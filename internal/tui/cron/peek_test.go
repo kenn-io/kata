@@ -1,7 +1,6 @@
 package cron
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -11,53 +10,6 @@ import (
 	"go.kenn.io/kata/internal/colormode"
 	"hegel.dev/go/hegel"
 )
-
-// A job's last result comes from the daemon even when its run is not in the
-// loaded history.
-func TestCronJobLastResultWithoutHistory(t *testing.T) {
-	for _, status := range []string{"running", "succeeded", "failed", "cancelled", "unknown"} {
-		t.Run(status, func(t *testing.T) {
-			d := nativeFixture()
-			wire := fmt.Sprintf(`{"last_run":{"uid":"outside-page","status":%q,"summary":{"version":1,"message":"outside page result"},"created_at":"2026-01-01T07:00:00Z"}}`, status)
-			if err := json.Unmarshal([]byte(wire), &d.Jobs[0]); err != nil {
-				t.Fatal(err)
-			}
-			d.Runs = nil
-			m := newModel(Options{})
-			m.Resize(160, 40)
-			m.SetData(d)
-			for i, col := range m.jobsColumns() {
-				if col.Title == "last status" {
-					if got := m.jobCells(m.selectedJobView())[i].Text; got != status {
-						t.Fatalf("authoritative last status = %q, want %q", got, status)
-					}
-					return
-				}
-			}
-			t.Fatal("job list has no authoritative last status")
-		})
-	}
-}
-
-// Explicit null means never-ran even if old history is still loaded.
-func TestCronNullLastRunBeatsLoadedHistory(t *testing.T) {
-	d := nativeFixture()
-	if err := json.Unmarshal([]byte(`{"last_run":null}`), &d.Jobs[0]); err != nil {
-		t.Fatal(err)
-	}
-	m := newModel(Options{})
-	m.Resize(160, 40)
-	m.SetData(d)
-	for i, col := range m.jobsColumns() {
-		if col.Title == "last status" {
-			if got := m.jobCells(m.selectedJobView())[i].Text; got != "never ran" {
-				t.Fatalf("explicit null last status = %q, want never ran", got)
-			}
-			return
-		}
-	}
-	t.Fatal("job list has no authoritative last status")
-}
 
 // The selected run's own summary stays visible in the peek at every snapshot
 // size and theme.

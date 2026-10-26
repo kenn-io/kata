@@ -152,3 +152,97 @@ func TestCronNativeReadbackMatchesOptionalDefaults(t *testing.T) {
 		})
 	}
 }
+
+// The daemon's last_run is authoritative for a job whose only run is outside
+// the first history page and for a job that never ran.
+func TestCronDaemonLastRunBeyondLoadedHistory(t *testing.T) {
+	env := testenv.New(t)
+	c := NewClient(env.URL, env.HTTP)
+	ctx := context.Background()
+	p, err := c.EnsureProject(ctx, "example-project", "example-actor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobs := map[string]records.Job{}
+	for _, name := range []string{"older-job", "busy-job", "unrun-job"} {
+		id, err := uid.New()
+		if err != nil {
+			t.Fatal(err)
+		}
+		definition := jsontext.Value(`{"version":1,"kind":"job","enabled":false,"trigger":{"kind":"interval","interval_seconds":3600,"timezone":"UTC"},"action":{"kind":"execute","prompt":"Summarize the report"},"issue":{"kind":"per-run","title":"Report"},"overlap":"forbid","catchup":"latest"}`)
+		if jobs[name], err = c.SaveCronJob(ctx, p.ID, "example-actor", records.Job{UID: id, Name: name, Definition: definition}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	observe := func(job records.Job, status string) string {
+		t.Helper()
+		id, err := uid.New()
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := fmt.Sprintf(`{"actor":"example-actor","job_uid":%q,"definition_event_uid":%q,"status":%q,"summary":{"version":1,"message":"%s result"},"expected_revision":0}`, job.UID, job.DefinitionEventUID, status, job.Name)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPut, fmt.Sprintf("%s/api/v1/projects/%d/cron/runs/%s", env.URL, p.ID, id), strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := env.HTTP.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != 200 {
+			t.Fatal(resp.Status, string(raw))
+		}
+		return id
+	}
+	olderRun := observe(jobs["older-job"], "failed")
+	for range 100 {
+		observe(jobs["busy-job"], "succeeded")
+	}
+	page, err := c.ListCronRuns(ctx, p.ID, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range page.Runs {
+		if r.UID == olderRun {
+			t.Fatal("the older job's run is inside the first history page")
+		}
+	}
+
+	listed, err := c.ListCronJobs(ctx, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]records.Job{}
+	for _, j := range listed {
+		byName[j.Name] = j
+	}
+	if j := byName["older-job"]; !j.LastRunKnown || j.LastRun == nil || j.LastRun.UID != olderRun || j.LastRun.Status != "failed" || j.LastRun.ProjectKey != fmt.Sprint(p.ID) {
+		t.Fatalf("job outside the history page lacks its last run: %+v", j.LastRun)
+	}
+	if j := byName["unrun-job"]; !j.LastRunKnown || j.LastRun != nil {
+		t.Fatalf("unrun job is not never-ran: known=%t last=%+v", j.LastRunKnown, j.LastRun)
+	}
+
+	m := initialModel(Options{})
+	m.api = newUndoClient(c)
+	m.scope = scope{projectID: p.ID, projectName: p.Name}
+	h := newCronHost(m)
+	h.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+	drainCronSmoke(t, h, h.selectCronTab(1))
+	want := map[string]string{"older-job": "failed", "busy-job": "succeeded", "unrun-job": "never ran"}
+	text := ansi.Strip(h.View().Content)
+	for name, status := range want {
+		found := false
+		for _, line := range strings.Split(text, "\n") {
+			if strings.Contains(line, name) && strings.Contains(line, status) && !strings.Contains(line, "unloaded") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("jobs tab lacks %s %s:\n%s", status, name, text)
+		}
+	}
+}

@@ -384,32 +384,23 @@ func TestCronPeekWithoutLinkedIssue(t *testing.T) {
 }
 
 // An older daemon omits last_run; the job stays usable and is not mistaken
-// for one that never ran. A newer daemon's explicit null means never ran.
+// for one that never ran. TestCronDaemonLastRunBeyondLoadedHistory covers the
+// current daemon's explicit null and populated last_run.
 func TestCronClientToleratesOlderDaemonJobs(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"jobs":[` +
-			`{"uid":"legacy","name":"legacy-job","definition":{}},` +
-			`{"uid":"never","name":"never-job","definition":{},"last_run":null},` +
-			`{"uid":"ran","name":"ran-job","definition":{},"last_run":{"uid":"run-a","status":"failed","summary":{"version":1,"message":"own summary marker"}}}]}`))
+		_, _ = w.Write([]byte(`{"jobs":[{"uid":"legacy","name":"legacy-job","definition":{}}]}`))
 	}))
 	defer server.Close()
 	jobs, err := NewClient(server.URL, server.Client()).ListCronJobs(context.Background(), 7)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(jobs) != 3 {
+	if len(jobs) != 1 || jobs[0].Name != "legacy-job" {
 		t.Fatalf("jobs = %+v", jobs)
 	}
 	if jobs[0].LastRunKnown || jobs[0].LastRun != nil {
 		t.Fatalf("omitted last_run treated as authoritative: %+v", jobs[0])
-	}
-	if !jobs[1].LastRunKnown || jobs[1].LastRun != nil {
-		t.Fatalf("explicit null last_run is not never-ran: %+v", jobs[1])
-	}
-	last := jobs[2].LastRun
-	if !jobs[2].LastRunKnown || last == nil || last.Status != "failed" || last.ProjectKey != "7" || last.ProjectID != 7 {
-		t.Fatalf("last_run lost status or project scope: %+v", last)
 	}
 }
 
