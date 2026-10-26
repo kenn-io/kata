@@ -60,6 +60,45 @@ version creates another reference. The saved name is the file's name at link
 time; media type and size describe the linked version. Later Docbank changes
 do not update that reference.
 
+## Cite a document when closing work
+
+Use an attachment as completion evidence for a document deliverable:
+
+```sh
+kata close abc4 --done -m "Delivered the report and checked its final contents." \
+  --docbank /reports/report.pdf
+```
+
+Repeat `--docbank` for several files. Each value accepts a node ID or absolute
+Docbank path and pins its current version. Repeated selectors for the same
+version produce one evidence item. Other done-compatible evidence flags can
+be combined with it. This workflow requires daemon API 0.35.0 or newer.
+
+Kata validates all local arguments before linking. If a link fails, the issue
+stays open and the error lists every attachment ID already linked. Retry
+while those versions remain current to reuse their references. A moving path
+can select a newer version on retry; use the returned full ID for stable retries.
+
+For a historical version, a dry run, a revision guard, or a keyed retry, link
+first and close explicitly:
+
+```sh
+kata docbank attachments link abc4 42 --version 6f1c2e8a-2222-4222-8222-222222222222
+kata close abc4 --done -m "Delivered the report and checked its final contents." \
+  --evidence attachment:<full-attachment-id> --idempotency-key report-close
+```
+
+`attachment:<id-or-unique-suffix>` requires a valid reference on the issue.
+The close checks it inside the same transaction and needs no Docbank connection.
+A successful keyed retry accepts the original full ID even after its reference
+is removed. Resolve suffixes before removal. `--docbank` cannot combine with
+`--dry`, `--if-match`, or `--idempotency-key`, and is only available for `done`.
+
+Close history freezes the name, media type, size and content version. The web
+links to the attachment panel only while the current reference still names
+that version. Removed or changed references retain their frozen description.
+`kata show` displays these details for closed issues.
+
 ## Read references as metadata
 
 Each file uses an `attachment.<ULID>` key with `name`, `media_type`, `size`, and `docbank_version` fields. These are ordinary opaque metadata keys. The browser checks field types for display; the daemon validates the full reference when serving content.

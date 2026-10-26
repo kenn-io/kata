@@ -18,9 +18,9 @@ function event(uid: string, created_at: string): KataTaskEvent {
   }
 }
 
-describe('IssueHistory', () => {
-  afterEach(cleanup)
+afterEach(cleanup)
 
+describe('IssueHistory', () => {
   it('shows the closing session and its optional AgentsView link', () => {
     const closed = {
       ...event('close-a', '2026-08-01T12:00:00Z'),
@@ -109,4 +109,79 @@ describe('IssueHistory', () => {
     expect(screen.getByRole('listitem')).not.toBeNull()
     expect(container.querySelector('time')).toBeNull()
   })
+})
+
+const attachmentID = '01K7E222222222222222222222'
+const frozenAttachment = {
+  name: 'report.pdf',
+  media_type: 'application/pdf',
+  size: 12,
+  docbank_version: '6f1c2e8a-2222-4222-8222-222222222222',
+}
+function attachmentEvent(snapshot: unknown = frozenAttachment): KataTaskEvent {
+  return {
+    ...event('close-document', '2026-08-01T12:00:00Z'),
+    type: 'issue.closed',
+    payload: {
+      evidence: [
+        {
+          type: 'attachment',
+          attachment_id: attachmentID,
+          ...(snapshot === undefined ? {} : { attachment: snapshot }),
+        },
+      ],
+    },
+  }
+}
+it('links frozen attachment evidence to the matching panel entry', () => {
+  render(IssueHistory, {
+    props: {
+      events: [attachmentEvent()],
+      metadata: { [`attachment.${attachmentID}`]: frozenAttachment },
+    },
+  })
+  expect(screen.getByRole('link', { name: /report.pdf/ }).getAttribute('href')).toBe(
+    `#kata-attachment-${attachmentID}`,
+  )
+  expect(screen.getByText(/application\/pdf.*12 bytes/)).toBeTruthy()
+})
+it.each(['removed', 'changed'])(
+  'retains the frozen descriptor when the reference is %s',
+  (state) => {
+    render(IssueHistory, {
+      props: {
+        events: [attachmentEvent()],
+        metadata:
+          state === 'removed'
+            ? {}
+            : {
+                [`attachment.${attachmentID}`]: {
+                  ...frozenAttachment,
+                  name: 'new.pdf',
+                  docbank_version: '6f1c2e8a-3333-4333-8333-333333333333',
+                },
+              },
+      },
+    })
+    expect(screen.getByText(new RegExp(`report.pdf.*${state}`))).toBeTruthy()
+    expect(screen.queryByRole('link')).toBeNull()
+  },
+)
+it('renders legacy id-only evidence from current metadata', () => {
+  const closed = attachmentEvent()
+  closed.payload = { evidence: [{ type: 'attachment', attachment_id: attachmentID }] }
+  render(IssueHistory, {
+    props: { events: [closed], metadata: { [`attachment.${attachmentID}`]: frozenAttachment } },
+  })
+  expect(screen.getByRole('link', { name: /report.pdf/ })).toBeTruthy()
+})
+it('does not retarget malformed historical descriptors', () => {
+  render(IssueHistory, {
+    props: {
+      events: [attachmentEvent({ name: 'bad', docbank_version: frozenAttachment.docbank_version })],
+      metadata: { [`attachment.${attachmentID}`]: frozenAttachment },
+    },
+  })
+  expect(screen.queryByRole('link')).toBeNull()
+  expect(screen.getByText(/invalid snapshot/)).toBeTruthy()
 })

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"path/filepath"
 	"testing"
 
@@ -92,4 +93,32 @@ func TestDoAuditCloses_SameProjectParentRendersBare(t *testing.T) {
 	require.Len(t, resp.Body.Rows, 1)
 	assert.Equal(t, parent.ShortID, resp.Body.Rows[0].Parent,
 		"same-project parent must render as a bare short_id")
+}
+
+func TestDoAuditCloses_AttachmentSnapshotRetainsEvidenceAndParent(t *testing.T) {
+	ctx := t.Context()
+	store, project, _ := auditRenderStore(t)
+	parent, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Report delivery", Author: "operator"})
+	require.NoError(t, err)
+	child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Deliver final report", Author: "operator"})
+	require.NoError(t, err)
+	link, err := store.CreateLink(ctx, db.CreateLinkParams{FromIssueID: child.ID, ToIssueID: parent.ID, Type: "parent", Author: "operator"})
+	require.NoError(t, err)
+	_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: child.ID, Actor: "operator", Patch: map[string]jsontext.Value{"attachment.report": jsontext.Value(`{"name":"report.pdf","media_type":"application/pdf","size":12,"docbank_version":"6f1c2e8a-2222-4222-8222-222222222222"}`)}})
+	require.NoError(t, err)
+	_, _, changed, err := store.CloseIssueGuarded(ctx, db.CloseIssueParams{IssueID: child.ID, Reason: "done", Actor: "operator", Evidence: []db.Evidence{{Type: "attachment", AttachmentID: "report"}}})
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.NoError(t, store.DeleteLinkByID(ctx, link.ID))
+	response, err := doAuditCloses(ctx, ServerConfig{DB: store}, &api.AuditClosesRequest{ProjectID: project.ID})
+	require.NoError(t, err)
+	require.Len(t, response.Body.Rows, 1)
+	row := response.Body.Rows[0]
+	assert.Equal(t, []string{"attachment"}, row.EvidenceTypes)
+	assert.NotContains(t, row.Flags, "no-evidence")
+	assert.Equal(t, parent.UID, row.ParentUID)
+	assert.Equal(t, parent.ShortID, row.Parent)
+	filtered, err := doAuditCloses(ctx, ServerConfig{DB: store}, &api.AuditClosesRequest{ProjectID: project.ID, NoEvidence: true})
+	require.NoError(t, err)
+	assert.Empty(t, filtered.Body.Rows)
 }

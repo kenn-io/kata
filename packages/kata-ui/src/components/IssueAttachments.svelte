@@ -156,7 +156,7 @@
     {#if entries.length > 0}
       <ul>
         {#each entries as entry (entry.id)}
-          <li>
+          <li id={`kata-attachment-${encodeURIComponent(entry.id)}`}>
             <div class="file-details">
               <span class="file-name">{entry.name}</span>
               <span class="description">{entry.media_type} · {entry.size} bytes</span>

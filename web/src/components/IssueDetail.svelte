@@ -139,7 +139,7 @@
     {#if visibleRecurrences.length > 0}
       <RecurrencePanel recurrences={visibleRecurrences} readOnly />
     {/if}
-    <IssueHistory events={props.events ?? []} />
+    <IssueHistory events={props.events ?? []} metadata={props.issue.issue.metadata} />
   {/if}
 </div>
 

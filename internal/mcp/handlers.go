@@ -1518,7 +1518,7 @@ func linkPeerSummary(peer *generated.LinkPeer) *LinkPeerSummary {
 func (h toolHandlers) convertEvidence(ctx context.Context, project ProjectIdentity, input Evidence) (generated.Evidence, error) {
 	typeName := strings.TrimSpace(input.Type)
 	allowed := map[string]bool{
-		"commit": true, "pr": true, "test": true, "reviewed-paths": true,
+		"attachment": true, "commit": true, "pr": true, "test": true, "reviewed-paths": true,
 		"external": true, "no-change-audit": true, "duplicate-of": true, "superseded-by": true,
 	}
 	if !allowed[typeName] {
@@ -1526,6 +1526,9 @@ func (h toolHandlers) convertEvidence(ctx context.Context, project ProjectIdenti
 	}
 	paths := compactStrings(input.Paths)
 	result := generated.Evidence{Type: typeName, Paths: paths}
+	if strings.TrimSpace(input.AttachmentID) != "" {
+		result.AttachmentID = new(input.AttachmentID)
+	}
 	result.Sha = optionalString(input.SHA)
 	result.URL = optionalString(input.URL)
 	result.Command = optionalString(input.Command)
@@ -1539,6 +1542,11 @@ func (h toolHandlers) convertEvidence(ctx context.Context, project ProjectIdenti
 		result.IssueRef = &target.IssueUID
 	}
 	switch typeName {
+	case "attachment":
+		if result.AttachmentID == nil {
+			return generated.Evidence{}, errors.New("attachment evidence requires attachment_id")
+		}
+
 	case "commit":
 		if result.Sha == nil {
 			return generated.Evidence{}, errors.New("commit evidence requires sha")

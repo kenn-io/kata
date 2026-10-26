@@ -124,9 +124,8 @@ func parseAuditWindow(sinceIn, untilIn string) (since, until string, err error) 
 	return since, until, nil
 }
 
-// closeEventPayload is the wire shape the daemon writes into the
-// payload column for issue.closed events. Defined locally because the
-// db package does not export it.
+// closeEventPayload reads the fields the close audit needs from stored
+// issue.closed event payloads. Storage owns the full event shape.
 //
 // ParentUID is the parent's immutable UID at close time. ParentShortID
 // is the close-time display value, retained as a fallback when the
@@ -138,11 +137,15 @@ func parseAuditWindow(sinceIn, untilIn string) (since, until string, err error) 
 // fields" — the audit projection falls back to a live links lookup
 // only for that case; non-nil empty signals "no parent at close".
 type closeEventPayload struct {
-	Reason        string         `json:"reason"`
-	Message       string         `json:"message,omitempty"`
-	Evidence      []api.Evidence `json:"evidence,omitempty"`
-	ParentUID     *string        `json:"parent_uid,omitempty"`
-	ParentShortID *string        `json:"parent_short_id,omitempty"`
+	Reason  string `json:"reason"`
+	Message string `json:"message,omitempty"`
+	// Audit consumes stored event evidence, including server-frozen descriptors,
+	// rather than the strict request-only api.Evidence shape.
+	Evidence []struct {
+		Type api.EvidenceType `json:"type"`
+	} `json:"evidence,omitempty"`
+	ParentUID     *string `json:"parent_uid,omitempty"`
+	ParentShortID *string `json:"parent_short_id,omitempty"`
 }
 
 // buildAuditRows projects close events into AuditCloseRow shape and
