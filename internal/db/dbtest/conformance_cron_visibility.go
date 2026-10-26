@@ -21,27 +21,50 @@ var cronVisibilityStatuses = []string{"running", "succeeded", "failed", "cancell
 
 func cronVisibilityUID(n int) string { return fmt.Sprintf("01J%023d", n) }
 
+// cronVisibilityDefinition is a committed job or workflow that runs reference.
+type cronVisibilityDefinition struct {
+	projectID     int64
+	uid, eventUID string
+	workflow      bool
+}
+
+func cronVisibilityJob(t *testing.T, store db.Storage, projectID int64) cronVisibilityDefinition {
+	t.Helper()
+	definition, err := cron.ParseJob([]byte(`{"version":1,"kind":"job","trigger":{"kind":"manual"},"action":{"kind":"execute","prompt":"Review"},"issue":{"kind":"per-run","title":"Review"},"overlap":"forbid","catchup":"skip"}`))
+	require.NoError(t, err)
+	job, _, err := store.PutCronJob(t.Context(), db.PutCronJob{ProjectID: projectID, Name: "Review", Actor: "worker", Definition: definition})
+	require.NoError(t, err)
+	return cronVisibilityDefinition{projectID: projectID, uid: job.UID, eventUID: job.DefinitionEventUID}
+}
+
+func cronVisibilityWorkflow(t *testing.T, store db.Storage, projectID int64) cronVisibilityDefinition {
+	t.Helper()
+	definition := cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "review", Kind: "command", Command: "git status"}}}
+	workflow, _, err := store.PutCronWorkflow(t.Context(), db.PutCronWorkflow{ProjectID: projectID, Name: "Review workflow", Actor: "worker", Definition: definition})
+	require.NoError(t, err)
+	return cronVisibilityDefinition{projectID: projectID, uid: workflow.UID, eventUID: workflow.DefinitionEventUID, workflow: true}
+}
+
 // Seed evidence directly to control creation instants without changing the
-// production clock. These are ordinary rows in each backend's isolated fixture.
-// As producers require, a job UID belongs to one project and each job or
-// project workflow has its own definition event UID.
-func seedCronVisibilityRun(t *testing.T, store db.Storage, project int64, runID int, job, status string, at time.Time) db.CronRun {
+// production clock. Each run references a committed definition in its own
+// project, as producers require.
+func seedCronVisibilityRun(t *testing.T, store db.Storage, runID int, definition cronVisibilityDefinition, status string, at time.Time) db.CronRun {
 	t.Helper()
 	q := store.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	})
 	var jobUID, definitionUID, workflowUID, workflowDefinitionUID any
-	if job == "" {
-		workflowUID, workflowDefinitionUID = cronVisibilityUID(90000+2*int(project)), cronVisibilityUID(90001+2*int(project))
+	if definition.workflow {
+		workflowUID, workflowDefinitionUID = definition.uid, definition.eventUID
 	} else {
-		jobUID, definitionUID = job, "01K"+job[3:]
+		jobUID, definitionUID = definition.uid, definition.eventUID
 	}
 	id := cronVisibilityUID(runID)
 	_, err := q.ExecContext(t.Context(), `INSERT INTO cron_runs
 		(uid,project_id,job_uid,definition_event_uid,workflow_uid,workflow_definition_event_uid,actor,status,created_at,updated_at)
-		VALUES($1,$2,$3,$4,$5,$6,'worker',$7,$8,$8)`, id, project, jobUID, definitionUID, workflowUID, workflowDefinitionUID, status, at.UTC().Format(db.CronRunCreatedAtFormat))
+		VALUES($1,$2,$3,$4,$5,$6,'worker',$7,$8,$8)`, id, definition.projectID, jobUID, definitionUID, workflowUID, workflowDefinitionUID, status, at.UTC().Format(db.CronRunCreatedAtFormat))
 	require.NoError(t, err)
-	run, err := store.CronRun(t.Context(), project, id)
+	run, err := store.CronRun(t.Context(), definition.projectID, id)
 	require.NoError(t, err)
 	return run
 }
@@ -53,10 +76,12 @@ func checkCronVisibilityLatest(t *testing.T, store db.Storage) error {
 	other, err := store.CreateProject(ctx, "other-project")
 	require.NoError(t, err)
 	at := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
-	oldJob, busyJob, neverJob, otherJob, otherNewerJob := cronVisibilityUID(1000), cronVisibilityUID(1001), cronVisibilityUID(1002), cronVisibilityUID(1003), cronVisibilityUID(1004)
-	old := seedCronVisibilityRun(t, store, project.ID, 1, oldJob, "failed", at.Add(-72*time.Hour))
-	seedCronVisibilityRun(t, store, project.ID, 2, oldJob, "failed", at.Add(-48*time.Hour))
-	winner := seedCronVisibilityRun(t, store, project.ID, 3, oldJob, "succeeded", at.Add(-48*time.Hour))
+	oldDef, busyDef, neverDef := cronVisibilityJob(t, store, project.ID), cronVisibilityJob(t, store, project.ID), cronVisibilityJob(t, store, project.ID)
+	otherDef, otherNewerDef := cronVisibilityJob(t, store, other.ID), cronVisibilityJob(t, store, other.ID)
+	oldJob, busyJob, neverJob, otherJob := oldDef.uid, busyDef.uid, neverDef.uid, otherDef.uid
+	old := seedCronVisibilityRun(t, store, 1, oldDef, "failed", at.Add(-72*time.Hour))
+	seedCronVisibilityRun(t, store, 2, oldDef, "failed", at.Add(-48*time.Hour))
+	winner := seedCronVisibilityRun(t, store, 3, oldDef, "succeeded", at.Add(-48*time.Hour))
 	q := store.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	})
@@ -64,11 +89,11 @@ func checkCronVisibilityLatest(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	var busy db.CronRun
 	for i := range 130 {
-		busy = seedCronVisibilityRun(t, store, project.ID, 10+i, busyJob, "running", at.Add(time.Duration(i)*time.Second))
+		busy = seedCronVisibilityRun(t, store, 10+i, busyDef, "running", at.Add(time.Duration(i)*time.Second))
 	}
-	seedCronVisibilityRun(t, store, other.ID, 200, otherNewerJob, "failed", at.Add(24*time.Hour))
-	foreign := seedCronVisibilityRun(t, store, other.ID, 201, otherJob, "failed", at)
-	seedCronVisibilityRun(t, store, project.ID, 202, "", "failed", at)
+	seedCronVisibilityRun(t, store, 200, otherNewerDef, "failed", at.Add(24*time.Hour))
+	foreign := seedCronVisibilityRun(t, store, 201, otherDef, "failed", at)
+	seedCronVisibilityRun(t, store, 202, cronVisibilityWorkflow(t, store, project.ID), "failed", at)
 
 	latest, err := store.LatestCronRuns(ctx, project.ID, []string{busyJob, strings.ToLower(oldJob), neverJob, otherJob, oldJob})
 	require.NoError(t, err)
@@ -96,15 +121,15 @@ func checkCronVisibilityStatusPages(t *testing.T, store db.Storage) error {
 	other, err := store.CreateProject(ctx, "other-project")
 	require.NoError(t, err)
 	at := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
-	job, otherJob, foreignJob := cronVisibilityUID(1000), cronVisibilityUID(1001), cronVisibilityUID(1002)
-	failed := seedCronVisibilityRun(t, store, project.ID, 1, job, "failed", at)
-	cancelled := seedCronVisibilityRun(t, store, project.ID, 2, job, "cancelled", at)
-	newer := seedCronVisibilityRun(t, store, project.ID, 3, job, "failed", at)
-	seedCronVisibilityRun(t, store, project.ID, 4, job, "succeeded", at.Add(time.Second))
-	seedCronVisibilityRun(t, store, project.ID, 5, otherJob, "failed", at.Add(time.Second))
-	foreign := seedCronVisibilityRun(t, store, other.ID, 6, foreignJob, "failed", at)
+	job := cronVisibilityJob(t, store, project.ID)
+	failed := seedCronVisibilityRun(t, store, 1, job, "failed", at)
+	cancelled := seedCronVisibilityRun(t, store, 2, job, "cancelled", at)
+	newer := seedCronVisibilityRun(t, store, 3, job, "failed", at)
+	seedCronVisibilityRun(t, store, 4, job, "succeeded", at.Add(time.Second))
+	seedCronVisibilityRun(t, store, 5, cronVisibilityJob(t, store, project.ID), "failed", at.Add(time.Second))
+	foreign := seedCronVisibilityRun(t, store, 6, cronVisibilityJob(t, store, other.ID), "failed", at)
 
-	query := db.CronRunList{ProjectID: project.ID, JobUID: job, Limit: 2}
+	query := db.CronRunList{ProjectID: project.ID, JobUID: job.uid, Limit: 2}
 	query.Statuses = []string{"failed", "cancelled", "failed"}
 	page, err := store.ListCronRuns(ctx, query)
 	require.NoError(t, err)
@@ -138,15 +163,15 @@ func checkCronVisibilityFailedCount(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	until := time.Date(2026, 10, 25, 12, 0, 0, 123456789, time.UTC)
 	since := until.Add(-24 * time.Hour)
-	job := cronVisibilityUID(1000)
+	job := cronVisibilityJob(t, store, project.ID)
 	for i, at := range []time.Time{since.Add(-time.Nanosecond), since, since.Add(time.Nanosecond), until, until.Add(time.Nanosecond)} {
-		seedCronVisibilityRun(t, store, project.ID, i+1, job, "failed", at)
+		seedCronVisibilityRun(t, store, i+1, job, "failed", at)
 	}
 	for i, status := range []string{"running", "succeeded", "cancelled", "unknown"} {
-		seedCronVisibilityRun(t, store, project.ID, i+10, job, status, until)
+		seedCronVisibilityRun(t, store, i+10, job, status, until)
 	}
-	seedCronVisibilityRun(t, store, project.ID, 20, "", "failed", until)
-	seedCronVisibilityRun(t, store, other.ID, 21, cronVisibilityUID(1001), "failed", until)
+	seedCronVisibilityRun(t, store, 20, cronVisibilityWorkflow(t, store, project.ID), "failed", until)
+	seedCronVisibilityRun(t, store, 21, cronVisibilityJob(t, store, other.ID), "failed", until)
 	count, err := store.CountFailedCronRuns(ctx, project.ID, since.In(time.FixedZone("offset", -7*60*60)), until)
 	require.NoError(t, err)
 	require.EqualValues(t, 4, count, "include both boundaries, including workflow-only observations")
@@ -211,14 +236,16 @@ func checkCronVisibilityBatching(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
-	jobs := make([]string, 513)
-	for i := range jobs {
-		jobs[i] = cronVisibilityUID(1000 + i)
+	definitions := make([]cronVisibilityDefinition, 513)
+	jobs := make([]string, len(definitions))
+	for i := range definitions {
+		definitions[i] = cronVisibilityJob(t, store, project.ID)
+		jobs[i] = definitions[i].uid
 	}
 	at := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
 	want := map[string]string{}
 	for i, index := range []int{0, 256, 512} {
-		run := seedCronVisibilityRun(t, store, project.ID, i+1, jobs[index], "succeeded", at)
+		run := seedCronVisibilityRun(t, store, i+1, definitions[index], "succeeded", at)
 		want[jobs[index]] = run.UID
 	}
 	requested := append(slices.Clone(jobs), jobs[0], strings.ToLower(jobs[256]))
@@ -248,13 +275,21 @@ func checkCronVisibilityProperties(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	projects := []int64{project.ID, other.ID}
 	// Jobs 0-2 belong to the first project and 3-5 to the second.
-	jobs := []string{cronVisibilityUID(1000), cronVisibilityUID(1001), cronVisibilityUID(1002), cronVisibilityUID(1003), cronVisibilityUID(1004), cronVisibilityUID(1005)}
+	var definitions []cronVisibilityDefinition
+	var jobs []string
+	for _, projectID := range projects {
+		for range 3 {
+			definition := cronVisibilityJob(t, store, projectID)
+			definitions = append(definitions, definition)
+			jobs = append(jobs, definition.uid)
+		}
+	}
 	base := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
 	var runs []db.CronRun
 	for i := range 30 {
 		// Nonmonotonic/tied creation times and interleaved projects make a
 		// first-row, globally keyed, or UID-only oracle observably wrong.
-		runs = append(runs, seedCronVisibilityRun(t, store, projects[i%2], i+1, jobs[(i%2)*3+i%3], cronVisibilityStatuses[i%5], base.Add(time.Duration((i*7)%9-4)*time.Hour)))
+		runs = append(runs, seedCronVisibilityRun(t, store, i+1, definitions[(i%2)*3+i%3], cronVisibilityStatuses[i%5], base.Add(time.Duration((i*7)%9-4)*time.Hour)))
 	}
 	t.Run("latest lookup matches independent history", func(t *testing.T) {
 		hegel.Test(t, func(ht *hegel.T) {
