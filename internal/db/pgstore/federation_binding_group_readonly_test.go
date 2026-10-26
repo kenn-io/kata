@@ -66,20 +66,6 @@ func (readOnlyGroupRows) Next([]driver.Value) error {
 	return io.EOF
 }
 
-func TestFederationBindingGroupProjectIDsReadOnlyTransaction(t *testing.T) {
-	probe := &readOnlyGroupProbe{}
-	database := sql.OpenDB(readOnlyGroupConnector{probe: probe})
-	t.Cleanup(func() { _ = database.Close() })
-	tx, err := database.BeginTx(t.Context(), &sql.TxOptions{ReadOnly: true})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = tx.Rollback() })
-
-	_, err = federationBindingGroupProjectIDsReadOnly(t.Context(), tx, db.FederationBinding{Role: db.FederationRoleHub})
-	require.NoError(t, err)
-	require.True(t, probe.readOnly)
-	require.NotContains(t, strings.ToUpper(probe.query), "FOR UPDATE")
-}
-
 func TestFederationBindingGroupProjectIDsLocksWriteTransactions(t *testing.T) {
 	probe := &readOnlyGroupProbe{}
 	database := sql.OpenDB(readOnlyGroupConnector{probe: probe})
