@@ -129,6 +129,10 @@ interface Task {
   again: boolean
   done: Promise<void>
 }
+interface RelatedTask extends Task {
+  selectionKey: string
+  issueRead: Promise<ShowIssueResponseBody>
+}
 interface SelectionTask extends Task {
   /** Settles once the drawer's detail (and a job's recent runs) is shown. */
   detail: Promise<void>
@@ -160,6 +164,12 @@ export class CronController {
   #revalidation: Promise<void> = Promise.resolve()
   #selection: SelectionTask | undefined
   #peek: Task | undefined
+  /**
+   * The optional AgentsView lookup for the drawer's run issue. It has its own
+   * lifecycle so a stalled lookup never holds back detail or peek reads; it is
+   * cancelled only when the drawer shows another selection.
+   */
+  #related: RelatedTask | undefined
   /** Selection key whose detail is on screen or loading. */
   #selectionKey = ''
   /** Orders read starts, so a catalog revalidates only selection reads older than it. */
@@ -515,6 +525,7 @@ export class CronController {
     this.#selection = undefined
     // Revalidating the same selection leaves its issue peek running.
     if (key !== this.#selectionKey) this.#cancelPeek()
+    if (this.#related?.selectionKey !== key) this.#cancelRelated()
     this.#selectionKey = key
     const selection = this.#intent?.route.selection
     this.#set({
@@ -630,12 +641,13 @@ export class CronController {
     task.done = (async () => {
       do {
         task.again = false
-        await this.#readPeek(project, issueUID, signal, current)
+        await this.#readPeek(selectionKey, project, issueUID, signal, current)
       } while (task.again && current())
       if (this.#peek === task) this.#peek = undefined
     })()
   }
   async #readPeek(
+    selectionKey: string,
     project: CronProject,
     issueUID: string,
     signal: AbortSignal,
@@ -655,7 +667,7 @@ export class CronController {
     })
     if (!current()) return
     const issueRead = this.client.issue(project.id, issueUID, signal)
-    const related = this.#readRelatedSession(project, issueUID, issueRead, signal, current)
+    this.#requestRelated(selectionKey, project, issueUID, issueRead)
     try {
       const issue = await issueRead
       if (current())
@@ -666,7 +678,51 @@ export class CronController {
         else this.#set({ peek: { status: 'unreadable' } })
       }
     }
-    await related
+  }
+  /** Starts the lookup, or reruns the one already running for this issue once more. */
+  #requestRelated(
+    selectionKey: string,
+    project: CronProject,
+    issueUID: string,
+    issueRead: Promise<ShowIssueResponseBody>,
+  ) {
+    issueRead.catch(() => {})
+    const key = JSON.stringify([selectionKey, issueUID])
+    const active = this.#related
+    if (active?.key === key) {
+      active.issueRead = issueRead
+      active.again = true
+      return
+    }
+    this.#cancelRelated()
+    const task: RelatedTask = {
+      key,
+      selectionKey,
+      issueRead,
+      abort: new AbortController(),
+      again: false,
+      done: Promise.resolve(),
+    }
+    this.#related = task
+    const current = () => this.#related === task && !task.abort.signal.aborted
+    task.done = (async () => {
+      do {
+        task.again = false
+        await this.#readRelatedSession(
+          project,
+          issueUID,
+          task.issueRead,
+          task.abort.signal,
+          // A queued rerun owns the result once this read is superseded.
+          () => current() && !task.again,
+        )
+      } while (task.again && current())
+      if (this.#related === task) this.#related = undefined
+    })()
+  }
+  #cancelRelated() {
+    this.#related?.abort.abort()
+    this.#related = undefined
   }
   // Optional AgentsView link: read only after the serving daemon opts in, and
   // never let its absence or failure affect ordinary cron reads.
@@ -713,6 +769,7 @@ export class CronController {
     this.#selection = undefined
     this.#selectionKey = ''
     this.#cancelPeek()
+    this.#cancelRelated()
   }
   /** Applies an accepted snapshot outside the Cron page: only the badge is read. */
   loadBadge(intent: CronIntent, unchangedSnapshot = false): Promise<void> {

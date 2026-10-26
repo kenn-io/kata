@@ -238,7 +238,7 @@ test('AgentsViewCron makes no history read when the issue is unreadable or moved
   }
 })
 
-test('AgentsViewCron coalesced snapshot syncs re-read the capability once per refresh', async () => {
+test('AgentsViewCron coalesced snapshot syncs re-read the capability per sweep, never per snapshot', async () => {
   const api = client(true)
   const controller = new CronController(api)
   const current = intent()
@@ -249,6 +249,7 @@ test('AgentsViewCron coalesced snapshot syncs re-read the capability once per re
     api.capabilities.mockImplementation(async () => ({ agentsviewEnabled: enabled }))
     const capabilityReads = api.capabilities.mock.calls.length
     const historyReads = api.issueHistory.mock.calls.length
+    const detailReads = api.run.mock.calls.length
     let release!: () => void
     api.summary.mockImplementationOnce(
       () =>
@@ -262,8 +263,14 @@ test('AgentsViewCron coalesced snapshot syncs re-read the capability once per re
     release()
     await Promise.all([first, ...coalesced])
     await settle()
-    expect(api.capabilities.mock.calls.length).toBe(capabilityReads + 1)
-    expect(api.issueHistory.mock.calls.length).toBe(historyReads + (enabled ? 1 : 0))
+    // Three snapshots make at most two catalog sweeps, each revalidating the
+    // drawer once; the coalesced lookup follows those, never each snapshot.
+    expect(api.run.mock.calls.length - detailReads).toBeGreaterThan(0)
+    expect(api.run.mock.calls.length - detailReads).toBeLessThanOrEqual(2)
+    const capabilityDelta = api.capabilities.mock.calls.length - capabilityReads
+    expect(capabilityDelta).toBeGreaterThan(0)
+    expect(capabilityDelta).toBeLessThanOrEqual(2)
+    expect(api.issueHistory.mock.calls.length - historyReads).toBe(enabled ? capabilityDelta : 0)
     expect(controller.state.relatedSessionURL).toBe(enabled ? locator : undefined)
   }
   controller.destroy()
@@ -289,3 +296,35 @@ test('AgentsViewCron a refresh during the history read reruns it once with the l
   expect(controller.state.relatedSessionURL).toBeUndefined()
   controller.destroy()
 })
+
+test.each(['capability', 'history'] as const)(
+  'AgentsViewCron a stalled %s read never holds back drawer revalidation',
+  async (stalled) => {
+    const api = client(true)
+    let signal: AbortSignal | undefined
+    const hold = (_a: unknown, _b: unknown, s: AbortSignal) => {
+      signal = s
+      return new Promise<never>(() => {})
+    }
+    if (stalled === 'capability') api.capabilities.mockImplementationOnce((p, s) => hold(p, p, s))
+    else api.issueHistory.mockImplementationOnce((p, i, s) => hold(p, i, s))
+    const controller = new CronController(api)
+    await controller.load(intent())
+    await settle()
+    expect(signal?.aborted).toBe(false)
+    expect(controller.state.peek.status).toBe('ready')
+    api.run.mockImplementation(async (_project, uid) => ({
+      ...run(uid),
+      summary: { version: 1, message: 'Revalidated' },
+    }))
+    await controller.sync(intent(), false)
+    await settle()
+    expect(controller.state.detail).toMatchObject({ summary: { message: 'Revalidated' } })
+    expect(api.run).toHaveBeenCalledTimes(2)
+    expect(api.issue).toHaveBeenCalledTimes(2)
+    expect(signal?.aborted).toBe(false)
+    await controller.select({ kind: 'run', projectUID: project.uid, uid: 'b' })
+    expect(signal?.aborted).toBe(true)
+    controller.destroy()
+  },
+)
