@@ -78,14 +78,11 @@ func (c *Client) CronRelatedTranscript(ctx context.Context, project cronRelatedP
 		return "", callErr
 	}
 	// Daemons that predate the field omit it, which reads as disabled.
-	var capabilities struct {
-		ProjectUID        string `json:"project_uid"`
-		AgentsViewEnabled bool   `json:"agentsview_enabled"`
-	}
+	var capabilities generated.CronCapabilitiesResponseBody
 	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &capabilities); err != nil {
 		return "", err
 	}
-	if !capabilities.AgentsViewEnabled || capabilities.ProjectUID == "" || project.uid != "" && capabilities.ProjectUID != project.uid {
+	if !capabilities.AgentsviewEnabled || capabilities.ProjectUID == "" || project.uid != "" && capabilities.ProjectUID != project.uid {
 		return "", nil
 	}
 	page, err := c.listEventsPage(ctx, project.id, 0, issueUID)

@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"net/http"
 	"strings"
@@ -14,7 +15,13 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"hegel.dev/go/hegel"
 
+	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kata/internal/transcript"
 	cronui "go.kenn.io/kata/internal/tui/cron"
+	"go.kenn.io/kata/internal/tui/cron/records"
+	"go.kenn.io/kata/internal/uid"
 )
 
 const relatedURL = "https://agentsview.example/Base%2Fpath/sessions/Opaque:Value"
@@ -613,6 +620,114 @@ func TestAgentsViewCronLifecycleRefresh(t *testing.T) {
 			pressOpen(h)
 			if len(d.eventRequests()) != 2 || len(opened) != 1 || opened[0] != relatedURL {
 				t.Fatalf("restore did not bring the session back: requests %q, opened %q", d.eventRequests(), opened)
+			}
+		})
+	}
+}
+
+type countingTransport struct {
+	base   http.RoundTripper
+	mu     sync.Mutex
+	events int
+}
+
+func (c *countingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if strings.HasSuffix(req.URL.Path, "/events") {
+		c.mu.Lock()
+		c.events++
+		c.mu.Unlock()
+	}
+	return c.base.RoundTrip(req)
+}
+
+func (c *countingTransport) eventReads() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.events
+}
+
+// Against a real daemon, a run linked to an issue closed with a recorded
+// transcript URL offers that exact URL only when the serving daemon has
+// [agentsview] enabled.
+func TestAgentsViewCronDaemon(t *testing.T) {
+	const locator = "https://agentsview.example/Base%2Fpath/sessions/claude/00000000-0000-4000-8000-000000000001"
+	for _, enabled := range []bool{true, false} {
+		t.Run(fmt.Sprintf("enabled=%t", enabled), func(t *testing.T) {
+			env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.AgentsViewEnabled = enabled })
+			transport := &countingTransport{base: env.HTTP.Transport}
+			if transport.base == nil {
+				transport.base = http.DefaultTransport
+			}
+			c := NewClient(env.URL, &http.Client{Transport: transport, Timeout: env.HTTP.Timeout})
+			ctx := t.Context()
+			p, err := c.EnsureProject(ctx, "example-project", "example-actor")
+			if err != nil {
+				t.Fatal(err)
+			}
+			issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "Report", Author: "example-actor"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, _, err := env.DB.CloseIssueGuarded(ctx, db.CloseIssueParams{IssueID: issue.ID, Reason: "done", Actor: "example-actor",
+				Transcript: &transcript.Transcript{Agent: "claude", SessionID: "00000000-0000-4000-8000-000000000001", URL: locator},
+				Evidence:   []db.Evidence{{Type: "test", Command: "go test ./internal/example"}}}); err != nil {
+				t.Fatal(err)
+			}
+			jobID, err := uid.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			job, err := c.SaveCronJob(ctx, p.ID, "example-actor", records.Job{UID: jobID, Name: "Hourly report", Definition: jsontext.Value(`{"version":1,"kind":"job","enabled":false,"trigger":{"kind":"interval","interval_seconds":3600,"timezone":"UTC"},"action":{"kind":"execute","prompt":"Summarize the report"},"issue":{"kind":"per-run","title":"Report"},"overlap":"forbid","catchup":"latest"}`)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			runID, err := uid.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := fmt.Sprintf(`{"actor":"example-actor","job_uid":%q,"definition_event_uid":%q,"issue_uid":%q,"status":"succeeded","summary":{"version":1,"message":"Report recorded"},"expected_revision":0}`, job.UID, job.DefinitionEventUID, issue.UID)
+			req, err := http.NewRequestWithContext(ctx, http.MethodPut, fmt.Sprintf("%s/api/v1/projects/%d/cron/runs/%s", env.URL, p.ID, runID), strings.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := env.HTTP.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Fatal(resp.Status)
+			}
+
+			var opened []string
+			m := initialModel(Options{OpenURL: func(_ context.Context, target string) error { opened = append(opened, target); return nil }})
+			m.api = newUndoClient(c)
+			m.scope = scope{projectID: p.ID, projectName: p.Name}
+			h := newCronHost(m)
+			t.Cleanup(func() { _ = h.Close() })
+			h.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
+			drainCronSmoke(t, h, h.selectCronTab(2))
+			text := ansi.Strip(h.View().Content)
+			if !strings.Contains(text, "Report recorded") || !strings.Contains(text, "Report") {
+				t.Fatalf("runs peek lacks the linked issue:\n%s", text)
+			}
+			_, cmd := h.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
+			if enabled {
+				if !strings.Contains(text, "Related issue session") || !strings.Contains(text, "o Open in AgentsView") {
+					t.Fatalf("enabled daemon peek lacks the action:\n%s", text)
+				}
+				child := awaitCronMsg(t, cmd, func(msg tea.Msg) bool { _, ok := msg.(cronChildMsg); return ok })
+				_, cmd = h.Update(child)
+				h.Update(awaitCronMsg(t, cmd, func(msg tea.Msg) bool { _, ok := msg.(cronRelatedOpenedMsg); return ok }))
+				if len(opened) != 1 || opened[0] != locator || transport.eventReads() != 1 {
+					t.Fatalf("opened %q after %d events reads, want %q after one", opened, transport.eventReads(), locator)
+				}
+				return
+			}
+			deliver(h, cmd)
+			if strings.Contains(text, "AgentsView") || len(opened) != 0 || transport.eventReads() != 0 {
+				t.Fatalf("disabled daemon: opened %q, %d events reads:\n%s", opened, transport.eventReads(), text)
 			}
 		})
 	}
