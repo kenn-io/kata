@@ -40,7 +40,7 @@ type cronHost struct {
 	peekGeneration           uint64
 	peekCancel               context.CancelFunc
 	peekAuth                 AuthInfo
-	peekClosed               bool
+	peekClosed, peekStale    bool
 
 	native             Model
 	tab, width, height int
@@ -244,6 +244,7 @@ func (h *cronHost) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	switch v := msg.(type) {
 	case eventReceivedMsg:
 		if !h.native.staleConnMsg(v.gen) {
+			h.invalidateCronPeek(v)
 			if strings.HasPrefix(v.eventType, "cron.") {
 				invalidate = h.invalidateCron(v.projectUID)
 			} else if strings.HasPrefix(v.eventType, "project.") {

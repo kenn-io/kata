@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -193,6 +194,109 @@ func TestCronPeekFencesStaleReplies(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// corePeekReplyFrom runs cmd's children concurrently, so a blocking native
+// command cannot hide the peek read, and returns the first peek reply.
+func corePeekReplyFrom(t *testing.T, cmd tea.Cmd) cronPeekMsg {
+	t.Helper()
+	out := make(chan tea.Msg, 64)
+	var run func(tea.Cmd)
+	run = func(cmd tea.Cmd) {
+		if cmd == nil {
+			return
+		}
+		msg := cmd()
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			for _, child := range batch {
+				go run(child)
+			}
+		} else if msg != nil {
+			out <- msg
+		}
+	}
+	go run(cmd)
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case msg := <-out:
+			if reply, ok := msg.(cronPeekMsg); ok {
+				return reply
+			}
+		case <-timeout:
+			t.Fatal("issue event did not refresh the selected run's linked issue peek within 2s")
+		}
+	}
+}
+
+// A live change to the peeked issue refreshes the selected run's context in
+// place, and a reply read before a later change never replaces newer context.
+func TestCronPeekRefreshesOnIssueEvents(t *testing.T) {
+	for _, eventType := range []string{"issue.commented", "issue.comment_edited", "issue.updated"} {
+		t.Run(eventType, func(t *testing.T) {
+			var mu sync.Mutex
+			title, body := "Example issue", "first comment marker"
+			h := newCorePeekHost(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.RequestURI() != "/api/v1/projects/7/issues/issue-a" {
+					http.NotFound(w, r)
+					return
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"issue":    map[string]string{"uid": "issue-a", "short_id": "ab12", "title": title},
+					"comments": []peekComment{{"comment-a", "example-author", body, time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC)}},
+				})
+			})
+			change := func(nextTitle, nextBody string) tea.Cmd {
+				mu.Lock()
+				title, body = nextTitle, nextBody
+				mu.Unlock()
+				_, cmd := h.Update(eventReceivedMsg{eventType: eventType, projectID: 7, projectUID: "project-uid", issueUID: "issue-a", commentUID: "comment-a"})
+				return cmd
+			}
+			selected := func() string {
+				run, ok := h.board.SelectedRun()
+				if !ok {
+					t.Fatal("no run selected")
+				}
+				return run.UID
+			}
+			first := corePeekReply(t, h)
+			h.Update(first)
+			run := selected()
+
+			// An event for another issue leaves the peek and its read alone.
+			generation := h.peekGeneration
+			h.Update(eventReceivedMsg{eventType: eventType, projectID: 7, projectUID: "project-uid", issueUID: "issue-b"})
+			if h.peekGeneration != generation {
+				t.Fatal("an unrelated issue event replaced the peek read")
+			}
+
+			older := corePeekReplyFrom(t, change("Renamed issue", "second comment marker"))
+			newer := corePeekReplyFrom(t, change("Retitled issue", "third comment marker"))
+			if text := ansi.Strip(h.View().Content); !strings.Contains(text, "first comment marker") || strings.Contains(text, "Loading issue") {
+				t.Fatalf("refresh hid the visible peek:\n%s", text)
+			}
+			h.Update(newer)
+			for _, late := range []cronPeekMsg{older, first, older} {
+				h.Update(late)
+			}
+			if selected() != run {
+				t.Fatalf("selection moved from %s to %s", run, selected())
+			}
+			text := ansi.Strip(h.View().Content)
+			if !strings.Contains(text, "ab12 Retitled issue") || !strings.Contains(text, "third comment marker") {
+				t.Fatalf("peek lacks the latest issue context:\n%s", text)
+			}
+			for _, stale := range []string{"first comment marker", "second comment marker", "Renamed issue"} {
+				if strings.Contains(text, stale) {
+					t.Fatalf("late reply restored %q:\n%s", stale, text)
+				}
+			}
+		})
 	}
 }
 

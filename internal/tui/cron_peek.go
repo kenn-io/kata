@@ -48,6 +48,7 @@ func (h *cronHost) clearCronPeek() {
 	}
 	h.peekKey = cronPeekKey{}
 	h.peekAuth = AuthInfo{}
+	h.peekStale = false
 	if h.board != nil {
 		h.board.SetPeek(cronui.PeekState{})
 	}
@@ -63,11 +64,22 @@ func (h *cronHost) syncCronPeek() tea.Cmd {
 		}
 		return nil
 	}
-	if key == h.peekKey && reflect.DeepEqual(h.peekAuth, h.native.activeAuth) {
+	refresh := key == h.peekKey && reflect.DeepEqual(h.peekAuth, h.native.activeAuth)
+	if refresh && !h.peekStale {
 		return nil
 	}
-	h.clearCronPeek()
-	h.peekKey, h.peekAuth = key, h.native.activeAuth
+	if refresh {
+		// The selection is unchanged, so its context stays visible while
+		// the replacement read fences and cancels the older one.
+		h.peekGeneration++
+		if h.peekCancel != nil {
+			h.peekCancel()
+		}
+		h.peekStale = false
+	} else {
+		h.clearCronPeek()
+		h.peekKey, h.peekAuth = key, h.native.activeAuth
+	}
 	api := h.native.api
 	if wrapped, ok := api.(*undoClient); ok {
 		api = wrapped.KataAPI
@@ -77,7 +89,9 @@ func (h *cronHost) syncCronPeek() tea.Cmd {
 		h.board.SetPeek(cronui.PeekState{Kind: "unreadable"})
 		return nil
 	}
-	h.board.SetPeek(cronui.PeekState{Kind: "loading"})
+	if !refresh {
+		h.board.SetPeek(cronui.PeekState{Kind: "loading"})
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
 	h.peekCancel = cancel
 	generation, slots := h.peekGeneration, h.slots
@@ -101,6 +115,20 @@ func (h *cronHost) syncCronPeek() tea.Cmd {
 		}
 		issue, err := peekAPI.CronIssuePeek(ctx, key.project, key.issueUID)
 		return cronPeekMsg{key: key, generation: generation, issue: issue, err: err}
+	}
+}
+
+// invalidateCronPeek marks the peek stale when a live event changes the
+// peeked issue's title or comments. Each change restarts the read's delay, so
+// a burst of events costs one read.
+func (h *cronHost) invalidateCronPeek(msg eventReceivedMsg) {
+	switch msg.eventType {
+	case "issue.commented", "issue.comment_edited", "issue.updated":
+	default:
+		return
+	}
+	if h.peekKey != (cronPeekKey{}) && msg.issueUID == h.peekKey.issueUID {
+		h.peekStale = true
 	}
 }
 
