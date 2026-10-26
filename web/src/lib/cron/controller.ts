@@ -158,6 +158,8 @@ export class CronController {
   #selectionStarted = 0
   #badge: Task | undefined
   #badgeFresh: string | undefined
+  /** An unmounted page may still deliver late snapshots; they must not start reads. */
+  #destroyed = false
   constructor(
     private readonly client = new CronClient(),
     private readonly reject: () => void = () => {},
@@ -221,6 +223,7 @@ export class CronController {
     )
   }
   #requestCatalog(intent: CronIntent, changed: boolean): Promise<void> {
+    if (this.#destroyed) return Promise.resolve()
     this.#adopt(intent)
     const key = catalogKey(intent)
     const active = this.#catalog
@@ -429,6 +432,7 @@ export class CronController {
   }
   /** Opens, changes or closes the drawer without touching the catalog. */
   async select(selection: CronSelection | undefined): Promise<void> {
+    if (this.#destroyed) return
     if (this.#intent)
       this.#intent = { ...this.#intent, route: { ...this.#intent.route, selection } }
     else this.#set({ selected: selection })
@@ -574,6 +578,7 @@ export class CronController {
   }
   /** Applies an accepted snapshot outside the Cron page: only the badge is read. */
   loadBadge(intent: CronIntent, unchangedSnapshot = false): Promise<void> {
+    if (this.#destroyed) return Promise.resolve()
     this.#adopt({ ...intent, route: { ...intent.route, selection: undefined } })
     this.#catalog?.abort.abort()
     this.#catalog = undefined
@@ -654,6 +659,7 @@ export class CronController {
     this.#set(emptyCronState())
   }
   destroy() {
+    this.#destroyed = true
     this.fence()
     this.#listeners.clear()
   }

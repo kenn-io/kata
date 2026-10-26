@@ -795,3 +795,26 @@ describe('overlapping events', () => {
     }
   })
 })
+
+test('a destroyed controller ignores requests from an unmounted page', async () => {
+  const api = client()
+  api.run = vi.fn(async () => ({ uid: 'r', created_at: '', summary: { version: 1 } }) as CronRun)
+  const c = new CronController(api)
+  c.destroy()
+  const intent = {
+    projects: projects.slice(0, 1),
+    route: {
+      ...defaultCronRoute(),
+      selection: { kind: 'run' as const, projectUID: 'p1', uid: 'r' },
+    },
+    daemonID: undefined,
+    authorityGeneration: 1,
+  }
+  await c.sync(intent, false)
+  await c.loadBadge(intent, false)
+  await c.select(intent.route.selection)
+  await c.refresh()
+  await c.refreshSummaries()
+  for (const read of [api.summary, api.jobs, api.runs, api.workflows, api.run])
+    expect(read).not.toHaveBeenCalled()
+})
