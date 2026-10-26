@@ -21,12 +21,11 @@ install: web-embed
 	@set -e; trap 'cd web && bun run scripts/embed-assets.ts --restore-stub' EXIT; \
 		go install -ldflags="$(LDFLAGS)" ./cmd/kata
 
-# Build from a release source archive, which already carries vendored modules
-# and the production web assets, so this needs no network, git, or Bun.
-# Pass VERSION and BUILD_DATE explicitly; the archive has no git metadata.
+# Homebrew build profile: the normal build with cgo and DISTRIBUTION=homebrew.
 homebrew: DISTRIBUTION := homebrew
-homebrew:
-	CGO_ENABLED=1 go build -mod=vendor -trimpath -buildvcs=false -ldflags="-s -w $(LDFLAGS)" -o "$(BINDIR)/kata" ./cmd/kata
+homebrew: web-embed
+	@set -e; trap 'cd web && bun run scripts/embed-assets.ts --restore-stub' EXIT; \
+		CGO_ENABLED=1 go build -ldflags="$(LDFLAGS)" -o "$(BINDIR)/kata" ./cmd/kata
 
 test:
 	env -u KATA_AUTH_TOKEN -u KATA_TRUST_PRIVATE_NETWORK go test $(GOFLAGS_TEST) ./...
