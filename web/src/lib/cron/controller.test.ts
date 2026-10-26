@@ -989,3 +989,89 @@ test('catalog updates finish while a drawer revalidation is delayed', async () =
     c.destroy()
   }
 })
+
+test('a Load more page requested before a sweep cannot bring back outdated statuses', async () => {
+  const api = client()
+  const at = (uid: string, status: string, time: string) =>
+    ({ uid, status, created_at: time }) as CronRun
+  let statuses = 'running'
+  let releasePage!: () => void
+  api.runs.mockImplementation(async (_project, _signal, query) => {
+    if (query?.beforeUID === 'cursor-1') {
+      const stale = statuses
+      if (stale === 'running' && !releasePage)
+        await new Promise<void>((resolve) => (releasePage = resolve))
+      return {
+        runs: [at('a', stale, '2026-10-25T00:00:00Z'), at('b', stale, '2026-10-24T00:00:00Z')],
+      }
+    }
+    return { runs: [at('a', statuses, '2026-10-25T00:00:00Z')], next_before_uid: 'cursor-1' }
+  })
+  const c = new CronController(api)
+  const intent = {
+    projects: projects.slice(0, 1),
+    route: defaultCronRoute(),
+    daemonID: undefined,
+    authorityGeneration: 1,
+  }
+  try {
+    await c.load(intent)
+    const more = c.loadMore('p1')
+    await vi.waitFor(() => expect(releasePage).toBeTypeOf('function'))
+    statuses = 'succeeded'
+    await c.sync(intent, false)
+    releasePage()
+    await more
+    await vi.waitFor(() =>
+      expect(c.state.projects[0]?.runs.map((run) => `${run.uid}:${run.status}`)).toEqual([
+        'a:succeeded',
+        'b:succeeded',
+      ]),
+    )
+    await vi.waitFor(() => expect(c.state.loading).toBe(false))
+    const reads = api.runs.mock.calls.length
+    await c.sync(intent, true)
+    expect(api.runs.mock.calls.length).toBe(reads)
+  } finally {
+    c.destroy()
+  }
+})
+
+test('a stalled issue peek never holds back run detail revalidation', async () => {
+  vi.useFakeTimers()
+  const api = client()
+  let summary = 'First'
+  api.run = vi.fn(
+    async (_project, uid) =>
+      ({
+        uid,
+        issue_uid: 'issue',
+        created_at: '',
+        summary: { version: 1, message: summary },
+      }) as CronRun,
+  )
+  api.issue = vi.fn(() => new Promise<ShowIssueResponseBody>(() => {}))
+  const c = new CronController(api)
+  const intent = {
+    projects: projects.slice(0, 1),
+    route: {
+      ...defaultCronRoute(),
+      selection: { kind: 'run' as const, projectUID: 'p1', uid: 'r' },
+    },
+    daemonID: undefined,
+    authorityGeneration: 1,
+  }
+  try {
+    await c.load(intent)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(api.issue).toHaveBeenCalledTimes(1)
+    summary = 'Revalidated'
+    await c.sync(intent, false)
+    await vi.advanceTimersByTimeAsync(200)
+    expect(c.state.detail).toMatchObject({ summary: { message: 'Revalidated' } })
+    expect(api.issue).toHaveBeenCalledTimes(1)
+  } finally {
+    c.destroy()
+    vi.useRealTimers()
+  }
+})

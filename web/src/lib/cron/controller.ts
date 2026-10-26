@@ -150,9 +150,12 @@ export class CronController {
   /** Keys the published rows' runs, jobs and workflows were read under. */
   #rowKeys: { runs?: string; jobs?: string; workflows?: string } = {}
   #more: AbortController | undefined
+  /** When the latest catalog sweep started, to age Load more pages against. */
+  #sweepStarted = 0
   /** The drawer revalidation the latest catalog read started. */
   #revalidation: Promise<void> = Promise.resolve()
   #selection: SelectionTask | undefined
+  #peek: Task | undefined
   /** Selection key whose detail is on screen or loading. */
   #selectionKey = ''
   /** Orders read starts, so a catalog revalidates only selection reads older than it. */
@@ -257,6 +260,7 @@ export class CronController {
       do {
         task.again = false
         started = ++this.#clock
+        this.#sweepStarted = started
         await this.#readCatalog(this.#intent!, task, current)
         // The drawer revalidates on its own task; a slow detail read must not
         // hold the catalog, or later snapshots and Refresh would queue behind it.
@@ -429,6 +433,7 @@ export class CronController {
     const abort = (this.#more ??= new AbortController())
     const current = () => this.#more === abort && !abort.signal.aborted
     const cursor = row.nextBeforeUID
+    const requested = ++this.#clock
     // A background sweep may replace the row while the page loads; apply the
     // result to whichever row is on screen when it arrives.
     const update = (change: (shown: CronProjectState) => void) => {
@@ -451,16 +456,20 @@ export class CronController {
         statuses: this.#intent.route.statuses.filter((s) => s !== 'never_ran'),
       })
       if (!current()) return
+      // A sweep that started after this request knows newer statuses: keep its
+      // copies, and sweep again through the new boundary to revalidate the rest.
+      const outdated = this.#sweepStarted > requested
       update((shown) => {
         const before = oldestRun(shown.runs),
           oldest = oldestRun(page.runs)
         const map = new Map(shown.runs.map((run) => [run.uid, run]))
-        for (const run of page.runs) map.set(run.uid, run)
+        for (const run of page.runs) if (!outdated || !map.has(run.uid)) map.set(run.uid, run)
         shown.runs = [...map.values()].sort(runOrder)
         if (shown.nextBeforeUID === cursor || (oldest && (!before || runOrder(oldest, before) > 0)))
           shown.nextBeforeUID = page.next_before_uid
         shown.loadingMore = false
       })
+      if (outdated && this.#intent) void this.#requestCatalog(this.#intent, true)
     } catch (error) {
       if (!current()) return
       if (isAuthenticationRequiredError(error)) {
@@ -498,7 +507,10 @@ export class CronController {
     return this.#startSelection(key, false)
   }
   #startSelection(key: string, retain: boolean): Promise<void> {
-    this.#cancelSelection()
+    this.#selection?.abort.abort()
+    this.#selection = undefined
+    // Revalidating the same selection leaves its issue peek running.
+    if (key !== this.#selectionKey) this.#cancelPeek()
     this.#selectionKey = key
     const selection = this.#intent?.route.selection
     this.#set({
@@ -588,7 +600,41 @@ export class CronController {
     } finally {
       shown()
     }
-    if (!issueUID || !current()) return
+    if (!current()) return
+    if (issueUID) this.#requestPeek(task.key, project, issueUID)
+    else this.#cancelPeek()
+  }
+  /**
+   * Reads the drawer run's issue on its own task, so a slow issue never holds
+   * back detail revalidation. A request for the issue already being read
+   * reruns it once; the task ends when the drawer shows another selection.
+   */
+  #requestPeek(selectionKey: string, project: CronProject, issueUID: string) {
+    const key = JSON.stringify([selectionKey, issueUID])
+    const active = this.#peek
+    if (active?.key === key) {
+      active.again = true
+      return
+    }
+    this.#cancelPeek()
+    const task: Task = { key, abort: new AbortController(), again: false, done: Promise.resolve() }
+    this.#peek = task
+    const current = () => this.#peek === task && !task.abort.signal.aborted
+    const signal = task.abort.signal
+    task.done = (async () => {
+      do {
+        task.again = false
+        await this.#readPeek(project, issueUID, signal, current)
+      } while (task.again && current())
+      if (this.#peek === task) this.#peek = undefined
+    })()
+  }
+  async #readPeek(
+    project: CronProject,
+    issueUID: string,
+    signal: AbortSignal,
+    current: () => boolean,
+  ): Promise<void> {
     // A short delay keeps quick drawer browsing from reading every issue.
     await new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, 150)
@@ -615,10 +661,15 @@ export class CronController {
       this.#set({ peek: { status: 'unreadable' } })
     }
   }
+  #cancelPeek() {
+    this.#peek?.abort.abort()
+    this.#peek = undefined
+  }
   #cancelSelection() {
     this.#selection?.abort.abort()
     this.#selection = undefined
     this.#selectionKey = ''
+    this.#cancelPeek()
   }
   /** Applies an accepted snapshot outside the Cron page: only the badge is read. */
   loadBadge(intent: CronIntent, unchangedSnapshot = false): Promise<void> {
