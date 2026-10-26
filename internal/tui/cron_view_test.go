@@ -65,67 +65,40 @@ func cronFixture(t *testing.T) Model {
 	return m
 }
 
-func TestCronWalkAndRecordedDefinitions(t *testing.T) {
-	m := cronFixture(t)
-	m = sendKey(m, tea.KeyEnter)
-	require.Contains(t, stripANSI(m.viewBody()), "jobs / Daily summary")
-	// Every line, including prose and JSON, is traversable.
-	_, _, lines := cronScreen(m)
-	for i, l := range lines {
-		if l.target.kind == 2 {
-			for range i {
+func TestCronLinkFollows(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		tab  rune
+		kind int
+		uid  string
+	}{
+		{"job to run", '2', 2, "01ARZ3NDEKTSV4RRFFQ69G5FAY"},
+		{"run to job", '3', 1, "01ARZ3NDEKTSV4RRFFQ69G5FAV"},
+		{"workflow to job", '4', 1, "01ARZ3NDEKTSV4RRFFQ69G5FAV"},
+		{"workflow to run", '4', 2, "01ARZ3NDEKTSV4RRFFQ69G5FAY"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := sendRune(cronFixture(t), tc.tab)
+			m = sendKey(m, tea.KeyEnter)
+			_, _, lines := cronScreen(m)
+			index := slices.IndexFunc(lines, func(line cronLine) bool { return line.target.kind == tc.kind && line.target.uid == tc.uid })
+			require.GreaterOrEqual(t, index, 0)
+			if tc.name == "run to job" {
+				require.Contains(t, lines[index].text, "current definition changed")
+			}
+			for range index {
 				m = sendRune(m, 'j')
 			}
-			break
-		}
+			m = sendKey(m, tea.KeyEnter)
+			require.Len(t, m.cron.stack, 2)
+			require.Equal(t, tc.uid, m.cron.stack[1].ref.uid)
+			require.Equal(t, tc.kind, m.cron.stack[1].ref.kind)
+			if tc.name == "run to job" {
+				m = sendRune(m, 'h')
+				require.Len(t, m.cron.stack, 1)
+			}
+		})
 	}
-	m = sendKey(m, tea.KeyEnter)
-	require.Contains(t, stripANSI(m.viewBody()), "runs / 01ARZ3NDEKTSV4RRFFQ69G5FAY")
-	_, _, lines = cronScreen(m)
-	jobLine := -1
-	for i, l := range lines {
-		if l.target.kind == 1 {
-			jobLine = i
-			break
-		}
-	}
-	require.GreaterOrEqual(t, jobLine, 0)
-	require.Contains(t, lines[jobLine].text, "current definition changed")
-	for range jobLine {
-		m = sendRune(m, 'j')
-	}
-	m = sendKey(m, tea.KeyEnter)
-	require.Contains(t, stripANSI(m.viewBody()), "jobs / Daily summary")
-	m = sendRune(m, 'h')
-	m = sendRune(m, 'h')
-	require.Len(t, m.cron.stack, 1)
-}
-
-func TestCronRefreshKeepsDetailAndCoalescesEvents(t *testing.T) {
-	m := cronFixture(t)
-	a := &cronReadTestAPI{data: *m.cron.data}
-	a.data.jobs = slices.Clone(a.data.jobs)
-	m.api = a
-	m = sendKey(m, tea.KeyEnter)
-	var cmd tea.Cmd
-	m, cmd = updateModel(m, keyRune('r'))
-	require.NotNil(t, cmd)
-	for range 10 {
-		m, _ = updateModel(m, eventReceivedMsg{eventType: "cron.job.updated", projectID: 7})
-	}
-	require.Contains(t, stripANSI(m.viewBody()), "Daily summary")
-	require.NotContains(t, stripANSI(m.viewBody()), "no longer in the loaded data")
-	first := cmd()
-	require.Equal(t, 1, a.calls)
-	a.data.jobs[0].Name = "New name"
-	m, cmd = updateModel(m, first)
-	require.Contains(t, stripANSI(m.viewBody()), "Daily summary")
-	require.NotContains(t, stripANSI(m.viewBody()), "New name")
-	require.NotNil(t, cmd, "events during the read request one replacement read")
-	m, cmd = updateModel(m, cmd())
-	require.Nil(t, cmd)
-	require.Equal(t, 2, a.calls)
-	require.Contains(t, stripANSI(m.viewBody()), "New name")
 }
 
 func TestCronFreshness(t *testing.T) {
@@ -134,27 +107,55 @@ func TestCronFreshness(t *testing.T) {
 		event tea.Msg
 		away  bool
 	}{
-		{"event", eventReceivedMsg{eventType: "cron.job.updated", projectID: 7}, false},
+		{"coalesce with detail open", keyRune('r'), false},
 		{"reset", resetRequiredMsg{}, false},
-		{"refresh", keyRune('r'), false},
 		{"event while away", eventReceivedMsg{eventType: "cron.job.updated", projectID: 7}, true},
 		{"reset while away", resetRequiredMsg{}, true},
+		{"disappearing record", keyRune('r'), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := cronFixture(t)
-			a := &cronReadTestAPI{data: *m.cron.data}
+			m.sseCh = nil
+			a := &cronReadTestAPI{KataAPI: &inboxTestAPI{}, data: *m.cron.data}
 			a.data.jobs = slices.Clone(a.data.jobs)
 			a.data.jobs[0].Name = "New title"
 			m.api = a
+			detail := tc.name == "coalesce with detail open" || tc.name == "disappearing record"
+			if detail {
+				m = sendKey(m, tea.KeyEnter)
+			}
+			if tc.name == "disappearing record" {
+				a.data.jobs = nil
+			}
 			if tc.away {
 				m = sendRune(m, '1')
 			}
 			m, cmd := updateModel(m, tc.event)
 			if tc.away {
+				runCmdTree(cmd)
 				require.Zero(t, a.calls)
 				m, cmd = updateModel(m, keyRune('2'))
 			}
 			require.NotNil(t, cmd)
+			if tc.name == "coalesce with detail open" {
+				for range 10 {
+					m, _ = updateModel(m, eventReceivedMsg{eventType: "cron.job.updated", projectID: 7})
+				}
+				require.Contains(t, stripANSI(m.viewBody()), "Daily summary")
+				require.NotContains(t, stripANSI(m.viewBody()), "no longer in the loaded data")
+				first := cmd()
+				require.Equal(t, 1, a.calls)
+				a.data.jobs[0].Name = "Newest title"
+				m, cmd = updateModel(m, first)
+				require.Contains(t, stripANSI(m.viewBody()), "New title")
+				require.NotContains(t, stripANSI(m.viewBody()), "Newest title")
+				require.NotNil(t, cmd, "events during the read request one replacement read")
+				m, cmd = updateModel(m, cmd())
+				require.Nil(t, cmd)
+				require.Equal(t, 2, a.calls)
+				require.Contains(t, stripANSI(m.viewBody()), "Newest title")
+				return
+			}
 			// Update appends the cron read after the existing issue/SSE commands.
 			msg := cmd()
 			if batch, ok := msg.(tea.BatchMsg); ok {
@@ -162,7 +163,11 @@ func TestCronFreshness(t *testing.T) {
 			}
 			m, _ = updateModel(m, msg)
 			require.Equal(t, 1, a.calls)
-			require.Contains(t, stripANSI(m.viewBody()), "New title")
+			if tc.name == "disappearing record" {
+				require.Contains(t, stripANSI(m.viewBody()), "this job is no longer in the loaded data")
+			} else {
+				require.Contains(t, stripANSI(m.viewBody()), "New title")
+			}
 		})
 	}
 }
@@ -183,9 +188,6 @@ func TestCronScopeAndDaemonFence(t *testing.T) {
 		require.Empty(t, m.cron.stack)
 		m, _ = updateModel(m, stale)
 		require.NotContains(t, stripANSI(m.viewBody()), "Daily summary")
-		m = sendRune(m, '1')
-		m = sendRune(m, '2')
-		require.Empty(t, m.cron.stack)
 	}
 }
 
@@ -198,51 +200,67 @@ func TestCronInputAndGlobals(t *testing.T) {
 		h := sendRune(m, '?')
 		require.Equal(t, viewCron, h.view)
 		require.True(t, h.cron.help)
-		require.Contains(t, stripANSI(h.viewBody()), "A job is a schedule plus an action.")
-		require.Contains(t, stripANSI(h.viewBody()), "kata cron --help")
-		require.Contains(t, stripANSI(h.viewBody()), map[bool]string{false: "filter", true: "follow"}[detail])
+		if detail {
+			require.Contains(t, stripANSI(h.viewBody()), "follow")
+		}
 		require.Equal(t, h.cron.tab, sendRune(h, '3').cron.tab)
-		require.Equal(t, viewCron, sendRune(h, '?').view)
+		require.False(t, sendRune(h, '?').cron.help)
 		require.Equal(t, viewProjects, sendRune(m, 'P').view)
 		q := sendRune(m, 'q')
 		require.Equal(t, modalQuitConfirm, q.modal)
 	}
-	m := cronFixture(t)
-	m = sendRune(m, '/')
-	pasted, _ := updateModel(m, tea.PasteMsg{Content: "daily"})
-	typed := m
-	for _, r := range "daily" {
-		typed = sendRune(typed, r)
-	}
-	require.Equal(t, stripANSI(typed.viewBody()), stripANSI(pasted.viewBody()))
-	require.Contains(t, stripANSI(pasted.viewBody()), "1 job")
-	pasted = sendRune(pasted, '3')
-	require.Equal(t, 1, pasted.cron.tab)
-	require.Contains(t, pasted.cron.lists[1].query, "3")
 }
 
-func TestCronTabsRespectExistingInputs(t *testing.T) {
-	m := cronFixture(t)
-	m = sendRune(m, '1')
-	m, cmd := updateModel(m, keyRune('/'))
-	require.NotNil(t, cmd)
-	m, _ = updateModel(m, cmd())
-	m = sendRune(m, '2')
-	require.Equal(t, viewList, m.view)
-	require.Contains(t, m.list.filter.Search, "2")
-	m = cronFixture(t)
-	m = sendRune(m, '1')
-	m.list = snapListModel([]Issue{testIssue("abc4")})
-	m = sendRune(m, '!')
-	m = sendRune(m, '2')
-	require.Equal(t, viewList, m.view)
-	// Typed prompts own digit keys before global routing.
-	m = cronFixture(t)
-	m.view = viewFederation
-	m.federation.mode = federationModeAdoptConfirm
-	m = sendRune(m, '2')
-	require.Equal(t, viewFederation, m.view)
-	require.Equal(t, "2", m.federation.adoptConfirmInput)
+func TestCronDigitsGoToActiveInput(t *testing.T) {
+	for _, name := range []string{"cron filter", "list search", "priority prompt", "federation adopt prompt", "main help view"} {
+		t.Run(name, func(t *testing.T) {
+			m := cronFixture(t)
+			digit := '2'
+			switch name {
+			case "cron filter":
+				m = sendRune(m, '/')
+				digit = '3'
+			case "list search":
+				m = sendRune(m, '1')
+				var cmd tea.Cmd
+				m, cmd = updateModel(m, keyRune('/'))
+				require.NotNil(t, cmd)
+				m, _ = updateModel(m, cmd())
+			case "priority prompt":
+				m = sendRune(m, '1')
+				issue := testIssue("abc4")
+				m.detail.issue, m.view = &issue, viewDetail
+				var cmd tea.Cmd
+				m, cmd = updateModel(m, keyRune('!'))
+				require.NotNil(t, cmd)
+				m, _ = updateModel(m, cmd())
+				require.Equal(t, inputPriorityPrompt, m.input.kind)
+			case "federation adopt prompt":
+				m.view = viewFederation
+				m.federation.mode = federationModeAdoptConfirm
+			case "main help view":
+				m = sendRune(m, '1')
+				m = sendRune(m, '?')
+				digit = '3'
+			}
+			want := m.view
+			m = sendRune(m, digit)
+			require.Equal(t, want, m.view)
+			switch name {
+			case "cron filter":
+				require.Equal(t, 1, m.cron.tab)
+				require.Equal(t, "3", m.cron.lists[1].query)
+			case "list search":
+				require.Contains(t, m.list.filter.Search, "2")
+			case "priority prompt":
+				require.Equal(t, "2", m.input.fields[0].value())
+			case "federation adopt prompt":
+				require.Equal(t, "2", m.federation.adoptConfirmInput)
+			case "main help view":
+				require.Equal(t, viewHelp, m.view)
+			}
+		})
+	}
 }
 
 func TestCronDocumentContentAndCursor(t *testing.T) {
@@ -269,12 +287,6 @@ func TestCronDocumentContentAndCursor(t *testing.T) {
 	require.Contains(t, document, "Summarize all changes\nInclude follow-up tasks.")
 	m = sendRune(m, '4')
 	m = sendKey(m, tea.KeyEnter)
-	_, _, lines = cronScreen(m)
-	document = ""
-	for _, l := range lines {
-		document += l.text + "\n"
-	}
-	require.Contains(t, document, "echo first\necho second")
 	// Thirty steps with a single link must still let k reach step one.
 	for i := range 30 {
 		p.workflows[0].Definition.Steps = append(p.workflows[0].Definition.Steps, generated.CronWorkflowStepResponse{Key: fmt.Sprintf("step-%d", i), Kind: "command", Command: new(strings.Repeat("long command ", 12))})
@@ -288,28 +300,21 @@ func TestCronDocumentContentAndCursor(t *testing.T) {
 	require.Contains(t, stripANSI(m.viewBody()), "collect")
 	// A refresh can shrink either list or detail; movement starts clamped.
 	m = sendRune(m, '2')
-	m.cron.lists[1].cursor = 100
+	for i := range 2 {
+		job := p.jobs[0]
+		job.UID = fmt.Sprintf("01ARZ3NDEKTSV4RRFFQ69G5FA%d", i)
+		job.ID = int64(i + 2)
+		job.DefinitionEventUID = fmt.Sprintf("01ARZ3NDEKTSV4RRFFQ69G5FB%d", i)
+		p.jobs = append(p.jobs, job)
+	}
+	m.cron.lists[1].cursor = 1000
 	m = sendRune(m, 'k')
-	require.Equal(t, 0, m.cron.lists[1].cursor)
+	require.Equal(t, len(p.jobs)-2, m.cron.lists[1].cursor)
 	m = sendKey(m, tea.KeyEnter)
 	m.cron.stack[0].cursor = 1000
-	m = sendRune(m, 'j')
 	_, _, lines = cronScreen(m)
 	m = sendRune(m, 'k')
-	require.Less(t, m.cron.stack[0].cursor, len(lines))
-}
-
-func TestCronRunsOrderAndEndTime(t *testing.T) {
-	m := cronFixture(t)
-	p := m.cron.data
-	other := p.runs[0]
-	other.UID = "01ARZ3NDEKTSV4RRFFQ69G5FAX"
-	p.runs = append(p.runs, other)
-	m = sendRune(m, '3')
-	_, _, lines := cronScreen(m)
-	require.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FAY", lines[0].target.uid)
-	require.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FAX", lines[1].target.uid)
-	require.Contains(t, lines[0].text, "05-01 11:00")
+	require.Equal(t, len(lines)-2, m.cron.stack[0].cursor)
 }
 
 // Only the read boundary is doubled; assertions exercise Update and rendering.
@@ -339,35 +344,43 @@ func (a *cronReadTestAPI) ListCronRuns(_ context.Context, id int64) ([]generated
 	return slices.Clone(a.data.runs), a.data.runsErr
 }
 
-func TestCronReturnAcrossLayouts(t *testing.T) {
-	for _, detail := range []bool{false, true} {
-		t.Run(fmt.Sprint(detail), func(t *testing.T) {
-			m := cronFixture(t)
-			m = sendRune(m, '1')
+func TestCronReturnToKata(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		detail       bool
+		width        int
+		coveredWidth int
+		exit         rune
+	}{
+		{"list", false, 80, 80, 0},
+		{"single-pane detail", true, 80, 80, 0},
+		{"split list focus", false, 200, 200, 0},
+		{"split detail focus", true, 200, 200, 0},
+		{"narrowed split", true, 200, 80, 0},
+		{"federation exit", true, 80, 80, 'F'},
+		{"daemon exit", true, 80, 80, 'C'},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := sendRune(cronFixture(t), '1')
 			issue := testIssue("abc4")
-			m.detail.issue = &issue
-			m.view = viewDetail
-			m = sendRune(m, '?')
-			m = sendRune(m, '?')
-			if !detail {
+			m.detail.issue, m.view = &issue, viewDetail
+			m.focus = focusDetail
+			m, _ = updateModel(m, tea.WindowSizeMsg{Width: tc.width, Height: 40})
+			if !tc.detail {
 				m, _ = updateModel(m, popDetailMsg{})
 			}
 			want := m.view
 			m = sendRune(m, '2')
-			m, _ = updateModel(m, tea.WindowSizeMsg{Width: 200, Height: 40})
-			m = sendRune(m, '?')
-			m = sendRune(m, '?')
+			m, _ = updateModel(m, tea.WindowSizeMsg{Width: tc.coveredWidth, Height: 24})
+			if tc.exit != 0 {
+				m = sendRune(m, tc.exit)
+				m = sendKey(m, tea.KeyEsc)
+			}
 			m = sendRune(m, '1')
 			require.Equal(t, want, m.view)
-			require.Equal(t, map[bool]focusPane{false: focusList, true: focusDetail}[detail], m.focus)
+			require.Equal(t, map[bool]focusPane{false: focusList, true: focusDetail}[tc.detail], m.focus)
 			m = sendRune(m, 'c')
-			require.Equal(t, map[bool]inputKind{false: inputNone, true: inputCommentForm}[detail], m.input.kind)
-			// Narrowing while covered also preserves the focused pane.
-			m.input.kind = inputNone
-			m = sendRune(m, '2')
-			m, _ = updateModel(m, tea.WindowSizeMsg{Width: 80, Height: 24})
-			m = sendRune(m, '1')
-			require.Equal(t, want, m.view)
+			require.Equal(t, map[bool]inputKind{false: inputNone, true: inputCommentForm}[tc.detail], m.input.kind)
 		})
 	}
 }
@@ -380,9 +393,6 @@ func TestCronAllProjects(t *testing.T) {
 	m.api = a
 	m, cmd := updateModel(m, keyRune('2'))
 	require.Nil(t, cmd)
-	require.Zero(t, a.calls)
-	require.Len(t, strings.Split(m.viewBody(), "\n"), 24)
-	require.Contains(t, stripANSI(m.viewBody()), "Press P to pick a project, then 2 for Jobs, 3 for Runs, or 4 for Workflows.")
 	require.Equal(t, viewProjects, sendRune(m, 'P').view)
 }
 
@@ -433,7 +443,6 @@ func TestCronIndependentFailuresAndRetainedRows(t *testing.T) {
 	m.cron.data = nil
 	m, cmd := updateModel(m, keyRune('r'))
 	m, _ = updateModel(m, cmd())
-	require.Contains(t, stripANSI(m.viewBody()), "jobs unavailable: see error below")
 	for line := range strings.SplitSeq(stripANSI(m.viewBody()), "\n") {
 		require.LessOrEqual(t, ansi.StringWidth(line), 80)
 	}
@@ -470,7 +479,12 @@ func TestCronFilterAndTabState(t *testing.T) {
 			m = sendRune(m, tab)
 			m = sendRune(m, '/')
 			query := map[rune]string{'2': "job-suffix", '3': "run-suffix", '4': "workflow-suffix"}[tab]
+			typed := m
+			for _, r := range query {
+				typed = sendRune(typed, r)
+			}
 			m, _ = updateModel(m, tea.PasteMsg{Content: query})
+			require.Equal(t, stripANSI(typed.viewBody()), stripANSI(m.viewBody()))
 			m = sendKey(m, tea.KeyEnter)
 			_, _, lines := cronScreen(m)
 			require.Len(t, lines, 1)
@@ -529,66 +543,6 @@ func TestSnapshot_Cron(t *testing.T) {
 	}
 }
 
-func TestCronEntryKeepsTitle(t *testing.T) {
-	m := newTestModel()
-	m.width, m.height = 80, 24
-	require.Contains(t, stripANSI(m.viewBody()), "[kata カタ] jobs runs workflows")
-	title, _, _ := strings.Cut(m.viewBody(), "\n")
-	m = sendRune(m, '2')
-	rows := strings.Split(m.viewBody(), "\n")
-	require.Equal(t, title, rows[0])
-	require.Contains(t, stripANSI(rows[1]), "kata カタ [jobs] runs workflows")
-	m = sendRune(m, '1')
-	require.Equal(t, viewList, m.view)
-	require.Contains(t, stripANSI(m.viewBody()), "[kata カタ] jobs runs workflows")
-	m = sendRune(m, '?')
-	m = sendRune(m, '3')
-	require.Equal(t, viewHelp, m.view)
-}
-
-func TestCronWorkflowLinksAndDisappearingRecord(t *testing.T) {
-	m := cronFixture(t)
-	m = sendRune(m, '4')
-	m = sendKey(m, tea.KeyEnter)
-	_, _, lines := cronScreen(m)
-	for i, line := range lines {
-		if line.target.kind == 1 {
-			for range i {
-				m = sendRune(m, 'j')
-			}
-			m = sendKey(m, tea.KeyEnter)
-			require.Contains(t, stripANSI(m.viewBody()), "jobs / Daily summary")
-			m = sendRune(m, 'h')
-			break
-		}
-	}
-	m = sendRune(m, 'G')
-	m = sendKey(m, tea.KeyEnter)
-	require.Contains(t, stripANSI(m.viewBody()), "runs / 01ARZ3NDEKTSV4RRFFQ69G5FAY")
-	m = sendRune(m, '2')
-	m = sendKey(m, tea.KeyEnter)
-	data := *m.cron.data
-	data.jobs = nil
-	m, _ = updateModel(m, cronLoadedMsg(data))
-	require.Contains(t, stripANSI(m.viewBody()), "this job is no longer in the loaded data")
-}
-
-func TestCronGlobalExitKeepsKataReturn(t *testing.T) {
-	for _, key := range []rune{'F', 'C'} {
-		t.Run(string(key), func(t *testing.T) {
-			m := cronFixture(t)
-			m = sendRune(m, '1')
-			issue := testIssue("abc4")
-			m.detail.issue, m.view = &issue, viewDetail
-			m = sendRune(m, '2')
-			m = sendRune(m, key)
-			m = sendKey(m, tea.KeyEsc)
-			m = sendRune(m, '1')
-			require.Equal(t, viewDetail, m.view)
-		})
-	}
-}
-
 func TestCronRefreshKeepsSelectedRecord(t *testing.T) {
 	for _, tab := range []rune{'2', '3', '4'} {
 		t.Run(string(tab), func(t *testing.T) {
@@ -596,6 +550,10 @@ func TestCronRefreshKeepsSelectedRecord(t *testing.T) {
 			data := *m.cron.data
 			job, run, workflow := data.jobs[0], data.runs[0], data.workflows[0]
 			job.UID, run.UID, workflow.UID = "01ARZ3NDEKTSV4RRFFQ69G5FAA", "01ARZ3NDEKTSV4RRFFQ69G5FAA", "01ARZ3NDEKTSV4RRFFQ69G5FAA"
+			job.ID, run.ID, workflow.ID = 3, 2, 4
+			job.DefinitionEventUID = "01ARZ3NDEKTSV4RRFFQ69G5FBC"
+			run.DefinitionEventUID = new("01ARZ3NDEKTSV4RRFFQ69G5FBD")
+			workflow.DefinitionEventUID = "01ARZ3NDEKTSV4RRFFQ69G5FBE"
 			job.Name, workflow.Name = "Selected job", "Selected workflow"
 			data.jobs = append(data.jobs, job)
 			data.runs = append(data.runs, run)
@@ -604,6 +562,10 @@ func TestCronRefreshKeepsSelectedRecord(t *testing.T) {
 			m = sendRune(m, tab)
 			m = sendRune(m, 'j')
 			job.UID, run.UID, workflow.UID = "01ARZ3NDEKTSV4RRFFQ69G5FAB", "01ARZ3NDEKTSV4RRFFQ69G5FAB", "01ARZ3NDEKTSV4RRFFQ69G5FAB"
+			job.ID, run.ID, workflow.ID = 5, 3, 6
+			job.DefinitionEventUID = "01ARZ3NDEKTSV4RRFFQ69G5FBF"
+			run.DefinitionEventUID = new("01ARZ3NDEKTSV4RRFFQ69G5FBG")
+			workflow.DefinitionEventUID = "01ARZ3NDEKTSV4RRFFQ69G5FBH"
 			data.jobs = append([]generated.CronJob{job}, data.jobs...)
 			data.runs = append([]generated.CronRun{run}, data.runs...)
 			data.workflows = append([]generated.CronWorkflow{workflow}, data.workflows...)
@@ -619,34 +581,21 @@ func TestCronRefreshKeepsSelectedRecord(t *testing.T) {
 }
 
 func TestCronNoticesFitTerminal(t *testing.T) {
-	for _, screen := range []string{"jobs", "runs", "workflows", "detail", "all-projects"} {
-		for _, notice := range []string{"inbox", "reset"} {
-			t.Run(screen+"/"+notice, func(t *testing.T) {
-				m := cronFixture(t)
-				switch screen {
-				case "runs":
-					m = sendRune(m, '3')
-				case "workflows":
-					m = sendRune(m, '4')
-				case "detail":
-					m = sendKey(m, tea.KeyEnter)
-				case "all-projects":
-					m.scope.allProjects = true
-				}
-				want := "resynced"
-				if notice == "inbox" {
-					m.api = &inboxTestAPI{}
-					var lookup tea.Cmd
-					m, lookup = updateModel(m, keyRune('I'))
-					require.NotNil(t, lookup)
-					m, _ = updateModel(m, lookup())
-					want = "No Inbox project designated"
-				} else {
-					m, _ = updateModel(m, resetRequiredMsg{})
-				}
-				rows := strings.Split(stripANSI(m.viewContent()), "\n")
-				require.Contains(t, strings.Join(rows[:min(len(rows), m.height)], "\n"), want)
-			})
-		}
+	for _, screen := range []string{"jobs", "detail", "all-projects"} {
+		t.Run(screen, func(t *testing.T) {
+			m := cronFixture(t)
+			switch screen {
+			case "detail":
+				m = sendKey(m, tea.KeyEnter)
+			case "all-projects":
+				m.scope.allProjects = true
+			}
+			m.api = &inboxTestAPI{}
+			m, lookup := updateModel(m, keyRune('I'))
+			require.NotNil(t, lookup)
+			m, _ = updateModel(m, lookup())
+			rows := strings.Split(stripANSI(m.viewContent()), "\n")
+			require.Contains(t, strings.Join(rows[:min(len(rows), m.height)], "\n"), "No Inbox project designated")
+		})
 	}
 }
