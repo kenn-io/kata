@@ -102,11 +102,13 @@ func TestMCPListenerPolicyAppliesOnlyWhenMounted(t *testing.T) {
 		kind                ListenerKind
 		mounted             bool
 		origin, contentType string
+		cookie              bool
 		want                int
 	}{
 		{name: "browser mounted without origin", kind: ListenerBrowser, mounted: true, want: http.StatusNoContent},
 		{name: "browser mounted foreign origin", kind: ListenerBrowser, mounted: true, origin: "https://attacker.example", want: http.StatusForbidden},
 		{name: "browser unmounted without origin", kind: ListenerBrowser, want: http.StatusForbidden},
+		{name: "shared mounted session cookie without origin", kind: ListenerSharedTCP, mounted: true, cookie: true, want: http.StatusForbidden},
 		{name: "shared mounted mixed-case JSON", kind: ListenerSharedTCP, mounted: true, contentType: "Application/JSON", want: http.StatusNoContent},
 		{name: "shared unmounted without origin", kind: ListenerSharedTCP, contentType: "Application/JSON", want: http.StatusForbidden},
 		{name: "socket mounted mixed-case JSON", kind: ListenerSocket, mounted: true, contentType: "Application/JSON", want: http.StatusNoContent},
@@ -126,6 +128,9 @@ func TestMCPListenerPolicyAppliesOnlyWhenMounted(t *testing.T) {
 			req.Header.Set("Content-Type", contentType)
 			if tt.origin != "" {
 				req.Header.Set("Origin", tt.origin)
+			}
+			if tt.cookie {
+				req.AddCookie(&http.Cookie{Name: "kata_session_instance_a", Value: "cookie-session"})
 			}
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, req)
@@ -252,15 +257,6 @@ func TestBrowserOriginPolicySharedTCPPreservesCLI(t *testing.T) {
 		cookie  *http.Cookie
 		want    int
 	}{
-		{
-			name: "MCP browser cookie without origin", method: http.MethodPost,
-			path: "/mcp", host: "127.0.0.1:27123",
-			cookie: &http.Cookie{
-				Name: "kata_session_instance_a", Value: "cookie-session",
-				Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode,
-			},
-			want: http.StatusForbidden,
-		},
 		{
 			name: "health request on shared daemon address",
 			path: "/api/v1/health", host: "spoke-b:7777", want: http.StatusBadRequest,
