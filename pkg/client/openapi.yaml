@@ -525,6 +525,8 @@ components:
       properties:
         accountable_actor:
           type: string
+        attributed_teammate:
+          type: string
         author:
           type: string
         authority_uid:
@@ -569,6 +571,8 @@ components:
       type: object
     CommentLink:
       properties:
+        attributed_teammate:
+          type: string
         author:
           type: string
         body:
@@ -606,6 +610,8 @@ components:
     CommentOut:
       properties:
         accountable_actor:
+          type: string
+        attributed_teammate:
           type: string
         author:
           type: string
@@ -1955,6 +1961,9 @@ components:
     EventEnvelope:
       properties:
         actor:
+          type: string
+        attributed_teammate:
+          description: Retained display contributor; independent of routing and receipt identity.
           type: string
         content_hash:
           type: string
@@ -6666,6 +6675,70 @@ components:
         - kind
         - other_uid
       type: object
+    UIHistoryEvent:
+      properties:
+        actor:
+          type: string
+        attributed_teammate:
+          type: string
+        content_hash:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        hlc_counter:
+          format: int64
+          type: integer
+        hlc_physical_ms:
+          format: int64
+          type: integer
+        id:
+          format: int64
+          type: integer
+        issue_id:
+          format: int64
+          type: integer
+        issue_short_id:
+          type: string
+        issue_uid:
+          type: string
+        origin_instance_uid:
+          type: string
+        payload:
+          type: string
+        project_id:
+          format: int64
+          type: integer
+        project_name:
+          type: string
+        project_uid:
+          type: string
+        related_issue_id:
+          format: int64
+          type: integer
+        related_issue_short_id:
+          type: string
+        related_issue_uid:
+          type: string
+        type:
+          type: string
+        uid:
+          type: string
+      required:
+        - id
+        - uid
+        - origin_instance_uid
+        - project_id
+        - project_uid
+        - project_name
+        - type
+        - actor
+        - payload
+        - hlc_physical_ms
+        - hlc_counter
+        - content_hash
+        - created_at
+      type: object
     UIIssue:
       properties:
         accountable_actor:
@@ -6913,7 +6986,7 @@ components:
           type: array
         history:
           items:
-            $ref: "#/components/schemas/Event"
+            $ref: "#/components/schemas/UIHistoryEvent"
           type: array
         issue:
           $ref: "#/components/schemas/UIIssue"

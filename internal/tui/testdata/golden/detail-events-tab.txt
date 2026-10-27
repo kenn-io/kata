@@ -10,8 +10,8 @@
   Click the login button twice.
 
   Activity   Comments (2)   [ Events (2) ]   Links (1)
-  > [issue.created] 2026-04-30 10:00 alice — created
-    [issue.commented] 2026-04-30 11:00 bob — added comment
+  > [issue.created] 2026-04-30 10:00 alice / planner — created
+    [issue.commented] 2026-04-30 11:00 bob / writer — added comment
 
 
 
