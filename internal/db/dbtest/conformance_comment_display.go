@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 )
@@ -187,5 +188,97 @@ func checkCommentDisplayContribution(t *testing.T, store db.Storage, backend Bac
 		require.Equal(t, "route", c.Teammate)
 		require.NotEmpty(t, c.Body)
 	}
+	t.Run("federation adoption", func(t *testing.T) {
+		checkAdoptionCommentDisplay(t, backend)
+	})
 	return nil
+}
+
+// Adoption must read creation history before replacing it with snapshots.
+func checkAdoptionCommentDisplay(t *testing.T, backend Backend) {
+	ctx := t.Context()
+	store := backend.Open(t)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	project, err := store.CreateProject(ctx, "adoption-display-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Adopt display", Author: "actor"})
+	require.NoError(t, err)
+	wantRouting := map[string]string{}
+	for _, route := range []string{"", "route"} {
+		comment, _, err := store.CreateComment(db.WithEventTeammate(ctx, "writer"), db.CreateCommentParams{
+			IssueID: issue.ID, Author: "actor", Teammate: route, Body: "Original",
+		})
+		require.NoError(t, err)
+		wantRouting[comment.UID] = route
+		_, _, changed, err := store.EditComment(db.WithEventTeammate(ctx, "editor"), db.EditCommentParams{
+			IssueID: issue.ID, CommentUID: comment.UID, Actor: "other", Body: "Edited",
+		})
+		require.NoError(t, err)
+		require.True(t, changed)
+	}
+	assertComments := func(comments []db.Comment) {
+		t.Helper()
+		require.Len(t, comments, 2)
+		for _, comment := range comments {
+			route, ok := wantRouting[comment.UID]
+			require.True(t, ok)
+			assert.Equal(t, "actor", comment.Author)
+			assert.Equal(t, route, comment.Teammate)
+			assert.Equal(t, "Edited", comment.Body)
+			if assert.NotNil(t, comment.AttributedTeammate) {
+				assert.Equal(t, "writer", *comment.AttributedTeammate, "comment %s routing %q", comment.UID, route)
+			}
+		}
+	}
+	before, err := store.CommentsByIssue(ctx, issue.ID)
+	require.NoError(t, err)
+	assertComments(before)
+	adopted, err := store.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
+		ProjectID: project.ID, HubURL: "https://hub.example", HubProjectID: 42,
+		HubProjectUID: "01ARZ3NDEKTSV4RRFFQ69G5FAB", Actor: "operator",
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), adopted.AdoptionSnapshotCount)
+	events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Limit: 100})
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	require.Equal(t, "issue.snapshot", events[0].Type)
+	var document struct {
+		Comments []struct {
+			UID                string  `json:"comment_uid"`
+			Author             string  `json:"author"`
+			Teammate           string  `json:"teammate"`
+			AttributedTeammate *string `json:"attributed_teammate"`
+			Body               string  `json:"body"`
+		} `json:"comments"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(events[0].Payload), &document))
+	var snapshotComments []db.Comment
+	for _, comment := range document.Comments {
+		snapshotComments = append(snapshotComments, db.Comment{
+			UID: comment.UID, Author: comment.Author, Teammate: comment.Teammate,
+			AttributedTeammate: comment.AttributedTeammate, Body: comment.Body,
+		})
+	}
+	assertComments(snapshotComments)
+	after, err := store.CommentsByIssue(ctx, issue.ID)
+	require.NoError(t, err)
+	assertComments(after)
+
+	// Replay only the adoption snapshot, without any creation or edit events.
+	restored := backend.Open(t)
+	t.Cleanup(func() { require.NoError(t, restored.Close()) })
+	target, err := restored.CreateProject(ctx, "adoption-snapshot-project")
+	require.NoError(t, err)
+	_, err = restored.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: target.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: target.UID, Enabled: true})
+	require.NoError(t, err)
+	remote := newRemoteEvent(t, target, &issue.UID, "issue.snapshot", "operator", "01DDDDDDDDDDDDDDDDDDDDDDDD", 1, jsontext.Value(events[0].Payload))
+	_, err = restored.InsertRemoteEvent(ctx, target.ID, remote)
+	require.NoError(t, err)
+	require.NoError(t, restored.MaterializeFederatedProject(ctx, target.ID))
+	restoredIssue, err := restored.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	comments, err := restored.CommentsByIssue(ctx, restoredIssue.ID)
+	require.NoError(t, err)
+	assertComments(comments)
 }
