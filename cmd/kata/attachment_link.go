@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -34,23 +36,9 @@ func newAttachmentLinkCmd() *cobra.Command {
 		}
 		actor, _ := resolveActor(ctx, flags.As, nil)
 		input.Actor = &actor
-		apiClient, err := kataclient.NewWithHTTPClient(base, hc)
+		out, err := linkAttachmentCLI(ctx, hc, base, pid, ref.RefForAPI, input)
 		if err != nil {
 			return err
-		}
-		response, callErr := apiClient.LinkAttachmentWithResponse(ctx, &generated.LinkAttachmentRequestOptions{
-			PathParams: &generated.LinkAttachmentPath{ProjectID: pid, Ref: ref.RefForAPI},
-			Body:       &input,
-		})
-		if response == nil {
-			return externalCLITransportError(response, callErr)
-		}
-		if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
-			return err
-		}
-		out := response.JSON200
-		if out == nil {
-			return fmt.Errorf("link attachment: empty response")
 		}
 		if currentOutputMode() == outputJSON {
 			return emitJSON(cmd.OutOrStdout(), out)
@@ -63,6 +51,27 @@ func newAttachmentLinkCmd() *cobra.Command {
 	}}
 	cmd.Flags().StringVar(&version, "version", "", "immutable content-version UUID (defaults to current version)")
 	return cmd
+}
+
+func linkAttachmentCLI(ctx context.Context, hc *http.Client, base string, pid int64, ref string, input generated.LinkAttachmentBody) (*generated.LinkAttachmentResponse, error) {
+	apiClient, err := kataclient.NewWithHTTPClient(base, hc)
+	if err != nil {
+		return nil, err
+	}
+	response, callErr := apiClient.LinkAttachmentWithResponse(ctx, &generated.LinkAttachmentRequestOptions{
+		PathParams: &generated.LinkAttachmentPath{ProjectID: pid, Ref: ref},
+		Body:       &input,
+	})
+	if response == nil {
+		return nil, externalCLITransportError(response, callErr)
+	}
+	if err := externalCLIResponseError(response.StatusCode, response.Body, callErr); err != nil {
+		return nil, err
+	}
+	if response.JSON200 == nil {
+		return nil, fmt.Errorf("link attachment: empty response")
+	}
+	return response.JSON200, nil
 }
 
 func parseDocbankSelector(file string) (generated.LinkAttachmentBody, error) {

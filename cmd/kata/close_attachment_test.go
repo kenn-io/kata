@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/docbank/docbanktest"
 	"go.kenn.io/kata/internal/metadata"
 )
 
@@ -159,4 +160,8 @@ func TestCloseAttachmentAgentOutputKeepsEvidenceID(t *testing.T) {
 	out, err := executeCloseAttachmentCLI(t, env.URL, "close", ref, "--done", "-m", attachmentCloseMessage, "--docbank", "42", "--agent")
 	require.NoError(t, err, out)
 	require.Contains(t, out, "Evidence: attachment:")
+}
+
+func seedCLILink(f *docbanktest.Fake) {
+	f.Seed("/reports/report.pdf", docbanktest.Node{ID: 42, Name: "report.pdf", Kind: "file", CurrentVersionID: cliLinkVersion}, docbanktest.Version{ID: cliLinkVersion, NodeID: 42, Size: 12, MediaType: "application/pdf"})
 }
