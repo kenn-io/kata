@@ -48,6 +48,7 @@ func TestNativeCronMigrationPreservesVersion30(t *testing.T) {
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
+	dropMCPEventSubscriptionsSchema(ctx, t, admin, schema)
 	dropCommentReplySchema(ctx, t, admin, schema)
 	dropProjectAccessSchema(ctx, t, admin, schema)
 	dropNativeCronSchema(ctx, t, admin, schema)

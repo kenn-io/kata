@@ -61,6 +61,7 @@ nav = [
     {"Federation" = "operations/federation.md"},
     {"Federation request signing" = "operations/federation-signing.md"},
     {"Agent orchestration" = "operations/agent-orchestration.md"},
+    {"MCP Events webhooks" = "operations/mcp-events.md"},
     {"Hosted mode" = "operations/hosted-mode.md"},
     {"Containers" = "operations/containers.md"},
     {"PostgreSQL" = "operations/postgres.md"},

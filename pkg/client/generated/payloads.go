@@ -28,6 +28,10 @@ type ConfigureFederationSigningBody = ConfigureFederationSigningRequestBody
 
 type RepinFederationRootKeyBody = RepinFederationRootKeyRequestBody
 
+type McpEventsSubscribeBody = MCPEventsSubscribeBody
+
+type McpEventsUnsubscribeBody = MCPEventsUnsubscribeBody
+
 type InitProjectBody = InitProjectRequestBody
 
 type ResolveProjectBody = ResolveProjectRequestBody

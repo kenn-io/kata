@@ -1571,6 +1571,10 @@ func runDaemonProcess(
 			rec.Metadata["mcp"] = "unavailable"
 		}
 	}
+
+	// Start the Events worker only after the last fallible startup step, so an
+	// earlier failure cannot leave it running past the store closing.
+	mcpEvents, mcpEventsReason := startDaemonMCPEvents(ctx, workers, dcfg, ns.DBHash, store, broadcaster, daemonLog)
 	srv := daemon.NewServer(daemon.ServerConfig{
 		MCPHandler:                mcpHandler,
 		FederationSigning:         signingVerifier,
@@ -1582,6 +1586,8 @@ func runDaemonProcess(
 		Endpoint:                  &endpoint,
 		Hooks:                     disp,
 		Broadcaster:               broadcaster,
+		MCPEvents:                 mcpEvents,
+		MCPEventsDisabledReason:   mcpEventsReason,
 		FederationWake:            federationWake,
 		EmbeddingWake:             embeddingWake,
 		FederationCatalog:         append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),

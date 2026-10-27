@@ -4307,6 +4307,233 @@ components:
         - tokens
         - observed_at
       type: object
+    MCPEventsArguments:
+      additionalProperties: false
+      properties:
+        for:
+          type: string
+        issue_uid:
+          type: string
+        project_uids:
+          items:
+            type: string
+          type: array
+      required:
+        - for
+      type: object
+    MCPEventsDelivery:
+      additionalProperties: false
+      properties:
+        mode:
+          type: string
+        secret:
+          type: string
+        url:
+          type: string
+      required:
+        - mode
+        - url
+      type: object
+    MCPEventsDeliveryStatus:
+      additionalProperties: true
+      properties:
+        active:
+          type: boolean
+        failed_since:
+          format: date-time
+          type: string
+        last_delivery_at:
+          format: date-time
+          type: string
+        last_error:
+          type: string
+      required:
+        - active
+      type: object
+    MCPEventsEventDefinition:
+      additionalProperties: true
+      properties:
+        delivery:
+          items:
+            type: string
+          type: array
+        description:
+          type: string
+        input_schema:
+          additionalProperties: true
+          type: object
+        name:
+          type: string
+        payload_schema:
+          additionalProperties: true
+          type: object
+      required:
+        - name
+        - description
+        - delivery
+        - input_schema
+        - payload_schema
+      type: object
+    MCPEventsForwarderScope:
+      additionalProperties: false
+      properties:
+        all:
+          type: boolean
+        projects:
+          items:
+            type: string
+          type: array
+      type: object
+    MCPEventsListResponseBody:
+      additionalProperties: true
+      properties:
+        events:
+          items:
+            $ref: "#/components/schemas/MCPEventsEventDefinition"
+          type: array
+      required:
+        - events
+      type: object
+    MCPEventsSubscribeBody:
+      additionalProperties: false
+      properties:
+        arguments:
+          $ref: "#/components/schemas/MCPEventsArguments"
+        cursor:
+          type: string
+        delivery:
+          $ref: "#/components/schemas/MCPEventsDelivery"
+        forwarder_scope:
+          $ref: "#/components/schemas/MCPEventsForwarderScope"
+        max_age_ms:
+          format: int64
+          type: integer
+        name:
+          type: string
+        no_expiry:
+          type: boolean
+        ttl_ms:
+          format: int64
+          type: integer
+      required:
+        - name
+        - arguments
+        - delivery
+      type: object
+    MCPEventsSubscribeResponseBody:
+      additionalProperties: true
+      properties:
+        cursor:
+          type: string
+        delivery_status:
+          $ref: "#/components/schemas/MCPEventsDeliveryStatus"
+        id:
+          type: string
+        refresh_before:
+          format: date-time
+          type:
+            - string
+            - "null"
+        truncated:
+          type: boolean
+      required:
+        - id
+        - refresh_before
+        - cursor
+        - truncated
+        - delivery_status
+      type: object
+    MCPEventsSubscriptionStatus:
+      additionalProperties: true
+      properties:
+        continuity_generation:
+          format: int64
+          type: integer
+        cursor:
+          type: string
+        dead_letter_count:
+          format: int64
+          type: integer
+        delivery:
+          $ref: "#/components/schemas/MCPEventsDeliveryStatus"
+        end_reason:
+          type: string
+        failed_attempts:
+          format: int64
+          type: integer
+        gap_unacked:
+          type: boolean
+        id:
+          type: string
+        issue_uid:
+          type: string
+        name:
+          type: string
+        pending_control:
+          type: string
+        project_uids:
+          items:
+            type: string
+          type: array
+        recipient:
+          type: string
+        refresh_before:
+          format: date-time
+          type:
+            - string
+            - "null"
+        state:
+          type: string
+      required:
+        - id
+        - name
+        - recipient
+        - state
+        - refresh_before
+        - cursor
+        - continuity_generation
+        - gap_unacked
+        - delivery
+        - failed_attempts
+        - dead_letter_count
+      type: object
+    MCPEventsSubscriptionsResponseBody:
+      additionalProperties: true
+      properties:
+        enabled:
+          type: boolean
+        reason:
+          type: string
+        subscriptions:
+          items:
+            $ref: "#/components/schemas/MCPEventsSubscriptionStatus"
+          type: array
+      required:
+        - enabled
+        - subscriptions
+      type: object
+    MCPEventsUnsubscribeBody:
+      additionalProperties: false
+      properties:
+        arguments:
+          $ref: "#/components/schemas/MCPEventsArguments"
+        delivery:
+          $ref: "#/components/schemas/MCPEventsDelivery"
+        name:
+          type: string
+      required:
+        - name
+        - arguments
+        - delivery
+      type: object
+    MCPEventsUnsubscribeResponseBody:
+      additionalProperties: true
+      properties:
+        unsubscribed:
+          type: boolean
+      required:
+        - unsubscribed
+      type: object
     MapConnectorFieldRequestBody:
       additionalProperties: false
       properties:
@@ -8019,6 +8246,86 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
+  /api/v1/mcp-events/list:
+    post:
+      operationId: mcpEventsList
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MCPEventsListResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+      summary: List the MCP Events this daemon can deliver
+  /api/v1/mcp-events/subscribe:
+    post:
+      operationId: mcpEventsSubscribe
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MCPEventsSubscribeBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MCPEventsSubscribeResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+      summary: Create or refresh an MCP Events webhook subscription
+  /api/v1/mcp-events/subscriptions:
+    get:
+      operationId: mcpEventSubscriptions
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MCPEventsSubscriptionsResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+      summary: List the caller's MCP Events subscriptions and whether Events is running
+  /api/v1/mcp-events/unsubscribe:
+    post:
+      operationId: mcpEventsUnsubscribe
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MCPEventsUnsubscribeBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MCPEventsUnsubscribeResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+      summary: End an MCP Events webhook subscription
   /api/v1/ping:
     get:
       operationId: ping
