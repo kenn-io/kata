@@ -962,9 +962,15 @@ the reply was posted. Use it for
 pre-federation content redaction; it does not rewrite historical events that
 have already been shared.
 
-Human views show attributed comments as `author / teammate`. JSON and agent
-output keep the two fields separate. Teammate-free comments retain the
-existing author-only shape.
+`kata show`, `kata events`, TUI history and comments, and web history and
+comments show retained contribution as `actor / teammate`. A comment keeps its
+original creation contributor after an edit, retry, refresh, or snapshot restore.
+Legacy comments use their explicit teammate when no retained contribution exists.
+
+JSON and agent output expose display contribution as `attributed_teammate`.
+The existing comment `teammate` remains the routing identity used by inbound
+filters, duplicate-reply checks, and notifications. Display contribution does
+not change those outcomes; missing or malformed display values show no suffix.
 
 Close:
 

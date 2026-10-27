@@ -355,7 +355,13 @@ export KATA_TEAMMATE=teammate-1
 export KATA_INBOX_USER=coordinator/teammate-1
 ```
 
-`KATA_TEAMMATE` selects request contribution for CLI issue mutations; see
+History shows each action's retained contributor beside the accountable actor.
+Comments keep their creation contributor after edits. This label does not
+select an inbox or change reply routing; see
+[comment attribution](../reference/cli.md#issue-lifecycle).
+
+`KATA_TEAMMATE` selects request contribution for CLI issue mutations, including
+comments and newly created issues; see
 [request contribution](../reference/http-api.md#request-contribution).
 `KATA_INBOX_USER` only selects the exact inbox to read. It does not change the
 actor or set attribution.

@@ -59,15 +59,21 @@ func (in *UISnapshotRequest) Resolve(ctx huma.Context) []error {
 	return nil
 }
 
+// UIHistoryEvent adds read-only display data without changing the stored event.
+type UIHistoryEvent struct {
+	db.Event
+	AttributedTeammate string `json:"attributed_teammate,omitempty"`
+}
+
 // UISelectedAuthority is the selected issue and its authoritative detail.
 type UISelectedAuthority struct {
-	State       string          `json:"state"`
-	Issue       *db.UIIssue     `json:"issue,omitempty"`
-	Comments    []CommentOut    `json:"comments"`
-	Labels      []db.IssueLabel `json:"labels"`
-	Links       []db.UILink     `json:"links"`
-	Recurrences []db.Recurrence `json:"recurrences"`
-	History     []db.Event      `json:"history"`
+	State       string           `json:"state"`
+	Issue       *db.UIIssue      `json:"issue,omitempty"`
+	Comments    []CommentOut     `json:"comments"`
+	Labels      []db.IssueLabel  `json:"labels"`
+	Links       []db.UILink      `json:"links"`
+	Recurrences []db.Recurrence  `json:"recurrences"`
+	History     []UIHistoryEvent `json:"history"`
 }
 
 // UIGraph is the optional relationship projection for the selected intent.

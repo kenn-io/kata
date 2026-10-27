@@ -124,6 +124,26 @@ describe('projectIssueDetail', () => {
     expect(acceptCanonicalWire).toBeTypeOf('function')
   })
 
+  it('keeps display contribution separate from routing through projection', () => {
+    const model = projectIssueDetail({
+      issue: { uid: '01TASK', title: 'Review', status: 'open' },
+      comments: [
+        {
+          id: 1,
+          author: 'actor',
+          teammate: 'route',
+          attributed_teammate: 'writer',
+          body: 'Edited',
+          created_at: '2026-09-13T12:00:00Z',
+        },
+      ],
+    })
+    expect(model.comments[0]).toMatchObject({
+      teammate: 'route',
+      attributedTeammate: 'writer',
+    })
+  })
+
   it('projects an optional teammate without inventing one for legacy comments', () => {
     const model = projectIssueDetail({
       issue: { uid: '01TASK', title: 'Review retries', status: 'open' },

@@ -1712,7 +1712,24 @@ func federationIssueComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]
 		}
 		out = append(out, comment)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	display, err := db.CommentDisplayContributionsTx(ctx, tx, issueID, func(int) string { return "?" })
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		value, found := display[out[i].CommentUID]
+		if !found {
+			value = db.LegacyDisplayContribution(out[i].Teammate)
+		}
+		out[i].AttributedTeammate = &value
+	}
+	return out, nil
 }
 
 func federationIssueRecurrenceUID(ctx context.Context, tx *sql.Tx, recurrenceID *int64) (string, error) {

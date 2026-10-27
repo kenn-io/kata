@@ -50,6 +50,7 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "comment display contribution", runWithBackend: checkCommentDisplayContribution},
 	{name: "event teammate", runWithBackend: checkEventTeammate},
 	{name: "setup finished delivery", methods: []string{"PrepareSetupFinished", "CompleteSetupFinished", "SystemProject", "CloseIssue", "SoftDeleteIssue", "RemoveProject"}, runWithBackend: checkSetupFinishedDelivery},
 	{name: "comment graph project access", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "MoveIssueProject", "ReadCommentGraph"}, run: checkCommentGraphProjectAccess},

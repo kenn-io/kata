@@ -84,12 +84,18 @@ func (s *Store) LookupCommentIdempotency(
 	key string,
 	since time.Time,
 ) (*db.CommentIdempotencyMatch, error) {
+	tx, err := s.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	query := eventSelect + ` WHERE e.type = 'issue.commented'
       AND e.issue_uid = $1
       AND e.payload::jsonb ->> 'idempotency_key' = $2
       AND e.created_at >= $3
       ORDER BY e.id DESC LIMIT 1`
-	event, err := scanEvent(s.QueryRowContext(ctx, query, issueUID, key, formatStoredTime(since)))
+	event, err := scanEvent(tx.QueryRowContext(ctx, query, issueUID, key, formatStoredTime(since)))
 	if errors.Is(err, db.ErrNotFound) {
 		return nil, nil
 	}
@@ -106,10 +112,16 @@ func (s *Store) LookupCommentIdempotency(
 	if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
 		return nil, fmt.Errorf("decode comment idempotency payload: %w", err)
 	}
-	comment, err := scanComment(s.QueryRowContext(ctx,
+	comment, err := scanComment(tx.QueryRowContext(ctx,
 		commentSelect+` WHERE issue_id = $1 AND uid = $2`, *event.IssueID, payload.CommentUID))
 	if err != nil {
 		return nil, fmt.Errorf("comment idempotency match comment: %w", err)
+	}
+	if err := db.HydrateCommentDisplayTx(ctx, tx, []*db.Comment{&comment}, dollarPlaceholder); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 	return &db.CommentIdempotencyMatch{
 		Comment: comment, IssueUID: *event.IssueUID,

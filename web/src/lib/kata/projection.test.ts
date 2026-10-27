@@ -152,6 +152,21 @@ describe('normalizeKataUISnapshot', () => {
     }
   })
 
+  test('retains separate comment and history display fields after accepting a snapshot', () => {
+    const wire = snapshot()
+    Object.assign(wire.selected!.comments![0]!, {
+      teammate: 'route',
+      attributed_teammate: 'writer',
+    })
+    Object.assign(wire.selected!.history![0]!, { attributed_teammate: 'writer' })
+    const projection = normalizeKataUISnapshot(wire, '2026-08-01T12:30:00.000Z')
+    expect(projection.selected_detail?.comments[0]).toMatchObject({
+      teammate: 'route',
+      attributed_teammate: 'writer',
+    })
+    expect(projection.selected_history[0]).toMatchObject({ attributed_teammate: 'writer' })
+  })
+
   test.each(['verified', 'pending', 'legacy'] as const)(
     'retains %s creation projections in accepted snapshots',
     (verification) => {

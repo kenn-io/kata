@@ -249,6 +249,18 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(st
 		}
 		data.Targets[targetUID] = state
 	}
+	comments := make([]*Comment, 0, len(data.Comments)+len(data.Targets))
+	for index := range data.Comments {
+		comments = append(comments, &data.Comments[index].Comment)
+	}
+	for _, target := range data.Targets {
+		if target.Record != nil {
+			comments = append(comments, &target.Record.Comment)
+		}
+	}
+	if err := HydrateCommentDisplayTx(ctx, tx, comments, bind); err != nil {
+		return data, err
+	}
 	return data, nil
 }
 

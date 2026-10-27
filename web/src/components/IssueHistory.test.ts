@@ -21,6 +21,16 @@ function event(uid: string, created_at: string): KataTaskEvent {
 describe('IssueHistory', () => {
   afterEach(cleanup)
 
+  it('prefixes retained contribution on the existing description line', () => {
+    const { container } = render(IssueHistory, {
+      props: {
+        events: [{ ...event('display', '2026-08-01T12:00:00Z'), attributed_teammate: 'writer' }],
+      },
+    })
+    expect(container.querySelector('.event-label')?.textContent).toContain('user-a / writer')
+    expect(container.querySelectorAll('.event-row')).toHaveLength(1)
+  })
+
   it.each([
     ['pi', '00000000-0000-4000-8000-000000000001'],
     ['opencode', 'ses_0123456789AbCd'],
