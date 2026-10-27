@@ -200,10 +200,11 @@ export default function kataHooks(pi) {
       return result.code === 0 && !result.killed;
     } catch { return false; /* Attention is best effort and never emits model context. */ }
   }
-  function attentionIdentity(ref, server) {
+  function attentionIdentity(ref, server, cwd) {
     // Mirrors attentionRef: a ref the CLI ignores never claims ownership.
+    // Without KATA_SERVER, the workspace chooses the daemon and project.
     ref = ref.trim();
-    return !ref || ref.startsWith("-") ? "" : JSON.stringify({ ref, server });
+    return !ref || ref.startsWith("-") ? "" : JSON.stringify({ ref, server, cwd });
   }
   async function transition(mode, baseline) {
     const pending = { mode };
@@ -233,7 +234,7 @@ export default function kataHooks(pi) {
       const previous = registry.active.get(cwd);
       const ref = process.env.KATA_REF || "";
       const baseline = previous?.id === id && !previous.ended ? previous :
-        { id, cwd, executable: options.executable, ref, identity: attentionIdentity(ref, process.env.KATA_SERVER || ""),
+        { id, cwd, executable: options.executable, ref, identity: attentionIdentity(ref, process.env.KATA_SERVER || "", cwd),
           started: false, startAttempted: false, ended: false };
       if (baseline.started || baseline.pending) return;
       registry.active.set(cwd, baseline);
@@ -250,7 +251,8 @@ export default function kataHooks(pi) {
         await pending.promise;
         if (pending.mode === "end") return;
       }
-      if (!baseline.startAttempted || !selected(ctx, "attention") || registry.active.get(baseline.cwd) !== baseline || baseline.ended || baseline.pending) return;
+      // Baselines retained from an earlier adapter record only started.
+      if ((!baseline.started && !baseline.startAttempted) || !selected(ctx, "attention") || registry.active.get(baseline.cwd) !== baseline || baseline.ended || baseline.pending) return;
       await transition("end", baseline);
     });
   }

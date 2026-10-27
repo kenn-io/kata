@@ -334,6 +334,28 @@ func TestPiNativeAttentionCleansUpLostStartResponse(t *testing.T) {
 	}
 }
 
+func TestPiNativeAttentionEndsBaselineFromPreviousAdapter(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node is required for native Pi execution fixture")
+	}
+	opts := piTestOptions(t)
+	opts.Contract = false
+	opts.Attention = true
+	plan, err := planPiAgentHooks(opts, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extension := filepath.Join(t.TempDir(), "extension.mjs")
+	if err := os.WriteFile(extension, plan.Changes[0].Content, 0600); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(node, "testdata/agent-hooks/pi-upgraded-baseline.mjs", extension, opts.Dir) //nolint:gosec // G204: fixed fixture executes the generated adapter over a retained baseline.
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("Pi attention end after adapter upgrade: %v\n%s", err, output)
+	}
+}
+
 func FuzzPiNativeOwnershipRejectsEdits(f *testing.F) {
 	f.Add("// changed\n")
 	f.Add("\x00")

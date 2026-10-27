@@ -8,7 +8,7 @@ const handlers = new Map(), calls = [];
 let session = 'session-A', pending;
 const result = {code: 0, killed: false, stdout: '', stderr: ''};
 function issueIdentity(ref) {
-  return JSON.stringify({ref, server: process.env.KATA_SERVER || ''});
+  return JSON.stringify({ref, server: process.env.KATA_SERVER || '', cwd: path.resolve(cwd)});
 }
 const pi = {
   on(name, handler) {

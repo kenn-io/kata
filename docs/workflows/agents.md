@@ -211,10 +211,12 @@ kata agent-hook install muse --managed-attention
 kata agent-hook status pi --json
 ```
 
-A pi child with the same `KATA_REF` and `KATA_SERVER` as its lead leaves
-attention to the lead, so the child does not mark the lead's issue as needing a
-human. The refs must match exactly: `abc4` and `spoke-project#abc4` count as
-different issues. A child with a different ref tracks its own attention. Rerun
+A pi child in the lead's working directory with the same `KATA_REF` and
+`KATA_SERVER` leaves attention to the lead, so the child does not mark the
+lead's issue as needing a human. The refs must match exactly: `abc4` and
+`spoke-project#abc4` count as different issues. A child with a different ref
+or directory tracks its own attention, because another directory can select a
+different daemon or project. Rerun
 `kata agent-hook install pi` and restart pi to pick up the fix.
 
 Protection requires inheriting the lead's `KATA_ATTENTION_HOST` marker after

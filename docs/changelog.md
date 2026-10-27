@@ -37,9 +37,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
   record has a process identity Kata can't check. Discovery previously skipped
   it and auto-started a second daemon, which then refused to start beside it.
   `stop`, `restart`, `reload`, and `update` still skip such a record.
-- Keep attention on the lead when a pi child inherits the lead's `KATA_REF`
-  and `KATA_SERVER`, so the child no longer marks the lead's issue as needing
-  a human. Rerun `kata agent-hook install pi` and restart pi to pick up the fix.
+- Keep attention on the lead when a pi child runs in the lead's directory and
+  inherits its `KATA_REF` and `KATA_SERVER`, so the child no longer marks the
+  lead's issue as needing a human. Rerun `kata agent-hook install pi` and restart pi to pick up the fix.
 
 - List the daemon catalog from Go with `client.DaemonCatalog()`, and connect
   to an entry by name with `client.DiscoverOptions{Daemon: name}`, which

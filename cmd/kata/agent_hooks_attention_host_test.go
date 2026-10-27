@@ -127,11 +127,17 @@ func TestPiChildWithDifferentRefTracksOwnIssue(t *testing.T) {
 	testPiChildAttention(t, "lead-ref", "other-ref", "https://daemon.example", "https://daemon.example")
 }
 
+// Without KATA_SERVER, the workspace config chooses the daemon and the
+// project for a bare ref, so a child elsewhere may track another issue.
+func TestPiChildInDifferentDirectoryTracksOwnIssue(t *testing.T) {
+	testPiChildAttention(t, "lead-ref", "lead-ref", "", "", "nested")
+}
+
 func TestPiChildWithSameIssueOnDifferentDaemonTracksOwnIssue(t *testing.T) {
 	testPiChildAttention(t, "lead-ref", "lead-ref", "https://daemon-one.example", "https://daemon-two.example")
 }
 
-func testPiChildAttention(t *testing.T, leadRef, childRef, leadServer, childServer string) {
+func testPiChildAttention(t *testing.T, leadRef, childRef, leadServer, childServer string, childSubdir ...string) {
 	t.Helper()
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -147,7 +153,7 @@ func testPiChildAttention(t *testing.T, leadRef, childRef, leadServer, childServ
 	if err := os.WriteFile(extension, plan.Changes[0].Content, 0600); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(node, "testdata/agent-hooks/pi-child.mjs", extension, opts.Dir, leadRef, childRef, leadServer, childServer) //nolint:gosec // G204: fixed fixture executes a generated adapter in temporary directories.
+	command := exec.Command(node, append([]string{"testdata/agent-hooks/pi-child.mjs", extension, opts.Dir, leadRef, childRef, leadServer, childServer}, childSubdir...)...) //nolint:gosec // G204: fixed fixture executes a generated adapter in temporary directories.
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("Pi child attention: %v\n%s", err, output)
 	}
