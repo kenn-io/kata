@@ -348,9 +348,36 @@ func (dm detailModel) applyFetchedIfFresh(msg tea.Msg) (detailModel, bool) {
 		}
 		dm.fetchSeq.comments = newestDetailFetchSeq(dm.fetchSeq.comments, m.requestSeq)
 		dm.commentsLoading = false
-		dm.comments = m.comments
+		selectedUID := ""
+		if dm.activeTab == tabComments && dm.tabCursor >= 0 && dm.tabCursor < len(dm.comments) {
+			selectedUID = dm.comments[dm.tabCursor].UID
+		}
+		wasVisible := false
+		if selectedUID != "" && dm.detailFocus == focusActivity && dm.selectedCommentUID == "" {
+			if width, visible, ok := dm.viewportDims(); ok {
+				_, anchors := dm.detailDocumentLines(width, dm.scrollChrome())
+				wasVisible = anchors.tabCursor >= dm.scroll && anchors.tabCursor < dm.scroll+visible
+			}
+		}
+		dm.comments = threadOrder(m.comments)
+		selectedFound := false
+		if selectedUID != "" {
+			for i, comment := range dm.comments {
+				if comment.UID == selectedUID {
+					dm.tabCursor = i
+					selectedFound = true
+					break
+				}
+			}
+		}
+		if dm.activeTab == tabComments && dm.tabCursor >= len(dm.comments) {
+			dm.tabCursor = max(0, len(dm.comments)-1)
+		}
 		dm.commentsErr = m.err
 		dm = dm.autoSelectActivityTab()
+		if wasVisible && selectedFound && m.err == nil {
+			dm = dm.revealCursor()
+		}
 	case eventsFetchedMsg:
 		if m.gen != dm.gen || detailFetchResultIsOlder(m.requestSeq, dm.fetchSeq.events) {
 			return dm, false

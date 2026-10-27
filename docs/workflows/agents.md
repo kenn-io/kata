@@ -622,6 +622,11 @@ the existing comment navigation pattern; the Web UI uses keyboard-accessible,
 labelled controls with names such as “Show 2 confirmation replies”. Text carries
 the meaning. Symbols and theme colors may supplement the text.
 
+The TUI nests local replies beneath their targets and shows `confirm` and
+`refute` tags for visible direct assertions. Both tags remain visible when the
+assertions conflict; neither chooses a winner. A tag says `(before edit)` when
+all of its corresponding assertions predate the target's edit.
+
 Kata filters links by authorization before counting or rendering. Counts
 include only directly linked comments the reader may access. If the authorized
 list is incomplete or paginated, use the server's authorized total when
