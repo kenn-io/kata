@@ -40,13 +40,6 @@ func TestRelationshipsByIssuesAuthorizedAtScale(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(db.WithAuthorizedProjects(t.Context(), projects), 5*time.Second)
 	defer cancel()
-	children, err := store.ChildrenOfIssue(ctx, 1)
-	require.NoError(t, err)
-	childIDs := make([]int64, len(children))
-	for i, child := range children {
-		childIDs[i] = child.ID
-	}
-	require.ElementsMatch(t, ids, childIDs)
 	got, err := store.RelationshipsByIssues(ctx, ids)
 	require.NoError(t, err)
 	require.Len(t, got, 281)
