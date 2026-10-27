@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-30
+last_edited: 2026-11-02
 ---
 
 # Agent workflows
@@ -355,7 +355,8 @@ export KATA_TEAMMATE=teammate-1
 export KATA_INBOX_USER=coordinator/teammate-1
 ```
 
-`KATA_TEAMMATE` attributes comments and newly created issues.
+`KATA_TEAMMATE` selects request contribution for CLI issue mutations; see
+[request contribution](../reference/http-api.md#request-contribution).
 `KATA_INBOX_USER` only selects the exact inbox to read. It does not change the
 actor or set attribution.
 
@@ -452,8 +453,8 @@ for the supported forms and the
 ## Teammate heads-up
 
 A teammate is a temporary participant working under an existing actor's
-identity. Several teammates can comment on the same issue while recording
-who contributed each comment. A teammate can also create a tracked child issue:
+identity. Several teammates can work on the same issue while recording
+who contributed each requested CLI action. A teammate can also create a tracked child issue:
 
 ```sh
 export KATA_TEAMMATE=teammate-1

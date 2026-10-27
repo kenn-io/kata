@@ -3950,3 +3950,108 @@ func TestDaemonControlsSkipUnknownRecord(t *testing.T) {
 		})
 	}
 }
+
+// Daemon startup must isolate background contribution while preserving context and HTTP selection.
+func TestDaemonLaunchContributionDoesNotReachBackgroundSync(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	t.Setenv("PORT", "")
+	t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
+	t.Setenv("KATA_TEAMMATE", "launch-worker")
+	store, project, binding := newDaemonGitHubSyncStore(t)
+	t.Setenv("KATA_DB", store.Path())
+	require.NoError(t, store.Close())
+	fetcher := newDaemonGitHubSyncFetcher(binding)
+	fetcher.issues = []githubsync.Issue{daemonGitHubSyncIssue(101, 1, "Background imported issue")}
+	imported := make(chan db.Event, 1)
+	started := make(chan context.Context, 1)
+	originalRunner, originalTelemetry := newGitHubSyncDaemonRunner, newTelemetryReporter
+	newTelemetryReporter = func(telemetry.Options) telemetry.Client { return &fakeTelemetryReporter{} }
+	newGitHubSyncDaemonRunner = func(cfg githubsync.RunnerConfig) issueSyncDaemonRunner {
+		cfg.Fetcher = fetcher
+		sink := cfg.EventSinkFrom
+		cfg.EventSinkFrom = func(ctx context.Context, pid int64, events []db.Event, fork activity.Admission) error {
+			if err := sink(ctx, pid, events, fork); err != nil {
+				return err
+			}
+			for _, event := range events {
+				if event.Type == "issue.created" {
+					select {
+					case imported <- event:
+					default:
+					}
+				}
+			}
+			return nil
+		}
+		return &contributionSyncRunner{Runner: githubsync.NewRunner(cfg), started: started}
+	}
+	t.Cleanup(func() { newGitHubSyncDaemonRunner, newTelemetryReporter = originalRunner, originalTelemetry })
+	type contextMarker struct{}
+	root := newRootCmd()
+	root.SetContext(context.WithValue(t.Context(), contextMarker{}, "preserved"))
+	require.NoError(t, root.PersistentPreRunE(root, nil))
+	ctx, cancel := context.WithCancel(root.Context())
+	done := make(chan error, 1)
+	go func() { done <- runDaemonProcess(ctx, "127.0.0.1:0", false, true, nil) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("daemon shutdown: %v", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Error("daemon did not stop after cancellation")
+		}
+	})
+	var workerContext context.Context
+	select {
+	case workerContext = <-started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("sync runner did not start")
+	}
+	require.Equal(t, "preserved", workerContext.Value(contextMarker{}))
+	var event db.Event
+	select {
+	case event = <-imported:
+	case <-time.After(10 * time.Second):
+		t.Fatal("background import did not commit")
+	}
+	require.NotContains(t, event.Payload, "attributed_teammate")
+	require.NotNil(t, event.IssueUID)
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	runtimePath, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Path(os.Getpid())
+	require.NoError(t, err)
+	var record daemonRuntimeRecordJSON
+	require.Eventually(t, func() bool {
+		body, err := os.ReadFile(runtimePath)
+		return err == nil && json.Unmarshal(body, &record) == nil
+	}, 5*time.Second, 20*time.Millisecond)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPatch,
+		fmt.Sprintf("http://%s/api/v1/projects/%d/issues/%s", record.Address, project.ID, *event.IssueUID),
+		strings.NewReader(`{"actor":"coordinator","title":"Explicit request"}`))
+	require.NoError(t, err)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Kata-Teammate", "request-worker")
+	response, err := (&http.Client{Timeout: 2 * time.Second}).Do(request)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, response.StatusCode, string(body))
+	require.Contains(t, string(body), `\"attributed_teammate\":\"request-worker\"`)
+	cancel()
+	require.Eventually(t, func() bool { return workerContext.Err() == context.Canceled }, time.Second, time.Millisecond)
+}
+
+type contributionSyncRunner struct {
+	*githubsync.Runner
+	started chan<- context.Context
+}
+
+func (r *contributionSyncRunner) Run(ctx context.Context) error {
+	r.started <- ctx
+	return r.Runner.Run(ctx)
+}

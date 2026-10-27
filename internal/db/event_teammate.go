@@ -9,21 +9,10 @@ import (
 	"go.kenn.io/kata/internal/teammate"
 )
 
-// WithEventTeammate carries display-only contribution to native event writers.
-func WithEventTeammate(ctx context.Context, handle string) context.Context {
-	return teammate.WithRequest(ctx, handle)
-}
-
-// EventTeammateFromContext returns the frozen contribution, if any.
-func EventTeammateFromContext(ctx context.Context) string {
-	handle, _ := teammate.FromRequest(ctx)
-	return handle
-}
-
 // StampEventTeammate appends the display field before native event hashing.
 // Existing payload spelling is retained; imported events never call this helper.
 func StampEventTeammate(ctx context.Context, kind, actor, payload string) (string, error) {
-	handle := EventTeammateFromContext(ctx)
+	handle, _ := teammate.FromRequest(ctx)
 	if handle == "" || actor == "system" || ctx.Value(recurringWriteKey{}) == true || !contributorEvent(kind) {
 		return payload, nil
 	}

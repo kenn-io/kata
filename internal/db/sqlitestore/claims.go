@@ -12,6 +12,7 @@ import (
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/notification"
+
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
