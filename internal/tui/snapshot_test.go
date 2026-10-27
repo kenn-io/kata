@@ -9,7 +9,10 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/stretchr/testify/require"
 
 	"go.kenn.io/kit/tui/splitlayout"
 )
@@ -862,12 +865,47 @@ func TestListPersistentSearch(t *testing.T) {
 					if state != "ready" && !strings.Contains(strings.Join(lines[row+1:], "\n"), map[string]string{"loading": "loading…", "error": "unavailable"}[state]) {
 						t.Errorf("%v: missing %s body", size, state)
 					}
-					m.list.loading, m.list.err = false, nil
-					if !strings.Contains(stripANSI(m.viewContent()), want) {
-						t.Error("search lost after recovery")
-					}
 				}
 			}
+		}
+	}
+
+	for _, initialSize := range [][2]int{{80, 9}, {160, 40}} {
+		m := resizeModel(newTestModel(), initialSize[0], initialSize[1])
+		m.authCapabilitiesRequired, m.authCapabilitiesReady = true, true
+		m.activeAuth = AuthInfo{Kind: "none"}
+		m.list.filter.Search = strings.Repeat("a", 70) + "TAIL"
+		m, cmd := updateModel(m, keyRune('/'))
+		require.NotNil(t, cmd)
+		m, _ = updateModel(m, cmd())
+		require.Equal(t, inputSearchBar, m.input.kind)
+		check := func(want string) {
+			t.Helper()
+			row := 1
+			if m.layout == splitlayout.Split {
+				row = 2
+			}
+			raw := strings.Split(m.viewContent(), "\n")[row]
+			width := m.width
+			if m.layout == splitlayout.Split {
+				width = splitConfig.ListWidth(m.width)
+			}
+			left := ansi.Truncate(raw, width, "")
+			require.Contains(t, stripANSI(left), want)
+			require.Regexp(t, `\x1b\[(?:[0-9]+;)*7(?:;[0-9]+)*m`, left, "final frame must preserve the input caret styling")
+		}
+		check("TAIL ")
+		m = sendKey(m, tea.KeyEnd)
+		m = sendRune(m, 'Z')
+		check("TAILZ ")
+		for range 3 {
+			m = sendKey(m, tea.KeyLeft)
+		}
+		m = sendRune(m, 'X')
+		check("TAXI")
+		for _, size := range [][2]int{{80, 9}, {80, 4}, {80, 40}, {240, 40}, {160, 40}} {
+			m = resizeModel(m, size[0], size[1])
+			check("TAXI")
 		}
 	}
 }

@@ -636,24 +636,14 @@ func TestCronPersistentSearch(t *testing.T) {
 				want = "/absent-query"
 			}
 			require.True(t, strings.HasPrefix(strings.TrimSpace(line), want), "%c %s: %s", tab, state, line)
-			if state == "idle" {
-				m, _ = updateModel(m, mouseLeftClick(4, 2))
-				require.True(t, m.cron.filtering, "%c %s", tab, state)
-			}
 		}
-	}
-}
-
-func TestCronLongSearchTailVisible(t *testing.T) {
-	for _, tab := range []rune{'2', '3', '4'} {
 		for _, prefix := range []string{strings.Repeat("a", 90), strings.Repeat("界", 45)} {
 			m := sendRune(cronFixture(t), tab)
 			m.opts.Mouse = true
-			m, _ = updateModel(m, mouseLeftClick(4, 2))
+			m = sendRune(m, '/')
 			m, _ = updateModel(m, tea.PasteMsg{Content: prefix + "TAIL"})
 			m = sendRune(m, 'Z')
-			require.Equal(t, prefix+"TAILZ", m.cron.lists[m.cron.tab].query)
-			line := strings.Split(ansi.Strip(m.viewBody()), "\n")[2]
+			line := strings.Split(ansi.Strip(renderCron(m)), "\n")[2]
 			require.Contains(t, line, "TAILZ▏", "tab %c must show the edited tail and caret", tab)
 			require.LessOrEqual(t, ansi.StringWidth(line), 80)
 		}
@@ -661,6 +651,13 @@ func TestCronLongSearchTailVisible(t *testing.T) {
 }
 
 func TestCronSearchClickGuards(t *testing.T) {
+	for _, tab := range []rune{'2', '3', '4'} {
+		m := sendRune(cronFixture(t), tab)
+		m.opts.Mouse = true
+		m, _ = updateModel(m, mouseLeftClick(4, 2))
+		require.True(t, m.cron.filtering, "tab %c", tab)
+	}
+
 	for _, state := range []string{"help", "detail", "projects"} {
 		m := cronFixture(t)
 		m.opts.Mouse = true

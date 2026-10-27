@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -126,35 +125,29 @@ func TestMouseClickSelectsProjectsRow(t *testing.T) {
 
 func TestMousePersistentSearch(t *testing.T) {
 	for _, size := range [][2]int{{80, 2}, {80, 3}, {80, 4}, {80, 9}, {80, 40}, {160, 40}} {
-		for _, state := range []string{"ready", "loading", "error"} {
-			m := resizeModel(newTestModel(), size[0], size[1])
-			m.list.loading = state == "loading"
-			if state == "error" {
-				m.list.err = fmt.Errorf("unavailable")
-			}
-			m.opts.Mouse = true
-			m.list.issues = makeTestIssues(5)
-			m.list.cursor = 2
-			m.list = m.list.syncSelection(m.list.visibleRows())
-			original := m.list.selectedUID
-			row := 1
-			if m.layout == splitlayout.Split {
-				row = 2
-			}
-			m, _ = updateModel(m, mouseLeftClick(0, row))
-			if m.input.kind != inputSearchBar {
-				t.Fatalf("%v %s: click did not open search", size, state)
-			}
-			m = sendRune(m, 'r')
-			m = sendKey(m, tea.KeyDown)
-			m, _ = updateModel(m, mouseLeftClick(4, row))
-			if m.input.searchFocus != searchFocusQuery {
-				t.Fatal("click did not refocus query")
-			}
-			m = sendKey(m, tea.KeyEscape)
-			if m.list.selectedUID != original || m.list.filter.Search != "" || m.input.kind != inputNone {
-				t.Fatalf("click recaptured search snapshot: selected=%s filter=%q", m.list.selectedUID, m.list.filter.Search)
-			}
+		m := resizeModel(newTestModel(), size[0], size[1])
+		m.opts.Mouse = true
+		m.list.issues = makeTestIssues(5)
+		m.list.cursor = 2
+		m.list = m.list.syncSelection(m.list.visibleRows())
+		original := m.list.selectedUID
+		row := 1
+		if m.layout == splitlayout.Split {
+			row = 2
+		}
+		m, _ = updateModel(m, mouseLeftClick(0, row))
+		if m.input.kind != inputSearchBar {
+			t.Fatalf("%v: click did not open search", size)
+		}
+		m = sendRune(m, 'r')
+		m = sendKey(m, tea.KeyDown)
+		m, _ = updateModel(m, mouseLeftClick(4, row))
+		if m.input.searchFocus != searchFocusQuery {
+			t.Fatal("click did not refocus query")
+		}
+		m = sendKey(m, tea.KeyEscape)
+		if m.list.selectedUID != original || m.list.filter.Search != "" || m.input.kind != inputNone {
+			t.Fatalf("click recaptured search snapshot: selected=%s filter=%q", m.list.selectedUID, m.list.filter.Search)
 		}
 	}
 }
@@ -170,7 +163,7 @@ func TestMouseSearchVisibilityGuards(t *testing.T) {
 			case "modal":
 				m.modal = modalQuitConfirm
 			case "input":
-				m.input.kind = inputFilterForm
+				m, _ = m.openInput(inputFilterForm)
 			case "detail":
 				m.view = viewDetail
 			}

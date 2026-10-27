@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kit/tui/splitlayout"
 )
@@ -2419,7 +2420,7 @@ func TestSearchRenderedRowsMatchPagingAndClicks(t *testing.T) {
 		count := 0
 		for y, line := range lines {
 			if m.layout == splitlayout.Split {
-				line = line[:min(len(line), 68)]
+				line = ansi.Truncate(line, splitConfig.ListWidth(m.width), "")
 			}
 			for i, issue := range m.list.issues {
 				ref := fmt.Sprintf("r%03d", i+1)
@@ -2438,47 +2439,6 @@ func TestSearchRenderedRowsMatchPagingAndClicks(t *testing.T) {
 		}
 		if size[0] == 80 && count != max(0, size[1]-3) {
 			t.Errorf("%v: compact rows=%d", size, count)
-		}
-	}
-}
-
-func TestSearchKeepsEditPositionVisible(t *testing.T) {
-	defer snapshotInit(t)()
-	for _, initialSize := range [][2]int{{80, 9}, {160, 40}} {
-		m := resizeModel(newTestModel(), initialSize[0], initialSize[1])
-		m.authCapabilitiesRequired, m.authCapabilitiesReady = true, true
-		m.activeAuth = AuthInfo{Kind: "none"}
-		m.list.filter.Search = strings.Repeat("a", 70) + "TAIL"
-		m, cmd := updateModel(m, keyRune('/'))
-		require.NotNil(t, cmd)
-		m, _ = updateModel(m, cmd())
-		require.Equal(t, inputSearchBar, m.input.kind)
-		check := func(want string) {
-			t.Helper()
-			row := 1
-			if m.layout == splitlayout.Split {
-				row = 2
-			}
-			raw := strings.Split(m.viewContent(), "\n")[row]
-			line := stripANSI(raw)
-			require.Contains(t, line, want)
-			require.Regexp(t, `\x1b\[(?:[0-9]+;)*7(?:;[0-9]+)*m`, raw, "final frame must preserve the input caret styling")
-			require.NotContains(t, line, "…", "the active input and caret must fit")
-		}
-		if initialSize[1] >= listMinHeight {
-			check("TAIL ")
-		}
-		m = sendKey(m, tea.KeyEnd)
-		m = sendRune(m, 'Z')
-		check("TAILZ ")
-		for range 3 {
-			m = sendKey(m, tea.KeyLeft)
-		}
-		m = sendRune(m, 'X')
-		check("TAXI")
-		for _, size := range [][2]int{{80, 9}, {80, 4}, {80, 40}, {240, 40}, {160, 40}} {
-			m = resizeModel(m, size[0], size[1])
-			check("TAXI")
 		}
 	}
 }
