@@ -18,15 +18,6 @@ const pi = {
     handlers.set(name, list);
   },
   async exec(_executable, args) {
-    if (args[3] === 'show') {
-      return {code: 0, killed: false, stdout: JSON.stringify({issue: {project_id: 42, uid: 'spoke-project:abc4'}}), stderr: ''};
-    }
-    if (args[3] === 'daemon') {
-      return {code: 0, killed: false, stdout: JSON.stringify({
-        network: 'tcp', address: 'https://daemon.example', request_base_url: 'https://daemon.example',
-      }), stderr: ''};
-    }
-
     attentionCalls.push(args);
     const identity = {
       session: args[5],

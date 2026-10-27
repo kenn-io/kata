@@ -5,18 +5,6 @@ const [extension, cwd, leadRef, childRef, leadServer, childServer] = process.arg
 const factory = (await import(pathToFileURL(extension))).default;
 const registryKey = Symbol.for('kata.pi.native.v1');
 const calls = [];
-function daemonRoute(server) {
-  if (server.startsWith('unix://')) return {network: 'unix', address: server, request_base_url: ''};
-  return {
-    network: 'tcp',
-    address: server,
-    request_base_url: server.includes('://') ? server : `http://${server}`,
-  };
-}
-function daemonIdentity(server) {
-  const route = daemonRoute(server);
-  return route.network === 'unix' ? route.address : route.request_base_url;
-}
 function host(adapter, pid, ref, server) {
   Object.defineProperty(process, 'pid', {value: pid, configurable: true});
   process.env.KATA_REF = ref;
@@ -28,17 +16,6 @@ function host(adapter, pid, ref, server) {
       list.push(fn); handlers.set(name, list);
     },
     async exec(_executable, args) {
-      if (args[0] === '--json' && args[3] === 'daemon') {
-        return {code: 0, killed: false, stdout: JSON.stringify(daemonRoute(process.env.KATA_SERVER)), stderr: ''};
-      }
-      if (args[0] === '--json' && args[3] === 'show') {
-        const ref = args[4];
-        const [project, issue] = ref.includes('#') ? ref.split('#', 2) : ['spoke-project', ref];
-        const projectID = project === 'spoke-project' ? 42 : 43;
-        return {code: 0, killed: false, stdout: JSON.stringify({issue: {
-          uid: `${project}:${issue}`, project_id: projectID,
-        }}), stderr: ''};
-      }
       calls.push([pid, args[3], args[args.indexOf('--ref') + 1]]);
       return {code: 0, killed: false, stdout: '', stderr: ''};
     },
@@ -62,14 +39,8 @@ const child = host(childFactory, 202, childRef, childServer);
 await child('session_start', 'startup');
 await child('session_shutdown', 'quit');
 assert.equal(process.env.KATA_REF, childRef, 'child tracking preserves its issue ref');
-const canonicalRef = ref => {
-  const [project, issue] = ref.includes('#') ? ref.split('#', 2) : ['spoke-project', ref];
-  return `${project}:${issue}`;
-};
-const sameIssue = daemonIdentity(leadServer) === daemonIdentity(childServer) && canonicalRef(leadRef) === canonicalRef(childRef);
-const [leadProject] = leadRef.includes('#') ? leadRef.split('#', 2) : ['spoke-project'];
-const leadProjectID = leadProject === 'spoke-project' ? 42 : 43;
-const leadIdentity = JSON.stringify({daemon: daemonIdentity(leadServer), project: leadProjectID, issue: canonicalRef(leadRef)});
+const sameIssue = leadServer === childServer && leadRef === childRef;
+const leadIdentity = JSON.stringify({ref: leadRef, server: leadServer});
 assert.deepEqual(calls, sameIssue ? [[101, 'start', leadRef]] :
   [[101, 'start', leadRef], [202, 'start', childRef], [202, 'end', childRef]]);
 assert.deepEqual(JSON.parse(inherited), {pid: 101, identity: leadIdentity});

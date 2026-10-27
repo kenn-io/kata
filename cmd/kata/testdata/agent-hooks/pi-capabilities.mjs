@@ -3,7 +3,7 @@ import {pathToFileURL} from 'node:url';
 const [projectPath,userPath,cwd,mode]=process.argv.slice(2);
 const project=(await import(pathToFileURL(projectPath))).default,user=(await import(pathToFileURL(userPath))).default;
 let session='session-A';const calls=[],handlers=new Map();
-const pi={on(name,handler){const list=handlers.get(name)||[];list.push(handler);handlers.set(name,list)},async exec(executable,args,options){if(args[0]==='--json'&&args[3]==='daemon')return {code:0,stdout:JSON.stringify({network:'tcp',address:'http://daemon.example',request_base_url:'http://daemon.example'}),stderr:'',killed:false};if(args[0]==='--json'&&args[3]==='show')return {code:0,stdout:JSON.stringify({issue:{project_id:42,uid:'spoke-project:abc4'}}),stderr:'',killed:false};calls.push({executable,args,options});return {code:0,stdout:args[0]==='agent-contract-hook'?JSON.stringify({hookSpecificOutput:{additionalContext:executable}}):'',stderr:'',killed:false}}};
+const pi={on(name,handler){const list=handlers.get(name)||[];list.push(handler);handlers.set(name,list)},async exec(executable,args,options){calls.push({executable,args,options});return {code:0,stdout:args[0]==='agent-contract-hook'?JSON.stringify({hookSpecificOutput:{additionalContext:executable}}):'',stderr:'',killed:false}}};
 const ctx={cwd,sessionManager:{getSessionId:()=>session},ui:{notify(){}}};
 async function emit(name,event){for(const fn of [...(handlers.get(name)||[])])await fn(event,ctx)}
 user(pi);project(pi);

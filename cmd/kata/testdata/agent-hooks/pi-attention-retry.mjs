@@ -8,8 +8,7 @@ const handlers = new Map(), calls = [];
 let session = 'session-A', pending;
 const result = {code: 0, killed: false, stdout: '', stderr: ''};
 function issueIdentity(ref) {
-  const [project, issue] = ref.includes('#') ? ref.split('#', 2) : ['spoke-project', ref];
-  return JSON.stringify({daemon: 'https://daemon.example', project: project === 'spoke-project' ? 42 : 43, issue: `${project}:${issue}`});
+  return JSON.stringify({ref, server: process.env.KATA_SERVER || ''});
 }
 const pi = {
   on(name, handler) {
@@ -17,13 +16,6 @@ const pi = {
     list.push(handler); handlers.set(name, list);
   },
   async exec(executable, args, options) {
-    if (args[3] === 'daemon') return {...result, stdout: JSON.stringify({
-      network: 'tcp', address: 'https://daemon.example', request_base_url: 'https://daemon.example',
-    })};
-    if (args[3] === 'show') return {...result, stdout: JSON.stringify({issue: {
-      project_id: args[4].includes('#') && !args[4].startsWith('spoke-project#') ? 43 : 42,
-      uid: args[4].includes('#') ? args[4] : `spoke-project:${args[4]}`,
-    }})};
     calls.push({args, options});
     if (pending) return await pending.promise;
     return result;
@@ -59,7 +51,7 @@ const name = mode === 'start' ? 'session_start' : 'session_shutdown';
 const event = {reason: mode === 'start' ? 'resume' : 'quit'};
 const before = calls.length;
 const first = emit(name, event), duplicate = emit(name, event);
-await new Promise(setImmediate);
+await Promise.resolve();
 assert.equal(calls.length, before + 1, 'concurrent lifecycle callbacks must share one command');
 fail(operation); pending = undefined;
 await Promise.all([first, duplicate]);
@@ -92,7 +84,7 @@ for (const replacementRef of ['old-ref', 'replacement-ref']) for (const staleMod
   const oldContext = context();
   const stale = emit(staleMode === 'start' ? 'session_start' : 'session_shutdown',
     {reason: staleMode === 'start' ? 'new' : 'quit'}, oldContext);
-  await new Promise(setImmediate);
+  await Promise.resolve();
   const retiring = snapshot('session_shutdown');
   await emit('session_shutdown', {reason: 'reload'}, oldContext);
   session = 'new-' + staleMode; factory(pi);

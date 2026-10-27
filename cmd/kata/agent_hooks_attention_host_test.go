@@ -10,14 +10,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	"hegel.dev/go/hegel"
+	"pgregory.net/rapid"
 )
 
 func TestPiChildDoesNotTakeOverLeadAttention(t *testing.T) {
 	testPiChildAttention(t, "lead-ref", "lead-ref", "https://daemon.example", "https://daemon.example")
 }
 
-func attentionHostFixture(t *testing.T) func(*hegel.T, any, any) {
+func attentionHostFixture(t *testing.T) func(*rapid.T, any, any) {
 	t.Helper()
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -48,45 +48,45 @@ func attentionHostFixture(t *testing.T) func(*hegel.T, any, any) {
 		}
 	})
 	decoder := jsontext.NewDecoder(stdout)
-	return func(ht *hegel.T, input, verdict any) {
+	return func(rt *rapid.T, input, verdict any) {
 		// Node readline treats Unicode JS line separators as record boundaries.
 		data, err := json.Marshal(input, jsontext.EscapeForJS(true))
 		if err != nil {
-			ht.Fatal(err)
+			rt.Fatal(err)
 		}
 		if _, err := fmt.Fprintln(stdin, string(data)); err != nil {
-			ht.Fatal(err)
+			rt.Fatal(err)
 		}
 		response, err := decoder.ReadValue()
 		if err != nil {
-			ht.Fatalf("missing fixture verdict: %v", err)
+			rt.Fatalf("missing fixture verdict: %v", err)
 		}
 		if err := json.Unmarshal(response, verdict); err != nil {
-			ht.Fatal(err)
+			rt.Fatal(err)
 		}
 	}
 }
 
 func TestAttentionHostMarkerProperty(t *testing.T) {
 	exchange := attentionHostFixture(t)
-	hegel.Test(t, func(ht *hegel.T) {
-		markerPid := hegel.Draw(ht, hegel.Integers(1, 2147483647))
-		ownPid := hegel.Draw(ht, hegel.Integers(1, 2147483647))
-		if hegel.Draw(ht, hegel.Booleans()) {
+	rapid.Check(t, func(rt *rapid.T) {
+		markerPid := rapid.IntRange(1, 2147483647).Draw(rt, "marker pid")
+		ownPid := rapid.IntRange(1, 2147483647).Draw(rt, "own pid")
+		if rapid.Bool().Draw(rt, "same pid") {
 			ownPid = markerPid
 		}
-		identities := hegel.SampledFrom([]string{
+		identities := rapid.SampledFrom([]string{
 			`{"daemon":"local","project":42,"issue":"lead"}`,
 			`{"daemon":"remote","project":42,"issue":"lead"}`,
 			`{"daemon":"local","project":43,"issue":"lead"}`,
 		})
-		markerIdentity, identity := hegel.Draw(ht, identities), hegel.Draw(ht, identities)
-		alive := hegel.Draw(ht, hegel.Booleans())
-		malformed := hegel.Draw(ht, hegel.Booleans())
+		markerIdentity, identity := identities.Draw(rt, "marker identity"), identities.Draw(rt, "identity")
+		alive := rapid.Bool().Draw(rt, "alive")
+		malformed := rapid.Bool().Draw(rt, "malformed")
 		input := map[string]any{
 			"marker": map[string]any{"pid": markerPid, "identity": markerIdentity},
 			"ownPid": ownPid, "identity": identity, "alive": alive, "malformed": malformed,
-			"denied": hegel.Draw(ht, hegel.Booleans()),
+			"denied": rapid.Bool().Draw(rt, "denied"),
 		}
 		if malformed && markerPid%22 == 0 {
 			delete(input, "marker")
@@ -94,20 +94,20 @@ func TestAttentionHostMarkerProperty(t *testing.T) {
 		var verdict struct {
 			Skip bool `json:"skip"`
 		}
-		exchange(ht, input, &verdict)
+		exchange(rt, input, &verdict)
 		want := !malformed && markerPid != ownPid && alive && markerIdentity == identity
 		if verdict.Skip != want {
-			ht.Fatalf("skip = %v, want %v for %+v", verdict.Skip, want, input)
+			rt.Fatalf("skip = %v, want %v for %+v", verdict.Skip, want, input)
 		}
-	}, hegel.WithTestCases(2000), hegel.WithDatabase(t.TempDir()))
+	})
 }
 
 func TestAttentionHostClaimReleaseProperty(t *testing.T) {
 	exchange := attentionHostFixture(t)
-	hegel.Test(t, func(ht *hegel.T) {
-		pid := hegel.Draw(ht, hegel.Integers(1, 2147483647))
-		identity := hegel.Draw(ht, hegel.Text())
-		replacement := hegel.Draw(ht, hegel.SampledFrom([]string{"own", "pid", "identity", "reordered", "extended", "malformed", "absent"}))
+	rapid.Check(t, func(rt *rapid.T) {
+		pid := rapid.IntRange(1, 2147483647).Draw(rt, "pid")
+		identity := rapid.String().Draw(rt, "identity")
+		replacement := rapid.SampledFrom([]string{"own", "pid", "identity", "reordered", "extended", "malformed", "absent"}).Draw(rt, "replacement")
 		var verdict struct {
 			PID       int    `json:"pid"`
 			Identity  string `json:"identity"`
@@ -115,87 +115,20 @@ func TestAttentionHostClaimReleaseProperty(t *testing.T) {
 			Unchanged bool   `json:"unchanged"`
 			KataRef   string `json:"kataRef"`
 		}
-		exchange(ht, map[string]any{"operation": "claim-release", "ownPid": pid, "identity": identity, "replacement": replacement}, &verdict)
+		exchange(rt, map[string]any{"operation": "claim-release", "ownPid": pid, "identity": identity, "replacement": replacement}, &verdict)
 		released := replacement == "own" || replacement == "absent"
 		if verdict.PID != pid || verdict.Identity != identity || verdict.KataRef != "preserved-ref" || verdict.Released != released || (!released && !verdict.Unchanged) {
-			ht.Fatalf("claim/release changed the wrong environment value: replacement=%s verdict=%+v", replacement, verdict)
+			rt.Fatalf("claim/release changed the wrong environment value: replacement=%s verdict=%+v", replacement, verdict)
 		}
-	}, hegel.WithTestCases(2000), hegel.WithDatabase(t.TempDir()))
+	})
 }
 
 func TestPiChildWithDifferentRefTracksOwnIssue(t *testing.T) {
 	testPiChildAttention(t, "lead-ref", "other-ref", "https://daemon.example", "https://daemon.example")
 }
 
-func TestPiChildWithEquivalentQualifiedRefDoesNotTakeOverLeadAttention(t *testing.T) {
-	testPiChildAttention(t, "abc4", "spoke-project#abc4", "https://daemon.example", "https://daemon.example")
-}
-
-func TestPiChildWithEquivalentBareRefDoesNotTakeOverLeadAttention(t *testing.T) {
-	testPiChildAttention(t, "spoke-project#abc4", "abc4", "https://daemon.example", "https://daemon.example")
-}
-
-func TestPiChildWithSameShortIDInDifferentProjectTracksOwnIssue(t *testing.T) {
-	testPiChildAttention(t, "spoke-project#abc4", "hub-project#abc4", "https://daemon.example", "https://daemon.example")
-}
-
 func TestPiChildWithSameIssueOnDifferentDaemonTracksOwnIssue(t *testing.T) {
-	testPiChildAttention(t, "spoke-project#abc4", "spoke-project#abc4", "https://daemon-one.example", "https://daemon-two.example")
-}
-
-func TestPiChildWithEquivalentTCPRoutesDoesNotTakeOverLeadAttention(t *testing.T) {
-	testPiChildAttention(t, "abc4", "spoke-project#abc4", "127.0.0.1:7777", "http://127.0.0.1:7777")
-}
-
-func TestPiChildWithSameUnixSocketDoesNotTakeOverLeadAttention(t *testing.T) {
-	testPiChildAttention(t, "abc4", "spoke-project#abc4", "unix:///tmp/kata.sock", "unix:///tmp/kata.sock")
-}
-
-func TestPiChildWithDifferentUnixSocketsTracksOwnIssue(t *testing.T) {
-	testPiChildAttention(t, "spoke-project#abc4", "spoke-project#abc4", "unix:///tmp/lead.sock", "unix:///tmp/child.sock")
-}
-
-func TestPiNativeReloadRestoresMarkerlessStartedBaseline(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("Node is required for the attention host fixture")
-	}
-	opts := piTestOptions(t)
-	opts.Attention = true
-	opts.Contract = false
-	plan, err := planPiAgentHooks(opts, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	extension := filepath.Join(t.TempDir(), "pi.mjs")
-	if err := os.WriteFile(extension, plan.Changes[0].Content, 0600); err != nil {
-		t.Fatal(err)
-	}
-	command := exec.Command(node, "testdata/agent-hooks/pi-markerless-reload.mjs", extension, opts.Dir) //nolint:gosec // G204: fixed fixture executes a generated adapter in a temporary directory.
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("Pi markerless reload: %v\n%s", err, output)
-	}
-}
-
-func TestPiNativeRetiredIdentityLookupCannotStartAfterReplacement(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("Node is required for the attention host fixture")
-	}
-	opts := piTestOptions(t)
-	opts.Attention = true
-	plan, err := planPiAgentHooks(opts, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	extension := filepath.Join(t.TempDir(), "pi.mjs")
-	if err := os.WriteFile(extension, plan.Changes[0].Content, 0600); err != nil {
-		t.Fatal(err)
-	}
-	command := exec.Command(node, "testdata/agent-hooks/pi-delayed-identity.mjs", extension, opts.Dir) //nolint:gosec // G204: fixed fixture executes a generated adapter in a temporary directory.
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("Pi retired identity lookup: %v\n%s", err, output)
-	}
+	testPiChildAttention(t, "lead-ref", "lead-ref", "https://daemon-one.example", "https://daemon-two.example")
 }
 
 func testPiChildAttention(t *testing.T, leadRef, childRef, leadServer, childServer string) {

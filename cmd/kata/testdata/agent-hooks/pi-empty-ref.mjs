@@ -23,4 +23,4 @@ const pi = {
 factory(pi);
 const ctx = {cwd, sessionManager: {getSessionId: () => 'session-A'}};
 for (const handler of handlers.get('session_start') || []) await handler({reason: 'startup'}, ctx);
-assert.deepEqual(calls, [], 'unsupported captured refs stop before daemon or issue resolution');
+assert.deepEqual(calls, [], 'unsupported captured refs never start attention');

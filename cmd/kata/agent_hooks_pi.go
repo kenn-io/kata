@@ -171,6 +171,8 @@ const registry = globalThis[registryKey] ||= { adapters: new Map(), active: new 
 const promptState = new WeakMap();
 
 export default function kataHooks(pi) {
+  // OMP also loads extensions from a shared PI_CODING_AGENT_DIR and exposes
+  // zod on its host API; its own Kata adapter owns that host.
   if (pi.zod) return;
   const key = options.scope + ":" + options.workspace;
   const adapter = { options, pi };
@@ -198,89 +200,46 @@ export default function kataHooks(pi) {
       return result.code === 0 && !result.killed;
     } catch { return false; /* Attention is best effort and never emits model context. */ }
   }
-  async function attentionIdentity(adapter, baseline) {
-    try {
-      const ref = typeof baseline.ref === "string" ? baseline.ref.trim() : "";
-      if (!ref || ref.startsWith("-")) return "";
-      const options = { cwd: baseline.cwd, timeout: 10000 };
-      // Show can start the local daemon. Probe its route only afterward.
-      const issue = await adapter.pi.exec(baseline.executable, ["--json", "--workspace", baseline.cwd, "show", ref], options);
-      if (issue.code !== 0 || issue.killed) return "";
-      const daemon = await adapter.pi.exec(baseline.executable, ["--json", "--workspace", baseline.cwd, "daemon", "locate"], options);
-      if (daemon.code !== 0 || daemon.killed) return "";
-      const route = JSON.parse(daemon.stdout);
-      const resolved = JSON.parse(issue.stdout)?.issue;
-      const daemonIdentity = route.network === "unix" ? route.address :
-        route.network === "tcp" ? route.request_base_url : "";
-      if (typeof daemonIdentity !== "string" || !daemonIdentity ||
-          !Number.isSafeInteger(resolved?.project_id) || resolved.project_id <= 0 ||
-          typeof resolved.uid !== "string" || !resolved.uid) return "";
-      return JSON.stringify({ daemon: daemonIdentity, project: resolved.project_id, issue: resolved.uid });
-    } catch { return ""; /* Without a resolved route and issue, do not claim ownership. */ }
+  function attentionIdentity(ref, server) {
+    // Mirrors attentionRef: a ref the CLI ignores never claims ownership.
+    ref = ref.trim();
+    return !ref || ref.startsWith("-") ? "" : JSON.stringify({ ref, server });
   }
-  async function transition(mode, baseline, adapter) {
+  async function transition(mode, baseline) {
     const pending = { mode };
     baseline.pending = pending;
     pending.promise = (async () => {
-      try {
-        if (registry.active.get(baseline.cwd) !== baseline) return;
-        const identity = mode === "start" ? await attentionIdentity(adapter, baseline) : baseline.identity;
-        if (registry.active.get(baseline.cwd) !== baseline) return;
-        if (mode === "start" && (!identity || kataAttentionHostSkip(identity))) return;
+      if (mode === "start") baseline.startAttempted = true;
+      const succeeded = await attention(mode, baseline);
+      if (registry.active.get(baseline.cwd) === baseline && succeeded) {
         if (mode === "start") {
-          baseline.identity = identity;
-          baseline.startAttempted = true;
+          baseline.started = true;
+          kataAttentionHostClaim(baseline.identity);
+        } else {
+          baseline.ended = true;
+          kataAttentionHostRelease(baseline.identity);
         }
-        const succeeded = await attention(mode, baseline);
-        if (registry.active.get(baseline.cwd) === baseline && succeeded) {
-          if (mode === "start") {
-            baseline.started = true;
-            kataAttentionHostClaim(identity);
-          } else {
-            baseline.ended = true;
-            baseline.startAttempted = false;
-            kataAttentionHostRelease(baseline.identity);
-          }
-        }
-      } finally {
-        if (baseline.pending === pending) delete baseline.pending;
       }
+      if (baseline.pending === pending) delete baseline.pending;
     })();
     await pending.promise;
   }
   if (options.attention) {
     pi.on("session_start", async (event, ctx) => {
-      if (!selected(ctx, "attention") || !["startup", "new", "resume", "fork", "reload"].includes(event.reason)) return;
+      if (!selected(ctx, "attention") || !["startup", "new", "resume", "fork"].includes(event.reason)) return;
       const id = ctx.sessionManager.getSessionId();
       if (typeof id !== "string" || !id) return;
       const cwd = path.resolve(ctx.cwd);
       const previous = registry.active.get(cwd);
+      const ref = process.env.KATA_REF || "";
       const baseline = previous?.id === id && !previous.ended ? previous :
-        { id, cwd, executable: options.executable, ref: process.env.KATA_REF || "", started: false, startAttempted: false, ended: false };
-      if (baseline.started || baseline.pending) {
-        if (baseline.started && !baseline.pending) {
-          const rawMarker = process.env.KATA_ATTENTION_HOST;
-          let marker;
-          try { marker = JSON.parse(rawMarker || "null"); } catch {}
-          const markerless = !rawMarker;
-          const ownedLegacyMarker = marker?.pid === process.pid &&
-            typeof marker.ref === "string" && marker.ref === baseline.ref;
-          if (markerless || ownedLegacyMarker) {
-            const identity = baseline.identity || await attentionIdentity(adapter, baseline);
-            if (identity && registry.active.get(cwd) === baseline && baseline.started && !baseline.pending &&
-                process.env.KATA_ATTENTION_HOST === rawMarker) {
-              baseline.identity = identity;
-              kataAttentionHostClaim(identity);
-            }
-          } else if (marker?.pid === process.pid && !baseline.identity &&
-              typeof marker.identity === "string" && marker.identity) {
-            baseline.identity = marker.identity;
-          }
-        }
-        return;
-      }
+        { id, cwd, executable: options.executable, ref, identity: attentionIdentity(ref, process.env.KATA_SERVER || ""),
+          started: false, startAttempted: false, ended: false };
+      if (baseline.started || baseline.pending) return;
       registry.active.set(cwd, baseline);
-      await transition("start", baseline, adapter);
+      // A nested session tracking its live parent's issue leaves attention to the parent.
+      if (!baseline.identity || kataAttentionHostSkip(baseline.identity)) return;
+      await transition("start", baseline);
     });
     pi.on("session_shutdown", async (event, ctx) => {
       if (!selected(ctx, "attention") || event.reason !== "quit") return;
@@ -291,8 +250,8 @@ export default function kataHooks(pi) {
         await pending.promise;
         if (pending.mode === "end") return;
       }
-      if ((!baseline.started && !baseline.startAttempted) || !selected(ctx, "attention") || registry.active.get(baseline.cwd) !== baseline || baseline.ended || baseline.pending) return;
-      await transition("end", baseline, null);
+      if (!baseline.startAttempted || !selected(ctx, "attention") || registry.active.get(baseline.cwd) !== baseline || baseline.ended || baseline.pending) return;
+      await transition("end", baseline);
     });
   }
   if (options.contract) pi.on("before_agent_start", async (event, ctx) => {
