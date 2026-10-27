@@ -66,13 +66,8 @@ func TestOpenAPIClientArtifactUpToDate(t *testing.T) {
 	if err := os.Mkdir(tmpGenerated, 0o700); err != nil {
 		t.Fatalf("mkdir generated temp dir: %v", err)
 	}
-	config, err := os.ReadFile(filepath.Join(clientGeneratedDir, "config.yaml"))
-	if err != nil {
-		t.Fatalf("read generated config: %v", err)
-	}
-	tmpConfig := filepath.Join(tmpGenerated, "config.yaml")
-	if err := os.WriteFile(tmpConfig, config, 0o600); err != nil { //nolint:gosec // test-controlled path under t.TempDir
-		t.Fatalf("write generated config: %v", err)
+	if err := copyGeneratorInputs(clientGeneratedDir, tmpGenerated); err != nil {
+		t.Fatalf("copy generator config, overlays, and header: %v", err)
 	}
 	if err := copyGeneratedTemplates(filepath.Join(clientGeneratedDir, "templates"), filepath.Join(tmpGenerated, "templates")); err != nil {
 		t.Fatalf("copy generated templates: %v", err)
@@ -121,6 +116,28 @@ func TestOpenAPIClientArtifactUpToDate(t *testing.T) {
 			t.Fatalf("%s is stale; run `make api-generate` to regenerate", filepath.Join(clientGeneratedDir, wantFiles[i]))
 		}
 	}
+}
+
+// copyGeneratorInputs copies the generator's top-level non-Go inputs, such as
+// config.yaml and the overlays and header template it references.
+func copyGeneratorInputs(src, dst string) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !entry.Type().IsRegular() || filepath.Ext(entry.Name()) == ".go" {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(src, entry.Name())) //nolint:gosec // generator input filename is enumerated from a fixed test fixture dir
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(dst, entry.Name()), data, 0o600); err != nil { //nolint:gosec // test-controlled copy under t.TempDir
+			return err
+		}
+	}
+	return nil
 }
 
 func copyGeneratedTemplates(src, dst string) error {

@@ -5,6 +5,7 @@ user-templates:
   client-with-response: templates/client_with_response.tmpl
   typeDef: templates/type_def.tmpl
   union.tmpl: templates/union.tmpl
+  header.tmpl: native_uuid_header.tmpl
 additional-imports:
   - package: reflect
 output:
@@ -14,3 +15,6 @@ generate:
   client: true
   client-with-response: true
   models: true
+overlay:
+  sources:
+    - native_uuid_overlay.yaml

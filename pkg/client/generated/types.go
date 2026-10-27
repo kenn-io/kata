@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"time"
 
+	"uuid"
+
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 )
 
@@ -198,14 +200,29 @@ func (a AssignRequestBody) Validate() error {
 }
 
 type Attachment struct {
-	DocbankVersion string `json:"docbank_version" validate:"required"`
-	MediaType      string `json:"media_type" validate:"required"`
-	Name           string `json:"name" validate:"required"`
-	Size           int64  `json:"size"`
+	DocbankVersion uuid.UUID `json:"docbank_version" validate:"required"`
+	MediaType      string    `json:"media_type" validate:"required"`
+	Name           string    `json:"name" validate:"required"`
+	Size           int64     `json:"size"`
 }
 
 func (a Attachment) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(a))
+	var errors runtime.ValidationErrors
+	if v, ok := any(a.DocbankVersion).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("DocbankVersion", err)
+		}
+	}
+	if err := typesValidator.Var(a.MediaType, "required"); err != nil {
+		errors = errors.Append("MediaType", err)
+	}
+	if err := typesValidator.Var(a.Name, "required"); err != nil {
+		errors = errors.Append("Name", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type AuditCloseRow struct {
@@ -3584,17 +3601,6 @@ func (i IssueOut) Validate() error {
 		return nil
 	}
 	return errors
-}
-
-type IssuePlanningDate struct {
-	Field    string    `json:"field" validate:"required"`
-	Instant  time.Time `json:"instant" validate:"required"`
-	Timezone string    `json:"timezone" validate:"required"`
-	Value    string    `json:"value" validate:"required"`
-}
-
-func (i IssuePlanningDate) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(i))
 }
 
 type IssuePlanningDates struct {

@@ -181,6 +181,7 @@ components:
     Attachment:
       properties:
         docbank_version:
+          format: uuid
           type: string
         media_type:
           type: string
@@ -3536,24 +3537,6 @@ components:
         - revision
         - created_at
         - updated_at
-      type: object
-    IssuePlanningDate:
-      additionalProperties: false
-      properties:
-        field:
-          type: string
-        instant:
-          format: date-time
-          type: string
-        timezone:
-          type: string
-        value:
-          type: string
-      required:
-        - field
-        - value
-        - timezone
-        - instant
       type: object
     IssuePlanningDates:
       properties:
