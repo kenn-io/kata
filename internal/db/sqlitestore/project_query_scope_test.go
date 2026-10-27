@@ -3,65 +3,49 @@ package sqlitestore
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 )
 
-// Authorization must check the endpoints of candidate links rather than make
-// SQLite probe every combination of requested and visible issue IDs.
-func TestAuthorizedLinkPredicateUsesEndpointLookups(t *testing.T) {
+// A parent with hundreds of children must load within the client's deadline
+// even when the authorized projects contain tens of thousands of issues.
+func TestRelationshipsByIssuesAuthorizedAtScale(t *testing.T) {
 	t.Parallel()
 	store := openUIStore(t)
 	projects := make([]string, 34)
 	for i := range projects {
-		projects[i] = fmt.Sprintf("%026d", i+1)
+		projects[i] = createUIProject(t, store, fmt.Sprintf("project-%02d", i+1)).UID
 	}
-	ctx := db.WithAuthorizedProjects(t.Context(), projects)
+	_, err := store.ExecContext(t.Context(), `WITH RECURSIVE sequence(n) AS (
+		VALUES(1) UNION ALL SELECT n+1 FROM sequence WHERE n<61202
+	)
+	INSERT INTO issues (id, uid, project_id, short_id, title, author)
+	SELECT n, printf('%026d', n),
+	       (SELECT id FROM projects WHERE name=printf('project-%02d', (n-1)%34+1)),
+	       printf('%06d', n), 'Issue ' || n, 'user-a'
+	FROM sequence`)
+	require.NoError(t, err)
+	_, err = store.ExecContext(t.Context(), `INSERT INTO links
+		(from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
+		SELECT child.id, parent.id, child.uid, parent.uid, 'parent', 'user-a'
+		FROM issues child JOIN issues parent ON parent.id=1
+		WHERE child.id BETWEEN 2 AND 282`)
+	require.NoError(t, err)
 	ids := make([]int64, 281)
 	for i := range ids {
-		ids[i] = int64(i + 1)
+		ids[i] = int64(i + 2)
 	}
-	placeholders, parentArgs := relationshipChunkPlaceholders(ids)
-	parentPredicate := authorizedLinkPredicate(ctx, "l.", &parentArgs)
-	linkArgs := []any{1, 1}
-	linkPredicate := authorizedLinkPredicate(ctx, "", &linkArgs)
-	for _, test := range []struct {
-		name, query string
-		args        []any
-		searches    []string
-	}{
-		{"parents", `SELECT l.from_issue_id, parent.id FROM links l
-		 JOIN issues child ON child.id=l.from_issue_id JOIN issues parent ON parent.id=l.to_issue_id
-		 WHERE l.type='parent' AND l.from_issue_id IN (` + placeholders + `) AND ` + parentPredicate + ` ORDER BY l.from_issue_id ASC`,
-			parentArgs, []string{"from_issue_id=?"}},
-		{"issue links", linkSelect + ` WHERE (from_issue_id=? OR to_issue_id=?) AND ` + linkPredicate + ` ORDER BY id ASC`,
-			linkArgs, []string{"from_issue_id=?", "to_issue_id=?"}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			rows, err := store.QueryContext(ctx, `EXPLAIN QUERY PLAN `+test.query, test.args...)
-			require.NoError(t, err)
-			var plan []string
-			var endpointLookups int
-			for rows.Next() {
-				var id, parent, unused int
-				var detail string
-				require.NoError(t, rows.Scan(&id, &parent, &unused, &detail))
-				plan = append(plan, detail)
-				if strings.HasPrefix(detail, "SEARCH endpoint ") && strings.Contains(detail, "USING INTEGER PRIMARY KEY") {
-					endpointLookups++
-				}
-			}
-			require.NoError(t, rows.Err())
-			require.NoError(t, rows.Close())
-			joined := strings.Join(plan, "\n")
-			require.Equal(t, 2, endpointLookups, "plan: %s", joined)
-			for _, search := range test.searches {
-				require.Contains(t, joined, search, "plan: %s", joined)
-			}
-		})
+	ctx, cancel := context.WithTimeout(db.WithAuthorizedProjects(t.Context(), projects), 5*time.Second)
+	defer cancel()
+	got, err := store.RelationshipsByIssues(ctx, ids)
+	require.NoError(t, err)
+	require.Len(t, got, 281)
+	for _, id := range ids {
+		require.NotNil(t, got[id].ParentIssueID, "child %d", id)
+		require.Equal(t, int64(1), *got[id].ParentIssueID, "child %d", id)
 	}
 }
 

@@ -71,7 +71,6 @@ func authorizedIssuePredicate(ctx context.Context, column string, args *[]any) s
 // caller's authorized projects. Every query that reads links composes it into
 // that reference's WHERE clause at construction time, appending its bindings
 // to args in text order; a query without it has no endpoint authorization.
-// Correlating by endpoint ID keeps authorization out of the link index's search keys.
 func authorizedLinkPredicate(ctx context.Context, prefix string, args *[]any) string {
 	if _, restricted := db.AuthorizedProjects(ctx); !restricted {
 		return "1=1"
