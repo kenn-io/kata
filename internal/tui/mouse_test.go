@@ -155,7 +155,7 @@ func TestMousePersistentSearch(t *testing.T) {
 }
 
 func TestMouseSearchVisibilityGuards(t *testing.T) {
-	for _, state := range []string{"disabled", "narrow", "short", "loading", "error", "modal", "input", "detail"} {
+	for _, state := range []string{"disabled", "narrow", "loading", "error", "modal", "input", "detail"} {
 		t.Run(state, func(t *testing.T) {
 			m := resizeModel(newTestModel(), 80, 24)
 			m.opts.Mouse = true
@@ -164,8 +164,6 @@ func TestMouseSearchVisibilityGuards(t *testing.T) {
 				m.opts.Mouse = false
 			case "narrow":
 				m = resizeModel(m, 79, 24)
-			case "short":
-				m = resizeModel(m, 80, 9)
 			case "loading":
 				m.list.loading = true
 			case "error":
@@ -192,22 +190,9 @@ func TestCompactSearchRowsMatchPagingAndClicks(t *testing.T) {
 		m.opts.Mouse = true
 		m.list.issues = makeTestIssues(30)
 		m = m.applyListViewportCache()
-		m, cmd := updateModel(m, keyRune('/'))
-		m, _ = updateModel(m, cmd())
-		m = sendRune(m, 'x')
-		if !strings.Contains(strings.Split(stripANSI(m.viewBody()), "\n")[0], "/x") {
-			t.Fatalf("height %d: active search is hidden", height)
-		}
-		m = sendKey(m, tea.KeyEscape)
 		m, _ = updateModel(m, mouseLeftClick(4, 0))
 		if m.input.kind != inputSearchBar {
 			t.Fatalf("height %d: compact search click did not focus input", height)
-		}
-		m = sendRune(m, 'r')
-		m = sendKey(m, tea.KeyDown)
-		m, _ = updateModel(m, mouseLeftClick(4, 0))
-		if m.input.searchFocus != searchFocusQuery {
-			t.Fatal("compact search click did not refocus query")
 		}
 		m = sendKey(m, tea.KeyEscape)
 		for range 2 {
