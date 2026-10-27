@@ -86,6 +86,9 @@ nav = [
 [project.theme]
 variant = "modern"
 custom_dir = "overrides"
+# extra.css sets the docs faces; the theme's default Google Fonts request
+# would only delay first paint.
+font = false
 features = [
   "navigation.instant",
   "navigation.instant.progress",

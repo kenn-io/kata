@@ -228,6 +228,13 @@ renders the reference site from the Markdown pages listed in
 `/`, the introductory guide at `/guide/`, and the documentation at `/docs/`.
 Keep `docs/llms.txt` links aligned with those public routes.
 
+Pages must not paint before their stylesheets and fonts load. The build embeds
+each `/fonts/<name>.woff2` that `docs/website/styles/site.css` references, and
+inlines `docs/website/hold-first-paint.js` right after each website page's
+`<meta charset="utf-8">`. The Zensical theme's font loading stays off;
+`docs/stylesheets/extra.css` sets the docs faces. The First paint CI job checks
+the built site and the web UI the daemon serves.
+
 When changing behavior:
 
 - update CLI help when flags or contracts change;
