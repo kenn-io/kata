@@ -130,6 +130,7 @@ string; on a keyed retry use `original_event.payload`. Both contain the same
 | `KATA_WEB_PUBLIC_ORIGIN` | Overrides `[web].public_origin`, the exact root browser origin. Non-loopback plain HTTP requires private-network trust. |
 | `KATA_MCP_ENABLED` | Overrides `[mcp].enabled`. Takes a boolean; an invalid value stops startup. |
 | `KATA_MCP_ACTOR` | Overrides `[mcp].actor`, the actor for daemon MCP mutations. |
+| `KATA_MCP_ALL_PROJECTS` | Overrides `[mcp].all_projects`. Takes a boolean; an invalid value stops startup. |
 | `KATA_MCP_PROJECTS` | Overrides `[mcp].projects` with comma-separated project names. Names are trimmed and resolve at startup. Missing or archived listed projects disable `/mcp` (503, reason logged); REST and the web UI keep serving. Create or restore the project, then restart. |
 | `KATA_MCP_STARTUP_SECTIONS` | Overrides `[mcp].startup_sections` with comma-separated section IDs. IDs are trimmed; an empty value preserves TOML. Restart the daemon after changes. See [Startup sections](mcp.md#startup-sections). |
 | `KATA_MCP_TOKEN_FILE` | Overrides `[mcp].token_file`, the file containing the daemon MCP bearer token. |
@@ -470,14 +471,18 @@ The optional `[mcp]` section serves `/mcp` on the daemon's listener. It defaults
 [mcp]
 enabled = true
 actor = "gateway-agent" # optional; defaults to the normal actor
-projects = ["alpha"]  # optional; defaults to all projects; missing or archived names disable /mcp (503)
+projects = ["alpha"]  # or all_projects = true; set exactly one
 token_file = "/run/secrets/mcp-token"
 # Alternatively: token_env = "KATA_MCP_TOKEN"
-startup_sections = ["issue_discovery", "docs"] # Optional; defaults to []
+startup_sections = ["issue_discovery", "docs"] # optional; defaults to []
 ```
 
+Choose the project scope explicitly: list `projects`, or set `all_projects = true`
+for daemon-wide access. Setting neither, setting both, or an empty `projects`
+array stops daemon startup.
 Missing or archived configured projects disable `/mcp` (503, reason logged); REST
 and the web UI keep serving. Create or restore the project, then restart.
+`kata daemon status` reports the endpoint as `serving` or `unavailable`.
 
 Set `token_file` or `token_env` for the separate MCP bearer. The file wins; secrets resolve at startup.
 Set `startup_sections` to existing section IDs to publish their typed tools in

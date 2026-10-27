@@ -303,6 +303,15 @@ authorization service. Review browser changes against these boundaries:
   continue through daemon bearer/private-network authentication. A bearer
   header never bypasses Host validation. Bearer CLI event streams remain CLI
   traffic. Do not weaken one boundary to make the other client class work.
+- **The daemon `/mcp` mount is a gateway client class.** Only when `[mcp]`
+  mounts it, `/mcp` requires its own constant-time MCP bearer instead of the
+  daemon bearer, skips the browser-listener Origin requirement unless the
+  request carries browser evidence (Origin, Fetch Metadata, session headers,
+  or session cookies), and leaves media-type checks to the MCP SDK. Host
+  validation still applies. Its REST self-calls use the bootstrap token or
+  owner-local socket, so an all-project mount is daemon-wide authority and must
+  be chosen with `all_projects = true`; the mount never registers token, team,
+  or storage tools. An unmounted `/mcp` is an ordinary browser route.
 - **Plain HTTP is local or explicit private-network trust.** Loopback browser
   origins may use HTTP. A non-loopback HTTP public origin requires the same
   explicit `[auth].trust_private_network` opt-in used for plaintext private

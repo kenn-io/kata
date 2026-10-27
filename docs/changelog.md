@@ -15,8 +15,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   `https://daemon.example/mcp` and the MCP bearer. See the
   [MCP reference](reference/mcp.md).
 - Limit the daemon's MCP endpoint to named projects with `[mcp] projects` or
-  `KATA_MCP_PROJECTS`. Names resolve to stable project UIDs at startup; an unset
-  allowlist keeps all-project access.
+  `KATA_MCP_PROJECTS`, or grant daemon-wide access with `all_projects = true` or
+  `KATA_MCP_ALL_PROJECTS=true`. One of the two is required. Names resolve to
+  stable project UIDs at startup. `kata daemon status` reports whether `/mcp` is
+  serving.
 - Publish selected typed MCP tools in a gateway's first catalog after each
   daemon restart with `[mcp].startup_sections` or `KATA_MCP_STARTUP_SECTIONS`.
   All loaders remain available; the default keeps loader-only progressive

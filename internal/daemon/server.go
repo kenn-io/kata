@@ -450,6 +450,7 @@ func (s *Server) HandlerFor(policy ListenerPolicy) (http.Handler, error) {
 		}
 		base = requireBrowserSession(s.cfg.WebSessions, policy, base)
 	}
+	policy.MCP = s.cfg.MCPHandler != nil
 	handler, err := ApplyListenerPolicy(base, policy)
 	if err != nil {
 		return nil, err
@@ -670,20 +671,20 @@ func (s *Server) ServeListenersWithLifecycle(
 // Origin so this is transparent for our own clients. Errors are emitted as
 // JSON envelopes matching api.ErrorEnvelope so the wire contract holds for
 // every non-2xx response, not just handler-returned ones.
-func withCSRFGuards(next http.Handler) http.Handler {
+func withCSRFGuards(next http.Handler, mcpMounted bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if origin := r.Header.Get("Origin"); origin != "" {
 			api.WriteEnvelope(w, http.StatusForbidden, "origin_forbidden",
 				"Origin header forbidden")
 			return
 		}
-		requireJSONMutation(next).ServeHTTP(w, r)
+		requireJSONMutation(next, mcpMounted).ServeHTTP(w, r)
 	})
 }
 
-func requireJSONMutation(next http.Handler) http.Handler {
+func requireJSONMutation(next http.Handler, mcpMounted bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != mcpPath && isMutation(r.Method) && r.ContentLength != 0 {
+		if (!mcpMounted || r.URL.Path != mcpPath) && isMutation(r.Method) && r.ContentLength != 0 {
 			ct := r.Header.Get("Content-Type")
 			if !strings.HasPrefix(ct, "application/json") && !isAttachmentUpload(r) {
 				api.WriteEnvelope(w, http.StatusUnsupportedMediaType, "unsupported_media_type",

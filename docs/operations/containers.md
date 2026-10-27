@@ -1,7 +1,7 @@
 ---
 title: Containers
 description: Run the stock Kata image using environment settings, mounted secrets, and persistent storage.
-last_edited: 2026-10-25
+last_edited: 2026-10-27
 ---
 
 # Containers
@@ -68,7 +68,9 @@ The daemon-mounted MCP settings below are unreleased. Deploy them only after
 a published stable Kata release and its matching image include them; 0.20.0
 does not include them.
 Enable the daemon's `/mcp` endpoint with `KATA_MCP_ENABLED=true`, set its actor
-with `KATA_MCP_ACTOR=gateway-agent`, and mount a separate bearer file at
+with `KATA_MCP_ACTOR=gateway-agent`, choose its scope with
+`KATA_MCP_PROJECTS=spoke-project` or `KATA_MCP_ALL_PROJECTS=true`, and mount a
+separate bearer file at
 `KATA_MCP_TOKEN_FILE=/run/secrets/mcp-token`. The same secret-file rules apply.
 Give the gateway the proxied `/mcp` URL and this MCP bearer; see the
 [MCP reference](../reference/mcp.md).

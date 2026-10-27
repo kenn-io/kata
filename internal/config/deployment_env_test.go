@@ -40,6 +40,7 @@ token_file = "/run/secrets/old-mcp-token"
 	t.Setenv("KATA_DOCBANK_API_KEY_FILE", "/run/secrets/docbank-key")
 	t.Setenv("KATA_DOCBANK_FOLDER", "/issues")
 	t.Setenv("KATA_MCP_ENABLED", " true ")
+	t.Setenv("KATA_MCP_ALL_PROJECTS", " true ")
 	t.Setenv("KATA_MCP_ACTOR", " gateway-agent ")
 	t.Setenv("KATA_MCP_PROJECTS", " alpha, beta ")
 	t.Setenv("KATA_MCP_STARTUP_SECTIONS", " issue_discovery, docs ")
@@ -57,6 +58,7 @@ token_file = "/run/secrets/old-mcp-token"
 	require.Equal(t, "https://docbank.example", cfg.Docbank.URL)
 	require.Equal(t, "/run/secrets/docbank-key", cfg.Docbank.APIKeyFile)
 	require.True(t, cfg.MCP.Enabled)
+	require.True(t, cfg.MCP.AllProjects)
 	require.Equal(t, "gateway-agent", cfg.MCP.Actor)
 	require.Equal(t, []string{"alpha", "beta"}, cfg.MCP.Projects)
 	require.Equal(t, []string{"issue_discovery", "docs"}, cfg.MCP.StartupSections)
@@ -127,7 +129,7 @@ request_dimensions = true
 
 func TestDeploymentInvalidBoolEnvFailsLoudly(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	for _, name := range []string{"KATA_SEARCH_EMBEDDINGS_REQUEST_DIMENSIONS", "KATA_MCP_ENABLED"} {
+	for _, name := range []string{"KATA_SEARCH_EMBEDDINGS_REQUEST_DIMENSIONS", "KATA_MCP_ENABLED", "KATA_MCP_ALL_PROJECTS"} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv(name, "sometimes")
 			_, err := config.ReadDaemonConfig()
@@ -137,7 +139,7 @@ func TestDeploymentInvalidBoolEnvFailsLoudly(t *testing.T) {
 }
 
 func TestLocalProfileRejectsDeploymentControlReferences(t *testing.T) {
-	for _, key := range []string{"KATA_LISTEN", "KATA_WEB_LISTEN", "KATA_WEB_PUBLIC_ORIGIN", "KATA_MCP_ENABLED", "KATA_MCP_ACTOR", "KATA_MCP_PROJECTS", "KATA_MCP_STARTUP_SECTIONS", "KATA_MCP_TOKEN_FILE", "KATA_AUTH_TOKEN_FILE", "KATA_DOCBANK_URL", "KATA_DOCBANK_API_KEY_FILE", "KATA_DOCBANK_FOLDER", "KATA_SEARCH_EMBEDDINGS_BASE_URL", "KATA_SEARCH_EMBEDDINGS_MODEL", "KATA_SEARCH_EMBEDDINGS_DIMS", "KATA_SEARCH_EMBEDDINGS_API_KEY_FILE", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_PREFIX", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_SUFFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_PREFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_SUFFIX", "KATA_SEARCH_EMBEDDINGS_REQUEST_DIMENSIONS", "KATA_BACKUP_DIR", "KATA_BACKUP_INTERVAL", "KATA_BACKUP_RETAIN"} {
+	for _, key := range []string{"KATA_LISTEN", "KATA_WEB_LISTEN", "KATA_WEB_PUBLIC_ORIGIN", "KATA_MCP_ENABLED", "KATA_MCP_ACTOR", "KATA_MCP_PROJECTS", "KATA_MCP_ALL_PROJECTS", "KATA_MCP_STARTUP_SECTIONS", "KATA_MCP_TOKEN_FILE", "KATA_AUTH_TOKEN_FILE", "KATA_DOCBANK_URL", "KATA_DOCBANK_API_KEY_FILE", "KATA_DOCBANK_FOLDER", "KATA_SEARCH_EMBEDDINGS_BASE_URL", "KATA_SEARCH_EMBEDDINGS_MODEL", "KATA_SEARCH_EMBEDDINGS_DIMS", "KATA_SEARCH_EMBEDDINGS_API_KEY_FILE", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_PREFIX", "KATA_SEARCH_EMBEDDINGS_DOCUMENT_SUFFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_PREFIX", "KATA_SEARCH_EMBEDDINGS_QUERY_SUFFIX", "KATA_SEARCH_EMBEDDINGS_REQUEST_DIMENSIONS", "KATA_BACKUP_DIR", "KATA_BACKUP_INTERVAL", "KATA_BACKUP_RETAIN"} {
 		t.Run(key, func(t *testing.T) {
 			_, err := config.LocalProfileEnvironment(config.LocalProfileConfig{Home: t.TempDir(), Catalog: config.CatalogDaemonConfig{TokenEnv: key}}, true)
 			require.ErrorContains(t, err, "reserved environment key")

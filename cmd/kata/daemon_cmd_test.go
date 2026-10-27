@@ -477,6 +477,36 @@ func TestDaemonStatus_AgentReportsWebURL(t *testing.T) {
 	assert.Contains(t, string(out), "unreachable")
 }
 
+func TestDaemonStatusReportsMCPState(t *testing.T) {
+	for _, state := range []string{"serving", "unavailable"} {
+		t.Run(state, func(t *testing.T) {
+			resetFlags(t)
+			setupKataEnv(t)
+			ns, err := daemonruntime.NewNamespace()
+			require.NoError(t, err)
+			require.NoError(t, ns.EnsureDirs())
+			_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+				PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:7777",
+				Metadata: map[string]string{"mcp": state},
+			})
+			require.NoError(t, err)
+
+			var got struct {
+				Daemons []struct {
+					MCP string `json:"mcp"`
+				} `json:"daemons"`
+			}
+			require.NoError(t, json.Unmarshal(executeRoot(t, newRootCmd(), "daemon", "status", "--json"), &got))
+			require.Len(t, got.Daemons, 1)
+			assert.Equal(t, state, got.Daemons[0].MCP)
+			resetFlags(t)
+			assert.Contains(t, string(executeRoot(t, newRootCmd(), "--agent", "daemon", "status")), " mcp="+state+" ")
+			resetFlags(t)
+			assert.Contains(t, string(executeRoot(t, newRootCmd(), "daemon", "status")), "  MCP:     "+state+"\n")
+		})
+	}
+}
+
 func TestRuntimeRecordRedactsPostgresDSN(t *testing.T) {
 	// Build the runtime-record DBPath the way the daemon does and assert the
 	// password is hidden. Direct unit test on the assembly function avoids

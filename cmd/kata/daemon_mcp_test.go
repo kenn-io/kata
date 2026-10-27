@@ -65,7 +65,7 @@ func TestDaemonServesMCPWithSeparateBearer(t *testing.T) {
 		{name: "shared TCP", listen: "127.0.0.1:0", web: "public_origin = 'https://daemon.example'\n", host: "daemon.example", contentType: "application/json", checkMountPolicy: true},
 		{name: "mixed-case JSON", listen: "127.0.0.1:0", web: "public_origin = 'https://daemon.example'\n", host: "daemon.example", contentType: "Application/JSON"},
 		{name: "Unix with web listener", web: "listen = '127.0.0.1:0'\n", contentType: "application/json"},
-		{name: "startup sections", listen: "127.0.0.1:0", contentType: "application/json", startup: `startup_sections = ["issue_mutation"]`},
+		{name: "startup sections", listen: "127.0.0.1:0", contentType: "application/json", startup: `startup_sections = [" issue_mutation "]`},
 		{name: "unknown startup section", listen: "127.0.0.1:0", startup: `startup_sections = ["missing"]`, unavailable: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -85,6 +85,7 @@ func TestDaemonServesMCPWithSeparateBearer(t *testing.T) {
 			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(`[mcp]
 enabled = true
 actor = " gateway-agent "
+all_projects = true
 token_env = "KATA_MCP_TEST_TOKEN"
 `+tt.startup+`
 [web]
@@ -129,6 +130,11 @@ token_env = "KATA_MCP_TEST_TOKEN"
 				return readErr == nil && json.Unmarshal(body, &record) == nil
 			}, 5*time.Second, 20*time.Millisecond)
 			require.False(t, exited, "daemon exited during startup: %v", startupErr)
+			wantMCP := "serving"
+			if tt.unavailable {
+				wantMCP = "unavailable"
+			}
+			require.Equal(t, wantMCP, record.Metadata["mcp"])
 			endpoint := "http://" + record.Address + "/mcp"
 			if tt.listen == "" {
 				require.Equal(t, kitdaemon.NetworkUnix, record.Network)
@@ -268,7 +274,7 @@ func TestDaemonMCPSelfCallsBypassHTTPProxy(t *testing.T) {
 			t.Cleanup(func() { http.DefaultTransport = original })
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
-			handler, err := newDaemonMCPHandler(ctx, store, config.MCPConfig{Actor: "gateway-agent"}, "test-mcp-token",
+			handler, err := newDaemonMCPHandler(ctx, store, config.MCPConfig{Actor: "gateway-agent", AllProjects: true}, "test-mcp-token",
 				kitdaemon.Endpoint{Network: "tcp", Address: backendURL.Host},
 				tt.auth)
 			require.NoError(t, err)
@@ -297,14 +303,16 @@ func TestDaemonMCPProjectScope(t *testing.T) {
 		wantProjects              []string
 		archiveAlpha              bool
 	}{
-		{name: "all by default", wantProjects: []string{"alpha", "beta"}},
+		{name: "all projects", projects: "all", wantProjects: []string{"alpha", "beta"}},
 		{name: "trimmed", projects: `[" alpha "]`, wantProjects: []string{"alpha"}},
 		{name: "archived", projects: `["alpha"]`, archiveAlpha: true, wantError: `[mcp] projects: MCP project "alpha" was not found`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			home := deploymentHome(t)
 			contents := "[mcp]\nactor = 'gateway-agent'\n"
-			if tt.projects != "" {
+			if tt.projects == "all" {
+				contents += "all_projects = true\n"
+			} else {
 				contents += "projects = " + tt.projects + "\n"
 			}
 			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(contents), 0o600))
@@ -359,7 +367,10 @@ func TestDaemonMCPPreflightRejectsInvalidAuthority(t *testing.T) {
 		{"identity mode", "127.0.0.1:7777", "[auth]\nrequire_token_identity = true\n[mcp]\nenabled = true\n", `[mcp] enabled cannot be combined with [auth] require_token_identity: the daemon MCP endpoint calls REST with the bootstrap token, which cannot perform attributed writes; run "kata mcp serve --http" with a user token instead`},
 		{"proxy actor", "127.0.0.1:7777", "[auth.proxy]\ntrusted_actor_header = 'X-Kata-Actor'\ntrusted_proxy_listeners = ['127.0.0.1:7777']\n[mcp]\nenabled = true\nactor = 'gateway-agent'\ntoken_env = 'KATA_MCP_TEST_TOKEN'\n", `[mcp] enabled cannot be combined with [auth.proxy] trusted_actor_header: the daemon MCP endpoint's REST calls carry no proxy actor header; run "kata mcp serve --http" with REST access through a listener outside trusted_proxy_listeners or through the proxy that sets the actor header`},
 		{"proxy actor on expanded IPv6", "[0:0:0:0:0:0:0:1]:7777", "[auth.proxy]\ntrusted_actor_header = 'X-Kata-Actor'\ntrusted_proxy_listeners = ['[::1]:7777']\n[mcp]\nenabled = true\nactor = 'gateway-agent'\ntoken_env = 'KATA_MCP_TEST_TOKEN'\n", `[mcp] enabled cannot be combined with [auth.proxy] trusted_actor_header: the daemon MCP endpoint's REST calls carry no proxy actor header; run "kata mcp serve --http" with REST access through a listener outside trusted_proxy_listeners or through the proxy that sets the actor header`},
-		{"proxy actor on another listener", "127.0.0.1:7777", "[auth.proxy]\ntrusted_actor_header = 'X-Kata-Actor'\ntrusted_proxy_listeners = ['127.0.0.1:8888']\n[mcp]\nenabled = true\nactor = 'gateway-agent'\ntoken_env = 'KATA_MCP_TEST_TOKEN'\n", ""},
+		{"proxy actor on another listener", "127.0.0.1:7777", "[auth.proxy]\ntrusted_actor_header = 'X-Kata-Actor'\ntrusted_proxy_listeners = ['127.0.0.1:8888']\n[mcp]\nenabled = true\nactor = 'gateway-agent'\nall_projects = true\ntoken_env = 'KATA_MCP_TEST_TOKEN'\n", ""},
+		{"no project scope", "127.0.0.1:7777", "[mcp]\nenabled = true\nactor = 'gateway-agent'\ntoken_env = 'KATA_MCP_TEST_TOKEN'\n", "[mcp] enabled requires projects or all_projects = true"},
+		{"empty project list", "127.0.0.1:7777", "[mcp]\nenabled = true\nactor = 'gateway-agent'\nprojects = []\ntoken_env = 'KATA_MCP_TEST_TOKEN'\n", "[mcp] enabled requires projects or all_projects = true"},
+		{"projects and all projects", "127.0.0.1:7777", "[mcp]\nenabled = true\nactor = 'gateway-agent'\nprojects = ['alpha']\nall_projects = true\ntoken_env = 'KATA_MCP_TEST_TOKEN'\n", "[mcp] projects and all_projects cannot both be set"},
 		{"no token source", "127.0.0.1:7777", "[mcp]\nenabled = true\n", "[mcp] enabled requires token_file or token_env"},
 		{"blank configured actor", "127.0.0.1:7777", "[mcp]\nenabled = true\nactor = '  '\ntoken_env = 'KATA_MCP_TEST_TOKEN'\n", "kata actor is required"},
 	} {
@@ -375,5 +386,21 @@ func TestDaemonMCPPreflightRejectsInvalidAuthority(t *testing.T) {
 				require.ErrorContains(t, err, tt.want)
 			}
 		})
+	}
+}
+
+// A "tcp" wildcard listener is dual-stack, but IPv6-disabled containers have no ::1.
+func TestDaemonMCPSelfEndpointUsesIPv4LoopbackForWildcards(t *testing.T) {
+	for listen, want := range map[string]string{
+		"0.0.0.0:7777":           "127.0.0.1:7777",
+		":7777":                  "127.0.0.1:7777",
+		"[::]:7777":              "127.0.0.1:7777",
+		"[0:0:0:0:0:0:0:0]:7777": "127.0.0.1:7777",
+		"[::1]:7777":             "[::1]:7777",
+		"100.64.0.5:7777":        "100.64.0.5:7777",
+	} {
+		self, err := daemonMCPSelfEndpoint(kitdaemon.Endpoint{Network: kitdaemon.NetworkTCP, Address: listen})
+		require.NoError(t, err)
+		require.Equal(t, want, self.Address, listen)
 	}
 }

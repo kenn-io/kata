@@ -87,17 +87,43 @@ func TestBrowserOriginPolicy(t *testing.T) {
 		})
 	}
 
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:27123/api/v1/projects", nil)
+	req.Host = "127.0.0.1:27123"
+	req.Header.Set("Origin", "http://127.0.0.1:27123")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, req)
+	assert.Equal(t, http.StatusNoContent, response.Code)
+}
+
+// /mcp owns its bearer and media-type checks only while the daemon mounts it.
+func TestMCPListenerPolicyAppliesOnlyWhenMounted(t *testing.T) {
 	for _, tt := range []struct {
-		name   string
-		origin string
-		want   int
+		name                string
+		kind                ListenerKind
+		mounted             bool
+		origin, contentType string
+		want                int
 	}{
-		{name: "MCP without origin on browser listener", want: http.StatusNoContent},
-		{name: "MCP foreign origin on browser listener", origin: "https://attacker.example", want: http.StatusForbidden},
+		{name: "browser mounted without origin", kind: ListenerBrowser, mounted: true, want: http.StatusNoContent},
+		{name: "browser mounted foreign origin", kind: ListenerBrowser, mounted: true, origin: "https://attacker.example", want: http.StatusForbidden},
+		{name: "browser unmounted without origin", kind: ListenerBrowser, want: http.StatusForbidden},
+		{name: "shared mounted mixed-case JSON", kind: ListenerSharedTCP, mounted: true, contentType: "Application/JSON", want: http.StatusNoContent},
+		{name: "shared unmounted without origin", kind: ListenerSharedTCP, contentType: "Application/JSON", want: http.StatusForbidden},
+		{name: "socket mounted mixed-case JSON", kind: ListenerSocket, mounted: true, contentType: "Application/JSON", want: http.StatusNoContent},
+		{name: "socket unmounted mixed-case JSON", kind: ListenerSocket, contentType: "Application/JSON", want: http.StatusUnsupportedMediaType},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:27123/mcp", nil)
+			handler, err := ApplyListenerPolicy(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNoContent)
+			}), ListenerPolicy{Kind: tt.kind, Origin: "http://127.0.0.1:27123", MCP: tt.mounted})
+			require.NoError(t, err)
+			contentType := tt.contentType
+			if contentType == "" {
+				contentType = "application/json"
+			}
+			req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:27123/mcp", strings.NewReader("{}"))
 			req.Host = "127.0.0.1:27123"
+			req.Header.Set("Content-Type", contentType)
 			if tt.origin != "" {
 				req.Header.Set("Origin", tt.origin)
 			}
@@ -106,13 +132,6 @@ func TestBrowserOriginPolicy(t *testing.T) {
 			assert.Equal(t, tt.want, response.Code)
 		})
 	}
-
-	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:27123/api/v1/projects", nil)
-	req.Host = "127.0.0.1:27123"
-	req.Header.Set("Origin", "http://127.0.0.1:27123")
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, req)
-	assert.Equal(t, http.StatusNoContent, response.Code)
 }
 
 func TestLocalUISessionPolicyRequiresDirectLoopback(t *testing.T) {

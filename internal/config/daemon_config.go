@@ -84,6 +84,7 @@ type MCPConfig struct {
 	Enabled         bool     `toml:"enabled"`
 	Actor           string   `toml:"actor"`
 	Projects        []string `toml:"projects"`
+	AllProjects     bool     `toml:"all_projects"` // required when Projects is empty
 	StartupSections []string `toml:"startup_sections"`
 	TokenFile       string   `toml:"token_file"`
 	TokenEnv        string   `toml:"token_env"`

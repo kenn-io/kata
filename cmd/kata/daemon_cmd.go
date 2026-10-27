@@ -649,6 +649,7 @@ func daemonStatusCmd() *cobra.Command {
 						WebURL:        r.Metadata["web_origin"],
 						DBPath:        r.Metadata["db_path"],
 						StartedAt:     r.StartedAt,
+						MCP:           r.Metadata["mcp"],
 						ConfigSources: runtimeConfigSources(r.Metadata),
 					})
 				}
@@ -659,9 +660,12 @@ func daemonStatusCmd() *cobra.Command {
 				if len(out.Daemons) > 0 {
 					status = "running"
 				}
-				webURL := ""
+				daemonFields := ""
 				if len(out.Daemons) == 1 && out.Daemons[0].WebURL != "" {
-					webURL = " web_url=" + out.Daemons[0].WebURL
+					daemonFields = " web_url=" + out.Daemons[0].WebURL
+				}
+				if len(out.Daemons) == 1 && out.Daemons[0].MCP != "" {
+					daemonFields += " mcp=" + out.Daemons[0].MCP
 				}
 				message := ""
 				if selected.Message != "" {
@@ -670,7 +674,7 @@ func daemonStatusCmd() *cobra.Command {
 				if selected.RootSigning != nil {
 					message += " root_signing=unavailable"
 				}
-				_, err := fmt.Fprintf(cmd.OutOrStdout(), "OK daemon status=%s%s selected_state=%s selected_profile=%s%s\n", status, webURL, selected.State, agentValue(selected.Profile), message)
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "OK daemon status=%s%s selected_state=%s selected_profile=%s%s\n", status, daemonFields, selected.State, agentValue(selected.Profile), message)
 				return err
 			case outputJSON:
 				return emitJSON(cmd.OutOrStdout(), out)
@@ -696,6 +700,9 @@ func daemonStatusCmd() *cobra.Command {
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "kata running at %s\n", daemonStatusAddress(d.Address))
 				if d.WebURL != "" {
 					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  web UI:  %s\n", d.WebURL)
+				}
+				if d.MCP != "" {
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  MCP:     %s\n", d.MCP)
 				}
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  pid:     %d\n", d.PID)
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  version: %s\n", d.Version)
@@ -728,6 +735,7 @@ type daemonStatusEntry struct {
 	WebURL        string            `json:"web_url,omitempty"`
 	DBPath        string            `json:"db_path"`
 	StartedAt     time.Time         `json:"started_at"`
+	MCP           string            `json:"mcp,omitempty"` // "serving" or "unavailable" when [mcp] is enabled
 	ConfigSources map[string]string `json:"config_sources,omitempty"`
 }
 
@@ -1557,8 +1565,10 @@ func runDaemonProcess(
 	var mcpHandler http.Handler
 	if dcfg.MCP.Enabled {
 		mcpHandler, err = newDaemonMCPHandler(ctx, store, dcfg.MCP, startup.MCPToken, runtimeEndpoint, dcfg.Auth)
+		rec.Metadata["mcp"] = "serving"
 		if err != nil {
 			mcpHandler = daemonMCPUnavailableHandler(err)
+			rec.Metadata["mcp"] = "unavailable"
 		}
 	}
 	srv := daemon.NewServer(daemon.ServerConfig{

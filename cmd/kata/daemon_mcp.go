@@ -28,7 +28,7 @@ func daemonMCPUnavailableHandler(err error) http.Handler {
 }
 
 func newDaemonMCPHandler(ctx context.Context, store db.Storage, cfg config.MCPConfig, token string, endpoint kitdaemon.Endpoint, auth config.AuthConfig) (http.Handler, error) {
-	scope, err := daemonMCPScope(ctx, store, cfg.Projects)
+	scope, err := daemonMCPScope(ctx, store, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -69,8 +69,8 @@ func newDaemonMCPHandler(ctx context.Context, store db.Storage, cfg config.MCPCo
 	return newMCPHTTPHandler(server, token, true), nil
 }
 
-func daemonMCPScope(ctx context.Context, store db.Storage, names []string) (*mcpserver.Scope, error) {
-	if len(names) == 0 {
+func daemonMCPScope(ctx context.Context, store db.Storage, cfg config.MCPConfig) (*mcpserver.Scope, error) {
+	if cfg.AllProjects {
 		return mcpserver.NewAllScope(), nil
 	}
 	catalog, err := store.ListProjects(ctx)
@@ -81,7 +81,7 @@ func daemonMCPScope(ctx context.Context, store db.Storage, names []string) (*mcp
 	for _, project := range catalog {
 		projects = append(projects, mcpserver.ProjectIdentity{ID: project.ID, UID: project.UID, Name: project.Name})
 	}
-	scope, err := mcpserver.SelectAllowlistScope(projects, names)
+	scope, err := mcpserver.SelectAllowlistScope(projects, cfg.Projects)
 	if err != nil {
 		return nil, fmt.Errorf("[mcp] projects: %w", err)
 	}
@@ -96,11 +96,9 @@ func daemonMCPSelfEndpoint(endpoint kitdaemon.Endpoint) (kitdaemon.Endpoint, err
 	if err != nil {
 		return kitdaemon.Endpoint{}, err
 	}
-	ip := net.ParseIP(host)
-	if host == "" || ip.Equal(net.IPv4zero) {
+	// A "tcp" wildcard listener is dual-stack; IPv4 loopback works even where ::1 is absent.
+	if ip := net.ParseIP(host); host == "" || ip.IsUnspecified() {
 		host = "127.0.0.1"
-	} else if ip.Equal(net.IPv6zero) {
-		host = "::1"
 	}
 	endpoint.Address = net.JoinHostPort(host, port)
 	return endpoint, nil
@@ -141,6 +139,16 @@ func resolveDaemonMCPStartup(ctx context.Context, cfg *config.DaemonConfig, endp
 	}
 	if token == "" {
 		return "", errors.New("[mcp] enabled requires token_file or token_env")
+	}
+	// An all-project mount carries daemon-wide authority, so it must be chosen explicitly.
+	switch {
+	case cfg.MCP.AllProjects && len(cfg.MCP.Projects) > 0:
+		return "", errors.New("[mcp] projects and all_projects cannot both be set")
+	case !cfg.MCP.AllProjects && len(cfg.MCP.Projects) == 0:
+		return "", errors.New("[mcp] enabled requires projects or all_projects = true")
+	}
+	for i, section := range cfg.MCP.StartupSections {
+		cfg.MCP.StartupSections[i] = strings.TrimSpace(section)
 	}
 	return token, nil
 }

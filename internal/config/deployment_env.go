@@ -45,13 +45,18 @@ func applyDeploymentEnv(cfg *DaemonConfig) error {
 		}
 		cfg.Sources["mcp_startup_sections"] = "KATA_MCP_STARTUP_SECTIONS"
 	}
-	if value := strings.TrimSpace(os.Getenv("KATA_MCP_ENABLED")); value != "" {
-		enabled, err := strconv.ParseBool(value)
-		if err != nil {
-			return fmt.Errorf("KATA_MCP_ENABLED must be true or false")
+	for name, field := range map[string]*bool{
+		"KATA_MCP_ENABLED":      &cfg.MCP.Enabled,
+		"KATA_MCP_ALL_PROJECTS": &cfg.MCP.AllProjects,
+	} {
+		if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+			parsed, err := strconv.ParseBool(value)
+			if err != nil {
+				return fmt.Errorf("%s must be true or false", name)
+			}
+			*field = parsed
+			cfg.Sources[deploymentSourceKey(name)] = name
 		}
-		cfg.MCP.Enabled = enabled
-		cfg.Sources["mcp_enabled"] = "KATA_MCP_ENABLED"
 	}
 	if value := strings.TrimSpace(os.Getenv("KATA_SEARCH_EMBEDDINGS_DIMS")); value != "" {
 		dims, err := strconv.Atoi(value)
