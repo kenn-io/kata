@@ -9,6 +9,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- MCP clients can call `kata.skills` to list and read Kata's agent workflow
+  guides (searching first, claiming, attention, closing with evidence,
+  teammates, scheduling and events), each built from the same text
+  `kata quickstart` prints. The workflow guide includes worked MCP calls,
+  and workflow tools point to the relevant guide. See [Agent guides](reference/mcp.md#agent-guides-kataskills).
+
 - List the daemon catalog from Go with `client.DaemonCatalog()`, and connect
   to an entry by name with `client.DiscoverOptions{Daemon: name}`, which
   matches `kata --daemon <name>`. Set `DiscoverOptions.StartWith` to a `kata`

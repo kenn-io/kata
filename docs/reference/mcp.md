@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-10-22
+last_edited: 2026-10-26
 ---
 
 # Model Context Protocol server
@@ -224,7 +224,7 @@ or imported creation timestamps. Stop only when `complete` is true.
 
 ## Progressive tool catalog
 
-The initial catalog exposes read-only section loaders. Call the applicable
+The initial catalog exposes read-only section loaders and `kata.skills`. Call the applicable
 loader, then refresh the tool list when the server sends the standard
 `notifications/tools/list_changed` notification. This exposes only the detailed
 typed tools needed for the current task instead of placing every detailed tool in the
@@ -308,6 +308,39 @@ assignment expiry and previous owner when present. `kata.edit` supports field,
 owner, priority, relationship, scheduling, and generic metadata changes. An
 issue-field or relationship change and a metadata change must use separate
 `kata.edit` calls so one failed request cannot leave a partial edit.
+
+## Agent guides (`kata.skills`)
+
+`kata.skills` is always in the first tool catalog. It is not a section loader:
+no loader call is needed to list or read a guide. Call it with no arguments to
+list the catalog, or pass a name:
+
+```json
+{"name":"workflow"}
+```
+
+The seven names are `workflow`, `issues`, `claiming`, `closing`, `teammates`,
+`scheduling`, and `events`. Read `workflow` before your first write. The guides
+reuse the contract and quickstart text shipped by `kata quickstart`, followed
+by a command-to-tool table with the section loaders and MCP differences.
+The workflow guide also includes worked MCP calls for the required steps in
+both bound and multi-project form. Workflow tools link to their relevant
+guide in their descriptions.
+The Markdown body is returned once as text content; structured content holds
+only the guide's name, title, and summary.
+
+This is a fixed catalog of agent workflow guidance. It cannot read arbitrary
+files or other skills. For reference documentation, load `kata.load_docs`, then
+use `kata.search_docs` and `kata.read_doc`.
+
+Some CLI workflows have no equivalent MCP call. `kata notify` requires an
+operator with CLI access to send or clear requests. `kata.wait` waits on issue
+status only. For an attention wait, poll `kata.show` for every watched ref with
+your own deadline: a closed issue completes first, then a non-empty
+`work.attention` other than `ok`. `kata.inbox` lists notifications on open
+issues; it does not replace an attention wait. In multi-project scope, use
+`project#ref` for existing-issue calls and pass `project` only where the tool's
+schema includes it.
 
 ## Scheduling and someday
 

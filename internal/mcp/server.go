@@ -87,7 +87,7 @@ func New(options Options) (*sdkmcp.Server, error) {
 		Description: "Scoped Kata data and administration tools for coding agents.",
 		Version:     options.Version,
 	}, &sdkmcp.ServerOptions{
-		Instructions: "Use returned web_url values when linking to issues. Use Kata to search before creating work, claim actionable issues, record progress, and close only with evidence. All tools are fixed to " + scopeDescription + " and actor " + options.Actor + ".",
+		Instructions: "Use returned web_url values when linking to issues. Use Kata to search before creating work, claim actionable issues, record progress, and close only with evidence. All tools are fixed to " + scopeDescription + " and actor " + options.Actor + `. Call kata.skills with {"name":"workflow"} before your first write; call it with no arguments to list the other guides.`,
 		Capabilities: &sdkmcp.ServerCapabilities{
 			Tools: &sdkmcp.ToolCapabilities{ListChanged: true},
 		},
@@ -99,6 +99,7 @@ func New(options Options) (*sdkmcp.Server, error) {
 	))
 	server.AddReceivingMiddleware(cacheHintsMiddleware)
 	registerSectionLoaders(server, options)
+	registerSkillsTool(server)
 	return server, nil
 }
 
@@ -149,25 +150,25 @@ func registerIssueDiscoveryTools(server *sdkmcp.Server, handlers toolHandlers) {
 	addTool(server, "kata.graph", "Issue graph", "Read the bounded reachable relationship graph for one issue.", read, handlers.graph)
 	addTool(server, "kata.labels", "List labels", "List labels already used in the selected project scope with issue counts.", read, handlers.labels)
 	addTool(server, "kata.list", "List issues", "List compact issue summaries in the selected project scope with bounded filters.", read, handlers.list)
-	addTool(server, "kata.next", "Next issue", "Select the highest-priority ready issue.", read, handlers.next)
+	addTool(server, "kata.next", "Next issue", "Select the highest-priority ready issue. See kata.skills {\"name\":\"claiming\"}.", read, handlers.next)
 	addTool(server, "kata.ready", "List ready issues", "List open issues with no open blocking predecessor in the selected project scope.", read, handlers.ready)
-	addTool(server, "kata.search", "Search issues", "Search titles, bodies, and comments before creating duplicate work.", searchRead, handlers.search)
+	addTool(server, "kata.search", "Search issues", "Search titles, bodies, and comments before creating duplicate work. See kata.skills {\"name\":\"issues\"}.", searchRead, handlers.search)
 	addTool(server, "kata.show", "Show issue", "Read one issue with its body, metadata, relationships, and a bounded comment history.", read, handlers.show)
 }
 
 func registerIssueMutationTools(server *sdkmcp.Server, handlers toolHandlers) {
 	additive := toolHints(false, false, false)
 	mutating := toolHints(false, true, false)
-	addTool(server, "kata.claim", "Claim issue", "Claim an issue for the bound actor. Without force the call fails when another owner already holds it; force replaces that owner.", mutating, handlers.claim)
+	addTool(server, "kata.claim", "Claim issue", "Claim an issue for the bound actor. Without force the call fails when another owner already holds it; force replaces that owner. See kata.skills {\"name\":\"claiming\"}.", mutating, handlers.claim)
 	addTool(server, "kata.comment", "Add comment", "Append a progress or context comment using a required idempotency key.", additive, handlers.comment)
-	addTool(server, "kata.create", "Create issue", "Create project work after searching for duplicates. A stable idempotency key is required.", additive, handlers.create)
+	addTool(server, "kata.create", "Create issue", "Create project work after searching for duplicates. A stable idempotency key is required. See kata.skills {\"name\":\"issues\"}.", additive, handlers.create)
 	addTool(server, "kata.edit", "Edit issue", "Edit issue fields, ownership, priority, and relationship deltas atomically.", mutating, handlers.edit)
 	addTool(server, "kata.edit_comment", "Edit comment", "Replace one comment body as the startup actor.", mutating, handlers.editComment)
 	addTool(server, "kata.move", "Move issue", "Move an issue to another in-scope project while preserving its UID and relationships.", mutating, handlers.move)
-	addTool(server, "kata.set_deadline", "Set deadline", "Set or clear an issue deadline. Values accept a date, local date-time, or RFC 3339 UTC instant ending in Z.", mutating, handlers.setDeadline)
+	addTool(server, "kata.set_deadline", "Set deadline", "Set or clear an issue deadline. Values accept a date, local date-time, or RFC 3339 UTC instant ending in Z. See kata.skills {\"name\":\"scheduling\"}.", mutating, handlers.setDeadline)
 	addTool(server, "kata.set_label", "Set label presence", "Ensure that a label is present or absent on an issue.", mutating, handlers.setLabel)
-	addTool(server, "kata.set_metadata", "Patch metadata", "Patch issue metadata; JSON null removes a key. An optional revision makes the write conditional.", mutating, handlers.setMetadata)
-	addTool(server, "kata.set_schedule", "Set schedule", "Set or clear an issue schedule gate. Values accept a date, local date-time, or RFC 3339 UTC instant ending in Z.", mutating, handlers.setSchedule)
+	addTool(server, "kata.set_metadata", "Patch metadata", "Patch issue metadata; JSON null removes a key. An optional revision makes the write conditional. work.* keys: see kata.skills {\"name\":\"workflow\"}.", mutating, handlers.setMetadata)
+	addTool(server, "kata.set_schedule", "Set schedule", "Set or clear an issue schedule gate. Values accept a date, local date-time, or RFC 3339 UTC instant ending in Z. See kata.skills {\"name\":\"scheduling\"}.", mutating, handlers.setSchedule)
 }
 
 func registerIssueLifecycleTools(server *sdkmcp.Server, handlers toolHandlers) {
@@ -175,12 +176,12 @@ func registerIssueLifecycleTools(server *sdkmcp.Server, handlers toolHandlers) {
 	additive := toolHints(false, false, false)
 	mutating := toolHints(false, true, false)
 	addTool(server, "kata.audit_closes", "Audit closes", "List close records with bounded project and time filters.", read, handlers.auditCloses)
-	addTool(server, "kata.close", "Close issue", "Close a completed issue with a reason, substantive message, and typed evidence.", mutating, handlers.close)
+	addTool(server, "kata.close", "Close issue", "Close a completed issue with a reason, substantive message, and typed evidence. See kata.skills {\"name\":\"closing\"} for evidence rules.", mutating, handlers.close)
 	addTool(server, "kata.delete", "Delete issue", "Soft-delete an issue after exact confirmation.", mutating, handlers.deleteIssue)
 	addTool(server, "kata.purge", "Purge issue", "Irreversibly purge a soft-deleted issue after exact confirmation.", mutating, handlers.purgeIssue)
 	addTool(server, "kata.reopen", "Reopen issue", "Reopen a closed issue when new work is required.", mutating, handlers.reopen)
 	addTool(server, "kata.restore", "Restore issue", "Restore a soft-deleted issue.", additive, handlers.restoreIssue)
-	addTool(server, "kata.wait", "Wait for issues", "Wait for issue status conditions with a bounded timeout.", read, handlers.wait)
+	addTool(server, "kata.wait", "Wait for issues", "Wait for issue status conditions with a bounded timeout. See kata.skills {\"name\":\"teammates\"}.", read, handlers.wait)
 }
 
 func addTool[In, Out any](
@@ -254,6 +255,9 @@ func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
 	}
 
 	switch toolName {
+	case "kata.skills":
+		setStringBounds("name", 0, 64)
+		property("name").Description = "Guide name: " + strings.Join(SkillGuides(), ", ") + "; omit to list the guides"
 	case "kata.connectors":
 		setStringBounds("instance", 1, 128)
 	case "kata.connector_fields":

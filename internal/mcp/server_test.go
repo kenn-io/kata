@@ -57,7 +57,7 @@ func TestServerPublishesOnlySectionLoadersInitially(t *testing.T) {
 	require.True(t, session.InitializeResult().Capabilities.Tools.ListChanged)
 	result, err := session.ListTools(t.Context(), nil)
 	require.NoError(t, err)
-	require.Equal(t, sectionLoaderNames, toolNames(result.Tools))
+	require.Equal(t, append(append([]string(nil), sectionLoaderNames...), "kata.skills"), toolNames(result.Tools))
 	for _, tool := range result.Tools {
 		require.True(t, tool.Annotations.ReadOnlyHint, tool.Name)
 		require.False(t, *tool.Annotations.DestructiveHint, tool.Name)
@@ -86,7 +86,7 @@ func TestSectionLoaderActivatesOnlyItsTypedToolsAndIsIdempotent(t *testing.T) {
 
 	result, err := session.ListTools(t.Context(), nil)
 	require.NoError(t, err)
-	want := append(append([]string(nil), sectionLoaderNames...), "kata.digest", "kata.events")
+	want := append(append([]string(nil), sectionLoaderNames...), "kata.skills", "kata.digest", "kata.events")
 	sort.Strings(want)
 	require.Equal(t, want, toolNames(result.Tools))
 }
@@ -229,6 +229,7 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 		"kata.unassign",
 		"kata.wait",
 	}
+	wantNames = append(wantNames, "kata.skills")
 	wantNames = append(wantNames, sectionLoaderNames...)
 	sort.Strings(wantNames)
 	gotNames := make([]string, 0, len(result.Tools))
@@ -301,6 +302,7 @@ func TestServerToolAnnotationsMatchMutationRisk(t *testing.T) {
 	require.NoError(t, err)
 
 	readOnly := map[string]bool{
+		"kata.skills":                   true,
 		"kata.federation_bridge_status": true,
 		"kata.teams":                    true, "kata.team_show": true, "kata.project_access_show": true,
 		"kata.audit_closes":      true,
