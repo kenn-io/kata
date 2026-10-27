@@ -20,7 +20,8 @@ The configured timeout is effective only when all of these conditions hold:
 - `web.public_origin` does not describe a non-loopback origin;
 - trusted-proxy and shared-listener host aliases do not expose the process;
 - the restricted `[federation.ingress]` listener is disabled, because spokes
-  reach it through a proxy that cannot auto-start a stopped daemon.
+  reach it through a proxy that cannot auto-start a stopped daemon;
+- `[mcp]` is disabled, because gateways cannot auto-start a stopped daemon.
 
 An explicit `kata daemon start`, service-managed process, configured remote,
 or locally bound listener behind a public proxy remains long-running. Listener

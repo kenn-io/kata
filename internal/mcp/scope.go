@@ -93,6 +93,16 @@ func ResolveAllowlistScope(ctx context.Context, client *kataclient.Client, names
 	if client == nil {
 		return nil, errors.New("kata API client is required")
 	}
+	catalog, err := loadScopeProjects(ctx, client, false)
+	if err != nil {
+		return nil, err
+	}
+	return SelectAllowlistScope(catalog, names)
+}
+
+// SelectAllowlistScope selects names from an active project catalog and fixes
+// their immutable UIDs. Catalog acquisition belongs to the caller.
+func SelectAllowlistScope(catalog []ProjectIdentity, names []string) (*Scope, error) {
 	seen := make(map[string]struct{}, len(names))
 	clean := make([]string, 0, len(names))
 	for _, raw := range names {
@@ -108,10 +118,6 @@ func ResolveAllowlistScope(ctx context.Context, client *kataclient.Client, names
 	}
 	if len(clean) == 0 {
 		return nil, errors.New("at least one MCP project is required")
-	}
-	catalog, err := loadScopeProjects(ctx, client, false)
-	if err != nil {
-		return nil, err
 	}
 	byName := make(map[string]ProjectIdentity, len(catalog))
 	for _, project := range catalog {

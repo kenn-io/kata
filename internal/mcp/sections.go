@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -28,13 +29,23 @@ type toolSection struct {
 	register    func(*sdkmcp.Server, toolHandlers)
 }
 
-func registerSectionLoaders(server *sdkmcp.Server, options Options) {
+func registerSectionLoaders(server *sdkmcp.Server, options Options) error {
 	handlers := toolHandlers{options: options}
 	sections := toolSections(
 		options.StorageAdmin != nil,
 		options.EnableTokenAdmin && options.Scope.Mode() == ScopeAll,
 	)
+	byID := make(map[string]toolSection, len(sections))
+	for _, definition := range sections {
+		byID[definition.section] = definition
+	}
 	loaded := make(map[string]bool, len(sections))
+	load := func(definition toolSection) {
+		if definition.available && !loaded[definition.section] {
+			definition.register(server, handlers)
+			loaded[definition.section] = true
+		}
+	}
 	var mutex sync.Mutex
 	for _, definition := range sections {
 		addTool(server, definition.loader, definition.title, definition.description,
@@ -42,16 +53,27 @@ func registerSectionLoaders(server *sdkmcp.Server, options Options) {
 			func(_ context.Context, _ *sdkmcp.CallToolRequest, _ ToolSectionInput) (*sdkmcp.CallToolResult, ToolSectionOutput, error) {
 				mutex.Lock()
 				defer mutex.Unlock()
-				if definition.available && !loaded[definition.section] {
-					definition.register(server, handlers)
-					loaded[definition.section] = true
-				}
+				load(definition)
 				return successResult(), ToolSectionOutput{
 					Section: definition.section, Available: definition.available,
 					Loaded: loaded[definition.section], Tools: append([]string(nil), definition.tools...),
 				}, nil
 			})
 	}
+	for _, id := range options.StartupSections {
+		definition, ok := byID[id]
+		if !ok {
+			return fmt.Errorf("unknown MCP startup section %q", id)
+		}
+		if loaded[id] {
+			return fmt.Errorf("duplicate MCP startup section %q", id)
+		}
+		if !definition.available {
+			return fmt.Errorf("MCP startup section %q is unavailable", id)
+		}
+		load(definition)
+	}
+	return nil
 }
 
 func toolSections(storageAvailable, tokenAdminAvailable bool) []toolSection {

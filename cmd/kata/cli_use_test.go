@@ -35,6 +35,7 @@ import (
 
 // cliUseTelemetry is the daemon's reporter.
 type cliUseTelemetry struct {
+	fakeTelemetryReporter
 	mu       sync.Mutex
 	captured []map[string]any
 	events   []string

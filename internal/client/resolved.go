@@ -63,6 +63,8 @@ type ResolvedDaemon struct {
 	Token               string
 	AllowInsecure       bool
 	TrustPrivateNetwork bool
+	// Direct dials the daemon without environment proxies, for a daemon calling itself.
+	Direct bool
 
 	// Named catalog entries can be local or remote while sharing one public
 	// source enum. Retain that distinction so Running reproduces the exact

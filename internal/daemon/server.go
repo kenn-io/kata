@@ -120,6 +120,8 @@ type ServerConfig struct {
 	// WebHandler serves optional public browser assets. Non-API paths bypass
 	// the bearer check. Nil keeps the server API-only without bundled assets.
 	WebHandler http.Handler
+	// MCPHandler owns its bearer authentication; the daemon token doesn't apply.
+	MCPHandler http.Handler
 
 	// WebSessions owns browser cookie+header session state. Nil keeps
 	// the browser-only routes and middleware disabled for embedded/API-only use.
@@ -376,6 +378,9 @@ func NewServer(cfg ServerConfig) *Server {
 	registerWebDaemonHandlers(mux, cfg)
 	registerOpenAPIYAML(mux, cfg.HostAccess)
 	registerPprofHandlers(mux)
+	if cfg.MCPHandler != nil {
+		mux.Handle(mcpPath, cfg.MCPHandler)
+	}
 	if cfg.WebHandler != nil {
 		mux.Handle("/", cfg.WebHandler)
 	}
@@ -678,7 +683,7 @@ func withCSRFGuards(next http.Handler) http.Handler {
 
 func requireJSONMutation(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isMutation(r.Method) && r.ContentLength != 0 {
+		if r.URL.Path != mcpPath && isMutation(r.Method) && r.ContentLength != 0 {
 			ct := r.Header.Get("Content-Type")
 			if !strings.HasPrefix(ct, "application/json") && !isAttachmentUpload(r) {
 				api.WriteEnvelope(w, http.StatusUnsupportedMediaType, "unsupported_media_type",

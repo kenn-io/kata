@@ -12,6 +12,8 @@ import (
 	"go.kenn.io/kata/internal/daemonruntime"
 )
 
+const mcpPath = "/mcp"
+
 // ListenerKind identifies which trust boundary accepted a request.
 type ListenerKind string
 
@@ -72,7 +74,7 @@ func ApplyListenerPolicy(next http.Handler, policy ListenerPolicy) (http.Handler
 				api.WriteEnvelope(w, http.StatusBadRequest, "host_invalid", "Host header does not match listener authority")
 				return
 			}
-			if (policy.Kind == ListenerBrowser && !ordinaryAPIBearerRequest(r)) || isBrowserRequest(r) {
+			if (policy.Kind == ListenerBrowser && r.URL.Path != mcpPath && !ordinaryAPIBearerRequest(r)) || isBrowserRequest(r) {
 				if isMutation(r.Method) && !browserMutationOriginAllowed(r, policy.Origin) {
 					api.WriteEnvelope(w, http.StatusForbidden, "origin_forbidden", "Origin header does not match browser origin")
 					return
@@ -151,13 +153,14 @@ func addAllowedAuthority(allowed map[string]struct{}, authority string) {
 		}
 		allowed[strings.ToLower(alias)] = struct{}{}
 	}
+	ip := net.ParseIP(host)
 	switch {
 	case strings.EqualFold(host, "localhost"):
 		add("127.0.0.1")
 		add("::1")
-	case net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback():
+	case ip != nil && ip.IsLoopback():
 		add("localhost")
-	case host == "0.0.0.0" || host == "::":
+	case ip != nil && ip.IsUnspecified():
 		add("127.0.0.1")
 		add("localhost")
 		add("::1")
@@ -178,7 +181,7 @@ func isBrowserRequest(r *http.Request) bool {
 			return true
 		}
 	}
-	return !strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/openapi.yaml"
+	return !strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/openapi.yaml" && r.URL.Path != mcpPath
 }
 
 // ordinaryAPIBearerRequest classifies CLI, TUI and federation traffic, leaving

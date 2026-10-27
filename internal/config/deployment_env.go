@@ -17,6 +17,8 @@ func applyDeploymentEnv(cfg *DaemonConfig) error {
 		"KATA_LISTEN":                         &cfg.Listen,
 		"KATA_WEB_LISTEN":                     &cfg.Web.Listen,
 		"KATA_WEB_PUBLIC_ORIGIN":              &cfg.Web.PublicOrigin,
+		"KATA_MCP_ACTOR":                      &cfg.MCP.Actor,
+		"KATA_MCP_TOKEN_FILE":                 &cfg.MCP.TokenFile,
 		"KATA_BACKUP_DIR":                     &cfg.Backup.Dir,
 		"KATA_BACKUP_INTERVAL":                &cfg.Backup.Interval,
 		"KATA_BACKUP_RETAIN":                  &cfg.Backup.Retain,
@@ -28,6 +30,28 @@ func applyDeploymentEnv(cfg *DaemonConfig) error {
 			*field = value
 			cfg.Sources[deploymentSourceKey(name)] = name
 		}
+	}
+	if value := strings.TrimSpace(os.Getenv("KATA_MCP_PROJECTS")); value != "" {
+		cfg.MCP.Projects = strings.Split(value, ",")
+		for i, name := range cfg.MCP.Projects {
+			cfg.MCP.Projects[i] = strings.TrimSpace(name)
+		}
+		cfg.Sources["mcp_projects"] = "KATA_MCP_PROJECTS"
+	}
+	if value := strings.TrimSpace(os.Getenv("KATA_MCP_STARTUP_SECTIONS")); value != "" {
+		cfg.MCP.StartupSections = strings.Split(value, ",")
+		for i, section := range cfg.MCP.StartupSections {
+			cfg.MCP.StartupSections[i] = strings.TrimSpace(section)
+		}
+		cfg.Sources["mcp_startup_sections"] = "KATA_MCP_STARTUP_SECTIONS"
+	}
+	if value := strings.TrimSpace(os.Getenv("KATA_MCP_ENABLED")); value != "" {
+		enabled, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("KATA_MCP_ENABLED must be true or false")
+		}
+		cfg.MCP.Enabled = enabled
+		cfg.Sources["mcp_enabled"] = "KATA_MCP_ENABLED"
 	}
 	if value := strings.TrimSpace(os.Getenv("KATA_SEARCH_EMBEDDINGS_DIMS")); value != "" {
 		dims, err := strconv.Atoi(value)

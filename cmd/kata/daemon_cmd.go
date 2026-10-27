@@ -909,6 +909,7 @@ func daemonRestartCmd() *cobra.Command {
 type daemonStartupPreflight struct {
 	Config         *config.DaemonConfig
 	Web            config.WebConfig
+	MCPToken       string
 	Listen         string
 	Namespace      *daemonruntime.Namespace
 	Endpoint       kitdaemon.Endpoint
@@ -945,6 +946,10 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 		return daemonStartupPreflight{}, err
 	}
 	endpoint, err := chooseEndpoint(ns, listen)
+	if err != nil {
+		return daemonStartupPreflight{}, err
+	}
+	mcpToken, err := resolveDaemonMCPStartup(ctx, dcfg, endpoint)
 	if err != nil {
 		return daemonStartupPreflight{}, err
 	}
@@ -1012,6 +1017,7 @@ func preflightDaemonStartup(ctx context.Context, listen string, insecureReadonly
 	return daemonStartupPreflight{
 		Config:         dcfg,
 		Web:            dcfg.Web,
+		MCPToken:       mcpToken,
 		Listen:         listen,
 		Namespace:      ns,
 		Endpoint:       endpoint,
@@ -1548,7 +1554,15 @@ func runDaemonProcess(
 	if dcfg.Docbank.Enabled() {
 		docbankClient = docbank.NewClient(dcfg.Docbank.URL, dcfg.Docbank.ResolveKey)
 	}
+	var mcpHandler http.Handler
+	if dcfg.MCP.Enabled {
+		mcpHandler, err = newDaemonMCPHandler(ctx, store, dcfg.MCP, startup.MCPToken, runtimeEndpoint, dcfg.Auth)
+		if err != nil {
+			mcpHandler = daemonMCPUnavailableHandler(err)
+		}
+	}
 	srv := daemon.NewServer(daemon.ServerConfig{
+		MCPHandler:                mcpHandler,
 		FederationSigning:         signingVerifier,
 		FederationSigningRequired: dcfg.Federation.Signing.Required,
 		DB:                        store,

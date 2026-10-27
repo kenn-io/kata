@@ -51,14 +51,44 @@ func TestResolveBoundScopeRetainsAuthorityByUIDAfterRename(t *testing.T) {
 	require.Equal(t, "01HAAAAAAAAAAAAAAAAAAAAAAA", project.UID)
 }
 
-func TestResolveAllowlistScopeRejectsDuplicateAndMissingProjects(t *testing.T) {
-	client := projectCatalogClient(t, `{"projects":[{"id":1,"uid":"01HAAAAAAAAAAAAAAAAAAAAAAA","name":"spoke-project","metadata":{},"revision":1,"created_at":"2026-08-11T00:00:00Z"}]}`)
+func TestResolveAllowlistScopeSelection(t *testing.T) {
+	catalog := []ProjectIdentity{{ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project"}}
+	for _, tt := range []struct {
+		name      string
+		names     []string
+		wantError string
+	}{
+		{name: "trimmed", names: []string{" spoke-project "}},
+		{name: "duplicate", names: []string{"spoke-project", " spoke-project "}, wantError: `duplicate MCP project "spoke-project"`},
+		{name: "missing", names: []string{"spoke-project", "missing-project"}, wantError: `MCP project "missing-project" was not found`},
+		{name: "empty name", names: []string{" "}, wantError: "MCP project name must not be empty"},
+		{name: "no names", wantError: "at least one MCP project is required"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			selected, selectErr := SelectAllowlistScope(catalog, tt.names)
+			if tt.wantError != "" {
+				require.EqualError(t, selectErr, tt.wantError)
+				require.Nil(t, selected)
+				return
+			}
+			require.NoError(t, selectErr)
+			require.Equal(t, ScopeAllowlist, selected.Mode())
+			projects, err := selected.Projects(t.Context(), nil, false)
+			require.NoError(t, err)
+			require.Equal(t, catalog, projects)
+		})
+	}
 
-	_, err := ResolveAllowlistScope(t.Context(), client, []string{"spoke-project", "spoke-project"})
-	require.EqualError(t, err, `duplicate MCP project "spoke-project"`)
-
-	_, err = ResolveAllowlistScope(t.Context(), client, []string{"missing-project"})
-	require.EqualError(t, err, `MCP project "missing-project" was not found`)
+	client := projectCatalogClient(t, `{"projects":[
+		{"id":1,"uid":"01HAAAAAAAAAAAAAAAAAAAAAAA","name":"spoke-project","metadata":{},"revision":1,"created_at":"2026-08-11T00:00:00Z"},
+		{"id":2,"uid":"01HBBBBBBBBBBBBBBBBBBBBBBB","name":"hub-project","metadata":{},"revision":1,"created_at":"2026-08-11T00:00:00Z"}
+	]}`)
+	resolved, err := ResolveAllowlistScope(t.Context(), client, []string{" spoke-project "})
+	require.NoError(t, err)
+	require.Equal(t, ScopeAllowlist, resolved.Mode())
+	projects, err := resolved.Projects(t.Context(), nil, false)
+	require.NoError(t, err)
+	require.Equal(t, catalog, projects)
 }
 
 func TestAllowlistScopeServesRemainingProjectsWhenOneIsMissing(t *testing.T) {

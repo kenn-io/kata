@@ -40,6 +40,8 @@ type Options struct {
 	Version           string
 	StorageAdmin      *storageadmin.Admin
 	EnableTokenAdmin  bool
+	// StartupSections preloads section IDs; empty keeps the loader-only catalog.
+	StartupSections []string
 	// ObserveToolCall must return immediately; nil disables activity reporting.
 	ObserveToolCall func()
 }
@@ -98,7 +100,9 @@ func New(options Options) (*sdkmcp.Server, error) {
 		options.ObserveToolCall,
 	))
 	server.AddReceivingMiddleware(cacheHintsMiddleware)
-	registerSectionLoaders(server, options)
+	if err := registerSectionLoaders(server, options); err != nil {
+		return nil, err
+	}
 	return server, nil
 }
 

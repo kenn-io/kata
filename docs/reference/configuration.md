@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-10-26
+last_edited: 2026-10-27
 ---
 
 # Configuration
@@ -128,6 +128,11 @@ string; on a keyed retry use `original_event.payload`. Both contain the same
 | `KATA_LISTEN` | Daemon API bind address. Overrides `listen` in the daemon config; `--listen` wins over both. |
 | `KATA_WEB_LISTEN` | Overrides `[web].listen`, the separate browser listener used with a Unix-socket API. |
 | `KATA_WEB_PUBLIC_ORIGIN` | Overrides `[web].public_origin`, the exact root browser origin. Non-loopback plain HTTP requires private-network trust. |
+| `KATA_MCP_ENABLED` | Overrides `[mcp].enabled`. Takes a boolean; an invalid value stops startup. |
+| `KATA_MCP_ACTOR` | Overrides `[mcp].actor`, the actor for daemon MCP mutations. |
+| `KATA_MCP_PROJECTS` | Overrides `[mcp].projects` with comma-separated project names. Names are trimmed and resolve at startup. Missing or archived listed projects disable `/mcp` (503, reason logged); REST and the web UI keep serving. Create or restore the project, then restart. |
+| `KATA_MCP_STARTUP_SECTIONS` | Overrides `[mcp].startup_sections` with comma-separated section IDs. IDs are trimmed; an empty value preserves TOML. Restart the daemon after changes. See [Startup sections](mcp.md#startup-sections). |
+| `KATA_MCP_TOKEN_FILE` | Overrides `[mcp].token_file`, the file containing the daemon MCP bearer token. |
 | `KATA_SEARCH_EMBEDDINGS_BASE_URL` | Overrides `[search.embeddings].base_url`. |
 | `KATA_SEARCH_EMBEDDINGS_MODEL` | Overrides `[search.embeddings].model`. |
 | `KATA_SEARCH_EMBEDDINGS_DIMS` | Overrides `[search.embeddings].dims`. Must be a non-negative integer; `0` keeps the default dimensionality. |
@@ -459,6 +464,32 @@ installation_id = 67890
 private_key_path = "/var/lib/kata/github-app.pem"
 ```
 
+The optional `[mcp]` section serves `/mcp` on the daemon's listener. It defaults to disabled. Restart after changes:
+
+```toml
+[mcp]
+enabled = true
+actor = "gateway-agent" # optional; defaults to the normal actor
+projects = ["alpha"]  # optional; defaults to all projects; missing or archived names disable /mcp (503)
+token_file = "/run/secrets/mcp-token"
+# Alternatively: token_env = "KATA_MCP_TOKEN"
+startup_sections = ["issue_discovery", "docs"] # Optional; defaults to []
+```
+
+Missing or archived configured projects disable `/mcp` (503, reason logged); REST
+and the web UI keep serving. Create or restore the project, then restart.
+
+Set `token_file` or `token_env` for the separate MCP bearer. The file wins; secrets resolve at startup.
+Set `startup_sections` to existing section IDs to publish their typed tools in
+the first `tools/list` after every restart. An omitted or empty array preserves
+loader-only progressive loading. Loaders remain available in both modes.
+Unknown, duplicate, or unavailable sections disable `/mcp` (503, reason logged);
+REST and the web UI keep serving. Correct the setting and restart. See
+[Startup sections](mcp.md#startup-sections) for IDs and availability rules.
+Identity mode (`[auth] require_token_identity`) requires `kata mcp serve --http` with a user token.
+Proxy actor mode (`[auth.proxy] trusted_actor_header`) requires `kata mcp serve --http` when the daemon's REST self-calls use a listener in `trusted_proxy_listeners`, because those calls carry no proxy actor header. The sidecar must reach the daemon through a REST listener outside `trusted_proxy_listeners` or through the proxy that sets the actor header.
+See [MCP transport](mcp.md#transport) for gateway setup and scope.
+
 Idle shutdown is intended for the default owner-local daemon rather than the
 shared-daemon configuration above. Its minimal configuration is:
 
@@ -491,7 +522,7 @@ For example, mount a `0600` secret file owned by the daemon user and set
 after a period without client activity. It is off by default. The setting is
 ignored for explicit daemon starts and for daemons exposed through non-loopback
 listeners, a public web origin, trusted-proxy configuration, shared-listener
-host aliases, or an enabled `[federation.ingress]` listener. `kata daemon start` replaces a running idle-eligible auto-started
+host aliases, an enabled `[federation.ingress]` listener, or an enabled `[mcp]` endpoint. `kata daemon start` replaces a running idle-eligible auto-started
 daemon with an explicit one so it stays resident, and `kata daemon restart`
 always starts an explicit daemon. The daemon writes one
 `kata daemon: idle shutdown after ...` line to its log when it exits for this

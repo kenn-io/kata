@@ -12,6 +12,31 @@ import (
 	"go.kenn.io/kata/internal/config"
 )
 
+func TestReadDaemonMCPStartupSections(t *testing.T) {
+	for _, tt := range []struct {
+		name, content string
+		want          []string
+	}{
+		{name: "default"},
+		{name: "empty", content: "[mcp]\nstartup_sections = []\n", want: []string{}},
+		{name: "configured", content: "[mcp]\nstartup_sections = ['issue_discovery', 'docs']\n", want: []string{"issue_discovery", "docs"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("KATA_HOME", home)
+			t.Setenv("KATA_MCP_STARTUP_SECTIONS", "")
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(tt.content), 0o600))
+			cfg, err := config.ReadDaemonConfig()
+			require.NoError(t, err)
+			if len(tt.want) == 0 {
+				require.Empty(t, cfg.MCP.StartupSections)
+			} else {
+				require.Equal(t, tt.want, cfg.MCP.StartupSections)
+			}
+		})
+	}
+}
+
 func TestReadDaemonConfigNormalizesConnectors(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)

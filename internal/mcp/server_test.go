@@ -24,6 +24,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/storageadmin"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -64,6 +65,81 @@ func TestServerPublishesOnlySectionLoadersInitially(t *testing.T) {
 	}
 }
 
+func TestServerPublishesStartupSectionsInitially(t *testing.T) {
+	admin, err := storageadmin.New(storageadmin.Config{Root: t.TempDir(), SourceDSN: "source.db"})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, admin.Close()) })
+	for _, section := range toolSections(true, true) {
+		t.Run(section.section, func(t *testing.T) {
+			options := Options{
+				Client: &kataclient.Client{}, Scope: NewAllScope(), Actor: "example-agent", Version: "test-version",
+				EnableTokenAdmin: true, StorageAdmin: admin,
+			}
+			progressive := connectRawTestServerWithOptions(t, options)
+			loaded, err := progressive.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: section.loader})
+			require.NoError(t, err)
+			require.False(t, loaded.IsError)
+			want, err := progressive.ListTools(t.Context(), nil)
+			require.NoError(t, err)
+
+			options.StartupSections = []string{section.section}
+			startup := connectRawTestServerWithOptions(t, options)
+			got, err := startup.ListTools(t.Context(), nil)
+			require.NoError(t, err)
+			require.Equal(t, want.Tools, got.Tools)
+		})
+	}
+	t.Run("combined sections", func(t *testing.T) {
+		session := connectRawTestServerWithOptions(t, Options{
+			Client: &kataclient.Client{}, ProjectID: 42, ProjectName: "spoke-project",
+			Actor: "example-agent", Version: "test-version",
+			StartupSections: []string{"issue_discovery", "issue_mutation", "coordination", "issue_lifecycle", "projects", "docs"},
+		})
+
+		initial, err := session.ListTools(t.Context(), nil)
+		require.NoError(t, err)
+		progressive := connectRawTestServerWithOptions(t, Options{
+			Client: &kataclient.Client{}, ProjectID: 42, ProjectName: "spoke-project",
+			Actor: "example-agent", Version: "test-version",
+		})
+		for _, section := range []string{"issue_discovery", "issue_mutation", "coordination", "issue_lifecycle", "projects", "docs"} {
+			result, err := progressive.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.load_" + section})
+			require.NoError(t, err)
+			require.False(t, result.IsError)
+		}
+		want, err := progressive.ListTools(t.Context(), nil)
+		require.NoError(t, err)
+		require.Equal(t, want.Tools, initial.Tools)
+	})
+}
+
+func TestServerRejectsInvalidStartupSections(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		sections []string
+		want     string
+	}{
+		{name: "unknown", sections: []string{"docs", "missing"}, want: `unknown MCP startup section "missing"`},
+		{name: "loader name", sections: []string{"kata.load_docs"}, want: `unknown MCP startup section "kata.load_docs"`},
+		{name: "empty ID", sections: []string{""}, want: `unknown MCP startup section ""`},
+		{name: "whitespace ID", sections: []string{" docs "}, want: `unknown MCP startup section " docs "`},
+		{name: "case variant", sections: []string{"Docs"}, want: `unknown MCP startup section "Docs"`},
+		{name: "duplicate", sections: []string{"docs", "docs"}, want: `duplicate MCP startup section "docs"`},
+		{name: "storage unavailable", sections: []string{"storage"}, want: `MCP startup section "storage" is unavailable`},
+		{name: "tokens disabled", sections: []string{"tokens"}, want: `MCP startup section "tokens" is unavailable`},
+		{name: "teams disabled", sections: []string{"teams"}, want: `MCP startup section "teams" is unavailable`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			server, err := New(Options{
+				Client: &kataclient.Client{}, Scope: NewAllScope(), Actor: "example-agent", Version: "test-version",
+				StartupSections: tt.sections,
+			})
+			require.ErrorContains(t, err, tt.want)
+			require.Nil(t, server)
+		})
+	}
+}
+
 func TestSectionLoaderActivatesOnlyItsTypedToolsAndIsIdempotent(t *testing.T) {
 	session := connectRawTestServerWithOptions(t, Options{
 		Client: &kataclient.Client{}, ProjectID: 42, ProjectName: "spoke-project",
@@ -89,6 +165,51 @@ func TestSectionLoaderActivatesOnlyItsTypedToolsAndIsIdempotent(t *testing.T) {
 	want := append(append([]string(nil), sectionLoaderNames...), "kata.digest", "kata.events")
 	sort.Strings(want)
 	require.Equal(t, want, toolNames(result.Tools))
+
+	t.Run("preloaded sections", func(t *testing.T) {
+		changed := make(chan struct{}, 1)
+		session := connectRawTestServerWithClientOptions(t, Options{
+			Client: &kataclient.Client{}, ProjectID: 42, ProjectName: "spoke-project",
+			Actor: "example-agent", Version: "test-version",
+			StartupSections: []string{"issue_discovery", "issue_mutation", "coordination", "issue_lifecycle", "projects", "docs"},
+		}, &sdkmcp.ClientOptions{ToolListChangedHandler: func(context.Context, *sdkmcp.ToolListChangedRequest) {
+			select {
+			case changed <- struct{}{}:
+			default:
+			}
+		}})
+
+		initial, err := session.ListTools(t.Context(), nil)
+		require.NoError(t, err)
+		for range 2 {
+			result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.load_issue_discovery"})
+			require.NoError(t, err)
+			require.False(t, result.IsError)
+			var output ToolSectionOutput
+			require.NoError(t, json.Unmarshal(mustJSON(t, result.StructuredContent), &output))
+			require.Equal(t, ToolSectionOutput{
+				Section: "issue_discovery", Available: true, Loaded: true,
+				Tools: []string{"kata.graph", "kata.labels", "kata.list", "kata.next", "kata.ready", "kata.search", "kata.show"},
+			}, output)
+		}
+		after, err := session.ListTools(t.Context(), nil)
+		require.NoError(t, err)
+		require.Equal(t, initial.Tools, after.Tools)
+		result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.load_activity"})
+		require.NoError(t, err)
+		require.False(t, result.IsError)
+		// The SDK caches catalogs until it receives the subscribed change notification.
+		select {
+		case <-changed:
+		case <-time.After(time.Second):
+			t.Fatal("MCP catalog change notification did not arrive")
+		}
+		after, err = session.ListTools(t.Context(), nil)
+		require.NoError(t, err)
+		wantNames := append(toolNames(initial.Tools), "kata.digest", "kata.events")
+		sort.Strings(wantNames)
+		require.Equal(t, wantNames, toolNames(after.Tools))
+	})
 }
 
 func TestTokenSectionRequiresExplicitStartupCapability(t *testing.T) {
@@ -1123,6 +1244,11 @@ func connectTestServerWithOptions(t *testing.T, options Options) *sdkmcp.ClientS
 
 func connectRawTestServerWithOptions(t *testing.T, options Options) *sdkmcp.ClientSession {
 	t.Helper()
+	return connectRawTestServerWithClientOptions(t, options, nil)
+}
+
+func connectRawTestServerWithClientOptions(t *testing.T, options Options, clientOptions *sdkmcp.ClientOptions) *sdkmcp.ClientSession {
+	t.Helper()
 	server, err := New(options)
 	require.NoError(t, err)
 
@@ -1136,7 +1262,7 @@ func connectRawTestServerWithOptions(t *testing.T, options Options) *sdkmcp.Clie
 	client := sdkmcp.NewClient(&sdkmcp.Implementation{
 		Name:    "test-client",
 		Version: "1",
-	}, nil)
+	}, clientOptions)
 	session, err := client.Connect(ctx, &sdkmcp.IOTransport{
 		Reader: clientConn,
 		Writer: clientConn,

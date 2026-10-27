@@ -64,6 +64,26 @@ failure stops startup rather than falling back or minting a replacement.
 See [configuration](../reference/configuration.md#daemon-config) for file limits
 and the auto-token opt-out.
 
+The daemon-mounted MCP settings below are unreleased. Deploy them only after
+a published stable Kata release and its matching image include them; 0.20.0
+does not include them.
+Enable the daemon's `/mcp` endpoint with `KATA_MCP_ENABLED=true`, set its actor
+with `KATA_MCP_ACTOR=gateway-agent`, and mount a separate bearer file at
+`KATA_MCP_TOKEN_FILE=/run/secrets/mcp-token`. The same secret-file rules apply.
+Give the gateway the proxied `/mcp` URL and this MCP bearer; see the
+[MCP reference](../reference/mcp.md).
+Add the gateway's Host, for example `kata:7777`, to `KATA_WEB_ALLOWED_HOSTS` as described in [`[web].allowed_hosts`](../reference/configuration.md#daemon-config).
+
+To publish selected typed tools in the gateway's first catalog after every
+restart, set
+`KATA_MCP_STARTUP_SECTIONS=issue_discovery,issue_mutation,coordination,issue_lifecycle,projects,docs`
+on the daemon container. Recreate the container with the new environment, then
+reconnect the gateway or refresh its catalog. No loader priming hook is needed.
+All section loaders remain available for progressive loading. An empty environment value preserves
+`[mcp].startup_sections`; with neither setting, the first catalog contains only
+loaders. See [Startup sections](../reference/mcp.md#startup-sections) for valid
+IDs, capability requirements, and configuration errors.
+
 Semantic search needs no seeded TOML. Set
 `KATA_SEARCH_EMBEDDINGS_BASE_URL=https://embedding.example/v1`,
 `KATA_SEARCH_EMBEDDINGS_MODEL=example-model`, and, when needed,

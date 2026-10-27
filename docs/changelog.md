@@ -1,13 +1,27 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-26
+last_edited: 2026-10-27
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Connect a gateway to the daemon's `/mcp` endpoint by setting `enabled = true`
+  under `[mcp]` and configuring its own bearer with `token_file` or `token_env`.
+  Route `/mcp` through an HTTPS reverse proxy, then give the gateway
+  `https://daemon.example/mcp` and the MCP bearer. See the
+  [MCP reference](reference/mcp.md).
+- Limit the daemon's MCP endpoint to named projects with `[mcp] projects` or
+  `KATA_MCP_PROJECTS`. Names resolve to stable project UIDs at startup; an unset
+  allowlist keeps all-project access.
+- Publish selected typed MCP tools in a gateway's first catalog after each
+  daemon restart with `[mcp].startup_sections` or `KATA_MCP_STARTUP_SECTIONS`.
+  All loaders remain available; the default keeps loader-only progressive
+  loading. Unknown, duplicate, or unavailable sections disable `/mcp` until
+  corrected and restarted. See [Startup sections](reference/mcp.md#startup-sections).
 
 - List the daemon catalog from Go with `client.DaemonCatalog()`, and connect
   to an entry by name with `client.DiscoverOptions{Daemon: name}`, which

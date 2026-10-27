@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-10-22
+last_edited: 2026-10-25
 ---
 
 # Model Context Protocol server
@@ -97,6 +97,27 @@ Use that plaintext mode only on an operator-trusted private network or behind
 an HTTPS reverse proxy. Public IPs and DNS hostnames are rejected. The
 listener also serves unauthenticated `GET` and `HEAD` requests at `/healthz`;
 the probe returns only readiness text and disables caching.
+
+For a remote gateway, enable the daemon's [`[mcp]` section](configuration.md#daemon-config) and restart.
+Route `/mcp` through the hub's HTTPS reverse proxy to the daemon. Give the gateway `https://daemon.example/mcp` and the separate MCP bearer.
+The mount serves all projects unless `[mcp] projects` lists names; names resolve to UIDs at startup, so renames don't widen scope. Missing or archived listed projects disable `/mcp` (503, reason logged); REST and the web UI keep serving. Create or restore the project, then restart.
+An allowlist limits tools to those projects and rejects project administration operations, including purge. Without an allowlist, the mount includes future projects and permits project administration.
+Treat an unrestricted MCP bearer as equivalent to the daemon's `[auth]` token.
+The mount never exposes token administration; use `kata mcp serve --all --enable-token-admin` with an identity-mode token.
+The mount uses the actor chosen at startup and has no `/healthz` probe or `kata mcp status` record.
+The daemon's `/api/v1/ping` endpoint works as a container health probe.
+When `actor` is unset, it defaults to `KATA_AUTHOR`, `USER`, or Git `user.name`, then `anonymous`.
+With a TCP daemon `listen`, a gateway using a container hostname needs that authority in `[web].allowed_hosts`.
+With a Unix-socket daemon and `[web] listen`, the gateway's Host must match the web listener's bound address or `public_origin`.
+
+You can also run a separate MCP process alongside the hub using [Client configuration](#client-configuration).
+Route `/mcp` to this listener through the HTTPS proxy and give the gateway its separate MCP bearer:
+
+```sh
+kata mcp serve --all --http 0.0.0.0:8080 --http-token-file /run/secrets/mcp-token --trust-private-network
+```
+
+Use `--projects <names>` in place of `--all` to limit the sidecar's project scope.
 
 ## Client configuration
 
@@ -224,7 +245,7 @@ or imported creation timestamps. Stop only when `complete` is true.
 
 ## Progressive tool catalog
 
-The initial catalog exposes read-only section loaders. Call the applicable
+By default, the initial catalog exposes read-only section loaders. Call the applicable
 loader, then refresh the tool list when the server sends the standard
 `notifications/tools/list_changed` notification. This exposes only the detailed
 typed tools needed for the current task instead of placing every detailed tool in the
@@ -308,6 +329,38 @@ assignment expiry and previous owner when present. `kata.edit` supports field,
 owner, priority, relationship, scheduling, and generic metadata changes. An
 issue-field or relationship change and a metadata change must use separate
 `kata.edit` calls so one failed request cannot leave a partial edit.
+
+### Startup sections
+
+For gateways that need typed tools in their first `tools/list`, configure the
+daemon-mounted endpoint before starting it:
+
+```toml
+[mcp]
+startup_sections = ["issue_discovery", "issue_mutation", "coordination", "issue_lifecycle", "projects", "docs"]
+```
+
+Use section IDs, such as `issue_discovery`, rather than loader tool names such
+as `kata.load_issue_discovery`. The IDs are `activity`, `coordination`, `docs`,
+`external_roots`, `federation`, `import`, `issue_discovery`, `issue_lifecycle`,
+`issue_mutation`, `leases`, `projects`, `recurrence`, `storage`, `sync`, `system`,
+`teams`, and `tokens`. Each ID selects the detailed tools in its loader row above.
+
+Only available sections can load at startup. `storage` requires host storage
+opt-in; `teams` and `tokens` require explicit token administration with
+daemon-wide scope. These three sections are unavailable on the daemon mount.
+An unknown, duplicate, or unavailable requested ID disables `/mcp` with HTTP
+503 and logs the reason; the daemon's REST API and web UI keep serving.
+
+`KATA_MCP_STARTUP_SECTIONS` overrides the array with comma-separated, trimmed
+IDs. An empty environment value preserves TOML. Restart the daemon after
+changing either setting, then reconnect the gateway or refresh its catalog.
+Every fresh server publishes the configured tools before any loader call;
+no priming hook is needed. All loaders remain available and idempotent, so
+clients can still load other sections progressively. Omit the setting or use
+`startup_sections = []` to retain the default loader-only initial catalog.
+These settings apply to the daemon mount; `kata mcp serve` retains progressive
+loading.
 
 ## Scheduling and someday
 
