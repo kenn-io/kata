@@ -3881,6 +3881,13 @@ func (l LeaveFederationReplicaResultBody) Validate() error {
 	return errors
 }
 
+type LinkAttachmentInput struct {
+	Actor     *string `json:"actor,omitempty"`
+	NodeID    *int64  `json:"node_id,omitempty"`
+	Path      *string `json:"path,omitempty"`
+	VersionID *string `json:"version_id,omitempty"`
+}
+
 type LinkChanges struct {
 	BlockedByAdded   []LinkPeer `json:"blocked_by_added,omitempty"`
 	BlockedByRemoved []LinkPeer `json:"blocked_by_removed,omitempty"`

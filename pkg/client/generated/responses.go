@@ -367,6 +367,28 @@ type AddAttachmentResponse = AddAttachmentResponseBody
 
 type AddAttachmentErrorResponse = ErrorEnvelope
 
+type LinkAttachmentResponse = AddAttachmentResponseBody
+
+type LinkAttachmentErrorResponse = ErrorEnvelope
+
+type LinkAttachmentErrorResponseJSON = ErrorEnvelope
+
+type LinkAttachmentErrorResponseJSON403 = ErrorEnvelope
+
+type LinkAttachmentErrorResponseJSON404 = ErrorEnvelope
+
+type LinkAttachmentErrorResponseJSON409 = ErrorEnvelope
+
+type LinkAttachmentErrorResponseJSON410 = ErrorEnvelope
+
+type LinkAttachmentErrorResponseJSON422 = ErrorEnvelope
+
+type LinkAttachmentErrorResponseJSON500 = ErrorEnvelope
+
+type LinkAttachmentErrorResponseJSON502 = ErrorEnvelope
+
+type LinkAttachmentErrorResponseJSON503 = ErrorEnvelope
+
 type AttachmentContentResponse = []byte
 
 type AttachmentContentErrorResponse = ErrorEnvelope
@@ -1310,6 +1332,23 @@ type AddAttachmentResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *AddAttachmentResponse
+}
+
+type LinkAttachmentResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *LinkAttachmentResponse
+	JSON400      *LinkAttachmentErrorResponse
+	JSON401      *LinkAttachmentErrorResponseJSON
+	JSON403      *LinkAttachmentErrorResponseJSON403
+	JSON404      *LinkAttachmentErrorResponseJSON404
+	JSON409      *LinkAttachmentErrorResponseJSON409
+	JSON410      *LinkAttachmentErrorResponseJSON410
+	JSON422      *LinkAttachmentErrorResponseJSON422
+	JSON500      *LinkAttachmentErrorResponseJSON500
+	JSON502      *LinkAttachmentErrorResponseJSON502
+	JSON503      *LinkAttachmentErrorResponseJSON503
 }
 
 type AttachmentContentResp struct {
