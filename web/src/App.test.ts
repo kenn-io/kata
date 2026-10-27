@@ -2580,9 +2580,7 @@ describe('App', () => {
     )
     await waitFor(() => expect(streamRequests).toBeGreaterThanOrEqual(2), { timeout: 5000 })
     await waitFor(() =>
-      expect(screen.getByRole('status', { name: 'Active connection' }).textContent).toContain(
-        'Credential: Connected',
-      ),
+      expect(screen.queryByRole('status', { name: 'Active connection' })).toBeNull(),
     )
     await fireEvent.click(screen.getByRole('button', { name: 'Credentials' }))
     expect(await screen.findByRole('heading', { name: 'Credentials' })).not.toBeNull()

@@ -13,7 +13,7 @@ describe('AppShell', () => {
     vi.useRealTimers()
   })
 
-  test('shows the current browser hub when no catalog daemon is selected', () => {
+  test('identifies the current browser hub when a connection needs attention', () => {
     vi.stubGlobal('location', new URL('https://daemon.example/workspace?token=never-display'))
     render(AppShell, {
       props: {
@@ -25,6 +25,7 @@ describe('AppShell', () => {
         },
         snapshot: snapshot(),
         loading: false,
+        readOnly: true,
         ...mutationProps(),
         onNavigate: vi.fn(),
         onCreateProject: vi.fn(async () => ({ changed: true })),
@@ -229,7 +230,7 @@ describe('AppShell', () => {
     expect(screen.getByRole('region', { name: 'Project sync' })).not.toBeNull()
   })
 
-  test('renders the workspace header through the kit-ui top bar', () => {
+  test('keeps the healthy workspace toolbar free of a connection banner', () => {
     const { container } = render(AppShell, {
       props: {
         route: {
@@ -246,6 +247,7 @@ describe('AppShell', () => {
       },
     })
 
+    expect(screen.queryByRole('status', { name: 'Active connection' })).toBeNull()
     const header = container.querySelector('header.kata-header')
     expect(header).not.toBeNull()
     expect(header?.classList.contains('kit-top-bar')).toBe(true)
@@ -274,6 +276,7 @@ describe('AppShell', () => {
         },
         snapshot: current,
         loading: false,
+        readOnly: true,
         ...mutationProps(),
         onNavigate: vi.fn(),
         onCreateProject: vi.fn(async () => ({ changed: true })),
@@ -295,6 +298,7 @@ describe('AppShell', () => {
       },
       snapshot: current,
       loading: false,
+      readOnly: true,
       ...mutationProps(),
       onNavigate: vi.fn(),
       onCreateProject: vi.fn(async () => ({ changed: true })),
@@ -313,7 +317,7 @@ describe('AppShell', () => {
     const summary = screen.getByRole('status', { name: 'Active connection' })
     expect(summary.textContent).toContain('hub-one')
     expect(summary.textContent).toContain('member-one')
-    expect(summary.textContent).toContain('Connected')
+    expect(summary.textContent).toContain('Read-only')
     expect(screen.queryByRole('button', { name: 'Credentials' })).toBeNull()
     await view.rerender({ ...props, daemonSwitching: true })
     expect(summary.textContent).toContain('Connecting')
@@ -358,9 +362,9 @@ describe('AppShell', () => {
       onCreateProject: vi.fn(async () => ({ changed: true })),
     }
     const view = render(AppShell, { props })
-    const summary = screen.getByRole('status', { name: 'Active connection' })
-    expect(summary.textContent).toContain('Connected')
+    expect(screen.queryByRole('status', { name: 'Active connection' })).toBeNull()
     await vi.advanceTimersByTimeAsync(3000)
+    const summary = screen.getByRole('status', { name: 'Active connection' })
     expect(summary.textContent).toContain('Credential expired')
     await view.rerender({ ...props, stale: true, daemonError: 'Authentication required' })
     expect(summary.textContent).toContain('Authentication required')

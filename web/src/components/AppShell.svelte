@@ -565,16 +565,19 @@
 {/snippet}
 
 <section class="kata-feature" aria-label="Kata workspace">
-  <div class="active-connection" role="status" aria-label="Active connection">
-    <span
-      >Hub: <strong>{activeDaemonID ?? (globalThis.location?.host || 'Local daemon')}</strong></span
-    >
-    <span>Account: <strong>{connectionAccount}</strong></span>
-    <span>Credential: <strong>{connectionStatus}</strong></span>
-    {#if stale}
-      <span>Snapshot may be out of date. Changes are paused.</span>
-    {/if}
-  </div>
+  {#if connectionStatus !== 'Connected'}
+    <div class="active-connection" role="status" aria-label="Active connection">
+      <span
+        >Hub: <strong>{activeDaemonID ?? (globalThis.location?.host || 'Local daemon')}</strong
+        ></span
+      >
+      <span>Account: <strong>{connectionAccount}</strong></span>
+      <span>Credential: <strong>{connectionStatus}</strong></span>
+      {#if stale}
+        <span>Snapshot may be out of date. Changes are paused.</span>
+      {/if}
+    </div>
+  {/if}
   <TopBar class="kata-header" ariaLabel="Kata workspace">
     {#snippet left()}
       <h1 class="kata-brand">Kata</h1>
