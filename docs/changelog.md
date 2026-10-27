@@ -9,8 +9,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
-- Preserve explicit teammate contribution on native issue and existing live claim
-  events in raw event JSON, independently of comment addressing and the
+- See retained contributors in CLI, TUI, and web history and comments, including
+  after edits, retries, and snapshot restores. Display labels remain separate
+  from reply routing and signed creation identity. See
+  [comment attribution](reference/cli.md#issue-lifecycle).
+
+- Preserve explicit teammate contribution on native issue and live claim
+  actions in raw event JSON, independently of comment addressing and the
   accountable actor. CLI, Go-client, and per-call MCP selections use the optional
   request header; older daemons still accept writes. See
   [Request contribution](reference/http-api.md#request-contribution).

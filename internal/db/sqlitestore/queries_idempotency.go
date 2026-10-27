@@ -206,6 +206,12 @@ func (d *Store) lookupIssueMutationIdempotency(
 func (d *Store) LookupCommentIdempotency(
 	ctx context.Context, issueUID, key string, since time.Time,
 ) (*db.CommentIdempotencyMatch, error) {
+	tx, err := d.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	const q = `
 		SELECT e.id, e.uid, e.origin_instance_uid, e.project_id, p.uid, e.project_name,
 		       e.issue_id, e.issue_uid,
@@ -219,10 +225,10 @@ func (d *Store) LookupCommentIdempotency(
 		  AND e.created_at >= ?
 		ORDER BY e.id DESC
 		LIMIT 1`
-	row := d.QueryRowContext(ctx, q, issueUID, key, since.UTC().Format(sqliteTimeFormat))
+	row := tx.QueryRowContext(ctx, q, issueUID, key, since.UTC().Format(sqliteTimeFormat))
 
 	var evt db.Event
-	err := row.Scan(&evt.ID, &evt.UID, &evt.OriginInstanceUID, &evt.ProjectID, &evt.ProjectUID, &evt.ProjectName,
+	err = row.Scan(&evt.ID, &evt.UID, &evt.OriginInstanceUID, &evt.ProjectID, &evt.ProjectUID, &evt.ProjectName,
 		&evt.IssueID, &evt.IssueUID, &evt.RelatedIssueID, &evt.RelatedIssueUID, &evt.Type, &evt.Actor,
 		&evt.Payload, &evt.HLCPhysicalMS, &evt.HLCCounter, &evt.ContentHash, &evt.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -241,7 +247,7 @@ func (d *Store) LookupCommentIdempotency(
 	if err := json.Unmarshal([]byte(evt.Payload), &payload); err != nil {
 		return nil, fmt.Errorf("decode comment idempotency payload: %w", err)
 	}
-	comment, err := scanComment(d.QueryRowContext(ctx,
+	comment, err := scanComment(tx.QueryRowContext(ctx,
 		`SELECT `+commentColumns+` FROM comments WHERE issue_id = ? AND uid = ?`,
 		*evt.IssueID, payload.CommentUID,
 	))
@@ -250,6 +256,12 @@ func (d *Store) LookupCommentIdempotency(
 	}
 	if err != nil {
 		return nil, fmt.Errorf("comment idempotency match comment: %w", err)
+	}
+	if err := db.HydrateCommentDisplayTx(ctx, tx, []*db.Comment{&comment}, func(int) string { return "?" }); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 	return &db.CommentIdempotencyMatch{
 		Comment: comment, IssueUID: *evt.IssueUID,

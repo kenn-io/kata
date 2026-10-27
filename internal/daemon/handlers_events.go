@@ -593,15 +593,16 @@ func eventToEnvelope(e db.Event) api.EventEnvelope {
 		payload = jsontext.Value(e.Payload)
 	}
 	return api.EventEnvelope{
-		EventID:           e.ID,
-		EventUID:          e.UID,
-		OriginInstanceUID: e.OriginInstanceUID,
-		Type:              e.Type,
-		ProjectID:         e.ProjectID,
-		ProjectUID:        e.ProjectUID,
-		ProjectName:       e.ProjectName,
-		IssueID:           e.IssueID,
-		IssueUID:          e.IssueUID,
+		AttributedTeammate: db.DisplayContribution(e.Type, []byte(e.Payload)),
+		EventID:            e.ID,
+		EventUID:           e.UID,
+		OriginInstanceUID:  e.OriginInstanceUID,
+		Type:               e.Type,
+		ProjectID:          e.ProjectID,
+		ProjectUID:         e.ProjectUID,
+		ProjectName:        e.ProjectName,
+		IssueID:            e.IssueID,
+		IssueUID:           e.IssueUID,
 		// IssueShortID / RelatedIssueShortID are joined from issues.short_id
 		// at query time so old events render correctly across short_id
 		// shifts (project merge, federation merge). UIDs remain canonical.

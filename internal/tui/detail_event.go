@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"go.kenn.io/kata/internal/db"
+
 	"github.com/mattn/go-runewidth"
 )
 
@@ -236,9 +238,13 @@ func eventDescription(e EventLogEntry) string {
 func eventChunkLines(e EventLogEntry, width int, isCursor bool) []string {
 	// Type is daemon-authored; Actor and description interpolate
 	// agent-authored payload fields — sanitize both.
+	actor := e.Actor
+	if contribution := db.LegacyDisplayContribution(e.AttributedTeammate); contribution != "" {
+		actor += " / " + contribution
+	}
 	head := fmt.Sprintf("[%s] %s %s — %s",
 		e.Type, fmtTime(e.CreatedAt),
-		sanitizeForDisplay(e.Actor),
+		sanitizeForDisplay(actor),
 		sanitizeForDisplay(eventDescription(e)))
 	lines := []string{applyActivityCursor(head, isCursor)}
 	if e.Type == "issue.closed" {

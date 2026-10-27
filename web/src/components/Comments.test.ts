@@ -10,6 +10,25 @@ type Reference = UIIssueReference
 describe('Comments', () => {
   afterEach(cleanup)
 
+  it('shows creation contribution after an edit without displaying the routing teammate', async () => {
+    const model = issue()
+    Object.assign(model.comments[0]!, {
+      teammate: 'route',
+      attributed_teammate: 'writer',
+      edited_at: '2026-08-02T12:00:00Z',
+    })
+    renderComments({ issue: model })
+    await waitFor(() => expect(screen.getByText('user-a / writer')).toBeTruthy())
+    expect(screen.queryByText('user-a / route')).toBeNull()
+  })
+
+  it('does not fall back to routing when retained display is explicitly empty', () => {
+    const model = issue()
+    Object.assign(model.comments[0]!, { teammate: 'route', attributed_teammate: '' })
+    renderComments({ issue: model })
+    expect(screen.queryByText('user-a / route')).toBeNull()
+  })
+
   it('submits comments and preserves an uncertain draft until accepted authority replaces it', async () => {
     const onAddComment = vi.fn(async () => false)
     const view = renderComments({ onAddComment, draftResetGeneration: 0 })

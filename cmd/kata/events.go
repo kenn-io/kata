@@ -17,6 +17,7 @@ import (
 
 	"github.com/cenkalti/backoff/v7"
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/db"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -174,12 +175,13 @@ func printEventsHuman(cmd *cobra.Command, bs []byte) error {
 		ResetRequired bool  `json:"reset_required"`
 		ResetAfterID  int64 `json:"reset_after_id"`
 		Events        []struct {
-			EventID      int64   `json:"event_id"`
-			Type         string  `json:"type"`
-			ProjectID    int64   `json:"project_id"`
-			IssueShortID *string `json:"issue_short_id"`
-			Actor        string  `json:"actor"`
-			CreatedAt    string  `json:"created_at"`
+			EventID            int64   `json:"event_id"`
+			Type               string  `json:"type"`
+			ProjectID          int64   `json:"project_id"`
+			IssueShortID       *string `json:"issue_short_id"`
+			Actor              string  `json:"actor"`
+			AttributedTeammate string  `json:"attributed_teammate,omitempty"`
+			CreatedAt          string  `json:"created_at"`
 		} `json:"events"`
 		NextAfterID int64 `json:"next_after_id"`
 	}
@@ -198,7 +200,7 @@ func printEventsHuman(cmd *cobra.Command, bs []byte) error {
 		}
 		if _, err := fmt.Fprintf(cmd.OutOrStdout(),
 			"%-6d  %-22s  proj=%-3d  %-8s  by %s  %s\n",
-			e.EventID, e.Type, e.ProjectID, issueStr, e.Actor, e.CreatedAt); err != nil {
+			e.EventID, e.Type, e.ProjectID, issueStr, commentAttribution(e.Actor, db.LegacyDisplayContribution(e.AttributedTeammate)), e.CreatedAt); err != nil {
 			return err
 		}
 	}
@@ -210,11 +212,12 @@ func printEventsAgent(cmd *cobra.Command, bs []byte) error {
 		ResetRequired bool  `json:"reset_required"`
 		ResetAfterID  int64 `json:"reset_after_id"`
 		Events        []struct {
-			EventID      int64   `json:"event_id"`
-			Type         string  `json:"type"`
-			ProjectName  string  `json:"project_name"`
-			IssueShortID *string `json:"issue_short_id"`
-			Actor        string  `json:"actor"`
+			EventID            int64   `json:"event_id"`
+			Type               string  `json:"type"`
+			ProjectName        string  `json:"project_name"`
+			IssueShortID       *string `json:"issue_short_id"`
+			Actor              string  `json:"actor"`
+			AttributedTeammate string  `json:"attributed_teammate,omitempty"`
 		} `json:"events"`
 		NextAfterID int64 `json:"next_after_id"`
 	}
@@ -238,6 +241,7 @@ func printEventsAgent(cmd *cobra.Command, bs []byte) error {
 			agentOptionalRowField("project", &project),
 			agentOptionalRowField("issue", e.IssueShortID),
 			agentRowField("actor", e.Actor),
+			agentOptionalRowField("attributed_teammate", new(db.LegacyDisplayContribution(e.AttributedTeammate))),
 		); err != nil {
 			return err
 		}
@@ -397,11 +401,12 @@ func (f *frameState) flush(out io.Writer, mode outputMode) (streamResult, error)
 
 func (f *frameState) flushAgentEvent(out io.Writer) (streamResult, error) {
 	var e struct {
-		EventID      int64   `json:"event_id"`
-		Type         string  `json:"type"`
-		ProjectName  string  `json:"project_name"`
-		IssueShortID *string `json:"issue_short_id"`
-		Actor        string  `json:"actor"`
+		EventID            int64   `json:"event_id"`
+		Type               string  `json:"type"`
+		ProjectName        string  `json:"project_name"`
+		IssueShortID       *string `json:"issue_short_id"`
+		Actor              string  `json:"actor"`
+		AttributedTeammate string  `json:"attributed_teammate,omitempty"`
 	}
 	if err := json.Unmarshal([]byte(f.data), &e); err != nil {
 		return streamResult{}, fmt.Errorf("parse event frame: %w", err)
@@ -426,6 +431,11 @@ func (f *frameState) flushAgentEvent(out io.Writer) (streamResult, error) {
 	}
 	if e.Actor != "" {
 		if _, err := fmt.Fprintf(out, " actor=%s", agentValue(e.Actor)); err != nil {
+			return streamResult{}, err
+		}
+	}
+	if contribution := db.LegacyDisplayContribution(e.AttributedTeammate); contribution != "" {
+		if _, err := fmt.Fprintf(out, " attributed_teammate=%s", agentValue(contribution)); err != nil {
 			return streamResult{}, err
 		}
 	}

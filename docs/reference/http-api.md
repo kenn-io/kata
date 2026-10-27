@@ -251,6 +251,16 @@ keyed close follow-up uses that close event's contribution, including its absenc
 If the response contains neither an original nor a returned event, the follow-up
 keeps the current invocation's selection.
 
+Event envelopes expose validated display contribution as optional
+`attributed_teammate`. Comment and comment-link reads expose the original
+creation contribution in the same field, including mutation responses and
+snapshot-only restores. Comment `teammate` still identifies the explicit routing
+participant. An empty display value suppresses the suffix; an absent field from
+an older daemon permits the client's legacy explicit-teammate display. Invalid
+retained handles are omitted from display without rewriting event payloads,
+content hashes, or signed creation receipts. No request-header or minimum-version
+change is required for these additive read fields.
+
 Older daemons can ignore the optional header and still accept ordinary writes
 and MCP startup. Explicit comment-body attribution retains its existing API
 version requirement. This header adds no version preflight.

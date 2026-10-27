@@ -2,6 +2,7 @@ package db
 
 import (
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"testing"
 
@@ -86,4 +87,32 @@ func TestFoldReplyNotificationIsExplicitMetadataOnly(t *testing.T) {
 	old := FoldEvents([]FoldEvent{creation, legacy, notification})
 	require.Equal(t, old.IssueMetadata["issue-1"], linked.IssueMetadata["issue-1"])
 	require.NotEmpty(t, linked.IssueMetadata["issue-1"])
+}
+
+// Creation contribution is display data; edits must never replace it.
+func TestFoldCommentDisplayContribution(t *testing.T) {
+	for _, kind := range []string{"issue.commented", "issue.created", "issue.snapshot"} {
+		for _, tc := range []struct{ raw, want string }{
+			{`"attributed_teammate":"writer","teammate":"route"`, "writer"},
+			{`"teammate":"legacy"`, "legacy"},
+			{`"attributed_teammate":"bad/handle","teammate":"route"`, ""},
+			{`"attributed_teammate":42`, ""},
+			{`"attributed_teammate":""`, ""},
+		} {
+			t.Run(kind+tc.raw, func(t *testing.T) {
+				body := `{"comment_uid":"comment-1","author":"actor","body":"original",` + tc.raw + `}`
+				if kind != "issue.commented" {
+					body = `{"uid":"issue-1","comments":[` + body + `]}`
+				}
+				creation := testEvent(kind, 1, body)
+				edit := testEvent("issue.comment_edited", 2, `{"comment_uid":"comment-1","body":"edited","attributed_teammate":"editor"}`)
+				got := FoldEvents([]FoldEvent{creation, edit}).Comments["comment-1"]
+				data, err := json.Marshal(got)
+				require.NoError(t, err)
+				var fields map[string]any
+				require.NoError(t, json.Unmarshal(data, &fields))
+				require.Equal(t, tc.want, fields["AttributedTeammate"])
+			})
+		}
+	}
 }

@@ -316,6 +316,7 @@
     {:else}
       <div class="comment-list" bind:this={listElement}>
         {#each sortedComments as comment (comment.id)}
+          {@const contributor = comment.attributed_teammate ?? comment.teammate}
           <article
             class="comment"
             class:selected={selectedCommentUID !== undefined && selectedCommentUID === comment.uid}
@@ -329,9 +330,7 @@
                 >{/if}
               <span class="avatar" aria-hidden="true">{comment.author.slice(0, 1)}</span>
               <span class="author"
-                >{comment.teammate
-                  ? `${comment.author} / ${comment.teammate}`
-                  : comment.author}</span
+                >{contributor ? `${comment.author} / ${contributor}` : comment.author}</span
               >
               <time datetime={comment.created_at} title={localDateTimeLabel(comment.created_at)}>
                 {timeAgo(comment.created_at)}

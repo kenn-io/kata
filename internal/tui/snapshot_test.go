@@ -490,6 +490,8 @@ func TestSnapshot_Detail_CommentsTab(t *testing.T) {
 	defer snapshotInit(t)()
 	dm := snapDetailFixture()
 	dm.activeTab = tabComments
+	dm.comments[0].Teammate = "route"
+	dm.comments[0].AttributedTeammate = new("writer")
 	got := dm.View(120, 30, viewChrome{})
 	assertGolden(t, "detail-comments-tab", got)
 }
@@ -499,6 +501,8 @@ func TestSnapshot_Detail_EventsTab(t *testing.T) {
 	defer snapshotInit(t)()
 	dm := snapDetailFixture()
 	dm.activeTab = tabEvents
+	dm.events[0].AttributedTeammate = "planner"
+	dm.events[1].AttributedTeammate = "writer"
 	got := dm.View(120, 30, viewChrome{})
 	assertGolden(t, "detail-events-tab", got)
 }

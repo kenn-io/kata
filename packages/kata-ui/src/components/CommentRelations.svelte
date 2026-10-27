@@ -68,6 +68,7 @@
     <section class="evidence" aria-label={evidenceLabels[selectedKind]}>
       <ol>
         {#each evidence as link (link.uid)}
+          {@const contribution = link.attributed_teammate ?? link.teammate}
           <li>
             <header>
               <Button
@@ -78,7 +79,7 @@
                 onclick={() => onOpen?.(link)}
               />
               {#if link.author}<strong
-                  >{link.author}{link.teammate ? ` / ${link.teammate}` : ''}</strong
+                  >{link.author}{contribution ? ` / ${contribution}` : ''}</strong
                 >{/if}
               {#if link.created_at}<time datetime={link.created_at}
                   >{formatTimestamp(link.created_at)}</time

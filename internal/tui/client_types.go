@@ -321,6 +321,7 @@ type CommentEntry struct {
 // IssueShortID is the project-scoped display ref for the subject issue;
 // IssueUID is the canonical reference and survives short_id cutovers.
 type EventLogEntry struct {
+	AttributedTeammate  string         `json:"attributed_teammate,omitempty"`
 	ID                  int64          `json:"event_id"`
 	Type                string         `json:"type"`
 	Actor               string         `json:"actor"`

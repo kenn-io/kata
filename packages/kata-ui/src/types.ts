@@ -61,6 +61,7 @@ export interface KataIssueReferenceWire {
 
 export type KataReplyKind = 'reply' | 'confirm' | 'refute' | 'supersede'
 export interface KataCommentLink {
+  attributed_teammate?: string | undefined
   uid?: string | undefined
   handle?: string | undefined
   kind: string
@@ -90,6 +91,7 @@ export interface KataIssueDetailWire {
           backlinks_truncated?: boolean | undefined
           edited_at?: string | undefined
           author: string
+          attributed_teammate?: string | undefined
           teammate?: string | undefined
           body: string
           created_at: string
@@ -162,6 +164,7 @@ export interface KataIssueDetailModel {
     backlinks?: KataCommentLink[]
     editedAt?: string
     author: string
+    attributedTeammate?: string
     teammate?: string
     body: string
     createdAt: string

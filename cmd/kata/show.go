@@ -224,7 +224,7 @@ func printShowHuman(
 			if err := printCommentAnnotations(out, c); err != nil {
 				return err
 			}
-			prefix := showCommentPrefix(showCommentIdentity(c, b.Issue.UID), c.Author, c.Teammate)
+			prefix := showCommentPrefix(showCommentIdentity(c, b.Issue.UID), c.Author, db.CommentDisplayContribution(c.AttributedTeammate, c.Teammate))
 			if rendered != nil {
 				if err := writeRenderedPrefixedLines(out, prefix, rendered.comments[i]); err != nil {
 					return err
@@ -365,6 +365,7 @@ type showResponseForCLI struct {
 }
 
 type cliShowComment struct {
+	AttributedTeammate *string `json:"attributed_teammate,omitempty"`
 	db.AttributionView
 	UID                string            `json:"uid"`
 	Author             string            `json:"author"`
@@ -400,7 +401,7 @@ func printCommentAnnotations(w io.Writer, c cliShowComment) error {
 		}
 		author := ""
 		if r.Author != "" {
-			author = " (" + commentAttribution(r.Author, r.Teammate) + ")"
+			author = " (" + commentAttribution(r.Author, db.CommentDisplayContribution(r.AttributedTeammate, r.Teammate)) + ")"
 		}
 		if r.Status != "" && r.Handle != "" {
 			author += " (" + r.Status + ")"
@@ -454,7 +455,7 @@ func renderShowFields(
 		if comment.Body == "" {
 			continue
 		}
-		prefix := showCommentPrefix(showCommentIdentity(comment, response.Issue.UID), comment.Author, comment.Teammate)
+		prefix := showCommentPrefix(showCommentIdentity(comment, response.Issue.UID), comment.Author, db.CommentDisplayContribution(comment.AttributedTeammate, comment.Teammate))
 		fieldWidth := max(1, width-ansi.StringWidth(prefix))
 		rendered, err := renderer.Render(
 			ctx, markdownComment, textsafe.Block(comment.Body), fieldWidth,
@@ -603,6 +604,9 @@ func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation
 			}
 			if c.EditedAt != "" {
 				fields = append(fields, agentRowField("edited_at", c.EditedAt))
+			}
+			if c.AttributedTeammate != nil {
+				fields = append(fields, agentOptionalRowField("attributed_teammate", new(db.LegacyDisplayContribution(*c.AttributedTeammate))))
 			}
 			if c.Teammate != "" {
 				fields = append(fields, agentRowField("teammate", c.Teammate))

@@ -115,6 +115,9 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 		if err != nil {
 			return err
 		}
+		if err := db.HydrateCommentDisplayTx(ctx, tx, []*db.Comment{&comment}, dollarPlaceholder); err != nil {
+			return err
+		}
 		committedEvents = []db.Event{event}
 		if hook := db.CommentMetadataPolicy(ctx); hook != nil {
 			updates, err := hook(ctx, tx, issue, comment)
@@ -177,7 +180,7 @@ func (s *Store) editComment(
 			return err
 		}
 		if comment.Body == params.Body {
-			return nil
+			return db.HydrateCommentDisplayTx(ctx, tx, []*db.Comment{&comment}, dollarPlaceholder)
 		}
 		var externallyOwned bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (
@@ -224,7 +227,7 @@ func (s *Store) editComment(
 			return err
 		}
 		event, changed = &created, true
-		return nil
+		return db.HydrateCommentDisplayTx(ctx, tx, []*db.Comment{&comment}, dollarPlaceholder)
 	})
 	return comment, event, changed, err
 }
@@ -341,7 +344,12 @@ func (s *Store) CommentBodyByID(ctx context.Context, id int64) (string, error) {
 
 // CommentsByIssue returns comments in stable chronological order.
 func (s *Store) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Comment, error) {
-	rows, err := s.QueryContext(ctx,
+	tx, err := s.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.QueryContext(ctx,
 		commentSelect+` WHERE issue_id = $1`, issueID)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
@@ -357,6 +365,19 @@ func (s *Store) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Commen
 	}
 	if err := rows.Err(); err != nil {
 		return nil, mapSQLError(err, nil)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	pointers := make([]*db.Comment, len(comments))
+	for i := range comments {
+		pointers[i] = &comments[i]
+	}
+	if err := db.HydrateCommentDisplayTx(ctx, tx, pointers, dollarPlaceholder); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 	sortCommentsByCreatedAt(comments)
 	return comments, nil
@@ -433,3 +454,5 @@ func execRowsAffected(ctx context.Context, tx *sql.Tx, query string, args ...any
 	}
 	return result.RowsAffected()
 }
+
+func dollarPlaceholder(n int) string { return fmt.Sprintf("$%d", n) }
