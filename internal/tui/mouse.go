@@ -26,18 +26,16 @@ func (m Model) routeMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 		m.width >= 80 {
 		mouse := click.Mouse()
 		if m.view == viewCron && !m.cron.help && len(m.cron.stack) == 0 &&
-			!m.scope.allProjects && m.scope.projectID != 0 && mouse.Y == 2 {
+			m.scope.projectID != 0 && mouse.Y == 2 {
 			m.cron.filtering = true
 			return m, nil
 		}
 		row := 1
 		if m.layout == splitlayout.Split {
 			row = 2
-		} else if m.height < listMinHeight {
-			row = 0
 		}
 		if (m.view == viewList || m.view == viewDetail && m.layout == splitlayout.Split) &&
-			!m.list.loading && m.list.err == nil && mouse.Y == row &&
+			mouse.Y == row && row < m.height &&
 			(m.layout != splitlayout.Split || mouse.X < splitConfig.ListWidth(m.width)) {
 			m.focus = focusList
 			if m.input.kind == inputSearchBar {
@@ -151,7 +149,7 @@ func (m Model) mouseLeftClick(x, y int) (Model, tea.Cmd) {
 	}
 	if m.view == viewList {
 		if m.height < listMinHeight {
-			return m.mouseListClick(y - 2) // Search and table header precede compact rows.
+			return m.mouseListClick(y - 3) // Title, search and table header precede compact rows.
 		}
 		return m.mouseListClick(y - stackedListDataRowY)
 	}

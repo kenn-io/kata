@@ -1069,7 +1069,7 @@ func (m Model) listRenderedDataRows() int {
 		return max(1, innerH-2)
 	}
 	if m.height < listMinHeight {
-		return max(0, m.height-2)
+		return max(0, m.height-3)
 	}
 	footerLines := helpLines(listHelpRows(m.list, m.chrome()), m.width)
 	bodyRows := max(m.height-2-1-footerLines, listBodyFloor)

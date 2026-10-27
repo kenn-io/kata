@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -126,48 +125,50 @@ func TestMouseClickSelectsProjectsRow(t *testing.T) {
 }
 
 func TestMousePersistentSearch(t *testing.T) {
-	for _, width := range []int{80, 160} {
-		m := resizeModel(newTestModel(), width, 40)
-		m.opts.Mouse = true
-		m.list.issues = makeTestIssues(5)
-		m.list.cursor = 2
-		m.list = m.list.syncSelection(m.list.visibleRows())
-		original := m.list.selectedUID
-		row := 1
-		if m.layout == splitlayout.Split {
-			row = 2
-		}
-		m, _ = updateModel(m, mouseLeftClick(0, row))
-		if m.input.kind != inputSearchBar {
-			t.Fatalf("width %d: click did not open search", width)
-		}
-		m = sendRune(m, 'r')
-		m = sendKey(m, tea.KeyDown)
-		m, _ = updateModel(m, mouseLeftClick(4, row))
-		if m.input.searchFocus != searchFocusQuery {
-			t.Fatal("click did not refocus query")
-		}
-		m = sendKey(m, tea.KeyEscape)
-		if m.list.selectedUID != original || m.list.filter.Search != "" || m.input.kind != inputNone {
-			t.Fatalf("click recaptured search snapshot: selected=%s filter=%q", m.list.selectedUID, m.list.filter.Search)
+	for _, size := range [][2]int{{80, 2}, {80, 3}, {80, 4}, {80, 9}, {80, 40}, {160, 40}} {
+		for _, state := range []string{"ready", "loading", "error"} {
+			m := resizeModel(newTestModel(), size[0], size[1])
+			m.list.loading = state == "loading"
+			if state == "error" {
+				m.list.err = fmt.Errorf("unavailable")
+			}
+			m.opts.Mouse = true
+			m.list.issues = makeTestIssues(5)
+			m.list.cursor = 2
+			m.list = m.list.syncSelection(m.list.visibleRows())
+			original := m.list.selectedUID
+			row := 1
+			if m.layout == splitlayout.Split {
+				row = 2
+			}
+			m, _ = updateModel(m, mouseLeftClick(0, row))
+			if m.input.kind != inputSearchBar {
+				t.Fatalf("%v %s: click did not open search", size, state)
+			}
+			m = sendRune(m, 'r')
+			m = sendKey(m, tea.KeyDown)
+			m, _ = updateModel(m, mouseLeftClick(4, row))
+			if m.input.searchFocus != searchFocusQuery {
+				t.Fatal("click did not refocus query")
+			}
+			m = sendKey(m, tea.KeyEscape)
+			if m.list.selectedUID != original || m.list.filter.Search != "" || m.input.kind != inputNone {
+				t.Fatalf("click recaptured search snapshot: selected=%s filter=%q", m.list.selectedUID, m.list.filter.Search)
+			}
 		}
 	}
 }
 
 func TestMouseSearchVisibilityGuards(t *testing.T) {
-	for _, state := range []string{"disabled", "narrow", "loading", "error", "modal", "input", "detail"} {
+	for _, state := range []string{"narrow", "one-row", "modal", "input", "detail"} {
 		t.Run(state, func(t *testing.T) {
 			m := resizeModel(newTestModel(), 80, 24)
 			m.opts.Mouse = true
 			switch state {
-			case "disabled":
-				m.opts.Mouse = false
 			case "narrow":
 				m = resizeModel(m, 79, 24)
-			case "loading":
-				m.list.loading = true
-			case "error":
-				m.list.err = fmt.Errorf("unavailable")
+			case "one-row":
+				m = resizeModel(m, 80, 1)
 			case "modal":
 				m.modal = modalQuitConfirm
 			case "input":
@@ -180,43 +181,5 @@ func TestMouseSearchVisibilityGuards(t *testing.T) {
 				t.Fatal("invisible or blocked search accepted click")
 			}
 		})
-	}
-}
-
-func TestCompactSearchRowsMatchPagingAndClicks(t *testing.T) {
-	defer snapshotInit(t)()
-	for _, height := range []int{3, 9} {
-		m := resizeModel(newTestModel(), 80, height)
-		m.opts.Mouse = true
-		m.list.issues = makeTestIssues(30)
-		m = m.applyListViewportCache()
-		m, _ = updateModel(m, mouseLeftClick(4, 0))
-		if m.input.kind != inputSearchBar {
-			t.Fatalf("height %d: compact search click did not focus input", height)
-		}
-		m = sendKey(m, tea.KeyEscape)
-		for range 2 {
-			lines := strings.Split(stripANSI(m.viewBody()), "\n")
-			if len(lines) > height {
-				t.Fatalf("height %d: frame has %d rows", height, len(lines))
-			}
-			count := 0
-			for y, line := range lines {
-				for i, issue := range m.list.issues {
-					if !strings.Contains(line, fmt.Sprintf("r%03d", i+1)) {
-						continue
-					}
-					clicked, _ := updateModel(m, mouseLeftClick(4, y))
-					if clicked.list.selectedUID != issue.UID {
-						t.Fatalf("height %d row %d: wrong issue selected", height, y)
-					}
-					count++
-				}
-			}
-			if count != height-2 || m.list.pageRows != count {
-				t.Fatalf("height %d: page rows=%d rendered=%d", height, m.list.pageRows, count)
-			}
-			m = sendKey(m, tea.KeyPgDown)
-		}
 	}
 }

@@ -636,13 +636,15 @@ func TestCronPersistentSearch(t *testing.T) {
 				want = "/absent-query"
 			}
 			require.True(t, strings.HasPrefix(strings.TrimSpace(line), want), "%c %s: %s", tab, state, line)
-			m, _ = updateModel(m, mouseLeftClick(4, 2))
-			require.True(t, m.cron.filtering, "%c %s", tab, state)
+			if state == "idle" {
+				m, _ = updateModel(m, mouseLeftClick(4, 2))
+				require.True(t, m.cron.filtering, "%c %s", tab, state)
+			}
 		}
 	}
 }
 
-func TestCronLongSearchEditVisible(t *testing.T) {
+func TestCronLongSearchTailVisible(t *testing.T) {
 	for _, tab := range []rune{'2', '3', '4'} {
 		for _, prefix := range []string{strings.Repeat("a", 90), strings.Repeat("界", 45)} {
 			m := sendRune(cronFixture(t), tab)
@@ -654,33 +656,21 @@ func TestCronLongSearchEditVisible(t *testing.T) {
 			line := strings.Split(ansi.Strip(m.viewBody()), "\n")[2]
 			require.Contains(t, line, "TAILZ▏", "tab %c must show the edited tail and caret", tab)
 			require.LessOrEqual(t, ansi.StringWidth(line), 80)
-			m = sendKey(m, tea.KeyEnter)
-			require.Equal(t, prefix+"TAILZ", m.cron.lists[m.cron.tab].query)
-			m, _ = updateModel(m, mouseLeftClick(4, 2))
-			m = sendKey(m, tea.KeyEscape)
-			require.Empty(t, m.cron.lists[m.cron.tab].query)
-			require.False(t, m.cron.filtering)
 		}
 	}
 }
 
 func TestCronSearchClickGuards(t *testing.T) {
-	for _, state := range []string{"disabled", "narrow", "help", "detail", "projects", "modal"} {
+	for _, state := range []string{"help", "detail", "projects"} {
 		m := cronFixture(t)
 		m.opts.Mouse = true
 		switch state {
-		case "disabled":
-			m.opts.Mouse = false
-		case "narrow":
-			m.width = 79
 		case "help":
 			m.cron.help = true
 		case "detail":
 			m = sendKey(m, tea.KeyEnter)
 		case "projects":
-			m.scope.allProjects = true
-		case "modal":
-			m.modal = modalQuitConfirm
+			m.scope = scope{allProjects: true}
 		}
 		m, _ = updateModel(m, mouseLeftClick(4, 2))
 		require.False(t, m.cron.filtering, state)

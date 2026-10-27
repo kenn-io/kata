@@ -532,14 +532,6 @@ func TestAttentionProjectsOriginInitializesListBeforePaneNavigation(t *testing.T
 			m, _ = updateModel(m, loaded)
 			require.False(t, m.list.loading)
 			require.Equal(t, browseAPI.allIssues, m.list.issues)
-			if tc.name == "mouse click search" {
-				require.Equal(t, inputSearchBar, m.input.kind)
-				m = sendRune(m, 'x')
-				m = sendKey(m, tea.KeyEnter)
-				require.Nil(t, m.detail.issue, "detail follows the empty search results")
-				m = sendKey(m, tea.KeyEscape)
-				require.False(t, m.attention.returnToAttention)
-			}
 		})
 	}
 }

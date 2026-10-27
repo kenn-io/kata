@@ -58,12 +58,6 @@ type viewChrome struct {
 // The table body absorbs the slack so the footer always sits on the
 // last line of the terminal — the msgvault `fillScreen` pattern.
 func (lm listModel) View(width, height int, chrome viewChrome) string {
-	if lm.loading {
-		return statusStyle.Render("loading…")
-	}
-	if lm.err != nil {
-		return errorStyle.Render(lm.err.Error())
-	}
 	if width <= 0 || height < listMinHeight {
 		return lm.renderTinyFallback(width, height, chrome)
 	}
@@ -98,18 +92,12 @@ func (lm listModel) View(width, height int, chrome viewChrome) string {
 // title-bar / info-line / footer are composed by renderSplit, not
 // here — this returns just the body region.
 func (lm listModel) ViewBody(width, bodyRows int, chrome viewChrome) string {
-	if lm.loading {
-		return statusStyle.Render("loading…")
-	}
-	if lm.err != nil {
-		return errorStyle.Render(lm.err.Error())
-	}
 	return renderStatsLine(width, lm.issueCounts(), lm.filter, chrome.input) + "\n" +
 		lm.renderBodyArea(width, bodyRows-1, chrome)
 }
 
 // listMinHeight is the smallest height for the full list chrome.
-// Below this we show search and the table without the title or footer.
+// Below this we keep the title and search but omit the footer.
 const listMinHeight = 10
 
 // listBodyFloor is the smallest row count the table body will ever
@@ -117,13 +105,18 @@ const listMinHeight = 10
 // tight on a small terminal.
 const listBodyFloor = 5
 
-// renderTinyFallback keeps search visible above as many table rows as fit.
+// renderTinyFallback reserves the title for the connection header, then search
+// and as many table rows as fit. At height one only the title fits.
 func (lm listModel) renderTinyFallback(width, height int, chrome viewChrome) string {
-	search := renderStatsLine(width, lm.issueCounts(), lm.filter, chrome.input)
+	title := renderTitleBar(width, chrome.scope, chrome.version, chrome.daemon)
 	if height <= 1 {
-		return search
+		return title
 	}
-	return search + "\n" + lm.renderBodyArea(width, height-1, chrome)
+	rows := []string{title, renderStatsLine(width, lm.issueCounts(), lm.filter, chrome.input)}
+	if height > 2 {
+		rows = append(rows, lm.renderBodyArea(width, height-2, chrome))
+	}
+	return strings.Join(rows, "\n")
 }
 
 // renderBodyArea wraps renderBody with the fillScreen padding that
@@ -136,7 +129,15 @@ func (lm listModel) renderTinyFallback(width, height int, chrome viewChrome) str
 // in M6 split-mode. The narrow flag stays scoped to renderBody +
 // helpers — chrome boilerplate (title/footer) is unaffected.
 func (lm listModel) renderBodyArea(width, bodyRows int, chrome viewChrome) string {
-	body := lm.renderBody(width, bodyRows-1 /* header */, chrome)
+	var body string
+	switch {
+	case lm.loading:
+		body = statusStyle.Render("loading…")
+	case lm.err != nil:
+		body = errorStyle.Render(lm.err.Error())
+	default:
+		body = lm.renderBody(width, bodyRows-1 /* header */, chrome)
+	}
 	rendered := strings.Split(body, "\n")
 	for len(rendered) < bodyRows {
 		rendered = append(rendered, normalRowStyle.Render(strings.Repeat(" ", width)))

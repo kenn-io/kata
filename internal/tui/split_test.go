@@ -2403,60 +2403,82 @@ func TestSplit_CursorFollow_RetargetsOnSameShortIDDifferentProject(t *testing.T)
 	}
 }
 
-func TestSplitSearchRenderedRowsMatchPagingAndClicks(t *testing.T) {
+func TestSearchRenderedRowsMatchPagingAndClicks(t *testing.T) {
 	defer snapshotInit(t)()
-	m := resizeModel(newTestModel(), 160, 40)
-	m.opts.Mouse = true
-	m.list.issues = makeTestIssues(60)
-	m = m.applyListViewportCache()
-	lines := strings.Split(stripANSI(m.viewBody()), "\n")
-	count := 0
-	for y, line := range lines {
-		for i := range 60 {
-			ref := fmt.Sprintf("r%03d", i+1)
-			if !strings.Contains(line[:min(len(line), 68)], ref) {
-				continue
-			}
-			clicked, _ := updateModel(m, mouseLeftClick(4, y))
-			if clicked.list.selectedUID != m.list.issues[i].UID {
-				t.Errorf("row %d shows %s but selected %s", y, ref, clicked.list.selectedUID)
-			}
-			count++
+	for _, size := range [][2]int{{80, 1}, {80, 2}, {80, 3}, {80, 4}, {80, 9}, {160, 40}} {
+		m := resizeModel(newTestModel(), size[0], size[1])
+		m.authCapabilitiesRequired, m.authCapabilitiesReady = true, true
+		m.activeAuth = AuthInfo{Kind: "none"}
+		m.opts.Mouse = true
+		m.list.issues = makeTestIssues(60)
+		m = m.applyListViewportCache()
+		lines := strings.Split(stripANSI(m.viewContent()), "\n")
+		if len(lines) > size[1] {
+			t.Fatalf("%v: frame has %d rows", size, len(lines))
 		}
-	}
-	if count == 0 || m.list.pageRows != count {
-		t.Fatalf("page rows=%d rendered=%d", m.list.pageRows, count)
+		count := 0
+		for y, line := range lines {
+			if m.layout == splitlayout.Split {
+				line = line[:min(len(line), 68)]
+			}
+			for i, issue := range m.list.issues {
+				ref := fmt.Sprintf("r%03d", i+1)
+				if !strings.Contains(line, ref) {
+					continue
+				}
+				clicked, _ := updateModel(m, mouseLeftClick(4, y))
+				if clicked.list.selectedUID != issue.UID {
+					t.Errorf("%v row %d shows %s but selected %s", size, y, ref, clicked.list.selectedUID)
+				}
+				count++
+			}
+		}
+		if m.list.pageRows != count {
+			t.Errorf("%v: page rows=%d rendered=%d", size, m.list.pageRows, count)
+		}
+		if size[0] == 80 && count != max(0, size[1]-3) {
+			t.Errorf("%v: compact rows=%d", size, count)
+		}
 	}
 }
 
-func TestSplitSearchKeepsEditPositionVisible(t *testing.T) {
-	m := resizeModel(newTestModel(), 160, 40)
-	m.list.filter.Search = strings.Repeat("a", 70) + "TAIL"
-	m, cmd := updateModel(m, keyRune('/'))
-	require.NotNil(t, cmd)
-	m, _ = updateModel(m, cmd())
-	require.Equal(t, inputSearchBar, m.input.kind)
-	check := func(want string) {
-		t.Helper()
-		row := 1
-		if m.layout == splitlayout.Split {
-			row = 2
+func TestSearchKeepsEditPositionVisible(t *testing.T) {
+	defer snapshotInit(t)()
+	for _, initialSize := range [][2]int{{80, 9}, {160, 40}} {
+		m := resizeModel(newTestModel(), initialSize[0], initialSize[1])
+		m.authCapabilitiesRequired, m.authCapabilitiesReady = true, true
+		m.activeAuth = AuthInfo{Kind: "none"}
+		m.list.filter.Search = strings.Repeat("a", 70) + "TAIL"
+		m, cmd := updateModel(m, keyRune('/'))
+		require.NotNil(t, cmd)
+		m, _ = updateModel(m, cmd())
+		require.Equal(t, inputSearchBar, m.input.kind)
+		check := func(want string) {
+			t.Helper()
+			row := 1
+			if m.layout == splitlayout.Split {
+				row = 2
+			}
+			raw := strings.Split(m.viewContent(), "\n")[row]
+			line := stripANSI(raw)
+			require.Contains(t, line, want)
+			require.Regexp(t, `\x1b\[(?:[0-9]+;)*7(?:;[0-9]+)*m`, raw, "final frame must preserve the input caret styling")
+			require.NotContains(t, line, "…", "the active input and caret must fit")
 		}
-		line := strings.Split(stripANSI(m.viewBody()), "\n")[row]
-		require.Contains(t, line, want)
-		require.NotContains(t, line, "…", "the active input and caret must fit")
-	}
-	check("TAIL ")
-	m = sendKey(m, tea.KeyEnd)
-	m = sendRune(m, 'Z')
-	check("TAILZ ")
-	for range 3 {
-		m = sendKey(m, tea.KeyLeft)
-	}
-	m = sendRune(m, 'X')
-	check("TAXI")
-	for _, width := range []int{80, 240, 160} {
-		m = resizeModel(m, width, 40)
+		if initialSize[1] >= listMinHeight {
+			check("TAIL ")
+		}
+		m = sendKey(m, tea.KeyEnd)
+		m = sendRune(m, 'Z')
+		check("TAILZ ")
+		for range 3 {
+			m = sendKey(m, tea.KeyLeft)
+		}
+		m = sendRune(m, 'X')
 		check("TAXI")
+		for _, size := range [][2]int{{80, 9}, {80, 4}, {80, 40}, {240, 40}, {160, 40}} {
+			m = resizeModel(m, size[0], size[1])
+			check("TAXI")
+		}
 	}
 }

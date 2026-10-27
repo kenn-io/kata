@@ -817,39 +817,55 @@ func snapLabelPromptModel() Model {
 // Search stays above the records even with no matches or a narrow split pane.
 func TestListPersistentSearch(t *testing.T) {
 	defer snapshotInit(t)()
-	for _, size := range [][2]int{{80, 9}, {80, 10}, {120, 30}, {160, 40}} {
-		for _, query := range []string{"", "no-match-anywhere", strings.Repeat("query", 30)} {
-			m := resizeModel(newTestModel(), size[0], size[1])
-			m.list.issues = makeTestIssues(30)
-			m.list.filter.Search = query
-			for _, editing := range []bool{false, true} {
-				if editing {
-					m, _ = m.openInput(inputSearchBar)
-				}
-				lines := strings.Split(stripANSI(m.viewBody()), "\n")
-				row := 1
-				if size[1] < listMinHeight {
-					row = 0
-				} else if m.layout == splitlayout.Split {
-					row = 2
-				}
-				if editing && len(query) < 20 {
-					if !strings.Contains(lines[row], "open:") {
-						t.Errorf("%v: active short search hides counts: %q", size, lines[row])
+	for _, size := range [][2]int{{80, 9}, {80, 10}, {160, 40}} {
+		for _, state := range []string{"ready", "loading", "error"} {
+			for _, query := range []string{"", "no-match-anywhere"} {
+				for _, editing := range []bool{false, true} {
+					m := resizeModel(newTestModel(), size[0], size[1])
+					m.authCapabilitiesRequired, m.authCapabilitiesReady = true, true
+					m.activeAuth = AuthInfo{Kind: "none"}
+					m.list.issues = makeTestIssues(30)
+					m.list.filter.Search = query
+					m.list.loading = state == "loading"
+					if state == "error" {
+						m.list.err = fmt.Errorf("unavailable")
 					}
-				}
-				want := "/" + query
-				if query == "" && !editing {
-					want = "/ search"
-				}
-				if editing && len(query) >= 20 {
-					want = query[len(query)-20:]
-				}
-				if !strings.Contains(lines[row], want[:min(len(want), 20)]) {
-					t.Errorf("%v editing=%v: search absent from row %d: %q", size, editing, row, lines[row])
-				}
-				if lipgloss.Width(lines[row]) > size[0] {
-					t.Errorf("search overflow: %q", lines[row])
+					if editing {
+						next, open := updateModel(m, keyRune('/'))
+						if open == nil {
+							t.Fatal("search did not open")
+						}
+						m, _ = updateModel(next, open())
+						m = sendRune(m, 'z')
+					}
+					lines := strings.Split(stripANSI(m.viewContent()), "\n")
+					row := 1
+					if m.layout == splitlayout.Split {
+						row = 2
+					}
+					want := "/" + query
+					if editing {
+						want += "z"
+					} else if query == "" {
+						want = "/ search"
+					}
+					if len(lines) <= row || !strings.Contains(lines[row], want) {
+						t.Errorf("%v %s editing=%v: search %q absent from final frame", size, state, editing, want)
+						continue
+					}
+					if !strings.Contains(lines[row], "open:") {
+						t.Errorf("%v %s: short search hides counts", size, state)
+					}
+					if lipgloss.Width(lines[row]) > size[0] {
+						t.Errorf("search overflow: %q", lines[row])
+					}
+					if state != "ready" && !strings.Contains(strings.Join(lines[row+1:], "\n"), map[string]string{"loading": "loading…", "error": "unavailable"}[state]) {
+						t.Errorf("%v: missing %s body", size, state)
+					}
+					m.list.loading, m.list.err = false, nil
+					if !strings.Contains(stripANSI(m.viewContent()), want) {
+						t.Error("search lost after recovery")
+					}
 				}
 			}
 		}
