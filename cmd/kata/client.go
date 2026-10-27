@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-
 	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/teammate"
 )

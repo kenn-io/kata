@@ -120,3 +120,33 @@ func TestTeammateInvalidResolutionFrozen(t *testing.T) {
 	_, present := teammate.FromRequest(cmd.Context())
 	require.False(t, present, "invalid optional default must not become request contribution")
 }
+
+// A no-event close response must preserve this invocation's selection for the keyed follow-up.
+func TestTeammateNoSourceCloseFollowupContribution(t *testing.T) {
+	setupKataEnv(t)
+	t.Setenv("KATA_TEAMMATE", "current-worker")
+	var contribution string
+	var comments int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/health":
+			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.18.0"}`))
+		case "/api/v1/projects/resolve":
+			_, _ = w.Write([]byte(`{"project":{"id":1,"name":"example-project"}}`))
+		case "/api/v1/projects/1/issues/01ARZ3NDEKTSV4RRFFQ69G5FAV/comments":
+			comments++
+			contribution = r.Header.Get("X-Kata-Teammate")
+			_, _ = w.Write([]byte(`{"comment":{"id":1,"body":"Fresh followup"}}`))
+		default:
+			_, _ = w.Write([]byte(`{"issue":{"id":1,"uid":"01ARZ3NDEKTSV4RRFFQ69G5FAV","project_id":1,"short_id":"abc1","status":"closed"},"changed":false}`))
+		}
+	}))
+	defer server.Close()
+	_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), "--project", "example-project", "close", "abc1", "--done",
+		"--message", "Implemented the requested behavior and ran focused tests.", "--test", "go test ./internal/example",
+		"--comment", "Fresh followup", "--idempotency-key", "fresh-close")
+	require.NoError(t, err)
+	require.Equal(t, 1, comments)
+	require.Equal(t, "current-worker", contribution)
+}

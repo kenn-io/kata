@@ -11,6 +11,7 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/teammate"
 )
 
 func TestScopedEventDisplayContribution(t *testing.T) {
@@ -37,7 +38,7 @@ func TestClaimForwardDisplayContribution(t *testing.T) {
 	defer hub.Close()
 	client, err := newClaimHubClient(t.Context(), hub.URL, "enrollment-token", false, nil)
 	require.NoError(t, err)
-	ctx := db.WithEventTeammate(t.Context(), "worker-1")
+	ctx := teammate.WithRequest(t.Context(), "worker-1")
 	_, err = client.AcquireClaim(ctx, 42, "abc1", api.ClaimActionBody{})
 	require.NoError(t, err)
 	_, err = client.ClaimIssue(ctx, 42, "abc1", api.ClaimRequestBody{})
@@ -53,7 +54,7 @@ func TestEventTeammateShadowsParent(t *testing.T) {
 		{"absent", "POST", "", ""}, {"read", "GET", "worker-2", ""}, {"override", "POST", "worker-2", "worker-2"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(db.WithEventTeammate(t.Context(), "parent-worker"))
+			ctx, cancel := context.WithCancel(teammate.WithRequest(t.Context(), "parent-worker"))
 			defer cancel()
 			req := httptest.NewRequest(tc.method, "/", nil).WithContext(ctx)
 			if tc.header != "" {
@@ -62,10 +63,11 @@ func TestEventTeammateShadowsParent(t *testing.T) {
 			called := false
 			withEventTeammate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				called = true
-				require.Equal(t, tc.want, db.EventTeammateFromContext(r.Context()))
+				handle, _ := teammate.FromRequest(r.Context())
+				require.Equal(t, tc.want, handle)
 				cancel()
 				require.ErrorIs(t, r.Context().Err(), context.Canceled)
-			})).ServeHTTP(httptest.NewRecorder(), req)
+			}), selfAuthenticatedRouteMatcher{}).ServeHTTP(httptest.NewRecorder(), req)
 			require.True(t, called)
 		})
 	}

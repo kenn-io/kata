@@ -9,12 +9,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/teammate"
 )
 
 // The contribution is request display data: native writes hash it, while
 // system events and replay retain their own bytes and identities.
 func checkEventTeammate(t *testing.T, store db.Storage, backend Backend) error {
-	ctx := db.WithEventTeammate(t.Context(), "worker-1")
+	ctx := teammate.WithRequest(t.Context(), "worker-1")
 	project, err := store.CreateProject(ctx, "contribution-project")
 	require.NoError(t, err)
 	issue, created, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Work", Author: "coordinator", Metadata: map[string]jsontext.Value{"teammate": []byte(`"explicit-owner"`)}})
@@ -30,6 +31,8 @@ func checkEventTeammate(t *testing.T, store db.Storage, backend Backend) error {
 		require.Equal(t, event.ContentHash, hash, event.Type)
 	}
 	check(created)
+	_, _, err = store.CreateIssue(teammate.WithRequest(ctx, "bad/handle"), db.CreateIssueParams{ProjectID: project.ID, Title: "Invalid contribution", Author: "coordinator"})
+	require.ErrorContains(t, err, "teammate")
 	peer, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Peer work", Author: "coordinator"})
 	require.NoError(t, err)
 	atomic, err := store.EditIssueAtomic(ctx, db.EditIssueAtomicParams{IssueID: issue.ID, Actor: "coordinator", Title: new("Updated work"), AddRelated: []int64{peer.ID}})
@@ -137,14 +140,14 @@ func checkEventTeammate(t *testing.T, store db.Storage, backend Backend) error {
 	_, system, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "System work", Author: "system"})
 	require.NoError(t, err)
 	require.NotContains(t, system.Payload, "attributed_teammate")
-	_, empty, err := store.CreateIssue(db.WithEventTeammate(ctx, ""), db.CreateIssueParams{ProjectID: project.ID, Title: "Unattributed work", Author: "coordinator"})
+	_, empty, err := store.CreateIssue(teammate.WithRequest(ctx, ""), db.CreateIssueParams{ProjectID: project.ID, Title: "Unattributed work", Author: "coordinator"})
 	require.NoError(t, err)
 	require.NotContains(t, empty.Payload, "attributed_teammate")
 	records, err := CollectImportRecords(t.Context(), store, db.ExportFilter{})
 	require.NoError(t, err)
 	target := backend.Open(t)
 	t.Cleanup(func() { require.NoError(t, target.Close()) })
-	require.NoError(t, target.ImportReplay(db.WithEventTeammate(t.Context(), "other-worker"), records, db.ImportOptions{}))
+	require.NoError(t, target.ImportReplay(teammate.WithRequest(t.Context(), "other-worker"), records, db.ImportOptions{}))
 	importedProject, err := target.ProjectByUID(t.Context(), project.UID)
 	require.NoError(t, err)
 	retained, err := target.EventsByUIDs(t.Context(), importedProject.ID, []string{created.UID, event.UID, empty.UID})

@@ -236,7 +236,9 @@ the startup default. Clients send the header only on mutations to the selected
 daemon origin. No harness detection is involved. Invalid explicit CLI flags
 are validation errors. An invalid environment default does not block actions
 that do not consume explicit teammate identity; those requests carry no
-contribution.
+contribution. The selection applies only to that request. Daemon workers,
+including background synchronization, do not inherit the launch selection.
+Interactive TUI and browser mutation selection is outside this transport scope.
 
 Native user issue and existing live claim events retain the value as
 `attributed_teammate` in their raw JSON payload before hashing. Full and
@@ -246,6 +248,8 @@ reply addresses, inbox matching, or idempotency fingerprints. System, project,
 cron, snapshot, imported history, and queued replay do not acquire a request
 contribution. Retries preserve the committed event's contribution; a recovered
 keyed close follow-up uses that close event's contribution, including its absence.
+If the response contains neither an original nor a returned event, the follow-up
+keeps the current invocation's selection.
 
 Older daemons can ignore the optional header and still accept ordinary writes
 and MCP startup. Explicit comment-body attribution retains its existing API

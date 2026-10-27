@@ -52,13 +52,13 @@ type ConnectorFieldMappingOutput struct {
 
 // BridgeInput selects one issue bridge inside the startup scope.
 type BridgeInput struct {
-	Teammate *string `json:"teammate,omitempty"`
+	Teammate *string `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
 	Ref      string  `json:"ref"`
 }
 
 // BridgeBindInput binds an issue to an existing external root.
 type BridgeBindInput struct {
-	Teammate        *string `json:"teammate,omitempty"`
+	Teammate        *string `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
 	Ref             string  `json:"ref"`
 	Connector       string  `json:"connector"`
 	External        string  `json:"external"`
@@ -67,14 +67,14 @@ type BridgeBindInput struct {
 
 // BridgePauseInput pauses an issue bridge with an optional safe reason.
 type BridgePauseInput struct {
-	Teammate *string `json:"teammate,omitempty"`
+	Teammate *string `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
 	Ref      string  `json:"ref"`
 	Reason   string  `json:"reason,omitempty"`
 }
 
 // BridgeResolveFieldInput selects the winner for one planning-field conflict.
 type BridgeResolveFieldInput struct {
-	Teammate  *string `json:"teammate,omitempty"`
+	Teammate  *string `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
 	Ref       string  `json:"ref"`
 	KataField string  `json:"kata_field"`
 	Use       string  `json:"use"`
@@ -82,7 +82,7 @@ type BridgeResolveFieldInput struct {
 
 // BridgeResolveCommentInput resolves uncertain outbound comment delivery.
 type BridgeResolveCommentInput struct {
-	Teammate          *string `json:"teammate,omitempty"`
+	Teammate          *string `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
 	Ref               string  `json:"ref"`
 	Action            string  `json:"action"`
 	ExternalCommentID string  `json:"external_comment_id,omitempty"`

@@ -11,6 +11,7 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/teammate"
 )
 
 type claimPrincipal struct {
@@ -33,7 +34,15 @@ func resolveClaimPrincipal(
 	operation HostFederationOperation,
 	allowEnrollment bool,
 ) (context.Context, claimPrincipal, error) {
-	return resolveCapabilityPrincipal(ctx, cfg, projectID, authz, body, operation, allowEnrollment, "claim", true)
+	ctx, principal, err := resolveCapabilityPrincipal(ctx, cfg, projectID, authz, body, operation, allowEnrollment, "claim", true)
+	if err != nil {
+		return ctx, principal, err
+	}
+	handle, _ := teammate.FromRequest(ctx)
+	if err := teammate.Validate(handle); err != nil {
+		return ctx, claimPrincipal{}, api.NewError(http.StatusBadRequest, "invalid_teammate", err.Error(), "", nil)
+	}
+	return ctx, principal, nil
 }
 
 // resolveCapabilityPrincipal shares ordinary credential handling with claims.
