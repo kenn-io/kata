@@ -49,16 +49,24 @@ export function setGeneratedFetch(fetcher: typeof fetch): void {
   generatedFetch = fetcher
 }
 
+async function readResponseBody(response: Response): Promise<unknown> {
+  const contentType = response.headers.get('Content-Type')
+  if (contentType && !contentType.includes('json') && !contentType.startsWith('text/')) {
+    return response.blob()
+  }
+  const text = await response.text()
+  return text ? (contentType?.includes('json') ? JSON.parse(text) : text) : undefined
+}
+
 export async function orvalFetch<T>(
   url: string,
   options: RequestInit,
   fetcher: typeof fetch = generatedFetch,
 ): Promise<T> {
   const response = await fetcher(applicationURL(url), options)
-  const text = await response.text()
-  const data = response.headers.get('Content-Type')?.includes('json') ? JSON.parse(text) : text
+  const data = await readResponseBody(response)
   return {
-    data: text ? data : undefined,
+    data,
     status: response.status,
     headers: response.headers,
   } as T
