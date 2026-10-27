@@ -29,28 +29,32 @@ test('healthy connections leave the toolbar at the top; read-only notices remain
   }
 
   await kata.restartReadonly()
-  await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
-  await expect(summary).toContainText('Credential: Read-only')
-  await expect(page.getByRole('button', { name: 'New task' })).toBeDisabled()
-  await expect(summary).not.toContainText('example-local-token')
-  for (const width of [1440, 390]) {
-    await page.setViewportSize({ width, height: 900 })
-    const layout = await summary.evaluate((element) => {
-      const rect = element.getBoundingClientRect()
-      const header = document.querySelector('.kata-header')!.getBoundingClientRect()
-      return {
-        top: rect.top,
-        bottom: rect.bottom,
-        headerTop: header.top,
-        left: rect.left,
-        right: rect.right,
-        viewport: window.innerWidth,
-      }
-    })
-    expect(layout.top).toBe(0)
-    expect(layout.bottom).toBeLessThanOrEqual(layout.headerTop)
-    expect(layout.left).toBeGreaterThanOrEqual(0)
-    expect(layout.right).toBeLessThanOrEqual(layout.viewport)
+  try {
+    await page.goto(`${kata.origin}/kata?issue=${issue.uid}`)
+    await expect(summary).toContainText('Credential: Read-only')
+    await expect(page.getByRole('button', { name: 'New task' })).toBeDisabled()
+    await expect(summary).not.toContainText('example-local-token')
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 })
+      const layout = await summary.evaluate((element) => {
+        const rect = element.getBoundingClientRect()
+        const header = document.querySelector('.kata-header')!.getBoundingClientRect()
+        return {
+          top: rect.top,
+          bottom: rect.bottom,
+          headerTop: header.top,
+          left: rect.left,
+          right: rect.right,
+          viewport: window.innerWidth,
+        }
+      })
+      expect(layout.top).toBe(0)
+      expect(layout.bottom).toBeLessThanOrEqual(layout.headerTop)
+      expect(layout.left).toBeGreaterThanOrEqual(0)
+      expect(layout.right).toBeLessThanOrEqual(layout.viewport)
+    }
+  } finally {
+    await kata.restart()
   }
   expect(inventoryReads).toBe(0)
 })
