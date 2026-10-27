@@ -459,6 +459,26 @@ func TestDaemonStatus_IgnoresRuntimeRecordWhosePIDWasReused(t *testing.T) {
 	assert.Equal(t, "OK daemon status=stopped selected_state=local_stopped selected_profile=\"\"\n", string(out))
 }
 
+// Discovery can select a daemon whose identity this process cannot check, so
+// status must list it too; daemon controls still skip it.
+func TestDaemonStatus_ListsUnverifiableRecord(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	child := startSleepProcess(t)
+	writeUnknownRuntimePID(t, child.Process.Pid)
+
+	out := executeRoot(t, newRootCmd(), "daemon", "status", "--json")
+
+	var got struct {
+		Daemons []struct {
+			PID int `json:"pid"`
+		} `json:"daemons"`
+	}
+	require.NoError(t, json.Unmarshal(out, &got))
+	require.Len(t, got.Daemons, 1)
+	assert.Equal(t, child.Process.Pid, got.Daemons[0].PID)
+}
+
 func TestDaemonStatus_AgentReportsWebURL(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
@@ -3976,7 +3996,8 @@ func writeUnknownRuntimePID(t *testing.T, pid int) string {
 	require.NoError(t, err)
 	path, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
 		PID: pid, ProcessIdentityV2: "unverifiable", StartedAt: time.Now().UTC(),
-		Network: "tcp", Address: "127.0.0.1:7777",
+		// Discovery probes this record, so name an address nothing listens on.
+		Network: "tcp", Address: closedLoopbackAddr(t),
 	})
 	require.NoError(t, err)
 	return path

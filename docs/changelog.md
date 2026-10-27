@@ -24,6 +24,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   All loaders remain available; the default keeps loader-only progressive
   loading. Unknown, duplicate, or unavailable sections disable `/mcp` until
   corrected and restarted. See [Startup sections](reference/mcp.md#startup-sections).
+- Connect to, and list in `kata daemon status`, a running daemon whose runtime
+  record has a process identity Kata can't check. Discovery previously skipped
+  it and auto-started a second daemon, which then refused to start beside it.
+  `stop`, `restart`, `reload`, and `update` still skip such a record.
 
 - List the daemon catalog from Go with `client.DaemonCatalog()`, and connect
   to an entry by name with `client.DiscoverOptions{Daemon: name}`, which

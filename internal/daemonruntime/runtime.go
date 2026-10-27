@@ -48,6 +48,21 @@ func runtimeCreationTimeMatches(record kitdaemon.RuntimeRecord) bool {
 	return !time.UnixMilli(created).After(record.StartedAt)
 }
 
+// RuntimeRecordWorthProbing reports whether discovery should ping a record's
+// endpoint. Beyond RuntimeProcessAlive, it keeps a record whose identity this
+// process cannot judge when its PID is live and was not reused after the record
+// was written. Startup refuses beside such a record, so discovery must still
+// find the daemon instead of auto-starting one that will refuse. Discovery
+// accepts it only if the endpoint reports the record's PID. Daemon controls
+// keep using RuntimeProcessAlive and never signal such a record.
+func RuntimeRecordWorthProbing(record kitdaemon.RuntimeRecord) bool {
+	if kitdaemon.RuntimeProcessScope(record) != kitdaemon.ProcessScopeUnknown {
+		return RuntimeProcessAlive(record)
+	}
+	return record.PID > 0 && record.PID <= math.MaxInt32 && kitdaemon.ProcessAlive(record.PID) &&
+		runtimeCreationTimeMatches(record)
+}
+
 // RuntimeRecordBlocksStart keeps kit's startup rule and the legacy PID-reuse check.
 func RuntimeRecordBlocksStart(record kitdaemon.RuntimeRecord) bool {
 	if !kitdaemon.RuntimeRecordBlocksStart(record) {

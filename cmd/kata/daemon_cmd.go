@@ -641,7 +641,8 @@ func daemonStatusCmd() *cobra.Command {
 			}
 			out.Selected = &selected
 			for _, r := range recs {
-				if daemonruntime.RuntimeProcessAlive(r) {
+				// Match discovery, which can select a record controls skip.
+				if daemonruntime.RuntimeRecordWorthProbing(r) {
 					out.Daemons = append(out.Daemons, daemonStatusEntry{
 						PID:           r.PID,
 						Version:       daemonRuntimeVersion(r),

@@ -144,11 +144,16 @@ func discoverWebRuntimeForBaseURL(ctx context.Context, dataDir, baseURL, address
 		if address != "" && record.Endpoint().ConfigAddress() != address {
 			continue
 		}
-		if !daemonruntime.RuntimeProcessAlive(record) {
+		if !daemonruntime.RuntimeRecordWorthProbing(record) {
 			continue
 		}
-		candidate, _, ok := probeAddress(ctx, record.Endpoint().ConfigAddress())
+		candidate, info, ok := probeAddress(ctx, record.Endpoint().ConfigAddress())
 		if !ok || candidate != baseURL {
+			continue
+		}
+		// A stale record can share an endpoint another daemon now owns. An
+		// unverifiable record must prove it is that daemon by its PID.
+		if info.PID != record.PID && (info.PID != 0 || !daemonruntime.RuntimeProcessAlive(record)) {
 			continue
 		}
 		discovered, err := DiscoverWebRuntime(record)
