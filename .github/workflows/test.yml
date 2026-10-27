@@ -224,7 +224,7 @@ jobs:
 
   api-breaking:
     name: OpenAPI breaking changes
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
 
     steps:
@@ -242,8 +242,8 @@ jobs:
 
       - name: Check for breaking API contract changes
         env:
-          BASE_REF: ${{ github.base_ref }}
-        run: make api-breaking BASE_REF="origin/$BASE_REF"
+          BASE_REF: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || format('origin/{0}', github.base_ref) }}
+        run: make api-breaking BASE_REF="$BASE_REF"
 
   api-check:
     name: OpenAPI artifacts
