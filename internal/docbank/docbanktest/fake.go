@@ -16,24 +16,58 @@ import (
 	"testing"
 )
 
+// Node is a seedable Docbank node record.
+// Node matches the fields consumed from Docbank's flat node response.
+type Node struct {
+	ID               int64  `json:"id"`
+	Name             string `json:"name"`
+	Kind             string `json:"kind"`
+	CurrentVersionID string `json:"current_version_id,omitempty"`
+	TrashedAt        string `json:"trashed_at,omitempty"`
+}
+
+// Version matches Docbank's flat content-version metadata response.
+type Version struct {
+	ID        string `json:"id"`
+	NodeID    int64  `json:"node_id"`
+	Size      int64  `json:"size"`
+	MediaType string `json:"mime_type,omitempty"`
+}
+
 // Fake keeps uploaded bytes in memory and records API requests.
 type Fake struct {
-	Server       *httptest.Server
-	Fault        string
-	UploadStatus int
-	mu           sync.Mutex
-	requests     []string
-	dirs         map[string]int64
-	versions     map[string]string
-	content      map[string][]byte
+	Server          *httptest.Server
+	Fault           string
+	UploadStatus    int
+	mu              sync.Mutex
+	requests        []string
+	dirs            map[string]int64
+	versions        map[string]string
+	content         map[string][]byte
+	nodes           map[int64]Node
+	paths           map[string]int64
+	versionMetadata map[string]Version
 }
 
 // New starts an isolated Docbank fake and registers its cleanup.
 func New(t testing.TB) *Fake {
-	f := &Fake{dirs: map[string]int64{"/": 1}, versions: map[string]string{}, content: map[string][]byte{}}
+	f := &Fake{dirs: map[string]int64{"/": 1}, versions: map[string]string{}, content: map[string][]byte{}, nodes: map[int64]Node{}, paths: map[string]int64{}, versionMetadata: map[string]Version{}}
 	f.Server = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.Server.Close)
 	return f
+}
+
+// Seed adds a node and its immutable versions without using the upload route.
+func (f *Fake) Seed(path string, node Node, versions ...Version) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.nodes[node.ID] = node
+	if path != "" {
+		f.paths[path] = node.ID
+	}
+	for _, version := range versions {
+		f.versionMetadata[version.ID] = version
+	}
 }
 
 // Requests returns the method and path of each observed request.
@@ -58,12 +92,38 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	send := func(v any) { w.Header().Set("Content-Type", "application/json"); _ = json.MarshalWrite(w, v) }
 	switch {
 	case r.URL.Path == "/api/v1/path" && r.Method == "GET":
+		if id, ok := f.paths[r.URL.Query().Get("path")]; ok {
+			node := f.nodes[id]
+			// Docbank's path resolver excludes trashed nodes; getNode includes them.
+			if node.TrashedAt != "" {
+				http.NotFound(w, r)
+				return
+			}
+			send(node)
+			return
+		}
 		id, ok := f.dirs[r.URL.Query().Get("path")]
 		if !ok {
 			http.NotFound(w, r)
 			return
 		}
 		send(map[string]any{"id": id, "kind": "dir"})
+	case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/v1/nodes/"):
+		id, _ := strconv.ParseInt(strings.TrimPrefix(r.URL.Path, "/api/v1/nodes/"), 10, 64)
+		node, ok := f.nodes[id]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		send(node)
+	case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/v1/versions/") && !strings.HasSuffix(r.URL.Path, "/content"):
+		id := strings.TrimPrefix(r.URL.Path, "/api/v1/versions/")
+		version, ok := f.versionMetadata[id]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		send(version)
 	case r.URL.Path == "/api/v1/path/mkdir" && r.Method == "POST":
 		var in struct {
 			Path string `json:"path"`

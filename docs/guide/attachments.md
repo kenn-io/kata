@@ -1,7 +1,7 @@
 ---
 title: Issue attachments
 description: Attach files through Docbank and view images and videos in Kata.
-last_edited: 2026-10-24
+last_edited: 2026-10-26
 ---
 
 # Issue attachments
@@ -38,6 +38,27 @@ kata docbank attachments rm abc4 <attachment-id-or-suffix>
 Each upload gets a new ID. Failed uploads add no reference. Retrying after a lost response may add another reference to the same Docbank file; remove the extra with `rm`. Downloads check the bytes against Docbank's `X-Docbank-Blob-Hash` header and the byte count against the reference before publishing the destination. Replacing an existing file requires `--force`.
 
 Removal drops the reference. Docbank retains the bytes under its own retention rules.
+
+## Link a file already in Docbank
+
+Pin an existing file without downloading or uploading its bytes:
+
+```sh
+kata docbank attachments link abc4 /reports/report.pdf
+kata docbank attachments link abc4 42 --version 6f1c2e8a-2222-4222-8222-222222222222
+```
+
+Use a positive numeric node ID or an absolute Docbank path. URLs are not accepted.
+By default, `link` pins the current content version. `--version` must identify a
+version belonging to that file. Directories and trashed files cannot be linked.
+This command requires daemon API 0.34.0 or newer.
+
+Linking an already attached version returns its existing attachment ID without
+changing the issue. If uploads created multiple references to that version,
+`link` returns the smallest ID and preserves the others. A newer current
+version creates another reference. The saved name is the file's name at link
+time; media type and size describe the linked version. Later Docbank changes
+do not update that reference.
 
 ## Read references as metadata
 

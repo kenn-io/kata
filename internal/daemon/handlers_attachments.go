@@ -105,6 +105,7 @@ func recheckAttachmentWrite(ctx context.Context, cfg ServerConfig, projectID int
 }
 
 func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
+	registerAttachmentLinkHandler(h, cfg)
 	rawBody := func(ctx huma.Context, next func(huma.Context)) {
 		r, w := humago.Unwrap(ctx)
 		// Match huma's unlimited body-read timeout for a streaming upload.

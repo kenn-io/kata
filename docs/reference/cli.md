@@ -2264,9 +2264,16 @@ On main after 0.20.0, attach files to an issue with Docbank, then list, download
 
 ```sh
 kata docbank attachments add <issue> <file>...
+kata docbank attachments link <issue> <node-id|/path> [--version UUID]
 kata docbank attachments ls <issue>
 kata docbank attachments get <issue> <attachment> [-o PATH] [--force]
 kata docbank attachments rm <issue> <attachment>
 ```
 
 `<attachment>` accepts a full ID or a unique suffix. Uploads are limited to 256 MiB per file. `get` checks the stored byte count before publishing and requires `--force` to replace a destination. `rm` clears only that file's metadata key. All commands support the usual output modes.
+
+`link` requires daemon API 0.34.0 or newer. It pins an existing file's current
+version, or the specified version belonging to that node, without transferring
+bytes. URLs, directories and trashed files are rejected. Relinking the same
+version returns an existing attachment ID; a new current version creates a new
+reference. See [linking existing files](../guide/attachments.md#link-a-file-already-in-docbank).
