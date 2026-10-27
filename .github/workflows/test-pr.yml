@@ -12,7 +12,7 @@ jobs:
   run:
     uses: ./.github/workflows/test.yml
 
-  ci-gate:
+  gate:
     name: CI gate
     needs: run
     if: always()
