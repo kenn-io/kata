@@ -130,7 +130,10 @@ func TestMCPListenerPolicyAppliesOnlyWhenMounted(t *testing.T) {
 				req.Header.Set("Origin", tt.origin)
 			}
 			if tt.cookie {
-				req.AddCookie(&http.Cookie{Name: "kata_session_instance_a", Value: "cookie-session"})
+				req.AddCookie(&http.Cookie{
+					Name: "kata_session_instance_a", Value: "cookie-session",
+					Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode,
+				})
 			}
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, req)
