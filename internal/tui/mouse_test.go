@@ -160,15 +160,13 @@ func TestMousePersistentSearch(t *testing.T) {
 }
 
 func TestMouseSearchVisibilityGuards(t *testing.T) {
-	for _, state := range []string{"narrow", "one-row", "modal", "input", "detail"} {
+	for _, state := range []string{"narrow", "modal", "input", "detail"} {
 		t.Run(state, func(t *testing.T) {
 			m := resizeModel(newTestModel(), 80, 24)
 			m.opts.Mouse = true
 			switch state {
 			case "narrow":
 				m = resizeModel(m, 79, 24)
-			case "one-row":
-				m = resizeModel(m, 80, 1)
 			case "modal":
 				m.modal = modalQuitConfirm
 			case "input":

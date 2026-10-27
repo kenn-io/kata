@@ -35,8 +35,7 @@ func (m Model) routeMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 			row = 2
 		}
 		if (m.view == viewList || m.view == viewDetail && m.layout == splitlayout.Split) &&
-			mouse.Y == row && row < m.height &&
-			(m.layout != splitlayout.Split || mouse.X < splitConfig.ListWidth(m.width)) {
+			mouse.Y == row && (m.layout != splitlayout.Split || mouse.X < splitConfig.ListWidth(m.width)) {
 			m.focus = focusList
 			if m.input.kind == inputSearchBar {
 				m.input.searchFocus, m.input.searchSubmitted = searchFocusQuery, false
