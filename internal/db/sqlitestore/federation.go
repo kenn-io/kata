@@ -2952,6 +2952,15 @@ func (d *Store) adoptProjectIntoFederation(
 		return db.AdoptProjectIntoFederationResult{}, err
 	}
 	baselineCreatedAt := time.Now().UTC().Format(sqliteTimeFormat)
+	// Capture retained comment contributors before replacing their source events.
+	snapshotPayloads := make([]string, len(issues))
+	for i, issue := range issues {
+		payload, err := d.federationIssueSnapshotPayload(ctx, tx, issue)
+		if err != nil {
+			return db.AdoptProjectIntoFederationResult{}, err
+		}
+		snapshotPayloads[i] = payload
+	}
 	// Old events were hashed with the local UID. Even an empty project's
 	// catalog events must be replaced when it takes the hub identity.
 	if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id = ?`, project.ID); err != nil {
@@ -3016,11 +3025,8 @@ func (d *Store) adoptProjectIntoFederation(
 	}
 
 	var snapshotCount int64
-	for _, issue := range issues {
-		payload, err := d.federationIssueSnapshotPayload(ctx, tx, issue)
-		if err != nil {
-			return db.AdoptProjectIntoFederationResult{}, err
-		}
+	for i, issue := range issues {
+		payload := snapshotPayloads[i]
 		issueUID := issue.UID
 		event, err := d.insertEventTx(ctx, tx, eventInsert{
 			ProjectID:   project.ID,

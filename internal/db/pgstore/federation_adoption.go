@@ -124,6 +124,15 @@ func (s *Store) AdoptProjectIntoFederation(
 		if err := clearProjectClaimStateTx(ctx, tx, project.ID); err != nil {
 			return err
 		}
+		// Capture retained comment contributors before replacing their source events.
+		snapshotPayloads := make([]string, len(issues))
+		for i, issue := range issues {
+			payload, err := federationIssueSnapshotPayload(ctx, tx, issue)
+			if err != nil {
+				return err
+			}
+			snapshotPayloads[i] = payload
+		}
 		// Old catalog events also carry a hash made with the local UID.
 		if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1`, project.ID); err != nil {
 			return fmt.Errorf("delete pre-adoption local events: %w", mapSQLError(err, nil))
@@ -177,11 +186,8 @@ push_cursor_event_id,bound_actor,allow_insecure,enabled
 			output.ResetAfterEventID = event.ID
 		}
 
-		for _, issue := range issues {
-			payload, err := federationIssueSnapshotPayload(ctx, tx, issue)
-			if err != nil {
-				return err
-			}
+		for i, issue := range issues {
+			payload := snapshotPayloads[i]
 			issueUID := issue.UID
 			event, err := s.insertEventTx(ctx, tx, eventInsert{
 				ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name,
