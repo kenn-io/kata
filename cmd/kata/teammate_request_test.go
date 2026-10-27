@@ -153,7 +153,6 @@ func TestTeammateNoSourceCloseFollowupContribution(t *testing.T) {
 				found = true
 				var payload map[string]any
 				require.NoError(t, json.Unmarshal([]byte(event.Payload), &payload))
-				t.Logf("keyed=%v comment payload=%s", keyed, event.Payload)
 				require.Equal(t, "worker-1", payload["attributed_teammate"], "a fresh current-daemon follow-up has no original close selection to replace the selected contribution")
 			}
 			require.True(t, found)
