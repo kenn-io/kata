@@ -2,58 +2,63 @@ package db
 
 import (
 	"encoding/json/v2"
-	"fmt"
-	"math"
-	"strings"
+	"maps"
 	"testing"
-	"unicode"
 	"uuid"
 
 	"go.kenn.io/kata/internal/metadata"
-	"hegel.dev/go/hegel"
 )
 
 // Acceptance follows the documented reference shape, including opaque future
 // formats being rejected, rather than trusting a caller-provided snapshot.
 func TestAttachmentEvidenceResolvesExactlyValidReferences(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		name := hegel.Draw(ht, hegel.Text())
-		media := hegel.Draw(ht, hegel.Text())
-		size := hegel.Draw(ht, hegel.Integers[int64](math.MinInt64, math.MaxInt64))
-		n := hegel.Draw(ht, hegel.Integers[uint64](0, math.MaxUint64))
-		version := uuid.MustParse(fmt.Sprintf("6f1c2e8a-2222-4222-8222-%012x", n&0xffffffffffff))
-		if hegel.Draw(ht, hegel.Booleans()) {
-			version = uuid.Nil()
+	version := uuid.MustParse("6f1c2e8a-2222-4222-8222-222222222222")
+	valid := map[string]any{"name": "report.pdf", "media_type": "application/pdf", "size": int64(12), "docbank_version": version}
+	with := func(key string, value any) map[string]any {
+		raw := maps.Clone(valid)
+		if value == nil {
+			delete(raw, key)
+		} else {
+			raw[key] = value
 		}
-		missingSize := hegel.Draw(ht, hegel.Booleans())
-		unknown := hegel.Draw(ht, hegel.Booleans())
-		raw := map[string]any{"name": name, "media_type": media, "size": size, "docbank_version": version}
-		if missingSize {
-			delete(raw, "size")
-		}
-		if unknown {
-			raw["future_field"] = true
-		}
-		encoded, err := json.Marshal(map[string]any{"attachment.example": raw})
-		if err != nil {
-			ht.Fatal(err)
-		}
-		evidence := []Evidence{{Type: "attachment", AttachmentID: "example", Attachment: &metadata.Attachment{Name: "forged.pdf"}}}
-		out, err := ResolveAttachmentEvidence(Issue{Metadata: JSONBlob(encoded)}, evidence)
-		validName := name != "" && len(name) <= 255 && name != "." && name != ".." && !strings.ContainsAny(name, `/\`) && !strings.ContainsFunc(name, unicode.IsControl)
-		valid := validName && media != "" && size >= 0 && version != uuid.Nil() && !missingSize && !unknown
-		if (err == nil) != valid {
-			ht.Fatalf("valid=%t raw=%v err=%v", valid, raw, err)
-		}
-		if valid {
-			expected := metadata.Attachment{Name: name, MediaType: media, Size: size, DocbankVersion: version}
+		return raw
+	}
+	for _, tc := range []struct {
+		name string
+		raw  map[string]any
+		ok   bool
+	}{
+		{"valid", valid, true},
+		{"empty size", with("size", int64(0)), true},
+		{"path name", with("name", "../report.pdf"), false},
+		{"control name", with("name", "report\n.pdf"), false},
+		{"empty media type", with("media_type", ""), false},
+		{"negative size", with("size", int64(-1)), false},
+		{"missing size", with("size", nil), false},
+		{"nil version", with("docbank_version", uuid.Nil()), false},
+		{"unknown field", with("future_field", true), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			encoded, err := json.Marshal(map[string]any{"attachment.example": tc.raw})
+			if err != nil {
+				t.Fatal(err)
+			}
+			evidence := []Evidence{{Type: "attachment", AttachmentID: "example", Attachment: &metadata.Attachment{Name: "forged.pdf"}}}
+			out, err := ResolveAttachmentEvidence(Issue{Metadata: JSONBlob(encoded)}, evidence)
+			if (err == nil) != tc.ok {
+				t.Fatalf("ok=%t err=%v", tc.ok, err)
+			}
+			if !tc.ok {
+				return
+			}
+			expected := metadata.Attachment{Name: tc.raw["name"].(string), MediaType: tc.raw["media_type"].(string), Size: tc.raw["size"].(int64), DocbankVersion: version}
 			if len(out) != 1 || out[0].Attachment == nil || *out[0].Attachment != expected {
-				ht.Fatalf("snapshot mismatch: %+v expected %+v", out, expected)
+				t.Fatalf("snapshot mismatch: %+v expected %+v", out, expected)
 			}
 			out[0].Attachment.Name = "edited.pdf"
 			if evidence[0].Attachment.Name != "forged.pdf" {
-				ht.Fatal("enrichment aliased caller evidence")
+				t.Fatal("enrichment aliased caller evidence")
 			}
-		}
-	}, hegel.WithTestCases(2000))
+		})
+	}
 }

@@ -9,6 +9,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/uid"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 const apiVersionAttachmentEvidence = "0.35.0"
@@ -26,9 +27,9 @@ func prepareCloseAttachments(cmd *cobra.Command, raw, reason, message string, ev
 	if len(files) > 0 && (reason != "done" || dry || cmd.Flags().Changed("if-match") || cmd.Flags().Changed("idempotency-key")) {
 		return nil, externalCLIValidation("--docbank requires done and cannot combine with --dry, --if-match or --idempotency-key; link first, then close with attachment:<full-id>")
 	}
-	inputs := make([]api.LinkAttachmentInput, len(files))
+	inputs := make([]generated.LinkAttachmentBody, len(files))
 	for i, file := range files {
-		input, err := parseDocbankSelector(file, "")
+		input, err := parseDocbankSelector(file)
 		if err != nil {
 			return nil, err
 		}
@@ -99,15 +100,15 @@ func prepareCloseAttachments(cmd *cobra.Command, raw, reason, message string, ev
 	actor, _ := resolveActor(ctx, flags.As, nil)
 	var linked []string
 	for i, input := range inputs {
-		input.Actor = actor
+		input.Actor = &actor
 		result, err := linkAttachmentCLI(ctx, hc, base, pid, ref.RefForAPI, input)
 		if err != nil {
 			return nil, fmt.Errorf("docbank selector %q failed; already linked attachment IDs: [%s]; issue was not closed: %w", files[i], strings.Join(linked, ", "), err)
 		}
-		linked = append(linked, result.ID)
-		if !seen[result.ID] {
-			seen[result.ID] = true
-			out = append(out, api.Evidence{Type: api.EvidenceAttachment, AttachmentID: result.ID})
+		linked = append(linked, result.AttachmentID)
+		if !seen[result.AttachmentID] {
+			seen[result.AttachmentID] = true
+			out = append(out, api.Evidence{Type: api.EvidenceAttachment, AttachmentID: result.AttachmentID})
 		}
 	}
 	return out, nil
