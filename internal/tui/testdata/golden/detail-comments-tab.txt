@@ -10,10 +10,10 @@
   Click the login button twice.
 
   Activity   [ Comments (2) ]   Events (2)   Links (1)
-  > alice  Apr 30 10:00
+  > alice / writer  Apr 30 10:00
     I can repro on macOS.
 
-    bob    Apr 30 11:00
+    bob             Apr 30 11:00
     Looks like a race in oauth.
 
 

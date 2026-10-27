@@ -4,6 +4,8 @@
 
 export interface EventEnvelope {
   actor: string
+  /** Retained display contributor; independent of routing and receipt identity. */
+  attributed_teammate?: string
   content_hash: string
   created_at: string
   event_id: number

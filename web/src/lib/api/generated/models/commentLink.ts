@@ -3,6 +3,7 @@
  */
 
 export interface CommentLink {
+  attributed_teammate?: string
   author?: string
   body?: string
   created_at?: string
