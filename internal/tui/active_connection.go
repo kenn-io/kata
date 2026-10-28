@@ -69,6 +69,11 @@ func (m Model) withActiveConnectionHeader(body string) string {
 	case m.sseStatus == sseDisconnected:
 		status = "Disconnected"
 	}
+	// A healthy connection keeps the normal header row; the summary is
+	// only for states that need attention.
+	if status == "Connected" {
+		return body
+	}
 	account := "—"
 	if m.authCapabilitiesReady && m.sseStatus == sseConnected {
 		account = sanitizeForLine(m.activeAuth.Actor)

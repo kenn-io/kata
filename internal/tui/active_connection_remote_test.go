@@ -17,6 +17,7 @@ func TestActiveConnectionDirectRemoteAndRevoked(t *testing.T) {
 		m.height = 24
 		m.activeDaemon = daemonTarget{URL: "https://daemon.example"}
 		m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{Actor: "member"}})
+		expireActiveCredential(&m)
 		header, _, _ := strings.Cut(stripANSI(m.viewContent()), "\n")
 		require.Contains(t, header, "Hub: daemon.example")
 		require.NotContains(t, header, "Local daemon")
