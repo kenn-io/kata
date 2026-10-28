@@ -686,9 +686,13 @@ database, and restore it with any restored backup.
 Run, the HTTP handler, and every other worker keep working. The status route,
 `GET /api/v1/mcp-events/subscriptions`, reports the reason.
 
-The embedded configuration has no `MaxTTL` field, so embedders always get the
-`720h` cap on finite subscription lifetimes. Requests without a lifetime get 24
-hours, and `ttlMs: null` requests no expiry.
+`MaxTTL` caps finite subscription lifetimes, like `[mcp_events].max_ttl`. Zero
+selects the 30-day default; any other value below 60 seconds fails
+construction. Requests without a lifetime get 24 hours within that cap.
+`ttlMs: null` requests no expiry; set `RefuseNoExpiry` to give those requests a
+`MaxTTL` grant instead, like `allow_no_expiry = false`. See
+[MCP Events configuration](../reference/configuration.md#mcp-events) for the
+operator settings.
 
 A subscription's owner for a host-authenticated caller is the exact bytes of
 `Principal.Subject`. Delivery asks the host `AccessController` again with the
