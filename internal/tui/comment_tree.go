@@ -11,9 +11,9 @@ import (
 const maxCommentDepth = 4
 
 type commentLeaf struct {
-	link  commentref.Link
-	depth int
-	tags  string
+	link    commentref.Link
+	depth   int
+	replies []commentref.Link
 }
 
 func compareCommentLinks(a, b commentref.Link) int {
@@ -42,7 +42,7 @@ func threadOrder(cs []CommentEntry) []CommentEntry {
 	var roots []int
 	for i, c := range cs {
 		parent, visible := "", false
-		if c.Reply != nil {
+		if c.Reply != nil && c.Reply.UID != "" {
 			parent = c.Reply.UID
 			_, visible = children[parent]
 		}
@@ -72,7 +72,7 @@ func threadOrder(cs []CommentEntry) []CommentEntry {
 				visit(child, childDepth)
 			} else {
 				last := &ordered[len(ordered)-1]
-				last.leaves = append(last.leaves, commentLeaf{link: link, depth: childDepth, tags: commentTags(CommentEntry{Backlinks: children[link.UID]})})
+				last.leaves = append(last.leaves, commentLeaf{link: link, depth: childDepth, replies: children[link.UID]})
 				for _, child := range children[link.UID] {
 					visit(byUID[child.UID], min(childDepth+1, maxCommentDepth))
 				}
@@ -88,11 +88,11 @@ func threadOrder(cs []CommentEntry) []CommentEntry {
 	return ordered
 }
 
-func commentTags(c CommentEntry) string {
+func commentTags(links []commentref.Link, complete bool) string {
 	var tags []string
 	for _, kind := range []string{"confirm", "refute"} {
 		present, fresh := false, false
-		for _, link := range c.Backlinks {
+		for _, link := range links {
 			if link.Kind == kind {
 				present = true
 				fresh = fresh || !link.TargetEdited
@@ -102,9 +102,9 @@ func commentTags(c CommentEntry) string {
 			continue
 		}
 		tag := kind
-		// Assumes projection retains the newest replies per kind, so omitted
-		// replies also predate the edit when every retained reply does.
-		if !fresh {
+		// Complete projections retain the newest replies per kind; partial
+		// foreign-leaf replies cannot establish freshness for the whole kind.
+		if complete && !fresh {
 			tag += " (before edit)"
 		}
 		if kind == "confirm" {

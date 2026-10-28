@@ -4,6 +4,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"image/color"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +22,7 @@ func TestThreadOrder(t *testing.T) {
 		rows     []string
 	}{
 		{"no links", []CommentEntry{{UID: "b"}, {UID: "a"}}, []string{"b:0", "a:0"}},
+		{"empty reply UID", []CommentEntry{{UID: ""}, {UID: "i", Reply: &commentref.Link{Kind: "confirm"}}}, []string{":0", "i:0"}},
 		{"nesting and root order", []CommentEntry{{UID: "b"}, {UID: "a"}, {UID: "c", Reply: &commentref.Link{UID: "a"}}, {UID: "d", Reply: &commentref.Link{UID: "c"}}}, []string{"b:0", "a:0", "c:1", "d:2"}},
 		{"foreign siblings", []CommentEntry{
 			{UID: "a", Backlinks: []commentref.Link{{UID: "early", CreatedAt: when}, {UID: "middle", CreatedAt: when.Add(2 * time.Minute)}, {UID: "late", CreatedAt: when.Add(4 * time.Minute)}}},
@@ -57,20 +59,18 @@ func TestThreadOrder(t *testing.T) {
 
 func TestCommentTags(t *testing.T) {
 	for _, tt := range []struct {
-		name      string
-		links     []commentref.Link
-		truncated bool
-		want      string
+		name  string
+		links []commentref.Link
+		want  string
 	}{
-		{"confirm", []commentref.Link{{Kind: "confirm"}}, false, "confirm"},
-		{"both", []commentref.Link{{Kind: "refute"}, {Kind: "confirm"}}, false, "confirm · refute"},
-		{"stale", []commentref.Link{{Kind: "confirm", TargetEdited: true}, {Kind: "refute", TargetEdited: true}}, false, "confirm (before edit) · refute (before edit)"},
-		{"mixed", []commentref.Link{{Kind: "confirm", TargetEdited: true}, {Kind: "confirm"}}, false, "confirm"},
-		{"truncated stale", []commentref.Link{{Kind: "confirm", TargetEdited: true}}, true, "confirm (before edit)"},
-		{"other kinds", []commentref.Link{{Kind: "reply"}, {Kind: "supersede"}}, false, ""},
+		{"confirm", []commentref.Link{{Kind: "confirm"}}, "confirm"},
+		{"both", []commentref.Link{{Kind: "refute"}, {Kind: "confirm"}}, "confirm · refute"},
+		{"stale", []commentref.Link{{Kind: "confirm", TargetEdited: true}, {Kind: "refute", TargetEdited: true}}, "confirm (before edit) · refute (before edit)"},
+		{"mixed", []commentref.Link{{Kind: "confirm", TargetEdited: true}, {Kind: "confirm"}}, "confirm"},
+		{"other kinds", []commentref.Link{{Kind: "reply"}, {Kind: "supersede"}}, ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.want, stripANSI(commentTags(CommentEntry{Backlinks: tt.links, BacklinksTruncated: tt.truncated})))
+			require.Equal(t, tt.want, stripANSI(commentTags(tt.links, true)))
 		})
 	}
 }
@@ -108,6 +108,7 @@ func TestCommentTreeForeignTargetTags(t *testing.T) {
 				{UID: "b", Handle: "c:foreign", ReplyToUID: "a", ReplyKind: "reply", IssueUID: "foreign", EditedAt: &edited},
 				{UID: "c", ReplyToUID: "b", ReplyKind: "confirm", IssueUID: "local", CreatedAt: confirmTime},
 				{UID: "d", ReplyToUID: "b", ReplyKind: "refute", IssueUID: "local", CreatedAt: edited.Add(time.Minute)},
+				{UID: "e", ReplyToUID: "b", ReplyKind: "confirm", IssueUID: "foreign", CreatedAt: edited.Add(2 * time.Minute)},
 			}, nil)
 			comments := threadOrder([]CommentEntry{
 				{UID: "a", Backlinks: projected[0].Backlinks},
@@ -115,13 +116,29 @@ func TestCommentTreeForeignTargetTags(t *testing.T) {
 				{UID: "d", Reply: projected[3].Reply},
 			})
 			chunks := commentChunks(comments, 80, -1, tabState{})
-			want := "confirm (before edit) · refute"
-			if freshConfirm {
-				want = "confirm · refute"
-			}
-			require.Contains(t, stripANSI(strings.Join(chunks[0].lines, "\n")), want)
+			rendered := stripANSI(strings.Join(chunks[0].lines, "\n"))
+			require.Contains(t, rendered, "confirm · refute")
+			require.NotContains(t, rendered, "(before edit)")
 		})
 	}
+}
+
+func TestCommentTreeForeignTagsFollowBackground(t *testing.T) {
+	oldMode, oldDark := activeColorMode, activeHasDarkBackground
+	t.Cleanup(func() { applyColorMode(oldMode, oldDark) })
+	m := newTestModel()
+	applyColorMode(colorAuto, false)
+	comments := threadOrder([]CommentEntry{
+		{UID: "a", Backlinks: []commentref.Link{{UID: "b", Handle: "c:foreign", Kind: "reply"}}},
+		{UID: "c", Reply: &commentref.Link{UID: "b", Kind: "confirm"}},
+		{UID: "d", Reply: &commentref.Link{UID: "b", Kind: "refute"}},
+	})
+	lightTags := openStyle.Render("confirm") + " · " + errorStyle.Render("refute")
+	require.Contains(t, strings.Join(commentChunks(comments, 80, -1, tabState{})[0].lines, "\n"), lightTags)
+	m, _ = updateModel(m, tea.BackgroundColorMsg{Color: color.Black})
+	darkTags := openStyle.Render("confirm") + " · " + errorStyle.Render("refute")
+	require.NotEqual(t, lightTags, darkTags)
+	require.Contains(t, strings.Join(commentChunks(comments, 80, -1, tabState{})[0].lines, "\n"), darkTags)
 }
 
 func TestCommentTagsProjectedTruncation(t *testing.T) {
@@ -141,7 +158,7 @@ func TestCommentTagsProjectedTruncation(t *testing.T) {
 			target := commentref.Project(records, nil)[0]
 			require.True(t, target.BacklinksTruncated)
 			require.Len(t, target.Backlinks, 50)
-			require.Equal(t, want, stripANSI(commentTags(CommentEntry{Backlinks: target.Backlinks, BacklinksTruncated: target.BacklinksTruncated})))
+			require.Equal(t, want, stripANSI(commentTags(target.Backlinks, true)))
 		})
 	}
 }
@@ -154,7 +171,7 @@ func TestCommentTreeColoredTags(t *testing.T) {
 	c := CommentEntry{depth: 4, Backlinks: []commentref.Link{
 		{Kind: "confirm", TargetEdited: true}, {Kind: "refute", TargetEdited: true},
 	}}
-	require.Contains(t, commentTags(c), "\x1b[")
+	require.Contains(t, commentTags(c.Backlinks, true), "\x1b[")
 	for width := 30; width <= 79; width++ {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
 			chunks := commentChunks([]CommentEntry{c}, width, -1, tabState{})
