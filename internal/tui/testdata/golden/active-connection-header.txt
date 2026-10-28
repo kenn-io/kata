@@ -1,3 +1,3 @@
-Credential expired · Hub: long-h… · Account: member-… · Project: example-project
-Credential expired · Hub: long-hub-long-hu… · Account: member-member-mem… · Project: example-project
-Credential expired · Hub: shared-hub · Account: member · Project: example-project                                        Daemon: shared-hub · kata カタ · v0.1.0
+Reconnecting · Hub: long-hub-long-hub-l… · Account: — · Project: example-project
+Reconnecting · Hub: long-hub-long-hub-long-hub-long-hub-lon… · Account: — · Project: example-project
+Reconnecting · Hub: shared-hub · Account: — · Project: example-project                                                   Daemon: shared-hub · kata カタ · v0.1.0

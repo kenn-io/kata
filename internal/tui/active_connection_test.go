@@ -25,15 +25,16 @@ func TestActiveConnectionHeaderEveryView(t *testing.T) {
 			healthy, _, _ := strings.Cut(stripANSI(m.viewContent()), "\n")
 			require.NotContains(t, healthy, "Hub:")
 			require.False(t, m.tokenAuditRead)
-			expireActiveCredential(&m)
+			m.sseStatus = sseReconnecting
 			header, _, _ := strings.Cut(stripANSI(m.viewContent()), "\n")
 			require.Contains(t, header, "Hub: shared-hub")
-			require.Contains(t, header, "Account: member")
-			require.Contains(t, header, "Credential expired")
+			require.Contains(t, header, "Account: —")
+			require.NotContains(t, header, "Account: member")
+			require.Contains(t, header, "Reconnecting")
 			m.width = 60
 			narrow, _, _ := strings.Cut(m.viewContent(), "\n")
 			require.LessOrEqual(t, ansi.StringWidth(narrow), 60)
-			require.Contains(t, stripANSI(narrow), "Credential expired")
+			require.Contains(t, stripANSI(narrow), "Reconnecting")
 		})
 	}
 }
@@ -65,47 +66,24 @@ func TestActiveConnectionHeaderFencesStaleAccountAndExpiry(t *testing.T) {
 	past := time.Now().Add(-time.Minute)
 	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{connGen: 2, auth: AuthInfo{Actor: "expired-member", ExpiresAt: &past}})
 	require.Contains(t, stripANSI(m.viewContent()), "Credential expired")
+	require.Contains(t, stripANSI(m.viewContent()), "Account: —")
+	require.NotContains(t, stripANSI(m.viewContent()), "expired-member")
 }
 
-// A11 narrow layouts must preserve readable status even for long account and
-// configured hub names. Clipping labels must not hide expiry or reconnection.
+// A11 narrow layouts must preserve readable status for long configured hub
+// names. Clipping labels must not hide reconnection.
 func TestActiveConnectionHeaderLongLabelsPreserveStatus(t *testing.T) {
 	m := newTestModel()
 	m.width = 60
 	m.height = 24
 	m.activeDaemon = daemonTarget{Name: strings.Repeat("long-hub-", 12)}
-	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{Actor: strings.Repeat("member-", 12)}})
-	expireActiveCredential(&m)
+	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{Actor: "member"}})
+	m.sseStatus = sseReconnecting
 	header, _, _ := strings.Cut(m.viewContent(), "\n")
 	require.LessOrEqual(t, ansi.StringWidth(header), 60)
-	require.Contains(t, stripANSI(header), "Credential expired")
+	require.Contains(t, stripANSI(header), "Reconnecting")
 	require.Contains(t, stripANSI(header), "Hub:")
-	require.Contains(t, stripANSI(header), "Account:")
-}
-
-// Connections without an account must say how they authenticated; only an
-// owner-local connection is labeled local.
-func TestActiveConnectionHeaderLabelsActorlessAuthKinds(t *testing.T) {
-	for kind, want := range map[string]string{
-		"static_token":                    "Account: Shared daemon token",
-		"bootstrap":                       "Account: Bootstrap token",
-		"insecure_readonly":               "Account: Anonymous (read-only)",
-		"unauthenticated_private_network": "Account: Unauthenticated private network",
-		"trusted_proxy_absent":            "Account: Proxy without account",
-		"none":                            "Account: Local connection",
-		"":                                "Account: No account",
-	} {
-		t.Run(kind, func(t *testing.T) {
-			m := newTestModel()
-			m.width = 120
-			m.height = 24
-			m.activeDaemon = daemonTarget{URL: "http://100.64.0.5:7777"}
-			m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{Kind: kind}})
-			expireActiveCredential(&m)
-			header, _, _ := strings.Cut(stripANSI(m.viewContent()), "\n")
-			require.Contains(t, header, want)
-		})
-	}
+	require.Contains(t, stripANSI(header), "Account: —")
 }
 
 // The connection summary shares the title-bar row, so it must yield to the
@@ -116,29 +94,29 @@ func TestActiveConnectionHeaderKeepsTitleBarContent(t *testing.T) {
 	priorVersion := kataVersion
 	kataVersion = "v0.1.0"
 	t.Cleanup(func() { kataVersion = priorVersion })
-	model := func(width int, hub, account string) Model {
+	model := func(width int, hub string) Model {
 		m := newTestModel()
 		m.width = width
 		m.height = 24
 		m.scope = scope{projectID: 7, projectName: "example-project"}
 		m.activeDaemon = daemonTarget{Name: hub, URL: "http://100.64.0.5:7777"}
-		m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{Kind: "db_token", Actor: account}})
-		expireActiveCredential(&m)
+		m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{Kind: "db_token", Actor: "member"}})
+		m.sseStatus = sseReconnecting
 		return m
 	}
 	var rows []string
 	for _, tc := range []struct {
-		width        int
-		hub, account string
+		width int
+		hub   string
 	}{
-		{80, strings.Repeat("long-hub-", 12), strings.Repeat("member-", 12)},
-		{100, strings.Repeat("long-hub-", 12), strings.Repeat("member-", 12)},
-		{160, "shared-hub", "member"},
+		{80, strings.Repeat("long-hub-", 12)},
+		{100, strings.Repeat("long-hub-", 12)},
+		{160, "shared-hub"},
 	} {
-		header, _, _ := strings.Cut(model(tc.width, tc.hub, tc.account).viewContent(), "\n")
+		header, _, _ := strings.Cut(model(tc.width, tc.hub).viewContent(), "\n")
 		require.LessOrEqual(t, ansi.StringWidth(header), tc.width)
 		header = stripANSI(header)
-		require.Contains(t, header, "Credential expired")
+		require.Contains(t, header, "Reconnecting")
 		require.Contains(t, header, "Project: example-project", "width %d", tc.width)
 		rows = append(rows, header)
 	}
@@ -158,11 +136,4 @@ func TestActiveConnectionHeaderHiddenWhenConnected(t *testing.T) {
 	got, _, _ := strings.Cut(m.viewContent(), "\n")
 	require.Equal(t, want, got)
 	require.NotContains(t, stripANSI(got), "Account:")
-}
-
-// expireActiveCredential simulates the expiry tick passing on a healthy
-// connection, the one attention state that still names the account.
-func expireActiveCredential(m *Model) {
-	past := time.Now().Add(-time.Minute)
-	m.activeAuth.ExpiresAt = &past
 }
