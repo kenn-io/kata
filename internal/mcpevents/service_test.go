@@ -224,15 +224,14 @@ func TestPrincipalRevokedStaysRefused(t *testing.T) {
 	})
 }
 
+// Authorization refuses the hidden issue before storage, so one backend is enough.
 func TestIssueFilterMustBeVisible(t *testing.T) {
-	forEachBackend(t, func(t *testing.T, store db.Storage) {
-		h := newHarness(t, store)
-		h.fake.hiddenIssue = map[string]bool{testIssue: true}
-		req := h.request("example-user")
-		req.Arguments.IssueUID = testIssue
-		_, err := h.subscribe(principalA, req)
-		_ = requireWire(t, err, mcpevents.CodeForbidden, "issue_not_visible")
-	})
+	h := newHarness(t, openSQLite(t))
+	h.fake.hiddenIssue = map[string]bool{testIssue: true}
+	req := h.request("example-user")
+	req.Arguments.IssueUID = testIssue
+	_, err := h.subscribe(principalA, req)
+	_ = requireWire(t, err, mcpevents.CodeForbidden, "issue_not_visible")
 }
 
 func TestUnsubscribe(t *testing.T) {

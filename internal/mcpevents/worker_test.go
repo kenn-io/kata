@@ -175,19 +175,18 @@ func TestReactivatedIdleSubscriptionReplaysWithoutRecheck(t *testing.T) {
 	})
 }
 
+// A disabled service returns before any database work, so one backend is enough.
 func TestRunReturnsPromptlyWhenEventsIsDisabled(t *testing.T) {
-	forEachBackend(t, func(t *testing.T, store db.Storage) {
-		subscriber := newFakeSubscriber()
-		svc, err := mcpevents.NewService(mcpevents.ServiceConfig{Store: store, Broadcaster: subscriber})
-		require.NoError(t, err)
-		require.False(t, svc.Availability().Enabled)
-		done := make(chan error, 1)
-		go func() { done <- svc.Run(t.Context()) }()
-		assert.NoError(t, receive(t, done), "a disabled service has nothing to run")
-		assert.Zero(t, subscriber.count(), "and subscribes to nothing")
-		assert.NoError(t, svc.Drain(t.Context()))
-		assert.NoError(t, svc.Sweep(t.Context()))
-	})
+	subscriber := newFakeSubscriber()
+	svc, err := mcpevents.NewService(mcpevents.ServiceConfig{Store: openSQLite(t), Broadcaster: subscriber})
+	require.NoError(t, err)
+	require.False(t, svc.Availability().Enabled)
+	done := make(chan error, 1)
+	go func() { done <- svc.Run(t.Context()) }()
+	assert.NoError(t, receive(t, done), "a disabled service has nothing to run")
+	assert.Zero(t, subscriber.count(), "and subscribes to nothing")
+	assert.NoError(t, svc.Drain(t.Context()))
+	assert.NoError(t, svc.Sweep(t.Context()))
 }
 
 func TestMismatchedKeyDisablesDeliveryAndClaimsNothing(t *testing.T) {
