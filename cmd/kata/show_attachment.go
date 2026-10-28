@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,20 @@ import (
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
+
+// optionalCloseEvidenceForShow leaves ordinary issue display available when
+// scoped history is unsupported or the host does not grant history access.
+func optionalCloseEvidenceForShow(ctx context.Context, hc *http.Client, base string, pid int64, ref string) ([]db.Evidence, error) {
+	if err := requireDaemonAPIVersion(ctx, hc, base, "0.32.0", "issue history"); err != nil {
+		return nil, nil
+	}
+	evidence, err := closeEvidenceForShow(ctx, hc, base, pid, ref)
+	var cliErr *cliError
+	if errors.As(err, &cliErr) && cliErr.HTTPStatus == http.StatusForbidden {
+		return nil, nil
+	}
+	return evidence, err
+}
 
 // closeEvidenceForShow reads subject history only for human/agent output.
 // The JSON show response remains the daemon's unmodified show payload.

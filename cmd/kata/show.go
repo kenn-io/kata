@@ -124,7 +124,7 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOp
 		return err
 	}
 	if b.Issue.Status == "closed" {
-		b.CloseEvidence, err = closeEvidenceForShow(ctx, client, baseURL, pid, b.Issue.UID)
+		b.CloseEvidence, err = optionalCloseEvidenceForShow(ctx, client, baseURL, pid, b.Issue.UID)
 		if err != nil {
 			return err
 		}
