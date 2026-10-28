@@ -9,7 +9,7 @@ import (
 )
 
 // A11: an unnamed direct remote target must not be labeled a local daemon,
-// and typed authentication rejection must clear current account authority.
+// and typed authentication rejection must show that authentication is required.
 func TestActiveConnectionDirectRemoteAndRevoked(t *testing.T) {
 	t.Run("direct_remote", func(t *testing.T) {
 		m := newTestModel()
@@ -30,6 +30,5 @@ func TestActiveConnectionDirectRemoteAndRevoked(t *testing.T) {
 		m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{err: &APIError{Status: http.StatusUnauthorized, Code: "unauthorized", Message: "credential revoked"}})
 		header, _, _ := strings.Cut(stripANSI(m.viewContent()), "\n")
 		require.Contains(t, header, "Authentication required")
-		require.NotContains(t, header, "member")
 	})
 }

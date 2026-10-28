@@ -28,8 +28,6 @@ func TestActiveConnectionHeaderEveryView(t *testing.T) {
 			m.sseStatus = sseReconnecting
 			header, _, _ := strings.Cut(stripANSI(m.viewContent()), "\n")
 			require.Contains(t, header, "Hub: shared-hub")
-			require.Contains(t, header, "Account: —")
-			require.NotContains(t, header, "Account: member")
 			require.Contains(t, header, "Reconnecting")
 			m.width = 60
 			narrow, _, _ := strings.Cut(m.viewContent(), "\n")
@@ -39,7 +37,7 @@ func TestActiveConnectionHeaderEveryView(t *testing.T) {
 	}
 }
 
-func TestActiveConnectionHeaderFencesStaleAccountAndExpiry(t *testing.T) {
+func TestActiveConnectionHeaderFencesStaleRepliesAndExpiry(t *testing.T) {
 	m := newTestModel()
 	m.width = 100
 	m.height = 24
@@ -47,7 +45,7 @@ func TestActiveConnectionHeaderFencesStaleAccountAndExpiry(t *testing.T) {
 	expiry := time.Now().Add(time.Hour)
 	m, cmd := m.handleAuthCapabilities(authCapabilitiesMsg{connGen: 1, auth: AuthInfo{Kind: "token", Actor: "member-one", ExpiresAt: &expiry}})
 	require.NotNil(t, cmd, "finite credential expiry must schedule a UI update")
-	require.NotContains(t, stripANSI(m.viewContent()), "Account:")
+	require.NotContains(t, stripANSI(m.viewContent()), "Hub:")
 	m.sseStatus = sseReconnecting
 	require.Contains(t, stripANSI(m.viewContent()), "Reconnecting")
 	m.sseStatus = sseConnected
@@ -55,19 +53,14 @@ func TestActiveConnectionHeaderFencesStaleAccountAndExpiry(t *testing.T) {
 	m.authCapabilitiesReady = false
 	m.activeDaemon = daemonTarget{Name: "other-hub"}
 	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{connGen: 1, auth: AuthInfo{Actor: "old-reply"}})
-	require.NotContains(t, stripANSI(m.viewContent()), "member-one")
-	require.NotContains(t, stripANSI(m.viewContent()), "old-reply")
 	require.Contains(t, stripANSI(m.viewContent()), "Connecting")
 	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{connGen: 2, auth: AuthInfo{Kind: "token", Actor: "member-two"}})
 	require.NotContains(t, stripANSI(m.viewContent()), "Connecting")
 	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{connGen: 2, err: errors.New("authentication required")})
-	require.NotContains(t, stripANSI(m.viewContent()), "member-two")
 	require.Contains(t, stripANSI(m.viewContent()), "Authentication required")
 	past := time.Now().Add(-time.Minute)
 	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{connGen: 2, auth: AuthInfo{Actor: "expired-member", ExpiresAt: &past}})
 	require.Contains(t, stripANSI(m.viewContent()), "Credential expired")
-	require.Contains(t, stripANSI(m.viewContent()), "Account: —")
-	require.NotContains(t, stripANSI(m.viewContent()), "expired-member")
 }
 
 // A11 narrow layouts must preserve readable status for long configured hub
@@ -83,7 +76,6 @@ func TestActiveConnectionHeaderLongLabelsPreserveStatus(t *testing.T) {
 	require.LessOrEqual(t, ansi.StringWidth(header), 60)
 	require.Contains(t, stripANSI(header), "Reconnecting")
 	require.Contains(t, stripANSI(header), "Hub:")
-	require.Contains(t, stripANSI(header), "Account: —")
 }
 
 // The connection summary shares the title-bar row, so it must yield to the
@@ -135,5 +127,41 @@ func TestActiveConnectionHeaderHiddenWhenConnected(t *testing.T) {
 	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{Kind: "token", Actor: "member"}})
 	got, _, _ := strings.Cut(m.viewContent(), "\n")
 	require.Equal(t, want, got)
-	require.NotContains(t, stripANSI(got), "Account:")
+}
+
+// Attention states show status, hub, and project in the existing header row.
+func TestActiveConnectionHeaderAttentionStates(t *testing.T) {
+	for _, tc := range []struct {
+		status  string
+		ready   bool
+		sse     sseConnState
+		err     string
+		expired bool
+	}{
+		{status: "Credential expired", ready: true, sse: sseConnected, expired: true},
+		{status: "Authentication required", err: "authentication required"},
+		{status: "Connection unavailable", err: "service unavailable"},
+		{status: "Connecting"},
+		{status: "Reconnecting", ready: true, sse: sseReconnecting},
+		{status: "Disconnected", ready: true, sse: sseDisconnected},
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			m := newTestModel()
+			m.width = 160
+			m.height = 24
+			m.scope.projectName = "example-project"
+			m.activeDaemon = daemonTarget{Name: "shared-hub"}
+			m.authCapabilitiesRequired = true
+			m.authCapabilitiesReady = tc.ready
+			m.activeAuth = AuthInfo{Kind: "token", Actor: "member"}
+			m.activeAuthError = tc.err
+			m.sseStatus = tc.sse
+			if tc.expired {
+				past := time.Now().Add(-time.Minute)
+				m.activeAuth.ExpiresAt = &past
+			}
+			header, _, _ := strings.Cut(stripANSI(m.viewContent()), "\n")
+			require.True(t, strings.HasPrefix(header, tc.status+" · Hub: shared-hub · Project: example-project"), "header: %s", header)
+		})
+	}
 }

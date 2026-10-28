@@ -1,7 +1,7 @@
 ---
 title: Web UI
 description: Browse and manage Kata projects and issues in the daemon-served browser application.
-last_edited: 2026-10-17
+last_edited: 2026-10-28
 ---
 
 # Web UI
@@ -167,7 +167,9 @@ network, authentication, and proxy setup.
 
 The yellow summary at the top shows the active hub, account, and credential
 status. It stays visible while you navigate and wraps on narrow screens.
-The TUI shows the same information in its existing header row.
+The TUI uses its existing header row to show only the status, hub, and project
+when credentials expire, authentication is required, the connection is
+unavailable, or it is connecting, reconnecting, or disconnected.
 
 Account-bound credentials show their canonical actor. A connection without an
 account identity shows how it authenticated instead:
