@@ -70,9 +70,13 @@ func registerMCPEventsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, mcpEventsAPIError(err)
 		}
+		args, err := mcpEventsArguments(body.Arguments)
+		if err != nil {
+			return nil, mcpEventsAPIError(err)
+		}
 		result, err := service.Subscribe(ctx, principal, scope, mcpevents.SubscribeRequest{
 			Name:      body.Name,
-			Arguments: mcpEventsArguments(body.Arguments),
+			Arguments: args,
 			Delivery:  mcpevents.Delivery{Mode: body.Delivery.Mode, URL: body.Delivery.URL, Secret: body.Delivery.Secret},
 			Cursor:    body.Cursor,
 			TTLMS:     ttl,
@@ -99,9 +103,13 @@ func registerMCPEventsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, mcpEventsAPIError(err)
 		}
 		body := in.Body
+		args, err := mcpEventsArguments(body.Arguments)
+		if err != nil {
+			return nil, mcpEventsAPIError(err)
+		}
 		err = service.Unsubscribe(ctx, principal, mcpevents.UnsubscribeRequest{
 			Name:      body.Name,
-			Arguments: mcpEventsArguments(body.Arguments),
+			Arguments: args,
 			Delivery:  mcpevents.Delivery{Mode: body.Delivery.Mode, URL: body.Delivery.URL},
 		})
 		if err != nil {
@@ -175,8 +183,13 @@ func mcpEventsUnavailable(reason string) *mcpevents.Error {
 	return &mcpevents.Error{Code: mcpevents.CodeUnavailable, Reason: reason, Data: map[string]any{"reason": reason}}
 }
 
-func mcpEventsArguments(a api.MCPEventsArguments) mcpevents.Arguments {
-	return mcpevents.Arguments{For: a.For, ProjectUIDs: a.ProjectUIDs, IssueUID: a.IssueUID}
+// mcpEventsArguments requires exactly one of a project list and all_projects.
+// An empty list is left for the service to reject.
+func mcpEventsArguments(a api.MCPEventsArguments) (mcpevents.Arguments, error) {
+	if a.AllProjects == (a.ProjectUIDs != nil) {
+		return mcpevents.Arguments{}, &mcpevents.Error{Code: mcpevents.CodeInvalidParams, Reason: "invalid_project_uids", Data: map[string]any{"reason": "invalid_project_uids"}}
+	}
+	return mcpevents.Arguments{For: a.For, ProjectUIDs: a.ProjectUIDs, IssueUID: a.IssueUID}, nil
 }
 
 func mcpEventsDeliveryStatus(s mcpevents.DeliveryStatus) api.MCPEventsDeliveryStatus {

@@ -236,9 +236,9 @@ func (f *eventsForwarder) forwarderScope() (*generated.MCPEventsForwarderScope, 
 	return &generated.MCPEventsForwarderScope{Projects: uids}, nil
 }
 
-// rejectEmptyProjectUIDs stops "project_uids": [] here. The generated client
-// omits an empty list, which would silently turn an explicit empty selection
-// into "every project".
+// rejectEmptyProjectUIDs stops "project_uids": [] here, before the daemon
+// round trip. The generated client omits an empty list, which the daemon
+// would also reject for naming neither projects nor all_projects.
 func rejectEmptyProjectUIDs(arguments mcpevents.Arguments) error {
 	if arguments.ProjectUIDs != nil && len(arguments.ProjectUIDs) == 0 {
 		return eventsRPCError(mcpevents.CodeInvalidParams, map[string]any{"reason": "invalid_project_uids"})
@@ -246,12 +246,18 @@ func rejectEmptyProjectUIDs(arguments mcpevents.Arguments) error {
 	return nil
 }
 
+// generatedArguments maps an omitted MCP project selection, which follows
+// every visible project, to the daemon's explicit all_projects.
 func generatedArguments(arguments mcpevents.Arguments) generated.MCPEventsArguments {
-	return generated.MCPEventsArguments{
+	out := generated.MCPEventsArguments{
 		For:         arguments.For,
 		ProjectUids: arguments.ProjectUIDs,
 		IssueUID:    nonEmptyString(arguments.IssueUID),
 	}
+	if arguments.ProjectUIDs == nil {
+		out.AllProjects = optionalTrue(true)
+	}
+	return out
 }
 
 func nonEmptyString(value string) *string {

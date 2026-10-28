@@ -3,6 +3,7 @@
  */
 
 export interface MCPEventsArguments {
+  all_projects?: boolean
   for: string
   issue_uid?: string
   project_uids?: string[]

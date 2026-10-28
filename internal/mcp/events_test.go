@@ -107,6 +107,8 @@ func TestSubscribeForwardsWireShapeAndScope(t *testing.T) {
 	assert.EqualValues(t, 5000, calls[0].Body["max_age_ms"])
 	assert.Equal(t, "c1.x", calls[0].Body["cursor"])
 	assert.Equal(t, map[string]any{"projects": []any{testProjectUID}}, calls[0].Body["forwarder_scope"])
+	assert.Equal(t, map[string]any{"for": "example-agent/worker", "all_projects": true}, calls[0].Body["arguments"],
+		"an omitted MCP selection asks the daemon for every project explicitly")
 }
 
 func TestForwarderScopeFollowsTheScopeMode(t *testing.T) {

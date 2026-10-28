@@ -4321,6 +4321,7 @@ func (l ListTokensResponseBody) Validate() error {
 }
 
 type MCPEventsArguments struct {
+	AllProjects *bool    `json:"all_projects,omitempty"`
 	For         string   `json:"for" validate:"required"`
 	IssueUID    *string  `json:"issue_uid,omitempty"`
 	ProjectUids []string `json:"project_uids,omitempty"`

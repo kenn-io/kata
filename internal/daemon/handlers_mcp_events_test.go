@@ -5,6 +5,8 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -25,6 +27,8 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/mcpevents"
 	"go.kenn.io/kata/internal/testenv"
+	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 const (
@@ -169,10 +173,21 @@ func mcpEventsFailure(t *testing.T, status int, raw []byte) (int, map[string]any
 	return int(code), data
 }
 
+// selectionArgs adds all_projects when args name no projects, as the
+// forwarder does for an omitted MCP selection.
+func selectionArgs(args map[string]any) map[string]any {
+	out := make(map[string]any, len(args)+1)
+	maps.Copy(out, args)
+	if _, ok := out["project_uids"]; !ok {
+		out["all_projects"] = true
+	}
+	return out
+}
+
 func subscribeBody(args map[string]any, scope map[string]any) map[string]any {
 	body := map[string]any{
 		"name":      mcpevents.EventName,
-		"arguments": args,
+		"arguments": selectionArgs(args),
 		"delivery":  map[string]any{"mode": "webhook", "url": mcpEventsURL, "secret": mcpEventsSecret},
 	}
 	if scope != nil {
@@ -184,7 +199,7 @@ func subscribeBody(args map[string]any, scope map[string]any) map[string]any {
 func unsubscribeBody(args map[string]any) map[string]any {
 	return map[string]any{
 		"name":      mcpevents.EventName,
-		"arguments": args,
+		"arguments": selectionArgs(args),
 		"delivery":  map[string]any{"mode": "webhook", "url": mcpEventsURL},
 	}
 }
@@ -629,4 +644,46 @@ func TestStaticTokenReplacementRevokesPersistedEventsAfterRestart(t *testing.T) 
 	require.NoError(t, err)
 	assert.Equal(t, db.MCPEventStateEnded, ended.State)
 	assert.Equal(t, "principal_revoked", ended.EndReason)
+}
+
+// The generated Go client drops an empty project list. The daemon must then
+// reject the request rather than read the missing list as every project, so
+// every project is asked for explicitly with all_projects.
+func TestMCPEventsGoClientCannotTurnAnEmptySelectionIntoEveryProject(t *testing.T) {
+	f := newMCPEventsFixture(t, withMCPEvents(t))
+	ctx := t.Context()
+	client, err := kataclient.NewWithHTTPClient(f.env.URL, f.env.HTTP, kataclient.WithRequestEditor(func(_ context.Context, req *http.Request) error {
+		req.Header.Set("Authorization", "Bearer coordinator-token")
+		return nil
+	}))
+	require.NoError(t, err)
+	secret := mcpEventsSecret
+	subscribe := func(projects []string, all bool) error {
+		args := generated.MCPEventsArguments{For: "example-user", ProjectUids: projects}
+		if all {
+			args.AllProjects = &all
+		}
+		_, err := client.McpEventsSubscribe(ctx, &generated.McpEventsSubscribeRequestOptions{Body: &generated.McpEventsSubscribeBody{
+			Name: mcpevents.EventName, Arguments: args,
+			Delivery: generated.MCPEventsDelivery{Mode: "webhook", URL: mcpEventsURL, Secret: &secret},
+		}})
+		return err
+	}
+	requireInvalidSelection := func(err error) {
+		t.Helper()
+		envelope, ok := errors.AsType[generated.ErrorEnvelope](err)
+		require.True(t, ok, "%v", err)
+		assert.EqualValues(t, http.StatusBadRequest, envelope.Status)
+		data, _ := envelope.ErrorData.Data[api.MCPEventsErrorDataKey].(map[string]any)
+		assert.Equal(t, "invalid_project_uids", data["reason"])
+	}
+
+	requireInvalidSelection(subscribe([]string{}, false))
+	_, err = client.McpEventsUnsubscribe(ctx, &generated.McpEventsUnsubscribeRequestOptions{Body: &generated.McpEventsUnsubscribeBody{
+		Name: mcpevents.EventName, Arguments: generated.MCPEventsArguments{For: "example-user", ProjectUids: []string{}},
+		Delivery: generated.MCPEventsDelivery{Mode: "webhook", URL: mcpEventsURL},
+	}})
+	requireInvalidSelection(err)
+	requireInvalidSelection(subscribe([]string{f.project.UID}, true))
+	require.NoError(t, subscribe(nil, true), "all_projects follows every visible project")
 }

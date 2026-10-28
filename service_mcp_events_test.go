@@ -211,7 +211,7 @@ func TestServiceMCPEventsDeliversUnderTheWorkerTransactionFence(t *testing.T) {
 
 	status, raw := embeddedEventsCall(t, service, http.MethodPost, "/api/v1/mcp-events/subscribe", map[string]any{
 		"name":      mcpevents.EventName,
-		"arguments": map[string]any{"for": "example-user"},
+		"arguments": map[string]any{"for": "example-user", "all_projects": true},
 		"delivery":  map[string]any{"mode": "webhook", "url": embeddedEventsURL, "secret": embeddedEventsSecret},
 	})
 	require.Equal(t, http.StatusOK, status, string(raw))
@@ -325,7 +325,7 @@ func TestServiceMCPEventsAppliesTheConfiguredGrantPolicy(t *testing.T) {
 	before := time.Now()
 	status, raw := embeddedEventsCall(t, service, http.MethodPost, "/api/v1/mcp-events/subscribe", map[string]any{
 		"name":      mcpevents.EventName,
-		"arguments": map[string]any{"for": "example-user"},
+		"arguments": map[string]any{"for": "example-user", "all_projects": true},
 		"delivery":  map[string]any{"mode": "webhook", "url": embeddedEventsURL, "secret": embeddedEventsSecret},
 		"no_expiry": true,
 	})

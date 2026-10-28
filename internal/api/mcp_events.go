@@ -2,13 +2,15 @@ package api
 
 import "time"
 
-// MCPEventsArguments identify an exact inbox recipient and an optional durable
-// project selection. ProjectUIDs omitted means every project the principal can
-// see, now and later; when present it must be non-empty, sorted ascending and
-// free of duplicates.
+// MCPEventsArguments identify an exact inbox recipient and a durable project
+// selection: either ProjectUIDs, non-empty, sorted ascending and free of
+// duplicates, or AllProjects for every project the principal can see, now and
+// later. Exactly one is required. An omitted list means empty here as on every
+// other route, so it never selects every project by accident.
 type MCPEventsArguments struct {
 	For         string   `json:"for"`
 	ProjectUIDs []string `json:"project_uids,omitzero"`
+	AllProjects bool     `json:"all_projects,omitzero"`
 	IssueUID    string   `json:"issue_uid,omitempty"`
 }
 
