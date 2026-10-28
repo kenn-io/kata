@@ -54,7 +54,7 @@ pi = "PI_SESSION_ID"
 omp = "OMP_SESSION_ID"
 ```
 
-The agent name must match AgentsView's agent type, such as `pi` or `omp`,
+The agent name must match the ID prefix AgentsView uses for the agent's sessions, such as `pi` or `omp`,
 for the link to open. Names must match `^[a-z0-9][a-z0-9-]*$` and contain
 at most 32 characters. Each nonempty variable supplies both its agent and
 session ID. Different agents are ambiguous even when their IDs match.

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
 	"uuid"
 
 	"github.com/spf13/cobra"
@@ -40,7 +39,7 @@ func closeTranscript(cmd *cobra.Command) *transcript.Transcript {
 			if value == "" {
 				continue
 			}
-			if id != "" && (agent != variable.agent || !strings.EqualFold(id, value)) {
+			if id != "" && (agent != variable.agent || id != value) {
 				warn("ambiguous current session; skipping attachment")
 				return nil
 			}

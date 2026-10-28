@@ -74,6 +74,7 @@ func TestCloseTranscript_ContextAndOptionalLink(t *testing.T) {
 	}{
 		{name: "no context", warning: "current session unavailable"},
 		{name: "conflicting Codex context", thread: transcriptSessionOne, session: transcriptSessionTwo, warning: "ambiguous"},
+		{name: "differently cased IDs for one agent", thread: "00000000-0000-4000-8000-00000000000a", session: "00000000-0000-4000-8000-00000000000A", warning: "ambiguous"},
 		{name: "configured session", variables: `pi = "PI_SESSION_ID"`, pi: transcriptSessionTwo, wantID: transcriptSessionTwo, wantAgent: "pi"},
 		{name: "configured native session", variables: `amp = "PI_SESSION_ID"`, pi: "T-" + transcriptSessionOne, wantID: "T-" + transcriptSessionOne, wantAgent: "amp"},
 		{name: "invalid configured session names variable", variables: `pi = "PI_SESSION_ID"`, pi: "/private/session/chat.jsonl", warning: "PI_SESSION_ID"},
