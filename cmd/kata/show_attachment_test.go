@@ -91,6 +91,7 @@ func TestOptionalShowAttachmentHistory(t *testing.T) {
 	}{
 		{"older daemon", "0.31.0", http.StatusOK, false},
 		{"history denied", "0.32.0", http.StatusForbidden, true},
+		{"host hides history", "0.32.0", http.StatusNotFound, true},
 		{"supported", "0.32.0", http.StatusOK, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -155,3 +155,28 @@ func TestPollProjectEventsIssueOmitsPrivatePeerEvents(t *testing.T) {
 		require.NotContains(t, string(body), f.issue.UID)
 	})
 }
+
+func TestPollProjectEventsMovedIssueRespectsHistoricalProjectAccess(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		_, err := store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: f.issue.ID, FromProjectID: f.private.ID, ToProjectID: f.public.ID, IfMatchRev: f.issue.Revision, Actor: "member"})
+		require.NoError(t, err)
+		path := fmt.Sprintf("%s?issue=%s", scopedProjectPath(f.public.ID, "events"), f.issue.UID)
+		for _, tc := range []struct {
+			actor       string
+			wantCreated bool
+		}{{"member", true}, {"nonmember", false}} {
+			status, _, body := f.request(t, http.MethodGet, path, tc.actor, nil, nil)
+			require.Equal(t, http.StatusOK, status, string(body))
+			var page api.PollEventsBody
+			require.NoError(t, json.Unmarshal(body, &page))
+			found := false
+			for _, event := range page.Events {
+				if event.Type == "issue.created" {
+					found = true
+				}
+			}
+			require.Equal(t, tc.wantCreated, found, string(body))
+		}
+	})
+}

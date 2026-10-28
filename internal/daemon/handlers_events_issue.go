@@ -9,7 +9,9 @@ import (
 
 // pollIssueHistory keeps history projection separate from stream invalidation:
 // omitted scoped rows consume no visible budget and compound links are redacted
-// as in UI history. Unrelated events never enter this scan.
+// as in UI history. Unrelated events never enter this scan. Historical rows
+// remain in their original project after a move; EventsAfter enforces the
+// caller's authorized projects while selecting this subject across projects.
 //
 // History is a read of one subject's rows, not a stream cursor, so it never
 // returns the purge-reset envelope: a purge removes only rows naming the purged
@@ -37,7 +39,7 @@ func pollIssueHistory(ctx context.Context, store db.Storage, afterID int64, rawL
 		// membership read per event.
 		batchLimit := min(pollLimitMax, max(limit-len(out.Body.Events), 100))
 		rows, err := store.EventsAfter(ctx, db.EventsAfterParams{
-			AfterID: out.Body.NextAfterID, ProjectID: issue.ProjectID, IssueUID: issue.UID, Limit: batchLimit,
+			AfterID: out.Body.NextAfterID, IssueUID: issue.UID, Limit: batchLimit,
 		})
 		if err != nil {
 			return nil, internalAPIError(err)
