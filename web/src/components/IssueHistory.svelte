@@ -84,7 +84,8 @@
           {/if}
           {#each closingAttachments(event, metadata) as attachment, index (index)}
             <span class="event-session">
-              {#if attachmentLinks && attachment.href}<a href={attachment.href}>{attachment.label}</a
+              {#if attachmentLinks && attachment.href}<a href={attachment.href}
+                  >{attachment.label}</a
                 >{:else}{attachment.label}{/if}
             </span>
           {/each}
