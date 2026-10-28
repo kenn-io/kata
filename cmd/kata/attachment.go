@@ -95,6 +95,7 @@ func newAttachmentCmd() *cobra.Command {
 		}
 		root.AddCommand(cmd)
 	}
+	root.AddCommand(newAttachmentLinkCmd())
 	parent := &cobra.Command{Use: "docbank", Short: "work with Docbank files"}
 	parent.AddCommand(root)
 	return parent
