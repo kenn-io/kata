@@ -46,6 +46,7 @@ func New(t testing.TB) *Fake {
 func (f *Fake) Seed(path string, node docbank.Node, versions map[uuid.UUID][]byte) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	node.Size = int64(len(versions[node.CurrentVersionID]))
 	f.nodes[node.ID] = node
 	f.paths[path] = node.ID
 	for id, content := range versions {

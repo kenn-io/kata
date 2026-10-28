@@ -85,20 +85,18 @@ func (c *Client) json(ctx context.Context, method, endpoint string, in, out any)
 
 // EnsureFolder creates missing ancestors and returns the final folder ID.
 func (c *Client) EnsureFolder(ctx context.Context, folder string) (int64, error) {
-	var node struct {
-		ID int64 `json:"id"`
-	}
+	var node Node
 	var current strings.Builder
 	for segment := range strings.SplitSeq(strings.Trim(folder, "/"), "/") {
 		if segment != "" {
 			current.WriteString("/" + segment)
 		}
-		endpoint := "/api/v1/path?" + url.Values{"path": {current.String()}}.Encode()
-		err := c.json(ctx, "GET", endpoint, nil, &node)
+		var err error
+		node, err = c.ResolvePath(ctx, current.String())
 		if e, ok := errors.AsType[*Error](err); ok && e.Status == 404 {
 			err = c.json(ctx, "POST", "/api/v1/path/mkdir", map[string]string{"path": current.String()}, &node)
 			if e, ok := errors.AsType[*Error](err); ok && e.Status == 409 {
-				err = c.json(ctx, "GET", endpoint, nil, &node)
+				node, err = c.ResolvePath(ctx, current.String())
 			}
 		}
 		if err != nil {

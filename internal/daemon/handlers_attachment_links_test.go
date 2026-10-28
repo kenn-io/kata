@@ -42,6 +42,7 @@ func TestAttachmentLinkPinsExistingVersion(t *testing.T) {
 	require.Equal(t, linkVersion, out.Attachment.DocbankVersion.String())
 	require.EqualValues(t, 12, out.Attachment.Size)
 	require.Equal(t, "application/octet-stream", out.Attachment.MediaType)
+	require.Equal(t, []string{"GET /api/v1/path"}, f.Requests())
 	currentID := out.ID
 	resp, err := env.HTTP.Get(fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/attachments/%s/content", env.URL, p.ID, iss.ShortID, currentID))
 	require.NoError(t, err)
@@ -50,6 +51,13 @@ func TestAttachmentLinkPinsExistingVersion(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 200, resp.StatusCode)
 	require.Equal(t, "sample bytes", string(content))
+	code, raw, err = postAttachmentLink(env, endpoint, `{"node_id":42,"actor":"operator"}`)
+	require.NoError(t, err)
+	require.Equal(t, 200, code, string(raw))
+	require.NoError(t, json.Unmarshal(raw, &out))
+	require.Equal(t, linkVersion, out.Attachment.DocbankVersion.String())
+	require.EqualValues(t, 12, out.Attachment.Size)
+	require.Equal(t, []string{"GET /api/v1/path", "GET /api/v1/versions/" + linkVersion + "/content", "GET /api/v1/nodes/42"}, f.Requests())
 	code, raw, err = postAttachmentLink(env, endpoint, `{"node_id":42,"version_id":"`+oldLinkVersion+`","actor":"operator"}`)
 	require.NoError(t, err)
 	require.Equal(t, 200, code, string(raw))
@@ -95,7 +103,11 @@ func TestAttachmentLinkRejectsInvalidSelections(t *testing.T) {
 		{name: "trashed", trash: "2026-10-25T01:00:00Z", status: 410, code: "attachment_content_missing"},
 		{name: "wrong node", body: `{"node_id":42,"version_id":"` + oldLinkVersion + `"}`, nodeID: 43, status: 400, code: "attachment_version_mismatch"},
 		{name: "bad name", fileName: strings.Repeat("a", 256), status: 400, code: "attachment_invalid"},
-		{name: "missing", fault: "status:404", status: 410, code: "attachment_content_missing"},
+		{name: "missing node", body: `{"node_id":99}`, status: 404, code: "docbank_not_found"},
+		{name: "missing path", body: `{"path":"/reports/missing.pdf"}`, status: 404, code: "docbank_not_found"},
+		{name: "missing version", body: `{"node_id":42,"version_id":"` + oldLinkVersion + `"}`, status: 404, code: "docbank_not_found"},
+		{name: "unauthorized", fault: "status:401", status: 502, code: "docbank_unauthorized"},
+		{name: "forbidden", fault: "status:403", status: 502, code: "docbank_unauthorized"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env, f := attachmentEnv(t)
@@ -135,7 +147,7 @@ func TestAttachmentLinkRejectsInvalidSelections(t *testing.T) {
 			stored, err := env.DB.IssueByID(t.Context(), iss.ID)
 			require.NoError(t, err)
 			require.JSONEq(t, `{}`, string(stored.Metadata))
-			if tc.body != "" && tc.nodeID == 42 {
+			if tc.status == 400 && tc.body != "" && tc.nodeID == 42 {
 				require.Empty(t, f.Requests(), "invalid selector must fail before upstream reads")
 			}
 		})
@@ -173,7 +185,7 @@ func TestAttachmentLinkRechecksAuthorityAfterLookup(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		status, raw, err := postAttachmentLink(env, endpoint, `{"node_id":42,"actor":"operator"}`)
+		status, raw, err := postAttachmentLink(env, endpoint, `{"node_id":42,"version_id":"`+linkVersion+`","actor":"operator"}`)
 		done <- result{status, raw, err}
 	}()
 	select {

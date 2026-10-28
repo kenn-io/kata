@@ -10,6 +10,12 @@ import (
 	"go.kenn.io/kata/internal/metadata"
 )
 
+var docbankLinkErrors = map[int]error{
+	401: attachmentError(502, "docbank_unauthorized"),
+	403: attachmentError(502, "docbank_unauthorized"),
+	404: api.NewError(404, "docbank_not_found", "Docbank file or version not found", "", nil),
+}
+
 func linkAttachment(ctx context.Context, cfg ServerConfig, in *api.LinkAttachmentRequest) (*api.AddAttachmentResponse, error) {
 	if cfg.Docbank == nil {
 		return nil, attachmentError(503, "docbank_not_configured")
@@ -36,7 +42,7 @@ func linkAttachment(ctx context.Context, cfg ServerConfig, in *api.LinkAttachmen
 		node, err = cfg.Docbank.Node(ctx, *input.NodeID)
 	}
 	if err != nil {
-		return nil, docbankError(err, docbankContentErrors)
+		return nil, docbankError(err, docbankLinkErrors)
 	}
 	if node.TrashedAt != "" {
 		return nil, attachmentError(410, "attachment_content_missing")
@@ -44,13 +50,12 @@ func linkAttachment(ctx context.Context, cfg ServerConfig, in *api.LinkAttachmen
 	if node.Kind != "file" {
 		return nil, attachmentError(400, "attachment_not_file")
 	}
-	versionID := node.CurrentVersionID
+	version := docbank.Version{ID: node.CurrentVersionID, NodeID: node.ID, Size: node.Size}
 	if input.VersionID != nil {
-		versionID = *input.VersionID
-	}
-	version, err := cfg.Docbank.Version(ctx, versionID)
-	if err != nil {
-		return nil, docbankError(err, docbankContentErrors)
+		version, err = cfg.Docbank.Version(ctx, *input.VersionID)
+		if err != nil {
+			return nil, docbankError(err, docbankLinkErrors)
+		}
 	}
 	if version.NodeID != node.ID {
 		return nil, attachmentError(400, "attachment_version_mismatch")

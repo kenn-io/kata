@@ -35,7 +35,11 @@ func TestAttachmentLinkCLIInvalidSelector(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { requests++; http.Error(w, "unexpected", 500) }))
 	defer server.Close()
-	_, err := executeAttachmentCLI(t, server.URL, "link", "abc4", "invalid")
-	require.Error(t, err)
-	require.Zero(t, requests)
+	for _, selector := range []string{"report.pdf", "invalid", "0", "9223372036854775808"} {
+		t.Run(selector, func(t *testing.T) {
+			_, err := executeAttachmentCLI(t, server.URL, "link", "abc4", selector)
+			require.ErrorContains(t, err, "Docbank file must be a positive node ID or an absolute path")
+			require.Zero(t, requests)
+		})
+	}
 }
