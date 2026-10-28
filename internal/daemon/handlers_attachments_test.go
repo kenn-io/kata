@@ -83,10 +83,12 @@ func TestAttachmentUploadRechecksAuthority(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		claim  bool
+		move   bool
 		status int
 		code   string
 	}{
 		{name: "claim taken", claim: true, status: http.StatusConflict, code: "claim_denied"},
+		{name: "issue moved", move: true, status: http.StatusConflict, code: "issue_project_changed"},
 		{name: "project archived", status: http.StatusNotFound, code: "project_not_found"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -138,6 +140,11 @@ func TestAttachmentUploadRechecksAuthority(t *testing.T) {
 			}
 			if tc.claim {
 				acquireClaimGateIssue(t, env, p, iss, "other")
+			} else if tc.move {
+				target, err := env.DB.CreateProject(t.Context(), "destination")
+				require.NoError(t, err)
+				_, err = env.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: iss.ID, FromProjectID: p.ID, ToProjectID: target.ID, IfMatchRev: iss.Revision, Actor: "operator"})
+				require.NoError(t, err)
 			} else {
 				_, _, err = env.DB.RemoveProject(t.Context(), db.RemoveProjectParams{
 					ProjectID: p.ID, Actor: "tester", Force: true,
@@ -154,7 +161,11 @@ func TestAttachmentUploadRechecksAuthority(t *testing.T) {
 			// A new request exercises the early gate after authority changes.
 			requestsBefore := f.Requests()
 			code, earlyRaw := attachmentUpload(t, env, endpoint, "shot.png", strings.NewReader("image bytes"))
-			assertAPIError(t, code, earlyRaw, tc.status, tc.code)
+			if tc.move {
+				assert.Equal(t, http.StatusNotFound, code, string(earlyRaw))
+			} else {
+				assertAPIError(t, code, earlyRaw, tc.status, tc.code)
+			}
 			assert.Equal(t, requestsBefore, f.Requests(), "the early gate must reject before another vault upload")
 			stored, err := env.DB.IssueByID(t.Context(), iss.ID)
 			require.NoError(t, err)

@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
@@ -170,9 +171,18 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		if err := recheckAttachmentWrite(ctx, cfg, in.ProjectID, iss, actor); err != nil {
 			return nil, err
 		}
-		res, err := cfg.DB.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: iss.ID, Actor: actor, Patch: map[string]jsontext.Value{metadata.AttachmentPrefix + id: raw}})
+		ctx = db.WithMetadataPatchHook(ctx, func(_ context.Context, _ *sql.Tx, current db.Issue) (map[string]jsontext.Value, error) {
+			if current.ProjectID != in.ProjectID {
+				return nil, db.ErrIssueProjectChanged
+			}
+			return map[string]jsontext.Value{metadata.AttachmentPrefix + id: raw}, nil
+		})
+		res, err := cfg.DB.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: iss.ID, Actor: actor})
 		if errors.Is(err, db.ErrFederatedReadOnly) {
 			return nil, federationReadOnlyError(err)
+		}
+		if errors.Is(err, db.ErrIssueProjectChanged) {
+			return nil, attachmentError(409, "issue_project_changed")
 		}
 		if err != nil {
 			return nil, internalAPIError(err)
