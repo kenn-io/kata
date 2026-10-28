@@ -93,18 +93,7 @@ var ForeignStoreOwnerGrace = 3 * time.Second
 // The grace covers a local daemon still releasing the store. With no such
 // record it returns nil at once and the caller's normal wait applies.
 func RefuseForeignStoreOwner(ctx context.Context, dataDir string, ownerLocks []string) error {
-	records, err := (kitdaemon.RuntimeStore{Dir: dataDir}).List()
-	if err != nil {
-		return nil
-	}
-	var owner *kitdaemon.RuntimeRecord
-	for i := range records {
-		if kitdaemon.RuntimeProcessScope(records[i]) == kitdaemon.ProcessScopeForeign {
-			owner = &records[i]
-			break
-		}
-	}
-	if owner == nil {
+	if _, ok := foreignRuntimeRecord(dataDir); !ok {
 		return nil
 	}
 	deadline := time.NewTimer(ForeignStoreOwnerGrace)
@@ -117,8 +106,29 @@ func RefuseForeignStoreOwner(ctx context.Context, dataDir string, ownerLocks []s
 			return ctx.Err()
 		case <-tick.C:
 		case <-deadline.C:
+			// That daemon can exit while a local starter takes the lock between
+			// polls, so blame it only if its record is still there.
+			owner, ok := foreignRuntimeRecord(dataDir)
+			if !ok {
+				return nil
+			}
 			return fmt.Errorf("a kata daemon in another PID namespace owns this store (pid %d there; runtime record %s); run kata where that daemon runs, or set KATA_SERVER to reach it", owner.PID, owner.SourcePath)
 		}
 	}
 	return nil
+}
+
+// foreignRuntimeRecord returns a record in dataDir for a live process in
+// another PID namespace.
+func foreignRuntimeRecord(dataDir string) (kitdaemon.RuntimeRecord, bool) {
+	records, err := (kitdaemon.RuntimeStore{Dir: dataDir}).List()
+	if err != nil {
+		return kitdaemon.RuntimeRecord{}, false
+	}
+	for _, record := range records {
+		if kitdaemon.RuntimeProcessScope(record) == kitdaemon.ProcessScopeForeign {
+			return record, true
+		}
+	}
+	return kitdaemon.RuntimeRecord{}, false
 }
