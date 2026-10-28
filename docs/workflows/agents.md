@@ -626,8 +626,9 @@ The TUI nests local replies beneath their targets and shows `confirm` and
 `refute` tags for visible direct assertions. Both tags remain visible when the
 assertions conflict; neither chooses a winner. A tag says `(before edit)` when
 all of its corresponding assertions predate the target's edit.
-Replies from other issues appear as header-only leaves directly beneath their local target, before its local replies, each group in time order.
-Indentation stops at four levels; reply labels still name the target.
+Replies from other issues appear as header-only leaves directly beneath their
+local target, before its local replies, each group in time order. Indentation
+stops at four levels; reply labels still name the target.
 
 Kata filters links by authorization before counting or rendering. Counts
 include only directly linked comments the reader may access. If the authorized

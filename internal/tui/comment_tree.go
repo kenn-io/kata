@@ -19,8 +19,8 @@ func compareCommentLinks(a, b commentref.Link) int {
 	return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), strings.Compare(a.UID, b.UID))
 }
 
-// threadOrder nests foreign leaves first, then local replies, each group in time order,
-// keeping roots in input order and retaining malformed cycles once.
+// threadOrder nests foreign leaves first, then local replies, each group in time
+// order, keeping roots in input order and retaining malformed cycles once.
 func threadOrder(cs []CommentEntry) []CommentEntry {
 	byUID := make(map[string]int, len(cs))
 	children := make(map[string][]commentref.Link, len(cs))
