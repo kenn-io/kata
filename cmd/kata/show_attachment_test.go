@@ -117,3 +117,30 @@ func TestOptionalShowAttachmentHistory(t *testing.T) {
 		})
 	}
 }
+
+func TestShowAttachmentHistoryUsesFederationOrder(t *testing.T) {
+	const subject = "01K7E222222222222222222222222"
+	cases := []struct {
+		name         string
+		newer, older string
+	}{
+		{"physical", `"hlc_physical_ms":2`, `"hlc_physical_ms":1`},
+		{"counter", `"hlc_physical_ms":2,"hlc_counter":2`, `"hlc_physical_ms":2,"hlc_counter":1`},
+		{"origin", `"hlc_physical_ms":2,"origin_instance_uid":"b"`, `"hlc_physical_ms":2,"origin_instance_uid":"a"`},
+		{"event", `"hlc_physical_ms":2,"event_uid":"b"`, `"hlc_physical_ms":2,"event_uid":"a"`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-Kata-Events-Issue-UID", subject)
+				_, _ = fmt.Fprintf(w, `{"events":[{"event_id":1,"type":"issue.closed","issue_uid":%q,%s,"payload":{"evidence":[{"type":"attachment","attachment_id":"new"}]}},{"event_id":2,"type":"issue.closed","issue_uid":%q,%s,"payload":{"evidence":[{"type":"attachment","attachment_id":"old"}]}}],"next_after_id":2,"reset_required":false}`, subject, tc.newer, subject, tc.older)
+			}))
+			defer server.Close()
+			evidence, err := closeEvidenceForShow(context.Background(), server.Client(), server.URL, 1, subject)
+			require.NoError(t, err)
+			require.Len(t, evidence, 1)
+			require.Equal(t, "new", evidence[0].AttachmentID)
+		})
+	}
+}
