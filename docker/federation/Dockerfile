@@ -13,6 +13,8 @@ RUN CGO_ENABLED=0 go build -buildvcs=false -trimpath -o /out/kata ./cmd/kata
 
 FROM debian:bookworm-slim
 
+ENV GOTRACEBACK=all
+
 RUN apt-get update \
  && apt-get install -y --no-install-recommends bash ca-certificates curl jq \
  && rm -rf /var/lib/apt/lists/*
