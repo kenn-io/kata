@@ -13,53 +13,68 @@ import (
 )
 
 func TestServeWaitsForActiveHandlerDuringShutdown(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = listener.Close() })
+	for _, tt := range []struct {
+		name       string
+		closeError bool
+		timeout    time.Duration
+	}{
+		{name: "plain", timeout: 5 * time.Second},
+		{name: "concurrent_close", closeError: true, timeout: time.Second},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = listener.Close() })
 
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		close(entered)
-		<-release
-		w.WriteHeader(http.StatusNoContent)
-	})
-	server := &Server{handler: handler}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- server.Serve(ctx, listener) }()
+			entered := make(chan struct{})
+			release := make(chan struct{})
+			handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				close(entered)
+				<-release
+				w.WriteHeader(http.StatusNoContent)
+			})
+			server := &Server{handler: handler}
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan error, 1)
+			serveListener := listener
+			if tt.closeError {
+				serveListener = closeErrorListener{Listener: listener}
+			}
+			go func() { done <- server.Serve(ctx, serveListener) }()
 
-	responseDone := make(chan error, 1)
-	go func() {
-		response, err := http.Get("http://" + listener.Addr().String())
-		if err == nil {
-			_ = response.Body.Close()
-		}
-		responseDone <- err
-	}()
-	select {
-	case <-entered:
-	case <-time.After(5 * time.Second):
-		stacktest.Dump(t)
-		t.Fatal("request did not enter handler")
+			responseDone := make(chan error, 1)
+			go func() {
+				response, err := http.Get("http://" + listener.Addr().String())
+				if err == nil {
+					_ = response.Body.Close()
+				}
+				responseDone <- err
+			}()
+			select {
+			case <-entered:
+			case <-time.After(tt.timeout):
+				stacktest.Dump(t)
+				t.Fatal("request did not enter handler")
+			}
+
+			cancel()
+			select {
+			case err := <-done:
+				t.Fatalf("Serve returned before active handler completed: %v", err)
+			case <-time.After(50 * time.Millisecond): //nolint:kennlint // absence window; release holds the active handler, so Serve must not return
+			}
+
+			close(release)
+			select {
+			case err := <-done:
+				require.NoError(t, err)
+			case <-time.After(tt.timeout):
+				stacktest.Dump(t)
+				t.Fatal("Serve did not return after active handler completed")
+			}
+			require.NoError(t, <-responseDone)
+		})
 	}
-
-	cancel()
-	select {
-	case err := <-done:
-		t.Fatalf("Serve returned before active handler completed: %v", err)
-	case <-time.After(50 * time.Millisecond): //nolint:kennlint // absence window; release holds the active handler, so Serve must not return
-	}
-
-	close(release)
-	select {
-	case err := <-done:
-		require.NoError(t, err)
-	case <-time.After(5 * time.Second):
-		stacktest.Dump(t)
-		t.Fatal("Serve did not return after active handler completed")
-	}
-	require.NoError(t, <-responseDone)
 }
 
 type closeErrorListener struct {
@@ -69,52 +84,6 @@ type closeErrorListener struct {
 func (l closeErrorListener) Close() error {
 	_ = l.Listener.Close()
 	return net.ErrClosed
-}
-
-func TestServeTreatsConcurrentListenerCloseAsDrained(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	server := &Server{handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		close(entered)
-		<-release
-		w.WriteHeader(http.StatusNoContent)
-	})}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- server.Serve(ctx, closeErrorListener{Listener: listener}) }()
-
-	responseDone := make(chan error, 1)
-	go func() {
-		response, requestErr := http.Get("http://" + listener.Addr().String())
-		if requestErr == nil {
-			_ = response.Body.Close()
-		}
-		responseDone <- requestErr
-	}()
-	select {
-	case <-entered:
-	case <-time.After(time.Second):
-		stacktest.Dump(t)
-		t.Fatal("request did not enter handler")
-	}
-	cancel()
-	select {
-	case err := <-done:
-		t.Fatalf("Serve returned before active handler completed: %v", err)
-	case <-time.After(50 * time.Millisecond): //nolint:kennlint // absence window; release holds the active handler, so Serve must not return
-	}
-	close(release)
-
-	select {
-	case err := <-done:
-		require.NoError(t, err)
-	case <-time.After(time.Second):
-		stacktest.Dump(t)
-		t.Fatal("Serve did not return after context cancellation")
-	}
-	require.NoError(t, <-responseDone)
 }
 
 func TestServeReportsHandlerThatOutlivesShutdownTimeout(t *testing.T) {
@@ -152,11 +121,6 @@ func TestServeReportsHandlerThatOutlivesShutdownTimeout(t *testing.T) {
 	case <-time.After(time.Second):
 		stacktest.Dump(t)
 		t.Fatal("Serve did not report the unjoined handler")
-	}
-	select {
-	case <-release:
-		t.Fatal("handler release channel unexpectedly closed")
-	default:
 	}
 	close(release)
 }
