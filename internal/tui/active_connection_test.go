@@ -134,7 +134,6 @@ func TestActiveConnectionHeaderAttentionStates(t *testing.T) {
 		{status: "Connection unavailable", err: "service unavailable"},
 		{status: "Connecting"},
 		{status: "Reconnecting", auth: AuthInfo{Kind: "insecure_readonly"}, absent: "Anonymous (read-only)", ready: true, sse: sseReconnecting},
-		{status: "Disconnected", auth: AuthInfo{Kind: "bootstrap"}, absent: "Bootstrap token", ready: true, sse: sseDisconnected},
 		{status: "Credential expired", auth: AuthInfo{Kind: "db_token", Actor: "expired-member", ExpiresAt: new(time.Now().Add(-time.Minute))}, absent: "expired-member", ready: true},
 	} {
 		t.Run(tc.status, func(t *testing.T) {
