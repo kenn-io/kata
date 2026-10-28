@@ -98,7 +98,7 @@ func TestAttachmentLinkRejectsInvalidSelections(t *testing.T) {
 		{name: "empty", body: `{}`, status: 400, code: "attachment_invalid"},
 		{name: "both", body: `{"node_id":42,"path":"/reports/report.pdf"}`, status: 400, code: "attachment_invalid"},
 		{name: "zero", body: `{"node_id":0}`, status: 400, code: "attachment_invalid"},
-		{name: "relative", body: `{"path":"report.pdf"}`, status: 400, code: "attachment_invalid"},
+		{name: "relative", body: `{"path":"report.pdf"}`, fault: "status:400", status: 400, code: "attachment_invalid"},
 		{name: "directory", kind: "dir", status: 400, code: "attachment_not_file"},
 		{name: "trashed", trash: "2026-10-25T01:00:00Z", status: 410, code: "attachment_content_missing"},
 		{name: "wrong node", body: `{"node_id":42,"version_id":"` + oldLinkVersion + `"}`, nodeID: 43, status: 400, code: "attachment_version_mismatch"},
@@ -147,7 +147,9 @@ func TestAttachmentLinkRejectsInvalidSelections(t *testing.T) {
 			stored, err := env.DB.IssueByID(t.Context(), iss.ID)
 			require.NoError(t, err)
 			require.JSONEq(t, `{}`, string(stored.Metadata))
-			if tc.status == 400 && tc.body != "" && tc.nodeID == 42 {
+			if tc.name == "relative" {
+				require.Equal(t, []string{"GET /api/v1/path"}, f.Requests())
+			} else if tc.status == 400 && tc.body != "" && tc.nodeID == 42 {
 				require.Empty(t, f.Requests(), "invalid selector must fail before upstream reads")
 			}
 		})

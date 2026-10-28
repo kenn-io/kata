@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"strings"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
@@ -32,7 +31,7 @@ func linkAttachment(ctx context.Context, cfg ServerConfig, in *api.LinkAttachmen
 		return nil, err
 	}
 	input := in.Body
-	if (input.NodeID == nil) == (input.Path == nil) || (input.NodeID != nil && *input.NodeID <= 0) || (input.Path != nil && !strings.HasPrefix(*input.Path, "/")) {
+	if (input.NodeID == nil) == (input.Path == nil) || (input.NodeID != nil && *input.NodeID <= 0) {
 		return nil, attachmentError(400, "attachment_invalid")
 	}
 	var node docbank.Node
