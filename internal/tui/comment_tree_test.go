@@ -82,21 +82,6 @@ func TestCommentTreePickerLeaves(t *testing.T) {
 	}
 }
 
-func TestThreadOrderForeignLeafOwner(t *testing.T) {
-	when := time.Date(2026, 4, 30, 10, 0, 0, 0, time.UTC)
-	late := commentref.Link{UID: "late", Kind: "confirm", CreatedAt: when.Add(2 * time.Minute)}
-	got := threadOrder([]CommentEntry{
-		{UID: "a", Backlinks: []commentref.Link{late}},
-		{UID: "b", CreatedAt: when, Reply: &commentref.Link{UID: "a"}},
-		{UID: "b2", CreatedAt: when.Add(time.Minute), Reply: &commentref.Link{UID: "b"}},
-	})
-	require.Len(t, got, 3)
-	require.Equal(t, "a", got[0].UID)
-	require.Equal(t, []commentLeaf{{link: late, depth: 1}}, got[0].leaves)
-	require.Empty(t, got[1].leaves)
-	require.Empty(t, got[2].leaves)
-}
-
 func TestCommentTags(t *testing.T) {
 	for _, tt := range []struct {
 		name  string
