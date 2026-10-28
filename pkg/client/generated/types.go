@@ -6675,13 +6675,25 @@ func (t TokenScopeOut) Validate() error {
 }
 
 type Transcript struct {
-	Agent     string  `json:"agent" validate:"required,max=32"`
-	SessionID string  `json:"session_id" validate:"required,max=128"`
-	URL       *string `json:"url,omitempty"`
+	Agent     TranscriptAgent `json:"agent" validate:"required,max=32"`
+	SessionID string          `json:"session_id" validate:"required,max=128"`
+	URL       *string         `json:"url,omitempty"`
 }
 
 func (t Transcript) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(t))
+	var errors runtime.ValidationErrors
+	if v, ok := any(t.Agent).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Agent", err)
+		}
+	}
+	if err := typesValidator.Var(t.SessionID, "required,max=128"); err != nil {
+		errors = errors.Append("SessionID", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type Trigger struct {

@@ -1,0 +1,8 @@
+overlay: 1.0.0
+info:
+  title: Keep the released TranscriptAgent type
+  version: 1.0.0
+actions:
+  - target: '$.components.schemas.Transcript.properties.agent'
+    update:
+      x-go-type: TranscriptAgent

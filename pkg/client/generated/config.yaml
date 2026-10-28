@@ -18,3 +18,4 @@ generate:
 overlay:
   sources:
     - native_uuid_overlay.yaml
+    - agent_overlay.yaml
