@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button } from '@kenn-io/kit-ui'
+  import { Button, RadioGroup } from '@kenn-io/kit-ui'
   import CheckIcon from '@lucide/svelte/icons/check'
   import RotateCcwIcon from '@lucide/svelte/icons/rotate-ccw'
   import type { KataTaskCloseRequest, KataTaskDetail } from '../lib/kata/types'
@@ -26,6 +26,21 @@
     { value: 'duplicate', label: 'Duplicate', description: 'Tracked elsewhere.' },
     { value: 'superseded', label: 'Superseded', description: 'Replaced by another task.' },
   ]
+  const closeReasonOptions = closeReasons.map((reason) => ({
+    value: reason.value,
+    label: `${reason.label}. ${reason.description}`,
+  }))
+
+  function chooseCloseReason(value: string | undefined): void {
+    if (
+      value === 'done' ||
+      value === 'wontfix' ||
+      value === 'duplicate' ||
+      value === 'superseded'
+    ) {
+      completeReason = value
+    }
+  }
 
   let completeOpen = $state(false)
   let completeReason = $state<CloseReason>('done')
@@ -183,23 +198,14 @@
       <p class="complete-task-id">{issue.issue.qualified_id}</p>
     </div>
 
-    <fieldset class="complete-reasons" disabled={pending}>
-      <legend>Reason</legend>
-      {#each closeReasons as reason (reason.value)}
-        <label class="complete-reason">
-          <input
-            type="radio"
-            name="complete-reason"
-            value={reason.value}
-            bind:group={completeReason}
-          />
-          <span>
-            <strong>{reason.label}</strong>
-            <small>{reason.description}</small>
-          </span>
-        </label>
-      {/each}
-    </fieldset>
+    <RadioGroup
+      legend="Reason"
+      name="complete-reason"
+      disabled={pending}
+      value={completeReason}
+      onchange={chooseCloseReason}
+      options={closeReasonOptions}
+    />
 
     {#if completeReason === 'done'}
       <div class="complete-evidence">
@@ -300,15 +306,6 @@
     font-size: var(--font-size-xs);
   }
 
-  .complete-reasons {
-    display: grid;
-    gap: 8px;
-    margin: 0;
-    padding: 0;
-    border: 0;
-  }
-
-  .complete-reasons legend,
   .complete-message > span,
   .complete-field > span,
   .complete-evidence label > span {
@@ -325,44 +322,11 @@
     text-transform: none;
   }
 
-  .complete-reason {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    min-height: 38px;
-    border: 1px solid var(--border-default);
-    border-radius: 6px;
-    background: var(--bg-primary);
-    padding: 8px 10px;
-    color: var(--text-primary);
-    cursor: pointer;
-  }
-
-  .complete-reason:has(input:checked) {
-    border-color: var(--accent-blue);
-    background: color-mix(in srgb, var(--accent-blue) 9%, var(--bg-primary));
-  }
-
-  .complete-reason input {
-    margin-top: 2px;
-  }
-
-  .complete-reason span,
   .complete-message,
   .complete-field,
   .complete-evidence label {
     display: grid;
     gap: 2px;
-  }
-
-  .complete-reason strong {
-    font-size: var(--font-size-sm);
-    font-weight: 650;
-  }
-
-  .complete-reason small {
-    color: var(--text-muted);
-    font-size: var(--font-size-xs);
   }
 
   .complete-message textarea {
