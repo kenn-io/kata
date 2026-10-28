@@ -23,12 +23,12 @@ func TestThreadOrder(t *testing.T) {
 			{UID: "a", Backlinks: []commentref.Link{{UID: "early", CreatedAt: when}, {UID: "middle", CreatedAt: when.Add(2 * time.Minute)}, {UID: "late", CreatedAt: when.Add(4 * time.Minute)}}},
 			{UID: "c", CreatedAt: when.Add(3 * time.Minute), Reply: &commentref.Link{UID: "a"}},
 			{UID: "b", CreatedAt: when.Add(time.Minute), Reply: &commentref.Link{UID: "a"}},
-		}, []string{"a:0", "early:1", "b:1", "middle:1", "c:1", "late:1"}},
+		}, []string{"a:0", "a->early:1", "a->middle:1", "a->late:1", "b:1", "c:1"}},
 		{"tied times", []CommentEntry{
 			{UID: "a", Backlinks: []commentref.Link{{UID: "c", CreatedAt: when}, {UID: "b", CreatedAt: when}}},
 			{UID: "d", CreatedAt: when, Reply: &commentref.Link{UID: "a"}},
 			{UID: "b", CreatedAt: when, Reply: &commentref.Link{UID: "a"}},
-		}, []string{"a:0", "b:1", "c:1", "d:1"}},
+		}, []string{"a:0", "a->c:1", "b:1", "d:1"}},
 		{"unknown parent", []CommentEntry{{UID: "c", Reply: &commentref.Link{UID: "unknown"}}}, []string{"c:0"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -36,7 +36,7 @@ func TestThreadOrder(t *testing.T) {
 			for _, c := range threadOrder(tt.comments) {
 				rows = append(rows, fmt.Sprintf("%s:%d", c.UID, c.depth))
 				for _, leaf := range c.leaves {
-					rows = append(rows, fmt.Sprintf("%s:%d", leaf.link.UID, leaf.depth))
+					rows = append(rows, fmt.Sprintf("%s->%s:%d", c.UID, leaf.link.UID, leaf.depth))
 				}
 			}
 			require.Equal(t, tt.rows, rows)
@@ -50,6 +50,21 @@ func TestThreadOrder(t *testing.T) {
 	got := threadOrder(chain)
 	require.Equal(t, []int{0, 1, 2, 3, 4, 4, 4}, []int{got[0].depth, got[1].depth, got[2].depth, got[3].depth, got[4].depth, got[5].depth, got[6].depth})
 	require.Equal(t, 4, got[6].leaves[0].depth)
+}
+
+func TestThreadOrderForeignLeafOwner(t *testing.T) {
+	when := time.Date(2026, 4, 30, 10, 0, 0, 0, time.UTC)
+	late := commentref.Link{UID: "late", Kind: "confirm", CreatedAt: when.Add(2 * time.Minute)}
+	got := threadOrder([]CommentEntry{
+		{UID: "a", Backlinks: []commentref.Link{late}},
+		{UID: "b", CreatedAt: when, Reply: &commentref.Link{UID: "a"}},
+		{UID: "b2", CreatedAt: when.Add(time.Minute), Reply: &commentref.Link{UID: "b"}},
+	})
+	require.Len(t, got, 3)
+	require.Equal(t, "a", got[0].UID)
+	require.Equal(t, []commentLeaf{{link: late, depth: 1}}, got[0].leaves)
+	require.Empty(t, got[1].leaves)
+	require.Empty(t, got[2].leaves)
 }
 
 func TestCommentTags(t *testing.T) {

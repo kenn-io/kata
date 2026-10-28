@@ -63,7 +63,7 @@ func threadOrder(cs []CommentEntry) []CommentEntry {
 			return
 		}
 		visited[i] = true
-		c := cs[i]
+		c, parentIdx := cs[i], len(ordered)
 		c.depth, c.leaves = depth, nil
 		ordered = append(ordered, c)
 		for _, link := range children[c.UID] {
@@ -71,8 +71,7 @@ func threadOrder(cs []CommentEntry) []CommentEntry {
 			if child, local := byUID[link.UID]; local {
 				visit(child, childDepth)
 			} else {
-				last := &ordered[len(ordered)-1]
-				last.leaves = append(last.leaves, commentLeaf{link: link, depth: childDepth, replies: children[link.UID]})
+				ordered[parentIdx].leaves = append(ordered[parentIdx].leaves, commentLeaf{link: link, depth: childDepth, replies: children[link.UID]})
 				for _, child := range children[link.UID] {
 					visit(byUID[child.UID], min(childDepth+1, maxCommentDepth))
 				}
