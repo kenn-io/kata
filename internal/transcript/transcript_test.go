@@ -10,6 +10,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestTranscriptRejectsNonUUIDBuiltInSessions(t *testing.T) {
+	for _, agent := range []string{"claude", "codex"} {
+		t.Run(agent, func(t *testing.T) {
+			assert.Error(t, (Transcript{Agent: agent, SessionID: "session-token"}).Validate())
+		})
+	}
+}
+
 func TestTranscriptLinks(t *testing.T) {
 	for _, tc := range []struct{ agent, id, path string }{
 		{"claude", "00000000-0000-4000-8000-000000000001", "sessions/00000000-0000-4000-8000-000000000001"},

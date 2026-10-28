@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"uuid"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/config"
@@ -81,8 +80,7 @@ func dropUnsupportedTranscript(
 		return nil
 	}
 	required := apiVersionOtherAgentCloseTranscript
-	_, uuidErr := uuid.Parse(ref.SessionID)
-	if (ref.Agent == "claude" || ref.Agent == "codex") && len(ref.SessionID) == 36 && uuidErr == nil {
+	if ref.Agent == "claude" || ref.Agent == "codex" {
 		required = apiVersionCloseTranscript
 	}
 	err := requireDaemonAPIVersion(ctx, client, baseURL, required, "close transcript")
