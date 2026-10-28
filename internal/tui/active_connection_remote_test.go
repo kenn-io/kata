@@ -30,5 +30,6 @@ func TestActiveConnectionDirectRemoteAndRevoked(t *testing.T) {
 		m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{err: &APIError{Status: http.StatusUnauthorized, Code: "unauthorized", Message: "credential revoked"}})
 		header, _, _ := strings.Cut(stripANSI(m.viewContent()), "\n")
 		require.Contains(t, header, "Authentication required")
+		require.NotContains(t, header, "member")
 	})
 }
