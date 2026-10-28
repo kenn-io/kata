@@ -72,7 +72,7 @@ type revokeBeforeAttachmentPatch struct {
 }
 
 func (s revokeBeforeAttachmentPatch) PatchIssueMetadata(ctx context.Context, in db.PatchIssueMetadataIn) (db.PatchIssueMetadataOut, error) {
-	if _, _, err := s.Storage.RevokeAPIToken(ctx, s.tokenID, db.BootstrapActor); err != nil {
+	if _, _, err := s.RevokeAPIToken(ctx, s.tokenID, db.BootstrapActor); err != nil {
 		return db.PatchIssueMetadataOut{}, err
 	}
 	return s.Storage.PatchIssueMetadata(ctx, in)
