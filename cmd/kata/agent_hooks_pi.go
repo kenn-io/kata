@@ -216,10 +216,10 @@ export default function kataHooks(pi) {
     const pending = { mode };
     baseline.pending = pending;
     pending.promise = (async () => {
-      let daemon = "";
       if (mode === "start") {
-        daemon = await daemonAddress(baseline);
-        // A nested session tracking its live parent's issue leaves attention to the parent.
+        // A nested session tracking its live parent's issue leaves attention
+        // to the parent. Only an inherited marker can make it skip.
+        const daemon = process.env.KATA_ATTENTION_HOST ? await daemonAddress(baseline) : "";
         if (registry.active.get(baseline.cwd) !== baseline ||
             (daemon && kataAttentionHostSkip(attentionIdentity(baseline, daemon)))) {
           if (baseline.pending === pending) delete baseline.pending;
@@ -231,8 +231,8 @@ export default function kataHooks(pi) {
       if (registry.active.get(baseline.cwd) === baseline && succeeded) {
         if (mode === "start") {
           baseline.started = true;
-          // A stopped daemon can be located only after the start brings it up.
-          daemon ||= await daemonAddress(baseline);
+          // The start can start a stopped daemon or replace an older one.
+          const daemon = await daemonAddress(baseline);
           if (daemon && registry.active.get(baseline.cwd) === baseline && !baseline.ended) {
             baseline.identity = attentionIdentity(baseline, daemon);
             kataAttentionHostClaim(baseline.identity);

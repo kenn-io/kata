@@ -21,7 +21,8 @@ const server=createServer(async(req,res)=>{
  else if(url.pathname==='/api/v1/projects/42/issues'){
   assert.equal(url.searchParams.get('meta'),'notify.YWN0b3IvdGVhbW1hdGU');assert.equal(url.searchParams.get('status'),'open');
   respond({issues:[{short_id:'abc4',title:'example task',metadata:{'notify.YWN0b3IvdGVhbW1hdGU':{from:'coordinator',message:'fresh request'}}}]});
- } else if(req.method==='POST'&&url.pathname==='/api/v1/ui/telemetry'&&body.event==='agent_active'){res.statusCode=202;respond({status:'queued'});}
+ } else if(req.method==='GET'&&url.pathname==='/api/v1/ping')respond({ok:true,service:'kata',version:'test',pid:process.pid});
+ else if(req.method==='POST'&&url.pathname==='/api/v1/ui/telemetry'&&body.event==='agent_active'){res.statusCode=202;respond({status:'queued'});}
  else if(url.pathname==='/health')respond({status:'ok',api_version:1});
  else {errors.push(req.method+' '+url.pathname);res.statusCode=404;respond({error:'unexpected route'});}
 });

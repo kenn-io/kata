@@ -358,7 +358,7 @@ func TestPiNativeAttentionEndsBaselineFromPreviousAdapter(t *testing.T) {
 	}
 }
 
-func TestPiNativeAttentionLeadClaimsAfterStartingDaemon(t *testing.T) {
+func TestPiNativeAttentionLeadClaimsDaemonAfterStart(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("Node is required for native Pi execution fixture")
@@ -374,9 +374,11 @@ func TestPiNativeAttentionLeadClaimsAfterStartingDaemon(t *testing.T) {
 	if err := os.WriteFile(extension, plan.Changes[0].Content, 0600); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(node, "testdata/agent-hooks/pi-stopped-lead.mjs", extension, opts.Dir) //nolint:gosec // G204: fixed fixture executes the generated adapter with a stopped daemon.
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("Pi lead marker after starting the daemon: %v\n%s", err, output)
+	for _, before := range []string{"", "unix:///tmp/older.sock"} {
+		command := exec.Command(node, "testdata/agent-hooks/pi-lead-daemon.mjs", extension, opts.Dir, before) //nolint:gosec // G204: fixed fixture executes the generated adapter while its start changes the daemon.
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("Pi lead marker after the start changes the daemon from %q: %v\n%s", before, err, output)
+		}
 	}
 }
 
