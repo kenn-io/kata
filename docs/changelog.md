@@ -15,6 +15,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   waited about 30 seconds before failing. The error names that daemon's
   runtime record and suggests running Kata where it runs or setting
   `KATA_SERVER`.
+- Follow typed replies beneath the comments they answer in the `kata tui`
+  Comments tab, including replies from other issues shown as leaves beneath
+  their target. Comments show `confirm` and `refute` tags, marked `(before edit)`
+  when all that evidence predates an edit.
 - Connect a gateway to the daemon's `/mcp` endpoint by setting `enabled = true`
   under `[mcp]` and configuring its own bearer with `token_file` or `token_env`.
   Route `/mcp` through an HTTPS reverse proxy, then give the gateway
