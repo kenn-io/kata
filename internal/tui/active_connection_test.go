@@ -9,6 +9,8 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
+
+	"go.kenn.io/kata/internal/api"
 )
 
 // A11: the existing current-authority read supplies every view's connection
@@ -37,7 +39,7 @@ func TestActiveConnectionHeaderEveryView(t *testing.T) {
 	}
 }
 
-func TestActiveConnectionHeaderFencesStaleRepliesAndExpiry(t *testing.T) {
+func TestActiveConnectionHeaderFencesStaleReplies(t *testing.T) {
 	m := newTestModel()
 	m.width = 100
 	m.height = 24
@@ -59,24 +61,32 @@ func TestActiveConnectionHeaderFencesStaleRepliesAndExpiry(t *testing.T) {
 	require.NotContains(t, stripANSI(m.viewContent()), "Connecting")
 	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{connGen: 2, err: errors.New("authentication required")})
 	require.Contains(t, stripANSI(m.viewContent()), "Authentication required")
-	past := time.Now().Add(-time.Minute)
-	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{connGen: 2, auth: AuthInfo{Actor: "expired-member", ExpiresAt: &past}})
-	require.Contains(t, stripANSI(m.viewContent()), "Credential expired")
 }
 
-// A11 narrow layouts must preserve readable status for long configured hub
-// names. Clipping labels must not hide reconnection.
+// Status and project remain readable when long hub and account labels compete.
 func TestActiveConnectionHeaderLongLabelsPreserveStatus(t *testing.T) {
 	m := newTestModel()
-	m.width = 60
+	m.width = 80
 	m.height = 24
+	m.scope.projectName = "example-project"
 	m.activeDaemon = daemonTarget{Name: strings.Repeat("long-hub-", 12)}
-	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{Actor: "member"}})
-	m.sseStatus = sseReconnecting
+	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{
+		Kind: "db_token", Actor: strings.Repeat("long-actor-", 12),
+		Scope: &api.TokenScopeOut{
+			Kind: "issue_subtree", ProjectUID: "01HZNQ7VFPK1XGD8R5MABCD4EX", RootIssueUID: "01HZNQ7VFPK1XGD8R5MABCD5YZ",
+		},
+		AllowedActions: []string{"issue.read"},
+	}})
+	m.sseStatus = sseConnected
 	header, _, _ := strings.Cut(m.viewContent(), "\n")
-	require.LessOrEqual(t, ansi.StringWidth(header), 60)
-	require.Contains(t, stripANSI(header), "Reconnecting")
-	require.Contains(t, stripANSI(header), "Hub:")
+	require.LessOrEqual(t, ansi.StringWidth(header), m.width)
+	header = stripANSI(header)
+	require.Contains(t, header, "Read-only")
+	require.Contains(t, header, "Project: example-project")
+	require.Contains(t, header, "Hub: long-hub-")
+	require.Contains(t, header, "Account: long-actor-")
+	require.NotContains(t, header, m.activeDaemon.Name)
+	require.NotContains(t, header, m.activeAuth.Actor)
 }
 
 // The connection summary shares the title-bar row, so it must yield to the
@@ -130,7 +140,7 @@ func TestActiveConnectionHeaderHiddenWhenConnected(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
-// Attention states show status, hub, and project in the existing header row.
+// Attention states clear the account until a read-only connection is ready.
 func TestActiveConnectionHeaderAttentionStates(t *testing.T) {
 	for _, tc := range []struct {
 		status   string
@@ -138,18 +148,12 @@ func TestActiveConnectionHeaderAttentionStates(t *testing.T) {
 		ready    bool
 		sse      sseConnState
 		err      string
-		expired  bool
 	}{
-		{status: "Credential expired", ready: true, sse: sseConnected, expired: true},
 		{status: "Authentication required", err: "authentication required"},
 		{status: "Connection unavailable", err: "service unavailable"},
 		{status: "Connecting"},
-		{status: "Reconnecting", ready: true, sse: sseReconnecting},
 		{status: "Reconnecting", authKind: "insecure_readonly", ready: true, sse: sseReconnecting},
-		{status: "Disconnected", ready: true, sse: sseDisconnected},
-		{status: "Read-only", authKind: "insecure_readonly", ready: true, sse: sseConnected},
-		{status: "Read-only", authKind: "bootstrap", ready: true, sse: sseConnected},
-		{status: "Read-only", authKind: "trusted_proxy_absent", ready: true, sse: sseConnected},
+		{status: "Disconnected", authKind: "bootstrap", ready: true, sse: sseDisconnected},
 	} {
 		t.Run(tc.status, func(t *testing.T) {
 			m := newTestModel()
@@ -165,12 +169,60 @@ func TestActiveConnectionHeaderAttentionStates(t *testing.T) {
 			}
 			m.activeAuthError = tc.err
 			m.sseStatus = tc.sse
-			if tc.expired {
-				past := time.Now().Add(-time.Minute)
-				m.activeAuth.ExpiresAt = &past
-			}
 			header, _, _ := strings.Cut(stripANSI(m.viewContent()), "\n")
-			require.True(t, strings.HasPrefix(header, tc.status+" · Hub: shared-hub · Project: example-project"), "header: %s", header)
+			require.True(t, strings.HasPrefix(header, tc.status+" · Hub: shared-hub · Account: — · Project: example-project"), "header: %s", header)
+			require.NotContains(t, header, "member")
 		})
 	}
+}
+
+func TestActiveConnectionHeaderReadOnlyAccount(t *testing.T) {
+	for _, tc := range []struct {
+		kind    string
+		account string
+	}{
+		{kind: "insecure_readonly", account: "Anonymous (read-only)"},
+		{kind: "bootstrap", account: "Bootstrap token"},
+		{kind: "trusted_proxy_absent", account: "Proxy without account"},
+	} {
+		t.Run(tc.kind, func(t *testing.T) {
+			m := newTestModel()
+			m.width = 160
+			m.height = 24
+			m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{Kind: tc.kind}})
+			m.sseStatus = sseConnected
+			header, _, _ := strings.Cut(stripANSI(m.viewContent()), "\n")
+			require.True(t, strings.HasPrefix(header, "Read-only · Hub: Local daemon · Account: "+tc.account+" · "), "header: %s", header)
+		})
+	}
+}
+
+func TestActiveConnectionHeaderScopedReadOnlyAccount(t *testing.T) {
+	m := newTestModel()
+	m.width = 160
+	m.height = 24
+	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{
+		Kind: "db_token", Actor: "member", Scope: &api.TokenScopeOut{
+			Kind: "issue_subtree", ProjectUID: "01HZNQ7VFPK1XGD8R5MABCD4EX", RootIssueUID: "01HZNQ7VFPK1XGD8R5MABCD5YZ",
+		},
+		AllowedActions: []string{"issue.read"},
+	}})
+	m.sseStatus = sseConnected
+	header, _, _ := strings.Cut(stripANSI(m.viewContent()), "\n")
+	require.Contains(t, header, "Read-only · Hub: Local daemon · Account: member · ")
+}
+
+// Expiry can precede its scheduled update while authority still looks ready.
+func TestActiveConnectionHeaderExpiredBeforeTickHidesAccount(t *testing.T) {
+	m := newTestModel()
+	m.width = 160
+	m.height = 24
+	past := time.Now().Add(-time.Minute)
+	m.authCapabilitiesRequired = true
+	m.authCapabilitiesReady = true
+	m.sseStatus = sseConnected
+	m.activeAuth = AuthInfo{Kind: "db_token", Actor: "expired-member", ExpiresAt: &past}
+	header, _, _ := strings.Cut(stripANSI(m.viewContent()), "\n")
+	require.Contains(t, header, "Credential expired · Hub: Local daemon · Account: — · ")
+	require.NotContains(t, header, "expired-member")
 }

@@ -167,12 +167,14 @@ network, authentication, and proxy setup.
 
 The yellow summary at the top shows the active hub, account, and credential
 status. It stays visible while you navigate and wraps on narrow screens.
-The TUI keeps its header row's existing label and adds the status and hub
+The TUI keeps its header row's label and adds the status, hub, and, for
+read-only connections, the account
 when credentials expire, authentication is required, or the connection is
 read-only, unavailable, connecting, reconnecting, or disconnected.
 
 Account-bound credentials show their canonical actor. A connection without an
-account identity shows how it authenticated instead:
+account identity shows how it authenticated instead. These account labels
+apply to the web summary and the TUI's read-only state:
 
 | Connection | Account label |
 | --- | --- |
