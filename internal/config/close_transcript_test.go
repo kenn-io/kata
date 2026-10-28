@@ -11,6 +11,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestReadCloseTranscriptConfig_InvalidAgentNamesKey(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KATA_HOME", home)
+	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[close.transcript.session_id_env]\nPi = \"PI_SESSION_ID\"\n"), 0600))
+	_, err := ReadCloseTranscriptConfig()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "Pi")
+}
+
 func TestReadCloseTranscriptConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
