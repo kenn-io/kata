@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json/v2"
 	"errors"
@@ -37,6 +38,7 @@ func closeEvidenceForShow(ctx context.Context, hc *http.Client, base string, pid
 		return nil, err
 	}
 	var evidence []db.Evidence
+	var latest *generated.EventEnvelope
 	var after int64
 	const limit = int64(1000)
 	for {
@@ -71,7 +73,15 @@ func closeEvidenceForShow(ctx context.Context, hc *http.Client, base string, pid
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
 				return nil, fmt.Errorf("decode close history: %w", err)
 			}
-			evidence = payload.Evidence
+			if latest == nil || cmp.Or(
+				cmp.Compare(event.HlcPhysicalMs, latest.HlcPhysicalMs),
+				cmp.Compare(event.HlcCounter, latest.HlcCounter),
+				cmp.Compare(event.OriginInstanceUID, latest.OriginInstanceUID),
+				cmp.Compare(event.EventUID, latest.EventUID),
+			) > 0 {
+				latest = &event
+				evidence = payload.Evidence
+			}
 		}
 		if len(page.Events) < int(limit) {
 			return evidence, nil
