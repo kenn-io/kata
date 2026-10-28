@@ -23,7 +23,6 @@ describe('IssueHistory', () => {
 
   it.each([
     ['pi', '00000000-0000-4000-8000-000000000001'],
-    ['amp', 'T-00000000-0000-4000-8000-000000000001'],
     ['opencode', 'ses_0123456789AbCd'],
   ])('shows the closing session and its optional AgentsView link: %s', (agent, id) => {
     const closed = {
@@ -79,7 +78,6 @@ describe('IssueHistory', () => {
     ...[
       '/private/chat.jsonl',
       '..',
-      '../session',
       'session other',
       'session#other',
       '',

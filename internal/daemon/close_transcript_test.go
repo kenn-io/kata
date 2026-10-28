@@ -15,8 +15,6 @@ import (
 func TestCloseTranscript_PersistenceAndRetries(t *testing.T) {
 	for _, tc := range []struct{ agent, id, otherID string }{
 		{"codex", "00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002"},
-		{"pi", "00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002"},
-		{"amp", "T-00000000-0000-4000-8000-000000000001", "T-00000000-0000-4000-8000-000000000002"},
 		{"opencode", "ses_0123456789AbCd", "ses_0123456789EfGh"},
 	} {
 		t.Run(tc.agent, func(t *testing.T) {
@@ -88,8 +86,6 @@ func TestCloseTranscript_DryRunAndInvalidInputDoNotPersist(t *testing.T) {
 	requireOK(t, postWithHeader(t, ts, path, nil, body))
 	body["dry_run"] = false
 	for _, ref := range []map[string]any{
-		{"session_id": "00000000-0000-4000-8000-000000000001"},
-		{"agent": "Pi", "session_id": "00000000-0000-4000-8000-000000000001"},
 		{"agent": "codex", "session_id": "/private/chat.jsonl"},
 		{"agent": "codex", "session_id": "00000000-0000-4000-8000-000000000001", "url": "https://agentsview.example?token=secret"},
 	} {

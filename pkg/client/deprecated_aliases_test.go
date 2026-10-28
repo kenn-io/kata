@@ -16,7 +16,8 @@ func TestTranscriptAgentCompatibility(t *testing.T) {
 		require.NoError(t, ref.Validate())
 	}
 	for _, agent := range []generated.TranscriptAgent{"", "Pi", "-pi", "pi_omp", generated.TranscriptAgent(strings.Repeat("a", 33))} {
-		require.Error(t, agent.Validate())
+		ref := generated.Transcript{Agent: agent, SessionID: "00000000-0000-4000-8000-000000000001"}
+		require.Error(t, ref.Validate())
 	}
 }
 

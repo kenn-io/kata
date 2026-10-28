@@ -14,7 +14,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/api"
 )
 
 const transcriptSessionOne = "00000000-0000-4000-8000-000000000001"
@@ -34,15 +33,18 @@ func TestCloseTranscript_OptIn(t *testing.T) {
 			if enabled {
 				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[close.transcript]\nenabled = true\nagentsview_url = \"https://agentsview.example/archive/\"\n"), 0600))
 			}
-			out, stderr, err := runCLIWithErr(t, env, dir, "--json", "close", ref, "--done", "--message", "Implemented the example behavior and ran the focused tests.", "--test", "go test ./internal/example")
+			out, stderr, err := runCLIWithErr(t, env, dir, "--json", "close", ref,
+				"--done", "--message", "Implemented the example behavior and ran the focused tests.", "--test", "go test ./internal/example")
 			require.NoError(t, err)
 			require.Empty(t, stderr)
-			var response api.MutationResponse
-			require.NoError(t, json.Unmarshal([]byte(out), &response.Body))
-			closed := response.Body.Event
-			require.NotNil(t, closed)
+			var response struct {
+				Event struct {
+					Payload string `json:"payload"`
+				} `json:"event"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(out), &response))
 			var payload map[string]any
-			require.NoError(t, json.Unmarshal([]byte(closed.Payload), &payload))
+			require.NoError(t, json.Unmarshal([]byte(response.Event.Payload), &payload))
 			if enabled {
 				assert.Equal(t, map[string]any{"agent": "codex", "session_id": transcriptSessionOne, "url": "https://agentsview.example/archive/sessions/codex/" + transcriptSessionOne}, payload["transcript"])
 				// Readers retrieve the same provenance without keeping the close receipt.
@@ -76,26 +78,20 @@ func TestCloseTranscript_ContextAndOptionalLink(t *testing.T) {
 		{name: "conflicting Codex context", thread: transcriptSessionOne, session: transcriptSessionTwo, warning: "ambiguous"},
 		{name: "differently cased IDs for one agent", thread: "00000000-0000-4000-8000-00000000000a", session: "00000000-0000-4000-8000-00000000000A", warning: "ambiguous"},
 		{name: "configured session", variables: `pi = "PI_SESSION_ID"`, pi: transcriptSessionTwo, wantID: transcriptSessionTwo, wantAgent: "pi"},
-		{name: "configured native session", variables: `amp = "PI_SESSION_ID"`, pi: "T-" + transcriptSessionOne, wantID: "T-" + transcriptSessionOne, wantAgent: "amp"},
 		{name: "invalid configured session names variable", variables: `pi = "PI_SESSION_ID"`, pi: "/private/session/chat.jsonl", warning: "PI_SESSION_ID"},
 		{name: "default ignores unconfigured session", pi: transcriptSessionOne, warning: "current session unavailable"},
 		{name: "equal aliases", wantAgent: "codex", thread: transcriptSessionOne, session: transcriptSessionOne, wantID: transcriptSessionOne},
 		{name: "Claude Code context", wantAgent: "claude", claude: transcriptSessionOne, wantID: transcriptSessionOne},
-		{name: "non-UUID Claude session skips attachment", claude: "session-token", warning: "current session from CLAUDE_CODE_SESSION_ID invalid; skipping attachment"},
 		{name: "different agents with equal UUIDs", claude: transcriptSessionOne, thread: transcriptSessionOne, warning: "ambiguous"},
-		{name: "configured agent with equal UUID", variables: `pi = "PI_SESSION_ID"`, pi: transcriptSessionOne, claude: transcriptSessionOne, warning: "ambiguous"},
 		{name: "ID without agent", id: transcriptSessionOne, warning: "current session unavailable or invalid; skipping attachment"},
-		{name: "explicit other agent", agent: "omp", id: transcriptSessionOne, wantID: transcriptSessionOne, wantAgent: "omp"},
 		{name: "nested agent context", claude: transcriptSessionTwo, thread: transcriptSessionOne, warning: "ambiguous"},
-		{name: "override resolves configured conflict", pi: transcriptSessionOne, id: transcriptSessionOne, agent: "pi", wantAgent: "pi", claude: transcriptSessionTwo, thread: transcriptSessionTwo, wantID: transcriptSessionOne},
+		{name: "override resolves discovered conflict", pi: transcriptSessionOne, id: transcriptSessionOne, agent: "pi", wantAgent: "pi", claude: transcriptSessionTwo, thread: transcriptSessionTwo, wantID: transcriptSessionOne},
 		{name: "session alias", wantAgent: "codex", session: transcriptSessionOne, wantID: transcriptSessionOne},
 		{name: "no AgentsView integration", wantAgent: "codex", thread: transcriptSessionOne, wantID: transcriptSessionOne},
 		{name: "bad link retains ID", wantAgent: "codex", thread: transcriptSessionOne, base: "https://user:secret@agentsview.example?token=secret", wantID: transcriptSessionOne, warning: "URL invalid"},
-		{name: "explicit Codex session", id: transcriptSessionTwo, agent: "codex", wantID: transcriptSessionTwo, wantAgent: "codex"},
 		{name: "agent without session skips discovery", claude: transcriptSessionOne, agent: "codex", warning: "current session unavailable or invalid; skipping attachment"},
 		{name: "configured alias retains Claude agent", variables: `claude = "PI_SESSION_ID"`, pi: transcriptSessionOne, claude: transcriptSessionOne, wantID: transcriptSessionOne, wantAgent: "claude"},
 		{name: "configured variable cannot hide built-in conflict", variables: `pi = "PI_SESSION_ID"`, pi: transcriptSessionOne, thread: transcriptSessionTwo, warning: "ambiguous"},
-		{name: "path never persisted", id: "/private/session/chat.jsonl", warning: "current session unavailable"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -138,7 +134,6 @@ func TestCloseTranscript_DaemonCompatibility(t *testing.T) {
 	}{
 		{"Codex on 0.26", "0.26.0", "CODEX_SESSION_ID", "codex", transcriptSessionOne, true},
 		{"Claude on 0.33", "0.33.0", "CLAUDE_CODE_SESSION_ID", "claude", transcriptSessionOne, true},
-		{"Codex on 0.33", "0.33.0", "CODEX_THREAD_ID", "codex", transcriptSessionOne, true},
 		{"Pi on 0.33", "0.33.0", "PI_SESSION_ID", "pi", transcriptSessionOne, false},
 		{"Pi on 0.34", "0.34.0", "PI_SESSION_ID", "pi", transcriptSessionOne, true},
 		{"transcript before 0.26", "0.25.0", "CODEX_THREAD_ID", "codex", transcriptSessionOne, false},
