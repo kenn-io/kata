@@ -1,7 +1,7 @@
 ---
 title: Backup and restore
 description: Back up, restore, and move Kata data safely with JSONL export and import workflows.
-last_edited: 2026-10-26
+last_edited: 2026-10-27
 ---
 
 # Backup and restore
@@ -21,7 +21,9 @@ mode, so recent writes can live in `kata.db-wal`; a plain file copy can look
 successful while missing recent data.
 
 The `kata.db.bak.*` files created by schema cutover are temporary rollback
-files, not scheduled backups.
+files, not scheduled backups. When `kata.db` is a symlink, cutover upgrades the
+file it points to and leaves the link in place, so the backup and import temp
+files sit beside that file.
 
 SQLite schema cutover preserves a moved issue's audit events in their original
 projects. Before replacing the database, it checks the imported event count

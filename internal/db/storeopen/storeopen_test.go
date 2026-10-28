@@ -618,3 +618,61 @@ func TestOpenCutoverBackupWithoutSourceDoesNotBootstrap(t *testing.T) {
 		})
 	}
 }
+
+// Cutover moves the file behind a symlinked path to its backup before it
+// installs the upgraded one. If it stops in between, the link dangles; opening
+// it must report the interrupted cutover, not create an empty database through
+// the link.
+func TestOpenRefusesInterruptedCutoverBehindSymlink(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	ctx := context.Background()
+	target := filepath.Join(t.TempDir(), "kata.db")
+	source, err := sqlitestore.Open(ctx, target)
+	require.NoError(t, err)
+	_, err = source.ExecContext(ctx, `UPDATE meta SET value='28' WHERE key='schema_version'`)
+	require.NoError(t, err)
+	require.NoError(t, source.Close())
+	link := filepath.Join(t.TempDir(), "linked.db")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	require.NoError(t, os.Rename(target, target+".bak.20261027T000000Z"))
+
+	store, err := storeopen.Open(ctx, link)
+	if store != nil {
+		t.Cleanup(func() { require.NoError(t, store.Close()) })
+	}
+
+	require.ErrorIs(t, err, jsonl.ErrCutoverInProgress)
+	require.NoFileExists(t, target, "must not create a database through the dangling link")
+}
+
+// Interrupted-cutover recovery must find the backup when the configured path
+// reaches a relative link through a directory symlink.
+func TestOpenRefusesInterruptedCutoverBehindRelativeLinkInSymlinkedDirectory(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	ctx := context.Background()
+	physical := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(physical, "links"), 0o700))
+	require.NoError(t, os.Mkdir(filepath.Join(physical, "data"), 0o700))
+	target := filepath.Join(physical, "data", "kata.db")
+	source, err := sqlitestore.Open(ctx, target)
+	require.NoError(t, err)
+	_, err = source.ExecContext(ctx, `UPDATE meta SET value='28' WHERE key='schema_version'`)
+	require.NoError(t, err)
+	require.NoError(t, source.Close())
+	if err := os.Symlink(filepath.Join("..", "data", "kata.db"), filepath.Join(physical, "links", "linked.db")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	alias := filepath.Join(t.TempDir(), "alias")
+	require.NoError(t, os.Symlink(filepath.Join(physical, "links"), alias))
+	require.NoError(t, os.Rename(target, target+".bak.20261027T000000Z"))
+
+	store, err := storeopen.Open(ctx, filepath.Join(alias, "linked.db"))
+	if store != nil {
+		t.Cleanup(func() { require.NoError(t, store.Close()) })
+	}
+
+	require.ErrorIs(t, err, jsonl.ErrCutoverInProgress)
+	require.NoFileExists(t, target)
+}

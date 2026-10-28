@@ -126,9 +126,8 @@ func TestStoreOwnerLockHelperProcess(t *testing.T) {
 	_, _ = io.Copy(io.Discard, os.Stdin)
 }
 
-// Cutover renames the upgraded database onto the configured path, which turns
-// a symlink there into a regular file. The daemon that ran that cutover must
-// still own the path a competing daemon now resolves.
+// A daemon that upgraded its store through a symlink keeps owning it, so a
+// competing daemon configured with the same link is refused.
 func TestStoreStaysOwnedAfterCutoverThroughSymlink(t *testing.T) {
 	resetFlags(t)
 	home := setupKataEnv(t)
@@ -175,10 +174,6 @@ func TestStoreStaysOwnedAfterCutoverThroughSymlink(t *testing.T) {
 	case err := <-done:
 		t.Fatalf("daemon exited before serving: %v", err)
 	}
-	info, err := os.Lstat(link)
-	require.NoError(t, err)
-	require.True(t, info.Mode().IsRegular(), "cutover must have replaced the symlink for this case to matter")
-
 	original := daemonOwnerLockWait
 	t.Cleanup(func() { daemonOwnerLockWait = original })
 	daemonOwnerLockWait = 200 * time.Millisecond

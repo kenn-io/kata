@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -1313,4 +1314,125 @@ func trimCurrentDBToV19Shape(t *testing.T, path string) {
 	require.NoError(t, raw.QueryRowContext(ctx,
 		`SELECT count(*) FROM sqlite_master WHERE type='table' AND name='project_purge_log'`).Scan(&n))
 	require.Equal(t, 0, n, "v19 shape must not have a project_purge_log table")
+}
+
+// A symlinked database path keeps working after an upgrade: cutover swaps the
+// new database in at the link's target instead of replacing the link.
+func TestAutoCutoverKeepsDatabaseSymlink(t *testing.T) {
+	ctx := context.Background()
+	target := filepath.Join(t.TempDir(), "kata.db")
+	writeLegacyV1DB(t, target)
+	linkDir := t.TempDir()
+	link := filepath.Join(linkDir, "linked.db")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	require.NoError(t, jsonl.AutoCutover(ctx, link))
+
+	info, err := os.Lstat(link)
+	require.NoError(t, err)
+	require.NotZero(t, info.Mode()&os.ModeSymlink, "cutover must leave the configured symlink in place")
+	resolved, err := filepath.EvalSymlinks(link)
+	require.NoError(t, err)
+	assert.Equal(t, mustEvalSymlinks(t, target), resolved)
+	assertCurrentSchemaVersion(t, target)
+	backups, err := filepath.Glob(target + ".bak.*")
+	require.NoError(t, err)
+	assert.Len(t, backups, 1, "the source backup stays beside the file it came from")
+	assertNoCutoverTemps(t, target)
+	assertNoCutoverTemps(t, link)
+}
+
+func mustEvalSymlinks(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	require.NoError(t, err)
+	return resolved
+}
+
+// A relative link target is interpreted from the directory the link really
+// lives in, even when the configured path reaches it through a directory
+// symlink, so ".." must not be collapsed against the configured parent.
+func TestAutoCutoverFollowsRelativeLinkBehindSymlinkedDirectory(t *testing.T) {
+	ctx := context.Background()
+	physical := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(physical, "links"), 0o700))
+	require.NoError(t, os.Mkdir(filepath.Join(physical, "data"), 0o700))
+	target := filepath.Join(physical, "data", "kata.db")
+	writeLegacyV1DB(t, target)
+	if err := os.Symlink(filepath.Join("..", "data", "kata.db"), filepath.Join(physical, "links", "linked.db")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	alias := filepath.Join(t.TempDir(), "alias")
+	require.NoError(t, os.Symlink(filepath.Join(physical, "links"), alias))
+	configured := filepath.Join(alias, "linked.db")
+
+	require.NoError(t, jsonl.AutoCutover(ctx, configured))
+
+	assertCurrentSchemaVersion(t, target)
+	info, err := os.Lstat(filepath.Join(physical, "links", "linked.db"))
+	require.NoError(t, err)
+	require.NotZero(t, info.Mode()&os.ModeSymlink)
+}
+
+// The OS follows a directory symlink inside a relative link target before it
+// applies a later "..", so cutover must not collapse "alias/.." as text.
+func TestAutoCutoverFollowsDirectorySymlinkInsideRelativeTarget(t *testing.T) {
+	ctx := context.Background()
+	storage := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(storage, "nested"), 0o700))
+	target := filepath.Join(storage, "kata.db")
+	writeLegacyV1DB(t, target)
+	links := t.TempDir()
+	if err := os.Symlink(filepath.Join(storage, "nested"), filepath.Join(links, "alias")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	configured := filepath.Join(links, "linked.db")
+	require.NoError(t, os.Symlink("alias"+string(filepath.Separator)+".."+string(filepath.Separator)+"kata.db", configured))
+
+	require.NoError(t, jsonl.AutoCutover(ctx, configured))
+
+	assertCurrentSchemaVersion(t, target)
+	require.NoFileExists(t, filepath.Join(links, "kata.db"))
+}
+
+// A configured path can apply ".." after a directory symlink; the OS opens the
+// file beside the link's target, so cutover and recovery must look there.
+func TestAutoCutoverResolvesDotDotAfterDirectorySymlinkInConfiguredPath(t *testing.T) {
+	ctx := context.Background()
+	storage := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(storage, "nested"), 0o700))
+	target := filepath.Join(storage, "kata.db")
+	writeLegacyV1DB(t, target)
+	links := t.TempDir()
+	if err := os.Symlink(filepath.Join(storage, "nested"), filepath.Join(links, "alias")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	sep := string(filepath.Separator)
+	configured := links + sep + "alias" + sep + ".." + sep + "kata.db"
+
+	require.NoError(t, jsonl.AutoCutover(ctx, configured))
+	assertCurrentSchemaVersion(t, target)
+
+	require.NoError(t, os.Rename(target, target+".bak.20261027T000000Z"))
+	require.ErrorIs(t, jsonl.CheckCutoverSource(ctx, configured), jsonl.ErrCutoverInProgress)
+}
+
+// A cutover through a link and one through its target share the target's temp
+// files, so the target's cutover lock must also be held.
+func TestAutoCutoverThroughSymlinkHoldsTargetCutoverLock(t *testing.T) {
+	ctx := context.Background()
+	target := filepath.Join(t.TempDir(), "kata.db")
+	writeLegacyV1DB(t, target)
+	link := filepath.Join(t.TempDir(), "linked.db")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	lock := flock.New(target + ".import.lock")
+	require.NoError(t, lock.Lock())
+	t.Cleanup(func() { _ = lock.Close() })
+
+	require.ErrorIs(t, jsonl.AutoCutover(ctx, link), jsonl.ErrCutoverInProgress)
+	assertNoCutoverTemps(t, target)
 }

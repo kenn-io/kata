@@ -19,8 +19,9 @@ func TestStoreOwnerLockedReportsHeldLock(t *testing.T) {
 	require.False(t, daemonruntime.StoreOwnerLocked(paths), "the probe must not keep the lock")
 }
 
-// Cutover replaces the configured name with a regular file. An owner reached
-// through outer -> inner -> target must still own inner once inner is replaced.
+// A link can be replaced by a regular file (an older release's cutover did
+// that). An owner reached through outer -> inner -> target must still own
+// inner once inner is replaced.
 func TestStoreOwnerLockCoversIntermediateSymlink(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target.db")
@@ -38,4 +39,25 @@ func TestStoreOwnerLockCoversIntermediateSymlink(t *testing.T) {
 	require.NoError(t, os.Remove(inner))
 	require.NoError(t, os.WriteFile(inner, nil, 0o600))
 	require.True(t, daemonruntime.StoreOwnerLocked(daemonruntime.StoreOwnerLockPaths(dir, inner)))
+}
+
+// linked.db -> alias/../kata.db with alias a directory symlink opens the file
+// beside alias's target, so an owner through the link must own that file.
+func TestStoreOwnerLockFollowsDirectorySymlinkInsideRelativeTarget(t *testing.T) {
+	storage := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(storage, "nested"), 0o700))
+	target := filepath.Join(storage, "kata.db")
+	require.NoError(t, os.WriteFile(target, nil, 0o600))
+	links := t.TempDir()
+	if err := os.Symlink(filepath.Join(storage, "nested"), filepath.Join(links, "alias")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	link := filepath.Join(links, "linked.db")
+	sep := string(filepath.Separator)
+	require.NoError(t, os.Symlink("alias"+sep+".."+sep+"kata.db", link))
+	release, err := daemonruntime.AcquireStoreOwnerLock(t.Context(), daemonruntime.StoreOwnerLockPaths(links, link))
+	require.NoError(t, err)
+	defer release()
+
+	require.True(t, daemonruntime.StoreOwnerLocked(daemonruntime.StoreOwnerLockPaths(storage, target)))
 }

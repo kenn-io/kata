@@ -9,12 +9,11 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+
+	"go.kenn.io/kata/internal/linkpath"
 )
 
 const storeOwnerLockRetry = 50 * time.Millisecond
-
-// maxStoreSymlinkHops bounds a symlink chain, as the OS does when it opens one.
-const maxStoreSymlinkHops = 40
 
 // StoreOwnerLockPaths names the locks a daemon holds for its whole life so no
 // second daemon opens the same store. A SQLite lock sits beside the database
@@ -22,9 +21,9 @@ const maxStoreSymlinkHops = 40
 // path, which hashes to a different runtime namespace but the same lock file.
 //
 // Every name on a symlink chain to the database gets a lock, including a
-// target SQLite has not created yet. Cutover renames the upgraded database
-// onto the configured path, which turns that link into a regular file, so
-// every name another daemon might be configured with must stay owned.
+// target SQLite has not created yet. Another daemon can be configured with
+// any of those names, and a link can later be replaced by a regular file (an
+// older release's cutover did that), so every name must stay owned.
 // Directory symlinks are resolved first so one file never gets two locks.
 // Hard links to one file are not unified. PostgreSQL has no file, so its lock
 // lives in the runtime namespace. The paths are sorted so every daemon takes
@@ -34,32 +33,11 @@ func StoreOwnerLockPaths(dataDir, dsn string) []string {
 		return []string{filepath.Join(dataDir, "store-owner.lock")}
 	}
 	var paths []string
-	for _, name := range sqliteFileNames(strings.TrimPrefix(dsn, "sqlite://")) {
+	for _, name := range linkpath.Chain(strings.TrimPrefix(dsn, "sqlite://")) {
 		paths = append(paths, name+".owner.lock")
 	}
 	slices.Sort(paths)
 	return slices.Compact(paths)
-}
-
-// sqliteFileNames lists path and each symlink hop from it, whether or not the
-// last name exists yet.
-func sqliteFileNames(path string) []string {
-	var names []string
-	for range maxStoreSymlinkHops {
-		if dir, err := filepath.EvalSymlinks(filepath.Dir(path)); err == nil {
-			path = filepath.Join(dir, filepath.Base(path))
-		}
-		names = append(names, path)
-		target, err := os.Readlink(path)
-		if err != nil {
-			break
-		}
-		if !filepath.IsAbs(target) {
-			target = filepath.Join(filepath.Dir(path), target)
-		}
-		path = target
-	}
-	return names
 }
 
 // AcquireStoreOwnerLock waits until ctx ends to hold every path exclusively.
