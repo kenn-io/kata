@@ -167,7 +167,7 @@ network, authentication, and proxy setup.
 
 The yellow summary at the top shows the active hub, account, and credential
 status. It stays visible while you navigate and wraps on narrow screens.
-The TUI uses its existing header row to show only the status, hub, and project
+The TUI keeps its header row's existing label and adds the status and hub
 when credentials expire, authentication is required, or the connection is
 read-only, unavailable, connecting, reconnecting, or disconnected.
 

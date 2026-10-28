@@ -146,6 +146,8 @@ func TestActiveConnectionHeaderAttentionStates(t *testing.T) {
 		{status: "Reconnecting", ready: true, sse: sseReconnecting},
 		{status: "Disconnected", ready: true, sse: sseDisconnected},
 		{status: "Read-only", authKind: "insecure_readonly", ready: true, sse: sseConnected},
+		{status: "Read-only", authKind: "bootstrap", ready: true, sse: sseConnected},
+		{status: "Read-only", authKind: "trusted_proxy_absent", ready: true, sse: sseConnected},
 	} {
 		t.Run(tc.status, func(t *testing.T) {
 			m := newTestModel()
