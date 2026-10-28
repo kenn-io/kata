@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-27
+last_edited: 2026-10-28
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,6 +9,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Get an immediate error when a daemon in another PID namespace, such as one in
+  a sandbox or container sharing your `KATA_HOME`, already owns the store.
+  `kata` commands, `kata daemon start`, and foreground startup previously
+  waited about 30 seconds before failing. The error names that daemon's
+  runtime record and suggests running Kata where it runs or setting
+  `KATA_SERVER`.
 - Connect a gateway to the daemon's `/mcp` endpoint by setting `enabled = true`
   under `[mcp]` and configuring its own bearer with `token_file` or `token_env`.
   Route `/mcp` through an HTTPS reverse proxy, then give the gateway

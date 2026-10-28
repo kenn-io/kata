@@ -61,3 +61,15 @@ func TestStoreOwnerLockFollowsDirectorySymlinkInsideRelativeTarget(t *testing.T)
 
 	require.True(t, daemonruntime.StoreOwnerLocked(daemonruntime.StoreOwnerLockPaths(storage, target)))
 }
+
+// A held lock with no record from another PID namespace belongs to a local
+// daemon that may be releasing the store, so the caller's normal wait applies.
+func TestRefuseForeignStoreOwnerIgnoresLocalOwner(t *testing.T) {
+	dataDir := t.TempDir()
+	paths := []string{filepath.Join(dataDir, "kata.db.owner.lock")}
+	release, err := daemonruntime.AcquireStoreOwnerLock(t.Context(), paths)
+	require.NoError(t, err)
+	defer release()
+
+	require.NoError(t, daemonruntime.RefuseForeignStoreOwner(t.Context(), dataDir, paths))
+}

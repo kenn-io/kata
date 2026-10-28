@@ -442,6 +442,9 @@ func autoStartWithMigration(ctx context.Context, dataDir string, ownerLocks, env
 		opts.Stdout = logw
 		opts.Stderr = logw
 	}
+	if err := daemonruntime.RefuseForeignStoreOwner(ctx, dataDir, ownerLocks); err != nil {
+		return RunningDaemon{}, fmt.Errorf("auto-start daemon: %w", err)
+	}
 	if err := startDetachedDaemonForEnsure(ctx, opts); err != nil {
 		return RunningDaemon{}, fmt.Errorf("auto-start daemon: %w", err)
 	}

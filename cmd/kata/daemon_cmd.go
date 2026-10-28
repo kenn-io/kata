@@ -466,16 +466,19 @@ func defaultLaunchDetachedDaemon(
 		childExited.Store(true)
 		exited <- err
 	}
+	var ownerLocks []string
+	if dsn, dsnErr := config.KataDSN(ctx); dsnErr == nil {
+		ownerLocks = daemonruntime.StoreOwnerLockPaths(dataDir, dsn)
+	}
+	if err := daemonruntime.RefuseForeignStoreOwner(ctx, dataDir, ownerLocks); err != nil {
+		return daemonStartOutput{}, err
+	}
 	if err := kitdaemon.StartDetached(ctx, opts); err != nil {
 		return daemonStartOutput{}, fmt.Errorf("start daemon: %w", err)
 	}
 
 	var record kitdaemon.RuntimeRecord
 	adoptedConcurrentDaemon := false
-	var ownerLocks []string
-	if dsn, dsnErr := config.KataDSN(ctx); dsnErr == nil {
-		ownerLocks = daemonruntime.StoreOwnerLockPaths(dataDir, dsn)
-	}
 	// The child may first wait for a replaced daemon to release the store.
 	err = client.WaitForDaemonStartup(ctx, ownerLocks, daemonOwnerLockWait+5*time.Second, exited, func(context.Context) (bool, error) {
 		var ok bool
@@ -1256,6 +1259,9 @@ func runDaemonProcess(
 	// does not block startup and its socket sits under a different runtime dir.
 	// The kernel file lock is visible across namespaces.
 	ownerLocks := daemonruntime.StoreOwnerLockPaths(ns.DataDir, startup.DBPath)
+	if err := daemonruntime.RefuseForeignStoreOwner(ctx, ns.DataDir, ownerLocks); err != nil {
+		return err
+	}
 	ownerCtx, ownerCancel := context.WithTimeout(ctx, daemonOwnerLockWait)
 	releaseOwner, err := daemonruntime.AcquireStoreOwnerLock(ownerCtx, ownerLocks)
 	ownerCancel()
