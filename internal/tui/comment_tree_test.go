@@ -144,6 +144,19 @@ func TestCommentTreeNarrowIndent(t *testing.T) {
 	assertGolden(t, "detail-comment-tree-tiny", strings.Join(chunks[0].lines, "\n"))
 }
 
+func TestReviewNestedEditedHeader(t *testing.T) {
+	defer snapshotInit(t)()
+	when := time.Date(2026, 4, 30, 10, 0, 0, 0, time.UTC)
+	edited := when.Add(time.Minute)
+	comments := []CommentEntry{{UID: "0", Handle: "c:0", Author: "review-bot", CreatedAt: when}}
+	for i := 1; i <= 4; i++ {
+		comments = append(comments, CommentEntry{UID: fmt.Sprint(i), Handle: fmt.Sprintf("c:%d", i), Author: "review-bot", CreatedAt: when, Reply: &commentref.Link{UID: fmt.Sprint(i - 1), Kind: "reply"}})
+	}
+	comments[4].Handle, comments[4].EditedAt = "c:abcd", &edited
+	rendered := stripANSI(renderCommentsTab(threadOrder(comments), 50, 100, 4, tabState{}))
+	require.Contains(t, rendered, "c:abcd  review-bot  Apr 30 10:00  (edited)")
+}
+
 func TestSnapshot_CommentTree(t *testing.T) {
 	defer snapshotInit(t)()
 	when := time.Date(2026, 4, 30, 10, 0, 0, 0, time.UTC)

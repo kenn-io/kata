@@ -34,10 +34,7 @@ func commentChunks(cs []CommentEntry, width, cursor int, ts tabState) []entryChu
 	chunks := make([]entryChunk, 0, len(cs))
 	authorW := commentAuthorWidth(cs, width)
 	for i, c := range cs {
-		// Preserve at least 32 columns for content before adding indentation.
-		depth := min(c.depth, max(0, (width-32)/2))
-		renderWidth := width - 2*depth
-		author := padToWidth(commentAuthorStyle(commentAttribution(c)), min(authorW, max(1, renderWidth-16)))
+		author := padToWidth(commentAuthorStyle(commentAttribution(c)), authorW)
 		header := fmt.Sprintf("%s  %s", author, subtleStyle.Render(formatDocumentTime(c.CreatedAt)))
 		if c.Handle != "" {
 			header = sanitizeForDisplay(c.Handle) + "  " + header
@@ -45,6 +42,9 @@ func commentChunks(cs []CommentEntry, width, cursor int, ts tabState) []entryChu
 		if c.EditedAt != nil {
 			header += "  (edited)"
 		}
+		// Preserve the full header and cursor gutter before adding indentation.
+		depth := min(c.depth, max(0, (width-max(32, ansi.StringWidth(header)+2))/2))
+		renderWidth := width - 2*depth
 		lines := []string{applyActivityCursor(header, i == cursor)}
 		for _, row := range creationAttributionLines(c.AttributionView, c.Author, c.Teammate, max(1, renderWidth-2)) {
 			lines = append(lines, "  "+subtleStyle.Render(row))
