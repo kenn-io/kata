@@ -75,14 +75,7 @@ func TestCloseInputFromFormBuildsWontfixWithoutEvidence(t *testing.T) {
 func TestIssueScopedCloseCapabilityOpensEvidenceForm(t *testing.T) {
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/instance", r.URL.Path)
-		future := time.Now().UTC().Add(time.Hour)
-		respondJSON(t, w, InstanceInfo{Auth: AuthInfo{
-			Kind:                  "db_token",
-			Scope:                 &api.TokenScopeOut{Kind: "issue_subtree", ProjectUID: "01HZNQ7VFPK1XGD8R5MABCD4EX", RootIssueUID: "01HZNQ7VFPK1XGD8R5MABCD5YZ"},
-			ExpiresAt:             &future,
-			AllowedActions:        []string{"issue.read", "issue.edit", "issue.close"},
-			CloseRequiresEvidence: true,
-		}})
+		respondJSON(t, w, InstanceInfo{Auth: testIssueScopedAuth("issue.read", "issue.edit", "issue.close")})
 	})
 	m := initialModel(Options{})
 	m.api = c
