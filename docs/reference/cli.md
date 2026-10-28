@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-27
+last_edited: 2026-10-28
 ---
 
 # CLI reference
@@ -2264,6 +2264,7 @@ On main after 0.20.0, attach files to an issue with Docbank, then list, download
 
 ```sh
 kata docbank attachments add <issue> <file>...
+kata docbank attachments link <issue> <node-id|/path> [--version UUID]
 kata docbank attachments ls <issue>
 kata docbank attachments get <issue> <attachment> [-o PATH] [--force]
 kata docbank attachments rm <issue> <attachment>

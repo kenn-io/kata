@@ -142,6 +142,8 @@ import type {
   LeaveFederationReplicaPathParameters,
   LeaveFederationReplicaRequestBody,
   LeaveFederationReplicaResultBody,
+  LinkAttachmentInput,
+  LinkAttachmentPathParameters,
   ListAllIssuesParams,
   ListAllIssuesResponseBody,
   ListConnectorFieldsPathParameters,
@@ -4415,6 +4417,50 @@ export const addAttachment = async (
     method: 'POST',
     headers: { 'Content-Type': 'application/octet-stream', ...getHeaders(options?.headers) },
     body: addAttachmentBody,
+  })
+}
+
+export type linkAttachmentResponse200 = {
+  data: AddAttachmentResponseBody
+  status: 200
+}
+
+export type linkAttachmentResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type linkAttachmentResponseSuccess = linkAttachmentResponse200 & {
+  headers: Headers
+}
+export type linkAttachmentResponseError = linkAttachmentResponseDefault & {
+  headers: Headers
+}
+
+export type linkAttachmentResponse = linkAttachmentResponseSuccess | linkAttachmentResponseError
+
+export const getLinkAttachmentUrl = ({ projectId, ref }: LinkAttachmentPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(String(ref))}/attachments/links`
+}
+
+export const linkAttachment = async (
+  { projectId, ref }: LinkAttachmentPathParameters,
+  linkAttachmentInput: LinkAttachmentInput,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<linkAttachmentResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<linkAttachmentResponse>(getLinkAttachmentUrl({ projectId, ref }), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(linkAttachmentInput),
   })
 }
 

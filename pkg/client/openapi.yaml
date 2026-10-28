@@ -3860,6 +3860,20 @@ components:
         - detached
         - disposition
       type: object
+    LinkAttachmentInput:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        node_id:
+          format: int64
+          type: integer
+        path:
+          type: string
+        version_id:
+          format: uuid
+          type: string
+      type: object
     LinkChanges:
       properties:
         blocked_by_added:
@@ -10096,6 +10110,40 @@ paths:
               format: binary
               type: string
               x-contentMediaType: application/octet-stream
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddAttachmentResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/issues/{ref}/attachments/links:
+    post:
+      operationId: linkAttachment
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LinkAttachmentInput"
         required: true
       responses:
         "200":
