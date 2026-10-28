@@ -17,7 +17,7 @@ func checkCloseTranscript(t *testing.T, store db.Storage) error {
 	}
 	for _, ref := range []*transcript.Transcript{
 		{Agent: "claude", SessionID: "00000000-0000-4000-8000-000000000001"},
-		{SessionID: "00000000-0000-4000-8000-000000000001", URL: "https://agentsview.example/sessions/00000000-0000-4000-8000-000000000001"},
+		{Agent: "pi", SessionID: "00000000-0000-4000-8000-000000000001", URL: "https://agentsview.example/sessions/pi/00000000-0000-4000-8000-000000000001"},
 	} {
 		issue, err := createFixtureIssue(ctx, store, project.ID, "Completed example work", "worker", nil)
 		if err != nil {

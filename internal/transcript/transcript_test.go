@@ -11,17 +11,17 @@ import (
 )
 
 func TestTranscriptLinks(t *testing.T) {
-	for _, agent := range []string{"", "codex", "claude"} {
-		t.Run(agent, func(t *testing.T) {
-			ref := Transcript{Agent: agent, SessionID: "00000000-0000-4000-8000-000000000001"}
+	for _, tc := range []struct{ agent, path string }{
+		{"claude", "sessions/00000000-0000-4000-8000-000000000001"},
+		{"codex", "sessions/codex/00000000-0000-4000-8000-000000000001"},
+		{"pi", "sessions/pi/00000000-0000-4000-8000-000000000001"},
+	} {
+		t.Run(tc.agent, func(t *testing.T) {
+			ref := Transcript{Agent: tc.agent, SessionID: "00000000-0000-4000-8000-000000000001"}
 			require.NoError(t, ref.Validate())
 			got, err := ref.Link("https://agentsview.example/archive/")
 			require.NoError(t, err)
-			want := "https://agentsview.example/archive/sessions/"
-			if agent == "codex" {
-				want += "codex/"
-			}
-			assert.Equal(t, want+ref.SessionID, got)
+			assert.Equal(t, "https://agentsview.example/archive/"+tc.path, got)
 		})
 	}
 }
@@ -34,7 +34,7 @@ func FuzzTranscriptLinkPreservesBasePrefix(f *testing.F) {
 		if https {
 			scheme = "https"
 		}
-		ref := Transcript{SessionID: "00000000-0000-4000-8000-000000000001"}
+		ref := Transcript{Agent: "claude", SessionID: "00000000-0000-4000-8000-000000000001"}
 		// Exercise both literal path separators and separators encoded within a
 		// single segment. Canonical Path serialization alone misses the latter.
 		for _, base := range []string{
@@ -49,7 +49,12 @@ func FuzzTranscriptLinkPreservesBasePrefix(f *testing.F) {
 }
 
 func TestTranscriptRejectsSensitiveCoordinates(t *testing.T) {
-	assert.Error(t, (Transcript{Agent: "pi", SessionID: "00000000-0000-4000-8000-000000000001"}).Validate())
+	for _, agent := range []string{"a", "0-agent", strings.Repeat("a", 32)} {
+		assert.NoError(t, (Transcript{Agent: agent, SessionID: "00000000-0000-4000-8000-000000000001"}).Validate())
+	}
+	for _, agent := range []string{"", "Pi", "-pi", "pi/omp", "pi_omp", strings.Repeat("a", 33)} {
+		assert.Error(t, (Transcript{Agent: agent, SessionID: "00000000-0000-4000-8000-000000000001"}).Validate())
+	}
 	for _, id := range []string{"", "../session", "/home/user/sessions/chat.jsonl", "secret?token=value", "session\nother", strings.Repeat("a", 10000)} {
 		assert.Error(t, (&Transcript{Agent: "codex", SessionID: id}).Validate())
 	}
@@ -60,7 +65,7 @@ func TestTranscriptRejectsSensitiveCoordinates(t *testing.T) {
 }
 
 func TestTranscriptLinkPreservesEncodedBasePrefix(t *testing.T) {
-	ref := Transcript{SessionID: "00000000-0000-4000-8000-000000000001"}
+	ref := Transcript{Agent: "claude", SessionID: "00000000-0000-4000-8000-000000000001"}
 	for _, base := range []string{
 		"https://agentsview.example/team%2Farchive",
 		"https://agentsview.example/%2e%2e/archive",
@@ -74,7 +79,7 @@ func TestTranscriptLinkPreservesEncodedBasePrefix(t *testing.T) {
 	}
 }
 
-// UUIDs are the stable native IDs for both supported harnesses. Exercise
+// AgentsView resolves native sessions by UUID. Exercise
 // the whole byte domain, independently formatting the UUID and expected URL.
 func FuzzTranscriptLinkPreservesSession(f *testing.F) {
 	f.Add([]byte("0123456789abcdef"))
@@ -84,7 +89,7 @@ func FuzzTranscriptLinkPreservesSession(f *testing.F) {
 		copy(bytes[:], raw)
 		hexID := hex.EncodeToString(bytes[:])
 		id := hexID[:8] + "-" + hexID[8:12] + "-" + hexID[12:16] + "-" + hexID[16:20] + "-" + hexID[20:]
-		ref := Transcript{SessionID: id}
+		ref := Transcript{Agent: "claude", SessionID: id}
 		got, err := ref.Link("https://agentsview.example")
 		require.NoError(t, err)
 		assert.Equal(t, "https://agentsview.example/sessions/"+id, got)

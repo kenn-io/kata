@@ -12,10 +12,11 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func TestCloseTranscript_AgentlessPersistenceAndRetries(t *testing.T) {
+func TestCloseTranscript_OtherAgentPersistenceAndRetries(t *testing.T) {
 	transcript := map[string]any{
+		"agent":      "pi",
 		"session_id": "00000000-0000-4000-8000-000000000001",
-		"url":        "https://agentsview.example/sessions/00000000-0000-4000-8000-000000000001",
+		"url":        "https://agentsview.example/sessions/pi/00000000-0000-4000-8000-000000000001",
 	}
 	_, ts, projectID, issueID := bootstrapProjectWithIssue(t)
 	path := issueURL(projectID, issueID, "actions/close")
@@ -34,7 +35,7 @@ func TestCloseTranscript_AgentlessPersistenceAndRetries(t *testing.T) {
 	assert.Contains(t, string(second.body), `"reused":true`)
 }
 
-func TestCloseTranscript_LegacyAgentPersistenceAndRetries(t *testing.T) {
+func TestCloseTranscript_BuiltInAgentPersistenceAndRetries(t *testing.T) {
 	transcript := map[string]any{
 		"agent":      "codex",
 		"session_id": "00000000-0000-4000-8000-000000000001",
@@ -104,6 +105,8 @@ func TestCloseTranscript_DryRunAndInvalidInputDoNotPersist(t *testing.T) {
 	requireOK(t, postWithHeader(t, ts, path, nil, body))
 	body["dry_run"] = false
 	for _, ref := range []map[string]any{
+		{"session_id": "00000000-0000-4000-8000-000000000001"},
+		{"agent": "Pi", "session_id": "00000000-0000-4000-8000-000000000001"},
 		{"agent": "codex", "session_id": "/private/chat.jsonl"},
 		{"agent": "codex", "session_id": "00000000-0000-4000-8000-000000000001", "url": "https://agentsview.example?token=secret"},
 	} {

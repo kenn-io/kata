@@ -117,7 +117,9 @@ API `0.20.0` before project fanout. Paginated `kata.list` and explicit
 single-project lexical `kata.search` require API `0.27.0`. The CLI checks the
 same version before new list options and explicit lexical pagination.
 
-Close requests may explicitly supply `transcript` (agent-bearing objects need HTTP API `0.26.0`; agentless objects need `0.34.0`):
+Close requests may explicitly supply `transcript`. See the
+[configuration reference](configuration.md#closing-session-transcripts) for
+agent names, session UUIDs, and daemon API compatibility:
 
 ```json
 {
@@ -126,13 +128,14 @@ Close requests may explicitly supply `transcript` (agent-bearing objects need HT
   "message": "Implemented the requested behavior and ran the focused tests.",
   "evidence": [{"type": "test", "command": "go test ./internal/example"}],
   "transcript": {
+    "agent": "pi",
     "session_id": "00000000-0000-4000-8000-000000000001",
-    "url": "https://agentsview.example/sessions/00000000-0000-4000-8000-000000000001"
+    "url": "https://agentsview.example/sessions/pi/00000000-0000-4000-8000-000000000001"
   }
 }
 ```
 
-The optional `agent` field accepts `codex` or `claude`; `session_id` is
+The required `agent` field identifies the coding agent; `session_id` is
 a session UUID, and `url` is
 optional absolute HTTP(S) without credentials, query, or fragment. Supply a
 verified locator for namespaced imported archives. The daemon stores this
@@ -196,7 +199,7 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 | Version | Change |
 | --- | --- |
-| `0.34.0` | Close transcript `agent` is optional. |
+| `0.34.0` | Close transcripts accept agent names beyond Claude Code and Codex. |
 | `0.33.0` | Publishes the issue attachment upload and content routes, and UI capabilities include `attachments` when the daemon has Docbank configured. Older daemons omit the field. |
 | `0.32.0` | Project event polling accepts an `issue` filter and acknowledges the resolved subject in `X-Kata-Events-Issue-UID`. |
 | `0.31.0` | Project federation metadata accepts optional `relay_protocol_version=1` to check existing cross-project issue links before relay enrollment. It returns `409 relay_cross_project_links` with a remedy, or sets `relay_links_checked` when the check passes. Bridge connect returns `hub_links_checked` and preserves this conflict. Older daemons ignore the parameter. |

@@ -30,11 +30,11 @@ agentsview_url = "https://agentsview.example" # optional; a base path is support
 ```
 
 This is off by default and needs no daemon restart. Claude Code and Codex
-discovery, agent, link path, and HTTP API `0.26.0` requirement are unchanged. Sessions from
-other configured variables need HTTP API `0.34.0` or newer. Before attaching a
-transcript, `kata close` checks the daemon's API version; an older daemon gets a warning on stderr and
-the close proceeds without the transcript. With attachment disabled, close
-requests remain unchanged.
+keep their existing discovery, agent, link paths, and HTTP API `0.26.0`
+requirement. Other agents need HTTP API `0.34.0` or newer. Before attaching a
+transcript, `kata close` checks the daemon's API version. An older daemon
+causes a warning on stderr, and the close proceeds without the transcript.
+With attachment disabled, close requests remain unchanged.
 
 When `kata close` supplies evidence, it attaches a separate `transcript` object
 to the same durable `issue.closed` event. Evidence and substantive-message
@@ -43,25 +43,31 @@ passed. No transcript body, local filename, token, or hook ownership hash is
 copied. The setting affects CLI closes, including remote-daemon calls; browser
 closes do not infer a session from the daemon's environment.
 
-Kata always checks `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`, and
-`CODEX_SESSION_ID`, in that order. The `session_id_env` list adds variables
-for other agents. For example, under `[close.transcript]`:
+Kata always checks `CLAUDE_CODE_SESSION_ID` for `claude`, then
+`CODEX_THREAD_ID` and `CODEX_SESSION_ID` for `codex`, in that fixed order.
+The `session_id_env` table maps each additional agent name to one session
+variable. Kata checks these entries in sorted agent-name order:
 
 ```toml
-session_id_env = ["PI_SESSION_ID"]
+[close.transcript.session_id_env]
+pi = "PI_SESSION_ID"
+omp = "OMP_SESSION_ID"
 ```
 
-All nonempty session variables must agree case-insensitively. Different values
-are ambiguous and skip the attachment. An additional variable with the same
-UUID as a built-in variable keeps the built-in variable's agent.
+The agent name must match AgentsView's agent type, such as `pi` or `omp`,
+for the link to open. Names must match `^[a-z0-9][a-z0-9-]*$` and contain
+at most 32 characters. Each nonempty variable supplies both its agent and
+session UUID. Different agents are ambiguous even when their UUIDs match.
+Variables for the same agent must agree on the UUID case-insensitively.
+Ambiguous context warns and skips attachment.
 
 Setting either `KATA_TRANSCRIPT_AGENT` or `KATA_TRANSCRIPT_SESSION_ID` skips
-variable discovery. `KATA_TRANSCRIPT_SESSION_ID` supplies the UUID;
-`KATA_TRANSCRIPT_AGENT` optionally supplies `claude` or `codex`. An agent
-without a session ID warns and skips attachment. A `KATA_TRANSCRIPT_SESSION_ID`
-without an agent now records an agentless session, requiring API `0.34.0`.
+variable discovery. Set both to supply an explicit agent and session UUID.
+The agent accepts any name matching the token rules above. A missing or
+invalid agent or session ID warns and skips attachment.
 
 ```sh
+KATA_TRANSCRIPT_AGENT=pi \
 KATA_TRANSCRIPT_SESSION_ID=00000000-0000-4000-8000-000000000001 \
 kata close example-project#abc4 --done \
   --message "Implemented the requested behavior and ran the focused tests." \
@@ -75,18 +81,9 @@ AgentsView URL stores only the identifier. An invalid URL warns and stores
 only the identifier. URLs must be absolute HTTP(S), with no embedded
 credentials, query, or fragment.
 
-Claude Code variables record `agent: "claude"`; Codex variables record
-`agent: "codex"`. Other configured variables record only the session UUID.
-Codex links use `<agentsview_url>/sessions/codex/<UUID>`. Claude Code and
-agentless links use `<agentsview_url>/sessions/<UUID>`.
-
-Links for other agents need an AgentsView build that includes
-[agentsview#2465](https://github.com/kenn-io/agentsview/pull/2465), which adds
-bare UUID session lookup, including on its PostgreSQL server. This change has
-yet to be released. For an older installation, omit `agentsview_url` and use
-AgentsView's **Go to session** lookup with the saved UUID. A UUID matching
-multiple sessions is ambiguous; use the session's canonical ID or a verified
-locator through the HTTP close API.
+Claude Code links use `<agentsview_url>/sessions/<UUID>`. Every other agent,
+including Codex, uses `<agentsview_url>/sessions/<agent>/<UUID>`. These routes
+work with released AgentsView v0.46.1.
 
 Kata makes no AgentsView request during close. A generated URL is a locator,
 not an availability receipt: offline hosting, delayed indexing, authentication,
@@ -101,7 +98,7 @@ original session, evidence, actor, and other request fields unchanged. The
 AgentsView link is not part of retry identity, so changing `agentsview_url`
 does not break a retry. Retrying from another chat with different automatic
 context conflicts; set `KATA_TRANSCRIPT_SESSION_ID` to the original UUID and
-`KATA_TRANSCRIPT_AGENT` to the original agent, if one was recorded.
+`KATA_TRANSCRIPT_AGENT` to the original agent.
 `--dry` validates without writing an event or attaching persistent provenance.
 
 Readers can open the session link in the web issue's **Events** history, or
@@ -132,7 +129,7 @@ string; on a keyed retry use `original_event.payload`. Both contain the same
 | `KATA_POSTGRES_ALLOW_INSECURE` | Set to `1` only to permit a non-loopback Postgres connection without server-identity-verified TLS. |
 | `KATA_AUTHOR` | Default actor for mutations. |
 | `KATA_TEAMMATE` | Optional teammate attribution for comments and newly created issues. A command-level `--teammate` overrides it; `--teammate=''` suppresses it. |
-| `KATA_TRANSCRIPT_AGENT` | Optional `claude` or `codex` agent for an explicit `KATA_TRANSCRIPT_SESSION_ID`; setting it skips variable discovery, and an agent alone warns and skips attachment. Preserves the original agent when replaying a keyed close from another shell. |
+| `KATA_TRANSCRIPT_AGENT` | Agent name for an explicit `KATA_TRANSCRIPT_SESSION_ID`, using the token rules above; setting it skips variable discovery, and an agent alone warns and skips attachment. Preserves the original agent when replaying a keyed close from another shell. |
 | `KATA_TRANSCRIPT_SESSION_ID` | Explicit current closing session UUID. Used only when close transcript attachment is enabled; overrides the configured session variables. |
 | `KATA_INBOX_USER` | Exact actor or `actor/teammate` inbox address for `kata inbox` when `--for` is omitted and the TUI Attention view (`T`), which otherwise falls back to the authenticated actor. It does not set attribution and is independent of `KATA_AUTHOR` and `KATA_TEAMMATE`. |
 | `KATA_SERVER` | Remote daemon URL. Skips local discovery and auto-start. |

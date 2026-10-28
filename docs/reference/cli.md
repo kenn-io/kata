@@ -958,10 +958,9 @@ after the original close advanced the issue state.
 
 An opt-in [closing-session transcript setting](configuration.md#closing-session-transcripts)
 records the current session UUID and optional AgentsView link alongside the
-close evidence. Claude Code and Codex discovery, agent, link path, and daemon
-API `0.26.0` requirement are unchanged. Other configured variables and
-`KATA_TRANSCRIPT_SESSION_ID` without an agent now record agentless sessions,
-requiring API `0.34.0`. See the setting's reference for AgentsView compatibility.
+close evidence. The setting maps each additional agent name to its session
+variable. See the configuration reference for UUID requirements, agent names,
+and daemon API compatibility.
 Session provenance supplies no completion evidence on its own.
 
 Evidence is validated against the close reason:

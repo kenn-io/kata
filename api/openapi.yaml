@@ -6672,15 +6672,15 @@ components:
       additionalProperties: false
       properties:
         agent:
-          enum:
-            - claude
-            - codex
+          maxLength: 32
+          pattern: ^[a-z0-9][a-z0-9-]*$
           type: string
         session_id:
           type: string
         url:
           type: string
       required:
+        - agent
         - session_id
       type: object
     Trigger:

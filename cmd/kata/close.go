@@ -147,10 +147,9 @@ The close message has a minimum length that depends on the reason:
 				"evidence": parsed,
 				"dry_run":  dryRun,
 			}
+			var ref *transcript.Transcript
 			if len(parsed) > 0 {
-				if ref := closeTranscript(cmd); ref != nil {
-					extra["transcript"] = ref
-				}
+				ref = closeTranscript(cmd)
 			}
 			// Route the dry-run banner to stderr only in human mode so
 			// machine-parseable output modes stay unprefixed.
@@ -168,7 +167,7 @@ The close message has a minimum length that depends on the reason:
 				}
 				headers["If-Match"] = etag
 			}
-			return runActionWithHeaders(cmd, args[0], "close", extra, headers)
+			return runActionWithHeaders(cmd, args[0], "close", extra, headers, ref)
 		},
 	}
 	cmd.Flags().StringVar(&reason, "reason", "",
@@ -268,11 +267,11 @@ func evidenceValueError(format string, args ...any) *cliError {
 // the daemon action endpoint. If --comment was passed on the command, the
 // comment is appended in a separate POST after the action succeeds.
 func runAction(cmd *cobra.Command, raw, action string, extra map[string]any) error {
-	return runActionWithHeaders(cmd, raw, action, extra, nil)
+	return runActionWithHeaders(cmd, raw, action, extra, nil, nil)
 }
 
 func runActionWithHeaders(
-	cmd *cobra.Command, raw, action string, extra map[string]any, headers map[string]string,
+	cmd *cobra.Command, raw, action string, extra map[string]any, headers map[string]string, ref *transcript.Transcript,
 ) error {
 	comment, handle, err := prepareFollowupComment(cmd)
 	if err != nil {
@@ -292,8 +291,9 @@ func runActionWithHeaders(
 	if err != nil {
 		return err
 	}
-	if action == "close" && body["transcript"] != nil {
-		if err := dropUnsupportedTranscript(ctx, cmd, client, baseURL, body["transcript"].(*transcript.Transcript), body); err != nil {
+	if ref != nil {
+		body["transcript"] = ref
+		if err := dropUnsupportedTranscript(ctx, cmd, client, baseURL, ref, body); err != nil {
 			return err
 		}
 	}

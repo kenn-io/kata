@@ -27,13 +27,16 @@ describe('IssueHistory', () => {
       type: 'issue.closed',
       payload: {
         transcript: {
+          agent: 'pi',
           session_id: '00000000-0000-4000-8000-000000000001',
-          url: 'https://agentsview.example/sessions/00000000-0000-4000-8000-000000000001',
+          url: 'https://agentsview.example/sessions/pi/00000000-0000-4000-8000-000000000001',
         },
       },
     }
     render(IssueHistory, { props: { events: [closed] } })
-    const link = screen.getByRole('link', { name: /Session: 00000000-0000-4000-8000-000000000001/ })
+    const link = screen.getByRole('link', {
+      name: /Session: pi 00000000-0000-4000-8000-000000000001/,
+    })
     expect(link.getAttribute('href')).toBe(closed.payload.transcript.url)
     expect(link.getAttribute('rel')).toContain('noreferrer')
   })
@@ -70,10 +73,14 @@ describe('IssueHistory', () => {
     null,
     [],
     { agent: 'codex', session_id: '/private/chat.jsonl' },
-    {
-      agent: 'pi',
+    ...[undefined, '', '-pi', 'pi/omp', 'a'.repeat(33)].map((agent) => ({
+      agent,
       session_id: '00000000-0000-4000-8000-000000000001',
-      url: 'https://agentsview.example/sessions/00000000-0000-4000-8000-000000000001',
+    })),
+    {
+      agent: 'Pi',
+      session_id: '00000000-0000-4000-8000-000000000001',
+      url: 'https://agentsview.example/sessions/pi/00000000-0000-4000-8000-000000000001',
     },
   ])('omits malformed session coordinates: %s', (transcript) => {
     render(IssueHistory, {

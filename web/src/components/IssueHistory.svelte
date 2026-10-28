@@ -27,16 +27,17 @@
     if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
     const ref = value as Record<string, unknown>
     if (
-      (ref.agent !== undefined && ref.agent !== 'claude' && ref.agent !== 'codex') ||
+      typeof ref.agent !== 'string' ||
+      ref.agent.length > 32 ||
+      !/^[a-z0-9][a-z0-9-]*$/.test(ref.agent) ||
       typeof ref.session_id !== 'string' ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ref.session_id)
     ) {
       return undefined
     }
 
-    const agent = ref.agent === 'claude' || ref.agent === 'codex' ? `${ref.agent} ` : ''
     const session: { label: string; url?: string } = {
-      label: `Session: ${agent}${ref.session_id}`,
+      label: `Session: ${ref.agent} ${ref.session_id}`,
     }
     if (typeof ref.url === 'string') {
       try {

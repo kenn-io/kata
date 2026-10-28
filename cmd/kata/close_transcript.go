@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -25,24 +27,25 @@ func closeTranscript(cmd *cobra.Command) *transcript.Transcript {
 	}
 	agent, id := os.Getenv("KATA_TRANSCRIPT_AGENT"), os.Getenv("KATA_TRANSCRIPT_SESSION_ID")
 	if agent == "" && id == "" {
-		names := append([]string{"CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID"}, cfg.SessionIDEnv...)
-		for _, name := range names {
-			value := os.Getenv(name)
+		variables := []struct{ agent, name string }{
+			{"claude", "CLAUDE_CODE_SESSION_ID"},
+			{"codex", "CODEX_THREAD_ID"},
+			{"codex", "CODEX_SESSION_ID"},
+		}
+		for _, agent := range slices.Sorted(maps.Keys(cfg.SessionIDEnv)) {
+			variables = append(variables, struct{ agent, name string }{agent, cfg.SessionIDEnv[agent]})
+		}
+		for _, variable := range variables {
+			value := os.Getenv(variable.name)
 			if value == "" {
 				continue
 			}
-			if id != "" && !strings.EqualFold(id, value) {
+			if id != "" && (agent != variable.agent || !strings.EqualFold(id, value)) {
 				warn("ambiguous current session; skipping attachment")
 				return nil
 			}
 			if id == "" {
-				id = value
-				switch name {
-				case "CLAUDE_CODE_SESSION_ID":
-					agent = "claude"
-				case "CODEX_THREAD_ID", "CODEX_SESSION_ID":
-					agent = "codex"
-				}
+				agent, id = variable.agent, value
 			}
 		}
 	}
@@ -70,8 +73,8 @@ func dropUnsupportedTranscript(
 	ctx context.Context, cmd *cobra.Command, client *http.Client, baseURL string, ref *transcript.Transcript, body map[string]any,
 ) error {
 	required := apiVersionCloseTranscript
-	if ref.Agent == "" {
-		required = apiVersionAgentlessCloseTranscript
+	if ref.Agent != "claude" && ref.Agent != "codex" {
+		required = apiVersionOtherAgentCloseTranscript
 	}
 	err := requireDaemonAPIVersion(ctx, client, baseURL, required, "close transcript")
 	if err == nil {

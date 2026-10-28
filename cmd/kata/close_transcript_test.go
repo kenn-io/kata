@@ -74,19 +74,23 @@ func TestCloseTranscript_ContextAndOptionalLink(t *testing.T) {
 	}{
 		{name: "no context", warning: "current session unavailable"},
 		{name: "conflicting Codex context", thread: transcriptSessionOne, session: transcriptSessionTwo, warning: "ambiguous"},
-		{name: "configured session", variables: `["PI_SESSION_ID"]`, pi: transcriptSessionTwo, wantID: transcriptSessionTwo},
+		{name: "configured session", variables: `pi = "PI_SESSION_ID"`, pi: transcriptSessionTwo, wantID: transcriptSessionTwo, wantAgent: "pi"},
 		{name: "default ignores unconfigured session", pi: transcriptSessionOne, warning: "current session unavailable"},
 		{name: "equal aliases", wantAgent: "codex", thread: transcriptSessionOne, session: transcriptSessionOne, wantID: transcriptSessionOne},
 		{name: "Claude Code context", wantAgent: "claude", claude: transcriptSessionOne, wantID: transcriptSessionOne},
+		{name: "different agents with equal UUIDs", claude: transcriptSessionOne, thread: transcriptSessionOne, warning: "ambiguous"},
+		{name: "configured agent with equal UUID", variables: `pi = "PI_SESSION_ID"`, pi: transcriptSessionOne, claude: transcriptSessionOne, warning: "ambiguous"},
+		{name: "ID without agent", id: transcriptSessionOne, warning: "current session unavailable or invalid; skipping attachment"},
+		{name: "explicit other agent", agent: "omp", id: transcriptSessionOne, wantID: transcriptSessionOne, wantAgent: "omp"},
 		{name: "nested agent context", claude: transcriptSessionTwo, thread: transcriptSessionOne, warning: "ambiguous"},
-		{name: "override resolves configured conflict", pi: transcriptSessionOne, id: transcriptSessionOne, claude: transcriptSessionTwo, thread: transcriptSessionTwo, wantID: transcriptSessionOne},
+		{name: "override resolves configured conflict", pi: transcriptSessionOne, id: transcriptSessionOne, agent: "pi", wantAgent: "pi", claude: transcriptSessionTwo, thread: transcriptSessionTwo, wantID: transcriptSessionOne},
 		{name: "session alias", wantAgent: "codex", session: transcriptSessionOne, wantID: transcriptSessionOne},
 		{name: "no AgentsView integration", wantAgent: "codex", thread: transcriptSessionOne, wantID: transcriptSessionOne},
 		{name: "bad link retains ID", wantAgent: "codex", thread: transcriptSessionOne, base: "https://user:secret@agentsview.example?token=secret", wantID: transcriptSessionOne, warning: "URL invalid"},
 		{name: "explicit Codex session", id: transcriptSessionTwo, agent: "codex", wantID: transcriptSessionTwo, wantAgent: "codex"},
 		{name: "agent without session skips discovery", claude: transcriptSessionOne, agent: "codex", warning: "current session unavailable or invalid; skipping attachment"},
-		{name: "configured alias retains Claude agent", variables: `["PI_SESSION_ID", "CLAUDE_CODE_SESSION_ID"]`, pi: transcriptSessionOne, claude: transcriptSessionOne, wantID: transcriptSessionOne, wantAgent: "claude"},
-		{name: "configured variable cannot hide built-in conflict", variables: `["PI_SESSION_ID"]`, pi: transcriptSessionOne, thread: transcriptSessionTwo, warning: "ambiguous"},
+		{name: "configured alias retains Claude agent", variables: `claude = "PI_SESSION_ID"`, pi: transcriptSessionOne, claude: transcriptSessionOne, wantID: transcriptSessionOne, wantAgent: "claude"},
+		{name: "configured variable cannot hide built-in conflict", variables: `pi = "PI_SESSION_ID"`, pi: transcriptSessionOne, thread: transcriptSessionTwo, warning: "ambiguous"},
 		{name: "path never persisted", id: "/private/session/chat.jsonl", warning: "current session unavailable"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -94,9 +98,9 @@ func TestCloseTranscript_ContextAndOptionalLink(t *testing.T) {
 			t.Setenv("KATA_HOME", home)
 			variables := ""
 			if tc.variables != "" {
-				variables = "session_id_env=" + tc.variables + "\n"
+				variables = "[close.transcript.session_id_env]\n" + tc.variables + "\n"
 			}
-			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[close.transcript]\n"+variables+"enabled=true\nagentsview_url="+fmt.Sprintf("%q", tc.base)+"\n"), 0600))
+			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[close.transcript]\nenabled=true\nagentsview_url="+fmt.Sprintf("%q", tc.base)+"\n"+variables), 0600))
 			for name, value := range map[string]string{"KATA_TRANSCRIPT_AGENT": tc.agent, "PI_SESSION_ID": tc.pi, "KATA_TRANSCRIPT_SESSION_ID": tc.id, "CODEX_THREAD_ID": tc.thread, "CODEX_SESSION_ID": tc.session, "CLAUDE_CODE_SESSION_ID": tc.claude} {
 				t.Setenv(name, value)
 			}
@@ -129,16 +133,18 @@ func TestCloseTranscript_DaemonCompatibility(t *testing.T) {
 		attach                         bool
 	}{
 		{"Codex on 0.26", "0.26.0", "CODEX_SESSION_ID", "codex", true},
-		{"agentless on 0.33", "0.33.0", "PI_SESSION_ID", "", false},
-		{"agentless on 0.34", "0.34.0", "PI_SESSION_ID", "", true},
+		{"Claude on 0.33", "0.33.0", "CLAUDE_CODE_SESSION_ID", "claude", true},
+		{"Codex on 0.33", "0.33.0", "CODEX_THREAD_ID", "codex", true},
+		{"Pi on 0.33", "0.33.0", "PI_SESSION_ID", "pi", false},
+		{"Pi on 0.34", "0.34.0", "PI_SESSION_ID", "pi", true},
 		{"transcript before 0.26", "0.25.0", "CODEX_THREAD_ID", "codex", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("KATA_HOME", home)
 			config := "[close.transcript]\nenabled = true\n"
-			if tc.agent == "" {
-				config += "session_id_env = [\"PI_SESSION_ID\"]\n"
+			if tc.agent == "pi" {
+				config += "[close.transcript.session_id_env]\npi = \"PI_SESSION_ID\"\n"
 			}
 			require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte(config), 0600))
 			for _, name := range []string{"CODEX_THREAD_ID", "PI_SESSION_ID", "CODEX_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "KATA_TRANSCRIPT_AGENT", "KATA_TRANSCRIPT_SESSION_ID"} {

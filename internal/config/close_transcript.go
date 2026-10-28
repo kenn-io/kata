@@ -11,9 +11,9 @@ import (
 // CloseTranscriptConfig is a client preference, read from the invoking
 // client's Kata home even when it targets a remote daemon.
 type CloseTranscriptConfig struct {
-	Enabled       bool     `toml:"enabled"`
-	AgentsViewURL string   `toml:"agentsview_url"`
-	SessionIDEnv  []string `toml:"session_id_env"`
+	Enabled       bool              `toml:"enabled"`
+	AgentsViewURL string            `toml:"agentsview_url"`
+	SessionIDEnv  map[string]string `toml:"session_id_env"`
 }
 
 // ReadCloseTranscriptConfig avoids daemon policy and credential resolution.
