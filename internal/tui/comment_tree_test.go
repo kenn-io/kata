@@ -80,34 +80,9 @@ func TestCommentTags(t *testing.T) {
 		{"other kinds", []commentref.Link{{Kind: "reply"}, {Kind: "supersede"}}, ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			require.Equal(t, tt.want, stripANSI(commentTags(tt.links, true)))
+			require.Equal(t, tt.want, stripANSI(commentTags(tt.links)))
 		})
 	}
-}
-
-func TestCommentTreeForeignTargetTags(t *testing.T) {
-	when := time.Date(2026, 4, 30, 10, 0, 0, 0, time.UTC)
-	edited := when.Add(time.Minute)
-	projected := commentref.Project([]commentref.Record{
-		{UID: "a", IssueUID: "local"},
-		{UID: "b", Handle: "c:foreign", ReplyToUID: "a", ReplyKind: "reply", IssueUID: "foreign", EditedAt: &edited},
-		{UID: "c", ReplyToUID: "b", ReplyKind: "confirm", IssueUID: "local", CreatedAt: when},
-		{UID: "d", ReplyToUID: "b", ReplyKind: "refute", IssueUID: "local", CreatedAt: edited.Add(time.Minute)},
-	}, nil)
-	comments := threadOrder([]CommentEntry{
-		{UID: "c", Reply: projected[2].Reply},
-		{UID: "a", Backlinks: projected[0].Backlinks},
-		{UID: "d", Reply: projected[3].Reply},
-	})
-	require.Equal(t, "a", comments[0].UID)
-	require.Equal(t, "b", comments[0].leaves[0].link.UID)
-	require.Equal(t, 1, comments[0].leaves[0].depth)
-	require.Equal(t, "c", comments[1].UID)
-	require.Equal(t, 2, comments[1].depth)
-	chunks := commentChunks(comments, 80, -1, tabState{})
-	rendered := stripANSI(strings.Join(chunks[0].lines, "\n"))
-	require.Contains(t, rendered, "confirm · refute")
-	require.NotContains(t, rendered, "(before edit)")
 }
 
 func TestCommentTreeColoredTags(t *testing.T) {
@@ -118,7 +93,7 @@ func TestCommentTreeColoredTags(t *testing.T) {
 	c := CommentEntry{depth: 4, Backlinks: []commentref.Link{
 		{Kind: "confirm", TargetEdited: true}, {Kind: "refute", TargetEdited: true},
 	}}
-	require.Contains(t, commentTags(c.Backlinks, true), "\x1b[")
+	require.Contains(t, commentTags(c.Backlinks), "\x1b[")
 	for width := 30; width <= 79; width++ {
 		chunks := commentChunks([]CommentEntry{c}, width, -1, tabState{})
 		plain := stripANSI(strings.Join(chunks[0].lines[1:], "\n"))

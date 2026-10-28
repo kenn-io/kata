@@ -49,7 +49,7 @@ func commentChunks(cs []CommentEntry, width, cursor int, ts tabState) []entryChu
 		for _, row := range creationAttributionLines(c.AttributionView, c.Author, c.Teammate, max(1, renderWidth-2)) {
 			lines = append(lines, "  "+subtleStyle.Render(row))
 		}
-		if tags := commentTags(c.Backlinks, true); tags != "" {
+		if tags := commentTags(c.Backlinks); tags != "" {
 			lines = append(lines, wrapCommentTags(tags, renderWidth)...)
 		}
 		if c.Reply != nil {
@@ -88,9 +88,6 @@ func commentChunks(cs []CommentEntry, width, cursor int, ts tabState) []entryChu
 			leafDepth := min(leaf.depth, max(0, (width-32)/2))
 			leafWidth := width - 2*leafDepth
 			rows := wrapDetailRow("  ", "↳ "+sanitizeForDisplay(leaf.link.Kind)+" "+commentEvidenceHeader(leaf.link), leafWidth)
-			if tags := commentTags(leaf.replies, false); tags != "" {
-				rows = append(rows, wrapCommentTags(tags, leafWidth)...)
-			}
 			if leaf.link.TargetEdited {
 				rows = append(rows, wrapDetailRow("  ", "Target edited after this reply", leafWidth)...)
 			}

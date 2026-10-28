@@ -11,9 +11,8 @@ import (
 const maxCommentDepth = 4
 
 type commentLeaf struct {
-	link    commentref.Link
-	depth   int
-	replies []commentref.Link
+	link  commentref.Link
+	depth int
 }
 
 func compareCommentLinks(a, b commentref.Link) int {
@@ -26,7 +25,6 @@ func threadOrder(cs []CommentEntry) []CommentEntry {
 	byUID := make(map[string]int, len(cs))
 	children := make(map[string][]commentref.Link, len(cs))
 	for i, c := range cs {
-		children[c.UID] = nil
 		if c.UID != "" {
 			byUID[c.UID] = i
 		}
@@ -35,7 +33,6 @@ func threadOrder(cs []CommentEntry) []CommentEntry {
 		for _, link := range c.Backlinks {
 			if _, local := byUID[link.UID]; !local {
 				children[c.UID] = append(children[c.UID], link)
-				children[link.UID] = nil
 			}
 		}
 	}
@@ -44,7 +41,7 @@ func threadOrder(cs []CommentEntry) []CommentEntry {
 		parent, visible := "", false
 		if c.Reply != nil && c.Reply.UID != "" {
 			parent = c.Reply.UID
-			_, visible = children[parent]
+			_, visible = byUID[parent]
 		}
 		if visible {
 			children[parent] = append(children[parent], commentref.Link{UID: c.UID, CreatedAt: c.CreatedAt, Kind: c.Reply.Kind, TargetEdited: c.Reply.TargetEdited})
@@ -71,10 +68,7 @@ func threadOrder(cs []CommentEntry) []CommentEntry {
 			if child, local := byUID[link.UID]; local {
 				visit(child, childDepth)
 			} else {
-				ordered[parentIdx].leaves = append(ordered[parentIdx].leaves, commentLeaf{link: link, depth: childDepth, replies: children[link.UID]})
-				for _, child := range children[link.UID] {
-					visit(byUID[child.UID], min(childDepth+1, maxCommentDepth))
-				}
+				ordered[parentIdx].leaves = append(ordered[parentIdx].leaves, commentLeaf{link: link, depth: childDepth})
 			}
 		}
 	}
@@ -87,7 +81,7 @@ func threadOrder(cs []CommentEntry) []CommentEntry {
 	return ordered
 }
 
-func commentTags(links []commentref.Link, complete bool) string {
+func commentTags(links []commentref.Link) string {
 	var tags []string
 	for _, kind := range []string{"confirm", "refute"} {
 		present, fresh := false, false
@@ -101,9 +95,9 @@ func commentTags(links []commentref.Link, complete bool) string {
 			continue
 		}
 		tag := kind
-		// Complete projections retain the newest replies per kind; partial
-		// foreign-leaf replies cannot establish freshness for the whole kind.
-		if complete && !fresh {
+		// Projections retain the newest replies per kind, so a truncated list
+		// still decides whether all evidence predates the target's edit.
+		if !fresh {
 			tag += " (before edit)"
 		}
 		if kind == "confirm" {
