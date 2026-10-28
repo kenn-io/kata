@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-27
+last_edited: 2026-10-28
 ---
 
 # CLI reference
@@ -958,7 +958,11 @@ after the original close advanced the issue state.
 
 An opt-in [closing-session transcript setting](configuration.md#closing-session-transcripts)
 records the current session UUID and optional AgentsView link alongside the
-close evidence. It never supplies completion evidence on its own.
+close evidence. Claude Code and Codex keep their existing behavior with daemon
+API `0.26.0` or newer. Other configured variables need API `0.34.0`; their links
+need an AgentsView build with
+[agentsview#2465](https://github.com/kenn-io/agentsview/pull/2465), which has yet
+to be released. Session provenance supplies no completion evidence on its own.
 
 Evidence is validated against the close reason:
 

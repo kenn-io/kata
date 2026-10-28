@@ -62,7 +62,7 @@ describe('IssueHistory', () => {
         ],
       },
     })
-    expect(screen.getByText(/Session: 00000000-0000-4000-8000-000000000002/)).toBeTruthy()
+    expect(screen.getByText(/Session: claude 00000000-0000-4000-8000-000000000002/)).toBeTruthy()
     expect(screen.queryByRole('link')).toBeNull()
   })
 

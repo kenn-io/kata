@@ -18,6 +18,9 @@ func TestTranscriptLinks(t *testing.T) {
 			got, err := ref.Link("https://agentsview.example/archive/")
 			require.NoError(t, err)
 			want := "https://agentsview.example/archive/sessions/"
+			if agent == "codex" {
+				want += "codex/"
+			}
 			assert.Equal(t, want+ref.SessionID, got)
 		})
 	}

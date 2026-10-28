@@ -12,14 +12,15 @@ import (
 )
 
 const (
-	apiVersionSearchStatus          = "0.20.0"
-	apiVersionListSort              = "0.21.0"
-	apiVersionDiscoveryPagination   = "0.27.0"
-	apiVersionMoveDryRun            = "0.23.0"
-	apiVersionCloseTranscript       = "0.33.0"
-	apiVersionCommentLinks          = "0.28.0"
-	apiVersionReadyAndSearchFilters = "0.8.0"
-	apiVersionGlobalListFilters     = "0.9.0"
+	apiVersionSearchStatus             = "0.20.0"
+	apiVersionListSort                 = "0.21.0"
+	apiVersionDiscoveryPagination      = "0.27.0"
+	apiVersionMoveDryRun               = "0.23.0"
+	apiVersionCloseTranscript          = "0.26.0"
+	apiVersionAgentlessCloseTranscript = "0.34.0"
+	apiVersionCommentLinks             = "0.28.0"
+	apiVersionReadyAndSearchFilters    = "0.8.0"
+	apiVersionGlobalListFilters        = "0.9.0"
 	// apiVersionMCPServer is the oldest daemon the native MCP server can
 	// drive: it pins relationship targets with to_project_uid and
 	// expected_project_uids and pages audit rows by event_id.

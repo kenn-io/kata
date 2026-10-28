@@ -33,8 +33,9 @@
       return undefined
     }
 
+    const agent = ref.agent === 'claude' || ref.agent === 'codex' ? `${ref.agent} ` : ''
     const session: { label: string; url?: string } = {
-      label: `Session: ${ref.session_id}`,
+      label: `Session: ${agent}${ref.session_id}`,
     }
     if (typeof ref.url === 'string') {
       try {

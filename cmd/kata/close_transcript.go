@@ -24,6 +24,10 @@ func closeTranscript(cmd *cobra.Command) *transcript.Transcript {
 		return nil
 	}
 	id := os.Getenv("KATA_TRANSCRIPT_SESSION_ID")
+	agent := ""
+	if id != "" {
+		agent = os.Getenv("KATA_TRANSCRIPT_AGENT")
+	}
 	if id == "" {
 		for _, name := range cfg.SessionIDEnv {
 			value := os.Getenv(name)
@@ -34,10 +38,18 @@ func closeTranscript(cmd *cobra.Command) *transcript.Transcript {
 				warn("ambiguous current session; skipping attachment")
 				return nil
 			}
-			id = value
+			if id == "" {
+				id = value
+				switch name {
+				case "CLAUDE_CODE_SESSION_ID":
+					agent = "claude"
+				case "CODEX_THREAD_ID", "CODEX_SESSION_ID":
+					agent = "codex"
+				}
+			}
 		}
 	}
-	ref := &transcript.Transcript{SessionID: id}
+	ref := &transcript.Transcript{Agent: agent, SessionID: id}
 	if err := ref.Validate(); err != nil {
 		warn("current session unavailable or invalid; skipping attachment")
 		return nil
@@ -55,12 +67,16 @@ func closeTranscript(cmd *cobra.Command) *transcript.Transcript {
 	return ref
 }
 
-// dropUnsupportedTranscript keeps provenance optional: older daemons cannot
-// accept agentless transcripts, so the close proceeds without one.
+// dropUnsupportedTranscript keeps provenance optional when a daemon predates
+// the supplied transcript shape.
 func dropUnsupportedTranscript(
 	ctx context.Context, cmd *cobra.Command, client *http.Client, baseURL string, body map[string]any,
 ) error {
-	err := requireDaemonAPIVersion(ctx, client, baseURL, apiVersionCloseTranscript, "close transcript")
+	required := apiVersionCloseTranscript
+	if ref := body["transcript"].(*transcript.Transcript); ref.Agent == "" {
+		required = apiVersionAgentlessCloseTranscript
+	}
+	err := requireDaemonAPIVersion(ctx, client, baseURL, required, "close transcript")
 	if err == nil {
 		return nil
 	}

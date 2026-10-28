@@ -1,7 +1,7 @@
 ---
 title: Web UI
 description: Browse and manage Kata projects and issues in the daemon-served browser application.
-last_edited: 2026-10-26
+last_edited: 2026-10-28
 ---
 
 # Web UI
@@ -105,7 +105,12 @@ project, and **Done editing** returns to the read-only view. The editor also sup
 
 When a close saved a
 [closing-session reference](../reference/configuration.md#closing-session-transcripts),
-the issue's events show the session ID, linked when a URL was saved.
+the issue's events show the session ID and agent when one was saved, linked
+when a URL was saved. Claude Code and Codex retain their API `0.26.0` behavior.
+Other configured variables need API `0.34.0` and, to open their links, an
+AgentsView build with
+[agentsview#2465](https://github.com/kenn-io/agentsview/pull/2465), which has yet
+to be released.
 
 With daemon API `0.28.0` or newer, comments show handles, reply targets,
 backlinks, and edit markers. Select a reply target or backlink to open its issue

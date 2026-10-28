@@ -11,7 +11,7 @@ import (
 
 var sessionIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// Transcript identifies a session UUID. Agent is an optional legacy field. URL is optional
+// Transcript identifies a session UUID. Agent is optional. URL is optional
 // and is a locator, not a claim that AgentsView has indexed the session.
 type Transcript struct {
 	Agent     string `json:"agent,omitempty" enum:"claude,codex"`
@@ -46,6 +46,9 @@ func (t Transcript) Link(base string) (string, error) {
 		return "", err
 	}
 	path := "sessions/"
+	if t.Agent == "codex" {
+		path += "codex/"
+	}
 	// Keep escaped prefixes intact: a configured %2F is part of a segment,
 	// not a new path separator. Session UUIDs contain no URL delimiters.
 	u.RawPath = strings.TrimRight(u.EscapedPath(), "/") + "/" + path + t.SessionID

@@ -117,7 +117,7 @@ API `0.20.0` before project fanout. Paginated `kata.list` and explicit
 single-project lexical `kata.search` require API `0.27.0`. The CLI checks the
 same version before new list options and explicit lexical pagination.
 
-Close requests may explicitly supply `transcript` (agentless objects need HTTP API `0.33.0`):
+Close requests may explicitly supply `transcript` (agent-bearing objects need HTTP API `0.26.0`; agentless objects need `0.34.0`):
 
 ```json
 {
@@ -132,14 +132,18 @@ Close requests may explicitly supply `transcript` (agentless objects need HTTP A
 }
 ```
 
-The optional legacy `agent` field accepts `codex` or `claude`; `session_id` is
+The optional `agent` field accepts `codex` or `claude`; `session_id` is
 a session UUID, and `url` is
 optional absolute HTTP(S) without credentials, query, or fragment. Supply a
 verified locator for namespaced imported archives. The daemon stores this
 separately from evidence in the close event; it does not fetch or verify the
 chat. Its `agent` and `session_id` participate in retry identity; `url` does
 not. The object is preserved in scoped responses and history. Automatic capture is a [CLI client preference](configuration.md#closing-session-transcripts),
-not daemon-side session discovery.
+not daemon-side session discovery. Claude Code and Codex keep their existing
+behavior, including Codex's `/sessions/codex/<UUID>` link path. Links for other
+agents need an AgentsView build with
+[agentsview#2465](https://github.com/kenn-io/agentsview/pull/2465), which has yet
+to be released.
 
 Guarded close requests use a request-local compatibility check instead of a
 separate health probe. A request that sends `Idempotency-Key` or `If-Match`
