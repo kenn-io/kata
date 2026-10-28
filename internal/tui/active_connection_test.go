@@ -53,6 +53,7 @@ func TestActiveConnectionHeaderFencesStaleRepliesAndExpiry(t *testing.T) {
 	m.authCapabilitiesReady = false
 	m.activeDaemon = daemonTarget{Name: "other-hub"}
 	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{connGen: 1, auth: AuthInfo{Actor: "old-reply"}})
+	require.Equal(t, "member-one", m.activeAuth.Actor)
 	require.Contains(t, stripANSI(m.viewContent()), "Connecting")
 	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{connGen: 2, auth: AuthInfo{Kind: "token", Actor: "member-two"}})
 	require.NotContains(t, stripANSI(m.viewContent()), "Connecting")
@@ -144,6 +145,7 @@ func TestActiveConnectionHeaderAttentionStates(t *testing.T) {
 		{status: "Connection unavailable", err: "service unavailable"},
 		{status: "Connecting"},
 		{status: "Reconnecting", ready: true, sse: sseReconnecting},
+		{status: "Reconnecting", authKind: "insecure_readonly", ready: true, sse: sseReconnecting},
 		{status: "Disconnected", ready: true, sse: sseDisconnected},
 		{status: "Read-only", authKind: "insecure_readonly", ready: true, sse: sseConnected},
 		{status: "Read-only", authKind: "bootstrap", ready: true, sse: sseConnected},
