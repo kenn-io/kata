@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kit/stacktest"
 )
 
 func TestServeWaitsForActiveHandlerDuringShutdown(t *testing.T) {
@@ -39,6 +40,7 @@ func TestServeWaitsForActiveHandlerDuringShutdown(t *testing.T) {
 	select {
 	case <-entered:
 	case <-time.After(5 * time.Second):
+		stacktest.Dump(t)
 		t.Fatal("request did not enter handler")
 	}
 
@@ -54,6 +56,7 @@ func TestServeWaitsForActiveHandlerDuringShutdown(t *testing.T) {
 	case err := <-done:
 		require.NoError(t, err)
 	case <-time.After(5 * time.Second):
+		stacktest.Dump(t)
 		t.Fatal("Serve did not return after active handler completed")
 	}
 	require.NoError(t, <-responseDone)
@@ -93,6 +96,7 @@ func TestServeTreatsConcurrentListenerCloseAsDrained(t *testing.T) {
 	select {
 	case <-entered:
 	case <-time.After(time.Second):
+		stacktest.Dump(t)
 		t.Fatal("request did not enter handler")
 	}
 	cancel()
@@ -107,6 +111,7 @@ func TestServeTreatsConcurrentListenerCloseAsDrained(t *testing.T) {
 	case err := <-done:
 		require.NoError(t, err)
 	case <-time.After(time.Second):
+		stacktest.Dump(t)
 		t.Fatal("Serve did not return after context cancellation")
 	}
 	require.NoError(t, <-responseDone)
@@ -137,6 +142,7 @@ func TestServeReportsHandlerThatOutlivesShutdownTimeout(t *testing.T) {
 	select {
 	case <-entered:
 	case <-time.After(time.Second):
+		stacktest.Dump(t)
 		t.Fatal("request did not enter handler")
 	}
 	cancel()
@@ -144,6 +150,7 @@ func TestServeReportsHandlerThatOutlivesShutdownTimeout(t *testing.T) {
 	case serveErr := <-done:
 		require.ErrorIs(t, serveErr, ErrHTTPHandlersUnjoined)
 	case <-time.After(time.Second):
+		stacktest.Dump(t)
 		t.Fatal("Serve did not report the unjoined handler")
 	}
 	select {
@@ -186,6 +193,7 @@ func TestServeListenersNotifiesAtFirstListenerExitBeforeHandlerDrain(t *testing.
 	select {
 	case <-entered:
 	case <-time.After(time.Second):
+		stacktest.Dump(t)
 		t.Fatal("request did not enter sibling handler")
 	}
 
@@ -193,6 +201,7 @@ func TestServeListenersNotifiesAtFirstListenerExitBeforeHandlerDrain(t *testing.
 	select {
 	case <-stopping:
 	case <-time.After(time.Second):
+		stacktest.Dump(t)
 		t.Fatal("listener exit did not notify root shutdown")
 	}
 	select {

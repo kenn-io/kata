@@ -21,6 +21,7 @@ import (
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	katauid "go.kenn.io/kata/internal/uid"
 	kitdaemon "go.kenn.io/kit/daemon"
+	"go.kenn.io/kit/stacktest"
 )
 
 func TestBoundSpokeClaimPrincipalPreservesLocalOwnerIdentity(t *testing.T) {
@@ -370,6 +371,7 @@ func receiveInternalMsg(t *testing.T, ch <-chan StreamMsg, label string) StreamM
 	case got := <-ch:
 		return got
 	case <-time.After(2 * time.Second):
+		stacktest.Dump(t)
 		t.Fatalf("%s: did not receive within timeout", label)
 		return StreamMsg{}
 	}
