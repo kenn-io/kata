@@ -15,6 +15,16 @@ import (
 )
 
 func TestAttachmentProxyCancelsWhenSessionEnds(t *testing.T) {
+	for _, path := range []string{
+		"/api/v1/projects/1/issues/abc4/attachments?name=shot.png",
+		"/api/v1/projects/1/issues/abc4/attachments/links",
+	} {
+		t.Run(path, func(t *testing.T) { testAttachmentProxyCancellation(t, path) })
+	}
+}
+
+func testAttachmentProxyCancellation(t *testing.T, path string) {
+	t.Helper()
 	started := make(chan struct{})
 	canceled := make(chan struct{})
 	stop := make(chan struct{})
@@ -41,7 +51,7 @@ func TestAttachmentProxyCancelsWhenSessionEnds(t *testing.T) {
 		}
 		return nil
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects/1/issues/abc4/attachments?name=shot.png", strings.NewReader("image")).WithContext(ctx)
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("image")).WithContext(ctx)
 	req.Header.Set("Content-Type", "application/octet-stream")
 	done := make(chan struct{})
 	go func() { proxy.ServeHTTP(httptest.NewRecorder(), req); close(done) }()

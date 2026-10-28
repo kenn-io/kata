@@ -740,10 +740,6 @@ func (g *webDaemonGateway) proxy(d resolvedWebDaemon) (http.Handler, error) {
 				writeWebDaemonError(w, http.StatusRequestEntityTooLarge, "attachment_too_large")
 				return
 			}
-			if err := revalidateBrowserSession(ctx); err != nil {
-				writeWebDaemonError(w, http.StatusUnauthorized, "web_session_required")
-				return
-			}
 			if _, err := file.Seek(0, io.SeekStart); err != nil {
 				writeWebDaemonError(w, http.StatusInternalServerError, "internal")
 				return
@@ -751,6 +747,13 @@ func (g *webDaemonGateway) proxy(d resolvedWebDaemon) (http.Handler, error) {
 			r = r.Clone(ctx)
 			r.Body = file
 			r.ContentLength = size
+		}
+		attachmentLink := r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/attachments/links")
+		if webSessionAuthenticated(ctx) && (isAttachmentUpload(r) || attachmentLink) {
+			if err := revalidateBrowserSession(ctx); err != nil {
+				writeWebDaemonError(w, http.StatusUnauthorized, "web_session_required")
+				return
+			}
 			go func() {
 				ticker := time.NewTicker(time.Second)
 				defer ticker.Stop()
