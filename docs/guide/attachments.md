@@ -50,7 +50,7 @@ kata docbank attachments link abc4 42 --version 6f1c2e8a-2222-4222-8222-22222222
 
 Choose one positive node ID or an absolute Docbank path. The link pins the current content version by default; `--version UUID` selects an older version of that same node.
 
-Kata refuses directories, trashed files, and versions belonging to another node. A missing Docbank file or version returns 404 `docbank_not_found`. A trashed node returns 410 `attachment_content_missing`. Each link adds a new reference, like `add`, even when that version is already attached. Remove extra references with `rm`.
+Kata refuses directories, trashed files, versions belonging to another node, and file names that fail the same rules as uploads. Names must be valid UTF-8, contain 1 to 255 bytes, and contain no `/`, `\`, or control characters. The names `.` and `..` are invalid. A missing Docbank file or version returns 404 `docbank_not_found`. A trashed node returns 410 `attachment_content_missing`. Each link adds a new reference, like `add`, even when that version is already attached. Remove extra references with `rm`.
 
 The saved name and size come from link time. Later changes in Docbank leave the reference pinned to the selected version.
 
