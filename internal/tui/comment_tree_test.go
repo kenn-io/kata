@@ -74,6 +74,54 @@ func TestCommentTags(t *testing.T) {
 	}
 }
 
+func TestCommentTreeCrossIssueParent(t *testing.T) {
+	projected := commentref.Project([]commentref.Record{
+		{UID: "a", IssueUID: "local"},
+		{UID: "b", ReplyToUID: "a", ReplyKind: "confirm", IssueUID: "foreign"},
+		{UID: "c", ReplyToUID: "b", ReplyKind: "refute", IssueUID: "local"},
+	}, nil)
+	comments := threadOrder([]CommentEntry{
+		{UID: "c", Handle: "c:child", Reply: projected[2].Reply},
+		{UID: "a", Handle: "c:root", Backlinks: projected[0].Backlinks},
+	})
+	require.Equal(t, "a", comments[0].UID)
+	require.Equal(t, "b", comments[0].leaves[0].link.UID)
+	require.Equal(t, 1, comments[0].leaves[0].depth)
+	require.Equal(t, "c", comments[1].UID)
+	require.Equal(t, 2, comments[1].depth)
+	chunks := commentChunks(comments, 80, -1, tabState{})
+	require.Contains(t, stripANSI(chunks[1].lines[0]), "      c:child")
+}
+
+func TestCommentTreeColoredTags(t *testing.T) {
+	t.Setenv("KATA_COLOR_MODE", "dark")
+	t.Setenv("NO_COLOR", "")
+	applyDefaultColorMode()
+	t.Cleanup(applyDefaultColorMode)
+	c := CommentEntry{depth: 4, Backlinks: []commentref.Link{
+		{Kind: "confirm", TargetEdited: true}, {Kind: "refute", TargetEdited: true},
+	}}
+	require.Contains(t, commentTags(c), "\x1b[")
+	for width := 30; width <= 79; width++ {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			chunks := commentChunks([]CommentEntry{c}, width, -1, tabState{})
+			plain := stripANSI(strings.Join(chunks[0].lines[1:], "\n"))
+			require.NotContains(t, plain, "\x1b")
+			require.Contains(t, strings.Join(strings.Fields(plain), ""), "confirm(beforeedit)·refute(beforeedit)")
+		})
+	}
+}
+
+func TestCommentTreeNarrowIndent(t *testing.T) {
+	defer snapshotInit(t)()
+	comments := []CommentEntry{{UID: "a", Handle: "c:a", Body: "Read the evidence.", depth: 4,
+		leaves: []commentLeaf{{link: commentref.Link{Handle: "b:reply", Kind: "confirm"}, depth: 4}},
+	}}
+	chunks := commentChunks(comments, 20, -1, tabState{})
+	require.Contains(t, stripANSI(strings.Join(chunks[0].lines, "\n")), "  Read the evidence.")
+	assertGolden(t, "detail-comment-tree-tiny", strings.Join(chunks[0].lines, "\n"))
+}
+
 func TestSnapshot_CommentTree(t *testing.T) {
 	defer snapshotInit(t)()
 	when := time.Date(2026, 4, 30, 10, 0, 0, 0, time.UTC)

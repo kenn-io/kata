@@ -33,7 +33,9 @@ func commentChunks(cs []CommentEntry, width, cursor int, ts tabState) []entryChu
 	chunks := make([]entryChunk, 0, len(cs))
 	authorW := commentAuthorWidth(cs, width)
 	for i, c := range cs {
-		renderWidth := width - 2*c.depth
+		// Preserve at least 32 columns for content before adding indentation.
+		depth := min(c.depth, max(0, (width-32)/2))
+		renderWidth := width - 2*depth
 		author := padToWidth(commentAuthorStyle(commentAttribution(c)), min(authorW, max(1, renderWidth-16)))
 		header := fmt.Sprintf("%s  %s", author, subtleStyle.Render(formatDocumentTime(c.CreatedAt)))
 		if c.Handle != "" {
@@ -80,14 +82,15 @@ func commentChunks(cs []CommentEntry, width, cursor int, ts tabState) []entryChu
 			lines = append(lines, wrapDetailRow("  ", "R typed reply · [/] select evidence · Enter open · Esc back", renderWidth)...)
 			lines = append(lines, commentEvidenceLines(c, renderWidth, ts.commentLinkCursor)...)
 		}
-		lines = indentLines(lines, c.depth)
+		lines = indentLines(lines, depth)
 		for _, leaf := range c.leaves {
-			leafWidth := width - 2*leaf.depth
+			leafDepth := min(leaf.depth, max(0, (width-32)/2))
+			leafWidth := width - 2*leafDepth
 			rows := wrapDetailRow("  ", "↳ "+sanitizeForDisplay(leaf.link.Kind)+" "+commentEvidenceHeader(leaf.link), leafWidth)
 			if leaf.link.TargetEdited {
 				rows = append(rows, wrapDetailRow("  ", "Target edited after this reply", leafWidth)...)
 			}
-			lines = append(lines, indentLines(rows, leaf.depth)...)
+			lines = append(lines, indentLines(rows, leafDepth)...)
 		}
 		lines = append(lines, "")
 		chunks = append(chunks, entryChunk{lines: lines})
@@ -425,7 +428,7 @@ func commentEvidenceLines(c CommentEntry, width, cursor int) []string {
 		if link.UID == selected.UID {
 			header = "> " + header
 		}
-		lines = append(lines, wrapDetailRow("  ", sanitizeForDisplay(header), width)...)
+		lines = append(lines, wrapDetailRow("  ", header, width)...)
 		if link.TargetEdited {
 			lines = append(lines, wrapDetailRow("  ", "Target edited after this reply", width)...)
 		}

@@ -370,7 +370,7 @@ func (dm detailModel) applyFetchedIfFresh(msg tea.Msg) (detailModel, bool) {
 		}
 		dm.commentsErr = m.err
 		dm = dm.autoSelectActivityTab()
-		if wasVisible && selectedFound && m.err == nil {
+		if wasVisible && selectedFound {
 			dm = dm.revealCursor()
 		}
 	case eventsFetchedMsg:

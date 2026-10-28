@@ -23,28 +23,36 @@ func compareCommentLinks(a, b commentref.Link) int {
 // roots in input order and retaining malformed cycles once.
 func threadOrder(cs []CommentEntry) []CommentEntry {
 	byUID := make(map[string]int, len(cs))
+	children := make(map[string][]commentref.Link, len(cs))
 	for i, c := range cs {
+		children[c.UID] = nil
 		if c.UID != "" {
 			byUID[c.UID] = i
 		}
 	}
-	children := make([][]commentref.Link, len(cs))
+	for _, c := range cs {
+		for _, link := range c.Backlinks {
+			if _, local := byUID[link.UID]; !local {
+				children[c.UID] = append(children[c.UID], link)
+				children[link.UID] = nil
+			}
+		}
+	}
 	var roots []int
 	for i, c := range cs {
-		parent, local := 0, false
+		parent, visible := "", false
 		if c.Reply != nil {
-			parent, local = byUID[c.Reply.UID]
+			parent = c.Reply.UID
+			_, visible = children[parent]
 		}
-		if local {
+		if visible {
 			children[parent] = append(children[parent], commentref.Link{UID: c.UID, CreatedAt: c.CreatedAt})
 		} else {
 			roots = append(roots, i)
 		}
-		for _, link := range c.Backlinks {
-			if _, local := byUID[link.UID]; !local {
-				children[i] = append(children[i], link)
-			}
-		}
+	}
+	for _, links := range children {
+		slices.SortStableFunc(links, compareCommentLinks)
 	}
 	ordered := make([]CommentEntry, 0, len(cs))
 	visited := make([]bool, len(cs))
@@ -57,14 +65,16 @@ func threadOrder(cs []CommentEntry) []CommentEntry {
 		c := cs[i]
 		c.depth, c.leaves = depth, nil
 		ordered = append(ordered, c)
-		slices.SortStableFunc(children[i], compareCommentLinks)
-		for _, link := range children[i] {
+		for _, link := range children[c.UID] {
 			childDepth := min(depth+1, maxCommentDepth)
 			if child, local := byUID[link.UID]; local {
 				visit(child, childDepth)
 			} else {
 				last := &ordered[len(ordered)-1]
 				last.leaves = append(last.leaves, commentLeaf{link: link, depth: childDepth})
+				for _, child := range children[link.UID] {
+					visit(byUID[child.UID], min(childDepth+1, maxCommentDepth))
+				}
 			}
 		}
 	}
@@ -91,8 +101,8 @@ func commentTags(c CommentEntry) string {
 			continue
 		}
 		tag := kind
-		// Projection keeps the newest replies per kind. If these all predate
-		// the target edit, older omitted replies do too.
+		// Assumes projection retains the newest replies per kind, so omitted
+		// replies also predate the edit when every retained reply does.
 		if !fresh {
 			tag += " (before edit)"
 		}

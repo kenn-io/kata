@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -281,10 +282,7 @@ func wrapDetailRow(prefix, value string, width int) []string {
 	}
 	prefixW := runewidth.StringWidth(prefix)
 	budget := max(width-prefixW, 1)
-	parts := hardWrap(value, budget)
-	if len(parts) == 0 {
-		return []string{prefix}
-	}
+	parts := strings.Split(ansi.Hardwrap(value, budget, true), "\n")
 	out := make([]string, 0, len(parts))
 	out = append(out, prefix+parts[0])
 	hang := strings.Repeat(" ", prefixW)
