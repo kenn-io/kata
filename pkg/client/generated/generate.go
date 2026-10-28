@@ -23,6 +23,7 @@ type ReadyGlobalIssue = ReadyGlobalIssueOut
 // released type and its constants instead of a generated enum.
 type TranscriptAgent string
 
+// Built-in agents, whose session IDs are UUIDs.
 const (
 	Claude TranscriptAgent = "claude"
 	Codex  TranscriptAgent = "codex"
