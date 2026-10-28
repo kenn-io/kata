@@ -75,14 +75,9 @@ describe('IssueHistory', () => {
   it.each([
     null,
     [],
-    ...[
-      '/private/chat.jsonl',
-      '..',
-      'session other',
-      'session#other',
-      '',
-      'a'.repeat(129),
-    ].map((session_id) => ({ agent: 'codex', session_id })),
+    ...['/private/chat.jsonl', '..', 'session other', 'session#other', '', 'a'.repeat(129)].map(
+      (session_id) => ({ agent: 'codex', session_id }),
+    ),
     ...[undefined, '', '-pi', 'pi/omp', 'a'.repeat(33)].map((agent) => ({
       agent,
       session_id: '00000000-0000-4000-8000-000000000001',
