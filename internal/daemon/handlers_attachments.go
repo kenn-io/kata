@@ -99,6 +99,9 @@ func binaryContent(mediaType string) map[string]*huma.MediaType {
 // recheckAttachmentWrite repeats the active-project and claim gates after the
 // Docbank transfer, which can outlast an archive or a lost claim.
 func recheckAttachmentWrite(ctx context.Context, cfg ServerConfig, projectID int64, iss db.Issue, actor string) error {
+	if err := revalidateBrowserSession(ctx); err != nil {
+		return api.NewError(http.StatusUnauthorized, "unauthorized", "authentication required", "", nil)
+	}
 	if _, err := activeProjectByID(ctx, cfg.DB, projectID); err != nil {
 		return err
 	}
@@ -150,6 +153,9 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		}
 		if _, err = file.Seek(0, io.SeekStart); err != nil {
 			return nil, internalAPIError(err)
+		}
+		if err := revalidateBrowserSession(ctx); err != nil {
+			return nil, api.NewError(http.StatusUnauthorized, "unauthorized", "authentication required", "", nil)
 		}
 		parent, err := cfg.Docbank.EnsureFolder(ctx, path.Join(cfg.DocbankFolder, iss.ProjectUID))
 		if err != nil {
