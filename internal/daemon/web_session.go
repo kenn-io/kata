@@ -530,6 +530,9 @@ func webLocalIssueRequestAllowed(r *http.Request, parts []string) bool {
 		}
 	}
 	if len(parts) == 3 {
+		if parts[1] == "attachments" && parts[2] == "links" {
+			return r.Method == http.MethodPost
+		}
 		if parts[1] == "labels" {
 			return r.Method == http.MethodDelete
 		}

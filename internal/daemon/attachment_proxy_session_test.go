@@ -19,7 +19,7 @@ func TestAttachmentProxyCancelsWhenSessionEnds(t *testing.T) {
 	canceled := make(chan struct{})
 	stop := make(chan struct{})
 	defer close(stop)
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
 		close(started)
 		select {
@@ -65,7 +65,7 @@ func TestAttachmentProxyCancelsWhenSessionEnds(t *testing.T) {
 
 type invalidateOnRead struct{ active *atomic.Bool }
 
-func (r invalidateOnRead) Read(p []byte) (int, error) { r.active.Store(false); return 0, io.EOF }
+func (r invalidateOnRead) Read(_ []byte) (int, error) { r.active.Store(false); return 0, io.EOF }
 func TestAttachmentProxyRechecksAfterReceivingBody(t *testing.T) {
 	var called atomic.Bool
 	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called.Store(true) }))
