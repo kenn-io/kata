@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"uuid"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
@@ -164,4 +166,25 @@ func TestCloseAttachmentAgentOutputKeepsEvidenceID(t *testing.T) {
 
 func seedCLILink(f *docbanktest.Fake) {
 	f.Seed("/reports/report.pdf", docbanktest.Node{ID: 42, Name: "report.pdf", Kind: "file", CurrentVersionID: cliLinkVersion}, docbanktest.Version{ID: cliLinkVersion, NodeID: 42, Size: 12, MediaType: "application/pdf"})
+}
+
+func TestCloseAttachmentPreservesLowercaseFullIDForReplay(t *testing.T) {
+	env, _, ref := attachmentCLIEnv(t)
+	project, err := env.DB.ProjectByName(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	issue, err := env.DB.IssueByShortID(t.Context(), project.ID, ref, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	id := "01k7e222222222222222222222"
+	entry, err := json.Marshal(metadata.Attachment{Name: "report.pdf", MediaType: "application/pdf", Size: 12, DocbankVersion: uuid.MustParse(cliLinkVersion)})
+	require.NoError(t, err)
+	_, err = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{metadata.AttachmentPrefix + id: entry}})
+	require.NoError(t, err)
+	args := []string{"close", ref, "--done", "-m", attachmentCloseMessage, "--evidence", "attachment:" + id, "--idempotency-key", "lowercase-close", "--json"}
+	out, err := executeCloseAttachmentCLI(t, env.URL, args...)
+	require.NoError(t, err, out)
+	_, err = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{metadata.AttachmentPrefix + id: nil}})
+	require.NoError(t, err)
+	out, err = executeCloseAttachmentCLI(t, env.URL, args...)
+	require.NoError(t, err, out)
+	require.Contains(t, out, `"reused":true`)
 }

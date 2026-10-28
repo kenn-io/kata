@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/metadata"
@@ -37,8 +38,7 @@ func closeEvidenceForShow(ctx context.Context, hc *http.Client, base string, pid
 	if err != nil {
 		return nil, err
 	}
-	var evidence []db.Evidence
-	var latest *generated.EventEnvelope
+	var events []generated.EventEnvelope
 	var after int64
 	const limit = int64(1000)
 	for {
@@ -61,30 +61,16 @@ func closeEvidenceForShow(ctx context.Context, hc *http.Client, base string, pid
 			return nil, fmt.Errorf("issue history requires a reset")
 		}
 		for _, event := range page.Events {
-			if event.Type != "issue.closed" {
-				continue
-			}
-			if event.IssueUID == nil || *event.IssueUID != ref {
-				return nil, fmt.Errorf("issue history close event subject does not match %s", ref)
-			}
-			var payload struct {
-				Evidence []db.Evidence `json:"evidence"`
-			}
-			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				return nil, fmt.Errorf("decode close history: %w", err)
-			}
-			if latest == nil || cmp.Or(
-				cmp.Compare(event.HlcPhysicalMs, latest.HlcPhysicalMs),
-				cmp.Compare(event.HlcCounter, latest.HlcCounter),
-				cmp.Compare(event.OriginInstanceUID, latest.OriginInstanceUID),
-				cmp.Compare(event.EventUID, latest.EventUID),
-			) > 0 {
-				latest = &event
-				evidence = payload.Evidence
+			switch event.Type {
+			case "issue.closed", "issue.reopened", "issue.updated", "issue.created", "issue.snapshot":
+				if event.IssueUID == nil || *event.IssueUID != ref {
+					return nil, fmt.Errorf("issue history event subject does not match %s", ref)
+				}
+				events = append(events, event)
 			}
 		}
 		if len(page.Events) < int(limit) {
-			return evidence, nil
+			return effectiveCloseEvidence(events)
 		}
 		if page.NextAfterID <= after {
 			return nil, fmt.Errorf("issue history cursor did not advance")
@@ -92,6 +78,42 @@ func closeEvidenceForShow(ctx context.Context, hc *http.Client, base string, pid
 		after = page.NextAfterID
 	}
 }
+func effectiveCloseEvidence(events []generated.EventEnvelope) ([]db.Evidence, error) {
+	slices.SortStableFunc(events, func(a, b generated.EventEnvelope) int {
+		return cmp.Or(cmp.Compare(a.HlcPhysicalMs, b.HlcPhysicalMs),
+			cmp.Compare(a.HlcCounter, b.HlcCounter),
+			cmp.Compare(a.OriginInstanceUID, b.OriginInstanceUID),
+			cmp.Compare(a.EventUID, b.EventUID))
+	})
+	var evidence []db.Evidence
+	var status string
+	for _, event := range events {
+		switch event.Type {
+		case "issue.closed":
+			var payload struct {
+				Evidence []db.Evidence `json:"evidence"`
+			}
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				return nil, fmt.Errorf("decode close history: %w", err)
+			}
+			status, evidence = "closed", payload.Evidence
+		case "issue.reopened":
+			status, evidence = "open", nil
+		default:
+			var payload struct {
+				Status *string `json:"status"`
+			}
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				return nil, fmt.Errorf("decode issue history: %w", err)
+			}
+			if payload.Status != nil && *payload.Status != status {
+				status, evidence = *payload.Status, nil
+			}
+		}
+	}
+	return evidence, nil
+}
+
 func printShowAttachmentEvidence(out io.Writer, b showResponseForCLI) error {
 	for _, e := range b.CloseEvidence {
 		if e.Type != "attachment" {

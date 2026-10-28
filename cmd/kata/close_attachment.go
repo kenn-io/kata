@@ -63,8 +63,8 @@ func prepareCloseAttachments(cmd *cobra.Command, raw, reason, message string, ev
 		if e.Type != api.EvidenceAttachment {
 			continue
 		}
-		id := strings.ToUpper(strings.TrimSpace(e.AttachmentID))
-		if uid.Valid(id) {
+		id := strings.TrimSpace(e.AttachmentID)
+		if uid.Valid(strings.ToUpper(id)) {
 			out[i].AttachmentID = id
 			continue
 		}
