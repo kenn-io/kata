@@ -81,3 +81,38 @@ func TestShowAttachmentHistoryRequiresAcknowledgementOnEveryPage(t *testing.T) {
 		})
 	}
 }
+
+func TestOptionalShowAttachmentHistory(t *testing.T) {
+	const subject = "01K7E222222222222222222222222"
+	for _, tc := range []struct {
+		name, version string
+		status        int
+		wantHistory   bool
+	}{
+		{"older daemon", "0.31.0", http.StatusOK, false},
+		{"history denied", "0.32.0", http.StatusForbidden, true},
+		{"supported", "0.32.0", http.StatusOK, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			historyCalls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path == "/api/v1/health" {
+					_, _ = fmt.Fprintf(w, `{"api_schema_version":%q}`, tc.version)
+					return
+				}
+				historyCalls++
+				if tc.status != http.StatusOK {
+					w.WriteHeader(tc.status)
+					return
+				}
+				w.Header().Set("X-Kata-Events-Issue-UID", subject)
+				_, _ = fmt.Fprint(w, `{"events":[],"next_after_id":0,"reset_required":false}`)
+			}))
+			defer server.Close()
+			_, err := optionalCloseEvidenceForShow(context.Background(), server.Client(), server.URL, 1, subject)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantHistory, historyCalls > 0)
+		})
+	}
+}
