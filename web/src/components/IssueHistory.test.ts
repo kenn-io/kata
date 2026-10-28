@@ -66,24 +66,30 @@ describe('IssueHistory', () => {
     expect(screen.queryByRole('link')).toBeNull()
   })
 
-  it.each([null, [], { agent: 'codex', session_id: '/private/chat.jsonl' }])(
-    'omits malformed session coordinates: %s',
-    (transcript) => {
-      render(IssueHistory, {
-        props: {
-          events: [
-            {
-              ...event('close-c', '2026-08-01T12:00:00Z'),
-              type: 'issue.closed',
-              payload: { transcript },
-            },
-          ],
-        },
-      })
-      expect(screen.queryByText(/Session:/)).toBeNull()
-      expect(screen.queryByRole('link')).toBeNull()
+  it.each([
+    null,
+    [],
+    { agent: 'codex', session_id: '/private/chat.jsonl' },
+    {
+      agent: 'pi',
+      session_id: '00000000-0000-4000-8000-000000000001',
+      url: 'https://agentsview.example/sessions/00000000-0000-4000-8000-000000000001',
     },
-  )
+  ])('omits malformed session coordinates: %s', (transcript) => {
+    render(IssueHistory, {
+      props: {
+        events: [
+          {
+            ...event('close-c', '2026-08-01T12:00:00Z'),
+            type: 'issue.closed',
+            payload: { transcript },
+          },
+        ],
+      },
+    })
+    expect(screen.queryByText(/Session:/)).toBeNull()
+    expect(screen.queryByRole('link')).toBeNull()
+  })
 
   it('shows when each event happened beside its description', () => {
     const { container } = render(IssueHistory, {

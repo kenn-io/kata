@@ -39,7 +39,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Share generated agent hooks across machines with `--executable kata` or `kata.exe`. Installation checks PATH and keeps that bare command; project hooks installed with `--executable kata` now also record bare `kata` instead of an absolute path; the harness also needs Kata on its runtime PATH. See [Agent workflows](workflows/agents.md).
 - Link a closing session to AgentsView using `[close.transcript].session_id_env`
-  to choose the session variables. Claude Code and Codex keep their existing
+  to add session variables alongside Claude Code and Codex. Claude Code and Codex keep their existing
   behavior with daemon HTTP API `0.26.0` or newer. Other configured variables
   need API `0.34.0` and an AgentsView build with
   [agentsview#2465](https://github.com/kenn-io/agentsview/pull/2465), which has yet

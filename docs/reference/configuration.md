@@ -43,26 +43,22 @@ passed. No transcript body, local filename, token, or hook ownership hash is
 copied. The setting affects CLI closes, including remote-daemon calls; browser
 closes do not infer a session from the daemon's environment.
 
-The `session_id_env` list selects the environment variables to read. Its default is:
+Kata always checks `CLAUDE_CODE_SESSION_ID`, `CODEX_THREAD_ID`, and
+`CODEX_SESSION_ID`, in that order. The `session_id_env` list adds variables
+for other agents. For example, under `[close.transcript]`:
 
 ```toml
-session_id_env = ["CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID"]
+session_id_env = ["PI_SESSION_ID"]
 ```
 
-A configured list replaces the default; an absent or empty list uses the default.
-To include `PI_SESSION_ID` alongside the default variables, set this under
-`[close.transcript]`:
+All nonempty session variables must agree case-insensitively. Different values
+are ambiguous and skip the attachment. An additional variable with the same
+UUID as a built-in variable keeps the built-in variable's agent.
 
-```toml
-session_id_env = ["CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "PI_SESSION_ID"]
-```
-
-To use only that variable, set `session_id_env = ["PI_SESSION_ID"]` instead.
-If multiple configured variables have nonempty values, they must agree
-case-insensitively. Different values are ambiguous and skip the attachment.
-
-`KATA_TRANSCRIPT_SESSION_ID` overrides the configured variables. When it is set,
-`KATA_TRANSCRIPT_AGENT` optionally supplies `claude` or `codex`:
+Setting either `KATA_TRANSCRIPT_AGENT` or `KATA_TRANSCRIPT_SESSION_ID` skips
+variable discovery. `KATA_TRANSCRIPT_SESSION_ID` supplies the UUID;
+`KATA_TRANSCRIPT_AGENT` optionally supplies `claude` or `codex`. An agent
+without a session ID warns and skips attachment.
 
 ```sh
 KATA_TRANSCRIPT_SESSION_ID=00000000-0000-4000-8000-000000000001 \
@@ -136,7 +132,7 @@ string; on a keyed retry use `original_event.payload`. Both contain the same
 | `KATA_POSTGRES_ALLOW_INSECURE` | Set to `1` only to permit a non-loopback Postgres connection without server-identity-verified TLS. |
 | `KATA_AUTHOR` | Default actor for mutations. |
 | `KATA_TEAMMATE` | Optional teammate attribution for comments and newly created issues. A command-level `--teammate` overrides it; `--teammate=''` suppresses it. |
-| `KATA_TRANSCRIPT_AGENT` | Optional `claude` or `codex` agent for an explicit `KATA_TRANSCRIPT_SESSION_ID`; preserves the original agent when replaying a keyed close from another shell. |
+| `KATA_TRANSCRIPT_AGENT` | Optional `claude` or `codex` agent for an explicit `KATA_TRANSCRIPT_SESSION_ID`; setting it skips variable discovery, and an agent alone warns and skips attachment. Preserves the original agent when replaying a keyed close from another shell. |
 | `KATA_TRANSCRIPT_SESSION_ID` | Explicit current closing session UUID. Used only when close transcript attachment is enabled; overrides the configured session variables. |
 | `KATA_INBOX_USER` | Exact actor or `actor/teammate` inbox address for `kata inbox` when `--for` is omitted and the TUI Attention view (`T`), which otherwise falls back to the authenticated actor. It does not set attribution and is independent of `KATA_AUTHOR` and `KATA_TEAMMATE`. |
 | `KATA_SERVER` | Remote daemon URL. Skips local discovery and auto-start. |

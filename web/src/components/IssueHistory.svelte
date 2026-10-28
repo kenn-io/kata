@@ -27,6 +27,7 @@
     if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
     const ref = value as Record<string, unknown>
     if (
+      (ref.agent !== undefined && ref.agent !== 'claude' && ref.agent !== 'codex') ||
       typeof ref.session_id !== 'string' ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ref.session_id)
     ) {

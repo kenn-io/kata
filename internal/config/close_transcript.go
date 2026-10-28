@@ -24,7 +24,7 @@ func ReadCloseTranscriptConfig() (CloseTranscriptConfig, error) {
 	}
 	data, err := os.ReadFile(path) // #nosec G304 -- derived from KATA_HOME
 	if errors.Is(err, os.ErrNotExist) {
-		return defaultCloseTranscriptConfig(CloseTranscriptConfig{}), nil
+		return CloseTranscriptConfig{}, nil
 	}
 	if err != nil {
 		return CloseTranscriptConfig{}, fmt.Errorf("read %s: %w", path, err)
@@ -37,12 +37,5 @@ func ReadCloseTranscriptConfig() (CloseTranscriptConfig, error) {
 	if _, err = toml.Decode(string(data), &file); err != nil {
 		return CloseTranscriptConfig{}, fmt.Errorf("parse %s: %w", path, err)
 	}
-	return defaultCloseTranscriptConfig(file.Close.Transcript), nil
-}
-
-func defaultCloseTranscriptConfig(cfg CloseTranscriptConfig) CloseTranscriptConfig {
-	if len(cfg.SessionIDEnv) == 0 {
-		cfg.SessionIDEnv = []string{"CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID"}
-	}
-	return cfg
+	return file.Close.Transcript, nil
 }

@@ -23,13 +23,10 @@ func closeTranscript(cmd *cobra.Command) *transcript.Transcript {
 	if !cfg.Enabled {
 		return nil
 	}
-	id := os.Getenv("KATA_TRANSCRIPT_SESSION_ID")
-	agent := ""
-	if id != "" {
-		agent = os.Getenv("KATA_TRANSCRIPT_AGENT")
-	}
-	if id == "" {
-		for _, name := range cfg.SessionIDEnv {
+	agent, id := os.Getenv("KATA_TRANSCRIPT_AGENT"), os.Getenv("KATA_TRANSCRIPT_SESSION_ID")
+	if agent == "" && id == "" {
+		names := append([]string{"CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID"}, cfg.SessionIDEnv...)
+		for _, name := range names {
 			value := os.Getenv(name)
 			if value == "" {
 				continue
@@ -73,7 +70,7 @@ func dropUnsupportedTranscript(
 	ctx context.Context, cmd *cobra.Command, client *http.Client, baseURL string, body map[string]any,
 ) error {
 	required := apiVersionCloseTranscript
-	if ref := body["transcript"].(*transcript.Transcript); ref.Agent == "" {
+	if ref, ok := body["transcript"].(*transcript.Transcript); ok && ref != nil && ref.Agent == "" {
 		required = apiVersionAgentlessCloseTranscript
 	}
 	err := requireDaemonAPIVersion(ctx, client, baseURL, required, "close transcript")
