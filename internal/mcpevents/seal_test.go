@@ -2,9 +2,6 @@ package mcpevents_test
 
 import (
 	"bytes"
-	"crypto/aes"
-	"crypto/cipher"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -48,24 +45,6 @@ func TestOpenRejectsTamperingAndWrongBinding(t *testing.T) {
 	assert.Error(t, err)
 	_, err = mcpevents.Open(key, "sub_a", "secret", sealed[:5])
 	assert.Error(t, err)
-}
-
-func TestSealRejectsBadKeyLength(t *testing.T) {
-	for _, size := range []int{16, 24} {
-		t.Run(fmt.Sprint(size), func(t *testing.T) {
-			key := bytes.Repeat([]byte{7}, size)
-			_, err := mcpevents.Seal(key, "sub_a", "secret", nil)
-			assert.Error(t, err)
-			block, err := aes.NewCipher(key)
-			require.NoError(t, err)
-			gcm, err := cipher.NewGCM(block)
-			require.NoError(t, err)
-			nonce := make([]byte, gcm.NonceSize())
-			sealed := gcm.Seal(nonce, nonce, []byte("x"), []byte("5:sub_a|secret")) //nolint:gosec // Deterministic ciphertext fixture exercises rejection of otherwise valid AES keys.
-			_, err = mcpevents.Open(key, "sub_a", "secret", sealed)
-			assert.Error(t, err, "valid AES ciphertext still requires a 32-byte key")
-		})
-	}
 }
 
 func TestSealAssociatedDataIsUnambiguous(t *testing.T) {

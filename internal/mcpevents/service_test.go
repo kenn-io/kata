@@ -81,47 +81,46 @@ func TestTTLFieldDecodesAbsentNullAndValue(t *testing.T) {
 	}
 }
 
+// Every case fails before storage, so one backend is enough.
 func TestSubscribeValidation(t *testing.T) {
-	forEachBackend(t, func(t *testing.T, store db.Storage) {
-		h := newHarness(t, store)
-		for _, tc := range []struct {
-			name   string
-			mutate func(*mcpevents.SubscribeRequest)
-			code   int
-			reason string
-		}{
-			{"unknown event", func(r *mcpevents.SubscribeRequest) { r.Name = "kata.other" }, mcpevents.CodeNotFound, "event"},
-			{"unsupported mode", func(r *mcpevents.SubscribeRequest) { r.Delivery.Mode = "poll" }, mcpevents.CodeUnsupported, "deliveryMode"},
-			{"bad secret", func(r *mcpevents.SubscribeRequest) { r.Delivery.Secret = "whsec_short" }, mcpevents.CodeInvalidParams, "invalid_secret"},
-			{"missing secret", func(r *mcpevents.SubscribeRequest) { r.Delivery.Secret = "" }, mcpevents.CodeInvalidParams, "invalid_secret"},
-			{"http callback", func(r *mcpevents.SubscribeRequest) { r.Delivery.URL = "http://example.com/x" }, mcpevents.CodeInvalidParams, "invalid_callback"},
-			{"private callback", func(r *mcpevents.SubscribeRequest) { r.Delivery.URL = "https://10.0.0.1/x" }, mcpevents.CodeInvalidParams, "invalid_callback"},
-			{"blank recipient", func(r *mcpevents.SubscribeRequest) { r.Arguments.For = " " }, mcpevents.CodeInvalidParams, "invalid_arguments"},
-			{"empty project list", func(r *mcpevents.SubscribeRequest) { r.Arguments.ProjectUIDs = []string{} }, mcpevents.CodeInvalidParams, "invalid_project_uids"},
-			{"unsorted project list", func(r *mcpevents.SubscribeRequest) { r.Arguments.ProjectUIDs = []string{testProjectB, testProjectA} }, mcpevents.CodeInvalidParams, "project_uids_not_sorted_unique"},
-			{"duplicate project list", func(r *mcpevents.SubscribeRequest) { r.Arguments.ProjectUIDs = []string{testProjectA, testProjectA} }, mcpevents.CodeInvalidParams, "project_uids_not_sorted_unique"},
-			{"lowercase project uid", func(r *mcpevents.SubscribeRequest) { r.Arguments.ProjectUIDs = []string{strings.ToLower(testProjectA)} }, mcpevents.CodeInvalidParams, "invalid_project_uids"},
-			{"bad issue uid", func(r *mcpevents.SubscribeRequest) { r.Arguments.IssueUID = "nope" }, mcpevents.CodeInvalidParams, "invalid_issue_uid"},
-		} {
-			t.Run(tc.name, func(t *testing.T) {
-				req := h.request("example-user")
-				tc.mutate(&req)
-				_, err := h.subscribe(principalA, req)
-				_ = requireWire(t, err, tc.code, tc.reason)
-				assert.Zero(t, h.recv.challenges.Load(), "validation fails before any network activity")
-			})
-		}
-		t.Run("bad cursor MAC", func(t *testing.T) {
+	h := newHarness(t, openSQLite(t))
+	for _, tc := range []struct {
+		name   string
+		mutate func(*mcpevents.SubscribeRequest)
+		code   int
+		reason string
+	}{
+		{"unknown event", func(r *mcpevents.SubscribeRequest) { r.Name = "kata.other" }, mcpevents.CodeNotFound, "event"},
+		{"unsupported mode", func(r *mcpevents.SubscribeRequest) { r.Delivery.Mode = "poll" }, mcpevents.CodeUnsupported, "deliveryMode"},
+		{"bad secret", func(r *mcpevents.SubscribeRequest) { r.Delivery.Secret = "whsec_short" }, mcpevents.CodeInvalidParams, "invalid_secret"},
+		{"missing secret", func(r *mcpevents.SubscribeRequest) { r.Delivery.Secret = "" }, mcpevents.CodeInvalidParams, "invalid_secret"},
+		{"http callback", func(r *mcpevents.SubscribeRequest) { r.Delivery.URL = "http://example.com/x" }, mcpevents.CodeInvalidParams, "invalid_callback"},
+		{"private callback", func(r *mcpevents.SubscribeRequest) { r.Delivery.URL = "https://10.0.0.1/x" }, mcpevents.CodeInvalidParams, "invalid_callback"},
+		{"blank recipient", func(r *mcpevents.SubscribeRequest) { r.Arguments.For = " " }, mcpevents.CodeInvalidParams, "invalid_arguments"},
+		{"empty project list", func(r *mcpevents.SubscribeRequest) { r.Arguments.ProjectUIDs = []string{} }, mcpevents.CodeInvalidParams, "invalid_project_uids"},
+		{"unsorted project list", func(r *mcpevents.SubscribeRequest) { r.Arguments.ProjectUIDs = []string{testProjectB, testProjectA} }, mcpevents.CodeInvalidParams, "project_uids_not_sorted_unique"},
+		{"duplicate project list", func(r *mcpevents.SubscribeRequest) { r.Arguments.ProjectUIDs = []string{testProjectA, testProjectA} }, mcpevents.CodeInvalidParams, "project_uids_not_sorted_unique"},
+		{"lowercase project uid", func(r *mcpevents.SubscribeRequest) { r.Arguments.ProjectUIDs = []string{strings.ToLower(testProjectA)} }, mcpevents.CodeInvalidParams, "invalid_project_uids"},
+		{"bad issue uid", func(r *mcpevents.SubscribeRequest) { r.Arguments.IssueUID = "nope" }, mcpevents.CodeInvalidParams, "invalid_issue_uid"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			req := h.request("example-user")
-			cursor := "c1.0123456789abcdef0123456789abcdef.0.5.AAAAAAAAAAAAAAAAAAAAAA"
-			req.Cursor = &cursor
+			tc.mutate(&req)
 			_, err := h.subscribe(principalA, req)
-			_ = requireWire(t, err, mcpevents.CodeInvalidParams, "invalid_cursor")
+			_ = requireWire(t, err, tc.code, tc.reason)
+			assert.Zero(t, h.recv.challenges.Load(), "validation fails before any network activity")
 		})
-		t.Run("invalid principal", func(t *testing.T) {
-			_, err := h.subscribe(mcpevents.Principal{Authority: "bootstrap", Subject: "x"}, h.request("example-user"))
-			assert.ErrorIs(t, err, mcpevents.ErrForbidden)
-		})
+	}
+	t.Run("bad cursor MAC", func(t *testing.T) {
+		req := h.request("example-user")
+		cursor := "c1.0123456789abcdef0123456789abcdef.0.5.AAAAAAAAAAAAAAAAAAAAAA"
+		req.Cursor = &cursor
+		_, err := h.subscribe(principalA, req)
+		_ = requireWire(t, err, mcpevents.CodeInvalidParams, "invalid_cursor")
+	})
+	t.Run("invalid principal", func(t *testing.T) {
+		_, err := h.subscribe(mcpevents.Principal{Authority: "bootstrap", Subject: "x"}, h.request("example-user"))
+		assert.ErrorIs(t, err, mcpevents.ErrForbidden)
 	})
 }
 

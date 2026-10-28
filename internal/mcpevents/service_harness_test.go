@@ -39,15 +39,7 @@ type opener func(t *testing.T) db.Storage
 // and consent never leak between subtests.
 func forEachBackendOpener(t *testing.T, fn func(t *testing.T, open opener)) {
 	t.Helper()
-	t.Run("sqlite", func(t *testing.T) {
-		fn(t, func(t *testing.T) db.Storage {
-			t.Helper()
-			store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
-			require.NoError(t, err)
-			t.Cleanup(func() { require.NoError(t, store.Close()) })
-			return store
-		})
-	})
+	t.Run("sqlite", func(t *testing.T) { fn(t, openSQLite) })
 	t.Run("postgres", func(t *testing.T) {
 		if testing.Short() {
 			t.Skip("requires postgres")
@@ -65,6 +57,16 @@ func forEachBackendOpener(t *testing.T, fn func(t *testing.T, open opener)) {
 }
 
 // forEachBackend runs fn once per backend against one fresh store.
+// openSQLite opens a fresh SQLite store, for tests whose subject never
+// reaches storage and so gains nothing from a second backend.
+func openSQLite(t *testing.T) db.Storage {
+	t.Helper()
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	return store
+}
+
 func forEachBackend(t *testing.T, fn func(t *testing.T, store db.Storage)) {
 	t.Helper()
 	forEachBackendOpener(t, func(t *testing.T, open opener) { fn(t, open(t)) })
