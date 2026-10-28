@@ -641,7 +641,8 @@ func daemonStatusCmd() *cobra.Command {
 			}
 			out.Selected = &selected
 			for _, r := range recs {
-				if daemonruntime.RuntimeProcessAlive(r) {
+				// Match discovery, which can select a record controls skip.
+				if daemonruntime.RuntimeRecordWorthProbing(r) {
 					out.Daemons = append(out.Daemons, daemonStatusEntry{
 						PID:           r.PID,
 						Version:       daemonRuntimeVersion(r),
@@ -762,8 +763,10 @@ func daemonRuntimeVersion(r kitdaemon.RuntimeRecord) string {
 func noteSkippedDaemons(stderr io.Writer, records []kitdaemon.RuntimeRecord) {
 	for _, record := range records {
 		switch kitdaemon.RuntimeProcessScope(record) {
-		case kitdaemon.ProcessScopeForeign, kitdaemon.ProcessScopeUnknown:
-			_, _ = fmt.Fprintf(stderr, "skipping daemon pid=%d (another PID namespace or unverifiable identity)\n", record.PID)
+		case kitdaemon.ProcessScopeForeign:
+			_, _ = fmt.Fprintf(stderr, "skipping daemon pid=%d (another PID namespace)\n", record.PID)
+		case kitdaemon.ProcessScopeUnknown:
+			_, _ = fmt.Fprintf(stderr, "skipping daemon pid=%d (unverifiable identity)\n", record.PID)
 		}
 	}
 }

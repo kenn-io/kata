@@ -893,6 +893,76 @@ func TestStopRunningDaemonsErrorsOnUnverifiableIncompatibleRuntime(t *testing.T)
 	assert.NoError(t, err, "unverifiable reachable daemon runtime file should be preserved")
 }
 
+// Discovery can select a daemon whose process identity cannot be checked, but
+// automatic replacement must not signal it on that unverified identity.
+func TestStopRunningDaemonsRefusesUnverifiableIdentity(t *testing.T) {
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	setupKataEnv(t)
+	helper, _ := startLongLivedTestProcess(t)
+	_, addr := startMockDaemonPing(t, map[string]any{
+		"ok": true, "service": "kata", "version": "old-version", "pid": helper.Process.Pid,
+	})
+	ns := writeUnverifiableRecord(t, helper.Process.Pid, addr, nil)
+	signals := 0
+	origSignal := signalDaemonStopForEnsure
+	signalDaemonStopForEnsure = func(kitdaemon.RuntimeRecord, string) error {
+		signals++
+		return nil
+	}
+	t.Cleanup(func() { signalDaemonStopForEnsure = origSignal })
+
+	err := stopRunningDaemons(t.Context(), ns.DataDir, ns.DBHash)
+
+	require.ErrorContains(t, err, "stop it manually")
+	assert.Zero(t, signals)
+}
+
+// A stale unverifiable record can share an endpoint another daemon now owns;
+// its browser metadata is accepted only when the endpoint reports its PID.
+func TestDiscoverWebRuntimeForUnverifiableRecordRequiresMatchingPID(t *testing.T) {
+	setupKataEnv(t)
+	helper, _ := startLongLivedTestProcess(t)
+	for _, tc := range []struct {
+		name    string
+		pingPID int
+		wantErr bool
+	}{
+		{name: "matching PID", pingPID: helper.Process.Pid},
+		{name: "endpoint reused by another daemon", pingPID: os.Getpid(), wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			baseURL, addr := startMockDaemonPing(t, map[string]any{
+				"ok": true, "service": "kata", "version": "test-version", "pid": tc.pingPID,
+			})
+			ns := writeUnverifiableRecord(t, helper.Process.Pid, addr, map[string]string{
+				"web_origin": "http://127.0.0.1:27123", "web_origin_stable": "true", "web_capabilities": "loopback,sse",
+			})
+
+			_, err := discoverWebRuntimeForBaseURL(t.Context(), ns.DataDir, baseURL, "")
+
+			if tc.wantErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func writeUnverifiableRecord(t *testing.T, pid int, addr string, metadata map[string]string) *daemonruntime.Namespace {
+	t.Helper()
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	path, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+		PID: pid, ProcessIdentityV2: "unverifiable", Network: "tcp", Address: addr,
+		Metadata: metadata, StartedAt: time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.Remove(path) })
+	return ns
+}
+
 func TestEnsureRunningReportsLiveUnreachableDaemonWithoutAutoStart(t *testing.T) {
 	tmp := setupKataEnv(t)
 	address := "unix://" + filepath.Join(tmp, "missing.sock")
@@ -948,6 +1018,58 @@ func TestDiscoverIgnoresRuntimeRecordWhosePIDWasReused(t *testing.T) {
 	require.NoError(t, err)
 
 	_, ok, err = Discover(context.Background(), ns.DataDir)
+
+	require.NoError(t, err)
+	assert.False(t, ok)
+}
+
+// A record whose identity this process cannot check is still probed, and
+// accepted only when its endpoint reports the record's PID.
+func TestDiscoverProbesUnverifiableRecord(t *testing.T) {
+	setupKataEnv(t)
+	helper, _ := startLongLivedTestProcess(t)
+	var hits atomic.Int32
+	_, addr := startCountingPing(t, &hits, helper.Process.Pid)
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	for _, tc := range []struct {
+		name      string
+		startedAt time.Time
+		want      bool
+	}{
+		{name: "live PID", startedAt: time.Now().UTC(), want: true},
+		// A record published before its PID's process was created names a reused PID.
+		{name: "reused PID", startedAt: time.Unix(1, 0), want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+				PID: helper.Process.Pid, ProcessIdentityV2: "unverifiable",
+				Network: "tcp", Address: addr, StartedAt: tc.startedAt,
+			})
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = os.Remove(path) })
+
+			url, ok, err := Discover(context.Background(), ns.DataDir)
+
+			require.NoError(t, err)
+			require.Equal(t, tc.want, ok)
+			if tc.want {
+				assert.Equal(t, "http://"+addr, url)
+			}
+		})
+	}
+}
+
+// An endpoint that answers without a PID cannot prove it is an unverifiable
+// record's daemon; another daemon may have taken the endpoint.
+func TestDiscoverSkipsUnverifiableRecordWithoutPingPID(t *testing.T) {
+	setupKataEnv(t)
+	helper, _ := startLongLivedTestProcess(t)
+	_, addr := startMockDaemonPing(t, map[string]any{"ok": true, "service": "kata", "version": "test-version"})
+	ns := writeUnverifiableRecord(t, helper.Process.Pid, addr, nil)
+
+	_, ok, err := Discover(context.Background(), ns.DataDir)
 
 	require.NoError(t, err)
 	assert.False(t, ok)

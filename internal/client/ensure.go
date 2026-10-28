@@ -347,6 +347,12 @@ func stopRunningDaemons(ctx context.Context, dataDir, dbhash string) error {
 		if candidate.Info.PID == 0 || candidate.Info.PID != candidate.Record.PID {
 			return fmt.Errorf("daemon at %s is running but its PID could not be verified; stop it manually", address)
 		}
+		// Discovery also returns records whose process identity cannot be
+		// checked. Never signal one, and never wait on it with a liveness check
+		// that already reports it gone.
+		if !daemonruntime.RuntimeProcessAlive(candidate.Record) {
+			return fmt.Errorf("daemon at %s (pid %d) runs an incompatible version, but its process identity cannot be verified; stop it manually", address, candidate.Record.PID)
+		}
 		targets = append(targets, candidate.Record)
 	}
 	if len(targets) == 0 {

@@ -129,7 +129,7 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 			return
 		}
 		for _, r := range recs {
-			if !daemonruntime.RuntimeProcessAlive(r) {
+			if !daemonruntime.RuntimeRecordWorthProbing(r) {
 				continue
 			}
 			ep := r.Endpoint()
@@ -153,7 +153,9 @@ func liveDaemonsUsing(ctx context.Context, dataDir string, readRecords runtimeRe
 			// takes over its endpoint. The responding daemon is not this record's
 			// process; keep scanning for its matching record. Do not delete the
 			// PID-named file: startup may have replaced it during the probe.
-			if info.PID != 0 && info.PID != r.PID {
+			// A PID-less ping is accepted only for a record whose identity was
+			// verified; an unverifiable record must report its own PID.
+			if info.PID != r.PID && (info.PID != 0 || !daemonruntime.RuntimeProcessAlive(r)) {
 				continue
 			}
 			candidate := liveDaemon{Record: r, BaseURL: url, Info: info}
