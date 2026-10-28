@@ -175,7 +175,7 @@ appears for read-only connections; other attention states show a dash.
 
 Account-bound credentials show their canonical actor. A connection without an
 account identity shows how it authenticated instead. The web summary uses these
-account labels. The TUI's read-only state uses the bootstrap and proxy labels:
+account labels. The TUI's read-only state uses the bootstrap, proxy, and anonymous labels:
 
 | Connection | Account label |
 | --- | --- |

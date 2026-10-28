@@ -33,6 +33,8 @@ func actorlessConnectionLabel(kind string) string {
 	switch kind {
 	case "bootstrap":
 		return "Bootstrap token"
+	case "insecure_readonly":
+		return "Anonymous (read-only)"
 	case "trusted_proxy_absent":
 		return "Proxy without account"
 	default:
@@ -59,7 +61,7 @@ func (m Model) withActiveConnectionHeader(body string) string {
 		status = "Reconnecting"
 	case m.sseStatus == sseDisconnected:
 		status = "Disconnected"
-	case m.activeAuth.Kind == "bootstrap" || m.activeAuth.Kind == "trusted_proxy_absent" || !m.mutationAllowed(true):
+	case m.activeAuth.Kind == "insecure_readonly" || m.activeAuth.Kind == "bootstrap" || m.activeAuth.Kind == "trusted_proxy_absent" || !m.mutationAllowed(true):
 		status = "Read-only"
 	}
 	// A healthy connection keeps the normal header row; the summary is

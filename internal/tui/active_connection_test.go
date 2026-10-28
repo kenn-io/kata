@@ -143,7 +143,7 @@ func TestActiveConnectionHeaderAttentionStates(t *testing.T) {
 		{status: "Authentication required", err: "authentication required"},
 		{status: "Connection unavailable", err: "service unavailable"},
 		{status: "Connecting"},
-		{status: "Reconnecting", auth: AuthInfo{Kind: "bootstrap"}, absent: "Bootstrap token", ready: true, sse: sseReconnecting},
+		{status: "Reconnecting", auth: AuthInfo{Kind: "insecure_readonly"}, absent: "Anonymous (read-only)", ready: true, sse: sseReconnecting},
 		{status: "Disconnected", auth: AuthInfo{Kind: "bootstrap"}, absent: "Bootstrap token", ready: true, sse: sseDisconnected},
 		{status: "Credential expired", auth: AuthInfo{Kind: "db_token", Actor: "expired-member", ExpiresAt: new(time.Now().Add(-time.Minute))}, absent: "expired-member", ready: true},
 	} {
@@ -172,6 +172,7 @@ func TestActiveConnectionHeaderReadOnlyAccount(t *testing.T) {
 		kind    string
 		account string
 	}{
+		{kind: "insecure_readonly", account: "Anonymous (read-only)"},
 		{kind: "bootstrap", account: "Bootstrap token"},
 		{kind: "trusted_proxy_absent", account: "Proxy without account"},
 	} {
