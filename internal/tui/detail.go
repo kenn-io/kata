@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"go.kenn.io/kata/internal/commentref"
@@ -361,17 +362,11 @@ func (dm detailModel) applyFetchedIfFresh(msg tea.Msg) (detailModel, bool) {
 		}
 		dm.comments = threadOrder(m.comments)
 		selectedFound := false
-		if selectedUID != "" {
-			for i, comment := range dm.comments {
-				if comment.UID == selectedUID {
-					dm.tabCursor = i
-					selectedFound = true
-					break
-				}
+		if selectedUID != "" && m.err == nil {
+			if index := slices.IndexFunc(dm.comments, func(c CommentEntry) bool { return c.UID == selectedUID }); index >= 0 {
+				dm.tabCursor = index
+				selectedFound = true
 			}
-		}
-		if dm.activeTab == tabComments && dm.tabCursor >= len(dm.comments) {
-			dm.tabCursor = max(0, len(dm.comments)-1)
 		}
 		dm.commentsErr = m.err
 		dm = dm.autoSelectActivityTab()

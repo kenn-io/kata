@@ -1,14 +1,12 @@
 package tui
 
 import (
-	"cmp"
 	"fmt"
 	"slices"
 	"strings"
 
 	"go.kenn.io/kata/internal/commentref"
 
-	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -29,59 +27,14 @@ type tabState struct {
 // content — detailDocumentLines emits them directly without a second
 // markdown pass.
 func commentChunks(cs []CommentEntry, width, cursor int, ts tabState) []entryChunk {
-	linked := false
-	for _, c := range cs {
-		if c.Reply != nil || len(c.Backlinks) > 0 {
-			linked = true
-			break
-		}
-	}
-	if !linked {
-		return flatCommentChunks(cs, width, cursor, ts)
-	}
 	if placeholder := tabPlaceholder(ts, "comments", "(no comments)", len(cs)); placeholder != nil {
 		return []entryChunk{*placeholder}
 	}
 	chunks := make([]entryChunk, 0, len(cs))
 	authorW := commentAuthorWidth(cs, width)
-	parents := make(map[string]int, len(cs))
-	lastChild := make(map[string]int)
 	for i, c := range cs {
-		if c.UID != "" {
-			parents[c.UID] = i
-		}
-		if c.Reply != nil {
-			lastChild[c.Reply.UID] = i
-		}
-	}
-	ancestorsByRow := make([][]string, len(cs))
-	maxAncestors := max(0, width/16-1)
-	for i, c := range cs {
-		var ancestors []string
-		if c.Reply != nil {
-			if parent, ok := parents[c.Reply.UID]; ok && parent < i {
-				ancestors = append(ancestors, ancestorsByRow[parent]...)
-				if len(ancestors) < maxAncestors && cs[parent].Reply != nil {
-					if grandparent, ok := parents[cs[parent].Reply.UID]; ok && grandparent < parent {
-						stem := "    "
-						if lastChild[cs[parent].Reply.UID] != parent {
-							stem = "│   "
-							if activeColorMode == colorNone {
-								stem = "|   "
-							}
-						}
-						ancestors = append(ancestors, stem)
-					}
-				}
-			}
-		}
-		ancestorsByRow[i] = ancestors
-		railPrefix := strings.Join(ancestors, "")
-		attribution := sanitizeForDisplay(commentAttribution(c))
-		author := commentAuthorStyle(attribution)
-		if padding := authorW - runewidth.StringWidth(attribution); padding > 0 {
-			author += strings.Repeat(" ", padding)
-		}
+		renderWidth := width - 2*c.depth
+		author := padToWidth(commentAuthorStyle(commentAttribution(c)), min(authorW, max(1, renderWidth-16)))
 		header := fmt.Sprintf("%s  %s", author, subtleStyle.Render(formatDocumentTime(c.CreatedAt)))
 		if c.Handle != "" {
 			header = sanitizeForDisplay(c.Handle) + "  " + header
@@ -89,57 +42,14 @@ func commentChunks(cs []CommentEntry, width, cursor int, ts tabState) []entryChu
 		if c.EditedAt != nil {
 			header += "  (edited)"
 		}
-		localParent := false
-		headerRail, bodyPrefix := "", ""
-		if c.Reply != nil {
-			if parent, ok := parents[c.Reply.UID]; ok && parent < i {
-				localParent = true
-				kind := sanitizeForDisplay(c.Reply.Kind)
-				glyph := commentKindGlyph(kind)
-				headerRail = subtleStyle.Render(railPrefix+childGuide(lastChild[c.Reply.UID] == i)) + glyph + " "
-				stem := "    "
-				if lastChild[c.Reply.UID] != i {
-					stem = "│   "
-					if activeColorMode == colorNone {
-						stem = "|   "
-					}
-				}
-				bodyPrefix = railPrefix + stem
-				header = sanitizeForDisplay(c.Handle) + "  " + kind + " " + sanitizeForDisplay(c.Reply.Handle) + "  " + author + "  " + subtleStyle.Render(formatDocumentTime(c.CreatedAt))
-				if c.EditedAt != nil {
-					header += "  (edited)"
-				}
-			}
-		}
-		tag := commentFlagTags(c)
-		var lines []string
-		renderWidth := max(1, width-runewidth.StringWidth(bodyPrefix))
-		gap := width - 2 - ansi.StringWidth(headerRail+header) - ansi.StringWidth(tag)
-		if tag != "" && gap >= 2 {
-			header += strings.Repeat(" ", gap) + tag
-			tag = ""
-		}
-		if ansi.StringWidth(headerRail+header) > width-2 {
-			lines = append(lines, wrapCommentHeader(header, headerRail, "  "+bodyPrefix, width, i == cursor)...)
-		} else {
-			lines = append(lines, applyActivityCursor(headerRail+header, i == cursor))
-		}
-		headerLines := len(lines)
-		if tag != "" {
-			if ansi.StringWidth(tag) <= renderWidth-2 {
-				lines = append(lines, "  "+tag)
-			} else {
-				for _, part := range commentFlagTagParts(c) {
-					for row := range strings.SplitSeq(ansi.Wrap(part, max(1, renderWidth-2), ""), "\n") {
-						lines = append(lines, "  "+row)
-					}
-				}
-			}
-		}
+		lines := []string{applyActivityCursor(header, i == cursor)}
 		for _, row := range creationAttributionLines(c.AttributionView, c.Author, c.Teammate, max(1, renderWidth-2)) {
 			lines = append(lines, "  "+subtleStyle.Render(row))
 		}
-		if c.Reply != nil && !localParent {
+		if tags := commentTags(c); tags != "" {
+			lines = append(lines, wrapDetailRow("  ", tags, renderWidth)...)
+		}
+		if c.Reply != nil {
 			r := c.Reply
 			label := r.Handle
 			if label == "" {
@@ -161,108 +71,23 @@ func commentChunks(cs []CommentEntry, width, cursor int, ts tabState) []entryChu
 			lines = append(lines, wrapDetailRow("  ", strings.TrimPrefix(sanitizeForDisplay(line), "  "), renderWidth)...)
 		}
 
-		if localParent && c.Reply.TargetEdited {
-			lines = append(lines, wrapDetailRow("  ", "Target edited after this reply", renderWidth)...)
-		}
 		for _, ln := range renderMarkdownLines(c.Body, max(1, renderWidth-2)) {
 			lines = append(lines, "  "+ln)
 		}
 
 		lines = append(lines, commentRelationSummaryLines(c, renderWidth)...)
-		foreign := make([]commentref.Link, 0)
-		for _, link := range c.Backlinks {
-			if _, ok := parents[link.UID]; !ok {
-				foreign = append(foreign, link)
-			}
-		}
-		for j, link := range foreign {
-			last := j == len(foreign)-1 && lastChild[c.UID] == 0
-			leaf := childGuide(last) + commentKindGlyph(link.Kind) + " " + sanitizeForDisplay(link.Handle) + "  " + link.Kind + " " + sanitizeForDisplay(c.Handle)
-			if link.Author != "" {
-				leaf += "  " + sanitizeForDisplay(link.Author)
-				if link.Teammate != "" {
-					leaf += " / " + sanitizeForDisplay(link.Teammate)
-				}
-			}
-			if !link.CreatedAt.IsZero() {
-				leaf += "  " + formatDocumentTime(link.CreatedAt)
-			}
-			for row := range strings.SplitSeq(ansi.Wrap(leaf, max(1, renderWidth-2), ""), "\n") {
-				lines = append(lines, "  "+row)
-			}
-		}
 		if c.UID != "" && i == cursor {
 			lines = append(lines, wrapDetailRow("  ", "R typed reply · [/] select evidence · Enter open · Esc back", renderWidth)...)
-			lines = append(lines, commentEvidenceLinesForThread(c, renderWidth, ts.commentLinkCursor, parents)...)
+			lines = append(lines, commentEvidenceLines(c, renderWidth, ts.commentLinkCursor)...)
 		}
-		if localParent {
-			for j := headerLines; j < len(lines); j++ {
-				lines[j] = "  " + subtleStyle.Render(bodyPrefix) + strings.TrimPrefix(lines[j], "  ")
+		lines = indentLines(lines, c.depth)
+		for _, leaf := range c.leaves {
+			leafWidth := width - 2*leaf.depth
+			rows := wrapDetailRow("  ", "↳ "+sanitizeForDisplay(leaf.link.Kind)+" "+commentEvidenceHeader(leaf.link), leafWidth)
+			if leaf.link.TargetEdited {
+				rows = append(rows, wrapDetailRow("  ", "Target edited after this reply", leafWidth)...)
 			}
-		}
-		if localParent && len(chunks) > 0 {
-			stem := "│"
-			if activeColorMode == colorNone {
-				stem = "|"
-			}
-			previous := &chunks[len(chunks)-1]
-			previous.lines[len(previous.lines)-1] = "  " + strings.TrimRight(railPrefix+stem, " ")
-		}
-		lines = append(lines, "")
-		chunks = append(chunks, entryChunk{lines: lines})
-	}
-	return chunks
-}
-
-func flatCommentChunks(cs []CommentEntry, width, cursor int, ts tabState) []entryChunk {
-	if placeholder := tabPlaceholder(ts, "comments", "(no comments)", len(cs)); placeholder != nil {
-		return []entryChunk{*placeholder}
-	}
-	chunks := make([]entryChunk, 0, len(cs))
-	authorW := commentAuthorWidth(cs, width)
-	for i, c := range cs {
-		author := padToWidth(commentAuthorStyle(commentAttribution(c)), authorW)
-		header := fmt.Sprintf("%s  %s", author, subtleStyle.Render(formatDocumentTime(c.CreatedAt)))
-		if c.Handle != "" {
-			header = sanitizeForDisplay(c.Handle) + "  " + header
-		}
-		if c.EditedAt != nil {
-			header += "  (edited)"
-		}
-		lines := []string{applyActivityCursor(header, i == cursor)}
-		for _, row := range creationAttributionLines(c.AttributionView, c.Author, c.Teammate, max(1, width-2)) {
-			lines = append(lines, "  "+subtleStyle.Render(row))
-		}
-		if c.Reply != nil {
-			r := c.Reply
-			label := r.Handle
-			if label == "" {
-				label = "(" + r.Status + ")"
-			}
-			line := "  ↳ " + commentOutgoingLabel(r.Kind) + " " + label
-			if r.Author != "" {
-				line += " by " + r.Author
-				if r.Teammate != "" {
-					line += " / " + r.Teammate
-				}
-			}
-			if r.Status != "" && r.Handle != "" {
-				line += " (" + r.Status + ")"
-			}
-			if r.TargetEdited {
-				line += " — Target edited after this reply"
-			}
-			lines = append(lines, sanitizeForDisplay(line))
-		}
-
-		for _, ln := range renderMarkdownLines(c.Body, max(1, width-2)) {
-			lines = append(lines, "  "+ln)
-		}
-
-		lines = append(lines, commentRelationSummaryLines(c, width)...)
-		if c.UID != "" && i == cursor {
-			lines = append(lines, wrapDetailRow("  ", "R typed reply · [/] select evidence · Enter open · Esc back", width)...)
-			lines = append(lines, commentEvidenceLines(c, width, ts.commentLinkCursor)...)
+			lines = append(lines, indentLines(rows, leaf.depth)...)
 		}
 		lines = append(lines, "")
 		chunks = append(chunks, entryChunk{lines: lines})
@@ -578,10 +403,6 @@ func commentRelationSummaryLines(c CommentEntry, width int) []string {
 }
 
 func commentEvidenceLines(c CommentEntry, width, cursor int) []string {
-	return commentEvidenceLinesForThread(c, width, cursor, nil)
-}
-
-func commentEvidenceLinesForThread(c CommentEntry, width, cursor int, local map[string]int) []string {
 	links := (detailModel{comments: []CommentEntry{c}}).commentLinks()
 	if len(links) == 0 {
 		return nil
@@ -597,29 +418,12 @@ func commentEvidenceLinesForThread(c CommentEntry, width, cursor int, local map[
 	if c.Reply != nil && selected.UID == c.Reply.UID {
 		evidence = []commentref.Link{selected}
 	}
-	slices.SortFunc(evidence, func(a, b commentref.Link) int {
-		return cmp.Or(a.CreatedAt.Compare(b.CreatedAt), strings.Compare(a.UID, b.UID))
-	})
+	slices.SortFunc(evidence, compareCommentLinks)
 	lines := wrapDetailRow("  ", fmt.Sprintf("evidence %d/%d: %s %s", index+1, len(links), selected.Kind, selected.Handle), width)
 	for _, link := range evidence {
-		actor := link.Author
-		if link.Teammate != "" {
-			actor += " / " + link.Teammate
-		}
-		header := link.Handle + "  " + actor + "  " + formatDocumentTime(link.CreatedAt)
+		header := commentEvidenceHeader(link)
 		if link.UID == selected.UID {
 			header = "> " + header
-		}
-		if link.EditedAt != nil {
-			header += "  (edited)"
-		}
-		if link.Status != "" {
-			header += "  (" + link.Status + ")"
-		}
-		if _, ok := local[link.UID]; ok {
-			header += "  (shown in thread)"
-			lines = append(lines, wrapDetailRow("  ", sanitizeForDisplay(header), width)...)
-			continue
 		}
 		lines = append(lines, wrapDetailRow("  ", sanitizeForDisplay(header), width)...)
 		if link.TargetEdited {
@@ -634,4 +438,28 @@ func commentEvidenceLinesForThread(c CommentEntry, width, cursor int, local map[
 		}
 	}
 	return lines
+}
+
+// indentLines keeps the cursor gutter at column zero for every depth.
+func indentLines(lines []string, depth int) []string {
+	prefix := strings.Repeat("  ", depth)
+	for i, line := range lines {
+		lines[i] = line[:2] + prefix + line[2:]
+	}
+	return lines
+}
+
+func commentEvidenceHeader(link commentref.Link) string {
+	actor := link.Author
+	if link.Teammate != "" {
+		actor += " / " + link.Teammate
+	}
+	header := link.Handle + "  " + actor + "  " + formatDocumentTime(link.CreatedAt)
+	if link.EditedAt != nil {
+		header += "  (edited)"
+	}
+	if link.Status != "" {
+		header += "  (" + link.Status + ")"
+	}
+	return sanitizeForDisplay(header)
 }
