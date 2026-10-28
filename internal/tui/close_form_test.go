@@ -90,8 +90,8 @@ func TestIssueScopedCloseCapabilityOpensEvidenceForm(t *testing.T) {
 	m.scope = scope{projectID: 7}
 	m.list.issues = []Issue{{ProjectID: 7, ShortID: "abc4", Status: "open"}}
 
-	model, _ := m.Update(m.fetchAuthCapabilities()())
-	m = model.(Model)
+	m, expiryCmd := m.handleAuthCapabilities(m.fetchAuthCapabilities()().(authCapabilitiesMsg))
+	require.NotNil(t, expiryCmd, "finite credential expiry must schedule a UI update")
 	got, cmd, handled := m.routeCloseKey(runeKey('x'))
 	require.True(t, handled)
 	require.Nil(t, cmd)
