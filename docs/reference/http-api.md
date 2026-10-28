@@ -136,7 +136,7 @@ agent names, session IDs, and daemon API compatibility:
 ```
 
 The required `agent` field identifies the coding agent; `session_id` follows
-the token rules in the configuration reference, and `url` is
+the session ID rules in the configuration reference, and `url` is
 optional absolute HTTP(S) without credentials, query, or fragment. Supply a
 verified locator for namespaced imported archives. The daemon stores this
 separately from evidence in the close event; it does not fetch or verify the
@@ -199,7 +199,7 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 | Version | Change |
 | --- | --- |
-| `0.34.0` | Close transcripts accept agent names beyond Claude Code and Codex, and non-UUID session IDs. |
+| `0.34.0` | Close transcripts accept agent names beyond Claude Code and Codex, with non-UUID session IDs for those agents. Claude Code and Codex session IDs remain UUIDs. |
 | `0.33.0` | Publishes the issue attachment upload and content routes, and UI capabilities include `attachments` when the daemon has Docbank configured. Older daemons omit the field. |
 | `0.32.0` | Project event polling accepts an `issue` filter and acknowledges the resolved subject in `X-Kata-Events-Issue-UID`. |
 | `0.31.0` | Project federation metadata accepts optional `relay_protocol_version=1` to check existing cross-project issue links before relay enrollment. It returns `409 relay_cross_project_links` with a remedy, or sets `relay_links_checked` when the check passes. Bridge connect returns `hub_links_checked` and preserves this conflict. Older daemons ignore the parameter. |

@@ -30,8 +30,8 @@ agentsview_url = "https://agentsview.example" # optional; a base path is support
 ```
 
 This is off by default and needs no daemon restart. Claude Code and Codex
-transcripts with UUID session IDs need HTTP API `0.26.0` or newer.
-Other agents and non-UUID session IDs need HTTP API `0.34.0` or newer.
+transcripts need HTTP API `0.26.0` or newer. Other agents need HTTP API
+`0.34.0` or newer.
 Before attaching a transcript, `kata close` checks the daemon's API version. An older daemon
 causes a warning on stderr, and the close proceeds without the transcript.
 With attachment disabled, close requests remain unchanged.
@@ -56,7 +56,8 @@ omp = "OMP_SESSION_ID"
 
 The agent name must match the ID prefix AgentsView uses for the agent's sessions, such as `pi` or `omp`,
 for the link to open. Names must match `^[a-z0-9][a-z0-9-]*$` and contain
-at most 32 characters. Each nonempty variable supplies both its agent and
+at most 32 characters. Any other name makes `kata close` warn that the
+configuration is unavailable, naming the key, and skip attachment. Each nonempty variable supplies both its agent and
 session ID. Different agents are ambiguous even when their IDs match.
 Variables for the same agent must agree on the ID case-insensitively.
 Ambiguous context warns and skips attachment.
@@ -74,7 +75,8 @@ kata close example-project#abc4 --done \
   --test "go test ./internal/example"
 ```
 
-The session ID must start with an ASCII letter or digit and contain only
+Claude Code and Codex session IDs must be UUIDs. For other agents, the
+session ID must start with an ASCII letter or digit and contain only
 ASCII letters, digits, `.`, `_`, or `-`, up to 128 characters. Examples include
 UUIDs, Amp's `T-<UUID>`, and OpenCode's `ses_<alnum>`. Use the ID AgentsView
 uses after the agent prefix so the link can open.
