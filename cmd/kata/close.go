@@ -12,7 +12,6 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 
 	"go.kenn.io/kata/internal/api"
-	"go.kenn.io/kata/internal/transcript"
 )
 
 func newCloseCmd() *cobra.Command {
@@ -147,9 +146,10 @@ The close message has a minimum length that depends on the reason:
 				"evidence": parsed,
 				"dry_run":  dryRun,
 			}
-			var ref *transcript.Transcript
 			if len(parsed) > 0 {
-				ref = closeTranscript(cmd)
+				if ref := closeTranscript(cmd); ref != nil {
+					extra["transcript"] = ref
+				}
 			}
 			// Route the dry-run banner to stderr only in human mode so
 			// machine-parseable output modes stay unprefixed.
@@ -167,7 +167,7 @@ The close message has a minimum length that depends on the reason:
 				}
 				headers["If-Match"] = etag
 			}
-			return runActionWithHeaders(cmd, args[0], "close", extra, headers, ref)
+			return runActionWithHeaders(cmd, args[0], "close", extra, headers)
 		},
 	}
 	cmd.Flags().StringVar(&reason, "reason", "",
@@ -267,11 +267,11 @@ func evidenceValueError(format string, args ...any) *cliError {
 // the daemon action endpoint. If --comment was passed on the command, the
 // comment is appended in a separate POST after the action succeeds.
 func runAction(cmd *cobra.Command, raw, action string, extra map[string]any) error {
-	return runActionWithHeaders(cmd, raw, action, extra, nil, nil)
+	return runActionWithHeaders(cmd, raw, action, extra, nil)
 }
 
 func runActionWithHeaders(
-	cmd *cobra.Command, raw, action string, extra map[string]any, headers map[string]string, ref *transcript.Transcript,
+	cmd *cobra.Command, raw, action string, extra map[string]any, headers map[string]string,
 ) error {
 	comment, handle, err := prepareFollowupComment(cmd)
 	if err != nil {
@@ -291,9 +291,8 @@ func runActionWithHeaders(
 	if err != nil {
 		return err
 	}
-	if ref != nil {
-		body["transcript"] = ref
-		if err := dropUnsupportedTranscript(ctx, cmd, client, baseURL, ref, body); err != nil {
+	if action == "close" && body["transcript"] != nil {
+		if err := dropUnsupportedTranscript(ctx, cmd, client, baseURL, body); err != nil {
 			return err
 		}
 	}

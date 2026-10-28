@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"uuid"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/config"
@@ -24,6 +25,7 @@ func closeTranscript(cmd *cobra.Command) *transcript.Transcript {
 		return nil
 	}
 	agent, id := os.Getenv("KATA_TRANSCRIPT_AGENT"), os.Getenv("KATA_TRANSCRIPT_SESSION_ID")
+	var source string
 	if agent == "" && id == "" {
 		variables := []struct{ agent, name string }{
 			{"claude", "CLAUDE_CODE_SESSION_ID"},
@@ -38,22 +40,23 @@ func closeTranscript(cmd *cobra.Command) *transcript.Transcript {
 			if value == "" {
 				continue
 			}
-			if err := (transcript.Transcript{Agent: variable.agent, SessionID: value}).Validate(); err != nil {
-				warn(fmt.Sprintf("current session from %s invalid; skipping attachment", variable.name))
-				return nil
-			}
 			if id != "" && (agent != variable.agent || !strings.EqualFold(id, value)) {
 				warn("ambiguous current session; skipping attachment")
 				return nil
 			}
 			if id == "" {
 				agent, id = variable.agent, value
+				source = variable.name
 			}
 		}
 	}
 	ref := &transcript.Transcript{Agent: agent, SessionID: id}
 	if err := ref.Validate(); err != nil {
-		warn("current session unavailable or invalid; skipping attachment")
+		if source != "" {
+			warn(fmt.Sprintf("current session from %s invalid; skipping attachment", source))
+		} else {
+			warn("current session unavailable or invalid; skipping attachment")
+		}
 		return nil
 	}
 	// Preserve the exact harness session ID: no filesystem path, transcript body,
@@ -72,11 +75,16 @@ func closeTranscript(cmd *cobra.Command) *transcript.Transcript {
 // dropUnsupportedTranscript keeps provenance optional when a daemon predates
 // the supplied transcript shape.
 func dropUnsupportedTranscript(
-	ctx context.Context, cmd *cobra.Command, client *http.Client, baseURL string, ref *transcript.Transcript, body map[string]any,
+	ctx context.Context, cmd *cobra.Command, client *http.Client, baseURL string, body map[string]any,
 ) error {
-	required := apiVersionCloseTranscript
-	if ref.Agent != "claude" && ref.Agent != "codex" {
-		required = apiVersionOtherAgentCloseTranscript
+	ref, ok := body["transcript"].(*transcript.Transcript)
+	if !ok || ref == nil {
+		return nil
+	}
+	required := apiVersionOtherAgentCloseTranscript
+	_, uuidErr := uuid.Parse(ref.SessionID)
+	if (ref.Agent == "claude" || ref.Agent == "codex") && len(ref.SessionID) == 36 && uuidErr == nil {
+		required = apiVersionCloseTranscript
 	}
 	err := requireDaemonAPIVersion(ctx, client, baseURL, required, "close transcript")
 	if err == nil {

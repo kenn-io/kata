@@ -131,15 +131,17 @@ func TestCloseTranscript_ContextAndOptionalLink(t *testing.T) {
 
 func TestCloseTranscript_DaemonCompatibility(t *testing.T) {
 	for _, tc := range []struct {
-		name, version, variable, agent string
-		attach                         bool
+		name, version, variable, agent, id string
+		attach                             bool
 	}{
-		{"Codex on 0.26", "0.26.0", "CODEX_SESSION_ID", "codex", true},
-		{"Claude on 0.33", "0.33.0", "CLAUDE_CODE_SESSION_ID", "claude", true},
-		{"Codex on 0.33", "0.33.0", "CODEX_THREAD_ID", "codex", true},
-		{"Pi on 0.33", "0.33.0", "PI_SESSION_ID", "pi", false},
-		{"Pi on 0.34", "0.34.0", "PI_SESSION_ID", "pi", true},
-		{"transcript before 0.26", "0.25.0", "CODEX_THREAD_ID", "codex", false},
+		{"Codex on 0.26", "0.26.0", "CODEX_SESSION_ID", "codex", transcriptSessionOne, true},
+		{"Claude on 0.33", "0.33.0", "CLAUDE_CODE_SESSION_ID", "claude", transcriptSessionOne, true},
+		{"Codex on 0.33", "0.33.0", "CODEX_THREAD_ID", "codex", transcriptSessionOne, true},
+		{"non-UUID Claude on 0.33", "0.33.0", "CLAUDE_CODE_SESSION_ID", "claude", "session-token", false},
+		{"non-UUID Claude on 0.34", "0.34.0", "CLAUDE_CODE_SESSION_ID", "claude", "session-token", true},
+		{"Pi on 0.33", "0.33.0", "PI_SESSION_ID", "pi", transcriptSessionOne, false},
+		{"Pi on 0.34", "0.34.0", "PI_SESSION_ID", "pi", transcriptSessionOne, true},
+		{"transcript before 0.26", "0.25.0", "CODEX_THREAD_ID", "codex", transcriptSessionOne, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -152,7 +154,7 @@ func TestCloseTranscript_DaemonCompatibility(t *testing.T) {
 			for _, name := range []string{"CODEX_THREAD_ID", "PI_SESSION_ID", "CODEX_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "KATA_TRANSCRIPT_AGENT", "KATA_TRANSCRIPT_SESSION_ID"} {
 				t.Setenv(name, "")
 			}
-			t.Setenv(tc.variable, transcriptSessionOne)
+			t.Setenv(tc.variable, tc.id)
 			var sent map[string]any
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
@@ -177,7 +179,7 @@ func TestCloseTranscript_DaemonCompatibility(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, sent)
 			if tc.attach {
-				expected := map[string]any{"agent": tc.agent, "session_id": transcriptSessionOne}
+				expected := map[string]any{"agent": tc.agent, "session_id": tc.id}
 				assert.Equal(t, expected, sent["transcript"])
 				assert.Empty(t, stderr)
 			} else {

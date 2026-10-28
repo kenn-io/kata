@@ -30,9 +30,9 @@ agentsview_url = "https://agentsview.example" # optional; a base path is support
 ```
 
 This is off by default and needs no daemon restart. Claude Code and Codex
-keep their existing discovery, agent, link paths, and HTTP API `0.26.0`
-requirement. Other agents need HTTP API `0.34.0` or newer. Before attaching a
-transcript, `kata close` checks the daemon's API version. An older daemon
+transcripts with UUID session IDs need HTTP API `0.26.0` or newer.
+Other agents and non-UUID session IDs need HTTP API `0.34.0` or newer.
+Before attaching a transcript, `kata close` checks the daemon's API version. An older daemon
 causes a warning on stderr, and the close proceeds without the transcript.
 With attachment disabled, close requests remain unchanged.
 
@@ -77,8 +77,9 @@ kata close example-project#abc4 --done \
 The session ID must start with an ASCII letter or digit and contain only
 ASCII letters, digits, `.`, `_`, or `-`, up to 128 characters. Examples include
 UUIDs, Amp's `T-<UUID>`, and OpenCode's `ses_<alnum>`. Use the ID AgentsView
-uses after the agent prefix so the link can open. Kata never scans recent chat
-files or reuses another issue's session. Missing, invalid, or ambiguous context warns on stderr
+uses after the agent prefix so the link can open.
+Agents whose AgentsView session IDs have more than one part can't be linked from a variable.
+Kata never scans recent chat files or reuses another issue's session. Missing, invalid, or ambiguous context warns on stderr
 and skips the attachment; the close can still succeed. An unconfigured
 AgentsView URL stores only the identifier. An invalid URL warns and stores
 only the identifier. URLs must be absolute HTTP(S), with no embedded
@@ -87,6 +88,15 @@ credentials, query, or fragment.
 Claude Code links use `<agentsview_url>/sessions/<id>`. Every other agent,
 including Codex, uses `<agentsview_url>/sessions/<agent>/<id>`. These routes
 work with released AgentsView v0.46.1.
+
+Set `agentsview_url` only for an installation indexing those native IDs.
+For namespaced imported archives with IDs such as `workstation~codex:<UUID>`,
+omit `agentsview_url` and use AgentsView's **Go to session** lookup with the
+saved session ID, or supply a verified exact URL through the
+[HTTP close API](http-api.md).
+If multiple archives contain that session ID, lookup reports ambiguity; use
+the archive's canonical ID or a verified locator. Kata doesn't infer an import
+namespace.
 
 Kata makes no AgentsView request during close. A generated URL is a locator,
 not an availability receipt: offline hosting, delayed indexing, authentication,

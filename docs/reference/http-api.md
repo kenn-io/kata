@@ -199,7 +199,7 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 | Version | Change |
 | --- | --- |
-| `0.34.0` | Close transcripts accept agent names beyond Claude Code and Codex. |
+| `0.34.0` | Close transcripts accept agent names beyond Claude Code and Codex, and non-UUID session IDs. |
 | `0.33.0` | Publishes the issue attachment upload and content routes, and UI capabilities include `attachments` when the daemon has Docbank configured. Older daemons omit the field. |
 | `0.32.0` | Project event polling accepts an `issue` filter and acknowledges the resolved subject in `X-Kata-Events-Issue-UID`. |
 | `0.31.0` | Project federation metadata accepts optional `relay_protocol_version=1` to check existing cross-project issue links before relay enrollment. It returns `409 relay_cross_project_links` with a remedy, or sets `relay_links_checked` when the check passes. Bridge connect returns `hub_links_checked` and preserves this conflict. Older daemons ignore the parameter. |
