@@ -375,6 +375,10 @@ type AddAttachmentResponse = AddAttachmentResponseBody
 
 type AddAttachmentErrorResponse = ErrorEnvelope
 
+type LinkAttachmentResponse = AddAttachmentResponseBody
+
+type LinkAttachmentErrorResponse = ErrorEnvelope
+
 type AttachmentContentResponse = []byte
 
 type AttachmentContentErrorResponse = ErrorEnvelope
@@ -1427,6 +1431,13 @@ type AddAttachmentResp struct {
 	StatusCode   int
 	JSON200      *AddAttachmentResponse
 	JSONDefault  *AddAttachmentErrorResponse
+}
+
+type LinkAttachmentResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *LinkAttachmentResponse
 }
 
 type AttachmentContentResp struct {
