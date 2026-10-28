@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kit/stacktest"
 )
 
 func TestBroadcaster_SubscribeAndUnsubLifecycle(t *testing.T) {
@@ -125,6 +126,7 @@ func TestBroadcaster_RaceFuzz(t *testing.T) {
 	case <-done:
 		// expected: all goroutines completed cleanly
 	case <-time.After(10 * time.Second):
+		stacktest.Dump(t)
 		t.Fatal("race fuzz did not complete within 10s — possible deadlock")
 	}
 }

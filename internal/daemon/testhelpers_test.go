@@ -15,6 +15,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kit/stacktest"
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
@@ -443,6 +444,7 @@ func receiveMsg(t *testing.T, ch <-chan daemon.StreamMsg, timeout time.Duration,
 	case got := <-ch:
 		return got
 	case <-time.After(timeout):
+		stacktest.Dump(t)
 		t.Fatalf("%s: did not receive within %s", label, timeout)
 		return daemon.StreamMsg{}
 	}
@@ -478,6 +480,7 @@ func assertChannelClosed(t *testing.T, ch <-chan daemon.StreamMsg, timeout time.
 		case <-time.After(remaining):
 		}
 	}
+	stacktest.Dump(t)
 	t.Fatalf("%s: channel was not closed within %s", label, timeout)
 }
 
