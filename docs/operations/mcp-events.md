@@ -1,7 +1,7 @@
 ---
 title: MCP Events webhook delivery
 description: Run daemon-owned inbox subscriptions that survive restarts, and receive signed webhooks safely.
-last_edited: 2026-10-27
+last_edited: 2026-10-28
 ---
 
 # MCP Events webhook delivery
@@ -341,6 +341,8 @@ The daemon sends a gap when:
   archive or an access grant;
 - the issue an `issue_uid` filter selects became hidden or visible, for example
   when a scoped token's subtree lost or regained a parent;
+- the daemon was restored from a full backup, which can roll an inbox back
+  without any new event;
 - a scan could not be served.
 
 Any purge causes a harmless extra gap for every subscription.

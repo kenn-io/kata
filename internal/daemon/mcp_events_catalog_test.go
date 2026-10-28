@@ -1,13 +1,18 @@
 package daemon_test
 
 import (
+	"bytes"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/jsonl"
 	"go.kenn.io/kata/internal/mcpevents"
 )
 
@@ -99,4 +104,48 @@ func TestMCPEventsUnchangedVisibilitySendsNoGap(t *testing.T) {
 			})
 		})
 	}
+}
+
+// A full restore can roll an inbox back, for example by bringing back a
+// request that was later cleared, with no event after the restored cursor. The
+// first pass after a restore therefore asks the receiver to reload, even
+// though its visible projects are unchanged.
+func TestMCPEventsRestoreFromBackupSendsAGap(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		ctx := t.Context()
+		f := newEventsFixture(t, store)
+		keyPath := filepath.Join(t.TempDir(), "mcp-events.key")
+		var recorder postRecorder
+		svc, err := mcpevents.NewService(mcpevents.ServiceConfig{
+			Store: store, Authority: f.authority, Keys: mcpevents.NewFileKeyProvider(keyPath),
+			Webhook: mcpEventsWebhookRecording(t, &recorder),
+		})
+		require.NoError(t, err)
+		_, err = svc.Subscribe(ctx, f.outsider, mcpevents.ForwarderScope{All: true}, mcpevents.SubscribeRequest{
+			Name: mcpevents.EventName, Arguments: mcpevents.Arguments{For: "example-user"},
+			Delivery: mcpevents.Delivery{Mode: "webhook", URL: mcpEventsURL, Secret: mcpEventsSecret},
+		})
+		require.NoError(t, err)
+		require.NoError(t, svc.Drain(ctx))
+		require.Empty(t, recorder.all())
+
+		var backup bytes.Buffer
+		require.NoError(t, jsonl.Export(ctx, store, &backup, jsonl.ExportOptions{IncludeDeleted: true}))
+		restored, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "restored.db"))
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, restored.Close()) })
+		require.NoError(t, jsonl.Import(ctx, &backup, restored))
+
+		svc, err = mcpevents.NewService(mcpevents.ServiceConfig{
+			Store: restored, Keys: mcpevents.NewFileKeyProvider(keyPath),
+			Authority: daemon.NewMCPEventsAuthority(daemon.ServerConfig{DB: restored, Auth: config.AuthConfig{Token: "configured", RequireTokenIdentity: true}}),
+			Webhook:   mcpEventsWebhookRecording(t, &recorder),
+		})
+		require.NoError(t, err)
+		require.True(t, svc.Availability().Enabled, svc.Availability().Reason)
+		require.NoError(t, svc.Drain(ctx))
+		posts := recorder.all()
+		require.Len(t, posts, 1, "the restored subscription reloads once")
+		assert.Equal(t, "gap", posts[0].Type)
+	})
 }

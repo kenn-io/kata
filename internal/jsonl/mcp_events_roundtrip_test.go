@@ -66,6 +66,16 @@ func mcpEventsRows() []db.MCPEventSubscription {
 	return []db.MCPEventSubscription{terminated, gap}
 }
 
+// restoredMCPEventsRows is what an ordinary restore produces: the rows with
+// their visibility baselines cleared, so each subscriber gets a gap.
+func restoredMCPEventsRows() []db.MCPEventSubscription {
+	rows := mcpEventsRows()
+	for i := range rows {
+		rows[i].CatalogVersion = ""
+	}
+	return rows
+}
+
 func seedMCPEvents(t *testing.T, store db.Storage, check string) {
 	t.Helper()
 	for _, row := range mcpEventsRows() {
@@ -160,8 +170,16 @@ func TestMCPEventsFullRoundTripSQLite(t *testing.T) {
 
 	restored := openImportTargetDB(t)
 	require.NoError(t, jsonl.Import(t.Context(), bytes.NewReader(backup), restored))
-	assertMCPEvents(t, mcpEventsRows(), restored, mcpEventsSourceCheck)
-	assert.Equal(t, string(backup), string(exportMCPEvents(t, restored, 0)), "a second export is identical")
+	assertMCPEvents(t, restoredMCPEventsRows(), restored, mcpEventsSourceCheck)
+
+	// Trusted local cutover reproduces the same database, so it keeps the
+	// baselines and a second export is identical.
+	cutover := openImportTargetDB(t)
+	require.NoError(t, jsonl.ImportWithOptions(t.Context(), bytes.NewReader(backup), cutover, jsonl.ImportOptions{
+		PreserveIssueSyncBindingEnabled: true, PreserveExternalRootBindingsEnabled: true, PreserveMCPEventBaselines: true,
+	}))
+	assertMCPEvents(t, mcpEventsRows(), cutover, mcpEventsSourceCheck)
+	assert.Equal(t, string(backup), string(exportMCPEvents(t, cutover, 0)), "a second export is identical")
 }
 
 func TestMCPEventsRestoreWithoutKeyFile(t *testing.T) {
@@ -174,7 +192,7 @@ func TestMCPEventsRestoreWithoutKeyFile(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = target.Close() })
 	require.NoError(t, jsonl.ImportWithOptions(t.Context(), bytes.NewReader(backup), target, jsonl.ImportOptions{RequireFreshTarget: true, NewInstance: true}))
-	assertMCPEvents(t, mcpEventsRows(), target, mcpEventsSourceCheck)
+	assertMCPEvents(t, restoredMCPEventsRows(), target, mcpEventsSourceCheck)
 	require.NoError(t, filepath.WalkDir(home, func(_ string, entry fs.DirEntry, err error) error {
 		require.NoError(t, err)
 		assert.NotEqual(t, "mcp-events.key", entry.Name(), "restore must not create a key file")
@@ -276,7 +294,7 @@ func TestMCPEventsFullRestoreReplacesDestinationState(t *testing.T) {
 
 	withEvents := exportMCPEvents(t, mcpEventsSourceDB(t), 0)
 	require.NoError(t, jsonl.Import(t.Context(), bytes.NewReader(withEvents), destination))
-	assertMCPEvents(t, mcpEventsRows(), destination, mcpEventsSourceCheck)
+	assertMCPEvents(t, restoredMCPEventsRows(), destination, mcpEventsSourceCheck)
 }
 
 func TestMCPEventsCutoverFromSchema34HasNoRows(t *testing.T) {
@@ -323,13 +341,13 @@ func TestMCPEventsRoundTripAcrossPostgres(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, postgres.Close()) })
 	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(backup), postgres))
-	assertMCPEvents(t, mcpEventsRows(), postgres, mcpEventsSourceCheck)
+	assertMCPEvents(t, restoredMCPEventsRows(), postgres, mcpEventsSourceCheck)
 
 	back := exportMCPEvents(t, postgres, 0)
 	assert.Equal(t, readMCPEventsWire(t, backup).kinds["mcp_event_subscription"], readMCPEventsWire(t, back).kinds["mcp_event_subscription"])
 	restored := openImportTargetDB(t)
 	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(back), restored))
-	assertMCPEvents(t, mcpEventsRows(), restored, mcpEventsSourceCheck)
+	assertMCPEvents(t, restoredMCPEventsRows(), restored, mcpEventsSourceCheck)
 }
 
 func TestMCPEventsPostgresPartialPathsLeaveDestination(t *testing.T) {

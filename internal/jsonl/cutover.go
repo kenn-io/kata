@@ -281,6 +281,7 @@ func importCutoverTarget(ctx context.Context, tmpJSONL, tmpDB string, expectedEv
 	if err := ImportWithOptions(ctx, in, target, ImportOptions{
 		PreserveIssueSyncBindingEnabled:     true,
 		PreserveExternalRootBindingsEnabled: true,
+		PreserveMCPEventBaselines:           true,
 	}); err != nil {
 		return err
 	}

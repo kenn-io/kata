@@ -229,7 +229,7 @@ func (s *Store) importReplayRecord(
 		if opts.MergeProject {
 			return replayLinkInserted, fmt.Errorf("%s records cannot be merged into a project", db.ImportKindMCPEventSubscription)
 		}
-		return replayLinkInserted, pgReplayError(db.ImportKindMCPEventSubscription, db.ReplayMCPEventSubscription(ctx, tx, rec))
+		return replayLinkInserted, pgReplayError(db.ImportKindMCPEventSubscription, db.ReplayMCPEventSubscription(ctx, tx, rec, opts.PreserveMCPEventBaselines))
 	case *db.MetaKV:
 		return replayLinkInserted, pgReplayMeta(ctx, tx, rec, opts)
 	case *db.EmbeddingArtifactExport:

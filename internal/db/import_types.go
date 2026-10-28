@@ -40,6 +40,12 @@ type ImportOptions struct {
 	// until a local operator re-enables them.
 	PreserveIssueSyncBindingEnabled bool
 
+	// PreserveMCPEventBaselines keeps each subscription's visibility baseline.
+	// Only trusted local schema cutover sets it. A restore can roll inboxes
+	// back without new events, so ordinary restores clear the baseline and the
+	// first delivery pass sends each subscriber a gap.
+	PreserveMCPEventBaselines bool
+
 	// MergeProject remaps a single project-scoped replay onto fresh numeric IDs
 	// and inserts it without clearing existing domain state.
 	MergeProject bool

@@ -455,7 +455,7 @@ func importRecord(ctx context.Context, tx *sql.Tx, r db.ImportRecord, opts db.Im
 		if opts.MergeProject {
 			return linkSkipNone, fmt.Errorf("%s records cannot be merged into a project", db.ImportKindMCPEventSubscription)
 		}
-		return linkSkipNone, wrapImportErr(db.ImportKindMCPEventSubscription, db.ReplayMCPEventSubscription(ctx, tx, rec))
+		return linkSkipNone, wrapImportErr(db.ImportKindMCPEventSubscription, db.ReplayMCPEventSubscription(ctx, tx, rec, opts.PreserveMCPEventBaselines))
 	case *db.MetaKV:
 		return linkSkipNone, importMeta(ctx, tx, rec, opts)
 	case *db.EmbeddingArtifactExport:

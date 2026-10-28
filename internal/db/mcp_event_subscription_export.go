@@ -122,12 +122,17 @@ func ExportMCPEventSubscriptionsSQL(ctx context.Context, query CronQuery, filter
 }
 
 // ReplayMCPEventSubscription validates and writes one backup row inside the
-// backend's restore transaction. Full restore and cutover only.
-func ReplayMCPEventSubscription(ctx context.Context, tx *sql.Tx, record *MCPEventSubscriptionExport) error {
+// backend's restore transaction. Full restore and cutover only. Without
+// preserveBaseline the row's visibility baseline is cleared, so its first
+// delivery pass sends a gap.
+func ReplayMCPEventSubscription(ctx context.Context, tx *sql.Tx, record *MCPEventSubscriptionExport, preserveBaseline bool) error {
 	if record == nil {
 		return fmt.Errorf("nil mcp event subscription")
 	}
 	s := record.Subscription()
+	if !preserveBaseline {
+		s.CatalogVersion = ""
+	}
 	if err := ValidateMCPEventSubscription(s); err != nil {
 		return err
 	}
