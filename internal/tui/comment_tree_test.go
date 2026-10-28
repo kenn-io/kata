@@ -167,6 +167,17 @@ func TestCommentTreeModelWalk(t *testing.T) {
 	}
 }
 
+func TestCommentRefreshBeforeIssueFetched(t *testing.T) {
+	dm := detailModel{
+		activeTab: tabComments, detailFocus: focusActivity, gen: 1,
+		lastTermWidth: 80, lastTermHeight: 24,
+		comments: []CommentEntry{{UID: "a", Handle: "c:a"}}, tabCursor: 0,
+	}
+	require.NotPanics(t, func() {
+		dm = dm.applyFetched(commentsFetchedMsg{gen: 1, comments: []CommentEntry{{UID: "a", Handle: "c:a"}}})
+	})
+}
+
 func TestCommentRefresh(t *testing.T) {
 	for _, manual := range []bool{false, true} {
 		t.Run(fmt.Sprint("manual=", manual), func(t *testing.T) {

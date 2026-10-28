@@ -354,7 +354,7 @@ func (dm detailModel) applyFetchedIfFresh(msg tea.Msg) (detailModel, bool) {
 			selectedUID = dm.comments[dm.tabCursor].UID
 		}
 		wasVisible := false
-		if selectedUID != "" && dm.detailFocus == focusActivity && dm.selectedCommentUID == "" {
+		if dm.issue != nil && selectedUID != "" && dm.detailFocus == focusActivity && dm.selectedCommentUID == "" {
 			if width, visible, ok := dm.viewportDims(); ok {
 				_, anchors := dm.detailDocumentLines(width, dm.scrollChrome())
 				wasVisible = anchors.tabCursor >= dm.scroll && anchors.tabCursor < dm.scroll+visible
