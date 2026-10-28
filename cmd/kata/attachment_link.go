@@ -74,7 +74,7 @@ func parseDocbankSelector(file string) (generated.LinkAttachmentBody, error) {
 	} else {
 		id, err := strconv.ParseInt(file, 10, 64)
 		if err != nil || id <= 0 {
-			return input, externalCLIValidation("Docbank node id must be a positive int64")
+			return input, externalCLIValidation("Docbank file must be a positive node ID or an absolute path")
 		}
 		input.NodeID = new(id)
 	}

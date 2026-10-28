@@ -12,6 +12,7 @@ type Node struct {
 	ID               int64     `json:"id"`
 	Name             string    `json:"name"`
 	Kind             string    `json:"kind"`
+	Size             int64     `json:"size"`
 	CurrentVersionID uuid.UUID `json:"current_version_id"`
 	TrashedAt        string    `json:"trashed_at"`
 }
