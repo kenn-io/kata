@@ -168,8 +168,8 @@ network, authentication, and proxy setup.
 The yellow summary at the top shows the active hub, account, and credential
 status. It stays visible while you navigate and wraps on narrow screens.
 The TUI uses its existing header row to show only the status, hub, and project
-when credentials expire, authentication is required, the connection is
-unavailable, or it is connecting, reconnecting, or disconnected.
+when credentials expire, authentication is required, or the connection is
+read-only, unavailable, connecting, reconnecting, or disconnected.
 
 Account-bound credentials show their canonical actor. A connection without an
 account identity shows how it authenticated instead:

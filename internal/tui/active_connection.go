@@ -47,6 +47,8 @@ func (m Model) withActiveConnectionHeader(body string) string {
 		status = "Reconnecting"
 	case m.sseStatus == sseDisconnected:
 		status = "Disconnected"
+	case m.activeAuth.Kind == "insecure_readonly":
+		status = "Read-only"
 	}
 	// A healthy connection keeps the normal header row; the summary is
 	// only for states that need attention.

@@ -132,11 +132,12 @@ func TestActiveConnectionHeaderHiddenWhenConnected(t *testing.T) {
 // Attention states show status, hub, and project in the existing header row.
 func TestActiveConnectionHeaderAttentionStates(t *testing.T) {
 	for _, tc := range []struct {
-		status  string
-		ready   bool
-		sse     sseConnState
-		err     string
-		expired bool
+		status   string
+		authKind string
+		ready    bool
+		sse      sseConnState
+		err      string
+		expired  bool
 	}{
 		{status: "Credential expired", ready: true, sse: sseConnected, expired: true},
 		{status: "Authentication required", err: "authentication required"},
@@ -144,6 +145,7 @@ func TestActiveConnectionHeaderAttentionStates(t *testing.T) {
 		{status: "Connecting"},
 		{status: "Reconnecting", ready: true, sse: sseReconnecting},
 		{status: "Disconnected", ready: true, sse: sseDisconnected},
+		{status: "Read-only", authKind: "insecure_readonly", ready: true, sse: sseConnected},
 	} {
 		t.Run(tc.status, func(t *testing.T) {
 			m := newTestModel()
@@ -154,6 +156,9 @@ func TestActiveConnectionHeaderAttentionStates(t *testing.T) {
 			m.authCapabilitiesRequired = true
 			m.authCapabilitiesReady = tc.ready
 			m.activeAuth = AuthInfo{Kind: "token", Actor: "member"}
+			if tc.authKind != "" {
+				m.activeAuth.Kind = tc.authKind
+			}
 			m.activeAuthError = tc.err
 			m.sseStatus = tc.sse
 			if tc.expired {
