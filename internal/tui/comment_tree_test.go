@@ -30,6 +30,8 @@ func TestThreadOrder(t *testing.T) {
 			{UID: "b", CreatedAt: when, Reply: &commentref.Link{UID: "a"}},
 		}, []string{"a:0", "a->c:1", "b:1", "d:1"}},
 		{"unknown parent", []CommentEntry{{UID: "c", Reply: &commentref.Link{UID: "unknown"}}}, []string{"c:0"}},
+		{"empty UIDs", []CommentEntry{{Backlinks: []commentref.Link{{UID: "foreign"}}}, {}}, []string{":0", ":0"}},
+		{"empty UID reply", []CommentEntry{{UID: "a"}, {Reply: &commentref.Link{UID: "a"}}}, []string{"a:0", ":0"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			var rows []string
@@ -50,6 +52,37 @@ func TestThreadOrder(t *testing.T) {
 	got := threadOrder(chain)
 	require.Equal(t, []int{0, 1, 2, 3, 4, 4, 4}, []int{got[0].depth, got[1].depth, got[2].depth, got[3].depth, got[4].depth, got[5].depth, got[6].depth})
 	require.Equal(t, 4, got[6].leaves[0].depth)
+}
+
+func TestCommentTreePickerLeaves(t *testing.T) {
+	comments := threadOrder([]CommentEntry{{UID: "a", Body: "Finding", Reply: &commentref.Link{UID: "parent", IssueUID: "other", Kind: "confirm", Body: "Parent evidence"}, Backlinks: []commentref.Link{
+		{UID: "b", IssueUID: "other", Kind: "confirm", Author: "worker-b", Body: "First confirmation"},
+		{UID: "c", IssueUID: "other", Kind: "confirm", Author: "worker-c", Body: "Second confirmation"},
+		{UID: "d", IssueUID: "other", Kind: "refute", Author: "worker-d", Body: "Refutation evidence"},
+	}}})
+	for _, tt := range []struct {
+		name         string
+		cursor       int
+		linkCursor   int
+		confirmation bool
+		refutation   bool
+	}{
+		{"unselected", -1, 1, false, false},
+		{"confirmations", 0, 1, true, false},
+		{"refutation", 0, 3, false, true},
+		{"outgoing reply", 0, 0, false, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			chunks := commentChunks(comments, 100, tt.cursor, tabState{commentLinkCursor: tt.linkCursor})
+			rendered := stripANSI(strings.Join(chunks[0].lines, "\n"))
+			for _, author := range []string{"worker-b", "worker-c", "worker-d"} {
+				require.Equal(t, 1, strings.Count(rendered, author), rendered)
+			}
+			require.Equal(t, tt.confirmation, strings.Contains(rendered, "First confirmation"))
+			require.Equal(t, tt.confirmation, strings.Contains(rendered, "Second confirmation"))
+			require.Equal(t, tt.refutation, strings.Contains(rendered, "Refutation evidence"))
+		})
+	}
 }
 
 func TestThreadOrderForeignLeafOwner(t *testing.T) {

@@ -30,6 +30,9 @@ func threadOrder(cs []CommentEntry) []CommentEntry {
 		}
 	}
 	for _, c := range cs {
+		if c.UID == "" {
+			continue
+		}
 		for _, link := range c.Backlinks {
 			if _, local := byUID[link.UID]; !local {
 				children[c.UID] = append(children[c.UID], link)
@@ -43,7 +46,7 @@ func threadOrder(cs []CommentEntry) []CommentEntry {
 			parent = c.Reply.UID
 			_, visible = byUID[parent]
 		}
-		if visible {
+		if visible && c.UID != "" {
 			children[parent] = append(children[parent], commentref.Link{UID: c.UID, CreatedAt: c.CreatedAt, Kind: c.Reply.Kind, TargetEdited: c.Reply.TargetEdited})
 		} else {
 			roots = append(roots, i)
@@ -63,6 +66,9 @@ func threadOrder(cs []CommentEntry) []CommentEntry {
 		c, parentIdx := cs[i], len(ordered)
 		c.depth, c.leaves = depth, nil
 		ordered = append(ordered, c)
+		if c.UID == "" {
+			return
+		}
 		for _, link := range children[c.UID] {
 			childDepth := min(depth+1, maxCommentDepth)
 			if child, local := byUID[link.UID]; local {

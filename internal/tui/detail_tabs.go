@@ -79,12 +79,18 @@ func commentChunks(cs []CommentEntry, width, cursor int, ts tabState) []entryChu
 		}
 
 		lines = append(lines, commentRelationSummaryLines(c, renderWidth)...)
+		var evidence []commentref.Link
 		if c.UID != "" && i == cursor {
 			lines = append(lines, wrapDetailRow("  ", "R typed reply · [/] select evidence · Enter open · Esc back", renderWidth)...)
-			lines = append(lines, commentEvidenceLines(c, renderWidth, ts.commentLinkCursor)...)
+			var evidenceLines []string
+			evidenceLines, evidence = commentEvidenceLines(c, renderWidth, ts.commentLinkCursor)
+			lines = append(lines, evidenceLines...)
 		}
 		lines = indentLines(lines, depth)
 		for _, leaf := range c.leaves {
+			if slices.ContainsFunc(evidence, func(link commentref.Link) bool { return link.UID == leaf.link.UID }) {
+				continue
+			}
 			leafDepth := min(leaf.depth, max(0, (width-32)/2))
 			leafWidth := width - 2*leafDepth
 			rows := wrapDetailRow("  ", "↳ "+sanitizeForDisplay(leaf.link.Kind)+" "+commentEvidenceHeader(leaf.link), leafWidth)
@@ -414,10 +420,10 @@ func commentRelationSummaryLines(c CommentEntry, width int) []string {
 	return rows
 }
 
-func commentEvidenceLines(c CommentEntry, width, cursor int) []string {
+func commentEvidenceLines(c CommentEntry, width, cursor int) ([]string, []commentref.Link) {
 	links := (detailModel{comments: []CommentEntry{c}}).commentLinks()
 	if len(links) == 0 {
-		return nil
+		return nil, nil
 	}
 	index := ((cursor % len(links)) + len(links)) % len(links)
 	selected := links[index]
@@ -449,7 +455,7 @@ func commentEvidenceLines(c CommentEntry, width, cursor int) []string {
 			lines = append(lines, "    "+line)
 		}
 	}
-	return lines
+	return lines, evidence
 }
 
 // indentLines keeps the cursor gutter at column zero for every depth.

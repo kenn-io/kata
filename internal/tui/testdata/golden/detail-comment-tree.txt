@@ -18,8 +18,6 @@
     > bbbb:reply  worker-b  Apr 30 10:00  (edited)
     Target edited after this reply
       Foreign evidence.
-      ↳ confirm bbbb:reply  worker-b  Apr 30 10:00  (edited)
-      Target edited after this reply
 
       c:reply  worker-c  Apr 30 10:02  (edited)
       confirm
@@ -30,6 +28,8 @@
         c:nested  worker-d  Apr 30 10:03
         ↳ Confirms c:reply by worker-c
         Confirmed.
+
+
 
 
 
