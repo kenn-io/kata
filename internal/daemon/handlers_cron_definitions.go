@@ -60,7 +60,7 @@ func checkCronLifecycleState(current db.CronDefinition, expected string, deletin
 func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 	path := "/api/v1/projects/{project_id}/cron/jobs"
 	put := func(ctx context.Context, projectID int64, id string, body api.PutCronJobBody, deleted bool) (*api.CronJobResponse, error) {
-		ctx, actor, err := cronWriteContext(ctx, body.Actor)
+		ctx, actor, err := actorWriteContext(ctx, body.Actor)
 		if err != nil {
 			return nil, err
 		}
@@ -137,7 +137,7 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 func registerCronWorkflowHandlers(h huma.API, cfg ServerConfig) {
 	path := "/api/v1/projects/{project_id}/cron/workflows"
 	put := func(ctx context.Context, projectID int64, id string, body api.PutCronWorkflowBody, deleted bool) (*api.CronWorkflowResponse, error) {
-		ctx, actor, err := cronWriteContext(ctx, body.Actor)
+		ctx, actor, err := actorWriteContext(ctx, body.Actor)
 		if err != nil {
 			return nil, err
 		}

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -59,6 +60,50 @@ func TestAttachmentUploadRejectsLoggedOutSession(t *testing.T) {
 	manager.Logout(issued.Session)
 	close(resume)
 	<-done
+	require.Equal(t, http.StatusUnauthorized, response.Code, response.Body.String())
+	current, err := store.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.JSONEq(t, `{}`, string(current.Metadata))
+}
+
+type revokeBeforeAttachmentPatch struct {
+	db.Storage
+	tokenID int64
+}
+
+func (s revokeBeforeAttachmentPatch) PatchIssueMetadata(ctx context.Context, in db.PatchIssueMetadataIn) (db.PatchIssueMetadataOut, error) {
+	if _, _, err := s.Storage.RevokeAPIToken(ctx, s.tokenID, db.BootstrapActor); err != nil {
+		return db.PatchIssueMetadataOut{}, err
+	}
+	return s.Storage.PatchIssueMetadata(ctx, in)
+}
+
+func TestAttachmentUploadFencesRevokedToken(t *testing.T) {
+	store := openAuthTestDB(t)
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Example", Author: "operator"})
+	require.NoError(t, err)
+	token, _, err := store.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: "example-token", Actor: "operator", AdminActor: db.BootstrapActor})
+	require.NoError(t, err)
+	fake := docbanktest.New(t)
+	manager := newDeterministicSessionManager(t, "http://127.0.0.1:27123", "instance_a")
+	manager.db = store
+	issued, err := manager.IssueSession(principalFromAPIToken(token), "/kata")
+	require.NoError(t, err)
+	server := NewServer(ServerConfig{DB: revokeBeforeAttachmentPatch{Storage: store, tokenID: token.ID}, StartedAt: time.Now(), WebSessions: manager, Docbank: docbank.NewClient(fake.Server.URL, func() (string, error) { return "test-key", nil }), DocbankFolder: "/kata"})
+	t.Cleanup(func() { _ = server.Close() })
+	handler, err := server.HandlerFor(ListenerPolicy{Kind: ListenerBrowser, Origin: "http://127.0.0.1:27123", RequireBrowserSession: true})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("http://127.0.0.1:27123/api/v1/projects/%d/issues/%s/attachments?name=shot.png&actor=operator", project.ID, issue.ShortID), strings.NewReader("image"))
+	req.RemoteAddr = "127.0.0.1:40123"
+	req.Header.Set("Origin", "http://127.0.0.1:27123")
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set(webSessionHeader, issued.Session)
+	req.Header.Set(webCSRFHeader, issued.CSRF)
+	req.AddCookie(manager.Cookie(issued.Cookie))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, req)
 	require.Equal(t, http.StatusUnauthorized, response.Code, response.Body.String())
 	current, err := store.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)

@@ -108,6 +108,15 @@ func recheckAttachmentWrite(ctx context.Context, cfg ServerConfig, projectID int
 	return requireFederatedIssueClaim(ctx, cfg, projectID, iss, actor)
 }
 
+// Scoped credentials already carry their own transaction fence.
+func attachmentWriteContext(ctx context.Context, requested string) (context.Context, string, error) {
+	if principal, ok := PrincipalFromContext(ctx); ok && principal.Kind == PrincipalDBToken && principal.Scope == nil {
+		return actorWriteContext(ctx, requested)
+	}
+	actor, err := attributedActor(ctx, requested)
+	return ctx, actor, err
+}
+
 func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 	registerAttachmentLinkHandler(h, cfg)
 	rawBody := func(ctx huma.Context, next func(huma.Context)) {
@@ -120,7 +129,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		if cfg.Docbank == nil {
 			return nil, attachmentError(503, "docbank_not_configured")
 		}
-		actor, err := attributedActor(ctx, in.Actor)
+		ctx, actor, err := attachmentWriteContext(ctx, in.Actor)
 		if err != nil {
 			return nil, err
 		}

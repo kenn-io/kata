@@ -20,7 +20,7 @@ import (
 
 func registerAttachmentLinkHandler(h huma.API, cfg ServerConfig) {
 	huma.Register(h, huma.Operation{OperationID: "linkAttachment", Method: http.MethodPost, Path: attachmentPath + "/links", Errors: []int{400, 401, 403, 404, 409, 410, 502, 503}}, func(ctx context.Context, in *api.LinkAttachmentRequest) (*api.AddAttachmentResponse, error) {
-		actor, err := attributedActor(ctx, in.Body.Actor)
+		ctx, actor, err := attachmentWriteContext(ctx, in.Body.Actor)
 		if err != nil {
 			return nil, err
 		}
