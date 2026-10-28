@@ -11,13 +11,15 @@ import (
 )
 
 func TestTranscriptLinks(t *testing.T) {
-	for _, tc := range []struct{ agent, path string }{
-		{"claude", "sessions/00000000-0000-4000-8000-000000000001"},
-		{"codex", "sessions/codex/00000000-0000-4000-8000-000000000001"},
-		{"pi", "sessions/pi/00000000-0000-4000-8000-000000000001"},
+	for _, tc := range []struct{ agent, id, path string }{
+		{"claude", "00000000-0000-4000-8000-000000000001", "sessions/00000000-0000-4000-8000-000000000001"},
+		{"codex", "00000000-0000-4000-8000-000000000001", "sessions/codex/00000000-0000-4000-8000-000000000001"},
+		{"pi", "00000000-0000-4000-8000-000000000001", "sessions/pi/00000000-0000-4000-8000-000000000001"},
+		{"amp", "T-00000000-0000-4000-8000-000000000001", "sessions/amp/T-00000000-0000-4000-8000-000000000001"},
+		{"opencode", "ses_0123456789AbCd", "sessions/opencode/ses_0123456789AbCd"},
 	} {
 		t.Run(tc.agent, func(t *testing.T) {
-			ref := Transcript{Agent: tc.agent, SessionID: "00000000-0000-4000-8000-000000000001"}
+			ref := Transcript{Agent: tc.agent, SessionID: tc.id}
 			require.NoError(t, ref.Validate())
 			got, err := ref.Link("https://agentsview.example/archive/")
 			require.NoError(t, err)
@@ -49,13 +51,16 @@ func FuzzTranscriptLinkPreservesBasePrefix(f *testing.F) {
 }
 
 func TestTranscriptRejectsSensitiveCoordinates(t *testing.T) {
+	for _, id := range []string{"T-00000000-0000-4000-8000-000000000001", "ses_0123456789AbCd", "a.b_c-d", "0", strings.Repeat("a", 128)} {
+		assert.NoError(t, (Transcript{Agent: "amp", SessionID: id}).Validate())
+	}
 	for _, agent := range []string{"a", "0-agent", strings.Repeat("a", 32)} {
 		assert.NoError(t, (Transcript{Agent: agent, SessionID: "00000000-0000-4000-8000-000000000001"}).Validate())
 	}
 	for _, agent := range []string{"", "Pi", "-pi", "pi/omp", "pi_omp", strings.Repeat("a", 33)} {
 		assert.Error(t, (Transcript{Agent: agent, SessionID: "00000000-0000-4000-8000-000000000001"}).Validate())
 	}
-	for _, id := range []string{"", "../session", "/home/user/sessions/chat.jsonl", "secret?token=value", "session\nother", strings.Repeat("a", 10000)} {
+	for _, id := range []string{"", "..", "../session", "/home/user/sessions/chat.jsonl", "secret?token=value", "session\nother", "session other", "session\\id", "session#other", strings.Repeat("a", 129), strings.Repeat("a", 10000)} {
 		assert.Error(t, (&Transcript{Agent: "codex", SessionID: id}).Validate())
 	}
 	for _, base := range []string{"javascript:alert(1)", "https://user:secret@agentsview.example", "https://agentsview.example?token=secret", "https://agentsview.example/#secret", "//agentsview.example", "file:///sessions"} {
@@ -79,8 +84,8 @@ func TestTranscriptLinkPreservesEncodedBasePrefix(t *testing.T) {
 	}
 }
 
-// AgentsView resolves native sessions by UUID. Exercise
-// the whole byte domain, independently formatting the UUID and expected URL.
+// Exercise UUID sessions across the whole byte domain, independently
+// formatting the UUID and expected URL.
 func FuzzTranscriptLinkPreservesSession(f *testing.F) {
 	f.Add([]byte("0123456789abcdef"))
 	f.Add(make([]byte, 16))

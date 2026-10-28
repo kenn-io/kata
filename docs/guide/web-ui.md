@@ -105,7 +105,7 @@ project, and **Done editing** returns to the read-only view. The editor also sup
 
 When a close saved a
 [closing-session reference](../reference/configuration.md#closing-session-transcripts),
-the issue's events show `Session: <agent> <uuid>`, linked when a URL was saved. See the configuration reference for API and AgentsView compatibility.
+the issue's events show `Session: <agent> <id>`, linked when a URL was saved. See the configuration reference for API and AgentsView compatibility.
 
 With daemon API `0.28.0` or newer, comments show handles, reply targets,
 backlinks, and edit markers. Select a reply target or backlink to open its issue

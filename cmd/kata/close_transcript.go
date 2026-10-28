@@ -4,10 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"net/http"
 	"os"
-	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -32,13 +30,17 @@ func closeTranscript(cmd *cobra.Command) *transcript.Transcript {
 			{"codex", "CODEX_THREAD_ID"},
 			{"codex", "CODEX_SESSION_ID"},
 		}
-		for _, agent := range slices.Sorted(maps.Keys(cfg.SessionIDEnv)) {
-			variables = append(variables, struct{ agent, name string }{agent, cfg.SessionIDEnv[agent]})
+		for configuredAgent, name := range cfg.SessionIDEnv {
+			variables = append(variables, struct{ agent, name string }{configuredAgent, name})
 		}
 		for _, variable := range variables {
 			value := os.Getenv(variable.name)
 			if value == "" {
 				continue
+			}
+			if err := (transcript.Transcript{Agent: variable.agent, SessionID: value}).Validate(); err != nil {
+				warn(fmt.Sprintf("current session from %s invalid; skipping attachment", variable.name))
+				return nil
 			}
 			if id != "" && (agent != variable.agent || !strings.EqualFold(id, value)) {
 				warn("ambiguous current session; skipping attachment")
@@ -54,7 +56,7 @@ func closeTranscript(cmd *cobra.Command) *transcript.Transcript {
 		warn("current session unavailable or invalid; skipping attachment")
 		return nil
 	}
-	// Preserve the exact harness UUID: no filesystem path, transcript body,
+	// Preserve the exact harness session ID: no filesystem path, transcript body,
 	// hook ownership hash, or another session is used as a fallback.
 	if cfg.AgentsViewURL != "" {
 		link, err := ref.Link(cfg.AgentsViewURL)

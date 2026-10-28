@@ -21,21 +21,25 @@ function event(uid: string, created_at: string): KataTaskEvent {
 describe('IssueHistory', () => {
   afterEach(cleanup)
 
-  it('shows the closing session and its optional AgentsView link', () => {
+  it.each([
+    ['pi', '00000000-0000-4000-8000-000000000001'],
+    ['amp', 'T-00000000-0000-4000-8000-000000000001'],
+    ['opencode', 'ses_0123456789AbCd'],
+  ])('shows the closing session and its optional AgentsView link: %s', (agent, id) => {
     const closed = {
       ...event('close-a', '2026-08-01T12:00:00Z'),
       type: 'issue.closed',
       payload: {
         transcript: {
-          agent: 'pi',
-          session_id: '00000000-0000-4000-8000-000000000001',
-          url: 'https://agentsview.example/sessions/pi/00000000-0000-4000-8000-000000000001',
+          agent,
+          session_id: id,
+          url: `https://agentsview.example/sessions/${agent}/${id}`,
         },
       },
     }
     render(IssueHistory, { props: { events: [closed] } })
     const link = screen.getByRole('link', {
-      name: /Session: pi 00000000-0000-4000-8000-000000000001/,
+      name: `Session: ${agent} ${id}`,
     })
     expect(link.getAttribute('href')).toBe(closed.payload.transcript.url)
     expect(link.getAttribute('rel')).toContain('noreferrer')
@@ -72,7 +76,15 @@ describe('IssueHistory', () => {
   it.each([
     null,
     [],
-    { agent: 'codex', session_id: '/private/chat.jsonl' },
+    ...[
+      '/private/chat.jsonl',
+      '..',
+      '../session',
+      'session other',
+      'session#other',
+      '',
+      'a'.repeat(129),
+    ].map((session_id) => ({ agent: 'codex', session_id })),
     ...[undefined, '', '-pi', 'pi/omp', 'a'.repeat(33)].map((agent) => ({
       agent,
       session_id: '00000000-0000-4000-8000-000000000001',

@@ -119,7 +119,7 @@ same version before new list options and explicit lexical pagination.
 
 Close requests may explicitly supply `transcript`. See the
 [configuration reference](configuration.md#closing-session-transcripts) for
-agent names, session UUIDs, and daemon API compatibility:
+agent names, session IDs, and daemon API compatibility:
 
 ```json
 {
@@ -135,8 +135,8 @@ agent names, session UUIDs, and daemon API compatibility:
 }
 ```
 
-The required `agent` field identifies the coding agent; `session_id` is
-a session UUID, and `url` is
+The required `agent` field identifies the coding agent; `session_id` follows
+the token rules in the configuration reference, and `url` is
 optional absolute HTTP(S) without credentials, query, or fragment. Supply a
 verified locator for namespaced imported archives. The daemon stores this
 separately from evidence in the close event; it does not fetch or verify the

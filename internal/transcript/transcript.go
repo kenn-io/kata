@@ -11,13 +11,13 @@ import (
 
 var agentPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
-var sessionIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+var sessionIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`)
 
-// Transcript identifies an agent and session UUID. The optional URL is a
+// Transcript identifies an agent and session ID. The optional URL is a
 // locator, not a claim that AgentsView has indexed the session.
 type Transcript struct {
 	Agent     string `json:"agent" required:"true" pattern:"^[a-z0-9][a-z0-9-]*$" maxLength:"32"`
-	SessionID string `json:"session_id" required:"true"`
+	SessionID string `json:"session_id" required:"true" pattern:"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$" maxLength:"128"`
 	URL       string `json:"url,omitempty"`
 }
 
@@ -27,7 +27,7 @@ func (t Transcript) Validate() error {
 		return errors.New("transcript agent must be a lowercase alphanumeric or hyphen token starting with a letter or digit, at most 32 characters")
 	}
 	if !sessionIDPattern.MatchString(t.SessionID) {
-		return errors.New("transcript session_id must be a native session UUID")
+		return errors.New("transcript session_id must start with a letter or digit and contain only letters, digits, dots, underscores, or hyphens, at most 128 characters")
 	}
 	if t.URL != "" {
 		if _, err := parseURL(t.URL); err != nil {
@@ -52,7 +52,7 @@ func (t Transcript) Link(base string) (string, error) {
 		path += t.Agent + "/"
 	}
 	// Keep escaped prefixes intact: a configured %2F is part of a segment,
-	// not a new path separator. Session UUIDs contain no URL delimiters.
+	// not a new path separator. Valid session IDs contain no URL delimiters.
 	u.RawPath = strings.TrimRight(u.EscapedPath(), "/") + "/" + path + t.SessionID
 	u.Path, err = url.PathUnescape(u.RawPath)
 	if err != nil {

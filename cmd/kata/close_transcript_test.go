@@ -75,6 +75,8 @@ func TestCloseTranscript_ContextAndOptionalLink(t *testing.T) {
 		{name: "no context", warning: "current session unavailable"},
 		{name: "conflicting Codex context", thread: transcriptSessionOne, session: transcriptSessionTwo, warning: "ambiguous"},
 		{name: "configured session", variables: `pi = "PI_SESSION_ID"`, pi: transcriptSessionTwo, wantID: transcriptSessionTwo, wantAgent: "pi"},
+		{name: "configured native session", variables: `amp = "PI_SESSION_ID"`, pi: "T-" + transcriptSessionOne, wantID: "T-" + transcriptSessionOne, wantAgent: "amp"},
+		{name: "invalid configured session names variable", variables: `pi = "PI_SESSION_ID"`, pi: "/private/session/chat.jsonl", warning: "PI_SESSION_ID"},
 		{name: "default ignores unconfigured session", pi: transcriptSessionOne, warning: "current session unavailable"},
 		{name: "equal aliases", wantAgent: "codex", thread: transcriptSessionOne, session: transcriptSessionOne, wantID: transcriptSessionOne},
 		{name: "Claude Code context", wantAgent: "claude", claude: transcriptSessionOne, wantID: transcriptSessionOne},
@@ -175,10 +177,7 @@ func TestCloseTranscript_DaemonCompatibility(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, sent)
 			if tc.attach {
-				expected := map[string]any{"session_id": transcriptSessionOne}
-				if tc.agent != "" {
-					expected["agent"] = tc.agent
-				}
+				expected := map[string]any{"agent": tc.agent, "session_id": transcriptSessionOne}
 				assert.Equal(t, expected, sent["transcript"])
 				assert.Empty(t, stderr)
 			} else {

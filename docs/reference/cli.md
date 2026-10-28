@@ -957,9 +957,9 @@ exact retry with a matching idempotency key returns the committed receipt even
 after the original close advanced the issue state.
 
 An opt-in [closing-session transcript setting](configuration.md#closing-session-transcripts)
-records the current session UUID and optional AgentsView link alongside the
+records the current session ID and optional AgentsView link alongside the
 close evidence. The setting maps each additional agent name to its session
-variable. See the configuration reference for UUID requirements, agent names,
+variable. See the configuration reference for session ID requirements, agent names,
 and daemon API compatibility.
 Session provenance supplies no completion evidence on its own.
 

@@ -8,6 +8,10 @@ export interface Transcript {
    * @pattern ^[a-z0-9][a-z0-9-]*$
    */
   agent: string
+  /**
+   * @maxLength 128
+   * @pattern ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$
+   */
   session_id: string
   url?: string
 }

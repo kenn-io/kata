@@ -6676,6 +6676,8 @@ components:
           pattern: ^[a-z0-9][a-z0-9-]*$
           type: string
         session_id:
+          maxLength: 128
+          pattern: ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$
           type: string
         url:
           type: string

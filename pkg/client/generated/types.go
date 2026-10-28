@@ -6676,7 +6676,7 @@ func (t TokenScopeOut) Validate() error {
 
 type Transcript struct {
 	Agent     string  `json:"agent" validate:"required,max=32"`
-	SessionID string  `json:"session_id" validate:"required"`
+	SessionID string  `json:"session_id" validate:"required,max=128"`
 	URL       *string `json:"url,omitempty"`
 }
 
