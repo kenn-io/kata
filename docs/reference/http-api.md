@@ -139,11 +139,7 @@ verified locator for namespaced imported archives. The daemon stores this
 separately from evidence in the close event; it does not fetch or verify the
 chat. Its `agent` and `session_id` participate in retry identity; `url` does
 not. The object is preserved in scoped responses and history. Automatic capture is a [CLI client preference](configuration.md#closing-session-transcripts),
-not daemon-side session discovery. Claude Code and Codex keep their existing
-behavior, including Codex's `/sessions/codex/<UUID>` link path. Links for other
-agents need an AgentsView build with
-[agentsview#2465](https://github.com/kenn-io/agentsview/pull/2465), which has yet
-to be released.
+not daemon-side session discovery. See that reference for AgentsView compatibility.
 
 Guarded close requests use a request-local compatibility check instead of a
 separate health probe. A request that sends `Idempotency-Key` or `If-Match`

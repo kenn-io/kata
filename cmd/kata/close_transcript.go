@@ -67,10 +67,10 @@ func closeTranscript(cmd *cobra.Command) *transcript.Transcript {
 // dropUnsupportedTranscript keeps provenance optional when a daemon predates
 // the supplied transcript shape.
 func dropUnsupportedTranscript(
-	ctx context.Context, cmd *cobra.Command, client *http.Client, baseURL string, body map[string]any,
+	ctx context.Context, cmd *cobra.Command, client *http.Client, baseURL string, ref *transcript.Transcript, body map[string]any,
 ) error {
 	required := apiVersionCloseTranscript
-	if ref, ok := body["transcript"].(*transcript.Transcript); ok && ref != nil && ref.Agent == "" {
+	if ref.Agent == "" {
 		required = apiVersionAgentlessCloseTranscript
 	}
 	err := requireDaemonAPIVersion(ctx, client, baseURL, required, "close transcript")

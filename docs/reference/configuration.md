@@ -30,7 +30,7 @@ agentsview_url = "https://agentsview.example" # optional; a base path is support
 ```
 
 This is off by default and needs no daemon restart. Claude Code and Codex
-attachment needs daemon HTTP API `0.26.0` or newer, as before. Sessions from
+discovery, agent, link path, and HTTP API `0.26.0` requirement are unchanged. Sessions from
 other configured variables need HTTP API `0.34.0` or newer. Before attaching a
 transcript, `kata close` checks the daemon's API version; an older daemon gets a warning on stderr and
 the close proceeds without the transcript. With attachment disabled, close
@@ -58,7 +58,8 @@ UUID as a built-in variable keeps the built-in variable's agent.
 Setting either `KATA_TRANSCRIPT_AGENT` or `KATA_TRANSCRIPT_SESSION_ID` skips
 variable discovery. `KATA_TRANSCRIPT_SESSION_ID` supplies the UUID;
 `KATA_TRANSCRIPT_AGENT` optionally supplies `claude` or `codex`. An agent
-without a session ID warns and skips attachment.
+without a session ID warns and skips attachment. A `KATA_TRANSCRIPT_SESSION_ID`
+without an agent now records an agentless session, requiring API `0.34.0`.
 
 ```sh
 KATA_TRANSCRIPT_SESSION_ID=00000000-0000-4000-8000-000000000001 \
@@ -85,8 +86,7 @@ bare UUID session lookup, including on its PostgreSQL server. This change has
 yet to be released. For an older installation, omit `agentsview_url` and use
 AgentsView's **Go to session** lookup with the saved UUID. A UUID matching
 multiple sessions is ambiguous; use the session's canonical ID or a verified
-locator through the HTTP close API. Claude Code and Codex links keep their
-existing paths.
+locator through the HTTP close API.
 
 Kata makes no AgentsView request during close. A generated URL is a locator,
 not an availability receipt: offline hosting, delayed indexing, authentication,

@@ -106,11 +106,7 @@ project, and **Done editing** returns to the read-only view. The editor also sup
 When a close saved a
 [closing-session reference](../reference/configuration.md#closing-session-transcripts),
 the issue's events show the session ID and agent when one was saved, linked
-when a URL was saved. Claude Code and Codex retain their API `0.26.0` behavior.
-Other configured variables need API `0.34.0` and, to open their links, an
-AgentsView build with
-[agentsview#2465](https://github.com/kenn-io/agentsview/pull/2465), which has yet
-to be released.
+when a URL was saved. See the configuration reference for API and AgentsView compatibility.
 
 With daemon API `0.28.0` or newer, comments show handles, reply targets,
 backlinks, and edit markers. Select a reply target or backlink to open its issue

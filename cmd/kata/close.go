@@ -12,6 +12,7 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/transcript"
 )
 
 func newCloseCmd() *cobra.Command {
@@ -292,7 +293,7 @@ func runActionWithHeaders(
 		return err
 	}
 	if action == "close" && body["transcript"] != nil {
-		if err := dropUnsupportedTranscript(ctx, cmd, client, baseURL, body); err != nil {
+		if err := dropUnsupportedTranscript(ctx, cmd, client, baseURL, body["transcript"].(*transcript.Transcript), body); err != nil {
 			return err
 		}
 	}
