@@ -75,7 +75,14 @@ func TestCloseInputFromFormBuildsWontfixWithoutEvidence(t *testing.T) {
 func TestIssueScopedCloseCapabilityOpensEvidenceForm(t *testing.T) {
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/instance", r.URL.Path)
-		respondJSON(t, w, InstanceInfo{Auth: testIssueScopedAuth("issue.read", "issue.edit", "issue.close")})
+		future := time.Now().UTC().Add(time.Hour)
+		respondJSON(t, w, InstanceInfo{Auth: AuthInfo{
+			Kind:                  "db_token",
+			Scope:                 &api.TokenScopeOut{Kind: "issue_subtree", ProjectUID: "01HZNQ7VFPK1XGD8R5MABCD4EX", RootIssueUID: "01HZNQ7VFPK1XGD8R5MABCD5YZ"},
+			ExpiresAt:             &future,
+			AllowedActions:        []string{"issue.read", "issue.edit", "issue.close"},
+			CloseRequiresEvidence: true,
+		}})
 	})
 	m := initialModel(Options{})
 	m.api = c
@@ -83,8 +90,8 @@ func TestIssueScopedCloseCapabilityOpensEvidenceForm(t *testing.T) {
 	m.scope = scope{projectID: 7}
 	m.list.issues = []Issue{{ProjectID: 7, ShortID: "abc4", Status: "open"}}
 
-	m, expiryCmd := m.handleAuthCapabilities(m.fetchAuthCapabilities()().(authCapabilitiesMsg))
-	require.NotNil(t, expiryCmd, "finite credential expiry must schedule a UI update")
+	model, _ := m.Update(m.fetchAuthCapabilities()())
+	m = model.(Model)
 	got, cmd, handled := m.routeCloseKey(runeKey('x'))
 	require.True(t, handled)
 	require.Nil(t, cmd)

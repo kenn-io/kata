@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -12,18 +11,6 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 )
-
-func testIssueScopedAuth(actions ...string) AuthInfo {
-	return AuthInfo{
-		Kind: "db_token",
-		Scope: &api.TokenScopeOut{
-			Kind: "issue_subtree", ProjectUID: "01HZNQ7VFPK1XGD8R5MABCD4EX", RootIssueUID: "01HZNQ7VFPK1XGD8R5MABCD5YZ",
-		},
-		ExpiresAt:             new(time.Now().UTC().Add(time.Hour)),
-		AllowedActions:        actions,
-		CloseRequiresEvidence: true,
-	}
-}
 
 // Every view shows the connection status when it needs attention.
 func TestActiveConnectionHeaderEveryView(t *testing.T) {
@@ -52,7 +39,9 @@ func TestActiveConnectionHeaderFencesStaleReplies(t *testing.T) {
 	m.width = 100
 	m.height = 24
 	m.connGen = 1
-	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{connGen: 1, auth: AuthInfo{Kind: "token", Actor: "member-one"}})
+	expiry := time.Now().Add(time.Hour)
+	m, cmd := m.handleAuthCapabilities(authCapabilitiesMsg{connGen: 1, auth: AuthInfo{Kind: "token", Actor: "member-one", ExpiresAt: &expiry}})
+	require.NotNil(t, cmd, "finite credential expiry must schedule a UI update")
 	m.connGen = 2
 	m.authCapabilitiesReady = false
 	m.activeAuth = AuthInfo{}
@@ -80,15 +69,16 @@ func TestActiveConnectionHeaderKeepsTitleBarContent(t *testing.T) {
 		m.height = 24
 		m.scope = scope{projectID: 7, projectName: "example-project"}
 		m.activeDaemon = daemonTarget{Name: hub, URL: "http://100.64.0.5:7777"}
-		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-			require.Equal(t, "/api/v1/instance", r.URL.Path)
-			auth := testIssueScopedAuth("issue.read")
-			auth.Actor = strings.Repeat("long-actor-", 12)
-			respondJSON(t, w, InstanceInfo{Auth: auth})
-		})
-		auth, err := c.GetInstance(t.Context())
-		require.NoError(t, err)
-		m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: auth.Auth})
+		m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{
+			Kind:  "db_token",
+			Actor: strings.Repeat("long-actor-", 12),
+			Scope: &api.TokenScopeOut{
+				Kind: "issue_subtree", ProjectUID: "01HZNQ7VFPK1XGD8R5MABCD4EX", RootIssueUID: "01HZNQ7VFPK1XGD8R5MABCD5YZ",
+			},
+			ExpiresAt:             new(time.Now().UTC().Add(time.Hour)),
+			AllowedActions:        []string{"issue.read"},
+			CloseRequiresEvidence: true,
+		}})
 		return m
 	}
 	var rows []string
