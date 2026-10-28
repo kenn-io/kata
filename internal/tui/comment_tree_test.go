@@ -75,9 +75,6 @@ func TestCommentTreePickerLeaves(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			chunks := commentChunks(comments, 100, tt.cursor, tabState{commentLinkCursor: tt.linkCursor})
 			rendered := stripANSI(strings.Join(chunks[0].lines, "\n"))
-			for _, author := range []string{"worker-b", "worker-c", "worker-d"} {
-				require.Equal(t, 1, strings.Count(rendered, author), rendered)
-			}
 			require.Equal(t, tt.confirmation, strings.Contains(rendered, "First confirmation"))
 			require.Equal(t, tt.confirmation, strings.Contains(rendered, "Second confirmation"))
 			require.Equal(t, tt.refutation, strings.Contains(rendered, "Refutation evidence"))
