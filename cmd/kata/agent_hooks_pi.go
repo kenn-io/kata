@@ -200,25 +200,46 @@ export default function kataHooks(pi) {
       return result.code === 0 && !result.killed;
     } catch { return false; /* Attention is best effort and never emits model context. */ }
   }
-  function attentionIdentity(ref, server, cwd) {
-    // Mirrors attentionRef: a ref the CLI ignores never claims ownership.
-    // Without KATA_SERVER, the workspace chooses the daemon and project.
-    ref = ref.trim();
-    return !ref || ref.startsWith("-") ? "" : JSON.stringify({ ref, server, cwd });
+  async function daemonAddress(baseline) {
+    try {
+      const result = await pi.exec(baseline.executable, ["--json", "--workspace", baseline.cwd, "daemon", "locate"],
+        { cwd: baseline.cwd, timeout: 10000 });
+      if (result.code !== 0 || result.killed) return "";
+      const route = JSON.parse(result.stdout);
+      const address = route.request_base_url || route.address;
+      return typeof address === "string" ? address : "";
+    } catch { return ""; /* An unknown daemon never matches another session. */ }
   }
+  // The workspace still chooses the project for a bare ref.
+  const attentionIdentity = (baseline, daemon) => JSON.stringify({ ref: baseline.ref, daemon, cwd: baseline.cwd });
   async function transition(mode, baseline) {
     const pending = { mode };
     baseline.pending = pending;
     pending.promise = (async () => {
-      if (mode === "start") baseline.startAttempted = true;
+      let daemon = "";
+      if (mode === "start") {
+        daemon = await daemonAddress(baseline);
+        // A nested session tracking its live parent's issue leaves attention to the parent.
+        if (registry.active.get(baseline.cwd) !== baseline ||
+            (daemon && kataAttentionHostSkip(attentionIdentity(baseline, daemon)))) {
+          if (baseline.pending === pending) delete baseline.pending;
+          return;
+        }
+        baseline.startAttempted = true;
+      }
       const succeeded = await attention(mode, baseline);
       if (registry.active.get(baseline.cwd) === baseline && succeeded) {
         if (mode === "start") {
           baseline.started = true;
-          kataAttentionHostClaim(baseline.identity);
+          // A stopped daemon can be located only after the start brings it up.
+          daemon ||= await daemonAddress(baseline);
+          if (daemon && registry.active.get(baseline.cwd) === baseline && !baseline.ended) {
+            baseline.identity = attentionIdentity(baseline, daemon);
+            kataAttentionHostClaim(baseline.identity);
+          }
         } else {
           baseline.ended = true;
-          kataAttentionHostRelease(baseline.identity);
+          if (baseline.identity) kataAttentionHostRelease(baseline.identity);
         }
       }
       if (baseline.pending === pending) delete baseline.pending;
@@ -232,14 +253,12 @@ export default function kataHooks(pi) {
       if (typeof id !== "string" || !id) return;
       const cwd = path.resolve(ctx.cwd);
       const previous = registry.active.get(cwd);
-      const ref = process.env.KATA_REF || "";
       const baseline = previous?.id === id && !previous.ended ? previous :
-        { id, cwd, executable: options.executable, ref, identity: attentionIdentity(ref, process.env.KATA_SERVER || "", cwd),
-          started: false, startAttempted: false, ended: false };
+        { id, cwd, executable: options.executable, ref: (process.env.KATA_REF || "").trim(), started: false, startAttempted: false, ended: false };
       if (baseline.started || baseline.pending) return;
       registry.active.set(cwd, baseline);
-      // A nested session tracking its live parent's issue leaves attention to the parent.
-      if (!baseline.identity || kataAttentionHostSkip(baseline.identity)) return;
+      // Mirrors attentionRef: the CLI ignores these refs, so skip the daemon lookup.
+      if (!baseline.ref || baseline.ref.startsWith("-")) return;
       await transition("start", baseline);
     });
     pi.on("session_shutdown", async (event, ctx) => {
@@ -251,8 +270,9 @@ export default function kataHooks(pi) {
         await pending.promise;
         if (pending.mode === "end") return;
       }
-      // Baselines retained from an earlier adapter record only started.
-      if ((!baseline.started && !baseline.startAttempted) || !selected(ctx, "attention") || registry.active.get(baseline.cwd) !== baseline || baseline.ended || baseline.pending) return;
+      // Baselines retained from an earlier adapter lack startAttempted, and
+      // each of them attempted a start, even if its response was lost.
+      if (baseline.startAttempted === false || !selected(ctx, "attention") || registry.active.get(baseline.cwd) !== baseline || baseline.ended || baseline.pending) return;
       await transition("end", baseline);
     });
   }

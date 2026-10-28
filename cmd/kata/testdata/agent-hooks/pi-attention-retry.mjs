@@ -8,7 +8,7 @@ const handlers = new Map(), calls = [];
 let session = 'session-A', pending;
 const result = {code: 0, killed: false, stdout: '', stderr: ''};
 function issueIdentity(ref) {
-  return JSON.stringify({ref, server: process.env.KATA_SERVER || '', cwd: path.resolve(cwd)});
+  return JSON.stringify({ref, daemon: 'unix:///tmp/kata.sock', cwd: path.resolve(cwd)});
 }
 const pi = {
   on(name, handler) {
@@ -16,6 +16,7 @@ const pi = {
     list.push(handler); handlers.set(name, list);
   },
   async exec(executable, args, options) {
+    if (args[3] === 'daemon') return {...result, stdout: JSON.stringify({network: 'unix', address: 'unix:///tmp/kata.sock'})};
     calls.push({args, options});
     if (pending) return await pending.promise;
     return result;
@@ -51,7 +52,7 @@ const name = mode === 'start' ? 'session_start' : 'session_shutdown';
 const event = {reason: mode === 'start' ? 'resume' : 'quit'};
 const before = calls.length;
 const first = emit(name, event), duplicate = emit(name, event);
-await Promise.resolve();
+await new Promise(setImmediate);
 assert.equal(calls.length, before + 1, 'concurrent lifecycle callbacks must share one command');
 fail(operation); pending = undefined;
 await Promise.all([first, duplicate]);
@@ -84,7 +85,7 @@ for (const replacementRef of ['old-ref', 'replacement-ref']) for (const staleMod
   const oldContext = context();
   const stale = emit(staleMode === 'start' ? 'session_start' : 'session_shutdown',
     {reason: staleMode === 'start' ? 'new' : 'quit'}, oldContext);
-  await Promise.resolve();
+  await new Promise(setImmediate);
   const retiring = snapshot('session_shutdown');
   await emit('session_shutdown', {reason: 'reload'}, oldContext);
   session = 'new-' + staleMode; factory(pi);

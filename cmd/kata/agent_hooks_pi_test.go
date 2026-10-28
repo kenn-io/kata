@@ -350,9 +350,33 @@ func TestPiNativeAttentionEndsBaselineFromPreviousAdapter(t *testing.T) {
 	if err := os.WriteFile(extension, plan.Changes[0].Content, 0600); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(node, "testdata/agent-hooks/pi-upgraded-baseline.mjs", extension, opts.Dir) //nolint:gosec // G204: fixed fixture executes the generated adapter over a retained baseline.
+	for _, started := range []string{"true", "false"} {
+		command := exec.Command(node, "testdata/agent-hooks/pi-upgraded-baseline.mjs", extension, opts.Dir, started) //nolint:gosec // G204: fixed fixture executes the generated adapter over a retained baseline.
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("Pi attention end after adapter upgrade (started=%s): %v\n%s", started, err, output)
+		}
+	}
+}
+
+func TestPiNativeAttentionLeadClaimsAfterStartingDaemon(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("Node is required for native Pi execution fixture")
+	}
+	opts := piTestOptions(t)
+	opts.Contract = false
+	opts.Attention = true
+	plan, err := planPiAgentHooks(opts, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extension := filepath.Join(t.TempDir(), "extension.mjs")
+	if err := os.WriteFile(extension, plan.Changes[0].Content, 0600); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(node, "testdata/agent-hooks/pi-stopped-lead.mjs", extension, opts.Dir) //nolint:gosec // G204: fixed fixture executes the generated adapter with a stopped daemon.
 	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("Pi attention end after adapter upgrade: %v\n%s", err, output)
+		t.Fatalf("Pi lead marker after starting the daemon: %v\n%s", err, output)
 	}
 }
 

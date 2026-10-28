@@ -14,7 +14,7 @@ import (
 )
 
 func TestPiChildDoesNotTakeOverLeadAttention(t *testing.T) {
-	testPiChildAttention(t, "lead-ref", "lead-ref", "https://daemon.example", "https://daemon.example")
+	testPiChildAttention(t, "lead-ref", "lead-ref", "unix:///tmp/kata.sock", "unix:///tmp/kata.sock")
 }
 
 func attentionHostFixture(t *testing.T) func(*rapid.T, any, any) {
@@ -124,20 +124,26 @@ func TestAttentionHostClaimReleaseProperty(t *testing.T) {
 }
 
 func TestPiChildWithDifferentRefTracksOwnIssue(t *testing.T) {
-	testPiChildAttention(t, "lead-ref", "other-ref", "https://daemon.example", "https://daemon.example")
+	testPiChildAttention(t, "lead-ref", "other-ref", "unix:///tmp/kata.sock", "unix:///tmp/kata.sock")
 }
 
-// Without KATA_SERVER, the workspace config chooses the daemon and the
-// project for a bare ref, so a child elsewhere may track another issue.
+// The workspace chooses the project for a bare ref, so a child elsewhere may
+// track another issue on the same daemon.
 func TestPiChildInDifferentDirectoryTracksOwnIssue(t *testing.T) {
-	testPiChildAttention(t, "lead-ref", "lead-ref", "", "", "nested")
+	testPiChildAttention(t, "lead-ref", "lead-ref", "unix:///tmp/kata.sock", "unix:///tmp/kata.sock", "nested")
 }
 
-func TestPiChildWithSameIssueOnDifferentDaemonTracksOwnIssue(t *testing.T) {
-	testPiChildAttention(t, "lead-ref", "lead-ref", "https://daemon-one.example", "https://daemon-two.example")
+// The child's environment or workspace config can select another daemon
+// without KATA_SERVER, for example through KATA_HOME.
+func TestPiChildOnDifferentDaemonTracksOwnIssue(t *testing.T) {
+	testPiChildAttention(t, "lead-ref", "lead-ref", "unix:///tmp/lead.sock", "unix:///tmp/child.sock")
 }
 
-func testPiChildAttention(t *testing.T, leadRef, childRef, leadServer, childServer string, childSubdir ...string) {
+func TestPiChildWithUnknownDaemonTracksOwnIssue(t *testing.T) {
+	testPiChildAttention(t, "lead-ref", "lead-ref", "unix:///tmp/kata.sock", "")
+}
+
+func testPiChildAttention(t *testing.T, leadRef, childRef, leadDaemon, childDaemon string, childSubdir ...string) {
 	t.Helper()
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -153,7 +159,7 @@ func testPiChildAttention(t *testing.T, leadRef, childRef, leadServer, childServ
 	if err := os.WriteFile(extension, plan.Changes[0].Content, 0600); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(node, append([]string{"testdata/agent-hooks/pi-child.mjs", extension, opts.Dir, leadRef, childRef, leadServer, childServer}, childSubdir...)...) //nolint:gosec // G204: fixed fixture executes a generated adapter in temporary directories.
+	command := exec.Command(node, append([]string{"testdata/agent-hooks/pi-child.mjs", extension, opts.Dir, leadRef, childRef, leadDaemon, childDaemon}, childSubdir...)...) //nolint:gosec // G204: fixed fixture executes a generated adapter in temporary directories.
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("Pi child attention: %v\n%s", err, output)
 	}

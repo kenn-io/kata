@@ -18,6 +18,9 @@ const pi = {
     handlers.set(name, list);
   },
   async exec(_executable, args) {
+    if (args[3] === 'daemon') {
+      return {code: 0, killed: false, stdout: JSON.stringify({network: 'unix', address: 'unix:///tmp/kata.sock'}), stderr: ''};
+    }
     attentionCalls.push(args);
     const identity = {
       session: args[5],

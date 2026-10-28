@@ -2,13 +2,14 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
-const [extension, cwd] = process.argv.slice(2);
+const [extension, cwd, started] = process.argv.slice(2);
 const session = 'upgraded-session';
 const calls = [];
 const registry = globalThis[Symbol.for('kata.pi.native.v1')] = {adapters: new Map(), active: new Map()};
-// A session started by the previous adapter retains its baseline across the
-// reinstall and reload. That baseline has no startAttempted field.
-registry.active.set(path.resolve(cwd), {id: session, cwd: path.resolve(cwd), executable: 'kata', ref: 'lead-ref', started: true, ended: false});
+// A session from the previous adapter retains its baseline across the
+// reinstall and reload. That baseline has no startAttempted field. It is not
+// started when the start command's response was lost.
+registry.active.set(path.resolve(cwd), {id: session, cwd: path.resolve(cwd), executable: 'kata', ref: 'lead-ref', started: started === 'true', ended: false});
 const handlers = new Map();
 (await import(pathToFileURL(extension))).default({
   on(name, fn) { handlers.set(name, [...(handlers.get(name) || []), fn]); },

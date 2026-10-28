@@ -6,6 +6,7 @@ const user=(await import(pathToFileURL(userPath))).default;
 let session='native-A',contract='contract current',inbox='request A',failInbox=false,failContract=false;
 const calls=[],notifications=[],handlers=new Map();
 const pi={on(name,fn){const list=handlers.get(name)||[];list.push(fn);handlers.set(name,list)},async exec(exe,args,opts){calls.push({exe,args,opts});assert.equal(opts.cwd,cwd);assert.equal(opts.timeout,10000);assert.equal(process.env.KATA_SERVER,'https://daemon.example');
+ if(args[3]==='daemon')return {code:1,stdout:'',stderr:'daemon is not running',killed:false};
  if(args[0]==='agent-contract-hook'){if(failContract)return {code:1,stdout:'',stderr:'failed',killed:false};return {code:0,stdout:JSON.stringify({hookSpecificOutput:{additionalContext:contract}}),stderr:'',killed:false};}
  if(args[0]==='inbox'){assert.deepEqual(args,['inbox','--context','--for',process.env.KATA_INBOX_USER]);return {code:failInbox?1:0,stdout:inbox,stderr:'',killed:false};}
  assert.deepEqual(args,['agent-hook','attention-native','pi',args[3],'--session',session,'--host-pid',String(process.pid),'--ref','issue-ref','--workspace',cwd]);return {code:0,stdout:'',stderr:'',killed:false};
