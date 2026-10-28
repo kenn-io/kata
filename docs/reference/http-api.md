@@ -183,8 +183,9 @@ reference or full UID within the URL project. `after_id` and `limit` page
 through that history; omitting `issue` polls the project feed. Filtered history
 never returns `reset_required`: purging another issue removes only events that
 name it, and events that name an issue the caller cannot see are omitted.
-Scoped credentials receive the same authorized history projection as issue
-detail.
+History includes events from earlier projects after a move only when the caller
+can access those projects. Scoped credentials receive the same authorized
+history projection as issue detail.
 
 Every successful filtered response includes `X-Kata-Events-Issue-UID` with the
 resolved issue UID, including empty pages. Clients should require

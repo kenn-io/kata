@@ -23,7 +23,7 @@ func optionalCloseEvidenceForShow(ctx context.Context, hc *http.Client, base str
 	}
 	evidence, err := closeEvidenceForShow(ctx, hc, base, pid, ref)
 	var cliErr *cliError
-	if errors.As(err, &cliErr) && cliErr.HTTPStatus == http.StatusForbidden {
+	if errors.As(err, &cliErr) && (cliErr.HTTPStatus == http.StatusForbidden || cliErr.HTTPStatus == http.StatusNotFound) {
 		return nil, nil
 	}
 	return evidence, err

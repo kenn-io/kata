@@ -151,3 +151,42 @@ func checkCloseAttachmentCurrentMetadata(t *testing.T, env *testenv.Env, store d
 }
 
 const attachmentCloseTestMessage = "Delivered the requested report and checked its final contents carefully."
+
+func TestMovedIssueHistoryRetainsAttachmentEvidence(t *testing.T) {
+	env := testenv.New(t)
+	project, issue := seedProjectAndIssue(t, env)
+	destination, err := env.DB.CreateProject(t.Context(), "destination-project")
+	require.NoError(t, err)
+	encoded, err := json.Marshal(closeAttachmentEntry())
+	require.NoError(t, err)
+	key := metadata.AttachmentPrefix + closeAttachmentID
+	_, err = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{key: encoded}})
+	require.NoError(t, err)
+	input := map[string]any{"actor": "operator", "reason": "done", "message": attachmentCloseTestMessage, "evidence": []any{map[string]any{"type": "attachment", "attachment_id": closeAttachmentID}}}
+	resp, raw := envDoRaw(t, env, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues/%s/actions/close", project.ID, issue.ShortID), input, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	_, err = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: "operator", Patch: map[string]jsontext.Value{key: nil}})
+	require.NoError(t, err)
+	current, err := env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	_, err = env.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: project.ID, ToProjectID: destination.ID, IfMatchRev: current.Revision, Actor: "operator"})
+	require.NoError(t, err)
+	resp, raw = envGetRaw(t, env, fmt.Sprintf("/api/v1/projects/%d/events?issue=%s", destination.ID, issue.UID))
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	require.Equal(t, issue.UID, resp.Header.Get("X-Kata-Events-Issue-UID"))
+	var page api.PollEventsBody
+	require.NoError(t, json.Unmarshal(raw, &page))
+	for _, event := range page.Events {
+		if event.Type != "issue.closed" {
+			continue
+		}
+		var payload struct {
+			Evidence []db.Evidence `json:"evidence"`
+		}
+		require.NoError(t, json.Unmarshal(event.Payload, &payload))
+		require.Len(t, payload.Evidence, 1)
+		require.Equal(t, closeAttachmentEntry(), *payload.Evidence[0].Attachment)
+		return
+	}
+	t.Fatal("moved issue history omitted the close event")
+}
