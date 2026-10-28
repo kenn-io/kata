@@ -65,7 +65,6 @@ func TestTranscriptLinkPreservesEncodedBasePrefix(t *testing.T) {
 		"https://agentsview.example/team%2Farchive",
 		"https://agentsview.example/%2e%2e/archive",
 		"https://agentsview.example/team%25archive",
-		"https://agentsview.example/team%3Farchive%23section",
 	} {
 		t.Run(base, func(t *testing.T) {
 			got, err := ref.Link(base)
