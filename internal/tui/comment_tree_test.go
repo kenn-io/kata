@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"strings"
@@ -93,6 +94,58 @@ func TestCommentTreeCrossIssueParent(t *testing.T) {
 	require.Contains(t, stripANSI(chunks[1].lines[0]), "      c:child")
 }
 
+func TestCommentTreeForeignTargetTags(t *testing.T) {
+	when := time.Date(2026, 4, 30, 10, 0, 0, 0, time.UTC)
+	edited := when.Add(time.Minute)
+	for _, freshConfirm := range []bool{false, true} {
+		t.Run(fmt.Sprint("fresh confirm=", freshConfirm), func(t *testing.T) {
+			confirmTime := when
+			if freshConfirm {
+				confirmTime = edited.Add(time.Minute)
+			}
+			projected := commentref.Project([]commentref.Record{
+				{UID: "a", IssueUID: "local"},
+				{UID: "b", Handle: "c:foreign", ReplyToUID: "a", ReplyKind: "reply", IssueUID: "foreign", EditedAt: &edited},
+				{UID: "c", ReplyToUID: "b", ReplyKind: "confirm", IssueUID: "local", CreatedAt: confirmTime},
+				{UID: "d", ReplyToUID: "b", ReplyKind: "refute", IssueUID: "local", CreatedAt: edited.Add(time.Minute)},
+			}, nil)
+			comments := threadOrder([]CommentEntry{
+				{UID: "a", Backlinks: projected[0].Backlinks},
+				{UID: "c", Reply: projected[2].Reply},
+				{UID: "d", Reply: projected[3].Reply},
+			})
+			chunks := commentChunks(comments, 80, -1, tabState{})
+			want := "confirm (before edit) · refute"
+			if freshConfirm {
+				want = "confirm · refute"
+			}
+			require.Contains(t, stripANSI(strings.Join(chunks[0].lines, "\n")), want)
+		})
+	}
+}
+
+func TestCommentTagsProjectedTruncation(t *testing.T) {
+	when := time.Date(2026, 4, 30, 10, 0, 0, 0, time.UTC)
+	edited := when.Add(time.Hour)
+	for _, fresh := range []bool{false, true} {
+		t.Run(fmt.Sprint("fresh=", fresh), func(t *testing.T) {
+			records := []commentref.Record{{UID: "target", EditedAt: &edited}}
+			for i := range 60 {
+				records = append(records, commentref.Record{UID: fmt.Sprintf("reply-%02d", i), ReplyToUID: "target", ReplyKind: "confirm", CreatedAt: when.Add(time.Duration(i) * time.Minute)})
+			}
+			want := "confirm (before edit)"
+			if fresh {
+				records = append(records, commentref.Record{UID: "fresh", ReplyToUID: "target", ReplyKind: "confirm", CreatedAt: edited.Add(time.Minute)})
+				want = "confirm"
+			}
+			target := commentref.Project(records, nil)[0]
+			require.True(t, target.BacklinksTruncated)
+			require.Len(t, target.Backlinks, 50)
+			require.Equal(t, want, stripANSI(commentTags(CommentEntry{Backlinks: target.Backlinks, BacklinksTruncated: target.BacklinksTruncated})))
+		})
+	}
+}
+
 func TestCommentTreeColoredTags(t *testing.T) {
 	t.Setenv("KATA_COLOR_MODE", "dark")
 	t.Setenv("NO_COLOR", "")
@@ -129,14 +182,18 @@ func TestSnapshot_CommentTree(t *testing.T) {
 	dm := snapDetailFixture()
 	dm.issue.Author, dm.issue.Title, dm.issue.Body = "worker", "Review a finding", "Discuss the evidence."
 	dm.activeTab, dm.detailFocus = tabComments, focusActivity
-	dm.comments = threadOrder([]CommentEntry{
-		{UID: "a", Handle: "c:root", Author: "worker-a", Body: "A finding to inspect.", CreatedAt: when, EditedAt: &edited, Backlinks: []commentref.Link{
-			{UID: "b", IssueUID: "issue-a", Handle: "c:reply", Kind: "refute", Author: "worker-c", CreatedAt: when.Add(2 * time.Minute), EditedAt: &edited, Body: "Local evidence."},
-			{UID: "foreign", IssueUID: "issue-b", Handle: "bbbb:reply", Kind: "confirm", Author: "worker-b", CreatedAt: when, TargetEdited: true, Status: "moved", EditedAt: &edited, Body: "Foreign evidence."},
-		}},
-		{UID: "b", Handle: "c:reply", Author: "worker-c", Body: "Local evidence.", CreatedAt: when.Add(2 * time.Minute), EditedAt: &edited, Reply: &commentref.Link{UID: "a", Handle: "c:root", Kind: "refute", Author: "worker-a"}},
-		{UID: "c", Handle: "c:nested", Author: "worker-d", Body: "Confirmed.", CreatedAt: when.Add(3 * time.Minute), Reply: &commentref.Link{UID: "b", Handle: "c:reply", Kind: "confirm", Author: "worker-c"}},
-	})
+	projected := commentref.Project([]commentref.Record{
+		{UID: "a", Handle: "c:root", IssueUID: "issue-a", Author: "worker-a", Body: "A finding to inspect.", CreatedAt: when, EditedAt: &edited},
+		{UID: "foreign", Handle: "c:reply", IssueUID: "issue-b", IssueShortID: "bbbb", ReplyToUID: "a", ReplyKind: "confirm", Author: "worker-b", Body: "Foreign evidence.", CreatedAt: when, EditedAt: &edited},
+		{UID: "b", Handle: "c:reply", IssueUID: "issue-a", ReplyToUID: "a", ReplyKind: "refute", Author: "worker-c", Body: "Local evidence.", CreatedAt: when.Add(2 * time.Minute), EditedAt: &edited},
+		{UID: "c", Handle: "c:nested", IssueUID: "issue-a", ReplyToUID: "b", ReplyKind: "confirm", Author: "worker-d", Body: "Confirmed.", CreatedAt: when.Add(3 * time.Minute)},
+	}, nil)
+	selected, err := commentref.Select(projected, "issue-a", commentref.Options{})
+	require.NoError(t, err)
+	wire, err := json.Marshal(selected.Comments)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(wire, &dm.comments))
+	dm.comments = threadOrder(dm.comments)
 	assertGolden(t, "detail-comment-tree", dm.View(80, 60, viewChrome{}))
 	dm.comments = []CommentEntry{{UID: "0", Handle: "c:0", Author: "worker", Body: "Start.", CreatedAt: when}}
 	for i := 1; i < 7; i++ {
@@ -146,6 +203,15 @@ func TestSnapshot_CommentTree(t *testing.T) {
 	dm.comments = threadOrder(dm.comments)
 	dm.tabCursor = 6
 	assertGolden(t, "detail-comment-tree-narrow", dm.View(50, 60, viewChrome{}))
+}
+
+func TestCommentTreeMovedTarget(t *testing.T) {
+	target := commentref.Record{UID: "target", Handle: "c:target", IssueUID: "other-issue", IssueShortID: "bbbb", ProjectName: "other-project"}
+	projected := commentref.Project([]commentref.Record{
+		{UID: "reply", IssueUID: "local", ReplyToUID: "target", ReplyKind: "confirm"},
+	}, map[string]commentref.TargetState{"target": {Status: "moved", Target: &target}})
+	chunks := commentChunks(threadOrder([]CommentEntry{{UID: "reply", Reply: projected[0].Reply}}), 80, -1, tabState{})
+	require.Contains(t, stripANSI(strings.Join(chunks[0].lines, "\n")), "↳ Confirms other-project#bbbb:target (moved)")
 }
 
 func TestCommentTreeModelWalk(t *testing.T) {

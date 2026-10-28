@@ -13,6 +13,7 @@ const maxCommentDepth = 4
 type commentLeaf struct {
 	link  commentref.Link
 	depth int
+	tags  string
 }
 
 func compareCommentLinks(a, b commentref.Link) int {
@@ -46,7 +47,7 @@ func threadOrder(cs []CommentEntry) []CommentEntry {
 			_, visible = children[parent]
 		}
 		if visible {
-			children[parent] = append(children[parent], commentref.Link{UID: c.UID, CreatedAt: c.CreatedAt})
+			children[parent] = append(children[parent], commentref.Link{UID: c.UID, CreatedAt: c.CreatedAt, Kind: c.Reply.Kind, TargetEdited: c.Reply.TargetEdited})
 		} else {
 			roots = append(roots, i)
 		}
@@ -71,7 +72,7 @@ func threadOrder(cs []CommentEntry) []CommentEntry {
 				visit(child, childDepth)
 			} else {
 				last := &ordered[len(ordered)-1]
-				last.leaves = append(last.leaves, commentLeaf{link: link, depth: childDepth})
+				last.leaves = append(last.leaves, commentLeaf{link: link, depth: childDepth, tags: commentTags(CommentEntry{Backlinks: children[link.UID]})})
 				for _, child := range children[link.UID] {
 					visit(byUID[child.UID], min(childDepth+1, maxCommentDepth))
 				}

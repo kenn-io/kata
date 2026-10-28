@@ -7,6 +7,7 @@ import (
 
 	"go.kenn.io/kata/internal/commentref"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -49,7 +50,7 @@ func commentChunks(cs []CommentEntry, width, cursor int, ts tabState) []entryChu
 			lines = append(lines, "  "+subtleStyle.Render(row))
 		}
 		if tags := commentTags(c); tags != "" {
-			lines = append(lines, wrapDetailRow("  ", tags, renderWidth)...)
+			lines = append(lines, wrapCommentTags(tags, renderWidth)...)
 		}
 		if c.Reply != nil {
 			r := c.Reply
@@ -87,6 +88,9 @@ func commentChunks(cs []CommentEntry, width, cursor int, ts tabState) []entryChu
 			leafDepth := min(leaf.depth, max(0, (width-32)/2))
 			leafWidth := width - 2*leafDepth
 			rows := wrapDetailRow("  ", "↳ "+sanitizeForDisplay(leaf.link.Kind)+" "+commentEvidenceHeader(leaf.link), leafWidth)
+			if leaf.tags != "" {
+				rows = append(rows, wrapCommentTags(leaf.tags, leafWidth)...)
+			}
 			if leaf.link.TargetEdited {
 				rows = append(rows, wrapDetailRow("  ", "Target edited after this reply", leafWidth)...)
 			}
@@ -96,6 +100,14 @@ func commentChunks(cs []CommentEntry, width, cursor int, ts tabState) []entryChu
 		chunks = append(chunks, entryChunk{lines: lines})
 	}
 	return chunks
+}
+
+func wrapCommentTags(tags string, width int) []string {
+	rows := strings.Split(ansi.Hardwrap(tags, max(width-2, 1), true), "\n")
+	for i := range rows {
+		rows[i] = "  " + rows[i]
+	}
+	return rows
 }
 
 // eventChunks builds the chunk slice for the events tab. Most events
