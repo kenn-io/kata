@@ -216,6 +216,9 @@ func (o OfferRelayDeliveriesQuery) Validate() error {
 			errors = errors.Append("Limit", err)
 		}
 	}
+	if len(o.ArtifactDigest) > 32 {
+		errors = errors.Add("ArtifactDigest", fmt.Sprintf("must have at most 32 items, got %d", len(o.ArtifactDigest)))
+	}
 	if o.Epoch != nil {
 		if err := typesValidator.Var(o.Epoch, "omitempty,gte=0"); err != nil {
 			errors = errors.Append("Epoch", err)

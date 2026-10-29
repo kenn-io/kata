@@ -521,6 +521,8 @@ type SearchIssuesErrorResponseJSON500 = ErrorEnvelope
 
 type SearchIssuesErrorResponseJSON503 = ErrorEnvelope
 
+type SearchIssuesErrorResponseJSONDefault = ErrorEnvelope
+
 type ReadyIssuesGlobalResponse = ReadyGlobalResponseBody
 
 type ReadyIssuesGlobalErrorResponse = ErrorEnvelope
@@ -582,6 +584,7 @@ type AuditClosesResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *AuditClosesResponse
+	JSONDefault  *AuditClosesErrorResponse
 }
 
 type ListConnectorsResp struct {
@@ -589,6 +592,7 @@ type ListConnectorsResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ListConnectorsResponse
+	JSONDefault  *ListConnectorsErrorResponse
 }
 
 type GetConnectorStatusResp struct {
@@ -596,6 +600,7 @@ type GetConnectorStatusResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *GetConnectorStatusResponse
+	JSONDefault  *GetConnectorStatusErrorResponse
 }
 
 type ReconcileExternalRootByKeyResp struct {
@@ -603,6 +608,7 @@ type ReconcileExternalRootByKeyResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ReconcileExternalRootByKeyResponse
+	JSONDefault  *ReconcileExternalRootByKeyErrorResponse
 }
 
 type ListConnectorFieldsResp struct {
@@ -610,6 +616,7 @@ type ListConnectorFieldsResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ListConnectorFieldsResponse
+	JSONDefault  *ListConnectorFieldsErrorResponse
 }
 
 type UnmapConnectorFieldResp struct {
@@ -617,6 +624,7 @@ type UnmapConnectorFieldResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *UnmapConnectorFieldResponse
+	JSONDefault  *UnmapConnectorFieldErrorResponse
 }
 
 type MapConnectorFieldResp struct {
@@ -624,6 +632,7 @@ type MapConnectorFieldResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *MapConnectorFieldResponse
+	JSONDefault  *MapConnectorFieldErrorResponse
 }
 
 type DigestGlobalResp struct {
@@ -631,6 +640,7 @@ type DigestGlobalResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *DigestGlobalResponse
+	JSONDefault  *DigestGlobalErrorResponse
 }
 
 type DoctorResp struct {
@@ -638,6 +648,7 @@ type DoctorResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *DoctorResponse
+	JSONDefault  *DoctorErrorResponse
 }
 
 type PollEventsResp200Headers struct {
@@ -652,12 +663,14 @@ type PollEventsResp struct {
 	StatusCode   int
 	JSON200      *PollEventsResponse
 	Headers200   *PollEventsResp200Headers
+	JSONDefault  *PollEventsErrorResponse
 }
 
 type StreamEventsResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
 	StatusCode   int
+	JSONDefault  *StreamEventsErrorResponse
 }
 
 type ConnectFederationBridgeResp struct {
@@ -665,6 +678,7 @@ type ConnectFederationBridgeResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ConnectFederationBridgeResponse
+	JSONDefault  *ConnectFederationBridgeErrorResponse
 }
 
 type GetFederationBridgeStatusResp struct {
@@ -672,6 +686,7 @@ type GetFederationBridgeStatusResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *GetFederationBridgeStatusResponse
+	JSONDefault  *GetFederationBridgeStatusErrorResponse
 }
 
 type DisconnectFederationBridgeResp struct {
@@ -679,6 +694,7 @@ type DisconnectFederationBridgeResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *DisconnectFederationBridgeResponse
+	JSONDefault  *DisconnectFederationBridgeErrorResponse
 }
 
 type ListFederationEnrollmentsResp struct {
@@ -686,6 +702,7 @@ type ListFederationEnrollmentsResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ListFederationEnrollmentsResponse
+	JSONDefault  *ListFederationEnrollmentsErrorResponse
 }
 
 type CreateFederationEnrollmentResp struct {
@@ -693,6 +710,7 @@ type CreateFederationEnrollmentResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *CreateFederationEnrollmentResponse
+	JSONDefault  *CreateFederationEnrollmentErrorResponse
 }
 
 type RotateFederationEnrollmentResp struct {
@@ -700,6 +718,7 @@ type RotateFederationEnrollmentResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *RotateFederationEnrollmentResponse
+	JSONDefault  *RotateFederationEnrollmentErrorResponse
 }
 
 type RevokeFederationEnrollmentResp struct {
@@ -707,6 +726,7 @@ type RevokeFederationEnrollmentResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *RevokeFederationEnrollmentResponse
+	JSONDefault  *RevokeFederationEnrollmentErrorResponse
 }
 
 type CreateFederationReplicaResp struct {
@@ -714,6 +734,7 @@ type CreateFederationReplicaResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *CreateFederationReplicaResponse
+	JSONDefault  *CreateFederationReplicaErrorResponse
 }
 
 type LeaveFederationReplicaResp struct {
@@ -721,6 +742,7 @@ type LeaveFederationReplicaResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *LeaveFederationReplicaResponse
+	JSONDefault  *LeaveFederationReplicaErrorResponse
 }
 
 type RebindFederationReplicaResp struct {
@@ -728,12 +750,14 @@ type RebindFederationReplicaResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *RebindFederationReplicaResponse
+	JSONDefault  *RebindFederationReplicaErrorResponse
 }
 
 type ConfigureFederationSigningResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
 	StatusCode   int
+	JSONDefault  *ConfigureFederationSigningErrorResponse
 }
 
 type RepinFederationRootKeyResp struct {
@@ -741,6 +765,7 @@ type RepinFederationRootKeyResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *RepinFederationRootKeyResponse
+	JSONDefault  *RepinFederationRootKeyErrorResponse
 }
 
 type GetFederationStatusResp struct {
@@ -748,6 +773,7 @@ type GetFederationStatusResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *GetFederationStatusResponse
+	JSONDefault  *GetFederationStatusErrorResponse
 }
 
 type HealthResp struct {
@@ -755,6 +781,7 @@ type HealthResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *HealthResponse
+	JSONDefault  *HealthErrorResponse
 }
 
 type InstanceResp struct {
@@ -762,6 +789,7 @@ type InstanceResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *InstanceResponse
+	JSONDefault  *InstanceErrorResponse
 }
 
 type ListAllIssuesResp struct {
@@ -769,6 +797,7 @@ type ListAllIssuesResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ListAllIssuesResponse
+	JSONDefault  *ListAllIssuesErrorResponse
 }
 
 type ShowIssueByUIDResp struct {
@@ -776,6 +805,7 @@ type ShowIssueByUIDResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ShowIssueByUIDResponse
+	JSONDefault  *ShowIssueByUIDErrorResponse
 }
 
 type PingResp struct {
@@ -783,6 +813,7 @@ type PingResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *PingResponse
+	JSONDefault  *PingErrorResponse
 }
 
 type ListProjectsResp struct {
@@ -790,6 +821,7 @@ type ListProjectsResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ListProjectsResponse
+	JSONDefault  *ListProjectsErrorResponse
 }
 
 type InitProjectResp struct {
@@ -797,6 +829,7 @@ type InitProjectResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *InitProjectResponse
+	JSONDefault  *InitProjectErrorResponse
 }
 
 type ResolveProjectResp struct {
@@ -804,6 +837,7 @@ type ResolveProjectResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ResolveProjectResponse
+	JSONDefault  *ResolveProjectErrorResponse
 }
 
 type RemoveProjectResp struct {
@@ -811,6 +845,7 @@ type RemoveProjectResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *RemoveProjectResponse
+	JSONDefault  *RemoveProjectErrorResponse
 }
 
 type ShowProjectResp struct {
@@ -818,6 +853,7 @@ type ShowProjectResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ShowProjectResponse
+	JSONDefault  *ShowProjectErrorResponse
 }
 
 type RenameProjectResp struct {
@@ -825,6 +861,7 @@ type RenameProjectResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *RenameProjectResponse
+	JSONDefault  *RenameProjectErrorResponse
 }
 
 type GetProjectAccessResp struct {
@@ -832,6 +869,7 @@ type GetProjectAccessResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *GetProjectAccessResponse
+	JSONDefault  *GetProjectAccessErrorResponse
 }
 
 type SetProjectAccessResp struct {
@@ -839,6 +877,7 @@ type SetProjectAccessResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *SetProjectAccessResponse
+	JSONDefault  *SetProjectAccessErrorResponse
 }
 
 type PurgeProjectResp struct {
@@ -846,6 +885,7 @@ type PurgeProjectResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *PurgeProjectResponse
+	JSONDefault  *PurgeProjectErrorResponse
 }
 
 type RewriteAuthorIdentityResp struct {
@@ -853,6 +893,7 @@ type RewriteAuthorIdentityResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *RewriteAuthorIdentityResponse
+	JSONDefault  *RewriteAuthorIdentityErrorResponse
 }
 
 type DetachProjectAliasResp struct {
@@ -860,6 +901,7 @@ type DetachProjectAliasResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *DetachProjectAliasResponse
+	JSONDefault  *DetachProjectAliasErrorResponse
 }
 
 type GetCronCapabilitiesResp200Headers struct {
@@ -872,6 +914,7 @@ type GetCronCapabilitiesResp struct {
 	StatusCode   int
 	JSON200      *GetCronCapabilitiesResponse
 	Headers200   *GetCronCapabilitiesResp200Headers
+	JSONDefault  *GetCronCapabilitiesErrorResponse
 }
 
 type ListCronJobsResp struct {
@@ -879,6 +922,7 @@ type ListCronJobsResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ListCronJobsResponse
+	JSONDefault  *ListCronJobsErrorResponse
 }
 
 type CreateCronJobResp struct {
@@ -886,6 +930,7 @@ type CreateCronJobResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON201      *CreateCronJobResponse
+	JSONDefault  *CreateCronJobErrorResponse
 }
 
 type ArchiveCronJobResp struct {
@@ -893,6 +938,7 @@ type ArchiveCronJobResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ArchiveCronJobResponse
+	JSONDefault  *ArchiveCronJobErrorResponse
 }
 
 type ShowCronJobResp struct {
@@ -900,6 +946,7 @@ type ShowCronJobResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ShowCronJobResponse
+	JSONDefault  *ShowCronJobErrorResponse
 }
 
 type ReplaceCronJobResp struct {
@@ -907,6 +954,7 @@ type ReplaceCronJobResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ReplaceCronJobResponse
+	JSONDefault  *ReplaceCronJobErrorResponse
 }
 
 type RestoreCronJobResp struct {
@@ -914,6 +962,7 @@ type RestoreCronJobResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *RestoreCronJobResponse
+	JSONDefault  *RestoreCronJobErrorResponse
 }
 
 type ListCronRunsResp struct {
@@ -921,6 +970,7 @@ type ListCronRunsResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ListCronRunsResponse
+	JSONDefault  *ListCronRunsErrorResponse
 }
 
 type ShowCronRunResp struct {
@@ -928,6 +978,7 @@ type ShowCronRunResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ShowCronRunResponse
+	JSONDefault  *ShowCronRunErrorResponse
 }
 
 type ObserveCronRunResp struct {
@@ -935,6 +986,7 @@ type ObserveCronRunResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ObserveCronRunResponse
+	JSONDefault  *ObserveCronRunErrorResponse
 }
 
 type ListCronWorkflowsResp struct {
@@ -942,6 +994,7 @@ type ListCronWorkflowsResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ListCronWorkflowsResponse
+	JSONDefault  *ListCronWorkflowsErrorResponse
 }
 
 type CreateCronWorkflowResp struct {
@@ -949,6 +1002,7 @@ type CreateCronWorkflowResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON201      *CreateCronWorkflowResponse
+	JSONDefault  *CreateCronWorkflowErrorResponse
 }
 
 type ArchiveCronWorkflowResp struct {
@@ -956,6 +1010,7 @@ type ArchiveCronWorkflowResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ArchiveCronWorkflowResponse
+	JSONDefault  *ArchiveCronWorkflowErrorResponse
 }
 
 type ShowCronWorkflowResp struct {
@@ -963,6 +1018,7 @@ type ShowCronWorkflowResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ShowCronWorkflowResponse
+	JSONDefault  *ShowCronWorkflowErrorResponse
 }
 
 type ReplaceCronWorkflowResp struct {
@@ -970,6 +1026,7 @@ type ReplaceCronWorkflowResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ReplaceCronWorkflowResponse
+	JSONDefault  *ReplaceCronWorkflowErrorResponse
 }
 
 type RestoreCronWorkflowResp struct {
@@ -977,6 +1034,7 @@ type RestoreCronWorkflowResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *RestoreCronWorkflowResponse
+	JSONDefault  *RestoreCronWorkflowErrorResponse
 }
 
 type DigestProjectResp struct {
@@ -984,6 +1042,7 @@ type DigestProjectResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *DigestProjectResponse
+	JSONDefault  *DigestProjectErrorResponse
 }
 
 type PollProjectEventsResp200Headers struct {
@@ -998,6 +1057,7 @@ type PollProjectEventsResp struct {
 	StatusCode   int
 	JSON200      *PollProjectEventsResponse
 	Headers200   *PollProjectEventsResp200Headers
+	JSONDefault  *PollProjectEventsErrorResponse
 }
 
 type GetProjectFederationResp200Headers struct {
@@ -1011,6 +1071,7 @@ type GetProjectFederationResp struct {
 	StatusCode   int
 	JSON200      *GetProjectFederationResponse
 	Headers200   *GetProjectFederationResp200Headers
+	JSONDefault  *GetProjectFederationErrorResponse
 }
 
 type EnableProjectFederationResp200Headers struct {
@@ -1024,6 +1085,7 @@ type EnableProjectFederationResp struct {
 	StatusCode   int
 	JSON200      *EnableProjectFederationResponse
 	Headers200   *EnableProjectFederationResp200Headers
+	JSONDefault  *EnableProjectFederationErrorResponse
 }
 
 type PollFederationProjectEventsResp200Headers struct {
@@ -1038,6 +1100,7 @@ type PollFederationProjectEventsResp struct {
 	StatusCode   int
 	JSON200      *PollFederationProjectEventsResponse
 	Headers200   *PollFederationProjectEventsResp200Headers
+	JSONDefault  *PollFederationProjectEventsErrorResponse
 }
 
 type IngestFederationProjectEventsResp200Headers struct {
@@ -1051,6 +1114,7 @@ type IngestFederationProjectEventsResp struct {
 	StatusCode   int
 	JSON200      *IngestFederationProjectEventsResponse
 	Headers200   *IngestFederationProjectEventsResp200Headers
+	JSONDefault  *IngestFederationProjectEventsErrorResponse
 }
 
 type GetFederationProjectMetadataResp200Headers struct {
@@ -1064,6 +1128,7 @@ type GetFederationProjectMetadataResp struct {
 	StatusCode   int
 	JSON200      *GetFederationProjectMetadataResponse
 	Headers200   *GetFederationProjectMetadataResp200Headers
+	JSONDefault  *GetFederationProjectMetadataErrorResponse
 }
 
 type RetryFederationQuarantineResp struct {
@@ -1071,6 +1136,7 @@ type RetryFederationQuarantineResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *RetryFederationQuarantineResponse
+	JSONDefault  *RetryFederationQuarantineErrorResponse
 }
 
 type SkipFederationQuarantineResp struct {
@@ -1078,6 +1144,7 @@ type SkipFederationQuarantineResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *SkipFederationQuarantineResponse
+	JSONDefault  *SkipFederationQuarantineErrorResponse
 }
 
 type OfferRelayDeliveriesResp struct {
@@ -1085,6 +1152,7 @@ type OfferRelayDeliveriesResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *OfferRelayDeliveriesResponse
+	JSONDefault  *OfferRelayDeliveriesErrorResponse
 }
 
 type GetRelayResetResp struct {
@@ -1092,6 +1160,7 @@ type GetRelayResetResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *GetRelayResetResponse
+	JSONDefault  *GetRelayResetErrorResponse
 }
 
 type AcceptRelayDeliveriesResp struct {
@@ -1099,6 +1168,7 @@ type AcceptRelayDeliveriesResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *AcceptRelayDeliveriesResponse
+	JSONDefault  *AcceptRelayDeliveriesErrorResponse
 }
 
 type AckRelayDeliveriesResp struct {
@@ -1106,6 +1176,7 @@ type AckRelayDeliveriesResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *AckRelayDeliveriesResponse
+	JSONDefault  *AckRelayDeliveriesErrorResponse
 }
 
 type DisconnectRelayEnrollmentResp struct {
@@ -1113,6 +1184,7 @@ type DisconnectRelayEnrollmentResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *DisconnectRelayEnrollmentResponse
+	JSONDefault  *DisconnectRelayEnrollmentErrorResponse
 }
 
 type GetProjectFederationStatusResp struct {
@@ -1120,6 +1192,7 @@ type GetProjectFederationStatusResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *GetProjectFederationStatusResponse
+	JSONDefault  *GetProjectFederationStatusErrorResponse
 }
 
 type ImportIssuesResp struct {
@@ -1127,6 +1200,7 @@ type ImportIssuesResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ImportIssuesResponse
+	JSONDefault  *ImportIssuesErrorResponse
 }
 
 type DisableIssueSyncResp struct {
@@ -1134,6 +1208,7 @@ type DisableIssueSyncResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *DisableIssueSyncResponse
+	JSONDefault  *DisableIssueSyncErrorResponse
 }
 
 type EnableIssueSyncResp struct {
@@ -1141,6 +1216,7 @@ type EnableIssueSyncResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *EnableIssueSyncResponse
+	JSONDefault  *EnableIssueSyncErrorResponse
 }
 
 type RunIssueSyncOnceResp struct {
@@ -1148,6 +1224,7 @@ type RunIssueSyncOnceResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *RunIssueSyncOnceResponse
+	JSONDefault  *RunIssueSyncOnceErrorResponse
 }
 
 type GetIssueSyncStatusResp struct {
@@ -1155,6 +1232,7 @@ type GetIssueSyncStatusResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *GetIssueSyncStatusResponse
+	JSONDefault  *GetIssueSyncStatusErrorResponse
 }
 
 type ListIssuesResp struct {
@@ -1162,6 +1240,7 @@ type ListIssuesResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ListIssuesResponse
+	JSONDefault  *ListIssuesErrorResponse
 }
 
 type CreateIssueResp200Headers struct {
@@ -1174,6 +1253,7 @@ type CreateIssueResp struct {
 	StatusCode   int
 	JSON200      *CreateIssueResponse
 	Headers200   *CreateIssueResp200Headers
+	JSONDefault  *CreateIssueErrorResponse
 }
 
 type ShowIssueResp struct {
@@ -1181,6 +1261,7 @@ type ShowIssueResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ShowIssueResponse
+	JSONDefault  *ShowIssueErrorResponse
 }
 
 type EditIssueResp200Headers struct {
@@ -1193,6 +1274,7 @@ type EditIssueResp struct {
 	StatusCode   int
 	JSON200      *EditIssueResponse
 	Headers200   *EditIssueResp200Headers
+	JSONDefault  *EditIssueErrorResponse
 }
 
 type AssignIssueResp200Headers struct {
@@ -1205,6 +1287,7 @@ type AssignIssueResp struct {
 	StatusCode   int
 	JSON200      *AssignIssueResponse
 	Headers200   *AssignIssueResp200Headers
+	JSONDefault  *AssignIssueErrorResponse
 }
 
 type ClaimIssueResp struct {
@@ -1212,6 +1295,7 @@ type ClaimIssueResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ClaimIssueResponse
+	JSONDefault  *ClaimIssueErrorResponse
 }
 
 type CloseIssueResp200Headers struct {
@@ -1224,6 +1308,7 @@ type CloseIssueResp struct {
 	StatusCode   int
 	JSON200      *CloseIssueResponse
 	Headers200   *CloseIssueResp200Headers
+	JSONDefault  *CloseIssueErrorResponse
 }
 
 type DeleteIssueResp200Headers struct {
@@ -1236,6 +1321,7 @@ type DeleteIssueResp struct {
 	StatusCode   int
 	JSON200      *DeleteIssueResponse
 	Headers200   *DeleteIssueResp200Headers
+	JSONDefault  *DeleteIssueErrorResponse
 }
 
 type MoveIssueResp200Headers struct {
@@ -1248,6 +1334,7 @@ type MoveIssueResp struct {
 	StatusCode   int
 	JSON200      *MoveIssueResponse
 	Headers200   *MoveIssueResp200Headers
+	JSONDefault  *MoveIssueErrorResponse
 }
 
 type SetIssuePriorityResp200Headers struct {
@@ -1260,6 +1347,7 @@ type SetIssuePriorityResp struct {
 	StatusCode   int
 	JSON200      *SetIssuePriorityResponse
 	Headers200   *SetIssuePriorityResp200Headers
+	JSONDefault  *SetIssuePriorityErrorResponse
 }
 
 type PurgeIssueResp struct {
@@ -1267,6 +1355,7 @@ type PurgeIssueResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *PurgeIssueResponse
+	JSONDefault  *PurgeIssueErrorResponse
 }
 
 type ReopenIssueResp200Headers struct {
@@ -1279,6 +1368,7 @@ type ReopenIssueResp struct {
 	StatusCode   int
 	JSON200      *ReopenIssueResponse
 	Headers200   *ReopenIssueResp200Headers
+	JSONDefault  *ReopenIssueErrorResponse
 }
 
 type RestoreIssueResp200Headers struct {
@@ -1291,6 +1381,7 @@ type RestoreIssueResp struct {
 	StatusCode   int
 	JSON200      *RestoreIssueResponse
 	Headers200   *RestoreIssueResp200Headers
+	JSONDefault  *RestoreIssueErrorResponse
 }
 
 type UnassignIssueResp200Headers struct {
@@ -1303,6 +1394,7 @@ type UnassignIssueResp struct {
 	StatusCode   int
 	JSON200      *UnassignIssueResponse
 	Headers200   *UnassignIssueResp200Headers
+	JSONDefault  *UnassignIssueErrorResponse
 }
 
 type AddAttachmentResp struct {
@@ -1310,12 +1402,14 @@ type AddAttachmentResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *AddAttachmentResponse
+	JSONDefault  *AddAttachmentErrorResponse
 }
 
 type AttachmentContentResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
 	StatusCode   int
+	JSONDefault  *AttachmentContentErrorResponse
 }
 
 type UnbindExternalRootResp struct {
@@ -1323,6 +1417,7 @@ type UnbindExternalRootResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *UnbindExternalRootResponse
+	JSONDefault  *UnbindExternalRootErrorResponse
 }
 
 type GetExternalRootBridgeResp struct {
@@ -1330,6 +1425,7 @@ type GetExternalRootBridgeResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *GetExternalRootBridgeResponse
+	JSONDefault  *GetExternalRootBridgeErrorResponse
 }
 
 type BindExternalRootResp struct {
@@ -1337,6 +1433,7 @@ type BindExternalRootResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *BindExternalRootResponse
+	JSONDefault  *BindExternalRootErrorResponse
 }
 
 type PauseExternalRootBridgeResp struct {
@@ -1344,6 +1441,7 @@ type PauseExternalRootBridgeResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *PauseExternalRootBridgeResponse
+	JSONDefault  *PauseExternalRootBridgeErrorResponse
 }
 
 type ReconcileExternalRootBridgeResp struct {
@@ -1351,6 +1449,7 @@ type ReconcileExternalRootBridgeResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ReconcileExternalRootBridgeResponse
+	JSONDefault  *ReconcileExternalRootBridgeErrorResponse
 }
 
 type ResolveExternalCommentResp struct {
@@ -1358,6 +1457,7 @@ type ResolveExternalCommentResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ResolveExternalCommentResponse
+	JSONDefault  *ResolveExternalCommentErrorResponse
 }
 
 type ResolveExternalFieldResp struct {
@@ -1365,6 +1465,7 @@ type ResolveExternalFieldResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ResolveExternalFieldResponse
+	JSONDefault  *ResolveExternalFieldErrorResponse
 }
 
 type ResumeExternalRootBridgeResp struct {
@@ -1372,6 +1473,7 @@ type ResumeExternalRootBridgeResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ResumeExternalRootBridgeResponse
+	JSONDefault  *ResumeExternalRootBridgeErrorResponse
 }
 
 type CreateCommentResp200Headers struct {
@@ -1384,6 +1486,7 @@ type CreateCommentResp struct {
 	StatusCode   int
 	JSON200      *CreateCommentResponse
 	Headers200   *CreateCommentResp200Headers
+	JSONDefault  *CreateCommentErrorResponse
 }
 
 type EditCommentResp200Headers struct {
@@ -1396,6 +1499,7 @@ type EditCommentResp struct {
 	StatusCode   int
 	JSON200      *EditCommentResponse
 	Headers200   *EditCommentResp200Headers
+	JSONDefault  *EditCommentErrorResponse
 }
 
 type ReachableIssueGraphResp struct {
@@ -1403,6 +1507,7 @@ type ReachableIssueGraphResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ReachableIssueGraphResponse
+	JSONDefault  *ReachableIssueGraphErrorResponse
 }
 
 type AddLabelResp200Headers struct {
@@ -1415,6 +1520,7 @@ type AddLabelResp struct {
 	StatusCode   int
 	JSON200      *AddLabelResponse
 	Headers200   *AddLabelResp200Headers
+	JSONDefault  *AddLabelErrorResponse
 }
 
 type RemoveLabelResp200Headers struct {
@@ -1427,6 +1533,7 @@ type RemoveLabelResp struct {
 	StatusCode   int
 	JSON200      *RemoveLabelResponse
 	Headers200   *RemoveLabelResp200Headers
+	JSONDefault  *RemoveLabelErrorResponse
 }
 
 type GetIssueLeaseStatusResp struct {
@@ -1434,6 +1541,7 @@ type GetIssueLeaseStatusResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *GetIssueLeaseStatusResponse
+	JSONDefault  *GetIssueLeaseStatusErrorResponse
 }
 
 type AcquireIssueLeaseResp struct {
@@ -1441,6 +1549,7 @@ type AcquireIssueLeaseResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *AcquireIssueLeaseResponse
+	JSONDefault  *AcquireIssueLeaseErrorResponse
 }
 
 type ForceReleaseIssueLeaseResp struct {
@@ -1448,6 +1557,7 @@ type ForceReleaseIssueLeaseResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ForceReleaseIssueLeaseResponse
+	JSONDefault  *ForceReleaseIssueLeaseErrorResponse
 }
 
 type ReleaseIssueLeaseResp struct {
@@ -1455,6 +1565,7 @@ type ReleaseIssueLeaseResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ReleaseIssueLeaseResponse
+	JSONDefault  *ReleaseIssueLeaseErrorResponse
 }
 
 type RenewIssueLeaseResp struct {
@@ -1462,6 +1573,7 @@ type RenewIssueLeaseResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *RenewIssueLeaseResponse
+	JSONDefault  *RenewIssueLeaseErrorResponse
 }
 
 type CreateLinkResp struct {
@@ -1469,6 +1581,7 @@ type CreateLinkResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *CreateLinkResponse
+	JSONDefault  *CreateLinkErrorResponse
 }
 
 type DeleteLinkResp200Headers struct {
@@ -1481,6 +1594,7 @@ type DeleteLinkResp struct {
 	StatusCode   int
 	JSON200      *DeleteLinkResponse
 	Headers200   *DeleteLinkResp200Headers
+	JSONDefault  *DeleteLinkErrorResponse
 }
 
 type GetIssueMetadataResp struct {
@@ -1488,6 +1602,7 @@ type GetIssueMetadataResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *GetIssueMetadataResponse
+	JSONDefault  *GetIssueMetadataErrorResponse
 }
 
 type PatchIssueMetadataResp200Headers struct {
@@ -1500,6 +1615,7 @@ type PatchIssueMetadataResp struct {
 	StatusCode   int
 	JSON200      *PatchIssueMetadataResponse
 	Headers200   *PatchIssueMetadataResp200Headers
+	JSONDefault  *PatchIssueMetadataErrorResponse
 }
 
 type NotifyIssueResp200Headers struct {
@@ -1512,6 +1628,7 @@ type NotifyIssueResp struct {
 	StatusCode   int
 	JSON200      *NotifyIssueResponse
 	Headers200   *NotifyIssueResp200Headers
+	JSONDefault  *NotifyIssueErrorResponse
 }
 
 type IssuePlanningDatesResp struct {
@@ -1519,6 +1636,7 @@ type IssuePlanningDatesResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *IssuePlanningDatesResponse
+	JSONDefault  *IssuePlanningDatesErrorResponse
 }
 
 type ListLabelsResp struct {
@@ -1526,6 +1644,7 @@ type ListLabelsResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ListLabelsResponse
+	JSONDefault  *ListLabelsErrorResponse
 }
 
 type MergeProjectResp struct {
@@ -1533,6 +1652,7 @@ type MergeProjectResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *MergeProjectResponse
+	JSONDefault  *MergeProjectErrorResponse
 }
 
 type PatchProjectMetadataResp200Headers struct {
@@ -1545,6 +1665,7 @@ type PatchProjectMetadataResp struct {
 	StatusCode   int
 	JSON200      *PatchProjectMetadataResponse
 	Headers200   *PatchProjectMetadataResp200Headers
+	JSONDefault  *PatchProjectMetadataErrorResponse
 }
 
 type ReadyIssuesResp struct {
@@ -1552,6 +1673,7 @@ type ReadyIssuesResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ReadyIssuesResponse
+	JSONDefault  *ReadyIssuesErrorResponse
 }
 
 type ListRecurrencesResp struct {
@@ -1559,6 +1681,7 @@ type ListRecurrencesResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ListRecurrencesResponse
+	JSONDefault  *ListRecurrencesErrorResponse
 }
 
 type CreateRecurrenceResp struct {
@@ -1566,12 +1689,14 @@ type CreateRecurrenceResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON201      *CreateRecurrenceResponse
+	JSONDefault  *CreateRecurrenceErrorResponse
 }
 
 type DeleteRecurrenceResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
 	StatusCode   int
+	JSONDefault  *DeleteRecurrenceErrorResponse
 }
 
 type ShowRecurrenceResp struct {
@@ -1579,6 +1704,7 @@ type ShowRecurrenceResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ShowRecurrenceResponse
+	JSONDefault  *ShowRecurrenceErrorResponse
 }
 
 type PatchRecurrenceResp200Headers struct {
@@ -1591,6 +1717,7 @@ type PatchRecurrenceResp struct {
 	StatusCode   int
 	JSON200      *PatchRecurrenceResponse
 	Headers200   *PatchRecurrenceResp200Headers
+	JSONDefault  *PatchRecurrenceErrorResponse
 }
 
 type RestoreProjectResp struct {
@@ -1598,6 +1725,7 @@ type RestoreProjectResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *RestoreProjectResponse
+	JSONDefault  *RestoreProjectErrorResponse
 }
 
 type SearchIssuesResp struct {
@@ -1612,6 +1740,7 @@ type SearchIssuesResp struct {
 	JSON422      *SearchIssuesErrorResponseJSON422
 	JSON500      *SearchIssuesErrorResponseJSON500
 	JSON503      *SearchIssuesErrorResponseJSON503
+	JSONDefault  *SearchIssuesErrorResponseJSONDefault
 }
 
 type ReadyIssuesGlobalResp struct {
@@ -1619,6 +1748,7 @@ type ReadyIssuesGlobalResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ReadyIssuesGlobalResponse
+	JSONDefault  *ReadyIssuesGlobalErrorResponse
 }
 
 type ListTeamsResp struct {
@@ -1626,6 +1756,7 @@ type ListTeamsResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ListTeamsResponse
+	JSONDefault  *ListTeamsErrorResponse
 }
 
 type CreateTeamResp struct {
@@ -1633,6 +1764,7 @@ type CreateTeamResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *CreateTeamResponse
+	JSONDefault  *CreateTeamErrorResponse
 }
 
 type DeleteTeamResp struct {
@@ -1640,6 +1772,7 @@ type DeleteTeamResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *DeleteTeamResponse
+	JSONDefault  *DeleteTeamErrorResponse
 }
 
 type ShowTeamResp struct {
@@ -1647,6 +1780,7 @@ type ShowTeamResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ShowTeamResponse
+	JSONDefault  *ShowTeamErrorResponse
 }
 
 type RemoveTeamMemberResp struct {
@@ -1654,6 +1788,7 @@ type RemoveTeamMemberResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *RemoveTeamMemberResponse
+	JSONDefault  *RemoveTeamMemberErrorResponse
 }
 
 type AddTeamMemberResp struct {
@@ -1661,6 +1796,7 @@ type AddTeamMemberResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *AddTeamMemberResponse
+	JSONDefault  *AddTeamMemberErrorResponse
 }
 
 type ListTokensResp struct {
@@ -1668,6 +1804,7 @@ type ListTokensResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ListTokensResponse
+	JSONDefault  *ListTokensErrorResponse
 }
 
 type CreateTokenResp struct {
@@ -1675,6 +1812,7 @@ type CreateTokenResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *CreateTokenResponse
+	JSONDefault  *CreateTokenErrorResponse
 }
 
 type RevokeTokenResp struct {
@@ -1682,6 +1820,7 @@ type RevokeTokenResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *RevokeTokenResponse
+	JSONDefault  *RevokeTokenErrorResponse
 }
 
 type ResolveUIIssueReferenceResp struct {
@@ -1689,6 +1828,7 @@ type ResolveUIIssueReferenceResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ResolveUIIssueReferenceResponse
+	JSONDefault  *ResolveUIIssueReferenceErrorResponse
 }
 
 type ReadUILaunchTargetResp struct {
@@ -1696,6 +1836,7 @@ type ReadUILaunchTargetResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *ReadUILaunchTargetResponse
+	JSONDefault  *ReadUILaunchTargetErrorResponse
 }
 
 type ReadUIReferencesResp200Headers struct {
@@ -1727,4 +1868,5 @@ type CaptureTelemetryEventResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON202      *CaptureTelemetryEventResponse
+	JSONDefault  *CaptureTelemetryEventErrorResponse
 }

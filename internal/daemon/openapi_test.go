@@ -67,7 +67,7 @@ func TestOpenAPIClientArtifactUpToDate(t *testing.T) {
 		t.Fatalf("mkdir generated temp dir: %v", err)
 	}
 	if err := copyGeneratorInputs(clientGeneratedDir, tmpGenerated); err != nil {
-		t.Fatalf("copy generator config, overlays, and header: %v", err)
+		t.Fatalf("copy generator config and overlays: %v", err)
 	}
 	if err := copyGeneratedTemplates(filepath.Join(clientGeneratedDir, "templates"), filepath.Join(tmpGenerated, "templates")); err != nil {
 		t.Fatalf("copy generated templates: %v", err)
@@ -81,7 +81,7 @@ func TestOpenAPIClientArtifactUpToDate(t *testing.T) {
 		t.Fatalf("write generated spec: %v", err)
 	}
 
-	cmd := exec.Command("go", "run", "github.com/doordash-oss/oapi-codegen-dd/v3/cmd/oapi-codegen@v3.75.5", "-config", "config.yaml", "../openapi.yaml")
+	cmd := exec.Command("go", "run", "github.com/doordash-oss/oapi-codegen-dd/v3/cmd/oapi-codegen@v3.76.5", "-config", "config.yaml", "../openapi.yaml")
 	cmd.Dir = tmpGenerated
 	cmd.Env = append(os.Environ(), "GOWORK=off")
 	out, err := cmd.CombinedOutput()
@@ -119,7 +119,7 @@ func TestOpenAPIClientArtifactUpToDate(t *testing.T) {
 }
 
 // copyGeneratorInputs copies the generator's top-level non-Go inputs, such as
-// config.yaml and the overlays and header template it references.
+// config.yaml and the overlays it references.
 func copyGeneratorInputs(src, dst string) error {
 	entries, err := os.ReadDir(src)
 	if err != nil {
