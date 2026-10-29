@@ -3,9 +3,31 @@ Adapted from oapi-codegen-dd's client-with-response.tmpl (Copyright 2026
 DoorDash, Inc., Apache License 2.0). Kata's change: error responses decode the
 operation's error body and wrap it in the returned ClientAPIError, so callers
 of WithResponse methods can use errors.AsType[ErrorEnvelope] exactly as they
-can with the plain methods. An undecodable body keeps the status-only error;
+can with the plain methods. A JSON `default` response is also decoded onto the
+envelope's JSONDefault field. An undecodable body keeps the status-only error;
 the raw body stays available on the response envelope.
 */ -}}
+
+{{- define "kataDefaultResponse" }}
+{{- $op := . }}
+{{- with $op.Response.Default }}
+{{- if and (eq .NameTag "JSON") (ne .ResponseName "struct{}") (not .IsRaw) }}
+        if len(resp.Content) > 0 {
+            body := new({{ .ResponseName }})
+            if json.Unmarshal(resp.Content, body) == nil {
+                out.JSON{{ .StatusName }} = body
+                if errTarget, ok := any(*body).(error); ok {
+                    return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+                }
+            }
+        }
+{{- else }}
+{{- template "kataErrorEnvelope" $op }}
+{{- end }}
+{{- else }}
+{{- template "kataErrorEnvelope" $op }}
+{{- end }}
+{{- end }}
 
 {{- define "kataErrorEnvelope" }}
 {{- $op := . }}
@@ -122,7 +144,7 @@ func (c *{{$clientName}}) {{$op.ID}}WithResponse(ctx context.Context{{ if $op.Ha
         return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
     {{- end }}
     default:
-        {{- template "kataErrorEnvelope" $op }}
+        {{- template "kataDefaultResponse" $op }}
         return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
     }
 }
