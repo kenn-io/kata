@@ -3,14 +3,13 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
-	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"errors"
+	"slices"
 
 	"go.kenn.io/kata/internal/db"
 )
 
-func ensureRelayLinkBoundaryTx(ctx context.Context, tx *sql.Tx, fromID, toID int64) error {
+func ensureRelayLinkBoundaryTx(ctx context.Context, tx *sql.Tx, fromID, toID int64, cleanup bool) error {
 	var fromProject, toProject int64
 	err := tx.QueryRowContext(ctx, `SELECT f.project_id,t.project_id FROM issues f JOIN issues t ON t.id=? WHERE f.id=?`, toID, fromID).Scan(&fromProject, &toProject)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -28,6 +27,13 @@ func ensureRelayLinkBoundaryTx(ctx context.Context, tx *sql.Tx, fromID, toID int
 		return err
 	}
 	if relayed {
+		compatible, err := relaySharedProjectsTx(ctx, tx, fromProject, toProject, true, cleanup)
+		if err != nil {
+			return err
+		}
+		if compatible {
+			return nil
+		}
 		return errors.Join(db.ErrFederatedReadOnly, db.ErrFederationCrossProjectBoundary)
 	}
 	return nil
@@ -51,136 +57,163 @@ func (d *Store) CheckRelayProjectLinks(ctx context.Context, projectID int64) err
 	return rejectRelayProjectLinksTx(ctx, tx, projectID)
 }
 
-// Reject before new relay admission. Never silently strip existing hashed links.
+// Enrollment admits crossings only inside the existing common-root group.
 func rejectRelayProjectLinksTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
-	var crossing bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM links l JOIN issues f ON f.id=l.from_issue_id JOIN issues t ON t.id=l.to_issue_id WHERE f.project_id<>t.project_id AND (f.project_id=? OR t.project_id=?))`, projectID, projectID).Scan(&crossing); err != nil {
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT CASE WHEN f.project_id=? THEN t.project_id ELSE f.project_id END FROM links l JOIN issues f ON f.id=l.from_issue_id JOIN issues t ON t.id=l.to_issue_id WHERE f.project_id<>t.project_id AND (f.project_id=? OR t.project_id=?)`, projectID, projectID, projectID)
+	if err != nil {
 		return err
 	}
-	if crossing {
-		return errors.Join(db.ErrFederatedReadOnly, db.ErrFederationCrossProjectBoundary)
+	var peers []int64
+	for rows.Next() {
+		var peer int64
+		if err = rows.Scan(&peer); err != nil {
+			break
+		}
+		peers = append(peers, peer)
+	}
+	if err == nil {
+		err = rows.Err()
+	}
+	_ = rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, peer := range peers {
+		compatible, err := relaySharedProjectsTx(ctx, tx, projectID, peer, false, false)
+		if err != nil {
+			return err
+		}
+		if !compatible {
+			return errors.Join(db.ErrFederatedReadOnly, db.ErrFederationCrossProjectBoundary)
+		}
 	}
 	return nil
 }
 
-// Original cross-project event bytes remain on the owner store. Initial relay
-// sync uses a signed current-state checkpoint rather than rewriting or sharing
-// those historical private endpoints.
-func relayEventCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID int64, event db.RemoteEvent) (bool, error) {
-	payload := db.PayloadMap(event.Payload)
-	if event.Type == "issue.closed" {
-		crossing, err := relayCloseParentCrossesProjectTx(ctx, tx, projectID, payload)
-		if err != nil || crossing {
-			return crossing, err
-		}
-		crossing, err = relayCloseEvidenceCrossesProjectTx(ctx, tx, projectID, payload)
-		if err != nil || crossing {
-			return crossing, err
-		}
+// relaySharedProjectsTx reuses the native binding group and pinned authority.
+// Local relationship writes require both endpoints to be authoritative here.
+func relaySharedProjectsTx(ctx context.Context, tx *sql.Tx, projectID, peerID int64, localWrite, cleanup bool) (bool, error) {
+	if projectID == peerID {
+		return true, nil
 	}
-	refs, err := payloadReferencedIssueUIDs(event, payload)
+	binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id=?`, projectID))
+	if errors.Is(err, db.ErrNotFound) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
-	if event.IssueUID != nil {
-		refs = append(refs, *event.IssueUID)
-	}
-	for _, ref := range refs {
-		if ref == "" {
-			continue
-		}
-		var own bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issues WHERE uid=? AND project_id=?)`, ref, projectID).Scan(&own); err != nil {
-			return false, err
-		}
-		if !own {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-func relayCloseEvidenceCrossesProjectTx(
-	ctx context.Context,
-	tx *sql.Tx,
-	projectID int64,
-	payload map[string]jsontext.Value,
-) (bool, error) {
-	raw, ok := payload["evidence"]
-	if !ok {
+	if !binding.Enabled || (localWrite && binding.Role != db.FederationRoleHub) {
 		return false, nil
 	}
-	var evidence []db.Evidence
-	if err := json.Unmarshal(raw, &evidence); err != nil {
-		return true, nil
-	}
-	if evidence == nil {
-		return true, nil
-	}
-	var projectUID string
-	if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=?`, projectID).Scan(&projectUID); err != nil {
+	group, err := federationBindingGroupProjectIDs(ctx, tx, binding)
+	if err != nil {
 		return false, err
 	}
-	for _, item := range evidence {
-		if item.Type != "duplicate-of" && item.Type != "superseded-by" {
-			continue
-		}
-		if item.IssueRef == "" {
-			return true, nil
-		}
-		target, err := eventIssueByRef(ctx, tx, projectUID, item.IssueRef)
-		if errors.Is(err, db.ErrNotFound) {
-			return true, nil
-		}
-		if err != nil {
-			return false, err
-		}
-		if target.ProjectID != projectID {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-func relayCloseParentCrossesProjectTx(
-	ctx context.Context,
-	tx *sql.Tx,
-	projectID int64,
-	payload map[string]jsontext.Value,
-) (bool, error) {
-	parentUID, uidPresent := db.StringValue(payload["parent_uid"])
-	parentShortID, shortIDPresent := db.StringValue(payload["parent_short_id"])
-	if _, exists := payload["parent_uid"]; exists && !uidPresent {
-		return true, nil
-	}
-	if _, exists := payload["parent_short_id"]; exists && !shortIDPresent {
-		return true, nil
-	}
-	if parentUID == "" && parentShortID == "" {
+	if !slices.Contains(group, peerID) {
 		return false, nil
 	}
-	var own bool
-	if parentUID != "" {
-		query := `SELECT EXISTS(SELECT 1 FROM issues WHERE uid=? AND project_id=?`
-		args := []any{parentUID, projectID}
-		if parentShortID != "" {
-			query += ` AND short_id=?`
-			args = append(args, parentShortID)
-		}
-		query += `)`
-		if err := tx.QueryRowContext(ctx, query, args...).Scan(&own); err != nil {
-			return false, err
-		}
-		return !own, nil
+	authority, err := relayRootAuthorityTx(ctx, tx, projectID, cleanup)
+	if errors.Is(err, db.ErrNotFound) {
+		return false, nil
 	}
-	var matches int
-	var resolvedProjectID int64
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*), COALESCE(MIN(project_id),0) FROM issues WHERE short_id=?`, parentShortID,
-	).Scan(&matches, &resolvedProjectID); err != nil {
+	if err != nil {
 		return false, err
 	}
-	return matches != 1 || resolvedProjectID != projectID, nil
+	peer, err := relayRootAuthorityTx(ctx, tx, peerID, cleanup)
+	if errors.Is(err, db.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if authority != peer {
+		return false, nil
+	}
+	if localWrite {
+		var instance string
+		if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='instance_uid'`).Scan(&instance); err != nil {
+			return false, err
+		}
+		return authority == instance, nil
+	}
+	return true, nil
+}
+
+// Pins take precedence; an enabled native hub is already rooted locally
+// before its first handshake initializes the public signing pin.
+func relayRootAuthorityTx(ctx context.Context, tx *sql.Tx, projectID int64, cleanup bool) (string, error) {
+	var projectUID, role, instance string
+	err := tx.QueryRowContext(ctx, `SELECT p.uid,b.role,m.value FROM projects p JOIN federation_bindings b ON b.project_id=p.id JOIN meta m ON m.key='instance_uid' WHERE p.id=? AND (? OR p.deleted_at IS NULL) AND b.enabled=1`, projectID, cleanup).Scan(&projectUID, &role, &instance)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", db.ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	pin, err := rootPinTx(ctx, tx, projectUID, "")
+	if !errors.Is(err, db.ErrNotFound) {
+		return pin.AuthorityUID, err
+	}
+	if role == string(db.FederationRoleHub) {
+		return instance, nil
+	}
+	return "", db.ErrNotFound
+}
+
+// Root-authored shared references retain their original history and hashes.
+func relayEventCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID int64, event db.RemoteEvent) (bool, error) {
+	crossing, _, err := relayEventBoundaryFactsTx(ctx, tx, projectID, event, false)
+	return crossing, err
+}
+
+// Fresh checkpoints cannot carry root-local purge facts. Exclude a history
+// record that needed one to resolve its references, while retaining the strict
+// resolver used for ordinary event authorization and retained checkpoints.
+func relayEventCheckpointHistoryExcludedTx(ctx context.Context, tx *sql.Tx, projectID int64, event db.RemoteEvent) (bool, error) {
+	crossing, usedPurgeFact, err := relayEventBoundaryFactsTx(ctx, tx, projectID, event, true)
+	return crossing || usedPurgeFact, err
+}
+
+func relayEventBoundaryFactsTx(ctx context.Context, tx *sql.Tx, projectID int64, event db.RemoteEvent, trackPurgeFacts bool) (bool, bool, error) {
+	var projects []int64
+	var usedPurgeFact bool
+	var err error
+	if trackPurgeFacts {
+		projects, usedPurgeFact, err = relayEventProjectsWithPurgeFactsTx(ctx, tx, event)
+	} else {
+		projects, err = relayEventProjectsTx(ctx, tx, event)
+	}
+	if errors.Is(err, db.ErrNotFound) {
+		return true, usedPurgeFact, nil
+	}
+	if err != nil {
+		return false, usedPurgeFact, err
+	}
+	for _, peer := range projects {
+		if peer == projectID {
+			continue
+		}
+		// Only relationship mutations require root authorship. Ordinary close
+		// freezes references whose projects are still authorized at release.
+		if db.FederationEventAffectsLinks(event.Type) {
+			authority, err := relayRootAuthorityTx(ctx, tx, projectID, false)
+			if errors.Is(err, db.ErrNotFound) {
+				return true, usedPurgeFact, nil
+			}
+			if err != nil {
+				return false, usedPurgeFact, err
+			}
+			if event.OriginInstanceUID != authority {
+				return true, usedPurgeFact, nil
+			}
+		}
+		compatible, err := relaySharedProjectsTx(ctx, tx, projectID, peer, false, false)
+		if err != nil || !compatible {
+			return !compatible, usedPurgeFact, err
+		}
+	}
+	return false, usedPurgeFact, nil
 }
 
 func relayHistoryHasBoundaryTx(ctx context.Context, tx *sql.Tx, projectID int64) (bool, error) {
@@ -239,4 +272,96 @@ func relayHistoryHasBoundaryAfterTx(ctx context.Context, tx *sql.Tx, projectID, 
 		}
 		after = ids[len(ids)-1]
 	}
+}
+
+func relayEventProjectsTx(ctx context.Context, tx *sql.Tx, event db.RemoteEvent) ([]int64, error) {
+	ctx = db.WithAuthorizedProjects(ctx, nil)
+	refs, err := payloadReferencedIssueUIDs(event, db.PayloadMap(event.Payload))
+	if err != nil {
+		return nil, err
+	}
+	return db.RelayEventReferencedProjectsTx(ctx, tx, event, refs,
+		func(uid string) (db.Issue, error) { return eventIssueByUID(ctx, tx, uid) },
+		func(int) string { return "?" }, func(field string) string { return "json_extract(e.payload,'$." + field + "')" })
+}
+
+func relayEventProjectsWithPurgeFactsTx(ctx context.Context, tx *sql.Tx, event db.RemoteEvent) ([]int64, bool, error) {
+	projects, _, usedPurgeFact, err := relayEventProjectsWithShortIDReferencesTx(ctx, tx, event)
+	return projects, usedPurgeFact, err
+}
+
+func relayEventShortIDReferencesTx(ctx context.Context, tx *sql.Tx, event db.RemoteEvent) ([]db.RelayShortIDReference, error) {
+	_, references, _, err := relayEventProjectsWithShortIDReferencesTx(ctx, tx, event)
+	return references, err
+}
+
+func relayEventProjectsWithShortIDReferencesTx(ctx context.Context, tx *sql.Tx, event db.RemoteEvent) ([]int64, []db.RelayShortIDReference, bool, error) {
+	ctx = db.WithAuthorizedProjects(ctx, nil)
+	refs, err := payloadReferencedIssueUIDs(event, db.PayloadMap(event.Payload))
+	if err != nil {
+		return nil, nil, false, err
+	}
+	return db.RelayEventReferencedProjectsWithShortIDReferencesTx(ctx, tx, event, refs,
+		func(uid string) (db.Issue, error) { return eventIssueByUID(ctx, tx, uid) },
+		func(int) string { return "?" }, func(field string) string { return "json_extract(e.payload,'$." + field + "')" },
+		func(uid string) (bool, error) {
+			var purged bool
+			err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM purge_log WHERE issue_uid=?)`, uid).Scan(&purged)
+			return purged, err
+		})
+}
+
+// A fresh checkpoint may omit a dangling reply edge only after the retained
+// reply event proves the target's owner is still in the same shared group.
+func relayCheckpointCanOmitPurgedCommentReferenceTx(ctx context.Context, tx *sql.Tx, sourceProjectID int64, sourceIssueUID, sourceCommentUID, targetCommentUID string) (bool, error) {
+	var exists bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM comments WHERE uid=?)`, targetCommentUID).Scan(&exists); err != nil {
+		return false, err
+	}
+	if exists {
+		return false, nil
+	}
+	query := `SELECT COUNT(DISTINCT p.project_id),COALESCE(MIN(p.project_id),0)
+		FROM events e JOIN purge_log p ON p.issue_uid=e.related_issue_uid
+		WHERE e.type='issue.commented' AND e.related_issue_uid IS NOT NULL AND e.related_issue_uid<>''
+		AND json_extract(e.payload,'$.reply_to_uid')=?`
+	args := []any{targetCommentUID}
+	if sourceIssueUID != "" {
+		query += ` AND e.issue_uid=? AND json_extract(e.payload,'$.comment_uid')=?`
+		args = append(args, sourceIssueUID, sourceCommentUID)
+	}
+	var owners int
+	var targetProjectID int64
+	if err := tx.QueryRowContext(ctx, query, args...).Scan(&owners, &targetProjectID); err != nil {
+		return false, err
+	}
+	if owners != 1 {
+		return false, nil
+	}
+	if targetProjectID == sourceProjectID {
+		return true, nil
+	}
+	return relaySharedProjectsTx(ctx, tx, sourceProjectID, targetProjectID, false, false)
+}
+
+func (d *Store) authorizeRelayEventTx(ctx context.Context, tx *sql.Tx, grant db.FederationEnrollment, event db.RemoteEvent) error {
+	projects, err := relayEventProjectsTx(ctx, tx, event)
+	if err != nil {
+		return err
+	}
+	for _, projectID := range projects {
+		var projectUID string
+		if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=? AND deleted_at IS NULL`, projectID).Scan(&projectUID); err != nil {
+			return db.RelayProjectLookupError(err)
+		}
+		if projectID != *grant.ProjectID {
+			if err := d.ProjectAccessTransactionFence(grant.Actor, []string{projectUID})(ctx, tx); err != nil {
+				return err
+			}
+		}
+		if err := db.CheckProjectAccessTransaction(ctx, tx, projectUID); err != nil {
+			return err
+		}
+	}
+	return nil
 }

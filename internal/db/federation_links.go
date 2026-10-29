@@ -1,6 +1,9 @@
 package db
 
-import "sort"
+import (
+	"encoding/json/v2"
+	"sort"
+)
 
 // FederationEventAffectsLinks reports whether an event type can change
 // federated link state, or the issue-to-project endpoint resolution that link
@@ -48,4 +51,26 @@ func FederationLinkAffectingEventTypes() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// LinkEventPayload retains event-facing peers and the persisted directional
+// edge for unlink records. A non-nil source preserves the import marker.
+func LinkEventPayload(link Link, event LinkEventParams, updatedAt string, source *string) ([]byte, error) {
+	payload := map[string]any{
+		"link_id":       link.ID,
+		"type":          link.Type,
+		"from_short_id": event.FromShortID,
+		"from_uid":      event.FromUID,
+		"to_short_id":   event.ToShortID,
+		"to_uid":        event.ToUID,
+		"updated_at":    updatedAt,
+	}
+	if source != nil {
+		payload["source"] = *source
+	}
+	if source == nil || event.EventType == "issue.unlinked" {
+		payload["link_from_uid"] = link.FromIssueUID
+		payload["link_to_uid"] = link.ToIssueUID
+	}
+	return json.Marshal(payload)
 }

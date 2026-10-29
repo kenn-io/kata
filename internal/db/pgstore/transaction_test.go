@@ -3,6 +3,7 @@ package pgstore
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"testing"
 	"time"
@@ -13,6 +14,34 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
+
+type rollbackRetryConnector struct{}
+
+func (rollbackRetryConnector) Connect(context.Context) (driver.Conn, error) {
+	return rollbackRetryConn{}, nil
+}
+
+func (rollbackRetryConnector) Driver() driver.Driver { return rollbackRetryDriver{} }
+
+type rollbackRetryDriver struct{}
+
+func (rollbackRetryDriver) Open(string) (driver.Conn, error) { return rollbackRetryConn{}, nil }
+
+type rollbackRetryConn struct{}
+
+func (rollbackRetryConn) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("prepare is not supported")
+}
+func (rollbackRetryConn) Close() error              { return nil }
+func (rollbackRetryConn) Begin() (driver.Tx, error) { return rollbackRetryTx{}, nil }
+func (rollbackRetryConn) BeginTx(context.Context, driver.TxOptions) (driver.Tx, error) {
+	return rollbackRetryTx{}, nil
+}
+
+type rollbackRetryTx struct{}
+
+func (rollbackRetryTx) Commit() error   { return nil }
+func (rollbackRetryTx) Rollback() error { return nil }
 
 func TestIsTransientUsesRetrySafeSQLStates(t *testing.T) {
 	t.Parallel()
@@ -32,6 +61,30 @@ func TestIsTransientUsesRetrySafeSQLStates(t *testing.T) {
 		})
 	}
 	assert.False(t, IsTransient(errors.New("serialization failure")))
+}
+
+func TestWithTxFinishesAfterRollbackBeforeTransientRetry(t *testing.T) {
+	ctx := context.Background()
+	database := sql.OpenDB(rollbackRetryConnector{})
+	t.Cleanup(func() { _ = database.Close() })
+	store := &Store{DB: database}
+	transient := errors.Join(errors.New("peer access check rejected the transaction"), &pgconn.PgError{Code: "40001"})
+	var attempts, callbacks, callbacksAtRetry int
+	err := store.withSerializableTx(ctx, func(*sql.Tx) error {
+		attempts++
+		if attempts == 1 {
+			return db.AfterTransactionRollback(transient, func(context.Context) error {
+				callbacks++
+				return nil
+			})
+		}
+		callbacksAtRetry = callbacks
+		return nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 2, attempts)
+	assert.Equal(t, 1, callbacksAtRetry, "host cleanup must finish before the retry begins")
+	assert.Equal(t, 1, callbacks)
 }
 
 func TestMapSQLErrorUsesDomainSentinelWithoutLeakingDetail(t *testing.T) {

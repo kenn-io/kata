@@ -15,7 +15,16 @@ func (d *Store) CreateRelayReset(ctx context.Context, bindingUID string, signer 
 	err := d.relayTx(ctx, func(tx *sql.Tx) error {
 		var err error
 		result, err = d.relayReset(tx).CreateReset(ctx, bindingUID, signer)
-		return err
+		if err != nil {
+			return err
+		}
+		grant, err := d.relayGrantTx(ctx, tx, bindingUID, "pull")
+		if err != nil {
+			return err
+		}
+		return db.VisitRelayResetSources(result.Snapshot, func(source db.RemoteEvent) error {
+			return d.authorizeRelayEventTx(ctx, tx, grant, source)
+		})
 	})
 	if err != nil {
 		return db.RelayResetCheckpoint{}, err
@@ -47,7 +56,7 @@ func (b relayResetBackend) InsertRelayCheckpointStateEvent(ctx context.Context, 
 }
 
 func (b relayResetBackend) RelayCheckpointRecords(ctx context.Context, project db.Project, boundaryID int64) (db.RelayCheckpointRecords, error) {
-	return b.d.relayCheckpointRecordsTx(ctx, b.tx, project, boundaryID)
+	return b.d.relayCheckpointRecordsTx(ctx, b.tx, project, boundaryID, true)
 }
 
 func (b relayResetBackend) RelayCheckpointCapacity() int64 {

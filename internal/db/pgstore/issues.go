@@ -195,7 +195,7 @@ func (s *Store) createIssueTx(ctx context.Context, tx *sql.Tx, params db.CreateI
 			if targetID == issueID {
 				return db.ErrSelfLink
 			}
-			if err := ensureRelayLinkBoundaryTx(ctx, tx, issueID, targetID); err != nil {
+			if err := ensureRelayLinkBoundaryTx(ctx, tx, issueID, targetID, false); err != nil {
 				return err
 			}
 			fromID, toID := issueID, targetID

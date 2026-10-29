@@ -29,9 +29,6 @@ func (d *Store) createLink(ctx context.Context, p db.CreateLinkParams) (db.Link,
 	if err := checkLinkEndpointsProjectAccessTx(ctx, tx, p.FromIssueID, p.ToIssueID); err != nil {
 		return db.Link{}, err
 	}
-	if err := ensureRelayLinkBoundaryTx(ctx, tx, p.FromIssueID, p.ToIssueID); err != nil {
-		return db.Link{}, err
-	}
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO links(from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
 		 VALUES(?, ?, (SELECT uid FROM issues WHERE id = ?), (SELECT uid FROM issues WHERE id = ?), ?, ?)`,
@@ -342,18 +339,22 @@ func (d *Store) LinksByIssue(ctx context.Context, issueID int64) ([]db.Link, err
 // DeleteLinkByID removes a links row. Returns ErrNotFound when no row exists.
 func (d *Store) DeleteLinkByID(ctx context.Context, linkID int64) error {
 	return d.RetryTransient(ctx, func() error {
-		res, err := d.ExecContext(ctx, `DELETE FROM links WHERE id = ?`, linkID)
+		tx, err := d.BeginTx(ctx, nil)
 		if err != nil {
-			return fmt.Errorf("delete link: %w", err)
+			return err
 		}
-		n, err := res.RowsAffected()
+		defer func() { _ = tx.Rollback() }()
+		link, err := scanLink(tx.QueryRowContext(ctx, linkSelect+` WHERE id=?`, linkID))
 		if err != nil {
-			return fmt.Errorf("delete link rows affected: %w", err)
+			return err
 		}
-		if n == 0 {
-			return db.ErrNotFound
+		if err := checkExistingLinkProjectAccessTx(ctx, tx, link); err != nil {
+			return err
 		}
-		return nil
+		if _, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id=?`, linkID); err != nil {
+			return err
+		}
+		return tx.Commit()
 	})
 }
 
@@ -444,9 +445,6 @@ func (d *Store) createLinkAndEvent(ctx context.Context, p db.CreateLinkParams, e
 		return db.Link{}, db.Event{}, err
 	}
 
-	if err := ensureRelayLinkBoundaryTx(ctx, tx, p.FromIssueID, p.ToIssueID); err != nil {
-		return db.Link{}, db.Event{}, err
-	}
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO links(from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
 		 VALUES(?, ?, (SELECT uid FROM issues WHERE id = ?), (SELECT uid FROM issues WHERE id = ?), ?, ?)`,
@@ -548,7 +546,7 @@ func (d *Store) deleteLinkAndEvent(ctx context.Context, link db.Link, ev db.Link
 	if err != nil {
 		return db.Event{}, err
 	}
-	if err := checkLinkEndpointsProjectAccessTx(ctx, tx, link.FromIssueID, link.ToIssueID); err != nil {
+	if err := checkExistingLinkProjectAccessTx(ctx, tx, link); err != nil {
 		return db.Event{}, err
 	}
 
@@ -568,17 +566,7 @@ func (d *Store) deleteLinkAndEvent(ctx context.Context, link db.Link, ev db.Link
 		relatedID = link.FromIssueID
 	}
 	ts := nowTimestamp()
-	payload, err := json.Marshal(map[string]any{
-		"link_id":       link.ID,
-		"type":          link.Type,
-		"from_short_id": ev.FromShortID,
-		"from_uid":      ev.FromUID,
-		"to_short_id":   ev.ToShortID,
-		"to_uid":        ev.ToUID,
-		"link_from_uid": link.FromIssueUID,
-		"link_to_uid":   link.ToIssueUID,
-		"updated_at":    ts,
-	})
+	payload, err := db.LinkEventPayload(link, ev, ts, nil)
 	if err != nil {
 		return db.Event{}, fmt.Errorf("marshal unlink payload: %w", err)
 	}

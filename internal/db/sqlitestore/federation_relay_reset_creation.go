@@ -15,7 +15,16 @@ func (d *Store) CreateRelayReset(ctx context.Context, bindingUID string, signer 
 	err := d.relayTx(ctx, func(tx *sql.Tx) error {
 		var err error
 		result, err = d.relayReset(tx).CreateReset(ctx, bindingUID, signer)
-		return err
+		if err != nil {
+			return err
+		}
+		grant, err := d.relayGrantTx(ctx, tx, bindingUID, "pull")
+		if err != nil {
+			return err
+		}
+		return db.VisitRelayResetSources(result.Snapshot, func(source db.RemoteEvent) error {
+			return d.authorizeRelayEventTx(ctx, tx, grant, source)
+		})
 	})
 	if err != nil {
 		return db.RelayResetCheckpoint{}, err

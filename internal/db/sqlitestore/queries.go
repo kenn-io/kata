@@ -171,8 +171,16 @@ func (d *Store) ProjectByNameIncludingArchived(ctx context.Context, name string)
 // how to surface the archived state; surface-level handlers should
 // inspect DeletedAt themselves. Returns ErrNotFound when no row matches.
 func (d *Store) ProjectByUID(ctx context.Context, uid string) (db.Project, error) {
-	row := d.QueryRowContext(ctx, projectSelect+` WHERE uid = ?`, uid)
-	return hideSystemProject(scanProject(row))
+	return d.ProjectByUIDTx(ctx, nil, uid)
+}
+
+// ProjectByUIDTx reads the native project through the supplied transaction.
+// A nil transaction uses the store pool for post-transaction callers.
+func (d *Store) ProjectByUIDTx(ctx context.Context, tx db.Transaction, uid string) (db.Project, error) {
+	if tx == nil {
+		tx = d
+	}
+	return hideSystemProject(scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE uid = ?`, uid)))
 }
 
 // HardDeleteProject permanently removes a project row by id and returns the
@@ -706,7 +714,7 @@ func (d *Store) createIssueTx(ctx context.Context, tx *sql.Tx, p db.CreateIssueP
 		resolvedTargets = append(resolvedTargets, createdLinkTarget{UID: toIssueUID, ShortID: toIssueShortID})
 		// Canonical ordering is a storage concern: the payload reports the
 		// peer's stable identity (UID + short_id), not a numeric ref.
-		if err := ensureRelayLinkBoundaryTx(ctx, tx, issueID, toIssueID); err != nil {
+		if err := ensureRelayLinkBoundaryTx(ctx, tx, issueID, toIssueID, false); err != nil {
 			return 0, db.Event{}, err
 		}
 		fromID, toID := issueID, toIssueID

@@ -24,12 +24,25 @@ type TransactionFence func(context.Context, Transaction) error
 var ErrTransactionFinalizationFailed = errors.New("transaction finalization unavailable")
 
 type afterRollbackError struct {
-	cause  error
-	finish func(context.Context) error
+	cause      error
+	finish     func(context.Context) error
+	finishOnce sync.Once
+	finishErr  error
 }
 
 func (e *afterRollbackError) Error() string { return e.cause.Error() }
 func (e *afterRollbackError) Unwrap() error { return e.cause }
+
+func (e *afterRollbackError) finishAfterRollback(ctx context.Context) (bool, error) {
+	ran := false
+	e.finishOnce.Do(func() {
+		ran = true
+		if e.finish != nil {
+			e.finishErr = e.finish(ctx)
+		}
+	})
+	return ran, e.finishErr
+}
 
 // AfterTransactionRollback attaches host cleanup to a rejected transaction.
 func AfterTransactionRollback(cause error, finish func(context.Context) error) error {
@@ -39,6 +52,13 @@ func AfterTransactionRollback(cause error, finish func(context.Context) error) e
 	return &afterRollbackError{cause: cause, finish: finish}
 }
 
+// HasTransactionRollbackCallback reports whether cause carries cleanup that
+// a retrying store must run after rollback and before starting another attempt.
+func HasTransactionRollbackCallback(cause error) bool {
+	rejected, ok := errors.AsType[*afterRollbackError](cause)
+	return ok && rejected.finish != nil
+}
+
 // FinishTransactionRollback runs only after the store has rolled back and
 // returned its connection. Callback failure never permits the rejected write.
 func FinishTransactionRollback(ctx context.Context, cause, rollbackErr error) error {
@@ -46,13 +66,14 @@ func FinishTransactionRollback(ctx context.Context, cause, rollbackErr error) er
 		rollbackErr = nil
 	}
 	var finishErr error
-	if rejected, ok := errors.AsType[*afterRollbackError](cause); ok && rejected.finish != nil {
-		finishErr = rejected.finish(ctx)
+	observeNow := true
+	if rejected, ok := errors.AsType[*afterRollbackError](cause); ok {
+		observeNow, finishErr = rejected.finishAfterRollback(ctx)
 	}
 	if rollbackErr != nil || finishErr != nil {
 		cause = errors.Join(ErrTransactionFinalizationFailed, cause, rollbackErr, finishErr)
 	}
-	if observe, _ := ctx.Value(transactionRollbackObserverKey{}).(func(error)); observe != nil {
+	if observe, _ := ctx.Value(transactionRollbackObserverKey{}).(func(error)); observeNow && observe != nil {
 		observe(cause)
 	}
 	return cause

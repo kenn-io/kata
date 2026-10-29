@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"math"
 
 	"go.kenn.io/kata/internal/db"
@@ -98,7 +99,7 @@ func (d *Store) relayCheckpointIssuesTx(ctx context.Context, tx *sql.Tx, project
 	}
 	out := make([]db.RelayCheckpointIssue, 0, len(issues))
 	for _, issue := range issues {
-		payload, err := d.federationIssueSnapshotPayload(ctx, tx, issue)
+		payload, err := d.relayCheckpointIssueSnapshotPayload(ctx, tx, issue)
 		if err != nil {
 			return nil, err
 		}
@@ -112,8 +113,20 @@ func (d *Store) relayCheckpointIssuesTx(ctx context.Context, tx *sql.Tx, project
 // or above it are the current-state records a checkpoint creation just wrote.
 func (d *Store) relayCheckpointRecordsTx(ctx context.Context, tx *sql.Tx, project db.Project, boundaryID int64) (db.RelayCheckpointRecords, error) {
 	var records db.RelayCheckpointRecords
-	crosses := func(event db.RemoteEvent) (bool, error) {
-		return relayEventCrossesProjectTx(ctx, tx, project.ID, event)
+	identityHistory, identitySelection, err := relayCheckpointSelectedIdentityHistoryTx(ctx, tx, project.ID, boundaryID)
+	if err != nil {
+		return records, err
+	}
+	excludeHistory := func(event db.RemoteEvent) (bool, error) {
+		if excluded, checked := identitySelection[event.EventUID]; checked {
+			return excluded, nil
+		}
+		excluded, err := relayEventCheckpointHistoryExcludedTx(ctx, tx, project.ID, event)
+		if err != nil || excluded || event.Type != "issue.closed" {
+			return excluded, err
+		}
+		included, err := relayCheckpointShortIDReferencesIncludedTx(ctx, tx, event, identityHistory)
+		return !included, err
 	}
 	for after := int64(0); ; {
 		events, err := relayCheckpointEventPageTx(ctx, tx, project.ID, after)
@@ -123,18 +136,80 @@ func (d *Store) relayCheckpointRecordsTx(ctx context.Context, tx *sql.Tx, projec
 		if len(events) == 0 {
 			break
 		}
-		if err := records.AppendEvents(events, boundaryID, crosses); err != nil {
+		if err := records.AppendEvents(events, boundaryID, excludeHistory); err != nil {
 			return records, err
 		}
 		after = events[len(events)-1].ID
 	}
-	var err error
 	records.Provenance, err = relayCheckpointProvenanceTx(ctx, tx, project.UID)
 	if err != nil {
 		return records, err
 	}
 	records.Artifacts, err = relayCheckpointArtifactsTx(ctx, tx, project)
 	return records, err
+}
+
+func relayCheckpointSelectedIdentityHistoryTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	boundaryID int64,
+) (map[string][]db.FoldEvent, map[string]bool, error) {
+	history := map[string][]db.FoldEvent{}
+	selection := map[string]bool{}
+	for after := int64(0); ; {
+		events, err := relayCheckpointEventPageTx(ctx, tx, projectID, after)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(events) == 0 {
+			return history, selection, nil
+		}
+		for _, event := range events {
+			if event.IssueUID == nil || (event.Type != "issue.created" && event.Type != "issue.snapshot" && event.Type != "issue.moved") {
+				continue
+			}
+			remote := db.RemoteEventFromStored(event)
+			excluded := false
+			if event.ID < boundaryID {
+				excluded, err = relayEventCheckpointHistoryExcludedTx(ctx, tx, projectID, remote)
+				if err != nil {
+					return nil, nil, err
+				}
+			}
+			selection[remote.EventUID] = excluded
+			if !excluded {
+				issueUID := *event.IssueUID
+				foldEvent, err := db.RelayFoldIdentityEventFromRemote(remote)
+				if err != nil {
+					return nil, nil, err
+				}
+				history[issueUID] = append(history[issueUID], foldEvent)
+			}
+		}
+		after = events[len(events)-1].ID
+	}
+}
+
+func relayCheckpointShortIDReferencesIncludedTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	event db.RemoteEvent,
+	identityHistory map[string][]db.FoldEvent,
+) (bool, error) {
+	references, err := relayEventShortIDReferencesTx(ctx, tx, event)
+	if errors.Is(err, db.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	for _, reference := range references {
+		if !db.RelayShortIDHistoryMatchesAtEvent(reference, event, identityHistory[reference.IssueUID]) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // relayCheckpointEventPageTx reads one page of portable events after an id.

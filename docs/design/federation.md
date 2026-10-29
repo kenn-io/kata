@@ -360,7 +360,19 @@ quarantine on the spoke instead of retrying forever.
 
 ### Cross-Project Link Convergence
 
-Direct-spoke federation can carry cross-project links; negotiated relay projects reject them.
+Direct-spoke federation carries cross-project links. Shared-access relays on current main
+also carry root-authored relationships inside a compatible group with one pinned root.
+Native sender transactions authorize every referenced project in the exact selected
+retained bodies before emitted-prefix mutation, and before returning checkpoint Events
+or Entities, including cached and forwarded snapshots. Denial withholds the whole
+response without changing retained bytes. Daemon release checks retain peer dependencies
+and host decisions while the enrollment keeps its owning-project identity.
+A selected event or reset containing a notification reference whose project
+cannot be proved is refused, including references to already-purged comments.
+Existing native resets remain valid when all selected content is authorized.
+No new recovery policy is required. Temporary access loss permits an exact retry
+once access returns; provable ordinary reply/purge recovery remains.
+See the [operating rules](../operations/federation.md#shared-access-relationships).
 For direct spokes, a missing link peer is not a permanent validation failure. The hub accepts
 the event, advances the push cursor, and keeps the edge absent until both endpoint issues are
 materialized inside one compatible federation group. Hub projects on one daemon form a group.

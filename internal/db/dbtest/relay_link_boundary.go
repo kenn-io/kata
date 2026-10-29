@@ -20,7 +20,7 @@ type relayLinkBoundaryFixture struct {
 	signer           db.RootAttributionSigner
 }
 
-func newRelayLinkBoundaryFixture(t *testing.T, store db.Storage, name string) relayLinkBoundaryFixture {
+func newRelayLinkBoundaryFixture(t *testing.T, store db.Storage, name string, credentials ...db.CreateAPITokenParams) relayLinkBoundaryFixture {
 	t.Helper()
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, name)
@@ -35,7 +35,11 @@ func newRelayLinkBoundaryFixture(t *testing.T, store db.Storage, name string) re
 	require.NoError(t, err)
 	require.NoError(t, store.PinRootAuthority(ctx, db.RootKeyPin{ProjectUID: project.UID, AuthorityUID: store.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}))
 	//nolint:gosec // This is a deterministic fixture credential, never an operational secret.
-	parent, _, err := store.CreateAPIToken(ctx, db.CreateAPITokenParams{PlaintextToken: name + "-parent-test-token", Actor: "relay-member", AdminActor: "admin"})
+	params := db.CreateAPITokenParams{PlaintextToken: name + "-parent-test-token", Actor: "relay-member", AdminActor: "admin"}
+	if len(credentials) > 0 {
+		params = credentials[0]
+	}
+	parent, _, err := store.CreateAPIToken(ctx, params)
 	require.NoError(t, err)
 	return relayLinkBoundaryFixture{project: project, sibling: sibling, parentTokenID: parent.ID, signer: db.RootAttributionSigner{AuthorityUID: store.InstanceUID(), PrivateKey: private}}
 }
@@ -137,10 +141,9 @@ func RunRelayLinkBoundaryKeepsSameProjectEffects(t *testing.T, store db.Storage)
 }
 
 // RunRelayLinkBoundaryFollowsActiveGrants proves the fold and the local write
-// rule share one boundary. While a relay grant is active a local cross-project
-// link is refused. After the last grant is revoked the link is allowed, and a
-// legacy peer's unlink of it is applied, so the hub does not keep an edge its
-// replicas removed.
+// rule share one boundary. An authoritative common-root crossing remains
+// writable with an active relay grant. After the last grant is revoked, a
+// legacy peer's unlink still applies, so removed edges do not return.
 func RunRelayLinkBoundaryFollowsActiveGrants(t *testing.T, store db.Storage) {
 	ctx := t.Context()
 	fixture := newRelayLinkBoundaryFixture(t, store, "boundary-grants")
@@ -154,12 +157,16 @@ func RunRelayLinkBoundaryFollowsActiveGrants(t *testing.T, store db.Storage) {
 	target, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.sibling.ID, Title: "Sibling issue", Author: "member"})
 	require.NoError(t, err)
 	linkEvent := db.LinkEventParams{EventType: "issue.linked", EventIssueID: source.ID, FromShortID: source.ShortID, FromUID: source.UID, ToShortID: target.ShortID, ToUID: target.UID, Actor: "member"}
-	_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: source.ID, ToIssueID: target.ID, Type: "blocks", Author: "member"}, linkEvent)
-	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary, "an active relay grant refuses a local cross-project link")
+	active, _, err := store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: source.ID, ToIssueID: target.ID, Type: "blocks", Author: "member"}, linkEvent)
+	require.NoError(t, err, "an authoritative common-root crossing is allowed with an active relay")
+	unlinkEvent := linkEvent
+	unlinkEvent.EventType = "issue.unlinked"
+	_, err = store.DeleteLinkAndEvent(ctx, active, unlinkEvent)
+	require.NoError(t, err)
 
 	require.NoError(t, store.RevokeFederationEnrollment(ctx, grant.Enrollment.ID))
 	_, _, err = store.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: source.ID, ToIssueID: target.ID, Type: "blocks", Author: "member"}, linkEvent)
-	require.NoError(t, err, "revoking the last relay grant allows local cross-project links again")
+	require.NoError(t, err, "common-root links remain allowed after revoking the last relay grant")
 	require.Equal(t, []string{target.UID}, linkTargetUIDs(t, store, source.ID))
 
 	spokeInstanceUID, err := uid.New()

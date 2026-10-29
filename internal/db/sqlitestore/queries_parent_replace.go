@@ -41,12 +41,7 @@ func (d *Store) replaceParentAndEventsTx(
 	if err := lockProjectAccess(ctx, tx); err != nil {
 		return result, err
 	}
-	if err := checkLinkEndpointsProjectAccessTx(ctx, tx,
-		input.Link.FromIssueID, input.ExpectedParentIssueID, input.Link.ToIssueID,
-	); err != nil {
-		return result, err
-	}
-	if err := ensureRelayLinkBoundaryTx(ctx, tx, input.Link.FromIssueID, input.Link.ToIssueID); err != nil {
+	if err := checkParentReplacementProjectAccessTx(ctx, tx, input); err != nil {
 		return result, err
 	}
 	if err := requireAddableLinkTargetTx(ctx, tx, input.Link.ToIssueID); err != nil {
@@ -113,12 +108,7 @@ func (d *Store) replaceParentAndEventsTx(
 	}
 
 	updatedAt := nowTimestamp()
-	unlinkedPayload, err := json.Marshal(map[string]any{
-		"link_id": oldLink.ID, "type": oldLink.Type,
-		"from_short_id": input.UnlinkEvent.FromShortID, "from_uid": input.UnlinkEvent.FromUID,
-		"to_short_id": input.UnlinkEvent.ToShortID, "to_uid": input.UnlinkEvent.ToUID,
-		"updated_at": updatedAt,
-	})
+	unlinkedPayload, err := db.LinkEventPayload(oldLink, input.UnlinkEvent, updatedAt, nil)
 	if err != nil {
 		return result, fmt.Errorf("marshal unlink payload: %w", err)
 	}

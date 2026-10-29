@@ -227,8 +227,12 @@ func (s *Store) insertFederationBaselineEventsTx(
 	if err != nil {
 		return db.Event{}, err
 	}
+	snapshotPayload := federationIssueSnapshotPayload
+	if db.RelayCheckpointCapture(ctx) {
+		snapshotPayload = relayCheckpointIssueSnapshotPayload
+	}
 	for _, issue := range issues {
-		snapshot, err := federationIssueSnapshotPayload(ctx, tx, issue)
+		snapshot, err := snapshotPayload(ctx, tx, issue)
 		if err != nil {
 			return db.Event{}, err
 		}
@@ -271,6 +275,39 @@ func federationIssuesForSnapshot(ctx context.Context, tx *sql.Tx, projectID int6
 }
 
 func federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Issue) (string, error) {
+	comments := func(ctx context.Context, tx *sql.Tx, issue db.Issue) ([]issueSnapshotComment, error) {
+		return federationIssueComments(ctx, tx, issue.ID)
+	}
+	return federationIssueSnapshotPayloadWithComments(ctx, tx, issue, comments)
+}
+
+// relayCheckpointIssueSnapshotPayload omits reply edges whose target comments
+// no longer exist. A fresh checkpoint cannot carry the root's purge facts that
+// would authorize those dangling references at a later relay hop.
+func relayCheckpointIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Issue) (string, error) {
+	return relayCheckpointIssueSnapshotPayloadWithGroupLock(ctx, tx, issue, true)
+}
+
+func relayCheckpointIssueSnapshotPayloadWithGroupLock(ctx context.Context, tx *sql.Tx, issue db.Issue, lockGroup bool) (string, error) {
+	metadata, err := db.RelayCheckpointMetadata(jsontext.Value(issue.Metadata), func(uid string) (bool, error) {
+		return relayCheckpointCanOmitPurgedCommentReferenceTx(ctx, tx, issue.ProjectID, "", "", uid, lockGroup)
+	})
+	if err != nil {
+		return "", fmt.Errorf("sanitize checkpoint notification metadata: %w", err)
+	}
+	issue.Metadata = db.JSONBlob(string(metadata))
+	comments := func(ctx context.Context, tx *sql.Tx, issue db.Issue) ([]issueSnapshotComment, error) {
+		return federationCheckpointIssueComments(ctx, tx, issue, lockGroup)
+	}
+	return federationIssueSnapshotPayloadWithComments(ctx, tx, issue, comments)
+}
+
+func federationIssueSnapshotPayloadWithComments(
+	ctx context.Context,
+	tx *sql.Tx,
+	issue db.Issue,
+	commentsForIssue func(context.Context, *sql.Tx, db.Issue) ([]issueSnapshotComment, error),
+) (string, error) {
 	labels, err := federationIssueLabels(ctx, tx, issue.ID)
 	if err != nil {
 		return "", err
@@ -279,7 +316,7 @@ func federationIssueSnapshotPayload(ctx context.Context, tx *sql.Tx, issue db.Is
 	if err != nil {
 		return "", err
 	}
-	comments, err := federationIssueComments(ctx, tx, issue.ID)
+	comments, err := commentsForIssue(ctx, tx, issue)
 	if err != nil {
 		return "", err
 	}
@@ -365,6 +402,36 @@ func federationIssueComments(
 	if err != nil {
 		return nil, mapSQLError(err, nil)
 	}
+	return scanFederationIssueComments(rows)
+}
+
+func federationCheckpointIssueComments(
+	ctx context.Context,
+	tx *sql.Tx,
+	issue db.Issue,
+	lockGroup bool,
+) ([]issueSnapshotComment, error) {
+	comments, err := federationIssueComments(ctx, tx, issue.ID)
+	if err != nil {
+		return nil, err
+	}
+	for index := range comments {
+		comment := &comments[index]
+		if comment.ReplyToUID == "" {
+			continue
+		}
+		omit, err := relayCheckpointCanOmitPurgedCommentReferenceTx(ctx, tx, issue.ProjectID, issue.UID, comment.CommentUID, comment.ReplyToUID, lockGroup)
+		if err != nil {
+			return nil, err
+		}
+		if omit {
+			comment.ReplyToUID, comment.ReplyKind = "", ""
+		}
+	}
+	return comments, nil
+}
+
+func scanFederationIssueComments(rows *sql.Rows) ([]issueSnapshotComment, error) {
 	defer func() { _ = rows.Close() }()
 	var output []issueSnapshotComment
 	for rows.Next() {
@@ -451,29 +518,6 @@ func (s *Store) materializeFederatedProjectTx(
 	acceptedEventUIDs []string,
 	validator *db.CronReplayValidator,
 ) error {
-	return s.materializeFederatedProjectTxScoped(ctx, tx, projectID, reconcileLinks, acceptedEventUIDs, validator, false)
-}
-
-func (s *Store) materializeFederatedProjectRelayTx(
-	ctx context.Context,
-	tx *sql.Tx,
-	projectID int64,
-	reconcileLinks bool,
-	acceptedEventUIDs []string,
-	validator *db.CronReplayValidator,
-) error {
-	return s.materializeFederatedProjectTxScoped(ctx, tx, projectID, reconcileLinks, acceptedEventUIDs, validator, true)
-}
-
-func (s *Store) materializeFederatedProjectTxScoped(
-	ctx context.Context,
-	tx *sql.Tx,
-	projectID int64,
-	reconcileLinks bool,
-	acceptedEventUIDs []string,
-	validator *db.CronReplayValidator,
-	projectOnlyLinks bool,
-) error {
 	if err := db.LockCronProject(ctx, tx, projectID); err != nil {
 		return err
 	}
@@ -529,13 +573,9 @@ func (s *Store) materializeFederatedProjectTxScoped(
 		// — is the transaction's lock-acquisition order under concurrent
 		// materialization of two projects in one group. Do not hoist it into the
 		// struct's construction above.
-		if projectOnlyLinks {
-			m.groupProjectIDs = []int64{projectID}
-		} else {
-			m.groupProjectIDs, err = federationBindingGroupProjectIDs(ctx, tx, m.binding)
-			if err != nil {
-				return err
-			}
+		m.groupProjectIDs, err = federationBindingGroupProjectIDs(ctx, tx, m.binding)
+		if err != nil {
+			return err
 		}
 		if err := reconcileFederatedLinkGroup(ctx, tx, m, issueIDs); err != nil {
 			return err

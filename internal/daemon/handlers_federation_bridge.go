@@ -50,6 +50,7 @@ func registerRelayHandlers(humaAPI huma.API, cfg ServerConfig) {
 			signer = cfg.RootSigning.Signer()
 		}
 		checkpoint, err := store.CreateRelayReset(ctx, principal.RelayBindingUID, signer)
+		err = finishPeerFenceRejection(ctx, err)
 		if err != nil {
 			return nil, relayTransportError(err)
 		}
@@ -76,6 +77,7 @@ func registerRelayHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		ctx = db.WithRelayRequestedEpoch(ctx, in.Epoch)
 		envelopes, err := cfg.DB.PendingRelayDeliveries(ctx, principal.RelayBindingUID, in.Stream, in.Limit)
+		err = finishPeerFenceRejection(ctx, err)
 		if err != nil {
 			return nil, relayTransportError(err)
 		}
@@ -149,6 +151,9 @@ func relayTransportError(err error) error {
 	if errors.Is(err, db.ErrFederationResetBlockedByPendingPush) || errors.Is(err, db.ErrFederationResetBlockedByQuarantine) || errors.Is(err, db.ErrFederationResetBlockedByExternalRoot) {
 		return api.NewError(http.StatusConflict, "relay_reset_blocked", "relay reset is blocked by retained work or bindings", "", nil)
 	}
+	if errors.Is(err, db.ErrTransactionFinalizationFailed) || errors.Is(err, errHostFederationAccessUnavailable) {
+		return api.NewError(http.StatusServiceUnavailable, "access_unavailable", "relay storage or authorization is unavailable", "", nil)
+	}
 	if errors.Is(err, db.ErrNotFound) {
 		return federationCredentialDenied()
 	}
@@ -161,9 +166,6 @@ func relayTransportError(err error) error {
 	if errors.Is(err, db.ErrFederationIngestValidation) || errors.Is(err, db.ErrRemoteEventHashMismatch) {
 		// Do not expose source, constraint or project details in protocol errors.
 		return api.NewError(http.StatusBadRequest, "relay_invalid", "relay batch, epoch or acknowledgement is invalid", "", nil)
-	}
-	if errors.Is(err, db.ErrTransactionFinalizationFailed) || errors.Is(err, errHostFederationAccessUnavailable) {
-		return api.NewError(http.StatusServiceUnavailable, "access_unavailable", "relay storage or authorization is unavailable", "", nil)
 	}
 	if apiErr, ok := errors.AsType[*api.APIError](err); ok {
 		if apiErr.Status == http.StatusForbidden || apiErr.Status == http.StatusNotFound {
@@ -198,14 +200,14 @@ func relayProjectLinksCheckError(err error) error {
 }
 
 func newRelayCrossProjectLinksError(side string) *api.APIError {
-	message := "this daemon's copy of the project has cross-project issue links"
+	message := "this daemon's project links cross the supported relay group"
 	location := "locally"
 	if side == "hub" {
-		message = "the project on the hub has cross-project issue links"
+		message = "the project on the hub has links outside the supported relay group"
 		location = "on the hub"
 	}
 	return api.NewError(http.StatusConflict, "relay_cross_project_links",
-		message, "remove cross-project related, blocks, and parent links "+location+" before retrying; ask an operator on that side to remove links to projects you cannot access", nil)
+		message, "check shared-upstream and common-root configuration "+location+"; author crossing relationships at the root or remove incompatible links; ask an operator to review links to projects you cannot access", nil)
 }
 
 func createRelayEnrollment(ctx context.Context, cfg ServerConfig, in *api.CreateFederationEnrollmentRequest) (*api.CreateFederationEnrollmentResponse, error) {

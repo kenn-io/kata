@@ -1,7 +1,7 @@
 ---
 title: Share projects between hubs
 description: Connect a selected project to another Kata daemon, relay it to your devices, and understand sync and recovery.
-last_edited: 2026-10-17
+last_edited: 2026-10-25
 ---
 
 # Share projects between hubs
@@ -198,7 +198,25 @@ offer optional coordination; they are not a prerequisite for every edit.
 Reads can be stale, and concurrent changes have
 [consistency limits](../operations/federation.md#consistency-limitations).
 Cross-project issue moves are unsupported while either project is federated;
-negotiated relay projects also reject cross-project links.
+on current main, shared-access relays can carry root-authored links between
+projects with the same pinned root. Enroll both projects through the same
+upstream at every hop, and give each recipient access to both projects there.
+Create, remove and replace crossing relationships at the root; replicas retain
+ordinary local-first issue edits. A missing peer's link appears after both
+projects arrive.
+
+If a recipient loses either project's access, the sender suspends the whole
+event response or checkpoint containing that reference. Restoring access retries
+the exact retained bytes. Already received data stays on the replica. Upgrade
+every hop to a build supporting shared-access links before enabling them;
+older relay builds reject crossings.
+
+A notification may refer to a permanently deleted comment whose owning project
+can no longer be proved. The sender refuses a selected event or checkpoint
+containing that reference, including the first checkpoint. An existing native
+reset remains valid when all its selected content is authorized. No new
+recovery policy is provided; see the
+[operating rules](../operations/federation.md#shared-access-relationships).
 
 Embeddings are optional. A project can select one producer and share compatible
 vectors so each device need not generate them again. See
@@ -220,7 +238,7 @@ does not establish that it happened.
 | Team membership was removed | Have the upstream operator restore access. The existing connection rechecks authority before resuming. |
 | `signing_rejected` | Repair the signing source or hub key registration. Reconnecting is not the remedy. |
 | Local project-name or identity collision | Resolve the existing project or choose an unused name; do not initialize another copy to bypass the conflict. |
-| Root purge or history reset | Let normal sync install the signed checkpoint. See [reset recovery](../operations/federation.md#reset-recovery) for retained-work blockers. |
+| Root purge or history reset | Normal sync installs the signed checkpoint unless selected references cannot be proved. See [reset recovery](../operations/federation.md#reset-recovery) for retained-work blockers. |
 | Hub is permanently gone | Review [local-only disconnect](../operations/federation.md#detach-a-bridge-whose-hub-is-gone). It discards undelivered transport work and cannot revoke the remote grant. |
 
 For a normal disconnect, finish pending deliveries and disconnect or revoke

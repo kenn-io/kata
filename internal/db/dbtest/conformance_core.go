@@ -231,7 +231,7 @@ func checkProjects(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return fmt.Errorf("project by name: %w", err)
 	}
-	byUID, err := store.ProjectByUID(ctx, alpha.UID)
+	byUID, err := store.ProjectByUIDTx(ctx, nil, alpha.UID)
 	if err != nil {
 		return fmt.Errorf("project by UID: %w", err)
 	}

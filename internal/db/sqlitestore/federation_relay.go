@@ -167,6 +167,10 @@ func (d *Store) relayTx(ctx context.Context, op func(*sql.Tx) error) error {
 		}
 		defer func() { _ = tx.Rollback() }()
 		if err := op(tx); err != nil {
+			rollbackErr := tx.Rollback()
+			if db.HasTransactionRollbackCallback(err) {
+				return db.FinishTransactionRollback(ctx, err, rollbackErr)
+			}
 			return err
 		}
 		return tx.Commit()

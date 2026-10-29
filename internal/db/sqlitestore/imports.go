@@ -744,7 +744,7 @@ func (d *Store) reconcileImportLinks(ctx context.Context, tx *sql.Tx, p db.Impor
 				if !db.ImportItemLinkTypeAuthoritative(item, link.Type) {
 					continue
 				}
-				if err := checkLinkEndpointsProjectAccessTx(ctx, tx, link.FromIssueID, link.ToIssueID); err != nil {
+				if err := checkExistingLinkProjectAccessTx(ctx, tx, link); err != nil {
 					return nil, 0, err
 				}
 				if _, err := tx.ExecContext(ctx, `DELETE FROM links WHERE id = ?`, link.ID); err != nil {
@@ -833,16 +833,10 @@ func (d *Store) insertLinkEvent(ctx context.Context, tx *sql.Tx, p db.ImportBatc
 	// queries_links.go — without them, TUI SSE refresh paths that key
 	// parent-pane invalidation on payload UIDs miss import-generated
 	// updates.
-	payload, err := json.Marshal(map[string]any{
-		"source":        p.Source,
-		"link_id":       link.ID,
-		"type":          link.Type,
-		"from_short_id": issue.ShortID,
-		"from_uid":      issue.UID,
-		"to_short_id":   toShortID,
-		"to_uid":        toUID,
-		"updated_at":    updatedAt.UTC().Format(sqliteTimeFormat),
-	})
+	payload, err := db.LinkEventPayload(link, db.LinkEventParams{
+		EventType: eventType, FromShortID: issue.ShortID, FromUID: issue.UID,
+		ToShortID: toShortID, ToUID: toUID,
+	}, updatedAt.UTC().Format(sqliteTimeFormat), &p.Source)
 	if err != nil {
 		return db.Event{}, fmt.Errorf("marshal link payload: %w", err)
 	}

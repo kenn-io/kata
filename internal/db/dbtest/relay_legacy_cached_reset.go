@@ -62,9 +62,39 @@ func RunRelayLegacyCachedResetPrivacy(t *testing.T, store db.Storage, writeMeta 
 	raw, err := json.Marshal(legacy)
 	require.NoError(t, err)
 	require.NoError(t, writeMeta(ctx, db.RelayResetMetadataPrefix+selected.UID+"."+binding, string(raw)))
-	served, err := resets.CreateRelayReset(ctx, binding, signer)
+	policy, err := store.ProjectAccessPolicy(ctx, unselected.UID)
 	require.NoError(t, err)
-	requireResetOmitsIssue(t, served, private)
+	policy.Visibility, policy.TeamUIDs = "teams", nil
+	policy, _, err = store.SetProjectAccessPolicy(ctx, policy, "admin")
+	require.NoError(t, err)
+	served, err := resets.CreateRelayReset(ctx, binding, signer)
+	if err != nil {
+		require.ErrorIs(t, err, db.ErrNotFound, "selected inaccessible peer refuses the whole reset")
+		require.Equal(t, db.RelayResetCheckpoint{}, served)
+	} else {
+		require.NoError(t, db.VerifyRootResetManifest(pin, served.Manifest, served.Snapshot))
+		requireResetOmitsIssue(t, served, private)
+	}
+	policy.Visibility = "all"
+	_, _, err = store.SetProjectAccessPolicy(ctx, policy, "admin")
+	require.NoError(t, err)
+	served, err = resets.CreateRelayReset(ctx, binding, signer)
+	require.NoError(t, err)
+	require.Positive(t, served.Manifest.HistoryEventID, "legacy checkpoint must be rebuilt with a history boundary")
+	require.NoError(t, db.VerifyRootResetManifest(pin, served.Manifest, served.Snapshot))
+	events, _, err := db.DecodeRootResetPayload(pin, served.Snapshot)
+	require.NoError(t, err)
+	found := 0
+	for _, event := range events {
+		if event.EventUID == unlinkEvent.UID {
+			require.Equal(t, remoteEventFromStored(unlinkEvent), event, "authorized original unlink payload and hash remain unchanged")
+			found++
+		}
+	}
+	require.Equal(t, 1, found)
+	retry, err := resets.CreateRelayReset(ctx, binding, signer)
+	require.NoError(t, err)
+	require.Equal(t, served, retry)
 }
 
 // legacyCheckpointWithEvent models an authentic checkpoint from an earlier
@@ -75,7 +105,20 @@ func legacyCheckpointWithEvent(t *testing.T, checkpoint db.RelayResetCheckpoint,
 	require.NoError(t, json.Unmarshal(checkpoint.Snapshot.Events, &sources))
 	historical, err := db.EncodeRelaySourceEvent(event)
 	require.NoError(t, err)
-	sources = append(sources, historical)
+	found := 0
+	for _, body := range sources {
+		source, err := db.DecodeRelaySourceEvent(body)
+		require.NoError(t, err)
+		if source.EventUID == event.EventUID {
+			require.Equal(t, event, source)
+			found++
+		}
+	}
+	if found == 0 {
+		sources = append(sources, historical)
+		found++
+	}
+	require.Equal(t, 1, found, "legacy source identities must remain unique")
 	checkpoint.Snapshot.Events, err = json.Marshal(sources)
 	require.NoError(t, err)
 	checkpoint.Translation.SnapshotDigest, err = db.RootResetSnapshotDigest(checkpoint.Snapshot)
@@ -84,6 +127,8 @@ func legacyCheckpointWithEvent(t *testing.T, checkpoint db.RelayResetCheckpoint,
 	checkpoint.Manifest, err = db.SignRootResetManifest(checkpoint.Manifest, checkpoint.Snapshot, signingKey)
 	require.NoError(t, err)
 	require.NoError(t, db.VerifyRootResetManifest(pin, checkpoint.Manifest, checkpoint.Snapshot))
+	_, _, err = db.DecodeRootResetPayload(pin, checkpoint.Snapshot)
+	require.NoError(t, err)
 	return checkpoint
 }
 

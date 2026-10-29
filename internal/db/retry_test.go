@@ -44,6 +44,22 @@ func TestRetryTransientDoesNotRetryPermanentErrors(t *testing.T) {
 	assert.Equal(t, 1, attempts)
 }
 
+func TestRetryTransientStopsWhenRollbackFinalizationFails(t *testing.T) {
+	attempts := 0
+	err := retryTransient(context.Background(), retryConfig{
+		maxElapsed: time.Second,
+		newBackOff: func() backoff.BackOff { return &backoff.ZeroBackOff{} },
+	}, alwaysTransient, func() error {
+		attempts++
+		if attempts == 1 {
+			return errors.Join(ErrTransactionFinalizationFailed, errors.New("retryable SQL failure"))
+		}
+		return nil
+	})
+	require.ErrorIs(t, err, ErrTransactionFinalizationFailed)
+	assert.Equal(t, 1, attempts, "a failed rollback callback cannot be retried as a successful authorization decision")
+}
+
 func TestNewRetryBackOffUsesSmallJitteredPolicy(t *testing.T) {
 	got, ok := newRetryBackOff().(*retryBackOff)
 	require.True(t, ok)

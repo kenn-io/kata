@@ -230,7 +230,7 @@ var (
 
 	// ErrFederatedReadOnly is returned when a local mutation targets an enabled
 	// spoke replica whose local writes are not available for that operation.
-	ErrFederatedReadOnly = errors.New("federated spoke project is read-only")
+	ErrFederatedReadOnly = errors.New("operation is not writable in this federation context")
 
 	// ErrFederatedSpokeUnsupported is joined with ErrFederatedReadOnly for Phase 2
 	// operations that remain hub-only even when a spoke is push-enabled.
@@ -244,9 +244,9 @@ var (
 	// project. Cross-project federated move semantics need a separate design.
 	ErrFederatedMoveUnsupported = errors.New("federated project move unsupported")
 
-	// ErrFederationResetBlockedByPendingPush is returned when a federation reset
-	// is blocked because there are pending push events.
-	ErrFederationCrossProjectBoundary = errors.New("cross-project links involving a relayed project are unsupported")
+	// ErrFederationCrossProjectBoundary rejects relationships outside a shared
+	// relay group or authored away from their common root.
+	ErrFederationCrossProjectBoundary = errors.New("cross-project relay relationships require a shared upstream and common root; author relationship changes at that root")
 
 	ErrFederationResetBlockedByDownstream = errors.New("federation change blocked by active downstream enrollments")
 

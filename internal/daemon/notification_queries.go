@@ -142,7 +142,10 @@ func notificationPeerProjectReadableTx(ctx context.Context, tx db.Transaction, p
 // peerFenceRejection carries a peer fence's rejection out of the write
 // transaction. Stores roll back on any error but finish host cleanup only for
 // their own begin-time fences, so the handler finishes this one.
-type peerFenceRejection struct{ err error }
+type peerFenceRejection struct {
+	err      error
+	response error
+}
 
 func (e *peerFenceRejection) Error() string { return e.err.Error() }
 func (e *peerFenceRejection) Unwrap() error { return e.err }
@@ -155,7 +158,14 @@ func finishPeerFenceRejection(ctx context.Context, err error) error {
 	if !ok {
 		return err
 	}
-	return db.FinishTransactionRollback(ctx, rejection.err, nil)
+	finished := db.FinishTransactionRollback(ctx, rejection.err, nil)
+	if errors.Is(finished, db.ErrTransactionFinalizationFailed) {
+		return finished
+	}
+	if rejection.response != nil {
+		return rejection.response
+	}
+	return finished
 }
 
 // Discovery reads other projects without widening the source mutation's host

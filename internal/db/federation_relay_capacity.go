@@ -78,18 +78,18 @@ type RelayCheckpointIssue struct {
 }
 
 // AppendEvents encodes loaded portable events in id order. Events below
-// boundaryID are retained history and are skipped when crosses reports that
-// they reference another project; events at or above it are the current-state
-// records a checkpoint creation just wrote.
-func (r *RelayCheckpointRecords) AppendEvents(events []Event, boundaryID int64, crosses func(RemoteEvent) (bool, error)) error {
+// boundaryID are retained history and are skipped when excludeHistory reports
+// that they depend on facts unavailable to a fresh checkpoint receiver; events
+// at or above it are the current-state records a checkpoint creation just wrote.
+func (r *RelayCheckpointRecords) AppendEvents(events []Event, boundaryID int64, excludeHistory func(RemoteEvent) (bool, error)) error {
 	for _, event := range events {
 		remote := RemoteEventFromStored(event)
 		if event.ID < boundaryID {
-			crossing, err := crosses(remote)
+			excluded, err := excludeHistory(remote)
 			if err != nil {
 				return err
 			}
-			if crossing {
+			if excluded {
 				// Keep original bytes owner-local; never rewrite a source hash
 				// to remove a private historical endpoint from this checkpoint.
 				continue
