@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-10-28
+last_edited: 2026-10-29
 ---
 
 # HTTP API schema
@@ -199,6 +199,7 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 | Version | Change |
 | --- | --- |
+| `0.35.0` | Moves include the issue subtree by default; `single` keeps the move to one issue. `X-Kata-Project-Scope` narrows requests to fixed projects and is enforced in the transaction, including historical issue references. Older daemons do not enforce this header. |
 | `0.34.0` | Close transcripts accept agent names beyond Claude Code and Codex, with non-UUID session IDs for those agents. Claude Code and Codex session IDs remain UUIDs. |
 | `0.33.0` | Publishes the issue attachment upload and content routes, and UI capabilities include `attachments` when the daemon has Docbank configured. Older daemons omit the field. |
 | `0.32.0` | Project event polling accepts an `issue` filter and acknowledges the resolved subject in `X-Kata-Events-Issue-UID`. |

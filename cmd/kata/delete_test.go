@@ -47,7 +47,7 @@ func TestDelete_AgentUndoUsesQualifiedRef(t *testing.T) {
 	cmd.SetOut(&buf)
 	body := []byte(`{"issue":{"short_id":"abc4","qualified_id":"other#abc4","title":"to be deleted","status":"open"},"changed":true}`)
 
-	require.NoError(t, printDestructive(cmd, "other#abc4", "delete", body))
+	require.NoError(t, printDestructive(cmd, "other#abc4", "other", "delete", body))
 
 	out := buf.String()
 	assert.Contains(t, out, "Undo: kata restore other#abc4 --agent")
@@ -62,7 +62,7 @@ func TestDelete_AgentUndoQuotesQualifiedRefForShell(t *testing.T) {
 	cmd.SetOut(&buf)
 	body := []byte(`{"issue":{"short_id":"abc4","qualified_id":"Kata Tracker#abc4","title":"to be deleted","status":"open"},"changed":true}`)
 
-	require.NoError(t, printDestructive(cmd, "Kata Tracker#abc4", "delete", body))
+	require.NoError(t, printDestructive(cmd, "Kata Tracker#abc4", "Kata Tracker", "delete", body))
 
 	out := buf.String()
 	assert.Contains(t, out, "Undo: kata restore 'Kata Tracker#abc4' --agent")

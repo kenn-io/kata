@@ -27,7 +27,7 @@ func TestNewSectionLoadersRegisterOnlyTheirTools(t *testing.T) {
 	} {
 		t.Run(test.section, func(t *testing.T) {
 			session := connectRawTestServerWithOptions(t, Options{
-				Client: &kataclient.Client{}, ProjectID: 42, ProjectName: "spoke-project",
+				Client: inertTestClient(t), ProjectID: 42, ProjectName: "spoke-project",
 				Actor: "example-agent", Version: "test-version",
 			})
 			result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: test.loader, Arguments: map[string]any{}})

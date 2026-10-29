@@ -44,7 +44,7 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if changed && evt != nil {
-			cfg.Publish().Event(in.ProjectID, *evt)
+			cfg.Publish().Event(evt.ProjectID, *evt)
 		}
 		evt, err = scopedMutationEvent(ctx, cfg.DB, evt)
 		if err != nil {
@@ -100,7 +100,7 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if changed && evt != nil {
-			cfg.Publish().Event(in.ProjectID, *evt)
+			cfg.Publish().Event(evt.ProjectID, *evt)
 		}
 		evt, err = scopedMutationEvent(ctx, cfg.DB, evt)
 		if err != nil {
@@ -123,6 +123,25 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
+		issue, err := locateClaimIssue(ctx, cfg.DB, in.ProjectID, in.Ref)
+		if err != nil {
+			return nil, err
+		}
+		if issue.ProjectID != in.ProjectID {
+			ctx, principal, err = resolveClaimPrincipal(ctx, cfg, issue.ProjectID, in.Authorization,
+				api.ClaimActionBody{Holder: in.Body.Actor}, federationTransportOperation("claimIssue"), true)
+			if err != nil {
+				return nil, err
+			}
+		}
+		ctx, err = authorizeHostProjectScope(ctx, []int64{issue.ProjectID}, nil, false)
+		if err != nil {
+			return nil, err
+		}
+		issue, err = activeIssueByRef(ctx, cfg.DB, issue.ProjectID, issue.UID, db.IncludeDeletedNo)
+		if err != nil {
+			return nil, err
+		}
 		actor := strings.TrimSpace(principal.Holder)
 		if principal.AuthenticatedHost {
 			actor, err = attributedActor(ctx, in.Body.Actor)
@@ -142,17 +161,13 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 				"federation claim credentials require ttl_seconds",
 				"pass ttl_seconds to bound the assignment; enrollment claims cannot be permanent", nil)
 		}
-		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
-		if err != nil {
-			return nil, err
-		}
 		if in.Body.TTLSeconds != nil {
 			forwarded, handled, forwardErr := forwardTimedAssignmentClaim(ctx, cfg, in, issue, actor)
 			if handled {
 				return forwarded, forwardErr
 			}
 		}
-		if err := requireFederatedIssueClaimForPrincipal(ctx, cfg, in.ProjectID, issue, principal.ClaimPrincipal); err != nil {
+		if err := requireFederatedIssueClaimForPrincipal(ctx, cfg, issue.ProjectID, issue, principal.ClaimPrincipal); err != nil {
 			return nil, err
 		}
 
@@ -192,7 +207,7 @@ func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 
 		if result.Changed {
-			cfg.Publish().Events(in.ProjectID, result.Events)
+			cfg.Publish().EventsByProject(result.Events)
 		}
 		var replayEvents []db.Event
 		if principal.Enrollment && result.Event != nil && result.Event.Type == "issue.assignment_renewed" {
@@ -345,13 +360,13 @@ func forwardTimedAssignmentClaim(
 	issue db.Issue,
 	actor string,
 ) (*api.ClaimResponse, bool, error) {
-	finishTransport, err := beginClaimFederationTransport(ctx, cfg, in.ProjectID)
+	finishTransport, err := beginClaimFederationTransport(ctx, cfg, issue.ProjectID)
 	if err != nil {
 		return nil, true, err
 	}
 	defer finishTransport()
 
-	binding, err := cfg.DB.FederationBindingByProject(ctx, in.ProjectID)
+	binding, err := cfg.DB.FederationBindingByProject(ctx, issue.ProjectID)
 	if errors.Is(err, db.ErrNotFound) {
 		return nil, false, nil
 	}
@@ -377,7 +392,7 @@ func forwardTimedAssignmentClaim(
 	if err != nil {
 		return nil, true, assignmentClaimForwardError(err)
 	}
-	response, err := applyForwardedAssignmentClaim(ctx, cfg, in.ProjectID, issue.UID, forwarded)
+	response, err := applyForwardedAssignmentClaim(ctx, cfg, issue.ProjectID, issue.UID, forwarded)
 	if err != nil {
 		return nil, true, claimAPIError(err)
 	}

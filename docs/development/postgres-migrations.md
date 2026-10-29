@@ -196,3 +196,25 @@ normal JSONL cutover with backup and swap protections.
 Start the matching schema 34 binary after migration. Older binaries cannot open
 schema 34. Rollback requires the pre-upgrade backup and matching older binary;
 there is no down migration.
+
+## Schema 35: move history lookup index
+
+The 34→35 migration adds the partial `idx_events_moved_from` index on `events`
+for `issue.moved` rows, keyed by the payload's `from_project_uid` and
+`from_short_id`. Kata uses it to resolve an issue's former project-qualified
+short ID and to keep that ID reserved when it assigns new short IDs, without
+scanning issues or events. Existing events and issues are unchanged; the
+migration adds no columns or constraints. Fresh PostgreSQL and SQLite databases
+include the same index.
+
+Stop serving daemons and imports, back up the database, and run
+`kata storage postgres migrate` with schema-owner credentials. Creating the
+index reads every `events` row and blocks event writes while it runs; allow an
+offline window that fits the event table's size. Existing table grants remain
+sufficient. Validation-only runtime credentials cannot migrate. Versions 25–34
+follow the existing immutable migration chain before applying schema 35. SQLite
+uses its normal JSONL cutover with backup and swap protections.
+
+Start the matching schema 35 binary after migration. Older binaries cannot open
+schema 35. Rollback requires the pre-upgrade backup and matching older binary;
+there is no down migration.

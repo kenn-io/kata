@@ -105,8 +105,12 @@ func newMCPServeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			requiredAPI := apiVersionMCPServer
+			if !allProjects {
+				requiredAPI = apiVersionMCPProjectScope
+			}
 			health, err := requireDaemonAPIVersionHealth(
-				ctx, httpClient, baseURL, apiVersionMCPServer, "kata mcp serve",
+				ctx, httpClient, baseURL, requiredAPI, "kata mcp serve",
 			)
 			if err != nil {
 				return err

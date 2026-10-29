@@ -21,11 +21,12 @@ func deleteProjectRelayMetadataTx(ctx context.Context, tx *sql.Tx, projectUID st
 	_, err := tx.ExecContext(ctx, `DELETE FROM meta
 		WHERE key = $1
 		   OR key = $2
+		   OR key = $7
 		   OR left(key, length($3)) = $3
 		   OR left(key, length($4)) = $4
 		   OR left(key, length($5)) = $5
 		   OR left(key, length($6)) = $6`,
-		resetKey, db.AttributionUIResetMetadataPrefix+projectUID, resetPrefix, transitionPrefix, pendingPrefix, supersededPrefix)
+		resetKey, db.AttributionUIResetMetadataPrefix+projectUID, resetPrefix, transitionPrefix, pendingPrefix, supersededPrefix, db.ProjectStreamResetMetadataPrefix+projectUID)
 	return mapSQLError(err, nil)
 }
 

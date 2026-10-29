@@ -123,6 +123,11 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOp
 	if err := json.Unmarshal(bs, &b); err != nil {
 		return err
 	}
+	b.Issue.ShortID, err = issueRefForOutput(daemonAPI{ctx: ctx, baseURL: baseURL, client: client}, pid, ref.ProjectName,
+		issueIdentityForOutput{ProjectID: b.Issue.ProjectID, UID: b.Issue.UID, ShortID: b.Issue.ShortID})
+	if err != nil {
+		return err
+	}
 	if mode == outputAgent {
 		return printShowAgent(cmd.OutOrStdout(), b, ref.ProjectName, agentOperation)
 	}
@@ -312,12 +317,13 @@ func compactJSON(raw jsontext.Value) string {
 // federation lease fields are zero when the issue is not federated.
 type showResponseForCLI struct {
 	Issue struct {
-		ShortID string `json:"short_id"`
-		UID     string `json:"uid"`
-		Title   string `json:"title"`
-		Body    string `json:"body"`
-		Status  string `json:"status"`
-		Author  string `json:"author"`
+		ProjectID int64  `json:"project_id"`
+		ShortID   string `json:"short_id"`
+		UID       string `json:"uid"`
+		Title     string `json:"title"`
+		Body      string `json:"body"`
+		Status    string `json:"status"`
+		Author    string `json:"author"`
 		db.AttributionView
 		Owner               *string                   `json:"owner"`
 		AssignmentExpiresOn *time.Time                `json:"assignment_expires_on"`
@@ -492,10 +498,10 @@ func commentAttribution(author, teammate string) string {
 }
 
 func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation string) error {
-	if _, err := fmt.Fprintf(w, "OK %s %s\n", operation, b.Issue.ShortID); err != nil {
+	if _, err := fmt.Fprintf(w, "OK %s %s\n", operation, agentValue(b.Issue.ShortID)); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, "Issue: %s %s\n", b.Issue.ShortID, agentValue(b.Issue.Title)); err != nil {
+	if _, err := fmt.Fprintf(w, "Issue: %s %s\n", agentValue(b.Issue.ShortID), agentValue(b.Issue.Title)); err != nil {
 		return err
 	}
 	if b.Issue.Status != "" {

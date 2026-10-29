@@ -25,11 +25,12 @@ func deleteProjectRelayMetadata(ctx context.Context, execer contextExecer, proje
 	_, err := execer.ExecContext(ctx, `DELETE FROM meta
 		WHERE key = ?
 		   OR key = ?
+		   OR key = ?
 		   OR substr(key, 1, length(?)) = ?
 		   OR substr(key, 1, length(?)) = ?
 		   OR substr(key, 1, length(?)) = ?
 		   OR substr(key, 1, length(?)) = ?`,
-		resetKey, db.AttributionUIResetMetadataPrefix+projectUID,
+		resetKey, db.AttributionUIResetMetadataPrefix+projectUID, db.ProjectStreamResetMetadataPrefix+projectUID,
 		resetPrefix, resetPrefix, transitionPrefix, transitionPrefix, pendingPrefix, pendingPrefix,
 		supersededPrefix, supersededPrefix)
 	return err

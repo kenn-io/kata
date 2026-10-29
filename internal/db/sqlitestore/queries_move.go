@@ -42,6 +42,37 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 	if err := ensureFederatedMoveAllowedTx(ctx, tx, in.FromProjectID, in.ToProjectID); err != nil {
 		return out, err
 	}
+	inputs, err := db.IssueMoveTreeInputs(ctx, tx, in)
+	if err != nil {
+		return out, err
+	}
+	for _, item := range inputs {
+		result, err := d.moveIssueProjectTx(ctx, tx, item.In)
+		if err != nil {
+			return db.MoveIssueProjectOut{}, item.Refusal(err)
+		}
+		if item.Descendant == nil {
+			out = result
+			out.Events = nil
+		}
+		out.Issues = append(out.Issues, result.Issue)
+		out.Events = append(out.Events, result.Events...)
+	}
+	if in.DryRun {
+		return out, tx.Rollback()
+	}
+	if err := tx.Commit(); err != nil {
+		return db.MoveIssueProjectOut{}, err
+	}
+	return out, nil
+}
+
+func (d *Store) moveIssueProjectTx(ctx context.Context, tx *sql.Tx, in db.MoveIssueProjectIn) (db.MoveIssueProjectOut, error) {
+	var out db.MoveIssueProjectOut
+
+	if err := ensureFederatedMoveAllowedTx(ctx, tx, in.FromProjectID, in.ToProjectID); err != nil {
+		return out, err
+	}
 
 	var (
 		curRev         int64
@@ -117,8 +148,7 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 		}
 		out.Issue = issue
 		out.NewRevision = curRev
-		// Validation may provisionally clear stale claims. Roll it all back.
-		return out, tx.Rollback()
+		return out, nil
 	}
 
 	newShortID, err := assignShortIDIn(ctx, tx,
@@ -202,10 +232,8 @@ func (d *Store) moveIssueProject(ctx context.Context, in db.MoveIssueProjectIn) 
 	if err != nil {
 		return out, err
 	}
-	if err := tx.Commit(); err != nil {
-		return out, err
-	}
 	committedEvent := ev
+	out.Events = []db.Event{ev}
 	out.Issue = issue
 	out.Event = &committedEvent
 	out.EventID = ev.ID

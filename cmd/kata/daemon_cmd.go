@@ -1460,7 +1460,7 @@ func runDaemonProcess(
 	federationConfigHealth := startFederationConfigReconciler(
 		ctx, workers, waitableDrainAdmission, dcfg, store, federationWake, func(event db.Event, fork activity.Admission) {
 			publisher.EventFrom(event.ProjectID, event, fork)
-		}, daemonLog,
+		}, publisher.Reset, daemonLog,
 	)
 	gitHubSyncFetcher := newConfiguredGitHubSyncFetcher(dcfg.GitHubSync)
 	gitHubSyncProgress := githubsync.NewProgressTracker()

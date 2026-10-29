@@ -30,12 +30,27 @@ func (s *Store) LookupIssueMutationIdempotency(
 	key string,
 	since time.Time,
 ) (*db.IdempotencyMatch, error) {
+	return s.lookupIssueMutationIdempotency(ctx, "e.project_id", projectID, eventType, key, since)
+}
+
+// LookupIssueMutationIdempotencyByIssue finds a receipt regardless of which
+// project the issue belonged to when the mutation committed.
+func (s *Store) LookupIssueMutationIdempotencyByIssue(
+	ctx context.Context, issueUID, eventType, key string, since time.Time,
+) (*db.IdempotencyMatch, error) {
+	return s.lookupIssueMutationIdempotency(ctx, "e.issue_uid", issueUID, eventType, key, since)
+}
+
+func (s *Store) lookupIssueMutationIdempotency(
+	ctx context.Context, scopeColumn string, scopeValue any, eventType, key string, since time.Time,
+) (*db.IdempotencyMatch, error) {
+	// scopeColumn is supplied only by the two fixed internal wrappers above.
 	query := eventSelect + ` WHERE e.type = $1
-	      AND e.project_id = $2
+	      AND ` + scopeColumn + ` = $2
 	      AND e.payload::jsonb ->> 'idempotency_key' = $3
 	      AND e.created_at >= $4
 	      ORDER BY e.id DESC LIMIT 1`
-	event, err := scanEvent(s.QueryRowContext(ctx, query, eventType, projectID, key, formatStoredTime(since)))
+	event, err := scanEvent(s.QueryRowContext(ctx, query, eventType, scopeValue, key, formatStoredTime(since)))
 	if errors.Is(err, db.ErrNotFound) {
 		return nil, nil
 	}

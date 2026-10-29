@@ -458,7 +458,11 @@ func (d *Store) PurgeResetCheck(ctx context.Context, afterID, projectID int64) (
 	if err != nil {
 		return 0, err
 	}
-	return max(n.Int64, attributionReset), nil
+	formerProjectReset, err := db.ProjectStreamResetAfter(ctx, d, afterID, projectID)
+	if err != nil {
+		return 0, err
+	}
+	return max(n.Int64, attributionReset, formerProjectReset), nil
 }
 
 // purgeResetProjectFilter returns a SQL fragment that filters purge_log or

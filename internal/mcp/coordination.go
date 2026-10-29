@@ -102,7 +102,7 @@ func (h toolHandlers) assign(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
-	return successResult(), h.mutation(project, response.Issue, response.Changed, response.Reused, &response.Event), nil
+	return h.mutationResult(ctx, project, response.Issue, response.Changed, response.Reused, &response.Event)
 }
 
 func (h toolHandlers) unassign(ctx context.Context, _ *sdkmcp.CallToolRequest, input UnassignInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
@@ -123,7 +123,7 @@ func (h toolHandlers) unassign(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
-	return successResult(), h.mutation(project, response.Issue, response.Changed, response.Reused, &response.Event), nil
+	return h.mutationResult(ctx, project, response.Issue, response.Changed, response.Reused, &response.Event)
 }
 
 func (h toolHandlers) inbox(ctx context.Context, request *sdkmcp.CallToolRequest, input InboxInput) (*sdkmcp.CallToolResult, InboxOutput, error) {
@@ -169,6 +169,10 @@ func (h toolHandlers) status(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 	shown, err := h.options.Client.ShowIssue(ctx, &generated.ShowIssueRequestOptions{
 		PathParams: &generated.ShowIssuePath{ProjectID: project.ID, Ref: ref},
 	})
+	if err != nil {
+		return nil, StatusOutput{}, err
+	}
+	project, err = h.currentIssueProject(ctx, project, issueFromShow(shown.Issue))
 	if err != nil {
 		return nil, StatusOutput{}, err
 	}

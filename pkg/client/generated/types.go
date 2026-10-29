@@ -4500,7 +4500,10 @@ type MoveIssueRequestBody struct {
 	Actor *string `json:"actor,omitempty"`
 
 	// DryRun Validate without moving; If-Match may be omitted for a preview.
-	DryRun       *bool  `json:"dry_run,omitempty"`
+	DryRun *bool `json:"dry_run,omitempty"`
+
+	// Single Move only this issue instead of its subtree.
+	Single       *bool  `json:"single,omitempty"`
 	ToProjectUID string `json:"to_project_uid" validate:"required"`
 }
 
@@ -4512,6 +4515,7 @@ type MoveIssueResponseBody struct {
 	Changed    bool    `json:"changed"`
 	EventID    int64   `json:"event_id"`
 	Issue      Issue   `json:"issue"`
+	Issues     []Issue `json:"issues,omitempty"`
 	NewShortID *string `json:"new_short_id,omitempty"`
 }
 
@@ -4520,6 +4524,13 @@ func (m MoveIssueResponseBody) Validate() error {
 	if v, ok := any(m.Issue).(runtime.Validator); ok {
 		if err := v.Validate(); err != nil {
 			errors = errors.Append("Issue", err)
+		}
+	}
+	for i, item := range m.Issues {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Issues[%d]", i), err)
+			}
 		}
 	}
 	if len(errors) == 0 {

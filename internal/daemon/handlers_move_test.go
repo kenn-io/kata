@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -659,5 +660,153 @@ func TestMoveIssue_FederationErrorNamesMoveRestriction(t *testing.T) {
 			assert.Contains(t, string(raw), "cross-project moves involving a federated project are unsupported")
 			assert.NotContains(t, string(raw), "spoke project is read-only")
 		})
+	}
+}
+
+func TestMoveIssuePublishesSubtreeEventsOnce(t *testing.T) {
+	sink := &recordingSink{}
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Hooks = sink })
+	source, target, root := seedMovePair(t, env)
+	child, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: source.ID, Title: "child", Author: "tester",
+		Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}},
+	})
+	require.NoError(t, err)
+	subscription := env.Broadcaster.Subscribe(daemon.SubFilter{})
+	defer subscription.Unsub()
+	response, raw := envDoRaw(t, env, http.MethodPost,
+		issuePathRef(source.ID, root.ShortID, "actions/move"),
+		map[string]any{"actor": "tester", "to_project_uid": target.UID},
+		map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, root.Revision)})
+	require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
+	expected := map[string]bool{root.UID: false, child.UID: false}
+	for range 2 {
+		select {
+		case message := <-subscription.Ch:
+			require.NotNil(t, message.Event)
+			require.Equal(t, target.ID, message.ProjectID)
+			require.Equal(t, "issue.moved", message.Event.Type)
+			require.NotNil(t, message.Event.IssueUID)
+			uid := *message.Event.IssueUID
+			require.Contains(t, expected, uid)
+			require.False(t, expected[uid], "each moved issue must be broadcast once")
+			expected[uid] = true
+		default:
+			t.Fatal("missing committed move event")
+		}
+	}
+	select {
+	case message := <-subscription.Ch:
+		t.Fatalf("duplicate move broadcast: %+v", message)
+	default:
+	}
+	captured := sink.snapshot()
+	require.Len(t, captured, 2, "each moved issue must enqueue its hook event once")
+	require.NotEqual(t, captured[0].UID, captured[1].UID)
+}
+
+func TestMoveIssueWakesLiveFormerProjectStream(t *testing.T) {
+	env := testenv.New(t)
+	source, target, issue := seedMovePair(t, env)
+	cursor, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	response := openSSE(t, env, fmt.Sprintf("project_id=%d&after_id=%d", source.ID, cursor-1), nil)
+	defer func() { _ = response.Body.Close() }()
+	framer := newSSEFramer(response.Body)
+	initial, ok := framer.Next(t, 2*time.Second)
+	require.True(t, ok, "initial source event must finish draining before the move")
+	require.Equal(t, "issue.created", initial.event)
+
+	// A global wakeup may cover unrelated data, but the durable project filter
+	// must still omit that event from this source stream.
+	unrelated, event, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "unrelated", Author: "tester"})
+	require.NoError(t, err)
+	env.Broadcaster.Broadcast(daemon.NewEventMsg(target.ID, event))
+	env.Broadcaster.Broadcast(daemon.NewResetMsg(target.ID, event.ID))
+	moved, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(source.ID, issue.ShortID, "actions/move"),
+		map[string]any{"actor": "tester", "to_project_uid": target.UID},
+		map[string]string{"If-Match": fmt.Sprintf(`"rev-%d"`, issue.Revision)})
+	require.Equal(t, http.StatusOK, moved.StatusCode, string(raw))
+	frame, ok := framer.Next(t, 2*time.Second)
+	require.True(t, ok, "former-project live stream must observe the move without another source mutation")
+	require.Equal(t, "issue.moved", frame.event)
+	require.Contains(t, frame.data, issue.UID)
+	require.NotContains(t, frame.data, unrelated.UID)
+}
+
+type projectEventReadCounter struct {
+	db.Storage
+	projectID int64
+	reads     atomic.Int64
+}
+
+func (s *projectEventReadCounter) EventsAfter(ctx context.Context, query db.EventsAfterParams) ([]db.Event, error) {
+	if query.ProjectID == s.projectID {
+		s.reads.Add(1)
+	}
+	return s.Storage.EventsAfter(ctx, query)
+}
+
+func TestProjectStreamIgnoresUnrelatedEventWakeups(t *testing.T) {
+	var counter *projectEventReadCounter
+	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+		counter = &projectEventReadCounter{Storage: cfg.DB}
+		cfg.DB = counter
+	})
+	source, target, _ := seedMovePair(t, env)
+	counter.projectID = source.ID
+	cursor, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	response := openSSE(t, env, fmt.Sprintf("project_id=%d&after_id=%d", source.ID, cursor-1), nil)
+	defer func() { _ = response.Body.Close() }()
+	framer := newSSEFramer(response.Body)
+	initial, ok := framer.Next(t, 2*time.Second)
+	require.True(t, ok)
+	require.Equal(t, "issue.created", initial.event)
+	before := counter.reads.Load()
+
+	_, foreign, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: target.ID, Title: "unrelated", Author: "tester"})
+	require.NoError(t, err)
+	for range 20 {
+		env.Broadcaster.Broadcast(daemon.NewEventMsg(target.ID, foreign))
+	}
+	own, raw := envDoRaw(t, env, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues", source.ID), map[string]any{"actor": "tester", "title": "source update"}, nil)
+	require.Equal(t, http.StatusOK, own.StatusCode, string(raw))
+	frame, ok := framer.Next(t, 2*time.Second)
+	require.True(t, ok, "source stream must remain available for its own events")
+	require.Equal(t, "issue.created", frame.event)
+	require.Contains(t, frame.data, "source update")
+	require.Equal(t, int64(1), counter.reads.Load()-before, "unrelated wakeups must not trigger durable source-event reads")
+}
+
+// Contract: a descendant in an archived project refuses the subtree with a
+// conflict that names the descendant, in previews and writes.
+func TestMoveIssue_ArchivedDescendantConflict(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	source, target, root := seedMovePair(t, env)
+	archived, err := env.DB.CreateProject(t.Context(), "archived")
+	require.NoError(t, err)
+	child, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: archived.ID, Title: "child", Author: "tester", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
+	require.NoError(t, err)
+	_, _, err = env.DB.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: archived.ID, Actor: "tester", Force: true})
+	require.NoError(t, err)
+	for _, dry := range []bool{true, false} {
+		body := fmt.Sprintf(`{"actor":"tester","to_project_uid":%q,"dry_run":%t}`, target.UID, dry)
+		resp := doPostWithIfMatch(t, env, moveURL(env, source.ID, root.ShortID), body, `"rev-1"`)
+		raw := readClose(t, resp)
+		require.Equal(t, http.StatusConflict, resp.StatusCode, string(raw))
+		var envelope struct {
+			Error struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+				Data    struct {
+					Descendant db.IssueMoveDescendant `json:"descendant"`
+				} `json:"data"`
+			} `json:"error"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &envelope))
+		assert.Equal(t, "issue_move_descendant_archived", envelope.Error.Code)
+		assert.Contains(t, envelope.Error.Message, "archived#"+child.ShortID)
+		assert.Equal(t, db.IssueMoveDescendant{UID: child.UID, ShortID: child.ShortID, ProjectUID: archived.UID, ProjectName: archived.Name}, envelope.Error.Data.Descendant)
 	}
 }

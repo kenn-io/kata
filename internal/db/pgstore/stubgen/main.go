@@ -276,6 +276,9 @@ var alreadyImplemented = map[string]bool{
 	"Path":                                 true, // store.go
 	"LookupIdempotency":                    true, // idempotency.go
 	"LookupIssueMutationIdempotency":       true, // idempotency.go
+
+	"LookupIssueMutationIdempotencyByIssue": true, // idempotency.go
+
 	"LookupCommentIdempotency":             true, // idempotency.go
 	"MaxEventID":                           true, // events.go
 	"MaxFederationBaselineEventID":         true, // events.go

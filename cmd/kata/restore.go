@@ -48,20 +48,29 @@ func newRestoreCmd() *cobra.Command {
 				return err
 			}
 			bs := response.Body
+			if currentOutputMode() == outputJSON {
+				return printMutationWithApplied(cmd, bs, nil, issue.ProjectName)
+			}
+			displayRef, err := mutationIssueRefForOutput(cmd, bs, issue.ProjectName)
+			if err != nil {
+				return err
+			}
 			if currentOutputMode() == outputAgent {
 				var m agentIssueMutation
 				if err := json.Unmarshal(bs, &m); err != nil {
 					return err
 				}
+				m.Issue.ShortID = displayRef
 				return printAgentMutationDecoded(cmd.OutOrStdout(), "restore", m, true, func(w io.Writer, _ agentIssueMutation) error {
 					return writeAgentField(w, "Deleted", "false")
 				})
 			}
 			if !flags.Quiet && currentOutputMode() == outputHuman {
-				_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s restored\n", issue.RefForAPI)
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s restored\n", displayRef)
 				return err
 			}
-			return printMutation(cmd, bs)
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), displayRef)
+			return err
 		},
 	}
 }
