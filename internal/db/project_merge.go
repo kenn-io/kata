@@ -142,6 +142,11 @@ func PrepareProjectMergeRecords(
 		if _, ok := rec.(*MetaKV); ok {
 			continue
 		}
+		// Callbacks must not follow partial data: subscriptions and the key
+		// check that guards them travel only in full restore and cutover.
+		if _, ok := rec.(*MCPEventSubscriptionExport); ok {
+			continue
+		}
 		cloned := cloneImportRecord(rec)
 		var err error
 		switch payload := cloned.(type) {

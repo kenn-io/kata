@@ -14,8 +14,8 @@ does not include the browser application assets.
 
 The host application remains responsible for the listener, TLS, signal
 handling, and HTTP server shutdown. A `kata.Service` owns its storage handle and
-the federation, GitHub sync, timed-claim, due-notification, and
-assignment-expiry background workers associated with that handle.
+the federation, GitHub sync, timed-claim, due-notification, assignment-expiry,
+and optional MCP Events background workers associated with that handle.
 
 ## Browser host boundary
 
@@ -110,14 +110,14 @@ func main() {
 ```
 
 `Run` does not open a listener. It blocks while federation, scheduled GitHub
-sync, timed-claim, due-notification, and assignment-expiry workers are active,
-then returns when its context is canceled or `Close` begins, and it may return
-an error from any background worker. Treat any `Run` return as service
-termination: stop accepting HTTP traffic, cancel the shared context, and
-inspect the error after both the workers and server stop. Only one `Run` call
-may be active for a service. `Close` cancels
-active work and requests, waits for them to stop, and closes the owned storage
-handle. It is safe to call more than once.
+sync, timed-claim, due-notification, assignment-expiry, and (when enabled) MCP
+Events delivery workers are active, then returns when its context is canceled
+or `Close` begins, and it may return an error from any background worker. Treat
+any `Run` return as service termination: stop accepting HTTP traffic, cancel
+the shared context, and inspect the error after both the workers and server
+stop. Only one `Run` call may be active for a service. `Close` cancels active
+work and requests, waits for them to stop, and closes the owned storage handle.
+It is safe to call more than once.
 
 ## Authentication is explicit
 
@@ -302,7 +302,7 @@ function without exposing Kata's internal storage packages.
 
 When `Config.Access` is set, also configure `WorkerTransactionFence`. Kata
 applies it to every writable transaction started by the federation, GitHub
-sync, timed-claim, due-notification, and assignment-expiry workers. A rejection
+sync, timed-claim, due-notification, assignment-expiry, and MCP Events workers. A rejection
 rolls the transaction back and finishes host recording before canceling all
 service workers. `Run` returns the rejection with any rollback or recording
 failure; it cannot be reduced to a logged retry while stale authority remains
@@ -658,6 +658,48 @@ URL matching uses Kata's canonical HTTP base rules: normalize host case and
 the default HTTPS port, remove trailing slashes, and preserve the mount path.
 A different host, nondefault port, or mount is rejected. A successful `Exchange`
 returns the canonical base.
+
+## MCP Events
+
+MCP Events is off in an embedded `Service`. Set `Config.MCPEvents` to run it:
+
+```go
+service, err := kata.New(ctx, kata.Config{
+	DSN:  os.Getenv("EXAMPLE_KATA_DSN"),
+	Auth: kata.AuthConfig{Token: os.Getenv("EXAMPLE_KATA_TOKEN")},
+	MCPEvents: kata.MCPEventsConfig{
+		Enabled: true,
+		Key:     exampleEventsKey{}, // implements kata.MCPEventsKeyProvider
+	},
+})
+```
+
+`Key` supplies the 32-byte key that seals webhook secrets and authenticates
+cursors. `Load` returns `kata.ErrMCPEventsKeyMissing` when no key exists and
+never creates one. `Create` returns the existing key or publishes a new one, and
+concurrent callers must converge on one key. Every service that shares a
+database must return identical key material. Persist the key outside the
+database, and restore it with any restored backup.
+
+`Enabled` with a nil `Key` disables Events with the status reason
+`events_not_configured`. A missing or unusable key also disables only Events.
+Run, the HTTP handler, and every other worker keep working. The status route,
+`GET /api/v1/mcp-events/subscriptions`, reports the reason.
+
+`MaxTTL` caps finite subscription lifetimes, like `[mcp_events].max_ttl`. Zero
+selects the 30-day default; any other value below 60 seconds fails
+construction. Requests without a lifetime get 24 hours within that cap.
+`ttlMs: null` requests no expiry; set `RefuseNoExpiry` to give those requests a
+`MaxTTL` grant instead, like `allow_no_expiry = false`. See
+[MCP Events configuration](../reference/configuration.md#mcp-events) for the
+operator settings.
+
+A subscription's owner for a host-authenticated caller is the exact bytes of
+`Principal.Subject`. Delivery asks the host `AccessController` again with the
+persisted subject and actor, and a missing controller fails closed without
+ending the subscription. Delivery runs under the same worker transaction fence
+as the other `Run` workers. See [MCP Events](../operations/mcp-events.md) for
+the operator contract.
 
 ## Storage and PostgreSQL policy
 

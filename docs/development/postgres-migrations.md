@@ -196,3 +196,27 @@ normal JSONL cutover with backup and swap protections.
 Start the matching schema 34 binary after migration. Older binaries cannot open
 schema 34. Rollback requires the pre-upgrade backup and matching older binary;
 there is no down migration.
+
+## Schema 35: MCP Events subscriptions
+
+The 34→35 migration adds the `mcp_event_subscriptions` table, with a text
+primary key `id`, and three indexes: `idx_mcp_event_subscriptions_due` on
+`(state, next_attempt_at)`, `idx_mcp_event_subscriptions_principal_callback`
+on `(principal_key, callback_url)`, and `idx_mcp_event_subscriptions_ended` on
+`(state, ended_at)`. The table holds one row per daemon-owned MCP Events
+subscription, including callback delivery and retry state. It has no CHECK
+constraints; Go validates rows before they are stored or imported. An upgraded
+database starts with the table empty.
+
+Stop serving daemons and imports, back up the database, and run
+`kata storage postgres migrate` with schema-owner credentials. The migration
+creates a new table and indexes without scanning existing data. Reapply the
+runtime role grants in [PostgreSQL operations](../operations/postgres.md) so
+the runtime role can read and write the new table. Validation-only credentials
+cannot migrate. Versions 25–34 follow the existing immutable migration chain
+before applying schema 35. SQLite upgrades through its normal JSONL cutover
+with backup and swap protections.
+
+Start the matching schema 35 binary after migration. Older binaries cannot open
+schema 35. Rollback requires the pre-upgrade backup and matching older binary;
+there is no down migration.

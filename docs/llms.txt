@@ -34,6 +34,8 @@ for machine readers.
   and flag
 - [MCP reference](https://katatracker.com/docs/reference/mcp.md): stdio and
   Streamable HTTP transports, tool loading
+- [MCP Events webhooks](https://katatracker.com/docs/operations/mcp-events.md):
+  daemon-owned signed inbox wakes, subscriptions, keys, replay and recovery
 - [Agent output format](https://katatracker.com/docs/reference/agent-output.md):
   the `--agent` output contract
 - [Go client](https://katatracker.com/docs/reference/go-client.md): typed Go

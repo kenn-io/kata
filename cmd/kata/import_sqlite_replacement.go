@@ -54,6 +54,7 @@ func installPreparedSQLiteImport(ctx context.Context, preparedPath, target strin
 	if err := jsonl.ImportWithOptions(ctx, &snapshot, replacement, jsonl.ImportOptions{
 		PreserveIssueSyncBindingEnabled:     true,
 		PreserveExternalRootBindingsEnabled: true,
+		PreserveMCPEventBaselines:           true,
 	}); err != nil {
 		return err
 	}

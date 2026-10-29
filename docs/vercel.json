@@ -306,6 +306,16 @@
       "permanent": true
     },
     {
+      "source": "/operations/mcp-events/",
+      "destination": "/docs/operations/mcp-events/",
+      "permanent": true
+    },
+    {
+      "source": "/operations/mcp-events.md",
+      "destination": "/docs/operations/mcp-events.md",
+      "permanent": true
+    },
+    {
       "source": "/operations/agent-orchestration/",
       "destination": "/docs/operations/agent-orchestration/",
       "permanent": true

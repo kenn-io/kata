@@ -217,6 +217,16 @@ Shared cron definitions and independent run observations are portable backup
 data. A run with `running` or `unknown` status does not prevent an explicitly
 requested replacement.
 
+Full backups also carry MCP Events subscriptions and the `mcp_events_key_check`
+metadata row that proves which Events key sealed them. The key file
+`mcp-events.key` is never in a backup, like the root signing key. Restore it
+into `<KATA_HOME>/runtime/<storage-id>/` before you start the restored daemon.
+The Events service accepts subscriptions and delivers only with a key that
+matches the check. Project exports, `--merge`, and `--as-standalone` copies omit
+both the subscriptions and the key check, so callbacks never follow partial
+data and a partial import never changes the destination's key check. A full
+restore replaces both.
+
 For Postgres, pass a DSN as the target:
 
 ```sh

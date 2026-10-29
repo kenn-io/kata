@@ -30,6 +30,7 @@ import (
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/issuesync"
 	"go.kenn.io/kata/internal/linearsync"
+	"go.kenn.io/kata/internal/mcpevents"
 	"go.kenn.io/kata/internal/notionsync"
 	"go.kenn.io/kata/internal/planesync"
 	"go.kenn.io/kata/internal/tickticksync"
@@ -132,6 +133,53 @@ type GitHubAppConfig struct {
 // DocbankConfig selects the vault used by issue attachments.
 type DocbankConfig = config.DocbankConfig
 
+// ErrMCPEventsKeyMissing is what MCPEventsKeyProvider.Load returns when no
+// key exists yet. Any other error means the key exists but cannot be used, and
+// Kata then leaves MCP Events disabled rather than replacing it.
+var ErrMCPEventsKeyMissing = errors.New("kata: MCP Events key is missing")
+
+// MCPEventsKeyProvider supplies the 32-byte key that seals MCP Events webhook
+// secrets and authenticates cursors. Every Service that shares one database
+// must return identical key material.
+type MCPEventsKeyProvider interface {
+	// Load returns the key, or ErrMCPEventsKeyMissing when none exists. It
+	// never creates a key.
+	Load(ctx context.Context) ([]byte, error)
+	// Create returns the existing key, or publishes a new one if none exists.
+	// Concurrent callers must converge on one key.
+	Create(ctx context.Context) ([]byte, error)
+}
+
+// MCPEventsConfig enables daemon-owned MCP Events delivery in the Service.
+type MCPEventsConfig struct {
+	// Enabled starts Events delivery in Run and serves the /api/v1/mcp-events
+	// routes. Events is off by default.
+	Enabled bool
+	// Key supplies the Events key. Enabled with a nil Key leaves Events
+	// disabled with a status reason; every other worker still runs.
+	Key MCPEventsKeyProvider
+	// MaxTTL caps finite subscription grants. Zero selects 30 days; any other
+	// value below 60 seconds is rejected.
+	MaxTTL time.Duration
+	// RefuseNoExpiry gives a subscriber's no-expiry request a MaxTTL grant
+	// instead of one that never expires.
+	RefuseNoExpiry bool
+}
+
+type mcpEventsKeyAdapter struct{ provider MCPEventsKeyProvider }
+
+func (a mcpEventsKeyAdapter) Load(ctx context.Context) ([]byte, error) {
+	key, err := a.provider.Load(ctx)
+	if errors.Is(err, ErrMCPEventsKeyMissing) {
+		return nil, mcpevents.ErrKeyMissing
+	}
+	return key, err
+}
+
+func (a mcpEventsKeyAdapter) Create(ctx context.Context) ([]byte, error) {
+	return a.provider.Create(ctx)
+}
+
 // Config contains the process-neutral inputs needed to construct a Service.
 type Config struct {
 	// DSN accepts a SQLite path, sqlite:// URL, or PostgreSQL URL.
@@ -170,8 +218,10 @@ type Config struct {
 	// FederationCredentials isolates secret material from other Service
 	// instances. Nil selects a service-owned in-memory store.
 	FederationCredentials FederationCredentialStore
-	StartedAt             time.Time
-	Logger                *slog.Logger
+	// MCPEvents optionally runs daemon-owned MCP Events delivery.
+	MCPEvents MCPEventsConfig
+	StartedAt time.Time
+	Logger    *slog.Logger
 }
 
 type serviceDeps struct {
@@ -189,6 +239,8 @@ type serviceDeps struct {
 	todoistSyncFetcherFactory  func(config.TodoistSyncConfig) todoistsync.Fetcher
 	tickTickSyncFetcher        tickticksync.Fetcher
 	tickTickSyncFetcherFactory func(config.TickTickSyncConfig) tickticksync.Fetcher
+	// mcpEventsWebhook replaces the production webhook client in tests.
+	mcpEventsWebhook *mcpevents.WebhookClient
 }
 
 // Service is a mountable Kata HTTP application and its owned lifecycle.
@@ -224,6 +276,7 @@ type Service struct {
 	defaultTimezone        string
 	hostAccessEnabled      bool
 	workerTransactionFence TransactionFence
+	mcpEvents              *mcpevents.Service
 	lifetimeCtx            context.Context
 	lifetimeCancel         context.CancelFunc
 	handlerWG              sync.WaitGroup
@@ -268,6 +321,9 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	docbankConfig, err := config.NormalizeDocbankConfig(cfg.Docbank)
 	if err != nil {
 		return nil, fmt.Errorf("kata: Docbank config: %w", err)
+	}
+	if maxTTL := cfg.MCPEvents.MaxTTL; maxTTL != 0 && maxTTL < config.MinMCPEventsMaxTTL {
+		return nil, fmt.Errorf("kata: MCPEvents.MaxTTL must be zero or at least %s: %s", config.MinMCPEventsMaxTTL, maxTTL)
 	}
 	var docbankClient *docbank.Client
 	if docbankConfig.Enabled() {
@@ -447,7 +503,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 			controller: cfg.FederationAccess,
 		}
 	}
-	server := daemon.NewServer(daemon.ServerConfig{
+	serverConfig := daemon.ServerConfig{
 		DB:                        store,
 		Docbank:                   docbankClient,
 		DocbankFolder:             docbankConfig.Folder,
@@ -493,7 +549,13 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		HostFederationAccess:      hostFederationAccess,
 		EmbeddingProfile:          daemon.EmbeddingProfile(cfg.Profile),
 		Logger:                    logger,
-	})
+	}
+	mcpEventsService := newMCPEventsService(cfg.MCPEvents, serverConfig, broadcaster, deps.mcpEventsWebhook, logger)
+	serverConfig.MCPEvents = mcpEventsService
+	if cfg.MCPEvents.Enabled && mcpEventsService == nil {
+		serverConfig.MCPEventsDisabledReason = mcpevents.ReasonStartFailed
+	}
+	server := daemon.NewServer(serverConfig)
 
 	return &Service{
 		store:                  store,
@@ -527,10 +589,49 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		defaultTimezone:        cfg.DefaultTimezone,
 		hostAccessEnabled:      cfg.Access != nil,
 		workerTransactionFence: cfg.WorkerTransactionFence,
+		mcpEvents:              mcpEventsService,
 		lifetimeCtx:            lifetimeCtx,
 		lifetimeCancel:         lifetimeCancel,
 		closeDone:              make(chan struct{}),
 	}, nil
+}
+
+// newMCPEventsService builds the embedded Events service. Events failures
+// never fail construction: a missing key provider, a missing, corrupt or
+// mismatched key all leave the service disabled with a status reason, and
+// only a service that could not be built at all is nil.
+func newMCPEventsService(
+	cfg MCPEventsConfig,
+	server daemon.ServerConfig,
+	broadcaster *daemon.EventBroadcaster,
+	webhook *mcpevents.WebhookClient,
+	logger *slog.Logger,
+) *mcpevents.Service {
+	if !cfg.Enabled {
+		return nil
+	}
+	var keys mcpevents.KeyProvider
+	if cfg.Key != nil {
+		keys = mcpEventsKeyAdapter{provider: cfg.Key}
+	}
+	service, err := mcpevents.NewService(mcpevents.ServiceConfig{
+		Store:          server.DB,
+		Keys:           keys,
+		Authority:      daemon.NewMCPEventsAuthority(server),
+		Webhook:        webhook,
+		MaxTTL:         cfg.MaxTTL,
+		RefuseNoExpiry: cfg.RefuseNoExpiry,
+		Broadcaster:    daemon.NewMCPEventsSubscriber(broadcaster),
+		InstanceUID:    server.DB.InstanceUID(),
+	})
+	if err != nil {
+		logger.Error("kata MCP Events disabled", "err", err)
+		return nil
+	}
+	if availability := service.Availability(); !availability.Enabled {
+		logger.Warn("kata MCP Events disabled", "reason", availability.Reason)
+	}
+	return service
 }
 
 func resolveGitHubSyncConfig(cfg GitHubSyncConfig) (config.GitHubSyncConfig, error) {
@@ -712,7 +813,13 @@ func (a hostAccessControllerAdapter) Authorize(
 	}
 	var revalidate func(context.Context) error
 	if decision.Lease != nil {
-		revalidate = decision.Lease.Revalidate
+		revalidate = func(ctx context.Context) error {
+			err := decision.Lease.Revalidate(ctx)
+			if errors.Is(err, ErrAccessDenied) {
+				return errors.Join(daemon.ErrHostAccessDenied, err)
+			}
+			return err
+		}
 	}
 	var transactionFence db.TransactionFence
 	if decision.TransactionFence != nil {
@@ -730,7 +837,8 @@ func (a hostAccessControllerAdapter) Authorize(
 }
 
 // Run executes Kata's federation, GitHub, Notion, Plane, and Linear synchronization, timed-claim,
-// due-notification, and assignment-expiry workers until ctx is canceled or
+// due-notification, and assignment-expiry workers, and MCP Events delivery
+// when Config.MCPEvents can deliver, until ctx is canceled or
 // Close is called. Run does not start a listener and may be called only once
 // at a time.
 func (s *Service) Run(ctx context.Context) error {
@@ -918,6 +1026,11 @@ func (s *Service) Run(ctx context.Context) error {
 		{name: "timed-claim", run: sweeper.Run},
 		{name: "due-notification", run: dueNotificationSweeper.Run},
 		{name: "assignment-expiry", run: assignmentSweeper.Run},
+	}
+	// A disabled Events service has nothing to run, and a worker that returns
+	// early would end Run, so it joins the list only when it can deliver.
+	if s.mcpEvents != nil && s.mcpEvents.Availability().Enabled {
+		workers = append(workers, namedWorker{name: "mcp-events", run: s.mcpEvents.Run})
 	}
 	workerErrs := make(chan error, len(workers))
 	for _, worker := range workers {

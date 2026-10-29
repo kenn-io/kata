@@ -124,6 +124,12 @@ func accessibleProjectUIDs(ctx context.Context, store db.Storage, actor string) 
 // two reads surfaces on the next refresh instead of hiding behind the newer
 // revision.
 func (d *ProjectAccessDecision) refresh(ctx context.Context) (gained []string, kept, changed bool, err error) {
+	return d.refreshProjects(ctx, true)
+}
+
+// refreshProjects can adopt a narrowed catalog for durable subscriptions, whose
+// stored selection is resolved separately instead of admitting every project.
+func (d *ProjectAccessDecision) refreshProjects(ctx context.Context, rejectLoss bool) (gained []string, kept, changed bool, err error) {
 	if d.owner {
 		return nil, true, false, nil
 	}
@@ -138,18 +144,20 @@ func (d *ProjectAccessDecision) refresh(ctx context.Context) (gained []string, k
 	if err != nil {
 		return nil, false, true, err
 	}
-	for _, projectUID := range d.ProjectUIDs {
-		if slices.Contains(accessible, projectUID) {
-			continue
+	if rejectLoss {
+		for _, projectUID := range d.ProjectUIDs {
+			if slices.Contains(accessible, projectUID) {
+				continue
+			}
+			// A project this request merged or purged away is gone for everyone;
+			// only an existing project the caller can no longer see is a loss.
+			if _, err := d.store.ProjectByUID(ctx, projectUID); errors.Is(err, db.ErrNotFound) {
+				continue
+			} else if err != nil {
+				return nil, false, true, fmt.Errorf("resolving admitted project %s: %w", projectUID, err)
+			}
+			return nil, false, true, nil
 		}
-		// A project this request merged or purged away is gone for everyone;
-		// only an existing project the caller can no longer see is a loss.
-		if _, err := d.store.ProjectByUID(ctx, projectUID); errors.Is(err, db.ErrNotFound) {
-			continue
-		} else if err != nil {
-			return nil, false, true, fmt.Errorf("resolving admitted project %s: %w", projectUID, err)
-		}
-		return nil, false, true, nil
 	}
 	for _, projectUID := range accessible {
 		if !slices.Contains(d.ProjectUIDs, projectUID) {

@@ -50,6 +50,11 @@ type ImportOptions struct {
 	// PreserveExternalRootBindingsEnabled is for trusted local schema cutover.
 	// Normal restores pause active bindings until an operator reconfirms them.
 	PreserveExternalRootBindingsEnabled bool
+
+	// PreserveMCPEventBaselines is for trusted local schema cutover. Normal
+	// restores clear subscription visibility baselines, so each subscriber
+	// gets a gap: a restored inbox can differ from what it last saw.
+	PreserveMCPEventBaselines bool
 }
 
 // Import reads JSONL records from r and inserts them into store.
@@ -113,10 +118,12 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 				*db.FederationQuarantineExport, *db.FederationEnrollmentExport,
 				*db.IssueClaimExport, *db.PendingClaimRequestExport,
 				*db.RootKeyPin, *db.AttributionReceipt, *db.EntityProvenance,
-				*db.RelayOutboxExport, *db.RelayInboxExport, *db.RelayCursorExport:
+				*db.RelayOutboxExport, *db.RelayInboxExport, *db.RelayCursorExport,
+				*db.MCPEventSubscriptionExport:
 				continue
 			case *db.MetaKV:
-				if strings.HasPrefix(record.Key, db.RootKeyTransitionMetadataPrefix) ||
+				if record.Key == db.MetaKeyMCPEventsKeyCheck ||
+					strings.HasPrefix(record.Key, db.RootKeyTransitionMetadataPrefix) ||
 					strings.HasPrefix(record.Key, db.RelayResetMetadataPrefix) ||
 					strings.HasPrefix(record.Key, db.RelayResetSupersededMetadataPrefix) ||
 					strings.HasPrefix(record.Key, db.AttributionUIResetMetadataPrefix) ||
@@ -140,6 +147,7 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 		RecomputeEventContentHash:           exportVersion < eventReplayFieldsSchemaVersion,
 		PreserveIssueSyncBindingEnabled:     opts.PreserveIssueSyncBindingEnabled,
 		PreserveExternalRootBindingsEnabled: opts.PreserveExternalRootBindingsEnabled,
+		PreserveMCPEventBaselines:           opts.PreserveMCPEventBaselines,
 		MergeProject:                        opts.MergeProject,
 	})
 }
@@ -508,6 +516,12 @@ func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, pr
 		return &rec, nil
 	case KindCronWorkflow:
 		var rec db.CronWorkflowExport
+		if err := json.Unmarshal(env.Data, &rec, json.RejectUnknownMembers(true)); err != nil {
+			return nil, err
+		}
+		return &rec, nil
+	case KindMCPEventSubscription:
+		var rec db.MCPEventSubscriptionExport
 		if err := json.Unmarshal(env.Data, &rec, json.RejectUnknownMembers(true)); err != nil {
 			return nil, err
 		}

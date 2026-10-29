@@ -936,6 +936,50 @@ typed evidence required by the normal close contract. The TUI discovers that
 requirement from `/instance`; it does not trust its own `source=tui` marker to
 widen authority. Structural guards still apply to every transport.
 
+## MCP Events
+
+`[mcp_events]` turns on daemon-owned MCP Events. The daemon then stores
+webhook subscriptions and delivers signed inbox events to them while the
+daemon runs. `kata mcp serve` only forwards requests to it.
+
+```toml
+[mcp_events]
+enabled = false
+max_ttl = "720h"
+allow_no_expiry = true
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `false` | Starts Events delivery and accepts subscriptions. |
+| `max_ttl` | `"720h"` (30 days) | Longest lifetime of a finite subscription grant. Go duration syntax; at least `"60s"`. |
+| `allow_no_expiry` | `true` | Honors requests for a subscription that never expires. Set `false` to give those requests a `max_ttl` grant instead. |
+
+Subscribers choose their own lifetime. A request without one gets 24 hours
+capped by `max_ttl`, and a finite request is clamped to between 60 seconds and
+`max_ttl`. A request for no expiry is honored unless `allow_no_expiry = false`.
+Subscriptions created before you change the setting keep their lifetime until
+the subscriber next refreshes.
+
+The daemon seals subscription secrets and signs cursors with a 32-byte key in
+`<KATA_HOME>/runtime/<storage-id>/mcp-events.key`. It creates the file, readable
+only by its owner, the first time Events starts against a database that has no
+Events data. Daemons that share one PostgreSQL database must use the same key
+file.
+
+Events failures never stop the daemon. If the key file is missing, unreadable
+or different from the one the database was written under, Events stays
+disabled, the daemon logs why, and every other daemon function keeps working.
+The daemon never replaces a key that is missing or corrupt. The status route,
+`GET /api/v1/mcp-events/subscriptions`, reports `enabled: false` and a
+`reason`: `events_not_configured`, `events_key_unavailable`,
+`events_key_mismatch` or `events_start_failed`.
+
+Programs that embed the Go `Service` set `Config.MCPEvents.Enabled` and
+supply `Config.MCPEvents.Key` instead. `Config.MCPEvents.MaxTTL` and
+`Config.MCPEvents.RefuseNoExpiry` match `max_ttl` and `allow_no_expiry = false`. Without a key provider, Events is
+disabled with `events_not_configured` and the other workers still run.
+
 ## Semantic search
 
 This section is the field reference; see the

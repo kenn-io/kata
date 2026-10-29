@@ -277,6 +277,11 @@ func validateImportRecord(record ImportRecord) error {
 	switch rec := record.(type) {
 	case *CronJobExport, *CronWorkflowExport, *CronRunExport:
 		return ValidateCronRecord(record)
+	case *MCPEventSubscriptionExport:
+		if rec == nil {
+			return errors.New("nil mcp event subscription")
+		}
+		return ValidateMCPEventSubscription(rec.Subscription())
 	case nil:
 		return errors.New("nil record")
 	case *EmbeddingArtifactExport:

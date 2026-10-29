@@ -70,6 +70,26 @@ All notable changes to kata, grouped by release. Versioned releases start with
   events, such as an assignment, were kept. Before, the device couldn't apply
   the assignment, and sync stalled.
 
+- Get a signed webhook when an assistant's inbox changes. Turn on MCP Events
+  with `[mcp_events] enabled = true`. Assistants connected through
+  `kata mcp serve` can then subscribe to `kata.inbox.changed` for one
+  recipient. The daemon stores subscriptions in its database, so they survive
+  daemon and `kata mcp serve` restarts, and any number of `kata mcp serve`
+  processes can forward to one daemon. Set `allow_no_expiry = false` to give
+  requests for a permanent subscription a `max_ttl` grant instead. Upgrading
+  moves the database to schema 35. The daemon creates `mcp-events.key` on first
+  start. Daemons that share one PostgreSQL database must use the same key file,
+  and a restore needs the key as well as the backup. See
+  [MCP Events](operations/mcp-events.md). Thanks to
+  [Rusty Shackleford](https://github.com/salmonumbrella).
+- `kata.inbox` now reads in pages. Follow `next_cursor` until it is absent, even
+  through empty pages. Each request includes `issue_uid` and `project_uid`, so
+  webhook receivers can match it to an event. `truncated` now means more pages
+  remain.
+- Manage recurring cron jobs, workflows and run evidence from MCP with
+  `kata.load_cron`. Recording a run does not start work or change who owns an
+  issue. See [Cron](reference/cron.md).
+
 ## 0.20.0
 <small>2026-10-23</small>
 

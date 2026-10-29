@@ -343,6 +343,8 @@ jobs:
           ./internal/db/pgstore \
           ./internal/db/storeopen \
           ./internal/daemon \
+          ./internal/mcp \
+          ./internal/mcpevents \
           ./internal/jsonl \
           ./internal/vector
           # cmd/kata PostgreSQL tests carry Postgres in their name.

@@ -145,19 +145,28 @@ func newMCPServeCmd() *cobra.Command {
 			}
 			observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved)
 			defer stopReporting()
-			server, err := mcpserver.New(mcpserver.Options{
-				Client:            apiClient,
-				ObserveToolCall:   observe,
-				LongRunningClient: longRunningAPIClient,
-				Scope:             scope,
-				ProjectID:         projectID,
-				ProjectName:       projectName,
-				Actor:             actor,
-				Teammate:          handle,
-				Version:           version.Version,
-				StorageAdmin:      storage,
-				EnableTokenAdmin:  enableTokenAdmin,
-			})
+			// Events forwards to the daemon, which owns every subscription, and is
+			// served only on stdio and the 2026-07-28 HTTP path. The legacy-session
+			// server never registers or advertises it.
+			admission := mcpserver.NewToolAdmission()
+			newServer := func(events bool) (*sdkmcp.Server, error) {
+				return mcpserver.New(mcpserver.Options{
+					Events:            events,
+					Admission:         admission,
+					Client:            apiClient,
+					ObserveToolCall:   observe,
+					LongRunningClient: longRunningAPIClient,
+					Scope:             scope,
+					ProjectID:         projectID,
+					ProjectName:       projectName,
+					Actor:             actor,
+					Teammate:          handle,
+					Version:           version.Version,
+					StorageAdmin:      storage,
+					EnableTokenAdmin:  enableTokenAdmin,
+				})
+			}
+			server, err := newServer(true)
 			if err != nil {
 				return err
 			}
@@ -170,7 +179,11 @@ func newMCPServeCmd() *cobra.Command {
 				if resolved.Network == "unix" {
 					backendURL = "unix://" + resolved.UnixSocket
 				}
-				return serveMCPHTTP(ctx, command.ErrOrStderr(), httpAddress, httpToken, server, filepath.Join(home, "mcp"), backendURL)
+				legacyServer, err := newServer(false)
+				if err != nil {
+					return err
+				}
+				return serveMCPHTTP(ctx, command.ErrOrStderr(), httpAddress, httpToken, legacyServer, server, filepath.Join(home, "mcp"), backendURL)
 			}
 			transport := mcpserver.NewStdioTransport(
 				asReadCloser(command.InOrStdin()),

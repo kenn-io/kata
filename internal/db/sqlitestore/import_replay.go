@@ -100,6 +100,11 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 				return fmt.Errorf("clear replacement metadata: %w", err)
 			}
 		}
+		// The key check travels with the subscription rows. A full restore
+		// replaces both, so the target's value must not outlive its rows.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=?`, db.MetaKeyMCPEventsKeyCheck); err != nil {
+			return fmt.Errorf("clear import target %s: %w", db.MetaKeyMCPEventsKeyCheck, err)
+		}
 		// meta survives the clear; drop the target's creation time so a source
 		// UID never inherits it.
 		if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=?`, db.MetaKeyInstanceCreatedAt); err != nil {
@@ -446,6 +451,11 @@ func importRecord(ctx context.Context, tx *sql.Tx, r db.ImportRecord, opts db.Im
 	switch rec := r.(type) {
 	case *db.CronJobExport, *db.CronWorkflowExport, *db.CronRunExport:
 		return linkSkipNone, db.ReplayCronRecord(ctx, tx, rec, false)
+	case *db.MCPEventSubscriptionExport:
+		if opts.MergeProject {
+			return linkSkipNone, fmt.Errorf("%s records cannot be merged into a project", db.ImportKindMCPEventSubscription)
+		}
+		return linkSkipNone, wrapImportErr(db.ImportKindMCPEventSubscription, db.ReplayMCPEventSubscription(ctx, tx, rec, opts.PreserveMCPEventBaselines))
 	case *db.MetaKV:
 		return linkSkipNone, importMeta(ctx, tx, rec, opts)
 	case *db.EmbeddingArtifactExport:
