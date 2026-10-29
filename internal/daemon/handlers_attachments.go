@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
@@ -98,13 +99,26 @@ func binaryContent(mediaType string) map[string]*huma.MediaType {
 // recheckAttachmentWrite repeats the active-project and claim gates after the
 // Docbank transfer, which can outlast an archive or a lost claim.
 func recheckAttachmentWrite(ctx context.Context, cfg ServerConfig, projectID int64, iss db.Issue, actor string) error {
+	if err := revalidateBrowserSession(ctx); err != nil {
+		return api.NewError(http.StatusUnauthorized, "unauthorized", "authentication required", "", nil)
+	}
 	if _, err := activeProjectByID(ctx, cfg.DB, projectID); err != nil {
 		return err
 	}
 	return requireFederatedIssueClaim(ctx, cfg, projectID, iss, actor)
 }
 
+// Scoped credentials already carry their own transaction fence.
+func attachmentWriteContext(ctx context.Context, requested string) (context.Context, string, error) {
+	if principal, ok := PrincipalFromContext(ctx); ok && principal.Kind == PrincipalDBToken && principal.Scope == nil {
+		return actorWriteContext(ctx, requested)
+	}
+	actor, err := attributedActor(ctx, requested)
+	return ctx, actor, err
+}
+
 func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
+	registerAttachmentLinkHandler(h, cfg)
 	rawBody := func(ctx huma.Context, next func(huma.Context)) {
 		r, w := humago.Unwrap(ctx)
 		// Match huma's unlimited body-read timeout for a streaming upload.
@@ -115,7 +129,7 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		if cfg.Docbank == nil {
 			return nil, attachmentError(503, "docbank_not_configured")
 		}
-		actor, err := attributedActor(ctx, in.Actor)
+		ctx, actor, err := attachmentWriteContext(ctx, in.Actor)
 		if err != nil {
 			return nil, err
 		}
@@ -149,6 +163,9 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		if _, err = file.Seek(0, io.SeekStart); err != nil {
 			return nil, internalAPIError(err)
 		}
+		if err := revalidateBrowserSession(ctx); err != nil {
+			return nil, api.NewError(http.StatusUnauthorized, "unauthorized", "authentication required", "", nil)
+		}
 		parent, err := cfg.Docbank.EnsureFolder(ctx, path.Join(cfg.DocbankFolder, iss.ProjectUID))
 		if err != nil {
 			return nil, docbankError(err, docbankUploadErrors)
@@ -169,9 +186,18 @@ func registerAttachmentHandlers(h huma.API, cfg ServerConfig) {
 		if err := recheckAttachmentWrite(ctx, cfg, in.ProjectID, iss, actor); err != nil {
 			return nil, err
 		}
-		res, err := cfg.DB.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: iss.ID, Actor: actor, Patch: map[string]jsontext.Value{metadata.AttachmentPrefix + id: raw}})
+		ctx = db.WithMetadataPatchHook(ctx, func(_ context.Context, _ *sql.Tx, current db.Issue) (map[string]jsontext.Value, error) {
+			if current.ProjectID != in.ProjectID {
+				return nil, db.ErrIssueProjectChanged
+			}
+			return map[string]jsontext.Value{metadata.AttachmentPrefix + id: raw}, nil
+		})
+		res, err := cfg.DB.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: iss.ID, Actor: actor})
 		if errors.Is(err, db.ErrFederatedReadOnly) {
 			return nil, federationReadOnlyError(err)
+		}
+		if errors.Is(err, db.ErrIssueProjectChanged) {
+			return nil, attachmentError(409, "issue_project_changed")
 		}
 		if err != nil {
 			return nil, internalAPIError(err)

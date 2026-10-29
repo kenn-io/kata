@@ -480,6 +480,15 @@ func (a AddAttachmentPath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(a))
 }
 
+type LinkAttachmentPath struct {
+	ProjectID int64  `json:"project_id"`
+	Ref       string `json:"ref" validate:"required"`
+}
+
+func (l LinkAttachmentPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(l))
+}
+
 type AttachmentContentPath struct {
 	ProjectID    int64  `json:"project_id"`
 	Ref          string `json:"ref" validate:"required"`

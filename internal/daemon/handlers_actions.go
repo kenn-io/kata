@@ -138,6 +138,9 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		now := time.Now()
 		dbEvidence := evidenceToDB(in.Body.Evidence)
+		if _, err := db.ResolveAttachmentEvidence(issue, dbEvidence); err != nil {
+			return nil, api.NewError(400, "validation", err.Error(), "", nil)
+		}
 		// Burst/prose throttles are opt-in via [close.throttle] enabled=true
 		// for operators who want stricter pacing.
 		if cfg.CloseThrottle.SiblingBurstEnabled {
@@ -229,6 +232,9 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 					}
 					return closeIdempotencyResponse(ctx, cfg, match, idempotencyFingerprint)
 				}
+			}
+			if errors.Is(err, db.ErrAttachmentEvidence) {
+				return nil, api.NewError(400, "validation", err.Error(), "", nil)
 			}
 			if revisionConflict, ok := errors.AsType[*db.RevisionConflictError](err); ok {
 				return nil, api.NewError(412, "revision_conflict",
@@ -588,14 +594,15 @@ func evidenceToDB(in []api.Evidence) []db.Evidence {
 	out := make([]db.Evidence, len(in))
 	for i, e := range in {
 		out[i] = db.Evidence{
-			Type:      string(e.Type),
-			SHA:       e.SHA,
-			URL:       e.URL,
-			Command:   e.Command,
-			Paths:     e.Paths,
-			Account:   e.Account,
-			Rationale: e.Rationale,
-			IssueRef:  e.IssueRef,
+			Type:         string(e.Type),
+			SHA:          e.SHA,
+			URL:          e.URL,
+			Command:      e.Command,
+			Paths:        e.Paths,
+			Account:      e.Account,
+			Rationale:    e.Rationale,
+			IssueRef:     e.IssueRef,
+			AttachmentID: e.AttachmentID,
 		}
 	}
 	return out

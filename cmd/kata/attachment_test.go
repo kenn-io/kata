@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
@@ -167,4 +169,32 @@ func TestAttachmentCLIDownloadSizeFailurePreservesDestination(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestAttachmentHumanOutputSanitizesID(t *testing.T) {
+	resetFlags(t)
+	var out bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&out)
+	err := printAttachmentsCLI(cmd, map[string]metadata.Attachment{"bad\x1b[2J": {Name: "file", MediaType: "text/plain", Size: 1}})
+	require.NoError(t, err)
+	require.NotContains(t, out.String(), "\x1b")
+}
+
+func TestAttachmentListUsesMetadataEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects/resolve":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"project":{"id":7,"name":"spoke-project"}}`))
+		case "/api/v1/projects/7/issues/abc4/metadata":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"issue":{"short_id":"abc4","metadata":{},"revision":4}}`))
+		default:
+			http.Error(w, "unavailable", http.StatusForbidden)
+		}
+	}))
+	t.Cleanup(server.Close)
+	_, err := executeAttachmentCLI(t, server.URL, "ls", "abc4")
+	require.NoError(t, err)
 }

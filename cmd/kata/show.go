@@ -123,6 +123,12 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOp
 	if err := json.Unmarshal(bs, &b); err != nil {
 		return err
 	}
+	if b.Issue.Status == "closed" {
+		b.CloseEvidence, err = optionalCloseEvidenceForShow(ctx, client, baseURL, pid, b.Issue.UID)
+		if err != nil {
+			return err
+		}
+	}
 	if mode == outputAgent {
 		return printShowAgent(cmd.OutOrStdout(), b, ref.ProjectName, agentOperation)
 	}
@@ -254,7 +260,7 @@ func printShowHuman(
 			}
 		}
 	}
-	return nil
+	return printShowAttachmentEvidence(out, b)
 }
 
 func writeRenderedPrefixedLines(w io.Writer, prefix string, lines []string) error {
@@ -311,7 +317,8 @@ func compactJSON(raw jsontext.Value) string {
 // response. It is shared by both the human and agent renderers; the
 // federation lease fields are zero when the issue is not federated.
 type showResponseForCLI struct {
-	Issue struct {
+	CloseEvidence []db.Evidence `json:"-"`
+	Issue         struct {
 		ShortID string `json:"short_id"`
 		UID     string `json:"uid"`
 		Title   string `json:"title"`
@@ -548,6 +555,9 @@ func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation
 				return err
 			}
 		}
+	}
+	if err := printShowAttachmentEvidence(w, b); err != nil {
+		return err
 	}
 	if err := printShowAgentLeaseLines(w, b.Lease, b.PendingLeases, b.LeaseHubNow); err != nil {
 		return err

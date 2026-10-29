@@ -50,7 +50,7 @@ func newAttachmentCmd() *cobra.Command {
 			if action == "add" {
 				return addAttachmentsCLI(ctx, cmd, hc, base, pid, ref.RefForAPI, args[1:])
 			}
-			issue, _, err := fetchMetaIssue(ctx, hc, base, pid, ref.RefForAPI)
+			issue, err := fetchIssueMetadata(ctx, hc, base, pid, ref.RefForAPI)
 			if err != nil {
 				return err
 			}
@@ -95,6 +95,7 @@ func newAttachmentCmd() *cobra.Command {
 		}
 		root.AddCommand(cmd)
 	}
+	root.AddCommand(newAttachmentLinkCmd())
 	parent := &cobra.Command{Use: "docbank", Short: "work with Docbank files"}
 	parent.AddCommand(root)
 	return parent
@@ -143,7 +144,7 @@ func printAttachmentsCLI(cmd *cobra.Command, entries map[string]metadata.Attachm
 		if currentOutputMode() == outputAgent {
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "- id=%s name=%s media_type=%s size=%d\n", agentValue(id), agentValue(e.Name), agentValue(e.MediaType), e.Size)
 		} else {
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s  %s  %d bytes  %s\n", textsafe.Line(e.Name), textsafe.Line(e.MediaType), e.Size, id)
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s  %s  %d bytes  %s\n", textsafe.Line(e.Name), textsafe.Line(e.MediaType), e.Size, textsafe.Line(id))
 		}
 		if err != nil {
 			return err

@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-10-25
+last_edited: 2026-10-26
 ---
 
 # HTTP API schema
@@ -183,8 +183,9 @@ reference or full UID within the URL project. `after_id` and `limit` page
 through that history; omitting `issue` polls the project feed. Filtered history
 never returns `reset_required`: purging another issue removes only events that
 name it, and events that name an issue the caller cannot see are omitted.
-Scoped credentials receive the same authorized history projection as issue
-detail.
+History includes events from earlier projects after a move only when the caller
+can access those projects. Scoped credentials receive the same authorized
+history projection as issue detail.
 
 Every successful filtered response includes `X-Kata-Events-Issue-UID` with the
 resolved issue UID, including empty pages. Clients should require
@@ -196,6 +197,7 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 | Version | Change |
 | --- | --- |
+| `0.34.0` | Adds `POST …/issues/{ref}/attachments/links`, which pins an existing Docbank file version without moving bytes. |
 | `0.33.0` | Publishes the issue attachment upload and content routes, and UI capabilities include `attachments` when the daemon has Docbank configured. Older daemons omit the field. |
 | `0.32.0` | Project event polling accepts an `issue` filter and acknowledges the resolved subject in `X-Kata-Events-Issue-UID`. |
 | `0.31.0` | Project federation metadata accepts optional `relay_protocol_version=1` to check existing cross-project issue links before relay enrollment. It returns `409 relay_cross_project_links` with a remedy, or sets `relay_links_checked` when the check passes. Bridge connect returns `hub_links_checked` and preserves this conflict. Older daemons ignore the parameter. |
@@ -856,7 +858,10 @@ uploads the raw request body as `application/octet-stream` to Docbank and
 returns the new `attachment_id` with its stored reference. `GET
 /api/v1/projects/{project_id}/issues/{ref}/attachments/{attachment_id}/content`
 streams the file back. Both return `docbank_not_configured` when the daemon has
-no Docbank. See [Issue attachments](../guide/attachments.md).
+no Docbank. `POST /api/v1/projects/{project_id}/issues/{ref}/attachments/links`
+takes JSON with exactly one of `node_id` or `path` and an optional `version_id`,
+and returns 200 with the new reference, or the existing one when that version
+is already attached. See [Issue attachments](../guide/attachments.md).
 
 ## Project Hygiene Endpoints
 

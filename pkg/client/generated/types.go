@@ -2269,14 +2269,15 @@ func (e EventEnvelope) Validate() error {
 }
 
 type Evidence struct {
-	Account   *string  `json:"account,omitempty"`
-	Command   *string  `json:"command,omitempty"`
-	IssueRef  *string  `json:"issue_ref,omitempty"`
-	Paths     []string `json:"paths,omitempty"`
-	Rationale *string  `json:"rationale,omitempty"`
-	Sha       *string  `json:"sha,omitempty"`
-	Type      string   `json:"type" validate:"required"`
-	URL       *string  `json:"url,omitempty"`
+	Account      *string  `json:"account,omitempty"`
+	AttachmentID *string  `json:"attachment_id,omitempty"`
+	Command      *string  `json:"command,omitempty"`
+	IssueRef     *string  `json:"issue_ref,omitempty"`
+	Paths        []string `json:"paths,omitempty"`
+	Rationale    *string  `json:"rationale,omitempty"`
+	Sha          *string  `json:"sha,omitempty"`
+	Type         string   `json:"type" validate:"required"`
+	URL          *string  `json:"url,omitempty"`
 }
 
 func (e Evidence) Validate() error {
@@ -3879,6 +3880,13 @@ func (l LeaveFederationReplicaResultBody) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type LinkAttachmentInput struct {
+	Actor     *string `json:"actor,omitempty"`
+	NodeID    *int64  `json:"node_id,omitempty"`
+	Path      *string `json:"path,omitempty"`
+	VersionID *string `json:"version_id,omitempty"`
 }
 
 type LinkChanges struct {

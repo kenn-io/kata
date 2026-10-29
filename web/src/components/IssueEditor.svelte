@@ -553,7 +553,7 @@
       onOpenComment={(uid, commentUID, returnComment) =>
         void onSelectIssue?.({ uid, commentUID, returnComment })}
     />
-    <IssueHistory {events} />
+    <IssueHistory {events} metadata={issue.issue.metadata} attachmentLinks={false} />
   {/key}
 </section>
 

@@ -929,6 +929,7 @@ kata close <ref> --done --message <text> \
   [--pr <url>] \
   [--test <command>] \
   [--reviewed <path>] \
+  [--docbank <node-id|/path>] \
   [--evidence <type:value>] \
   [--idempotency-key <key>] \
   [--if-match <revision>] \
@@ -937,6 +938,15 @@ kata close <ref> --done --message <text> \
 
 Repeat `--commit`, `--pr`, `--test`, `--reviewed`, or `--evidence` to record
 more than one item, for example a fix that landed in two pull requests.
+
+`--evidence attachment:<id-or-unique-suffix>` cites a live issue attachment
+as done evidence and freezes its descriptor in history. Repeat `--docbank`
+with a Docbank node ID or absolute path to link current file versions and cite
+them in one close. Both forms require daemon API 0.35.0. `--docbank` is
+done-only and rejects `--dry`, `--if-match` and `--idempotency-key`; link first
+for those workflows. Partial link failures leave the issue open and list the
+IDs already linked. See [document close evidence](../guide/attachments.md#cite-a-document-when-closing-work)
+for historical versions, offline closes and stable retries.
 
 `--dry` validates the close without changing the issue and reports the close
 event it would record. Releases before 0.19.0 spelled this flag `--dry-run`.
@@ -964,7 +974,7 @@ Evidence is validated against the close reason:
 
 | Reason | Evidence rule |
 | --- | --- |
-| `done` | One or more of `commit`, `pr`, `test`, `reviewed-paths`, or `external` |
+| `done` | One or more of `commit`, `pr`, `test`, `reviewed-paths`, `external`, or `attachment` |
 | `wontfix` | No evidence; any evidence item is rejected |
 | `duplicate` | Exactly one `duplicate-of` item |
 | `superseded` | Exactly one `superseded-by` item |
@@ -2264,9 +2274,16 @@ On main after 0.20.0, attach files to an issue with Docbank, then list, download
 
 ```sh
 kata docbank attachments add <issue> <file>...
+kata docbank attachments link <issue> <node-id|/path> [--version UUID]
 kata docbank attachments ls <issue>
 kata docbank attachments get <issue> <attachment> [-o PATH] [--force]
 kata docbank attachments rm <issue> <attachment>
 ```
 
 `<attachment>` accepts a full ID or a unique suffix. Uploads are limited to 256 MiB per file. `get` checks the stored byte count before publishing and requires `--force` to replace a destination. `rm` clears only that file's metadata key. All commands support the usual output modes.
+
+`link` requires daemon API 0.34.0 or newer. It pins an existing file's current
+version, or the specified version belonging to that node, without transferring
+bytes. URLs, directories and trashed files are rejected. Relinking the same
+version returns an existing attachment ID; a new current version creates a new
+reference. See [linking existing files](../guide/attachments.md#link-a-file-already-in-docbank).

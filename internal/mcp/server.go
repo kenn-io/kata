@@ -496,6 +496,8 @@ func evidenceVariant(kind string) *jsonschema.Schema {
 		MinItems: &pathMinimum,
 	}
 	switch kind {
+	case "attachment":
+		return variant(kind, "attachment_id", stringValue(1, 256))
 	case "commit":
 		sha := stringValue(7, 40)
 		sha.Pattern = `^[0-9a-fA-F]{7,40}$`
@@ -526,7 +528,7 @@ func evidenceSchemaFor(kinds ...string) *jsonschema.Schema {
 }
 
 func evidenceSchema() *jsonschema.Schema {
-	return evidenceSchemaFor("commit", "pr", "test", "reviewed-paths", "external", "no-change-audit", "duplicate-of", "superseded-by")
+	return evidenceSchemaFor("attachment", "commit", "pr", "test", "reviewed-paths", "external", "no-change-audit", "duplicate-of", "superseded-by")
 }
 
 func closeReasonSchemas() []*jsonschema.Schema {
@@ -551,7 +553,7 @@ func closeReasonSchemas() []*jsonschema.Schema {
 			Required: []string{"reason", "message", "evidence"},
 		}
 	}
-	done := variant("done", 40, 1, -1, "commit", "pr", "test", "reviewed-paths", "external")
+	done := variant("done", 40, 1, -1, "attachment", "commit", "pr", "test", "reviewed-paths", "external")
 	wontfix := variant("wontfix", 60, 0, 0, "commit")
 	duplicate := variant("duplicate", 20, 1, 1, "duplicate-of")
 	superseded := variant("superseded", 20, 1, 1, "superseded-by")
@@ -738,14 +740,15 @@ type SetMetadataInput struct {
 
 // Evidence is a typed completion proof accepted by Kata close.
 type Evidence struct {
-	Type      string   `json:"type" jsonschema:"Evidence type: commit, pr, test, reviewed-paths, external, no-change-audit, duplicate-of, or superseded-by"`
-	SHA       string   `json:"sha,omitempty" jsonschema:"Commit SHA for commit evidence"`
-	URL       string   `json:"url,omitempty" jsonschema:"Pull request URL for pr evidence"`
-	Command   string   `json:"command,omitempty" jsonschema:"Executed command for test evidence"`
-	Paths     []string `json:"paths,omitempty" jsonschema:"Reviewed paths for reviewed-paths evidence"`
-	Account   string   `json:"account,omitempty" jsonschema:"Free-text account of where and how externally completed work was done"`
-	Rationale string   `json:"rationale,omitempty" jsonschema:"Rationale for no-change-audit evidence"`
-	IssueRef  string   `json:"issue_ref,omitempty" jsonschema:"Target issue for duplicate-of or superseded-by evidence"`
+	AttachmentID string   `json:"attachment_id,omitempty" jsonschema:"Existing attachment ID for attachment evidence"`
+	Type         string   `json:"type" jsonschema:"Evidence type: attachment, commit, pr, test, reviewed-paths, external, no-change-audit, duplicate-of, or superseded-by"`
+	SHA          string   `json:"sha,omitempty" jsonschema:"Commit SHA for commit evidence"`
+	URL          string   `json:"url,omitempty" jsonschema:"Pull request URL for pr evidence"`
+	Command      string   `json:"command,omitempty" jsonschema:"Executed command for test evidence"`
+	Paths        []string `json:"paths,omitempty" jsonschema:"Reviewed paths for reviewed-paths evidence"`
+	Account      string   `json:"account,omitempty" jsonschema:"Free-text account of where and how externally completed work was done"`
+	Rationale    string   `json:"rationale,omitempty" jsonschema:"Rationale for no-change-audit evidence"`
+	IssueRef     string   `json:"issue_ref,omitempty" jsonschema:"Target issue for duplicate-of or superseded-by evidence"`
 }
 
 // CloseInput makes the completion assertion explicit.

@@ -599,7 +599,7 @@ func TestCreateAndCommentRequireIdempotencyKeys(t *testing.T) {
 	closeProperties := schemaObject(t, byName["kata.close"].InputSchema)["properties"].(map[string]any)
 	require.ElementsMatch(t, []any{"done", "wontfix", "duplicate", "superseded", "audit-no-change"}, closeProperties["reason"].(map[string]any)["enum"])
 	evidenceItems := closeProperties["evidence"].(map[string]any)["items"].(map[string]any)
-	require.Len(t, evidenceItems["oneOf"], 8)
+	require.Len(t, evidenceItems["oneOf"], 9)
 	require.Contains(t, schemaObject(t, byName["kata.close"].InputSchema), "if")
 
 	require.Contains(t, schemaObject(t, byName["kata.list"].InputSchema), "not")
@@ -628,6 +628,7 @@ func TestCloseInputSchemaMirrorsDaemonEvidenceMatrix(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "done with test", input: map[string]any{"ref": "abc1", "reason": "done", "message": message40, "evidence": []any{map[string]any{"type": "test", "command": "go test ./..."}}}},
+		{name: "done with attachment", input: map[string]any{"ref": "abc1", "reason": "done", "message": message40, "evidence": []any{map[string]any{"type": "attachment", "attachment_id": "01K7E222222222222222222222"}}}},
 		{name: "done with external account", input: map[string]any{"ref": "abc1", "reason": "done", "message": message40, "evidence": []any{map[string]any{"type": "external", "account": "email thread archived; calendar hold sent"}}}},
 		{name: "done without evidence", input: map[string]any{"ref": "abc1", "reason": "done", "message": message40, "evidence": []any{}}, wantErr: true},
 		{name: "wontfix", input: map[string]any{"ref": "abc1", "reason": "wontfix", "message": message60, "evidence": []any{}}},
@@ -1404,4 +1405,14 @@ func TestListPreservesIssueBrowserURL(t *testing.T) {
 	rows := structured["issues"].([]any)
 	require.Len(t, rows, 1)
 	require.Equal(t, "https://tasks.example/kata?issue=01ARZ3NDEKTSV4RRFFQ69G5FAV", rows[0].(map[string]any)["web_url"])
+}
+
+func TestConvertEvidenceAttachmentPreservesID(t *testing.T) {
+	const id = " report "
+	converted, err := (toolHandlers{}).convertEvidence(t.Context(), ProjectIdentity{}, Evidence{Type: "attachment", AttachmentID: id})
+	require.NoError(t, err)
+	require.NotNil(t, converted.AttachmentID)
+	require.Equal(t, id, *converted.AttachmentID)
+	_, err = (toolHandlers{}).convertEvidence(t.Context(), ProjectIdentity{}, Evidence{Type: "attachment"})
+	require.Error(t, err)
 }

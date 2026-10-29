@@ -33,7 +33,7 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 		return out, nil
 	})
 	huma.Register(h, huma.Operation{OperationID: "observeCronRun", Method: http.MethodPut, Path: base + "/runs/{run_uid}", MaxBodyBytes: db.CronObservationLimit}, func(ctx context.Context, in *api.ObserveCronRunRequest) (*api.ObserveCronRunResponse, error) {
-		ctx, actor, err := cronWriteContext(ctx, in.Body.Actor)
+		ctx, actor, err := actorWriteContext(ctx, in.Body.Actor)
 		if err != nil {
 			return nil, err
 		}

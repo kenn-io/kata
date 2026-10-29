@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"go.kenn.io/kata/internal/metadata"
 )
 
 // JSONBlob is the storage type for TEXT columns that hold a JSON object,
@@ -597,14 +598,17 @@ type CommentIdempotencyMatch struct {
 
 // Evidence is the typed-union element persisted on issue.closed event
 // payloads (anti-agent-justification spec §3.3). It mirrors api.Evidence
-// field-for-field; the daemon handler does a 1:1 conversion at the
+// for request fields; Attachment is a server-filled historical snapshot. The
+// daemon handler converts request evidence at the
 // boundary so the db package stays free of the api dependency that
 // would create an import cycle (internal/api already imports
 // internal/db). Per-reason validation lives in the daemon, not here —
-// the db layer treats this as opaque payload data and simply persists
-// the marshaled JSON onto the event row.
+// the db layer validates attachment liveness and freezes its descriptor in
+// the close transaction before persisting the event JSON.
 type Evidence struct {
-	Type string `json:"type"`
+	Type         string               `json:"type"`
+	AttachmentID string               `json:"attachment_id,omitempty"`
+	Attachment   *metadata.Attachment `json:"attachment,omitempty"`
 
 	SHA       string   `json:"sha,omitempty"`       // commit
 	URL       string   `json:"url,omitempty"`       // pr

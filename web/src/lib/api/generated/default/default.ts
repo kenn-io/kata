@@ -142,6 +142,8 @@ import type {
   LeaveFederationReplicaPathParameters,
   LeaveFederationReplicaRequestBody,
   LeaveFederationReplicaResultBody,
+  LinkAttachmentInput,
+  LinkAttachmentPathParameters,
   ListAllIssuesParams,
   ListAllIssuesResponseBody,
   ListConnectorFieldsPathParameters,
@@ -4415,6 +4417,106 @@ export const addAttachment = async (
     method: 'POST',
     headers: { 'Content-Type': 'application/octet-stream', ...getHeaders(options?.headers) },
     body: addAttachmentBody,
+  })
+}
+
+export type linkAttachmentResponse200 = {
+  data: AddAttachmentResponseBody
+  status: 200
+}
+
+export type linkAttachmentResponse400 = {
+  data: ErrorEnvelope
+  status: 400
+}
+
+export type linkAttachmentResponse401 = {
+  data: ErrorEnvelope
+  status: 401
+}
+
+export type linkAttachmentResponse403 = {
+  data: ErrorEnvelope
+  status: 403
+}
+
+export type linkAttachmentResponse404 = {
+  data: ErrorEnvelope
+  status: 404
+}
+
+export type linkAttachmentResponse409 = {
+  data: ErrorEnvelope
+  status: 409
+}
+
+export type linkAttachmentResponse410 = {
+  data: ErrorEnvelope
+  status: 410
+}
+
+export type linkAttachmentResponse422 = {
+  data: ErrorEnvelope
+  status: 422
+}
+
+export type linkAttachmentResponse500 = {
+  data: ErrorEnvelope
+  status: 500
+}
+
+export type linkAttachmentResponse502 = {
+  data: ErrorEnvelope
+  status: 502
+}
+
+export type linkAttachmentResponse503 = {
+  data: ErrorEnvelope
+  status: 503
+}
+
+export type linkAttachmentResponseSuccess = linkAttachmentResponse200 & {
+  headers: Headers
+}
+export type linkAttachmentResponseError = (
+  | linkAttachmentResponse400
+  | linkAttachmentResponse401
+  | linkAttachmentResponse403
+  | linkAttachmentResponse404
+  | linkAttachmentResponse409
+  | linkAttachmentResponse410
+  | linkAttachmentResponse422
+  | linkAttachmentResponse500
+  | linkAttachmentResponse502
+  | linkAttachmentResponse503
+) & {
+  headers: Headers
+}
+
+export type linkAttachmentResponse = linkAttachmentResponseSuccess | linkAttachmentResponseError
+
+export const getLinkAttachmentUrl = ({ projectId, ref }: LinkAttachmentPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/issues/${encodeURIComponent(String(ref))}/attachments/links`
+}
+
+export const linkAttachment = async (
+  { projectId, ref }: LinkAttachmentPathParameters,
+  linkAttachmentInput: LinkAttachmentInput,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<linkAttachmentResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<linkAttachmentResponse>(getLinkAttachmentUrl({ projectId, ref }), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(linkAttachmentInput),
   })
 }
 

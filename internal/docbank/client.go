@@ -76,7 +76,8 @@ func (c *Client) json(ctx context.Context, method, endpoint string, in, out any)
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if json.UnmarshalRead(io.LimitReader(resp.Body, 1<<20), out) != nil {
+	// Docbank node and version reads embed source metadata of up to 8MiB encoded, plus 1MiB for the envelope.
+	if json.UnmarshalRead(io.LimitReader(resp.Body, (8<<20)+(1<<20)), out) != nil {
 		return &Error{}
 	}
 	return nil

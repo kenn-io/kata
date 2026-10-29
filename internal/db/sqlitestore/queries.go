@@ -1759,6 +1759,10 @@ func (d *Store) closeIssueGuarded(
 	} else if hasOpen {
 		return db.Issue{}, nil, false, db.ErrOpenChildren
 	}
+	evidence, err := db.ResolveAttachmentEvidence(issue, p.Evidence)
+	if err != nil {
+		return db.Issue{}, nil, false, err
+	}
 	closedAt := time.Now().UTC().Format(sqliteTimeFormat)
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE issues
@@ -1804,7 +1808,7 @@ func (d *Store) closeIssueGuarded(
 		Reason:                 p.Reason,
 		ClosedAt:               closedAt,
 		Message:                p.Message,
-		Evidence:               p.Evidence,
+		Evidence:               evidence,
 		Transcript:             p.Transcript,
 		ParentUID:              parentUIDForPayload,
 		ParentShortID:          parentSIDForPayload,

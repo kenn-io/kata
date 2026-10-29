@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -723,6 +724,52 @@ func (g *webDaemonGateway) proxy(d resolvedWebDaemon) (http.Handler, error) {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), timeout)
 		defer cancel()
+		if isAttachmentUpload(r) && webSessionAuthenticated(ctx) {
+			file, err := os.CreateTemp("", "kata-proxy-upload-*")
+			if err != nil {
+				writeWebDaemonError(w, http.StatusInternalServerError, "internal")
+				return
+			}
+			defer func() { _ = file.Close(); _ = os.Remove(file.Name()) }()
+			size, err := io.Copy(file, io.LimitReader(r.Body, maxAttachmentBytes+1))
+			if err != nil {
+				writeWebDaemonError(w, http.StatusBadRequest, "attachment_invalid")
+				return
+			}
+			if size > maxAttachmentBytes {
+				writeWebDaemonError(w, http.StatusRequestEntityTooLarge, "attachment_too_large")
+				return
+			}
+			if _, err := file.Seek(0, io.SeekStart); err != nil {
+				writeWebDaemonError(w, http.StatusInternalServerError, "internal")
+				return
+			}
+			r = r.Clone(ctx)
+			r.Body = file
+			r.ContentLength = size
+		}
+		attachmentLink := r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/attachments/links")
+		if webSessionAuthenticated(ctx) && (isAttachmentUpload(r) || attachmentLink) {
+			if err := revalidateBrowserSession(ctx); err != nil {
+				writeWebDaemonError(w, http.StatusUnauthorized, "web_session_required")
+				return
+			}
+			go func() {
+				ticker := time.NewTicker(time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-ticker.C:
+						if revalidateBrowserSession(ctx) != nil {
+							cancel()
+							return
+						}
+					}
+				}
+			}()
+		}
 		reverse.ServeHTTP(w, r.WithContext(ctx))
 	})
 	g.mu.Lock()

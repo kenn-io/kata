@@ -8,9 +8,9 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-// cronWriteContext applies ordinary actor attribution and credential
+// actorWriteContext applies ordinary actor attribution and credential
 // revalidation. It adds no executor authority or scheduling permission.
-func cronWriteContext(ctx context.Context, requested string) (context.Context, string, error) {
+func actorWriteContext(ctx context.Context, requested string) (context.Context, string, error) {
 	actor, err := attributedActor(ctx, requested)
 	if err != nil {
 		return ctx, "", err
