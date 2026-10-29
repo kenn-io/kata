@@ -61,7 +61,7 @@ func TestServeWaitsForActiveHandlerDuringShutdown(t *testing.T) {
 			select {
 			case err := <-done:
 				t.Fatalf("Serve returned before active handler completed: %v", err)
-			case <-time.After(50 * time.Millisecond): //nolint:kennlint // absence window; release holds the active handler, so Serve must not return
+			case <-time.After(50 * time.Millisecond): //nolint:kennlint // deadlinetest: absence window; release holds the active handler, so Serve must not return
 			}
 
 			close(release)
@@ -97,7 +97,7 @@ func TestServeReportsHandlerThatOutlivesShutdownTimeout(t *testing.T) {
 		close(entered)
 		<-release
 	})
-	server := &Server{handler: handler, shutdownTimeout: 20 * time.Millisecond}
+	server := &Server{handler: handler, shutdownTimeout: 20 * time.Millisecond} //nolint:kennlint // deadlinetest: the handler stays blocked; shutdown deadline expiry must prevent safe dependency cleanup
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(ctx, listener) }()
@@ -171,7 +171,7 @@ func TestServeListenersNotifiesAtFirstListenerExitBeforeHandlerDrain(t *testing.
 	select {
 	case err := <-done:
 		t.Fatalf("ServeListeners returned before sibling handler drained: %v", err)
-	case <-time.After(50 * time.Millisecond): //nolint:kennlint // absence window; release holds the sibling handler, so ServeListeners must not return
+	case <-time.After(50 * time.Millisecond): //nolint:kennlint // deadlinetest: absence window; release holds the sibling handler, so ServeListeners must not return
 	}
 	close(release)
 	require.True(t, errors.Is(<-done, net.ErrClosed))

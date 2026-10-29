@@ -126,7 +126,7 @@ func TestEmbeddingProducerFillConnectionBounds(t *testing.T) {
 						t.Error("worker did not stop")
 					}
 				})
-				//nolint:kennlint // Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
+				//nolint:kennlint // sleeptest: Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
 				require.Eventually(t, func() bool { return worker.Health().LastSuccessAt != nil }, 30*time.Second, 10*time.Millisecond)
 				switch mode {
 				case "online":
@@ -141,7 +141,7 @@ func TestEmbeddingProducerFillConnectionBounds(t *testing.T) {
 					require.Contains(t, worker.Health().ProducerErrors[project.UID].Message, "503", "the failed connection is kept for status, not reported as waiting")
 					reachable.Store(true)
 					worker.RetryNow()
-					//nolint:kennlint // Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
+					//nolint:kennlint // sleeptest: Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
 					require.Eventually(t, func() bool { return worker.Health().Backlog == 0 }, 30*time.Second, 10*time.Millisecond)
 					require.EqualValues(t, 3, inputs.Load(), "the next existing-worker fill retries the connection")
 					require.NotContains(t, worker.Health().ProducerErrors, project.UID, "a successful connection clears the failure")

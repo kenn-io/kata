@@ -98,7 +98,7 @@ func TestDaemonShutdownCoordinatorDrainsHookProducersBeforeStoppingHooks(t *test
 	select {
 	case <-hooks.started:
 		t.Fatal("hook shutdown started before background producers drained")
-	case <-time.After(20 * time.Millisecond): //nolint:kennlint // absence window; releaseWorker holds a background producer, so hook shutdown must not start
+	case <-time.After(20 * time.Millisecond): //nolint:kennlint // deadlinetest: absence window; releaseWorker holds a background producer, so hook shutdown must not start
 	}
 	close(releaseWorker)
 	select {
@@ -128,7 +128,7 @@ func TestDaemonShutdownCoordinatorWaitsForHTTPHandlersBeforeStoppingHooks(t *tes
 	select {
 	case <-hooks.started:
 		t.Fatal("hook shutdown started before HTTP handlers drained")
-	case <-time.After(20 * time.Millisecond): //nolint:kennlint // absence window; HTTP handlers have not drained, so hook shutdown must not start
+	case <-time.After(20 * time.Millisecond): //nolint:kennlint // deadlinetest: absence window; HTTP handlers have not drained, so hook shutdown must not start
 	}
 	shutdown.HTTPHandlersDone(true)
 	select {
@@ -201,7 +201,7 @@ func TestDaemonShutdownCoordinatorLetsInFlightReadinessWinBeforeShutdown(t *test
 	select {
 	case <-ctx.Done():
 		t.Fatal("shutdown overtook readiness publication inside the lifecycle gate")
-	case <-time.After(20 * time.Millisecond): //nolint:kennlint // absence window; releasePublish holds readiness publication inside the lifecycle gate
+	case <-time.After(20 * time.Millisecond): //nolint:kennlint // deadlinetest: absence window; releasePublish holds readiness publication inside the lifecycle gate
 	}
 
 	close(releasePublish)
@@ -229,7 +229,7 @@ func TestDaemonShutdownCoordinatorSkipsHookShutdownWhenWorkerRemainsUnjoined(t *
 		workers,
 		hooks,
 		nil,
-		20*time.Millisecond,
+		20*time.Millisecond, //nolint:kennlint // deadlinetest: held producers exhaust the shared shutdown deadline; unsafe cleanup is the asserted result
 		func(cleanupCtx context.Context) bool {
 			close(cleanupStarted)
 			<-cleanupCtx.Done()
@@ -266,7 +266,7 @@ func TestDaemonShutdownCoordinatorSkipsHookShutdownWhenHTTPRemainsUnjoined(t *te
 		newDaemonWorkerGroup(),
 		hooks,
 		nil,
-		20*time.Millisecond,
+		20*time.Millisecond, //nolint:kennlint // deadlinetest: held producers exhaust the shared shutdown deadline; unsafe cleanup is the asserted result
 	)
 
 	shutdown.Trigger()

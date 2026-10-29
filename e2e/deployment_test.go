@@ -83,7 +83,7 @@ func TestVanillaDeploymentEnvironmentOnly(t *testing.T) {
 	create.Env, create.Dir = env, workspace
 	output, err := create.CombinedOutput()
 	require.NoError(t, err, string(output))
-	//nolint:kennlint // The subprocess uses a real clock; its published filesystem state cannot be observed with synctest.
+	//nolint:kennlint // sleeptest: The subprocess uses a real clock; its published filesystem state cannot be observed with synctest.
 	require.Eventually(t, func() bool {
 		files, err := filepath.Glob(filepath.Join(home, "backups", "*", "*.jsonl"))
 		if err != nil {

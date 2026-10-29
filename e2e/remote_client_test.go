@@ -298,7 +298,7 @@ func freeTCPPort(t *testing.T) int {
 func waitForPing(t *testing.T, base string, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
-	client := &http.Client{Timeout: 250 * time.Millisecond}
+	client := &http.Client{Timeout: time.Second}
 	for time.Now().Before(deadline) {
 		resp, err := client.Get(base + "/api/v1/ping") //nolint:noctx
 		if err == nil {

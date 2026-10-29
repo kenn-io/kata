@@ -428,7 +428,7 @@ func TestFederationIngressBoundsConnections(t *testing.T) {
 	extra, err := net.DialTimeout("tcp", listener.Addr().String(), time.Second)
 	require.NoError(t, err)
 	defer func() { _ = extra.Close() }()
-	require.NoError(t, extra.SetReadDeadline(time.Now().Add(500*time.Millisecond)))
+	require.NoError(t, extra.SetReadDeadline(time.Now().Add(500*time.Millisecond))) //nolint:kennlint // deadlinetest: the admission slots stay occupied; the extra connection must receive no response
 	_, err = fmt.Fprint(extra, "GET /unavailable HTTP/1.1\r\nHost: daemon.example\r\n\r\n")
 	require.NoError(t, err)
 	_, err = bufio.NewReader(extra).ReadByte()

@@ -570,7 +570,7 @@ func TestSmoke_Plan4Events(t *testing.T) {
 		"&after_id="+strconv.FormatInt(resetID, 10))
 	defer func() { _ = sseResp2.Body.Close() }()
 	framer2 := newSmokeFramer(sseResp2.Body)
-	noMore := framer2.NextN(t, 1, 200*time.Millisecond)
+	noMore := framer2.NextN(t, 1, 200*time.Millisecond) //nolint:kennlint // deadlinetest: bounded absence checks that reconnecting after the reset cursor yields no duplicate frames
 	assert.Len(t, noMore, 0, "no further frames after reset cursor")
 }
 

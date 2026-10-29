@@ -168,7 +168,7 @@ func TestCreateTimeoutClassificationAtCommandBoundary(t *testing.T) {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	// Start the timeout after sending, so slow command setup cannot turn
 	// this unknown-outcome scenario into a pre-transmission failure.
-	transport.ResponseHeaderTimeout = 100 * time.Millisecond
+	transport.ResponseHeaderTimeout = 100 * time.Millisecond //nolint:kennlint // deadlinetest: the handler withholds headers so the command must classify a transmitted request timeout
 	http.DefaultTransport = transport
 	t.Cleanup(func() {
 		http.DefaultTransport = previousTransport

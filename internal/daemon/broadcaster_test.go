@@ -38,7 +38,7 @@ func TestBroadcaster_BroadcastFansToMatchingFiltersOnly(t *testing.T) {
 	gotA := receiveMsg(t, a.Ch, time.Second, "project-1 subscriber")
 	assert.Equal(t, int64(100), gotA.Event.ID)
 
-	assertNoReceive(t, other.Ch, 50*time.Millisecond, "project-2 subscriber must not receive a project-1 event")
+	assertNoReceive(t, other.Ch, 50*time.Millisecond, "project-2 subscriber must not receive a project-1 event") //nolint:kennlint // deadlinetest: bounded absence checks that project-2 subscriber must not receive a project-1 event
 }
 
 func TestBroadcaster_ResetFansToAllMatchingFilters(t *testing.T) {

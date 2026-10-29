@@ -821,7 +821,7 @@ func TestAwaitCommandOutcomeReapWaitIsBounded(t *testing.T) {
 
 func TestConnectorContextErrorKeepsChildTimeoutAfterParentEnds(t *testing.T) {
 	parent, cancelParent := context.WithCancel(t.Context())
-	commandCtx, cancelCommand := context.WithTimeoutCause( //nolint:kennlint // the deadline is the expected result; the test waits on commandCtx.Done for it
+	commandCtx, cancelCommand := context.WithTimeoutCause( //nolint:kennlint // deadlinetest: the deadline is the expected result; the test waits on commandCtx.Done for it
 		parent, time.Nanosecond, errConnectorChildTimeout,
 	)
 	defer cancelCommand()
@@ -857,7 +857,7 @@ func TestProcessClientBoundsTimeoutAndDoesNotExposeSettings(t *testing.T) {
 		ID: "notes", Command: helperBinary(t), Args: []string{"-test.run=^TestProcessClientHelper$"}, TimeoutSeconds: 1,
 		Env: map[string]string{"MODE": "HELPER_MODE"}, Settings: map[string]any{"private": "not-for-errors"},
 	})
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond) //nolint:kennlint // the deadline is the expected result; the sleeping helper holds Describe until it fires
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond) //nolint:kennlint // deadlinetest: the deadline is the expected result; the sleeping helper holds Describe until it fires
 	defer cancel()
 	_, err := client.Describe(ctx)
 	require.ErrorIs(t, err, context.DeadlineExceeded)

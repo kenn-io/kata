@@ -77,7 +77,7 @@ func TestGitHubSyncHandlers_EnableValidatesStoresStableSourceAndWakesRunner(t *t
 	assert.Equal(t, out.Binding.RemoteID, stored.RemoteID)
 	assert.Equal(t, out.Binding.DisplayName, stored.DisplayName)
 	assert.JSONEq(t, `{"host":"github.com","owner":"example-owner","repo":"example-repo-renamed","repo_id":12345,"title_prefix":true}`, string(stored.Config))
-	assertNoReceive(t, sub.Ch, 50*time.Millisecond, "enable should not broadcast normal events")
+	assertNoReceive(t, sub.Ch, 50*time.Millisecond, "enable should not broadcast normal events") //nolint:kennlint // deadlinetest: bounded absence checks that enable should not broadcast normal events
 	assert.Empty(t, h.hooks.snapshot(), "enable should not enqueue hook events")
 }
 

@@ -164,7 +164,7 @@ func TestDaemonClients_ClassifyOnlyTheirOwnDialFailures(t *testing.T) {
 
 	t.Run("redirect policy rejection is not a daemon transport failure", func(t *testing.T) {
 		hc, err := markDaemonHTTPClient(sameOrigin.URL, &http.Client{
-			Timeout: 200 * time.Millisecond,
+			Timeout: 10 * time.Second,
 			CheckRedirect: func(*http.Request, []*http.Request) error {
 				return fmt.Errorf("redirect refused by policy")
 			},
@@ -244,7 +244,11 @@ func TestDaemonClientClassifiesUnixFailuresAcrossGeneratedCall(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			api := newUnixGeneratedTestClient(t, tt.handler, 100*time.Millisecond)
+			timeout := 10 * time.Second
+			if tt.wantTime {
+				timeout = 100 * time.Millisecond //nolint:kennlint // deadlinetest: the timeout cases hold headers or the body until the client deadline fires
+			}
+			api := newUnixGeneratedTestClient(t, tt.handler, timeout)
 
 			_, err := api.PingWithResponse(t.Context())
 
@@ -265,7 +269,7 @@ func TestDaemonClientClassifiesUnixFailuresAcrossGeneratedCall(t *testing.T) {
 		api := newUnixGeneratedTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"ok":`))
-		}), 100*time.Millisecond)
+		}), 10*time.Second)
 
 		resp, err := api.PingWithResponse(t.Context())
 
@@ -281,7 +285,7 @@ func TestDaemonClientClassifiesUnixFailuresAcrossGeneratedCall(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write([]byte(`{"error":{"code":"temporary_failure","message":"try later"}}`))
-		}), 100*time.Millisecond)
+		}), 10*time.Second)
 
 		resp, err := api.PingWithResponse(t.Context())
 
@@ -298,7 +302,7 @@ func TestDaemonClientClassifiesUnixFailuresAcrossGeneratedCall(t *testing.T) {
 func TestDaemonTransportErrorOutputModes(t *testing.T) {
 	api := newUnixGeneratedTestClient(t, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
-	}), 100*time.Millisecond)
+	}), 100*time.Millisecond) //nolint:kennlint // deadlinetest: the handler waits for cancellation; timeout classification is the asserted result
 	_, err := api.PingWithResponse(t.Context())
 	require.Error(t, err)
 
@@ -429,7 +433,7 @@ func TestSameOriginRedirectPreservesMutationUncertainty(t *testing.T) {
 		<-r.Context().Done()
 	}))
 	t.Cleanup(server.Close)
-	hc, err := markDaemonHTTPClient(server.URL, &http.Client{Timeout: 100 * time.Millisecond})
+	hc, err := markDaemonHTTPClient(server.URL, &http.Client{Timeout: 100 * time.Millisecond}) //nolint:kennlint // deadlinetest: the redirected handler waits for cancellation; the test asserts timeout provenance
 	require.NoError(t, err)
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/start", nil)
 	require.NoError(t, err)
@@ -513,7 +517,7 @@ func TestDifferentOriginRedirectDoesNotClaimMutationUncertainty(t *testing.T) {
 		http.Redirect(w, r, external.URL+"/stall", http.StatusFound)
 	}))
 	t.Cleanup(selected.Close)
-	hc, err := markDaemonHTTPClient(selected.URL, &http.Client{Timeout: 100 * time.Millisecond})
+	hc, err := markDaemonHTTPClient(selected.URL, &http.Client{Timeout: 100 * time.Millisecond}) //nolint:kennlint // deadlinetest: the external handler waits for cancellation; the test asserts timeout provenance
 	require.NoError(t, err)
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, selected.URL, nil)
 	require.NoError(t, err)

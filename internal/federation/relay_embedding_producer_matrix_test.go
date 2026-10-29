@@ -161,7 +161,7 @@ func TestEmbeddingProjectSingleProducerBackendMatrix(t *testing.T) {
 						}
 						close(gate)
 						waitProducer := func(expected int64) {
-							//nolint:kennlint // Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
+							//nolint:kennlint // sleeptest: Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
 							require.Eventually(t, func() bool {
 								return workers[producerIndex].Health().LastSuccessAt != nil && documents[producerIndex].Load() == expected && workers[producerIndex].Health().Backlog == 0
 							}, 30*time.Second, 10*time.Millisecond)
@@ -172,7 +172,7 @@ func TestEmbeddingProjectSingleProducerBackendMatrix(t *testing.T) {
 								worker.Wake()
 							}
 							for _, worker := range workers {
-								//nolint:kennlint // Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
+								//nolint:kennlint // sleeptest: Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
 								require.Eventually(t, func() bool {
 									h := worker.Health()
 									return h.LastSuccessAt != nil && h.Backlog == 0 && h.Embedded == embedded
@@ -237,7 +237,7 @@ func TestEmbeddingProjectSingleProducerBackendMatrix(t *testing.T) {
 							startWorker(i, nil)
 						}
 						for _, worker := range workers {
-							//nolint:kennlint // Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
+							//nolint:kennlint // sleeptest: Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
 							require.Eventually(t, func() bool { return worker.Health().LastSuccessAt != nil && worker.Health().Backlog == 0 }, 30*time.Second, 10*time.Millisecond)
 						}
 						checkSpend(2)
