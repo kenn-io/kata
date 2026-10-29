@@ -12,7 +12,7 @@
       "name": "@kenn-io/kata-ui",
       "version": "0.1.0",
       "dependencies": {
-        "@kenn-io/kit-ui": "github:kenn-io/kit-ui#a6bfaffcfb05da95b90600c95daf7272cfaf0196",
+        "@kenn-io/kit-ui": "github:kenn-io/kit-ui#284ae27b578ed7226be606926e4e1ccd037d2e1e",
       },
       "devDependencies": {
         "@sveltejs/vite-plugin-svelte": "7.1.2",
@@ -35,7 +35,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@kenn-io/kata-ui": "workspace:*",
-        "@kenn-io/kit-ui": "github:kenn-io/kit-ui#a6bfaffcfb05da95b90600c95daf7272cfaf0196",
+        "@kenn-io/kit-ui": "github:kenn-io/kit-ui#284ae27b578ed7226be606926e4e1ccd037d2e1e",
         "@lucide/svelte": "1.21.0",
         "@xyflow/svelte": "1.6.1",
         "elkjs": "0.11.1",
@@ -219,7 +219,7 @@
 
     "@kenn-io/kata-web": ["@kenn-io/kata-web@workspace:web"],
 
-    "@kenn-io/kit-ui": ["@kenn-io/kit-ui@github:kenn-io/kit-ui#a6bfaff", { "peerDependencies": { "@lucide/svelte": ">=1.0.0", "@videojs/html": "^10.1.0", "dompurify": "^3.2.0", "marked": "^18.0.0", "mermaid": "12.0.0", "shiki": "^4.0.0", "svelte": "^5.29.0" }, "optionalPeers": ["mermaid"], "bin": { "kit-ui-check": "./bin/kit-ui-check.mjs" } }, "kenn-io-kit-ui-a6bfaff", "sha512-eqZrsf4CgXYxXjKcPmcR55wsWkMjvAXB6ElWn2MIfn63VxLX59cXhJ3wqbNZZdAz73d1poLiFoucxPwPg/qrlg=="],
+    "@kenn-io/kit-ui": ["@kenn-io/kit-ui@github:kenn-io/kit-ui#284ae27", { "peerDependencies": { "@lucide/svelte": ">=1.0.0", "@videojs/html": "^10.1.0", "dompurify": "^3.2.0", "marked": "^18.0.0", "mermaid": "12.0.0", "shiki": "^4.0.0", "svelte": "^5.29.0" }, "optionalPeers": ["mermaid"], "bin": { "kit-ui-check": "./bin/kit-ui-check.mjs" } }, "kenn-io-kit-ui-284ae27", "sha512-wtqaTvlM/N3silFUuyFIPGjPWAFO1xN6U6h69XcBJw7/x4Jm+C8vC9ykFGncMAfxwwiz74xNffWyCJTkD8gmnw=="],
 
     "@lit-labs/ssr-dom-shim": ["@lit-labs/ssr-dom-shim@1.6.0", "", {}, "sha512-VHb0ALPMTlgKjM6yIxxoQNnpKyUKLD04VzeQdsiXkMqkvYlAHxq9glGLmgbb889/1GsohSOAjvQYoiBppXFqrQ=="],
 

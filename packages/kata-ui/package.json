@@ -33,7 +33,7 @@
     "check:usage": "kit-ui-check src && bun run scripts/check-kit-ui-usage.ts src"
   },
   "dependencies": {
-    "@kenn-io/kit-ui": "github:kenn-io/kit-ui#a6bfaffcfb05da95b90600c95daf7272cfaf0196"
+    "@kenn-io/kit-ui": "github:kenn-io/kit-ui#284ae27b578ed7226be606926e4e1ccd037d2e1e"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "7.1.2",

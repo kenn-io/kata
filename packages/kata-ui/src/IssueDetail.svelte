@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Button, Markdown } from '@kenn-io/kit-ui'
+  import { Button, Markdown, PageHeader } from '@kenn-io/kit-ui'
 
   import IssueAttachments from './components/IssueAttachments.svelte'
   import IssueChecklist from './components/IssueChecklist.svelte'
@@ -31,10 +31,13 @@
 </script>
 
 <section class="kata-issue-detail" aria-label="Kata issue detail">
-  <header class="detail-header">
+  <div class="detail-header">
     <div class="heading-copy">
-      <span class="reference">{detail.issue.reference}</span>
-      <h2>{detail.issue.title}</h2>
+      <PageHeader level={2} title={detail.issue.title}>
+        {#snippet before()}
+          <span class="reference">{detail.issue.reference}</span>
+        {/snippet}
+      </PageHeader>
     </div>
     <IssueProperties issue={detail.issue} />
     {#if actions.length > 0}
@@ -49,7 +52,7 @@
         {/each}
       </div>
     {/if}
-  </header>
+  </div>
 
   <section class="body-section" aria-label="Description">
     {#if detail.issue.body}
@@ -141,14 +144,6 @@
   .reference {
     font-family: var(--font-mono, ui-monospace, monospace);
     font-size: var(--font-size-xs, 0.75rem);
-  }
-
-  h2 {
-    margin: var(--space-1, 2px) 0 0;
-    font-size: var(--font-size-xl, 1.125rem);
-    font-weight: var(--font-weight-semibold, 600);
-    line-height: 1.3;
-    overflow-wrap: anywhere;
   }
 
   .host-actions,
