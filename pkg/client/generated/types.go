@@ -1195,7 +1195,9 @@ type CreateRecurrenceRequestBody struct {
 	InitialIssueRef *string                 `json:"initial_issue_ref,omitempty"`
 	Rrule           string                  `json:"rrule" validate:"required"`
 	Template        RecurrenceTemplateInput `json:"template"`
-	Timezone        string                  `json:"timezone" validate:"required"`
+
+	// Timezone IANA time zone such as America/New_York or UTC. Local is rejected because it depends on the daemon host.
+	Timezone string `json:"timezone" validate:"required"`
 }
 
 func (c CreateRecurrenceRequestBody) Validate() error {
@@ -4782,7 +4784,9 @@ type PatchRecurrenceRequestBody struct {
 	Dtstart  *string                        `json:"dtstart,omitempty"`
 	Rrule    *string                        `json:"rrule,omitempty"`
 	Template *RecurrenceTemplateUpdateInput `json:"template,omitempty"`
-	Timezone *string                        `json:"timezone,omitempty"`
+
+	// Timezone IANA time zone such as America/New_York or UTC. Changes to Local are rejected; an existing Local value may be retained by omitting timezone or echoing Local.
+	Timezone *string `json:"timezone,omitempty"`
 }
 
 func (p PatchRecurrenceRequestBody) Validate() error {

@@ -8,5 +8,6 @@ export interface PatchRecurrenceRequestBody {
   dtstart?: string
   rrule?: string
   template?: RecurrenceTemplateUpdateInput
+  /** IANA time zone such as America/New_York or UTC. Changes to Local are rejected; an existing Local value may be retained by omitting timezone or echoing Local. */
   timezone?: string
 }

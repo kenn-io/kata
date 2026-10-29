@@ -9,5 +9,6 @@ export interface CreateRecurrenceRequestBody {
   initial_issue_ref?: string
   rrule: string
   template: RecurrenceTemplateInput
+  /** IANA time zone such as America/New_York or UTC. Local is rejected because it depends on the daemon host. */
   timezone: string
 }

@@ -1008,6 +1008,7 @@ components:
         template:
           $ref: "#/components/schemas/RecurrenceTemplateInput"
         timezone:
+          description: IANA time zone such as America/New_York or UTC. Local is rejected because it depends on the daemon host.
           type: string
       required:
         - rrule
@@ -4630,6 +4631,7 @@ components:
         template:
           $ref: "#/components/schemas/RecurrenceTemplateUpdateInput"
         timezone:
+          description: IANA time zone such as America/New_York or UTC. Changes to Local are rejected; an existing Local value may be retained by omitting timezone or echoing Local.
           type: string
       type: object
     PatchRecurrenceResponseBody:
