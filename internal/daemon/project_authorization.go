@@ -345,7 +345,7 @@ func withProjectOperationAuthorization(humaAPI huma.API, store db.Storage) {
 		// project access; the selectors below fence every project they name.
 		// Token, team and federation administration grant or route authority
 		// beyond one project, so they stay with the daemon owner.
-		ownerOnly := policy.Kind == hostOperationTokenAdministration || op.OperationID == "getFederationStatus" || op.OperationID == "listFederationEnrollments" || op.OperationID == "revokeFederationEnrollment" || op.OperationID == "createFederationReplica" || op.OperationID == "disconnectFederationBridge" || op.OperationID == "connectFederationBridge" || op.OperationID == "getFederationBridgeStatus" || op.OperationID == "repinFederationRootKey"
+		ownerOnly := policy.Kind == hostOperationTokenAdministration || op.OperationID == "getFederationStatus" || op.OperationID == "listFederationEnrollments" || op.OperationID == "revokeFederationEnrollment" || op.OperationID == "setFederationSpokeName" || op.OperationID == "createFederationReplica" || op.OperationID == "disconnectFederationBridge" || op.OperationID == "connectFederationBridge" || op.OperationID == "getFederationBridgeStatus" || op.OperationID == "repinFederationRootKey"
 		principal, authenticated := PrincipalFromContext(ctx.Context())
 		// A mounting host adjudicates its administrative capabilities through
 		// HostAccess. Native project selection/fences still intersect that grant.

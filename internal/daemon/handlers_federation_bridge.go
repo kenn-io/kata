@@ -209,6 +209,9 @@ func newRelayCrossProjectLinksError(side string) *api.APIError {
 }
 
 func createRelayEnrollment(ctx context.Context, cfg ServerConfig, in *api.CreateFederationEnrollmentRequest) (*api.CreateFederationEnrollmentResponse, error) {
+	if in.Body.SpokeName != "" {
+		return nil, api.NewError(http.StatusBadRequest, "validation", "spoke_name requires daemon-owner enrollment; ask the hub owner to name an existing relay spoke", "", nil)
+	}
 	options := in.Body.Relay
 	if options.ProtocolVersion != db.RelayProtocolVersion || in.Body.ProjectID == nil || *in.Body.ProjectID <= 0 || !uid.Valid(in.Body.SpokeInstanceUID) || in.Body.AllowAdoptionSnapshotAuthors {
 		return nil, api.NewError(http.StatusBadRequest, "validation", "relay requires a supported protocol, one project and a valid peer", "", nil)

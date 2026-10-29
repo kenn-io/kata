@@ -368,6 +368,8 @@ type Storage interface {
 	CreateProjectFederationEnrollment(ctx context.Context, p CreateFederationEnrollmentParams) (CreatedFederationEnrollment, error)
 	FindActiveFederationEnrollment(ctx context.Context, p ActiveFederationEnrollmentParams) (FederationEnrollment, error)
 	RotateFederationEnrollment(ctx context.Context, p CreateFederationEnrollmentParams) (CreatedFederationEnrollment, error)
+	SetFederationSpokeName(context.Context, string, string) error
+	ListFederationSpokeNames(context.Context) (map[string]string, error)
 	ListFederationEnrollments(ctx context.Context) ([]FederationEnrollment, error)
 	ListProjectFederationEnrollments(ctx context.Context, projectID int64) ([]FederationEnrollment, error)
 	RevokeFederationEnrollment(ctx context.Context, id int64) error

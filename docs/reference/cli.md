@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-27
+last_edited: 2026-10-29
 ---
 
 # CLI reference
@@ -2080,7 +2080,7 @@ kata federation bridge status --project <local-project>
 kata federation bridge disconnect --project <local-project> [--preflight] [--local-only]
 kata federation enable --project <project>
 kata federation enroll [project] [--project <project>] --spoke-instance <uid> --hub-url <url> \
-  --actor <actor> [--hub-token-env <env-name>] [--allow-insecure]
+  --actor <actor> [--spoke-name laptop] [--hub-token-env <env-name>] [--allow-insecure]
 kata federation join --project <project> --hub-url <url> --hub-project-id <id> \
   --token <token> --actor <actor> [--push]
 kata federation join --project <existing-project> --hub-url <url> \
@@ -2090,6 +2090,8 @@ kata federation rebind --all --hub <catalog-name>
 kata federation root-key repin --project <project> [--preflight] [--previous-key-file <path>] [--strand-relays]
 kata federation status
 kata federation enrollments list
+kata federation enrollments name <spoke-instance-uid> <name>
+kata federation enrollments name <spoke-instance-uid> --clear
 kata federation revoke <enrollment-id>
 kata federation lease acquire <issue-ref> [--ttl 30m]
 kata federation lease renew <issue-ref> --ttl 30m
@@ -2160,6 +2162,14 @@ prints a warning to stderr that the hub grant was not revoked; the hub operator
 must revoke it. Active downstream enrollments block it. Combine it with
 `--preflight` to check first. See
 [Detach a bridge whose hub is gone](../operations/federation.md#detach-a-bridge-whose-hub-is-gone).
+
+Use `federation enroll --spoke-name laptop` to assign a hub-local name when
+enrolling, or `federation enrollments name <uid> build-box` to change it later.
+Use `federation enrollments name <uid> --clear` to remove it. Names are unique
+on the hub, shared by an instance's enrollments across projects, and shown in
+enrollment lists and ordinary hub event responses. Naming requires hub
+administration authority. See [spoke names](../operations/federation.md#operator-commands)
+for naming rules, backups and relay enrollment.
 
 `kata federation enroll --project <project> --hub-url <url>` sends the
 enrollment API call to `<url>` using `--hub-token-env` or a daemon catalog

@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-10-23
+last_edited: 2026-10-29
 ---
 
 # Federation
@@ -2014,7 +2014,7 @@ fails with `root_key_not_local` for a project that this daemon does not root.
 kata federation identity
 kata federation enable --project <project>
 kata federation enroll --project <project> --spoke-instance <uid> --hub-url <url> \
-  --actor <actor> [--hub-token-env <env-name>] [--allow-insecure]
+  --actor <actor> [--spoke-name laptop] [--hub-token-env <env-name>] [--allow-insecure]
 kata federation join --project <project> --hub-url <url> --hub-project-id <id> \
   --token <token> --actor <actor> [--push]
 kata federation enroll --project <project> --spoke-instance <uid> \
@@ -2024,6 +2024,8 @@ kata federation join --project <project> --hub-url <http-hostname-url> \
 kata federation join --project <existing-project> --hub-url <url> \
   --hub-project-id <id> --token <token> --actor <actor> --push --adopt-existing
 kata federation enrollments list
+kata federation enrollments name <spoke-instance-uid> laptop
+kata federation enrollments name <spoke-instance-uid> --clear
 kata federation revoke <enrollment-id>
 kata federation leave <project> [--delete [--force]] [--local-only] [--hub <name>]
 kata federation rebind <project> --hub <name>
@@ -2040,6 +2042,24 @@ kata federation lease release <issue-ref>
 `kata federation enroll --project <project>` creates `<project>` on the hub
 when it does not already exist, then enables federation and creates the
 enrollment.
+
+Give a spoke a hub-local name with `federation enroll --spoke-name laptop`,
+or name an existing enrollment with `federation enrollments name <uid> laptop`.
+Use `--clear` instead of a name to remove it. Names start with a lowercase
+letter, contain only lowercase letters, digits and hyphens, and have at most
+32 characters. A name belongs to one instance across all of its enrollments
+on this hub and must be unique on the hub. Re-enrolling with a name replaces
+the instance's previous name; omitting the flag keeps it. A name stays while
+any enrollment for that instance remains, including revoked enrollments.
+Purging its last enrollment's project removes the name.
+
+Naming requires the same hub administration authority as listing and revoking
+enrollments. For a relay enrolled through an account credential, ask the hub
+owner to run the naming command after enrollment. Enrollment lists show names
+next to instance UIDs; JSON adds `spoke_name` when a name is set. Ordinary hub
+event responses (polling, issue history and SSE) add `origin_spoke_name` for
+named origins. Names stay on the hub and are included in owner backups; they
+are not replicated to spokes and do not change event hashes or attribution.
 
 `kata federation status` reports local bindings, enabled/push state, cursors,
 pending push depth, sync timestamps, enrollment counts, lease counts,

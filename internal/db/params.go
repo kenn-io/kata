@@ -868,6 +868,7 @@ type FederationIngestResult struct {
 // CreateFederationEnrollmentParams carries the plaintext token at creation
 // time only. The database stores only its SHA-256 hash.
 type CreateFederationEnrollmentParams struct {
+	SpokeName                    string // Optional hub-local display name; empty leaves it unchanged.
 	Token                        string
 	SpokeInstanceUID             string
 	ProjectID                    *int64

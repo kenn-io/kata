@@ -843,6 +843,8 @@ components:
           $ref: "#/components/schemas/RelayEnrollmentOptions"
         spoke_instance_uid:
           type: string
+        spoke_name:
+          type: string
         token:
           type: string
       required:
@@ -2034,6 +2036,8 @@ components:
           type: string
         origin_instance_uid:
           type: string
+        origin_spoke_name:
+          type: string
         payload: {}
         project_id:
           format: int64
@@ -2527,6 +2531,8 @@ components:
           type: string
         spoke_instance_uid:
           type: string
+        spoke_name:
+          type: string
         token:
           type: string
         updated_at:
@@ -2898,6 +2904,16 @@ components:
         - status
         - method
         - active_relay_enrollments
+      type: object
+    FederationSpokeNameOut:
+      additionalProperties: true
+      properties:
+        spoke_instance_uid:
+          type: string
+        spoke_name:
+          type: string
+      required:
+        - spoke_instance_uid
       type: object
     FederationStatusBody:
       additionalProperties: true
@@ -6312,6 +6328,15 @@ components:
         - complete
         - truncated
       type: object
+    SetFederationSpokeNameRequestBody:
+      additionalProperties: false
+      properties:
+        name:
+          description: Lowercase spoke name, or empty to clear.
+          type: string
+      required:
+        - name
+      type: object
     SetProjectAccessRequestBody:
       additionalProperties: false
       properties:
@@ -7635,6 +7660,35 @@ paths:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
       summary: Rotate a federation enrollment
+  /api/v1/federation/enrollments/spokes/{spoke_instance_uid}/name:
+    put:
+      operationId: setFederationSpokeName
+      parameters:
+        - in: path
+          name: spoke_instance_uid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetFederationSpokeNameRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationSpokeNameOut"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+      summary: Set or clear an enrolled spoke's hub-local name
   /api/v1/federation/enrollments/{enrollment_id}/revoke:
     post:
       operationId: revokeFederationEnrollment

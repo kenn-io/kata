@@ -100,6 +100,11 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 				return fmt.Errorf("clear replacement metadata: %w", err)
 			}
 		}
+		// Labels describe the restored enrollment inventory, so target-only
+		// labels must not survive a replacement restore.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE substr(key,1,?)=?`, len(db.FederationSpokeNamePrefix), db.FederationSpokeNamePrefix); err != nil {
+			return fmt.Errorf("clear target spoke names: %w", err)
+		}
 		// meta survives the clear; drop the target's creation time so a source
 		// UID never inherits it.
 		if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key=?`, db.MetaKeyInstanceCreatedAt); err != nil {
