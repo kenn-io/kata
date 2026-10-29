@@ -195,6 +195,7 @@ func TestDaemonClientClassifiesUnixFailuresAcrossGeneratedCall(t *testing.T) {
 		handler   http.Handler
 		wantPhase string
 		wantTime  bool
+		Timeout   time.Duration
 	}{
 		{
 			name: "headers timeout",
@@ -203,6 +204,7 @@ func TestDaemonClientClassifiesUnixFailuresAcrossGeneratedCall(t *testing.T) {
 			}),
 			wantPhase: "headers",
 			wantTime:  true,
+			Timeout:   100 * time.Millisecond, //nolint:kennlint // deadlinetest: the handler holds headers until the client deadline fires
 		},
 		{
 			name: "body timeout",
@@ -217,6 +219,7 @@ func TestDaemonClientClassifiesUnixFailuresAcrossGeneratedCall(t *testing.T) {
 			}),
 			wantPhase: "body",
 			wantTime:  true,
+			Timeout:   100 * time.Millisecond, //nolint:kennlint // deadlinetest: the handler holds the body until the client deadline fires
 		},
 		{
 			name: "connection closes before headers",
@@ -229,6 +232,7 @@ func TestDaemonClientClassifiesUnixFailuresAcrossGeneratedCall(t *testing.T) {
 				}
 			}),
 			wantPhase: "headers",
+			Timeout:   10 * time.Second,
 		},
 		{
 			name: "truncated body",
@@ -239,16 +243,13 @@ func TestDaemonClientClassifiesUnixFailuresAcrossGeneratedCall(t *testing.T) {
 				_, _ = w.Write([]byte(`{"ok":true}`))
 			}),
 			wantPhase: "body",
+			Timeout:   10 * time.Second,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			timeout := 10 * time.Second
-			if tt.wantTime {
-				timeout = 100 * time.Millisecond //nolint:kennlint // deadlinetest: the timeout cases hold headers or the body until the client deadline fires
-			}
-			api := newUnixGeneratedTestClient(t, tt.handler, timeout)
+			api := newUnixGeneratedTestClient(t, tt.handler, tt.Timeout)
 
 			_, err := api.PingWithResponse(t.Context())
 
