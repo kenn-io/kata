@@ -1583,7 +1583,7 @@ type CreateRecurrenceRequest struct {
 		InitialIssueRef string                  `json:"initial_issue_ref,omitempty"`
 		RRule           string                  `json:"rrule" required:"true"`
 		DTStart         string                  `json:"dtstart" required:"true"`
-		Timezone        string                  `json:"timezone" required:"true"`
+		Timezone        string                  `json:"timezone" required:"true" doc:"IANA time zone such as America/New_York or UTC. Local is rejected because it depends on the daemon host."`
 		Template        RecurrenceTemplateInput `json:"template"`
 	}
 }
@@ -1644,7 +1644,7 @@ type PatchRecurrenceRequest struct {
 		Actor    string                         `json:"actor,omitempty"`
 		RRule    *string                        `json:"rrule,omitempty"`
 		DTStart  *string                        `json:"dtstart,omitempty"`
-		Timezone *string                        `json:"timezone,omitempty"`
+		Timezone *string                        `json:"timezone,omitempty" doc:"IANA time zone such as America/New_York or UTC. Changes to Local are rejected; an existing Local value may be retained by omitting timezone or echoing Local."`
 		Template *RecurrenceTemplateUpdateInput `json:"template,omitempty"`
 	}
 }

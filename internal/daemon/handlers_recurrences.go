@@ -112,6 +112,10 @@ func createRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Create
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
+		if in.Body.Timezone == "Local" {
+			return nil, api.NewError(400, "validation",
+				"timezone: Local depends on the daemon host; use an IANA time zone such as America/New_York or UTC", "", nil)
+		}
 		createInput := db.CreateRecurrenceIn{
 			ProjectID: in.ProjectID,
 			Actor:     actor,
@@ -215,6 +219,18 @@ func patchRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.PatchRe
 		rec, err := activeRecurrenceByUID(ctx, cfg.DB, in.ProjectID, in.RecurrenceUID)
 		if err != nil {
 			return nil, err
+		}
+		if in.Body.Timezone != nil && *in.Body.Timezone == "Local" {
+			// A future revision could become current before storage runs. Check
+			// the read revision before granting the stored-Local exemption.
+			if rev != rec.Revision {
+				return nil, api.NewError(412, "revision_conflict",
+					fmt.Sprintf("recurrence revision is %d", rec.Revision), "", nil)
+			}
+			if rec.Timezone != "Local" {
+				return nil, api.NewError(400, "validation",
+					"timezone: Local depends on the daemon host; use an IANA time zone such as America/New_York or UTC", "", nil)
+			}
 		}
 		update := db.RecurrenceUpdate{
 			Rule:     in.Body.RRule,

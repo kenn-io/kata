@@ -45,6 +45,33 @@ code to branch in scripts, rather than matching the message or hint.
 The CLI preserves the hint in human, agent, and JSON errors. See
 [agent output](agent-output.md#errors) for its stderr format.
 
+## Recurrence timezones
+
+Use an IANA time zone such as `America/New_York` or `UTC` when creating a
+recurrence with `POST /api/v1/projects/{project_id}/recurrences`:
+
+```json
+{
+  "actor": "user-a",
+  "rrule": "FREQ=WEEKLY",
+  "dtstart": "2026-11-02",
+  "timezone": "America/New_York",
+  "template": {"title": "Weekly review"}
+}
+```
+
+Creation, including attachment through `initial_issue_ref`, rejects the exact
+value `Local` with HTTP 400 and error code `validation`. Changing another
+timezone to `Local` through PATCH returns the same error. `Local` depends on
+the daemon host, so moving the daemon could change the schedule's timezone.
+
+Existing recurrences stored with `Local` still run and remain readable. PATCH
+may omit `timezone` or echo `Local` while editing their schedule or template.
+To make an existing schedule portable, PATCH its timezone to an IANA zone or
+`UTC`. PATCH requires the current `If-Match: "rev-N"` revision; stale requests
+return HTTP 412 with code `revision_conflict`, including stale `Local` values.
+Other loadable timezone names and aliases keep their existing behavior.
+
 ## What the schema is
 
 A **per-release snapshot** of the daemon's current HTTP API: a faithful
