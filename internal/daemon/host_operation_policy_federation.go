@@ -14,7 +14,7 @@ func registerFederationOperationPolicies(policies map[string]HostOperationPolicy
 		Mutation: true, restricted: true,
 	}, "enableProjectFederation", "skipFederationQuarantine", "retryFederationQuarantine",
 		"createFederationEnrollment", "rotateFederationEnrollment",
-		"revokeFederationEnrollment", "createFederationReplica",
+		"revokeFederationEnrollment", "setFederationSpokeName", "createFederationReplica",
 		"leaveFederationReplica", "rebindFederationReplica", "configureFederationSigning",
 		"connectFederationBridge", "disconnectFederationBridge", "repinFederationRootKey")
 

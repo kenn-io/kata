@@ -70,6 +70,9 @@ func ValidateImportRecords(records []ImportRecord) error {
 			return fmt.Errorf("import record %d: %w", i, err)
 		}
 	}
+	if err := validateSpokeNameReplay(records); err != nil {
+		return err
+	}
 	if err := validateCronImportEvents(records); err != nil {
 		return err
 	}

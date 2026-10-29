@@ -803,6 +803,11 @@ var storageScenarios = []scenario{
 		runWithBackend: checkClaimViolationQueries,
 	},
 	{
+		name:    "federation spoke names",
+		methods: []string{"CreateFederationEnrollment", "ListFederationSpokeNames", "SetFederationSpokeName", "ListFederationEnrollments", "ExportMeta", "ExportProjects", "ExportFederationEnrollments", "ImportReplay"},
+		run:     func(t *testing.T, store db.Storage) error { RunFederationSpokeNames(t, store); return nil },
+	},
+	{
 		name: "federation control lifecycle",
 		methods: []string{
 			"ActiveFederationQuarantine", "ActiveFederationQuarantinesByProject",

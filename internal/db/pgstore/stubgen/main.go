@@ -120,6 +120,8 @@ var alreadyImplemented = map[string]bool{
 	"FederationSyncStatusByProject":        true, // federation_control.go
 	"FindActiveFederationEnrollment":       true, // federation_control.go
 	"ListFederationBindings":               true, // federation_control.go
+	"ListFederationSpokeNames":             true, // spoke_names.go
+	"SetFederationSpokeName":               true, // spoke_names.go
 	"ListFederationEnrollments":            true, // federation_control.go
 	"ListProjectFederationEnrollments":     true, // federation_control.go
 	"LeaveFederationReplica":               true, // federation_projection.go

@@ -412,14 +412,22 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 				}
 			}
 		}
+		names, err := cfg.DB.ListFederationSpokeNames(ctx)
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
 		created, err := cfg.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
 			Token:                        in.Body.Token,
 			SpokeInstanceUID:             in.Body.SpokeInstanceUID,
+			SpokeName:                    in.Body.SpokeName,
 			ProjectID:                    in.Body.ProjectID,
 			Capabilities:                 in.Body.Capabilities,
 			Actor:                        actor,
 			AllowAdoptionSnapshotAuthors: in.Body.AllowAdoptionSnapshotAuthors,
 		})
+		if errors.Is(err, db.ErrFederationSpokeNameValidation) {
+			return nil, api.NewError(http.StatusBadRequest, "validation", err.Error(), "", nil)
+		}
 		if errors.Is(err, db.ErrFederationEnrollmentTokenConflict) {
 			return nil, api.NewError(http.StatusConflict, "federation_enrollment_token_conflict",
 				"federation enrollment token conflicts with an existing enrollment", "", nil)
@@ -428,6 +436,11 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		out := federationEnrollmentToOut(created.Enrollment, created.Token)
+		out.SpokeName = names[created.Enrollment.SpokeInstanceUID]
+		if in.Body.SpokeName != "" {
+			out.SpokeName = in.Body.SpokeName
+		}
+
 		if join != nil {
 			join.Token, join.Actor, join.Capabilities = created.Token, created.Enrollment.Actor, created.Enrollment.Capabilities
 			join.PushEnabled = slices.Contains(strings.Split(created.Enrollment.Capabilities, ","), "push")
@@ -500,13 +513,37 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		names, err := cfg.DB.ListFederationSpokeNames(ctx)
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
 		out := make([]api.FederationEnrollmentOut, 0, len(enrollments))
 		for _, enrollment := range enrollments {
-			out = append(out, federationEnrollmentToOut(enrollment, ""))
+			row := federationEnrollmentToOut(enrollment, "")
+			row.SpokeName = names[enrollment.SpokeInstanceUID]
+			out = append(out, row)
 		}
 		return &api.ListFederationEnrollmentsResponse{
 			Body: api.ListFederationEnrollmentsBody{Enrollments: out},
 		}, nil
+	})
+
+	huma.Register(humaAPI, huma.Operation{
+		OperationID: "setFederationSpokeName", Method: http.MethodPut,
+		Path:    "/api/v1/federation/enrollments/spokes/{spoke_instance_uid}/name",
+		Summary: "Set or clear an enrolled spoke's hub-local name",
+	}, func(ctx context.Context, in *api.SetFederationSpokeNameRequest) (*api.SetFederationSpokeNameResponse, error) {
+		err := cfg.DB.SetFederationSpokeName(ctx, in.SpokeInstanceUID, in.Body.Name)
+		if errors.Is(err, db.ErrFederationSpokeNameValidation) {
+			return nil, api.NewError(http.StatusBadRequest, "validation", err.Error(), "", nil)
+		}
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, api.NewError(http.StatusNotFound, "federation_enrollment_not_found", "spoke has no enrollment", "", nil)
+		}
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
+		return &api.SetFederationSpokeNameResponse{Body: api.FederationSpokeNameOut{SpokeInstanceUID: in.SpokeInstanceUID, SpokeName: in.Body.Name}}, nil
 	})
 
 	huma.Register(humaAPI, huma.Operation{
