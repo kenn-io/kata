@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Make the hand-written pages in the assembled site paint in their own fonts.
+"""Make every page in the assembled site paint with its stylesheets and fonts.
 
 The browser finds a font in a separate file only after it parses the
 stylesheet, so it can paint text in a fallback face first. This embeds every
 font that styles/site.css references as a data URL, and inlines
-website/hold-first-paint.js right after each hand-written page's charset
-declaration so Chromium waits for the embedded fonts to decode.
+website/hold-first-paint.js right after each page's charset declaration so the
+page stays hidden until its stylesheets load and Chromium decodes the embedded
+fonts.
 """
 
 from __future__ import annotations
@@ -19,7 +20,6 @@ from public_markdown_sources import fail
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 WEBSITE = ROOT / "website"
-HANDWRITTEN_PAGES = ("index.html", "guide/index.html", "404.html")
 CHARSET = '<meta charset="utf-8">'
 FONT_URL = re.compile(r'url\("/fonts/([A-Za-z0-9-]+\.woff2)"\)')
 
@@ -65,8 +65,11 @@ def main() -> None:
 
     embed_fonts(site_dir / "styles" / "site.css")
     script = (WEBSITE / "hold-first-paint.js").read_text(encoding="utf-8")
-    for name in HANDWRITTEN_PAGES:
-        hold_first_paint(site_dir / name, script)
+    pages = sorted(site_dir.rglob("*.html"))
+    if not pages:
+        fail(f"{site_dir.relative_to(ROOT)} has no HTML pages to hold")
+    for page in pages:
+        hold_first_paint(page, script)
     print("website fonts embedded and first paint held")
 
 

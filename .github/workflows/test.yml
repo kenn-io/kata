@@ -178,7 +178,7 @@ jobs:
       - name: Build the docs site
         run: make docs-install docs-build
 
-      # Check the web UI as the daemon serves it, with its real headers.
+      # Check the web UI as the daemon serves it.
       - name: Start an isolated daemon
         env:
           KATA_HOME: ${{ runner.temp }}/kata-first-paint/home
@@ -195,11 +195,14 @@ jobs:
           curl --fail --silent --show-error --output /dev/null --retry 60 --retry-delay 1 \
             --retry-all-errors --header 'Accept: text/html' http://127.0.0.1:7777/kata
 
+      # The daemon serves the shell at /kata only to requests that accept HTML,
+      # and the check's fetch does not ask for it. /index.html is the same page
+      # with the same headers.
       - name: Check first paint
-        uses: kenn-io/actions/first-paint@ee1ddcce6a620e49ba96f613bb8d113e0193b4f6 # first-paint, kenn-io/actions#6
+        uses: kenn-io/actions/first-paint@b523fb403607f01de5eec5f4556c7668544c70fe  # main
         with:
           dist: docs/site
-          urls: http://127.0.0.1:7777/kata
+          urls: http://127.0.0.1:7777/index.html
 
       - name: Show the daemon log
         if: failure()
