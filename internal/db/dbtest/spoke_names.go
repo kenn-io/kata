@@ -55,11 +55,25 @@ func RunFederationSpokeNames(t *testing.T, store db.Storage) {
 	names, err = store.ListFederationSpokeNames(ctx)
 	require.NoError(t, err)
 	require.Equal(t, map[string]string{first: "desktop", second: "laptop"}, names)
+	// Replace one existing row so duplicate-key validation cannot mask an
+	// invalid name or a name already held by another enrolled instance.
+	for _, name := range []string{"Bad", "laptop"} {
+		invalid := append([]db.ImportRecord{}, records...)
+		for i, record := range invalid {
+			if meta, ok := record.(*db.MetaKV); ok && meta.Key == db.FederationSpokeNamePrefix+first {
+				invalid[i] = &db.MetaKV{Key: meta.Key, Value: name}
+				break
+			}
+		}
+		require.ErrorIs(t, store.ImportReplay(ctx, invalid, db.ImportOptions{}), db.ErrFederationSpokeNameValidation)
+		names, err = store.ListFederationSpokeNames(ctx)
+		require.NoError(t, err)
+		require.Equal(t, "desktop", names[first], "invalid import is atomic")
+	}
 	for _, bad := range []*db.MetaKV{
-		{Key: "federation_spoke_name." + first, Value: "Bad"},
 		{Key: "federation_spoke_name.invalid", Value: "phone"},
 		{Key: "federation_spoke_name.01HZNQ7VFPK1XGD8R5MABCD4EC", Value: "phone"},
-		{Key: "federation_spoke_name." + first, Value: "laptop"},
+		{Key: "federation_spoke_name." + first, Value: "desktop"},
 	} {
 		invalid := append(append([]db.ImportRecord{}, records...), bad)
 		require.ErrorIs(t, store.ImportReplay(ctx, invalid, db.ImportOptions{}), db.ErrFederationSpokeNameValidation)
