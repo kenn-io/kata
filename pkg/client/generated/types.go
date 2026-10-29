@@ -3881,6 +3881,28 @@ func (l LeaveFederationReplicaResultBody) Validate() error {
 	return errors
 }
 
+type LinkAttachmentInput struct {
+	Actor     *string    `json:"actor,omitempty"`
+	NodeID    *int64     `json:"node_id,omitempty"`
+	Path      *string    `json:"path,omitempty"`
+	VersionID *uuid.UUID `json:"version_id,omitempty"`
+}
+
+func (l LinkAttachmentInput) Validate() error {
+	var errors runtime.ValidationErrors
+	if l.VersionID != nil {
+		if v, ok := any(l.VersionID).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("VersionID", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type LinkChanges struct {
 	BlockedByAdded   []LinkPeer `json:"blocked_by_added,omitempty"`
 	BlockedByRemoved []LinkPeer `json:"blocked_by_removed,omitempty"`

@@ -1,4 +1,4 @@
-package docbank
+package docbank_test
 
 import (
 	"io"
@@ -10,12 +10,13 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/docbank/docbanktest"
 )
 
 func TestDocbankUploadAndContent(t *testing.T) {
 	f := docbanktest.New(t)
-	c := NewClient(f.Server.URL, func() (string, error) { return "test-key", nil })
+	c := docbank.NewClient(f.Server.URL, func() (string, error) { return "test-key", nil })
 	parent, err := c.EnsureFolder(t.Context(), "/kata/project-a")
 	require.NoError(t, err)
 	same, err := c.EnsureFolder(t.Context(), "/kata/project-a")
@@ -39,7 +40,7 @@ func TestDocbankContentWithoutTrailer(t *testing.T) {
 		_, _ = io.WriteString(w, "abc")
 	}))
 	defer upstream.Close()
-	c := NewClient(upstream.URL, func() (string, error) { return "test-key", nil })
+	c := docbank.NewClient(upstream.URL, func() (string, error) { return "test-key", nil })
 	resp, err := c.Content(t.Context(), uuid.MustParse("6f1c2e8a-2222-4222-8222-222222222222"))
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
@@ -61,7 +62,7 @@ func TestDocbankContentRejectsCorruptContent(t *testing.T) {
 				_, _ = io.WriteString(w, "BBBB")
 			}))
 			defer upstream.Close()
-			c := NewClient(upstream.URL, func() (string, error) { return "test-key", nil })
+			c := docbank.NewClient(upstream.URL, func() (string, error) { return "test-key", nil })
 			resp, err := c.Content(t.Context(), uuid.MustParse("6f1c2e8a-2222-4222-8222-222222222222"))
 			require.NoError(t, err)
 			defer func() { _ = resp.Body.Close() }()
@@ -79,7 +80,7 @@ func TestDocbankUploadRejectsMissingVersion(t *testing.T) {
 		_, _ = io.WriteString(w, `{"node":{}}`)
 	}))
 	defer upstream.Close()
-	c := NewClient(upstream.URL, func() (string, error) { return "test-key", nil })
+	c := docbank.NewClient(upstream.URL, func() (string, error) { return "test-key", nil })
 	version, err := c.Upload(t.Context(), 1, "sample.txt", strings.NewReader("abc"), 3, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
 	require.Error(t, err)
 	require.Equal(t, uuid.Nil(), version)
@@ -92,11 +93,11 @@ func TestDocbankStatusAndKeyRotation(t *testing.T) {
 		http.Error(w, "private upstream detail", http.StatusServiceUnavailable)
 	}))
 	defer server.Close()
-	c := NewClient(server.URL, func() (string, error) { return key, nil })
+	c := docbank.NewClient(server.URL, func() (string, error) { return key, nil })
 	for _, value := range []string{"first", "rotated"} {
 		key = value
 		_, err := c.Content(t.Context(), uuid.MustParse("6f1c2e8a-2222-4222-8222-222222222222"))
-		var upstream *Error
+		var upstream *docbank.Error
 		require.ErrorAs(t, err, &upstream)
 		require.Equal(t, 503, upstream.Status)
 		require.Equal(t, "docbank: HTTP 503", err.Error())
@@ -109,7 +110,7 @@ func TestDocbankRefusesRedirect(t *testing.T) {
 	defer target.Close()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, target.URL, http.StatusFound) }))
 	defer server.Close()
-	c := NewClient(server.URL, func() (string, error) { return "test-key", nil })
+	c := docbank.NewClient(server.URL, func() (string, error) { return "test-key", nil })
 	_, err := c.Content(t.Context(), uuid.MustParse("6f1c2e8a-2222-4222-8222-222222222222"))
 	require.Error(t, err)
 	require.Zero(t, calls)
