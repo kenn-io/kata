@@ -366,7 +366,9 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			projectIDs = []int64{*in.Body.ProjectID}
 		}
 		var err error
-		ctx, err = authorizeHostProjectScope(ctx, projectIDs, nil, in.Body.ProjectID == nil)
+		// A name belongs to the instance across every project, so naming
+		// also requires a global host decision for a project-scoped grant.
+		ctx, err = authorizeHostProjectScope(ctx, projectIDs, nil, in.Body.ProjectID == nil || in.Body.SpokeName != "")
 		if err != nil {
 			return nil, err
 		}
