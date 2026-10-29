@@ -804,7 +804,7 @@ var storageScenarios = []scenario{
 	},
 	{
 		name:    "federation spoke names",
-		methods: []string{"CreateFederationEnrollment", "ListFederationSpokeNames", "SetFederationSpokeName", "ListFederationEnrollments", "ExportMeta", "ExportProjects", "ExportFederationEnrollments", "ImportReplay"},
+		methods: []string{"CreateProject", "RemoveProject", "PurgeProject", "CreateFederationEnrollment", "ListFederationSpokeNames", "SetFederationSpokeName", "ListFederationEnrollments", "ExportMeta", "ExportProjects", "ExportFederationEnrollments", "ImportReplay"},
 		run:     func(t *testing.T, store db.Storage) error { RunFederationSpokeNames(t, store); return nil },
 	},
 	{

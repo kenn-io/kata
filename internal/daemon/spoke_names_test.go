@@ -12,19 +12,25 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
+const spokeNameTestUID = "01HZNQ7VFPK1XGD8R5MABCD4EA"
+
+func spokeNameBearer(token string) map[string]string {
+	return map[string]string{"Authorization": "Bearer " + token}
+}
+
 func TestFederationSpokeNamesAPI(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("owner-fixture"))
 	path := "/api/v1/federation/enrollments"
-	resp, raw := envDoRaw(t, env, http.MethodPost, path, map[string]any{"project_id": nil, "spoke_instance_uid": federationTestSpokeUID, "spoke_name": "laptop", "capabilities": "pull", "actor": "member"}, bearer("owner-fixture"))
+	resp, raw := envDoRaw(t, env, http.MethodPost, path, map[string]any{"project_id": nil, "spoke_instance_uid": spokeNameTestUID, "spoke_name": "laptop", "capabilities": "pull", "actor": "member"}, spokeNameBearer("owner-fixture"))
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 	var result map[string]any
 	require.NoError(t, json.Unmarshal(raw, &result))
 	require.Equal(t, "laptop", result["spoke_name"])
-	namePath := path + "/spokes/" + federationTestSpokeUID + "/name"
+	namePath := path + "/spokes/" + spokeNameTestUID + "/name"
 	for _, name := range []string{"build-box", ""} {
-		resp, raw = envDoRaw(t, env, http.MethodPut, namePath, map[string]any{"name": name}, bearer("owner-fixture"))
+		resp, raw = envDoRaw(t, env, http.MethodPut, namePath, map[string]any{"name": name}, spokeNameBearer("owner-fixture"))
 		require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
-		resp, raw = envDoRaw(t, env, http.MethodGet, path, nil, bearer("owner-fixture"))
+		resp, raw = envDoRaw(t, env, http.MethodGet, path, nil, spokeNameBearer("owner-fixture"))
 		require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
 		var list struct {
 			Enrollments []map[string]any `json:"enrollments"`
@@ -37,7 +43,7 @@ func TestFederationSpokeNamesAPI(t *testing.T) {
 			require.Equal(t, name, list.Enrollments[0]["spoke_name"])
 		}
 	}
-	resp, raw = envDoRaw(t, env, http.MethodPut, namePath, map[string]any{"name": "Bad"}, bearer("owner-fixture"))
+	resp, raw = envDoRaw(t, env, http.MethodPut, namePath, map[string]any{"name": "Bad"}, spokeNameBearer("owner-fixture"))
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(raw))
 	resp, _ = envDoRaw(t, env, http.MethodPut, namePath, map[string]any{"name": "phone"}, nil)
 	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
@@ -46,19 +52,19 @@ func TestFederationSpokeNameRequiresOwner(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("owner-fixture"), func(cfg *daemon.ServerConfig) { cfg.Auth.RequireTokenIdentity = true })
 	_, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: "account-fixture", Actor: "member", AdminActor: "bootstrap"})
 	require.NoError(t, err)
-	_, err = env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{SpokeInstanceUID: federationTestSpokeUID, SpokeName: "laptop", Capabilities: "pull", Actor: "member"})
+	_, err = env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{SpokeInstanceUID: spokeNameTestUID, SpokeName: "laptop", Capabilities: "pull", Actor: "member"})
 	require.NoError(t, err)
-	for _, path := range []string{"/api/v1/federation/enrollments", "/api/v1/federation/enrollments/spokes/" + federationTestSpokeUID + "/name"} {
+	for _, path := range []string{"/api/v1/federation/enrollments", "/api/v1/federation/enrollments/spokes/" + spokeNameTestUID + "/name"} {
 		method := http.MethodGet
 		if path != "/api/v1/federation/enrollments" {
 			method = http.MethodPut
 		}
-		resp, _ := envDoRaw(t, env, method, path, map[string]any{"name": "phone"}, bearer("account-fixture"))
+		resp, _ := envDoRaw(t, env, method, path, map[string]any{"name": "phone"}, spokeNameBearer("account-fixture"))
 		require.Equal(t, http.StatusNotFound, resp.StatusCode)
 	}
 	names, err := env.DB.ListFederationSpokeNames(t.Context())
 	require.NoError(t, err)
-	require.Equal(t, "laptop", names[federationTestSpokeUID])
+	require.Equal(t, "laptop", names[spokeNameTestUID])
 }
 
 func TestFederationSpokeNamesEvents(t *testing.T) {

@@ -2049,7 +2049,9 @@ Use `--clear` instead of a name to remove it. Names start with a lowercase
 letter, contain only lowercase letters, digits and hyphens, and have at most
 32 characters. A name belongs to one instance across all of its enrollments
 on this hub and must be unique on the hub. Re-enrolling with a name replaces
-the instance's previous name; omitting the flag keeps it.
+the instance's previous name; omitting the flag keeps it. A name stays while
+any enrollment for that instance remains, including revoked enrollments.
+Purging its last enrollment's project removes the name.
 
 Naming requires the same hub administration authority as listing and revoking
 enrollments. For a relay enrolled through an account credential, ask the hub

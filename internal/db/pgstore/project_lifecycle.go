@@ -251,6 +251,11 @@ type projectPurgeCounts struct {
 func (s *Store) PurgeProject(ctx context.Context, params db.PurgeProjectParams) (db.ProjectPurgeLog, error) {
 	var result db.ProjectPurgeLog
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {
+		// Keep the lock order used by named enrollment creation, and prevent
+		// a concurrent rename from restoring a label for a purged enrollment.
+		if err := lockSpokeNames(ctx, tx); err != nil {
+			return err
+		}
 		project, err := scanProject(tx.QueryRowContext(ctx, projectSelect+` WHERE id = $1 FOR UPDATE`, params.ProjectID))
 		if err != nil {
 			return err
@@ -502,7 +507,9 @@ func deleteProjectScopedTx(ctx context.Context, tx *sql.Tx, project db.Project) 
 			return mapSQLError(err, nil)
 		}
 	}
-	return nil
+	// Retain the hub-local label while another project still enrolls this peer.
+	_, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE substr(key,1,$1)=$2 AND NOT EXISTS (SELECT 1 FROM federation_enrollments e WHERE meta.key=$2||e.spoke_instance_uid)`, len(db.FederationSpokeNamePrefix), db.FederationSpokeNamePrefix)
+	return mapSQLError(err, nil)
 }
 
 func scanProjectPurgeLog(row rowScanner) (db.ProjectPurgeLog, error) {

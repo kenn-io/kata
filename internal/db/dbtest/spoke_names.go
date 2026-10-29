@@ -94,4 +94,30 @@ func RunFederationSpokeNames(t *testing.T, store db.Storage) {
 		require.NoError(t, b)
 	}
 
+	// A name belongs to an instance across projects, until its last enrollment
+	// is permanently removed. Purging one project must retain another's label.
+	const sharedSpoke = "01HZNQ7VFPK1XGD8R5MABCD4EC"
+	projects := make([]db.Project, 0, 2)
+	for _, projectName := range []string{"hub-project-one", "hub-project-two"} {
+		project, err := store.CreateProject(ctx, projectName)
+		require.NoError(t, err)
+		projects = append(projects, project)
+		_, err = store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: sharedSpoke, SpokeName: "tablet", ProjectID: &project.ID, Actor: "member", Capabilities: "pull"})
+		require.NoError(t, err)
+	}
+	for i, project := range projects {
+		_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: project.ID, Actor: "member", Force: true})
+		require.NoError(t, err)
+		_, err = store.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: project.ID, Actor: "member"})
+		require.NoError(t, err)
+		names, err = store.ListFederationSpokeNames(ctx)
+		require.NoError(t, err)
+		if i == 0 {
+			require.Equal(t, "tablet", names[sharedSpoke])
+		} else {
+			require.NotContains(t, names, sharedSpoke)
+		}
+	}
+	require.NoError(t, store.SetFederationSpokeName(ctx, first, "tablet"), "the removed spoke's name is available again")
+
 }
