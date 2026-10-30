@@ -16,7 +16,32 @@ env:
   GOTRACEBACK: all
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      groups: ${{ steps.changes.outputs.groups }}
+      all: ${{ steps.changes.outputs.all }}
+    steps:
+      - uses: kenn-io/actions/changes@92f255293f1cfcf6998d1b87d0c2c3bb700d01e6
+        id: changes
+        with:
+          filters: |
+            go:
+              - '!{*.md,docs/**/*.md,docs/website/**,web/**,packages/**,package.json,bun.lock}'
+              # These pages are bundled by docs/docs.go and read by MCP tests.
+              - 'docs/index.md'
+              - 'docs/{get-started,guide,workflows,reference,operations}/*.md'
+              - 'docs/{scripts,assets,screenshots}/**'
+            frontend:
+              - '!{*.md,docs/**,**/*.go,go.mod,go.sum}'
+              - 'docs/{scripts,assets,screenshots}/**'
+
   web-static:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'frontend')) }}
     name: Web static checks
     runs-on: ubuntu-latest
 
@@ -43,6 +68,8 @@ jobs:
         run: make web-check web-audit web-test
 
   web-browser:
+    needs: changes
+    if: &mixed-changes ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go') || contains(fromJSON(needs.changes.outputs.groups), 'frontend')) }}
     name: Web browser tests
     runs-on: ubuntu-latest
 
@@ -141,6 +168,8 @@ jobs:
           docker rm --force "$CONTAINER_ID"
 
   go:
+    needs: changes
+    if: *mixed-changes
     name: Go tests
     runs-on: ubuntu-latest
 
@@ -183,6 +212,8 @@ jobs:
           env -u KATA_AUTH_TOKEN go test -p 1 ./e2e
 
   native-agent-plugins:
+    needs: changes
+    if: &go-changes ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go')) }}
     name: Native agent plugins
     runs-on: ubuntu-latest
     steps:
@@ -224,8 +255,9 @@ jobs:
           -run '^Test(PiNative(InstalledRunner|RealKataTransport|InstalledRuntimeReplacement)|NativePlugins(Runtime|PublishedDeclarations)|OpenClawPublishedNativeLoader)$'
 
   api-breaking:
+    needs: changes
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go')) }}
     name: OpenAPI breaking changes
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
 
     steps:
@@ -247,6 +279,8 @@ jobs:
         run: make api-breaking BASE_REF="origin/$BASE_REF"
 
   api-check:
+    needs: changes
+    if: *go-changes
     name: OpenAPI artifacts
     runs-on: ubuntu-latest
 
@@ -266,6 +300,8 @@ jobs:
         run: make api-check
 
   postgres:
+    needs: changes
+    if: *mixed-changes
     name: PostgreSQL ${{ matrix.postgres }} conformance
     runs-on: ubuntu-latest
     strategy:
@@ -350,6 +386,8 @@ jobs:
           env -u KATA_AUTH_TOKEN go test -count=1 -p 1 ./e2e
 
   windows:
+    needs: changes
+    if: *go-changes
     name: ${{ matrix.name }}
     runs-on: windows-2025
     strategy:
@@ -439,6 +477,8 @@ jobs:
           env -u KATA_AUTH_TOKEN go test -timeout 15m -vet=off -run "$TEST_RUN" -skip "$TEST_SKIP" ./cmd/kata
 
   lint:
+    needs: changes
+    if: *go-changes
     name: golangci-lint
     runs-on: ubuntu-latest
 
@@ -463,6 +503,8 @@ jobs:
         run: make lint
 
   nilaway:
+    needs: changes
+    if: *go-changes
     name: nilaway
     runs-on: ubuntu-latest
 
@@ -482,6 +524,8 @@ jobs:
         run: make nilaway
 
   federation-stress:
+    needs: changes
+    if: *go-changes
     name: Federation stress tests
     runs-on: ubuntu-latest
 
@@ -501,6 +545,8 @@ jobs:
         run: env -u KATA_AUTH_TOKEN make test-stress
 
   federation-docker:
+    needs: changes
+    if: *go-changes
     name: Federation Docker tests
     runs-on: ubuntu-latest
 
