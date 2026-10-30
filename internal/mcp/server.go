@@ -616,6 +616,8 @@ type ListInput struct {
 	Labels        []string `json:"labels,omitempty" jsonschema:"Labels that every issue must have"`
 	ExcludeLabels []string `json:"exclude_labels,omitempty" jsonschema:"Labels that issues must not have"`
 	Metadata      []string `json:"metadata,omitempty" jsonschema:"Metadata filters as key or key=value"`
+	DueBy         string   `json:"due_by,omitempty" jsonschema:"YYYY-MM-DD; only issues whose scheduled_on or deadline_on falls on or before this date in time_zone, as the web Today view does; rows then carry scheduled_on_date and deadline_on_date"`
+	TimeZone      string   `json:"time_zone,omitempty" jsonschema:"IANA zone that due_by is read in; requires due_by; defaults to the daemon timezone, then UTC"`
 }
 
 // ReadyInput filters unblocked open work.
@@ -794,6 +796,8 @@ type IssueSummary struct {
 	UpdatedAt           string    `json:"updated_at"`
 	ScheduledOn         *string   `json:"scheduled_on,omitempty"`
 	Timezone            *string   `json:"timezone,omitempty"`
+	ScheduledOnDate     *string   `json:"scheduled_on_date,omitempty" jsonschema:"scheduled_on as a calendar date in the due_by time_zone; set only by kata.list with due_by"`
+	DeadlineOnDate      *string   `json:"deadline_on_date,omitempty" jsonschema:"deadline_on as a calendar date in the due_by time_zone; set only by kata.list with due_by"`
 	updatedAt           time.Time
 	metadata            map[string]any
 }

@@ -1275,6 +1275,8 @@ func (h toolHandlers) summaryFromIssueOut(project ProjectIdentity, issue generat
 		UpdatedAt:           formatTime(issue.UpdatedAt),
 		ScheduledOn:         metadataString(issue.Metadata, "scheduled_on"),
 		Timezone:            metadataString(issue.Metadata, "timezone"),
+		ScheduledOnDate:     issue.ScheduledOnDate,
+		DeadlineOnDate:      issue.DeadlineOnDate,
 		updatedAt:           issue.UpdatedAt,
 		metadata:            issue.Metadata,
 	}
@@ -1295,6 +1297,7 @@ func summaryFromGlobalIssue(issue generated.ListGlobalIssueOut) IssueSummary {
 		Labels: new(nonNilStrings(issue.Labels)), Blocked: issue.Blocked,
 		Revision: issue.Revision, UpdatedAt: formatTime(issue.UpdatedAt),
 		ScheduledOn: metadataString(issue.Metadata, "scheduled_on"), Timezone: metadataString(issue.Metadata, "timezone"),
+		ScheduledOnDate: issue.ScheduledOnDate, DeadlineOnDate: issue.DeadlineOnDate,
 		updatedAt: issue.UpdatedAt, metadata: issue.Metadata,
 	}
 }

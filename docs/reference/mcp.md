@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-10-27
+last_edited: 2026-10-30
 ---
 
 # Model Context Protocol server
@@ -221,6 +221,15 @@ another page exists. Its default limit is 20 and its maximum is 100. Pass
 `sort: "created"` orders newest creation first; `sort: "oldest"` reverses it.
 Both use the issue ID to break creation-time ties. Ordinary edits do not move
 issues between pages. These calls require daemon API 0.27.0 or newer.
+
+Set `due_by: "YYYY-MM-DD"` to list only issues whose `scheduled_on` or
+`deadline_on` falls on or before that date, the web Today rule with a date you
+choose. `time_zone` is an optional IANA zone the date is read in and requires
+`due_by`; without it the daemon's `timezone` applies, then UTC. Matching rows
+carry `scheduled_on_date` and `deadline_on_date` in that zone, and `status`,
+`limit`, `include_total` and `cursor` apply to matching issues. A call with
+`due_by` requires daemon API 0.35.0 or newer and returns a tool error for an
+older daemon instead of ignoring the filter.
 
 Set `include_total: true` to request `total`, the count of all matching issues
 in the permitted projects, independent of the page limit and cursor. Counts
