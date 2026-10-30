@@ -234,3 +234,31 @@ func PlanRecurring(j JobDefinition, definitionEventUID string, p RecurringProgre
 	out.Progress = p
 	return out, nil
 }
+
+// RecurringBacklog counts the children that sweeping from p up to now would
+// deliver. The 1000-per-step cap only spreads a large backlog over several
+// sweeps, so the count follows the planner to the end and is exact.
+func RecurringBacklog(j JobDefinition, definitionEventUID string, p RecurringProgress, now time.Time) (int, error) {
+	total := 0
+	for {
+		batch, err := PlanRecurring(j, definitionEventUID, p, now)
+		if err != nil {
+			return 0, err
+		}
+		total += len(batch.Due)
+		if !batch.More {
+			return total, nil
+		}
+		if sameRecurringPosition(p, batch.Progress) {
+			return 0, invalid("recurring planner made no progress")
+		}
+		p = batch.Progress
+	}
+}
+
+func sameRecurringPosition(a, b RecurringProgress) bool {
+	if !a.Through.Equal(b.Through) || (a.Scan == nil) != (b.Scan == nil) {
+		return false
+	}
+	return a.Scan == nil || a.Scan.Cursor.Equal(b.Scan.Cursor)
+}

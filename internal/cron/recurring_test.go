@@ -241,3 +241,57 @@ func TestRecurringSkipIdleSweepsKeepProgress(t *testing.T) {
 	require.Equal(t, at(t, "2026-10-02T09:05:00Z"), missed.Progress.Through,
 		"discarding an occurrence records progress past it")
 }
+
+// The backlog count must equal what repeated sweeps would create, with no
+// per-sweep cap on the total.
+func TestRecurringBacklog(t *testing.T) {
+	anchor := at(t, "2026-06-01T00:00:00Z")
+	progress := RecurringProgress{Version: 1, Anchor: anchor, Through: anchor}
+	j := nativeJob(t)
+	j.Trigger = Trigger{Kind: "interval", IntervalSeconds: 60}
+
+	for name, tc := range map[string]struct {
+		change func(*JobDefinition)
+		now    time.Time
+		want   int
+	}{
+		"all counts every missed occurrence":    {func(j *JobDefinition) {}, anchor.Add(7 * time.Minute), 7},
+		"all beyond a thousand is exact":        {func(j *JobDefinition) {}, anchor.Add(2503 * time.Minute), 2503},
+		"nothing due yet":                       {func(j *JobDefinition) {}, anchor.Add(30 * time.Second), 0},
+		"latest delivers one":                   {func(j *JobDefinition) { j.Catchup = "latest" }, anchor.Add(2503 * time.Minute), 1},
+		"latest with nothing due":               {func(j *JobDefinition) { j.Catchup = "latest" }, anchor.Add(30 * time.Second), 0},
+		"skip drops occurrences past grace":     {func(j *JobDefinition) { j.Catchup = "skip"; j.GraceSeconds = 60 }, anchor.Add(2503 * time.Minute), 2},
+		"disabled job delivers nothing":         {func(j *JobDefinition) { j.Enabled = false }, anchor.Add(7 * time.Minute), 0},
+		"calendar trigger counts missed months": {func(j *JobDefinition) { j.Trigger = Trigger{Kind: "cron", Cron: "0 0 1 * *"} }, at(t, "2026-09-15T00:00:00Z"), 3},
+	} {
+		t.Run(name, func(t *testing.T) {
+			job := j
+			tc.change(&job)
+			got, err := RecurringBacklog(job, definitionUID, progress, tc.now)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+
+	t.Run("matches the sweep loop", func(t *testing.T) {
+		now := anchor.Add(1234 * time.Minute)
+		want, p := 0, progress
+		for {
+			batch, err := PlanRecurring(j, definitionUID, p, now)
+			require.NoError(t, err)
+			want += len(batch.Due)
+			p = batch.Progress
+			if !batch.More {
+				break
+			}
+		}
+		got, err := RecurringBacklog(j, definitionUID, progress, now)
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("invalid input is rejected", func(t *testing.T) {
+		_, err := RecurringBacklog(j, "not-a-uid", progress, anchor.Add(time.Hour))
+		require.ErrorIs(t, err, ErrInvalid)
+	})
+}
