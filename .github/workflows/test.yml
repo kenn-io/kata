@@ -31,17 +31,23 @@ jobs:
         with:
           filters: |
             go:
-              - '!{*.md,docs/**/*.md,docs/website/**,docs/scripts/**,docs/stylesheets/**,docs/javascripts/**,docs/overrides/**,docs/zensical.toml,docs/vercel.json,docs/llms.txt,docs/pyproject.toml,docs/uv.lock,docs/vercel-build.sh,docs/zensical-docs.sh,web/**,packages/**}'
+              - '!{*.md,docs/**/*.md,docs/assets/**,docs/site/**,docs/website/**,docs/scripts/**,docs/stylesheets/**,docs/javascripts/**,docs/overrides/**,docs/zensical.toml,docs/vercel.json,docs/llms.txt,docs/pyproject.toml,docs/uv.lock,docs/vercel-build.sh,docs/zensical-docs.sh,web/**,packages/**}'
               - '**/*.go'
             embedded-docs:
               # Keep aligned with the go:embed directive in docs/docs.go.
               - 'docs/index.md'
               - 'docs/{get-started,guide,workflows,reference,operations}/*.md'
             frontend:
-              - '!{*.go,**/*.go,*.md,**/*.md,docs/website/**,docs/scripts/**,docs/stylesheets/**,docs/javascripts/**,docs/overrides/**,docs/zensical.toml,docs/vercel.json,docs/llms.txt,docs/pyproject.toml,docs/uv.lock,docs/vercel-build.sh,docs/zensical-docs.sh}'
               - 'web/**'
               - 'packages/**'
               - '.github/**'
+              - 'api/openapi.yaml'
+              - 'bun.lock'
+              - 'package.json'
+              - 'Makefile'
+              - 'go.mod'
+              - 'go.sum'
+              - 'mise.toml'
             docs-javascript:
               - 'docs/javascripts/**'
 
