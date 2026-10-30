@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"strings"
@@ -176,13 +177,9 @@ func CalendarDate(
 	if len(raw) == 0 {
 		return "", false, nil
 	}
-	values, err := decodeScheduleMetadata(raw)
+	value, issueTimezone, err := decodePlanningField(raw, field)
 	if err != nil {
 		return "", false, err
-	}
-	value := values.ScheduledOn
-	if field == "deadline_on" {
-		value = values.DeadlineOn
 	}
 	if value == nil {
 		return "", false, nil
@@ -197,7 +194,7 @@ func CalendarDate(
 		return scheduleValue, true, nil
 	}
 	if kind == scheduledOnLocalTime {
-		location, err := loadScheduleLocation(values.Timezone, defaultTimezone)
+		location, err := loadScheduleLocation(issueTimezone, defaultTimezone)
 		if err != nil {
 			return "", false, err
 		}
@@ -210,8 +207,8 @@ func CalendarDate(
 	switch {
 	case displayTimezone != nil:
 		display = *displayTimezone
-	case values.Timezone != "":
-		display = values.Timezone
+	case issueTimezone != "":
+		display = issueTimezone
 	default:
 		display = defaultTimezone
 	}
@@ -223,6 +220,26 @@ func CalendarDate(
 		return "", false, fmt.Errorf("load display timezone %q: %w", display, err)
 	}
 	return instant.In(displayLocation).Format(time.DateOnly), true, nil
+}
+
+// decodePlanningField reads one planning field and the issue timezone, so a
+// non-string sibling field cannot hide a valid date.
+func decodePlanningField(raw, field string) (value *string, timezone string, err error) {
+	var members map[string]jsontext.Value
+	if err := json.Unmarshal([]byte(raw), &members); err != nil {
+		return nil, "", fmt.Errorf("decode schedule metadata: %w", err)
+	}
+	if member, ok := members[field]; ok {
+		if err := json.Unmarshal(member, &value); err != nil {
+			return nil, "", fmt.Errorf("decode schedule metadata %s: %w", field, err)
+		}
+	}
+	if member, ok := members["timezone"]; ok {
+		if err := json.Unmarshal(member, &timezone); err != nil {
+			return nil, "", fmt.Errorf("decode schedule metadata timezone: %w", err)
+		}
+	}
+	return value, timezone, nil
 }
 
 func decodeScheduleMetadata(raw string) (scheduleMetadata, error) {

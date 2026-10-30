@@ -117,3 +117,13 @@ func TestRowPlanningDatesOmitsOnlyTheUnreadableField(t *testing.T) {
 	assert.Equal(t, "2026-10-29", scheduledOn)
 	assert.Empty(t, deadlineOn, "an unknown issue zone cannot place an instant")
 }
+
+func TestRowPlanningDatesKeepsAValidDateBesideANonStringOne(t *testing.T) {
+	scheduledOn, deadlineOn := RowPlanningDates(`{"scheduled_on":42,"deadline_on":"2026-11-02"}`, "", "")
+	assert.Empty(t, scheduledOn)
+	assert.Equal(t, "2026-11-02", deadlineOn)
+
+	scheduledOn, deadlineOn = RowPlanningDates(`{"scheduled_on":"2026-10-29","deadline_on":["x"]}`, "", "")
+	assert.Equal(t, "2026-10-29", scheduledOn)
+	assert.Empty(t, deadlineOn)
+}
