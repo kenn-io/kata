@@ -167,14 +167,16 @@ type ListAllIssuesParams struct {
 	// UpdatedFirst keeps the single-project route's default order (updated_at
 	// DESC) when neither CreatedFirst nor OldestFirst is set.
 	UpdatedFirst bool `json:",omitzero"`
+}
 
-	// DueBy selects issues whose scheduled_on or deadline_on falls on or
-	// before this YYYY-MM-DD date, projected into DueTimeZone. DefaultTimezone is the daemon zone for civil schedules
-	// without an issue zone. Set DueBy only on ListDueIssues/CountDueIssues;
-	// the plain list methods do not read these fields.
-	DueBy           string `json:",omitzero"`
-	DueTimeZone     string `json:",omitzero"`
-	DefaultTimezone string `json:",omitzero"`
+// DueFilter selects issues whose scheduled_on or deadline_on falls on or before
+// By (YYYY-MM-DD), read in TimeZone. DefaultTimezone is the daemon zone for
+// civil schedules without an issue zone. Only ListDueIssues and CountDueIssues
+// take it; the plain list methods cannot receive it.
+type DueFilter struct {
+	By              string
+	TimeZone        string
+	DefaultTimezone string
 }
 
 // DueIssue is a list row that matched a due-by filter, with its planning dates

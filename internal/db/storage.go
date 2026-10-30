@@ -135,11 +135,11 @@ type Storage interface {
 	ListAllIssues(ctx context.Context, p ListAllIssuesParams) ([]Issue, error)
 	CountIssues(ctx context.Context, p ListIssuesParams) (int64, error)
 	CountAllIssues(ctx context.Context, p ListAllIssuesParams) (int64, error)
-	// ListDueIssues is ListAllIssues restricted to rows matching p.DueBy by
-	// the browser's Today rule; Limit and After apply to matching rows.
-	ListDueIssues(ctx context.Context, p ListAllIssuesParams) ([]DueIssue, error)
-	// CountDueIssues counts every row matching p.DueBy, ignoring Limit and After.
-	CountDueIssues(ctx context.Context, p ListAllIssuesParams) (int64, error)
+	// ListDueIssues is ListAllIssues restricted to rows matching due by the
+	// browser's Today rule; Limit and After apply to matching rows.
+	ListDueIssues(ctx context.Context, p ListAllIssuesParams, due DueFilter) ([]DueIssue, error)
+	// CountDueIssues counts every row matching due, ignoring Limit and After.
+	CountDueIssues(ctx context.Context, p ListAllIssuesParams, due DueFilter) (int64, error)
 	ReadyIssues(ctx context.Context, projectID int64, limit int, filter ReadyIssuesFilter) ([]Issue, error)
 	ReadyIssuesGlobal(ctx context.Context, limit int, filter ReadyIssuesFilter) ([]ReadyGlobalIssue, error)
 	ChildrenOfIssue(ctx context.Context, parentIssueID int64) ([]Issue, error)

@@ -87,9 +87,11 @@ func MatchUICalendarView(
 	case "upcoming":
 		return scheduledDate, deadlineDate, scheduled && scheduledDate > query.LocalDate, nil
 	case "today":
-		return scheduledDate, deadlineDate, dueByLocalDate(
-			scheduledDate, scheduled, deadlineDate, deadline, query.LocalDate,
-		), nil
+		// The Today rule, shared with the due-by list filter through
+		// DueByCalendarDates: a present planning date on or before LocalDate.
+		scheduleDue := scheduled && scheduledDate <= query.LocalDate
+		deadlineDue := deadline && deadlineDate <= query.LocalDate
+		return scheduledDate, deadlineDate, scheduleDue || deadlineDue, nil
 	case "deadlines":
 		return "", deadlineDate, true, nil
 	default:
@@ -97,26 +99,15 @@ func MatchUICalendarView(
 	}
 }
 
-// dueByLocalDate is the Today rule shared by the browser snapshot and the
-// due-by list filter: an issue is due when its scheduled or deadline calendar
-// date, when present, falls on or before localDate.
-func dueByLocalDate(
-	scheduledDate string, scheduled bool,
-	deadlineDate string, deadline bool,
-	localDate string,
-) bool {
-	return (scheduled && scheduledDate <= localDate) ||
-		(deadline && deadlineDate <= localDate)
-}
-
-// DueByCalendarDates projects an issue's planning dates into timeZone and
-// reports whether it is due by localDate. scheduledDefaultTimezone can include
-// the legacy recurrence fallback; deadlines use daemonTimezone.
+// DueByCalendarDates projects an issue's planning dates into the filter's
+// time zone and reports whether it is due by the filter's date, using the same
+// Today rule as the browser snapshot. scheduledDefaultTimezone can include the
+// legacy recurrence fallback; deadlines use the filter's daemon timezone.
 func DueByCalendarDates(
-	raw, localDate, timeZone, scheduledDefaultTimezone, daemonTimezone string,
-) (scheduledDate, deadlineDate string, due bool, err error) {
+	raw string, due DueFilter, scheduledDefaultTimezone string,
+) (scheduledDate, deadlineDate string, matches bool, err error) {
 	return MatchUICalendarView(raw, UISnapshotQuery{
-		View: "today", LocalDate: localDate, TimeZone: timeZone, DefaultTimezone: daemonTimezone,
+		View: "today", LocalDate: due.By, TimeZone: due.TimeZone, DefaultTimezone: due.DefaultTimezone,
 	}, scheduledDefaultTimezone)
 }
 

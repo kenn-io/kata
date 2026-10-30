@@ -12,6 +12,11 @@ import (
 	"go.kenn.io/kata/internal/pagination"
 )
 
+type dueQuery struct {
+	db.ListAllIssuesParams
+	due db.DueFilter
+}
+
 type dueFixtureSpec struct {
 	title     string
 	scheduled string
@@ -65,6 +70,9 @@ func checkListDueIssues(t *testing.T, store db.Storage) error {
 	create(project.ID, dueFixtureSpec{title: "issue zone", scheduled: "2026-11-03T01:00", timezone: "Pacific/Auckland"})
 	create(project.ID, dueFixtureSpec{title: "daemon zone", scheduled: "2026-11-03T01:00"})
 	create(project.ID, dueFixtureSpec{title: "dst fall back", deadline: "2026-11-01T23:30", timezone: "America/New_York"})
+	// One hour from midnight in UTC: a wrong offset moves these across the day.
+	create(project.ID, dueFixtureSpec{title: "dst midnight fall", deadline: "2026-11-01T19:30", timezone: "America/New_York"})
+	create(project.ID, dueFixtureSpec{title: "dst midnight spring", deadline: "2026-03-08T19:30", timezone: "America/New_York"})
 	create(project.ID, dueFixtureSpec{title: "dst spring gap", scheduled: "2026-03-08T02:30", timezone: "America/New_York"})
 	closed := create(project.ID, dueFixtureSpec{title: "closed scheduled", scheduled: "2026-11-01"})
 	_, _, _, err = store.CloseIssue(ctx, closed.ID, "done", "due-author", "", nil)
@@ -96,10 +104,14 @@ func checkListDueIssues(t *testing.T, store db.Storage) error {
 	// Newest issue never matches, so a limit must skip it rather than count it.
 	create(project.ID, dueFixtureSpec{title: "newest unscheduled"})
 
-	titles := func(params db.ListAllIssuesParams) []string {
-		params.CreatedFirst = true
-		rows, err := store.ListDueIssues(ctx, params)
+	list := func(q dueQuery) []db.DueIssue {
+		q.CreatedFirst = true
+		rows, err := store.ListDueIssues(ctx, q.ListAllIssuesParams, q.due)
 		require.NoError(t, err)
+		return rows
+	}
+	titles := func(q dueQuery) []string {
+		rows := list(q)
 		out := make([]string, 0, len(rows))
 		for _, row := range rows {
 			out = append(out, row.Title)
@@ -107,16 +119,16 @@ func checkListDueIssues(t *testing.T, store db.Storage) error {
 		slices.Sort(out)
 		return out
 	}
-	scoped := func(dueBy, zone, daemonZone string) db.ListAllIssuesParams {
-		return db.ListAllIssuesParams{
-			ProjectID: project.ID, Status: "open",
-			DueBy: dueBy, DueTimeZone: zone, DefaultTimezone: daemonZone,
+	scoped := func(dueBy, zone, daemonZone string) dueQuery {
+		return dueQuery{
+			ListAllIssuesParams: db.ListAllIssuesParams{ProjectID: project.ID, Status: "open"},
+			due:                 db.DueFilter{By: dueBy, TimeZone: zone, DefaultTimezone: daemonZone},
 		}
 	}
 
 	// Date-only, local date-time and UTC instant values in UTC.
 	require.Equal(t, []string{
-		"date deadline", "date scheduled", "dst fall back", "dst spring gap",
+		"date deadline", "date scheduled", "dst fall back", "dst midnight fall", "dst midnight spring", "dst spring gap",
 		"instant late", "issue zone", "local time utc", "tracked alice", "tracked bob",
 	}, titles(scoped("2026-11-02", "UTC", "")))
 
@@ -144,6 +156,12 @@ func checkListDueIssues(t *testing.T, store db.Storage) error {
 	// 2nd, so it is due on the 1st only for a New York reader.
 	require.Contains(t, titles(scoped("2026-11-01", "America/New_York", "")), "dst fall back")
 	require.NotContains(t, titles(scoped("2026-11-01", "UTC", "")), "dst fall back")
+	// 19:30 EST on Nov 1 is 00:30Z on Nov 2, so a UTC reader sees it on the 2nd;
+	// 19:30 EDT on Mar 8 is 23:30Z that day, so the same reader sees the 8th.
+	require.NotContains(t, titles(scoped("2026-11-01", "UTC", "")), "dst midnight fall")
+	require.Contains(t, titles(scoped("2026-11-02", "UTC", "")), "dst midnight fall")
+	require.Contains(t, titles(scoped("2026-03-08", "UTC", "")), "dst midnight spring")
+	require.NotContains(t, titles(scoped("2026-03-07", "UTC", "")), "dst midnight spring")
 	// A local time inside the spring-forward gap resolves to the first valid
 	// instant after it (07:00Z on the 8th).
 	require.NotContains(t, titles(scoped("2026-03-07", "UTC", "")), "dst spring gap")
@@ -165,8 +183,7 @@ func checkListDueIssues(t *testing.T, store db.Storage) error {
 	require.NotContains(t, titles(scoped("2026-11-02", "UTC", "")), "other project")
 
 	// Rows carry the dates projected into the display zone.
-	rows, err := store.ListDueIssues(ctx, scoped("2026-11-03", "Pacific/Auckland", ""))
-	require.NoError(t, err)
+	rows := list(scoped("2026-11-03", "Pacific/Auckland", ""))
 	var zoned *db.DueIssue
 	for i := range rows {
 		if rows[i].Title == "issue zone" {
@@ -176,8 +193,7 @@ func checkListDueIssues(t *testing.T, store db.Storage) error {
 	require.NotNil(t, zoned)
 	require.Equal(t, "2026-11-03", zoned.ScheduledOnDate)
 	require.Empty(t, zoned.DeadlineOnDate)
-	rows, err = store.ListDueIssues(ctx, scoped("2026-11-02", "UTC", ""))
-	require.NoError(t, err)
+	rows = list(scoped("2026-11-02", "UTC", ""))
 	seen := map[string]db.DueIssue{}
 	for _, row := range rows {
 		seen[row.Title] = row
@@ -188,24 +204,22 @@ func checkListDueIssues(t *testing.T, store db.Storage) error {
 	// Limit and count apply to matching rows, and a cursor continues past the
 	// last returned matching row.
 	all := scoped("2026-11-02", "UTC", "")
-	total, err := store.CountDueIssues(ctx, all)
+	total, err := store.CountDueIssues(ctx, all.ListAllIssuesParams, all.due)
 	require.NoError(t, err)
-	require.Equal(t, int64(9), total)
+	require.Equal(t, int64(11), total)
 	limited := all
 	limited.Limit = 3
 	limited.CreatedFirst = true
-	page, err := store.ListDueIssues(ctx, limited)
-	require.NoError(t, err)
+	page := list(limited)
 	require.Len(t, page, 3, "the unmatched newest issue must not consume the limit")
 	counted := limited
 	counted.After = &pagination.Position{CreatedAt: page[0].CreatedAt, ID: page[0].ID}
-	count, err := store.CountDueIssues(ctx, counted)
+	count, err := store.CountDueIssues(ctx, counted.ListAllIssuesParams, counted.due)
 	require.NoError(t, err)
 	require.Equal(t, total, count, "count ignores limit and cursor")
 	next := limited
 	next.After = &pagination.Position{CreatedAt: page[2].CreatedAt, ID: page[2].ID}
-	rest, err := store.ListDueIssues(ctx, next)
-	require.NoError(t, err)
+	rest := list(next)
 	require.Len(t, rest, 3)
 	require.Less(t, rest[0].ID, page[2].ID)
 	return nil

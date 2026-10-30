@@ -259,6 +259,8 @@ var alreadyImplemented = map[string]bool{
 	"CountIssues":                          true,
 	"CountAllIssues":                       true,
 	"ListAllIssues":                        true, // issues.go
+	"ListDueIssues":                        true, // issues.go
+	"CountDueIssues":                       true, // issues.go
 	"ListDueIssueSyncBindings":             true, // issue_sync.go
 	"ListDueExternalRootBindings":          true, // external_roots.go
 	"ListDueNotificationIssueIDs":          true, // due_notifications.go
