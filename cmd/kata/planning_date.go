@@ -8,7 +8,19 @@ import (
 )
 
 func newDeadlineCmd() *cobra.Command {
-	cmd := newPlanningDateCmd("deadline", "deadline_on")
+	var ifMatch string
+	cmd := &cobra.Command{
+		Use:   "deadline <issue-ref> <date-or-time|->",
+		Short: "set or clear a due date (does not hide from ready)",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validateMetaIfMatchFlag(cmd, ifMatch); err != nil {
+				return err
+			}
+			return runPlanningDate(cmd, args, "deadline_on", ifMatch)
+		},
+	}
+	cmd.Flags().StringVar(&ifMatch, "if-match", "", "expected issue revision (N or rev-N)")
 	cmd.Long = `Set deadline_on. A deadline does not park the issue; use kata schedule for that.
 "-" clears it. Formats: YYYY-MM-DD, local YYYY-MM-DDTHH:MM[:SS], or RFC 3339
 UTC ending in Z. Relative words like "monday" are rejected; compute the date.
@@ -68,23 +80,6 @@ refused: closing it as done would pause the job. Use kata cron job create
 	cmd.Flags().StringVar(&ifMatch, "if-match", "", "expected issue revision (N or rev-N)")
 	cmd.Flags().StringVar(&repeat, "repeat", "", "RRULE to repeat on from <date>, or - to stop repeating")
 	cmd.Flags().StringVar(&timezone, "timezone", "", "IANA zone for --repeat (default: the recurrence's zone, issue timezone metadata, then your zone)")
-	return cmd
-}
-
-func newPlanningDateCmd(name, metadataKey string) *cobra.Command {
-	var ifMatch string
-	cmd := &cobra.Command{
-		Use:   name + " <issue-ref> <date-or-time|->",
-		Short: "set or clear a due date (does not hide from ready)",
-		Args:  cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := validateMetaIfMatchFlag(cmd, ifMatch); err != nil {
-				return err
-			}
-			return runPlanningDate(cmd, args, metadataKey, ifMatch)
-		},
-	}
-	cmd.Flags().StringVar(&ifMatch, "if-match", "", "expected issue revision (N or rev-N)")
 	return cmd
 }
 

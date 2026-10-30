@@ -37,6 +37,14 @@ type recurrenceView struct {
 	Revision          int64   `json:"revision"`
 }
 
+// zone is the recurrence's zone, or "" when there is no recurrence yet.
+func (r *recurrenceView) zone() string {
+	if r == nil {
+		return ""
+	}
+	return r.Timezone
+}
+
 func (r *recurrenceView) line() string {
 	next := "none"
 	if r.NextOccurrenceKey != nil {
@@ -131,6 +139,14 @@ func runScheduleRepeat(cmd *cobra.Command, args []string, opts scheduleRepeatOpt
 	if err != nil {
 		return err
 	}
+	var terms recurrenceTerms
+	if !stop {
+		zone, err := repeatZone(opts.Timezone, current.zone(), issue.Metadata)
+		if err != nil {
+			return err
+		}
+		terms = recurrenceTerms{Rule: opts.Rule, Start: args[1], Zone: zone, Actor: actor}
+	}
 	action := "started"
 	switch {
 	case stop:
@@ -142,22 +158,11 @@ func runScheduleRepeat(cmd *cobra.Command, args []string, opts scheduleRepeatOpt
 		}
 		action = "stopped"
 	case current != nil:
-		recurrenceZone := current.Timezone
-		zone, err := repeatZone(opts.Timezone, recurrenceZone, issue.Metadata)
-		if err != nil {
-			return err
-		}
-		terms := recurrenceTerms{Rule: opts.Rule, Start: args[1], Zone: zone, Actor: actor}
 		if err := changeRecurrence(ctx, api, pid, *current, terms); err != nil {
 			return err
 		}
 		action = "changed"
 	default:
-		zone, err := repeatZone(opts.Timezone, "", issue.Metadata)
-		if err != nil {
-			return err
-		}
-		terms := recurrenceTerms{Rule: opts.Rule, Start: args[1], Zone: zone, Actor: actor}
 		if err := startRecurrence(ctx, api, pid, ref.RefForAPI, issue, terms); err != nil {
 			return err
 		}

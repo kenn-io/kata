@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
@@ -138,6 +139,47 @@ func TestScheduleRepeatZoneSources(t *testing.T) {
 func setIssueTimezoneMeta(t *testing.T, env *testenv.Env, dir, ref, zone string) {
 	t.Helper()
 	runCLI(t, env, dir, "meta", "set", ref, "timezone", zone)
+}
+
+func TestScheduleRepeatChangeUsesTheRecurrencesZoneOverIssueMetadata(t *testing.T) {
+	isolateCallerZone(t)
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "zone on change")
+	runCLI(t, env, dir, "schedule", ref, "2026-11-02", "--repeat", "FREQ=WEEKLY", "--timezone", "Europe/Paris")
+	setIssueTimezoneMeta(t, env, dir, ref, "America/Chicago")
+
+	runCLI(t, env, dir, "schedule", ref, "2026-11-09", "--repeat", "FREQ=DAILY")
+
+	recs := listRecurrencesViaHTTP(t, env, pid)
+	require.Len(t, recs, 1)
+	assert.Equal(t, "Europe/Paris", recs[0].Timezone)
+}
+
+func TestScheduleRepeatJSONOutput(t *testing.T) {
+	isolateCallerZone(t)
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "json output")
+
+	started := runCLI(t, env, dir, "--json", "schedule", ref, "2026-11-02", "--repeat", "FREQ=WEEKLY", "--timezone", "Europe/Paris")
+	var start map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal([]byte(started), &start))
+	assert.JSONEq(t, `"started"`, string(start["action"]))
+	assert.JSONEq(t, `"2026-11-02"`, string(start["scheduled_on"]))
+	assert.JSONEq(t, `"Europe/Paris"`, string(start["timezone"]))
+	var startedRec recurrenceView
+	require.NoError(t, json.Unmarshal(start["recurrence"], &startedRec))
+	assert.Equal(t, "FREQ=WEEKLY", startedRec.RRule)
+
+	changed := runCLI(t, env, dir, "--json", "schedule", ref, "2026-11-09", "--repeat", "FREQ=DAILY", "--timezone", "Asia/Tokyo")
+	var change map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal([]byte(changed), &change))
+	assert.JSONEq(t, `"changed"`, string(change["action"]))
+	assert.NotContains(t, change, "timezone", "a change leaves the issue's own zone alone")
+	var changedRec recurrenceView
+	require.NoError(t, json.Unmarshal(change["recurrence"], &changedRec))
+	assert.Equal(t, "FREQ=DAILY", changedRec.RRule)
+	assert.Equal(t, "2026-11-09", changedRec.DTStart)
+	assert.Equal(t, "Asia/Tokyo", changedRec.Timezone)
 }
 
 func TestScheduleRepeatRequiresAZoneWhenNoneIsKnown(t *testing.T) {
@@ -385,9 +427,7 @@ func TestShowPrintsTheRecurrenceAndJSONCarriesIt(t *testing.T) {
 
 	raw := runCLI(t, env, dir, "--json", "show", ref)
 	var body struct {
-		Recurrence struct {
-			recurrenceView
-		} `json:"recurrence"`
+		Recurrence recurrenceView `json:"recurrence"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(raw), &body))
 	assert.NotEmpty(t, body.Recurrence.UID)
