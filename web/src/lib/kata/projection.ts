@@ -326,6 +326,7 @@ function normalizeIssue(
     labels: [...(issue.labels ?? [])],
     blocks: [],
     blocked_by: [],
+    open_blocked_by: [],
     related: [],
     recurrence_id: issue.recurrence_id,
     occurrence_key: issue.occurrence_key,
@@ -371,7 +372,15 @@ function enrichRelationships(issues: KataTaskSummary[], links: readonly UILink[]
         break
       case 'blocks':
         if (from) from.blocks = appendPeer(from.blocks, toPeer)
-        if (to) to.blocked_by = appendPeer(to.blocked_by, fromPeer)
+        if (to) {
+          to.blocked_by = appendPeer(to.blocked_by, fromPeer)
+          if (link.from_status === 'open') {
+            to.open_blocked_by = [
+              ...(to.open_blocked_by ?? []),
+              { ...fromPeer, qualified_id: link.from_qualified_id },
+            ]
+          }
+        }
         break
       case 'related':
         if (from) from.related = appendPeer(from.related, toPeer)

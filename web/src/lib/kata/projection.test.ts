@@ -24,6 +24,23 @@ describe('normalizeKataUISnapshot', () => {
     },
   )
 
+  test('selects only open blockers for the collection column', () => {
+    const wire = snapshot()
+    wire.collection_links = [
+      link('issue-blocker', 'b1', 'open', 'issue-blocked', 'b2', 'open', 'blocks'),
+      link('issue-done', 'd2', 'closed', 'issue-blocked', 'b2', 'open', 'blocks'),
+      link('issue-later', 'l3', 'open', 'issue-blocked', 'b2', 'open', 'blocks'),
+    ]
+    const projection = normalizeKataUISnapshot(wire, '2026-08-01T12:30:00.000Z')
+    const blocked = projection.issues.find((issue) => issue.uid === 'issue-blocked')!
+
+    expect(blocked.open_blocked_by).toEqual([
+      { uid: 'issue-blocker', short_id: 'b1', qualified_id: 'example-project#b1' },
+      { uid: 'issue-later', short_id: 'l3', qualified_id: 'example-project#l3' },
+    ])
+    expect(blocked.blocked_by).toHaveLength(3)
+  })
+
   test('adapts the native snapshot to the ported immutable collection model', () => {
     const projection = normalizeKataUISnapshot(snapshot(), '2026-08-01T12:30:00.000Z')
 

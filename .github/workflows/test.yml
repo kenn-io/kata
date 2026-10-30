@@ -19,6 +19,7 @@ jobs:
   web-static:
     name: Web static checks
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Check out repository
@@ -45,6 +46,7 @@ jobs:
   web-browser:
     name: Web browser tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Check out repository
@@ -143,6 +145,7 @@ jobs:
   go:
     name: Go tests
     runs-on: ubuntu-latest
+    timeout-minutes: 24
 
     steps:
       - name: Check out repository
@@ -185,6 +188,7 @@ jobs:
   native-agent-plugins:
     name: Native agent plugins
     runs-on: ubuntu-latest
+    timeout-minutes: 18
     steps:
       - name: Check out repository
         uses: actions/checkout@v7.0.1
@@ -225,8 +229,9 @@ jobs:
 
   api-breaking:
     name: OpenAPI breaking changes
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Check out repository
@@ -243,12 +248,13 @@ jobs:
 
       - name: Check for breaking API contract changes
         env:
-          BASE_REF: ${{ github.base_ref }}
-        run: make api-breaking BASE_REF="origin/$BASE_REF"
+          BASE_REF: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || format('origin/{0}', github.base_ref) }}
+        run: make api-breaking BASE_REF="$BASE_REF"
 
   api-check:
     name: OpenAPI artifacts
     runs-on: ubuntu-latest
+    timeout-minutes: 14
 
     steps:
       - name: Check out repository
@@ -268,6 +274,7 @@ jobs:
   postgres:
     name: PostgreSQL ${{ matrix.postgres }} conformance
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -352,6 +359,7 @@ jobs:
   windows:
     name: ${{ matrix.name }}
     runs-on: windows-2025
+    timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false
       # G-S uses measured Windows root-test times. Rebalance if a CLI shard
@@ -360,11 +368,14 @@ jobs:
       matrix:
         include:
           - name: Windows
+            timeout: 25
             cli: false
           - name: Windows CLI (G-S)
+            timeout: 21
             cli: true
             shard: G-S
           - name: Windows CLI (A-F, T-Z, and fuzz/examples)
+            timeout: 23
             cli: true
             shard: complement
 
@@ -441,6 +452,7 @@ jobs:
   lint:
     name: golangci-lint
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Check out repository
@@ -465,6 +477,7 @@ jobs:
   nilaway:
     name: nilaway
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Check out repository
@@ -484,6 +497,7 @@ jobs:
   federation-stress:
     name: Federation stress tests
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Check out repository
@@ -504,6 +518,7 @@ jobs:
   federation-docker:
     name: Federation Docker tests
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Check out repository

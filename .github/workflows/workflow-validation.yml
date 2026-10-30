@@ -17,8 +17,14 @@ on:
       - "scripts/release*"
       - "web/**"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
+
+cache-mode: read
 
 env:
   # "|" falls back to the source repo on any proxy error, including HTTP/2 stream resets mid-download.
@@ -27,6 +33,7 @@ env:
 jobs:
   actionlint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: step-security/jactionlint@v2.2.0
@@ -39,6 +46,7 @@ jobs:
 
   goreleaser:
     runs-on: ubuntu-latest
+    timeout-minutes: 29
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -88,6 +96,7 @@ jobs:
 
   release-image:
     runs-on: ubuntu-latest
+    timeout-minutes: 11
     env:
       VERSION: v0.0.0-snapshot
       OCI_VERSION: 0.0.0-snapshot
