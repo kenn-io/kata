@@ -1,7 +1,7 @@
 ---
 title: Native cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-10-26
+last_edited: 2026-10-30
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -478,6 +478,16 @@ orders by creation time and UID descending. Use `next_before_uid` with `--before
 page. Ordinary federation publishes observations from spokes, folds evidence
 by original event provenance per run UID, and preserves independent runs in
 baselines and backup. Run identity conflicts fail rather than replacing a run.
+
+An adapter with a machine-readable cause for a run's outcome starts
+`summary.message` with the line `reason: <code>`, then puts any detail on the
+next line. The `<code>` matches `[a-z0-9_.-]{1,64}`. Any status may carry one.
+Kata stores the message as text and validates nothing: there is no summary
+field, capability, or schema change. Clients that know the convention can show
+the code and filter on it client-side. Each adapter defines and documents its
+own codes; where two adapters mean the same thing they share the name, as
+`agent_quota`, `agent_login`, and `launch_unproven` do. The `reason: ` marker
+keeps short messages such as `admitted` from reading as codes.
 
 ## Native issue planning dates
 
