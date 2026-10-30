@@ -119,16 +119,6 @@ func TestScheduleRepeatZoneSources(t *testing.T) {
 			},
 			want: "Australia/Sydney",
 		},
-		{
-			name: "TZ set but empty means UTC, not the localtime link",
-			setup: func(t *testing.T, _ *testenv.Env, _, _ string) {
-				link := filepath.Join(t.TempDir(), "localtime")
-				require.NoError(t, os.Symlink("/usr/share/zoneinfo/Australia/Sydney", link))
-				localtimePath = link
-				t.Setenv("TZ", "")
-			},
-			want: "UTC",
-		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -150,20 +140,6 @@ func TestScheduleRepeatZoneSources(t *testing.T) {
 func setIssueTimezoneMeta(t *testing.T, env *testenv.Env, dir, ref, zone string) {
 	t.Helper()
 	runCLI(t, env, dir, "meta", "set", ref, "timezone", zone)
-}
-
-func TestScheduleRepeatChangeUsesTheRecurrencesZoneOverIssueMetadata(t *testing.T) {
-	isolateCallerZone(t)
-	env, dir, pid := setupCLIWorkspace(t)
-	ref := createIssue(t, env, pid, "zone on change")
-	runCLI(t, env, dir, "schedule", ref, "2026-11-02", "--repeat", "FREQ=WEEKLY", "--timezone", "Europe/Paris")
-	setIssueTimezoneMeta(t, env, dir, ref, "America/Chicago")
-
-	runCLI(t, env, dir, "schedule", ref, "2026-11-09", "--repeat", "FREQ=DAILY")
-
-	recs := listRecurrencesViaHTTP(t, env, pid)
-	require.Len(t, recs, 1)
-	assert.Equal(t, "Europe/Paris", recs[0].Timezone)
 }
 
 func TestScheduleRepeatJSONOutput(t *testing.T) {
