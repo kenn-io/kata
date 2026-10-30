@@ -361,7 +361,7 @@ type showResponseForCLI struct {
 	PendingLeases   []pendingClaimForCLI   `json:"pending_leases"`
 	LeaseHubNow     *time.Time             `json:"lease_hub_now"`
 	LeaseViolations []claimViolationForCLI `json:"lease_violations"`
-	Recurrence      *showRecurrence        `json:"-"`
+	Recurrence      *recurrenceView        `json:"-"`
 }
 
 type cliShowComment struct {

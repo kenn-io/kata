@@ -20,17 +20,12 @@ import (
 )
 
 type recurrenceRow struct {
-	UID               string   `json:"uid"`
-	RRule             string   `json:"rrule"`
-	DTStart           string   `json:"dtstart"`
-	Timezone          string   `json:"timezone"`
-	TemplateTitle     string   `json:"template_title"`
-	TemplateBody      string   `json:"template_body"`
-	TemplateOwner     *string  `json:"template_owner"`
-	TemplatePriority  *int64   `json:"template_priority"`
-	TemplateLabels    []string `json:"template_labels"`
-	NextOccurrenceKey *string  `json:"next_occurrence_key"`
-	Revision          int64    `json:"revision"`
+	recurrenceView
+	TemplateTitle    string   `json:"template_title"`
+	TemplateBody     string   `json:"template_body"`
+	TemplateOwner    *string  `json:"template_owner"`
+	TemplatePriority *int64   `json:"template_priority"`
+	TemplateLabels   []string `json:"template_labels"`
 }
 
 func listRecurrencesViaHTTP(t *testing.T, env *testenv.Env, pid int64) []recurrenceRow {
@@ -110,12 +105,12 @@ func TestScheduleRepeatZoneSources(t *testing.T) {
 		},
 		{
 			name:  "TZ environment",
-			setup: func(t *testing.T, env *testenv.Env, dir, ref string) { t.Setenv("TZ", ":Asia/Tokyo") },
+			setup: func(t *testing.T, _ *testenv.Env, _, _ string) { t.Setenv("TZ", ":Asia/Tokyo") },
 			want:  "Asia/Tokyo",
 		},
 		{
 			name: "localtime link",
-			setup: func(t *testing.T, env *testenv.Env, dir, ref string) {
+			setup: func(t *testing.T, _ *testenv.Env, _, _ string) {
 				link := filepath.Join(t.TempDir(), "localtime")
 				require.NoError(t, os.Symlink("/usr/share/zoneinfo/Australia/Sydney", link))
 				localtimePath = link
@@ -164,11 +159,11 @@ func TestScheduleRepeatNeverSendsLocal(t *testing.T) {
 	ref := createIssue(t, env, pid, "local zone")
 
 	_, stderr, err := runCLIWithErr(t, env, dir, "schedule", ref, "2026-11-02", "--repeat", "FREQ=DAILY")
-	requireCLIError(t, err, ExitValidation)
+	_ = requireCLIError(t, err, ExitValidation)
 	assert.Contains(t, stderr, "--timezone")
 
 	_, _, err = runCLIWithErr(t, env, dir, "schedule", ref, "2026-11-02", "--repeat", "FREQ=DAILY", "--timezone", "Local")
-	requireCLIError(t, err, ExitValidation)
+	_ = requireCLIError(t, err, ExitValidation)
 	assert.Empty(t, listRecurrencesViaHTTP(t, env, pid))
 }
 
@@ -182,6 +177,8 @@ func TestScheduleRepeatChangesAnExistingRecurrence(t *testing.T) {
 
 	out := runCLI(t, env, dir, "schedule", ref, "2026-11-09", "--repeat", "FREQ=DAILY", "--timezone", "Asia/Tokyo")
 	assert.Contains(t, out, "repeat: FREQ=DAILY, start 2026-11-09, timezone Asia/Tokyo")
+	assert.Contains(t, out, "scheduled_on: 2026-11-02 (this issue's date did not move)")
+	assert.NotContains(t, out, "Europe/Paris", "the issue's stale timezone must not be printed beside the new one")
 
 	after := listRecurrencesViaHTTP(t, env, pid)
 	require.Len(t, after, 1, "a change must not start a second recurrence")
@@ -190,6 +187,14 @@ func TestScheduleRepeatChangesAnExistingRecurrence(t *testing.T) {
 	assert.Equal(t, "2026-11-09", after[0].DTStart)
 	assert.Equal(t, "Asia/Tokyo", after[0].Timezone)
 	assert.Greater(t, after[0].Revision, before[0].Revision)
+
+	// The issue's own timezone metadata is still Paris; a later change that
+	// names no zone keeps the recurrence's zone, not the stale one.
+	runCLI(t, env, dir, "schedule", ref, "2026-11-16", "--repeat", "FREQ=WEEKLY")
+	again := listRecurrencesViaHTTP(t, env, pid)
+	require.Len(t, again, 1)
+	assert.Equal(t, "FREQ=WEEKLY", again[0].RRule)
+	assert.Equal(t, "Asia/Tokyo", again[0].Timezone)
 }
 
 // movingProxy forwards to the daemon, but the first PATCH to a recurrence is
@@ -216,18 +221,7 @@ func movingProxy(t *testing.T, env *testenv.Env, competing func()) string {
 
 func runCLIAgainst(t *testing.T, baseURL, dir string, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
-	resetFlags(t)
-	cmd := newRootCmd()
-	var so, se bytes.Buffer
-	cmd.SetOut(&so)
-	cmd.SetErr(&se)
-	cmd.SetArgs(append([]string{"--workspace", dir}, args...))
-	cmd.SetContext(contextWithBaseURL(context.Background(), baseURL))
-	err = cmd.Execute()
-	if err != nil {
-		emitErrorForMode(&se, err, outputHuman, true)
-	}
-	return so.String(), se.String(), err
+	return executeRootCapture(t, contextWithBaseURL(context.Background(), baseURL), append([]string{"--workspace", dir}, args...)...)
 }
 
 func patchRecurrenceViaHTTP(t *testing.T, env *testenv.Env, pid int64, rec recurrenceRow, rule string) {
@@ -291,7 +285,7 @@ func TestScheduleRepeatStopWhenAlreadyStoppedWritesNothing(t *testing.T) {
 
 	plain := createIssue(t, env, pid, "never repeated")
 	_, stderr, err = runCLIWithErr(t, env, dir, "schedule", plain, "--repeat", "-")
-	requireCLIError(t, err, ExitNotFound)
+	_ = requireCLIError(t, err, ExitNotFound)
 	assert.Contains(t, stderr, "no active recurrence")
 }
 
@@ -304,7 +298,7 @@ func TestScheduleRepeatStopLosingTheRaceWritesNothing(t *testing.T) {
 
 	base := movingProxy(t, env, func() { patchRecurrenceViaHTTP(t, env, pid, rec, "FREQ=MONTHLY") })
 	_, stderr, err := runCLIAgainst(t, base, dir, "schedule", ref, "--repeat", "-")
-	requireCLIError(t, err, ExitConfirm)
+	_ = requireCLIError(t, err, ExitConfirm)
 	assert.Contains(t, stderr, "FREQ=MONTHLY")
 	require.Len(t, listRecurrencesViaHTTP(t, env, pid), 1)
 }
@@ -358,7 +352,7 @@ func TestScheduleRepeatHonorsIfMatch(t *testing.T) {
 	require.Len(t, listRecurrencesViaHTTP(t, env, pid), 1)
 
 	_, _, err = runCLIWithErr(t, env, dir, "schedule", "--if-match", "1", ref, "--repeat", "-")
-	requireCLIError(t, err, ExitConfirm)
+	_ = requireCLIError(t, err, ExitConfirm)
 	require.Len(t, listRecurrencesViaHTTP(t, env, pid), 1, "a stale --if-match must not stop the recurrence")
 }
 
@@ -368,15 +362,15 @@ func TestScheduleRepeatUsageErrors(t *testing.T) {
 	ref := createIssue(t, env, pid, "usage")
 
 	_, _, err := runCLIWithErr(t, env, dir, "schedule", ref, "--repeat", "FREQ=DAILY", "--timezone", "UTC")
-	requireCLIError(t, err, ExitUsage)
+	_ = requireCLIError(t, err, ExitUsage)
 	_, _, err = runCLIWithErr(t, env, dir, "schedule", ref, "2026-11-02", "--repeat", "-")
-	requireCLIError(t, err, ExitUsage)
+	_ = requireCLIError(t, err, ExitUsage)
 	_, _, err = runCLIWithErr(t, env, dir, "schedule", ref, "--repeat", "-", "--timezone", "UTC")
-	requireCLIError(t, err, ExitUsage)
+	_ = requireCLIError(t, err, ExitUsage)
 	_, _, err = runCLIWithErr(t, env, dir, "schedule", ref, "2026-11-02", "--timezone", "UTC")
-	requireCLIError(t, err, ExitUsage)
+	_ = requireCLIError(t, err, ExitUsage)
 	_, _, err = runCLIWithErr(t, env, dir, "schedule", ref)
-	requireCLIError(t, err, ExitUsage)
+	_ = requireCLIError(t, err, ExitUsage)
 	assert.Empty(t, listRecurrencesViaHTTP(t, env, pid))
 }
 
@@ -392,12 +386,7 @@ func TestShowPrintsTheRecurrenceAndJSONCarriesIt(t *testing.T) {
 	raw := runCLI(t, env, dir, "--json", "show", ref)
 	var body struct {
 		Recurrence struct {
-			UID            string  `json:"uid"`
-			RRule          string  `json:"rrule"`
-			DTStart        string  `json:"dtstart"`
-			Timezone       string  `json:"timezone"`
-			NextOccurrence *string `json:"next_occurrence"`
-			Revision       int64   `json:"revision"`
+			recurrenceView
 		} `json:"recurrence"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(raw), &body))
@@ -405,8 +394,8 @@ func TestShowPrintsTheRecurrenceAndJSONCarriesIt(t *testing.T) {
 	assert.Equal(t, "FREQ=WEEKLY", body.Recurrence.RRule)
 	assert.Equal(t, "2026-11-02", body.Recurrence.DTStart)
 	assert.Equal(t, "Europe/Paris", body.Recurrence.Timezone)
-	require.NotNil(t, body.Recurrence.NextOccurrence)
-	assert.Equal(t, "2026-11-09", *body.Recurrence.NextOccurrence)
+	require.NotNil(t, body.Recurrence.NextOccurrenceKey)
+	assert.Equal(t, "2026-11-09", *body.Recurrence.NextOccurrenceKey)
 	assert.Positive(t, body.Recurrence.Revision)
 
 	plain := createIssue(t, env, pid, "one-off")

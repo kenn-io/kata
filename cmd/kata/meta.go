@@ -139,12 +139,18 @@ func newMetaGetCmd() *cobra.Command {
 // status, metadata, and revision are the only fields those consumers read.
 // show.go keeps its own richer struct for the full `kata show` surface. Status
 // is unused by meta but lets waitFetchState and liveAttnDaemon.lookup decode the
-// lifecycle status through the same struct instead of anonymous copies.
+// lifecycle status through the same struct instead of anonymous copies. The
+// content fields and RecurrenceID are read by kata schedule --repeat.
 type metaIssueWire struct {
-	ShortID  string                    `json:"short_id"`
-	Status   string                    `json:"status"`
-	Metadata map[string]jsontext.Value `json:"metadata"`
-	Revision int64                     `json:"revision"`
+	ShortID      string                    `json:"short_id"`
+	Status       string                    `json:"status"`
+	Title        string                    `json:"title"`
+	Body         string                    `json:"body"`
+	Priority     *int64                    `json:"priority"`
+	Labels       []string                  `json:"labels"`
+	Metadata     map[string]jsontext.Value `json:"metadata"`
+	Revision     int64                     `json:"revision"`
+	RecurrenceID *int64                    `json:"recurrence_id"`
 }
 
 type metaShowResponse struct {
