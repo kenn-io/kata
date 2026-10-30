@@ -766,10 +766,12 @@
 <section class="issue-list" aria-label="Issues">
   <div class="pane-header">
     <PageHeader level={2} title={viewTitle(currentView)}>
-      {#snippet actions()}
+      {#snippet trailing()}
         <span class="count"
           >{totalFilteredIssues()} {totalFilteredIssues() === 1 ? 'task' : 'tasks'}</span
         >
+      {/snippet}
+      {#snippet actions()}
         <ColumnPicker
           visibility={columnVisibility}
           onchange={setColumnVisibility}
