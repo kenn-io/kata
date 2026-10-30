@@ -3,41 +3,39 @@ package main
 import (
 	"os"
 	"strings"
-	"time"
+
+	"go.kenn.io/kata/internal/metadata"
 )
 
 // localTimeZoneName names the CLI's local IANA zone: TZ first, then the
-// /etc/localtime link. It returns "" when neither names a zone, so the daemon
-// falls back to its own timezone.
+// /etc/localtime link. A TZ that is set but empty means UTC, as in POSIX and
+// Go. It returns "" when nothing names a zone, so the daemon falls back to its
+// own timezone.
 func localTimeZoneName() string {
-	return resolveLocalTimeZone(os.Getenv("TZ"), "/etc/localtime")
+	tz, set := os.LookupEnv("TZ")
+	return resolveLocalTimeZone(tz, set, "/etc/localtime")
 }
 
-func resolveLocalTimeZone(tz, localtimePath string) string {
-	if name := strings.TrimPrefix(strings.TrimSpace(tz), ":"); ianaZoneName(name) {
+func resolveLocalTimeZone(tz string, tzSet bool, localtimePath string) string {
+	if tzSet && strings.TrimSpace(tz) == "" {
+		return "UTC"
+	}
+	if name := strings.TrimPrefix(strings.TrimSpace(tz), ":"); isIANAZone(name) {
 		return name
 	}
 	target, err := os.Readlink(localtimePath)
 	if err != nil {
 		return ""
 	}
-	const marker = "zoneinfo/"
-	idx := strings.LastIndex(target, marker)
-	if idx < 0 {
-		return ""
-	}
-	if name := target[idx+len(marker):]; ianaZoneName(name) {
+	_, name, found := strings.CutLast(target, "zoneinfo/")
+	if found && isIANAZone(name) {
 		return name
 	}
 	return ""
 }
 
-// ianaZoneName reports whether name loads as a zone. "Local" is excluded: it
+// isIANAZone reports whether name loads as a zone. "Local" is excluded: it
 // means the daemon's zone, not the caller's.
-func ianaZoneName(name string) bool {
-	if name == "" || name == "Local" {
-		return false
-	}
-	_, err := time.LoadLocation(name)
-	return err == nil
+func isIANAZone(name string) bool {
+	return name != "" && name != "Local" && metadata.ValidTimeZone(name)
 }

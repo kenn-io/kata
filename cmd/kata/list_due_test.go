@@ -120,12 +120,21 @@ func TestList_AllDueByComposesWithOwnerAndLabels(t *testing.T) {
 	createDueIssue(t, env, secondary.ID, "wrong owner", due, "bob", "tracked")
 	createDueIssue(t, env, secondary.ID, "wrong label", due, "alice", "other")
 	createDueIssue(t, env, secondary.ID, "not due", map[string]string{"scheduled_on": "2026-12-01"}, "alice", "tracked")
+	closed := createDueIssue(t, env, secondary.ID, "closed match", due, "alice", "tracked")
+	_, _, _, err = env.DB.CloseIssue(t.Context(), closed.ID, "done", "tester", "", nil)
+	require.NoError(t, err)
 
 	out, err := runCmdOutput(t, env, "--json", "list", "--all",
 		"--due-by", "2026-11-02", "--owner", "alice", "--label", "tracked")
 	require.NoError(t, err)
 	got := parseDueList(t, out)
-	assert.Equal(t, []string{"primary match", "secondary match"}, got.titles())
+	assert.Equal(t, []string{"primary match", "secondary match"}, got.titles(),
+		"--all widens the project scope; closed issues stay out by default")
+
+	out, err = runCmdOutput(t, env, "--json", "list", "--all", "--status", "all",
+		"--due-by", "2026-11-02", "--owner", "alice", "--label", "tracked")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"closed match", "primary match", "secondary match"}, parseDueList(t, out).titles())
 }
 
 func TestList_DueByLimitTotalAndCursorCountMatchingRows(t *testing.T) {
@@ -179,16 +188,23 @@ func TestResolveLocalTimeZone(t *testing.T) {
 	}
 	missing := filepath.Join(t.TempDir(), "absent")
 
-	assert.Equal(t, "Europe/Paris", resolveLocalTimeZone("Europe/Paris", link(t, "/usr/share/zoneinfo/Asia/Tokyo")),
+	assert.Equal(t, "Europe/Paris", resolveLocalTimeZone("Europe/Paris", true, link(t, "/usr/share/zoneinfo/Asia/Tokyo")),
 		"TZ wins over the localtime link")
-	assert.Equal(t, "Europe/Paris", resolveLocalTimeZone(":Europe/Paris", missing), "POSIX leading colon")
-	assert.Equal(t, "Asia/Tokyo", resolveLocalTimeZone("", link(t, "../usr/share/zoneinfo/Asia/Tokyo")))
+	assert.Equal(t, "Europe/Paris", resolveLocalTimeZone(":Europe/Paris", true, missing), "POSIX leading colon")
+	assert.Equal(t, "Asia/Tokyo", resolveLocalTimeZone("", false, link(t, "../usr/share/zoneinfo/Asia/Tokyo")))
 	assert.Equal(t, "America/Argentina/Buenos_Aires",
-		resolveLocalTimeZone("", link(t, "/var/db/timezone/zoneinfo/America/Argentina/Buenos_Aires")))
-	assert.Equal(t, "Asia/Tokyo", resolveLocalTimeZone("CET-1", link(t, "/usr/share/zoneinfo/Asia/Tokyo")),
+		resolveLocalTimeZone("", false, link(t, "/var/db/timezone/zoneinfo/America/Argentina/Buenos_Aires")))
+	assert.Equal(t, "Asia/Tokyo", resolveLocalTimeZone("CET-1", true, link(t, "/usr/share/zoneinfo/Asia/Tokyo")),
 		"a TZ that is not an IANA name falls back to the link")
-	assert.Equal(t, "Asia/Tokyo", resolveLocalTimeZone("Local", link(t, "/usr/share/zoneinfo/Asia/Tokyo")),
+	assert.Equal(t, "Asia/Tokyo", resolveLocalTimeZone("Local", true, link(t, "/usr/share/zoneinfo/Asia/Tokyo")),
 		"Local names no zone")
-	assert.Empty(t, resolveLocalTimeZone("", missing), "no zone known: the daemon decides")
-	assert.Empty(t, resolveLocalTimeZone("", link(t, "/etc/some-other-file")))
+	assert.Equal(t, "UTC", resolveLocalTimeZone("", true, link(t, "/usr/share/zoneinfo/Asia/Tokyo")),
+		"TZ set but empty means UTC")
+	assert.Empty(t, resolveLocalTimeZone("", false, missing), "no zone known: the daemon decides")
+	assert.Empty(t, resolveLocalTimeZone("", false, link(t, "/etc/some-other-file")))
+}
+
+func TestLocalTimeZoneNameTreatsEmptyTZAsUTC(t *testing.T) {
+	t.Setenv("TZ", "")
+	assert.Equal(t, "UTC", localTimeZoneName(), "TZ set but empty means UTC, not the localtime link")
 }

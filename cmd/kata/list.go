@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/metadata"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -38,8 +38,9 @@ project, newest created first, with no default row limit.
 --due-by YYYY-MM-DD keeps issues whose scheduled_on or deadline_on falls on or
 before that date, the web Today rule with a chosen date. The date is read in your
 local zone (TZ, then /etc/localtime), so TZ=Europe/Paris overrides it; rows then
-carry scheduled_on_date and deadline_on_date. Add --all to include closed issues
-and other projects' work: kata list --all --status all --due-by "$(date +%F)".
+carry scheduled_on_date and deadline_on_date. --all widens the scope to every
+project; --status all adds closed issues:
+kata list --all --status all --due-by "$(date +%F)".
 For what to work on next, use kata ready or kata next instead.`,
 		Example: `  kata list --agent
   kata list --status all --label bug --owner alice --agent
@@ -68,7 +69,7 @@ For what to work on next, use kata ready or kata next instead.`,
 				return &cliError{Message: "--unowned and --owner are mutually exclusive", Kind: kindValidation, ExitCode: ExitValidation}
 			}
 			if cmd.Flags().Changed("due-by") {
-				if parsed, err := time.Parse(time.DateOnly, dueBy); err != nil || parsed.Format(time.DateOnly) != dueBy {
+				if !metadata.ValidCalendarDate(dueBy) {
 					return &cliError{Message: "--due-by must be a date in YYYY-MM-DD form", Kind: kindValidation, ExitCode: ExitValidation}
 				}
 			}

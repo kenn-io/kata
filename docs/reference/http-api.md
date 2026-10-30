@@ -537,6 +537,12 @@ Omitting `sort`, or sending an empty value, keeps the project route's
 default. The project default cannot continue with a cursor; use an explicit
 creation sort for exhaustive scans.
 
+Ordinary edits preserve creation order. Cursors validate the daemon instance,
+project selection, authorization scope, sort, and filters; changing these
+returns HTTP 400. The page size and count request may change between pages.
+These are live reads rather than snapshots. Restart after changes to filter
+membership, project membership, deletion, or imported creation timestamps.
+
 ### Due-by filter
 
 `due_by=YYYY-MM-DD` on either list route keeps issues whose `scheduled_on` or
@@ -551,12 +557,6 @@ and `deadline_on_date` in that zone. The rule runs after the SQL filters, so
 and the effective zone. Status still defaults as in the rest of the route; pass
 `status=open` to leave out closed issues. API `0.35.0` or newer is required, and
 older daemons ignore the parameters.
-
-Ordinary edits preserve creation order. Cursors validate the daemon instance,
-project selection, authorization scope, sort, and filters; changing these
-returns HTTP 400. The page size and count request may change between pages.
-These are live reads rather than snapshots. Restart after changes to filter
-membership, project membership, deletion, or imported creation timestamps.
 
 ### Search continuation
 

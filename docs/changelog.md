@@ -15,10 +15,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
   filters, `--all`, `--sort` and `--cursor`; `--limit` and `--include-total` count
   matching issues. The date is read in your local zone (`TZ`, then
   `/etc/localtime`), and rows carry `scheduled_on_date` and `deadline_on_date`.
-  The MCP `kata.list` tool takes `due_by` and an optional `time_zone`, and the
-  HTTP list routes take `due_by` and `time_zone`. An older daemon is refused
-  rather than listing every issue. Requires HTTP API `0.35.0`. See the
-  [CLI reference](reference/cli.md#issue-lifecycle).
+  See the [CLI reference](reference/cli.md#issue-lifecycle).
+- Filter the MCP `kata.list` tool and both HTTP list routes the same way with
+  `due_by` and an optional `time_zone`. This is HTTP API `0.35.0`; an older
+  daemon is refused rather than listing every issue. See the
+  [HTTP API](reference/http-api.md#due-by-filter) and
+  [MCP reference](reference/mcp.md#exhaustive-issue-discovery).
 - Get an immediate error when a daemon in another PID namespace, such as one in
   a sandbox or container sharing your `KATA_HOME`, already owns the store.
   `kata` commands, `kata daemon start`, and foreground startup previously
