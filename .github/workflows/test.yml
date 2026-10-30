@@ -31,7 +31,7 @@ jobs:
         with:
           filters: |
             go:
-              - '!{*.md,docs/**/*.md,docs/assets/**,docs/site/**,docs/website/**,docs/scripts/**,docs/stylesheets/**,docs/javascripts/**,docs/overrides/**,docs/zensical.toml,docs/vercel.json,docs/llms.txt,docs/pyproject.toml,docs/uv.lock,docs/vercel-build.sh,docs/zensical-docs.sh,web/**,packages/**}'
+              - '!{*.md,docs/**,web/**,packages/**}'
               - '**/*.go'
             embedded-docs:
               # Keep aligned with the go:embed directive in docs/docs.go.
@@ -181,7 +181,7 @@ jobs:
 
   go:
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go') || contains(fromJSON(needs.changes.outputs.groups), 'embedded-docs') || contains(fromJSON(needs.changes.outputs.groups), 'frontend')) }}
+    if: *go-frontend-changes
     name: Go tests
     runs-on: ubuntu-latest
 
@@ -399,7 +399,7 @@ jobs:
 
   windows:
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go') || contains(fromJSON(needs.changes.outputs.groups), 'embedded-docs')) }}
+    if: *go-changes
     name: ${{ matrix.name }}
     runs-on: windows-2025
     strategy:
