@@ -13,6 +13,8 @@ export interface ShowIssueOut {
   closed_at?: string
   closed_reason?: string
   created_at: string
+  /** deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent. */
+  deadline_on_date?: string
   deleted_at?: string
   id: number
   labels: string[]
@@ -24,6 +26,8 @@ export interface ShowIssueOut {
   project_uid?: string
   recurrence_id?: number
   revision: number
+  /** scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent. */
+  scheduled_on_date?: string
   short_id: string
   source_actor?: string
   status: string

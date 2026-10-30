@@ -13,6 +13,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
   optional **Blocked by** column. It lists each task's open blockers, three IDs
   at most and then `+N`; closed blockers are left out. It is off by default;
   turn it on from the column picker. See the [web UI guide](guide/web-ui.md).
+- Filter issues by due date with `jq`: `kata list --json`, `kata show --json`
+  and MCP `kata.list` rows now carry `scheduled_on_date` and `deadline_on_date`
+  as `YYYY-MM-DD` dates, matching the dates the web UI shows. Each is omitted
+  when the issue has no such metadata. Dates resolve in the issue `timezone`,
+  then the daemon `timezone`, then UTC, and need daemon API `0.36.0` or newer.
+  See [Calendar dates on issue rows](reference/metadata.md#calendar-dates-on-issue-rows).
 - Get an immediate error when a daemon in another PID namespace, such as one in
   a sandbox or container sharing your `KATA_HOME`, already owns the store.
   `kata` commands, `kata daemon start`, and foreground startup previously

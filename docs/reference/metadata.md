@@ -1,7 +1,7 @@
 ---
 title: Metadata
 description: Reference Kata's issue and project metadata model, reserved keys, scheduling fields, and update rules.
-last_edited: 2026-10-23
+last_edited: 2026-10-30
 ---
 
 # Metadata
@@ -65,6 +65,30 @@ not exist, the gate opens at the first valid instant after the gap. Numeric
 offsets are rejected because they pin an instant while duplicating the named
 timezone. `deadline_on` accepts the same three forms and uses the same timezone
 rules. It is a deadline only; it does not control `ready` or `next`.
+
+### Calendar dates on issue rows
+
+`kata list --json`, `kata show --json` and `kata.list` rows carry
+`scheduled_on_date` and `deadline_on_date`: the `scheduled_on` and
+`deadline_on` values as `YYYY-MM-DD` calendar dates. A key's field is omitted
+when the key is absent. These are the names and values the web UI's snapshot
+uses, resolved by one shared rule. A date-only value keeps its written date. A
+local date-time resolves in the issue `timezone`, then the daemon's top-level
+`timezone`, then UTC, as above. An RFC 3339 `Z` instant is read in that same
+zone chain, so it can fall on a different calendar date than its UTC date.
+Requests carry no zone. A daemon older than API `0.36.0` omits both fields, so
+a client should treat a missing field as unsupported rather than as an
+absent date.
+
+Kata offers no due-date filter. Select on the dates yourself, for example the
+issues due on or before a day:
+
+```sh
+kata list --all --meta deadline_on --json \
+  | jq '.issues[] | select(.deadline_on_date <= "2026-10-29")'
+```
+
+Add `select(.blocked | not)` to keep only issues that are not actively blocked.
 
 The daemon surfaces a reached `scheduled_on` or `deadline_on` through ordinary
 `notify.*` metadata. It addresses the current owner, falling back to the author
