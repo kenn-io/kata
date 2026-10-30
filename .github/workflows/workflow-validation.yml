@@ -28,8 +28,8 @@ jobs:
   actionlint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: step-security/jactionlint@30b636b51bcfb8cd8404be70a661f28e5564466d # v2.2.0
+      - uses: actions/checkout@v7.0.1
+      - uses: step-security/jactionlint@v2.2.0
         with:
           version: 2.3.0
           profile: correctness
@@ -40,23 +40,23 @@ jobs:
   goreleaser:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Set up Node
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        uses: actions/setup-node@v7.1.0
         with:
           node-version: 26.12.1
 
       - name: Set up Bun
-        uses: step-security/setup-bun@f6f5dadeac34f70c7828f731569e8d6e8330b8fb # v2.1.3
+        uses: step-security/setup-bun@v2.1.3
         with:
           bun-version: 1.4.4
 
@@ -67,7 +67,7 @@ jobs:
       # `brews` pipe. Executing the full snapshot validates that pipe and every
       # artifact ID without publishing.
       - name: Validate configuration and build release snapshot
-        uses: step-security/goreleaser-action@e91207bb836a83eca7cb8b2e61024bcb6dc3c458 # v7.3.0
+        uses: step-security/goreleaser-action@v7.3.0
         with:
           distribution: goreleaser
           version: v2.19.0
@@ -78,7 +78,7 @@ jobs:
           KATA_WORKSPACE: ${{ runner.temp }}/kata-release-snapshot/workspace
 
       - name: Retain snapshot release artifacts
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: kata-release-snapshot
           path: |
@@ -92,15 +92,15 @@ jobs:
       VERSION: v0.0.0-snapshot
       OCI_VERSION: 0.0.0-snapshot
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up image emulation
-        uses: step-security/setup-qemu-action@d21542abd2ae44772cf2276e75ee4ec531d598b6 # v4.4.0
+        uses: step-security/setup-qemu-action@v4.4.0
 
       - name: Set up image builder
-        uses: step-security/setup-buildx-action@e50058a0fcd8d1a7d626c905502d010a468bf238 # v4.4.1
+        uses: step-security/setup-buildx-action@v4.4.1
         with:
           driver-opts: image=moby/buildkit:v0.34.1@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c
 
@@ -166,7 +166,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
 
