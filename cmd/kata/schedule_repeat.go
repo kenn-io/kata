@@ -142,15 +142,7 @@ func runScheduleRepeat(cmd *cobra.Command, args []string, opts scheduleRepeatOpt
 	if err := checkIssueIfMatch(opts.IfMatch, issue.Revision); err != nil {
 		return err
 	}
-	// Starting is the one write that changes the issue (its date moves), so
-	// the daemon re-checks the revision inside that transaction; an older
-	// daemon would ignore the header and could overwrite a competing write.
 	guardStart := !stop && strings.TrimSpace(opts.IfMatch) != ""
-	if guardStart {
-		if err := requireDaemonAPIVersion(ctx, httpClient, baseURL, apiVersionRecurrenceIfMatch, "--if-match when starting a recurrence"); err != nil {
-			return err
-		}
-	}
 	actor, _ := resolveActor(ctx, flags.As, nil)
 
 	current, err := activeRecurrenceOf(ctx, api, pid, issue.RecurrenceID)
@@ -181,8 +173,15 @@ func runScheduleRepeat(cmd *cobra.Command, args []string, opts scheduleRepeatOpt
 		}
 		action = repeatChanged
 	default:
+		// Starting is the one write that changes the issue (its date moves),
+		// so the daemon re-checks the revision inside that transaction; an
+		// older daemon would ignore the header and could overwrite a
+		// competing write. A change uses the recurrence's own guarded PATCH.
 		var ifMatch *string
 		if guardStart {
+			if err := requireDaemonAPIVersion(ctx, httpClient, baseURL, apiVersionRecurrenceIfMatch, "--if-match when starting a recurrence"); err != nil {
+				return err
+			}
 			tag := revisionETag(issue.Revision)
 			ifMatch = &tag
 		}

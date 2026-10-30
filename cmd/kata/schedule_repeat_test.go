@@ -495,3 +495,40 @@ func TestScheduleRepeatIfMatchLosesToACompetingWriteBeforeTheRecurrenceIsCreated
 	assert.Contains(t, stderr, "revision conflict")
 	assert.Empty(t, listRecurrencesViaHTTP(t, env, pid), "the competing write must not be overwritten")
 }
+
+// olderDaemonProxy forwards to the daemon but reports an API version that
+// predates the If-Match guard on starting a recurrence.
+func olderDaemonProxy(t *testing.T, env *testenv.Env) string {
+	t.Helper()
+	target, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) { r.SetURL(target) }}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/health" {
+			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.35.0"}`))
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+func TestScheduleRepeatIfMatchOnAnOlderDaemonOnlyBlocksStarting(t *testing.T) {
+	isolateCallerZone(t)
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "older daemon")
+	older := olderDaemonProxy(t, env)
+
+	_, _, err := runCLIAgainst(t, older, dir, "schedule", "--if-match", "1", ref, "2026-11-02", "--repeat", "FREQ=DAILY", "--timezone", "UTC")
+	require.Error(t, err, "starting needs the daemon guard")
+	assert.Empty(t, listRecurrencesViaHTTP(t, env, pid))
+
+	runCLI(t, env, dir, "schedule", "--if-match", "1", ref, "2026-11-02", "--repeat", "FREQ=DAILY", "--timezone", "UTC")
+	rev := listRecurrencesViaHTTP(t, env, pid)
+	require.Len(t, rev, 1)
+
+	_, _, err = runCLIAgainst(t, older, dir, "schedule", "--if-match", "2", ref, "2026-11-09", "--repeat", "FREQ=WEEKLY")
+	require.NoError(t, err, "a change uses the recurrence PATCH guard that older daemons have")
+	assert.Equal(t, "FREQ=WEEKLY", listRecurrencesViaHTTP(t, env, pid)[0].RRule)
+}
