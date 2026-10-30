@@ -15,7 +15,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   turn it on from the column picker. See the [web UI guide](guide/web-ui.md).
 - Filter issues by due date with `jq`: `kata list --json`, `kata show --json`
   and MCP `kata.list` rows now carry `scheduled_on_date` and `deadline_on_date`
-  as `YYYY-MM-DD` dates, matching the dates the web UI shows. Each is omitted
+  as `YYYY-MM-DD` dates, the names the web UI snapshot uses. Each is omitted
   when the issue has no such metadata or its value cannot be read. Dates
   resolve in the issue `timezone`, then the daemon `timezone`, then UTC, and
   need daemon API `0.36.0` or newer. See

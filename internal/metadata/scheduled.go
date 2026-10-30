@@ -145,7 +145,7 @@ func ScheduledOnCalendarDate(
 	displayTimezone string,
 	defaultTimezone string,
 ) (string, bool, error) {
-	return CalendarDate(raw, "scheduled_on", &displayTimezone, defaultTimezone)
+	return CalendarDate(raw, ScheduledOnField, &displayTimezone, defaultTimezone)
 }
 
 // DeadlineOnCalendarDate returns the display calendar date for deadline_on.
@@ -156,17 +156,25 @@ func DeadlineOnCalendarDate(
 	displayTimezone string,
 	defaultTimezone string,
 ) (string, bool, error) {
-	return CalendarDate(raw, "deadline_on", &displayTimezone, defaultTimezone)
+	return CalendarDate(raw, DeadlineOnField, &displayTimezone, defaultTimezone)
 }
 
-// CalendarDate projects one planning field ("scheduled_on" or "deadline_on")
-// to a YYYY-MM-DD calendar date, reporting whether the key is present. A
+// PlanningField names a planning-date metadata key.
+type PlanningField int
+
+// The planning-date metadata keys CalendarDate can read.
+const (
+	ScheduledOnField PlanningField = iota
+	DeadlineOnField
+)
+
+// CalendarDate projects one planning field to a YYYY-MM-DD calendar date, reporting whether the key is present. A
 // non-nil displayTimezone is the viewer's zone, with "" meaning UTC. A nil
 // displayTimezone reads the value in its own schedule zone: the issue
 // timezone, then defaultTimezone, then UTC.
 func CalendarDate(
 	raw string,
-	key string,
+	field PlanningField,
 	displayTimezone *string,
 	defaultTimezone string,
 ) (string, bool, error) {
@@ -177,9 +185,14 @@ func CalendarDate(
 	if err != nil {
 		return "", false, err
 	}
-	value := values.ScheduledOn
-	if key == "deadline_on" {
+	var value *string
+	switch field {
+	case ScheduledOnField:
+		value = values.ScheduledOn
+	case DeadlineOnField:
 		value = values.DeadlineOn
+	default:
+		return "", false, fmt.Errorf("unsupported planning field %d", field)
 	}
 	if value == nil {
 		return "", false, nil

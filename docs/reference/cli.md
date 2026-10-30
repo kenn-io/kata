@@ -684,8 +684,10 @@ older daemon omits the key. The top-level `.labels` array keeps each label's
 
 `kata show --json` and `kata list --json` rows also carry `scheduled_on_date`
 and `deadline_on_date` when the issue has `scheduled_on` or `deadline_on`
-metadata. They are `YYYY-MM-DD` calendar dates in the issue's timezone, the
-same dates the web UI shows. Daemons older than API `0.36.0` omit them. See
+metadata. They are `YYYY-MM-DD` calendar dates in the issue's timezone. A row
+that has the metadata key but no date has a value that could not be read.
+Daemons older than API `0.36.0` omit them. The web UI snapshot uses the same
+field names but reads RFC 3339 instants in the viewer's zone. See
 [Calendar dates on issue rows](metadata.md#calendar-dates-on-issue-rows).
 
 With daemon API `0.28.0` or newer, comments include copyable handles, typed

@@ -79,6 +79,11 @@ local date-time resolves in the issue `timezone`, then the daemon's top-level
 metadata, `scheduled_on` resolves in the recurrence's timezone before the
 daemon's; `deadline_on` does not. An RFC 3339 `Z` instant is read in that same
 zone chain, so it can fall on a different calendar date than its UTC date.
+The web UI snapshot uses the same field names but reads instants in the
+viewer's zone, so it differs only when that zone differs from the issue's. For
+an unreadable stored value the snapshot returns an error, while a row omits the
+field; a row that has the metadata key but no date means the value could not be
+read.
 Requests carry no zone. A daemon older than API `0.36.0` omits both fields, so
 a client should treat a missing field as unsupported rather than as an
 absent date.
