@@ -397,6 +397,9 @@ func (s *Store) closeIssueWithEvents(
 		if hasOpenChildren {
 			return db.ErrOpenChildren
 		}
+		if err := db.CheckEvidenceTargetsTx(ctx, tx, p.Evidence); err != nil {
+			return err
+		}
 		closedAt := mutationTimestamp()
 		if _, err := tx.ExecContext(ctx, `UPDATE issues SET status = 'closed', revision = revision + 1, closed_reason = $1,
 		  assignment_expires_on = NULL, closed_at = $2, updated_at = $2 WHERE id = $3`, p.Reason, closedAt, current.ID); err != nil {

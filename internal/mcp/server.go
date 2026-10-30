@@ -61,6 +61,26 @@ func New(options Options) (*sdkmcp.Server, error) {
 		}
 		options.Scope = scope
 	}
+
+	if options.Scope.Mode() != ScopeAll {
+		refs := make([]string, 0, len(options.Scope.projects))
+		for _, project := range options.Scope.projects {
+			ref := project.UID
+			if ref == "" {
+				ref = fmt.Sprintf("id:%d", project.ID)
+			}
+			refs = append(refs, ref)
+		}
+		var err error
+		options.Client, err = options.Client.WithProjectScope(refs)
+		if err != nil {
+			return nil, err
+		}
+		options.LongRunningClient, err = options.LongRunningClient.WithProjectScope(refs)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if options.Scope.Mode() == ScopeBound {
 		projects, err := options.Scope.Projects(context.Background(), nil, false)
 		if err != nil {
@@ -167,7 +187,7 @@ func registerIssueMutationTools(server *sdkmcp.Server, handlers toolHandlers) {
 	addTool(server, "kata.create", "Create issue", "Create project work after searching for duplicates. A stable idempotency key is required.", additive, handlers.create)
 	addTool(server, "kata.edit", "Edit issue", "Edit issue fields, ownership, priority, and relationship deltas atomically.", mutating, handlers.edit)
 	addTool(server, "kata.edit_comment", "Edit comment", "Replace one comment body as the startup actor.", mutating, handlers.editComment)
-	addTool(server, "kata.move", "Move issue", "Move an issue to another in-scope project while preserving its UID and relationships.", mutating, handlers.move)
+	addTool(server, "kata.move", "Move issue", "Move an issue and its active descendants to another in-scope project while preserving UIDs and relationships. Pass single to move one issue or dry_run to preview.", mutating, handlers.move)
 	addTool(server, "kata.set_deadline", "Set deadline", "Set or clear an issue deadline. Values accept a date, local date-time, or RFC 3339 UTC instant ending in Z.", mutating, handlers.setDeadline)
 	addTool(server, "kata.set_label", "Set label presence", "Ensure that a label is present or absent on an issue.", mutating, handlers.setLabel)
 	addTool(server, "kata.set_metadata", "Patch metadata", "Patch issue metadata; JSON null removes a key. An optional revision makes the write conditional.", mutating, handlers.setMetadata)

@@ -51,7 +51,7 @@ var sectionLoaderNames = []string{
 
 func TestServerPublishesOnlySectionLoadersInitially(t *testing.T) {
 	session := connectRawTestServerWithOptions(t, Options{
-		Client: &kataclient.Client{}, ProjectID: 42, ProjectName: "spoke-project",
+		Client: inertTestClient(t), ProjectID: 42, ProjectName: "spoke-project",
 		Actor: "example-agent", Version: "test-version",
 	})
 
@@ -72,7 +72,7 @@ func TestServerPublishesStartupSectionsInitially(t *testing.T) {
 	for _, section := range toolSections(true, true) {
 		t.Run(section.section, func(t *testing.T) {
 			options := Options{
-				Client: &kataclient.Client{}, Scope: NewAllScope(), Actor: "example-agent", Version: "test-version",
+				Client: inertTestClient(t), Scope: NewAllScope(), Actor: "example-agent", Version: "test-version",
 				EnableTokenAdmin: true, StorageAdmin: admin,
 			}
 			progressive := connectRawTestServerWithOptions(t, options)
@@ -91,7 +91,7 @@ func TestServerPublishesStartupSectionsInitially(t *testing.T) {
 	}
 	t.Run("combined sections", func(t *testing.T) {
 		session := connectRawTestServerWithOptions(t, Options{
-			Client: &kataclient.Client{}, ProjectID: 42, ProjectName: "spoke-project",
+			Client: inertTestClient(t), ProjectID: 42, ProjectName: "spoke-project",
 			Actor: "example-agent", Version: "test-version",
 			StartupSections: []string{"issue_discovery", "issue_mutation", "coordination", "issue_lifecycle", "projects", "docs"},
 		})
@@ -99,7 +99,7 @@ func TestServerPublishesStartupSectionsInitially(t *testing.T) {
 		initial, err := session.ListTools(t.Context(), nil)
 		require.NoError(t, err)
 		progressive := connectRawTestServerWithOptions(t, Options{
-			Client: &kataclient.Client{}, ProjectID: 42, ProjectName: "spoke-project",
+			Client: inertTestClient(t), ProjectID: 42, ProjectName: "spoke-project",
 			Actor: "example-agent", Version: "test-version",
 		})
 		for _, section := range []string{"issue_discovery", "issue_mutation", "coordination", "issue_lifecycle", "projects", "docs"} {
@@ -131,7 +131,7 @@ func TestServerRejectsInvalidStartupSections(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			server, err := New(Options{
-				Client: &kataclient.Client{}, Scope: NewAllScope(), Actor: "example-agent", Version: "test-version",
+				Client: inertTestClient(t), Scope: NewAllScope(), Actor: "example-agent", Version: "test-version",
 				StartupSections: tt.sections,
 			})
 			require.ErrorContains(t, err, tt.want)
@@ -142,7 +142,7 @@ func TestServerRejectsInvalidStartupSections(t *testing.T) {
 
 func TestSectionLoaderActivatesOnlyItsTypedToolsAndIsIdempotent(t *testing.T) {
 	session := connectRawTestServerWithOptions(t, Options{
-		Client: &kataclient.Client{}, ProjectID: 42, ProjectName: "spoke-project",
+		Client: inertTestClient(t), ProjectID: 42, ProjectName: "spoke-project",
 		Actor: "example-agent", Version: "test-version",
 	})
 
@@ -169,7 +169,7 @@ func TestSectionLoaderActivatesOnlyItsTypedToolsAndIsIdempotent(t *testing.T) {
 	t.Run("preloaded sections", func(t *testing.T) {
 		changed := make(chan struct{}, 1)
 		session := connectRawTestServerWithClientOptions(t, Options{
-			Client: &kataclient.Client{}, ProjectID: 42, ProjectName: "spoke-project",
+			Client: inertTestClient(t), ProjectID: 42, ProjectName: "spoke-project",
 			Actor: "example-agent", Version: "test-version",
 			StartupSections: []string{"issue_discovery", "issue_mutation", "coordination", "issue_lifecycle", "projects", "docs"},
 		}, &sdkmcp.ClientOptions{ToolListChangedHandler: func(context.Context, *sdkmcp.ToolListChangedRequest) {
@@ -214,7 +214,7 @@ func TestSectionLoaderActivatesOnlyItsTypedToolsAndIsIdempotent(t *testing.T) {
 
 func TestTokenSectionRequiresExplicitStartupCapability(t *testing.T) {
 	session := connectRawTestServerWithOptions(t, Options{
-		Client: &kataclient.Client{}, Scope: NewAllScope(),
+		Client: inertTestClient(t), Scope: NewAllScope(),
 		Actor: "example-agent", Version: "test-version",
 	})
 
@@ -229,7 +229,7 @@ func TestTokenSectionRequiresExplicitStartupCapability(t *testing.T) {
 	require.False(t, output.Loaded)
 
 	enabled := connectRawTestServerWithOptions(t, Options{
-		Client: &kataclient.Client{}, Scope: NewAllScope(), EnableTokenAdmin: true,
+		Client: inertTestClient(t), Scope: NewAllScope(), EnableTokenAdmin: true,
 		Actor: "example-agent", Version: "test-version",
 	})
 	result, err = enabled.CallTool(t.Context(), &sdkmcp.CallToolParams{
@@ -244,7 +244,7 @@ func TestTokenSectionRequiresExplicitStartupCapability(t *testing.T) {
 
 func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 	session := connectTestServerWithOptions(t, Options{
-		Client: &kataclient.Client{}, Scope: NewAllScope(), EnableTokenAdmin: true,
+		Client: inertTestClient(t), Scope: NewAllScope(), EnableTokenAdmin: true,
 		Actor: "example-agent", Version: "test-version",
 	})
 
@@ -415,7 +415,7 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 
 func TestServerToolAnnotationsMatchMutationRisk(t *testing.T) {
 	session := connectTestServerWithOptions(t, Options{
-		Client: &kataclient.Client{}, Scope: NewAllScope(), EnableTokenAdmin: true,
+		Client: inertTestClient(t), Scope: NewAllScope(), EnableTokenAdmin: true,
 		Actor: "example-agent", Version: "test-version",
 	})
 	result, err := session.ListTools(t.Context(), nil)
@@ -1217,7 +1217,7 @@ func TestToolCancellationStopsDaemonRequest(t *testing.T) {
 
 func connectTestServer(t *testing.T) *sdkmcp.ClientSession {
 	t.Helper()
-	return connectTestServerWithClient(t, &kataclient.Client{})
+	return connectTestServerWithClient(t, inertTestClient(t))
 }
 
 func connectTestServerWithClient(t *testing.T, apiClient *kataclient.Client) *sdkmcp.ClientSession {

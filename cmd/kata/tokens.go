@@ -257,6 +257,7 @@ func resolveScopedTokenIssue(_ *cobra.Command, a daemonAPI, raw string) (tokenSc
 		Issue struct {
 			UID        string `json:"uid"`
 			ProjectUID string `json:"project_uid"`
+			ProjectID  int64  `json:"project_id"`
 			ShortID    string `json:"short_id"`
 		} `json:"issue"`
 	}
@@ -279,9 +280,17 @@ func resolveScopedTokenIssue(_ *cobra.Command, a daemonAPI, raw string) (tokenSc
 	if shown.Issue.UID == "" || shown.Issue.ProjectUID == "" || shown.Issue.ShortID == "" {
 		return tokenScopeCLIOut{}, "", errors.New("daemon returned incomplete issue identity for scoped token creation")
 	}
+	displayRef := projectName + "#" + shown.Issue.ShortID
+	if shown.Issue.ProjectID != 0 && shown.Issue.ProjectID != projectID {
+		displayRef, err = issueRefForOutput(a, projectID, projectName,
+			issueIdentityForOutput{ProjectID: shown.Issue.ProjectID, UID: shown.Issue.UID, ShortID: shown.Issue.ShortID})
+		if err != nil {
+			return tokenScopeCLIOut{}, "", err
+		}
+	}
 	return tokenScopeCLIOut{
 		Kind: "issue_subtree", ProjectUID: shown.Issue.ProjectUID, RootIssueUID: shown.Issue.UID,
-	}, projectName + "#" + shown.Issue.ShortID, nil
+	}, displayRef, nil
 }
 
 func cleanupScopedTokenCreation(a daemonAPI, tokenID int64, cause error) error {

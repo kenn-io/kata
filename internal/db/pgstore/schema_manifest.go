@@ -13,7 +13,7 @@ import (
 const (
 	canonicalColumnFingerprint     = "e39313e493aca5629098c150076ee7e1aa04a8d747d8704001e741401fe3df50"
 	canonicalConstraintFingerprint = "ec4c05a641252558d8b52b92ed9ff97c9310064e5f8ad2ab8c636fba65344a17"
-	canonicalIndexFingerprint      = "a58820c23d72461fc9197d28842ee01cd500d8f414ae8673138083c11c45f611"
+	canonicalIndexFingerprint      = "ae9e2dc666ce39a34db9eb078a797636794ede4d0737aad618684475b9b960af"
 	vectorColumnFingerprint        = "b8c7cb5e43f3c17502fc3e1deba77a772c3e9a486be623a96729de8866381c31"
 	vectorConstraintFingerprint    = "3a39a82331175295586fb3399dff2221fe511171f21e31a88410dd091c3a3cf4"
 	vectorIndexFingerprint         = "7868c4a815ebee6451cef203509dcedcd21401c76f49fb666e9facaad2f7aef3"
@@ -83,7 +83,7 @@ idx_issues_project_status_updated idx_issues_project_updated idx_issues_owner id
 uniq_issues_project_short_id issues_recurrence_occurrence_uniq idx_comments_issue idx_comments_reply_to
 uniq_one_parent_per_child idx_links_from idx_links_to idx_links_from_uid idx_links_to_uid
 idx_issue_labels_label idx_events_project idx_events_issue idx_events_related
-idx_events_issue_uid idx_events_related_issue_uid idx_events_origin_instance
+idx_events_issue_uid idx_events_moved_from idx_events_related_issue_uid idx_events_origin_instance
 idx_events_origin_project_id idx_events_hlc idx_events_content_hash idx_events_idempotency
 idx_purge_log_reset idx_purge_log_project_reset idx_purge_log_issue idx_purge_log_issue_uid
 idx_purge_log_project_uid idx_purge_log_origin_instance idx_purge_log_short_id

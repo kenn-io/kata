@@ -637,19 +637,6 @@ func aliasInputBody(info config.AliasInfo) map[string]any {
 	}
 }
 
-// printMutation formats a mutation response (issue create/edit/close/reopen)
-// according to the active output mode: JSON envelope, quiet (issue short_id
-// only), or human-readable one-liner.
-//
-// In human mode, when the response carries a `changes` block (kata edit
-// with link/priority mutations), append a per-line summary so the caller
-// can see what landed without parsing JSON. A request whose `changed`
-// flag is false renders an explicit "(no changes applied)" tail so a
-// no-op edit doesn't look identical to a successful one.
-func printMutation(cmd *cobra.Command, bs []byte) error {
-	return printMutationWithApplied(cmd, bs, nil, "")
-}
-
 const closeReminderText = "closing asserts this issue is complete; verify the message and evidence are specific to this issue."
 
 func shouldPrintCloseReminder(verb string, changed bool) bool {
@@ -659,11 +646,8 @@ func shouldPrintCloseReminder(verb string, changed bool) bool {
 // printMutationWithApplied formats a mutation response with an optional
 // synthetic changes block for the create path. applied is a fallback `changes`
 // block used when the wire response carries none (create path); nil elsewhere.
-// subjectProject drives bare/qualified rendering: foreign peers
-// (project != subjectProject) render qualified ("project#short_id"), same-project
-// peers stay bare. Pass "" when the subject project is unknown (close, restore);
-// those responses carry no changes block, so nothing renders. If one ever did,
-// wire-populated peers would all render qualified (the unambiguous form).
+// subjectProject is the resolved requested project. The issue and foreign peers
+// render qualified when their current project differs from that context.
 func printMutationWithApplied(cmd *cobra.Command, bs []byte, applied *mutationChanges, subjectProject string) error {
 	mode := currentOutputMode()
 	var b struct {
@@ -687,11 +671,17 @@ func printMutationWithApplied(cmd *cobra.Command, bs []byte, applied *mutationCh
 		_, err := fmt.Fprint(cmd.OutOrStdout(), buf.String())
 		return err
 	}
+	displayRef, err := mutationIssueRefForOutput(cmd, bs, subjectProject)
+	if err != nil {
+		return err
+	}
+	b.Issue.ShortID = displayRef
 	if mode == outputAgent {
 		var m agentIssueMutation
 		if err := json.Unmarshal(bs, &m); err != nil {
 			return err
 		}
+		m.Issue.ShortID = displayRef
 		includeChangedTrue := verb == "edit"
 		return printAgentMutationDecoded(cmd.OutOrStdout(), verb, m, includeChangedTrue, func(w io.Writer, m agentIssueMutation) error {
 			if m.Issue.ClosedReason != nil {

@@ -267,6 +267,12 @@ func (d *Store) purgeIssue(ctx context.Context, issueID int64, actor string, rea
 	if err != nil {
 		return db.PurgeLog{}, fmt.Errorf("re-fetch purge_log: %w", err)
 	}
+	if pl.PurgeResetAfterEventID != nil {
+		pl.ResetProjectIDs, err = db.ProjectStreamResetProjectIDs(ctx, conn, pl.ProjectID, *pl.PurgeResetAfterEventID)
+		if err != nil {
+			return db.PurgeLog{}, fmt.Errorf("collect purge reset projects: %w", err)
+		}
+	}
 
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return db.PurgeLog{}, fmt.Errorf("commit: %w", err)
@@ -318,7 +324,7 @@ func rejectActiveExternalRootProjectPurge(ctx context.Context, q sqlReader, proj
 // readable and to bound its cyclomatic complexity.
 func purgeCascade(
 	ctx context.Context,
-	c connExec,
+	c projectPurgeQueryer,
 	issue db.Issue,
 	projectName string,
 	actor string,
@@ -364,6 +370,11 @@ func purgeCascade(
 		`SELECT count(*) FROM events WHERE `+eventsWhere, eventsArgs...)
 	if err != nil {
 		return 0, fmt.Errorf("count events: %w", err)
+	}
+
+	affectedProjects, err := db.PurgeResetProjects(ctx, c, issue)
+	if err != nil {
+		return 0, fmt.Errorf("collect affected federation streams: %w", err)
 	}
 
 	// Step 4: cascade-delete dependents. Order is bounded by foreign keys —
@@ -445,6 +456,10 @@ func purgeCascade(
 	reservedCursor, err := reserveEventSequence(ctx, c, true)
 	if err != nil {
 		return 0, err
+	}
+
+	if err := db.RecordProjectStreamResets(ctx, c, affectedProjects, reservedCursor.Int64); err != nil {
+		return 0, fmt.Errorf("invalidate former federation streams: %w", err)
 	}
 
 	purgeUID, err := katauid.New()

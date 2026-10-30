@@ -30,6 +30,7 @@ func startFederationConfigReconciler(
 	store db.Storage,
 	federationWake func(),
 	projectEventSink func(db.Event, activity.Admission),
+	projectResetSink func(projectID, cursor int64),
 	daemonLog *log.Logger,
 ) func() api.FederationConfigHealth {
 	if len(daemonConfig.Federation.Projects) == 0 {
@@ -69,6 +70,7 @@ func startFederationConfigReconciler(
 		},
 		Wake:                 federationWake,
 		ProjectEventSinkFrom: projectEventSink,
+		ProjectResetSink:     projectResetSink,
 		DrainAdmission:       drainAdmission,
 		Logger:               daemonLog,
 	})

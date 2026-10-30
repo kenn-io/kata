@@ -91,6 +91,10 @@ func (s *Store) AdoptProjectIntoFederation(
 		if err != nil {
 			return err
 		}
+		formerProjects, err := db.AdoptionFormerProjects(ctx, tx, project)
+		if err != nil {
+			return err
+		}
 		issues, err := federationIssuesForSnapshot(ctx, tx, project.ID)
 		if err != nil {
 			return err
@@ -170,6 +174,7 @@ push_cursor_event_id,bound_actor,allow_insecure,enabled
 					return fmt.Errorf("set attachment push cursor: %w", err)
 				}
 			}
+			output.ResetAfterEventID = event.ID
 		}
 
 		for _, issue := range issues {
@@ -178,21 +183,32 @@ push_cursor_event_id,bound_actor,allow_insecure,enabled
 				return err
 			}
 			issueUID := issue.UID
-			if _, err := s.insertEventTx(ctx, tx, eventInsert{
+			event, err := s.insertEventTx(ctx, tx, eventInsert{
 				ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name,
 				IssueID: &issue.ID, IssueUID: &issueUID, Type: "issue.snapshot",
 				Actor: actor, Payload: payload, HLC: &boundary, CreatedAt: baselineCreatedAt,
-			}); err != nil {
+			})
+			if err != nil {
 				return err
 			}
+			output.ResetAfterEventID = event.ID
 			output.AdoptionSnapshotCount++
 		}
 
 		for _, event := range cron {
-			if _, err := s.insertEventTx(ctx, tx, eventInsert{ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, Type: event.Type, Actor: actor, Payload: event.Payload, HLC: &boundary, CreatedAt: baselineCreatedAt}); err != nil {
+			inserted, err := s.insertEventTx(ctx, tx, eventInsert{ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, Type: event.Type, Actor: actor, Payload: event.Payload, HLC: &boundary, CreatedAt: baselineCreatedAt})
+			if err != nil {
 				return err
 			}
+			output.ResetAfterEventID = inserted.ID
 			output.AdoptionSnapshotCount++
+		}
+		if err := db.RecordProjectStreamResets(ctx, tx, append(formerProjects, project.UID), output.ResetAfterEventID); err != nil {
+			return err
+		}
+		output.ResetProjectIDs, err = db.ProjectStreamResetProjectIDs(ctx, tx, project.ID, output.ResetAfterEventID)
+		if err != nil {
+			return err
 		}
 		binding, err := scanFederationBinding(tx.QueryRowContext(ctx,
 			federationBindingSelect+` WHERE project_id=$1`, project.ID))

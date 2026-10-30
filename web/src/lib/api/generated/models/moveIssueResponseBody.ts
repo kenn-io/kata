@@ -7,6 +7,7 @@ export interface MoveIssueResponseBody {
   changed: boolean
   event_id: number
   issue: Issue
+  issues?: Issue[]
   new_short_id?: string
   [key: string]: unknown
 }

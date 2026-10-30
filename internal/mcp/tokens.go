@@ -142,6 +142,10 @@ func (h toolHandlers) scopedTokenCreate(ctx context.Context, input TokenCreateIn
 	if err != nil {
 		return nil, TokenCreateOutput{}, err
 	}
+	project, err = h.currentIssueProject(ctx, project, issueFromShow(shown.Issue))
+	if err != nil {
+		return nil, TokenCreateOutput{}, err
+	}
 	if project.UID == "" || shown.Issue.UID == "" || shown.Issue.ShortID == "" || shown.Issue.ProjectID != project.ID {
 		return nil, TokenCreateOutput{}, errors.New("daemon returned incomplete issue identity for scoped token creation")
 	}

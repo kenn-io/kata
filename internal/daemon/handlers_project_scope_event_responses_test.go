@@ -77,7 +77,7 @@ func TestProjectScopedCloseRetryHidesRestrictedEvidenceReference(t *testing.T) {
 		}
 		require.NoError(t, json.Unmarshal(responseBody, &first))
 		require.NotNil(t, first.Event)
-		require.Contains(t, string(first.Event.Payload), fixture.visible.ShortID)
+		require.Contains(t, string(first.Event.Payload), fixture.visible.UID)
 
 		target, err := store.IssueByID(t.Context(), fixture.visible.ID)
 		require.NoError(t, err)
@@ -136,7 +136,7 @@ func TestProjectScopedCloseReceiptsResolveEvidenceReferenceForms(t *testing.T) {
 				require.NoError(t, json.Unmarshal(responseBody, &first))
 				require.NotNil(t, first.Event,
 					"a successful close must retain its receipt when evidence uses a supported reference form")
-				require.Contains(t, first.Event.Payload, refCase.ref)
+				require.Contains(t, first.Event.Payload, fixture.visible.UID)
 
 				status, _, responseBody = fixture.request(t, "POST", path, "member", body, headers)
 				require.Equalf(t, 200, status, "idempotent close retry response: %s", responseBody)
@@ -148,7 +148,7 @@ func TestProjectScopedCloseReceiptsResolveEvidenceReferenceForms(t *testing.T) {
 				require.True(t, retry.Reused)
 				require.NotNil(t, retry.OriginalEvent,
 					"a keyed retry must retain its receipt when evidence uses a supported reference form")
-				require.Contains(t, retry.OriginalEvent.Payload, refCase.ref)
+				require.Contains(t, retry.OriginalEvent.Payload, fixture.visible.UID)
 			})
 		}
 	})

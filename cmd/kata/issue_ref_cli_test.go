@@ -1,11 +1,55 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 )
+
+func TestDestructiveCLI_MovedIssueConfirmation(t *testing.T) {
+	for _, verb := range []string{"delete", "purge"} {
+		for _, refKind := range []string{"alias", "ULID"} {
+			t.Run(verb+"/"+refKind, func(t *testing.T) {
+				env, dir, source, target, issue := setupMoveCLIProjects(t)
+				runCLI(t, env, dir, "--project", source.Name, "move", issue.ShortID, target.Name)
+				moved, err := env.DB.IssueByID(t.Context(), issue.ID)
+				require.NoError(t, err)
+				currentRef := target.Name + "#" + moved.ShortID
+				if verb == "purge" {
+					runCLI(t, env, dir, "delete", currentRef, "--force", "--confirm", "DELETE "+currentRef)
+				}
+				ref := source.Name + "#" + issue.ShortID
+				if refKind == "ULID" {
+					ref = issue.UID
+				}
+
+				resetFlags(t)
+				stubIsTTY(t, true)
+				cmd := newRootCmd()
+				var output bytes.Buffer
+				cmd.SetOut(&output)
+				cmd.SetErr(&output)
+				cmd.SetIn(strings.NewReader(strings.ToUpper(verb) + " " + currentRef + "\n"))
+				cmd.SetContext(contextWithBaseURL(context.Background(), env.URL))
+				cmd.SetArgs([]string{"--workspace", dir, "--project", source.Name, verb, ref, "--force"})
+				require.NoError(t, cmd.Execute(), "confirmation must use the issue's current project")
+				assert.Contains(t, output.String(), currentRef)
+				stored, err := env.DB.IssueByID(t.Context(), issue.ID)
+				if verb == "purge" {
+					require.ErrorIs(t, err, db.ErrNotFound)
+				} else {
+					require.NoError(t, err)
+					assert.NotNil(t, stored.DeletedAt)
+				}
+			})
+		}
+	}
+}
 
 func TestRefToWireForwardsQualifiedRefsOnlyForOtherProjects(t *testing.T) {
 	tests := []struct {

@@ -257,7 +257,15 @@ func (s *Store) IssueByShortID(ctx context.Context, projectID int64, value strin
 	}
 	args := []any{projectID, value}
 	query += " AND " + authorizedIssuePredicate(ctx, "i.project_id", &args)
-	return scanIssue(ctx, s.QueryRowContext(ctx, query, args...))
+	issue, err := scanIssue(ctx, s.QueryRowContext(ctx, query, args...))
+	if !errors.Is(err, db.ErrNotFound) {
+		return issue, err
+	}
+	uid, err := db.MovedIssueUID(ctx, s, projectID, value, true)
+	if err != nil {
+		return db.Issue{}, err
+	}
+	return s.IssueByUID(ctx, uid, include)
 }
 
 // IssueByUID resolves a stable issue identifier.
@@ -583,7 +591,13 @@ func (s *Store) resolveShortIDTx(ctx context.Context, tx *sql.Tx, projectID int6
 			return "", mapSQLError(err, nil)
 		}
 		if !exists {
-			return candidate, nil
+			movedUID, err := db.MovedIssueUID(ctx, tx, projectID, candidate, true)
+			if err != nil && !errors.Is(err, db.ErrNotFound) {
+				return "", err
+			}
+			if err != nil || movedUID == uid {
+				return candidate, nil
+			}
 		}
 	}
 	return "", fmt.Errorf("short_id auto-extend exhausted for uid %s", uid)
