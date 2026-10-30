@@ -1,7 +1,7 @@
 ---
 title: Native cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-10-26
+last_edited: 2026-10-30
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -118,7 +118,7 @@ digits, `-`, `_`, and `.`, and is neither `.` nor `..`.
 | `checkout_key` | Optional portable name. Not allowed with `notify`. |
 | `grace_seconds`, `timeout_seconds` | Optional; zero or greater. |
 | `secret_refs` | Optional object mapping portable names to portable names. |
-| `options` | Optional JSON object for the adapter. |
+| `options` | Optional JSON object for the adapter. `options.adapter` can name the adapter that runs the job; see [adapter responsibilities](#adapter-responsibilities). |
 
 `options` objects, at any depth, cannot contain these keys (compared without
 case): `token`, `api_token`, `api_key`, `password`, `secret`, `credentials`,
@@ -535,6 +535,15 @@ adapter owns its local activation, scheduler, overlap and catchup handling,
 checkout and secret mappings, process lifecycle, and conversation recovery.
 A second adapter may independently execute the same occurrence. Each execution
 keeps a separate run UID; no shared observation reserves the issue or occurrence.
+
+A job may name its adapter in `options.adapter`. An adapter neither schedules
+nor manually runs a job whose key names another adapter, and says why in its own
+status. A job without the key runs as before. Kata stores the key and arbitrates
+nothing. The value names an adapter, not an installation; each adapter's lease
+still picks the installation. `herdr-kata` and `tern-kata` are examples, and
+each adapter documents its own value. Older adapters ignore the key: Herdr Kata
+v0.1.0, for example, logs `ignored options key: adapter` and still runs the job.
+
 Local transcripts, process IDs, session handles, credentials, and delivery
 buffers are not native run evidence. An adapter may buffer a failed observation
 write and retry it later without blocking its own work.
