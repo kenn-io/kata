@@ -25,10 +25,46 @@ kata next. "-" clears it. For no date at all: kata meta set <ref> someday
 true --json-value.
 Formats: YYYY-MM-DD, local YYYY-MM-DDTHH:MM[:SS], or RFC 3339 UTC ending
 in Z. Relative words like "monday" are rejected; compute the date.
-When it is reached, the owner (or author if unowned) gets an inbox request.`
+When it is reached, the owner (or author if unowned) gets an inbox request.
+
+--repeat '<rrule>' makes the issue the first occurrence of a recurrence that
+starts on <date>, or changes the rule, start and zone of the one it already
+belongs to. The rule is sent as written and the daemon validates it. The
+zone is --timezone, else the issue's timezone metadata, else your own IANA
+zone (TZ, then the /etc/localtime link); with none of those, pass --timezone.
+Starting rewrites scheduled_on to the first occurrence, so a future date
+takes the issue out of kata ready until then. --repeat - stops the
+recurrence; occurrences already created stay.
+An issue that parents a recurring cron job (cron.progress.* metadata) is
+refused: closing it as done would pause the job. Use kata cron job create
+--parent for work that repeats under an issue.`
 	cmd.Example = `  kata schedule abc4 2026-11-02 --agent
   kata schedule abc4 2026-11-02T09:00 --agent
-  kata schedule abc4 - --agent`
+  kata schedule abc4 - --agent
+  kata schedule abc4 2026-11-02 --repeat 'FREQ=WEEKLY;BYDAY=MO' --timezone Europe/Paris --agent
+  kata schedule abc4 --repeat - --agent`
+	cmd.Use = "schedule <issue-ref> [<date-or-time|->]"
+	cmd.Args = cobra.RangeArgs(1, 2)
+	var repeat, timezone string
+	cmd.Flags().StringVar(&repeat, "repeat", "", "RRULE to repeat on from <date>, or - to stop repeating")
+	cmd.Flags().StringVar(&timezone, "timezone", "", "IANA zone for --repeat (default: issue timezone metadata, then your zone)")
+	setDate := cmd.RunE
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		ifMatch, _ := cmd.Flags().GetString("if-match")
+		if !cmd.Flags().Changed("repeat") {
+			if timezone != "" {
+				return scheduleRepeatUsage("--timezone only applies with --repeat")
+			}
+			if len(args) != 2 {
+				return scheduleRepeatUsage("kata schedule needs <issue-ref> and <date-or-time|->")
+			}
+			return setDate(cmd, args)
+		}
+		if err := validateMetaIfMatchFlag(cmd, ifMatch); err != nil {
+			return err
+		}
+		return runScheduleRepeat(cmd, args, scheduleRepeatOptions{Rule: repeat, Timezone: timezone, IfMatch: ifMatch})
+	}
 	return cmd
 }
 
