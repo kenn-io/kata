@@ -53,7 +53,7 @@ jobs:
 
   web-static:
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'frontend') || contains(fromJSON(needs.changes.outputs.groups), 'docs-javascript')) }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'frontend') || contains(fromJSON(needs.changes.outputs.groups), 'docs-javascript') || contains(fromJSON(needs.changes.outputs.groups), 'embedded-docs')) }}
     name: Web static checks
     runs-on: ubuntu-latest
 
@@ -81,7 +81,7 @@ jobs:
 
   web-browser:
     needs: changes
-    if: &go-frontend-changes ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go') || contains(fromJSON(needs.changes.outputs.groups), 'frontend')) }}
+    if: &go-frontend-changes ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go') || contains(fromJSON(needs.changes.outputs.groups), 'frontend') || contains(fromJSON(needs.changes.outputs.groups), 'embedded-docs')) }}
     name: Web browser tests
     runs-on: ubuntu-latest
 
@@ -225,7 +225,7 @@ jobs:
 
   native-agent-plugins:
     needs: changes
-    if: &go-changes ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go')) }}
+    if: &go-changes ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go') || contains(fromJSON(needs.changes.outputs.groups), 'embedded-docs')) }}
     name: Native agent plugins
     runs-on: ubuntu-latest
     steps:
@@ -268,7 +268,7 @@ jobs:
 
   api-breaking:
     needs: changes
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go')) }}
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go') || contains(fromJSON(needs.changes.outputs.groups), 'embedded-docs')) }}
     name: OpenAPI breaking changes
     runs-on: ubuntu-latest
 
