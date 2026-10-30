@@ -538,11 +538,12 @@ keeps a separate run UID; no shared observation reserves the issue or occurrence
 
 A job may name its adapter in `options.adapter`. An adapter neither schedules
 nor manually runs a job whose key names another adapter, and says why in its own
-status. A job without the key runs as before. Kata stores the key and arbitrates
-nothing. The value names an adapter, not an installation; each adapter's lease
-still picks the installation. `herdr-kata` and `tern-kata` are examples, and
-each adapter documents its own value. Older adapters ignore the key: Herdr Kata
-v0.1.0, for example, logs `ignored options key: adapter` and still runs the job.
+status. Any adapter may run a job without the key. Kata stores the key and
+arbitrates nothing. The value names an adapter, not an installation; each
+adapter decides which of its installations runs the job. `herdr-kata` and
+`tern-kata` are examples, and each adapter documents its own value. Adapters
+that do not read the key ignore it: Herdr Kata v0.1.0, for example, logs
+`ignored options key: adapter` and still runs the job.
 
 Local transcripts, process IDs, session handles, credentials, and delivery
 buffers are not native run evidence. An adapter may buffer a failed observation
