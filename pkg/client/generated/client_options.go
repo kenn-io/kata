@@ -6123,6 +6123,7 @@ func (o *ListRecurrencesRequestOptions) GetHeader() (map[string]string, error) {
 type CreateRecurrenceRequestOptions struct {
 	PathParams *CreateRecurrencePath
 	Body       *CreateRecurrenceBody
+	Header     *CreateRecurrenceHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -6142,6 +6143,14 @@ func (o *CreateRecurrenceRequestOptions) Validate() error {
 		if v, ok := any(o.Body).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -6169,7 +6178,7 @@ func (o *CreateRecurrenceRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *CreateRecurrenceRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // DeleteRecurrenceRequestOptions is the options needed to make a request to DeleteRecurrence.

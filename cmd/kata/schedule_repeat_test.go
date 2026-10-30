@@ -230,6 +230,15 @@ func TestScheduleRepeatChangesAnExistingRecurrence(t *testing.T) {
 // preceded by a competing change, so the revision the CLI read is stale.
 func movingProxy(t *testing.T, env *testenv.Env, competing func()) string {
 	t.Helper()
+	return proxyBefore(t, env, func(r *http.Request) bool {
+		return (r.Method == http.MethodPatch || r.Method == http.MethodDelete) && strings.Contains(r.URL.Path, "/recurrences/")
+	}, competing)
+}
+
+// proxyBefore forwards to the daemon, running competing once before the first
+// request that match accepts.
+func proxyBefore(t *testing.T, env *testenv.Env, match func(*http.Request) bool, competing func()) string {
+	t.Helper()
 	target, err := url.Parse(env.URL)
 	require.NoError(t, err)
 	// Rewrite, unlike the default director, adds no X-Forwarded-For header,
@@ -237,10 +246,8 @@ func movingProxy(t *testing.T, env *testenv.Env, competing func()) string {
 	proxy := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) { r.SetURL(target) }}
 	var once sync.Once
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPatch || r.Method == http.MethodDelete {
-			if strings.Contains(r.URL.Path, "/recurrences/") {
-				once.Do(competing)
-			}
+		if match(r) {
+			once.Do(competing)
 		}
 		proxy.ServeHTTP(w, r)
 	}))
@@ -470,4 +477,20 @@ func TestScheduleRepeatThroughAMovedIssuesOldRefUsesItsCurrentProject(t *testing
 
 	runCLI(t, env, dir, "schedule", oldRef, "--repeat", "-")
 	assert.Empty(t, listRecurrencesViaHTTP(t, env, target.ID))
+}
+
+func TestScheduleRepeatIfMatchLosesToACompetingWriteBeforeTheRecurrenceIsCreated(t *testing.T) {
+	isolateCallerZone(t)
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "contended start")
+	proxyURL := proxyBefore(t, env, func(r *http.Request) bool {
+		return r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/recurrences")
+	}, func() { runCLI(t, env, dir, "meta", "set", ref, "note", "competing") })
+
+	_, stderr, err := runCLIAgainst(t, proxyURL, dir, "schedule", "--if-match", "1", ref, "2026-11-02", "--repeat", "FREQ=DAILY", "--timezone", "UTC")
+
+	ce := requireCLIError(t, err, ExitConfirm)
+	assert.Equal(t, kindConfirm, ce.Kind)
+	assert.Contains(t, stderr, "revision conflict")
+	assert.Empty(t, listRecurrencesViaHTTP(t, env, pid), "the competing write must not be overwritten")
 }

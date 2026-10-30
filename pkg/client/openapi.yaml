@@ -11317,6 +11317,10 @@ paths:
           schema:
             format: int64
             type: integer
+        - in: header
+          name: If-Match
+          schema:
+            type: string
       requestBody:
         content:
           application/json:

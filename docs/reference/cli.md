@@ -1168,7 +1168,11 @@ zone, else the issue's `timezone` metadata, else your own IANA zone (`TZ`, then
 the zone the `/etc/localtime` link names; a `TZ` that is set but empty means
 UTC). With none of those, pass `--timezone`.
 `Local` is never sent. `--if-match` checks the issue revision before anything is
-written.
+written. When starting a recurrence the daemon checks it again inside the
+transaction that attaches the issue, so a competing write in between fails with
+a revision conflict instead of being overwritten; that needs daemon API 0.36.0
+or newer. A moved issue is found through its old ref and the recurrence belongs
+to the project it is in now.
 
 `kata schedule <ref> --repeat -` stops the recurrence. Occurrences that already
 exist stay. Stopping an issue with no active recurrence fails and writes
