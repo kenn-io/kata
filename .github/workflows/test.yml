@@ -31,18 +31,25 @@ jobs:
         with:
           filters: |
             go:
-              - '!{*.md,docs/**/*.md,docs/website/**,docs/scripts/**,docs/stylesheets/**,docs/javascripts/**,docs/overrides/**,docs/zensical.toml,docs/vercel.json,docs/llms.txt,docs/pyproject.toml,docs/uv.lock,docs/vercel-build.sh,docs/zensical-docs.sh}'
+              - '!{*.md,docs/**/*.md,docs/website/**,docs/scripts/**,docs/stylesheets/**,docs/javascripts/**,docs/overrides/**,docs/zensical.toml,docs/vercel.json,docs/llms.txt,docs/pyproject.toml,docs/uv.lock,docs/vercel-build.sh,docs/zensical-docs.sh,web/**,packages/**}'
+              - '**/*.go'
+              - 'internal/web/**'
+              - '.github/**'
+            embedded-docs:
+              # Keep aligned with the go:embed directive in docs/docs.go.
               - 'docs/index.md'
               - 'docs/{get-started,guide,workflows,reference,operations}/*.md'
             frontend:
-              - '!{*.go,**/*.go,*.md,**/*.md,docs/**}'
+              - '!{*.go,**/*.go,*.md,**/*.md,docs/website/**,docs/scripts/**,docs/stylesheets/**,docs/javascripts/**,docs/overrides/**,docs/zensical.toml,docs/vercel.json,docs/llms.txt,docs/pyproject.toml,docs/uv.lock,docs/vercel-build.sh,docs/zensical-docs.sh}'
               - 'web/**'
               - 'packages/**'
+              - '.github/**'
+            docs-javascript:
               - 'docs/javascripts/**'
 
   web-static:
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'frontend')) }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'frontend') || contains(fromJSON(needs.changes.outputs.groups), 'docs-javascript')) }}
     name: Web static checks
     runs-on: ubuntu-latest
 
@@ -70,7 +77,7 @@ jobs:
 
   web-browser:
     needs: changes
-    if: &go-changes ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go')) }}
+    if: &go-frontend-changes ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go') || contains(fromJSON(needs.changes.outputs.groups), 'frontend')) }}
     name: Web browser tests
     runs-on: ubuntu-latest
 
@@ -170,7 +177,7 @@ jobs:
 
   go:
     needs: changes
-    if: *go-changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go') || contains(fromJSON(needs.changes.outputs.groups), 'embedded-docs') || contains(fromJSON(needs.changes.outputs.groups), 'frontend')) }}
     name: Go tests
     runs-on: ubuntu-latest
 
@@ -214,7 +221,7 @@ jobs:
 
   native-agent-plugins:
     needs: changes
-    if: *go-changes
+    if: &go-changes ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go')) }}
     name: Native agent plugins
     runs-on: ubuntu-latest
     steps:
@@ -302,7 +309,7 @@ jobs:
 
   postgres:
     needs: changes
-    if: *go-changes
+    if: *go-frontend-changes
     name: PostgreSQL ${{ matrix.postgres }} conformance
     runs-on: ubuntu-latest
     strategy:
@@ -388,7 +395,7 @@ jobs:
 
   windows:
     needs: changes
-    if: *go-changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go') || contains(fromJSON(needs.changes.outputs.groups), 'embedded-docs')) }}
     name: ${{ matrix.name }}
     runs-on: windows-2025
     strategy:
