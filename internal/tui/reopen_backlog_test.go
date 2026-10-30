@@ -1,0 +1,359 @@
+package tui
+
+import (
+	"context"
+	"net/http"
+	"strings"
+	"testing"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/internal/db"
+)
+
+const (
+	backlogParentUID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+	backlogEventUID  = "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+)
+
+// backlogJob describes one native recurring job stored on the issue being
+// reopened. missed is how many one-minute occurrences passed since its progress
+// stopped advancing; the extra half minute keeps the count stable while the
+// test runs.
+type backlogJob struct {
+	uid        string
+	catchup    string
+	grace      int64
+	missed     int
+	deleted    bool
+	unreadable bool
+}
+
+func (j backlogJob) definition() api.CronJob {
+	def := api.CronJobDefinition{
+		Version: 1, Kind: "job", Enabled: true,
+		Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 60},
+		Action:  cron.Action{Kind: "notify", Recipient: "current-owner-or-author"},
+		Issue:   &cron.IssuePolicy{Kind: "per-run", ParentUID: backlogParentUID, Title: "Review"},
+		Overlap: "allow", Catchup: j.catchup, GraceSeconds: j.grace,
+	}
+	job := api.CronJob{CronDefinition: db.CronDefinition{UID: j.uid, DefinitionEventUID: backlogEventUID}, Definition: def}
+	if j.deleted {
+		now := time.Now().UTC()
+		job.DeletedAt = &now
+	}
+	return job
+}
+
+func (j backlogJob) progress() cron.RecurringProgress {
+	through := time.Now().UTC().Add(-time.Duration(j.missed)*time.Minute - 30*time.Second).Truncate(time.Second)
+	return cron.RecurringProgress{Version: 1, Anchor: through, Through: through}
+}
+
+// backlogDaemon serves the two reads the reopen check makes: the issue's
+// metadata and each job named by a progress key.
+func backlogDaemon(t *testing.T, extraMeta map[string]any, jobs ...backlogJob) *Client {
+	t.Helper()
+	metadata := map[string]any{}
+	byUID := map[string]backlogJob{}
+	for _, j := range jobs {
+		metadata[cronProgressPrefix+j.uid] = j.progress()
+		byUID[j.uid] = j
+	}
+	for k, v := range extraMeta {
+		metadata[k] = v
+	}
+	return newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/projects/7/issues/abcd/metadata":
+			respondJSON(t, w, map[string]any{"issue": map[string]any{"short_id": "abcd", "metadata": metadata, "revision": 3}})
+		case strings.HasPrefix(r.URL.Path, "/api/v1/projects/7/cron/jobs/"):
+			job, ok := byUID[strings.TrimPrefix(r.URL.Path, "/api/v1/projects/7/cron/jobs/")]
+			if !ok || job.unreadable {
+				http.NotFound(w, r)
+				return
+			}
+			respondJSON(t, w, map[string]any{"job": job.definition()})
+		default:
+			t.Errorf("unexpected request %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	})
+}
+
+func TestReopenBacklogCountsRecurringJobs(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		meta map[string]any
+		jobs []backlogJob
+		want int
+	}{
+		{"no cron progress", map[string]any{"note": "text"}, nil, 0},
+		{"all job missed several", nil, []backlogJob{{uid: "job-a", catchup: "all", missed: 3}}, 3},
+		{"jobs on one parent are summed", nil, []backlogJob{
+			{uid: "job-a", catchup: "all", missed: 3},
+			{uid: "job-b", catchup: "all", missed: 4},
+		}, 7},
+		{"latest delivers one", nil, []backlogJob{{uid: "job-a", catchup: "latest", missed: 500}}, 1},
+		{"skip delivers only what is inside grace", nil, []backlogJob{{uid: "job-a", catchup: "skip", grace: 60, missed: 500}}, 1},
+		{"nothing missed", nil, []backlogJob{{uid: "job-a", catchup: "all", missed: 0}}, 0},
+		{"count is exact beyond one thousand", nil, []backlogJob{{uid: "job-a", catchup: "all", missed: 2503}}, 2503},
+		{"deleted and unreadable jobs are ignored", nil, []backlogJob{
+			{uid: "job-a", catchup: "all", missed: 3},
+			{uid: "job-b", catchup: "all", missed: 9, deleted: true},
+			{uid: "job-c", catchup: "all", missed: 9, unreadable: true},
+		}, 3},
+		{"latest and all mix", nil, []backlogJob{
+			{uid: "job-a", catchup: "latest", missed: 50},
+			{uid: "job-b", catchup: "all", missed: 2},
+		}, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := backlogDaemon(t, tc.meta, tc.jobs...)
+			got, err := c.ReopenBacklog(context.Background(), 7, "abcd")
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestReopenBacklogReportsMetadataFailure(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) { http.Error(w, "boom", http.StatusInternalServerError) })
+	_, err := c.ReopenBacklog(context.Background(), 7, "abcd")
+	require.Error(t, err)
+}
+
+// reopenSpyAPI counts the reopens the model sends to the daemon.
+type reopenSpyAPI struct {
+	*Client
+	reopens int
+}
+
+func (s *reopenSpyAPI) Reopen(_ context.Context, _ int64, _, _ string) (*MutationResp, error) {
+	s.reopens++
+	return &MutationResp{Issue: &Issue{UID: "01TEST-abcd", ShortID: "abcd", Status: "open"}, Changed: true}, nil
+}
+
+func listReopenModel(t *testing.T, spy *reopenSpyAPI) Model {
+	t.Helper()
+	m := newTestModel()
+	m.api = spy
+	m.view = viewList
+	m.list.actor = "tester"
+	m.list.issues = []Issue{{ProjectID: 7, ShortID: "abcd", Status: "closed", Title: "Parent"}}
+	return m
+}
+
+func detailReopenModel(t *testing.T, spy *reopenSpyAPI) Model {
+	t.Helper()
+	m := newTestModel()
+	m.api = spy
+	m.view = viewDetail
+	m.detail.actor = "tester"
+	m.detail.scopePID = 7
+	m.detail.gen = 4
+	m.detail.issue = &Issue{ProjectID: 7, ShortID: "abcd", Status: "closed", Title: "Parent"}
+	return m
+}
+
+// pressReopen sends r and delivers the backlog answer back to the model.
+func pressReopen(t *testing.T, m Model) (Model, tea.Cmd) {
+	t.Helper()
+	m, cmd := updateModel(m, runeKey('r'))
+	require.NotNil(t, cmd)
+	msg, ok := cmd().(reopenBacklogMsg)
+	require.True(t, ok, "r must check the backlog before reopening")
+	return updateModel(m, msg)
+}
+
+func TestReopenFromListAndDetailPromptsBeforeDeliveringBacklog(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		model      func(*testing.T, *reopenSpyAPI) Model
+		wantOrigin string
+		wantGen    int64
+	}{
+		{"list", listReopenModel, "list", 0},
+		{"detail", detailReopenModel, "detail", 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
+			m, cmd := pressReopen(t, tc.model(t, spy))
+			require.Nil(t, cmd)
+			require.Equal(t, modalReopenBacklog, m.modal)
+			require.Zero(t, spy.reopens, "nothing is reopened until the user confirms")
+			view := stripANSI(m.confirmModalView())
+			require.Contains(t, view, "Reopen #abcd?")
+			require.Contains(t, view, "3 recurring child")
+			require.Contains(t, view, "kata cron job update")
+			require.NotContains(t, view, "latest", "the prompt informs without steering catch-up")
+
+			m, cmd = updateModel(m, runeKey('y'))
+			require.Equal(t, modalNone, m.modal)
+			require.NotNil(t, cmd)
+			done, ok := cmd().(mutationDoneMsg)
+			require.True(t, ok)
+			require.Equal(t, 1, spy.reopens)
+			require.Equal(t, "reopen", done.kind)
+			require.Equal(t, tc.wantOrigin, done.origin)
+			require.Equal(t, tc.wantGen, done.gen)
+		})
+	}
+}
+
+func TestReopenBacklogCancelLeavesIssueClosed(t *testing.T) {
+	for _, cancel := range []tea.KeyPressMsg{runeKey('n'), {Code: tea.KeyEscape}} {
+		spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 2})}
+		m, _ := pressReopen(t, listReopenModel(t, spy))
+		require.Equal(t, modalReopenBacklog, m.modal)
+		m, cmd := updateModel(m, cancel)
+		require.Equal(t, modalNone, m.modal)
+		require.Nil(t, cmd)
+		require.Nil(t, m.reopenPrompt)
+		require.Zero(t, spy.reopens)
+	}
+}
+
+func TestReopenWithoutBacklogSkipsPrompt(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		jobs []backlogJob
+	}{
+		{"no cron jobs", nil},
+		{"zero due", []backlogJob{{uid: "job-a", catchup: "all", missed: 0}}},
+		{"one due", []backlogJob{{uid: "job-a", catchup: "all", missed: 1}}},
+		{"latest job", []backlogJob{{uid: "job-a", catchup: "latest", missed: 800}}},
+		{"skip job", []backlogJob{{uid: "job-a", catchup: "skip", grace: 60, missed: 800}}},
+	} {
+		for _, view := range []string{"list", "detail"} {
+			t.Run(tc.name+"/"+view, func(t *testing.T) {
+				spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, tc.jobs...)}
+				model := listReopenModel
+				if view == "detail" {
+					model = detailReopenModel
+				}
+				m, cmd := pressReopen(t, model(t, spy))
+				require.Equal(t, modalNone, m.modal)
+				require.NotNil(t, cmd)
+				require.IsType(t, mutationDoneMsg{}, cmd())
+				require.Equal(t, 1, spy.reopens)
+			})
+		}
+	}
+}
+
+func TestReopenReadFailureStillReopens(t *testing.T) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) { http.Error(w, "boom", http.StatusInternalServerError) })
+	spy := &reopenSpyAPI{Client: client}
+	m, cmd := pressReopen(t, listReopenModel(t, spy))
+	require.Equal(t, modalNone, m.modal)
+	require.NotNil(t, cmd)
+	cmd()
+	require.Equal(t, 1, spy.reopens)
+}
+
+func TestReopenBacklogAnswerForMovedSelectionIsDropped(t *testing.T) {
+	spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
+	m := listReopenModel(t, spy)
+	m, cmd := updateModel(m, runeKey('r'))
+	msg := cmd().(reopenBacklogMsg)
+	m.list.issues = []Issue{{ProjectID: 7, ShortID: "wxyz", Status: "closed"}}
+	m, cmd = updateModel(m, msg)
+	require.Nil(t, cmd)
+	require.Equal(t, modalNone, m.modal)
+	require.Zero(t, spy.reopens)
+}
+
+// backlogUndoAPI answers the backlog question for the undo path.
+type backlogUndoAPI struct {
+	*undoTestAPI
+	count int
+	err   error
+}
+
+func (b *backlogUndoAPI) ReopenBacklog(context.Context, int64, string) (int, error) {
+	return b.count, b.err
+}
+
+func undoCloseModel(t *testing.T, count int, err error) (Model, *undoTestAPI) {
+	t.Helper()
+	done := "done"
+	uid := "01JZ0000000000000000000001"
+	f := &undoTestAPI{issue: Issue{UID: uid, ProjectID: 7, ShortID: "abc4", Status: "closed", ClosedReason: &done, Revision: 4},
+		writeResp: &MutationResp{Issue: &Issue{UID: uid, ProjectID: 7, Status: "open", Revision: 5}, Changed: true}}
+	m := initialModel(Options{})
+	m.api = newConnectedUndoClient(t, &backlogUndoAPI{undoTestAPI: f, count: count, err: err})
+	m.view = viewList
+	m.undoHistory.push(undoEntry{kind: "close", uid: uid, projectID: 7, instanceUID: "instance-1", actor: "bob",
+		before: Issue{Status: "open", Revision: 3}, after: f.issue, revision: 4})
+	return m, f
+}
+
+func pressUndo(t *testing.T, m Model) (Model, tea.Cmd) {
+	t.Helper()
+	updated, cmd := m.Update(runeKey('u'))
+	require.NotNil(t, cmd)
+	m = updated.(Model)
+	updated, cmd = m.Update(cmd())
+	return updated.(Model), cmd
+}
+
+func TestUndoCloseConfirmsBacklogBeforeReopening(t *testing.T) {
+	m, f := undoCloseModel(t, 5, nil)
+	m, cmd := pressUndo(t, m)
+	require.Nil(t, cmd)
+	require.Equal(t, modalReopenBacklog, m.modal)
+	require.Zero(t, f.reopenCalls)
+	require.Len(t, m.undoHistory.entries, 1, "the close stays undoable until confirmed")
+	require.False(t, m.undoInFlight)
+	view := stripANSI(m.confirmModalView())
+	require.Contains(t, view, "5 recurring child")
+	require.Contains(t, view, "kata cron job update")
+
+	m, cmd = updateModel(m, runeKey('y'))
+	require.NotNil(t, cmd)
+	require.Equal(t, modalNone, m.modal)
+	updated, _ := m.Update(cmd())
+	m = updated.(Model)
+	require.Equal(t, 1, f.reopenCalls)
+	require.Empty(t, m.undoHistory.entries)
+}
+
+func TestUndoCloseCancelKeepsEntryAndIssueClosed(t *testing.T) {
+	m, f := undoCloseModel(t, 5, nil)
+	m, _ = pressUndo(t, m)
+	m, cmd := updateModel(m, runeKey('n'))
+	require.Nil(t, cmd)
+	require.Equal(t, modalNone, m.modal)
+	require.Zero(t, f.reopenCalls)
+	require.Len(t, m.undoHistory.entries, 1)
+}
+
+func TestUndoCloseWithoutBacklogReopensDirectly(t *testing.T) {
+	for name, tc := range map[string]struct {
+		count int
+		err   error
+	}{
+		"zero":         {0, nil},
+		"one":          {1, nil},
+		"lookup fails": {0, context.DeadlineExceeded},
+	} {
+		t.Run(name, func(t *testing.T) {
+			m, f := undoCloseModel(t, tc.count, tc.err)
+			m, _ = pressUndo(t, m)
+			require.Equal(t, modalNone, m.modal)
+			require.Equal(t, 1, f.reopenCalls)
+			require.Empty(t, m.undoHistory.entries)
+		})
+	}
+}
+
+func TestReopenBacklogModalHelpOffersBothChoices(t *testing.T) {
+	rows := modalHelpRows(modalReopenBacklog)
+	require.Len(t, rows, 1)
+	require.Equal(t, "y", rows[0][0].Key)
+	require.Equal(t, "n/esc", rows[0][1].Key)
+}

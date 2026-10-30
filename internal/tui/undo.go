@@ -105,7 +105,25 @@ func (m Model) startUndo() (Model, tea.Cmd) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return undoDoneMsg{connGen: connGen, entryID: entry.id,
-			outcome: client.undo(ctx, entry, evidenceRequired, nil)}
+			outcome: client.undoWith(ctx, entry, undoOptions{evidenceRequired: evidenceRequired, checkBacklog: true})}
+	}
+}
+
+// dispatchConfirmedUndo runs the undo whose reopen backlog the user accepted.
+func (m Model) dispatchConfirmedUndo(entryID uint64) (Model, tea.Cmd) {
+	client, ok := m.api.(*undoClient)
+	if !ok || len(m.undoHistory.entries) == 0 || m.undoHistory.entries[len(m.undoHistory.entries)-1].id != entryID {
+		return m.undoNotice("undo action is no longer available", toastError)
+	}
+	entry := m.undoHistory.entries[len(m.undoHistory.entries)-1]
+	m.undoInFlight = true
+	connGen := m.connGen
+	evidenceRequired := m.closeRequiresEvidence
+	return m, func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return undoDoneMsg{connGen: connGen, entryID: entry.id,
+			outcome: client.undoWith(ctx, entry, undoOptions{evidenceRequired: evidenceRequired})}
 	}
 }
 
@@ -146,6 +164,10 @@ func (m Model) handleUndoDone(msg undoDoneMsg) (Model, tea.Cmd) {
 	switch {
 	case out.needsEvidence:
 		return m.openUndoCloseForm(), nil
+	case out.backlog > 1:
+		m.reopenPrompt = &reopenPrompt{ref: target, count: out.backlog, undoEntryID: entry.id}
+		m.modal = modalReopenBacklog
+		return m, nil
 	case out.conflict != "":
 		m.undoHistory.entries = m.undoHistory.entries[:len(m.undoHistory.entries)-1]
 		return m.undoNotice("skipped undo for "+target+": "+out.conflict, toastError)

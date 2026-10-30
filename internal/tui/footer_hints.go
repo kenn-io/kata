@@ -258,6 +258,11 @@ func modalHelpRows(kind modalKind) [][]helplayout.HelpItem {
 			{Key: "y", Description: "confirm"},
 			{Key: "n/esc", Description: "cancel"},
 		}}
+	case modalReopenBacklog:
+		return [][]helplayout.HelpItem{{
+			{Key: "y", Description: "reopen"},
+			{Key: "n/esc", Description: "cancel"},
+		}}
 	case modalDiscardComment, modalDiscardNewIssue, modalDiscardCronJob:
 		return [][]helplayout.HelpItem{{
 			{Key: "y", Description: "discard"},

@@ -17,11 +17,26 @@ type undoOutcome struct {
 	changed       bool
 	already       bool
 	needsEvidence bool
+	backlog       int
 	conflict      string
 	err           error
 }
 
+// undoOptions tunes one undo attempt. checkBacklog asks for the recurring
+// backlog before undoing a close, so the user can confirm a reopen that
+// delivers several children.
+type undoOptions struct {
+	evidenceRequired bool
+	evidence         *CloseInput
+	checkBacklog     bool
+}
+
 func (c *undoClient) undo(ctx context.Context, entry undoEntry, evidenceRequired bool, evidence *CloseInput) undoOutcome {
+	return c.undoWith(ctx, entry, undoOptions{evidenceRequired: evidenceRequired, evidence: evidence})
+}
+
+func (c *undoClient) undoWith(ctx context.Context, entry undoEntry, opts undoOptions) undoOutcome {
+	evidenceRequired, evidence := opts.evidenceRequired, opts.evidence
 	attempt, err := c.begin(ctx, false)
 	if err != nil {
 		return undoOutcome{err: err}
@@ -76,6 +91,15 @@ func (c *undoClient) undo(ctx context.Context, entry undoEntry, evidenceRequired
 		if entry.kind == "reopen" && evidenceRequired && evidence == nil {
 			out.needsEvidence = true
 			return out
+		}
+		if entry.kind == "close" && opts.checkBacklog {
+			if checker, ok := backlogChecker(c); ok {
+				// A failed lookup must not block undo; only a known backlog prompts.
+				if count, err := checker.ReopenBacklog(ctx, entry.projectID, entry.uid); err == nil && count > 1 {
+					out.backlog = count
+					return out
+				}
+			}
 		}
 		if entry.kind == "close" {
 			out.resp, out.err = c.KataAPI.Reopen(ctx, entry.projectID, entry.uid, entry.actor)
