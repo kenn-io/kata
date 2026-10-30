@@ -115,10 +115,7 @@ describe('summarizeBlockedBy', () => {
   })
 
   it('qualifies only blockers from another project', () => {
-    const mixed = [
-      peers[0]!,
-      { uid: 'uid-z9', short_id: 'z9', qualified_id: 'other-project#z9' },
-    ]
+    const mixed = [peers[0]!, { uid: 'uid-z9', short_id: 'z9', qualified_id: 'other-project#z9' }]
     expect(summarizeBlockedBy(mixed, row).ids).toBe('a1, other-project#z9')
   })
 })
