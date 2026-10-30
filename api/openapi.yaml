@@ -3549,7 +3549,7 @@ components:
           format: date-time
           type: string
         deadline_on_date:
-          description: deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent.
+          description: deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
           type: string
         deleted_at:
           format: date-time
@@ -3591,7 +3591,7 @@ components:
           format: int64
           type: integer
         scheduled_on_date:
-          description: scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent.
+          description: scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
           type: string
         short_id:
           type: string
@@ -4168,7 +4168,7 @@ components:
           format: date-time
           type: string
         deadline_on_date:
-          description: deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent.
+          description: deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
           type: string
         deleted_at:
           format: date-time
@@ -4212,7 +4212,7 @@ components:
           format: int64
           type: integer
         scheduled_on_date:
-          description: scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent.
+          description: scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
           type: string
         short_id:
           type: string
@@ -5348,7 +5348,7 @@ components:
           format: date-time
           type: string
         deadline_on_date:
-          description: deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent.
+          description: deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
           type: string
         deleted_at:
           format: date-time
@@ -5392,7 +5392,7 @@ components:
           format: int64
           type: integer
         scheduled_on_date:
-          description: scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent.
+          description: scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
           type: string
         short_id:
           type: string
@@ -6381,7 +6381,7 @@ components:
           format: date-time
           type: string
         deadline_on_date:
-          description: deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent.
+          description: deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
           type: string
         deleted_at:
           format: date-time
@@ -6415,7 +6415,7 @@ components:
           format: int64
           type: integer
         scheduled_on_date:
-          description: scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent.
+          description: scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
           type: string
         short_id:
           type: string

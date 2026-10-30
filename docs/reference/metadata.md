@@ -70,11 +70,14 @@ rules. It is a deadline only; it does not control `ready` or `next`.
 
 `kata list --json`, `kata show --json` and `kata.list` rows carry
 `scheduled_on_date` and `deadline_on_date`: the `scheduled_on` and
-`deadline_on` values as `YYYY-MM-DD` calendar dates. A key's field is omitted
-when the key is absent. These are the names and values the web UI's snapshot
+`deadline_on` values as `YYYY-MM-DD` calendar dates. A field is omitted when
+its key is absent or its stored value cannot be read, so one bad value never
+fails the list. These are the names and values the web UI's snapshot
 uses, resolved by one shared rule. A date-only value keeps its written date. A
 local date-time resolves in the issue `timezone`, then the daemon's top-level
-`timezone`, then UTC, as above. An RFC 3339 `Z` instant is read in that same
+`timezone`, then UTC, as above. For a recurring occurrence without `timezone`
+metadata, `scheduled_on` resolves in the recurrence's timezone before the
+daemon's; `deadline_on` does not. An RFC 3339 `Z` instant is read in that same
 zone chain, so it can fall on a different calendar date than its UTC date.
 Requests carry no zone. A daemon older than API `0.36.0` omits both fields, so
 a client should treat a missing field as unsupported rather than as an

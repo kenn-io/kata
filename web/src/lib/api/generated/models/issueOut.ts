@@ -19,7 +19,7 @@ export interface IssueOut {
   closed_at?: string
   closed_reason?: string
   created_at: string
-  /** deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent. */
+  /** deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable. */
   deadline_on_date?: string
   deleted_at?: string
   id: number
@@ -35,7 +35,7 @@ export interface IssueOut {
   recurrence_id?: number
   related?: LinkPeer[]
   revision: number
-  /** scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent. */
+  /** scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable. */
   scheduled_on_date?: string
   short_id: string
   source_actor?: string
