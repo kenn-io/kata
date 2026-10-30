@@ -41,7 +41,7 @@ func TestActorTokenFenceRechecksExpiryAfterRowLock(t *testing.T) {
 		defer func() { _ = tx.Rollback() }()
 		fenced <- db.ActorTokenTransactionFence(token)(ctx, tx)
 	}()
-	//nolint:kennlint // PostgreSQL lock observation requires native server I/O outside a synctest bubble.
+	//nolint:kennlint // sleeptest: PostgreSQL lock observation requires native server I/O outside a synctest bubble.
 	require.Eventually(t, func() bool {
 		var blocked bool
 		require.NoError(t, store.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid)))`, holderPID).Scan(&blocked))

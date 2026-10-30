@@ -941,7 +941,15 @@ func (d *Store) IssueByShortID(ctx context.Context, projectID int64, shortID str
 	args := []any{projectID, shortID}
 	q += " AND " + authorizedIssuePredicate(ctx, "i.project_id", &args)
 	row := d.QueryRowContext(ctx, q, args...)
-	return scanIssue(ctx, row)
+	issue, err := scanIssue(ctx, row)
+	if !errors.Is(err, db.ErrNotFound) {
+		return issue, err
+	}
+	uid, err := db.MovedIssueUID(ctx, d, projectID, shortID, false)
+	if err != nil {
+		return db.Issue{}, err
+	}
+	return d.IssueByUID(ctx, uid, include)
 }
 
 // IssueByUID fetches an issue by stable UID. Soft-deleted rows are returned
@@ -1758,6 +1766,9 @@ func (d *Store) closeIssueGuarded(
 		return db.Issue{}, nil, false, err
 	} else if hasOpen {
 		return db.Issue{}, nil, false, db.ErrOpenChildren
+	}
+	if err := db.CheckEvidenceTargetsTx(ctx, tx, p.Evidence); err != nil {
+		return db.Issue{}, nil, false, err
 	}
 	closedAt := time.Now().UTC().Format(sqliteTimeFormat)
 	if _, err := tx.ExecContext(ctx,

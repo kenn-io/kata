@@ -1,6 +1,7 @@
 .PHONY: build install homebrew test test-short test-stress test-federation-docker lint vet clean fmt nilaway openapi api-generate api-check api-breaking tui tui-demo docs-install docs-build docs-serve docs-preview docs-check docs-deploy docs-screenshots docs-assets-branch kata-ui-check kata-ui-test kata-ui-pack-check web-install web-generate web-check web-audit web-test web-test-browser web-e2e web-build web-embed web-assets-check web-release-check web-dev
 
 GOFLAGS_TEST := -shuffle=on
+FEDERATION_STRESS_TIMEOUT ?= 2m
 GOBIN ?= $(HOME)/.local/bin
 VERSION := $(shell v=$$(git describe --tags --always --dirty 2>/dev/null || printf dev); printf '%s' "$$v" | LC_ALL=C tr -c 'A-Za-z0-9._+~:-' '-')
 COMMIT := $(shell v=$$(git rev-parse --short=7 HEAD 2>/dev/null || printf unknown); printf '%s' "$$v" | LC_ALL=C tr -c 'A-Za-z0-9._+~:-' '-')
@@ -118,7 +119,7 @@ test-short:
 	env -u KATA_AUTH_TOKEN -u KATA_TRUST_PRIVATE_NETWORK go test -short $(GOFLAGS_TEST) ./...
 
 test-stress:
-	go test -tags federation_stress ./e2e -run 'TestFederationStress|TestFederationFailpoint' -rapid.checks=5 -count=1 -timeout 2m
+	go test -tags federation_stress ./e2e -run 'TestFederationStress|TestFederationFailpoint' -rapid.checks=5 -count=1 -timeout $(FEDERATION_STRESS_TIMEOUT)
 
 test-federation-docker:
 	./scripts/test-federation-docker.sh

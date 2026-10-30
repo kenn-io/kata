@@ -318,7 +318,7 @@ func TestMCPCommandTelemetryAdmission(t *testing.T) {
 			require.NoError(t, err)
 			require.False(t, result.IsError)
 			if scenario == "release" {
-				//nolint:kennlint // Wait for the real daemon to finish responding to forwarded activity.
+				//nolint:kennlint // sleeptest: Wait for the real daemon to finish responding to forwarded activity.
 				require.Eventually(t, func() bool { return posts.Load() > 0 && posts.Load() == completed.Load() }, 5*time.Second, time.Millisecond)
 				require.Positive(t, posts.Load(), "an eligible MCP command must forward activity")
 			} else {

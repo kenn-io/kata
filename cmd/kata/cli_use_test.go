@@ -64,7 +64,7 @@ func (c *cliUseTelemetry) recorded() []map[string]any {
 
 func (c *cliUseTelemetry) waitForCapture(t *testing.T) {
 	t.Helper()
-	//nolint:kennlint // Real daemon delivery can finish after the command's exit wait.
+	//nolint:kennlint // sleeptest: Real daemon delivery can finish after the command's exit wait.
 	require.Eventually(t, func() bool { return len(c.recorded()) > 0 }, 5*time.Second, time.Millisecond)
 }
 
@@ -74,7 +74,7 @@ func waitCLIUseMarker(t *testing.T, prefix string) {
 	require.NotNil(t, target)
 	marker := client.TelemetryDayMarkerPath(*target, prefix)
 	day := cliUseNow().UTC().Format(time.DateOnly)
-	//nolint:kennlint // The daily marker signals that the real HTTP response was handled.
+	//nolint:kennlint // sleeptest: The daily marker signals that the real HTTP response was handled.
 	require.Eventually(t, func() bool { return client.ReadTelemetryDayMarker(marker) == day }, 5*time.Second, time.Millisecond)
 }
 
@@ -358,7 +358,7 @@ func newCLIUseDaemon(t *testing.T) *cliUseDaemon {
 
 func (d *cliUseDaemon) waitForPosts(t *testing.T, want int32) {
 	t.Helper()
-	//nolint:kennlint // Wait for real HTTP handlers before asserting counts or changing their response.
+	//nolint:kennlint // sleeptest: Wait for real HTTP handlers before asserting counts or changing their response.
 	require.Eventually(t, func() bool { return d.posts.Load() == want }, 5*time.Second, time.Millisecond)
 }
 
@@ -410,7 +410,7 @@ func TestCLIUseRetriesUntilTheDaemonAccepts(t *testing.T) {
 	reportCLIUseTo(t, target.url)
 	target.waitForPosts(t, 1)
 	attempt := client.TelemetryDayMarkerPath(*cliUseTarget.Load(), "cli-opened-try-")
-	//nolint:kennlint // Observe the handled failure before invoking the next command.
+	//nolint:kennlint // sleeptest: Observe the handled failure before invoking the next command.
 	require.Eventually(t, func() bool { return client.ReadTelemetryDayMarker(attempt) == "" }, 5*time.Second, time.Millisecond)
 	target.status.Store(http.StatusAccepted)
 	reportCLIUseTo(t, target.url)

@@ -16,6 +16,7 @@ const (
 	apiVersionListSort                  = "0.21.0"
 	apiVersionDiscoveryPagination       = "0.27.0"
 	apiVersionMoveDryRun                = "0.23.0"
+	apiVersionMoveSubtree               = "0.35.0"
 	apiVersionCloseTranscript           = "0.26.0"
 	apiVersionOtherAgentCloseTranscript = "0.34.0"
 	apiVersionCommentLinks              = "0.28.0"
@@ -25,6 +26,9 @@ const (
 	// drive: it pins relationship targets with to_project_uid and
 	// expected_project_uids and pages audit rows by event_id.
 	apiVersionMCPServer = "0.11.0"
+	// Fixed MCP scopes require the daemon to enforce X-Kata-Project-Scope
+	// inside the request transaction before following historical issue refs.
+	apiVersionMCPProjectScope = "0.35.0"
 )
 
 type daemonAPIHealth struct {

@@ -118,7 +118,7 @@ token_env = "KATA_MCP_TEST_TOKEN"
 			var record kitdaemon.RuntimeRecord
 			var startupErr error
 			var exited bool
-			require.Eventually(t, func() bool { //nolint:kennlint // daemon startup publishes readiness only through its runtime record file
+			require.Eventually(t, func() bool { //nolint:kennlint // sleeptest: daemon startup publishes readiness only through its runtime record file
 				select {
 				case err := <-done:
 					done <- err
@@ -204,7 +204,7 @@ token_env = "KATA_MCP_TEST_TOKEN"
 					require.False(t, created.IsError, "%v", created.Content)
 					issue := created.StructuredContent.(map[string]any)["issue"].(map[string]any)
 					require.Equal(t, "gateway-agent", issue["author"])
-					//nolint:kennlint // Tool-use reporting finishes asynchronously through the daemon REST API.
+					//nolint:kennlint // sleeptest: Tool-use reporting finishes asynchronously through the daemon REST API.
 					require.Eventually(t, func() bool {
 						capture.mu.Lock()
 						defer capture.mu.Unlock()

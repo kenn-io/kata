@@ -1,0 +1,60 @@
+ Project: —                                                           kata カタ
+
+  #42aa  Review a finding                                                 [open]
+  authored by worker
+  owner: none   parent: none
+  priority: none
+
+  Body
+  Discuss the evidence.
+
+  Activity   [ Comments (3) ]   Events (2)   Links (1)
+  > c:root  worker-a  Apr 30 10:00  (edited)
+    confirm (before edit) · refute
+    A finding to inspect.
+    Confirmations 1 | Refutations 1
+    R typed reply · [/] select evidence · Enter open · Esc back
+    evidence 1/2: confirm bbbb:reply
+    > bbbb:reply  worker-b  Apr 30 10:00  (edited)
+    Target edited after this reply
+      Foreign evidence.
+      ↳ confirm bbbb:reply  worker-b  Apr 30 10:00  (edited)
+      Target edited after this reply
+
+      c:reply  worker-c  Apr 30 10:02  (edited)
+      confirm
+      ↳ Refutes c:root by worker-a
+      Local evidence.
+      Confirmations 1
+
+        c:nested  worker-d  Apr 30 10:03
+        ↳ Confirms c:reply by worker-c
+        Confirmed.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ↑↓ scroll▕ j/k row     ▕ ↹ section    ▕ ↵ open ▕ pgup/pgdn page▕ e edit
+ c comment▕ + label     ▕ - unlabel    ▕ a owner▕ A unassign    ▕ t timed
+ x close  ▕ r reopen    ▕ p parent     ▕ b block▕ l related     ▕ ! priority
+ D daemons▕ F federation▕ C credentials▕ N child▕ L layout      ▕ esc back
+ ? help   ▕ q quit

@@ -41,10 +41,14 @@ func requireFederatedIssueClaim(
 func requireFederatedIssueClaimForPrincipal(
 	ctx context.Context,
 	cfg ServerConfig,
-	projectID int64,
+	_ int64,
 	issue db.Issue,
 	principal db.ClaimPrincipal,
 ) error {
+	// Historical references retain their route project; claims belong to the
+	// resolved issue in its current project.
+	projectID := issue.ProjectID
+
 	finishTransport, err := beginClaimFederationTransport(ctx, cfg, projectID)
 	if err != nil {
 		return err
@@ -88,10 +92,12 @@ func requireFederatedIssueClaimForPrincipal(
 func requireFederatedHubIssueClaim(
 	ctx context.Context,
 	cfg ServerConfig,
-	projectID int64,
+	_ int64,
 	issue db.Issue,
 	actor string,
 ) error {
+	projectID := issue.ProjectID
+
 	binding, err := cfg.DB.FederationBindingByProject(ctx, projectID)
 	if errors.Is(err, db.ErrNotFound) {
 		return nil

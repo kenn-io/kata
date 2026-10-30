@@ -108,15 +108,12 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		project, err := activeProjectByID(ctx, cfg.DB, in.ProjectID)
+		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
 		if err != nil {
 			return nil, err
 		}
-		issue, err := resolveIssueRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
+		project, err := activeProjectByID(ctx, cfg.DB, issue.ProjectID)
 		if err != nil {
-			return nil, err
-		}
-		if err := authorizeIssueScopedIssue(ctx, cfg.DB, issue); err != nil {
 			return nil, err
 		}
 		out := &api.UIIssueReferenceResponse{}

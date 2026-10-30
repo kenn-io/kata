@@ -164,6 +164,7 @@ func registerFederationBridgeConnect(humaAPI huma.API, cfg ServerConfig) {
 			Credential: credential, ExpectedCredential: &expectedCredential, PushEnabled: true,
 			Relay: grant.Relay, RelayLocalActor: actor, RelayServeDownstream: in.Body.ServeDownstream,
 			ProjectEventSink: func(event db.Event) { deliverProjectMutation(cfg, &event) },
+			ProjectResetSink: cfg.Publish().Reset,
 		})
 		if err != nil {
 			return nil, federationReplicaAPIError(err)

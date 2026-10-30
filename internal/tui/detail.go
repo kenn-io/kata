@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"go.kenn.io/kata/internal/commentref"
@@ -348,9 +349,30 @@ func (dm detailModel) applyFetchedIfFresh(msg tea.Msg) (detailModel, bool) {
 		}
 		dm.fetchSeq.comments = newestDetailFetchSeq(dm.fetchSeq.comments, m.requestSeq)
 		dm.commentsLoading = false
-		dm.comments = m.comments
+		selectedUID := ""
+		if dm.activeTab == tabComments && dm.tabCursor >= 0 && dm.tabCursor < len(dm.comments) {
+			selectedUID = dm.comments[dm.tabCursor].UID
+		}
+		wasVisible := false
+		if dm.issue != nil && selectedUID != "" && dm.detailFocus == focusActivity && dm.selectedCommentUID == "" {
+			if width, visible, ok := dm.viewportDims(); ok {
+				_, anchors := dm.detailDocumentLines(width, dm.scrollChrome())
+				wasVisible = anchors.tabCursor >= dm.scroll && anchors.tabCursor < dm.scroll+visible
+			}
+		}
+		dm.comments = threadOrder(m.comments)
+		selectedFound := false
+		if selectedUID != "" && m.err == nil {
+			if index := slices.IndexFunc(dm.comments, func(c CommentEntry) bool { return c.UID == selectedUID }); index >= 0 {
+				dm.tabCursor = index
+				selectedFound = true
+			}
+		}
 		dm.commentsErr = m.err
 		dm = dm.autoSelectActivityTab()
+		if wasVisible && selectedFound {
+			dm = dm.revealCursor()
+		}
 	case eventsFetchedMsg:
 		if m.gen != dm.gen || detailFetchResultIsOlder(m.requestSeq, dm.fetchSeq.events) {
 			return dm, false

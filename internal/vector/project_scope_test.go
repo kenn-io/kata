@@ -292,7 +292,7 @@ func TestEmbeddingArtifactReuseBeforeFill(t *testing.T) {
 			done := make(chan error, 1)
 			go func() { done <- reconciler.Run(runCtx) }()
 			t.Cleanup(cancel)
-			//nolint:kennlint // Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
+			//nolint:kennlint // sleeptest: Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
 			require.Eventually(t, func() bool {
 				health := reconciler.Health()
 				return health.LastSuccessAt != nil && health.Backlog == 0 && health.Embedded == 1

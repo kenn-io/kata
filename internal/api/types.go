@@ -1753,6 +1753,7 @@ type MoveIssueRequest struct {
 	Body      struct {
 		Actor        string `json:"actor,omitempty"`
 		DryRun       bool   `json:"dry_run,omitempty" doc:"Validate without moving; If-Match may be omitted for a preview."`
+		Single       bool   `json:"single,omitempty" doc:"Move only this issue instead of its subtree."`
 		ToProjectUID string `json:"to_project_uid" required:"true"`
 	}
 }
@@ -1765,10 +1766,11 @@ type MoveIssueRequest struct {
 type MoveIssueResponse struct {
 	ETag string `header:"ETag"`
 	Body struct {
-		Issue      db.Issue `json:"issue"`
-		EventID    int64    `json:"event_id"`
-		NewShortID *string  `json:"new_short_id,omitempty"`
-		Changed    bool     `json:"changed"`
+		Issue      db.Issue   `json:"issue"`
+		Issues     []db.Issue `json:"issues,omitempty"`
+		EventID    int64      `json:"event_id"`
+		NewShortID *string    `json:"new_short_id,omitempty"`
+		Changed    bool       `json:"changed"`
 	}
 }
 

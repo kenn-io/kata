@@ -553,7 +553,7 @@ func TestShowIssueClaimSpokeBoundsRemoteRefreshBody(t *testing.T) {
 
 func TestShowIssueClaimSpokeTimeoutSuppressesImmediateRetryWithoutPendingClaim(t *testing.T) {
 	ctx := context.Background()
-	daemon.SetShowClaimStatusRefreshTimeoutForTest(t, 100*time.Millisecond)
+	daemon.SetShowClaimStatusRefreshTimeoutForTest(t, 100*time.Millisecond) //nolint:kennlint // deadlinetest: the hub withholds its response until cancellation; the test asserts cached claim state after refresh timeout
 	spoke := testenv.New(t)
 	project, issue := createShowClaimSpokeProject(t, spoke)
 	cachedAt := time.Date(2026, 5, 23, 14, 0, 0, 0, time.UTC)
@@ -736,7 +736,7 @@ func newShowClaimTimeoutSpoke(
 ) (*testenv.Env, db.Project, db.Issue, db.PendingClaimRequest) {
 	t.Helper()
 	ctx := context.Background()
-	daemon.SetShowClaimStatusRefreshTimeoutForTest(t, 100*time.Millisecond)
+	daemon.SetShowClaimStatusRefreshTimeoutForTest(t, 100*time.Millisecond) //nolint:kennlint // deadlinetest: the hub withholds its response until cancellation; the test asserts cached claim state after refresh timeout
 	spoke := testenv.New(t)
 	project, issue := createShowClaimSpokeProject(t, spoke)
 	cachedAt := time.Date(2026, 5, 23, 14, 0, 0, 0, time.UTC)

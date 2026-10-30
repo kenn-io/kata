@@ -212,12 +212,14 @@ func claimRequestContext(ctx context.Context, principal claimPrincipal) context.
 	if principal.OwnerAuthority {
 		// Only validated daemon credentials or the derived owner-local transport
 		// grant this authority. Holder labels are attribution, never access.
+		var limits []string
 		if decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision); decision != nil {
 			decision.owner = true
-			decision.ProjectUIDs = nil
+			limits = decision.fixedUIDs
+			decision.ProjectUIDs = narrowProjectUIDs(nil, limits)
 			decision.targets = nil
 		}
-		ctx = db.WithAuthorizedProjects(ctx, nil)
+		ctx = db.WithAuthorizedProjects(ctx, limits)
 	}
 	if principal.RequestPrincipal == nil {
 		return ctx

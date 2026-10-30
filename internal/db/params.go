@@ -542,8 +542,12 @@ type ProjectMergeResult struct {
 
 // MoveIssueProjectIn carries inputs for MoveIssueProject.
 type MoveIssueProjectIn struct {
+	// AuthorizeProjects checks source project UIDs resolved inside the transaction.
+	AuthorizeProjects func([]string) error
 	// DryRun validates inside the move transaction, then rolls back without moving.
-	DryRun        bool
+	DryRun bool
+	// Single moves only the selected issue; the default includes descendants.
+	Single        bool
 	IssueID       int64
 	FromProjectID int64
 	ToProjectID   int64
@@ -553,6 +557,8 @@ type MoveIssueProjectIn struct {
 
 // MoveIssueProjectOut carries results from a successful MoveIssueProject call.
 type MoveIssueProjectOut struct {
+	Issues      []Issue
+	Events      []Event
 	Issue       Issue
 	Event       *Event `json:"-"`
 	EventID     int64
@@ -812,6 +818,9 @@ type AdoptProjectIntoFederationResult struct {
 	Binding               FederationBinding
 	AdoptionSnapshotCount int64
 	CreatedEvent          *Event
+	// Committed stream invalidations are transient publisher inputs.
+	ResetProjectIDs   []int64 `json:"-"`
+	ResetAfterEventID int64   `json:"-"`
 }
 
 // LeaveFederationResult reports what LeaveFederationReplica removed. ProjectUID

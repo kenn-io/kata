@@ -521,7 +521,7 @@ func TestStopRunningDaemonsDoesNotSignalUnverifiedRuntimePID(t *testing.T) {
 	select {
 	case err := <-waitCh:
 		t.Fatalf("unverified runtime PID was signaled; process exited with %v", err)
-	case <-time.After(200 * time.Millisecond): //nolint:kennlint // absence window; the unverified PID must never be signaled, so nothing ends the process
+	case <-time.After(200 * time.Millisecond): //nolint:kennlint // deadlinetest: absence window; the unverified PID must never be signaled, so nothing ends the process
 	}
 }
 

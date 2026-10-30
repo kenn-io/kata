@@ -3271,7 +3271,7 @@ func TestFederationRunnerUsesClientTimeout(t *testing.T) {
 		HubProjectID: 42,
 		Token:        "runner-timeout-token",
 	}))
-	runner := &Runner{DB: spoke.DB, Opts: clientpkg.Opts{Timeout: 50 * time.Millisecond}}
+	runner := &Runner{DB: spoke.DB, Opts: clientpkg.Opts{Timeout: 50 * time.Millisecond}} //nolint:kennlint // deadlinetest: the hub delays its response past the client budget; RunOnce must report timeout
 
 	start := time.Now()
 	err = runner.RunOnce(ctx)
@@ -3376,7 +3376,7 @@ func TestFederationRunnerRetriesAfterSyncError(t *testing.T) {
 	select {
 	case err := <-errCh:
 		require.NoError(t, err)
-	case <-time.After(50 * time.Millisecond): //nolint:kennlint // absence window; the offline hub keeps sync failing, and Run must not exit before cancel
+	case <-time.After(50 * time.Millisecond): //nolint:kennlint // deadlinetest: absence window; the offline hub keeps sync failing, and Run must not exit before cancel
 	}
 
 	require.NoError(t, config.WriteFederationCredential(spokeProject.UID, config.FederationCredential{

@@ -510,7 +510,7 @@ func TestPatchIssueMetadata_Broadcasts(t *testing.T) {
 	raw := readClose(t, resp)
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "no-op body: %s", raw)
 	assert.Contains(t, string(raw), `"changed":false`, "no-op patch must report changed=false")
-	assertNoReceive(t, sub.Ch, 200*time.Millisecond, "no-op issue metadata patch must not broadcast")
+	assertNoReceive(t, sub.Ch, 200*time.Millisecond, "no-op issue metadata patch must not broadcast") //nolint:kennlint // deadlinetest: bounded absence checks that no-op issue metadata patch must not broadcast
 }
 
 // TestPatchProjectMetadata_Broadcasts is the project-subject mirror: a changing
@@ -538,7 +538,7 @@ func TestPatchProjectMetadata_Broadcasts(t *testing.T) {
 	raw := readClose(t, resp)
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "no-op body: %s", raw)
 	assert.Contains(t, string(raw), `"changed":false`, "no-op patch must report changed=false")
-	assertNoReceive(t, sub.Ch, 200*time.Millisecond, "no-op project metadata patch must not broadcast")
+	assertNoReceive(t, sub.Ch, 200*time.Millisecond, "no-op project metadata patch must not broadcast") //nolint:kennlint // deadlinetest: bounded absence checks that no-op project metadata patch must not broadcast
 }
 
 func TestPatchProjectMetadata_DesignatesInboxAtomically(t *testing.T) {

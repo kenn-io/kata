@@ -630,8 +630,8 @@ func TestClaimActionDoesNotBroadcastRolledBackOpportunisticExpiry(t *testing.T) 
 		map[string]any{"holder": "agent-denied", "client_kind": "cli", "claim_kind": "hard"}, nil, nil)
 
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	assertNoReceive(t, subA.Ch, 100*time.Millisecond, "denied claim should not broadcast rolled-back expiration")
-	assertNoReceive(t, subB.Ch, 100*time.Millisecond, "denied claim should not broadcast rolled-back expiration")
+	assertNoReceive(t, subA.Ch, 100*time.Millisecond, "denied claim should not broadcast rolled-back expiration") //nolint:kennlint // deadlinetest: bounded absence checks that denied claim should not broadcast rolled-back expiration
+	assertNoReceive(t, subB.Ch, 100*time.Millisecond, "denied claim should not broadcast rolled-back expiration") //nolint:kennlint // deadlinetest: bounded absence checks that denied claim should not broadcast rolled-back expiration
 }
 
 func TestClaimStatusBroadcastsOpportunisticExpiry(t *testing.T) {
@@ -659,7 +659,7 @@ func TestClaimStatusBroadcastsOpportunisticExpiry(t *testing.T) {
 	msg := receiveMsg(t, sub.Ch, time.Second, "claim expired broadcast")
 	require.NotNil(t, msg.Event)
 	assert.Equal(t, "claim.expired", msg.Event.Type)
-	assertNoReceive(t, sub.Ch, 100*time.Millisecond, "status should emit only one expiry")
+	assertNoReceive(t, sub.Ch, 100*time.Millisecond, "status should emit only one expiry") //nolint:kennlint // deadlinetest: bounded absence checks that status should emit only one expiry
 }
 
 func TestClaimActionForceReleaseDefaultAndExplicitReasons(t *testing.T) {

@@ -120,6 +120,7 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 					strings.HasPrefix(record.Key, db.RelayResetMetadataPrefix) ||
 					strings.HasPrefix(record.Key, db.RelayResetSupersededMetadataPrefix) ||
 					strings.HasPrefix(record.Key, db.AttributionUIResetMetadataPrefix) ||
+					strings.HasPrefix(record.Key, db.ProjectStreamResetMetadataPrefix) ||
 					strings.HasPrefix(record.Key, db.PendingCreationMetadataPrefix) {
 					continue
 				}

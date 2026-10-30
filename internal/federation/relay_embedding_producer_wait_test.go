@@ -89,7 +89,7 @@ func TestPendingOfferWaitRestartsAfterSyncDrains(t *testing.T) {
 				runCtx, cancel := context.WithCancel(ctx)
 				done := make(chan error, 1)
 				go func() { done <- worker.Run(runCtx) }()
-				//nolint:kennlint // Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
+				//nolint:kennlint // sleeptest: Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
 				require.Eventually(t, func() bool { return worker.Health().LastSuccessAt != nil }, 20*time.Second, 10*time.Millisecond)
 				cancel()
 				select {

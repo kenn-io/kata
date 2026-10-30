@@ -2912,7 +2912,7 @@ func TestFederationIngestPersistsBroadcastsAndReturnsAck(t *testing.T) {
 	assert.Equal(t, int64(0), out.Accepted)
 	assert.Equal(t, int64(1), out.Duplicates)
 	assert.Equal(t, int64(17), out.PushCursorEventID)
-	assertNoReceive(t, sub.Ch, 100*time.Millisecond, "duplicate ingest should not rebroadcast")
+	assertNoReceive(t, sub.Ch, 100*time.Millisecond, "duplicate ingest should not rebroadcast") //nolint:kennlint // deadlinetest: bounded absence checks that duplicate ingest should not rebroadcast
 }
 
 func TestFederationIngestRejectsFutureSchemaVersion(t *testing.T) {
@@ -3029,7 +3029,7 @@ func TestFederationIngestInvalidBatchReturnsErrorAndDoesNotBroadcast(t *testing.
 	assert.Contains(t, string(raw), "validation")
 	assert.Equal(t, beforeEvents, countEvents(t, env.DB))
 	assert.Equal(t, beforeIssues, countIssues(t, env.DB))
-	assertNoReceive(t, sub.Ch, 100*time.Millisecond, "invalid ingest should not broadcast")
+	assertNoReceive(t, sub.Ch, 100*time.Millisecond, "invalid ingest should not broadcast") //nolint:kennlint // deadlinetest: bounded absence checks that invalid ingest should not broadcast
 }
 
 func TestFederationIngestRejectsInvalidSourceCursor(t *testing.T) {
@@ -3056,7 +3056,7 @@ func TestFederationIngestRejectsInvalidSourceCursor(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode, "invalid cursor response: %s", raw)
 	assert.Contains(t, string(raw), "validation")
 	assert.Equal(t, beforeEvents, countEvents(t, env.DB))
-	assertNoReceive(t, sub.Ch, 100*time.Millisecond, "invalid cursor should not broadcast")
+	assertNoReceive(t, sub.Ch, 100*time.Millisecond, "invalid cursor should not broadcast") //nolint:kennlint // deadlinetest: bounded absence checks that invalid cursor should not broadcast
 }
 
 func TestFederationAuthProjectScopedTokenRejectsNonFederatedProject(t *testing.T) {
@@ -3688,7 +3688,7 @@ func TestLeaveFederationReplicaWaitsForEnsureCredentialPersistence(t *testing.T)
 	select {
 	case leave = <-leaveDone:
 		returnedBeforePersistence = true
-	case <-time.After(100 * time.Millisecond): //nolint:kennlint // absence window; releaseStore holds credential persistence, so leave must not return
+	case <-time.After(100 * time.Millisecond): //nolint:kennlint // deadlinetest: absence window; releaseStore holds credential persistence, so leave must not return
 	}
 	credentials.releaseStore()
 	require.NoError(t, <-ensureDone)
