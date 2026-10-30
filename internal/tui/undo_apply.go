@@ -95,7 +95,8 @@ func (c *undoClient) undo(ctx context.Context, entry undoEntry, opts undoOptions
 		}
 		if entry.kind == "close" && opts.checkBacklog {
 			// A failed or slow lookup must not block undo; only a known backlog
-			// prompts. The lookup gets its own budget so it cannot expire ctx.
+			// prompts. The lookup is bounded so a slow read leaves ctx's
+			// remaining deadline for the reopen.
 			lookupCtx, cancel := context.WithTimeout(ctx, undoBacklogLookupTimeout)
 			count, err := c.ReopenBacklog(lookupCtx, entry.projectID, entry.uid)
 			cancel()
