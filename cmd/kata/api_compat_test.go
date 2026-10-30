@@ -161,7 +161,7 @@ func TestListDueByRejectsOldDaemonBeforeQuery(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
 			case "/api/v1/health":
-				_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.34.0"}`))
+				_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.35.0"}`))
 			case "/api/v1/projects/resolve":
 				_, _ = w.Write([]byte(`{"project":{"id":1,"name":"example-project"}}`))
 			case "/api/v1/projects/1/issues", "/api/v1/issues":
@@ -175,8 +175,8 @@ func TestListDueByRejectsOldDaemonBeforeQuery(t *testing.T) {
 
 		_, _, err := executeRootCapture(t, contextWithBaseURL(context.Background(), server.URL), args...)
 		require.Error(t, err, "%v", args)
-		assert.Contains(t, err.Error(), "list --due-by requires daemon API 0.35.0 or newer")
-		assert.Contains(t, err.Error(), "reports 0.34.0")
+		assert.Contains(t, err.Error(), "list --due-by requires daemon API 0.36.0 or newer")
+		assert.Contains(t, err.Error(), "reports 0.35.0")
 		assert.Contains(t, err.Error(), "upgrade the daemon")
 		assert.Zero(t, listCalls.Load(), "an older daemon would ignore due_by and list everything")
 	}

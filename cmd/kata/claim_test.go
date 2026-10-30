@@ -202,7 +202,7 @@ func TestPrintClaimMutationIncludesAssignmentExpiry(t *testing.T) {
 		cmd := &cobra.Command{}
 		cmd.SetOut(&out)
 
-		require.NoError(t, printClaimMutation(cmd, []byte(response)))
+		require.NoError(t, printClaimMutation(cmd, []byte(response), ""))
 		assert.Equal(t, "abcd assigned to agent1 until 2026-09-17T21:30:00Z\n", out.String())
 	})
 
@@ -213,7 +213,7 @@ func TestPrintClaimMutationIncludesAssignmentExpiry(t *testing.T) {
 		cmd := &cobra.Command{}
 		cmd.SetOut(&out)
 
-		require.NoError(t, printClaimMutation(cmd, []byte(response)))
+		require.NoError(t, printClaimMutation(cmd, []byte(response), ""))
 		assert.Contains(t, out.String(), "Owner: agent1\n")
 		assert.Contains(t, out.String(), "Assignment-Expires-On: 2026-09-17T21:30:00Z\n")
 	})
@@ -226,7 +226,7 @@ func TestPrintClaimMutationTimedNoOpIncludesAssignmentExpiry(t *testing.T) {
 	cmd.SetOut(&out)
 	const response = `{"issue":{"short_id":"abcd","owner":"agent1","assignment_expires_on":"2026-09-17T21:30:00Z"},"changed":false}`
 
-	require.NoError(t, printClaimMutation(cmd, []byte(response)))
+	require.NoError(t, printClaimMutation(cmd, []byte(response), ""))
 	assert.Equal(t, "abcd already assigned to agent1 until 2026-09-17T21:30:00Z (no-op)\n", out.String())
 }
 

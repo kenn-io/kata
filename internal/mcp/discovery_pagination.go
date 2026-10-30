@@ -86,10 +86,10 @@ func (h toolHandlers) list(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 	if input.PriorityUnset {
 		priority = new("none")
 	}
-	// One health check against the higher floor: due_by needs 0.35.0, which
+	// One health check against the higher floor: due_by needs 0.36.0, which
 	// also covers paginated discovery (0.27.0).
 	if dueBy != "" {
-		err = h.requireAPIVersion(ctx, "0.35.0", "due_by")
+		err = h.requireAPIVersion(ctx, "0.36.0", "due_by")
 	} else {
 		err = h.requireDiscoveryAPI(ctx)
 	}

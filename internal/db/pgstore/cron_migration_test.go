@@ -18,6 +18,7 @@ import (
 
 func dropNativeCronSchema(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
+	dropEventMoveHistoryIndex(ctx, t, admin, schema)
 	for _, table := range []string{"cron_runs", "cron_jobs", "cron_workflows"} {
 		_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP TABLE IF EXISTS %s.%s`, schema, table))
 		require.NoError(t, err)

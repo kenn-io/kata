@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.kenn.io/kata/internal/storageadmin"
-	kataclient "go.kenn.io/kata/pkg/client"
 )
 
 func TestStorageToolsRequireStartupOptIn(t *testing.T) {
@@ -20,7 +19,7 @@ func TestStorageToolsRequireStartupOptIn(t *testing.T) {
 	admin, err := storageadmin.New(storageadmin.Config{Root: t.TempDir(), SourceDSN: "source.db", Targets: map[string]string{"restore": "restore.db"}})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, admin.Close()) })
-	with := connectTestServerWithOptions(t, Options{Client: &kataclient.Client{}, ProjectID: 42, ProjectName: "spoke-project", Actor: "example-agent", Version: "test-version", StorageAdmin: admin})
+	with := connectTestServerWithOptions(t, Options{Client: inertTestClient(t), ProjectID: 42, ProjectName: "spoke-project", Actor: "example-agent", Version: "test-version", StorageAdmin: admin})
 	tools, err = with.ListTools(t.Context(), nil)
 	require.NoError(t, err)
 	require.Contains(t, toolNames(tools.Tools), "kata.storage_export")

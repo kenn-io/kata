@@ -55,10 +55,26 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		if _, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo); err != nil {
+		issue, err := locateClaimIssue(ctx, cfg.DB, in.ProjectID, in.Ref)
+		if err != nil {
 			return nil, err
 		}
-		body, err := handleClaimAcquire(ctx, cfg, in.ProjectID, in.Ref, in.Body, principal.ClaimPrincipal)
+		if issue.ProjectID != in.ProjectID {
+			ctx, principal, err = resolveClaimPrincipal(ctx, cfg, issue.ProjectID, in.Authorization, in.Body,
+				federationTransportOperation("acquireIssueLease"), true)
+			if err != nil {
+				return nil, err
+			}
+		}
+		ctx, err = authorizeHostProjectScope(ctx, []int64{issue.ProjectID}, nil, false)
+		if err != nil {
+			return nil, err
+		}
+		issue, err = activeIssueByRef(ctx, cfg.DB, issue.ProjectID, issue.UID, db.IncludeDeletedNo)
+		if err != nil {
+			return nil, err
+		}
+		body, err := handleClaimAcquire(ctx, cfg, issue.ProjectID, issue.UID, in.Body, principal.ClaimPrincipal)
 		if err != nil {
 			return nil, err
 		}
@@ -78,10 +94,26 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		if _, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo); err != nil {
+		issue, err := locateClaimIssue(ctx, cfg.DB, in.ProjectID, in.Ref)
+		if err != nil {
 			return nil, err
 		}
-		body, err := handleClaimRenew(ctx, cfg, in.ProjectID, in.Ref, in.Body, principal.ClaimPrincipal)
+		if issue.ProjectID != in.ProjectID {
+			ctx, principal, err = resolveClaimPrincipal(ctx, cfg, issue.ProjectID, in.Authorization, in.Body,
+				federationTransportOperation("renewIssueLease"), true)
+			if err != nil {
+				return nil, err
+			}
+		}
+		ctx, err = authorizeHostProjectScope(ctx, []int64{issue.ProjectID}, nil, false)
+		if err != nil {
+			return nil, err
+		}
+		issue, err = activeIssueByRef(ctx, cfg.DB, issue.ProjectID, issue.UID, db.IncludeDeletedNo)
+		if err != nil {
+			return nil, err
+		}
+		body, err := handleClaimRenew(ctx, cfg, issue.ProjectID, issue.UID, in.Body, principal.ClaimPrincipal)
 		if err != nil {
 			return nil, err
 		}
@@ -101,10 +133,26 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		if _, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo); err != nil {
+		issue, err := locateClaimIssue(ctx, cfg.DB, in.ProjectID, in.Ref)
+		if err != nil {
 			return nil, err
 		}
-		body, err := handleClaimRelease(ctx, cfg, in.ProjectID, in.Ref, in.Body, principal.ClaimPrincipal)
+		if issue.ProjectID != in.ProjectID {
+			ctx, principal, err = resolveClaimPrincipal(ctx, cfg, issue.ProjectID, in.Authorization, in.Body,
+				federationTransportOperation("releaseIssueLease"), true)
+			if err != nil {
+				return nil, err
+			}
+		}
+		ctx, err = authorizeHostProjectScope(ctx, []int64{issue.ProjectID}, nil, false)
+		if err != nil {
+			return nil, err
+		}
+		issue, err = activeIssueByRef(ctx, cfg.DB, issue.ProjectID, issue.UID, db.IncludeDeletedNo)
+		if err != nil {
+			return nil, err
+		}
+		body, err := handleClaimRelease(ctx, cfg, issue.ProjectID, issue.UID, in.Body, principal.ClaimPrincipal)
 		if err != nil {
 			return nil, err
 		}
@@ -128,7 +176,26 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, api.NewError(http.StatusForbidden, "scoped_operation_forbidden",
 				"operation is not available to an issue-scoped credential", "", nil)
 		}
-		if err := requireHubClaimBinding(ctx, cfg.DB, in.ProjectID); err != nil {
+		issue, err := locateClaimIssueWithDeleted(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedYes)
+		if err != nil {
+			return nil, err
+		}
+		if issue.ProjectID != in.ProjectID {
+			ctx, principal, err = resolveClaimPrincipal(ctx, cfg, issue.ProjectID, in.Authorization, in.Body,
+				federationTransportOperation("forceReleaseIssueLease"), false)
+			if err != nil {
+				return nil, err
+			}
+		}
+		ctx, err = authorizeHostProjectScope(ctx, []int64{issue.ProjectID}, nil, false)
+		if err != nil {
+			return nil, err
+		}
+		issue, err = activeIssueByRef(ctx, cfg.DB, issue.ProjectID, issue.UID, db.IncludeDeletedYes)
+		if err != nil {
+			return nil, err
+		}
+		if err := requireHubClaimBinding(ctx, cfg.DB, issue.ProjectID); err != nil {
 			return nil, err
 		}
 		actor := actorFor(ctx, strings.TrimSpace(in.Body.Actor))
@@ -143,8 +210,8 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 			reason = "admin_force_release"
 		}
 		result, err := cfg.DB.ForceReleaseClaim(ctx, db.ForceReleaseClaimParams{
-			ProjectID: in.ProjectID,
-			IssueRef:  in.Ref,
+			ProjectID: issue.ProjectID,
+			IssueRef:  issue.UID,
 			Actor:     actor,
 			Reason:    reason,
 			Now:       time.Now().UTC(),
@@ -157,7 +224,7 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		cfg.Publish().EventsByProject(result.Events)
 		if result.Event != nil {
-			cfg.Publish().Event(in.ProjectID, *result.Event)
+			cfg.Publish().Event(result.Event.ProjectID, *result.Event)
 		}
 		return &api.ClaimActionResponse{Body: claimResultBody(result)}, nil
 	})
@@ -172,15 +239,45 @@ func registerClaimHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, err
 		}
-		if _, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo); err != nil {
+		issue, err := locateClaimIssue(ctx, cfg.DB, in.ProjectID, in.Ref)
+		if err != nil {
 			return nil, err
 		}
-		body, err := handleClaimStatus(ctx, cfg, in.ProjectID, in.Ref)
+		if issue.ProjectID != in.ProjectID {
+			ctx, err = authorizeClaimStatusRead(ctx, cfg, issue.ProjectID, in.Authorization)
+			if err != nil {
+				return nil, err
+			}
+		}
+		ctx, err = authorizeHostProjectScope(ctx, []int64{issue.ProjectID}, nil, false)
+		if err != nil {
+			return nil, err
+		}
+		issue, err = activeIssueByRef(ctx, cfg.DB, issue.ProjectID, issue.UID, db.IncludeDeletedNo)
+		if err != nil {
+			return nil, err
+		}
+		body, err := handleClaimStatus(ctx, cfg, issue.ProjectID, issue.UID)
 		if err != nil {
 			return nil, err
 		}
 		return &api.ClaimStatusResponse{Body: body}, nil
 	})
+}
+
+// locateClaimIssue selects routing identity before the current project's claim
+// credential and host scope are checked. Enrollment authorization restricts DB
+// reads to the route project even when the enrollment permits both projects.
+// Callers must reauthorize and use activeIssueByRef before accessing lease state.
+func locateClaimIssue(ctx context.Context, store db.Storage, projectID int64, ref string) (db.Issue, error) {
+	return locateClaimIssueWithDeleted(ctx, store, projectID, ref, db.IncludeDeletedNo)
+}
+
+func locateClaimIssueWithDeleted(ctx context.Context, store db.Storage, projectID int64, ref string, include db.IncludeDeleted) (db.Issue, error) {
+	if _, err := activeProjectByID(ctx, store, projectID); err != nil {
+		return db.Issue{}, err
+	}
+	return resolveIssueRef(db.WithAuthorizedProjects(ctx, nil), store, projectID, ref, include)
 }
 
 func handleClaimAcquire(

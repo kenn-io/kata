@@ -109,7 +109,7 @@ The first-party CLI uses this check before requests where an older daemon
 could ignore a filter and return unfiltered rows. Status-filtered `search`
 requires API `0.20.0`; label-filtered `search` and filtered `ready --all`
 require API `0.8.0`; filtered `list --all` requires API `0.9.0`; `list --due-by`
-requires API `0.35.0`. The CLI stops before the filtered query and tells the operator to
+requires API `0.36.0`. The CLI stops before the filtered query and tells the operator to
 upgrade when the daemon is too old. `kata mcp serve` performs the same check
 once at startup and requires API `0.11.0`, because its relationship tools
 always send the pinned-target fields and its close-audit paging relies on
@@ -200,7 +200,8 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 | Version | Change |
 | --- | --- |
-| `0.35.0` | Both issue list routes accept `due_by` and `time_zone`, and rows of a `due_by` list carry `scheduled_on_date` and `deadline_on_date`. |
+| `0.36.0` | Both issue list routes accept `due_by` and `time_zone`, and rows of a `due_by` list carry `scheduled_on_date` and `deadline_on_date`. |
+| `0.35.0` | Moves include the issue subtree by default; `single` keeps the move to one issue. `X-Kata-Project-Scope` narrows requests to fixed projects and is enforced in the transaction, including historical issue references. Older daemons do not enforce this header. |
 | `0.34.0` | Close transcripts accept agent names beyond Claude Code and Codex, with non-UUID session IDs for those agents. Claude Code and Codex session IDs remain UUIDs. |
 | `0.33.0` | Publishes the issue attachment upload and content routes, and UI capabilities include `attachments` when the daemon has Docbank configured. Older daemons omit the field. |
 | `0.32.0` | Project event polling accepts an `issue` filter and acknowledges the resolved subject in `X-Kata-Events-Issue-UID`. |
@@ -555,7 +556,7 @@ that zone. Invalid values return HTTP 400. Matching rows carry `scheduled_on_dat
 and `deadline_on_date` in that zone. The rule runs after the SQL filters, so
 `limit` and `include_total` count matching issues, and the cursor binds `due_by`
 and the effective zone. Status still defaults as in the rest of the route; pass
-`status=open` to leave out closed issues. API `0.35.0` or newer is required, and
+`status=open` to leave out closed issues. API `0.36.0` or newer is required, and
 older daemons ignore the parameters.
 
 ### Search continuation

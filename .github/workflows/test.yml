@@ -497,8 +497,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # Cold CLI compilation inside the harness shares Go's package timeout.
       - name: Run federation stress tests
-        run: env -u KATA_AUTH_TOKEN make test-stress
+        run: env -u KATA_AUTH_TOKEN make test-stress FEDERATION_STRESS_TIMEOUT=4m
 
   federation-docker:
     name: Federation Docker tests

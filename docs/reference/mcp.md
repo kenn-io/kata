@@ -29,6 +29,11 @@ kata mcp serve --all
 kata mcp serve --all --enable-token-admin
 ```
 
+Workspace-bound and explicit project scopes require daemon API `0.35.0` or
+newer so the daemon enforces their project limits inside each request.
+`--all` retains the daemon API `0.11.0` minimum. Startup rejects an older
+daemon before resolving projects or serving tool calls.
+
 With the default stdio transport, JSON-RPC uses stdin and stdout. Kata writes
 no status text or logs to stdout. The actor is fixed when the process starts
 and uses the normal precedence: `--as`, `KATA_AUTHOR`, `USER`, Git `user.name`,
@@ -173,9 +178,20 @@ require an explicit `project` in multi-project mode. Project administration
 `--all` daemon-wide scope; a scoped server can read its projects but
 cannot alter or destroy the catalog it was bound to.
 
-Tool calls cannot change the startup actor or expand the startup scope. The
-daemon remains authoritative for authentication, attribution, revision
-checks, federation trust, claims, and mutation policy. Scoped servers replace
+Tool calls cannot change the startup actor or expand the startup scope.
+Historical issue references remain usable while both the lookup route and the
+issue's current project are visible within the startup scope. Retained
+references also work as relationship and closure evidence targets. Returned
+references and delete/purge confirmations use the current project and short ID.
+Reads and writes retain that boundary if
+an issue moves during a call. `kata.move` moves the issue and its active
+descendants by default and lists every moved issue; pass `single: true` to move
+only the selected issue or `dry_run: true` to preview. A subtree move is
+rejected atomically if any descendant comes from an excluded project. Against a
+daemon older than API `0.35.0`, `kata.move` requires `single: true` instead of
+silently moving only the root. The daemon remains authoritative for
+authentication, attribution, revision checks, federation trust, claims, and
+mutation policy. Scoped servers replace
 close-guard refusal messages (`parent_has_open_children`,
 `sibling_throttle`, `duplicate_message`) with scope-safe guidance because
 the daemon prose can name children, siblings, and prior closes in other
@@ -228,7 +244,7 @@ choose. `time_zone` is an optional IANA zone the date is read in and requires
 `due_by`; without it the daemon's `timezone` applies, then UTC. Matching rows
 carry `scheduled_on_date` and `deadline_on_date` in that zone, and `status`,
 `limit`, `include_total` and `cursor` apply to matching issues. A call with
-`due_by` requires daemon API 0.35.0 or newer and returns a tool error for an
+`due_by` requires daemon API 0.36.0 or newer and returns a tool error for an
 older daemon instead of ignoring the filter.
 
 Set `include_total: true` to request `total`, the count of all matching issues

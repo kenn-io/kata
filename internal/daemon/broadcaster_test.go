@@ -38,7 +38,7 @@ func TestBroadcaster_BroadcastFansToMatchingFiltersOnly(t *testing.T) {
 	gotA := receiveMsg(t, a.Ch, time.Second, "project-1 subscriber")
 	assert.Equal(t, int64(100), gotA.Event.ID)
 
-	assertNoReceive(t, other.Ch, 50*time.Millisecond, "project-2 subscriber must not receive a project-1 event")
+	assertNoReceive(t, other.Ch, 50*time.Millisecond, "project-2 subscriber must not receive a project-1 event") //nolint:kennlint // deadlinetest: bounded absence checks that project-2 subscriber must not receive a project-1 event
 }
 
 func TestBroadcaster_ResetFansToAllMatchingFilters(t *testing.T) {
@@ -128,5 +128,35 @@ func TestBroadcaster_RaceFuzz(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		stacktest.Dump(t)
 		t.Fatal("race fuzz did not complete within 10s — possible deadlock")
+	}
+}
+
+func TestBroadcaster_MoveWakesSourceWithoutUnrelatedOverflow(t *testing.T) {
+	broadcaster := daemon.NewEventBroadcaster()
+	source := broadcaster.Subscribe(daemon.SubFilter{ProjectID: 1, ProjectUID: "01ARZ3NDEKTSV4RRFFQ69G5FAVA"})
+	destination := broadcaster.Subscribe(daemon.SubFilter{ProjectID: 2, ProjectUID: "01ARZ3NDEKTSV4RRFFQ69G5FAVB"})
+	defer source.Unsub()
+	defer destination.Unsub()
+	for i := range 300 {
+		broadcaster.Broadcast(daemon.NewEventMsg(3, db.Event{ID: int64(i + 1), ProjectID: 3, Type: "issue.updated", Payload: `{"from_project_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAVA"}`}))
+	}
+	broadcaster.Broadcast(daemon.NewResetMsg(3, 300))
+	broadcaster.Broadcast(daemon.NewEventMsg(1, db.Event{ID: 301, ProjectID: 1, Type: "issue.updated"}))
+	broadcaster.Broadcast(daemon.NewEventMsg(2, db.Event{ID: 302, ProjectID: 2, Type: "issue.moved", Payload: `{"from_project_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAVA","to_project_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAVB"}`}))
+	own := receiveMsg(t, source.Ch, time.Second, "source issue event after unrelated burst")
+	assert.Equal(t, int64(301), own.Event.ID)
+	moved := receiveMsg(t, source.Ch, time.Second, "source move departure")
+	assert.Equal(t, int64(302), moved.Event.ID)
+	arrived := receiveMsg(t, destination.Ch, time.Second, "destination move arrival")
+	assert.Equal(t, int64(302), arrived.Event.ID)
+	select {
+	case extra := <-source.Ch:
+		t.Fatalf("unexpected source delivery: %+v", extra)
+	default:
+	}
+	select {
+	case extra := <-destination.Ch:
+		t.Fatalf("unexpected destination delivery: %+v", extra)
+	default:
 	}
 }

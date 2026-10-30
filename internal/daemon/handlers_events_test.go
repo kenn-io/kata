@@ -659,7 +659,7 @@ func TestSSE_DrainOmitsTokenEvents(t *testing.T) {
 	second, ok := framer.Next(t, 2*time.Second)
 	require.True(t, ok, "issue frame should arrive")
 	assert.Equal(t, "issue.created", second.event)
-	_, ok = framer.Next(t, 150*time.Millisecond)
+	_, ok = framer.Next(t, 150*time.Millisecond) //nolint:kennlint // deadlinetest: bounded absence checks that token creation produces no replay frame
 	assert.False(t, ok, "token.created must not be emitted as a drain frame")
 }
 
@@ -840,7 +840,7 @@ func TestSSE_LivePhaseOmitsTokenEvents(t *testing.T) {
 	})
 	require.NoError(t, err)
 	env.Broadcaster.Broadcast(daemon.NewEventMsg(sys.ID, tokenEvt))
-	_, ok := framer.Next(t, 150*time.Millisecond)
+	_, ok := framer.Next(t, 150*time.Millisecond) //nolint:kennlint // deadlinetest: bounded absence checks that token creation produces no live frame
 	assert.False(t, ok, "token.created must not be emitted as a live frame")
 
 	envPostJSON(t, env, projectPath(pid)+"/issues",
@@ -988,6 +988,6 @@ func TestSSE_LiveHeartbeatKeepsConnectionAlive(t *testing.T) {
 	require.NoError(t, err)
 
 	// No frames should arrive in 100ms with an empty DB.
-	frames := readSSEFramesUntilN(t, resp.Body, 1, 100*time.Millisecond)
+	frames := readSSEFramesUntilN(t, resp.Body, 1, 100*time.Millisecond) //nolint:kennlint // deadlinetest: bounded absence checks that an empty database produces no SSE frames
 	assert.Len(t, frames, 0)
 }

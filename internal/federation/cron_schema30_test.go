@@ -68,7 +68,7 @@ func TestCronSchema30ExecutableCompatibility(t *testing.T) {
 		}
 		_ = log.Close()
 	})
-	//nolint:kennlint // An external daemon process cannot participate in synctest; poll its bounded public readiness/progress signal.
+	//nolint:kennlint // sleeptest: An external daemon process cannot participate in synctest; poll its bounded public readiness/progress signal.
 	require.Eventually(t, func() bool {
 		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 		defer cancel()
@@ -122,7 +122,7 @@ func TestCronSchema30ExecutableCompatibility(t *testing.T) {
 		require.NoError(t, json.Unmarshal(raw, &body))
 		return body
 	}
-	//nolint:kennlint // An external daemon process cannot participate in synctest; poll its bounded public readiness/progress signal.
+	//nolint:kennlint // sleeptest: An external daemon process cannot participate in synctest; poll its bounded public readiness/progress signal.
 	require.Eventually(t, func() bool {
 		body := status()
 		return len(body.Statuses) == 1 && body.Statuses[0].PullCursorEventID >= boundary.ReplayHorizonEventID
@@ -130,18 +130,18 @@ func TestCronSchema30ExecutableCompatibility(t *testing.T) {
 	before := status().Statuses[0].PullCursorEventID
 	_, err = hub.PurgeIssue(t.Context(), issue.ID, "worker", nil)
 	require.NoError(t, err)
-	//nolint:kennlint // An external daemon process cannot participate in synctest; poll its bounded public readiness/progress signal.
+	//nolint:kennlint // sleeptest: An external daemon process cannot participate in synctest; poll its bounded public readiness/progress signal.
 	require.Eventually(t, func() bool {
 		body := status()
 		return body.Statuses[0].PullCursorEventID > before && body.Statuses[0].LastError == nil
 	}, 20*time.Second, 25*time.Millisecond, "actual old reader accepts a legacy-only purge reset")
 	issue, issueEvent, err := hub.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Cron reset fixture", Author: "worker"})
 	require.NoError(t, err)
-	//nolint:kennlint // An external daemon process cannot participate in synctest; poll its bounded public readiness/progress signal.
+	//nolint:kennlint // sleeptest: An external daemon process cannot participate in synctest; poll its bounded public readiness/progress signal.
 	require.Eventually(t, func() bool { return status().Statuses[0].PullCursorEventID >= issueEvent.ID }, 20*time.Second, 25*time.Millisecond)
 	before = status().Statuses[0].PullCursorEventID
 	nativeJob(t, hub, project)
-	//nolint:kennlint // An external daemon process cannot participate in synctest; poll its bounded public readiness/progress signal.
+	//nolint:kennlint // sleeptest: An external daemon process cannot participate in synctest; poll its bounded public readiness/progress signal.
 	require.Eventually(t, func() bool {
 		body := status()
 		return len(body.Statuses) == 1 && body.Statuses[0].LastError != nil && strings.Contains(*body.Statuses[0].LastError, "unsupported_event_features")
@@ -150,7 +150,7 @@ func TestCronSchema30ExecutableCompatibility(t *testing.T) {
 	_, err = hub.PurgeIssue(t.Context(), issue.ID, "worker", nil)
 	require.NoError(t, err)
 	pollsBeforeReset := oldPolls.Load()
-	//nolint:kennlint // An external daemon process cannot participate in synctest; poll its bounded public readiness/progress signal.
+	//nolint:kennlint // sleeptest: An external daemon process cannot participate in synctest; poll its bounded public readiness/progress signal.
 	require.Eventually(t, func() bool { return oldPolls.Load() > pollsBeforeReset }, 20*time.Second, 25*time.Millisecond)
 	require.Equal(t, before, status().Statuses[0].PullCursorEventID, "old executable must not accept a cron project's reset cursor")
 	require.Contains(t, *status().Statuses[0].LastError, "unsupported_event_features")

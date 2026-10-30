@@ -71,29 +71,37 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		// targets and won't corrupt the audit trail.
 		tuiBypass := tuiBypassAllowed(ctx, in.Body.Source, in.Body.Reason)
 		idempotencyFingerprint := ""
+		includeDeleted := db.IncludeDeletedNo
 		if in.IdempotencyKey != "" {
-			if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
-				return nil, err
-			}
-			release, err := cfg.DB.AcquireIdempotencyLock(ctx, in.ProjectID, in.IdempotencyKey)
+			// Receipts remain replayable after a soft delete.
+			includeDeleted = db.IncludeDeletedYes
+		}
+		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, includeDeleted)
+		if err != nil {
+			return nil, err
+		}
+		if in.IdempotencyKey != "" {
+			// A close key keeps one lock across project moves and still
+			// serializes project-key collisions with another issue. Receipt
+			// lookup below remains scoped to the resolved issue and project.
+			release, err := cfg.DB.AcquireIdempotencyLock(ctx, 0, "issue.closed\x00"+in.IdempotencyKey)
 			if err != nil {
 				return nil, internalAPIError(err)
 			}
 			defer func() { _ = release() }()
-			match, err := lookupCloseIdempotencyMatch(ctx, cfg, in.ProjectID, in.IdempotencyKey)
+			match, err := lookupCloseIdempotencyMatchForIssue(ctx, cfg, issue, in.IdempotencyKey)
 			if err != nil {
 				return nil, err
 			}
 			if match != nil {
 				idempotencyFingerprint = closeIdempotencyFingerprint(
-					match.IssueUID, in.Ref, actor, in.Body.Reason, in.Body.Message, in.Body.Source,
+					issue.UID, in.Ref, actor, in.Body.Reason, in.Body.Message, in.Body.Source,
 					in.Body.Evidence, in.Body.DryRun, ifMatchRev, in.Body.Transcript)
 				return closeIdempotencyResponse(ctx, cfg, match, idempotencyFingerprint)
 			}
 		}
-		issue, err := activeIssueByRef(ctx, cfg.DB, in.ProjectID, in.Ref, db.IncludeDeletedNo)
-		if err != nil {
-			return nil, err
+		if issue.DeletedAt != nil {
+			return nil, api.NewError(404, "issue_not_found", "issue not found", "", nil)
 		}
 		if in.IdempotencyKey != "" {
 			idempotencyFingerprint = closeIdempotencyFingerprint(
@@ -128,16 +136,18 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if err := ValidateCloseInput(in.Body.Reason, in.Body.Message, in.Body.Evidence); err != nil {
 				return nil, api.NewError(400, "validation", err.Error(), "", nil)
 			}
-			if err := validateEvidenceTargets(ctx, cfg.DB, in.ProjectID, issue.ShortID, in.Body.Evidence); err != nil {
-				return nil, api.NewError(400, "validation", err.Error(), "", nil)
-			}
+		}
+		// Every close stores resolved target UIDs, so later moves cannot change
+		// which issue the evidence names.
+		dbEvidence, err := resolveEvidenceTargets(ctx, cfg.DB, in.ProjectID, issue, in.Body.Evidence)
+		if err != nil {
+			return nil, api.NewError(400, "validation", err.Error(), "", nil)
 		}
 		if err := CheckParentCloseCompleteness(ctx, cfg.DB, issue.ID, issue.ShortID, issue.ProjectID); err != nil {
 			return nil, api.NewError(409, "parent_has_open_children",
 				scopedCloseRefusal(ctx, err.Error(), "issue has open children; close them before closing the parent"), "", nil)
 		}
 		now := time.Now()
-		dbEvidence := evidenceToDB(in.Body.Evidence)
 		// Burst/prose throttles are opt-in via [close.throttle] enabled=true
 		// for operators who want stricter pacing.
 		if cfg.CloseThrottle.SiblingBurstEnabled {
@@ -195,7 +205,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			evt = nil
 			events = nil
 			updated, events, changed, err = cfg.DB.CloseIssueGuarded(ctx, db.CloseIssueParams{
-				IssueID: issue.ID, ExpectedProjectID: in.ProjectID,
+				IssueID: issue.ID, ExpectedProjectID: issue.ProjectID,
 				Reason: in.Body.Reason, Actor: actor,
 				Message: in.Body.Message, Evidence: dbEvidence, IfMatchRev: ifMatchRev,
 				Transcript:     in.Body.Transcript,
@@ -208,7 +218,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return err
 		})
 		if err == nil && changed {
-			cfg.Publish().Events(in.ProjectID, events)
+			cfg.Publish().EventsByProject(events)
 			captureCoreAction(ctx, cfg, "issue_closed", in.Surface)
 		}
 		if err != nil {
@@ -217,14 +227,14 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			// batch this attempt returned is the committed batch, so publish
 			// it exactly once before replying with the receipt.
 			if in.IdempotencyKey != "" {
-				match, lookupErr := lookupCloseIdempotencyMatch(
-					ctx, cfg, in.ProjectID, in.IdempotencyKey)
+				match, lookupErr := lookupCloseIdempotencyMatchForIssue(
+					ctx, cfg, issue, in.IdempotencyKey)
 				if lookupErr != nil {
 					return nil, lookupErr
 				}
 				if match != nil {
 					if len(events) > 0 && events[0].UID == match.Event.UID {
-						cfg.Publish().Events(in.ProjectID, events)
+						cfg.Publish().EventsByProject(events)
 						captureCoreAction(ctx, cfg, "issue_closed", in.Surface)
 					}
 					return closeIdempotencyResponse(ctx, cfg, match, idempotencyFingerprint)
@@ -260,6 +270,9 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if errors.Is(err, db.ErrFederatedReadOnly) {
 				return nil, federationReadOnlyError(err)
 			}
+			if errors.Is(err, db.ErrEvidenceTargetUnavailable) {
+				return nil, api.NewError(400, "validation", "evidence target issue was deleted before the close committed", "", nil)
+			}
 			return nil, internalAPIError(err)
 		}
 		// A database retry can observe that its first attempt committed even
@@ -267,7 +280,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		// before returning a plain no-op response.
 		if !changed && in.IdempotencyKey != "" {
 			reuse, err := tryCloseIdempotencyMatch(
-				ctx, cfg, in.ProjectID, in.IdempotencyKey, idempotencyFingerprint)
+				ctx, cfg, issue, in.IdempotencyKey, idempotencyFingerprint)
 			if err != nil {
 				return nil, err
 			}
@@ -325,7 +338,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		if changed && evt != nil {
-			cfg.Publish().Event(in.ProjectID, *evt)
+			cfg.Publish().Event(evt.ProjectID, *evt)
 		}
 		evt, err = scopedMutationEvent(ctx, cfg.DB, evt)
 		if err != nil {
@@ -342,10 +355,10 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 func tryCloseIdempotencyMatch(
 	ctx context.Context,
 	cfg ServerConfig,
-	projectID int64,
+	issue db.Issue,
 	key, fingerprint string,
 ) (*api.MutationResponse, error) {
-	match, err := lookupCloseIdempotencyMatch(ctx, cfg, projectID, key)
+	match, err := lookupCloseIdempotencyMatchForIssue(ctx, cfg, issue, key)
 	if err != nil {
 		return nil, err
 	}
@@ -353,6 +366,23 @@ func tryCloseIdempotencyMatch(
 		return nil, nil
 	}
 	return closeIdempotencyResponse(ctx, cfg, match, fingerprint)
+}
+
+// lookupCloseIdempotencyMatchForIssue prioritizes this issue's stable receipt,
+// even when a later move left it in an intermediate project. New keys still
+// check the current project for collisions with another issue's close.
+func lookupCloseIdempotencyMatchForIssue(
+	ctx context.Context, cfg ServerConfig, issue db.Issue, key string,
+) (*db.IdempotencyMatch, error) {
+	match, err := cfg.DB.LookupIssueMutationIdempotencyByIssue(
+		ctx, issue.UID, "issue.closed", key, time.Now().Add(-idempotencyWindow))
+	if err != nil {
+		return nil, internalAPIError(err)
+	}
+	if match != nil {
+		return match, nil
+	}
+	return lookupCloseIdempotencyMatch(ctx, cfg, issue.ProjectID, key)
 }
 
 func lookupCloseIdempotencyMatch(
@@ -393,6 +423,11 @@ func closeIdempotencyResponse(
 	original, err := scopedMutationEvent(ctx, cfg.DB, &match.Event)
 	if err != nil {
 		return nil, err
+	}
+	// A receipt found by issue UID can predate a move. Its event stays in the
+	// former project, which this request may not be allowed to see.
+	if original != nil && !db.ProjectAttributionVisible(ctx, original.ProjectUID) {
+		original = nil
 	}
 	out := &api.MutationResponse{}
 	out.Body.Issue = current
@@ -540,7 +575,7 @@ func closeIdempotencyFingerprint(
 	return hex.EncodeToString(sum[:])
 }
 
-// validateEvidenceTargets resolves duplicate-of and superseded-by issue
+// resolveEvidenceTargets resolves duplicate-of and superseded-by issue
 // refs in the same project and rejects targets that are missing or that
 // point at the issue being closed. ValidateCloseInput already checks that
 // the issue ref is non-empty; this is the database-backed half of the
@@ -549,31 +584,38 @@ func closeIdempotencyFingerprint(
 //
 // Errors are plain so the caller can wrap them in the 400 validation
 // envelope alongside the other shape-check errors.
-func validateEvidenceTargets(
+func resolveEvidenceTargets(
 	ctx context.Context, store db.Storage,
-	projectID int64, closingShortID string, evidence []api.Evidence,
-) error {
+	projectID int64, closing db.Issue, evidence []api.Evidence,
+) ([]db.Evidence, error) {
+	resolved := evidenceToDB(evidence)
 	for i, e := range evidence {
 		switch e.Type {
 		case api.EvidenceDuplicateOf, api.EvidenceSupersededBy:
 		default:
 			continue
 		}
+		// closeIssue requires complete AllProjects host authority before
+		// dispatch, including targets reached through historical references.
+		// The issue/token boundary still needs the per-issue check below.
 		target, err := resolveIssueRef(ctx, store, projectID, e.IssueRef, db.IncludeDeletedNo)
 		if err != nil {
-			return fmt.Errorf("evidence[%d] %s target %q does not exist in this project",
+			return nil, fmt.Errorf("evidence[%d] %s target %q does not exist in this project",
 				i, e.Type, e.IssueRef)
 		}
 		if err := authorizeIssueScopedIssue(ctx, store, target); err != nil {
-			return fmt.Errorf("evidence[%d] %s target %q does not exist in this project",
+			return nil, fmt.Errorf("evidence[%d] %s target %q does not exist in this project",
 				i, e.Type, e.IssueRef)
 		}
-		if target.ShortID == closingShortID {
-			return fmt.Errorf("evidence[%d] %s cannot reference the issue being closed (%s)",
-				i, e.Type, closingShortID)
+		if target.ID == closing.ID {
+			return nil, fmt.Errorf("evidence[%d] %s cannot reference the issue being closed (%s)",
+				i, e.Type, closing.ShortID)
 		}
+		// The event belongs to the issue's current project. Retain the target
+		// identity resolved in the request project, independent of later moves.
+		resolved[i].IssueRef = target.UID
 	}
-	return nil
+	return resolved, nil
 }
 
 // evidenceToDB performs the 1:1 conversion from the api wire type to the
@@ -582,9 +624,6 @@ func validateEvidenceTargets(
 // internal/api already imports internal/db; both types remain
 // field-for-field identical and the daemon handles the boundary.
 func evidenceToDB(in []api.Evidence) []db.Evidence {
-	if len(in) == 0 {
-		return nil
-	}
 	out := make([]db.Evidence, len(in))
 	for i, e := range in {
 		out[i] = db.Evidence{

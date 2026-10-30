@@ -275,7 +275,7 @@ func exportMeta(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportO
 		if err := rows.Scan(&rec.Key, &rec.Value); err != nil {
 			return fmt.Errorf("scan meta: %w", err)
 		}
-		if opts.ProjectID != 0 && (strings.HasPrefix(rec.Key, db.AttributionUIResetMetadataPrefix) || strings.HasPrefix(rec.Key, db.RelayResetMetadataPrefix) || strings.HasPrefix(rec.Key, db.RelayResetSupersededMetadataPrefix) || strings.HasPrefix(rec.Key, db.PendingCreationMetadataPrefix)) {
+		if opts.ProjectID != 0 && (strings.HasPrefix(rec.Key, db.AttributionUIResetMetadataPrefix) || strings.HasPrefix(rec.Key, db.ProjectStreamResetMetadataPrefix) || strings.HasPrefix(rec.Key, db.RelayResetMetadataPrefix) || strings.HasPrefix(rec.Key, db.RelayResetSupersededMetadataPrefix) || strings.HasPrefix(rec.Key, db.PendingCreationMetadataPrefix)) {
 			continue
 		}
 		if opts.ProjectID != 0 && rec.Key == "project_access_revision" {

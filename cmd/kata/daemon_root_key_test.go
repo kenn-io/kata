@@ -64,7 +64,7 @@ func TestDaemonStartsWithPinnedProjectAndMissingRootKey(t *testing.T) {
 	runtimePath, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Path(os.Getpid())
 	require.NoError(t, err)
 	var record daemonRuntimeRecordJSON
-	require.Eventually(t, func() bool { //nolint:kennlint // daemon startup publishes readiness only through its runtime record file
+	require.Eventually(t, func() bool { //nolint:kennlint // sleeptest: daemon startup publishes readiness only through its runtime record file
 		select {
 		case err := <-done:
 			t.Fatalf("daemon exited during startup: %v", err)

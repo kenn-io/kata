@@ -3129,7 +3129,7 @@ func TestExternalRootEventWakeUsesActualNativeEventsAndSkipsProjectionLoops(t *t
 	select {
 	case extra := <-wakes:
 		t.Fatalf("unexpected wake %d", extra)
-	case <-time.After(50 * time.Millisecond): //nolint:kennlint // absence window; all seven wakes were already received, so any further wake is a duplicate
+	case <-time.After(50 * time.Millisecond): //nolint:kennlint // deadlinetest: absence window; all seven wakes were already received, so any further wake is a duplicate
 	}
 }
 

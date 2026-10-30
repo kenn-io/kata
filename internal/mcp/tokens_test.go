@@ -20,6 +20,16 @@ import (
 )
 
 func TestScopedTokenToolWritesProtectedFileWithoutReturningPlaintext(t *testing.T) {
+	for _, historical := range []bool{false, true} {
+		name := "current"
+		if historical {
+			name = "historical"
+		}
+		t.Run(name, func(t *testing.T) { checkScopedTokenToolProtectedFile(t, historical) })
+	}
+}
+
+func checkScopedTokenToolProtectedFile(t *testing.T, historical bool) {
 	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, store.Close()) })
@@ -29,6 +39,13 @@ func TestScopedTokenToolWritesProtectedFileWithoutReturningPlaintext(t *testing.
 		ProjectID: project.ID, Title: "Delegated work", Author: "coordinator",
 	})
 	require.NoError(t, err)
+	issueRef := project.Name + "#" + root.ShortID
+	if historical {
+		target, err := store.CreateProject(t.Context(), "destination-project")
+		require.NoError(t, err)
+		root, _ = historicalOutputMove(t, store, project, target, root)
+		project = target
+	}
 	daemonServer := daemon.NewServer(daemon.ServerConfig{
 		DB: store, StartedAt: time.Now().UTC(),
 		Auth: config.AuthConfig{Token: "bootstrap-token", RequireTokenIdentity: true},
@@ -49,7 +66,7 @@ func TestScopedTokenToolWritesProtectedFileWithoutReturningPlaintext(t *testing.
 	output := callAdministrationTool(t, session, "kata.token_create", map[string]any{
 		"token_actor":        "worker-a",
 		"name":               "remote-worktree",
-		"issue":              project.Name + "#" + root.ShortID,
+		"issue":              issueRef,
 		"expires_in_seconds": 3600,
 		"token_file":         tokenPath,
 	})

@@ -15,8 +15,10 @@ import (
 
 	oapiruntime "github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"golang.org/x/mod/semver"
 
 	"go.kenn.io/kata/internal/shortid"
+	"go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -73,6 +75,8 @@ type MoveInput struct {
 	Ref       string `json:"ref"`
 	ToProject string `json:"to_project"`
 	Revision  *int64 `json:"revision,omitempty"`
+	Single    bool   `json:"single,omitempty" jsonschema:"Move only this issue; by default its active descendants move too."`
+	DryRun    bool   `json:"dry_run,omitempty" jsonschema:"Validate and list every issue that would move without moving."`
 }
 
 // MoveOutput reports the issue after a project move.
@@ -83,6 +87,9 @@ type MoveOutput struct {
 	Changed    bool            `json:"changed"`
 	EventID    int64           `json:"event_id"`
 	NewShortID string          `json:"new_short_id"`
+	// Issues lists the root and every moved descendant in their resulting
+	// projects; a dry run lists them where they are now.
+	Issues []IssueSummary `json:"issues,omitempty"`
 }
 
 // DeleteInput carries a soft-delete confirmation.
@@ -304,6 +311,10 @@ func (h toolHandlers) editComment(ctx context.Context, _ *sdkmcp.CallToolRequest
 	if err != nil {
 		return nil, EditCommentOutput{}, err
 	}
+	project, err = h.currentIssueProject(ctx, project, response.Issue)
+	if err != nil {
+		return nil, EditCommentOutput{}, err
+	}
 	return successResult(), EditCommentOutput{
 		Project: project, Issue: h.summaryFromIssue(project, response.Issue),
 		Comment: commentSummary(response.Comment), Changed: response.Changed, Event: eventSummary(&response.Event),
@@ -386,27 +397,75 @@ func (h toolHandlers) move(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 	if to.UID == "" {
 		return nil, MoveOutput{}, errors.New("target project UID is required")
 	}
-	revision := input.Revision
-	if revision == nil {
-		shown, showErr := h.options.Client.ShowIssue(ctx, &generated.ShowIssueRequestOptions{PathParams: &generated.ShowIssuePath{ProjectID: from.ID, Ref: ref}})
-		if showErr != nil {
-			return nil, MoveOutput{}, showErr
-		}
-		revision = &shown.Issue.Revision
+	// Check the live daemon on every move: it can be upgraded while this
+	// server runs. Older daemons reject single and move only the root.
+	subtreeMoves, err := h.daemonSupportsSubtreeMoves(ctx)
+	if err != nil {
+		return nil, MoveOutput{}, err
 	}
-	ifMatch := fmt.Sprintf(`"rev-%d"`, *revision)
+	if !subtreeMoves && !input.Single {
+		return nil, MoveOutput{}, errors.New("this daemon predates subtree moves; upgrade it or pass single=true to move only this issue")
+	}
+	// Showing an issue on a federation spoke refreshes and persists claim
+	// status. A preview takes the issue identity from the move validation
+	// response instead; If-Match is optional for previews.
+	var ifMatch *string
+	if !input.DryRun {
+		shown, err := h.options.Client.ShowIssue(ctx, &generated.ShowIssueRequestOptions{PathParams: &generated.ShowIssuePath{ProjectID: from.ID, Ref: ref}})
+		if err != nil {
+			return nil, MoveOutput{}, err
+		}
+		from, err = h.currentIssueProject(ctx, from, issueFromShow(shown.Issue))
+		if err != nil {
+			return nil, MoveOutput{}, err
+		}
+		ref = shown.Issue.UID
+		if input.Revision == nil {
+			input.Revision = &shown.Issue.Revision
+		}
+	}
+	if input.Revision != nil {
+		value := fmt.Sprintf(`"rev-%d"`, *input.Revision)
+		ifMatch = &value
+	}
+	body := &generated.MoveIssueBody{Actor: &h.options.Actor, ToProjectUID: to.UID}
+	if input.DryRun {
+		body.DryRun = &input.DryRun
+	}
+	if input.Single && subtreeMoves {
+		body.Single = &input.Single
+	}
 	response, err := h.options.Client.MoveIssue(ctx, &generated.MoveIssueRequestOptions{
 		PathParams: &generated.MoveIssuePath{ProjectID: from.ID, Ref: ref},
-		Body:       &generated.MoveIssueBody{Actor: &h.options.Actor, ToProjectUID: to.UID},
-		Header:     &generated.MoveIssueHeaders{IfMatch: &ifMatch},
+		Body:       body,
+		Header:     &generated.MoveIssueHeaders{IfMatch: ifMatch},
 	})
 	if err != nil {
 		return nil, MoveOutput{}, err
 	}
-	return successResult(), MoveOutput{
-		From: from, To: to, Issue: h.summaryFromIssue(to, response.Issue), Changed: response.Changed,
-		EventID: response.EventID, NewShortID: response.Issue.ShortID,
-	}, nil
+	root := to
+	if input.DryRun {
+		from, err = h.currentIssueProject(ctx, from, response.Issue)
+		if err != nil {
+			return nil, MoveOutput{}, err
+		}
+		root = from
+	}
+	output := MoveOutput{
+		From: from, To: to, Issue: h.summaryFromIssue(root, response.Issue), Changed: response.Changed,
+		EventID: response.EventID,
+	}
+	if !input.DryRun {
+		output.NewShortID = response.Issue.ShortID
+	}
+	for _, issue := range response.Issues {
+		project, err := h.currentIssueProject(ctx, root, issue)
+		if err != nil {
+			return nil, MoveOutput{}, err
+		}
+		output.Issues = append(output.Issues, h.summaryFromIssue(project, issue))
+	}
+	return successResult(), output, nil
 }
 
 func (h toolHandlers) deleteIssue(ctx context.Context, _ *sdkmcp.CallToolRequest, input DeleteInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
@@ -422,7 +481,7 @@ func (h toolHandlers) deleteIssue(ctx context.Context, _ *sdkmcp.CallToolRequest
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
-	return successResult(), h.mutation(project, response.Issue, response.Changed, response.Reused, &response.Event), nil
+	return h.mutationResult(ctx, project, response.Issue, response.Changed, response.Reused, &response.Event)
 }
 
 func (h toolHandlers) restoreIssue(ctx context.Context, _ *sdkmcp.CallToolRequest, input RestoreInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
@@ -437,7 +496,7 @@ func (h toolHandlers) restoreIssue(ctx context.Context, _ *sdkmcp.CallToolReques
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
-	return successResult(), h.mutation(project, response.Issue, response.Changed, response.Reused, &response.Event), nil
+	return h.mutationResult(ctx, project, response.Issue, response.Changed, response.Reused, &response.Event)
 }
 
 func (h toolHandlers) purgeIssue(ctx context.Context, _ *sdkmcp.CallToolRequest, input PurgeInput) (*sdkmcp.CallToolResult, PurgeOutput, error) {
@@ -477,6 +536,10 @@ func (h toolHandlers) destructiveTarget(ctx context.Context, rawRef, confirm, ve
 		PathParams: &generated.ShowIssuePath{ProjectID: project.ID, Ref: ref},
 		Query:      &generated.ShowIssueQuery{IncludeDeleted: &includeDeleted},
 	})
+	if err != nil {
+		return ProjectIdentity{}, destructiveIssue{}, "", err
+	}
+	project, err = h.currentIssueProject(ctx, project, issueFromShow(shown.Issue))
 	if err != nil {
 		return ProjectIdentity{}, destructiveIssue{}, "", err
 	}
@@ -529,6 +592,13 @@ func (h toolHandlers) wait(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 				PathParams: &generated.ShowIssuePath{ProjectID: project.ID, Ref: ref},
 				Query:      &generated.ShowIssueQuery{IncludeDeleted: &includeDeleted},
 			})
+			if showErr != nil {
+				if errors.Is(waitContext.Err(), context.DeadlineExceeded) {
+					return successResult(), WaitOutput{Reason: "timeout", States: lastStates}, nil
+				}
+				return nil, WaitOutput{}, showErr
+			}
+			project, showErr = h.currentIssueProject(waitContext, project, issueFromShow(shown.Issue))
 			if showErr != nil {
 				if errors.Is(waitContext.Err(), context.DeadlineExceeded) {
 					return successResult(), WaitOutput{Reason: "timeout", States: lastStates}, nil
@@ -948,6 +1018,7 @@ func (h toolHandlers) pollScopedEvents(ctx context.Context, projectName string, 
 		return EventsOutput{}, err
 	}
 	output := EventsOutput{NextAfterID: after}
+	seen := make(map[int64]struct{})
 	for _, project := range projects {
 		response, pollErr := h.options.Client.PollProjectEvents(ctx, &generated.PollProjectEventsRequestOptions{PathParams: &generated.PollProjectEventsPath{ProjectID: project.ID}, Query: &generated.PollProjectEventsQuery{AfterID: &after, Limit: &limit}})
 		if pollErr != nil {
@@ -967,6 +1038,12 @@ func (h toolHandlers) pollScopedEvents(ctx context.Context, projectName string, 
 			return output, nil
 		}
 		for _, event := range response.Events {
+			// Move events appear in both endpoint feeds. IDs are global to
+			// the selected daemon, so count each event once before limiting.
+			if _, exists := seen[event.EventID]; exists {
+				continue
+			}
+			seen[event.EventID] = struct{}{}
 			output.Events = append(output.Events, streamEvent(event))
 		}
 	}
@@ -1121,6 +1198,11 @@ func (h toolHandlers) redactEventsOutsideScope(ctx context.Context, output *Even
 			peerUIDs[event.RelatedIssueUID] = struct{}{}
 		}
 		collectEventPeerUIDs(event.Payload, peerUIDs)
+		if event.Type == "issue.closed" {
+			for _, ref := range closeEvidenceUIDRefs(event.Payload) {
+				peerUIDs[ref] = struct{}{}
+			}
+		}
 	}
 	allowedPeers := make(map[string]bool, len(peerUIDs))
 	for uid := range peerUIDs {
@@ -1145,18 +1227,51 @@ func (h toolHandlers) redactEventsOutsideScope(ctx context.Context, output *Even
 			event.RelatedIssueShortID = ""
 		}
 		event.Payload = redactEventPayloadPeers(event.Payload, allowedPeers, allowedProjectUIDs)
-		redactEventTypedDisplayRefs(event)
+		redactEventTypedDisplayRefs(event, allowedPeers)
 	}
 	return nil
 }
 
+// daemonSupportsSubtreeMoves reports whether the daemon has API 0.35.0, which
+// moves subtrees by default and accepts the single field.
+func (h toolHandlers) daemonSupportsSubtreeMoves(ctx context.Context) (bool, error) {
+	health, err := h.options.Client.Health(ctx)
+	if err != nil {
+		return false, err
+	}
+	version := ""
+	if health.APISchemaVersion != nil {
+		version = strings.TrimSpace(*health.APISchemaVersion)
+	}
+	return semver.IsValid("v"+version) && semver.Compare("v"+version, "v0.35.0") >= 0, nil
+}
+
+// closeEvidenceUIDRefs returns duplicate and superseding targets stored as
+// issue UIDs. Closes record resolved UIDs so later moves cannot change them.
+func closeEvidenceUIDRefs(payload any) []string {
+	values, ok := payload.(map[string]any)
+	if !ok {
+		return nil
+	}
+	evidence, _ := values["evidence"].([]any)
+	refs := make([]string, 0, len(evidence))
+	for _, element := range evidence {
+		entry, _ := element.(map[string]any)
+		if ref, isString := entry["issue_ref"].(string); isString && uid.Valid(ref) {
+			refs = append(refs, ref)
+		}
+	}
+	return refs
+}
+
 // redactEventTypedDisplayRefs removes event-type-specific display references
 // that carry no UID companion: close-throttle cohort refs span projects and
-// close-evidence refs are stored verbatim. Historical text refs are
+// older close-evidence refs are stored verbatim. Close evidence stored as an
+// issue UID survives when that issue is currently in scope. Historical text refs are
 // authorized only against this event's own stamped project name — current
 // scope names are unusable because a scoped project renamed to a previously
 // foreign name would retroactively vouch that foreign project's refs.
-func redactEventTypedDisplayRefs(event *StreamEvent) {
+func redactEventTypedDisplayRefs(event *StreamEvent, allowedPeers map[string]bool) {
 	eventProjectName := event.ProjectName
 	payload, ok := event.Payload.(map[string]any)
 	if !ok {
@@ -1195,7 +1310,11 @@ func redactEventTypedDisplayRefs(event *StreamEvent) {
 			if !isMap {
 				continue
 			}
-			if ref, isString := entry["issue_ref"].(string); isString && ref != "" && !displayRefInScope(ref, eventProjectName) {
+			ref, isString := entry["issue_ref"].(string)
+			if !isString || ref == "" {
+				continue
+			}
+			if uid.Valid(ref) && !allowedPeers[ref] || !uid.Valid(ref) && !displayRefInScope(ref, eventProjectName) {
 				delete(entry, "issue_ref")
 			}
 		}

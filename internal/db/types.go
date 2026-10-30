@@ -621,6 +621,9 @@ type Evidence struct {
 // every successful issue purge so snapshot readers invalidate cached state;
 // replayed historical purge rows may omit it.
 type PurgeLog struct {
+	// ResetProjectIDs carries committed invalidations to the publisher only.
+	// It is neither persisted nor exposed in the purge audit wire format.
+	ResetProjectIDs        []int64   `json:"-"`
 	ID                     int64     `json:"id"`
 	UID                    string    `json:"uid"`
 	OriginInstanceUID      string    `json:"origin_instance_uid"`
