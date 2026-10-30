@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"context"
 	"encoding/json/v2"
 	"strings"
 	"testing"
@@ -267,14 +268,14 @@ func TestRecurringBacklog(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			job := j
 			tc.change(&job)
-			got, err := RecurringBacklog(job, definitionUID, progress, tc.now)
+			got, err := RecurringBacklog(t.Context(), job, definitionUID, progress, tc.now)
 			require.NoError(t, err)
 			require.Equal(t, tc.want, got)
 		})
 	}
 
 	t.Run("invalid input is rejected", func(t *testing.T) {
-		_, err := RecurringBacklog(j, "not-a-uid", progress, anchor.Add(time.Hour))
+		_, err := RecurringBacklog(t.Context(), j, "not-a-uid", progress, anchor.Add(time.Hour))
 		require.ErrorIs(t, err, ErrInvalid)
 	})
 }
@@ -295,7 +296,7 @@ func TestRecurringBacklogFollowsUnfinishedLatestScan(t *testing.T) {
 	}
 	now := until.Add(30 * time.Minute)
 
-	got, err := RecurringBacklog(j, definitionUID, progress, now)
+	got, err := RecurringBacklog(t.Context(), j, definitionUID, progress, now)
 	require.NoError(t, err)
 
 	delivered := 0
@@ -329,7 +330,43 @@ func TestRecurringBacklogRestartsScanAfterDefinitionUpdate(t *testing.T) {
 		},
 	}
 
-	got, err := RecurringBacklog(j, definitionUID, stale, anchor.Add(3000*time.Minute))
+	got, err := RecurringBacklog(t.Context(), j, definitionUID, stale, anchor.Add(3000*time.Minute))
 	require.NoError(t, err)
 	require.Equal(t, 1, got)
+}
+
+// countdownContext reports cancellation once Err has been asked a set number
+// of times, so a long scan is interrupted at a known point without a clock.
+type countdownContext struct {
+	context.Context
+	left int
+}
+
+func (c *countdownContext) Err() error {
+	if c.left--; c.left < 0 {
+		return context.Canceled
+	}
+	return nil
+}
+
+// A backlog spread over many planner batches stops between batches when the
+// caller's context ends, instead of enumerating it all.
+func TestRecurringBacklogStopsWhenContextEnds(t *testing.T) {
+	anchor := at(t, "2026-06-01T00:00:00Z")
+	progress := RecurringProgress{Version: 1, Anchor: anchor, Through: anchor}
+	j := nativeJob(t)
+	j.Trigger = Trigger{Kind: "interval", IntervalSeconds: 60}
+	now := anchor.Add(5000 * time.Minute)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := RecurringBacklog(ctx, j, definitionUID, progress, now)
+	require.ErrorIs(t, err, context.Canceled)
+
+	_, err = RecurringBacklog(&countdownContext{Context: t.Context(), left: 2}, j, definitionUID, progress, now)
+	require.ErrorIs(t, err, context.Canceled, "cancellation between batches ends the count")
+
+	got, err := RecurringBacklog(&countdownContext{Context: t.Context(), left: 100}, j, definitionUID, progress, now)
+	require.NoError(t, err)
+	require.Equal(t, 5000, got)
 }

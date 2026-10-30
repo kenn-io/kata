@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"context"
 	"encoding/json/v2"
 	"strings"
 	"time"
@@ -237,10 +238,14 @@ func PlanRecurring(j JobDefinition, definitionEventUID string, p RecurringProgre
 
 // RecurringBacklog counts the children that sweeping from p up to now would
 // deliver. The 1000-per-step cap only spreads a large backlog over several
-// sweeps, so the count follows the planner to the end and is exact.
-func RecurringBacklog(j JobDefinition, definitionEventUID string, p RecurringProgress, now time.Time) (int, error) {
+// sweeps, so the count follows the planner to the end and is exact. A large
+// backlog takes many batches, so ctx is checked between them.
+func RecurringBacklog(ctx context.Context, j JobDefinition, definitionEventUID string, p RecurringProgress, now time.Time) (int, error) {
 	total := 0
 	for {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
 		batch, err := PlanRecurring(j, definitionEventUID, p, now)
 		if err != nil {
 			return 0, err

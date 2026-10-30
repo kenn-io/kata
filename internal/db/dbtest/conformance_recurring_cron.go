@@ -218,7 +218,7 @@ func checkRecurringBacklogMatchesDelivery(t *testing.T, s db.Storage) error {
 			require.NoError(t, json.Unmarshal(values["cron.progress."+job.UID], &progress))
 			now := progress.Anchor.Add(2000*time.Hour + 30*time.Minute)
 
-			backlog, e := cron.RecurringBacklog(job.Definition, job.DefinitionEventUID, progress, now)
+			backlog, e := cron.RecurringBacklog(ctx, job.Definition, job.DefinitionEventUID, progress, now)
 			require.NoError(t, e)
 			require.Equal(t, tc.want, backlog)
 
