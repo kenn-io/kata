@@ -490,13 +490,19 @@ func TestReopenKeyIgnoredWhileHelpIsVisibleInSplitLayout(t *testing.T) {
 	require.Zero(t, spy.reopens)
 }
 
-// slowBacklogUndoAPI blocks the backlog lookup until its context ends and
-// refuses a reopen whose context has already expired.
+// slowBacklogUndoAPI models a backlog lookup that outlasts the undo attempt:
+// a lookup with its own deadline times out harmlessly, while one that shares
+// the attempt's context uses the attempt up (expireAttempt) before returning.
+// Reopen refuses a context that has already ended.
 type slowBacklogUndoAPI struct {
 	*undoTestAPI
+	expireAttempt context.CancelFunc
 }
 
 func (s *slowBacklogUndoAPI) ReopenBacklog(ctx context.Context, _ int64, _ string) (int, error) {
+	if _, bounded := ctx.Deadline(); !bounded {
+		s.expireAttempt()
+	}
 	<-ctx.Done()
 	return 0, ctx.Err()
 }
@@ -516,9 +522,9 @@ func TestUndoCloseSlowBacklogLookupStillReopens(t *testing.T) {
 	t.Cleanup(func() { undoBacklogLookupTimeout = previous })
 
 	m, f := undoCloseModel(t, 0, nil)
-	client := newConnectedUndoClient(t, &slowBacklogUndoAPI{undoTestAPI: f})
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
+	ctx, expireAttempt := context.WithCancel(context.Background())
+	defer expireAttempt()
+	client := newConnectedUndoClient(t, &slowBacklogUndoAPI{undoTestAPI: f, expireAttempt: expireAttempt})
 
 	out := client.undo(ctx, m.undoHistory.entries[0], undoOptions{checkBacklog: true})
 	if out.attempt != nil {
