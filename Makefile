@@ -160,7 +160,7 @@ endif
 $(CURDIR)/.cache/golangci-lint/custom-gcl: .custom-gcl.yml go.mod
 	golangci-lint custom --destination "$(CURDIR)/.cache/golangci-lint" --name custom-gcl --version v2.14.0
 
-lint: $(CURDIR)/.cache/golangci-lint/custom-gcl
+lint: $(CURDIR)/.cache/golangci-lint/custom-gcl lint-workflow-retries
 	@if [ "$${GITHUB_ACTIONS:-}" = true ] && [ "$$(git rev-parse --is-shallow-repository)" = true ]; then \
 		git fetch --no-tags --unshallow origin main:refs/remotes/origin/main; \
 	fi
@@ -229,3 +229,7 @@ actions-lock-check-local: gh-actions-lock-install
 # Network check that the lockfile is complete and every locked commit is still valid
 actions-lock-check: gh-actions-lock-install
 	gh actions-lock --verify
+
+.PHONY: lint-workflow-retries
+lint-workflow-retries:
+	GOOS= GOARCH= go run go.kenn.io/kit/cmd/kennlint@v0.47.3 workflow-retries
