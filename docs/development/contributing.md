@@ -66,7 +66,7 @@ make lint
 make nilaway
 ```
 
-Pull request checks are selected by changed files; pushes to `main` run all groups.
+On pull requests, root `README.md` and docs-site-only edits skip both test groups. Embedded Markdown selects Go; JavaScript files under `docs/javascripts/**` and all `web/**` files select both groups. Shared inputs such as `go.mod`, `Makefile`, and `.github/**` also select both. Pushes to `main` run every group.
 
 ### Native agent plugins
 

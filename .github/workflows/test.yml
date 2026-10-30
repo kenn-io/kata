@@ -69,7 +69,7 @@ jobs:
 
   web-browser:
     needs: changes
-    if: &mixed-changes ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go') || contains(fromJSON(needs.changes.outputs.groups), 'frontend')) }}
+    if: &go-changes ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go')) }}
     name: Web browser tests
     runs-on: ubuntu-latest
 
@@ -169,7 +169,7 @@ jobs:
 
   go:
     needs: changes
-    if: *mixed-changes
+    if: *go-changes
     name: Go tests
     runs-on: ubuntu-latest
 
@@ -213,7 +213,7 @@ jobs:
 
   native-agent-plugins:
     needs: changes
-    if: &go-changes ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go')) }}
+    if: *go-changes
     name: Native agent plugins
     runs-on: ubuntu-latest
     steps:
@@ -301,7 +301,7 @@ jobs:
 
   postgres:
     needs: changes
-    if: *mixed-changes
+    if: *go-changes
     name: PostgreSQL ${{ matrix.postgres }} conformance
     runs-on: ubuntu-latest
     strategy:
