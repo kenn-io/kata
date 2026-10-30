@@ -905,6 +905,43 @@ func TestInboxPendingEntryCancelledByForegroundKeys(t *testing.T) {
 	require.Nil(t, cmd)
 }
 
+func TestMouseSearchCancelsPendingInbox(t *testing.T) {
+	for _, tab := range []rune{'1', '2'} {
+		t.Run(string(tab), func(t *testing.T) {
+			inbox := ProjectSummary{ID: 2, Name: "example-project"}
+			inbox.Metadata.Role = jsontext.Value(`"inbox"`)
+			m := resizeModel(newTestModel(), 80, 24)
+			m.opts.Mouse = true
+			m.api = &inboxTestAPI{projects: []ProjectSummary{inbox}}
+			m.scope = homedScope(7, "spoke-project")
+			m.list.issues = makeTestIssues(2)
+			m.list.filter.Search = "row"
+			m.list.cursor = 1
+			m.list = m.list.syncSelection(m.list.visibleRows())
+			m = sendRune(m, tab)
+			m, lookup := updateModel(m, keyRune('I'))
+			require.NotNil(t, lookup)
+			reply := lookup()
+			row := 1
+			if tab == '2' {
+				row = 2
+			}
+			m, _ = updateModel(m, mouseLeftClick(4, row))
+			m, cmd := updateModel(m, reply)
+			require.Equal(t, int64(7), m.scope.projectID, "a delayed Inbox reply must not change the search project")
+			require.Nil(t, cmd)
+			if tab == '1' {
+				require.Equal(t, inputSearchBar, m.input.kind)
+			} else {
+				require.True(t, m.cron.filtering)
+			}
+			m = sendKey(m, tea.KeyEsc)
+			require.Equal(t, "row", m.list.filter.Search)
+			require.Equal(t, "01TEST-r002", m.list.selectedUID)
+		})
+	}
+}
+
 // Inbox keeps the project chosen on entry. Events still refresh its tasks;
 // leaving and reopening Inbox picks up the current designation.
 func TestInboxDesignationChangesApplyOnNextVisit(t *testing.T) {

@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"net/http"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/stretchr/testify/require"
 	"go.kenn.io/kit/tui/splitlayout"
 )
 
@@ -150,6 +152,40 @@ func TestMousePersistentSearch(t *testing.T) {
 			t.Fatalf("click recaptured search snapshot: selected=%s filter=%q", m.list.selectedUID, m.list.filter.Search)
 		}
 	}
+}
+
+func TestMouseSearchCancelsPendingPriority(t *testing.T) {
+	m := resizeModel(newTestModel(), 80, 24)
+	m.opts.Mouse = true
+	m.api = newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			respondJSON(t, w, map[string]any{"jobs": []any{}, "workflows": []any{}, "runs": []any{}})
+			return
+		}
+		t.Errorf("tab navigation made an unexpected daemon request: %s %s", r.Method, r.URL.Path)
+		http.Error(w, "unexpected request", http.StatusBadRequest)
+	})
+	m.authCapabilitiesRequired, m.authCapabilitiesReady = true, true
+	m.activeAuth = AuthInfo{Kind: "none"}
+	m.list.issues = makeTestIssues(2)
+	m.list.issues[1].Title = "second"
+	m.list = m.list.syncSelection(m.list.visibleRows())
+	m = sendRune(m, '!')
+	require.True(t, m.list.pendingPriority)
+
+	m, _ = updateModel(m, mouseLeftClick(4, 1))
+	if m.list.status != "" {
+		t.Error("opening search kept the priority prompt")
+	}
+	m, _ = updateModel(m, tea.PasteMsg{Content: "second"})
+	m = sendKey(m, tea.KeyEnter)
+	m = sendKey(m, tea.KeyEnter)
+	require.Equal(t, "01TEST-r002", m.list.selectedUID)
+	require.Equal(t, inputNone, m.input.kind)
+
+	m, cmd := updateModel(m, keyRune('2'))
+	runCmd(cmd)
+	require.Equal(t, viewCron, m.view, "2 must open Jobs instead of changing priority")
 }
 
 func TestMouseSearchVisibilityGuards(t *testing.T) {

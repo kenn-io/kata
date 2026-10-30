@@ -27,6 +27,7 @@ func (m Model) routeMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 		mouse := click.Mouse()
 		if m.view == viewCron && !m.cron.help && len(m.cron.stack) == 0 &&
 			m.scope.projectID != 0 && mouse.Y == 2 {
+			m.inboxPending = false
 			m.cron.filtering = true
 			return m, nil
 		}
@@ -36,6 +37,11 @@ func (m Model) routeMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 		}
 		if (m.view == viewList || m.view == viewDetail && m.layout == splitlayout.Split) &&
 			mouse.Y == row && (m.layout != splitlayout.Split || mouse.X < splitConfig.ListWidth(m.width)) {
+			m.inboxPending = false
+			if m.list.pendingPriority {
+				m.list.pendingPriority = false
+				m.list.status = ""
+			}
 			m.focus = focusList
 			if m.input.kind == inputSearchBar {
 				m.input.searchFocus, m.input.searchSubmitted = searchFocusQuery, false
