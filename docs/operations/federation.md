@@ -2176,6 +2176,47 @@ For a legacy spoke, skipping advances its push cursor past the quarantined event
 does not delete local events and it does not make skipped work appear on the
 hub.
 
+### Withheld creations after a root checkpoint
+
+A root can retain an issue's creation without sharing its original bytes when
+those bytes name an unshared project. Later metadata or assignment events can
+then refer to an issue the relay has never received. A root that has already
+served a signed checkpoint must check later history too; otherwise it can keep
+advertising the old checkpoint and a pull can quarantine with an error such as
+`issue.metadata_updated references unknown issue`.
+
+Upgrade the **root daemon** to a build containing the retained-checkpoint
+history-boundary fix. The root then offers a fresh signed checkpoint with the
+selected project's current issues, keeping the private historical endpoints
+out of the shared history. Relays serving downstream peers should also run a
+build containing the withheld-creation recovery from
+[PR #634](https://github.com/kenn-io/kata/pull/634). The new root fix does not
+require a new relay protocol or a new quarantine-retry command.
+
+For an existing negotiated relay pull quarantine, select that relay's daemon
+and project, inspect the error, then explicitly retry after the root upgrade:
+
+```sh
+kata --project spoke-project federation quarantine list
+quarantine_id=7 # Replace with the affected entry's ID from the list.
+kata --project spoke-project federation quarantine show "$quarantine_id"
+kata --project spoke-project federation quarantine retry "$quarantine_id" \
+  --confirm "RETRY FEDERATION BATCH $quarantine_id" \
+  --reason "root upgraded for withheld creation recovery"
+kata --project spoke-project federation status
+```
+
+Retry clears the active rejection without advancing delivery cursors. The next
+automatic sync installs the refreshed root-signed checkpoint before resuming
+delivery. Existing issues, metadata, assignments and subsequent ordinary
+creations are retained. If pending local or downstream work blocks the reset,
+resolve the [normal reset blockers](#reset-recovery) before retrying recovery.
+Retrying against an unfixed root can quarantine the same batch again.
+
+There is no verified general workaround for this retained-checkpoint case on
+0.20.0. Preserve the quarantine and upgrade the root; skipping relay data or
+editing a database cursor is not a recovery path.
+
 ## Purge and reset
 
 Hard purge is hub-admin-only for federated projects. A spoke rejects hard purge
