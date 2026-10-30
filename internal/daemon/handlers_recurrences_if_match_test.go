@@ -51,3 +51,25 @@ func TestPostRecurrenceIfMatchNeedsAnInitialIssue(t *testing.T) {
 	}, map[string]string{"If-Match": `"rev-1"`})
 	assertAPIError(t, response.StatusCode, raw, http.StatusBadRequest, "validation")
 }
+
+func TestPostRecurrenceEmptyIfMatchIsRejectedNotTreatedAsUnconditional(t *testing.T) {
+	env := testenv.New(t)
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Weekly review", Author: "worker"})
+	require.NoError(t, err)
+
+	response, raw := envDoRaw(t, env, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/recurrences", project.ID), map[string]any{
+		"actor": "worker", "initial_issue_ref": issue.ShortID, "rrule": "FREQ=WEEKLY", "dtstart": "2026-10-12", "timezone": "UTC",
+		"template": map[string]string{"title": "Weekly review"},
+	}, map[string]string{"If-Match": ""})
+
+	assertAPIError(t, response.StatusCode, raw, http.StatusBadRequest, "validation")
+	recurrences, err := env.DB.ListRecurrencesByProject(t.Context(), project.ID)
+	require.NoError(t, err)
+	require.Empty(t, recurrences)
+	stored, err := env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, issue.Revision, stored.Revision)
+	assert.Nil(t, stored.RecurrenceID)
+}
