@@ -63,7 +63,8 @@ starts on <date>, or changes the rule, start and zone of the one it already
 belongs to. The rule is sent as written and the daemon validates it. The
 zone is --timezone, else the recurrence's own zone when changing, else the
 issue's timezone metadata, else your own IANA zone (TZ, then the
-/etc/localtime link); with none of those, pass --timezone.
+/etc/localtime link; an empty TZ means UTC); with none of those, pass
+--timezone.
 Starting rewrites scheduled_on to the first occurrence, so a future date
 takes the issue out of kata ready until then. --repeat - stops the
 recurrence; occurrences already created stay, and the issue cannot start a

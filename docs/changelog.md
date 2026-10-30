@@ -32,6 +32,15 @@ All notable changes to kata, grouped by release. Versioned releases start with
   resolve in the issue `timezone`, then the daemon `timezone`, then UTC, and
   need daemon API `0.36.0` or newer. See
   [Calendar dates on issue rows](reference/metadata.md#calendar-dates-on-issue-rows).
+
+- Start, change, and stop a recurrence from the CLI with `kata schedule <ref>
+  <date> --repeat '<rrule>'` and `kata schedule <ref> --repeat -`. The zone is
+  `--timezone`, the recurrence's own zone, the issue's `timezone` metadata, or
+  your own IANA zone (`TZ`, then the `/etc/localtime` link; an empty `TZ` means
+  UTC). `kata show` prints an issue's rule, start, zone, and next occurrence,
+  and `kata show --json` returns them under `recurrence`. See
+  [Repeat an issue](reference/cli.md#repeat-an-issue).
+
 - Get an immediate error when a daemon in another PID namespace, such as one in
   a sandbox or container sharing your `KATA_HOME`, already owns the store.
   `kata` commands, `kata daemon start`, and foreground startup previously
@@ -100,14 +109,6 @@ All notable changes to kata, grouped by release. Versioned releases start with
   and the full issue when the issue's creation was withheld and only later
   events, such as an assignment, were kept. Before, the device couldn't apply
   the assignment, and sync stalled.
-
-- Start, change, and stop a recurrence from the CLI with `kata schedule <ref>
-  <date> --repeat '<rrule>'` and `kata schedule <ref> --repeat -`. The zone is
-  `--timezone`, the recurrence's own zone, the issue's `timezone` metadata, or
-  your own IANA zone.
-  `kata show` prints an issue's rule, start, zone, and next occurrence, and
-  `kata show --json` returns them under `recurrence`. See
-  [Repeat an issue](reference/cli.md#repeat-an-issue).
 
 ## 0.20.0
 <small>2026-10-23</small>

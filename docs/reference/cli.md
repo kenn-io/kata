@@ -1165,7 +1165,8 @@ is written and the error reports the recurrence's current rule.
 The rule is sent as written. The daemon is the only validator, and its error is
 printed. The zone is `--timezone`, else, when changing, the recurrence's own
 zone, else the issue's `timezone` metadata, else your own IANA zone (`TZ`, then
-the zone `/etc/localtime` links to). With none of those, pass `--timezone`.
+the zone the `/etc/localtime` link names; a `TZ` that is set but empty means
+UTC). With none of those, pass `--timezone`.
 `Local` is never sent. `--if-match` checks the issue revision before anything is
 written.
 
