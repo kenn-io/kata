@@ -16,7 +16,45 @@ env:
   GOTRACEBACK: all
 
 jobs:
+  changes:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      groups: ${{ steps.changes.outputs.groups }}
+      all: ${{ steps.changes.outputs.all }}
+    steps:
+      - uses: kenn-io/actions/changes@main
+        id: changes
+        with:
+          filters: |
+            go:
+              - '!{*.md,docs/**,web/**,packages/**}'
+              - '**/*.go'
+              - 'docs/screenshots/*.sh'
+            embedded-docs:
+              # Keep aligned with the go:embed directive in docs/docs.go.
+              - 'docs/index.md'
+              - 'docs/{get-started,guide,workflows,reference,operations}/*.md'
+            frontend:
+              - 'web/**'
+              - 'packages/**'
+              - '.github/**'
+              - 'api/openapi.yaml'
+              - 'bun.lock'
+              - 'package.json'
+              - 'Makefile'
+              - 'go.mod'
+              - 'go.sum'
+              - 'mise.toml'
+            docs-javascript:
+              - 'docs/javascripts/**'
+
   web-static:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'frontend') || contains(fromJSON(needs.changes.outputs.groups), 'docs-javascript') || contains(fromJSON(needs.changes.outputs.groups), 'embedded-docs')) }}
     name: Web static checks
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -44,6 +82,8 @@ jobs:
         run: make web-check web-audit web-test
 
   web-browser:
+    needs: changes
+    if: &go-frontend-changes ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go') || contains(fromJSON(needs.changes.outputs.groups), 'frontend') || contains(fromJSON(needs.changes.outputs.groups), 'embedded-docs')) }}
     name: Web browser tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -143,6 +183,8 @@ jobs:
           docker rm --force "$CONTAINER_ID"
 
   go:
+    needs: changes
+    if: *go-frontend-changes
     name: Go tests
     runs-on: ubuntu-latest
     timeout-minutes: 24
@@ -186,6 +228,8 @@ jobs:
           env -u KATA_AUTH_TOKEN go test -p 1 ./e2e
 
   native-agent-plugins:
+    needs: changes
+    if: &go-changes ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go') || contains(fromJSON(needs.changes.outputs.groups), 'embedded-docs')) }}
     name: Native agent plugins
     runs-on: ubuntu-latest
     timeout-minutes: 18
@@ -228,8 +272,9 @@ jobs:
           -run '^Test(PiNative(InstalledRunner|RealKataTransport|InstalledRuntimeReplacement)|NativePlugins(Runtime|PublishedDeclarations)|OpenClawPublishedNativeLoader)$'
 
   api-breaking:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go') || contains(fromJSON(needs.changes.outputs.groups), 'embedded-docs')) }}
     name: OpenAPI breaking changes
-    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -252,6 +297,8 @@ jobs:
         run: make api-breaking BASE_REF="$BASE_REF"
 
   api-check:
+    needs: changes
+    if: *go-changes
     name: OpenAPI artifacts
     runs-on: ubuntu-latest
     timeout-minutes: 14
@@ -272,6 +319,8 @@ jobs:
         run: make api-check
 
   postgres:
+    needs: changes
+    if: *go-frontend-changes
     name: PostgreSQL ${{ matrix.postgres }} conformance
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -357,6 +406,8 @@ jobs:
           env -u KATA_AUTH_TOKEN go test -count=1 -p 1 ./e2e
 
   windows:
+    needs: changes
+    if: *go-changes
     name: ${{ matrix.name }}
     runs-on: windows-2025
     timeout-minutes: ${{ matrix.timeout }}
@@ -450,6 +501,8 @@ jobs:
           env -u KATA_AUTH_TOKEN go test -timeout 15m -vet=off -run "$TEST_RUN" -skip "$TEST_SKIP" ./cmd/kata
 
   lint:
+    needs: changes
+    if: *go-changes
     name: golangci-lint
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -475,6 +528,8 @@ jobs:
         run: make lint
 
   nilaway:
+    needs: changes
+    if: *go-changes
     name: nilaway
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -495,6 +550,8 @@ jobs:
         run: make nilaway
 
   federation-stress:
+    needs: changes
+    if: *go-changes
     name: Federation stress tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -516,6 +573,8 @@ jobs:
         run: env -u KATA_AUTH_TOKEN make test-stress FEDERATION_STRESS_TIMEOUT=4m
 
   federation-docker:
+    needs: changes
+    if: *go-changes
     name: Federation Docker tests
     runs-on: ubuntu-latest
     timeout-minutes: 10

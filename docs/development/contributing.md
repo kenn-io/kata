@@ -66,6 +66,8 @@ make lint
 make nilaway
 ```
 
+Pull requests select checks based on the changed files. See the filters and job conditions in [test.yml](https://github.com/kenn-io/kata/blob/main/.github/workflows/test.yml) for the selection rules. Pushes to `main` run every check.
+
 ### Native agent plugins
 
 The `native-agent-plugins` job in
