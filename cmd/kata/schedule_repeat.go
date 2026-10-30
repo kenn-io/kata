@@ -124,6 +124,10 @@ func runScheduleRepeat(cmd *cobra.Command, args []string, opts scheduleRepeatOpt
 			}
 		}
 	}
+	// A historical ref resolves an issue that has since moved; every
+	// recurrence call belongs to the project the issue is in now, under the
+	// short id it has there.
+	pid, ref.RefForAPI = issue.ProjectID, issue.ShortID
 	if err := checkIssueIfMatch(opts.IfMatch, issue.Revision); err != nil {
 		return err
 	}
@@ -394,12 +398,12 @@ func printScheduleRepeat(cmd *cobra.Command, r scheduleRepeatResult) error {
 
 // showRecurrenceFor reads the recurrence of the issue in a show response. It
 // is best effort: a token that may not list recurrences still gets the issue.
-func showRecurrenceFor(ctx context.Context, api *kataclient.Client, pid int64, showBody []byte) *recurrenceView {
+func showRecurrenceFor(ctx context.Context, api *kataclient.Client, showBody []byte) *recurrenceView {
 	var shown metaShowResponse
 	if json.Unmarshal(showBody, &shown) != nil {
 		return nil
 	}
-	rec, err := activeRecurrenceOf(ctx, api, pid, shown.Issue.RecurrenceID)
+	rec, err := activeRecurrenceOf(ctx, api, shown.Issue.ProjectID, shown.Issue.RecurrenceID)
 	if err != nil {
 		return nil
 	}

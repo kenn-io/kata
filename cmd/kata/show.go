@@ -114,7 +114,7 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOp
 	if err != nil {
 		return err
 	}
-	recurrence := showRecurrenceFor(ctx, apiClient, pid, bs)
+	recurrence := showRecurrenceFor(ctx, apiClient, bs)
 	mode := currentOutputMode()
 	if mode == outputJSON {
 		if recurrence != nil {

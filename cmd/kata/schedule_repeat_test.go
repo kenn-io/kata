@@ -447,3 +447,27 @@ func TestScheduleRepeatAgentOutputStartsWithOK(t *testing.T) {
 	}
 	assert.Contains(t, start, "rrule=FREQ=WEEKLY")
 }
+
+func TestScheduleRepeatThroughAMovedIssuesOldRefUsesItsCurrentProject(t *testing.T) {
+	isolateCallerZone(t)
+	env, dir, source, target, issue := setupMoveCLIProjects(t)
+	runCLI(t, env, dir, "--project", source.Name, "move", issue.ShortID, target.Name)
+	oldRef := source.Name + "#" + issue.ShortID
+
+	runCLI(t, env, dir, "schedule", oldRef, "2026-11-02", "--repeat", "FREQ=WEEKLY", "--timezone", "UTC")
+	require.Empty(t, listRecurrencesViaHTTP(t, env, source.ID), "the old project must not gain a recurrence")
+	recs := listRecurrencesViaHTTP(t, env, target.ID)
+	require.Len(t, recs, 1)
+	assert.Equal(t, "FREQ=WEEKLY", recs[0].RRule)
+
+	shown := runCLI(t, env, dir, "show", oldRef)
+	assert.Contains(t, shown, "FREQ=WEEKLY", "show through the old ref must print the recurrence")
+
+	runCLI(t, env, dir, "schedule", oldRef, "2026-11-09", "--repeat", "FREQ=DAILY")
+	recs = listRecurrencesViaHTTP(t, env, target.ID)
+	require.Len(t, recs, 1, "a change must not start a second recurrence")
+	assert.Equal(t, "FREQ=DAILY", recs[0].RRule)
+
+	runCLI(t, env, dir, "schedule", oldRef, "--repeat", "-")
+	assert.Empty(t, listRecurrencesViaHTTP(t, env, target.ID))
+}
