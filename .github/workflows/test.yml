@@ -30,11 +30,13 @@ jobs:
         with:
           filters: |
             go:
-              - '!{*.md,docs/**/*.md,docs/website/**,web/**,packages/**,package.json,bun.lock}'
+              - '!{*.md,docs/**/*.md,docs/website/**}'
               - 'docs/index.md'
               - 'docs/{get-started,guide,workflows,reference,operations}/*.md'
             frontend:
-              - '!{*.md,docs/**,**/*.go,go.mod,go.sum}'
+              - '!{*.md,docs/**,**/*.go}'
+              - 'docs/index.md'
+              - 'docs/{get-started,guide,workflows,reference,operations}/*.md'
               - 'docs/{scripts,assets,screenshots,javascripts}/**'
 
   web-static:
