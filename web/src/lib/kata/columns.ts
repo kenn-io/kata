@@ -27,7 +27,9 @@ export function summarizeBlockedBy(
   blockers: readonly KataOpenBlocker[] | undefined,
   qualified: boolean,
 ): BlockedBySummary {
-  const ids = (blockers ?? []).map((blocker) => (qualified ? blocker.qualified_id : blocker.short_id))
+  const ids = (blockers ?? []).map((blocker) =>
+    qualified ? blocker.qualified_id : blocker.short_id,
+  )
   const more = ids.length - BLOCKED_BY_VISIBLE_IDS
   const shown = ids.slice(0, BLOCKED_BY_VISIBLE_IDS).join(', ')
   return { text: more > 0 ? `${shown} +${more}` : shown, title: ids.join(', ') }

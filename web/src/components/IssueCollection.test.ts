@@ -362,9 +362,7 @@ describe('IssueCollection', () => {
           onSelect: () => {},
         },
       })
-      expect(container.querySelector('.cell-blocked-by')?.textContent?.trim()).toBe(
-        'a1, b2, c3 +2',
-      )
+      expect(container.querySelector('.cell-blocked-by')?.textContent?.trim()).toBe('a1, b2, c3 +2')
     })
   })
 
