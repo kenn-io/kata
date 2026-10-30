@@ -83,6 +83,9 @@ func (m Model) startUndo() (Model, tea.Cmd) {
 	if m.undoInFlight {
 		return m.undoNotice("undo already in progress", toastInfo)
 	}
+	if m.reopenLookupPending {
+		return m.undoNotice("reopen already in progress", toastInfo)
+	}
 	if len(m.undoHistory.entries) == 0 {
 		message := "nothing to undo"
 		if m.undoHistory.boundary != "" {
@@ -112,9 +115,6 @@ func (m Model) runUndo(opts undoOptions, wantEntryID uint64) (Model, tea.Cmd) {
 		return m.undoNotice("undo action is no longer available", toastError)
 	}
 	m.undoInFlight = true
-	// A direct reopen still looking up its backlog must not act once undo
-	// owns the reopen decision.
-	m.reopenLookupSeq++
 	connGen := m.connGen
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

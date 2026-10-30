@@ -596,32 +596,84 @@ func TestReopenKeyCancelsPendingPriority(t *testing.T) {
 	require.Nil(t, cmd, "a stale priority prompt must not turn the digit into a priority change")
 }
 
-// Pressing `r` twice starts two lookups. A failed lookup's zero count must not
-// reopen the issue while the other lookup's confirmation is open, nor
-// before it, because only the latest press is still wanted.
-func TestReopenSupersededLookupNeverDispatches(t *testing.T) {
-	for _, order := range []string{"confirmation first", "fallback first"} {
-		t.Run(order, func(t *testing.T) {
-			spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
-			m, first := updateModel(listReopenModel(t, spy), runeKey('r'))
-			m, second := updateModel(m, runeKey('r'))
-			require.NotNil(t, first)
-			require.NotNil(t, second)
-			failed := first().(reopenBacklogMsg)
-			failed.count = 0
-			confirm := second().(reopenBacklogMsg)
+// Reopen has one owner at a time: a pending lookup, an undo in flight, or an
+// open backlog confirmation. While one holds it, `r` and `u` start nothing.
+func reopenOwnerModel(t *testing.T) (Model, *undoTestAPI) {
+	t.Helper()
+	m, f := undoCloseModel(t, 5, nil)
+	m.list.issues = []Issue{{ProjectID: 7, ShortID: "abc4", Status: "closed", Title: "Parent"}}
+	return m, f
+}
 
-			replies := []reopenBacklogMsg{confirm, failed}
-			if order == "fallback first" {
-				replies = []reopenBacklogMsg{failed, confirm}
-			}
-			for _, reply := range replies {
-				var cmd tea.Cmd
-				m, cmd = updateModel(m, reply)
-				require.Nil(t, cmd, "no reopen is sent without the user's confirmation")
-			}
+func TestReopenKeyIsIgnoredWhileAnotherLookupIsPending(t *testing.T) {
+	spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
+	m, first := updateModel(listReopenModel(t, spy), runeKey('r'))
+	require.NotNil(t, first)
+	reply := first()
+
+	m, second := updateModel(m, runeKey('r'))
+	require.Nil(t, second, "a second press must not start another lookup")
+
+	m, cmd := updateModel(m, reply)
+	require.Nil(t, cmd)
+	require.Equal(t, modalReopenBacklog, m.modal)
+	require.Zero(t, spy.reopens)
+}
+
+func TestReopenAnswerWithoutAnOwningLookupIsDropped(t *testing.T) {
+	spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
+	m, lookup := updateModel(listReopenModel(t, spy), runeKey('r'))
+	answer := lookup().(reopenBacklogMsg)
+	m, cmd := updateModel(m, answer)
+	require.Nil(t, cmd)
+	require.Equal(t, modalReopenBacklog, m.modal)
+	m, _ = updateModel(m, runeKey('n'))
+
+	answer.count = 0
+	_, cmd = updateModel(m, answer)
+	require.Nil(t, cmd, "a repeated or late answer must not reopen after the owner finished")
+	require.Zero(t, spy.reopens)
+}
+
+func TestUndoKeyIsIgnoredWhileReopenLookupIsPending(t *testing.T) {
+	m, f := reopenOwnerModel(t)
+	m, lookup := updateModel(m, runeKey('r'))
+	require.NotNil(t, lookup)
+	failed := lookup().(reopenBacklogMsg)
+	failed.count = 0
+
+	m, _ = updateModel(m, runeKey('u'))
+	require.False(t, m.undoInFlight, "undo must not start beside a pending reopen lookup")
+
+	m, cmd := updateModel(m, failed)
+	require.NotNil(t, cmd, "the lookup that owns reopen still reopens when no backlog is found")
+	cmd()
+	require.Equal(t, 1, f.reopenCalls)
+	require.Len(t, m.undoHistory.entries, 1)
+}
+
+func TestReopenKeyIsIgnoredWhileUndoIsInFlight(t *testing.T) {
+	for _, after := range []string{"confirmation answered", "confirmation cancelled"} {
+		t.Run(after, func(t *testing.T) {
+			m, f := reopenOwnerModel(t)
+			m, undo := updateModel(m, runeKey('u'))
+			require.NotNil(t, undo)
+			require.True(t, m.undoInFlight)
+
+			m, lookup := updateModel(m, runeKey('r'))
+			require.Nil(t, lookup, "r must not start a lookup beside an undo")
+
+			m, cmd := updateModel(m, undo())
+			require.Nil(t, cmd)
 			require.Equal(t, modalReopenBacklog, m.modal)
-			require.Zero(t, spy.reopens)
+
+			m, lookup = updateModel(m, runeKey('r'))
+			require.Nil(t, lookup)
+			if after == "confirmation cancelled" {
+				m, _ = updateModel(m, runeKey('n'))
+				require.Equal(t, modalNone, m.modal)
+			}
+			require.Zero(t, f.reopenCalls)
 		})
 	}
 }
@@ -657,54 +709,4 @@ func TestUndoCloseSlowPreflightSkipsBacklogLookup(t *testing.T) {
 		require.False(t, out.attempt.unknown, "an expired lookup is not an ambiguous write")
 		require.Equal(t, 1, f.reopenCalls)
 	})
-}
-
-// A direct reopen's failed lookup must not reopen the issue through the undo
-// confirmation that opened while it was in flight, in either reply order.
-func TestReopenFailedLookupNeverBypassesUndoConfirmation(t *testing.T) {
-	for _, order := range []string{"undo reply first", "fallback first"} {
-		t.Run(order, func(t *testing.T) {
-			m, f := undoCloseModel(t, 5, nil)
-			m.list.issues = []Issue{{ProjectID: 7, ShortID: "abc4", Status: "closed", Title: "Parent"}}
-			m, lookup := updateModel(m, runeKey('r'))
-			require.NotNil(t, lookup)
-			failed := lookup().(reopenBacklogMsg)
-			failed.count = 0
-			m, undo := updateModel(m, runeKey('u'))
-			require.NotNil(t, undo)
-			undoReply := undo()
-
-			replies := []tea.Msg{undoReply, failed}
-			if order == "fallback first" {
-				replies = []tea.Msg{failed, undoReply}
-			}
-			for _, reply := range replies {
-				var cmd tea.Cmd
-				m, cmd = updateModel(m, reply)
-				require.Nil(t, cmd, "nothing is reopened without the user's confirmation")
-			}
-			require.Equal(t, modalReopenBacklog, m.modal)
-			require.Zero(t, f.reopenCalls)
-		})
-	}
-}
-
-// Even when the reopen lookup started after undo did, its failed answer must
-// not reopen through the undo confirmation that opens first.
-func TestReopenFailedLookupStartedAfterUndoNeverBypassesConfirmation(t *testing.T) {
-	m, f := undoCloseModel(t, 5, nil)
-	m.list.issues = []Issue{{ProjectID: 7, ShortID: "abc4", Status: "closed", Title: "Parent"}}
-	m, undo := updateModel(m, runeKey('u'))
-	require.NotNil(t, undo)
-	m, lookup := updateModel(m, runeKey('r'))
-	require.NotNil(t, lookup)
-	failed := lookup().(reopenBacklogMsg)
-	failed.count = 0
-
-	m, cmd := updateModel(m, undo())
-	require.Nil(t, cmd)
-	require.Equal(t, modalReopenBacklog, m.modal)
-	m, cmd = updateModel(m, failed)
-	require.Nil(t, cmd)
-	require.Zero(t, f.reopenCalls)
 }

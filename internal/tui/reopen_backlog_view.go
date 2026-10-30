@@ -51,6 +51,10 @@ func (m Model) routeReopenKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if m.view != viewList && m.view != viewDetail {
 		return m, nil, true
 	}
+	// Reopen has one owner at a time; a lookup or undo already holds it.
+	if m.reopenLookupPending || m.undoInFlight {
+		return m, nil, true
+	}
 	target, ok := m.activeCloseTarget()
 	if !ok {
 		return m, nil, true
@@ -65,9 +69,9 @@ func (m Model) routeReopenKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if !ok || m.activeIssueStatus() == "open" {
 		return m, m.dispatchReopen(target), true
 	}
-	// Only the latest press's answer counts; an earlier lookup that fails
-	// late must not reopen past a confirmation the later one raised.
+	// The pending lookup owns reopen until its answer arrives.
 	m.reopenLookupSeq++
+	m.reopenLookupPending = true
 	connGen, seq := m.connGen, m.reopenLookupSeq
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -93,7 +97,11 @@ func (m Model) promptReopenBacklog(prompt reopenPrompt) Model {
 }
 
 func (m Model) handleReopenBacklog(msg reopenBacklogMsg) (Model, tea.Cmd) {
-	if m.staleConnMsg(msg.connGen) || msg.seq != m.reopenLookupSeq {
+	if !m.reopenLookupPending || msg.seq != m.reopenLookupSeq {
+		return m, nil
+	}
+	m.reopenLookupPending = false
+	if m.staleConnMsg(msg.connGen) {
 		return m, nil
 	}
 	if current, ok := m.activeCloseTarget(); !ok || current != msg.target {
@@ -101,10 +109,6 @@ func (m Model) handleReopenBacklog(msg reopenBacklogMsg) (Model, tea.Cmd) {
 	}
 	if msg.count > 1 {
 		return m.promptReopenBacklog(reopenPrompt{target: msg.target, ref: "#" + msg.target.issueShortID, count: msg.count}), nil
-	}
-	// A confirmation for another reopen is open; a fallback must not answer it.
-	if m.modal == modalReopenBacklog {
-		return m, nil
 	}
 	return m, m.dispatchReopen(msg.target)
 }

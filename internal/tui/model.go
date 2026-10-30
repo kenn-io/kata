@@ -212,6 +212,7 @@ type Model struct {
 	undoCloseEntryID         uint64
 	reopenPrompt             *reopenPrompt
 	reopenLookupSeq          uint64
+	reopenLookupPending      bool
 	mutationEpoch            uint64
 }
 
