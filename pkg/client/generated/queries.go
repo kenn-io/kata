@@ -77,6 +77,12 @@ type ListAllIssuesQuery struct {
 	Label        []string                `json:"label,omitempty"`
 	ExcludeLabel []string                `json:"exclude_label,omitempty"`
 	Meta         []string                `json:"meta,omitempty"`
+
+	// DueBy YYYY-MM-DD; only issues whose scheduled_on or deadline_on falls on or before this date in time_zone (the web Today rule). Rows then carry scheduled_on_date and deadline_on_date.
+	DueBy *string `json:"due_by,omitempty"`
+
+	// TimeZone IANA zone the due_by date is read in; requires due_by. Defaults to the daemon timezone, then UTC.
+	TimeZone *string `json:"time_zone,omitempty"`
 }
 
 func (l ListAllIssuesQuery) Validate() error {
@@ -252,6 +258,12 @@ type ListIssuesQuery struct {
 	Label        []string             `json:"label,omitempty"`
 	ExcludeLabel []string             `json:"exclude_label,omitempty"`
 	Meta         []string             `json:"meta,omitempty"`
+
+	// DueBy YYYY-MM-DD; only issues whose scheduled_on or deadline_on falls on or before this date in time_zone (the web Today rule). Rows then carry scheduled_on_date and deadline_on_date.
+	DueBy *string `json:"due_by,omitempty"`
+
+	// TimeZone IANA zone the due_by date is read in; requires due_by. Defaults to the daemon timezone, then UTC.
+	TimeZone *string `json:"time_zone,omitempty"`
 }
 
 func (l ListIssuesQuery) Validate() error {

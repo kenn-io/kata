@@ -1,10 +1,12 @@
 package daemon
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"slices"
 	"strings"
+	"time"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
@@ -86,4 +88,81 @@ func pageBoundary(issues []db.Issue, limit int, hash string, stable bool) ([]db.
 
 func scopedListParams(p db.ListAllIssuesParams) db.ListIssuesParams {
 	return db.ListIssuesParams{ProjectID: p.ProjectID, Status: p.Status, Priority: p.Priority, MaxPriority: p.MaxPriority, PriorityUnset: p.PriorityUnset, Limit: p.Limit, OldestFirst: p.OldestFirst, CreatedFirst: p.CreatedFirst, After: p.After, Unowned: p.Unowned, Owner: p.Owner, Labels: p.Labels, ExcludeLabels: p.ExcludeLabels, Meta: p.Meta, IssueScope: p.IssueScope}
+}
+
+// applyListDueBy validates the due_by filter like the browser snapshot's
+// local_date and time_zone and fills the due fields of params. The effective
+// zone (request, then daemon, then UTC) is stored so it is part of the cursor
+// hash. An empty dueBy leaves params untouched.
+func applyListDueBy(cfg ServerConfig, dueBy, timeZone string, params *db.ListAllIssuesParams) error {
+	dueBy, timeZone = strings.TrimSpace(dueBy), strings.TrimSpace(timeZone)
+	if dueBy == "" {
+		if timeZone != "" {
+			return uiValidationError("time_zone", "time_zone requires due_by", nil)
+		}
+		return nil
+	}
+	if parsed, err := time.Parse(time.DateOnly, dueBy); err != nil || parsed.Format(time.DateOnly) != dueBy {
+		return uiValidationError("due_by", "due_by must use YYYY-MM-DD", nil)
+	}
+	if timeZone != "" {
+		if _, err := time.LoadLocation(timeZone); err != nil {
+			return uiValidationError("time_zone", "time_zone must be a valid IANA timezone", nil)
+		}
+	}
+	if timeZone == "" {
+		timeZone = cfg.DefaultTimezone
+	}
+	if timeZone == "" {
+		timeZone = "UTC"
+	}
+	params.DueBy, params.DueTimeZone, params.DefaultTimezone = dueBy, timeZone, cfg.DefaultTimezone
+	return nil
+}
+
+// dueDates maps an issue id to its projected planning dates.
+type dueDates map[int64]db.DueIssue
+
+// listIssuesPage runs plain for ordinary lists and ListDueIssues when a due_by
+// filter is set, returning the matched rows' projected dates alongside them.
+func listIssuesPage(
+	ctx context.Context, store db.Storage, params db.ListAllIssuesParams,
+	plain func() ([]db.Issue, error),
+) ([]db.Issue, dueDates, error) {
+	if params.DueBy == "" {
+		issues, err := plain()
+		return issues, nil, err
+	}
+	rows, err := store.ListDueIssues(ctx, params)
+	if err != nil {
+		return nil, nil, err
+	}
+	issues := make([]db.Issue, len(rows))
+	dates := make(dueDates, len(rows))
+	for i, row := range rows {
+		issues[i] = row.Issue
+		dates[row.ID] = row
+	}
+	return issues, dates, nil
+}
+
+func countIssuesPage(
+	ctx context.Context, store db.Storage, params db.ListAllIssuesParams,
+	plain func() (int64, error),
+) (int64, error) {
+	if params.DueBy == "" {
+		return plain()
+	}
+	return store.CountDueIssues(ctx, params)
+}
+
+func attachDueDates(outs []api.IssueOut, dates dueDates) {
+	if dates == nil {
+		return
+	}
+	for i := range outs {
+		row := dates[outs[i].ID]
+		outs[i].ScheduledOnDate = row.ScheduledOnDate
+		outs[i].DeadlineOnDate = row.DeadlineOnDate
+	}
 }

@@ -32,4 +32,12 @@ export type ListIssuesParams = {
   label?: string[]
   exclude_label?: string[]
   meta?: string[]
+  /**
+   * YYYY-MM-DD; only issues whose scheduled_on or deadline_on falls on or before this date in time_zone (the web Today rule). Rows then carry scheduled_on_date and deadline_on_date.
+   */
+  due_by?: string
+  /**
+   * IANA zone the due_by date is read in; requires due_by. Defaults to the daemon timezone, then UTC.
+   */
+  time_zone?: string
 }

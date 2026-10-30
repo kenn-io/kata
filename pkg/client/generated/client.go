@@ -2194,6 +2194,7 @@ func (c *Client) ListAllIssues(ctx context.Context, options *ListAllIssuesReques
 
 	queryEncoding := map[string]runtime.QueryEncoding{
 		"cursor":        {Style: "form", Explode: &[]bool{false}[0]},
+		"due_by":        {Style: "form", Explode: &[]bool{false}[0]},
 		"include_total": {Style: "form", Explode: &[]bool{false}[0]},
 		"limit":         {Style: "form", Explode: &[]bool{false}[0]},
 		"max_priority":  {Style: "form", Explode: &[]bool{false}[0]},
@@ -2202,6 +2203,7 @@ func (c *Client) ListAllIssues(ctx context.Context, options *ListAllIssuesReques
 		"project_id":    {Style: "form", Explode: &[]bool{false}[0]},
 		"sort":          {Style: "form", Explode: &[]bool{false}[0]},
 		"status":        {Style: "form", Explode: &[]bool{false}[0]},
+		"time_zone":     {Style: "form", Explode: &[]bool{false}[0]},
 		"unowned":       {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{
@@ -5408,6 +5410,7 @@ func (c *Client) ListIssues(ctx context.Context, options *ListIssuesRequestOptio
 
 	queryEncoding := map[string]runtime.QueryEncoding{
 		"cursor":        {Style: "form", Explode: &[]bool{false}[0]},
+		"due_by":        {Style: "form", Explode: &[]bool{false}[0]},
 		"include_total": {Style: "form", Explode: &[]bool{false}[0]},
 		"limit":         {Style: "form", Explode: &[]bool{false}[0]},
 		"max_priority":  {Style: "form", Explode: &[]bool{false}[0]},
@@ -5415,6 +5418,7 @@ func (c *Client) ListIssues(ctx context.Context, options *ListIssuesRequestOptio
 		"priority":      {Style: "form", Explode: &[]bool{false}[0]},
 		"sort":          {Style: "form", Explode: &[]bool{false}[0]},
 		"status":        {Style: "form", Explode: &[]bool{false}[0]},
+		"time_zone":     {Style: "form", Explode: &[]bool{false}[0]},
 		"unowned":       {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{

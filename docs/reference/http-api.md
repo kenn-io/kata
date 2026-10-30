@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-10-28
+last_edited: 2026-10-30
 ---
 
 # HTTP API schema
@@ -108,7 +108,8 @@ Generated clients should still use the schema from their target release.
 The first-party CLI uses this check before requests where an older daemon
 could ignore a filter and return unfiltered rows. Status-filtered `search`
 requires API `0.20.0`; label-filtered `search` and filtered `ready --all`
-require API `0.8.0`; filtered `list --all` requires API `0.9.0`. The CLI stops before the filtered query and tells the operator to
+require API `0.8.0`; filtered `list --all` requires API `0.9.0`; `list --due-by`
+requires API `0.35.0`. The CLI stops before the filtered query and tells the operator to
 upgrade when the daemon is too old. `kata mcp serve` performs the same check
 once at startup and requires API `0.11.0`, because its relationship tools
 always send the pinned-target fields and its close-audit paging relies on
@@ -199,6 +200,7 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 | Version | Change |
 | --- | --- |
+| `0.35.0` | Both issue list routes accept `due_by` and `time_zone`, and rows of a `due_by` list carry `scheduled_on_date` and `deadline_on_date`. |
 | `0.34.0` | Close transcripts accept agent names beyond Claude Code and Codex, with non-UUID session IDs for those agents. Claude Code and Codex session IDs remain UUIDs. |
 | `0.33.0` | Publishes the issue attachment upload and content routes, and UI capabilities include `attachments` when the daemon has Docbank configured. Older daemons omit the field. |
 | `0.32.0` | Project event polling accepts an `issue` filter and acknowledges the resolved subject in `X-Kata-Events-Issue-UID`. |
@@ -534,6 +536,21 @@ Omitting `sort`, or sending an empty value, keeps the project route's
 `updated_at` descending default and the global route's `created_at` descending
 default. The project default cannot continue with a cursor; use an explicit
 creation sort for exhaustive scans.
+
+### Due-by filter
+
+`due_by=YYYY-MM-DD` on either list route keeps issues whose `scheduled_on` or
+`deadline_on` falls on or before that date: the rule the web Today view applies,
+with a date you choose. `time_zone` names the IANA zone the date is read in and
+requires `due_by`; without it the daemon's `timezone` applies, then UTC. Date-only
+values keep their written date, while local date-times and UTC instants are
+resolved as described in [metadata](metadata.md#reserved-keys-vs-opaque-pass-through) and then read in
+that zone. Invalid values return HTTP 400. Matching rows carry `scheduled_on_date`
+and `deadline_on_date` in that zone. The rule runs after the SQL filters, so
+`limit` and `include_total` count matching issues, and the cursor binds `due_by`
+and the effective zone. Status still defaults as in the rest of the route; pass
+`status=open` to leave out closed issues. API `0.35.0` or newer is required, and
+older daemons ignore the parameters.
 
 Ordinary edits preserve creation order. Cursors validate the daemon instance,
 project selection, authorization scope, sort, and filters; changing these

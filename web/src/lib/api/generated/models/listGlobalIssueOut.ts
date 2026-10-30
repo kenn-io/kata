@@ -19,6 +19,8 @@ export interface ListGlobalIssueOut {
   closed_at?: string
   closed_reason?: string
   created_at: string
+  /** deadline_on as a calendar date in the due_by time_zone; set only on due_by list rows. */
+  deadline_on_date?: string
   deleted_at?: string
   id: number
   labels?: string[]
@@ -34,6 +36,8 @@ export interface ListGlobalIssueOut {
   recurrence_id?: number
   related?: LinkPeer[]
   revision: number
+  /** scheduled_on as a calendar date in the due_by time_zone; set only on due_by list rows. */
+  scheduled_on_date?: string
   short_id: string
   source_actor?: string
   status: string

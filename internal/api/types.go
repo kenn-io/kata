@@ -543,6 +543,10 @@ type ListIssuesRequest struct {
 	// equals value); split on the FIRST "=". Multiple entries AND together.
 	// An empty key is a validation error.
 	Meta []string `query:"meta,explode"`
+	// DueBy keeps issues whose scheduled_on or deadline_on falls on or before this
+	// date in TimeZone, the rule the web Today view applies. TimeZone requires DueBy.
+	DueBy    string `query:"due_by,omitempty" doc:"YYYY-MM-DD; only issues whose scheduled_on or deadline_on falls on or before this date in time_zone (the web Today rule). Rows then carry scheduled_on_date and deadline_on_date."`
+	TimeZone string `query:"time_zone,omitempty" doc:"IANA zone the due_by date is read in; requires due_by. Defaults to the daemon timezone, then UTC."`
 }
 
 // ListAllIssuesRequest is GET /api/v1/issues — the cross-project list. The
@@ -566,6 +570,10 @@ type ListAllIssuesRequest struct {
 	Labels        []string `query:"label,explode"`
 	ExcludeLabels []string `query:"exclude_label,explode"`
 	Meta          []string `query:"meta,explode"`
+	// DueBy keeps issues whose scheduled_on or deadline_on falls on or before this
+	// date in TimeZone, the rule the web Today view applies. TimeZone requires DueBy.
+	DueBy    string `query:"due_by,omitempty" doc:"YYYY-MM-DD; only issues whose scheduled_on or deadline_on falls on or before this date in time_zone (the web Today rule). Rows then carry scheduled_on_date and deadline_on_date."`
+	TimeZone string `query:"time_zone,omitempty" doc:"IANA zone the due_by date is read in; requires due_by. Defaults to the daemon timezone, then UTC."`
 
 	// Deprecated query params kept on the struct only to surface a 400 if a
 	// stale client still sends them — the daemon used to honor view= /
@@ -613,6 +621,10 @@ type IssueOut struct {
 	// server-computed display state, distinct from BlockedBy which carries
 	// the full (policy-free) set of blocker relationship edges.
 	Blocked bool `json:"blocked,omitempty,omitzero"`
+	// ScheduledOnDate and DeadlineOnDate are the planning dates projected into
+	// the request's time_zone. They are set only on rows of a due_by list.
+	ScheduledOnDate string `json:"scheduled_on_date,omitempty" doc:"scheduled_on as a calendar date in the due_by time_zone; set only on due_by list rows."`
+	DeadlineOnDate  string `json:"deadline_on_date,omitempty" doc:"deadline_on as a calendar date in the due_by time_zone; set only on due_by list rows."`
 }
 
 // PageMetadata distinguishes terminal pages from bounded discovery results.
