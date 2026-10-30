@@ -16,8 +16,8 @@ func RunRelayCheckpointHistoryValidationCache(t *testing.T, store db.Storage, ba
 	fixture := newRelayLinkBoundaryFixture(t, store, "checkpoint-cache")
 	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.project.ID, Title: "Cached root issue", Author: "member"})
 	require.NoError(t, err)
-	var grants []db.FederationEnrollment
-	for range 2 {
+	var grants [2]db.FederationEnrollment
+	for i := range grants {
 		peer, err := uid.New()
 		require.NoError(t, err)
 		created, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{
@@ -30,7 +30,7 @@ func RunRelayCheckpointHistoryValidationCache(t *testing.T, store db.Storage, ba
 		require.NoError(t, err)
 		_, err = store.PendingRelayDeliveries(db.WithRelayRequestedEpoch(ctx, checkpoint.Translation.Authority.Epoch), grant.RelayBindingUID, db.RelayStreamEvent, 100)
 		require.NoError(t, err)
-		grants = append(grants, grant)
+		grants[i] = grant
 	}
 	fullScans := 0
 	require.NotNil(t, backend.InstallRelayHistoryFullScanObserver)

@@ -12,6 +12,7 @@ retained-checkpoint refresh and explicit quarantine recovery automatically.
 import json
 import os
 import pathlib
+import shutil
 import socket
 import subprocess
 import sys
@@ -381,4 +382,5 @@ finally:
             except subprocess.TimeoutExpired:
                 p.kill()
                 p.wait(timeout=10)
-    print("STOPPED", scratch, flush=True)
+    shutil.rmtree(scratch)
+    print("STOPPED AND REMOVED", scratch, flush=True)
