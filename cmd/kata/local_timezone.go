@@ -3,8 +3,7 @@ package main
 import (
 	"os"
 	"strings"
-
-	"go.kenn.io/kata/internal/metadata"
+	"time"
 )
 
 // localtimePath is the system zone link; tests override it.
@@ -40,5 +39,9 @@ func resolveLocalTimeZone(tz string, tzSet bool, localtimePath string) string {
 // isIANAZone reports whether name loads as a zone. "Local" is excluded: it
 // means the daemon's zone, not the caller's.
 func isIANAZone(name string) bool {
-	return name != "" && name != "Local" && metadata.ValidTimeZone(name)
+	if name == "" || name == "Local" {
+		return false
+	}
+	_, err := time.LoadLocation(name)
+	return err == nil
 }
