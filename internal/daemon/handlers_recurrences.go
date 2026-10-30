@@ -127,6 +127,18 @@ func createRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Create
 				Metadata: jsontext.Value(in.Body.Template.Metadata),
 			},
 		}
+		var ifMatchRev *int64
+		if in.IfMatch != "" {
+			if in.Body.InitialIssueRef == "" {
+				return nil, api.NewError(400, "validation",
+					"If-Match applies to the initial issue; it needs initial_issue_ref", "", nil)
+			}
+			rev, parseErr := parseIfMatchRevision(in.IfMatch)
+			if parseErr != nil {
+				return nil, parseErr
+			}
+			ifMatchRev = &rev
+		}
 		var rec db.Recurrence
 		var events []db.Event
 		if in.Body.InitialIssueRef != "" {
@@ -143,8 +155,12 @@ func createRecurrenceHandler(cfg ServerConfig) func(context.Context, *api.Create
 				return nil, claimErr
 			}
 			created, createErr := cfg.DB.CreateRecurrenceForIssue(ctx, db.CreateRecurrenceForIssueIn{
-				IssueID: issue.ID, Recurrence: createInput,
+				IssueID: issue.ID, IfMatchRev: ifMatchRev, Recurrence: createInput,
 			})
+			if rce, ok := errors.AsType[*db.RevisionConflictError](createErr); ok {
+				return nil, api.NewError(412, "revision_conflict",
+					fmt.Sprintf("issue revision is %d", rce.CurrentRevision), "", nil)
+			}
 			if errors.Is(createErr, db.ErrNotFound) {
 				return nil, api.NewError(404, "issue_not_found", "initial issue not found in the recurrence project", "", nil)
 			}

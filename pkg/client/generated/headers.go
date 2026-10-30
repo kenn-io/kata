@@ -158,6 +158,10 @@ type PatchProjectMetadataHeaders struct {
 	IfMatch *string `json:"If-Match,omitempty"`
 }
 
+type CreateRecurrenceHeaders struct {
+	IfMatch *string `json:"If-Match,omitempty"`
+}
+
 type DeleteRecurrenceHeaders struct {
 	IfMatch string `json:"If-Match" validate:"required"`
 }

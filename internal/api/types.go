@@ -1576,8 +1576,12 @@ type RecurrenceTemplateInput struct {
 }
 
 // CreateRecurrenceRequest is POST /api/v1/projects/{project_id}/recurrences.
+//
+// An optional If-Match carries the "rev-N" ETag of the initial issue and is
+// accepted only with initial_issue_ref; a revision other than N is 412.
 type CreateRecurrenceRequest struct {
-	ProjectID int64 `path:"project_id" required:"true"`
+	ProjectID int64  `path:"project_id" required:"true"`
+	IfMatch   string `header:"If-Match"`
 	Body      struct {
 		Actor           string                  `json:"actor,omitempty"`
 		InitialIssueRef string                  `json:"initial_issue_ref,omitempty"`

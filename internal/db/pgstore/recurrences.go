@@ -161,6 +161,9 @@ func (s *Store) CreateRecurrenceForIssue(
 		if err != nil {
 			return err
 		}
+		if input.IfMatchRev != nil && *input.IfMatchRev != issue.Revision {
+			return &db.RevisionConflictError{CurrentRevision: issue.Revision}
+		}
 		if issue.Status != "open" {
 			return fmt.Errorf("%w: initial recurrence issue must be open", db.ErrInvalidRecurrence)
 		}

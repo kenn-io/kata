@@ -110,8 +110,18 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOp
 	if err != nil {
 		return err
 	}
+	apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
+	if err != nil {
+		return err
+	}
+	recurrence := showRecurrenceFor(ctx, apiClient, bs)
 	mode := currentOutputMode()
 	if mode == outputJSON {
+		if recurrence != nil {
+			if bs, err = withRecurrence(bs, recurrence); err != nil {
+				return err
+			}
+		}
 		var buf bytes.Buffer
 		if err := emitJSON(&buf, jsontext.Value(bs)); err != nil {
 			return err
@@ -123,6 +133,7 @@ func runShow(cmd *cobra.Command, issueRef, agentOperation string, opts showRunOp
 	if err := json.Unmarshal(bs, &b); err != nil {
 		return err
 	}
+	b.Recurrence = recurrence
 	b.Issue.ShortID, err = issueRefForOutput(daemonAPI{ctx: ctx, baseURL: baseURL, client: client}, pid, ref.ProjectName,
 		issueIdentityForOutput{ProjectID: b.Issue.ProjectID, UID: b.Issue.UID, ShortID: b.Issue.ShortID})
 	if err != nil {
@@ -178,6 +189,11 @@ func printShowHuman(
 	}
 	if err := printShowClaimViolationLines(out, b.LeaseViolations); err != nil {
 		return err
+	}
+	if b.Recurrence != nil {
+		if _, err := fmt.Fprintln(out, b.Recurrence.line()); err != nil {
+			return err
+		}
 	}
 	if b.Issue.Body != "" {
 		if _, err := fmt.Fprintln(out); err != nil {
@@ -345,6 +361,7 @@ type showResponseForCLI struct {
 	PendingLeases   []pendingClaimForCLI   `json:"pending_leases"`
 	LeaseHubNow     *time.Time             `json:"lease_hub_now"`
 	LeaseViolations []claimViolationForCLI `json:"lease_violations"`
+	Recurrence      *recurrenceView        `json:"-"`
 }
 
 type cliShowComment struct {
@@ -531,6 +548,11 @@ func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation
 	}
 	if b.Issue.Priority != nil {
 		if err := writeAgentField(w, "Priority", fmt.Sprint(*b.Issue.Priority)); err != nil {
+			return err
+		}
+	}
+	if b.Recurrence != nil {
+		if err := writeAgentField(w, "Repeat", agentValue(b.Recurrence.line())); err != nil {
 			return err
 		}
 	}

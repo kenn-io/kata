@@ -181,17 +181,21 @@ func (d *Store) createRecurrenceForIssue(
 
 	var issueUID, status, metadataJSON, projectName string
 	var recurrenceID *int64
+	var revision int64
 	err = tx.QueryRowContext(ctx, `
-		SELECT i.uid, i.status, i.metadata, i.recurrence_id, p.name
+		SELECT i.uid, i.status, i.metadata, i.recurrence_id, p.name, i.revision
 		  FROM issues i JOIN projects p ON p.id = i.project_id
 		 WHERE i.id = ? AND i.project_id = ? AND i.deleted_at IS NULL`,
 		in.IssueID, in.Recurrence.ProjectID,
-	).Scan(&issueUID, &status, &metadataJSON, &recurrenceID, &projectName)
+	).Scan(&issueUID, &status, &metadataJSON, &recurrenceID, &projectName, &revision)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, db.ErrNotFound
 	}
 	if err != nil {
 		return out, err
+	}
+	if in.IfMatchRev != nil && *in.IfMatchRev != revision {
+		return out, &db.RevisionConflictError{CurrentRevision: revision}
 	}
 	if status != "open" {
 		return out, fmt.Errorf("%w: initial recurrence issue must be open", db.ErrInvalidRecurrence)

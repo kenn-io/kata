@@ -9,6 +9,15 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Start, change, and stop a recurrence from the CLI with `kata schedule <ref>
+  <date> --repeat '<rrule>'` and `kata schedule <ref> --repeat -`. The zone is
+  `--timezone`, the recurrence's own zone, the issue's `timezone` metadata, or
+  your own IANA zone (`TZ`, then the `/etc/localtime` link; an empty `TZ` means
+  UTC). `kata show` prints an issue's rule, start, zone, and next occurrence,
+  and `kata show --json` returns them under `recurrence`. See
+  [Repeat an issue](reference/cli.md#repeat-an-issue). `--if-match` is checked
+  again inside the transaction that starts the recurrence (daemon API 0.37.0),
+  and an issue moved to another project is repeated in its current project.
 - Show what is stuck in any web collection, Inbox and Today included, with the
   optional **Blocked by** column. It lists each task's open blockers, three IDs
   at most and then `+N`; closed blockers are left out. It is off by default;
