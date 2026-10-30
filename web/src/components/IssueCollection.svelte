@@ -24,6 +24,7 @@
     defaultKataTaskColumnVisibility,
     loadKataTaskColumnVisibility,
     persistKataTaskColumnVisibility,
+    summarizeBlockedBy,
     type KataOptionalTaskColumn,
     type KataTaskColumnVisibility,
   } from '../lib/kata/columns'
@@ -88,6 +89,7 @@
       priority: 'minmax(68px, 80px)',
       due: 'minmax(56px, 70px)',
       owner: 'minmax(72px, 110px)',
+      blockedBy: 'minmax(96px, 150px)',
       tags: 'minmax(96px, 200px)',
     },
     medium: {
@@ -95,6 +97,7 @@
       priority: 'minmax(68px, 80px)',
       due: 'minmax(56px, 70px)',
       owner: 'minmax(72px, 110px)',
+      blockedBy: 'minmax(96px, 150px)',
       tags: null,
     },
     compact: {
@@ -102,6 +105,7 @@
       priority: 'minmax(64px, 78px)',
       due: 'minmax(54px, 68px)',
       owner: null,
+      blockedBy: null,
       tags: null,
     },
     narrow: {
@@ -109,6 +113,7 @@
       priority: 'minmax(62px, 74px)',
       due: null,
       owner: null,
+      blockedBy: null,
       tags: null,
     },
   }
@@ -905,6 +910,9 @@
             {/if}
           </button>
         {/if}
+        {#if columnVisibility.blockedBy}
+          <span class="col col-blocked-by col-static">Blocked by</span>
+        {/if}
         {#if columnVisibility.tags}<span class="col col-tags col-static">Tags</span>{/if}
       </div>
 
@@ -998,6 +1006,14 @@
         </span>
       {/if}
       {#if columnVisibility.owner}<span class="cell cell-owner">{issue.owner ?? ''}</span>{/if}
+      {#if columnVisibility.blockedBy}
+        {@const blockers = summarizeBlockedBy(issue.open_blocked_by)}
+        <span class="cell cell-blocked-by" title={blockers.ids.join(', ')}>
+          {#if blockers.ids.length > 0}
+            {blockers.ids.join(', ')}{blockers.more > 0 ? ` +${blockers.more}` : ''}
+          {/if}
+        </span>
+      {/if}
       {#if columnVisibility.tags}
         <span class="cell cell-tags" title={labels}>
           {#if labels}{labels}{/if}
@@ -1465,6 +1481,13 @@
     color: var(--text-secondary);
   }
 
+  .cell-blocked-by {
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .cell-due,
   .cell-updated {
     color: var(--text-muted);
@@ -1502,6 +1525,8 @@
   }
 
   @container list (max-width: 680px) {
+    .col-blocked-by,
+    .cell-blocked-by,
     .table:not(.table--keep-owner-sort) .col-owner,
     .table:not(.table--keep-owner-sort) .cell-owner {
       display: none;

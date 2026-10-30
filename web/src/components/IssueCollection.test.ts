@@ -296,7 +296,34 @@ describe('IssueCollection', () => {
       'priority',
       'due',
       'owner',
+      'blockedBy',
     ])
+  })
+
+  it('shows open blockers in the Blocked by column, three at most then +N', () => {
+    const peer = (short_id: string) => ({ uid: `uid-${short_id}`, short_id })
+    const blocked = task({
+      ...baseIssues[0]!,
+      uid: 'issue-blocked-row',
+      short_id: 'blocked-row',
+      qualified_id: 'example-project#blocked-row',
+      title: 'Blocked row',
+      blocked_by: [peer('x1'), peer('y2'), peer('z3'), peer('q4'), peer('r5')],
+      open_blocked_by: [peer('a1'), peer('b2'), peer('c3'), peer('d4'), peer('e5')],
+    })
+    const view: KataCurrentView = {
+      ...currentView,
+      name: 'inbox',
+      groups: [{ id: 'inbox', title: 'Inbox', issues: [blocked] }],
+    }
+    const { container } = render(IssueCollection, {
+      props: { currentView: view, selectedIssueUID: null, loading: false, onSelect: () => {} },
+    })
+
+    const header = container.querySelector<HTMLElement>('.table-header')!
+    expect(within(header).getByText('Blocked by')).toBeTruthy()
+    const cell = container.querySelector<HTMLElement>('.cell-blocked-by')!
+    expect(cell.textContent?.replace(/\s+/g, ' ').trim()).toBe('a1, b2, c3 +2')
   })
 
   it('restores hidden columns after remount and Show all resets the preference', async () => {
@@ -310,7 +337,7 @@ describe('IssueCollection', () => {
     })
 
     await fireEvent.click(screen.getByRole('button', { name: 'Columns' }))
-    for (const name of ['Updated', 'Priority', 'Due', 'Owner', 'Tags']) {
+    for (const name of ['Updated', 'Priority', 'Due', 'Owner', 'Blocked by', 'Tags']) {
       await fireEvent.click(screen.getByRole('checkbox', { name }))
     }
     first.unmount()
@@ -343,6 +370,7 @@ describe('IssueCollection', () => {
       'priority',
       'due',
       'owner',
+      'blockedBy',
       'tags',
     ])
   })
@@ -408,7 +436,7 @@ describe('IssueCollection', () => {
     })
 
     const header = container.querySelector<HTMLElement>('.table-header')!
-    for (const name of ['Updated', 'Priority', 'Due', 'Owner', 'Tags']) {
+    for (const name of ['Updated', 'Priority', 'Due', 'Owner', 'Blocked by', 'Tags']) {
       expect(within(header).getByText(name)).toBeTruthy()
     }
   })

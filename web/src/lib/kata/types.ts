@@ -71,6 +71,7 @@ export interface KataTaskSummary extends KataCreationAttributionWire {
   parent_short_id?: string | undefined
   blocks?: KataLinkPeer[] | undefined
   blocked_by?: KataLinkPeer[] | undefined
+  open_blocked_by?: KataLinkPeer[] | undefined
   related?: KataLinkPeer[] | undefined
   child_counts?: { open: number; total: number } | undefined
   recurrence_id?: number | undefined

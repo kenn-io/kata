@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-28
+last_edited: 2026-10-30
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,6 +9,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Show what is stuck in any web collection, Inbox and Today included, with the
+  optional **Blocked by** column. It lists each task's open blockers, three IDs
+  at most and then `+N`; closed blockers are left out. If you saved a column
+  choice earlier, turn it on in the column picker. See the [web UI guide](guide/web-ui.md).
 - Get an immediate error when a daemon in another PID namespace, such as one in
   a sandbox or container sharing your `KATA_HOME`, already owns the store.
   `kata` commands, `kata daemon start`, and foreground startup previously

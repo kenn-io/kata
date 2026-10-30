@@ -6,6 +6,7 @@ import {
   defaultKataTaskColumnVisibility,
   loadKataTaskColumnVisibility,
   persistKataTaskColumnVisibility,
+  summarizeBlockedBy,
 } from './columns'
 
 describe('Kata task column visibility', () => {
@@ -15,6 +16,7 @@ describe('Kata task column visibility', () => {
       priority: true,
       due: true,
       owner: true,
+      blockedBy: true,
       tags: true,
     })
   })
@@ -30,6 +32,7 @@ describe('Kata task column visibility', () => {
       priority: false,
       due: false,
       owner: false,
+      blockedBy: false,
       tags: true,
     })
   })
@@ -56,7 +59,7 @@ describe('Kata task column visibility', () => {
   it('persists visible keys and tolerates write failures', () => {
     const setItem = vi.fn()
     persistKataTaskColumnVisibility(
-      { updated: true, priority: false, due: true, owner: false, tags: false },
+      { updated: true, priority: false, due: true, owner: false, blockedBy: false, tags: false },
       { getItem: vi.fn(), setItem },
     )
     expect(setItem).toHaveBeenCalledWith(
@@ -77,7 +80,28 @@ describe('Kata task column visibility', () => {
       'priority',
       'due',
       'owner',
+      'blockedBy',
       'tags',
     ])
+  })
+})
+
+describe('summarizeBlockedBy', () => {
+  const peers = ['a1', 'b2', 'c3', 'd4', 'e5'].map((short_id) => ({
+    uid: `uid-${short_id}`,
+    short_id,
+  }))
+
+  it('returns nothing without blockers', () => {
+    expect(summarizeBlockedBy(undefined)).toEqual({ ids: [], more: 0 })
+    expect(summarizeBlockedBy([])).toEqual({ ids: [], more: 0 })
+  })
+
+  it('lists up to three ids without a remainder', () => {
+    expect(summarizeBlockedBy(peers.slice(0, 3))).toEqual({ ids: ['a1', 'b2', 'c3'], more: 0 })
+  })
+
+  it('cuts after three ids and counts the rest', () => {
+    expect(summarizeBlockedBy(peers)).toEqual({ ids: ['a1', 'b2', 'c3'], more: 2 })
   })
 })
