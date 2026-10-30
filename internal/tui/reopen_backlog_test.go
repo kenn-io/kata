@@ -414,6 +414,67 @@ func TestReopenOfOpenIssueSkipsBacklogCheck(t *testing.T) {
 	}
 }
 
+// A backlog answer that lands while the quit confirmation is open must not
+// replace it: the `y` meant to quit would otherwise reopen the issue.
+func TestReopenBacklogAnswerDoesNotReplaceQuitConfirm(t *testing.T) {
+	spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
+	m, cmd := updateModel(listReopenModel(t, spy), runeKey('r'))
+	require.NotNil(t, cmd)
+	reply := cmd()
+	m, _ = updateModel(m, runeKey('q'))
+	require.Equal(t, modalQuitConfirm, m.modal)
+
+	m, cmd = updateModel(m, reply)
+	require.Nil(t, cmd)
+	require.Equal(t, modalQuitConfirm, m.modal)
+	require.Nil(t, m.reopenPrompt)
+
+	_, cmd = updateModel(m, runeKey('y'))
+	require.NotNil(t, cmd)
+	require.IsType(t, tea.QuitMsg{}, cmd())
+	require.Zero(t, spy.reopens)
+}
+
+// An answer arriving while a form owns input is dropped instead of stacking a
+// confirmation over the form.
+func TestReopenBacklogAnswerIgnoredWhileInputActive(t *testing.T) {
+	spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
+	m, cmd := updateModel(listReopenModel(t, spy), runeKey('r'))
+	require.NotNil(t, cmd)
+	reply := cmd()
+	m, _ = m.openInput(inputSearchBar)
+	require.Equal(t, inputSearchBar, m.input.kind)
+
+	m, cmd = updateModel(m, reply)
+	require.Nil(t, cmd)
+	require.Equal(t, modalNone, m.modal)
+	require.Nil(t, m.reopenPrompt)
+	require.Zero(t, spy.reopens)
+}
+
+// The undo backlog answer likewise must not replace an open quit confirmation.
+func TestUndoBacklogAnswerDoesNotReplaceQuitConfirm(t *testing.T) {
+	m, f := undoCloseModel(t, 5, nil)
+	updated, cmd := m.Update(runeKey('u'))
+	require.NotNil(t, cmd)
+	m = updated.(Model)
+	reply := cmd()
+	m, _ = updateModel(m, runeKey('q'))
+	require.Equal(t, modalQuitConfirm, m.modal)
+
+	m, cmd = updateModel(m, reply)
+	require.Nil(t, cmd)
+	require.Equal(t, modalQuitConfirm, m.modal)
+	require.Nil(t, m.reopenPrompt)
+	require.False(t, m.undoInFlight)
+	require.Len(t, m.undoHistory.entries, 1, "the close stays undoable")
+
+	_, cmd = updateModel(m, runeKey('y'))
+	require.NotNil(t, cmd)
+	require.IsType(t, tea.QuitMsg{}, cmd())
+	require.Zero(t, f.reopenCalls)
+}
+
 // In split layout the hidden selection must not be reopened from the help view.
 func TestReopenKeyIgnoredWhileHelpIsVisibleInSplitLayout(t *testing.T) {
 	spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}

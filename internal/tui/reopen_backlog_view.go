@@ -82,6 +82,11 @@ func (m Model) handleReopenBacklog(msg reopenBacklogMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 	if msg.count > 1 {
+		// Another modal or form took control while the lookup ran; the
+		// prompt must not replace it, or its keys would answer this one.
+		if m.modal != modalNone || m.input.kind != inputNone {
+			return m, nil
+		}
 		m.reopenPrompt = &reopenPrompt{target: msg.target, ref: "#" + msg.target.issueShortID, count: msg.count}
 		m.modal = modalReopenBacklog
 		return m, nil
