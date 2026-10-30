@@ -31,13 +31,11 @@ jobs:
           filters: |
             go:
               - '!{*.md,docs/**/*.md,docs/website/**,web/**,packages/**,package.json,bun.lock}'
-              # These pages are bundled by docs/docs.go and read by MCP tests.
               - 'docs/index.md'
               - 'docs/{get-started,guide,workflows,reference,operations}/*.md'
-              - 'docs/{scripts,assets,screenshots}/**'
             frontend:
               - '!{*.md,docs/**,**/*.go,go.mod,go.sum}'
-              - 'docs/{scripts,assets,screenshots}/**'
+              - 'docs/{scripts,assets,screenshots,javascripts}/**'
 
   web-static:
     needs: changes
