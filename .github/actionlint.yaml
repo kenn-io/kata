@@ -1,5 +1,0 @@
-# actionlint 1.7.12 predates cache-mode. Drop these ignores once it supports it.
-paths:
-  .github/workflows/{test-pr,workflow-validation}.yml:
-    ignore:
-      - 'unexpected key "cache-mode" for "(job|workflow)" section'
