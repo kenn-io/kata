@@ -15,6 +15,21 @@ import (
 // cannot use up the deadline the reopen itself needs.
 var undoBacklogLookupTimeout = 2 * time.Second
 
+// undoReopenReserve is the part of the attempt's deadline kept for the reopen
+// itself; the backlog lookup only gets time beyond it.
+const undoReopenReserve = 2 * time.Second
+
+// undoBacklogLookupBudget is how long the backlog lookup may run: at most
+// undoBacklogLookupTimeout, and never into the reserve for the reopen. Zero
+// means too little time remains, so the lookup is skipped.
+func undoBacklogLookupBudget(ctx context.Context) time.Duration {
+	budget := undoBacklogLookupTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		budget = min(budget, time.Until(deadline)-undoReopenReserve)
+	}
+	return max(budget, 0)
+}
+
 type undoOutcome struct {
 	attempt       *undoAttempt
 	resp          *MutationResp
@@ -94,15 +109,16 @@ func (c *undoClient) undo(ctx context.Context, entry undoEntry, opts undoOptions
 			return out
 		}
 		if entry.kind == "close" && opts.checkBacklog {
-			// A failed or slow lookup must not block undo; only a known backlog
-			// prompts. The lookup is bounded so a slow read leaves ctx's
-			// remaining deadline for the reopen.
-			lookupCtx, cancel := context.WithTimeout(ctx, undoBacklogLookupTimeout)
-			count, err := c.ReopenBacklog(lookupCtx, entry.projectID, entry.uid)
-			cancel()
-			if err == nil && count > 1 {
-				out.backlog = count
-				return out
+			// A failed, slow or skipped lookup must not block undo; only a
+			// known backlog prompts.
+			if budget := undoBacklogLookupBudget(ctx); budget > 0 {
+				lookupCtx, cancel := context.WithTimeout(ctx, budget)
+				count, err := c.ReopenBacklog(lookupCtx, entry.projectID, entry.uid)
+				cancel()
+				if err == nil && count > 1 {
+					out.backlog = count
+					return out
+				}
 			}
 		}
 		if entry.kind == "close" {

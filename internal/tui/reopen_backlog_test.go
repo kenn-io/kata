@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -623,4 +624,37 @@ func TestReopenSupersededLookupNeverDispatches(t *testing.T) {
 			require.Zero(t, spy.reopens)
 		})
 	}
+}
+
+// slowPreflightUndoAPI spends part of the attempt's deadline on the issue read
+// that precedes the backlog lookup.
+type slowPreflightUndoAPI struct {
+	*slowBacklogUndoAPI
+	delay time.Duration
+}
+
+func (s *slowPreflightUndoAPI) GetIssueDetail(ctx context.Context, projectID int64, ref string) (*IssueDetail, error) {
+	time.Sleep(s.delay)
+	return s.undoTestAPI.GetIssueDetail(ctx, projectID, ref)
+}
+
+// When slow preflight reads leave too little of the attempt's deadline for the
+// reopen, the optional lookup is skipped rather than allowed to use it up.
+func TestUndoCloseSlowPreflightSkipsBacklogLookup(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m, f := undoCloseModel(t, 0, nil)
+		slow := &slowBacklogUndoAPI{undoTestAPI: f}
+		client := newConnectedUndoClient(t, &slowPreflightUndoAPI{slowBacklogUndoAPI: slow, delay: 4 * time.Second})
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		out := client.undo(ctx, m.undoHistory.entries[0], undoOptions{checkBacklog: true})
+		if out.attempt != nil {
+			defer out.attempt.complete()
+		}
+		require.NoError(t, out.err)
+		require.True(t, out.changed)
+		require.False(t, out.attempt.unknown, "an expired lookup is not an ambiguous write")
+		require.Equal(t, 1, f.reopenCalls)
+	})
 }
