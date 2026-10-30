@@ -710,3 +710,48 @@ func TestUndoCloseSlowPreflightSkipsBacklogLookup(t *testing.T) {
 		require.Equal(t, 1, f.reopenCalls)
 	})
 }
+
+// A reopen that finishes after a daemon switch belongs to the previous daemon
+// and must not touch the current view, and neither must its backlog answer.
+func TestReopenResultsAfterDaemonSwitchAreIgnored(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		issue string
+	}{{"open parent dispatches directly", "open"}, {"closed parent after confirmation", "closed"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
+			m := listReopenModel(t, spy)
+			m.list.issues[0].Status = tc.issue
+			m.connGen = 1
+			m, cmd := updateModel(m, runeKey('r'))
+			require.NotNil(t, cmd)
+			if tc.issue == "closed" {
+				m, _ = updateModel(m, cmd())
+				m, cmd = updateModel(m, runeKey('y'))
+				require.NotNil(t, cmd)
+			}
+			done, ok := cmd().(mutationDoneMsg)
+			require.True(t, ok)
+			require.Equal(t, uint64(1), done.connGen)
+
+			m.connGen = 2
+			_, cmd = updateModel(m, done)
+			require.Nil(t, cmd, "the previous daemon's result must not refresh the current view")
+		})
+	}
+}
+
+func TestReopenBacklogAnswerAfterDaemonSwitchIsDropped(t *testing.T) {
+	spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
+	m := listReopenModel(t, spy)
+	m.connGen = 1
+	m, cmd := updateModel(m, runeKey('r'))
+	m.connGen = 2
+	m, cmd = updateModel(m, cmd())
+	require.Nil(t, cmd)
+	require.Equal(t, modalNone, m.modal)
+	require.Zero(t, spy.reopens)
+
+	_, cmd = updateModel(m, runeKey('r'))
+	require.NotNil(t, cmd, "the dropped answer releases reopen ownership")
+}

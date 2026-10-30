@@ -118,12 +118,12 @@ func (m Model) dispatchReopen(target formTarget) tea.Cmd {
 	if target.origin == "detail" {
 		actor = m.detail.actor
 	}
-	return func() tea.Msg {
+	return withConnGen(func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		resp, err := apiClient.Reopen(ctx, target.projectID, target.issueShortID, actor)
 		return mutationDoneMsg{origin: target.origin, gen: target.detailGen, kind: "reopen", resp: resp, err: err}
-	}
+	}, m.connGen)
 }
 
 // confirmReopenBacklog proceeds with the reopen the user accepted.
