@@ -753,7 +753,7 @@ It combines with the other filters, `--sort` and `--cursor`; `--status` stays
 `open` by default, so pass `--status all` to include closed issues.
 The date is read in your local zone, named by `TZ` and then the
 `/etc/localtime` link, so `TZ=Europe/Paris kata list --due-by 2026-11-02`
-overrides it. When neither names a zone, the daemon's `timezone` applies, then
+overrides it, and an empty `TZ` means UTC. When neither names a zone, the daemon's `timezone` applies, then
 UTC. `--limit` and `--include-total` count matching issues. JSON rows then
 carry `scheduled_on_date` and `deadline_on_date` in that zone, and agent rows
 add the same fields. The flag needs a daemon with HTTP API `0.35.0`; an older

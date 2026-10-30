@@ -37,9 +37,9 @@ project, newest created first, with no default row limit.
 --meta key or key=value filters metadata, for example work.attention=stuck.
 --due-by YYYY-MM-DD keeps issues whose scheduled_on or deadline_on falls on or
 before that date, the web Today rule with a chosen date. The date is read in your
-local zone (TZ, then /etc/localtime), so TZ=Europe/Paris overrides it; rows then
-carry scheduled_on_date and deadline_on_date. --all widens the scope to every
-project; --status all adds closed issues:
+local zone (TZ, then /etc/localtime), so TZ=Europe/Paris overrides it; an empty
+TZ means UTC. Rows then carry scheduled_on_date and deadline_on_date. --all
+widens the scope to every project; --status all adds closed issues:
 kata list --all --status all --due-by "$(date +%F)".
 For what to work on next, use kata ready or kata next instead.`,
 		Example: `  kata list --agent

@@ -14,7 +14,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   Today view uses with a date you choose. It combines with the other `list`
   filters, `--all`, `--sort` and `--cursor`; `--limit` and `--include-total` count
   matching issues. The date is read in your local zone (`TZ`, then
-  `/etc/localtime`), and rows carry `scheduled_on_date` and `deadline_on_date`.
+  `/etc/localtime`; an empty `TZ` means UTC), and rows carry `scheduled_on_date` and `deadline_on_date`.
   See the [CLI reference](reference/cli.md#issue-lifecycle).
 - Filter the MCP `kata.list` tool and both HTTP list routes the same way with
   `due_by` and an optional `time_zone`. This is HTTP API `0.35.0`; an older
