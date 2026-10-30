@@ -200,5 +200,5 @@ func TestPurgeProjectHandler_BroadcastsResetToScopedSubscribers(t *testing.T) {
 	assert.Equal(t, pid, purgedMsg.ProjectID)
 	assert.NotZero(t, purgedMsg.ResetID)
 
-	assertNoReceive(t, otherSub.Ch, 100*time.Millisecond, "unrelated-project reset")
+	assertNoReceive(t, otherSub.Ch, 100*time.Millisecond, "unrelated-project reset") //nolint:kennlint // deadlinetest: bounded absence checks that purge sends no reset to an unrelated project
 }

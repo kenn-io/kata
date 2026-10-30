@@ -60,7 +60,7 @@ func TestDueNotificationSweeperPublishesOrdinaryMetadataEvent(t *testing.T) {
 
 	require.NoError(t, sweeper.RunOnce(ctx,
 		time.Date(2026, 9, 16, 10, 1, 0, 0, time.UTC)))
-	assertNoReceive(t, sub.Ch, 100*time.Millisecond, "delivered date must not repeat")
+	assertNoReceive(t, sub.Ch, 100*time.Millisecond, "delivered date must not repeat") //nolint:kennlint // deadlinetest: bounded absence checks that delivered date must not repeat
 	require.Len(t, hookSink.events, 2)
 }
 

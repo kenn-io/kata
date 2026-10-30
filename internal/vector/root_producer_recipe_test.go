@@ -125,7 +125,7 @@ func runReconcilerOnce(t *testing.T, source db.Storage, ix *vector.Index, client
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- reconciler.Run(runCtx) }()
-	//nolint:kennlint // Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
+	//nolint:kennlint // sleeptest: Native database and HTTP worker progress requires real I/O; bounded polling observes retained state.
 	require.Eventually(t, func() bool { return reconciler.Health().LastSuccessAt != nil }, 10*time.Second, 10*time.Millisecond)
 	cancel()
 	select {

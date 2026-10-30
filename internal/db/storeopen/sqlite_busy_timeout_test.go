@@ -65,7 +65,7 @@ func TestSQLiteConfiguredBusyTimeout(t *testing.T) {
 	require.NoError(t, err)
 	done := make(chan error, 1)
 	go func() {
-		//nolint:kennlint // SQLite busy polling needs real elapsed time while another handle owns the lock.
+		//nolint:kennlint // sleeptest: SQLite busy polling needs real elapsed time while another handle owns the lock.
 		time.Sleep(50 * time.Millisecond)
 		_, err := hold.ExecContext(ctx, "COMMIT")
 		done <- err

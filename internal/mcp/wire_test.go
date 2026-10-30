@@ -141,7 +141,7 @@ func TestWireCancellationSuppressesLateToolResponse(t *testing.T) {
 	response := readWireResponse(t, reader)
 	require.Nil(t, response.Error)
 	require.EqualValues(t, 2, response.ID)
-	require.NoError(t, connection.SetReadDeadline(time.Now().Add(100*time.Millisecond)))
+	require.NoError(t, connection.SetReadDeadline(time.Now().Add(100*time.Millisecond))) //nolint:kennlint // deadlinetest: bounded absence checks that a cancelled request sends no late wire response
 	_, err = reader.ReadBytes('\n')
 	var netError net.Error
 	require.True(t, errors.As(err, &netError) && netError.Timeout(), err)

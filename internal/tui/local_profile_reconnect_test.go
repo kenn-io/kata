@@ -283,7 +283,7 @@ func TestLocalProfileConcurrentRefreshHonorsRequestDeadline(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("refresh never started")
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond) //nolint:kennlint // the deadline is the expected result; release holds the SSE refresh past it
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond) //nolint:kennlint // deadlinetest: the deadline is the expected result; release holds the SSE refresh past it
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { _, err := conn.api.GetInstance(ctx); done <- err }()

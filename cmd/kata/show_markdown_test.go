@@ -89,7 +89,7 @@ func TestExternalShowMarkdownRendererNamesMissingExecutable(t *testing.T) {
 func TestExternalShowMarkdownRendererTimesOutPerInvocation(t *testing.T) {
 	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
 	renderer := helperRenderer(t, "wait")
-	renderer.timeout = 50 * time.Millisecond
+	renderer.timeout = 50 * time.Millisecond //nolint:kennlint // deadlinetest: the helper waits indefinitely; per-invocation deadline expiry is the asserted result
 
 	started := time.Now()
 	_, err := renderer.Render(context.Background(), markdownDescription, "body", 80)

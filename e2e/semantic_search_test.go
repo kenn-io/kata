@@ -652,7 +652,7 @@ func TestE2E_EmbeddingCredentialDiagnosticsAndFileReload(t *testing.T) {
 	pid := initProjectE2E(t, client, baseURL, dirs.repoDir)
 	pidStr := strconv.FormatInt(pid, 10)
 	short := createIssueWithBody(t, client, baseURL, pid, "credential rotation", "replace embedding provider credentials")
-	//nolint:kennlint // Polls a separate daemon process; synctest cannot control its clock.
+	//nolint:kennlint // sleeptest: Polls a separate daemon process; synctest cannot control its clock.
 	require.Eventually(t, func() bool { return strings.Contains(embeddingHealth(t, client, baseURL), `"backlog":1`) }, 5*time.Second, 50*time.Millisecond)
 	fallback := searchHybrid(t, client, baseURL, pidStr, "credential", "")
 	require.True(t, fallback.Degraded)
@@ -684,7 +684,7 @@ func TestE2E_EmbeddingCredentialDiagnosticsAndFileReload(t *testing.T) {
 	reloadOutput, err := reload.CombinedOutput()
 	require.NoError(t, err, string(reloadOutput))
 	waitForSemanticHit(t, client, baseURL, pidStr, "credential", short, stderr)
-	//nolint:kennlint // Polls a separate daemon process; synctest cannot control its clock.
+	//nolint:kennlint // sleeptest: Polls a separate daemon process; synctest cannot control its clock.
 	require.Eventually(t, func() bool {
 		h := embeddingHealth(t, client, baseURL)
 		return strings.Contains(h, `"credential":"ok"`) && strings.Contains(h, `"backlog":0`) && strings.Contains(h, "last_success_at")

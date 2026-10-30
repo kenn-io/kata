@@ -124,7 +124,7 @@ func TestTimedClaimSweeperSkipsArchivedHubBindings(t *testing.T) {
 	sweeper := daemon.NewTimedClaimSweeper(env.DB, daemon.NewEventPublisher(broadcaster, hookSink))
 
 	require.NoError(t, sweeper.RunOnce(ctx, now))
-	assertNoReceive(t, sub.Ch, 100*time.Millisecond, "archived project should not broadcast claim expiry")
+	assertNoReceive(t, sub.Ch, 100*time.Millisecond, "archived project should not broadcast claim expiry") //nolint:kennlint // deadlinetest: bounded absence checks that archived project should not broadcast claim expiry
 	require.Empty(t, hookSink.events)
 
 	var released int

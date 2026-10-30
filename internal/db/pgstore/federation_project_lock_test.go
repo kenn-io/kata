@@ -39,7 +39,7 @@ func TestFederationProjectAdvisoryLockCoordinatesStores(t *testing.T) {
 	select {
 	case <-exclusiveAcquired:
 		t.Fatal("exclusive project lock acquired while another store held a shared lock")
-	case <-time.After(100 * time.Millisecond): //nolint:kennlint // absence window; the shared lock holder keeps the exclusive lock from being granted
+	case <-time.After(100 * time.Millisecond): //nolint:kennlint // deadlinetest: absence window; the shared lock holder keeps the exclusive lock from being granted
 	}
 	releaseShared()
 
@@ -63,7 +63,7 @@ func TestFederationProjectAdvisoryLockCoordinatesStores(t *testing.T) {
 	select {
 	case <-sharedAcquired:
 		t.Fatal("shared project lock acquired while another store held an exclusive lock")
-	case <-time.After(100 * time.Millisecond): //nolint:kennlint // absence window; the exclusive lock holder keeps the shared lock from being granted
+	case <-time.After(100 * time.Millisecond): //nolint:kennlint // deadlinetest: absence window; the exclusive lock holder keeps the shared lock from being granted
 	}
 	releaseExclusive()
 

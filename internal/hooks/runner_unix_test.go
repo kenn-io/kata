@@ -22,7 +22,7 @@ func TestRunner_KillTree_OrphanedChildrenDieToo(t *testing.T) {
 	got := rs.runProbe(func(h *ResolvedHook) {
 		h.Index = 11
 		h.Args = []string{"spawn-orphan", "30s"}
-		h.Timeout = 100 * time.Millisecond
+		h.Timeout = 100 * time.Millisecond //nolint:kennlint // deadlinetest: the helper leaves a child running; timeout must terminate the process group
 	})
 	if got.Result != "timed_out" {
 		t.Fatalf("result = %q, want timed_out (rs log: %s)", got.Result, rs.logBuf.String())

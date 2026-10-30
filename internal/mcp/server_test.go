@@ -526,7 +526,7 @@ func TestToolAdmissionMiddlewareBoundsCalls(t *testing.T) {
 			firstDone <- err
 		}()
 		<-started
-		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond) //nolint:kennlint // the deadline is the expected result; release holds the only concurrency slot until it fires
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond) //nolint:kennlint // deadlinetest: the deadline is the expected result; release holds the only concurrency slot until it fires
 		defer cancel()
 		_, err := handler(ctx, "tools/call", nil)
 		require.ErrorIs(t, err, context.DeadlineExceeded)
@@ -544,7 +544,7 @@ func TestToolAdmissionMiddlewareBoundsCalls(t *testing.T) {
 				return nil, nil
 			},
 		)
-		blockedContext, cancelBlocked := context.WithTimeout(t.Context(), 10*time.Millisecond) //nolint:kennlint // the deadline is the expected result; the filled concurrency channel blocks admission until it fires
+		blockedContext, cancelBlocked := context.WithTimeout(t.Context(), 10*time.Millisecond) //nolint:kennlint // deadlinetest: the deadline is the expected result; the filled concurrency channel blocks admission until it fires
 		defer cancelBlocked()
 		_, err := handler(blockedContext, "tools/call", nil)
 		require.ErrorIs(t, err, context.DeadlineExceeded)
