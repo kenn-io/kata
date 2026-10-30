@@ -2,6 +2,9 @@ package tui
 
 import (
 	"context"
+	"encoding/json/v2"
+	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"strings"
@@ -12,6 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kit/tui/splitlayout"
 )
 
@@ -534,4 +539,50 @@ func TestUndoCloseSlowBacklogLookupStillReopens(t *testing.T) {
 	require.True(t, out.changed)
 	require.False(t, out.attempt.unknown, "an expired lookup is not an ambiguous write")
 	require.Equal(t, 1, f.reopenCalls)
+}
+
+// The lookup must read what a real daemon serves: a drift in the metadata or
+// cron job responses would otherwise be swallowed as a zero backlog and the
+// prompt would silently vanish.
+func TestReopenBacklogAgainstRealDaemon(t *testing.T) {
+	ctx := t.Context()
+	env := testenv.New(t)
+	project, err := env.DB.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	parent, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Ongoing review", Author: "operator"})
+	require.NoError(t, err)
+
+	request := fmt.Sprintf(`{"actor":"operator","name":"Review every minute","definition":{"version":1,"kind":"job","enabled":true,`+
+		`"trigger":{"kind":"interval","interval_seconds":60},"action":{"kind":"notify","recipient":"operator/consumer"},`+
+		`"issue":{"kind":"per-run","parent_uid":%q,"title":"Review service"},"overlap":"allow","catchup":"all"}}`, parent.UID)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		fmt.Sprintf("%s/api/v1/projects/%d/cron/jobs", env.URL, project.ID), strings.NewReader(request))
+	require.NoError(t, err)
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := env.HTTP.Do(httpReq)
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusCreated, resp.StatusCode, string(body))
+	var created struct {
+		Job api.CronJob `json:"job"`
+	}
+	require.NoError(t, json.Unmarshal(body, &created))
+
+	client := NewClient(env.URL, env.HTTP)
+	_, err = client.Close(ctx, project.ID, parent.ShortID, "operator")
+	require.NoError(t, err)
+
+	// Closing pauses the job; move its stored progress back so three
+	// occurrences came due while the parent was closed.
+	stale := backlogJob{uid: created.Job.UID, missed: 3}.progress()
+	raw, err := json.Marshal(map[string]cron.RecurringProgress{cronProgressPrefix + created.Job.UID: stale})
+	require.NoError(t, err)
+	_, err = env.DB.ExecContext(ctx, `UPDATE issues SET metadata=? WHERE id=?`, string(raw), parent.ID)
+	require.NoError(t, err)
+
+	count, err := client.ReopenBacklog(ctx, project.ID, parent.ShortID)
+	require.NoError(t, err)
+	require.Equal(t, 3, count)
 }
