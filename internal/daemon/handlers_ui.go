@@ -16,6 +16,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/uid"
 )
 
@@ -573,12 +574,12 @@ func normalizeUISnapshotIntent(in *api.UISnapshotRequest) (normalizedUISnapshotI
 	localDate := strings.TrimSpace(in.LocalDate)
 	timeZone := strings.TrimSpace(in.TimeZone)
 	if localDate != "" {
-		if parsed, err := time.Parse("2006-01-02", localDate); err != nil || parsed.Format("2006-01-02") != localDate {
+		if !metadata.ValidCalendarDate(localDate) {
 			return normalizedUISnapshotIntent{}, uiValidationError("local_date", "local_date must use YYYY-MM-DD", nil)
 		}
 	}
 	if timeZone != "" {
-		if _, err := time.LoadLocation(timeZone); err != nil {
+		if !metadata.ValidTimeZone(timeZone) {
 			return normalizedUISnapshotIntent{}, uiValidationError("time_zone", "time_zone must be a valid IANA timezone", nil)
 		}
 	}

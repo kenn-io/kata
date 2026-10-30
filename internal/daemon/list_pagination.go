@@ -6,10 +6,10 @@ import (
 	"math"
 	"slices"
 	"strings"
-	"time"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/pagination"
 )
 
@@ -28,7 +28,7 @@ func normalizePageStrings(values []string, lower bool) []string {
 	return out
 }
 
-func listPageHash(cfg ServerConfig, route string, p db.ListAllIssuesParams) string {
+func listPageHash(cfg ServerConfig, route string, p db.ListAllIssuesParams, due db.DueFilter) string {
 	p.Limit = 0
 	p.After = nil
 	p.Labels = normalizePageStrings(p.Labels, true)
@@ -43,7 +43,8 @@ func listPageHash(cfg ServerConfig, route string, p db.ListAllIssuesParams) stri
 	return pagination.Fingerprint(struct {
 		Instance, Route string
 		Filters         db.ListAllIssuesParams
-	}{cfg.DB.InstanceUID(), route, p})
+		Due             db.DueFilter `json:",omitzero"`
+	}{cfg.DB.InstanceUID(), route, p, due})
 }
 
 func listPriorities(priority, maximum string) (*int64, *int64, bool, error) {
@@ -90,25 +91,22 @@ func scopedListParams(p db.ListAllIssuesParams) db.ListIssuesParams {
 	return db.ListIssuesParams{ProjectID: p.ProjectID, Status: p.Status, Priority: p.Priority, MaxPriority: p.MaxPriority, PriorityUnset: p.PriorityUnset, Limit: p.Limit, OldestFirst: p.OldestFirst, CreatedFirst: p.CreatedFirst, After: p.After, Unowned: p.Unowned, Owner: p.Owner, Labels: p.Labels, ExcludeLabels: p.ExcludeLabels, Meta: p.Meta, IssueScope: p.IssueScope}
 }
 
-// applyListDueBy validates the due_by filter like the browser snapshot's
-// local_date and time_zone and fills the due fields of params. The effective
-// zone (request, then daemon, then UTC) is stored so it is part of the cursor
-// hash. An empty dueBy leaves params untouched.
-func applyListDueBy(cfg ServerConfig, dueBy, timeZone string, params *db.ListAllIssuesParams) error {
+// parseListDueFilter validates the due_by filter like the browser snapshot's
+// local_date and time_zone. The effective zone (request, then daemon, then UTC)
+// is stored so it is part of the cursor hash. The zero filter means no due_by.
+func parseListDueFilter(cfg ServerConfig, dueBy, timeZone string) (db.DueFilter, error) {
 	dueBy, timeZone = strings.TrimSpace(dueBy), strings.TrimSpace(timeZone)
 	if dueBy == "" {
 		if timeZone != "" {
-			return uiValidationError("time_zone", "time_zone requires due_by", nil)
+			return db.DueFilter{}, uiValidationError("time_zone", "time_zone requires due_by", nil)
 		}
-		return nil
+		return db.DueFilter{}, nil
 	}
-	if parsed, err := time.Parse(time.DateOnly, dueBy); err != nil || parsed.Format(time.DateOnly) != dueBy {
-		return uiValidationError("due_by", "due_by must use YYYY-MM-DD", nil)
+	if !metadata.ValidCalendarDate(dueBy) {
+		return db.DueFilter{}, uiValidationError("due_by", "due_by must use YYYY-MM-DD", nil)
 	}
-	if timeZone != "" {
-		if _, err := time.LoadLocation(timeZone); err != nil {
-			return uiValidationError("time_zone", "time_zone must be a valid IANA timezone", nil)
-		}
+	if timeZone != "" && !metadata.ValidTimeZone(timeZone) {
+		return db.DueFilter{}, uiValidationError("time_zone", "time_zone must be a valid IANA timezone", nil)
 	}
 	if timeZone == "" {
 		timeZone = cfg.DefaultTimezone
@@ -116,52 +114,52 @@ func applyListDueBy(cfg ServerConfig, dueBy, timeZone string, params *db.ListAll
 	if timeZone == "" {
 		timeZone = "UTC"
 	}
-	params.DueBy, params.DueTimeZone, params.DefaultTimezone = dueBy, timeZone, cfg.DefaultTimezone
-	return nil
+	return db.DueFilter{By: dueBy, TimeZone: timeZone, DefaultTimezone: cfg.DefaultTimezone}, nil
 }
 
-// dueDates maps an issue id to its projected planning dates.
-type dueDates map[int64]db.DueIssue
+// dueRows maps an issue id to its row of a due_by list.
+type dueRows map[int64]db.DueIssue
 
-// listIssuesPage runs plain for ordinary lists and ListDueIssues when a due_by
-// filter is set, returning the matched rows' projected dates alongside them.
-func listIssuesPage(
-	ctx context.Context, store db.Storage, params db.ListAllIssuesParams,
+// listPlainOrDue runs plain for ordinary lists and ListDueIssues when due is
+// set, returning the matched rows' projected dates alongside them.
+func listPlainOrDue(
+	ctx context.Context, store db.Storage, params db.ListAllIssuesParams, due db.DueFilter,
 	plain func() ([]db.Issue, error),
-) ([]db.Issue, dueDates, error) {
-	if params.DueBy == "" {
+) ([]db.Issue, dueRows, error) {
+	if due == (db.DueFilter{}) {
 		issues, err := plain()
 		return issues, nil, err
 	}
-	rows, err := store.ListDueIssues(ctx, params)
+	rows, err := store.ListDueIssues(ctx, params, due)
 	if err != nil {
 		return nil, nil, err
 	}
 	issues := make([]db.Issue, len(rows))
-	dates := make(dueDates, len(rows))
+	byID := make(dueRows, len(rows))
 	for i, row := range rows {
 		issues[i] = row.Issue
-		dates[row.ID] = row
+		byID[row.ID] = row
 	}
-	return issues, dates, nil
+	return issues, byID, nil
 }
 
-func countIssuesPage(
-	ctx context.Context, store db.Storage, params db.ListAllIssuesParams,
+// countPlainOrDue is listPlainOrDue for the include_total count.
+func countPlainOrDue(
+	ctx context.Context, store db.Storage, params db.ListAllIssuesParams, due db.DueFilter,
 	plain func() (int64, error),
 ) (int64, error) {
-	if params.DueBy == "" {
+	if due == (db.DueFilter{}) {
 		return plain()
 	}
-	return store.CountDueIssues(ctx, params)
+	return store.CountDueIssues(ctx, params, due)
 }
 
-func attachDueDates(outs []api.IssueOut, dates dueDates) {
-	if dates == nil {
+func attachDueDates(outs []api.IssueOut, rows dueRows) {
+	if rows == nil {
 		return
 	}
 	for i := range outs {
-		row := dates[outs[i].ID]
+		row := rows[outs[i].ID]
 		outs[i].ScheduledOnDate = row.ScheduledOnDate
 		outs[i].DeadlineOnDate = row.DeadlineOnDate
 	}

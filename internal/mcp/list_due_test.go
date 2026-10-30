@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"sync/atomic"
 	"testing"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -109,11 +110,14 @@ func TestMCPListDueBy(t *testing.T) {
 }
 
 func TestMCPListDueByRejectsOldDaemon(t *testing.T) {
+	var healthCalls atomic.Int32
 	client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/api/v1/health", r.URL.Path)
+		healthCalls.Add(1)
 		writeJSON(w, map[string]any{"ok": true, "api_schema_version": "0.34.0"})
 	})
 	handlers := toolHandlers{options: Options{Client: client, Scope: NewAllScope()}}
 	_, _, err := handlers.list(t.Context(), nil, ListInput{DueBy: "2026-11-02"})
 	require.ErrorContains(t, err, "due_by requires daemon API 0.35.0")
+	require.EqualValues(t, 1, healthCalls.Load(), "one version check against the higher floor")
 }

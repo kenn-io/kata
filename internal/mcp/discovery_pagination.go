@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/pkg/client/generated"
 	"golang.org/x/mod/semver"
 )
@@ -51,11 +51,11 @@ func (h toolHandlers) list(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		return nil, IssueListOutput{}, errors.New("time_zone requires due_by")
 	}
 	if dueBy != "" {
-		if parsed, err := time.Parse(time.DateOnly, dueBy); err != nil || parsed.Format(time.DateOnly) != dueBy {
+		if !metadata.ValidCalendarDate(dueBy) {
 			return nil, IssueListOutput{}, errors.New("due_by must use YYYY-MM-DD")
 		}
 		if timeZone != "" {
-			if _, err := time.LoadLocation(timeZone); err != nil {
+			if !metadata.ValidTimeZone(timeZone) {
 				return nil, IssueListOutput{}, errors.New("time_zone must be a valid IANA timezone")
 			}
 		}
@@ -86,13 +86,15 @@ func (h toolHandlers) list(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 	if input.PriorityUnset {
 		priority = new("none")
 	}
-	if err := h.requireDiscoveryAPI(ctx); err != nil {
-		return nil, IssueListOutput{}, err
-	}
+	// One health check against the higher floor: due_by needs 0.35.0, which
+	// also covers paginated discovery (0.27.0).
 	if dueBy != "" {
-		if err := h.requireAPIVersion(ctx, "0.35.0", "due_by"); err != nil {
-			return nil, IssueListOutput{}, err
-		}
+		err = h.requireAPIVersion(ctx, "0.35.0", "due_by")
+	} else {
+		err = h.requireDiscoveryAPI(ctx)
+	}
+	if err != nil {
+		return nil, IssueListOutput{}, err
 	}
 	projects, err := h.readProjects(ctx, input.Project)
 	if err != nil {

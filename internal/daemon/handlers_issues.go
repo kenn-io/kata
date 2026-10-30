@@ -277,15 +277,16 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			IssueScope:    issueScopeFromContext(ctx),
 			UpdatedFirst:  in.Sort == "",
 		}
-		if err := applyListDueBy(cfg, in.DueBy, in.TimeZone, &params); err != nil {
+		due, err := parseListDueFilter(cfg, in.DueBy, in.TimeZone)
+		if err != nil {
 			return nil, err
 		}
-		hash := listPageHash(cfg, "project-list", params)
+		hash := listPageHash(cfg, "project-list", params, due)
 		params.After, err = pagination.Decode(in.Cursor, hash)
 		if err != nil {
 			return nil, api.NewError(400, "validation", err.Error(), "", nil)
 		}
-		issues, dueDates, err := listIssuesPage(ctx, cfg.DB, params, func() ([]db.Issue, error) {
+		issues, dueRows, err := listPlainOrDue(ctx, cfg.DB, params, due, func() ([]db.Issue, error) {
 			return cfg.DB.ListIssues(ctx, scopedListParams(params))
 		})
 		if err != nil {
@@ -293,7 +294,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		issues, page := pageBoundary(issues, in.Limit, hash, in.Sort != "")
 		if in.IncludeTotal {
-			count, countErr := countIssuesPage(ctx, cfg.DB, params, func() (int64, error) {
+			count, countErr := countPlainOrDue(ctx, cfg.DB, params, due, func() (int64, error) {
 				return cfg.DB.CountIssues(ctx, scopedListParams(params))
 			})
 			if countErr != nil {
@@ -306,7 +307,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
-		attachDueDates(issueOuts, dueDates)
+		attachDueDates(issueOuts, dueRows)
 		addIssueWebURLs(cfg, issueOuts)
 		out.Body.PageMetadata = page
 		out.Body.Issues = issueOuts
@@ -387,15 +388,16 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			Meta:              metaFilters,
 			IssueScope:        issueScopeFromContext(ctx),
 		}
-		if err := applyListDueBy(cfg, in.DueBy, in.TimeZone, &params); err != nil {
+		due, err := parseListDueFilter(cfg, in.DueBy, in.TimeZone)
+		if err != nil {
 			return nil, err
 		}
-		hash := listPageHash(cfg, "global-list", params)
+		hash := listPageHash(cfg, "global-list", params, due)
 		params.After, err = pagination.Decode(in.Cursor, hash)
 		if err != nil {
 			return nil, api.NewError(400, "validation", err.Error(), "", nil)
 		}
-		issues, dueDates, err := listIssuesPage(ctx, cfg.DB, params, func() ([]db.Issue, error) {
+		issues, dueRows, err := listPlainOrDue(ctx, cfg.DB, params, due, func() ([]db.Issue, error) {
 			return cfg.DB.ListAllIssues(ctx, params)
 		})
 		if err != nil {
@@ -404,7 +406,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 
 		issues, page := pageBoundary(issues, in.Limit, hash, true)
 		if in.IncludeTotal {
-			count, countErr := countIssuesPage(ctx, cfg.DB, params, func() (int64, error) {
+			count, countErr := countPlainOrDue(ctx, cfg.DB, params, due, func() (int64, error) {
 				return cfg.DB.CountAllIssues(ctx, params)
 			})
 			if countErr != nil {
@@ -417,7 +419,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
-		attachDueDates(issueOuts, dueDates)
+		attachDueDates(issueOuts, dueRows)
 		out := &api.ListAllIssuesResponse{}
 		out.Body.PageMetadata = page
 		out.Body.Issues = make([]api.ListGlobalIssueOut, len(issueOuts))
