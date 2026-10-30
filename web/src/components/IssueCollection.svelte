@@ -21,7 +21,6 @@
   import ColumnPicker from './ColumnPicker.svelte'
   import {
     KATA_OPTIONAL_TASK_COLUMNS,
-    defaultKataTaskColumnVisibility,
     loadKataTaskColumnVisibility,
     persistKataTaskColumnVisibility,
     summarizeBlockedBy,

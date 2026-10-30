@@ -1,3 +1,5 @@
+import type { KataOpenBlocker } from './types'
+
 export const KATA_TASK_COLUMNS_STORAGE_KEY = 'kata:issue-columns/v1'
 
 export const KATA_OPTIONAL_TASK_COLUMNS = [
@@ -22,7 +24,7 @@ export interface BlockedBySummary {
 }
 
 export function summarizeBlockedBy(
-  blockers: readonly { short_id: string; qualified_id: string }[] | undefined,
+  blockers: readonly KataOpenBlocker[] | undefined,
   qualified: boolean,
 ): BlockedBySummary {
   const ids = (blockers ?? []).map((blocker) => (qualified ? blocker.qualified_id : blocker.short_id))
