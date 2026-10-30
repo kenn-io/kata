@@ -39,7 +39,7 @@ jobs:
               - 'packages/**'
               - 'docs/index.md'
               - 'docs/{get-started,guide,workflows,reference,operations}/*.md'
-              - 'docs/{scripts,assets,screenshots,javascripts}/**'
+              - 'docs/javascripts/**'
 
   web-static:
     needs: changes
