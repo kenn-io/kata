@@ -452,11 +452,13 @@ func TestSameOriginRedirectPreservesMutationUncertainty(t *testing.T) {
 			if tt.crossOrigin {
 				var provenance daemonTransportProvenance
 				assert.NotErrorAs(t, err, &provenance)
+				assert.NotContains(t, cliErrorForErr(err, true).Message, "mutation result may be unknown")
 				return
 			}
 			transportErr, ok := errors.AsType[*daemonTransportError](err)
 			require.True(t, ok)
 			assert.Equal(t, http.MethodPost, transportErr.method)
+			assert.Contains(t, cliErrorForErr(err, true).Message, "mutation result may be unknown")
 		})
 	}
 }
