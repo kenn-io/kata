@@ -1239,6 +1239,9 @@
   .table-body {
     flex: 1;
     overflow: auto;
+    /* Reserve the scrollbar's width so columns do not shift when a search or
+       filter changes whether the rows overflow. */
+    scrollbar-gutter: stable;
     padding: 0 0 12px;
   }
 

@@ -964,6 +964,9 @@
     min-width: 0;
     flex: 1;
     overflow: auto;
+    /* Reserve the scrollbar's width so controls do not shift when a search
+       changes whether the credential table overflows. */
+    scrollbar-gutter: stable;
   }
 
   .access-administration {

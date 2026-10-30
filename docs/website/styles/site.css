@@ -72,6 +72,9 @@
 
 html {
   scroll-behavior: smooth;
+  /* Reserve the scrollbar's width so the centered column does not shift between
+     the short not-found page and the scrolling pages. */
+  scrollbar-gutter: stable;
 }
 
 body {
