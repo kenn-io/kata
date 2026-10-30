@@ -334,7 +334,7 @@ describe('IssueCollection', () => {
       expect(container.querySelector('.cell-blocked-by')).toBeNull()
     })
 
-    it('shows qualified open blockers outside a project scope, three then +N', () => {
+    it('shows short ids for same-project blockers in any view, with +N in its own element', () => {
       enableColumn()
       const { container } = render(IssueCollection, {
         props: { currentView: view, selectedIssueUID: null, loading: false, onSelect: () => {} },
@@ -343,26 +343,33 @@ describe('IssueCollection', () => {
       const header = container.querySelector<HTMLElement>('.table-header')!
       expect(within(header).getByText('Blocked by')).toBeTruthy()
       const cell = container.querySelector<HTMLElement>('.cell-blocked-by')!
-      expect(cell.textContent?.trim()).toBe(
-        'example-project#a1, example-project#b2, example-project#c3 +2',
-      )
+      expect(cell.querySelector('.blocked-ids')?.textContent?.trim()).toBe('a1, b2, c3')
+      expect(cell.querySelector('.blocked-more')?.textContent?.trim()).toBe('+2')
       expect(cell.title).toBe(
         'example-project#a1, example-project#b2, example-project#c3, example-project#d4, example-project#e5',
       )
     })
 
-    it('shows short ids inside a single-project scope', () => {
+    it('qualifies a blocker from another project', () => {
       enableColumn()
+      const mixed = task({
+        ...blocked,
+        open_blocked_by: [
+          peer('a1'),
+          { uid: 'uid-z9', short_id: 'z9', qualified_id: 'other-project#z9' },
+        ],
+      })
       const { container } = render(IssueCollection, {
         props: {
-          currentView: view,
-          scopedProjectName: 'example-project',
+          currentView: { ...view, groups: [{ id: 'inbox', title: 'Inbox', issues: [mixed] }] },
           selectedIssueUID: null,
           loading: false,
           onSelect: () => {},
         },
       })
-      expect(container.querySelector('.cell-blocked-by')?.textContent?.trim()).toBe('a1, b2, c3 +2')
+      const cell = container.querySelector<HTMLElement>('.cell-blocked-by')!
+      expect(cell.querySelector('.blocked-ids')?.textContent?.trim()).toBe('a1, other-project#z9')
+      expect(cell.querySelector('.blocked-more')).toBeNull()
     })
   })
 

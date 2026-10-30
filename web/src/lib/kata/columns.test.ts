@@ -92,30 +92,33 @@ describe('summarizeBlockedBy', () => {
     short_id,
     qualified_id: `example-project#${short_id}`,
   }))
+  const row = 'example-project#row'
 
-  it('returns empty text without blockers', () => {
-    expect(summarizeBlockedBy(undefined, false)).toEqual({ text: '', title: '' })
-    expect(summarizeBlockedBy([], true)).toEqual({ text: '', title: '' })
+  it('returns empty parts without blockers', () => {
+    expect(summarizeBlockedBy(undefined, row)).toEqual({ ids: '', more: '', title: '' })
+    expect(summarizeBlockedBy([], row)).toEqual({ ids: '', more: '', title: '' })
   })
 
   it('lists up to three ids without a remainder', () => {
-    expect(summarizeBlockedBy(peers.slice(0, 3), false)).toEqual({
-      text: 'a1, b2, c3',
-      title: 'a1, b2, c3',
+    expect(summarizeBlockedBy(peers.slice(0, 3), row)).toEqual({
+      ids: 'a1, b2, c3',
+      more: '',
+      title: 'example-project#a1, example-project#b2, example-project#c3',
     })
   })
 
-  it('cuts after three ids, appends +N, and titles every blocker', () => {
-    expect(summarizeBlockedBy(peers, false)).toEqual({
-      text: 'a1, b2, c3 +2',
-      title: 'a1, b2, c3, d4, e5',
-    })
+  it('cuts after three ids, reports +N separately, and titles every blocker', () => {
+    const summary = summarizeBlockedBy(peers, row)
+    expect(summary.ids).toBe('a1, b2, c3')
+    expect(summary.more).toBe('+2')
+    expect(summary.title).toBe(peers.map((peer) => peer.qualified_id).join(', '))
   })
 
-  it('uses qualified ids outside a single-project scope', () => {
-    expect(summarizeBlockedBy(peers.slice(0, 4), true)).toEqual({
-      text: 'example-project#a1, example-project#b2, example-project#c3 +1',
-      title: 'example-project#a1, example-project#b2, example-project#c3, example-project#d4',
-    })
+  it('qualifies only blockers from another project', () => {
+    const mixed = [
+      peers[0]!,
+      { uid: 'uid-z9', short_id: 'z9', qualified_id: 'other-project#z9' },
+    ]
+    expect(summarizeBlockedBy(mixed, row).ids).toBe('a1, other-project#z9')
   })
 })

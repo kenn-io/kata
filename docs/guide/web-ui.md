@@ -80,9 +80,9 @@ selected-issue state stays in the URL, making the current view bookmarkable.
 The optional **Blocked by** column is off by default. Turn it on from the
 column picker to see each task's open blockers in every collection view,
 including Inbox and Today: up to three IDs, then `+N` for the rest, with all of
-them in the hover title. IDs are qualified with the project outside a
-single-project scope. Closed blockers are left out, and the column hides at
-narrow list widths.
+them in the hover title. Blockers from the task's own project show their short
+ID; blockers from another project show the qualified ID. Closed blockers are
+left out, and the column hides at narrow list widths.
 
 At narrow window widths the task list stays primary: below 700px the sidebar
 moves into a drawer, and filter controls wrap to fit the list pane, including

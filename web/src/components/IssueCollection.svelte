@@ -1010,8 +1010,11 @@
       {/if}
       {#if columnVisibility.owner}<span class="cell cell-owner">{issue.owner ?? ''}</span>{/if}
       {#if columnVisibility.blockedBy}
-        {@const blockers = summarizeBlockedBy(issue.open_blocked_by, !isProjectScoped)}
-        <span class="cell cell-blocked-by" title={blockers.title}>{blockers.text}</span>
+        {@const blockers = summarizeBlockedBy(issue.open_blocked_by, issue.qualified_id)}
+        <span class="cell cell-blocked-by" title={blockers.title}>
+          <span class="blocked-ids">{blockers.ids}</span>
+          {#if blockers.more}<span class="blocked-more">{blockers.more}</span>{/if}
+        </span>
       {/if}
       {#if columnVisibility.tags}
         <span class="cell cell-tags" title={labels}>
@@ -1478,6 +1481,22 @@
 
   .cell-owner {
     color: var(--text-secondary);
+  }
+
+  /* The +N stays visible: only the ID list ellipsizes. */
+  .cell-blocked-by {
+    display: flex;
+    gap: 4px;
+  }
+
+  .blocked-ids {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .blocked-more {
+    flex-shrink: 0;
   }
 
   .cell-due,

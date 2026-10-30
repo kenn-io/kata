@@ -17,22 +17,36 @@ export type KataTaskColumnVisibility = Record<KataOptionalTaskColumn, boolean>
 const BLOCKED_BY_VISIBLE_IDS = 3
 
 export interface BlockedBySummary {
-  /** Cell text: up to three IDs, then " +N" for the rest. */
-  text: string
-  /** Every open blocker, for the hover title. */
+  /** Up to three IDs, comma separated. */
+  ids: string
+  /** "+N" for blockers beyond the first three, else empty. */
+  more: string
+  /** Every open blocker with its qualified ID, for the hover title. */
   title: string
 }
 
+function projectOf(qualifiedID: string): string {
+  return qualifiedID.slice(0, qualifiedID.lastIndexOf('#'))
+}
+
+/** Blockers from the row's own project show the short ID; others stay qualified. */
 export function summarizeBlockedBy(
   blockers: readonly KataOpenBlocker[] | undefined,
-  qualified: boolean,
+  rowQualifiedID: string,
 ): BlockedBySummary {
-  const ids = (blockers ?? []).map((blocker) =>
-    qualified ? blocker.qualified_id : blocker.short_id,
-  )
-  const more = ids.length - BLOCKED_BY_VISIBLE_IDS
-  const shown = ids.slice(0, BLOCKED_BY_VISIBLE_IDS).join(', ')
-  return { text: more > 0 ? `${shown} +${more}` : shown, title: ids.join(', ') }
+  const all = blockers ?? []
+  const rowProject = projectOf(rowQualifiedID)
+  const shown = all
+    .slice(0, BLOCKED_BY_VISIBLE_IDS)
+    .map((blocker) =>
+      projectOf(blocker.qualified_id) === rowProject ? blocker.short_id : blocker.qualified_id,
+    )
+  const more = all.length - BLOCKED_BY_VISIBLE_IDS
+  return {
+    ids: shown.join(', '),
+    more: more > 0 ? `+${more}` : '',
+    title: all.map((blocker) => blocker.qualified_id).join(', '),
+  }
 }
 
 type ColumnStorage = Pick<Storage, 'getItem' | 'setItem'>
