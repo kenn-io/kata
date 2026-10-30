@@ -429,3 +429,21 @@ func TestShowPrintsTheRecurrenceAndJSONCarriesIt(t *testing.T) {
 	assert.NotContains(t, runCLI(t, env, dir, "show", plain), "repeat:")
 	assert.NotContains(t, runCLI(t, env, dir, "--json", "show", plain), `"recurrence"`)
 }
+
+func TestScheduleRepeatAgentOutputStartsWithOK(t *testing.T) {
+	isolateCallerZone(t)
+	env, dir, pid := setupCLIWorkspace(t)
+	ref := createIssue(t, env, pid, "agent output")
+
+	start := runCLI(t, env, dir, "--agent", "schedule", ref, "2026-11-02", "--repeat", "FREQ=WEEKLY", "--timezone", "UTC")
+	change := runCLI(t, env, dir, "--agent", "schedule", ref, "2026-11-09", "--repeat", "FREQ=DAILY")
+	stop := runCLI(t, env, dir, "--agent", "schedule", ref, "--repeat", "-")
+
+	for action, out := range map[string]string{"started": start, "changed": change, "stopped": stop} {
+		lines := strings.Split(strings.TrimSpace(out), "\n")
+		require.Len(t, lines, 1, action)
+		assert.Contains(t, lines[0], "OK schedule ref="+ref, action)
+		assert.Contains(t, lines[0], "repeat="+action, action)
+	}
+	assert.Contains(t, start, "rrule=FREQ=WEEKLY")
+}

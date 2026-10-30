@@ -363,7 +363,7 @@ func printScheduleRepeat(cmd *cobra.Command, r scheduleRepeatResult) error {
 				agentRowField("start", r.Recurrence.DTStart),
 				agentRowField("recurrence_timezone", r.Recurrence.Timezone))
 		}
-		return writeAgentKVRow(out, fields...)
+		return writeAgentOKLine(out, "schedule", fields...)
 	}
 	if flags.Quiet {
 		return nil
