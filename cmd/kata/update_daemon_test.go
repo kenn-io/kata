@@ -42,27 +42,22 @@ func copyTestExecutable(t *testing.T, srcPath, dstPath string) {
 }
 
 func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
+	testDaemonLifecycle(t, false)
+}
+
+func TestDaemonRestart_Lifecycle(t *testing.T) {
+	testDaemonLifecycle(t, true)
+}
+
+func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("builds and runs isolated daemon binaries")
 	}
-	// Child daemons get only toolchain/OS variables and the test's Kata paths.
-	var childEnv []string
-	allowed := []string{"PATH", "HOME", "USERPROFILE", "LOCALAPPDATA", "SYSTEMROOT", "WINDIR", "TMPDIR", "TMP", "TEMP", "GOCACHE", "GOMODCACHE", "GOPATH", "GOROOT", "GOTOOLCHAIN", "CGO_CFLAGS", "CGO_LDFLAGS"}
-	for _, entry := range os.Environ() {
-		key, _, _ := strings.Cut(entry, "=")
-		if key == "" {
-			continue // Windows drive-directory entries cannot be changed with Setenv.
-		}
-		lookupKey := key
-		if runtime.GOOS == "windows" {
-			lookupKey = strings.ToUpper(key)
-		}
-		if slices.Contains(allowed, lookupKey) {
-			childEnv = append(childEnv, entry)
-		} else {
-			t.Setenv(key, "")
-		}
-	}
+	childEnv := daemonLifecycleEnvironment(t)
+	originalWait := daemonReplacementWaitTimeout
+	daemonReplacementWaitTimeout = 5 * time.Second
+	t.Cleanup(func() { daemonReplacementWaitTimeout = originalWait })
 	moduleDir, err := os.Getwd()
 	require.NoError(t, err)
 	workspace := t.TempDir()
@@ -81,7 +76,11 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 		require.NoError(t, err, "%s", output)
 		binaries[version] = binary
 	}
-	for _, scenario := range []string{"running", "stopped", "check only", "cancelled", "install failure", "restart failure", "read-only TCP", "older daemon", "daemon token", "idle shutdown"} {
+	scenarios := []string{"running", "stopped", "check only", "cancelled", "install failure", "restart failure", "read-only TCP", "older daemon", "daemon token", "idle shutdown"}
+	if explicitRestart {
+		scenarios = []string{"running", "restart failure", "read-only TCP", "older daemon", "daemon token", "idle shutdown", "startup flags", "config listen"}
+	}
+	for _, scenario := range scenarios {
 		t.Run(scenario, func(t *testing.T) {
 			resetFlags(t)
 			fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{CurrentVersion: "v0.1.0", LatestVersion: "v0.2.0"}}}
@@ -97,6 +96,7 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 			// The daemon restarts from its own environment. A hosted PORT in the
 			// updater's shell must not move a Unix-socket daemon onto wildcard TCP.
 			t.Setenv("PORT", "4321")
+			t.Setenv("KATA_AUTH_TOKEN", "caller-token")
 			if scenario == "daemon token" {
 				// Only the daemon holds the token; the updater never needs it.
 				env = append(env, "KATA_AUTH_TOKEN=fixture-token")
@@ -134,6 +134,13 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 				process := exec.Command(binary, args...) //nolint:gosec // test-owned binary and fixed arguments
 				process.Env = env
 				process.Stderr = os.Stderr
+				if scenario == "restart failure" {
+					require.NoError(t, ns.EnsureDirs())
+					logFile, err := os.OpenFile(filepath.Join(ns.DataDir, "daemon.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // G304: test-owned daemon log
+					require.NoError(t, err)
+					t.Cleanup(func() { assert.NoError(t, logFile.Close()) })
+					process.Stderr = logFile
+				}
 				require.NoError(t, process.Start())
 				exited := make(chan error, 1)
 				go func() { exited <- process.Wait() }()
@@ -178,12 +185,34 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 				assert.Equal(t, before.StartedAt, record().StartedAt)
 				return
 			}
-			stdout, stderr, updateErr := executeRootCapture(t, t.Context(), "update", "--yes", "--json")
+			var stdout, stderr string
+			var updateErr error
+			if explicitRestart {
+				if scenario == "restart failure" {
+					require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("invalid = ["), 0600))
+				}
+				if scenario == "config listen" {
+					require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("listen = \"127.0.0.1:0\"\n"), 0600))
+				}
+				if scenario == "startup flags" {
+					for _, flag := range []string{"--listen=127.0.0.1:0", "--insecure-readonly=false", "--no-auto-token=false"} {
+						_, _, err := executeRootCapture(t, t.Context(), "daemon", "restart", flag)
+						require.ErrorContains(t, err, "kata daemon stop")
+						assert.Equal(t, before.StartedAt, record().StartedAt)
+					}
+					return
+				}
+				stdout, stderr, updateErr = executeRootCapture(t, t.Context(), "daemon", "restart", "--json")
+			} else {
+				stdout, stderr, updateErr = executeRootCapture(t, t.Context(), "update", "--yes", "--json")
+			}
 			if scenario == "older daemon" {
 				require.Error(t, updateErr)
-				assert.Contains(t, updateErr.Error(), "installed")
-				assert.Contains(t, updateErr.Error(), "kata daemon restart")
-				assert.NotEmpty(t, fake.installed)
+				if !explicitRestart {
+					assert.Contains(t, updateErr.Error(), "installed")
+					assert.NotEmpty(t, fake.installed)
+				}
+				assert.Contains(t, updateErr.Error(), "kata daemon stop")
 				assert.Equal(t, before.StartedAt, record().StartedAt)
 				httpClient, baseURL := client.LocalHTTPClient(before.Endpoint().ConfigAddress())
 				status, _, err := httpDoJSON(t.Context(), httpClient, http.MethodGet, baseURL+"/api/v1/ping", nil)
@@ -192,13 +221,18 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 				return
 			}
 			if scenario == "restart failure" {
-				// The replacement refuses the broken config after the original has
-				// already released its listeners, so the daemon is down.
-				require.Error(t, updateErr)
-				assert.Contains(t, updateErr.Error(), "installed")
-				assert.Contains(t, updateErr.Error(), "restart")
+				require.ErrorContains(t, updateErr, "restart")
+				assert.Contains(t, updateErr.Error(), "validate replacement", "return daemon-side validation diagnostics")
+				assert.Equal(t, before.StartedAt, record().StartedAt)
+				httpClient, baseURL := client.LocalHTTPClient(before.Endpoint().ConfigAddress())
+				status, _, err := httpDoJSON(t.Context(), httpClient, http.MethodGet, baseURL+"/api/v1/ping", nil)
+				require.NoError(t, err)
+				assert.Equal(t, http.StatusOK, status)
 				require.NoError(t, os.Remove(filepath.Join(home, "config.toml")))
-				assert.Zero(t, record().PID)
+				// A corrected request must still reach the signal watcher.
+				_, _, err = executeRootCapture(t, t.Context(), "daemon", "restart")
+				require.NoError(t, err)
+				require.True(t, record().StartedAt.After(before.StartedAt))
 				return
 			}
 			if scenario == "install failure" {
@@ -211,7 +245,14 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 				Installed bool `json:"installed"`
 			}
 			require.NoError(t, json.Unmarshal([]byte(stdout), &result))
-			assert.True(t, result.Installed)
+			if explicitRestart {
+				var restarted daemonRestartOutput
+				require.NoError(t, json.Unmarshal([]byte(stdout), &restarted))
+				assert.Equal(t, []int{before.PID}, restarted.PIDs)
+				assert.Equal(t, 1, restarted.Stopped)
+			} else {
+				assert.True(t, result.Installed)
+			}
 			after := record()
 			if scenario == "stopped" {
 				assert.Zero(t, after.PID)
@@ -219,13 +260,17 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 				return
 			}
 			require.True(t, after.StartedAt.After(before.StartedAt), "update must replace the running daemon")
-			assert.Equal(t, "v0.2.0", after.Version)
-			assert.Contains(t, stderr, "restarted daemon")
+			if !explicitRestart {
+				assert.Equal(t, "v0.2.0", after.Version)
+				assert.Contains(t, stderr, "restarted daemon")
+			}
 			httpClient, baseURL := client.LocalHTTPClient(after.Endpoint().ConfigAddress())
 			status, _, err := httpDoJSON(t.Context(), httpClient, "GET", baseURL+"/api/v1/ping", nil)
 			require.NoError(t, err)
 			assert.Equal(t, 200, status)
 			switch scenario {
+			case "config listen":
+				assert.False(t, after.Endpoint().IsUnix())
 			case "running":
 				assert.Equal(t, before.Endpoint().IsUnix(), after.Endpoint().IsUnix())
 			case "daemon token":
@@ -247,4 +292,27 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 			}
 		})
 	}
+}
+
+func daemonLifecycleEnvironment(t *testing.T) []string {
+	t.Helper()
+	// Child daemons get only toolchain/OS variables and the test's Kata paths.
+	var childEnv []string
+	allowed := []string{"PATH", "HOME", "USERPROFILE", "LOCALAPPDATA", "SYSTEMROOT", "WINDIR", "TMPDIR", "TMP", "TEMP", "GOCACHE", "GOMODCACHE", "GOPATH", "GOROOT", "GOTOOLCHAIN", "CGO_CFLAGS", "CGO_LDFLAGS"}
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if key == "" {
+			continue // Windows drive-directory entries cannot be changed with Setenv.
+		}
+		lookupKey := key
+		if runtime.GOOS == "windows" {
+			lookupKey = strings.ToUpper(key)
+		}
+		if slices.Contains(allowed, lookupKey) {
+			childEnv = append(childEnv, entry)
+		} else {
+			t.Setenv(key, "")
+		}
+	}
+	return childEnv
 }

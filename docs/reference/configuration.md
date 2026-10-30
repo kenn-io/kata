@@ -554,7 +554,7 @@ ignored for explicit daemon starts and for daemons exposed through non-loopback
 listeners, a public web origin, trusted-proxy configuration, shared-listener
 host aliases, an enabled `[federation.ingress]` listener, or an enabled `[mcp]` endpoint. `kata daemon start` replaces a running idle-eligible auto-started
 daemon with an explicit one so it stays resident, and `kata daemon restart`
-always starts an explicit daemon. The daemon writes one
+retains the running daemon's idle policy. The daemon writes one
 `kata daemon: idle shutdown after ...` line to its log when it exits for this
 reason. Active requests and already-admitted finite background work
 receive a bounded drain before process exit, so exit can occur after the

@@ -103,8 +103,8 @@ binds a new one.
 
 If the daemon does not come back, or it does not support automatic restart, the
 command reports that the binary was installed and returns an error. Resolve
-any reported startup problem, then run `kata daemon restart` with the daemon's
-original startup options.
+any reported startup problem, then run `kata daemon stop` followed by
+`kata daemon start` with the daemon's original startup options.
 
 Package-managed installations keep
 `kata update --check`, but install-capable update forms direct you back to the

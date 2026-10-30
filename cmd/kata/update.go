@@ -142,12 +142,9 @@ func restartDaemonAfterUpdate(ctx context.Context, stderr io.Writer) error {
 			continue
 		}
 		if !daemonruntime.RuntimeRecordRestartable(record) {
-			return fmt.Errorf("daemon pid %d does not support automatic restart; run 'kata daemon restart' with its original startup options", record.PID)
+			return fmt.Errorf("daemon pid %d does not support automatic restart; run 'kata daemon stop', then 'kata daemon start' with its original startup options", record.PID)
 		}
-		if err := daemonruntime.SignalDaemonRestart(record, ns.DBHash); err != nil {
-			return fmt.Errorf("signal daemon pid %d: %w", record.PID, err)
-		}
-		replacement, err := waitForDaemonReplacement(ctx, store, record)
+		replacement, err := requestDaemonRestart(ctx, ns, record)
 		if err != nil {
 			return err
 		}
@@ -172,7 +169,7 @@ const updateDaemonReplacementGrace = 5 * time.Second
 func waitForDaemonReplacement(
 	ctx context.Context, store kitdaemon.RuntimeStore, previous kitdaemon.RuntimeRecord,
 ) (kitdaemon.RuntimeRecord, error) {
-	deadline := time.Now().Add(daemonRestartProcessWaitTimeout)
+	deadline := time.Now().Add(daemonReplacementWaitTimeout)
 	var exitedAt time.Time
 	for {
 		records, err := store.List()
@@ -192,7 +189,7 @@ func waitForDaemonReplacement(
 		case !exitedAt.IsZero() && now.Sub(exitedAt) > updateDaemonReplacementGrace:
 			return kitdaemon.RuntimeRecord{}, fmt.Errorf("daemon pid %d exited without starting a replacement; check the daemon log, then run 'kata daemon start' with its original startup options", previous.PID)
 		case now.After(deadline):
-			return kitdaemon.RuntimeRecord{}, fmt.Errorf("daemon pid %d did not restart within %s", previous.PID, daemonRestartProcessWaitTimeout)
+			return kitdaemon.RuntimeRecord{}, fmt.Errorf("daemon pid %d did not restart within %s", previous.PID, daemonReplacementWaitTimeout)
 		}
 		select {
 		case <-ctx.Done():

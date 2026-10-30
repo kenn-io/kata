@@ -1303,91 +1303,6 @@ func TestDaemonRestart_StartsWhenNoDaemonIsRunning(t *testing.T) {
 		"  web UI:  http://127.0.0.1:28888\n", string(out))
 }
 
-func TestDaemonRestart_StopsRunningDaemonBeforeStarting(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the test helper does not install the Windows daemon stop event watcher")
-	}
-	resetFlags(t)
-	tmp := setupKataEnv(t)
-
-	child := exec.Command(os.Args[0], "-test.run=TestDaemonCommandSleepHelperProcess", "--") //nolint:gosec // test helper starts this test binary
-	child.Env = append(os.Environ(), "KATA_DAEMON_CMD_SLEEP_HELPER=1")
-	stdin, err := child.StdinPipe()
-	require.NoError(t, err)
-	require.NoError(t, child.Start())
-	exited := make(chan struct{})
-	go func() {
-		_ = child.Wait()
-		close(exited)
-	}()
-	t.Cleanup(func() {
-		_ = stdin.Close()
-		_ = child.Process.Kill()
-		<-exited
-	})
-	writeRuntimePID(t, tmp, child.Process.Pid)
-
-	orig := startDetachedDaemon
-	t.Cleanup(func() { startDetachedDaemon = orig })
-	startDetachedDaemon = func(context.Context, string, bool, bool) (daemonStartOutput, error) {
-		select {
-		case <-exited:
-			return daemonStartOutput{
-				Action: "started", PID: 4243, Address: "127.0.0.1:7777",
-				WebURL: "http://127.0.0.1:28888",
-			}, nil
-		default:
-			return daemonStartOutput{}, errors.New("new daemon started before old daemon stopped")
-		}
-	}
-
-	out := executeRoot(t, newRootCmd(), "daemon", "restart")
-
-	assert.Equal(t, "restarted pid=4243 address=127.0.0.1:7777\n"+
-		"  web UI:  http://127.0.0.1:28888\n", string(out))
-}
-
-func TestDaemonRestart_AllowsFullGracefulShutdownBudget(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the test helper does not install the Windows daemon stop event watcher")
-	}
-	resetFlags(t)
-	tmp := setupKataEnv(t)
-	readyPath := filepath.Join(tmp, "shutdown-delay-ready")
-
-	child := exec.Command(os.Args[0], "-test.run=TestDaemonCommandSleepHelperProcess", "--") //nolint:gosec // test helper starts this test binary
-	child.Env = append(os.Environ(),
-		"KATA_DAEMON_CMD_SLEEP_HELPER=1",
-		"KATA_DAEMON_CMD_SHUTDOWN_DELAY=4s",
-		"KATA_DAEMON_CMD_READY_PATH="+readyPath,
-	)
-	require.NoError(t, child.Start())
-	exited := make(chan struct{})
-	go func() {
-		_ = child.Wait()
-		close(exited)
-	}()
-	t.Cleanup(func() {
-		_ = child.Process.Kill()
-		<-exited
-	})
-	require.Eventually(t, func() bool {
-		_, err := os.Stat(readyPath)
-		return err == nil
-	}, 10*time.Second, 10*time.Millisecond)
-	writeRuntimePID(t, tmp, child.Process.Pid)
-
-	orig := startDetachedDaemon
-	t.Cleanup(func() { startDetachedDaemon = orig })
-	startDetachedDaemon = func(context.Context, string, bool, bool) (daemonStartOutput, error) {
-		return daemonStartOutput{Action: "started", PID: 4244, Address: "127.0.0.1:7777"}, nil
-	}
-
-	out := executeRoot(t, newRootCmd(), "daemon", "restart")
-
-	assert.Equal(t, "restarted pid=4244 address=127.0.0.1:7777\n", string(out))
-}
-
 func TestDaemonRestartReservesProcessExitMarginBeyondDrainBudget(t *testing.T) {
 	require.Equal(t, 5*time.Second, daemonRestartProcessWaitTimeout-daemonShutdownDrainTimeout)
 }
@@ -1465,10 +1380,7 @@ func TestDaemonRestart_PassesStartupOverrides(t *testing.T) {
 	assert.True(t, gotInsecureReadonly)
 }
 
-func TestDaemonRestart_ValidatesReplacementBeforeStopping(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the test helper does not install the Windows daemon stop event watcher")
-	}
+func TestDaemonRestart_ValidatesStoppedDaemonStartup(t *testing.T) {
 	tests := []struct {
 		name    string
 		setup   func(*testing.T, string)
@@ -1515,8 +1427,6 @@ model = "example-model"
 			resetFlags(t)
 			tmp := setupKataEnv(t)
 
-			child := startSleepProcess(t)
-			writeRuntimePID(t, tmp, child.Process.Pid)
 			tt.setup(t, tmp)
 
 			orig := startDetachedDaemon
@@ -1532,7 +1442,6 @@ model = "example-model"
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantErr)
 			assert.False(t, startCalled)
-			assert.True(t, kitdaemon.ProcessAlive(child.Process.Pid), "invalid replacement config must leave the daemon running")
 		})
 	}
 }

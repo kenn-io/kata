@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"sync/atomic"
+
+	"go.kenn.io/kata/internal/daemonruntime"
 
 	kitdaemon "go.kenn.io/kit/daemon"
 
@@ -45,13 +48,21 @@ func newDaemonRestart(stderr io.Writer) *daemonRestart {
 	return &daemonRestart{executable: executable}
 }
 
-// watch records the first restart signal and triggers daemon shutdown.
-func (r *daemonRestart) watch(ctx context.Context, sigs <-chan os.Signal, trigger func()) {
-	select {
-	case <-ctx.Done():
-	case <-sigs:
-		r.requested.Store(true)
-		trigger()
+// watch validates each restart request before triggering daemon shutdown.
+func (r *daemonRestart) watch(ctx context.Context, sigs <-chan os.Signal, validate func() error, logger *log.Logger, trigger func()) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-sigs:
+			if err := validate(); err != nil {
+				logger.Printf("restart: validate replacement: %v", err)
+				continue
+			}
+			r.requested.Store(true)
+			trigger()
+			return
+		}
 	}
 }
 
@@ -66,4 +77,20 @@ func (r *daemonRestart) exec(ctx context.Context) error {
 		return fmt.Errorf("restart daemon: %w", err)
 	}
 	return nil
+}
+
+// daemonReplacementWaitTimeout is overridable for refused-restart tests.
+var daemonReplacementWaitTimeout = daemonRestartProcessWaitTimeout
+
+func requestDaemonRestart(ctx context.Context, ns *daemonruntime.Namespace, previous kitdaemon.RuntimeRecord) (kitdaemon.RuntimeRecord, error) {
+	if err := daemonruntime.SignalDaemonRestart(previous, ns.DBHash); err != nil {
+		return kitdaemon.RuntimeRecord{}, fmt.Errorf("signal daemon pid %d: %w", previous.PID, err)
+	}
+	replacement, err := waitForDaemonReplacement(ctx, kitdaemon.RuntimeStore{Dir: ns.DataDir}, previous)
+	if err != nil {
+		if tail := daemonStartLogTail(ns.DataDir); tail != "" {
+			err = fmt.Errorf("%w\n%s", err, tail)
+		}
+	}
+	return replacement, err
 }

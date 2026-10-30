@@ -1777,7 +1777,7 @@ restart it. Restart output, including the new web UI address, goes to stderr
 so JSON and agent stdout remain a single update result. If the replacement
 fails to start, or the running daemon does not support automatic restart, the command
 returns an error identifying the installed version and directs you to
-`kata daemon restart` with the daemon's original startup options. Remote
+`kata daemon stop` followed by `kata daemon start` with the daemon's original startup options. Remote
 daemons must be updated on their own hosts.
 
 Local commands auto-start the daemon when appropriate. When the running local
@@ -1801,10 +1801,13 @@ stops it and starts an explicit daemon in its place, reporting the replaced
 PID; a resident daemon is reported as already running. Use
 `daemon start --foreground` for service managers, hosted deployments, and any
 setup where the daemon process should stay attached to the terminal. `daemon
-restart` gracefully stops any running local daemon, waits for it to exit, and
-starts a replacement using the configured listener. It validates replacement
-settings before stopping the current daemon; use the restart flags to repeat
-transient startup overrides. Background start and restart output reports the
+restart` asks each running local daemon to replace itself in its original
+environment, retaining its startup options, credentials, network, and idle
+policy. The daemon validates the replacement settings before stopping; an
+invalid configuration leaves it serving, and the command reports a bounded
+timeout with available daemon-log diagnostics. Restart flags apply only when stopped.
+To change startup flags, or replace a daemon without restart support, run
+`kata daemon stop` followed by `kata daemon start` with the desired options. Background start and restart output reports the
 resolved web UI URL on its own line after the daemon transport address.
 `daemon start`, `stop`, `restart`, `reload`, and `logs` administer the current
 `KATA_HOME` and reject `--daemon`. Set the home explicitly for those operations.

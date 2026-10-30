@@ -852,32 +852,47 @@ func daemonRestartCmd() *cobra.Command {
 			if err := requireCurrentHomeDaemonCommand(); err != nil {
 				return err
 			}
-			startup, err := preflightDaemonStartup(cmd.Context(), listen, insecureReadonly, noAutoToken)
+			ns, err := daemonruntime.NewNamespace()
 			if err != nil {
-				return fmt.Errorf("restart: validate replacement: %w", err)
+				return err
 			}
-			ns := startup.Namespace
 			recs, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).List()
 			if err != nil {
 				return err
 			}
 			noteSkippedDaemons(cmd.ErrOrStderr(), recs)
-			pids := make([]int, 0, len(recs))
+			running := make([]kitdaemon.RuntimeRecord, 0, len(recs))
 			for _, rec := range recs {
 				if !daemonruntime.RuntimeProcessAlive(rec) {
 					continue
 				}
-				if err := daemonruntime.SignalDaemonStop(rec, ns.DBHash); err != nil {
-					return fmt.Errorf("restart: stop pid %d: %w", rec.PID, err)
+				if cmd.Flags().Changed("listen") || cmd.Flags().Changed("insecure-readonly") || cmd.Flags().Changed("no-auto-token") {
+					return fmt.Errorf("restart retains the running daemon's startup options; run 'kata daemon stop', then 'kata daemon start' with the requested options")
 				}
-				pids = append(pids, rec.PID)
+				if !daemonruntime.RuntimeRecordRestartable(rec) {
+					return fmt.Errorf("daemon pid %d does not support automatic restart; run 'kata daemon stop', then 'kata daemon start' with its original startup options", rec.PID)
+				}
+				running = append(running, rec)
 			}
-			if err := waitForDaemonProcesses(cmd.Context(), pids, daemonRestartProcessWaitTimeout); err != nil {
-				return err
-			}
-			out, err := startDetachedDaemon(cmd.Context(), listen, insecureReadonly, noAutoToken)
-			if err != nil {
-				return err
+			pids := make([]int, 0, len(running))
+			var out daemonStartOutput
+			if len(running) == 0 {
+				if _, err := preflightDaemonStartup(cmd.Context(), listen, insecureReadonly, noAutoToken); err != nil {
+					return fmt.Errorf("restart: validate replacement: %w", err)
+				}
+				out, err = startDetachedDaemon(cmd.Context(), listen, insecureReadonly, noAutoToken)
+				if err != nil {
+					return err
+				}
+			} else {
+				for _, rec := range running {
+					replacement, err := requestDaemonRestart(cmd.Context(), ns, rec)
+					if err != nil {
+						return err
+					}
+					pids = append(pids, rec.PID)
+					out = daemonStartOutputFromRecord("restarted", replacement)
+				}
 			}
 			switch currentOutputMode() {
 			case outputJSON:
@@ -913,7 +928,7 @@ func daemonRestartCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&listen, "listen", "",
-		"bind the replacement daemon to host:port (overrides config.toml)")
+		"bind to host:port when no daemon is running (overrides config.toml)")
 	cmd.Flags().BoolVar(&noAutoToken, "no-auto-token", false, "disable creating a persisted daemon token; eligible existing tokens are still reused")
 	cmd.Flags().BoolVar(&insecureReadonly, "insecure-readonly", false,
 		"permit unauthenticated GETs on non-loopback TCP when no token is configured (DEV ONLY)")
@@ -1213,6 +1228,7 @@ func runDaemonProcess(
 		return err
 	}
 	dcfg := startup.Config
+	originalListen := listen
 	listen = startup.Listen
 	ns := startup.Namespace
 	endpoint := startup.Endpoint
@@ -1446,7 +1462,10 @@ func runDaemonProcess(
 		var restartSignals <-chan os.Signal
 		restartSignals, restartCleanup = installRestartSource(ctx, ns.DBHash)
 		workers.Go(func() {
-			restart.watch(ctx, restartSignals, shutdownTrigger.Call)
+			restart.watch(ctx, restartSignals, func() error {
+				_, err := preflightDaemonStartup(ctx, originalListen, insecureReadonly, noAutoToken)
+				return err
+			}, daemonLog, shutdownTrigger.Call)
 		})
 	}
 	syncOutcome := daemon.NewSyncOutcomeObserver(telemetryReporter)
