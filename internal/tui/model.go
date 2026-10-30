@@ -1050,7 +1050,7 @@ func (m Model) applyListViewportCache() Model {
 		if m.layout == splitlayout.Split {
 			width = m.splitGeometry().ListInnerW
 		}
-		field := m.input.activeField()
+		field := &m.input.fields[0]
 		pos := field.input.Position()
 		// Reserve the slash and end cursor, then refresh the visible window.
 		field.input.SetWidth(titleBarInnerWidth(width) - 2)
