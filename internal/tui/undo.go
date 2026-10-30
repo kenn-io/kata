@@ -158,14 +158,7 @@ func (m Model) handleUndoDone(msg undoDoneMsg) (Model, tea.Cmd) {
 	case out.needsEvidence:
 		return m.openUndoCloseForm(), nil
 	case out.backlog > 1:
-		if m.modal != modalNone || m.input.kind != inputNone {
-			// Another modal or form took control while the lookup ran; keep
-			// the entry undoable and leave that interaction alone.
-			return m, nil
-		}
-		m.reopenPrompt = &reopenPrompt{ref: target, count: out.backlog, undoEntryID: entry.id}
-		m.modal = modalReopenBacklog
-		return m, nil
+		return m.promptReopenBacklog(reopenPrompt{ref: target, count: out.backlog, undoEntryID: entry.id}), nil
 	case out.conflict != "":
 		m.undoHistory.entries = m.undoHistory.entries[:len(m.undoHistory.entries)-1]
 		return m.undoNotice("skipped undo for "+target+": "+out.conflict, toastError)

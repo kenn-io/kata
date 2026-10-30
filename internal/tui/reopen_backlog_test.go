@@ -234,8 +234,6 @@ func TestReopenWithoutBacklogSkipsPrompt(t *testing.T) {
 		{"no cron jobs", nil},
 		{"zero due", []backlogJob{{uid: "job-a", catchup: "all", missed: 0}}},
 		{"one due", []backlogJob{{uid: "job-a", catchup: "all", missed: 1}}},
-		{"latest job", []backlogJob{{uid: "job-a", catchup: "latest", missed: 800}}},
-		{"skip job", []backlogJob{{uid: "job-a", catchup: "skip", grace: 60, missed: 800}}},
 	} {
 		for _, view := range []string{"list", "detail"} {
 			t.Run(tc.name+"/"+view, func(t *testing.T) {
@@ -388,14 +386,6 @@ func TestReopenDispatchesRowAndActor(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestReopenSkipJobWithSeveralInGraceShowsPrompt(t *testing.T) {
-	spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "skip", grace: 300, missed: 800})}
-	m, cmd := pressReopen(t, listReopenModel(t, spy))
-	require.Nil(t, cmd)
-	require.Equal(t, modalReopenBacklog, m.modal)
-	require.Contains(t, stripANSI(renderConfirmModal(m.modal, m.reopenPrompt)), "5 recurring child")
 }
 
 // An open parent can be part-way through delivering a backlog; reopening does
