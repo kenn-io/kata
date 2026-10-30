@@ -121,8 +121,9 @@ func checkListDueIssues(t *testing.T, store db.Storage) error {
 	}
 	scoped := func(dueBy, zone, daemonZone string) dueQuery {
 		return dueQuery{
-			ListAllIssuesParams: db.ListAllIssuesParams{ProjectID: project.ID, Status: "open"},
-			due:                 db.DueFilter{By: dueBy, TimeZone: zone, DefaultTimezone: daemonZone},
+			ProjectID: project.ID,
+			Status:    "open",
+			due:       db.DueFilter{By: dueBy, TimeZone: zone, DefaultTimezone: daemonZone},
 		}
 	}
 
