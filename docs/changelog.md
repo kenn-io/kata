@@ -101,6 +101,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
   events, such as an assignment, were kept. Before, the device couldn't apply
   the assignment, and sync stalled.
 
+- Start, change, and stop a recurrence from the CLI with `kata schedule <ref>
+  <date> --repeat '<rrule>'` and `kata schedule <ref> --repeat -`. The zone is
+  `--timezone`, the issue's `timezone` metadata, or your own IANA zone.
+  `kata show` prints an issue's rule, start, zone, and next occurrence, and
+  `kata show --json` returns them under `recurrence`.
+
 ## 0.20.0
 <small>2026-10-23</small>
 
