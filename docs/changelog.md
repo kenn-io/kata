@@ -40,7 +40,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   UTC). `kata show` prints an issue's rule, start, zone, and next occurrence,
   and `kata show --json` returns them under `recurrence`. See
   [Repeat an issue](reference/cli.md#repeat-an-issue). `--if-match` is checked
-  again inside the transaction that starts the recurrence (daemon API 0.36.0),
+  again inside the transaction that starts the recurrence (daemon API 0.37.0),
   and an issue moved to another project is repeated in its current project.
 
 - Get an immediate error when a daemon in another PID namespace, such as one in

@@ -527,7 +527,7 @@ func olderDaemonProxy(t *testing.T, env *testenv.Env) string {
 		if r.URL.Path != "/api/v1/health" {
 			return false
 		}
-		_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.35.0"}`))
+		_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.36.0"}`))
 		return true
 	})
 }
@@ -540,7 +540,7 @@ func TestScheduleRepeatIfMatchOnAnOlderDaemonOnlyBlocksStarting(t *testing.T) {
 
 	_, stderr, err := runCLIAgainst(t, older, dir, "schedule", "--if-match", "1", ref, "2026-11-02", "--repeat", "FREQ=DAILY", "--timezone", "UTC")
 	require.Error(t, err, "starting needs the daemon guard")
-	assert.Contains(t, stderr, "--if-match when starting a recurrence requires daemon API 0.36.0")
+	assert.Contains(t, stderr, "--if-match when starting a recurrence requires daemon API 0.37.0")
 	assert.Empty(t, listRecurrencesViaHTTP(t, env, pid))
 
 	runCLI(t, env, dir, "schedule", "--if-match", "1", ref, "2026-11-02", "--repeat", "FREQ=DAILY", "--timezone", "UTC")
