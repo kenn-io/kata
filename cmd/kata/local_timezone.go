@@ -11,9 +11,12 @@ import (
 // /etc/localtime link. A TZ that is set but empty means UTC, as in POSIX and
 // Go. It returns "" when nothing names a zone, so the daemon falls back to its
 // own timezone.
+// localtimePath is the system zone link; tests override it.
+var localtimePath = "/etc/localtime"
+
 func localTimeZoneName() string {
 	tz, set := os.LookupEnv("TZ")
-	return resolveLocalTimeZone(tz, set, "/etc/localtime")
+	return resolveLocalTimeZone(tz, set, localtimePath)
 }
 
 func resolveLocalTimeZone(tz string, tzSet bool, localtimePath string) string {
