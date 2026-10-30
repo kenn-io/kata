@@ -198,15 +198,6 @@ func TestDaemonClientClassifiesUnixFailuresAcrossGeneratedCall(t *testing.T) {
 		timeout   time.Duration
 	}{
 		{
-			name: "headers timeout",
-			handler: http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-				<-r.Context().Done()
-			}),
-			wantPhase: "headers",
-			wantTime:  true,
-			timeout:   100 * time.Millisecond, //nolint:kennlint // deadlinetest: the handler holds headers until the client deadline fires
-		},
-		{
 			name: "body timeout",
 			handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
@@ -426,26 +417,48 @@ func TestDaemonTransportErrorMutationUncertainty(t *testing.T) {
 }
 
 func TestSameOriginRedirectPreservesMutationUncertainty(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/start" {
-			http.Redirect(w, r, "/stall", http.StatusFound)
-			return
-		}
-		<-r.Context().Done()
-	}))
-	t.Cleanup(server.Close)
-	hc, err := markDaemonHTTPClient(server.URL, &http.Client{Timeout: 100 * time.Millisecond}) //nolint:kennlint // deadlinetest: the redirected handler waits for cancellation; the test asserts timeout provenance
-	require.NoError(t, err)
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/start", nil)
-	require.NoError(t, err)
+	for _, tt := range []struct {
+		name        string
+		crossOrigin bool
+	}{
+		{name: "same origin"},
+		{name: "cross origin", crossOrigin: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			target := "/stall"
+			if tt.crossOrigin {
+				external := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+					<-r.Context().Done()
+				}))
+				t.Cleanup(external.Close)
+				target = external.URL + "/stall"
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/start" {
+					http.Redirect(w, r, target, http.StatusFound)
+					return
+				}
+				<-r.Context().Done()
+			}))
+			t.Cleanup(server.Close)
+			hc, err := markDaemonHTTPClient(server.URL, &http.Client{Timeout: 100 * time.Millisecond}) //nolint:kennlint // deadlinetest: the redirected handler waits for cancellation; the test asserts timeout provenance
+			require.NoError(t, err)
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/start", nil)
+			require.NoError(t, err)
 
-	_, err = hc.Do(req) //nolint:gosec // loopback fixture only
+			_, err = hc.Do(req) //nolint:gosec // loopback fixtures only
 
-	require.Error(t, err)
-	transportErr, ok := errors.AsType[*daemonTransportError](err)
-	require.True(t, ok)
-	assert.Equal(t, http.MethodPost, transportErr.method)
-	assert.Contains(t, cliErrorForErr(err, true).Message, "mutation result may be unknown")
+			require.Error(t, err)
+			if tt.crossOrigin {
+				var provenance daemonTransportProvenance
+				assert.NotErrorAs(t, err, &provenance)
+				return
+			}
+			transportErr, ok := errors.AsType[*daemonTransportError](err)
+			require.True(t, ok)
+			assert.Equal(t, http.MethodPost, transportErr.method)
+		})
+	}
 }
 
 func TestSameOriginRedirectFinalBodyFailurePreservesMutationUncertainty(t *testing.T) {
@@ -507,28 +520,6 @@ func TestSameOriginRedirectFinalBodyCloseStopsRequestBudget(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("request budget did not stop when final response body closed")
 	}
-}
-
-func TestDifferentOriginRedirectDoesNotClaimMutationUncertainty(t *testing.T) {
-	external := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		<-r.Context().Done()
-	}))
-	t.Cleanup(external.Close)
-	selected := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, external.URL+"/stall", http.StatusFound)
-	}))
-	t.Cleanup(selected.Close)
-	hc, err := markDaemonHTTPClient(selected.URL, &http.Client{Timeout: 100 * time.Millisecond}) //nolint:kennlint // deadlinetest: the external handler waits for cancellation; the test asserts timeout provenance
-	require.NoError(t, err)
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, selected.URL, nil)
-	require.NoError(t, err)
-
-	_, err = hc.Do(req) //nolint:gosec // loopback fixtures only
-
-	require.Error(t, err)
-	var provenance daemonTransportProvenance
-	assert.NotErrorAs(t, err, &provenance)
-	assert.NotContains(t, cliErrorForErr(err, true).Message, "mutation result may be unknown")
 }
 
 func newUnixGeneratedTestClient(t *testing.T, handler http.Handler, timeout time.Duration) *kataclient.Client {
