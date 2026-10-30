@@ -10,13 +10,13 @@ import {
 } from './columns'
 
 describe('Kata task column visibility', () => {
-  it('defaults every optional column to visible', () => {
+  it('defaults every optional column to visible except Blocked by', () => {
     expect(defaultKataTaskColumnVisibility()).toEqual({
       updated: true,
       priority: true,
       due: true,
       owner: true,
-      blockedBy: true,
+      blockedBy: false,
       tags: true,
     })
   })
@@ -90,18 +90,32 @@ describe('summarizeBlockedBy', () => {
   const peers = ['a1', 'b2', 'c3', 'd4', 'e5'].map((short_id) => ({
     uid: `uid-${short_id}`,
     short_id,
+    qualified_id: `example-project#${short_id}`,
   }))
 
-  it('returns nothing without blockers', () => {
-    expect(summarizeBlockedBy(undefined)).toEqual({ ids: [], more: 0 })
-    expect(summarizeBlockedBy([])).toEqual({ ids: [], more: 0 })
+  it('returns empty text without blockers', () => {
+    expect(summarizeBlockedBy(undefined, false)).toEqual({ text: '', title: '' })
+    expect(summarizeBlockedBy([], true)).toEqual({ text: '', title: '' })
   })
 
   it('lists up to three ids without a remainder', () => {
-    expect(summarizeBlockedBy(peers.slice(0, 3))).toEqual({ ids: ['a1', 'b2', 'c3'], more: 0 })
+    expect(summarizeBlockedBy(peers.slice(0, 3), false)).toEqual({
+      text: 'a1, b2, c3',
+      title: 'a1, b2, c3',
+    })
   })
 
-  it('cuts after three ids and counts the rest', () => {
-    expect(summarizeBlockedBy(peers)).toEqual({ ids: ['a1', 'b2', 'c3'], more: 2 })
+  it('cuts after three ids, appends +N, and titles every blocker', () => {
+    expect(summarizeBlockedBy(peers, false)).toEqual({
+      text: 'a1, b2, c3 +2',
+      title: 'a1, b2, c3, d4, e5',
+    })
+  })
+
+  it('uses qualified ids outside a single-project scope', () => {
+    expect(summarizeBlockedBy(peers.slice(0, 4), true)).toEqual({
+      text: 'example-project#a1, example-project#b2, example-project#c3 +1',
+      title: 'example-project#a1, example-project#b2, example-project#c3, example-project#d4',
+    })
   })
 })

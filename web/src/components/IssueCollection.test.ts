@@ -296,12 +296,15 @@ describe('IssueCollection', () => {
       'priority',
       'due',
       'owner',
-      'blockedBy',
     ])
   })
 
-  it('shows open blockers in the Blocked by column, three at most then +N', () => {
-    const peer = (short_id: string) => ({ uid: `uid-${short_id}`, short_id })
+  describe('Blocked by column', () => {
+    const peer = (short_id: string) => ({
+      uid: `uid-${short_id}`,
+      short_id,
+      qualified_id: `example-project#${short_id}`,
+    })
     const blocked = task({
       ...baseIssues[0]!,
       uid: 'issue-blocked-row',
@@ -316,14 +319,53 @@ describe('IssueCollection', () => {
       name: 'inbox',
       groups: [{ id: 'inbox', title: 'Inbox', issues: [blocked] }],
     }
-    const { container } = render(IssueCollection, {
-      props: { currentView: view, selectedIssueUID: null, loading: false, onSelect: () => {} },
+
+    function enableColumn() {
+      localStorage.setItem(
+        KATA_TASK_COLUMNS_STORAGE_KEY,
+        JSON.stringify(['updated', 'priority', 'due', 'owner', 'blockedBy', 'tags']),
+      )
+    }
+
+    it('is hidden until turned on', () => {
+      const { container } = render(IssueCollection, {
+        props: { currentView: view, selectedIssueUID: null, loading: false, onSelect: () => {} },
+      })
+      expect(container.querySelector('.cell-blocked-by')).toBeNull()
     })
 
-    const header = container.querySelector<HTMLElement>('.table-header')!
-    expect(within(header).getByText('Blocked by')).toBeTruthy()
-    const cell = container.querySelector<HTMLElement>('.cell-blocked-by')!
-    expect(cell.textContent?.replace(/\s+/g, ' ').trim()).toBe('a1, b2, c3 +2')
+    it('shows qualified open blockers outside a project scope, three then +N', () => {
+      enableColumn()
+      const { container } = render(IssueCollection, {
+        props: { currentView: view, selectedIssueUID: null, loading: false, onSelect: () => {} },
+      })
+
+      const header = container.querySelector<HTMLElement>('.table-header')!
+      expect(within(header).getByText('Blocked by')).toBeTruthy()
+      const cell = container.querySelector<HTMLElement>('.cell-blocked-by')!
+      expect(cell.textContent?.trim()).toBe(
+        'example-project#a1, example-project#b2, example-project#c3 +2',
+      )
+      expect(cell.title).toBe(
+        'example-project#a1, example-project#b2, example-project#c3, example-project#d4, example-project#e5',
+      )
+    })
+
+    it('shows short ids inside a single-project scope', () => {
+      enableColumn()
+      const { container } = render(IssueCollection, {
+        props: {
+          currentView: view,
+          scopedProjectName: 'example-project',
+          selectedIssueUID: null,
+          loading: false,
+          onSelect: () => {},
+        },
+      })
+      expect(container.querySelector('.cell-blocked-by')?.textContent?.trim()).toBe(
+        'a1, b2, c3 +2',
+      )
+    })
   })
 
   it('restores hidden columns after remount and Show all resets the preference', async () => {
@@ -337,7 +379,7 @@ describe('IssueCollection', () => {
     })
 
     await fireEvent.click(screen.getByRole('button', { name: 'Columns' }))
-    for (const name of ['Updated', 'Priority', 'Due', 'Owner', 'Blocked by', 'Tags']) {
+    for (const name of ['Updated', 'Priority', 'Due', 'Owner', 'Tags']) {
       await fireEvent.click(screen.getByRole('checkbox', { name }))
     }
     first.unmount()
@@ -365,6 +407,7 @@ describe('IssueCollection', () => {
     expect(within(header).getByText('Due')).toBeTruthy()
     expect(within(header).getByText('Owner')).toBeTruthy()
     expect(within(header).getByText('Tags')).toBeTruthy()
+    expect(within(header).getByText('Blocked by')).toBeTruthy()
     expect(JSON.parse(localStorage.getItem(KATA_TASK_COLUMNS_STORAGE_KEY)!)).toEqual([
       'updated',
       'priority',
@@ -436,9 +479,10 @@ describe('IssueCollection', () => {
     })
 
     const header = container.querySelector<HTMLElement>('.table-header')!
-    for (const name of ['Updated', 'Priority', 'Due', 'Owner', 'Blocked by', 'Tags']) {
+    for (const name of ['Updated', 'Priority', 'Due', 'Owner', 'Tags']) {
       expect(within(header).getByText(name)).toBeTruthy()
     }
+    expect(within(header).queryByText('Blocked by')).toBeNull()
   })
 
   it('resets an invisible active sort to Title ascending', async () => {

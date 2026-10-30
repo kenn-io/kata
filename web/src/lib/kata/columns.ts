@@ -15,18 +15,20 @@ export type KataTaskColumnVisibility = Record<KataOptionalTaskColumn, boolean>
 const BLOCKED_BY_VISIBLE_IDS = 3
 
 export interface BlockedBySummary {
-  ids: string[]
-  more: number
+  /** Cell text: up to three IDs, then " +N" for the rest. */
+  text: string
+  /** Every open blocker, for the hover title. */
+  title: string
 }
 
 export function summarizeBlockedBy(
-  peers: readonly { short_id: string }[] | undefined,
+  blockers: readonly { short_id: string; qualified_id: string }[] | undefined,
+  qualified: boolean,
 ): BlockedBySummary {
-  const all = peers ?? []
-  return {
-    ids: all.slice(0, BLOCKED_BY_VISIBLE_IDS).map((peer) => peer.short_id),
-    more: Math.max(0, all.length - BLOCKED_BY_VISIBLE_IDS),
-  }
+  const ids = (blockers ?? []).map((blocker) => (qualified ? blocker.qualified_id : blocker.short_id))
+  const more = ids.length - BLOCKED_BY_VISIBLE_IDS
+  const shown = ids.slice(0, BLOCKED_BY_VISIBLE_IDS).join(', ')
+  return { text: more > 0 ? `${shown} +${more}` : shown, title: ids.join(', ') }
 }
 
 type ColumnStorage = Pick<Storage, 'getItem' | 'setItem'>
@@ -34,7 +36,7 @@ type ColumnStorage = Pick<Storage, 'getItem' | 'setItem'>
 const knownColumns = new Set<string>(KATA_OPTIONAL_TASK_COLUMNS.map((column) => column.id))
 
 export function defaultKataTaskColumnVisibility(): KataTaskColumnVisibility {
-  return { updated: true, priority: true, due: true, owner: true, blockedBy: true, tags: true }
+  return { updated: true, priority: true, due: true, owner: true, blockedBy: false, tags: true }
 }
 
 function browserStorage(): ColumnStorage | null {

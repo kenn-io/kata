@@ -35,8 +35,8 @@ describe('normalizeKataUISnapshot', () => {
     const blocked = projection.issues.find((issue) => issue.uid === 'issue-blocked')!
 
     expect(blocked.open_blocked_by).toEqual([
-      { uid: 'issue-blocker', short_id: 'b1' },
-      { uid: 'issue-later', short_id: 'l3' },
+      { uid: 'issue-blocker', short_id: 'b1', qualified_id: 'example-project#b1' },
+      { uid: 'issue-later', short_id: 'l3', qualified_id: 'example-project#l3' },
     ])
     expect(blocked.blocked_by).toHaveLength(3)
   })

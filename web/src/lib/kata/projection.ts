@@ -375,7 +375,10 @@ function enrichRelationships(issues: KataTaskSummary[], links: readonly UILink[]
         if (to) {
           to.blocked_by = appendPeer(to.blocked_by, fromPeer)
           if (link.from_status === 'open') {
-            to.open_blocked_by = appendPeer(to.open_blocked_by, fromPeer)
+            to.open_blocked_by = [
+              ...(to.open_blocked_by ?? []),
+              { ...fromPeer, qualified_id: link.from_qualified_id },
+            ]
           }
         }
         break

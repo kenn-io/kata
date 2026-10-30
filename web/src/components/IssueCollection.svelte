@@ -308,7 +308,11 @@
   }
 
   function showAllColumns(): void {
-    setColumnVisibility(defaultKataTaskColumnVisibility())
+    setColumnVisibility(
+      Object.fromEntries(
+        KATA_OPTIONAL_TASK_COLUMNS.map((column) => [column.id, true]),
+      ) as KataTaskColumnVisibility,
+    )
   }
 
   function viewTitle(view: KataCurrentView): string {
@@ -1007,12 +1011,8 @@
       {/if}
       {#if columnVisibility.owner}<span class="cell cell-owner">{issue.owner ?? ''}</span>{/if}
       {#if columnVisibility.blockedBy}
-        {@const blockers = summarizeBlockedBy(issue.open_blocked_by)}
-        <span class="cell cell-blocked-by" title={blockers.ids.join(', ')}>
-          {#if blockers.ids.length > 0}
-            {blockers.ids.join(', ')}{blockers.more > 0 ? ` +${blockers.more}` : ''}
-          {/if}
-        </span>
+        {@const blockers = summarizeBlockedBy(issue.open_blocked_by, !isProjectScoped)}
+        <span class="cell cell-blocked-by" title={blockers.title}>{blockers.text}</span>
       {/if}
       {#if columnVisibility.tags}
         <span class="cell cell-tags" title={labels}>
@@ -1481,13 +1481,6 @@
     color: var(--text-secondary);
   }
 
-  .cell-blocked-by {
-    color: var(--text-secondary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
   .cell-due,
   .cell-updated {
     color: var(--text-muted);
@@ -1509,8 +1502,8 @@
   /* Pane-width-driven column visibility. The list narrows whenever the
      user picks the side-by-side layout and drags the list pane down to
      its minimum; viewport queries miss this because the *window* is
-     still wide. Tags + Owner drop first (low scanning value), then
-     Due, leaving the irreducible quartet of ID / title / updated /
+     still wide. Tags, Blocked by and Owner drop first (low scanning
+     value), then Due, leaving the irreducible quartet of ID / title / updated /
      priority that you need to triage a row. */
   @container list (max-width: 880px) {
     .col-tags,
