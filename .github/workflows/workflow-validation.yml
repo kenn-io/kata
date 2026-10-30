@@ -65,7 +65,7 @@ jobs:
       # `brews` pipe. Executing the full snapshot validates that pipe and every
       # artifact ID without publishing.
       - name: Validate configuration and build release snapshot
-        uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89 # v7.2.2
+        uses: step-security/goreleaser-action@aee981bee303ff102e9a607e46c6a6ace9201398 # v7.2.2
         with:
           distribution: goreleaser
           version: v2.19.0
@@ -95,10 +95,10 @@ jobs:
           persist-credentials: false
 
       - name: Set up image emulation
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        uses: step-security/setup-qemu-action@8c4aef027ab2df56e08f597afe6dd8cd31cb84f5 # v3.7.0
 
       - name: Set up image builder
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        uses: step-security/setup-buildx-action@c60a792b446ef83310733d5cd9d0c8d6870d043f # v3.12.0
         with:
           driver-opts: image=moby/buildkit:v0.34.1@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c
 
