@@ -2213,6 +2213,11 @@ creations are retained. If pending local or downstream work blocks the reset,
 resolve the [normal reset blockers](#reset-recovery) before retrying recovery.
 Retrying against an unfixed root can quarantine the same batch again.
 
+A still-live cross-project link remains unsupported. The root refuses to sign
+that current state, preserving the owner's link and retained events. Resolve
+the live boundary explicitly before retrying recovery; a reset neither strips
+that link silently nor shares its private endpoint.
+
 There is no verified general workaround for this retained-checkpoint case on
 0.20.0. Preserve the quarantine and upgrade the root; skipping relay data or
 editing a database cursor is not a recovery path.

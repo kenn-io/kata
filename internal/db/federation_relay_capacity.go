@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"time"
 
@@ -84,16 +85,19 @@ type RelayCheckpointIssue struct {
 func (r *RelayCheckpointRecords) AppendEvents(events []Event, boundaryID int64, crosses func(RemoteEvent) (bool, error)) error {
 	for _, event := range events {
 		remote := RemoteEventFromStored(event)
-		if event.ID < boundaryID {
-			crossing, err := crosses(remote)
-			if err != nil {
-				return err
+		crossing, err := crosses(remote)
+		if err != nil {
+			return err
+		}
+		if crossing {
+			if event.ID >= boundaryID {
+				// Current state must satisfy the same boundary as admission.
+				// Refuse rather than disclose or silently strip a live link.
+				return errors.Join(ErrFederatedReadOnly, ErrFederationCrossProjectBoundary)
 			}
-			if crossing {
-				// Keep original bytes owner-local; never rewrite a source hash
-				// to remove a private historical endpoint from this checkpoint.
-				continue
-			}
+			// Keep original bytes owner-local; never rewrite a source hash
+			// to remove a private historical endpoint from this checkpoint.
+			continue
 		}
 		raw, err := EncodeRelaySourceEvent(remote)
 		if err != nil {

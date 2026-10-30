@@ -80,6 +80,9 @@ func RunRelayRootCheckpointLaterBoundary(t *testing.T, store db.Storage, openRep
 	links, err := store.LinksByIssue(ctx, issue.ID)
 	require.NoError(t, err)
 	require.Len(t, links, 1)
+	_, err = resetter.CreateRelayReset(ctx, bindingUID, fixture.signer)
+	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary, "a live private link must be refused before signing shared current state")
+	require.Equal(t, []string{private.UID}, linkTargetUIDs(t, store, issue.ID), "a refused reset must preserve the owner's private link")
 	_, err = store.DeleteLinkAndEvent(writeCtx, links[0], db.LinkEventParams{
 		EventType: "issue.unlinked", EventIssueID: issue.ID, Actor: "member",
 		FromUID: issue.UID, ToUID: private.UID, FromShortID: issue.ShortID, ToShortID: private.ShortID,
