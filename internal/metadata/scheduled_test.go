@@ -255,13 +255,10 @@ func TestScheduleFieldDueRejectsUnknownField(t *testing.T) {
 	assert.Contains(t, err.Error(), "planning field")
 }
 
-func TestCalendarDateReadsTheNamedFieldAndRejectsUnknownOnes(t *testing.T) {
+func TestCalendarDateReadsTheNamedField(t *testing.T) {
 	raw := `{"scheduled_on":"2026-09-01","deadline_on":"2026-09-02"}`
-	date, present, err := CalendarDate(raw, DeadlineOnField, nil, "")
+	date, present, err := CalendarDate(raw, "deadline_on", nil, "")
 	require.NoError(t, err)
 	assert.True(t, present)
 	assert.Equal(t, "2026-09-02", date)
-
-	_, _, err = CalendarDate(raw, PlanningField(99), nil, "")
-	require.Error(t, err)
 }

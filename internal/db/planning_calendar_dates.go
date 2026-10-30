@@ -28,10 +28,10 @@ func resolvePlanningCalendarDates(
 ) planningCalendarDates {
 	var out planningCalendarDates
 	out.scheduledOn, out.hasScheduledOn, out.scheduledErr = metadata.CalendarDate(
-		raw, metadata.ScheduledOnField, display, scheduledDefaultTimezone,
+		raw, "scheduled_on", display, scheduledDefaultTimezone,
 	)
 	out.deadlineOn, out.hasDeadlineOn, out.deadlineErr = metadata.CalendarDate(
-		raw, metadata.DeadlineOnField, display, deadlineDefaultTimezone,
+		raw, "deadline_on", display, deadlineDefaultTimezone,
 	)
 	return out
 }

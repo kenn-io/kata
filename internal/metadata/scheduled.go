@@ -145,7 +145,7 @@ func ScheduledOnCalendarDate(
 	displayTimezone string,
 	defaultTimezone string,
 ) (string, bool, error) {
-	return CalendarDate(raw, ScheduledOnField, &displayTimezone, defaultTimezone)
+	return CalendarDate(raw, "scheduled_on", &displayTimezone, defaultTimezone)
 }
 
 // DeadlineOnCalendarDate returns the display calendar date for deadline_on.
@@ -156,28 +156,23 @@ func DeadlineOnCalendarDate(
 	displayTimezone string,
 	defaultTimezone string,
 ) (string, bool, error) {
-	return CalendarDate(raw, DeadlineOnField, &displayTimezone, defaultTimezone)
+	return CalendarDate(raw, "deadline_on", &displayTimezone, defaultTimezone)
 }
 
-// PlanningField names a planning-date metadata key.
-type PlanningField int
-
-// The planning-date metadata keys CalendarDate can read.
-const (
-	ScheduledOnField PlanningField = iota
-	DeadlineOnField
-)
-
-// CalendarDate projects one planning field to a YYYY-MM-DD calendar date, reporting whether the key is present. A
+// CalendarDate projects one planning field ("scheduled_on" or "deadline_on")
+// to a YYYY-MM-DD calendar date, reporting whether the key is present. A
 // non-nil displayTimezone is the viewer's zone, with "" meaning UTC. A nil
 // displayTimezone reads the value in its own schedule zone: the issue
 // timezone, then defaultTimezone, then UTC.
 func CalendarDate(
 	raw string,
-	field PlanningField,
+	field string,
 	displayTimezone *string,
 	defaultTimezone string,
 ) (string, bool, error) {
+	if field != "scheduled_on" && field != "deadline_on" {
+		return "", false, fmt.Errorf("unsupported planning field %q", field)
+	}
 	if len(raw) == 0 {
 		return "", false, nil
 	}
@@ -185,14 +180,9 @@ func CalendarDate(
 	if err != nil {
 		return "", false, err
 	}
-	var value *string
-	switch field {
-	case ScheduledOnField:
-		value = values.ScheduledOn
-	case DeadlineOnField:
+	value := values.ScheduledOn
+	if field == "deadline_on" {
 		value = values.DeadlineOn
-	default:
-		return "", false, fmt.Errorf("unsupported planning field %d", field)
 	}
 	if value == nil {
 		return "", false, nil
