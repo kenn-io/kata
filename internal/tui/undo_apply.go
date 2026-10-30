@@ -6,9 +6,14 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"time"
 
 	"go.kenn.io/kata/internal/api"
 )
+
+// undoBacklogLookupTimeout bounds the optional backlog lookup so a slow read
+// cannot use up the deadline the reopen itself needs.
+var undoBacklogLookupTimeout = 2 * time.Second
 
 type undoOutcome struct {
 	attempt       *undoAttempt
@@ -89,8 +94,12 @@ func (c *undoClient) undo(ctx context.Context, entry undoEntry, opts undoOptions
 			return out
 		}
 		if entry.kind == "close" && opts.checkBacklog {
-			// A failed lookup must not block undo; only a known backlog prompts.
-			if count, err := c.ReopenBacklog(ctx, entry.projectID, entry.uid); err == nil && count > 1 {
+			// A failed or slow lookup must not block undo; only a known backlog
+			// prompts. The lookup gets its own budget so it cannot expire ctx.
+			lookupCtx, cancel := context.WithTimeout(ctx, undoBacklogLookupTimeout)
+			count, err := c.ReopenBacklog(lookupCtx, entry.projectID, entry.uid)
+			cancel()
+			if err == nil && count > 1 {
 				out.backlog = count
 				return out
 			}

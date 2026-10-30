@@ -489,3 +489,43 @@ func TestReopenKeyIgnoredWhileHelpIsVisibleInSplitLayout(t *testing.T) {
 	require.Equal(t, modalNone, m.modal)
 	require.Zero(t, spy.reopens)
 }
+
+// slowBacklogUndoAPI blocks the backlog lookup until its context ends and
+// refuses a reopen whose context has already expired.
+type slowBacklogUndoAPI struct {
+	*undoTestAPI
+}
+
+func (s *slowBacklogUndoAPI) ReopenBacklog(ctx context.Context, _ int64, _ string) (int, error) {
+	<-ctx.Done()
+	return 0, ctx.Err()
+}
+
+func (s *slowBacklogUndoAPI) Reopen(ctx context.Context, projectID int64, ref, actor string) (*MutationResp, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.undoTestAPI.Reopen(ctx, projectID, ref, actor)
+}
+
+// A backlog lookup that runs out of time must not take the undo's own deadline
+// with it: the reopen still goes through and is not classified as ambiguous.
+func TestUndoCloseSlowBacklogLookupStillReopens(t *testing.T) {
+	previous := undoBacklogLookupTimeout
+	undoBacklogLookupTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { undoBacklogLookupTimeout = previous })
+
+	m, f := undoCloseModel(t, 0, nil)
+	client := newConnectedUndoClient(t, &slowBacklogUndoAPI{undoTestAPI: f})
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	out := client.undo(ctx, m.undoHistory.entries[0], undoOptions{checkBacklog: true})
+	if out.attempt != nil {
+		defer out.attempt.complete()
+	}
+	require.NoError(t, out.err)
+	require.True(t, out.changed)
+	require.False(t, out.attempt.unknown, "an expired lookup is not an ambiguous write")
+	require.Equal(t, 1, f.reopenCalls)
+}
