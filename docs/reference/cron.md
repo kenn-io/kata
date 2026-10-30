@@ -296,7 +296,7 @@ configured catch-up policy. A pause does not skip occurrences: with
 `catchup: "all"`, resuming creates every child missed while paused. This
 includes the time since creation for a job created disabled. Use `latest` or
 `skip` when a pause must not backfill. The TUI's [reopen
-prompt](cli.md#diagnosing-setup) counts every missed occurrence, not just the
+prompt](cli.md) counts every missed occurrence, not just the
 1000 that one sweep delivers. Deleting the job stops delivery until
 restoration.
 Keep the parent in the job's project. Kata rejects moving the parent alone

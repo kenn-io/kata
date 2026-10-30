@@ -20,7 +20,6 @@ type fakeListAPI struct {
 	listAllCalls       int
 	createCalls        int
 	closeCalls         int
-	reopenCalls        int
 	setPriorityCalls   int
 	lastListProjectID  int64
 	lastListFilter     ListFilter
@@ -29,9 +28,6 @@ type fakeListAPI struct {
 	lastCloseProjectID int64
 	lastCloseRef       string
 	lastCloseActor     string
-	lastReopenProject  int64
-	lastReopenRef      string
-	lastReopenActor    string
 	lastPriorityPID    int64
 	lastPriorityRef    string
 	lastPriorityValue  *int64
@@ -40,13 +36,11 @@ type fakeListAPI struct {
 	listAllResult      []Issue
 	createResult       *MutationResp
 	closeResult        *MutationResp
-	reopenResult       *MutationResp
 	setPriorityResult  *MutationResp
 	listIssuesErr      error
 	listAllErr         error
 	createErr          error
 	closeErr           error
-	reopenErr          error
 	setPriorityErr     error
 }
 
@@ -84,16 +78,6 @@ func (f *fakeListAPI) Close(
 	f.lastCloseRef = ref
 	f.lastCloseActor = actor
 	return f.closeResult, f.closeErr
-}
-
-func (f *fakeListAPI) Reopen(
-	_ context.Context, projectID int64, ref, actor string,
-) (*MutationResp, error) {
-	f.reopenCalls++
-	f.lastReopenProject = projectID
-	f.lastReopenRef = ref
-	f.lastReopenActor = actor
-	return f.reopenResult, f.reopenErr
 }
 
 func (f *fakeListAPI) SetPriority(
