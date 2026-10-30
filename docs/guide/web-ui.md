@@ -1,7 +1,7 @@
 ---
 title: Web UI
 description: Browse and manage Kata projects and issues in the daemon-served browser application.
-last_edited: 2026-10-28
+last_edited: 2026-10-30
 ---
 
 # Web UI
@@ -76,6 +76,13 @@ The collection toolbar filters by text, project, status, relationship, owner,
 and label. Parent and child issues can be expanded inline, and the column
 picker controls the visible fields. Collection, scope, filter, and
 selected-issue state stays in the URL, making the current view bookmarkable.
+
+The optional **Blocked by** column is off by default. Turn it on from the
+column picker to see each task's open blockers in every collection view,
+including Inbox and Today: up to three IDs, then `+N` for the rest, with all of
+them in the hover title. Blockers from the task's own project show their short
+ID; blockers from another project show the qualified ID. Closed blockers are
+left out, and the column hides at narrow list widths.
 
 At narrow window widths the task list stays primary: below 700px the sidebar
 moves into a drawer, and filter controls wrap to fit the list pane, including

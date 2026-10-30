@@ -42,6 +42,10 @@ export interface KataLinkPeer {
   short_id: string
 }
 
+export interface KataOpenBlocker extends KataLinkPeer {
+  qualified_id: string
+}
+
 export interface KataTaskLinkPeer extends KataLinkPeer {
   qualified_id: string
   status: 'open' | 'closed'
@@ -71,6 +75,7 @@ export interface KataTaskSummary extends KataCreationAttributionWire {
   parent_short_id?: string | undefined
   blocks?: KataLinkPeer[] | undefined
   blocked_by?: KataLinkPeer[] | undefined
+  open_blocked_by?: KataOpenBlocker[] | undefined
   related?: KataLinkPeer[] | undefined
   child_counts?: { open: number; total: number } | undefined
   recurrence_id?: number | undefined

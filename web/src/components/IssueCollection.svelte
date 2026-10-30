@@ -21,9 +21,9 @@
   import ColumnPicker from './ColumnPicker.svelte'
   import {
     KATA_OPTIONAL_TASK_COLUMNS,
-    defaultKataTaskColumnVisibility,
     loadKataTaskColumnVisibility,
     persistKataTaskColumnVisibility,
+    summarizeBlockedBy,
     type KataOptionalTaskColumn,
     type KataTaskColumnVisibility,
   } from '../lib/kata/columns'
@@ -88,6 +88,7 @@
       priority: 'minmax(68px, 80px)',
       due: 'minmax(56px, 70px)',
       owner: 'minmax(72px, 110px)',
+      blockedBy: 'minmax(96px, 150px)',
       tags: 'minmax(96px, 200px)',
     },
     medium: {
@@ -95,6 +96,7 @@
       priority: 'minmax(68px, 80px)',
       due: 'minmax(56px, 70px)',
       owner: 'minmax(72px, 110px)',
+      blockedBy: 'minmax(96px, 150px)',
       tags: null,
     },
     compact: {
@@ -102,6 +104,7 @@
       priority: 'minmax(64px, 78px)',
       due: 'minmax(54px, 68px)',
       owner: null,
+      blockedBy: null,
       tags: null,
     },
     narrow: {
@@ -109,6 +112,7 @@
       priority: 'minmax(62px, 74px)',
       due: null,
       owner: null,
+      blockedBy: null,
       tags: null,
     },
   }
@@ -303,7 +307,11 @@
   }
 
   function showAllColumns(): void {
-    setColumnVisibility(defaultKataTaskColumnVisibility())
+    setColumnVisibility(
+      Object.fromEntries(
+        KATA_OPTIONAL_TASK_COLUMNS.map((column) => [column.id, true]),
+      ) as KataTaskColumnVisibility,
+    )
   }
 
   function viewTitle(view: KataCurrentView): string {
@@ -905,6 +913,9 @@
             {/if}
           </button>
         {/if}
+        {#if columnVisibility.blockedBy}
+          <span class="col col-blocked-by col-static">Blocked by</span>
+        {/if}
         {#if columnVisibility.tags}<span class="col col-tags col-static">Tags</span>{/if}
       </div>
 
@@ -998,6 +1009,13 @@
         </span>
       {/if}
       {#if columnVisibility.owner}<span class="cell cell-owner">{issue.owner ?? ''}</span>{/if}
+      {#if columnVisibility.blockedBy}
+        {@const blockers = summarizeBlockedBy(issue.open_blocked_by, issue.qualified_id)}
+        <span class="cell cell-blocked-by" title={blockers.title}>
+          <span class="blocked-ids">{blockers.ids}</span>
+          {#if blockers.more}<span class="blocked-more">{blockers.more}</span>{/if}
+        </span>
+      {/if}
       {#if columnVisibility.tags}
         <span class="cell cell-tags" title={labels}>
           {#if labels}{labels}{/if}
@@ -1465,6 +1483,22 @@
     color: var(--text-secondary);
   }
 
+  /* The +N stays visible: only the ID list ellipsizes. */
+  .cell-blocked-by {
+    display: flex;
+    gap: 4px;
+  }
+
+  .blocked-ids {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .blocked-more {
+    flex-shrink: 0;
+  }
+
   .cell-due,
   .cell-updated {
     color: var(--text-muted);
@@ -1486,8 +1520,8 @@
   /* Pane-width-driven column visibility. The list narrows whenever the
      user picks the side-by-side layout and drags the list pane down to
      its minimum; viewport queries miss this because the *window* is
-     still wide. Tags + Owner drop first (low scanning value), then
-     Due, leaving the irreducible quartet of ID / title / updated /
+     still wide. Tags, Blocked by and Owner drop first (low scanning
+     value), then Due, leaving the irreducible quartet of ID / title / updated /
      priority that you need to triage a row. */
   @container list (max-width: 880px) {
     .col-tags,
@@ -1502,6 +1536,8 @@
   }
 
   @container list (max-width: 680px) {
+    .col-blocked-by,
+    .cell-blocked-by,
     .table:not(.table--keep-owner-sort) .col-owner,
     .table:not(.table--keep-owner-sort) .cell-owner {
       display: none;

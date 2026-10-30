@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-10-28
+last_edited: 2026-10-30
 ---
 
 # Model Context Protocol server
@@ -237,6 +237,13 @@ another page exists. Its default limit is 20 and its maximum is 100. Pass
 `sort: "created"` orders newest creation first; `sort: "oldest"` reverses it.
 Both use the issue ID to break creation-time ties. Ordinary edits do not move
 issues between pages. These calls require daemon API 0.27.0 or newer.
+
+Each row carries `scheduled_on_date` and `deadline_on_date` when the issue has
+`scheduled_on` or `deadline_on` metadata: `YYYY-MM-DD` calendar dates resolved
+as described in [Calendar dates on issue
+rows](metadata.md#calendar-dates-on-issue-rows). A daemon older than API
+`0.36.0` omits them. `kata.list` takes no date filter; compare the row dates
+yourself.
 
 Set `include_total: true` to request `total`, the count of all matching issues
 in the permitted projects, independent of the page limit and cursor. Counts

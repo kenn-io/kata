@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"strings"
@@ -145,7 +146,7 @@ func ScheduledOnCalendarDate(
 	displayTimezone string,
 	defaultTimezone string,
 ) (string, bool, error) {
-	return metadataCalendarDate(raw, "scheduled_on", displayTimezone, defaultTimezone)
+	return CalendarDate(raw, "scheduled_on", &displayTimezone, defaultTimezone)
 }
 
 // DeadlineOnCalendarDate returns the display calendar date for deadline_on.
@@ -156,25 +157,29 @@ func DeadlineOnCalendarDate(
 	displayTimezone string,
 	defaultTimezone string,
 ) (string, bool, error) {
-	return metadataCalendarDate(raw, "deadline_on", displayTimezone, defaultTimezone)
+	return CalendarDate(raw, "deadline_on", &displayTimezone, defaultTimezone)
 }
 
-func metadataCalendarDate(
+// CalendarDate projects one planning field ("scheduled_on" or "deadline_on")
+// to a YYYY-MM-DD calendar date, reporting whether the key is present. A
+// non-nil displayTimezone is the viewer's zone, with "" meaning UTC. A nil
+// displayTimezone reads the value in its own schedule zone: the issue
+// timezone, then defaultTimezone, then UTC.
+func CalendarDate(
 	raw string,
-	key string,
-	displayTimezone string,
+	field string,
+	displayTimezone *string,
 	defaultTimezone string,
 ) (string, bool, error) {
+	if field != "scheduled_on" && field != "deadline_on" {
+		return "", false, fmt.Errorf("unsupported planning field %q", field)
+	}
 	if len(raw) == 0 {
 		return "", false, nil
 	}
-	values, err := decodeScheduleMetadata(raw)
+	value, issueTimezone, err := decodePlanningField(raw, field)
 	if err != nil {
 		return "", false, err
-	}
-	value := values.ScheduledOn
-	if key == "deadline_on" {
-		value = values.DeadlineOn
 	}
 	if value == nil {
 		return "", false, nil
@@ -189,7 +194,7 @@ func metadataCalendarDate(
 		return scheduleValue, true, nil
 	}
 	if kind == scheduledOnLocalTime {
-		location, err := loadScheduleLocation(values.Timezone, defaultTimezone)
+		location, err := loadScheduleLocation(issueTimezone, defaultTimezone)
 		if err != nil {
 			return "", false, err
 		}
@@ -198,14 +203,43 @@ func metadataCalendarDate(
 			return "", false, err
 		}
 	}
-	if displayTimezone == "" {
-		displayTimezone = "UTC"
+	var display string
+	switch {
+	case displayTimezone != nil:
+		display = *displayTimezone
+	case issueTimezone != "":
+		display = issueTimezone
+	default:
+		display = defaultTimezone
 	}
-	displayLocation, err := time.LoadLocation(displayTimezone)
+	if display == "" {
+		display = "UTC"
+	}
+	displayLocation, err := time.LoadLocation(display)
 	if err != nil {
-		return "", false, fmt.Errorf("load display timezone %q: %w", displayTimezone, err)
+		return "", false, fmt.Errorf("load display timezone %q: %w", display, err)
 	}
 	return instant.In(displayLocation).Format(time.DateOnly), true, nil
+}
+
+// decodePlanningField reads one planning field and the issue timezone, so a
+// non-string sibling field cannot hide a valid date.
+func decodePlanningField(raw, field string) (value *string, timezone string, err error) {
+	var members map[string]jsontext.Value
+	if err := json.Unmarshal([]byte(raw), &members); err != nil {
+		return nil, "", fmt.Errorf("decode schedule metadata: %w", err)
+	}
+	if member, ok := members[field]; ok {
+		if err := json.Unmarshal(member, &value); err != nil {
+			return nil, "", fmt.Errorf("decode schedule metadata %s: %w", field, err)
+		}
+	}
+	if member, ok := members["timezone"]; ok {
+		if err := json.Unmarshal(member, &timezone); err != nil {
+			return nil, "", fmt.Errorf("decode schedule metadata timezone: %w", err)
+		}
+	}
+	return value, timezone, nil
 }
 
 func decodeScheduleMetadata(raw string) (scheduleMetadata, error) {

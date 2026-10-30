@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-28
+last_edited: 2026-10-30
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,12 +9,27 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Show what is stuck in any web collection, Inbox and Today included, with the
+  optional **Blocked by** column. It lists each task's open blockers, three IDs
+  at most and then `+N`; closed blockers are left out. It is off by default;
+  turn it on from the column picker. See the [web UI guide](guide/web-ui.md).
+- Filter issues by due date with `jq`: `kata list --json`, `kata show --json`
+  and MCP `kata.list` rows now carry `scheduled_on_date` and `deadline_on_date`
+  as `YYYY-MM-DD` dates, the names the web UI snapshot uses. Each is omitted
+  when the issue has no such metadata or its value cannot be read. Dates
+  resolve in the issue `timezone`, then the daemon `timezone`, then UTC, and
+  need daemon API `0.36.0` or newer. See
+  [Calendar dates on issue rows](reference/metadata.md#calendar-dates-on-issue-rows).
 - Get an immediate error when a daemon in another PID namespace, such as one in
   a sandbox or container sharing your `KATA_HOME`, already owns the store.
   `kata` commands, `kata daemon start`, and foreground startup previously
   waited about 30 seconds before failing. The error names that daemon's
   runtime record and suggests running Kata where it runs or setting
   `KATA_SERVER`.
+- Follow typed replies beneath the comments they answer in the `kata tui`
+  Comments tab, including replies from other issues shown as leaves beneath
+  their target. Comments show `confirm` and `refute` tags, marked `(before edit)`
+  when all that evidence predates an edit.
 - Connect a gateway to the daemon's `/mcp` endpoint by setting `enabled = true`
   under `[mcp]` and configuring its own bearer with `token_file` or `token_env`.
   Route `/mcp` through an HTTPS reverse proxy, then give the gateway

@@ -293,7 +293,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			}
 			page.Total = &count
 		}
-		issueOuts, err := hydrateIssueOuts(ctx, cfg.DB, in.ProjectID, issues)
+		issueOuts, err := hydrateIssueOuts(ctx, cfg.DB, cfg.DefaultTimezone, in.ProjectID, issues)
 		out := &api.ListIssuesResponse{}
 		if err != nil {
 			return nil, internalAPIError(err)
@@ -397,7 +397,7 @@ func registerIssuesHandlers(humaAPI huma.API, cfg ServerConfig) {
 			page.Total = &count
 		}
 
-		issueOuts, err := hydrateIssueOutsCrossProject(ctx, cfg.DB, issues)
+		issueOuts, err := hydrateIssueOutsCrossProject(ctx, cfg.DB, cfg.DefaultTimezone, issues)
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
@@ -1010,7 +1010,7 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 	// storage v16), so hydrate each child against its OWN project rather than
 	// the parent's — otherwise a cross-project child gets the parent's project
 	// prefix in qualified_id and its labels resolved against the wrong project.
-	childOuts, err := hydrateIssueOutsCrossProject(ctx, cfg.DB, children)
+	childOuts, err := hydrateIssueOutsCrossProject(ctx, cfg.DB, cfg.DefaultTimezone, children)
 	if err != nil {
 		return nil, internalAPIError(err)
 	}
@@ -1019,7 +1019,14 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 		labelNames = append(labelNames, label.Label)
 	}
 	out := &api.ShowIssueResponse{}
-	out.Body.Issue = api.ShowIssueOut{Issue: issue, Labels: labelNames}
+	scheduledOnDate, deadlineOnDate, err := newPlanningDateResolver(cfg.DB, cfg.DefaultTimezone).resolve(ctx, issue)
+	if err != nil {
+		return nil, internalAPIError(err)
+	}
+	out.Body.Issue = api.ShowIssueOut{
+		Issue: issue, Labels: labelNames,
+		ScheduledOnDate: scheduledOnDate, DeadlineOnDate: deadlineOnDate,
+	}
 	var includeDeletedSourceIssueID int64
 	if includeDeleted && issue.DeletedAt != nil {
 		includeDeletedSourceIssueID = issue.ID
@@ -1159,7 +1166,7 @@ func loadParentRef(ctx context.Context, store db.Storage, issue db.Issue) (*api.
 // project_id, so we group by ProjectID and run them per group, then assemble
 // the IssueOut slice in the input order. Realistic project counts are tiny
 // (≤10) so the per-group cost is bounded.
-func hydrateIssueOutsCrossProject(ctx context.Context, store db.Storage, issues []db.Issue) ([]api.IssueOut, error) {
+func hydrateIssueOutsCrossProject(ctx context.Context, store db.Storage, defaultTimezone string, issues []db.Issue) ([]api.IssueOut, error) {
 	if len(issues) == 0 {
 		return []api.IssueOut{}, nil
 	}
@@ -1169,7 +1176,7 @@ func hydrateIssueOutsCrossProject(ctx context.Context, store db.Storage, issues 
 	}
 	rowsByID := make(map[int64]api.IssueOut, len(issues))
 	for projectID, group := range byProject {
-		hydrated, err := hydrateIssueOuts(ctx, store, projectID, group)
+		hydrated, err := hydrateIssueOuts(ctx, store, defaultTimezone, projectID, group)
 		if err != nil {
 			return nil, err
 		}
@@ -1268,7 +1275,7 @@ func collectLinkPeers(
 	return cache, nil
 }
 
-func hydrateIssueOuts(ctx context.Context, store db.Storage, projectID int64, issues []db.Issue) ([]api.IssueOut, error) {
+func hydrateIssueOuts(ctx context.Context, store db.Storage, defaultTimezone string, projectID int64, issues []db.Issue) ([]api.IssueOut, error) {
 	ctx, err := authorizeHostProjectScope(ctx, []int64{projectID}, nil, false)
 	if err != nil {
 		return nil, err
@@ -1333,9 +1340,14 @@ func hydrateIssueOuts(ctx context.Context, store db.Storage, projectID int64, is
 	if err != nil {
 		return nil, err
 	}
+	dates := newPlanningDateResolver(store, defaultTimezone)
 	out := make([]api.IssueOut, len(issues))
 	for i, iss := range issues {
 		rel := relationships[iss.ID]
+		scheduledOnDate, deadlineOnDate, err := dates.resolve(ctx, iss)
+		if err != nil {
+			return nil, err
+		}
 		row := api.IssueOut{
 			Issue:       iss,
 			QualifiedID: qualifiedID(project.Name, iss.ShortID),
@@ -1345,7 +1357,9 @@ func hydrateIssueOuts(ctx context.Context, store db.Storage, projectID int64, is
 			Related:     peerSlice(peerCache, rel.Related),
 			// Blocked is server-computed display state (ready predicate),
 			// kept separate from the full blocked_by hydration above.
-			Blocked: rel.ActivelyBlocked,
+			Blocked:         rel.ActivelyBlocked,
+			ScheduledOnDate: scheduledOnDate,
+			DeadlineOnDate:  deadlineOnDate,
 		}
 		if rel.ParentIssueID != nil {
 			if peer, ok := peerCache[*rel.ParentIssueID]; ok {

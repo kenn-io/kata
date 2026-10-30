@@ -299,6 +299,80 @@ describe('IssueCollection', () => {
     ])
   })
 
+  describe('Blocked by column', () => {
+    const peer = (short_id: string) => ({
+      uid: `uid-${short_id}`,
+      short_id,
+      qualified_id: `example-project#${short_id}`,
+    })
+    const blocked = task({
+      ...baseIssues[0]!,
+      uid: 'issue-blocked-row',
+      short_id: 'blocked-row',
+      qualified_id: 'example-project#blocked-row',
+      title: 'Blocked row',
+      blocked_by: [peer('x1'), peer('y2'), peer('z3'), peer('q4'), peer('r5')],
+      open_blocked_by: [peer('a1'), peer('b2'), peer('c3'), peer('d4'), peer('e5')],
+    })
+    const view: KataCurrentView = {
+      ...currentView,
+      name: 'inbox',
+      groups: [{ id: 'inbox', title: 'Inbox', issues: [blocked] }],
+    }
+
+    function enableColumn() {
+      localStorage.setItem(
+        KATA_TASK_COLUMNS_STORAGE_KEY,
+        JSON.stringify(['updated', 'priority', 'due', 'owner', 'blockedBy', 'tags']),
+      )
+    }
+
+    it('is hidden until turned on', () => {
+      const { container } = render(IssueCollection, {
+        props: { currentView: view, selectedIssueUID: null, loading: false, onSelect: () => {} },
+      })
+      expect(container.querySelector('.cell-blocked-by')).toBeNull()
+    })
+
+    it('shows short ids for same-project blockers in any view, with +N in its own element', () => {
+      enableColumn()
+      const { container } = render(IssueCollection, {
+        props: { currentView: view, selectedIssueUID: null, loading: false, onSelect: () => {} },
+      })
+
+      const header = container.querySelector<HTMLElement>('.table-header')!
+      expect(within(header).getByText('Blocked by')).toBeTruthy()
+      const cell = container.querySelector<HTMLElement>('.cell-blocked-by')!
+      expect(cell.querySelector('.blocked-ids')?.textContent?.trim()).toBe('a1, b2, c3')
+      expect(cell.querySelector('.blocked-more')?.textContent?.trim()).toBe('+2')
+      expect(cell.title).toBe(
+        'example-project#a1, example-project#b2, example-project#c3, example-project#d4, example-project#e5',
+      )
+    })
+
+    it('qualifies a blocker from another project', () => {
+      enableColumn()
+      const mixed = task({
+        ...blocked,
+        open_blocked_by: [
+          peer('a1'),
+          { uid: 'uid-z9', short_id: 'z9', qualified_id: 'other-project#z9' },
+        ],
+      })
+      const { container } = render(IssueCollection, {
+        props: {
+          currentView: { ...view, groups: [{ id: 'inbox', title: 'Inbox', issues: [mixed] }] },
+          selectedIssueUID: null,
+          loading: false,
+          onSelect: () => {},
+        },
+      })
+      const cell = container.querySelector<HTMLElement>('.cell-blocked-by')!
+      expect(cell.querySelector('.blocked-ids')?.textContent?.trim()).toBe('a1, other-project#z9')
+      expect(cell.querySelector('.blocked-more')).toBeNull()
+    })
+  })
+
   it('restores hidden columns after remount and Show all resets the preference', async () => {
     const first = render(IssueCollection, {
       props: {
@@ -338,11 +412,13 @@ describe('IssueCollection', () => {
     expect(within(header).getByText('Due')).toBeTruthy()
     expect(within(header).getByText('Owner')).toBeTruthy()
     expect(within(header).getByText('Tags')).toBeTruthy()
+    expect(within(header).getByText('Blocked by')).toBeTruthy()
     expect(JSON.parse(localStorage.getItem(KATA_TASK_COLUMNS_STORAGE_KEY)!)).toEqual([
       'updated',
       'priority',
       'due',
       'owner',
+      'blockedBy',
       'tags',
     ])
   })
@@ -411,6 +487,7 @@ describe('IssueCollection', () => {
     for (const name of ['Updated', 'Priority', 'Due', 'Owner', 'Tags']) {
       expect(within(header).getByText(name)).toBeTruthy()
     }
+    expect(within(header).queryByText('Blocked by')).toBeNull()
   })
 
   it('resets an invisible active sort to Title ascending', async () => {

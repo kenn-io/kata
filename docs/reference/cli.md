@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-28
+last_edited: 2026-10-30
 ---
 
 # CLI reference
@@ -682,6 +682,14 @@ response as-is, so `.issue.labels` requires daemon API `0.24.0` or newer; an
 older daemon omits the key. The top-level `.labels` array keeps each label's
 `author` and `created_at` on every daemon version.
 
+`kata show --json` and `kata list --json` rows also carry `scheduled_on_date`
+and `deadline_on_date` when the issue has `scheduled_on` or `deadline_on`
+metadata. They are `YYYY-MM-DD` calendar dates in the issue's timezone. A row
+that has the metadata key but no date has a value that could not be read.
+Daemons older than API `0.36.0` omit them. The web UI snapshot uses the same
+field names but reads RFC 3339 instants in the viewer's zone. See
+[Calendar dates on issue rows](metadata.md#calendar-dates-on-issue-rows).
+
 With daemon API `0.28.0` or newer, comments include copyable handles, typed
 reply lines, backlinks, and edit markers in human, `--agent`, and `--json`
 output. `--thread COMMENT` follows the root and all its transitive replies
@@ -713,7 +721,13 @@ reject a stale attention update after another worker claims or closes the issue.
 
 For `kata list`, `--meta` is repeatable. A bare key filters on presence,
 while `key=value` filters on string equality. Multiple filters combine with
-AND logic.
+AND logic. To list issues due on or before a day, select the issues that carry
+the key and compare their row dates with `jq`:
+
+```sh
+kata list --all --meta deadline_on --json \
+  | jq '.issues[] | select(.deadline_on_date <= "2026-10-29")'
+```
 
 `--sort oldest` orders matching issues by `created_at` ascending, then `id`
 ascending for equal timestamps. The daemon applies this order before

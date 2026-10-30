@@ -3544,40 +3544,46 @@ func (i IssueMetadataOut) Validate() error {
 }
 
 type IssueOut struct {
-	AccountableActor    *string               `json:"accountable_actor,omitempty"`
-	AssignmentExpiresOn *time.Time            `json:"assignment_expires_on,omitempty"`
-	Author              string                `json:"author" validate:"required"`
-	AuthorityUID        *string               `json:"authority_uid,omitempty"`
-	Blocked             *bool                 `json:"blocked,omitempty"`
-	BlockedBy           []LinkPeer            `json:"blocked_by,omitempty"`
-	Blocks              []LinkPeer            `json:"blocks,omitempty"`
-	Body                string                `json:"body" validate:"required"`
-	ChildCounts         *ChildCounts          `json:"child_counts,omitempty"`
-	ClosedAt            *time.Time            `json:"closed_at,omitempty"`
-	ClosedReason        *string               `json:"closed_reason,omitempty"`
-	CreatedAt           time.Time             `json:"created_at" validate:"required"`
-	DeletedAt           *time.Time            `json:"deleted_at,omitempty"`
-	ID                  int64                 `json:"id"`
-	Labels              []string              `json:"labels,omitempty"`
-	Metadata            map[string]any        `json:"metadata"`
-	OccurrenceKey       *string               `json:"occurrence_key,omitempty"`
-	Owner               *string               `json:"owner,omitempty"`
-	Parent              *LinkPeer             `json:"parent,omitempty"`
-	Priority            *int64                `json:"priority,omitempty"`
-	ProjectID           int64                 `json:"project_id"`
-	ProjectUID          *string               `json:"project_uid,omitempty"`
-	QualifiedID         string                `json:"qualified_id" validate:"required"`
-	RecurrenceID        *int64                `json:"recurrence_id,omitempty"`
-	Related             []LinkPeer            `json:"related,omitempty"`
-	Revision            int64                 `json:"revision"`
-	ShortID             string                `json:"short_id" validate:"required"`
-	SourceActor         *string               `json:"source_actor,omitempty"`
-	Status              string                `json:"status" validate:"required"`
-	Teammate            *string               `json:"teammate,omitempty"`
-	Title               string                `json:"title" validate:"required"`
-	UID                 string                `json:"uid" validate:"required"`
-	UpdatedAt           time.Time             `json:"updated_at" validate:"required"`
-	Verification        *IssueOutVerification `json:"verification,omitempty"`
+	AccountableActor    *string      `json:"accountable_actor,omitempty"`
+	AssignmentExpiresOn *time.Time   `json:"assignment_expires_on,omitempty"`
+	Author              string       `json:"author" validate:"required"`
+	AuthorityUID        *string      `json:"authority_uid,omitempty"`
+	Blocked             *bool        `json:"blocked,omitempty"`
+	BlockedBy           []LinkPeer   `json:"blocked_by,omitempty"`
+	Blocks              []LinkPeer   `json:"blocks,omitempty"`
+	Body                string       `json:"body" validate:"required"`
+	ChildCounts         *ChildCounts `json:"child_counts,omitempty"`
+	ClosedAt            *time.Time   `json:"closed_at,omitempty"`
+	ClosedReason        *string      `json:"closed_reason,omitempty"`
+	CreatedAt           time.Time    `json:"created_at" validate:"required"`
+
+	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
+	DeadlineOnDate *string        `json:"deadline_on_date,omitempty"`
+	DeletedAt      *time.Time     `json:"deleted_at,omitempty"`
+	ID             int64          `json:"id"`
+	Labels         []string       `json:"labels,omitempty"`
+	Metadata       map[string]any `json:"metadata"`
+	OccurrenceKey  *string        `json:"occurrence_key,omitempty"`
+	Owner          *string        `json:"owner,omitempty"`
+	Parent         *LinkPeer      `json:"parent,omitempty"`
+	Priority       *int64         `json:"priority,omitempty"`
+	ProjectID      int64          `json:"project_id"`
+	ProjectUID     *string        `json:"project_uid,omitempty"`
+	QualifiedID    string         `json:"qualified_id" validate:"required"`
+	RecurrenceID   *int64         `json:"recurrence_id,omitempty"`
+	Related        []LinkPeer     `json:"related,omitempty"`
+	Revision       int64          `json:"revision"`
+
+	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
+	ScheduledOnDate *string               `json:"scheduled_on_date,omitempty"`
+	ShortID         string                `json:"short_id" validate:"required"`
+	SourceActor     *string               `json:"source_actor,omitempty"`
+	Status          string                `json:"status" validate:"required"`
+	Teammate        *string               `json:"teammate,omitempty"`
+	Title           string                `json:"title" validate:"required"`
+	UID             string                `json:"uid" validate:"required"`
+	UpdatedAt       time.Time             `json:"updated_at" validate:"required"`
+	Verification    *IssueOutVerification `json:"verification,omitempty"`
 
 	// WebURL Browser URL for this issue in the owning daemon.
 	WebURL *string `json:"web_url,omitempty"`
@@ -4169,41 +4175,47 @@ func (l ListFederationEnrollmentsBody) Validate() error {
 }
 
 type ListGlobalIssueOut struct {
-	AccountableActor    *string                         `json:"accountable_actor,omitempty"`
-	AssignmentExpiresOn *time.Time                      `json:"assignment_expires_on,omitempty"`
-	Author              string                          `json:"author" validate:"required"`
-	AuthorityUID        *string                         `json:"authority_uid,omitempty"`
-	Blocked             *bool                           `json:"blocked,omitempty"`
-	BlockedBy           []LinkPeer                      `json:"blocked_by,omitempty"`
-	Blocks              []LinkPeer                      `json:"blocks,omitempty"`
-	Body                string                          `json:"body" validate:"required"`
-	ChildCounts         *ChildCounts                    `json:"child_counts,omitempty"`
-	ClosedAt            *time.Time                      `json:"closed_at,omitempty"`
-	ClosedReason        *string                         `json:"closed_reason,omitempty"`
-	CreatedAt           time.Time                       `json:"created_at" validate:"required"`
-	DeletedAt           *time.Time                      `json:"deleted_at,omitempty"`
-	ID                  int64                           `json:"id"`
-	Labels              []string                        `json:"labels,omitempty"`
-	Metadata            map[string]any                  `json:"metadata"`
-	OccurrenceKey       *string                         `json:"occurrence_key,omitempty"`
-	Owner               *string                         `json:"owner,omitempty"`
-	Parent              *LinkPeer                       `json:"parent,omitempty"`
-	Priority            *int64                          `json:"priority,omitempty"`
-	ProjectID           int64                           `json:"project_id"`
-	ProjectName         string                          `json:"project_name" validate:"required"`
-	ProjectUID          *string                         `json:"project_uid,omitempty"`
-	QualifiedID         string                          `json:"qualified_id" validate:"required"`
-	RecurrenceID        *int64                          `json:"recurrence_id,omitempty"`
-	Related             []LinkPeer                      `json:"related,omitempty"`
-	Revision            int64                           `json:"revision"`
-	ShortID             string                          `json:"short_id" validate:"required"`
-	SourceActor         *string                         `json:"source_actor,omitempty"`
-	Status              string                          `json:"status" validate:"required"`
-	Teammate            *string                         `json:"teammate,omitempty"`
-	Title               string                          `json:"title" validate:"required"`
-	UID                 string                          `json:"uid" validate:"required"`
-	UpdatedAt           time.Time                       `json:"updated_at" validate:"required"`
-	Verification        *ListGlobalIssueOutVerification `json:"verification,omitempty"`
+	AccountableActor    *string      `json:"accountable_actor,omitempty"`
+	AssignmentExpiresOn *time.Time   `json:"assignment_expires_on,omitempty"`
+	Author              string       `json:"author" validate:"required"`
+	AuthorityUID        *string      `json:"authority_uid,omitempty"`
+	Blocked             *bool        `json:"blocked,omitempty"`
+	BlockedBy           []LinkPeer   `json:"blocked_by,omitempty"`
+	Blocks              []LinkPeer   `json:"blocks,omitempty"`
+	Body                string       `json:"body" validate:"required"`
+	ChildCounts         *ChildCounts `json:"child_counts,omitempty"`
+	ClosedAt            *time.Time   `json:"closed_at,omitempty"`
+	ClosedReason        *string      `json:"closed_reason,omitempty"`
+	CreatedAt           time.Time    `json:"created_at" validate:"required"`
+
+	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
+	DeadlineOnDate *string        `json:"deadline_on_date,omitempty"`
+	DeletedAt      *time.Time     `json:"deleted_at,omitempty"`
+	ID             int64          `json:"id"`
+	Labels         []string       `json:"labels,omitempty"`
+	Metadata       map[string]any `json:"metadata"`
+	OccurrenceKey  *string        `json:"occurrence_key,omitempty"`
+	Owner          *string        `json:"owner,omitempty"`
+	Parent         *LinkPeer      `json:"parent,omitempty"`
+	Priority       *int64         `json:"priority,omitempty"`
+	ProjectID      int64          `json:"project_id"`
+	ProjectName    string         `json:"project_name" validate:"required"`
+	ProjectUID     *string        `json:"project_uid,omitempty"`
+	QualifiedID    string         `json:"qualified_id" validate:"required"`
+	RecurrenceID   *int64         `json:"recurrence_id,omitempty"`
+	Related        []LinkPeer     `json:"related,omitempty"`
+	Revision       int64          `json:"revision"`
+
+	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
+	ScheduledOnDate *string                         `json:"scheduled_on_date,omitempty"`
+	ShortID         string                          `json:"short_id" validate:"required"`
+	SourceActor     *string                         `json:"source_actor,omitempty"`
+	Status          string                          `json:"status" validate:"required"`
+	Teammate        *string                         `json:"teammate,omitempty"`
+	Title           string                          `json:"title" validate:"required"`
+	UID             string                          `json:"uid" validate:"required"`
+	UpdatedAt       time.Time                       `json:"updated_at" validate:"required"`
+	Verification    *ListGlobalIssueOutVerification `json:"verification,omitempty"`
 
 	// WebURL Browser URL for this issue in the owning daemon.
 	WebURL *string `json:"web_url,omitempty"`
@@ -5399,41 +5411,47 @@ func (r ReachableGraphUnresolvedRef) Validate() error {
 }
 
 type ReadyGlobalIssueOut struct {
-	AccountableActor    *string                          `json:"accountable_actor,omitempty"`
-	AssignmentExpiresOn *time.Time                       `json:"assignment_expires_on,omitempty"`
-	Author              string                           `json:"author" validate:"required"`
-	AuthorityUID        *string                          `json:"authority_uid,omitempty"`
-	Blocked             *bool                            `json:"blocked,omitempty"`
-	BlockedBy           []LinkPeer                       `json:"blocked_by,omitempty"`
-	Blocks              []LinkPeer                       `json:"blocks,omitempty"`
-	Body                string                           `json:"body" validate:"required"`
-	ChildCounts         *ChildCounts                     `json:"child_counts,omitempty"`
-	ClosedAt            *time.Time                       `json:"closed_at,omitempty"`
-	ClosedReason        *string                          `json:"closed_reason,omitempty"`
-	CreatedAt           time.Time                        `json:"created_at" validate:"required"`
-	DeletedAt           *time.Time                       `json:"deleted_at,omitempty"`
-	ID                  int64                            `json:"id"`
-	Labels              []string                         `json:"labels,omitempty"`
-	Metadata            map[string]any                   `json:"metadata"`
-	OccurrenceKey       *string                          `json:"occurrence_key,omitempty"`
-	Owner               *string                          `json:"owner,omitempty"`
-	Parent              *LinkPeer                        `json:"parent,omitempty"`
-	Priority            *int64                           `json:"priority,omitempty"`
-	ProjectID           int64                            `json:"project_id"`
-	ProjectName         string                           `json:"project_name" validate:"required"`
-	ProjectUID          *string                          `json:"project_uid,omitempty"`
-	QualifiedID         string                           `json:"qualified_id" validate:"required"`
-	RecurrenceID        *int64                           `json:"recurrence_id,omitempty"`
-	Related             []LinkPeer                       `json:"related,omitempty"`
-	Revision            int64                            `json:"revision"`
-	ShortID             string                           `json:"short_id" validate:"required"`
-	SourceActor         *string                          `json:"source_actor,omitempty"`
-	Status              string                           `json:"status" validate:"required"`
-	Teammate            *string                          `json:"teammate,omitempty"`
-	Title               string                           `json:"title" validate:"required"`
-	UID                 string                           `json:"uid" validate:"required"`
-	UpdatedAt           time.Time                        `json:"updated_at" validate:"required"`
-	Verification        *ReadyGlobalIssueOutVerification `json:"verification,omitempty"`
+	AccountableActor    *string      `json:"accountable_actor,omitempty"`
+	AssignmentExpiresOn *time.Time   `json:"assignment_expires_on,omitempty"`
+	Author              string       `json:"author" validate:"required"`
+	AuthorityUID        *string      `json:"authority_uid,omitempty"`
+	Blocked             *bool        `json:"blocked,omitempty"`
+	BlockedBy           []LinkPeer   `json:"blocked_by,omitempty"`
+	Blocks              []LinkPeer   `json:"blocks,omitempty"`
+	Body                string       `json:"body" validate:"required"`
+	ChildCounts         *ChildCounts `json:"child_counts,omitempty"`
+	ClosedAt            *time.Time   `json:"closed_at,omitempty"`
+	ClosedReason        *string      `json:"closed_reason,omitempty"`
+	CreatedAt           time.Time    `json:"created_at" validate:"required"`
+
+	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
+	DeadlineOnDate *string        `json:"deadline_on_date,omitempty"`
+	DeletedAt      *time.Time     `json:"deleted_at,omitempty"`
+	ID             int64          `json:"id"`
+	Labels         []string       `json:"labels,omitempty"`
+	Metadata       map[string]any `json:"metadata"`
+	OccurrenceKey  *string        `json:"occurrence_key,omitempty"`
+	Owner          *string        `json:"owner,omitempty"`
+	Parent         *LinkPeer      `json:"parent,omitempty"`
+	Priority       *int64         `json:"priority,omitempty"`
+	ProjectID      int64          `json:"project_id"`
+	ProjectName    string         `json:"project_name" validate:"required"`
+	ProjectUID     *string        `json:"project_uid,omitempty"`
+	QualifiedID    string         `json:"qualified_id" validate:"required"`
+	RecurrenceID   *int64         `json:"recurrence_id,omitempty"`
+	Related        []LinkPeer     `json:"related,omitempty"`
+	Revision       int64          `json:"revision"`
+
+	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
+	ScheduledOnDate *string                          `json:"scheduled_on_date,omitempty"`
+	ShortID         string                           `json:"short_id" validate:"required"`
+	SourceActor     *string                          `json:"source_actor,omitempty"`
+	Status          string                           `json:"status" validate:"required"`
+	Teammate        *string                          `json:"teammate,omitempty"`
+	Title           string                           `json:"title" validate:"required"`
+	UID             string                           `json:"uid" validate:"required"`
+	UpdatedAt       time.Time                        `json:"updated_at" validate:"required"`
+	Verification    *ReadyGlobalIssueOutVerification `json:"verification,omitempty"`
 
 	// WebURL Browser URL for this issue in the owning daemon.
 	WebURL *string `json:"web_url,omitempty"`
@@ -6397,33 +6415,39 @@ func (s SetProjectAccessRequestBody) Validate() error {
 }
 
 type ShowIssueOut struct {
-	AccountableActor    *string                   `json:"accountable_actor,omitempty"`
-	AssignmentExpiresOn *time.Time                `json:"assignment_expires_on,omitempty"`
-	Author              string                    `json:"author" validate:"required"`
-	AuthorityUID        *string                   `json:"authority_uid,omitempty"`
-	Body                string                    `json:"body" validate:"required"`
-	ClosedAt            *time.Time                `json:"closed_at,omitempty"`
-	ClosedReason        *string                   `json:"closed_reason,omitempty"`
-	CreatedAt           time.Time                 `json:"created_at" validate:"required"`
-	DeletedAt           *time.Time                `json:"deleted_at,omitempty"`
-	ID                  int64                     `json:"id"`
-	Labels              []string                  `json:"labels" validate:"required"`
-	Metadata            map[string]any            `json:"metadata"`
-	OccurrenceKey       *string                   `json:"occurrence_key,omitempty"`
-	Owner               *string                   `json:"owner,omitempty"`
-	Priority            *int64                    `json:"priority,omitempty"`
-	ProjectID           int64                     `json:"project_id"`
-	ProjectUID          *string                   `json:"project_uid,omitempty"`
-	RecurrenceID        *int64                    `json:"recurrence_id,omitempty"`
-	Revision            int64                     `json:"revision"`
-	ShortID             string                    `json:"short_id" validate:"required"`
-	SourceActor         *string                   `json:"source_actor,omitempty"`
-	Status              string                    `json:"status" validate:"required"`
-	Teammate            *string                   `json:"teammate,omitempty"`
-	Title               string                    `json:"title" validate:"required"`
-	UID                 string                    `json:"uid" validate:"required"`
-	UpdatedAt           time.Time                 `json:"updated_at" validate:"required"`
-	Verification        *ShowIssueOutVerification `json:"verification,omitempty"`
+	AccountableActor    *string    `json:"accountable_actor,omitempty"`
+	AssignmentExpiresOn *time.Time `json:"assignment_expires_on,omitempty"`
+	Author              string     `json:"author" validate:"required"`
+	AuthorityUID        *string    `json:"authority_uid,omitempty"`
+	Body                string     `json:"body" validate:"required"`
+	ClosedAt            *time.Time `json:"closed_at,omitempty"`
+	ClosedReason        *string    `json:"closed_reason,omitempty"`
+	CreatedAt           time.Time  `json:"created_at" validate:"required"`
+
+	// DeadlineOnDate deadline_on as a YYYY-MM-DD calendar date in the issue timezone, then the daemon timezone, then UTC; omitted when deadline_on is absent or unreadable.
+	DeadlineOnDate *string        `json:"deadline_on_date,omitempty"`
+	DeletedAt      *time.Time     `json:"deleted_at,omitempty"`
+	ID             int64          `json:"id"`
+	Labels         []string       `json:"labels" validate:"required"`
+	Metadata       map[string]any `json:"metadata"`
+	OccurrenceKey  *string        `json:"occurrence_key,omitempty"`
+	Owner          *string        `json:"owner,omitempty"`
+	Priority       *int64         `json:"priority,omitempty"`
+	ProjectID      int64          `json:"project_id"`
+	ProjectUID     *string        `json:"project_uid,omitempty"`
+	RecurrenceID   *int64         `json:"recurrence_id,omitempty"`
+	Revision       int64          `json:"revision"`
+
+	// ScheduledOnDate scheduled_on as a YYYY-MM-DD calendar date in the issue timezone, then (for a recurring occurrence without one) the recurrence timezone, then the daemon timezone, then UTC; omitted when scheduled_on is absent or unreadable.
+	ScheduledOnDate *string                   `json:"scheduled_on_date,omitempty"`
+	ShortID         string                    `json:"short_id" validate:"required"`
+	SourceActor     *string                   `json:"source_actor,omitempty"`
+	Status          string                    `json:"status" validate:"required"`
+	Teammate        *string                   `json:"teammate,omitempty"`
+	Title           string                    `json:"title" validate:"required"`
+	UID             string                    `json:"uid" validate:"required"`
+	UpdatedAt       time.Time                 `json:"updated_at" validate:"required"`
+	Verification    *ShowIssueOutVerification `json:"verification,omitempty"`
 }
 
 func (s ShowIssueOut) Validate() error {

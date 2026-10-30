@@ -1,0 +1,60 @@
+ Project: —                             kata カタ
+
+  #42aa  Review a finding                   [open]
+  authored by worker
+  owner: none   parent: none
+  priority: none
+
+  Body
+  Discuss the evidence.
+
+  Activity   [ Comments (7) ]   Events (2)   Link…
+    c:0  worker  Apr 30 10:00
+    confirm
+    Start.
+    Confirmations 1
+
+      c:1  worker  Apr 30 10:01
+      confirm
+      ↳ Confirms c:0 by worker
+      Evidence remains visible at depth.
+      Confirmations 1
+
+        c:2  worker  Apr 30 10:02
+        confirm
+        ↳ Confirms c:1 by worker
+        Evidence remains visible at depth.
+        Confirmations 1
+
+          c:3  worker  Apr 30 10:03
+          confirm
+          ↳ Confirms c:2 by worker
+          Evidence remains visible at depth.
+          Confirmations 1
+
+            c:4  worker  Apr 30 10:04
+            confirm
+            ↳ Confirms c:3 by worker
+            Evidence remains visible at depth.
+            Confirmations 1
+
+            c:5  worker  Apr 30 10:05  (edited)
+            confirm
+            ↳ Confirms c:4 by worker
+            Evidence remains visible at depth.
+            Confirmations 1
+
+  >         c:6  worker  Apr 30 10:06
+            ↳ Confirms c:5 by worker
+            Evidence remains visible at depth.
+            R typed reply · [/] select evidence ·
+                               [lines 1-48 of 53]
+ ↑↓ scroll▕ j/k row       ▕ ↹ section
+ ↵ open   ▕ pgup/pgdn page▕ e edit
+ c comment▕ + label       ▕ - unlabel
+ a owner  ▕ A unassign    ▕ t timed
+ x close  ▕ r reopen      ▕ p parent
+ b block  ▕ l related     ▕ ! priority
+ D daemons▕ F federation  ▕ C credentials
+ N child  ▕ L layout      ▕ esc back
+ ? help   ▕ q quit
