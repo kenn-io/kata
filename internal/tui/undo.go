@@ -90,40 +90,33 @@ func (m Model) startUndo() (Model, tea.Cmd) {
 		}
 		return m.undoNotice(message, toastInfo)
 	}
-	client, ok := m.api.(*undoClient)
+	_, ok := m.api.(*undoClient)
 	if !ok {
 		return m.undoNotice("undo unavailable for this connection", toastError)
 	}
 	if !m.mutationAllowed(true) {
 		return m.undoNotice("undo unavailable with current permissions", toastError)
 	}
-	entry := m.undoHistory.entries[len(m.undoHistory.entries)-1]
-	m.undoInFlight = true
-	connGen := m.connGen
-	evidenceRequired := m.closeRequiresEvidence
-	return m, func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		return undoDoneMsg{connGen: connGen, entryID: entry.id,
-			outcome: client.undoWith(ctx, entry, undoOptions{evidenceRequired: evidenceRequired, checkBacklog: true})}
-	}
+	return m.runUndo(undoOptions{evidenceRequired: m.closeRequiresEvidence, checkBacklog: true}, 0)
 }
 
-// dispatchConfirmedUndo runs the undo whose reopen backlog the user accepted.
-func (m Model) dispatchConfirmedUndo(entryID uint64) (Model, tea.Cmd) {
+// runUndo undoes the latest history entry. A non-zero wantEntryID names the
+// entry a confirmation was shown for; if another entry is now latest, nothing runs.
+func (m Model) runUndo(opts undoOptions, wantEntryID uint64) (Model, tea.Cmd) {
 	client, ok := m.api.(*undoClient)
-	if !ok || len(m.undoHistory.entries) == 0 || m.undoHistory.entries[len(m.undoHistory.entries)-1].id != entryID {
+	if !ok || len(m.undoHistory.entries) == 0 {
 		return m.undoNotice("undo action is no longer available", toastError)
 	}
 	entry := m.undoHistory.entries[len(m.undoHistory.entries)-1]
+	if wantEntryID != 0 && entry.id != wantEntryID {
+		return m.undoNotice("undo action is no longer available", toastError)
+	}
 	m.undoInFlight = true
 	connGen := m.connGen
-	evidenceRequired := m.closeRequiresEvidence
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		return undoDoneMsg{connGen: connGen, entryID: entry.id,
-			outcome: client.undoWith(ctx, entry, undoOptions{evidenceRequired: evidenceRequired})}
+		return undoDoneMsg{connGen: connGen, entryID: entry.id, outcome: client.undo(ctx, entry, opts)}
 	}
 }
 
@@ -310,7 +303,7 @@ func (m Model) dispatchUndoEvidenceClose(in CloseInput) (Model, tea.Cmd) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return undoDoneMsg{connGen: connGen, entryID: entry.id, formGen: formGen,
-			outcome: client.undo(ctx, entry, true, &in)}
+			outcome: client.undo(ctx, entry, undoOptions{evidenceRequired: true, evidence: &in})}
 	}
 }
 

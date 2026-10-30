@@ -70,6 +70,14 @@ func (c *undoClient) ListTokens(ctx context.Context) ([]TokenInfo, time.Time, er
 	return audit.ListTokens(ctx)
 }
 
+func (c *undoClient) ReopenBacklog(ctx context.Context, projectID int64, ref string) (int, error) {
+	api, ok := c.KataAPI.(reopenBacklogAPI)
+	if !ok {
+		return 0, errors.New("reopen backlog client unavailable")
+	}
+	return api.ReopenBacklog(ctx, projectID, ref)
+}
+
 func (c *undoClient) ReportAppOpened(ctx context.Context) error {
 	reporter, ok := c.KataAPI.(appOpenedAPI)
 	if !ok {

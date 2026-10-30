@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"maps"
 	"net/http"
 	"strings"
 	"testing"
@@ -11,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
-	"go.kenn.io/kata/internal/db"
 )
 
 const (
@@ -40,7 +40,8 @@ func (j backlogJob) definition() api.CronJob {
 		Issue:   &cron.IssuePolicy{Kind: "per-run", ParentUID: backlogParentUID, Title: "Review"},
 		Overlap: "allow", Catchup: j.catchup, GraceSeconds: j.grace,
 	}
-	job := api.CronJob{CronDefinition: db.CronDefinition{UID: j.uid, DefinitionEventUID: backlogEventUID}, Definition: def}
+	var job api.CronJob
+	job.UID, job.DefinitionEventUID, job.Definition = j.uid, backlogEventUID, def
 	if j.deleted {
 		now := time.Now().UTC()
 		job.DeletedAt = &now
@@ -63,9 +64,7 @@ func backlogDaemon(t *testing.T, extraMeta map[string]any, jobs ...backlogJob) *
 		metadata[cronProgressPrefix+j.uid] = j.progress()
 		byUID[j.uid] = j
 	}
-	for k, v := range extraMeta {
-		metadata[k] = v
-	}
+	maps.Copy(metadata, extraMeta)
 	return newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/api/v1/projects/7/issues/abcd/metadata":
@@ -97,6 +96,7 @@ func TestReopenBacklogCountsRecurringJobs(t *testing.T) {
 			{uid: "job-a", catchup: "all", missed: 3},
 			{uid: "job-b", catchup: "all", missed: 4},
 		}, 7},
+		{"skip with several occurrences inside grace", nil, []backlogJob{{uid: "job-a", catchup: "skip", grace: 300, missed: 800}}, 5},
 		{"latest delivers one", nil, []backlogJob{{uid: "job-a", catchup: "latest", missed: 500}}, 1},
 		{"skip delivers only what is inside grace", nil, []backlogJob{{uid: "job-a", catchup: "skip", grace: 60, missed: 500}}, 1},
 		{"nothing missed", nil, []backlogJob{{uid: "job-a", catchup: "all", missed: 0}}, 0},
@@ -121,7 +121,7 @@ func TestReopenBacklogCountsRecurringJobs(t *testing.T) {
 }
 
 func TestReopenBacklogReportsMetadataFailure(t *testing.T) {
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) { http.Error(w, "boom", http.StatusInternalServerError) })
+	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "boom", http.StatusInternalServerError) })
 	_, err := c.ReopenBacklog(context.Background(), 7, "abcd")
 	require.Error(t, err)
 }
@@ -129,11 +129,14 @@ func TestReopenBacklogReportsMetadataFailure(t *testing.T) {
 // reopenSpyAPI counts the reopens the model sends to the daemon.
 type reopenSpyAPI struct {
 	*Client
-	reopens int
+	reopens    int
+	project    int64
+	ref, actor string
 }
 
-func (s *reopenSpyAPI) Reopen(_ context.Context, _ int64, _, _ string) (*MutationResp, error) {
+func (s *reopenSpyAPI) Reopen(_ context.Context, projectID int64, ref, actor string) (*MutationResp, error) {
 	s.reopens++
+	s.project, s.ref, s.actor = projectID, ref, actor
 	return &MutationResp{Issue: &Issue{UID: "01TEST-abcd", ShortID: "abcd", Status: "open"}, Changed: true}, nil
 }
 
@@ -185,7 +188,7 @@ func TestReopenFromListAndDetailPromptsBeforeDeliveringBacklog(t *testing.T) {
 			require.Nil(t, cmd)
 			require.Equal(t, modalReopenBacklog, m.modal)
 			require.Zero(t, spy.reopens, "nothing is reopened until the user confirms")
-			view := stripANSI(m.confirmModalView())
+			view := stripANSI(renderConfirmModal(m.modal, m.reopenPrompt))
 			require.Contains(t, view, "Reopen #abcd?")
 			require.Contains(t, view, "3 recurring child")
 			require.Contains(t, view, "kata cron job update")
@@ -246,7 +249,7 @@ func TestReopenWithoutBacklogSkipsPrompt(t *testing.T) {
 }
 
 func TestReopenReadFailureStillReopens(t *testing.T) {
-	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) { http.Error(w, "boom", http.StatusInternalServerError) })
+	client := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "boom", http.StatusInternalServerError) })
 	spy := &reopenSpyAPI{Client: client}
 	m, cmd := pressReopen(t, listReopenModel(t, spy))
 	require.Equal(t, modalNone, m.modal)
@@ -309,7 +312,7 @@ func TestUndoCloseConfirmsBacklogBeforeReopening(t *testing.T) {
 	require.Zero(t, f.reopenCalls)
 	require.Len(t, m.undoHistory.entries, 1, "the close stays undoable until confirmed")
 	require.False(t, m.undoInFlight)
-	view := stripANSI(m.confirmModalView())
+	view := stripANSI(renderConfirmModal(m.modal, m.reopenPrompt))
 	require.Contains(t, view, "5 recurring child")
 	require.Contains(t, view, "kata cron job update")
 
@@ -351,9 +354,61 @@ func TestUndoCloseWithoutBacklogReopensDirectly(t *testing.T) {
 	}
 }
 
-func TestReopenBacklogModalHelpOffersBothChoices(t *testing.T) {
-	rows := modalHelpRows(modalReopenBacklog)
-	require.Len(t, rows, 1)
-	require.Equal(t, "y", rows[0][0].Key)
-	require.Equal(t, "n/esc", rows[0][1].Key)
+func TestReopenBacklogModalFooterShowsChoices(t *testing.T) {
+	spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
+	m, _ := updateModel(listReopenModel(t, spy), tea.WindowSizeMsg{Width: 120, Height: 40})
+	m, _ = pressReopen(t, m)
+	footer := stripANSI(m.View().Content)
+	require.Contains(t, footer, "reopen")
+	require.Contains(t, footer, "cancel")
+}
+
+// Without a backlog reader the key still reopens, with the row's project, ref and actor.
+func TestReopenDispatchesRowAndActor(t *testing.T) {
+	for name, model := range map[string]func(*testing.T, *reopenSpyAPI) Model{"list": listReopenModel, "detail": detailReopenModel} {
+		t.Run(name, func(t *testing.T) {
+			spy := &reopenSpyAPI{Client: backlogDaemon(t, nil)}
+			m := model(t, spy)
+			m.list.status = "stale status"
+			m, cmd := pressReopen(t, m)
+			require.NotNil(t, cmd)
+			require.IsType(t, mutationDoneMsg{}, cmd())
+			require.Equal(t, 1, spy.reopens)
+			require.Equal(t, int64(7), spy.project)
+			require.Equal(t, "abcd", spy.ref)
+			require.Equal(t, "tester", spy.actor)
+			if name == "list" {
+				require.Empty(t, m.list.status)
+			}
+		})
+	}
+}
+
+func TestReopenSkipJobWithSeveralInGraceShowsPrompt(t *testing.T) {
+	spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "skip", grace: 300, missed: 800})}
+	m, cmd := pressReopen(t, listReopenModel(t, spy))
+	require.Nil(t, cmd)
+	require.Equal(t, modalReopenBacklog, m.modal)
+	require.Contains(t, stripANSI(renderConfirmModal(m.modal, m.reopenPrompt)), "5 recurring child")
+}
+
+// An open parent can be part-way through delivering a backlog; reopening does
+// nothing for it, so the closed-period warning must not appear.
+func TestReopenOfOpenIssueSkipsBacklogCheck(t *testing.T) {
+	for name, model := range map[string]func(*testing.T, *reopenSpyAPI) Model{"list": listReopenModel, "detail": detailReopenModel} {
+		t.Run(name, func(t *testing.T) {
+			spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
+			m := model(t, spy)
+			if name == "list" {
+				m.list.issues[0].Status = "open"
+			} else {
+				m.detail.issue.Status = "open"
+			}
+			m, cmd := updateModel(m, runeKey('r'))
+			require.Equal(t, modalNone, m.modal)
+			require.NotNil(t, cmd)
+			require.IsType(t, mutationDoneMsg{}, cmd())
+			require.Equal(t, 1, spy.reopens)
+		})
+	}
 }

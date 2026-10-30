@@ -1269,33 +1269,6 @@ func TestList_AuthorFilter_NarrowsDisplay(t *testing.T) {
 	}
 }
 
-// TestList_Reopen_DispatchesAPI covers the list-local 'r' binding. Close is
-// intentionally tested through Model because it first resolves the daemon's
-// evidence requirement and opens the close form.
-func TestList_Reopen_DispatchesAPI(t *testing.T) {
-	api, km, sc := newListEnv()
-	api.reopenResult = &MutationResp{Issue: &Issue{UID: "01TEST-aaa1", ShortID: "aaa1", Status: "open"}}
-	lm := listModel{
-		actor: "tester",
-		issues: []Issue{
-			{ProjectID: 7, UID: "01TEST-aaa1", ShortID: "aaa1", Title: "first"},
-		},
-	}
-
-	lm, cmd := lm.Update(runeKey('r'), km, api, sc)
-	if cmd == nil {
-		t.Fatal("expected reopen cmd from r")
-	}
-	_ = drainCmd(t, lm, cmd, km, api, sc)
-	if api.reopenCalls != 1 {
-		t.Fatalf("reopenCalls = %d, want 1", api.reopenCalls)
-	}
-	if api.lastReopenRef != "aaa1" || api.lastReopenActor != "tester" {
-		t.Fatalf("reopen args wrong: ref=%q actor=%q",
-			api.lastReopenRef, api.lastReopenActor)
-	}
-}
-
 // TestList_SetPriority_PendingThenDigit: pressing `!` arms pending
 // mode; the next digit (0..4) dispatches SetPriority for the cursor row
 // with the corresponding *int64. The pending hint must clear after the

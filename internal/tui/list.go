@@ -23,7 +23,6 @@ type listAPI interface {
 		ctx context.Context, projectID int64, body CreateIssueBody,
 	) (*MutationResp, error)
 	Close(ctx context.Context, projectID int64, ref, actor string) (*MutationResp, error)
-	Reopen(ctx context.Context, projectID int64, ref, actor string) (*MutationResp, error)
 	SetPriority(
 		ctx context.Context, projectID int64, ref string, priority *int64, actor string,
 	) (*MutationResp, error)
@@ -170,9 +169,9 @@ func (lm listModel) applyNavKey(
 	return lm, nil
 }
 
-// applyMutationKey handles list-side mutation bindings: reopen (r) and
-// set-priority (!) act on the highlighted row. Close is routed by Model so it
-// can collect the required close reason, message, and evidence. Empty
+// applyMutationKey handles list-side mutation bindings: set-priority (!) acts
+// on the highlighted row. Close and reopen are routed by Model so they can
+// collect the close evidence or confirm a recurring backlog. Empty
 // list is a quiet no-op so a stray keystroke on the empty-state hint
 // does nothing. `!` arms pendingPriority; the next 0..4 / `-` keystroke
 // is consumed by applyPendingPriorityKey before it reaches any other
@@ -181,9 +180,6 @@ func (lm listModel) applyMutationKey(
 	msg tea.KeyPressMsg, km keymap, api listAPI, sc scope,
 ) (listModel, tea.Cmd, bool) {
 	switch {
-	case km.Reopen.matches(msg):
-		next, cmd := lm.dispatchListReopen(api, sc)
-		return next, cmd, true
 	case km.SetPriority.matches(msg):
 		next := lm.armPendingPriority()
 		return next, nil, true
@@ -247,18 +243,6 @@ func (lm listModel) dispatchListSetPriority(
 	return lm, setPriorityListCmd(api, projectIDForRow(iss, sc), iss.ShortID, priority, lm.actor)
 }
 
-// dispatchListReopen reopens the issue under the cursor.
-func (lm listModel) dispatchListReopen(
-	api listAPI, sc scope,
-) (listModel, tea.Cmd) {
-	iss, ok := lm.targetRow()
-	if !ok {
-		return lm, nil
-	}
-	lm.status = ""
-	return lm, reopenIssueCmd(api, projectIDForRow(iss, sc), iss.ShortID, lm.actor)
-}
-
 // targetRow returns the currently highlighted issue, accounting for the
 // client-side filter that hides rows the cursor still indexes. ok=false
 // when the visible list is empty.
@@ -294,16 +278,6 @@ func projectIDForRow(iss Issue, sc scope) int64 {
 		return iss.ProjectID
 	}
 	return sc.projectID
-}
-
-// reopenIssueCmd is the reopen counterpart of closeIssueCmd.
-func reopenIssueCmd(api listAPI, pid int64, ref, actor string) tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		resp, err := api.Reopen(ctx, pid, ref, actor)
-		return mutationDoneMsg{origin: "list", kind: "reopen", resp: resp, err: err}
-	}
 }
 
 // setPriorityListCmd wraps SetPriority into a mutationDoneMsg-emitting

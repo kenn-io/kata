@@ -3596,7 +3596,7 @@ func (m Model) overlayInputAndModal(body string) string {
 		body = overlayModal(body, form, m.width, m.height)
 	}
 	if m.modal != modalNone {
-		body = overlayModal(body, m.confirmModalView(), m.width, m.height)
+		body = overlayModal(body, renderConfirmModal(m.modal, m.reopenPrompt), m.width, m.height)
 	}
 	return body
 }

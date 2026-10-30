@@ -31,11 +31,7 @@ type undoOptions struct {
 	checkBacklog     bool
 }
 
-func (c *undoClient) undo(ctx context.Context, entry undoEntry, evidenceRequired bool, evidence *CloseInput) undoOutcome {
-	return c.undoWith(ctx, entry, undoOptions{evidenceRequired: evidenceRequired, evidence: evidence})
-}
-
-func (c *undoClient) undoWith(ctx context.Context, entry undoEntry, opts undoOptions) undoOutcome {
+func (c *undoClient) undo(ctx context.Context, entry undoEntry, opts undoOptions) undoOutcome {
 	evidenceRequired, evidence := opts.evidenceRequired, opts.evidence
 	attempt, err := c.begin(ctx, false)
 	if err != nil {
@@ -93,12 +89,10 @@ func (c *undoClient) undoWith(ctx context.Context, entry undoEntry, opts undoOpt
 			return out
 		}
 		if entry.kind == "close" && opts.checkBacklog {
-			if checker, ok := backlogChecker(c); ok {
-				// A failed lookup must not block undo; only a known backlog prompts.
-				if count, err := checker.ReopenBacklog(ctx, entry.projectID, entry.uid); err == nil && count > 1 {
-					out.backlog = count
-					return out
-				}
+			// A failed lookup must not block undo; only a known backlog prompts.
+			if count, err := c.ReopenBacklog(ctx, entry.projectID, entry.uid); err == nil && count > 1 {
+				out.backlog = count
+				return out
 			}
 		}
 		if entry.kind == "close" {
