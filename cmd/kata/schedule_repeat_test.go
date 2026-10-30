@@ -240,17 +240,28 @@ func movingProxy(t *testing.T, env *testenv.Env, competing func()) string {
 // request that match accepts.
 func proxyBefore(t *testing.T, env *testenv.Env, match func(*http.Request) bool, competing func()) string {
 	t.Helper()
+	var once sync.Once
+	return interceptingProxy(t, env, func(_ http.ResponseWriter, r *http.Request) bool {
+		if match(r) {
+			once.Do(competing)
+		}
+		return false
+	})
+}
+
+// interceptingProxy forwards to the daemon unless intercept answers the
+// request itself and returns true.
+func interceptingProxy(t *testing.T, env *testenv.Env, intercept func(http.ResponseWriter, *http.Request) bool) string {
+	t.Helper()
 	target, err := url.Parse(env.URL)
 	require.NoError(t, err)
 	// Rewrite, unlike the default director, adds no X-Forwarded-For header,
 	// which the daemon would read as a remote caller.
 	proxy := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) { r.SetURL(target) }}
-	var once sync.Once
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if match(r) {
-			once.Do(competing)
+		if !intercept(w, r) {
+			proxy.ServeHTTP(w, r)
 		}
-		proxy.ServeHTTP(w, r)
 	}))
 	t.Cleanup(srv.Close)
 	return srv.URL
@@ -512,18 +523,13 @@ func TestScheduleRepeatReportsAMovedIssueWithItsCurrentProjectRef(t *testing.T) 
 // predates the If-Match guard on starting a recurrence.
 func olderDaemonProxy(t *testing.T, env *testenv.Env) string {
 	t.Helper()
-	target, err := url.Parse(env.URL)
-	require.NoError(t, err)
-	proxy := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) { r.SetURL(target) }}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/health" {
-			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.35.0"}`))
-			return
+	return interceptingProxy(t, env, func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path != "/api/v1/health" {
+			return false
 		}
-		proxy.ServeHTTP(w, r)
-	}))
-	t.Cleanup(srv.Close)
-	return srv.URL
+		_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.35.0"}`))
+		return true
+	})
 }
 
 func TestScheduleRepeatIfMatchOnAnOlderDaemonOnlyBlocksStarting(t *testing.T) {
@@ -532,8 +538,9 @@ func TestScheduleRepeatIfMatchOnAnOlderDaemonOnlyBlocksStarting(t *testing.T) {
 	ref := createIssue(t, env, pid, "older daemon")
 	older := olderDaemonProxy(t, env)
 
-	_, _, err := runCLIAgainst(t, older, dir, "schedule", "--if-match", "1", ref, "2026-11-02", "--repeat", "FREQ=DAILY", "--timezone", "UTC")
+	_, stderr, err := runCLIAgainst(t, older, dir, "schedule", "--if-match", "1", ref, "2026-11-02", "--repeat", "FREQ=DAILY", "--timezone", "UTC")
 	require.Error(t, err, "starting needs the daemon guard")
+	assert.Contains(t, stderr, "--if-match when starting a recurrence requires daemon API 0.36.0")
 	assert.Empty(t, listRecurrencesViaHTTP(t, env, pid))
 
 	runCLI(t, env, dir, "schedule", "--if-match", "1", ref, "2026-11-02", "--repeat", "FREQ=DAILY", "--timezone", "UTC")
