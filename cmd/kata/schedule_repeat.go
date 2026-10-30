@@ -412,6 +412,9 @@ func withRecurrence(showBody []byte, rec *recurrenceView) ([]byte, error) {
 	if err := json.Unmarshal(showBody, &fields); err != nil {
 		return nil, err
 	}
+	if fields == nil {
+		fields = map[string]jsontext.Value{}
+	}
 	encoded, err := json.Marshal(rec)
 	if err != nil {
 		return nil, err
