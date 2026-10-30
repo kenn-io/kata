@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-28
+last_edited: 2026-10-30
 ---
 
 # CLI reference
@@ -648,6 +648,7 @@ List and inspect:
 kata list [--status open|closed|all] [--sort oldest|created] [--limit N]
 kata list [--label LABEL] [--no-label LABEL] [--owner NAME] [--unowned]
 kata list [--meta key[=value]] [--cursor CURSOR] [--include-total]
+kata list --due-by YYYY-MM-DD [--all] [--status open|closed|all]
 kata list --all [--status open|closed|all] [--sort oldest|created] [--limit N]
               [--priority N | --max-priority N | --priority-unset]
               [--owner NAME | --unowned]
@@ -744,6 +745,20 @@ Its human and agent rows use qualified refs such as
 `example-project#abc4`, and JSON rows include `project_name`. A scoped list
 defaults to 200 rows; `list --all` defaults to no limit. Passing `--limit 0`
 also means no limit. `--all` cannot be combined with `--project` or `--workspace`.
+
+`--due-by YYYY-MM-DD` keeps issues whose `scheduled_on` or `deadline_on` falls on
+or before that date: the web Today rule with a date you choose, for example
+`kata list --all --due-by "$(date +%F)"` for today. The date is required, and a malformed one is rejected before any request.
+It combines with the other filters, `--sort` and `--cursor`; `--status` stays
+`open` by default, so pass `--status all` to include closed issues.
+The date is read in your local zone, named by `TZ` and then the
+`/etc/localtime` link, so `TZ=Europe/Paris kata list --due-by 2026-11-02`
+overrides it. When neither names a zone, the daemon's `timezone` applies, then
+UTC. `--limit` and `--include-total` count matching issues. JSON rows then
+carry `scheduled_on_date` and `deadline_on_date` in that zone, and agent rows
+add the same fields. The flag needs a daemon with HTTP API `0.35.0`; an older
+daemon is refused instead of listing every issue. For due and unblocked work,
+filter the JSON with `select(.blocked | not)`; `ready` and `next` do not take it.
 
 Human `kata list` output groups fetched children beneath their fetched parents
 with box-drawing connectors. When a parent is absent because it did not match

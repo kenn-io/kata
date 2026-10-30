@@ -21,6 +21,7 @@ const (
 	apiVersionCommentLinks              = "0.28.0"
 	apiVersionReadyAndSearchFilters     = "0.8.0"
 	apiVersionGlobalListFilters         = "0.9.0"
+	apiVersionListDueBy                 = "0.35.0"
 	// apiVersionMCPServer is the oldest daemon the native MCP server can
 	// drive: it pins relationship targets with to_project_uid and
 	// expected_project_uids and pages audit rows by event_id.

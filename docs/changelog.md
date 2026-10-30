@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-28
+last_edited: 2026-10-30
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,6 +9,16 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- List the work due on a day with `kata list --due-by YYYY-MM-DD`: issues whose
+  `scheduled_on` or `deadline_on` falls on or before that date, the rule the web
+  Today view uses with a date you choose. It combines with the other `list`
+  filters, `--all`, `--sort` and `--cursor`; `--limit` and `--include-total` count
+  matching issues. The date is read in your local zone (`TZ`, then
+  `/etc/localtime`), and rows carry `scheduled_on_date` and `deadline_on_date`.
+  The MCP `kata.list` tool takes `due_by` and an optional `time_zone`, and the
+  HTTP list routes take `due_by` and `time_zone`. An older daemon is refused
+  rather than listing every issue. Requires HTTP API `0.35.0`. See the
+  [CLI reference](reference/cli.md#issue-lifecycle).
 - Get an immediate error when a daemon in another PID namespace, such as one in
   a sandbox or container sharing your `KATA_HOME`, already owns the store.
   `kata` commands, `kata daemon start`, and foreground startup previously

@@ -1,7 +1,7 @@
 ---
 title: Metadata
 description: Reference Kata's issue and project metadata model, reserved keys, scheduling fields, and update rules.
-last_edited: 2026-10-23
+last_edited: 2026-10-30
 ---
 
 # Metadata
@@ -65,6 +65,14 @@ not exist, the gate opens at the first valid instant after the gap. Numeric
 offsets are rejected because they pin an instant while duplicating the named
 timezone. `deadline_on` accepts the same three forms and uses the same timezone
 rules. It is a deadline only; it does not control `ready` or `next`.
+
+`kata list --due-by <date>` and the web Today view select issues whose
+`scheduled_on` or `deadline_on` falls on or before a calendar date. A date-only
+value keeps its written date. A local date-time resolves as above and a UTC
+timestamp is an instant; both are then read in the viewer's zone (the CLI's
+local zone, or the browser's), so the same value can fall on different dates
+for readers in different zones. Matching rows carry `scheduled_on_date` and
+`deadline_on_date`, the dates in that zone. See [list](cli.md#issue-lifecycle).
 
 The daemon surfaces a reached `scheduled_on` or `deadline_on` through ordinary
 `notify.*` metadata. It addresses the current owner, falling back to the author

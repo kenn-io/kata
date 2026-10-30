@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -26,6 +27,7 @@ func newListCmd() *cobra.Command {
 	var noLabels []string
 	var meta []string
 	var all bool
+	var dueBy string
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "list issues with filters (default: open, this project)",
@@ -33,10 +35,16 @@ func newListCmd() *cobra.Command {
 most recently updated first, at most 200 rows. --all lists every active
 project, newest created first, with no default row limit.
 --meta key or key=value filters metadata, for example work.attention=stuck.
+--due-by YYYY-MM-DD keeps issues whose scheduled_on or deadline_on falls on or
+before that date, the web Today rule with a chosen date. The date is read in your
+local zone (TZ, then /etc/localtime), so TZ=Europe/Paris overrides it; rows then
+carry scheduled_on_date and deadline_on_date. Add --all to include closed issues
+and other projects' work: kata list --all --status all --due-by "$(date +%F)".
 For what to work on next, use kata ready or kata next instead.`,
 		Example: `  kata list --agent
   kata list --status all --label bug --owner alice --agent
-  kata list --meta work.attention=stuck --all --agent`,
+  kata list --meta work.attention=stuck --all --agent
+  kata list --all --due-by "$(date +%F)" --json`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if sortOrder != "" && sortOrder != "oldest" && sortOrder != "created" {
 				return &cliError{Message: "--sort must be oldest or created", Kind: kindValidation, ExitCode: ExitValidation}
@@ -59,6 +67,11 @@ For what to work on next, use kata ready or kata next instead.`,
 			if unowned && owner != "" {
 				return &cliError{Message: "--unowned and --owner are mutually exclusive", Kind: kindValidation, ExitCode: ExitValidation}
 			}
+			if cmd.Flags().Changed("due-by") {
+				if parsed, err := time.Parse(time.DateOnly, dueBy); err != nil || parsed.Format(time.DateOnly) != dueBy {
+					return &cliError{Message: "--due-by must be a date in YYYY-MM-DD form", Kind: kindValidation, ExitCode: ExitValidation}
+				}
+			}
 			if all && (strings.TrimSpace(flags.Project) != "" || strings.TrimSpace(flags.Workspace) != "") {
 				return &cliError{Message: "--all is mutually exclusive with --project and --workspace", Kind: kindUsage, ExitCode: ExitUsage}
 			}
@@ -77,6 +90,12 @@ For what to work on next, use kata ready or kata next instead.`,
 				}
 			} else if sortOrder != "" {
 				if err := requireDaemonAPIVersion(ctx, client, baseURL, apiVersionListSort, "list --sort"); err != nil {
+					return err
+				}
+			}
+			if dueBy != "" {
+				if err := requireDaemonAPIVersion(ctx, client, baseURL,
+					apiVersionListDueBy, "list --due-by"); err != nil {
 					return err
 				}
 			}
@@ -132,11 +151,18 @@ For what to work on next, use kata ready or kata next instead.`,
 			if owner != "" {
 				params.Owner = &owner
 			}
+			if dueBy != "" {
+				params.DueBy = &dueBy
+				if zone := localTimeZoneName(); zone != "" {
+					params.TimeZone = &zone
+				}
+			}
 			var bs []byte
 			if all {
 				response, callErr := apiClient.ListAllIssuesWithResponse(ctx, &generated.ListAllIssuesRequestOptions{Query: &generated.ListAllIssuesQuery{
 					Status: new(generated.ListAllIssuesQueryStatus(apiStatus)), Priority: params.Priority, MaxPriority: params.MaxPriority,
 					Limit: params.Limit, Sort: allSort, Cursor: params.Cursor, IncludeTotal: params.IncludeTotal, Unowned: params.Unowned, Owner: params.Owner, Label: labels, ExcludeLabel: noLabels, Meta: meta,
+					DueBy: params.DueBy, TimeZone: params.TimeZone,
 				}})
 				if err := externalCLITransportError(response, callErr); err != nil {
 					return err
@@ -179,17 +205,19 @@ For what to work on next, use kata ready or kata next instead.`,
 				NextCursor string `json:"next_cursor"`
 				Total      *int64 `json:"total"`
 				Issues     []struct {
-					ShortID     string   `json:"short_id"`
-					QualifiedID string   `json:"qualified_id"`
-					ProjectName string   `json:"project_name"`
-					Title       string   `json:"title"`
-					Status      string   `json:"status"`
-					Owner       *string  `json:"owner"`
-					Priority    *int64   `json:"priority"`
-					Revision    int64    `json:"revision"`
-					Labels      []string `json:"labels"`
-					Blocked     bool     `json:"blocked"`
-					Parent      *struct {
+					ShortID         string   `json:"short_id"`
+					QualifiedID     string   `json:"qualified_id"`
+					ProjectName     string   `json:"project_name"`
+					Title           string   `json:"title"`
+					Status          string   `json:"status"`
+					Owner           *string  `json:"owner"`
+					Priority        *int64   `json:"priority"`
+					Revision        int64    `json:"revision"`
+					Labels          []string `json:"labels"`
+					Blocked         bool     `json:"blocked"`
+					ScheduledOnDate string   `json:"scheduled_on_date"`
+					DeadlineOnDate  string   `json:"deadline_on_date"`
+					Parent          *struct {
 						QualifiedID string `json:"qualified_id"`
 					} `json:"parent"`
 				} `json:"issues"`
@@ -225,6 +253,8 @@ For what to work on next, use kata ready or kata next instead.`,
 						agentRowListField("labels", i.Labels),
 						agentRowField("title", i.Title),
 						agentRowField("revision", fmt.Sprint(i.Revision)),
+						agentOptionalRowField("scheduled_on_date", &i.ScheduledOnDate),
+						agentOptionalRowField("deadline_on_date", &i.DeadlineOnDate),
 					); err != nil {
 						return err
 					}
@@ -311,6 +341,8 @@ For what to work on next, use kata ready or kata next instead.`,
 	cmd.Flags().StringVar(&owner, "owner", "", "only issues owned by this actor")
 	cmd.Flags().StringSliceVar(&labels, "label", nil, "only issues with this label (repeatable, AND logic)")
 	cmd.Flags().StringSliceVar(&noLabels, "no-label", nil, "exclude issues with this label (repeatable)")
+	cmd.Flags().StringVar(&dueBy, "due-by", "",
+		"only issues scheduled or due on or before this YYYY-MM-DD date (web Today rule, read in your local zone)")
 	cmd.Flags().StringArrayVar(&meta, "meta", nil,
 		"filter by metadata key or key=value (repeatable, AND logic)")
 	return cmd
