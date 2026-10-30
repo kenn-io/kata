@@ -634,7 +634,7 @@ type slowPreflightUndoAPI struct {
 }
 
 func (s *slowPreflightUndoAPI) GetIssueDetail(ctx context.Context, projectID int64, ref string) (*IssueDetail, error) {
-	time.Sleep(s.delay)
+	<-time.After(s.delay)
 	return s.undoTestAPI.GetIssueDetail(ctx, projectID, ref)
 }
 
