@@ -1195,6 +1195,9 @@ func (d *Store) CountIssues(ctx context.Context, p db.ListIssuesParams) (int64, 
 func buildListAllIssuesQuery(ctx context.Context, p db.ListAllIssuesParams, count bool) (string, []any) {
 	var q strings.Builder
 	selection := issueSelect
+	if p.DueBy != "" {
+		selection = scheduledIssueSelect
+	}
 	if count {
 		selection = `SELECT COUNT(*) FROM issues i JOIN projects p ON p.id = i.project_id`
 	}
@@ -1279,6 +1282,8 @@ func buildListAllIssuesQuery(ctx context.Context, p db.ListAllIssuesParams, coun
 		q.WriteString(" ORDER BY " + creationKeySQL("i") + " ASC, i.id ASC")
 	} else if p.CreatedFirst || p.After != nil {
 		q.WriteString(" ORDER BY " + creationKeySQL("i") + " DESC, i.id DESC")
+	} else if p.UpdatedFirst {
+		q.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
 	} else {
 		q.WriteString(` ORDER BY i.created_at DESC, i.id DESC`)
 	}
@@ -1313,6 +1318,59 @@ func (d *Store) CountAllIssues(ctx context.Context, p db.ListAllIssuesParams) (i
 	var total int64
 	err := d.QueryRowContext(ctx, query, args...).Scan(&total)
 	return total, err
+}
+
+// ListDueIssues returns the ListAllIssues rows whose planning dates are due by
+// p.DueBy. The date rule runs in Go after SQL, like the browser snapshot, so
+// Limit counts matching rows only.
+func (d *Store) ListDueIssues(ctx context.Context, p db.ListAllIssuesParams) ([]db.DueIssue, error) {
+	rows, _, err := d.dueIssues(ctx, p, false)
+	return rows, err
+}
+
+// CountDueIssues counts every row due by p.DueBy, ignoring Limit and After.
+func (d *Store) CountDueIssues(ctx context.Context, p db.ListAllIssuesParams) (int64, error) {
+	p.Limit, p.After = 0, nil
+	_, total, err := d.dueIssues(ctx, p, true)
+	return total, err
+}
+
+func (d *Store) dueIssues(ctx context.Context, p db.ListAllIssuesParams, countOnly bool) ([]db.DueIssue, int64, error) {
+	limit := p.Limit
+	p.Limit = 0
+	query, args := buildListAllIssuesQuery(ctx, p, false)
+	rows, err := d.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list due issues: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []db.DueIssue
+	var total int64
+	for rows.Next() {
+		issue, recurrenceTimezone, err := scanScheduledIssue(ctx, rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		scheduledOn, deadlineOn, due, err := db.DueByCalendarDates(
+			string(issue.Metadata), p.DueBy, p.DueTimeZone,
+			scheduleDefaultTimezone(recurrenceTimezone, p.DefaultTimezone), p.DefaultTimezone,
+		)
+		if err != nil {
+			return nil, 0, fmt.Errorf("list due issue %s schedule: %w", issue.UID, err)
+		}
+		if !due {
+			continue
+		}
+		total++
+		if countOnly {
+			continue
+		}
+		out = append(out, db.DueIssue{Issue: issue, ScheduledOnDate: scheduledOn, DeadlineOnDate: deadlineOn})
+		if limit > 0 && len(out) == limit {
+			break
+		}
+	}
+	return out, total, rows.Err()
 }
 
 func commentByUIDForIssueTx(ctx context.Context, tx *sql.Tx, issueID int64, commentUID string) (db.Comment, error) {

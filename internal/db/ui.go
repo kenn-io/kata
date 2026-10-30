@@ -87,14 +87,37 @@ func MatchUICalendarView(
 	case "upcoming":
 		return scheduledDate, deadlineDate, scheduled && scheduledDate > query.LocalDate, nil
 	case "today":
-		scheduleDue := scheduled && scheduledDate <= query.LocalDate
-		deadlineDue := deadline && deadlineDate <= query.LocalDate
-		return scheduledDate, deadlineDate, scheduleDue || deadlineDue, nil
+		return scheduledDate, deadlineDate, dueByLocalDate(
+			scheduledDate, scheduled, deadlineDate, deadline, query.LocalDate,
+		), nil
 	case "deadlines":
 		return "", deadlineDate, true, nil
 	default:
 		return scheduledDate, deadlineDate, true, nil
 	}
+}
+
+// dueByLocalDate is the Today rule shared by the browser snapshot and the
+// due-by list filter: an issue is due when its scheduled or deadline calendar
+// date, when present, falls on or before localDate.
+func dueByLocalDate(
+	scheduledDate string, scheduled bool,
+	deadlineDate string, deadline bool,
+	localDate string,
+) bool {
+	return (scheduled && scheduledDate <= localDate) ||
+		(deadline && deadlineDate <= localDate)
+}
+
+// DueByCalendarDates projects an issue's planning dates into timeZone and
+// reports whether it is due by localDate. scheduledDefaultTimezone can include
+// the legacy recurrence fallback; deadlines use daemonTimezone.
+func DueByCalendarDates(
+	raw, localDate, timeZone, scheduledDefaultTimezone, daemonTimezone string,
+) (scheduledDate, deadlineDate string, due bool, err error) {
+	return MatchUICalendarView(raw, UISnapshotQuery{
+		View: "today", LocalDate: localDate, TimeZone: timeZone, DefaultTimezone: daemonTimezone,
+	}, scheduledDefaultTimezone)
 }
 
 // ProjectUIDeadlineDate gives a selected issue the same browser-calendar

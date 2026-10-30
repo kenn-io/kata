@@ -520,10 +520,17 @@ func buildListAllIssuesQuery(ctx context.Context, params db.ListAllIssuesParams,
 	}
 
 	order := `i.created_at DESC, i.id DESC`
+	if params.UpdatedFirst && !params.CreatedFirst {
+		order = `i.updated_at DESC, i.id DESC`
+	}
 	if params.OldestFirst {
 		order = `i.created_at ASC, i.id ASC`
 	}
-	query := issueSelect + ` WHERE ` + strings.Join(conditions, " AND ") + ` ORDER BY ` + order
+	selection := issueSelect
+	if params.DueBy != "" {
+		selection = scheduledIssueSelect
+	}
+	query := selection + ` WHERE ` + strings.Join(conditions, " AND ") + ` ORDER BY ` + order
 	if params.Limit > 0 {
 		args = append(args, params.Limit)
 		query += fmt.Sprintf(` LIMIT $%d`, len(args))
@@ -556,6 +563,59 @@ func (s *Store) CountAllIssues(ctx context.Context, params db.ListAllIssuesParam
 	var total int64
 	err := s.QueryRowContext(ctx, query, args...).Scan(&total)
 	return total, err
+}
+
+// ListDueIssues returns the ListAllIssues rows whose planning dates are due by
+// params.DueBy. The date rule runs in Go after SQL, like the browser snapshot,
+// so Limit counts matching rows only.
+func (s *Store) ListDueIssues(ctx context.Context, params db.ListAllIssuesParams) ([]db.DueIssue, error) {
+	rows, _, err := s.dueIssues(ctx, params, false)
+	return rows, err
+}
+
+// CountDueIssues counts every row due by params.DueBy, ignoring Limit and After.
+func (s *Store) CountDueIssues(ctx context.Context, params db.ListAllIssuesParams) (int64, error) {
+	params.Limit, params.After = 0, nil
+	_, total, err := s.dueIssues(ctx, params, true)
+	return total, err
+}
+
+func (s *Store) dueIssues(ctx context.Context, params db.ListAllIssuesParams, countOnly bool) ([]db.DueIssue, int64, error) {
+	limit := params.Limit
+	params.Limit = 0
+	query, args := buildListAllIssuesQuery(ctx, params, false)
+	rows, err := s.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, 0, mapSQLError(err, nil)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []db.DueIssue
+	var total int64
+	for rows.Next() {
+		issue, recurrenceTimezone, err := scanScheduledIssue(ctx, rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		scheduledOn, deadlineOn, due, err := db.DueByCalendarDates(
+			string(issue.Metadata), params.DueBy, params.DueTimeZone,
+			scheduleDefaultTimezone(recurrenceTimezone, params.DefaultTimezone), params.DefaultTimezone,
+		)
+		if err != nil {
+			return nil, 0, fmt.Errorf("list due issue %s schedule: %w", issue.UID, err)
+		}
+		if !due {
+			continue
+		}
+		total++
+		if countOnly {
+			continue
+		}
+		out = append(out, db.DueIssue{Issue: issue, ScheduledOnDate: scheduledOn, DeadlineOnDate: deadlineOn})
+		if limit > 0 && len(out) == limit {
+			break
+		}
+	}
+	return out, total, mapSQLError(rows.Err(), nil)
 }
 
 func (s *Store) resolveShortIDTx(ctx context.Context, tx *sql.Tx, projectID int64, uid, override string) (string, error) {

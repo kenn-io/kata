@@ -95,6 +95,14 @@ func WithInsecureReadonly() Option {
 	}
 }
 
+// WithDefaultTimezone sets the daemon timezone applied to civil schedules
+// that have no issue timezone, mirroring `timezone` in config.toml.
+func WithDefaultTimezone(zone string) Option {
+	return func(cfg *daemon.ServerConfig) {
+		cfg.DefaultTimezone = zone
+	}
+}
+
 // New launches a daemon listening on a free loopback port. The DB lives under
 // a temp KATA_HOME. Cleanup is wired via t.Cleanup.
 func New(t *testing.T, opts ...Option) *Env {
