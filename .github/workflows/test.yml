@@ -33,6 +33,7 @@ jobs:
             go:
               - '!{*.md,docs/**,web/**,packages/**}'
               - '**/*.go'
+              - 'docs/screenshots/*.sh'
             embedded-docs:
               # Keep aligned with the go:embed directive in docs/docs.go.
               - 'docs/index.md'
