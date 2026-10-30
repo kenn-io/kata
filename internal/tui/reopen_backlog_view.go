@@ -46,6 +46,10 @@ func (m Model) routeReopenKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if !m.keymap.Reopen.matches(msg) {
 		return m, nil, false
 	}
+	// Help and other full-screen views hide the selection the key would act on.
+	if m.view != viewList && m.view != viewDetail {
+		return m, nil, true
+	}
 	target, ok := m.activeCloseTarget()
 	if !ok {
 		return m, nil, true

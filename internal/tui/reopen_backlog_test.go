@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kit/tui/splitlayout"
 )
 
 const (
@@ -411,4 +412,19 @@ func TestReopenOfOpenIssueSkipsBacklogCheck(t *testing.T) {
 			require.Equal(t, 1, spy.reopens)
 		})
 	}
+}
+
+// In split layout the hidden selection must not be reopened from the help view.
+func TestReopenKeyIgnoredWhileHelpIsVisibleInSplitLayout(t *testing.T) {
+	spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
+	m := listReopenModel(t, spy)
+	m.layout = splitlayout.Split
+	m.focus = focusList
+	m, _ = updateModel(m, runeKey('?'))
+	require.Equal(t, viewHelp, m.view)
+
+	m, cmd := updateModel(m, runeKey('r'))
+	require.Nil(t, cmd)
+	require.Equal(t, modalNone, m.modal)
+	require.Zero(t, spy.reopens)
 }
