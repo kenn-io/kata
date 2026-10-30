@@ -149,7 +149,6 @@ type metaIssueWire struct {
 	Title        string                    `json:"title"`
 	Body         string                    `json:"body"`
 	Priority     *int64                    `json:"priority"`
-	Labels       []string                  `json:"labels"`
 	Metadata     map[string]jsontext.Value `json:"metadata"`
 	Revision     int64                     `json:"revision"`
 	RecurrenceID *int64                    `json:"recurrence_id"`

@@ -81,6 +81,47 @@ func TestScheduleRepeatStartsRecurrenceFromTheIssue(t *testing.T) {
 	require.JSONEq(t, `{"scheduled_on":"2026-11-02","timezone":"Europe/Paris"}`, string(issue.Issue.Metadata))
 }
 
+// A daemon older than API 0.24.0 returns labels only in the top-level labels
+// array of a show response, not under issue.labels.
+func TestScheduleRepeatKeepsLabelsFromAnOlderShowResponse(t *testing.T) {
+	isolateCallerZone(t)
+	env, dir, pid := setupCLIWorkspace(t)
+	created := postJSON[struct {
+		Issue struct {
+			ShortID string `json:"short_id"`
+		} `json:"issue"`
+	}](t, env.URL+"/api/v1/projects/"+itoa(pid)+"/issues", map[string]any{
+		"actor": "tester", "title": "Water the plants", "labels": []string{"home"},
+	})
+	ref := created.Issue.ShortID
+	showPath := "/api/v1/projects/" + itoa(pid) + "/issues/" + ref
+	older := interceptingProxy(t, env, func(w http.ResponseWriter, r *http.Request) bool {
+		if r.Method != http.MethodGet || r.URL.Path != showPath {
+			return false
+		}
+		var shown map[string]jsontext.Value
+		require.NoError(t, json.Unmarshal(getJSON[jsontext.Value](t, env.URL+r.URL.RequestURI()), &shown))
+		var issue map[string]jsontext.Value
+		require.NoError(t, json.Unmarshal(shown["issue"], &issue))
+		delete(issue, "labels")
+		encoded, err := json.Marshal(issue)
+		require.NoError(t, err)
+		shown["issue"] = encoded
+		body, err := json.Marshal(shown)
+		require.NoError(t, err)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+		return true
+	})
+
+	_, stderr, err := runCLIAgainst(t, older, dir, "schedule", ref, "2026-11-02", "--repeat", "FREQ=DAILY", "--timezone", "UTC")
+	require.NoError(t, err, stderr)
+
+	recs := listRecurrencesViaHTTP(t, env, pid)
+	require.Len(t, recs, 1)
+	assert.Equal(t, []string{"home"}, recs[0].TemplateLabels)
+}
+
 func TestScheduleRepeatZoneSources(t *testing.T) {
 	cases := []struct {
 		name  string

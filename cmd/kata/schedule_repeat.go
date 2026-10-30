@@ -122,7 +122,7 @@ func runScheduleRepeat(cmd *cobra.Command, args []string, opts scheduleRepeatOpt
 	if err != nil {
 		return err
 	}
-	issue, _, err := fetchMetaIssue(ctx, httpClient, baseURL, pid, ref.RefForAPI)
+	issue, showBody, err := fetchMetaIssue(ctx, httpClient, baseURL, pid, ref.RefForAPI)
 	if err != nil {
 		return err
 	}
@@ -186,7 +186,11 @@ func runScheduleRepeat(cmd *cobra.Command, args []string, opts scheduleRepeatOpt
 			tag := revisionETag(issue.Revision)
 			ifMatch = &tag
 		}
-		if err := startRecurrence(ctx, api, pid, ref.RefForAPI, issue, terms, ifMatch); err != nil {
+		labels, err := showLabels(showBody)
+		if err != nil {
+			return err
+		}
+		if err := startRecurrence(ctx, api, pid, ref.RefForAPI, issue, labels, terms, ifMatch); err != nil {
 			return err
 		}
 	}
@@ -299,7 +303,25 @@ func listRecurrences(ctx context.Context, api *kataclient.Client, pid int64) ([]
 	return body.Recurrences, nil
 }
 
-func startRecurrence(ctx context.Context, api *kataclient.Client, pid int64, ref string, issue metaIssueWire, terms recurrenceTerms, ifMatch *string) error {
+// showLabels reads the top-level labels array of a show response. Every daemon
+// version returns it; issue.labels only exists from API 0.24.0.
+func showLabels(showBody []byte) ([]string, error) {
+	var shown struct {
+		Labels []struct {
+			Label string `json:"label"`
+		} `json:"labels"`
+	}
+	if err := json.Unmarshal(showBody, &shown); err != nil {
+		return nil, err
+	}
+	labels := make([]string, 0, len(shown.Labels))
+	for _, l := range shown.Labels {
+		labels = append(labels, l.Label)
+	}
+	return labels, nil
+}
+
+func startRecurrence(ctx context.Context, api *kataclient.Client, pid int64, ref string, issue metaIssueWire, labels []string, terms recurrenceTerms, ifMatch *string) error {
 	body := issue.Body
 	response, callErr := api.CreateRecurrenceWithResponse(ctx, &generated.CreateRecurrenceRequestOptions{
 		PathParams: &generated.CreateRecurrencePath{ProjectID: pid},
@@ -307,7 +329,7 @@ func startRecurrence(ctx context.Context, api *kataclient.Client, pid int64, ref
 		Body: &generated.CreateRecurrenceBody{
 			Actor: &terms.Actor, Rrule: terms.Rule, Dtstart: terms.Start, Timezone: terms.Zone, InitialIssueRef: &ref,
 			Template: generated.RecurrenceTemplateInput{
-				Title: issue.Title, Body: &body, Priority: issue.Priority, Labels: issue.Labels,
+				Title: issue.Title, Body: &body, Priority: issue.Priority, Labels: labels,
 			},
 		},
 	})
