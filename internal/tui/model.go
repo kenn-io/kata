@@ -211,6 +211,7 @@ type Model struct {
 	undoInFlight             bool
 	undoCloseEntryID         uint64
 	reopenPrompt             *reopenPrompt
+	reopenLookupSeq          uint64
 	mutationEpoch            uint64
 }
 

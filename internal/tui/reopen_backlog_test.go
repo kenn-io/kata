@@ -594,3 +594,33 @@ func TestReopenKeyCancelsPendingPriority(t *testing.T) {
 	_, cmd = updateModel(m, runeKey('2'))
 	require.Nil(t, cmd, "a stale priority prompt must not turn the digit into a priority change")
 }
+
+// Pressing `r` twice starts two lookups. A failed lookup's zero count must not
+// reopen the issue while the other lookup's confirmation is open, nor
+// before it, because only the latest press is still wanted.
+func TestReopenSupersededLookupNeverDispatches(t *testing.T) {
+	for _, order := range []string{"confirmation first", "fallback first"} {
+		t.Run(order, func(t *testing.T) {
+			spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
+			m, first := updateModel(listReopenModel(t, spy), runeKey('r'))
+			m, second := updateModel(m, runeKey('r'))
+			require.NotNil(t, first)
+			require.NotNil(t, second)
+			failed := first().(reopenBacklogMsg)
+			failed.count = 0
+			confirm := second().(reopenBacklogMsg)
+
+			replies := []reopenBacklogMsg{confirm, failed}
+			if order == "fallback first" {
+				replies = []reopenBacklogMsg{failed, confirm}
+			}
+			for _, reply := range replies {
+				var cmd tea.Cmd
+				m, cmd = updateModel(m, reply)
+				require.Nil(t, cmd, "no reopen is sent without the user's confirmation")
+			}
+			require.Equal(t, modalReopenBacklog, m.modal)
+			require.Zero(t, spy.reopens)
+		})
+	}
+}
