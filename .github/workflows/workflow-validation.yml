@@ -27,6 +27,7 @@ env:
 jobs:
   actionlint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
@@ -37,6 +38,7 @@ jobs:
 
   goreleaser:
     runs-on: ubuntu-latest
+    timeout-minutes: 29
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -86,6 +88,7 @@ jobs:
 
   release-image:
     runs-on: ubuntu-latest
+    timeout-minutes: 11
     env:
       VERSION: v0.0.0-snapshot
       OCI_VERSION: 0.0.0-snapshot
