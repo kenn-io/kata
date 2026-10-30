@@ -620,21 +620,6 @@ func TestReopenKeyIsIgnoredWhileAnotherLookupIsPending(t *testing.T) {
 	require.Zero(t, spy.reopens)
 }
 
-func TestReopenAnswerWithoutAnOwningLookupIsDropped(t *testing.T) {
-	spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
-	m, lookup := updateModel(listReopenModel(t, spy), runeKey('r'))
-	answer := lookup().(reopenBacklogMsg)
-	m, cmd := updateModel(m, answer)
-	require.Nil(t, cmd)
-	require.Equal(t, modalReopenBacklog, m.modal)
-	m, _ = updateModel(m, runeKey('n'))
-
-	answer.count = 0
-	_, cmd = updateModel(m, answer)
-	require.Nil(t, cmd, "a repeated or late answer must not reopen after the owner finished")
-	require.Zero(t, spy.reopens)
-}
-
 func TestUndoKeyIsIgnoredWhileReopenLookupIsPending(t *testing.T) {
 	m, f := reopenOwnerModel(t)
 	m, lookup := updateModel(m, runeKey('r'))

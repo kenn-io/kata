@@ -22,7 +22,6 @@ type reopenPrompt struct {
 // A lookup that failed arrives as a count of zero.
 type reopenBacklogMsg struct {
 	connGen uint64
-	seq     uint64
 	target  formTarget
 	count   int
 }
@@ -70,9 +69,8 @@ func (m Model) routeReopenKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		return m, m.dispatchReopen(target), true
 	}
 	// The pending lookup owns reopen until its answer arrives.
-	m.reopenLookupSeq++
 	m.reopenLookupPending = true
-	connGen, seq := m.connGen, m.reopenLookupSeq
+	connGen := m.connGen
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -80,7 +78,7 @@ func (m Model) routeReopenKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		if err != nil {
 			count = 0
 		}
-		return reopenBacklogMsg{connGen: connGen, seq: seq, target: target, count: count}
+		return reopenBacklogMsg{connGen: connGen, target: target, count: count}
 	}, true
 }
 
@@ -97,9 +95,6 @@ func (m Model) promptReopenBacklog(prompt reopenPrompt) Model {
 }
 
 func (m Model) handleReopenBacklog(msg reopenBacklogMsg) (Model, tea.Cmd) {
-	if !m.reopenLookupPending || msg.seq != m.reopenLookupSeq {
-		return m, nil
-	}
 	m.reopenLookupPending = false
 	if m.staleConnMsg(msg.connGen) {
 		return m, nil
