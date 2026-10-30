@@ -1155,8 +1155,9 @@ occurrence of a recurrence that starts on `<date>`. The date is
 `YYYY-MM-DD`. Starting a recurrence rewrites the issue's `scheduled_on` to the
 first occurrence, so a future date takes the issue out of `ready` until then.
 The command prints the issue's `scheduled_on` and `timezone` and the rule as it
-now stands. A change prints the recurrence's new rule, start, and zone instead,
-and notes that the issue's own date did not move. The recurrence template copies
+now stands. A change prints the recurrence's new rule, start, and zone too, and
+notes that the issue's own date and zone did not change, so its `timezone` can
+differ from the recurrence's. The recurrence template copies
 the issue's title, body, priority, and labels, never its owner or metadata. For
 an issue that already belongs to a recurrence, the same command changes its
 rule, start, and zone. If the recurrence changed after the CLI read it, nothing

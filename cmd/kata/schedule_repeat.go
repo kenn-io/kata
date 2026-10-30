@@ -57,8 +57,8 @@ type scheduleRepeatResult struct {
 	Ref         string `json:"ref"`
 	Action      string `json:"action"`
 	ScheduledOn string `json:"scheduled_on"`
-	// Timezone is the issue's own zone. A change leaves it alone, so it is not
-	// reported there: the recurrence's zone is the one that changed.
+	// Timezone is the issue's own zone. A change leaves it alone, so on a
+	// change it can differ from the recurrence's zone.
 	Timezone string `json:"timezone,omitempty"`
 	// Recurrence is the rule as it stands after a start or change; absent after a stop.
 	Recurrence *recurrenceView `json:"recurrence,omitempty"`
@@ -189,9 +189,7 @@ func runScheduleRepeat(cmd *cobra.Command, args []string, opts scheduleRepeatOpt
 		Action:      action,
 		ScheduledOn: metadataString(after.Metadata, "scheduled_on"),
 	}
-	if action != "changed" {
-		result.Timezone = metadataString(after.Metadata, "timezone")
-	}
+	result.Timezone = metadataString(after.Metadata, "timezone")
 	if !stop {
 		result.Recurrence, _ = activeRecurrenceOf(ctx, api, pid, after.RecurrenceID)
 	}
@@ -401,7 +399,10 @@ func printScheduleRepeat(cmd *cobra.Command, r scheduleRepeatResult) error {
 				return err
 			}
 		}
-		_, err := fmt.Fprintf(out, "scheduled_on: %s (this issue's date did not move)\n", textsafe.Line(r.ScheduledOn))
+		if _, err := fmt.Fprintf(out, "scheduled_on: %s (this issue's date did not move)\n", textsafe.Line(r.ScheduledOn)); err != nil {
+			return err
+		}
+		_, err := fmt.Fprintf(out, "timezone: %s (this issue's zone did not change)\n", textsafe.Line(r.Timezone))
 		return err
 	}
 	if _, err := fmt.Fprintf(out, "scheduled_on: %s\ntimezone: %s\n", textsafe.Line(r.ScheduledOn), textsafe.Line(r.Timezone)); err != nil {

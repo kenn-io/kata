@@ -161,7 +161,8 @@ func TestScheduleRepeatJSONOutput(t *testing.T) {
 	var change map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(changed), &change))
 	assert.JSONEq(t, `"changed"`, string(change["action"]))
-	assert.NotContains(t, change, "timezone", "a change leaves the issue's own zone alone")
+	assert.JSONEq(t, `"2026-11-02"`, string(change["scheduled_on"]))
+	assert.JSONEq(t, `"Europe/Paris"`, string(change["timezone"]), "the issue's own zone is reported on a change too")
 	var changedRec recurrenceView
 	require.NoError(t, json.Unmarshal(change["recurrence"], &changedRec))
 	assert.Equal(t, "FREQ=DAILY", changedRec.RRule)
@@ -207,7 +208,7 @@ func TestScheduleRepeatChangesAnExistingRecurrence(t *testing.T) {
 	out := runCLI(t, env, dir, "schedule", ref, "2026-11-09", "--repeat", "FREQ=DAILY", "--timezone", "Asia/Tokyo")
 	assert.Contains(t, out, "repeat: FREQ=DAILY, start 2026-11-09, timezone Asia/Tokyo")
 	assert.Contains(t, out, "scheduled_on: 2026-11-02 (this issue's date did not move)")
-	assert.NotContains(t, out, "Europe/Paris", "the issue's stale timezone must not be printed beside the new one")
+	assert.Contains(t, out, "timezone: Europe/Paris (this issue's zone did not change)")
 
 	after := listRecurrencesViaHTTP(t, env, pid)
 	require.Len(t, after, 1, "a change must not start a second recurrence")
