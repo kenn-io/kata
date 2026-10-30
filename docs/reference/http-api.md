@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-10-29
+last_edited: 2026-10-30
 ---
 
 # HTTP API schema
@@ -13,7 +13,7 @@ generate typed clients instead of hand-copying wire structs.
 Use [`kata daemon locate`](daemon-discovery.md) to discover the endpoint and
 transport for those requests with the same selection rules as the CLI. Go
 programs can use the generated [Go client](go-client.md), which includes
-discovery. [Native cron](cron.md) documents job and workflow resources.
+discovery. [Cron](cron.md) documents job and workflow resources.
 
 ## Getting the schema
 

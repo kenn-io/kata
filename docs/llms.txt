@@ -57,7 +57,7 @@ for machine readers.
   mirror one task data source with daemon polling and optional two-way status sync
 - [Configuration](https://katatracker.com/docs/reference/configuration.md):
   config.toml reference
-- [Native cron](https://katatracker.com/docs/reference/cron.md):
+- [Cron](https://katatracker.com/docs/reference/cron.md):
   shared job definitions, run evidence, and recurring child issues
 - [Diagnosing setup](https://katatracker.com/docs/operations/doctor.md):
   read-only configuration, daemon, project and hook diagnostics with `kata doctor`

@@ -1,5 +1,5 @@
 ---
-title: Native cron
+title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
 last_edited: 2026-10-30
 ---
@@ -556,7 +556,7 @@ that do not read the key ignore it: Herdr Kata v0.1.0, for example, logs
 `ignored options key: adapter` and still runs the job.
 
 Local transcripts, process IDs, session handles, credentials, and delivery
-buffers are not native run evidence. An adapter may buffer a failed observation
+buffers are not shared run evidence. An adapter may buffer a failed observation
 write and retry it later without blocking its own work.
 
 The adapter must refresh current definitions before starting new scheduled work;
@@ -587,7 +587,7 @@ is one adapter that implements this contract; its documentation covers setup.
 
 ## Storage and backup
 
-SQLite and PostgreSQL schema 31 store native cron data in `cron_jobs`,
+SQLite and PostgreSQL schema 31 store cron data in `cron_jobs`,
 `cron_workflows`, and `cron_runs`. JSONL export and import retain shared
 definitions, including tombstones, and bounded run evidence. Native recurring
 delivery reuses ordinary issue metadata and parent links; it adds no tables or

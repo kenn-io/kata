@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-10-23
+last_edited: 2026-10-30
 ---
 
 # Federation
@@ -36,7 +36,7 @@ offline queues. Each participant may use SQLite or PostgreSQL independently;
 no backend-specific federation flags are needed.
 
 Workspace aliases and per-issue recurrence schedules stay local. Issues created
-by a recurrence synchronize as ordinary content. [Native cron](../reference/cron.md)
+by a recurrence synchronize as ordinary content. [Cron](../reference/cron.md)
 job and workflow definitions and run evidence do synchronize; only the owning
 hub delivers their recurring child issues. Local catalog, scheduling and claim
 audit records remain on their source daemon.

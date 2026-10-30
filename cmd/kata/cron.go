@@ -16,7 +16,7 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
-// Native cron commands are finite API clients. The daemon schedules recurring
+// Cron commands are finite API clients. The daemon schedules recurring
 // issue jobs; external adapters schedule execution and launch processes.
 func newCronCmd() *cobra.Command {
 	command := &cobra.Command{
@@ -32,14 +32,14 @@ A job is configured work: its trigger, action, and execution settings.
 A workflow is reusable command or prompt steps with dependencies.
 A run is one execution and its reported status and results.
 For request bodies, see kata cron job create --help or kata cron workflow create --help.
-The full contract is in the Native cron reference (docs/reference/cron.md).`,
+The full contract is in the Cron reference (docs/reference/cron.md).`,
 		Example: `  kata cron capabilities --json
   kata cron job create --file job.json --json
   kata cron job list --json
   kata cron run observe <run-uid> --json-input observation.json --json`,
 	}
 	for _, resource := range []string{"job", "workflow"} {
-		group := &cobra.Command{Use: resource, Short: "manage native " + resource + " definitions"}
+		group := &cobra.Command{Use: resource, Short: "manage shared " + resource + " definitions"}
 		if resource == "job" {
 			group.Short = "manage recurring issue and adapter job definitions"
 			group.Long = "Manage shared jobs. Enabled notify jobs with a per-run parent issue are delivered by the owning daemon; other jobs require an external adapter."
@@ -74,7 +74,7 @@ func (o cronCLIOptions) definition() bool { return o.resource == "job" || o.reso
 func newCronOperationCmd(resource, action string) *cobra.Command {
 	options := cronCLIOptions{resource: resource, action: action, limit: 100}
 	takesUID := (resource == "job" || resource == "workflow" || resource == "run") && action != "list" && action != "create"
-	command := &cobra.Command{Use: action, Short: action + " native " + resource, Args: cobra.NoArgs}
+	command := &cobra.Command{Use: action, Short: action + " " + resource, Args: cobra.NoArgs}
 	command.Long, command.Example = cronOperationHelp(resource, action)
 	if resource == "job" {
 		command.Long += "\nEnabled recurring issue jobs create independent children and inbox requests on the owning hub. Other jobs use external adapters."
