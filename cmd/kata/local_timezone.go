@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -29,7 +30,8 @@ func resolveLocalTimeZone(tz string, tzSet bool, localtimePath string) string {
 	if err != nil {
 		return ""
 	}
-	_, name, found := strings.CutLast(target, "zoneinfo/")
+	// Windows stores link targets with backslashes.
+	_, name, found := strings.CutLast(filepath.ToSlash(target), "zoneinfo/")
 	if found && isIANAZone(name) {
 		return name
 	}
