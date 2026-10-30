@@ -145,7 +145,7 @@ func ScheduledOnCalendarDate(
 	displayTimezone string,
 	defaultTimezone string,
 ) (string, bool, error) {
-	return metadataCalendarDate(raw, "scheduled_on", displayTimezone, defaultTimezone)
+	return metadataCalendarDate(raw, "scheduled_on", displayTimezone, defaultTimezone, false)
 }
 
 // DeadlineOnCalendarDate returns the display calendar date for deadline_on.
@@ -156,14 +156,31 @@ func DeadlineOnCalendarDate(
 	displayTimezone string,
 	defaultTimezone string,
 ) (string, bool, error) {
-	return metadataCalendarDate(raw, "deadline_on", displayTimezone, defaultTimezone)
+	return metadataCalendarDate(raw, "deadline_on", displayTimezone, defaultTimezone, false)
 }
 
+// ScheduledOnScheduleZoneDate is ScheduledOnCalendarDate read in the zone the
+// value itself is scheduled in: the issue timezone, then defaultTimezone, then
+// UTC.
+func ScheduledOnScheduleZoneDate(raw, defaultTimezone string) (string, bool, error) {
+	return metadataCalendarDate(raw, "scheduled_on", "", defaultTimezone, true)
+}
+
+// DeadlineOnScheduleZoneDate is DeadlineOnCalendarDate read in the zone the
+// value itself is scheduled in; see ScheduledOnScheduleZoneDate.
+func DeadlineOnScheduleZoneDate(raw, defaultTimezone string) (string, bool, error) {
+	return metadataCalendarDate(raw, "deadline_on", "", defaultTimezone, true)
+}
+
+// metadataCalendarDate projects one planning field to a calendar date. With
+// inScheduleZone the display zone is the schedule zone (issue timezone, then
+// defaultTimezone, then UTC) and displayTimezone is ignored.
 func metadataCalendarDate(
 	raw string,
 	key string,
 	displayTimezone string,
 	defaultTimezone string,
+	inScheduleZone bool,
 ) (string, bool, error) {
 	if len(raw) == 0 {
 		return "", false, nil
@@ -196,6 +213,12 @@ func metadataCalendarDate(
 		instant, err = resolveLocalSchedule(scheduleValue, layout, location)
 		if err != nil {
 			return "", false, err
+		}
+	}
+	if inScheduleZone {
+		displayTimezone = values.Timezone
+		if displayTimezone == "" {
+			displayTimezone = defaultTimezone
 		}
 	}
 	if displayTimezone == "" {
