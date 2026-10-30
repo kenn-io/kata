@@ -117,6 +117,10 @@ var storageScenarios = []scenario{
 		RunRelayEnrollmentHistoryValidationCache(t, store, backend)
 		return nil
 	}},
+	{name: "relay checkpoint history validation cache", methods: []string{"CreateAPIToken", "CreateIssue", "CreateProject", "CreateRelayEnrollment", "CreateComment", "PendingRelayDeliveries", "RemoveProject", "PurgeProject", "PinRootAuthority", "RevokeFederationEnrollment", "UpsertFederationBinding"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunRelayCheckpointHistoryValidationCache(t, store, backend)
+		return nil
+	}},
 	{name: "relay ingest returns local issue ids", methods: []string{"AcceptRelayDeliveries", "CreateAPIToken", "CreateProject", "CreateRelayEnrollment", "IssueByUID", "PinRootAuthority", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {
 		RunRelayIngestReturnsLocalIssueIDs(t, store)
 		return nil

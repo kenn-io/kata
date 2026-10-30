@@ -199,7 +199,7 @@ func (d *Store) RelayEnrollmentNeedsReset(ctx context.Context, bindingUID string
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		required, err = d.relayHistoryNeedsResetCachedTx(ctx, tx, *grant.ProjectID, projectUID)
+		required, err = d.relayHistoryNeedsResetCachedTx(ctx, tx, *grant.ProjectID, projectUID, nil)
 		return err
 	})
 	return required, err
@@ -242,7 +242,7 @@ func (d *Store) relayCheckpointNeedsRefreshTx(ctx context.Context, tx *sql.Tx, p
 		if err := tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE uid=?`, projectUID).Scan(&projectID); err != nil {
 			return false, err
 		}
-		return relayHistoryHasBoundaryAfterTx(ctx, tx, projectID, checkpoint.Manifest.HistoryEventID)
+		return d.relayHistoryNeedsResetCachedTx(ctx, tx, projectID, projectUID, &checkpoint)
 	}
 	var raw string
 	if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=?`, db.RelayResetMetadataPrefix+projectUID).Scan(&raw); err != nil {
