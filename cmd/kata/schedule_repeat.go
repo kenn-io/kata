@@ -15,7 +15,18 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
-const cronParentPrefix = "cron.progress."
+// repeatAction is what `kata schedule --repeat` did; it is the JSON "action".
+type repeatAction string
+
+const (
+	repeatStarted repeatAction = "started"
+	repeatChanged repeatAction = "changed"
+	repeatStopped repeatAction = "stopped"
+)
+
+// cronProgressMetadataPrefix starts the metadata keys a cron job writes on the
+// issue it parents.
+const cronProgressMetadataPrefix = "cron.progress."
 
 // recurrenceView is a daemon recurrence row as the CLI reads it, and the
 // block `kata show --json` adds under "recurrence". NextOccurrenceKey is the
@@ -54,9 +65,9 @@ type recurrenceTerms struct {
 }
 
 type scheduleRepeatResult struct {
-	Ref         string `json:"ref"`
-	Action      string `json:"action"`
-	ScheduledOn string `json:"scheduled_on"`
+	Ref         string       `json:"ref"`
+	Action      repeatAction `json:"action"`
+	ScheduledOn string       `json:"scheduled_on"`
 	// Timezone is the issue's own zone. A change leaves it alone, so on a
 	// change it can differ from the recurrence's zone.
 	Timezone string `json:"timezone,omitempty"`
@@ -76,8 +87,8 @@ func scheduleRepeatUsage(message string) error {
 	return &cliError{Message: message, Kind: kindUsage, ExitCode: ExitUsage}
 }
 
-func errNoActiveRecurrence(status int) error {
-	return &cliError{HTTPStatus: status, Message: "issue has no active recurrence; nothing was written", Kind: kindNotFound, ExitCode: ExitNotFound}
+func errNoActiveRecurrence() error {
+	return &cliError{Message: "issue has no active recurrence; nothing was written", Kind: kindNotFound, ExitCode: ExitNotFound}
 }
 
 func errRevisionConflict(message string) error {
@@ -116,7 +127,7 @@ func runScheduleRepeat(cmd *cobra.Command, args []string, opts scheduleRepeatOpt
 		return err
 	}
 	for key := range issue.Metadata {
-		if strings.HasPrefix(key, cronParentPrefix) {
+		if strings.HasPrefix(key, cronProgressMetadataPrefix) {
 			return &cliError{
 				Message: "this issue parents a recurring cron job; closing it as done would pause the job",
 				Hint:    "make the work a child instead: kata cron job create --parent <issue-ref>",
@@ -154,21 +165,21 @@ func runScheduleRepeat(cmd *cobra.Command, args []string, opts scheduleRepeatOpt
 		}
 		terms = recurrenceTerms{Rule: opts.Rule, Start: args[1], Zone: zone, Actor: actor}
 	}
-	action := "started"
+	action := repeatStarted
 	switch {
 	case stop:
 		if current == nil {
-			return errNoActiveRecurrence(0)
+			return errNoActiveRecurrence()
 		}
 		if err := stopRecurrence(ctx, api, pid, *current, actor); err != nil {
 			return err
 		}
-		action = "stopped"
+		action = repeatStopped
 	case current != nil:
 		if err := changeRecurrence(ctx, api, pid, *current, terms); err != nil {
 			return err
 		}
-		action = "changed"
+		action = repeatChanged
 	default:
 		var ifMatch *string
 		if guardStart {
@@ -333,7 +344,7 @@ func stopRecurrence(ctx context.Context, api *kataclient.Client, pid int64, curr
 		return recurrenceConflict(ctx, api, pid, current.UID)
 	}
 	if response.StatusCode == http.StatusNotFound {
-		return errNoActiveRecurrence(response.StatusCode)
+		return errNoActiveRecurrence()
 	}
 	return externalCLIResponseError(response.StatusCode, response.Body, callErr)
 }
@@ -371,7 +382,7 @@ func printScheduleRepeat(cmd *cobra.Command, r scheduleRepeatResult) error {
 		}
 		fields := []agentField{
 			agentRowField("ref", r.Ref),
-			agentRowField("repeat", r.Action),
+			agentRowField("repeat", string(r.Action)),
 			agentRowField("scheduled_on", r.ScheduledOn),
 		}
 		if r.Timezone != "" {
@@ -391,7 +402,7 @@ func printScheduleRepeat(cmd *cobra.Command, r scheduleRepeatResult) error {
 	if _, err := fmt.Fprintf(out, "%s repeat %s\n", textsafe.Line(r.Ref), r.Action); err != nil {
 		return err
 	}
-	if r.Action == "changed" {
+	if r.Action == repeatChanged {
 		// The change moves the recurrence only; the issue keeps the date and
 		// zone it had, so say so rather than print them as if they were new.
 		if r.Recurrence != nil {
