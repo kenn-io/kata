@@ -278,3 +278,36 @@ func TestRecurringBacklog(t *testing.T) {
 		require.ErrorIs(t, err, ErrInvalid)
 	})
 }
+
+// A latest calendar job closed in the middle of a scan resumes at its stored
+// horizon. Finishing that scan delivers one child, and the next sweep delivers
+// another for the occurrences between that horizon and now, so the preview
+// must count both.
+func TestRecurringBacklogFollowsUnfinishedLatestScan(t *testing.T) {
+	anchor := at(t, "2026-06-01T00:00:00Z")
+	j := nativeJob(t)
+	j.Trigger = Trigger{Kind: "cron", Cron: "* * * * *"}
+	j.Catchup = "latest"
+	until := anchor.Add(30 * time.Minute)
+	progress := RecurringProgress{
+		Version: 1, Anchor: anchor, Through: anchor,
+		Scan: &RecurringScan{DefinitionEventUID: definitionUID, Until: until, Cursor: anchor.Add(10 * time.Minute)},
+	}
+	now := until.Add(30 * time.Minute)
+
+	got, err := RecurringBacklog(j, definitionUID, progress, now)
+	require.NoError(t, err)
+
+	delivered := 0
+	for {
+		batch, err := PlanRecurring(j, definitionUID, progress, now)
+		require.NoError(t, err)
+		delivered += len(batch.Due)
+		if !batch.More && !batch.Progress.Through.Before(now) {
+			break
+		}
+		progress = batch.Progress
+	}
+	require.Equal(t, 2, delivered, "sweeps deliver one child per scan stage")
+	require.Equal(t, delivered, got)
+}

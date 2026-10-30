@@ -246,10 +246,14 @@ func RecurringBacklog(j JobDefinition, definitionEventUID string, p RecurringPro
 			return 0, err
 		}
 		total += len(batch.Due)
-		if !batch.More {
+		same := sameRecurringPosition(p, batch.Progress)
+		// A finished scan can stop at a horizon older than now; the next sweep
+		// then plans the stretch after it, so keep going until progress
+		// reaches now.
+		if !batch.More && (same || !batch.Progress.Through.Before(now.UTC())) {
 			return total, nil
 		}
-		if sameRecurringPosition(p, batch.Progress) {
+		if same {
 			return 0, invalid("recurring planner made no progress")
 		}
 		p = batch.Progress
