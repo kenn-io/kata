@@ -102,6 +102,10 @@ func (m Model) handleReopenBacklog(msg reopenBacklogMsg) (Model, tea.Cmd) {
 	if msg.count > 1 {
 		return m.promptReopenBacklog(reopenPrompt{target: msg.target, ref: "#" + msg.target.issueShortID, count: msg.count}), nil
 	}
+	// A confirmation for another reopen is open; a fallback must not answer it.
+	if m.modal == modalReopenBacklog {
+		return m, nil
+	}
 	return m, m.dispatchReopen(msg.target)
 }
 

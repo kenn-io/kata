@@ -658,3 +658,53 @@ func TestUndoCloseSlowPreflightSkipsBacklogLookup(t *testing.T) {
 		require.Equal(t, 1, f.reopenCalls)
 	})
 }
+
+// A direct reopen's failed lookup must not reopen the issue through the undo
+// confirmation that opened while it was in flight, in either reply order.
+func TestReopenFailedLookupNeverBypassesUndoConfirmation(t *testing.T) {
+	for _, order := range []string{"undo reply first", "fallback first"} {
+		t.Run(order, func(t *testing.T) {
+			m, f := undoCloseModel(t, 5, nil)
+			m.list.issues = []Issue{{ProjectID: 7, ShortID: "abc4", Status: "closed", Title: "Parent"}}
+			m, lookup := updateModel(m, runeKey('r'))
+			require.NotNil(t, lookup)
+			failed := lookup().(reopenBacklogMsg)
+			failed.count = 0
+			m, undo := updateModel(m, runeKey('u'))
+			require.NotNil(t, undo)
+			undoReply := undo()
+
+			replies := []tea.Msg{undoReply, failed}
+			if order == "fallback first" {
+				replies = []tea.Msg{failed, undoReply}
+			}
+			for _, reply := range replies {
+				var cmd tea.Cmd
+				m, cmd = updateModel(m, reply)
+				require.Nil(t, cmd, "nothing is reopened without the user's confirmation")
+			}
+			require.Equal(t, modalReopenBacklog, m.modal)
+			require.Zero(t, f.reopenCalls)
+		})
+	}
+}
+
+// Even when the reopen lookup started after undo did, its failed answer must
+// not reopen through the undo confirmation that opens first.
+func TestReopenFailedLookupStartedAfterUndoNeverBypassesConfirmation(t *testing.T) {
+	m, f := undoCloseModel(t, 5, nil)
+	m.list.issues = []Issue{{ProjectID: 7, ShortID: "abc4", Status: "closed", Title: "Parent"}}
+	m, undo := updateModel(m, runeKey('u'))
+	require.NotNil(t, undo)
+	m, lookup := updateModel(m, runeKey('r'))
+	require.NotNil(t, lookup)
+	failed := lookup().(reopenBacklogMsg)
+	failed.count = 0
+
+	m, cmd := updateModel(m, undo())
+	require.Nil(t, cmd)
+	require.Equal(t, modalReopenBacklog, m.modal)
+	m, cmd = updateModel(m, failed)
+	require.Nil(t, cmd)
+	require.Zero(t, f.reopenCalls)
+}
