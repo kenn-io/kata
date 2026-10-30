@@ -42,6 +42,7 @@ func listRecurrencesViaHTTP(t *testing.T, env *testenv.Env, pid int64) []recurre
 func isolateCallerZone(t *testing.T) {
 	t.Helper()
 	t.Setenv("TZ", "")
+	require.NoError(t, os.Unsetenv("TZ"))
 	prev := localtimePath
 	localtimePath = filepath.Join(t.TempDir(), "no-localtime")
 	t.Cleanup(func() { localtimePath = prev })
@@ -117,6 +118,16 @@ func TestScheduleRepeatZoneSources(t *testing.T) {
 				localtimePath = link
 			},
 			want: "Australia/Sydney",
+		},
+		{
+			name: "TZ set but empty means UTC, not the localtime link",
+			setup: func(t *testing.T, _ *testenv.Env, _, _ string) {
+				link := filepath.Join(t.TempDir(), "localtime")
+				require.NoError(t, os.Symlink("/usr/share/zoneinfo/Australia/Sydney", link))
+				localtimePath = link
+				t.Setenv("TZ", "")
+			},
+			want: "UTC",
 		},
 	}
 	for _, tc := range cases {

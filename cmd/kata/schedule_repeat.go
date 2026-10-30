@@ -7,10 +7,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/textsafe"
@@ -19,9 +16,6 @@ import (
 )
 
 const cronParentPrefix = "cron.progress."
-
-// localtimePath is the link the caller's zone is read from when TZ is unset.
-var localtimePath = "/etc/localtime"
 
 // recurrenceView is a daemon recurrence row as the CLI reads it, and the
 // block `kata show --json` adds under "recurrence". NextOccurrenceKey is the
@@ -226,45 +220,13 @@ func repeatZone(flagZone, recurrenceZone string, metadata map[string]jsontext.Va
 		}
 		return zone, nil
 	}
-	if zone := callerZone(); zone != "" {
+	if zone := localTimeZoneName(); zone != "" {
 		return zone, nil
 	}
 	return "", &cliError{
 		Message: "no timezone known for this recurrence; pass --timezone with an IANA name like Europe/Paris",
 		Kind:    kindValidation, ExitCode: ExitValidation,
 	}
-}
-
-// callerZone is the caller's IANA zone from TZ, else from the zoneinfo path
-// /etc/localtime links to. It is empty when neither names a loadable zone.
-func callerZone() string {
-	if tz := strings.TrimPrefix(strings.TrimSpace(os.Getenv("TZ")), ":"); tz != "" {
-		if usableZone(tz) {
-			return tz
-		}
-		return ""
-	}
-	target, err := os.Readlink(localtimePath)
-	if err != nil {
-		return ""
-	}
-	target = filepath.ToSlash(target)
-	_, zone, found := strings.Cut(target, "zoneinfo/")
-	if !found {
-		return ""
-	}
-	if usableZone(zone) {
-		return zone
-	}
-	return ""
-}
-
-func usableZone(name string) bool {
-	if name == "" || name == "Local" {
-		return false
-	}
-	_, err := time.LoadLocation(name)
-	return err == nil
 }
 
 // activeRecurrenceOf finds the live recurrence the issue is an occurrence of.
