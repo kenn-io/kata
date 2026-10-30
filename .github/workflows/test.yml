@@ -33,8 +33,6 @@ jobs:
             go:
               - '!{*.md,docs/**/*.md,docs/website/**,docs/scripts/**,docs/stylesheets/**,docs/javascripts/**,docs/overrides/**,docs/zensical.toml,docs/vercel.json,docs/llms.txt,docs/pyproject.toml,docs/uv.lock,docs/vercel-build.sh,docs/zensical-docs.sh,web/**,packages/**}'
               - '**/*.go'
-              - 'internal/web/**'
-              - '.github/**'
             embedded-docs:
               # Keep aligned with the go:embed directive in docs/docs.go.
               - 'docs/index.md'
