@@ -308,7 +308,9 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 		},
 	})
 	var staleConflict *db.RevisionConflictError
-	require.ErrorAs(t, err, &staleConflict, "a stale issue revision must refuse the attachment")
+	if !errors.As(err, &staleConflict) || staleConflict == nil {
+		return fmt.Errorf("a stale issue revision must refuse the attachment with a revision conflict, got %v", err)
+	}
 	assert.Equal(t, initialIssue.Revision, staleConflict.CurrentRevision)
 	untouched, err := store.IssueByID(ctx, initialIssue.ID)
 	if err != nil {
