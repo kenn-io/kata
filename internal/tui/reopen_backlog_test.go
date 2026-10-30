@@ -576,3 +576,21 @@ func TestReopenBacklogAgainstRealDaemon(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 3, count)
 }
+
+// `r` after `!` cancels the priority prompt, as any other key does, so a digit
+// typed after the reopen prompt is answered does not change the priority.
+func TestReopenKeyCancelsPendingPriority(t *testing.T) {
+	spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
+	m, _ := updateModel(listReopenModel(t, spy), runeKey('!'))
+	require.True(t, m.list.pendingPriority)
+
+	m, cmd := updateModel(m, runeKey('r'))
+	require.NotNil(t, cmd)
+	require.False(t, m.list.pendingPriority)
+	m, _ = updateModel(m, cmd())
+	require.Equal(t, modalReopenBacklog, m.modal)
+	m, _ = updateModel(m, runeKey('n'))
+
+	_, cmd = updateModel(m, runeKey('2'))
+	require.Nil(t, cmd, "a stale priority prompt must not turn the digit into a priority change")
+}

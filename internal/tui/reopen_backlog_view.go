@@ -55,6 +55,8 @@ func (m Model) routeReopenKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 	if target.origin == "list" {
+		// Like any key after `!`, this one cancels the priority prompt.
+		m.list.pendingPriority = false
 		m.list.status = ""
 	}
 	checker, ok := m.api.(reopenBacklogAPI)
