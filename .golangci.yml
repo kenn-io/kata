@@ -20,7 +20,6 @@ linters:
     - forbidigo
   settings:
     nolintlint:
-      require-explanation: true
       require-specific: true
       allow-unused: true
     forbidigo:
