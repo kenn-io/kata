@@ -264,5 +264,8 @@ func sameRecurringPosition(a, b RecurringProgress) bool {
 	if !a.Through.Equal(b.Through) || (a.Scan == nil) != (b.Scan == nil) {
 		return false
 	}
-	return a.Scan == nil || a.Scan.Cursor.Equal(b.Scan.Cursor)
+	// A scan restarted under a new revision or horizon is a new checkpoint
+	// even when it stops at the same cursor.
+	return a.Scan == nil || (a.Scan.Cursor.Equal(b.Scan.Cursor) &&
+		a.Scan.DefinitionEventUID == b.Scan.DefinitionEventUID && a.Scan.Until.Equal(b.Scan.Until))
 }

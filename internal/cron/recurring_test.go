@@ -311,3 +311,25 @@ func TestRecurringBacklogFollowsUnfinishedLatestScan(t *testing.T) {
 	require.Equal(t, 2, delivered, "sweeps deliver one child per scan stage")
 	require.Equal(t, delivered, got)
 }
+
+// Editing a latest calendar job after its first scan batch restarts the scan
+// from the same cursor under the new revision. That is progress for the sweep,
+// so the preview must follow it instead of reporting a stall.
+func TestRecurringBacklogRestartsScanAfterDefinitionUpdate(t *testing.T) {
+	anchor := at(t, "2026-06-01T00:00:00Z")
+	j := nativeJob(t)
+	j.Trigger = Trigger{Kind: "cron", Cron: "* * * * *"}
+	j.Catchup = "latest"
+	stale := RecurringProgress{
+		Version: 1, Anchor: anchor, Through: anchor,
+		Scan: &RecurringScan{
+			DefinitionEventUID: "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+			Until:              anchor.Add(1000 * time.Minute),
+			Cursor:             anchor.Add(1000 * time.Minute),
+		},
+	}
+
+	got, err := RecurringBacklog(j, definitionUID, stale, anchor.Add(3000*time.Minute))
+	require.NoError(t, err)
+	require.Equal(t, 1, got)
+}
