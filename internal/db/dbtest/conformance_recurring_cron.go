@@ -187,6 +187,59 @@ func checkRecurringCron(t *testing.T, s db.Storage, b Backend) error {
 	return nil
 }
 
+// The backlog a client previews for a reopened parent must equal what the
+// daemon delivers for it, for every catch-up policy.
+func checkRecurringBacklogMatchesDelivery(t *testing.T, s db.Storage) error {
+	ctx := t.Context()
+	for _, tc := range []struct {
+		catchup string
+		grace   int64
+		want    int
+	}{
+		{"all", 0, 1000},
+		{"latest", 0, 1},
+		{"skip", 20000, 3},
+	} {
+		t.Run(tc.catchup, func(t *testing.T) {
+			p, e := s.CreateProject(ctx, "backlog-"+tc.catchup)
+			require.NoError(t, e)
+			parent, _, e := s.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "Ongoing commitment", Author: "operator"})
+			require.NoError(t, e)
+			def := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 7200}, Action: cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}, Issue: &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Review service"}, Overlap: "allow", Catchup: tc.catchup, GraceSeconds: tc.grace}
+			job, _, e := s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "Periodic review", Actor: "operator", Definition: def})
+			require.NoError(t, e)
+			_, _, _, e = s.CloseIssue(ctx, parent.ID, "done", "operator", "Recurring commitment paused", nil)
+			require.NoError(t, e)
+			closed, e := s.IssueByID(ctx, parent.ID)
+			require.NoError(t, e)
+			var values map[string]jsontext.Value
+			require.NoError(t, json.Unmarshal([]byte(closed.Metadata), &values))
+			var progress cron.RecurringProgress
+			require.NoError(t, json.Unmarshal(values["cron.progress."+job.UID], &progress))
+			now := progress.Anchor.Add(2000*time.Hour + 30*time.Minute)
+
+			backlog, e := cron.RecurringBacklog(job.Definition, job.DefinitionEventUID, progress, now)
+			require.NoError(t, e)
+			require.Equal(t, tc.want, backlog)
+
+			_, _, _, e = s.ReopenIssue(ctx, parent.ID, "operator")
+			require.NoError(t, e)
+			in := db.DispatchRecurringCronIn{ProjectID: p.ID, JobUID: job.UID, ExpectedEventUID: job.DefinitionEventUID, Now: now}
+			for {
+				out, e := s.DispatchRecurringCron(ctx, in)
+				require.NoError(t, e)
+				if !out.More {
+					break
+				}
+			}
+			issues, e := s.ListIssues(ctx, db.ListIssuesParams{ProjectID: p.ID})
+			require.NoError(t, e)
+			require.Len(t, issues, backlog+1, "children created equal the previewed backlog")
+		})
+	}
+	return nil
+}
+
 // A failed progress write rolls back all already-created children and their events.
 func checkRecurringAtomicRollback(t *testing.T, s db.Storage, b Backend) error {
 	p, parent, job, progress := recurringFixture(t, s, "all")

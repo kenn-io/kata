@@ -255,9 +255,9 @@ func TestRecurringBacklog(t *testing.T) {
 		now    time.Time
 		want   int
 	}{
-		"all counts every missed occurrence":    {func(j *JobDefinition) {}, anchor.Add(7 * time.Minute), 7},
-		"all beyond a thousand is exact":        {func(j *JobDefinition) {}, anchor.Add(2503 * time.Minute), 2503},
-		"nothing due yet":                       {func(j *JobDefinition) {}, anchor.Add(30 * time.Second), 0},
+		"all counts every missed occurrence":    {func(_ *JobDefinition) {}, anchor.Add(7 * time.Minute), 7},
+		"all beyond a thousand is exact":        {func(_ *JobDefinition) {}, anchor.Add(2503 * time.Minute), 2503},
+		"nothing due yet":                       {func(_ *JobDefinition) {}, anchor.Add(30 * time.Second), 0},
 		"latest delivers one":                   {func(j *JobDefinition) { j.Catchup = "latest" }, anchor.Add(2503 * time.Minute), 1},
 		"latest with nothing due":               {func(j *JobDefinition) { j.Catchup = "latest" }, anchor.Add(30 * time.Second), 0},
 		"skip drops occurrences past grace":     {func(j *JobDefinition) { j.Catchup = "skip"; j.GraceSeconds = 60 }, anchor.Add(2503 * time.Minute), 2},
@@ -272,23 +272,6 @@ func TestRecurringBacklog(t *testing.T) {
 			require.Equal(t, tc.want, got)
 		})
 	}
-
-	t.Run("matches the sweep loop", func(t *testing.T) {
-		now := anchor.Add(1234 * time.Minute)
-		want, p := 0, progress
-		for {
-			batch, err := PlanRecurring(j, definitionUID, p, now)
-			require.NoError(t, err)
-			want += len(batch.Due)
-			p = batch.Progress
-			if !batch.More {
-				break
-			}
-		}
-		got, err := RecurringBacklog(j, definitionUID, progress, now)
-		require.NoError(t, err)
-		require.Equal(t, want, got)
-	})
 
 	t.Run("invalid input is rejected", func(t *testing.T) {
 		_, err := RecurringBacklog(j, "not-a-uid", progress, anchor.Add(time.Hour))
