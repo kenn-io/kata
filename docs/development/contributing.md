@@ -66,6 +66,8 @@ make lint
 make nilaway
 ```
 
+Pull request checks are selected by changed files; pushes to `main` run all groups.
+
 ### Native agent plugins
 
 The `native-agent-plugins` job in

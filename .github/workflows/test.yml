@@ -37,8 +37,6 @@ jobs:
               - '!{*.go,**/*.go,*.md,**/*.md,docs/**}'
               - 'web/**'
               - 'packages/**'
-              - 'docs/index.md'
-              - 'docs/{get-started,guide,workflows,reference,operations}/*.md'
               - 'docs/javascripts/**'
 
   web-static:
