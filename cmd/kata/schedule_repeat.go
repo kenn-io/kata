@@ -138,6 +138,7 @@ func runScheduleRepeat(cmd *cobra.Command, args []string, opts scheduleRepeatOpt
 	// A historical ref resolves an issue that has since moved; every
 	// recurrence call belongs to the project the issue is in now, under the
 	// short id it has there.
+	requestedPID := pid
 	pid, ref.RefForAPI = issue.ProjectID, issue.ShortID
 	if err := checkIssueIfMatch(opts.IfMatch, issue.Revision); err != nil {
 		return err
@@ -194,8 +195,13 @@ func runScheduleRepeat(cmd *cobra.Command, args []string, opts scheduleRepeatOpt
 	if err != nil {
 		return err
 	}
+	displayRef, err := issueRefForOutput(daemonAPI{ctx: ctx, baseURL: baseURL, client: httpClient}, requestedPID, ref.ProjectName,
+		issueIdentityForOutput{ProjectID: issue.ProjectID, UID: after.UID, ShortID: after.ShortID})
+	if err != nil {
+		return err
+	}
 	result := scheduleRepeatResult{
-		Ref:         after.ShortID,
+		Ref:         displayRef,
 		Action:      action,
 		ScheduledOn: metadataString(after.Metadata, "scheduled_on"),
 	}

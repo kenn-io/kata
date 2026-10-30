@@ -143,6 +143,7 @@ func newMetaGetCmd() *cobra.Command {
 // content fields, ProjectID and RecurrenceID are read by kata schedule --repeat.
 type metaIssueWire struct {
 	ProjectID    int64                     `json:"project_id"`
+	UID          string                    `json:"uid"`
 	ShortID      string                    `json:"short_id"`
 	Status       string                    `json:"status"`
 	Title        string                    `json:"title"`

@@ -496,6 +496,18 @@ func TestScheduleRepeatIfMatchLosesToACompetingWriteBeforeTheRecurrenceIsCreated
 	assert.Empty(t, listRecurrencesViaHTTP(t, env, pid), "the competing write must not be overwritten")
 }
 
+func TestScheduleRepeatReportsAMovedIssueWithItsCurrentProjectRef(t *testing.T) {
+	isolateCallerZone(t)
+	env, dir, source, target, issue := setupMoveCLIProjects(t)
+	runCLI(t, env, dir, "--project", source.Name, "move", issue.ShortID, target.Name)
+	moved, err := env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+
+	out := runCLI(t, env, dir, "schedule", source.Name+"#"+issue.ShortID, "2026-11-02", "--repeat", "FREQ=DAILY", "--timezone", "UTC")
+
+	assert.True(t, strings.HasPrefix(out, target.Name+"#"+moved.ShortID+" repeat started"), out)
+}
+
 // olderDaemonProxy forwards to the daemon but reports an API version that
 // predates the If-Match guard on starting a recurrence.
 func olderDaemonProxy(t *testing.T, env *testenv.Env) string {
