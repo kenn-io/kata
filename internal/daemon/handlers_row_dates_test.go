@@ -101,27 +101,19 @@ func TestListRowsCarryResolvedPlanningDates(t *testing.T) {
 				got[title] = row
 			}
 			require.Equal(t, f.want(), got)
+
+			var generic struct {
+				Issues []map[string]any `json:"issues"`
+			}
+			require.NoError(t, json.Unmarshal(raw, &generic))
+			for _, row := range generic.Issues {
+				if row["title"] == "no dates" {
+					require.NotContains(t, row, "scheduled_on_date")
+					require.NotContains(t, row, "deadline_on_date")
+				}
+			}
 		})
 	}
-}
-
-func TestListRowsOmitAbsentPlanningDateKeys(t *testing.T) {
-	f := newRowDatesFixture(t)
-	status, raw := cronHTTP(t, f.env, http.MethodGet,
-		fmt.Sprintf("/api/v1/projects/%d/issues", f.project.ID), nil)
-	require.Equalf(t, http.StatusOK, status, "%s", raw)
-	var body struct {
-		Issues []map[string]any `json:"issues"`
-	}
-	require.NoError(t, json.Unmarshal(raw, &body))
-	for _, row := range body.Issues {
-		if row["title"] == "no dates" {
-			require.NotContains(t, row, "scheduled_on_date")
-			require.NotContains(t, row, "deadline_on_date")
-			return
-		}
-	}
-	require.FailNow(t, "row without planning dates not listed")
 }
 
 func TestShowIssueCarriesResolvedPlanningDates(t *testing.T) {
@@ -150,4 +142,40 @@ func TestShowIssueCarriesResolvedPlanningDates(t *testing.T) {
 			}
 		})
 	}
+}
+
+// One unreadable stored value must not take a whole list or show response
+// down; only the field that cannot be resolved is omitted.
+func TestRowsOmitUnreadablePlanningDateAndKeepTheRest(t *testing.T) {
+	f := newRowDatesFixture(t)
+	_, err := f.env.DB.ExecContext(t.Context(),
+		`UPDATE issues SET metadata = ? WHERE id = ?`,
+		`{"scheduled_on":"next tuesday","deadline_on":"2026-11-02"}`, f.nodate.ID)
+	require.NoError(t, err)
+
+	status, raw := cronHTTP(t, f.env, http.MethodGet,
+		fmt.Sprintf("/api/v1/projects/%d/issues", f.project.ID), nil)
+	require.Equalf(t, http.StatusOK, status, "%s", raw)
+	var list struct {
+		Issues []map[string]any `json:"issues"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &list))
+	got := map[any]map[string]any{}
+	for _, row := range list.Issues {
+		got[row["title"]] = row
+	}
+	require.Len(t, got, 4)
+	require.NotContains(t, got["no dates"], "scheduled_on_date")
+	require.Equal(t, "2026-11-02", got["no dates"]["deadline_on_date"])
+	require.Equal(t, "2026-10-29", got["date only"]["scheduled_on_date"])
+
+	status, raw = cronHTTP(t, f.env, http.MethodGet,
+		fmt.Sprintf("/api/v1/projects/%d/issues/%s", f.project.ID, f.nodate.ShortID), nil)
+	require.Equalf(t, http.StatusOK, status, "%s", raw)
+	var shown struct {
+		Issue map[string]any `json:"issue"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &shown))
+	require.NotContains(t, shown.Issue, "scheduled_on_date")
+	require.Equal(t, "2026-11-02", shown.Issue["deadline_on_date"])
 }

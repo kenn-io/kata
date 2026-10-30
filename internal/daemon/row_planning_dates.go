@@ -21,6 +21,8 @@ func newPlanningDateResolver(store db.Storage, defaultTimezone string) *planning
 	return &planningDateResolver{store: store, defaultTimezone: defaultTimezone, recurrenceTimezone: map[int64]string{}}
 }
 
+// resolve omits a field whose stored value cannot be read; it fails only when
+// the recurrence timezone lookup itself fails.
 func (r *planningDateResolver) resolve(ctx context.Context, issue db.Issue) (scheduledOn, deadlineOn string, err error) {
 	raw := string(issue.Metadata)
 	if raw == "" {
@@ -41,9 +43,6 @@ func (r *planningDateResolver) resolve(ctx context.Context, issue db.Issue) (sch
 			scheduledDefault = zone
 		}
 	}
-	scheduledOn, deadlineOn, err = db.RowPlanningDates(raw, scheduledDefault, r.defaultTimezone)
-	if err != nil {
-		return "", "", fmt.Errorf("read issue %s planning dates: %w", issue.UID, err)
-	}
+	scheduledOn, deadlineOn = db.RowPlanningDates(raw, scheduledDefault, r.defaultTimezone)
 	return scheduledOn, deadlineOn, nil
 }

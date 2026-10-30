@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestRowPlanningDatesResolveInIssueThenDefaultThenUTC(t *testing.T) {
@@ -102,15 +101,19 @@ func TestRowPlanningDatesResolveInIssueThenDefaultThenUTC(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			scheduledOn, deadlineOn, err := RowPlanningDates(tt.raw, tt.scheduledZone, tt.deadlineZone)
-			require.NoError(t, err)
+			scheduledOn, deadlineOn := RowPlanningDates(tt.raw, tt.scheduledZone, tt.deadlineZone)
 			assert.Equal(t, tt.wantScheduledOn, scheduledOn)
 			assert.Equal(t, tt.wantDeadlineOn, deadlineOn)
 		})
 	}
 }
 
-func TestRowPlanningDatesRejectsMalformedMetadata(t *testing.T) {
-	_, _, err := RowPlanningDates(`{"scheduled_on":"next tuesday"}`, "", "")
-	require.Error(t, err)
+func TestRowPlanningDatesOmitsOnlyTheUnreadableField(t *testing.T) {
+	scheduledOn, deadlineOn := RowPlanningDates(`{"scheduled_on":"next tuesday","deadline_on":"2026-11-02"}`, "", "")
+	assert.Empty(t, scheduledOn)
+	assert.Equal(t, "2026-11-02", deadlineOn)
+
+	scheduledOn, deadlineOn = RowPlanningDates(`{"scheduled_on":"2026-10-29","timezone":"Mars/Base","deadline_on":"2026-10-29T23:30:00Z"}`, "", "")
+	assert.Equal(t, "2026-10-29", scheduledOn)
+	assert.Empty(t, deadlineOn, "an unknown issue zone cannot place an instant")
 }

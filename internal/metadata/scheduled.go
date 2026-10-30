@@ -145,7 +145,7 @@ func ScheduledOnCalendarDate(
 	displayTimezone string,
 	defaultTimezone string,
 ) (string, bool, error) {
-	return metadataCalendarDate(raw, "scheduled_on", displayTimezone, defaultTimezone, false)
+	return CalendarDate(raw, "scheduled_on", &displayTimezone, defaultTimezone)
 }
 
 // DeadlineOnCalendarDate returns the display calendar date for deadline_on.
@@ -156,31 +156,19 @@ func DeadlineOnCalendarDate(
 	displayTimezone string,
 	defaultTimezone string,
 ) (string, bool, error) {
-	return metadataCalendarDate(raw, "deadline_on", displayTimezone, defaultTimezone, false)
+	return CalendarDate(raw, "deadline_on", &displayTimezone, defaultTimezone)
 }
 
-// ScheduledOnScheduleZoneDate is ScheduledOnCalendarDate read in the zone the
-// value itself is scheduled in: the issue timezone, then defaultTimezone, then
-// UTC.
-func ScheduledOnScheduleZoneDate(raw, defaultTimezone string) (string, bool, error) {
-	return metadataCalendarDate(raw, "scheduled_on", "", defaultTimezone, true)
-}
-
-// DeadlineOnScheduleZoneDate is DeadlineOnCalendarDate read in the zone the
-// value itself is scheduled in; see ScheduledOnScheduleZoneDate.
-func DeadlineOnScheduleZoneDate(raw, defaultTimezone string) (string, bool, error) {
-	return metadataCalendarDate(raw, "deadline_on", "", defaultTimezone, true)
-}
-
-// metadataCalendarDate projects one planning field to a calendar date. With
-// inScheduleZone the display zone is the schedule zone (issue timezone, then
-// defaultTimezone, then UTC) and displayTimezone is ignored.
-func metadataCalendarDate(
+// CalendarDate projects one planning field ("scheduled_on" or "deadline_on")
+// to a YYYY-MM-DD calendar date, reporting whether the key is present. A
+// non-nil displayTimezone is the viewer's zone, with "" meaning UTC. A nil
+// displayTimezone reads the value in its own schedule zone: the issue
+// timezone, then defaultTimezone, then UTC.
+func CalendarDate(
 	raw string,
 	key string,
-	displayTimezone string,
+	displayTimezone *string,
 	defaultTimezone string,
-	inScheduleZone bool,
 ) (string, bool, error) {
 	if len(raw) == 0 {
 		return "", false, nil
@@ -215,18 +203,21 @@ func metadataCalendarDate(
 			return "", false, err
 		}
 	}
-	if inScheduleZone {
-		displayTimezone = values.Timezone
-		if displayTimezone == "" {
-			displayTimezone = defaultTimezone
-		}
+	var display string
+	switch {
+	case displayTimezone != nil:
+		display = *displayTimezone
+	case values.Timezone != "":
+		display = values.Timezone
+	default:
+		display = defaultTimezone
 	}
-	if displayTimezone == "" {
-		displayTimezone = "UTC"
+	if display == "" {
+		display = "UTC"
 	}
-	displayLocation, err := time.LoadLocation(displayTimezone)
+	displayLocation, err := time.LoadLocation(display)
 	if err != nil {
-		return "", false, fmt.Errorf("load display timezone %q: %w", displayTimezone, err)
+		return "", false, fmt.Errorf("load display timezone %q: %w", display, err)
 	}
 	return instant.In(displayLocation).Format(time.DateOnly), true, nil
 }
