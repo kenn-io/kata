@@ -157,6 +157,9 @@
     min-width: 0;
     min-height: 0;
     overflow: auto;
+    /* Reserve the scrollbar's width so actions do not shift when selecting a
+       longer issue makes the pane scroll. */
+    scrollbar-gutter: stable;
     background: var(--bg-surface);
     padding: var(--space-6) var(--space-7) var(--space-8);
   }
