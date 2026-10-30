@@ -30,11 +30,13 @@ jobs:
         with:
           filters: |
             go:
-              - '!{*.md,docs/**/*.md,docs/website/**}'
+              - '!{*.md,docs/**/*.md,docs/website/**,docs/scripts/**,docs/stylesheets/**,docs/overrides/**,docs/zensical.toml,docs/vercel.json,docs/llms.txt,docs/pyproject.toml,docs/uv.lock,docs/vercel-build.sh,docs/zensical-docs.sh}'
               - 'docs/index.md'
               - 'docs/{get-started,guide,workflows,reference,operations}/*.md'
             frontend:
-              - '!{*.md,docs/**,**/*.go}'
+              - '!{*.go,**/*.go,*.md,**/*.md,docs/**}'
+              - 'web/**'
+              - 'packages/**'
               - 'docs/index.md'
               - 'docs/{get-started,guide,workflows,reference,operations}/*.md'
               - 'docs/{scripts,assets,screenshots,javascripts}/**'
