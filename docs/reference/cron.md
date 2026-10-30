@@ -482,8 +482,8 @@ baselines and backup. Run identity conflicts fail rather than replacing a run.
 An adapter with a machine-readable cause for a run's outcome starts
 `summary.message` with the line `reason: <code>`, then puts any detail on the
 next line. The `<code>` matches `[a-z0-9_.-]{1,64}`. Any status may carry one.
-Kata stores the message as text and validates nothing: there is no summary
-field, capability, or schema change. Clients that know the convention can show
+Kata does not parse or validate the reason line; it is ordinary message text
+under the summary rules above. Clients that know the convention can show
 the code and filter on it client-side. Each adapter defines and documents its
 own codes; where two adapters mean the same thing they share the name, as
 `agent_quota`, `agent_login`, and `launch_unproven` do. The `reason: ` marker
