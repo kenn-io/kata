@@ -180,7 +180,7 @@ func daemonLifecycle(t *testing.T) func(*testing.T, string) *daemonLifecycleFixt
 func (f *daemonLifecycleFixture) restart(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	command := exec.CommandContext(t.Context(), f.cli, append([]string{"daemon", "restart"}, args...)...) //nolint:gosec // test-built executable
-	command.Env = f.env
+	command.Env = append(append([]string(nil), f.env...), "PORT=4321")
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
 	output, err := command.Output()
@@ -414,7 +414,12 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 					assert.NoError(t, err, "%s", output)
 					done <- struct{}{}
 				}()
-				lockAttempted() // the second CLI is retrying the start lock the first restart holds
+				lockAttempted() // the second CLI has opened the shared start lock
+				select {
+				case <-done:
+					t.Fatal("second command finished before the restart drain was released")
+				case <-time.After(200 * time.Millisecond): //nolint:kennlint // deadlinetest: a real CLI must wait for the held restart drain
+				}
 				require.NoError(t, os.WriteFile(release, nil, 0600))
 				<-restarted
 				assert.NoError(t, restartErr, "%s", restartOutput.String())
@@ -488,6 +493,7 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 			require.True(t, after.StartedAt.After(before.StartedAt))
 			assert.Equal(t, "v0.2.0", after.Version)
 			if scenario == "new config" {
+				assert.NotEqual(t, "0.0.0.0:4321", after.Address, "replacement must ignore the caller PORT")
 				var result struct {
 					Action  string `json:"action"`
 					PID     int    `json:"pid"`
@@ -516,7 +522,9 @@ func TestWaitForDaemonReplacement(t *testing.T) {
 		reply := filepath.Join(store.Dir, "restart-reply-caller")
 		require.NoError(t, os.WriteFile(reply, nil, 0600))
 		started := time.Now().UTC()
-		_, err := store.Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), StartedAt: started, Address: "127.0.0.1:7777"})
+		identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
+		require.True(t, ok)
+		_, err := store.Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: identity, StartedAt: started, Address: "127.0.0.1:7777"})
 		require.NoError(t, err)
 		previous := kitdaemon.RuntimeRecord{PID: 1 << 30, StartedAt: started.Add(-time.Second)}
 		_, err = waitForDaemonReplacement(t.Context(), store, previous, reply)
