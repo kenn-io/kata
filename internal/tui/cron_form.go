@@ -63,7 +63,7 @@ var cronFieldLabels = [cfCount]string{
 }
 
 // cronFieldHints say what a field takes, shown after an empty field.
-var cronFieldHints = [cfCount]string{
+var cronFieldHints = [cfCount]string{ //nolint:gosec // G101: input hints such as "ENV=source", not credentials
 	cfCron: "5 fields like 0 9 * * 1-5, or @daily", cfZone: "IANA name, default UTC",
 	cfInterval: "seconds or 15m", cfAt: "2026-11-01T09:00:00+01:00", cfIssue: "issue ref",
 	cfLead: "seconds or 2h, optional", cfParent: "issue ref", cfScheduled: "seconds, optional", cfDeadline: "seconds, optional",
@@ -126,12 +126,14 @@ func fieldErr(field cronField, format string, args ...any) error {
 	return &cronFieldError{field, fmt.Sprintf(format, args...)}
 }
 
-func cronIsDate(trigger string) bool { return trigger == "issue-scheduled" || trigger == "issue-deadline" }
+func cronIsDate(trigger string) bool {
+	return trigger == "issue-scheduled" || trigger == "issue-deadline"
+}
 
 var cronRecurringKind = cronJobKind{
 	id: cronRecurringID, label: "recurring child issue", triggers: allTriggers[:2],
 	owns: cron.IsRecurringIssueJob,
-	shown: func(f *cronForm, field cronField) bool {
+	shown: func(_ *cronForm, field cronField) bool {
 		return slices.Contains([]cronField{cfParent, cfTitle, cfBody, cfRecipient, cfMessage, cfCatchup}, field)
 	},
 	load: func(f *cronForm, def cron.JobDefinition) {
@@ -349,8 +351,8 @@ var cronDeadlineTrigger = cronJobTrigger{
 }
 
 // cronSeconds reads an optional span as whole seconds: a number or a Go
-// duration. Blank is zero. Values below min are refused unless min is 0.
-func cronSeconds(field cronField, text string, min int64) (int64, error) {
+// duration. Blank is zero. Values below least are refused.
+func cronSeconds(field cronField, text string, least int64) (int64, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return 0, nil
@@ -363,8 +365,8 @@ func cronSeconds(field cronField, text string, min int64) (int64, error) {
 		}
 		n = int64(d / time.Second)
 	}
-	if n < min {
-		return 0, fieldErr(field, "must be at least %d", min)
+	if n < least {
+		return 0, fieldErr(field, "must be at least %d", least)
 	}
 	return n, nil
 }
@@ -752,7 +754,7 @@ func (f *cronForm) step(field cronField, delta int) {
 
 // order lists the shown fields in tab order.
 func (f *cronForm) order() []cronField {
-	var out []cronField
+	out := make([]cronField, 0, cfCount)
 	for field := range cronField(cfCount) {
 		if f.shown(field) {
 			out = append(out, field)
@@ -763,6 +765,9 @@ func (f *cronForm) order() []cronField {
 
 func (f *cronForm) move(delta int) {
 	order := f.order()
+	if len(order) == 0 {
+		return
+	}
 	i := slices.Index(order, f.focus)
 	for range len(order) {
 		i = (max(i, 0) + delta + len(order)) % len(order)

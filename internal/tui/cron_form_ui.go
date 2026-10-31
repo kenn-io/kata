@@ -250,7 +250,7 @@ func (m Model) cronSaveCmd(f cronForm) tea.Cmd {
 		}
 		if _, err := api.PutCronJob(ctx, pid, f.uid, write); err != nil {
 			var apiErr *APIError
-			if !f.create && errors.As(err, &apiErr) && apiErr.Status == http.StatusConflict {
+			if !f.create && errors.As(err, &apiErr) && apiErr != nil && apiErr.Status == http.StatusConflict {
 				if current, readErr := api.ShowCronJob(ctx, pid, f.uid); readErr == nil {
 					return cronSavedMsg{conn: conn, scope: scope, conflict: &current, err: err, fromForm: true}
 				}
@@ -263,14 +263,14 @@ func (m Model) cronSaveCmd(f cronForm) tea.Cmd {
 
 func isNotFound(err error) bool {
 	var apiErr *APIError
-	return errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound
+	return errors.As(err, &apiErr) && apiErr != nil && apiErr.Status == http.StatusNotFound
 }
 
 // cronWriteMessage words a failed cron request. A rejected token and a token
 // that may not touch the project are different problems.
 func cronWriteMessage(err error) string {
 	var apiErr *APIError
-	if !errors.As(err, &apiErr) {
+	if !errors.As(err, &apiErr) || apiErr == nil {
 		return err.Error()
 	}
 	switch {
@@ -447,6 +447,7 @@ func cronFieldLabel(f *cronForm, field cronField) string {
 
 // cronFormLines renders the form body, one line per field.
 func cronFormLines(m Model, f *cronForm) (lines []string, cursor int) {
+	lines = make([]string, 0, cfCount)
 	if f.conflict != nil {
 		c := f.conflict
 		lines = append(lines, errorStyle.Render("This job changed while you edited it. Your draft is kept."), "",

@@ -2,7 +2,7 @@
 kata カタ [jobs] runs workflows
  / search                                                                0 jobs
 
-  Job            State   Trigger           Action             Last loaded run
+  Job           State    Trigger           Action             Last loaded run
 jobs unavailable: see error below
 
 

@@ -1841,7 +1841,7 @@ such as `kata tui abc4`, to open that issue's detail view directly. The ref
 accepts the same bare short ID, qualified short ID, and full UID forms as
 `kata show`.
 
-**Cron tabs.** Press `1` for Kata, `2` for Jobs, `3` for Runs, or `4` for Workflows. Cron tabs are read-only and show the current project. In All projects, press `P` to pick one. Each tab keeps its filter and position when you switch tabs. Returning to Kata preserves the issue you were browsing.
+**Cron tabs.** Press `1` for Kata, `2` for Jobs, `3` for Runs, or `4` for Workflows. Runs and Workflows are read-only; Jobs can create and change jobs (below). Cron tabs show the current project. In All projects, press `P` to pick one. Each tab keeps its filter and position when you switch tabs. Returning to Kata preserves the issue you were browsing.
 
 | Key | Cron lists and details |
 | --- | --- |
@@ -1853,6 +1853,21 @@ accepts the same bare short ID, qualified short ID, and full UID forms as
 | `1`–`4` | Switch tabs. |
 | `?` | Explain jobs, workflows, and runs, and show keybindings. |
 | `q` | Quit. |
+
+On the Jobs tab, or on a job's detail, these keys change jobs. Elsewhere `n` keeps its usual meaning.
+
+| Key | Jobs |
+| --- | --- |
+| `n` | Create a job. |
+| `e` | Edit the selected job. |
+| `p` | Pause or resume the selected job by writing `enabled`. |
+| `d` | Archive the selected job after a `y`/`n` confirmation. The job stays readable and can be restored. |
+| `a` | Switch the list between live and archived jobs. |
+| `u` | Restore the selected archived job after a `y`/`n` confirmation. |
+
+The job form offers four kinds: a recurring child issue (a native job with a parent issue), an agent prompt, a workflow run, and a notification. Each kind offers the triggers that fit it: cron with its time zone, interval (60 seconds or more for recurring child issues), once at an RFC 3339 instant, manual, an issue's scheduled date, and an issue's deadline with its lead. Issue fields take a short ID or a full UID. The form also edits `checkout_key`, `secret_refs` and `options`; `options` is a raw JSON object that is saved exactly as written, so unknown keys and large numbers survive an edit. The form shows the message from kata's job validation beside the field it concerns, and `Ctrl+s` saves. `Esc` asks for a second `Esc` before it discards changes.
+
+The form mints the job UID when it opens, so retrying a failed create never makes a second job. An edit is guarded on the job's `definition_event_uid`. If the job changed while you edited, the form keeps your draft and shows the current job; press `a` to apply the draft to it or `t` to take the current job instead. A recurring child issue's parent cannot change after creation, and native jobs must be written on the project's owning hub.
 
 Runs loads the newest 100 observations for the current project. Job and workflow details show matching runs from that loaded project history. Run details distinguish the recorded definition revision from the current job or workflow, including definitions that have changed or disappeared.
 

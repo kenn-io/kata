@@ -2,8 +2,8 @@
 kata カタ [jobs] runs workflows
  /daily▏                                                                  1 job
 
-  Job            State   Trigger           Action             Last loaded run
-▶ Daily summary  enabled 0 7 * * *         workflow Summary … succeeded 1h ago
+  Job           State    Trigger           Action             Last loaded run
+▶ Daily summary enabled  0 7 * * *         workflow Summary … succeeded 1h ago
 
 
 

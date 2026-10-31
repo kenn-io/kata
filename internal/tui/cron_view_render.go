@@ -104,7 +104,7 @@ func cronScreen(m Model) (string, string, []cronLine) {
 	// Fixed columns leave the name and summary the remaining cells.
 	widths := [][]int{
 		nil,
-		{0, 7, 17, 18, 18},
+		{0, 8, 17, 18, 18},
 		{10, 0, 12, 11, 11, 0},
 		{0, 5, 7, 18, 11},
 	}[m.cron.tab]
