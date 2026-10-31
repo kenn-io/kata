@@ -45,6 +45,9 @@ func (m Model) routeCronJobKey(key string, lines []cronLine, cursor int) (Model,
 	if !m.cronJobsScope() || m.cron.data == nil {
 		return m, nil, false
 	}
+	if (key == "n" || key == "e") && !m.mutationAllowed(false) {
+		return m, nil, true
+	}
 	switch key {
 	case "n":
 		f, err := newCronForm(m.cronWorkflowChoices())
@@ -94,7 +97,6 @@ type cronSavedMsg struct {
 	conflict    *db.CronJob
 	fieldErr    *cronFieldError
 	err         error
-	fromForm    bool
 }
 
 func (m Model) cronOpenEdit(uid string, seq uint64) tea.Cmd {
@@ -141,7 +143,7 @@ func (m Model) cronSaveCmd(f cronForm) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
 		defer cancel()
-		fail := func(err error) tea.Msg { return cronSavedMsg{conn: conn, scope: scope, err: err, fromForm: true} }
+		fail := func(err error) tea.Msg { return cronSavedMsg{conn: conn, scope: scope, err: err} }
 		resolved := map[string]string{}
 		for _, r := range f.issueRefs() {
 			detail, err := api.GetIssueDetail(ctx, pid, r.ref)
@@ -151,14 +153,14 @@ func (m Model) cronSaveCmd(f cronForm) tea.Cmd {
 				if err != nil && (!errors.As(err, &apiErr) || apiErr == nil || apiErr.Status != http.StatusNotFound) {
 					text = err.Error()
 				}
-				return cronSavedMsg{conn: conn, scope: scope, fieldErr: &cronFieldError{r.field, text}, fromForm: true}
+				return cronSavedMsg{conn: conn, scope: scope, fieldErr: &cronFieldError{r.field, text}}
 			}
 			resolved[r.ref] = detail.Issue.UID
 		}
 		name, def, err := f.build(cronUIDResolver(resolved))
 		if err != nil {
 			if fe, ok := err.(*cronFieldError); ok {
-				return cronSavedMsg{conn: conn, scope: scope, fieldErr: fe, fromForm: true}
+				return cronSavedMsg{conn: conn, scope: scope, fieldErr: fe}
 			}
 			return fail(err)
 		}
@@ -176,14 +178,17 @@ func (m Model) cronSaveCmd(f cronForm) tea.Cmd {
 				if json.Unmarshal(apiErr.Data, &data) == nil && len(data.Current) > 0 {
 					current, readErr := decodeCronJob(data.Current)
 					if readErr == nil {
-						return cronSavedMsg{conn: conn, scope: scope, conflict: &current, err: err, fromForm: true}
+						_, readErr = cronFormFor(current, f.workflows)
+					}
+					if readErr == nil {
+						return cronSavedMsg{conn: conn, scope: scope, conflict: &current, err: err}
 					}
 					return fail(readErr)
 				}
 			}
 			return fail(err)
 		}
-		return cronSavedMsg{conn: conn, scope: scope, notice: notice, fromForm: true}
+		return cronSavedMsg{conn: conn, scope: scope, notice: notice}
 	}
 }
 
@@ -192,7 +197,7 @@ func (m Model) cronSaved(msg cronSavedMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 	f := m.cron.form
-	if msg.fromForm && f != nil {
+	if f != nil {
 		f.saving = false
 	}
 	switch {
@@ -205,15 +210,13 @@ func (m Model) cronSaved(msg cronSavedMsg) (Model, tea.Cmd) {
 		return m, nil
 	case msg.err != nil:
 		m.cron.events++
-		if msg.fromForm && f != nil {
+		if f != nil {
 			f.general = msg.err.Error()
 			return m, nil
 		}
 		return m.undoNotice(msg.err.Error(), toastError)
 	}
-	if msg.fromForm {
-		m.cron.form = nil
-	}
+	m.cron.form = nil
 	m.cron.events++
 	m.cache.markStale()
 	refresh := m.detail.refetch(m.api)

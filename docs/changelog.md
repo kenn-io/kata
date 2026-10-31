@@ -25,9 +25,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
   The form covers recurring child issues, agent prompts, workflow runs, and
   notifications. Edit long text in `$VISUAL` or `$EDITOR`, preserving tabs
   and line endings. Unknown adapter `options` keys and exact numbers survive
-  an edit. If a revision changes while you edit, keep your draft
-  and inspect the current definition, then reload it or save your whole draft
-  against its revision. See [the `kata tui` keys](reference/cli.md#daemon-and-diagnostics).
+  an edit. If a revision changes while you edit, the form keeps your draft.
+  Inspect a supported current definition, then reload it or save your whole
+  draft against its revision. See [the `kata tui` keys](reference/cli.md#daemon-and-diagnostics).
 - Show what is stuck in any web collection, Inbox and Today included, with the
   optional **Blocked by** column. It lists each task's open blockers, three IDs
   at most and then `+N`; closed blockers are left out. It is off by default;

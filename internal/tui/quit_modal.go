@@ -38,21 +38,14 @@ func renderQuitConfirmModal() string {
 }
 
 func renderDiscardCommentModal() string {
-	body := strings.Join([]string{
-		"Discard comment draft?",
-		"",
-		"Your unsaved comment will be lost.",
-		"",
-		"[Y] Discard    [N] Keep editing",
-	}, "\n")
-	return modalBoxStyle.Render(body)
+	return renderDiscardDraftModal("Discard comment draft?", "Your unsaved comment will be lost.")
 }
 
-func renderDiscardCronJobModal() string {
+func renderDiscardDraftModal(prompt, warning string) string {
 	body := strings.Join([]string{
-		"Discard job draft?",
+		prompt,
 		"",
-		"Your unsaved job changes will be lost.",
+		warning,
 		"",
 		"[Y] Discard    [N] Keep editing",
 	}, "\n")
@@ -60,14 +53,7 @@ func renderDiscardCronJobModal() string {
 }
 
 func renderDiscardNewIssueModal() string {
-	body := strings.Join([]string{
-		"Discard new issue draft?",
-		"",
-		"Your unsaved issue will be lost.",
-		"",
-		"[Y] Discard    [N] Keep editing",
-	}, "\n")
-	return modalBoxStyle.Render(body)
+	return renderDiscardDraftModal("Discard new issue draft?", "Your unsaved issue will be lost.")
 }
 
 func renderConfirmModal(kind modalKind) string {
@@ -79,7 +65,7 @@ func renderConfirmModal(kind modalKind) string {
 	case modalDiscardNewIssue:
 		return renderDiscardNewIssueModal()
 	case modalDiscardCronJob:
-		return renderDiscardCronJobModal()
+		return renderDiscardDraftModal("Discard job draft?", "Your unsaved job changes will be lost.")
 	}
 	return ""
 }

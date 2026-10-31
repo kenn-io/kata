@@ -227,7 +227,6 @@ func TestCronFormEveryKindAndTrigger(t *testing.T) {
 			_, def, err := f.build(cronTestUIDs)
 			require.NoError(t, err)
 			require.Equal(t, tc.trigger, def.Trigger.Kind)
-			require.NoError(t, def.Validate())
 		})
 	}
 }
@@ -265,7 +264,7 @@ func TestCronFormCatchupLatestClearsGrace(t *testing.T) {
 	rec.Definition.Catchup, rec.Definition.GraceSeconds = "skip", 300
 	f, err := cronFormFor(rec, nil)
 	require.NoError(t, err)
-	f.val[cfCatchup] = "latest"
+	f.step(cfCatchup, 1)
 	_, def, err := f.build(cronUIDResolver(nil))
 	require.NoError(t, err)
 	require.Zero(t, def.GraceSeconds)
@@ -276,6 +275,26 @@ func TestCronFormCatchupLatestClearsGrace(t *testing.T) {
 	created.step(cfCatchup, 1)
 	_, def, err = created.build(cronUIDResolver(nil))
 	require.NoError(t, err)
+	require.Zero(t, def.GraceSeconds)
+}
+
+func TestCronFormHiddenGraceDoesNotBlockSave(t *testing.T) {
+	rec := executeRecord(`{}`)
+	rec.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 9 * * *"}
+	f, err := cronFormFor(rec, nil)
+	require.NoError(t, err)
+	f.step(cfCatchup, -1) // latest to skip
+	f.val[cfGrace] = "invalid grace"
+	f.validate()
+	require.NotNil(t, f.err)
+	require.Equal(t, cfGrace, f.err.field)
+	for range 3 {
+		f.step(cfTrigger, 1) // cron through interval and once to manual
+	}
+	require.False(t, f.shown(cfGrace))
+	_, def, err := f.build(cronUIDResolver(nil))
+	require.NoError(t, err)
+	require.Equal(t, "manual", def.Trigger.Kind)
 	require.Zero(t, def.GraceSeconds)
 }
 

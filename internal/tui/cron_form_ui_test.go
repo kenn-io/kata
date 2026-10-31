@@ -184,6 +184,36 @@ func TestCronEditConflictKeepsDraftAndAppliesToCurrent(t *testing.T) {
 	require.True(t, api.puts[1].write.Definition.Enabled, "saving replaces the whole definition with the kept draft")
 }
 
+func TestCronConflictRefusesFutureVersion(t *testing.T) {
+	m, api := openEdit(t, executeRecord(`{}`))
+	m.cron.form.val[cfTitle] = "My draft"
+	opened := m.cron.form.expected
+	api.shown.Definition.Version = 2
+	api.shown.DefinitionEventUID = "01ARZ3NDEKTSV4RRFFQ69G5FB8"
+	api.putErrs = []error{&APIError{Status: http.StatusConflict, Code: "cron_conflict"}}
+	m, cmd := press(m, ctrlKey('o'))
+	m = settle(t, m, cmd)
+	require.NotNil(t, m.cron.form)
+	require.Nil(t, m.cron.form.conflict, "an unsupported definition cannot authorize replacement")
+	require.Contains(t, m.cron.form.general, "version")
+	require.Equal(t, "My draft", m.cron.form.val[cfTitle])
+	require.Equal(t, opened, m.cron.form.expected)
+	require.Len(t, api.puts, 1)
+}
+
+func TestCronJobKeysRespectMutationAuthority(t *testing.T) {
+	for _, key := range []rune{'n', 'e'} {
+		for _, pending := range []bool{false, true} {
+			m, _ := cronWriteFixture(t)
+			m.issueScoped, m.scopedWritable = !pending, true
+			m.authCapabilitiesRequired, m.authCapabilitiesReady = pending, false
+			m, cmd := updateModel(m, keyRune(key))
+			require.Nil(t, m.cron.form, "key=%c pending=%v", key, pending)
+			require.Nil(t, cmd, "key=%c pending=%v", key, pending)
+		}
+	}
+}
+
 func openEdit(t *testing.T, record db.CronJob) (Model, *cronWriteTestAPI) {
 	t.Helper()
 	m, api := cronWriteFixture(t)

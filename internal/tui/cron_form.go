@@ -505,7 +505,7 @@ func (f *cronForm) dirty() bool {
 // base starts a definition. An edit of the same kind of job keeps what the
 // form has no field for; a new or re-kinded job starts clean.
 func (f *cronForm) base() cron.JobDefinition {
-	def := cron.JobDefinition{Version: 1, Kind: "job"}
+	def := cron.JobDefinition{Version: 1, Kind: "job", Catchup: "latest"}
 	if !f.create && f.kind == f.openedKind {
 		def = f.opened
 	}
@@ -540,9 +540,12 @@ func (f *cronForm) catchupShown() bool {
 }
 
 func (f *cronForm) applyCatchup(def *cron.JobDefinition) error {
+	if !f.catchupShown() {
+		return nil
+	}
 	def.Catchup = cmp.Or(f.val[cfCatchup], "latest")
-	if def.Catchup != "skip" && f.snapshot[cfCatchup] == "skip" {
-		def.GraceSeconds = 0
+	def.GraceSeconds = 0
+	if def.Catchup != "skip" {
 		return nil
 	}
 	grace, err := cronSeconds(cfGrace, f.val[cfGrace])
@@ -711,10 +714,6 @@ func (f *cronForm) order() []cronField {
 
 func (f *cronForm) move(delta int) {
 	order := f.order()
-	if len(order) == 0 {
-		return
-	}
-
 	nav := f.navigation()
 	for range len(order) {
 		nav = nav.advanceField(delta)
