@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -1275,9 +1276,10 @@ func decodeError(body []byte, status int, method, path string) error {
 	var env struct {
 		Status int `json:"status"`
 		Error  struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-			Hint    string `json:"hint"`
+			Code    string         `json:"code"`
+			Message string         `json:"message"`
+			Hint    string         `json:"hint"`
+			Data    jsontext.Value `json:"data"`
 		} `json:"error"`
 	}
 	_ = json.Unmarshal(body, &env)
@@ -1288,6 +1290,7 @@ func decodeError(body []byte, status int, method, path string) error {
 		Code:    env.Error.Code,
 		Message: env.Error.Message,
 		Hint:    env.Error.Hint,
+		Data:    env.Error.Data,
 	}
 }
 

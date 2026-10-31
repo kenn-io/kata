@@ -7,13 +7,13 @@ import (
 	"fmt"
 
 	kataapi "go.kenn.io/kata/internal/api"
-	"go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
 type cronAPI interface {
 	ListCronJobs(context.Context, int64) ([]generated.CronJob, error)
-	ShowCronJob(ctx context.Context, projectID int64, uid string) (CronJobRecord, error)
+	ShowCronJob(ctx context.Context, projectID int64, uid string) (db.CronJob, error)
 	PutCronJob(ctx context.Context, projectID int64, uid string, write kataapi.PutCronJobBody) error
 	ListCronWorkflows(context.Context, int64) ([]generated.CronWorkflow, error)
 	ListCronRuns(context.Context, int64) ([]generated.CronRun, error)
@@ -75,52 +75,39 @@ func (c *Client) ListCronRuns(ctx context.Context, projectID int64) ([]generated
 	return wire.JSON200.Runs, nil
 }
 
-// CronJobRecord is one job read for editing. Its definition is decoded from
-// the response body itself, so adapter options keep unknown keys and exact
-// numbers instead of passing through a generated map.
-type CronJobRecord struct {
-	UID, Name, DefinitionEventUID string
-	Archived                      bool
-	Definition                    cron.JobDefinition
-}
-
-func decodeCronJobRecord(body []byte) (CronJobRecord, error) {
+// decodeCronJobRecord reads the envelope without passing options through a generated map.
+func decodeCronJobRecord(body []byte) (db.CronJob, error) {
 	var wire struct {
-		Job struct {
-			UID                string         `json:"uid"`
-			Name               string         `json:"name"`
-			DefinitionEventUID string         `json:"definition_event_uid"`
-			DeletedAt          *string        `json:"deleted_at"`
-			Definition         jsontext.Value `json:"definition"`
-		} `json:"job"`
+		Job jsontext.Value `json:"job"`
 	}
 	if err := json.Unmarshal(body, &wire); err != nil {
-		return CronJobRecord{}, err
+		return db.CronJob{}, err
 	}
-	record := CronJobRecord{UID: wire.Job.UID, Name: wire.Job.Name, DefinitionEventUID: wire.Job.DefinitionEventUID, Archived: wire.Job.DeletedAt != nil}
-	// A member this kata does not know would be dropped by the next write.
-	definition, err := cron.DecodeJob(wire.Job.Definition)
-	if err != nil {
-		return CronJobRecord{}, fmt.Errorf("the job has definition members this kata does not know, so editing it here would drop them; use a newer kata (%w)", err)
+	return decodeCronJob(wire.Job)
+}
+
+func decodeCronJob(body []byte) (db.CronJob, error) {
+	var job kataapi.CronJob
+	if err := json.Unmarshal(body, &job, json.RejectUnknownMembers(true)); err != nil {
+		return db.CronJob{}, fmt.Errorf("use a newer kata to edit this job: %w", err)
 	}
-	record.Definition = definition
-	return record, nil
+	return db.CronJob{CronDefinition: job.CronDefinition, Definition: job.Definition.Native()}, nil
 }
 
 // ShowCronJob reads one job, archived or not.
-func (c *Client) ShowCronJob(ctx context.Context, projectID int64, uid string) (CronJobRecord, error) {
+func (c *Client) ShowCronJob(ctx context.Context, projectID int64, uid string) (db.CronJob, error) {
 	client, err := c.generatedClient()
 	if err != nil {
-		return CronJobRecord{}, err
+		return db.CronJob{}, err
 	}
 	wire, callErr := client.ShowCronJobWithResponse(ctx, &generated.ShowCronJobRequestOptions{
 		PathParams: &generated.ShowCronJobPath{ProjectID: projectID, CronUID: uid},
 	})
 	if wire == nil {
-		return CronJobRecord{}, callErr
+		return db.CronJob{}, callErr
 	}
 	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil); err != nil {
-		return CronJobRecord{}, err
+		return db.CronJob{}, err
 	}
 	return decodeCronJobRecord(wire.Body)
 }

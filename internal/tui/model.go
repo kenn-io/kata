@@ -1845,6 +1845,15 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 // status line. The textarea is NOT repopulated — preserves what the
 // user typed before the editor opened.
 func (m Model) routeEditorReturn(msg editorReturnedMsg) (Model, tea.Cmd) {
+	if f := m.cron.form; f != nil && msg.formGen != 0 && msg.formGen == f.formGen {
+		if msg.err != nil {
+			f.general = "editor: " + msg.err.Error()
+		} else {
+			f.val[f.focus] = msg.content
+			f.validate()
+		}
+		return m, nil
+	}
 	if msg.formGen == 0 {
 		return m, nil
 	}

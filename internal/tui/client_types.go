@@ -352,6 +352,7 @@ type APIError struct {
 	Code         string
 	Message      string
 	Hint         string
+	Data         jsontext.Value
 }
 
 // Error returns "code: message[: hint: ...]" when the daemon supplied a

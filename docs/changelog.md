@@ -23,8 +23,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
   See the [CLI reference](reference/cli.md#daemon-and-diagnostics).
 - Create and edit cron jobs from `kata tui` with `n` and `e` on the Jobs tab.
   The form covers recurring child issues, agent prompts, workflow runs, and
-  notifications. It preserves multiline text and unknown adapter `options`
-  keys and exact numbers. If a revision changes while you edit, keep your draft
+  notifications. Edit long text in `$VISUAL` or `$EDITOR`, preserving tabs
+  and line endings. Unknown adapter `options` keys and exact numbers survive
+  an edit. If a revision changes while you edit, keep your draft
   and inspect the current definition, then reload it or save your whole draft
   against its revision. See [the `kata tui` keys](reference/cli.md#daemon-and-diagnostics).
 - Show what is stuck in any web collection, Inbox and Today included, with the

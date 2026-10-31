@@ -12,6 +12,8 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/uid"
 )
 
@@ -34,11 +36,11 @@ const (
 	cfIssue
 	cfLead
 	cfParent
+	cfPolicy
 	cfTitle
 	cfBody
 	cfPrompt
 	cfWorkflow
-	cfPolicy
 	cfScheduled
 	cfDeadline
 	cfRecipient
@@ -385,7 +387,8 @@ type cronForm struct {
 	general        string
 	saving         bool
 	conflictCursor int
-	conflict       *CronJobRecord
+	conflict       *db.CronJob
+	formGen        int64
 	workflows      []cronChoice
 }
 
@@ -422,7 +425,7 @@ func newCronForm(workflows []cronChoice) (*cronForm, error) {
 
 // cronFormFor is a form on an existing job. It reads the portable definition
 // that was returned by the daemon, so nothing is lost on a round trip.
-func cronFormFor(rec CronJobRecord, workflows []cronChoice) (*cronForm, error) {
+func cronFormFor(rec db.CronJob, workflows []cronChoice) (*cronForm, error) {
 	if err := rec.Definition.Validate(); err != nil {
 		return nil, err
 	}
@@ -434,7 +437,7 @@ func cronFormFor(rec CronJobRecord, workflows []cronChoice) (*cronForm, error) {
 	return f, nil
 }
 
-func (f *cronForm) load(rec CronJobRecord) error {
+func (f *cronForm) load(rec db.CronJob) error {
 	def := rec.Definition
 	f.val = [cfCount]string{}
 	f.defaults()
@@ -454,9 +457,6 @@ func (f *cronForm) load(rec CronJobRecord) error {
 	f.kindDef().load(f, def)
 	if len(def.Options) > 0 {
 		f.val[cfOptions] = string(def.Options)
-		if compact := slices.Clone(def.Options); compact.Compact() == nil {
-			f.val[cfOptions] = string(compact)
-		}
 	}
 	return nil
 }
@@ -530,7 +530,7 @@ func (f *cronForm) applyNotification(def *cron.JobDefinition) {
 func (f *cronForm) applyOptions(def *cron.JobDefinition) {
 	def.Options = nil
 	if text := strings.TrimSpace(f.val[cfOptions]); text != "" {
-		def.Options = jsontext.Value(text)
+		def.Options = jsontext.Value(f.val[cfOptions])
 	}
 }
 
@@ -541,8 +541,8 @@ func (f *cronForm) catchupShown() bool {
 
 func (f *cronForm) applyCatchup(def *cron.JobDefinition) error {
 	def.Catchup = cmp.Or(f.val[cfCatchup], "latest")
-	def.GraceSeconds = 0
-	if !f.catchupShown() || def.Catchup != "skip" {
+	if def.Catchup != "skip" && f.snapshot[cfCatchup] == "skip" {
+		def.GraceSeconds = 0
 		return nil
 	}
 	grace, err := cronSeconds(cfGrace, f.val[cfGrace])
@@ -677,7 +677,13 @@ func (f *cronForm) step(field cronField, delta int) {
 		return
 	}
 	at := slices.IndexFunc(options, func(c cronChoice) bool { return c.value == f.current(field) })
-	next := options[(max(at, 0)+delta+len(options))%len(options)].value
+	if at < 0 && delta < 0 {
+		at = 0
+	}
+	next := options[(at+delta+len(options))%len(options)].value
+	if field == cfCatchup && f.val[cfCatchup] == "skip" && next != "skip" {
+		f.val[cfGrace] = ""
+	}
 	switch field {
 	case cfKind:
 		f.kind = next
@@ -709,11 +715,7 @@ func (f *cronForm) move(delta int) {
 		return
 	}
 
-	nav := inputState{active: max(slices.Index(order, f.focus), 0), fields: make([]inputField, len(order))}
-	for i, field := range order {
-		nav.fields[i].locked = f.locked(field)
-		nav.fields[i].kind = fieldRadio
-	}
+	nav := f.navigation()
 	for range len(order) {
 		nav = nav.advanceField(delta)
 		if !nav.activeField().locked {
@@ -723,9 +725,19 @@ func (f *cronForm) move(delta int) {
 	f.focusField(order[nav.active])
 }
 
+func (f *cronForm) navigation() inputState {
+	order := f.order()
+	nav := inputState{kind: inputFilterForm, active: max(slices.Index(order, f.focus), 0), fields: make([]inputField, len(order))}
+	for i, field := range order {
+		nav.fields[i].locked = f.locked(field)
+		nav.fields[i].kind = fieldRadio
+	}
+	return nav
+}
+
 // syncEditor keeps values assigned directly by a caller until the editor changes.
 func (f *cronForm) syncEditor() {
-	if f.isChoice(f.focus) || f.locked(f.focus) || f.ed.activeField() == nil {
+	if f.isChoice(f.focus) || f.locked(f.focus) || f.externalText(f.focus) || f.ed.activeField() == nil {
 		return
 	}
 	if v := f.ed.activeField().value(); v != f.edInit {
@@ -737,12 +749,7 @@ func (f *cronForm) focusField(field cronField) {
 	f.syncEditor()
 	f.focus = field
 	var editor inputField
-	if slices.Contains([]cronField{cfBody, cfPrompt, cfMessage, cfOptions}, field) {
-		editor = newFormTextarea(fieldBody, "")
-		editor.area.CharLimit = 0
-		editor.setValue(f.val[field])
-		editor.area.SetHeight(3)
-	} else {
+	if !f.externalText(field) {
 		editor = inputField{kind: fieldSingleLine, input: textinput.New()}
 		editor.input.Prompt = ""
 		editor.setValue(f.val[field])
@@ -753,8 +760,11 @@ func (f *cronForm) focusField(field cronField) {
 	f.edInit = editor.value()
 }
 
-// validate builds the definition with stand-in issue UIDs and records the
-// first problem beside its field.
+func (f *cronForm) externalText(field cronField) bool {
+	return slices.Contains([]cronField{cfBody, cfPrompt, cfMessage, cfOptions}, field)
+}
+
+// validate builds the definition with stand-in issue UIDs.
 func (f *cronForm) validate() {
 	f.syncEditor()
 	_, _, err := f.build(func(ref string) string {
@@ -767,45 +777,8 @@ func (f *cronForm) validate() {
 	if fe, ok := err.(*cronFieldError); ok {
 		f.err = fe
 	} else if err != nil {
-		f.err = f.attribute(err)
-		if f.err == nil {
-			f.general = err.Error()
-		}
+		f.general = err.Error()
 	}
-}
-
-// cronErrorWords attributes a message of internal/cron to the field it is
-// about; one that matches nothing shows under the form.
-var cronErrorWords = []struct {
-	word  string
-	field cronField
-}{
-	{"timezone", cfZone}, {"cron expression", cfCron}, {"interval", cfInterval}, {"once", cfAt}, {"lead", cfLead},
-	{"issue date", cfIssue}, {"checkout", cfCheckout}, {"secret", cfSecrets}, {"options", cfOptions},
-	{"recipient", cfRecipient}, {"message", cfMessage}, {"title", cfTitle}, {"parent", cfParent},
-	{"grace", cfGrace}, {"timeout", cfTimeout}, {"offset", cfScheduled}, {"workflow", cfWorkflow},
-	{"prompt", cfPrompt}, {"per-run", cfTitle}, {"issue target", cfIssue}, {"existing issue", cfReport}, {"existing issue", cfIssue},
-}
-
-// attribute places a message on the shown field its words name. When one
-// message names several, the one still blank is blamed.
-func (f *cronForm) attribute(err error) *cronFieldError {
-	text := strings.TrimPrefix(err.Error(), cron.ErrInvalid.Error()+": ")
-	var named []cronField
-	for _, w := range cronErrorWords {
-		if strings.Contains(text, w.word) && f.shown(w.field) && !slices.Contains(named, w.field) {
-			named = append(named, w.field)
-		}
-	}
-	for _, field := range named {
-		if strings.TrimSpace(f.current(field)) == "" {
-			return &cronFieldError{field, text}
-		}
-	}
-	if len(named) > 0 {
-		return &cronFieldError{named[0], text}
-	}
-	return nil
 }
 
 // build reads the form into the job write it would send, or names the
@@ -840,7 +813,8 @@ func (f *cronForm) issueRefs() []cronFieldRef {
 	var refs []cronFieldRef
 	for _, field := range []cronField{cfParent, cfIssue, cfReport} {
 		ref := strings.TrimSpace(f.val[field])
-		if ref == "" || !f.shown(field) || f.locked(field) || cronUIDShaped(ref) {
+		parsed, _ := shortid.Parse(ref)
+		if ref == "" || !f.shown(field) || f.locked(field) || parsed.ULID != "" {
 			continue
 		}
 		refs = append(refs, cronFieldRef{field, strings.TrimPrefix(ref, "#")})
@@ -853,16 +827,12 @@ type cronFieldRef struct {
 	ref   string
 }
 
-func cronUIDShaped(ref string) bool {
-	return len(ref) == 26 && uid.Valid(strings.ToUpper(ref))
-}
-
-// uidResolver maps typed refs to UIDs: UID-shaped text is its own UID.
+// cronUIDResolver maps typed refs to resolved issue UIDs.
 func cronUIDResolver(resolved map[string]string) func(string) string {
 	return func(ref string) string {
 		ref = strings.TrimSpace(ref)
-		if cronUIDShaped(ref) {
-			return strings.ToUpper(ref)
+		if parsed, err := shortid.Parse(ref); err == nil && parsed.ULID != "" {
+			return parsed.ULID
 		}
 		return resolved[strings.TrimPrefix(ref, "#")]
 	}
@@ -870,10 +840,9 @@ func cronUIDResolver(resolved map[string]string) func(string) string {
 
 // paste inserts pasted text into the focused text field, as typing would.
 func (f *cronForm) paste(msg tea.PasteMsg) {
-	if f.saving || f.conflict != nil || f.isChoice(f.focus) || f.locked(f.focus) {
+	if f.saving || f.conflict != nil || f.isChoice(f.focus) || f.locked(f.focus) || f.externalText(f.focus) {
 		return
 	}
 	f.ed, _ = f.ed.delegateToField(msg)
 	f.validate()
-	f.general = ""
 }

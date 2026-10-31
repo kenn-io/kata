@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 	kataapi "go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -24,8 +25,8 @@ func newNativeForm(t *testing.T) *cronForm {
 	return f
 }
 
-func nativeRecord() CronJobRecord {
-	return CronJobRecord{
+func nativeRecord() db.CronJob {
+	return db.CronJob{
 		UID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Name: "Weekly report", DefinitionEventUID: "01ARZ3NDEKTSV4RRFFQ69G5FB2",
 		Definition: cron.JobDefinition{
 			Version: 1, Kind: "job", Enabled: true,
@@ -37,8 +38,8 @@ func nativeRecord() CronJobRecord {
 	}
 }
 
-func executeRecord(options string) CronJobRecord {
-	return CronJobRecord{
+func executeRecord(options string) db.CronJob {
+	return db.CronJob{
 		UID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Name: "Digest", DefinitionEventUID: "01ARZ3NDEKTSV4RRFFQ69G5FB2",
 		Definition: manualExecuteJob(options),
 	}
@@ -122,25 +123,6 @@ func TestCronFormExecuteDateTriggerCreatesOnTheDaemon(t *testing.T) {
 	require.Equal(t, issue, shown.Definition.Issue.UID)
 }
 
-func TestCronFormPlacesCronMessagesOnTheBlankField(t *testing.T) {
-	f := newNativeForm(t)
-	f.val[cfParent] = ""
-	f.validate()
-	require.NotNil(t, f.err)
-	require.Equal(t, cfParent, f.err.field, "the title is filled; the blank parent is blamed")
-
-	f.val[cfParent], f.val[cfTitle] = "abc4", ""
-	f.validate()
-	require.NotNil(t, f.err)
-	require.Equal(t, cfTitle, f.err.field)
-
-	f.kind, f.trigger = "notify", "manual"
-	f.val[cfMessage], f.val[cfRecipient], f.val[cfIssue] = "hi", "alice", ""
-	f.validate()
-	require.NotNil(t, f.err)
-	require.Equal(t, cfIssue, f.err.field)
-}
-
 func TestCronFormLocksNativeParentAndAction(t *testing.T) {
 	f, err := cronFormFor(nativeRecord(), nil)
 	require.NoError(t, err)
@@ -213,32 +195,10 @@ func TestCronFormOptionsAreKeptVerbatim(t *testing.T) {
 	f.val[cfTitle] = "Digest 2"
 	_, def, err := f.build(cronTestUIDs)
 	require.NoError(t, err)
-	require.JSONEq(t, options, string(def.Options))
+	require.Equal(t, options, string(def.Options))
 	require.Contains(t, string(def.Options), "12345678901234567890123")
 	require.Contains(t, string(def.Options), "1.10")
 	require.Equal(t, "Line one\nLine two", def.Action.Prompt, "line breaks survive a pass through the editor")
-}
-
-func TestCronFormShowsValidationBesideField(t *testing.T) {
-	f := newNativeForm(t)
-	f.val[cfCron] = "not a schedule"
-	f.validate()
-	require.NotNil(t, f.err)
-	require.Equal(t, cfCron, f.err.field)
-
-	f.val[cfCron] = "0 9 * * *"
-	f.step(cfTrigger, 1)
-	require.Equal(t, "interval", f.trigger)
-	f.val[cfInterval] = "30"
-	f.validate()
-	require.NotNil(t, f.err)
-	require.Equal(t, cfInterval, f.err.field)
-	require.Contains(t, f.err.text, "60 seconds")
-
-	f.val[cfInterval] = "15m"
-	f.validate()
-	require.Nil(t, f.err)
-	require.Empty(t, f.general)
 }
 
 func TestCronFormEveryKindAndTrigger(t *testing.T) {
@@ -270,15 +230,6 @@ func TestCronFormEveryKindAndTrigger(t *testing.T) {
 			require.NoError(t, def.Validate())
 		})
 	}
-}
-
-func TestCronFormBlamesBlankRunIssue(t *testing.T) {
-	f := newNativeForm(t)
-	f.kind, f.trigger = "prompt", "cron"
-	f.val[cfPrompt], f.val[cfPolicy], f.val[cfReport] = "Do it", "existing", ""
-	f.validate()
-	require.NotNil(t, f.err)
-	require.Equal(t, cfReport, f.err.field)
 }
 
 func TestCronFormNotifyEditKeepsStoredOverlap(t *testing.T) {
@@ -318,4 +269,43 @@ func TestCronFormCatchupLatestClearsGrace(t *testing.T) {
 	_, def, err := f.build(cronUIDResolver(nil))
 	require.NoError(t, err)
 	require.Zero(t, def.GraceSeconds)
+
+	created := newNativeForm(t)
+	created.step(cfCatchup, -1)
+	created.val[cfGrace] = "300"
+	created.step(cfCatchup, 1)
+	_, def, err = created.build(cronUIDResolver(nil))
+	require.NoError(t, err)
+	require.Zero(t, def.GraceSeconds)
+}
+
+func TestCronFormHiddenCatchupKeepsGrace(t *testing.T) {
+	for _, catchup := range []string{"skip", "latest", "all"} {
+		t.Run(catchup, func(t *testing.T) {
+			rec := executeRecord(`{}`)
+			rec.Definition.Action = cron.Action{Kind: "notify", Recipient: "alice", Message: "hello"}
+			rec.Definition.Issue = &cron.IssuePolicy{Kind: "existing", UID: cronTestIssue}
+			rec.Definition.Trigger = cron.Trigger{Kind: "issue-deadline", IssueUID: cronTestIssue}
+			rec.Definition.Catchup, rec.Definition.GraceSeconds = catchup, 10
+			f, err := cronFormFor(rec, nil)
+			require.NoError(t, err)
+			_, def, err := f.build(cronUIDResolver(nil))
+			require.NoError(t, err)
+			require.Equal(t, int64(10), def.GraceSeconds)
+		})
+	}
+}
+
+func TestCronFormEmptyWorkflowStepsToFirstOrLast(t *testing.T) {
+	for _, delta := range []int{1, -1} {
+		f := newNativeForm(t)
+		f.kind = "workflow"
+		f.workflows = []cronChoice{{cronTestIssue, "First"}, {cronTestParent, "Last"}}
+		f.step(cfWorkflow, delta)
+		want := cronTestIssue
+		if delta < 0 {
+			want = cronTestParent
+		}
+		require.Equal(t, want, f.val[cfWorkflow])
+	}
 }

@@ -9,12 +9,11 @@ import (
 	"net/http"
 	"slices"
 	"strings"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	kataapi "go.kenn.io/kata/internal/api"
-	"go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kit/tui/helplayout"
 	"go.kenn.io/kit/tui/termtext"
 )
@@ -41,11 +40,6 @@ func (m Model) cronSelectedJob(lines []cronLine, cursor int) (uid string, ok boo
 	return lines[cursor].target.uid, true
 }
 
-func (m Model) cronToast(text string, level toastLevel) (Model, tea.Cmd) {
-	m.toast = &toast{text: text, level: level, expiresAt: m.toastNow().Add(3 * time.Second)}
-	return m, toastExpireCmd(3 * time.Second)
-}
-
 // routeCronJobKey handles the job keys. It reports false for any other key.
 func (m Model) routeCronJobKey(key string, lines []cronLine, cursor int) (Model, tea.Cmd, bool) {
 	if !m.cronJobsScope() || m.cron.data == nil {
@@ -55,9 +49,11 @@ func (m Model) routeCronJobKey(key string, lines []cronLine, cursor int) (Model,
 	case "n":
 		f, err := newCronForm(m.cronWorkflowChoices())
 		if err != nil {
-			m, cmd := m.cronToast("Could not start a job: "+err.Error(), toastError)
+			m, cmd := m.undoNotice("Could not start a job: "+err.Error(), toastError)
 			return m, cmd, true
 		}
+		m.nextFormGen++
+		f.formGen = m.nextFormGen
 		m.cron.form = f
 		return m, nil, true
 	case "e":
@@ -86,7 +82,7 @@ func (m Model) cronWorkflowChoices() []cronChoice {
 type cronEditOpenedMsg struct {
 	conn, scope, seq uint64
 	uid              string
-	record           CronJobRecord
+	record           db.CronJob
 	err              error
 }
 
@@ -95,7 +91,7 @@ type cronEditOpenedMsg struct {
 type cronSavedMsg struct {
 	conn, scope uint64
 	notice      string
-	conflict    *CronJobRecord
+	conflict    *db.CronJob
 	fieldErr    *cronFieldError
 	err         error
 	fromForm    bool
@@ -122,22 +118,23 @@ func (m Model) cronEditOpened(msg cronEditOpenedMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 	if msg.err != nil {
-		return m.cronToast("Could not open the job: "+cronWriteMessage(msg.err), toastError)
+		return m.undoNotice("Could not open the job: "+msg.err.Error(), toastError)
 	}
-	if msg.record.Archived {
-		return m.cronToast("The job was archived; use the CLI to restore it before editing", toastInfo)
+	if msg.record.DeletedAt != nil {
+		return m.undoNotice("The job was archived; use the CLI to restore it before editing", toastInfo)
 	}
 	f, err := cronFormFor(msg.record, m.cronWorkflowChoices())
 	if err != nil {
-		return m.cronToast(err.Error(), toastError)
+		return m.undoNotice(err.Error(), toastError)
 	}
+	m.nextFormGen++
+	f.formGen = m.nextFormGen
 	m.cron.form = f
 	return m, nil
 }
 
 // cronSaveCmd resolves the issue refs the draft names, builds the definition
-// and writes it. A refused guard reads the job as it is now so the form can
-// show it beside the draft.
+// and writes it. A refused guard returns the current job beside the draft.
 func (m Model) cronSaveCmd(f cronForm) tea.Cmd {
 	api, pid, actor := m.api, m.scope.projectID, m.list.actor
 	conn, scope := m.connGen, m.scopeGen
@@ -152,7 +149,7 @@ func (m Model) cronSaveCmd(f cronForm) tea.Cmd {
 				text := fmt.Sprintf("no issue %q in this project", r.ref)
 				var apiErr *APIError
 				if err != nil && (!errors.As(err, &apiErr) || apiErr == nil || apiErr.Status != http.StatusNotFound) {
-					text = cronWriteMessage(err)
+					text = err.Error()
 				}
 				return cronSavedMsg{conn: conn, scope: scope, fieldErr: &cronFieldError{r.field, text}, fromForm: true}
 			}
@@ -173,39 +170,21 @@ func (m Model) cronSaveCmd(f cronForm) tea.Cmd {
 		if err := api.PutCronJob(ctx, pid, f.uid, write); err != nil {
 			var apiErr *APIError
 			if errors.As(err, &apiErr) && apiErr != nil && apiErr.Status == http.StatusConflict && apiErr.Code == "cron_conflict" {
-				if current, readErr := api.ShowCronJob(ctx, pid, f.uid); readErr == nil {
-					// A create whose reply was lost conflicts with itself on retry.
-					if f.create && current.Name == name && cronSameDefinition(current.Definition, def) {
-						if current.Archived {
-							return fail(errors.New("this job was created and then archived; use the CLI to restore it"))
-						}
-						return cronSavedMsg{conn: conn, scope: scope, notice: notice, fromForm: true}
+				var data struct {
+					Current jsontext.Value `json:"current"`
+				}
+				if json.Unmarshal(apiErr.Data, &data) == nil && len(data.Current) > 0 {
+					current, readErr := decodeCronJob(data.Current)
+					if readErr == nil {
+						return cronSavedMsg{conn: conn, scope: scope, conflict: &current, err: err, fromForm: true}
 					}
-					return cronSavedMsg{conn: conn, scope: scope, conflict: &current, err: err, fromForm: true}
+					return fail(readErr)
 				}
 			}
 			return fail(err)
 		}
 		return cronSavedMsg{conn: conn, scope: scope, notice: notice, fromForm: true}
 	}
-}
-
-// cronWriteMessage words a failed cron request. A rejected token and a token
-// that may not touch the project are different problems.
-func cronWriteMessage(err error) string {
-	var apiErr *APIError
-	if !errors.As(err, &apiErr) || apiErr == nil {
-		return err.Error()
-	}
-	switch {
-	case apiErr.Status == http.StatusForbidden && apiErr.Code == "token_invalid":
-		return "the daemon rejected the token as invalid or revoked; replace it and try again"
-	case apiErr.Status == http.StatusForbidden:
-		return "this token may not change cron jobs in this project (" + err.Error() + ")"
-	case apiErr.Status == http.StatusUnauthorized:
-		return "the daemon asked for authentication: " + err.Error()
-	}
-	return err.Error()
 }
 
 func (m Model) cronSaved(msg cronSavedMsg) (Model, tea.Cmd) {
@@ -227,16 +206,19 @@ func (m Model) cronSaved(msg cronSavedMsg) (Model, tea.Cmd) {
 	case msg.err != nil:
 		m.cron.events++
 		if msg.fromForm && f != nil {
-			f.general = cronWriteMessage(msg.err)
+			f.general = msg.err.Error()
 			return m, nil
 		}
-		return m.cronToast(cronWriteMessage(msg.err), toastError)
+		return m.undoNotice(msg.err.Error(), toastError)
 	}
 	if msg.fromForm {
 		m.cron.form = nil
 	}
 	m.cron.events++
-	return m.cronToast(msg.notice, toastSuccess)
+	m.cache.markStale()
+	refresh := m.detail.refetch(m.api)
+	m, notice := m.undoNotice(msg.notice, toastSuccess)
+	return m, combineCmds(notice, refresh)
 }
 
 func (m Model) routeCronFormKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
@@ -251,38 +233,52 @@ func (m Model) routeCronFormKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	if f.conflict != nil {
 		return m.routeCronConflictKey(key)
 	}
-	switch key {
-	case "esc":
-		if f.dirty() {
-			m.modal = modalDiscardCronJob
-			return m, nil
-		}
-		m.cron.form = nil
-	case "ctrl+o", "ctrl+s":
-		f.validate()
-		if f.err != nil || f.general != "" {
-			if f.err != nil {
-				f.focusField(f.err.field)
+	if key == "ctrl+s" {
+		return m, nil
+	}
+	if key == "ctrl+e" && !f.externalText(f.focus) {
+		return m, nil
+	}
+	if _, action, handled := f.ed.handleFormControlKey(msg); handled {
+		switch action {
+		case actionCancel:
+			if f.dirty() {
+				m.modal = modalDiscardCronJob
+			} else {
+				m.cron.form = nil
 			}
-			return m, nil
-		}
-		f.saving = true
-		return m, m.cronSaveCmd(*f)
-	case "enter", "up", "down":
-		if f.ed.activeField().kind == fieldMultiLine && !f.isChoice(f.focus) {
-			f.ed, _ = f.ed.delegateToField(msg)
+		case actionCommit:
 			f.validate()
-			break
+			if f.err != nil || f.general != "" {
+				if f.err != nil {
+					f.focusField(f.err.field)
+				}
+				return m, nil
+			}
+			f.saving = true
+			return m, m.cronSaveCmd(*f)
+		case actionEditorHandoff:
+			return m, editorCmd("edit", f.val[f.focus], f.formGen)
 		}
-		if key == "up" {
-			f.move(-1)
-		} else {
-			f.move(1)
+		return m, nil
+	}
+	nav := f.navigation()
+	if next, handled := nav.handleFormNavKey(msg); handled {
+		delta := 1
+		if key == "shift+tab" {
+			delta = -1
 		}
-	case "tab":
-		f.move(1)
-	case "shift+tab":
+		for next.activeField().locked {
+			next = next.advanceField(delta)
+		}
+		f.focusField(f.order()[next.active])
+		return m, nil
+	}
+	switch key {
+	case "up":
 		f.move(-1)
+	case "down":
+		f.move(1)
 	case "left", "right", "space":
 		if f.isChoice(f.focus) {
 			delta := 1
@@ -290,16 +286,14 @@ func (m Model) routeCronFormKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 				delta = -1
 			}
 			f.step(f.focus, delta)
-			break
+			return m, nil
 		}
 		fallthrough
 	default:
-		if f.isChoice(f.focus) || f.locked(f.focus) {
-			break
+		if !f.isChoice(f.focus) && !f.locked(f.focus) && !f.externalText(f.focus) {
+			f.ed, _ = f.ed.delegateToField(msg)
+			f.validate()
 		}
-		f.ed, _ = f.ed.delegateToField(msg)
-		f.validate()
-		f.general = ""
 	}
 	return m, nil
 }
@@ -310,7 +304,7 @@ func (m Model) routeCronConflictKey(key string) (Model, tea.Cmd) {
 	current := *f.conflict
 	switch key {
 	case "r":
-		if current.Archived {
+		if current.DeletedAt != nil {
 			return m, nil
 		}
 		next, err := cronFormFor(current, f.workflows)
@@ -318,9 +312,11 @@ func (m Model) routeCronConflictKey(key string) (Model, tea.Cmd) {
 			f.general = err.Error()
 			return m, nil
 		}
+		m.nextFormGen++
+		next.formGen = m.nextFormGen
 		m.cron.form = next
-	case "ctrl+o", "ctrl+s":
-		if current.Archived {
+	case "ctrl+o":
+		if current.DeletedAt != nil {
 			return m, nil
 		}
 		f.create, f.expected, f.conflict = false, current.DefinitionEventUID, nil
@@ -340,7 +336,7 @@ func cronFormHelpRows(f *cronForm) []helplayout.HelpItem {
 	switch {
 	case f.conflict != nil:
 		rows := []helplayout.HelpItem{{Key: "↑↓", Description: "scroll"}, {Key: "esc", Description: "back to my draft"}}
-		if !f.conflict.Archived {
+		if f.conflict.DeletedAt == nil {
 			rows = slices.Insert(rows, 0, helplayout.HelpItem{Key: "r", Description: "reload current job"}, helplayout.HelpItem{Key: "ctrl+o", Description: "save my draft"})
 		}
 		return rows
@@ -349,6 +345,7 @@ func cronFormHelpRows(f *cronForm) []helplayout.HelpItem {
 		{Key: "tab/shift+tab", Description: "field"},
 		{Key: "←/→", Description: "choose"},
 		{Key: "ctrl+o", Description: "save"},
+		{Key: "ctrl+e", Description: "edit text in $EDITOR"},
 		{Key: "esc", Description: "cancel"},
 	}
 }
@@ -379,7 +376,7 @@ func cronFormLines(m Model, f *cronForm) (lines []string, cursor int) {
 		c := f.conflict
 		lines = append(lines, errorStyle.Render("This job changed while you edited it. Your draft is kept."), "",
 			"Current name: "+sanitizeForLine(c.Name), "Current event: "+c.DefinitionEventUID)
-		if c.Archived {
+		if c.DeletedAt != nil {
 			lines = append(lines, "Current state: archived")
 		}
 		raw, err := json.Marshal(c.Definition, jsontext.WithIndent("  "))
@@ -408,30 +405,25 @@ func cronFormLines(m Model, f *cronForm) (lines []string, cursor int) {
 		switch {
 		case f.isChoice(field):
 			value = "‹ " + f.display(field) + " ›"
-		case field == f.focus && !f.locked(field):
+		case field == f.focus && !f.locked(field) && !f.externalText(field):
 			ed := f.ed.activeField()
 			width := max(m.width-labelWidth-5, 1)
-			if ed.kind == fieldMultiLine {
-				ed.area.SetWidth(width)
-				value = ed.area.View()
-			} else {
-				ed.input.SetWidth(max(width-1, 1))
-				ed.input.SetCursor(ed.input.Position())
-				value = ed.input.View()
-			}
+			ed.input.SetWidth(max(width-1, 1))
+			ed.input.SetCursor(ed.input.Position())
+			value = ed.input.View()
 		default:
 			value = sanitizeForLine(strings.ReplaceAll(f.val[field], "\n", " ⏎ "))
 			if value == "" && cronFieldHints[field] != "" {
 				value = statsLineStyle.Render(cronFieldHints[field])
 			}
 		}
+		if f.externalText(field) && field == f.focus {
+			value = "ctrl+e  " + value
+		}
 		if f.locked(field) {
 			value += "  (locked)"
 		}
 		line := fmt.Sprintf("%s%-*s  %s", prefix, labelWidth+1, cronFieldLabel(f, field)+":", value)
-		if f.err != nil && f.err.field == field {
-			line += "  " + errorStyle.Render(sanitizeForLine(f.err.text))
-		}
 		for n, part := range strings.Split(line, "\n") {
 			if n > 0 {
 				part = strings.Repeat(" ", labelWidth+5) + part
@@ -460,8 +452,10 @@ func renderCronForm(m Model) string {
 	switch {
 	case f.saving:
 		footer = append(footer, "saving…")
+	case f.err != nil:
+		footer = append(footer, termtext.Wrap(errorStyle.Render(sanitizeForLine(f.err.text)), max(m.width, 1))...)
 	case f.general != "":
-		footer = append(footer, errorStyle.Render(truncate(sanitizeForLine(f.general), m.width)))
+		footer = append(footer, termtext.Wrap(errorStyle.Render(sanitizeForLine(f.general)), max(m.width, 1))...)
 	}
 	budget := max(m.height-len(body)-max(len(footer), 1)-helpLines(help, m.width)-cronNoticeRows(m), 1)
 	start, end := windowBounds(len(lines), cursor, budget)
@@ -475,21 +469,4 @@ func renderCronForm(m Model) string {
 	body = append(body, footer...)
 	body = append(body, renderFooterHelpTable(help, m.width))
 	return strings.Join(body, "\n")
-}
-
-// cronSameDefinition compares two definitions as the daemon stores them.
-func cronSameDefinition(a, b cron.JobDefinition) bool {
-	canon := func(d cron.JobDefinition) string {
-		raw, err := json.Marshal(d)
-		if err != nil {
-			return ""
-		}
-		value := jsontext.Value(raw)
-		if value.Canonicalize() != nil {
-			return ""
-		}
-		return string(value)
-	}
-	ca := canon(a)
-	return ca != "" && ca == canon(b)
 }
