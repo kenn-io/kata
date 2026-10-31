@@ -1804,8 +1804,7 @@ setup where the daemon process should stay attached to the terminal. `daemon
 restart` asks each running local daemon to replace itself in its original
 environment, using the installed executable invoked by the CLI and retaining
 its startup options, credentials, network, and idle policy. The CLI and daemon
-must see the same process IDs and executable paths. The daemon checks settings with the selected executable in its own environment before stopping; an
-invalid configuration leaves it serving, and the command reports the replacement's startup error. Explicit restart flags override its startup options and persist through later restarts.
+must see the same process IDs and executable paths. The selected executable validates configuration in the daemon's environment before stopping it. Configuration validation errors leave the daemon serving; listener binding happens during replacement startup. Explicit restart flags override its startup options and persist through later restarts.
 To replace an older daemon that supports only restart
 signals rather than executable selection, run
 `kata daemon stop` followed by `kata daemon start` with the desired options. Background start and restart output reports the

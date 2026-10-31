@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -78,7 +79,7 @@ func (r *daemonRestart) watch(ctx context.Context, sigs <-chan os.Signal, valida
 			return
 		case <-sigs:
 			if err := validate(); err != nil {
-				logger.Printf("restart: validate replacement: %v", err)
+				logger.Printf("restart: request refused: %v", err)
 				continue
 			}
 			r.requested.Store(true)
@@ -113,12 +114,40 @@ func (r *daemonRestart) metadata() map[string]string {
 	}
 }
 
+// daemonArgs returns this daemon's arguments with extra flags replacing any
+// earlier values of the same flags, ahead of a "--" delimiter.
 func daemonArgs(extra ...string) []string {
-	args := slices.Clone(os.Args[1:])
+	args := withoutFlags(os.Args[1:], extra)
 	if at := slices.Index(args, "--"); at >= 0 {
 		return slices.Insert(args, at, extra...)
 	}
 	return append(args, extra...)
+}
+
+// withoutFlags copies args without the flags that overrides name, leaving
+// everything from "--" on. Daemon start takes no positional arguments, so a
+// non-flag token after a named flag is that flag's separate value.
+func withoutFlags(args, overrides []string) []string {
+	names := make([]string, 0, len(overrides))
+	for _, override := range overrides {
+		name, _, _ := strings.Cut(strings.TrimPrefix(override, "--"), "=")
+		names = append(names, name)
+	}
+	kept := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--" {
+			return append(kept, args[i:]...)
+		}
+		name, _, inline := strings.Cut(strings.TrimPrefix(args[i], "--"), "=")
+		if !strings.HasPrefix(args[i], "--") || !slices.Contains(names, name) {
+			kept = append(kept, args[i])
+			continue
+		}
+		if !inline && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+			i++
+		}
+	}
+	return kept
 }
 
 func validateDaemonReplacement(ctx context.Context, executable string, flags []string) error {
@@ -136,23 +165,14 @@ type restartRequest struct {
 	Flags             []string
 }
 
-// restartAccepted is the reply a daemon publishes before handing off the one
-// request it applies; any other non-empty reply is that request's refusal.
-const restartAccepted = "accepted"
-
-// accept applies the restart request published for rec and answers its
-// caller. Acceptance is published before the handoff, so a caller can tell
-// its own replacement from one started for a concurrent request.
+// accept applies the restart request published for rec and writes any refusal
+// to its caller's reply file.
 func (r *daemonRestart) accept(ctx context.Context, dir string, rec kitdaemon.RuntimeRecord) (err error) {
 	var req restartRequest
 	defer func() {
 		reply := filepath.Join(dir, filepath.Base(req.Reply))
-		answer := restartAccepted
-		if err != nil {
-			answer = err.Error()
-		}
-		if _, statErr := os.Lstat(reply); req.Reply != "" && statErr == nil {
-			_ = atomicfile.WriteFile(reply, []byte(answer), atomicfile.WithPrivate())
+		if _, statErr := os.Lstat(reply); err != nil && req.Reply != "" && statErr == nil {
+			_ = atomicfile.WriteFile(reply, []byte(err.Error()), atomicfile.WithPrivate())
 		}
 	}()
 	executable := r.executable

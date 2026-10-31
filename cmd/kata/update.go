@@ -199,14 +199,14 @@ func waitForDaemonReplacement(
 	}
 }
 
-// restartReplyError reads the daemon's answer to this caller's request after
+// restartReplyError reads the daemon's refusal of this caller's request after
 // the runtime records were listed. A replacement started for this request
 // names its reply; any other was started for another request or start.
 func restartReplyError(reply string, pid int, replacement *kitdaemon.RuntimeRecord) error {
 	answer, _ := os.ReadFile(reply) //nolint:gosec // caller-owned private reply file
 	switch {
-	case len(answer) != 0 && string(answer) != restartAccepted:
-		return fmt.Errorf("restart: validate replacement: %s", answer)
+	case len(answer) != 0:
+		return fmt.Errorf("restart: request refused: %s", answer)
 	case replacement != nil && reply != "" && replacement.Metadata[daemonruntime.RuntimeRestartReplyKey] != filepath.Base(reply):
 		return fmt.Errorf("another daemon replaced pid %d first; this restart was not applied", pid)
 	}

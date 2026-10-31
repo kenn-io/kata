@@ -396,7 +396,7 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 			if scenario == "restart failure" {
 				require.Error(t, updateErr)
 				message := parseErrorEnvelope(t, []byte(stdout)).Error.Message
-				assert.Contains(t, message, "validate replacement")
+				assert.Contains(t, message, "request refused")
 				assert.Contains(t, message, "parse "+filepath.Join(f.home, "config.toml"))
 				assert.NotContains(t, message, "did not restart within")
 				assert.Equal(t, before.StartedAt, f.record().StartedAt)
@@ -421,7 +421,7 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 func TestWaitForDaemonReplacement_RejectsUnrelatedStarter(t *testing.T) {
 	store := kitdaemon.RuntimeStore{Dir: t.TempDir()}
 	reply := filepath.Join(store.Dir, "restart-reply-caller")
-	require.NoError(t, os.WriteFile(reply, []byte(restartAccepted), 0600))
+	require.NoError(t, os.WriteFile(reply, nil, 0600))
 	started := time.Now().UTC()
 	_, err := store.Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), StartedAt: started, Address: "127.0.0.1:7777"})
 	require.NoError(t, err)
