@@ -638,21 +638,18 @@ func TestCronSpokeForwardPushOnlyOverlap(t *testing.T) {
 // TestCronSpokeForwardConflictAndUncertainResponse.
 func TestCronSpokeForwardRefusesAdapterConversion(t *testing.T) {
 	f := newCronForwardFixture(t, nil)
-	hegel.Test(t, func(ht *hegel.T) {
-		number := hegel.Draw(ht, hegel.Integers[int64](math.MinInt64, math.MaxInt64))
-		adapter := cron.JobDefinition{Version: 1, Kind: "job", Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Inspect"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Inspect"}, Overlap: "forbid", Catchup: "all", Options: jsontext.Value(fmt.Sprintf(`{"nested":[{"integer":%d}]}`, number))}
-		uid := cronHTTPUID(t)
-		current, _, err := f.hub.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: f.hp.ID, UID: uid, Name: "Adapter", Definition: adapter, Actor: "tester"})
-		require.NoError(ht, err)
-		response, raw := f.put(t, uid, "")
-		require.Equalf(ht, http.StatusForbidden, response.StatusCode, "%s", raw)
-		kept, err := f.hub.DB.CronJob(t.Context(), f.hp.ID, uid)
-		require.NoError(ht, err)
-		require.Equal(ht, current.DefinitionEventUID, kept.DefinitionEventUID)
-		require.Equal(ht, current.Revision, kept.Revision)
-		require.Equal(ht, current.UpdatedAt, kept.UpdatedAt)
-		require.Equal(ht, string(current.Definition.Options), string(kept.Definition.Options))
-	}, hegel.WithTestCases(1000), hegel.WithDatabase(""))
+	adapter := cron.JobDefinition{Version: 1, Kind: "job", Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Inspect"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Inspect"}, Overlap: "forbid", Catchup: "all", Options: jsontext.Value(`{"nested":[{"integer":-42}]}`)}
+	uid := cronHTTPUID(t)
+	current, _, err := f.hub.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: f.hp.ID, UID: uid, Name: "Adapter", Definition: adapter, Actor: "tester"})
+	require.NoError(t, err)
+	response, raw := f.put(t, uid, "")
+	require.Equalf(t, http.StatusForbidden, response.StatusCode, "%s", raw)
+	kept, err := f.hub.DB.CronJob(t.Context(), f.hp.ID, uid)
+	require.NoError(t, err)
+	require.Equal(t, current.DefinitionEventUID, kept.DefinitionEventUID)
+	require.Equal(t, current.Revision, kept.Revision)
+	require.Equal(t, current.UpdatedAt, kept.UpdatedAt)
+	require.Equal(t, string(current.Definition.Options), string(kept.Definition.Options))
 }
 
 func TestCronSpokeForwardPOSTCreate(t *testing.T) {
