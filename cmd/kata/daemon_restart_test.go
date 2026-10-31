@@ -71,3 +71,15 @@ func TestDaemonRestart_SignalFailureCleansRequest(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, replies)
 }
+
+func TestDaemonArgs(t *testing.T) {
+	original := os.Args
+	t.Cleanup(func() { os.Args = original })
+	os.Args = []string{"kata", "daemon", "start", "--foreground", "--listen", "127.0.0.1:7777", "--insecure-readonly", "--no-auto-token=false", "--"}
+	overrides := []string{"--listen=127.0.0.1:8888", "--insecure-readonly=false", "--no-auto-token=true"}
+	want := []string{"daemon", "start", "--foreground", "--listen=127.0.0.1:8888", "--insecure-readonly=false", "--no-auto-token=true", "--"}
+	args := daemonArgs(overrides...)
+	assert.Equal(t, want, args)
+	os.Args = append([]string{"kata"}, args...)
+	assert.Equal(t, want, daemonArgs(overrides...))
+}
