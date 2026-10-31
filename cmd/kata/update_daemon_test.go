@@ -17,6 +17,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/shirou/gopsutil/v4/process"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/client"
@@ -379,6 +380,15 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 				require.NoError(t, err, "%s", output)
 				after := f.record()
 				require.True(t, after.StartedAt.After(before.StartedAt))
+				assert.True(t, strings.HasPrefix(after.Address, "0.0.0.0:"), "%s", after.Address)
+				assert.NotEqual(t, "0.0.0.0:0", after.Address)
+				replacement, err := process.NewProcess(int32(after.PID)) //nolint:gosec // PID belongs to the test-built daemon.
+				require.NoError(t, err)
+				args, err := replacement.CmdlineSliceWithContext(t.Context())
+				require.NoError(t, err)
+				for _, flag := range []string{"--listen=0.0.0.0:0", "--insecure-readonly=true", "--no-auto-token=true"} {
+					assert.Contains(t, args, flag)
+				}
 				output, err = f.restart(t, "--insecure-readonly=false")
 				require.Error(t, err)
 				assert.Contains(t, output, "pass --insecure-readonly")
@@ -445,16 +455,13 @@ func TestWaitForDaemonReplacement(t *testing.T) {
 		require.ErrorContains(t, err, "this restart was not applied")
 	})
 	t.Run("late readiness after previous exits", func(t *testing.T) {
-		previousProcess := exec.CommandContext(t.Context(), os.Args[0], "-test.run=TestDaemonCommandSleepHelperProcess") //nolint:gosec // existing test helper exits immediately without its sleep marker
-		require.NoError(t, previousProcess.Run())
-		require.False(t, kitdaemon.ProcessAlive(previousProcess.ProcessState.Pid()))
 		store := kitdaemon.RuntimeStore{Dir: t.TempDir()}
 		reply := filepath.Join(store.Dir, "restart-reply-caller")
 		require.NoError(t, os.WriteFile(reply, nil, 0600))
 		identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
 		require.True(t, ok)
 		synctest.Test(t, func(t *testing.T) {
-			previous := kitdaemon.RuntimeRecord{PID: previousProcess.ProcessState.Pid(), StartedAt: time.Now()}
+			previous := kitdaemon.RuntimeRecord{PID: 1 << 30, StartedAt: time.Now()}
 			published := make(chan error, 1)
 			go func() {
 				time.Sleep(6 * time.Second)

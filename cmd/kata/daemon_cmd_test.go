@@ -1289,7 +1289,10 @@ func TestDaemonRestart_StartsWhenNoDaemonIsRunning(t *testing.T) {
 
 	orig := startDetachedDaemon
 	t.Cleanup(func() { startDetachedDaemon = orig })
-	startDetachedDaemon = func(context.Context, string, bool, bool) (daemonStartOutput, error) {
+	startDetachedDaemon = func(_ context.Context, listen string, insecureReadonly, noAutoToken bool) (daemonStartOutput, error) {
+		assert.Equal(t, "100.64.0.5:7777", listen)
+		assert.True(t, insecureReadonly)
+		assert.True(t, noAutoToken)
 		return daemonStartOutput{
 			Action:  "started",
 			PID:     4242,
@@ -1298,7 +1301,7 @@ func TestDaemonRestart_StartsWhenNoDaemonIsRunning(t *testing.T) {
 		}, nil
 	}
 
-	out := executeRoot(t, newRootCmd(), "daemon", "restart")
+	out := executeRoot(t, newRootCmd(), "daemon", "restart", "--listen", "100.64.0.5:7777", "--insecure-readonly", "--no-auto-token")
 
 	assert.Equal(t, "started pid=4242 address=127.0.0.1:7777 (was not running)\n"+
 		"  web UI:  http://127.0.0.1:28888\n", string(out))
@@ -1355,28 +1358,6 @@ func TestDaemonRestart_AgentReportsStartedDaemon(t *testing.T) {
 
 	assert.Equal(t, "OK daemon action=restart pid=4242 stopped=0 "+
 		"web_url=http://127.0.0.1:28888\n", string(out))
-}
-
-func TestDaemonRestart_PassesStartupOverrides(t *testing.T) {
-	resetFlags(t)
-	setupKataEnv(t)
-
-	orig := startDetachedDaemon
-	t.Cleanup(func() { startDetachedDaemon = orig })
-	var gotListen string
-	var gotInsecureReadonly, gotNoAutoToken bool
-	startDetachedDaemon = func(_ context.Context, listen string, insecureReadonly, noAutoToken bool) (daemonStartOutput, error) {
-		gotListen = listen
-		gotInsecureReadonly = insecureReadonly
-		gotNoAutoToken = noAutoToken
-		return daemonStartOutput{Action: "started", PID: 4242, Address: listen}, nil
-	}
-
-	executeRoot(t, newRootCmd(), "daemon", "restart", "--listen", "100.64.0.5:7777", "--insecure-readonly", "--no-auto-token")
-
-	assert.Equal(t, "100.64.0.5:7777", gotListen)
-	assert.True(t, gotInsecureReadonly)
-	assert.True(t, gotNoAutoToken)
 }
 
 func TestDaemonArgs(t *testing.T) {
