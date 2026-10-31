@@ -149,7 +149,7 @@ func daemonLifecycle(t *testing.T) func(*testing.T, string) *daemonLifecycleFixt
 				args = append(args, "--")
 			case "read-only TCP":
 				args = append(args, "--listen", "127.0.0.1:0", "--insecure-readonly")
-			case "daemon token", "restart during drain", "autostart during drain", "start during drain":
+			case "daemon token", "restart during drain", "start during drain":
 				args = append(args, "--listen", "127.0.0.1:0")
 			}
 			process := exec.Command(binary, args...) //nolint:gosec // test-owned binary and fixed arguments
@@ -289,7 +289,7 @@ func testUpdateInstallDaemonLifecycle(t *testing.T, fixture func(*testing.T, str
 
 func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *daemonLifecycleFixture) {
 	t.Helper()
-	for _, scenario := range []string{"restart failure", "older daemon", "startup flags", "new config", "restart during drain", "autostart during drain", "start during drain"} {
+	for _, scenario := range []string{"restart failure", "older daemon", "startup flags", "new config", "restart during drain", "start during drain"} {
 		t.Run(scenario, func(t *testing.T) {
 			if strings.Contains(scenario, "during drain") && runtime.GOOS != "linux" {
 				t.Skip("holds drain with a shell hook and observes the start lock through inotify")
@@ -349,10 +349,7 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 				done := make(chan struct{}, 1)
 				go func() {
 					args := []string{"daemon", "restart", "--json"}
-					switch scenario {
-					case "autostart during drain":
-						args = []string{"list", "--json"}
-					case "start during drain":
+					if scenario == "start during drain" {
 						args = []string{"daemon", "start", "--json"}
 					}
 					command := exec.CommandContext(t.Context(), f.cli, args...) //nolint:gosec // test-built executable

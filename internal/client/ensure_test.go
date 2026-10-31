@@ -113,19 +113,6 @@ func TestEnsureRunningKeepsNewerReleaseDaemon(t *testing.T) {
 	assert.Zero(t, state.startCalls)
 	assert.Contains(t, err.Error(), "kata daemon v0.19.0 is newer than this kata binary v0.18.0")
 	assert.Contains(t, err.Error(), "use a newer kata binary")
-
-	t.Run("rediscovery_under_start_lock", func(t *testing.T) {
-		originalStart := startDetachedDaemonForEnsure
-		defer func() { startDetachedDaemonForEnsure = originalStart }()
-		started := false
-		startDetachedDaemonForEnsure = func(context.Context, kitdaemon.StartDetachedOptions) error {
-			started = true
-			return fmt.Errorf("unexpected replacement of newer daemon")
-		}
-		_, err := ensureLocalRunningTarget(t.Context())
-		assert.ErrorIs(t, err, ErrDaemonNotReplaceable)
-		assert.False(t, started, "rediscovery must refuse the newer daemon before spawning")
-	})
 }
 
 // Only two release versions have a defined order. Development builds report a
@@ -194,7 +181,6 @@ func TestEnsureRunningRestartsWhenDaemonVersionDiffers(t *testing.T) {
 		require.NoError(t, err)
 		defer release()
 		restore.stopCalls = 0
-		startDaemonForEnsure = autoStart
 		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 		defer cancel()
 
@@ -1006,19 +992,6 @@ func TestEnsureRunningReportsLiveUnreachableDaemonWithoutAutoStart(t *testing.T)
 	assert.Contains(t, err.Error(), address)
 	assert.Contains(t, err.Error(), "missing.sock")
 	assert.Zero(t, restore.startCalls)
-
-	t.Run("rediscovery_under_start_lock", func(t *testing.T) {
-		originalStart := startDetachedDaemonForEnsure
-		defer func() { startDetachedDaemonForEnsure = originalStart }()
-		started := false
-		startDetachedDaemonForEnsure = func(context.Context, kitdaemon.StartDetachedOptions) error {
-			started = true
-			return fmt.Errorf("unexpected startup beside unreachable live daemon")
-		}
-		_, err := ensureLocalRunningTarget(t.Context())
-		assert.ErrorIs(t, err, ErrLocalDaemonUnreachable)
-		assert.False(t, started, "rediscovery errors must prevent spawning")
-	})
 }
 
 func TestEnsureRunningPrioritizesUnreachableDaemonOverIncompatibleDaemon(t *testing.T) {

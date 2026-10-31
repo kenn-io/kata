@@ -61,15 +61,13 @@ func TestNewDaemonRestart_ResolvesSymlinkedExecutable(t *testing.T) {
 	assert.Empty(t, stderr.String())
 }
 
-func TestDaemonRestart_CallerFailure(t *testing.T) {
-	t.Run("signal failure", func(t *testing.T) {
-		dir := t.TempDir()
-		rec := kitdaemon.RuntimeRecord{PID: 1 << 30, StartedAt: time.Now().UTC(), Metadata: map[string]string{daemonruntime.RuntimeRestartExecutableKey: "1"}}
-		_, err := requestDaemonRestart(t.Context(), &daemonruntime.Namespace{DataDir: dir}, rec, "/installed/kata", nil)
-		require.Error(t, err)
-		require.NoFileExists(t, restartRequestPath(dir, rec))
-		replies, err := filepath.Glob(filepath.Join(dir, "restart-reply-*"))
-		require.NoError(t, err)
-		assert.Empty(t, replies)
-	})
+func TestDaemonRestart_SignalFailureCleansRequest(t *testing.T) {
+	dir := t.TempDir()
+	rec := kitdaemon.RuntimeRecord{PID: 1 << 30, StartedAt: time.Now().UTC(), Metadata: map[string]string{daemonruntime.RuntimeRestartExecutableKey: "1"}}
+	_, err := requestDaemonRestart(t.Context(), &daemonruntime.Namespace{DataDir: dir}, rec, "/installed/kata", nil)
+	require.ErrorContains(t, err, "signal daemon pid")
+	require.NoFileExists(t, restartRequestPath(dir, rec))
+	replies, err := filepath.Glob(filepath.Join(dir, "restart-reply-*"))
+	require.NoError(t, err)
+	assert.Empty(t, replies)
 }
