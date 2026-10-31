@@ -275,9 +275,9 @@ var cronNotifyKind = cronJobKind{
 
 var cronCronTrigger = cronJobTrigger{
 	id: "cron", label: "cron expression", fields: []cronField{cfCron, cfZone},
-	load: func(f *cronForm, t cron.Trigger) { f.val[cfCron], f.val[cfZone] = t.Cron, cmp.Or(t.Timezone, "UTC") },
+	load: func(f *cronForm, t cron.Trigger) { f.val[cfCron], f.val[cfZone] = t.Cron, t.Timezone },
 	build: func(f *cronForm) (cron.Trigger, error) {
-		return cron.Trigger{Kind: "cron", Cron: strings.TrimSpace(f.val[cfCron]), Timezone: cmp.Or(strings.TrimSpace(f.val[cfZone]), "UTC")}, nil
+		return cron.Trigger{Kind: "cron", Cron: strings.TrimSpace(f.val[cfCron]), Timezone: strings.TrimSpace(f.val[cfZone])}, nil
 	},
 }
 
@@ -897,6 +897,17 @@ func cronCanonical(v jsontext.Value) string {
 	return string(c)
 }
 
+// cronNormalized is the name and definition a form builds, untouched, from
+// rec, so values the form adds or drops never read as someone's edit.
+func cronNormalized(rec CronJobRecord, workflows []cronChoice) (string, cron.JobDefinition) {
+	if f, err := cronFormFor(rec, workflows); err == nil {
+		if name, def, err := f.build(cronUIDResolver(nil)); err == nil {
+			return name, def
+		}
+	}
+	return rec.Name, rec.Definition
+}
+
 // rebase is a three-way merge of the job's name and definition: base is what
 // the form opened with, mine is what the draft last tried to write, theirs is
 // the job now. A property the draft changed comes from the draft whole;
@@ -910,7 +921,9 @@ func (f *cronForm) rebase(current CronJobRecord) (*cronForm, error) {
 	if f.merged != nil {
 		baseName, baseDef = f.merged.Name, f.merged.Definition
 	}
-	base, mine, theirs := cronProperties(baseName, baseDef), cronProperties(f.mine.Name, f.mine.Definition), cronProperties(current.Name, current.Definition)
+	baseName, baseDef = cronNormalized(CronJobRecord{UID: f.uid, Name: baseName, Definition: baseDef}, f.workflows)
+	theirsName, theirsDef := cronNormalized(current, f.workflows)
+	base, mine, theirs := cronProperties(baseName, baseDef), cronProperties(f.mine.Name, f.mine.Definition), cronProperties(theirsName, theirsDef)
 	merged, both := map[string]jsontext.Value{}, []string{}
 	keys := map[string]bool{}
 	for _, props := range []map[string]jsontext.Value{base, mine, theirs} {
@@ -948,13 +961,33 @@ func (f *cronForm) rebase(current CronJobRecord) (*cronForm, error) {
 		return nil, err
 	}
 	next.merged = &current
+	// The draft is unsaved against the job as it is now, whatever the merge kept.
+	if persisted, err := cronFormFor(current, f.workflows); err == nil {
+		next.snapshot, next.snapKind, next.snapTrig = persisted.snapshot, persisted.snapKind, persisted.snapTrig
+	}
 	next.focusField(f.focus)
 	next.validate()
+	// A merged property the form cannot represent builds back as something
+	// else; say so rather than claim it was kept.
+	var lost []string
+	if builtName, built, err := next.build(cronUIDResolver(nil)); err == nil {
+		kept, want := cronProperties(builtName, built), cronProperties(name, rec.Definition)
+		for key := range want {
+			if cronCanonical(kept[key]) != cronCanonical(want[key]) {
+				lost = append(lost, key)
+			}
+		}
+		slices.Sort(lost)
+	}
+	both = slices.DeleteFunc(both, func(key string) bool { return slices.Contains(lost, key) })
 	if next.general == "" {
 		next.general = "Applied to the current job; review it, then save."
 	}
 	if len(both) > 0 {
 		next.general += " Both changed: " + strings.Join(both, ", ") + ". Your version is kept."
+	}
+	if len(lost) > 0 {
+		next.general += " Could not keep: " + strings.Join(lost, ", ") + "."
 	}
 	return next, nil
 }

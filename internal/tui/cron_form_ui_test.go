@@ -628,3 +628,49 @@ func TestCronSecondConflictKeepsTheDraftsEarlierEdits(t *testing.T) {
 	require.Equal(t, "Mine", got.Action.Prompt, "the edit made before the first conflict survives the second")
 	require.Equal(t, "0 7 * * *", got.Trigger.Cron, "the other writer's later trigger change is kept")
 }
+
+func TestCronEscAfterApplyAsksBeforeDroppingTheMerge(t *testing.T) {
+	m, api := openEdit(t, executeRecord(`{}`))
+	m.cron.form.val[cfPrompt] = "Mine"
+	m = conflictAndApply(t, m, api, executeRecord(`{}`))
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	require.Equal(t, modalDiscardCronJob, m.modal, "the merged draft is unsaved")
+}
+
+func TestCronConflictApplySaysWhatItCouldNotKeep(t *testing.T) {
+	const wasRun, newRun, source = "01ARZ3NDEKTSV4RRFFQ69G5FB5", cronTestParent, "01ARZ3NDEKTSV4RRFFQ69G5FB6"
+	rec := executeRecord(`{}`)
+	rec.Definition.Issue = &cron.IssuePolicy{Kind: "existing", UID: wasRun}
+	m, api := openEdit(t, rec)
+	m.cron.form.val[cfReport] = newRun // mine edits the run issue
+	theirs := rec
+	theirs.Definition.Trigger = cron.Trigger{Kind: "issue-scheduled", IssueUID: source}
+	m = conflictAndApply(t, m, api, theirs)
+	require.Contains(t, m.cron.form.general, "Could not keep: issue")
+	require.NotContains(t, m.cron.form.general, "Both changed")
+}
+
+func TestCronConflictApplyKeepsTheirScheduleWhenTheZoneWasOmitted(t *testing.T) {
+	rec := executeRecord(`{}`)
+	rec.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 7 * * *"}
+	m, api := openEdit(t, rec)
+	m.cron.form.val[cfPrompt] = "Mine"
+	theirs := rec
+	theirs.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 6 * * *"}
+	m = conflictAndApply(t, m, api, theirs)
+	m, cmd := press(m, ctrlKey('o'))
+	settle(t, m, cmd)
+	got := api.puts[1].write.Definition
+	require.Equal(t, "0 6 * * *", got.Trigger.Cron)
+	require.Equal(t, "Mine", got.Action.Prompt)
+}
+
+func TestCronEditOfAJobWithoutAZoneWritesNone(t *testing.T) {
+	rec := executeRecord(`{}`)
+	rec.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 7 * * *"}
+	m, api := openEdit(t, rec)
+	m.cron.form.val[cfName] = "Renamed"
+	m, cmd := press(m, ctrlKey('o'))
+	settle(t, m, cmd)
+	require.Empty(t, api.puts[0].write.Definition.Trigger.Timezone)
+}
