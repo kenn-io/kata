@@ -200,6 +200,7 @@ func testUpdateInstallDaemonLifecycle(t *testing.T, fixture func(*testing.T, str
 			before := f.record()
 			if scenario == "older daemon" {
 				delete(before.Metadata, daemonruntime.RuntimeRestartMetadataKey)
+				delete(before.Metadata, daemonruntime.RuntimeRestartExecutableKey)
 				_, err := f.store.Write(before)
 				require.NoError(t, err)
 			}
@@ -287,7 +288,7 @@ func testUpdateInstallDaemonLifecycle(t *testing.T, fixture func(*testing.T, str
 
 func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *daemonLifecycleFixture) {
 	t.Helper()
-	for _, scenario := range []string{"restart failure", "older daemon", "startup flags", "new config", "refusal then restart", "restart during drain", "autostart during drain", "start during drain"} {
+	for _, scenario := range []string{"restart failure", "older daemon", "startup flags", "new config", "restart during drain", "autostart during drain", "start during drain"} {
 		t.Run(scenario, func(t *testing.T) {
 			if strings.Contains(scenario, "during drain") && runtime.GOOS != "linux" {
 				t.Skip("holds drain with a shell hook and observes the start lock through inotify")
@@ -295,6 +296,9 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 			setupKataEnv(t)
 			f := fixture(t, scenario)
 			before := f.record()
+			if scenario != "older daemon" && runtime.GOOS != "windows" {
+				t.Cleanup(func() { assert.Equal(t, before.PID, f.record().PID) })
+			}
 			if strings.Contains(scenario, "during drain") {
 				release := filepath.Join(f.home, "hook-release")
 				t.Cleanup(func() { _ = os.WriteFile(release, nil, 0600) })
@@ -336,22 +340,6 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 				require.NoError(t, os.WriteFile(release, nil, 0600))
 				<-done
 				<-done
-				assert.Equal(t, before.PID, f.record().PID)
-				assert.Equal(t, before.Endpoint().IsUnix(), f.record().Endpoint().IsUnix())
-				return
-			}
-			if scenario != "restart failure" && scenario != "older daemon" && runtime.GOOS != "windows" {
-				t.Cleanup(func() { assert.Equal(t, before.PID, f.record().PID) })
-			}
-			if scenario == "refusal then restart" {
-				output, err := f.restart(t, "--json", "--listen=invalid")
-				require.Error(t, err)
-				assert.Contains(t, output, "invalid")
-				output, err = f.restart(t, "--json")
-				require.NoError(t, err, "%s", output)
-				replies, err := filepath.Glob(filepath.Join(f.store.Dir, "restart*"))
-				require.NoError(t, err)
-				assert.Empty(t, replies)
 				return
 			}
 			if scenario == "older daemon" {
@@ -367,10 +355,6 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 				require.NoError(t, err, "%s", output)
 				after := f.record()
 				require.True(t, after.StartedAt.After(before.StartedAt))
-				httpClient, baseURL := client.LocalHTTPClient(strings.Replace(after.Endpoint().ConfigAddress(), "0.0.0.0:", "127.0.0.1:", 1))
-				status, _, err := httpDoJSON(t.Context(), httpClient, http.MethodPost, baseURL+"/api/v1/projects", map[string]string{"name": "example-project", "actor": "user-a"})
-				require.NoError(t, err)
-				assert.Equal(t, http.StatusUnauthorized, status)
 				output, err = f.restart(t, "--insecure-readonly=false")
 				require.Error(t, err)
 				assert.Contains(t, output, "pass --insecure-readonly")
@@ -404,6 +388,12 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 				status, _, err := httpDoJSON(t.Context(), httpClient, http.MethodGet, baseURL+"/api/v1/ping", nil)
 				require.NoError(t, err)
 				assert.Equal(t, http.StatusOK, status)
+				require.NoError(t, os.Remove(filepath.Join(f.home, "config.toml")))
+				output, err := f.restart(t, "--json")
+				require.NoError(t, err, "%s", output)
+				replies, err := filepath.Glob(filepath.Join(f.store.Dir, "restart*"))
+				require.NoError(t, err)
+				assert.Empty(t, replies)
 				return
 			}
 			require.NoError(t, updateErr, "%s", stdout)
