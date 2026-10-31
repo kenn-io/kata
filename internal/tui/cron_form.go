@@ -167,7 +167,9 @@ func executeKind(id, label string, workflow bool) cronJobKind {
 			case cfWorkflow:
 				return workflow
 			case cfReport:
-				return f.val[cfPolicy] == "existing"
+				// On an issue-date trigger the daemon requires the run issue to be
+				// the trigger's own, so there is nothing to ask.
+				return f.val[cfPolicy] == "existing" && !cronIsDate(f.trigger)
 			case cfTitle, cfBody, cfScheduled, cfDeadline:
 				return f.val[cfPolicy] == "per-run"
 			}
@@ -186,7 +188,9 @@ func executeKind(id, label string, workflow bool) cronJobKind {
 			}
 			f.val[cfPolicy] = p.Kind
 			if p.Kind == "existing" {
-				f.val[cfReport] = p.UID
+				if !cronIsDate(f.trigger) {
+					f.val[cfReport] = p.UID
+				}
 				return
 			}
 			f.val[cfTitle], f.val[cfBody] = p.Title, p.Body
@@ -555,7 +559,11 @@ func (f *cronForm) applyCatchup(def *cron.JobDefinition) error {
 
 func (f *cronForm) executePolicy(uidOf func(string) string) (*cron.IssuePolicy, error) {
 	if f.val[cfPolicy] == "existing" {
-		return &cron.IssuePolicy{Kind: "existing", UID: uidOf(f.val[cfReport])}, nil
+		run := cfReport
+		if cronIsDate(f.trigger) {
+			run = cfIssue
+		}
+		return &cron.IssuePolicy{Kind: "existing", UID: uidOf(f.val[run])}, nil
 	}
 	policy := cron.IssuePolicy{Kind: "per-run", Title: strings.TrimSpace(f.val[cfTitle]), Body: strings.TrimSpace(f.val[cfBody])}
 	for _, offset := range []struct {

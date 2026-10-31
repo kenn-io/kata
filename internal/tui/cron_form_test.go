@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/internal/testenv"
 )
 
 const (
@@ -93,18 +94,39 @@ func TestCronFormEditSavesWhenAnotherJobSharesTheName(t *testing.T) {
 	require.Equal(t, twin.Name, api.puts[0].write.Name)
 }
 
-func TestCronFormExecuteDateTriggerKeepsTriggerAndPolicyIssuesApart(t *testing.T) {
-	const triggerIssue, runIssue = "01ARZ3NDEKTSV4RRFFQ69G5FB5", "01ARZ3NDEKTSV4RRFFQ69G5FB6"
-	rec := executeRecord(`{}`)
-	rec.Definition.Trigger = cron.Trigger{Kind: "issue-scheduled", IssueUID: triggerIssue}
-	rec.Definition.Issue = &cron.IssuePolicy{Kind: "existing", UID: runIssue}
-	f, err := cronFormFor(rec, nil)
-	require.NoError(t, err)
-	f.val[cfName] = "Renamed"
+func TestCronFormExecuteDateTriggerUsesTheTriggerIssueForTheRun(t *testing.T) {
+	f := newNativeForm(t)
+	f.kind, f.trigger = "prompt", "issue-scheduled"
+	f.val[cfPrompt], f.val[cfPolicy], f.val[cfIssue], f.val[cfReport] = "Do it", "existing", cronTestParent, cronTestIssue
+	require.False(t, f.shown(cfReport), "the run issue is the trigger's issue, so there is nothing to ask")
 	_, def, err := f.build(cronUIDResolver(nil))
 	require.NoError(t, err)
-	require.Equal(t, triggerIssue, def.Trigger.IssueUID)
-	require.Equal(t, runIssue, def.Issue.UID)
+	require.Equal(t, cronTestParent, def.Trigger.IssueUID)
+	require.Equal(t, cronTestParent, def.Issue.UID)
+
+	f.trigger = "manual"
+	require.True(t, f.shown(cfReport))
+}
+
+func TestCronFormExecuteDateTriggerCreatesOnTheDaemon(t *testing.T) {
+	env := testenv.New(t)
+	c := NewClient(env.URL, env.HTTP)
+	project, err := c.EnsureProject(t.Context(), "cron-date-example", "alice")
+	require.NoError(t, err)
+	created, err := c.CreateIssue(t.Context(), project.ID, CreateIssueBody{Title: "Dated", Actor: "alice"})
+	require.NoError(t, err)
+	issue := created.Issue.UID
+
+	f := newNativeForm(t)
+	f.kind, f.trigger = "prompt", "issue-scheduled"
+	f.val[cfPrompt], f.val[cfPolicy], f.val[cfIssue] = "Do it", "existing", issue
+	name, def, err := f.build(cronUIDResolver(nil))
+	require.NoError(t, err)
+	require.NoError(t, c.PutCronJob(t.Context(), project.ID, f.uid, CronJobWrite{Name: name, Definition: def, Actor: "alice"}))
+	shown, err := c.ShowCronJob(t.Context(), project.ID, f.uid)
+	require.NoError(t, err)
+	require.Equal(t, issue, shown.Definition.Trigger.IssueUID)
+	require.Equal(t, issue, shown.Definition.Issue.UID)
 }
 
 func TestCronFormPlacesCronMessagesOnTheBlankField(t *testing.T) {
