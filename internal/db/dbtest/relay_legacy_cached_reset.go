@@ -119,6 +119,26 @@ func RunRelayCachedResetLiveBoundary(t *testing.T, store db.Storage, writeMeta f
 	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary)
 	require.Empty(t, served.Manifest.SnapshotUID, "never disclose the old signed private checkpoint")
 	require.Equal(t, []string{private.UID}, linkTargetUIDs(t, store, issue.ID), "refusal preserves the owner's link")
+	links, err := store.LinksByIssue(ctx, issue.ID)
+	require.NoError(t, err)
+	require.Len(t, links, 1)
+	for _, link := range links {
+		unlink, err := store.DeleteLinkAndEvent(ctx, link, db.LinkEventParams{
+			EventType: "issue.unlinked", EventIssueID: private.ID, Actor: "member",
+			FromUID: issue.UID, ToUID: private.UID, FromShortID: issue.ShortID, ToShortID: private.ShortID,
+		})
+		require.NoError(t, err)
+		require.Equal(t, fixture.sibling.ID, unlink.ProjectID, "unlinking through the private endpoint advances only its history")
+	}
+	var latest int64
+	for stored, err := range store.ExportEvents(ctx, db.ExportFilter{ProjectID: &fixture.project.ID}) {
+		require.NoError(t, err)
+		latest = max(latest, stored.ID)
+	}
+	require.Equal(t, legacy.Manifest.HistoryEventID, latest)
+	served, err = resets.CreateRelayReset(ctx, binding, fixture.signer)
+	require.NoError(t, err)
+	requireResetOmitsIssue(t, served, private)
 }
 
 // legacyCheckpointWithEvent models an authentic checkpoint from an earlier

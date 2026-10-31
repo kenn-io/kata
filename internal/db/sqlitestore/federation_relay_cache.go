@@ -14,11 +14,12 @@ type relayHistoryValidationKey struct {
 }
 
 type relayHistoryValidationEntry struct {
-	projectUID string
-	generation uint64
-	after      int64
-	cursor     int64
-	reset      bool
+	projectUID     string
+	generation     uint64
+	after          int64
+	snapshotDigest string
+	cursor         int64
+	reset          bool
 }
 
 type relayHistoryValidationCache struct {
@@ -60,14 +61,16 @@ func (d *Store) relayHistoryNeedsResetCachedTx(
 ) (bool, error) {
 	key := relayHistoryValidationKey{projectID: projectID}
 	var after int64
+	var snapshotDigest string
 	validateAfter := relayHistoryHasBoundaryAfterTx
 	if checkpoint != nil {
 		// A root checkpoint already introduces existing issues, even when
-		// their raw history was compacted. Only later privacy crossings need
-		// a new checkpoint here; the caller checks root purge boundaries.
+		// their raw history was compacted. Validate its retained records and
+		// later privacy crossings; the caller checks root purge boundaries.
 		validateAfter = relayHistoryCrossesProjectAfterTx
 		key.bindingUID = checkpoint.Translation.Authority.BindingUID
 		after = checkpoint.Manifest.HistoryEventID
+		snapshotDigest = checkpoint.Manifest.SnapshotDigest
 	}
 	cache := d.relayHistoryCache
 	cache.mu.Lock()
@@ -108,7 +111,7 @@ func (d *Store) relayHistoryNeedsResetCachedTx(
 		return false, err
 	}
 	entry, cached := cache.entries[key]
-	if !cached || entry.projectUID != projectUID || entry.after != after || entry.generation != cache.generation || projectCursor < entry.cursor {
+	if !cached || entry.projectUID != projectUID || entry.after != after || entry.snapshotDigest != snapshotDigest || entry.generation != cache.generation || projectCursor < entry.cursor {
 		if d.relayHistoryFullScanObserver != nil {
 			d.relayHistoryFullScanObserver()
 		}
@@ -117,17 +120,23 @@ func (d *Store) relayHistoryNeedsResetCachedTx(
 		if checkpoint == nil {
 			reset, err = relayHistoryNeedsResetTx(ctx, tx, projectID, projectUID)
 		} else {
-			reset, err = validateAfter(ctx, tx, projectID, after)
+			reset, err = db.RelayCheckpointCrossesProject(checkpoint.Snapshot, func(source db.RemoteEvent) (bool, error) {
+				return relayEventCrossesProjectTx(ctx, tx, projectID, source)
+			})
+			if err == nil && !reset {
+				reset, err = validateAfter(ctx, tx, projectID, after)
+			}
 		}
 		if err != nil {
 			return false, err
 		}
 		cache.entries[key] = relayHistoryValidationEntry{
-			projectUID: projectUID,
-			generation: cache.generation,
-			after:      after,
-			cursor:     projectCursor,
-			reset:      reset,
+			projectUID:     projectUID,
+			generation:     cache.generation,
+			after:          after,
+			snapshotDigest: snapshotDigest,
+			cursor:         projectCursor,
+			reset:          reset,
 		}
 		return reset, nil
 	}

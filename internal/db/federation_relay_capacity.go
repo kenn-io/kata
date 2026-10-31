@@ -112,6 +112,31 @@ func (r *RelayCheckpointRecords) AppendEvents(events []Event, boundaryID int64, 
 	return nil
 }
 
+// RelayCheckpointCrossesProject checks retained source and current-state records
+// from older builders. A live link may have been removed through another
+// project, leaving this checkpoint's history cursor unchanged and its original
+// private bytes unsafe to disclose. Callers cache this result by snapshot digest
+// and invalidate it when issue identities or purge boundaries change.
+func RelayCheckpointCrossesProject(snapshot RootResetSnapshot, crosses func(RemoteEvent) (bool, error)) (bool, error) {
+	for _, section := range [][]byte{snapshot.Events, snapshot.Entities} {
+		var records [][]byte
+		if err := json.Unmarshal(section, &records); err != nil {
+			return false, err
+		}
+		for _, body := range records {
+			source, err := DecodeRelaySourceEvent(body)
+			if err != nil {
+				return false, err
+			}
+			crossing, err := crosses(source)
+			if err != nil || crossing {
+				return crossing, err
+			}
+		}
+	}
+	return false, nil
+}
+
 // Snapshot serializes the records into the committed snapshot sections. Empty
 // sections are explicit, as a signed checkpoint requires.
 func (r RelayCheckpointRecords) Snapshot() (RootResetSnapshot, error) {
