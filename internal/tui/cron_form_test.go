@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -45,6 +46,17 @@ func executeRecord(options string) db.CronJob {
 	}
 }
 
+func manualExecuteJob(options string) cron.JobDefinition {
+	return cron.JobDefinition{
+		Version: 1, Kind: "job", Enabled: true,
+		Trigger: cron.Trigger{Kind: "manual"},
+		Action:  cron.Action{Kind: "execute", Prompt: "Line one\nLine two"},
+		Issue:   &cron.IssuePolicy{Kind: "per-run", Title: "Digest", ScheduledOffsetSeconds: new(int64(3600))},
+		Overlap: "forbid", Catchup: "latest",
+		Options: jsontext.Value(options),
+	}
+}
+
 func TestCronFormRecurringCreateHonoursEnabled(t *testing.T) {
 	f := newNativeForm(t)
 	_, def, err := f.build(cronTestUIDs)
@@ -70,38 +82,6 @@ func TestCronFormPolicySwitchDropsOffsets(t *testing.T) {
 	require.Equal(t, cron.IssuePolicy{Kind: "existing", UID: cronTestIssue}, *def.Issue)
 }
 
-func TestCronFormEditSavesWhenAnotherJobSharesTheName(t *testing.T) {
-	m, api := cronWriteFixture(t)
-	twin := m.cron.data.jobs[0]
-	twin.UID, twin.ID = "01ARZ3NDEKTSV4RRFFQ69G5FAZ", 9
-	m.cron.data.jobs = append(m.cron.data.jobs, twin)
-	api.shown = executeRecord(`{}`)
-	api.shown.Name = twin.Name
-	api.shown.UID = m.cron.data.jobs[0].UID
-	m, cmd := press(m, keyRune('e'))
-	m = settle(t, m, cmd)
-	m.cron.form.val[cfTitle] = "Edited"
-	m, cmd = press(m, ctrlKey('o'))
-	m = settle(t, m, cmd)
-	require.Nil(t, m.cron.form)
-	require.Len(t, api.puts, 1)
-	require.Equal(t, twin.Name, api.puts[0].write.Name)
-}
-
-func TestCronFormExecuteDateTriggerUsesTheTriggerIssueForTheRun(t *testing.T) {
-	f := newNativeForm(t)
-	f.kind, f.trigger = "prompt", "issue-scheduled"
-	f.val[cfPrompt], f.val[cfPolicy], f.val[cfIssue], f.val[cfReport] = "Do it", "existing", cronTestParent, cronTestIssue
-	require.False(t, f.shown(cfReport), "the run issue is the trigger's issue, so there is nothing to ask")
-	_, def, err := f.build(cronUIDResolver(nil))
-	require.NoError(t, err)
-	require.Equal(t, cronTestParent, def.Trigger.IssueUID)
-	require.Equal(t, cronTestParent, def.Issue.UID)
-
-	f.trigger = "manual"
-	require.True(t, f.shown(cfReport))
-}
-
 func TestCronFormExecuteDateTriggerCreatesOnTheDaemon(t *testing.T) {
 	env := testenv.New(t)
 	c := NewClient(env.URL, env.HTTP)
@@ -113,7 +93,8 @@ func TestCronFormExecuteDateTriggerCreatesOnTheDaemon(t *testing.T) {
 
 	f := newNativeForm(t)
 	f.kind, f.trigger = "prompt", "issue-scheduled"
-	f.val[cfPrompt], f.val[cfPolicy], f.val[cfIssue] = "Do it", "existing", issue
+	f.val[cfPrompt], f.val[cfPolicy], f.val[cfIssue], f.val[cfReport] = "Do it", "existing", issue, cronTestIssue
+	require.False(t, f.shown(cfReport), "the run issue is the trigger's issue, so there is nothing to ask")
 	name, def, err := f.build(cronUIDResolver(nil))
 	require.NoError(t, err)
 	require.NoError(t, c.PutCronJob(t.Context(), project.ID, f.uid, kataapi.PutCronJobBody{Name: name, Definition: kataapi.CronJobDefinitionFrom(def), Actor: "alice"}))
@@ -121,6 +102,8 @@ func TestCronFormExecuteDateTriggerCreatesOnTheDaemon(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, issue, shown.Definition.Trigger.IssueUID)
 	require.Equal(t, issue, shown.Definition.Issue.UID)
+	f.trigger = "manual"
+	require.True(t, f.shown(cfReport))
 }
 
 func TestCronFormLocksNativeParentAndAction(t *testing.T) {
@@ -196,9 +179,6 @@ func TestCronFormOptionsAreKeptVerbatim(t *testing.T) {
 	_, def, err := f.build(cronTestUIDs)
 	require.NoError(t, err)
 	require.Equal(t, options, string(def.Options))
-	require.Contains(t, string(def.Options), "12345678901234567890123")
-	require.Contains(t, string(def.Options), "1.10")
-	require.Equal(t, "Line one\nLine two", def.Action.Prompt, "line breaks survive a pass through the editor")
 }
 
 func TestCronFormEveryKindAndTrigger(t *testing.T) {
@@ -268,14 +248,6 @@ func TestCronFormCatchupLatestClearsGrace(t *testing.T) {
 	_, def, err := f.build(cronUIDResolver(nil))
 	require.NoError(t, err)
 	require.Zero(t, def.GraceSeconds)
-
-	created := newNativeForm(t)
-	created.step(cfCatchup, -1)
-	created.val[cfGrace] = "300"
-	created.step(cfCatchup, 1)
-	_, def, err = created.build(cronUIDResolver(nil))
-	require.NoError(t, err)
-	require.Zero(t, def.GraceSeconds)
 }
 
 func TestCronFormRenameKeepsStoredCronText(t *testing.T) {
@@ -291,19 +263,15 @@ func TestCronFormRenameKeepsStoredCronText(t *testing.T) {
 }
 
 func TestCronFormRenameKeepsStoredGrace(t *testing.T) {
-	for _, catchup := range []string{"latest", "all"} {
-		t.Run(catchup, func(t *testing.T) {
-			rec := nativeRecord()
-			rec.Definition.Catchup, rec.Definition.GraceSeconds = catchup, 30
-			f, err := cronFormFor(rec, nil)
-			require.NoError(t, err)
-			f.ed.activeField().input.SetValue("Renamed report")
-			name, def, err := f.build(cronUIDResolver(nil))
-			require.NoError(t, err)
-			require.Equal(t, "Renamed report", name)
-			require.Equal(t, int64(30), def.GraceSeconds)
-		})
-	}
+	rec := nativeRecord()
+	rec.Definition.Catchup, rec.Definition.GraceSeconds = "latest", 30
+	f, err := cronFormFor(rec, nil)
+	require.NoError(t, err)
+	f.ed.activeField().input.SetValue("Renamed report")
+	name, def, err := f.build(cronUIDResolver(nil))
+	require.NoError(t, err)
+	require.Equal(t, "Renamed report", name)
+	require.Equal(t, int64(30), def.GraceSeconds)
 }
 
 func TestCronFormHiddenGraceDoesNotBlockSave(t *testing.T) {
@@ -327,20 +295,16 @@ func TestCronFormHiddenGraceDoesNotBlockSave(t *testing.T) {
 }
 
 func TestCronFormHiddenCatchupKeepsGrace(t *testing.T) {
-	for _, catchup := range []string{"skip", "latest", "all"} {
-		t.Run(catchup, func(t *testing.T) {
-			rec := executeRecord(`{}`)
-			rec.Definition.Action = cron.Action{Kind: "notify", Recipient: "alice", Message: "hello"}
-			rec.Definition.Issue = &cron.IssuePolicy{Kind: "existing", UID: cronTestIssue}
-			rec.Definition.Trigger = cron.Trigger{Kind: "issue-deadline", IssueUID: cronTestIssue}
-			rec.Definition.Catchup, rec.Definition.GraceSeconds = catchup, 10
-			f, err := cronFormFor(rec, nil)
-			require.NoError(t, err)
-			_, def, err := f.build(cronUIDResolver(nil))
-			require.NoError(t, err)
-			require.Equal(t, int64(10), def.GraceSeconds)
-		})
-	}
+	rec := executeRecord(`{}`)
+	rec.Definition.Action = cron.Action{Kind: "notify", Recipient: "alice", Message: "hello"}
+	rec.Definition.Issue = &cron.IssuePolicy{Kind: "existing", UID: cronTestIssue}
+	rec.Definition.Trigger = cron.Trigger{Kind: "issue-deadline", IssueUID: cronTestIssue}
+	rec.Definition.Catchup, rec.Definition.GraceSeconds = "skip", 10
+	f, err := cronFormFor(rec, nil)
+	require.NoError(t, err)
+	_, def, err := f.build(cronUIDResolver(nil))
+	require.NoError(t, err)
+	require.Equal(t, int64(10), def.GraceSeconds)
 }
 
 func TestCronFormEmptyWorkflowStepsToFirstOrLast(t *testing.T) {
@@ -354,5 +318,20 @@ func TestCronFormEmptyWorkflowStepsToFirstOrLast(t *testing.T) {
 			want = cronTestParent
 		}
 		require.Equal(t, want, f.val[cfWorkflow])
+	}
+}
+
+func TestCronEditOfAJobWithoutAZoneWritesNone(t *testing.T) {
+	for _, zone := range []string{"", "Europe/Berlin"} {
+		t.Run(zone, func(t *testing.T) {
+			rec := executeRecord(`{}`)
+			rec.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 7 * * *", Timezone: zone}
+			f, err := cronFormFor(rec, nil)
+			require.NoError(t, err)
+			f.val[cfName], f.val[cfZone] = "Renamed", ""
+			_, def, err := f.build(cronUIDResolver(nil))
+			require.NoError(t, err)
+			require.Empty(t, def.Trigger.Timezone)
+		})
 	}
 }

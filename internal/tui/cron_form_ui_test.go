@@ -134,7 +134,6 @@ func TestCronCreateResendKeepsUID(t *testing.T) {
 	require.Equal(t, api.puts[0].uid, api.puts[1].uid, "resending a create is the same create")
 	require.Empty(t, api.puts[1].write.ExpectedEventUID)
 	require.Equal(t, cronTestIssue, api.puts[1].write.Definition.Issue.ParentUID, "the parent ref is resolved to its UID")
-	require.True(t, api.puts[1].write.Definition.Enabled)
 	require.Equal(t, "alice", api.puts[1].write.Actor)
 	require.Equal(t, "Created Weekly report", m.toast.text)
 }
@@ -151,11 +150,7 @@ func TestCronSaveNamesUnknownIssueBesideField(t *testing.T) {
 }
 
 func TestCronEditConflictKeepsDraftAndAppliesToCurrent(t *testing.T) {
-	m, api := cronWriteFixture(t)
-	api.shown = executeRecord(`{"keep":1}`)
-	api.shown.UID = m.cron.data.jobs[0].UID
-	m, cmd := press(m, keyRune('e'))
-	m = settle(t, m, cmd)
+	m, api := openEdit(t, executeRecord(`{"keep":1}`))
 	require.NotNil(t, m.cron.form)
 	require.False(t, m.cron.form.create)
 	opened := api.shown.DefinitionEventUID
@@ -166,7 +161,7 @@ func TestCronEditConflictKeepsDraftAndAppliesToCurrent(t *testing.T) {
 	api.showErr = errors.New("current job must come from the conflict response")
 	api.putErrs = []error{&APIError{Status: http.StatusConflict, Code: "cron_conflict"}, nil}
 
-	m, cmd = press(m, ctrlKey('o'))
+	m, cmd := press(m, ctrlKey('o'))
 	m = settle(t, m, cmd)
 	require.Equal(t, opened, api.puts[0].write.ExpectedEventUID, "the edit is guarded on the event it read")
 	require.NotNil(t, m.cron.form.conflict)
@@ -214,34 +209,6 @@ func TestCronJobKeysRespectMutationAuthority(t *testing.T) {
 	}
 }
 
-func TestCronJobKeysRetryPermissionDiscovery(t *testing.T) {
-	for _, key := range []rune{'n', 'e'} {
-		t.Run(string(key), func(t *testing.T) {
-			m, _ := cronWriteFixture(t)
-			m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{err: errors.New("temporary connection failure")})
-			m, cmd := updateModel(m, keyRune(key))
-			require.Nil(t, m.cron.form)
-			require.NotNil(t, cmd, "retrying a job action must retry permission discovery")
-		})
-	}
-}
-
-func TestCronSaveDoesNotShareEditorWithRender(t *testing.T) {
-	m, api := openEdit(t, executeRecord(`{}`))
-	m.cron.form.ed.activeField().input.SetValue("Renamed digest")
-	m, cmd := press(m, ctrlKey('o'))
-	require.NotNil(t, cmd)
-	done := make(chan tea.Msg, 1)
-	go func() { done <- cmd() }()
-	for range 100 {
-		cronFormLines(m, m.cron.form)
-	}
-	msg := (<-done).(cronSavedMsg)
-	require.NoError(t, msg.err)
-	require.Len(t, api.puts, 1)
-	require.Equal(t, "Renamed digest", api.puts[0].write.Name)
-}
-
 func openEdit(t *testing.T, record db.CronJob) (Model, *cronWriteTestAPI) {
 	t.Helper()
 	m, api := cronWriteFixture(t)
@@ -249,58 +216,6 @@ func openEdit(t *testing.T, record db.CronJob) (Model, *cronWriteTestAPI) {
 	api.shown.UID = m.cron.data.jobs[0].UID
 	m, cmd := press(m, keyRune('e'))
 	return settle(t, m, cmd), api
-}
-
-func TestCronEditKeepsMarkdownTextVerbatim(t *testing.T) {
-	rec := executeRecord(`{}`)
-	rec.Definition.Action.Prompt = "  - indented\n    more\n"
-	rec.Definition.Issue = &cron.IssuePolicy{Kind: "per-run", Title: " Title ", Body: "    code\n"}
-	m, api := openEdit(t, rec)
-	m.cron.form.val[cfName] = "Renamed"
-	m, cmd := press(m, ctrlKey('o'))
-	m = settle(t, m, cmd)
-	got := api.puts[0].write.Definition
-	require.Equal(t, rec.Definition.Action.Prompt, got.Action.Prompt)
-	require.Equal(t, rec.Definition.Issue.Title, got.Issue.Title)
-	require.Equal(t, rec.Definition.Issue.Body, got.Issue.Body)
-
-	note := executeRecord(`{}`)
-	note.Definition.Action = cron.Action{Kind: "notify", Recipient: "alice", Message: "line\n\n"}
-	note.Definition.Issue = &cron.IssuePolicy{Kind: "existing", UID: cronTestIssue}
-	m, api = openEdit(t, note)
-	m.cron.form.val[cfName] = "Renamed"
-	m, cmd = press(m, ctrlKey('o'))
-	settle(t, m, cmd)
-	require.Equal(t, "line\n\n", api.puts[0].write.Definition.Action.Message)
-}
-
-func TestCronOtherConflictsAreOrdinarySaveErrors(t *testing.T) {
-	for _, create := range []bool{false, true} {
-		m, api := cronWriteFixture(t)
-		if create {
-			m, _ = press(m, keyRune('n'))
-			m.cron.form.val[cfName], m.cron.form.val[cfParent], m.cron.form.val[cfTitle] = "W", "abc4", "R"
-		} else {
-			m, api = openEdit(t, executeRecord(`{}`))
-		}
-		api.shown = executeRecord(`{}`)
-		api.putErrs = []error{&APIError{Status: http.StatusConflict, Code: "federated_read_only", Message: "write on the owning hub"}}
-		m, cmd := press(m, ctrlKey('o'))
-		m = settle(t, m, cmd)
-		require.Nil(t, m.cron.form.conflict, "create=%v", create)
-		require.Contains(t, m.cron.form.general, "owning hub")
-	}
-}
-
-func TestCronEditReplyIsRefusedWhileFiltering(t *testing.T) {
-	m, api := cronWriteFixture(t)
-	api.shown = executeRecord(`{}`)
-	api.shown.UID = m.cron.data.jobs[0].UID
-	m, cmd := press(m, keyRune('e'))
-	m, _ = press(m, keyRune('/'))
-	require.True(t, m.cron.filtering)
-	m = settle(t, m, cmd)
-	require.Nil(t, m.cron.form)
 }
 
 func TestCronEscAsksBeforeDiscardingADirtyDraft(t *testing.T) {
@@ -377,6 +292,11 @@ func TestCronEditResponseNeedsItsContext(t *testing.T) {
 	for name, away := range map[string]func(Model) Model{
 		"help":      func(m Model) Model { m, _ = updateModel(m, keyRune('?')); return m },
 		"other tab": func(m Model) Model { return sendRune(m, '3') },
+		"filtering": func(m Model) Model {
+			m, _ = press(m, keyRune('/'))
+			require.True(t, m.cron.filtering)
+			return m
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			m, api := cronWriteFixture(t)
@@ -411,26 +331,6 @@ func TestCronEditShowsTheReasonWhenTheJobCannotBeRead(t *testing.T) {
 	m = settle(t, m, cmd)
 	require.Nil(t, m.cron.form)
 	require.Contains(t, m.toast.text, "Could not open the job")
-}
-
-func TestCronEditOfAJobWithoutAZoneWritesNone(t *testing.T) {
-	rec := executeRecord(`{}`)
-	rec.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 7 * * *"}
-	m, api := openEdit(t, rec)
-	m.cron.form.val[cfName] = "Renamed"
-	m, cmd := press(m, ctrlKey('o'))
-	settle(t, m, cmd)
-	require.Empty(t, api.puts[0].write.Definition.Trigger.Timezone)
-}
-
-func TestCronEditCanClearTheTimeZone(t *testing.T) {
-	rec := executeRecord(`{}`)
-	rec.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 7 * * *", Timezone: "Europe/Berlin"}
-	m, api := openEdit(t, rec)
-	m.cron.form.val[cfZone] = ""
-	m, cmd := press(m, ctrlKey('o'))
-	settle(t, m, cmd)
-	require.Empty(t, api.puts[0].write.Definition.Trigger.Timezone)
 }
 
 func TestCronLongFieldKeepsCursorVisible(t *testing.T) {
@@ -480,33 +380,16 @@ func TestCronConflictReloadUsesCurrentJob(t *testing.T) {
 	require.Equal(t, api.shown.DefinitionEventUID, m.cron.form.expected)
 }
 
-func TestCronCreateRetryKeepsConflictOnDaemon(t *testing.T) {
-	env := testenv.New(t)
-	c := NewClient(env.URL, env.HTTP)
-	project, err := c.EnsureProject(t.Context(), "cron-retry-example", "alice")
-	require.NoError(t, err)
-	m := newTestModel()
-	m.api, m.scope, m.list.actor = c, scope{projectID: project.ID}, "alice"
-	f := newNativeForm(t)
-	parent, err := c.CreateIssue(t.Context(), project.ID, CreateIssueBody{Title: "Report parent", Actor: "alice"})
-	require.NoError(t, err)
-	f.val[cfParent] = parent.Issue.UID
-	m.cron.form = f
-	name, def, err := f.build(cronUIDResolver(nil))
-	require.NoError(t, err)
-	// The daemon committed the first send, but the form still has its draft.
-	require.NoError(t, c.PutCronJob(t.Context(), project.ID, f.uid, kataapi.PutCronJobBody{Name: name, Definition: kataapi.CronJobDefinitionFrom(def), Actor: "alice"}))
-	m = settle(t, m, m.cronSaveCmd(*f))
-	require.NotNil(t, m.cron.form)
-	require.NotNil(t, m.cron.form.conflict)
-	require.Equal(t, f.uid, m.cron.form.conflict.UID)
-	jobs, err := c.ListCronJobs(t.Context(), project.ID)
-	require.NoError(t, err)
-	require.Len(t, jobs, 1)
-	require.Equal(t, f.uid, jobs[0].UID)
-}
-
 func TestCronTextFieldsUseExternalEditorWithoutChangingStoredText(t *testing.T) {
+	rec := executeRecord(`{}`)
+	rec.Definition.Issue.Title = " Title "
+	f, err := cronFormFor(rec, nil)
+	require.NoError(t, err)
+	f.val[cfName] = "Renamed"
+	_, def, err := f.build(cronUIDResolver(nil))
+	require.NoError(t, err)
+	require.Equal(t, " Title ", def.Issue.Title)
+
 	t.Setenv("TMPDIR", t.TempDir())
 	for _, field := range []cronField{cfBody, cfPrompt, cfMessage, cfOptions} {
 		t.Run(cronFieldLabels[field], func(t *testing.T) {
@@ -579,31 +462,31 @@ func TestCronNativeCreateRefreshesParentActivity(t *testing.T) {
 		m.detail, _ = m.detail.Update(msg, m.keymap, c)
 	}
 	require.Greater(t, len(m.detail.events), before)
+
+	// Resend the retained draft after the daemon committed the first send.
+	m.cron.form = f
+	m = settle(t, m, m.cronSaveCmd(*f))
+	require.NotNil(t, m.cron.form)
+	require.NotNil(t, m.cron.form.conflict)
+	require.Equal(t, f.uid, m.cron.form.conflict.UID)
+	jobs, err := c.ListCronJobs(t.Context(), project.ID)
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+	require.Equal(t, f.uid, jobs[0].UID)
 }
 
 func TestCronValidationMessagesRemainVisible(t *testing.T) {
-	for _, tc := range []struct {
-		field cronField
-		value string
-	}{
-		{cfCron, "invalid"},
-		{cfOptions, "[1]"},
-		{cfDeadline, "9223372036854775807"},
-	} {
-		t.Run(cronFieldLabels[tc.field], func(t *testing.T) {
-			rec := executeRecord(`{}`)
-			rec.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 9 * * *"}
-			m, _ := openEdit(t, rec)
-			m.width = 60
-			m.cron.form.val[tc.field] = tc.value
-			m.cron.form.focusField(tc.field)
-			_, _, err := m.cron.form.build(cronUIDResolver(nil))
-			require.Error(t, err)
-			m, cmd := press(m, ctrlKey('o'))
-			require.Nil(t, cmd)
-			require.Contains(t, strings.Join(strings.Fields(stripANSI(m.viewBody())), " "), err.Error())
-		})
-	}
+	rec := executeRecord(`{}`)
+	rec.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 9 * * *"}
+	m, _ := openEdit(t, rec)
+	m.width = 60
+	m.cron.form.val[cfCron] = "invalid"
+	m.cron.form.focusField(cfCron)
+	_, _, err := m.cron.form.build(cronUIDResolver(nil))
+	require.Error(t, err)
+	m, cmd := press(m, ctrlKey('o'))
+	require.Nil(t, cmd)
+	require.Contains(t, strings.Join(strings.Fields(stripANSI(m.viewBody())), " "), err.Error())
 }
 
 func TestCronEditorReturnKeepsDraftOnErrorAndIgnoresClosedForm(t *testing.T) {

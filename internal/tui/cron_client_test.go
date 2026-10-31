@@ -1,13 +1,11 @@
 package tui
 
 import (
-	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	kataapi "go.kenn.io/kata/internal/api"
-	"go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -35,7 +33,7 @@ func TestCronClientReadsStoredRecords(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 201, workflow.HTTPResponse.StatusCode, string(workflow.Body))
 	var w struct {
-		Workflow kataapi.CronWorkflow `json:"workflow"`
+		Workflow api.CronWorkflow `json:"workflow"`
 	}
 	require.NoError(t, json.Unmarshal(workflow.Body, &w))
 	job, err := client.CreateCronJobWithResponse(ctx, &generated.CreateCronJobRequestOptions{
@@ -54,7 +52,7 @@ func TestCronClientReadsStoredRecords(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 201, job.HTTPResponse.StatusCode, string(job.Body))
 	var j struct {
-		Job kataapi.CronJob `json:"job"`
+		Job api.CronJob `json:"job"`
 	}
 	require.NoError(t, json.Unmarshal(job.Body, &j))
 	run, err := client.ObserveCronRunWithResponse(ctx, &generated.ObserveCronRunRequestOptions{
@@ -84,17 +82,6 @@ func TestCronClientReadsStoredRecords(t *testing.T) {
 	require.Equal(t, project.ID, runs[0].ProjectID)
 }
 
-func manualExecuteJob(options string) cron.JobDefinition {
-	return cron.JobDefinition{
-		Version: 1, Kind: "job", Enabled: true,
-		Trigger: cron.Trigger{Kind: "manual"},
-		Action:  cron.Action{Kind: "execute", Prompt: "Line one\nLine two"},
-		Issue:   &cron.IssuePolicy{Kind: "per-run", Title: "Digest", ScheduledOffsetSeconds: new(int64(3600))},
-		Overlap: "forbid", Catchup: "latest",
-		Options: jsontext.Value(options),
-	}
-}
-
 func TestCronClientWriteGuardsEdits(t *testing.T) {
 	env := testenv.New(t)
 	c := NewClient(env.URL, env.HTTP)
@@ -103,17 +90,18 @@ func TestCronClientWriteGuardsEdits(t *testing.T) {
 	ctx := t.Context()
 	const uid = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 
-	require.NoError(t, c.PutCronJob(ctx, project.ID, uid, kataapi.PutCronJobBody{Name: "Digest", Actor: "alice", Definition: kataapi.CronJobDefinitionFrom(manualExecuteJob(`{}`))}))
+	require.NoError(t, c.PutCronJob(ctx, project.ID, uid, api.PutCronJobBody{Name: "Digest", Actor: "alice", Definition: api.CronJobDefinitionFrom(manualExecuteJob(`{}`))}))
 	shown, err := c.ShowCronJob(ctx, project.ID, uid)
 	require.NoError(t, err)
 
 	shown.Definition.Enabled = false
-	err = c.PutCronJob(ctx, project.ID, uid, kataapi.PutCronJobBody{Name: "Digest", Actor: "alice", Definition: kataapi.CronJobDefinitionFrom(shown.Definition), ExpectedEventUID: "01ARZ3NDEKTSV4RRFFQ69G5FB9"})
+	err = c.PutCronJob(ctx, project.ID, uid, api.PutCronJobBody{Name: "Digest", Actor: "alice", Definition: api.CronJobDefinitionFrom(shown.Definition), ExpectedEventUID: "01ARZ3NDEKTSV4RRFFQ69G5FB9"})
 	var apiErr *APIError
 	require.ErrorAs(t, err, &apiErr)
+	require.Equal(t, "cron_conflict", apiErr.Code)
 	require.Equal(t, 409, apiErr.Status)
 
-	require.NoError(t, c.PutCronJob(ctx, project.ID, uid, kataapi.PutCronJobBody{Name: "Digest", Actor: "alice", Definition: kataapi.CronJobDefinitionFrom(shown.Definition), ExpectedEventUID: shown.DefinitionEventUID}))
+	require.NoError(t, c.PutCronJob(ctx, project.ID, uid, api.PutCronJobBody{Name: "Digest", Actor: "alice", Definition: api.CronJobDefinitionFrom(shown.Definition), ExpectedEventUID: shown.DefinitionEventUID}))
 	updated, err := c.ShowCronJob(ctx, project.ID, uid)
 	require.NoError(t, err)
 	require.False(t, updated.Definition.Enabled)
