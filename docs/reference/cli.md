@@ -1893,10 +1893,11 @@ position; `c` clears the selected request
 Press `u` in the issue list or detail view to undo the latest eligible issue
 edit from this TUI session. Repeated presses walk back through up to 20 edits,
 including close, reopen, owner, priority, label, body, dates, and newly added
-parent, blocker, or related links. Undo follows the recorded issue across navigation
-and projects; it does not target whichever row is currently selected. It makes
-a new attributed change, so the original audit event remains. Undoing a reopen
-may open the normal completion form when the daemon requires evidence.
+parent, blocker, or related links. Undo follows the recorded issue across
+navigation and projects; it does not target whichever row is currently
+selected. It makes a new attributed change, so the original audit event
+remains. Undoing a reopen may open the normal completion form when the daemon
+requires evidence.
 There is no redo; repeat the action manually if you undo by mistake. Issue edits
 run one at a time; quick successive edits wait for the current edit to finish.
 
