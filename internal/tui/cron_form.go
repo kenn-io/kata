@@ -895,7 +895,9 @@ func (f *cronForm) rebase(current CronJobRecord) (*cronForm, error) {
 	}
 	next.focusField(f.focus)
 	next.validate()
-	next.general = "Applied to the current job; review it, then save."
+	if next.general == "" {
+		next.general = "Applied to the current job; review it, then save."
+	}
 	var lost []string
 	for field := range cfCount {
 		if f.val[field] != f.snapshot[field] && !next.shown(field) {

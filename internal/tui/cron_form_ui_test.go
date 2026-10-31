@@ -274,8 +274,7 @@ func TestCronArchiveFromDetailReturnsToTheList(t *testing.T) {
 	m = settle(t, m, cmd)
 	require.Len(t, api.archives, 1)
 	require.Empty(t, m.cron.stack, "the archived job's page would be empty, so the list is shown")
-	require.Contains(t, m.toast.text, "a")
-	require.Contains(t, m.toast.text, "restore")
+	require.Equal(t, "Archived Daily summary; press a, then u to restore it", m.toast.text)
 }
 
 func TestCronEscAsksBeforeDiscardingADirtyDraft(t *testing.T) {
@@ -464,4 +463,57 @@ func TestCronEditShowsTheReasonWhenTheJobCannotBeRead(t *testing.T) {
 	m = settle(t, m, cmd)
 	require.Nil(t, m.cron.form)
 	require.Contains(t, m.toast.text, "Could not open the job")
+}
+
+func TestCronLateArchiveReplyClosesOnlyItsOwnPage(t *testing.T) {
+	m, _ := cronWriteFixture(t)
+	second := m.cron.data.jobs[0]
+	second.UID, second.Name, second.ID = "01ARZ3NDEKTSV4RRFFQ69G5FB0", "Weekly digest", 5
+	m.cron.data.jobs = append(m.cron.data.jobs, second)
+	m = sendKey(m, tea.KeyEnter)
+	m, _ = press(m, keyRune('d'))
+	m, cmd := press(m, keyRune('y'))
+	m = sendRune(m, 'h')
+	m = sendRune(m, 'j')
+	m = sendKey(m, tea.KeyEnter)
+	require.Equal(t, second.UID, m.cron.stack[0].ref.uid)
+	m = settle(t, m, cmd)
+	require.Len(t, m.cron.stack, 1, "the reply is about the first job; the second job's page stays")
+	require.Equal(t, second.UID, m.cron.stack[0].ref.uid)
+}
+
+func TestCronArchiveHintOnlyWhereTheKeysWork(t *testing.T) {
+	m, _ := cronWriteFixture(t)
+	m = sendRune(m, '4')
+	m = sendKey(m, tea.KeyEnter)
+	_, _, lines := cronScreen(m)
+	for i, l := range lines {
+		if l.target.kind == cronJobs {
+			for range i {
+				m = sendRune(m, 'j')
+			}
+			break
+		}
+	}
+	m = sendKey(m, tea.KeyEnter)
+	m, _ = press(m, keyRune('d'))
+	m, cmd := press(m, keyRune('y'))
+	m = settle(t, m, cmd)
+	require.Equal(t, "Archived Daily summary", m.toast.text, "a does nothing on the workflow below")
+}
+
+func TestCronRetriedCreateOfAnArchivedJobSaysSo(t *testing.T) {
+	m, api := cronWriteFixture(t)
+	m, _ = press(m, keyRune('n'))
+	f := m.cron.form
+	f.val[cfName], f.val[cfParent], f.val[cfTitle] = "Weekly report", "abc4", "Report"
+	name, def, err := f.build(cronUIDResolver(map[string]string{"abc4": cronTestIssue}))
+	require.NoError(t, err)
+	api.shown = CronJobRecord{UID: f.uid, Name: name, Definition: def, Archived: true}
+	api.putErrs = []error{&APIError{Status: http.StatusConflict, Code: "cron_conflict"}}
+	m, cmd := press(m, ctrlKey('o'))
+	m = settle(t, m, cmd)
+	require.NotNil(t, m.cron.form)
+	require.Nil(t, m.cron.form.conflict)
+	require.Contains(t, m.cron.form.general, "restore it with u")
 }

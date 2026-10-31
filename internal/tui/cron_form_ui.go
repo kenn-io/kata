@@ -140,7 +140,8 @@ type cronSavedMsg struct {
 	fieldErr    *cronFieldError
 	err         error
 	fromForm    bool
-	closeDetail bool
+	closeUID    string // the job whose page this reply closes
+	archived    bool
 }
 
 func (m Model) cronOpenEdit(uid string, seq uint64) tea.Cmd {
@@ -209,16 +210,16 @@ func (m Model) cronTogglePause(job generated.CronJob) tea.Cmd {
 }
 
 func (m Model) cronLifecycle(c cronConfirm) tea.Cmd {
-	api, pid, actor, fromDetail := m.api, m.scope.projectID, m.list.actor, len(m.cron.stack) > 0
+	api, pid, actor := m.api, m.scope.projectID, m.list.actor
 	conn, scope := m.connGen, m.scopeGen
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
 		defer cancel()
-		call, notice := api.ArchiveCronJob, "Archived "+c.name+"; press a, then u to restore it"
+		call, notice := api.ArchiveCronJob, "Archived "+c.name
 		if c.restore {
 			call, notice = api.RestoreCronJob, "Restored "+c.name
 		}
-		return cronSavedMsg{conn: conn, scope: scope, notice: notice, err: call(ctx, pid, c.uid, c.eventID, actor), closeDetail: fromDetail}
+		return cronSavedMsg{conn: conn, scope: scope, notice: notice, err: call(ctx, pid, c.uid, c.eventID, actor), closeUID: c.uid, archived: !c.restore}
 	}
 }
 
@@ -263,6 +264,9 @@ func (m Model) cronSaveCmd(f cronForm) tea.Cmd {
 				if current, readErr := api.ShowCronJob(ctx, pid, f.uid); readErr == nil {
 					// A create whose reply was lost conflicts with itself on retry.
 					if f.create && current.Name == name && cronSameDefinition(current.Definition, def) {
+						if current.Archived {
+							return fail(errors.New("this job was created and then archived; restore it with u"))
+						}
 						return cronSavedMsg{conn: conn, scope: scope, notice: notice, fromForm: true}
 					}
 					return cronSavedMsg{conn: conn, scope: scope, conflict: &current, err: err, fromForm: true}
@@ -320,9 +324,12 @@ func (m Model) cronSaved(msg cronSavedMsg) (Model, tea.Cmd) {
 		m.cron.form = nil
 	}
 	m.cron.events++
-	if msg.closeDetail && len(m.cron.stack) > 0 {
+	if n := len(m.cron.stack); n > 0 && msg.closeUID != "" && m.cron.stack[n-1].ref == (cronRef{cronJobs, msg.closeUID}) {
 		// The job leaves the list this page reads from, so the page would empty.
-		m.cron.stack = m.cron.stack[:len(m.cron.stack)-1]
+		m.cron.stack = m.cron.stack[:n-1]
+	}
+	if msg.archived && len(m.cron.stack) == 0 && m.cron.tab == cronJobs {
+		msg.notice += "; press a, then u to restore it"
 	}
 	return m.cronToast(msg.notice, toastSuccess)
 }
