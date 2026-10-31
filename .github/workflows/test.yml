@@ -37,11 +37,16 @@ jobs:
         with:
           bun-version: 1.4.4
 
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+
       - name: Install frozen web dependencies
-        run: make web-install
+        run: kit-retry 3 5 make web-install
+
+      - name: Audit web dependencies
+        run: kit-retry 3 10 make web-audit
 
       - name: Run shared UI and web static checks
-        run: make web-check web-audit web-test
+        run: make web-check web-test
 
   web-browser:
     name: Web browser tests
@@ -70,8 +75,10 @@ jobs:
         with:
           bun-version: 1.4.4
 
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+
       - name: Install frozen web dependencies
-        run: make web-install
+        run: kit-retry 3 5 make web-install
 
       - name: Start browser server
         id: browser-server
@@ -89,13 +96,7 @@ jobs:
             exit 1
           fi
           cli=$(node -p "require.resolve('@playwright/test/cli')")
-          for attempt in {1..3}; do
-            if docker pull "$PLAYWRIGHT_IMAGE"; then
-              break
-            fi
-            if [ "$attempt" -eq 3 ]; then exit 1; fi
-            sleep 5
-          done
+          kit-retry 3 5 docker pull "$PLAYWRIGHT_IMAGE"
           container_id=$(docker run --detach --interactive --init --network host --ipc host \
             --volume "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE:ro" \
             --workdir "$GITHUB_WORKSPACE/web" \
@@ -106,6 +107,7 @@ jobs:
               echo 'Browser server container exited before becoming ready.' >&2
               exit 1
             fi
+            # workflowretry: allow Poll the local service for readiness.
             if curl --fail --silent --output /dev/null --max-time 2 http://127.0.0.1:3000/json; then
               exit 0
             fi
@@ -169,11 +171,16 @@ jobs:
         with:
           bun-version: 1.4.4
 
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+
       - name: Install frozen web dependencies
-        run: make web-install
+        run: kit-retry 3 5 make web-install
 
       - name: Check Huma API conventions
-        run: go run go.kenn.io/kit/cmd/huma-check@b1f14b1ca30b680f023dff9467bde0eb70768c68 ./...
+        run: |
+          huma=go.kenn.io/kit/cmd/huma-check@b1f14b1ca30b680f023dff9467bde0eb70768c68
+          kit-retry 3 5 go run -n "$huma"
+          go run "$huma" ./...
 
       - name: Run tests
         env:
@@ -206,12 +213,14 @@ jobs:
         with:
           node-version: 26.12.1
 
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+
       # Exercise the declared minimum native APIs without running package scripts.
       - name: Install published native APIs
         env:
           KATA_NATIVE_PLUGIN_SDK_ROOT: ${{ runner.temp }}/native-agent-sdk
         run: |
-          npm install --prefix "$KATA_NATIVE_PLUGIN_SDK_ROOT" --ignore-scripts --no-audit --no-fund \
+          kit-retry 3 5 npm install --prefix "$KATA_NATIVE_PLUGIN_SDK_ROOT" --ignore-scripts --no-audit --no-fund \
             typescript@7.0.2 @types/node@26.6.4 \
             @earendil-works/pi-coding-agent@0.99.1 \
             @ampcode/plugin@0.0.0-20260526003443-g9106a62 \
@@ -268,6 +277,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+
+      - name: Fetch OpenAPI client generator
+        run: kit-retry 3 5 go run -n github.com/doordash-oss/oapi-codegen-dd/v3/cmd/oapi-codegen@v3.76.5
+
       - name: Check generated OpenAPI artifacts
         run: make api-check
 
@@ -320,8 +334,10 @@ jobs:
         with:
           bun-version: 1.4.4
 
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+
       - name: Install frozen web dependencies
-        run: make web-install
+        run: kit-retry 3 5 make web-install
 
       # Service containers cannot take server flags, so turn off durability
       # with ALTER SYSTEM; all three settings apply on reload. TCP skips the
@@ -465,6 +481,14 @@ jobs:
         with:
           cache: true
           install: true
+
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+
+      - name: Fetch Go checkers
+        run: GOFLAGS="${GOFLAGS:+$GOFLAGS }-n" kit-retry 3 5 make lint-workflow-retries
+
+      - name: Build custom Go linter
+        run: kit-retry 3 5 make "$PWD/.cache/golangci-lint/custom-gcl"
 
       - name: Run golangci-lint
         run: make lint
