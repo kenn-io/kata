@@ -17,7 +17,7 @@ func cronTestUIDs(string) string { return cronTestIssue }
 
 func newNativeForm(t *testing.T) *cronForm {
 	t.Helper()
-	f, err := newCronForm(nil, nil)
+	f, err := newCronForm(nil)
 	require.NoError(t, err)
 	f.val[cfName], f.val[cfParent], f.val[cfTitle] = "Weekly report", cronTestParent, "Report"
 	return f
@@ -63,7 +63,7 @@ func TestCronFormRecurringCreateHonoursEnabled(t *testing.T) {
 }
 
 func TestCronFormPolicySwitchDropsOffsets(t *testing.T) {
-	f, err := cronFormFor(executeRecord(`{}`), nil, nil)
+	f, err := cronFormFor(executeRecord(`{}`), nil)
 	require.NoError(t, err)
 	_, def, err := f.build(cronTestUIDs)
 	require.NoError(t, err)
@@ -75,36 +75,67 @@ func TestCronFormPolicySwitchDropsOffsets(t *testing.T) {
 	require.Equal(t, cron.IssuePolicy{Kind: "existing", UID: cronTestIssue}, *def.Issue)
 }
 
-func TestCronFormNameUniquenessSkipsUnchangedEdits(t *testing.T) {
-	taken := map[string]bool{"digest": true}
-	f, err := cronFormFor(executeRecord(`{}`), nil, taken)
+func TestCronFormEditSavesWhenAnotherJobSharesTheName(t *testing.T) {
+	m, api := cronWriteFixture(t)
+	twin := m.cron.data.jobs[0]
+	twin.UID, twin.ID = "01ARZ3NDEKTSV4RRFFQ69G5FAZ", 9
+	m.cron.data.jobs = append(m.cron.data.jobs, twin)
+	api.shown = executeRecord(`{}`)
+	api.shown.Name = twin.Name
+	api.shown.UID = m.cron.data.jobs[0].UID
+	m, cmd := press(m, keyRune('e'))
+	m = settle(t, m, cmd)
+	m.cron.form.val[cfTitle] = "Edited"
+	m, cmd = press(m, ctrlKey('o'))
+	m = settle(t, m, cmd)
+	require.Nil(t, m.cron.form)
+	require.Len(t, api.puts, 1)
+	require.Equal(t, twin.Name, api.puts[0].write.Name)
+}
+
+func TestCronFormExecuteDateTriggerKeepsTriggerAndPolicyIssuesApart(t *testing.T) {
+	const triggerIssue, runIssue = "01ARZ3NDEKTSV4RRFFQ69G5FB5", "01ARZ3NDEKTSV4RRFFQ69G5FB6"
+	rec := executeRecord(`{}`)
+	rec.Definition.Trigger = cron.Trigger{Kind: "issue-scheduled", IssueUID: triggerIssue}
+	rec.Definition.Issue = &cron.IssuePolicy{Kind: "existing", UID: runIssue}
+	f, err := cronFormFor(rec, nil)
 	require.NoError(t, err)
-	f.val[cfMessage] = "" // an edit elsewhere
-	f.val[cfTitle] = "Renamed issue"
-	_, _, err = f.build(cronTestUIDs)
-	require.NoError(t, err, "the unchanged name is not a duplicate of itself")
-
-	f.val[cfName] = "Digest"
-	_, _, err = f.build(cronTestUIDs)
-	require.NoError(t, err, "a name equal to the opened one is unchanged")
-
-	f.val[cfName] = "Weekly"
-	taken["weekly"] = true
-	_, _, err = f.build(cronTestUIDs)
-	var fe *cronFieldError
-	require.ErrorAs(t, err, &fe)
-	require.Equal(t, cfName, fe.field)
-
-	created, err := newCronForm(nil, taken)
+	f.val[cfName] = "Renamed"
+	_, def, err := f.build(cronUIDResolver(nil))
 	require.NoError(t, err)
-	created.val[cfName] = "Digest"
-	_, _, err = created.build(cronTestUIDs)
-	require.ErrorAs(t, err, &fe)
-	require.Equal(t, cfName, fe.field, "a new job may not reuse a name")
+	require.Equal(t, triggerIssue, def.Trigger.IssueUID)
+	require.Equal(t, runIssue, def.Issue.UID)
+}
+
+func TestCronFormPlacesCronMessagesOnTheBlankField(t *testing.T) {
+	f := newNativeForm(t)
+	f.val[cfParent] = ""
+	f.validate()
+	require.NotNil(t, f.err)
+	require.Equal(t, cfParent, f.err.field, "the title is filled; the blank parent is blamed")
+
+	f.val[cfParent], f.val[cfTitle] = "abc4", ""
+	f.validate()
+	require.NotNil(t, f.err)
+	require.Equal(t, cfTitle, f.err.field)
+
+	f.kind, f.trigger = "notify", "manual"
+	f.val[cfMessage], f.val[cfRecipient], f.val[cfIssue] = "hi", "alice", ""
+	f.validate()
+	require.NotNil(t, f.err)
+	require.Equal(t, cfIssue, f.err.field)
+}
+
+func TestCronFormLeavesRulesToCron(t *testing.T) {
+	f := newNativeForm(t)
+	f.step(cfTrigger, 1)
+	f.val[cfInterval] = "30"
+	_, _, err := f.build(cronTestUIDs)
+	require.ErrorIs(t, err, cron.ErrInvalid, "the 60 second floor is cron's rule, reported as cron words it")
 }
 
 func TestCronFormLocksNativeParentAndAction(t *testing.T) {
-	f, err := cronFormFor(nativeRecord(), nil, nil)
+	f, err := cronFormFor(nativeRecord(), nil)
 	require.NoError(t, err)
 	require.True(t, f.locked(cfParent))
 	require.Len(t, f.kinds(), 1, "a native job cannot become another kind")
@@ -129,7 +160,7 @@ func TestCronFormLocksNativeParentAndAction(t *testing.T) {
 }
 
 func TestCronFormAdapterJobsCannotBecomeNative(t *testing.T) {
-	f, err := cronFormFor(executeRecord(`{}`), nil, nil)
+	f, err := cronFormFor(executeRecord(`{}`), nil)
 	require.NoError(t, err)
 	for _, k := range f.kinds() {
 		require.NotEqual(t, cronRecurringID, k.id)
@@ -137,7 +168,7 @@ func TestCronFormAdapterJobsCannotBecomeNative(t *testing.T) {
 }
 
 func TestCronFormNotifyIssueTargetIsExisting(t *testing.T) {
-	f, err := newCronForm(nil, nil)
+	f, err := newCronForm(nil)
 	require.NoError(t, err)
 	f.kind, f.trigger = "notify", "manual"
 	f.val[cfName], f.val[cfIssue], f.val[cfMessage] = "Ping", cronTestIssue, "hello"
@@ -162,7 +193,7 @@ func TestCronFormNotifyIssueTargetIsExisting(t *testing.T) {
 
 func TestCronFormOptionsAreKeptVerbatim(t *testing.T) {
 	const options = `{"future":{"keep":[1,2]},"big":12345678901234567890123,"exact":1.10}`
-	f, err := cronFormFor(executeRecord(options), nil, nil)
+	f, err := cronFormFor(executeRecord(options), nil)
 	require.NoError(t, err)
 	for range 40 {
 		f.move(1) // tabbing through every field must not rewrite any of them

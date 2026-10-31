@@ -70,7 +70,7 @@ func (m Model) routeCronJobKey(key string, lines []cronLine, cursor int) (Model,
 		if m.cron.archived && len(m.cron.stack) == 0 {
 			return m, nil, false
 		}
-		f, err := newCronForm(m.cronWorkflowChoices(), m.cronTakenNames(""))
+		f, err := newCronForm(m.cronWorkflowChoices())
 		if err != nil {
 			m, cmd := m.cronToast("Could not start a job: "+err.Error(), toastError)
 			return m, cmd, true
@@ -119,17 +119,6 @@ func (m Model) cronWorkflowChoices() []cronChoice {
 	return out
 }
 
-// cronTakenNames are the names of the project's other live jobs.
-func (m Model) cronTakenNames(except string) map[string]bool {
-	taken := map[string]bool{}
-	for _, j := range m.cron.data.jobs {
-		if j.UID != except {
-			taken[strings.ToLower(strings.TrimSpace(j.Name))] = true
-		}
-	}
-	return taken
-}
-
 type cronEditOpenedMsg struct {
 	conn, scope uint64
 	record      CronJobRecord
@@ -164,7 +153,7 @@ func (m Model) cronEditOpened(msg cronEditOpenedMsg) (Model, tea.Cmd) {
 	if msg.err != nil {
 		return m.cronToast("Could not open the job: "+cronWriteMessage(msg.err), toastError)
 	}
-	f, err := cronFormFor(msg.record, m.cronWorkflowChoices(), m.cronTakenNames(msg.record.UID))
+	f, err := cronFormFor(msg.record, m.cronWorkflowChoices())
 	if err != nil {
 		return m.cronToast(err.Error(), toastError)
 	}
@@ -341,17 +330,14 @@ func (m Model) routeCronFormKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	if f.conflict != nil {
 		return m.routeCronConflictKey(key)
 	}
-	if key != "esc" {
-		f.discard = false
-	}
 	switch key {
 	case "esc":
-		if f.dirty() && !f.discard {
-			f.discard, f.general = true, "unsaved changes: press esc again to discard them"
+		if f.dirty() {
+			m.modal = modalDiscardCronJob
 			return m, nil
 		}
 		m.cron.form = nil
-	case "ctrl+s":
+	case "ctrl+o", "ctrl+s":
 		f.validate()
 		if f.err != nil || f.general != "" {
 			if f.err != nil {
@@ -396,11 +382,19 @@ func (m Model) routeCronConflictKey(key string) (Model, tea.Cmd) {
 		if current.Archived {
 			return m, nil
 		}
-		f.expected, f.conflict, f.saving = current.DefinitionEventUID, nil, true
-		return m, m.cronSaveCmd(*f)
+		next, err := f.rebase(current)
+		if err != nil {
+			f.general = err.Error()
+			return m, nil
+		}
+		m.cron.form = next
+		if next.err != nil || next.general != "" {
+			return m, nil
+		}
+		next.saving = true
+		return m, m.cronSaveCmd(*next)
 	case "t":
-		taken := f.taken
-		next, err := cronFormFor(current, f.workflows, taken)
+		next, err := cronFormFor(current, f.workflows)
 		if err != nil {
 			f.general = err.Error()
 			return m, nil
@@ -424,7 +418,7 @@ func cronFormHelpRows(f *cronForm) []helplayout.HelpItem {
 	return []helplayout.HelpItem{
 		{Key: "tab/↑↓", Description: "field"},
 		{Key: "←/→", Description: "choose"},
-		{Key: "ctrl+s", Description: "save"},
+		{Key: "ctrl+o", Description: "save"},
 		{Key: "esc", Description: "cancel"},
 	}
 }
@@ -439,8 +433,11 @@ func cronFieldLabel(f *cronForm, field cronField) string {
 			return "Notify about issue"
 		}
 		return "Run issue"
-	case cfCatchup:
-		return "Catch up"
+	case cfReport:
+		if f.kind == cronNotifyKind.id {
+			return "Notify about issue"
+		}
+		return "Run issue"
 	}
 	return cronFieldLabels[field]
 }

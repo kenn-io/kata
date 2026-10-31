@@ -258,7 +258,7 @@ func modalHelpRows(kind modalKind) [][]helplayout.HelpItem {
 			{Key: "y", Description: "confirm"},
 			{Key: "n/esc", Description: "cancel"},
 		}}
-	case modalDiscardComment, modalDiscardNewIssue:
+	case modalDiscardComment, modalDiscardNewIssue, modalDiscardCronJob:
 		return [][]helplayout.HelpItem{{
 			{Key: "y", Description: "discard"},
 			{Key: "n/esc", Description: "keep editing"},

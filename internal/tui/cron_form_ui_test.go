@@ -182,21 +182,42 @@ func TestCronEditConflictKeepsDraftAndAppliesToCurrent(t *testing.T) {
 	require.Len(t, api.puts, 2)
 	require.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FB8", api.puts[1].write.ExpectedEventUID, "the draft is applied to the current definition")
 	require.Equal(t, "My edit", api.puts[1].write.Definition.Issue.Title)
+	require.False(t, api.puts[1].write.Definition.Enabled, "only the user's own changes are applied; the other writer's pause stays")
 }
 
-func TestCronEscNeedsConfirmationWhenDirty(t *testing.T) {
+func TestCronEscAsksBeforeDiscardingADirtyDraft(t *testing.T) {
 	m, _ := cronWriteFixture(t)
 	m, _ = press(m, keyRune('n'))
 	m, _ = press(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	require.Nil(t, m.cron.form, "an untouched form closes at once")
 
 	m, _ = press(m, keyRune('n'))
-	m, _ = press(m, keyRune('x'))
-	m, _ = press(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	m, _ = updateModel(m, keyRune('x'))
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	require.NotNil(t, m.cron.form)
-	require.Contains(t, m.cron.form.general, "esc again")
-	m, _ = press(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	require.Equal(t, modalDiscardCronJob, m.modal)
+	require.Contains(t, stripANSI(m.View().Content), "Discard job draft?")
+	m, _ = updateModel(m, keyRune('n'))
+	require.NotNil(t, m.cron.form, "n keeps editing")
+	require.Equal(t, modalNone, m.modal)
+	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	m, _ = updateModel(m, keyRune('y'))
 	require.Nil(t, m.cron.form)
+}
+
+func TestCronFormSavesWithCtrlOAndCtrlS(t *testing.T) {
+	for _, key := range []tea.KeyPressMsg{ctrlKey('o'), ctrlKey('s')} {
+		m, api := cronWriteFixture(t)
+		m, _ = press(m, keyRune('n'))
+		m.cron.form.val[cfName], m.cron.form.val[cfParent], m.cron.form.val[cfTitle] = "Weekly", "abc4", "Report"
+		m, cmd := press(m, key)
+		m = settle(t, m, cmd)
+		require.Nil(t, m.cron.form, key.String())
+		require.Len(t, api.puts, 1)
+	}
+	m, _ := cronWriteFixture(t)
+	m, _ = press(m, keyRune('n'))
+	require.Contains(t, stripANSI(m.viewBody()), "ctrl+o")
 }
 
 func TestCronPauseResumeIsGuarded(t *testing.T) {

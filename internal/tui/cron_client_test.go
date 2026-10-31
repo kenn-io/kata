@@ -142,3 +142,10 @@ func TestCronClientWriteKeepsOptionsExactAndGuardsEdits(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, live, 1)
 }
+
+func TestCronJobRecordRefusesDefinitionsItWouldDrop(t *testing.T) {
+	body := `{"job":{"uid":"01ARZ3NDEKTSV4RRFFQ69G5FAV","name":"Digest","definition_event_uid":"01ARZ3NDEKTSV4RRFFQ69G5FB2","definition":{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"manual"},"action":{"kind":"execute","prompt":"x"},"issue":{"kind":"per-run","title":"t"},"overlap":"forbid","catchup":"latest","options":{"free":1},"newer_member":{"a":1}}}}`
+	_, err := decodeCronJobRecord([]byte(body))
+	require.ErrorContains(t, err, "newer_member")
+	require.ErrorContains(t, err, "newer kata")
+}

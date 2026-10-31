@@ -57,7 +57,7 @@ var cronFieldLabels = [cfCount]string{
 	cfCron: "Cron", cfZone: "Time zone", cfInterval: "Interval", cfAt: "At", cfIssue: "Issue", cfLead: "Lead",
 	cfParent: "Parent issue", cfTitle: "Issue title", cfBody: "Issue body", cfPrompt: "Prompt", cfWorkflow: "Workflow",
 	cfPolicy: "Issue policy", cfScheduled: "Scheduled offset", cfDeadline: "Deadline offset",
-	cfRecipient: "Recipient", cfMessage: "Message", cfReport: "Notify about issue",
+	cfRecipient: "Recipient", cfMessage: "Message", cfReport: "Issue",
 	cfOverlap: "Overlap", cfCatchup: "Catch up", cfGrace: "Grace", cfTimeout: "Timeout",
 	cfCheckout: "Checkout key", cfSecrets: "Secrets", cfOptions: "Options",
 }
@@ -83,9 +83,6 @@ var (
 
 // cronRecurringID names the native recurring-child kind.
 const cronRecurringID = "recurring"
-
-// cronMinNativeInterval is the shortest interval the daemon delivers a native job at.
-const cronMinNativeInterval = 60
 
 // cronValidationUID stands in for an issue ref that is not resolved yet, so
 // the shape of the definition can be validated while the form is open.
@@ -145,16 +142,9 @@ var cronRecurringKind = cronJobKind{
 		def.Overlap, def.Action = "allow", cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}
 		parent := f.openedParent()
 		if f.create {
-			if strings.TrimSpace(f.val[cfParent]) == "" {
-				return def, fieldErr(cfParent, "name the issue the children hang from")
-			}
 			parent = uidOf(f.val[cfParent])
 		}
-		title := strings.TrimSpace(f.val[cfTitle])
-		if title == "" {
-			return def, fieldErr(cfTitle, "must not be blank")
-		}
-		def.Issue = &cron.IssuePolicy{Kind: "per-run", ParentUID: parent, Title: title, Body: strings.TrimSpace(f.val[cfBody])}
+		def.Issue = &cron.IssuePolicy{Kind: "per-run", ParentUID: parent, Title: strings.TrimSpace(f.val[cfTitle]), Body: strings.TrimSpace(f.val[cfBody])}
 		f.applyNotification(&def)
 		return def, f.applyCatchup(&def)
 	},
@@ -175,7 +165,7 @@ func executeKind(id, label string, workflow bool) cronJobKind {
 				return !workflow
 			case cfWorkflow:
 				return workflow
-			case cfIssue:
+			case cfReport:
 				return f.val[cfPolicy] == "existing"
 			case cfTitle, cfBody, cfScheduled, cfDeadline:
 				return f.val[cfPolicy] == "per-run"
@@ -195,7 +185,7 @@ func executeKind(id, label string, workflow bool) cronJobKind {
 			}
 			f.val[cfPolicy] = p.Kind
 			if p.Kind == "existing" {
-				f.val[cfIssue] = cmpOr(f.val[cfIssue], p.UID)
+				f.val[cfReport] = p.UID
 				return
 			}
 			f.val[cfTitle], f.val[cfBody] = p.Title, p.Body
@@ -212,12 +202,9 @@ func executeKind(id, label string, workflow bool) cronJobKind {
 			def := f.base()
 			def.Overlap, def.Action = f.val[cfOverlap], cron.Action{Kind: "execute"}
 			if workflow {
-				if f.val[cfWorkflow] == "" {
-					return def, fieldErr(cfWorkflow, "pick the workflow to run")
-				}
 				def.Action.WorkflowUID = f.val[cfWorkflow]
-			} else if def.Action.Prompt = strings.TrimSpace(f.val[cfPrompt]); def.Action.Prompt == "" {
-				return def, fieldErr(cfPrompt, "must not be blank")
+			} else {
+				def.Action.Prompt = strings.TrimSpace(f.val[cfPrompt])
 			}
 			def.CheckoutKey = strings.TrimSpace(f.val[cfCheckout])
 			secrets, err := cronParseSecrets(f.val[cfSecrets])
@@ -228,7 +215,7 @@ func executeKind(id, label string, workflow bool) cronJobKind {
 			if err := f.applyOptions(&def); err != nil {
 				return def, err
 			}
-			if def.TimeoutSeconds, err = cronSeconds(cfTimeout, f.val[cfTimeout], 0); err != nil {
+			if def.TimeoutSeconds, err = cronSeconds(cfTimeout, f.val[cfTimeout]); err != nil {
 				return def, err
 			}
 			if def.Issue, err = f.executePolicy(uidOf); err != nil {
@@ -266,12 +253,9 @@ var cronNotifyKind = cronJobKind{
 		def.Overlap, def.Action = "allow", cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}
 		f.applyNotification(&def)
 		switch {
-		case !cronIsDate(f.trigger):
-			if strings.TrimSpace(f.val[cfIssue]) == "" {
-				return def, fieldErr(cfIssue, "name the issue to notify about")
-			}
+		case !cronIsDate(f.trigger) && strings.TrimSpace(f.val[cfIssue]) != "":
 			def.Issue = &cron.IssuePolicy{Kind: "existing", UID: uidOf(f.val[cfIssue])}
-		case strings.TrimSpace(f.val[cfReport]) != "":
+		case cronIsDate(f.trigger) && strings.TrimSpace(f.val[cfReport]) != "":
 			def.Issue = &cron.IssuePolicy{Kind: "existing", UID: uidOf(f.val[cfReport])}
 		}
 		if err := f.applyOptions(&def); err != nil {
@@ -285,15 +269,7 @@ var cronCronTrigger = cronJobTrigger{
 	id: "cron", label: "cron expression", fields: []cronField{cfCron, cfZone},
 	load: func(f *cronForm, t cron.Trigger) { f.val[cfCron], f.val[cfZone] = t.Cron, cmpOr(t.Timezone, "UTC") },
 	build: func(f *cronForm) (cron.Trigger, error) {
-		expression := strings.TrimSpace(f.val[cfCron])
-		if expression == "" {
-			return cron.Trigger{}, fieldErr(cfCron, "enter 5 fields like 0 9 * * 1-5, or a descriptor like @daily")
-		}
-		zone := cmpOr(strings.TrimSpace(f.val[cfZone]), "UTC")
-		if _, err := time.LoadLocation(zone); err != nil || zone == "Local" {
-			return cron.Trigger{}, fieldErr(cfZone, "unknown time zone %q; use an IANA name like Europe/Berlin or UTC", zone)
-		}
-		return cron.Trigger{Kind: "cron", Cron: expression, Timezone: zone}, nil
+		return cron.Trigger{Kind: "cron", Cron: strings.TrimSpace(f.val[cfCron]), Timezone: cmpOr(strings.TrimSpace(f.val[cfZone]), "UTC")}, nil
 	},
 }
 
@@ -301,14 +277,8 @@ var cronIntervalTrigger = cronJobTrigger{
 	id: "interval", label: "interval", fields: []cronField{cfInterval},
 	load: func(f *cronForm, t cron.Trigger) { f.val[cfInterval] = strconv.FormatInt(t.IntervalSeconds, 10) },
 	build: func(f *cronForm) (cron.Trigger, error) {
-		seconds, err := cronSeconds(cfInterval, f.val[cfInterval], 1)
-		if err != nil {
-			return cron.Trigger{}, err
-		}
-		if seconds == 0 {
-			return cron.Trigger{}, fieldErr(cfInterval, "enter seconds, or a duration like 15m or 2h")
-		}
-		return cron.Trigger{Kind: "interval", IntervalSeconds: seconds}, nil
+		seconds, err := cronSeconds(cfInterval, f.val[cfInterval])
+		return cron.Trigger{Kind: "interval", IntervalSeconds: seconds}, err
 	},
 }
 
@@ -316,11 +286,7 @@ var cronOnceTrigger = cronJobTrigger{
 	id: "once", label: "once", fields: []cronField{cfAt},
 	load: func(f *cronForm, t cron.Trigger) { f.val[cfAt] = t.At },
 	build: func(f *cronForm) (cron.Trigger, error) {
-		at := strings.TrimSpace(f.val[cfAt])
-		if _, err := time.Parse(time.RFC3339, at); err != nil {
-			return cron.Trigger{}, fieldErr(cfAt, "enter an instant with its offset, like 2026-11-01T09:00:00+01:00 or 2026-11-01T08:00:00Z")
-		}
-		return cron.Trigger{Kind: "once", At: at}, nil
+		return cron.Trigger{Kind: "once", At: strings.TrimSpace(f.val[cfAt])}, nil
 	},
 }
 
@@ -345,14 +311,14 @@ var cronDeadlineTrigger = cronJobTrigger{
 		}
 	},
 	build: func(f *cronForm) (cron.Trigger, error) {
-		lead, err := cronSeconds(cfLead, f.val[cfLead], 0)
+		lead, err := cronSeconds(cfLead, f.val[cfLead])
 		return cron.Trigger{Kind: "issue-deadline", LeadSeconds: lead}, err
 	},
 }
 
 // cronSeconds reads an optional span as whole seconds: a number or a Go
-// duration. Blank is zero. Values below least are refused.
-func cronSeconds(field cronField, text string, least int64) (int64, error) {
+// duration. Blank is zero; what the number may be is cron's to say.
+func cronSeconds(field cronField, text string) (int64, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return 0, nil
@@ -364,9 +330,6 @@ func cronSeconds(field cronField, text string, least int64) (int64, error) {
 			return 0, fieldErr(field, "enter whole seconds, or a duration like 15m or 2h")
 		}
 		n = int64(d / time.Second)
-	}
-	if n < least {
-		return 0, fieldErr(field, "must be at least %d", least)
 	}
 	return n, nil
 }
@@ -427,10 +390,8 @@ type cronForm struct {
 	err        *cronFieldError
 	general    string
 	saving     bool
-	discard    bool
 	conflict   *CronJobRecord
 	workflows  []cronChoice
-	taken      map[string]bool
 }
 
 func (f *cronForm) kindDef() cronJobKind {
@@ -452,12 +413,12 @@ func (f *cronForm) triggerDef() cronJobTrigger {
 }
 
 // newCronForm is a form for a job that does not exist yet.
-func newCronForm(workflows []cronChoice, taken map[string]bool) (*cronForm, error) {
+func newCronForm(workflows []cronChoice) (*cronForm, error) {
 	minted, err := uid.New()
 	if err != nil {
 		return nil, err
 	}
-	f := &cronForm{uid: minted, create: true, kind: cronRecurringID, trigger: "cron", workflows: workflows, taken: taken}
+	f := &cronForm{uid: minted, create: true, kind: cronRecurringID, trigger: "cron", workflows: workflows}
 	f.val[cfEnabled], f.val[cfCron], f.val[cfZone], f.val[cfInterval] = "yes", "0 9 * * *", "UTC", "3600"
 	f.val[cfPolicy], f.val[cfOverlap], f.val[cfCatchup] = "per-run", "forbid", "latest"
 	f.val[cfWorkflow] = ""
@@ -467,8 +428,8 @@ func newCronForm(workflows []cronChoice, taken map[string]bool) (*cronForm, erro
 
 // cronFormFor is a form on an existing job. It reads the portable definition
 // that was returned by the daemon, so nothing is lost on a round trip.
-func cronFormFor(rec CronJobRecord, workflows []cronChoice, taken map[string]bool) (*cronForm, error) {
-	f := &cronForm{uid: rec.UID, expected: rec.DefinitionEventUID, opened: rec.Definition, openedName: rec.Name, workflows: workflows, taken: taken}
+func cronFormFor(rec CronJobRecord, workflows []cronChoice) (*cronForm, error) {
+	f := &cronForm{uid: rec.UID, expected: rec.DefinitionEventUID, opened: rec.Definition, openedName: rec.Name, workflows: workflows}
 	if err := f.load(rec); err != nil {
 		return nil, err
 	}
@@ -592,12 +553,9 @@ func (f *cronForm) applyCatchup(def *cron.JobDefinition) error {
 	if !f.catchupShown() || def.Catchup != "skip" {
 		return nil
 	}
-	grace, err := cronSeconds(cfGrace, f.val[cfGrace], 0)
+	grace, err := cronSeconds(cfGrace, f.val[cfGrace])
 	if err != nil {
 		return err
-	}
-	if grace <= 0 && f.kind == cronRecurringID {
-		return fieldErr(cfGrace, "skip needs a grace of 1 second or more")
 	}
 	def.GraceSeconds = grace
 	return nil
@@ -605,15 +563,9 @@ func (f *cronForm) applyCatchup(def *cron.JobDefinition) error {
 
 func (f *cronForm) executePolicy(uidOf func(string) string) (*cron.IssuePolicy, error) {
 	if f.val[cfPolicy] == "existing" {
-		if strings.TrimSpace(f.val[cfIssue]) == "" {
-			return nil, fieldErr(cfIssue, "name the issue every run belongs to")
-		}
-		return &cron.IssuePolicy{Kind: "existing", UID: uidOf(f.val[cfIssue])}, nil
+		return &cron.IssuePolicy{Kind: "existing", UID: uidOf(f.val[cfReport])}, nil
 	}
 	policy := cron.IssuePolicy{Kind: "per-run", Title: strings.TrimSpace(f.val[cfTitle]), Body: strings.TrimSpace(f.val[cfBody])}
-	if policy.Title == "" {
-		return nil, fieldErr(cfTitle, "must not be blank")
-	}
 	for _, offset := range []struct {
 		field cronField
 		into  **int64
@@ -621,7 +573,7 @@ func (f *cronForm) executePolicy(uidOf func(string) string) (*cron.IssuePolicy, 
 		if strings.TrimSpace(f.val[offset.field]) == "" {
 			continue
 		}
-		n, err := cronSeconds(offset.field, f.val[offset.field], -1<<62)
+		n, err := cronSeconds(offset.field, f.val[offset.field])
 		if err != nil {
 			return nil, err
 		}
@@ -805,7 +757,12 @@ func (f *cronForm) focusField(field cronField) {
 // first problem beside its field.
 func (f *cronForm) validate() {
 	f.syncEditor()
-	_, _, err := f.build(func(string) string { return cronValidationUID })
+	_, _, err := f.build(func(ref string) string {
+		if strings.TrimSpace(ref) == "" {
+			return ""
+		}
+		return cronValidationUID
+	})
 	f.err, f.general = nil, ""
 	if fe, ok := err.(*cronFieldError); ok {
 		f.err = fe
@@ -827,15 +784,26 @@ var cronErrorWords = []struct {
 	{"issue date", cfIssue}, {"checkout", cfCheckout}, {"secret", cfSecrets}, {"options", cfOptions},
 	{"recipient", cfRecipient}, {"message", cfMessage}, {"title", cfTitle}, {"parent", cfParent},
 	{"grace", cfGrace}, {"timeout", cfTimeout}, {"offset", cfScheduled}, {"workflow", cfWorkflow},
-	{"prompt", cfPrompt}, {"issue", cfIssue},
+	{"prompt", cfPrompt}, {"per-run", cfTitle}, {"issue target", cfIssue}, {"existing issue", cfIssue},
 }
 
+// attribute places a message on the shown field its words name. When one
+// message names several, the one still blank is blamed.
 func (f *cronForm) attribute(err error) *cronFieldError {
 	text := strings.TrimPrefix(err.Error(), cron.ErrInvalid.Error()+": ")
+	var named []cronField
 	for _, w := range cronErrorWords {
-		if strings.Contains(text, w.word) && f.shown(w.field) {
-			return &cronFieldError{w.field, text}
+		if strings.Contains(text, w.word) && f.shown(w.field) && !slices.Contains(named, w.field) {
+			named = append(named, w.field)
 		}
+	}
+	for _, field := range named {
+		if strings.TrimSpace(f.current(field)) == "" {
+			return &cronFieldError{field, text}
+		}
+	}
+	if len(named) > 0 {
+		return &cronFieldError{named[0], text}
 	}
 	return nil
 }
@@ -845,14 +813,6 @@ func (f *cronForm) attribute(err error) *cronFieldError {
 func (f *cronForm) build(uidOf func(string) string) (string, cron.JobDefinition, error) {
 	f.syncEditor()
 	name := strings.TrimSpace(f.val[cfName])
-	switch {
-	case name == "":
-		return "", cron.JobDefinition{}, fieldErr(cfName, "must not be blank")
-	case len(name) > 256:
-		return "", cron.JobDefinition{}, fieldErr(cfName, "at most 256 bytes")
-	case (f.create || name != f.openedName) && f.taken[strings.ToLower(name)]:
-		return "", cron.JobDefinition{}, fieldErr(cfName, "another job already has this name")
-	}
 	trigger, err := f.triggerDef().build(f)
 	if err != nil {
 		return "", cron.JobDefinition{}, err
@@ -861,9 +821,6 @@ func (f *cronForm) build(uidOf func(string) string) (string, cron.JobDefinition,
 		trigger.Timezone = f.opened.Trigger.Timezone
 	}
 	if cronIsDate(trigger.Kind) {
-		if strings.TrimSpace(f.val[cfIssue]) == "" {
-			return "", cron.JobDefinition{}, fieldErr(cfIssue, "name the issue whose date fires this job")
-		}
 		trigger.IssueUID = uidOf(f.val[cfIssue])
 	}
 	def, err := f.kindDef().build(f, uidOf)
@@ -871,9 +828,6 @@ func (f *cronForm) build(uidOf func(string) string) (string, cron.JobDefinition,
 		return "", cron.JobDefinition{}, err
 	}
 	def.Trigger = trigger
-	if f.kind == cronRecurringID && trigger.Kind == "interval" && trigger.IntervalSeconds < cronMinNativeInterval {
-		return "", def, fieldErr(cfInterval, "native intervals must be at least %d seconds", cronMinNativeInterval)
-	}
 	if err := def.Validate(); err != nil {
 		return "", def, err
 	}
@@ -912,4 +866,27 @@ func cronUIDResolver(resolved map[string]string) func(string) string {
 		}
 		return resolved[strings.TrimPrefix(ref, "#")]
 	}
+}
+
+// rebase carries the user's own changes onto the job as it is now. The
+// fields the draft changed from what it opened with replace the current
+// ones; everything else, hidden fields included, comes from the current job,
+// so another writer's edits are not undone.
+func (f *cronForm) rebase(current CronJobRecord) (*cronForm, error) {
+	f.syncEditor()
+	next, err := cronFormFor(current, f.workflows)
+	if err != nil {
+		return nil, err
+	}
+	if f.kind != f.snapKind || f.trigger != f.snapTrig {
+		next.kind, next.trigger = f.kind, f.trigger
+	}
+	for field := range cfCount {
+		if f.val[field] != f.snapshot[field] {
+			next.val[field] = f.val[field]
+		}
+	}
+	next.focusField(f.focus)
+	next.validate()
+	return next, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"fmt"
 
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -107,7 +108,11 @@ func decodeCronJobRecord(body []byte) (CronJobRecord, error) {
 		return CronJobRecord{}, err
 	}
 	record := CronJobRecord{UID: wire.Job.UID, Name: wire.Job.Name, DefinitionEventUID: wire.Job.DefinitionEventUID, Archived: wire.Job.DeletedAt != nil}
-	return record, json.Unmarshal(wire.Job.Definition, &record.Definition)
+	// A member this kata does not know would be dropped by the next write.
+	if err := json.Unmarshal(wire.Job.Definition, &record.Definition, json.RejectUnknownMembers(true)); err != nil {
+		return CronJobRecord{}, fmt.Errorf("the job has definition members this kata does not know, so editing it here would drop them; use a newer kata (%w)", err)
+	}
+	return record, nil
 }
 
 // ListArchivedCronJobs reads the project's deleted job definitions.
