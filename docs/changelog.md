@@ -1,13 +1,19 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-30
+last_edited: 2026-10-31
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Manage cron jobs, workflows and run evidence from MCP: load `kata.load_cron`
+  for 17 tools over the daemon's existing cron API. Native notification jobs
+  use the daemon scheduler; recording a run never starts work or changes who
+  owns an issue. See [MCP](reference/mcp.md#native-cron-through-mcp). Thanks to
+  [Rusty Shackleford](https://github.com/salmonumbrella).
 
 - Show what is stuck in any web collection, Inbox and Today included, with the
   optional **Blocked by** column. It lists each task's open blockers, three IDs

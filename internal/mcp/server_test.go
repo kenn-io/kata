@@ -32,6 +32,7 @@ import (
 var sectionLoaderNames = []string{
 	"kata.load_activity",
 	"kata.load_coordination",
+	"kata.load_cron",
 	"kata.load_docs",
 	"kata.load_external_roots",
 	"kata.load_federation",
@@ -284,6 +285,23 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 		"kata.connector_fields",
 		"kata.connectors",
 		"kata.create",
+		"kata.cron_capabilities",
+		"kata.cron_job",
+		"kata.cron_job_create",
+		"kata.cron_job_delete",
+		"kata.cron_job_restore",
+		"kata.cron_job_update",
+		"kata.cron_jobs",
+		"kata.cron_new_uid",
+		"kata.cron_workflows",
+		"kata.cron_workflow",
+		"kata.cron_workflow_create",
+		"kata.cron_workflow_update",
+		"kata.cron_workflow_delete",
+		"kata.cron_workflow_restore",
+		"kata.cron_runs",
+		"kata.cron_run",
+		"kata.cron_run_observe",
 		"kata.delete",
 		"kata.digest",
 		"kata.edit",
@@ -354,6 +372,8 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 	sort.Strings(wantNames)
 	gotNames := make([]string, 0, len(result.Tools))
 	projectSelectors := map[string]bool{
+		"kata.cron_workflows": true, "kata.cron_workflow": true, "kata.cron_workflow_create": true, "kata.cron_workflow_update": true, "kata.cron_workflow_delete": true, "kata.cron_workflow_restore": true, "kata.cron_runs": true, "kata.cron_run": true, "kata.cron_run_observe": true,
+		"kata.cron_new_uid": true, "kata.cron_capabilities": true, "kata.cron_jobs": true, "kata.cron_job": true, "kata.cron_job_create": true, "kata.cron_job_update": true, "kata.cron_job_delete": true, "kata.cron_job_restore": true,
 		"kata.federation_bridge_connect": true, "kata.federation_bridge_disconnect": true, "kata.federation_bridge_status": true,
 		"kata.project_access_set": true, "kata.project_access_show": true,
 		"kata.audit_closes": true,
@@ -422,6 +442,8 @@ func TestServerToolAnnotationsMatchMutationRisk(t *testing.T) {
 	require.NoError(t, err)
 
 	readOnly := map[string]bool{
+		"kata.cron_workflows": true, "kata.cron_workflow": true, "kata.cron_runs": true, "kata.cron_run": true,
+		"kata.cron_capabilities": true, "kata.cron_jobs": true, "kata.cron_job": true, "kata.cron_new_uid": true,
 		"kata.federation_bridge_status": true,
 		"kata.teams":                    true, "kata.team_show": true, "kata.project_access_show": true,
 		"kata.audit_closes":      true,
@@ -457,13 +479,16 @@ func TestServerToolAnnotationsMatchMutationRisk(t *testing.T) {
 	// Mixed-mode tools with any overwriting or removing input (forced
 	// claims, lease release, recurrence patch) advertise destructive.
 	additive := map[string]bool{
+		"kata.cron_workflow_create": true, "kata.cron_workflow_restore": true,
+		"kata.cron_job_create": true, "kata.cron_job_restore": true,
 		"kata.team_create": true,
 		"kata.comment":     true, "kata.create": true,
 		"kata.project_create": true, "kata.project_restore": true,
 		"kata.restore": true, "kata.token_create": true,
 	}
 	nonIdempotentTools := map[string]bool{
-		"kata.team_create": true,
+		"kata.cron_new_uid": true,
+		"kata.team_create":  true,
 		// Identical retries mint new records: no idempotency key or natural
 		// unique key deduplicates these creations.
 		"kata.token_create":      true,
