@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -312,16 +313,40 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 					_, err := os.Stat(filepath.Join(f.home, "hook-ready"))
 					return err == nil
 				}, 5*time.Second, 20*time.Millisecond)
-				done := make(chan struct{}, 2)
+				restart := exec.CommandContext(t.Context(), f.cli, "daemon", "restart", "--json") //nolint:gosec // test-built executable
+				restart.Env = append(append([]string(nil), f.env...), "PORT=4321")
+				var restartOutput bytes.Buffer
+				restart.Stdout, restart.Stderr = &restartOutput, &restartOutput
+				require.NoError(t, restart.Start())
+				restarted := make(chan struct{})
+				var restartErr error
 				go func() {
-					output, err := f.restart(t, "--json")
-					assert.NoError(t, err, "%s", output)
-					done <- struct{}{}
+					restartErr = restart.Wait()
+					close(restarted)
 				}()
+				t.Cleanup(func() {
+					select {
+					case <-restarted:
+					default:
+						_ = restart.Process.Kill()
+						<-restarted
+					}
+				})
 				require.Eventually(t, func() bool { return f.record().PID == 0 }, 5*time.Second, 20*time.Millisecond) //nolint:kennlint // sleeptest: graceful shutdown removes discovery before draining the real hook
+				if scenario == "restart during drain" {
+					require.NoError(t, restart.Process.Signal(os.Interrupt))
+					ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+					defer cancel()
+					unlock, err := f.store.AcquireStartLock(ctx)
+					if unlock != nil {
+						unlock()
+					}
+					require.ErrorIs(t, err, context.DeadlineExceeded, "one Ctrl-C must retain handoff ownership during drain")
+				}
 				lockPath, err := f.store.LockPath()
 				require.NoError(t, err)
 				lockAttempted := watchOpens(t, lockPath)
+				done := make(chan struct{}, 1)
 				go func() {
 					args := []string{"daemon", "restart", "--json"}
 					switch scenario {
@@ -338,7 +363,8 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 				}()
 				lockAttempted() // the second CLI is retrying the start lock the first restart holds
 				require.NoError(t, os.WriteFile(release, nil, 0600))
-				<-done
+				<-restarted
+				assert.NoError(t, restartErr, "%s", restartOutput.String())
 				<-done
 				return
 			}

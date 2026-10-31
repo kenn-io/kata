@@ -324,6 +324,20 @@ func TestLocalProfileKeepsNewerReleaseDaemon(t *testing.T) {
 	require.ErrorIs(t, err, ErrDaemonNotReplaceable)
 	assert.Contains(t, err.Error(), "kata daemon v0.19.0 is newer than this kata binary v0.18.0")
 	assert.Zero(t, calls)
+
+	t.Run("restart_owns_start_lock", func(t *testing.T) {
+		currentVersionForEnsure = func() string { return "v0.20.0" }
+		release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireStartLock(t.Context())
+		require.NoError(t, err)
+		defer release()
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+
+		_, err = EnsureResolvedInWorkspace(ctx, root)
+
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.Zero(t, calls, "another restart owns validation; its profile daemon must keep running")
+	})
 }
 
 func TestLocalProfileNamedDiscoveryCannotUsePersonalRuntime(t *testing.T) {

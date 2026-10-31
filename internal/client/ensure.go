@@ -177,10 +177,17 @@ func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
 	if err != nil {
 		return RunningDaemon{}, err
 	}
-	found, err := discoverForEnsure(ctx, ns.DataDir)
+	found, release, err := discoverForStart(ctx, ns.DataDir)
 	if err != nil {
 		return RunningDaemon{}, err
 	}
+	defer release()
+	return startLocalDaemon(ctx, ns, found)
+}
+
+// startLocalDaemon reuses a compatible daemon, or replaces an incompatible one
+// this binary may replace, and otherwise starts one.
+func startLocalDaemon(ctx context.Context, ns *daemonruntime.Namespace, found ensureDiscovery) (RunningDaemon, error) {
 	switch found.Outcome {
 	case daemonScanCompatible:
 		return runningDaemonForLive(found.Daemon), nil
@@ -193,6 +200,28 @@ func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
 		}
 	}
 	return startDaemonForEnsure(ctx, ns.DataDir)
+}
+
+// discoverForStart returns a compatible daemon without locking. Any other
+// outcome is discovered again under the runtime store's start lock, which an
+// in-place restart holds until its replacement is ready, so the caller's stop,
+// replace, and start decisions follow that restart. The caller holds the lock
+// until it calls release.
+func discoverForStart(ctx context.Context, dataDir string) (ensureDiscovery, func(), error) {
+	found, err := discoverForEnsure(ctx, dataDir)
+	if err != nil || found.Outcome == daemonScanCompatible {
+		return found, func() {}, err
+	}
+	release, err := (kitdaemon.RuntimeStore{Dir: dataDir}).AcquireStartLock(ctx)
+	if err != nil {
+		return ensureDiscovery{}, nil, fmt.Errorf("auto-start daemon: %w", err)
+	}
+	found, err = discoverForEnsure(ctx, dataDir)
+	if err != nil {
+		release()
+		return ensureDiscovery{}, nil, err
+	}
+	return found, release, nil
 }
 
 // checkDaemonReplaceable refuses to stop a live daemon that this binary could
@@ -448,24 +477,15 @@ func autoStartWithMigration(ctx context.Context, dataDir string, ownerLocks, env
 	return launchAutoStart(ctx, dataDir, ownerLocks, opts, exited, migrationAllowed)
 }
 
-// launchAutoStart holds the runtime store's start lock from the launch decision
-// through readiness, reusing a compatible daemon that an in-place restart made
-// ready while this caller waited for the lock.
+// launchAutoStart starts the daemon and waits for readiness. Its caller holds
+// the start lock from discoverForStart through readiness.
 func launchAutoStart(ctx context.Context, dataDir string, ownerLocks []string, opts kitdaemon.StartDetachedOptions, exited <-chan error, migrationAllowed bool) (RunningDaemon, error) {
-	release, err := (kitdaemon.RuntimeStore{Dir: dataDir}).AcquireStartLock(ctx)
-	if err != nil {
-		return RunningDaemon{}, fmt.Errorf("auto-start daemon: %w", err)
-	}
-	defer release()
-	if found, err := discoverDaemonForAutoStart(ctx, dataDir); err == nil && found.Outcome == daemonScanCompatible {
-		return runningDaemonForLive(found.Daemon), nil
-	}
 	if err := startDetachedDaemonForEnsure(ctx, opts); err != nil {
 		return RunningDaemon{}, fmt.Errorf("auto-start daemon: %w", err)
 	}
 	var running RunningDaemon
 	var unreachable error
-	err = waitForDaemonStartup(ctx, ownerLocks, daemonStartupWait, exited, func(ctx context.Context) (bool, error) {
+	err := waitForDaemonStartup(ctx, ownerLocks, daemonStartupWait, exited, func(ctx context.Context) (bool, error) {
 		found, err := discoverDaemonForAutoStart(ctx, dataDir)
 		if err != nil && !errors.Is(err, ErrLocalDaemonUnreachable) {
 			return false, err

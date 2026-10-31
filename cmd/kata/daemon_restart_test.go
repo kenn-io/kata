@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -69,19 +68,6 @@ func TestDaemonRestart_CallerFailure(t *testing.T) {
 		_, err := requestDaemonRestart(t.Context(), &daemonruntime.Namespace{DataDir: dir}, rec, "/installed/kata", nil)
 		require.Error(t, err)
 		require.NoFileExists(t, restartRequestPath(dir, rec))
-		replies, err := filepath.Glob(filepath.Join(dir, "restart-reply-*"))
-		require.NoError(t, err)
-		assert.Empty(t, replies)
-	})
-	t.Run("cancelled wait", func(t *testing.T) {
-		child := startSleepProcess(t)
-		registerDaemonSignalEndpoints(t, "", child.Process.Pid)
-		ctx, cancel := context.WithCancel(t.Context())
-		cancel()
-		dir := t.TempDir()
-		rec := kitdaemon.RuntimeRecord{PID: child.Process.Pid, StartedAt: time.Now().UTC(), Metadata: map[string]string{daemonruntime.RuntimeRestartExecutableKey: "1"}}
-		_, err := requestDaemonRestart(ctx, &daemonruntime.Namespace{DataDir: dir}, rec, "/installed/kata", nil)
-		require.ErrorIs(t, err, context.Canceled)
 		replies, err := filepath.Glob(filepath.Join(dir, "restart-reply-*"))
 		require.NoError(t, err)
 		assert.Empty(t, replies)

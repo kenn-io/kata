@@ -209,7 +209,7 @@ func restartRequestPath(dir string, rec kitdaemon.RuntimeRecord) string {
 // requestDaemonRestart asks the live daemon to restart within one restart wait
 // budget, reporting a timeout as the daemon not restarting in time.
 func requestDaemonRestart(ctx context.Context, ns *daemonruntime.Namespace, previous kitdaemon.RuntimeRecord, executable string, flags []string) (kitdaemon.RuntimeRecord, error) {
-	ctx, cancel := context.WithTimeoutCause(ctx, daemonRestartProcessWaitTimeout, fmt.Errorf("daemon pid %d did not restart within %s", previous.PID, daemonRestartProcessWaitTimeout))
+	ctx, cancel := context.WithTimeoutCause(context.WithoutCancel(ctx), daemonRestartProcessWaitTimeout, fmt.Errorf("daemon pid %d did not restart within %s", previous.PID, daemonRestartProcessWaitTimeout))
 	defer cancel()
 	replacement, err := requestDaemonRestartOnce(ctx, ns, previous, executable, flags)
 	if errors.Is(err, context.DeadlineExceeded) {
