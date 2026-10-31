@@ -31,7 +31,20 @@ import (
 type daemonRestart struct {
 	executable string
 	args       []string
+	reply      string
 	requested  atomic.Bool
+}
+
+// daemonRestartReplyEnv names the accepted request in the replacement's environment.
+const daemonRestartReplyEnv = "KATA_DAEMON_RESTART_REPLY"
+
+// startedForRestartReply is unset at process start so children never inherit it.
+var startedForRestartReply = takeRestartReply()
+
+func takeRestartReply() string {
+	reply := os.Getenv(daemonRestartReplyEnv)
+	_ = os.Unsetenv(daemonRestartReplyEnv)
+	return reply
 }
 
 // resolveDaemonExecutable is swapped in tests that exercise unsupported hosts.
@@ -82,10 +95,22 @@ func (r *daemonRestart) exec(ctx context.Context) error {
 	if r == nil || !r.requested.Load() {
 		return nil
 	}
-	if err := reexecDaemon(ctx, r.executable, r.args); err != nil {
+	if err := reexecDaemon(ctx, r.executable, r.args, append(os.Environ(), daemonRestartReplyEnv+"="+r.reply)); err != nil {
 		return fmt.Errorf("restart daemon: %w", err)
 	}
 	return nil
+}
+
+// metadata advertises restart support and the request this daemon was started for.
+func (r *daemonRestart) metadata() map[string]string {
+	if r == nil {
+		return nil
+	}
+	return map[string]string{
+		daemonruntime.RuntimeRestartMetadataKey:   "1",
+		daemonruntime.RuntimeRestartExecutableKey: "1",
+		daemonruntime.RuntimeRestartReplyKey:      startedForRestartReply,
+	}
 }
 
 func daemonArgs(extra ...string) []string {
@@ -153,7 +178,7 @@ func (r *daemonRestart) accept(ctx context.Context, dir string, rec kitdaemon.Ru
 	if err := validateDaemonReplacement(ctx, executable, req.Flags); err != nil {
 		return err
 	}
-	r.executable, r.args = executable, daemonArgs(req.Flags...)
+	r.executable, r.args, r.reply = executable, daemonArgs(req.Flags...), req.Reply
 	return nil
 }
 

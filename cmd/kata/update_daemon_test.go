@@ -351,9 +351,10 @@ func TestDaemonRestart_Lifecycle(t *testing.T) {
 			}
 			if scenario == "restart failure" {
 				require.Error(t, updateErr)
-				assert.Contains(t, stdout+updateErr.Error(), "validate replacement")
-				assert.Contains(t, stdout+updateErr.Error(), "parse "+filepath.Join(f.home, "config.toml"))
-				assert.NotContains(t, stdout+updateErr.Error(), "did not restart within")
+				message := parseErrorEnvelope(t, []byte(stdout)).Error.Message
+				assert.Contains(t, message, "validate replacement")
+				assert.Contains(t, message, "parse "+filepath.Join(f.home, "config.toml"))
+				assert.NotContains(t, message, "did not restart within")
 				assert.Equal(t, before.StartedAt, f.record().StartedAt)
 				httpClient, baseURL := client.LocalHTTPClient(before.Endpoint().ConfigAddress())
 				status, _, err := httpDoJSON(t.Context(), httpClient, http.MethodGet, baseURL+"/api/v1/ping", nil)
@@ -379,6 +380,18 @@ func TestDaemonRestart_Lifecycle(t *testing.T) {
 			assert.Equal(t, http.StatusOK, status)
 		})
 	}
+}
+
+func TestWaitForDaemonReplacement_RejectsUnrelatedStarter(t *testing.T) {
+	store := kitdaemon.RuntimeStore{Dir: t.TempDir()}
+	reply := filepath.Join(store.Dir, "restart-reply-caller")
+	require.NoError(t, os.WriteFile(reply, []byte(restartAccepted), 0600))
+	started := time.Now().UTC()
+	_, err := store.Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), StartedAt: started, Address: "127.0.0.1:7777"})
+	require.NoError(t, err)
+	previous := kitdaemon.RuntimeRecord{PID: 1 << 30, StartedAt: started.Add(-time.Second)}
+	_, err = waitForDaemonReplacement(t.Context(), store, previous, reply)
+	require.ErrorContains(t, err, "this restart was not applied")
 }
 
 func daemonLifecycleEnvironment(t *testing.T) []string {

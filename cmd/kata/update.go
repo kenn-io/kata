@@ -179,10 +179,10 @@ func waitForDaemonReplacement(
 		}
 		for _, record := range records {
 			if record.StartedAt.After(previous.StartedAt) && daemonruntime.RuntimeProcessAlive(record) {
-				return record, restartReplyError(reply, previous.PID, true)
+				return record, restartReplyError(reply, previous.PID, &record)
 			}
 		}
-		if err := restartReplyError(reply, previous.PID, false); err != nil {
+		if err := restartReplyError(reply, previous.PID, nil); err != nil {
 			return kitdaemon.RuntimeRecord{}, err
 		}
 		now := time.Now()
@@ -204,15 +204,15 @@ func waitForDaemonReplacement(
 }
 
 // restartReplyError reads the daemon's answer to this caller's request after
-// the runtime records were listed. The daemon publishes acceptance before its
-// handoff, so a listed replacement without it was started for another request.
-func restartReplyError(reply string, pid int, replaced bool) error {
+// the runtime records were listed. A replacement started for this request
+// names its reply; any other was started for another request or start.
+func restartReplyError(reply string, pid int, replacement *kitdaemon.RuntimeRecord) error {
 	answer, _ := os.ReadFile(reply) //nolint:gosec // caller-owned private reply file
 	switch {
 	case len(answer) != 0 && string(answer) != restartAccepted:
 		return fmt.Errorf("restart: validate replacement: %s", answer)
-	case replaced && reply != "" && len(answer) == 0:
-		return fmt.Errorf("daemon pid %d completed another restart first; this restart was not applied", pid)
+	case replacement != nil && reply != "" && replacement.Metadata[daemonruntime.RuntimeRestartReplyKey] != filepath.Base(reply):
+		return fmt.Errorf("another daemon replaced pid %d first; this restart was not applied", pid)
 	}
 	return nil
 }

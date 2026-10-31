@@ -1438,10 +1438,7 @@ func runDaemonProcess(
 		rec.Metadata["config_"+key+"_source"] = source
 	}
 	maps.Copy(rec.Metadata, webRuntime.Metadata())
-	if restart != nil {
-		rec.Metadata[daemonruntime.RuntimeRestartMetadataKey] = "1"
-		rec.Metadata[daemonruntime.RuntimeRestartExecutableKey] = "1"
-	}
+	maps.Copy(rec.Metadata, restart.metadata())
 
 	broadcaster := daemon.NewEventBroadcaster()
 	publisher := daemon.NewEventPublisher(broadcaster, disp)
