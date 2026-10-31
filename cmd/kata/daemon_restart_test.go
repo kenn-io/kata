@@ -63,22 +63,27 @@ func TestNewDaemonRestart_ResolvesSymlinkedExecutable(t *testing.T) {
 }
 
 func TestDaemonRestart_CleansCallerFiles(t *testing.T) {
-	child := startSleepProcess(t)
-	registerDaemonSignalEndpoints(t, "", child.Process.Pid)
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	for _, pid := range []int{1 << 30, child.Process.Pid} {
+	t.Run("signal failure", func(t *testing.T) {
 		dir := t.TempDir()
-		rec := kitdaemon.RuntimeRecord{PID: pid, StartedAt: time.Unix(1, 0), Metadata: map[string]string{daemonruntime.RuntimeRestartExecutableKey: "1"}}
-		_, err := requestDaemonRestart(ctx, &daemonruntime.Namespace{DataDir: dir}, rec, "/installed/kata", nil)
+		rec := kitdaemon.RuntimeRecord{PID: 1 << 30, StartedAt: time.Now().UTC(), Metadata: map[string]string{daemonruntime.RuntimeRestartExecutableKey: "1"}}
+		_, err := requestDaemonRestart(t.Context(), &daemonruntime.Namespace{DataDir: dir}, rec, "/installed/kata", nil)
 		require.Error(t, err)
-		if pid == child.Process.Pid {
-			require.ErrorIs(t, err, context.Canceled)
-		} else {
-			require.NoFileExists(t, restartRequestPath(dir, rec))
-		}
+		require.NoFileExists(t, restartRequestPath(dir, rec))
 		replies, err := filepath.Glob(filepath.Join(dir, "restart-reply-*"))
 		require.NoError(t, err)
 		assert.Empty(t, replies)
-	}
+	})
+	t.Run("cancelled wait", func(t *testing.T) {
+		child := startSleepProcess(t)
+		registerDaemonSignalEndpoints(t, "", child.Process.Pid)
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		dir := t.TempDir()
+		rec := kitdaemon.RuntimeRecord{PID: child.Process.Pid, StartedAt: time.Now().UTC(), Metadata: map[string]string{daemonruntime.RuntimeRestartExecutableKey: "1"}}
+		_, err := requestDaemonRestart(ctx, &daemonruntime.Namespace{DataDir: dir}, rec, "/installed/kata", nil)
+		require.ErrorIs(t, err, context.Canceled)
+		replies, err := filepath.Glob(filepath.Join(dir, "restart-reply-*"))
+		require.NoError(t, err)
+		assert.Empty(t, replies)
+	})
 }

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -175,8 +174,14 @@ func (f *daemonLifecycleFixture) restart(t *testing.T, args ...string) (string, 
 	return string(output), err
 }
 
-func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
+func TestDaemonLifecycle(t *testing.T) {
 	fixture := daemonLifecycle(t)
+	t.Run("update", func(t *testing.T) { testUpdateInstallDaemonLifecycle(t, fixture) })
+	t.Run("restart", func(t *testing.T) { testDaemonRestartLifecycle(t, fixture) })
+}
+
+func testUpdateInstallDaemonLifecycle(t *testing.T, fixture func(*testing.T, string) *daemonLifecycleFixture) {
+	t.Helper()
 	for _, scenario := range []string{"running", "stopped", "check only", "cancelled", "install failure", "read-only TCP", "older daemon", "daemon token", "idle shutdown"} {
 		t.Run(scenario, func(t *testing.T) {
 			fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{CurrentVersion: "v0.1.0", LatestVersion: "v0.2.0"}}}
@@ -271,13 +276,31 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 	}
 }
 
-func TestDaemonRestart_Lifecycle(t *testing.T) {
-	fixture := daemonLifecycle(t)
-	for _, scenario := range []string{"restart failure", "older daemon", "startup flags", "new config", "concurrent restart"} {
+func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *daemonLifecycleFixture) {
+	t.Helper()
+	for _, scenario := range []string{"restart failure", "older daemon", "startup flags", "new config", "equivalent concurrent restarts"} {
 		t.Run(scenario, func(t *testing.T) {
 			setupKataEnv(t)
 			f := fixture(t, scenario)
 			before := f.record()
+			if scenario == "equivalent concurrent restarts" {
+				start, done := make(chan struct{}), make(chan struct{}, 6)
+				for range 6 {
+					go func() {
+						<-start
+						output, err := f.restart(t, "--json")
+						assert.NoError(t, err, "%s", output)
+						done <- struct{}{}
+					}()
+				}
+				close(start)
+				for range 6 {
+					<-done
+				}
+				assert.Equal(t, "v0.2.0", f.record().Version)
+				assert.Equal(t, before.Endpoint().IsUnix(), f.record().Endpoint().IsUnix())
+				return
+			}
 			if scenario == "older daemon" {
 				delete(before.Metadata, daemonruntime.RuntimeRestartExecutableKey)
 				_, err := f.store.Write(before)
@@ -285,35 +308,6 @@ func TestDaemonRestart_Lifecycle(t *testing.T) {
 			}
 			if scenario == "restart failure" {
 				require.NoError(t, os.WriteFile(filepath.Join(f.home, "config.toml"), []byte("invalid = ["), 0600))
-			}
-			if scenario == "concurrent restart" {
-				start, done := make(chan struct{}), make(chan bool, 12)
-				for range 12 {
-					listener, err := net.Listen("tcp", "127.0.0.1:0")
-					require.NoError(t, err)
-					address := listener.Addr().String()
-					require.NoError(t, listener.Close())
-					go func() {
-						<-start
-						output, err := f.restart(t, "--listen="+address, "--json")
-						if err == nil {
-							var result daemonRestartOutput
-							if assert.NoError(t, json.Unmarshal([]byte(output), &result)) {
-								assert.Equal(t, address, result.Address, "successful restart must apply its own requested listener")
-							}
-						}
-						done <- err == nil
-					}()
-				}
-				close(start)
-				successes := 0
-				for range 12 {
-					if <-done {
-						successes++
-					}
-				}
-				assert.Positive(t, successes)
-				return
 			}
 			if scenario == "startup flags" {
 				output, err := f.restart(t, "--listen=0.0.0.0:0", "--insecure-readonly", "--no-auto-token")

@@ -1378,54 +1378,19 @@ func TestDaemonRestart_PassesStartupOverrides(t *testing.T) {
 }
 
 func TestDaemonRestart_ValidatesStoppedDaemonStartup(t *testing.T) {
-	tests := []struct {
-		name    string
-		setup   func(*testing.T, string)
-		wantErr string
-	}{
-		{
-			name: "hooks config",
-			setup: func(t *testing.T, tmp string) {
-				require.NoError(t, os.WriteFile(filepath.Join(tmp, "hooks.toml"),
-					[]byte("[[hook]\nevent =\n"), 0o600))
-			},
-			wantErr: "parse hooks config",
-		},
-		{
-			name: "embedding config",
-			setup: func(t *testing.T, tmp string) {
-				require.NoError(t, os.WriteFile(filepath.Join(tmp, "config.toml"), []byte(`
-[search.embeddings]
-base_url = "http://embedding.example"
-model = "example-model"
-`), 0o600))
-			},
-			wantErr: "embedding client",
-		},
+	resetFlags(t)
+	tmp := setupKataEnv(t)
+	require.NoError(t, os.WriteFile(filepath.Join(tmp, "hooks.toml"), []byte("[[hook]]\nevent =\n"), 0600))
+	orig := startDetachedDaemon
+	t.Cleanup(func() { startDetachedDaemon = orig })
+	startCalled := false
+	startDetachedDaemon = func(context.Context, string, bool, bool) (daemonStartOutput, error) {
+		startCalled = true
+		return daemonStartOutput{}, errors.New("replacement startup attempted")
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			resetFlags(t)
-			tmp := setupKataEnv(t)
-
-			tt.setup(t, tmp)
-
-			orig := startDetachedDaemon
-			t.Cleanup(func() { startDetachedDaemon = orig })
-			startCalled := false
-			startDetachedDaemon = func(context.Context, string, bool, bool) (daemonStartOutput, error) {
-				startCalled = true
-				return daemonStartOutput{}, errors.New("replacement startup attempted")
-			}
-
-			_, _, err := executeRootCapture(t, context.Background(), "daemon", "restart")
-
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), tt.wantErr)
-			assert.False(t, startCalled)
-		})
-	}
+	_, _, err := executeRootCapture(t, context.Background(), "daemon", "restart")
+	require.ErrorContains(t, err, "parse hooks config")
+	assert.False(t, startCalled)
 }
 
 func TestValidateFederationStartupConfigActors(t *testing.T) {

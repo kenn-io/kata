@@ -140,6 +140,9 @@ type restartRequest struct {
 // request it applies; any other non-empty reply is that request's refusal.
 const restartAccepted = "accepted"
 
+// errRestartNotApplied marks a request whose daemon was replaced first.
+var errRestartNotApplied = errors.New("this restart was not applied")
+
 // accept applies the restart request published for rec and answers its
 // caller. Acceptance is published before the handoff, so a caller can tell
 // its own replacement from one started for a concurrent request.
@@ -186,7 +189,24 @@ func restartRequestPath(dir string, rec kitdaemon.RuntimeRecord) string {
 	return filepath.Join(dir, fmt.Sprintf("restart.%d.%d", rec.PID, rec.StartedAt.UnixNano()))
 }
 
+// requestDaemonRestart repeats this caller's request against each replacement
+// another caller's restart started first, within one restart wait budget.
 func requestDaemonRestart(ctx context.Context, ns *daemonruntime.Namespace, previous kitdaemon.RuntimeRecord, executable string, flags []string) (kitdaemon.RuntimeRecord, error) {
+	ctx, cancel := context.WithTimeoutCause(ctx, daemonRestartProcessWaitTimeout, fmt.Errorf("daemon pid %d did not restart within %s", previous.PID, daemonRestartProcessWaitTimeout))
+	defer cancel()
+	for {
+		replacement, err := requestDaemonRestartOnce(ctx, ns, previous, executable, flags)
+		if errors.Is(err, context.DeadlineExceeded) {
+			err = context.Cause(ctx)
+		}
+		if !errors.Is(err, errRestartNotApplied) || replacement.Metadata[daemonruntime.RuntimeRestartReplyKey] == "" {
+			return replacement, err
+		}
+		previous = replacement
+	}
+}
+
+func requestDaemonRestartOnce(ctx context.Context, ns *daemonruntime.Namespace, previous kitdaemon.RuntimeRecord, executable string, flags []string) (kitdaemon.RuntimeRecord, error) {
 	var reply string
 	if previous.Metadata[daemonruntime.RuntimeRestartExecutableKey] == "1" {
 		file, err := safefileio.CreatePrivateTemp(ns.DataDir, "restart-reply-*")
@@ -201,7 +221,7 @@ func requestDaemonRestart(ctx context.Context, ns *daemonruntime.Namespace, prev
 		payload, _ := json.Marshal(restartRequest{Executable: executable, Reply: filepath.Base(reply), Flags: flags})
 		if err := atomicfile.WriteNew(restartRequestPath(ns.DataDir, previous), payload, atomicfile.WithPrivate()); err != nil {
 			if errors.Is(err, os.ErrExist) {
-				return kitdaemon.RuntimeRecord{}, fmt.Errorf("daemon pid %d already has a pending restart: %w", previous.PID, err)
+				return waitForDaemonReplacement(ctx, kitdaemon.RuntimeStore{Dir: ns.DataDir}, previous, reply)
 			}
 			return kitdaemon.RuntimeRecord{}, err
 		}
