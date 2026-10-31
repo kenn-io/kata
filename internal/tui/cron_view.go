@@ -2,10 +2,12 @@ package tui
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/pkg/client/generated"
 	"go.kenn.io/kit/tui/splitlayout"
 )
@@ -34,6 +36,8 @@ type cronData struct {
 	jobs                []generated.CronJob
 	workflows           []generated.CronWorkflow
 	runs                []generated.CronRun
+	progress            map[string]cron.RecurringProgress
+	parentOpen          map[string]bool
 	jobsErr             error
 	workflowsErr        error
 	runsErr             error
@@ -84,6 +88,7 @@ func (m Model) fetchCron() tea.Cmd {
 		data.jobs, data.jobsErr = cronRead(reader.ListCronJobs, id)
 		data.workflows, data.workflowsErr = cronRead(reader.ListCronWorkflows, id)
 		data.runs, data.runsErr = cronRead(reader.ListCronRuns, id)
+		data.progress, data.parentOpen = cronReadParents(reader, id, data.jobs)
 		return cronLoadedMsg(data)
 	}
 }
@@ -92,6 +97,30 @@ func cronRead[T any](read func(context.Context, int64) (T, error), id int64) (T,
 	defer cancel()
 	return read(ctx, id)
 }
+
+// cronReadParents reads each native job's parent issue once: its delivery
+// checkpoints and whether it is open. A parent that cannot be read leaves its
+// jobs without a preview.
+func cronReadParents(reader cronAPI, id int64, jobs []generated.CronJob) (map[string]cron.RecurringProgress, map[string]bool) {
+	progress := map[string]cron.RecurringProgress{}
+	open := map[string]bool{}
+	seen := map[string]bool{}
+	for _, j := range jobs {
+		parent := cronNativeParent(j)
+		if parent == "" || seen[parent] {
+			continue
+		}
+		seen[parent] = true
+		ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
+		read, err := reader.readCronParent(ctx, id, parent)
+		cancel()
+		if err == nil {
+			maps.Copy(progress, read.progress)
+			open[parent] = read.open
+		}
+	}
+	return progress, open
+}
 func (m Model) cronLoaded(msg cronLoadedMsg) Model {
 	if msg.conn != m.connGen || msg.scope != m.scopeGen {
 		return m
@@ -99,7 +128,7 @@ func (m Model) cronLoaded(msg cronLoadedMsg) Model {
 	data := cronData(msg)
 	if previous := m.cron.data; previous != nil {
 		if data.jobsErr != nil {
-			data.jobs = previous.jobs
+			data.jobs, data.progress, data.parentOpen = previous.jobs, previous.progress, previous.parentOpen
 		}
 		if data.workflowsErr != nil {
 			data.workflows = previous.workflows

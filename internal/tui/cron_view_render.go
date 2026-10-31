@@ -44,6 +44,10 @@ func cronSchedule(t generated.TriggerResponse) string {
 			}
 			value = "once " + at.In(zone).Format("2006-01-02 15:04")
 		}
+	case "issue-deadline":
+		if lead := deref(t.LeadSeconds); lead > 0 {
+			value += ", " + (time.Duration(lead) * time.Second).String() + " before"
+		}
 	}
 	if deref(t.Timezone) != "" && deref(t.Timezone) != "UTC" {
 		value += " (" + deref(t.Timezone) + ")"
@@ -203,6 +207,12 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			name = j.Name
 			d.field("State", cronJobState(*j))
 			d.field("Schedule", cronSchedule(j.Definition.Trigger))
+			if label, times := cronNextRuns(p, *j, renderNow()); len(times) > 0 {
+				d.field(label, times[0])
+				for _, t := range times[1:] {
+					d.text(strings.Repeat(" ", d.labelWidth+1)+t, cronRef{})
+				}
+			}
 			d.field("Action", cronAction(p, *j))
 			if uid := deref(j.Definition.Action.WorkflowUID); uid != "" {
 				cronDefinitionLink(&d, p, uid, "", true)
