@@ -282,7 +282,7 @@ func daemonStartCmd() *cobra.Command {
 				defer cancel()
 				return runDaemonForeground(ctx, listen, insecureReadonly, noAutoToken)
 			}
-			out, err := startDetachedDaemon(cmd.Context(), listen, insecureReadonly, noAutoToken)
+			out, err := startDetachedDaemonLocked(cmd.Context(), listen, insecureReadonly, noAutoToken)
 			if err != nil {
 				return err
 			}
@@ -318,6 +318,22 @@ func daemonStartCmd() *cobra.Command {
 		"permit unauthenticated GETs on non-loopback TCP when no token "+
 			"is configured (DEV ONLY — production must use a token).")
 	return cmd
+}
+
+// startDetachedDaemonLocked holds the start lock an in-place restart holds
+// until its replacement is ready, so an explicit start adopts that replacement
+// instead of launching into the handoff. Restart's own startup already holds it.
+func startDetachedDaemonLocked(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) (daemonStartOutput, error) {
+	ns, err := daemonruntime.NewNamespace()
+	if err != nil {
+		return daemonStartOutput{}, err
+	}
+	release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireStartLock(ctx)
+	if err != nil {
+		return daemonStartOutput{}, err
+	}
+	defer release()
+	return startDetachedDaemon(ctx, listen, insecureReadonly, noAutoToken)
 }
 
 func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) (daemonStartOutput, error) {
@@ -863,21 +879,15 @@ func daemonRestartCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			store := kitdaemon.RuntimeStore{Dir: ns.DataDir}
-			recs, err := store.List()
+			running, release, err := lockLiveDaemons(cmd.Context(), ns, cmd.ErrOrStderr())
 			if err != nil {
 				return err
 			}
-			noteSkippedDaemons(cmd.ErrOrStderr(), recs)
-			running := make([]kitdaemon.RuntimeRecord, 0, len(recs))
-			for _, rec := range recs {
-				if !daemonruntime.RuntimeProcessAlive(rec) {
-					continue
-				}
+			defer release()
+			for _, rec := range running {
 				if rec.Metadata[daemonruntime.RuntimeRestartExecutableKey] != "1" {
 					return fmt.Errorf("daemon pid %d does not support automatic restart; run 'kata daemon stop', then 'kata daemon start' with its original startup options", rec.PID)
 				}
-				running = append(running, rec)
 			}
 			pids := make([]int, 0, len(running))
 			var out daemonStartOutput

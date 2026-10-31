@@ -97,13 +97,22 @@ func daemonLifecycle(t *testing.T) func(*testing.T, string) *daemonLifecycleFixt
 		// existing daemon binary really must be replaced.
 		copyTestExecutable(t, binaries["v0.1.0"], binary)
 		env := append(append([]string(nil), childEnv...), "KATA_HOME="+home, "KATA_DB="+filepath.Join(home, "kata.db"), "KATA_WORKSPACE="+workspace, "KATA_AUTHOR=user-a")
+		if strings.Contains(scenario, "during drain") {
+			shell, err := exec.LookPath("sh")
+			require.NoError(t, err)
+			command, err := json.Marshal(shell)
+			require.NoError(t, err)
+			args, err := json.Marshal([]string{"-c", `touch "$1"; while [ ! -f "$2" ]; do sleep 0.01; done`, "hook", filepath.Join(home, "hook-ready"), filepath.Join(home, "hook-release")})
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(filepath.Join(home, "hooks.toml"), []byte("[[hook]]\nevent = 'issue.created'\ncommand = "+string(command)+"\nargs = "+string(args)+"\ntimeout = '10s'\n"), 0600))
+		}
 		if scenario == "startup flags" {
 			env = append(env, "KATA_TRUST_PRIVATE_NETWORK=1")
 		}
 		// The daemon restarts from its own environment. A hosted PORT in the
 		// updater's shell must not move a Unix-socket daemon onto wildcard TCP.
 		t.Setenv("PORT", "4321")
-		if scenario == "daemon token" {
+		if scenario == "daemon token" || strings.Contains(scenario, "during drain") {
 			t.Setenv("KATA_AUTH_TOKEN", "caller-token")
 			// Only the daemon holds the token; the updater never needs it.
 			env = append(env, "KATA_AUTH_TOKEN=fixture-token")
@@ -138,7 +147,7 @@ func daemonLifecycle(t *testing.T) func(*testing.T, string) *daemonLifecycleFixt
 				args = append(args, "--")
 			case "read-only TCP":
 				args = append(args, "--listen", "127.0.0.1:0", "--insecure-readonly")
-			case "daemon token":
+			case "daemon token", "restart during drain", "autostart during drain", "start during drain":
 				args = append(args, "--listen", "127.0.0.1:0")
 			}
 			process := exec.Command(binary, args...) //nolint:gosec // test-owned binary and fixed arguments
@@ -278,11 +287,56 @@ func testUpdateInstallDaemonLifecycle(t *testing.T, fixture func(*testing.T, str
 
 func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *daemonLifecycleFixture) {
 	t.Helper()
-	for _, scenario := range []string{"restart failure", "older daemon", "startup flags", "new config", "equivalent concurrent restarts", "concurrent refusal"} {
+	for _, scenario := range []string{"restart failure", "older daemon", "startup flags", "new config", "equivalent concurrent restarts", "concurrent refusal", "restart during drain", "autostart during drain", "start during drain"} {
 		t.Run(scenario, func(t *testing.T) {
+			if strings.Contains(scenario, "during drain") && runtime.GOOS == "windows" {
+				t.Skip("uses a shell hook to hold graceful drain")
+			}
 			setupKataEnv(t)
 			f := fixture(t, scenario)
 			before := f.record()
+			if strings.Contains(scenario, "during drain") {
+				release := filepath.Join(f.home, "hook-release")
+				t.Cleanup(func() { _ = os.WriteFile(release, nil, 0600) })
+				for _, args := range [][]string{{"init", "--project", "example/project"}, {"create", "hold restart drain", "--json"}} {
+					command := exec.CommandContext(t.Context(), f.binary, args...) //nolint:gosec // test-built executable
+					command.Env = f.env
+					output, err := command.CombinedOutput()
+					require.NoError(t, err, "%s", output)
+				}
+				require.Eventually(t, func() bool { //nolint:kennlint // sleeptest: the real hook reports it has started
+					_, err := os.Stat(filepath.Join(f.home, "hook-ready"))
+					return err == nil
+				}, 5*time.Second, 20*time.Millisecond)
+				done := make(chan struct{}, 2)
+				go func() {
+					output, err := f.restart(t, "--json")
+					assert.NoError(t, err, "%s", output)
+					done <- struct{}{}
+				}()
+				require.Eventually(t, func() bool { return f.record().PID == 0 }, 5*time.Second, 20*time.Millisecond) //nolint:kennlint // sleeptest: graceful shutdown removes discovery before draining the real hook
+				go func() {
+					args := []string{"daemon", "restart", "--json"}
+					switch scenario {
+					case "autostart during drain":
+						args = []string{"list", "--json"}
+					case "start during drain":
+						args = []string{"daemon", "start", "--json"}
+					}
+					command := exec.CommandContext(t.Context(), f.cli, args...) //nolint:gosec // test-built executable
+					command.Env = f.env
+					output, err := command.CombinedOutput()
+					assert.NoError(t, err, "%s", output)
+					done <- struct{}{}
+				}()
+				time.Sleep(200 * time.Millisecond) //nolint:kennlint // sleeptest: allow the second real CLI to enter startup while the hook holds the record-free gap
+				require.NoError(t, os.WriteFile(release, nil, 0600))
+				<-done
+				<-done
+				assert.Equal(t, before.PID, f.record().PID)
+				assert.Equal(t, before.Endpoint().IsUnix(), f.record().Endpoint().IsUnix())
+				return
+			}
 			if scenario != "restart failure" && scenario != "older daemon" && runtime.GOOS != "windows" {
 				t.Cleanup(func() { assert.Equal(t, before.PID, f.record().PID) })
 			}

@@ -264,6 +264,9 @@ func TestLocalProfileStartUsesSelectedEnvironment(t *testing.T) {
 	startDetachedDaemonForEnsure = func(_ context.Context, opts kitdaemon.StartDetachedOptions) error { childEnv = opts.Env; return nil }
 	discoverDaemonForAutoStart = func(_ context.Context, dir string) (ensureDiscovery, error) {
 		assert.Equal(t, filepath.Join(profile.Home, "runtime", profile.StorageID), dir)
+		if childEnv == nil {
+			return ensureDiscovery{}, nil
+		}
 		return ensureDiscovery{Outcome: daemonScanCompatible, Daemon: liveDaemon{BaseURL: server.URL, Record: kitdaemon.RuntimeRecord{Address: strings.TrimPrefix(server.URL, "http://"), Network: "tcp"}}}, nil
 	}
 	resolved, err := EnsureResolvedInWorkspace(t.Context(), root)

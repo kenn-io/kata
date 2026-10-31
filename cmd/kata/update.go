@@ -132,16 +132,12 @@ func restartDaemonAfterUpdate(ctx context.Context, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	store := kitdaemon.RuntimeStore{Dir: ns.DataDir}
-	records, err := store.List()
+	records, release, err := lockLiveDaemons(ctx, ns, stderr)
 	if err != nil {
 		return err
 	}
-	noteSkippedDaemons(stderr, records)
+	defer release()
 	for _, record := range records {
-		if !daemonruntime.RuntimeProcessAlive(record) {
-			continue
-		}
 		if !daemonruntime.RuntimeRecordRestartable(record) {
 			return fmt.Errorf("daemon pid %d does not support automatic restart; run 'kata daemon stop', then 'kata daemon start' with its original startup options", record.PID)
 		}

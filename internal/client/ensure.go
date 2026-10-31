@@ -445,12 +445,27 @@ func autoStartWithMigration(ctx context.Context, dataDir string, ownerLocks, env
 	if err := daemonruntime.RefuseForeignStoreOwner(ctx, dataDir, ownerLocks); err != nil {
 		return RunningDaemon{}, fmt.Errorf("auto-start daemon: %w", err)
 	}
+	return launchAutoStart(ctx, dataDir, ownerLocks, opts, exited, migrationAllowed)
+}
+
+// launchAutoStart holds the runtime store's start lock from the launch decision
+// through readiness, reusing a compatible daemon that an in-place restart made
+// ready while this caller waited for the lock.
+func launchAutoStart(ctx context.Context, dataDir string, ownerLocks []string, opts kitdaemon.StartDetachedOptions, exited <-chan error, migrationAllowed bool) (RunningDaemon, error) {
+	release, err := (kitdaemon.RuntimeStore{Dir: dataDir}).AcquireStartLock(ctx)
+	if err != nil {
+		return RunningDaemon{}, fmt.Errorf("auto-start daemon: %w", err)
+	}
+	defer release()
+	if found, err := discoverDaemonForAutoStart(ctx, dataDir); err == nil && found.Outcome == daemonScanCompatible {
+		return runningDaemonForLive(found.Daemon), nil
+	}
 	if err := startDetachedDaemonForEnsure(ctx, opts); err != nil {
 		return RunningDaemon{}, fmt.Errorf("auto-start daemon: %w", err)
 	}
 	var running RunningDaemon
 	var unreachable error
-	err := waitForDaemonStartup(ctx, ownerLocks, daemonStartupWait, exited, func(ctx context.Context) (bool, error) {
+	err = waitForDaemonStartup(ctx, ownerLocks, daemonStartupWait, exited, func(ctx context.Context) (bool, error) {
 		found, err := discoverDaemonForAutoStart(ctx, dataDir)
 		if err != nil && !errors.Is(err, ErrLocalDaemonUnreachable) {
 			return false, err

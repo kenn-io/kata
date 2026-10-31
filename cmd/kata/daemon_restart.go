@@ -191,32 +191,31 @@ func restartRequestPath(dir string, rec kitdaemon.RuntimeRecord) string {
 func requestDaemonRestart(ctx context.Context, ns *daemonruntime.Namespace, previous kitdaemon.RuntimeRecord, executable string, flags []string) (kitdaemon.RuntimeRecord, error) {
 	ctx, cancel := context.WithTimeoutCause(ctx, daemonRestartProcessWaitTimeout, fmt.Errorf("daemon pid %d did not restart within %s", previous.PID, daemonRestartProcessWaitTimeout))
 	defer cancel()
-	replacement, err := requestLiveDaemonRestart(ctx, ns, previous, executable, flags)
+	replacement, err := requestDaemonRestartOnce(ctx, ns, previous, executable, flags)
 	if errors.Is(err, context.DeadlineExceeded) {
 		err = context.Cause(ctx)
 	}
 	return replacement, err
 }
 
-// requestLiveDaemonRestart serializes active requests with the runtime store's
-// start lock and rediscovers the live daemon when each caller takes its turn.
-func requestLiveDaemonRestart(ctx context.Context, ns *daemonruntime.Namespace, previous kitdaemon.RuntimeRecord, executable string, flags []string) (kitdaemon.RuntimeRecord, error) {
+// lockLiveDaemons takes the runtime store's start lock and lists the live
+// daemons under it. Restart callers hold the lock until their replacement is
+// ready, so no caller chooses while a daemon is between records.
+func lockLiveDaemons(ctx context.Context, ns *daemonruntime.Namespace, stderr io.Writer) ([]kitdaemon.RuntimeRecord, func(), error) {
 	store := kitdaemon.RuntimeStore{Dir: ns.DataDir}
 	release, err := store.AcquireStartLock(ctx)
 	if err != nil {
-		return kitdaemon.RuntimeRecord{}, err
+		return nil, nil, err
 	}
-	defer release()
 	records, err := store.List()
 	if err != nil {
-		return kitdaemon.RuntimeRecord{}, err
+		release()
+		return nil, nil, err
 	}
-	for _, record := range records {
-		if record.StartedAt.After(previous.StartedAt) && daemonruntime.RuntimeProcessAlive(record) {
-			previous = record
-		}
-	}
-	return requestDaemonRestartOnce(ctx, ns, previous, executable, flags)
+	noteSkippedDaemons(stderr, records)
+	return slices.DeleteFunc(records, func(record kitdaemon.RuntimeRecord) bool {
+		return !daemonruntime.RuntimeProcessAlive(record)
+	}), release, nil
 }
 
 func requestDaemonRestartOnce(ctx context.Context, ns *daemonruntime.Namespace, previous kitdaemon.RuntimeRecord, executable string, flags []string) (kitdaemon.RuntimeRecord, error) {
