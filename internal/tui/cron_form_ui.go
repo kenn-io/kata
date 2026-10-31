@@ -122,6 +122,7 @@ func (m Model) cronWorkflowChoices() []cronChoice {
 
 type cronEditOpenedMsg struct {
 	conn, scope, seq uint64
+	uid              string
 	record           CronJobRecord
 	err              error
 }
@@ -143,7 +144,7 @@ func (m Model) cronOpenEdit(uid string, seq uint64) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
 		defer cancel()
 		rec, err := api.ShowCronJob(ctx, pid, uid)
-		return cronEditOpenedMsg{conn: conn, scope: scope, seq: seq, record: rec, err: err}
+		return cronEditOpenedMsg{conn: conn, scope: scope, seq: seq, uid: uid, record: rec, err: err}
 	}
 }
 
@@ -154,7 +155,7 @@ func (m Model) cronEditOpened(msg cronEditOpenedMsg) (Model, tea.Cmd) {
 	// The answer may arrive after the user moved on; it opens the form only
 	// where the key was pressed: the same job, with nothing else on top.
 	_, _, lines := cronScreen(m)
-	if uid, ok := m.cronSelectedJob(lines, *m.cronCursor()); m.view != viewCron || m.cron.help || m.cron.confirm != nil || !m.cronJobsScope() || !ok || uid != msg.record.UID {
+	if uid, ok := m.cronSelectedJob(lines, *m.cronCursor()); m.view != viewCron || m.cron.help || m.cron.confirm != nil || !m.cronJobsScope() || !ok || uid != msg.uid {
 		return m, nil
 	}
 	if msg.err != nil {
@@ -186,7 +187,10 @@ func (m Model) cronTogglePause(job generated.CronJob) tea.Cmd {
 		if err != nil {
 			return done("", err)
 		}
-		if rec.Archived || rec.DefinitionEventUID != job.DefinitionEventUID {
+		if rec.Archived {
+			return done("", errors.New("the job is archived; restore it with u"))
+		}
+		if rec.DefinitionEventUID != job.DefinitionEventUID {
 			return done("", errors.New("the job changed since it was loaded; refreshed, try again"))
 		}
 		rec.Definition.Enabled = !rec.Definition.Enabled

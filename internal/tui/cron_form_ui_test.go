@@ -24,13 +24,14 @@ type cronWriteTestAPI struct {
 	puts      []cronPut
 	putErrs   []error // consumed one per put
 	shown     CronJobRecord
+	showErr   error
 	archives  []string
 	restores  []string
 	issueUIDs map[string]string
 }
 
 func (a *cronWriteTestAPI) ShowCronJob(context.Context, int64, string) (CronJobRecord, error) {
-	return a.shown, nil
+	return a.shown, a.showErr
 }
 
 func (a *cronWriteTestAPI) PutCronJob(_ context.Context, _ int64, uid string, w CronJobWrite) error {
@@ -360,4 +361,13 @@ func TestCronFormTakesPaste(t *testing.T) {
 	m, _ = updateModel(m, tea.PasteMsg{Content: "zzz"})
 	require.Equal(t, "pasted name", m.cron.form.val[cfName])
 	require.Equal(t, "recurring", m.cron.form.kind)
+}
+
+func TestCronEditShowsTheReasonWhenTheJobCannotBeRead(t *testing.T) {
+	m, api := cronWriteFixture(t)
+	api.showErr = &APIError{Status: http.StatusNotFound, Code: "not_found", Message: "cron not found"}
+	m, cmd := press(m, keyRune('e'))
+	m = settle(t, m, cmd)
+	require.Nil(t, m.cron.form)
+	require.Contains(t, m.toast.text, "Could not open the job")
 }
