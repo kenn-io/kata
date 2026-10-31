@@ -42,8 +42,11 @@ jobs:
       - name: Install frozen web dependencies
         run: kit-retry 3 5 make web-install
 
+      - name: Audit web dependencies
+        run: kit-retry 3 10 make web-audit
+
       - name: Run shared UI and web static checks
-        run: make web-check web-audit web-test
+        run: make web-check web-test
 
   web-browser:
     name: Web browser tests
