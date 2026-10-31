@@ -19,6 +19,7 @@ const (
 	modalQuitConfirm
 	modalDiscardComment
 	modalDiscardNewIssue
+	modalReopenBacklog
 )
 
 // renderQuitConfirmModal returns the centered "Are you sure?" panel.
@@ -58,8 +59,10 @@ func renderDiscardNewIssueModal() string {
 	return modalBoxStyle.Render(body)
 }
 
-func renderConfirmModal(kind modalKind) string {
+func renderConfirmModal(kind modalKind, reopen *reopenPrompt) string {
 	switch kind {
+	case modalReopenBacklog:
+		return renderReopenBacklogModal(reopen)
 	case modalQuitConfirm:
 		return renderQuitConfirmModal()
 	case modalDiscardComment:

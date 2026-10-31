@@ -37,15 +37,14 @@ func (dm detailModel) handleMutationKey(
 }
 
 // handleStatusKey routes the keys that don't open a modal: close,
-// reopen, clear-owner. Each fires a single mutation immediately.
+// clear-owner. Each fires a single mutation immediately. Reopen is routed by
+// Model, which confirms a recurring backlog first.
 func (dm detailModel) handleStatusKey(
 	msg tea.KeyPressMsg, km keymap, api detailAPI,
 ) (detailModel, tea.Cmd, bool) {
 	switch {
 	case km.Close.matches(msg):
 		return dm, dm.dispatchClose(api), true
-	case km.Reopen.matches(msg):
-		return dm, dm.dispatchReopen(api), true
 	case km.ClearOwner.matches(msg):
 		return dm, dm.dispatchAssign(api, ""), true
 	}
@@ -234,22 +233,6 @@ func (dm detailModel) dispatchClose(api detailAPI) tea.Cmd {
 		resp, err := api.Close(ctx, pid, ref, actor)
 		return mutationDoneMsg{
 			origin: "detail", gen: gen, kind: "close", resp: resp, err: err,
-		}
-	}
-}
-
-// dispatchReopen mirrors dispatchClose for the reopen action.
-func (dm detailModel) dispatchReopen(api detailAPI) tea.Cmd {
-	if dm.issue == nil {
-		return nil
-	}
-	pid, ref, actor, gen := dm.scopePID, dm.issue.ShortID, dm.actor, dm.gen
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		resp, err := api.Reopen(ctx, pid, ref, actor)
-		return mutationDoneMsg{
-			origin: "detail", gen: gen, kind: "reopen", resp: resp, err: err,
 		}
 	}
 }

@@ -83,16 +83,16 @@ func TestUndoCloseSuppressesSurface(t *testing.T) {
 		actor: "user-a", before: Issue{Status: "closed", ClosedReason: &done, Revision: 4},
 		after: Issue{Status: "open", Revision: 5},
 	}
-	outcome := undo.undo(t.Context(), entry, false, nil)
+	outcome := undo.undo(t.Context(), entry, undoOptions{})
 	require.NoError(t, outcome.err)
 	require.True(t, outcome.changed)
 	outcome.attempt.complete()
 
 	assert.Equal(t, []string{""}, surfaces)
 
-	outcome = undo.undo(t.Context(), entry, true, &CloseInput{
+	outcome = undo.undo(t.Context(), entry, undoOptions{evidenceRequired: true, evidence: &CloseInput{
 		Actor: "user-a", Reason: "done", Message: "Completed the requested work and checked the result.",
-	})
+	}})
 	require.NoError(t, outcome.err)
 	require.True(t, outcome.changed)
 	outcome.attempt.complete()

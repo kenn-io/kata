@@ -113,24 +113,6 @@ func TestDetail_Close_DispatchesAPI(t *testing.T) {
 	}
 }
 
-// TestDetail_Reopen_DispatchesAPI: pressing 'r' calls api.Reopen.
-func TestDetail_Reopen_DispatchesAPI(t *testing.T) {
-	api, dm, km := setupMutationTest(t)
-
-	out, cmd := dm.Update(runeKey('r'), km, api)
-	if cmd == nil {
-		t.Fatal("expected reopen cmd from r")
-	}
-	_ = runDetailCmd(t, out, cmd, km, api)
-	if api.reopenCalls != 1 {
-		t.Fatalf("reopenCalls = %d, want 1", api.reopenCalls)
-	}
-	if api.lastProjectID != 7 || api.lastRef != "42aa" || api.lastActor != "tester" {
-		t.Fatalf("reopen args wrong: pid=%d ref=%q actor=%q",
-			api.lastProjectID, api.lastRef, api.lastActor)
-	}
-}
-
 // TestDetail_AddLabel_OpensPrompt: '+' on detail emits an
 // openInputMsg{kind: inputLabelPrompt}. The cmd's message is what
 // Model.routeTopLevel intercepts to construct the inputState; dm

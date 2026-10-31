@@ -370,7 +370,7 @@ func TestUndoClientReopensRecordedCloseAfterFreshStateCheck(t *testing.T) {
 	require.Equal(t, "instance-1", entry.instanceUID)
 	resp.undo.complete()
 	f.issue = *f.closeResp.Issue
-	outcome := c.undo(context.Background(), entry, false, nil)
+	outcome := c.undo(context.Background(), entry, undoOptions{})
 	require.NoError(t, outcome.err)
 	require.True(t, outcome.changed)
 	require.Equal(t, 1, f.reopenCalls)
@@ -386,14 +386,14 @@ func TestUndoClientRefusesChangedIssueAndChangedDaemon(t *testing.T) {
 	other := "wontfix"
 	f.issue.ClosedReason = &other
 	f.issue.Revision = 8
-	outcome := c.undo(context.Background(), entry, false, nil)
+	outcome := c.undo(context.Background(), entry, undoOptions{})
 	require.False(t, outcome.changed)
 	require.NotEmpty(t, outcome.conflict)
 	require.Equal(t, 0, f.reopenCalls)
 	outcome.attempt.complete()
 	f.issue = entry.after
 	f.instanceUID = "instance-2"
-	outcome = c.undo(context.Background(), entry, false, nil)
+	outcome = c.undo(context.Background(), entry, undoOptions{})
 	require.False(t, outcome.changed)
 	require.NotEmpty(t, outcome.conflict)
 	require.Equal(t, 0, f.reopenCalls)
@@ -419,7 +419,7 @@ func TestUndoClientRestoresFieldEdits(t *testing.T) {
 			tc.entry.uid, tc.entry.projectID, tc.entry.revision = uid, 7, 4
 			tc.entry.instanceUID, tc.entry.actor = "instance-1", "bob"
 			f := &undoTestAPI{issue: tc.current, writeResp: &MutationResp{Issue: &Issue{Revision: 4}, Changed: true}}
-			outcome := newConnectedUndoClient(t, f).undo(context.Background(), tc.entry, false, nil)
+			outcome := newConnectedUndoClient(t, f).undo(context.Background(), tc.entry, undoOptions{})
 			require.NoError(t, outcome.err)
 			require.True(t, outcome.changed)
 		})
@@ -431,7 +431,7 @@ func TestUndoClientRemovesOnlyExactRecordedLink(t *testing.T) {
 	f := &undoTestAPI{issue: Issue{UID: link.From.UID, ProjectID: 7, Revision: 4}, links: []LinkEntry{link},
 		writeResp: &MutationResp{Issue: &Issue{Revision: 4}, Changed: true}}
 	entry := undoEntry{kind: "link.add", uid: link.From.UID, projectID: 7, instanceUID: "instance-1", actor: "bob", revision: 4, link: &link}
-	outcome := newConnectedUndoClient(t, f).undo(context.Background(), entry, false, nil)
+	outcome := newConnectedUndoClient(t, f).undo(context.Background(), entry, undoOptions{})
 	require.NoError(t, outcome.err)
 	require.True(t, outcome.changed)
 	require.Equal(t, int64(42), f.removedLinkID)
@@ -594,7 +594,7 @@ func TestUndoClientRefusesChangedPrincipal(t *testing.T) {
 	resp.undo.complete()
 	f.issue = *f.closeResp.Issue
 	f.authActor = "mallory"
-	out := c.undo(context.Background(), entry, false, nil)
+	out := c.undo(context.Background(), entry, undoOptions{})
 	require.Contains(t, out.conflict, "principal")
 	require.Equal(t, 0, f.reopenCalls)
 }
@@ -630,7 +630,7 @@ func TestUndoClientNoopInverseReadbackConsumesRestoredEntry(t *testing.T) {
 		writeResp:   &MutationResp{Changed: false}}
 	entry := undoEntry{kind: "close", uid: uid, projectID: 7, instanceUID: "instance-1", actor: "bob",
 		before: Issue{Status: "open", Revision: 3}, after: f.issue, revision: 4}
-	out := newConnectedUndoClient(t, f).undo(context.Background(), entry, false, nil)
+	out := newConnectedUndoClient(t, f).undo(context.Background(), entry, undoOptions{})
 	require.NoError(t, out.err)
 	require.True(t, out.already)
 	require.False(t, out.changed)

@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"context"
 	"encoding/json/v2"
 	"strings"
 	"testing"
@@ -240,4 +241,132 @@ func TestRecurringSkipIdleSweepsKeepProgress(t *testing.T) {
 	require.Empty(t, missed.Due, "an occurrence older than grace is discarded")
 	require.Equal(t, at(t, "2026-10-02T09:05:00Z"), missed.Progress.Through,
 		"discarding an occurrence records progress past it")
+}
+
+// The backlog count must equal what repeated sweeps would create, with no
+// per-sweep cap on the total.
+func TestRecurringBacklog(t *testing.T) {
+	anchor := at(t, "2026-06-01T00:00:00Z")
+	progress := RecurringProgress{Version: 1, Anchor: anchor, Through: anchor}
+	j := nativeJob(t)
+	j.Trigger = Trigger{Kind: "interval", IntervalSeconds: 60}
+
+	for name, tc := range map[string]struct {
+		change func(*JobDefinition)
+		now    time.Time
+		want   int
+	}{
+		"all counts every missed occurrence":    {func(_ *JobDefinition) {}, anchor.Add(7 * time.Minute), 7},
+		"all beyond a thousand is exact":        {func(_ *JobDefinition) {}, anchor.Add(2503 * time.Minute), 2503},
+		"nothing due yet":                       {func(_ *JobDefinition) {}, anchor.Add(30 * time.Second), 0},
+		"latest delivers one":                   {func(j *JobDefinition) { j.Catchup = "latest" }, anchor.Add(2503 * time.Minute), 1},
+		"latest with nothing due":               {func(j *JobDefinition) { j.Catchup = "latest" }, anchor.Add(30 * time.Second), 0},
+		"skip drops occurrences past grace":     {func(j *JobDefinition) { j.Catchup = "skip"; j.GraceSeconds = 60 }, anchor.Add(2503 * time.Minute), 2},
+		"disabled job delivers nothing":         {func(j *JobDefinition) { j.Enabled = false }, anchor.Add(7 * time.Minute), 0},
+		"calendar trigger counts missed months": {func(j *JobDefinition) { j.Trigger = Trigger{Kind: "cron", Cron: "0 0 1 * *"} }, at(t, "2026-09-15T00:00:00Z"), 3},
+	} {
+		t.Run(name, func(t *testing.T) {
+			job := j
+			tc.change(&job)
+			got, err := RecurringBacklog(t.Context(), job, definitionUID, progress, tc.now)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+
+	t.Run("invalid input is rejected", func(t *testing.T) {
+		_, err := RecurringBacklog(t.Context(), j, "not-a-uid", progress, anchor.Add(time.Hour))
+		require.ErrorIs(t, err, ErrInvalid)
+	})
+}
+
+// A latest calendar job closed in the middle of a scan resumes at its stored
+// horizon. Finishing that scan delivers one child, and the next sweep delivers
+// another for the occurrences between that horizon and now, so the preview
+// must count both.
+func TestRecurringBacklogFollowsUnfinishedLatestScan(t *testing.T) {
+	anchor := at(t, "2026-06-01T00:00:00Z")
+	j := nativeJob(t)
+	j.Trigger = Trigger{Kind: "cron", Cron: "* * * * *"}
+	j.Catchup = "latest"
+	until := anchor.Add(30 * time.Minute)
+	progress := RecurringProgress{
+		Version: 1, Anchor: anchor, Through: anchor,
+		Scan: &RecurringScan{DefinitionEventUID: definitionUID, Until: until, Cursor: anchor.Add(10 * time.Minute)},
+	}
+	now := until.Add(30 * time.Minute)
+
+	got, err := RecurringBacklog(t.Context(), j, definitionUID, progress, now)
+	require.NoError(t, err)
+
+	delivered := 0
+	for {
+		batch, err := PlanRecurring(j, definitionUID, progress, now)
+		require.NoError(t, err)
+		delivered += len(batch.Due)
+		if !batch.More && !batch.Progress.Through.Before(now) {
+			break
+		}
+		progress = batch.Progress
+	}
+	require.Equal(t, 2, delivered, "sweeps deliver one child per scan stage")
+	require.Equal(t, delivered, got)
+}
+
+// Editing a latest calendar job after its first scan batch restarts the scan
+// from the same cursor under the new revision. That is progress for the sweep,
+// so the preview must follow it instead of reporting a stall.
+func TestRecurringBacklogRestartsScanAfterDefinitionUpdate(t *testing.T) {
+	anchor := at(t, "2026-06-01T00:00:00Z")
+	j := nativeJob(t)
+	j.Trigger = Trigger{Kind: "cron", Cron: "* * * * *"}
+	j.Catchup = "latest"
+	stale := RecurringProgress{
+		Version: 1, Anchor: anchor, Through: anchor,
+		Scan: &RecurringScan{
+			DefinitionEventUID: "01ARZ3NDEKTSV4RRFFQ69G5FAX",
+			Until:              anchor.Add(1000 * time.Minute),
+			Cursor:             anchor.Add(1000 * time.Minute),
+		},
+	}
+
+	got, err := RecurringBacklog(t.Context(), j, definitionUID, stale, anchor.Add(3000*time.Minute))
+	require.NoError(t, err)
+	require.Equal(t, 1, got)
+}
+
+// countdownContext reports cancellation once Err has been asked a set number
+// of times, so a long scan is interrupted at a known point without a clock.
+type countdownContext struct {
+	context.Context
+	left int
+}
+
+func (c *countdownContext) Err() error {
+	if c.left--; c.left < 0 {
+		return context.Canceled
+	}
+	return nil
+}
+
+// A backlog spread over many planner batches stops between batches when the
+// caller's context ends, instead of enumerating it all.
+func TestRecurringBacklogStopsWhenContextEnds(t *testing.T) {
+	anchor := at(t, "2026-06-01T00:00:00Z")
+	progress := RecurringProgress{Version: 1, Anchor: anchor, Through: anchor}
+	j := nativeJob(t)
+	j.Trigger = Trigger{Kind: "interval", IntervalSeconds: 60}
+	now := anchor.Add(5000 * time.Minute)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := RecurringBacklog(ctx, j, definitionUID, progress, now)
+	require.ErrorIs(t, err, context.Canceled)
+
+	_, err = RecurringBacklog(&countdownContext{Context: t.Context(), left: 2}, j, definitionUID, progress, now)
+	require.ErrorIs(t, err, context.Canceled, "cancellation between batches ends the count")
+
+	got, err := RecurringBacklog(&countdownContext{Context: t.Context(), left: 100}, j, definitionUID, progress, now)
+	require.NoError(t, err)
+	require.Equal(t, 5000, got)
 }

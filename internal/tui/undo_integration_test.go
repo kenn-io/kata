@@ -174,7 +174,7 @@ func TestUndoClientRealDaemonCloseAndParentLink(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, closed.undo.entry)
 	closed.undo.complete()
-	closeOutcome := client.undo(ctx, *closed.undo.entry, false, nil)
+	closeOutcome := client.undo(ctx, *closed.undo.entry, undoOptions{})
 	require.NoError(t, closeOutcome.err)
 	require.True(t, closeOutcome.changed)
 	closeOutcome.attempt.complete()
@@ -188,7 +188,7 @@ func TestUndoClientRealDaemonCloseAndParentLink(t *testing.T) {
 	require.NotNil(t, linked.undo.entry.link)
 	require.Positive(t, linked.undo.entry.link.ID)
 	linked.undo.complete()
-	linkOutcome := client.undo(ctx, *linked.undo.entry, false, nil)
+	linkOutcome := client.undo(ctx, *linked.undo.entry, undoOptions{})
 	require.NoError(t, linkOutcome.err)
 	require.True(t, linkOutcome.changed)
 	linkOutcome.attempt.complete()
@@ -228,14 +228,14 @@ func TestUndoClientRealDaemonScopedReopenRequiresEvidence(t *testing.T) {
 	require.NotNil(t, reopened.undo.entry)
 	reopened.undo.complete()
 	entry := *reopened.undo.entry
-	preflight := client.undo(ctx, entry, true, nil)
+	preflight := client.undo(ctx, entry, undoOptions{evidenceRequired: true})
 	require.True(t, preflight.needsEvidence)
 	require.False(t, preflight.changed)
 	preflight.attempt.complete()
-	outcome := client.undo(ctx, entry, true, &CloseInput{Actor: "worker-a", Reason: "done",
+	outcome := client.undo(ctx, entry, undoOptions{evidenceRequired: true, evidence: &CloseInput{Actor: "worker-a", Reason: "done",
 		Message:  "Completed the assigned work and verified it.",
 		Evidence: []api.Evidence{{Type: api.EvidenceTest, Command: "go test ./internal/tui"}},
-	})
+	}})
 	require.NoError(t, outcome.err)
 	require.True(t, outcome.changed)
 	outcome.attempt.complete()
@@ -261,7 +261,7 @@ func TestUndoClientRealDaemonBodyConflictWithoutRevisionChange(t *testing.T) {
 	external, err := base.EditBody(ctx, project.ID, issue.UID, "someone else's text", "bob")
 	require.NoError(t, err)
 	require.Equal(t, entry.revision, external.Issue.Revision)
-	outcome := client.undo(ctx, entry, false, nil)
+	outcome := client.undo(ctx, entry, undoOptions{})
 	require.Contains(t, outcome.conflict, "body")
 	require.False(t, outcome.changed)
 	outcome.attempt.complete()
@@ -291,7 +291,7 @@ func TestUndoClientRealDaemonDetectsStatusChangedAwayAndBack(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, entry.after.Status, reclosed.Issue.Status)
 	require.Equal(t, entry.after.ClosedReason, reclosed.Issue.ClosedReason)
-	outcome := client.undo(ctx, entry, false, nil)
+	outcome := client.undo(ctx, entry, undoOptions{})
 	defer outcome.attempt.complete()
 	require.NotEmpty(t, outcome.conflict)
 	require.False(t, outcome.changed)

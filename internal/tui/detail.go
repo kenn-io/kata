@@ -52,7 +52,6 @@ type detailAPI interface {
 	ListEvents(ctx context.Context, projectID int64, ref string) ([]EventLogEntry, error)
 	ListLinks(ctx context.Context, projectID int64, ref string) ([]LinkEntry, error)
 	Close(ctx context.Context, projectID int64, ref, actor string) (*MutationResp, error)
-	Reopen(ctx context.Context, projectID int64, ref, actor string) (*MutationResp, error)
 	AddLabel(
 		ctx context.Context, projectID int64, ref, label, actor string,
 	) (*MutationResp, error)

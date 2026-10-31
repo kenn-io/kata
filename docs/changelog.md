@@ -9,6 +9,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Reopening a parent in the TUI now shows how many recurring children it will
+  deliver. Press `r` in the list or detail view, or `u` to undo a close, on a
+  parent whose `catchup: "all"` job missed several occurrences, and the TUI
+  asks you to reopen or cancel with the exact count. It names
+  `kata cron job update` for changing catch-up. One or zero due children reopen
+  without a prompt. See the [CLI reference](reference/cli.md).
 - Show what is stuck in any web collection, Inbox and Today included, with the
   optional **Blocked by** column. It lists each task's open blockers, three IDs
   at most and then `+N`; closed blockers are left out. It is off by default;

@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"context"
 	"encoding/json/v2"
 	"strings"
 	"time"
@@ -233,4 +234,43 @@ func PlanRecurring(j JobDefinition, definitionEventUID string, p RecurringProgre
 	}
 	out.Progress = p
 	return out, nil
+}
+
+// RecurringBacklog counts the children that sweeping from p up to now would
+// deliver. The 1000-per-step cap only spreads a large backlog over several
+// sweeps, so the count follows the planner to the end and is exact. A large
+// backlog takes many batches, so ctx is checked between them.
+func RecurringBacklog(ctx context.Context, j JobDefinition, definitionEventUID string, p RecurringProgress, now time.Time) (int, error) {
+	total := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+		batch, err := PlanRecurring(j, definitionEventUID, p, now)
+		if err != nil {
+			return 0, err
+		}
+		total += len(batch.Due)
+		same := sameRecurringPosition(p, batch.Progress)
+		// A finished scan can stop at a horizon older than now; the next sweep
+		// then plans the stretch after it, so keep going until progress
+		// reaches now.
+		if !batch.More && (same || !batch.Progress.Through.Before(now.UTC())) {
+			return total, nil
+		}
+		if same {
+			return 0, invalid("recurring planner made no progress")
+		}
+		p = batch.Progress
+	}
+}
+
+func sameRecurringPosition(a, b RecurringProgress) bool {
+	if !a.Through.Equal(b.Through) || (a.Scan == nil) != (b.Scan == nil) {
+		return false
+	}
+	// A scan restarted under a new revision or horizon is a new checkpoint
+	// even when it stops at the same cursor.
+	return a.Scan == nil || (a.Scan.Cursor.Equal(b.Scan.Cursor) &&
+		a.Scan.DefinitionEventUID == b.Scan.DefinitionEventUID && a.Scan.Until.Equal(b.Scan.Until))
 }

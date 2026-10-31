@@ -1890,6 +1890,15 @@ position; `c` clears the selected request
 (daemon API `0.13.0` or newer, guarded against a concurrent replacement);
 `r` refreshes. Press `T` or Esc to return to the previous view.
 
+Press `r` in the issue list or detail view to reopen an issue. When the issue
+is the parent of native recurring jobs, the TUI first counts the children that
+reopening would deliver, summed across its jobs from their stored progress. If
+more than one child is due, it shows the exact count and asks you to reopen or
+cancel; zero or one due child reopens without a prompt. The prompt names
+[`kata cron job update`](cron.md) for changing a job's catch-up and does not
+choose a policy for you. Undoing a close asks the same way. If the TUI cannot
+read the jobs, it reopens without a prompt.
+
 Press `u` in the issue list or detail view to undo the latest eligible issue
 edit from this TUI session. Repeated presses walk back through up to 20 edits,
 including close, reopen, owner, priority, label, body, and newly added parent,

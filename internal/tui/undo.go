@@ -83,6 +83,9 @@ func (m Model) startUndo() (Model, tea.Cmd) {
 	if m.undoInFlight {
 		return m.undoNotice("undo already in progress", toastInfo)
 	}
+	if m.reopenLookupPending {
+		return m.undoNotice("reopen already in progress", toastInfo)
+	}
 	if len(m.undoHistory.entries) == 0 {
 		message := "nothing to undo"
 		if m.undoHistory.boundary != "" {
@@ -90,22 +93,33 @@ func (m Model) startUndo() (Model, tea.Cmd) {
 		}
 		return m.undoNotice(message, toastInfo)
 	}
-	client, ok := m.api.(*undoClient)
+	_, ok := m.api.(*undoClient)
 	if !ok {
 		return m.undoNotice("undo unavailable for this connection", toastError)
 	}
 	if !m.mutationAllowed(true) {
 		return m.undoNotice("undo unavailable with current permissions", toastError)
 	}
+	return m.runUndo(undoOptions{evidenceRequired: m.closeRequiresEvidence, checkBacklog: true}, 0)
+}
+
+// runUndo undoes the latest history entry. A non-zero wantEntryID names the
+// entry a confirmation was shown for; if another entry is now latest, nothing runs.
+func (m Model) runUndo(opts undoOptions, wantEntryID uint64) (Model, tea.Cmd) {
+	client, ok := m.api.(*undoClient)
+	if !ok || len(m.undoHistory.entries) == 0 {
+		return m.undoNotice("undo action is no longer available", toastError)
+	}
 	entry := m.undoHistory.entries[len(m.undoHistory.entries)-1]
+	if wantEntryID != 0 && entry.id != wantEntryID {
+		return m.undoNotice("undo action is no longer available", toastError)
+	}
 	m.undoInFlight = true
 	connGen := m.connGen
-	evidenceRequired := m.closeRequiresEvidence
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		return undoDoneMsg{connGen: connGen, entryID: entry.id,
-			outcome: client.undo(ctx, entry, evidenceRequired, nil)}
+		return undoDoneMsg{connGen: connGen, entryID: entry.id, outcome: client.undo(ctx, entry, opts)}
 	}
 }
 
@@ -146,6 +160,8 @@ func (m Model) handleUndoDone(msg undoDoneMsg) (Model, tea.Cmd) {
 	switch {
 	case out.needsEvidence:
 		return m.openUndoCloseForm(), nil
+	case out.backlog > 1:
+		return m.promptReopenBacklog(reopenPrompt{ref: target, count: out.backlog, undoEntryID: entry.id}), nil
 	case out.conflict != "":
 		m.undoHistory.entries = m.undoHistory.entries[:len(m.undoHistory.entries)-1]
 		return m.undoNotice("skipped undo for "+target+": "+out.conflict, toastError)
@@ -286,7 +302,7 @@ func (m Model) dispatchUndoEvidenceClose(in CloseInput) (Model, tea.Cmd) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		return undoDoneMsg{connGen: connGen, entryID: entry.id, formGen: formGen,
-			outcome: client.undo(ctx, entry, true, &in)}
+			outcome: client.undo(ctx, entry, undoOptions{evidenceRequired: true, evidence: &in})}
 	}
 }
 
