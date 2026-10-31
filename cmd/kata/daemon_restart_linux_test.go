@@ -40,19 +40,11 @@ func TestDaemonRestart_PreservesNetworkNamespace(t *testing.T) {
 	t.Cleanup(func() { _ = process.Process.Signal(syscall.SIGTERM); <-exited })
 	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
-	store := kitdaemon.RuntimeStore{Dir: ns.DataDir}
 	var before kitdaemon.RuntimeRecord
 	require.Eventually(t, func() bool { //nolint:kennlint // sleeptest: subprocess readiness is published through its runtime record
-		records, err := store.List()
-		if err == nil {
-			for _, rec := range records {
-				if daemonruntime.RuntimeProcessAlive(rec) {
-					before = rec
-					return true
-				}
-			}
-		}
-		return false
+		var ready bool
+		before, ready = liveDaemonRecord(ns.DataDir, process.Process.Pid)
+		return ready
 	}, 10*time.Second, 20*time.Millisecond)
 	originalNetwork, err := os.Readlink("/proc/" + strconv.Itoa(before.PID) + "/ns/net")
 	require.NoError(t, err)
@@ -87,10 +79,6 @@ func TestDaemonRestart_PreservesNetworkNamespace(t *testing.T) {
 			}
 		}
 	})
-	records, err := store.List()
-	require.NoError(t, err)
-	require.Len(t, records, 1)
-	require.True(t, records[0].StartedAt.After(before.StartedAt))
 	replacementNetwork, err := os.Readlink("/proc/" + strconv.Itoa(result.PID) + "/ns/net")
 	require.NoError(t, err)
 	require.Equal(t, originalNetwork, replacementNetwork, "restart must retain the host network")

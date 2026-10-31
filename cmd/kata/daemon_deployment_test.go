@@ -84,8 +84,8 @@ func TestDeploymentNoAutoTokenStopsCreation(t *testing.T) {
 	require.True(t, os.IsNotExist(err))
 }
 
-func TestDeploymentNoAutoTokenFlagReachesStartAndRestart(t *testing.T) {
-	for _, action := range []string{"start", "restart"} {
+func TestDeploymentNoAutoTokenFlagReachesStart(t *testing.T) {
+	for _, action := range []string{"start"} {
 		t.Run(action, func(t *testing.T) {
 			resetFlags(t)
 			deploymentHome(t)

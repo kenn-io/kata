@@ -856,7 +856,8 @@ func daemonRestartCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			recs, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).List()
+			store := kitdaemon.RuntimeStore{Dir: ns.DataDir}
+			recs, err := store.List()
 			if err != nil {
 				return err
 			}
@@ -869,7 +870,7 @@ func daemonRestartCmd() *cobra.Command {
 				if cmd.Flags().Changed("listen") || cmd.Flags().Changed("insecure-readonly") || cmd.Flags().Changed("no-auto-token") {
 					return fmt.Errorf("restart retains the running daemon's startup options; run 'kata daemon stop', then 'kata daemon start' with the requested options")
 				}
-				if !daemonruntime.RuntimeRecordRestartable(rec) {
+				if !daemonruntime.RuntimeRecordRestartable(rec) || rec.Metadata[daemonruntime.RuntimeRestartExecutableKey] == "" {
 					return fmt.Errorf("daemon pid %d does not support automatic restart; run 'kata daemon stop', then 'kata daemon start' with its original startup options", rec.PID)
 				}
 				running = append(running, rec)
@@ -885,8 +886,12 @@ func daemonRestartCmd() *cobra.Command {
 					return err
 				}
 			} else {
+				target := newDaemonRestart(cmd.ErrOrStderr())
+				if target == nil {
+					return fmt.Errorf("cannot resolve the installed restart executable")
+				}
 				for _, rec := range running {
-					replacement, err := requestDaemonRestart(cmd.Context(), ns, rec)
+					replacement, err := requestDaemonRestart(cmd.Context(), ns, rec, target.executable)
 					if err != nil {
 						return err
 					}
@@ -1426,6 +1431,7 @@ func runDaemonProcess(
 	maps.Copy(rec.Metadata, webRuntime.Metadata())
 	if restart != nil {
 		rec.Metadata[daemonruntime.RuntimeRestartMetadataKey] = "1"
+		rec.Metadata[daemonruntime.RuntimeRestartExecutableKey] = restart.executable
 	}
 
 	broadcaster := daemon.NewEventBroadcaster()
@@ -1463,8 +1469,27 @@ func runDaemonProcess(
 		restartSignals, restartCleanup = installRestartSource(ctx, ns.DBHash)
 		workers.Go(func() {
 			restart.watch(ctx, restartSignals, func() error {
-				_, err := preflightDaemonStartup(ctx, originalListen, insecureReadonly, noAutoToken)
-				return err
+				path, err := runtimeStore.Path(rec.PID)
+				if err != nil {
+					return err
+				}
+				current, err := runtimeStore.Read(path)
+				if err != nil {
+					return err
+				}
+				target := current.Metadata[daemonruntime.RuntimeRestartExecutableKey]
+				if !current.StartedAt.Equal(rec.StartedAt) || !filepath.IsAbs(target) {
+					return fmt.Errorf("restart target is missing or runtime generation changed")
+				}
+				executable, err := exec.LookPath(target)
+				if err != nil {
+					return err
+				}
+				if _, err := preflightDaemonStartup(ctx, originalListen, insecureReadonly, noAutoToken); err != nil {
+					return err
+				}
+				restart.executable = executable
+				return nil
 			}, daemonLog, shutdownTrigger.Call)
 		})
 	}

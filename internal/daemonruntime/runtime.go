@@ -14,6 +14,9 @@ import (
 // restart after an update.
 const RuntimeRestartMetadataKey = "restart_signal"
 
+// RuntimeRestartExecutableKey carries the executable a path-aware daemon will run.
+const RuntimeRestartExecutableKey = "restart_executable"
+
 // RuntimeProcessAlive reports whether a runtime record still identifies a local
 // process that created it. For legacy records without an identity, a process
 // created after the record was published proves that the PID has been reused.

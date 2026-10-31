@@ -9,6 +9,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Keep the browser reachable when `kata daemon restart` runs from a sandbox or
+  container. The running daemon uses the CLI's installed executable while
+  retaining its own environment, startup options, and idle policy. Changing
+  startup flags or replacing an older signal-only daemon requires stop/start.
+
 - Show what is stuck in any web collection, Inbox and Today included, with the
   optional **Blocked by** column. It lists each task's open blockers, three IDs
   at most and then `+N`; closed blockers are left out. It is off by default;

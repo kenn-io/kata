@@ -105,6 +105,9 @@ If the daemon does not come back, or it does not support automatic restart, the
 command reports that the binary was installed and returns an error. Resolve
 any reported startup problem, then run `kata daemon stop` followed by
 `kata daemon start` with the daemon's original startup options.
+After a package-manager upgrade, `kata daemon restart` uses the executable
+invoked by the CLI while retaining the running daemon's environment. Older
+signal-only daemons need one stop/start before explicit restart can do this.
 
 Package-managed installations keep
 `kata update --check`, but install-capable update forms direct you back to the

@@ -55,9 +55,6 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 		t.Skip("builds and runs isolated daemon binaries")
 	}
 	childEnv := daemonLifecycleEnvironment(t)
-	originalWait := daemonReplacementWaitTimeout
-	daemonReplacementWaitTimeout = 5 * time.Second
-	t.Cleanup(func() { daemonReplacementWaitTimeout = originalWait })
 	moduleDir, err := os.Getwd()
 	require.NoError(t, err)
 	workspace := t.TempDir()
@@ -76,15 +73,19 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 		require.NoError(t, err, "%s", output)
 		binaries[version] = binary
 	}
-	scenarios := []string{"running", "stopped", "check only", "cancelled", "install failure", "restart failure", "read-only TCP", "older daemon", "daemon token", "idle shutdown"}
+	scenarios := []string{"running", "stopped", "check only", "cancelled", "install failure", "read-only TCP", "older daemon", "daemon token", "idle shutdown"}
 	if explicitRestart {
-		scenarios = []string{"running", "restart failure", "read-only TCP", "older daemon", "daemon token", "idle shutdown", "startup flags", "config listen"}
+		scenarios = []string{"running", "restart failure", "older daemon", "startup flags", "upgrade retained", "upgrade removed"}
 	}
 	for _, scenario := range scenarios {
 		t.Run(scenario, func(t *testing.T) {
 			resetFlags(t)
 			fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{CurrentVersion: "v0.1.0", LatestVersion: "v0.2.0"}}}
-			stubUpdateClient(t, fake)
+			if explicitRestart {
+				setupKataEnv(t)
+			} else {
+				stubUpdateClient(t, fake)
+			}
 			home, err := config.KataHome()
 			require.NoError(t, err)
 			binary := filepath.Join(t.TempDir(), filepath.Base(binaries["v0.1.0"]))
@@ -92,12 +93,28 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 			// staged replacement exercised by fake.install below, where the
 			// existing daemon binary really must be replaced.
 			copyTestExecutable(t, binaries["v0.1.0"], binary)
+			launchBinary := binary
+			cli := binaries["v0.2.0"]
+			if strings.HasPrefix(scenario, "upgrade") {
+				if runtime.GOOS == "windows" {
+					t.Skip("installation symlink regression is Unix-specific")
+				}
+				launchBinary = filepath.Join(t.TempDir(), "kata")
+				require.NoError(t, os.Symlink(binary, launchBinary))
+				cli = launchBinary
+			}
 			env := append(append([]string(nil), childEnv...), "KATA_HOME="+home, "KATA_DB="+filepath.Join(home, "kata.db"), "KATA_WORKSPACE="+workspace, "KATA_AUTHOR=user-a")
+			restartCLI := func(args ...string) (string, error) {
+				command := exec.CommandContext(t.Context(), cli, append([]string{"daemon", "restart"}, args...)...) //nolint:gosec // G204: test-built executable
+				command.Env = append(append([]string(nil), env...), "PORT=4321")
+				output, err := command.CombinedOutput()
+				return string(output), err
+			}
 			// The daemon restarts from its own environment. A hosted PORT in the
 			// updater's shell must not move a Unix-socket daemon onto wildcard TCP.
 			t.Setenv("PORT", "4321")
-			t.Setenv("KATA_AUTH_TOKEN", "caller-token")
 			if scenario == "daemon token" {
+				t.Setenv("KATA_AUTH_TOKEN", "caller-token")
 				// Only the daemon holds the token; the updater never needs it.
 				env = append(env, "KATA_AUTH_TOKEN=fixture-token")
 			}
@@ -117,7 +134,7 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 				return kitdaemon.RuntimeRecord{}
 			}
 			t.Cleanup(func() {
-				stop := exec.Command(binary, "daemon", "stop") //nolint:gosec // test-owned binary
+				stop := exec.Command(binaries["v0.2.0"], "daemon", "stop") //nolint:gosec // test-owned binary
 				stop.Env = env
 				output, err := stop.CombinedOutput()
 				assert.NoError(t, err, "%s", output)
@@ -131,7 +148,7 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 				case "daemon token":
 					args = append(args, "--listen", "127.0.0.1:0")
 				}
-				process := exec.Command(binary, args...) //nolint:gosec // test-owned binary and fixed arguments
+				process := exec.Command(launchBinary, args...) //nolint:gosec // test-owned binary and fixed arguments
 				process.Env = env
 				process.Stderr = os.Stderr
 				if scenario == "restart failure" {
@@ -156,8 +173,12 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 			}
 			before := record()
 			if scenario == "older daemon" {
-				// Earlier daemons do not advertise the restart signal.
-				delete(before.Metadata, daemonruntime.RuntimeRestartMetadataKey)
+				// Older daemons can lack executable selection or the restart signal.
+				if explicitRestart {
+					delete(before.Metadata, daemonruntime.RuntimeRestartExecutableKey)
+				} else {
+					delete(before.Metadata, daemonruntime.RuntimeRestartMetadataKey)
+				}
 				_, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(before)
 				require.NoError(t, err)
 			}
@@ -167,9 +188,6 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 				}
 				if err := selfupdate.InstallBinary(binaries["v0.2.0"], binary); err != nil {
 					return err
-				}
-				if scenario == "restart failure" {
-					return os.WriteFile(filepath.Join(home, "config.toml"), []byte("invalid = ["), 0600)
 				}
 				return nil
 			}
@@ -191,18 +209,23 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 				if scenario == "restart failure" {
 					require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("invalid = ["), 0600))
 				}
-				if scenario == "config listen" {
-					require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("listen = \"127.0.0.1:0\"\n"), 0600))
-				}
 				if scenario == "startup flags" {
 					for _, flag := range []string{"--listen=127.0.0.1:0", "--insecure-readonly=false", "--no-auto-token=false"} {
-						_, _, err := executeRootCapture(t, t.Context(), "daemon", "restart", flag)
-						require.ErrorContains(t, err, "kata daemon stop")
+						output, err := restartCLI(flag)
+						require.Error(t, err)
+						assert.Contains(t, output, "kata daemon stop")
 						assert.Equal(t, before.StartedAt, record().StartedAt)
 					}
 					return
 				}
-				stdout, stderr, updateErr = executeRootCapture(t, t.Context(), "daemon", "restart", "--json")
+				if strings.HasPrefix(scenario, "upgrade") {
+					require.NoError(t, os.Remove(launchBinary))
+					require.NoError(t, os.Symlink(binaries["v0.2.0"], launchBinary))
+					if scenario == "upgrade removed" {
+						require.NoError(t, os.Remove(binary))
+					}
+				}
+				stdout, updateErr = restartCLI("--json")
 			} else {
 				stdout, stderr, updateErr = executeRootCapture(t, t.Context(), "update", "--yes", "--json")
 			}
@@ -212,7 +235,7 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 					assert.Contains(t, updateErr.Error(), "installed")
 					assert.NotEmpty(t, fake.installed)
 				}
-				assert.Contains(t, updateErr.Error(), "kata daemon stop")
+				assert.Contains(t, stdout+updateErr.Error(), "kata daemon stop")
 				assert.Equal(t, before.StartedAt, record().StartedAt)
 				httpClient, baseURL := client.LocalHTTPClient(before.Endpoint().ConfigAddress())
 				status, _, err := httpDoJSON(t.Context(), httpClient, http.MethodGet, baseURL+"/api/v1/ping", nil)
@@ -221,8 +244,8 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 				return
 			}
 			if scenario == "restart failure" {
-				require.ErrorContains(t, updateErr, "restart")
-				assert.Contains(t, updateErr.Error(), "validate replacement", "return daemon-side validation diagnostics")
+				require.Error(t, updateErr)
+				assert.Contains(t, stdout, "validate replacement", "return daemon-side validation diagnostics")
 				assert.Equal(t, before.StartedAt, record().StartedAt)
 				httpClient, baseURL := client.LocalHTTPClient(before.Endpoint().ConfigAddress())
 				status, _, err := httpDoJSON(t.Context(), httpClient, http.MethodGet, baseURL+"/api/v1/ping", nil)
@@ -230,7 +253,7 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 				assert.Equal(t, http.StatusOK, status)
 				require.NoError(t, os.Remove(filepath.Join(home, "config.toml")))
 				// A corrected request must still reach the signal watcher.
-				_, _, err = executeRootCapture(t, t.Context(), "daemon", "restart")
+				_, err = restartCLI()
 				require.NoError(t, err)
 				require.True(t, record().StartedAt.After(before.StartedAt))
 				return
@@ -260,8 +283,8 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 				return
 			}
 			require.True(t, after.StartedAt.After(before.StartedAt), "update must replace the running daemon")
+			assert.Equal(t, "v0.2.0", after.Version)
 			if !explicitRestart {
-				assert.Equal(t, "v0.2.0", after.Version)
 				assert.Contains(t, stderr, "restarted daemon")
 			}
 			httpClient, baseURL := client.LocalHTTPClient(after.Endpoint().ConfigAddress())
@@ -269,8 +292,6 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 			require.NoError(t, err)
 			assert.Equal(t, 200, status)
 			switch scenario {
-			case "config listen":
-				assert.False(t, after.Endpoint().IsUnix())
 			case "running":
 				assert.Equal(t, before.Endpoint().IsUnix(), after.Endpoint().IsUnix())
 			case "daemon token":

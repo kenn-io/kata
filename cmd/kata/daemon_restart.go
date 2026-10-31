@@ -82,7 +82,13 @@ func (r *daemonRestart) exec(ctx context.Context) error {
 // daemonReplacementWaitTimeout is overridable for refused-restart tests.
 var daemonReplacementWaitTimeout = daemonRestartProcessWaitTimeout
 
-func requestDaemonRestart(ctx context.Context, ns *daemonruntime.Namespace, previous kitdaemon.RuntimeRecord) (kitdaemon.RuntimeRecord, error) {
+func requestDaemonRestart(ctx context.Context, ns *daemonruntime.Namespace, previous kitdaemon.RuntimeRecord, executable string) (kitdaemon.RuntimeRecord, error) {
+	if executable != "" {
+		previous.Metadata[daemonruntime.RuntimeRestartExecutableKey] = executable
+		if _, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(previous); err != nil {
+			return kitdaemon.RuntimeRecord{}, err
+		}
+	}
 	if err := daemonruntime.SignalDaemonRestart(previous, ns.DBHash); err != nil {
 		return kitdaemon.RuntimeRecord{}, fmt.Errorf("signal daemon pid %d: %w", previous.PID, err)
 	}

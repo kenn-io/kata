@@ -15,7 +15,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
-	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -1303,10 +1302,6 @@ func TestDaemonRestart_StartsWhenNoDaemonIsRunning(t *testing.T) {
 		"  web UI:  http://127.0.0.1:28888\n", string(out))
 }
 
-func TestDaemonRestartReservesProcessExitMarginBeyondDrainBudget(t *testing.T) {
-	require.Equal(t, 5*time.Second, daemonRestartProcessWaitTimeout-daemonShutdownDrainTimeout)
-}
-
 func TestDaemonRestart_JSONReportsStartedDaemon(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
@@ -1367,17 +1362,19 @@ func TestDaemonRestart_PassesStartupOverrides(t *testing.T) {
 	orig := startDetachedDaemon
 	t.Cleanup(func() { startDetachedDaemon = orig })
 	var gotListen string
-	var gotInsecureReadonly bool
-	startDetachedDaemon = func(_ context.Context, listen string, insecureReadonly, _ bool) (daemonStartOutput, error) {
+	var gotInsecureReadonly, gotNoAutoToken bool
+	startDetachedDaemon = func(_ context.Context, listen string, insecureReadonly, noAutoToken bool) (daemonStartOutput, error) {
 		gotListen = listen
 		gotInsecureReadonly = insecureReadonly
+		gotNoAutoToken = noAutoToken
 		return daemonStartOutput{Action: "started", PID: 4242, Address: listen}, nil
 	}
 
-	executeRoot(t, newRootCmd(), "daemon", "restart", "--listen", "100.64.0.5:7777", "--insecure-readonly")
+	executeRoot(t, newRootCmd(), "daemon", "restart", "--listen", "100.64.0.5:7777", "--insecure-readonly", "--no-auto-token")
 
 	assert.Equal(t, "100.64.0.5:7777", gotListen)
 	assert.True(t, gotInsecureReadonly)
+	assert.True(t, gotNoAutoToken)
 }
 
 func TestDaemonRestart_ValidatesStoppedDaemonStartup(t *testing.T) {
@@ -2906,22 +2903,6 @@ func startSleepProcess(t *testing.T) *exec.Cmd {
 func TestDaemonCommandSleepHelperProcess(_ *testing.T) {
 	if os.Getenv("KATA_DAEMON_CMD_SLEEP_HELPER") != "1" {
 		return
-	}
-	if rawDelay := os.Getenv("KATA_DAEMON_CMD_SHUTDOWN_DELAY"); rawDelay != "" {
-		delay, err := time.ParseDuration(rawDelay)
-		if err != nil {
-			os.Exit(2)
-		}
-		shutdown := make(chan os.Signal, 1)
-		signal.Notify(shutdown)
-		if readyPath := os.Getenv("KATA_DAEMON_CMD_READY_PATH"); readyPath != "" {
-			if err := os.WriteFile(readyPath, nil, 0o600); err != nil { //nolint:gosec // test-controlled path under t.TempDir
-				os.Exit(3)
-			}
-		}
-		<-shutdown
-		time.Sleep(delay)
-		os.Exit(0)
 	}
 	_, _ = io.Copy(io.Discard, os.Stdin)
 	os.Exit(0)

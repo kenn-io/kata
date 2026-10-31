@@ -1802,11 +1802,12 @@ PID; a resident daemon is reported as already running. Use
 `daemon start --foreground` for service managers, hosted deployments, and any
 setup where the daemon process should stay attached to the terminal. `daemon
 restart` asks each running local daemon to replace itself in its original
-environment, retaining its startup options, credentials, network, and idle
-policy. The daemon validates the replacement settings before stopping; an
+environment, using the installed executable invoked by the CLI and retaining
+its startup options, credentials, network, and idle policy. The daemon validates the replacement settings before stopping; an
 invalid configuration leaves it serving, and the command reports a bounded
 timeout with available daemon-log diagnostics. Restart flags apply only when stopped.
-To change startup flags, or replace a daemon without restart support, run
+To change startup flags, or replace an older daemon that supports only restart
+signals rather than executable selection, run
 `kata daemon stop` followed by `kata daemon start` with the desired options. Background start and restart output reports the
 resolved web UI URL on its own line after the daemon transport address.
 `daemon start`, `stop`, `restart`, `reload`, and `logs` administer the current
