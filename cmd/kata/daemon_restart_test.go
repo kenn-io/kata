@@ -82,6 +82,5 @@ func TestDaemonRestart_CallerFailure(t *testing.T) {
 		rec := kitdaemon.RuntimeRecord{PID: child.Process.Pid, StartedAt: time.Now().UTC(), Metadata: map[string]string{daemonruntime.RuntimeRestartExecutableKey: "1"}}
 		_, err := requestDaemonRestart(ctx, &daemonruntime.Namespace{DataDir: dir}, rec, "/installed/kata", nil)
 		require.ErrorIs(t, err, context.Canceled)
-
 	})
 }

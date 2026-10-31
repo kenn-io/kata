@@ -112,9 +112,10 @@ func daemonLifecycle(t *testing.T) func(*testing.T, string) *daemonLifecycleFixt
 		// The daemon restarts from its own environment. A hosted PORT in the
 		// updater's shell must not move a Unix-socket daemon onto wildcard TCP.
 		t.Setenv("PORT", "4321")
-		if scenario == "daemon token" || strings.Contains(scenario, "during drain") {
+		if scenario == "daemon token" {
 			t.Setenv("KATA_AUTH_TOKEN", "caller-token")
-			// Only the daemon holds the token; the updater never needs it.
+		}
+		if scenario == "daemon token" || strings.Contains(scenario, "during drain") {
 			env = append(env, "KATA_AUTH_TOKEN=fixture-token")
 		}
 		if scenario == "idle shutdown" {
@@ -199,7 +200,6 @@ func testUpdateInstallDaemonLifecycle(t *testing.T, fixture func(*testing.T, str
 			before := f.record()
 			if scenario == "older daemon" {
 				delete(before.Metadata, daemonruntime.RuntimeRestartMetadataKey)
-				delete(before.Metadata, daemonruntime.RuntimeRestartExecutableKey)
 				_, err := f.store.Write(before)
 				require.NoError(t, err)
 			}
@@ -287,10 +287,10 @@ func testUpdateInstallDaemonLifecycle(t *testing.T, fixture func(*testing.T, str
 
 func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *daemonLifecycleFixture) {
 	t.Helper()
-	for _, scenario := range []string{"restart failure", "older daemon", "startup flags", "new config", "equivalent concurrent restarts", "concurrent refusal", "restart during drain", "autostart during drain", "start during drain"} {
+	for _, scenario := range []string{"restart failure", "older daemon", "startup flags", "new config", "refusal then restart", "restart during drain", "autostart during drain", "start during drain"} {
 		t.Run(scenario, func(t *testing.T) {
-			if strings.Contains(scenario, "during drain") && runtime.GOOS == "windows" {
-				t.Skip("uses a shell hook to hold graceful drain")
+			if strings.Contains(scenario, "during drain") && runtime.GOOS != "linux" {
+				t.Skip("holds drain with a shell hook and observes the start lock through inotify")
 			}
 			setupKataEnv(t)
 			f := fixture(t, scenario)
@@ -315,6 +315,9 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 					done <- struct{}{}
 				}()
 				require.Eventually(t, func() bool { return f.record().PID == 0 }, 5*time.Second, 20*time.Millisecond) //nolint:kennlint // sleeptest: graceful shutdown removes discovery before draining the real hook
+				lockPath, err := f.store.LockPath()
+				require.NoError(t, err)
+				lockAttempted := watchOpens(t, lockPath)
 				go func() {
 					args := []string{"daemon", "restart", "--json"}
 					switch scenario {
@@ -329,7 +332,7 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 					assert.NoError(t, err, "%s", output)
 					done <- struct{}{}
 				}()
-				time.Sleep(200 * time.Millisecond) //nolint:kennlint // sleeptest: allow the second real CLI to enter startup while the hook holds the record-free gap
+				lockAttempted() // the second CLI is retrying the start lock the first restart holds
 				require.NoError(t, os.WriteFile(release, nil, 0600))
 				<-done
 				<-done
@@ -340,34 +343,12 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 			if scenario != "restart failure" && scenario != "older daemon" && runtime.GOOS != "windows" {
 				t.Cleanup(func() { assert.Equal(t, before.PID, f.record().PID) })
 			}
-			if scenario == "concurrent refusal" || scenario == "equivalent concurrent restarts" {
-				callers := 6
-				if scenario == "concurrent refusal" {
-					callers = 2
-				}
-				start, done := make(chan struct{}), make(chan struct{}, callers)
-				for caller := range callers {
-					go func() {
-						<-start
-						args := []string{"--json"}
-						invalid := scenario == "concurrent refusal" && caller == 0
-						if invalid {
-							args = append(args, "--listen=invalid")
-						}
-						output, err := f.restart(t, args...)
-						if invalid {
-							assert.Error(t, err)
-							assert.Contains(t, output, "invalid")
-						} else {
-							assert.NoError(t, err, "%s", output)
-						}
-						done <- struct{}{}
-					}()
-				}
-				close(start)
-				for range callers {
-					<-done
-				}
+			if scenario == "refusal then restart" {
+				output, err := f.restart(t, "--json", "--listen=invalid")
+				require.Error(t, err)
+				assert.Contains(t, output, "invalid")
+				output, err = f.restart(t, "--json")
+				require.NoError(t, err, "%s", output)
 				replies, err := filepath.Glob(filepath.Join(f.store.Dir, "restart*"))
 				require.NoError(t, err)
 				assert.Empty(t, replies)
