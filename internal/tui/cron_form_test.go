@@ -303,15 +303,3 @@ func TestCronFormNotifyEditKeepsStoredOverlap(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "allow", def.Overlap, "a new notify job gets a default")
 }
-
-func TestCronFormRebaseMergesKindAndTriggerIndependently(t *testing.T) {
-	f, err := cronFormFor(executeRecord(`{}`), nil)
-	require.NoError(t, err)
-	f.kind = "notify" // the draft changes only the kind
-	other := executeRecord(`{}`)
-	other.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 8 * * *", Timezone: "UTC"} // another writer changed the trigger
-	next, err := f.rebase(other)
-	require.NoError(t, err)
-	require.Equal(t, "notify", next.kind)
-	require.Equal(t, "cron", next.trigger, "the other writer's trigger survives a kind-only draft")
-}

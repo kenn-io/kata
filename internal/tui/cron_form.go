@@ -3,7 +3,10 @@ package tui
 import (
 	"cmp"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
+	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -146,7 +149,7 @@ var cronRecurringKind = cronJobKind{
 		if f.create {
 			parent = uidOf(f.val[cfParent])
 		}
-		def.Issue = &cron.IssuePolicy{Kind: "per-run", ParentUID: parent, Title: strings.TrimSpace(f.val[cfTitle]), Body: strings.TrimSpace(f.val[cfBody])}
+		def.Issue = &cron.IssuePolicy{Kind: "per-run", ParentUID: parent, Title: f.val[cfTitle], Body: f.val[cfBody]}
 		f.applyNotification(&def)
 		return def, f.applyCatchup(&def)
 	},
@@ -210,7 +213,7 @@ func executeKind(id, label string, workflow bool) cronJobKind {
 			if workflow {
 				def.Action.WorkflowUID = f.val[cfWorkflow]
 			} else {
-				def.Action.Prompt = strings.TrimSpace(f.val[cfPrompt])
+				def.Action.Prompt = f.val[cfPrompt]
 			}
 			def.CheckoutKey = strings.TrimSpace(f.val[cfCheckout])
 			secrets, err := cronParseSecrets(f.val[cfSecrets])
@@ -389,6 +392,7 @@ type cronForm struct {
 	general    string
 	saving     bool
 	conflict   *CronJobRecord
+	mine       *CronJobWrite // what the draft last tried to write, for a conflict apply
 	workflows  []cronChoice
 }
 
@@ -524,7 +528,7 @@ func (f *cronForm) applyNotification(def *cron.JobDefinition) {
 	if r := strings.TrimSpace(f.val[cfRecipient]); r != "" {
 		def.Action.Recipient = r
 	}
-	def.Action.Message = strings.TrimSpace(f.val[cfMessage])
+	def.Action.Message = f.val[cfMessage]
 }
 
 func (f *cronForm) applyOptions(def *cron.JobDefinition) error {
@@ -566,7 +570,7 @@ func (f *cronForm) executePolicy(uidOf func(string) string) (*cron.IssuePolicy, 
 		}
 		return &cron.IssuePolicy{Kind: "existing", UID: uidOf(f.val[run])}, nil
 	}
-	policy := cron.IssuePolicy{Kind: "per-run", Title: strings.TrimSpace(f.val[cfTitle]), Body: strings.TrimSpace(f.val[cfBody])}
+	policy := cron.IssuePolicy{Kind: "per-run", Title: f.val[cfTitle], Body: f.val[cfBody]}
 	for _, offset := range []struct {
 		field cronField
 		into  **int64
@@ -869,43 +873,82 @@ func cronUIDResolver(resolved map[string]string) func(string) string {
 	}
 }
 
-// rebase carries the user's own changes onto the job as it is now. The
-// fields the draft changed from what it opened with replace the current
-// ones; everything else, hidden fields included, comes from the current job,
-// so another writer's edits are not undone.
+// cronProperties splits a job into the pieces a merge compares: its name and
+// each top-level definition member, as the JSON the daemon stores.
+func cronProperties(name string, def cron.JobDefinition) map[string]jsontext.Value {
+	props := map[string]jsontext.Value{}
+	raw, err := json.Marshal(def)
+	if err == nil {
+		err = json.Unmarshal(raw, &props)
+	}
+	if err != nil {
+		return map[string]jsontext.Value{}
+	}
+	props["name"], _ = json.Marshal(name)
+	return props
+}
+
+func cronCanonical(v jsontext.Value) string {
+	c := slices.Clone(v)
+	if c.Canonicalize() != nil {
+		return string(v)
+	}
+	return string(c)
+}
+
+// rebase is a three-way merge of the job's name and definition: base is what
+// the form opened with, mine is what the draft last tried to write, theirs is
+// the job now. A property the draft changed comes from the draft whole;
+// every other property comes from the current job, so another writer's edits
+// are not undone. Properties both sides changed are named in the notice.
 func (f *cronForm) rebase(current CronJobRecord) (*cronForm, error) {
-	f.syncEditor()
-	next, err := cronFormFor(current, f.workflows)
+	if f.mine == nil {
+		return nil, errors.New("there is no draft to apply")
+	}
+	base, mine, theirs := cronProperties(f.openedName, f.opened), cronProperties(f.mine.Name, f.mine.Definition), cronProperties(current.Name, current.Definition)
+	merged, both := map[string]jsontext.Value{}, []string{}
+	keys := map[string]bool{}
+	for _, props := range []map[string]jsontext.Value{base, mine, theirs} {
+		for key := range props {
+			keys[key] = true
+		}
+	}
+	for _, key := range slices.Sorted(maps.Keys(keys)) {
+		pick := theirs[key]
+		if cronCanonical(mine[key]) != cronCanonical(base[key]) {
+			pick = mine[key]
+			if t := cronCanonical(theirs[key]); t != cronCanonical(base[key]) && t != cronCanonical(mine[key]) {
+				both = append(both, key)
+			}
+		}
+		if pick != nil {
+			merged[key] = pick
+		}
+	}
+	var name string
+	if err := json.Unmarshal(merged["name"], &name); err != nil {
+		return nil, err
+	}
+	delete(merged, "name")
+	raw, err := json.Marshal(merged)
 	if err != nil {
 		return nil, err
 	}
-	if f.kind != f.snapKind {
-		next.kind = f.kind
-		if !slices.Contains(next.kindDef().triggers, next.trigger) {
-			next.trigger = f.trigger
-		}
+	rec := CronJobRecord{UID: current.UID, Name: name, DefinitionEventUID: current.DefinitionEventUID}
+	if err := json.Unmarshal(raw, &rec.Definition); err != nil {
+		return nil, err
 	}
-	if f.trigger != f.snapTrig {
-		next.trigger = f.trigger
-	}
-	for field := range cfCount {
-		if f.val[field] != f.snapshot[field] {
-			next.val[field] = f.val[field]
-		}
+	next, err := cronFormFor(rec, f.workflows)
+	if err != nil {
+		return nil, err
 	}
 	next.focusField(f.focus)
 	next.validate()
 	if next.general == "" {
 		next.general = "Applied to the current job; review it, then save."
 	}
-	var lost []string
-	for field := range cfCount {
-		if f.val[field] != f.snapshot[field] && !next.shown(field) {
-			lost = append(lost, cronFieldLabel(next, field))
-		}
-	}
-	if len(lost) > 0 {
-		next.general += " No longer applicable: " + strings.Join(lost, ", ") + "."
+	if len(both) > 0 {
+		next.general += " Both changed: " + strings.Join(both, ", ") + ". Your version is kept."
 	}
 	return next, nil
 }

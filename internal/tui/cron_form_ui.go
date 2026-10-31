@@ -142,6 +142,7 @@ type cronSavedMsg struct {
 	fromForm    bool
 	closeUID    string // the job whose page this reply closes
 	archived    bool
+	draft       *CronJobWrite
 }
 
 func (m Model) cronOpenEdit(uid string, seq uint64) tea.Cmd {
@@ -260,7 +261,7 @@ func (m Model) cronSaveCmd(f cronForm) tea.Cmd {
 		}
 		if err := api.PutCronJob(ctx, pid, f.uid, write); err != nil {
 			var apiErr *APIError
-			if errors.As(err, &apiErr) && apiErr != nil && apiErr.Status == http.StatusConflict {
+			if errors.As(err, &apiErr) && apiErr != nil && apiErr.Status == http.StatusConflict && apiErr.Code == "cron_conflict" {
 				if current, readErr := api.ShowCronJob(ctx, pid, f.uid); readErr == nil {
 					// A create whose reply was lost conflicts with itself on retry.
 					if f.create && current.Name == name && cronSameDefinition(current.Definition, def) {
@@ -269,7 +270,7 @@ func (m Model) cronSaveCmd(f cronForm) tea.Cmd {
 						}
 						return cronSavedMsg{conn: conn, scope: scope, notice: notice, fromForm: true}
 					}
-					return cronSavedMsg{conn: conn, scope: scope, conflict: &current, err: err, fromForm: true}
+					return cronSavedMsg{conn: conn, scope: scope, conflict: &current, draft: &write, err: err, fromForm: true}
 				}
 			}
 			return fail(err)
@@ -306,7 +307,7 @@ func (m Model) cronSaved(msg cronSavedMsg) (Model, tea.Cmd) {
 	}
 	switch {
 	case msg.conflict != nil && f != nil:
-		f.conflict, f.general = msg.conflict, ""
+		f.conflict, f.mine, f.general = msg.conflict, msg.draft, ""
 		return m, nil
 	case msg.fieldErr != nil && f != nil:
 		f.err, f.general = msg.fieldErr, ""

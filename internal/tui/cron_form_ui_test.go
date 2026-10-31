@@ -191,23 +191,108 @@ func TestCronEditConflictKeepsDraftAndAppliesToCurrent(t *testing.T) {
 	require.False(t, api.puts[1].write.Definition.Enabled, "only the user's own changes are applied; the other writer's pause stays")
 }
 
-func TestCronConflictApplyNamesEditsThatNoLongerApply(t *testing.T) {
-	m, api := cronWriteFixture(t)
-	api.shown = executeRecord(`{}`)
-	api.shown.UID = m.cron.data.jobs[0].UID
-	m, cmd := press(m, keyRune('e'))
-	m = settle(t, m, cmd)
-	m.cron.form.val[cfTitle] = "My title"
-	api.shown.DefinitionEventUID = "01ARZ3NDEKTSV4RRFFQ69G5FB8"
-	api.shown.Definition.Issue = &cron.IssuePolicy{Kind: "existing", UID: cronTestIssue}
+// conflictAndApply saves the open edit against a stale guard, then applies
+// the draft to theirs and returns the form for review.
+func conflictAndApply(t *testing.T, m Model, api *cronWriteTestAPI, theirs CronJobRecord) Model {
+	t.Helper()
+	theirs.DefinitionEventUID = "01ARZ3NDEKTSV4RRFFQ69G5FB8"
+	api.shown = theirs
 	api.putErrs = []error{&APIError{Status: http.StatusConflict, Code: "cron_conflict"}}
-	m, cmd = press(m, ctrlKey('o'))
+	m, cmd := press(m, ctrlKey('o'))
 	m = settle(t, m, cmd)
+	require.NotNil(t, m.cron.form.conflict)
 	m, cmd = press(m, keyRune('a'))
 	require.Nil(t, cmd)
-	require.NotNil(t, m.cron.form)
-	require.Contains(t, m.cron.form.general, "Issue title", "the edit that no longer applies is named")
-	require.Len(t, api.puts, 1)
+	require.Len(t, api.puts, 1, "applying writes nothing")
+	return m
+}
+
+func openEdit(t *testing.T, record CronJobRecord) (Model, *cronWriteTestAPI) {
+	t.Helper()
+	m, api := cronWriteFixture(t)
+	api.shown = record
+	api.shown.UID = m.cron.data.jobs[0].UID
+	m, cmd := press(m, keyRune('e'))
+	return settle(t, m, cmd), api
+}
+
+func TestCronConflictApplyNamesPropertiesBothSidesChanged(t *testing.T) {
+	m, api := openEdit(t, executeRecord(`{}`))
+	m.cron.form.val[cfTitle] = "My title"
+	theirs := executeRecord(`{}`)
+	theirs.Definition.Issue = &cron.IssuePolicy{Kind: "existing", UID: cronTestIssue}
+	m = conflictAndApply(t, m, api, theirs)
+	require.Contains(t, m.cron.form.general, "Both changed: issue")
+	require.Equal(t, "My title", m.cron.form.val[cfTitle], "the user's whole issue policy wins")
+}
+
+func TestCronConflictApplyKeepsAChosenScheduleEqualToTheDefault(t *testing.T) {
+	m, api := openEdit(t, executeRecord(`{}`))
+	m.cron.form.trigger = "cron" // the form's default schedule is 0 9 * * *
+	theirs := executeRecord(`{}`)
+	theirs.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 8 * * *", Timezone: "UTC"}
+	m = conflictAndApply(t, m, api, theirs)
+	m, cmd := press(m, ctrlKey('o'))
+	m = settle(t, m, cmd)
+	require.Equal(t, "0 9 * * *", api.puts[1].write.Definition.Trigger.Cron)
+}
+
+func TestCronConflictApplyKeepsANotificationTargetWhenTheTriggerBecameADate(t *testing.T) {
+	const wasTarget, newTarget, source = "01ARZ3NDEKTSV4RRFFQ69G5FB5", cronTestIssue, "01ARZ3NDEKTSV4RRFFQ69G5FB6"
+	rec := executeRecord(`{}`)
+	rec.Definition.Action = cron.Action{Kind: "notify", Recipient: "alice", Message: "hi"}
+	rec.Definition.Issue = &cron.IssuePolicy{Kind: "existing", UID: wasTarget}
+	m, api := openEdit(t, rec)
+	m.cron.form.val[cfIssue] = newTarget
+	theirs := rec
+	theirs.Definition.Trigger = cron.Trigger{Kind: "issue-scheduled", IssueUID: source}
+	m = conflictAndApply(t, m, api, theirs)
+	m, cmd := press(m, ctrlKey('o'))
+	m = settle(t, m, cmd)
+	got := api.puts[1].write.Definition
+	require.Equal(t, newTarget, got.Issue.UID, "the edited target stays the target")
+	require.Equal(t, source, got.Trigger.IssueUID)
+}
+
+func TestCronEditKeepsMarkdownTextVerbatim(t *testing.T) {
+	rec := executeRecord(`{}`)
+	rec.Definition.Action.Prompt = "  - indented\n    more\n"
+	rec.Definition.Issue = &cron.IssuePolicy{Kind: "per-run", Title: " Title ", Body: "    code\n"}
+	m, api := openEdit(t, rec)
+	m.cron.form.val[cfName] = "Renamed"
+	m, cmd := press(m, ctrlKey('o'))
+	m = settle(t, m, cmd)
+	got := api.puts[0].write.Definition
+	require.Equal(t, rec.Definition.Action.Prompt, got.Action.Prompt)
+	require.Equal(t, rec.Definition.Issue.Title, got.Issue.Title)
+	require.Equal(t, rec.Definition.Issue.Body, got.Issue.Body)
+
+	note := executeRecord(`{}`)
+	note.Definition.Action = cron.Action{Kind: "notify", Recipient: "alice", Message: "line\n\n"}
+	note.Definition.Issue = &cron.IssuePolicy{Kind: "existing", UID: cronTestIssue}
+	m, api = openEdit(t, note)
+	m.cron.form.val[cfName] = "Renamed"
+	m, cmd = press(m, ctrlKey('o'))
+	settle(t, m, cmd)
+	require.Equal(t, "line\n\n", api.puts[0].write.Definition.Action.Message)
+}
+
+func TestCronOtherConflictsAreOrdinarySaveErrors(t *testing.T) {
+	for _, create := range []bool{false, true} {
+		m, api := cronWriteFixture(t)
+		if create {
+			m, _ = press(m, keyRune('n'))
+			m.cron.form.val[cfName], m.cron.form.val[cfParent], m.cron.form.val[cfTitle] = "W", "abc4", "R"
+		} else {
+			m, api = openEdit(t, executeRecord(`{}`))
+		}
+		api.shown = executeRecord(`{}`)
+		api.putErrs = []error{&APIError{Status: http.StatusConflict, Code: "federated_read_only", Message: "write on the owning hub"}}
+		m, cmd := press(m, ctrlKey('o'))
+		m = settle(t, m, cmd)
+		require.Nil(t, m.cron.form.conflict, "create=%v", create)
+		require.Contains(t, m.cron.form.general, "owning hub")
+	}
 }
 
 func TestCronRetriedCreateThatAlreadyLanded(t *testing.T) {
