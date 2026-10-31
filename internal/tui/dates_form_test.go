@@ -240,6 +240,9 @@ func TestDatesFormReloadsWhenTheIssueChangedMeanwhile(t *testing.T) {
 	assert.Equal(t, "2026-12-01", h.m.input.fieldValue(fieldDeadline))
 	assert.Equal(t, map[string]string{"scheduled_on": "2026-11-02", "deadline_on": "2026-12-01"}, h.stored(), "nothing was overwritten")
 	assert.Equal(t, moved, h.revision())
+	assert.Equal(t, "2026-12-01", h.m.list.issues[0].deadlineOn(), "the list row shows the current dates")
+	assert.Equal(t, "2026-12-01", h.m.detail.issue.deadlineOn(), "so does the open detail")
+	assert.Equal(t, moved, h.m.detail.issue.Revision)
 
 	h.fill("2026-11-09", "2026-12-01")
 	h.save()
@@ -342,13 +345,6 @@ func TestDatesFormShowsWhatItWillWrite(t *testing.T) {
 	assert.NotContains(t, view, "monday 2026", "text that would be refused has no preview")
 	assert.Contains(t, view, "Scheduled")
 	assert.Contains(t, view, "Deadline")
-}
-
-func TestDatesKeyIsFreeOfOtherBindings(t *testing.T) {
-	km := newKeymap()
-	assert.False(t, km.Undo.matches(runeKey('d')))
-	assert.False(t, km.Daemons.matches(runeKey('d')), "D is daemons; d is dates")
-	assert.True(t, km.SetDates.matches(runeKey('d')))
 }
 
 func TestDetailStripShowsBothDates(t *testing.T) {

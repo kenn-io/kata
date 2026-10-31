@@ -187,6 +187,14 @@ func (m Model) reloadDatesForm(current Issue) Model {
 	m.input = m.input.loadDates(current)
 	m.input.saving = false
 	m.input.err = datesChangedMessage
+	for i := range m.list.issues {
+		if m.list.issues[i].UID == current.UID {
+			m.list.issues[i].Metadata, m.list.issues[i].Revision = current.Metadata, current.Revision
+		}
+	}
+	if m.detail.issue != nil && m.detail.issue.UID == current.UID {
+		m.detail.issue.Metadata, m.detail.issue.Revision = current.Metadata, current.Revision
+	}
 	return m
 }
 
@@ -211,13 +219,20 @@ func renderDatesForm(s inputState, innerW int) string {
 	if status := renderFormStatus(s); status != "" {
 		parts = append(parts, status)
 	}
-	parts = append(parts, renderDatesFooter(s))
+	parts = append(parts, renderDatesFooter(s, innerW))
 	return modalBoxStyle.Width(innerW+2).Padding(0, 1).Render(strings.Join(parts, "\n"))
 }
 
-func renderDatesFooter(s inputState) string {
+func renderDatesFooter(s inputState, innerW int) string {
 	if s.saving {
 		return statusStyle.Render("saving…")
 	}
-	return subtleStyle.Render("blank clears · today, tomorrow, +3d, +2w\nctrl+o save · esc cancel · tab next")
+	keys, formats := "ctrl+o save · esc cancel · tab next", "blank clears · today, tomorrow, +3d, +2w"
+	if len(keys) > innerW {
+		return subtleStyle.Render("ctrl+o save · esc cancel")
+	}
+	if len(formats) > innerW {
+		return subtleStyle.Render(keys)
+	}
+	return subtleStyle.Render(formats + "\n" + keys)
 }
