@@ -256,6 +256,7 @@ func daemonStartCmd() *cobra.Command {
 		listen           string
 		insecureReadonly bool
 		foreground       bool
+		checkStartup     bool
 		noAutoToken      bool
 	)
 	cmd := &cobra.Command{
@@ -271,6 +272,10 @@ func daemonStartCmd() *cobra.Command {
 					Kind:     kindUsage,
 					ExitCode: ExitUsage,
 				}
+			}
+			if checkStartup {
+				_, err := preflightDaemonStartup(cmd.Context(), listen, insecureReadonly, noAutoToken)
+				return err
 			}
 			if foreground {
 				ctx, cancel := context.WithCancel(cmd.Context())
@@ -300,6 +305,8 @@ func daemonStartCmd() *cobra.Command {
 			return err
 		},
 	}
+	cmd.Flags().BoolVar(&checkStartup, "check-startup", false, "check startup settings")
+	_ = cmd.Flags().MarkHidden("check-startup")
 	cmd.Flags().BoolVar(&foreground, "foreground", false,
 		"run the daemon in the current process instead of starting it in the background")
 	cmd.Flags().BoolVar(&noAutoToken, "no-auto-token", false, "disable creating a persisted daemon token; eligible existing tokens are still reused")
@@ -1233,7 +1240,6 @@ func runDaemonProcess(
 		return err
 	}
 	dcfg := startup.Config
-	originalListen := listen
 	listen = startup.Listen
 	ns := startup.Namespace
 	endpoint := startup.Endpoint
@@ -1484,7 +1490,7 @@ func runDaemonProcess(
 				case !errors.Is(err, os.ErrNotExist):
 					return err
 				}
-				if _, err := preflightDaemonStartup(ctx, originalListen, insecureReadonly, noAutoToken); err != nil {
+				if err := validateDaemonReplacement(ctx, executable); err != nil {
 					return err
 				}
 				restart.executable = executable

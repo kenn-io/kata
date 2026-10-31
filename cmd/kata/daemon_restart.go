@@ -6,8 +6,10 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync/atomic"
+	"time"
 
 	"go.kenn.io/kata/internal/daemonruntime"
 
@@ -81,6 +83,17 @@ func (r *daemonRestart) exec(ctx context.Context) error {
 	return nil
 }
 
+func validateDaemonReplacement(ctx context.Context, executable string) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, executable, append(os.Args[1:], "--check-startup")...) //nolint:gosec // selected installed executable with daemon-owned arguments
+	output, err := command.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("check replacement startup: %w: %s", err, output)
+	}
+	return nil
+}
+
 func restartRequestPath(dir string, rec kitdaemon.RuntimeRecord) string {
 	return filepath.Join(dir, fmt.Sprintf("restart.%d.%d", rec.PID, rec.StartedAt.UnixNano()))
 }
@@ -91,9 +104,11 @@ func requestDaemonRestart(ctx context.Context, ns *daemonruntime.Namespace, prev
 		if err := atomicfile.WriteFile(request, []byte(executable), atomicfile.WithPrivate()); err != nil {
 			return kitdaemon.RuntimeRecord{}, err
 		}
-		defer func() { _ = os.Remove(request) }()
 	}
 	if err := daemonruntime.SignalDaemonRestart(previous, ns.DBHash); err != nil {
+		if executable != "" {
+			_ = os.Remove(restartRequestPath(ns.DataDir, previous))
+		}
 		return kitdaemon.RuntimeRecord{}, fmt.Errorf("signal daemon pid %d: %w", previous.PID, err)
 	}
 	replacement, err := waitForDaemonReplacement(ctx, kitdaemon.RuntimeStore{Dir: ns.DataDir}, previous)

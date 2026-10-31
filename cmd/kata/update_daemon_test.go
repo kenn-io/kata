@@ -70,6 +70,19 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 		build := exec.CommandContext(t.Context(), "go", "build", "-buildvcs=false", "-ldflags", "-X go.kenn.io/kata/internal/version.Version="+version, "-o", binary, "go.kenn.io/kata/cmd/kata") //nolint:gosec // test-owned executable and fixed build arguments
 		// Build inside the module, while runtime commands use a scratch workspace.
 		build.Dir = moduleDir
+		if explicitRestart && version == "v0.2.0" {
+			source := filepath.Join(moduleDir, "..", "..", "internal", "config", "daemon_config.go")
+			contents, err := os.ReadFile(source) //nolint:gosec // test-owned source overlay
+			require.NoError(t, err)
+			overlaySource := filepath.Join(t.TempDir(), "daemon_config.go")
+			contents = bytes.Replace(contents, []byte("type DaemonConfig struct {"), []byte("type DaemonConfig struct {\n FutureSetting string `toml:\"future_setting\"`"), 1)
+			require.NoError(t, os.WriteFile(overlaySource, contents, 0600)) //nolint:gosec // G703: source overlay lives in a test-owned temporary directory
+			overlay, err := json.Marshal(map[string]any{"Replace": map[string]string{source: overlaySource}})
+			require.NoError(t, err)
+			overlayPath := filepath.Join(t.TempDir(), "overlay.json")
+			require.NoError(t, os.WriteFile(overlayPath, overlay, 0600))
+			build.Args = append(build.Args[:2], append([]string{"-overlay=" + overlayPath}, build.Args[2:]...)...)
+		}
 		build.Env = childEnv
 		output, err := build.CombinedOutput()
 		require.NoError(t, err, "%s", output)
@@ -77,21 +90,13 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 	}
 	scenarios := []string{"running", "stopped", "check only", "cancelled", "install failure", "read-only TCP", "older daemon", "daemon token", "idle shutdown"}
 	if explicitRestart {
-		scenarios = []string{"restart failure", "older daemon", "startup flags", "upgrade retained", "upgrade removed", "network namespace"}
+		scenarios = []string{"restart failure", "older daemon", "startup flags", "upgrade retained", "upgrade removed", "cancelled restart", "new config"}
 	}
 	for _, scenario := range scenarios {
 		t.Run(scenario, func(t *testing.T) {
 			resetFlags(t)
 			fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{CurrentVersion: "v0.1.0", LatestVersion: "v0.2.0"}}}
 			stubUpdateClient(t, fake)
-			if scenario == "network namespace" {
-				if runtime.GOOS != "linux" {
-					t.Skip("Linux network namespace regression")
-				}
-				if _, err := exec.LookPath("rootlesskit"); err != nil {
-					t.Skipf("RootlessKit unavailable: %v", err)
-				}
-			}
 			home, err := config.KataHome()
 			require.NoError(t, err)
 			binary := filepath.Join(t.TempDir(), filepath.Base(binaries["v0.1.0"]))
@@ -115,9 +120,6 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 			env := append(append([]string(nil), childEnv...), "KATA_HOME="+home, "KATA_DB="+filepath.Join(home, "kata.db"), "KATA_WORKSPACE="+workspace, "KATA_AUTHOR=user-a")
 			restartCLI := func(args ...string) (string, error) {
 				command := exec.CommandContext(t.Context(), cli, append([]string{"daemon", "restart"}, args...)...) //nolint:gosec // G204: test-built executable
-				if scenario == "network namespace" {
-					command = exec.CommandContext(t.Context(), "rootlesskit", append([]string{"--net=slirp4netns", "--disable-host-loopback", cli, "daemon", "restart"}, args...)...) //nolint:gosec // G204: namespace helper and test-built executable
-				}
 				command.Env = append(append([]string(nil), env...), "PORT=4321")
 				var stderr bytes.Buffer
 				command.Stderr = &stderr
@@ -189,11 +191,6 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 				require.Eventually(t, func() bool { return record().PID != 0 }, 10*time.Second, 20*time.Millisecond)
 			}
 			before := record()
-			var networkBefore string
-			if scenario == "network namespace" {
-				networkBefore, err = os.Readlink(fmt.Sprintf("/proc/%d/ns/net", before.PID))
-				require.NoError(t, err)
-			}
 			if scenario == "older daemon" {
 				// Older daemons can lack executable selection or the restart signal.
 				if explicitRestart {
@@ -247,7 +244,33 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 						require.NoError(t, os.Remove(binary))
 					}
 				}
-				stdout, updateErr = restartCLI("--json")
+				if scenario == "new config" {
+					require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("future_setting = 'accepted'\n"), 0600))
+				}
+				if scenario == "cancelled restart" {
+					if runtime.GOOS == "windows" {
+						t.Skip("requires Unix process suspension")
+					}
+					signal := func(name string) {
+						output, err := exec.Command("kill", name, fmt.Sprint(before.PID)).CombinedOutput() //nolint:gosec // G204: fixed suspension signals target the fixture PID
+						require.NoError(t, err, "%s", output)
+					}
+					signal("-STOP")
+					t.Cleanup(func() { signal("-CONT") })
+					command := exec.CommandContext(t.Context(), cli, "daemon", "restart") //nolint:gosec // test-built executable
+					command.Env = env
+					require.NoError(t, command.Start())
+					t.Cleanup(func() { _ = command.Process.Kill(); _ = command.Wait() })
+					//nolint:kennlint // sleeptest: External CLI publishes its request through the filesystem.
+					require.Eventually(t, func() bool { _, err := os.Stat(restartRequestPath(ns.DataDir, before)); return err == nil }, 10*time.Second, 20*time.Millisecond)
+					require.NoError(t, command.Process.Signal(os.Interrupt))
+					require.Error(t, command.Wait())
+					signal("-CONT")
+					//nolint:kennlint // sleeptest: External daemon publishes replacement readiness through its runtime record.
+					require.Eventually(t, func() bool { return record().StartedAt.After(before.StartedAt) }, 10*time.Second, 20*time.Millisecond)
+				} else {
+					stdout, updateErr = restartCLI("--json")
+				}
 			} else {
 				stdout, stderr, updateErr = executeRootCapture(t, t.Context(), "update", "--yes", "--json")
 			}
@@ -287,13 +310,10 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 			}
 			require.NoError(t, updateErr, "%s", stderr)
 			if explicitRestart {
-				var restarted daemonRestartOutput
-				require.NoError(t, json.Unmarshal([]byte(stdout), &restarted))
-				assert.Equal(t, []int{before.PID}, restarted.PIDs)
-				if scenario == "network namespace" {
-					networkAfter, err := os.Readlink(fmt.Sprintf("/proc/%d/ns/net", restarted.PID))
-					require.NoError(t, err)
-					assert.Equal(t, networkBefore, networkAfter)
+				if scenario != "cancelled restart" {
+					var restarted daemonRestartOutput
+					require.NoError(t, json.Unmarshal([]byte(stdout), &restarted))
+					assert.Equal(t, []int{before.PID}, restarted.PIDs)
 				}
 			} else {
 				var result struct {

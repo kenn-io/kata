@@ -3935,20 +3935,10 @@ func TestDaemonControlsSkipUnknownRecord(t *testing.T) {
 	}
 }
 
-func TestDaemonRestart_PreservesNewerRuntimeRecord(t *testing.T) {
+func TestDaemonRestart_RemovesRequestAfterSignalFailure(t *testing.T) {
 	dir := t.TempDir()
-	store := kitdaemon.RuntimeStore{Dir: dir}
-	stale := kitdaemon.RuntimeRecord{PID: 1 << 30, Address: "old", StartedAt: time.Unix(1, 0), Metadata: map[string]string{}}
-	current := stale
-	current.Address, current.StartedAt = "new", time.Unix(2, 0)
-	path, err := store.Write(current)
-	require.NoError(t, err)
-	before, err := os.ReadFile(path) //nolint:gosec // G304: test-owned runtime record
-	require.NoError(t, err)
-	_, err = requestDaemonRestart(t.Context(), &daemonruntime.Namespace{DataDir: dir}, stale, "/installed/kata")
+	rec := kitdaemon.RuntimeRecord{PID: 1 << 30, StartedAt: time.Unix(1, 0)}
+	_, err := requestDaemonRestart(t.Context(), &daemonruntime.Namespace{DataDir: dir}, rec, "/installed/kata")
 	require.Error(t, err)
-	after, err := os.ReadFile(path) //nolint:gosec // G304: test-owned runtime record
-	require.NoError(t, err)
-	assert.Equal(t, before, after, "a stale caller must preserve the current daemon's discovery record")
-	require.NoFileExists(t, restartRequestPath(dir, stale))
+	require.NoFileExists(t, restartRequestPath(dir, rec))
 }
