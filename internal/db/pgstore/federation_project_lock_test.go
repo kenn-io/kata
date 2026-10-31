@@ -75,3 +75,37 @@ func TestFederationProjectAdvisoryLockCoordinatesStores(t *testing.T) {
 		t.Fatal("shared project lock did not acquire after exclusive lock release")
 	}
 }
+
+func TestFederationProjectTrySharedLock(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
+	t.Cleanup(cleanup)
+	first, err := pgstore.Open(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, first.Close()) })
+	second, err := pgstore.Open(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, second.Close()) })
+	try, ok := any(second).(interface {
+		TryAcquireFederationProjectSharedLock(context.Context, int64) (func(), bool, error)
+	})
+	require.True(t, ok, "interactive transport must support nonblocking backend coordination")
+	release, err := first.AcquireFederationProjectExclusiveLock(ctx, 42)
+	require.NoError(t, err)
+	start := time.Now()
+	_, acquired, err := try.TryAcquireFederationProjectSharedLock(ctx, 42)
+	require.NoError(t, err)
+	require.False(t, acquired)
+	require.Less(t, time.Since(start), time.Second)
+	release()
+	a, acquired, err := try.TryAcquireFederationProjectSharedLock(ctx, 42)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	defer a()
+	b, acquired, err := try.TryAcquireFederationProjectSharedLock(ctx, 42)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	b()
+	b()
+}

@@ -1628,6 +1628,13 @@ func runDaemonProcess(
 		ExternalRootService:       externalRootService,
 		ExternalRootReconciler:    externalRootReconciler,
 		ExternalRootWake:          externalRootWake,
+		FederationPushPending: func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
+			client, err := federation.NewClient(ctx, credential.HubURL, credential.Token, client.Opts{AllowInsecure: credential.AllowInsecure, FederationSigning: credential.Signing})
+			if err != nil {
+				return err
+			}
+			return federation.PushDirectSpoke(ctx, store, binding, credential.HubProjectID, client)
+		},
 		CloseThrottle: daemon.CloseThrottlePolicy{
 			SiblingBurstEnabled: dcfg.Close.Throttle.ThrottleEnabled(),
 			SiblingBurstWindow:  closeThrottleWindow,

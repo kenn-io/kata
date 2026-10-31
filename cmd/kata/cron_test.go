@@ -59,7 +59,7 @@ func TestCronCLIJobMutationHelpNamesHub(t *testing.T) {
 				out, _, err := executeCronCLI(t, "http://daemon.example", nil, resource, operation, "--help")
 				require.NoError(t, err)
 				if resource == "job" {
-					require.Contains(t, out, "Native recurring jobs must be created, edited, deleted, and restored on the project's owning hub; run the same command there with --daemon <hub-name>.")
+					require.Contains(t, out, "Direct spokes forward native recurring job writes synchronously when push is enabled. Otherwise, run the same command against the project's owning hub with --daemon <hub-name>.")
 				} else {
 					require.NotContains(t, out, "--daemon <hub-name>")
 				}

@@ -468,3 +468,110 @@ func TestOptionalSigningRejectsEmptySignatureHeader(t *testing.T) {
 		require.Equal(t, http.StatusUnauthorized, resp.StatusCode, string(raw))
 	}
 }
+
+// Required signing applies to enrollment writes on both listeners, while
+// ordinary daemon authority still authors jobs without a federation signature.
+func TestSignedNativeCronEnrollment(t *testing.T) {
+	env, project, _, definition := nativeCronEnrollmentFixture(t, testenv.WithAuthToken("owner-token"))
+	synctest.Test(t, func(t *testing.T) {
+		enrollment := createClaimEnrollment(t, env, project.ID, cronHTTPUID(t), "push")
+		t.Setenv("TEST_CRON_SIGNING_KEY", strings.Repeat("c", 64))
+		source := signingpolicy.Source{KeyID: "cron-key", KeyEnv: "TEST_CRON_SIGNING_KEY"}
+		state := filepath.Join(t.TempDir(), "replay.state")
+		require.NoError(t, federationsigning.InitializeReplayState(state))
+		verifier, err := federationsigning.NewVerifier("https://daemon.example", []signingpolicy.Key{{Source: source, EnrollmentID: enrollment.Enrollment.ID}}, state)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = verifier.Close() })
+		access := &countingFederationAccess{}
+		server := daemon.NewServer(daemon.ServerConfig{HostFederationAccess: access, DB: env.DB, Auth: config.AuthConfig{Token: "owner-token"}, FederationSigning: verifier, FederationSigningRequired: true})
+		ingress, err := server.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerFederation})
+		require.NoError(t, err)
+		time.Sleep(federationsigning.Quarantine)
+		path := fmt.Sprintf("/api/v1/projects/%d/cron/jobs", project.ID)
+		// A valid native definition can exceed the control-plane 64 KiB bound.
+		definition.Issue.Body = strings.Repeat("x", 70<<10)
+		payload, err := json.Marshal(map[string]any{"actor": "tester", "name": "Review", "definition": definition})
+		require.NoError(t, err)
+		send := func(handler http.Handler, method, target, token string, signed bool, body []byte) *httptest.ResponseRecorder {
+			request := httptest.NewRequest(method, "https://daemon.example"+target, bytes.NewReader(body))
+			request.RemoteAddr = "127.0.0.1:1234"
+			request = request.WithContext(context.WithValue(request.Context(), http.LocalAddrContextKey, &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}))
+			if token != "" {
+				request.Header.Set("Authorization", "Bearer "+token)
+			}
+			request.Header.Set("Content-Type", "application/json")
+			if signed {
+				require.NoError(t, federationsigning.Sign(request, source))
+			}
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			return recorder
+		}
+		for _, handler := range []http.Handler{server.Handler(), ingress} {
+			unsigned := send(handler, http.MethodPost, path, enrollment.Token, false, payload)
+			require.Equal(t, http.StatusUnauthorized, unsigned.Code, unsigned.Body.String())
+		}
+		owner := send(server.Handler(), http.MethodPost, path, "owner-token", false, payload)
+		require.Equal(t, http.StatusCreated, owner.Code, owner.Body.String())
+		deniedOwner := send(ingress, http.MethodPost, path, "owner-token", false, payload)
+		require.Equal(t, http.StatusForbidden, deniedOwner.Code, deniedOwner.Body.String())
+		for _, kind := range []string{"keyless", "identity", "bootstrap"} {
+			auth := config.AuthConfig{}
+			token := ""
+			if kind != "keyless" {
+				auth = config.AuthConfig{Token: "owner-token", RequireTokenIdentity: true}
+				token = "owner-token"
+			}
+			if kind == "identity" {
+				token = "identity-token"
+				_, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: token, Actor: "credential-actor", AdminActor: "admin"})
+				require.NoError(t, err)
+			}
+			ordinary := daemon.NewServer(daemon.ServerConfig{DB: env.DB, Auth: auth, FederationSigning: verifier, FederationSigningRequired: true})
+			t.Cleanup(func() { require.NoError(t, ordinary.Close()) })
+			result := send(ordinary.Handler(), http.MethodPost, path, token, false, payload)
+			want := http.StatusCreated
+			if kind == "bootstrap" {
+				want = http.StatusForbidden
+			}
+			require.Equal(t, want, result.Code, "%s: %s", kind, result.Body.String())
+			if kind == "identity" {
+				var value struct {
+					Job db.CronJob `json:"job"`
+				}
+				require.NoError(t, json.Unmarshal(result.Body.Bytes(), &value))
+				require.Equal(t, "credential-actor", value.Job.Author)
+			}
+		}
+		for _, handler := range []http.Handler{server.Handler(), ingress} {
+			before := len(access.snapshot())
+			created := send(handler, http.MethodPost, path, enrollment.Token, true, payload)
+			require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
+			require.Len(t, access.snapshot(), before+1, "signed create must reuse authorization")
+			var current struct {
+				Job db.CronJob `json:"job"`
+			}
+			require.NoError(t, json.Unmarshal(created.Body.Bytes(), &current))
+			for _, operation := range []string{"replace", "archive", "restore"} {
+				method, target := http.MethodPut, path+"/"+current.Job.UID
+				body := map[string]any{"actor": "tester", "name": "Updated review", "definition": definition, "expected_event_uid": current.Job.DefinitionEventUID}
+				if operation != "replace" {
+					delete(body, "name")
+					delete(body, "definition")
+					method = http.MethodDelete
+				}
+				if operation == "restore" {
+					method = http.MethodPost
+					target += "/restore"
+				}
+				encoded, err := json.Marshal(body)
+				require.NoError(t, err)
+				before := len(access.snapshot())
+				result := send(handler, method, target, enrollment.Token, true, encoded)
+				require.Len(t, access.snapshot(), before+1, "signed lifecycle must reuse authorization")
+				require.Equal(t, http.StatusOK, result.Code, result.Body.String())
+				require.NoError(t, json.Unmarshal(result.Body.Bytes(), &current))
+			}
+		}
+	})
+}

@@ -79,7 +79,7 @@ func newCronOperationCmd(resource, action string) *cobra.Command {
 	if resource == "job" {
 		command.Long += "\nEnabled recurring issue jobs create independent children and inbox requests on the owning hub. Other jobs use external adapters."
 		if options.mutation() {
-			command.Long += "\nNative recurring jobs must be created, edited, deleted, and restored on the project's owning hub; run the same command there with --daemon <hub-name>."
+			command.Long += "\nDirect spokes forward native recurring job writes synchronously when push is enabled. Otherwise, run the same command against the project's owning hub with --daemon <hub-name>."
 		}
 	}
 	if takesUID {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 	"go.kenn.io/kata/internal/api"
@@ -57,17 +58,56 @@ func checkCronLifecycleState(current db.CronDefinition, expected string, deletin
 	return nil
 }
 
+// cronJobWriteContext preserves ordinary attribution while narrowing enrollment
+// authority to direct project-scoped push credentials and their bound actor.
+func cronJobWriteContext(ctx context.Context, cfg ServerConfig, projectID int64, authz, actor, operationID string) (context.Context, string, bool, error) {
+	ctx, principal, err := resolveCapabilityPrincipal(ctx, cfg, projectID, authz,
+		api.ClaimActionBody{Holder: actor}, federationTransportOperation(operationID), true, "push", false)
+	if err != nil {
+		return ctx, "", false, err
+	}
+	if principal.Enrollment {
+		fed := principal.Federation
+		if fed.ScopedProjectID != projectID || fed.RelayBindingUID != "" || fed.RelayProtocolVersion != 0 {
+			return ctx, "", true, federationCredentialDenied()
+		}
+		if strings.TrimSpace(actor) != "" && strings.TrimSpace(actor) != fed.Actor {
+			return ctx, "", true, federationCredentialDenied()
+		}
+		actor = fed.Actor
+	}
+	ctx, actor, err = cronWriteContext(ctx, actor)
+	return ctx, actor, principal.Enrollment, err
+}
+
+func checkEnrollmentCronJob(ctx context.Context, cfg ServerConfig, projectID int64, id string, definition cron.JobDefinition) error {
+	if cron.IsRecurringIssueJob(definition) {
+		return nil
+	}
+	if id != "" {
+		current, err := cfg.DB.CronJob(ctx, projectID, id)
+		if err == nil && cron.IsRecurringIssueJob(current.Definition) {
+			return nil
+		}
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
+			return cronAPIError(ctx, cfg, err, projectID, id, true)
+		}
+	}
+	return federationCredentialDenied()
+}
+
 func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 	path := "/api/v1/projects/{project_id}/cron/jobs"
-	put := func(ctx context.Context, projectID int64, id string, body api.PutCronJobBody, deleted bool) (*api.CronJobResponse, error) {
-		ctx, actor, err := cronWriteContext(ctx, body.Actor)
-		if err != nil {
-			return nil, err
+	put := func(ctx context.Context, projectID int64, id string, body api.PutCronJobBody, deleted, enrollment bool) (*api.CronJobResponse, error) {
+		if enrollment {
+			if err := checkEnrollmentCronJob(ctx, cfg, projectID, id, body.Definition.Native()); err != nil {
+				return nil, err
+			}
 		}
 		if _, err := activeProjectByID(ctx, cfg.DB, projectID); err != nil {
 			return nil, err
 		}
-		value, events, err := cfg.DB.PutCronJob(ctx, db.PutCronJob{ProjectID: projectID, UID: id, ExpectedEventUID: body.ExpectedEventUID, Name: body.Name, Definition: body.Definition.Native(), Actor: actor, Deleted: deleted})
+		value, events, err := cfg.DB.PutCronJob(ctx, db.PutCronJob{ProjectID: projectID, UID: id, ExpectedEventUID: body.ExpectedEventUID, Name: body.Name, Definition: body.Definition.Native(), Actor: body.Actor, Deleted: deleted})
 		if err != nil {
 			return nil, cronAPIError(ctx, cfg, err, projectID, id, true)
 		}
@@ -79,10 +119,26 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 		return out, nil
 	}
 	huma.Register(h, huma.Operation{OperationID: "createCronJob", Method: http.MethodPost, Path: path, DefaultStatus: 201}, func(ctx context.Context, in *api.CreateCronJobRequest) (*api.CronJobResponse, error) {
-		return put(ctx, in.ProjectID, "", in.Body, false)
+		ctx, actor, enrollment, err := cronJobWriteContext(ctx, cfg, in.ProjectID, in.Authorization, in.Body.Actor, "createCronJob")
+		if err != nil {
+			return nil, err
+		}
+		in.Body.Actor = actor
+		if out, handled, err := forwardCronJob(ctx, cfg, in.ProjectID, "", http.MethodPost, "", &in.Body, nil, enrollment); handled {
+			return out, err
+		}
+		return put(ctx, in.ProjectID, "", in.Body, false, enrollment)
 	})
 	huma.Register(h, huma.Operation{OperationID: "replaceCronJob", Method: http.MethodPut, Path: path + "/{cron_uid}"}, func(ctx context.Context, in *api.ReplaceCronJobRequest) (*api.CronJobResponse, error) {
-		return put(ctx, in.ProjectID, in.UID, in.Body, false)
+		ctx, actor, enrollment, err := cronJobWriteContext(ctx, cfg, in.ProjectID, in.Authorization, in.Body.Actor, "replaceCronJob")
+		if err != nil {
+			return nil, err
+		}
+		in.Body.Actor = actor
+		if out, handled, err := forwardCronJob(ctx, cfg, in.ProjectID, in.UID, http.MethodPut, "", &in.Body, nil, enrollment); handled {
+			return out, err
+		}
+		return put(ctx, in.ProjectID, in.UID, in.Body, false, enrollment)
 	})
 	huma.Register(h, huma.Operation{OperationID: "showCronJob", Method: http.MethodGet, Path: path + "/{cron_uid}"}, func(ctx context.Context, in *api.CronDefinitionRequest) (*api.CronJobResponse, error) {
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
@@ -116,8 +172,12 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 		deleted              bool
 	}{{"archive", http.MethodDelete, "", true}, {"restore", http.MethodPost, "/restore", false}} {
 		huma.Register(h, huma.Operation{OperationID: action.name + "CronJob", Method: action.method, Path: path + "/{cron_uid}" + action.suffix}, func(ctx context.Context, in *api.CronDefinitionActionRequest) (*api.CronJobResponse, error) {
-			if _, err := attributedActor(ctx, in.Body.Actor); err != nil {
+			ctx, actor, enrollment, err := cronJobWriteContext(ctx, cfg, in.ProjectID, in.Authorization, in.Body.Actor, action.name+"CronJob")
+			if err != nil {
 				return nil, err
+			}
+			if out, handled, err := forwardCronJob(ctx, cfg, in.ProjectID, in.UID, action.method, action.suffix, nil, &in.Body, enrollment); handled {
+				return out, err
 			}
 			if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 				return nil, err
@@ -126,10 +186,13 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 			if err != nil {
 				return nil, cronAPIError(ctx, cfg, err, in.ProjectID, in.UID, true)
 			}
+			if enrollment && !cron.IsRecurringIssueJob(value.Definition) {
+				return nil, federationCredentialDenied()
+			}
 			if err := checkCronLifecycleState(value.CronDefinition, in.Body.ExpectedEventUID, action.deleted); err != nil {
 				return nil, cronAPIError(ctx, cfg, err, in.ProjectID, in.UID, true)
 			}
-			return put(ctx, in.ProjectID, in.UID, api.PutCronJobBody{Actor: in.Body.Actor, Name: value.Name, Definition: api.CronJobDefinitionFrom(value.Definition), ExpectedEventUID: in.Body.ExpectedEventUID}, action.deleted)
+			return put(ctx, in.ProjectID, in.UID, api.PutCronJobBody{Actor: actor, Name: value.Name, Definition: api.CronJobDefinitionFrom(value.Definition), ExpectedEventUID: in.Body.ExpectedEventUID}, action.deleted, enrollment)
 		})
 	}
 }
