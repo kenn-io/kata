@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -2800,6 +2801,8 @@ func startSleepProcess(t *testing.T) *exec.Cmd {
 	cmd.Env = append(os.Environ(), "KATA_DAEMON_CMD_SLEEP_HELPER=1")
 	stdin, err := cmd.StdinPipe()
 	require.NoError(t, err)
+	stdout, err := cmd.StdoutPipe()
+	require.NoError(t, err)
 	require.NoError(t, cmd.Start())
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -2812,6 +2815,8 @@ func startSleepProcess(t *testing.T) *exec.Cmd {
 			<-done
 		}
 	})
+	_, err = bufio.NewReader(stdout).ReadString('\n')
+	require.NoError(t, err, "sleep helper did not install its stop watcher")
 	return cmd
 }
 
@@ -2824,6 +2829,7 @@ func TestDaemonCommandSleepHelperProcess(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	cleanup := installStopWatcher(ns.DBHash, cancel)
+	fmt.Println("ready")
 	go func() { _, _ = io.Copy(io.Discard, os.Stdin); cancel() }()
 	<-ctx.Done()
 	require.True(t, cleanup(t.Context()))
