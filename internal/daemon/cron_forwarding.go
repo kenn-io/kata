@@ -34,10 +34,19 @@ func forwardCronJob(ctx context.Context, cfg ServerConfig, projectID int64, uid,
 		return nil, false, nil
 	}
 	native := put != nil && cron.IsRecurringIssueJob(put.Definition.Native())
+	staleAdapter := false
 	if uid != "" {
 		old, err := cfg.DB.CronJob(ctx, projectID, uid)
 		if err == nil {
 			native = native || cron.IsRecurringIssueJob(old.Definition)
+			// A hub-side conversion of a replicated adapter job to native can
+			// leave this projection stale. When the request revision disagrees
+			// with the stale local revision, the hub is authoritative: forward
+			// and let its compare-and-swap decide instead of conflicting
+			// locally until replication catches up.
+			if !native && action != nil && action.ExpectedEventUID != old.DefinitionEventUID {
+				native, staleAdapter = true, true
+			}
 		} else if !errors.Is(err, db.ErrNotFound) {
 			return nil, true, cronAPIError(ctx, cfg, err, projectID, uid, true)
 		} else if action != nil {
@@ -130,7 +139,15 @@ func forwardCronJob(ctx context.Context, cfg ServerConfig, projectID int64, uid,
 	}
 	path += suffix
 	out := &api.CronJobResponse{}
-	if err := cronHubRequest(ctx, client, method, path, body, &out.Body, projectID); err != nil {
+	err = cronHubRequest(ctx, client, method, path, body, &out.Body, projectID)
+	if err != nil && staleAdapter {
+		if apiErr, ok := errors.AsType[*api.APIError](err); ok && apiErr.Status == http.StatusNotFound {
+			// The hub never saw this job: the stale-looking projection is
+			// spoke-local after all, and the ordinary local path owns it.
+			return nil, false, nil
+		}
+	}
+	if err != nil {
 		return nil, true, err
 	}
 	if out.Body.Job.UID == "" || out.Body.Job.DefinitionEventUID == "" {

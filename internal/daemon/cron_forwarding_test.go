@@ -631,9 +631,12 @@ func TestCronSpokeForwardPushOnlyOverlap(t *testing.T) {
 	require.Equal(t, last, binding.PushCursorEventID, "late acknowledgments must not regress the cursor")
 }
 
-// A native conversion request can conflict with a valid adapter definition.
-// Its opaque options remain exact in the hub's authoritative current object.
-func TestCronSpokeForwardAdapterConflictPreservesNumbers(t *testing.T) {
+// A forwarded native write must never convert a hub-side adapter job. The
+// enrollment authority is refused before compare-and-swap, whatever the
+// opaque adapter options carry, and the adapter job and its history stay
+// untouched. Conflict-payload fidelity for authorized writes is covered by
+// TestCronSpokeForwardConflictAndUncertainResponse.
+func TestCronSpokeForwardRefusesAdapterConversion(t *testing.T) {
 	f := newCronForwardFixture(t, nil)
 	hegel.Test(t, func(ht *hegel.T) {
 		number := hegel.Draw(ht, hegel.Integers[int64](math.MinInt64, math.MaxInt64))
@@ -642,20 +645,13 @@ func TestCronSpokeForwardAdapterConflictPreservesNumbers(t *testing.T) {
 		current, _, err := f.hub.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: f.hp.ID, UID: uid, Name: "Adapter", Definition: adapter, Actor: "tester"})
 		require.NoError(ht, err)
 		response, raw := f.put(t, uid, "")
-		require.Equalf(ht, 409, response.StatusCode, "%s", raw)
-		var conflict struct {
-			Error struct {
-				Data struct {
-					Current api.CronJob `json:"current"`
-				} `json:"data"`
-			} `json:"error"`
-		}
-		require.NoError(ht, json.Unmarshal(raw, &conflict))
-		expected := api.CronJobFrom(current)
-		expected.ID = 0
-		expected.Revision = 0
-		expected.ProjectID = f.sp.ID
-		require.Equal(ht, expected, conflict.Error.Data.Current)
+		require.Equalf(ht, http.StatusForbidden, response.StatusCode, "%s", raw)
+		kept, err := f.hub.DB.CronJob(t.Context(), f.hp.ID, uid)
+		require.NoError(ht, err)
+		require.Equal(ht, current.DefinitionEventUID, kept.DefinitionEventUID)
+		require.Equal(ht, current.Revision, kept.Revision)
+		require.Equal(ht, current.UpdatedAt, kept.UpdatedAt)
+		require.Equal(ht, string(current.Definition.Options), string(kept.Definition.Options))
 	}, hegel.WithTestCases(1000), hegel.WithDatabase(""))
 }
 
