@@ -3036,7 +3036,7 @@ func toastExpireCmd(d time.Duration) tea.Cmd {
 // /forms) or a confirm modal (quit or draft discard) is open. Both
 // gates redirect global keys into the field instead of firing.
 func (m Model) canQuit() bool {
-	if m.view == viewCron && (m.cron.filtering || m.cron.form != nil || m.cron.confirm != nil) {
+	if m.view == viewCron && (m.cron.filtering || m.cron.form != nil) {
 		return false
 	}
 	if m.modal != modalNone {

@@ -3,10 +3,7 @@ package tui
 import (
 	"cmp"
 	"encoding/json/jsontext"
-	"encoding/json/v2"
-	"errors"
 	"fmt"
-	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -146,7 +143,7 @@ var cronRecurringKind = cronJobKind{
 		def := f.base()
 		def.Overlap, def.Action = "allow", cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}
 		parent := f.openedParent()
-		if f.create {
+		if f.create || f.openedKind != cronRecurringID {
 			parent = uidOf(f.val[cfParent])
 		}
 		def.Issue = &cron.IssuePolicy{Kind: "per-run", ParentUID: parent, Title: f.val[cfTitle], Body: f.val[cfBody]}
@@ -221,9 +218,7 @@ func executeKind(id, label string, workflow bool) cronJobKind {
 				return def, err
 			}
 			def.SecretRefs = secrets
-			if err := f.applyOptions(&def); err != nil {
-				return def, err
-			}
+			f.applyOptions(&def)
 			if def.TimeoutSeconds, err = cronSeconds(cfTimeout, f.val[cfTimeout]); err != nil {
 				return def, err
 			}
@@ -266,9 +261,7 @@ var cronNotifyKind = cronJobKind{
 		case cronIsDate(f.trigger) && strings.TrimSpace(f.val[cfReport]) != "":
 			def.Issue = &cron.IssuePolicy{Kind: "existing", UID: uidOf(f.val[cfReport])}
 		}
-		if err := f.applyOptions(&def); err != nil {
-			return def, err
-		}
+		f.applyOptions(&def)
 		return def, f.applyCatchup(&def)
 	},
 }
@@ -373,28 +366,27 @@ func cronFormatSecrets(refs map[string]string) string {
 // cronForm is the create and edit draft. Text fields hold what was typed; the
 // definition is built from them only when validating or saving.
 type cronForm struct {
-	uid        string // minted when the form opens, so every send of a create is one job
-	create     bool
-	expected   string // definition_event_uid the edit replaces
-	opened     cron.JobDefinition
-	openedName string
-	openedKind string
-	kind       string
-	trigger    string
-	val        [cfCount]string
-	focus      cronField
-	ed         textinput.Model
-	edInit     string
-	snapshot   [cfCount]string
-	snapKind   string
-	snapTrig   string
-	err        *cronFieldError
-	general    string
-	saving     bool
-	conflict   *CronJobRecord
-	mine       *CronJobWrite  // what the draft last tried to write, for a conflict apply
-	merged     *CronJobRecord // the job a merged form derives from: the base of its next merge
-	workflows  []cronChoice
+	uid            string // minted when the form opens, so every send of a create is one job
+	create         bool
+	expected       string // definition_event_uid the edit replaces
+	opened         cron.JobDefinition
+	openedName     string
+	openedKind     string
+	kind           string
+	trigger        string
+	val            [cfCount]string
+	focus          cronField
+	ed             inputState
+	edInit         string
+	snapshot       [cfCount]string
+	snapKind       string
+	snapTrig       string
+	err            *cronFieldError
+	general        string
+	saving         bool
+	conflictCursor int
+	conflict       *CronJobRecord
+	workflows      []cronChoice
 }
 
 func (f *cronForm) kindDef() cronJobKind {
@@ -431,6 +423,9 @@ func newCronForm(workflows []cronChoice) (*cronForm, error) {
 // cronFormFor is a form on an existing job. It reads the portable definition
 // that was returned by the daemon, so nothing is lost on a round trip.
 func cronFormFor(rec CronJobRecord, workflows []cronChoice) (*cronForm, error) {
+	if err := rec.Definition.Validate(); err != nil {
+		return nil, err
+	}
 	f := &cronForm{uid: rec.UID, expected: rec.DefinitionEventUID, opened: rec.Definition, openedName: rec.Name, workflows: workflows}
 	if err := f.load(rec); err != nil {
 		return nil, err
@@ -532,17 +527,11 @@ func (f *cronForm) applyNotification(def *cron.JobDefinition) {
 	def.Action.Message = f.val[cfMessage]
 }
 
-func (f *cronForm) applyOptions(def *cron.JobDefinition) error {
-	text := strings.TrimSpace(f.val[cfOptions])
+func (f *cronForm) applyOptions(def *cron.JobDefinition) {
 	def.Options = nil
-	if text == "" {
-		return nil
+	if text := strings.TrimSpace(f.val[cfOptions]); text != "" {
+		def.Options = jsontext.Value(text)
 	}
-	if !jsontext.Value(text).IsValid() {
-		return fieldErr(cfOptions, "is not valid JSON")
-	}
-	def.Options = jsontext.Value(text)
-	return nil
 }
 
 // catchupShown says the trigger can fall due while nothing runs it.
@@ -552,6 +541,7 @@ func (f *cronForm) catchupShown() bool {
 
 func (f *cronForm) applyCatchup(def *cron.JobDefinition) error {
 	def.Catchup = cmp.Or(f.val[cfCatchup], "latest")
+	def.GraceSeconds = 0
 	if !f.catchupShown() || def.Catchup != "skip" {
 		return nil
 	}
@@ -621,20 +611,12 @@ func (f *cronForm) isChoice(field cronField) bool {
 	return false
 }
 
-// kinds are the kinds the form offers: all for a new job, and for an existing
-// one only those of its own class, since a native job stays native.
+// A native recurring job stays native; adapter jobs can change kind.
 func (f *cronForm) kinds() []cronJobKind {
-	if f.create {
+	if f.create || f.openedKind != cronRecurringID {
 		return cronJobKinds
 	}
-	native := f.openedKind == cronRecurringID
-	var kinds []cronJobKind
-	for _, k := range cronJobKinds {
-		if (k.id == cronRecurringID) == native {
-			kinds = append(kinds, k)
-		}
-	}
-	return kinds
+	return []cronJobKind{cronRecurringKind}
 }
 
 func (f *cronForm) choices(field cronField) []cronChoice {
@@ -726,37 +708,49 @@ func (f *cronForm) move(delta int) {
 	if len(order) == 0 {
 		return
 	}
-	i := slices.Index(order, f.focus)
+
+	nav := inputState{active: max(slices.Index(order, f.focus), 0), fields: make([]inputField, len(order))}
+	for i, field := range order {
+		nav.fields[i].locked = f.locked(field)
+		nav.fields[i].kind = fieldRadio
+	}
 	for range len(order) {
-		i = (max(i, 0) + delta + len(order)) % len(order)
-		if !f.locked(order[i]) {
+		nav = nav.advanceField(delta)
+		if !nav.activeField().locked {
 			break
 		}
 	}
-	f.focusField(order[i])
+	f.focusField(order[nav.active])
 }
 
-// syncEditor copies the focused editor back unless it is untouched: a value
-// holding line breaks shows flattened in the editor and must not be rewritten.
+// syncEditor keeps values assigned directly by a caller until the editor changes.
 func (f *cronForm) syncEditor() {
-	if f.isChoice(f.focus) || f.locked(f.focus) {
+	if f.isChoice(f.focus) || f.locked(f.focus) || f.ed.activeField() == nil {
 		return
 	}
-	if v := f.ed.Value(); v != f.edInit {
-		f.val[f.focus] = v
-		f.edInit = v
+	if v := f.ed.activeField().value(); v != f.edInit {
+		f.val[f.focus], f.edInit = v, v
 	}
 }
 
 func (f *cronForm) focusField(field cronField) {
 	f.syncEditor()
 	f.focus = field
-	f.ed = textinput.New()
-	f.ed.Prompt = ""
-	f.ed.SetValue(f.val[field])
-	f.ed.CursorEnd()
-	f.ed.Focus()
-	f.edInit = f.ed.Value()
+	var editor inputField
+	if slices.Contains([]cronField{cfBody, cfPrompt, cfMessage, cfOptions}, field) {
+		editor = newFormTextarea(fieldBody, "")
+		editor.area.CharLimit = 0
+		editor.setValue(f.val[field])
+		editor.area.SetHeight(3)
+	} else {
+		editor = inputField{kind: fieldSingleLine, input: textinput.New()}
+		editor.input.Prompt = ""
+		editor.setValue(f.val[field])
+		editor.input.CursorEnd()
+		_ = editor.focus()
+	}
+	f.ed = inputState{fields: []inputField{editor}}
+	f.edInit = editor.value()
 }
 
 // validate builds the definition with stand-in issue UIDs and records the
@@ -874,130 +868,12 @@ func cronUIDResolver(resolved map[string]string) func(string) string {
 	}
 }
 
-// cronProperties splits a job into the pieces a merge compares: its name and
-// each top-level definition member, as the JSON the daemon stores.
-func cronProperties(name string, def cron.JobDefinition) map[string]jsontext.Value {
-	props := map[string]jsontext.Value{}
-	raw, err := json.Marshal(def)
-	if err == nil {
-		err = json.Unmarshal(raw, &props)
-	}
-	if err != nil {
-		return map[string]jsontext.Value{}
-	}
-	props["name"], _ = json.Marshal(name)
-	return props
-}
-
-func cronCanonical(v jsontext.Value) string {
-	c := slices.Clone(v)
-	if c.Canonicalize() != nil {
-		return string(v)
-	}
-	return string(c)
-}
-
-// cronNormalized is the name and definition a form builds, untouched, from
-// rec, so values the form adds or drops never read as someone's edit.
-func cronNormalized(rec CronJobRecord, workflows []cronChoice) (string, cron.JobDefinition) {
-	if f, err := cronFormFor(rec, workflows); err == nil {
-		if name, def, err := f.build(cronUIDResolver(nil)); err == nil {
-			return name, def
-		}
-	}
-	return rec.Name, rec.Definition
-}
-
-// rebase is a three-way merge of the job's name and definition: base is what
-// the form opened with, mine is what the draft last tried to write, theirs is
-// the job now. A property the draft changed comes from the draft whole;
-// every other property comes from the current job, so another writer's edits
-// are not undone. Properties both sides changed are named in the notice.
-func (f *cronForm) rebase(current CronJobRecord) (*cronForm, error) {
-	if f.mine == nil {
-		return nil, errors.New("there is no draft to apply")
-	}
-	baseName, baseDef := f.openedName, f.opened
-	if f.merged != nil {
-		baseName, baseDef = f.merged.Name, f.merged.Definition
-	}
-	baseName, baseDef = cronNormalized(CronJobRecord{UID: f.uid, Name: baseName, Definition: baseDef}, f.workflows)
-	theirsName, theirsDef := cronNormalized(current, f.workflows)
-	base, mine, theirs := cronProperties(baseName, baseDef), cronProperties(f.mine.Name, f.mine.Definition), cronProperties(theirsName, theirsDef)
-	merged, both := map[string]jsontext.Value{}, []string{}
-	keys := map[string]bool{}
-	for _, props := range []map[string]jsontext.Value{base, mine, theirs} {
-		for key := range props {
-			keys[key] = true
-		}
-	}
-	for _, key := range slices.Sorted(maps.Keys(keys)) {
-		pick := theirs[key]
-		if cronCanonical(mine[key]) != cronCanonical(base[key]) {
-			pick = mine[key]
-			if t := cronCanonical(theirs[key]); t != cronCanonical(base[key]) && t != cronCanonical(mine[key]) {
-				both = append(both, key)
-			}
-		}
-		if pick != nil {
-			merged[key] = pick
-		}
-	}
-	var name string
-	if err := json.Unmarshal(merged["name"], &name); err != nil {
-		return nil, err
-	}
-	delete(merged, "name")
-	raw, err := json.Marshal(merged)
-	if err != nil {
-		return nil, err
-	}
-	rec := CronJobRecord{UID: current.UID, Name: name, DefinitionEventUID: current.DefinitionEventUID}
-	if err := json.Unmarshal(raw, &rec.Definition); err != nil {
-		return nil, err
-	}
-	next, err := cronFormFor(rec, f.workflows)
-	if err != nil {
-		return nil, err
-	}
-	next.merged = &current
-	// The draft is unsaved against the job as it is now, whatever the merge kept.
-	if persisted, err := cronFormFor(current, f.workflows); err == nil {
-		next.snapshot, next.snapKind, next.snapTrig = persisted.snapshot, persisted.snapKind, persisted.snapTrig
-	}
-	next.focusField(f.focus)
-	next.validate()
-	// A merged property the form cannot represent builds back as something
-	// else; say so rather than claim it was kept.
-	var lost []string
-	if builtName, built, err := next.build(cronUIDResolver(nil)); err == nil {
-		kept, want := cronProperties(builtName, built), cronProperties(name, rec.Definition)
-		for key := range want {
-			if cronCanonical(kept[key]) != cronCanonical(want[key]) {
-				lost = append(lost, key)
-			}
-		}
-		slices.Sort(lost)
-	}
-	both = slices.DeleteFunc(both, func(key string) bool { return slices.Contains(lost, key) })
-	if next.general == "" {
-		next.general = "Applied to the current job; review it, then save."
-	}
-	if len(both) > 0 {
-		next.general += " Both changed: " + strings.Join(both, ", ") + ". Your version is kept."
-	}
-	if len(lost) > 0 {
-		next.general += " Could not keep: " + strings.Join(lost, ", ") + "."
-	}
-	return next, nil
-}
-
 // paste inserts pasted text into the focused text field, as typing would.
 func (f *cronForm) paste(msg tea.PasteMsg) {
 	if f.saving || f.conflict != nil || f.isChoice(f.focus) || f.locked(f.focus) {
 		return
 	}
-	f.ed, _ = f.ed.Update(msg)
+	f.ed, _ = f.ed.delegateToField(msg)
 	f.validate()
 	f.general = ""
 }

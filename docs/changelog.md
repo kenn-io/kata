@@ -21,14 +21,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
   with a preview of the resolved day. A save is one revision-guarded patch of
   the dates you changed, and `u` undoes it. The detail now shows both dates.
   See the [CLI reference](reference/cli.md#daemon-and-diagnostics).
-- Create and change cron jobs from `kata tui`. On the Jobs tab, press `n` to
-  make a job, `e` to edit one, `p` to pause or resume it, and `d` or `u` to
-  archive or restore it. The form covers recurring child issues, agent prompts,
-  workflows and notifications with every trigger, shows kata's validation
-  beside the field, and keeps unknown adapter `options` keys and exact numbers.
-  A job that changed while you edited keeps your draft and offers to apply it
-  to the current definition. See
-  [the `kata tui` keys](reference/cli.md#daemon-and-diagnostics).
+- Create and edit cron jobs from `kata tui` with `n` and `e` on the Jobs tab.
+  The form covers recurring child issues, agent prompts, workflow runs, and
+  notifications. It preserves multiline text and unknown adapter `options`
+  keys and exact numbers. If a revision changes while you edit, keep your draft
+  and inspect the current definition, then reload it or save your whole draft
+  against its revision. See [the `kata tui` keys](reference/cli.md#daemon-and-diagnostics).
 - Show what is stuck in any web collection, Inbox and Today included, with the
   optional **Blocked by** column. It lists each task's open blockers, three IDs
   at most and then `+N`; closed blockers are left out. It is off by default;

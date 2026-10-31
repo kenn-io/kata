@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/api"
+	kataapi "go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -35,7 +35,7 @@ func TestCronClientReadsStoredRecords(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 201, workflow.HTTPResponse.StatusCode, string(workflow.Body))
 	var w struct {
-		Workflow api.CronWorkflow `json:"workflow"`
+		Workflow kataapi.CronWorkflow `json:"workflow"`
 	}
 	require.NoError(t, json.Unmarshal(workflow.Body, &w))
 	job, err := client.CreateCronJobWithResponse(ctx, &generated.CreateCronJobRequestOptions{
@@ -54,7 +54,7 @@ func TestCronClientReadsStoredRecords(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 201, job.HTTPResponse.StatusCode, string(job.Body))
 	var j struct {
-		Job api.CronJob `json:"job"`
+		Job kataapi.CronJob `json:"job"`
 	}
 	require.NoError(t, json.Unmarshal(job.Body, &j))
 	run, err := client.ObserveCronRunWithResponse(ctx, &generated.ObserveCronRunRequestOptions{
@@ -88,14 +88,14 @@ func manualExecuteJob(options string) cron.JobDefinition {
 	return cron.JobDefinition{
 		Version: 1, Kind: "job", Enabled: true,
 		Trigger: cron.Trigger{Kind: "manual"},
-		Action:  cron.Action{Kind: "execute", Prompt: "Summarize"},
-		Issue:   &cron.IssuePolicy{Kind: "per-run", Title: "Summary"},
+		Action:  cron.Action{Kind: "execute", Prompt: "Line one\nLine two"},
+		Issue:   &cron.IssuePolicy{Kind: "per-run", Title: "Digest", ScheduledOffsetSeconds: new(int64(3600))},
 		Overlap: "forbid", Catchup: "latest",
 		Options: jsontext.Value(options),
 	}
 }
 
-func TestCronClientWriteGuardsEditsAndArchives(t *testing.T) {
+func TestCronClientWriteGuardsEdits(t *testing.T) {
 	env := testenv.New(t)
 	c := NewClient(env.URL, env.HTTP)
 	project, err := c.EnsureProject(t.Context(), "cron-write-example", "alice")
@@ -103,32 +103,20 @@ func TestCronClientWriteGuardsEditsAndArchives(t *testing.T) {
 	ctx := t.Context()
 	const uid = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 
-	require.NoError(t, c.PutCronJob(ctx, project.ID, uid, CronJobWrite{Name: "Digest", Actor: "alice", Definition: manualExecuteJob(`{}`)}))
+	require.NoError(t, c.PutCronJob(ctx, project.ID, uid, kataapi.PutCronJobBody{Name: "Digest", Actor: "alice", Definition: kataapi.CronJobDefinitionFrom(manualExecuteJob(`{}`))}))
 	shown, err := c.ShowCronJob(ctx, project.ID, uid)
 	require.NoError(t, err)
 
 	shown.Definition.Enabled = false
-	err = c.PutCronJob(ctx, project.ID, uid, CronJobWrite{Name: "Digest", Actor: "alice", Definition: shown.Definition, ExpectedEventUID: "01ARZ3NDEKTSV4RRFFQ69G5FB9"})
+	err = c.PutCronJob(ctx, project.ID, uid, kataapi.PutCronJobBody{Name: "Digest", Actor: "alice", Definition: kataapi.CronJobDefinitionFrom(shown.Definition), ExpectedEventUID: "01ARZ3NDEKTSV4RRFFQ69G5FB9"})
 	var apiErr *APIError
 	require.ErrorAs(t, err, &apiErr)
 	require.Equal(t, 409, apiErr.Status)
 
-	require.NoError(t, c.PutCronJob(ctx, project.ID, uid, CronJobWrite{Name: "Digest", Actor: "alice", Definition: shown.Definition, ExpectedEventUID: shown.DefinitionEventUID}))
+	require.NoError(t, c.PutCronJob(ctx, project.ID, uid, kataapi.PutCronJobBody{Name: "Digest", Actor: "alice", Definition: kataapi.CronJobDefinitionFrom(shown.Definition), ExpectedEventUID: shown.DefinitionEventUID}))
 	updated, err := c.ShowCronJob(ctx, project.ID, uid)
 	require.NoError(t, err)
 	require.False(t, updated.Definition.Enabled)
-
-	require.NoError(t, c.ArchiveCronJob(ctx, project.ID, uid, updated.DefinitionEventUID, "alice"))
-	live, err := c.ListCronJobs(ctx, project.ID)
-	require.NoError(t, err)
-	require.Empty(t, live)
-	archived, err := c.ListArchivedCronJobs(ctx, project.ID)
-	require.NoError(t, err)
-	require.Len(t, archived, 1)
-	require.NoError(t, c.RestoreCronJob(ctx, project.ID, uid, archived[0].DefinitionEventUID, "alice"))
-	live, err = c.ListCronJobs(ctx, project.ID)
-	require.NoError(t, err)
-	require.Len(t, live, 1)
 }
 
 func TestCronJobRecordRefusesDefinitionsItWouldDrop(t *testing.T) {

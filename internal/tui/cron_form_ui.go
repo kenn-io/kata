@@ -13,16 +13,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	kataapi "go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
-	"go.kenn.io/kata/pkg/client/generated"
 	"go.kenn.io/kit/tui/helplayout"
+	"go.kenn.io/kit/tui/termtext"
 )
-
-// cronConfirm is a pending archive or restore awaiting y.
-type cronConfirm struct {
-	restore            bool
-	uid, name, eventID string
-}
 
 // cronJobsScope says the keys that edit jobs apply: the Jobs list or a job's page.
 func (m Model) cronJobsScope() bool {
@@ -46,19 +41,6 @@ func (m Model) cronSelectedJob(lines []cronLine, cursor int) (uid string, ok boo
 	return lines[cursor].target.uid, true
 }
 
-// jobAny finds the loaded job, live or archived.
-func (p cronData) jobAny(uid string) *generated.CronJob {
-	if j := p.job(uid); j != nil {
-		return j
-	}
-	for _, j := range p.archived {
-		if j.UID == uid {
-			return &j
-		}
-	}
-	return nil
-}
-
 func (m Model) cronToast(text string, level toastLevel) (Model, tea.Cmd) {
 	m.toast = &toast{text: text, level: level, expiresAt: m.toastNow().Add(3 * time.Second)}
 	return m, toastExpireCmd(3 * time.Second)
@@ -71,9 +53,6 @@ func (m Model) routeCronJobKey(key string, lines []cronLine, cursor int) (Model,
 	}
 	switch key {
 	case "n":
-		if m.cron.archived && len(m.cron.stack) == 0 {
-			return m, nil, false
-		}
 		f, err := newCronForm(m.cronWorkflowChoices())
 		if err != nil {
 			m, cmd := m.cronToast("Could not start a job: "+err.Error(), toastError)
@@ -81,38 +60,18 @@ func (m Model) routeCronJobKey(key string, lines []cronLine, cursor int) (Model,
 		}
 		m.cron.form = f
 		return m, nil, true
-	case "a":
-		if len(m.cron.stack) > 0 {
-			return m, nil, false
-		}
-		m.cron.archived = !m.cron.archived
-		m.cron.lists[cronJobs].cursor = 0
-		m.cron.events++
-		return m, nil, true
-	case "e", "p", "d", "u":
+	case "e":
 	default:
 		return m, nil, false
 	}
 	uid, ok := m.cronSelectedJob(lines, cursor)
-	job := m.cron.data.jobAny(uid)
+	job := m.cron.data.job(uid)
 	if !ok || job == nil {
 		return m, nil, true
 	}
-	archived := job.DeletedAt != nil
-	switch {
-	case key == "u" && !archived, key == "d" && archived:
-		return m, nil, true
-	case (key == "e" || key == "p") && archived:
-		m, cmd := m.cronToast("The job is archived; restore it with u first", toastInfo)
-		return m, cmd, true
-	case key == "d" || key == "u":
-		m.cron.confirm = &cronConfirm{restore: key == "u", uid: uid, name: job.Name, eventID: job.DefinitionEventUID}
-		return m, nil, true
-	case key == "e":
-		m.cron.editSeq++
-		return m, m.cronOpenEdit(uid, m.cron.editSeq), true
-	}
-	return m, m.cronTogglePause(*job), true
+
+	m.cron.editSeq++
+	return m, m.cronOpenEdit(uid, m.cron.editSeq), true
 }
 
 // cronWorkflowChoices are the project's live workflows for the workflow field.
@@ -131,7 +90,7 @@ type cronEditOpenedMsg struct {
 	err              error
 }
 
-// cronSavedMsg answers a save, pause, archive or restore. conflict carries
+// cronSavedMsg answers a save. conflict carries
 // the job as it is now when the guard refused the write.
 type cronSavedMsg struct {
 	conn, scope uint64
@@ -140,9 +99,6 @@ type cronSavedMsg struct {
 	fieldErr    *cronFieldError
 	err         error
 	fromForm    bool
-	closeUID    string // the job whose page this reply closes
-	archived    bool
-	draft       *CronJobWrite
 }
 
 func (m Model) cronOpenEdit(uid string, seq uint64) tea.Cmd {
@@ -162,14 +118,14 @@ func (m Model) cronEditOpened(msg cronEditOpenedMsg) (Model, tea.Cmd) {
 	// The answer may arrive after the user moved on; it opens the form only
 	// where the key was pressed: the same job, with nothing else on top.
 	_, _, lines := cronScreen(m)
-	if uid, ok := m.cronSelectedJob(lines, *m.cronCursor()); m.view != viewCron || m.cron.help || m.cron.confirm != nil || !m.cronJobsScope() || !ok || uid != msg.uid {
+	if uid, ok := m.cronSelectedJob(lines, *m.cronCursor()); m.view != viewCron || m.cron.help || !m.cronJobsScope() || !ok || uid != msg.uid {
 		return m, nil
 	}
 	if msg.err != nil {
 		return m.cronToast("Could not open the job: "+cronWriteMessage(msg.err), toastError)
 	}
 	if msg.record.Archived {
-		return m.cronToast("The job was archived; restore it with u before editing", toastInfo)
+		return m.cronToast("The job was archived; use the CLI to restore it before editing", toastInfo)
 	}
 	f, err := cronFormFor(msg.record, m.cronWorkflowChoices())
 	if err != nil {
@@ -177,51 +133,6 @@ func (m Model) cronEditOpened(msg cronEditOpenedMsg) (Model, tea.Cmd) {
 	}
 	m.cron.form = f
 	return m, nil
-}
-
-// cronTogglePause flips enabled on the definition as it is now, guarded on the
-// event the user saw, so a pause never overwrites an unseen edit.
-func (m Model) cronTogglePause(job generated.CronJob) tea.Cmd {
-	api, pid, actor := m.api, m.scope.projectID, m.list.actor
-	conn, scope := m.connGen, m.scopeGen
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
-		defer cancel()
-		done := func(notice string, err error) tea.Msg {
-			return cronSavedMsg{conn: conn, scope: scope, notice: notice, err: err}
-		}
-		rec, err := api.ShowCronJob(ctx, pid, job.UID)
-		if err != nil {
-			return done("", err)
-		}
-		if rec.Archived {
-			return done("", errors.New("the job is archived; restore it with u"))
-		}
-		if rec.DefinitionEventUID != job.DefinitionEventUID {
-			return done("", errors.New("the job changed since it was loaded; refreshed, try again"))
-		}
-		rec.Definition.Enabled = !rec.Definition.Enabled
-		err = api.PutCronJob(ctx, pid, job.UID, CronJobWrite{Name: rec.Name, Definition: rec.Definition, ExpectedEventUID: rec.DefinitionEventUID, Actor: actor})
-		notice := "Paused " + rec.Name
-		if rec.Definition.Enabled {
-			notice = "Resumed " + rec.Name
-		}
-		return done(notice, err)
-	}
-}
-
-func (m Model) cronLifecycle(c cronConfirm) tea.Cmd {
-	api, pid, actor := m.api, m.scope.projectID, m.list.actor
-	conn, scope := m.connGen, m.scopeGen
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
-		defer cancel()
-		call, notice := api.ArchiveCronJob, "Archived "+c.name
-		if c.restore {
-			call, notice = api.RestoreCronJob, "Restored "+c.name
-		}
-		return cronSavedMsg{conn: conn, scope: scope, notice: notice, err: call(ctx, pid, c.uid, c.eventID, actor), closeUID: c.uid, archived: !c.restore}
-	}
 }
 
 // cronSaveCmd resolves the issue refs the draft names, builds the definition
@@ -254,7 +165,7 @@ func (m Model) cronSaveCmd(f cronForm) tea.Cmd {
 			}
 			return fail(err)
 		}
-		write := CronJobWrite{Name: name, Definition: def, Actor: actor}
+		write := kataapi.PutCronJobBody{Name: name, Definition: kataapi.CronJobDefinitionFrom(def), Actor: actor}
 		notice := "Created " + name
 		if !f.create {
 			write.ExpectedEventUID, notice = f.expected, "Saved "+name
@@ -266,11 +177,11 @@ func (m Model) cronSaveCmd(f cronForm) tea.Cmd {
 					// A create whose reply was lost conflicts with itself on retry.
 					if f.create && current.Name == name && cronSameDefinition(current.Definition, def) {
 						if current.Archived {
-							return fail(errors.New("this job was created and then archived; restore it with u"))
+							return fail(errors.New("this job was created and then archived; use the CLI to restore it"))
 						}
 						return cronSavedMsg{conn: conn, scope: scope, notice: notice, fromForm: true}
 					}
-					return cronSavedMsg{conn: conn, scope: scope, conflict: &current, draft: &write, err: err, fromForm: true}
+					return cronSavedMsg{conn: conn, scope: scope, conflict: &current, err: err, fromForm: true}
 				}
 			}
 			return fail(err)
@@ -307,7 +218,7 @@ func (m Model) cronSaved(msg cronSavedMsg) (Model, tea.Cmd) {
 	}
 	switch {
 	case msg.conflict != nil && f != nil:
-		f.conflict, f.mine, f.general = msg.conflict, msg.draft, ""
+		f.conflict, f.general = msg.conflict, ""
 		return m, nil
 	case msg.fieldErr != nil && f != nil:
 		f.err, f.general = msg.fieldErr, ""
@@ -325,28 +236,7 @@ func (m Model) cronSaved(msg cronSavedMsg) (Model, tea.Cmd) {
 		m.cron.form = nil
 	}
 	m.cron.events++
-	if n := len(m.cron.stack); n > 0 && msg.closeUID != "" && m.cron.stack[n-1].ref == (cronRef{cronJobs, msg.closeUID}) {
-		// The job leaves the list this page reads from, so the page would empty.
-		m.cron.stack = m.cron.stack[:n-1]
-	}
-	if msg.archived && len(m.cron.stack) == 0 && m.cron.tab == cronJobs {
-		msg.notice += "; press a, then u to restore it"
-	}
 	return m.cronToast(msg.notice, toastSuccess)
-}
-
-func (m Model) routeCronConfirmKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
-	c := *m.cron.confirm
-	switch msg.String() {
-	case "ctrl+c":
-		return m, tea.Quit
-	case "y", "Y":
-		m.cron.confirm = nil
-		return m, m.cronLifecycle(c)
-	case "n", "N", "esc":
-		m.cron.confirm = nil
-	}
-	return m, nil
 }
 
 func (m Model) routeCronFormKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
@@ -378,9 +268,20 @@ func (m Model) routeCronFormKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		}
 		f.saving = true
 		return m, m.cronSaveCmd(*f)
-	case "tab", "down", "enter":
+	case "enter", "up", "down":
+		if f.ed.activeField().kind == fieldMultiLine && !f.isChoice(f.focus) {
+			f.ed, _ = f.ed.delegateToField(msg)
+			f.validate()
+			break
+		}
+		if key == "up" {
+			f.move(-1)
+		} else {
+			f.move(1)
+		}
+	case "tab":
 		f.move(1)
-	case "shift+tab", "up":
+	case "shift+tab":
 		f.move(-1)
 	case "left", "right", "space":
 		if f.isChoice(f.focus) {
@@ -396,30 +297,39 @@ func (m Model) routeCronFormKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		if f.isChoice(f.focus) || f.locked(f.focus) {
 			break
 		}
-		f.ed, _ = f.ed.Update(msg)
+		f.ed, _ = f.ed.delegateToField(msg)
 		f.validate()
 		f.general = ""
 	}
 	return m, nil
 }
 
-// routeCronConflictKey answers the newer job a save found: apply the draft to
-// it, take the newer one instead, or go back to the draft.
+// A conflict keeps the whole draft until the user reloads or saves it.
 func (m Model) routeCronConflictKey(key string) (Model, tea.Cmd) {
 	f := m.cron.form
 	current := *f.conflict
 	switch key {
-	case "a":
+	case "r":
 		if current.Archived {
 			return m, nil
 		}
-		next, err := f.rebase(current)
+		next, err := cronFormFor(current, f.workflows)
 		if err != nil {
 			f.general = err.Error()
 			return m, nil
 		}
 		m.cron.form = next
-		return m, nil
+	case "ctrl+o", "ctrl+s":
+		if current.Archived {
+			return m, nil
+		}
+		f.create, f.expected, f.conflict = false, current.DefinitionEventUID, nil
+		f.saving = true
+		return m, m.cronSaveCmd(*f)
+	case "j", "down":
+		f.conflictCursor++
+	case "k", "up":
+		f.conflictCursor = max(f.conflictCursor-1, 0)
 	case "esc":
 		f.conflict = nil
 	}
@@ -429,14 +339,14 @@ func (m Model) routeCronConflictKey(key string) (Model, tea.Cmd) {
 func cronFormHelpRows(f *cronForm) []helplayout.HelpItem {
 	switch {
 	case f.conflict != nil:
-		rows := []helplayout.HelpItem{{Key: "esc", Description: "back to my draft"}}
+		rows := []helplayout.HelpItem{{Key: "↑↓", Description: "scroll"}, {Key: "esc", Description: "back to my draft"}}
 		if !f.conflict.Archived {
-			rows = slices.Insert(rows, 0, helplayout.HelpItem{Key: "a", Description: "apply my draft to it"})
+			rows = slices.Insert(rows, 0, helplayout.HelpItem{Key: "r", Description: "reload current job"}, helplayout.HelpItem{Key: "ctrl+o", Description: "save my draft"})
 		}
 		return rows
 	}
 	return []helplayout.HelpItem{
-		{Key: "tab/↑↓", Description: "field"},
+		{Key: "tab/shift+tab", Description: "field"},
 		{Key: "←/→", Description: "choose"},
 		{Key: "ctrl+o", Description: "save"},
 		{Key: "esc", Description: "cancel"},
@@ -468,21 +378,27 @@ func cronFormLines(m Model, f *cronForm) (lines []string, cursor int) {
 	if f.conflict != nil {
 		c := f.conflict
 		lines = append(lines, errorStyle.Render("This job changed while you edited it. Your draft is kept."), "",
-			"Current name:       "+sanitizeForLine(c.Name),
-			"Current state:      "+map[bool]string{true: "enabled", false: "paused"}[c.Definition.Enabled]+map[bool]string{true: " (archived)", false: ""}[c.Archived],
-			"Current trigger:    "+sanitizeForLine(cronCurrentTrigger(c.Definition.Trigger)),
-			"Current action:     "+sanitizeForLine(c.Definition.Action.Kind),
-			"Current event:      "+c.DefinitionEventUID)
-		return lines, 0
+			"Current name: "+sanitizeForLine(c.Name), "Current event: "+c.DefinitionEventUID)
+		if c.Archived {
+			lines = append(lines, "Current state: archived")
+		}
+		raw, err := json.Marshal(c.Definition, jsontext.WithIndent("  "))
+		if err == nil {
+			for line := range strings.SplitSeq(string(raw), "\n") {
+				lines = append(lines, termtext.Wrap(sanitizeForDisplay(line), max(m.width, 1))...)
+			}
+		}
+		f.conflictCursor = min(f.conflictCursor, max(len(lines)-1, 0))
+		return lines, f.conflictCursor
 	}
 	labelWidth := 0
 	order := f.order()
 	for _, field := range order {
 		labelWidth = max(labelWidth, len([]rune(cronFieldLabel(f, field))))
 	}
-	for i, field := range order {
+	for _, field := range order {
 		if field == f.focus {
-			cursor = i
+			cursor = len(lines)
 		}
 		prefix := "  "
 		if field == f.focus {
@@ -493,7 +409,16 @@ func cronFormLines(m Model, f *cronForm) (lines []string, cursor int) {
 		case f.isChoice(field):
 			value = "‹ " + f.display(field) + " ›"
 		case field == f.focus && !f.locked(field):
-			value = f.ed.View()
+			ed := f.ed.activeField()
+			width := max(m.width-labelWidth-5, 1)
+			if ed.kind == fieldMultiLine {
+				ed.area.SetWidth(width)
+				value = ed.area.View()
+			} else {
+				ed.input.SetWidth(max(width-1, 1))
+				ed.input.SetCursor(ed.input.Position())
+				value = ed.input.View()
+			}
 		default:
 			value = sanitizeForLine(strings.ReplaceAll(f.val[field], "\n", " ⏎ "))
 			if value == "" && cronFieldHints[field] != "" {
@@ -507,13 +432,14 @@ func cronFormLines(m Model, f *cronForm) (lines []string, cursor int) {
 		if f.err != nil && f.err.field == field {
 			line += "  " + errorStyle.Render(sanitizeForLine(f.err.text))
 		}
-		lines = append(lines, ansi.Truncate(line, m.width, "…"))
+		for n, part := range strings.Split(line, "\n") {
+			if n > 0 {
+				part = strings.Repeat(" ", labelWidth+5) + part
+			}
+			lines = append(lines, ansi.Truncate(part, m.width, "…"))
+		}
 	}
 	return lines, cursor
-}
-
-func cronCurrentTrigger(t cron.Trigger) string {
-	return cronSchedule(generated.TriggerResponse{Kind: t.Kind, Cron: &t.Cron, IntervalSeconds: &t.IntervalSeconds, At: &t.At, Timezone: &t.Timezone})
 }
 
 func renderCronForm(m Model) string {

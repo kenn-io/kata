@@ -25,7 +25,7 @@ func (m Model) routeMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 		m.modal == modalNone && (m.input.kind == inputNone || m.input.kind == inputSearchBar) &&
 		m.width >= 80 {
 		mouse := click.Mouse()
-		if m.view == viewCron && !m.cron.help && m.cron.form == nil && m.cron.confirm == nil && len(m.cron.stack) == 0 &&
+		if m.view == viewCron && !m.cron.help && m.cron.form == nil && len(m.cron.stack) == 0 &&
 			m.scope.projectID != 0 && mouse.Y == 2 {
 			m.inboxPending = false
 			m.cron.filtering = true

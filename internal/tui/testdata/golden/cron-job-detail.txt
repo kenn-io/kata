@@ -20,5 +20,5 @@ kata カタ [jobs] runs workflows
       "title": "Summary result"
     },
 
- j/k move ▕ ↵/l follow▕ h/esc back▕ n/e new/edit▕ p pause▕ d/u archive/restore
- r refresh▕ 1-4 tabs  ▕ ? help    ▕ q quit
+ j/k move▕ ↵/l follow▕ h/esc back▕ n/e new/edit▕ r refresh▕ 1-4 tabs▕ ? help
+ q quit

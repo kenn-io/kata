@@ -6,17 +6,15 @@ import (
 	"encoding/json/v2"
 	"fmt"
 
+	kataapi "go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
 type cronAPI interface {
 	ListCronJobs(context.Context, int64) ([]generated.CronJob, error)
-	ListArchivedCronJobs(context.Context, int64) ([]generated.CronJob, error)
 	ShowCronJob(ctx context.Context, projectID int64, uid string) (CronJobRecord, error)
-	PutCronJob(ctx context.Context, projectID int64, uid string, write CronJobWrite) error
-	ArchiveCronJob(ctx context.Context, projectID int64, uid, expectedEventUID, actor string) error
-	RestoreCronJob(ctx context.Context, projectID int64, uid, expectedEventUID, actor string) error
+	PutCronJob(ctx context.Context, projectID int64, uid string, write kataapi.PutCronJobBody) error
 	ListCronWorkflows(context.Context, int64) ([]generated.CronWorkflow, error)
 	ListCronRuns(context.Context, int64) ([]generated.CronRun, error)
 }
@@ -86,14 +84,6 @@ type CronJobRecord struct {
 	Definition                    cron.JobDefinition
 }
 
-// CronJobWrite is a complete replacement. ExpectedEventUID is empty for a create.
-type CronJobWrite struct {
-	Name             string             `json:"name"`
-	Definition       cron.JobDefinition `json:"definition"`
-	ExpectedEventUID string             `json:"expected_event_uid,omitempty"`
-	Actor            string             `json:"actor,omitempty"`
-}
-
 func decodeCronJobRecord(body []byte) (CronJobRecord, error) {
 	var wire struct {
 		Job struct {
@@ -109,35 +99,12 @@ func decodeCronJobRecord(body []byte) (CronJobRecord, error) {
 	}
 	record := CronJobRecord{UID: wire.Job.UID, Name: wire.Job.Name, DefinitionEventUID: wire.Job.DefinitionEventUID, Archived: wire.Job.DeletedAt != nil}
 	// A member this kata does not know would be dropped by the next write.
-	if err := json.Unmarshal(wire.Job.Definition, &record.Definition, json.RejectUnknownMembers(true)); err != nil {
+	definition, err := cron.DecodeJob(wire.Job.Definition)
+	if err != nil {
 		return CronJobRecord{}, fmt.Errorf("the job has definition members this kata does not know, so editing it here would drop them; use a newer kata (%w)", err)
 	}
+	record.Definition = definition
 	return record, nil
-}
-
-// ListArchivedCronJobs reads the project's deleted job definitions.
-func (c *Client) ListArchivedCronJobs(ctx context.Context, projectID int64) ([]generated.CronJob, error) {
-	client, err := c.generatedClient()
-	if err != nil {
-		return nil, err
-	}
-	wire, callErr := client.ListCronJobsWithResponse(ctx, &generated.ListCronJobsRequestOptions{
-		PathParams: &generated.ListCronJobsPath{ProjectID: projectID},
-		Query:      &generated.ListCronJobsQuery{IncludeDeleted: new(true)},
-	})
-	if wire == nil {
-		return nil, callErr
-	}
-	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil); err != nil {
-		return nil, err
-	}
-	var archived []generated.CronJob
-	for _, job := range wire.JSON200.Jobs {
-		if job.DeletedAt != nil {
-			archived = append(archived, job)
-		}
-	}
-	return archived, nil
 }
 
 // ShowCronJob reads one job, archived or not.
@@ -161,7 +128,7 @@ func (c *Client) ShowCronJob(ctx context.Context, projectID int64, uid string) (
 // PutCronJob creates or replaces a job, the same call `kata cron job create`
 // and `update` make. The body reaches the generated type through its own
 // decoder, which keeps option numbers exact.
-func (c *Client) PutCronJob(ctx context.Context, projectID int64, uid string, write CronJobWrite) error {
+func (c *Client) PutCronJob(ctx context.Context, projectID int64, uid string, write kataapi.PutCronJobBody) error {
 	client, err := c.generatedClient()
 	if err != nil {
 		return err
@@ -177,38 +144,6 @@ func (c *Client) PutCronJob(ctx context.Context, projectID int64, uid string, wr
 	wire, callErr := client.ReplaceCronJobWithResponse(ctx, &generated.ReplaceCronJobRequestOptions{
 		PathParams: &generated.ReplaceCronJobPath{ProjectID: projectID, CronUID: uid},
 		Body:       &body,
-	})
-	if wire == nil {
-		return callErr
-	}
-	return decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil)
-}
-
-// ArchiveCronJob deletes a job definition; RestoreCronJob brings it back.
-func (c *Client) ArchiveCronJob(ctx context.Context, projectID int64, uid, expectedEventUID, actor string) error {
-	client, err := c.generatedClient()
-	if err != nil {
-		return err
-	}
-	wire, callErr := client.ArchiveCronJobWithResponse(ctx, &generated.ArchiveCronJobRequestOptions{
-		PathParams: &generated.ArchiveCronJobPath{ProjectID: projectID, CronUID: uid},
-		Body:       &generated.CronDefinitionActionBody{Actor: &actor, ExpectedEventUID: expectedEventUID},
-	})
-	if wire == nil {
-		return callErr
-	}
-	return decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil)
-}
-
-// RestoreCronJob restores a deleted job definition.
-func (c *Client) RestoreCronJob(ctx context.Context, projectID int64, uid, expectedEventUID, actor string) error {
-	client, err := c.generatedClient()
-	if err != nil {
-		return err
-	}
-	wire, callErr := client.RestoreCronJobWithResponse(ctx, &generated.RestoreCronJobRequestOptions{
-		PathParams: &generated.RestoreCronJobPath{ProjectID: projectID, CronUID: uid},
-		Body:       &generated.CronDefinitionActionBody{Actor: &actor, ExpectedEventUID: expectedEventUID},
 	})
 	if wire == nil {
 		return callErr

@@ -2,8 +2,8 @@
 kata カタ [jobs] runs workflows
  /daily▏                                                                  1 job
 
-  Job           State    Trigger           Action             Last loaded run
-▶ Daily summary enabled  0 7 * * *         workflow Summary … succeeded 1h ago
+  Job            State   Trigger           Action             Last loaded run
+▶ Daily summary  enabled 0 7 * * *         workflow Summary … succeeded 1h ago
 
 
 
@@ -20,5 +20,5 @@ kata カタ [jobs] runs workflows
 
 
 
- j/k move  ▕ ↵/l open  ▕ / filter ▕ n/e new/edit▕ p pause▕ d/u archive/restore
- a archived▕ h/esc kata▕ r refresh▕ 1-4 tabs    ▕ ? help ▕ q quit
+ j/k move▕ ↵/l open▕ / filter▕ n/e new/edit▕ h/esc kata▕ r refresh▕ 1-4 tabs
+ ? help  ▕ q quit

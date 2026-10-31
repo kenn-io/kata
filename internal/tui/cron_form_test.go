@@ -1,10 +1,10 @@
 package tui
 
 import (
-	"encoding/json/jsontext"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	kataapi "go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -38,16 +38,9 @@ func nativeRecord() CronJobRecord {
 }
 
 func executeRecord(options string) CronJobRecord {
-	offset := int64(3600)
 	return CronJobRecord{
 		UID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Name: "Digest", DefinitionEventUID: "01ARZ3NDEKTSV4RRFFQ69G5FB2",
-		Definition: cron.JobDefinition{
-			Version: 1, Kind: "job", Enabled: true,
-			Trigger: cron.Trigger{Kind: "manual"},
-			Action:  cron.Action{Kind: "execute", Prompt: "Line one\nLine two"},
-			Issue:   &cron.IssuePolicy{Kind: "per-run", Title: "Digest", ScheduledOffsetSeconds: &offset},
-			Overlap: "forbid", Catchup: "latest", Options: jsontext.Value(options),
-		},
+		Definition: manualExecuteJob(options),
 	}
 }
 
@@ -122,7 +115,7 @@ func TestCronFormExecuteDateTriggerCreatesOnTheDaemon(t *testing.T) {
 	f.val[cfPrompt], f.val[cfPolicy], f.val[cfIssue] = "Do it", "existing", issue
 	name, def, err := f.build(cronUIDResolver(nil))
 	require.NoError(t, err)
-	require.NoError(t, c.PutCronJob(t.Context(), project.ID, f.uid, CronJobWrite{Name: name, Definition: def, Actor: "alice"}))
+	require.NoError(t, c.PutCronJob(t.Context(), project.ID, f.uid, kataapi.PutCronJobBody{Name: name, Definition: kataapi.CronJobDefinitionFrom(def), Actor: "alice"}))
 	shown, err := c.ShowCronJob(t.Context(), project.ID, f.uid)
 	require.NoError(t, err)
 	require.Equal(t, issue, shown.Definition.Trigger.IssueUID)
@@ -173,12 +166,17 @@ func TestCronFormLocksNativeParentAndAction(t *testing.T) {
 	require.False(t, created.locked(cfParent))
 }
 
-func TestCronFormAdapterJobsCannotBecomeNative(t *testing.T) {
+func TestCronFormAdapterJobsCanBecomeNative(t *testing.T) {
 	f, err := cronFormFor(executeRecord(`{}`), nil)
 	require.NoError(t, err)
-	for _, k := range f.kinds() {
-		require.NotEqual(t, cronRecurringID, k.id)
-	}
+	require.Equal(t, cronRecurringID, f.kinds()[0].id)
+	f.step(cfKind, -1)
+	require.Equal(t, cronRecurringID, f.kind)
+	f.val[cfParent] = cronTestParent
+	_, def, err := f.build(cronUIDResolver(nil))
+	require.NoError(t, err)
+	require.True(t, cron.IsRecurringIssueJob(def))
+	require.Equal(t, cronTestParent, def.Issue.ParentUID)
 }
 
 func TestCronFormNotifyIssueTargetIsExisting(t *testing.T) {
@@ -302,4 +300,22 @@ func TestCronFormNotifyEditKeepsStoredOverlap(t *testing.T) {
 	_, def, err = created.build(cronUIDResolver(nil))
 	require.NoError(t, err)
 	require.Equal(t, "allow", def.Overlap, "a new notify job gets a default")
+}
+
+func TestCronFormRefusesFutureVersion(t *testing.T) {
+	rec := executeRecord(`{}`)
+	rec.Definition.Version = 2
+	_, err := cronFormFor(rec, nil)
+	require.Error(t, err)
+}
+
+func TestCronFormCatchupLatestClearsGrace(t *testing.T) {
+	rec := nativeRecord()
+	rec.Definition.Catchup, rec.Definition.GraceSeconds = "skip", 300
+	f, err := cronFormFor(rec, nil)
+	require.NoError(t, err)
+	f.val[cfCatchup] = "latest"
+	_, def, err := f.build(cronUIDResolver(nil))
+	require.NoError(t, err)
+	require.Zero(t, def.GraceSeconds)
 }

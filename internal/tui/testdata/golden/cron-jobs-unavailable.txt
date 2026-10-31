@@ -2,7 +2,7 @@
 kata カタ [jobs] runs workflows
  / search                                                                0 jobs
 
-  Job           State    Trigger           Action             Last loaded run
+  Job            State   Trigger           Action             Last loaded run
 jobs unavailable: see error below
 
 
@@ -20,5 +20,5 @@ jobs unavailable: see error below
 
 
 jobs: no cron permission (403)
- j/k move  ▕ ↵/l open  ▕ / filter ▕ n/e new/edit▕ p pause▕ d/u archive/restore
- a archived▕ h/esc kata▕ r refresh▕ 1-4 tabs    ▕ ? help ▕ q quit
+ j/k move▕ ↵/l open▕ / filter▕ n/e new/edit▕ h/esc kata▕ r refresh▕ 1-4 tabs
+ ? help  ▕ q quit
