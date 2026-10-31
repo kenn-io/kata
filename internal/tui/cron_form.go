@@ -392,7 +392,8 @@ type cronForm struct {
 	general    string
 	saving     bool
 	conflict   *CronJobRecord
-	mine       *CronJobWrite // what the draft last tried to write, for a conflict apply
+	mine       *CronJobWrite  // what the draft last tried to write, for a conflict apply
+	merged     *CronJobRecord // the job a merged form derives from: the base of its next merge
 	workflows  []cronChoice
 }
 
@@ -905,7 +906,11 @@ func (f *cronForm) rebase(current CronJobRecord) (*cronForm, error) {
 	if f.mine == nil {
 		return nil, errors.New("there is no draft to apply")
 	}
-	base, mine, theirs := cronProperties(f.openedName, f.opened), cronProperties(f.mine.Name, f.mine.Definition), cronProperties(current.Name, current.Definition)
+	baseName, baseDef := f.openedName, f.opened
+	if f.merged != nil {
+		baseName, baseDef = f.merged.Name, f.merged.Definition
+	}
+	base, mine, theirs := cronProperties(baseName, baseDef), cronProperties(f.mine.Name, f.mine.Definition), cronProperties(current.Name, current.Definition)
 	merged, both := map[string]jsontext.Value{}, []string{}
 	keys := map[string]bool{}
 	for _, props := range []map[string]jsontext.Value{base, mine, theirs} {
@@ -942,6 +947,7 @@ func (f *cronForm) rebase(current CronJobRecord) (*cronForm, error) {
 	if err != nil {
 		return nil, err
 	}
+	next.merged = &current
 	next.focusField(f.focus)
 	next.validate()
 	if next.general == "" {

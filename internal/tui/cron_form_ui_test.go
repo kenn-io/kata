@@ -602,3 +602,29 @@ func TestCronRetriedCreateOfAnArchivedJobSaysSo(t *testing.T) {
 	require.Nil(t, m.cron.form.conflict)
 	require.Contains(t, m.cron.form.general, "restore it with u")
 }
+
+func TestCronSecondConflictKeepsTheDraftsEarlierEdits(t *testing.T) {
+	m, api := openEdit(t, executeRecord(`{}`))
+	m.cron.form.val[cfPrompt] = "Mine"
+	first := executeRecord(`{}`)
+	first.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 8 * * *", Timezone: "UTC"}
+	m = conflictAndApply(t, m, api, first)
+
+	second := first
+	second.DefinitionEventUID = "01ARZ3NDEKTSV4RRFFQ69G5FB9"
+	second.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 7 * * *", Timezone: "UTC"}
+	second.Definition.Action.Prompt = "Theirs"
+	api.shown = second
+	api.putErrs = []error{&APIError{Status: http.StatusConflict, Code: "cron_conflict"}}
+	m, cmd := press(m, ctrlKey('o'))
+	m = settle(t, m, cmd)
+	m, cmd = press(m, keyRune('a'))
+	require.Nil(t, cmd)
+	require.Contains(t, m.cron.form.general, "Both changed: action")
+
+	m, cmd = press(m, ctrlKey('o'))
+	m = settle(t, m, cmd)
+	got := api.puts[len(api.puts)-1].write.Definition
+	require.Equal(t, "Mine", got.Action.Prompt, "the edit made before the first conflict survives the second")
+	require.Equal(t, "0 7 * * *", got.Trigger.Cron, "the other writer's later trigger change is kept")
+}
