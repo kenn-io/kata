@@ -14,7 +14,7 @@ import (
 // restart after an update.
 const RuntimeRestartMetadataKey = "restart_signal"
 
-// RuntimeRestartExecutableKey carries the executable a path-aware daemon will run.
+// RuntimeRestartExecutableKey marks a daemon that accepts an installed-executable restart request.
 const RuntimeRestartExecutableKey = "restart_executable"
 
 // RuntimeProcessAlive reports whether a runtime record still identifies a local

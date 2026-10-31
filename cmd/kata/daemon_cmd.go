@@ -870,7 +870,7 @@ func daemonRestartCmd() *cobra.Command {
 				if cmd.Flags().Changed("listen") || cmd.Flags().Changed("insecure-readonly") || cmd.Flags().Changed("no-auto-token") {
 					return fmt.Errorf("restart retains the running daemon's startup options; run 'kata daemon stop', then 'kata daemon start' with the requested options")
 				}
-				if !daemonruntime.RuntimeRecordRestartable(rec) || rec.Metadata[daemonruntime.RuntimeRestartExecutableKey] == "" {
+				if !daemonruntime.RuntimeRecordRestartable(rec) || rec.Metadata[daemonruntime.RuntimeRestartExecutableKey] != "1" {
 					return fmt.Errorf("daemon pid %d does not support automatic restart; run 'kata daemon stop', then 'kata daemon start' with its original startup options", rec.PID)
 				}
 				running = append(running, rec)
@@ -1431,7 +1431,7 @@ func runDaemonProcess(
 	maps.Copy(rec.Metadata, webRuntime.Metadata())
 	if restart != nil {
 		rec.Metadata[daemonruntime.RuntimeRestartMetadataKey] = "1"
-		rec.Metadata[daemonruntime.RuntimeRestartExecutableKey] = restart.executable
+		rec.Metadata[daemonruntime.RuntimeRestartExecutableKey] = "1"
 	}
 
 	broadcaster := daemon.NewEventBroadcaster()
@@ -1469,20 +1469,19 @@ func runDaemonProcess(
 		restartSignals, restartCleanup = installRestartSource(ctx, ns.DBHash)
 		workers.Go(func() {
 			restart.watch(ctx, restartSignals, func() error {
-				path, err := runtimeStore.Path(rec.PID)
-				if err != nil {
-					return err
-				}
-				current, err := runtimeStore.Read(path)
-				if err != nil {
-					return err
-				}
-				target := current.Metadata[daemonruntime.RuntimeRestartExecutableKey]
-				if !current.StartedAt.Equal(rec.StartedAt) || !filepath.IsAbs(target) {
-					return fmt.Errorf("restart target is missing or runtime generation changed")
-				}
-				executable, err := exec.LookPath(target)
-				if err != nil {
+				executable := restart.executable
+				request := restartRequestPath(ns.DataDir, rec)
+				target, err := os.ReadFile(request) //nolint:gosec // G304: generation-scoped request in the daemon's runtime directory
+				switch {
+				case err == nil:
+					if err := os.Remove(request); err != nil {
+						return err
+					}
+					executable, err = exec.LookPath(string(target))
+					if err != nil {
+						return err
+					}
+				case !errors.Is(err, os.ErrNotExist):
 					return err
 				}
 				if _, err := preflightDaemonStartup(ctx, originalListen, insecureReadonly, noAutoToken); err != nil {

@@ -6,10 +6,12 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"sync/atomic"
 
 	"go.kenn.io/kata/internal/daemonruntime"
 
+	"go.kenn.io/kit/atomicfile"
 	kitdaemon "go.kenn.io/kit/daemon"
 
 	"go.kenn.io/kit/pathresolve"
@@ -79,15 +81,17 @@ func (r *daemonRestart) exec(ctx context.Context) error {
 	return nil
 }
 
-// daemonReplacementWaitTimeout is overridable for refused-restart tests.
-var daemonReplacementWaitTimeout = daemonRestartProcessWaitTimeout
+func restartRequestPath(dir string, rec kitdaemon.RuntimeRecord) string {
+	return filepath.Join(dir, fmt.Sprintf("restart.%d.%d", rec.PID, rec.StartedAt.UnixNano()))
+}
 
 func requestDaemonRestart(ctx context.Context, ns *daemonruntime.Namespace, previous kitdaemon.RuntimeRecord, executable string) (kitdaemon.RuntimeRecord, error) {
 	if executable != "" {
-		previous.Metadata[daemonruntime.RuntimeRestartExecutableKey] = executable
-		if _, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(previous); err != nil {
+		request := restartRequestPath(ns.DataDir, previous)
+		if err := atomicfile.WriteFile(request, []byte(executable), atomicfile.WithPrivate()); err != nil {
 			return kitdaemon.RuntimeRecord{}, err
 		}
+		defer func() { _ = os.Remove(request) }()
 	}
 	if err := daemonruntime.SignalDaemonRestart(previous, ns.DBHash); err != nil {
 		return kitdaemon.RuntimeRecord{}, fmt.Errorf("signal daemon pid %d: %w", previous.PID, err)

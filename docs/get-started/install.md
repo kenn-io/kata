@@ -106,7 +106,8 @@ command reports that the binary was installed and returns an error. Resolve
 any reported startup problem, then run `kata daemon stop` followed by
 `kata daemon start` with the daemon's original startup options.
 After a package-manager upgrade, `kata daemon restart` uses the executable
-invoked by the CLI while retaining the running daemon's environment. Older
+invoked by the CLI while retaining the running daemon's environment. Both
+processes must see the same process IDs and executable paths. Older
 signal-only daemons need one stop/start before explicit restart can do this.
 
 Package-managed installations keep

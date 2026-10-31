@@ -169,7 +169,7 @@ const updateDaemonReplacementGrace = 5 * time.Second
 func waitForDaemonReplacement(
 	ctx context.Context, store kitdaemon.RuntimeStore, previous kitdaemon.RuntimeRecord,
 ) (kitdaemon.RuntimeRecord, error) {
-	deadline := time.Now().Add(daemonReplacementWaitTimeout)
+	deadline := time.Now().Add(daemonRestartProcessWaitTimeout)
 	var exitedAt time.Time
 	for {
 		records, err := store.List()
@@ -189,7 +189,7 @@ func waitForDaemonReplacement(
 		case !exitedAt.IsZero() && now.Sub(exitedAt) > updateDaemonReplacementGrace:
 			return kitdaemon.RuntimeRecord{}, fmt.Errorf("daemon pid %d exited without starting a replacement; check the daemon log, then run 'kata daemon start' with its original startup options", previous.PID)
 		case now.After(deadline):
-			return kitdaemon.RuntimeRecord{}, fmt.Errorf("daemon pid %d did not restart within %s", previous.PID, daemonReplacementWaitTimeout)
+			return kitdaemon.RuntimeRecord{}, fmt.Errorf("daemon pid %d did not restart within %s", previous.PID, daemonRestartProcessWaitTimeout)
 		}
 		select {
 		case <-ctx.Done():

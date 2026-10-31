@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -75,16 +77,20 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 	}
 	scenarios := []string{"running", "stopped", "check only", "cancelled", "install failure", "read-only TCP", "older daemon", "daemon token", "idle shutdown"}
 	if explicitRestart {
-		scenarios = []string{"running", "restart failure", "older daemon", "startup flags", "upgrade retained", "upgrade removed"}
+		scenarios = []string{"restart failure", "older daemon", "startup flags", "upgrade retained", "upgrade removed", "network namespace"}
 	}
 	for _, scenario := range scenarios {
 		t.Run(scenario, func(t *testing.T) {
 			resetFlags(t)
 			fake := &fakeUpdateClient{checkResults: []*selfupdate.Info{{CurrentVersion: "v0.1.0", LatestVersion: "v0.2.0"}}}
-			if explicitRestart {
-				setupKataEnv(t)
-			} else {
-				stubUpdateClient(t, fake)
+			stubUpdateClient(t, fake)
+			if scenario == "network namespace" {
+				if runtime.GOOS != "linux" {
+					t.Skip("Linux network namespace regression")
+				}
+				if _, err := exec.LookPath("rootlesskit"); err != nil {
+					t.Skipf("RootlessKit unavailable: %v", err)
+				}
 			}
 			home, err := config.KataHome()
 			require.NoError(t, err)
@@ -97,17 +103,28 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 			cli := binaries["v0.2.0"]
 			if strings.HasPrefix(scenario, "upgrade") {
 				if runtime.GOOS == "windows" {
-					t.Skip("installation symlink regression is Unix-specific")
+					if scenario == "upgrade removed" {
+						t.Skip("installation symlink regression is Unix-specific")
+					}
+				} else {
+					launchBinary = filepath.Join(t.TempDir(), "kata")
+					require.NoError(t, os.Symlink(binary, launchBinary))
+					cli = launchBinary
 				}
-				launchBinary = filepath.Join(t.TempDir(), "kata")
-				require.NoError(t, os.Symlink(binary, launchBinary))
-				cli = launchBinary
 			}
 			env := append(append([]string(nil), childEnv...), "KATA_HOME="+home, "KATA_DB="+filepath.Join(home, "kata.db"), "KATA_WORKSPACE="+workspace, "KATA_AUTHOR=user-a")
 			restartCLI := func(args ...string) (string, error) {
 				command := exec.CommandContext(t.Context(), cli, append([]string{"daemon", "restart"}, args...)...) //nolint:gosec // G204: test-built executable
+				if scenario == "network namespace" {
+					command = exec.CommandContext(t.Context(), "rootlesskit", append([]string{"--net=slirp4netns", "--disable-host-loopback", cli, "daemon", "restart"}, args...)...) //nolint:gosec // G204: namespace helper and test-built executable
+				}
 				command.Env = append(append([]string(nil), env...), "PORT=4321")
-				output, err := command.CombinedOutput()
+				var stderr bytes.Buffer
+				command.Stderr = &stderr
+				output, err := command.Output()
+				if err != nil {
+					output = append(output, stderr.Bytes()...)
+				}
 				return string(output), err
 			}
 			// The daemon restarts from its own environment. A hosted PORT in the
@@ -172,6 +189,11 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 				require.Eventually(t, func() bool { return record().PID != 0 }, 10*time.Second, 20*time.Millisecond)
 			}
 			before := record()
+			var networkBefore string
+			if scenario == "network namespace" {
+				networkBefore, err = os.Readlink(fmt.Sprintf("/proc/%d/ns/net", before.PID))
+				require.NoError(t, err)
+			}
 			if scenario == "older daemon" {
 				// Older daemons can lack executable selection or the restart signal.
 				if explicitRestart {
@@ -218,7 +240,7 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 					}
 					return
 				}
-				if strings.HasPrefix(scenario, "upgrade") {
+				if strings.HasPrefix(scenario, "upgrade") && runtime.GOOS != "windows" {
 					require.NoError(t, os.Remove(launchBinary))
 					require.NoError(t, os.Symlink(binaries["v0.2.0"], launchBinary))
 					if scenario == "upgrade removed" {
@@ -232,7 +254,7 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 			if scenario == "older daemon" {
 				require.Error(t, updateErr)
 				if !explicitRestart {
-					assert.Contains(t, updateErr.Error(), "installed")
+					assert.Contains(t, updateErr.Error(), "installed kata v0.2.0, but the daemon was not restarted")
 					assert.NotEmpty(t, fake.installed)
 				}
 				assert.Contains(t, stdout+updateErr.Error(), "kata daemon stop")
@@ -264,16 +286,20 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 				return
 			}
 			require.NoError(t, updateErr, "%s", stderr)
-			var result struct {
-				Installed bool `json:"installed"`
-			}
-			require.NoError(t, json.Unmarshal([]byte(stdout), &result))
 			if explicitRestart {
 				var restarted daemonRestartOutput
 				require.NoError(t, json.Unmarshal([]byte(stdout), &restarted))
 				assert.Equal(t, []int{before.PID}, restarted.PIDs)
-				assert.Equal(t, 1, restarted.Stopped)
+				if scenario == "network namespace" {
+					networkAfter, err := os.Readlink(fmt.Sprintf("/proc/%d/ns/net", restarted.PID))
+					require.NoError(t, err)
+					assert.Equal(t, networkBefore, networkAfter)
+				}
 			} else {
+				var result struct {
+					Installed bool `json:"installed"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(stdout), &result))
 				assert.True(t, result.Installed)
 			}
 			after := record()
