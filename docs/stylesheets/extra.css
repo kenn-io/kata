@@ -31,6 +31,13 @@
   padding-bottom: 0.25rem;
 }
 
+/* A table or card grid directly under a section heading draws its own top
+   edge, so the heading rule would stack a second line above it. */
+.md-typeset h2:has(+ .md-typeset__scrollwrap, + .grid.cards) {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
 .md-typeset code,
 .md-typeset pre {
   border-radius: 6px;
