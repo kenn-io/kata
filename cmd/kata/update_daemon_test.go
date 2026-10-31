@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -431,16 +432,44 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 	}
 }
 
-func TestWaitForDaemonReplacement_RejectsUnrelatedStarter(t *testing.T) {
-	store := kitdaemon.RuntimeStore{Dir: t.TempDir()}
-	reply := filepath.Join(store.Dir, "restart-reply-caller")
-	require.NoError(t, os.WriteFile(reply, nil, 0600))
-	started := time.Now().UTC()
-	_, err := store.Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), StartedAt: started, Address: "127.0.0.1:7777"})
-	require.NoError(t, err)
-	previous := kitdaemon.RuntimeRecord{PID: 1 << 30, StartedAt: started.Add(-time.Second)}
-	_, err = waitForDaemonReplacement(t.Context(), store, previous, reply)
-	require.ErrorContains(t, err, "this restart was not applied")
+func TestWaitForDaemonReplacement(t *testing.T) {
+	t.Run("unrelated starter", func(t *testing.T) {
+		store := kitdaemon.RuntimeStore{Dir: t.TempDir()}
+		reply := filepath.Join(store.Dir, "restart-reply-caller")
+		require.NoError(t, os.WriteFile(reply, nil, 0600))
+		started := time.Now().UTC()
+		_, err := store.Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), StartedAt: started, Address: "127.0.0.1:7777"})
+		require.NoError(t, err)
+		previous := kitdaemon.RuntimeRecord{PID: 1 << 30, StartedAt: started.Add(-time.Second)}
+		_, err = waitForDaemonReplacement(t.Context(), store, previous, reply)
+		require.ErrorContains(t, err, "this restart was not applied")
+	})
+	t.Run("late readiness after previous exits", func(t *testing.T) {
+		previousProcess := exec.CommandContext(t.Context(), os.Args[0], "-test.run=TestDaemonCommandSleepHelperProcess") //nolint:gosec // existing test helper exits immediately without its sleep marker
+		require.NoError(t, previousProcess.Run())
+		require.False(t, kitdaemon.ProcessAlive(previousProcess.ProcessState.Pid()))
+		store := kitdaemon.RuntimeStore{Dir: t.TempDir()}
+		reply := filepath.Join(store.Dir, "restart-reply-caller")
+		require.NoError(t, os.WriteFile(reply, nil, 0600))
+		identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
+		require.True(t, ok)
+		synctest.Test(t, func(t *testing.T) {
+			previous := kitdaemon.RuntimeRecord{PID: previousProcess.ProcessState.Pid(), StartedAt: time.Now()}
+			published := make(chan error, 1)
+			go func() {
+				time.Sleep(6 * time.Second)
+				_, err := store.Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: identity, StartedAt: time.Now(), Address: "127.0.0.1:7777", Metadata: map[string]string{daemonruntime.RuntimeRestartReplyKey: filepath.Base(reply)}})
+				published <- err
+			}()
+
+			replacement, err := waitForDaemonReplacement(t.Context(), store, previous, reply)
+
+			require.NoError(t, <-published)
+			require.NoError(t, err)
+			assert.Equal(t, os.Getpid(), replacement.PID)
+			assert.True(t, replacement.StartedAt.After(previous.StartedAt))
+		})
+	})
 }
 
 func daemonLifecycleEnvironment(t *testing.T) []string {

@@ -156,10 +156,6 @@ func restartDaemonAfterUpdate(ctx context.Context, stderr io.Writer) error {
 	return nil
 }
 
-// updateDaemonReplacementGrace bounds how long a replacement may take to
-// publish its runtime record once the previous daemon process has exited.
-const updateDaemonReplacementGrace = 5 * time.Second
-
 // waitForDaemonReplacement returns the first live runtime record started
 // after previous. On Unix the daemon keeps its PID across re-execution, so a
 // newer record rather than a new PID identifies the replacement.
@@ -167,7 +163,6 @@ func waitForDaemonReplacement(
 	ctx context.Context, store kitdaemon.RuntimeStore, previous kitdaemon.RuntimeRecord, reply string,
 ) (kitdaemon.RuntimeRecord, error) {
 	deadline := time.Now().Add(daemonRestartProcessWaitTimeout)
-	var exitedAt time.Time
 	for {
 		records, err := store.List()
 		if err != nil {
@@ -181,14 +176,7 @@ func waitForDaemonReplacement(
 		if err := restartReplyError(reply, previous.PID, nil); err != nil {
 			return kitdaemon.RuntimeRecord{}, err
 		}
-		now := time.Now()
-		if exitedAt.IsZero() && !kitdaemon.ProcessAlive(previous.PID) {
-			exitedAt = now
-		}
-		switch {
-		case !exitedAt.IsZero() && now.Sub(exitedAt) > updateDaemonReplacementGrace:
-			return kitdaemon.RuntimeRecord{}, fmt.Errorf("daemon pid %d exited without starting a replacement; check the daemon log, then run 'kata daemon start' with its original startup options", previous.PID)
-		case now.After(deadline):
+		if time.Now().After(deadline) {
 			return kitdaemon.RuntimeRecord{}, fmt.Errorf("daemon pid %d did not restart within %s", previous.PID, daemonRestartProcessWaitTimeout)
 		}
 		select {
