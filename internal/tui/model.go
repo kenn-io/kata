@@ -2251,39 +2251,33 @@ func dispatchFormEditBody(
 	}
 }
 
-// cancelInput restores any pre-open filter snapshot (bars + filter
-// modal) and closes the input — undoing every live keystroke the
-// user typed. Panel-local prompts and centered forms (other than the
-// filter modal) have no live mirror, so cancel is just close.
-//
-// The filter form's commit ALSO writes lm.filter, so a cancel that
-// arrives BEFORE the commit only needs to clear the open form (no
-// snapshot restore is needed because the filter never moved). The
-// preFilter restore here is a no-op in that case but kept symmetric
-// with the bar path so any future "live preview" mode plugs in
-// without changing this code.
+// cancelInput restores the search bar's pre-open filter and selection
+// and closes the input — undoing every live keystroke the user typed.
+// Panel-local prompts and centered forms, the filter modal included, have
+// no live mirror: the filter form writes lm.filter only on commit, so
+// cancelling it just closes it.
 func (m Model) cancelInput() (Model, tea.Cmd) {
 	searchCanceled := m.input.kind.isCommandBar()
-	followSelection := searchCanceled || m.input.kind == inputFilterForm
 	restoreSplitDetail := searchCanceled && m.input.restoreSplitDetail
 	preSplitDetail := m.input.preSplitDetail
 	if searchCanceled {
-		m.list = m.list.restoreFilter(m.input.preFilter)
+		// Keep the day applyFetched pinned since the bar opened.
+		pre := m.input.preFilter
+		pre.Day = m.list.filter.Day
+		m.list.filter = pre
 		snapshot := m.input.preListSelection
 		m.list.cursor = snapshot.cursor
 		m.list.windowStart = snapshot.windowStart
 		m.list.selectedUID = snapshot.selectedUID
 		m.list.selectedProjectID = snapshot.selectedProjectID
 		m.list = m.list.restoreCursorToSelection()
-	} else if m.input.kind == inputFilterForm {
-		m.list = m.list.restoreFilter(m.input.preFilter).restoreCursorToSelection()
 	}
 	m.input = inputState{}
 	m.undoCloseEntryID = 0
 	if restoreSplitDetail {
 		return m.restoreSearchDetailIfNeeded(preSplitDetail, nil)
 	}
-	if followSelection {
+	if searchCanceled {
 		return m.followSearchResultIfNeeded(nil)
 	}
 	return m, nil
