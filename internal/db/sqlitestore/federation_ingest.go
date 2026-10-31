@@ -228,6 +228,7 @@ func (d *Store) ingestFederationEventsOnce(
 			return db.FederationIngestResult{}, err
 		}
 	}
+	relaySources := make(map[string]bool, len(prepared))
 	for _, in := range prepared {
 		if in.Duplicate {
 			continue
@@ -252,6 +253,7 @@ func (d *Store) ingestFederationEventsOnce(
 			return db.FederationIngestResult{}, err
 		}
 		result.Accepted++
+		relaySources[ev.EventUID] = true
 		result.InsertedEventUIDs = append(result.InsertedEventUIDs, ev.EventUID)
 		result.Events = append(result.Events, auditEvents...)
 		for _, auditEvent := range auditEvents {
@@ -281,6 +283,33 @@ func (d *Store) ingestFederationEventsOnce(
 	})
 	if err != nil {
 		return db.FederationIngestResult{}, err
+	}
+	// Retained results also contain peer-project claim audits. Only admitted
+	// sources belong to this ingest's relay route. Resolve their references
+	// after materialization, retaining private original bytes owner-local.
+	for _, event := range result.Events {
+		if !relaySources[event.UID] {
+			continue
+		}
+		crossing, err := relayEventCrossesProjectTx(ctx, tx, p.ProjectID, db.RemoteEventFromStored(event))
+		if err != nil {
+			return db.FederationIngestResult{}, err
+		}
+		if crossing {
+			unresolved, err := relayEventHasUnresolvedRefsTx(ctx, tx, db.RemoteEventFromStored(event))
+			if err != nil {
+				return db.FederationIngestResult{}, err
+			}
+			// An introduction referencing a known private endpoint stays
+			// queued as a withheld barrier; emission rechecks the boundary
+			// and holds the source and its dependent updates owner-local.
+			if !unresolved && !db.RelayEventIsIssueIntroduction(event.Type) {
+				continue
+			}
+		}
+		if err := d.queueRelaySourceTx(ctx, tx, event); err != nil {
+			return db.FederationIngestResult{}, err
+		}
 	}
 	if err := federationFailpoint("before_federation_ingest_commit"); err != nil {
 		return db.FederationIngestResult{}, err

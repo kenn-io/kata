@@ -161,14 +161,10 @@ func relayCloseParentCrossesProjectTx(
 	}
 	var own bool
 	if parentUID != "" {
-		query := `SELECT EXISTS(SELECT 1 FROM issues WHERE uid=$1 AND project_id=$2`
-		args := []any{parentUID, projectID}
-		if parentShortID != "" {
-			query += ` AND short_id=$3`
-			args = append(args, parentShortID)
-		}
-		query += `)`
-		if err := tx.QueryRowContext(ctx, query, args...).Scan(&own); err != nil {
+		// Short-ID collision resolution can renumber the same parent
+		// differently on each replica, so the close-time parent short ID is
+		// a display hint. The UID alone decides same-project membership.
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issues WHERE uid=$1 AND project_id=$2)`, parentUID, projectID).Scan(&own); err != nil {
 			return false, mapSQLError(err, nil)
 		}
 		return !own, nil
@@ -239,4 +235,27 @@ func relayHistoryHasBoundaryAfterTx(ctx context.Context, tx *sql.Tx, projectID, 
 		}
 		after = ids[len(ids)-1]
 	}
+}
+
+// Deferred adoption links may name peers arriving in a later chunk. Retain
+// those sources in their original queue position; emission rechecks the strict
+// project boundary before exposing their bytes or any dependent update.
+func relayEventHasUnresolvedRefsTx(ctx context.Context, tx *sql.Tx, event db.RemoteEvent) (bool, error) {
+	refs, err := payloadReferencedIssueUIDs(event, db.PayloadMap(event.Payload))
+	if err != nil {
+		return false, err
+	}
+	for _, ref := range refs {
+		if ref == "" {
+			continue
+		}
+		var known bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issues WHERE uid=$1)`, ref).Scan(&known); err != nil {
+			return false, err
+		}
+		if !known {
+			return true, nil
+		}
+	}
+	return false, nil
 }

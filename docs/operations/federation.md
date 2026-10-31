@@ -861,6 +861,12 @@ Markdown. Agent output adds `Creation` for the issue and a `creation` field on
 comment rows. JSON retains the daemon's structured fields. Responses from older
 daemons that omit this projection retain the previous text format.
 
+Events accepted from a direct legacy spoke also travel through negotiated
+relays, including a relay serving downstream peers. Forwarding preserves the
+original event identity and hash. Legacy ingest does not mint root receipts or
+turn source labels into certified creation attribution; those creations remain
+`legacy` until an existing valid proof establishes otherwise.
+
 The TUI shows the same creation status, source labels and verified accountable
 actor in the issue detail header and above each comment. Labels wrap to the
 terminal width; pending and legacy rows do not assert an accountable actor.
@@ -2175,6 +2181,64 @@ kata federation quarantine skip <id> \
 For a legacy spoke, skipping advances its push cursor past the quarantined event range. It
 does not delete local events and it does not make skipped work appear on the
 hub.
+
+### Missing creations from direct legacy spokes
+
+Older SQLite roots could accept a direct spoke's events without queueing them
+for existing relay enrollments. A later root-local update, such as a scheduled
+date notification, could reach the relay before its issue's creation and cause
+an `issue.metadata_updated references unknown issue` pull quarantine.
+
+Deploy a root build containing the legacy-ingest relay-queue fix first. New
+direct-spoke events are then queued in the same transaction as their stored
+history and projection. The direct spokes and relays need no protocol change.
+Events whose original bytes reference a private project remain owner-local;
+retained-checkpoint boundary recovery is the separate change in
+[PR #767](https://github.com/kenn-io/kata/pull/767).
+
+Linked adoption snapshots can arrive in separate chunks. An introduction whose
+peers have not arrived stays pending with its original bytes. Event delivery
+holds that position and dependent updates until the peers resolve within the
+shared project, then releases the prefix in order. A peer that resolves in a
+private project stays withheld; sync never skips the pending introduction.
+An introduction that already names a known private endpoint stays withheld the
+same way, and later updates for that issue wait behind it until a bridge
+reconnect delivers a fresh checkpoint. A close forwards on its close-time
+parent UID alone; the close-time parent short ID is a display hint that short
+ID collision resolution may renumber differently on each replica.
+
+The queueing fix does not insert missing old introductions ahead of already
+emitted updates. Retrying an old quarantine alone cannot repair that backlog.
+After upgrading the root, reconnect each affected bridge to obtain a new signed
+checkpoint. Select the affected relay daemon through its normal profile and
+substitute its local project, actor, root catalog entry and root project:
+
+```sh
+kata --project spoke-project federation quarantine list
+kata --project spoke-project federation bridge disconnect --preflight --as member --agent
+```
+
+Proceed only when preflight reports `ready`. Resolve pending local deliveries
+and downstream enrollments first. Keep the existing data and quarantine while
+those blockers remain. Do not use `--local-only`: it discards undelivered relay
+work rather than completing this recovery.
+
+```sh
+kata --project spoke-project federation bridge disconnect --as member
+kata --project spoke-project federation bridge connect \
+  --hub-daemon root-hub --hub-project hub-project --serve-downstream --as member
+kata --project spoke-project federation bridge status
+kata --project spoke-project federation quarantine list
+kata --project spoke-project list --status all --json
+```
+
+Disconnect preserves the detached local project and revokes the old upstream
+grant. Reconnect attaches the same project UID under a new grant and receives
+the root's current checkpoint. After normal sync, confirm `connected`, no active
+quarantine, the same issue UID set as the root, and delivery of a new direct-spoke
+issue through each downstream hop. Reconnecting against an unfixed root repairs
+history only once; later direct-spoke writes can produce the gap again. Do not
+skip relay data or edit cursors to bypass it.
 
 ## Purge and reset
 

@@ -12,6 +12,11 @@ import (
 	"go.kenn.io/kata/internal/embedding"
 )
 
+type pendingRelayDelivery struct {
+	id       int64
+	envelope db.RelayEnvelope
+}
+
 // PendingRelayDeliveries durably marks the selected prefix emitted before the
 // caller can send it. Lost responses replay its retained bytes and identities.
 func (d *Store) PendingRelayDeliveries(ctx context.Context, bindingUID, stream string, limit int) ([]db.RelayEnvelope, error) {
@@ -42,7 +47,7 @@ func (d *Store) PendingRelayDeliveries(ctx context.Context, bindingUID, stream s
 		if err != nil {
 			return err
 		}
-		var ids []int64
+		var pending []pendingRelayDelivery
 		total := 0
 		manifestLimit := db.MaxRelayEnvelopeBytes
 		if stream == db.RelayStreamArtifact {
@@ -74,8 +79,7 @@ func (d *Store) PendingRelayDeliveries(ctx context.Context, bindingUID, stream s
 				declaredBytes += manifest.VectorByteSize
 			}
 			total += len(e.Body)
-			output = append(output, e)
-			ids = append(ids, id)
+			pending = append(pending, pendingRelayDelivery{id: id, envelope: e})
 		}
 		if err == nil {
 			err = rows.Err()
@@ -83,6 +87,26 @@ func (d *Store) PendingRelayDeliveries(ctx context.Context, bindingUID, stream s
 		_ = rows.Close()
 		if err != nil {
 			return err
+		}
+		var ids []int64
+		for _, delivery := range pending {
+			if stream == db.RelayStreamEvent {
+				source, err := db.DecodeRelaySourceEvent(delivery.envelope.Body)
+				if err != nil {
+					return err
+				}
+				crossing, err := relayEventCrossesProjectTx(ctx, tx, *grant.ProjectID, source)
+				if err != nil {
+					return err
+				}
+				if crossing {
+					// Keep unresolved sources and dependent updates unoffered.
+					// Never rewrite a body or skip later updates past this prefix.
+					break
+				}
+			}
+			output = append(output, delivery.envelope)
+			ids = append(ids, delivery.id)
 		}
 		for _, id := range ids {
 			if _, err := tx.ExecContext(ctx, `UPDATE federation_relay_outbox SET emitted=1 WHERE id=?`, id); err != nil {
