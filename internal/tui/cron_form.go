@@ -823,7 +823,7 @@ func (f *cronForm) build(uidOf func(string) string) (string, cron.JobDefinition,
 	if err != nil {
 		return "", cron.JobDefinition{}, err
 	}
-	if !f.create && trigger.Kind == f.opened.Trigger.Kind && trigger.Timezone == "" {
+	if !f.create && trigger.Kind != "cron" && trigger.Kind == f.opened.Trigger.Kind && trigger.Timezone == "" {
 		trigger.Timezone = f.opened.Trigger.Timezone
 	}
 	if cronIsDate(trigger.Kind) {

@@ -674,3 +674,13 @@ func TestCronEditOfAJobWithoutAZoneWritesNone(t *testing.T) {
 	settle(t, m, cmd)
 	require.Empty(t, api.puts[0].write.Definition.Trigger.Timezone)
 }
+
+func TestCronEditCanClearTheTimeZone(t *testing.T) {
+	rec := executeRecord(`{}`)
+	rec.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 7 * * *", Timezone: "Europe/Berlin"}
+	m, api := openEdit(t, rec)
+	m.cron.form.val[cfZone] = ""
+	m, cmd := press(m, ctrlKey('o'))
+	settle(t, m, cmd)
+	require.Empty(t, api.puts[0].write.Definition.Trigger.Timezone)
+}
