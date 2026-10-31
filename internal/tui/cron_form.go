@@ -895,6 +895,16 @@ func (f *cronForm) rebase(current CronJobRecord) (*cronForm, error) {
 	}
 	next.focusField(f.focus)
 	next.validate()
+	next.general = "Applied to the current job; review it, then save."
+	var lost []string
+	for field := range cfCount {
+		if f.val[field] != f.snapshot[field] && !next.shown(field) {
+			lost = append(lost, cronFieldLabel(next, field))
+		}
+	}
+	if len(lost) > 0 {
+		next.general += " No longer applicable: " + strings.Join(lost, ", ") + "."
+	}
 	return next, nil
 }
 

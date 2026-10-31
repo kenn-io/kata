@@ -137,3 +137,18 @@ func TestCronJobRecordRefusesDefinitionsItWouldDrop(t *testing.T) {
 	require.ErrorContains(t, err, "newer_member")
 	require.ErrorContains(t, err, "newer kata")
 }
+
+func TestCronDuplicateCreateIsAConflict(t *testing.T) {
+	env := testenv.New(t)
+	c := NewClient(env.URL, env.HTTP)
+	project, err := c.EnsureProject(t.Context(), "cron-dup-example", "alice")
+	require.NoError(t, err)
+	const uid = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+	write := CronJobWrite{Name: "Digest", Actor: "alice", Definition: manualExecuteJob(`{}`)}
+	require.NoError(t, c.PutCronJob(t.Context(), project.ID, uid, write))
+	err = c.PutCronJob(t.Context(), project.ID, uid, write)
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	require.Equal(t, 409, apiErr.Status)
+	require.Equal(t, "cron_conflict", apiErr.Code)
+}

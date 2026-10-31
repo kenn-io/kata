@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/testenv"
 	katauid "go.kenn.io/kata/internal/uid"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -176,12 +177,105 @@ func TestCronEditConflictKeepsDraftAndAppliesToCurrent(t *testing.T) {
 	require.Contains(t, view, "apply my draft")
 
 	m, cmd = press(m, keyRune('a'))
+	require.Nil(t, cmd, "applying only rebases the draft; nothing is written yet")
+	require.NotNil(t, m.cron.form)
+	require.Nil(t, m.cron.form.conflict)
+	require.Len(t, api.puts, 1)
+
+	m, cmd = press(m, ctrlKey('o'))
 	m = settle(t, m, cmd)
 	require.Nil(t, m.cron.form)
 	require.Len(t, api.puts, 2)
 	require.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FB8", api.puts[1].write.ExpectedEventUID, "the draft is applied to the current definition")
 	require.Equal(t, "My edit", api.puts[1].write.Definition.Issue.Title)
 	require.False(t, api.puts[1].write.Definition.Enabled, "only the user's own changes are applied; the other writer's pause stays")
+}
+
+func TestCronConflictApplyNamesEditsThatNoLongerApply(t *testing.T) {
+	m, api := cronWriteFixture(t)
+	api.shown = executeRecord(`{}`)
+	api.shown.UID = m.cron.data.jobs[0].UID
+	m, cmd := press(m, keyRune('e'))
+	m = settle(t, m, cmd)
+	m.cron.form.val[cfTitle] = "My title"
+	api.shown.DefinitionEventUID = "01ARZ3NDEKTSV4RRFFQ69G5FB8"
+	api.shown.Definition.Issue = &cron.IssuePolicy{Kind: "existing", UID: cronTestIssue}
+	api.putErrs = []error{&APIError{Status: http.StatusConflict, Code: "cron_conflict"}}
+	m, cmd = press(m, ctrlKey('o'))
+	m = settle(t, m, cmd)
+	m, cmd = press(m, keyRune('a'))
+	require.Nil(t, cmd)
+	require.NotNil(t, m.cron.form)
+	require.Contains(t, m.cron.form.general, "Issue title", "the edit that no longer applies is named")
+	require.Len(t, api.puts, 1)
+}
+
+func TestCronRetriedCreateThatAlreadyLanded(t *testing.T) {
+	m, api := cronWriteFixture(t)
+	m, _ = press(m, keyRune('n'))
+	f := m.cron.form
+	f.val[cfName], f.val[cfParent], f.val[cfTitle] = "Weekly report", "abc4", "Report"
+	name, def, err := f.build(cronUIDResolver(map[string]string{"abc4": cronTestIssue}))
+	require.NoError(t, err)
+	api.shown = CronJobRecord{UID: f.uid, Name: name, Definition: def, DefinitionEventUID: "01ARZ3NDEKTSV4RRFFQ69G5FB8"}
+	exists := &APIError{Status: http.StatusConflict, Code: "cron_conflict"}
+	api.putErrs = []error{exists}
+
+	m, cmd := press(m, ctrlKey('o'))
+	m = settle(t, m, cmd)
+	require.Nil(t, m.cron.form, "the stored job is the one that was sent, so the create is done")
+	require.Equal(t, "Created Weekly report", m.toast.text)
+
+	m, _ = press(m, keyRune('n'))
+	m.cron.form.val[cfName], m.cron.form.val[cfParent], m.cron.form.val[cfTitle] = "Weekly report", "abc4", "Report"
+	api.shown.Definition.Issue.Title = "Someone else's"
+	api.putErrs = []error{exists}
+	m, cmd = press(m, ctrlKey('o'))
+	m = settle(t, m, cmd)
+	require.NotNil(t, m.cron.form.conflict, "a different job under the UID is shown, not hidden")
+}
+
+func TestCronEditReplyIsRefusedWhileFiltering(t *testing.T) {
+	m, api := cronWriteFixture(t)
+	api.shown = executeRecord(`{}`)
+	api.shown.UID = m.cron.data.jobs[0].UID
+	m, cmd := press(m, keyRune('e'))
+	m, _ = press(m, keyRune('/'))
+	require.True(t, m.cron.filtering)
+	m = settle(t, m, cmd)
+	require.Nil(t, m.cron.form)
+}
+
+func TestCronJobKeysWorkOnADetailReachedFromAnotherTab(t *testing.T) {
+	m, _ := cronWriteFixture(t)
+	m = sendRune(m, '3')
+	m = sendKey(m, tea.KeyEnter)
+	_, _, lines := cronScreen(m)
+	for i, l := range lines {
+		if l.target.kind == cronJobs {
+			for range i {
+				m = sendRune(m, 'j')
+			}
+			break
+		}
+	}
+	m = sendKey(m, tea.KeyEnter)
+	require.Equal(t, cronJobs, m.cron.stack[len(m.cron.stack)-1].ref.kind)
+	m, _ = press(m, keyRune('d'))
+	require.NotNil(t, m.cron.confirm, "the job's page offers its actions whichever tab led there")
+}
+
+func TestCronArchiveFromDetailReturnsToTheList(t *testing.T) {
+	m, api := cronWriteFixture(t)
+	m = sendKey(m, tea.KeyEnter)
+	require.Len(t, m.cron.stack, 1)
+	m, _ = press(m, keyRune('d'))
+	m, cmd := press(m, keyRune('y'))
+	m = settle(t, m, cmd)
+	require.Len(t, api.archives, 1)
+	require.Empty(t, m.cron.stack, "the archived job's page would be empty, so the list is shown")
+	require.Contains(t, m.toast.text, "a")
+	require.Contains(t, m.toast.text, "restore")
 }
 
 func TestCronEscAsksBeforeDiscardingADirtyDraft(t *testing.T) {
@@ -250,7 +344,7 @@ func TestCronArchiveAndRestoreAskFirst(t *testing.T) {
 	m, cmd = press(m, keyRune('y'))
 	m = settle(t, m, cmd)
 	require.Equal(t, []string{m.cron.data.jobs[0].UID}, api.archives)
-	require.Equal(t, "Archived Daily summary", m.toast.text)
+	require.Contains(t, m.toast.text, "Archived Daily summary")
 
 	archived := m.cron.data.jobs[0]
 	deleted := archived

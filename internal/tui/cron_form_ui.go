@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -24,11 +26,13 @@ type cronConfirm struct {
 
 // cronJobsScope says the keys that edit jobs apply: the Jobs list or a job's page.
 func (m Model) cronJobsScope() bool {
-	if m.cron.tab != cronJobs || m.scope.allProjects || m.scope.projectID == 0 {
+	if m.scope.allProjects || m.scope.projectID == 0 {
 		return false
 	}
-	n := len(m.cron.stack)
-	return n == 0 || m.cron.stack[n-1].ref.kind == cronJobs
+	if n := len(m.cron.stack); n > 0 {
+		return m.cron.stack[n-1].ref.kind == cronJobs
+	}
+	return m.cron.tab == cronJobs
 }
 
 // cronSelectedJob is the job under the cursor on the list, or the open job page.
@@ -136,6 +140,7 @@ type cronSavedMsg struct {
 	fieldErr    *cronFieldError
 	err         error
 	fromForm    bool
+	closeDetail bool
 }
 
 func (m Model) cronOpenEdit(uid string, seq uint64) tea.Cmd {
@@ -149,7 +154,7 @@ func (m Model) cronOpenEdit(uid string, seq uint64) tea.Cmd {
 }
 
 func (m Model) cronEditOpened(msg cronEditOpenedMsg) (Model, tea.Cmd) {
-	if msg.conn != m.connGen || msg.scope != m.scopeGen || m.cron.data == nil || m.cron.form != nil || msg.seq != m.cron.editSeq {
+	if msg.conn != m.connGen || msg.scope != m.scopeGen || m.cron.data == nil || m.cron.form != nil || msg.seq != m.cron.editSeq || m.cron.filtering || m.modal != modalNone {
 		return m, nil
 	}
 	// The answer may arrive after the user moved on; it opens the form only
@@ -204,16 +209,16 @@ func (m Model) cronTogglePause(job generated.CronJob) tea.Cmd {
 }
 
 func (m Model) cronLifecycle(c cronConfirm) tea.Cmd {
-	api, pid, actor := m.api, m.scope.projectID, m.list.actor
+	api, pid, actor, fromDetail := m.api, m.scope.projectID, m.list.actor, len(m.cron.stack) > 0
 	conn, scope := m.connGen, m.scopeGen
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
 		defer cancel()
-		call, notice := api.ArchiveCronJob, "Archived "+c.name
+		call, notice := api.ArchiveCronJob, "Archived "+c.name+"; press a, then u to restore it"
 		if c.restore {
 			call, notice = api.RestoreCronJob, "Restored "+c.name
 		}
-		return cronSavedMsg{conn: conn, scope: scope, notice: notice, err: call(ctx, pid, c.uid, c.eventID, actor)}
+		return cronSavedMsg{conn: conn, scope: scope, notice: notice, err: call(ctx, pid, c.uid, c.eventID, actor), closeDetail: fromDetail}
 	}
 }
 
@@ -254,8 +259,12 @@ func (m Model) cronSaveCmd(f cronForm) tea.Cmd {
 		}
 		if err := api.PutCronJob(ctx, pid, f.uid, write); err != nil {
 			var apiErr *APIError
-			if !f.create && errors.As(err, &apiErr) && apiErr != nil && apiErr.Status == http.StatusConflict {
+			if errors.As(err, &apiErr) && apiErr != nil && apiErr.Status == http.StatusConflict {
 				if current, readErr := api.ShowCronJob(ctx, pid, f.uid); readErr == nil {
+					// A create whose reply was lost conflicts with itself on retry.
+					if f.create && current.Name == name && cronSameDefinition(current.Definition, def) {
+						return cronSavedMsg{conn: conn, scope: scope, notice: notice, fromForm: true}
+					}
 					return cronSavedMsg{conn: conn, scope: scope, conflict: &current, err: err, fromForm: true}
 				}
 			}
@@ -311,6 +320,10 @@ func (m Model) cronSaved(msg cronSavedMsg) (Model, tea.Cmd) {
 		m.cron.form = nil
 	}
 	m.cron.events++
+	if msg.closeDetail && len(m.cron.stack) > 0 {
+		// The job leaves the list this page reads from, so the page would empty.
+		m.cron.stack = m.cron.stack[:len(m.cron.stack)-1]
+	}
 	return m.cronToast(msg.notice, toastSuccess)
 }
 
@@ -398,11 +411,7 @@ func (m Model) routeCronConflictKey(key string) (Model, tea.Cmd) {
 			return m, nil
 		}
 		m.cron.form = next
-		if next.err != nil || next.general != "" {
-			return m, nil
-		}
-		next.saving = true
-		return m, m.cronSaveCmd(*next)
+		return m, nil
 	case "esc":
 		f.conflict = nil
 	}
@@ -532,4 +541,21 @@ func renderCronForm(m Model) string {
 	body = append(body, footer...)
 	body = append(body, renderFooterHelpTable(help, m.width))
 	return strings.Join(body, "\n")
+}
+
+// cronSameDefinition compares two definitions as the daemon stores them.
+func cronSameDefinition(a, b cron.JobDefinition) bool {
+	canon := func(d cron.JobDefinition) string {
+		raw, err := json.Marshal(d)
+		if err != nil {
+			return ""
+		}
+		value := jsontext.Value(raw)
+		if value.Canonicalize() != nil {
+			return ""
+		}
+		return string(value)
+	}
+	ca := canon(a)
+	return ca != "" && ca == canon(b)
 }
