@@ -150,3 +150,47 @@ func TestDateToggle_RowDatesYieldToTheTitleOnNarrowCells(t *testing.T) {
 	assert.Contains(t, rows[0][4], "a reasonably long")
 	assert.NotContains(t, rows[0][4], "s:")
 }
+
+func TestDateToggle_MidnightRolloverKeepsRowActionsOnTheSelectedIssue(t *testing.T) {
+	now := time.Date(2026, 11, 10, 23, 59, 0, 0, time.UTC)
+	prior := renderNow
+	renderNow = func() time.Time { return now }
+	t.Cleanup(func() { renderNow = prior })
+
+	m := filterFormFixture()
+	m.list.issues = []Issue{
+		dated("x", "2026-11-10", ""),
+		dated("y", "2026-11-11", ""),
+		dated("z", "2026-11-09", ""),
+	}
+	form := newFilterForm(ListFilter{}, m.scope)
+	form.field(fieldDate).radio.set(dateToday)
+	m, _ = m.commitFilterForm(form)
+	m.list.cursor = 1 // z, the second Today row
+	got, ok := m.list.targetRow()
+	require.True(t, ok)
+	require.Equal(t, "z", got.ShortID)
+
+	// Midnight passes without a refetch: the highlighted row must stay put.
+	now = now.Add(2 * time.Minute)
+	got, ok = m.list.targetRow()
+	require.True(t, ok)
+	assert.Equal(t, "z", got.ShortID)
+
+	// The next fetch moves the day on and the selection follows the issue.
+	m.list.selectedUID = "uid-z"
+	m.list.issues[2].UID = "uid-z"
+	m.list = m.list.applyFetched(refetchedMsg{issues: m.list.issues})
+	got, ok = m.list.targetRow()
+	require.True(t, ok)
+	assert.Equal(t, "z", got.ShortID)
+	assert.Equal(t, []string{"x", "y", "z"}, shortIDs(rowIssues(m.list.visibleRows())))
+}
+
+func rowIssues(rows []queueRow) []Issue {
+	out := make([]Issue, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.issue)
+	}
+	return out
+}

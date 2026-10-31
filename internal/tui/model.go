@@ -1984,6 +1984,7 @@ func (m Model) commitFilterForm(form inputState) (Model, tea.Cmd) {
 	if m.list.filter.Date == "any" {
 		m.list.filter.Date = ""
 	}
+	m.list.filter = m.list.filter.stampDay()
 	// "all" is the surface label for "no Status filter"; the wire
 	// expects an empty string.
 	if m.list.filter.Status == "all" {

@@ -114,7 +114,11 @@ type IssueRef struct {
 type ListFilter struct {
 	Status, Owner, Author, Search string
 	// Date is "" (off), dateToday, or dateScheduled; see matchesDate.
-	Date   string
+	Date string
+	// Day is the calendar day the Date filter evaluates against. It is
+	// stamped when the filter is committed and on each fetch, so rows do
+	// not change membership between fetches when midnight passes.
+	Day    string
 	Labels []string
 	Limit  int
 }

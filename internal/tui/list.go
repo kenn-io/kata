@@ -899,6 +899,7 @@ func (lm listModel) applyFetched(msg tea.Msg) listModel {
 			lm.issues, lm.truncated = trimQueueWorkingSet(m.issues)
 		}
 	}
+	lm.filter = lm.filter.stampDay()
 	lm = lm.expandAncestorsOfSelection()
 	rows := lm.visibleRows()
 	if len(rows) == 0 {
@@ -1111,10 +1112,20 @@ func matchesFilter(iss Issue, f ListFilter) bool {
 	if len(f.Labels) > 0 && !labelsAnyOf(iss.Labels, f.Labels) {
 		return false
 	}
-	if f.Date != "" && !matchesDate(iss, f.Date) {
+	if f.Date != "" && !matchesDate(iss, f) {
 		return false
 	}
 	return true
+}
+
+// stampDay pins the day the Date filter evaluates against to now, or
+// clears it when no Date filter is active.
+func (f ListFilter) stampDay() ListFilter {
+	f.Day = ""
+	if f.Date != "" {
+		f.Day = renderNow().Format(time.DateOnly)
+	}
+	return f
 }
 
 // Date toggle values for ListFilter.Date.
@@ -1126,15 +1137,19 @@ const (
 // matchesDate reports whether an open issue's resolved row dates put it
 // in the Today (either date on or before today) or Scheduled (either
 // date after today) bucket. Today's calendar day is read in the zone
-// renderNow reports, which is the local zone in production. Dates are
+// renderNow reports, which is the local zone in production, and is pinned
+// in f.Day once the filter is stamped. Dates are
 // zero-padded YYYY-MM-DD, so string comparison orders them. A row
 // without a date, including every row from a daemon older than API
 // 0.36.0, never matches.
-func matchesDate(iss Issue, mode string) bool {
+func matchesDate(iss Issue, f ListFilter) bool {
 	if iss.Status != "open" {
 		return false
 	}
-	today := renderNow().Format(time.DateOnly)
+	mode, today := f.Date, f.Day
+	if today == "" {
+		today = renderNow().Format(time.DateOnly)
+	}
 	for _, d := range [...]string{iss.ScheduledOnDate, iss.DeadlineOnDate} {
 		if d == "" {
 			continue
