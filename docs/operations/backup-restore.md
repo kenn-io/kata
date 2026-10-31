@@ -1,7 +1,7 @@
 ---
 title: Backup and restore
 description: Back up, restore, and move Kata data safely with JSONL export and import workflows.
-last_edited: 2026-10-30
+last_edited: 2026-10-31
 ---
 
 # Backup and restore
@@ -60,8 +60,10 @@ publishing a ready daemon. Large databases can take minutes. Detached
 `kata daemon start` and restart when stopped keep waiting while an SQLite
 migration is pending and report that progress on stderr. Restarting a running
 daemon waits up to 30 seconds for readiness; the replacement can continue a
-long migration after that wait expires. Cancelling the CLI
-stops waiting; it does not stop the detached daemon. Use `kata daemon logs`
+long migration after that wait expires. Cancelling detached startup stops
+waiting; the detached daemon keeps running. After a running-daemon restart
+starts, one Ctrl-C keeps the CLI waiting and holding the start lock until the
+restart completes or its 30-second deadline expires. Use `kata daemon logs`
 to inspect progress. A daemon that exits before readiness reports its startup
 error rather than a readiness timeout.
 
