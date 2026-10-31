@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -61,13 +62,23 @@ func TestNewDaemonRestart_ResolvesSymlinkedExecutable(t *testing.T) {
 	assert.Empty(t, stderr.String())
 }
 
-func TestDaemonRestart_RemovesRequestAfterSignalFailure(t *testing.T) {
-	dir := t.TempDir()
-	rec := kitdaemon.RuntimeRecord{PID: 1 << 30, StartedAt: time.Unix(1, 0), Metadata: map[string]string{daemonruntime.RuntimeRestartExecutableKey: "1"}}
-	_, err := requestDaemonRestart(t.Context(), &daemonruntime.Namespace{DataDir: dir}, rec, "/installed/kata", nil)
-	require.Error(t, err)
-	require.NoFileExists(t, restartRequestPath(dir, rec))
-	replies, err := filepath.Glob(filepath.Join(dir, "restart-reply-*"))
-	require.NoError(t, err)
-	assert.Empty(t, replies)
+func TestDaemonRestart_CleansCallerFiles(t *testing.T) {
+	child := startSleepProcess(t)
+	registerDaemonSignalEndpoints(t, "", child.Process.Pid)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	for _, pid := range []int{1 << 30, child.Process.Pid} {
+		dir := t.TempDir()
+		rec := kitdaemon.RuntimeRecord{PID: pid, StartedAt: time.Unix(1, 0), Metadata: map[string]string{daemonruntime.RuntimeRestartExecutableKey: "1"}}
+		_, err := requestDaemonRestart(ctx, &daemonruntime.Namespace{DataDir: dir}, rec, "/installed/kata", nil)
+		require.Error(t, err)
+		if pid == child.Process.Pid {
+			require.ErrorIs(t, err, context.Canceled)
+		} else {
+			require.NoFileExists(t, restartRequestPath(dir, rec))
+		}
+		replies, err := filepath.Glob(filepath.Join(dir, "restart-reply-*"))
+		require.NoError(t, err)
+		assert.Empty(t, replies)
+	}
 }

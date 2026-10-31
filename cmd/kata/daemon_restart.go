@@ -111,6 +111,52 @@ type restartRequest struct {
 	Flags             []string
 }
 
+// restartAccepted is the reply a daemon publishes before handing off the one
+// request it applies; any other non-empty reply is that request's refusal.
+const restartAccepted = "accepted"
+
+// accept applies the restart request published for rec and answers its
+// caller. Acceptance is published before the handoff, so a caller can tell
+// its own replacement from one started for a concurrent request.
+func (r *daemonRestart) accept(ctx context.Context, dir string, rec kitdaemon.RuntimeRecord) (err error) {
+	var req restartRequest
+	defer func() {
+		reply := filepath.Join(dir, filepath.Base(req.Reply))
+		answer := restartAccepted
+		if err != nil {
+			answer = err.Error()
+		}
+		if _, statErr := os.Lstat(reply); req.Reply != "" && statErr == nil {
+			_ = atomicfile.WriteFile(reply, []byte(answer), atomicfile.WithPrivate())
+		}
+	}()
+	executable := r.executable
+	request := restartRequestPath(dir, rec)
+	target, err := os.ReadFile(request) //nolint:gosec // G304: generation-scoped request in the daemon's runtime directory
+	switch {
+	case err == nil:
+		if err := os.Remove(request); err != nil {
+			return err
+		}
+		if err := json.Unmarshal(target, &req, json.RejectUnknownMembers(true)); err != nil {
+			return err
+		}
+		if req.Executable != "" {
+			executable, err = exec.LookPath(req.Executable)
+			if err != nil {
+				return err
+			}
+		}
+	case !errors.Is(err, os.ErrNotExist):
+		return err
+	}
+	if err := validateDaemonReplacement(ctx, executable, req.Flags); err != nil {
+		return err
+	}
+	r.executable, r.args = executable, daemonArgs(req.Flags...)
+	return nil
+}
+
 func restartRequestPath(dir string, rec kitdaemon.RuntimeRecord) string {
 	return filepath.Join(dir, fmt.Sprintf("restart.%d.%d", rec.PID, rec.StartedAt.UnixNano()))
 }

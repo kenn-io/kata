@@ -173,17 +173,17 @@ func waitForDaemonReplacement(
 	deadline := time.Now().Add(daemonRestartProcessWaitTimeout)
 	var exitedAt time.Time
 	for {
-		if refusal, _ := os.ReadFile(reply); len(refusal) != 0 { //nolint:gosec // caller-owned private reply file
-			return kitdaemon.RuntimeRecord{}, fmt.Errorf("restart: validate replacement: %s", refusal)
-		}
 		records, err := store.List()
 		if err != nil {
 			return kitdaemon.RuntimeRecord{}, err
 		}
 		for _, record := range records {
 			if record.StartedAt.After(previous.StartedAt) && daemonruntime.RuntimeProcessAlive(record) {
-				return record, nil
+				return record, restartReplyError(reply, previous.PID, true)
 			}
+		}
+		if err := restartReplyError(reply, previous.PID, false); err != nil {
+			return kitdaemon.RuntimeRecord{}, err
 		}
 		now := time.Now()
 		if exitedAt.IsZero() && !kitdaemon.ProcessAlive(previous.PID) {
@@ -201,6 +201,20 @@ func waitForDaemonReplacement(
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
+}
+
+// restartReplyError reads the daemon's answer to this caller's request after
+// the runtime records were listed. The daemon publishes acceptance before its
+// handoff, so a listed replacement without it was started for another request.
+func restartReplyError(reply string, pid int, replaced bool) error {
+	answer, _ := os.ReadFile(reply) //nolint:gosec // caller-owned private reply file
+	switch {
+	case len(answer) != 0 && string(answer) != restartAccepted:
+		return fmt.Errorf("restart: validate replacement: %s", answer)
+	case replaced && reply != "" && len(answer) == 0:
+		return fmt.Errorf("daemon pid %d completed another restart first; this restart was not applied", pid)
+	}
+	return nil
 }
 
 func printUpdateSummary(cmd *cobra.Command, info *selfupdate.Info) error {

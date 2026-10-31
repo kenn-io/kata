@@ -48,7 +48,6 @@ import (
 	"go.kenn.io/kata/internal/version"
 	kataweb "go.kenn.io/kata/internal/web"
 	kataclient "go.kenn.io/kata/pkg/client"
-	"go.kenn.io/kit/atomicfile"
 	kitdaemon "go.kenn.io/kit/daemon"
 	"go.kenn.io/kit/safefileio"
 	kitvec "go.kenn.io/kit/vector"
@@ -1478,40 +1477,7 @@ func runDaemonProcess(
 		var restartSignals <-chan os.Signal
 		restartSignals, restartCleanup = installRestartSource(ctx, ns.DBHash)
 		workers.Go(func() {
-			restart.watch(ctx, restartSignals, func() (err error) {
-				var req restartRequest
-				defer func() {
-					reply := filepath.Join(ns.DataDir, filepath.Base(req.Reply))
-					if _, statErr := os.Lstat(reply); err != nil && req.Reply != "" && statErr == nil {
-						_ = atomicfile.WriteFile(reply, []byte(err.Error()), atomicfile.WithPrivate())
-					}
-				}()
-				executable := restart.executable
-				request := restartRequestPath(ns.DataDir, rec)
-				target, err := os.ReadFile(request) //nolint:gosec // G304: generation-scoped request in the daemon's runtime directory
-				switch {
-				case err == nil:
-					if err := os.Remove(request); err != nil {
-						return err
-					}
-					if err := json.Unmarshal(target, &req, json.RejectUnknownMembers(true)); err != nil {
-						return err
-					}
-					if req.Executable != "" {
-						executable, err = exec.LookPath(req.Executable)
-						if err != nil {
-							return err
-						}
-					}
-				case !errors.Is(err, os.ErrNotExist):
-					return err
-				}
-				if err := validateDaemonReplacement(ctx, executable, req.Flags); err != nil {
-					return err
-				}
-				restart.executable, restart.args = executable, daemonArgs(req.Flags...)
-				return nil
-			}, daemonLog, shutdownTrigger.Call)
+			restart.watch(ctx, restartSignals, func() error { return restart.accept(ctx, ns.DataDir, rec) }, daemonLog, shutdownTrigger.Call)
 		})
 	}
 	syncOutcome := daemon.NewSyncOutcomeObserver(telemetryReporter)

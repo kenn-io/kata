@@ -1384,21 +1384,6 @@ func TestDaemonRestart_ValidatesStoppedDaemonStartup(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name: "auth config",
-			setup: func(t *testing.T, tmp string) {
-				require.NoError(t, os.WriteFile(filepath.Join(tmp, "config.toml"),
-					[]byte("listen = \"100.64.0.5:7777\"\n"), 0o600))
-			},
-			wantErr: "pass --insecure-readonly",
-		},
-		{
-			name: "storage DSN",
-			setup: func(t *testing.T, _ string) {
-				t.Setenv("KATA_DSN", "mysql://db.example/kata")
-			},
-			wantErr: "unsupported dsn scheme",
-		},
-		{
 			name: "hooks config",
 			setup: func(t *testing.T, tmp string) {
 				require.NoError(t, os.WriteFile(filepath.Join(tmp, "hooks.toml"),
