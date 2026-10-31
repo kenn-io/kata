@@ -79,7 +79,7 @@ func newCronForwardFixture(t *testing.T, configure func(*cronForwardFixture, *da
 		configure(f, &cfg)
 	}
 	srv := daemon.NewServer(cfg)
-	var handler http.Handler = srv.Handler()
+	handler := srv.Handler()
 	if cfg.HostAccess != nil {
 		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			srv.Handler().ServeHTTP(w, r.WithContext(daemon.WithPrincipal(r.Context(), daemon.Principal{Kind: daemon.PrincipalHost, Subject: "host-user", Actor: "tester"})))
