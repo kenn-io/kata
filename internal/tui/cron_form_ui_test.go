@@ -214,6 +214,34 @@ func TestCronJobKeysRespectMutationAuthority(t *testing.T) {
 	}
 }
 
+func TestCronJobKeysRetryPermissionDiscovery(t *testing.T) {
+	for _, key := range []rune{'n', 'e'} {
+		t.Run(string(key), func(t *testing.T) {
+			m, _ := cronWriteFixture(t)
+			m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{err: errors.New("temporary connection failure")})
+			m, cmd := updateModel(m, keyRune(key))
+			require.Nil(t, m.cron.form)
+			require.NotNil(t, cmd, "retrying a job action must retry permission discovery")
+		})
+	}
+}
+
+func TestCronSaveDoesNotShareEditorWithRender(t *testing.T) {
+	m, api := openEdit(t, executeRecord(`{}`))
+	m.cron.form.ed.activeField().input.SetValue("Renamed digest")
+	m, cmd := press(m, ctrlKey('o'))
+	require.NotNil(t, cmd)
+	done := make(chan tea.Msg, 1)
+	go func() { done <- cmd() }()
+	for range 100 {
+		cronFormLines(m, m.cron.form)
+	}
+	msg := (<-done).(cronSavedMsg)
+	require.NoError(t, msg.err)
+	require.Len(t, api.puts, 1)
+	require.Equal(t, "Renamed digest", api.puts[0].write.Name)
+}
+
 func openEdit(t *testing.T, record db.CronJob) (Model, *cronWriteTestAPI) {
 	t.Helper()
 	m, api := cronWriteFixture(t)

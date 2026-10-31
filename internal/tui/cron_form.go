@@ -272,7 +272,7 @@ var cronCronTrigger = cronJobTrigger{
 	id: "cron", label: "cron expression", fields: []cronField{cfCron, cfZone},
 	load: func(f *cronForm, t cron.Trigger) { f.val[cfCron], f.val[cfZone] = t.Cron, t.Timezone },
 	build: func(f *cronForm) (cron.Trigger, error) {
-		return cron.Trigger{Kind: "cron", Cron: strings.TrimSpace(f.val[cfCron]), Timezone: strings.TrimSpace(f.val[cfZone])}, nil
+		return cron.Trigger{Kind: "cron", Cron: f.val[cfCron], Timezone: strings.TrimSpace(f.val[cfZone])}, nil
 	},
 }
 
@@ -544,10 +544,6 @@ func (f *cronForm) applyCatchup(def *cron.JobDefinition) error {
 		return nil
 	}
 	def.Catchup = cmp.Or(f.val[cfCatchup], "latest")
-	def.GraceSeconds = 0
-	if def.Catchup != "skip" {
-		return nil
-	}
 	grace, err := cronSeconds(cfGrace, f.val[cfGrace])
 	if err != nil {
 		return err

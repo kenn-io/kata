@@ -278,6 +278,34 @@ func TestCronFormCatchupLatestClearsGrace(t *testing.T) {
 	require.Zero(t, def.GraceSeconds)
 }
 
+func TestCronFormRenameKeepsStoredCronText(t *testing.T) {
+	rec := nativeRecord()
+	rec.Definition.Trigger.Cron = "0 9 * * 1\t"
+	f, err := cronFormFor(rec, nil)
+	require.NoError(t, err)
+	f.ed.activeField().input.SetValue("Renamed report")
+	name, def, err := f.build(cronUIDResolver(nil))
+	require.NoError(t, err)
+	require.Equal(t, "Renamed report", name)
+	require.Equal(t, "0 9 * * 1\t", def.Trigger.Cron)
+}
+
+func TestCronFormRenameKeepsStoredGrace(t *testing.T) {
+	for _, catchup := range []string{"latest", "all"} {
+		t.Run(catchup, func(t *testing.T) {
+			rec := nativeRecord()
+			rec.Definition.Catchup, rec.Definition.GraceSeconds = catchup, 30
+			f, err := cronFormFor(rec, nil)
+			require.NoError(t, err)
+			f.ed.activeField().input.SetValue("Renamed report")
+			name, def, err := f.build(cronUIDResolver(nil))
+			require.NoError(t, err)
+			require.Equal(t, "Renamed report", name)
+			require.Equal(t, int64(30), def.GraceSeconds)
+		})
+	}
+}
+
 func TestCronFormHiddenGraceDoesNotBlockSave(t *testing.T) {
 	rec := executeRecord(`{}`)
 	rec.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 9 * * *"}
