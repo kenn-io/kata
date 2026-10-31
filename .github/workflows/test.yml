@@ -277,6 +277,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+
+      - name: Fetch OpenAPI client generator
+        run: kit-retry 3 5 go run -n github.com/doordash-oss/oapi-codegen-dd/v3/cmd/oapi-codegen@v3.76.5
+
       - name: Check generated OpenAPI artifacts
         run: make api-check
 
