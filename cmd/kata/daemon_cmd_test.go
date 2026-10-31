@@ -871,10 +871,11 @@ func TestDaemonStart_DetachesByDefaultAfterStartup(t *testing.T) {
 	oldStart := startDetachedDaemon
 	t.Cleanup(func() { startDetachedDaemon = oldStart })
 	var gotListen string
-	var gotInsecureReadonly bool
-	startDetachedDaemon = func(_ context.Context, listen string, insecureReadonly, _ bool) (daemonStartOutput, error) {
+	var gotInsecureReadonly, gotNoAutoToken bool
+	startDetachedDaemon = func(_ context.Context, listen string, insecureReadonly, noAutoToken bool) (daemonStartOutput, error) {
 		gotListen = listen
 		gotInsecureReadonly = insecureReadonly
+		gotNoAutoToken = noAutoToken
 		return daemonStartOutput{
 			Action:  "started",
 			PID:     1234,
@@ -884,11 +885,12 @@ func TestDaemonStart_DetachesByDefaultAfterStartup(t *testing.T) {
 	}
 
 	stdout, stderr, err := executeRootCapture(t, context.Background(),
-		"daemon", "start", "--listen", "127.0.0.1:7777", "--insecure-readonly")
+		"daemon", "start", "--listen", "127.0.0.1:7777", "--insecure-readonly", "--no-auto-token")
 
 	require.NoError(t, err)
 	assert.Equal(t, "127.0.0.1:7777", gotListen)
 	assert.True(t, gotInsecureReadonly)
+	assert.True(t, gotNoAutoToken)
 	assert.Equal(t, "started pid=1234 address=127.0.0.1:7777\n"+
 		"  web UI:  http://127.0.0.1:28888\n", stdout)
 	assert.Empty(t, stderr)

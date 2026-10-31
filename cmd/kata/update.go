@@ -212,7 +212,7 @@ func restartReplyError(reply string, pid int, replacement *kitdaemon.RuntimeReco
 	case len(answer) != 0 && string(answer) != restartAccepted:
 		return fmt.Errorf("restart: validate replacement: %s", answer)
 	case replacement != nil && reply != "" && replacement.Metadata[daemonruntime.RuntimeRestartReplyKey] != filepath.Base(reply):
-		return fmt.Errorf("another daemon replaced pid %d first; %w", pid, errRestartNotApplied)
+		return fmt.Errorf("another daemon replaced pid %d first; this restart was not applied", pid)
 	}
 	return nil
 }

@@ -140,9 +140,6 @@ type restartRequest struct {
 // request it applies; any other non-empty reply is that request's refusal.
 const restartAccepted = "accepted"
 
-// errRestartNotApplied marks a request whose daemon was replaced first.
-var errRestartNotApplied = errors.New("this restart was not applied")
-
 // accept applies the restart request published for rec and answers its
 // caller. Acceptance is published before the handoff, so a caller can tell
 // its own replacement from one started for a concurrent request.
@@ -189,40 +186,37 @@ func restartRequestPath(dir string, rec kitdaemon.RuntimeRecord) string {
 	return filepath.Join(dir, fmt.Sprintf("restart.%d.%d", rec.PID, rec.StartedAt.UnixNano()))
 }
 
-// requestDaemonRestart repeats this caller's request against each replacement
-// another caller's restart started first, within one restart wait budget.
+// requestDaemonRestart asks the live daemon to restart within one restart wait
+// budget, reporting a timeout as the daemon not restarting in time.
 func requestDaemonRestart(ctx context.Context, ns *daemonruntime.Namespace, previous kitdaemon.RuntimeRecord, executable string, flags []string) (kitdaemon.RuntimeRecord, error) {
 	ctx, cancel := context.WithTimeoutCause(ctx, daemonRestartProcessWaitTimeout, fmt.Errorf("daemon pid %d did not restart within %s", previous.PID, daemonRestartProcessWaitTimeout))
 	defer cancel()
-	for {
-		replacement, err := requestDaemonRestartOnce(ctx, ns, previous, executable, flags)
-		if errors.Is(err, context.DeadlineExceeded) {
-			err = context.Cause(ctx)
-		}
-		if !errors.Is(err, errRestartNotApplied) || replacement.Metadata[daemonruntime.RuntimeRestartReplyKey] == "" {
-			return replacement, err
-		}
-		previous = replacement
+	replacement, err := requestLiveDaemonRestart(ctx, ns, previous, executable, flags)
+	if errors.Is(err, context.DeadlineExceeded) {
+		err = context.Cause(ctx)
 	}
+	return replacement, err
 }
 
-// publishRestartRequest publishes this caller's request once the daemon has
-// taken any other caller's pending request for previous's generation. Between
-// attempts it polls once for a replacement, which ends the wait as it would
-// for a published request.
-func publishRestartRequest(ctx context.Context, store kitdaemon.RuntimeStore, previous kitdaemon.RuntimeRecord, reply string, payload []byte) (kitdaemon.RuntimeRecord, error) {
-	for {
-		err := atomicfile.WriteNew(restartRequestPath(store.Dir, previous), payload, atomicfile.WithPrivate())
-		if !errors.Is(err, os.ErrExist) {
-			return kitdaemon.RuntimeRecord{}, err
-		}
-		poll, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
-		replacement, err := waitForDaemonReplacement(poll, store, previous, reply)
-		cancel()
-		if ctx.Err() != nil || !errors.Is(err, context.DeadlineExceeded) {
-			return replacement, err
+// requestLiveDaemonRestart serializes active requests with the runtime store's
+// start lock and rediscovers the live daemon when each caller takes its turn.
+func requestLiveDaemonRestart(ctx context.Context, ns *daemonruntime.Namespace, previous kitdaemon.RuntimeRecord, executable string, flags []string) (kitdaemon.RuntimeRecord, error) {
+	store := kitdaemon.RuntimeStore{Dir: ns.DataDir}
+	release, err := store.AcquireStartLock(ctx)
+	if err != nil {
+		return kitdaemon.RuntimeRecord{}, err
+	}
+	defer release()
+	records, err := store.List()
+	if err != nil {
+		return kitdaemon.RuntimeRecord{}, err
+	}
+	for _, record := range records {
+		if record.StartedAt.After(previous.StartedAt) && daemonruntime.RuntimeProcessAlive(record) {
+			previous = record
 		}
 	}
+	return requestDaemonRestartOnce(ctx, ns, previous, executable, flags)
 }
 
 func requestDaemonRestartOnce(ctx context.Context, ns *daemonruntime.Namespace, previous kitdaemon.RuntimeRecord, executable string, flags []string) (kitdaemon.RuntimeRecord, error) {
@@ -238,8 +232,8 @@ func requestDaemonRestartOnce(ctx context.Context, ns *daemonruntime.Namespace, 
 			return kitdaemon.RuntimeRecord{}, err
 		}
 		payload, _ := json.Marshal(restartRequest{Executable: executable, Reply: filepath.Base(reply), Flags: flags})
-		if replacement, err := publishRestartRequest(ctx, kitdaemon.RuntimeStore{Dir: ns.DataDir}, previous, reply, payload); err != nil {
-			return replacement, err
+		if err := atomicfile.WriteFile(restartRequestPath(ns.DataDir, previous), payload, atomicfile.WithPrivate()); err != nil {
+			return kitdaemon.RuntimeRecord{}, err
 		}
 	}
 	if err := daemonruntime.SignalDaemonRestart(previous, ns.DBHash); err != nil {

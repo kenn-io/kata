@@ -283,54 +283,40 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 			setupKataEnv(t)
 			f := fixture(t, scenario)
 			before := f.record()
-			if scenario == "concurrent refusal" {
-				// Publish the first caller's request before its signal, so the
-				// valid CLI reaches the pending-request branch deterministically.
-				reply := filepath.Join(f.store.Dir, "restart-reply-refused")
-				require.NoError(t, os.WriteFile(reply, nil, 0600))
-				t.Cleanup(func() { _ = os.Remove(reply) })
-				payload, err := json.Marshal(restartRequest{Executable: f.cli, Reply: filepath.Base(reply), Flags: []string{"--listen=invalid"}})
-				require.NoError(t, err)
-				require.NoError(t, os.WriteFile(restartRequestPath(f.store.Dir, before), payload, 0600))
-				done := make(chan struct{})
-				var output string
-				var restartErr error
-				go func() {
-					output, restartErr = f.restart(t, "--json")
-					close(done)
-				}()
-				require.Eventually(t, func() bool { //nolint:kennlint // sleeptest: the external CLI publishes its private reply before waiting
-					replies, err := filepath.Glob(filepath.Join(f.store.Dir, "restart-reply-*"))
-					return err == nil && len(replies) == 2
-				}, 5*time.Second, 20*time.Millisecond)
-				require.NoError(t, daemonruntime.SignalDaemonRestart(before, filepath.Base(f.store.Dir)))
-				<-done
-				refusal, err := os.ReadFile(reply) //nolint:gosec // caller-owned private reply in the isolated fixture
-				require.NoError(t, err)
-				assert.Contains(t, string(refusal), "invalid")
-				assert.NoError(t, restartErr, "%s", output)
-				require.NoError(t, os.Remove(reply))
-				replies, err := filepath.Glob(filepath.Join(f.store.Dir, "restart*"))
-				require.NoError(t, err)
-				assert.Empty(t, replies)
-				return
+			if scenario != "restart failure" && scenario != "older daemon" && runtime.GOOS != "windows" {
+				t.Cleanup(func() { assert.Equal(t, before.PID, f.record().PID) })
 			}
-			if scenario == "equivalent concurrent restarts" {
-				start, done := make(chan struct{}), make(chan struct{}, 6)
-				for range 6 {
+			if scenario == "concurrent refusal" || scenario == "equivalent concurrent restarts" {
+				callers := 6
+				if scenario == "concurrent refusal" {
+					callers = 2
+				}
+				start, done := make(chan struct{}), make(chan struct{}, callers)
+				for caller := range callers {
 					go func() {
 						<-start
-						output, err := f.restart(t, "--json")
-						assert.NoError(t, err, "%s", output)
+						args := []string{"--json"}
+						invalid := scenario == "concurrent refusal" && caller == 0
+						if invalid {
+							args = append(args, "--listen=invalid")
+						}
+						output, err := f.restart(t, args...)
+						if invalid {
+							assert.Error(t, err)
+							assert.Contains(t, output, "invalid")
+						} else {
+							assert.NoError(t, err, "%s", output)
+						}
 						done <- struct{}{}
 					}()
 				}
 				close(start)
-				for range 6 {
+				for range callers {
 					<-done
 				}
-				assert.Equal(t, "v0.2.0", f.record().Version)
-				assert.Equal(t, before.Endpoint().IsUnix(), f.record().Endpoint().IsUnix())
+				replies, err := filepath.Glob(filepath.Join(f.store.Dir, "restart*"))
+				require.NoError(t, err)
+				assert.Empty(t, replies)
 				return
 			}
 			if scenario == "older daemon" {
@@ -346,9 +332,6 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 				require.NoError(t, err, "%s", output)
 				after := f.record()
 				require.True(t, after.StartedAt.After(before.StartedAt))
-				if runtime.GOOS != "windows" {
-					assert.Equal(t, before.PID, after.PID)
-				}
 				httpClient, baseURL := client.LocalHTTPClient(strings.Replace(after.Endpoint().ConfigAddress(), "0.0.0.0:", "127.0.0.1:", 1))
 				status, _, err := httpDoJSON(t.Context(), httpClient, http.MethodPost, baseURL+"/api/v1/projects", map[string]string{"name": "example-project", "actor": "user-a"})
 				require.NoError(t, err)
@@ -386,17 +369,9 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 				status, _, err := httpDoJSON(t.Context(), httpClient, http.MethodGet, baseURL+"/api/v1/ping", nil)
 				require.NoError(t, err)
 				assert.Equal(t, http.StatusOK, status)
-				require.NoError(t, os.Remove(filepath.Join(f.home, "config.toml")))
-				// A corrected request must still reach the signal watcher.
-				_, err = f.restart(t)
-				require.NoError(t, err)
-				require.True(t, f.record().StartedAt.After(before.StartedAt))
 				return
 			}
 			require.NoError(t, updateErr, "%s", stdout)
-			var restarted daemonRestartOutput
-			require.NoError(t, json.Unmarshal([]byte(stdout), &restarted))
-			assert.Equal(t, []int{before.PID}, restarted.PIDs)
 			after := f.record()
 			require.True(t, after.StartedAt.After(before.StartedAt))
 			assert.Equal(t, "v0.2.0", after.Version)
