@@ -945,15 +945,10 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 			next, cmd := m.routeCredentialsViewKey(msg)
 			return next, cmd, true
 		}
-		if withinSubtree, mutation := m.mutationForKey(msg); mutation && !m.mutationAllowed(withinSubtree) {
-			if m.authCapabilitiesRequired && !m.authCapabilitiesReady {
-				m.toast = &toast{
-					text:  "Checking daemon permissions; retry your action when connected",
-					level: toastInfo, expiresAt: m.toastNow().Add(3 * time.Second),
-				}
-				return m, tea.Batch(m.fetchAuthCapabilities(), toastExpireCmd(3*time.Second)), true
+		if withinSubtree, mutation := m.mutationForKey(msg); mutation {
+			if next, cmd, blocked := m.blockMutation(withinSubtree); blocked {
+				return next, cmd, true
 			}
-			return m, nil, true
 		}
 		if next, cmd, ok := m.routeCloseKey(msg); ok {
 			return next, cmd, true
@@ -1023,6 +1018,22 @@ func (m Model) inboxEntryKeptKey(msg tea.KeyPressMsg) bool {
 		}
 	}
 	return false
+}
+
+// blockMutation reports whether a mutation must wait, and retries permission
+// discovery when that is what it waits on.
+func (m Model) blockMutation(withinSubtree bool) (Model, tea.Cmd, bool) {
+	if m.mutationAllowed(withinSubtree) {
+		return m, nil, false
+	}
+	if m.authCapabilitiesRequired && !m.authCapabilitiesReady {
+		m.toast = &toast{
+			text:  "Checking daemon permissions; retry your action when connected",
+			level: toastInfo, expiresAt: m.toastNow().Add(3 * time.Second),
+		}
+		return m, tea.Batch(m.fetchAuthCapabilities(), toastExpireCmd(3*time.Second)), true
+	}
+	return m, nil, true
 }
 
 func (m Model) mutationForKey(msg tea.KeyPressMsg) (withinSubtree, mutation bool) {

@@ -209,7 +209,7 @@ func TestCronJobKeysRespectMutationAuthority(t *testing.T) {
 			m.authCapabilitiesRequired, m.authCapabilitiesReady = pending, false
 			m, cmd := updateModel(m, keyRune(key))
 			require.Nil(t, m.cron.form, "key=%c pending=%v", key, pending)
-			require.Nil(t, cmd, "key=%c pending=%v", key, pending)
+			require.Equal(t, pending, cmd != nil, "key=%c pending=%v: only pending discovery is retried", key, pending)
 		}
 	}
 }

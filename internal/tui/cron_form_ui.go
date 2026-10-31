@@ -40,13 +40,13 @@ func (m Model) cronSelectedJob(lines []cronLine, cursor int) (uid string, ok boo
 	return lines[cursor].target.uid, true
 }
 
-// routeCronJobKey handles the job keys. It reports false for any other key.
+// routeCronJobKey handles the n and e job keys. It reports false when no job applies.
 func (m Model) routeCronJobKey(key string, lines []cronLine, cursor int) (Model, tea.Cmd, bool) {
 	if !m.cronJobsScope() || m.cron.data == nil {
 		return m, nil, false
 	}
-	if (key == "n" || key == "e") && !m.mutationAllowed(false) {
-		return m, nil, true
+	if next, cmd, blocked := m.blockMutation(false); blocked {
+		return next, cmd, true
 	}
 	switch key {
 	case "n":
@@ -259,7 +259,7 @@ func (m Model) routeCronFormKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 				return m, nil
 			}
 			f.saving = true
-			return m, m.cronSaveCmd(*f)
+			return m, m.cronSaveCmd(f.frozen())
 		case actionEditorHandoff:
 			return m, editorCmd("edit", f.val[f.focus], f.formGen)
 		}
@@ -324,7 +324,7 @@ func (m Model) routeCronConflictKey(key string) (Model, tea.Cmd) {
 		}
 		f.create, f.expected, f.conflict = false, current.DefinitionEventUID, nil
 		f.saving = true
-		return m, m.cronSaveCmd(*f)
+		return m, m.cronSaveCmd(f.frozen())
 	case "j", "down":
 		f.conflictCursor++
 	case "k", "up":

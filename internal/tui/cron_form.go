@@ -730,6 +730,15 @@ func (f *cronForm) navigation() inputState {
 	return nav
 }
 
+// frozen is a copy of the form that a save can read off the event loop,
+// without the editor the render loop keeps changing.
+func (f *cronForm) frozen() cronForm {
+	f.syncEditor()
+	c := *f
+	c.ed = inputState{}
+	return c
+}
+
 // syncEditor keeps values assigned directly by a caller until the editor changes.
 func (f *cronForm) syncEditor() {
 	if f.isChoice(f.focus) || f.locked(f.focus) || f.externalText(f.focus) || f.ed.activeField() == nil {
