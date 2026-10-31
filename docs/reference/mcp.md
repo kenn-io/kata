@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-10-30
+last_edited: 2026-10-31
 ---
 
 # Model Context Protocol server
@@ -279,6 +279,7 @@ model context at startup.
 | `kata.load_issue_discovery` | `kata.search`, `kata.list`, `kata.show`, `kata.ready`, `kata.next`, `kata.labels`, `kata.graph` |
 | `kata.load_issue_mutation` | `kata.create`, `kata.edit`, `kata.comment`, `kata.edit_comment`, `kata.claim`, `kata.set_label`, `kata.set_metadata`, `kata.set_schedule`, `kata.set_deadline`, `kata.move` |
 | `kata.load_coordination` | `kata.assign`, `kata.unassign`, `kata.inbox`, `kata.status` |
+| `kata.load_cron` | `kata.cron_capabilities`, `kata.cron_new_uid`, `kata.cron_jobs`, `kata.cron_job`, `kata.cron_job_create`, `kata.cron_job_update`, `kata.cron_job_delete`, `kata.cron_job_restore`, `kata.cron_workflows`, `kata.cron_workflow`, `kata.cron_workflow_create`, `kata.cron_workflow_update`, `kata.cron_workflow_delete`, `kata.cron_workflow_restore`, `kata.cron_runs`, `kata.cron_run`, `kata.cron_run_observe` |
 | `kata.load_issue_lifecycle` | `kata.close`, `kata.reopen`, `kata.delete`, `kata.restore`, `kata.purge`, `kata.wait`, `kata.audit_closes` |
 | `kata.load_leases` | `kata.lease_status`, `kata.lease`, `kata.lease_force_release`, `kata.lease_steal` |
 | `kata.load_projects` | `kata.projects`, `kata.project_show`, `kata.project_create`, `kata.project_update`, `kata.project_merge`, `kata.project_remove`, `kata.project_restore`, `kata.project_purge` |
@@ -334,6 +335,8 @@ non-idempotent: the first two mint a new record on every identical retry, a
 forced storage import replaces the target again (with a fresh instance
 identity when `new_instance` is set), a lease renewal extends the expiry on
 every call, and each sync pass re-imports from the provider.
+`kata.cron_new_uid` is read-only but non-idempotent: each call returns a fresh,
+unreserved UID.
 `kata.lease_steal` acquires first and only force-releases a holder that
 denies that acquire, so a retry after a lost response keeps a lease the
 startup principal already holds instead of releasing and re-acquiring it.
@@ -364,8 +367,8 @@ startup_sections = ["issue_discovery", "issue_mutation", "coordination", "issue_
 ```
 
 Use section IDs, such as `issue_discovery`, rather than loader tool names such
-as `kata.load_issue_discovery`. The IDs are `activity`, `coordination`, `docs`,
-`external_roots`, `federation`, `import`, `issue_discovery`, `issue_lifecycle`,
+as `kata.load_issue_discovery`. The IDs are `activity`, `coordination`, `cron`,
+`docs`, `external_roots`, `federation`, `import`, `issue_discovery`, `issue_lifecycle`,
 `issue_mutation`, `leases`, `projects`, `recurrence`, `storage`, `sync`, `system`,
 `teams`, and `tokens`. Each ID selects the detailed tools in its loader row above.
 
@@ -384,6 +387,52 @@ clients can still load other sections progressively. Omit the setting or use
 `startup_sections = []` to retain the default loader-only initial catalog.
 These settings apply to the daemon mount; `kata mcp serve` retains progressive
 loading.
+
+## Native cron through MCP
+
+Load `kata.load_cron` for job and workflow lifecycle tools, live capability
+discovery, and attributed run evidence. This interface uses cron job definitions;
+the separate `kata.load_recurrence` tools manage RRULE issue templates.
+
+| Purpose | Tools |
+| --- | --- |
+| Discovery and identity | `kata.cron_capabilities`, `kata.cron_new_uid` |
+| Jobs | `kata.cron_jobs`, `kata.cron_job`, `kata.cron_job_create`, `kata.cron_job_update`, `kata.cron_job_delete`, `kata.cron_job_restore` |
+| Workflows | `kata.cron_workflows`, `kata.cron_workflow`, `kata.cron_workflow_create`, `kata.cron_workflow_update`, `kata.cron_workflow_delete`, `kata.cron_workflow_restore` |
+| Run evidence | `kata.cron_runs`, `kata.cron_run`, `kata.cron_run_observe` |
+
+Every operation uses the MCP server's configured daemon credentials, project
+scope, and accountable actor. Select `project` explicitly in multi-project modes.
+Run observations accept the usual per-call `teammate` override; an empty value
+suppresses the startup default without changing the actor. Issue-scoped tokens
+do not gain project-level cron authority.
+
+Call `kata.cron_new_uid` before creation and retain its returned `uid`. The helper
+creates and reserves nothing and does not bind the UID to a project. Creates use
+that caller-retained identity without an expected event UID. After a lost create
+response, read the same UID with `kata.cron_job` or `kata.cron_workflow`; repeating
+a create preserves the daemon's conflict rather than becoming an update.
+
+Update, delete, and restore require the current `expected_event_uid`. Read the
+current definition after a conflict and decide whether to retry; MCP never fetches
+a new CAS value on the caller's behalf. Delete is the existing reversible cron
+tombstone operation. Workflow-in-use checks and native parent bindings are
+preserved. Typed definitions and opaque option objects retain exact JSON numbers.
+
+`kata.cron_runs` defaults to 20 records, accepts `limit` from 1 through 100,
+and returns `next_before_uid`; pass it as `before_uid` to continue. `job_uid`
+filters history. `kata.cron_run_observe` requires a caller-retained run UID,
+`expected_revision` (`0` for new evidence), a job or workflow reference with its
+definition event UID, status, and a versioned summary. Identical retries return
+`replayed: true`; distinct run UIDs for one scheduled occurrence remain separate
+observations. Recording evidence does not launch execution, claim an issue, or
+change its status.
+
+Enabled native `notify` jobs activate the existing daemon delivery. Execution
+jobs and workflows require an installed external adapter. Check
+`kata.cron_capabilities` for the selected daemon's actual advertised features;
+permission denial, unsupported capability, and temporary unavailability remain
+distinct errors. See [Native cron](cron.md) for job definitions and adapters.
 
 ## Scheduling and someday
 

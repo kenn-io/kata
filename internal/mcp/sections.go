@@ -89,6 +89,12 @@ func toolSections(storageAvailable, tokenAdminAvailable bool) []toolSection {
 			tools:       []string{"kata.assign", "kata.inbox", "kata.status", "kata.unassign"}, available: true, register: registerCoordinationTools,
 		},
 		{
+			loader: "kata.load_cron", section: "cron", title: "Load cron tools",
+			description: "Load native recurring notification jobs and external-adapter execution definitions. Run evidence does not launch work. Distinct from RRULE recurrence tools; refresh the MCP tool list.",
+			tools:       []string{"kata.cron_capabilities", "kata.cron_new_uid", "kata.cron_jobs", "kata.cron_job", "kata.cron_job_create", "kata.cron_job_update", "kata.cron_job_delete", "kata.cron_job_restore", "kata.cron_workflows", "kata.cron_workflow", "kata.cron_workflow_create", "kata.cron_workflow_update", "kata.cron_workflow_delete", "kata.cron_workflow_restore", "kata.cron_runs", "kata.cron_run", "kata.cron_run_observe"},
+			available:   true, register: registerCronTools,
+		},
+		{
 			loader: "kata.load_docs", section: "docs", title: "Load documentation tools",
 			description: "Load typed tools that search and read Kata's bundled user documentation, then refresh the MCP tool list.",
 			tools:       []string{"kata.read_doc", "kata.search_docs"}, available: true, register: registerDocsTools,
