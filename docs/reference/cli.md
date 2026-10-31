@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-30
+last_edited: 2026-10-31
 ---
 
 # CLI reference
@@ -1892,8 +1892,8 @@ position; `c` clears the selected request
 
 Press `u` in the issue list or detail view to undo the latest eligible issue
 edit from this TUI session. Repeated presses walk back through up to 20 edits,
-including close, reopen, owner, priority, label, body, and newly added parent,
-blocker, or related links. Undo follows the recorded issue across navigation
+including close, reopen, owner, priority, label, body, dates, and newly added
+parent, blocker, or related links. Undo follows the recorded issue across navigation
 and projects; it does not target whichever row is currently selected. It makes
 a new attributed change, so the original audit event remains. Undoing a reopen
 may open the normal completion form when the daemon requires evidence.
@@ -1923,6 +1923,23 @@ In issue detail, press `t` to start or renew a temporary assignment for the
 current actor. Enter a duration from one minute through 24 hours, such as
 `15m`, `1h`, or `8h`. The detail properties show the resulting absolute
 assignment expiry.
+
+In the issue list or detail, press `d` to edit the selected issue's Scheduled
+and Deadline dates. Each field starts with the stored `scheduled_on` or
+`deadline_on` value and accepts what `kata schedule` and `kata deadline`
+accept (see [Issue metadata](#issue-metadata)): `YYYY-MM-DD`, local
+`YYYY-MM-DDTHH:MM[:SS]`, or RFC 3339 UTC ending in `Z`. Leave a field blank to
+clear that date. The form also reads `today`, `tomorrow`, `+Nd` and `+Nw`,
+counted from your local date; a line under the field previews the resolved day,
+such as `2026-11-05 Thu`, and only that day is sent. Weekday names are not
+accepted, and the CLI, MCP and daemon still reject relative input.
+`Ctrl+o` saves, `Esc` cancels, and `Tab` moves between fields. A save sends one
+metadata patch with only the dates you changed, guarded by `If-Match` on the
+revision the form read, like `kata schedule --if-match`. If the issue changed
+since the form opened, nothing is written; the form stays open and shows the
+current dates so you can edit them again. The detail properties show both
+dates once either is set, and `u` writes the previous dates back under the
+same revision check.
 
 In the issue list, `v` toggles between nested and flat views: nested groups
 children under parents, while flat shows matching issues as peers in list

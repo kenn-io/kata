@@ -15,6 +15,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
   owns an issue. See [MCP](reference/mcp.md#native-cron-through-mcp). Thanks to
   [Rusty Shackleford](https://github.com/salmonumbrella).
 
+- Set, change or clear an issue's Scheduled and Deadline dates in `kata tui`
+  with `d`, from the list or the detail. Fields take the same values as
+  `kata schedule` and `kata deadline`, plus `today`, `tomorrow`, `+Nd` and `+Nw`
+  with a preview of the resolved day. A save is one revision-guarded patch of
+  the dates you changed, and `u` undoes it. The detail now shows both dates.
+  See the [CLI reference](reference/cli.md#daemon-and-diagnostics).
 - Show what is stuck in any web collection, Inbox and Today included, with the
   optional **Blocked by** column. It lists each task's open blockers, three IDs
   at most and then `+N`; closed blockers are left out. It is off by default;
