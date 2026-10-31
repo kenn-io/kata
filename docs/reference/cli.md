@@ -1939,8 +1939,9 @@ the last field, narrows the list by each row's resolved dates. **today** keeps
 open issues whose `scheduled_on_date` or `deadline_on_date` is today or earlier.
 **scheduled** keeps open issues with either date after today. Today is the
 calendar day in your local time zone. The choice combines with status, owner,
-labels, and search, and shows as a `date:` chip. Choose All projects in the
-projects view (`P`) to see every project's issues together. Rows show their dates as
+labels, and search, and shows as a `date:` chip. The choice filters the current
+project scope and does not change it; for Today across every project, choose
+All projects in the projects view (`P`) and then set **today**. Rows show their dates as
 `s:MM-DD` and `d:MM-DD`, with the year added for other years; the dates are
 left off where the title column is too narrow. An issue missing a date never
 matches on it, and daemons older than API `0.36.0` send no dates, so neither

@@ -1061,7 +1061,7 @@ func (lm listModel) refetchCmd(api listAPI, sc scope) tea.Cmd {
 }
 
 // filteredIssues returns the subset of issues that satisfy the
-// client-side filters (Status/Owner/Author/Search/Labels). The fast path
+// client-side filters (Status/Owner/Author/Search/Labels/Date). The fast path
 // returns the input slice unchanged when no client-side filter is set
 // — render runs every keystroke, so this matters.
 //

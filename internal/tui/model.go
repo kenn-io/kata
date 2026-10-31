@@ -1960,7 +1960,7 @@ func (m Model) commitInput() (Model, tea.Cmd) {
 	return m, nil
 }
 
-// commitFilterForm reads the four filter axes off the form and
+// commitFilterForm reads the five filter axes off the form and
 // applies them to lm.filter as a single atomic update. Cursor and
 // selectedUID are reset so the next render lands on a fresh row
 // (the prior selection may no longer match the new filter, and a
