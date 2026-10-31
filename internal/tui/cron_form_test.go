@@ -66,12 +66,12 @@ func TestCronFormRecurringCreateHonoursEnabled(t *testing.T) {
 func TestCronFormPolicySwitchDropsOffsets(t *testing.T) {
 	f, err := cronFormFor(executeRecord(`{}`), nil)
 	require.NoError(t, err)
-	_, def, err := f.build(cronTestUIDs)
+	_, def, err := f.build(cronUIDResolver(nil))
 	require.NoError(t, err)
 	require.NotNil(t, def.Issue.ScheduledOffsetSeconds, "per-run keeps its offset")
 
-	f.val[cfPolicy], f.val[cfIssue] = "existing", cronTestIssue
-	_, def, err = f.build(cronTestUIDs)
+	f.val[cfPolicy], f.val[cfReport] = "existing", cronTestIssue
+	_, def, err = f.build(cronUIDResolver(nil))
 	require.NoError(t, err)
 	require.Equal(t, cron.IssuePolicy{Kind: "existing", UID: cronTestIssue}, *def.Issue)
 }
@@ -187,20 +187,20 @@ func TestCronFormNotifyIssueTargetIsExisting(t *testing.T) {
 	f.kind, f.trigger = "notify", "manual"
 	f.val[cfName], f.val[cfIssue], f.val[cfMessage] = "Ping", cronTestIssue, "hello"
 	f.val[cfRecipient] = "alice"
-	_, def, err := f.build(cronTestUIDs)
+	_, def, err := f.build(cronUIDResolver(nil))
 	require.NoError(t, err)
 	require.Equal(t, cron.IssuePolicy{Kind: "existing", UID: cronTestIssue}, *def.Issue)
 
 	f.trigger = "issue-deadline"
 	f.val[cfReport] = cronTestParent
-	_, def, err = f.build(cronTestUIDs)
+	_, def, err = f.build(cronUIDResolver(nil))
 	require.NoError(t, err)
-	require.Equal(t, cron.IssuePolicy{Kind: "existing", UID: cronTestIssue}, *def.Issue)
+	require.Equal(t, cron.IssuePolicy{Kind: "existing", UID: cronTestParent}, *def.Issue, "the notification target is its own field")
 	require.Equal(t, "issue-deadline", def.Trigger.Kind)
 	require.Equal(t, cronTestIssue, def.Trigger.IssueUID)
 
 	f.val[cfReport] = ""
-	_, def, err = f.build(cronTestUIDs)
+	_, def, err = f.build(cronUIDResolver(nil))
 	require.NoError(t, err)
 	require.Nil(t, def.Issue, "a date-triggered notify may leave its issue to the trigger")
 }
@@ -281,4 +281,37 @@ func TestCronFormBlamesBlankRunIssue(t *testing.T) {
 	f.validate()
 	require.NotNil(t, f.err)
 	require.Equal(t, cfReport, f.err.field)
+}
+
+func TestCronFormNotifyEditKeepsStoredOverlap(t *testing.T) {
+	rec := executeRecord(`{}`)
+	rec.Definition.Action = cron.Action{Kind: "notify", Recipient: "alice", Message: "hi"}
+	rec.Definition.Issue = &cron.IssuePolicy{Kind: "existing", UID: cronTestIssue}
+	rec.Definition.Overlap = "forbid"
+	f, err := cronFormFor(rec, nil)
+	require.NoError(t, err)
+	f.val[cfMessage] = "changed"
+	_, def, err := f.build(cronUIDResolver(nil))
+	require.NoError(t, err)
+	require.Equal(t, "forbid", def.Overlap)
+
+	created, err := newCronForm(nil)
+	require.NoError(t, err)
+	created.kind, created.trigger = "notify", "manual"
+	created.val[cfIssue], created.val[cfRecipient], created.val[cfMessage] = cronTestIssue, "alice", "hi"
+	_, def, err = created.build(cronUIDResolver(nil))
+	require.NoError(t, err)
+	require.Equal(t, "allow", def.Overlap, "a new notify job gets a default")
+}
+
+func TestCronFormRebaseMergesKindAndTriggerIndependently(t *testing.T) {
+	f, err := cronFormFor(executeRecord(`{}`), nil)
+	require.NoError(t, err)
+	f.kind = "notify" // the draft changes only the kind
+	other := executeRecord(`{}`)
+	other.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 8 * * *", Timezone: "UTC"} // another writer changed the trigger
+	next, err := f.rebase(other)
+	require.NoError(t, err)
+	require.Equal(t, "notify", next.kind)
+	require.Equal(t, "cron", next.trigger, "the other writer's trigger survives a kind-only draft")
 }

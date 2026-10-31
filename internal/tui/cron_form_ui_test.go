@@ -319,3 +319,45 @@ func TestCronEditDefinitionRoundTripsThroughDaemon(t *testing.T) {
 	require.Contains(t, string(after.Definition.Options), "1.10")
 	require.Equal(t, "Line one\nLine two", after.Definition.Action.Prompt)
 }
+
+func TestCronEditRefusesAnArchivedRecord(t *testing.T) {
+	m, api := cronWriteFixture(t)
+	api.shown = executeRecord(`{}`)
+	api.shown.UID = m.cron.data.jobs[0].UID
+	api.shown.Archived = true
+	m, cmd := press(m, keyRune('e'))
+	m = settle(t, m, cmd)
+	require.Nil(t, m.cron.form, "saving an archived job's revision would restore it")
+	require.Contains(t, m.toast.text, "restore")
+}
+
+func TestCronEditResponseNeedsItsContext(t *testing.T) {
+	for name, away := range map[string]func(Model) Model{
+		"help":      func(m Model) Model { m, _ = updateModel(m, keyRune('?')); return m },
+		"other tab": func(m Model) Model { return sendRune(m, '3') },
+	} {
+		t.Run(name, func(t *testing.T) {
+			m, api := cronWriteFixture(t)
+			api.shown = executeRecord(`{}`)
+			api.shown.UID = m.cron.data.jobs[0].UID
+			m, cmd := press(m, keyRune('e'))
+			m = away(m)
+			m = settle(t, m, cmd)
+			require.Nil(t, m.cron.form)
+		})
+	}
+}
+
+func TestCronFormTakesPaste(t *testing.T) {
+	m, _ := cronWriteFixture(t)
+	m, _ = updateModel(m, keyRune('n'))
+	m, _ = updateModel(m, tea.PasteMsg{Content: "pasted name"})
+	require.Equal(t, "pasted name", m.cron.form.ed.Value())
+	require.True(t, m.cron.form.dirty())
+	require.Equal(t, "pasted name", m.cron.form.val[cfName])
+
+	m.cron.form.focusField(cfKind) // a choice field takes no text
+	m, _ = updateModel(m, tea.PasteMsg{Content: "zzz"})
+	require.Equal(t, "pasted name", m.cron.form.val[cfName])
+	require.Equal(t, "recurring", m.cron.form.kind)
+}

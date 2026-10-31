@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/uid"
 )
@@ -254,7 +255,7 @@ var cronNotifyKind = cronJobKind{
 	},
 	build: func(f *cronForm, uidOf func(string) string) (cron.JobDefinition, error) {
 		def := f.base()
-		def.Overlap, def.Action = "allow", cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}
+		def.Overlap, def.Action = cmp.Or(def.Overlap, "allow"), cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}
 		f.applyNotification(&def)
 		switch {
 		case !cronIsDate(f.trigger) && strings.TrimSpace(f.val[cfIssue]) != "":
@@ -878,8 +879,14 @@ func (f *cronForm) rebase(current CronJobRecord) (*cronForm, error) {
 	if err != nil {
 		return nil, err
 	}
-	if f.kind != f.snapKind || f.trigger != f.snapTrig {
-		next.kind, next.trigger = f.kind, f.trigger
+	if f.kind != f.snapKind {
+		next.kind = f.kind
+		if !slices.Contains(next.kindDef().triggers, next.trigger) {
+			next.trigger = f.trigger
+		}
+	}
+	if f.trigger != f.snapTrig {
+		next.trigger = f.trigger
 	}
 	for field := range cfCount {
 		if f.val[field] != f.snapshot[field] {
@@ -889,4 +896,14 @@ func (f *cronForm) rebase(current CronJobRecord) (*cronForm, error) {
 	next.focusField(f.focus)
 	next.validate()
 	return next, nil
+}
+
+// paste inserts pasted text into the focused text field, as typing would.
+func (f *cronForm) paste(msg tea.PasteMsg) {
+	if f.saving || f.conflict != nil || f.isChoice(f.focus) || f.locked(f.focus) {
+		return
+	}
+	f.ed, _ = f.ed.Update(msg)
+	f.validate()
+	f.general = ""
 }

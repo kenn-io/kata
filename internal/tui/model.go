@@ -854,6 +854,12 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		if m.view == viewCron && m.cron.filtering && m.modal == modalNone {
 			return m.cronFilter(m.cron.lists[m.cron.tab].query + msg.Content), nil, true
 		}
+		if m.view == viewCron && m.cron.form != nil {
+			if m.modal == modalNone {
+				m.cron.form.paste(msg)
+			}
+			return m, nil, true
+		}
 		// Bubble Tea v2 delivers bracketed pastes as their own message
 		// type. Forward to the active input's bubbles model so a paste
 		// lands atomically (newlines included) instead of as

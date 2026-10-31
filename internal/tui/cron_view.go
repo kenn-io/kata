@@ -67,6 +67,7 @@ type cronState struct {
 	form            *cronForm
 	confirm         *cronConfirm
 	archived        bool
+	editSeq         uint64
 }
 
 // Synchronize after every update and retain visible records during refresh.
