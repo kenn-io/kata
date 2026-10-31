@@ -953,9 +953,6 @@ func writeRuntimeRecordFor(t *testing.T, home, addr string, pid int) {
 }
 
 func TestDaemonStart_ReplacesIdleAutostartDaemon(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the test helper does not install the Windows daemon stop event watcher")
-	}
 	resetFlags(t)
 	home := setupKataEnv(t)
 	child := startSleepProcess(t)
@@ -980,9 +977,6 @@ func TestDaemonStart_ReplacesIdleAutostartDaemon(t *testing.T) {
 }
 
 func TestDaemonStart_ReplacesIdleDaemonDiscoveredAfterCutover(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the test helper does not install the Windows daemon stop event watcher")
-	}
 	resetFlags(t)
 	home := setupKataEnv(t)
 	child := startSleepProcess(t)

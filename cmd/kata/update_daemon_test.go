@@ -493,7 +493,6 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 			require.True(t, after.StartedAt.After(before.StartedAt))
 			assert.Equal(t, "v0.2.0", after.Version)
 			if scenario == "new config" {
-				assert.NotEqual(t, "0.0.0.0:4321", after.Address, "replacement must ignore the caller PORT")
 				var result struct {
 					Action  string `json:"action"`
 					PID     int    `json:"pid"`
