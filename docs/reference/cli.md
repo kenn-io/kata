@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-30
+last_edited: 2026-10-31
 ---
 
 # CLI reference
@@ -1800,14 +1800,22 @@ daemon was auto-started with `autostart_idle_timeout` in effect, `daemon start`
 stops it and starts an explicit daemon in its place, reporting the replaced
 PID; a resident daemon is reported as already running. Use
 `daemon start --foreground` for service managers, hosted deployments, and any
-setup where the daemon process should stay attached to the terminal. `daemon
-restart` asks each running local daemon to replace itself in its original
+setup where the daemon process should stay attached to the terminal.
+
+`daemon restart` asks each running local daemon to replace itself in its original
 environment, using the installed executable invoked by the CLI and retaining
 its startup options, credentials, network, and idle policy. The CLI and daemon
-must see the same process IDs and executable paths. The selected executable validates configuration in the daemon's environment before stopping it. Configuration validation errors leave the daemon serving; listener binding happens during replacement startup. Explicit restart flags override its startup options and persist through later restarts.
-To replace an older daemon that supports only restart
-signals rather than executable selection, run
-`kata daemon stop` followed by `kata daemon start` with the desired options. Background start and restart output reports the
+must see the same process IDs and executable paths. Separate PID or filesystem
+views can prevent daemon discovery or executable handoff. The selected
+executable validates configuration in the daemon's environment before stopping
+it. Configuration validation errors leave the daemon serving; listener binding
+happens during replacement startup. Explicit restart flags override startup
+options and persist through later restarts. `kata daemon stop` followed by
+`kata daemon start` clears these overrides and uses the current startup settings.
+
+To replace an older daemon that supports only restart signals rather than
+executable selection, run `kata daemon stop` followed by `kata daemon start`
+with the desired options. Background start and restart output reports the
 resolved web UI URL on its own line after the daemon transport address.
 `daemon start`, `stop`, `restart`, `reload`, and `logs` administer the current
 `KATA_HOME` and reject `--daemon`. Set the home explicitly for those operations.
