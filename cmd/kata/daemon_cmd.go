@@ -800,7 +800,7 @@ func noteSkippedDaemons(stderr io.Writer, records []kitdaemon.RuntimeRecord) {
 func daemonStopCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop",
-		Short: "request a graceful shutdown of the running daemon",
+		Short: "gracefully stop the running daemon and wait for it to exit",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := requireCurrentHomeDaemonCommand(); err != nil {
 				return err
@@ -814,7 +814,6 @@ func daemonStopCmd() *cobra.Command {
 				return err
 			}
 			noteSkippedDaemons(cmd.ErrOrStderr(), recs)
-			mode := currentOutputMode()
 			pids := make([]int, 0, len(recs))
 			for _, r := range recs {
 				if !daemonruntime.RuntimeProcessAlive(r) {
@@ -823,17 +822,18 @@ func daemonStopCmd() *cobra.Command {
 				// SignalDaemonStop is platform-specific: SIGTERM on Unix,
 				// a named stop event on Windows.
 				if err := daemonruntime.SignalDaemonStop(r, ns.DBHash); err != nil {
-					return &cliError{
-						Kind: kindInternal, ExitCode: ExitInternal,
-						Message: fmt.Sprintf("stop pid %d: %v", r.PID, err),
-					}
+					return &cliError{Kind: kindInternal, ExitCode: ExitInternal, Message: fmt.Sprintf("stop pid %d: %v", r.PID, err)}
 				}
 				pids = append(pids, r.PID)
-				if mode == outputHuman {
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "stopped pid=%d\n", r.PID)
-				}
 			}
-			switch mode {
+			if err := waitForDaemonProcesses(cmd.Context(), pids, daemonRestartProcessWaitTimeout); err != nil {
+				return err
+			}
+			switch currentOutputMode() {
+			case outputHuman:
+				for _, pid := range pids {
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "stopped pid=%d\n", pid)
+				}
 			case outputAgent:
 				switch len(pids) {
 				case 0:
@@ -886,7 +886,7 @@ func daemonRestartCmd() *cobra.Command {
 			defer release()
 			for _, rec := range running {
 				if rec.Metadata[daemonruntime.RuntimeRestartExecutableKey] != "1" {
-					return fmt.Errorf("daemon pid %d does not support automatic restart; run 'kata daemon stop', then 'kata daemon start' with its original startup options", rec.PID)
+					return fmt.Errorf("daemon pid %d does not support automatic restart; run 'kata daemon stop', then 'kata daemon start' in its original host shell or service with its original startup options", rec.PID)
 				}
 			}
 			pids := make([]int, 0, len(running))

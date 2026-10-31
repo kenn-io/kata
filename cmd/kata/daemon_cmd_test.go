@@ -958,27 +958,16 @@ func TestDaemonStart_ReplacesIdleAutostartDaemon(t *testing.T) {
 	resetFlags(t)
 	home := setupKataEnv(t)
 	child := startSleepProcess(t)
-	exited := make(chan struct{})
-	go func() {
-		_ = child.Wait()
-		close(exited)
-	}()
-	t.Cleanup(func() {
-		_ = child.Process.Kill()
-		<-exited
-	})
 	server := writeIdleDaemonHealthServer(t, true)
 	writeRuntimeRecordFor(t, home, strings.TrimPrefix(server.URL, "http://"), child.Process.Pid)
 
 	orig := launchDetachedDaemon
 	t.Cleanup(func() { launchDetachedDaemon = orig })
 	launchDetachedDaemon = func(context.Context, string, string, bool, bool) (daemonStartOutput, error) {
-		select {
-		case <-exited:
-			return daemonStartOutput{Action: "started", PID: 4243, Address: "127.0.0.1:7777"}, nil
-		default:
+		if kitdaemon.ProcessAlive(child.Process.Pid) {
 			return daemonStartOutput{}, errors.New("replacement started before the idle daemon stopped")
 		}
+		return daemonStartOutput{Action: "started", PID: 4243, Address: "127.0.0.1:7777"}, nil
 	}
 
 	out, err := defaultStartDetachedDaemon(context.Background(), "", false, false)
@@ -996,11 +985,6 @@ func TestDaemonStart_ReplacesIdleDaemonDiscoveredAfterCutover(t *testing.T) {
 	resetFlags(t)
 	home := setupKataEnv(t)
 	child := startSleepProcess(t)
-	exited := make(chan struct{})
-	go func() {
-		_ = child.Wait()
-		close(exited)
-	}()
 	server := writeIdleDaemonHealthServer(t, true)
 	address := strings.TrimPrefix(server.URL, "http://")
 	launches := 0
@@ -1012,12 +996,10 @@ func TestDaemonStart_ReplacesIdleDaemonDiscoveredAfterCutover(t *testing.T) {
 			writeRuntimeRecordFor(t, home, address, child.Process.Pid)
 			return daemonStartOutput{Action: "already_running", PID: child.Process.Pid, Address: address}, nil
 		}
-		select {
-		case <-exited:
-			return daemonStartOutput{Action: "started", PID: 4243, Address: address}, nil
-		default:
+		if kitdaemon.ProcessAlive(child.Process.Pid) {
 			return daemonStartOutput{}, errors.New("replacement started before the idle daemon stopped")
 		}
+		return daemonStartOutput{Action: "started", PID: 4243, Address: address}, nil
 	}
 
 	out, err := defaultStartDetachedDaemon(context.Background(), address, false, false)
@@ -2819,10 +2801,10 @@ func startSleepProcess(t *testing.T) *exec.Cmd {
 	stdin, err := cmd.StdinPipe()
 	require.NoError(t, err)
 	require.NoError(t, cmd.Start())
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
 	t.Cleanup(func() {
 		_ = stdin.Close()
-		done := make(chan error, 1)
-		go func() { done <- cmd.Wait() }()
 		select {
 		case <-done:
 		case <-time.After(2 * time.Second):
@@ -2833,11 +2815,18 @@ func startSleepProcess(t *testing.T) *exec.Cmd {
 	return cmd
 }
 
-func TestDaemonCommandSleepHelperProcess(_ *testing.T) {
+func TestDaemonCommandSleepHelperProcess(t *testing.T) {
 	if os.Getenv("KATA_DAEMON_CMD_SLEEP_HELPER") != "1" {
 		return
 	}
-	_, _ = io.Copy(io.Discard, os.Stdin)
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	cleanup := installStopWatcher(ns.DBHash, cancel)
+	go func() { _, _ = io.Copy(io.Discard, os.Stdin); cancel() }()
+	<-ctx.Done()
+	require.True(t, cleanup(t.Context()))
 	os.Exit(0)
 }
 

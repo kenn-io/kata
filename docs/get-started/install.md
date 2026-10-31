@@ -104,7 +104,8 @@ binds a new one.
 If the daemon does not come back, or it does not support automatic restart, the
 command reports that the binary was installed and returns an error. Resolve
 any reported startup problem, then run `kata daemon stop` followed by
-`kata daemon start` with the daemon's original startup options.
+`kata daemon start` with the daemon's original startup options in its original
+host shell or service environment.
 After a package-manager upgrade, `kata daemon restart` uses the executable
 invoked by the CLI while retaining the running daemon's environment. Both
 processes must see the same process IDs and executable paths. Older
