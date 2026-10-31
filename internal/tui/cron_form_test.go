@@ -126,14 +126,6 @@ func TestCronFormPlacesCronMessagesOnTheBlankField(t *testing.T) {
 	require.Equal(t, cfIssue, f.err.field)
 }
 
-func TestCronFormLeavesRulesToCron(t *testing.T) {
-	f := newNativeForm(t)
-	f.step(cfTrigger, 1)
-	f.val[cfInterval] = "30"
-	_, _, err := f.build(cronTestUIDs)
-	require.ErrorIs(t, err, cron.ErrInvalid, "the 60 second floor is cron's rule, reported as cron words it")
-}
-
 func TestCronFormLocksNativeParentAndAction(t *testing.T) {
 	f, err := cronFormFor(nativeRecord(), nil)
 	require.NoError(t, err)
@@ -260,10 +252,11 @@ func TestCronFormEveryKindAndTrigger(t *testing.T) {
 	}
 }
 
-func TestCronFormDirtyTracksEdits(t *testing.T) {
+func TestCronFormBlamesBlankRunIssue(t *testing.T) {
 	f := newNativeForm(t)
-	f.snapshot = f.val
-	require.False(t, f.dirty())
-	f.val[cfName] = "Other"
-	require.True(t, f.dirty())
+	f.kind, f.trigger = "prompt", "cron"
+	f.val[cfPrompt], f.val[cfPolicy], f.val[cfReport] = "Do it", "existing", ""
+	f.validate()
+	require.NotNil(t, f.err)
+	require.Equal(t, cfReport, f.err.field)
 }

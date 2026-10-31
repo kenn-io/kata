@@ -14,7 +14,7 @@ type cronAPI interface {
 	ListCronJobs(context.Context, int64) ([]generated.CronJob, error)
 	ListArchivedCronJobs(context.Context, int64) ([]generated.CronJob, error)
 	ShowCronJob(ctx context.Context, projectID int64, uid string) (CronJobRecord, error)
-	PutCronJob(ctx context.Context, projectID int64, uid string, write CronJobWrite) (CronJobRecord, error)
+	PutCronJob(ctx context.Context, projectID int64, uid string, write CronJobWrite) error
 	ArchiveCronJob(ctx context.Context, projectID int64, uid, expectedEventUID, actor string) error
 	RestoreCronJob(ctx context.Context, projectID int64, uid, expectedEventUID, actor string) error
 	ListCronWorkflows(context.Context, int64) ([]generated.CronWorkflow, error)
@@ -161,30 +161,27 @@ func (c *Client) ShowCronJob(ctx context.Context, projectID int64, uid string) (
 // PutCronJob creates or replaces a job, the same call `kata cron job create`
 // and `update` make. The body reaches the generated type through its own
 // decoder, which keeps option numbers exact.
-func (c *Client) PutCronJob(ctx context.Context, projectID int64, uid string, write CronJobWrite) (CronJobRecord, error) {
+func (c *Client) PutCronJob(ctx context.Context, projectID int64, uid string, write CronJobWrite) error {
 	client, err := c.generatedClient()
 	if err != nil {
-		return CronJobRecord{}, err
+		return err
 	}
 	raw, err := json.Marshal(write)
 	if err != nil {
-		return CronJobRecord{}, err
+		return err
 	}
 	var body generated.PutCronJobBody
 	if err := json.Unmarshal(raw, &body); err != nil {
-		return CronJobRecord{}, err
+		return err
 	}
 	wire, callErr := client.ReplaceCronJobWithResponse(ctx, &generated.ReplaceCronJobRequestOptions{
 		PathParams: &generated.ReplaceCronJobPath{ProjectID: projectID, CronUID: uid},
 		Body:       &body,
 	})
 	if wire == nil {
-		return CronJobRecord{}, callErr
+		return callErr
 	}
-	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil); err != nil {
-		return CronJobRecord{}, err
-	}
-	return decodeCronJobRecord(wire.Body)
+	return decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil)
 }
 
 // ArchiveCronJob deletes a job definition; RestoreCronJob brings it back.

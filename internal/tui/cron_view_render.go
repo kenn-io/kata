@@ -380,6 +380,9 @@ func cronKeyRows(m Model) []helplayout.HelpItem {
 			helplayout.HelpItem{Key: "n/e", Description: "new/edit"},
 			helplayout.HelpItem{Key: "p", Description: "pause"},
 			helplayout.HelpItem{Key: "d/u", Description: "archive/restore"})
+		if len(m.cron.stack) == 0 {
+			rows = slices.Insert(rows, 6, helplayout.HelpItem{Key: "a", Description: "archived"})
+		}
 	}
 	return rows
 }
@@ -512,13 +515,6 @@ func cronHelp(m Model) string {
 		"",
 	}
 	sections := []helpSection{{title: "Cron keys", rows: cronKeyRows(m)}}
-	if m.cronJobsScope() {
-		sections = append(sections, helpSection{title: "Job keys", rows: []helplayout.HelpItem{
-			{Key: "n", Description: "new job"}, {Key: "e", Description: "edit the job"},
-			{Key: "p", Description: "pause or resume"}, {Key: "d", Description: "archive (asks first)"},
-			{Key: "u", Description: "restore an archived job"}, {Key: "a", Description: "show archived jobs"},
-		}})
-	}
 	body = append(body, renderHelpGroup(sections))
 	return strings.Join(body, "\n")
 }

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"encoding/json/jsontext"
 	"fmt"
 	"slices"
@@ -240,7 +241,6 @@ var cronNotifyKind = cronJobKind{
 	},
 	load: func(f *cronForm, def cron.JobDefinition) {
 		f.loadNotification(def)
-		f.loadCommon(def)
 		switch {
 		case def.Issue != nil && cronIsDate(def.Trigger.Kind):
 			f.val[cfReport] = def.Issue.UID
@@ -267,9 +267,9 @@ var cronNotifyKind = cronJobKind{
 
 var cronCronTrigger = cronJobTrigger{
 	id: "cron", label: "cron expression", fields: []cronField{cfCron, cfZone},
-	load: func(f *cronForm, t cron.Trigger) { f.val[cfCron], f.val[cfZone] = t.Cron, cmpOr(t.Timezone, "UTC") },
+	load: func(f *cronForm, t cron.Trigger) { f.val[cfCron], f.val[cfZone] = t.Cron, cmp.Or(t.Timezone, "UTC") },
 	build: func(f *cronForm) (cron.Trigger, error) {
-		return cron.Trigger{Kind: "cron", Cron: strings.TrimSpace(f.val[cfCron]), Timezone: cmpOr(strings.TrimSpace(f.val[cfZone]), "UTC")}, nil
+		return cron.Trigger{Kind: "cron", Cron: strings.TrimSpace(f.val[cfCron]), Timezone: cmp.Or(strings.TrimSpace(f.val[cfZone]), "UTC")}, nil
 	},
 }
 
@@ -362,13 +362,6 @@ func cronFormatSecrets(refs map[string]string) string {
 	return strings.Join(pairs, ", ")
 }
 
-func cmpOr(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
-}
-
 // cronForm is the create and edit draft. Text fields hold what was typed; the
 // definition is built from them only when validating or saving.
 type cronForm struct {
@@ -419,9 +412,8 @@ func newCronForm(workflows []cronChoice) (*cronForm, error) {
 		return nil, err
 	}
 	f := &cronForm{uid: minted, create: true, kind: cronRecurringID, trigger: "cron", workflows: workflows}
-	f.val[cfEnabled], f.val[cfCron], f.val[cfZone], f.val[cfInterval] = "yes", "0 9 * * *", "UTC", "3600"
-	f.val[cfPolicy], f.val[cfOverlap], f.val[cfCatchup] = "per-run", "forbid", "latest"
-	f.val[cfWorkflow] = ""
+	f.defaults()
+	f.val[cfEnabled] = "yes"
 	f.finish()
 	return f, nil
 }
@@ -440,8 +432,8 @@ func cronFormFor(rec CronJobRecord, workflows []cronChoice) (*cronForm, error) {
 func (f *cronForm) load(rec CronJobRecord) error {
 	def := rec.Definition
 	f.val = [cfCount]string{}
-	f.val[cfEnabled], f.val[cfZone], f.val[cfInterval], f.val[cfCron] = cronYesNoValue(def.Enabled), "UTC", "3600", "0 9 * * *"
-	f.val[cfPolicy], f.val[cfOverlap], f.val[cfCatchup] = "per-run", "forbid", "latest"
+	f.defaults()
+	f.val[cfEnabled] = cronYesNoValue(def.Enabled)
 	f.val[cfName] = rec.Name
 	for _, k := range cronJobKinds {
 		if k.owns(def) {
@@ -471,9 +463,15 @@ func cronYesNoValue(enabled bool) string {
 	return "no"
 }
 
+// defaults are what a field holds until a job or the user says otherwise.
+func (f *cronForm) defaults() {
+	f.val[cfCron], f.val[cfZone], f.val[cfInterval] = "0 9 * * *", "UTC", "3600"
+	f.val[cfPolicy], f.val[cfOverlap], f.val[cfCatchup] = "per-run", "forbid", "latest"
+}
+
 func (f *cronForm) loadCommon(def cron.JobDefinition) {
-	f.val[cfOverlap] = cmpOr(def.Overlap, "forbid")
-	f.val[cfCatchup] = cmpOr(def.Catchup, "latest")
+	f.val[cfOverlap] = cmp.Or(def.Overlap, "forbid")
+	f.val[cfCatchup] = cmp.Or(def.Catchup, "latest")
 	if def.GraceSeconds > 0 {
 		f.val[cfGrace] = strconv.FormatInt(def.GraceSeconds, 10)
 	}
@@ -507,12 +505,6 @@ func (f *cronForm) base() cron.JobDefinition {
 		def = f.opened
 	}
 	def.Enabled, def.Issue = f.val[cfEnabled] == "yes", nil
-	def.CheckoutKey, def.SecretRefs, def.TimeoutSeconds, def.GraceSeconds, def.Options = "", nil, 0, 0, nil
-	if f.kind == f.openedKind && !f.create {
-		// Fields hidden by this kind or trigger keep their stored values.
-		def.CheckoutKey, def.SecretRefs, def.TimeoutSeconds = f.opened.CheckoutKey, f.opened.SecretRefs, f.opened.TimeoutSeconds
-		def.GraceSeconds, def.Options = f.opened.GraceSeconds, f.opened.Options
-	}
 	return def
 }
 
@@ -549,7 +541,7 @@ func (f *cronForm) catchupShown() bool {
 }
 
 func (f *cronForm) applyCatchup(def *cron.JobDefinition) error {
-	def.Catchup = cmpOr(f.val[cfCatchup], "latest")
+	def.Catchup = cmp.Or(f.val[cfCatchup], "latest")
 	if !f.catchupShown() || def.Catchup != "skip" {
 		return nil
 	}
@@ -784,7 +776,7 @@ var cronErrorWords = []struct {
 	{"issue date", cfIssue}, {"checkout", cfCheckout}, {"secret", cfSecrets}, {"options", cfOptions},
 	{"recipient", cfRecipient}, {"message", cfMessage}, {"title", cfTitle}, {"parent", cfParent},
 	{"grace", cfGrace}, {"timeout", cfTimeout}, {"offset", cfScheduled}, {"workflow", cfWorkflow},
-	{"prompt", cfPrompt}, {"per-run", cfTitle}, {"issue target", cfIssue}, {"existing issue", cfIssue},
+	{"prompt", cfPrompt}, {"per-run", cfTitle}, {"issue target", cfIssue}, {"existing issue", cfReport}, {"existing issue", cfIssue},
 }
 
 // attribute places a message on the shown field its words name. When one

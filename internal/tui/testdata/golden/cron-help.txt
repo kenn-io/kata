@@ -14,16 +14,9 @@ j/k    move
 n/e    new/edit
 p      pause
 d/u    archive/restore
+a      archived
 h/esc  kata
 r      refresh
 1-4    tabs
 ?      help
 q      quit
-
-Job keys
-n  new job
-e  edit the job
-p  pause or resume
-d  archive (asks first)
-u  restore an archived job
-a  show archived jobs

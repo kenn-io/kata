@@ -180,7 +180,7 @@ func (m Model) cronTogglePause(job generated.CronJob) tea.Cmd {
 			return done("", errors.New("the job changed since it was loaded; refreshed, try again"))
 		}
 		rec.Definition.Enabled = !rec.Definition.Enabled
-		_, err = api.PutCronJob(ctx, pid, job.UID, CronJobWrite{Name: rec.Name, Definition: rec.Definition, ExpectedEventUID: rec.DefinitionEventUID, Actor: actor})
+		err = api.PutCronJob(ctx, pid, job.UID, CronJobWrite{Name: rec.Name, Definition: rec.Definition, ExpectedEventUID: rec.DefinitionEventUID, Actor: actor})
 		notice := "Paused " + rec.Name
 		if rec.Definition.Enabled {
 			notice = "Resumed " + rec.Name
@@ -218,7 +218,8 @@ func (m Model) cronSaveCmd(f cronForm) tea.Cmd {
 			detail, err := api.GetIssueDetail(ctx, pid, r.ref)
 			if err != nil || detail == nil || detail.Issue == nil || detail.Issue.UID == "" {
 				text := fmt.Sprintf("no issue %q in this project", r.ref)
-				if err != nil && !isNotFound(err) {
+				var apiErr *APIError
+				if err != nil && (!errors.As(err, &apiErr) || apiErr == nil || apiErr.Status != http.StatusNotFound) {
 					text = cronWriteMessage(err)
 				}
 				return cronSavedMsg{conn: conn, scope: scope, fieldErr: &cronFieldError{r.field, text}, fromForm: true}
@@ -237,7 +238,7 @@ func (m Model) cronSaveCmd(f cronForm) tea.Cmd {
 		if !f.create {
 			write.ExpectedEventUID, notice = f.expected, "Saved "+name
 		}
-		if _, err := api.PutCronJob(ctx, pid, f.uid, write); err != nil {
+		if err := api.PutCronJob(ctx, pid, f.uid, write); err != nil {
 			var apiErr *APIError
 			if !f.create && errors.As(err, &apiErr) && apiErr != nil && apiErr.Status == http.StatusConflict {
 				if current, readErr := api.ShowCronJob(ctx, pid, f.uid); readErr == nil {
@@ -248,11 +249,6 @@ func (m Model) cronSaveCmd(f cronForm) tea.Cmd {
 		}
 		return cronSavedMsg{conn: conn, scope: scope, notice: notice, fromForm: true}
 	}
-}
-
-func isNotFound(err error) bool {
-	var apiErr *APIError
-	return errors.As(err, &apiErr) && apiErr != nil && apiErr.Status == http.StatusNotFound
 }
 
 // cronWriteMessage words a failed cron request. A rejected token and a token
@@ -393,13 +389,6 @@ func (m Model) routeCronConflictKey(key string) (Model, tea.Cmd) {
 		}
 		next.saving = true
 		return m, m.cronSaveCmd(*next)
-	case "t":
-		next, err := cronFormFor(current, f.workflows)
-		if err != nil {
-			f.general = err.Error()
-			return m, nil
-		}
-		m.cron.form = next
 	case "esc":
 		f.conflict = nil
 	}
@@ -409,7 +398,7 @@ func (m Model) routeCronConflictKey(key string) (Model, tea.Cmd) {
 func cronFormHelpRows(f *cronForm) []helplayout.HelpItem {
 	switch {
 	case f.conflict != nil:
-		rows := []helplayout.HelpItem{{Key: "t", Description: "take the current job"}, {Key: "esc", Description: "back to my draft"}}
+		rows := []helplayout.HelpItem{{Key: "esc", Description: "back to my draft"}}
 		if !f.conflict.Archived {
 			rows = slices.Insert(rows, 0, helplayout.HelpItem{Key: "a", Description: "apply my draft to it"})
 		}

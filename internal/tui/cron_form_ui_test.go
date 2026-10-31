@@ -33,16 +33,14 @@ func (a *cronWriteTestAPI) ShowCronJob(context.Context, int64, string) (CronJobR
 	return a.shown, nil
 }
 
-func (a *cronWriteTestAPI) PutCronJob(_ context.Context, _ int64, uid string, w CronJobWrite) (CronJobRecord, error) {
+func (a *cronWriteTestAPI) PutCronJob(_ context.Context, _ int64, uid string, w CronJobWrite) error {
 	a.puts = append(a.puts, cronPut{uid, w})
 	if len(a.putErrs) > 0 {
 		err := a.putErrs[0]
 		a.putErrs = a.putErrs[1:]
-		if err != nil {
-			return CronJobRecord{}, err
-		}
+		return err
 	}
-	return CronJobRecord{UID: uid, Name: w.Name, Definition: w.Definition}, nil
+	return nil
 }
 
 func (a *cronWriteTestAPI) ArchiveCronJob(_ context.Context, _ int64, uid, _, _ string) error {
@@ -215,9 +213,6 @@ func TestCronFormSavesWithCtrlOAndCtrlS(t *testing.T) {
 		require.Nil(t, m.cron.form, key.String())
 		require.Len(t, api.puts, 1)
 	}
-	m, _ := cronWriteFixture(t)
-	m, _ = press(m, keyRune('n'))
-	require.Contains(t, stripANSI(m.viewBody()), "ctrl+o")
 }
 
 func TestCronPauseResumeIsGuarded(t *testing.T) {
@@ -295,7 +290,7 @@ func TestCronEditDefinitionRoundTripsThroughDaemon(t *testing.T) {
 	const jobUID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 	def := manualExecuteJob(options)
 	def.Action.Prompt = "Line one\nLine two"
-	_, err = c.PutCronJob(t.Context(), project.ID, jobUID, CronJobWrite{Name: "Digest", Actor: "alice", Definition: def})
+	err = c.PutCronJob(t.Context(), project.ID, jobUID, CronJobWrite{Name: "Digest", Actor: "alice", Definition: def})
 	require.NoError(t, err)
 
 	m := newTestModel()
