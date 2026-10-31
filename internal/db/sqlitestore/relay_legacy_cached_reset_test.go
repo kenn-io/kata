@@ -19,3 +19,13 @@ func TestRelayLegacyCachedResetPrivacy(t *testing.T) {
 		return err
 	})
 }
+
+func TestRelayCachedResetLiveBoundary(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "legacy.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	dbtest.RunRelayCachedResetLiveBoundary(t, store, func(ctx context.Context, key, value string) error {
+		_, err := store.ExecContext(ctx, `UPDATE meta SET value=? WHERE key=?`, value, key)
+		return err
+	})
+}

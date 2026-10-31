@@ -2214,7 +2214,8 @@ resolve the [normal reset blockers](#reset-recovery) before retrying recovery.
 Retrying against an unfixed root can quarantine the same batch again.
 
 A still-live cross-project link remains unsupported. The root refuses to sign
-that current state, preserving the owner's link and retained events. Resolve
+that current state or serve an older retained checkpoint while that boundary
+exists, preserving the owner's link and retained events. Resolve
 the live boundary explicitly before retrying recovery; a reset neither strips
 that link silently nor shares its private endpoint.
 

@@ -242,6 +242,12 @@ func (d *Store) relayCheckpointNeedsRefreshTx(ctx context.Context, tx *sql.Tx, p
 		if err := tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE uid=?`, projectUID).Scan(&projectID); err != nil {
 			return false, err
 		}
+		// Older builders could sign current state with a live private link.
+		// A retained checkpoint must satisfy the admission boundary too,
+		// even when no history arrived after its signed cursor.
+		if err := rejectRelayProjectLinksTx(ctx, tx, projectID); err != nil {
+			return false, err
+		}
 		return d.relayHistoryNeedsResetCachedTx(ctx, tx, projectID, projectUID, &checkpoint)
 	}
 	var raw string
