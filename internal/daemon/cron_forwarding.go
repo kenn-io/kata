@@ -116,13 +116,13 @@ func forwardCronJob(ctx context.Context, cfg ServerConfig, projectID int64, uid,
 	}
 	var body any
 	if put != nil {
-		copy := *put
-		copy.Actor = cred.Actor
-		body = copy
+		forwarded := *put
+		forwarded.Actor = cred.Actor
+		body = forwarded
 	} else {
-		copy := *action
-		copy.Actor = cred.Actor
-		body = copy
+		forwarded := *action
+		forwarded.Actor = cred.Actor
+		body = forwarded
 	}
 	path += "/cron/jobs"
 	if uid != "" {
