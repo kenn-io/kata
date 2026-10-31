@@ -51,6 +51,9 @@ type Issue struct {
 	Revision            int64         `json:"revision"`
 	RecurrenceID        *int64        `json:"recurrence_id,omitempty"`
 	Metadata            issueMetadata `json:"metadata,omitzero"`
+	// Resolved YYYY-MM-DD planning dates from the daemon.
+	ScheduledOnDate string `json:"scheduled_on_date,omitempty"`
+	DeadlineOnDate  string `json:"deadline_on_date,omitempty"`
 }
 
 // issueMetadata keeps the two planning-date keys of an issue's metadata as
@@ -110,8 +113,10 @@ type IssueRef struct {
 // daemon work and is deferred to a future task.
 type ListFilter struct {
 	Status, Owner, Author, Search string
-	Labels                        []string
-	Limit                         int
+	// Date is "" (off), dateToday, or dateScheduled; see matchesDate.
+	Date   string
+	Labels []string
+	Limit  int
 }
 
 // CreateInitialLinkBody requests a link created atomically with a new

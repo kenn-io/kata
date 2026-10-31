@@ -28,6 +28,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
   an edit. If a revision changes while you edit, the form keeps your draft.
   Inspect a supported current definition, then save your whole
   draft against its revision. See [the `kata tui` keys](reference/cli.md#daemon-and-diagnostics).
+- Find what is due or planned in `kata tui` with the new **Date** choice in the
+  filter form (`f`). **today** lists open issues with a scheduled or deadline
+  date today or earlier in your local time zone; **scheduled** lists those with
+  a later date. It combines with status, owner, labels, and search, and rows now
+  show their dates. Daemon API `0.36.0` or newer is required.
 - Show what is stuck in any web collection, Inbox and Today included, with the
   optional **Blocked by** column. It lists each task's open blockers, three IDs
   at most and then `+N`; closed blockers are left out. It is off by default;

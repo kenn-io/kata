@@ -1934,6 +1934,19 @@ project is designated, the TUI shows a notice. [Choose the Inbox project](metada
 in the web UI or through the project metadata API. This view is separate from
 `kata inbox`, which lists attention requests sent to an actor.
 
+Press `f` in the issue list to open the filter form. Its **Date** choice,
+the last field, narrows the list by each row's resolved dates. **today** keeps
+open issues whose `scheduled_on_date` or `deadline_on_date` is today or earlier.
+**scheduled** keeps open issues with either date after today. Today is the
+calendar day in your local time zone. The choice combines with status, owner,
+labels, and search, and shows as a `date:` chip. Choose All projects in the
+projects view (`P`) to see every project's issues together. Rows show their dates as
+`s:MM-DD` and `d:MM-DD`, with the year added for other years; the dates are
+left off where the title column is too narrow. An issue missing a date never
+matches on it, and daemons older than API `0.36.0` send no dates, so neither
+choice lists anything from them. See
+[Calendar dates on issue rows](metadata.md#calendar-dates-on-issue-rows).
+
 Press `T` to open Attention: the requests `kata notify` addressed to you, read
 from open issues in the current project or across all projects when the TUI is
 in that scope. The recipient is `KATA_INBOX_USER`, else the daemon's authenticated

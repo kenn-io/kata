@@ -1979,6 +1979,10 @@ func (m Model) commitFilterForm(form inputState) (Model, tea.Cmd) {
 		Owner:  strings.TrimSpace(form.fieldValue(fieldOwner)),
 		Search: strings.TrimSpace(form.fieldValue(fieldSearch)),
 		Labels: normalizeLabels(form.fieldValue(fieldLabels)),
+		Date:   form.fieldValue(fieldDate),
+	}
+	if m.list.filter.Date == "any" {
+		m.list.filter.Date = ""
 	}
 	// "all" is the surface label for "no Status filter"; the wire
 	// expects an empty string.
