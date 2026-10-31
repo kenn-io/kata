@@ -4,13 +4,22 @@ import (
 	"context"
 	"database/sql"
 	"sync"
+
+	"go.kenn.io/kata/internal/db"
 )
 
+type relayHistoryValidationKey struct {
+	projectID  int64
+	bindingUID string
+}
+
 type relayHistoryValidationEntry struct {
-	projectUID string
-	generation uint64
-	cursor     int64
-	reset      bool
+	projectUID     string
+	generation     uint64
+	after          int64
+	snapshotDigest string
+	cursor         int64
+	reset          bool
 }
 
 type relayHistoryValidationCache struct {
@@ -20,11 +29,11 @@ type relayHistoryValidationCache struct {
 	eventCursor        int64
 	purgeCursor        int64
 	projectPurgeCursor int64
-	entries            map[int64]relayHistoryValidationEntry
+	entries            map[relayHistoryValidationKey]relayHistoryValidationEntry
 }
 
 func newRelayHistoryValidationCache() *relayHistoryValidationCache {
-	return &relayHistoryValidationCache{entries: make(map[int64]relayHistoryValidationEntry)}
+	return &relayHistoryValidationCache{entries: make(map[relayHistoryValidationKey]relayHistoryValidationEntry)}
 }
 
 func (cache *relayHistoryValidationCache) invalidate() {
@@ -40,14 +49,29 @@ func (d *Store) invalidateRelayHistoryValidationCache() {
 }
 
 // relayHistoryNeedsResetCachedTx validates unchanged history once, then checks
-// only new source events. Issue identity changes and purges invalidate cached
+// only new source events. Retained checkpoints have independent grant/boundary
+// entries. Issue identity changes and purges invalidate cached
 // results because they can change how retained event references resolve.
 func (d *Store) relayHistoryNeedsResetCachedTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	projectID int64,
 	projectUID string,
+	checkpoint *db.RelayResetCheckpoint,
 ) (bool, error) {
+	key := relayHistoryValidationKey{projectID: projectID}
+	var after int64
+	var snapshotDigest string
+	validateAfter := relayHistoryHasBoundaryAfterTx
+	if checkpoint != nil {
+		// A root checkpoint already introduces existing issues, even when
+		// their raw history was compacted. Validate its retained records and
+		// later privacy crossings; the caller checks root purge boundaries.
+		validateAfter = relayHistoryCrossesProjectAfterTx
+		key.bindingUID = checkpoint.Translation.Authority.BindingUID
+		after = checkpoint.Manifest.HistoryEventID
+		snapshotDigest = checkpoint.Manifest.SnapshotDigest
+	}
 	cache := d.relayHistoryCache
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
@@ -86,32 +110,45 @@ func (d *Store) relayHistoryNeedsResetCachedTx(
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM events WHERE project_id=?`, projectID).Scan(&projectCursor); err != nil {
 		return false, err
 	}
-	entry, cached := cache.entries[projectID]
-	if !cached || entry.projectUID != projectUID || entry.generation != cache.generation || projectCursor < entry.cursor {
+	entry, cached := cache.entries[key]
+	if !cached || entry.projectUID != projectUID || entry.after != after || entry.snapshotDigest != snapshotDigest || entry.generation != cache.generation || projectCursor < entry.cursor {
 		if d.relayHistoryFullScanObserver != nil {
 			d.relayHistoryFullScanObserver()
 		}
-		reset, err := relayHistoryNeedsResetTx(ctx, tx, projectID, projectUID)
+		var reset bool
+		var err error
+		if checkpoint == nil {
+			reset, err = relayHistoryNeedsResetTx(ctx, tx, projectID, projectUID)
+		} else {
+			reset, err = db.RelayCheckpointCrossesProject(checkpoint.Snapshot, func(source db.RemoteEvent) (bool, error) {
+				return relayEventCrossesProjectTx(ctx, tx, projectID, source)
+			})
+			if err == nil && !reset {
+				reset, err = validateAfter(ctx, tx, projectID, after)
+			}
+		}
 		if err != nil {
 			return false, err
 		}
-		cache.entries[projectID] = relayHistoryValidationEntry{
-			projectUID: projectUID,
-			generation: cache.generation,
-			cursor:     projectCursor,
-			reset:      reset,
+		cache.entries[key] = relayHistoryValidationEntry{
+			projectUID:     projectUID,
+			generation:     cache.generation,
+			after:          after,
+			snapshotDigest: snapshotDigest,
+			cursor:         projectCursor,
+			reset:          reset,
 		}
 		return reset, nil
 	}
 	if projectCursor == entry.cursor {
 		return entry.reset, nil
 	}
-	reset, err := relayHistoryHasBoundaryAfterTx(ctx, tx, projectID, entry.cursor)
+	reset, err := validateAfter(ctx, tx, projectID, entry.cursor)
 	if err != nil {
 		return false, err
 	}
 	entry.cursor = projectCursor
 	entry.reset = entry.reset || reset
-	cache.entries[projectID] = entry
+	cache.entries[key] = entry
 	return entry.reset, nil
 }

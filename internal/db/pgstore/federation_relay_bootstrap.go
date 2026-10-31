@@ -199,7 +199,7 @@ func (d *Store) RelayEnrollmentNeedsReset(ctx context.Context, bindingUID string
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		required, err = d.relayHistoryNeedsResetCachedTx(ctx, tx, *grant.ProjectID, projectUID)
+		required, err = d.relayHistoryNeedsResetCachedTx(ctx, tx, *grant.ProjectID, projectUID, nil)
 		return err
 	})
 	return required, err
@@ -218,8 +218,8 @@ func relayHistoryNeedsResetTx(ctx context.Context, tx *sql.Tx, projectID int64, 
 	return relayHistoryHasBoundaryTx(ctx, tx, projectID)
 }
 
-// Retained checkpoints are exact retry identities until a later root purge or
-// an installed upstream checkpoint makes their snapshot obsolete.
+// Retained checkpoints are exact retry identities until a later root purge,
+// history boundary or installed upstream checkpoint makes them obsolete.
 func (d *Store) relayCheckpointNeedsRefreshTx(ctx context.Context, tx *sql.Tx, projectUID string, checkpoint db.RelayResetCheckpoint) (bool, error) {
 	pin, err := rootPinTx(ctx, tx, projectUID, "")
 	if err != nil {
@@ -235,7 +235,20 @@ func (d *Store) relayCheckpointNeedsRefreshTx(ctx context.Context, tx *sql.Tx, p
 		err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(cursor),0) FROM (
    SELECT MAX(purge_reset_after_event_id) AS cursor FROM purge_log WHERE project_uid=$1
    UNION ALL SELECT MAX(purge_reset_after_event_id) AS cursor FROM project_purge_log WHERE project_uid=$1) AS boundaries`, projectUID).Scan(&latest)
-		return latest > checkpoint.Manifest.HistoryEventID, err
+		if err != nil || latest > checkpoint.Manifest.HistoryEventID {
+			return latest > checkpoint.Manifest.HistoryEventID, err
+		}
+		var projectID int64
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE uid=$1`, projectUID).Scan(&projectID); err != nil {
+			return false, err
+		}
+		// Older builders could sign current state with a live private link.
+		// A retained checkpoint must satisfy the admission boundary too,
+		// even when no history arrived after its signed cursor.
+		if err := rejectRelayProjectLinksTx(ctx, tx, projectID); err != nil {
+			return false, err
+		}
+		return d.relayHistoryNeedsResetCachedTx(ctx, tx, projectID, projectUID, &checkpoint)
 	}
 	var raw string
 	if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=$1`, db.RelayResetMetadataPrefix+projectUID).Scan(&raw); err != nil {

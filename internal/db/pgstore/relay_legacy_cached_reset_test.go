@@ -22,3 +22,15 @@ func TestRelayLegacyCachedResetPrivacy(t *testing.T) {
 		return err
 	})
 }
+
+func TestRelayCachedResetLiveBoundary(t *testing.T) {
+	dsn, cleanup := pgstoretest.NewDatabase(t, t.Context())
+	t.Cleanup(cleanup)
+	store, err := pgstore.Open(t.Context(), dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	dbtest.RunRelayCachedResetLiveBoundary(t, store, func(ctx context.Context, key, value string) error {
+		_, err := store.ExecContext(ctx, `UPDATE meta SET value=$1 WHERE key=$2`, value, key)
+		return err
+	})
+}

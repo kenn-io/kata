@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"time"
 
@@ -84,16 +85,19 @@ type RelayCheckpointIssue struct {
 func (r *RelayCheckpointRecords) AppendEvents(events []Event, boundaryID int64, crosses func(RemoteEvent) (bool, error)) error {
 	for _, event := range events {
 		remote := RemoteEventFromStored(event)
-		if event.ID < boundaryID {
-			crossing, err := crosses(remote)
-			if err != nil {
-				return err
+		crossing, err := crosses(remote)
+		if err != nil {
+			return err
+		}
+		if crossing {
+			if event.ID >= boundaryID {
+				// Current state must satisfy the same boundary as admission.
+				// Refuse rather than disclose or silently strip a live link.
+				return errors.Join(ErrFederatedReadOnly, ErrFederationCrossProjectBoundary)
 			}
-			if crossing {
-				// Keep original bytes owner-local; never rewrite a source hash
-				// to remove a private historical endpoint from this checkpoint.
-				continue
-			}
+			// Keep original bytes owner-local; never rewrite a source hash
+			// to remove a private historical endpoint from this checkpoint.
+			continue
 		}
 		raw, err := EncodeRelaySourceEvent(remote)
 		if err != nil {
@@ -106,6 +110,31 @@ func (r *RelayCheckpointRecords) AppendEvents(events []Event, boundaryID int64, 
 		}
 	}
 	return nil
+}
+
+// RelayCheckpointCrossesProject checks retained source and current-state records
+// from older builders. A live link may have been removed through another
+// project, leaving this checkpoint's history cursor unchanged and its original
+// private bytes unsafe to disclose. Callers cache this result by snapshot digest
+// and invalidate it when issue identities or purge boundaries change.
+func RelayCheckpointCrossesProject(snapshot RootResetSnapshot, crosses func(RemoteEvent) (bool, error)) (bool, error) {
+	for _, section := range [][]byte{snapshot.Events, snapshot.Entities} {
+		var records [][]byte
+		if err := json.Unmarshal(section, &records); err != nil {
+			return false, err
+		}
+		for _, body := range records {
+			source, err := DecodeRelaySourceEvent(body)
+			if err != nil {
+				return false, err
+			}
+			crossing, err := crosses(source)
+			if err != nil || crossing {
+				return crossing, err
+			}
+		}
+	}
+	return false, nil
 }
 
 // Snapshot serializes the records into the committed snapshot sections. Empty
