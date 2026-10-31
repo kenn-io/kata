@@ -177,7 +177,10 @@ jobs:
         run: kit-retry 3 5 make web-install
 
       - name: Check Huma API conventions
-        run: go run go.kenn.io/kit/cmd/huma-check@b1f14b1ca30b680f023dff9467bde0eb70768c68 ./...
+        run: |
+          huma=go.kenn.io/kit/cmd/huma-check@b1f14b1ca30b680f023dff9467bde0eb70768c68
+          kit-retry 3 5 go run -n "$huma"
+          go run "$huma" ./...
 
       - name: Run tests
         env:
@@ -473,6 +476,14 @@ jobs:
         with:
           cache: true
           install: true
+
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+
+      - name: Fetch Go checkers
+        run: GOFLAGS="${GOFLAGS:+$GOFLAGS }-n" kit-retry 3 5 make lint-workflow-retries
+
+      - name: Build custom Go linter
+        run: kit-retry 3 5 make "$PWD/.cache/golangci-lint/custom-gcl"
 
       - name: Run golangci-lint
         run: make lint
