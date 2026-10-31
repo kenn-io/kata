@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -175,6 +176,9 @@ func waitForDaemonReplacement(
 		}
 		if err := restartReplyError(reply, previous.PID, nil); err != nil {
 			return kitdaemon.RuntimeRecord{}, err
+		}
+		if runtime.GOOS != "windows" && !daemonruntime.RuntimeProcessAlive(previous) {
+			return kitdaemon.RuntimeRecord{}, fmt.Errorf("daemon pid %d exited without starting a replacement; check the daemon log", previous.PID)
 		}
 		if time.Now().After(deadline) {
 			return kitdaemon.RuntimeRecord{}, fmt.Errorf("daemon pid %d did not restart within %s", previous.PID, daemonRestartProcessWaitTimeout)

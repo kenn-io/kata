@@ -454,7 +454,22 @@ func TestWaitForDaemonReplacement(t *testing.T) {
 		_, err = waitForDaemonReplacement(t.Context(), store, previous, reply)
 		require.ErrorContains(t, err, "this restart was not applied")
 	})
+	t.Run("Unix replacement exits before readiness", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Unix replacement retains the previous PID")
+		}
+		store := kitdaemon.RuntimeStore{Dir: t.TempDir()}
+		synctest.Test(t, func(t *testing.T) {
+			started := time.Now()
+			_, err := waitForDaemonReplacement(t.Context(), store, kitdaemon.RuntimeRecord{PID: 1 << 30, StartedAt: started}, "")
+			assert.ErrorContains(t, err, "exited without starting a replacement")
+			assert.Less(t, time.Since(started), time.Second)
+		})
+	})
 	t.Run("late readiness after previous exits", func(t *testing.T) {
+		if runtime.GOOS != "windows" {
+			t.Skip("Windows replacement starts a new PID")
+		}
 		store := kitdaemon.RuntimeStore{Dir: t.TempDir()}
 		reply := filepath.Join(store.Dir, "restart-reply-caller")
 		require.NoError(t, os.WriteFile(reply, nil, 0600))

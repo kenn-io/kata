@@ -254,11 +254,9 @@ func requestDaemonRestartOnce(ctx context.Context, ns *daemonruntime.Namespace, 
 		if err := atomicfile.WriteFile(restartRequestPath(ns.DataDir, previous), payload, atomicfile.WithPrivate()); err != nil {
 			return kitdaemon.RuntimeRecord{}, err
 		}
+		defer func() { _ = os.Remove(restartRequestPath(ns.DataDir, previous)) }()
 	}
 	if err := daemonruntime.SignalDaemonRestart(previous, ns.DBHash); err != nil {
-		if reply != "" {
-			_ = os.Remove(restartRequestPath(ns.DataDir, previous))
-		}
 		return kitdaemon.RuntimeRecord{}, fmt.Errorf("signal daemon pid %d: %w", previous.PID, err)
 	}
 	return waitForDaemonReplacement(ctx, kitdaemon.RuntimeStore{Dir: ns.DataDir}, previous, reply)
