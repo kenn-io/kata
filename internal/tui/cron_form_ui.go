@@ -271,10 +271,14 @@ func (m Model) routeCronFormKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		if key == "shift+tab" {
 			delta = -1
 		}
-		for next.activeField().locked {
+		order := f.order()
+		if len(order) == 0 {
+			return m, nil
+		}
+		for f.locked(order[next.active]) {
 			next = next.advanceField(delta)
 		}
-		f.focusField(f.order()[next.active])
+		f.focusField(order[next.active])
 		return m, nil
 	}
 	switch key {
@@ -408,7 +412,7 @@ func cronFormLines(m Model, f *cronForm) (lines []string, cursor int) {
 		switch {
 		case f.isChoice(field):
 			value = "‹ " + f.display(field) + " ›"
-		case field == f.focus && !f.locked(field) && !f.externalText(field):
+		case field == f.focus && !f.locked(field) && !f.externalText(field) && f.ed.activeField() != nil:
 			ed := f.ed.activeField()
 			width := max(m.width-labelWidth-5, 1)
 			ed.input.SetWidth(max(width-1, 1))

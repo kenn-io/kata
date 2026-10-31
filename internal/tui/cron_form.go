@@ -710,10 +710,13 @@ func (f *cronForm) order() []cronField {
 
 func (f *cronForm) move(delta int) {
 	order := f.order()
+	if len(order) == 0 {
+		return
+	}
 	nav := f.navigation()
 	for range len(order) {
 		nav = nav.advanceField(delta)
-		if !nav.activeField().locked {
+		if !f.locked(order[nav.active]) {
 			break
 		}
 	}
