@@ -174,7 +174,7 @@ func TestEnsureRunningRestartsWhenDaemonVersionDiffers(t *testing.T) {
 	assert.Equal(t, 1, restore.stopCalls)
 	assert.Equal(t, 1, restore.startCalls)
 
-	t.Run("restart_owns_start_lock", func(t *testing.T) {
+	t.Run("discovery waits for start lock before stopping daemon", func(t *testing.T) {
 		ns, err := daemonruntime.NewNamespace()
 		require.NoError(t, err)
 		release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireStartLock(t.Context())

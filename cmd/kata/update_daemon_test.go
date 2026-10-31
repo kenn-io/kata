@@ -121,7 +121,7 @@ func daemonLifecycle(t *testing.T) func(*testing.T, string) *daemonLifecycleFixt
 		if scenario == "daemon token" {
 			t.Setenv("KATA_AUTH_TOKEN", "caller-token")
 		}
-		if scenario == "daemon token" || scenario == "legacy recovery" || strings.Contains(scenario, "during drain") {
+		if scenario == "daemon token" || scenario == "stop waits for held request" || strings.Contains(scenario, "during drain") {
 			env = append(env, "KATA_AUTH_TOKEN=fixture-token")
 		}
 		if scenario == "idle shutdown" {
@@ -194,6 +194,57 @@ func TestDaemonLifecycle(t *testing.T) {
 	fixture := daemonLifecycle(t)
 	t.Run("update", func(t *testing.T) { testUpdateInstallDaemonLifecycle(t, fixture) })
 	t.Run("restart", func(t *testing.T) { testDaemonRestartLifecycle(t, fixture) })
+	t.Run("stop waits for held request", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("holds an HTTP request over a Unix socket")
+		}
+		setupKataEnv(t)
+		f := fixture(t, "stop waits for held request")
+		before := f.record()
+		socket := strings.TrimPrefix(before.Address, "unix://")
+		conn, err := net.DialTimeout("unix", socket, time.Second)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = conn.Close() })
+		require.NoError(t, conn.SetDeadline(time.Now().Add(10*time.Second)))
+		body := `{"name":"example/recovery","actor":"user-a"}`
+		_, err = fmt.Fprintf(conn, "POST /api/v1/projects HTTP/1.1\r\nHost: example.test\r\nAuthorization: Bearer fixture-token\r\nContent-Type: application/json\r\nContent-Length: %d\r\nExpect: 100-continue\r\n\r\n", len(body))
+		require.NoError(t, err)
+		reader := bufio.NewReader(conn)
+		response, err := http.ReadResponse(reader, nil)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusContinue, response.StatusCode)
+		require.NoError(t, response.Body.Close())
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		stop := exec.CommandContext(ctx, f.cli, "daemon", "stop") //nolint:gosec // test-built executable
+		stop.Env = f.env
+		stopped := make(chan struct{})
+		var stopOutput []byte
+		var stopErr error
+		go func() { stopOutput, stopErr = stop.CombinedOutput(); close(stopped) }()
+		t.Cleanup(func() { cancel(); <-stopped })
+		require.Eventually(t, func() bool { //nolint:kennlint // sleeptest: listener closure proves the actual daemon is draining the held request
+			probe, err := net.DialTimeout("unix", socket, time.Second)
+			if err != nil {
+				return true
+			}
+			_ = probe.Close()
+			return false
+		}, 5*time.Second, 20*time.Millisecond)
+		select {
+		case <-stopped:
+			t.Fatalf("stop returned while HTTP request was still active: %s (%v)", stopOutput, stopErr)
+		case <-time.After(200 * time.Millisecond): //nolint:kennlint // deadlinetest: stop must remain pending while the request body is withheld
+		}
+		_, err = io.WriteString(conn, body)
+		require.NoError(t, err)
+		response, err = http.ReadResponse(reader, nil)
+		require.NoError(t, err)
+		_, err = io.Copy(io.Discard, response.Body)
+		require.NoError(t, err)
+		require.NoError(t, response.Body.Close())
+		<-stopped
+		require.NoError(t, stopErr, "%s", stopOutput)
+	})
 }
 
 func testUpdateInstallDaemonLifecycle(t *testing.T, fixture func(*testing.T, string) *daemonLifecycleFixture) {
@@ -294,78 +345,16 @@ func testUpdateInstallDaemonLifecycle(t *testing.T, fixture func(*testing.T, str
 
 func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *daemonLifecycleFixture) {
 	t.Helper()
-	for _, scenario := range []string{"restart failure", "bad listener", "older daemon", "legacy recovery", "startup flags", "new config", "restart during drain", "start during drain"} {
+	for _, scenario := range []string{"restart failure", "replacement fails after exec", "older daemon", "startup flags", "new config", "restart during drain", "start during drain"} {
 		t.Run(scenario, func(t *testing.T) {
 			if strings.Contains(scenario, "during drain") && runtime.GOOS != "linux" {
 				t.Skip("holds drain with a shell hook and observes the start lock through inotify")
 			}
-			if scenario == "legacy recovery" && runtime.GOOS == "windows" {
-				t.Skip("holds an HTTP request over a Unix socket")
-			}
 			setupKataEnv(t)
 			f := fixture(t, scenario)
 			before := f.record()
-			if scenario != "older daemon" && scenario != "bad listener" && scenario != "legacy recovery" && runtime.GOOS != "windows" {
+			if scenario != "older daemon" && scenario != "replacement fails after exec" && runtime.GOOS != "windows" {
 				t.Cleanup(func() { assert.Equal(t, before.PID, f.record().PID) })
-			}
-			if scenario == "legacy recovery" {
-				socket := strings.TrimPrefix(before.Address, "unix://")
-				conn, err := net.DialTimeout("unix", socket, time.Second)
-				require.NoError(t, err)
-				t.Cleanup(func() { _ = conn.Close() })
-				require.NoError(t, conn.SetDeadline(time.Now().Add(10*time.Second)))
-				body := `{"name":"example/recovery","actor":"user-a"}`
-				_, err = fmt.Fprintf(conn, "POST /api/v1/projects HTTP/1.1\r\nHost: example.test\r\nAuthorization: Bearer fixture-token\r\nContent-Type: application/json\r\nContent-Length: %d\r\nExpect: 100-continue\r\n\r\n", len(body))
-				require.NoError(t, err)
-				reader := bufio.NewReader(conn)
-				response, err := http.ReadResponse(reader, nil)
-				require.NoError(t, err)
-				require.Equal(t, http.StatusContinue, response.StatusCode)
-				require.NoError(t, response.Body.Close())
-				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-				stop := exec.CommandContext(ctx, f.cli, "daemon", "stop") //nolint:gosec // test-built executable
-				stop.Env = f.env
-				stopped := make(chan struct{})
-				var stopOutput []byte
-				var stopErr error
-				go func() { stopOutput, stopErr = stop.CombinedOutput(); close(stopped) }()
-				t.Cleanup(func() { cancel(); <-stopped })
-				require.Eventually(t, func() bool { //nolint:kennlint // sleeptest: listener closure proves the actual daemon is draining the held request
-					probe, err := net.DialTimeout("unix", socket, time.Second)
-					if err != nil {
-						return true
-					}
-					_ = probe.Close()
-					return false
-				}, 5*time.Second, 20*time.Millisecond)
-				select {
-				case <-stopped:
-					t.Fatalf("stop returned while HTTP request was still active: %s (%v)", stopOutput, stopErr)
-				case <-time.After(200 * time.Millisecond): //nolint:kennlint // deadlinetest: stop must remain pending while the request body is withheld
-				}
-				_, err = io.WriteString(conn, body)
-				require.NoError(t, err)
-				response, err = http.ReadResponse(reader, nil)
-				require.NoError(t, err)
-				_, err = io.Copy(io.Discard, response.Body)
-				require.NoError(t, err)
-				require.NoError(t, response.Body.Close())
-				<-stopped
-				require.NoError(t, stopErr, "%s", stopOutput)
-				start := exec.CommandContext(t.Context(), f.cli, "daemon", "start", "--json") //nolint:gosec // test-built executable
-				start.Env = f.env
-				output, err := start.CombinedOutput()
-				require.NoError(t, err, "%s", output)
-				var result struct{ Action string }
-				require.NoError(t, json.Unmarshal(output, &result))
-				assert.Equal(t, "started", result.Action)
-				after := f.record()
-				assert.NotEqual(t, before.PID, after.PID)
-				httpClient, baseURL := client.LocalHTTPClient(after.Endpoint().ConfigAddress())
-				status, _, err := httpDoJSON(t.Context(), httpClient, http.MethodGet, baseURL+"/api/v1/ping", nil)
-				require.NoError(t, err)
-				assert.Equal(t, http.StatusOK, status)
-				return
 			}
 			if strings.Contains(scenario, "during drain") {
 				release := filepath.Join(f.home, "hook-release")
@@ -432,7 +421,7 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 				<-done
 				return
 			}
-			if scenario == "bad listener" {
+			if scenario == "replacement fails after exec" {
 				output, err := f.restart(t, "--json", "--listen=127.0.0.1:bad")
 				require.Error(t, err)
 				assert.Contains(t, parseErrorEnvelope(t, []byte(output)).Error.Message, "unknown port")

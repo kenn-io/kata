@@ -322,7 +322,7 @@ func TestLocalProfileKeepsNewerReleaseDaemon(t *testing.T) {
 	assert.Contains(t, err.Error(), "kata daemon v0.19.0 is newer than this kata binary v0.18.0")
 	assert.Zero(t, calls)
 
-	t.Run("restart_owns_start_lock", func(t *testing.T) {
+	t.Run("discovery waits for start lock before stopping daemon", func(t *testing.T) {
 		currentVersionForEnsure = func() string { return "v0.20.0" }
 		release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireStartLock(t.Context())
 		require.NoError(t, err)
