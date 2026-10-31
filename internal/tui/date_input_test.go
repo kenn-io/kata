@@ -44,7 +44,7 @@ func TestResolveDateInputRefusesWhatTheDaemonRefuses(t *testing.T) {
 		t.Run(in, func(t *testing.T) {
 			_, err := resolveDateInput(in, now)
 			require.Error(t, err)
-			assert.Equal(t, "must be "+dateInputHint+".", err.Error())
+			assert.Equal(t, "must be "+dateInputHint, err.Error())
 		})
 	}
 }

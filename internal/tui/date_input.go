@@ -43,7 +43,7 @@ func resolveDateInput(input string, now time.Time) (string, error) {
 		}
 	default:
 		if !validStoredDate(text) {
-			return "", errors.New("must be " + dateInputHint + ".")
+			return "", errors.New("must be " + dateInputHint)
 		}
 		return text, nil
 	}

@@ -63,8 +63,14 @@ func newDatesForm(target formTarget, issue Issue) inputState {
 func (s inputState) loadDates(issue Issue) inputState {
 	s.dates.revision = issue.Revision
 	s.dates.scheduled, s.dates.deadline = issue.scheduledOn(), issue.deadlineOn()
-	s.field(fieldScheduled).setValue(s.dates.scheduled)
-	s.field(fieldDeadline).setValue(s.dates.deadline)
+	for i := range s.fields {
+		switch s.fields[i].id {
+		case fieldScheduled:
+			s.fields[i].setValue(s.dates.scheduled)
+		case fieldDeadline:
+			s.fields[i].setValue(s.dates.deadline)
+		}
+	}
 	return s
 }
 
@@ -87,7 +93,7 @@ func datesInputFromForm(s inputState, now time.Time, actor string) (DatesInput, 
 		}
 		value, err := resolveDateInput(text, now)
 		if err != nil {
-			return DatesInput{}, fmt.Errorf("%s %s", f.label, err)
+			return DatesInput{}, errors.New(f.label + " " + err.Error() + ".")
 		}
 		if value == f.opened {
 			continue
@@ -152,8 +158,8 @@ func dispatchFormSetDates(apiClient any, target formTarget, in DatesInput, formG
 }
 
 func isRevisionConflict(err error) bool {
-	var apiErr *APIError
-	return errors.As(err, &apiErr) && apiErr.Status == http.StatusPreconditionFailed
+	apiErr, ok := errors.AsType[*APIError](err)
+	return ok && apiErr != nil && apiErr.Status == http.StatusPreconditionFailed
 }
 
 // withCurrentIssue attaches the issue as the daemon holds it now to a refused
