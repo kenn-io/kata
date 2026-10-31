@@ -66,16 +66,6 @@ var cronFieldLabels = [cfCount]string{
 	cfCheckout: "Checkout key", cfSecrets: "Secrets", cfOptions: "Options",
 }
 
-// cronFieldHints say what a field takes, shown after an empty field.
-var cronFieldHints = [cfCount]string{ //nolint:gosec // G101: input hints such as "ENV=source", not credentials
-	cfCron: "5 fields like 0 9 * * 1-5, or @daily", cfZone: "IANA name, default UTC",
-	cfInterval: "seconds or 15m", cfAt: "2026-11-01T09:00:00+01:00", cfIssue: "issue ref",
-	cfLead: "seconds or 2h, optional", cfParent: "issue ref", cfScheduled: "seconds, optional", cfDeadline: "seconds, optional",
-	cfRecipient: "blank: current owner or author", cfReport: "issue ref, optional", cfGrace: "seconds or 15m",
-	cfTimeout: "seconds or 15m, optional", cfCheckout: "portable name, optional", cfSecrets: "ENV=source, ENV2=source2",
-	cfOptions: `JSON object, optional`,
-}
-
 type cronChoice struct{ value, label string }
 
 var (

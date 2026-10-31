@@ -138,6 +138,47 @@ func TestCronCreateResendKeepsUID(t *testing.T) {
 	require.Equal(t, "Created Weekly report", m.toast.text)
 }
 
+func TestCronCtrlSSavesEditedJob(t *testing.T) {
+	env := testenv.New(t)
+	c := NewClient(env.URL, env.HTTP)
+	project, err := c.EnsureProject(t.Context(), "cron-save-example", "alice")
+	require.NoError(t, err)
+	rec := executeRecord(`{}`)
+	require.NoError(t, c.PutCronJob(t.Context(), project.ID, rec.UID, kataapi.PutCronJobBody{Name: "Original", Actor: "alice", Definition: kataapi.CronJobDefinitionFrom(rec.Definition)}))
+	rec, err = c.ShowCronJob(t.Context(), project.ID, rec.UID)
+	require.NoError(t, err)
+	m := cronFixture(t)
+	m.api, m.scope.projectID, m.list.actor = c, project.ID, "alice"
+	m.cron.form, err = cronFormFor(rec, nil)
+	require.NoError(t, err)
+	m.cron.form.val[cfName] = "Renamed"
+	m, cmd := press(m, ctrlKey('s'))
+	if cmd != nil {
+		m = settle(t, m, cmd)
+	}
+	saved, err := c.ShowCronJob(t.Context(), project.ID, rec.UID)
+	require.NoError(t, err)
+	require.Equal(t, "Renamed", saved.Name)
+	require.Nil(t, m.cron.form)
+}
+
+func TestCronFormFieldTraversalSkipsLockedParent(t *testing.T) {
+	for _, key := range []tea.KeyPressMsg{
+		{Code: tea.KeyTab}, {Code: tea.KeyTab, Mod: tea.ModShift}, {Code: tea.KeyEnter},
+	} {
+		t.Run(key.String(), func(t *testing.T) {
+			m, _ := openEdit(t, nativeRecord())
+			from, want := cfZone, cfTitle
+			if key.Mod == tea.ModShift {
+				from, want = cfTitle, cfZone
+			}
+			m.cron.form.focusField(from)
+			m, _ = press(m, key)
+			require.Equal(t, want, m.cron.form.focus)
+		})
+	}
+}
+
 func TestCronSaveNamesUnknownIssueBesideField(t *testing.T) {
 	m, api := cronWriteFixture(t)
 	m, _ = press(m, keyRune('n'))
@@ -352,7 +393,7 @@ func TestCronScopeResetClosesDiscardModal(t *testing.T) {
 	require.Equal(t, modalNone, m.modal)
 }
 
-func TestCronConflictReloadUsesCurrentJob(t *testing.T) {
+func TestCronConflictShowsCurrentDefinition(t *testing.T) {
 	m, api := openEdit(t, executeRecord(`{}`))
 	m.cron.form.val[cfTitle] = "My draft"
 	api.shown.Name = "Current name"
@@ -370,14 +411,6 @@ func TestCronConflictReloadUsesCurrentJob(t *testing.T) {
 	}
 	require.Contains(t, viewed.String(), "Current prompt")
 	require.Contains(t, viewed.String(), "12345678901234567890")
-	m, cmd = press(m, keyRune('r'))
-	require.Nil(t, cmd)
-	require.Len(t, api.puts, 1, "reload makes no write")
-	require.Nil(t, m.cron.form.conflict)
-	require.False(t, m.cron.form.dirty())
-	require.Equal(t, "Current name", m.cron.form.val[cfName])
-	require.Equal(t, "Current prompt", m.cron.form.val[cfPrompt])
-	require.Equal(t, api.shown.DefinitionEventUID, m.cron.form.expected)
 }
 
 func TestCronTextFieldsUseExternalEditorWithoutChangingStoredText(t *testing.T) {

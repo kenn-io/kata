@@ -236,9 +236,6 @@ func (m Model) routeCronFormKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	if f.conflict != nil {
 		return m.routeCronConflictKey(key)
 	}
-	if key == "ctrl+s" {
-		return m, nil
-	}
 	if key == "ctrl+e" && !f.externalText(f.focus) {
 		return m, nil
 	}
@@ -305,23 +302,11 @@ func (m Model) routeCronFormKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// A conflict keeps the whole draft until the user reloads or saves it.
+// A conflict keeps the whole draft while the user inspects the current job.
 func (m Model) routeCronConflictKey(key string) (Model, tea.Cmd) {
 	f := m.cron.form
 	current := *f.conflict
 	switch key {
-	case "r":
-		if current.DeletedAt != nil {
-			return m, nil
-		}
-		next, err := cronFormFor(current, f.workflows)
-		if err != nil {
-			f.general = err.Error()
-			return m, nil
-		}
-		m.nextFormGen++
-		next.formGen = m.nextFormGen
-		m.cron.form = next
 	case "ctrl+o":
 		if current.DeletedAt != nil {
 			return m, nil
@@ -344,7 +329,7 @@ func cronFormHelpRows(f *cronForm) []helplayout.HelpItem {
 	case f.conflict != nil:
 		rows := []helplayout.HelpItem{{Key: "↑↓", Description: "scroll"}, {Key: "esc", Description: "back to my draft"}}
 		if f.conflict.DeletedAt == nil {
-			rows = slices.Insert(rows, 0, helplayout.HelpItem{Key: "r", Description: "reload current job"}, helplayout.HelpItem{Key: "ctrl+o", Description: "save my draft"})
+			rows = slices.Insert(rows, 0, helplayout.HelpItem{Key: "ctrl+o", Description: "save my draft"})
 		}
 		return rows
 	}
@@ -420,9 +405,6 @@ func cronFormLines(m Model, f *cronForm) (lines []string, cursor int) {
 			value = ed.input.View()
 		default:
 			value = sanitizeForLine(strings.ReplaceAll(f.val[field], "\n", " ⏎ "))
-			if value == "" && cronFieldHints[field] != "" {
-				value = statsLineStyle.Render(cronFieldHints[field])
-			}
 		}
 		if f.externalText(field) && field == f.focus {
 			value = "ctrl+e  " + value
