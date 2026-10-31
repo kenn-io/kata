@@ -514,6 +514,38 @@ func (c *Client) SetPriority(ctx context.Context, projectID int64, ref string, p
 	return &resp, nil
 }
 
+// SetDates patches scheduled_on and deadline_on in one metadata request,
+// guarded by If-Match on the revision the caller read. A nil value clears
+// its key. A stale revision comes back as a 412 *APIError and writes nothing.
+func (c *Client) SetDates(ctx context.Context, projectID int64, ref string, in DatesInput) (*MutationResp, error) {
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	patch := make(map[string]any, len(in.Set))
+	for key, value := range in.Set {
+		if value == nil {
+			patch[key] = nil
+		} else {
+			patch[key] = *value
+		}
+	}
+	etag := fmt.Sprintf(`"rev-%d"`, in.IfMatchRevision)
+	wire, callErr := apiClient.PatchIssueMetadataWithResponse(ctx, &generated.PatchIssueMetadataRequestOptions{
+		PathParams: &generated.PatchIssueMetadataPath{ProjectID: projectID, Ref: ref},
+		Header:     &generated.PatchIssueMetadataHeaders{IfMatch: &etag},
+		Body:       &generated.PatchIssueMetadataBody{Actor: &in.Actor, Patch: patch},
+	})
+	if wire == nil {
+		return nil, callErr
+	}
+	var resp MutationResp
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // AddLink creates a typed link from this issue to body.ToRef. The
 // daemon's CreateLinkRequest.Body is {actor, type, to_ref}; ToRef
 // accepts a short_id, qualified short_id ("kata#abc4"), or a 26-char

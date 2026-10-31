@@ -208,6 +208,11 @@ func renderDocumentMetadata(
 	}
 	priorityText := metadataLabel("priority:") + " " + priorityDocumentText(iss.Priority)
 	rows = append(rows, truncate(priorityText, width))
+	if scheduled, deadline := iss.scheduledOn(), iss.deadlineOn(); scheduled != "" || deadline != "" {
+		rows = append(rows, joinMetadataRow(
+			metadataLabel("scheduled:")+" "+datesDocumentText(scheduled),
+			metadataLabel("deadline:")+" "+datesDocumentText(deadline), width)...)
+	}
 	if len(iss.Labels) > 0 {
 		labelsBudget := width - runewidth.StringWidth("labels: ")
 		labels := metadataLabel("labels:") + " " + labelsDocumentText(iss.Labels, labelsBudget)
@@ -291,6 +296,14 @@ func parentDocumentText(parent *IssueRef) string {
 		return "none"
 	}
 	return fmt.Sprintf("#%s %s", parent.ShortID, sanitizeForDisplay(parent.Title))
+}
+
+// datesDocumentText renders a stored planning date as typed, "none" when unset.
+func datesDocumentText(raw string) string {
+	if raw == "" {
+		return "none"
+	}
+	return sanitizeForDisplay(raw)
 }
 
 // priorityDocumentText renders the priority value for the detail

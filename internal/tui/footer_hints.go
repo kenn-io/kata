@@ -126,6 +126,12 @@ func inputHelpRows(input inputState) [][]helplayout.HelpItem {
 			{Key: "esc", Description: "cancel"},
 			{Key: "ctrl+r", Description: "reset"},
 		}}
+	case kind == inputDatesForm:
+		return [][]helplayout.HelpItem{{
+			{Key: "ctrl+o", Description: "save"},
+			{Key: "esc", Description: "cancel"},
+			{Key: "tab", Description: "field"},
+		}}
 	case kind == inputNewIssueForm:
 		return [][]helplayout.HelpItem{{
 			{Key: "ctrl+o", Description: "create"},
@@ -176,6 +182,7 @@ func (lm listModel) queueHelpRows() [][]helplayout.HelpItem {
 		helplayout.HelpItem{Key: "o", Description: "order"},
 		helplayout.HelpItem{Key: "c", Description: "clear"},
 		helplayout.HelpItem{Key: "x", Description: "close"},
+		helplayout.HelpItem{Key: "d", Description: "dates"},
 		helplayout.HelpItem{Key: "!", Description: "priority"},
 		helplayout.HelpItem{Key: "D", Description: "daemons"},
 		helplayout.HelpItem{Key: "F", Description: "federation"},
@@ -210,6 +217,7 @@ func (dm detailModel) detailHelpRows() [][]helplayout.HelpItem {
 		{Key: "t", Description: "timed"},
 		{Key: "x", Description: "close"},
 		{Key: "r", Description: "reopen"},
+		{Key: "d", Description: "dates"},
 		{Key: "p", Description: "parent"},
 		{Key: "b", Description: "block"},
 		{Key: "l", Description: "related"},

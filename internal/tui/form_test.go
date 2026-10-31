@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
@@ -28,9 +29,9 @@ func TestCenteredForm_TextareaWrapsWithinPadding(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s := focusNewIssueField(tt.form, tt.field)
 			// Size the textarea before pasting, as the initial form render does.
-			_ = renderCenteredForm(s, 160, 40)
+			_ = renderCenteredForm(s, 160, 40, time.Time{})
 			s, _ = s.delegateToField(tea.PasteMsg{Content: body})
-			view := stripANSI(renderCenteredForm(s, 160, 40))
+			view := stripANSI(renderCenteredForm(s, 160, 40, time.Time{}))
 			// A second wrap by the modal used to leave "labore" on its own row.
 			if !strings.Contains(view, "labore et dolore magna aliqua.") {
 				t.Fatalf("modal rewrapped the textarea's continuation line:\n%s", view)

@@ -49,12 +49,12 @@
             Evidence remains visible at depth.
             R typed reply · [/] select evidence ·
                                [lines 1-48 of 53]
- ↑↓ scroll▕ j/k row       ▕ ↹ section
- ↵ open   ▕ pgup/pgdn page▕ e edit
- c comment▕ + label       ▕ - unlabel
- a owner  ▕ A unassign    ▕ t timed
- x close  ▕ r reopen      ▕ p parent
- b block  ▕ l related     ▕ ! priority
- D daemons▕ F federation  ▕ C credentials
- N child  ▕ L layout      ▕ esc back
- ? help   ▕ q quit
+ ↑↓ scroll    ▕ j/k row       ▕ ↹ section
+ ↵ open       ▕ pgup/pgdn page▕ e edit
+ c comment    ▕ + label       ▕ - unlabel
+ a owner      ▕ A unassign    ▕ t timed
+ x close      ▕ r reopen      ▕ d dates
+ p parent     ▕ b block       ▕ l related
+ ! priority   ▕ D daemons     ▕ F federation
+ C credentials▕ N child       ▕ L layout
+ esc back     ▕ ? help        ▕ q quit
