@@ -875,10 +875,7 @@ func daemonRestartCmd() *cobra.Command {
 				if !daemonruntime.RuntimeProcessAlive(rec) {
 					continue
 				}
-				if cmd.Flags().Changed("listen") || cmd.Flags().Changed("insecure-readonly") || cmd.Flags().Changed("no-auto-token") {
-					return fmt.Errorf("restart retains the running daemon's startup options; run 'kata daemon stop', then 'kata daemon start' with the requested options")
-				}
-				if !daemonruntime.RuntimeRecordRestartable(rec) || rec.Metadata[daemonruntime.RuntimeRestartExecutableKey] != "1" {
+				if rec.Metadata[daemonruntime.RuntimeRestartExecutableKey] != "1" {
 					return fmt.Errorf("daemon pid %d does not support automatic restart; run 'kata daemon stop', then 'kata daemon start' with its original startup options", rec.PID)
 				}
 				running = append(running, rec)
@@ -894,12 +891,18 @@ func daemonRestartCmd() *cobra.Command {
 					return err
 				}
 			} else {
-				target := newDaemonRestart(cmd.ErrOrStderr())
+				target := newDaemonRestart(io.Discard)
 				if target == nil {
 					return fmt.Errorf("cannot resolve the installed restart executable")
 				}
+				var flags []string
+				for _, name := range []string{"listen", "insecure-readonly", "no-auto-token"} {
+					if f := cmd.Flags().Lookup(name); f.Changed {
+						flags = append(flags, "--"+name+"="+f.Value.String())
+					}
+				}
 				for _, rec := range running {
-					replacement, err := requestDaemonRestart(cmd.Context(), ns, rec, target.executable)
+					replacement, err := requestDaemonRestart(cmd.Context(), ns, rec, target.executable, flags)
 					if err != nil {
 						return err
 					}
@@ -941,7 +944,7 @@ func daemonRestartCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&listen, "listen", "",
-		"bind to host:port when no daemon is running (overrides config.toml)")
+		"bind the replacement daemon to host:port (overrides config.toml)")
 	cmd.Flags().BoolVar(&noAutoToken, "no-auto-token", false, "disable creating a persisted daemon token; eligible existing tokens are still reused")
 	cmd.Flags().BoolVar(&insecureReadonly, "insecure-readonly", false,
 		"permit unauthenticated GETs on non-loopback TCP when no token is configured (DEV ONLY)")
@@ -1479,10 +1482,8 @@ func runDaemonProcess(
 				var req restartRequest
 				defer func() {
 					reply := filepath.Join(ns.DataDir, filepath.Base(req.Reply))
-					if err != nil && req.Reply != "" {
-						if _, exists := os.Lstat(reply); exists == nil {
-							_ = atomicfile.WriteFile(reply, []byte(err.Error()), atomicfile.WithPrivate())
-						}
+					if _, statErr := os.Lstat(reply); err != nil && req.Reply != "" && statErr == nil {
+						_ = atomicfile.WriteFile(reply, []byte(err.Error()), atomicfile.WithPrivate())
 					}
 				}()
 				executable := restart.executable
@@ -1493,7 +1494,7 @@ func runDaemonProcess(
 					if err := os.Remove(request); err != nil {
 						return err
 					}
-					if err := json.Unmarshal(target, &req); err != nil {
+					if err := json.Unmarshal(target, &req, json.RejectUnknownMembers(true)); err != nil {
 						return err
 					}
 					if req.Executable != "" {
@@ -1505,10 +1506,10 @@ func runDaemonProcess(
 				case !errors.Is(err, os.ErrNotExist):
 					return err
 				}
-				if err := validateDaemonReplacement(ctx, executable); err != nil {
+				if err := validateDaemonReplacement(ctx, executable, req.Flags); err != nil {
 					return err
 				}
-				restart.executable = executable
+				restart.executable, restart.args = executable, daemonArgs(req.Flags...)
 				return nil
 			}, daemonLog, shutdownTrigger.Call)
 		})

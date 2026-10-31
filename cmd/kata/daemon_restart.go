@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 // marker, and idle timeout of the process it replaces.
 type daemonRestart struct {
 	executable string
+	args       []string
 	requested  atomic.Bool
 }
 
@@ -80,18 +82,25 @@ func (r *daemonRestart) exec(ctx context.Context) error {
 	if r == nil || !r.requested.Load() {
 		return nil
 	}
-	if err := reexecDaemon(ctx, r.executable); err != nil {
+	if err := reexecDaemon(ctx, r.executable, r.args); err != nil {
 		return fmt.Errorf("restart daemon: %w", err)
 	}
 	return nil
 }
 
-func validateDaemonReplacement(ctx context.Context, executable string) error {
+func daemonArgs(extra ...string) []string {
+	args := slices.Clone(os.Args[1:])
+	if at := slices.Index(args, "--"); at >= 0 {
+		return slices.Insert(args, at, extra...)
+	}
+	return append(args, extra...)
+}
+
+func validateDaemonReplacement(ctx context.Context, executable string, flags []string) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, executable, append(os.Args[1:], "--check-startup")...) //nolint:gosec // selected installed executable with daemon-owned arguments
-	output, err := command.CombinedOutput()
-	if err != nil {
+	command := exec.CommandContext(ctx, executable, daemonArgs(append(flags, "--check-startup")...)...) //nolint:gosec // selected installed executable with daemon-owned arguments
+	if output, err := command.CombinedOutput(); err != nil {
 		return fmt.Errorf("check replacement startup: %w: %s", err, output)
 	}
 	return nil
@@ -99,13 +108,14 @@ func validateDaemonReplacement(ctx context.Context, executable string) error {
 
 type restartRequest struct {
 	Executable, Reply string
+	Flags             []string
 }
 
 func restartRequestPath(dir string, rec kitdaemon.RuntimeRecord) string {
 	return filepath.Join(dir, fmt.Sprintf("restart.%d.%d", rec.PID, rec.StartedAt.UnixNano()))
 }
 
-func requestDaemonRestart(ctx context.Context, ns *daemonruntime.Namespace, previous kitdaemon.RuntimeRecord, executable string) (kitdaemon.RuntimeRecord, error) {
+func requestDaemonRestart(ctx context.Context, ns *daemonruntime.Namespace, previous kitdaemon.RuntimeRecord, executable string, flags []string) (kitdaemon.RuntimeRecord, error) {
 	var reply string
 	if previous.Metadata[daemonruntime.RuntimeRestartExecutableKey] == "1" {
 		file, err := safefileio.CreatePrivateTemp(ns.DataDir, "restart-reply-*")
@@ -117,7 +127,7 @@ func requestDaemonRestart(ctx context.Context, ns *daemonruntime.Namespace, prev
 		if err := file.Close(); err != nil {
 			return kitdaemon.RuntimeRecord{}, err
 		}
-		payload, _ := json.Marshal(restartRequest{Executable: executable, Reply: filepath.Base(reply)})
+		payload, _ := json.Marshal(restartRequest{Executable: executable, Reply: filepath.Base(reply), Flags: flags})
 		if err := atomicfile.WriteNew(restartRequestPath(ns.DataDir, previous), payload, atomicfile.WithPrivate()); err != nil {
 			if errors.Is(err, os.ErrExist) {
 				return kitdaemon.RuntimeRecord{}, fmt.Errorf("daemon pid %d already has a pending restart: %w", previous.PID, err)

@@ -159,6 +159,8 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 			if scenario != "stopped" {
 				args := []string{"daemon", "start", "--foreground"}
 				switch scenario {
+				case "startup flags":
+					args = append(args, "--")
 				case "read-only TCP":
 					args = append(args, "--listen", "127.0.0.1:0", "--insecure-readonly")
 				case "daemon token":
@@ -219,11 +221,13 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 			}
 			if explicitRestart {
 				if scenario == "startup flags" {
-					for _, flag := range []string{"--listen=127.0.0.1:0", "--insecure-readonly=false", "--no-auto-token=false"} {
-						output, err := restartCLI(flag)
-						require.Error(t, err)
-						assert.Contains(t, output, "kata daemon stop")
-						assert.Equal(t, before.StartedAt, record().StartedAt)
+					output, err := restartCLI("--listen=127.0.0.1:0", "--insecure-readonly", "--no-auto-token")
+					require.NoError(t, err, "%s", output)
+					after := record()
+					require.True(t, after.StartedAt.After(before.StartedAt))
+					assert.False(t, after.Endpoint().IsUnix())
+					if runtime.GOOS != "windows" {
+						assert.Equal(t, before.PID, after.PID)
 					}
 					return
 				}

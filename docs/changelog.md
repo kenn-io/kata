@@ -12,8 +12,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Keep the browser reachable when `kata daemon restart` runs from a sandbox or
   container that sees the daemon's process IDs and executable paths. The daemon
   uses the CLI's installed executable while
-  retaining its own environment, startup options, and idle policy. Changing
-  startup flags or replacing an older signal-only daemon requires stop/start.
+  retaining its own environment and idle policy. Explicit restart flags override
+  startup options and persist. Replacing an older signal-only daemon requires stop/start.
   `kata update` also reports the startup error when the daemon refuses to restart.
 
 - Show what is stuck in any web collection, Inbox and Today included, with the

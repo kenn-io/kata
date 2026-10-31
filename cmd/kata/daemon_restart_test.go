@@ -64,7 +64,7 @@ func TestNewDaemonRestart_ResolvesSymlinkedExecutable(t *testing.T) {
 func TestDaemonRestart_RemovesRequestAfterSignalFailure(t *testing.T) {
 	dir := t.TempDir()
 	rec := kitdaemon.RuntimeRecord{PID: 1 << 30, StartedAt: time.Unix(1, 0), Metadata: map[string]string{daemonruntime.RuntimeRestartExecutableKey: "1"}}
-	_, err := requestDaemonRestart(t.Context(), &daemonruntime.Namespace{DataDir: dir}, rec, "/installed/kata")
+	_, err := requestDaemonRestart(t.Context(), &daemonruntime.Namespace{DataDir: dir}, rec, "/installed/kata", nil)
 	require.Error(t, err)
 	require.NoFileExists(t, restartRequestPath(dir, rec))
 	replies, err := filepath.Glob(filepath.Join(dir, "restart-reply-*"))
