@@ -330,7 +330,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, federationFeatureError(err)
 		}
-		body := api.ProjectFederationBody{ProjectID: result.Project.ID, ProjectUID: result.Project.UID, ProjectName: result.Project.Name, ReplayHorizonEventID: result.Binding.ReplayHorizonEventID, BaselineThroughEventID: result.BaselineThroughEventID}
+		body := api.ProjectFederationBody{NativeCronWrites: result.Binding.Role == db.FederationRoleHub && result.Binding.Enabled, ProjectID: result.Project.ID, ProjectUID: result.Project.UID, ProjectName: result.Project.Name, ReplayHorizonEventID: result.Binding.ReplayHorizonEventID, BaselineThroughEventID: result.BaselineThroughEventID}
 		return &api.ProjectFederationResponse{Body: body, EventFeatures: db.SupportedEventFeatures, RequiredEventFeatures: result.RequiredFeatures}, nil
 	})
 
@@ -1606,6 +1606,7 @@ func buildProjectFederationBody(ctx context.Context, store db.Storage, projectID
 		through = maxSnapshot
 	}
 	return api.ProjectFederationBody{
+		NativeCronWrites:       binding.Role == db.FederationRoleHub && binding.Enabled,
 		ProjectID:              project.ID,
 		ProjectUID:             project.UID,
 		ProjectName:            project.Name,

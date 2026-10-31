@@ -1756,6 +1756,7 @@ func (o *ListCronJobsRequestOptions) GetHeader() (map[string]string, error) {
 type CreateCronJobRequestOptions struct {
 	PathParams *CreateCronJobPath
 	Body       *CreateCronJobBody
+	Header     *CreateCronJobHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -1775,6 +1776,14 @@ func (o *CreateCronJobRequestOptions) Validate() error {
 		if v, ok := any(o.Body).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -1802,13 +1811,14 @@ func (o *CreateCronJobRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *CreateCronJobRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // ArchiveCronJobRequestOptions is the options needed to make a request to ArchiveCronJob.
 type ArchiveCronJobRequestOptions struct {
 	PathParams *ArchiveCronJobPath
 	Body       *ArchiveCronJobBody
+	Header     *ArchiveCronJobHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -1828,6 +1838,14 @@ func (o *ArchiveCronJobRequestOptions) Validate() error {
 		if v, ok := any(o.Body).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -1855,7 +1873,7 @@ func (o *ArchiveCronJobRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *ArchiveCronJobRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // ShowCronJobRequestOptions is the options needed to make a request to ShowCronJob.
@@ -1906,6 +1924,7 @@ func (o *ShowCronJobRequestOptions) GetHeader() (map[string]string, error) {
 type ReplaceCronJobRequestOptions struct {
 	PathParams *ReplaceCronJobPath
 	Body       *ReplaceCronJobBody
+	Header     *ReplaceCronJobHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -1925,6 +1944,14 @@ func (o *ReplaceCronJobRequestOptions) Validate() error {
 		if v, ok := any(o.Body).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -1952,13 +1979,14 @@ func (o *ReplaceCronJobRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *ReplaceCronJobRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // RestoreCronJobRequestOptions is the options needed to make a request to RestoreCronJob.
 type RestoreCronJobRequestOptions struct {
 	PathParams *RestoreCronJobPath
 	Body       *RestoreCronJobBody
+	Header     *RestoreCronJobHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -1978,6 +2006,14 @@ func (o *RestoreCronJobRequestOptions) Validate() error {
 		if v, ok := any(o.Body).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -2005,7 +2041,7 @@ func (o *RestoreCronJobRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *RestoreCronJobRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // ListCronRunsRequestOptions is the options needed to make a request to ListCronRuns.
@@ -2268,6 +2304,7 @@ func (o *CreateCronWorkflowRequestOptions) GetHeader() (map[string]string, error
 type ArchiveCronWorkflowRequestOptions struct {
 	PathParams *ArchiveCronWorkflowPath
 	Body       *ArchiveCronWorkflowBody
+	Header     *ArchiveCronWorkflowHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -2287,6 +2324,14 @@ func (o *ArchiveCronWorkflowRequestOptions) Validate() error {
 		if v, ok := any(o.Body).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -2314,7 +2359,7 @@ func (o *ArchiveCronWorkflowRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *ArchiveCronWorkflowRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // ShowCronWorkflowRequestOptions is the options needed to make a request to ShowCronWorkflow.
@@ -2418,6 +2463,7 @@ func (o *ReplaceCronWorkflowRequestOptions) GetHeader() (map[string]string, erro
 type RestoreCronWorkflowRequestOptions struct {
 	PathParams *RestoreCronWorkflowPath
 	Body       *RestoreCronWorkflowBody
+	Header     *RestoreCronWorkflowHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -2437,6 +2483,14 @@ func (o *RestoreCronWorkflowRequestOptions) Validate() error {
 		if v, ok := any(o.Body).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -2464,7 +2518,7 @@ func (o *RestoreCronWorkflowRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *RestoreCronWorkflowRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // DigestProjectRequestOptions is the options needed to make a request to DigestProject.

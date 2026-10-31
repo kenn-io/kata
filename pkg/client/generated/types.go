@@ -4976,11 +4976,14 @@ func (p ProjectEmbeddingProducer) Validate() error {
 }
 
 type ProjectFederationBody struct {
-	BaselineThroughEventID int64           `json:"baseline_through_event_id"`
-	ProjectID              int64           `json:"project_id"`
-	ProjectName            string          `json:"project_name" validate:"required"`
-	ProjectUID             string          `json:"project_uid" validate:"required"`
-	Relay                  *RelayHandshake `json:"relay,omitempty"`
+	BaselineThroughEventID int64 `json:"baseline_through_event_id"`
+
+	// NativeCronWrites Supports native recurring job writes using direct project-scoped push enrollments.
+	NativeCronWrites *bool           `json:"native_cron_writes,omitempty"`
+	ProjectID        int64           `json:"project_id"`
+	ProjectName      string          `json:"project_name" validate:"required"`
+	ProjectUID       string          `json:"project_uid" validate:"required"`
+	Relay            *RelayHandshake `json:"relay,omitempty"`
 
 	// RelayLinksChecked True when relay_protocol_version was requested and the project has no cross-project issue links. Older daemons omit it.
 	RelayLinksChecked    *bool `json:"relay_links_checked,omitempty"`
