@@ -166,10 +166,17 @@ func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (Resolve
 	if err := safefileio.ValidatePrivateDir(resolved.LocalProfile.DataDir); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return resolved, err
 	}
-	found, err := discoverForEnsure(ctx, resolved.LocalProfile.DataDir)
+	found, release, err := discoverForStart(ctx, resolved.LocalProfile.DataDir)
 	if err != nil {
 		return resolved, err
 	}
+	defer release()
+	return startLocalProfile(ctx, profile, resolved, found)
+}
+
+// startLocalProfile reuses the profile's compatible daemon, or replaces an
+// older one, and otherwise starts the profile daemon in its own environment.
+func startLocalProfile(ctx context.Context, profile config.LocalProfileConfig, resolved ResolvedDaemon, found ensureDiscovery) (ResolvedDaemon, error) {
 	if found.Outcome != daemonScanNone {
 		resolved = resolved.WithRunning(runningDaemonForLive(found.Daemon))
 		resolved.UnixSocket = found.Daemon.UnixSocket

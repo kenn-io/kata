@@ -1,13 +1,21 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-30
+last_edited: 2026-10-31
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Keep the browser reachable when `kata daemon restart` runs from a sandbox or
+  container that sees the daemon's process IDs and executable paths. The daemon
+  uses the CLI's installed executable with its own environment and idle policy.
+  Explicit restart flags persist until stop/start, which also replaces older
+  daemons that support only restart signals. Separate PID or filesystem views
+  can prevent discovery or executable handoff.
+  `kata update` also reports the startup error when the daemon refuses to restart.
 
 - Show what is stuck in any web collection, Inbox and Today included, with the
   optional **Blocked by** column. It lists each task's open blockers, three IDs

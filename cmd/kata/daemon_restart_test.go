@@ -6,9 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/daemonruntime"
+	kitdaemon "go.kenn.io/kit/daemon"
 )
 
 func stubDaemonExecutable(t *testing.T, resolve func() (string, error)) {
@@ -56,4 +59,27 @@ func TestNewDaemonRestart_ResolvesSymlinkedExecutable(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, expected, restart.executable)
 	assert.Empty(t, stderr.String())
+}
+
+func TestDaemonRestart_SignalFailureCleansRequest(t *testing.T) {
+	dir := t.TempDir()
+	rec := kitdaemon.RuntimeRecord{PID: 1 << 30, StartedAt: time.Now().UTC(), Metadata: map[string]string{daemonruntime.RuntimeRestartExecutableKey: "1"}}
+	_, err := requestDaemonRestart(t.Context(), &daemonruntime.Namespace{DataDir: dir}, rec, "/installed/kata", nil)
+	require.ErrorContains(t, err, "signal daemon pid")
+	require.NoFileExists(t, restartRequestPath(dir, rec))
+	replies, err := filepath.Glob(filepath.Join(dir, "restart-reply-*"))
+	require.NoError(t, err)
+	assert.Empty(t, replies)
+}
+
+func TestDaemonArgs(t *testing.T) {
+	original := os.Args
+	t.Cleanup(func() { os.Args = original })
+	os.Args = []string{"kata", "daemon", "start", "--foreground", "--listen", "127.0.0.1:7777", "--insecure-readonly", "--no-auto-token=false", "--"}
+	overrides := []string{"--listen=127.0.0.1:8888", "--insecure-readonly=false", "--no-auto-token=true"}
+	want := []string{"daemon", "start", "--foreground", "--listen=127.0.0.1:8888", "--insecure-readonly=false", "--no-auto-token=true", "--"}
+	args := daemonArgs(overrides...)
+	assert.Equal(t, want, args)
+	os.Args = append([]string{"kata"}, args...)
+	assert.Equal(t, want, daemonArgs(overrides...))
 }

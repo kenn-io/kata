@@ -175,6 +175,33 @@ func TestEnsureRunningRestartsWhenDaemonVersionDiffers(t *testing.T) {
 	assert.Equal(t, 1, restore.startCalls)
 }
 
+func TestEnsureRunningDiscoveryWaitsForStartLockBeforeStoppingDaemon(t *testing.T) {
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	tmp := setupKataEnv(t)
+
+	_, addr := startMockDaemonPing(t, map[string]any{
+		"ok":      true,
+		"service": "kata",
+		"version": "old-version",
+		"pid":     os.Getpid(),
+	})
+
+	require.NoError(t, writeRuntimeRecord(t, tmp, addr))
+	restore := patchEnsureHooks(t, "new-version", "http://new-daemon")
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireStartLock(t.Context())
+	require.NoError(t, err)
+	defer release()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+
+	_, err = EnsureRunning(ctx)
+
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Zero(t, restore.stopCalls, "another restart owns validation; its daemon must keep running")
+}
+
 func TestEnsureRunningRestartsWhenDaemonVersionUnknown(t *testing.T) {
 	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
 	tmp := setupKataEnv(t)

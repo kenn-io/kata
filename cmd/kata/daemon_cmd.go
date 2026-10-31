@@ -256,6 +256,7 @@ func daemonStartCmd() *cobra.Command {
 		listen           string
 		insecureReadonly bool
 		foreground       bool
+		checkStartup     bool
 		noAutoToken      bool
 	)
 	cmd := &cobra.Command{
@@ -272,12 +273,16 @@ func daemonStartCmd() *cobra.Command {
 					ExitCode: ExitUsage,
 				}
 			}
+			if checkStartup {
+				_, err := preflightDaemonStartup(cmd.Context(), listen, insecureReadonly, noAutoToken)
+				return err
+			}
 			if foreground {
 				ctx, cancel := context.WithCancel(cmd.Context())
 				defer cancel()
 				return runDaemonForeground(ctx, listen, insecureReadonly, noAutoToken)
 			}
-			out, err := startDetachedDaemon(cmd.Context(), listen, insecureReadonly, noAutoToken)
+			out, err := startDetachedDaemonLocked(cmd.Context(), listen, insecureReadonly, noAutoToken)
 			if err != nil {
 				return err
 			}
@@ -300,6 +305,8 @@ func daemonStartCmd() *cobra.Command {
 			return err
 		},
 	}
+	cmd.Flags().BoolVar(&checkStartup, "check-startup", false, "check startup settings")
+	_ = cmd.Flags().MarkHidden("check-startup")
 	cmd.Flags().BoolVar(&foreground, "foreground", false,
 		"run the daemon in the current process instead of starting it in the background")
 	cmd.Flags().BoolVar(&noAutoToken, "no-auto-token", false, "disable creating a persisted daemon token; eligible existing tokens are still reused")
@@ -311,6 +318,22 @@ func daemonStartCmd() *cobra.Command {
 		"permit unauthenticated GETs on non-loopback TCP when no token "+
 			"is configured (DEV ONLY — production must use a token).")
 	return cmd
+}
+
+// startDetachedDaemonLocked holds the start lock an in-place restart holds
+// until its replacement is ready, so an explicit start adopts that replacement
+// instead of launching into the handoff. Restart's own startup already holds it.
+func startDetachedDaemonLocked(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) (daemonStartOutput, error) {
+	ns, err := daemonruntime.NewNamespace()
+	if err != nil {
+		return daemonStartOutput{}, err
+	}
+	release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireStartLock(ctx)
+	if err != nil {
+		return daemonStartOutput{}, err
+	}
+	defer release()
+	return startDetachedDaemon(ctx, listen, insecureReadonly, noAutoToken)
 }
 
 func defaultStartDetachedDaemon(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) (daemonStartOutput, error) {
@@ -777,7 +800,7 @@ func noteSkippedDaemons(stderr io.Writer, records []kitdaemon.RuntimeRecord) {
 func daemonStopCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop",
-		Short: "request a graceful shutdown of the running daemon",
+		Short: "gracefully stop the running daemon and wait for it to exit",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := requireCurrentHomeDaemonCommand(); err != nil {
 				return err
@@ -791,7 +814,6 @@ func daemonStopCmd() *cobra.Command {
 				return err
 			}
 			noteSkippedDaemons(cmd.ErrOrStderr(), recs)
-			mode := currentOutputMode()
 			pids := make([]int, 0, len(recs))
 			for _, r := range recs {
 				if !daemonruntime.RuntimeProcessAlive(r) {
@@ -800,17 +822,18 @@ func daemonStopCmd() *cobra.Command {
 				// SignalDaemonStop is platform-specific: SIGTERM on Unix,
 				// a named stop event on Windows.
 				if err := daemonruntime.SignalDaemonStop(r, ns.DBHash); err != nil {
-					return &cliError{
-						Kind: kindInternal, ExitCode: ExitInternal,
-						Message: fmt.Sprintf("stop pid %d: %v", r.PID, err),
-					}
+					return &cliError{Kind: kindInternal, ExitCode: ExitInternal, Message: fmt.Sprintf("stop pid %d: %v", r.PID, err)}
 				}
 				pids = append(pids, r.PID)
-				if mode == outputHuman {
-					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "stopped pid=%d\n", r.PID)
-				}
 			}
-			switch mode {
+			if err := waitForDaemonProcesses(cmd.Context(), pids, daemonRestartProcessWaitTimeout); err != nil {
+				return err
+			}
+			switch currentOutputMode() {
+			case outputHuman:
+				for _, pid := range pids {
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "stopped pid=%d\n", pid)
+				}
 			case outputAgent:
 				switch len(pids) {
 				case 0:
@@ -852,32 +875,49 @@ func daemonRestartCmd() *cobra.Command {
 			if err := requireCurrentHomeDaemonCommand(); err != nil {
 				return err
 			}
-			startup, err := preflightDaemonStartup(cmd.Context(), listen, insecureReadonly, noAutoToken)
-			if err != nil {
-				return fmt.Errorf("restart: validate replacement: %w", err)
-			}
-			ns := startup.Namespace
-			recs, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).List()
+			ns, err := daemonruntime.NewNamespace()
 			if err != nil {
 				return err
 			}
-			noteSkippedDaemons(cmd.ErrOrStderr(), recs)
-			pids := make([]int, 0, len(recs))
-			for _, rec := range recs {
-				if !daemonruntime.RuntimeProcessAlive(rec) {
-					continue
+			running, release, err := lockLiveDaemons(cmd.Context(), ns, cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
+			defer release()
+			for _, rec := range running {
+				if rec.Metadata[daemonruntime.RuntimeRestartExecutableKey] != "1" {
+					return fmt.Errorf("daemon pid %d does not support automatic restart; run 'kata daemon stop', then 'kata daemon start' in its original host shell or service with its original startup options", rec.PID)
 				}
-				if err := daemonruntime.SignalDaemonStop(rec, ns.DBHash); err != nil {
-					return fmt.Errorf("restart: stop pid %d: %w", rec.PID, err)
+			}
+			pids := make([]int, 0, len(running))
+			var out daemonStartOutput
+			if len(running) == 0 {
+				if _, err := preflightDaemonStartup(cmd.Context(), listen, insecureReadonly, noAutoToken); err != nil {
+					return fmt.Errorf("restart: validate replacement: %w", err)
 				}
-				pids = append(pids, rec.PID)
-			}
-			if err := waitForDaemonProcesses(cmd.Context(), pids, daemonRestartProcessWaitTimeout); err != nil {
-				return err
-			}
-			out, err := startDetachedDaemon(cmd.Context(), listen, insecureReadonly, noAutoToken)
-			if err != nil {
-				return err
+				out, err = startDetachedDaemon(cmd.Context(), listen, insecureReadonly, noAutoToken)
+				if err != nil {
+					return err
+				}
+			} else {
+				target := newDaemonRestart(io.Discard)
+				if target == nil {
+					return fmt.Errorf("cannot resolve the installed restart executable")
+				}
+				var flags []string
+				for _, name := range []string{"listen", "insecure-readonly", "no-auto-token"} {
+					if f := cmd.Flags().Lookup(name); f.Changed {
+						flags = append(flags, "--"+name+"="+f.Value.String())
+					}
+				}
+				for _, rec := range running {
+					replacement, err := requestDaemonRestart(cmd.Context(), ns, rec, target.executable, flags)
+					if err != nil {
+						return err
+					}
+					pids = append(pids, rec.PID)
+					out = daemonStartOutputFromRecord("restarted", replacement)
+				}
 			}
 			switch currentOutputMode() {
 			case outputJSON:
@@ -1200,7 +1240,7 @@ func announceIdleShutdown(w io.Writer, timeout time.Duration) {
 func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) error {
 	restart := newDaemonRestart(os.Stderr)
 	if err := runDaemonProcess(ctx, listen, insecureReadonly, noAutoToken, restart); err != nil {
-		return err
+		return reportRestartFailure(err)
 	}
 	return restart.exec(ctx)
 }
@@ -1408,9 +1448,7 @@ func runDaemonProcess(
 		rec.Metadata["config_"+key+"_source"] = source
 	}
 	maps.Copy(rec.Metadata, webRuntime.Metadata())
-	if restart != nil {
-		rec.Metadata[daemonruntime.RuntimeRestartMetadataKey] = "1"
-	}
+	maps.Copy(rec.Metadata, restart.metadata())
 
 	broadcaster := daemon.NewEventBroadcaster()
 	publisher := daemon.NewEventPublisher(broadcaster, disp)
@@ -1446,7 +1484,7 @@ func runDaemonProcess(
 		var restartSignals <-chan os.Signal
 		restartSignals, restartCleanup = installRestartSource(ctx, ns.DBHash)
 		workers.Go(func() {
-			restart.watch(ctx, restartSignals, shutdownTrigger.Call)
+			restart.watch(ctx, restartSignals, func() error { return restart.accept(ctx, ns.DataDir, rec) }, daemonLog, shutdownTrigger.Call)
 		})
 	}
 	syncOutcome := daemon.NewSyncOutcomeObserver(telemetryReporter)
