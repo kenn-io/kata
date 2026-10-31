@@ -18,6 +18,10 @@ import (
 // These operation IDs are the explicit restricted-ingress allowlist. Paths
 // come from native registration so ingress cannot drift from actual routes.
 var signingCapabilities = map[string][]string{
+	"createCronJob":                 {"push"},
+	"replaceCronJob":                {"push"},
+	"archiveCronJob":                {"push"},
+	"restoreCronJob":                {"push"},
 	"getFederationProjectMetadata":  {"pull", "push"},
 	"pollFederationProjectEvents":   {"pull"},
 	"ingestFederationProjectEvents": {"push"},
@@ -31,6 +35,15 @@ var signingCapabilities = map[string][]string{
 	"renewIssueLease":               {"claim"},
 	"releaseIssueLease":             {"claim"},
 	"getIssueLeaseStatus":           {"claim"},
+}
+
+func isCronJobWriteOperation(operation string) bool {
+	switch operation {
+	case "createCronJob", "replaceCronJob", "archiveCronJob", "restoreCronJob":
+		return true
+	default:
+		return false
+	}
 }
 
 type signingRoute struct {
@@ -79,9 +92,9 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 				next.ServeHTTP(w, r)
 				return
 			}
-			// Owner/identity lease operations remain ordinary daemon operations.
+			// Owner/identity lease and cron writes remain ordinary daemon operations.
 			// Ingress never takes this local-authority path.
-			if slices.Contains(route.capabilities, "claim") {
+			if slices.Contains(route.capabilities, "claim") || isCronJobWriteOperation(route.operation) {
 				if _, ok := PrincipalFromContext(r.Context()); ok || validLocalBearer(s.cfg.Auth.Token, r.Header.Get("Authorization")) || !hasBearerHeader(r.Header.Get("Authorization")) {
 					next.ServeHTTP(w, r)
 					return
@@ -92,7 +105,7 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 		// used by metadata, event polls, and lease requests.
 		admission := s.federationControlAdmission
 		bodyLimit := int64(64 << 10)
-		if route.operation == "ingestFederationProjectEvents" || route.operation == "acceptRelayDeliveries" {
+		if route.operation == "ingestFederationProjectEvents" || route.operation == "acceptRelayDeliveries" || isCronJobWriteOperation(route.operation) {
 			admission = s.federationIngestAdmission
 			bodyLimit = federationsigning.MaxBodyBytes
 		}

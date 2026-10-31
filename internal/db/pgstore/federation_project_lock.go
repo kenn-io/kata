@@ -61,3 +61,28 @@ func (s *Store) acquireFederationProjectLock(
 		})
 	}, nil
 }
+
+// TryAcquireFederationProjectSharedLock never waits behind another process's
+// rebind. A false result leaves no transaction or advisory lock behind.
+func (s *Store) TryAcquireFederationProjectSharedLock(ctx context.Context, projectID int64) (func(), bool, error) {
+	if s.federationLockDB == nil {
+		return nil, false, errors.New("postgres federation project coordinator is unavailable")
+	}
+	tx, err := s.federationLockDB.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("begin postgres federation project lock: %w", err)
+	}
+	identity := fmt.Sprintf("kata:federation:project:%s:%d", s.schema, projectID)
+	var acquired bool
+	err = tx.QueryRowContext(ctx, `SELECT pg_catalog.pg_try_advisory_xact_lock_shared(
+ pg_catalog.hashtextextended(pg_catalog.current_database() || ':' || $1, 0))`, identity).Scan(&acquired)
+	if err != nil || !acquired {
+		_ = tx.Rollback()
+		if err != nil {
+			return nil, false, fmt.Errorf("try postgres federation project lock: %w", mapSQLError(err, nil))
+		}
+		return nil, false, nil
+	}
+	var once sync.Once
+	return func() { once.Do(func() { _ = tx.Rollback() }) }, true, nil
+}

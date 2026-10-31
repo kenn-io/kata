@@ -19,6 +19,30 @@ type PurgeProjectHeaders struct {
 	XKataConfirm *string `json:"X-Kata-Confirm,omitempty"`
 }
 
+type CreateCronJobHeaders struct {
+	Authorization *string `json:"Authorization,omitempty"`
+}
+
+type ArchiveCronJobHeaders struct {
+	Authorization *string `json:"Authorization,omitempty"`
+}
+
+type ReplaceCronJobHeaders struct {
+	Authorization *string `json:"Authorization,omitempty"`
+}
+
+type RestoreCronJobHeaders struct {
+	Authorization *string `json:"Authorization,omitempty"`
+}
+
+type ArchiveCronWorkflowHeaders struct {
+	Authorization *string `json:"Authorization,omitempty"`
+}
+
+type RestoreCronWorkflowHeaders struct {
+	Authorization *string `json:"Authorization,omitempty"`
+}
+
 type PollFederationProjectEventsHeaders struct {
 	XKataEventFeatures *string `json:"X-Kata-Event-Features,omitempty"`
 	Authorization      *string `json:"Authorization,omitempty"`

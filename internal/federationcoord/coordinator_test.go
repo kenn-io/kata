@@ -2,6 +2,7 @@ package federationcoord
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -59,4 +60,37 @@ func TestBackendProjectLockCoordinatesDistinctProcessGates(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("backend rebind lock did not acquire after transport release")
 	}
+}
+
+func TestTrySyncBusyAndShared(t *testing.T) {
+	release, err := BeginRebind(t.Context(), t.Name(), nil, 1)
+	require.NoError(t, err)
+	start := time.Now()
+	_, err = TryBeginSync(t.Context(), t.Name(), nil, 1)
+	require.ErrorIs(t, err, ErrBusy)
+	require.Less(t, time.Since(start), time.Second)
+	release()
+	a, err := TryBeginSync(t.Context(), t.Name(), nil, 1)
+	require.NoError(t, err)
+	defer a()
+	b, err := TryBeginSync(t.Context(), t.Name(), nil, 1)
+	require.NoError(t, err)
+	b()
+	b()
+}
+
+type tryProjectLocker struct{}
+
+func (tryProjectLocker) AcquireFederationProjectSharedLock(context.Context, int64) (func(), error) {
+	return nil, errors.New("blocking path must not be used")
+}
+func (tryProjectLocker) TryAcquireFederationProjectSharedLock(context.Context, int64) (func(), bool, error) {
+	return nil, false, nil
+}
+func TestTrySyncBackendBusy(t *testing.T) {
+	_, err := TryBeginSync(t.Context(), t.Name(), tryProjectLocker{}, 1)
+	require.ErrorIs(t, err, ErrBusy)
+	release, err := TryBeginSync(t.Context(), t.Name(), nil, 1)
+	require.NoError(t, err)
+	release()
 }
