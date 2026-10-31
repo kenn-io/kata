@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-30
+last_edited: 2026-10-31
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,6 +9,14 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Create and change cron jobs from `kata tui`. On the Jobs tab, press `n` to
+  make a job, `e` to edit one, `p` to pause or resume it, and `d` or `u` to
+  archive or restore it. The form covers recurring child issues, agent prompts,
+  workflows and notifications with every trigger, shows kata's validation
+  beside the field, and keeps unknown adapter `options` keys and exact numbers.
+  A job that changed while you edited keeps your draft and offers to apply it
+  to the current definition. See
+  [the `kata tui` keys](reference/cli.md#daemon-and-diagnostics).
 - Show what is stuck in any web collection, Inbox and Today included, with the
   optional **Blocked by** column. It lists each task's open blockers, three IDs
   at most and then `+N`; closed blockers are left out. It is off by default;

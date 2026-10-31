@@ -19,6 +19,6 @@ kata カタ [jobs] runs workflows
       "kind": "per-run",
       "title": "Summary result"
     },
-    "kind": "job",
 
- j/k move▕ ↵/l follow▕ h/esc back▕ r refresh▕ 1-4 tabs▕ ? help▕ q quit
+ j/k move ▕ ↵/l follow▕ h/esc back▕ n/e new/edit▕ p pause▕ d/u archive/restore
+ r refresh▕ 1-4 tabs  ▕ ? help    ▕ q quit

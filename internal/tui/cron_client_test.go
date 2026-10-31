@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -80,4 +82,58 @@ func TestCronClientReadsStoredRecords(t *testing.T) {
 	require.Len(t, runs, 1)
 	require.Equal(t, "Report ready", deref(runs[0].Summary.Message))
 	require.Equal(t, project.ID, runs[0].ProjectID)
+}
+
+func manualExecuteJob(options string) cron.JobDefinition {
+	return cron.JobDefinition{
+		Version: 1, Kind: "job", Enabled: true,
+		Trigger: cron.Trigger{Kind: "manual"},
+		Action:  cron.Action{Kind: "execute", Prompt: "Summarize"},
+		Issue:   &cron.IssuePolicy{Kind: "per-run", Title: "Summary"},
+		Overlap: "forbid", Catchup: "latest",
+		Options: jsontext.Value(options),
+	}
+}
+
+func TestCronClientWriteGuardsEditsAndArchives(t *testing.T) {
+	env := testenv.New(t)
+	c := NewClient(env.URL, env.HTTP)
+	project, err := c.EnsureProject(t.Context(), "cron-write-example", "alice")
+	require.NoError(t, err)
+	ctx := t.Context()
+	const uid = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+
+	require.NoError(t, c.PutCronJob(ctx, project.ID, uid, CronJobWrite{Name: "Digest", Actor: "alice", Definition: manualExecuteJob(`{}`)}))
+	shown, err := c.ShowCronJob(ctx, project.ID, uid)
+	require.NoError(t, err)
+
+	shown.Definition.Enabled = false
+	err = c.PutCronJob(ctx, project.ID, uid, CronJobWrite{Name: "Digest", Actor: "alice", Definition: shown.Definition, ExpectedEventUID: "01ARZ3NDEKTSV4RRFFQ69G5FB9"})
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	require.Equal(t, 409, apiErr.Status)
+
+	require.NoError(t, c.PutCronJob(ctx, project.ID, uid, CronJobWrite{Name: "Digest", Actor: "alice", Definition: shown.Definition, ExpectedEventUID: shown.DefinitionEventUID}))
+	updated, err := c.ShowCronJob(ctx, project.ID, uid)
+	require.NoError(t, err)
+	require.False(t, updated.Definition.Enabled)
+
+	require.NoError(t, c.ArchiveCronJob(ctx, project.ID, uid, updated.DefinitionEventUID, "alice"))
+	live, err := c.ListCronJobs(ctx, project.ID)
+	require.NoError(t, err)
+	require.Empty(t, live)
+	archived, err := c.ListArchivedCronJobs(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, archived, 1)
+	require.NoError(t, c.RestoreCronJob(ctx, project.ID, uid, archived[0].DefinitionEventUID, "alice"))
+	live, err = c.ListCronJobs(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, live, 1)
+}
+
+func TestCronJobRecordRefusesDefinitionsItWouldDrop(t *testing.T) {
+	body := `{"job":{"uid":"01ARZ3NDEKTSV4RRFFQ69G5FAV","name":"Digest","definition_event_uid":"01ARZ3NDEKTSV4RRFFQ69G5FB2","definition":{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"manual"},"action":{"kind":"execute","prompt":"x"},"issue":{"kind":"per-run","title":"t"},"overlap":"forbid","catchup":"latest","options":{"free":1},"newer_member":{"a":1}}}}`
+	_, err := decodeCronJobRecord([]byte(body))
+	require.ErrorContains(t, err, "newer_member")
+	require.ErrorContains(t, err, "newer kata")
 }

@@ -836,6 +836,12 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case cronLoadedMsg:
 		return m.cronLoaded(msg), nil, true
+	case cronEditOpenedMsg:
+		next, cmd := m.cronEditOpened(msg)
+		return next, cmd, true
+	case cronSavedMsg:
+		next, cmd := m.cronSaved(msg)
+		return next, cmd, true
 	case tea.BackgroundColorMsg:
 		// The terminal answered Init's in-loop background query. Only
 		// colorAuto consults the answer — explicit KATA_COLOR_MODE
@@ -3015,7 +3021,7 @@ func toastExpireCmd(d time.Duration) tea.Cmd {
 // /forms) or a confirm modal (quit or draft discard) is open. Both
 // gates redirect global keys into the field instead of firing.
 func (m Model) canQuit() bool {
-	if m.view == viewCron && m.cron.filtering {
+	if m.view == viewCron && (m.cron.filtering || m.cron.form != nil || m.cron.confirm != nil) {
 		return false
 	}
 	if m.modal != modalNone {
@@ -3047,6 +3053,15 @@ func (m Model) routeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		case "y", "Y":
 			m.detail.cancelReads()
 			return m, tea.Quit
+		case "n", "N", "esc":
+			m.modal = modalNone
+			return m, nil
+		}
+	case modalDiscardCronJob:
+		switch msg.String() {
+		case "y", "Y":
+			m.modal, m.cron.form = modalNone, nil
+			return m, nil
 		case "n", "N", "esc":
 			m.modal = modalNone
 			return m, nil
@@ -3624,6 +3639,9 @@ func (m Model) viewBody() string {
 	case viewCron:
 		if m.cron.help {
 			return cronHelp(m)
+		}
+		if m.cron.form != nil {
+			return renderCronForm(m)
 		}
 		return renderCron(m)
 	case viewHelp:

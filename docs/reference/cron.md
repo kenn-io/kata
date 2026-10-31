@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-10-30
+last_edited: 2026-10-31
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -13,7 +13,7 @@ observations. External adapters schedule other jobs, resolve checkout and provid
 configuration, create or update ordinary issues, deliver notifications, and launch processes.
 An observation records evidence; its status does not control whether anything runs.
 
-Browse jobs, runs, and workflows in `kata tui` with the `2`, `3`, and `4` tabs for the current project.
+Browse jobs, runs, and workflows in `kata tui` with the `2`, `3`, and `4` tabs for the current project. On the Jobs tab, create, edit, pause, archive, and restore jobs; see the [`kata tui` keys](cli.md#daemon-and-diagnostics).
 
 ## Vocabulary
 

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 
@@ -32,8 +33,10 @@ type cronList struct {
 type cronData struct {
 	conn, scope, events uint64
 	jobs                []generated.CronJob
+	archived            []generated.CronJob
 	workflows           []generated.CronWorkflow
 	runs                []generated.CronRun
+	archivedErr         error
 	jobsErr             error
 	workflowsErr        error
 	runsErr             error
@@ -43,7 +46,7 @@ type cronLoadedMsg cronData
 func (p cronData) readError(kind int) error {
 	switch kind {
 	case cronJobs:
-		return p.jobsErr
+		return errors.Join(p.jobsErr, p.archivedErr)
 	case cronRuns:
 		return p.runsErr
 	case cronWorkflows:
@@ -61,6 +64,9 @@ type cronState struct {
 	events          uint64
 	out             bool
 	conn, scope     uint64
+	form            *cronForm
+	confirm         *cronConfirm
+	archived        bool
 }
 
 // Synchronize after every update and retain visible records during refresh.
@@ -78,10 +84,13 @@ func (m Model) cronSync() (Model, tea.Cmd) {
 	return m, m.fetchCron()
 }
 func (m Model) fetchCron() tea.Cmd {
-	reader, id := m.api, m.scope.projectID
+	reader, id, archived := m.api, m.scope.projectID, m.cron.archived
 	data := cronData{conn: m.connGen, scope: m.scopeGen, events: m.cron.events}
 	return func() tea.Msg {
 		data.jobs, data.jobsErr = cronRead(reader.ListCronJobs, id)
+		if archived {
+			data.archived, data.archivedErr = cronRead(reader.ListArchivedCronJobs, id)
+		}
 		data.workflows, data.workflowsErr = cronRead(reader.ListCronWorkflows, id)
 		data.runs, data.runsErr = cronRead(reader.ListCronRuns, id)
 		return cronLoadedMsg(data)
@@ -100,6 +109,9 @@ func (m Model) cronLoaded(msg cronLoadedMsg) Model {
 	if previous := m.cron.data; previous != nil {
 		if data.jobsErr != nil {
 			data.jobs = previous.jobs
+		}
+		if data.archivedErr != nil {
+			data.archived = previous.archived
 		}
 		if data.workflowsErr != nil {
 			data.workflows = previous.workflows
@@ -174,6 +186,12 @@ func (m Model) cronFilter(text string) Model {
 
 func (m Model) routeCronKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	key := msg.String()
+	if m.cron.form != nil {
+		return m.routeCronFormKey(msg)
+	}
+	if m.cron.confirm != nil {
+		return m.routeCronConfirmKey(msg)
+	}
 	if m.cron.help {
 		if key == "esc" || key == "h" {
 			m.cron.help = false
@@ -215,6 +233,11 @@ func (m Model) routeCronKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		*cursor -= max(m.height-8, 1)
 	case m.keymap.PageDown.matches(msg):
 		*cursor += max(m.height-8, 1)
+	case key == "n", key == "e", key == "p", key == "d", key == "u", key == "a":
+		next, cmd, handled := m.routeCronJobKey(key, lines, *cursor)
+		if handled {
+			return next, cmd
+		}
 	case key == "enter" || key == "l":
 		if len(lines) > 0 && lines[*cursor].target.uid != "" {
 			m.cron.stack = append(m.cron.stack, cronFrame{ref: lines[*cursor].target})
@@ -274,6 +297,9 @@ func (p cronData) workflowJobs(uid string) []generated.CronJob {
 }
 
 func cronJobState(j generated.CronJob) string {
+	if j.DeletedAt != nil {
+		return "archived"
+	}
 	if j.Definition.Enabled {
 		return "enabled"
 	}
