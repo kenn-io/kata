@@ -16,7 +16,7 @@
 
 
 
-
  [kata カタ] jobs runs workflows                                                                                  [1/2]
- ↑↓ move▕ ↵ open ▕ space expand▕ E all    ▕ n new       ▕ N child      ▕ / search▕ f filter▕ s status▕ v view▕ o order
- c clear▕ x close▕ ! priority  ▕ D daemons▕ F federation▕ C credentials▕ L layout▕ ? help  ▕ q quit
+ ↑↓ move▕ ↵ open ▕ space expand▕ E all  ▕ n new     ▕ N child  ▕ / search    ▕ f filter     ▕ s status▕ v view
+ o order▕ c clear▕ x close     ▕ d dates▕ ! priority▕ D daemons▕ F federation▕ C credentials▕ L layout▕ ? help
+ q quit

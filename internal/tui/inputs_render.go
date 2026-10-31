@@ -90,6 +90,8 @@ func renderCenteredForm(s inputState, width, height int) string {
 		return renderFilterForm(s, innerW)
 	case inputCloseForm:
 		return renderCloseForm(s, innerW, innerH)
+	case inputDatesForm:
+		return renderDatesForm(s, innerW)
 	}
 	return renderSingleFieldForm(s, innerW, innerH)
 }

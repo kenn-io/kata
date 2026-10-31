@@ -946,6 +946,9 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		if next, cmd, ok := m.routeCloseKey(msg); ok {
 			return next, cmd, true
 		}
+		if next, cmd, ok := m.routeDatesKey(msg); ok {
+			return next, cmd, true
+		}
 		// Detail-view `e` and `c` open M4 centered forms instead of
 		// shelling out to $EDITOR. Routed at the Model level because
 		// the form lives on m.input, which detail.Update can't reach.
@@ -1014,7 +1017,7 @@ func (m Model) mutationForKey(msg tea.KeyPressMsg) (withinSubtree, mutation bool
 	switch {
 	case m.keymap.NewIssue.matches(msg):
 		return false, true
-	case m.keymap.Close.matches(msg), m.keymap.Reopen.matches(msg):
+	case m.keymap.Close.matches(msg), m.keymap.Reopen.matches(msg), m.keymap.SetDates.matches(msg):
 		return true, true
 	case !m.detailIsActive():
 		return false, false
@@ -1769,6 +1772,9 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 	if mut.formGen != m.input.formGen {
 		return m, nil
 	}
+	if m.input.kind == inputDatesForm && isRevisionConflict(mut.err) && mut.resp != nil && mut.resp.Issue != nil {
+		return m.reloadDatesForm(*mut.resp.Issue), nil
+	}
 	if mut.err != nil {
 		m.input.saving = false
 		m.input.err = mut.kind + " failed: " + mut.err.Error()
@@ -1803,7 +1809,7 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 	// detail's body / comments list updates. Re-classify as if it
 	// came from detail (gen=current detail gen) so existing
 	// applyMutation logic kicks in.
-	if formKind == inputCloseForm {
+	if formKind == inputCloseForm || formKind == inputDatesForm {
 		mut.origin = target.origin
 		mut.gen = target.detailGen
 	} else {
@@ -1972,6 +1978,9 @@ func (m Model) commitFilterForm(form inputState) (Model, tea.Cmd) {
 func (m Model) commitFormInput(kind inputKind) (Model, tea.Cmd) {
 	if kind == inputNewIssueForm {
 		return m.commitNewIssueForm()
+	}
+	if kind == inputDatesForm {
+		return m.commitDatesForm()
 	}
 	if kind == inputCloseForm {
 		in, err := closeInputFromForm(m.input, m.list.actor)
@@ -3524,7 +3533,11 @@ func (m Model) viewContent() string {
 
 func (m Model) overlayInputAndModal(body string) string {
 	if m.input.kind.isCenteredForm() {
-		form := renderCenteredForm(m.input, m.width, m.height)
+		input := m.input
+		if input.kind == inputDatesForm {
+			input = input.withDatePreviews(m.toastNow())
+		}
+		form := renderCenteredForm(input, m.width, m.height)
 		body = overlayModal(body, form, m.width, m.height)
 	}
 	if m.modal != modalNone {

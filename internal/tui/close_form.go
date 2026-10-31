@@ -145,26 +145,33 @@ func (m Model) routeCloseKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 }
 
 func (m Model) activeCloseTarget() (formTarget, bool) {
+	target, _, ok := m.activeIssueTarget()
+	return target, ok
+}
+
+// activeIssueTarget is the issue a list or detail action key acts on: the open
+// detail's issue, else the list row under the cursor.
+func (m Model) activeIssueTarget() (formTarget, Issue, bool) {
 	if m.detailIsActive() {
 		if m.detail.issue == nil {
-			return formTarget{}, false
+			return formTarget{}, Issue{}, false
 		}
 		return formTarget{
 			projectID: m.detail.scopePID, issueShortID: m.detail.issue.ShortID,
 			detailGen: m.detail.gen, origin: "detail",
-		}, true
+		}, *m.detail.issue, true
 	}
 	if !m.listIsActive() {
-		return formTarget{}, false
+		return formTarget{}, Issue{}, false
 	}
 	issue, ok := m.list.targetRow()
 	if !ok {
-		return formTarget{}, false
+		return formTarget{}, Issue{}, false
 	}
 	return formTarget{
 		projectID: projectIDForRow(issue, m.scope), issueShortID: issue.ShortID,
 		origin: "list",
-	}, true
+	}, issue, true
 }
 
 func (m Model) openCloseForm(target formTarget) Model {
