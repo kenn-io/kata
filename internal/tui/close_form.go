@@ -134,7 +134,7 @@ func (m Model) routeCloseKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if !m.keymap.Close.matches(msg) {
 		return m, nil, false
 	}
-	target, ok := m.activeCloseTarget()
+	target, _, ok := m.activeIssueTarget()
 	if !ok {
 		return m, nil, true
 	}
@@ -142,11 +142,6 @@ func (m Model) routeCloseKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		return m.openCloseForm(target), nil, true
 	}
 	return m, dispatchLegacyClose(m.api, target, m.list.actor), true
-}
-
-func (m Model) activeCloseTarget() (formTarget, bool) {
-	target, _, ok := m.activeIssueTarget()
-	return target, ok
 }
 
 // activeIssueTarget is the issue a list or detail action key acts on: the open

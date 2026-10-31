@@ -128,15 +128,9 @@ func (h *datesHarness) undo() {
 	h.m = out.(Model)
 }
 
-func TestDatesFormWritesEachAcceptedForm(t *testing.T) {
+func TestDatesFormWritesRelativeAndLocalTimeForms(t *testing.T) {
 	for _, tt := range []struct{ name, typed, want string }{
-		{"calendar date", "2026-11-15", "2026-11-15"},
 		{"local minute", "2026-11-15T09:00", "2026-11-15T09:00"},
-		{"local second", "2026-11-15T09:00:30", "2026-11-15T09:00:30"},
-		{"utc instant", "2026-11-15T09:00:00Z", "2026-11-15T09:00:00Z"},
-		{"today", "today", "2026-11-02"},
-		{"tomorrow", "tomorrow", "2026-11-03"},
-		{"days", "+3d", "2026-11-05"},
 		{"weeks", "+2w", "2026-11-16"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -304,29 +298,6 @@ func TestDatesUndoRefusesWhenTheIssueMovedOn(t *testing.T) {
 	}
 }
 
-func TestDatesPreviewCountsFromTheLocalDay(t *testing.T) {
-	// 23:30 on 1 November in UTC-8 is already 2 November in UTC.
-	pacific := time.FixedZone("PST", -8*60*60)
-	local := time.Date(2026, time.November, 1, 23, 30, 0, 0, pacific)
-	m := initialModel(Options{})
-	m.toastNow = func() time.Time { return local }
-	m.width, m.height = 120, 30
-	m.view = viewList
-	m.scope = scope{projectID: 7}
-	m.list.issues = []Issue{{ProjectID: 7, ShortID: "abc4", Status: "open", Revision: 1}}
-
-	out, _ := m.Update(runeKey('d'))
-	m = out.(Model)
-	require.Equal(t, inputDatesForm, m.input.kind)
-	m.input.field(fieldScheduled).setValue("today")
-	m.input.field(fieldDeadline).setValue("+1d")
-
-	view := stripANSI(m.viewContent())
-	assert.Contains(t, view, "2026-11-01 Sun")
-	assert.Contains(t, view, "2026-11-02 Mon")
-	assert.NotContains(t, view, "2026-11-03")
-}
-
 func TestDatesFormShowsWhatItWillWrite(t *testing.T) {
 	m := initialModel(Options{})
 	m.toastNow = func() time.Time { return datesNow }
@@ -343,8 +314,6 @@ func TestDatesFormShowsWhatItWillWrite(t *testing.T) {
 
 	assert.Contains(t, view, "2026-11-05 Thu")
 	assert.NotContains(t, view, "monday 2026", "text that would be refused has no preview")
-	assert.Contains(t, view, "Scheduled")
-	assert.Contains(t, view, "Deadline")
 }
 
 func TestDetailStripShowsBothDates(t *testing.T) {

@@ -26,13 +26,12 @@ type datesAPI interface {
 }
 
 // datesFormState is what a Dates form needs beyond its fields: the revision it
-// read, the raw dates it was opened with (a field left alone is never written,
-// so a stored time keeps its time), and the clock the previews count from.
+// read and the raw dates it was opened with (a field left alone is never written,
+// so a stored time keeps its time).
 type datesFormState struct {
 	revision  int64
 	scheduled string
 	deadline  string
-	now       time.Time
 }
 
 const datesChangedMessage = "The issue changed since the form opened; nothing was written. The form now shows the current dates."
@@ -198,23 +197,13 @@ func (m Model) reloadDatesForm(current Issue) Model {
 	return m
 }
 
-// withDatePreviews stamps the clock the previews count from.
-func (s inputState) withDatePreviews(now time.Time) inputState {
-	s.dates.now = now
-	return s
-}
-
 // renderDatesForm lays out the two date fields, each with the day its text
 // resolves to underneath.
-func renderDatesForm(s inputState, innerW int) string {
+func renderDatesForm(s inputState, innerW int, now time.Time) string {
 	parts := []string{titleStyle.Render(s.title)}
 	for idx := range s.fields {
 		parts = append(parts, renderNewIssueField(s, idx, innerW))
-		preview := ""
-		if !s.dates.now.IsZero() {
-			preview = datePreview(s.fields[idx].value(), s.dates.now)
-		}
-		parts = append(parts, subtleStyle.Render(sanitizeForDisplay(preview)))
+		parts = append(parts, subtleStyle.Render(sanitizeForDisplay(datePreview(s.fields[idx].value(), now))))
 	}
 	if status := renderFormStatus(s); status != "" {
 		parts = append(parts, status)

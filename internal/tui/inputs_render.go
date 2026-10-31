@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 )
@@ -77,7 +78,7 @@ func renderPanelPrompt(s inputState, width int) string {
 // single-field forms (edit-body, comment) keep the M4 layout. Plan 8
 // commit 5a added the filter modal, which is multi-field but uses a
 // radio for the Status axis instead of a textinput.
-func renderCenteredForm(s inputState, width, height int) string {
+func renderCenteredForm(s inputState, width, height int, now time.Time) string {
 	if width < formMinWidth || height < formMinHeight {
 		return renderTinyFormFallback(s)
 	}
@@ -91,7 +92,7 @@ func renderCenteredForm(s inputState, width, height int) string {
 	case inputCloseForm:
 		return renderCloseForm(s, innerW, innerH)
 	case inputDatesForm:
-		return renderDatesForm(s, innerW)
+		return renderDatesForm(s, innerW, now)
 	}
 	return renderSingleFieldForm(s, innerW, innerH)
 }

@@ -3533,11 +3533,11 @@ func (m Model) viewContent() string {
 
 func (m Model) overlayInputAndModal(body string) string {
 	if m.input.kind.isCenteredForm() {
-		input := m.input
-		if input.kind == inputDatesForm {
-			input = input.withDatePreviews(m.toastNow())
+		var now time.Time
+		if m.input.kind == inputDatesForm {
+			now = m.toastNow()
 		}
-		form := renderCenteredForm(input, m.width, m.height)
+		form := renderCenteredForm(m.input, m.width, m.height, now)
 		body = overlayModal(body, form, m.width, m.height)
 	}
 	if m.modal != modalNone {
