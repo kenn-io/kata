@@ -3934,11 +3934,3 @@ func TestDaemonControlsSkipUnknownRecord(t *testing.T) {
 		})
 	}
 }
-
-func TestDaemonRestart_RemovesRequestAfterSignalFailure(t *testing.T) {
-	dir := t.TempDir()
-	rec := kitdaemon.RuntimeRecord{PID: 1 << 30, StartedAt: time.Unix(1, 0)}
-	_, err := requestDaemonRestart(t.Context(), &daemonruntime.Namespace{DataDir: dir}, rec, "/installed/kata")
-	require.Error(t, err)
-	require.NoFileExists(t, restartRequestPath(dir, rec))
-}

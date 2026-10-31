@@ -1805,8 +1805,7 @@ restart` asks each running local daemon to replace itself in its original
 environment, using the installed executable invoked by the CLI and retaining
 its startup options, credentials, network, and idle policy. The CLI and daemon
 must see the same process IDs and executable paths. The daemon checks settings with the selected executable in its own environment before stopping; an
-invalid configuration leaves it serving, and the command reports a bounded
-timeout with available daemon-log diagnostics. Restart flags apply only when stopped.
+invalid configuration leaves it serving, and the command reports the replacement's startup error. Restart flags apply only when stopped.
 To change startup flags, or replace an older daemon that supports only restart
 signals rather than executable selection, run
 `kata daemon stop` followed by `kata daemon start` with the desired options. Background start and restart output reports the

@@ -88,9 +88,9 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 		require.NoError(t, err, "%s", output)
 		binaries[version] = binary
 	}
-	scenarios := []string{"running", "stopped", "check only", "cancelled", "install failure", "read-only TCP", "older daemon", "daemon token", "idle shutdown"}
+	scenarios := []string{"running", "stopped", "check only", "cancelled", "install failure", "restart failure", "read-only TCP", "older daemon", "daemon token", "idle shutdown"}
 	if explicitRestart {
-		scenarios = []string{"restart failure", "older daemon", "startup flags", "upgrade retained", "upgrade removed", "cancelled restart", "new config"}
+		scenarios = []string{"restart failure", "older daemon", "startup flags", "upgrade removed", "cancelled restart", "new config"}
 	}
 	for _, scenario := range scenarios {
 		t.Run(scenario, func(t *testing.T) {
@@ -106,16 +106,13 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 			copyTestExecutable(t, binaries["v0.1.0"], binary)
 			launchBinary := binary
 			cli := binaries["v0.2.0"]
-			if strings.HasPrefix(scenario, "upgrade") {
+			if scenario == "upgrade removed" {
 				if runtime.GOOS == "windows" {
-					if scenario == "upgrade removed" {
-						t.Skip("installation symlink regression is Unix-specific")
-					}
-				} else {
-					launchBinary = filepath.Join(t.TempDir(), "kata")
-					require.NoError(t, os.Symlink(binary, launchBinary))
-					cli = launchBinary
+					t.Skip("installation symlink regression is Unix-specific")
 				}
+				launchBinary = filepath.Join(t.TempDir(), "kata")
+				require.NoError(t, os.Symlink(binary, launchBinary))
+				cli = launchBinary
 			}
 			env := append(append([]string(nil), childEnv...), "KATA_HOME="+home, "KATA_DB="+filepath.Join(home, "kata.db"), "KATA_WORKSPACE="+workspace, "KATA_AUTHOR=user-a")
 			restartCLI := func(args ...string) (string, error) {
@@ -170,13 +167,6 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 				process := exec.Command(launchBinary, args...) //nolint:gosec // test-owned binary and fixed arguments
 				process.Env = env
 				process.Stderr = os.Stderr
-				if scenario == "restart failure" {
-					require.NoError(t, ns.EnsureDirs())
-					logFile, err := os.OpenFile(filepath.Join(ns.DataDir, "daemon.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // G304: test-owned daemon log
-					require.NoError(t, err)
-					t.Cleanup(func() { assert.NoError(t, logFile.Close()) })
-					process.Stderr = logFile
-				}
 				require.NoError(t, process.Start())
 				exited := make(chan error, 1)
 				go func() { exited <- process.Wait() }()
@@ -224,10 +214,10 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 			}
 			var stdout, stderr string
 			var updateErr error
+			if scenario == "restart failure" {
+				require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("invalid = ["), 0600))
+			}
 			if explicitRestart {
-				if scenario == "restart failure" {
-					require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("invalid = ["), 0600))
-				}
 				if scenario == "startup flags" {
 					for _, flag := range []string{"--listen=127.0.0.1:0", "--insecure-readonly=false", "--no-auto-token=false"} {
 						output, err := restartCLI(flag)
@@ -237,12 +227,10 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 					}
 					return
 				}
-				if strings.HasPrefix(scenario, "upgrade") && runtime.GOOS != "windows" {
+				if scenario == "upgrade removed" {
 					require.NoError(t, os.Remove(launchBinary))
 					require.NoError(t, os.Symlink(binaries["v0.2.0"], launchBinary))
-					if scenario == "upgrade removed" {
-						require.NoError(t, os.Remove(binary))
-					}
+					require.NoError(t, os.Remove(binary))
 				}
 				if scenario == "new config" {
 					require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("future_setting = 'accepted'\n"), 0600))
@@ -265,6 +253,9 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 					require.Eventually(t, func() bool { _, err := os.Stat(restartRequestPath(ns.DataDir, before)); return err == nil }, 10*time.Second, 20*time.Millisecond)
 					require.NoError(t, command.Process.Signal(os.Interrupt))
 					require.Error(t, command.Wait())
+					replies, err := filepath.Glob(filepath.Join(ns.DataDir, "restart-reply-*"))
+					require.NoError(t, err)
+					assert.Empty(t, replies)
 					signal("-CONT")
 					//nolint:kennlint // sleeptest: External daemon publishes replacement readiness through its runtime record.
 					require.Eventually(t, func() bool { return record().StartedAt.After(before.StartedAt) }, 10*time.Second, 20*time.Millisecond)
@@ -290,7 +281,9 @@ func testDaemonLifecycle(t *testing.T, explicitRestart bool) {
 			}
 			if scenario == "restart failure" {
 				require.Error(t, updateErr)
-				assert.Contains(t, stdout, "validate replacement", "return daemon-side validation diagnostics")
+				assert.Contains(t, stdout+updateErr.Error(), "validate replacement")
+				assert.Contains(t, stdout+updateErr.Error(), "parse "+filepath.Join(home, "config.toml"))
+				assert.NotContains(t, stdout+updateErr.Error(), "did not restart within")
 				assert.Equal(t, before.StartedAt, record().StartedAt)
 				httpClient, baseURL := client.LocalHTTPClient(before.Endpoint().ConfigAddress())
 				status, _, err := httpDoJSON(t.Context(), httpClient, http.MethodGet, baseURL+"/api/v1/ping", nil)

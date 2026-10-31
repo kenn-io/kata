@@ -6,9 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/daemonruntime"
+	kitdaemon "go.kenn.io/kit/daemon"
 )
 
 func stubDaemonExecutable(t *testing.T, resolve func() (string, error)) {
@@ -56,4 +59,15 @@ func TestNewDaemonRestart_ResolvesSymlinkedExecutable(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, expected, restart.executable)
 	assert.Empty(t, stderr.String())
+}
+
+func TestDaemonRestart_RemovesRequestAfterSignalFailure(t *testing.T) {
+	dir := t.TempDir()
+	rec := kitdaemon.RuntimeRecord{PID: 1 << 30, StartedAt: time.Unix(1, 0), Metadata: map[string]string{daemonruntime.RuntimeRestartExecutableKey: "1"}}
+	_, err := requestDaemonRestart(t.Context(), &daemonruntime.Namespace{DataDir: dir}, rec, "/installed/kata")
+	require.Error(t, err)
+	require.NoFileExists(t, restartRequestPath(dir, rec))
+	replies, err := filepath.Glob(filepath.Join(dir, "restart-reply-*"))
+	require.NoError(t, err)
+	assert.Empty(t, replies)
 }

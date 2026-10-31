@@ -14,6 +14,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   uses the CLI's installed executable while
   retaining its own environment, startup options, and idle policy. Changing
   startup flags or replacing an older signal-only daemon requires stop/start.
+  `kata update` also reports the startup error when the daemon refuses to restart.
 
 - Show what is stuck in any web collection, Inbox and Today included, with the
   optional **Blocked by** column. It lists each task's open blockers, three IDs

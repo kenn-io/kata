@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -167,11 +168,14 @@ const updateDaemonReplacementGrace = 5 * time.Second
 // after previous. On Unix the daemon keeps its PID across re-execution, so a
 // newer record rather than a new PID identifies the replacement.
 func waitForDaemonReplacement(
-	ctx context.Context, store kitdaemon.RuntimeStore, previous kitdaemon.RuntimeRecord,
+	ctx context.Context, store kitdaemon.RuntimeStore, previous kitdaemon.RuntimeRecord, reply string,
 ) (kitdaemon.RuntimeRecord, error) {
 	deadline := time.Now().Add(daemonRestartProcessWaitTimeout)
 	var exitedAt time.Time
 	for {
+		if refusal, _ := os.ReadFile(reply); len(refusal) != 0 { //nolint:gosec // caller-owned private reply file
+			return kitdaemon.RuntimeRecord{}, fmt.Errorf("restart: validate replacement: %s", refusal)
+		}
 		records, err := store.List()
 		if err != nil {
 			return kitdaemon.RuntimeRecord{}, err

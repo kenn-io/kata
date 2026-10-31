@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -15,6 +17,7 @@ import (
 
 	"go.kenn.io/kit/atomicfile"
 	kitdaemon "go.kenn.io/kit/daemon"
+	"go.kenn.io/kit/safefileio"
 
 	"go.kenn.io/kit/pathresolve"
 )
@@ -94,28 +97,39 @@ func validateDaemonReplacement(ctx context.Context, executable string) error {
 	return nil
 }
 
+type restartRequest struct {
+	Executable, Reply string
+}
+
 func restartRequestPath(dir string, rec kitdaemon.RuntimeRecord) string {
 	return filepath.Join(dir, fmt.Sprintf("restart.%d.%d", rec.PID, rec.StartedAt.UnixNano()))
 }
 
 func requestDaemonRestart(ctx context.Context, ns *daemonruntime.Namespace, previous kitdaemon.RuntimeRecord, executable string) (kitdaemon.RuntimeRecord, error) {
-	if executable != "" {
-		request := restartRequestPath(ns.DataDir, previous)
-		if err := atomicfile.WriteFile(request, []byte(executable), atomicfile.WithPrivate()); err != nil {
+	var reply string
+	if previous.Metadata[daemonruntime.RuntimeRestartExecutableKey] == "1" {
+		file, err := safefileio.CreatePrivateTemp(ns.DataDir, "restart-reply-*")
+		if err != nil {
+			return kitdaemon.RuntimeRecord{}, err
+		}
+		reply = file.Name()
+		defer func() { _ = os.Remove(reply) }()
+		if err := file.Close(); err != nil {
+			return kitdaemon.RuntimeRecord{}, err
+		}
+		payload, _ := json.Marshal(restartRequest{Executable: executable, Reply: filepath.Base(reply)})
+		if err := atomicfile.WriteNew(restartRequestPath(ns.DataDir, previous), payload, atomicfile.WithPrivate()); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				return kitdaemon.RuntimeRecord{}, fmt.Errorf("daemon pid %d already has a pending restart: %w", previous.PID, err)
+			}
 			return kitdaemon.RuntimeRecord{}, err
 		}
 	}
 	if err := daemonruntime.SignalDaemonRestart(previous, ns.DBHash); err != nil {
-		if executable != "" {
+		if reply != "" {
 			_ = os.Remove(restartRequestPath(ns.DataDir, previous))
 		}
 		return kitdaemon.RuntimeRecord{}, fmt.Errorf("signal daemon pid %d: %w", previous.PID, err)
 	}
-	replacement, err := waitForDaemonReplacement(ctx, kitdaemon.RuntimeStore{Dir: ns.DataDir}, previous)
-	if err != nil {
-		if tail := daemonStartLogTail(ns.DataDir); tail != "" {
-			err = fmt.Errorf("%w\n%s", err, tail)
-		}
-	}
-	return replacement, err
+	return waitForDaemonReplacement(ctx, kitdaemon.RuntimeStore{Dir: ns.DataDir}, previous, reply)
 }
