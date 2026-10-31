@@ -139,7 +139,11 @@ func cronScreen(m Model) (string, string, []cronLine) {
 		runs := p.runs
 		switch m.cron.tab {
 		case cronJobs:
-			for _, j := range p.jobs {
+			jobs := p.jobs
+			if m.cron.archived {
+				jobs = p.archived
+			}
+			for _, j := range jobs {
 				add(j.UID, []string{j.Name, cronJobState(j), cronSchedule(j.Definition.Trigger), cronAction(*p, j), cronLast(runs, j.UID, false)})
 			}
 		case cronRuns:
@@ -154,6 +158,9 @@ func cronScreen(m Model) (string, string, []cronLine) {
 	}
 	noun := []string{"", "job", "run", "workflow"}[m.cron.tab]
 	title := cronCount(len(lines), noun)
+	if m.cron.tab == cronJobs && m.cron.archived {
+		title = cronCount(len(lines), "archived job")
+	}
 	if m.cron.tab == cronRuns {
 		title = cronCount(len(lines), "loaded run") + " · newest 100"
 	}
@@ -199,7 +206,7 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 	name := ""
 	switch ref.kind {
 	case cronJobs:
-		if j := p.job(ref.uid); j != nil {
+		if j := p.jobAny(ref.uid); j != nil {
 			name = j.Name
 			d.field("State", cronJobState(*j))
 			d.field("Schedule", cronSchedule(j.Definition.Trigger))
@@ -349,6 +356,13 @@ func cronKeyRows(m Model) []helplayout.HelpItem {
 	if len(m.cron.stack) > 0 {
 		open, back = "follow", "back"
 	}
+	if m.cron.confirm != nil {
+		verb := "archive"
+		if m.cron.confirm.restore {
+			verb = "restore"
+		}
+		return []helplayout.HelpItem{{Key: "y", Description: verb}, {Key: "n/esc", Description: "cancel"}}
+	}
 	rows := []helplayout.HelpItem{
 		{Key: "j/k", Description: "move"},
 		{Key: "↵/l", Description: open},
@@ -360,6 +374,12 @@ func cronKeyRows(m Model) []helplayout.HelpItem {
 	}
 	if len(m.cron.stack) == 0 {
 		rows = slices.Insert(rows, 2, helplayout.HelpItem{Key: "/", Description: "filter"})
+	}
+	if m.cronJobsScope() {
+		rows = slices.Insert(rows, 3,
+			helplayout.HelpItem{Key: "n/e", Description: "new/edit"},
+			helplayout.HelpItem{Key: "p", Description: "pause"},
+			helplayout.HelpItem{Key: "d/u", Description: "archive/restore"})
 	}
 	return rows
 }
@@ -396,6 +416,10 @@ func renderCron(m Model) string {
 				errors = append(errors, errorStyle.Render(truncate(sanitizeForLine(read.name+": "+read.err.Error()), m.width)))
 			}
 		}
+	}
+	if c := m.cron.confirm; c != nil {
+		verb := map[bool]string{false: "Archive", true: "Restore"}[c.restore]
+		errors = append(errors, errorStyle.Render(truncate(sanitizeForLine(verb+" job "+c.name+"? y/n"), m.width)))
 	}
 	query := m.cron.lists[m.cron.tab].query
 	left, right := title, ""
@@ -487,6 +511,14 @@ func cronHelp(m Model) string {
 		strings.Join(intro, "\n"),
 		"",
 	}
-	body = append(body, renderHelpGroup([]helpSection{{title: "Cron keys", rows: cronKeyRows(m)}}))
+	sections := []helpSection{{title: "Cron keys", rows: cronKeyRows(m)}}
+	if m.cronJobsScope() {
+		sections = append(sections, helpSection{title: "Job keys", rows: []helplayout.HelpItem{
+			{Key: "n", Description: "new job"}, {Key: "e", Description: "edit the job"},
+			{Key: "p", Description: "pause or resume"}, {Key: "d", Description: "archive (asks first)"},
+			{Key: "u", Description: "restore an archived job"}, {Key: "a", Description: "show archived jobs"},
+		}})
+	}
+	body = append(body, renderHelpGroup(sections))
 	return strings.Join(body, "\n")
 }
