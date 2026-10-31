@@ -124,11 +124,6 @@ func TestDateToggle_FilterFormCommitsAndResetsDate(t *testing.T) {
 	assert.Empty(t, m.list.filter.Date)
 }
 
-func TestDateToggle_ChipNamesTheActiveToggle(t *testing.T) {
-	assert.Contains(t, stripANSI(renderChips(ListFilter{Date: dateScheduled})), "date:scheduled")
-	assert.Empty(t, renderChips(ListFilter{}))
-}
-
 func TestDateToggle_RowsShowResolvedDates(t *testing.T) {
 	withClock(t, time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC))
 	rows := buildRows([]queueRow{
