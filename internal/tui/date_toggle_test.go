@@ -194,3 +194,41 @@ func rowIssues(rows []queueRow) []Issue {
 	}
 	return out
 }
+
+func TestDateToggle_CancelingFormAfterMidnightRefreshKeepsDayAndSelection(t *testing.T) {
+	now := time.Date(2026, 11, 10, 23, 59, 0, 0, time.UTC)
+	prior := renderNow
+	renderNow = func() time.Time { return now }
+	t.Cleanup(func() { renderNow = prior })
+
+	m, cleanup := splitTestSetup(t)
+	defer cleanup()
+	mk := func(short, sched string) Issue {
+		iss := dated(short, sched, "")
+		iss.ProjectID, iss.UID = 7, "uid-"+short
+		return iss
+	}
+	issues := []Issue{mk("x", "2026-11-10"), mk("y", "2026-11-11"), mk("z", "2026-11-09")}
+	m.list.issues = issues
+	form := newFilterForm(ListFilter{}, m.scope)
+	form.field(fieldDate).radio.set(dateToday)
+	m, _ = m.commitFilterForm(form)
+	m.list = m.list.applyFetched(refetchedMsg{issues: issues})
+	m.list.cursor, m.list.selectedUID, m.list.selectedProjectID = 1, "uid-z", 7
+	zIssue := issues[2]
+	m.detail.issue, m.detail.scopePID = &zIssue, 7
+
+	// Open the form before midnight, refresh after it, then cancel.
+	m.input = newFilterForm(m.list.filter, m.scope)
+	now = now.Add(2 * time.Minute)
+	m, _ = stepModel(m, refetchedMsg{dispatchKey: m.currentCacheKey(), issues: issues})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	assert.Equal(t, "2026-11-11", m.list.filter.Day)
+	assert.Equal(t, "uid-z", m.list.selectedUID)
+	got, ok := m.list.targetRow()
+	require.True(t, ok)
+	assert.Equal(t, "z", got.ShortID)
+	require.NotNil(t, m.detail.issue)
+	assert.Equal(t, "uid-z", m.detail.issue.UID)
+}

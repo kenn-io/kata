@@ -2264,10 +2264,11 @@ func dispatchFormEditBody(
 // without changing this code.
 func (m Model) cancelInput() (Model, tea.Cmd) {
 	searchCanceled := m.input.kind.isCommandBar()
+	followSelection := searchCanceled || m.input.kind == inputFilterForm
 	restoreSplitDetail := searchCanceled && m.input.restoreSplitDetail
 	preSplitDetail := m.input.preSplitDetail
 	if searchCanceled {
-		m.list.filter = m.input.preFilter
+		m.list = m.list.restoreFilter(m.input.preFilter)
 		snapshot := m.input.preListSelection
 		m.list.cursor = snapshot.cursor
 		m.list.windowStart = snapshot.windowStart
@@ -2275,15 +2276,14 @@ func (m Model) cancelInput() (Model, tea.Cmd) {
 		m.list.selectedProjectID = snapshot.selectedProjectID
 		m.list = m.list.restoreCursorToSelection()
 	} else if m.input.kind == inputFilterForm {
-		m.list.filter = m.input.preFilter
-		m.list = m.list.clampCursorToFilter()
+		m.list = m.list.restoreFilter(m.input.preFilter).restoreCursorToSelection()
 	}
 	m.input = inputState{}
 	m.undoCloseEntryID = 0
 	if restoreSplitDetail {
 		return m.restoreSearchDetailIfNeeded(preSplitDetail, nil)
 	}
-	if searchCanceled {
+	if followSelection {
 		return m.followSearchResultIfNeeded(nil)
 	}
 	return m, nil

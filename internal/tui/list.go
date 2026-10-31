@@ -1128,6 +1128,21 @@ func (f ListFilter) stampDay() ListFilter {
 	return f
 }
 
+// restoreFilter puts a saved filter snapshot back while keeping the day
+// the live filter is pinned to, so a refresh that moved the day on while
+// the snapshot was held is not undone.
+func (lm listModel) restoreFilter(saved ListFilter) listModel {
+	saved.Day = lm.filter.Day
+	if saved.Date != "" && saved.Day == "" {
+		saved = saved.stampDay()
+	}
+	if saved.Date == "" {
+		saved.Day = ""
+	}
+	lm.filter = saved
+	return lm
+}
+
 // Date toggle values for ListFilter.Date.
 const (
 	dateToday     = "today"
