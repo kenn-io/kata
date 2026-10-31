@@ -206,6 +206,25 @@ func requestDaemonRestart(ctx context.Context, ns *daemonruntime.Namespace, prev
 	}
 }
 
+// publishRestartRequest publishes this caller's request once the daemon has
+// taken any other caller's pending request for previous's generation. Between
+// attempts it polls once for a replacement, which ends the wait as it would
+// for a published request.
+func publishRestartRequest(ctx context.Context, store kitdaemon.RuntimeStore, previous kitdaemon.RuntimeRecord, reply string, payload []byte) (kitdaemon.RuntimeRecord, error) {
+	for {
+		err := atomicfile.WriteNew(restartRequestPath(store.Dir, previous), payload, atomicfile.WithPrivate())
+		if !errors.Is(err, os.ErrExist) {
+			return kitdaemon.RuntimeRecord{}, err
+		}
+		poll, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
+		replacement, err := waitForDaemonReplacement(poll, store, previous, reply)
+		cancel()
+		if ctx.Err() != nil || !errors.Is(err, context.DeadlineExceeded) {
+			return replacement, err
+		}
+	}
+}
+
 func requestDaemonRestartOnce(ctx context.Context, ns *daemonruntime.Namespace, previous kitdaemon.RuntimeRecord, executable string, flags []string) (kitdaemon.RuntimeRecord, error) {
 	var reply string
 	if previous.Metadata[daemonruntime.RuntimeRestartExecutableKey] == "1" {
@@ -219,11 +238,8 @@ func requestDaemonRestartOnce(ctx context.Context, ns *daemonruntime.Namespace, 
 			return kitdaemon.RuntimeRecord{}, err
 		}
 		payload, _ := json.Marshal(restartRequest{Executable: executable, Reply: filepath.Base(reply), Flags: flags})
-		if err := atomicfile.WriteNew(restartRequestPath(ns.DataDir, previous), payload, atomicfile.WithPrivate()); err != nil {
-			if errors.Is(err, os.ErrExist) {
-				return waitForDaemonReplacement(ctx, kitdaemon.RuntimeStore{Dir: ns.DataDir}, previous, reply)
-			}
-			return kitdaemon.RuntimeRecord{}, err
+		if replacement, err := publishRestartRequest(ctx, kitdaemon.RuntimeStore{Dir: ns.DataDir}, previous, reply, payload); err != nil {
+			return replacement, err
 		}
 	}
 	if err := daemonruntime.SignalDaemonRestart(previous, ns.DBHash); err != nil {

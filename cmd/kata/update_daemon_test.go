@@ -278,11 +278,43 @@ func testUpdateInstallDaemonLifecycle(t *testing.T, fixture func(*testing.T, str
 
 func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *daemonLifecycleFixture) {
 	t.Helper()
-	for _, scenario := range []string{"restart failure", "older daemon", "startup flags", "new config", "equivalent concurrent restarts"} {
+	for _, scenario := range []string{"restart failure", "older daemon", "startup flags", "new config", "equivalent concurrent restarts", "concurrent refusal"} {
 		t.Run(scenario, func(t *testing.T) {
 			setupKataEnv(t)
 			f := fixture(t, scenario)
 			before := f.record()
+			if scenario == "concurrent refusal" {
+				// Publish the first caller's request before its signal, so the
+				// valid CLI reaches the pending-request branch deterministically.
+				reply := filepath.Join(f.store.Dir, "restart-reply-refused")
+				require.NoError(t, os.WriteFile(reply, nil, 0600))
+				t.Cleanup(func() { _ = os.Remove(reply) })
+				payload, err := json.Marshal(restartRequest{Executable: f.cli, Reply: filepath.Base(reply), Flags: []string{"--listen=invalid"}})
+				require.NoError(t, err)
+				require.NoError(t, os.WriteFile(restartRequestPath(f.store.Dir, before), payload, 0600))
+				done := make(chan struct{})
+				var output string
+				var restartErr error
+				go func() {
+					output, restartErr = f.restart(t, "--json")
+					close(done)
+				}()
+				require.Eventually(t, func() bool { //nolint:kennlint // sleeptest: the external CLI publishes its private reply before waiting
+					replies, err := filepath.Glob(filepath.Join(f.store.Dir, "restart-reply-*"))
+					return err == nil && len(replies) == 2
+				}, 5*time.Second, 20*time.Millisecond)
+				require.NoError(t, daemonruntime.SignalDaemonRestart(before, filepath.Base(f.store.Dir)))
+				<-done
+				refusal, err := os.ReadFile(reply) //nolint:gosec // caller-owned private reply in the isolated fixture
+				require.NoError(t, err)
+				assert.Contains(t, string(refusal), "invalid")
+				assert.NoError(t, restartErr, "%s", output)
+				require.NoError(t, os.Remove(reply))
+				replies, err := filepath.Glob(filepath.Join(f.store.Dir, "restart*"))
+				require.NoError(t, err)
+				assert.Empty(t, replies)
+				return
+			}
 			if scenario == "equivalent concurrent restarts" {
 				start, done := make(chan struct{}), make(chan struct{}, 6)
 				for range 6 {
