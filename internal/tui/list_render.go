@@ -731,6 +731,9 @@ func renderChips(f ListFilter) string {
 		chips = append(chips, chipStyle.Render(
 			"label:"+sanitizeForDisplay(l)))
 	}
+	if f.Date != "" {
+		chips = append(chips, chipActive.Render("date:"+f.Date))
+	}
 	if len(chips) == 0 {
 		return ""
 	}
@@ -900,11 +903,36 @@ func buildRows(queueRows []queueRow, cursor, titleW int, narrow bool, chrome vie
 // the same project so repeating the name on every line is noise.
 func titleForRow(iss Issue, chrome viewChrome, titleW int) string {
 	clean := sanitizeForDisplay(iss.Title)
-	if !chrome.scope.allProjects {
+	if chrome.scope.allProjects {
+		clean = projectPrefix(iss.ProjectID, chrome.projectsByID) + clean
+	}
+	dates := rowDatesText(iss)
+	// Keep at least rowDatesMinTitle cells of title; on a cell too narrow
+	// for that the dates stay out of the way.
+	if dates == "" || titleW-1 < len(dates)+1+rowDatesMinTitle {
 		return truncate(clean, titleW)
 	}
-	prefix := projectPrefix(iss.ProjectID, chrome.projectsByID)
-	return truncate(prefix+clean, titleW)
+	return padToWidth(truncate(clean, titleW-1-len(dates)-1), titleW-1-len(dates)) + dates
+}
+
+// rowDatesMinTitle is the title width a row keeps before its dates
+// are dropped for lack of room.
+const rowDatesMinTitle = 15
+
+// rowDatesText renders an issue's resolved dates as "s:MM-DD d:MM-DD",
+// dropping the year for dates in the current year. A missing date is
+// omitted, and an issue with neither renders "".
+func rowDatesText(iss Issue) string {
+	year := renderNow().Format("2006") + "-"
+	short := func(d string) string { return strings.TrimPrefix(d, year) }
+	var parts []string
+	if iss.ScheduledOnDate != "" {
+		parts = append(parts, "s:"+short(iss.ScheduledOnDate))
+	}
+	if iss.DeadlineOnDate != "" {
+		parts = append(parts, "d:"+short(iss.DeadlineOnDate))
+	}
+	return strings.Join(parts, " ")
 }
 
 // projectPrefix renders the bracketed project name for a list row. Falls

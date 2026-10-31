@@ -122,11 +122,11 @@ func assertActiveField(t *testing.T, m Model, want int) {
 // Search / Labels in order (Labels axis added in Plan 8 commit 5b).
 func TestFilterForm_OpensOnFKey(t *testing.T) {
 	m := openFilterForm(t, filterFormFixture())
-	if len(m.input.fields) != 4 {
-		t.Fatalf("form fields = %d, want 4 (Status/Owner/Search/Labels)",
+	if len(m.input.fields) != 5 {
+		t.Fatalf("form fields = %d, want 5 (Status/Owner/Search/Labels/Date)",
 			len(m.input.fields))
 	}
-	wantLabels := []string{"Status", "Owner", "Search", "Labels"}
+	wantLabels := []string{"Status", "Owner", "Search", "Labels", "Date"}
 	for i, f := range m.input.fields {
 		if f.label != wantLabels[i] {
 			t.Fatalf("field[%d].label = %q, want %q", i, f.label, wantLabels[i])
@@ -151,12 +151,11 @@ func TestFilterForm_AllProjectsScopeStillRenders(t *testing.T) {
 	assertInputKind(t, m, inputFilterForm)
 }
 
-// TestFilterForm_TabCyclesFourFields_WithWrap: tab cycles
-// 0→1→2→3→0 (Status → Owner → Search → Labels → Status). Plan 8
-// commit 5b added the Labels axis as the 4th field.
-func TestFilterForm_TabCyclesFourFields_WithWrap(t *testing.T) {
+// TestFilterForm_TabCyclesAllFields_WithWrap: tab cycles
+// 0→1→2→3→4→0 (Status → Owner → Search → Labels → Date → Status).
+func TestFilterForm_TabCyclesAllFields_WithWrap(t *testing.T) {
 	m := openFilterForm(t, filterFormFixture())
-	wants := []int{1, 2, 3, 0}
+	wants := []int{1, 2, 3, 4, 0}
 	for i, want := range wants {
 		m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
 		if m.input.active != want {

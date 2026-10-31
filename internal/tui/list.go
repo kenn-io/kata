@@ -1059,7 +1059,7 @@ func (lm listModel) refetchCmd(api listAPI, sc scope) tea.Cmd {
 }
 
 // filteredIssues returns the subset of issues that satisfy the
-// client-side filters (Status/Owner/Author/Search/Labels). The fast path
+// client-side filters (Status/Owner/Author/Search/Labels/Date). The fast path
 // returns the input slice unchanged when no client-side filter is set
 // — render runs every keystroke, so this matters.
 //
@@ -1068,7 +1068,7 @@ func (lm listModel) refetchCmd(api listAPI, sc scope) tea.Cmd {
 // len(f.Labels) == 0 check so a label-only filter no longer
 // short-circuits past matchesFilter.
 func filteredIssues(issues []Issue, f ListFilter) []Issue {
-	if f.Status == "" && f.Owner == "" && f.Author == "" && f.Search == "" && len(f.Labels) == 0 {
+	if f.Status == "" && f.Owner == "" && f.Author == "" && f.Search == "" && f.Date == "" && len(f.Labels) == 0 {
 		return issues
 	}
 	out := make([]Issue, 0, len(issues))
@@ -1109,7 +1109,39 @@ func matchesFilter(iss Issue, f ListFilter) bool {
 	if len(f.Labels) > 0 && !labelsAnyOf(iss.Labels, f.Labels) {
 		return false
 	}
+	if f.Date != "" && !matchesDate(iss, f.Date) {
+		return false
+	}
 	return true
+}
+
+// Date toggle values for ListFilter.Date.
+const (
+	dateToday     = "today"
+	dateScheduled = "scheduled"
+)
+
+// matchesDate reports whether an open issue's resolved row dates put it
+// in the Today (either date on or before today) or Scheduled (either
+// date after today) bucket. Today's calendar day is read in the zone
+// renderNow reports, which is the local zone in production. Dates are
+// zero-padded YYYY-MM-DD, so string comparison orders them. A row
+// without a date, including every row from a daemon older than API
+// 0.36.0, never matches.
+func matchesDate(iss Issue, mode string) bool {
+	if iss.Status != "open" {
+		return false
+	}
+	today := renderNow().Format(time.DateOnly)
+	for _, d := range [...]string{iss.ScheduledOnDate, iss.DeadlineOnDate} {
+		if d == "" {
+			continue
+		}
+		if (mode == dateToday && d <= today) || (mode == dateScheduled && d > today) {
+			return true
+		}
+	}
+	return false
 }
 
 // matchesSearchTerm runs the `/` filter as case-insensitive contains

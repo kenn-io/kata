@@ -428,9 +428,9 @@ func (s *queueBuildState) hasIncludedParent(key issueKey) bool {
 }
 
 func hasActiveQueueFilter(f ListFilter) bool {
-	return f.Status != "" || f.Owner != "" || f.Author != "" || f.Search != "" || len(f.Labels) > 0
+	return f.Status != "" || f.Owner != "" || f.Author != "" || f.Search != "" || f.Date != "" || len(f.Labels) > 0
 }
 
 func hasRevealQueueFilter(f ListFilter) bool {
-	return f.Owner != "" || f.Author != "" || f.Search != "" || len(f.Labels) > 0
+	return f.Owner != "" || f.Author != "" || f.Search != "" || f.Date != "" || len(f.Labels) > 0
 }

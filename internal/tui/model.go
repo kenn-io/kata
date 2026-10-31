@@ -1922,7 +1922,7 @@ func (m Model) commitInput() (Model, tea.Cmd) {
 	return m, nil
 }
 
-// commitFilterForm reads the four filter axes off the form and
+// commitFilterForm reads the five filter axes off the form and
 // applies them to lm.filter as a single atomic update. Cursor and
 // selectedUID are reset so the next render lands on a fresh row
 // (the prior selection may no longer match the new filter, and a
@@ -1941,6 +1941,10 @@ func (m Model) commitFilterForm(form inputState) (Model, tea.Cmd) {
 		Owner:  strings.TrimSpace(form.fieldValue(fieldOwner)),
 		Search: strings.TrimSpace(form.fieldValue(fieldSearch)),
 		Labels: normalizeLabels(form.fieldValue(fieldLabels)),
+		Date:   form.fieldValue(fieldDate),
+	}
+	if m.list.filter.Date == "any" {
+		m.list.filter.Date = ""
 	}
 	// "all" is the surface label for "no Status filter"; the wire
 	// expects an empty string.

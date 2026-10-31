@@ -49,6 +49,11 @@ type Issue struct {
 	Priority            *int64       `json:"priority,omitempty"`
 	Revision            int64        `json:"revision"`
 	RecurrenceID        *int64       `json:"recurrence_id,omitempty"`
+	// ScheduledOnDate and DeadlineOnDate are the daemon's resolved
+	// YYYY-MM-DD planning dates (API 0.36.0 and newer). A daemon that
+	// predates them leaves both empty, as does an issue without the date.
+	ScheduledOnDate string `json:"scheduled_on_date,omitempty"`
+	DeadlineOnDate  string `json:"deadline_on_date,omitempty"`
 }
 
 // LinkPeer mirrors api.LinkPeer: UID, short_id, project, and qualified_id
@@ -89,8 +94,10 @@ type IssueRef struct {
 // daemon work and is deferred to a future task.
 type ListFilter struct {
 	Status, Owner, Author, Search string
-	Labels                        []string
-	Limit                         int
+	// Date is "" (off), dateToday, or dateScheduled; see matchesDate.
+	Date   string
+	Labels []string
+	Limit  int
 }
 
 // CreateInitialLinkBody requests a link created atomically with a new

@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-30
+last_edited: 2026-10-31
 ---
 
 # CLI reference
@@ -1875,6 +1875,20 @@ Esc from the Inbox list restores the browsing context and its filters. If no
 project is designated, the TUI shows a notice. [Choose the Inbox project](metadata.md#project-inbox-designation)
 in the web UI or through the project metadata API. This view is separate from
 `kata inbox`, which lists attention requests sent to an actor.
+
+Press `f` in the issue list to open the filter form. Its **Date** choice,
+the last field, narrows the list by each row's resolved dates. **today** keeps
+open issues whose `scheduled_on_date` or `deadline_on_date` is today or earlier.
+**scheduled** keeps open issues with either date after today. Today is the
+calendar day in your local time zone. The choice combines with status, owner,
+labels, and search, and shows as a `date:` chip. The choice filters the current
+project scope and does not change it; for Today across every project, choose
+All projects in the projects view (`P`) and then set **today**. Rows show their dates as
+`s:MM-DD` and `d:MM-DD`, with the year added for other years; the dates are
+left off where the title column is too narrow. An issue missing a date never
+matches on it, and daemons older than API `0.36.0` send no dates, so neither
+choice lists anything from them. See
+[Calendar dates on issue rows](metadata.md#calendar-dates-on-issue-rows).
 
 Press `T` to open Attention: the requests `kata notify` addressed to you, read
 from open issues in the current project or across all projects when the TUI is
