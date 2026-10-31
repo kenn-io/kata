@@ -2196,6 +2196,17 @@ Events whose original bytes reference a private project remain owner-local;
 retained-checkpoint boundary recovery is the separate change in
 [PR #767](https://github.com/kenn-io/kata/pull/767).
 
+Linked adoption snapshots can arrive in separate chunks. An introduction whose
+peers have not arrived stays pending with its original bytes. Event delivery
+holds that position and dependent updates until the peers resolve within the
+shared project, then releases the prefix in order. A peer that resolves in a
+private project stays withheld; sync never skips the pending introduction.
+An introduction that already names a known private endpoint stays withheld the
+same way, and later updates for that issue wait behind it until a bridge
+reconnect delivers a fresh checkpoint. A close forwards on its close-time
+parent UID alone; the close-time parent short ID is a display hint that short
+ID collision resolution may renumber differently on each replica.
+
 The queueing fix does not insert missing old introductions ahead of already
 emitted updates. Retrying an old quarantine alone cannot repair that backlog.
 After upgrading the root, reconnect each affected bridge to obtain a new signed

@@ -253,7 +253,16 @@ func (s *Store) IngestFederationEvents(
 				return err
 			}
 			if crossing {
-				continue
+				unresolved, err := relayEventHasUnresolvedRefsTx(ctx, tx, db.RemoteEventFromStored(event))
+				if err != nil {
+					return err
+				}
+				// An introduction referencing a known private endpoint stays
+				// queued as a withheld barrier; emission rechecks the boundary
+				// and holds the source and its dependent updates owner-local.
+				if !unresolved && !db.RelayEventIsIssueIntroduction(event.Type) {
+					continue
+				}
 			}
 			if err := s.queueRelaySourceTx(ctx, tx, event); err != nil {
 				return err

@@ -131,6 +131,14 @@ func IsFederationSnapshotEvent(kind string) bool {
 	return ok && declared.snapshot
 }
 
+// RelayEventIsIssueIntroduction identifies the events that introduce an issue
+// into a shared project. A relay route keeps such a source queued as a
+// withheld barrier while a referenced endpoint is unresolved or private, so
+// no dependent update overtakes the introduction.
+func RelayEventIsIssueIntroduction(eventType string) bool {
+	return eventType == "issue.created" || eventType == "issue.snapshot"
+}
+
 func isCronDefinitionEvent(kind string) bool {
 	_, ok := lookupFederationEventType(kind)
 	return ok && (strings.HasPrefix(kind, "cron.job.") || strings.HasPrefix(kind, "cron.workflow."))
