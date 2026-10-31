@@ -433,6 +433,21 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 			after := f.record()
 			require.True(t, after.StartedAt.After(before.StartedAt))
 			assert.Equal(t, "v0.2.0", after.Version)
+			if scenario == "new config" {
+				var result struct {
+					Action  string `json:"action"`
+					PID     int    `json:"pid"`
+					Address string `json:"address"`
+					PIDs    []int  `json:"pids"`
+					Stopped int    `json:"stopped"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(stdout), &result))
+				assert.Equal(t, "restart", result.Action)
+				assert.Equal(t, after.PID, result.PID)
+				assert.Equal(t, after.Endpoint().ConfigAddress(), result.Address)
+				assert.Equal(t, []int{before.PID}, result.PIDs)
+				assert.Equal(t, 1, result.Stopped)
+			}
 			httpClient, baseURL := client.LocalHTTPClient(after.Endpoint().ConfigAddress())
 			status, _, err := httpDoJSON(t.Context(), httpClient, http.MethodGet, baseURL+"/api/v1/ping", nil)
 			require.NoError(t, err)
@@ -458,10 +473,8 @@ func TestWaitForDaemonReplacement(t *testing.T) {
 			t.Skip("Unix replacement retains the previous PID")
 		}
 		store := kitdaemon.RuntimeStore{Dir: t.TempDir()}
-		synctest.Test(t, func(t *testing.T) {
-			_, err := waitForDaemonReplacement(t.Context(), store, kitdaemon.RuntimeRecord{PID: 1 << 30, StartedAt: time.Now()}, "")
-			assert.ErrorContains(t, err, "exited without starting a replacement")
-		})
+		_, err := waitForDaemonReplacement(t.Context(), store, kitdaemon.RuntimeRecord{PID: 1 << 30, StartedAt: time.Now()}, "")
+		assert.ErrorContains(t, err, "exited without starting a replacement")
 	})
 	t.Run("late readiness after previous exits", func(t *testing.T) {
 		if runtime.GOOS != "windows" {
