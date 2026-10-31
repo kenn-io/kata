@@ -15,6 +15,9 @@ An observation records evidence; its status does not control whether anything ru
 
 Browse jobs, runs, and workflows in `kata tui` with the `2`, `3`, and `4` tabs for the current project.
 
+For a run organized as dependent issues with human approval, see
+[Gated workflows](../workflows/gated-workflows.md).
+
 ## Vocabulary
 
 | Name | Meaning |

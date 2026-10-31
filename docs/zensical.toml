@@ -44,6 +44,7 @@ nav = [
   ]},
   {"Workflows" = [
     {"Agent workflows" = "workflows/agents.md"},
+    {"Gated workflows" = "workflows/gated-workflows.md"},
     {"Sharing models" = "workflows/sharing.md"},
   ]},
   {"Operations" = [

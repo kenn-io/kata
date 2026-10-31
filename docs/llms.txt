@@ -41,6 +41,8 @@ for machine readers.
 - [Web UI](https://katatracker.com/docs/guide/web-ui.md): the browser workspace
 - [Semantic search](https://katatracker.com/docs/guide/semantic-search.md):
   opt-in embeddings
+- [Gated workflows](https://katatracker.com/docs/workflows/gated-workflows.md):
+  ordered issue stages, human approval, evidence, and attention.
 - [Sharing models](https://katatracker.com/docs/workflows/sharing.md): local,
   private network, federation, hosted
 - [Share projects between hubs](https://katatracker.com/docs/guide/project-relays.md):
