@@ -1240,7 +1240,7 @@ func announceIdleShutdown(w io.Writer, timeout time.Duration) {
 func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly, noAutoToken bool) error {
 	restart := newDaemonRestart(os.Stderr)
 	if err := runDaemonProcess(ctx, listen, insecureReadonly, noAutoToken, restart); err != nil {
-		return err
+		return reportRestartFailure(err)
 	}
 	return restart.exec(ctx)
 }

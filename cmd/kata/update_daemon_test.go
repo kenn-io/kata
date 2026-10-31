@@ -291,7 +291,7 @@ func testUpdateInstallDaemonLifecycle(t *testing.T, fixture func(*testing.T, str
 
 func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *daemonLifecycleFixture) {
 	t.Helper()
-	for _, scenario := range []string{"restart failure", "older daemon", "startup flags", "new config", "restart during drain", "start during drain"} {
+	for _, scenario := range []string{"restart failure", "bad listener", "older daemon", "startup flags", "new config", "restart during drain", "start during drain"} {
 		t.Run(scenario, func(t *testing.T) {
 			if strings.Contains(scenario, "during drain") && runtime.GOOS != "linux" {
 				t.Skip("holds drain with a shell hook and observes the start lock through inotify")
@@ -299,7 +299,7 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 			setupKataEnv(t)
 			f := fixture(t, scenario)
 			before := f.record()
-			if scenario != "older daemon" && runtime.GOOS != "windows" {
+			if scenario != "older daemon" && scenario != "bad listener" && runtime.GOOS != "windows" {
 				t.Cleanup(func() { assert.Equal(t, before.PID, f.record().PID) })
 			}
 			if strings.Contains(scenario, "during drain") {
@@ -367,6 +367,13 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 				<-done
 				return
 			}
+			if scenario == "bad listener" {
+				output, err := f.restart(t, "--json", "--listen=127.0.0.1:bad")
+				require.Error(t, err)
+				assert.Contains(t, parseErrorEnvelope(t, []byte(output)).Error.Message, "unknown port")
+				assert.Zero(t, f.record().PID)
+				return
+			}
 			if scenario == "older daemon" {
 				delete(before.Metadata, daemonruntime.RuntimeRestartExecutableKey)
 				_, err := f.store.Write(before)
@@ -409,7 +416,7 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 			if scenario == "restart failure" {
 				require.Error(t, updateErr)
 				message := parseErrorEnvelope(t, []byte(stdout)).Error.Message
-				assert.Contains(t, message, "request refused")
+				assert.Contains(t, message, "restart failed")
 				assert.Contains(t, message, "parse "+filepath.Join(f.home, "config.toml"))
 				assert.NotContains(t, message, "did not restart within")
 				assert.Equal(t, before.StartedAt, f.record().StartedAt)

@@ -169,12 +169,7 @@ type restartRequest struct {
 // to its caller's reply file.
 func (r *daemonRestart) accept(ctx context.Context, dir string, rec kitdaemon.RuntimeRecord) (err error) {
 	var req restartRequest
-	defer func() {
-		reply := filepath.Join(dir, filepath.Base(req.Reply))
-		if _, statErr := os.Lstat(reply); err != nil && req.Reply != "" && statErr == nil {
-			_ = atomicfile.WriteFile(reply, []byte(err.Error()), atomicfile.WithPrivate())
-		}
-	}()
+	defer func() { writeRestartFailure(dir, req.Reply, err) }()
 	executable := r.executable
 	request := restartRequestPath(dir, rec)
 	target, err := os.ReadFile(request) //nolint:gosec // G304: generation-scoped request in the daemon's runtime directory
@@ -200,6 +195,25 @@ func (r *daemonRestart) accept(ctx context.Context, dir string, rec kitdaemon.Ru
 	}
 	r.executable, r.args, r.reply = executable, daemonArgs(req.Flags...), req.Reply
 	return nil
+}
+
+func writeRestartFailure(dir, name string, err error) {
+	if err == nil || name == "" {
+		return
+	}
+	reply := filepath.Join(dir, filepath.Base(name))
+	if _, statErr := os.Lstat(reply); statErr == nil {
+		_ = atomicfile.WriteFile(reply, []byte(err.Error()), atomicfile.WithPrivate())
+	}
+}
+
+func reportRestartFailure(err error) error {
+	if startedForRestartReply != "" {
+		if ns, nsErr := daemonruntime.NewNamespace(); nsErr == nil {
+			writeRestartFailure(ns.DataDir, startedForRestartReply, fmt.Errorf("replacement failed to start: %w", err))
+		}
+	}
+	return err
 }
 
 func restartRequestPath(dir string, rec kitdaemon.RuntimeRecord) string {
