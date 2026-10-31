@@ -100,6 +100,14 @@ var storageScenarios = []scenario{
 	{name: "relay ingress", methods: []string{"AcceptRelayDeliveries", "CreateAPIToken", "CreateIssue", "CreateProject", "CreateRelayEnrollment", "IssueByUID", "LinksByIssue", "MaterializeFederatedProject", "PinRootAuthority", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error { RunRelayIngressAtomicity(t, store); return nil }},
 	{name: "relay topology", methods: []string{"SetRelayBindingConfig"}, run: func(t *testing.T, store db.Storage) error { RunRelayTopology(t, store); return nil }},
 	{name: "relay enrollment", methods: []string{"CreateRelayEnrollment"}, run: func(t *testing.T, store db.Storage) error { RunRelayEnrollmentScope(t, store); return nil }},
+	{name: "relay offers legacy ingested events", methods: []string{"CreateAPIToken", "CreateProject", "CreateRelayEnrollment", "EntityAttribution", "IngestFederationEvents", "IssueByUID", "PatchIssueMetadata", "PendingRelayDeliveries", "PinRootAuthority", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {
+		RunRelayOffersLegacyIngestedEvents(t, store)
+		return nil
+	}},
+	{name: "relay withholds private legacy ingested events", methods: []string{"CreateAPIToken", "CreateIssue", "CreateProject", "CreateRelayEnrollment", "EventsByUIDs", "IngestFederationEvents", "IssueByUID", "LinksByIssue", "PendingRelayDeliveries", "PinRootAuthority", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {
+		RunRelayWithholdsPrivateLegacyIngestedEvents(t, store)
+		return nil
+	}},
 	{name: "relay cross-project boundary", methods: []string{"AdoptProjectIntoFederation", "AuthorizeFederationToken", "CheckRelayProjectLinks", "CloseIssueWithEvents", "CreateAPIToken", "CreateIssue", "CreateLink", "CreateLinkAndEvent", "CreateProject", "CreateRelayEnrollment", "DeleteLinkAndEvent", "EditIssueAtomic", "EventsAfter", "FederationBindingByProject", "InstanceUID", "IssueByID", "LinkByID", "LinksByIssue", "MoveIssueProject", "ParentOf", "PendingRelayDeliveries", "PinRootAuthority", "ProjectByID", "SetRelayBindingConfig", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error { RunRelayCrossProjectBoundary(t, store); return nil }},
 	{name: "relay checkpoint capacity", methods: []string{"CreateAPIToken", "CreateIssue", "CreateProject", "CreateRelayEnrollment", "ListFederationEnrollments", "PinRootAuthority", "UpsertFederationBinding"}, runWithBackend: func(t *testing.T, _ db.Storage, backend Backend) error {
 		RunRelayCheckpointCapacity(t, backend)

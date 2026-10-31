@@ -184,6 +184,7 @@ func (s *Store) IngestFederationEvents(
 		}
 
 		linksAffected := false
+		relaySources := make(map[string]bool, len(prepared))
 		for _, input := range prepared {
 			if input.duplicate {
 				continue
@@ -199,6 +200,7 @@ func (s *Store) IngestFederationEvents(
 				continue
 			}
 			result.Accepted++
+			relaySources[input.event.EventUID] = true
 			if db.FederationEventAffectsLinks(input.event.Type) {
 				linksAffected = true
 			}
@@ -240,6 +242,23 @@ func (s *Store) IngestFederationEvents(
 		if err != nil {
 			return err
 		}
+		// Claim audits can belong to peer projects. Queue only admitted sources
+		// after materialization so private endpoints resolve before routing.
+		for _, event := range result.Events {
+			if !relaySources[event.UID] {
+				continue
+			}
+			crossing, err := relayEventCrossesProjectTx(ctx, tx, params.ProjectID, db.RemoteEventFromStored(event))
+			if err != nil {
+				return err
+			}
+			if crossing {
+				continue
+			}
+			if err := s.queueRelaySourceTx(ctx, tx, event); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	return result, err
@@ -267,6 +286,7 @@ func (s *Store) insertFederationEventTx(
 		Type: event.Type, Actor: event.Actor, Payload: string(event.Payload),
 		UID: event.EventUID, OriginInstanceUID: event.OriginInstanceUID, HLC: &clock,
 		CreatedAt: formatStoredTime(event.CreatedAt), ContentHash: event.ContentHash,
+		SkipRelay: true, // Route admitted sources after the batch materializes.
 	})
 	if err == nil {
 		return true, nil
