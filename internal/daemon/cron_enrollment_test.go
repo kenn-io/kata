@@ -122,8 +122,19 @@ func TestCronEnrollmentWriteBoundaries(t *testing.T) {
 			case "revoked":
 				require.NoError(t, env.DB.RevokeFederationEnrollment(t.Context(), enrollment.Enrollment.ID))
 			case "wrong-project":
+				// A federation-enabled target keeps the rejection on
+				// cross-project scoping alone. Without the enabled hub binding,
+				// AuthorizeFederationToken would reject for the missing binding
+				// and mask a scoping regression.
 				other := seedProject(t, env, "other-project")
+				otherParent, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: other.ID, Title: "Other parent", Author: "tester"})
+				require.NoError(t, err)
+				_, err = env.DB.EnableProjectFederation(t.Context(), other.ID, "tester")
+				require.NoError(t, err)
 				path = fmt.Sprintf("/api/v1/projects/%d/cron/jobs", other.ID)
+				otherDefinition := definition
+				otherDefinition.Issue.ParentUID = otherParent.UID
+				document = otherDefinition
 			case "global":
 				grant, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{Token: "global-push-token", SpokeInstanceUID: cronHTTPUID(t), Capabilities: "push", Actor: "tester"})
 				require.NoError(t, err)
