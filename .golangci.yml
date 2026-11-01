@@ -18,7 +18,17 @@ linters:
     - kennnolint
     - nolintlint
     - forbidigo
+    - noctx
+    - usetesting
+    - fatcontext
   settings:
+    usetesting:
+      context-background: true
+      context-todo: true
+      # Some fixtures need short Unix socket paths or outlive one test, and
+      # tests that unset variables cannot use t.Setenv.
+      os-mkdir-temp: false
+      os-setenv: false
     nolintlint:
       require-specific: true
       allow-unused: true

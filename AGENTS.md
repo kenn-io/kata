@@ -61,6 +61,29 @@
   behavior coverage is not practical, document the manual check instead of
   adding a brittle shell content test.
 
+## Context use
+
+- A Go function that does I/O, runs a process, waits on a channel or timer,
+  or calls the daemon, a hub, a connector, or a database takes
+  `ctx context.Context` first and passes it down. Derive new contexts from it.
+  Create a root context only in `main`, `TestMain`, signal handling, the
+  service and daemon lifetime, or a framework callback that supplies none,
+  such as a Bubble Tea command.
+- Connector, hook, and federation provider children run under
+  `internal/processtree`, which owns their cancellation and termination grace;
+  those `exec.Command` calls carry a `//nolint:noctx` reason.
+- Detach only work that must outlive its caller: cleanup or finalization after
+  cancellation (`context.WithoutCancel(ctx)` with its own timeout), lease and
+  lock release functions, and `Close`. Say why in a short comment.
+- A per-invocation value such as `daemonAPI` may carry that invocation's
+  context. Never keep a context in a struct that outlives one call unless the
+  struct owns that context's lifetime and cancels it.
+- Tests use `t.Context()`. It is canceled before `t.Cleanup` functions run, so
+  cleanup work, and fixtures that must keep serving through later cleanups,
+  use `context.WithoutCancel(t.Context())`.
+- `make lint` checks this with `noctx`, `usetesting`, `fatcontext`, and govet's
+  `lostcancel`; see `.golangci.yml`.
+
 ## Documentation
 
 - Follow the [page frontmatter policy](docs/development/contributing.md#page-frontmatter)
