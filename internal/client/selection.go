@@ -50,7 +50,7 @@ func inspectSelection(ctx context.Context, start, name string, keepActiveLocalCa
 	sourcePath := ""
 	name = strings.TrimSpace(name)
 	if name == "" && os.Getenv(remoteServerEnvVar) == "" {
-		root, path, ok, err := findLocalConfig(start)
+		root, path, ok, err := findLocalConfig(ctx, start)
 		if err != nil {
 			return DaemonSelection{}, err
 		}

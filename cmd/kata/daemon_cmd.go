@@ -1347,7 +1347,8 @@ func runDaemonProcess(
 	}
 	defer func() {
 		if closeDependencies && !hooksClosed {
-			fallbackCtx, fallbackCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			// ctx may already be canceled; shutdown still gets its own budget.
+			fallbackCtx, fallbackCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer fallbackCancel()
 			_ = disp.Shutdown(fallbackCtx)
 		}
@@ -1706,7 +1707,7 @@ func runDaemonProcess(
 
 	var federationIngressAddress string
 	if dcfg.Federation.Ingress.Enabled {
-		ingress, err := net.Listen("tcp", dcfg.Federation.Ingress.Listen)
+		ingress, err := new(net.ListenConfig).Listen(ctx, "tcp", dcfg.Federation.Ingress.Listen)
 		if err != nil {
 			return fmt.Errorf("listen for restricted federation: %w", err)
 		}

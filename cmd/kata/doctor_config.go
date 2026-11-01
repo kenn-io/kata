@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -25,9 +26,9 @@ func (s *doctorState) add(id, category string, fn func() diagnostics.Check) {
 	s.checks = append(s.checks, diagnostics.Run(id, category, fn))
 }
 
-func (s *doctorState) localChecks() {
+func (s *doctorState) localChecks(ctx context.Context) {
 	s.add("config.daemon", "config", doctorDaemonConfig)
-	s.add("config.workspace", "config", s.workspaceConfig)
+	s.add("config.workspace", "config", func() diagnostics.Check { return s.workspaceConfig(ctx) })
 	s.add("config.hooks", "config", doctorHookConfig)
 }
 
@@ -65,7 +66,7 @@ func doctorHookConfig() diagnostics.Check {
 	return diagnostics.Check{Status: diagnostics.StatusOK, Summary: "Local hooks configuration is valid; active daemon hooks are checked separately"}
 }
 
-func (s *doctorState) workspaceConfig() diagnostics.Check {
+func (s *doctorState) workspaceConfig(ctx context.Context) diagnostics.Check {
 	s.project = strings.TrimSpace(flags.Project)
 	start, err := resolveStartPath(flags.Workspace)
 	if err != nil {
@@ -88,7 +89,7 @@ func (s *doctorState) workspaceConfig() diagnostics.Check {
 		}
 		unknown += doctorUnknownProjectKeys(filepath.Join(disc.WorkspaceRoot, config.ProjectConfigFilename))
 	}
-	localPath, err := client.LocalConfigPathInWorkspace(start)
+	localPath, err := client.LocalConfigPathInWorkspace(ctx, start)
 	if err != nil {
 		return diagnostics.Check{Status: diagnostics.StatusFail, Summary: "Workspace local override could not be verified", Fix: "Ensure git is available and the workspace is trusted; keep .kata.local.toml untracked."}
 	}

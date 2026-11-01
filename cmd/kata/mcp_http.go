@@ -111,7 +111,7 @@ func serveMCPHTTP(
 	server *sdkmcp.Server,
 	discoveryDirectory, backendURL string,
 ) (result error) {
-	listener, err := net.Listen("tcp", strings.TrimSpace(address))
+	listener, err := new(net.ListenConfig).Listen(ctx, "tcp", strings.TrimSpace(address))
 	if err != nil {
 		return fmt.Errorf("listen for MCP HTTP: %w", err)
 	}

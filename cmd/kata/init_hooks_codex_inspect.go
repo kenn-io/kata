@@ -146,7 +146,7 @@ func codexMatcherCoversContract(group map[string]any) bool {
 	return true
 }
 
-func codexHookFileTracked(dir string) (bool, error) {
+func codexHookFileTracked(ctx context.Context, dir string) (bool, error) {
 	discovered, err := config.DiscoverPaths(dir)
 	if err != nil {
 		return false, err
@@ -156,7 +156,7 @@ func codexHookFileTracked(dir string) (bool, error) {
 	}
 	// Run from the workspace so path matching remains correct in nested repos
 	// and linked worktrees; git/cmd strips inherited GIT_* routing variables.
-	stdout, _, err := gitcmd.New().Run(context.Background(), dir, nil, "ls-files", "-z", "--", ".codex/hooks.json")
+	stdout, _, err := gitcmd.New().Run(ctx, dir, nil, "ls-files", "-z", "--", ".codex/hooks.json")
 	if err != nil {
 		return false, fmt.Errorf("check tracked Codex hooks: %w", err)
 	}

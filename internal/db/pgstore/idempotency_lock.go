@@ -41,6 +41,7 @@ func (s *Store) AcquireIdempotencyLock(
 		}
 		if acquired {
 			return func() error {
+				// Unlock even after the acquiring context is canceled.
 				releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				_, unlockErr := conn.ExecContext(releaseCtx,
