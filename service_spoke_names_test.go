@@ -79,7 +79,7 @@ func TestServiceSpokeNameEnrollmentRequiresGlobalAuthority(t *testing.T) {
 			t.Cleanup(func() { _ = service.Close() })
 			raw, err := json.Marshal(map[string]any{"project_id": project.ID, "spoke_instance_uid": peer, "spoke_name": tc.spokeName, "capabilities": "pull"})
 			require.NoError(t, err)
-			request := httptest.NewRequest(http.MethodPost, "/api/v1/federation/enrollments", bytes.NewReader(raw))
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/federation/enrollments", bytes.NewReader(raw))
 			request.Header.Set("Content-Type", "application/json")
 			request = request.WithContext(kata.WithPrincipal(request.Context(), kata.Principal{Subject: "host-member", Actor: "member"}))
 			response := httptest.NewRecorder()
