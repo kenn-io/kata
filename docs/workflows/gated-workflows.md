@@ -1,7 +1,7 @@
 ---
 title: Gated workflows
 description: "Coordinate agent steps and human approval with issue dependencies."
-last_edited: 2026-10-30
+last_edited: 2026-11-01
 ---
 
 # Gated workflows
@@ -10,11 +10,15 @@ Use a parent issue for one run and child issues for its stages. Connect the
 stages with `--blocked-by`, then have automated workers take unowned ready
 stages. A person owns the approval stage and closes it after reviewing the output.
 
-This is a team convention built from ordinary issues. Dependencies filter the
-ready queue; they do not prevent someone from claiming, editing, or closing a
-blocked issue. Ownership does not restrict approval to a human. Any closed
-blocker releases the next stage, including `wontfix` or `superseded` closes.
-If approval is refused, park or cancel downstream work before closing the gate.
+This is a team convention built from ordinary issues, so Kata does not enforce
+the gate:
+
+- Dependencies filter the ready queue. They do not prevent anyone from
+  claiming, editing, or closing a blocked issue.
+- Ownership records who should approve. It does not restrict approval to a human.
+- Any closed blocker releases the next stage, including `wontfix` and
+  `superseded` closes. If approval is refused, park or cancel downstream work
+  before closing the gate.
 
 ## Create a three-stage run
 
@@ -73,11 +77,23 @@ Follow [Claim work](agents.md#claim-work) when taking a stage.
    - issue=5ybd owner=reviewer title="Approve brief" labels=stage
    ```
 
-2. The reviewer reads `brief.txt`.
+2. Ask the reviewer to read `brief.txt`. Leave the approval issue open while
+   waiting, and do not attach an execute job to this stage. Assignment records
+   responsibility; workers must honor the agreed human gate themselves.
 
-   Leave the approval issue open while waiting. Do not attach an execute job
-   to this stage. Assignment records responsibility; workers must honor the
-   agreed human gate themselves.
+   Record why the stage is waiting and send the request to the reviewer's inbox:
+
+   ```sh
+   kata meta set "$approval" work.attention needs-human
+   kata meta set "$approval" work.attention_msg 'Please review brief.txt before publication.'
+   kata notify "$approval" --to reviewer --message 'Please review brief.txt before publication.'
+   ```
+
+   A worker that needs the approval can block until the reviewer closes it:
+
+   ```sh
+   kata wait "$approval" --until closed --timeout 30m
+   ```
 
    After approving, the reviewer closes the approval issue using their
    configured identity:
@@ -127,31 +143,17 @@ Kata refuses to close a parent with open children. Close an unused branch with
 and a message of at least 20 characters. These closures also release dependents;
 park them first with `kata meta set <ref> someday true --json-value` if needed.
 
-## Request attention and wait
+## Attention and reminders
 
-While approval is still open, before closing it in step 2, record the reason
-and request the reviewer's attention:
+`work.attention` values do not change readiness. Use `needs-human` for a
+stage waiting on a person and `stuck` for stalled work. After handling a
+request, clear it with `kata notify <ref> --to reviewer --clear` and set
+`work.attention` back to `ok`.
 
-```sh
-kata meta set "$approval" work.attention needs-human
-kata meta set "$approval" work.attention_msg 'Please review brief.txt before publication.'
-kata notify "$approval" --to reviewer --message 'Please review brief.txt before publication.'
-kata wait "$approval" "$publish" --until attention --any --timeout 30m
-```
-
-`work.attention stuck` marks stalled work. These metadata values do not change
-readiness. `--until attention` returns for any nonempty value other than `ok`,
-or when an issue closes; `--any` returns after the first match. The example
-returns immediately because `needs-human` is already set. Already-closed stages
-also match immediately, so pass only the stages you still need to watch.
-After handling a request, clear it with `kata notify <ref> --to reviewer --clear`
-and set `work.attention` back to `ok`.
-
-To wait specifically for the reviewer to finish the approval stage, use:
-
-```sh
-kata wait "$approval" --until closed --timeout 30m
-```
+To watch several stages for a new attention request, use
+`kata wait <ref>... --until attention --any`. It returns for any nonempty
+value other than `ok`, or when an issue closes, so pass only open stages that
+do not already need attention.
 
 Optionally use `kata deadline "$approval" <date-or-time>` for a reminder.
 Reached deadlines use `notify.*` to request the current owner's attention,
@@ -167,7 +169,7 @@ create one child per occurrence, rather than this whole graph.
 For automation, use an adapter that runs execute jobs against an existing issue
 (issue policy `existing`), and make its workers honor the ready queue. Shared
 `kata cron workflow` definitions describe command or prompt steps, rather than
-this issue graph. See the [Native cron reference](../reference/cron.md) for the
+this issue graph. See the [Cron reference](../reference/cron.md) for the
 adapter contract.
 
 Keep run-level decisions in parent comments and stage details in each child's
