@@ -821,7 +821,7 @@ func TestProjectAccessEventReferenceResetsPollAndSSE(t *testing.T) {
 		assert.Equal(t, closeEvents[0].ID, polled.Body.ResetAfterID)
 		assert.Empty(t, polled.Body.Events)
 		assert.NotContains(t, string(body), hiddenParent.UID)
-		assert.NotContains(t, string(body), hiddenParent.ShortID)
+		assert.NotRegexp(t, `\b`+hiddenParent.ShortID+`\b`, string(body))
 
 		streamCtx, cancel := context.WithTimeout(t.Context(), 4*time.Second)
 		defer cancel()

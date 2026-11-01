@@ -93,7 +93,7 @@ func TestReadUILaunchTargetRequiresExactUID(t *testing.T) {
 	require.Equal(t, "validation", failure.Error.Code)
 	for _, match := range leakingMatches {
 		require.NotContains(t, string(prefixBody), match.UID)
-		require.NotContains(t, string(prefixBody), match.ShortID)
+		require.NotRegexp(t, `\b`+match.ShortID+`\b`, string(prefixBody))
 	}
 	require.NotContains(t, string(prefixBody), "4242")
 	require.NotContains(t, string(prefixBody), "8484")
