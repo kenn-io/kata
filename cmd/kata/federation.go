@@ -27,6 +27,7 @@ import (
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
 	"go.kenn.io/kata/internal/httpurl"
 	"go.kenn.io/kata/internal/textsafe"
+	katauid "go.kenn.io/kata/internal/uid"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 	"go.kenn.io/kata/pkg/federationprovider"
@@ -132,6 +133,7 @@ func federationEnableCmd() *cobra.Command {
 }
 
 func federationEnrollCmd() *cobra.Command {
+	var spokeName string
 	var spokeInstance string
 	var hubURL string
 	var capabilities string
@@ -147,6 +149,13 @@ func federationEnrollCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(spokeInstance) == "" {
 				return &cliError{Message: "--spoke-instance is required", Kind: kindValidation, ExitCode: ExitValidation}
+			}
+			var requestedSpokeName *string
+			if cmd.Flags().Changed("spoke-name") {
+				requestedSpokeName = &spokeName
+				if err := db.ValidateFederationSpokeName(spokeInstance, spokeName); err != nil {
+					return &cliError{Message: err.Error(), Kind: kindValidation, ExitCode: ExitValidation}
+				}
 			}
 			if strings.TrimSpace(hubURL) == "" {
 				return &cliError{Message: "--hub-url is required", Kind: kindValidation, ExitCode: ExitValidation}
@@ -205,7 +214,7 @@ func federationEnrollCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			callResp, callErr := apiClient.CreateFederationEnrollmentWithResponse(hub.ctx, &generated.CreateFederationEnrollmentRequestOptions{Body: &generated.CreateFederationEnrollmentBody{SpokeInstanceUID: spokeInstance, ProjectID: project.ID, Capabilities: internalCaps, Token: &token, Actor: &requestActor, AllowAdoptionSnapshotAuthors: &adoptExisting}})
+			callResp, callErr := apiClient.CreateFederationEnrollmentWithResponse(hub.ctx, &generated.CreateFederationEnrollmentRequestOptions{Body: &generated.CreateFederationEnrollmentBody{SpokeInstanceUID: spokeInstance, SpokeName: requestedSpokeName, ProjectID: project.ID, Capabilities: internalCaps, Token: &token, Actor: &requestActor, AllowAdoptionSnapshotAuthors: &adoptExisting}})
 			if err := externalCLITransportError(callResp, callErr); err != nil {
 				return federationEnrollHTTPClientError(err)
 			}
@@ -235,6 +244,7 @@ func federationEnrollCmd() *cobra.Command {
 			return printFederationEnrollment(cmd, project.Name, spokeInstance, enrollment, bundle)
 		},
 	}
+	cmd.Flags().StringVar(&spokeName, "spoke-name", "", "unique hub-local name for this spoke instance")
 	cmd.Flags().StringVar(&spokeInstance, "spoke-instance", "", "spoke instance UID from `kata federation identity`")
 	cmd.Flags().StringVar(&hubURL, "hub-url", "", "hub URL reachable by the spoke")
 	cmd.Flags().StringVar(&capabilities, "capabilities", "pull,push,lease", "comma-separated capabilities: pull,push,lease (claim is the API name for lease)")
@@ -556,6 +566,7 @@ func federationEnrollmentsCmd() *cobra.Command {
 		Use:   "enrollments",
 		Short: "audit hub federation enrollments",
 	}
+	cmd.AddCommand(federationSpokeNameCmd())
 	cmd.AddCommand(&cobra.Command{
 		Use:   "list",
 		Short: "list hub federation enrollments",
@@ -583,6 +594,64 @@ func federationEnrollmentsCmd() *cobra.Command {
 			return printFederationEnrollments(cmd, bs)
 		},
 	})
+	return cmd
+}
+
+func federationSpokeNameCmd() *cobra.Command {
+	var clearName bool
+	cmd := &cobra.Command{
+		Use: "name <spoke-instance-uid> [name]", Short: "set or clear a spoke's hub-local name",
+		Args: cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if clearName && len(args) != 1 || !clearName && len(args) != 2 {
+				return &cliError{Message: "provide a name or --clear", Kind: kindValidation, ExitCode: ExitValidation}
+			}
+			name := ""
+			if !clearName {
+				name = args[1]
+			}
+			if !katauid.Valid(args[0]) {
+				return &cliError{Message: "spoke-instance-uid must be a valid instance UID", Kind: kindValidation, ExitCode: ExitValidation}
+			}
+			if !clearName {
+				if err := db.ValidateFederationSpokeName(args[0], name); err != nil {
+					return &cliError{Message: err.Error(), Kind: kindValidation, ExitCode: ExitValidation}
+				}
+			}
+			a, err := dialDaemon(cmd.Context())
+			if err != nil {
+				return err
+			}
+			apiClient, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
+			if err != nil {
+				return err
+			}
+			resp, callErr := apiClient.SetFederationSpokeNameWithResponse(a.ctx, &generated.SetFederationSpokeNameRequestOptions{PathParams: &generated.SetFederationSpokeNamePath{SpokeInstanceUID: args[0]}, Body: &generated.SetFederationSpokeNameBody{Name: name}})
+			if err := externalCLITransportError(resp, callErr); err != nil {
+				return err
+			}
+			if err := externalCLIResponseError(resp.StatusCode, resp.Body, callErr); err != nil {
+				return err
+			}
+			_, emitted, err := emitPassthrough(cmd, resp.Body)
+			if err != nil || emitted {
+				return err
+			}
+			if currentOutputMode() == outputAgent {
+				return writeAgentKVRow(cmd.OutOrStdout(), agentRowField("spoke_instance", args[0]), agentRowField("spoke_name", name))
+			}
+			if flags.Quiet {
+				return nil
+			}
+			if clearName {
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "cleared name for spoke %s\n", args[0])
+			} else {
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "spoke %s name: %s\n", args[0], name)
+			}
+			return err
+		},
+	}
+	cmd.Flags().BoolVar(&clearName, "clear", false, "clear this spoke's hub-local name")
 	return cmd
 }
 
@@ -1531,6 +1600,7 @@ func printFederationEnrollments(cmd *cobra.Command, bs []byte) error {
 			if err := writeAgentKVRow(cmd.OutOrStdout(),
 				agentRowField("id", strconv.FormatInt(enrollment.ID, 10)),
 				agentRowField("spoke_instance", enrollment.SpokeInstanceUID),
+				agentRowField("spoke_name", enrollment.SpokeName),
 				agentRowField("project", project),
 				agentRowField("capabilities", displayCaps),
 				agentRowField("state", state),
@@ -1556,8 +1626,12 @@ func printFederationEnrollments(cmd *cobra.Command, bs []byte) error {
 		if err != nil {
 			return err
 		}
+		spoke := textsafe.Line(enrollment.SpokeInstanceUID)
+		if enrollment.SpokeName != "" {
+			spoke += " (" + textsafe.Line(enrollment.SpokeName) + ")"
+		}
 		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "#%d %s project: %s capabilities: %s %s\n",
-			enrollment.ID, textsafe.Line(enrollment.SpokeInstanceUID), project, displayCaps, state); err != nil {
+			enrollment.ID, spoke, project, displayCaps, state); err != nil {
 			return err
 		}
 	}
