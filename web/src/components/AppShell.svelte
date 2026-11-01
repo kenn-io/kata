@@ -1,6 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { DetailDrawer, IconButton, Tooltip, TopBar, type TypeaheadOption } from '@kenn-io/kit-ui'
+  import {
+    DetailDrawer,
+    IconButton,
+    PageHeader,
+    Tooltip,
+    TopBar,
+    type TypeaheadOption,
+  } from '@kenn-io/kit-ui'
   import LayoutPanelLeftIcon from '@lucide/svelte/icons/layout-panel-left'
   import LayoutPanelTopIcon from '@lucide/svelte/icons/layout-panel-top'
   import MonitorIcon from '@lucide/svelte/icons/monitor'
@@ -674,8 +681,8 @@
             onBack={onBackFromCredentials}
           />
           {#if accessAdministrationAvailable}
-            <section class="access-administration" aria-labelledby="access-administration-heading">
-              <h2 id="access-administration-heading">Teams and visibility</h2>
+            <section class="access-administration" aria-label="Teams and visibility">
+              <PageHeader level={2} title="Teams and visibility" />
               {#if onAccessMutation}
                 {#key `${activeDaemonID ?? 'direct'}:${draftFenceGeneration}`}
                   <AccessManagement
@@ -967,15 +974,11 @@
   }
 
   .access-administration {
+    display: grid;
+    gap: var(--space-4);
     padding: var(--space-5);
     background: var(--bg-primary);
     border-top: 1px solid var(--border-default);
-  }
-
-  .access-administration h2 {
-    margin-bottom: var(--space-4);
-    font-size: var(--font-size-xl);
-    line-height: 1.25;
   }
 
   .list-column {

@@ -18,6 +18,7 @@
     type KataTaskSort,
     type KataTaskSortKey,
   } from '../lib/kata/sort'
+  import { PageHeader } from '@kenn-io/kit-ui'
   import ColumnPicker from './ColumnPicker.svelte'
   import {
     KATA_OPTIONAL_TASK_COLUMNS,
@@ -772,14 +773,13 @@
 
 <section class="issue-list" aria-label="Issues">
   <div class="pane-header">
-    <div class="heading-row">
-      <div class="heading">
-        <h2>{viewTitle(currentView)}</h2>
+    <PageHeader level={2} title={viewTitle(currentView)}>
+      {#snippet trailing()}
         <span class="count"
           >{totalFilteredIssues()} {totalFilteredIssues() === 1 ? 'task' : 'tasks'}</span
         >
-      </div>
-      <div class="header-actions">
+      {/snippet}
+      {#snippet actions()}
         <ColumnPicker
           visibility={columnVisibility}
           onchange={setColumnVisibility}
@@ -811,8 +811,8 @@
             </button>
           </div>
         {/if}
-      </div>
-    </div>
+      {/snippet}
+    </PageHeader>
     {#if loading}
       <span class="kit-sr-only" aria-live="polite">Loading snapshot</span>
     {/if}
@@ -1073,38 +1073,6 @@
     flex-shrink: 0;
     padding: 12px 12px 8px;
     background: var(--bg-surface);
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .heading-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    min-width: 0;
-  }
-
-  .heading {
-    display: flex;
-    align-items: baseline;
-    gap: var(--space-4);
-    min-width: 0;
-  }
-
-  .header-actions {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    flex-shrink: 0;
-    white-space: nowrap;
-  }
-
-  .pane-header h2 {
-    font-size: var(--font-size-xl);
-    line-height: 1.2;
-    font-weight: var(--font-weight-semibold);
   }
 
   .count {
@@ -1554,7 +1522,7 @@
       --table-min-width: 560px;
     }
 
-    .header-actions :global(.action-label) {
+    .pane-header :global(.action-label) {
       display: none;
     }
   }

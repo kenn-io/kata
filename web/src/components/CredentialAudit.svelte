@@ -1,7 +1,13 @@
 <script lang="ts">
   import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left'
   import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw'
-  import { SearchInput, SelectDropdown, Table, type SelectDropdownOption } from '@kenn-io/kit-ui'
+  import {
+    PageHeader,
+    SearchInput,
+    SelectDropdown,
+    Table,
+    type SelectDropdownOption,
+  } from '@kenn-io/kit-ui'
 
   import type { TokenOut } from '../lib/api/generated'
 
@@ -58,28 +64,31 @@
   }
 </script>
 
-<section class="credential-audit" aria-labelledby="credential-audit-heading">
-  <header class="audit-header">
-    <div class="audit-heading">
+<section class="credential-audit" aria-label="Credentials">
+  <PageHeader
+    level={2}
+    title="Credentials"
+    description="Redacted credential inventory for this daemon."
+  >
+    {#snippet before()}
       <button type="button" class="back-button" aria-label="Back to issues" onclick={onBack}>
-        <ArrowLeftIcon size={16} strokeWidth={1.8} aria-hidden="true" />
+        <ArrowLeftIcon size={14} strokeWidth={1.8} aria-hidden="true" />
+        <span>Issues</span>
       </button>
-      <div>
-        <h2 id="credential-audit-heading">Credentials</h2>
-        <p>Redacted credential inventory for this daemon.</p>
-      </div>
-    </div>
-    <button
-      type="button"
-      class="refresh-button"
-      aria-label="Refresh credentials"
-      disabled={loading}
-      onclick={onRefresh}
-    >
-      <RefreshCwIcon size={14} strokeWidth={1.8} aria-hidden="true" />
-      <span>Refresh</span>
-    </button>
-  </header>
+    {/snippet}
+    {#snippet actions()}
+      <button
+        type="button"
+        class="refresh-button"
+        aria-label="Refresh credentials"
+        disabled={loading}
+        onclick={onRefresh}
+      >
+        <RefreshCwIcon size={14} strokeWidth={1.8} aria-hidden="true" />
+        <span>Refresh</span>
+      </button>
+    {/snippet}
+  </PageHeader>
 
   <div class="filters" role="group" aria-label="Credential filters">
     <div class="filter-field">
@@ -210,35 +219,16 @@
     background: var(--bg-primary);
   }
 
-  .audit-header,
-  .audit-heading,
   .refresh-button {
     display: flex;
     align-items: center;
   }
 
-  .audit-header {
-    justify-content: space-between;
-    gap: var(--space-4);
-  }
-
-  .audit-heading {
-    min-width: 0;
-    gap: var(--space-3);
-  }
-
-  h2 {
-    font-size: var(--font-size-xl);
-    line-height: 1.25;
-  }
-
-  .audit-heading p,
   .refresh-status {
     color: var(--text-muted);
     font-size: var(--font-size-sm);
   }
 
-  .back-button,
   .refresh-button {
     border: 1px solid var(--border-default);
     border-radius: var(--radius-sm);
@@ -246,11 +236,19 @@
   }
 
   .back-button {
-    display: grid;
-    flex: 0 0 auto;
-    width: 30px;
-    height: 30px;
-    place-items: center;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .back-button:hover {
+    color: var(--text-primary);
   }
 
   .refresh-button {
@@ -259,7 +257,6 @@
     white-space: nowrap;
   }
 
-  .back-button:hover,
   .refresh-button:hover:not(:disabled) {
     background: var(--bg-surface-hover);
   }
@@ -371,10 +368,6 @@
   @media (max-width: 760px) {
     .credential-audit {
       padding: var(--space-4);
-    }
-
-    .audit-header {
-      align-items: flex-start;
     }
 
     .filters {
