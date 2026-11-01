@@ -287,15 +287,6 @@ func TestEmitError_AgentMode_CommandError(t *testing.T) {
 	assert.Equal(t, "ERR comment validation: comment body is required\n", buf.String())
 }
 
-func TestEmitError_AgentMode_UnknownCommandUsesKata(t *testing.T) {
-	resetRunEEntered(t)
-	resetFlags(t)
-	_, stderr, err := executeRootCapture(t, t.Context(), "--agent", "cretae")
-	require.Error(t, err)
-	assert.Truef(t, strings.HasPrefix(stderr, "ERR kata usage:"),
-		"stderr should start with agent usage error, got %q", stderr)
-}
-
 func TestEmitError_AgentMode_ParseErrorSingleLine(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)

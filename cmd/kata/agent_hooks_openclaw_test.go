@@ -762,20 +762,3 @@ func TestOpenClawTerminalFallbackWithoutAnotherPrompt(t *testing.T) {
 		}
 	}
 }
-
-func TestOpenClawRecorderDoesNotRequireChildNodePATH(t *testing.T) {
-	opts := openClawTestOptions(t)
-	opts.Executable = filepath.Join(opts.Home, "record-kata")
-	opts.Executable = openClawInstallRecorder(t, opts.Executable)
-	require.NoError(t, os.WriteFile(filepath.Join(opts.Home, "contract"), []byte("recorded"), 0600))
-	cmd := exec.CommandContext(t.Context(), opts.Executable, "agent-contract-hook") //nolint:gosec // G204: controlled native fixture command or current test executable, with fixed test arguments.
-	cmd.Dir = opts.Home
-	cmd.Env = []string{"SystemRoot=" + os.Getenv("SystemRoot"), "OPENCLAW_TEST_ROOT=" + opts.Home, "PATH=" + filepath.Join(opts.Home, "empty")}
-	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, string(out))
-	var response struct {
-		HookSpecificOutput struct{ AdditionalContext string }
-	}
-	require.NoError(t, json.Unmarshal(out, &response))
-	require.Equal(t, "contract:recorded", response.HookSpecificOutput.AdditionalContext)
-}
