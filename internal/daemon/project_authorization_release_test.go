@@ -701,7 +701,7 @@ func TestProjectAccessCachedHistoryWithheldAfterReferencedIssueMoved(t *testing.
 				status, _, body = f.request(t, http.MethodGet, path, "member", nil, nil)
 				assert.True(t, moved, "the move ran between the cached read and the release")
 				assert.Equal(t, http.StatusNotFound, status, string(body))
-				assert.NotContains(t, string(body), f.issue.ShortID)
+				assert.NotRegexp(t, `\b`+f.issue.ShortID+`\b`, string(body))
 			})
 		}
 	})

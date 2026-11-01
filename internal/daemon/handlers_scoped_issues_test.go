@@ -427,14 +427,19 @@ func TestIssueScopedUIDPrefixAmbiguityIgnoresHiddenMatches(t *testing.T) {
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)
 	require.Contains(t, string(body), root.UID)
 	require.NotContains(t, string(body), hidden.UID)
-	require.NotContains(t, string(body), hidden.ShortID)
+	require.NotRegexp(t, `\b`+hidden.ShortID+`\b`, string(body))
 }
 
 func TestIssueScopedCloseResponseAndRefusalHideOutsideRelationships(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	project, err := env.DB.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
-	outsideParent := createScopedHTTPTestIssue(t, env, project.ID, "Outside parent", nil)
+	// "mman" also occurs in the close response's "command" field name.
+	outsideParent, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: project.ID, UID: "01HZNQ7VFPK1XGD8R5MABCMMAN", Title: "Outside parent", Author: "coordinator",
+	})
+	require.NoError(t, err)
+	require.Equal(t, "mman", outsideParent.ShortID)
 	root := createScopedHTTPTestIssue(t, env, project.ID, "Root", &outsideParent)
 	otherProject, err := env.DB.CreateProject(t.Context(), "other-project")
 	require.NoError(t, err)
@@ -460,7 +465,8 @@ func TestIssueScopedCloseResponseAndRefusalHideOutsideRelationships(t *testing.T
 	}
 	resp, body := envDoRaw(t, env, http.MethodPost, closePath, closeBody, headers)
 	assertAPIError(t, resp.StatusCode, body, http.StatusConflict, "parent_has_open_children")
-	for _, secret := range []string{hiddenChild.UID, hiddenChild.ShortID, hiddenChild.Title, otherProject.Name} {
+	require.NotRegexp(t, `\b`+hiddenChild.ShortID+`\b`, string(body))
+	for _, secret := range []string{hiddenChild.UID, hiddenChild.Title, otherProject.Name} {
 		require.NotContains(t, string(body), secret)
 	}
 
@@ -469,7 +475,8 @@ func TestIssueScopedCloseResponseAndRefusalHideOutsideRelationships(t *testing.T
 	require.NoError(t, err)
 	resp, body = envDoRaw(t, env, http.MethodPost, closePath, closeBody, headers)
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)
-	for _, secret := range []string{outsideParent.UID, outsideParent.ShortID, outsideParent.Title} {
+	require.NotRegexp(t, `\b`+outsideParent.ShortID+`\b`, string(body))
+	for _, secret := range []string{outsideParent.UID, outsideParent.Title} {
 		require.NotContains(t, string(body), secret)
 	}
 }
@@ -669,7 +676,7 @@ func TestIssueScopedTokenProjectsEventsWithoutOutsideIdentities(t *testing.T) {
 		nil, headers)
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)
 	require.NotContains(t, string(body), outside.UID)
-	require.NotContains(t, string(body), outside.ShortID)
+	require.NotRegexp(t, `\b`+outside.ShortID+`\b`, string(body))
 }
 
 func TestIssueScopedPollResetsWhenHiddenBlockerChangesReadiness(t *testing.T) {
@@ -811,7 +818,8 @@ func TestIssueScopedPollResetsWhenHiddenCreatedIssueBlocksAccessibleIssue(t *tes
 	require.Greater(t, polled.ResetAfterID, afterID)
 	require.Equal(t, polled.ResetAfterID, polled.NextAfterID)
 	require.Empty(t, polled.Events)
-	for _, secret := range []string{created.Issue.UID, created.Issue.ShortID, created.Issue.Title} {
+	require.NotRegexp(t, `\b`+created.Issue.ShortID+`\b`, string(body))
+	for _, secret := range []string{created.Issue.UID, created.Issue.Title} {
 		require.NotContains(t, string(body), secret,
 			"the reset must be identity-free")
 	}
@@ -930,7 +938,8 @@ func TestIssueScopedPollResetsWhenCompoundEditMovesChildOutsideSubtree(t *testin
 	require.NoError(t, json.Unmarshal(body, &polled))
 	require.True(t, polled.ResetRequired)
 	require.Empty(t, polled.Events)
-	for _, secret := range []string{outside.UID, outside.ShortID, outside.Title} {
+	require.NotRegexp(t, `\b`+outside.ShortID+`\b`, string(body))
+	for _, secret := range []string{outside.UID, outside.Title} {
 		require.NotContains(t, string(body), secret)
 	}
 }
