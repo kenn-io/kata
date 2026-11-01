@@ -4,6 +4,7 @@ package e2e_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -47,7 +48,8 @@ func TestRemoteClient_DaemonOnTCPClientViaKATA_SERVER(t *testing.T) {
 	serverHome := t.TempDir()
 
 	daemonStderr := &safeBuffer{}
-	daemon := exec.Command(bin, "daemon", "start", "--foreground", "--listen", addr) //nolint:gosec
+	// t.Cleanup owns this process; t.Context() would kill it before that runs.
+	daemon := exec.CommandContext(context.WithoutCancel(t.Context()), bin, "daemon", "start", "--foreground", "--listen", addr) //nolint:gosec
 	daemon.Env = append(os.Environ(),
 		"KATA_HOME="+serverHome,
 		"KATA_DB="+filepath.Join(serverHome, "kata.db"),
@@ -129,7 +131,8 @@ func TestRemoteInit_PathFreeWireShape(t *testing.T) {
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	serverHome := t.TempDir()
 	daemonStderr := &safeBuffer{}
-	daemon := exec.Command(bin, "daemon", "start", "--foreground", "--listen", addr) //nolint:gosec
+	// t.Cleanup owns this process; t.Context() would kill it before that runs.
+	daemon := exec.CommandContext(context.WithoutCancel(t.Context()), bin, "daemon", "start", "--foreground", "--listen", addr) //nolint:gosec
 	daemon.Env = append(os.Environ(),
 		"KATA_HOME="+serverHome,
 		"KATA_DB="+filepath.Join(serverHome, "kata.db"),
@@ -213,7 +216,8 @@ func TestRemoteResolve_PathFreeWireShape(t *testing.T) {
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	serverHome := t.TempDir()
 	daemonStderr := &safeBuffer{}
-	daemon := exec.Command(bin, "daemon", "start", "--foreground", "--listen", addr) //nolint:gosec
+	// t.Cleanup owns this process; t.Context() would kill it before that runs.
+	daemon := exec.CommandContext(context.WithoutCancel(t.Context()), bin, "daemon", "start", "--foreground", "--listen", addr) //nolint:gosec
 	daemon.Env = append(os.Environ(),
 		"KATA_HOME="+serverHome,
 		"KATA_DB="+filepath.Join(serverHome, "kata.db"),
@@ -286,7 +290,7 @@ func TestRemoteResolve_PathFreeWireShape(t *testing.T) {
 // There is a small race window before the caller binds again; accept it.
 func freeTCPPort(t *testing.T) int {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	l, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	port := l.Addr().(*net.TCPAddr).Port
 	require.NoError(t, l.Close())
@@ -300,7 +304,9 @@ func waitForPing(t *testing.T, base string, timeout time.Duration) {
 	deadline := time.Now().Add(timeout)
 	client := &http.Client{Timeout: time.Second}
 	for time.Now().Before(deadline) {
-		resp, err := client.Get(base + "/api/v1/ping") //nolint:noctx
+		req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, base+"/api/v1/ping", nil)
+		require.NoError(t, reqErr)
+		resp, err := client.Do(req)
 		if err == nil {
 			body, _ := io.ReadAll(resp.Body)
 			_ = resp.Body.Close()
@@ -322,7 +328,7 @@ func waitForPing(t *testing.T, base string, timeout time.Duration) {
 // combined output on failure for debugging.
 func runRemoteCmd(t *testing.T, bin, workdir string, env []string, args ...string) {
 	t.Helper()
-	cmd := exec.Command(bin, args...) //nolint:gosec
+	cmd := exec.CommandContext(t.Context(), bin, args...) //nolint:gosec
 	cmd.Dir = workdir
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
@@ -333,7 +339,7 @@ func runRemoteCmd(t *testing.T, bin, workdir string, env []string, args ...strin
 // and asserts success.
 func runRemoteCmdOutput(t *testing.T, bin, workdir string, env []string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command(bin, args...) //nolint:gosec
+	cmd := exec.CommandContext(t.Context(), bin, args...) //nolint:gosec
 	cmd.Dir = workdir
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()

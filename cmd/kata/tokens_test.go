@@ -35,7 +35,7 @@ func TestTokensCreateCommand_PrintsPlaintextOnce(t *testing.T) {
 
 	plaintext := extractTokenPlaintext(t, out)
 	assert.Equal(t, 1, strings.Count(out, plaintext))
-	resolved, err := env.DB.ResolveAPIToken(context.Background(), plaintext)
+	resolved, err := env.DB.ResolveAPIToken(t.Context(), plaintext)
 	require.NoError(t, err)
 	assert.Equal(t, "wesm", resolved.Actor)
 	require.NotNil(t, resolved.Name)
@@ -62,16 +62,16 @@ func TestTokensCreateCommand_ExplainsIdentityModeBeforeMinting(t *testing.T) {
 	assert.Contains(t, cliErr.Message, "require_token_identity")
 
 	var tokens int
-	require.NoError(t, env.DB.QueryRowContext(context.Background(),
+	require.NoError(t, env.DB.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM api_tokens`).Scan(&tokens))
 	assert.Zero(t, tokens)
 }
 
 func TestTokensCreateCommand_WritesScopedTokenToOwnerOnlyFile(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
-	project, err := env.DB.CreateProject(context.Background(), "example-project")
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
-	root, _, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
+	root, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: project.ID, Title: "Delegated work", Author: "coordinator",
 	})
 	require.NoError(t, err)
@@ -99,7 +99,7 @@ func TestTokensCreateCommand_WritesScopedTokenToOwnerOnlyFile(t *testing.T) {
 		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 	}
 
-	resolved, err := env.DB.ResolveAPIToken(context.Background(), plaintext)
+	resolved, err := env.DB.ResolveAPIToken(t.Context(), plaintext)
 	require.NoError(t, err)
 	assert.Equal(t, "worker-a", resolved.Actor)
 	require.NotNil(t, resolved.Scope)
@@ -125,9 +125,9 @@ func TestTokensCreateCommand_ScopedOutputNeverContainsPlaintext(t *testing.T) {
 	} {
 		t.Run(mode.name, func(t *testing.T) {
 			env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
-			project, err := env.DB.CreateProject(context.Background(), "example-project")
+			project, err := env.DB.CreateProject(t.Context(), "example-project")
 			require.NoError(t, err)
-			root, _, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
+			root, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
 				ProjectID: project.ID, Title: "Delegated work", Author: "coordinator",
 			})
 			require.NoError(t, err)
@@ -163,9 +163,9 @@ func TestTokensCreateCommand_ScopedOutputNeverContainsPlaintext(t *testing.T) {
 
 func TestTokensCreateCommand_ReservesScopedTokenFileBeforeMinting(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
-	project, err := env.DB.CreateProject(context.Background(), "example-project")
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
-	root, _, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
+	root, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: project.ID, Title: "Delegated work", Author: "coordinator",
 	})
 	require.NoError(t, err)
@@ -184,7 +184,7 @@ func TestTokensCreateCommand_ReservesScopedTokenFileBeforeMinting(t *testing.T) 
 	assert.Equal(t, "keep-me", string(contents))
 
 	var count int
-	require.NoError(t, env.DB.QueryRowContext(context.Background(),
+	require.NoError(t, env.DB.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM api_tokens`).Scan(&count))
 	assert.Zero(t, count)
 }
@@ -205,18 +205,18 @@ func TestTokensCreateCommand_RequiresCompleteScopedArguments(t *testing.T) {
 	}
 
 	var count int
-	require.NoError(t, env.DB.QueryRowContext(context.Background(),
+	require.NoError(t, env.DB.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM api_tokens`).Scan(&count))
 	assert.Zero(t, count)
 }
 
 func TestTokensCreateCommand_RejectsConflictingExplicitProject(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
-	project, err := env.DB.CreateProject(context.Background(), "example-project")
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
-	_, err = env.DB.CreateProject(context.Background(), "other-project")
+	_, err = env.DB.CreateProject(t.Context(), "other-project")
 	require.NoError(t, err)
-	root, _, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
+	root, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: project.ID, Title: "Delegated work", Author: "coordinator",
 	})
 	require.NoError(t, err)
@@ -232,7 +232,7 @@ func TestTokensCreateCommand_RejectsConflictingExplicitProject(t *testing.T) {
 	assert.Equal(t, "conflicting_project_selector", cliErr.Code)
 
 	var count int
-	require.NoError(t, env.DB.QueryRowContext(context.Background(),
+	require.NoError(t, env.DB.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM api_tokens`).Scan(&count))
 	assert.Zero(t, count)
 }
@@ -242,9 +242,9 @@ func TestTokensCreateCommand_RejectsSymlinkTokenFileWithoutTouchingTarget(t *tes
 		t.Skip("creating symlinks may require elevated Windows privileges")
 	}
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
-	project, err := env.DB.CreateProject(context.Background(), "example-project")
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
-	root, _, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
+	root, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: project.ID, Title: "Delegated work", Author: "coordinator",
 	})
 	require.NoError(t, err)
@@ -266,7 +266,7 @@ func TestTokensCreateCommand_RejectsSymlinkTokenFileWithoutTouchingTarget(t *tes
 	assert.Equal(t, "keep-me", string(contents))
 
 	var count int
-	require.NoError(t, env.DB.QueryRowContext(context.Background(),
+	require.NoError(t, env.DB.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM api_tokens`).Scan(&count))
 	assert.Zero(t, count)
 }
@@ -276,9 +276,9 @@ func TestTokensCreateCommand_RejectsNonPrivateTokenDirectoryBeforeMinting(t *tes
 		t.Skip("Windows privacy is enforced with directory ACLs")
 	}
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
-	project, err := env.DB.CreateProject(context.Background(), "example-project")
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
-	root, _, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
+	root, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: project.ID, Title: "Delegated work", Author: "coordinator",
 	})
 	require.NoError(t, err)
@@ -297,7 +297,7 @@ func TestTokensCreateCommand_RejectsNonPrivateTokenDirectoryBeforeMinting(t *tes
 	assert.ErrorIs(t, statErr, os.ErrNotExist)
 
 	var count int
-	require.NoError(t, env.DB.QueryRowContext(context.Background(),
+	require.NoError(t, env.DB.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM api_tokens`).Scan(&count))
 	assert.Zero(t, count)
 }
@@ -417,7 +417,7 @@ func TestTokensListCommand_RedactsPlaintextAndHash(t *testing.T) {
 
 func TestTokensRevokeCommand_RevokesToken(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
-	tok, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	tok, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "user-token",
 		Actor:          "alice",
 		AdminActor:     db.BootstrapActor,
@@ -428,7 +428,7 @@ func TestTokensRevokeCommand_RevokesToken(t *testing.T) {
 
 	assert.Contains(t, out, "revoked token id="+strconv.FormatInt(tok.ID, 10))
 	assert.Contains(t, out, "actor=alice")
-	_, err = env.DB.ResolveAPIToken(context.Background(), "user-token")
+	_, err = env.DB.ResolveAPIToken(t.Context(), "user-token")
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 

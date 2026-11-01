@@ -74,7 +74,7 @@ func TestBearerTransportCanonicalOrigin(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			base := &recordingRoundTripper{}
 			transport := (BearerPolicy{}).Transport(base, "test-token", "https://Daemon.Example:443")
-			req, err := http.NewRequest(http.MethodGet, tt.target, nil)
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, tt.target, nil)
 			require.NoError(t, err)
 
 			resp, err := transport.RoundTrip(req)
@@ -99,7 +99,7 @@ func TestBearerTransportCanonicalIPv6ZoneOrigin(t *testing.T) {
 		"test-token",
 		"https://[FE80::ABCD%25EnABC]:00443/configured/path",
 	)
-	req, err := http.NewRequest(
+	req, err := http.NewRequestWithContext(t.Context(),
 		http.MethodGet,
 		"https://[fe80::abcd%25EnABC]/api/v1/ping",
 		nil,
@@ -291,7 +291,7 @@ func TestBearerTransportPerRequestPolicyMatrix(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			base := &recordingRoundTripper{}
 			rt := tt.policy.Transport(base, "test-token", "http://127.0.0.1:7777")
-			req, err := http.NewRequest(http.MethodGet, tt.target, nil)
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, tt.target, nil)
 			require.NoError(t, err)
 
 			resp, err := rt.RoundTrip(req)
@@ -401,7 +401,7 @@ func TestBearerPolicyConfigureClientEmptyToken(t *testing.T) {
 					"an empty token must preserve the client's transport")
 			}
 
-			req, err := http.NewRequest(http.MethodGet, tt.baseURL+"/api/v1/ping", nil)
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, tt.baseURL+"/api/v1/ping", nil)
 			require.NoError(t, err)
 			resp, err := c.Transport.RoundTrip(req)
 			require.NoError(t, err)

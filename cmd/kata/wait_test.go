@@ -242,7 +242,7 @@ const (
 func TestWaitAlreadyClosedReturnsImmediately(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "finished work")
-	require.NoError(t, closeIssueHTTP(env, pid, ref))
+	require.NoError(t, closeIssueHTTP(t.Context(), env, pid, ref))
 
 	start := time.Now()
 	stdout, _, err := runCLIWithErr(t, env, dir,
@@ -260,7 +260,7 @@ func TestWaitClosesAfterDelay(t *testing.T) {
 	errc := make(chan error, 1)
 	go func() {
 		time.Sleep(waitMutDelay)
-		errc <- closeIssueHTTP(env, pid, ref)
+		errc <- closeIssueHTTP(t.Context(), env, pid, ref)
 	}()
 
 	stdout, _, err := runCLIWithErr(t, env, dir,
@@ -278,7 +278,7 @@ func TestWaitUntilNeedsHumanSurfacesMessage(t *testing.T) {
 	errc := make(chan error, 1)
 	go func() {
 		time.Sleep(waitMutDelay)
-		errc <- setAttentionHTTP(env, pid, ref, "needs-human", "blocked on database migration")
+		errc <- setAttentionHTTP(t.Context(), env, pid, ref, "needs-human", "blocked on database migration")
 	}()
 
 	stdout, _, err := runCLIWithErr(t, env, dir,
@@ -296,7 +296,7 @@ func TestWaitUntilAttentionFiresOnStuck(t *testing.T) {
 	errc := make(chan error, 1)
 	go func() {
 		time.Sleep(waitMutDelay)
-		errc <- setAttentionHTTP(env, pid, ref, "stuck", "")
+		errc <- setAttentionHTTP(t.Context(), env, pid, ref, "stuck", "")
 	}()
 
 	stdout, _, err := runCLIWithErr(t, env, dir,
@@ -313,7 +313,7 @@ func TestWaitUntilAttentionFiresOnNovelLevel(t *testing.T) {
 	errc := make(chan error, 1)
 	go func() {
 		time.Sleep(waitMutDelay)
-		errc <- setAttentionHTTP(env, pid, ref, "on-fire", "")
+		errc <- setAttentionHTTP(t.Context(), env, pid, ref, "on-fire", "")
 	}()
 
 	stdout, _, err := runCLIWithErr(t, env, dir,
@@ -330,7 +330,7 @@ func TestWaitAttentionModeCompletesOnClose(t *testing.T) {
 	errc := make(chan error, 1)
 	go func() {
 		time.Sleep(waitMutDelay)
-		errc <- closeIssueHTTP(env, pid, ref)
+		errc <- closeIssueHTTP(t.Context(), env, pid, ref)
 	}()
 
 	stdout, _, err := runCLIWithErr(t, env, dir,
@@ -348,7 +348,7 @@ func TestWaitAnyReturnsOnFirst(t *testing.T) {
 	errc := make(chan error, 1)
 	go func() {
 		time.Sleep(waitMutDelay)
-		errc <- closeIssueHTTP(env, pid, ref1)
+		errc <- closeIssueHTTP(t.Context(), env, pid, ref1)
 	}()
 
 	// --timeout is a safety net; if --any did not short-circuit, ref2 never
@@ -369,9 +369,9 @@ func TestWaitAllWaitsForEvery(t *testing.T) {
 	go func() {
 		e1 := (error)(nil)
 		time.Sleep(waitMutDelay)
-		e1 = closeIssueHTTP(env, pid, ref1)
+		e1 = closeIssueHTTP(t.Context(), env, pid, ref1)
 		time.Sleep(waitMutDelay)
-		e2 := closeIssueHTTP(env, pid, ref2)
+		e2 := closeIssueHTTP(t.Context(), env, pid, ref2)
 		errc <- errors.Join(e1, e2)
 	}()
 
@@ -476,7 +476,7 @@ func TestWaitTimeoutBoundsHungFetch(t *testing.T) {
 
 	resetFlags(t)
 	start := time.Now()
-	_, _, err := executeRootCapture(t, contextWithBaseURL(context.Background(), srv.URL),
+	_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), srv.URL),
 		"wait", "kata#abcd", "--timeout", "300ms", "--poll-interval", "50ms")
 	elapsed := time.Since(start)
 
@@ -508,7 +508,7 @@ func TestWaitTimeoutBoundsRefResolution(t *testing.T) {
 
 	resetFlags(t)
 	start := time.Now()
-	_, _, err := executeRootCapture(t, contextWithBaseURL(context.Background(), srv.URL),
+	_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), srv.URL),
 		"wait", "kata#abcd", "--timeout", "300ms", "--poll-interval", "50ms")
 	elapsed := time.Since(start)
 
@@ -550,7 +550,7 @@ func TestWaitTimeoutAfterTransientFailsReportsTimeout(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	resetFlags(t)
-	_, _, err := executeRootCapture(t, contextWithBaseURL(context.Background(), srv.URL),
+	_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), srv.URL),
 		"wait", "kata#abcd", "--timeout", "500ms", "--poll-interval", "20ms")
 
 	// A deadline-canceled fetch is a timeout, not the 3rd consecutive failure.
@@ -582,7 +582,7 @@ func TestWaitParentDeadlineDuringResolutionIsNotWaitTimeout(t *testing.T) {
 
 	resetFlags(t)
 	parentCtx, cancel := context.WithTimeout( //nolint:kennlint // deadlinetest: the parent deadline is the expected result; the fake holds resolution until the client disconnects
-		contextWithBaseURL(context.Background(), srv.URL), 200*time.Millisecond)
+		contextWithBaseURL(t.Context(), srv.URL), 200*time.Millisecond)
 	defer cancel()
 	_, _, err := executeRootCapture(t, parentCtx,
 		"wait", "kata#abcd", "--timeout", "5s", "--poll-interval", "50ms")
@@ -616,7 +616,7 @@ func TestWaitAnyInitialPassStopsAfterJoinMet(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	resetFlags(t)
-	stdout, _, err := executeRootCapture(t, contextWithBaseURL(context.Background(), srv.URL),
+	stdout, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), srv.URL),
 		"wait", "kata#aaaa", "kata#bbbb", "--any", "--poll-interval", "50ms")
 
 	require.NoError(t, err)
@@ -639,7 +639,7 @@ func TestWaitBadRefFailsFast(t *testing.T) {
 func TestWaitAnySucceedsWhenOtherRefAlreadySatisfiedBadRefLast(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "already closed, bad ref last")
-	require.NoError(t, closeIssueHTTP(env, pid, ref))
+	require.NoError(t, closeIssueHTTP(t.Context(), env, pid, ref))
 
 	start := time.Now()
 	stdout, _, err := runCLIWithErr(t, env, dir,
@@ -653,7 +653,7 @@ func TestWaitAnySucceedsWhenOtherRefAlreadySatisfiedBadRefLast(t *testing.T) {
 func TestWaitAnySucceedsWhenOtherRefAlreadySatisfiedBadRefFirst(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "already closed, bad ref first")
-	require.NoError(t, closeIssueHTTP(env, pid, ref))
+	require.NoError(t, closeIssueHTTP(t.Context(), env, pid, ref))
 
 	start := time.Now()
 	stdout, _, err := runCLIWithErr(t, env, dir,
@@ -679,7 +679,7 @@ func TestWaitAnyStillFailsFastOnBadRefWhenJoinUnsatisfied(t *testing.T) {
 func TestWaitAllStillFailsOnBadRefEvenWhenOtherRefAlreadySatisfied(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "already closed, but --all with bad ref")
-	require.NoError(t, closeIssueHTTP(env, pid, ref))
+	require.NoError(t, closeIssueHTTP(t.Context(), env, pid, ref))
 
 	_, err := runCLICapture(t, env, dir,
 		"wait", ref, "zzzz", "--all", "--poll-interval", waitFastPoll, "--timeout", waitSafetyNet)
@@ -698,7 +698,7 @@ func TestWaitAllAbortsOnDeletedRefMidWait(t *testing.T) {
 	errc := make(chan error, 1)
 	go func() {
 		time.Sleep(waitMutDelay)
-		errc <- deleteIssueHTTP(env, pid, ref)
+		errc <- deleteIssueHTTP(t.Context(), env, pid, ref)
 	}()
 
 	start := time.Now()
@@ -721,9 +721,9 @@ func TestWaitAnyAbandonsDeletedRefCompletesOnOther(t *testing.T) {
 	errc := make(chan error, 2)
 	go func() {
 		time.Sleep(waitMutDelay)
-		errc <- deleteIssueHTTP(env, pid, ref1)
+		errc <- deleteIssueHTTP(t.Context(), env, pid, ref1)
 		time.Sleep(waitMutDelay)
-		errc <- closeIssueHTTP(env, pid, ref2)
+		errc <- closeIssueHTTP(t.Context(), env, pid, ref2)
 	}()
 
 	stdout, _, err := runCLIWithErr(t, env, dir,
@@ -750,9 +750,9 @@ func TestWaitAnyAbandonedAgentUsesNonErrorRow(t *testing.T) {
 	errc := make(chan error, 2)
 	go func() {
 		time.Sleep(waitMutDelay)
-		errc <- deleteIssueHTTP(env, pid, ref1)
+		errc <- deleteIssueHTTP(t.Context(), env, pid, ref1)
 		time.Sleep(waitMutDelay)
-		errc <- closeIssueHTTP(env, pid, ref2)
+		errc <- closeIssueHTTP(t.Context(), env, pid, ref2)
 	}()
 
 	stdout, _, err := runCLIWithErr(t, env, dir,
@@ -781,9 +781,9 @@ func TestWaitAnyAbandonedRefAppearsInJSON(t *testing.T) {
 	errc := make(chan error, 2)
 	go func() {
 		time.Sleep(waitMutDelay)
-		errc <- deleteIssueHTTP(env, pid, ref1)
+		errc <- deleteIssueHTTP(t.Context(), env, pid, ref1)
 		time.Sleep(waitMutDelay)
-		errc <- closeIssueHTTP(env, pid, ref2)
+		errc <- closeIssueHTTP(t.Context(), env, pid, ref2)
 	}()
 
 	stdout, _, err := runCLIWithErr(t, env, dir,
@@ -814,7 +814,7 @@ func TestWaitAnyJSONSuccessLeavesPendingEmpty(t *testing.T) {
 	errc := make(chan error, 1)
 	go func() {
 		time.Sleep(waitMutDelay)
-		errc <- closeIssueHTTP(env, pid, ref1)
+		errc <- closeIssueHTTP(t.Context(), env, pid, ref1)
 	}()
 
 	stdout, _, err := runCLIWithErr(t, env, dir,
@@ -841,8 +841,8 @@ func TestWaitAnyAllRefsDeletedReturnsFirstError(t *testing.T) {
 	errc := make(chan error, 2)
 	go func() {
 		time.Sleep(waitMutDelay)
-		errc <- deleteIssueHTTP(env, pid, ref1)
-		errc <- deleteIssueHTTP(env, pid, ref2)
+		errc <- deleteIssueHTTP(t.Context(), env, pid, ref1)
+		errc <- deleteIssueHTTP(t.Context(), env, pid, ref2)
 	}()
 
 	_, err := runCLICapture(t, env, dir,
@@ -855,7 +855,7 @@ func TestWaitAnyAllRefsDeletedReturnsFirstError(t *testing.T) {
 func TestWaitAgentOutput(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "agent output")
-	require.NoError(t, closeIssueHTTP(env, pid, ref))
+	require.NoError(t, closeIssueHTTP(t.Context(), env, pid, ref))
 
 	stdout, _, err := runCLIWithErr(t, env, dir,
 		"--agent", "wait", ref, "--poll-interval", waitFastPoll, "--timeout", waitSafetyNet)
@@ -868,7 +868,7 @@ func TestWaitAgentOutput(t *testing.T) {
 func TestWaitJSONOutput(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	ref := createIssue(t, env, pid, "json output")
-	require.NoError(t, setAttentionHTTP(env, pid, ref, "needs-human", "please look"))
+	require.NoError(t, setAttentionHTTP(t.Context(), env, pid, ref, "needs-human", "please look"))
 
 	stdout, _, err := runCLIWithErr(t, env, dir,
 		"--json", "wait", ref, "--until", "needs-human", "--poll-interval", waitFastPoll, "--timeout", waitSafetyNet)
@@ -899,8 +899,8 @@ func parseWaitJSON(t *testing.T, stdout string) waitJSONOutput {
 // closeIssueHTTP closes an issue via the daemon's close action using the TUI
 // bypass (reason=done, no evidence). Returns an error instead of failing a
 // *testing.T so it is safe to call from a background goroutine.
-func closeIssueHTTP(env *testenv.Env, pid int64, ref string) error {
-	return postJSONExpectOK(
+func closeIssueHTTP(ctx context.Context, env *testenv.Env, pid int64, ref string) error {
+	return postJSONExpectOK(ctx,
 		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/close", env.URL, pid, ref),
 		map[string]any{"actor": "tester", "source": "tui", "reason": "done"}, "")
 }
@@ -910,12 +910,12 @@ func closeIssueHTTP(env *testenv.Env, pid int64, ref string) error {
 // the project name "kata", so the confirm value is "DELETE kata#<short_id>".
 // After this returns, a GET on the ref yields a permanent 404. Goroutine-safe
 // (returns error, no *testing.T).
-func deleteIssueHTTP(env *testenv.Env, pid int64, ref string) error {
+func deleteIssueHTTP(ctx context.Context, env *testenv.Env, pid int64, ref string) error {
 	bs, err := json.Marshal(map[string]any{"actor": "tester"})
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost,
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/delete", env.URL, pid, ref),
 		bytes.NewReader(bs))
 	if err != nil {
@@ -938,8 +938,8 @@ func deleteIssueHTTP(env *testenv.Env, pid int64, ref string) error {
 // setAttentionHTTP patches the work.attention (and optional work.attention_msg)
 // metadata keys. It first reads the current revision for the required If-Match
 // precondition. Goroutine-safe (returns error, no *testing.T).
-func setAttentionHTTP(env *testenv.Env, pid int64, ref, value, msg string) error {
-	rev, err := issueRevisionHTTP(env, pid, ref)
+func setAttentionHTTP(ctx context.Context, env *testenv.Env, pid int64, ref, value, msg string) error {
+	rev, err := issueRevisionHTTP(ctx, env, pid, ref)
 	if err != nil {
 		return err
 	}
@@ -947,15 +947,19 @@ func setAttentionHTTP(env *testenv.Env, pid int64, ref, value, msg string) error
 	if msg != "" {
 		patch["work.attention_msg"] = msg
 	}
-	return postJSONExpectOK(
+	return postJSONExpectOK(ctx,
 		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/metadata", env.URL, pid, ref),
 		map[string]any{"actor": "tester", "patch": patch},
 		fmt.Sprintf(`"rev-%d"`, rev))
 }
 
 // issueRevisionHTTP GETs an issue and returns its current revision.
-func issueRevisionHTTP(env *testenv.Env, pid int64, ref string) (int64, error) {
-	resp, err := http.Get(fmt.Sprintf("%s/api/v1/projects/%d/issues/%s", env.URL, pid, ref)) //nolint:noctx,gosec // test-only loopback
+func issueRevisionHTTP(ctx context.Context, env *testenv.Env, pid int64, ref string) (int64, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s", env.URL, pid, ref), nil)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // test-only loopback
 	if err != nil {
 		return 0, err
 	}
@@ -977,12 +981,12 @@ func issueRevisionHTTP(env *testenv.Env, pid int64, ref string) (int64, error) {
 
 // postJSONExpectOK POSTs body as JSON, optionally with an If-Match header, and
 // returns an error unless the daemon answers 200.
-func postJSONExpectOK(url string, body any, ifMatch string) error {
+func postJSONExpectOK(ctx context.Context, url string, body any, ifMatch string) error {
 	bs, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewReader(bs))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bs))
 	if err != nil {
 		return err
 	}

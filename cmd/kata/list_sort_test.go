@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -14,7 +13,7 @@ import (
 
 func TestList_SortOldest(t *testing.T) {
 	env, dir, projectID := setupCLIWorkspace(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
 	items := []db.ImportItem{
 		{ExternalID: "oldest", Title: "oldest issue", Author: "fixture", Status: "open", CreatedAt: base, UpdatedAt: base},
@@ -87,7 +86,7 @@ func TestList_SortOldest(t *testing.T) {
 }
 
 func TestList_RejectsInvalidSort(t *testing.T) {
-	_, _, err := executeRootCapture(t, context.Background(), "list", "--sort", "newest")
+	_, _, err := executeRootCapture(t, t.Context(), "list", "--sort", "newest")
 	require.Error(t, err)
 	var cliErr *cliError
 	require.ErrorAs(t, err, &cliErr)

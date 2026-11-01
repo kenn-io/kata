@@ -16,6 +16,7 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
 	// Embed zones as the kata binary does: trimmed test binaries cannot
 	// fall back to the Go installation's copy.
 	_ "time/tzdata"
@@ -875,7 +876,7 @@ func TestProcessClientAppliesConfiguredTimeoutWithoutCallerDeadline(t *testing.T
 	})
 
 	started := time.Now()
-	_, err := client.Describe(context.Background())
+	_, err := client.Describe(t.Context())
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	require.ErrorIs(t, err, ErrRequestTimeout)
 	assert.EqualError(t, err, "external connector request timed out")
@@ -892,7 +893,7 @@ func TestProcessClientConfiguredTimeoutBoundsDescendantHeldStdout(t *testing.T) 
 	})
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := client.Describe(context.Background())
+		_, err := client.Describe(t.Context())
 		errCh <- err
 	}()
 
@@ -919,7 +920,7 @@ func TestProcessClientParentCancellationBoundsDescendantHeldStdout(t *testing.T)
 		ID: "notes", Command: helperBinary(t), Args: []string{"-test.run=^TestProcessClientHelper$"}, TimeoutSeconds: 30,
 		Env: map[string]string{"MODE": "HELPER_MODE", "SYNC": "HELPER_SYNC"},
 	})
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 	errCh := make(chan error, 1)
 	go func() {
@@ -1287,7 +1288,8 @@ func serveProcessClientHelper() {
 	if os.Getenv("MODE") == "spawn-stdout-holder" ||
 		os.Getenv("MODE") == "spawn-stdout-holder-and-exit" ||
 		os.Getenv("MODE") == "spawn-background-holder" {
-		child := exec.Command( // #nosec G204,G702 -- the test starts its own fixed executable and helper arguments.
+		// This helper process entry point has no caller context.
+		child := exec.CommandContext(context.Background(), // #nosec G204,G702 -- the test starts its own fixed executable and helper arguments.
 			os.Args[0], "-test.run=^TestProcessClientStdoutHolderHelper$", "--", "--connector-stdout-holder",
 		)
 		if os.Getenv("MODE") == "spawn-stdout-holder" || os.Getenv("MODE") == "spawn-stdout-holder-and-exit" {

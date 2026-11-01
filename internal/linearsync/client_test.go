@@ -29,7 +29,7 @@ func mockClient(t *testing.T, fn roundTrip) *Client {
 }
 func sessionFor(t *testing.T, c *Client) Session {
 	t.Helper()
-	s, err := c.ForRun(context.Background(), testConfig())
+	s, err := c.ForRun(t.Context(), testConfig())
 	require.NoError(t, err)
 	return s
 }
@@ -110,10 +110,10 @@ func TestClientScopesPaginationAndNullableFields(t *testing.T) {
 		return dataResponse(map[string]any{"issues": map[string]any{"nodes": []any{}, "pageInfo": map[string]any{"hasNextPage": false, "endCursor": nil}}}), nil
 	})
 	s := sessionFor(t, c)
-	scope, err := s.Scope(context.Background(), testConfig())
+	scope, err := s.Scope(t.Context(), testConfig())
 	require.NoError(t, err)
 	require.Equal(t, workspaceID, scope.WorkspaceID)
-	items, err := s.Issues(context.Background(), testConfig())
+	items, err := s.Issues(t.Context(), testConfig())
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 	require.Empty(t, items[0].Description)
@@ -123,7 +123,7 @@ func TestClientScopesPaginationAndNullableFields(t *testing.T) {
 func TestClientRejectsPartialErrorsAndScopeLeaks(t *testing.T) {
 	for _, body := range []string{`{"data":{"issues":{"nodes":[]}},"errors":[{"message":"example-key private body"}]}`, `{"data":{"issues":{"nodes":[],"pageInfo":{"hasNextPage":true,"endCursor":null}}}}`, `{"data":{"issues":{"nodes":null,"pageInfo":{"hasNextPage":false}}}}`} {
 		c := mockClient(t, func(*http.Request) (*http.Response, error) { return response(200, body), nil })
-		_, err := sessionFor(t, c).Issues(context.Background(), testConfig())
+		_, err := sessionFor(t, c).Issues(t.Context(), testConfig())
 		require.Error(t, err)
 		require.NotContains(t, err.Error(), "example-key")
 		require.NotContains(t, err.Error(), "private body")
@@ -134,7 +134,7 @@ func TestClientRejectsPartialErrorsAndScopeLeaks(t *testing.T) {
 			edit(i)
 			return dataResponse(map[string]any{"issues": map[string]any{"nodes": []any{i}, "pageInfo": map[string]any{"hasNextPage": false}}}), nil
 		})
-		_, err := sessionFor(t, c).Issues(context.Background(), testConfig())
+		_, err := sessionFor(t, c).Issues(t.Context(), testConfig())
 		require.Error(t, err)
 	}
 }
@@ -162,14 +162,14 @@ func TestClientAuthenticationAndRetryPacing(t *testing.T) {
 			return dataResponse(map[string]any{"issues": map[string]any{"nodes": []any{}, "pageInfo": map[string]any{"hasNextPage": false}}}), nil
 		})})
 		s := sessionFor(t, c)
-		_, err := s.Issues(context.Background(), testConfig())
+		_, err := s.Issues(t.Context(), testConfig())
 		require.NoError(t, err)
-		_, err = s.Issues(context.Background(), testConfig())
+		_, err = s.Issues(t.Context(), testConfig())
 		require.NoError(t, err)
 		require.Equal(t, []time.Duration{5 * time.Second, 1500 * time.Millisecond}, waits)
 	}
 	c := mockClient(t, func(*http.Request) (*http.Response, error) { return response(401, "example-key"), nil })
-	_, err := sessionFor(t, c).Issues(context.Background(), testConfig())
+	_, err := sessionFor(t, c).Issues(t.Context(), testConfig())
 	var classified *issuesync.StatusError
 	require.ErrorAs(t, err, &classified)
 	require.True(t, classified.Blocked)
@@ -182,7 +182,7 @@ func TestClientDetectsCursorCycleAndDuplicateIDs(t *testing.T) {
 			calls++
 			return dataResponse(map[string]any{"issues": map[string]any{"nodes": []any{wireIssue()}, "pageInfo": map[string]any{"hasNextPage": cycle, "endCursor": "same"}}}), nil
 		})
-		_, err := sessionFor(t, c).Issues(context.Background(), testConfig())
+		_, err := sessionFor(t, c).Issues(t.Context(), testConfig())
 		if cycle {
 			require.Error(t, err)
 			require.Equal(t, 2, calls)
@@ -193,7 +193,7 @@ func TestClientDetectsCursorCycleAndDuplicateIDs(t *testing.T) {
 	c := mockClient(t, func(*http.Request) (*http.Response, error) {
 		return dataResponse(map[string]any{"issues": map[string]any{"nodes": []any{wireIssue(), wireIssue()}, "pageInfo": map[string]any{"hasNextPage": false}}}), nil
 	})
-	_, err := sessionFor(t, c).Issues(context.Background(), testConfig())
+	_, err := sessionFor(t, c).Issues(t.Context(), testConfig())
 	require.Error(t, err)
 }
 
@@ -223,15 +223,15 @@ func TestClientProjectScopeAndSharedResetCooldown(t *testing.T) {
 	})})
 	cfg := testConfig()
 	cfg.ProjectID = projectID
-	s, err := c.ForRun(context.Background(), cfg)
+	s, err := c.ForRun(t.Context(), cfg)
 	require.NoError(t, err)
-	scope, err := s.Scope(context.Background(), cfg)
+	scope, err := s.Scope(t.Context(), cfg)
 	require.NoError(t, err)
 	require.Equal(t, projectID, scope.ProjectID)
 	// A new run shares the same account client quota instead of bypassing cooldown.
-	s, err = c.ForRun(context.Background(), cfg)
+	s, err = c.ForRun(t.Context(), cfg)
 	require.NoError(t, err)
-	_, err = s.Scope(context.Background(), cfg)
+	_, err = s.Scope(t.Context(), cfg)
 	require.NoError(t, err)
 	require.Equal(t, []time.Duration{10 * time.Second, 1500 * time.Millisecond, 1500 * time.Millisecond}, waits)
 }
@@ -258,7 +258,7 @@ func TestClientRateLimitWaitsForExhaustedBucket(t *testing.T) {
 		}
 		return dataResponse(map[string]any{"issues": map[string]any{"nodes": []any{}, "pageInfo": map[string]any{"hasNextPage": false}}}), nil
 	})})
-	_, err := sessionFor(t, c).Issues(context.Background(), testConfig())
+	_, err := sessionFor(t, c).Issues(t.Context(), testConfig())
 	require.NoError(t, err)
 	require.Equal(t, []time.Duration{10 * time.Second}, waits)
 }

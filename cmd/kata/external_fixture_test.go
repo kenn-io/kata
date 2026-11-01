@@ -38,7 +38,7 @@ func externalFixtureBinary(t *testing.T, name string) string {
 	}
 	bin := filepath.Join(externalFixtures.dir, filename)
 	//nolint:gosec // Fixed testdata package names and owned binary destination.
-	output, err := exec.Command("go", "build", "-o", bin, "./testdata/"+name).CombinedOutput()
+	output, err := exec.CommandContext(t.Context(), "go", "build", "-o", bin, "./testdata/"+name).CombinedOutput()
 	require.NoError(t, err, "build external contract fixture: %s", output)
 	externalFixtures.binaries[name] = bin
 	return bin

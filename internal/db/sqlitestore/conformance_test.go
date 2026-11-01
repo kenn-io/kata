@@ -22,7 +22,7 @@ func TestStorageConformance(t *testing.T) {
 		Name: "sqlite",
 		Open: func(t *testing.T) db.Storage {
 			t.Helper()
-			store, err := sqlitestore.Open(context.Background(), filepath.Join(t.TempDir(), "kata.db"))
+			store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
 			require.NoError(t, err)
 			return store
 		},
@@ -93,7 +93,7 @@ hlc_physical_ms,hlc_counter,content_hash
 				END`)
 			return func() error {
 				_, dropErr := sqlStore.ExecContext(
-					context.Background(),
+					t.Context(),
 					`DROP TRIGGER IF EXISTS fail_federation_enrollment_rotation_insert`,
 				)
 				return dropErr
@@ -176,7 +176,7 @@ func TestExternalRootConformance(t *testing.T) {
 		Name: "sqlite",
 		Open: func(t *testing.T) db.Storage {
 			t.Helper()
-			store, err := sqlitestore.Open(context.Background(), filepath.Join(t.TempDir(), "kata.db"))
+			store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
 			require.NoError(t, err)
 			return store
 		},
@@ -193,7 +193,7 @@ func TestExternalRootContentOwned(t *testing.T) {
 		Name: "sqlite",
 		Open: func(t *testing.T) db.Storage {
 			t.Helper()
-			store, err := sqlitestore.Open(context.Background(), filepath.Join(t.TempDir(), "kata.db"))
+			store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
 			require.NoError(t, err)
 			return store
 		},

@@ -45,7 +45,7 @@ func TestNotifyRateErrorRejectsLateDetach(t *testing.T) {
 	cfg.Auth.Token = "bootstrap-token"
 	d := daemon.NewServer(cfg)
 	t.Cleanup(func() { _ = d.Close() })
-	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues/%s/notifications", p.ID, source.ShortID), strings.NewReader(`{"broadcast":true,"message":"New finding"}`))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues/%s/notifications", p.ID, source.ShortID), strings.NewReader(`{"broadcast":true,"message":"New finding"}`))
 	req.Header.Set("Authorization", "Bearer worker-token")
 	req.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()

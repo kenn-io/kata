@@ -17,7 +17,7 @@ func TestPostgresFederationRunnersElectOneLeaderPerSchema(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 
@@ -80,7 +80,7 @@ func TestPostgresFederationRunnerRecoversAfterLeaseSessionLoss(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 

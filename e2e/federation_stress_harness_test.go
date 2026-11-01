@@ -695,7 +695,8 @@ func startFederationStressTCPDaemon(
 	addr string,
 ) *exec.Cmd {
 	t.Helper()
-	cmd := exec.Command(bin, "daemon", "start", "--foreground", "--listen", addr) //nolint:gosec // test-built binary and loopback address
+	// t.Cleanup owns this process; t.Context() would kill it before that runs.
+	cmd := exec.CommandContext(context.WithoutCancel(t.Context()), bin, "daemon", "start", "--foreground", "--listen", addr) //nolint:gosec // test-built binary and loopback address
 	cmd.Env = append(dirs.env(), federationStressPullIntervalEnv())
 	cmd.Dir = dirs.repoDir
 	cmd.Stdout = io.Discard
@@ -734,7 +735,8 @@ func startFederationStressSpoke(t federationStressTB, bin string, index int) *fe
 
 func startFederationStressUnixDaemon(t federationStressTB, bin string, dirs e2eDirs, stderr *safeBuffer) *exec.Cmd {
 	t.Helper()
-	cmd := exec.Command(bin, "daemon", "start", "--foreground") //nolint:gosec // test-built binary
+	// t.Cleanup owns this process; t.Context() would kill it before that runs.
+	cmd := exec.CommandContext(context.WithoutCancel(t.Context()), bin, "daemon", "start", "--foreground") //nolint:gosec // test-built binary
 	cmd.Env = append(dirs.env(), federationStressPullIntervalEnv())
 	cmd.Dir = dirs.repoDir
 	cmd.Stdout = io.Discard
@@ -826,7 +828,9 @@ func stressConnectDaemon(t federationStressTB, d e2eDirs, daemonStderr *safeBuff
 
 func stressDecodeGET(t federationStressTB, client *http.Client, url string, out any) {
 	t.Helper()
-	resp, err := client.Get(url) //nolint:gosec,noctx // test loopback
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+	require.NoError(t, err)
+	resp, err := client.Do(req) //nolint:gosec // test loopback
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -901,7 +905,7 @@ func stressDecodeMutationIssue(t federationStressTB, body []byte) createdIssue {
 
 func federationStressFreeTCPPort(t federationStressTB) int {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	l, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	port := l.Addr().(*net.TCPAddr).Port
 	require.NoError(t, l.Close())
@@ -913,7 +917,9 @@ func stressWaitForPing(t federationStressTB, base string, timeout time.Duration)
 	deadline := time.Now().Add(timeout)
 	client := &http.Client{Timeout: time.Second}
 	for time.Now().Before(deadline) {
-		resp, err := client.Get(base + "/api/v1/ping") //nolint:noctx
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, base+"/api/v1/ping", nil)
+		require.NoError(t, err)
+		resp, err := client.Do(req)
 		if err == nil {
 			body, _ := io.ReadAll(resp.Body)
 			_ = resp.Body.Close()

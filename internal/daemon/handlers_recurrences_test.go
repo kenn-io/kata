@@ -115,7 +115,7 @@ func TestPostRecurrence_InitialIssueRequiresFederatedClaim(t *testing.T) {
 				ProjectID: project.ID, Title: "Weekly review", Author: "user-a",
 			})
 			require.NoError(t, err)
-			_, err = env.DB.AcquireClaim(context.Background(), db.AcquireClaimParams{
+			_, err = env.DB.AcquireClaim(t.Context(), db.AcquireClaimParams{
 				ProjectID: project.ID,
 				IssueRef:  issue.ShortID,
 				Principal: db.ClaimPrincipal{
@@ -205,7 +205,7 @@ func TestDeleteRecurrence_SoftDeletes(t *testing.T) {
 	p := seedProject(t, env, "src")
 	rec := seedRecurrence(t, env, p.ID, "FREQ=WEEKLY", "2026-05-15", "UTC", "x")
 
-	req, err := http.NewRequest(http.MethodDelete,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodDelete,
 		fmt.Sprintf("%s/api/v1/projects/%d/recurrences/%s?actor=tester", env.URL, p.ID, rec.UID), nil)
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer tok")
@@ -300,7 +300,7 @@ func TestListRecurrences_ByProject(t *testing.T) {
 	_ = seedRecurrence(t, env, p.ID, "FREQ=WEEKLY", "2026-05-15", "UTC", "a")
 	_ = seedRecurrence(t, env, p.ID, "FREQ=MONTHLY", "2026-05-01", "UTC", "b")
 
-	req, err := http.NewRequest(http.MethodGet,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		fmt.Sprintf("%s/api/v1/projects/%d/recurrences", env.URL, p.ID), nil)
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer tok")

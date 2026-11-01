@@ -59,7 +59,7 @@ func TestTUI_RejectsAgentOutputBeforeLaunch(t *testing.T) {
 		{"--format", "agent", "tui"},
 		{"tui", "--format", "agent"},
 	} {
-		stdout, stderr, err := executeRootCapture(t, context.Background(), args...)
+		stdout, stderr, err := executeRootCapture(t, t.Context(), args...)
 		require.Error(t, err, "args %v", args)
 		ce := requireCLIError(t, err, ExitUsage)
 		assert.Equal(t, kindUsage, ce.Kind)

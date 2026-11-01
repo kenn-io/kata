@@ -32,7 +32,7 @@ func attachmentEnv(t *testing.T) (*testenv.Env, *docbanktest.Fake) {
 }
 func attachmentUpload(t *testing.T, env *testenv.Env, endpoint, name string, data io.Reader, token ...string) (int, []byte) {
 	t.Helper()
-	req, err := http.NewRequest("POST", env.URL+endpoint+"?name="+name+"&actor=operator", data)
+	req, err := http.NewRequestWithContext(t.Context(), "POST", env.URL+endpoint+"?name="+name+"&actor=operator", data)
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/octet-stream")
 	if len(token) > 0 {
@@ -195,7 +195,7 @@ func TestAttachmentAdmissionBeforeBody(t *testing.T) {
 			}
 			body := &attachmentUnreadBody{}
 			endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments?name=%s&actor=operator", p.ID, iss.ShortID, tc.filename)
-			req := httptest.NewRequest("POST", endpoint, body)
+			req := httptest.NewRequestWithContext(t.Context(), "POST", endpoint, body)
 			req.RemoteAddr = "127.0.0.1:1234"
 			req.Header.Set("Content-Type", "application/octet-stream")
 			res := httptest.NewRecorder()
@@ -248,7 +248,9 @@ func TestAttachmentContentTypesAndReportedLength(t *testing.T) {
 			_, err = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{IssueID: iss.ID, Actor: "operator", Patch: map[string]jsontext.Value{"attachment." + out.ID: raw}})
 			require.NoError(t, err)
 			calls := len(f.Requests())
-			resp, err := env.HTTP.Get(env.URL + endpoint + "/" + out.ID + "/content")
+			req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, env.URL+endpoint+"/"+out.ID+"/content", nil)
+			require.NoError(t, reqErr)
+			resp, err := env.HTTP.Do(req)
 			require.NoError(t, err)
 			defer func() { _ = resp.Body.Close() }()
 			data, err := io.ReadAll(resp.Body)
@@ -268,7 +270,10 @@ func TestAttachmentContentTypesAndReportedLength(t *testing.T) {
 func TestAttachmentMalformedReferenceAndReadErrors(t *testing.T) {
 	env, f := attachmentEnv(t)
 	p, iss := seedProjectAndIssue(t, env)
-	response, err := env.HTTP.Post(env.URL+fmt.Sprintf("/api/v1/projects/%d/issues/%s/metadata", p.ID, iss.ShortID), "application/json", strings.NewReader(`{"actor":"operator","patch":{"attachment.x":"junk"}}`))
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodPost, env.URL+fmt.Sprintf("/api/v1/projects/%d/issues/%s/metadata", p.ID, iss.ShortID), strings.NewReader(`{"actor":"operator","patch":{"attachment.x":"junk"}}`))
+	require.NoError(t, reqErr)
+	req.Header.Set("Content-Type", "application/json")
+	response, err := env.HTTP.Do(req)
 	require.NoError(t, err)
 	raw, err := io.ReadAll(response.Body)
 	require.NoError(t, err)

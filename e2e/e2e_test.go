@@ -3,7 +3,6 @@ package e2e_test
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -161,7 +160,7 @@ func TestSmoke_Plan2Lifecycle(t *testing.T) {
 // the response is 200.
 func deleteWith(t *testing.T, client *http.Client, url string) {
 	t.Helper()
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodDelete, url, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodDelete, url, nil)
 	require.NoError(t, err)
 	resp, err := client.Do(req) //nolint:gosec // G704: test-only loopback
 	require.NoError(t, err)
@@ -194,7 +193,7 @@ func postJSON(t *testing.T, client *http.Client, url string, body any) *http.Res
 	require.NoError(t, err)
 	deadline := time.Now().Add(5 * time.Second)
 	for attempt := 0; ; attempt++ {
-		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewReader(bs))
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, url, bytes.NewReader(bs))
 		require.NoError(t, err)
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := client.Do(req) //nolint:gosec // G704: test-only loopback, caller-controlled URL
@@ -222,7 +221,7 @@ func isSQLiteBusyMessage(msg string) bool {
 // body as a string. The body is fully drained so the connection can be reused.
 func getBody(t *testing.T, client *http.Client, url string) string {
 	t.Helper()
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
 	require.NoError(t, err)
 	resp, err := client.Do(req) //nolint:gosec // G704: test-only loopback, caller-controlled URL
 	require.NoError(t, err)
@@ -308,7 +307,7 @@ func postWithHeaderHTTP(t *testing.T, client *http.Client, url string,
 	t.Helper()
 	bs, err := json.Marshal(body)
 	require.NoError(t, err)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, bytes.NewReader(bs))
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, url, bytes.NewReader(bs))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	for k, v := range headers {
@@ -326,7 +325,7 @@ func postWithHeaderHTTP(t *testing.T, client *http.Client, url string,
 // without asserting a 2xx status, so callers can verify 404s.
 func getStatusBodyHTTP(t *testing.T, client *http.Client, url string) (*http.Response, []byte) {
 	t.Helper()
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
 	require.NoError(t, err)
 	resp, err := client.Do(req) //nolint:gosec // G704: test-only loopback
 	require.NoError(t, err)
@@ -486,8 +485,10 @@ func TestSmoke_Plan4Events(t *testing.T) {
 	assert.Equal(t, "issue.assigned", frames[2].event)
 
 	// 6. polling client returns the same three; subsequent poll is empty.
-	resp, err := env.HTTP.Get(env.URL + "/api/v1/projects/" + pidAStr +
-		"/events?after_id=" + strconv.FormatInt(baselineA, 10))
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, env.URL+"/api/v1/projects/"+pidAStr+
+		"/events?after_id="+strconv.FormatInt(baselineA, 10), nil)
+	require.NoError(t, reqErr)
+	resp, err := env.HTTP.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	var pollBody struct {
@@ -501,8 +502,10 @@ func TestSmoke_Plan4Events(t *testing.T) {
 	require.Len(t, pollBody.Events, 3)
 	require.Greater(t, pollBody.NextAfterID, baselineA)
 
-	resp2, err := env.HTTP.Get(env.URL + "/api/v1/projects/" + pidAStr +
-		"/events?after_id=" + strconv.FormatInt(pollBody.NextAfterID, 10))
+	req, reqErr = http.NewRequestWithContext(t.Context(), http.MethodGet, env.URL+"/api/v1/projects/"+pidAStr+
+		"/events?after_id="+strconv.FormatInt(pollBody.NextAfterID, 10), nil)
+	require.NoError(t, reqErr)
+	resp2, err := env.HTTP.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = resp2.Body.Close() }()
 	var poll2 struct {
@@ -533,7 +536,7 @@ func TestSmoke_Plan4Events(t *testing.T) {
 
 	// 8. purge firstA (issue 1 in project A).
 	purgeURL := env.URL + "/api/v1/projects/" + pidAStr + "/issues/" + firstA.ShortID + "/actions/purge"
-	pReq, err := http.NewRequestWithContext(context.Background(), http.MethodPost, purgeURL,
+	pReq, err := http.NewRequestWithContext(t.Context(), http.MethodPost, purgeURL,
 		strings.NewReader(`{"actor":"agent"}`))
 	require.NoError(t, err)
 	pReq.Header.Set("Content-Type", "application/json")
@@ -551,8 +554,10 @@ func TestSmoke_Plan4Events(t *testing.T) {
 	require.Greater(t, resetID, int64(0))
 
 	// 9. polling client with stale cursor.
-	resp3, err := env.HTTP.Get(env.URL + "/api/v1/projects/" + pidAStr +
-		"/events?after_id=" + strconv.FormatInt(baselineA, 10))
+	req, reqErr = http.NewRequestWithContext(t.Context(), http.MethodGet, env.URL+"/api/v1/projects/"+pidAStr+
+		"/events?after_id="+strconv.FormatInt(baselineA, 10), nil)
+	require.NoError(t, reqErr)
+	resp3, err := env.HTTP.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = resp3.Body.Close() }()
 	var poll3 struct {
@@ -577,7 +582,9 @@ func TestSmoke_Plan4Events(t *testing.T) {
 // pollNextAfterID issues a GET poll and returns next_after_id.
 func pollNextAfterID(t *testing.T, client *http.Client, url string) int64 {
 	t.Helper()
-	resp, err := client.Get(url) //nolint:gosec // G107: test-only loopback
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+	require.NoError(t, reqErr)
+	resp, err := client.Do(req) //nolint:gosec // G107: test-only loopback
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, 200, resp.StatusCode)
@@ -595,7 +602,7 @@ func pollNextAfterID(t *testing.T, client *http.Client, url string) int64 {
 // (which used to over- or under-consume bytes when frames raced the comment).
 func openSSEAt(t *testing.T, client *http.Client, url string) *http.Response {
 	t.Helper()
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
 	require.NoError(t, err)
 	req.Header.Set("Accept", "text/event-stream")
 	resp, err := client.Do(req) //nolint:gosec // G107: test-only loopback

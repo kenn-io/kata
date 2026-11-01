@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -117,7 +118,8 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 				return kitdaemon.RuntimeRecord{}
 			}
 			t.Cleanup(func() {
-				stop := exec.Command(binary, "daemon", "stop") //nolint:gosec // test-owned binary
+				// t.Context() is already canceled when cleanup runs.
+				stop := exec.CommandContext(context.WithoutCancel(t.Context()), binary, "daemon", "stop") //nolint:gosec // test-owned binary
 				stop.Env = env
 				output, err := stop.CombinedOutput()
 				assert.NoError(t, err, "%s", output)
@@ -131,7 +133,8 @@ func TestUpdateInstall_DaemonLifecycle(t *testing.T) {
 				case "daemon token":
 					args = append(args, "--listen", "127.0.0.1:0")
 				}
-				process := exec.Command(binary, args...) //nolint:gosec // test-owned binary and fixed arguments
+				// t.Cleanup owns this process; t.Context() would kill it before that runs.
+				process := exec.CommandContext(context.WithoutCancel(t.Context()), binary, args...) //nolint:gosec // test-owned binary and fixed arguments
 				process.Env = env
 				process.Stderr = os.Stderr
 				require.NoError(t, process.Start())

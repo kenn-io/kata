@@ -1,7 +1,6 @@
 package pgstore_test
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json/jsontext"
 	"testing"
@@ -20,7 +19,7 @@ func TestImportReplayFreshTargetRejectsConcurrentWriter(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 
@@ -84,7 +83,7 @@ func TestImportReplayWaitsForConcurrentSchemaMigration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 
@@ -143,7 +142,7 @@ func TestImportReplayWaitsForServingDaemonAcrossConnections(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 
@@ -185,7 +184,7 @@ func TestImportReplayRefusesCrossSchemaCascade(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(ctx, dsn)
@@ -228,7 +227,7 @@ func TestImportReplayClearsTargetOnlyMetadata(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(ctx, dsn)
@@ -258,7 +257,7 @@ func TestImportReplayPreservesHistoricalEventProjectName(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(ctx, dsn)

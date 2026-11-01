@@ -12,7 +12,7 @@ import (
 )
 
 func checkIssueStatusNativeIntent(t *testing.T, store db.Storage, backend Backend) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	sqlStore := store.(interface {
 		QueryRowContext(context.Context, string, ...any) *sql.Row
 		ExecContext(context.Context, string, ...any) (sql.Result, error)

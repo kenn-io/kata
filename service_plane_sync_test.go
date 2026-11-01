@@ -52,20 +52,20 @@ func (f *runtimePlaneFetcher) WorkItems(ctx context.Context, c planesync.Config)
 func readRuntimePlaneStatus(t *testing.T, h http.Handler, id int64) runtimeNotionStatus {
 	t.Helper()
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issue-sync/plane/status", id), nil))
+	h.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issue-sync/plane/status", id), nil))
 	require.Equal(t, 200, w.Code, w.Body.String())
 	var s runtimeNotionStatus
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &s))
 	return s
 }
-func planeRuntimePost(id int64, action string, body io.Reader) *http.Request {
-	r := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issue-sync/plane/%s", id, action), body)
+func planeRuntimePost(ctx context.Context, id int64, action string, body io.Reader) *http.Request {
+	r := httptest.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issue-sync/plane/%s", id, action), body)
 	r.Header.Set("Content-Type", "application/json")
 	return r
 }
 
 func TestServicePlaneScheduledProgress(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newRuntimePlaneFetcher()
 	var resolved config.PlaneSyncConfig
 	s, err := newService(ctx, Config{DSN: filepath.Join(t.TempDir(), "service.db"), Auth: AuthConfig{TrustCallerAuthentication: true}, PlaneSync: PlaneSyncConfig{APIOrigin: "https://plane.example/", TokenEnv: " EXAMPLE_PLANE_TOKEN "}}, serviceDeps{planeSyncFetcherFactory: func(c config.PlaneSyncConfig) planesync.Fetcher { resolved = c; return f }})
@@ -77,7 +77,7 @@ func TestServicePlaneScheduledProgress(t *testing.T) {
 	p, err := s.store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	w := httptest.NewRecorder()
-	s.Handler().ServeHTTP(w, planeRuntimePost(p.ID, "enable", strings.NewReader(`{"config":{"workspace":"example-workspace","project_id":"11111111-1111-4111-8111-111111111111"}}`)))
+	s.Handler().ServeHTTP(w, planeRuntimePost(t.Context(), p.ID, "enable", strings.NewReader(`{"config":{"workspace":"example-workspace","project_id":"11111111-1111-4111-8111-111111111111"}}`)))
 	require.Equal(t, 200, w.Code, w.Body.String())
 	sub := s.broadcaster.Subscribe(daemon.SubFilter{ProjectID: p.ID})
 	defer sub.Unsub()
@@ -92,7 +92,7 @@ func TestServicePlaneScheduledProgress(t *testing.T) {
 	require.NotNil(t, status.Status.Progress)
 	require.Equal(t, "work-items", status.Status.Progress.Phase)
 	w = httptest.NewRecorder()
-	s.Handler().ServeHTTP(w, planeRuntimePost(p.ID, "once", strings.NewReader(`{}`)))
+	s.Handler().ServeHTTP(w, planeRuntimePost(t.Context(), p.ID, "once", strings.NewReader(`{}`)))
 	require.Equal(t, 409, w.Code, w.Body.String())
 	close(f.release)
 	finished := waitRuntimeNotionRecord(t, record.recorded)
@@ -106,17 +106,17 @@ func TestServicePlaneScheduledProgress(t *testing.T) {
 	}
 }
 func TestServicePlaneConfigAndExplicitCredentials(t *testing.T) {
-	_, err := New(context.Background(), Config{DSN: filepath.Join(t.TempDir(), "bad.db"), Auth: AuthConfig{TrustCallerAuthentication: true}, PlaneSync: PlaneSyncConfig{APIOrigin: "http://plane.example"}})
+	_, err := New(t.Context(), Config{DSN: filepath.Join(t.TempDir(), "bad.db"), Auth: AuthConfig{TrustCallerAuthentication: true}, PlaneSync: PlaneSyncConfig{APIOrigin: "http://plane.example"}})
 	require.ErrorContains(t, err, "plane_sync.api_origin")
 	t.Setenv("KATA_PLANE_TOKEN", "unrelated-example-secret")
 	t.Setenv("EXAMPLE_PLANE_TOKEN", "")
-	s, err := New(context.Background(), Config{DSN: filepath.Join(t.TempDir(), "service.db"), Auth: AuthConfig{TrustCallerAuthentication: true}, PlaneSync: PlaneSyncConfig{TokenEnv: "EXAMPLE_PLANE_TOKEN"}})
+	s, err := New(t.Context(), Config{DSN: filepath.Join(t.TempDir(), "service.db"), Auth: AuthConfig{TrustCallerAuthentication: true}, PlaneSync: PlaneSyncConfig{TokenEnv: "EXAMPLE_PLANE_TOKEN"}})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, s.Close()) }()
-	p, err := s.store.CreateProject(context.Background(), "example-project")
+	p, err := s.store.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
 	w := httptest.NewRecorder()
-	s.Handler().ServeHTTP(w, planeRuntimePost(p.ID, "enable", strings.NewReader(`{"config":{"workspace":"example-workspace","project_id":"11111111-1111-4111-8111-111111111111"}}`)))
+	s.Handler().ServeHTTP(w, planeRuntimePost(t.Context(), p.ID, "enable", strings.NewReader(`{"config":{"workspace":"example-workspace","project_id":"11111111-1111-4111-8111-111111111111"}}`)))
 	require.Equal(t, 400, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "credentials")
 	require.NotContains(t, w.Body.String(), "unrelated-example-secret")

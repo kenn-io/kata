@@ -112,7 +112,7 @@ func TestFederationStatusTextOutputIncludesOperatorFields(t *testing.T) {
 func TestFederationQuarantineListHumanAndShow(t *testing.T) {
 	env, project := setupFederationStatusCLIState(t)
 	q, err := env.DB.ActiveFederationQuarantine(
-		context.Background(), project.ID, db.FederationQuarantineDirectionPush)
+		t.Context(), project.ID, db.FederationQuarantineDirectionPush)
 	require.NoError(t, err)
 
 	list := requireCmdOutput(t, env, "federation", "quarantine", "list")
@@ -134,7 +134,7 @@ func TestFederationQuarantineListHumanAndShow(t *testing.T) {
 func TestFederationQuarantineListAgentAndJSON(t *testing.T) {
 	env, project := setupFederationStatusCLIState(t)
 	q, err := env.DB.ActiveFederationQuarantine(
-		context.Background(), project.ID, db.FederationQuarantineDirectionPush)
+		t.Context(), project.ID, db.FederationQuarantineDirectionPush)
 	require.NoError(t, err)
 
 	agent := requireCmdOutput(t, env, "--agent", "federation", "quarantine", "list")
@@ -185,7 +185,7 @@ func TestFederationQuarantineListEmptyAndShowMissing(t *testing.T) {
 
 func TestFederationStatusIncludesRecentClaimViolations(t *testing.T) {
 	env, _, pid, ref := setupFederatedHubIssue(t, "status violation")
-	ctx := context.Background()
+	ctx := t.Context()
 	issue, err := env.DB.IssueByShortID(ctx, pid, ref, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	_, err = env.DB.AcquireClaim(ctx, db.AcquireClaimParams{
@@ -239,7 +239,7 @@ func TestFederationStatusIncludesRecentClaimViolations(t *testing.T) {
 
 func TestFederationQuarantineSkipCLI(t *testing.T) {
 	env, project := setupFederationStatusCLIState(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	q, err := env.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
 	require.NoError(t, err)
 
@@ -255,7 +255,7 @@ func TestFederationQuarantineSkipCLI(t *testing.T) {
 
 func TestFederationQuarantineSkipCLIAgentMode(t *testing.T) {
 	env, project := setupFederationStatusCLIState(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	q, err := env.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
 	require.NoError(t, err)
 
@@ -268,7 +268,7 @@ func TestFederationQuarantineSkipCLIAgentMode(t *testing.T) {
 
 func TestFederationQuarantineRetryCLI(t *testing.T) {
 	env, project := setupFederationStatusCLIState(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	q, err := env.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
 	require.NoError(t, err)
 
@@ -283,7 +283,7 @@ func TestFederationQuarantineRetryCLI(t *testing.T) {
 	_, err = env.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
 	assert.ErrorIs(t, err, db.ErrNotFound)
 	var skipReason string
-	require.NoError(t, env.DB.QueryRow(`
+	require.NoError(t, env.DB.QueryRowContext(t.Context(), `
 		SELECT skip_reason
 		  FROM federation_quarantine
 		 WHERE id = ?`,
@@ -293,7 +293,7 @@ func TestFederationQuarantineRetryCLI(t *testing.T) {
 
 func TestFederationQuarantineRetryCLIAgentMode(t *testing.T) {
 	env, project := setupFederationStatusCLIState(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	q, err := env.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
 	require.NoError(t, err)
 
@@ -345,27 +345,27 @@ func TestFederationEnableCLIEnablesWorkspaceProject(t *testing.T) {
 	out := runCLI(t, env, dir, "federation", "enable")
 
 	assert.Contains(t, out, "enabled federation for kata")
-	binding, err := env.DB.FederationBindingByProject(context.Background(), pid)
+	binding, err := env.DB.FederationBindingByProject(t.Context(), pid)
 	require.NoError(t, err)
 	assert.Equal(t, db.FederationRoleHub, binding.Role)
 }
 
 func TestFederationEnableCLIResolvesExplicitProjectFlag(t *testing.T) {
 	env := testenv.New(t)
-	project, err := env.DB.CreateProject(context.Background(), "fedlab")
+	project, err := env.DB.CreateProject(t.Context(), "fedlab")
 	require.NoError(t, err)
 
 	out := requireCmdOutput(t, env, "federation", "enable", "--project", "fedlab")
 
 	assert.Contains(t, out, "enabled federation for fedlab")
-	binding, err := env.DB.FederationBindingByProject(context.Background(), project.ID)
+	binding, err := env.DB.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, err)
 	assert.Equal(t, db.FederationRoleHub, binding.Role)
 }
 
 func TestFederationEnableCLIRequiresExactProjectFlagName(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "team/hub-project")
 	require.NoError(t, err)
 
@@ -384,13 +384,13 @@ func TestFederationEnableCLIDoesNotCreateProjectFromProjectFlag(t *testing.T) {
 
 	ce := requireCLIError(t, err, ExitNotFound)
 	assert.Contains(t, ce.Message, "project missing-project is not registered")
-	_, err = env.DB.ProjectByName(context.Background(), "missing-project")
+	_, err = env.DB.ProjectByName(t.Context(), "missing-project")
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
 
 func TestFederationEnableCLIRejectsSpokeProject(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "spoke")
 	require.NoError(t, err)
 	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -450,7 +450,7 @@ func TestFederationEnrollCLIUsesHubURLForEnrollmentAndDefaultDaemonForAdoption(t
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
 	spoke := testenv.New(t)
 	writeHubAdminCatalogEntry(t, spoke.Home, hub.URL, "hub-token")
-	ctx := context.Background()
+	ctx := t.Context()
 	spokeProject, err := spoke.DB.CreateProject(ctx, "fedlab")
 	require.NoError(t, err)
 	spokeUID := spoke.DB.InstanceUID()
@@ -515,7 +515,7 @@ func TestFederationEnrollCLIExplicitHubTokenIgnoresBrokenLocalAuthFile(t *testin
 	err := cmd.Execute()
 	require.NoError(t, err)
 
-	enrollments, err := hub.DB.ListFederationEnrollments(context.Background())
+	enrollments, err := hub.DB.ListFederationEnrollments(t.Context())
 	require.NoError(t, err)
 	require.Len(t, enrollments, 1)
 }
@@ -553,7 +553,7 @@ token = "hub-token"
 	})
 
 	require.NoError(t, cmd.Execute())
-	enrollments, err := hub.DB.ListFederationEnrollments(context.Background())
+	enrollments, err := hub.DB.ListFederationEnrollments(t.Context())
 	require.NoError(t, err)
 	require.Len(t, enrollments, 1)
 }
@@ -565,7 +565,7 @@ func TestFederationEnrollCLIUsesKATAServerAsSpokeForAdoption(t *testing.T) {
 	spoke := testenv.New(t)
 	writeHubAdminCatalogEntry(t, spoke.Home, hub.URL, "hub-token")
 	t.Setenv("KATA_SERVER", spoke.URL)
-	ctx := context.Background()
+	ctx := t.Context()
 	_, err := spoke.DB.CreateProject(ctx, "fedlab")
 	require.NoError(t, err)
 
@@ -602,7 +602,7 @@ func TestFederationEnrollCLIUsesNamedSpokeCatalogAuthForAdoption(t *testing.T) {
 	resetFlags(t)
 	spoke := testenv.New(t, testenv.WithAuthToken("spoke-token"))
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
-	ctx := context.Background()
+	ctx := t.Context()
 	_, err := spoke.DB.CreateProject(ctx, "fedlab")
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(hub.Home, "config.toml"), []byte(fmt.Sprintf(`
@@ -645,7 +645,7 @@ func TestFederationEnrollCLIExplicitDaemonResolutionFailureErrors(t *testing.T) 
 	resetFlags(t)
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
 	writeHubAdminCatalogEntry(t, hub.Home, hub.URL, "hub-token")
-	ctx := context.Background()
+	ctx := t.Context()
 	t.Setenv("KATA_AUTH_TOKEN", "hub-token")
 
 	cmd := newRootCmd()
@@ -811,7 +811,7 @@ func TestFederationEnrollCLIKATAServerSpokeAuthFailureErrors(t *testing.T) {
 	hub := testenv.New(t, testenv.WithAuthToken("hub-token"))
 	t.Setenv("KATA_SERVER", spoke.URL)
 	t.Setenv("KATA_AUTH_TOKEN", "hub-token")
-	ctx := context.Background()
+	ctx := t.Context()
 	_, err := spoke.DB.CreateProject(ctx, "fedlab")
 	require.NoError(t, err)
 
@@ -846,7 +846,7 @@ func TestFederationEnrollCLISameNameAutoAdoptionRequiresMatchingSpokeInstance(t 
 	spoke := testenv.New(t)
 	writeHubAdminCatalogEntry(t, spoke.Home, hub.URL, "hub-token")
 	t.Setenv("KATA_SERVER", spoke.URL)
-	ctx := context.Background()
+	ctx := t.Context()
 	_, err := spoke.DB.CreateProject(ctx, "fedlab")
 	require.NoError(t, err)
 	otherSpokeUID, err := katauid.New()
@@ -883,7 +883,7 @@ func TestFederationEnrollCLIAutoAdoptionRequiresExactSpokeProjectName(t *testing
 	spoke := testenv.New(t)
 	writeHubAdminCatalogEntry(t, spoke.Home, hub.URL, "hub-token")
 	t.Setenv("KATA_SERVER", spoke.URL)
-	ctx := context.Background()
+	ctx := t.Context()
 	_, err := spoke.DB.CreateProject(ctx, "workspace:fedlab")
 	require.NoError(t, err)
 
@@ -917,7 +917,7 @@ func TestFederationEnrollCLIExplicitAdoptExistingMarksEnrollmentWithoutSameNameS
 	spoke := testenv.New(t)
 	writeHubAdminCatalogEntry(t, spoke.Home, hub.URL, "hub-token")
 	t.Setenv("KATA_SERVER", spoke.URL)
-	ctx := context.Background()
+	ctx := t.Context()
 	_, err := spoke.DB.CreateProject(ctx, "local-project")
 	require.NoError(t, err)
 
@@ -988,12 +988,12 @@ func TestFederationEnrollCLICreatesMissingProjectFromProjectFlag(t *testing.T) {
 
 	assert.Contains(t, out, "enrolled "+spokeUID+" for new-hub-project")
 	assert.Contains(t, out, "--project new-hub-project")
-	project, err := env.DB.ProjectByName(context.Background(), "new-hub-project")
+	project, err := env.DB.ProjectByName(t.Context(), "new-hub-project")
 	require.NoError(t, err)
-	binding, err := env.DB.FederationBindingByProject(context.Background(), project.ID)
+	binding, err := env.DB.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, err)
 	assert.Equal(t, db.FederationRoleHub, binding.Role)
-	enrollments, err := env.DB.ListFederationEnrollments(context.Background())
+	enrollments, err := env.DB.ListFederationEnrollments(t.Context())
 	require.NoError(t, err)
 	require.Len(t, enrollments, 1)
 	require.NotNil(t, enrollments[0].ProjectID)
@@ -1006,7 +1006,7 @@ func TestFederationEnrollHTTPClientRequiresExplicitAllowInsecureForPlaintextHost
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
 
 	t.Setenv("EXAMPLE_HUB_TOKEN", "hub-token")
-	client, _, err := federationEnrollHTTPClientPolicy(context.Background(), "http://hub.internal:7787", false, "EXAMPLE_HUB_TOKEN")
+	client, _, err := federationEnrollHTTPClientPolicy(t.Context(), "http://hub.internal:7787", false, "EXAMPLE_HUB_TOKEN")
 
 	require.Error(t, err)
 	assert.Nil(t, client)
@@ -1033,9 +1033,9 @@ func TestFederationEnrollHTTPClientDoesNotSendLocalFileTokenToHub(t *testing.T) 
 	}))
 	t.Cleanup(hub.Close)
 
-	client, err := federationEnrollHTTPClient(context.Background(), hub.URL, false)
+	client, err := federationEnrollHTTPClient(t.Context(), hub.URL, false)
 	require.NoError(t, err)
-	request, err := http.NewRequest(http.MethodGet, hub.URL+"/probe", nil)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, hub.URL+"/probe", nil)
 	require.NoError(t, err)
 	response, err := client.Do(request)
 	require.NoError(t, err)
@@ -1097,7 +1097,7 @@ func TestFederationEnrollCLIPlaintextBearerErrorMentionsAllowInsecure(t *testing
 func TestFederationEnrollHTTPClientAllowsExplicitInsecurePlaintext(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("EXAMPLE_HUB_TOKEN", "hub-token")
-	client, _, err := federationEnrollHTTPClientPolicy(context.Background(), "http://8.8.8.8:7787", true, "EXAMPLE_HUB_TOKEN")
+	client, _, err := federationEnrollHTTPClientPolicy(t.Context(), "http://8.8.8.8:7787", true, "EXAMPLE_HUB_TOKEN")
 
 	require.NoError(t, err)
 	require.NotNil(t, client)
@@ -1134,10 +1134,10 @@ func TestFederationEnrollHTTPClientNeverReplaysExplicitTokenCrossOrigin(t *testi
 			}))
 			t.Cleanup(source.Close)
 
-			client, err := federationEnrollHTTPClient(context.Background(), source.URL, true)
+			client, err := federationEnrollHTTPClient(t.Context(), source.URL, true)
 			require.NoError(t, err)
 			_, _, err = httpDoJSON(
-				context.Background(),
+				t.Context(),
 				client,
 				http.MethodPost,
 				source.URL+"/api/v1/federation/enrollments",
@@ -1176,10 +1176,10 @@ func TestFederationEnrollHTTPClientFollowsSameOriginRedirect(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client, err := federationEnrollHTTPClient(context.Background(), server.URL, true)
+	client, err := federationEnrollHTTPClient(t.Context(), server.URL, true)
 	require.NoError(t, err)
 	status, _, err := httpDoJSON(
-		context.Background(),
+		t.Context(),
 		client,
 		http.MethodPost,
 		server.URL+"/api/v1/federation/enrollments",
@@ -1256,7 +1256,7 @@ func TestResolveFederationProjectUsesProvidedClientForWorkspaceResolution(t *tes
 	})}
 
 	project, err := resolveFederationProject(
-		daemonAPI{ctx: context.Background(), baseURL: baseURL, client: client}, nil, false, "")
+		daemonAPI{ctx: t.Context(), baseURL: baseURL, client: client}, nil, false, "")
 
 	require.NoError(t, err)
 	assert.True(t, called)
@@ -1285,7 +1285,7 @@ func TestFederationSpokeProjectExistsDoesNotAttachHubTokenToSpokeProbe(t *testin
 	}))
 	t.Cleanup(spoke.Close)
 
-	exists := federationSpokeProjectExists(contextWithBaseURL(context.Background(), spoke.URL), "fedlab", "")
+	exists := federationSpokeProjectExists(contextWithBaseURL(t.Context(), spoke.URL), "fedlab", "")
 
 	require.True(t, exists)
 	require.NotEmpty(t, seenAuth)
@@ -1310,9 +1310,9 @@ func TestFederationSpokeHTTPClientDoesNotUseKATAServerGlobalAuth(t *testing.T) {
 	t.Cleanup(spoke.Close)
 	t.Setenv("KATA_SERVER", spoke.URL)
 
-	hc, err := federationSpokeHTTPClient(context.Background(), spoke.URL)
+	hc, err := federationSpokeHTTPClient(t.Context(), spoke.URL)
 	require.NoError(t, err)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, spoke.URL+"/probe", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, spoke.URL+"/probe", nil)
 	require.NoError(t, err)
 	resp, err := hc.Do(req)
 	require.NoError(t, err)
@@ -1340,9 +1340,9 @@ name = "spoke"
 url = "`+spoke.URL+`"
 `), 0o600))
 
-	hc, err := federationSpokeHTTPClient(context.Background(), spoke.URL)
+	hc, err := federationSpokeHTTPClient(t.Context(), spoke.URL)
 	require.NoError(t, err)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, spoke.URL+"/probe", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, spoke.URL+"/probe", nil)
 	require.NoError(t, err)
 	resp, err := hc.Do(req)
 	require.NoError(t, err)
@@ -1490,7 +1490,7 @@ url = "`+baseURL+`"
 token_env = "KATA_SPOKE_TOKEN"
 `), 0o600))
 
-	hc, err := federationSpokeHTTPClient(context.Background(), baseURL)
+	hc, err := federationSpokeHTTPClient(t.Context(), baseURL)
 
 	require.NoError(t, err)
 	assert.NotNil(t, hc)
@@ -1518,7 +1518,7 @@ func TestFederationSpokeProjectExistsUsesReadonlyGETProbe(t *testing.T) {
 	}))
 	t.Cleanup(spoke.Close)
 
-	exists := federationSpokeProjectExists(contextWithBaseURL(context.Background(), spoke.URL), "fedlab", spokeUID)
+	exists := federationSpokeProjectExists(contextWithBaseURL(t.Context(), spoke.URL), "fedlab", spokeUID)
 
 	require.True(t, exists)
 	assert.Equal(t, []string{
@@ -1547,7 +1547,7 @@ func TestFederationEnrollCLIUsesResolvedActorWhenAutoEnabling(t *testing.T) {
 		"--hub-url", env.URL,
 		"--actor", "alice")
 
-	events, err := env.DB.EventsAfter(context.Background(), db.EventsAfterParams{
+	events, err := env.DB.EventsAfter(t.Context(), db.EventsAfterParams{
 		ProjectID: pid,
 		Limit:     100,
 	})
@@ -1648,10 +1648,10 @@ func TestFederationJoinCLICreatesPushEnabledReplicaAndCredential(t *testing.T) {
 		"--push")
 
 	assert.Contains(t, out, "joined federation project fedlab")
-	project, err := env.DB.ProjectByUID(context.Background(), hubProjectUID)
+	project, err := env.DB.ProjectByUID(t.Context(), hubProjectUID)
 	require.NoError(t, err)
 	assert.Equal(t, "fedlab", project.Name)
-	binding, err := env.DB.FederationBindingByProject(context.Background(), project.ID)
+	binding, err := env.DB.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, err)
 	assert.Equal(t, db.FederationRoleSpoke, binding.Role)
 	assert.True(t, binding.PushEnabled)
@@ -1709,14 +1709,14 @@ func TestHydrateFederationJoinMetadataAllowsPlaintextHostnameWithOptIn(t *testin
 		Token:         "join-token",
 		AllowInsecure: true,
 	}
-	err := hydrateFederationJoinMetadata(context.Background(), &bundle)
+	err := hydrateFederationJoinMetadata(t.Context(), &bundle)
 	require.NoError(t, err)
 	assert.Equal(t, "01HZNQ7VFPK1XGD8R5MABCD4EG", bundle.HubProjectUID)
 }
 
 func TestFederationJoinCLIAdoptExistingOutput(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "fedlab")
 	require.NoError(t, err)
 	_, _, err = env.DB.CreateIssue(ctx, db.CreateIssueParams{
@@ -1747,7 +1747,7 @@ func TestFederationJoinCLIAdoptExistingOutput(t *testing.T) {
 
 func TestFederationJoinCLIAgentOutputIncludesAdoptionFields(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "fedlab")
 	require.NoError(t, err)
 	_, _, err = env.DB.CreateIssue(ctx, db.CreateIssueParams{
@@ -1777,7 +1777,7 @@ func TestFederationJoinCLIAgentOutputIncludesAdoptionFields(t *testing.T) {
 func TestFederationJoinCLIFetchesMissingHubMetadata(t *testing.T) {
 	hub := testenv.New(t)
 	spoke := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	hubProject, err := hub.DB.CreateProject(ctx, "fedlab")
 	require.NoError(t, err)
 	_, err = hub.DB.EnableProjectFederation(ctx, hubProject.ID, "tester")
@@ -1831,7 +1831,7 @@ func TestFederationJoinCLIWarnsWhenPushCapabilityIsNotEnabledLocally(t *testing.
 
 func TestFederationEnrollmentsListCLIShowsHubEnrollments(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "fedlab")
 	require.NoError(t, err)
 	_, err = env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
@@ -1854,7 +1854,7 @@ func TestFederationEnrollmentsListCLIShowsHubEnrollments(t *testing.T) {
 
 func TestFederationRevokeCLIRevokesEnrollment(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	created, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
 		Token:            "revoke-token",
 		SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EF",
@@ -1973,7 +1973,7 @@ func newFakeLeaveHub(t *testing.T, spokeInstanceUID string, hubProjectID int64) 
 // test fixtures but points hub_url at a caller-controlled fake hub.
 func seedLeaveSpoke(t *testing.T, env *testenv.Env, name, hubURL string, hubProjectID int64) db.Project {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, name)
 	require.NoError(t, err)
 	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -2001,7 +2001,7 @@ func seedLeaveSpoke(t *testing.T, env *testenv.Env, name, hubURL string, hubProj
 func TestFederationLeaveDetachRevokesThenTearsDown(t *testing.T) {
 	resetFlags(t)
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	const hubProjectID int64 = 42
 	hub, hubSrv := newFakeLeaveHub(t, env.DB.InstanceUID(), hubProjectID)
 	project := seedLeaveSpoke(t, env, "spoke-project", hubSrv.URL, hubProjectID)
@@ -2053,7 +2053,7 @@ func TestFederationLeaveAbortsOnEnrollmentUIDMismatch(t *testing.T) {
 	t.Run("aborts before any teardown", func(t *testing.T) {
 		resetFlags(t)
 		env := testenv.New(t)
-		ctx := context.Background()
+		ctx := t.Context()
 		const hubProjectID int64 = 42
 		// The hub's only active enrollment is for a different spoke instance.
 		hub, hubSrv := newFakeLeaveHub(t, "01HZNQ7VFPK1XGD8R5MABCD4FF", hubProjectID)
@@ -2074,7 +2074,7 @@ func TestFederationLeaveAbortsOnEnrollmentUIDMismatch(t *testing.T) {
 	t.Run("--local-only remains the explicit escape", func(t *testing.T) {
 		resetFlags(t)
 		env := testenv.New(t)
-		ctx := context.Background()
+		ctx := t.Context()
 		const hubProjectID int64 = 42
 		_, hubSrv := newFakeLeaveHub(t, "01HZNQ7VFPK1XGD8R5MABCD4FF", hubProjectID)
 		project := seedLeaveSpoke(t, env, "spoke-project", hubSrv.URL, hubProjectID)
@@ -2090,7 +2090,7 @@ func TestFederationLeaveAbortsOnEnrollmentUIDMismatch(t *testing.T) {
 func TestFederationLeaveLocalOnlySkipsRevoke(t *testing.T) {
 	resetFlags(t)
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	const hubProjectID int64 = 42
 	hub, hubSrv := newFakeLeaveHub(t, env.DB.InstanceUID(), hubProjectID)
 	project := seedLeaveSpoke(t, env, "spoke-project", hubSrv.URL, hubProjectID)
@@ -2112,7 +2112,7 @@ func TestFederationLeaveDeleteArchivesReplica(t *testing.T) {
 	t.Run("no open issues", func(t *testing.T) {
 		resetFlags(t)
 		env := testenv.New(t)
-		ctx := context.Background()
+		ctx := t.Context()
 		const hubProjectID int64 = 42
 		hub, hubSrv := newFakeLeaveHub(t, env.DB.InstanceUID(), hubProjectID)
 		project := seedLeaveSpoke(t, env, "spoke-project", hubSrv.URL, hubProjectID)
@@ -2135,7 +2135,7 @@ func TestFederationLeaveDeleteArchivesReplica(t *testing.T) {
 	t.Run("open issue without force returns error", func(t *testing.T) {
 		resetFlags(t)
 		env := testenv.New(t)
-		ctx := context.Background()
+		ctx := t.Context()
 		const hubProjectID int64 = 42
 		_, hubSrv := newFakeLeaveHub(t, env.DB.InstanceUID(), hubProjectID)
 		project := seedLeaveSpoke(t, env, "spoke-project", hubSrv.URL, hubProjectID)
@@ -2165,7 +2165,7 @@ func TestFederationLeaveDeleteArchivesReplica(t *testing.T) {
 	t.Run("open issue with force archives", func(t *testing.T) {
 		resetFlags(t)
 		env := testenv.New(t)
-		ctx := context.Background()
+		ctx := t.Context()
 		const hubProjectID int64 = 42
 		hub, hubSrv := newFakeLeaveHub(t, env.DB.InstanceUID(), hubProjectID)
 		project := seedLeaveSpoke(t, env, "spoke-project", hubSrv.URL, hubProjectID)
@@ -2189,7 +2189,7 @@ func TestFederationLeaveDeleteArchivesReplica(t *testing.T) {
 func TestFederationLeaveNotASpoke(t *testing.T) {
 	resetFlags(t)
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "hub-project")
 	require.NoError(t, err)
 	// EnableProjectFederation creates a proper hub binding using the project's UID.
@@ -2211,7 +2211,7 @@ func TestFederationLeaveNotASpoke(t *testing.T) {
 func TestFederationLeaveHubUnreachableAbortsWithoutLocalOnly(t *testing.T) {
 	resetFlags(t)
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	const hubProjectID int64 = 42
 
 	// Start a server then immediately close it so the URL is syntactically valid
@@ -2250,7 +2250,7 @@ func TestFederationLeaveHubUnreachableAbortsWithoutLocalOnly(t *testing.T) {
 func TestFederationLeaveReleasesPreparationWhoseResponseWasLost(t *testing.T) {
 	resetFlags(t)
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	const hubProjectID int64 = 42
 	hub, hubSrv := newFakeLeaveHub(t, env.DB.InstanceUID(), hubProjectID)
 	project := seedLeaveSpoke(t, env, "spoke-project", hubSrv.URL, hubProjectID)
@@ -2342,7 +2342,7 @@ func TestFederationLeaveResolvesArchivedProject(t *testing.T) {
 	t.Run("stale credential cleaned through the archived project", func(t *testing.T) {
 		resetFlags(t)
 		env := testenv.New(t)
-		ctx := context.Background()
+		ctx := t.Context()
 		project, err := env.DB.CreateProject(ctx, "spoke-project")
 		require.NoError(t, err)
 		// Partial archive-leave: archive committed, credential delete failed.
@@ -2367,7 +2367,7 @@ func TestFederationLeaveResolvesArchivedProject(t *testing.T) {
 	t.Run("surviving binding detached through the archived project", func(t *testing.T) {
 		resetFlags(t)
 		env := testenv.New(t)
-		ctx := context.Background()
+		ctx := t.Context()
 		project, err := env.DB.CreateProject(ctx, "spoke-project")
 		require.NoError(t, err)
 		_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -2407,7 +2407,7 @@ func TestFederationLeaveResolvesArchivedProject(t *testing.T) {
 func TestFederationLeaveDeletePreflightsArchiveBeforeRevoke(t *testing.T) {
 	seed := func(t *testing.T, env *testenv.Env, hubURL string, hubProjectID int64) db.Project {
 		t.Helper()
-		ctx := context.Background()
+		ctx := t.Context()
 		project, err := env.DB.CreateProject(ctx, "spoke-project")
 		require.NoError(t, err)
 		// Open issue created before the binding so the spoke read-only guard
@@ -2437,7 +2437,7 @@ func TestFederationLeaveDeletePreflightsArchiveBeforeRevoke(t *testing.T) {
 	t.Run("open-issue refusal happens before any revoke", func(t *testing.T) {
 		resetFlags(t)
 		env := testenv.New(t)
-		ctx := context.Background()
+		ctx := t.Context()
 		const hubProjectID int64 = 42
 		hub, hubSrv := newFakeLeaveHub(t, env.DB.InstanceUID(), hubProjectID)
 		project := seed(t, env, hubSrv.URL, hubProjectID)
@@ -2459,7 +2459,7 @@ func TestFederationLeaveDeletePreflightsArchiveBeforeRevoke(t *testing.T) {
 	t.Run("--force skips the refusal and completes the leave", func(t *testing.T) {
 		resetFlags(t)
 		env := testenv.New(t)
-		ctx := context.Background()
+		ctx := t.Context()
 		const hubProjectID int64 = 42
 		hub, hubSrv := newFakeLeaveHub(t, env.DB.InstanceUID(), hubProjectID)
 		project := seed(t, env, hubSrv.URL, hubProjectID)
@@ -2487,7 +2487,7 @@ func TestFederationLeaveDeletePreflightsArchiveBeforeRevoke(t *testing.T) {
 func TestFederationLeaveRevokesAfterProjectsRemoveArchive(t *testing.T) {
 	resetFlags(t)
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	const hubProjectID int64 = 42
 	hub, hubSrv := newFakeLeaveHub(t, env.DB.InstanceUID(), hubProjectID)
 	project := seedLeaveSpoke(t, env, "spoke-project", hubSrv.URL, hubProjectID)
@@ -2518,7 +2518,7 @@ func TestFederationLeaveAllowInsecureFlag(t *testing.T) {
 
 	seed := func(t *testing.T, env *testenv.Env) {
 		t.Helper()
-		ctx := context.Background()
+		ctx := t.Context()
 		project, err := env.DB.CreateProject(ctx, "spoke-project")
 		require.NoError(t, err)
 		_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -2567,7 +2567,7 @@ func TestFederationLeaveResumeWhenAlreadyStandalone(t *testing.T) {
 	t.Run("delete on no-binding project archives it", func(t *testing.T) {
 		resetFlags(t)
 		env := testenv.New(t)
-		ctx := context.Background()
+		ctx := t.Context()
 		project, err := env.DB.CreateProject(ctx, "standalone-project")
 		require.NoError(t, err)
 
@@ -2587,7 +2587,7 @@ func TestFederationLeaveResumeWhenAlreadyStandalone(t *testing.T) {
 	t.Run("plain leave on no-binding project prints already standalone", func(t *testing.T) {
 		resetFlags(t)
 		env := testenv.New(t)
-		ctx := context.Background()
+		ctx := t.Context()
 		project, err := env.DB.CreateProject(ctx, "standalone-project")
 		require.NoError(t, err)
 
@@ -2604,7 +2604,7 @@ func TestFederationLeaveResumeWhenAlreadyStandalone(t *testing.T) {
 	t.Run("plain leave on no-binding project deletes a stale credential", func(t *testing.T) {
 		resetFlags(t)
 		env := testenv.New(t)
-		ctx := context.Background()
+		ctx := t.Context()
 		project, err := env.DB.CreateProject(ctx, "standalone-project")
 		require.NoError(t, err)
 		// A partially failed leave deletes the binding but can leave the hub
@@ -2627,7 +2627,7 @@ func TestFederationLeaveResumeWhenAlreadyStandalone(t *testing.T) {
 	t.Run("plain leave revokes enrollment for pending managed reservation", func(t *testing.T) {
 		resetFlags(t)
 		env := testenv.New(t)
-		ctx := context.Background()
+		ctx := t.Context()
 		project, err := env.DB.CreateProject(ctx, "standalone-project")
 		require.NoError(t, err)
 		hub, hubServer := newFakeLeaveHub(t, env.DB.InstanceUID(), 42)
@@ -2666,7 +2666,7 @@ func TestFederationLeaveResumeWhenAlreadyStandalone(t *testing.T) {
 	t.Run("plain leave on no-binding project honors --json", func(t *testing.T) {
 		resetFlags(t)
 		env := testenv.New(t)
-		ctx := context.Background()
+		ctx := t.Context()
 		_, err := env.DB.CreateProject(ctx, "standalone-project")
 		require.NoError(t, err)
 
@@ -2684,7 +2684,7 @@ func TestFederationLeaveResumeWhenAlreadyStandalone(t *testing.T) {
 	t.Run("delete on no-binding project requires confirmation without --yes", func(t *testing.T) {
 		resetFlags(t)
 		env := testenv.New(t)
-		ctx := context.Background()
+		ctx := t.Context()
 		project, err := env.DB.CreateProject(ctx, "standalone-project")
 		require.NoError(t, err)
 
@@ -2706,7 +2706,7 @@ func setupFederationStatusCLIState(t *testing.T) (*testenv.Env, db.Project) {
 	t.Helper()
 	resetFlags(t)
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "spoke-cli")
 	require.NoError(t, err)
 	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -2773,7 +2773,7 @@ func ingestCLIClaimViolation(
 	sourceEventID int64,
 ) db.RemoteEvent {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.ProjectByID(ctx, projectID)
 	require.NoError(t, err)
 	eventUID, err := katauid.New()
@@ -2827,7 +2827,7 @@ func ingestCLIClaimViolation(
 func TestFederationJoinLeaveJoinRoundTrip(t *testing.T) {
 	resetFlags(t)
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	const hubProjectID int64 = 42
 	hubProjectUID := "01HZNQ7VFPK1XGD8R5MABCD4EG"
 	_, hubSrv := newFakeLeaveHub(t, env.DB.InstanceUID(), hubProjectID)
@@ -2876,7 +2876,7 @@ func TestFederationEnrollCLISameNameUIDHolderPrintsRejoinJoin(t *testing.T) {
 	spoke := testenv.New(t)
 	writeHubAdminCatalogEntry(t, spoke.Home, hub.URL, "hub-token")
 	t.Setenv("KATA_SERVER", spoke.URL)
-	ctx := context.Background()
+	ctx := t.Context()
 	hubProject, err := hub.DB.CreateProject(ctx, "fedlab")
 	require.NoError(t, err)
 	_, err = spoke.DB.CreateProjectWithUID(ctx, "fedlab", hubProject.UID)
@@ -2954,7 +2954,7 @@ func TestEnsureFederationProjectByNameRejects3xx(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	api := daemonAPI{ctx: context.Background(), baseURL: srv.URL, client: noRedirectClient(srv)}
+	api := daemonAPI{ctx: t.Context(), baseURL: srv.URL, client: noRedirectClient(srv)}
 	_, err := ensureFederationProjectByName(api, "spoke-project", actor)
 
 	require.Error(t, err)
@@ -3128,7 +3128,7 @@ func TestFederationEnrollCLICatalogPlaintextOptInCarriesIntoJoin(t *testing.T) {
 				original := http.DefaultTransport
 				http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 					clone := r.Clone(r.Context())
-					target, err := http.NewRequest(r.Method, hub.URL+r.URL.RequestURI(), nil) //nolint:gosec // G704: hub.URL is a local httptest endpoint; the forwarded path cannot change its host.
+					target, err := http.NewRequestWithContext(t.Context(), r.Method, hub.URL+r.URL.RequestURI(), nil) //nolint:gosec // G704: hub.URL is a local httptest endpoint; the forwarded path cannot change its host.
 					if err != nil {
 						return nil, err
 					}

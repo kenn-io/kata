@@ -53,7 +53,7 @@ func TestForegroundRefusesStartupBeforeCutover(t *testing.T) {
 
 			switch {
 			case tc.occupiedEndpoint:
-				occupied, listenErr := net.Listen("tcp", "127.0.0.1:0")
+				occupied, listenErr := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 				require.NoError(t, listenErr)
 				t.Cleanup(func() { require.NoError(t, occupied.Close()) })
 				err = runDaemonWithListen(ctx, occupied.Addr().String(), false, false)
@@ -93,7 +93,8 @@ func TestForegroundRefusesStartupBeforeCutover(t *testing.T) {
 // home and dbPath, as a daemon in another PID namespace or mount would.
 func holdStoreOwnerLock(t *testing.T, home, dbPath string) {
 	t.Helper()
-	child := exec.Command(os.Args[0], "-test.run=^TestStoreOwnerLockHelperProcess$") //nolint:gosec // test helper starts this test binary
+	// t.Cleanup owns this process; t.Context() would kill it before that runs.
+	child := exec.CommandContext(context.WithoutCancel(t.Context()), os.Args[0], "-test.run=^TestStoreOwnerLockHelperProcess$") //nolint:gosec // test helper starts this test binary
 	child.Env = append(os.Environ(), "KATA_OWNER_LOCK_HELPER=1", "KATA_HOME="+home, "KATA_DB="+dbPath)
 	stdin, err := child.StdinPipe()
 	require.NoError(t, err)

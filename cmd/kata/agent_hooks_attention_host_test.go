@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -27,7 +28,8 @@ func attentionHostFixture(t *testing.T) func(*rapid.T, any, any) {
 	if err := os.WriteFile(guard, []byte(nativeAttentionHostGuardJS+"\nexport {kataAttentionHostSkip, kataAttentionHostClaim, kataAttentionHostRelease};\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(node, "testdata/agent-hooks/attention-host.mjs", guard) //nolint:gosec // G204: fixed fixture imports the production guard from a temporary file.
+	// t.Cleanup owns this process; t.Context() would kill it before that runs.
+	command := exec.CommandContext(context.WithoutCancel(t.Context()), node, "testdata/agent-hooks/attention-host.mjs", guard) //nolint:gosec // G204: fixed fixture imports the production guard from a temporary file.
 	stdin, err := command.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -159,7 +161,7 @@ func testPiChildAttention(t *testing.T, leadRef, childRef, leadDaemon, childDaem
 	if err := os.WriteFile(extension, plan.Changes[0].Content, 0600); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(node, append([]string{"testdata/agent-hooks/pi-child.mjs", extension, opts.Dir, leadRef, childRef, leadDaemon, childDaemon}, childSubdir...)...) //nolint:gosec // G204: fixed fixture executes a generated adapter in temporary directories.
+	command := exec.CommandContext(t.Context(), node, append([]string{"testdata/agent-hooks/pi-child.mjs", extension, opts.Dir, leadRef, childRef, leadDaemon, childDaemon}, childSubdir...)...) //nolint:gosec // G204: fixed fixture executes a generated adapter in temporary directories.
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("Pi child attention: %v\n%s", err, output)
 	}

@@ -1,7 +1,6 @@
 package sqlitestore_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,7 +10,7 @@ import (
 
 func TestPurgeProject_DeletesArchivedProjectAndFreesName(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openTestDB(t)
 
 	p, err := d.CreateProject(ctx, "spoke-project")
@@ -53,7 +52,7 @@ func TestPurgeProject_DeletesArchivedProjectAndFreesName(t *testing.T) {
 
 func TestPurgeProject_RefusesActiveProject(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openTestDB(t)
 	p, err := d.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
@@ -63,7 +62,7 @@ func TestPurgeProject_RefusesActiveProject(t *testing.T) {
 
 func TestPurgeProject_NotFound(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openTestDB(t)
 	_, err := d.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: 9999, Actor: "tester"})
 	require.ErrorIs(t, err, db.ErrNotFound)
@@ -71,7 +70,7 @@ func TestPurgeProject_NotFound(t *testing.T) {
 
 func TestPurgeProject_RefusesFederated(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openTestDB(t)
 	p, err := d.CreateProject(ctx, "hub-project")
 	require.NoError(t, err)
@@ -93,7 +92,7 @@ func TestPurgeProject_RefusesFederated(t *testing.T) {
 
 func TestPurgeProject_RefusesFederatedSpoke(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openTestDB(t)
 	p, err := d.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
@@ -117,7 +116,7 @@ func TestPurgeProject_RefusesFederatedSpoke(t *testing.T) {
 
 func TestPurgeProject_DetachesMovedInIssueEvents(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openTestDB(t)
 	origin, err := d.CreateProject(ctx, "origin-project")
 	require.NoError(t, err)
@@ -153,7 +152,7 @@ func TestPurgeProject_DetachesMovedInIssueEvents(t *testing.T) {
 // resuming subscriber discovers the reset regardless of its subscription scope.
 func TestPurgeProject_ReservesResetCursorForBothStreams(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openTestDB(t)
 	p, err := d.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
@@ -183,7 +182,7 @@ func TestPurgeProject_ReservesResetCursorForBothStreams(t *testing.T) {
 // flip this assertion.
 func TestPurgeProject_PreservesIssuePurgeLog(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openTestDB(t)
 	p, err := d.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)

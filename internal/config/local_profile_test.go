@@ -377,7 +377,9 @@ func TestLocalProfileEnvironmentIncludesDocumentedHubCredentials(t *testing.T) {
 
 func TestLocalProfileEnvironmentTrustsConfiguredCertificateAuthority(t *testing.T) {
 	if target := os.Getenv("PROFILE_TLS_PROBE"); target != "" {
-		response, err := http.Get(target) //nolint:gosec // Parent supplies only its loopback TLS fixture.
+		req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, target, nil) //nolint:gosec // Parent supplies only its loopback TLS fixture.
+		require.NoError(t, reqErr)
+		response, err := http.DefaultClient.Do(req) //nolint:gosec // Parent supplies only its loopback TLS fixture.
 		require.NoError(t, err)
 		defer func() { _ = response.Body.Close() }()
 		require.Equal(t, http.StatusNoContent, response.StatusCode)

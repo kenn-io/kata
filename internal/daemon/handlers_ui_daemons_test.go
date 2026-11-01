@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -62,7 +61,7 @@ func TestWebDaemonProxyUploadAllowsBothMaximumTransferLegs(t *testing.T) {
 		{http.MethodGet, "/api/v1/projects/1/issues/abc4/attachments/01JB3Z6V2K8M4Q9T1X5W7Y0RNA/content"},
 	} {
 		t.Run(tc.method, func(t *testing.T) {
-			req, err := http.NewRequestWithContext(context.Background(), tc.method, server.URL+"/api/v1/ui/proxy"+tc.path, strings.NewReader("image"))
+			req, err := http.NewRequestWithContext(t.Context(), tc.method, server.URL+"/api/v1/ui/proxy"+tc.path, strings.NewReader("image"))
 			require.NoError(t, err)
 			req.Header.Set("Content-Type", "application/octet-stream")
 			// Keep the caller out of the transport being observed.
@@ -100,7 +99,9 @@ func TestWebDaemonRosterIsSanitizedAndReportsHealth(t *testing.T) {
 		},
 	})
 
-	response, err := http.Get(server.URL + "/api/v1/ui/daemons")
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/daemons", nil)
+	require.NoError(t, reqErr)
+	response, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 	body, err := io.ReadAll(response.Body)
@@ -146,7 +147,9 @@ func TestWebDaemonRosterReportsTargetsWithoutWebUIContract(t *testing.T) {
 		},
 	})
 
-	response, err := http.Get(server.URL + "/api/v1/ui/daemons")
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/daemons", nil)
+	require.NoError(t, reqErr)
+	response, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 	var roster struct {
@@ -178,7 +181,9 @@ func TestWebDaemonRosterRejectsPreviousSnapshotContract(t *testing.T) {
 		},
 	})
 
-	response, err := http.Get(server.URL + "/api/v1/ui/daemons")
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/daemons", nil)
+	require.NoError(t, reqErr)
+	response, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 	var roster struct {
@@ -209,7 +214,9 @@ func TestAnonymousReadonlyRosterHidesConfiguredCredentialTargetsBeforeProbing(t 
 		},
 	})
 
-	response, err := http.Get(server.URL + "/api/v1/ui/daemons")
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/daemons", nil)
+	require.NoError(t, reqErr)
+	response, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 	var roster struct {
@@ -224,7 +231,7 @@ func TestAnonymousReadonlyRosterHidesConfiguredCredentialTargetsBeforeProbing(t 
 	assert.True(t, roster.Daemons[0].Default)
 	assert.Equal(t, int64(0), calls.Load())
 
-	request, err := http.NewRequest(http.MethodGet,
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		server.URL+"/api/v1/ui/proxy/api/v1/ui/snapshot?view=all-open", nil)
 	require.NoError(t, err)
 	request.Header.Set("X-Kata-Web-Daemon", "example-remote")
@@ -263,7 +270,7 @@ func TestWebDaemonProxyPinsTargetAndStripsBrowserCredentials(t *testing.T) {
 			Name: "example-remote", URL: upstream.URL, Token: "target-token", AllowInsecure: true,
 		}},
 	})
-	request, err := http.NewRequest(http.MethodGet,
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		server.URL+"/api/v1/ui/proxy/api/v1/ui/snapshot?view=all-open", nil)
 	require.NoError(t, err)
 	request.Header.Set("X-Kata-Web-Daemon", "example-remote")
@@ -324,7 +331,7 @@ func TestWebDaemonProxyRestrictsDownstreamOperations(t *testing.T) {
 		{name: "purge", path: "/api/v1/projects/7/actions/purge", body: `{}`, want: http.StatusForbidden},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			request, err := http.NewRequest(http.MethodPost,
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
 				server.URL+"/api/v1/ui/proxy"+test.path, strings.NewReader(test.body))
 			require.NoError(t, err)
 			request.Header.Set("X-Kata-Web-Daemon", "example-remote")
@@ -351,7 +358,7 @@ func TestWebDaemonGatewayAllowsIssueReferenceLookup(t *testing.T) {
 		WebDaemons: []config.CatalogDaemonConfig{{Name: "example-local", Local: true}},
 	})
 
-	request, err := http.NewRequest(http.MethodGet, fmt.Sprintf(
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf(
 		"%s/api/v1/ui/proxy/api/v1/ui/issue-reference?project_id=%d&ref=%s", server.URL, project.ID, issue.ShortID,
 	), nil)
 	require.NoError(t, err)
@@ -382,7 +389,7 @@ func TestWebDaemonGatewayRejectsDownstreamRosterBeforeProxying(t *testing.T) {
 		}},
 	})
 
-	request, err := http.NewRequest(http.MethodGet,
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		server.URL+"/api/v1/ui/proxy/api/v1/ui/daemons", nil)
 	require.NoError(t, err)
 	request.Header.Set("X-Kata-Web-Daemon", "example-remote")
@@ -409,7 +416,7 @@ func TestWebDaemonGatewayRejectsDeletedIssueLookupBeforeProxying(t *testing.T) {
 		}},
 	})
 
-	request, err := http.NewRequest(http.MethodGet,
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		server.URL+"/api/v1/ui/proxy/api/v1/projects/7/issues/abc4?include_deleted=true", nil)
 	require.NoError(t, err)
 	request.Header.Set("X-Kata-Web-Daemon", "example-remote")
@@ -433,7 +440,7 @@ func TestWebDaemonProxyDoesNotMisclassifyUpstreamAuthAsBrowserExpiry(t *testing.
 			Name: "example-remote", URL: upstream.URL, Token: "invalid-token", AllowInsecure: true,
 		}},
 	})
-	request, err := http.NewRequest(http.MethodGet,
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		server.URL+"/api/v1/ui/proxy/api/v1/ui/snapshot", nil)
 	require.NoError(t, err)
 	request.Header.Set("X-Kata-Web-Daemon", "example-remote")
@@ -466,7 +473,7 @@ func TestWebDaemonProxyRejectsUpstreamRedirects(t *testing.T) {
 			Name: "example-remote", URL: upstream.URL, AllowInsecure: true,
 		}},
 	})
-	request, err := http.NewRequest(http.MethodPost,
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
 		server.URL+"/api/v1/ui/proxy/api/v1/projects/resolve",
 		strings.NewReader(`{"name":"example-project"}`))
 	require.NoError(t, err)
@@ -489,7 +496,7 @@ func TestWebDaemonProxyDispatchesLocalSelectionInProcess(t *testing.T) {
 		DB: d.db, StartedAt: d.now,
 		WebDaemons: []config.CatalogDaemonConfig{{Name: "example-local", Local: true}},
 	})
-	request, err := http.NewRequest(http.MethodGet,
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		server.URL+"/api/v1/ui/proxy/api/v1/ping", nil)
 	require.NoError(t, err)
 	request.Header.Set("X-Kata-Web-Daemon", "example-local")
@@ -509,21 +516,25 @@ func TestLocalProfileGatewayOmitsAndRejectsHomeEntries(t *testing.T) {
 					entries = append(entries, config.CatalogDaemonConfig{Name: "personal", Local: true})
 				}
 				server := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, ActiveWebDaemon: name, WebDaemons: entries})
-				response, err := http.Get(server.URL + "/api/v1/ui/daemons")
+				req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/daemons", nil)
+				require.NoError(t, reqErr)
+				response, err := http.DefaultClient.Do(req)
 				require.NoError(t, err)
 				body, err := io.ReadAll(response.Body)
 				require.NoError(t, err)
 				require.NoError(t, response.Body.Close())
 				assert.NotContains(t, string(body), fmt.Sprintf(`"id":%q`, name))
 				assert.NotContains(t, string(body), "/work-home")
-				request, err := http.NewRequest(http.MethodGet, server.URL+"/api/v1/ui/proxy/api/v1/ping", nil)
+				request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/proxy/api/v1/ping", nil)
 				require.NoError(t, err)
 				request.Header.Set("X-Kata-Web-Daemon", name)
 				response, err = http.DefaultClient.Do(request)
 				require.NoError(t, err)
 				require.NoError(t, response.Body.Close())
 				assert.Equal(t, http.StatusBadRequest, response.StatusCode)
-				response, err = http.Get(server.URL + "/api/v1/ui/proxy/api/v1/ping")
+				req, reqErr = http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/proxy/api/v1/ping", nil)
+				require.NoError(t, reqErr)
+				response, err = http.DefaultClient.Do(req)
 				require.NoError(t, err)
 				require.NoError(t, response.Body.Close())
 				assert.Equal(t, http.StatusOK, response.StatusCode)

@@ -84,7 +84,7 @@ func TestUpdateInstall_PackageManagedBuildFailsBeforeClientConstruction(t *testi
 			}
 			t.Cleanup(func() { newSelfUpdateClient = orig })
 
-			_, _, err := executeRootCapture(t, context.Background(), "update", "--yes")
+			_, _, err := executeRootCapture(t, t.Context(), "update", "--yes")
 
 			ce := requireCLIError(t, err, ExitUsage)
 			assert.Equal(t, kindUsage, ce.Kind)
@@ -112,7 +112,7 @@ func TestUpdateInstall_PackageManagedFormsFailBeforeClientConstruction(t *testin
 			}
 			t.Cleanup(func() { newSelfUpdateClient = orig })
 
-			_, _, err := executeRootCapture(t, context.Background(), args...)
+			_, _, err := executeRootCapture(t, t.Context(), args...)
 
 			ce := requireCLIError(t, err, ExitUsage)
 			assert.Equal(t, kindUsage, ce.Kind)
@@ -137,7 +137,7 @@ func TestUpdateCheck_PackageManagedFlagCombinationsRemainReadOnly(t *testing.T) 
 			}}}
 			stubUpdateClient(t, fake)
 
-			_, _, err := executeRootCapture(t, context.Background(), args...)
+			_, _, err := executeRootCapture(t, t.Context(), args...)
 
 			require.NoError(t, err)
 			assert.Len(t, fake.checks, 1)
@@ -152,7 +152,7 @@ func TestUpdateCheck_HumanUpToDate(t *testing.T) {
 	fake := &fakeUpdateClient{}
 	stubUpdateClient(t, fake)
 
-	stdout, _, err := executeRootCapture(t, context.Background(), "update", "--check")
+	stdout, _, err := executeRootCapture(t, t.Context(), "update", "--check")
 
 	require.NoError(t, err)
 	assert.Equal(t, "kata is up to date (v0.5.0)\n", stdout)
@@ -171,7 +171,7 @@ func TestUpdateCheck_HumanUpdateAvailable(t *testing.T) {
 	}}}
 	stubUpdateClient(t, fake)
 
-	stdout, _, err := executeRootCapture(t, context.Background(), "update", "--check")
+	stdout, _, err := executeRootCapture(t, t.Context(), "update", "--check")
 
 	require.NoError(t, err)
 	assert.Equal(t, "update available: v0.4.0 -> v0.5.0\n", stdout)
@@ -188,7 +188,7 @@ func TestUpdateCheck_HomebrewHumanUpdateAvailable(t *testing.T) {
 	}}}
 	stubUpdateClient(t, fake)
 
-	stdout, _, err := executeRootCapture(t, context.Background(), "update", "--check")
+	stdout, _, err := executeRootCapture(t, t.Context(), "update", "--check")
 
 	require.NoError(t, err)
 	assert.Equal(t, "update available: v0.4.0 -> v0.5.0\n\nHomebrew manages this installation. Try 'brew upgrade kata' when the update is packaged; the formula may trail GitHub releases.\n", stdout)
@@ -206,7 +206,7 @@ func TestUpdateCheck_DevBuildForcesFreshCheckAndShowsOfficialRelease(t *testing.
 	}}}
 	stubUpdateClient(t, fake)
 
-	stdout, _, err := executeRootCapture(t, context.Background(), "update", "--check")
+	stdout, _, err := executeRootCapture(t, t.Context(), "update", "--check")
 
 	require.NoError(t, err)
 	assert.Equal(t, "dev build: v0.5.0-9-gcf994f5\nlatest official release: v0.6.0\nUse 'kata update --force' to install the latest official release.\n", stdout)
@@ -226,7 +226,7 @@ func TestUpdateCheck_JSONOutput(t *testing.T) {
 	}}}
 	stubUpdateClient(t, fake)
 
-	stdout, _, err := executeRootCapture(t, context.Background(), "--json", "update", "--check")
+	stdout, _, err := executeRootCapture(t, t.Context(), "--json", "update", "--check")
 
 	require.NoError(t, err)
 	var got struct {
@@ -263,7 +263,7 @@ func TestUpdateCheck_HomebrewJSONOutput(t *testing.T) {
 	}}}
 	stubUpdateClient(t, fake)
 
-	stdout, _, err := executeRootCapture(t, context.Background(), "--json", "update", "--check")
+	stdout, _, err := executeRootCapture(t, t.Context(), "--json", "update", "--check")
 
 	require.NoError(t, err)
 	var got struct {
@@ -286,7 +286,7 @@ func TestUpdateCheck_AgentOutput(t *testing.T) {
 	}}}
 	stubUpdateClient(t, fake)
 
-	stdout, _, err := executeRootCapture(t, context.Background(), "--agent", "update", "--check")
+	stdout, _, err := executeRootCapture(t, t.Context(), "--agent", "update", "--check")
 
 	require.NoError(t, err)
 	assert.Equal(t, "OK update update_available=true current=v0.4.0 latest=v0.5.0 distribution=\"\" package_release_may_lag=false\n", stdout)
@@ -302,7 +302,7 @@ func TestUpdateCheck_HomebrewAgentOutput(t *testing.T) {
 	}}}
 	stubUpdateClient(t, fake)
 
-	stdout, _, err := executeRootCapture(t, context.Background(), "--agent", "update", "--check")
+	stdout, _, err := executeRootCapture(t, t.Context(), "--agent", "update", "--check")
 
 	require.NoError(t, err)
 	assert.Equal(t, "OK update update_available=true current=v0.4.0 latest=v0.5.0 distribution=homebrew upgrade_hint=\"brew upgrade kata\" package_release_may_lag=true\n", stdout)
@@ -321,7 +321,7 @@ func TestUpdateInstall_HumanShowsDownloadDetailsBeforeConfirmation(t *testing.T)
 	}}}
 	stubUpdateClient(t, fake)
 
-	stdout, stderr, err := executeRootCaptureWithInput(context.Background(), t, "n\n", "update")
+	stdout, stderr, err := executeRootCaptureWithInput(t.Context(), t, "n\n", "update")
 
 	ce := requireCLIError(t, err, ExitConfirm)
 	assert.Equal(t, kindConfirm, ce.Kind)
@@ -344,7 +344,7 @@ func TestUpdateInstall_DevBuildRequiresForce(t *testing.T) {
 	}}}
 	stubUpdateClient(t, fake)
 
-	stdout, stderr, err := executeRootCapture(t, context.Background(), "update")
+	stdout, stderr, err := executeRootCapture(t, t.Context(), "update")
 
 	require.NoError(t, err)
 	assert.Empty(t, stderr)
@@ -365,7 +365,7 @@ func TestUpdateInstall_DevBuildForceInstalls(t *testing.T) {
 	}}}
 	stubUpdateClient(t, fake)
 
-	stdout, _, err := executeRootCapture(t, context.Background(), "update", "--force", "--yes")
+	stdout, _, err := executeRootCapture(t, t.Context(), "update", "--force", "--yes")
 
 	require.NoError(t, err)
 	assert.Equal(t, "installed kata v0.6.0\n", stdout)
@@ -384,7 +384,7 @@ func TestUpdateInstall_RefetchesCachedInfoBeforeInstall(t *testing.T) {
 	updateInfoNeedsRefetch = func(info *selfupdate.Info) bool { return info == first }
 	t.Cleanup(func() { updateInfoNeedsRefetch = origNeedsRefetch })
 
-	stdout, _, err := executeRootCapture(t, context.Background(), "update", "--yes")
+	stdout, _, err := executeRootCapture(t, t.Context(), "update", "--yes")
 
 	require.NoError(t, err)
 	assert.Equal(t, "installed kata v0.5.0\n", stdout)
@@ -404,7 +404,7 @@ func TestUpdateInstall_JSONRequiresConfirmation(t *testing.T) {
 	}}}
 	stubUpdateClient(t, fake)
 
-	stdout, stderr, err := executeRootCaptureWithInput(context.Background(), t, "n\n", "--json", "update")
+	stdout, stderr, err := executeRootCaptureWithInput(t.Context(), t, "n\n", "--json", "update")
 
 	ce := requireCLIError(t, err, ExitConfirm)
 	assert.Equal(t, kindConfirm, ce.Kind)
@@ -423,7 +423,7 @@ func TestUpdateInstall_JSONOutputAfterConfirmation(t *testing.T) {
 	}}}
 	stubUpdateClient(t, fake)
 
-	stdout, stderr, err := executeRootCaptureWithInput(context.Background(), t, "y\n", "--json", "update")
+	stdout, stderr, err := executeRootCaptureWithInput(t.Context(), t, "y\n", "--json", "update")
 
 	require.NoError(t, err)
 	assert.Contains(t, stderr, "Install kata update v0.4.0 -> v0.5.0?")
@@ -452,7 +452,7 @@ func TestUpdateInstall_AgentOutputAfterYes(t *testing.T) {
 	}}}
 	stubUpdateClient(t, fake)
 
-	stdout, stderr, err := executeRootCapture(t, context.Background(), "--agent", "update", "--yes")
+	stdout, stderr, err := executeRootCapture(t, t.Context(), "--agent", "update", "--yes")
 
 	require.NoError(t, err)
 	assert.Empty(t, stderr)
@@ -469,7 +469,7 @@ func TestUpdateInstall_OfficialKennDistributionInstalls(t *testing.T) {
 	}}}
 	stubUpdateClient(t, fake)
 
-	stdout, stderr, err := executeRootCapture(t, context.Background(), "--agent", "update", "--yes")
+	stdout, stderr, err := executeRootCapture(t, t.Context(), "--agent", "update", "--yes")
 
 	require.NoError(t, err)
 	assert.Empty(t, stderr)
@@ -496,7 +496,7 @@ func TestUpdateCheck_OfficialKennDistributionHasNoPackageGuidance(t *testing.T) 
 			}}}
 			stubUpdateClient(t, fake)
 
-			stdout, _, err := executeRootCapture(t, context.Background(), tt.args...)
+			stdout, _, err := executeRootCapture(t, t.Context(), tt.args...)
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, stdout)
@@ -517,7 +517,7 @@ func TestUpdateInstall_WrapsInstallError(t *testing.T) {
 	}
 	stubUpdateClient(t, fake)
 
-	_, _, err := executeRootCapture(t, context.Background(), "update", "--yes")
+	_, _, err := executeRootCapture(t, t.Context(), "update", "--yes")
 
 	ce := requireCLIError(t, err, ExitInternal)
 	assert.Equal(t, kindInternal, ce.Kind)

@@ -20,7 +20,7 @@ import (
 // make materialization fail.
 func TestFederatedMaterializationSharesWriterWithLocalWrites(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	d, err := Open(ctx, filepath.Join(t.TempDir(), "spoke.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, d.Close()) })
@@ -92,7 +92,7 @@ func TestFederatedMaterializationSharesWriterWithLocalWrites(t *testing.T) {
 func TestWriteQueueAdmitsInArrivalOrder(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		ctx := context.Background()
+		ctx := t.Context()
 		q := newWriteQueue()
 		require.NoError(t, q.acquire(ctx))
 		admitted := make(chan int, 3)
@@ -117,7 +117,7 @@ func TestWriteQueueAdmitsInArrivalOrder(t *testing.T) {
 func TestWriteQueueRetryPreservesArrivalOrder(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 		defer cancel()
 		q := newWriteQueue()
 		require.NoError(t, q.acquire(ctx))
@@ -155,26 +155,26 @@ func TestWriteQueueCancellation(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		q := newWriteQueue()
-		require.NoError(t, q.acquire(context.Background()))
-		ctx, cancel := context.WithCancel(context.Background())
+		require.NoError(t, q.acquire(t.Context()))
+		ctx, cancel := context.WithCancel(t.Context())
 		result := make(chan error, 1)
 		go func() { result <- q.acquire(ctx) }()
 		synctest.Wait()
 		cancel()
 		require.ErrorIs(t, <-result, context.Canceled)
 		q.release()
-		require.NoError(t, q.acquire(context.Background()))
+		require.NoError(t, q.acquire(t.Context()))
 		q.release()
 	})
 }
 
 func TestWriteQueueAlreadyCanceled(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	q := newWriteQueue()
 	require.ErrorIs(t, q.acquire(ctx), context.Canceled)
-	require.NoError(t, q.acquire(context.Background()))
+	require.NoError(t, q.acquire(t.Context()))
 	q.release()
 }
 
@@ -182,14 +182,14 @@ func TestWriteQueueDeadline(t *testing.T) {
 	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		q := newWriteQueue()
-		require.NoError(t, q.acquire(context.Background()))
-		ctx, cancel := context.WithTimeout(context.Background(), 2*sqliteBusyTimeout)
+		require.NoError(t, q.acquire(t.Context()))
+		ctx, cancel := context.WithTimeout(t.Context(), 2*sqliteBusyTimeout)
 		defer cancel()
 		started := time.Now()
 		require.ErrorIs(t, q.acquire(ctx), context.DeadlineExceeded)
 		require.Equal(t, 2*sqliteBusyTimeout, time.Since(started))
 		q.release()
-		require.NoError(t, q.acquire(context.Background()))
+		require.NoError(t, q.acquire(t.Context()))
 		q.release()
 	})
 }
@@ -199,8 +199,8 @@ func TestWriteQueueCancellationRacesHandoff(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		for range 100 {
 			q := newWriteQueue()
-			require.NoError(t, q.acquire(context.Background()))
-			ctx, cancel := context.WithCancel(context.Background())
+			require.NoError(t, q.acquire(t.Context()))
+			ctx, cancel := context.WithCancel(t.Context())
 			result := make(chan error, 1)
 			go func() {
 				err := q.acquire(ctx)
@@ -214,7 +214,7 @@ func TestWriteQueueCancellationRacesHandoff(t *testing.T) {
 			cancel()
 			q.release()
 			<-result
-			require.NoError(t, q.acquire(context.Background()), "canceled waiter must pass the slot on")
+			require.NoError(t, q.acquire(t.Context()), "canceled waiter must pass the slot on")
 			q.release()
 		}
 	})

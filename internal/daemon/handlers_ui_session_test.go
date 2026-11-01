@@ -28,7 +28,7 @@ func TestIssueLocalUISession(t *testing.T) {
 		RequireBrowserSession: true, AllowLocalSession: true,
 	})
 	require.NoError(t, err)
-	request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:27123/api/v1/ui/session/local", bytes.NewBufferString(`{"return_path":"/kata?view=today"}`))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://127.0.0.1:27123/api/v1/ui/session/local", bytes.NewBufferString(`{"return_path":"/kata?view=today"}`))
 	request.Host = "127.0.0.1:27123"
 	request.RemoteAddr = "127.0.0.1:40123"
 	request.Header.Set("Origin", "http://127.0.0.1:27123")
@@ -78,7 +78,7 @@ func TestIssueTrustedProxyUISession(t *testing.T) {
 		Kind: ListenerBrowser, Origin: "https://daemon.example", RequireBrowserSession: true,
 	})
 	require.NoError(t, err)
-	request := httptest.NewRequest(http.MethodPost, "https://daemon.example/api/v1/ui/session/proxy",
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://daemon.example/api/v1/ui/session/proxy",
 		bytes.NewBufferString(`{"return_path":"/kata?view=today"}`))
 	request = request.WithContext(context.WithValue(request.Context(), http.LocalAddrContextKey,
 		&net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 27123}))
@@ -123,7 +123,7 @@ func TestWebLocalSessionRejectsPathBasedProjectInit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			body, err := json.Marshal(map[string]string{"start_path": tc.startPath, "actor": "user-a"})
 			require.NoError(t, err)
-			request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:27123/api/v1/projects", bytes.NewReader(body))
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://127.0.0.1:27123/api/v1/projects", bytes.NewReader(body))
 			request.Host = "127.0.0.1:27123"
 			request.RemoteAddr = "127.0.0.1:40123"
 			request.Header.Set("Origin", "http://127.0.0.1:27123")

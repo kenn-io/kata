@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"fmt"
@@ -24,7 +23,7 @@ import (
 func TestCreateIssue_IdentityModeOverridesBodyActor(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	projectID := mkProject(t, env, "github.com/test/a", "a")
-	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	_, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "alice-token",
 		Actor:          "alice",
 		AdminActor:     db.BootstrapActor,
@@ -45,7 +44,7 @@ func TestCreateIssue_IdentityModeOverridesBodyActor(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(bs, &out))
 	assert.Equal(t, "alice", out.Event.Actor)
-	issue, err := env.DB.IssueByID(context.Background(), out.Issue.ID)
+	issue, err := env.DB.IssueByID(t.Context(), out.Issue.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "alice", issue.Author)
 }
@@ -53,7 +52,7 @@ func TestCreateIssue_IdentityModeOverridesBodyActor(t *testing.T) {
 func TestIssueMutation_IdentityModeUsesPrincipalWhenActorIsOmitted(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	projectID := mkProject(t, env, "https://daemon.example/example-project", "example-project")
-	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	_, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "user-a-token",
 		Actor:          "user-a",
 		AdminActor:     db.BootstrapActor,
@@ -157,7 +156,7 @@ func TestCreateIssue_InvalidTitleIs400(t *testing.T) {
 			resp, bs := envDoRaw(t, env, http.MethodPost, projectPath(projectID)+"/issues",
 				map[string]string{"actor": "tester", "title": tc.title}, nil)
 			assertAPIError(t, resp.StatusCode, bs, http.StatusBadRequest, "validation")
-			count, err := env.DB.CountOpenIssues(context.Background(), projectID)
+			count, err := env.DB.CountOpenIssues(t.Context(), projectID)
 			require.NoError(t, err)
 			assert.Zero(t, count)
 		})
@@ -175,7 +174,7 @@ func TestEditIssue_InvalidTitleIs400AndPreservesIssue(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			env := testenv.New(t)
 			projectID := mkProject(t, env, "github.com/test/invalid-edit-title", "invalid-edit-title")
-			created, _, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
+			created, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
 				ProjectID: projectID, Title: "original title", Author: "tester",
 			})
 			require.NoError(t, err)
@@ -184,7 +183,7 @@ func TestEditIssue_InvalidTitleIs400AndPreservesIssue(t *testing.T) {
 				issueURLRef(projectID, created.ShortID, ""),
 				map[string]string{"actor": "tester", "title": tc.title}, nil)
 			assertAPIError(t, resp.StatusCode, bs, http.StatusBadRequest, "validation")
-			stored, err := env.DB.IssueByID(context.Background(), created.ID)
+			stored, err := env.DB.IssueByID(t.Context(), created.ID)
 			require.NoError(t, err)
 			assert.Equal(t, "original title", stored.Title)
 		})
@@ -197,14 +196,14 @@ func TestEditIssue_InvalidTitleIs400AndPreservesIssue(t *testing.T) {
 func TestGetIssue_ResolvesByShortID(t *testing.T) {
 	h, projectID := bootstrapProject(t)
 	ts := h.ts.(*httptest.Server)
-	created, _, err := h.DB().CreateIssue(context.Background(), db.CreateIssueParams{
+	created, _, err := h.DB().CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: projectID,
 		UID:       "01HZNQ7VFPK1XGD8R5MABCD4EX",
 		Title:     "via short_id",
 		Author:    "tester",
 	})
 	require.NoError(t, err)
-	project, err := h.DB().ProjectByID(context.Background(), projectID)
+	project, err := h.DB().ProjectByID(t.Context(), projectID)
 	require.NoError(t, err)
 
 	resp, bs := getStatusBody(t, ts, "/api/v1/projects/"+strconv.FormatInt(projectID, 10)+"/issues/"+created.ShortID)
@@ -224,7 +223,7 @@ func TestGetIssue_ResolvesByShortID(t *testing.T) {
 func TestGetIssue_ResolvesByULID(t *testing.T) {
 	h, projectID := bootstrapProject(t)
 	ts := h.ts.(*httptest.Server)
-	created, _, err := h.DB().CreateIssue(context.Background(), db.CreateIssueParams{
+	created, _, err := h.DB().CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: projectID,
 		UID:       "01HZNQ7VFPK1XGD8R5MABCD4EX",
 		Title:     "via uid",
@@ -247,7 +246,7 @@ func TestGetIssue_ResolvesByULID(t *testing.T) {
 func TestGetIssue_ULIDInWrongProjectReturns404(t *testing.T) {
 	h, projectA := bootstrapProject(t)
 	ts := h.ts.(*httptest.Server)
-	ctx := context.Background()
+	ctx := t.Context()
 	projectB, err := h.DB().CreateProject(ctx, "other-project")
 	require.NoError(t, err)
 	created, _, err := h.DB().CreateIssue(ctx, db.CreateIssueParams{
@@ -270,7 +269,7 @@ func TestGetIssue_ULIDInWrongProjectReturns404(t *testing.T) {
 func TestGetIssue_QualifiedRefCrossProjectGuard(t *testing.T) {
 	h, projectA := bootstrapProject(t)
 	ts := h.ts.(*httptest.Server)
-	ctx := context.Background()
+	ctx := t.Context()
 	pa, err := h.DB().ProjectByID(ctx, projectA)
 	require.NoError(t, err)
 	_, err = h.DB().CreateProject(ctx, "other-project")
@@ -310,7 +309,7 @@ func TestGetIssue_QualifiedRefCrossProjectGuard(t *testing.T) {
 func TestGetIssue_LegacyNumberReturns404(t *testing.T) {
 	h, projectID := bootstrapProject(t)
 	ts := h.ts.(*httptest.Server)
-	_, _, err := h.DB().CreateIssue(context.Background(), db.CreateIssueParams{
+	_, _, err := h.DB().CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: projectID,
 		UID:       "01HZNQ7VFPK1XGD8R5MABCD4EX",
 		Title:     "no number lookup",
@@ -448,11 +447,11 @@ func TestIssues_PatchEditTitleAndBody(t *testing.T) {
 func TestEditIssueExternalRootContentOwnedReturnsNeutralConflict(t *testing.T) {
 	env := testenv.New(t)
 	projectID := mkProject(t, env, "https://daemon.example/example-project", "example-project")
-	issue, _, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: projectID, Title: "External root", Body: "External body", Author: "tester",
 	})
 	require.NoError(t, err)
-	_, _, err = env.DB.CreateExternalRootBinding(context.Background(), db.CreateExternalRootBindingParams{
+	_, _, err = env.DB.CreateExternalRootBinding(t.Context(), db.CreateExternalRootBindingParams{
 		ProjectID: projectID, IssueID: issue.ID, ConnectorInstance: "example-connector",
 		ExternalRootKey: "opaque-root-key", ExternalAccountKey: "opaque-account-key",
 		Actor: "tester", ReceiveCommentsAfter: time.Date(2026, 8, 20, 8, 0, 0, 0, time.UTC),
@@ -473,7 +472,7 @@ func TestEditIssueExternalRootContentOwnedReturnsNeutralConflict(t *testing.T) {
 	assert.Contains(t, envelope.Error.Hint, "kata bridge unbind <issue-ref>")
 	assert.NotContains(t, string(raw), "example-connector")
 	assert.NotContains(t, string(raw), "opaque-root-key")
-	stored, readErr := env.DB.IssueByID(context.Background(), issue.ID)
+	stored, readErr := env.DB.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, readErr)
 	assert.Equal(t, issue.Title, stored.Title)
 	assert.Nil(t, stored.Priority)
@@ -592,7 +591,9 @@ func TestEditIssue_LinksDelta_AddBlocks(t *testing.T) {
 	assert.Equal(t, target, out.Changes.BlocksAdded[0].ShortID)
 
 	// Verify the link persisted: GET issue and inspect its links list.
-	getResp, err := http.Get(ts.URL + issueURL(pid, src, "")) //nolint:gosec,noctx // test loopback
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+issueURL(pid, src, ""), nil)
+	require.NoError(t, reqErr)
+	getResp, err := http.DefaultClient.Do(req) //nolint:gosec // test loopback
 	require.NoError(t, err)
 	defer func() { _ = getResp.Body.Close() }()
 	require.Equal(t, 200, getResp.StatusCode)
@@ -711,7 +712,9 @@ func TestEditIssue_LinksDelta_AddBlockedBy(t *testing.T) {
 	assert.Equal(t, blocker, out.Changes.BlockedByAdded[0].ShortID)
 
 	// Persistence: GET URL issue, expect a blocks link FROM blocker TO src.
-	getResp, err := http.Get(ts.URL + issueURL(pid, src, "")) //nolint:gosec,noctx // test loopback
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+issueURL(pid, src, ""), nil)
+	require.NoError(t, reqErr)
+	getResp, err := http.DefaultClient.Do(req) //nolint:gosec // test loopback
 	require.NoError(t, err)
 	defer func() { _ = getResp.Body.Close() }()
 	var show struct {
@@ -808,7 +811,7 @@ func TestEditIssue_LinksDelta_RemoveBlocksAfterPeerSoftDeleted(t *testing.T) {
 	require.Equal(t, 200, resp.StatusCode)
 	peer := issueShortIDFromCreate(t, bs)
 	srcShortID := issueRefByID(t, h, src)
-	project, err := h.DB().ProjectByID(context.Background(), pid)
+	project, err := h.DB().ProjectByID(t.Context(), pid)
 	require.NoError(t, err)
 
 	// src blocks peer.
@@ -856,7 +859,7 @@ func TestShowIssue_LinkPeerSoftDeletedReturns200(t *testing.T) {
 	require.Equal(t, 200, resp.StatusCode)
 	peer := issueShortIDFromCreate(t, bs)
 	srcShortID := issueRefByID(t, h, src)
-	project, err := h.DB().ProjectByID(context.Background(), pid)
+	project, err := h.DB().ProjectByID(t.Context(), pid)
 	require.NoError(t, err)
 
 	// src blocks peer.
@@ -875,7 +878,9 @@ func TestShowIssue_LinkPeerSoftDeletedReturns200(t *testing.T) {
 	// Show src — the surviving end. Must succeed (200) and surface the
 	// link to the soft-deleted peer; the peer's short_id rides on the
 	// link row even though its issue row is hidden.
-	getResp, err := http.Get(ts.URL + issueURLRef(pid, srcShortID, "")) //nolint:gosec,noctx // test loopback
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+issueURLRef(pid, srcShortID, ""), nil)
+	require.NoError(t, reqErr)
+	getResp, err := http.DefaultClient.Do(req) //nolint:gosec // test loopback
 	require.NoError(t, err)
 	defer func() { _ = getResp.Body.Close() }()
 	showBody, err := io.ReadAll(getResp.Body)
@@ -909,7 +914,7 @@ func TestShowIssue_ParentPeerSoftDeletedReturns200(t *testing.T) {
 		map[string]any{"actor": "tester", "title": "child"})
 	require.Equal(t, 200, resp.StatusCode)
 	childRef := issueShortIDFromCreate(t, bs)
-	project, err := h.DB().ProjectByID(context.Background(), pid)
+	project, err := h.DB().ProjectByID(t.Context(), pid)
 	require.NoError(t, err)
 
 	resp, _ = patchJSON(t, ts, issueURLRef(pid, childRef, ""), map[string]any{
@@ -922,7 +927,9 @@ func TestShowIssue_ParentPeerSoftDeletedReturns200(t *testing.T) {
 		map[string]any{"actor": "tester"})
 	require.Equalf(t, 200, delResp.status, "delete: %s", string(delResp.body))
 
-	getResp, err := http.Get(ts.URL + issueURLRef(pid, childRef, "")) //nolint:gosec,noctx // test loopback
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+issueURLRef(pid, childRef, ""), nil)
+	require.NoError(t, reqErr)
+	getResp, err := http.DefaultClient.Do(req) //nolint:gosec // test loopback
 	require.NoError(t, err)
 	defer func() { _ = getResp.Body.Close() }()
 	showBody, err := io.ReadAll(getResp.Body)
@@ -965,7 +972,9 @@ func TestEditIssue_LinksDelta_SetParent_RejectsCycle(t *testing.T) {
 	assertAPIError(t, resp.StatusCode, bs, 400, "validation")
 
 	// src must still have no parent (rollback semantics).
-	getResp, err := http.Get(ts.URL + issueURLRef(pid, srcRef, "")) //nolint:gosec,noctx // test loopback
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+issueURLRef(pid, srcRef, ""), nil)
+	require.NoError(t, reqErr)
+	getResp, err := http.DefaultClient.Do(req) //nolint:gosec // test loopback
 	require.NoError(t, err)
 	defer func() { _ = getResp.Body.Close() }()
 	var show struct {
@@ -1290,7 +1299,9 @@ func TestEditIssue_Priority_SetViaPATCH(t *testing.T) {
 	})
 	require.Equalf(t, 200, resp.StatusCode, "patch: %s", string(bs))
 
-	getResp, err := http.Get(ts.URL + issueURL(pid, 1, "")) //nolint:gosec,noctx // test loopback
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+issueURL(pid, 1, ""), nil)
+	require.NoError(t, reqErr)
+	getResp, err := http.DefaultClient.Do(req) //nolint:gosec // test loopback
 	require.NoError(t, err)
 	defer func() { _ = getResp.Body.Close() }()
 	var show struct {
@@ -1318,7 +1329,9 @@ func TestEditIssue_Priority_ClearViaPATCH(t *testing.T) {
 	})
 	require.Equalf(t, 200, resp.StatusCode, "clear: %s", string(bs))
 
-	getResp, err := http.Get(ts.URL + issueURL(pid, 1, "")) //nolint:gosec,noctx // test loopback
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+issueURL(pid, 1, ""), nil)
+	require.NoError(t, reqErr)
+	getResp, err := http.DefaultClient.Do(req) //nolint:gosec // test loopback
 	require.NoError(t, err)
 	defer func() { _ = getResp.Body.Close() }()
 	var show struct {
@@ -1524,7 +1537,9 @@ func (e eventTransport) PayloadString() string { return string(e.Payload) }
 // project; subsequent eventsAfter calls use this as the cursor.
 func highestEventID(t *testing.T, ts *httptest.Server, pid int64) int64 {
 	t.Helper()
-	resp, err := http.Get(ts.URL + fmt.Sprintf("/api/v1/projects/%d/events?after_id=0&limit=1000", pid)) //nolint:gosec,noctx // test loopback
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+fmt.Sprintf("/api/v1/projects/%d/events?after_id=0&limit=1000", pid), nil)
+	require.NoError(t, reqErr)
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // test loopback
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	var b struct {
@@ -1540,7 +1555,9 @@ func highestEventID(t *testing.T, ts *httptest.Server, pid int64) int64 {
 // eventsAfter returns every event for the project with ID > after.
 func eventsAfter(t *testing.T, ts *httptest.Server, pid int64, after int64) []eventTransport {
 	t.Helper()
-	resp, err := http.Get(ts.URL + fmt.Sprintf("/api/v1/projects/%d/events?after_id=%d&limit=1000", pid, after)) //nolint:gosec,noctx // test loopback
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+fmt.Sprintf("/api/v1/projects/%d/events?after_id=%d&limit=1000", pid, after), nil)
+	require.NoError(t, reqErr)
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // test loopback
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	var b struct {
@@ -1571,7 +1588,9 @@ func TestEditIssue_Atomic_RollsBackOnLinkFailure(t *testing.T) {
 	require.GreaterOrEqualf(t, resp.StatusCode, 400, "missing target must fail: %s", string(bs))
 
 	// Title must NOT have changed; no link to #2 either. The whole edit rolls back.
-	getResp, err := http.Get(ts.URL + issueURL(pid, 1, "")) //nolint:gosec,noctx // test loopback
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+issueURL(pid, 1, ""), nil)
+	require.NoError(t, reqErr)
+	getResp, err := http.DefaultClient.Do(req) //nolint:gosec // test loopback
 	require.NoError(t, err)
 	defer func() { _ = getResp.Body.Close() }()
 	var show struct {
@@ -1813,7 +1832,7 @@ func TestCreateIssue_CrossProjectInitialLinks(t *testing.T) {
 // create with the same 409 claim_denied the link endpoint returns.
 func TestCreateIssue_InitialLinksFederatedClaimGate(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// src: non-federated project — the URL project for the create call.
 	src, err := env.DB.CreateProject(ctx, "src-gate-test")
@@ -1845,7 +1864,7 @@ func TestCreateIssue_InitialLinksFederatedClaimGate(t *testing.T) {
 // authorization failure.
 func TestCreateIssue_InvalidInitialLinkTypeBeatsClaimGate(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	src, err := env.DB.CreateProject(ctx, "src-bad-type")
 	require.NoError(t, err)
@@ -1874,7 +1893,7 @@ func TestCreateIssue_InvalidInitialLinkTypeBeatsClaimGate(t *testing.T) {
 // validation, so the up-front validation isn't claim-gate-specific.
 func TestCreateIssue_InvalidInitialLinkTypeNoClaims(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	pid := mkProject(t, env, "", "plain-bad-type")
 	peer, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
@@ -2061,7 +2080,7 @@ func TestCreate_IdempotencyDeletedIs409(t *testing.T) {
 	require.Equal(t, 409, second.status, string(second.body))
 	assert.Contains(t, string(second.body), `"code":"idempotency_deleted"`)
 	// Look up the original issue's short_id to pin the hint format.
-	deletedIssue, err := h.DB().IssueByID(context.Background(), firstResp.Issue.ID)
+	deletedIssue, err := h.DB().IssueByID(t.Context(), firstResp.Issue.ID)
 	require.NoError(t, err)
 	assert.Contains(t, string(second.body), "kata restore "+deletedIssue.ShortID,
 		"hint must point at the restore command")
@@ -2447,7 +2466,7 @@ func TestListAllIssues_RejectsRemovedViewParams(t *testing.T) {
 // surfaced as a clear 400 rather than silently honored.
 func TestListAllIssues_RejectsRemovedClientTZHeader(t *testing.T) {
 	env := testenv.New(t)
-	req, err := http.NewRequest(http.MethodGet, env.URL+"/api/v1/issues", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, env.URL+"/api/v1/issues", nil)
 	require.NoError(t, err)
 	req.Header.Set("X-Kata-Client-TZ", "America/New_York")
 	resp, err := env.HTTP.Do(req) //nolint:gosec // test request to loopback URL

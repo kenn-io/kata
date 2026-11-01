@@ -43,7 +43,7 @@ func TestBrowserSession(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:27123/api/v1/events/stream", nil)
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://127.0.0.1:27123/api/v1/events/stream", nil)
 			if tt.cookie != "" {
 				request.AddCookie(manager.Cookie(tt.cookie))
 			}
@@ -109,7 +109,7 @@ func TestWebLocalSessionIsLimitedToSPAOperations(t *testing.T) {
 		{name: "path resolution", method: http.MethodPost, path: "/api/v1/projects/resolve", want: http.StatusForbidden},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			request := httptest.NewRequest(test.method, "http://127.0.0.1:27123"+test.path, nil)
+			request := httptest.NewRequestWithContext(t.Context(), test.method, "http://127.0.0.1:27123"+test.path, nil)
 			request.AddCookie(manager.Cookie(issued.Cookie))
 			request.Header.Set(webSessionHeader, issued.Session)
 			request.Header.Set(webCSRFHeader, issued.CSRF)
@@ -155,7 +155,7 @@ func TestIssueScopedBrowserSessionUsesSameRouteAllowlist(t *testing.T) {
 		{name: "project deletion denied", method: http.MethodDelete, path: "/api/v1/projects/2", want: http.StatusForbidden},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			request := httptest.NewRequest(tc.method, "http://127.0.0.1:27123"+tc.path, nil)
+			request := httptest.NewRequestWithContext(t.Context(), tc.method, "http://127.0.0.1:27123"+tc.path, nil)
 			request.AddCookie(manager.Cookie(issued.Cookie))
 			request.Header.Set(webSessionHeader, issued.Session)
 			request.Header.Set(webCSRFHeader, issued.CSRF)
@@ -215,7 +215,7 @@ func TestSharedTCPEventStreamPreservesCLIAuthentication(t *testing.T) {
 		Kind: ListenerSharedTCP, Origin: "https://daemon.example", BackendAuthority: "127.0.0.1:7777",
 		RequireBrowserSession: true,
 	}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
-	request := httptest.NewRequest(http.MethodGet, "https://daemon.example/api/v1/events/stream", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://daemon.example/api/v1/events/stream", nil)
 	request.Header.Set("Authorization", "Bearer configured-token")
 	request.Header.Set("Accept", "text/event-stream")
 	response := httptest.NewRecorder()
@@ -232,7 +232,7 @@ func TestSharedTCPUISnapshotPreservesCLIAuthentication(t *testing.T) {
 		Kind: ListenerSharedTCP, Origin: "http://127.0.0.1:27123", BackendAuthority: "127.0.0.1:27123",
 		RequireBrowserSession: true,
 	}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
-	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:27123/api/v1/ui/snapshot", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://127.0.0.1:27123/api/v1/ui/snapshot", nil)
 	request.RemoteAddr = "127.0.0.1:54321"
 	request.Header.Set("Authorization", "Bearer configured-token")
 	response := httptest.NewRecorder()
@@ -252,7 +252,7 @@ func TestSharedTCPTokenlessPublicAuthorityRequiresBrowserSession(t *testing.T) {
 		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 
 	for _, path := range []string{"/api/v1/projects", "/api/v1/ui/snapshot"} {
-		publicRequest := httptest.NewRequest(http.MethodGet, "https://daemon.example"+path, nil)
+		publicRequest := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://daemon.example"+path, nil)
 		publicResponse := httptest.NewRecorder()
 		handler.ServeHTTP(publicResponse, publicRequest)
 		assert.Equal(t, http.StatusUnauthorized, publicResponse.Code)
@@ -262,7 +262,7 @@ func TestSharedTCPTokenlessPublicAuthorityRequiresBrowserSession(t *testing.T) {
 	for _, authority := range []string{"127.0.0.1:7777", "localhost:7777", "backend.example:7777"} {
 		t.Run(authority, func(t *testing.T) {
 			for _, path := range []string{"/api/v1/projects", "/api/v1/ui/snapshot"} {
-				request := httptest.NewRequest(http.MethodGet, "http://"+authority+path, nil)
+				request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+authority+path, nil)
 				request.RemoteAddr = "127.0.0.1:54321"
 				response := httptest.NewRecorder()
 				handler.ServeHTTP(response, request)
@@ -286,7 +286,7 @@ func TestSharedTCPExplicitUnauthenticatedPrivateNetworkWritesPreservesCLI(t *tes
 		{method: http.MethodPost, path: "/api/v1/projects"},
 		{method: http.MethodGet, path: "/api/v1/ui/snapshot"},
 	} {
-		request := httptest.NewRequest(requestCase.method, "http://100.64.0.5:7777"+requestCase.path, nil)
+		request := httptest.NewRequestWithContext(t.Context(), requestCase.method, "http://100.64.0.5:7777"+requestCase.path, nil)
 		request.RemoteAddr = "100.64.0.6:54321"
 		response := httptest.NewRecorder()
 
@@ -323,7 +323,7 @@ func TestBrowserSessionsRemainIndependentAcrossTabs(t *testing.T) {
 		Kind: ListenerBrowser, Origin: "http://127.0.0.1:27123", RequireBrowserSession: true,
 	}
 	handler := requireBrowserSession(manager, policy, mux)
-	logout := httptest.NewRequest(http.MethodDelete, "http://127.0.0.1:27123/api/v1/ui/session", nil)
+	logout := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "http://127.0.0.1:27123/api/v1/ui/session", nil)
 	logout.AddCookie(manager.Cookie(first.Cookie))
 	logout.Header.Set(webSessionHeader, first.Session)
 	logout.Header.Set(webCSRFHeader, first.CSRF)
@@ -332,15 +332,15 @@ func TestBrowserSessionsRemainIndependentAcrossTabs(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, response.Code)
 	assert.Empty(t, response.Header().Values("Set-Cookie"))
 
-	_, err = manager.Authenticate(context.Background(), first.Cookie, first.Session)
+	_, err = manager.Authenticate(t.Context(), first.Cookie, first.Session)
 	assert.ErrorIs(t, err, ErrWebSessionInvalid)
-	_, err = manager.Authenticate(context.Background(), second.Cookie, second.Session)
+	_, err = manager.Authenticate(t.Context(), second.Cookie, second.Session)
 	assert.NoError(t, err)
 }
 
 func TestBrowserSessionRetainsIdentityAndCapabilities(t *testing.T) {
 	store := openAuthTestDB(t)
-	tokenRow, _, err := store.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	tokenRow, _, err := store.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "user-a-token",
 		Actor:          "user-a",
 		AdminActor:     db.BootstrapActor,
@@ -357,21 +357,21 @@ func TestBrowserSessionRetainsIdentityAndCapabilities(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	issued, err := manager.Login(context.Background(), "user-a-token", "/views/inbox")
+	issued, err := manager.Login(t.Context(), "user-a-token", "/views/inbox")
 	require.NoError(t, err)
 	assert.Equal(t, PrincipalDBToken, issued.Principal.Kind)
 	assert.Equal(t, "user-a", issued.Principal.Actor)
 	assert.True(t, issued.Writable)
 	assert.Equal(t, "sse", issued.Updates)
 
-	_, err = manager.Authenticate(context.Background(), issued.Cookie, issued.Session)
+	_, err = manager.Authenticate(t.Context(), issued.Cookie, issued.Session)
 	require.NoError(t, err)
-	_, _, err = store.RevokeAPIToken(context.Background(), tokenRow.ID, db.BootstrapActor)
+	_, _, err = store.RevokeAPIToken(t.Context(), tokenRow.ID, db.BootstrapActor)
 	require.NoError(t, err)
-	_, err = manager.Authenticate(context.Background(), issued.Cookie, issued.Session)
+	_, err = manager.Authenticate(t.Context(), issued.Cookie, issued.Session)
 	assert.ErrorIs(t, err, ErrWebSessionInvalid)
 
-	bootstrap, err := manager.Login(context.Background(), "bootstrap-token", "/views/inbox")
+	bootstrap, err := manager.Login(t.Context(), "bootstrap-token", "/views/inbox")
 	require.NoError(t, err)
 	assert.Equal(t, PrincipalBootstrap, bootstrap.Principal.Kind)
 	assert.False(t, bootstrap.Writable)
@@ -394,12 +394,12 @@ func TestEffectiveUIPolicyUsesBrowserSessionPrincipal(t *testing.T) {
 	manager := newDeterministicSessionManager(t, "http://127.0.0.1:27123", "instance_a")
 	cfg := ServerConfig{WebSessions: manager}
 
-	bootstrap := effectiveUIPolicy(WithPrincipal(context.Background(), Principal{
+	bootstrap := effectiveUIPolicy(WithPrincipal(t.Context(), Principal{
 		Kind: PrincipalBootstrap,
 	}), cfg)
 	assert.False(t, bootstrap.Capabilities.Writable)
 
-	local := effectiveUIPolicy(WithPrincipal(context.Background(), Principal{
+	local := effectiveUIPolicy(WithPrincipal(t.Context(), Principal{
 		Kind: PrincipalWebLocal,
 	}), cfg)
 	assert.True(t, local.Capabilities.Writable)
@@ -417,10 +417,10 @@ func TestBrowserSessionExpires(t *testing.T) {
 	issued, err := manager.IssueSession(Principal{}, "/views/inbox")
 	require.NoError(t, err)
 
-	_, err = manager.Authenticate(context.Background(), issued.Cookie, issued.Session)
+	_, err = manager.Authenticate(t.Context(), issued.Cookie, issued.Session)
 	require.NoError(t, err)
 	now = now.Add(24 * time.Hour)
-	_, err = manager.Authenticate(context.Background(), issued.Cookie, issued.Session)
+	_, err = manager.Authenticate(t.Context(), issued.Cookie, issued.Session)
 	assert.ErrorIs(t, err, ErrWebSessionInvalid)
 }
 
@@ -438,7 +438,7 @@ func TestBrowserSessionRejectsCrossDaemonReplay(t *testing.T) {
 
 	issued, err := first.IssueSession(Principal{}, "/views/inbox")
 	require.NoError(t, err)
-	_, err = second.Authenticate(context.Background(), issued.Cookie, issued.Session)
+	_, err = second.Authenticate(t.Context(), issued.Cookie, issued.Session)
 	assert.ErrorIs(t, err, ErrWebSessionInvalid)
 }
 
@@ -450,14 +450,14 @@ func TestBrowserMutation(t *testing.T) {
 		Kind: ListenerBrowser, Origin: "http://127.0.0.1:27123", RequireBrowserSession: true,
 	}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 
-	request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:27123/api/v1/projects", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://127.0.0.1:27123/api/v1/projects", nil)
 	request.AddCookie(manager.Cookie(session.Cookie))
 	request.Header.Set(webSessionHeader, session.Session)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	assert.Equal(t, http.StatusForbidden, response.Code)
 
-	request = httptest.NewRequest(http.MethodPost, "http://127.0.0.1:27123/api/v1/projects", nil)
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://127.0.0.1:27123/api/v1/projects", nil)
 	request.AddCookie(manager.Cookie(session.Cookie))
 	request.Header.Set(webSessionHeader, session.Session)
 	request.Header.Set(webCSRFHeader, session.CSRF)
@@ -467,7 +467,7 @@ func TestBrowserMutation(t *testing.T) {
 
 	bootstrap, err := manager.IssueSession(Principal{Kind: PrincipalBootstrap}, "/views/inbox")
 	require.NoError(t, err)
-	request = httptest.NewRequest(http.MethodPost, "http://127.0.0.1:27123/api/v1/projects", nil)
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://127.0.0.1:27123/api/v1/projects", nil)
 	request.AddCookie(manager.Cookie(bootstrap.Cookie))
 	request.Header.Set(webSessionHeader, bootstrap.Session)
 	request.Header.Set(webCSRFHeader, bootstrap.CSRF)
@@ -490,7 +490,7 @@ func TestBrowserSessionLogoutInvalidatesPairAndHasNoRefresh(t *testing.T) {
 	}
 	handler := requireBrowserSession(manager, policy, mux)
 
-	logout := httptest.NewRequest(http.MethodDelete, "http://127.0.0.1:27123/api/v1/ui/session", nil)
+	logout := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "http://127.0.0.1:27123/api/v1/ui/session", nil)
 	logout.AddCookie(manager.Cookie(issued.Cookie))
 	logout.Header.Set(webSessionHeader, issued.Session)
 	logout.Header.Set(webCSRFHeader, issued.CSRF)
@@ -498,14 +498,14 @@ func TestBrowserSessionLogoutInvalidatesPairAndHasNoRefresh(t *testing.T) {
 	handler.ServeHTTP(response, logout)
 	require.Equal(t, http.StatusNoContent, response.Code)
 
-	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:27123/api/v1/data", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://127.0.0.1:27123/api/v1/data", nil)
 	request.AddCookie(manager.Cookie(issued.Cookie))
 	request.Header.Set(webSessionHeader, issued.Session)
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	assert.Equal(t, http.StatusUnauthorized, response.Code)
 
-	refresh := httptest.NewRequest(http.MethodPost, "/api/v1/ui/session/refresh", nil)
+	refresh := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/ui/session/refresh", nil)
 	response = httptest.NewRecorder()
 	mux.ServeHTTP(response, refresh)
 	assert.Equal(t, http.StatusNotFound, response.Code)
@@ -533,7 +533,7 @@ func TestBrowserSessionLogoutAllowsReadOnlyAndBootstrapPrincipals(t *testing.T) 
 			handler, err := ApplyListenerPolicy(requireBrowserSession(manager, policy, mux), policy)
 			require.NoError(t, err)
 
-			request := httptest.NewRequest(http.MethodDelete, "http://127.0.0.1:27123/api/v1/ui/session", nil)
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "http://127.0.0.1:27123/api/v1/ui/session", nil)
 			request.AddCookie(manager.Cookie(issued.Cookie))
 			request.Header.Set("Origin", policy.Origin)
 			request.Header.Set(webSessionHeader, issued.Session)
@@ -557,14 +557,14 @@ func TestStreamEventsBrowser(t *testing.T) {
 		w.WriteHeader(http.StatusNoContent)
 	}))
 
-	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:27123/api/v1/events/stream", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://127.0.0.1:27123/api/v1/events/stream", nil)
 	request.AddCookie(manager.Cookie(issued.Cookie))
 	request.Header.Set("Last-Event-ID", "41")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	assert.Equal(t, http.StatusUnauthorized, response.Code)
 
-	request = httptest.NewRequest(http.MethodGet, "http://127.0.0.1:27123/api/v1/events/stream", nil)
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://127.0.0.1:27123/api/v1/events/stream", nil)
 	request.AddCookie(manager.Cookie(issued.Cookie))
 	request.Header.Set(webSessionHeader, issued.Session)
 	request.Header.Set("Last-Event-ID", "41")
@@ -583,7 +583,7 @@ func TestStreamEventsBrowser(t *testing.T) {
 	readonlyHandler := requireBrowserSession(readonly, ListenerPolicy{
 		Kind: ListenerBrowser, Origin: "http://127.0.0.1:29123", RequireBrowserSession: true,
 	}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
-	request = httptest.NewRequest(http.MethodGet, "http://127.0.0.1:29123/api/v1/events/stream", nil)
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://127.0.0.1:29123/api/v1/events/stream", nil)
 	response = httptest.NewRecorder()
 	readonlyHandler.ServeHTTP(response, request)
 	assert.Equal(t, http.StatusUnauthorized, response.Code)
@@ -594,7 +594,7 @@ func TestBrowserEventStreamRevalidatesSessionAuthority(t *testing.T) {
 		manager := newDeterministicSessionManager(t, "http://127.0.0.1:27123", "instance_a")
 		issued, err := manager.IssueSession(Principal{Kind: PrincipalWebLocal}, "/views/inbox")
 		require.NoError(t, err)
-		ctx := withWebSessionRevalidation(context.Background(), manager, issued.Cookie, issued.Session)
+		ctx := withWebSessionRevalidation(t.Context(), manager, issued.Cookie, issued.Session)
 		manager.Logout(issued.Session)
 		assertStreamRejectsInvalidatedSession(ctx, t)
 	})
@@ -611,14 +611,14 @@ func TestBrowserEventStreamRevalidatesSessionAuthority(t *testing.T) {
 		require.NoError(t, err)
 		issued, err := manager.IssueSession(Principal{Kind: PrincipalWebLocal}, "/views/inbox")
 		require.NoError(t, err)
-		ctx := withWebSessionRevalidation(context.Background(), manager, issued.Cookie, issued.Session)
+		ctx := withWebSessionRevalidation(t.Context(), manager, issued.Cookie, issued.Session)
 		now = now.Add(webSessionTTL)
 		assertStreamRejectsInvalidatedSession(ctx, t)
 	})
 
 	t.Run("token revocation", func(t *testing.T) {
 		store := openAuthTestDB(t)
-		token, _, err := store.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+		token, _, err := store.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 			PlaintextToken: "user-a-token",
 			Actor:          "user-a",
 			AdminActor:     db.BootstrapActor,
@@ -633,10 +633,10 @@ func TestBrowserEventStreamRevalidatesSessionAuthority(t *testing.T) {
 			DB:         store,
 		})
 		require.NoError(t, err)
-		issued, err := manager.Login(context.Background(), "user-a-token", "/views/inbox")
+		issued, err := manager.Login(t.Context(), "user-a-token", "/views/inbox")
 		require.NoError(t, err)
-		ctx := withWebSessionRevalidation(context.Background(), manager, issued.Cookie, issued.Session)
-		_, _, err = store.RevokeAPIToken(context.Background(), token.ID, db.BootstrapActor)
+		ctx := withWebSessionRevalidation(t.Context(), manager, issued.Cookie, issued.Session)
+		_, _, err = store.RevokeAPIToken(t.Context(), token.ID, db.BootstrapActor)
 		require.NoError(t, err)
 		assertStreamRejectsInvalidatedSession(ctx, t)
 	})
@@ -661,7 +661,7 @@ func TestBrowserSessionAuthenticatedResponsesArePrivate(t *testing.T) {
 		Kind: ListenerBrowser, Origin: "https://daemon.example", RequireBrowserSession: true,
 	}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 
-	request := httptest.NewRequest(http.MethodGet, "https://daemon.example/api/v1/ui/snapshot", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://daemon.example/api/v1/ui/snapshot", nil)
 	request.AddCookie(manager.Cookie(issued.Cookie))
 	request.Header.Set(webSessionHeader, issued.Session)
 	response := httptest.NewRecorder()
@@ -687,18 +687,18 @@ func TestBrowserSessionReadonlyIgnoresAmbientCookieButRejectsSessionHeader(t *te
 		Kind: ListenerBrowser, Origin: "http://127.0.0.1:29123", RequireBrowserSession: true,
 	}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 
-	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:29123/api/v1/ui/snapshot", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://127.0.0.1:29123/api/v1/ui/snapshot", nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	assert.Equal(t, http.StatusNoContent, response.Code)
 
-	request = httptest.NewRequest(http.MethodGet, "http://127.0.0.1:29123/api/v1/ui/snapshot", nil)
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://127.0.0.1:29123/api/v1/ui/snapshot", nil)
 	request.AddCookie(manager.Cookie(issued.Cookie))
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	assert.Equal(t, http.StatusNoContent, response.Code)
 
-	request = httptest.NewRequest(http.MethodGet, "http://127.0.0.1:29123/api/v1/ui/snapshot", nil)
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://127.0.0.1:29123/api/v1/ui/snapshot", nil)
 	request.Header.Set(webSessionHeader, issued.Session)
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -747,7 +747,7 @@ func TestLoginListenersPreserveOrdinaryBearerAuthority(t *testing.T) {
 				require.NoError(t, err)
 				for _, path := range []string{"/api/v1/projects", "/api/v1/federation/enrollments"} {
 					for _, method := range []string{http.MethodGet, http.MethodPost} {
-						request := httptest.NewRequest(method, manager.Origin()+path, strings.NewReader(`{}`))
+						request := httptest.NewRequestWithContext(t.Context(), method, manager.Origin()+path, strings.NewReader(`{}`))
 						request.Header.Set("Content-Type", "application/json")
 						request.Header.Set("Authorization", "Bearer configured-token")
 						response := httptest.NewRecorder()
@@ -762,7 +762,7 @@ func TestLoginListenersPreserveOrdinaryBearerAuthority(t *testing.T) {
 					"csrf":    {webCSRFHeader: "missing-csrf"},
 					"fetch":   {"Sec-Fetch-Site": "cross-site"},
 				} {
-					request := httptest.NewRequest(http.MethodPost, manager.Origin()+"/api/v1/federation/enrollments", strings.NewReader(`{}`))
+					request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, manager.Origin()+"/api/v1/federation/enrollments", strings.NewReader(`{}`))
 					request.Header.Set("Authorization", "Bearer configured-token")
 					request.Header.Set("Content-Type", "application/json")
 					for key, value := range headers {
@@ -772,7 +772,7 @@ func TestLoginListenersPreserveOrdinaryBearerAuthority(t *testing.T) {
 					handler.ServeHTTP(response, request)
 					assert.NotEqual(t, http.StatusNoContent, response.Code, name)
 				}
-				request := httptest.NewRequest(http.MethodPost, "https://attacker.example/api/v1/federation/enrollments", strings.NewReader(`{}`))
+				request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://attacker.example/api/v1/federation/enrollments", strings.NewReader(`{}`))
 				request.Header.Set("Authorization", "Bearer configured-token")
 				request.Header.Set("Content-Type", "application/json")
 				response := httptest.NewRecorder()
@@ -788,7 +788,7 @@ func TestKeylessBrowserListenerDoesNotGrantAuthorityForArbitraryBearer(t *testin
 	policy := ListenerPolicy{Kind: ListenerBrowser, Origin: manager.Origin(), RequireBrowserSession: true}
 	handler, err := ApplyListenerPolicy(requireBrowserSession(manager, policy, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })), policy)
 	require.NoError(t, err)
-	request := httptest.NewRequest(http.MethodPost, manager.Origin()+"/api/v1/federation/enrollments", strings.NewReader(`{}`))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, manager.Origin()+"/api/v1/federation/enrollments", strings.NewReader(`{}`))
 	request.Header.Set("Authorization", "Bearer arbitrary-token")
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
@@ -810,7 +810,7 @@ func TestBrowserAccessAdministrationBoundary(t *testing.T) {
 			manager.writable = false
 			require.False(t, manager.CanAdministerAccess(principal))
 			handler := requireBrowserSession(manager, ListenerPolicy{Kind: ListenerBrowser, Origin: manager.Origin(), RequireBrowserSession: true}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
-			request := httptest.NewRequest(http.MethodPost, manager.Origin()+"/api/v1/teams", strings.NewReader(`{"name":"blocked"}`))
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, manager.Origin()+"/api/v1/teams", strings.NewReader(`{"name":"blocked"}`))
 			request.AddCookie(manager.Cookie(issued.Cookie))
 			request.Header.Set(webSessionHeader, issued.Session)
 			request.Header.Set(webCSRFHeader, issued.CSRF)

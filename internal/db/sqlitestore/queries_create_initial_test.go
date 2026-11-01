@@ -1,7 +1,6 @@
 package sqlitestore_test
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -301,7 +300,7 @@ func TestCreateIssue_WithAllInitialState(t *testing.T) {
 func TestCreateIssue_AssignsLength4WhenUnique(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p := createProject(ctx, t, d, "demo")
 	row, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: p.ID,
@@ -316,7 +315,7 @@ func TestCreateIssue_AssignsLength4WhenUnique(t *testing.T) {
 func TestCreateIssue_ExtendsToLength5OnCollision(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p := createProject(ctx, t, d, "demo")
 	_, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: p.ID,
@@ -339,7 +338,7 @@ func TestCreateIssue_ExtendsToLength5OnCollision(t *testing.T) {
 func TestCreateIssue_ExtendsToLength6OnDoubleCollision(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p := createProject(ctx, t, d, "demo")
 	uids := []string{
 		"01HZNQ7VFPK1XGD8R5MABCD4EX",

@@ -1,7 +1,6 @@
 package vector_test
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -17,7 +16,7 @@ func TestPostgresReconcilerLeaseFencesWorkAfterSessionLoss(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires pgvector testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(ctx, dsn)

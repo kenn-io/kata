@@ -30,7 +30,7 @@ func TestIssueStatusMigrationUpgradesVersion29(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires PostgreSQL")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	const schema = "status_upgrade"

@@ -57,7 +57,7 @@ func TestEmbeddingCredentialStartupAndReload(t *testing.T) {
 	if !woke {
 		t.Fatal("reload did not wake backlog")
 	}
-	if _, err := c.Embed(context.Background(), []string{"query"}); err != nil {
+	if _, err := c.Embed(t.Context(), []string{"query"}); err != nil {
 		t.Fatal(err)
 	}
 	if calls.Load() != 1 || c.CredentialHealth().Credential != "ok" {
@@ -97,7 +97,7 @@ func TestEmbeddingCredentialReloadRetriesRejectedBacklog(t *testing.T) {
 	require.NoError(t, err)
 	defer func() {
 		cancel()
-		require.True(t, workers.Wait(context.Background()))
+		require.True(t, workers.Wait(t.Context()))
 		require.NoError(t, idx.Close())
 	}()
 	select {

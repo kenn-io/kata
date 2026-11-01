@@ -17,7 +17,7 @@ import (
 // expiry instant.
 func newTimedAssignmentStore(t *testing.T) (*Store, context.Context, db.Project, db.Issue, time.Time) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	d, err := Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"reflect"
 	"testing"
 
@@ -45,7 +44,7 @@ func TestBuildLinksDeltaAlwaysYieldsADeltaForEverySetLinkFlag(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			delta, err := buildLinksDelta(
-				context.Background(), linkDeltaTestCommand(t, tt.changedFlag), "", "example-project", 1,
+				t.Context(), linkDeltaTestCommand(t, tt.changedFlag), "", "example-project", 1,
 				tt.parentRef, tt.blocks, tt.blockedBy, tt.related,
 				tt.removeParentRef, tt.removeBlocks, tt.removeBlockedBy, tt.removeRelated,
 			)

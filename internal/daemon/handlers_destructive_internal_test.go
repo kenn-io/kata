@@ -11,7 +11,7 @@ func TestRefreshFederationBaselineAfterPurgeIgnoresCanceledRequestContext(t *tes
 	store := openClaimGateHelperDB(t)
 	project, _ := createClaimGateHelperIssue(t, store)
 	enableClaimGateHelperHub(t, store, project.ID)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	err := refreshFederationBaselineAfterPurge(ctx, ServerConfig{DB: store}, project.ID, "agent")

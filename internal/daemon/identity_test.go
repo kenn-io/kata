@@ -39,7 +39,7 @@ func TestPrincipalKind_TrustedProxyConstants(t *testing.T) {
 // request-supplied actor string. The trusted-proxy header value is set by
 // the listener-trust middleware and must win over client-claimed actors.
 func TestActorFor_TrustedProxy(t *testing.T) {
-	ctx := WithPrincipal(context.Background(), Principal{
+	ctx := WithPrincipal(t.Context(), Principal{
 		Kind:  PrincipalTrustedProxy,
 		Actor: "proxy-user",
 	})
@@ -52,7 +52,7 @@ func TestActorFor_TrustedProxy(t *testing.T) {
 // actor header. The error envelope must be 400 actor_header_required so
 // clients can distinguish "trusted but unattributed" from generic 403s.
 func TestEnsureAttributedWriteAllowed_TrustedProxyAbsent(t *testing.T) {
-	ctx := WithPrincipal(context.Background(), Principal{
+	ctx := WithPrincipal(t.Context(), Principal{
 		Kind: PrincipalTrustedProxyAbsent,
 	})
 	err := ensureAttributedWriteAllowed(ctx)
@@ -68,7 +68,7 @@ func TestEnsureAttributedWriteAllowed_TrustedProxyAbsent(t *testing.T) {
 // path: when the trusted-proxy middleware sets a PrincipalTrustedProxy with
 // an Actor value, attributed writes proceed.
 func TestEnsureAttributedWriteAllowed_TrustedProxyAllowed(t *testing.T) {
-	ctx := WithPrincipal(context.Background(), Principal{
+	ctx := WithPrincipal(t.Context(), Principal{
 		Kind:  PrincipalTrustedProxy,
 		Actor: "proxy-user",
 	})
@@ -77,7 +77,7 @@ func TestEnsureAttributedWriteAllowed_TrustedProxyAllowed(t *testing.T) {
 }
 
 func TestPrincipalWebLocalAllowsOrdinaryWritesButNotTokenAdministration(t *testing.T) {
-	ctx := WithPrincipal(context.Background(), Principal{Kind: PrincipalWebLocal})
+	ctx := WithPrincipal(t.Context(), Principal{Kind: PrincipalWebLocal})
 	require.NoError(t, ensureAttributedWriteAllowed(ctx))
 
 	err := ensureTokenAdminAllowed(ctx)
@@ -139,7 +139,7 @@ func TestTUIBypassAllowed_RequiresOwnerLocalTransport(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodPost, "/api/v1/actions/close", nil)
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/actions/close", nil)
 			request.RemoteAddr = tt.remoteAddr
 			if tt.addr != nil {
 				request = request.WithContext(context.WithValue(request.Context(), http.LocalAddrContextKey, tt.addr))
@@ -159,15 +159,15 @@ func TestTUIBypassAllowed_RequiresOwnerLocalTransport(t *testing.T) {
 }
 
 func TestCloseRequiresEvidenceMatchesEffectiveTUIBypass(t *testing.T) {
-	ownerLocal := context.WithValue(context.Background(), ownerLocalTransportContextKey{}, true)
+	ownerLocal := context.WithValue(t.Context(), ownerLocalTransportContextKey{}, true)
 	require.False(t, closeRequiresEvidence(ownerLocal))
-	require.True(t, closeRequiresEvidence(context.Background()))
+	require.True(t, closeRequiresEvidence(t.Context()))
 	require.True(t, closeRequiresEvidence(WithPrincipal(ownerLocal, Principal{Kind: PrincipalDBToken})))
-	require.True(t, closeRequiresEvidence(WithPrincipal(context.Background(), Principal{Kind: PrincipalStaticToken})))
+	require.True(t, closeRequiresEvidence(WithPrincipal(t.Context(), Principal{Kind: PrincipalStaticToken})))
 }
 
 func TestCapabilityCloseRequirementDoesNotDependOnPrincipal(t *testing.T) {
-	remote := context.Background()
+	remote := t.Context()
 	ownerLocal := context.WithValue(remote, ownerLocalTransportContextKey{}, true)
 
 	require.True(t, instanceAuthInfo(remote, ServerConfig{}).CloseRequiresEvidence)

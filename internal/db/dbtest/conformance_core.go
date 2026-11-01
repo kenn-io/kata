@@ -19,7 +19,7 @@ import (
 
 func checkProjectAliases(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	first, err := store.CreateProject(ctx, "first-alias-project")
 	if err != nil {
 		return fmt.Errorf("create first alias project: %w", err)
@@ -85,7 +85,7 @@ func checkProjectAliases(t *testing.T, store db.Storage) error {
 
 func checkLifecycle(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	instanceUID := store.InstanceUID()
 	if !uid.Valid(instanceUID) {
@@ -118,7 +118,7 @@ func checkLifecycle(t *testing.T, store db.Storage) error {
 
 func checkInstanceCreatedAt(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	createdAt, err := store.InstanceCreatedAt(ctx)
 	if err != nil {
@@ -190,7 +190,7 @@ func checkInstanceCreatedAt(t *testing.T, store db.Storage) error {
 
 func checkProjects(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, err := store.CreateProject(ctx, db.SystemProjectName)
 	assert.Error(t, err)
@@ -284,7 +284,7 @@ func checkProjects(t *testing.T, store db.Storage) error {
 
 func checkIssueEventAtomicity(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "event-project")
 	if err != nil {
 		return fmt.Errorf("create project: %w", err)
@@ -379,7 +379,7 @@ func checkIssueEventAtomicity(t *testing.T, store db.Storage) error {
 
 func checkIdempotency(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "idempotency-project")
 	if err != nil {
 		return fmt.Errorf("create project: %w", err)
@@ -569,7 +569,7 @@ func checkIdempotency(t *testing.T, store db.Storage) error {
 
 func checkConcurrentUniqueness(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	start := make(chan struct{})
 	results := make(chan error, 2)
 	var ready sync.WaitGroup
@@ -612,7 +612,7 @@ func checkConcurrentUniqueness(t *testing.T, store db.Storage) error {
 
 func checkPurgeReset(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "purge-project")
 	if err != nil {
 		return fmt.Errorf("create project: %w", err)
@@ -659,7 +659,7 @@ func checkPurgeReset(t *testing.T, store db.Storage) error {
 
 func checkProjectLifecycle(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "lifecycle-project")
 	if err != nil {
 		return fmt.Errorf("create lifecycle project: %w", err)
@@ -769,7 +769,7 @@ func checkProjectLifecycle(t *testing.T, store db.Storage) error {
 
 func checkIssueLifecycle(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "issue-lifecycle-project")
 	if err != nil {
 		return fmt.Errorf("create project: %w", err)
@@ -930,7 +930,7 @@ func checkIssueLifecycle(t *testing.T, store db.Storage) error {
 
 func checkEventQueries(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "event-query-project")
 	if err != nil {
 		return fmt.Errorf("create project: %w", err)
@@ -986,7 +986,7 @@ func checkEventQueries(t *testing.T, store db.Storage) error {
 
 func checkIssueCreateEnvelope(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "create-envelope-project")
 	if err != nil {
 		return fmt.Errorf("create project: %w", err)
@@ -1123,7 +1123,7 @@ func checkIssueCreateEnvelope(t *testing.T, store db.Storage) error {
 
 func checkConcurrentIssueIdentity(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "concurrent-identity-project")
 	if err != nil {
 		return fmt.Errorf("create project: %w", err)
@@ -1181,7 +1181,7 @@ func checkConcurrentIssueIdentity(t *testing.T, store db.Storage) error {
 
 func checkConcurrentOwnerClaim(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "concurrent-owner-project")
 	if err != nil {
 		return fmt.Errorf("create project: %w", err)
@@ -1221,7 +1221,7 @@ func checkConcurrentOwnerClaim(t *testing.T, store db.Storage) error {
 
 func checkConcurrentGuardedOwnerClaim(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "concurrent-guarded-owner-project")
 	if err != nil {
 		return fmt.Errorf("create project: %w", err)
@@ -1267,7 +1267,7 @@ func checkConcurrentGuardedOwnerClaim(t *testing.T, store db.Storage) error {
 
 func checkTimedAssignmentOwnerMutations(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "timed-owner-mutations-project")
 	if err != nil {
 		return fmt.Errorf("create project: %w", err)
@@ -1357,7 +1357,7 @@ func checkTimedAssignmentOwnerMutations(t *testing.T, store db.Storage) error {
 
 func checkBoundedAssignmentExpiry(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "assignment-expiry-project")
 	if err != nil {
 		return fmt.Errorf("create project: %w", err)
@@ -1446,7 +1446,7 @@ func checkBoundedAssignmentExpiry(t *testing.T, store db.Storage) error {
 
 func checkExpectedOwnerUnassign(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "expected-owner-project")
 	if err != nil {
 		return fmt.Errorf("create project: %w", err)
@@ -1488,7 +1488,7 @@ func checkExpectedOwnerUnassign(t *testing.T, store db.Storage) error {
 
 func checkConcurrentExpectedOwnerUnassign(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "concurrent-expected-owner-project")
 	if err != nil {
 		return fmt.Errorf("create project: %w", err)

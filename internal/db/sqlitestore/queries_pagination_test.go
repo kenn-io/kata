@@ -1,7 +1,6 @@
 package sqlitestore_test
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -12,7 +11,7 @@ import (
 
 func TestListIssuesPaginationOrdersStoredOffsetTimestampsByInstant(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openTestDB(t)
 	project, err := store.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)

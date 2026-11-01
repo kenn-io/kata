@@ -58,7 +58,7 @@ func TestNotificationDiscoveryRechecksPeerProjectsInsideTransaction(t *testing.T
 		f.server = httptest.NewServer(server.Handler())
 		t.Cleanup(f.server.Close)
 		revokeMember := func() error {
-			_, err := store.SetTeamMembership(context.Background(), f.team.UID, "member", false, "admin")
+			_, err := store.SetTeamMembership(t.Context(), f.team.UID, "member", false, "admin")
 			return err
 		}
 

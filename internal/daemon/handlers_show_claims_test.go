@@ -68,7 +68,7 @@ func TestShowIssueClaimHubReturnsWhileSQLiteWriterIsHeld(t *testing.T) {
 	conn, err := hub.DB.Conn(t.Context())
 	require.NoError(t, err)
 	defer func() {
-		_, rollbackErr := conn.ExecContext(context.Background(), "ROLLBACK")
+		_, rollbackErr := conn.ExecContext(t.Context(), "ROLLBACK")
 		assert.NoError(t, rollbackErr)
 		assert.NoError(t, conn.Close())
 	}()
@@ -84,7 +84,7 @@ func TestShowIssueClaimHubReturnsWhileSQLiteWriterIsHeld(t *testing.T) {
 }
 
 func TestShowIssueClaimInsecureReadonlyOmitsUnauthenticatedClaimHydration(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t, testenv.WithInsecureReadonly())
 	project, issue := createClaimHubIssue(t, hub)
 	_, err := hub.DB.AcquireClaim(ctx, db.AcquireClaimParams{
@@ -163,7 +163,7 @@ func TestShowIssueClaimIncludesTimedClaimExpiresAt(t *testing.T) {
 }
 
 func TestShowIssueClaimKeepsViolationsUntilTimedClaimIsSwept(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	project, issue := createClaimHubIssue(t, hub)
 	now := time.Now().UTC()
@@ -227,7 +227,7 @@ func TestShowIssueClaimKeepsViolationsUntilTimedClaimIsSwept(t *testing.T) {
 }
 
 func TestShowIssueClaimHubDefersTimedExpiryToExplicitStatus(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	project, issue := createClaimHubIssue(t, hub)
 	now := time.Now().UTC()
@@ -279,7 +279,7 @@ func TestShowIssueClaimHubDefersTimedExpiryToExplicitStatus(t *testing.T) {
 }
 
 func TestShowIssueClaimSpokeFallbackDoesNotExpireCachedTimedClaim(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, issue := createShowClaimSpokeProject(t, spoke)
 	cachedAt := time.Now().UTC().Add(-2 * time.Minute)
@@ -318,7 +318,7 @@ func TestShowIssueClaimSpokeFallbackDoesNotExpireCachedTimedClaim(t *testing.T) 
 }
 
 func TestShowIssueClaimIncludesPendingClaimsNewestFirst(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	project, issue := createClaimHubIssue(t, hub)
 	oldestAt := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
@@ -362,7 +362,7 @@ func TestShowIssueClaimPendingClaimsUseAPIShape(t *testing.T) {
 }
 
 func TestShowIssueClaimNonFederatedUnclaimedIssueOmitsClaimFields(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t)
 	project, err := env.DB.CreateProject(ctx, "plain")
 	require.NoError(t, err)
@@ -383,7 +383,7 @@ func TestShowIssueClaimNonFederatedUnclaimedIssueOmitsClaimFields(t *testing.T) 
 }
 
 func TestShowIssueClaimNonFederatedShowDoesNotExpireFederatedClaims(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t)
 	hubProject, hubIssue := createClaimHubIssue(t, env)
 	acquiredAt := time.Now().UTC().Add(-2 * time.Minute)
@@ -424,7 +424,7 @@ func TestShowIssueClaimNonFederatedShowDoesNotExpireFederatedClaims(t *testing.T
 }
 
 func TestShowIssueClaimIncludeDeletedSkipsClaimHydration(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t)
 	project, issue := createClaimHubIssue(t, env)
 	_, err := env.DB.AcquireClaim(ctx, db.AcquireClaimParams{
@@ -453,7 +453,7 @@ func TestShowIssueClaimIncludeDeletedSkipsClaimHydration(t *testing.T) {
 }
 
 func TestShowIssueClaimRefreshCallsHubAndReturnsFreshClaim(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, issue := createShowClaimSpokeProject(t, spoke)
 	hubNow := time.Date(2026, 5, 23, 15, 0, 0, 0, time.UTC)
@@ -491,7 +491,7 @@ func TestShowIssueClaimRefreshCallsHubAndReturnsFreshClaim(t *testing.T) {
 }
 
 func TestShowIssueClaimRefreshHubUnreachableFallsBackToCachedClaimAndPending(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, issue := createShowClaimSpokeProject(t, spoke)
 	cachedAt := time.Date(2026, 5, 23, 13, 0, 0, 0, time.UTC)
@@ -552,7 +552,7 @@ func TestShowIssueClaimSpokeBoundsRemoteRefreshBody(t *testing.T) {
 }
 
 func TestShowIssueClaimSpokeTimeoutSuppressesImmediateRetryWithoutPendingClaim(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	daemon.SetShowClaimStatusRefreshTimeoutForTest(t, 100*time.Millisecond) //nolint:kennlint // deadlinetest: the hub withholds its response until cancellation; the test asserts cached claim state after refresh timeout
 	spoke := testenv.New(t)
 	project, issue := createShowClaimSpokeProject(t, spoke)
@@ -613,7 +613,7 @@ func TestShowIssueClaimRefreshInternalServerErrorWithoutPendingDoesNotHotLoop(t 
 }
 
 func TestShowIssueClaimRefreshTransportFailureWithoutPendingDoesNotHotLoop(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, issue := createShowClaimSpokeProject(t, spoke)
 	cachedAt := time.Date(2026, 5, 23, 14, 0, 0, 0, time.UTC)
@@ -735,7 +735,7 @@ func newShowClaimTimeoutSpoke(
 	t *testing.T,
 ) (*testenv.Env, db.Project, db.Issue, db.PendingClaimRequest) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	daemon.SetShowClaimStatusRefreshTimeoutForTest(t, 100*time.Millisecond) //nolint:kennlint // deadlinetest: the hub withholds its response until cancellation; the test asserts cached claim state after refresh timeout
 	spoke := testenv.New(t)
 	project, issue := createShowClaimSpokeProject(t, spoke)
@@ -781,7 +781,7 @@ func testShowIssueClaimRefreshStatusErrorDoesNotHotLoop(t *testing.T, status int
 
 func testShowIssueClaimRefreshStatusErrorWithoutPendingDoesNotHotLoop(t *testing.T, status int) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	spoke := testenv.New(t)
 	project, issue := createShowClaimSpokeProject(t, spoke)
 	cachedAt := time.Date(2026, 5, 23, 14, 0, 0, 0, time.UTC)
@@ -821,7 +821,7 @@ func enqueueShowPendingClaim(
 	at time.Time,
 ) db.PendingClaimRequest {
 	t.Helper()
-	pending, err := store.EnqueuePendingClaim(context.Background(), db.PendingClaimParams{
+	pending, err := store.EnqueuePendingClaim(t.Context(), db.PendingClaimParams{
 		ProjectID: projectID,
 		IssueRef:  ref,
 		Principal: db.ClaimPrincipal{
@@ -839,7 +839,7 @@ func enqueueShowPendingClaim(
 func assertShowLiveClaimCount(t *testing.T, store *sqlitestore.Store, issueUID string, want int) {
 	t.Helper()
 	var got int
-	require.NoError(t, store.QueryRow(
+	require.NoError(t, store.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM issue_claims WHERE issue_uid = ? AND released_at IS NULL`, issueUID,
 	).Scan(&got))
 	assert.Equal(t, want, got)
@@ -848,7 +848,7 @@ func assertShowLiveClaimCount(t *testing.T, store *sqlitestore.Store, issueUID s
 func assertShowEventCount(t *testing.T, store *sqlitestore.Store, eventType string, want int) {
 	t.Helper()
 	var got int
-	require.NoError(t, store.QueryRow(
+	require.NoError(t, store.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM events WHERE type = ?`, eventType,
 	).Scan(&got))
 	assert.Equal(t, want, got)
@@ -856,7 +856,7 @@ func assertShowEventCount(t *testing.T, store *sqlitestore.Store, eventType stri
 
 func createShowClaimSpokeProject(t *testing.T, env *testenv.Env) (db.Project, db.Issue) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "spoke")
 	require.NoError(t, err)
 	issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
@@ -877,7 +877,7 @@ func writeShowClaimSpokeBinding(
 	capabilities string,
 ) {
 	t.Helper()
-	_, err := env.DB.UpsertFederationBinding(context.Background(), db.FederationBinding{
+	_, err := env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{
 		ProjectID:     project.ID,
 		Role:          db.FederationRoleSpoke,
 		HubURL:        hubURL,

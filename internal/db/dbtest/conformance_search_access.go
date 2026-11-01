@@ -13,7 +13,7 @@ import (
 // project outside the caller's project boundary, with filters bound before
 // and after that boundary so every placeholder lands on its own value.
 func checkRestrictedSearchReads(t *testing.T, store db.Storage) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	visible, err := store.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
 	hidden, err := store.CreateProject(ctx, "hub-project")

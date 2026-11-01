@@ -74,7 +74,9 @@ enabled = true
 			case <-time.After(10 * time.Second):
 				t.Fatal("native ingress was not advertised")
 			}
-			resp, err := http.Get("http://" + address + "/api/v1/projects")
+			req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+address+"/api/v1/projects", nil)
+			require.NoError(t, reqErr)
+			resp, err := http.DefaultClient.Do(req)
 			require.NoError(t, err)
 			_ = resp.Body.Close()
 			require.Equal(t, http.StatusNotFound, resp.StatusCode)

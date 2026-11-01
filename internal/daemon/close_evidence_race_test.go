@@ -44,11 +44,11 @@ func TestCloseRejectsEvidenceTargetMovedOutOfScope(t *testing.T) {
 	original, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: source.ID, Title: "original", Author: "tester"})
 	require.NoError(t, err)
 	race.beforeClose = func() {
-		_, err := env.DB.MoveIssueProject(context.Background(), db.MoveIssueProjectIn{IssueID: original.ID, FromProjectID: source.ID, ToProjectID: excluded.ID, IfMatchRev: original.Revision, Actor: "tester"})
+		_, err := env.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: original.ID, FromProjectID: source.ID, ToProjectID: excluded.ID, IfMatchRev: original.Revision, Actor: "tester"})
 		require.NoError(t, err)
 	}
 	body := fmt.Sprintf(`{"actor":"tester","reason":"duplicate","message":"Same report as the original issue.","evidence":[{"type":"duplicate-of","issue_ref":%q}]}`, original.ShortID)
-	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/close", env.URL, source.ID, closing.ShortID), strings.NewReader(body))
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/close", env.URL, source.ID, closing.ShortID), strings.NewReader(body))
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer tok")
 	req.Header.Set("Content-Type", "application/json")

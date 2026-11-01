@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"fmt"
@@ -60,7 +59,7 @@ func TestUnscopedNotificationEventStillVisible(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	visible, err := notificationEventStillVisible(context.Background(), fixture.store, result.Event)
+	visible, err := notificationEventStillVisible(t.Context(), fixture.store, result.Event)
 	require.NoError(t, err)
 	require.True(t, visible, "unscoped streams keep notification events visible")
 }

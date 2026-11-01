@@ -3,6 +3,7 @@
 package daemonruntime_test
 
 import (
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -30,7 +31,8 @@ func TestOwnerLockForeignHelperProcess(t *testing.T) {
 // starter takes the store lock before the next poll. The lock never looks
 // free, but the refusal must not blame a daemon whose record is gone.
 func TestRefuseForeignStoreOwnerRechecksRecordBeforeRefusing(t *testing.T) {
-	child := exec.Command(os.Args[0], "-test.run=^TestOwnerLockForeignHelperProcess$") //nolint:gosec // test binary
+	// t.Cleanup owns this process; t.Context() would kill it before that runs.
+	child := exec.CommandContext(context.WithoutCancel(t.Context()), os.Args[0], "-test.run=^TestOwnerLockForeignHelperProcess$") //nolint:gosec // test binary
 	child.Env = append(os.Environ(), "KATA_OWNER_PIDNS_HELPER=1")
 	child.SysProcAttr = &syscall.SysProcAttr{
 		Cloneflags:  syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID,

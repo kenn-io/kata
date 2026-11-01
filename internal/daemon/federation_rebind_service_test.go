@@ -80,7 +80,7 @@ func TestRebindFederationReplicaRejectsTargetBeforeCredentialRead(t *testing.T) 
 			fetchCalls := 0
 
 			_, err := daemon.RebindFederationReplica(
-				context.Background(), store, credentials,
+				t.Context(), store, credentials,
 				daemon.RebindFederationReplicaParams{
 					ProjectID: project.ID, HubCatalog: tc.catalog,
 					FetchMetadata: func(context.Context, string, string, int64) (api.ProjectFederationBody, error) {
@@ -114,7 +114,7 @@ func TestRebindFederationReplicaWaitsForOldEndpointSync(t *testing.T) {
 	credentials.put(project.UID, credential)
 	syncDone := make(chan error, 1)
 	go func() {
-		syncDone <- federation.SyncFederationOnce(context.Background(), store, binding, credential)
+		syncDone <- federation.SyncFederationOnce(t.Context(), store, binding, credential)
 	}()
 	select {
 	case <-requestStarted:
@@ -125,7 +125,7 @@ func TestRebindFederationReplicaWaitsForOldEndpointSync(t *testing.T) {
 	rebindDone := make(chan error, 1)
 	go func() {
 		_, err := daemon.RebindFederationReplica(
-			context.Background(), store, credentials,
+			t.Context(), store, credentials,
 			daemon.RebindFederationReplicaParams{
 				ProjectID:  project.ID,
 				HubCatalog: config.CatalogDaemonConfig{Name: "primary-hub", URL: rebindTargetURL},
@@ -142,14 +142,14 @@ func TestRebindFederationReplicaWaitsForOldEndpointSync(t *testing.T) {
 		t.Fatalf("rebind completed before the old endpoint sync drained: %v", err)
 	case <-time.After(100 * time.Millisecond): //nolint:kennlint // deadlinetest: absence window; the held old endpoint sync keeps the rebind in its drain wait
 	}
-	currentBinding, err := store.FederationBindingByProject(context.Background(), project.ID)
+	currentBinding, err := store.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, err)
 	assert.Equal(t, oldHub.URL, currentBinding.HubURL)
 
 	close(releaseRequest)
 	require.NoError(t, <-syncDone)
 	require.NoError(t, <-rebindDone)
-	currentBinding, err = store.FederationBindingByProject(context.Background(), project.ID)
+	currentBinding, err = store.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, err)
 	assert.Equal(t, rebindTargetURL, currentBinding.HubURL)
 }
@@ -169,7 +169,7 @@ func TestRebindFederationReplicaWaitsForImmediateClaimForwardCommit(t *testing.T
 		{name: "claim gate refresh", method: http.MethodPatch, body: []byte(`{"actor":"sync-agent","title":"updated title"}`)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			commitStarted := make(chan struct{})
 			commitRelease := make(chan struct{})
 			var releaseOnce sync.Once
@@ -346,7 +346,7 @@ func TestRebindFederationReplicaDistinguishesReverseProxyPaths(t *testing.T) {
 	credentials.put(project.UID, rebindCredential(sourceURL, false, false))
 
 	result, err := daemon.RebindFederationReplica(
-		context.Background(), store, credentials,
+		t.Context(), store, credentials,
 		daemon.RebindFederationReplicaParams{
 			ProjectID:  project.ID,
 			HubCatalog: config.CatalogDaemonConfig{Name: "primary-hub", URL: targetURL},
@@ -363,7 +363,7 @@ func TestRebindFederationReplicaDistinguishesReverseProxyPaths(t *testing.T) {
 
 func TestRebindFederationReplicaConvergesCanonicalTargetFromRawDefaultPort(t *testing.T) {
 	const equivalentTargetURL = "https://hub.example:443/kata"
-	ctx := context.Background()
+	ctx := t.Context()
 	store, project, binding := prepareFederationRebind(t, rebindTargetURL)
 	binding.HubURL = equivalentTargetURL
 	binding.AllowInsecure = false
@@ -418,7 +418,7 @@ func TestRebindFederationReplicaConvergesEveryDurableState(t *testing.T) {
 			fetchCalls := 0
 
 			result, err := daemon.RebindFederationReplica(
-				context.Background(), store, credentials,
+				t.Context(), store, credentials,
 				daemon.RebindFederationReplicaParams{
 					ProjectID: project.ID,
 					HubCatalog: config.CatalogDaemonConfig{ //nolint:gosec // contains a non-secret test sentinel
@@ -445,7 +445,7 @@ func TestRebindFederationReplicaConvergesEveryDurableState(t *testing.T) {
 			assert.Equal(t, wantPreviousURL, result.PreviousHubURL)
 			assert.Equal(t, 1, fetchCalls)
 			storedCredential, found, readErr := credentials.FederationCredential(
-				context.Background(), project.UID,
+				t.Context(), project.UID,
 			)
 			require.NoError(t, readErr)
 			require.True(t, found)
@@ -453,7 +453,7 @@ func TestRebindFederationReplicaConvergesEveryDurableState(t *testing.T) {
 			wantCredential.HubURL = rebindTargetURL
 			wantCredential.AllowInsecure = false
 			assert.Equal(t, wantCredential, storedCredential)
-			storedBinding, readErr := store.FederationBindingByProject(context.Background(), project.ID)
+			storedBinding, readErr := store.FederationBindingByProject(t.Context(), project.ID)
 			require.NoError(t, readErr)
 			assert.Equal(t, rebindTargetURL, storedBinding.HubURL)
 			assert.False(t, storedBinding.AllowInsecure)
@@ -467,7 +467,7 @@ func TestRebindFederationReplicaConvergesEveryDurableState(t *testing.T) {
 }
 
 func TestRebindFederationReplicaConvergesLegacyCredentialOnlyInsecureState(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, project, binding := prepareFederationRebind(t, rebindSourceURL)
 	binding.AllowInsecure = false
 	_, err := store.UpsertFederationBinding(ctx, binding)
@@ -514,7 +514,7 @@ func TestRebindFederationReplicaRemoteValidationFailureLeavesLocalStateUnchanged
 			credentials.put(project.UID, originalCredential)
 
 			_, err := daemon.RebindFederationReplica(
-				context.Background(), store, credentials,
+				t.Context(), store, credentials,
 				daemon.RebindFederationReplicaParams{
 					ProjectID:  project.ID,
 					HubCatalog: config.CatalogDaemonConfig{Name: "primary-hub", URL: rebindTargetURL},
@@ -525,11 +525,11 @@ func TestRebindFederationReplicaRemoteValidationFailureLeavesLocalStateUnchanged
 			)
 
 			require.Error(t, err)
-			storedCredential, found, readErr := credentials.FederationCredential(context.Background(), project.UID)
+			storedCredential, found, readErr := credentials.FederationCredential(t.Context(), project.UID)
 			require.NoError(t, readErr)
 			require.True(t, found)
 			assert.Equal(t, originalCredential, storedCredential)
-			storedBinding, readErr := store.FederationBindingByProject(context.Background(), project.ID)
+			storedBinding, readErr := store.FederationBindingByProject(t.Context(), project.ID)
 			require.NoError(t, readErr)
 			assert.Equal(t, originalBinding, storedBinding)
 		})
@@ -549,22 +549,22 @@ func TestRebindFederationReplicaResumesAfterBindingWriteFailure(t *testing.T) {
 	}
 
 	_, err := daemon.RebindFederationReplica(
-		context.Background(), rebindFailingStore{Storage: store, err: errors.New("injected binding failure")},
+		t.Context(), rebindFailingStore{Storage: store, err: errors.New("injected binding failure")},
 		credentials, params,
 	)
 	require.ErrorContains(t, err, "injected binding failure")
-	credentialAfterFailure, found, readErr := credentials.FederationCredential(context.Background(), project.UID)
+	credentialAfterFailure, found, readErr := credentials.FederationCredential(t.Context(), project.UID)
 	require.NoError(t, readErr)
 	require.True(t, found)
 	assert.Equal(t, rebindTargetURL, credentialAfterFailure.HubURL)
-	bindingAfterFailure, readErr := store.FederationBindingByProject(context.Background(), project.ID)
+	bindingAfterFailure, readErr := store.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, readErr)
 	assert.Equal(t, rebindSourceURL, bindingAfterFailure.HubURL)
 
-	result, err := daemon.RebindFederationReplica(context.Background(), store, credentials, params)
+	result, err := daemon.RebindFederationReplica(t.Context(), store, credentials, params)
 	require.NoError(t, err)
 	assert.Equal(t, daemon.FederationRebindStateResumed, result.State)
-	converged, readErr := store.FederationBindingByProject(context.Background(), project.ID)
+	converged, readErr := store.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, readErr)
 	assert.Equal(t, rebindTargetURL, converged.HubURL)
 }
@@ -576,7 +576,7 @@ func TestRebindFederationReplicaCredentialFailureLeavesBindingUnchanged(t *testi
 	credentials.replaceErr = errors.New("injected credential failure")
 
 	_, err := daemon.RebindFederationReplica(
-		context.Background(), store, credentials,
+		t.Context(), store, credentials,
 		daemon.RebindFederationReplicaParams{
 			ProjectID:  project.ID,
 			HubCatalog: config.CatalogDaemonConfig{Name: "primary-hub", URL: rebindTargetURL},
@@ -587,7 +587,7 @@ func TestRebindFederationReplicaCredentialFailureLeavesBindingUnchanged(t *testi
 	)
 
 	require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialIO)
-	storedBinding, readErr := store.FederationBindingByProject(context.Background(), project.ID)
+	storedBinding, readErr := store.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, readErr)
 	assert.Equal(t, originalBinding, storedBinding)
 }
@@ -600,7 +600,7 @@ func TestRebindFederationReplicaManagedCatalogMustMatch(t *testing.T) {
 	fetchCalls := 0
 
 	_, err := daemon.RebindFederationReplica(
-		context.Background(), store, credentials,
+		t.Context(), store, credentials,
 		daemon.RebindFederationReplicaParams{
 			ProjectID:  project.ID,
 			HubCatalog: config.CatalogDaemonConfig{Name: "another-hub", URL: rebindTargetURL},
@@ -613,11 +613,11 @@ func TestRebindFederationReplicaManagedCatalogMustMatch(t *testing.T) {
 
 	require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialConflict)
 	assert.Zero(t, fetchCalls)
-	storedCredential, found, readErr := credentials.FederationCredential(context.Background(), project.UID)
+	storedCredential, found, readErr := credentials.FederationCredential(t.Context(), project.UID)
 	require.NoError(t, readErr)
 	require.True(t, found)
 	assert.Equal(t, credential, storedCredential)
-	storedBinding, readErr := store.FederationBindingByProject(context.Background(), project.ID)
+	storedBinding, readErr := store.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, readErr)
 	assert.Equal(t, originalBinding, storedBinding)
 }
@@ -628,7 +628,7 @@ func TestRebindFederationReplicaPreservesCursorAdvancementDuringPreflight(t *tes
 	credentials.put(project.UID, rebindCredential(rebindSourceURL, false, false))
 
 	result, err := daemon.RebindFederationReplica(
-		context.Background(), store, credentials,
+		t.Context(), store, credentials,
 		daemon.RebindFederationReplicaParams{
 			ProjectID:  project.ID,
 			HubCatalog: config.CatalogDaemonConfig{Name: "primary-hub", URL: rebindTargetURL},
@@ -717,7 +717,7 @@ func prepareFederationRebind(
 ) (db.Storage, db.Project, db.FederationBinding) {
 	t.Helper()
 	store := openReplicaServiceStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProjectWithUID(ctx, "spoke-project", replicaHubProjectUID)
 	require.NoError(t, err)
 	bindingTarget := bindingURL == rebindTargetURL

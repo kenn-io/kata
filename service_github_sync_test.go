@@ -25,7 +25,7 @@ func TestServiceGitHubSyncConfigDrivesHandlersAndRunner(t *testing.T) {
 		repositoryCalls: make(chan githubsync.Binding, 2),
 	}
 	var resolved internalconfig.GitHubSyncConfig
-	service, err := newService(context.Background(), Config{
+	service, err := newService(t.Context(), Config{
 		DSN:  filepath.Join(t.TempDir(), "service.db"),
 		Auth: AuthConfig{TrustCallerAuthentication: true},
 		GitHubSync: GitHubSyncConfig{ //nolint:gosec // TokenEnv is an environment variable name, not a credential.
@@ -52,7 +52,7 @@ func TestServiceGitHubSyncConfigDrivesHandlersAndRunner(t *testing.T) {
 		}},
 	}, resolved)
 
-	project, err := service.store.CreateProject(context.Background(), "example-project")
+	project, err := service.store.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
 	server := httptest.NewServer(service.Handler())
 	t.Cleanup(server.Close)
@@ -62,10 +62,10 @@ func TestServiceGitHubSyncConfigDrivesHandlersAndRunner(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	response, err := http.Post(
-		server.URL+"/api/v1/projects/"+fmt.Sprint(project.ID)+"/issue-sync/github/enable",
-		"application/json", bytes.NewReader(body),
-	)
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/api/v1/projects/"+fmt.Sprint(project.ID)+"/issue-sync/github/enable", bytes.NewReader(body))
+	require.NoError(t, reqErr)
+	req.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 	require.Equal(t, http.StatusOK, response.StatusCode)
@@ -79,7 +79,7 @@ func TestServiceGitHubSyncConfigDrivesHandlersAndRunner(t *testing.T) {
 		require.Fail(t, "configured GitHub fetcher was not used by the HTTP handler")
 	}
 
-	runCtx, cancelRun := context.WithCancel(context.Background())
+	runCtx, cancelRun := context.WithCancel(t.Context())
 	runDone := make(chan error, 1)
 	go func() { runDone <- service.Run(runCtx) }()
 	select {
@@ -98,14 +98,14 @@ func TestServiceRunProcessesEnabledGitHubSyncBinding(t *testing.T) {
 	fetcher := &serviceGitHubFetcher{
 		repositoryCalls: make(chan githubsync.Binding, 1),
 	}
-	service, err := newService(context.Background(), Config{
+	service, err := newService(t.Context(), Config{
 		DSN:  filepath.Join(t.TempDir(), "service.db"),
 		Auth: AuthConfig{TrustCallerAuthentication: true},
 	}, serviceDeps{gitHubSyncFetcher: fetcher})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
 
-	project, err := service.store.CreateProject(context.Background(), "example-project")
+	project, err := service.store.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
 	titlePrefix := true
 	bindingConfig, err := githubsync.EncodeConfig(githubsync.Config{
@@ -113,14 +113,14 @@ func TestServiceRunProcessesEnabledGitHubSyncBinding(t *testing.T) {
 		RepoID: 12345, TitlePrefix: &titlePrefix,
 	})
 	require.NoError(t, err)
-	_, err = service.store.UpsertIssueSyncBinding(context.Background(), db.UpsertIssueSyncBindingParams{
+	_, err = service.store.UpsertIssueSyncBinding(t.Context(), db.UpsertIssueSyncBindingParams{
 		ProjectID: project.ID, Provider: "github", SourceKey: "github:R_exampleNode",
 		RemoteID: "R_exampleNode", DisplayName: "example-owner/example-repo",
 		Config: bindingConfig, IntervalSeconds: 300,
 	})
 	require.NoError(t, err)
 
-	runCtx, cancelRun := context.WithCancel(context.Background())
+	runCtx, cancelRun := context.WithCancel(t.Context())
 	runDone := make(chan error, 1)
 	go func() { runDone <- service.Run(runCtx) }()
 
@@ -133,7 +133,7 @@ func TestServiceRunProcessesEnabledGitHubSyncBinding(t *testing.T) {
 		require.Fail(t, "GitHub sync worker did not process the enabled binding")
 	}
 	require.Eventually(t, func() bool {
-		status, statusErr := service.store.IssueSyncStatusByProject(context.Background(), project.ID)
+		status, statusErr := service.store.IssueSyncStatusByProject(t.Context(), project.ID)
 		return statusErr == nil && status.LastSuccessAt != nil
 	}, 2*time.Second, 10*time.Millisecond)
 
@@ -147,7 +147,7 @@ func TestServiceRunProcessesEnabledGitHubSyncBinding(t *testing.T) {
 }
 
 func TestServiceRunShowsGitHubSyncProgressForScheduledRun(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	fetcher := &serviceGitHubProgressFetcher{
 		issuesStarted: make(chan struct{}),
 		releaseIssues: make(chan struct{}),
@@ -194,7 +194,9 @@ func TestServiceRunShowsGitHubSyncProgressForScheduledRun(t *testing.T) {
 		require.FailNow(t, "scheduled GitHub sync did not reach issue fetch")
 	}
 
-	response, err := http.Get(fmt.Sprintf("%s/api/v1/projects/%d/issue-sync/github/status", server.URL, project.ID))
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d/issue-sync/github/status", server.URL, project.ID), nil)
+	require.NoError(t, reqErr)
+	response, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 	require.Equal(t, http.StatusOK, response.StatusCode)

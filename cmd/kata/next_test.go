@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"regexp"
@@ -178,7 +177,7 @@ func TestNext_JSONFullUsesShowEnvelope(t *testing.T) {
 func TestNext_AllFullResolvesQualifiedProject(t *testing.T) {
 	env, _, pid := setupCLIWorkspace(t)
 	peer := createIssue(t, env, pid, "local peer")
-	project, err := env.DB.CreateProject(context.Background(), "example-project")
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
 	target := createNextTestIssue(t, env, project.ID, "global full candidate", new(int64(0)))
 	postJSONOK(t, env.URL+"/api/v1/projects/"+itoa(project.ID)+"/issues/"+target+"/links",

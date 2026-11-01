@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -13,7 +12,7 @@ import (
 
 func checkExternalRootContentOwnership(t *testing.T, store db.Storage, backend Backend) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("issue-sync managed content cannot be externally bound", func(t *testing.T) {
 		project, err := store.CreateProject(ctx, "issue-sync-owned-root")

@@ -77,7 +77,7 @@ func runBuild(t *testing.T, evt db.Event, opts ...buildOption) ([]byte, map[stri
 	for _, opt := range opts {
 		opt(&o)
 	}
-	out, truncated := buildStdinJSON(context.Background(), evt, o.rp, o.ri, o.rc, o.ra, o.log)
+	out, truncated := buildStdinJSON(t.Context(), evt, o.rp, o.ri, o.rc, o.ra, o.log)
 	var got map[string]any
 	if err := json.Unmarshal(out, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)

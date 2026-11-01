@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -32,7 +31,7 @@ func TestIssueScopedExactUIDLookupCannotProbeHiddenExistence(t *testing.T) {
 	require.NoError(t, err)
 
 	expiresAt := time.Now().UTC().Add(time.Hour)
-	_, _, err = env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "worker-token", Actor: "worker-a", AdminActor: db.BootstrapActor,
 		Scope: &db.APITokenScope{
 			Kind: db.APITokenScopeIssueSubtree, ProjectUID: project.UID, RootIssueUID: root.UID,
@@ -85,7 +84,7 @@ func TestIssueScopedExactUIDLookupHidesProjectIdentity(t *testing.T) {
 	root := createScopedHTTPTestIssue(t, env, project.ID, "Root", nil)
 
 	expiresAt := time.Now().UTC().Add(time.Hour)
-	_, _, err = env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "worker-token", Actor: "worker-a", AdminActor: db.BootstrapActor,
 		Scope: &db.APITokenScope{
 			Kind: db.APITokenScopeIssueSubtree, ProjectUID: project.UID, RootIssueUID: root.UID,

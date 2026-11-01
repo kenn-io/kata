@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -48,7 +47,7 @@ func TestCloseTranscript_PersistenceAndRetries(t *testing.T) {
 			requireOK(t, postWithHeader(t, ts, issueURL(projectID, issueID, "actions/reopen"), nil, map[string]any{"actor": "agent-one"}))
 			headers["Idempotency-Key"] = "transcript-close-two"
 			requireOK(t, postWithHeader(t, ts, path, headers, body))
-			events, err := h.DB().EventsAfter(context.Background(), db.EventsAfterParams{ProjectID: projectID, Limit: 100})
+			events, err := h.DB().EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: projectID, Limit: 100})
 			require.NoError(t, err)
 			var ids []string
 			for _, e := range events {

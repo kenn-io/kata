@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -61,7 +60,7 @@ func collectExport[T any](sequence iter.Seq2[T, error]) ([]T, error) {
 
 func checkAPITokensAndSystemProject(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	systemProject, err := store.SystemProject(ctx)
 	if err != nil {
 		return fmt.Errorf("system project: %w", err)
@@ -284,7 +283,7 @@ func checkAPITokensAndSystemProject(t *testing.T, store db.Storage) error {
 
 func checkRecurrences(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "recurrence-project")
 	if err != nil {
 		return fmt.Errorf("create recurrence project: %w", err)
@@ -688,7 +687,7 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 
 func checkCloseAuditQueries(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	primary, err := store.CreateProject(ctx, "close-audit-primary")
 	if err != nil {
 		return fmt.Errorf("create close audit project: %w", err)

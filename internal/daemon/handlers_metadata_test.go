@@ -221,7 +221,7 @@ func TestPatchMetadata_PresentEmptyIfMatch_400(t *testing.T) {
 			env := testenv.New(t, testenv.WithAuthToken("tok"))
 			url, _ := subject.setup(t, env)
 
-			req, err := http.NewRequest(http.MethodPost, url,
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, url,
 				strings.NewReader(`{"actor":"tester","patch":{}}`))
 			require.NoError(t, err)
 			req.Header.Set("Authorization", "Bearer tok")
@@ -331,7 +331,7 @@ func TestPatchIssueMetadata_UnknownKey_Accepted(t *testing.T) {
 		"unknown key must round-trip into the persisted metadata blob")
 
 	// GET-after view confirms the key is durably stored and surfaced.
-	getReq, err := http.NewRequest(http.MethodGet, url[:len(url)-len("/metadata")], nil)
+	getReq, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url[:len(url)-len("/metadata")], nil)
 	require.NoError(t, err)
 	getReq.Header.Set("Authorization", "Bearer tok")
 	getResp, err := env.HTTP.Do(getReq) //nolint:gosec // G704: test server URL, not user-controlled

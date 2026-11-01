@@ -604,7 +604,8 @@ func (d *e2eDatabase) close(t *testing.T) {
 		d.store = nil
 	}
 	if d.cleanup != nil {
-		require.NoError(t, d.cleanup(context.Background()))
+		// Runs from t.Cleanup, after t.Context() is canceled.
+		require.NoError(t, d.cleanup(context.WithoutCancel(t.Context())))
 		d.cleanup = nil
 	}
 }
@@ -834,7 +835,7 @@ func buildFakeConnector(t *testing.T) string {
 	if runtime.GOOS == "windows" {
 		executable += ".exe"
 	}
-	command := exec.Command("go", "build", "-o", executable, "../connector/fakeconnector/cmd") // #nosec G204 -- fixed test tool and package; only the test-owned output path varies.
+	command := exec.CommandContext(t.Context(), "go", "build", "-o", executable, "../connector/fakeconnector/cmd") // #nosec G204 -- fixed test tool and package; only the test-owned output path varies.
 	output, err := command.CombinedOutput()
 	require.NoError(t, err, string(output))
 	return executable

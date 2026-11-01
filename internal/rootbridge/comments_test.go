@@ -719,12 +719,12 @@ func TestConcurrentReconcileWakesPublishOnce(t *testing.T) {
 	type runResult struct{ err error }
 	results := make(chan runResult, 2)
 	go func() {
-		_, err := h.reconciler.Run(context.Background(), h.binding.ID, RunOptions{})
+		_, err := h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{})
 		results <- runResult{err: err}
 	}()
 	<-entered
 	go func() {
-		_, err := h.reconciler.Run(context.Background(), h.binding.ID, RunOptions{})
+		_, err := h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{})
 		results <- runResult{err: err}
 	}()
 	second := <-results
@@ -748,7 +748,7 @@ func TestOutboundCommentEditDuringPublicationLeavesResolutionPending(t *testing.
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := h.reconciler.Run(context.Background(), h.binding.ID, RunOptions{})
+		_, err := h.reconciler.Run(t.Context(), h.binding.ID, RunOptions{})
 		done <- err
 	}()
 	<-entered

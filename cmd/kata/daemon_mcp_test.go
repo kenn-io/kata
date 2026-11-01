@@ -42,7 +42,7 @@ func TestDaemonMCPUnavailableHandler(t *testing.T) {
 	require.Equal(t, `project "missing" was not found`, entry["err"])
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
 		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, httptest.NewRequest(method, "/mcp", nil))
+		handler.ServeHTTP(response, httptest.NewRequestWithContext(t.Context(), method, "/mcp", nil))
 		require.Equal(t, http.StatusServiceUnavailable, response.Code)
 		require.Equal(t, "application/json", response.Header().Get("Content-Type"))
 		require.JSONEq(t, `{"error":"kata MCP endpoint unavailable; see daemon log"}`, response.Body.String())

@@ -98,7 +98,7 @@ func TestListProjectsRetainsInboxDesignation(t *testing.T) {
 		}})
 	})
 
-	projects, err := client.ListProjects(context.Background())
+	projects, err := client.ListProjects(t.Context())
 	require.NoError(t, err)
 	require.Len(t, projects, 3)
 	selected, ok := designatedInboxProject(projects)

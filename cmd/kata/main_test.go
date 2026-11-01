@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"net/http"
 	"os"
@@ -124,7 +123,7 @@ func TestExitCodeFor_PureMapping(t *testing.T) {
 // command before PersistentPreRunE fires.
 func TestRunEEntered_FalseOnUnknownCommand(t *testing.T) {
 	resetRunEEntered(t)
-	_, _, err := executeRootCapture(t, context.Background(), "this-command-does-not-exist")
+	_, _, err := executeRootCapture(t, t.Context(), "this-command-does-not-exist")
 	require.Error(t, err)
 	assert.False(t, runEEntered, "PersistentPreRunE must not fire on unknown command")
 	assert.Equal(t, ExitUsage, exitCodeFor(err, runEEntered))
@@ -134,7 +133,7 @@ func TestRunEEntered_FalseOnUnknownCommand(t *testing.T) {
 // on whoami short-circuits before PersistentPreRunE.
 func TestRunEEntered_FalseOnNoArgsViolation(t *testing.T) {
 	resetRunEEntered(t)
-	_, _, err := executeRootCapture(t, context.Background(), "whoami", "unexpected-positional-arg")
+	_, _, err := executeRootCapture(t, t.Context(), "whoami", "unexpected-positional-arg")
 	require.Error(t, err)
 	assert.False(t, runEEntered, "NoArgs rejection must short-circuit before PersistentPreRunE")
 	assert.Equal(t, ExitUsage, exitCodeFor(err, runEEntered))
@@ -145,7 +144,7 @@ func TestRunEEntered_FalseOnNoArgsViolation(t *testing.T) {
 func TestRunEEntered_TrueOnSuccessfulRunE(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
-	_, _, err := executeRootCapture(t, context.Background(), "whoami", "--as", "test-actor")
+	_, _, err := executeRootCapture(t, t.Context(), "whoami", "--as", "test-actor")
 	require.NoError(t, err)
 	assert.True(t, runEEntered, "PersistentPreRunE should fire before whoami's RunE")
 }
@@ -223,7 +222,7 @@ func TestHelp_RefFlagsDoNotAdvertiseLegacyNumbers(t *testing.T) {
 		{"create", "--help"},
 		{"edit", "--help"},
 	} {
-		stdout, _, err := executeRootCapture(t, context.Background(), args...)
+		stdout, _, err := executeRootCapture(t, t.Context(), args...)
 		require.NoError(t, err)
 		assert.NotContains(t, stdout, "#N")
 		assert.NotContains(t, stdout, "bare number")
@@ -291,7 +290,7 @@ func TestEmitError_AgentMode_CommandError(t *testing.T) {
 func TestEmitError_AgentMode_UnknownCommandUsesKata(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
-	_, stderr, err := executeRootCapture(t, context.Background(), "--agent", "cretae")
+	_, stderr, err := executeRootCapture(t, t.Context(), "--agent", "cretae")
 	require.Error(t, err)
 	assert.Truef(t, strings.HasPrefix(stderr, "ERR kata usage:"),
 		"stderr should start with agent usage error, got %q", stderr)
@@ -300,7 +299,7 @@ func TestEmitError_AgentMode_UnknownCommandUsesKata(t *testing.T) {
 func TestEmitError_AgentMode_ParseErrorSingleLine(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
-	_, stderr, err := executeRootCapture(t, context.Background(), "--agent", "cretae")
+	_, stderr, err := executeRootCapture(t, t.Context(), "--agent", "cretae")
 	require.Error(t, err)
 	assert.Truef(t, strings.HasPrefix(stderr, "ERR kata usage:"),
 		"stderr should start with agent usage error, got %q", stderr)
@@ -311,7 +310,7 @@ func TestEmitError_AgentMode_ParseErrorSingleLine(t *testing.T) {
 func TestEmitError_OutputModeErrorPrecedesUnknownCommand(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
-	_, stderr, err := executeRootCapture(t, context.Background(), "--format", "xml", "cretae")
+	_, stderr, err := executeRootCapture(t, t.Context(), "--format", "xml", "cretae")
 	require.Error(t, err)
 	assert.Contains(t, stderr, "unsupported output format")
 	assert.NotContains(t, stderr, "unknown command")
@@ -320,7 +319,7 @@ func TestEmitError_OutputModeErrorPrecedesUnknownCommand(t *testing.T) {
 func TestEmitError_AgentAliasWithInvalidFormatStillUsesAgent(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
-	_, stderr, err := executeRootCapture(t, context.Background(), "--agent", "--format", "xml", "version")
+	_, stderr, err := executeRootCapture(t, t.Context(), "--agent", "--format", "xml", "version")
 	require.Error(t, err)
 	assert.Truef(t, strings.HasPrefix(stderr, "ERR version usage:"),
 		"stderr should use agent mode, got %q", stderr)
@@ -330,7 +329,7 @@ func TestEmitError_AgentAliasWithInvalidFormatStillUsesAgent(t *testing.T) {
 func TestEmitError_OutputModeConflictPrecedesUnknownCommand(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
-	_, stderr, err := executeRootCapture(t, context.Background(), "--json", "--agent", "cretae")
+	_, stderr, err := executeRootCapture(t, t.Context(), "--json", "--agent", "cretae")
 	require.Error(t, err)
 	assert.Contains(t, stderr, "conflicting output modes")
 	assert.NotContains(t, stderr, "unknown command")
@@ -339,7 +338,7 @@ func TestEmitError_OutputModeConflictPrecedesUnknownCommand(t *testing.T) {
 func TestOutputMode_RepeatedFormatConflicts(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
-	stdout, stderr, err := executeRootCapture(t, context.Background(),
+	stdout, stderr, err := executeRootCapture(t, t.Context(),
 		"--format", "human", "--format", "json", "version")
 	require.Error(t, err)
 	assert.Empty(t, stdout)
@@ -351,7 +350,7 @@ func TestOutputMode_ContractAcceptedOnlyForQuickstart(t *testing.T) {
 		t.Run(command, func(t *testing.T) {
 			resetRunEEntered(t)
 			resetFlags(t)
-			stdout, stderr, err := executeRootCapture(t, context.Background(),
+			stdout, stderr, err := executeRootCapture(t, t.Context(),
 				"--format", "contract", command)
 			require.NoError(t, err)
 			assert.NotEmpty(t, stdout)
@@ -368,7 +367,7 @@ func TestOutputMode_ContractRejectedForUnrelatedCommands(t *testing.T) {
 	} {
 		resetRunEEntered(t)
 		resetFlags(t)
-		stdout, stderr, err := executeRootCapture(t, context.Background(), args...)
+		stdout, stderr, err := executeRootCapture(t, t.Context(), args...)
 		require.Error(t, err)
 		assert.Empty(t, stdout)
 		assert.Contains(t, stderr, `unsupported output format "contract"`)
@@ -378,7 +377,7 @@ func TestOutputMode_ContractRejectedForUnrelatedCommands(t *testing.T) {
 func TestOutputMode_QuickstartUsageListsContractFormat(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
-	stdout, stderr, err := executeRootCapture(t, context.Background(),
+	stdout, stderr, err := executeRootCapture(t, t.Context(),
 		"--format", "bogus", "quickstart")
 	require.Error(t, err)
 	assert.Empty(t, stdout)
@@ -390,7 +389,7 @@ func TestOutputMode_ContractConflictsWithAgentAndJSON(t *testing.T) {
 		t.Run(flag, func(t *testing.T) {
 			resetRunEEntered(t)
 			resetFlags(t)
-			stdout, stderr, err := executeRootCapture(t, context.Background(),
+			stdout, stderr, err := executeRootCapture(t, t.Context(),
 				"--format", "contract", flag, "quickstart")
 			require.Error(t, err)
 			assert.Empty(t, stdout)
@@ -402,7 +401,7 @@ func TestOutputMode_ContractConflictsWithAgentAndJSON(t *testing.T) {
 func TestEmitError_QuickstartContractConflictUsesAgentFallback(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
-	stdout, stderr, err := executeRootCapture(t, context.Background(),
+	stdout, stderr, err := executeRootCapture(t, t.Context(),
 		"quickstart", "--agent", "--format", "contract")
 	require.Error(t, err)
 	assert.Empty(t, stdout)
@@ -414,7 +413,7 @@ func TestEmitError_QuickstartContractConflictUsesAgentFallback(t *testing.T) {
 func TestEmitError_QuickstartContractConflictUsesJSONFallback(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
-	stdout, stderr, err := executeRootCapture(t, context.Background(),
+	stdout, stderr, err := executeRootCapture(t, t.Context(),
 		"quickstart", "--format", "contract", "--format", "json")
 	require.Error(t, err)
 	assert.Empty(t, stdout)
@@ -427,7 +426,7 @@ func TestEmitError_QuickstartContractConflictUsesJSONFallback(t *testing.T) {
 func TestEmitError_RawModeScanParsesJSONTrueValue(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
-	_, stderr, err := executeRootCapture(t, context.Background(), "--json=true", "cretae")
+	_, stderr, err := executeRootCapture(t, t.Context(), "--json=true", "cretae")
 	require.Error(t, err)
 	got := parseErrorEnvelope(t, []byte(stderr))
 	assert.Equal(t, "usage", got.Error.Kind)
@@ -437,7 +436,7 @@ func TestEmitError_RawModeScanParsesJSONTrueValue(t *testing.T) {
 func TestEmitError_RawModeScanParsesAgentTrueValue(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
-	_, stderr, err := executeRootCapture(t, context.Background(), "--agent=true", "cretae")
+	_, stderr, err := executeRootCapture(t, t.Context(), "--agent=true", "cretae")
 	require.Error(t, err)
 	assert.Truef(t, strings.HasPrefix(stderr, "ERR kata usage:"),
 		"stderr should use agent mode, got %q", stderr)
@@ -446,7 +445,7 @@ func TestEmitError_RawModeScanParsesAgentTrueValue(t *testing.T) {
 func TestEmitError_RawModeScanParsesJSONFalseValue(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
-	_, stderr, err := executeRootCapture(t, context.Background(), "--json=false", "cretae")
+	_, stderr, err := executeRootCapture(t, t.Context(), "--json=false", "cretae")
 	require.Error(t, err)
 	assert.Truef(t, strings.HasPrefix(stderr, "kata:"), "stderr should stay human, got %q", stderr)
 }
@@ -454,7 +453,7 @@ func TestEmitError_RawModeScanParsesJSONFalseValue(t *testing.T) {
 func TestEmitError_RawModeScanParsesAgentFalseValue(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
-	_, stderr, err := executeRootCapture(t, context.Background(), "--agent=false", "cretae")
+	_, stderr, err := executeRootCapture(t, t.Context(), "--agent=false", "cretae")
 	require.Error(t, err)
 	assert.Truef(t, strings.HasPrefix(stderr, "kata:"), "stderr should stay human, got %q", stderr)
 }
@@ -462,7 +461,7 @@ func TestEmitError_RawModeScanParsesAgentFalseValue(t *testing.T) {
 func TestEmitError_RawModeScanSkipsWorkspaceFormatValue(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
-	_, stderr, err := executeRootCapture(t, context.Background(), "--workspace", "--format", "show")
+	_, stderr, err := executeRootCapture(t, t.Context(), "--workspace", "--format", "show")
 	require.Error(t, err)
 	assert.Truef(t, strings.HasPrefix(stderr, "kata:"), "stderr should stay human, got %q", stderr)
 	assert.NotContains(t, stderr, "unsupported output format")
@@ -471,7 +470,7 @@ func TestEmitError_RawModeScanSkipsWorkspaceFormatValue(t *testing.T) {
 func TestEmitError_RawModeScanSkipsWorkspaceAgentValue(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
-	_, stderr, err := executeRootCapture(t, context.Background(), "--workspace", "--agent", "show")
+	_, stderr, err := executeRootCapture(t, t.Context(), "--workspace", "--agent", "show")
 	require.Error(t, err)
 	assert.Truef(t, strings.HasPrefix(stderr, "kata:"), "stderr should stay human, got %q", stderr)
 	assert.NotContains(t, stderr, "ERR ")
@@ -480,7 +479,7 @@ func TestEmitError_RawModeScanSkipsWorkspaceAgentValue(t *testing.T) {
 func TestEmitError_RawModeScanSkipsCreateBodyJSONValue(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
-	_, stderr, err := executeRootCapture(t, context.Background(), "create", "--body", "--json")
+	_, stderr, err := executeRootCapture(t, t.Context(), "create", "--body", "--json")
 	require.Error(t, err)
 	assert.Truef(t, strings.HasPrefix(stderr, "kata:"), "stderr should stay human, got %q", stderr)
 	assert.Falsef(t, strings.HasPrefix(stderr, "{"), "stderr should not be JSON, got %q", stderr)
@@ -489,7 +488,7 @@ func TestEmitError_RawModeScanSkipsCreateBodyJSONValue(t *testing.T) {
 func TestEmitError_InvalidCommandPathDoesNotSwallowJSON(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
-	_, stderr, err := executeRootCapture(t, context.Background(), "typo", "create", "--body", "--json")
+	_, stderr, err := executeRootCapture(t, t.Context(), "typo", "create", "--body", "--json")
 	require.Error(t, err)
 	got := parseErrorEnvelope(t, []byte(stderr))
 	assert.Equal(t, "usage", got.Error.Kind)
@@ -499,7 +498,7 @@ func TestEmitError_InvalidCommandPathDoesNotSwallowJSON(t *testing.T) {
 func TestEmitError_RawModeScanSkipsCreateBodyAgentValue(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
-	_, stderr, err := executeRootCapture(t, context.Background(), "create", "--body", "--agent")
+	_, stderr, err := executeRootCapture(t, t.Context(), "create", "--body", "--agent")
 	require.Error(t, err)
 	assert.Truef(t, strings.HasPrefix(stderr, "kata:"), "stderr should stay human, got %q", stderr)
 	assert.NotContains(t, stderr, "ERR ")
@@ -508,7 +507,7 @@ func TestEmitError_RawModeScanSkipsCreateBodyAgentValue(t *testing.T) {
 func TestEmitError_AgentMode_CommandArgErrorUsesLeafCommand(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
-	_, stderr, err := executeRootCapture(t, context.Background(), "--agent", "show")
+	_, stderr, err := executeRootCapture(t, t.Context(), "--agent", "show")
 	require.Error(t, err)
 	assert.Truef(t, strings.HasPrefix(stderr, "ERR show usage:"),
 		"stderr should start with agent usage error for show, got %q", stderr)
@@ -522,7 +521,7 @@ func TestEmitError_AgentMode_CommandArgErrorUsesLeafCommand(t *testing.T) {
 func TestEmitError_AgentMode_FlagParseErrorUsesLeafCommand(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
-	_, stderr, err := executeRootCapture(t, context.Background(), "--agent", "show", "--nonexistent-flag")
+	_, stderr, err := executeRootCapture(t, t.Context(), "--agent", "show", "--nonexistent-flag")
 	require.Error(t, err)
 	assert.Truef(t, strings.HasPrefix(stderr, "ERR show usage:"),
 		"a flag-parse failure under --agent must still emit the agent ERR shape, got %q", stderr)
@@ -588,7 +587,7 @@ func TestHealth_DoesNotAutoStartDaemon(t *testing.T) {
 	// no daemon discovery succeeds.
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_SERVER", "")
-	_, err := discoverDaemon(context.Background())
+	_, err := discoverDaemon(t.Context())
 	require.Error(t, err)
 	var ce *cliError
 	require.ErrorAs(t, err, &ce)
@@ -606,7 +605,7 @@ func TestHealthCommandDoesNotAutoStartDaemon(t *testing.T) {
 	cmd := newHealthCmd()
 	cmd.SilenceErrors = true
 	cmd.SilenceUsage = true
-	err := cmd.ExecuteContext(context.Background())
+	err := cmd.ExecuteContext(t.Context())
 
 	ce := requireCLIError(t, err, ExitDaemonUnavail)
 	assert.Equal(t, kindDaemonUnavail, ce.Kind)
@@ -620,7 +619,7 @@ func TestHealthReportsLiveUnreachableDaemon(t *testing.T) {
 	address := "unix://" + filepath.Join(home, "missing.sock")
 	require.NoError(t, writeRuntimeFor(home, address))
 
-	_, err := discoverDaemon(context.Background())
+	_, err := discoverDaemon(t.Context())
 
 	require.Error(t, err)
 	var ce *cliError
@@ -645,7 +644,7 @@ local = true
 `), 0o600))
 	flags.Daemon = "local"
 
-	_, err := discoverDaemon(context.Background())
+	_, err := discoverDaemon(t.Context())
 
 	require.Error(t, err)
 	var ce *cliError
@@ -667,7 +666,7 @@ func TestHealth_HonorsKataServer(t *testing.T) {
 	env := testenv.New(t)
 	t.Setenv("KATA_SERVER", env.URL)
 
-	url, err := discoverDaemon(context.Background())
+	url, err := discoverDaemon(t.Context())
 	require.NoError(t, err)
 	assert.Equal(t, env.URL, url,
 		"discoverDaemon must return the KATA_SERVER URL when it's reachable")
@@ -681,8 +680,10 @@ func TestHealth_HonorsKataServer(t *testing.T) {
 func TestList_ShowsOwnerInParens(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
 	body := []byte(`{"actor":"x","title":"T","owner":"alice"}`)
-	resp, err := http.Post(env.URL+"/api/v1/projects/"+itoa(pid)+"/issues",
-		"application/json", bytes.NewReader(body)) //nolint:gosec,noctx // test-only loopback
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodPost, env.URL+"/api/v1/projects/"+itoa(pid)+"/issues", bytes.NewReader(body))
+	require.NoError(t, reqErr)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // test-only loopback
 	require.NoError(t, err)
 	require.Equal(t, 200, resp.StatusCode)
 	_ = resp.Body.Close()

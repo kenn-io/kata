@@ -13,7 +13,7 @@ import (
 )
 
 func TestRuntimePrivilegeValidationCoversFederationObjects(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	t.Run("provenance table", func(t *testing.T) {
 		db := openPrivilegeCheckDB(t, [][]driver.Value{{
 			"federation_entity_provenance", false, true, true, true,

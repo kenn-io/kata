@@ -55,7 +55,7 @@ func TestWebDaemonGatewayAppliesWebLocalProjectPolicyBeforeForwarding(t *testing
 		{name: "replace", body: `{"name":"example-project","replace":true,"actor":"user-a"}`, want: http.StatusForbidden},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodPost,
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
 				"http://127.0.0.1:27123/api/v1/ui/proxy/api/v1/projects", bytes.NewBufferString(test.body))
 			request.Host = "127.0.0.1:27123"
 			request.RemoteAddr = "127.0.0.1:40123"
@@ -88,7 +88,7 @@ func TestWebDaemonRestrictedRosterFallsBackToLocalMux(t *testing.T) {
 		WithPrincipal(t.Context(), Principal{Kind: PrincipalWebLocal}),
 		[]string{"example-project-uid"},
 	)
-	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/api/v1/ui/daemons", nil).WithContext(ctx)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://127.0.0.1/api/v1/ui/daemons", nil).WithContext(ctx)
 	roster := httptest.NewRecorder()
 	gateway.list(roster, request)
 	require.Equal(t, http.StatusOK, roster.Code)
@@ -101,7 +101,7 @@ func TestWebDaemonRestrictedRosterFallsBackToLocalMux(t *testing.T) {
 	assert.True(t, listed.Daemons[0].Local)
 	assert.True(t, listed.Daemons[0].Default)
 
-	proxyRequest := httptest.NewRequest(http.MethodGet,
+	proxyRequest := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
 		"http://127.0.0.1/api/v1/ui/snapshot", nil).WithContext(ctx)
 	proxyRequest.Header.Set(webDaemonHeaderName, listed.Daemons[0].ID)
 	proxyResponse := httptest.NewRecorder()
@@ -294,7 +294,7 @@ func TestWebDaemonGatewayCannotProxyTUIBypassToLoopbackTarget(t *testing.T) {
 	issued, err := manager.IssueSession(Principal{Kind: PrincipalWebLocal}, "/kata")
 	require.NoError(t, err)
 	body := bytes.NewBufferString(`{"actor":"forged","source":"tui","reason":"done"}`)
-	request := httptest.NewRequest(http.MethodPost,
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
 		fmt.Sprintf("http://127.0.0.1:27123/api/v1/ui/proxy/api/v1/projects/%d/issues/%s/actions/close",
 			project.ID, issue.ShortID), body)
 	request.Host = "127.0.0.1:27123"
@@ -434,7 +434,7 @@ func TestWebDaemonGatewayRejectsMutationsForNonWritableSourcePrincipals(t *testi
 		{Kind: PrincipalTrustedProxyAbsent},
 	} {
 		t.Run(string(principal.Kind), func(t *testing.T) {
-			lookup := httptest.NewRequest(http.MethodPost, "/api/v1/projects/resolve",
+			lookup := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/projects/resolve",
 				bytes.NewBufferString(`{"name":"example-project"}`))
 			lookup.Header.Set(webDaemonHeaderName, "example-remote")
 			lookup.Header.Set("Content-Type", "application/json")
@@ -445,7 +445,7 @@ func TestWebDaemonGatewayRejectsMutationsForNonWritableSourcePrincipals(t *testi
 
 			assert.Equal(t, http.StatusNoContent, lookupResponse.Code, lookupResponse.Body.String())
 
-			request := httptest.NewRequest(http.MethodPost, "/api/v1/projects/7/metadata",
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/projects/7/metadata",
 				bytes.NewBufferString(`{}`))
 			request.Header.Set(webDaemonHeaderName, "example-remote")
 			request.Header.Set("Content-Type", "application/json")
@@ -477,7 +477,7 @@ func TestWebDaemonGatewayRejectsNestedProxyRoutesWithoutContactingTarget(t *test
 	}
 	mux := http.NewServeMux()
 	mux.Handle(webDaemonProxyPrefix+"/", http.StripPrefix(webDaemonProxyPrefix, gateway))
-	request := httptest.NewRequest(http.MethodGet,
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
 		webDaemonProxyPrefix+webDaemonProxyPrefix+pathEventsStreamPath, nil)
 	request.Header.Set(webDaemonHeaderName, "example-remote")
 	response := httptest.NewRecorder()
@@ -637,7 +637,7 @@ func TestWebDaemonGatewayRejectsRemoteStreamsAndCredentialedReadonlyTargets(t *t
 	readonlyHandler, _ := newAuthorizedWebDaemonGateway(t, true, false, config.CatalogDaemonConfig{
 		Name: "example-remote", URL: upstream.URL, Token: "target-token", AllowInsecure: true,
 	})
-	request := httptest.NewRequest(http.MethodGet,
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
 		"http://127.0.0.1:27123/api/v1/ui/proxy/api/v1/ui/snapshot", nil)
 	request.Host = "127.0.0.1:27123"
 	request.RemoteAddr = "127.0.0.1:40123"
@@ -650,7 +650,7 @@ func TestWebDaemonGatewayRejectsRemoteStreamsAndCredentialedReadonlyTargets(t *t
 	localHandler, _ := newAuthorizedWebDaemonGateway(t, true, false, config.CatalogDaemonConfig{
 		Name: "example-local", Local: true,
 	})
-	request = httptest.NewRequest(http.MethodGet,
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodGet,
 		"http://127.0.0.1:27123/api/v1/ui/proxy/api/v1/events/stream", nil)
 	request.Host = "127.0.0.1:27123"
 	request.RemoteAddr = "127.0.0.1:40123"
@@ -687,7 +687,7 @@ func TestSharedTCPBearerUISnapshotAcceptsCanonicalPublicAuthority(t *testing.T) 
 		{name: "invalid", token: "wrong-token", want: http.StatusForbidden},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodGet, "https://daemon.example/api/v1/ui/snapshot?view=all-open", nil)
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://daemon.example/api/v1/ui/snapshot?view=all-open", nil)
 			request.Host = "daemon.example"
 			request.RemoteAddr = "127.0.0.1:40123"
 			request.Header.Set("Authorization", "Bearer "+test.token)
@@ -736,7 +736,7 @@ func authorizedGatewayRequest(
 	ifNoneMatch string,
 ) *httptest.ResponseRecorder {
 	t.Helper()
-	request := httptest.NewRequest(method,
+	request := httptest.NewRequestWithContext(t.Context(), method,
 		"http://127.0.0.1:27123/api/v1/ui/proxy"+innerPath, body)
 	request.Host = "127.0.0.1:27123"
 	request.RemoteAddr = "127.0.0.1:40123"

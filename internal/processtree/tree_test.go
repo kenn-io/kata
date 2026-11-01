@@ -10,7 +10,7 @@ import (
 )
 
 func TestTreeTerminateWithGraceBeforeStart(t *testing.T) {
-	cmd := exec.Command("unused")
+	cmd := exec.CommandContext(t.Context(), "unused")
 	tree, err := New(cmd)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, tree.Close()) })
@@ -18,7 +18,7 @@ func TestTreeTerminateWithGraceBeforeStart(t *testing.T) {
 }
 
 func TestTreeStartsAndWaitsForProcess(t *testing.T) {
-	cmd := exec.Command(os.Args[0], "-test.run=^TestProcessTreeExitHelper$") // #nosec G204,G702 -- fixed current test executable.
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestProcessTreeExitHelper$") // #nosec G204,G702 -- fixed current test executable.
 	cmd.Env = append(os.Environ(), "GO_WANT_PROCESS_TREE_EXIT_HELPER=1")
 	tree, err := New(cmd)
 	require.NoError(t, err)

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -78,7 +77,7 @@ func TestDoctorFailedChecksHaveTheirOwnErrorKind(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			_, workspace := doctorTestEnv(t)
 			t.Setenv("KATA_SERVER", "http://127.0.0.1:1")
-			_, stderr, err := executeRootCapture(t, context.Background(), "doctor", "--workspace", workspace, mode)
+			_, stderr, err := executeRootCapture(t, t.Context(), "doctor", "--workspace", workspace, mode)
 			require.Error(t, err)
 			require.Equal(t, 1, exitCodeForErr(err, true))
 			if mode == "--agent" {
@@ -119,7 +118,7 @@ func TestDoctorWarningsExitSuccessfullyAndInvalidModesKeepCLIError(t *testing.T)
 
 func TestDoctorStoppedDaemonReportsWithoutCreatingFiles(t *testing.T) {
 	home, workspace := doctorTestEnv(t)
-	out, _, err := executeRootCapture(t, context.Background(), "doctor", "--workspace", workspace, "--json")
+	out, _, err := executeRootCapture(t, t.Context(), "doctor", "--workspace", workspace, "--json")
 	require.NoError(t, err, "ordinary commands start a stopped local daemon, so doctor must not exit 1")
 	var report struct {
 		Version int `json:"version"`
@@ -149,7 +148,7 @@ func TestDoctorDoesNotRepairRuntimeDirectoryPermissions(t *testing.T) {
 	require.NoError(t, err)
 	assertUnchanged := makeDoctorRuntimeDirectoryInsecureForTest(t, ns.DataDir)
 
-	out, _, err := executeRootCapture(t, context.Background(), "doctor", "--workspace", workspace, "--json")
+	out, _, err := executeRootCapture(t, t.Context(), "doctor", "--workspace", workspace, "--json")
 	require.NoError(t, err, "ordinary commands repair runtime permissions, so doctor must not exit 1")
 	var report struct {
 		Checks []struct {

@@ -53,7 +53,7 @@ func TestRelationshipsByIssuesAuthorizedAtScale(t *testing.T) {
 // project, whichever alias the query gives the links table.
 func TestAuthorizedLinkPredicateBoundsBothEndpoints(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openUIStore(t)
 	visible := createUIProject(t, store, "spoke-project")
 	hidden := createUIProject(t, store, "hub-project")

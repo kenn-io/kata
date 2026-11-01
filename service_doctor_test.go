@@ -1,7 +1,6 @@
 package kata_test
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -18,10 +17,10 @@ func TestServiceDoctorRequiresManagePolicyAndHonorsHostDenial(t *testing.T) {
 			if denied {
 				controller.err = kata.ErrAccessDenied
 			}
-			service, err := kata.New(context.Background(), kata.Config{DSN: filepath.Join(t.TempDir(), "service.db"), Access: controller})
+			service, err := kata.New(t.Context(), kata.Config{DSN: filepath.Join(t.TempDir(), "service.db"), Access: controller})
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, service.Close()) })
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/doctor", nil)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/doctor", nil)
 			req = req.WithContext(kata.WithPrincipal(req.Context(), kata.Principal{Subject: "operator", Actor: "operator"}))
 			rr := httptest.NewRecorder()
 			service.Handler().ServeHTTP(rr, req)

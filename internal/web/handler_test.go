@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"io"
 	"io/fs"
@@ -22,13 +23,13 @@ func TestWebHandlerAssetsAndNavigationFallback(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("root redirect", func(t *testing.T) {
-		response := serveWebRequest(handler, http.MethodGet, "/", "text/html", "")
+		response := serveWebRequest(t.Context(), handler, http.MethodGet, "/", "text/html", "")
 		assert.Equal(t, http.StatusFound, response.Code)
 		assert.Equal(t, "/kata", response.Header().Get("Location"))
 	})
 
 	t.Run("deep link", func(t *testing.T) {
-		response := serveWebRequest(handler, http.MethodGet, "/kata?issue=01HZNQ7VFPK1XGD8R5MABCD4EX", "text/html", "")
+		response := serveWebRequest(t.Context(), handler, http.MethodGet, "/kata?issue=01HZNQ7VFPK1XGD8R5MABCD4EX", "text/html", "")
 		require.Equal(t, http.StatusOK, response.Code)
 		assert.Equal(t, string(files["index.html"].Data), response.Body.String())
 		assert.Equal(t, "no-store", response.Header().Get("Cache-Control"))
@@ -50,7 +51,7 @@ func TestWebHandlerAssetsAndNavigationFallback(t *testing.T) {
 	})
 
 	t.Run("non-navigation miss", func(t *testing.T) {
-		response := serveWebRequest(handler, http.MethodGet, "/issues/missing", "application/json", "")
+		response := serveWebRequest(t.Context(), handler, http.MethodGet, "/issues/missing", "application/json", "")
 		assert.Equal(t, http.StatusNotFound, response.Code)
 	})
 
@@ -62,7 +63,7 @@ func TestWebHandlerAssetsAndNavigationFallback(t *testing.T) {
 		"/openapi.json",
 	} {
 		t.Run("owned "+path, func(t *testing.T) {
-			response := serveWebRequest(handler, http.MethodGet, path, "text/html", "")
+			response := serveWebRequest(t.Context(), handler, http.MethodGet, path, "text/html", "")
 			assert.Equal(t, http.StatusNotFound, response.Code)
 			assert.NotContains(t, response.Body.String(), "Kata test shell")
 		})
@@ -86,7 +87,7 @@ func TestWebHandlerExactAssetsCachingAndMIME(t *testing.T) {
 		{path: "/favicon.svg", contentType: "image/svg+xml", immutable: false},
 	} {
 		t.Run(tt.path, func(t *testing.T) {
-			response := serveWebRequest(handler, http.MethodGet, tt.path, "*/*", "")
+			response := serveWebRequest(t.Context(), handler, http.MethodGet, tt.path, "*/*", "")
 			require.Equal(t, http.StatusOK, response.Code)
 			assert.Equal(t, tt.contentType, response.Header().Get("Content-Type"))
 			if tt.immutable {
@@ -113,7 +114,7 @@ func TestWebHandlerRejectsUnsafeAndNonNavigationPaths(t *testing.T) {
 		"/views/../index.html",
 	} {
 		t.Run(path, func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodGet, "http://daemon.example/", nil)
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://daemon.example/", nil)
 			request.URL.Path = path
 			request.Header.Set("Accept", "text/html")
 			response := httptest.NewRecorder()
@@ -140,7 +141,7 @@ func TestWebHandlerCompressesStaticTextFormats(t *testing.T) {
 		{path: "/assets/data-11223344.json", want: files["assets/data-11223344.json"].Data},
 	} {
 		t.Run(tt.path, func(t *testing.T) {
-			response := serveWebRequest(handler, http.MethodGet, tt.path, "text/html", "gzip")
+			response := serveWebRequest(t.Context(), handler, http.MethodGet, tt.path, "text/html", "gzip")
 			require.Equal(t, http.StatusOK, response.Code)
 			require.Equal(t, "gzip", response.Header().Get("Content-Encoding"))
 			reader, err := gzip.NewReader(bytes.NewReader(response.Body.Bytes()))
@@ -153,8 +154,8 @@ func TestWebHandlerCompressesStaticTextFormats(t *testing.T) {
 	}
 }
 
-func serveWebRequest(handler http.Handler, method, path, accept, encoding string) *httptest.ResponseRecorder {
-	request := httptest.NewRequest(method, "http://daemon.example"+path, nil)
+func serveWebRequest(ctx context.Context, handler http.Handler, method, path, accept, encoding string) *httptest.ResponseRecorder {
+	request := httptest.NewRequestWithContext(ctx, method, "http://daemon.example"+path, nil)
 	if accept != "" {
 		request.Header.Set("Accept", accept)
 	}

@@ -89,7 +89,7 @@ func TestOpenClawGeneratedSourceRemainsData(t *testing.T) {
 		extension := filepath.Join(t.TempDir(), "extension.mjs")
 		require.NoError(t, os.WriteFile(extension, plan.Changes[0].Content, 0600))
 		//nolint:gosec // G204: Node imports only the generated fixture in the temporary directory.
-		command := exec.Command(node, "--input-type=module", "-e", `
+		command := exec.CommandContext(t.Context(), node, "--input-type=module", "-e", `
 import assert from 'node:assert/strict';
 import {pathToFileURL} from 'node:url';
 const plugin = await import(pathToFileURL(process.argv[1]));
@@ -121,7 +121,7 @@ func TestOpenClawInboxIsOffByDefault(t *testing.T) {
 			plugin = change.Path
 		}
 	}
-	cmd := exec.Command(node, "testdata/openclaw/inbox-opt-in.mjs", plugin, opts.Dir) //nolint:gosec // G204: Node runs a fixed fixture against isolated paths.
+	cmd := exec.CommandContext(t.Context(), node, "testdata/openclaw/inbox-opt-in.mjs", plugin, opts.Dir) //nolint:gosec // G204: Node runs a fixed fixture against isolated paths.
 	cmd.Env = append(os.Environ(), "KATA_REF=abcd", "KATA_INBOX_USER=actor/worker", "OPENCLAW_TEST_ROOT="+opts.Home, "TMPDIR="+opts.Home)
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
@@ -461,7 +461,7 @@ func TestOpenClawSubagentSessionsDoNotOwnAttention(t *testing.T) {
 		}
 	}
 
-	cmd := exec.Command(node, "testdata/openclaw/subagent.mjs", plugin, opts.Dir) //nolint:gosec // G204: published Node executable runs a fixed lifecycle fixture against isolated paths.
+	cmd := exec.CommandContext(t.Context(), node, "testdata/openclaw/subagent.mjs", plugin, opts.Dir) //nolint:gosec // G204: published Node executable runs a fixed lifecycle fixture against isolated paths.
 	cmd.Env = append(os.Environ(), "KATA_REF=launch-ref", "OPENCLAW_TEST_ROOT="+opts.Home, "TMPDIR="+opts.Home)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
@@ -495,7 +495,7 @@ func openClawGeneratedNativeBehaviorWithContract(t *testing.T, platform, contrac
 			plugin = c.Path
 		}
 	}
-	cmd := exec.Command(node, "testdata/openclaw/behavior.mjs", plugin, opts.Dir) //nolint:gosec // G204: published Node executable runs fixed native fixture with isolated paths.
+	cmd := exec.CommandContext(t.Context(), node, "testdata/openclaw/behavior.mjs", plugin, opts.Dir) //nolint:gosec // G204: published Node executable runs fixed native fixture with isolated paths.
 	cmd.Env = append(os.Environ(), "KATA_REF=abcd", "KATA_INBOX_USER=actor/worker", "OPENCLAW_TEST_ROOT="+opts.Home, "OPENCLAW_STATE_DIR="+filepath.Join(opts.Home, "state"), "OPENCLAW_TEST_PLATFORM="+platform, "TMPDIR="+opts.Home)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
@@ -536,7 +536,7 @@ func openClawProjectPrecedence(t *testing.T, attentionOnly bool) {
 			}
 		}
 	}
-	cmd := exec.Command(node, append([]string{"testdata/openclaw/precedence.mjs"}, append(plugins, opts.Dir)...)...) //nolint:gosec // G204: published Node executable runs fixed native fixture with isolated paths.
+	cmd := exec.CommandContext(t.Context(), node, append([]string{"testdata/openclaw/precedence.mjs"}, append(plugins, opts.Dir)...)...) //nolint:gosec // G204: published Node executable runs fixed native fixture with isolated paths.
 	cmd.Env = append(os.Environ(), "KATA_REF=launch-ref", "KATA_INBOX_USER=actor/worker", "OPENCLAW_TEST_ROOT="+opts.Home, "OPENCLAW_TEST_ATTENTION_ONLY="+fmt.Sprint(attentionOnly), "TMPDIR="+opts.Home)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
@@ -562,7 +562,7 @@ func TestOpenClawPublishedNativeLoader(t *testing.T) {
 	require.NoError(t, err)
 	_, err = publishNativeAgentHookPlan(p)
 	require.NoError(t, err)
-	cmd := exec.Command(node, "testdata/openclaw/published.mjs", runtime, p.Path, opts.Dir) //nolint:gosec // G204: published Node executable runs fixed native fixture with isolated paths.
+	cmd := exec.CommandContext(t.Context(), node, "testdata/openclaw/published.mjs", runtime, p.Path, opts.Dir) //nolint:gosec // G204: published Node executable runs fixed native fixture with isolated paths.
 	// Deliberately allow only OS/toolchain environment, then isolated runtime
 	// targets and noncredential test attribution. No host daemon/provider env.
 	cmd.Env = []string{"SystemRoot=" + os.Getenv("SystemRoot"), "TEMP=" + opts.Home, "TMP=" + opts.Home, "USERPROFILE=" + opts.Home, "PATH=" + os.Getenv("PATH"), "HOME=" + opts.Home, "TMPDIR=" + opts.Home, "OPENCLAW_STATE_DIR=" + filepath.Join(opts.Home, ".openclaw"), "OPENCLAW_CONFIG_PATH=" + p.Path, "OPENCLAW_TEST_ROOT=" + opts.Home, "KATA_REF=abcd", "KATA_INBOX_USER=actor/worker"}
@@ -724,7 +724,7 @@ func TestOpenClawSessionEndBoundsQueuedCleanup(t *testing.T) {
 	require.NoError(t, err)
 	_, err = publishNativeAgentHookPlan(p)
 	require.NoError(t, err)
-	cmd := exec.Command(node, "testdata/openclaw/timeout.mjs", p.Changes[0].Path, opts.Dir) //nolint:gosec // G204: published Node executable runs fixed native fixture with isolated paths.
+	cmd := exec.CommandContext(t.Context(), node, "testdata/openclaw/timeout.mjs", p.Changes[0].Path, opts.Dir) //nolint:gosec // G204: published Node executable runs fixed native fixture with isolated paths.
 	cmd.Env = append(os.Environ(), "KATA_REF=abcd", "OPENCLAW_TEST_ROOT="+opts.Home, "TMPDIR="+opts.Home)
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(out))
@@ -754,7 +754,7 @@ func TestOpenClawTerminalFallbackWithoutAnotherPrompt(t *testing.T) {
 					require.NoError(t, err)
 					plugins = append(plugins, p.Changes[0].Path)
 				}
-				cmd := exec.Command(node, "testdata/openclaw/terminal-fallback.mjs", plugins[0], plugins[1], opts.Dir, executables[1], transition, reason) //nolint:gosec // G204: published Node executable runs fixed native fixture with isolated paths.
+				cmd := exec.CommandContext(t.Context(), node, "testdata/openclaw/terminal-fallback.mjs", plugins[0], plugins[1], opts.Dir, executables[1], transition, reason) //nolint:gosec // G204: published Node executable runs fixed native fixture with isolated paths.
 				cmd.Env = append(os.Environ(), "KATA_REF=captured-ref", "OPENCLAW_TEST_ROOT="+opts.Home, "TMPDIR="+opts.Home)
 				out, err := cmd.CombinedOutput()
 				require.NoError(t, err, string(out))
@@ -768,7 +768,7 @@ func TestOpenClawRecorderDoesNotRequireChildNodePATH(t *testing.T) {
 	opts.Executable = filepath.Join(opts.Home, "record-kata")
 	opts.Executable = openClawInstallRecorder(t, opts.Executable)
 	require.NoError(t, os.WriteFile(filepath.Join(opts.Home, "contract"), []byte("recorded"), 0600))
-	cmd := exec.Command(opts.Executable, "agent-contract-hook") //nolint:gosec // G204: controlled native fixture command or current test executable, with fixed test arguments.
+	cmd := exec.CommandContext(t.Context(), opts.Executable, "agent-contract-hook") //nolint:gosec // G204: controlled native fixture command or current test executable, with fixed test arguments.
 	cmd.Dir = opts.Home
 	cmd.Env = []string{"SystemRoot=" + os.Getenv("SystemRoot"), "OPENCLAW_TEST_ROOT=" + opts.Home, "PATH=" + filepath.Join(opts.Home, "empty")}
 	out, err := cmd.CombinedOutput()

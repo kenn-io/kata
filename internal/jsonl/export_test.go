@@ -82,7 +82,7 @@ func TestExportIncludesProjectPurgeLog(t *testing.T) {
 }
 
 func TestIssueSyncCurrentExportOrderAndProjectFilter(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openExportTestDB(t)
 	project, err := d.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
@@ -191,7 +191,7 @@ func TestIssueSyncCurrentExportOrderAndProjectFilter(t *testing.T) {
 }
 
 func TestExportReadOnlyLegacyV17GitHubStatusMapsCounts(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	writeLegacyV17GitHubStatusDB(t, path)
 	assertLegacyTableExists(t, path, "github_sync_bindings")
@@ -230,13 +230,13 @@ func assertLegacyTableExists(t *testing.T, path, table string) {
 	require.NoError(t, err)
 	defer func() { _ = raw.Close() }()
 	var name string
-	err = raw.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name)
+	err = raw.QueryRowContext(t.Context(), `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name)
 	require.NoError(t, err)
 	assert.Equal(t, table, name)
 }
 
 func TestExportReadOnlyLegacySQLiteUsesVersionAwareExporter(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	writeLegacyV1DB(t, path)
 	source, err := sqlitestore.Open(ctx, path, db.ReadOnly())
@@ -254,7 +254,7 @@ func TestExportReadOnlyLegacySQLiteUsesVersionAwareExporter(t *testing.T) {
 }
 
 func TestExportReadOnlyLegacyV12FederationRowsOmitMissingBoundActor(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	writeLegacyV12FederationDB(t, path)
 	source, err := sqlitestore.Open(ctx, path, db.ReadOnly())
@@ -283,7 +283,7 @@ func TestExportReadOnlyLegacyV12FederationRowsOmitMissingBoundActor(t *testing.T
 }
 
 func TestExportReadOnlyLegacyV13FederationRowsPreserveBoundActor(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	writeLegacyV13FederationDB(t, path)
 	source, err := sqlitestore.Open(ctx, path, db.ReadOnly())
@@ -320,7 +320,7 @@ func TestExportReadOnlyLegacyV13FederationRowsPreserveBoundActor(t *testing.T) {
 	assert.True(t, binding.PushEnabled)
 	assert.Equal(t, "legacy-actor", binding.Actor)
 	var enrollmentCount int
-	require.NoError(t, target.QueryRow(`SELECT COUNT(*) FROM federation_enrollments WHERE bound_actor = 'legacy-actor'`).Scan(&enrollmentCount))
+	require.NoError(t, target.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM federation_enrollments WHERE bound_actor = 'legacy-actor'`).Scan(&enrollmentCount))
 	assert.Equal(t, 1, enrollmentCount)
 }
 
@@ -466,7 +466,7 @@ func indexOfKind(kinds []string, want string) int {
 }
 
 func TestExportProjectIDFiltersProjectScopedRows(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openExportTestDB(t)
 	p1, err := d.CreateProject(ctx, "kata")
 	require.NoError(t, err)
@@ -487,7 +487,7 @@ func TestExportProjectIDFiltersProjectScopedRows(t *testing.T) {
 }
 
 func TestExportProjectIDOmitsRelayEnrollmentsWithSystemParents(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openExportTestDB(t)
 	project, err := d.CreateProject(ctx, "shared-project")
 	require.NoError(t, err)
@@ -526,7 +526,7 @@ func TestExportProjectIDOmitsRelayEnrollmentsWithSystemParents(t *testing.T) {
 func TestLegacyProjectExportPreservesMovedIssueHistory(t *testing.T) {
 	for _, includeDeleted := range []bool{false, true} {
 		t.Run(fmt.Sprintf("include_deleted=%t", includeDeleted), func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			source := openExportTestDB(t)
 			from, err := source.CreateProject(ctx, "source-project")
 			require.NoError(t, err)
@@ -607,7 +607,7 @@ func TestExportUsesSingleSnapshot(t *testing.T) {
 func TestLegacyExportUIDOnlyPeersRespectProjection(t *testing.T) {
 	for _, peerState := range []string{"same-project", "other-project", "missing", "soft-deleted"} {
 		t.Run(peerState, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			source := openExportTestDB(t)
 			project, err := source.CreateProject(ctx, "source-project")
 			require.NoError(t, err)
@@ -1055,7 +1055,7 @@ func TestExportNoIncludeDeletedDropsFederatedEventForSoftDeletedIssueUID(t *test
 func openExportTestDB(t *testing.T) *sqlitestore.Store {
 	t.Helper()
 	t.Setenv("KATA_HOME", t.TempDir())
-	d, err := sqlitestore.Open(context.Background(), filepath.Join(t.TempDir(), "kata.db"))
+	d, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
 	return d
@@ -1064,7 +1064,7 @@ func openExportTestDB(t *testing.T) *sqlitestore.Store {
 func writeLegacyV12FederationDB(t *testing.T, path string) {
 	t.Helper()
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	current, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
 	project, err := current.CreateProject(ctx, "legacy-fed")
@@ -1088,7 +1088,7 @@ func writeLegacyV12FederationDB(t *testing.T, path string) {
 	raw, err := sql.Open("sqlite", path)
 	require.NoError(t, err)
 	defer func() { _ = raw.Close() }()
-	_, err = raw.Exec(`
+	_, err = raw.ExecContext(t.Context(), `
 		PRAGMA foreign_keys = OFF;
 
 		DROP INDEX IF EXISTS idx_federation_bindings_role_enabled;
@@ -1162,7 +1162,7 @@ func writeLegacyV12FederationDB(t *testing.T, path string) {
 func writeLegacyV13FederationDB(t *testing.T, path string) {
 	t.Helper()
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	current, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
 	project, err := current.CreateProject(ctx, "legacy-fed")
@@ -1192,7 +1192,7 @@ func writeLegacyV13FederationDB(t *testing.T, path string) {
 func writeLegacyV17GitHubStatusDB(t *testing.T, path string) {
 	t.Helper()
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	current, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
 	project, err := current.CreateProject(ctx, "legacy-github")
@@ -1212,7 +1212,7 @@ func writeLegacyV17GitHubStatusDB(t *testing.T, path string) {
 	raw, err := sql.Open("sqlite", path)
 	require.NoError(t, err)
 	defer func() { _ = raw.Close() }()
-	_, err = raw.Exec(`
+	_, err = raw.ExecContext(t.Context(), `
 		PRAGMA foreign_keys = OFF;
 
 		CREATE TABLE github_sync_bindings (
@@ -1275,7 +1275,7 @@ func writeLegacyV17GitHubStatusDB(t *testing.T, path string) {
 // used by most export tests.
 func newExportEnv(t *testing.T) (context.Context, *sqlitestore.Store, db.Project) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openExportTestDB(t)
 	p, err := d.CreateProject(ctx, "kata")
 	require.NoError(t, err)
@@ -1393,7 +1393,7 @@ type notionExportFixture struct {
 
 func exportNotionFixture(t *testing.T) notionExportFixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	s := openExportTestDB(t)
 	p, err := s.CreateProject(ctx, "example-notion-project")
 	require.NoError(t, err)

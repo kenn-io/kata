@@ -21,7 +21,7 @@ import (
 func TestLiveGitHubParentGraphQLMatchesREST(t *testing.T) {
 	binding, childNumber, parentNumber, token := liveGitHubParentTestConfig(t)
 	fetcher := liveGitHubHTTPFetcher(token)
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
 
 	data, err := fetcher.ParentData(ctx, binding, ParentRequest{})
@@ -43,7 +43,7 @@ func TestLiveGitHubReparentMutationBehavior(t *testing.T) {
 	}
 	binding, childNumber, _, targetParentNumber, token := liveGitHubReparentTestConfig(t)
 	fetcher := liveGitHubHTTPFetcher(token)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 
 	child := liveGitHubRESTIssue(ctx, t, fetcher, binding, fmt.Sprintf("%s/issues/%d", repositoryEndpoint(binding), childNumber))
@@ -63,7 +63,7 @@ func TestLiveGitHubReparentMutationBehavior(t *testing.T) {
 		if !reparented {
 			return
 		}
-		restoreCtx, restoreCancel := context.WithTimeout(context.Background(), 45*time.Second)
+		restoreCtx, restoreCancel := context.WithTimeout(t.Context(), 45*time.Second)
 		defer restoreCancel()
 		if hasOriginalParent {
 			_ = liveGitHubSubIssueRequest(restoreCtx, fetcher, binding, http.MethodPost,

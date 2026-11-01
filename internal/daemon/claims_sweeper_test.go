@@ -16,7 +16,7 @@ import (
 )
 
 func TestTimedClaimSweeperExpiresOnlyHubClaimsAndFansOutEvents(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t)
 	now := time.Date(2026, 5, 23, 18, 0, 0, 0, time.UTC)
 	hubProject, hubIssue := createClaimHubIssue(t, env)
@@ -93,7 +93,7 @@ func TestTimedClaimSweeperExpiresOnlyHubClaimsAndFansOutEvents(t *testing.T) {
 }
 
 func TestTimedClaimSweeperSkipsArchivedHubBindings(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t)
 	now := time.Date(2026, 5, 23, 18, 0, 0, 0, time.UTC)
 	project, issue := createClaimHubIssue(t, env)
@@ -134,9 +134,9 @@ func TestTimedClaimSweeperSkipsArchivedHubBindings(t *testing.T) {
 }
 
 func TestTimedClaimSweeperRunReportsPassErrorsToOnError(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	store, err := sqlitestore.Open(context.Background(), filepath.Join(t.TempDir(), "kata.db"))
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
 	errCh := make(chan error, 1)

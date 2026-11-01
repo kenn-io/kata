@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -49,7 +48,7 @@ func TestSearchEndpoint_InsecureReadonlyUnauthenticatedAutoSearchStaysLexical(t 
 	env := testenv.New(t, testenv.WithInsecureReadonly(), func(cfg *daemon.ServerConfig) {
 		cfg.Embedder = emb
 	})
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
 	_, _, err = env.DB.CreateIssue(ctx, db.CreateIssueParams{
@@ -79,7 +78,7 @@ func TestSearchEndpoint_InsecureReadonlyUnauthenticatedExplicitVectorModesRequir
 	env := testenv.New(t, testenv.WithInsecureReadonly(), func(cfg *daemon.ServerConfig) {
 		cfg.Embedder = emb
 	})
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
 
@@ -175,7 +174,7 @@ func TestSearchEndpointMissingKeyIsValidation(t *testing.T) {
 	emb, err := embedding.New(embedding.Config{Credential: config.EmbeddingCredential{Source: "env:EXAMPLE_KEY", Reason: "no embedding API key (env EXAMPLE_KEY is unset)"}, BaseURL: "http://127.0.0.1:9", Model: "m", Dims: 2})
 	require.NoError(t, err)
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.Embedder = emb })
-	p, err := env.DB.CreateProject(context.Background(), "spoke-project")
+	p, err := env.DB.CreateProject(t.Context(), "spoke-project")
 	require.NoError(t, err)
 	// A configured embedder must explain the credential even before the index
 	// becomes usable. The absent index otherwise looks like unconfigured search.

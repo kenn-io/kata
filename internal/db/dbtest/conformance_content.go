@@ -58,7 +58,7 @@ func createFixtureIssue(
 // archived project hydrates into BlockedBy but must not set ActivelyBlocked,
 // and a soft-deleted parent is still a parent.
 func checkIssueRelationships(t *testing.T, store db.Storage) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	home, err := store.CreateProject(ctx, "spoke-project")
 	if err != nil {
 		return fmt.Errorf("create home project: %w", err)
@@ -158,7 +158,7 @@ func checkIssueRelationships(t *testing.T, store db.Storage) error {
 
 func checkComments(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	originalOwner := "original-author"
 	primary, err := createIssueFixture(
 		ctx, store, "comment-project", "comment behavior", "original-author", &originalOwner,
@@ -369,7 +369,7 @@ func checkComments(t *testing.T, store db.Storage) error {
 
 func checkLabels(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	fixture, err := createIssueFixture(ctx, store, "label-project", "first labeled issue", "label-author", nil)
 	if err != nil {
 		return err
@@ -520,7 +520,7 @@ func checkLabels(t *testing.T, store db.Storage) error {
 
 func checkLinksAndRelationshipProjections(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	primary, err := createIssueFixture(ctx, store, "relationship-project", "open child", "link-author", nil)
 	if err != nil {
 		return err
@@ -802,7 +802,7 @@ func checkLinksAndRelationshipProjections(t *testing.T, store db.Storage) error 
 
 func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	alice := "alice"
 	primary, err := createIssueFixture(
 		ctx, store, "discovery-project", "login crash", "discovery-author", &alice,

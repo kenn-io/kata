@@ -71,7 +71,7 @@ type notionLifecycleHarness struct {
 func newNotionLifecycleHarness(t *testing.T, customize func(*daemon.ServerConfig)) *notionLifecycleHarness {
 	t.Helper()
 	d := openTestDB(t)
-	project, err := d.db.CreateProject(context.Background(), "example-project")
+	project, err := d.db.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
 	h := &notionLifecycleHarness{store: d.db, project: project, fetcher: newLifecycleNotionFetcher()}
 	cfg := daemon.ServerConfig{DB: d.db, StartedAt: d.now, NotionSyncFetcher: h.fetcher, NotionSyncWake: func() { h.wakes.Add(1) }, GitHubSyncWake: func() { h.githubWakes.Add(1) }}
@@ -132,7 +132,7 @@ func TestNotionEnableLifecycle(t *testing.T) {
 			body := notionEnableBody()
 			tc.change(h, body)
 			out := h.enable(t, body, tc.want)
-			stored, err := h.store.IssueSyncBindingByProject(context.Background(), h.project.ID)
+			stored, err := h.store.IssueSyncBindingByProject(t.Context(), h.project.ID)
 			if tc.want != 200 {
 				require.ErrorIs(t, err, db.ErrNotFound)
 				require.Zero(t, h.wakes.Load())
@@ -212,14 +212,14 @@ func TestNotionEnableUntitledDataSourceUsesFallbackDisplayName(t *testing.T) {
 	out := h.enable(t, notionEnableBody(), http.StatusOK)
 	want := "Notion data source " + notionSourceID
 	require.Equal(t, want, out.Binding.DisplayName)
-	stored, err := h.store.IssueSyncBindingByProject(context.Background(), h.project.ID)
+	stored, err := h.store.IssueSyncBindingByProject(t.Context(), h.project.ID)
 	require.NoError(t, err)
 	require.Equal(t, want, stored.DisplayName)
 }
 
 func setNotionTestFederationBinding(t *testing.T, h *notionLifecycleHarness, role db.FederationRole, enabled bool) {
 	t.Helper()
-	_, err := h.store.UpsertFederationBinding(context.Background(), db.FederationBinding{
+	_, err := h.store.UpsertFederationBinding(t.Context(), db.FederationBinding{
 		ProjectID:            h.project.ID,
 		Role:                 role,
 		HubURL:               "http://127.0.0.1:7373",
@@ -252,7 +252,7 @@ func TestNotionEnableRejectsFederationSpokeWithNotionGuidance(t *testing.T) {
 			require.Zero(t, h.fetcher.forRunCalls.Load(), "local rejection must precede credential resolution")
 			require.Zero(t, h.fetcher.databaseCalls.Load())
 			require.Zero(t, h.fetcher.sourceCalls.Load())
-			_, err := h.store.IssueSyncBindingByProject(context.Background(), h.project.ID)
+			_, err := h.store.IssueSyncBindingByProject(t.Context(), h.project.ID)
 			require.ErrorIs(t, err, db.ErrNotFound)
 			require.Zero(t, h.wakes.Load())
 			require.Zero(t, h.githubWakes.Load())
@@ -289,14 +289,14 @@ func TestNotionEnableForeignBindingPrecedesCredentialResolution(t *testing.T) {
 	for _, enabled := range []bool{true, false} {
 		t.Run(fmt.Sprintf("enabled=%t", enabled), func(t *testing.T) {
 			h := newNotionLifecycleHarness(t, nil)
-			binding, err := h.store.UpsertIssueSyncBinding(context.Background(), db.UpsertIssueSyncBindingParams{
+			binding, err := h.store.UpsertIssueSyncBinding(t.Context(), db.UpsertIssueSyncBindingParams{
 				ProjectID: h.project.ID, Provider: "github", SourceKey: "github:R_exampleNode",
 				RemoteID: "R_exampleNode", DisplayName: "example-owner/example-repo",
 				Config: mustDaemonGitHubSyncConfig(t, "github.com", "example-owner", "example-repo", 12345), IntervalSeconds: 300,
 			})
 			require.NoError(t, err)
 			if !enabled {
-				_, err = h.store.DisableIssueSyncBinding(context.Background(), h.project.ID)
+				_, err = h.store.DisableIssueSyncBinding(t.Context(), h.project.ID)
 				require.NoError(t, err)
 			}
 			h.fetcher.credentialErr = errors.New("credentials unavailable")
@@ -306,7 +306,7 @@ func TestNotionEnableForeignBindingPrecedesCredentialResolution(t *testing.T) {
 			require.Zero(t, h.fetcher.forRunCalls.Load())
 			require.Zero(t, h.fetcher.databaseCalls.Load())
 			require.Zero(t, h.fetcher.sourceCalls.Load())
-			stored, err := h.store.IssueSyncBindingByProject(context.Background(), h.project.ID)
+			stored, err := h.store.IssueSyncBindingByProject(t.Context(), h.project.ID)
 			require.NoError(t, err)
 			require.Equal(t, binding.ID, stored.ID)
 			require.Equal(t, "github", stored.Provider)
@@ -325,7 +325,7 @@ func TestNotionEnableFederationChangeDuringValidationRemainsFenced(t *testing.T)
 	resp, body := postJSON(t, h.server, issueSyncEndpoint(h.project.ID, "notion", "enable"), notionEnableBody())
 	assertAPIError(t, resp.StatusCode, body, http.StatusConflict, "issue_sync_federation_conflict")
 	require.Contains(t, string(body), "enable Notion sync on the hub project")
-	_, err := h.store.IssueSyncBindingByProject(context.Background(), h.project.ID)
+	_, err := h.store.IssueSyncBindingByProject(t.Context(), h.project.ID)
 	require.ErrorIs(t, err, db.ErrNotFound)
 	require.Zero(t, h.wakes.Load())
 	require.Zero(t, h.githubWakes.Load())
@@ -361,32 +361,32 @@ func TestNotionEnableSincePresence(t *testing.T) {
 	body := notionEnableBody()
 	body["config"].(map[string]any)["since"] = "2026-01-01"
 	h.enable(t, body, 200)
-	binding, err := h.store.IssueSyncBindingByProject(context.Background(), h.project.ID)
+	binding, err := h.store.IssueSyncBindingByProject(t.Context(), h.project.ID)
 	require.NoError(t, err)
 	started := time.Now().UTC().Truncate(time.Second)
-	_, claimed, err := h.store.ClaimIssueSyncBinding(context.Background(), binding.ID, "notion", started, started.Add(-time.Hour))
+	_, claimed, err := h.store.ClaimIssueSyncBinding(t.Context(), binding.ID, "notion", started, started.Add(-time.Hour))
 	require.NoError(t, err)
 	require.True(t, claimed)
-	_, err = h.store.RecordIssueSyncSuccess(context.Background(), db.IssueSyncSuccessParams{BindingID: binding.ID, StartedAt: started, At: started, CursorAt: started})
+	_, err = h.store.RecordIssueSyncSuccess(t.Context(), db.IssueSyncSuccessParams{BindingID: binding.ID, StartedAt: started, At: started, CursorAt: started})
 	require.NoError(t, err)
 	out := h.enable(t, map[string]any{}, 200)
 	require.Equal(t, "2026-01-01T00:00:00Z", out.Binding.Config["since"])
-	binding, err = h.store.IssueSyncBindingByProject(context.Background(), h.project.ID)
+	binding, err = h.store.IssueSyncBindingByProject(t.Context(), h.project.ID)
 	require.NoError(t, err)
 	require.NotNil(t, binding.LastCursorAt)
 	out = h.enable(t, map[string]any{"config": map[string]any{"since": ""}}, 200)
 	require.Equal(t, "", out.Binding.Config["since"])
-	binding, err = h.store.IssueSyncBindingByProject(context.Background(), h.project.ID)
+	binding, err = h.store.IssueSyncBindingByProject(t.Context(), h.project.ID)
 	require.NoError(t, err)
 	require.Nil(t, binding.LastCursorAt)
-	_, claimed, err = h.store.ClaimIssueSyncBinding(context.Background(), binding.ID, "notion", started, started.Add(-time.Hour))
+	_, claimed, err = h.store.ClaimIssueSyncBinding(t.Context(), binding.ID, "notion", started, started.Add(-time.Hour))
 	require.NoError(t, err)
 	require.True(t, claimed)
-	_, err = h.store.RecordIssueSyncSuccess(context.Background(), db.IssueSyncSuccessParams{BindingID: binding.ID, StartedAt: started, At: started, CursorAt: started})
+	_, err = h.store.RecordIssueSyncSuccess(t.Context(), db.IssueSyncSuccessParams{BindingID: binding.ID, StartedAt: started, At: started, CursorAt: started})
 	require.NoError(t, err)
 	out = h.enable(t, map[string]any{"config": map[string]any{"since": "2026-02-01T01:00:00+01:00"}}, 200)
 	require.Equal(t, "2026-02-01T00:00:00Z", out.Binding.Config["since"])
-	binding, err = h.store.IssueSyncBindingByProject(context.Background(), h.project.ID)
+	binding, err = h.store.IssueSyncBindingByProject(t.Context(), h.project.ID)
 	require.NoError(t, err)
 	require.Nil(t, binding.LastCursorAt)
 }
@@ -403,7 +403,7 @@ func TestNotionEnableImmutableMapping(t *testing.T) {
 	h.fetcher.source.ID = notionDatabaseID
 	h.fetcher.database.DataSources = []notionsync.Option{{ID: notionDatabaseID, Name: "Other source"}}
 	h.enable(t, map[string]any{"config": map[string]any{"data_source_id": notionDatabaseID}}, 400)
-	binding, err := h.store.IssueSyncBindingByProject(context.Background(), h.project.ID)
+	binding, err := h.store.IssueSyncBindingByProject(t.Context(), h.project.ID)
 	require.NoError(t, err)
 	require.Equal(t, notionSourceID, binding.RemoteID)
 }
@@ -457,7 +457,7 @@ func TestNotionEnableConcurrentConfig(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("stale enable did not finish")
 			}
-			after, err := h.store.IssueSyncBindingByProject(context.Background(), h.project.ID)
+			after, err := h.store.IssueSyncBindingByProject(t.Context(), h.project.ID)
 			require.NoError(t, err)
 			require.Equal(t, out.Binding.IntervalSeconds, after.IntervalSeconds)
 			config, err := notionsync.DecodeConfig(after.Config)
@@ -516,7 +516,7 @@ func TestNotionStatusSelectsProviderProgress(t *testing.T) {
 	})
 	out := h.enable(t, notionEnableBody(), 200)
 	started := time.Now().UTC().Truncate(time.Second)
-	_, claimed, err := h.store.ClaimIssueSyncBinding(context.Background(), out.Binding.ID, "notion", started, started.Add(-time.Hour))
+	_, claimed, err := h.store.ClaimIssueSyncBinding(t.Context(), out.Binding.ID, "notion", started, started.Add(-time.Hour))
 	require.NoError(t, err)
 	require.True(t, claimed)
 	notionProgress.BeginWithPhase(out.Binding.ID, started, "content")
@@ -543,7 +543,7 @@ func TestNotionRouteAuthority(t *testing.T) {
 				headers = bearer("bootstrap-token")
 			}
 			env := testenv.New(t, options...)
-			project, err := env.DB.CreateProject(context.Background(), "example-project")
+			project, err := env.DB.CreateProject(t.Context(), "example-project")
 			require.NoError(t, err)
 			for _, action := range []string{"enable", "disable", "once"} {
 				body := map[string]any{}
@@ -557,13 +557,13 @@ func TestNotionRouteAuthority(t *testing.T) {
 				}
 				require.Equal(t, want, resp.StatusCode, string(raw))
 			}
-			_, err = env.DB.IssueSyncBindingByProject(context.Background(), project.ID)
+			_, err = env.DB.IssueSyncBindingByProject(t.Context(), project.ID)
 			require.ErrorIs(t, err, db.ErrNotFound)
 		})
 	}
 	t.Run("project scope", func(t *testing.T) {
 		d := openTestDB(t)
-		project, err := d.db.CreateProject(context.Background(), "example-project")
+		project, err := d.db.CreateProject(t.Context(), "example-project")
 		require.NoError(t, err)
 		server := daemon.NewServer(daemon.ServerConfig{DB: d.db, HostAccess: commentProjectHostAccess{deniedProjectID: project.ID}, NotionSyncFetcher: newLifecycleNotionFetcher()})
 		t.Cleanup(func() { _ = server.Close() })
@@ -580,7 +580,7 @@ func TestNotionRouteAuthority(t *testing.T) {
 	})
 	t.Run("browser local", func(t *testing.T) {
 		d := openTestDB(t)
-		project, err := d.db.CreateProject(context.Background(), "example-project")
+		project, err := d.db.CreateProject(t.Context(), "example-project")
 		require.NoError(t, err)
 		const origin = "http://127.0.0.1:27123"
 		manager, err := daemon.NewWebSessionManager(daemon.WebSessionManagerConfig{Origin: origin, InstanceID: "instance_a", Writable: true, DB: d.db})
@@ -592,7 +592,7 @@ func TestNotionRouteAuthority(t *testing.T) {
 		handler, err := server.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerBrowser, Origin: origin, RequireBrowserSession: true, AllowLocalSession: true})
 		require.NoError(t, err)
 		for _, action := range []string{"enable", "disable", "once"} {
-			request := httptest.NewRequest(http.MethodPost, origin+issueSyncEndpoint(project.ID, "notion", action), nil)
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, origin+issueSyncEndpoint(project.ID, "notion", action), nil)
 			request.AddCookie(manager.Cookie(issued.Cookie))
 			request.Header.Set("X-Kata-Web-Session", issued.Session)
 			request.Header.Set("X-Kata-CSRF", issued.CSRF)
@@ -630,7 +630,7 @@ func TestNotionEnableTitlePrefixPresence(t *testing.T) {
 			want = choice.(bool)
 		}
 		require.Equal(t, want, out.Binding.Config["title_prefix"])
-		stored, err := h.store.IssueSyncBindingByProject(context.Background(), h.project.ID)
+		stored, err := h.store.IssueSyncBindingByProject(t.Context(), h.project.ID)
 		require.NoError(t, err)
 		decoded, err := notionsync.DecodeConfig(stored.Config)
 		require.NoError(t, err)

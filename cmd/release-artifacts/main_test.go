@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,7 +14,7 @@ import (
 func TestRun_RequiresKnownSubcommand(t *testing.T) {
 	for _, args := range [][]string{nil, {"unknown"}} {
 		var stdout, stderr bytes.Buffer
-		err := run(context.Background(), args, &stdout, &stderr)
+		err := run(t.Context(), args, &stdout, &stderr)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "build-source")
 		assert.Contains(t, err.Error(), "verify-source")
@@ -30,7 +29,7 @@ func TestRun_BuildSourceRequiresVersionOutputAndMetadata(t *testing.T) {
 		{"build-source", "--version", "0.14.2", "--output", "source.tar.gz"},
 	} {
 		var stdout, stderr bytes.Buffer
-		err := run(context.Background(), args, &stdout, &stderr)
+		err := run(t.Context(), args, &stdout, &stderr)
 		require.Error(t, err)
 	}
 }
@@ -62,7 +61,7 @@ replace example.test/dependency => ./third_party/dependency
 	metadata := filepath.Join(t.TempDir(), "source-archive.json")
 	var stdout, stderr bytes.Buffer
 
-	err := run(context.Background(), []string{
+	err := run(t.Context(), []string{
 		"build-source", "--repo", repo, "--version", "0.14.2-SNAPSHOT", "--snapshot",
 		"--output", archive, "--metadata", metadata,
 	}, &stdout, &stderr)
@@ -74,7 +73,7 @@ replace example.test/dependency => ./third_party/dependency
 
 func runReleaseGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...) //nolint:gosec // fixed test helper arguments
+	cmd := exec.CommandContext(t.Context(), "git", args...) //nolint:gosec // fixed test helper arguments
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "%s", out)

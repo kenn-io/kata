@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -15,7 +14,7 @@ import (
 )
 
 func TestDueNotificationSweeperPublishesOrdinaryMetadataEvent(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t)
 	project, err := env.DB.CreateProject(ctx, "scheduled-project")
 	require.NoError(t, err)
@@ -67,7 +66,7 @@ func TestDueNotificationSweeperPublishesOrdinaryMetadataEvent(t *testing.T) {
 // The first sweep after an upgrade delivers an overdue schedule's inbox
 // request without replaying it as issue.scheduled_reached.
 func TestDueNotificationSweeperSkipsSchedulesOverdueBeforeFirstSweep(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t)
 	project, err := env.DB.CreateProject(ctx, "upgrade-project")
 	require.NoError(t, err)
@@ -87,7 +86,7 @@ func TestDueNotificationSweeperSkipsSchedulesOverdueBeforeFirstSweep(t *testing.
 }
 
 func TestDueNotificationSweeperPublishesReachedScheduleForInvalidRecipient(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t)
 	project, err := env.DB.CreateProject(ctx, "recipient-project")
 	require.NoError(t, err)
@@ -110,7 +109,7 @@ func TestDueNotificationSweeperPublishesReachedScheduleForInvalidRecipient(t *te
 }
 
 func TestDueNotificationSweeperContinuesAfterInvalidRecipient(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t)
 	project, err := env.DB.CreateProject(ctx, "recipient-project")
 	require.NoError(t, err)
