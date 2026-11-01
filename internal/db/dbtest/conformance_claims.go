@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -17,7 +16,7 @@ import (
 
 func checkClaimLeaseLifecycle(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "claim-lease-project")
 	if err != nil {
 		return err
@@ -350,7 +349,7 @@ func checkClaimLeaseLifecycle(t *testing.T, store db.Storage) error {
 
 func checkPendingClaimAndCacheLifecycle(t *testing.T, store db.Storage, backend Backend) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "pending-claim-project")
 	if err != nil {
 		return err
@@ -689,7 +688,7 @@ func checkClaimViolationQueries(t *testing.T, store db.Storage, backend Backend)
 	if backend.SeedClaimViolation == nil {
 		return errors.New("backend must seed claim violation fixtures")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "claim-violation-project")
 	if err != nil {
 		return err

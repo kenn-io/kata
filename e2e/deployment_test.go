@@ -4,6 +4,7 @@ package e2e_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -35,7 +36,8 @@ func TestVanillaDeploymentEnvironmentOnly(t *testing.T) {
 		fmt.Sprintf("KATA_LISTEN=0.0.0.0:%d", port), "KATA_TRUST_PRIVATE_NETWORK=1", "KATA_WEB_PUBLIC_ORIGIN="+base,
 		"KATA_BACKUP_DIR="+filepath.Join(home, "backups"), "KATA_BACKUP_INTERVAL=100ms", "KATA_BACKUP_RETAIN=1h")
 	start := func() *exec.Cmd {
-		cmd := exec.Command(bin, "daemon", "start", "--foreground") //nolint:gosec // test-owned binary
+		// t.Cleanup owns this process; t.Context() would kill it before that runs.
+		cmd := exec.CommandContext(context.WithoutCancel(t.Context()), bin, "daemon", "start", "--foreground") //nolint:gosec // test-owned binary
 		cmd.Env, cmd.Dir = env, workspace
 		stderr := &safeBuffer{}
 		cmd.Stderr = stderr
@@ -63,12 +65,16 @@ func TestVanillaDeploymentEnvironmentOnly(t *testing.T) {
 	require.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 	httpClient := &http.Client{Timeout: 5 * time.Second}
 	for _, path := range []string{"/api/v1/ping", "/api/v1/health"} {
-		resp, err := httpClient.Get(base + path)
+		req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, base+path, nil)
+		require.NoError(t, reqErr)
+		resp, err := httpClient.Do(req)
 		require.NoError(t, err)
 		_ = resp.Body.Close()
 		require.Equal(t, http.StatusOK, resp.StatusCode)
 	}
-	resp, err := httpClient.Get(base + "/api/v1/projects")
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, base+"/api/v1/projects", nil)
+	require.NoError(t, reqErr)
+	resp, err := httpClient.Do(req)
 	require.NoError(t, err)
 	_ = resp.Body.Close()
 	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
@@ -79,7 +85,7 @@ func TestVanillaDeploymentEnvironmentOnly(t *testing.T) {
 	require.NoError(t, err)
 	_ = resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	create := exec.Command(bin, "projects", "create", "example-project") //nolint:gosec // test-owned binary
+	create := exec.CommandContext(t.Context(), bin, "projects", "create", "example-project") //nolint:gosec // test-owned binary
 	create.Env, create.Dir = env, workspace
 	output, err := create.CombinedOutput()
 	require.NoError(t, err, string(output))

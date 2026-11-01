@@ -31,7 +31,7 @@ func newReconcilerTestStore(t *testing.T) *sqlitestore.Store {
 	t.Setenv("KATA_HOME", t.TempDir())
 	// Search fixtures seed a thousand issues; flushing each commit to disk dominated their runtime.
 	t.Setenv("KATA_TEST_FAST_SQLITE", "1")
-	ctx := context.Background()
+	ctx := t.Context()
 	d, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -63,7 +63,7 @@ func TestReconcilerLeaderRetriesWhenDrainAdmissionReopens(t *testing.T) {
 			},
 		},
 	)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- r.runLeader(ctx) }()
 
@@ -101,7 +101,7 @@ func TestReconcilerLeaderRetriesWhenDrainAdmissionReopens(t *testing.T) {
 func openTestVectorIndex(t *testing.T) *vector.Index {
 	t.Helper()
 	t.Setenv("KATA_TEST_FAST_SQLITE", "1")
-	idx, err := vector.Open(context.Background(), filepath.Join(t.TempDir(), "vectors.db"))
+	idx, err := vector.Open(t.Context(), filepath.Join(t.TempDir(), "vectors.db"))
 	if err != nil {
 		t.Fatalf("open vector index: %v", err)
 	}
@@ -160,7 +160,7 @@ func (f *fakeEmbedder) EncodeFunc() kitvec.EncodeFunc {
 }
 
 func TestReconcileOnceEmbedsAndActivates(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	proj, _ := store.CreateProject(ctx, "spoke-project")
 	for range 3 {
@@ -195,7 +195,7 @@ func TestReconcileOnceEmbedsAndActivates(t *testing.T) {
 // failing embedder interrupts reconcileOnce mid-fill, proving activation did
 // not wait for the fill to complete.
 func TestReconcileOnceColdStartActivatesBeforeFill(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	proj, _ := store.CreateProject(ctx, "spoke-project")
 	if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: proj.ID, Title: "t", Body: "b", Author: "x"}); err != nil {
@@ -222,7 +222,7 @@ func TestReconcileOnceColdStartActivatesBeforeFill(t *testing.T) {
 // one is built in the background and only cut over once its fill completes —
 // an interrupted fill leaves the old generation serving.
 func TestReconcileOnceModelChangeKeepsOldActiveDuringBackfill(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	proj, _ := store.CreateProject(ctx, "spoke-project")
 	if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: proj.ID, Title: "t", Body: "b", Author: "x"}); err != nil {
@@ -250,7 +250,7 @@ func TestReconcileOnceModelChangeKeepsOldActiveDuringBackfill(t *testing.T) {
 }
 
 func TestReconcileOnceModelChangeCutsOver(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	proj, _ := store.CreateProject(ctx, "spoke-project")
 	if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: proj.ID, Title: "t", Body: "b", Author: "x"}); err != nil {
@@ -403,7 +403,7 @@ func (e *reconcilerArtifactEmbedder) inputs() [][]string {
 }
 
 func TestReconcileErrorReportsPendingBacklog(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	proj, _ := store.CreateProject(ctx, "spoke-project")
 	for range 2 {
@@ -424,7 +424,7 @@ func TestReconcileErrorReportsPendingBacklog(t *testing.T) {
 }
 
 func TestReconcileReportsProgressDuringFill(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	proj, _ := store.CreateProject(ctx, "spoke-project")
 	for range 2 {
@@ -463,7 +463,7 @@ func TestReconcileReportsProgressDuringFill(t *testing.T) {
 }
 
 func TestReconcileReportsSmoothedRateAndETA(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	proj, _ := store.CreateProject(ctx, "spoke-project")
 	for range 3 {
@@ -566,7 +566,7 @@ func TestEmbeddingProgressEstimatorResetsAcrossDiscontinuities(t *testing.T) {
 // refresh: when the fill stamps some documents before failing, health must
 // report only what is still pending, not the pre-fill count.
 func TestReconcileFillErrorRefreshesPartialBacklog(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	proj, _ := store.CreateProject(ctx, "spoke-project")
 	for range 2 {
@@ -598,7 +598,7 @@ func TestReconcileFillErrorRefreshesPartialBacklog(t *testing.T) {
 }
 
 func TestReconcileDefinitiveErrorPinsHealth(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	proj, _ := store.CreateProject(ctx, "spoke-project")
 	_, _, _ = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: proj.ID, Title: "t", Body: "b", Author: "x"})

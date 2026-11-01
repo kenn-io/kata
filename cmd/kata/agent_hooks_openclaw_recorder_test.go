@@ -18,7 +18,7 @@ func openClawInstallRecorder(t *testing.T, target string) string {
 	if runtime.GOOS == "windows" && filepath.Ext(target) != ".exe" {
 		target += ".exe"
 	}
-	cmd := exec.Command("go", "build", "-o", target, "./testdata/openclaw/recorder") //nolint:gosec // G204: fixed Go recorder source and isolated output path.
+	cmd := exec.CommandContext(t.Context(), "go", "build", "-o", target, "./testdata/openclaw/recorder") //nolint:gosec // G204: fixed Go recorder source and isolated output path.
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
 	return target

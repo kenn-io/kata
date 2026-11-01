@@ -124,7 +124,7 @@ func TestClose_RetryProtocolMarkerIsCloseOnly(t *testing.T) {
 
 func TestClose_IdempotencyReplaysCommittedReceipt(t *testing.T) {
 	h, ts, projectID, issueID := bootstrapProjectWithIssue(t)
-	issue, err := h.DB().IssueByID(context.Background(), issueID)
+	issue, err := h.DB().IssueByID(t.Context(), issueID)
 	require.NoError(t, err)
 	path := issueURLRef(projectID, issue.ShortID, "actions/close")
 	headers := map[string]string{
@@ -159,7 +159,7 @@ func TestClose_IdempotencyReplaysCommittedReceipt(t *testing.T) {
 	require.NotNil(t, secondOut.Body.OriginalEvent)
 	assert.Equal(t, firstOut.Body.Event.UID, secondOut.Body.OriginalEvent.UID)
 
-	events, err := h.DB().EventsAfter(context.Background(), db.EventsAfterParams{
+	events, err := h.DB().EventsAfter(t.Context(), db.EventsAfterParams{
 		ProjectID: projectID,
 		Limit:     100,
 	})
@@ -175,7 +175,7 @@ func TestClose_IdempotencyReplaysCommittedReceipt(t *testing.T) {
 
 func TestClose_IdempotencyReplaysReceiptAfterSoftDelete(t *testing.T) {
 	h, ts, projectID, issueID := bootstrapProjectWithIssue(t)
-	issue, err := h.DB().IssueByID(context.Background(), issueID)
+	issue, err := h.DB().IssueByID(t.Context(), issueID)
 	require.NoError(t, err)
 	path := issueURLRef(projectID, issue.ShortID, "actions/close")
 	headers := map[string]string{"Idempotency-Key": "close-request-then-delete"}
@@ -192,7 +192,7 @@ func TestClose_IdempotencyReplaysReceiptAfterSoftDelete(t *testing.T) {
 	require.NoError(t, json.Unmarshal(first.body, &firstOut.Body))
 	require.NotNil(t, firstOut.Body.Event)
 
-	_, _, changed, err := h.DB().SoftDeleteIssue(context.Background(), issueID, "agent-one")
+	_, _, changed, err := h.DB().SoftDeleteIssue(t.Context(), issueID, "agent-one")
 	require.NoError(t, err)
 	require.True(t, changed)
 
@@ -451,7 +451,7 @@ func TestClose_IdempotencyRejectsDifferentIssueWithSameBody(t *testing.T) {
 
 func TestClose_IfMatchRejectsStaleRevision(t *testing.T) {
 	h, ts, projectID, issueID := bootstrapProjectWithIssue(t)
-	_, err := h.DB().PatchIssueMetadata(context.Background(), db.PatchIssueMetadataIn{
+	_, err := h.DB().PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
 		IssueID: issueID,
 		Actor:   "coordinator",
 		Patch: map[string]jsontext.Value{
@@ -474,7 +474,7 @@ func TestClose_IfMatchRejectsStaleRevision(t *testing.T) {
 	assertAPIError(t, response.status, response.body,
 		http.StatusPreconditionFailed, "revision_conflict")
 
-	issue, err := h.DB().IssueByID(context.Background(), issueID)
+	issue, err := h.DB().IssueByID(t.Context(), issueID)
 	require.NoError(t, err)
 	assert.Equal(t, "open", issue.Status)
 }
@@ -491,14 +491,14 @@ func TestClose_PresentEmptyIfMatchRejectsRequest(t *testing.T) {
 	assertAPIError(t, response.status, response.body,
 		http.StatusBadRequest, "validation")
 
-	issue, err := h.DB().IssueByID(context.Background(), issueID)
+	issue, err := h.DB().IssueByID(t.Context(), issueID)
 	require.NoError(t, err)
 	assert.Equal(t, "open", issue.Status)
 }
 
 func TestClose_IfMatchRejectsStaleRevisionAfterAnotherClose(t *testing.T) {
 	h, ts, projectID, issueID := bootstrapProjectWithIssue(t)
-	_, err := h.DB().PatchIssueMetadata(context.Background(), db.PatchIssueMetadataIn{
+	_, err := h.DB().PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
 		IssueID: issueID,
 		Actor:   "coordinator",
 		Patch: map[string]jsontext.Value{

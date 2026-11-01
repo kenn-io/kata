@@ -115,7 +115,7 @@ func findCommand(t *testing.T, path ...string) *cobra.Command {
 
 func closedLoopbackAddr(t *testing.T) string {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	addr := listener.Addr().String()
 	require.NoError(t, listener.Close())
@@ -246,7 +246,7 @@ func TestCLIUseNeverStartsDaemon(t *testing.T) {
 		require.Error(t, err)
 		assert.Equal(t, ExitDaemonUnavail, exitCodeForErr(err, true))
 		t.Setenv("KATA_SERVER", "")
-		_, err = discoverDaemon(context.Background())
+		_, err = discoverDaemon(t.Context())
 		var ce *cliError
 		require.ErrorAs(t, err, &ce)
 		assert.Contains(t, ce.Message, "no daemon running")
@@ -263,13 +263,13 @@ func TestCLIUseNeverStartsDaemon(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		cmd.SetOut(&stdout)
 		cmd.SetErr(&stderr)
-		cmd.SetContext(context.Background())
+		cmd.SetContext(t.Context())
 
 		settledCLIUse(t, func(*testing.T) { reportCLIUse(cmd) })
 
 		assert.Empty(t, stdout.String())
 		assert.Empty(t, stderr.String())
-		_, err := discoverDaemon(context.Background())
+		_, err := discoverDaemon(t.Context())
 		var ce *cliError
 		require.ErrorAs(t, err, &ce)
 		assert.Contains(t, ce.Message, "no daemon running")
@@ -283,7 +283,7 @@ func TestCLIUseNeverStartsDaemon(t *testing.T) {
 		require.Contains(t, output, "SessionStart")
 		require.Empty(t, stderr)
 		t.Setenv("KATA_SERVER", "")
-		_, err = discoverDaemon(context.Background())
+		_, err = discoverDaemon(t.Context())
 		require.ErrorContains(t, err, "no daemon running")
 	})
 }
@@ -316,7 +316,7 @@ func TestCLIUseReportsAfterCanceledContext(t *testing.T) {
 	env := newCLIUseEnv(t, capture)
 	cmd := findCommand(t, "events")
 	cliUseTarget.Store(&client.ResolvedDaemon{BaseURL: env.URL})
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	cmd.SetContext(ctx)
 
@@ -373,7 +373,7 @@ func setCLIUseClock(t *testing.T, now time.Time) {
 func reportCLIUseTo(t *testing.T, url string) {
 	t.Helper()
 	cmd := findCommand(t, "projects", "list")
-	cmd.SetContext(context.Background())
+	cmd.SetContext(t.Context())
 	cliUseTarget.Store(&client.ResolvedDaemon{BaseURL: url})
 	t.Cleanup(func() { cliUseTarget.Store(nil) })
 	reportCLIUse(cmd)

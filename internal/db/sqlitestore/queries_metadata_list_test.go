@@ -1,7 +1,6 @@
 package sqlitestore_test
 
 import (
-	"context"
 	"encoding/json/jsontext"
 	"testing"
 
@@ -14,7 +13,7 @@ import (
 // makeIssueWithMetadata creates an issue with the given metadata blob.
 func makeIssueWithMetadata(t *testing.T, d *sqlitestore.Store, projectID int64, title string, meta map[string]jsontext.Value) db.Issue {
 	t.Helper()
-	issue, _, err := d.CreateIssue(context.Background(), db.CreateIssueParams{
+	issue, _, err := d.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: projectID,
 		Title:     title,
 		Author:    "tester",

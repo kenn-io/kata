@@ -20,7 +20,7 @@ import (
 )
 
 func TestHybridSearchLexicalWhenUnconfigured(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	proj, _ := store.CreateProject(ctx, "spoke-project")
 	if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: proj.ID, Title: "login race", Body: "x", Author: "a"}); err != nil {
@@ -42,7 +42,7 @@ func TestHybridSearchLexicalWhenUnconfigured(t *testing.T) {
 }
 
 func TestHybridSearchExplicitHybridUnconfiguredErrors(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	proj, _ := store.CreateProject(ctx, "spoke-project")
 	_, err := hybridSearch(ctx, store, nil, nil, hybridParams{ProjectID: proj.ID, Query: "x", Limit: 10, Requested: "hybrid"})
@@ -140,7 +140,7 @@ func fillGeneration(ctx context.Context, t *testing.T, store db.Storage, idx *ve
 }
 
 func TestHybridSearchAutoDegradesOnVectorFailure(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	proj, _ := store.CreateProject(ctx, "spoke-project")
 	if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: proj.ID, Title: "login race", Body: "x", Author: "a"}); err != nil {
@@ -167,7 +167,7 @@ func TestHybridSearchAutoDegradesOnVectorFailure(t *testing.T) {
 }
 
 func TestHybridSearchExplicitHybridLegFailureReturns503(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	proj, _ := store.CreateProject(ctx, "spoke-project")
 	if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: proj.ID, Title: "login race", Body: "x", Author: "a"}); err != nil {
@@ -197,7 +197,7 @@ func TestVectorLegUnavailable_CredentialFailureWithNilIndexPreservesReason(t *te
 		{"keyless", "missing", "provider requires an API key (401)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store := newReconcilerTestStore(t)
 			proj, err := store.CreateProject(ctx, "spoke-project")
 			require.NoError(t, err)
@@ -239,7 +239,7 @@ func TestVectorLegUnavailable_CredentialFailureWithNilIndexPreservesReason(t *te
 }
 
 func TestHybridSearchScopedSemanticFailsClosedAndAutoUsesLexical(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	project, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
@@ -278,7 +278,7 @@ func TestHybridSearchScopedSemanticFailsClosedAndAutoUsesLexical(t *testing.T) {
 // hydrating against live kata.db rows must strip both before they ever reach
 // a caller scoped to one project.
 func TestVectorLegExcludesOtherProjectsAndDeleted(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 
 	projA, err := store.CreateProject(ctx, "spoke-project-a")
@@ -352,7 +352,7 @@ func TestVectorLegExcludesOtherProjectsAndDeleted(t *testing.T) {
 // must refuse to serve — auto degrades labeled, explicit semantic is 503 —
 // until the new generation cuts over.
 func TestVectorLegModelChangeBackfillUnavailable(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	proj, err := store.CreateProject(ctx, "spoke-project")
 	if err != nil {
@@ -398,7 +398,7 @@ func TestVectorLegModelChangeBackfillUnavailable(t *testing.T) {
 // while deleted and no search — not even include_deleted — ranks it
 // semantically. Restoring the issue re-mirrors and re-embeds it.
 func TestVectorLegSoftDeleteDropsFromIndexUntilRestore(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	proj, err := store.CreateProject(ctx, "spoke-project")
 	if err != nil {
@@ -475,7 +475,7 @@ func TestVectorLegSoftDeleteDropsFromIndexUntilRestore(t *testing.T) {
 // in-project hits than wanted, one deeper query (knnDeepLimit) must recover
 // the requested project's match.
 func TestVectorLegDeepRetryBeatsCrossProjectStarvation(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	projA, err := store.CreateProject(ctx, "spoke-project-a")
 	if err != nil {
@@ -537,7 +537,7 @@ func TestVectorLegDeepRetryBeatsCrossProjectStarvation(t *testing.T) {
 // itself fails, so auto degrades with a reason and an explicit request gets a
 // 503.
 func TestVectorLegUnavailableDegradesInAutoAndFailsExplicit(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("nil index is treated as unconfigured", func(t *testing.T) {
 		store := newReconcilerTestStore(t)
@@ -630,7 +630,7 @@ func hitTitles(hits []db.SearchCandidate) []string {
 // only be absent from a hybrid response if the FTS predicate and the vector
 // leg's own check both applied.
 func TestHybridSearchLabelFilterAppliesToBothLegs(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	proj, err := store.CreateProject(ctx, "spoke-project")
 	if err != nil {
@@ -711,7 +711,7 @@ func TestHybridSearchLabelFilterAppliesToBothLegs(t *testing.T) {
 // canonical labels. Every fixture shares one vector, so labels are the only
 // thing separating them.
 func TestSemanticSearchLabelANDAndExclusion(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	proj, err := store.CreateProject(ctx, "spoke-project")
 	if err != nil {
@@ -776,7 +776,7 @@ func (s *labelsByIssuesCountingStore) LabelsByIssues(ctx context.Context, projec
 }
 
 func TestSemanticSearchHydratesLabelsOncePerCandidateBatch(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	proj, err := store.CreateProject(ctx, "spoke-project")
 	if err != nil {
@@ -815,7 +815,7 @@ func TestSemanticSearchHydratesLabelsOncePerCandidateBatch(t *testing.T) {
 // re-queries at knnDeepLimit. The index holds fewer chunks than that ceiling,
 // so the short result is exact and must not be flagged degraded.
 func TestVectorLegLabelFilterUsesDeepRetry(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	proj, err := store.CreateProject(ctx, "spoke-project")
 	if err != nil {
@@ -865,7 +865,7 @@ func TestVectorLegLabelFilterUsesDeepRetry(t *testing.T) {
 // KNN slot even though the freshness join removes it from returned hits, so
 // the retry decision cannot rely on len(hits) alone.
 func TestVectorLegLabelFilterRetriesPastStaleInitialSQLiteWindow(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	proj, err := store.CreateProject(ctx, "spoke-project")
 	if err != nil {
@@ -952,7 +952,7 @@ func TestSearchLabelCeilingRequiresRelevantProbeCandidate(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store := newReconcilerTestStore(t)
 			proj, err := store.CreateProject(ctx, "spoke-project")
 			if err != nil {
@@ -1064,7 +1064,7 @@ func seedLabelCeilingCorpus(ctx context.Context, t *testing.T, store db.Storage,
 // modes, which fail when the bounded semantic leg cannot prove completeness,
 // and auto mode, which may return the reachable hits with a degraded signal.
 func TestSearchLabelCeilingHonorsModeStrictness(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	proj, err := store.CreateProject(ctx, "spoke-project")
 	if err != nil {
@@ -1138,7 +1138,7 @@ func TestSearchLabelCeilingHonorsModeStrictness(t *testing.T) {
 }
 
 func TestSearchEndpointReturnsAvailablePageAtCandidateCeiling(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	project, err := store.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
@@ -1152,7 +1152,9 @@ func TestSearchEndpointReturnsAvailablePageAtCandidateCeiling(t *testing.T) {
 		server.Close()
 		_ = srv.Close()
 	})
-	response, err := server.Client().Get(fmt.Sprintf("%s/api/v1/projects/%d/search?q=login+race&mode=semantic&limit=%d&label=bug", server.URL, project.ID, ceilingSurvivors))
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d/search?q=login+race&mode=semantic&limit=%d&label=bug", server.URL, project.ID, ceilingSurvivors), nil)
+	require.NoError(t, reqErr)
+	response, err := server.Client().Do(req)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 	require.Equal(t, http.StatusOK, response.StatusCode)
@@ -1180,7 +1182,7 @@ func TestSearchEndpointReturnsAvailablePageAtCandidateCeiling(t *testing.T) {
 }
 
 func TestSearchEndpointHybridHonorsRequestedLimitAboveCandidateCap(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	project, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
@@ -1215,7 +1217,9 @@ func TestSearchEndpointHybridHonorsRequestedLimitAboveCandidateCap(t *testing.T)
 		server.Close()
 		_ = srv.Close()
 	})
-	response, err := server.Client().Get(fmt.Sprintf("%s/api/v1/projects/%d/search?q=hybridresultneedle&mode=hybrid&limit=%d", server.URL, project.ID, perLeg*2))
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d/search?q=hybridresultneedle&mode=hybrid&limit=%d", server.URL, project.ID, perLeg*2), nil)
+	require.NoError(t, reqErr)
+	response, err := server.Client().Do(req)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 	require.Equal(t, http.StatusOK, response.StatusCode)
@@ -1232,7 +1236,7 @@ func TestSearchEndpointHybridHonorsRequestedLimitAboveCandidateCap(t *testing.T)
 }
 
 func TestSearchLabelCeilingProbeSurvivesStaleSQLiteVector(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	proj, err := store.CreateProject(ctx, "spoke-project")
 	if err != nil {
@@ -1295,7 +1299,7 @@ func TestSearchLabelCeilingProbeSurvivesStaleSQLiteVector(t *testing.T) {
 // vector because project authorization is applied before candidate limits.
 // The ceiling signal remains specific to label filters.
 func TestUnfilteredSearchNeverSetsCeilingDegraded(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	proj, err := store.CreateProject(ctx, "spoke-project-a")
 	if err != nil {

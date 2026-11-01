@@ -68,7 +68,7 @@ func checkMoveTree(t *testing.T, store db.Storage) error {
 // whole tree, in previews and writes, and names the refusing descendant; a stale
 // root revision also rejects it.
 func checkMoveTreeGuards(t *testing.T, store db.Storage) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	source, err := store.CreateProject(ctx, "guard-source")
 	require.NoError(t, err)
 	target, err := store.CreateProject(ctx, "guard-target")

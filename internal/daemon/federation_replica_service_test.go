@@ -387,7 +387,7 @@ func TestEnsureFederationReplicaCreatesProjectBindingAndCredential(t *testing.T)
 	wakes := 0
 
 	result, err := daemon.EnsureFederationReplica(
-		context.Background(), store, credentials, func() { wakes++ }, replicaServiceParams(),
+		t.Context(), store, credentials, func() { wakes++ }, replicaServiceParams(),
 	)
 
 	require.NoError(t, err)
@@ -403,7 +403,7 @@ func TestEnsureFederationReplicaCreatesProjectBindingAndCredential(t *testing.T)
 	assert.Zero(t, result.AdoptionSnapshotCount)
 	assert.Equal(t, 1, wakes)
 
-	stored, ok, err := credentials.FederationCredential(context.Background(), result.Project.UID)
+	stored, ok, err := credentials.FederationCredential(t.Context(), result.Project.UID)
 	require.NoError(t, err)
 	require.True(t, ok)
 	assert.Equal(t, "pull,push", stored.Capabilities)
@@ -423,13 +423,13 @@ func TestEnsureFederationReplicaPreservesHubURLPathPrefix(t *testing.T) {
 	params.Credential.HubURL = params.HubURL
 
 	result, err := daemon.EnsureFederationReplica(
-		context.Background(), store, credentials, nil, params,
+		t.Context(), store, credentials, nil, params,
 	)
 
 	require.NoError(t, err)
 	assert.Equal(t, "https://daemon.example/kata/hub", result.Binding.HubURL)
 	stored, found, err := credentials.FederationCredential(
-		context.Background(), result.Project.UID,
+		t.Context(), result.Project.UID,
 	)
 	require.NoError(t, err)
 	require.True(t, found)
@@ -444,13 +444,13 @@ func TestEnsureFederationReplicaPreservesEscapedHubURLPathPrefix(t *testing.T) {
 	params.Credential.HubURL = params.HubURL
 
 	result, err := daemon.EnsureFederationReplica(
-		context.Background(), store, credentials, nil, params,
+		t.Context(), store, credentials, nil, params,
 	)
 
 	require.NoError(t, err)
 	assert.Equal(t, "https://daemon.example/kata%2Fhub", result.Binding.HubURL)
 	stored, found, err := credentials.FederationCredential(
-		context.Background(), result.Project.UID,
+		t.Context(), result.Project.UID,
 	)
 	require.NoError(t, err)
 	require.True(t, found)
@@ -518,7 +518,7 @@ func TestEnsureFederationReplicaRejectsUnsafeHubURLComponents(t *testing.T) {
 			params.Credential.HubURL = tt.hubURL
 
 			result, err := daemon.EnsureFederationReplica(
-				context.Background(), store, credentials, nil, params,
+				t.Context(), store, credentials, nil, params,
 			)
 
 			if tt.wantErr {
@@ -573,13 +573,13 @@ func TestEnsureFederationReplicaRejectsMalformedHubOrigins(t *testing.T) {
 			params.Credential.HubURL = tt.hubURL
 
 			_, err := daemon.EnsureFederationReplica(
-				context.Background(), store, credentials, nil, params,
+				t.Context(), store, credentials, nil, params,
 			)
 
 			require.Error(t, err)
 			assert.ErrorIs(t, err, daemon.ErrFederationReplicaInvalidInput)
 			assert.NotContains(t, err.Error(), tt.marker)
-			projects, listErr := store.ListProjects(context.Background())
+			projects, listErr := store.ListProjects(t.Context())
 			require.NoError(t, listErr)
 			assert.Empty(t, projects)
 			assert.Zero(t, credentials.storeCallCount())
@@ -588,7 +588,7 @@ func TestEnsureFederationReplicaRejectsMalformedHubOrigins(t *testing.T) {
 }
 
 func TestLeaveFederationReplicaCredentialCleanupFailureResumesWithoutExtraWake(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	credentials := newReplicaCredentialStore()
 	created, err := daemon.EnsureFederationReplica(
@@ -627,7 +627,7 @@ func TestLeaveFederationReplicaCredentialCleanupFailureResumesWithoutExtraWake(t
 }
 
 func TestReserveFederationReplicaCredentialRequiresManagedStore(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	project, err := store.CreateProjectWithUID(
 		ctx, "spoke-project", replicaLocalProjectUID,
@@ -657,7 +657,7 @@ func TestReserveFederationReplicaCredentialRequiresManagedStore(t *testing.T) {
 }
 
 func TestReserveFederationReplicaCredentialRejectsBindingThatAppearedAfterPreflight(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	project, err := store.CreateProjectWithUID(
 		ctx, "spoke-project", replicaHubProjectUID,
@@ -743,7 +743,7 @@ func TestPrepareFederationReplicaLeaveFailurePublishesNoLeaveState(t *testing.T)
 		t.Helper()
 		store := openReplicaServiceStore(t)
 		project, err := store.CreateProjectWithUID(
-			context.Background(), "spoke-project", replicaLocalProjectUID,
+			t.Context(), "spoke-project", replicaLocalProjectUID,
 		)
 		require.NoError(t, err)
 		credentials := &prepareLeaveFailureCredentialStore{
@@ -753,7 +753,7 @@ func TestPrepareFederationReplicaLeaveFailurePublishesNoLeaveState(t *testing.T)
 		reservation.ManagedByConfig = true
 		reservation.SpokeProjectName = project.Name
 		require.NoError(t, credentials.ReserveManagedFederationCredential(
-			context.Background(), config.FederationManagedCredentialReservation{
+			t.Context(), config.FederationManagedCredentialReservation{
 				ProjectUID: replicaHubProjectUID,
 				Credential: reservation,
 			},
@@ -762,7 +762,7 @@ func TestPrepareFederationReplicaLeaveFailurePublishesNoLeaveState(t *testing.T)
 	}
 
 	t.Run("failed lookup never suppresses reconciliation", func(t *testing.T) {
-		ctx := context.Background()
+		ctx := t.Context()
 		store, project, credentials := newBoundStore(t)
 		suppressedDuringFind := false
 		credentials.onFind = func() {
@@ -780,7 +780,7 @@ func TestPrepareFederationReplicaLeaveFailurePublishesNoLeaveState(t *testing.T)
 	})
 
 	t.Run("failed durable mark never suppresses reconciliation", func(t *testing.T) {
-		ctx := context.Background()
+		ctx := t.Context()
 		store, project, credentials := newBoundStore(t)
 		suppressedDuringReplace := false
 		credentials.onReplace = func() {
@@ -803,7 +803,7 @@ func TestPrepareFederationReplicaLeaveFailurePublishesNoLeaveState(t *testing.T)
 	})
 
 	t.Run("failed retry preserves a completed leave", func(t *testing.T) {
-		ctx := context.Background()
+		ctx := t.Context()
 		store, project, credentials := newBoundStore(t)
 		_, err := daemon.LeaveFederationReplica(ctx, store, credentials, nil, project.ID)
 		require.NoError(t, err)
@@ -879,7 +879,7 @@ func TestPrepareFederationReplicaLeaveDrainsAndBlocksHubOperations(t *testing.T)
 }
 
 func TestLeaveFederationReplicaRequiresManagedStoreForMarkedProject(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	project, err := store.CreateProjectWithUID(
 		ctx, "spoke-project", replicaHubProjectUID,
@@ -918,7 +918,7 @@ func TestLeaveFederationReplicaRequiresManagedStoreForMarkedProject(t *testing.T
 
 func TestLeaveFederationReplicaCleansExactManagedReservation(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	project, err := store.CreateProjectWithUID(
 		ctx, "spoke-project", replicaLocalProjectUID,
@@ -949,7 +949,7 @@ func TestLeaveFederationReplicaCleansExactManagedReservation(t *testing.T) {
 
 func TestLeaveFederationReplicaRetainsConflictingManualCurrentUIDCredential(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	project, err := store.CreateProjectWithUID(
 		ctx, "spoke-project", replicaLocalProjectUID,
@@ -981,7 +981,7 @@ func TestLeaveFederationReplicaRetainsConflictingManualCurrentUIDCredential(t *t
 }
 
 func TestLeaveFederationReplicaWakeRunsOutsideServiceLock(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	credentials := newReplicaCredentialStore()
 	created, err := daemon.EnsureFederationReplica(
@@ -1018,7 +1018,7 @@ func TestLeaveFederationReplicaWakeRunsOutsideServiceLock(t *testing.T) {
 }
 
 func TestEnsureFederationReplicaAdoptsStandaloneProjectWithSnapshot(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	credentials := newReplicaCredentialStore()
 	project, err := store.CreateProjectWithUID(ctx, "spoke-project", replicaLocalProjectUID)
@@ -1051,7 +1051,7 @@ func TestEnsureFederationReplicaAdoptsStandaloneProjectWithSnapshot(t *testing.T
 }
 
 func TestEnsureFederationReplicaRejectsDistinctCredentialAtAdoptionSource(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	project, err := store.CreateProjectWithUID(ctx, "spoke-project", replicaLocalProjectUID)
 	require.NoError(t, err)
@@ -1086,7 +1086,7 @@ func TestEnsureFederationReplicaRejectsDistinctCredentialAtAdoptionSource(t *tes
 }
 
 func TestEnsureFederationReplicaRejectsManualAdoptionConflictingWithManagedReservation(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	project, err := store.CreateProjectWithUID(ctx, "spoke-project", replicaLocalProjectUID)
 	require.NoError(t, err)
@@ -1127,7 +1127,7 @@ func TestEnsureFederationReplicaRejectsManualAdoptionConflictingWithManagedReser
 }
 
 func TestEnsureFederationReplicaAcceptsManagedReservationAtCanonicalEndpoint(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	delegate := newReplicaCredentialStore()
 	reservation := replicaServiceParams().Credential
@@ -1149,7 +1149,7 @@ func TestEnsureFederationReplicaAcceptsManagedReservationAtCanonicalEndpoint(t *
 }
 
 func TestEnsureFederationReplicaRejectsRemovedManagedReservation(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	project, err := store.CreateProjectWithUID(
 		ctx, "spoke-project", replicaLocalProjectUID,
@@ -1191,7 +1191,7 @@ func TestEnsureFederationReplicaRejectsRemovedManagedReservation(t *testing.T) {
 }
 
 func TestEnsureFederationReplicaAcceptsUnchangedManagedReservation(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	project, err := store.CreateProjectWithUID(
 		ctx, "spoke-project", replicaLocalProjectUID,
@@ -1234,7 +1234,7 @@ func TestEnsureFederationReplicaAcceptsUnchangedManagedReservation(t *testing.T)
 }
 
 func TestEnsureFederationReplicaRekeysCredentialBeforeAdoption(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	project, err := store.CreateProjectWithUID(ctx, "spoke-project", replicaLocalProjectUID)
 	require.NoError(t, err)
@@ -1274,7 +1274,7 @@ func TestEnsureFederationReplicaRekeysCredentialBeforeAdoption(t *testing.T) {
 }
 
 func TestEnsureFederationReplicaValidatesBindingBeforeCredentialRekey(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	project, err := store.CreateProjectWithUID(ctx, "spoke-project", replicaLocalProjectUID)
 	require.NoError(t, err)
@@ -1313,7 +1313,7 @@ func TestEnsureFederationReplicaValidatesBindingBeforeCredentialRekey(t *testing
 }
 
 func TestEnsureFederationReplicaClassifiesAtomicRekeyConflictWithoutMutation(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	project, err := store.CreateProjectWithUID(ctx, "spoke-project", replicaLocalProjectUID)
 	require.NoError(t, err)
@@ -1355,7 +1355,7 @@ func TestEnsureFederationReplicaClassifiesAtomicRekeyConflictWithoutMutation(t *
 }
 
 func TestEnsureFederationReplicaRejectsReplacementOfManagedTargetCredential(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	credentials := newReplicaCredentialStore()
 	managed := replicaServiceParams().Credential
@@ -1384,7 +1384,7 @@ func TestEnsureFederationReplicaRejectsReplacementOfManagedTargetCredential(t *t
 }
 
 func TestEnsureFederationReplicaMatchingBindingIsIdempotentAcrossCanonicalEndpointSpellings(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	credentials := newReplicaCredentialStore()
 	wakes := 0
@@ -1608,7 +1608,7 @@ func TestEnsureFederationReplicaConcurrentDifferentHubJoinsStayConsistent(t *tes
 }
 
 func TestEnsureFederationReplicaRejectsPushCredentialBeforeBindingMutation(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	credentials := newReplicaCredentialStore()
 	var wakes int
@@ -1647,7 +1647,7 @@ func TestEnsureFederationReplicaRejectsPushCredentialBeforeBindingMutation(t *te
 }
 
 func TestEnsureFederationReplicaCredentialReadFailureDoesNotMutate(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	credentials := newReplicaCredentialStore()
 	injected := errors.New("injected credential read failure")
@@ -1668,7 +1668,7 @@ func TestEnsureFederationReplicaCredentialReadFailureDoesNotMutate(t *testing.T)
 }
 
 func TestEnsureFederationReplicaCredentialWriteFailureRetriesBinding(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	credentials := newReplicaCredentialStore()
 	injected := errors.New("injected credential write failure")
@@ -1743,7 +1743,7 @@ func TestEnsureFederationReplicaDeliversCreatedEventBeforeCredentialWriteComplet
 }
 
 func TestEnsureFederationReplicaCredentialWriteFailureRetriesAdoption(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	credentials := newReplicaCredentialStore()
 	project, err := store.CreateProjectWithUID(ctx, "spoke-project", replicaLocalProjectUID)
@@ -1795,7 +1795,7 @@ func TestEnsureFederationReplicaCredentialWriteFailureRetriesAdoption(t *testing
 }
 
 func TestEnsureFederationReplicaPushEnableFailureRetriesWithoutDuplication(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	credentials := newReplicaCredentialStore()
 	_, err := store.ExecContext(ctx, `
@@ -1842,7 +1842,7 @@ func TestEnsureFederationReplicaPushEnableFailureRetriesWithoutDuplication(t *te
 }
 
 func TestEnsureFederationReplicaBindingFailurePreservesCreatedEvent(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	credentials := newReplicaCredentialStore()
 	_, err := store.ExecContext(ctx, `
@@ -1901,7 +1901,7 @@ func TestEnsureFederationReplicaRejectsBindingConflictsWithoutWaking(t *testing.
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store := openReplicaServiceStore(t)
 			credentials := newReplicaCredentialStore()
 			project, err := store.CreateProjectWithUID(ctx, "hub-project", replicaHubProjectUID)
@@ -1968,7 +1968,7 @@ func TestEnsureFederationReplicaZeroTokenRetryRejectsStaleStoredCredentialTarget
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store := openReplicaServiceStore(t)
 			credentials := newReplicaCredentialStore()
 			project, err := store.CreateProjectWithUID(ctx, "hub-project", replicaHubProjectUID)
@@ -2017,7 +2017,7 @@ func TestEnsureFederationReplicaZeroTokenRetryRejectsStaleStoredCredentialTarget
 }
 
 func TestEnsureFederationReplicaRejectsMalformedStoredBindingOrigin(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	credentials := newReplicaCredentialStore()
 	project, err := store.CreateProjectWithUID(ctx, "hub-project", replicaHubProjectUID)
@@ -2055,7 +2055,7 @@ func TestEnsureFederationReplicaRejectsMalformedStoredBindingOrigin(t *testing.T
 }
 
 func TestEnsureFederationReplicaDoesNotOverwriteConflictingCredential(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	credentials := newReplicaCredentialStore()
 	project, err := store.CreateProjectWithUID(ctx, "hub-project", replicaHubProjectUID)
@@ -2096,7 +2096,7 @@ func TestEnsureFederationReplicaDoesNotOverwriteConflictingCredential(t *testing
 
 func TestEnsureFederationReplicaRejectsInvalidCanonicalOriginsBeforeMutation(t *testing.T) {
 	t.Run("requested origin", func(t *testing.T) {
-		ctx := context.Background()
+		ctx := t.Context()
 		store := openReplicaServiceStore(t)
 		params := replicaServiceParams()
 		params.HubURL = "hub.example/no-scheme"
@@ -2126,7 +2126,7 @@ func TestEnsureFederationReplicaRejectsInvalidCanonicalOriginsBeforeMutation(t *
 		credentials.credentials[replicaHubProjectUID] = original
 
 		_, err := daemon.EnsureFederationReplica(
-			context.Background(), store, credentials, nil, replicaServiceParams(),
+			t.Context(), store, credentials, nil, replicaServiceParams(),
 		)
 
 		require.Error(t, err)
@@ -2137,7 +2137,7 @@ func TestEnsureFederationReplicaRejectsInvalidCanonicalOriginsBeforeMutation(t *
 }
 
 func TestEnsureFederationReplicaClearsLeaveStateAndRepermitsHubOperations(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openReplicaServiceStore(t)
 	params := replicaServiceParams()
 	project, err := store.CreateProjectWithUID(ctx, params.ProjectName, replicaHubProjectUID)
@@ -2207,7 +2207,8 @@ func TestFederationReplicaHubOperationsRaceWithLeavePreparation(t *testing.T) {
 	)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// t.Context() is already canceled when cleanup runs.
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(t.Context()), 5*time.Second)
 		defer cleanupCancel()
 		_, cleanupErr := held(cleanupCtx, 0)
 		assert.NoError(t, cleanupErr)
@@ -2223,7 +2224,8 @@ func TestFederationReplicaHubOperationsRaceWithLeavePreparation(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		stopReaders()
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// t.Context() is already canceled when cleanup runs.
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(t.Context()), 5*time.Second)
 		defer cleanupCancel()
 		for range readerCount {
 			select {
@@ -2340,7 +2342,7 @@ func TestFederationReplicaHubOperationsRaceWithLeavePreparation(t *testing.T) {
 }
 
 func TestRecordFederationReplicaPendingEnrollment(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	newLeavePreparedStore := func(t *testing.T) (*sqlitestore.Store, *replicaCredentialStore, db.Project) {
 		t.Helper()
 		store := openReplicaServiceStore(t)
@@ -2438,7 +2440,7 @@ func replicaServiceParams() daemon.EnsureFederationReplicaParams {
 func openReplicaServiceStore(t *testing.T) *sqlitestore.Store {
 	t.Helper()
 	unsetReplicaAuthToken(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	store, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	// This fixture is discarded after the test; it needs no WAL checkpoint.

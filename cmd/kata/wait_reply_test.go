@@ -65,7 +65,7 @@ func runWaitReplyDiscoveryUntilContextDone(t *testing.T, waitTimeout, parentTime
 	t.Setenv("KATA_TEAMMATE", "")
 	t.Setenv("KATA_INBOX_USER", "")
 
-	ctx := contextWithBaseURL(context.Background(), server.URL)
+	ctx := contextWithBaseURL(t.Context(), server.URL)
 	if parentTimeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, parentTimeout)

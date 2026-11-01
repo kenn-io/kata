@@ -26,7 +26,7 @@ import (
 )
 
 func TestLocalProfileStorageIdentityReadOnly(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	home := t.TempDir()
 	path := filepath.Join(home, "kata.db")
 	store, err := sqlitestore.Open(ctx, path)
@@ -65,7 +65,7 @@ func TestLocalProfileStorageMissingStaysMissing(t *testing.T) {
 	home := t.TempDir()
 	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: "01HZZZZZZZZZZZZZZZZZZZZZ01"})
 	require.NoError(t, err)
-	_, err = InspectLocalProfileStorage(context.Background(), profile)
+	_, err = InspectLocalProfileStorage(t.Context(), profile)
 	require.Error(t, err)
 	_, err = os.Stat(profile.DSN)
 	assert.ErrorIs(t, err, os.ErrNotExist)
@@ -81,7 +81,7 @@ func TestLocalProfileUnreadableMetadataIsStorageUnavailable(t *testing.T) {
 			name:  "instance identity",
 			cause: "no such table: meta",
 			corrupt: func(store *sqlitestore.Store) error {
-				_, err := store.ExecContext(context.Background(), "DROP TABLE meta")
+				_, err := store.ExecContext(t.Context(), "DROP TABLE meta")
 				return err
 			},
 		},
@@ -89,13 +89,13 @@ func TestLocalProfileUnreadableMetadataIsStorageUnavailable(t *testing.T) {
 			name:  "schema version",
 			cause: "invalid syntax",
 			corrupt: func(store *sqlitestore.Store) error {
-				_, err := store.ExecContext(context.Background(), "UPDATE meta SET value='invalid' WHERE key='schema_version'")
+				_, err := store.ExecContext(t.Context(), "UPDATE meta SET value='invalid' WHERE key='schema_version'")
 				return err
 			},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			home := t.TempDir()
 			store, err := sqlitestore.Open(ctx, filepath.Join(home, "kata.db"))
 			require.NoError(t, err)
@@ -116,7 +116,7 @@ func TestLocalProfileUnreadableMetadataIsStorageUnavailable(t *testing.T) {
 func TestLocalProfileStorageInspectionRetainsUnsupportedSchema(t *testing.T) {
 	for _, version := range []int{db.CurrentSchemaVersion() - 1, db.CurrentSchemaVersion() + 1} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			home := t.TempDir()
 			path := filepath.Join(home, "kata.db")
 			store, err := sqlitestore.Open(ctx, path)

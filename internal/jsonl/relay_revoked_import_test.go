@@ -2,7 +2,6 @@ package jsonl
 
 import (
 	"bytes"
-	"context"
 	"crypto/ed25519"
 	"path/filepath"
 	"testing"
@@ -86,7 +85,7 @@ func TestImportSkipsRevokedRelayBindingRows(t *testing.T) {
 func relayRowsForBinding(t *testing.T, store db.Storage, bindingUID string) []db.ImportRecord {
 	t.Helper()
 	rows := []db.ImportRecord{}
-	for record, err := range store.ExportRelayState(context.Background()) {
+	for record, err := range store.ExportRelayState(t.Context()) {
 		require.NoError(t, err)
 		switch value := record.(type) {
 		case *db.RelayOutboxExport:

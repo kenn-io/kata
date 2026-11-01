@@ -3,6 +3,7 @@
 package e2e_test
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -38,8 +39,9 @@ func TestPortEnvBind_ServesAndShutsDownCleanly(t *testing.T) {
 	)), 0o600))
 
 	stderr := &safeBuffer{}
+	// t.Cleanup owns this process; t.Context() would kill it before that runs.
 	//nolint:gosec // G204: bin is buildKataBinary's output
-	cmd := exec.Command(bin, "daemon", "start", "--foreground")
+	cmd := exec.CommandContext(context.WithoutCancel(t.Context()), bin, "daemon", "start", "--foreground")
 	cmd.Env = append(os.Environ(),
 		"KATA_HOME="+home,
 		"KATA_DB="+filepath.Join(home, "kata.db"),
@@ -68,19 +70,23 @@ func TestPortEnvBind_ServesAndShutsDownCleanly(t *testing.T) {
 
 	client := &http.Client{Timeout: 2 * time.Second}
 
-	healthResp, err := client.Get("http://" + addr + "/api/v1/health") //nolint:noctx
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+addr+"/api/v1/health", nil)
+	require.NoError(t, reqErr)
+	healthResp, err := client.Do(req)
 	require.NoError(t, err)
 	_ = healthResp.Body.Close()
 	assert.Equal(t, http.StatusOK, healthResp.StatusCode,
 		"unauthenticated /api/v1/health should 200")
 
-	noTokenResp, err := client.Get("http://" + addr + "/api/v1/projects") //nolint:noctx
+	req, reqErr = http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+addr+"/api/v1/projects", nil)
+	require.NoError(t, reqErr)
+	noTokenResp, err := client.Do(req)
 	require.NoError(t, err)
 	_ = noTokenResp.Body.Close()
 	assert.Equal(t, http.StatusUnauthorized, noTokenResp.StatusCode,
 		"protected GET without token should 401")
 
-	req, err := http.NewRequest(http.MethodGet, "http://"+addr+"/api/v1/projects", nil) //nolint:noctx
+	req, err = http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+addr+"/api/v1/projects", nil)
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer "+token)
 	authResp, err := client.Do(req) //nolint:gosec // G107: URL is "http://127.0.0.1:<free-port>" composed from freeTCPPort.
@@ -149,7 +155,7 @@ func TestPortEnvBind_AutostartMarkerSuppresses(t *testing.T) {
 
 	// The key assertion: PORT must remain unbound. If suppression had
 	// failed, the daemon would be accepting on this address.
-	conn, dialErr := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 250*time.Millisecond)
+	conn, dialErr := (&net.Dialer{Timeout: 250 * time.Millisecond}).DialContext(t.Context(), "tcp", fmt.Sprintf("127.0.0.1:%d", port)) //nolint:kennlint // deadlinetest: the dial must be refused; the timeout only bounds a hung connect
 	if dialErr == nil {
 		_ = conn.Close()
 		t.Fatalf("PORT %d is bound; auto-start marker should have suppressed the PORT-env path (stderr: %s)",

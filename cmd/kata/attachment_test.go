@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"fmt"
@@ -33,7 +32,7 @@ func executeAttachmentCLIWithRootFlags(t *testing.T, base string, rootFlags []st
 	var b bytes.Buffer
 	cmd.SetOut(&b)
 	cmd.SetErr(&b)
-	cmd.SetContext(contextWithBaseURL(context.Background(), base))
+	cmd.SetContext(contextWithBaseURL(t.Context(), base))
 	commandArgs := append([]string(nil), rootFlags...)
 	commandArgs = append(commandArgs, "--project", "spoke-project", "docbank", "attachments")
 	cmd.SetArgs(append(commandArgs, args...))

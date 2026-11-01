@@ -27,7 +27,7 @@ func openTestDB(t *testing.T) *sqlitestore.Store {
 func openTestDBWithPath(t *testing.T) (*sqlitestore.Store, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "kata.db")
-	d, err := sqlitestore.Open(context.Background(), path)
+	d, err := sqlitestore.Open(t.Context(), path)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
 	return d, path
@@ -38,7 +38,7 @@ func openTestDBWithPath(t *testing.T) (*sqlitestore.Store, string) {
 func assertSchemaVersion(t *testing.T, d *sqlitestore.Store, expected int) {
 	t.Helper()
 	var got string
-	require.NoError(t, d.QueryRow(`SELECT value FROM meta WHERE key='schema_version'`).Scan(&got))
+	require.NoError(t, d.QueryRowContext(t.Context(), `SELECT value FROM meta WHERE key='schema_version'`).Scan(&got))
 	assert.Equal(t, strconv.Itoa(expected), got)
 }
 
@@ -62,7 +62,7 @@ func createProject(ctx context.Context, t *testing.T, d *sqlitestore.Store, name
 func setupTestProject(t *testing.T) (*sqlitestore.Store, context.Context, db.Project) {
 	t.Helper()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.CreateProject(ctx, "p")
 	require.NoError(t, err)
 	return d, ctx, p
@@ -245,7 +245,7 @@ func insertLegacyEvent(ctx context.Context, t *testing.T, d *sqlitestore.Store, 
 // first parameter to match the plan's helper signature.
 func seedIssueInProject(t *testing.T, d *sqlitestore.Store, projectID int64, title, author string) db.Issue {
 	t.Helper()
-	issue, _, err := d.CreateIssue(context.Background(), db.CreateIssueParams{
+	issue, _, err := d.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: projectID, Title: title, Author: author,
 	})
 	require.NoError(t, err)
@@ -259,11 +259,11 @@ func seedRecurrenceInstance(
 	t *testing.T, d *sqlitestore.Store, projectID, recurrenceID int64, occurrenceKey, title string,
 ) (int64, string) {
 	t.Helper()
-	iss, _, err := d.CreateIssue(context.Background(), db.CreateIssueParams{
+	iss, _, err := d.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: projectID, Title: title, Author: "tester",
 	})
 	require.NoError(t, err)
-	_, err = d.ExecContext(context.Background(),
+	_, err = d.ExecContext(t.Context(),
 		`UPDATE issues SET recurrence_id = ?, occurrence_key = ? WHERE id = ?`,
 		recurrenceID, occurrenceKey, iss.ID)
 	require.NoError(t, err)
@@ -275,7 +275,7 @@ func seedRecurrenceInstance(
 // v16), so the endpoints carry all the project context.
 func seedLink(t *testing.T, d *sqlitestore.Store, fromID, toID int64, linkType, actor string) {
 	t.Helper()
-	_, err := d.CreateLink(context.Background(), db.CreateLinkParams{
+	_, err := d.CreateLink(t.Context(), db.CreateLinkParams{
 		FromIssueID: fromID,
 		ToIssueID:   toID,
 		Type:        linkType,
@@ -289,7 +289,7 @@ func seedLink(t *testing.T, d *sqlitestore.Store, fromID, toID int64, linkType, 
 // hardcoded UID does not collide across test runs.
 func seedRecurrence(t *testing.T, d *sqlitestore.Store, projectID int64, rule, dtstart, tz, title string) int64 {
 	t.Helper()
-	res, err := d.ExecContext(context.Background(), `
+	res, err := d.ExecContext(t.Context(), `
 		INSERT INTO recurrences
 		  (uid, project_id, rrule, dtstart, timezone, template_title, template_body,
 		   template_labels, template_metadata, author)
@@ -332,7 +332,7 @@ func assertRowCount(ctx context.Context, t *testing.T, d *sqlitestore.Store, exp
 func assertEventCount(t *testing.T, d *sqlitestore.Store, eventType string, expected int) {
 	t.Helper()
 	var n int
-	require.NoError(t, d.QueryRow(
+	require.NoError(t, d.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM events WHERE type = ?`, eventType,
 	).Scan(&n))
 	assert.Equalf(t, expected, n, "events of type %q", eventType)

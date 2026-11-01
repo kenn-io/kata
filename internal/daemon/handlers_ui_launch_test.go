@@ -325,7 +325,7 @@ func newUILaunchTestManager(t *testing.T, dbh testDBHandle, origin string) *daem
 func getUILaunchTarget(t *testing.T, ts *httptest.Server, issueUID string) (*http.Response, []byte) {
 	t.Helper()
 	requestURL := ts.URL + "/api/v1/ui/launch-target?issue_uid=" + url.QueryEscape(issueUID)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, requestURL, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, requestURL, nil)
 	require.NoError(t, err)
 	resp, err := ts.Client().Do(req)
 	require.NoError(t, err)

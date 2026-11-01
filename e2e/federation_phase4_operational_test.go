@@ -3,7 +3,6 @@
 package e2e_test
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"strconv"
@@ -17,7 +16,7 @@ import (
 )
 
 func TestFederationPhase4OperationalRecovery(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	fx := setupFederationClaimE2E(t, "phase4-operational")
 	issueA := waitForFederatedIssue(t, fx.spokeA.db, fx.hubIssue.UID, fx.spokeA.stderr)
 	_ = waitForFederatedIssue(t, fx.spokeB.db, fx.hubIssue.UID, fx.spokeB.stderr)
@@ -97,7 +96,7 @@ func waitForFederatedIssueGone(t *testing.T, store *sqlitestore.Store, issueUID 
 	t.Helper()
 	var lastErr error
 	require.Eventually(t, func() bool {
-		_, err := store.IssueByUID(context.Background(), issueUID, db.IncludeDeletedYes)
+		_, err := store.IssueByUID(t.Context(), issueUID, db.IncludeDeletedYes)
 		lastErr = err
 		return federatedIssueGone(err)
 	}, 5*time.Second, 50*time.Millisecond,

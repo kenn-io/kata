@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -181,7 +182,7 @@ func sameAgentHookFile(a, b string) bool {
 	return aErr == nil && bErr == nil && os.SameFile(aInfo, bInfo)
 }
 
-func agentHookDuplicateHint(agent agenthook.Agent, userPath, workspace string) (string, error) {
+func agentHookDuplicateHint(ctx context.Context, agent agenthook.Agent, userPath, workspace string) (string, error) {
 	if agent != agenthook.AgentCodex {
 		return "", nil
 	}
@@ -194,7 +195,7 @@ func agentHookDuplicateHint(agent agenthook.Agent, userPath, workspace string) (
 		return "", fmt.Errorf("inspect workspace hooks: %w", err)
 	}
 	if hasAgentHookContract(agent, entries) {
-		tracked, err := codexHookFileTracked(workspace)
+		tracked, err := codexHookFileTracked(ctx, workspace)
 		if err != nil {
 			return "", err
 		}

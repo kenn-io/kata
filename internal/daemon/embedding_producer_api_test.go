@@ -36,7 +36,7 @@ func TestEmbeddingProducerMetadataRequiresOwner(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, server.Close()) })
 	identityServer := daemon.NewServer(daemon.ServerConfig{DB: store, Auth: config.AuthConfig{Token: "bootstrap-test-token", RequireTokenIdentity: true}})
 	t.Cleanup(func() { require.NoError(t, identityServer.Close()) })
-	probe := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/metadata", project.ID), bytes.NewBufferString(`{"actor":"member","patch":{"area":"example-area"}}`))
+	probe := httptest.NewRequestWithContext(t.Context(), http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/metadata", project.ID), bytes.NewBufferString(`{"actor":"member","patch":{"area":"example-area"}}`))
 	probe.Header.Set("Content-Type", "application/json")
 	probe.Header.Set("Authorization", "Bearer member-test-token")
 	probeResponse := httptest.NewRecorder()
@@ -52,7 +52,7 @@ func TestEmbeddingProducerMetadataRequiresOwner(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			raw, err := json.Marshal(map[string]any{"actor": test.actor, "patch": map[string]any{db.ProjectEmbeddingMetadataKey: producer}})
 			require.NoError(t, err)
-			req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/metadata", project.ID), bytes.NewReader(raw))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/metadata", project.ID), bytes.NewReader(raw))
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Authorization", "Bearer "+test.token)
 			response := httptest.NewRecorder()

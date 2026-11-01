@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -28,7 +27,7 @@ func TestFilteredReadyAllRejectsOldDaemonBeforeQuery(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	_, _, err := executeRootCapture(t,
-		contextWithBaseURL(context.Background(), server.URL),
+		contextWithBaseURL(t.Context(), server.URL),
 		"ready", "--all", "--label", "handoff")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "requires daemon API 0.8.0 or newer")
@@ -55,7 +54,7 @@ func TestMoveDryRunRejectsOldDaemonBeforePreview(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	_, _, err := executeRootCapture(t,
-		contextWithBaseURL(context.Background(), server.URL),
+		contextWithBaseURL(t.Context(), server.URL),
 		"--project", "example-project", "move", "abc1", "target-project", "--dry")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "requires daemon API 0.23.0 or newer")
@@ -81,7 +80,7 @@ func TestFilteredSearchRejectsOldDaemonBeforeQuery(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	_, _, err := executeRootCapture(t,
-		contextWithBaseURL(context.Background(), server.URL),
+		contextWithBaseURL(t.Context(), server.URL),
 		"--project", "example-project", "search", "handoff", "--no-label", "parked")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "requires daemon API 0.8.0 or newer")
@@ -105,7 +104,7 @@ func TestFilteredListAllRejectsDaemonBeforeGlobalListFilters(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	_, _, err := executeRootCapture(t,
-		contextWithBaseURL(context.Background(), server.URL),
+		contextWithBaseURL(t.Context(), server.URL),
 		"list", "--all", "--unowned")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "requires daemon API 0.9.0 or newer")
@@ -140,7 +139,7 @@ func TestCloseRetryFlagsMakeOldDaemonRejectCloseBeforeMutation(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	_, _, err := executeRootCapture(t,
-		contextWithBaseURL(context.Background(), server.URL),
+		contextWithBaseURL(t.Context(), server.URL),
 		"--project", "example-project", "close", "abc1",
 		"--wontfix",
 		"--message", "Reviewed the request and recorded why the work should stop here.",
@@ -165,7 +164,7 @@ func TestListAllDefaultsToUnlimited(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	_, _, err := executeRootCapture(t,
-		contextWithBaseURL(context.Background(), server.URL), "list", "--all")
+		contextWithBaseURL(t.Context(), server.URL), "list", "--all")
 	require.NoError(t, err)
 	assert.False(t, sentLimit.Load(), "list --all must not silently cap a fleet scan at 200 rows")
 }
@@ -216,7 +215,7 @@ func TestListSortDaemonCompatibility(t *testing.T) {
 			t.Cleanup(server.Close)
 
 			_, _, err := executeRootCapture(t,
-				contextWithBaseURL(context.Background(), server.URL), tt.args...)
+				contextWithBaseURL(t.Context(), server.URL), tt.args...)
 			if tt.wantError == "" {
 				require.NoError(t, err)
 			} else {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -23,7 +22,7 @@ func TestErrorHintsUnboundWorkspace(t *testing.T) {
 	workspace := t.TempDir()
 	for _, mode := range []string{"human", "agent", "json"} {
 		t.Run(mode, func(t *testing.T) {
-			stdout, stderr, err := executeRootCapture(t, contextWithBaseURL(context.Background(), env.URL),
+			stdout, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL),
 				"--workspace", workspace, "list", "--format", mode)
 			require.Error(t, err)
 			assert.Equal(t, ExitNotFound, exitCodeForErr(err, runEEntered))
@@ -94,7 +93,7 @@ func TestErrorHintsNameCLIFlags(t *testing.T) {
 	t.Setenv("KATA_SERVER", "")
 	env := testenv.New(t)
 	dir, _ := initLocalBoundWorkspace(t, env, "example-project")
-	ctx := contextWithBaseURL(context.Background(), env.URL)
+	ctx := contextWithBaseURL(t.Context(), env.URL)
 	newIssue := func(t *testing.T) string {
 		return runCLI(t, env, dir, "--quiet", "create", "hint fixture "+t.Name())
 	}

@@ -103,7 +103,7 @@ func New(t *testing.T, opts ...Option) *Env {
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_DB", filepath.Join(home, "kata.db"))
 
-	ctx := context.Background()
+	ctx := t.Context()
 	d, err := sqlitestore.Open(ctx, filepath.Join(home, "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
@@ -117,7 +117,7 @@ func New(t *testing.T, opts ...Option) *Env {
 // KATA_HOME is not modified — the caller's environment is preserved.
 func NewFromDB(t *testing.T, dbPath string) *Env {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	d, err := sqlitestore.Open(ctx, dbPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
@@ -140,7 +140,9 @@ func PhysicalPath(t *testing.T, path string) string {
 // the status code paired with the body bytes. Errors fail the test.
 func (e *Env) Get(t *testing.T, path string) (int, []byte) {
 	t.Helper()
-	resp, err := e.HTTP.Get(e.URL + path) //nolint:gosec,noctx // test helper against loopback
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, e.URL+path, nil)
+	require.NoError(t, err)
+	resp, err := e.HTTP.Do(req) //nolint:gosec // test helper against loopback
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
@@ -166,10 +168,10 @@ func serveDaemon(t *testing.T, d *sqlitestore.Store, opts ...Option) (string, *h
 	// Bind the listener once and hand it directly to Server.Serve so no other
 	// process can grab the port between bind and serve (the close-then-reopen
 	// pattern has a TOCTOU race).
-	tcp, err := net.Listen("tcp", "127.0.0.1:0")
+	tcp, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	l := &trackingListener{Listener: tcp, conns: map[*trackedConn]struct{}{}}
-	addr := l.Addr().(*net.TCPAddr).String() //nolint:forcetypeassert // net.Listen("tcp",...) always returns *net.TCPAddr
+	addr := l.Addr().(*net.TCPAddr).String() //nolint:forcetypeassert // a "tcp" listener always returns *net.TCPAddr
 
 	bcast := daemon.NewEventBroadcaster()
 	cfg := daemon.ServerConfig{
@@ -183,7 +185,9 @@ func serveDaemon(t *testing.T, d *sqlitestore.Store, opts ...Option) (string, *h
 	applyClientAuthEnv(t, cfg)
 	srv := daemon.NewServer(cfg)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	// t.Context() is canceled before cleanups run; later-registered cleanups
+	// may still call the daemon, so this cleanup owns the shutdown instead.
+	ctx, cancel := context.WithCancel(context.WithoutCancel(t.Context()))
 	done := make(chan struct{})
 	go func() {
 		defer close(done)

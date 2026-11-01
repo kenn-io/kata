@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json/v2"
 	"fmt"
 	"os"
@@ -16,7 +15,7 @@ import (
 	"go.kenn.io/kit/agenthook"
 )
 
-func TestMuseManagedRemoteCommandFixture(_ *testing.T) {
+func TestMuseManagedRemoteCommandFixture(t *testing.T) {
 	if os.Getenv("KATA_EXTRA_MANAGED_REMOTE_FIXTURE") != "1" {
 		return
 	}
@@ -36,7 +35,7 @@ func TestMuseManagedRemoteCommandFixture(_ *testing.T) {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(3)
 	}
-	selection, err := client.InspectSelection(context.Background(), cwd, "")
+	selection, err := client.InspectSelection(t.Context(), cwd, "")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(4)
@@ -89,7 +88,7 @@ func TestMuseManagedHandlerForwardsOperatorRemoteTransportPolicy(t *testing.T) {
 			if approved {
 				launching["KATA_ALLOW_INSECURE"] = "1"
 			}
-			process := exec.Command("sh", "-c", emitted) //nolint:gosec // G204: controlled native fixture command or current test executable, with fixed test arguments.
+			process := exec.CommandContext(t.Context(), "sh", "-c", emitted) //nolint:gosec // G204: controlled native fixture command or current test executable, with fixed test arguments.
 			// Model Muse's documented managed allowlist from generated settings,
 			// rather than inheriting the parent test process's routing policy.
 			process.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + opts.Home, "KATA_EXTRA_MANAGED_REMOTE_FIXTURE=1"}

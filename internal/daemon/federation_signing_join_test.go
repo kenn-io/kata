@@ -73,7 +73,10 @@ func TestConfigureSigningIsNotLostToConcurrentRejoin(t *testing.T) {
 	post := func(path, body string) <-chan int {
 		status := make(chan int, 1)
 		go func() {
-			res, err := env.HTTP.Post(env.URL+path, "application/json", strings.NewReader(body))
+			req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodPost, env.URL+path, strings.NewReader(body))
+			require.NoError(t, reqErr)
+			req.Header.Set("Content-Type", "application/json")
+			res, err := env.HTTP.Do(req)
 			if err != nil {
 				status <- 0
 				return

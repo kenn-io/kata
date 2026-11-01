@@ -401,7 +401,7 @@ func searchStatus(t *testing.T, client *http.Client, baseURL, pidStr, query, mod
 		q.Set("mode", mode)
 	}
 	u := baseURL + "/api/v1/projects/" + pidStr + "/search?" + q.Encode()
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, u, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, u, nil)
 	require.NoError(t, err)
 	resp, err := client.Do(req) //nolint:gosec // G704: test-only unix socket, fixed URL
 	require.NoError(t, err)
@@ -433,7 +433,7 @@ func createIssueWithBody(t *testing.T, client *http.Client, baseURL string, pid 
 	u := baseURL + "/api/v1/projects/" + strconv.FormatInt(pid, 10) + "/issues"
 	payload, err := json.Marshal(map[string]any{"actor": "tester", "title": title, "body": body})
 	require.NoError(t, err)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, u, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, u, bytes.NewReader(payload))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req) //nolint:gosec // G704: test-only unix socket, fixed URL
@@ -461,7 +461,7 @@ func editIssueE2E(t *testing.T, client *http.Client, baseURL string, pid int64, 
 	u := baseURL + "/api/v1/projects/" + strconv.FormatInt(pid, 10) + "/issues/" + ref
 	payload, err := json.Marshal(map[string]any{"actor": "tester", "title": title, "body": body})
 	require.NoError(t, err)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPatch, u, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPatch, u, bytes.NewReader(payload))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req) //nolint:gosec // G704: test-only unix socket, fixed URL
@@ -480,7 +480,7 @@ func addLabelE2E(t *testing.T, client *http.Client, baseURL string, pid int64, r
 	u := baseURL + "/api/v1/projects/" + strconv.FormatInt(pid, 10) + "/issues/" + ref + "/labels"
 	payload, err := json.Marshal(map[string]string{"actor": "tester", "label": label})
 	require.NoError(t, err)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, u, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, u, bytes.NewReader(payload))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req) //nolint:gosec // G704: test-only unix socket, fixed URL
@@ -504,7 +504,7 @@ func runKataSearchCLI(t *testing.T, bin, repoDir string, env []string, query str
 	t.Helper()
 	args := append([]string{"search", query, "--lexical", "--agent", "--workspace", repoDir}, extraArgs...)
 	//nolint:gosec // G204: bin is buildKataBinary's output
-	cmd := exec.Command(bin, args...)
+	cmd := exec.CommandContext(t.Context(), bin, args...)
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	require.NoErrorf(t, err, "kata %s: %s", strings.Join(args, " "), out)
@@ -549,7 +549,7 @@ func waitForSemanticHit(t *testing.T, client *http.Client, baseURL, pidStr, quer
 // only runs on an already-failing path.
 func embeddingHealth(t *testing.T, client *http.Client, baseURL string) string {
 	t.Helper()
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, baseURL+"/api/v1/health", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, baseURL+"/api/v1/health", nil)
 	if err != nil {
 		return fmt.Sprintf("(health request error: %v)", err)
 	}
@@ -599,8 +599,9 @@ func waitForBacklogZero(t *testing.T, client *http.Client, baseURL string, daemo
 func startDaemonCmd(t *testing.T, bin string, env []string) (*exec.Cmd, *safeBuffer) {
 	t.Helper()
 	stderr := &safeBuffer{}
+	// t.Cleanup owns this process; t.Context() would kill it before that runs.
 	//nolint:gosec // G204: bin is buildKataBinary's output
-	cmd := exec.Command(bin, "daemon", "start", "--foreground")
+	cmd := exec.CommandContext(context.WithoutCancel(t.Context()), bin, "daemon", "start", "--foreground")
 	cmd.Env = env
 	cmd.Stderr = stderr
 	cmd.Stdout = io.Discard
@@ -664,7 +665,7 @@ func TestE2E_EmbeddingCredentialDiagnosticsAndFileReload(t *testing.T) {
 		require.Contains(t, string(raw), `"code":"validation"`)
 		require.Contains(t, string(raw), "EXAMPLE_EMBEDDING_KEY")
 	}
-	cmd := exec.Command(bin, "--workspace", dirs.repoDir, "--format", "human", "search", "credential") //nolint:gosec // G204: bin is buildKataBinary's test-owned output.
+	cmd := exec.CommandContext(t.Context(), bin, "--workspace", dirs.repoDir, "--format", "human", "search", "credential") //nolint:gosec // G204: bin is buildKataBinary's test-owned output.
 	cmd.Env = env
 	var out, warning bytes.Buffer
 	cmd.Stdout = &out
@@ -679,7 +680,7 @@ func TestE2E_EmbeddingCredentialDiagnosticsAndFileReload(t *testing.T) {
 	require.NoError(t, os.WriteFile(keyFile, []byte("example-key\n"), 0600))
 	body += fmt.Sprintf("api_key_file=%q\n", keyFile)
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.home, "config.toml"), []byte(body), 0600))
-	reload := exec.Command(bin, "daemon", "reload") //nolint:gosec // G204: bin is buildKataBinary's test-owned output.
+	reload := exec.CommandContext(t.Context(), bin, "daemon", "reload") //nolint:gosec // G204: bin is buildKataBinary's test-owned output.
 	reload.Env = env
 	reloadOutput, err := reload.CombinedOutput()
 	require.NoError(t, err, string(reloadOutput))

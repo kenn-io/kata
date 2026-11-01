@@ -28,7 +28,7 @@ func dropNativeCronSchema(ctx context.Context, t *testing.T, admin *sql.DB, sche
 }
 
 func TestNativeCronMigrationPreservesVersion30(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	const schema = "cron_upgrade"
@@ -107,7 +107,7 @@ func cronPhysicalShape(ctx context.Context, t *testing.T, admin *sql.DB, schema 
 }
 
 func TestNativeCronMigrationRollback(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	const schema = "cron_rollback"

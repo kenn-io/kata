@@ -25,7 +25,7 @@ func TestCreateConcurrentIdempotencyAcrossPostgresDaemons(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 	t.Cleanup(cleanup)
 	firstStore, err := pgstore.Open(ctx, dsn)
@@ -115,7 +115,7 @@ func TestPostgresCreateInvalidTitlesReturnBadRequest(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(ctx, dsn)
@@ -151,7 +151,7 @@ func TestCreateConcurrentDistinctIdempotencyKeysWithBoundedPostgresPool(t *testi
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(ctx, dsn)

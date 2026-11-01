@@ -28,7 +28,7 @@ func (f *fakeStorage) ListIssueContent(_ context.Context, afterID int64, limit i
 
 func openTestIndex(t *testing.T) *Index {
 	t.Helper()
-	ix, err := Open(context.Background(), filepath.Join(t.TempDir(), "vectors.db"))
+	ix, err := Open(t.Context(), filepath.Join(t.TempDir(), "vectors.db"))
 	if err != nil {
 		t.Fatalf("open index: %v", err)
 	}
@@ -40,7 +40,7 @@ func openTestIndex(t *testing.T) *Index {
 // Index does not close a handle it does not own. The sidecar handle stands in
 // for the caller's pool here so the test needs no database container.
 func TestClosePostgresIndexLeavesTheCallersPoolOpen(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	owner := openTestIndex(t)
 	borrowed := &Index{db: owner.db, pg: &postgresIndex{db: owner.db}}
 
@@ -53,7 +53,7 @@ func TestClosePostgresIndexLeavesTheCallersPoolOpen(t *testing.T) {
 }
 
 func TestRefreshMirrorUpdatesProjectMoveWithoutRevisionBump(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	ix := openTestIndex(t)
 	st := &fakeStorage{issues: []db.IssueContent{
 		{ID: 1, UID: "u1", ProjectUID: "p1", Title: "a", Body: "b", ContentRevision: 1},
@@ -79,7 +79,7 @@ func TestRefreshMirrorUpdatesProjectMoveWithoutRevisionBump(t *testing.T) {
 }
 
 func TestRefreshMirrorUpsertsAndDeletes(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	ix := openTestIndex(t)
 	st := &fakeStorage{issues: []db.IssueContent{
 		{ID: 1, UID: "u1", ProjectUID: "p1", Title: "a", Body: "b", ContentRevision: 1},

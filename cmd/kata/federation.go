@@ -447,7 +447,7 @@ func federationImplicitSpokeTargetAuth(ctx context.Context, spokeURL string) (cl
 	if err != nil {
 		return clientpkg.TargetAuth{}, err
 	}
-	targetAuth.AllowInsecure = clientpkg.RemoteAllowInsecureForBaseURL(spokeURL, workspaceStart) //nolint:staticcheck // URL-only compatibility caller awaits resolved-target migration.
+	targetAuth.AllowInsecure = clientpkg.RemoteAllowInsecureForBaseURL(ctx, spokeURL, workspaceStart) //nolint:staticcheck // URL-only compatibility caller awaits resolved-target migration.
 	if os.Getenv("KATA_SERVER") != "" {
 		return targetAuth, nil
 	}

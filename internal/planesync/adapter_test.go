@@ -46,32 +46,32 @@ func newAdapterSession() *adapterSession {
 func adapterStore(t *testing.T) *sqlitestore.Store {
 	t.Helper()
 	t.Setenv("KATA_HOME", t.TempDir())
-	s, err := sqlitestore.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	s, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, s.Close()) })
 	return s
 }
 func adapterBinding(t *testing.T, s db.Storage, c Config) db.IssueSyncBinding {
 	t.Helper()
-	p, err := s.CreateProject(context.Background(), "example-project")
+	p, err := s.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
 	raw, err := EncodeConfig(c)
 	require.NoError(t, err)
-	b, err := s.UpsertIssueSyncBinding(context.Background(), db.UpsertIssueSyncBindingParams{ProjectID: p.ID, Provider: "plane", SourceKey: c.SourceKey(), RemoteID: c.RemoteID(), DisplayName: "Example project", Config: raw, IntervalSeconds: 300})
+	b, err := s.UpsertIssueSyncBinding(t.Context(), db.UpsertIssueSyncBindingParams{ProjectID: p.ID, Provider: "plane", SourceKey: c.SourceKey(), RemoteID: c.RemoteID(), DisplayName: "Example project", Config: raw, IntervalSeconds: 300})
 	require.NoError(t, err)
 	return b
 }
 func importedIssue(t *testing.T, s db.Storage, b db.IssueSyncBinding) db.Issue {
 	t.Helper()
-	mapping, err := s.ImportMappingBySource(context.Background(), b.ProjectID, b.SourceKey, "issue", "work-item:"+testItemID)
+	mapping, err := s.ImportMappingBySource(t.Context(), b.ProjectID, b.SourceKey, "issue", "work-item:"+testItemID)
 	require.NoError(t, err)
-	i, err := s.IssueByID(context.Background(), *mapping.IssueID)
+	i, err := s.IssueByID(t.Context(), *mapping.IssueID)
 	require.NoError(t, err)
 	return i
 }
 
 func TestAdapterImportsReplaysAndWorkflowGroupChanges(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := adapterStore(t)
 	c := testConfig()
 	binding := adapterBinding(t, store, c)
@@ -133,7 +133,7 @@ func TestAdapterImportsReplaysAndWorkflowGroupChanges(t *testing.T) {
 }
 
 func TestRunnerPlaneDisplayNameRefreshCannotRestoreSupersededConfig(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := adapterStore(t)
 	c := statusConfig(t, "https://api.plane.so")
 	binding := adapterBinding(t, store, c)
@@ -171,7 +171,7 @@ func TestRunnerPlaneDisplayNameRefreshCannotRestoreSupersededConfig(t *testing.T
 func TestAdapterFailsPreparationBeforeImportAndKeepsCursor(t *testing.T) {
 	for _, kind := range []string{"unknown state", "partial content", "wrong project", "fetch failure", "disabled"} {
 		t.Run(kind, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			store := adapterStore(t)
 			c := testConfig()
 			binding := adapterBinding(t, store, c)
@@ -215,10 +215,10 @@ func TestAdapterBlankProjectNameUsesIdentifier(t *testing.T) {
 	source := newAdapterSession()
 	source.project.Name = " \t\n"
 	runner := NewRunner(RunnerConfig{Store: store, Fetcher: source})
-	result, err := runner.RunOnce(context.Background(), binding.ID)
+	result, err := runner.RunOnce(t.Context(), binding.ID)
 	require.NoError(t, err)
 	require.Equal(t, "EX", result.Binding.DisplayName)
-	stored, err := store.IssueSyncBindingByProject(context.Background(), binding.ProjectID)
+	stored, err := store.IssueSyncBindingByProject(t.Context(), binding.ProjectID)
 	require.NoError(t, err)
 	require.Equal(t, "EX", stored.DisplayName)
 }
@@ -253,7 +253,7 @@ func TestAdapterImportsPriorityAndPreservesNewerLocalEdits(t *testing.T) {
 }
 
 func TestAdapterCutoffAndProgress(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := adapterStore(t)
 	c := testConfig()
 	c.Since = "2026-09-01T10:00:00Z"

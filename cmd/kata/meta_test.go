@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"fmt"
@@ -39,7 +38,7 @@ func TestMetaGetUsesMetadataEndpoint(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	stdout, stderr, err := executeRootCapture(t,
-		contextWithBaseURL(context.Background(), server.URL),
+		contextWithBaseURL(t.Context(), server.URL),
 		"--json", "--project", "example-project", "meta", "get", "abc4")
 	require.NoError(t, err, stderr)
 	assert.JSONEq(t,

@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"path/filepath"
@@ -41,7 +40,7 @@ func TestInstance_ReturnsLocalUID(t *testing.T) {
 // the test reaches it by routing the server through OpenReadOnly, which
 // skips the seed step and yields a *DB with empty cached value.
 func TestInstance_503WhenUIDUnset(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 
 	// Materialize a real DB file so OpenReadOnly has something to attach to.
@@ -68,7 +67,7 @@ func TestInstance_503WhenUIDUnset(t *testing.T) {
 func TestInstanceEndpointReturnsVersionAndSchemaVersion(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("test-token"))
 
-	req, err := http.NewRequest(http.MethodGet, env.URL+"/api/v1/instance", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, env.URL+"/api/v1/instance", nil)
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer test-token")
 	resp, err := env.HTTP.Do(req) //nolint:gosec // test request to loopback URL
@@ -89,7 +88,7 @@ func TestInstanceEndpointReturnsVersionAndSchemaVersion(t *testing.T) {
 }
 
 func TestInstanceEndpointIncludesDBTokenActor(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	plaintext := strings.Join([]string{"operator", "bearer"}, "-")
 	_, _, err := env.DB.CreateAPIToken(ctx, db.CreateAPITokenParams{ //nolint:gosec // test-only bearer credential
@@ -130,7 +129,7 @@ func TestInstanceEndpointAdvertisesIssueSubtreeTokens(t *testing.T) {
 }
 
 func TestInstanceEndpointAdvertisesTokenAuditReadIndependentOfIssueWrites(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	_, _, err := env.DB.CreateAPIToken(ctx, db.CreateAPITokenParams{
 		PlaintextToken: "operator-token", Actor: "operator", AdminActor: db.BootstrapActor,
@@ -165,7 +164,7 @@ func TestInstanceEndpointAdvertisesTokenAuditReadIndependentOfIssueWrites(t *tes
 }
 
 func TestInstanceEndpointIncludesScopedTokenGrant(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	project, err := env.DB.CreateProject(ctx, "example-project")
 	require.NoError(t, err)

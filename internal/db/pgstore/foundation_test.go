@@ -80,7 +80,7 @@ func TestConfigValidatePostgresIdentifiers(t *testing.T) {
 func TestValidationModeRequiresConfiguredSchemaOwnerBeforeConnecting(t *testing.T) {
 	t.Parallel()
 
-	store, err := pgstore.OpenWithConfig(context.Background(), "not-a-postgres-dsn", pgstore.Config{
+	store, err := pgstore.OpenWithConfig(t.Context(), "not-a-postgres-dsn", pgstore.Config{
 		Schema: "kata", SchemaMode: pgstore.SchemaModeValidate,
 	})
 	assert.Nil(t, store)
@@ -116,7 +116,7 @@ func TestExternalRootMigrationUpgradesVersion25(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 
@@ -161,7 +161,7 @@ func TestCommentTeammateMigrationUpgradesVersion26(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 
@@ -220,7 +220,7 @@ func TestIssueScopedTokensMigrationUpgradesVersion27(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 
@@ -272,7 +272,7 @@ func TestExpiringAssignmentsMigrationUpgradesVersion28(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 
@@ -338,7 +338,7 @@ func TestExternalRootMigrationRollsBackSchemaAndVersionTogether(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 
@@ -463,7 +463,7 @@ func TestOpenWithConfigIsolatesAndValidatesSchema(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 
@@ -508,7 +508,8 @@ func TestOpenWithConfigIsolatesAndValidatesSchema(t *testing.T) {
 `, runtimeRole, runtimeRole, runtimeRole, runtimeRole, runtimeRole)) // #nosec G201 -- role is a fixed prefix plus process ID.
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, err := admin.ExecContext(context.Background(), fmt.Sprintf(
+		// t.Context() is already canceled when cleanup runs.
+		_, err := admin.ExecContext(context.WithoutCancel(t.Context()), fmt.Sprintf(
 			`DROP OWNED BY %s; DROP ROLE %s`, runtimeRole, runtimeRole,
 		)) // #nosec G201 -- role is a fixed prefix plus process ID.
 		require.NoError(t, err, "roles are cluster-wide and outlive the test database")
@@ -580,7 +581,7 @@ func TestValidationRejectsUnexpectedSchemaAndObjectOwnership(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	admin, err := sql.Open("pgx", dsn)
@@ -609,7 +610,8 @@ func TestValidationRejectsUnexpectedSchemaAndObjectOwnership(t *testing.T) {
 	`, attackerRole, runtimeRole, runtimeRole, runtimeRole, runtimeRole, runtimeRole)) // #nosec G201 -- role names are fixed prefixes plus process ID.
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf(`
+		// t.Context() is already canceled when cleanup runs.
+		_, _ = admin.ExecContext(context.WithoutCancel(t.Context()), fmt.Sprintf(`
 			DROP OWNED BY %s, %s CASCADE;
 			DROP ROLE IF EXISTS %s, %s;
 		`, attackerRole, runtimeRole, attackerRole, runtimeRole)) // #nosec G201 -- role names are fixed prefixes plus process ID.
@@ -676,7 +678,7 @@ func TestRestrictedRuntimeRoleCanAdoptExistingProject(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	admin, err := sql.Open("pgx", dsn)
@@ -707,7 +709,8 @@ func TestRestrictedRuntimeRoleCanAdoptExistingProject(t *testing.T) {
 	`, runtimeRole, attackerRole, runtimeRole, runtimeRole, runtimeRole, runtimeRole)) // #nosec G201 -- role names are fixed prefixes plus process ID.
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = admin.ExecContext(context.Background(), fmt.Sprintf(`
+		// t.Context() is already canceled when cleanup runs.
+		_, _ = admin.ExecContext(context.WithoutCancel(t.Context()), fmt.Sprintf(`
 			DROP OWNED BY %s, %s CASCADE;
 			DROP ROLE IF EXISTS %s, %s;
 		`, attackerRole, runtimeRole, attackerRole, runtimeRole)) // #nosec G201 -- role names are fixed prefixes plus process ID.
@@ -794,7 +797,7 @@ func TestBootstrapMultipleSchemasSharesUnaccent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 
@@ -817,7 +820,7 @@ func TestBootstrapRejectsPreexistingSchemaObjectsBeforeExecutingThem(t *testing.
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	admin, err := sql.Open("pgx", dsn)
@@ -858,7 +861,7 @@ func TestBootstrapRejectsUnshippedOlderPostgresVersion(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	admin, err := sql.Open("pgx", dsn)
@@ -882,7 +885,7 @@ func TestReadOnlyOpenRequiresSystemProject(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{
@@ -907,7 +910,7 @@ func TestSystemProjectCannotBeRenamed(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(ctx, dsn)
@@ -937,7 +940,7 @@ func TestConcurrentBootstrapSerializesOneSchemaInstallation(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 
@@ -987,7 +990,7 @@ func TestValidatePreparedCanonicalSchema(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 
@@ -1019,7 +1022,7 @@ func TestValidationRejectsIncompleteCanonicalSchema(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	admin, err := sql.Open("pgx", dsn)
@@ -1074,7 +1077,7 @@ func TestBootstrapRejectsIncompleteCurrentSchema(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{

@@ -77,7 +77,7 @@ func TestNamedReadOnlyProfileDiscoveryDefersIdentityProbe(t *testing.T) {
 
 func TestLocalProfileStorageProbeHonorsTimeout(t *testing.T) {
 	t.Setenv("KATA_HTTP_TIMEOUT", "50ms")
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	release := make(chan struct{})
 	defer close(release)

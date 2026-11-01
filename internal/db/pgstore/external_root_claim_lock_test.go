@@ -1,7 +1,6 @@
 package pgstore
 
 import (
-	"context"
 	"database/sql"
 	"testing"
 	"time"
@@ -15,7 +14,7 @@ func TestExternalRootCompletionClaimsWaitForIssueLock(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := OpenWithConfig(ctx, dsn, Config{

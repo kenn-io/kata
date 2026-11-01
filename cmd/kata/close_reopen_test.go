@@ -433,9 +433,10 @@ func TestCloseAPI_TUISourceBypassesSubstanceAndEvidence(t *testing.T) {
 		"source": "tui",
 	})
 	require.NoError(t, err)
-	resp, err := http.Post( //nolint:noctx,gosec // test-only loopback
-		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/close", env.URL, pid, ref),
-		"application/json", bytes.NewReader(body))
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodPost, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/close", env.URL, pid, ref), bytes.NewReader(body))
+	require.NoError(t, reqErr)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	bs, err := io.ReadAll(resp.Body)
@@ -460,9 +461,10 @@ func TestCloseAPI_TUISourceWithNonDoneReasonStillValidates(t *testing.T) {
 		// refuse rather than bypass validation on the TUI claim.
 	})
 	require.NoError(t, err)
-	resp, err := http.Post( //nolint:noctx,gosec // test-only loopback
-		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/close", env.URL, pid, ref),
-		"application/json", bytes.NewReader(body))
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodPost, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/close", env.URL, pid, ref), bytes.NewReader(body))
+	require.NoError(t, reqErr)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	bs, err := io.ReadAll(resp.Body)
@@ -479,9 +481,10 @@ func TestCloseAPI_NonTUIRequiresSubstance(t *testing.T) {
 		"actor": "alice",
 	})
 	require.NoError(t, err)
-	resp, err := http.Post( //nolint:noctx,gosec // test-only loopback
-		fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/close", env.URL, pid, ref),
-		"application/json", bytes.NewReader(body))
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodPost, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/close", env.URL, pid, ref), bytes.NewReader(body))
+	require.NoError(t, reqErr)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	bs, err := io.ReadAll(resp.Body)

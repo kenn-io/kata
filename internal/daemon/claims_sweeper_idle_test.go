@@ -56,7 +56,7 @@ func TestTimedClaimSweeperSkipsPassWhenDrainAdmissionIsClosed(t *testing.T) {
 	sweeper := NewTimedClaimSweeper(nil, NewEventPublisher(nil, nil))
 	sweeper.IdleAdmission = controller.WaitableDrainAdmission()
 
-	require.NoError(t, sweeper.RunOnce(context.Background(), time.Now()))
+	require.NoError(t, sweeper.RunOnce(t.Context(), time.Now()))
 }
 
 func TestTimedClaimSweeperRetriesImmediatelyWhenDrainAdmissionReopens(t *testing.T) {
@@ -150,7 +150,7 @@ func TestTimedClaimSweeperWaitsForCancellationAfterTerminalDrainDenial(t *testin
 }
 
 func TestTimedClaimSweeperForksBlockedIdleLeaseForCausedHook(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, store.Close()) })

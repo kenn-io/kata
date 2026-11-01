@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"testing"
@@ -12,7 +11,7 @@ import (
 )
 
 func checkCommentReplies(t *testing.T, store db.Storage) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Task", Author: "worker"})

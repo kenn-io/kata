@@ -1,7 +1,6 @@
 package sqlitestore_test
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -17,7 +16,7 @@ import (
 // meta.instance_uid as a valid 26-char ULID and exposes it via InstanceUID().
 func TestOpenSeedsInstanceUID(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openTestDB(t)
 	got := d.InstanceUID()
 	require.NotEmpty(t, got)
@@ -32,7 +31,7 @@ func TestOpenSeedsInstanceUID(t *testing.T) {
 // never changes" rule: a second db.Open on the same path returns the same UID.
 func TestInstanceUIDStableAcrossReopen(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	first, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
@@ -53,7 +52,7 @@ func TestInstanceUIDStableAcrossReopen(t *testing.T) {
 // fixed for the process lifetime.
 func TestInstanceUIDCachedAcrossDirectSQLMutation(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openTestDB(t)
 	original := d.InstanceUID()
 
@@ -80,7 +79,7 @@ func TestInstanceUIDCachedAcrossDirectSQLMutation(t *testing.T) {
 // the local meta.instance_uid.
 func TestEventInsertCarriesUIDAndOrigin(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openTestDB(t)
 	p := createKataProject(ctx, t, d)
 	_, evt := createTesterIssue(ctx, t, d, p.ID, "uid-stamping")
@@ -92,7 +91,7 @@ func TestEventInsertCarriesUIDAndOrigin(t *testing.T) {
 // a row with valid uid + origin_instance_uid matching the local instance.
 func TestPurgeInsertCarriesUIDAndOrigin(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openTestDB(t)
 	p := createKataProject(ctx, t, d)
 	issue, _ := createTesterIssue(ctx, t, d, p.ID, "purge me")
@@ -106,7 +105,7 @@ func TestPurgeInsertCarriesUIDAndOrigin(t *testing.T) {
 // raw INSERT bypassing the daemon's uid generation is rejected by SQLite.
 func TestEventUIDNotNullRejected(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openTestDB(t)
 	p := createKataProject(ctx, t, d)
 
@@ -131,7 +130,7 @@ func TestEventUIDNotNullRejected(t *testing.T) {
 // origin_instance_uid must be rejected at runtime.
 func TestPurgeLogUIDNotNullRejected(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openTestDB(t)
 
 	// uid omitted entirely.
@@ -159,7 +158,7 @@ func TestPurgeLogUIDNotNullRejected(t *testing.T) {
 
 func TestInstanceCreatedAtSurvivesReopen(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	first, path := openTestDBWithPath(t)
 	createdAt, err := first.InstanceCreatedAt(ctx)
 	require.NoError(t, err)
@@ -179,7 +178,7 @@ func TestInstanceCreatedAtSurvivesReopen(t *testing.T) {
 // the current time onto an instance UID that already existed.
 func TestInstanceCreatedAtStaysZeroForExistingInstanceUID(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	first, path := openTestDBWithPath(t)
 	original := first.InstanceUID()
 	_, err := first.ExecContext(ctx, `DELETE FROM meta WHERE key=?`, db.MetaKeyInstanceCreatedAt)

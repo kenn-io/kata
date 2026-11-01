@@ -76,7 +76,7 @@ func checkSnapshotReplayRejectsMalformedEventEntries(t *testing.T, store db.Stor
 
 func checkSnapshotReplayCore(t *testing.T, target db.Storage, backend Backend) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	source := backend.Open(t)
 	require.NotNil(t, source)
 	t.Cleanup(func() {

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -85,7 +84,7 @@ func TestImportBeadsFromLiveBD(t *testing.T) {
 
 	// The importer created exactly one issue; look it up via the DB to get
 	// its short_id, then show it.
-	rows, err := env.DB.QueryContext(context.Background(),
+	rows, err := env.DB.QueryContext(t.Context(),
 		"SELECT short_id FROM issues WHERE project_id = ? LIMIT 1", pid)
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()
@@ -107,7 +106,7 @@ func TestImportBeadsFromLegacyBD(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, out, "imported beads: created 1, updated 0, unchanged 0, comments 1, links 0")
 
-	rows, err := env.DB.QueryContext(context.Background(),
+	rows, err := env.DB.QueryContext(t.Context(),
 		"SELECT short_id, owner FROM issues WHERE project_id = ? LIMIT 1", pid)
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()
@@ -349,7 +348,7 @@ fi
 func TestRunBeadsExportFallsBackForUnsupportedNoMemories(t *testing.T) {
 	bdPath, callsPath := installBDExportFixture(t, "fallback-success")
 
-	got, err := runBeadsExport(context.Background(), t.TempDir(), bdPath)
+	got, err := runBeadsExport(t.Context(), t.TempDir(), bdPath)
 
 	require.NoError(t, err)
 	assert.Contains(t, string(got), `"id":"legacy-1"`)
@@ -359,7 +358,7 @@ func TestRunBeadsExportFallsBackForUnsupportedNoMemories(t *testing.T) {
 func TestRunBeadsExportDoesNotFallbackForOtherErrors(t *testing.T) {
 	bdPath, callsPath := installBDExportFixture(t, "unrelated-error")
 
-	_, err := runBeadsExport(context.Background(), t.TempDir(), bdPath)
+	_, err := runBeadsExport(t.Context(), t.TempDir(), bdPath)
 
 	require.ErrorContains(t, err, "database unavailable")
 	assert.Equal(t, "export --no-memories\n", readFixtureCalls(t, callsPath))
@@ -368,7 +367,7 @@ func TestRunBeadsExportDoesNotFallbackForOtherErrors(t *testing.T) {
 func TestRunBeadsExportReturnsPlainExportFailure(t *testing.T) {
 	bdPath, callsPath := installBDExportFixture(t, "fallback-error")
 
-	_, err := runBeadsExport(context.Background(), t.TempDir(), bdPath)
+	_, err := runBeadsExport(t.Context(), t.TempDir(), bdPath)
 
 	require.ErrorContains(t, err, "legacy database corrupt")
 	assert.NotContains(t, err.Error(), "unknown flag")

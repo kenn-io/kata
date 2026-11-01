@@ -34,7 +34,7 @@ func newDoctorCmd() *cobra.Command {
 
 func collectDoctor(ctx context.Context) diagnostics.Report {
 	s := &doctorState{}
-	s.localChecks()
+	s.localChecks(ctx)
 	s.daemonChecks(ctx)
 	return diagnostics.NewReport(s.checks)
 }

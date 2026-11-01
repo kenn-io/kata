@@ -3,7 +3,6 @@
 package e2e_test
 
 import (
-	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"net/http"
@@ -20,7 +19,7 @@ import (
 )
 
 func TestSmoke_FederationPhase1PullReplication(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	spokeDirs := newE2EDirs(t)
 	bin := buildKataBinary(t)
@@ -89,7 +88,7 @@ func waitForFederatedIssue(t *testing.T, store *sqlitestore.Store, issueUID stri
 	deadline := time.Now().Add(10 * time.Second)
 	var lastErr error
 	for time.Now().Before(deadline) {
-		issue, err := store.IssueByUID(context.Background(), issueUID, db.IncludeDeletedYes)
+		issue, err := store.IssueByUID(t.Context(), issueUID, db.IncludeDeletedYes)
 		if err == nil {
 			return issue
 		}
@@ -103,7 +102,7 @@ func waitForFederatedIssue(t *testing.T, store *sqlitestore.Store, issueUID stri
 
 func assertFoldedProjectionMatch(t *testing.T, hub, spoke *sqlitestore.Store, hubProjectID, spokeProjectID, hubAfterID int64) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	hubEvents, err := hub.EventsAfter(ctx, db.EventsAfterParams{
 		ProjectID: hubProjectID,
 		AfterID:   hubAfterID,

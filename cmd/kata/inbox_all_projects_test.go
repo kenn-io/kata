@@ -102,7 +102,7 @@ func TestAllProjectsInboxRejectsOldDaemonBeforeGlobalList(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	_, _, err := executeRootCapture(t, contextWithBaseURL(context.Background(), server.URL),
+	_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL),
 		"inbox", "--for", "reviewer", "--all")
 	cli := requireCLIError(t, err, ExitValidation)
 	assert.Equal(t, "daemon_api_too_old", cli.Code)
@@ -115,7 +115,7 @@ func TestAllProjectsInboxRejectsExplicitProjectSelection(t *testing.T) {
 		{"--project", "spoke-project", "inbox", "--for", "reviewer", "--all"},
 		{"--workspace", t.TempDir(), "inbox", "--for", "reviewer", "--all"},
 	} {
-		_, _, err := executeRootCapture(t, context.Background(), args...)
+		_, _, err := executeRootCapture(t, t.Context(), args...)
 		cli := requireCLIError(t, err, ExitUsage)
 		assert.Contains(t, cli.Message, "--all")
 	}
@@ -144,7 +144,7 @@ func TestAllProjectsInboxDoesNotEmitPartialResultsWhenGlobalAccessDenied(t *test
 		server.Handler().ServeHTTP(w, r.WithContext(ctx))
 	}))
 	t.Cleanup(ts.Close)
-	ctx := contextWithBaseURL(context.Background(), ts.URL)
+	ctx := contextWithBaseURL(t.Context(), ts.URL)
 	projectOut, _, err := executeRootCapture(t, ctx,
 		"--project", "spoke-project", "inbox", "--for", "reviewer")
 	require.NoError(t, err)

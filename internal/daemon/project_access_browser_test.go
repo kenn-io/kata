@@ -36,7 +36,7 @@ func TestIdentityBrowserAccessAdministration(t *testing.T) {
 		handler, err := server.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerBrowser, Origin: origin, RequireBrowserSession: true})
 		require.NoError(t, err)
 		request := func(method, path, body, csrf, requestOrigin string) *httptest.ResponseRecorder {
-			req := httptest.NewRequest(method, origin+path, strings.NewReader(body))
+			req := httptest.NewRequestWithContext(t.Context(), method, origin+path, strings.NewReader(body))
 			req.RemoteAddr = "127.0.0.1:40123"
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Origin", requestOrigin)

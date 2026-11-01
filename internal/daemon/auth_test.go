@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -20,7 +19,7 @@ func TestAuthMiddleware_NoTokenConfigured_AllRequestsPass(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil))
+	h.ServeHTTP(rr, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects", nil))
 	assert.Equal(t, http.StatusOK, rr.Code)
 }
 
@@ -31,11 +30,11 @@ func TestAuthMiddleware_UnauthenticatedPrivateNetworkWrites_AllowsWritesAndEvent
 	}))
 
 	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/v1/projects", nil))
+	h.ServeHTTP(rr, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/projects", nil))
 	assert.Equal(t, http.StatusOK, rr.Code)
 
 	rr = httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/events/stream", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/events/stream", nil)
 	req.Header.Set("Accept", "text/event-stream")
 	h.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusOK, rr.Code)
@@ -57,7 +56,7 @@ func TestAuthMiddleware_UnauthenticatedPrivateNetworkWrites_BlocksTokenAdmin(t *
 	} {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
 			rr := httptest.NewRecorder()
-			h.ServeHTTP(rr, httptest.NewRequest(tc.method, tc.path, nil))
+			h.ServeHTTP(rr, httptest.NewRequestWithContext(t.Context(), tc.method, tc.path, nil))
 			assert.Equal(t, http.StatusUnauthorized, rr.Code)
 			assert.Contains(t, rr.Body.String(), `"auth_required"`)
 			assert.Contains(t, rr.Body.String(), "token administration")
@@ -69,7 +68,7 @@ func TestAuthMiddleware_TokenConfigured_MissingHeader_401(t *testing.T) {
 	mw := requireBearer(authPolicy{Token: "expected-token"})
 	h := mw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil))
+	h.ServeHTTP(rr, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects", nil))
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 	assert.Contains(t, rr.Body.String(), `"auth_required"`)
 	assert.Contains(t, rr.Body.String(), "Authorization bearer required")
@@ -79,7 +78,7 @@ func TestAuthMiddleware_TokenConfigured_MissingHeader_401(t *testing.T) {
 func TestAuthMiddleware_TokenConfigured_WrongToken_403(t *testing.T) {
 	mw := requireBearer(authPolicy{Token: "expected-token"})
 	h := mw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects", nil)
 	req.Header.Set("Authorization", "Bearer wrong-token")
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
@@ -91,7 +90,7 @@ func TestAuthMiddleware_TokenConfigured_CorrectToken_OK(t *testing.T) {
 	h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects", nil)
 	req.Header.Set("Authorization", "Bearer expected-token")
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
@@ -100,7 +99,7 @@ func TestAuthMiddleware_TokenConfigured_CorrectToken_OK(t *testing.T) {
 
 func TestAuthMiddleware_IdentityModeDBTokenSetsPrincipal(t *testing.T) {
 	d := openAuthTestDB(t)
-	_, _, err := d.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	_, _, err := d.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "user-token",
 		Actor:          "alice",
 		AdminActor:     db.BootstrapActor,
@@ -115,7 +114,7 @@ func TestAuthMiddleware_IdentityModeDBTokenSetsPrincipal(t *testing.T) {
 		assert.Equal(t, "alice", principal.Actor)
 		w.WriteHeader(http.StatusOK)
 	}))
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects", nil)
 	req.Header.Set("Authorization", "Bearer user-token")
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
@@ -125,7 +124,7 @@ func TestAuthMiddleware_IdentityModeDBTokenSetsPrincipal(t *testing.T) {
 func TestAuthMiddleware_IssueScopedTokenUsesExplicitRouteAllowlist(t *testing.T) {
 	d := openAuthTestDB(t)
 	expiresAt := time.Now().UTC().Add(time.Hour)
-	_, _, err := d.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	_, _, err := d.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "scoped-token",
 		Actor:          "worker-a",
 		AdminActor:     db.BootstrapActor,
@@ -163,7 +162,7 @@ func TestAuthMiddleware_IssueScopedTokenUsesExplicitRouteAllowlist(t *testing.T)
 		{name: "unknown route", method: http.MethodGet, path: "/api/v1/future-surface", want: http.StatusForbidden},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(tc.method, tc.path, nil)
+			req := httptest.NewRequestWithContext(t.Context(), tc.method, tc.path, nil)
 			req.Header.Set("Authorization", "Bearer scoped-token")
 			rr := httptest.NewRecorder()
 			h.ServeHTTP(rr, req)
@@ -182,7 +181,7 @@ func TestAuthMiddleware_IdentityModeMissingBearer401(t *testing.T) {
 	h := mw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 
 	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil))
+	h.ServeHTTP(rr, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects", nil))
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 	assert.Contains(t, rr.Body.String(), `"auth_required"`)
 	assert.Contains(t, rr.Body.String(), "Authorization bearer required")
@@ -193,7 +192,7 @@ func TestAuthMiddleware_IdentityModeUnknownToken403(t *testing.T) {
 	d := openAuthTestDB(t)
 	mw := requireBearer(authPolicy{Token: "bootstrap-token", RequireTokenIdentity: true}, d)
 	h := mw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects", nil)
 	req.Header.Set("Authorization", "Bearer unknown-token")
 
 	rr := httptest.NewRecorder()
@@ -204,12 +203,12 @@ func TestAuthMiddleware_IdentityModeUnknownToken403(t *testing.T) {
 
 func TestAuthMiddleware_IdentityModeTokenLookupError500(t *testing.T) {
 	d := openAuthTestDB(t)
-	_, err := d.ExecContext(context.Background(), `DROP TABLE api_tokens`)
+	_, err := d.ExecContext(t.Context(), `DROP TABLE api_tokens`)
 	require.NoError(t, err)
 
 	mw := requireBearer(authPolicy{Token: "bootstrap-token", RequireTokenIdentity: true}, d)
 	h := mw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects", nil)
 	req.Header.Set("Authorization", "Bearer user-token")
 
 	rr := httptest.NewRecorder()
@@ -220,18 +219,18 @@ func TestAuthMiddleware_IdentityModeTokenLookupError500(t *testing.T) {
 
 func TestAuthMiddleware_IdentityModeRevokedToken403(t *testing.T) {
 	d := openAuthTestDB(t)
-	tok, _, err := d.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	tok, _, err := d.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "revoked-token",
 		Actor:          "alice",
 		AdminActor:     db.BootstrapActor,
 	})
 	require.NoError(t, err)
-	_, _, err = d.RevokeAPIToken(context.Background(), tok.ID, db.BootstrapActor)
+	_, _, err = d.RevokeAPIToken(t.Context(), tok.ID, db.BootstrapActor)
 	require.NoError(t, err)
 
 	mw := requireBearer(authPolicy{Token: "bootstrap-token", RequireTokenIdentity: true}, d)
 	h := mw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects", nil)
 	req.Header.Set("Authorization", "Bearer revoked-token")
 
 	rr := httptest.NewRecorder()
@@ -250,7 +249,7 @@ func TestAuthMiddleware_IdentityModeBootstrapTokenSetsPrincipal(t *testing.T) {
 		assert.Empty(t, principal.Actor)
 		w.WriteHeader(http.StatusOK)
 	}))
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects", nil)
 	req.Header.Set("Authorization", "Bearer bootstrap-token")
 
 	rr := httptest.NewRecorder()
@@ -264,7 +263,7 @@ func TestAuthMiddleware_IdentityModeBootstrapTokenReachesPostHandlers(t *testing
 	h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects/resolve", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/projects/resolve", nil)
 	req.Header.Set("Authorization", "Bearer bootstrap-token")
 
 	rr := httptest.NewRecorder()
@@ -278,7 +277,7 @@ func TestAuthMiddleware_IdentityModeBootstrapTokenCanAdminTokens(t *testing.T) {
 	h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/tokens", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/tokens", nil)
 	req.Header.Set("Authorization", "Bearer bootstrap-token")
 
 	rr := httptest.NewRecorder()
@@ -293,15 +292,15 @@ func TestAuthMiddleware_InsecureReadonly_GETPasses_POSTAndSSERejected(t *testing
 	}))
 
 	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil))
+	h.ServeHTTP(rr, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects", nil))
 	assert.Equal(t, http.StatusOK, rr.Code)
 
 	rr = httptest.NewRecorder()
-	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/v1/projects", nil))
+	h.ServeHTTP(rr, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/projects", nil))
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 
 	rr = httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/events/stream", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/events/stream", nil)
 	req.Header.Set("Accept", "text/event-stream")
 	h.ServeHTTP(rr, req)
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
@@ -314,7 +313,7 @@ func TestAuthMiddleware_InsecureReadonly_TokenAdminGETRejected(t *testing.T) {
 	}))
 
 	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/tokens", nil))
+	h.ServeHTTP(rr, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/tokens", nil))
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 	assert.Contains(t, rr.Body.String(), `"auth_required"`)
 }
@@ -326,7 +325,7 @@ func TestAuthMiddleware_UnauthenticatedPathsAlwaysPass(t *testing.T) {
 	}))
 	for _, p := range []string{"/api/v1/ping", "/api/v1/health"} {
 		rr := httptest.NewRecorder()
-		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, p, nil))
+		h.ServeHTTP(rr, httptest.NewRequestWithContext(t.Context(), http.MethodGet, p, nil))
 		assert.Equal(t, http.StatusOK, rr.Code, "unauthenticated path %s should pass", p)
 	}
 }
@@ -336,7 +335,7 @@ func TestAuthMiddleware_HealthValidatesAnExplicitBearer(t *testing.T) {
 	h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/health", nil)
 	req.Header.Set("Authorization", "Bearer wrong-token")
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
@@ -360,7 +359,7 @@ func TestAuthMiddleware_KeylessHealthRejectsExplicitAuthorization(t *testing.T) 
 		{name: "malformed scheme", header: "Basic dXNlcjpwYXNz", status: http.StatusUnauthorized, code: "auth_required"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, pathHealth, nil)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, pathHealth, nil)
 			req.Header.Set(authHeader, tc.header)
 			rr := httptest.NewRecorder()
 			h.ServeHTTP(rr, req)
@@ -372,7 +371,7 @@ func TestAuthMiddleware_KeylessHealthRejectsExplicitAuthorization(t *testing.T) 
 	// Ordinary keyless requests keep their established local authority. The
 	// credential-broker proxy relies on this path while forwarding a target
 	// Authorization header through its self-authenticated handler.
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects", nil)
 	req.Header.Set(authHeader, "Bearer target-token")
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
@@ -397,7 +396,7 @@ func TestAuthMiddleware_FederationTransportPathsBypassAdminBearer(t *testing.T) 
 		{method: http.MethodPost, path: "/api/v1/projects/1/federation/events:ingest"},
 	} {
 		rr := httptest.NewRecorder()
-		h.ServeHTTP(rr, httptest.NewRequest(tc.method, tc.path, nil))
+		h.ServeHTTP(rr, httptest.NewRequestWithContext(t.Context(), tc.method, tc.path, nil))
 		assert.Equal(t, http.StatusAccepted, rr.Code, "%s %s should bypass daemon bearer middleware", tc.method, tc.path)
 	}
 }
@@ -429,7 +428,7 @@ func TestAuthMiddleware_FederationTransportBypassRequiresExactRouteAndMethod(t *
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rr := httptest.NewRecorder()
-			h.ServeHTTP(rr, httptest.NewRequest(tc.method, tc.path, nil))
+			h.ServeHTTP(rr, httptest.NewRequestWithContext(t.Context(), tc.method, tc.path, nil))
 			assert.Equal(t, http.StatusUnauthorized, rr.Code, "%s %s should require daemon bearer", tc.method, tc.path)
 		})
 	}
@@ -442,10 +441,10 @@ func TestAuthMiddleware_FederationSetupRouteUsesAdminBearer(t *testing.T) {
 	}))
 
 	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/v1/federation/enrollments", nil))
+	h.ServeHTTP(rr, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/federation/enrollments", nil))
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/federation/enrollments", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/federation/enrollments", nil)
 	req.Header.Set("Authorization", "Bearer expected-token")
 	rr = httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
@@ -455,7 +454,7 @@ func TestAuthMiddleware_FederationSetupRouteUsesAdminBearer(t *testing.T) {
 func openAuthTestDB(t *testing.T) *sqlitestore.Store {
 	t.Helper()
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	d, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })

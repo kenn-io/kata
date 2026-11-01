@@ -103,9 +103,9 @@ func TestTextRoleHTTPContract(t *testing.T) {
 			require.NoError(t, err)
 			document := EmbedText("repair login", "session expired")
 			query := "login"
-			_, err = c.EncodeFunc()(context.Background(), []string{document})
+			_, err = c.EncodeFunc()(t.Context(), []string{document})
 			require.NoError(t, err)
-			_, err = c.EmbedQuery(context.Background(), []string{query})
+			_, err = c.EmbedQuery(t.Context(), []string{query})
 			require.NoError(t, err)
 			require.Equal(t, [][]string{{cfg.DocumentPrefix + document + cfg.DocumentSuffix}, {cfg.QueryPrefix + query + cfg.QuerySuffix}}, inputs)
 		})
@@ -140,7 +140,7 @@ func TestRequestedTextDimensions(t *testing.T) {
 				c, err := New(Config{BaseURL: srv.URL, Model: "example-model", Dims: width, RequestDimensions: request})
 				require.NoError(t, err)
 				for _, encode := range []func(context.Context, []string) ([][]float32, error){c.Embed, c.EmbedQuery} {
-					vecs, err := encode(context.Background(), []string{"example"})
+					vecs, err := encode(t.Context(), []string{"example"})
 					require.NoError(t, err)
 					require.Len(t, vecs[0], width)
 				}

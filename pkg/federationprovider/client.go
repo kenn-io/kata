@@ -38,6 +38,7 @@ func Exchange(parent context.Context, command []string, request Request) (Respon
 	if err := ctx.Err(); err != nil {
 		return Response{}, errors.Join(ErrProviderFailed, err)
 	}
+	//nolint:noctx // the AfterFunc below terminates the process tree when ctx ends.
 	cmd := exec.Command(command[0], command[1:]...) // #nosec G204 -- operator-configured executable and argv, never response data.
 	cmd.Stdin = bytes.NewReader(data)
 	output := &boundedOutput{cancel: cancel}

@@ -1150,7 +1150,7 @@ func TestRunnerRunRequiresStore(t *testing.T) {
 	runner := NewRunner(RunnerConfig{})
 	var err error
 	require.NotPanics(t, func() {
-		err = runner.Run(context.Background())
+		err = runner.Run(t.Context())
 	})
 	require.ErrorContains(t, err, "github sync runner requires store")
 }
@@ -1218,7 +1218,7 @@ func withWaitableDrainAdmission(admission activity.WaitableAdmission) runnerOpti
 
 func newRunnerHarness(t *testing.T, opts ...runnerOption) *runnerHarness {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	t.Setenv("KATA_HOME", t.TempDir())
 	storePath := filepath.Join(t.TempDir(), "kata.db")
 	sqliteStore, err := sqlitestore.Open(ctx, storePath)

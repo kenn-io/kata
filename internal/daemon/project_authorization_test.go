@@ -1154,7 +1154,7 @@ func TestProjectAccessDiagnosticsAllowRemoteStaticOwnerToken(t *testing.T) {
 		})
 		t.Cleanup(func() { require.NoError(t, server.Close()) })
 
-		request := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/debug/pprof/", nil)
 		request.RemoteAddr = "192.0.2.10:43210"
 		request.Header.Set("Authorization", "Bearer remote-owner-test-token")
 		request = request.WithContext(context.WithValue(request.Context(), http.LocalAddrContextKey, &net.TCPAddr{
@@ -1322,7 +1322,7 @@ func TestMountedAdministratorsCanManageArchivedProjectsWithinProjectPolicy(t *te
 						path = fmt.Sprintf("/api/v1/projects/%d/actions/purge", project.ID)
 						body = `{"actor":"` + actor + `"}`
 					}
-					request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+					request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, strings.NewReader(body))
 					if operation == "purgeProject" {
 						request.Header.Set("Content-Type", "application/json")
 						request.Header.Set("X-Kata-Confirm", "PURGE archived-managed-project")
@@ -1370,7 +1370,7 @@ func TestProjectAccessRevocationFence(t *testing.T) {
 		}}
 		server := daemon.NewServer(daemon.ServerConfig{DB: wrapped, HostAccess: projectAccessHostController{&hostFence}})
 		t.Cleanup(func() { _ = server.Close() })
-		request := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues", f.private.ID), strings.NewReader(`{"title":"Revoked mutation","actor":"member","force_new":true}`))
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues", f.private.ID), strings.NewReader(`{"title":"Revoked mutation","actor":"member","force_new":true}`))
 		request.Header.Set("Content-Type", "application/json")
 		request = request.WithContext(daemon.WithPrincipal(request.Context(), daemon.Principal{Kind: daemon.PrincipalHost, Actor: "member", Subject: "host-member"}))
 		recorder := httptest.NewRecorder()
@@ -1405,7 +1405,7 @@ func TestProjectAccessHostSubtreeProjectFenceIntersection(t *testing.T) {
 				called := false
 				server := daemon.NewServer(daemon.ServerConfig{DB: wrapped, HostAccess: projectAccessFinalHostFence{called: &called, deny: boundary == "host"}})
 				t.Cleanup(func() { require.NoError(t, server.Close()) })
-				request := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues/%s/comments", f.private.ID, f.issue.ShortID), strings.NewReader(`{"body":"Intersected write","actor":"member"}`))
+				request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues/%s/comments", f.private.ID, f.issue.ShortID), strings.NewReader(`{"body":"Intersected write","actor":"member"}`))
 				request.Header.Set("Content-Type", "application/json")
 				// Host principals do not carry native DB-token scopes. Install the
 				// admitted native subtree fence on the incoming context, as a host
@@ -1762,7 +1762,7 @@ func TestProjectAccessHostedDiagnosticsRequireIdentity(t *testing.T) {
 		hosted := daemon.NewServer(daemon.ServerConfig{DB: store, HostAccess: projectAccessHostController{&hostFence}, TrustCallerAuthentication: true})
 		t.Cleanup(func() { require.NoError(t, hosted.Close()) })
 		for _, path := range []string{"/debug/pprof/", "/debug/pprof/cmdline"} {
-			request := httptest.NewRequest(http.MethodGet, path, nil)
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 			request.RemoteAddr = "192.0.2.10:43210"
 			request = request.WithContext(context.WithValue(request.Context(), http.LocalAddrContextKey, &net.TCPAddr{IP: net.ParseIP("192.0.2.20"), Port: 7777}))
 			recorder := httptest.NewRecorder()
@@ -1772,13 +1772,13 @@ func TestProjectAccessHostedDiagnosticsRequireIdentity(t *testing.T) {
 		// A standalone listener on the owner-local host keeps its existing access.
 		local := daemon.NewServer(daemon.ServerConfig{DB: store})
 		t.Cleanup(func() { require.NoError(t, local.Close()) })
-		request := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/debug/pprof/", nil)
 		request.RemoteAddr = "127.0.0.1:43210"
 		request = request.WithContext(context.WithValue(request.Context(), http.LocalAddrContextKey, &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 7777}))
 		recorder := httptest.NewRecorder()
 		local.Handler().ServeHTTP(recorder, request)
 		assert.Equal(t, http.StatusOK, recorder.Code, "genuine owner-local diagnostics remain available")
-		request = httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+		request = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/debug/pprof/", nil)
 		recorder = httptest.NewRecorder()
 		local.Handler().ServeHTTP(recorder, request)
 		assert.NotEqual(t, http.StatusOK, recorder.Code, "missing transport facts establish no owner authority")
@@ -1791,7 +1791,7 @@ func TestProjectAccessAnonymousPrivateNetworkWrites(t *testing.T) {
 		server := daemon.NewServer(daemon.ServerConfig{DB: store, Auth: config.AuthConfig{AllowUnauthenticatedPrivateNetworkWrites: true}})
 		t.Cleanup(func() { require.NoError(t, server.Close()) })
 		for _, project := range []db.Project{f.public, f.private} {
-			request := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues", project.ID), strings.NewReader(`{"title":"Network task","actor":"member","force_new":true}`))
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issues", project.ID), strings.NewReader(`{"title":"Network task","actor":"member","force_new":true}`))
 			request.Header.Set("Content-Type", "application/json")
 			request.RemoteAddr = "192.168.1.10:43210"
 			request = request.WithContext(context.WithValue(request.Context(), http.LocalAddrContextKey, &net.TCPAddr{IP: net.ParseIP("192.168.1.20"), Port: 7777}))
@@ -1821,7 +1821,7 @@ func TestProjectAccessAnonymousPrivateNetworkLeaseActions(t *testing.T) {
 				encoded, err = json.Marshal(body)
 				require.NoError(t, err)
 			}
-			req := httptest.NewRequest(method, path, bytes.NewReader(encoded))
+			req := httptest.NewRequestWithContext(t.Context(), method, path, bytes.NewReader(encoded))
 			if body != nil {
 				req.Header.Set("Content-Type", "application/json")
 			}
@@ -1923,7 +1923,7 @@ func TestProjectAccessProxyAndHostBoundaries(t *testing.T) {
 		server := daemon.NewServer(cfg)
 		t.Cleanup(func() { require.NoError(t, server.Close()) })
 		for _, actor := range []string{"", "nonmember", "member"} {
-			request := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d", f.private.ID), nil)
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/projects/%d", f.private.ID), nil)
 			request.RemoteAddr = "127.0.0.1:43210"
 			request.Header.Set("X-Authenticated-Actor", actor)
 			request = request.WithContext(context.WithValue(request.Context(), http.LocalAddrContextKey, &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 7777}))
@@ -1937,7 +1937,7 @@ func TestProjectAccessProxyAndHostBoundaries(t *testing.T) {
 		}
 		host := daemon.NewServer(daemon.ServerConfig{DB: store, HostAccess: projectAccessDenyHost{}})
 		t.Cleanup(func() { require.NoError(t, host.Close()) })
-		request := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d", f.private.ID), nil)
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/projects/%d", f.private.ID), nil)
 		request = request.WithContext(daemon.WithPrincipal(request.Context(), daemon.Principal{Kind: daemon.PrincipalHost, Actor: "member", Subject: "host-member"}))
 		recorder := httptest.NewRecorder()
 		host.Handler().ServeHTTP(recorder, request)

@@ -83,7 +83,7 @@ func TestFederationMixedBackendMatrix(t *testing.T) {
 		t.Skip("mixed-backend federation requires PostgreSQL")
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	bin := buildKataBinary(t)
@@ -245,7 +245,7 @@ func startFederationMatrixNode(
 	}
 	env := federationMatrixOverlayEnv(dirs.env(), overrides)
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	addr := listener.Addr().String()
 	require.NoError(t, listener.Close())
@@ -265,7 +265,8 @@ func restartFederationMatrixNode(t *testing.T, node federationMatrixNode) federa
 func launchFederationMatrixNode(t *testing.T, node federationMatrixNode) federationMatrixNode {
 	t.Helper()
 	addr := strings.TrimPrefix(node.url, "http://")
-	cmd := exec.Command(node.bin, "daemon", "start", "--foreground", "--listen", addr) //nolint:gosec // test-built binary and loopback address
+	// t.Cleanup owns this process; t.Context() would kill it before that runs.
+	cmd := exec.CommandContext(context.WithoutCancel(t.Context()), node.bin, "daemon", "start", "--foreground", "--listen", addr) //nolint:gosec // test-built binary and loopback address
 	cmd.Env = node.env
 	cmd.Dir = node.dirs.repoDir
 	cmd.Stdout = io.Discard
@@ -283,7 +284,9 @@ func launchFederationMatrixNode(t *testing.T, node federationMatrixNode) federat
 	client := &http.Client{Timeout: 2 * time.Second}
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		resp, requestErr := client.Get(node.url + "/api/v1/ping") //nolint:gosec,noctx // loopback test daemon
+		req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, node.url+"/api/v1/ping", nil)
+		require.NoError(t, reqErr)
+		resp, requestErr := client.Do(req) //nolint:gosec // loopback test daemon
 		if requestErr == nil {
 			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
@@ -335,7 +338,7 @@ func federationMatrixRunJSON[T any](t *testing.T, node federationMatrixNode, arg
 
 func federationMatrixRunCommand(t *testing.T, node federationMatrixNode, args ...string) federationMatrixCommandResult {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, node.bin, args...) //nolint:gosec // test-built binary and fixed test arguments
 	cmd.Dir = node.dirs.repoDir

@@ -229,7 +229,7 @@ func TestSSE_StreamForwardsMessages(t *testing.T) {
 			`{"reset_after_id":2}`)
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	ch := make(chan tea.Msg, 4)
 	var lastID int64
@@ -269,7 +269,7 @@ func TestSSE_NoConnectedStatusBeforeFirstFrame(t *testing.T) {
 		// Return immediately — body closes with no frames.
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	ch := make(chan tea.Msg, 4)
 	var lastID int64
@@ -308,7 +308,7 @@ func TestSSE_ReconnectSendsLastEventID(t *testing.T) {
 		// Close the connection by returning.
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	ch := make(chan tea.Msg, 8)
 	done := make(chan struct{})
 	go func() {
@@ -373,7 +373,7 @@ func TestSSE_GracePeriod_FastReconnect_NoReconnectingBadge(t *testing.T) {
 			return &http.Response{StatusCode: http.StatusOK, Body: body}, nil
 		})}
 
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		ch := make(chan tea.Msg, 16)
 		done := make(chan struct{})
@@ -437,7 +437,7 @@ func TestSSE_GracePeriod_TimerVsConnectIsRaceFree(t *testing.T) {
 			`{"type":"issue.created","project_id":7}`)
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	ch := make(chan tea.Msg, 256)
 	done := make(chan struct{})
 	go func() {
@@ -512,7 +512,7 @@ func TestSSE_GracePeriod_LongOutage_SurfacesBadge(t *testing.T) {
 		<-r.Context().Done()
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	ch := make(chan tea.Msg, 16)
 	done := make(chan struct{})
 	go func() {

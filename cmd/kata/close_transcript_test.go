@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -167,7 +166,7 @@ func TestCloseTranscript_DaemonCompatibility(t *testing.T) {
 			t.Cleanup(server.Close)
 
 			_, stderr, err := executeRootCapture(t,
-				contextWithBaseURL(context.Background(), server.URL),
+				contextWithBaseURL(t.Context(), server.URL),
 				"--project", "example-project", "close", "abc1", "--done",
 				"--message", "Implemented the example behavior and ran the focused tests.",
 				"--test", "go test ./internal/example")

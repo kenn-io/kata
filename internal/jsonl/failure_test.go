@@ -1,7 +1,6 @@
 package jsonl_test
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -40,7 +39,7 @@ func TestImportPropagatesDecoderFailures(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			target := openImportTargetDB(t)
 
-			err := jsonl.Import(context.Background(), strings.NewReader(tt.input), target)
+			err := jsonl.Import(t.Context(), strings.NewReader(tt.input), target)
 
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantErr)

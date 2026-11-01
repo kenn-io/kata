@@ -1,7 +1,6 @@
 package todoistsync
 
 import (
-	"context"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -319,7 +318,7 @@ func TestClientAuthenticationFailureIsTerminal(t *testing.T) {
 		c := testConfig()
 		c.APIOrigin = server.URL
 		client := NewClient(ClientConfig{Daemon: config.TodoistSyncConfig{APIOrigin: server.URL}, LookupEnv: func(string) (string, bool) { return "fixture-secret", true }})
-		_, err := client.ForRun(context.Background(), c)
+		_, err := client.ForRun(t.Context(), c)
 		statusErr, ok := errors.AsType[*issuesync.StatusError](err)
 		require.True(t, ok, "%v", err)
 		require.True(t, statusErr.Blocked)

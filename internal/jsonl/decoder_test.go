@@ -16,7 +16,7 @@ func decodeLines(ctx context.Context, lines ...string) ([]jsonl.Envelope, error)
 }
 
 func TestDecoderRequiresExportVersionFirst(t *testing.T) {
-	_, err := decodeLines(context.Background(), `{"kind":"project","data":{"id":1}}`)
+	_, err := decodeLines(t.Context(), `{"kind":"project","data":{"id":1}}`)
 
 	require.Error(t, err)
 	assert.ErrorIs(t, err, jsonl.ErrMissingExportVersion)
@@ -24,7 +24,7 @@ func TestDecoderRequiresExportVersionFirst(t *testing.T) {
 }
 
 func TestDecoderRejectsUnknownKind(t *testing.T) {
-	_, err := decodeLines(context.Background(),
+	_, err := decodeLines(t.Context(),
 		validExportVersion,
 		`{"kind":"bogus","data":{"id":1}}`,
 	)
@@ -35,7 +35,7 @@ func TestDecoderRejectsUnknownKind(t *testing.T) {
 }
 
 func TestDecoderRejectsOutOfOrderKind(t *testing.T) {
-	_, err := decodeLines(context.Background(),
+	_, err := decodeLines(t.Context(),
 		validExportVersion,
 		`{"kind":"link","data":{"id":1}}`,
 		`{"kind":"issue","data":{"id":1}}`,
@@ -47,7 +47,7 @@ func TestDecoderRejectsOutOfOrderKind(t *testing.T) {
 }
 
 func TestDecoderReportsInvalidJSONLine(t *testing.T) {
-	_, err := decodeLines(context.Background(),
+	_, err := decodeLines(t.Context(),
 		validExportVersion,
 		`{"kind":"project","data":`,
 	)
@@ -57,7 +57,7 @@ func TestDecoderReportsInvalidJSONLine(t *testing.T) {
 }
 
 func TestDecoderReadsOrderedEnvelopes(t *testing.T) {
-	got, err := decodeLines(context.Background(),
+	got, err := decodeLines(t.Context(),
 		`{"kind":"meta","data":{"key":"export_version","value":"1"},"ignored":true}`,
 		`{"kind":"meta","data":{"key":"schema_version","value":"1"}}`,
 		`{"kind":"project","data":{"id":1}}`,
@@ -83,7 +83,7 @@ func TestEncoderWritesCompactJSONLines(t *testing.T) {
 }
 
 func TestDecoderReturnsContextError(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	_, err := decodeLines(ctx, validExportVersion)

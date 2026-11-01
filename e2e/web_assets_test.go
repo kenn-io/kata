@@ -4,6 +4,7 @@ package e2e_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -62,7 +63,7 @@ func TestReleaseBinaryContainsValidatedWebUI(t *testing.T) {
 
 	repositoryRoot, err := filepath.Abs("..")
 	require.NoError(t, err)
-	build := exec.Command("make", "web-embed")
+	build := exec.CommandContext(t.Context(), "make", "web-embed")
 	build.Dir = repositoryRoot
 	build.Env = os.Environ()
 	var buildLog bytes.Buffer
@@ -71,14 +72,14 @@ func TestReleaseBinaryContainsValidatedWebUI(t *testing.T) {
 	require.NoErrorf(t, build.Run(), "stage validated web assets: %s", buildLog.String())
 
 	bin := filepath.Join(t.TempDir(), "kata")
-	compile := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-o", bin, "./cmd/kata") //nolint:gosec // fixed build arguments and test-owned output
+	compile := exec.CommandContext(t.Context(), "go", "build", "-trimpath", "-buildvcs=false", "-o", bin, "./cmd/kata") //nolint:gosec // fixed build arguments and test-owned output
 	compile.Dir = repositoryRoot
 	compile.Env = os.Environ()
 	buildLog.Reset()
 	compile.Stdout = &buildLog
 	compile.Stderr = &buildLog
 	require.NoErrorf(t, compile.Run(), "compile release binary: %s", buildLog.String())
-	verify := exec.Command(bin, "_web-assets-check") //nolint:gosec // bin is the test-owned release binary compiled above.
+	verify := exec.CommandContext(t.Context(), bin, "_web-assets-check") //nolint:gosec // bin is the test-owned release binary compiled above.
 	verify.Env = os.Environ()
 	buildLog.Reset()
 	verify.Stdout = &buildLog
@@ -94,8 +95,9 @@ func TestReleaseBinaryContainsValidatedWebUI(t *testing.T) {
 	env := webReleaseEnvironment(os.Environ(), home, workspace)
 
 	stderr := &safeBuffer{}
+	// t.Cleanup owns this process; t.Context() would kill it before that runs.
 	//nolint:gosec // bin is the test-owned release binary compiled above.
-	daemon := exec.Command(bin, "daemon", "start", "--foreground")
+	daemon := exec.CommandContext(context.WithoutCancel(t.Context()), bin, "daemon", "start", "--foreground")
 	daemon.Dir = workspace
 	daemon.Env = env
 	daemon.Stdout = io.Discard
@@ -117,7 +119,7 @@ func TestReleaseBinaryContainsValidatedWebUI(t *testing.T) {
 	releaseGET(t, client, origin+"/"+strings.TrimPrefix(assetPath[1], "./"))
 	require.Contains(t, releaseGET(t, client, origin+"/kata?view=all-open"), productionWebMarker)
 
-	request, err := http.NewRequest(http.MethodGet, origin+"/kata/?view=today&label=ready", nil)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, origin+"/kata/?view=today&label=ready", nil)
 	require.NoError(t, err)
 	request.Header.Set("Accept", "text/html")
 	page, err := client.Do(request) //nolint:gosec // loopback origin selected by this test.
@@ -143,7 +145,7 @@ func TestReleaseBinaryContainsValidatedWebUI(t *testing.T) {
 	require.NoError(t, json.Unmarshal(sessionResponse, &session))
 	require.NotEmpty(t, session.Session)
 
-	req, err := http.NewRequest(http.MethodGet, origin+"/api/v1/ui/snapshot?view=all-open", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, origin+"/api/v1/ui/snapshot?view=all-open", nil)
 	require.NoError(t, err)
 	req.Header.Set("X-Kata-Web-Session", session.Session)
 	response, err := client.Do(req) //nolint:gosec // loopback origin selected by this test.
@@ -203,7 +205,7 @@ func assertEnvironmentMissing(t *testing.T, env []string, name string) {
 
 func releaseGET(t *testing.T, client *http.Client, target string) string {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodGet, target, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, target, nil)
 	require.NoError(t, err)
 	req.Header.Set("Accept", "text/html")
 	response, err := client.Do(req) //nolint:gosec // loopback target created by the test.
@@ -219,7 +221,7 @@ func releaseJSON(t *testing.T, client *http.Client, method, target string, input
 	t.Helper()
 	body, err := json.Marshal(input)
 	require.NoError(t, err)
-	req, err := http.NewRequest(method, target, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(t.Context(), method, target, bytes.NewReader(body))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	for name, value := range headers {

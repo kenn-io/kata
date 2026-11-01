@@ -167,7 +167,7 @@ func TestEnsureRunningRestartsWhenDaemonVersionDiffers(t *testing.T) {
 
 	require.NoError(t, writeRuntimeRecord(t, tmp, addr))
 	restore := patchEnsureHooks(t, "new-version", "http://new-daemon")
-	url, err := EnsureRunning(context.Background())
+	url, err := EnsureRunning(t.Context())
 	require.NoError(t, err)
 
 	assert.Equal(t, "http://new-daemon", url)
@@ -183,7 +183,7 @@ func TestEnsureRunningRestartsWhenDaemonVersionUnknown(t *testing.T) {
 
 	require.NoError(t, writeRuntimeRecord(t, tmp, addr))
 	restore := patchEnsureHooks(t, "new-version", "http://new-daemon")
-	url, err := EnsureRunning(context.Background())
+	url, err := EnsureRunning(t.Context())
 	require.NoError(t, err)
 
 	assert.Equal(t, "http://new-daemon", url)
@@ -197,7 +197,7 @@ func TestEnsureLocalRunningIgnoresRemoteOverride(t *testing.T) {
 	setupKataEnv(t)
 	restore := patchEnsureHooks(t, currentVersionForEnsure(), "http://local-daemon")
 
-	url, err := EnsureLocalRunning(context.Background())
+	url, err := EnsureLocalRunning(t.Context())
 
 	require.NoError(t, err)
 	assert.Equal(t, "http://local-daemon", url)
@@ -303,7 +303,7 @@ func TestDiscoverForEnsureThreeOutcomes(t *testing.T) {
 			ns, err := daemonruntime.NewNamespace()
 			require.NoError(t, err)
 
-			got, err := discoverForEnsure(context.Background(), ns.DataDir)
+			got, err := discoverForEnsure(t.Context(), ns.DataDir)
 
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got.Outcome)
@@ -386,7 +386,7 @@ func TestAutoStartUsesKitDetachedStarter(t *testing.T) {
 	}
 	t.Cleanup(func() { startDetachedDaemonForEnsure = orig })
 
-	target, err := autoStart(context.Background(), ns.DataDir)
+	target, err := autoStart(t.Context(), ns.DataDir)
 
 	require.NoError(t, err)
 	assert.Equal(t, "http://"+addr, target.BaseURL)
@@ -516,7 +516,7 @@ func TestStopRunningDaemonsDoesNotSignalUnverifiedRuntimePID(t *testing.T) {
 	require.NoError(t, writeRuntimeRecordForPID(t, tmp, cmd.Process.Pid, "127.0.0.1:1"))
 	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
-	require.ErrorIs(t, stopRunningDaemons(context.Background(), ns.DataDir, ns.DBHash), ErrLocalDaemonUnreachable)
+	require.ErrorIs(t, stopRunningDaemons(t.Context(), ns.DataDir, ns.DBHash), ErrLocalDaemonUnreachable)
 
 	select {
 	case err := <-waitCh:
@@ -548,7 +548,7 @@ func TestEnsureLocalRunningDoesNotStartWhenRestartProbeFails(t *testing.T) {
 	}
 	t.Cleanup(func() { startDaemonForEnsure = origStart })
 
-	_, err := EnsureLocalRunning(context.Background())
+	_, err := EnsureLocalRunning(t.Context())
 	assert.ErrorIs(t, err, ErrLocalDaemonUnreachable)
 	assert.Zero(t, startCalls)
 }
@@ -559,7 +559,7 @@ func TestNewHTTPClientWithoutAuthSkipsDeadRuntimeRecords(t *testing.T) {
 	}
 	tmp := setupKataEnv(t)
 	socket := filepath.Join(t.TempDir(), "kata.sock")
-	ln, err := net.Listen("unix", socket)
+	ln, err := new(net.ListenConfig).Listen(t.Context(), "unix", socket)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ln.Close() })
 	srv := &http.Server{
@@ -580,10 +580,10 @@ func TestNewHTTPClientWithoutAuthSkipsDeadRuntimeRecords(t *testing.T) {
 	require.NoError(t, writeRuntimeRecordForPID(t, tmp, deadPID(t), "unix:///nonexistent/kata.sock"))
 	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), "unix://"+socket))
 
-	c, err := newHTTPClientWithoutAuth(context.Background(), UnixBase, Opts{Timeout: 2 * time.Second})
+	c, err := newHTTPClientWithoutAuth(t.Context(), UnixBase, Opts{Timeout: 2 * time.Second})
 	require.NoError(t, err)
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, UnixBase+"/api/v1/ping", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, UnixBase+"/api/v1/ping", nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req)
 	require.NoError(t, err)
@@ -603,7 +603,7 @@ func TestNewHTTPClientWithoutAuthSkipsLiveTCPRuntimeBeforeUnix(t *testing.T) {
 	require.NoError(t, writeRuntimeRecordForPID(t, tmp, tcpProcess.Process.Pid, tcpAddress))
 
 	socket := filepath.Join(t.TempDir(), "kata.sock")
-	ln, err := net.Listen("unix", socket)
+	ln, err := new(net.ListenConfig).Listen(t.Context(), "unix", socket)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ln.Close() })
 	srv := &http.Server{
@@ -639,7 +639,7 @@ func TestNewHTTPClientWithoutAuthSkipsLiveTCPRuntimeBeforeUnix(t *testing.T) {
 // been reaped.
 func deadPID(t *testing.T) int {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=TestEnsureSleepHelperProcess", "--") //nolint:gosec // test helper starts this test binary
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=TestEnsureSleepHelperProcess", "--") //nolint:gosec // test helper starts this test binary
 	cmd.Env = append(os.Environ(), "KATA_ENSURE_SLEEP_HELPER=1")
 	stdin, err := cmd.StdinPipe()
 	require.NoError(t, err)
@@ -652,7 +652,8 @@ func deadPID(t *testing.T) int {
 
 func startLongLivedTestProcess(t *testing.T) (*exec.Cmd, <-chan error) {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=TestEnsureSleepHelperProcess", "--") //nolint:gosec // test helper starts this test binary
+	// t.Cleanup owns this process; t.Context() would kill it before that runs.
+	cmd := exec.CommandContext(context.WithoutCancel(t.Context()), os.Args[0], "-test.run=TestEnsureSleepHelperProcess", "--") //nolint:gosec // test helper starts this test binary
 	cmd.Env = append(os.Environ(), "KATA_ENSURE_SLEEP_HELPER=1")
 	stdin, err := cmd.StdinPipe()
 	require.NoError(t, err)
@@ -706,7 +707,7 @@ func TestStopRunningDaemonsSignalsVerifiedIncompatibleRuntime(t *testing.T) {
 	}
 	t.Cleanup(func() { signalDaemonStopForEnsure = origSignal })
 
-	require.NoError(t, stopRunningDaemons(context.Background(), ns.DataDir, ns.DBHash))
+	require.NoError(t, stopRunningDaemons(t.Context(), ns.DataDir, ns.DBHash))
 	assert.Equal(t, os.Getpid(), signaled.PID)
 	assert.Equal(t, ns.DBHash, signaledDBHash)
 }
@@ -734,10 +735,10 @@ func TestDaemonDiscoveryPreservesRecordPublishedDuringProbe(t *testing.T) {
 	t.Cleanup(oldServer.Close)
 	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), strings.TrimPrefix(oldServer.URL, "http://")))
 
-	_, _, err = Discover(context.Background(), ns.DataDir)
+	_, _, err = Discover(t.Context(), ns.DataDir)
 	require.NoError(t, err)
 	require.NoError(t, <-published)
-	url, found, err := Discover(context.Background(), ns.DataDir)
+	url, found, err := Discover(t.Context(), ns.DataDir)
 	require.NoError(t, err)
 	require.True(t, found, "the newly published daemon must remain discoverable")
 	assert.Equal(t, replacementURL, url)
@@ -761,7 +762,7 @@ func TestEnsureRunningStartsAfterLegacyDaemonExits(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), address))
-	_, found, err := Discover(context.Background(), ns.DataDir)
+	_, found, err := Discover(t.Context(), ns.DataDir)
 	require.NoError(t, err)
 	require.True(t, found)
 
@@ -771,7 +772,7 @@ func TestEnsureRunningStartsAfterLegacyDaemonExits(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.Remove(path))
 	state := patchEnsureHooks(t, currentVersionForEnsure(), "http://new-daemon")
-	url, err := EnsureLocalRunning(context.Background())
+	url, err := EnsureLocalRunning(t.Context())
 	require.NoError(t, err)
 	assert.Equal(t, "http://new-daemon", url)
 	assert.Equal(t, 1, state.startCalls)
@@ -804,7 +805,7 @@ func TestDaemonDiscoverySkipsReusedPIDAtSameEndpoint(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			found, err := discoverForEnsure(context.Background(), ns.DataDir)
+			found, err := discoverForEnsure(t.Context(), ns.DataDir)
 			require.NoError(t, err)
 			require.Equal(t, os.Getpid(), found.Daemon.Record.PID)
 
@@ -817,7 +818,7 @@ func TestDaemonDiscoverySkipsReusedPIDAtSameEndpoint(t *testing.T) {
 			}
 			t.Cleanup(func() { signalDaemonStopForEnsure = origSignal })
 
-			require.NoError(t, stopRunningDaemons(context.Background(), ns.DataDir, ns.DBHash))
+			require.NoError(t, stopRunningDaemons(t.Context(), ns.DataDir, ns.DBHash))
 			assert.Equal(t, []int{os.Getpid()}, signaled)
 		})
 	}
@@ -845,7 +846,7 @@ func TestStopRunningDaemonsReportsUnreachableDaemonRemainingAfterSignal(t *testi
 	}
 	t.Cleanup(func() { signalDaemonStopForEnsure = origSignal })
 
-	err = stopRunningDaemons(context.Background(), ns.DataDir, ns.DBHash)
+	err = stopRunningDaemons(t.Context(), ns.DataDir, ns.DBHash)
 
 	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
 	assert.Contains(t, err.Error(), unreachableAddress)
@@ -969,7 +970,7 @@ func TestEnsureRunningReportsLiveUnreachableDaemonWithoutAutoStart(t *testing.T)
 	require.NoError(t, writeRuntimeRecord(t, tmp, address))
 	restore := patchEnsureHooks(t, currentVersionForEnsure(), "http://new-daemon")
 
-	_, err := EnsureRunning(context.Background())
+	_, err := EnsureRunning(t.Context())
 
 	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
 	assert.Contains(t, err.Error(), fmt.Sprintf("daemon pid %d is running", os.Getpid()))
@@ -993,7 +994,7 @@ func TestEnsureRunningPrioritizesUnreachableDaemonOverIncompatibleDaemon(t *test
 	require.NoError(t, writeRuntimeRecordForPID(t, tmp, os.Getpid(), unreachableAddress))
 	restore := patchEnsureHooks(t, currentVersionForEnsure(), "http://new-daemon")
 
-	_, err := EnsureRunning(context.Background())
+	_, err := EnsureRunning(t.Context())
 
 	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
 	assert.Contains(t, err.Error(), unreachableAddress)
@@ -1017,7 +1018,7 @@ func TestDiscoverIgnoresRuntimeRecordWhosePIDWasReused(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, ok, err = Discover(context.Background(), ns.DataDir)
+	_, ok, err = Discover(t.Context(), ns.DataDir)
 
 	require.NoError(t, err)
 	assert.False(t, ok)
@@ -1050,7 +1051,7 @@ func TestDiscoverProbesUnverifiableRecord(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = os.Remove(path) })
 
-			url, ok, err := Discover(context.Background(), ns.DataDir)
+			url, ok, err := Discover(t.Context(), ns.DataDir)
 
 			require.NoError(t, err)
 			require.Equal(t, tc.want, ok)
@@ -1069,7 +1070,7 @@ func TestDiscoverSkipsUnverifiableRecordWithoutPingPID(t *testing.T) {
 	_, addr := startMockDaemonPing(t, map[string]any{"ok": true, "service": "kata", "version": "test-version"})
 	ns := writeUnverifiableRecord(t, helper.Process.Pid, addr, nil)
 
-	_, ok, err := Discover(context.Background(), ns.DataDir)
+	_, ok, err := Discover(t.Context(), ns.DataDir)
 
 	require.NoError(t, err)
 	assert.False(t, ok)
@@ -1091,7 +1092,7 @@ func TestDiscoverStopsProbingAfterFirstLiveDaemon(t *testing.T) {
 	ns, err := daemonruntime.NewNamespace()
 	require.NoError(t, err)
 
-	url, ok, err := Discover(context.Background(), ns.DataDir)
+	url, ok, err := Discover(t.Context(), ns.DataDir)
 	require.NoError(t, err)
 	require.True(t, ok)
 	assert.Contains(t, []string{"http://" + addr1, "http://" + addr2}, url)
@@ -1149,7 +1150,7 @@ func TestEnsureRunningAutoStartsWhenRuntimePIDWasReused(t *testing.T) {
 	require.NoError(t, err)
 	restore := patchEnsureHooks(t, currentVersionForEnsure(), "http://new-daemon")
 
-	url, err := EnsureRunning(context.Background())
+	url, err := EnsureRunning(t.Context())
 
 	require.NoError(t, err)
 	assert.Equal(t, "http://new-daemon", url)
@@ -1162,7 +1163,7 @@ func TestEnsureRunningAutoStartsWhenRuntimePIDIsDead(t *testing.T) {
 	require.NoError(t, writeRuntimeRecordForPID(t, tmp, 1<<30, address))
 	restore := patchEnsureHooks(t, currentVersionForEnsure(), "http://new-daemon")
 
-	url, err := EnsureRunning(context.Background())
+	url, err := EnsureRunning(t.Context())
 
 	require.NoError(t, err)
 	assert.Equal(t, "http://new-daemon", url)

@@ -36,7 +36,7 @@ func envDoJSON(t *testing.T, env *testenv.Env, method, path string, body, out an
 		require.NoError(t, err)
 		bodyReader = bytes.NewReader(js)
 	}
-	req, err := http.NewRequestWithContext(context.Background(), method, env.URL+path, bodyReader)
+	req, err := http.NewRequestWithContext(t.Context(), method, env.URL+path, bodyReader)
 	require.NoError(t, err)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -65,7 +65,7 @@ func envDoRaw(t *testing.T, env *testenv.Env, method, path string, body any, hea
 		require.NoError(t, err)
 		bodyReader = bytes.NewReader(js)
 	}
-	req, err := http.NewRequestWithContext(context.Background(), method, env.URL+path, bodyReader)
+	req, err := http.NewRequestWithContext(t.Context(), method, env.URL+path, bodyReader)
 	require.NoError(t, err)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -150,9 +150,9 @@ func initLocalWorkspace(t *testing.T, env *testenv.Env, projectName string) int6
 	t.Helper()
 	dir := t.TempDir()
 	require.NoError(t, config.WriteProjectConfig(dir, projectName))
-	project, err := env.DB.CreateProject(context.Background(), projectName)
+	project, err := env.DB.CreateProject(t.Context(), projectName)
 	require.NoError(t, err)
-	_, err = env.DB.AttachAlias(context.Background(), project.ID, "local://"+dir, "local")
+	_, err = env.DB.AttachAlias(t.Context(), project.ID, "local://"+dir, "local")
 	require.NoError(t, err)
 	currentEnvForIssuePath = env
 	t.Cleanup(func() {
@@ -205,7 +205,7 @@ func createIssueAs(t *testing.T, env *testenv.Env, projectID int64, actor, title
 // carry a short_id (or qualified short_id / ULID).
 func refForIssue(t *testing.T, env *testenv.Env, issueID int64) string {
 	t.Helper()
-	iss, err := env.DB.IssueByID(context.Background(), issueID)
+	iss, err := env.DB.IssueByID(t.Context(), issueID)
 	require.NoError(t, err)
 	require.NotEmpty(t, iss.ShortID, "issue %d has no short_id", issueID)
 	return iss.ShortID
@@ -340,7 +340,7 @@ func postLinkAs(t *testing.T, env *testenv.Env, projectID, fromNumber int64, act
 	var out linkResp
 	toRef := strconv.FormatInt(toNumber, 10)
 	if currentEnvForIssuePath != nil {
-		if toIssue, err := currentEnvForIssuePath.DB.IssueByID(context.Background(), toNumber); err == nil && toIssue.ShortID != "" {
+		if toIssue, err := currentEnvForIssuePath.DB.IssueByID(t.Context(), toNumber); err == nil && toIssue.ShortID != "" {
 			toRef = toIssue.ShortID
 		}
 	}
@@ -453,7 +453,7 @@ func deleteLinkBlocksAs(t *testing.T, env *testenv.Env, projectID, fromNumber in
 	t.Helper()
 	toShortID := ""
 	if currentEnvForIssuePath != nil {
-		toIssue, err := currentEnvForIssuePath.DB.IssueByID(context.Background(), toNumber)
+		toIssue, err := currentEnvForIssuePath.DB.IssueByID(t.Context(), toNumber)
 		require.NoError(t, err)
 		toShortID = toIssue.ShortID
 	}
@@ -487,7 +487,7 @@ func TestSetupOneIssueUsesFastLocalBinding(t *testing.T) {
 	pid, issueID := setupOneIssue(t, env)
 	require.NotZero(t, issueID)
 
-	aliases, err := env.DB.ProjectAliases(context.Background(), pid)
+	aliases, err := env.DB.ProjectAliases(t.Context(), pid)
 	require.NoError(t, err)
 	require.Len(t, aliases, 1)
 	require.Equal(t, "local", aliases[0].AliasKind)

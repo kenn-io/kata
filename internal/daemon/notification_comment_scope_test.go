@@ -85,7 +85,7 @@ func checkNotificationCommentLateDetach(t *testing.T, detachSource bool, kind st
 		"body": evidence,
 	})
 	require.NoError(t, err)
-	req := httptest.NewRequest(http.MethodPost,
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
 		fmt.Sprintf("/api/v1/projects/%d/issues/%s/comments", project.ID, source.ShortID), strings.NewReader(string(body)))
 	req.Header.Set("Authorization", "Bearer worker-token")
 	req.Header.Set("Content-Type", "application/json")

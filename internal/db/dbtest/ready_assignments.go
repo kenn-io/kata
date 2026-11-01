@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"encoding/json/jsontext"
 	"testing"
 	"time"
@@ -11,7 +10,7 @@ import (
 )
 
 func checkReadyAssignmentExpiry(t *testing.T, store db.Storage) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	// Deliberately differs from wall time: all ownership decisions use At.
 	at := time.Date(2035, 1, 2, 12, 0, 0, 0, time.UTC)
 	fixture, err := createIssueFixture(ctx, store, "ready-assignment-project", "unassigned", "author", nil)

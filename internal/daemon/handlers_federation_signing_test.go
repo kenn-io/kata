@@ -208,7 +208,7 @@ func TestConfigureFederationSigningRejectsBrowserAuthority(t *testing.T) {
 		t.Run(string(kind), func(t *testing.T) {
 			issued, err := manager.IssueSession(daemon.Principal{Kind: kind}, "/kata")
 			require.NoError(t, err)
-			request := httptest.NewRequest(http.MethodPost, manager.Origin()+configureSigningPath,
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, manager.Origin()+configureSigningPath,
 				strings.NewReader(`{"key_id":"key-a","key_env":"TEST_DAEMON_SIGNING_KEY"}`))
 			request.Header.Set("Origin", manager.Origin())
 			request.Header.Set("Content-Type", "application/json")

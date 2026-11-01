@@ -20,7 +20,7 @@ func TestStoragePostgresMigrateAndStatusWithSeparatedRoles(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	t.Setenv("KATA_HOME", t.TempDir())
@@ -60,7 +60,8 @@ func TestStoragePostgresMigrateAndStatusWithSeparatedRoles(t *testing.T) {
 	`, runtimeRole, runtimeRole, runtimeRole, runtimeRole, runtimeRole)) // #nosec G201 -- role is a fixed prefix plus process ID.
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, err := admin.ExecContext(context.Background(), fmt.Sprintf(
+		// t.Context() is already canceled when cleanup runs.
+		_, err := admin.ExecContext(context.WithoutCancel(t.Context()), fmt.Sprintf(
 			`DROP OWNED BY %s; DROP ROLE %s`, runtimeRole, runtimeRole,
 		)) // #nosec G201 -- role is a fixed prefix plus process ID.
 		require.NoError(t, err, "roles are cluster-wide and outlive the test database")
@@ -92,7 +93,7 @@ func TestStoragePostgresStatusRejectsIncompleteRuntimePrivileges(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	t.Setenv("KATA_HOME", t.TempDir())
@@ -131,7 +132,8 @@ func TestStoragePostgresStatusRejectsIncompleteRuntimePrivileges(t *testing.T) {
 			`, runtimeRole, runtimeRole, runtimeRole, runtimeRole, runtimeRole)) // #nosec G201 -- role is a fixed prefix plus process ID and table index.
 			require.NoError(t, err)
 			t.Cleanup(func() {
-				_, _ = admin.ExecContext(context.Background(), fmt.Sprintf(`
+				// t.Context() is already canceled when cleanup runs.
+				_, _ = admin.ExecContext(context.WithoutCancel(t.Context()), fmt.Sprintf(`
 					DROP OWNED BY %s;
 					DROP ROLE IF EXISTS %s;
 				`, runtimeRole, runtimeRole)) // #nosec G201 -- role is a fixed prefix plus process ID and table index.
@@ -159,7 +161,7 @@ mode = "validate"
 schema_owner = "runtime_schema_owner"
 `), 0o600))
 
-	startup, err := preflightDaemonStartup(context.Background(), "127.0.0.1:0", false, false)
+	startup, err := preflightDaemonStartup(t.Context(), "127.0.0.1:0", false, false)
 	require.NoError(t, err)
 	assert.Equal(t, "runtime_store", startup.StoreConfig.Postgres.Schema)
 	assert.Equal(t, "validate", string(startup.StoreConfig.Postgres.SchemaMode))

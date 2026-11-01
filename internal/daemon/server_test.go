@@ -64,7 +64,7 @@ func TestServer_ExposesStandardPprofHandlers(t *testing.T) {
 		},
 	} {
 		t.Run(tc.path, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, tc.path, nil)
 			req.RemoteAddr = "127.0.0.1:12345"
 			req = req.WithContext(context.WithValue(req.Context(), http.LocalAddrContextKey, ts.Listener.Addr().(*net.TCPAddr)))
 			if tc.cancelBeforeHandle {
@@ -100,8 +100,10 @@ func TestServer_RejectsNonEmptyOrigin(t *testing.T) {
 func TestServer_MutationRequiresJSON(t *testing.T) {
 	ts, _ := startDefaultTestServer(t)
 
-	resp, err := http.Post(ts.URL+"/api/v1/projects/resolve", "text/plain",
-		strings.NewReader(`{"start_path":"/x"}`))
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodPost, ts.URL+"/api/v1/projects/resolve", strings.NewReader(`{"start_path":"/x"}`))
+	require.NoError(t, reqErr)
+	req.Header.Set("Content-Type", "text/plain")
+	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusUnsupportedMediaType, resp.StatusCode)
@@ -115,7 +117,7 @@ func TestAttributedWriteDoesNotApplyFederationTokenActorPolicy(t *testing.T) {
 func createIssueWithActor(t *testing.T, actor string) *http.Response {
 	t.Helper()
 	ts, handle := startDefaultTestServer(t)
-	project, err := handle.db.CreateProject(context.Background(), "spoke-project")
+	project, err := handle.db.CreateProject(t.Context(), "spoke-project")
 	require.NoError(t, err)
 	resp, _ := doReq(t, ts, http.MethodPost, issuesURL(project.ID), map[string]any{
 		"actor": actor,

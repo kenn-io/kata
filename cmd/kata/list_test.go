@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -296,7 +295,7 @@ func TestList_HumanRowBlockedGlyphFollowsOpenBlocker(t *testing.T) {
 // archived via the same path `kata projects remove` uses (RemoveProject).
 func TestList_HumanRowIgnoresBlockerInArchivedProject(t *testing.T) {
 	env, dir, pid := setupCLIWorkspace(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	blockerProject, err := env.DB.CreateProject(ctx, "blocker-project")
 	require.NoError(t, err)
 

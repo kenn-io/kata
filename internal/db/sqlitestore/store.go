@@ -361,6 +361,7 @@ func (d *Store) Close() error {
 	}
 	var checkpointErr error
 	if !d.readOnly {
+		// Close takes no context; bound the final checkpoint on its own.
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		checkpointErr = d.Checkpoint(ctx)
 		cancel()

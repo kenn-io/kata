@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"strings"
@@ -25,7 +24,7 @@ func runAttnHook(t *testing.T, env *testenv.Env, dir string, args ...string) err
 	cmd.SetErr(&buf)
 	cmd.SetIn(strings.NewReader(""))
 	cmd.SetArgs(args)
-	cmd.SetContext(contextWithBaseURL(context.Background(), env.URL))
+	cmd.SetContext(contextWithBaseURL(t.Context(), env.URL))
 	return cmd.Execute()
 }
 
@@ -119,7 +118,7 @@ func TestE2E_AttentionHook_ConditionalEndRejectsConcurrentChange(t *testing.T) {
 
 	resetFlags(t)
 	cmd := newRootCmd()
-	cmd.SetContext(contextWithBaseURL(context.Background(), env.URL))
+	cmd.SetContext(contextWithBaseURL(t.Context(), env.URL))
 	flags.Workspace = dir
 	d := &liveAttnDaemon{cmd: cmd}
 	lookup := d.lookup(ref)

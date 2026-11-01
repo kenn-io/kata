@@ -22,7 +22,7 @@ func (allowWorkerFenceAccess) Authorize(context.Context, AccessRequest) (AccessD
 }
 
 func TestServiceWorkerTransactionFenceRollsBackAndStopsWorkers(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	databasePath := filepath.Join(t.TempDir(), "service.db")
 	rejected := errors.New("worker transaction rejected")
 	service, err := New(ctx, Config{
@@ -155,7 +155,7 @@ func TestServiceRunTreatsCanceledInFlightWorkerFenceAsCleanShutdown(t *testing.T
 		{name: "service close", close: true},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			fenceStarted := make(chan struct{})
 			var startOnce sync.Once
 			service, err := New(ctx, Config{
@@ -237,7 +237,7 @@ func TestServiceRunTreatsDeadlineInFlightWorkerFenceAsCleanShutdown(t *testing.T
 }
 
 func TestServiceRunReportsWorkerInitiatedContextCancellation(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	service, err := New(ctx, Config{
 		DSN:    filepath.Join(t.TempDir(), "service.db"),
 		Access: allowWorkerFenceAccess{},
@@ -282,13 +282,13 @@ func seedExpiredWorkerClaim(ctx context.Context, t *testing.T, service *Service)
 }
 
 func TestServiceRunRequiresWorkerFenceWithHostAccess(t *testing.T) {
-	service, err := New(context.Background(), Config{
+	service, err := New(t.Context(), Config{
 		DSN:    filepath.Join(t.TempDir(), "service.db"),
 		Access: allowWorkerFenceAccess{},
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, service.Close()) })
 
-	err = service.Run(context.Background())
+	err = service.Run(t.Context())
 	assert.EqualError(t, err, "kata: worker transaction fence is required with host access")
 }

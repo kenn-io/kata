@@ -15,7 +15,7 @@ func TestSearchKitBuildersPreserveFieldsScopeAndOrdering(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires isolated PostgreSQL")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(ctx, dsn)

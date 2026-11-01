@@ -93,11 +93,11 @@ func TestNewForTargetHonorsTrustPrivateNetwork(t *testing.T) {
 	t.Setenv("KATA_AUTH_TOKEN", "")
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
 
-	_, err := NewForTarget(context.Background(), "http://100.64.0.5:7777",
+	_, err := NewForTarget(t.Context(), "http://100.64.0.5:7777",
 		TargetAuth{Token: "target-token"})
 	require.Error(t, err, "a plaintext CGNAT target must be refused without the opt-in")
 
-	c, err := NewForTarget(context.Background(), "http://100.64.0.5:7777",
+	c, err := NewForTarget(t.Context(), "http://100.64.0.5:7777",
 		TargetAuth{Token: "target-token", TrustPrivateNetwork: true})
 	require.NoError(t, err)
 	assert.NotNil(t, c)

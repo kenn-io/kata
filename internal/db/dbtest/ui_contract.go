@@ -19,7 +19,7 @@ func RunUISnapshotCompletenessContract(t *testing.T, open func(*testing.T) db.St
 	store := open(t)
 	uiStore, ok := store.(db.UIStore)
 	require.True(t, ok, "storage backend must implement db.UIStore")
-	ctx := context.Background()
+	ctx := t.Context()
 	project := createCursorProject(ctx, t, store)
 	const issueCount = 501
 	for idx := range issueCount {
@@ -39,7 +39,7 @@ func RunUISnapshotAuthorityReuseContract(t *testing.T, open func(*testing.T) db.
 	store := open(t)
 	uiStore, ok := store.(db.UIStore)
 	require.True(t, ok, "storage backend must implement db.UIStore")
-	ctx := context.Background()
+	ctx := t.Context()
 	project := createCursorProject(ctx, t, store)
 	issue := createCursorIssue(ctx, t, store, project.ID, "Selected issue")
 	_, _, err := store.AddLabelAndEvent(ctx, issue.ID, db.LabelEventParams{
@@ -103,7 +103,7 @@ func RunUISnapshotMutationCursorContract(t *testing.T, open func(*testing.T) db.
 				store := open(t)
 				uiStore, ok := store.(db.UIStore)
 				require.True(t, ok, "storage backend must implement db.UIStore")
-				ctx := context.Background()
+				ctx := t.Context()
 				before, err := uiStore.UIEventCursor(ctx)
 				require.NoError(t, err)
 				test.run(ctx, t, store)
@@ -118,7 +118,7 @@ func RunUISnapshotMutationCursorContract(t *testing.T, open func(*testing.T) db.
 		store := open(t)
 		uiStore, ok := store.(db.UIStore)
 		require.True(t, ok, "storage backend must implement db.UIStore")
-		ctx := context.Background()
+		ctx := t.Context()
 		target := createCursorProject(ctx, t, store)
 		source, err := store.CreateProject(ctx, "example-workspace")
 		require.NoError(t, err)
@@ -139,7 +139,7 @@ func RunUISnapshotMutationCursorContract(t *testing.T, open func(*testing.T) db.
 		store := open(t)
 		uiStore, ok := store.(db.UIStore)
 		require.True(t, ok, "storage backend must implement db.UIStore")
-		ctx := context.Background()
+		ctx := t.Context()
 		project := createCursorProject(ctx, t, store)
 		issue := createCursorIssue(ctx, t, store, project.ID, "Unchanged title")
 
@@ -185,7 +185,7 @@ func RunUISnapshotCollectionContract(t *testing.T, open func(*testing.T) db.Stor
 	store := open(t)
 	uiStore, ok := store.(db.UIStore)
 	require.True(t, ok, "storage backend must implement db.UIStore")
-	ctx := context.Background()
+	ctx := t.Context()
 	project := createCursorProject(ctx, t, store)
 	parent := createCursorIssue(ctx, t, store, project.ID, "Parent issue")
 	child := createCursorIssue(ctx, t, store, project.ID, "Child issue")
@@ -346,7 +346,7 @@ func RunUISnapshotChildLinkContract(t *testing.T, open func(*testing.T) db.Stora
 	store := open(t)
 	uiStore, ok := store.(db.UIStore)
 	require.True(t, ok, "storage backend must implement db.UIStore")
-	ctx := context.Background()
+	ctx := t.Context()
 	primary, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	spoke, err := store.CreateProject(ctx, "spoke-project")
@@ -477,7 +477,7 @@ func RunUISnapshotReadyAssignmentExpiryContract(t *testing.T, open func(*testing
 	store := open(t)
 	uiStore, ok := store.(db.UIStore)
 	require.True(t, ok, "storage backend must implement db.UIStore")
-	ctx := context.Background()
+	ctx := t.Context()
 	project := createCursorProject(ctx, t, store)
 	readyAt := time.Date(2035, 1, 2, 12, 0, 0, 0, time.UTC)
 	owner := "worker"
@@ -530,7 +530,7 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 	t.Run("delegated filters valid teammates before limit", func(t *testing.T) {
 		store := open(t)
 		uiStore := store.(db.UIStore)
-		ctx := context.Background()
+		ctx := t.Context()
 		project := createCursorProject(ctx, t, store)
 		matching, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: project.ID, Title: "Delegated issue", Author: "coordinator",
@@ -579,7 +579,7 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 		t.Run(test.name+" filters before limit", func(t *testing.T) {
 			store := open(t)
 			uiStore := store.(db.UIStore)
-			ctx := context.Background()
+			ctx := t.Context()
 			project := createCursorProject(ctx, t, store)
 			matching, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 				ProjectID: project.ID, Title: "Matching issue", Author: "user-a", Metadata: test.metadata,
@@ -601,7 +601,7 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 	t.Run("timed schedules use the browser calendar before limit", func(t *testing.T) {
 		store := open(t)
 		uiStore := store.(db.UIStore)
-		ctx := context.Background()
+		ctx := t.Context()
 		project := createCursorProject(ctx, t, store)
 		previousDay, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: project.ID, Title: "Previous browser day", Author: "user-a",
@@ -638,7 +638,7 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 	t.Run("timed deadlines use the browser calendar before limit", func(t *testing.T) {
 		store := open(t)
 		uiStore := store.(db.UIStore)
-		ctx := context.Background()
+		ctx := t.Context()
 		project := createCursorProject(ctx, t, store)
 		previousDay, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: project.ID, Title: "Previous browser deadline", Author: "user-a",
@@ -667,7 +667,7 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 	t.Run("deadline projection does not inherit a recurrence timezone", func(t *testing.T) {
 		store := open(t)
 		uiStore := store.(db.UIStore)
-		ctx := context.Background()
+		ctx := t.Context()
 		project := createCursorProject(ctx, t, store)
 		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: project.ID, Title: "Recurrence deadline", Author: "user-a",
@@ -715,7 +715,7 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 	t.Run("non-calendar views project start and deadline dates", func(t *testing.T) {
 		store := open(t)
 		uiStore := store.(db.UIStore)
-		ctx := context.Background()
+		ctx := t.Context()
 		project := createCursorProject(ctx, t, store)
 		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: project.ID, Title: "All-open deadline", Author: "user-a",
@@ -753,7 +753,7 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 			t.Run(test.name, func(t *testing.T) {
 				store := open(t)
 				uiStore := store.(db.UIStore)
-				ctx := context.Background()
+				ctx := t.Context()
 				project := createCursorProject(ctx, t, store)
 				issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
 					ProjectID: project.ID, Title: "Selected deadline", Author: "user-a",
@@ -775,7 +775,7 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 	t.Run("ready uses linked recurrence timezone for legacy issues", func(t *testing.T) {
 		store := open(t)
 		uiStore := store.(db.UIStore)
-		ctx := context.Background()
+		ctx := t.Context()
 		project := createCursorProject(ctx, t, store)
 		issue := createCursorIssue(ctx, t, store, project.ID, "Legacy recurrence issue")
 		_, err := store.CreateRecurrenceForIssue(ctx, db.CreateRecurrenceForIssueIn{
@@ -805,7 +805,7 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 	t.Run("inbox filters before limit", func(t *testing.T) {
 		store := open(t)
 		uiStore := store.(db.UIStore)
-		ctx := context.Background()
+		ctx := t.Context()
 		inbox := createCursorProject(ctx, t, store)
 		_, err := store.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 			ProjectID: inbox.ID, Actor: "user-a",
@@ -829,7 +829,7 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 	t.Run("selected recurrences use selected project", func(t *testing.T) {
 		store := open(t)
 		uiStore := store.(db.UIStore)
-		ctx := context.Background()
+		ctx := t.Context()
 		selectedProject := createCursorProject(ctx, t, store)
 		selectedIssue := createCursorIssue(ctx, t, store, selectedProject.ID, "Selected issue")
 		otherProject, err := store.CreateProject(ctx, "example-workspace")
@@ -858,7 +858,7 @@ func RunUISnapshotViewScopeContract(t *testing.T, open func(*testing.T) db.Stora
 	t.Run("archived project relationships are excluded", func(t *testing.T) {
 		store := open(t)
 		uiStore := store.(db.UIStore)
-		ctx := context.Background()
+		ctx := t.Context()
 		activeProject := createCursorProject(ctx, t, store)
 		archivedProject, err := store.CreateProject(ctx, "example-workspace")
 		require.NoError(t, err)

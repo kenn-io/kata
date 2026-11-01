@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -135,7 +136,7 @@ func agentHookCommandForPlatform(agent agenthook.Agent, entry agentHookEntry, go
 	return entry.Command, false
 }
 
-func collectAgentHookWorkspaceStatus(workspace string) agentHookStatusReport {
+func collectAgentHookWorkspaceStatus(ctx context.Context, workspace string) agentHookStatusReport {
 	report := agentHookStatusReport{Harnesses: []agentHookHarnessStatus{}, Workspace: agentHookWorkspaceStatus{Path: workspace}, Warnings: []string{}}
 	var err error
 	report.Workspace.Claude, err = readAgentHookStatus(agenthook.AgentClaude, filepath.Join(workspace, ".claude", "settings.json"), workspace)
@@ -146,7 +147,7 @@ func collectAgentHookWorkspaceStatus(workspace string) agentHookStatusReport {
 	if err != nil {
 		report.Warnings = append(report.Warnings, fmt.Sprintf("inspect workspace Codex hooks: %v", err))
 	}
-	report.Workspace.CommittedGuidance, err = readCommittedGuidance(workspace)
+	report.Workspace.CommittedGuidance, err = readCommittedGuidance(ctx, workspace)
 	if err != nil {
 		report.Workspace.CommittedGuidance = []string{}
 		report.Warnings = append(report.Warnings, fmt.Sprintf("inspect committed guidance: %v", err))
@@ -155,18 +156,18 @@ func collectAgentHookWorkspaceStatus(workspace string) agentHookStatusReport {
 }
 
 // Overlap means committed team guidance, not a local or staged-only marker.
-func readCommittedGuidance(workspace string) ([]string, error) {
+func readCommittedGuidance(ctx context.Context, workspace string) ([]string, error) {
 	result := []string{}
-	output, err := exec.Command("git", "-C", workspace, "rev-parse", "--show-toplevel").CombinedOutput() //nolint:gosec // G204: workspace is a directory argument to fixed read-only git commands; no shell.
+	output, err := exec.CommandContext(ctx, "git", "-C", workspace, "rev-parse", "--show-toplevel").CombinedOutput() //nolint:gosec // G204: workspace is a directory argument to fixed read-only git commands; no shell.
 	if err != nil {
 		return nil, fmt.Errorf("inspect workspace git root: %w: %s", err, strings.TrimSpace(string(output)))
 	}
-	prefixOutput, err := exec.Command("git", "-C", workspace, "rev-parse", "--show-prefix").Output() //nolint:gosec // G204: workspace is a directory argument to fixed read-only Git commands; no shell.
+	prefixOutput, err := exec.CommandContext(ctx, "git", "-C", workspace, "rev-parse", "--show-prefix").Output() //nolint:gosec // G204: workspace is a directory argument to fixed read-only Git commands; no shell.
 	if err != nil {
 		return nil, fmt.Errorf("inspect workspace git prefix: %w", err)
 	}
 	prefix := strings.TrimRight(string(prefixOutput), "\r\n")
-	if _, err := exec.Command("git", "-C", workspace, "rev-parse", "--verify", "--quiet", "HEAD").Output(); err != nil { //nolint:gosec // G204: workspace and revision are fixed directory and Git arguments; no shell.
+	if _, err := exec.CommandContext(ctx, "git", "-C", workspace, "rev-parse", "--verify", "--quiet", "HEAD").Output(); err != nil { //nolint:gosec // G204: workspace and revision are fixed directory and Git arguments; no shell.
 		var exit *exec.ExitError
 		if errors.As(err, &exit) && exit.ExitCode() == 1 {
 			return result, nil
@@ -175,14 +176,14 @@ func readCommittedGuidance(workspace string) ([]string, error) {
 	}
 	for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
 		path := prefix + name
-		tracked, err := exec.Command("git", "-C", workspace, "ls-tree", "-z", "HEAD", "--", ":(top)"+path).Output() //nolint:gosec // G204: fixed HEAD and literal guidance filenames passed as arguments, not shell code.
+		tracked, err := exec.CommandContext(ctx, "git", "-C", workspace, "ls-tree", "-z", "HEAD", "--", ":(top)"+path).Output() //nolint:gosec // G204: fixed HEAD and literal guidance filenames passed as arguments, not shell code.
 		if err != nil {
 			return nil, err
 		}
 		if len(tracked) == 0 {
 			continue
 		}
-		data, err := exec.Command("git", "-C", workspace, "show", "HEAD:"+path).Output() //nolint:gosec // G204: fixed HEAD and literal guidance filenames passed as arguments, not shell code.
+		data, err := exec.CommandContext(ctx, "git", "-C", workspace, "show", "HEAD:"+path).Output() //nolint:gosec // G204: fixed HEAD and literal guidance filenames passed as arguments, not shell code.
 		if err != nil {
 			return nil, err
 		}

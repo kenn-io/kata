@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"strings"
 	"testing"
 
@@ -35,7 +34,7 @@ func TestDestructiveCLI_MovedIssueConfirmation(t *testing.T) {
 				cmd.SetOut(&output)
 				cmd.SetErr(&output)
 				cmd.SetIn(strings.NewReader(strings.ToUpper(verb) + " " + currentRef + "\n"))
-				cmd.SetContext(contextWithBaseURL(context.Background(), env.URL))
+				cmd.SetContext(contextWithBaseURL(t.Context(), env.URL))
 				cmd.SetArgs([]string{"--workspace", dir, "--project", source.Name, verb, ref, "--force"})
 				require.NoError(t, cmd.Execute(), "confirmation must use the issue's current project")
 				assert.Contains(t, output.String(), currentRef)

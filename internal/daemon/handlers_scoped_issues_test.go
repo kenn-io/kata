@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net"
@@ -39,7 +38,7 @@ func TestIssueScopedIncompleteBodyDoesNotBlockAnotherMutation(t *testing.T) {
 			commentPath := "/api/v1/projects/" + strconv.FormatInt(project.ID, 10) +
 				"/issues/" + root.ShortID + "/comments"
 			host := strings.TrimPrefix(env.URL, "http://")
-			connection, err := net.DialTimeout("tcp", host, time.Second)
+			connection, err := (&net.Dialer{Timeout: time.Second}).DialContext(t.Context(), "tcp", host)
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = connection.Close() })
 			_, err = io.WriteString(connection,
@@ -100,7 +99,7 @@ func TestIssueScopedTokenNarrowsListBeforeLimitAndHidesDirectLookups(t *testing.
 	})
 	require.NoError(t, err)
 	expiresAt := time.Now().UTC().Add(time.Hour)
-	_, _, err = env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "worker-token", Actor: "worker-a", AdminActor: db.BootstrapActor,
 		Scope: &db.APITokenScope{
 			Kind: db.APITokenScopeIssueSubtree, ProjectUID: project.UID, RootIssueUID: root.UID,
@@ -482,7 +481,7 @@ func TestIssueScopedTokenReceivesOnlyItsMinimalProjectIdentity(t *testing.T) {
 	require.NoError(t, err)
 	root := createScopedHTTPTestIssue(t, env, project.ID, "Root", nil)
 	expiresAt := time.Now().UTC().Add(time.Hour)
-	_, _, err = env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "worker-token", Actor: "worker-a", AdminActor: db.BootstrapActor,
 		Scope: &db.APITokenScope{
 			Kind: db.APITokenScopeIssueSubtree, ProjectUID: project.UID, RootIssueUID: root.UID,
@@ -521,7 +520,7 @@ func TestIssueScopedTokenCreatesOnlyExplicitChildrenOfAccessibleIssues(t *testin
 	root := createScopedHTTPTestIssue(t, env, project.ID, "Root", nil)
 	outside := createScopedHTTPTestIssue(t, env, project.ID, "Outside", nil)
 	expiresAt := time.Now().UTC().Add(time.Hour)
-	_, _, err = env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "worker-token", Actor: "worker-a", AdminActor: db.BootstrapActor,
 		Scope: &db.APITokenScope{
 			Kind: db.APITokenScopeIssueSubtree, ProjectUID: project.UID, RootIssueUID: root.UID,
@@ -563,7 +562,7 @@ func TestIssueScopedTokenNarrowsBrowserSnapshotAndReferences(t *testing.T) {
 	child := createScopedHTTPTestIssue(t, env, project.ID, "Child", &root)
 	outside := createScopedHTTPTestIssue(t, env, project.ID, "Outside", nil)
 	expiresAt := time.Now().UTC().Add(time.Hour)
-	_, _, err = env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "worker-token", Actor: "worker-a", AdminActor: db.BootstrapActor,
 		Scope: &db.APITokenScope{
 			Kind: db.APITokenScopeIssueSubtree, ProjectUID: project.UID, RootIssueUID: root.UID,
@@ -633,7 +632,7 @@ func TestIssueScopedTokenProjectsEventsWithoutOutsideIdentities(t *testing.T) {
 	})
 	require.NoError(t, err)
 	expiresAt := time.Now().UTC().Add(time.Hour)
-	_, _, err = env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "worker-token", Actor: "worker-a", AdminActor: db.BootstrapActor,
 		Scope: &db.APITokenScope{
 			Kind: db.APITokenScopeIssueSubtree, ProjectUID: project.UID, RootIssueUID: root.UID,

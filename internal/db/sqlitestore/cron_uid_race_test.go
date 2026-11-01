@@ -1,6 +1,7 @@
 package sqlitestore_test
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -30,7 +31,8 @@ func TestCronFreshUIDCollisionIsAConflict(t *testing.T) {
   VALUES(NEW.uid,%d,NEW.name,NEW.definition_json,NEW.definition_event_uid,NEW.definition_hlc_json,'rival',1,NEW.created_at,NEW.updated_at);
 END`, writer.ID, rival.ID))
 		require.NoError(t, err)
-		t.Cleanup(func() { _, _ = store.ExecContext(ctx, `DROP TRIGGER IF EXISTS claim_job`) })
+		// t.Context() is already canceled when cleanup runs.
+		t.Cleanup(func() { _, _ = store.ExecContext(context.WithoutCancel(ctx), `DROP TRIGGER IF EXISTS claim_job`) })
 		before, err := store.MaxEventID(ctx)
 		require.NoError(t, err)
 		_, _, err = store.PutCronJob(ctx, db.PutCronJob{ProjectID: writer.ID, Name: "Racing", Definition: definition, Actor: "worker"})
@@ -46,7 +48,8 @@ END`, writer.ID, rival.ID))
   VALUES(NEW.uid,%d,NEW.job_uid,NEW.definition_event_uid,'rival','running',NEW.created_at,NEW.updated_at);
 END`, writer.ID, rival.ID))
 		require.NoError(t, err)
-		t.Cleanup(func() { _, _ = store.ExecContext(ctx, `DROP TRIGGER IF EXISTS claim_run`) })
+		// t.Context() is already canceled when cleanup runs.
+		t.Cleanup(func() { _, _ = store.ExecContext(context.WithoutCancel(ctx), `DROP TRIGGER IF EXISTS claim_run`) })
 		before, err := store.MaxEventID(ctx)
 		require.NoError(t, err)
 		runUID, err := uid.New()

@@ -2,7 +2,6 @@ package mcpserver
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"errors"
@@ -292,7 +291,7 @@ func TestStdioConnectionCloseUnblocksRead(t *testing.T) {
 	conn := connectStdioReader(t, reader, io.Discard)
 	done := make(chan error, 1)
 	go func() {
-		_, err := conn.Read(context.Background())
+		_, err := conn.Read(t.Context())
 		done <- err
 	}()
 
@@ -311,7 +310,7 @@ func TestStdioConnectionCloseUnblocksWrite(t *testing.T) {
 	conn := connectStdio(t, "", writer)
 	done := make(chan error, 1)
 	go func() {
-		done <- conn.Write(context.Background(), testResponse(t, 1, map[string]any{"ok": true}))
+		done <- conn.Write(t.Context(), testResponse(t, 1, map[string]any{"ok": true}))
 	}()
 	<-writer.started
 

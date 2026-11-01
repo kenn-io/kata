@@ -116,7 +116,7 @@ func TestDaemonLogs_Hooks_PrintsChronological(t *testing.T) {
 		"runs.jsonl":   {{"event_id": 3, "result": "ok"}, {"event_id": 4, "result": "ok"}},
 	})
 	resetFlags(t)
-	out, _, err := executeRootCapture(t, context.Background(), "daemon", "logs", "--hooks")
+	out, _, err := executeRootCapture(t, t.Context(), "daemon", "logs", "--hooks")
 	require.NoError(t, err)
 	idx1 := strings.Index(out, `"event_id":1`)
 	idx2 := strings.Index(out, `"event_id":2`)
@@ -137,7 +137,7 @@ func TestDaemonLogs_Hooks_FailedOnly(t *testing.T) {
 		},
 	})
 	resetFlags(t)
-	out, _, err := executeRootCapture(t, context.Background(), "daemon", "logs", "--hooks", "--failed-only")
+	out, _, err := executeRootCapture(t, t.Context(), "daemon", "logs", "--hooks", "--failed-only")
 	require.NoError(t, err)
 	if strings.Contains(out, `"event_id":1`) {
 		t.Fatal("--failed-only should exclude ok exit_code=0")
@@ -154,7 +154,7 @@ func TestDaemonLogs_Hooks_MalformedLineSkippedWithStderrWarning(t *testing.T) {
 		t.Fatal(err)
 	}
 	resetFlags(t)
-	stdout, stderr, err := executeRootCapture(t, context.Background(), "daemon", "logs", "--hooks")
+	stdout, stderr, err := executeRootCapture(t, t.Context(), "daemon", "logs", "--hooks")
 	require.NoError(t, err)
 	if !strings.Contains(stdout, `"event_id":1`) || !strings.Contains(stdout, `"event_id":2`) {
 		t.Fatal("valid lines should still print")
@@ -171,7 +171,7 @@ func TestDaemonLogs_Hooks_AgentSkipsMalformedLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	resetFlags(t)
-	stdout, stderr, err := executeRootCapture(t, context.Background(), "--agent", "daemon", "logs", "--hooks")
+	stdout, stderr, err := executeRootCapture(t, t.Context(), "--agent", "daemon", "logs", "--hooks")
 	require.NoError(t, err)
 
 	assert.Contains(t, stdout, "OK daemon_log event_id=1 result=ok")
@@ -195,7 +195,7 @@ func TestDaemonLogs_Hooks_AgentOutputOneLinePerRecord(t *testing.T) {
 	})
 	resetFlags(t)
 
-	stdout, _, err := executeRootCapture(t, context.Background(), "--agent", "daemon", "logs", "--hooks")
+	stdout, _, err := executeRootCapture(t, t.Context(), "--agent", "daemon", "logs", "--hooks")
 	require.NoError(t, err)
 
 	lines := strings.Split(strings.TrimSpace(stdout), "\n")
@@ -232,7 +232,7 @@ func TestDaemonLogs_Hooks_Tail_RotatedOnlyWaitsForActive(t *testing.T) {
 		writeHookLog(t, dir, "runs.jsonl.1", map[string]any{"event_id": 99, "result": "ok"})
 
 		resetFlags(t)
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 		defer cancel()
 		appendHookLogAsync(filepath.Join(dir, "runs.jsonl"), 300*time.Millisecond,
 			map[string]any{"event_id": 7, "result": "ok"})
@@ -310,7 +310,7 @@ func TestFollowActive_NoMark_EmitsExistingContent(t *testing.T) {
 	var buf bytes.Buffer
 	f := &hookLogFilter{hookIndex: -1}
 	synctest.Test(t, func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
 		defer cancel()
 		if err := followActive(ctx, &buf, io.Discard, path, activeMark{}, f); err != nil {
 			t.Fatal(err)
@@ -339,7 +339,7 @@ func TestFollowActive_MarkAtSize_DoesNotReEmit(t *testing.T) {
 	f := &hookLogFilter{hookIndex: -1}
 	mark := activeMark{set: true, info: info, size: info.Size()}
 	synctest.Test(t, func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
 		defer cancel()
 		if err := followActive(ctx, &buf, io.Discard, path, mark, f); err != nil {
 			t.Fatal(err)
@@ -397,7 +397,7 @@ func TestDaemonLogs_Hooks_Tail_PicksUpNewLines(t *testing.T) {
 		writeHookLog(t, dir, "runs.jsonl", map[string]any{"event_id": 1, "result": "ok"})
 
 		resetFlags(t)
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 		defer cancel()
 		appendHookLogAsync(path, 200*time.Millisecond,
 			map[string]any{"event_id": 2, "result": "ok"})
@@ -416,7 +416,7 @@ func TestDaemonLogs_Hooks_Tail_PicksUpNewLines(t *testing.T) {
 func TestDaemonLogs_RejectsNonPositiveLimit(t *testing.T) {
 	for _, lim := range []string{"0", "-1"} {
 		resetFlags(t)
-		_, _, err := executeRootCapture(t, context.Background(),
+		_, _, err := executeRootCapture(t, t.Context(),
 			"daemon", "logs", "--hooks", "--limit", lim)
 		require.Errorf(t, err, "--limit %s should reject", lim)
 		var ce *cliError
@@ -431,7 +431,7 @@ func TestDaemonLogs_RejectsNonPositiveLimit(t *testing.T) {
 // -1 is meaningless; reject loudly.
 func TestDaemonLogs_RejectsHookIndexBelowMinusOne(t *testing.T) {
 	resetFlags(t)
-	_, _, err := executeRootCapture(t, context.Background(),
+	_, _, err := executeRootCapture(t, t.Context(),
 		"daemon", "logs", "--hooks", "--hook-index", "-2")
 	require.Error(t, err)
 	var ce *cliError

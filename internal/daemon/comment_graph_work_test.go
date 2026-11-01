@@ -102,7 +102,7 @@ func TestCommentReferenceWritesReadOnlyMatchingIdentity(t *testing.T) {
 			}
 			raw, err := json.Marshal(body)
 			require.NoError(t, err)
-			request := httptest.NewRequest(method, path, bytes.NewReader(raw))
+			request := httptest.NewRequestWithContext(t.Context(), method, path, bytes.NewReader(raw))
 			request.Header.Set("Content-Type", "application/json")
 			response := httptest.NewRecorder()
 			server.baseHandler.ServeHTTP(response, request)
@@ -154,7 +154,7 @@ func TestImportedCommentReferenceCase(t *testing.T) {
 						}
 						raw, err := json.Marshal(body)
 						require.NoError(t, err)
-						request := httptest.NewRequest(method, path, bytes.NewReader(raw))
+						request := httptest.NewRequestWithContext(t.Context(), method, path, bytes.NewReader(raw))
 						request.Header.Set("Content-Type", "application/json")
 						response := httptest.NewRecorder()
 						server.baseHandler.ServeHTTP(response, request)
