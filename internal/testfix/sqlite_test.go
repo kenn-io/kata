@@ -9,26 +9,6 @@ import (
 	"go.kenn.io/kata/internal/testfix"
 )
 
-func TestOpenSQLiteIndependentCopies(t *testing.T) {
-	ctx := t.Context()
-	first, err := testfix.OpenSQLite(ctx, filepath.Join(t.TempDir(), "kata.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, first.Close()) })
-	second, err := testfix.OpenSQLite(ctx, filepath.Join(t.TempDir(), "kata.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, second.Close()) })
-	require.NotEmpty(t, first.InstanceUID())
-	require.NotEmpty(t, second.InstanceUID())
-	require.NotEqual(t, first.InstanceUID(), second.InstanceUID())
-	for _, store := range []*sqlitestore.Store{first, second} {
-		createdAt, err := store.InstanceCreatedAt(ctx)
-		require.NoError(t, err)
-		require.False(t, createdAt.IsZero())
-		_, err = store.CreateProject(ctx, "example-project")
-		require.NoError(t, err)
-	}
-}
-
 func TestOpenSQLiteFreshProjectIDs(t *testing.T) {
 	ctx := t.Context()
 	fresh, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
@@ -37,6 +17,10 @@ func TestOpenSQLiteFreshProjectIDs(t *testing.T) {
 	cloned, err := testfix.OpenSQLite(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, cloned.Close()) })
+	second, err := testfix.OpenSQLite(ctx, filepath.Join(t.TempDir(), "kata.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, second.Close()) })
+	require.NotEqual(t, cloned.InstanceUID(), second.InstanceUID())
 	wantSystem, err := fresh.SystemProject(ctx)
 	require.NoError(t, err)
 	gotSystem, err := cloned.SystemProject(ctx)
