@@ -187,24 +187,20 @@ func (m Model) reloadDatesForm(current Issue) Model {
 	m.input.saving = false
 	m.input.err = datesChangedMessage
 	if m.detail.issue != nil && m.detail.issue.UID == current.UID {
-		copyIssueDates(m.detail.issue, current)
+		*m.detail.issue = current
 	}
-	m, _ = m.refreshListDay(func(lm listModel) listModel { return lm.withIssueDates(current) })
+	m, _ = m.refreshListDay(func(lm listModel) listModel { return lm.withCurrentIssue(current) })
 	return m
 }
 
-// withIssueDates copies current's dates and revision onto its cached list row.
-func (lm listModel) withIssueDates(current Issue) listModel {
+// withCurrentIssue replaces the cached list row with the daemon's current issue.
+func (lm listModel) withCurrentIssue(current Issue) listModel {
 	for i := range lm.issues {
 		if lm.issues[i].UID == current.UID {
-			copyIssueDates(&lm.issues[i], current)
+			lm.issues[i] = current
 		}
 	}
 	return lm
-}
-
-func copyIssueDates(dst *Issue, src Issue) {
-	dst.Metadata, dst.Revision, dst.ScheduledOnDate, dst.DeadlineOnDate = src.Metadata, src.Revision, src.ScheduledOnDate, src.DeadlineOnDate
 }
 
 // renderDatesForm lays out the two date fields, each with the day its text

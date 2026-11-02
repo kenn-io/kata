@@ -315,6 +315,25 @@ func TestDatesFormConflictRefreshesResolvedDatesAndTodayMembership(t *testing.T)
 	}
 }
 
+func TestDatesFormConflictRemovesRemotelyClosedIssueFromToday(t *testing.T) {
+	withClock(t, func() time.Time { return datesNow })
+	h := newDatesHarness(t, map[string]string{"scheduled_on": "2026-11-02"}, viewList)
+	h.m.sseCh = nil
+	h.m.list.filter = ListFilter{Date: dateToday}.stampDay()
+	h.openForm()
+	remote := NewClient(h.env.URL, h.env.HTTP)
+	_, err := remote.Close(t.Context(), h.issue.ProjectID, h.issue.UID, "bob")
+	require.NoError(t, err)
+	h.fill("2026-11-03", "")
+	follow := h.save()
+	h.m = drainInboxCmds(h.m, follow)
+	require.Equal(t, inputDatesForm, h.m.input.kind)
+	require.Equal(t, datesChangedMessage, h.m.input.err)
+	cancel := h.key(tea.KeyPressMsg{Code: tea.KeyEsc})
+	h.m = drainInboxCmds(h.m, cancel)
+	assert.Empty(t, h.m.list.visibleRows(), "a remotely closed issue leaves Today after the conflict reload")
+}
+
 func TestDatesUndoWritesThePreviousDatesBack(t *testing.T) {
 	h := newDatesHarness(t, map[string]string{"scheduled_on": "2026-11-02", "deadline_on": "2026-11-20"}, viewDetail)
 	h.openForm()
