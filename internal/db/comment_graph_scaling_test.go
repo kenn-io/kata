@@ -73,6 +73,7 @@ func TestSelectedCommentGraphWorkIgnoresUnrelatedBodies(t *testing.T) {
 
 func TestReadCommentGraphPendingTargetWork(t *testing.T) {
 	var singleReplyQueries int
+	var singleReplySuffixArgs int
 	for _, replies := range []int{1, 32} {
 		ctx := t.Context()
 		work := &referenceWork{}
@@ -102,7 +103,13 @@ func TestReadCommentGraphPendingTargetWork(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = tx.Rollback() })
 		*work = referenceWork{}
-		graph, err := ReadCommentGraphTx(ctx, tx, CommentGraphQuery{ProjectID: 1},
+		var suffixArgs int
+		work.capture = func(statement string, args []driver.NamedValue) {
+			if strings.HasPrefix(statement, "SELECT c.uid FROM") {
+				suffixArgs = len(args)
+			}
+		}
+		graph, err := ReadCommentGraphTx(ctx, tx, CommentGraphQuery{ProjectID: 1, SelectedIssueID: 1},
 			func(int) string { return "?" },
 			func(value string) (time.Time, error) { return time.Parse(time.RFC3339Nano, value) },
 			`json_extract(e.payload,'$.reply_to_uid')`, "NULL")
@@ -112,8 +119,11 @@ func TestReadCommentGraphPendingTargetWork(t *testing.T) {
 		t.Logf("replies=%d queries=%d", replies, work.queries)
 		if replies == 1 {
 			singleReplyQueries = work.queries
+			require.Positive(t, suffixArgs, "the suffix lookup must run")
+			singleReplySuffixArgs = suffixArgs
 		} else {
 			require.Equal(t, singleReplyQueries, work.queries, "replies to the same target must reuse its snapshot evidence")
+			require.Equal(t, singleReplySuffixArgs, suffixArgs, "suffix lookup arguments stay fixed as selected comments grow")
 		}
 	}
 }

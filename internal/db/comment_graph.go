@@ -53,13 +53,11 @@ type CommentGraphTarget struct {
 	ProjectID int64
 }
 
-// commentHandleSuffixLength matches commentref.MinLength and the UID index expression.
-const commentHandleSuffixLength = 6
-
 // CommentGraphData is captured wholly inside one backend read transaction.
 type CommentGraphData struct {
-	// CommentUIDsByProject holds UIDs sharing a six-character suffix with a
-	// returned record, enough to derive the same handles as the full project.
+	// CommentUIDsByProject holds each project's UIDs sharing a six-character
+	// suffix with the selected issue's comments, their reply targets, or their
+	// incoming replies, enough to derive the same handles as the full project.
 	CommentUIDsByProject map[int64][]string
 	Comments             []CommentGraphRecord
 	Targets              map[string]CommentGraphTarget
@@ -172,20 +170,12 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(st
 		return data, err
 	}
 	type handleUniverse struct {
-		where    string
-		args     []any
-		suffixes map[string]bool
+		where string
+		args  []any
 	}
 	universes := map[int64]*handleUniverse{}
-	addSuffix := func(record CommentGraphRecord) {
-		uid := record.Comment.UID
-		universes[record.ProjectID].suffixes[strings.ToLower(uid[len(uid)-commentHandleSuffixLength:])] = true
-	}
 	if query.SelectedIssueID > 0 && len(data.Comments) > 0 {
-		universes[query.ProjectID] = &handleUniverse{where: where, args: args, suffixes: map[string]bool{}}
-		for _, record := range data.Comments {
-			addSuffix(record)
-		}
+		universes[query.ProjectID] = &handleUniverse{where: where, args: args}
 	}
 
 	visible := make(map[string]bool, len(data.Comments))
@@ -218,11 +208,10 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(st
 			targetArgs := []any{target.ProjectID}
 			if query.SelectedIssueID > 0 {
 				if _, loaded := universes[target.ProjectID]; !loaded {
-					universes[target.ProjectID] = &handleUniverse{where: targetWhere, args: targetArgs, suffixes: map[string]bool{}}
+					universes[target.ProjectID] = &handleUniverse{where: targetWhere, args: targetArgs}
 				}
-				addSuffix(target)
 			} else if _, loaded := data.CommentUIDsByProject[target.ProjectID]; !loaded {
-				uids, err := readCommentGraphUIDs(ctx, tx, targetWhere, targetArgs, nil, bind)
+				uids, err := readCommentGraphUIDs(ctx, tx, targetWhere, targetArgs, 0, bind)
 				if err != nil {
 					return data, err
 				}
@@ -263,7 +252,7 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(st
 		data.Targets[targetUID] = state
 	}
 	for projectID, universe := range universes {
-		uids, err := readCommentGraphUIDs(ctx, tx, universe.where, universe.args, universe.suffixes, bind)
+		uids, err := readCommentGraphUIDs(ctx, tx, universe.where, universe.args, query.SelectedIssueID, bind)
 		if err != nil {
 			return data, err
 		}
@@ -272,18 +261,17 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(st
 	return data, nil
 }
 
-func readCommentGraphUIDs(ctx context.Context, tx *sql.Tx, where string, args []any, suffixes map[string]bool, bind func(int) string) ([]string, error) {
+func readCommentGraphUIDs(ctx context.Context, tx *sql.Tx, where string, args []any, selectedIssueID int64, bind func(int) string) ([]string, error) {
 	from := commentGraphFrom
-	if len(suffixes) > 0 {
-		args = slices.Clone(args)
-		marks := make([]string, 0, len(suffixes))
-		for suffix := range suffixes {
-			args = append(args, suffix)
-			marks = append(marks, bind(len(args)))
-		}
+	if selectedIssueID > 0 {
+		args = append(slices.Clone(args), selectedIssueID, selectedIssueID, selectedIssueID)
+		n := len(args)
 		// CROSS JOIN keeps SQLite on the suffix index without planner statistics.
 		from = ` FROM comments c CROSS JOIN issues i CROSS JOIN projects p`
-		where += " AND i.id=c.issue_id AND p.id=i.project_id AND lower(substr(c.uid,21)) IN (" + strings.Join(marks, ",") + ")"
+		where += ` AND i.id=c.issue_id AND p.id=i.project_id AND lower(substr(c.uid,21)) IN (
+ SELECT lower(substr(uid,21)) FROM comments WHERE issue_id=` + bind(n-2) + `
+ UNION SELECT lower(substr(reply_to_uid,21)) FROM comments WHERE issue_id=` + bind(n-1) + ` AND reply_to_uid IS NOT NULL
+ UNION SELECT lower(substr(r.uid,21)) FROM comments s JOIN comments r ON r.reply_to_uid=s.uid WHERE s.issue_id=` + bind(n) + `)`
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT c.uid`+from+where, args...) // #nosec G202 -- Callers supply static predicates and bind every value.
 	if err != nil {
