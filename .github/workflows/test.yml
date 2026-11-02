@@ -235,8 +235,8 @@ jobs:
           KATA_SKIP_OPENAPI_CLIENT_CHECK: "1"
         # e2e runs alone because it rebuilds the embedded web assets other packages compile against.
         run: |
-          env -u KATA_AUTH_TOKEN go test $(go list ./... | grep -v '/e2e$')
-          env -u KATA_AUTH_TOKEN go test -p 1 ./e2e
+          env -u KATA_AUTH_TOKEN go test -count=1 $(go list ./... | grep -v '/e2e$')
+          env -u KATA_AUTH_TOKEN go test -count=1 -p 1 ./e2e
 
   native-agent-plugins:
     needs: changes
