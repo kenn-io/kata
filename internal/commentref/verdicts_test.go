@@ -22,7 +22,7 @@ func TestVerdicts(t *testing.T) {
 	}{
 		{"empty", nil, 0, 0}, {"self", []Record{claim, graphRecord(2, "issue", claim.UID, "confirm")}, 0, 0},
 		{"teammate", []Record{claim, confirm}, 1, 0},
-		{"conflict", []Record{claim, refute, confirm}, 1, 1},
+		{"conflict", []Record{claim, refute, confirm}, 0, 1},
 		{"rebuttal", []Record{claim, refute, rebuttal}, 0, 0},
 		{"reopened", []Record{claim, refute, rebuttal, reopened}, 0, 1},
 		{"replaced claim", []Record{claim, refute, graphRecord(6, "other", claim.UID, "supersede")}, 0, 0},
@@ -73,7 +73,9 @@ func TestVerdictsConfirmationAndOrderProperties(t *testing.T) {
 		}
 		before := Evaluate(rows, "issue", nil)
 		require.Len(ht, before.OpenRefutations, 1)
-		require.Equal(ht, count, before.Confirmed[0].Confirmations)
+		require.Empty(ht, before.Confirmed)
+		clean := Evaluate(append([]Record{claim}, rows[2:]...), "issue", nil)
+		require.Equal(ht, count, clean.Confirmed[0].Confirmations)
 		for i, j := 0, len(rows)-1; i < j; i, j = i+1, j-1 {
 			rows[i], rows[j] = rows[j], rows[i]
 		}

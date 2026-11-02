@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -1035,13 +1036,61 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 	if len(selectors) > 0 {
 		opts = selectors[0]
 	}
-	query := db.CommentGraphQuery{ProjectID: issue.ProjectID, IncludeDeletedSourceIssueID: includeDeletedSourceIssueID}
+	query := db.CommentGraphQuery{ProjectID: issue.ProjectID, IncludeDeletedSourceIssueID: includeDeletedSourceIssueID, VerificationIssueID: issue.ID, IssueScope: issueScopeFromContext(ctx)}
 	if opts.Thread == "" && opts.Inbound == "" && opts.Since == "" {
 		query.SelectedIssueID = issue.ID
 	}
-	records, err := readCommentRecords(ctx, cfg.DB, query)
+	data, err := cfg.DB.ReadCommentGraph(ctx, query)
+	if err != nil {
+		return nil, internalAPIError(err)
+	}
+	records, err := projectCommentGraph(ctx, data)
 	if err != nil {
 		return nil, err
+	}
+	v := commentref.Evaluate(records, issue.UID, nil)
+	v.Required = verificationRequired(issue)
+	v.Redacted += data.Redacted
+	if v.Activity && query.SelectedIssueID > 0 && issue.DeletedAt == nil {
+		_, v, err = readVerification(ctx, cfg.DB, issue)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if issue.Status == "closed" {
+		var events []db.Event
+		query := db.EventsAfterParams{ProjectID: issue.ProjectID, IssueUID: issue.UID, Types: []string{"issue.closed"}, Limit: 100}
+		for {
+			page, err := cfg.DB.EventsAfter(ctx, query)
+			if err != nil {
+				return nil, internalAPIError(err)
+			}
+			if len(page) == 0 {
+				break
+			}
+			events = page
+			query.AfterID = page[len(page)-1].ID
+			if len(page) < query.Limit {
+				break
+			}
+		}
+
+		if len(events) > 0 {
+			var payload struct {
+				Evidence []db.Evidence `json:"evidence"`
+			}
+			if err := json.Unmarshal([]byte(events[len(events)-1].Payload), &payload); err != nil {
+				return nil, internalAPIError(err)
+			}
+			for _, e := range payload.Evidence {
+				if e.Type == "confirmed" || e.Type == "refuted" {
+					v.Evidence = append(v.Evidence, db.VerdictEvidence{Type: e.Type, Comment: e.Comment})
+				}
+			}
+		}
+	}
+	if v.Activity || v.Required || v.Redacted > 0 || len(v.Evidence) > 0 {
+		out.Body.Verification = &v
 	}
 	selected, err := commentref.Select(records, issue.UID, opts)
 	if err != nil {

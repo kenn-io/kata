@@ -29,6 +29,8 @@ func newCloseCmd() *cobra.Command {
 		sugarAuditNoChange bool
 		sugarDuplicateOf   string
 		sugarSupersededBy  string
+		sugarRefuted       []string
+		sugarConfirmed     []string
 		sugarCommit        []string
 		sugarPR            []string
 		sugarTest          []string
@@ -113,6 +115,12 @@ The close message has a minimum length that depends on the reason:
 			}
 
 			// Resolve sugar -> evidence (appended to user-supplied --evidence values).
+			for _, handle := range sugarRefuted {
+				evidence = append(evidence, "refuted:"+handle)
+			}
+			for _, handle := range sugarConfirmed {
+				evidence = append(evidence, "confirmed:"+handle)
+			}
 			for _, sha := range sugarCommit {
 				evidence = append(evidence, "commit:"+sha)
 			}
@@ -197,6 +205,8 @@ The close message has a minimum length that depends on the reason:
 	cmd.Flags().BoolVar(&sugarAuditNoChange, "audit-no-change", false, "sugar for --reason audit-no-change")
 	cmd.Flags().StringVar(&sugarDuplicateOf, "duplicate-of", "", "sugar for --reason duplicate --evidence duplicate-of:<ref>")
 	cmd.Flags().StringVar(&sugarSupersededBy, "superseded-by", "", "sugar for --reason superseded --evidence superseded-by:<ref>")
+	cmd.Flags().StringArrayVar(&sugarRefuted, "refuted", nil, "cite an independently refuted claim for wontfix, duplicate, or superseded; repeatable")
+	cmd.Flags().StringArrayVar(&sugarConfirmed, "confirmed", nil, "cite an independently confirmed comment, repeatable")
 	cmd.Flags().StringArrayVar(&sugarCommit, "commit", nil, "sugar for --evidence commit:<sha>, repeatable")
 	cmd.Flags().StringArrayVar(&sugarPR, "pr", nil, "sugar for --evidence pr:<url>, repeatable")
 	cmd.Flags().StringArrayVar(&sugarTest, "test", nil, "sugar for --evidence test:<command>, repeatable")
@@ -220,6 +230,8 @@ func parseEvidenceFlags(raw []string) ([]api.Evidence, error) {
 		}
 		kind, value := api.EvidenceType(before), after
 		switch kind {
+		case api.EvidenceConfirmed, api.EvidenceRefuted:
+			out = append(out, api.Evidence{Type: kind, Comment: value})
 		case api.EvidenceCommit:
 			out = append(out, api.Evidence{Type: kind, SHA: value})
 		case api.EvidencePR:
@@ -412,6 +424,8 @@ func findDuplicateEvidence(items []api.Evidence) string {
 
 func evidencePayloadKey(e api.Evidence) string {
 	switch e.Type {
+	case api.EvidenceConfirmed, api.EvidenceRefuted:
+		return e.Comment
 	case api.EvidenceCommit:
 		return e.SHA
 	case api.EvidencePR:

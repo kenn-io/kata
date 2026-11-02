@@ -143,7 +143,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, api.NewError(400, "validation", err.Error(), "", nil)
 		}
-		warnings, overruled, err := CheckOpenRefutations(ctx, cfg.DB, issue, in.Body.Reason, cfg.CloseVerification, in.Body.Overrule)
+		warnings, overruled, err := checkCloseVerification(ctx, cfg, issue, in.Body)
 		if err != nil {
 			return nil, err
 		}
@@ -649,6 +649,7 @@ func evidenceToDB(in []api.Evidence) []db.Evidence {
 	for i, e := range in {
 		out[i] = db.Evidence{
 			Type:      string(e.Type),
+			Comment:   e.Comment,
 			SHA:       e.SHA,
 			URL:       e.URL,
 			Command:   e.Command,

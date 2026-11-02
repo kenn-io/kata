@@ -14,6 +14,8 @@ type EvidenceType string
 // action's evidence array. See spec §3.3 and the per-reason validation
 // matrix in §3.5.
 const (
+	EvidenceRefuted       EvidenceType = "refuted"
+	EvidenceConfirmed     EvidenceType = "confirmed"
 	EvidenceCommit        EvidenceType = "commit"
 	EvidencePR            EvidenceType = "pr"
 	EvidenceTest          EvidenceType = "test"
@@ -30,6 +32,7 @@ const (
 type Evidence struct {
 	Type EvidenceType `json:"type"`
 
+	Comment   string   `json:"comment,omitempty"`   // confirmed
 	SHA       string   `json:"sha,omitempty"`       // commit
 	URL       string   `json:"url,omitempty"`       // pr
 	Command   string   `json:"command,omitempty"`   // test
@@ -41,6 +44,8 @@ type Evidence struct {
 
 var validEvidenceTypes = map[EvidenceType]struct{}{
 	EvidenceCommit:        {},
+	EvidenceConfirmed:     {},
+	EvidenceRefuted:       {},
 	EvidencePR:            {},
 	EvidenceTest:          {},
 	EvidenceReviewedPaths: {},

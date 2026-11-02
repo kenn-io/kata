@@ -15,7 +15,7 @@ type Verification = db.Verification
 // further redact records; nil means every supplied row is readable. Rebuttals
 // resolve the original dispute rather than becoming independent close blockers.
 func Evaluate(comments []Record, issueUID string, readable func(uid string) bool) Verification {
-	v := Verification{Confirmed: []db.ConfirmedClaim{}, OpenRefutations: []db.OpenRefutation{}}
+	v := Verification{Claims: map[string]db.ClaimVerdict{}, Confirmed: []db.ConfirmedClaim{}, OpenRefutations: []db.OpenRefutation{}}
 	byUID := make(map[string]Record, len(comments))
 	incoming := make(map[string][]Record)
 	for _, r := range comments {
@@ -71,19 +71,30 @@ func Evaluate(comments []Record, issueUID string, readable func(uid string) bool
 		if target.IssueUID != issueUID {
 			continue
 		}
+		claimVerdict := db.ClaimVerdict{}
 		confirmations := 0
+		hasOpenRefutation := false
 		for _, r := range incoming[target.UID] {
 			if r.ReplyKind == "confirm" || r.ReplyKind == "refute" {
 				v.Activity = true
 			}
 			if r.ReplyKind == "confirm" && (r.Author != target.Author || r.Teammate != target.Teammate) {
 				confirmations++
+				claimVerdict.Confirmations = append(claimVerdict.Confirmations, verdictHandle(r, issueUID))
 			}
-			if r.ReplyKind != "refute" || target.ReplyKind == "refute" {
+			if r.ReplyKind != "refute" {
 				continue
 			}
 			result := dispute(r, 0, map[string]bool{})
 			if result.open || !result.known {
+				hasOpenRefutation = true
+				claimVerdict.OpenRefutations = append(claimVerdict.OpenRefutations, verdictHandle(r, issueUID))
+				if r.Author != target.Author || r.Teammate != target.Teammate {
+					claimVerdict.IndependentRefutations = append(claimVerdict.IndependentRefutations, verdictHandle(r, issueUID))
+				}
+				if target.ReplyKind == "refute" {
+					continue
+				}
 				summary := []rune(strings.Join(strings.Fields(r.Body), " "))
 				if len(summary) > 80 {
 					summary = summary[:80]
@@ -91,7 +102,11 @@ func Evaluate(comments []Record, issueUID string, readable func(uid string) bool
 				v.OpenRefutations = append(v.OpenRefutations, db.OpenRefutation{Refutation: verdictHandle(r, issueUID), Target: verdictHandle(target, issueUID), Author: r.Author, Teammate: r.Teammate, Summary: string(summary)})
 			}
 		}
-		if confirmations > 0 {
+		slices.Sort(claimVerdict.Confirmations)
+		slices.Sort(claimVerdict.OpenRefutations)
+		slices.Sort(claimVerdict.IndependentRefutations)
+		v.Claims[verdictHandle(target, issueUID)] = claimVerdict
+		if confirmations > 0 && !hasOpenRefutation {
 			v.Confirmed = append(v.Confirmed, db.ConfirmedClaim{Comment: verdictHandle(target, issueUID), Confirmations: confirmations})
 		}
 	}

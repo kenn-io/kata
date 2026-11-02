@@ -606,6 +606,7 @@ type CommentIdempotencyMatch struct {
 type Evidence struct {
 	Type string `json:"type"`
 
+	Comment   string   `json:"comment,omitempty"`   // confirmed
 	SHA       string   `json:"sha,omitempty"`       // commit
 	URL       string   `json:"url,omitempty"`       // pr
 	Command   string   `json:"command,omitempty"`   // test

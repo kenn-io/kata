@@ -806,6 +806,7 @@ type ShowIssueResponse struct {
 // this component as "ShowIssueResponseBody", so renaming the Go type renames
 // the published component and breaks every generated client.
 type ShowIssueResponseBody struct {
+	Verification        *db.Verification    `json:"verification,omitempty"`
 	WebURL              string              `json:"web_url,omitempty" doc:"Browser URL for this issue in the owning daemon."`
 	Issue               ShowIssueOut        `json:"issue"`
 	Comments            []CommentOut        `json:"comments"`
@@ -1543,17 +1544,18 @@ type AuditClosesRequest struct {
 // the event recorded one, giving Parent's display ref immutable
 // provenance.
 type AuditCloseRow struct {
-	OverruledRefutations []string `json:"overruled_refutations,omitempty"`
-	Time                 string   `json:"time"`
-	Actor                string   `json:"actor"`
-	Issue                string   `json:"issue"`
-	Parent               string   `json:"parent,omitempty"`
-	ParentUID            string   `json:"parent_uid,omitempty"`
-	Reason               string   `json:"reason"`
-	EvidenceTypes        []string `json:"evidence_types,omitempty"`
-	Flags                []string `json:"flags,omitempty"`
-	Message              string   `json:"message,omitempty"`
-	EventID              int64    `json:"event_id"`
+	VerdictEvidence      []Evidence `json:"verdict_evidence,omitempty"`
+	OverruledRefutations []string   `json:"overruled_refutations,omitempty"`
+	Time                 string     `json:"time"`
+	Actor                string     `json:"actor"`
+	Issue                string     `json:"issue"`
+	Parent               string     `json:"parent,omitempty"`
+	ParentUID            string     `json:"parent_uid,omitempty"`
+	Reason               string     `json:"reason"`
+	EvidenceTypes        []string   `json:"evidence_types,omitempty"`
+	Flags                []string   `json:"flags,omitempty"`
+	Message              string     `json:"message,omitempty"`
+	EventID              int64      `json:"event_id"`
 }
 
 // AuditClosesResponse wraps the AuditCloseRow list. Rows is never nil

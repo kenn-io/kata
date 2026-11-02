@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"slices"
 	"strings"
@@ -24,12 +26,13 @@ func readVerification(ctx context.Context, store db.Storage, issue db.Issue) ([]
 	}
 	v := commentref.Evaluate(records, issue.UID, nil)
 	v.Redacted += data.Redacted
+	v.Required = verificationRequired(issue)
 	return records, v, nil
 }
 
 // CheckOpenRefutations applies the accepting daemon's close policy. Read-side
 // verdicts are a point-in-time check, like the existing prose/throttle guards.
-func CheckOpenRefutations(ctx context.Context, store db.Storage, issue db.Issue, reason, policy string, overrule []string) ([]db.VerificationWarning, []string, error) {
+func CheckOpenRefutations(issue db.Issue, reason, policy string, overrule []string, records []commentref.Record, v db.Verification) ([]db.VerificationWarning, []string, error) {
 	if reason != "done" && reason != "audit-no-change" {
 		if len(overrule) > 0 {
 			return nil, nil, api.NewError(400, "validation", "overrule requires done or audit-no-change", "", nil)
@@ -39,13 +42,7 @@ func CheckOpenRefutations(ctx context.Context, store db.Storage, issue db.Issue,
 	if policy == "" {
 		policy = "warn"
 	}
-	if policy == "off" && len(overrule) == 0 {
-		return nil, nil, nil
-	}
-	records, v, err := readVerification(ctx, store, issue)
-	if err != nil {
-		return nil, nil, err
-	}
+
 	overruled := []string{}
 	for _, input := range overrule {
 		r, err := commentref.Resolve(records, issue.UID, input, projectNameForRecords(records, issue.UID))
@@ -90,4 +87,71 @@ func projectNameForRecords(records []commentref.Record, issueUID string) string 
 		}
 	}
 	return ""
+}
+
+func verificationRequired(issue db.Issue) bool {
+	var values map[string]jsontext.Value
+	if json.Unmarshal([]byte(issue.Metadata), &values) != nil {
+		return false
+	}
+	var required bool
+	return json.Unmarshal(values["verify.required"], &required) == nil && required
+}
+
+func checkCloseVerification(ctx context.Context, cfg ServerConfig, issue db.Issue, body api.CloseActionRequestBody) ([]db.VerificationWarning, []string, error) {
+	// Verdict evidence pairing also applies to the owner-local TUI exception.
+	for _, e := range body.Evidence {
+		if e.Type == api.EvidenceConfirmed && body.Reason != "done" {
+			return nil, nil, api.NewError(400, "validation", "confirmed evidence is only valid with done", "", nil)
+		}
+		if e.Type == api.EvidenceRefuted && body.Reason != "wontfix" && body.Reason != "duplicate" && body.Reason != "superseded" {
+			return nil, nil, api.NewError(400, "validation", "--refuted is not valid with this reason; use --overrule for --done", "", nil)
+		}
+	}
+	hasCitation := slices.ContainsFunc(body.Evidence, func(e api.Evidence) bool { return e.Type == api.EvidenceConfirmed || e.Type == api.EvidenceRefuted })
+	if body.Reason != "done" && body.Reason != "audit-no-change" && !hasCitation {
+		return CheckOpenRefutations(issue, body.Reason, cfg.CloseVerification, body.Overrule, nil, db.Verification{})
+	}
+	records, v, err := readVerification(ctx, cfg.DB, issue)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	cited := false
+	for _, e := range body.Evidence {
+		if e.Type != api.EvidenceConfirmed && e.Type != api.EvidenceRefuted {
+			continue
+		}
+		cited = cited || e.Type == api.EvidenceConfirmed
+		claim, err := commentref.Resolve(records, issue.UID, e.Comment, projectNameForRecords(records, issue.UID))
+		if err != nil || claim.IssueUID != issue.UID {
+			return nil, nil, api.NewError(400, "validation", fmt.Sprintf("%s comment %q is not a live comment on this issue", e.Type, e.Comment), "", nil)
+		}
+		if claim.ReplyKind == "confirm" || claim.ReplyKind == "refute" {
+			return nil, nil, api.NewError(400, "validation", "verdict evidence must cite the claim, not its confirm/refute reply", "", nil)
+		}
+		handle := commentref.HandleForIssue(claim.Handle, claim.IssueUID, claim.IssueShortID, issue.UID)
+		verdict := v.Claims[handle]
+		detail := ""
+		switch {
+		case len(verdict.Confirmations) > 0 && len(verdict.OpenRefutations) > 0:
+			detail = fmt.Sprintf("%s is contested: confirmed by %s, refuted by %s (open refutation)", handle, verdict.Confirmations[0], verdict.OpenRefutations[0])
+		case e.Type == api.EvidenceConfirmed && len(verdict.OpenRefutations) > 0:
+			detail = fmt.Sprintf("%s has an open refutation %s", handle, verdict.OpenRefutations[0])
+		case e.Type == api.EvidenceConfirmed && len(verdict.Confirmations) == 0:
+			detail = fmt.Sprintf("%s has no confirmation from another principal", handle)
+		case e.Type == api.EvidenceRefuted && len(verdict.Confirmations) > 0:
+			detail = fmt.Sprintf("%s has a counting confirmation; refuted evidence requires none", handle)
+		case e.Type == api.EvidenceRefuted && len(verdict.IndependentRefutations) == 0:
+			detail = fmt.Sprintf("%s has no open refutation from another principal", handle)
+		}
+		if detail != "" {
+			return nil, nil, api.NewError(400, "validation", detail, "", nil)
+		}
+	}
+
+	if body.Reason == "done" && v.Required && !cited {
+		return nil, nil, api.NewError(409, "confirmation_required", "verify.required=true requires confirmed evidence citing a claim verified by another principal", fmt.Sprintf("kata notify %s --to <actor>/<teammate> --re c:<claim> --message \"Please confirm or refute\"", issue.ShortID), nil)
+	}
+	return CheckOpenRefutations(issue, body.Reason, cfg.CloseVerification, body.Overrule, records, v)
 }

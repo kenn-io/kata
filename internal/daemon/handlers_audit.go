@@ -273,6 +273,9 @@ func buildAuditRows(
 		row.OverruledRefutations = p.OverruledRefutations
 		for _, e := range p.Evidence {
 			row.EvidenceTypes = append(row.EvidenceTypes, string(e.Type))
+			if e.Type == api.EvidenceConfirmed || e.Type == api.EvidenceRefuted {
+				row.VerdictEvidence = append(row.VerdictEvidence, e)
+			}
 		}
 		// Spec §5: legacy / pre-v1 closes have no evidence and surface
 		// with flags=no-evidence. wontfix is the one reason where a
