@@ -21,7 +21,7 @@ func openClawInstallRecorder(t *testing.T, target string) string {
 	return target
 }
 
-func TestOpenClawCopyRecorderReplacesExistingTarget(t *testing.T) {
+func TestOpenClawCopyRecorderKeepsLinkedSource(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source")
 	target := filepath.Join(dir, "target")
