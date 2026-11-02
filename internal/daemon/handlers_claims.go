@@ -26,6 +26,7 @@ import (
 	"go.kenn.io/kata/internal/federationcoord"
 	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
+	"go.kenn.io/kata/internal/projectscope"
 )
 
 // projectScopedClaimActionEvent rewrites the lease action response's event
@@ -1213,7 +1214,7 @@ func addClaimForwardProjectScope(ctx context.Context, req *http.Request) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Add(api.ProjectScopeHeader, string(limit))
+	req.Header.Add(projectscope.Header, string(limit))
 	return nil
 }
 

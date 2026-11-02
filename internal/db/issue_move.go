@@ -48,6 +48,7 @@ func (item IssueMoveTreeItem) Refusal(err error) error {
 	}
 	return &IssueMoveDescendantError{Descendant: *item.Descendant, Err: err}
 }
+
 // ErrIssueMoveTreeChanged reports membership changes since external validation.
 var ErrIssueMoveTreeChanged = errors.New("issue move tree changed during validation")
 
@@ -248,18 +249,35 @@ func MovedIssueUID(ctx context.Context, q interface {
 	if err != nil {
 		return "", err
 	}
-	var uid string
-	err = q.QueryRowContext(ctx, `SELECT e.issue_uid FROM events e
- WHERE (e.type='issue.moved' OR (e.type='sync.reset_required'
+	var resetUID string
+	var resetID int64
+	err = q.QueryRowContext(ctx, `SELECT e.issue_uid, e.id FROM events e
+ WHERE e.project_id=$1 AND e.type='sync.reset_required' AND `+fromProject+`=$3 AND `+match+`
  AND EXISTS (SELECT 1 FROM events retained_move WHERE retained_move.uid=`+moveEvent+`
- AND retained_move.type='issue.moved' AND retained_move.issue_uid=e.issue_uid)))
- AND `+fromProject+`=$3 AND `+match+`
+ AND retained_move.type='issue.moved' AND retained_move.issue_uid=e.issue_uid)
  AND EXISTS (SELECT 1 FROM issues WHERE uid=e.issue_uid)
  AND NOT EXISTS (SELECT 1 FROM issues WHERE project_id=$1 AND short_id=$2)
  AND NOT EXISTS (SELECT 1 FROM purge_log WHERE project_id=$1 AND short_id=$2)
- ORDER BY e.id DESC LIMIT 1`, projectID, shortID, projectUID).Scan(&uid)
- if errors.Is(err, sql.ErrNoRows) {
+ ORDER BY e.id DESC LIMIT 1`, projectID, shortID, projectUID).Scan(&resetUID, &resetID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	var uid string
+	var moveID int64
+	err = q.QueryRowContext(ctx, `SELECT e.issue_uid, e.id FROM events e
+ WHERE e.type='issue.moved' AND `+fromProject+`=$3 AND `+match+`
+ AND EXISTS (SELECT 1 FROM issues WHERE uid=e.issue_uid)
+ AND NOT EXISTS (SELECT 1 FROM issues WHERE project_id=$1 AND short_id=$2)
+ AND NOT EXISTS (SELECT 1 FROM purge_log WHERE project_id=$1 AND short_id=$2)
+ ORDER BY e.id DESC LIMIT 1`, projectID, shortID, projectUID).Scan(&uid, &moveID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	if resetID > moveID {
+		return resetUID, nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
 	}
-	return uid, err
+	return uid, nil
 }

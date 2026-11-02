@@ -460,7 +460,11 @@ func syncDirectSpoke(
 		var deliverProjects []int64
 		materializeUIDs := make([]string, 0, len(body.Events))
 		var applyUIDs []string
+		fullMaterialization := false
 		for i, ev := range body.Events {
+			if ev.ProjectUID != binding.HubProjectUID || ev.Type == "issue.moved" {
+				fullMaterialization = true
+			}
 			var invalidate bool
 			if duplicate[i] && shouldDeliverPage {
 				var err error
@@ -501,7 +505,7 @@ func syncDirectSpoke(
 			var err error
 			if incremental, ok := store.(interface {
 				MaterializeFederatedEvents(context.Context, int64, []string) error
-			}); ok {
+			}); ok && !fullMaterialization {
 				err = incremental.MaterializeFederatedEvents(applyCtx, binding.ProjectID, materializeUIDs)
 			} else {
 				err = store.MaterializeFederatedProject(applyCtx, binding.ProjectID)

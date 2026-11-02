@@ -33,7 +33,7 @@ func TestPrepareFederationLeaveRetainsPendingMoveSourceCredential(t *testing.T) 
 	require.NoError(t, err)
 	move, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "worker"})
 	require.NoError(t, err)
-	_, err = daemon.PrepareFederationReplicaLeave(ctx, store, credentials, source.ID)
+	_, err = daemon.PrepareFederationReplicaLeave(ctx, store, credentials, source.ID, "")
 	require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush)
 	retained, found, err := credentials.FederationCredential(ctx, source.UID)
 	require.NoError(t, err)
@@ -42,7 +42,7 @@ func TestPrepareFederationLeaveRetainsPendingMoveSourceCredential(t *testing.T) 
 	require.Equal(t, credential.Token, retained.Token)
 	require.False(t, daemon.FederationReplicaMappingSuppressed(store, source.Name))
 	require.NoError(t, store.AdvanceFederationPushCursor(ctx, target.ID, move.EventID))
-	_, err = daemon.PrepareFederationReplicaLeave(ctx, store, credentials, source.ID)
+	_, err = daemon.PrepareFederationReplicaLeave(ctx, store, credentials, source.ID, "")
 	require.NoError(t, err)
 	retained, found, err = credentials.FederationCredential(ctx, source.UID)
 	require.NoError(t, err)
@@ -113,7 +113,7 @@ func TestPrepareFederationLeaveFencesConcurrentNativeMove(t *testing.T) {
 			if side == "failed-credential-mark" {
 				credentials.managedErr = errors.New("injected credential mark failure")
 			}
-			_, err = daemon.PrepareFederationReplicaLeave(ctx, store, credentials, leaving.ID)
+			_, err = daemon.PrepareFederationReplicaLeave(ctx, store, credentials, leaving.ID, "")
 			if side == "failed-credential-mark" {
 				require.ErrorIs(t, err, daemon.ErrFederationReplicaCredentialIO)
 				require.Contains(t, err.Error(), "retry", "a retained safe write fence needs actionable recovery guidance")
@@ -126,7 +126,7 @@ func TestPrepareFederationLeaveFencesConcurrentNativeMove(t *testing.T) {
 				require.ErrorIs(t, readErr, db.ErrFederatedReadOnly, "the safe fence persists until preparation is retried")
 				credentials.managedErr = nil
 				credentials.onReplace = nil
-				_, err = daemon.PrepareFederationReplicaLeave(ctx, store, credentials, leaving.ID)
+				_, err = daemon.PrepareFederationReplicaLeave(ctx, store, credentials, leaving.ID, "")
 			}
 			require.NoError(t, err)
 			require.ErrorIs(t, moveErr, db.ErrFederatedReadOnly, "a move must be fenced before credential preparation can authorize revocation")

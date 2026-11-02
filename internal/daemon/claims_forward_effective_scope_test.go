@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/projectscope"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -82,7 +82,7 @@ func TestForwardedClaimPreservesIdentityProjectAuthority(t *testing.T) {
 				if tc.fixed == "both" {
 					limit = append(limit, target.UID)
 				}
-				headers[api.ProjectScopeHeader] = requestScopeValue(t, limit...)
+				headers[projectscope.Header] = requestScopeValue(t, limit...)
 			}
 			method, path := http.MethodPost, claimActionPath(replicas[0].ID, issue.UID, tc.action)
 			var body any = map[string]any{"holder": "ignored", "client_kind": "cli", "claim_kind": "timed", "ttl_seconds": 600}

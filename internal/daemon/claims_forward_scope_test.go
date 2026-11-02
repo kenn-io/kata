@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/projectscope"
 )
 
 func TestForwardedClaimPreservesFixedProjectScope(t *testing.T) {
@@ -58,7 +58,7 @@ func TestForwardedClaimPreservesFixedProjectScope(t *testing.T) {
 				}
 				raw, err := json.Marshal(uids)
 				require.NoError(t, err)
-				headers[api.ProjectScopeHeader] = string(raw)
+				headers[projectscope.Header] = string(raw)
 			}
 			method, path := http.MethodPost, claimActionPath(replica.ID, issue.UID, tc.action)
 			var body any = map[string]any{"holder": "local-agent", "client_kind": "cli", "claim_kind": "timed", "ttl_seconds": 600}

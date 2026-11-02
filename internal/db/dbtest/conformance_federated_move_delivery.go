@@ -251,7 +251,7 @@ func checkFederatedMoveDelivery(t *testing.T, store db.Storage) error {
 			require.Empty(t, pending, "local reset is not native spoke intent")
 			// A portable history without its optional reset metadata still
 			// cannot export local control rows as federated source events.
-			_, err = query.ExecContext(ctx, `DELETE FROM meta WHERE key=$1`, db.FederationPurgeResetMetadataPrefix+local[1].UID)
+			_, err = query.ExecContext(ctx, `DELETE FROM meta WHERE key=$1`, db.ProjectStreamResetMetadataPrefix+local[1].UID)
 			require.NoError(t, err)
 			page, err := store.ReadFederation(ctx, db.FederationReadParams{ProjectID: local[1].ID, AfterID: seen, Limit: 10, Features: db.SupportedEventFeatures})
 			require.NoError(t, err)

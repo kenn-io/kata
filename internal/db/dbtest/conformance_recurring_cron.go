@@ -867,9 +867,13 @@ func checkRecurringAdoptionSnapshots(t *testing.T, s db.Storage) error {
 		afterRead, err := s.MaxEventID(ctx)
 		require.NoError(t, err)
 		require.Equal(t, beforeRead, afterRead)
-		page, err := s.ReadFederation(ctx, db.FederationReadParams{ProjectID: p.ID, AfterID: binding.ReplayHorizonEventID - 1, Features: "cron_v1", Limit: 100})
+		features := db.CronEventFeature
+		if i == 2 {
+			features = db.MergeEventFeatures(features, db.IssueMoveEventFeature)
+		}
+		page, err := s.ReadFederation(ctx, db.FederationReadParams{ProjectID: p.ID, AfterID: binding.ReplayHorizonEventID - 1, Features: features, Limit: 100})
 		require.NoError(t, err)
-		require.Equal(t, "cron_v1", page.RequiredFeatures)
+		require.Equal(t, features, page.RequiredFeatures)
 	}
 	return nil
 }

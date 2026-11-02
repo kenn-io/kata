@@ -120,7 +120,7 @@ func recordFederationMoveDisplacement(ctx context.Context, tx *sql.Tx, source Pr
 			return err
 		}
 	}
-	if err := RecordFederationPurgeResets(ctx, tx, []string{source.UID}, cursor); err != nil {
+	if err := RecordProjectStreamResets(ctx, tx, []string{source.UID}, cursor); err != nil {
 		return err
 	}
 	if capture, ok := ctx.Value(federationMoveResetCaptureKey{}).(*FederationMoveResetCapture); ok {
