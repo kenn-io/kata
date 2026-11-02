@@ -97,6 +97,33 @@ func TestDaemonRestartAccept_RefusesUnavailableReplacementAndReplies(t *testing.
 	assert.Contains(t, string(failure), "check replacement startup")
 }
 
+// A newer client may send fields this daemon does not know. The daemon must
+// still act on the fields it does know instead of refusing the request.
+func TestDaemonRestartAccept_IgnoresFieldsFromNewerClients(t *testing.T) {
+	dir := t.TempDir()
+	rec := kitdaemon.RuntimeRecord{PID: os.Getpid(), StartedAt: time.Now()}
+	executable := filepath.Join(dir, "missing-kata")
+	payload, err := json.Marshal(map[string]any{
+		"Executable": executable,
+		"Reply":      "restart-reply",
+		"Flags":      []string{},
+		"FutureKey":  "set by a newer client",
+	})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(restartRequestPath(dir, rec), payload, 0o600))
+	reply := filepath.Join(dir, "restart-reply")
+	require.NoError(t, os.WriteFile(reply, nil, 0o600))
+	restart := &daemonRestart{executable: "original-kata"}
+
+	err = restart.accept(t.Context(), dir, rec)
+
+	require.ErrorContains(t, err, "check replacement startup")
+	require.ErrorContains(t, err, executable)
+	failure, err := os.ReadFile(reply) //nolint:gosec // test-owned reply under t.TempDir
+	require.NoError(t, err)
+	assert.Contains(t, string(failure), "check replacement startup")
+}
+
 func TestDaemonArgs(t *testing.T) {
 	original := os.Args
 	t.Cleanup(func() { os.Args = original })

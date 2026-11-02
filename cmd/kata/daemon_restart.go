@@ -210,7 +210,9 @@ func (r *daemonRestart) accept(ctx context.Context, dir string, rec kitdaemon.Ru
 		if err := os.Remove(request); err != nil {
 			return err
 		}
-		if err := json.Unmarshal(target, &req, json.RejectUnknownMembers(true)); err != nil {
+		// Unknown members are ignored so a newer client can extend the request
+		// without every daemon from this release refusing it.
+		if err := json.Unmarshal(target, &req); err != nil {
 			return err
 		}
 		if req.Executable != "" {
