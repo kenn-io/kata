@@ -1,11 +1,13 @@
 package daemon_test
 
 import (
+	"encoding/json/v2"
 	"net/http"
 	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -28,6 +30,18 @@ func TestCloseVerificationScopedRetryRedactsWarnings(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, events, 1)
 	require.Contains(t, events[0].Payload, refute.UID, "retained references must be immutable UIDs")
+	// Rendered payloads no longer match the canonical replication hash.
+	var feed struct {
+		Events []api.EventEnvelope `json:"events"`
+	}
+	resp, raw = envDoRaw(t, env, http.MethodGet, "/api/v1/events?after_id="+strconv.FormatInt(events[0].ID-1, 10), nil, headers)
+	require.Equal(t, 200, resp.StatusCode, string(raw))
+	require.NoError(t, json.Unmarshal(raw, &feed))
+	require.NotEmpty(t, events[0].ContentHash)
+	require.NotEmpty(t, feed.Events)
+	require.Equal(t, events[0].UID, feed.Events[0].EventUID)
+	require.NotContains(t, string(feed.Events[0].Payload), refute.UID)
+	require.Empty(t, feed.Events[0].ContentHash)
 	headers["Authorization"] = "Bearer worker-token"
 	resp, raw = envDoRaw(t, env, http.MethodPost, path, body, headers)
 	require.Equal(t, 200, resp.StatusCode, string(raw))

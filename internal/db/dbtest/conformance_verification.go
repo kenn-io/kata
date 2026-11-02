@@ -1,12 +1,62 @@
 package dbtest
 
 import (
+	"encoding/json/jsontext"
+	"testing"
+	"time"
+
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
-	"testing"
-	"time"
 )
+
+// M6: trusted late replication updates live verdicts without reopening the
+// issue or rewriting the evidence accepted by the closing daemon.
+func checkVerificationLateReplication(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	p, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: p.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: p.UID, Enabled: true})
+	require.NoError(t, err)
+	const issueUID = "01CCCCCCCCCCCCCCCCCCCCCCCC"
+	const claimUID = "01AAAAAAAAAAAAAAAAAAAAAAAA"
+	const originUID = "01DDDDDDDDDDDDDDDDDDDDDDDD"
+	issueRef := issueUID
+	snapshot := newRemoteEvent(t, p, &issueRef, "issue.snapshot", "worker", originUID, 1, jsontext.Value(`{"uid":"`+issueUID+`","title":"Completed task","author":"worker","status":"open","created_at":"2026-10-07T11:00:00Z","comments":[{"comment_uid":"`+claimUID+`","author":"worker","body":"Completion claim","created_at":"2026-10-07T11:00:00Z"},{"comment_uid":"01BBBBBBBBBBBBBBBBBBBBBBBB","author":"reviewer","body":"Confirmed","created_at":"2026-10-07T11:01:00Z","reply_to_uid":"`+claimUID+`","reply_kind":"confirm"}]}`))
+	closed := newRemoteEvent(t, p, &issueRef, "issue.closed", "worker", originUID, 2, jsontext.Value(`{"reason":"done","message":"Completed the requested work and checked its focused tests.","closed_at":"2026-10-07T11:02:00Z","evidence":[{"type":"confirmed","comment":"`+claimUID+`"}]}`))
+	for _, event := range []db.RemoteEvent{snapshot, closed} {
+		_, err = store.InsertRemoteEvent(ctx, p.ID, event)
+		require.NoError(t, err)
+	}
+	require.NoError(t, store.MaterializeFederatedProject(ctx, p.ID))
+	read := func() db.Verification {
+		graph, err := store.ReadCommentGraph(ctx, db.CommentGraphQuery{ProjectID: p.ID})
+		require.NoError(t, err)
+		rows := make([]commentref.Record, 0, len(graph.Comments))
+		for _, record := range graph.Comments {
+			rows = append(rows, commentref.Record{Comment: record.Comment, IssueUID: record.IssueUID, IssueShortID: record.IssueShortID})
+		}
+		return commentref.Evaluate(rows, issueUID, nil)
+	}
+	require.Len(t, read().Confirmed, 1)
+	before, err := store.EventsByUIDs(ctx, p.ID, []string{closed.EventUID})
+	require.NoError(t, err)
+	require.Len(t, before, 1)
+	late := newRemoteEvent(t, p, &issueRef, "issue.commented", "second-reviewer", originUID, 3, jsontext.Value(`{"comment_uid":"01EEEEEEEEEEEEEEEEEEEEEEEE","author":"second-reviewer","body":"A late independent refutation","created_at":"2026-10-07T11:03:00Z","reply_to_uid":"`+claimUID+`","reply_kind":"refute"}`))
+	_, err = store.InsertRemoteEvent(ctx, p.ID, late)
+	require.NoError(t, err)
+	require.NoError(t, store.MaterializeFederatedProject(ctx, p.ID))
+	verdict := read()
+	require.Empty(t, verdict.Confirmed)
+	require.Len(t, verdict.OpenRefutations, 1)
+	issue, err := store.IssueByUID(ctx, issueUID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "closed", issue.Status)
+	after, err := store.EventsByUIDs(ctx, p.ID, []string{closed.EventUID})
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	return nil
+}
 
 func checkVerificationGraph(t *testing.T, store db.Storage) error {
 	ctx := t.Context()

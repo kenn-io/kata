@@ -161,6 +161,9 @@ func readVisibleEvents(
 			if err != nil {
 				return nil, afterID, 0, internalAPIError(err)
 			}
+			if string(raw) != event.Payload {
+				rows[index].ContentHash = ""
+			}
 			rows[index].Payload = string(raw)
 		}
 		next := nextAfterID(rows, afterID)
@@ -225,6 +228,9 @@ func readVisibleEvents(
 				raw, err := projectNotificationEventPayload(ctx, store, projected)
 				if err != nil {
 					return nil, cursor, 0, internalAPIError(err)
+				}
+				if string(raw) != projected.Payload {
+					projected.ContentHash = ""
 				}
 				projected.Payload = string(raw)
 				visible = append(visible, projected)
