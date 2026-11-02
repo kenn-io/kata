@@ -96,7 +96,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if match != nil {
 				idempotencyFingerprint = closeIdempotencyFingerprint(
 					issue.UID, in.Ref, actor, in.Body.Reason, in.Body.Message, in.Body.Source,
-					in.Body.Evidence, in.Body.DryRun, ifMatchRev, in.Body.Transcript)
+					in.Body.Evidence, in.Body.DryRun, ifMatchRev, in.Body.Transcript, in.Body.Overrule)
 				return closeIdempotencyResponse(ctx, cfg, match, idempotencyFingerprint)
 			}
 		}
@@ -106,7 +106,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if in.IdempotencyKey != "" {
 			idempotencyFingerprint = closeIdempotencyFingerprint(
 				issue.UID, in.Ref, actor, in.Body.Reason, in.Body.Message, in.Body.Source,
-				in.Body.Evidence, in.Body.DryRun, ifMatchRev, in.Body.Transcript)
+				in.Body.Evidence, in.Body.DryRun, ifMatchRev, in.Body.Transcript, in.Body.Overrule)
 		}
 		if ifMatchRev != nil && issue.Revision != *ifMatchRev {
 			return nil, api.NewError(412, "revision_conflict",
@@ -142,6 +142,10 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		dbEvidence, err := resolveEvidenceTargets(ctx, cfg.DB, in.ProjectID, issue, in.Body.Evidence)
 		if err != nil {
 			return nil, api.NewError(400, "validation", err.Error(), "", nil)
+		}
+		warnings, overruled, err := CheckOpenRefutations(ctx, cfg.DB, issue, in.Body.Reason, cfg.CloseVerification, in.Body.Overrule)
+		if err != nil {
+			return nil, err
 		}
 		if err := CheckParentCloseCompleteness(ctx, cfg.DB, issue.ID, issue.ShortID, issue.ProjectID); err != nil {
 			return nil, api.NewError(409, "parent_has_open_children",
@@ -194,6 +198,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if in.Body.DryRun {
 			out := &api.MutationResponse{}
 			out.Body.Issue = issue
+			out.Body.Warnings = warnings
 			return out, nil
 		}
 		var updated db.Issue
@@ -208,6 +213,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				IssueID: issue.ID, ExpectedProjectID: issue.ProjectID,
 				Reason: in.Body.Reason, Actor: actor,
 				Message: in.Body.Message, Evidence: dbEvidence, IfMatchRev: ifMatchRev,
+				VerificationWarnings: warnings, OverruledRefutations: overruled,
 				Transcript:     in.Body.Transcript,
 				IdempotencyKey: in.IdempotencyKey, IdempotencyFingerprint: idempotencyFingerprint,
 				DisallowRecurrenceEffects: issueScopeFromContext(ctx) != nil,
@@ -299,6 +305,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.Issue = updated
 		out.Body.Event = evt
 		out.Body.Changed = changed
+		out.Body.Warnings = warnings
 		return out, nil
 	})
 
@@ -433,6 +440,13 @@ func closeIdempotencyResponse(
 	out.Body.Issue = current
 	out.Body.OriginalEvent = original
 	out.Body.Reused = true
+	var receipt struct {
+		Warnings []db.VerificationWarning `json:"verification_warnings"`
+	}
+	if err := json.Unmarshal([]byte(match.Event.Payload), &receipt); err != nil {
+		return nil, internalAPIError(err)
+	}
+	out.Body.Warnings = receipt.Warnings
 	return out, nil
 }
 
@@ -547,6 +561,7 @@ func closeIdempotencyFingerprint(
 	dryRun bool,
 	ifMatchRev *int64,
 	ref *transcript.Transcript,
+	overrules ...[]string,
 ) string {
 	// The session identifies the request; its URL is a derived locator, so a
 	// changed AgentsView base still replays the original close.
@@ -554,7 +569,12 @@ func closeIdempotencyFingerprint(
 	if ref != nil {
 		session = &transcript.Transcript{Agent: ref.Agent, SessionID: ref.SessionID}
 	}
+	var overrule []string
+	if len(overrules) > 0 {
+		overrule = overrules[0]
+	}
 	encoded, _ := json.Marshal(struct {
+		Overrule   []string               `json:"overrule,omitempty"`
 		IssueUID   string                 `json:"issue_uid"`
 		RequestRef string                 `json:"request_ref"`
 		Actor      string                 `json:"actor"`
@@ -566,6 +586,7 @@ func closeIdempotencyFingerprint(
 		IfMatchRev *int64                 `json:"if_match_revision"`
 		Transcript *transcript.Transcript `json:"transcript,omitempty"`
 	}{
+		Overrule: overrule,
 		IssueUID: issueUID, RequestRef: requestRef,
 		Actor: actor, Reason: reason, Message: message,
 		Source: source, Evidence: evidence, DryRun: dryRun, IfMatchRev: ifMatchRev,

@@ -138,11 +138,12 @@ func parseAuditWindow(sinceIn, untilIn string) (since, until string, err error) 
 // fields" — the audit projection falls back to a live links lookup
 // only for that case; non-nil empty signals "no parent at close".
 type closeEventPayload struct {
-	Reason        string         `json:"reason"`
-	Message       string         `json:"message,omitempty"`
-	Evidence      []api.Evidence `json:"evidence,omitempty"`
-	ParentUID     *string        `json:"parent_uid,omitempty"`
-	ParentShortID *string        `json:"parent_short_id,omitempty"`
+	Reason               string         `json:"reason"`
+	Message              string         `json:"message,omitempty"`
+	Evidence             []api.Evidence `json:"evidence,omitempty"`
+	OverruledRefutations []string       `json:"overruled_refutations,omitempty"`
+	ParentUID            *string        `json:"parent_uid,omitempty"`
+	ParentShortID        *string        `json:"parent_short_id,omitempty"`
 }
 
 // buildAuditRows projects close events into AuditCloseRow shape and
@@ -269,6 +270,7 @@ func buildAuditRows(
 		if parentFilter.has && !parentFilter.matches(row.Parent, p.ParentUID) {
 			continue
 		}
+		row.OverruledRefutations = p.OverruledRefutations
 		for _, e := range p.Evidence {
 			row.EvidenceTypes = append(row.EvidenceTypes, string(e.Type))
 		}

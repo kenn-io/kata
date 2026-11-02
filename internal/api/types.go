@@ -512,11 +512,12 @@ type CreateInitialLinkBody struct {
 type MutationResponse struct {
 	ProjectNameHeader
 	Body struct {
-		Issue         db.Issue  `json:"issue"`
-		Event         *db.Event `json:"event"`
-		OriginalEvent *db.Event `json:"original_event,omitempty"`
-		Changed       bool      `json:"changed"`
-		Reused        bool      `json:"reused,omitzero"`
+		Issue         db.Issue                 `json:"issue"`
+		Event         *db.Event                `json:"event"`
+		OriginalEvent *db.Event                `json:"original_event,omitempty"`
+		Changed       bool                     `json:"changed"`
+		Reused        bool                     `json:"reused,omitzero"`
+		Warnings      []db.VerificationWarning `json:"warnings,omitempty"`
 	}
 }
 
@@ -997,6 +998,7 @@ type CloseActionRequestBody struct {
 	ActionRequestBody
 	RetryProtocol string                 `json:"retry_protocol,omitempty" enum:"close-v1,"`
 	Transcript    *transcript.Transcript `json:"transcript,omitempty"`
+	Overrule      []string               `json:"overrule,omitempty"`
 }
 
 // ActionRequestBody is the shared JSON body for close and reopen actions.
@@ -1541,16 +1543,17 @@ type AuditClosesRequest struct {
 // the event recorded one, giving Parent's display ref immutable
 // provenance.
 type AuditCloseRow struct {
-	Time          string   `json:"time"`
-	Actor         string   `json:"actor"`
-	Issue         string   `json:"issue"`
-	Parent        string   `json:"parent,omitempty"`
-	ParentUID     string   `json:"parent_uid,omitempty"`
-	Reason        string   `json:"reason"`
-	EvidenceTypes []string `json:"evidence_types,omitempty"`
-	Flags         []string `json:"flags,omitempty"`
-	Message       string   `json:"message,omitempty"`
-	EventID       int64    `json:"event_id"`
+	OverruledRefutations []string `json:"overruled_refutations,omitempty"`
+	Time                 string   `json:"time"`
+	Actor                string   `json:"actor"`
+	Issue                string   `json:"issue"`
+	Parent               string   `json:"parent,omitempty"`
+	ParentUID            string   `json:"parent_uid,omitempty"`
+	Reason               string   `json:"reason"`
+	EvidenceTypes        []string `json:"evidence_types,omitempty"`
+	Flags                []string `json:"flags,omitempty"`
+	Message              string   `json:"message,omitempty"`
+	EventID              int64    `json:"event_id"`
 }
 
 // AuditClosesResponse wraps the AuditCloseRow list. Rows is never nil

@@ -417,19 +417,22 @@ func (s *Store) closeIssueWithEvents(
 			return mapSQLError(parentErr, nil)
 		}
 		body, err := json.Marshal(struct {
-			Reason                 string                 `json:"reason"`
-			ClosedAt               string                 `json:"closed_at"`
-			Message                string                 `json:"message,omitempty"`
-			Evidence               []db.Evidence          `json:"evidence,omitempty"`
-			Transcript             *transcript.Transcript `json:"transcript,omitempty"`
-			ParentUID              *string                `json:"parent_uid,omitzero"`
-			ParentShortID          *string                `json:"parent_short_id,omitzero"`
-			IdempotencyKey         string                 `json:"idempotency_key,omitempty"`
-			IdempotencyFingerprint string                 `json:"idempotency_fingerprint,omitempty"`
+			Reason                 string                   `json:"reason"`
+			ClosedAt               string                   `json:"closed_at"`
+			Message                string                   `json:"message,omitempty"`
+			Evidence               []db.Evidence            `json:"evidence,omitempty"`
+			VerificationWarnings   []db.VerificationWarning `json:"verification_warnings,omitempty"`
+			OverruledRefutations   []string                 `json:"overruled_refutations,omitempty"`
+			Transcript             *transcript.Transcript   `json:"transcript,omitempty"`
+			ParentUID              *string                  `json:"parent_uid,omitzero"`
+			ParentShortID          *string                  `json:"parent_short_id,omitzero"`
+			IdempotencyKey         string                   `json:"idempotency_key,omitempty"`
+			IdempotencyFingerprint string                   `json:"idempotency_fingerprint,omitempty"`
 		}{
 			Reason: p.Reason, ClosedAt: closedAt, Message: p.Message, Evidence: p.Evidence,
-			Transcript: p.Transcript,
-			ParentUID:  parentUID, ParentShortID: parentShortID,
+			Transcript:           p.Transcript,
+			VerificationWarnings: p.VerificationWarnings, OverruledRefutations: p.OverruledRefutations,
+			ParentUID: parentUID, ParentShortID: parentShortID,
 			IdempotencyKey: p.IdempotencyKey, IdempotencyFingerprint: p.IdempotencyFingerprint,
 		})
 		if err != nil {

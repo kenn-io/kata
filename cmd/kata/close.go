@@ -19,6 +19,7 @@ func newCloseCmd() *cobra.Command {
 		reason         string
 		message        string
 		evidence       []string
+		overrule       []string
 		dryRun         bool
 		idempotencyKey string
 		ifMatch        string
@@ -145,6 +146,7 @@ The close message has a minimum length that depends on the reason:
 				"message":  message,
 				"evidence": parsed,
 				"dry_run":  dryRun,
+				"overrule": overrule,
 			}
 			if len(parsed) > 0 {
 				if ref := closeTranscript(cmd); ref != nil {
@@ -170,6 +172,7 @@ The close message has a minimum length that depends on the reason:
 			return runActionWithHeaders(cmd, args[0], "close", extra, headers)
 		},
 	}
+	cmd.Flags().StringArrayVar(&overrule, "overrule", nil, "deliberately overrule an open refutation, repeatable")
 	cmd.Flags().StringVar(&reason, "reason", "",
 		"one of: done, wontfix, duplicate, superseded, audit-no-change")
 	cmd.Flags().StringVarP(&message, "message", "m", "",
@@ -370,6 +373,25 @@ func runActionWithHeaders(
 		ctx, client, baseURL, commentProjectID, commentIssueRef, actor, comment, handle, commentKey,
 	); err != nil {
 		return err
+	}
+	if action == "close" {
+		var result struct {
+			Warnings []struct {
+				Code        string `json:"code"`
+				Refutations []struct {
+					Refutation string `json:"refutation"`
+					Summary    string `json:"summary"`
+				} `json:"refutations"`
+			} `json:"warnings"`
+		}
+		if err := json.Unmarshal(bs, &result); err != nil {
+			return err
+		}
+		for _, warning := range result.Warnings {
+			for _, r := range warning.Refutations {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s: %s %s\n", warning.Code, r.Refutation, r.Summary)
+			}
+		}
 	}
 	return printMutationWithApplied(cmd, bs, nil, issue.ProjectName)
 }

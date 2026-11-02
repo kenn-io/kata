@@ -116,6 +116,9 @@ func printAuditClosesTable(cmd *cobra.Command, bs []byte) error {
 			parent = r.Parent
 		}
 		flagsCol := strings.Join(r.Flags, ",")
+		if len(r.OverruledRefutations) > 0 {
+			flagsCol += " overruled=" + strings.Join(r.OverruledRefutations, ",")
+		}
 		for _, f := range r.Flags {
 			if f == "throttled" || f == "rapid-burst" {
 				flagsCol = "!! " + flagsCol
@@ -157,6 +160,9 @@ func printAuditClosesAgent(cmd *cobra.Command, bs []byte) error {
 			agentRowListField("evidence", r.EvidenceTypes),
 			agentRowListField("flags", r.Flags),
 		)
+		if len(r.OverruledRefutations) > 0 {
+			fields = append(fields, agentRowListField("overruled", r.OverruledRefutations))
+		}
 		if err := writeAgentKVRow(out, fields...); err != nil {
 			return err
 		}
