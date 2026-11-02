@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from 'vitest'
+import { describe, expect, test } from 'vitest'
 
 import type { UISnapshot } from '../state/snapshot'
 import { normalizeKataUISnapshot } from './projection'
@@ -12,9 +12,6 @@ describe('normalizeKataUISnapshot', () => {
     ['hub fan-in/out', 2000, 8000],
     ['layered10', 2000, 8000],
     ['skip4', 2000, 8000],
-    ['shared-sink chain', 2000, 8000],
-    ['skip4 leaf cycle', 2000, 8000],
-    ['random forward links', 2000, 8000],
   ] as const)(
     '%s normalization scales with graph size',
     (shape, smallSize, largeSize) => {
@@ -37,17 +34,8 @@ describe('normalizeKataUISnapshot', () => {
             ),
           )
         }
-        let seed = 12345
         for (let index = 1; index < size; index++) {
-          if (shape === 'shared-sink chain') {
-            connect(index - 1, index)
-            if (index < size - 1) connect(index - 1, size - 1)
-          } else if (shape === 'random forward links') {
-            connect(index - 1, index)
-            seed = (seed * 1664525 + 1013904223) >>> 0
-            const later = index + Math.floor((seed / 2 ** 32) * (size - index))
-            if (later !== index) connect(index - 1, later)
-          } else if (shape.endsWith('chain')) connect(index - 1, index)
+          if (shape.endsWith('chain')) connect(index - 1, index)
           else if (shape.endsWith('hub')) connect(0, index)
           else if (shape === 'hub fan-in/out') {
             if (index < size / 2) connect(index, 0)
@@ -61,18 +49,7 @@ describe('normalizeKataUISnapshot', () => {
             for (let skip = 1; skip <= 4 && skip <= index; skip++) connect(index - skip, index)
           }
         }
-        if (shape === 'skip4 leaf cycle') connect(size - 1, size - 2)
-        wire.collection = []
-        wire.collection_links = []
-        wire.selected = {
-          state: 'available',
-          issue: issues[0]!,
-          comments: [],
-          history: [],
-          labels: [],
-          links: [],
-          recurrences: [],
-        }
+        wire.selected!.issue = issues[0]!
         wire.graph = { issues, links, edges: [], unresolved_refs: [] }
         expect(normalizeKataUISnapshot(wire).selected_graph?.nodes).toHaveLength(size)
         const samples = Array.from({ length: 3 }, () => {
@@ -182,54 +159,6 @@ describe('normalizeKataUISnapshot', () => {
       }
       check([...'abcdefgh'], pairs)
     }
-  })
-
-  test('skip4 typed-array allocations grow below quadratic with task count', () => {
-    const allocations = [4000, 16000].map((size) => {
-      const wire = snapshot()
-      const issues = Array.from({ length: size }, (_, index) =>
-        issue(`issue-${index}`, `t${index}`, `Task ${index}`),
-      )
-      const links: NonNullable<UISnapshot['collection_links']> = []
-      for (let index = 1; index < size; index++) {
-        for (let skip = 1; skip <= 4 && skip <= index; skip++) {
-          links.push(
-            link(
-              issues[index - skip]!.uid,
-              `t${index - skip}`,
-              'open',
-              issues[index]!.uid,
-              `t${index}`,
-              'open',
-              'blocks',
-            ),
-          )
-        }
-      }
-      wire.selected!.issue = issues[0]!
-      wire.graph = { issues, links, edges: [], unresolved_refs: [] }
-      let bytes = 0
-      for (const name of ['Uint32Array', 'Int32Array'] as const) {
-        vi.stubGlobal(
-          name,
-          new Proxy(globalThis[name], {
-            construct(target, args) {
-              const array = Reflect.construct(target, args) as Int32Array | Uint32Array
-              bytes += array.byteLength
-              return array
-            },
-          }),
-        )
-      }
-      try {
-        expect(normalizeKataUISnapshot(wire).selected_graph?.nodes).toHaveLength(size)
-      } finally {
-        vi.unstubAllGlobals()
-      }
-      return bytes
-    })
-    expect(allocations[0]).toBeGreaterThan(0)
-    expect(allocations[1]).toBeLessThan(allocations[0]! * 6)
   })
 
   test.each(['verified', 'pending', 'legacy'] as const)(

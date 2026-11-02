@@ -236,130 +236,78 @@ function markTransitiveBlockLayout(edges: KataReachableGraphEdge[]): void {
   }
 
   // Only components with multiple incoming links can be hidden targets.
-  const unread = new Int32Array(groups.length)
+  const incoming = new Int32Array(groups.length)
   for (let node = 0; node < count; node++) {
     for (const to of targets[node]!) {
-      if (componentOf[to] !== componentOf[node]) unread[componentOf[to]!]!++
+      if (componentOf[to] !== componentOf[node]) incoming[componentOf[to]!]!++
     }
   }
   const bit = new Int32Array(groups.length).fill(-1)
   let bits = 0
   for (let component = 0; component < groups.length; component++) {
-    if (unread[component]! > 1) bit[component] = bits++
+    if (incoming[component]! > 1) bit[component] = bits++
   }
   const words = Math.ceil(bits / 32)
-  const reach: (Uint32Array | undefined)[] = []
-  const spare: Uint32Array[] = []
+  const reach: Uint32Array[] = []
   const absorb = (row: Uint32Array, component: number): void => {
     const slot = bit[component]!
     if (slot >= 0) row[slot >>> 5]! |= 1 << (slot & 31)
-    const downstream = reach[component]
-    if (downstream) {
-      for (let word = 0; word < words; word++) row[word]! |= downstream[word]!
-    }
+    for (let word = 0; word < words; word++) row[word]! |= reach[component]![word]!
   }
   const hidden = new Set<number>()
-  const seen = new Int32Array(count).fill(-1)
-  const first = new Int32Array(count)
-  const second = new Int32Array(count)
-  const queue = new Int32Array(2 * count)
-  const origins = new Int32Array(2 * count)
-
   for (let component = 0; component < groups.length; component++) {
     const group = groups[component]!
-    const node = group[0]!
-    const branching =
-      group.length === 1 &&
-      targets[node]!.length > 1 &&
-      targets[node]!.some((target) => bit[componentOf[target]!]! >= 0)
-    const row =
-      words > 0 && (unread[component]! > 0 || branching)
-        ? (spare.pop()?.fill(0) ?? new Uint32Array(words))
-        : undefined
-    if (branching && row) {
-      // Acyclic sources cannot lie on a path from one target to another.
-      // Read nearest targets first, then hide targets already in the row.
-      const near = targets[node]!.slice().sort((a, b) => componentOf[b]! - componentOf[a]!)
-      for (let index = 0; index < near.length; index++) {
-        const target = near[index]!
-        const targetComponent = componentOf[target]!
-        const slot = bit[targetComponent]!
-        if (slot >= 0) {
-          if ((row[slot >>> 5]! & (1 << (slot & 31))) !== 0) hidden.add(node * count + target)
-          if (index > 0 && componentOf[near[index - 1]!] === targetComponent)
-            hidden.add(node * count + near[index - 1]!)
-        }
-        absorb(row, targetComponent)
-      }
-    } else if (row) {
+    const row = (reach[component] = new Uint32Array(words))
+    if (group.length > 1) {
       for (const member of group) {
         for (const target of targets[member]!) {
           if (componentOf[target] !== component) absorb(row, componentOf[target]!)
         }
       }
+      continue
     }
-    // Release each row after its last incoming link has consumed it.
-    for (const member of group) {
-      for (const target of targets[member]!) {
-        const downstream = componentOf[target]!
-        if (downstream !== component && --unread[downstream]! === 0 && reach[downstream]) {
-          spare.push(reach[downstream]!)
-          reach[downstream] = undefined
-        }
+    // Acyclic sources cannot lie on a path from one target to another.
+    // Read nearest targets first, then hide targets already in the row.
+    const node = group[0]!
+    const near = targets[node]!.slice().sort((a, b) => componentOf[b]! - componentOf[a]!)
+    for (let index = 0; index < near.length; index++) {
+      const target = near[index]!
+      const targetComponent = componentOf[target]!
+      const slot = bit[targetComponent]!
+      if (slot >= 0) {
+        if ((row[slot >>> 5]! & (1 << (slot & 31))) !== 0) hidden.add(node * count + target)
+        if (index > 0 && componentOf[near[index - 1]!] === targetComponent)
+          hidden.add(node * count + near[index - 1]!)
       }
-    }
-    if (row && unread[component]! > 0) reach[component] = row
-    else if (row) spare.push(row)
-
-    if (group.length === 1) continue
-    // Cyclic sources need paths that never return through the source.
-    // Two distinct starting targets per task suffice to detect alternate paths.
-    for (const source of group) {
-      if (targets[source]!.length < 2) continue
-      const pending = targets[source]!.slice().sort((a, b) => componentOf[a]! - componentOf[b]!)
-      let remaining = pending.length
-      let lowest = 0
-      let floor = componentOf[pending[lowest]!]!
-      let tail = 0
-      for (const target of pending) {
-        seen[target] = source
-        first[target] = target
-        second[target] = -1
-        origins[tail] = target
-        queue[tail++] = target
-      }
-      for (let head = 0; head < tail && remaining > 0; head++) {
-        const current = queue[head]!
-        if (componentOf[current]! < floor) continue
-        for (const target of targets[current]!) {
-          if (target === source || componentOf[target]! < floor) continue
-          const origin = origins[head]!
-          if (seen[target] !== source) {
-            seen[target] = source
-            first[target] = origin
-            second[target] = -1
-          } else if (first[target] === origin || second[target] !== -1) continue
-          else {
-            second[target] = origin
-            if (first[target] === target) {
-              hidden.add(source * count + target)
-              if (--remaining === 0) break
-              // Hidden targets no longer require exploring lower components.
-              while (hidden.has(source * count + pending[lowest]!)) lowest++
-              floor = componentOf[pending[lowest]!]!
-            }
-          }
-          origins[tail] = origin
-          queue[tail++] = target
-        }
-      }
+      absorb(row, targetComponent)
     }
   }
 
   blocks.forEach((edge, index) => {
     const [from, to] = ends[index]!
-    if (hidden.has(from * count + to)) edge.layout = false
+    const cyclic = groups[componentOf[from]!]!.length > 1
+    if (cyclic ? hasAlternateBlockPath(targets, from, to) : hidden.has(from * count + to))
+      edge.layout = false
   })
+}
+
+function hasAlternateBlockPath(
+  adjacency: readonly (readonly number[])[],
+  from: number,
+  to: number,
+): boolean {
+  const seen = new Set([from])
+  const queue = [...adjacency[from]!]
+  while (queue.length > 0) {
+    const next = queue.shift()!
+    if (next === to || seen.has(next)) continue
+    seen.add(next)
+    for (const peer of adjacency[next]!) {
+      if (peer === to) return true
+      if (!seen.has(peer)) queue.push(peer)
+    }
+  }
+  return false
 }
 
 function normalizeEvent(
