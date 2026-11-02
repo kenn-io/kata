@@ -95,19 +95,19 @@ func TestSearchStatusCandidateLimits(t *testing.T) {
 		{name: "exact ceiling", closed: knnDeepLimit - 1},
 		{name: "beyond ceiling", closed: knnDeepLimit + 1, bounded: true},
 	} {
-		items := make([]db.ImportItem, tc.closed-closed)
-		for i := range items {
-			n := closed + i
-			items[i] = db.ImportItem{
-				ExternalID: fmt.Sprint(n), Title: fmt.Sprintf("distractor %d", n), Body: "x", Author: "a",
-				Status: "closed", ClosedReason: new("done"), CreatedAt: base, UpdatedAt: base, ClosedAt: &base,
-			}
-		}
-		_, _, err := store.ImportBatch(ctx, db.ImportBatchParams{ProjectID: project.ID, Source: "fixture", Actor: "a", Items: items})
-		require.NoError(t, err)
-		closed = tc.closed
-		fillGeneration(ctx, t, store, idx, seedEmb)
 		t.Run(tc.name, func(t *testing.T) {
+			items := make([]db.ImportItem, tc.closed-closed)
+			for i := range items {
+				n := closed + i
+				items[i] = db.ImportItem{
+					ExternalID: fmt.Sprint(n), Title: fmt.Sprintf("distractor %d", n), Body: "x", Author: "a",
+					Status: "closed", ClosedReason: new("done"), CreatedAt: base, UpdatedAt: base, ClosedAt: &base,
+				}
+			}
+			_, _, err := store.ImportBatch(ctx, db.ImportBatchParams{ProjectID: project.ID, Source: "fixture", Actor: "a", Items: items})
+			require.NoError(t, err)
+			closed = tc.closed
+			fillGeneration(ctx, t, store, idx, seedEmb)
 			for _, mode := range []string{"semantic", "hybrid", "auto"} {
 				res, err := hybridSearch(ctx, store, idx, emb, hybridParams{
 					ProjectID: project.ID, Query: "semantic query", Limit: 10, Requested: mode, Status: "open",
