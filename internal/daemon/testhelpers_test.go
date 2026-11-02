@@ -186,6 +186,18 @@ func assertAPIError(t *testing.T, status int, body []byte, wantStatus int, wantC
 	assert.Equal(t, wantCode, envelope.Error.Code, string(body))
 }
 
+// assertErrorData asserts the error envelope's data object equals want exactly.
+func assertErrorData(t *testing.T, body []byte, want map[string]any) {
+	t.Helper()
+	var env struct {
+		Error struct {
+			Data map[string]any `json:"data"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(body, &env), string(body))
+	assert.Equal(t, want, env.Error.Data, string(body))
+}
+
 // testDBHandle bundles a fresh *sqlitestore.Store and a started-at timestamp for daemon
 // server tests.
 type testDBHandle struct {

@@ -335,18 +335,6 @@ func TestResolve_ByStartPath_KataTomlNamesUnregisteredProject(t *testing.T) {
 	assertErrorData(t, bs, map[string]any{"project": "ghost-project"})
 }
 
-// assertErrorData asserts the error envelope's data object equals want exactly.
-func assertErrorData(t *testing.T, body []byte, want map[string]any) {
-	t.Helper()
-	var env struct {
-		Error struct {
-			Data map[string]any `json:"data"`
-		} `json:"error"`
-	}
-	require.NoError(t, json.Unmarshal(body, &env), string(body))
-	assert.Equal(t, want, env.Error.Data, string(body))
-}
-
 func TestListProjects_IncludeArchived(t *testing.T) {
 	ts, h := startDefaultTestServer(t)
 	active, err := h.db.CreateProject(t.Context(), "active")

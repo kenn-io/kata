@@ -42,14 +42,17 @@ code to branch in scripts, rather than matching the message or hint.
 {"error":{"code":"project_not_initialized","message":"no .kata.toml ancestor and no git ancestor","hint":"run \"kata init --project <name>\" in the workspace root, or pass --project <name>"}}
 ```
 
-`project_not_initialized` names what Kata looked up in `data`. `alias` holds the
-workspace alias identity when the alias points at an archived project. It also
-holds the alias when only an alias was looked up and it is not registered, as in
-a git workspace without `.kata.toml`. `project` holds the project name when a
-named project is not registered. The name can come from `--project`,
-`.kata.toml`, or a `name:` project selector. This includes requests that also
-sent an unknown alias. Errors that name neither, such as a directory with no
-`.kata.toml` and no git ancestor, have no `data`.
+`project_not_initialized` puts the name it looked up in `data`, only when the
+message names it:
+
+| Request | `data` |
+| --- | --- |
+| An alias that points at an archived project | `alias` |
+| Only an alias, not registered (the CLI in a git workspace without `.kata.toml`) | `alias` |
+| A project name that is not registered, from `--project`, `.kata.toml`, or a `name:` project selector, with or without an alias | `project` |
+| A `start_path` whose `.kata.toml` names an unregistered project | `project` |
+| A `start_path` in a git workspace whose alias is not registered | none |
+| No `.kata.toml` and no git ancestor | none |
 
 ```json
 {"error":{"code":"project_not_initialized","message":"alias github.com/example/spoke-project is not registered","hint":"run \"kata init\" in this workspace","data":{"alias":"github.com/example/spoke-project"}}}

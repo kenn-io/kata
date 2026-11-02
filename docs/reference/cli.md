@@ -56,6 +56,9 @@ Errors go to stderr in the selected output mode.
 | 7 | Daemon unavailable. |
 | 8 | Wait timeout. |
 
+With `--json`, a `project_not_initialized` error names the alias or project Kata
+looked up in `error.data`; see [HTTP API errors](http-api.md#errors).
+
 ## Workspace initialization
 
 ```sh
@@ -66,10 +69,6 @@ kata init [--replace | --reassign]
 `kata init` writes the secret-free `.kata.toml` binding for the current
 workspace. Pass `--project` to choose the project name explicitly instead of
 deriving it from the git remote.
-
-Project-scoped commands in a workspace with no registered project fail with
-`project_not_initialized` and exit code 4. With `--json`, `error.data` names the
-alias or project Kata looked up. See [HTTP API errors](http-api.md#errors).
 
 Pass `--with-agents` to add or refresh kata's marker-delimited guidance block
 where coding agents look for workspace instructions. Existing real `AGENTS.md`

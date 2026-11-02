@@ -65,26 +65,16 @@ func TestProjectNotInitializedErrorData(t *testing.T) {
 			assert.Empty(t, stdout)
 
 			var got struct {
-				Error map[string]json.RawMessage `json:"error"`
+				Error struct {
+					Code     string         `json:"code"`
+					ExitCode int            `json:"exit_code"`
+					Data     map[string]any `json:"data"`
+				} `json:"error"`
 			}
 			require.NoError(t, json.Unmarshal([]byte(stderr), &got), stderr)
-
-			var code string
-			require.NoError(t, json.Unmarshal(got.Error["code"], &code))
-			assert.Equal(t, "project_not_initialized", code)
-			var exitCode int
-			require.NoError(t, json.Unmarshal(got.Error["exit_code"], &exitCode))
-			assert.Equal(t, ExitNotFound, exitCode)
-
-			raw, hasData := got.Error["data"]
-			if tc.wantData == nil {
-				assert.False(t, hasData, "data must be absent: %s", stderr)
-				return
-			}
-			require.True(t, hasData, stderr)
-			var data map[string]any
-			require.NoError(t, json.Unmarshal(raw, &data))
-			assert.Equal(t, tc.wantData, data)
+			assert.Equal(t, "project_not_initialized", got.Error.Code)
+			assert.Equal(t, ExitNotFound, got.Error.ExitCode)
+			assert.Equal(t, tc.wantData, got.Error.Data)
 		})
 	}
 }
