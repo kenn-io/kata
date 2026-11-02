@@ -846,7 +846,7 @@ func TestTeammateCLIClientComposition(t *testing.T) {
 			}))
 			defer selected.Close()
 			redirects := 0
-			caller := &http.Client{CheckRedirect: func(r *http.Request, via []*http.Request) error {
+			caller := &http.Client{CheckRedirect: func(r *http.Request, _ []*http.Request) error {
 				redirects++
 				r.Header.Set("X-Kata-Teammate", "inherited")
 				return nil

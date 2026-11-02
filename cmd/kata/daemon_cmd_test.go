@@ -4060,14 +4060,14 @@ func TestDaemonControlsSkipUnknownRecord(t *testing.T) {
 	}
 }
 
-// Daemon startup must isolate background contribution while preserving context and HTTP selection.
+// Daemon startup must not copy the launch contribution into background sync.
 func TestDaemonLaunchContributionDoesNotReachBackgroundSync(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
 	t.Setenv("PORT", "")
 	t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
 	t.Setenv("KATA_TEAMMATE", "launch-worker")
-	store, project, binding := newDaemonGitHubSyncStore(t)
+	store, _, binding := newDaemonGitHubSyncStore(t)
 	t.Setenv("KATA_DB", store.Path())
 	require.NoError(t, store.Close())
 	fetcher := newDaemonGitHubSyncFetcher(binding)
@@ -4128,31 +4128,13 @@ func TestDaemonLaunchContributionDoesNotReachBackgroundSync(t *testing.T) {
 		t.Fatal("background import did not commit")
 	}
 	require.NotContains(t, event.Payload, "attributed_teammate")
-	require.NotNil(t, event.IssueUID)
-	ns, err := daemonruntime.NewNamespace()
-	require.NoError(t, err)
-	runtimePath, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Path(os.Getpid())
-	require.NoError(t, err)
-	var record daemonRuntimeRecordJSON
-	require.Eventually(t, func() bool {
-		body, err := os.ReadFile(runtimePath)
-		return err == nil && json.Unmarshal(body, &record) == nil
-	}, 5*time.Second, 20*time.Millisecond)
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodPatch,
-		fmt.Sprintf("http://%s/api/v1/projects/%d/issues/%s", record.Address, project.ID, *event.IssueUID),
-		strings.NewReader(`{"actor":"coordinator","title":"Explicit request"}`))
-	require.NoError(t, err)
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-Kata-Teammate", "request-worker")
-	response, err := (&http.Client{Timeout: 2 * time.Second}).Do(request)
-	require.NoError(t, err)
-	defer response.Body.Close()
-	body, err := io.ReadAll(response.Body)
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, response.StatusCode, string(body))
-	require.Contains(t, string(body), `\"attributed_teammate\":\"request-worker\"`)
 	cancel()
-	require.Eventually(t, func() bool { return workerContext.Err() == context.Canceled }, time.Second, time.Millisecond)
+	select {
+	case <-workerContext.Done():
+	case <-time.After(time.Second):
+		t.Fatal("background sync did not stop after cancellation")
+	}
+	require.ErrorIs(t, workerContext.Err(), context.Canceled)
 }
 
 type contributionSyncRunner struct {

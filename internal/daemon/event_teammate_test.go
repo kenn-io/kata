@@ -56,12 +56,12 @@ func TestEventTeammateShadowsParent(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(teammate.WithRequest(t.Context(), "parent-worker"))
 			defer cancel()
-			req := httptest.NewRequest(tc.method, "/", nil).WithContext(ctx)
+			req := httptest.NewRequestWithContext(ctx, tc.method, "/", nil)
 			if tc.header != "" {
 				req.Header.Set("X-Kata-Teammate", tc.header)
 			}
 			called := false
-			withEventTeammate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			withEventTeammate(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 				called = true
 				handle, _ := teammate.FromRequest(r.Context())
 				require.Equal(t, tc.want, handle)
