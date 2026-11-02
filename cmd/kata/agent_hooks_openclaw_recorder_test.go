@@ -3,7 +3,6 @@ package main
 import (
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -18,9 +17,7 @@ func openClawInstallRecorder(t *testing.T, target string) string {
 	if runtime.GOOS == "windows" && filepath.Ext(target) != ".exe" {
 		target += ".exe"
 	}
-	cmd := exec.CommandContext(t.Context(), "go", "build", "-o", target, "./testdata/openclaw/recorder") //nolint:gosec // G204: fixed Go recorder source and isolated output path.
-	output, err := cmd.CombinedOutput()
-	require.NoError(t, err, string(output))
+	openClawCopyRecorder(t, testBinary(t, "openclaw-recorder", "./testdata/openclaw/recorder"), target)
 	return target
 }
 func openClawCopyRecorder(t *testing.T, source, target string) {

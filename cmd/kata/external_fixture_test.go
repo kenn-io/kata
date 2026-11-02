@@ -21,6 +21,19 @@ var externalFixtures struct {
 // They exercise real subprocess I/O and cleanup without CLI test initialization.
 func externalFixtureBinary(t *testing.T, name string) string {
 	t.Helper()
+	return testBinary(t, name, "./testdata/"+name)
+}
+
+func kataTestBinary(t *testing.T, version string) string {
+	t.Helper()
+	if version == "" {
+		return testBinary(t, "kata-dev", "-buildvcs=false", "go.kenn.io/kata/cmd/kata")
+	}
+	return testBinary(t, "kata-"+version, "-buildvcs=false", "-ldflags", "-X go.kenn.io/kata/internal/version.Version="+version, "go.kenn.io/kata/cmd/kata")
+}
+
+func testBinary(t *testing.T, name string, args ...string) string {
+	t.Helper()
 	externalFixtures.Lock()
 	defer externalFixtures.Unlock()
 	if bin := externalFixtures.binaries[name]; bin != "" {
@@ -37,8 +50,8 @@ func externalFixtureBinary(t *testing.T, name string) string {
 		filename += ".exe"
 	}
 	bin := filepath.Join(externalFixtures.dir, filename)
-	//nolint:gosec // Fixed testdata package names and owned binary destination.
-	output, err := exec.CommandContext(t.Context(), "go", "build", "-o", bin, "./testdata/"+name).CombinedOutput()
+	//nolint:gosec // Fixed test build arguments and owned binary destination.
+	output, err := exec.CommandContext(t.Context(), "go", append([]string{"build", "-o", bin}, args...)...).CombinedOutput()
 	require.NoError(t, err, "build external contract fixture: %s", output)
 	externalFixtures.binaries[name] = bin
 	return bin

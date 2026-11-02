@@ -630,12 +630,7 @@ func TestPiNativeRealKataTransport(t *testing.T) {
 	opts.Attention = true
 	opts.SourceSet = true
 	opts.Source = "contract '$;`.txt"
-	binary := filepath.Join(t.TempDir(), "kata")
-	build := exec.CommandContext(t.Context(), "go", "build", "-o", binary, ".") //nolint:gosec // G204: controlled native fixture executable and arguments exercise the generated integration.
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("compile Kata: %v\n%s", err, output)
-	}
-	opts.Executable = binary
+	opts.Executable = kataTestBinary(t, "")
 	plan, err := planPiAgentHooks(opts, false)
 	if err != nil {
 		t.Fatal(err)

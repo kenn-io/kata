@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -55,13 +54,7 @@ func TestOpenClawContractSurvivesSlowAgentTelemetry(t *testing.T) {
 	opts := openClawTestOptions(t)
 	opts.Attention = false
 	opts.Dir = workspace
-	opts.Executable = filepath.Join(opts.Home, "kata")
-	if runtime.GOOS == "windows" {
-		opts.Executable += ".exe"
-	}
-	build := exec.CommandContext(t.Context(), "go", "build", "-buildvcs=false", "-ldflags", "-X go.kenn.io/kata/internal/version.Version=v1.2.3", "-o", opts.Executable, "go.kenn.io/kata/cmd/kata") //nolint:gosec // G204: fixed build arguments produce an isolated test executable.
-	output, err := build.CombinedOutput()
-	require.NoError(t, err, string(output))
+	opts.Executable = kataTestBinary(t, "v1.2.3")
 	plan, err := planOpenClawAgentHooks(opts, false)
 	require.NoError(t, err)
 	_, err = publishNativeAgentHookPlan(plan)
@@ -70,7 +63,7 @@ func TestOpenClawContractSurvivesSlowAgentTelemetry(t *testing.T) {
 	require.NoError(t, os.WriteFile(contract, []byte(agentContractText), 0600))
 	cmd := exec.CommandContext(t.Context(), node, "testdata/openclaw/slow-telemetry.mjs", plan.Changes[0].Path, workspace, contract) //nolint:gosec // G204: Node runs a fixed fixture with the generated plugin and test-owned executable.
 	cmd.Env = []string{"SystemRoot=" + os.Getenv("SystemRoot"), "PATH=" + os.Getenv("PATH"), "HOME=" + opts.Home, "USERPROFILE=" + opts.Home, "TEMP=" + opts.Home, "TMP=" + opts.Home, "TMPDIR=" + opts.Home, "KATA_HOME=" + opts.Home, "KATA_SERVER=" + server.URL, "KATA_AUTHOR=user-a"}
-	output, err = cmd.CombinedOutput()
+	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
 	require.Equal(t, int32(1), posts.Load(), "contract sends agent activity")
 }
