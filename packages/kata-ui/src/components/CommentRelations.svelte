@@ -50,7 +50,7 @@
 
 {#if links.length || partial}
   <div class="relations" aria-label="Incoming comment relations">
-    {#each kinds as kind}
+    {#each kinds as kind (kind)}
       {#if count(kind)}
         <Button
           size="sm"

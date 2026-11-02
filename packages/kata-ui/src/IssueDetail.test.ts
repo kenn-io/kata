@@ -268,7 +268,9 @@ it('opens a comment endpoint and starts a typed reply from its canonical UID', a
     issueUID: '01TASK',
     commentUID: 'reply-comment',
   })
-  expect(screen.getByRole('button', { name: /Replies to abcd:abc123/ }).textContent).toContain('finder / finder-display')
+  expect(screen.getByRole('button', { name: /Replies to abcd:abc123/ }).textContent).toContain(
+    'finder / finder-display',
+  )
   await fireEvent.click(screen.getByRole('button', { name: 'Show 1 confirmation reply' }))
   expect(screen.getByText('reviewer / checker')).toBeDefined()
   await fireEvent.click(screen.getByRole('button', { name: 'Open efgh:ghi789' }))

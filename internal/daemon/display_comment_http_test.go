@@ -8,11 +8,12 @@ import (
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/notification"
+	"go.kenn.io/kata/internal/teammate"
 )
 
 func TestCommentDisplayContributionHTTPKeepsRouting(t *testing.T) {
 	h, ts, pid, id := bootstrapProjectWithIssue(t)
-	target, _, err := h.DB().CreateComment(db.WithEventTeammate(t.Context(), "target-display"), db.CreateCommentParams{IssueID: id, Author: "finder", Teammate: "review", Body: "Finding"})
+	target, _, err := h.DB().CreateComment(teammate.WithRequest(t.Context(), "target-display"), db.CreateCommentParams{IssueID: id, Author: "finder", Teammate: "review", Body: "Finding"})
 	require.NoError(t, err)
 	path := issueURL(pid, id, "comments")
 	body := map[string]any{"actor": "worker", "teammate": "route", "body": "Response", "reply_to": target.UID, "kind": "reply"}
