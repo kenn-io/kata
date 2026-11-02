@@ -1059,7 +1059,7 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 	}
 	if issue.Status == "closed" {
 		var events []db.Event
-		query := db.EventsAfterParams{ProjectID: issue.ProjectID, IssueUID: issue.UID, Types: []string{"issue.closed"}, Limit: 100}
+		query := db.EventsAfterParams{IssueUID: issue.UID, Types: []string{"issue.closed"}, Limit: 100}
 		for {
 			page, err := cfg.DB.EventsAfter(ctx, query)
 			if err != nil {
@@ -1079,8 +1079,14 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 			var payload struct {
 				Evidence []db.Evidence `json:"evidence"`
 			}
-			if err := json.Unmarshal([]byte(events[len(events)-1].Payload), &payload); err != nil {
-				return nil, internalAPIError(err)
+			projected, err := scopedMutationEvent(ctx, cfg.DB, &events[len(events)-1])
+			if err != nil {
+				return nil, err
+			}
+			if projected != nil {
+				if err := json.Unmarshal([]byte(projected.Payload), &payload); err != nil {
+					return nil, internalAPIError(err)
+				}
 			}
 			for _, e := range payload.Evidence {
 				if e.Type == "confirmed" || e.Type == "refuted" {

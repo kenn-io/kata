@@ -37,6 +37,7 @@ type VerificationWarning struct {
 // ClaimVerdict retains evaluator details for validating explicit close citations.
 // It is internal derivation state, not part of show output.
 type ClaimVerdict struct {
+	Eligible               bool
 	Confirmations          []string
 	OpenRefutations        []string
 	IndependentRefutations []string

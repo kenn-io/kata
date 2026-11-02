@@ -82,6 +82,11 @@ func projectNotificationJSON(ctx context.Context, store db.Storage, raw jsontext
 }
 
 func projectNotificationEventPayload(ctx context.Context, store db.Storage, event db.Event) (jsontext.Value, error) {
+	projected, err := projectCloseEvent(ctx, store, &event)
+	if err != nil {
+		return nil, err
+	}
+	event = *projected
 	return projectNotificationJSONWithWalker(ctx, store, jsontext.Value(event.Payload), func(
 		raw jsontext.Value, keep func(jsontext.Value) (bool, error),
 	) (jsontext.Value, error) {

@@ -98,7 +98,7 @@ func verificationRequired(issue db.Issue) bool {
 	return json.Unmarshal(values["verify.required"], &required) == nil && required
 }
 
-func checkCloseVerification(ctx context.Context, cfg ServerConfig, issue db.Issue, body api.CloseActionRequestBody) ([]db.VerificationWarning, []string, error) {
+func checkCloseVerification(ctx context.Context, cfg ServerConfig, issue db.Issue, body api.CloseActionRequestBody, evidence []db.Evidence, issueUIDs *[]string) ([]db.VerificationWarning, []string, error) {
 	// Verdict evidence pairing also applies to the owner-local TUI exception.
 	for _, e := range body.Evidence {
 		if e.Type == api.EvidenceConfirmed && body.Reason != "done" {
@@ -118,7 +118,7 @@ func checkCloseVerification(ctx context.Context, cfg ServerConfig, issue db.Issu
 	}
 
 	cited := false
-	for _, e := range body.Evidence {
+	for index, e := range body.Evidence {
 		if e.Type != api.EvidenceConfirmed && e.Type != api.EvidenceRefuted {
 			continue
 		}
@@ -131,9 +131,15 @@ func checkCloseVerification(ctx context.Context, cfg ServerConfig, issue db.Issu
 			return nil, nil, api.NewError(400, "validation", "verdict evidence must cite the claim, not its confirm/refute reply", "", nil)
 		}
 		handle := commentref.HandleForIssue(claim.Handle, claim.IssueUID, claim.IssueShortID, issue.UID)
+		evidence[index].Comment = claim.UID
+		if !slices.Contains(*issueUIDs, claim.IssueUID) {
+			*issueUIDs = append(*issueUIDs, claim.IssueUID)
+		}
 		verdict := v.Claims[handle]
 		detail := ""
 		switch {
+		case !verdict.Eligible:
+			detail = fmt.Sprintf("%s is superseded or is a verdict reply; cite a live claim", handle)
 		case len(verdict.Confirmations) > 0 && len(verdict.OpenRefutations) > 0:
 			detail = fmt.Sprintf("%s is contested: confirmed by %s, refuted by %s (open refutation)", handle, verdict.Confirmations[0], verdict.OpenRefutations[0])
 		case e.Type == api.EvidenceConfirmed && len(verdict.OpenRefutations) > 0:
@@ -153,5 +159,29 @@ func checkCloseVerification(ctx context.Context, cfg ServerConfig, issue db.Issu
 	if body.Reason == "done" && v.Required && !cited {
 		return nil, nil, api.NewError(409, "confirmation_required", "verify.required=true requires confirmed evidence citing a claim verified by another principal", fmt.Sprintf("kata notify %s --to <actor>/<teammate> --re c:<claim> --message \"Please confirm or refute\"", issue.ShortID), nil)
 	}
-	return CheckOpenRefutations(issue, body.Reason, cfg.CloseVerification, body.Overrule, records, v)
+	warnings, overruled, err := CheckOpenRefutations(issue, body.Reason, cfg.CloseVerification, body.Overrule, records, v)
+	if err != nil {
+		return nil, nil, err
+	}
+	canonical := func(handle string) string {
+		r, err := commentref.Resolve(records, issue.UID, handle, projectNameForRecords(records, issue.UID))
+		if err != nil {
+			return ""
+		} // Inputs were resolved in the same captured graph.
+		if !slices.Contains(*issueUIDs, r.IssueUID) {
+			*issueUIDs = append(*issueUIDs, r.IssueUID)
+		}
+		return r.UID
+	}
+	for i := range overruled {
+		overruled[i] = canonical(overruled[i])
+	}
+	for i := range warnings {
+		for j := range warnings[i].Refutations {
+			r := &warnings[i].Refutations[j]
+			r.Refutation = canonical(r.Refutation)
+			r.Target = canonical(r.Target)
+		}
+	}
+	return warnings, overruled, nil
 }

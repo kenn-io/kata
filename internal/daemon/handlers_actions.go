@@ -143,7 +143,8 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, api.NewError(400, "validation", err.Error(), "", nil)
 		}
-		warnings, overruled, err := checkCloseVerification(ctx, cfg, issue, in.Body)
+		var verificationIssues []string
+		warnings, overruled, err := checkCloseVerification(ctx, cfg, issue, in.Body, dbEvidence, &verificationIssues)
 		if err != nil {
 			return nil, err
 		}
@@ -213,7 +214,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				IssueID: issue.ID, ExpectedProjectID: issue.ProjectID,
 				Reason: in.Body.Reason, Actor: actor,
 				Message: in.Body.Message, Evidence: dbEvidence, IfMatchRev: ifMatchRev,
-				VerificationWarnings: warnings, OverruledRefutations: overruled,
+				VerificationWarnings: warnings, OverruledRefutations: overruled, VerificationIssueUIDs: verificationIssues,
 				Transcript:     in.Body.Transcript,
 				IdempotencyKey: in.IdempotencyKey, IdempotencyFingerprint: idempotencyFingerprint,
 				DisallowRecurrenceEffects: issueScopeFromContext(ctx) != nil,
@@ -305,7 +306,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.Issue = updated
 		out.Body.Event = evt
 		out.Body.Changed = changed
-		out.Body.Warnings = warnings
+		out.Body.Warnings = projectedCloseWarnings(evt)
 		return out, nil
 	})
 
@@ -440,13 +441,7 @@ func closeIdempotencyResponse(
 	out.Body.Issue = current
 	out.Body.OriginalEvent = original
 	out.Body.Reused = true
-	var receipt struct {
-		Warnings []db.VerificationWarning `json:"verification_warnings"`
-	}
-	if err := json.Unmarshal([]byte(match.Event.Payload), &receipt); err != nil {
-		return nil, internalAPIError(err)
-	}
-	out.Body.Warnings = receipt.Warnings
+	out.Body.Warnings = projectedCloseWarnings(original)
 	return out, nil
 }
 
@@ -467,7 +462,7 @@ func scopedMutationEvent(
 	}
 	if scope == nil {
 		if _, restricted := db.AuthorizedProjects(ctx); !restricted {
-			return event, nil
+			return projectCloseEvent(ctx, store, event)
 		}
 		return projectScopedMutationEvent(ctx, store, event)
 	}
@@ -523,7 +518,7 @@ func projectScopedMutationEvent(
 	if reset {
 		return nil, nil
 	}
-	return event, nil
+	return projectCloseEvent(ctx, store, event)
 }
 
 // scopedMutationEvents is the multi-event form of scopedMutationEvent for

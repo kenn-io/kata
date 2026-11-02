@@ -421,6 +421,7 @@ func (s *Store) closeIssueWithEvents(
 			ClosedAt               string                   `json:"closed_at"`
 			Message                string                   `json:"message,omitempty"`
 			Evidence               []db.Evidence            `json:"evidence,omitempty"`
+			VerificationIssueUIDs  []string                 `json:"verification_issue_uids,omitempty"`
 			VerificationWarnings   []db.VerificationWarning `json:"verification_warnings,omitempty"`
 			OverruledRefutations   []string                 `json:"overruled_refutations,omitempty"`
 			Transcript             *transcript.Transcript   `json:"transcript,omitempty"`
@@ -430,8 +431,8 @@ func (s *Store) closeIssueWithEvents(
 			IdempotencyFingerprint string                   `json:"idempotency_fingerprint,omitempty"`
 		}{
 			Reason: p.Reason, ClosedAt: closedAt, Message: p.Message, Evidence: p.Evidence,
-			Transcript:           p.Transcript,
-			VerificationWarnings: p.VerificationWarnings, OverruledRefutations: p.OverruledRefutations,
+			Transcript:            p.Transcript,
+			VerificationIssueUIDs: p.VerificationIssueUIDs, VerificationWarnings: p.VerificationWarnings, OverruledRefutations: p.OverruledRefutations,
 			ParentUID: parentUID, ParentShortID: parentShortID,
 			IdempotencyKey: p.IdempotencyKey, IdempotencyFingerprint: p.IdempotencyFingerprint,
 		})

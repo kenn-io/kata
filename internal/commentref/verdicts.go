@@ -71,14 +71,14 @@ func Evaluate(comments []Record, issueUID string, readable func(uid string) bool
 		if target.IssueUID != issueUID {
 			continue
 		}
-		claimVerdict := db.ClaimVerdict{}
+		claimVerdict := db.ClaimVerdict{Eligible: target.ReplyKind != "confirm" && target.ReplyKind != "refute" && !superseded(target.UID)}
 		confirmations := 0
 		hasOpenRefutation := false
 		for _, r := range incoming[target.UID] {
 			if r.ReplyKind == "confirm" || r.ReplyKind == "refute" {
 				v.Activity = true
 			}
-			if r.ReplyKind == "confirm" && (r.Author != target.Author || r.Teammate != target.Teammate) {
+			if r.ReplyKind == "confirm" && !superseded(r.UID) && (target.EditedAt == nil || !r.CreatedAt.Before(*target.EditedAt)) && (r.Author != target.Author || r.Teammate != target.Teammate) {
 				confirmations++
 				claimVerdict.Confirmations = append(claimVerdict.Confirmations, verdictHandle(r, issueUID))
 			}
@@ -106,7 +106,7 @@ func Evaluate(comments []Record, issueUID string, readable func(uid string) bool
 		slices.Sort(claimVerdict.OpenRefutations)
 		slices.Sort(claimVerdict.IndependentRefutations)
 		v.Claims[verdictHandle(target, issueUID)] = claimVerdict
-		if confirmations > 0 && !hasOpenRefutation {
+		if claimVerdict.Eligible && confirmations > 0 && !hasOpenRefutation {
 			v.Confirmed = append(v.Confirmed, db.ConfirmedClaim{Comment: verdictHandle(target, issueUID), Confirmations: confirmations})
 		}
 	}

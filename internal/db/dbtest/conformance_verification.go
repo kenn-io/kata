@@ -52,3 +52,64 @@ func checkVerificationGraph(t *testing.T, store db.Storage) error {
 	require.NotEmpty(t, confirm.UID)
 	return nil
 }
+
+// M1/H1: current-project verdicts follow endpoint moves; retained close
+// references remain canonical and respect the reader's current project grant.
+func checkVerificationMovesAndHistory(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	p, err := store.CreateProject(ctx, "claim-project")
+	require.NoError(t, err)
+	q, err := store.CreateProject(ctx, "review-project")
+	require.NoError(t, err)
+	claimIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "Claim", Author: "worker"})
+	require.NoError(t, err)
+	reviewIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "Review", Author: "reviewer"})
+	require.NoError(t, err)
+	claim, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: claimIssue.ID, Author: "worker", Body: "Claim"})
+	require.NoError(t, err)
+	r, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: reviewIssue.ID, Author: "reviewer", Body: "Retained review excerpt", ReplyToUID: claim.UID, ReplyKind: "refute"})
+	require.NoError(t, err)
+	read := func() db.Verification {
+		data, err := store.ReadCommentGraph(ctx, db.CommentGraphQuery{ProjectID: claimIssue.ProjectID})
+		require.NoError(t, err)
+		rows := []commentref.Record{}
+		for _, v := range data.Comments {
+			rows = append(rows, commentref.Record{Comment: v.Comment, IssueUID: v.IssueUID, IssueShortID: v.IssueShortID})
+		}
+		return commentref.Evaluate(rows, claimIssue.UID, nil)
+	}
+	move := func(issue *db.Issue, to int64) {
+		current, err := store.IssueByID(ctx, issue.ID)
+		require.NoError(t, err)
+		_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: current.ProjectID, ToProjectID: to, IfMatchRev: current.Revision, Actor: "worker"})
+		require.NoError(t, err)
+		*issue, err = store.IssueByID(ctx, issue.ID)
+		require.NoError(t, err)
+	}
+	require.Len(t, read().OpenRefutations, 1)
+	_, events, _, err := store.CloseIssueGuarded(ctx, db.CloseIssueParams{IssueID: claimIssue.ID, ExpectedProjectID: p.ID, Actor: "worker", Reason: "done", Message: "Completed the requested work and recorded the unresolved review.", Evidence: []db.Evidence{{Type: "test", Command: "go test ./example"}}, VerificationIssueUIDs: []string{claimIssue.UID, reviewIssue.UID}, VerificationWarnings: []db.VerificationWarning{{Code: "open_refutations", Refutations: []db.OpenRefutation{{Refutation: r.UID, Target: claim.UID, Author: "reviewer", Summary: r.Body}}}}})
+	require.NoError(t, err)
+	require.NotEmpty(t, events)
+	move(&reviewIssue, q.ID)
+	require.Empty(t, read().OpenRefutations)
+	restricted := db.WithAuthorizedProjects(ctx, []string{p.UID})
+	feed, err := store.EventsAfter(restricted, db.EventsAfterParams{ProjectID: p.ID, IssueUID: claimIssue.UID, Types: []string{"issue.closed"}, Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, feed, 1)
+	require.Equal(t, db.ProjectScopeResetEventType, feed[0].Type)
+	require.NotContains(t, feed[0].Payload, r.Body)
+	move(&reviewIssue, p.ID)
+	require.Len(t, read().OpenRefutations, 1)
+	feed, err = store.EventsAfter(restricted, db.EventsAfterParams{ProjectID: p.ID, IssueUID: claimIssue.UID, Types: []string{"issue.closed"}, Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, feed, 1)
+	require.Contains(t, feed[0].Payload, r.UID)
+	move(&claimIssue, q.ID)
+	require.Empty(t, read().OpenRefutations)
+	move(&reviewIssue, q.ID)
+	require.Len(t, read().OpenRefutations, 1)
+	_, _, _, err = store.SoftDeleteIssue(ctx, reviewIssue.ID, "reviewer")
+	require.NoError(t, err)
+	require.Empty(t, read().OpenRefutations)
+	return nil
+}

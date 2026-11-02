@@ -4,6 +4,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"hegel.dev/go/hegel"
 	"testing"
+	"time"
 )
 
 // The close-verification contract requires independent principals and explicit
@@ -81,4 +82,39 @@ func TestVerdictsConfirmationAndOrderProperties(t *testing.T) {
 		}
 		require.Equal(ht, before, Evaluate(rows, "issue", nil))
 	}, hegel.WithTestCases(30), hegel.WithDatabase(t.TempDir()))
+}
+
+// H2: the confirmation must still certify the current text and remain live.
+func TestVerdictsConfirmationLifecycle(t *testing.T) {
+	for _, state := range []string{"edited", "confirmation withdrawn", "claim replaced", "withdrawal superseded", "edited refutation"} {
+		t.Run(state, func(t *testing.T) {
+			claim := graphRecord(1, "issue", "", "")
+			c := graphRecord(2, "other", claim.UID, "confirm")
+			c.Teammate = "reviewer"
+			rows := []Record{claim, c}
+			switch state {
+			case "edited":
+				edited := time.Unix(3, 0)
+				rows[0].EditedAt = &edited
+			case "confirmation withdrawn", "withdrawal superseded":
+				withdraw := graphRecord(3, "other", c.UID, "supersede")
+				rows = append(rows, withdraw)
+				if state == "withdrawal superseded" {
+					rows = append(rows, graphRecord(4, "other", withdraw.UID, "supersede"))
+				}
+			case "claim replaced":
+				rows = append(rows, graphRecord(3, "issue", claim.UID, "supersede"))
+			case "edited refutation":
+				r := graphRecord(3, "other", claim.UID, "refute")
+				rows = append(rows, r)
+				edited := time.Unix(4, 0)
+				rows[0].EditedAt = &edited
+			}
+			v := Evaluate(rows, "issue", nil)
+			require.Empty(t, v.Confirmed)
+			if state == "edited refutation" {
+				require.Len(t, v.OpenRefutations, 1, "editing text never dismisses a dispute")
+			}
+		})
+	}
 }

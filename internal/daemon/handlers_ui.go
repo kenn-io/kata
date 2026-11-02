@@ -243,7 +243,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 						return nil, internalAPIError(err)
 					}
 					recordUISnapshotDependencies(ctx, cachedDependencies)
-					return snapshotResponse(ctx, cachedResponse, intent, policy, validator)
+					return authorizedSnapshotResponse(ctx, cfg.DB, cachedResponse, intent, policy, validator)
 				}
 			}
 			query := intent.storeQuery()
@@ -281,7 +281,7 @@ func registerUIHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, internalAPIError(err)
 			}
 			recordUISnapshotDependencies(ctx, dependencies)
-			return snapshotResponse(ctx, data, intent, policy, validator)
+			return authorizedSnapshotResponse(ctx, cfg.DB, data, intent, policy, validator)
 		})
 
 	referencesOperation := huma.Operation{
@@ -885,4 +885,24 @@ func nonNil[S ~[]E, E any](value S) S {
 		return S{}
 	}
 	return value
+}
+
+func authorizedSnapshotResponse(ctx context.Context, store db.Storage, data db.UISnapshotData, intent normalizedUISnapshotIntent, policy uiPolicy, validator string) (*api.UISnapshotResponse, error) {
+	data.History = slices.Clone(data.History)
+	history := data.History[:0]
+	for _, event := range data.History {
+		if event.Type == "issue.closed" {
+			projected, err := scopedMutationEvent(ctx, store, &event)
+			if err != nil {
+				return nil, err
+			}
+			if projected == nil {
+				continue
+			}
+			event = *projected
+		}
+		history = append(history, event)
+	}
+	data.History = history
+	return snapshotResponse(ctx, data, intent, policy, validator)
 }

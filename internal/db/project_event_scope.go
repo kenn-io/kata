@@ -137,12 +137,16 @@ func EventRequiresProjectScopeReset(
 		return checkUIDs(uids)
 	case "issue.closed":
 		var payload struct {
-			ParentUID     *string    `json:"parent_uid"`
-			ParentShortID *string    `json:"parent_short_id"`
-			Evidence      []Evidence `json:"evidence"`
+			ParentUID             *string    `json:"parent_uid"`
+			ParentShortID         *string    `json:"parent_short_id"`
+			Evidence              []Evidence `json:"evidence"`
+			VerificationIssueUIDs []string   `json:"verification_issue_uids"`
 		}
 		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
 			return true, nil
+		}
+		if private, err := checkUIDs(payload.VerificationIssueUIDs); private || err != nil {
+			return private, err
 		}
 		if payload.ParentUID == nil || *payload.ParentUID == "" {
 			if payload.ParentShortID != nil && *payload.ParentShortID != "" {
