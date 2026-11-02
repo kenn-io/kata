@@ -4,6 +4,7 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+	_ "time/tzdata"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
@@ -21,10 +22,10 @@ func withClock(t *testing.T, now time.Time) {
 }
 
 func dated(shortID, scheduled, deadline string) Issue {
-	return Issue{
-		ShortID: shortID, Status: "open",
-		ScheduledOnDate: scheduled, DeadlineOnDate: deadline,
-	}
+	iss := testIssue(shortID)
+	iss.Status = "open"
+	iss.ScheduledOnDate, iss.DeadlineOnDate = scheduled, deadline
+	return iss
 }
 
 func shortIDs(issues []Issue) []string {
@@ -179,8 +180,7 @@ func TestDateToggle_MidnightRolloverKeepsRowActionsOnTheSelectedIssue(t *testing
 	assert.Equal(t, "z", got.ShortID)
 
 	// The next fetch moves the day on and the selection follows the issue.
-	m.list.selectedUID = "uid-z"
-	m.list.issues[2].UID = "uid-z"
+	m.list.selectedUID = m.list.issues[2].UID
 	m.list = m.list.applyFetched(refetchedMsg{issues: m.list.issues})
 	got, ok = m.list.targetRow()
 	require.True(t, ok)
@@ -196,18 +196,13 @@ func TestDateToggle_CancelingFormAfterMidnightRefreshKeepsDayAndSelection(t *tes
 
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
-	mk := func(short, sched string) Issue {
-		iss := dated(short, sched, "")
-		iss.ProjectID, iss.UID = 7, "uid-"+short
-		return iss
-	}
-	issues := []Issue{mk("x", "2026-11-10"), mk("y", "2026-11-11"), mk("z", "2026-11-09")}
+	issues := []Issue{dated("x", "2026-11-10", ""), dated("y", "2026-11-11", ""), dated("z", "2026-11-09", "")}
 	m.list.issues = issues
 	form := newFilterForm(ListFilter{}, m.scope)
 	form.field(fieldDate).radio.set(dateToday)
 	m, _ = m.commitFilterForm(form)
 	m.list = m.list.applyFetched(refetchedMsg{issues: issues})
-	m.list.cursor, m.list.selectedUID, m.list.selectedProjectID = 1, "uid-z", 7
+	m.list.cursor, m.list.selectedUID, m.list.selectedProjectID = 1, "01TEST-z", 7
 	zIssue := issues[2]
 	m.detail.issue, m.detail.scopePID = &zIssue, 7
 
@@ -218,77 +213,105 @@ func TestDateToggle_CancelingFormAfterMidnightRefreshKeepsDayAndSelection(t *tes
 	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	assert.Equal(t, "2026-11-11", m.list.filter.Day)
-	assert.Equal(t, "uid-z", m.list.selectedUID)
+	assert.Equal(t, "01TEST-z", m.list.selectedUID)
 	got, ok := m.list.targetRow()
 	require.True(t, ok)
 	assert.Equal(t, "z", got.ShortID)
 	require.NotNil(t, m.detail.issue)
-	assert.Equal(t, "uid-z", m.detail.issue.UID)
+	assert.Equal(t, "01TEST-z", m.detail.issue.UID)
 }
 
 // An idle TUI must advance relative date filters at local midnight without
 // relying on a daemon event or a key press.
 func TestDateToggle_IdleMidnightRefetchKeepsSelection(t *testing.T) {
-	for _, mode := range []string{dateToday, dateScheduled, ""} {
-		t.Run(mode, func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				base := time.Now()
-				start := time.Date(2026, 11, 10, 23, 59, 0, 0, time.FixedZone("local", -5*3600))
-				prior := renderNow
-				renderNow = func() time.Time { return start.Add(time.Since(base)) }
-				t.Cleanup(func() { renderNow = prior })
-				priorColor := activeColorMode
-				activeColorMode = colorNone
-				t.Cleanup(func() { activeColorMode = priorColor })
+	santiago, err := time.LoadLocation("America/Santiago")
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name   string
+		start  time.Time
+		jump   time.Duration
+		day    string
+		checks int
+	}{
+		{"midnight", time.Date(2026, 11, 10, 23, 59, 0, 0, time.FixedZone("local", -5*3600)), 0, "2026-11-11", 2},
+		{"suspend", time.Date(2026, 11, 10, 18, 0, 0, 0, time.UTC), 15 * time.Hour, "2026-11-11", 2},
+		{"DST gap", time.Date(2027, 9, 4, 23, 30, 0, 0, santiago), 0, "2027-09-05", 31},
+	} {
+		for _, mode := range []string{dateToday, dateScheduled, ""} {
+			t.Run(tc.name+"/"+mode, func(t *testing.T) {
+				synctest.Test(t, func(t *testing.T) {
+					base := time.Now()
+					wallJump := time.Duration(0)
+					prior := renderNow
+					renderNow = func() time.Time { return tc.start.Add(time.Since(base) + wallJump) }
+					t.Cleanup(func() { renderNow = prior })
+					priorColor := activeColorMode
+					activeColorMode = colorNone
+					t.Cleanup(func() { activeColorMode = priorColor })
 
-				m := filterFormFixture()
-				issues := []Issue{
-					dated("new", "2026-11-11", ""),
-					dated("keep", "2026-11-09", "2026-11-20"),
-				}
-				for i := range issues {
-					issues[i].UID, issues[i].ProjectID = "uid-"+issues[i].ShortID, 7
-				}
-				m.list.filter = ListFilter{Date: mode}.stampDay()
-				m.list = m.list.applyFetched(initialFetchMsg{issues: issues})
-				m.list.cursor = len(m.list.visibleRows()) - 1
-				m.list.selectedUID, m.list.selectedProjectID = "uid-keep", 7
-				m.cache.put(m.currentCacheKey(), issues)
-				// No API during Init: only the midnight timer should run.
-				tick := m.Init()
-				require.NotNil(t, tick, "an idle TUI needs a local-midnight wakeup")
-				m.api = &inboxTestAPI{issues: issues}
-				for _, day := range []string{"2026-11-11", "2026-11-12"} {
-					msg := tick()
-					require.Equal(t, day+" 00:00", renderNow().Format("2006-01-02 15:04"))
-					next, work, handled := m.routeSSE(msg)
-					require.True(t, handled)
-					m = next.(Model)
-					require.NotNil(t, work)
-					if mode == "" {
-						// With Date=any, the wakeup only schedules the next midnight.
-						tick = work
-						continue
+					m := filterFormFixture()
+					issues := []Issue{
+						dated("new", tc.day, ""),
+						dated("keep", "2026-11-09", "2027-11-20"),
 					}
-					batch, ok := work().(tea.BatchMsg)
-					require.True(t, ok, "midnight must fetch and schedule the next wakeup")
-					require.Len(t, batch, 2)
-					fetched, ok := batch[0]().(refetchedMsg)
-					require.True(t, ok)
-					require.NoError(t, fetched.err)
-					m, _ = stepModel(m, fetched)
-					tick = batch[1]
-					assert.Equal(t, day, m.list.filter.Day)
-					if mode == dateToday {
-						assertQueueShortIDs(t, m.list.visibleRows(), []string{"new", "keep"})
-					} else {
+					m.list.filter = ListFilter{Date: mode}.stampDay()
+					m.list = m.list.applyFetched(initialFetchMsg{issues: issues})
+					m.list.cursor = len(m.list.visibleRows()) - 1
+					// Filter commits clear the recorded identity until navigation.
+					m.list.selectedUID = ""
+					m.cache.put(m.currentCacheKey(), issues)
+					tick := m.Init()
+					require.NotNil(t, tick)
+					// A pending SSE reader must stay the sole reader. No API is
+					// available: changing the day uses only the cached rows.
+					m.sseCh = make(chan tea.Msg)
+					wallJump = tc.jump
+					for range tc.checks {
+						before := time.Now()
+						msg := tick()
+						require.Greater(t, time.Since(before), time.Duration(0), "each wakeup must be in the future")
+						require.LessOrEqual(t, time.Since(before), time.Minute, "resume must update within a minute")
+						var handled bool
+						var next tea.Model
+						next, tick, handled = m.routeSSE(msg)
+						require.True(t, handled)
+						m = next.(Model)
+						require.NotNil(t, tick)
+						if mode != "" {
+							assert.Equal(t, renderNow().Format(time.DateOnly), m.list.filter.Day)
+						}
+					}
+					assert.Equal(t, tc.day, renderNow().Format(time.DateOnly))
+					if mode == dateScheduled {
 						assertQueueShortIDs(t, m.list.visibleRows(), []string{"keep"})
+					} else {
+						assertQueueShortIDs(t, m.list.visibleRows(), []string{"new", "keep"})
 					}
 					selected, ok := m.list.targetRow()
 					require.True(t, ok)
 					assert.Equal(t, "keep", selected.ShortID)
-				}
+				})
 			})
+		}
+	}
+}
+
+func TestDateToggle_ClosedStatusControls(t *testing.T) {
+	for _, mode := range []string{dateToday, dateScheduled} {
+		t.Run(mode, func(t *testing.T) {
+			m := openFilterForm(t, filterFormFixture())
+			m.input.field(fieldStatus).radio.set("closed")
+			m.input.field(fieldDate).radio.set(mode)
+			m, _ = stepModel(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+			require.Equal(t, inputFilterForm, m.input.kind)
+			assert.Equal(t, "Today and Scheduled show open issues only", m.input.err)
+			m.input.field(fieldStatus).radio.set("open")
+			m, _ = stepModel(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+			require.Equal(t, inputNone, m.input.kind)
+			assert.Equal(t, mode, m.list.filter.Date)
+			m, _ = stepModel(m, tea.KeyPressMsg{Code: 's'})
+			assert.Equal(t, "open", m.list.filter.Status)
+			assert.Equal(t, "Today and Scheduled show open issues only", m.list.status)
 		})
 	}
 }

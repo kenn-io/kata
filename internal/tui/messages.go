@@ -352,9 +352,11 @@ const (
 	sseDisconnected
 )
 
-// refetchTickMsg fires after the event debounce window or at local midnight.
-// midnight renews the daily timer independently of event-driven ticks.
-type refetchTickMsg struct{ midnight bool }
+// refetchTickMsg fires after the event debounce window.
+type refetchTickMsg struct{}
+
+// dayTickMsg checks whether relative date filters need a new local day.
+type dayTickMsg struct{}
 
 // detailFollowTickMsg fires after the 75ms M6 split-mode debounce
 // window so a burst of cursor moves coalesces into one detail fetch.

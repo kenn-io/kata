@@ -736,6 +736,10 @@ func (lm listModel) applyFilterKey(msg tea.KeyPressMsg, km keymap) (listModel, t
 			lm.status = "Inbox shows open issues only"
 			return lm, nil, true
 		}
+		if lm.filter.Date != "" && nextStatus(lm.filter.Status) == "closed" {
+			lm.status = "Today and Scheduled show open issues only"
+			return lm, nil, true
+		}
 		lm.filter.Status = nextStatus(lm.filter.Status)
 		lm.cursor = 0
 		lm.windowStart = 0
@@ -899,6 +903,11 @@ func (lm listModel) applyFetched(msg tea.Msg) listModel {
 			lm.issues, lm.truncated = trimQueueWorkingSet(m.issues)
 		}
 	}
+	return lm.refreshDay()
+}
+
+// refreshDay advances relative date filters and keeps selection on the same issue.
+func (lm listModel) refreshDay() listModel {
 	lm.filter = lm.filter.stampDay()
 	lm = lm.expandAncestorsOfSelection()
 	rows := lm.visibleRows()

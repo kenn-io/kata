@@ -280,7 +280,7 @@ func (m Model) Init() tea.Cmd {
 	// through the event loop — the v2 replacement for the v1-era
 	// blocking OSC probe at boot. Update restyles when the
 	// tea.BackgroundColorMsg answer lands.
-	cmds := []tea.Cmd{m.waitForSSE(), midnightRefetch()}
+	cmds := []tea.Cmd{m.waitForSSE(), dayTick()}
 	if m.api != nil {
 		// Init runs once per launch; daemon switches and reconnects never reach it.
 		cmds = append(cmds, m.fetchAuthCapabilities(), m.reportAppOpened())
@@ -1973,6 +1973,11 @@ func (m Model) commitInput() (Model, tea.Cmd) {
 // the filter" intent overrides the implicit "follow the same issue
 // across refetches" intent.
 func (m Model) commitFilterForm(form inputState) (Model, tea.Cmd) {
+	if form.fieldValue(fieldStatus) == "closed" && form.fieldValue(fieldDate) != "any" {
+		form.err = "Today and Scheduled show open issues only"
+		m.input = form
+		return m, nil
+	}
 	previousSearch := m.list.filter.Search
 	m.list.filter = ListFilter{
 		Status: form.fieldValue(fieldStatus),
@@ -2510,10 +2515,13 @@ func (m Model) routeSSE(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return m, m.waitForSSE(), true
 	case refetchTickMsg:
 		next, cmd := m.handleRefetchTick()
-		if msg.midnight {
-			cmd = tea.Batch(cmd, midnightRefetch())
-		}
 		return next, cmd, true
+	case dayTickMsg:
+		if m.list.filter.Date != "" && m.list.filter.Day != renderNow().Format(time.DateOnly) {
+			m.list = m.list.syncSelection(m.list.visibleRows())
+			m.list = m.list.refreshDay()
+		}
+		return m, dayTick(), true
 	case toastExpiredMsg:
 		next, cmd := m.handleToastExpired()
 		return next, cmd, true
@@ -2942,13 +2950,10 @@ func (msg eventReceivedMsg) parentLinkEndpointUIDs() (fromUID, toUID string, ok 
 }
 
 // handleRefetchTick fires after the debounce window. Clears the
-// pending flag and refetches when the cache is stale or an active Date
-// filter needs the new local day. applyFetched advances the day and restores
-// the selected issue together.
+// pending flag and refetches when the cache is stale.
 func (m Model) handleRefetchTick() (tea.Model, tea.Cmd) {
 	m.pendingRefetch = false
-	dayChanged := m.list.filter.Date != "" && m.list.filter.Day != renderNow().Format(time.DateOnly)
-	if !m.cache.isStale() && !dayChanged {
+	if !m.cache.isStale() {
 		return m, m.waitForSSE()
 	}
 	cmd := m.list.refetchCmd(m.api, m.scope)
@@ -3040,14 +3045,10 @@ const toastResyncedTTL = 2 * time.Second
 // resynced toast because the user has to act on the hint, not just notice.
 const toastNoBindingTTL = 3 * time.Second
 
-// midnightRefetch wakes the list at the next local midnight, including across
-// daylight-saving changes. One timer per TUI launch keeps the chain independent
-// of filter edits and daemon events; Date=any makes the wakeup a fetch no-op.
-func midnightRefetch() tea.Cmd {
-	now := renderNow()
-	year, month, day := now.Date()
-	next := time.Date(year, month, day+1, 0, 0, 0, 0, now.Location())
-	return tea.Tick(next.Sub(now), func(time.Time) tea.Msg { return refetchTickMsg{midnight: true} })
+// dayTick checks the wall clock within a minute of resuming from suspend.
+// A fixed interval also avoids constructing midnight inside a DST gap.
+func dayTick() tea.Cmd {
+	return tea.Tick(time.Minute, func(time.Time) tea.Msg { return dayTickMsg{} })
 }
 
 // debouncedRefetch returns a tea.Cmd that emits refetchTickMsg after d.
