@@ -493,7 +493,7 @@ func TestSignedNativeCronEnrollment(t *testing.T) {
 		payload, err := json.Marshal(map[string]any{"actor": "tester", "name": "Review", "definition": definition})
 		require.NoError(t, err)
 		send := func(handler http.Handler, method, target, token string, signed bool, body []byte) *httptest.ResponseRecorder {
-			request := httptest.NewRequest(method, "https://daemon.example"+target, bytes.NewReader(body))
+			request := httptest.NewRequestWithContext(t.Context(), method, "https://daemon.example"+target, bytes.NewReader(body))
 			request.RemoteAddr = "127.0.0.1:1234"
 			request = request.WithContext(context.WithValue(request.Context(), http.LocalAddrContextKey, &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 443}))
 			if token != "" {
