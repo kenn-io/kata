@@ -20,7 +20,7 @@ import (
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 
 	internalclient "go.kenn.io/kata/internal/client"
-	"go.kenn.io/kata/internal/teammate"
+	"go.kenn.io/kata/internal/teammate/selection"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -225,7 +225,7 @@ func newGeneratedClient(baseURL string, opts options) (*Client, error) {
 	// Own the contribution transport without mutating the caller's client or
 	// redirect policy. The transport prepares every hop, including redirects.
 	httpClient := *opts.httpClient
-	httpClient.Transport = teammate.WrapTransport(normalizedBaseURL, httpClient.Transport)
+	httpClient.Transport = selection.WrapTransport(normalizedBaseURL, httpClient.Transport)
 	opts.httpClient = &httpClient
 	generatedOpts := []runtime.APIClientOption{runtime.WithHTTPClient(contextDoer{client: opts.httpClient})}
 	for _, editor := range opts.requestEditors {
