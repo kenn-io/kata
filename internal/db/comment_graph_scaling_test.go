@@ -14,66 +14,87 @@ import (
 
 func TestSelectedCommentGraphWorkIgnoresUnrelatedBodies(t *testing.T) {
 	for _, unrelated := range []int{0, 256} {
-		t.Run(fmt.Sprint(unrelated), func(t *testing.T) {
-			ctx := t.Context()
-			work := &referenceWork{}
-			pool := sql.OpenDB(referenceConnector{work})
-			pool.SetMaxOpenConns(1)
-			t.Cleanup(func() { _ = pool.Close() })
-			for _, query := range []string{
-				`CREATE TABLE projects(id INTEGER PRIMARY KEY,uid TEXT,name TEXT,deleted_at TEXT)`,
-				`CREATE TABLE issues(id INTEGER PRIMARY KEY,uid TEXT,short_id TEXT,project_id INTEGER,deleted_at TEXT)`,
-				`CREATE TABLE comments(id INTEGER PRIMARY KEY,uid TEXT,issue_id INTEGER,author TEXT,body TEXT,created_at TEXT,teammate TEXT,reply_to_uid TEXT,reply_kind TEXT,edited_at TEXT)`,
-				`CREATE TABLE events(type TEXT,related_issue_uid TEXT,payload TEXT)`,
-				`CREATE TABLE purge_log(issue_uid TEXT)`,
-				`INSERT INTO projects VALUES(1,'01M40000000000000000000001','example-project',NULL)`,
-				`INSERT INTO issues VALUES(1,'01M40000000000000000000002','0002',1,NULL),(2,'01M40000000000000000000003','0003',1,NULL)`,
-				`INSERT INTO comments(uid,issue_id,author,body,created_at) VALUES('01M40000000000000000000004',1,'worker','Selected issue comment','2026-01-01T00:00:00Z')`,
-			} {
-				_, err := pool.ExecContext(ctx, query)
-				require.NoError(t, err)
-			}
-			for index := range unrelated {
-				_, err := pool.ExecContext(ctx, `INSERT INTO comments(uid,issue_id,author,body,created_at,reply_to_uid,reply_kind) VALUES(?,2,'worker',?,'2026-01-01T00:00:00Z',?,'reply')`,
-					fmt.Sprintf("01M5%022d", index), strings.Repeat("x", 65536), fmt.Sprintf("01M6%022d", index))
-				require.NoError(t, err)
-			}
-			tx, err := pool.BeginTx(ctx, nil)
-			require.NoError(t, err)
-			defer func() { _ = tx.Rollback() }()
-			for _, reference := range []*CommentGraphReference{nil, {UID: "01M40000000000000000000004"}} {
-				*work = referenceWork{}
-				graph, err := ReadCommentGraphTx(ctx, tx, CommentGraphQuery{ProjectID: 1, SelectedIssueID: 1, Reference: reference},
-					func(int) string { return "?" },
-					func(value string) (time.Time, error) { return time.Parse(time.RFC3339Nano, value) },
-					`json_extract(e.payload,'$.reply_to_uid')`, "NULL")
-				require.NoError(t, err)
-				require.Equal(t, 1, len(graph.Comments))
-				require.Equal(t, "01M40000000000000000000004", graph.Comments[0].Comment.UID)
-				if reference == nil {
-					require.Equal(t, "Selected issue comment", graph.Comments[0].Comment.Body)
-					expected := []string{"01M40000000000000000000004"}
-					if unrelated > 4 {
-						expected = append(expected, "01M50000000000000000000004")
-					}
-					require.ElementsMatch(t, expected, graph.CommentUIDsByProject[1])
-					require.LessOrEqual(t, work.rows, 3, "handle rows stay bounded as unrelated comments grow")
-					require.Equal(t, 22, work.bodyBytes, "unrelated bodies must not be consumed and discarded")
-					require.LessOrEqual(t, work.queries, 2, "unrelated pending targets must not trigger endpoint lookups")
-				} else {
-					require.Zero(t, work.bodyBytes)
-					require.Equal(t, 1, work.rows, "full UID resolution must not read unrelated identities")
-					require.Equal(t, 1, work.queries)
+		var singleCommentSuffixArgs int
+		for _, selected := range []int{1, 32} {
+			t.Run(fmt.Sprintf("unrelated=%d/selected=%d", unrelated, selected), func(t *testing.T) {
+				ctx := t.Context()
+				work := &referenceWork{}
+				pool := sql.OpenDB(referenceConnector{work})
+				pool.SetMaxOpenConns(1)
+				t.Cleanup(func() { _ = pool.Close() })
+				for _, query := range []string{
+					`CREATE TABLE projects(id INTEGER PRIMARY KEY,uid TEXT,name TEXT,deleted_at TEXT)`,
+					`CREATE TABLE issues(id INTEGER PRIMARY KEY,uid TEXT,short_id TEXT,project_id INTEGER,deleted_at TEXT)`,
+					`CREATE TABLE comments(id INTEGER PRIMARY KEY,uid TEXT,issue_id INTEGER,author TEXT,body TEXT,created_at TEXT,teammate TEXT,reply_to_uid TEXT,reply_kind TEXT,edited_at TEXT)`,
+					`CREATE TABLE events(type TEXT,related_issue_uid TEXT,payload TEXT)`,
+					`CREATE TABLE purge_log(issue_uid TEXT)`,
+					`INSERT INTO projects VALUES(1,'01M40000000000000000000001','example-project',NULL)`,
+					`INSERT INTO issues VALUES(1,'01M40000000000000000000002','0002',1,NULL),(2,'01M40000000000000000000003','0003',1,NULL)`,
+					`INSERT INTO comments(uid,issue_id,author,body,created_at) VALUES('01M40000000000000000000004',1,'worker','Selected issue comment','2026-01-01T00:00:00Z')`,
+				} {
+					_, err := pool.ExecContext(ctx, query)
+					require.NoError(t, err)
 				}
-				t.Logf("unrelated=%d reference=%t queries=%d rows=%d body_bytes=%d", unrelated, reference != nil, work.queries, work.rows, work.bodyBytes)
-			}
-		})
+				expected := []string{"01M40000000000000000000004"}
+				for index := 1; index < selected; index++ {
+					uid := fmt.Sprintf("01M7%022d", index+1000)
+					_, err := pool.ExecContext(ctx, `INSERT INTO comments(uid,issue_id,author,body,created_at) VALUES(?,1,'worker','Selected issue comment','2026-01-01T00:00:00Z')`, uid)
+					require.NoError(t, err)
+					expected = append(expected, uid)
+				}
+				if unrelated > 4 {
+					expected = append(expected, "01M50000000000000000000004")
+				}
+				for index := range unrelated {
+					_, err := pool.ExecContext(ctx, `INSERT INTO comments(uid,issue_id,author,body,created_at,reply_to_uid,reply_kind) VALUES(?,2,'worker',?,'2026-01-01T00:00:00Z',?,'reply')`,
+						fmt.Sprintf("01M5%022d", index), strings.Repeat("x", 65536), fmt.Sprintf("01M6%022d", index))
+					require.NoError(t, err)
+				}
+				tx, err := pool.BeginTx(ctx, nil)
+				require.NoError(t, err)
+				defer func() { _ = tx.Rollback() }()
+				for _, reference := range []*CommentGraphReference{nil, {UID: "01M40000000000000000000004"}} {
+					*work = referenceWork{}
+					var suffixArgs int
+					work.capture = func(statement string, args []driver.NamedValue) {
+						if strings.HasPrefix(statement, "SELECT c.uid FROM") {
+							suffixArgs = len(args)
+						}
+					}
+					graph, err := ReadCommentGraphTx(ctx, tx, CommentGraphQuery{ProjectID: 1, SelectedIssueID: 1, Reference: reference},
+						func(int) string { return "?" },
+						func(value string) (time.Time, error) { return time.Parse(time.RFC3339Nano, value) },
+						`json_extract(e.payload,'$.reply_to_uid')`, "NULL")
+					require.NoError(t, err)
+					require.Equal(t, "01M40000000000000000000004", graph.Comments[0].Comment.UID)
+					if reference == nil {
+						require.Equal(t, "Selected issue comment", graph.Comments[0].Comment.Body)
+						require.Len(t, graph.Comments, selected)
+						if selected == 1 {
+							require.Positive(t, suffixArgs, "the suffix lookup must run")
+							singleCommentSuffixArgs = suffixArgs
+						} else {
+							require.Equal(t, singleCommentSuffixArgs, suffixArgs, "suffix lookup arguments stay fixed as selected comments grow")
+						}
+						require.ElementsMatch(t, expected, graph.CommentUIDsByProject[1])
+						require.LessOrEqual(t, work.rows, 2*selected+1, "handle rows stay bounded as unrelated comments grow")
+						require.Equal(t, 22*selected, work.bodyBytes, "unrelated bodies must not be consumed and discarded")
+						require.LessOrEqual(t, work.queries, 2, "unrelated pending targets must not trigger endpoint lookups")
+					} else {
+						require.Len(t, graph.Comments, 1)
+						require.Zero(t, work.bodyBytes)
+						require.Equal(t, 1, work.rows, "full UID resolution must not read unrelated identities")
+						require.Equal(t, 1, work.queries)
+					}
+					t.Logf("unrelated=%d reference=%t queries=%d rows=%d body_bytes=%d", unrelated, reference != nil, work.queries, work.rows, work.bodyBytes)
+				}
+			})
+		}
 	}
 }
 
 func TestReadCommentGraphPendingTargetWork(t *testing.T) {
 	var singleReplyQueries int
-	var singleReplySuffixArgs int
 	for _, replies := range []int{1, 32} {
 		ctx := t.Context()
 		work := &referenceWork{}
@@ -103,12 +124,6 @@ func TestReadCommentGraphPendingTargetWork(t *testing.T) {
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = tx.Rollback() })
 		*work = referenceWork{}
-		var suffixArgs int
-		work.capture = func(statement string, args []driver.NamedValue) {
-			if strings.HasPrefix(statement, "SELECT c.uid FROM") {
-				suffixArgs = len(args)
-			}
-		}
 		graph, err := ReadCommentGraphTx(ctx, tx, CommentGraphQuery{ProjectID: 1, SelectedIssueID: 1},
 			func(int) string { return "?" },
 			func(value string) (time.Time, error) { return time.Parse(time.RFC3339Nano, value) },
@@ -119,11 +134,8 @@ func TestReadCommentGraphPendingTargetWork(t *testing.T) {
 		t.Logf("replies=%d queries=%d", replies, work.queries)
 		if replies == 1 {
 			singleReplyQueries = work.queries
-			require.Positive(t, suffixArgs, "the suffix lookup must run")
-			singleReplySuffixArgs = suffixArgs
 		} else {
 			require.Equal(t, singleReplyQueries, work.queries, "replies to the same target must reuse its snapshot evidence")
-			require.Equal(t, singleReplySuffixArgs, suffixArgs, "suffix lookup arguments stay fixed as selected comments grow")
 		}
 	}
 }

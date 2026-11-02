@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -101,5 +102,35 @@ func checkSelectedCommentGraph(t *testing.T, store db.Storage) error {
 		require.Equal(t, persistedUID, edited.UID)
 		require.Equal(t, "Updated imported finding", edited.Body)
 	}
+	collider, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: other.ID, Author: "finder", Body: "Collision"})
+	require.NoError(t, err)
+	records, err = CollectImportRecords(ctx, store, db.ExportFilter{ProjectID: &project.ID, IncludeDeleted: true})
+	require.NoError(t, err)
+	const findingUID = "01AAAAAAAAAAAAAAAAAAABCDEF"
+	const colliderUID = "01BBBBBBBBBBBBBBBBBBABCDEF"
+	for _, record := range records {
+		if comment, ok := record.(*db.CommentExport); ok {
+			switch comment.ID {
+			case target.ID:
+				comment.UID = findingUID
+			case collider.ID:
+				comment.UID = colliderUID
+			}
+		}
+	}
+	require.NoError(t, store.ImportReplay(ctx, records, db.ImportOptions{}))
+	destination, err := store.CreateProject(ctx, "target-project")
+	require.NoError(t, err)
+	_, _, err = store.CreateComment(ctx, db.CreateCommentParams{IssueID: root.ID, Author: "worker", Body: "Reply to moved finding", ReplyToUID: findingUID, ReplyKind: "reply"})
+	require.NoError(t, err)
+	current, err := store.IssueByID(ctx, other.ID)
+	require.NoError(t, err)
+	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: other.ID, FromProjectID: project.ID, ToProjectID: destination.ID, IfMatchRev: current.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	graph, err = store.ReadCommentGraph(ctx, db.CommentGraphQuery{ProjectID: project.ID, SelectedIssueID: root.ID})
+	require.NoError(t, err)
+	require.Equal(t, "moved", graph.Targets[findingUID].Status)
+	require.ElementsMatch(t, []string{findingUID, colliderUID}, graph.CommentUIDsByProject[destination.ID])
+	require.Equal(t, "aabcdef", commentref.Handles(graph.CommentUIDsByProject[destination.ID])[findingUID])
 	return nil
 }
