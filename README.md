@@ -109,8 +109,8 @@ flowchart TB
   coord --> done
 
   done{"Verified complete?"}
-  done -->|yes| close["kata close #60;ref#62; --done --message #34;#60;scope and verification, 40+ chars#62;#34;<br/>--evidence commit:#60;sha#62; #124; pr:#60;url#62; #124; test:#60;cmd#62; #124; reviewed-paths:#60;path#62;<br/>(or --commit, --pr, --test, --reviewed)"]
-  done -->|duplicate, superseded or dropped| retire["kata close #60;ref#62; --message #34;#60;why#62;#34;<br/>--duplicate-of #60;ref#62; #124; --superseded-by #60;ref#62; (20+ chars)<br/>#124; --wontfix (60+ chars)"]
+  done -->|yes| close["kata close #60;ref#62; --done --message #34;#60;scope and verification, 40+ chars#62;#34;<br/>--evidence commit:#60;sha#62; #124; pr:#60;url#62; #124; test:#60;cmd#62; #124; reviewed-paths:#60;path#62;<br/>(or --commit, --pr, --test, --reviewed)<br/>--confirmed c:#60;claim#62; (teammate-confirmed; required if verify.required)"]
+  done -->|duplicate, superseded or dropped| retire["kata close #60;ref#62; --message #34;#60;why#62;#34;<br/>--duplicate-of #60;ref#62; #124; --superseded-by #60;ref#62; (20+ chars)<br/>#124; --wontfix (60+ chars) [--refuted c:#60;claim#62;]"]
   done -->|no| park{"Park it?"}
   park -->|start date known| schedule["kata schedule #60;ref#62; #60;date-or-time#62;<br/>sets scheduled_on; clear with -"]
   park -->|start date unknown| someday["kata meta set #60;ref#62; someday true --json-value<br/>clear with kata meta unset #60;ref#62; someday"]

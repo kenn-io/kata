@@ -31,8 +31,8 @@ digraph kata {
   }
 
   done     [shape=diamond label="Verified complete?"];
-  close    [label="kata close <ref> --done --message \"<scope and verification, 40+ chars>\"\n--evidence commit:<sha> | pr:<url> | test:<cmd> | reviewed-paths:<path>\n(or --commit, --pr, --test, --reviewed)"];
-  retire   [label="kata close <ref> --message \"<why>\"\n--duplicate-of <ref> | --superseded-by <ref> (20+ chars)\n| --wontfix (60+ chars)"];
+  close    [label="kata close <ref> --done --message \"<scope and verification, 40+ chars>\"\n--evidence commit:<sha> | pr:<url> | test:<cmd> | reviewed-paths:<path>\n(or --commit, --pr, --test, --reviewed)\n--confirmed c:<claim> (teammate-confirmed; required if verify.required)"];
+  retire   [label="kata close <ref> --message \"<why>\"\n--duplicate-of <ref> | --superseded-by <ref> (20+ chars)\n| --wontfix (60+ chars) [--refuted c:<claim>]"];
   review   [label="kata label add <ref> needs-review --comment \"<what remains>\""];
   park     [shape=diamond label="Park it?"];
   schedule [label="kata schedule <ref> <date-or-time>\nsets scheduled_on; clear with -"];
@@ -123,8 +123,34 @@ const fragClosing = `2. Closing an issue asserts that the work is complete. If t
         --commit <sha>
 
    Typed --evidence accepts commit:<sha>, pr:<url>, test:<cmd>,
-   reviewed-paths:<path>, or external:<account>. Shortcuts are --commit,
-   --pr, --test, and --reviewed.
+   reviewed-paths:<path>, external:<account>, confirmed:c:<claim>, or
+   refuted:c:<claim>. Shortcuts are --commit, --pr, --test, --reviewed,
+   --confirmed and --refuted; verdict types follow the reason pairings below.
+
+   Verified claims: post a claim comment about completed work (kata claim
+   takes ownership), then ask another teammate or author to review it:
+
+      kata comment abc4 -m "Completed the retry fix; the focused tests pass."
+      kata notify abc4 --to worker/reviewer --re c:abc123 --message "Please confirm or refute"
+      kata --teammate reviewer comment abc4 --confirm c:abc123 -m "Reviewed the retry fix and reran its focused tests successfully."
+      kata close abc4 --done --confirmed c:abc123 --message "Completed the retry fix and checked the focused tests."
+
+   Replace worker/reviewer with the real reviewer and use the claim handle
+   printed by comment. --confirmed cites the claim,
+   not its verdict reply; another author or teammate must confirm the current
+   text with no open refutation. confirm can also record a bug reproduction:
+   cite the completion claim relevant to the close. verify.required=true
+   (JSON boolean) makes this citation mandatory on done.
+   A clean independent refutation can be cited on retirement instead:
+
+      kata close abc4 --wontfix --refuted c:abc123 --message "Reproduced the observed behavior and confirmed it is the intended contract."
+
+   Contested claims support neither type. Supersede or rebut a refutation to
+   resolve it. Only then consider deliberate --overrule c:<refutation> on
+   done/audit-no-change; it cannot make a disputed claim valid evidence.
+   The accepting daemon warns by default; block and off are configured in
+   [close.verification] open_refutations. New refusals and warnings give a
+   runnable next command. verify.* is daemon-read; work.* stays agent-owned.
 
    Close each issue as soon as its work is verified, not in a batch or a
    single "close everything" pass at the end. By default the daemon permits

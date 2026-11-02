@@ -85,4 +85,5 @@ func TestCloseVerificationPreflightTiming(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &out))
 	require.Len(t, out.Verification.OpenRefutations, 1)
 	require.Empty(t, out.Verification.Confirmed)
+	require.NotContains(t, out.Verification.Hint, "Post a completion claim")
 }

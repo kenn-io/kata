@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-31
+last_edited: 2026-11-02
 ---
 
 # CLI reference
@@ -966,13 +966,16 @@ kata close <ref> --done --message <text> \
   [--pr <url>] \
   [--test <command>] \
   [--reviewed <path>] \
+  [--confirmed c:<claim>] \
+  [--overrule c:<refutation>] \
   [--evidence <type:value>] \
   [--idempotency-key <key>] \
   [--if-match <revision>] \
   [--dry]
 ```
 
-Repeat `--commit`, `--pr`, `--test`, `--reviewed`, or `--evidence` to record
+Repeat `--commit`, `--pr`, `--test`, `--reviewed`, `--confirmed`, `--refuted`,
+`--overrule`, or `--evidence` to record
 more than one item, for example a fix that landed in two pull requests.
 
 `--dry` validates the close without changing the issue and reports the close
@@ -1004,11 +1007,28 @@ Evidence is validated against the close reason:
 
 | Reason | Evidence rule |
 | --- | --- |
-| `done` | One or more of `commit`, `pr`, `test`, `reviewed-paths`, or `external` |
-| `wontfix` | No evidence; any evidence item is rejected |
-| `duplicate` | Exactly one `duplicate-of` item |
-| `superseded` | Exactly one `superseded-by` item |
+| `done` | One or more of `commit`, `pr`, `test`, `reviewed-paths`, `external`, or `confirmed` |
+| `wontfix` | No evidence required; optional `refuted` evidence |
+| `duplicate` | Exactly one `duplicate-of` item, plus optional `refuted` evidence |
+| `superseded` | Exactly one `superseded-by` item, plus optional `refuted` evidence |
 | `audit-no-change` | Exactly one `no-change-audit` item; `reviewed-paths` is optional |
+
+`--confirmed c:<claim>` and `--refuted c:<claim>` cite a claim comment on this
+issue. Another author or teammate must have given it an unambiguous verdict;
+self-verdicts do not count. A superseded claim cannot be cited, a superseded
+confirmation is withdrawn, and a confirmation predating a body edit does not
+certify the new text. `confirmed` requires a confirmation and no open
+refutation; `refuted` requires an independent open refutation and no counting
+confirmation. A contested claim supports neither.
+
+When issue metadata `verify.required` is JSON `true`, `done` requires an
+explicit `confirmed` citation. Other values and close reasons are unaffected.
+`--overrule` names the open refutation, rather than the claim, and deliberately
+bypasses the [open-refutation policy](configuration.md#close-verification) on
+`done` or `audit-no-change`. It cannot make a contested claim valid evidence.
+The check reads a preflight snapshot; verdicts arriving after that read update
+live state, not the close decision. See [Verified claims](../workflows/agents.md#verified-claims)
+for the full workflow.
 
 Use `external:<account>` for completed work that has no repository artifact or
 command to cite. The value is a non-empty, free-text account of where and how

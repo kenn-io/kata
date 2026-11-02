@@ -27,7 +27,8 @@ for machine readers.
 - [Concepts](https://katatracker.com/docs/guide/concepts.md): projects,
   workspaces, issue identity, events, close discipline
 - [Agent workflows](https://katatracker.com/docs/workflows/agents.md): the
-  operating contract for coding agents
+  operating contract for coding agents, including verified claims and cited
+  confirmed/refuted close evidence
 - [Agent orchestration](https://katatracker.com/docs/operations/agent-orchestration.md):
   fan-out/join, attention hooks, dashboards
 - [CLI reference](https://katatracker.com/docs/reference/cli.md): every command

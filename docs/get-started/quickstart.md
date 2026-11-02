@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-21
+last_edited: 2026-11-02
 ---
 
 # Quickstart
@@ -376,6 +376,11 @@ canonical managed briefing without mutating the workspace; see
 [Agent contract output](../reference/cli.md#agent-contract-output).
 
 ## Close with evidence
+
+To close on a reviewed claim, use `--done --confirmed c:<claim>` with a
+substantive `--message`, or `--wontfix --refuted c:<claim>` with a retirement
+message. See [Verified claims](../workflows/agents.md#verified-claims) to post
+a completion claim comment and ask another teammate or author to review it.
 
 Closing asserts completion. If work is incomplete, add context instead:
 

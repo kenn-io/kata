@@ -1107,7 +1107,11 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 			if err != nil {
 				return nil, err
 			}
-			v.Hint += "\nPost a completion claim comment and ask another teammate or author to confirm it, then close --done with --confirmed."
+			if issue.Status == "open" {
+				v.Hint += "\nPost a completion claim comment and ask another teammate or author to confirm it, then close --done with --confirmed."
+			} else {
+				v.Hint += "\nVerification describes current comments; the recorded close keeps its original cited evidence."
+			}
 		}
 		out.Body.Verification = &v
 	}

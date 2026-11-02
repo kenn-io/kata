@@ -1,13 +1,22 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-31
+last_edited: 2026-11-02
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Require a reviewed completion claim before closing selected issues with
+  `verify.required=true` and `close --confirmed c:<claim>`. Configure
+  `[close.verification] open_refutations` to warn (the default), block, or
+  ignore unresolved refutations; deliberate overrules appear in audit closes.
+  `show` and MCP show include verification state. Older daemons reject the new
+  `confirmed` and `refuted` evidence types. Refuted claim evidence is optional
+  on retirement; edited or withdrawn confirmations cannot certify replacement
+  text. See [Verified claims](workflows/agents.md#verified-claims).
 
 - Manage cron jobs, workflows and run evidence from MCP: load `kata.load_cron`
   for 17 tools over the daemon's existing cron API. Native notification jobs
