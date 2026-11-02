@@ -1,9 +1,237 @@
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
 
 import type { UISnapshot } from '../state/snapshot'
 import { normalizeKataUISnapshot } from './projection'
 
 describe('normalizeKataUISnapshot', () => {
+  test.each([
+    ['blocks chain', 2000, 8000],
+    ['related chain', 2000, 8000],
+    ['blocks hub', 4000, 16000],
+    ['related hub', 2000, 8000],
+    ['hub fan-in/out', 2000, 8000],
+    ['layered10', 2000, 8000],
+    ['skip4', 2000, 8000],
+    ['shared-sink chain', 2000, 8000],
+    ['skip4 leaf cycle', 2000, 8000],
+    ['random forward links', 2000, 8000],
+  ] as const)(
+    '%s normalization scales with graph size',
+    (shape, smallSize, largeSize) => {
+      const timings = [smallSize, largeSize].map((size) => {
+        const wire = snapshot()
+        const issues = Array.from({ length: size }, (_, index) =>
+          issue(`issue-${index}`, `t${index}`, `Task ${index}`),
+        )
+        const links: NonNullable<UISnapshot['collection_links']> = []
+        const connect = (from: number, to: number) => {
+          links.push(
+            link(
+              `issue-${from}`,
+              `t${from}`,
+              'open',
+              `issue-${to}`,
+              `t${to}`,
+              'open',
+              shape.startsWith('related') ? 'related' : 'blocks',
+            ),
+          )
+        }
+        let seed = 12345
+        for (let index = 1; index < size; index++) {
+          if (shape === 'shared-sink chain') {
+            connect(index - 1, index)
+            if (index < size - 1) connect(index - 1, size - 1)
+          } else if (shape === 'random forward links') {
+            connect(index - 1, index)
+            seed = (seed * 1664525 + 1013904223) >>> 0
+            const later = index + Math.floor((seed / 2 ** 32) * (size - index))
+            if (later !== index) connect(index - 1, later)
+          } else if (shape.endsWith('chain')) connect(index - 1, index)
+          else if (shape.endsWith('hub')) connect(0, index)
+          else if (shape === 'hub fan-in/out') {
+            if (index < size / 2) connect(index, 0)
+            else connect(0, index)
+          } else if (shape === 'layered10') {
+            const previousLayer = (Math.floor(index / 10) - 1) * 10
+            if (previousLayer >= 0) {
+              for (let peer = previousLayer; peer < previousLayer + 10; peer++) connect(peer, index)
+            }
+          } else {
+            for (let skip = 1; skip <= 4 && skip <= index; skip++) connect(index - skip, index)
+          }
+        }
+        if (shape === 'skip4 leaf cycle') connect(size - 1, size - 2)
+        wire.collection = []
+        wire.collection_links = []
+        wire.selected = {
+          state: 'available',
+          issue: issues[0]!,
+          comments: [],
+          history: [],
+          labels: [],
+          links: [],
+          recurrences: [],
+        }
+        wire.graph = { issues, links, edges: [], unresolved_refs: [] }
+        expect(normalizeKataUISnapshot(wire).selected_graph?.nodes).toHaveLength(size)
+        const samples = Array.from({ length: 3 }, () => {
+          const start = performance.now()
+          normalizeKataUISnapshot(wire)
+          return performance.now() - start
+        })
+        return Math.min(...samples)
+      })
+      const [small, large] = timings as [number, number]
+      console.info(
+        `${shape}: ${smallSize}=${small.toFixed(2)}ms, ${largeSize}=${large.toFixed(2)}ms`,
+      )
+      // Allow noise above linear growth while rejecting quadratic growth.
+      expect(large).toBeLessThan(small * (largeSize / smallSize) ** 1.75 + 5)
+    },
+    60_000,
+  )
+
+  test.each([
+    { pairs: ['ab', 'bc', 'ac'], layouts: [true, true, false] },
+    { pairs: ['ab', 'ac', 'bd', 'db'], layouts: [true, true, true, true] },
+    { pairs: ['ab', 'bc', 'ca', 'ac'], layouts: [true, true, true, false] },
+    { pairs: ['ab', 'bc', 'ac', 'ac', 'ab'], layouts: [true, true, false, false, true] },
+  ])('preserves blocks layout for $pairs', ({ pairs, layouts }) => {
+    const wire = snapshot()
+    const issues = ['a', 'b', 'c', 'd', 'x'].map((uid, index) => issue(uid, `t${index}`, uid))
+    wire.selected!.issue = issues[0]!
+    wire.graph = {
+      issues,
+      links: pairs.map((pair) =>
+        link(pair[0]!, pair[0]!, 'open', pair[1]!, pair[1]!, 'open', 'blocks'),
+      ),
+      edges: [],
+      unresolved_refs: [],
+    }
+
+    expect(normalizeKataUISnapshot(wire).selected_graph?.edges.map((edge) => edge.layout)).toEqual(
+      layouts,
+    )
+  })
+
+  test('matches the alternate-path rule on all four-task graphs and seeded cyclic graphs', () => {
+    const check = (uids: string[], pairs: string[]) => {
+      const wire = snapshot()
+      const issues = uids.map((uid, index) => issue(uid, `t${index}`, uid))
+      wire.selected!.issue = issues[0]!
+      wire.graph = {
+        issues,
+        links: pairs.map((pair) =>
+          link(pair[0]!, pair[0]!, 'open', pair[1]!, pair[1]!, 'open', 'blocks'),
+        ),
+        // Keep disconnected blocking components visible without adding blocking paths.
+        edges: uids
+          .slice(1)
+          .map((uid) => ({ from_uid: uids[0]!, to_uid: uid, kind: 'related', layout: true })),
+        unresolved_refs: [],
+      }
+      const expected = pairs.map((pair) => {
+        const source = pair[0]!
+        const target = pair[1]!
+        const seen = new Set([source])
+        const queue = pairs.filter((edge) => edge[0] === source).map((edge) => edge[1]!)
+        while (queue.length > 0) {
+          const next = queue.shift()!
+          if (next === target || seen.has(next)) continue
+          seen.add(next)
+          for (const edge of pairs) {
+            if (edge[0] !== next) continue
+            if (edge[1] === target) return false
+            if (!seen.has(edge[1]!)) queue.push(edge[1]!)
+          }
+        }
+        return true
+      })
+      const actual = normalizeKataUISnapshot(wire).selected_graph!.edges.filter(
+        (edge) => edge.kind === 'blocks',
+      )
+      expect(
+        actual.map((edge) => edge.layout),
+        pairs.join(','),
+      ).toEqual(expected)
+    }
+    const slots = [...'abcd'].flatMap((from) =>
+      [...'abcd'].filter((to) => to !== from).map((to) => from + to),
+    )
+    for (let mask = 0; mask < 4096; mask++) {
+      check(
+        [...'abcd'],
+        slots.filter((_, index) => (mask & (1 << index)) !== 0),
+      )
+    }
+    let seed = 12345
+    const random = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32
+    for (let trial = 0; trial < 500; trial++) {
+      const pairs: string[] = []
+      for (const from of 'abcdefgh') {
+        for (const to of 'abcdefgh') {
+          if (from === to || random() >= 0.2) continue
+          pairs.push(from + to)
+          if (random() < 0.1) pairs.push(from + to)
+        }
+      }
+      for (let index = pairs.length - 1; index > 0; index--) {
+        const other = Math.floor(random() * (index + 1))
+        ;[pairs[index], pairs[other]] = [pairs[other]!, pairs[index]!]
+      }
+      check([...'abcdefgh'], pairs)
+    }
+  })
+
+  test('skip4 typed-array allocations grow below quadratic with task count', () => {
+    const allocations = [4000, 16000].map((size) => {
+      const wire = snapshot()
+      const issues = Array.from({ length: size }, (_, index) =>
+        issue(`issue-${index}`, `t${index}`, `Task ${index}`),
+      )
+      const links: NonNullable<UISnapshot['collection_links']> = []
+      for (let index = 1; index < size; index++) {
+        for (let skip = 1; skip <= 4 && skip <= index; skip++) {
+          links.push(
+            link(
+              issues[index - skip]!.uid,
+              `t${index - skip}`,
+              'open',
+              issues[index]!.uid,
+              `t${index}`,
+              'open',
+              'blocks',
+            ),
+          )
+        }
+      }
+      wire.selected!.issue = issues[0]!
+      wire.graph = { issues, links, edges: [], unresolved_refs: [] }
+      let bytes = 0
+      for (const name of ['Uint32Array', 'Int32Array'] as const) {
+        vi.stubGlobal(
+          name,
+          new Proxy(globalThis[name], {
+            construct(target, args) {
+              const array = Reflect.construct(target, args) as Int32Array | Uint32Array
+              bytes += array.byteLength
+              return array
+            },
+          }),
+        )
+      }
+      try {
+        expect(normalizeKataUISnapshot(wire).selected_graph?.nodes).toHaveLength(size)
+      } finally {
+        vi.unstubAllGlobals()
+      }
+      return bytes
+    })
+    expect(allocations[0]).toBeGreaterThan(0)
+    expect(allocations[1]).toBeLessThan(allocations[0]! * 6)
+  })
+
   test.each(['verified', 'pending', 'legacy'] as const)(
     'retains %s creation projections in accepted snapshots',
     (verification) => {
