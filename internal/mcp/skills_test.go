@@ -13,7 +13,6 @@ import (
 
 	"go.kenn.io/kata/internal/agentguide"
 	"go.kenn.io/kata/internal/storageadmin"
-	kataclient "go.kenn.io/kata/pkg/client"
 )
 
 func TestSkillFragmentsArePartitioned(t *testing.T) {
@@ -75,7 +74,7 @@ func TestSkillsLookupOutcomes(t *testing.T) {
 }
 
 func TestSkillsSchemaBoundary(t *testing.T) {
-	session := connectRawTestServerWithOptions(t, Options{Client: &kataclient.Client{}, ProjectID: 42, ProjectName: "spoke-project", Actor: "example-agent", Version: "test-version"})
+	session := connectRawTestServerWithOptions(t, Options{Client: inertTestClient(t), ProjectID: 42, ProjectName: "spoke-project", Actor: "example-agent", Version: "test-version"})
 	for _, tc := range []struct {
 		name string
 		args map[string]any
@@ -129,7 +128,7 @@ func TestSkillsDeterministicAndScopeIndependent(t *testing.T) {
 	bound, err := NewBoundScope(ProjectIdentity{ID: 1, Name: "spoke-project"})
 	require.NoError(t, err)
 	hegel.Test(t, func(ht *hegel.T) {
-		options := Options{Client: &kataclient.Client{}, Actor: "example-agent", Version: "test-version"}
+		options := Options{Client: inertTestClient(t), Actor: "example-agent", Version: "test-version"}
 		options.Scope = hegel.Draw(ht, hegel.SampledFrom([]*Scope{bound, allowlist, NewAllScope()}))
 		options.EnableTokenAdmin = hegel.Draw(ht, hegel.Booleans())
 		options.Teammate = hegel.Draw(ht, hegel.SampledFrom([]string{"", "teammate-1"}))
