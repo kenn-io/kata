@@ -26,7 +26,7 @@ func projectedCloseWarnings(event *db.Event) []db.VerificationWarning {
 // current comment authority. The stored event stays canonical for replication
 // and exact retry; display handles are recomputed for each authorized view.
 func projectCloseEvent(ctx context.Context, store db.Storage, event *db.Event) (*db.Event, error) {
-	if event == nil || event.Type != "issue.closed" {
+	if event == nil || event.Type != "issue.closed" || event.Payload == "" {
 		return event, nil
 	}
 	var fields map[string]jsontext.Value
@@ -73,6 +73,18 @@ func projectCloseEvent(ctx context.Context, store db.Storage, event *db.Event) (
 	if !canonical {
 		return event, nil
 	} // Already projected by this request's scope pass.
+	subjectProject := event.ProjectUID
+	var subject db.Issue
+	if event.IssueUID != nil {
+		var err error
+		subject, err = store.IssueByUID(ctx, *event.IssueUID, db.IncludeDeletedYes)
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
+			return nil, err
+		}
+		if err == nil {
+			subjectProject = subject.ProjectUID
+		}
+	}
 	ids, err := store.CommentIssueIDsByUIDs(ctx, refs)
 	if err != nil {
 		return nil, err
@@ -121,7 +133,7 @@ func projectCloseEvent(ctx context.Context, store db.Storage, event *db.Event) (
 			shown = *event.IssueUID
 		}
 		handle := commentref.HandleForIssue(r.Handle, r.IssueUID, r.IssueShortID, shown)
-		if r.ProjectUID != event.ProjectUID {
+		if r.ProjectUID != subjectProject {
 			handle = r.ProjectName + "#" + handle
 		}
 		return handle, true
@@ -151,6 +163,13 @@ func projectCloseEvent(ctx context.Context, store db.Storage, event *db.Event) (
 		}
 		if len(kept) > 0 {
 			w.Refutations = kept
+			if subject.UID != "" {
+				w.Hint, err = closeShowCommand(ctx, store, subject)
+				if err != nil {
+					return nil, err
+				}
+			}
+
 			keptWarnings = append(keptWarnings, w)
 		}
 	}
@@ -180,7 +199,7 @@ func projectCloseEvent(ctx context.Context, store db.Storage, event *db.Event) (
 		}
 	}
 	delete(fields, "verification_issue_uids")
-	raw, err := json.Marshal(fields)
+	raw, err := json.Marshal(fields, json.Deterministic(true))
 	if err != nil {
 		return nil, err
 	}

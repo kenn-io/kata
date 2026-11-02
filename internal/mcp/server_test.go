@@ -624,7 +624,8 @@ func TestCreateAndCommentRequireIdempotencyKeys(t *testing.T) {
 	closeProperties := schemaObject(t, byName["kata.close"].InputSchema)["properties"].(map[string]any)
 	require.ElementsMatch(t, []any{"done", "wontfix", "duplicate", "superseded", "audit-no-change"}, closeProperties["reason"].(map[string]any)["enum"])
 	evidenceItems := closeProperties["evidence"].(map[string]any)["items"].(map[string]any)
-	require.Len(t, evidenceItems["oneOf"], 8)
+	require.Len(t, evidenceItems["oneOf"], 10)
+	require.Contains(t, closeProperties, "overrule")
 	require.Contains(t, schemaObject(t, byName["kata.close"].InputSchema), "if")
 
 	require.Contains(t, schemaObject(t, byName["kata.list"].InputSchema), "not")

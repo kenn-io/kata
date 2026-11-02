@@ -22,6 +22,11 @@ func TestShowVerification(t *testing.T) {
 			Verification *db.Verification `json:"verification"`
 		}
 		require.NoError(t, json.Unmarshal(raw, &out))
+		if out.Verification == nil {
+			var fields map[string]any
+			require.NoError(t, json.Unmarshal(raw, &fields))
+			require.NotContains(t, fields, "verification")
+		}
 		return out.Verification
 	}
 	require.Nil(t, show(), "omit empty summaries")

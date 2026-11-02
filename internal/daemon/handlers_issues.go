@@ -1058,7 +1058,7 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 		}
 	}
 	if issue.Status == "closed" {
-		var events []db.Event
+		var latest *db.Event
 		query := db.EventsAfterParams{IssueUID: issue.UID, Types: []string{"issue.closed"}, Limit: 100}
 		for {
 			page, err := cfg.DB.EventsAfter(ctx, query)
@@ -1068,26 +1068,32 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 			if len(page) == 0 {
 				break
 			}
-			events = page
+			for i := range page {
+				if page[i].Type != "issue.closed" {
+					continue
+				}
+				projected, err := scopedMutationEvent(ctx, cfg.DB, &page[i])
+				if err != nil {
+					return nil, err
+				}
+				if projected != nil {
+					latest = projected
+				}
+			}
 			query.AfterID = page[len(page)-1].ID
 			if len(page) < query.Limit {
 				break
 			}
 		}
 
-		if len(events) > 0 {
+		if latest != nil {
 			var payload struct {
 				Evidence []db.Evidence `json:"evidence"`
 			}
-			projected, err := scopedMutationEvent(ctx, cfg.DB, &events[len(events)-1])
-			if err != nil {
-				return nil, err
+			if err := json.Unmarshal([]byte(latest.Payload), &payload); err != nil {
+				return nil, internalAPIError(err)
 			}
-			if projected != nil {
-				if err := json.Unmarshal([]byte(projected.Payload), &payload); err != nil {
-					return nil, internalAPIError(err)
-				}
-			}
+
 			for _, e := range payload.Evidence {
 				if e.Type == "confirmed" || e.Type == "refuted" {
 					v.Evidence = append(v.Evidence, db.VerdictEvidence{Type: e.Type, Comment: e.Comment})
@@ -1096,6 +1102,13 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 		}
 	}
 	if v.Activity || v.Required || v.Redacted > 0 || len(v.Evidence) > 0 {
+		if v.Required && len(v.Confirmed) == 0 {
+			v.Hint, err = closeShowCommand(ctx, cfg.DB, issue)
+			if err != nil {
+				return nil, err
+			}
+			v.Hint += "\nPost a completion claim comment and ask another teammate or author to confirm it, then close --done with --confirmed."
+		}
 		out.Body.Verification = &v
 	}
 	selected, err := commentref.Select(records, issue.UID, opts)

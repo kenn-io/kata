@@ -27,9 +27,11 @@ func newMetaCmd() *cobra.Command {
   work.attention      ok | needs-human | stuck  (agent's live signal)
   work.attention_msg  one-line reason shown with work.attention
   work.branch         git branch doing the work
+  verify.required     JSON true requires a cited --confirmed claim on close --done (daemon-read)
   someday             true (with --json-value) parks the issue without a date
 By convention, agents write only their own work.* keys and never on closed
-issues; Kata does not enforce this. Planning dates use kata schedule and
+issues; Kata does not enforce this. verify.* is daemon-read; other values
+of verify.required do not require confirmation. Planning dates use kata schedule and
 kata deadline.`,
 	}
 	cmd.AddCommand(newMetaSetCmd(), newMetaUnsetCmd(), newMetaGetCmd())

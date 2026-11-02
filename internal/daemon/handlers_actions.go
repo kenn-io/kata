@@ -134,19 +134,19 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		if !tuiBypass {
 			if err := ValidateCloseInput(in.Body.Reason, in.Body.Message, in.Body.Evidence); err != nil {
-				return nil, api.NewError(400, "validation", err.Error(), "", nil)
+				return nil, closeRefusalHint(ctx, cfg.DB, issue, in.Body, api.NewError(400, "validation", err.Error(), "", nil))
 			}
 		}
 		// Every close stores resolved target UIDs, so later moves cannot change
 		// which issue the evidence names.
 		dbEvidence, err := resolveEvidenceTargets(ctx, cfg.DB, in.ProjectID, issue, in.Body.Evidence)
 		if err != nil {
-			return nil, api.NewError(400, "validation", err.Error(), "", nil)
+			return nil, closeRefusalHint(ctx, cfg.DB, issue, in.Body, api.NewError(400, "validation", err.Error(), "", nil))
 		}
 		var verificationIssues []string
 		warnings, overruled, err := checkCloseVerification(ctx, cfg, issue, in.Body, dbEvidence, &verificationIssues)
 		if err != nil {
-			return nil, err
+			return nil, closeRefusalHint(ctx, cfg.DB, issue, in.Body, err)
 		}
 		if err := CheckParentCloseCompleteness(ctx, cfg.DB, issue.ID, issue.ShortID, issue.ProjectID); err != nil {
 			return nil, api.NewError(409, "parent_has_open_children",
@@ -199,7 +199,15 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if in.Body.DryRun {
 			out := &api.MutationResponse{}
 			out.Body.Issue = issue
-			out.Body.Warnings = warnings
+			raw, err := json.Marshal(map[string]any{"verification_warnings": warnings})
+			if err != nil {
+				return nil, internalAPIError(err)
+			}
+			preview, err := projectCloseEvent(ctx, cfg.DB, &db.Event{Type: "issue.closed", IssueUID: &issue.UID, ProjectUID: issue.ProjectUID, Payload: string(raw)})
+			if err != nil {
+				return nil, internalAPIError(err)
+			}
+			out.Body.Warnings = projectedCloseWarnings(preview)
 			return out, nil
 		}
 		var updated db.Issue

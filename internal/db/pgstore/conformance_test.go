@@ -253,6 +253,6 @@ func backdateCommentCreated(ctx context.Context, store db.Storage, commentID int
 	postgresStore := store.(*pgstore.Store)
 	_, err := postgresStore.ExecContext(ctx,
 		`UPDATE comments SET created_at=$1 WHERE id=$2`,
-		createdAt.UTC(), commentID)
+		createdAt.UTC().Format(time.RFC3339Nano), commentID)
 	return err
 }

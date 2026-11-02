@@ -84,3 +84,72 @@ func TestCloseVerificationResolution(t *testing.T) {
 		})
 	}
 }
+
+func TestCloseVerificationReasonsAndOverrules(t *testing.T) {
+	for _, policy := range []string{"block", "warn", "off"} {
+		for _, reason := range []string{"audit-no-change", "wontfix", "duplicate", "superseded"} {
+			t.Run(policy+"/"+reason, func(t *testing.T) {
+				env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.CloseVerification = policy })
+				pid := initLocalWorkspace(t, env, "example-workspace")
+				id := createIssueViaHTTP(t, env, pid, "Claim")
+				claim, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: id, Author: "worker", Body: "Claim"})
+				require.NoError(t, err)
+				_, _, err = env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: id, Author: "reviewer", Body: "Disputed", ReplyToUID: claim.UID, ReplyKind: "refute"})
+				require.NoError(t, err)
+				body := map[string]any{"actor": "worker", "reason": reason, "message": strings.Repeat("Reviewed the claim and recorded the completion decision. ", 2)}
+				switch reason {
+				case "audit-no-change":
+					body["evidence"] = []map[string]any{{"type": "no-change-audit", "rationale": "Reviewed the implementation and found no required change."}}
+				case "duplicate", "superseded":
+					other := createIssueViaHTTP(t, env, pid, "Target")
+					target, err := env.DB.IssueByID(t.Context(), other)
+					require.NoError(t, err)
+					kind := "duplicate-of"
+					if reason == "superseded" {
+						kind = "superseded-by"
+					}
+					body["evidence"] = []map[string]any{{"type": kind, "issue_ref": target.ShortID}}
+				}
+				response, raw := envDoRaw(t, env, http.MethodPost, issuePath(pid, id, "actions/close"), body, nil)
+				want := 200
+				if reason == "audit-no-change" && policy == "block" {
+					want = 409
+				}
+				require.Equal(t, want, response.StatusCode, string(raw))
+			})
+		}
+	}
+	for _, selection := range []string{"partial", "complete", "duplicate", "resolved"} {
+		t.Run(selection, func(t *testing.T) {
+			env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.CloseVerification = "block" })
+			pid := initLocalWorkspace(t, env, "example-workspace")
+			id := createIssueViaHTTP(t, env, pid, "Claim")
+			claim, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: id, Author: "worker", Body: "Claim"})
+			require.NoError(t, err)
+			refs := []string{}
+			for _, author := range []string{"reviewer-a", "reviewer-b"} {
+				r, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: id, Author: author, Body: "Disputed", ReplyToUID: claim.UID, ReplyKind: "refute"})
+				require.NoError(t, err)
+				refs = append(refs, r.UID)
+			}
+			switch selection {
+			case "partial":
+				refs = refs[:1]
+			case "duplicate":
+				refs = append(refs, refs[0])
+			case "resolved":
+				_, _, err = env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: id, Author: "reviewer-a", Body: "Withdrawn", ReplyToUID: refs[0], ReplyKind: "supersede"})
+				require.NoError(t, err)
+			}
+			response, raw := envDoRaw(t, env, http.MethodPost, issuePath(pid, id, "actions/close"), map[string]any{"actor": "worker", "reason": "done", "message": "Completed the requested fix and checked the focused tests.", "evidence": []map[string]any{{"type": "test", "command": "go test ./example"}}, "overrule": refs}, nil)
+			want := 200
+			if selection == "partial" {
+				want = 409
+			}
+			if selection == "resolved" {
+				want = 400
+			}
+			require.Equal(t, want, response.StatusCode, string(raw))
+		})
+	}
+}

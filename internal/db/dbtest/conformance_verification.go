@@ -5,6 +5,7 @@ import (
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
 	"testing"
+	"time"
 )
 
 func checkVerificationGraph(t *testing.T, store db.Storage) error {
@@ -111,5 +112,79 @@ func checkVerificationMovesAndHistory(t *testing.T, store db.Storage) error {
 	_, _, _, err = store.SoftDeleteIssue(ctx, reviewIssue.ID, "reviewer")
 	require.NoError(t, err)
 	require.Empty(t, read().OpenRefutations)
+	return nil
+}
+
+func checkVerificationLifecycle(t *testing.T, store db.Storage, backend Backend) error {
+	ctx := t.Context()
+	p, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Author: "worker", Title: "Claim"})
+	require.NoError(t, err)
+	claim, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "Original completion claim"})
+	require.NoError(t, err)
+	confirmation, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "reviewer", Body: "Independent confirmation", ReplyToUID: claim.UID, ReplyKind: "confirm"})
+	require.NoError(t, err)
+	require.NotNil(t, backend.BackdateCommentCreated)
+	require.NoError(t, backend.BackdateCommentCreated(ctx, store, confirmation.ID, time.Now().Add(-time.Hour)))
+	read := func() db.Verification {
+		data, err := store.ReadCommentGraph(ctx, db.CommentGraphQuery{ProjectID: p.ID})
+		require.NoError(t, err)
+		rows := []commentref.Record{}
+		for _, r := range data.Comments {
+			rows = append(rows, commentref.Record{Comment: r.Comment, IssueUID: r.IssueUID, IssueShortID: r.IssueShortID})
+		}
+		return commentref.Evaluate(rows, issue.UID, nil)
+	}
+	require.Len(t, read().Confirmed, 1)
+	_, _, _, err = store.EditComment(ctx, db.EditCommentParams{IssueID: issue.ID, CommentUID: claim.UID, Actor: "worker", Body: "Edited completion claim"})
+	require.NoError(t, err)
+	require.Empty(t, read().Confirmed)
+	fresh, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "reviewer", Teammate: "fresh-review", Body: "Reviewed the edited text", ReplyToUID: claim.UID, ReplyKind: "confirm"})
+	require.NoError(t, err)
+	require.Len(t, read().Confirmed, 1)
+	_, _, err = store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "reviewer", Body: "Withdraw this confirmation", ReplyToUID: fresh.UID, ReplyKind: "supersede"})
+	require.NoError(t, err)
+	require.Empty(t, read().Confirmed)
+	_, _, err = store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "reviewer", Body: "Unresolved refutation", ReplyToUID: claim.UID, ReplyKind: "refute"})
+	require.NoError(t, err)
+	_, _, _, err = store.EditComment(ctx, db.EditCommentParams{IssueID: issue.ID, CommentUID: claim.UID, Actor: "worker", Body: "Another body edit cannot dismiss this dispute"})
+	require.NoError(t, err)
+	require.Len(t, read().OpenRefutations, 1)
+	_, _, err = store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "Replacement claim", ReplyToUID: claim.UID, ReplyKind: "supersede"})
+	require.NoError(t, err)
+	require.Empty(t, read().OpenRefutations)
+	require.Empty(t, read().Confirmed)
+	return nil
+}
+
+func checkVerificationNestedRedaction(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	p, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	root, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Author: "worker", Title: "Claim"})
+	require.NoError(t, err)
+	child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Author: "reviewer", Title: "Review", Links: []db.InitialLink{{Type: "parent", ToNumber: root.ID}}})
+	require.NoError(t, err)
+	hidden, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Author: "worker", Title: "Outside reply"})
+	require.NoError(t, err)
+	claim, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: root.ID, Author: "worker", Body: "Claim"})
+	require.NoError(t, err)
+	refute, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: child.ID, Author: "reviewer", Body: "Refutation", ReplyToUID: claim.UID, ReplyKind: "refute"})
+	require.NoError(t, err)
+	rebuttal, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: hidden.ID, Author: "worker", Body: "Hidden nested rebuttal", ReplyToUID: refute.UID, ReplyKind: "refute"})
+	require.NoError(t, err)
+	query := db.CommentGraphQuery{ProjectID: p.ID, VerificationIssueID: root.ID, IssueScope: &db.APITokenScope{Kind: db.APITokenScopeIssueSubtree, ProjectUID: p.UID, RootIssueUID: root.UID}}
+	graph, err := store.ReadCommentGraph(ctx, query)
+	require.NoError(t, err)
+	require.Equal(t, 1, graph.Redacted)
+	for _, record := range graph.Comments {
+		require.NotEqual(t, rebuttal.UID, record.Comment.UID)
+	}
+	_, err = store.CreateLink(ctx, db.CreateLinkParams{FromIssueID: hidden.ID, ToIssueID: root.ID, Type: "parent", Author: "worker"})
+	require.NoError(t, err)
+	graph, err = store.ReadCommentGraph(ctx, query)
+	require.NoError(t, err)
+	require.Zero(t, graph.Redacted)
 	return nil
 }

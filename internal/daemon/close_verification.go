@@ -72,7 +72,7 @@ func CheckOpenRefutations(issue db.Issue, reason, policy string, overrule []stri
 			}
 			lines = append(lines, fmt.Sprintf("%s  %s  %s", r.Refutation, author, r.Summary))
 		}
-		return nil, nil, api.NewError(409, "open_refutations", fmt.Sprintf("%d open refutations:\n%s", len(unresolved), strings.Join(lines, "\n")), "supersede the claim, withdraw or rebut the refutation, or close with --overrule <refutation>", nil)
+		return nil, nil, api.NewError(409, "open_refutations", fmt.Sprintf("%d open refutations:\n%s", len(unresolved), strings.Join(lines, "\n")), "", map[string]any{"refutations": unresolved})
 	}
 	if policy == "warn" && len(unresolved) > 0 {
 		return []db.VerificationWarning{{Code: "open_refutations", Refutations: unresolved}}, overruled, nil
@@ -145,11 +145,11 @@ func checkCloseVerification(ctx context.Context, cfg ServerConfig, issue db.Issu
 		case e.Type == api.EvidenceConfirmed && len(verdict.OpenRefutations) > 0:
 			detail = fmt.Sprintf("%s has an open refutation %s", handle, verdict.OpenRefutations[0])
 		case e.Type == api.EvidenceConfirmed && len(verdict.Confirmations) == 0:
-			detail = fmt.Sprintf("%s has no confirmation from another principal", handle)
+			detail = fmt.Sprintf("%s has no confirmation from another teammate or author", handle)
 		case e.Type == api.EvidenceRefuted && len(verdict.Confirmations) > 0:
 			detail = fmt.Sprintf("%s has a counting confirmation; refuted evidence requires none", handle)
 		case e.Type == api.EvidenceRefuted && len(verdict.IndependentRefutations) == 0:
-			detail = fmt.Sprintf("%s has no open refutation from another principal", handle)
+			detail = fmt.Sprintf("%s has no open refutation from another teammate or author", handle)
 		}
 		if detail != "" {
 			return nil, nil, api.NewError(400, "validation", detail, "", nil)
@@ -157,7 +157,7 @@ func checkCloseVerification(ctx context.Context, cfg ServerConfig, issue db.Issu
 	}
 
 	if body.Reason == "done" && v.Required && !cited {
-		return nil, nil, api.NewError(409, "confirmation_required", "verify.required=true requires confirmed evidence citing a claim verified by another principal", fmt.Sprintf("kata notify %s --to <actor>/<teammate> --re c:<claim> --message \"Please confirm or refute\"", issue.ShortID), nil)
+		return nil, nil, api.NewError(409, "confirmation_required", "verify.required=true requires confirmed evidence citing a claim verified by another teammate or author", fmt.Sprintf("kata notify %s --to <actor>/<teammate> --re c:<claim> --message \"Please confirm or refute\"", issue.ShortID), nil)
 	}
 	warnings, overruled, err := CheckOpenRefutations(issue, body.Reason, cfg.CloseVerification, body.Overrule, records, v)
 	if err != nil {

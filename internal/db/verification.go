@@ -3,6 +3,7 @@ package db
 // Verification is derived from live, authorized comment edges, never persisted
 // as issue state. Confirmed claims have no unresolved dispute.
 type Verification struct {
+	Hint            string                  `json:"hint,omitempty"`
 	Evidence        []VerdictEvidence       `json:"evidence,omitempty"`
 	Claims          map[string]ClaimVerdict `json:"-"`
 	Required        bool                    `json:"required"`
@@ -30,6 +31,7 @@ type OpenRefutation struct {
 
 // VerificationWarning is retained with the close receipt and event.
 type VerificationWarning struct {
+	Hint        string           `json:"hint,omitempty"`
 	Code        string           `json:"code"`
 	Refutations []OpenRefutation `json:"refutations"`
 }

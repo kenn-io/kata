@@ -687,7 +687,7 @@ func apiErrFromBody(status int, bs []byte) *cliError {
 	}
 	return &cliError{
 		HTTPStatus: status,
-		Hint:       env.Error.Hint,
+		Hint:       selectedVerificationHint(env.Error.Hint),
 		Message:    env.Error.Message,
 		Code:       env.Error.Code,
 		Kind:       kindForStatus(status),

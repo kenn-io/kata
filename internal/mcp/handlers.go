@@ -432,7 +432,8 @@ func (h toolHandlers) show(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		metadata = map[string]any{}
 	}
 	return successResult(), ShowOutput{
-		Project: project,
+		Verification: response.Verification,
+		Project:      project,
 		Issue: IssueDetail{
 			IssueSummary: summary,
 			Labels:       labels,
@@ -851,6 +852,7 @@ func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 			Reason:        &reason,
 			Message:       &input.Message,
 			Evidence:      evidence,
+			Overrule:      input.Overrule,
 			DryRun:        optionalTrue(input.DryRun),
 			RetryProtocol: retryProtocol,
 		},
@@ -867,7 +869,12 @@ func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
-	return h.mutationResult(ctx, project, response.Issue, response.Changed, response.Reused, event)
+	result, out, err := h.mutationResult(ctx, project, response.Issue, response.Changed, response.Reused, event)
+	out.Warnings, err = h.scopedVerificationWarnings(ctx, response.Warnings)
+	if err != nil {
+		return nil, MutationOutput{}, err
+	}
+	return result, out, err
 }
 
 // closeMutationProject keeps replayed close receipts inside the immutable MCP
@@ -1538,7 +1545,7 @@ func (h toolHandlers) convertEvidence(ctx context.Context, project ProjectIdenti
 	typeName := strings.TrimSpace(input.Type)
 	allowed := map[string]bool{
 		"commit": true, "pr": true, "test": true, "reviewed-paths": true,
-		"external": true, "no-change-audit": true, "duplicate-of": true, "superseded-by": true,
+		"external": true, "no-change-audit": true, "duplicate-of": true, "superseded-by": true, "confirmed": true, "refuted": true,
 	}
 	if !allowed[typeName] {
 		return generated.Evidence{}, fmt.Errorf("unknown type %q", typeName)
@@ -1548,6 +1555,7 @@ func (h toolHandlers) convertEvidence(ctx context.Context, project ProjectIdenti
 	result.Sha = optionalString(input.SHA)
 	result.URL = optionalString(input.URL)
 	result.Command = optionalString(input.Command)
+	result.Comment = optionalString(input.Comment)
 	result.Account = optionalString(input.Account)
 	result.Rationale = optionalString(input.Rationale)
 	if input.IssueRef != "" {
@@ -1558,6 +1566,10 @@ func (h toolHandlers) convertEvidence(ctx context.Context, project ProjectIdenti
 		result.IssueRef = &target.IssueUID
 	}
 	switch typeName {
+	case "confirmed", "refuted":
+		if result.Comment == nil {
+			return generated.Evidence{}, fmt.Errorf("%s evidence requires comment", typeName)
+		}
 	case "commit":
 		if result.Sha == nil {
 			return generated.Evidence{}, errors.New("commit evidence requires sha")
@@ -1737,4 +1749,41 @@ func optionalCommentEnum[T ~string](value string) *T {
 	}
 	converted := T(value)
 	return &converted
+}
+
+// A connected daemon credential can be broader than the MCP startup scope.
+// Canonical endpoint authorization is daemon-side; display qualification also
+// lets this broker withhold retained warnings whose source left its projects.
+func (h toolHandlers) scopedVerificationWarnings(ctx context.Context, warnings []generated.VerificationWarning) ([]generated.VerificationWarning, error) {
+	if len(warnings) == 0 || h.options.Scope.Mode() == ScopeAll {
+		return warnings, nil
+	}
+	projects, err := h.options.Scope.Projects(ctx, h.options.Client, false)
+	if err != nil {
+		return nil, err
+	}
+	allowed := map[string]bool{}
+	for _, project := range projects {
+		allowed[project.Name] = true
+	}
+	visible := func(ref string) bool {
+		if project, _, qualified := strings.Cut(ref, "#"); qualified {
+			return allowed[project]
+		}
+		return strings.Contains(ref, ":")
+	}
+	kept := []generated.VerificationWarning{}
+	for _, warning := range warnings {
+		refs := []generated.OpenRefutation{}
+		for _, r := range warning.Refutations {
+			if visible(r.Refutation) && visible(r.Target) {
+				refs = append(refs, r)
+			}
+		}
+		if len(refs) > 0 {
+			warning.Refutations = refs
+			kept = append(kept, warning)
+		}
+	}
+	return kept, nil
 }

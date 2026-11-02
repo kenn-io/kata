@@ -30,6 +30,10 @@ func TestCloseConfirmationRequired(t *testing.T) {
 	code, raw := closeIssue()
 	require.Equal(t, 409, code, string(raw))
 	require.Contains(t, string(raw), "confirmation_required")
+	body["source"] = "tui"
+	code, raw = closeIssue()
+	require.Equal(t, 409, code, string(raw))
+	delete(body, "source")
 	body["evidence"] = []map[string]any{{"type": "confirmed", "comment": claim.UID}}
 	code, raw = closeIssue()
 	require.Equal(t, 400, code, string(raw))

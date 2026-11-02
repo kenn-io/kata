@@ -55,13 +55,30 @@ If you have not completed and tested this work, do not close it.
 Instead, label and comment:
     kata label add <ref> needs-review --comment "<what remains>"
 
+Post a completion claim comment, then ask another teammate or author to
+confirm or refute it. --confirmed c:<claim> is valid only with --done.
+--refuted c:<claim> is valid only with --wontfix, --duplicate-of, or
+--superseded-by. Cite the claim, not the verdict reply. Contested claims
+support neither evidence type. verify.required=true (JSON boolean) requires
+an explicit --confirmed citation on --done, even if another comment is confirmed.
+
+Resolve open refutations by superseding the claim or refutation, or by rebutting.
+--overrule c:<refutation> deliberately overrides that blocker for done or
+audit-no-change; repeat for all blockers under block policy. It never makes a
+contested claim valid evidence. [close.verification] open_refutations defaults
+to warn; block refuses the close and off suppresses warnings. Verification
+checks a preflight snapshot; later verdicts update live show, not the receipt.
+
 The close message has a minimum length that depends on the reason:
     --done, --audit-no-change           at least 40 characters
     --duplicate-of, --superseded-by     at least 20 characters
     --wontfix                           at least 60 characters`,
 		Example: `  kata close abc4 --done -m "Fixed Safari double-submit; go test ./auth passes." --commit <sha> --agent
   kata close abc4 --done -m "Docs updated and link check passes for the guide." --pr <url> --test "make docs-check" --agent
-  kata close abc4 --duplicate-of d4ex -m "Same Safari race as d4ex." --agent`,
+  kata close abc4 --duplicate-of d4ex -m "Same Safari race as d4ex." --agent
+  kata close abc4 --done --confirmed c:abc123 -m "Completed the retry fix and checked its focused tests." --agent
+  kata close abc4 --wontfix --refuted c:abc123 -m "Reproduced the observed behavior and confirmed it is the intended contract." --agent
+  kata close abc4 --done --overrule c:def456 --test "go test ./example" -m "Checked the requested fix and reviewed the unresolved concern." --agent`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Flags().Changed("idempotency-key") && strings.TrimSpace(idempotencyKey) == "" {
@@ -192,7 +209,7 @@ The close message has a minimum length that depends on the reason:
 	cmd.Flags().StringArrayVar(&evidence, "evidence", nil,
 		"typed evidence, repeatable: commit:<sha>, pr:<url>, test:<cmd>, "+
 			"reviewed-paths:<path>, external:<account>, no-change-audit:<text>, "+
-			"duplicate-of:<N>, superseded-by:<N>")
+			"duplicate-of:<N>, superseded-by:<N>, confirmed:c:<claim>, refuted:c:<claim>")
 	cmd.Flags().BoolVar(&dryRun, "dry", false,
 		"validate without mutating; reports the would-be close event")
 	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "",
@@ -390,6 +407,7 @@ func runActionWithHeaders(
 		var result struct {
 			Warnings []struct {
 				Code        string `json:"code"`
+				Hint        string `json:"hint"`
 				Refutations []struct {
 					Refutation string `json:"refutation"`
 					Summary    string `json:"summary"`
@@ -400,6 +418,9 @@ func runActionWithHeaders(
 			return err
 		}
 		for _, warning := range result.Warnings {
+			if warning.Hint != "" {
+				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "hint: "+selectedVerificationHint(warning.Hint))
+			}
 			for _, r := range warning.Refutations {
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s: %s %s\n", warning.Code, r.Refutation, r.Summary)
 			}

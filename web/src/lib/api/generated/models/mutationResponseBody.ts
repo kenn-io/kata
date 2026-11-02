@@ -3,6 +3,7 @@
  */
 import type { Event } from './event.ts'
 import type { Issue } from './issue.ts'
+import type { VerificationWarning } from './verificationWarning.ts'
 
 export interface MutationResponseBody {
   changed: boolean
@@ -10,5 +11,6 @@ export interface MutationResponseBody {
   issue: Issue
   original_event?: Event
   reused?: boolean
+  warnings?: VerificationWarning[]
   [key: string]: unknown
 }

@@ -18,6 +18,7 @@ import (
 	"go.kenn.io/kata/internal/storageadmin"
 	"go.kenn.io/kata/internal/teammate"
 	kataclient "go.kenn.io/kata/pkg/client"
+	"go.kenn.io/kata/pkg/client/generated"
 )
 
 const catalogTTL = 5 * time.Minute
@@ -199,7 +200,7 @@ func registerIssueLifecycleTools(server *sdkmcp.Server, handlers toolHandlers) {
 	additive := toolHints(false, false, false)
 	mutating := toolHints(false, true, false)
 	addTool(server, "kata.audit_closes", "Audit closes", "List close records with bounded project and time filters.", read, handlers.auditCloses)
-	addTool(server, "kata.close", "Close issue", "Close a completed issue with a reason, substantive message, and typed evidence.", mutating, handlers.close)
+	addTool(server, "kata.close", "Close issue", "Close with a reason, substantive message, and typed evidence. Post a completion claim comment and ask another teammate or author to confirm/refute it. Cite the claim with confirmed evidence only for done, or refuted evidence only for wontfix, duplicate, or superseded; contested claims fail either type. verify.required=true demands an explicit confirmed citation on done. Resolve open refutations by superseding or rebutting; overrule deliberately names the refutation, not the claim. Warnings include a post-close show command.", mutating, handlers.close)
 	addTool(server, "kata.delete", "Delete issue", "Soft-delete an issue after exact confirmation.", mutating, handlers.deleteIssue)
 	addTool(server, "kata.purge", "Purge issue", "Irreversibly purge a soft-deleted issue after exact confirmation.", mutating, handlers.purgeIssue)
 	addTool(server, "kata.reopen", "Reopen issue", "Reopen a closed issue when new work is required.", mutating, handlers.reopen)
@@ -520,6 +521,8 @@ func evidenceVariant(kind string) *jsonschema.Schema {
 		sha := stringValue(7, 40)
 		sha.Pattern = `^[0-9a-fA-F]{7,40}$`
 		return variant(kind, "sha", sha)
+	case "confirmed", "refuted":
+		return variant(kind, "comment", stringValue(1, 256))
 	case "pr":
 		return variant(kind, "url", stringValue(1, 4096))
 	case "test":
@@ -546,7 +549,7 @@ func evidenceSchemaFor(kinds ...string) *jsonschema.Schema {
 }
 
 func evidenceSchema() *jsonschema.Schema {
-	return evidenceSchemaFor("commit", "pr", "test", "reviewed-paths", "external", "no-change-audit", "duplicate-of", "superseded-by")
+	return evidenceSchemaFor("commit", "pr", "test", "reviewed-paths", "external", "no-change-audit", "duplicate-of", "superseded-by", "confirmed", "refuted")
 }
 
 func closeReasonSchemas() []*jsonschema.Schema {
@@ -571,12 +574,21 @@ func closeReasonSchemas() []*jsonschema.Schema {
 			Required: []string{"reason", "message", "evidence"},
 		}
 	}
-	done := variant("done", 40, 1, -1, "commit", "pr", "test", "reviewed-paths", "external")
-	wontfix := variant("wontfix", 60, 0, 0, "commit")
-	duplicate := variant("duplicate", 20, 1, 1, "duplicate-of")
-	superseded := variant("superseded", 20, 1, 1, "superseded-by")
+	done := variant("done", 40, 1, -1, "commit", "pr", "test", "reviewed-paths", "external", "confirmed")
+	wontfix := variant("wontfix", 60, 0, -1, "refuted")
+	duplicate := variant("duplicate", 20, 1, -1, "duplicate-of", "refuted")
+	superseded := variant("superseded", 20, 1, -1, "superseded-by", "refuted")
 	audit := variant("audit-no-change", 40, 1, -1, "no-change-audit", "reviewed-paths")
 	one := 1
+	for _, item := range []struct {
+		schema *jsonschema.Schema
+		kind   string
+	}{{duplicate, "duplicate-of"}, {superseded, "superseded-by"}} {
+		evidence := item.schema.Properties["evidence"]
+		evidence.Contains = evidenceVariant(item.kind)
+		evidence.MinContains = &one
+		evidence.MaxContains = &one
+	}
 	auditEvidence, ok := audit.Properties["evidence"]
 	if !ok || auditEvidence == nil {
 		panic("audit close schema has no evidence property")
@@ -758,7 +770,8 @@ type SetMetadataInput struct {
 
 // Evidence is a typed completion proof accepted by Kata close.
 type Evidence struct {
-	Type      string   `json:"type" jsonschema:"Evidence type: commit, pr, test, reviewed-paths, external, no-change-audit, duplicate-of, or superseded-by"`
+	Comment   string   `json:"comment,omitempty" jsonschema:"Claim comment handle or UID for confirmed/refuted; cite the claim, not its verdict reply"`
+	Type      string   `json:"type" jsonschema:"Evidence type: commit, pr, test, reviewed-paths, external, no-change-audit, duplicate-of, superseded-by, confirmed, or refuted"`
 	SHA       string   `json:"sha,omitempty" jsonschema:"Commit SHA for commit evidence"`
 	URL       string   `json:"url,omitempty" jsonschema:"Pull request URL for pr evidence"`
 	Command   string   `json:"command,omitempty" jsonschema:"Executed command for test evidence"`
@@ -770,6 +783,7 @@ type Evidence struct {
 
 // CloseInput makes the completion assertion explicit.
 type CloseInput struct {
+	Overrule       []string   `json:"overrule,omitempty" jsonschema:"Deliberately overrule these open refutation handles or UIDs for done/audit-no-change; every blocker must be named under block policy"`
 	Ref            string     `json:"ref" jsonschema:"Issue reference; use project#ref in multi-project mode"`
 	Reason         string     `json:"reason" jsonschema:"Close reason: done, wontfix, duplicate, superseded, or audit-no-change"`
 	Message        string     `json:"message" jsonschema:"Substantive completion message"`
@@ -908,9 +922,10 @@ type IssueDetail struct {
 
 // ShowOutput wraps one issue with its project identity.
 type ShowOutput struct {
-	Project           ProjectIdentity `json:"project"`
-	Issue             IssueDetail     `json:"issue"`
-	CommentsTruncated bool            `json:"comments_truncated"`
+	Verification      *generated.Verification `json:"verification,omitempty"`
+	Project           ProjectIdentity         `json:"project"`
+	Issue             IssueDetail             `json:"issue"`
+	CommentsTruncated bool                    `json:"comments_truncated"`
 }
 
 // EventSummary records the actual attributed event produced by a mutation.
@@ -942,12 +957,13 @@ type LinkChangesSummary struct {
 
 // MutationOutput is the common mutation result.
 type MutationOutput struct {
-	Project       ProjectIdentity `json:"project"`
-	Issue         IssueSummary    `json:"issue"`
-	Changed       bool            `json:"changed"`
-	Reused        *bool           `json:"reused,omitempty"`
-	Event         *EventSummary   `json:"event,omitempty"`
-	PreviousOwner *string         `json:"previous_owner,omitempty"`
+	Warnings      []generated.VerificationWarning `json:"warnings,omitempty"`
+	Project       ProjectIdentity                 `json:"project"`
+	Issue         IssueSummary                    `json:"issue"`
+	Changed       bool                            `json:"changed"`
+	Reused        *bool                           `json:"reused,omitempty"`
+	Event         *EventSummary                   `json:"event,omitempty"`
+	PreviousOwner *string                         `json:"previous_owner,omitempty"`
 }
 
 // EditOutput preserves every ordered event and applied relationship change.

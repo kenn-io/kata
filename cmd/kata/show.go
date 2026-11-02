@@ -199,6 +199,11 @@ func printShowHuman(
 		if _, err := fmt.Fprintln(out, "Verification: "+verificationSummary(*b.Verification)); err != nil {
 			return err
 		}
+		if b.Verification.Hint != "" {
+			if _, err := fmt.Fprintln(out, "Hint: "+selectedVerificationHint(b.Verification.Hint)); err != nil {
+				return err
+			}
+		}
 	}
 
 	if b.Issue.Body != "" {
@@ -574,6 +579,11 @@ func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation
 	if b.Verification != nil {
 		if _, err := fmt.Fprintln(w, "Verification: "+verificationSummary(*b.Verification)); err != nil {
 			return err
+		}
+		if b.Verification.Hint != "" {
+			if _, err := fmt.Fprintln(w, "Hint: "+firstLine(selectedVerificationHint(b.Verification.Hint))); err != nil {
+				return err
+			}
 		}
 	}
 

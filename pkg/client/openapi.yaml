@@ -7080,6 +7080,8 @@ components:
           items:
             $ref: "#/components/schemas/VerdictEvidence"
           type: array
+        hint:
+          type: string
         open_refutations:
           items:
             $ref: "#/components/schemas/OpenRefutation"
@@ -7098,6 +7100,8 @@ components:
     VerificationWarning:
       properties:
         code:
+          type: string
+        hint:
           type: string
         refutations:
           items:

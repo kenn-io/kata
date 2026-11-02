@@ -58,6 +58,9 @@ func TestShowWithoutVerificationGolden(t *testing.T) {
 	var out bytes.Buffer
 	require.NoError(t, printShowHuman(&out, b, "example-project", nil))
 	require.Equal(t, "abc4  Claim  [open]  by worker\n", out.String())
+	out.Reset()
+	require.NoError(t, printShowAgent(&out, b, "example-project", "show"))
+	require.Equal(t, "OK show abc4\nIssue: abc4 Claim\nStatus: open\nRevision: 0\nBody:\n```text\n\n```\n", out.String())
 }
 
 func TestCloseVerdictEvidenceCLI(t *testing.T) {
@@ -94,4 +97,45 @@ func TestCloseVerdictEvidenceCLI(t *testing.T) {
 			})
 		}
 	}
+}
+
+// M2: receipts retain comment UIDs when an authorized view needs longer handles.
+func TestCloseCitationSurvivesCollisionAndMove(t *testing.T) {
+	env, dir, pid, ref := setupWorkspaceWithIssue(t, "Completion claim")
+	issue, err := env.DB.IssueByShortID(t.Context(), pid, ref, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	claim, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "Completion claim"})
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: issue.ID, Author: "reviewer", Body: "Independent confirmation", ReplyToUID: claim.UID, ReplyKind: "confirm"})
+	require.NoError(t, err)
+	original := "c:" + strings.ToLower(claim.UID[len(claim.UID)-6:])
+	args := []string{"--json", "close", ref, "--done", "--confirmed", original, "-m", "Completed the requested fix and checked the focused tests.", "--idempotency-key", "cited-close"}
+	runCLI(t, env, dir, args...)
+	other, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: pid, Author: "worker", Title: "Another claim"})
+	require.NoError(t, err)
+	collision, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{IssueID: other.ID, Author: "worker", Body: "Unrelated claim"})
+	require.NoError(t, err)
+	prefix := "01AAAAAAAAAAAAAAAAAA"
+	if claim.UID[len(claim.UID)-7] == 'A' {
+		prefix = prefix[:19] + "B"
+	}
+	// Fixture-only DML makes a legitimate ULID suffix collision deterministic.
+	_, err = env.DB.ExecContext(t.Context(), "UPDATE comments SET uid = ? WHERE id = ?", prefix+claim.UID[len(claim.UID)-6:], collision.ID)
+	require.NoError(t, err)
+	current := "c:" + strings.ToLower(claim.UID[len(claim.UID)-7:])
+	replay := runCLI(t, env, dir, args...)
+	require.Contains(t, replay, `"reused":true`)
+	require.Contains(t, replay, current)
+	audit := runCLI(t, env, dir, "audit", "closes")
+	require.Contains(t, audit, "confirmed "+current)
+	destination, err := env.DB.CreateProject(t.Context(), "moved-project")
+	require.NoError(t, err)
+	live, err := env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	_, err = env.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: pid, ToProjectID: destination.ID, IfMatchRev: live.Revision, Actor: "worker"})
+	require.NoError(t, err)
+	moved, err := env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	shown := runCLI(t, env, dir, "show", destination.Name+"#"+moved.ShortID)
+	require.Contains(t, shown, "confirmed "+original, "the historical citation uses its current authorized handle")
 }

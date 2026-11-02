@@ -7510,6 +7510,7 @@ func (v VerdictEvidence) Validate() error {
 type Verification struct {
 	Confirmed       []ConfirmedClaim  `json:"confirmed" validate:"required"`
 	Evidence        []VerdictEvidence `json:"evidence,omitempty"`
+	Hint            *string           `json:"hint,omitempty"`
 	OpenRefutations []OpenRefutation  `json:"open_refutations" validate:"required"`
 	Redacted        int64             `json:"redacted"`
 	Required        bool              `json:"required"`
@@ -7552,6 +7553,7 @@ func (v Verification) Validate() error {
 
 type VerificationWarning struct {
 	Code        string           `json:"code" validate:"required"`
+	Hint        *string          `json:"hint,omitempty"`
 	Refutations []OpenRefutation `json:"refutations" validate:"required"`
 }
 

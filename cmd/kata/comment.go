@@ -28,8 +28,8 @@ KATA_TEAMMATE (or --teammate) records which teammate wrote it.`,
 		Args: cobra.ExactArgs(1),
 	}
 	cmd.Flags().StringVar(&reply, "reply", "", "reply to a comment reference")
-	cmd.Flags().StringVar(&confirm, "confirm", "", "verify or reproduce a comment with at least 40 characters of evidence")
-	cmd.Flags().StringVar(&refute, "refute", "", "refute a comment with at least 40 characters of evidence")
+	cmd.Flags().StringVar(&confirm, "confirm", "", "verify or reproduce a comment with 40+ characters of evidence; a done close can cite the claim with --confirmed")
+	cmd.Flags().StringVar(&refute, "refute", "", "refute a comment with 40+ characters of evidence; a retirement close can cite the claim with --refuted")
 	cmd.Flags().StringVar(&supersede, "supersede", "", "supersede a comment reference")
 	cmd.MarkFlagsMutuallyExclusive("reply", "confirm", "refute", "supersede")
 	cmd.Flags().BoolVar(&force, "force", false, "allow another reply of the same kind by this author and teammate")

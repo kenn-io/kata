@@ -10,6 +10,7 @@ import type { IssueRef } from './issueRef.ts'
 import type { LinkOut } from './linkOut.ts'
 import type { PendingClaimOut } from './pendingClaimOut.ts'
 import type { ShowIssueOut } from './showIssueOut.ts'
+import type { Verification } from './verification.ts'
 
 export interface ShowIssueResponseBody {
   children?: IssueOut[]
@@ -29,6 +30,7 @@ export interface ShowIssueResponseBody {
   parent?: IssueRef
   pending_claims?: PendingClaimOut[]
   pending_leases?: PendingClaimOut[]
+  verification?: Verification
   /** Browser URL for this issue in the owning daemon. */
   web_url?: string
   [key: string]: unknown
