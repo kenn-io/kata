@@ -197,11 +197,15 @@ jobs:
         with:
           persist-credentials: false
 
+      # Go tests is the only writer of this key; shorter Linux jobs sharing the default key finished first and saved a near-empty cache.
       - name: Set up Go
         uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: |
+            go.mod
+            go.sum
 
       - name: Set up Node
         uses: actions/setup-node@v7.1.0
