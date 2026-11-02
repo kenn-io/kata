@@ -946,7 +946,63 @@ func (c *Client) RotateFederationEnrollmentWithResponse(ctx context.Context, opt
 	}
 }
 
-// SetFederationSpokeName Set or clear an enrolled spoke's hub-local name
+// ClearFederationSpokeName Clear an enrolled spoke's hub-local name
+func (c *Client) ClearFederationSpokeNameWithResponse(ctx context.Context, options *ClearFederationSpokeNameRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ClearFederationSpokeNameResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/federation/enrollments/spokes/{spoke_instance_uid}/name",
+		Method:     "DELETE",
+		Options:    options,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/federation/enrollments/spokes/{spoke_instance_uid}/name")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &ClearFederationSpokeNameResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(ClearFederationSpokeNameResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "ClearFederationSpokeNameResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		return out, nil
+	default:
+		if len(resp.Content) > 0 {
+			body := new(ClearFederationSpokeNameErrorResponse)
+			if json.Unmarshal(resp.Content, body) == nil {
+				out.JSONDefault = body
+				if errTarget, ok := any(*body).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
+// SetFederationSpokeName Set an enrolled spoke's hub-local name
 func (c *Client) SetFederationSpokeNameWithResponse(ctx context.Context, options *SetFederationSpokeNameRequestOptions, reqEditors ...runtime.RequestEditorFn) (*SetFederationSpokeNameResp, error) {
 	var err error
 	reqParams := runtime.RequestOptionsParameters{

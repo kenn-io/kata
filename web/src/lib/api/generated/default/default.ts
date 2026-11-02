@@ -31,6 +31,7 @@ import type {
   ClaimRequestBody,
   ClaimResponseBody,
   ClaimStatusBody,
+  ClearFederationSpokeNamePathParameters,
   CloseActionRequestBody,
   CloseIssuePathParameters,
   CommentRequestBody,
@@ -1047,6 +1048,49 @@ export const rotateFederationEnrollment = async (
   })
 }
 
+export type clearFederationSpokeNameResponse200 = {
+  data: FederationSpokeNameOut
+  status: 200
+}
+
+export type clearFederationSpokeNameResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type clearFederationSpokeNameResponseSuccess = clearFederationSpokeNameResponse200 & {
+  headers: Headers
+}
+export type clearFederationSpokeNameResponseError = clearFederationSpokeNameResponseDefault & {
+  headers: Headers
+}
+
+export type clearFederationSpokeNameResponse =
+  | clearFederationSpokeNameResponseSuccess
+  | clearFederationSpokeNameResponseError
+
+export const getClearFederationSpokeNameUrl = ({
+  spokeInstanceUid,
+}: ClearFederationSpokeNamePathParameters) => {
+  return `/api/v1/federation/enrollments/spokes/${encodeURIComponent(String(spokeInstanceUid))}/name`
+}
+
+/**
+ * @summary Clear an enrolled spoke's hub-local name
+ */
+export const clearFederationSpokeName = async (
+  { spokeInstanceUid }: ClearFederationSpokeNamePathParameters,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<clearFederationSpokeNameResponse> => {
+  return orvalFetch<clearFederationSpokeNameResponse>(
+    getClearFederationSpokeNameUrl({ spokeInstanceUid }),
+    {
+      ...options,
+      method: 'DELETE',
+    },
+  )
+}
+
 export type setFederationSpokeNameResponse200 = {
   data: FederationSpokeNameOut
   status: 200
@@ -1075,7 +1119,7 @@ export const getSetFederationSpokeNameUrl = ({
 }
 
 /**
- * @summary Set or clear an enrolled spoke's hub-local name
+ * @summary Set an enrolled spoke's hub-local name
  */
 export const setFederationSpokeName = async (
   { spokeInstanceUid }: SetFederationSpokeNamePathParameters,

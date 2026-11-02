@@ -765,8 +765,13 @@ type FederationEmbeddingArtifactStatus struct {
 type SetFederationSpokeNameRequest struct {
 	SpokeInstanceUID string `path:"spoke_instance_uid"`
 	Body             struct {
-		Name string `json:"name" doc:"Lowercase spoke name, or empty to clear."`
+		Name string `json:"name" minLength:"1" doc:"Lowercase spoke name: a letter, then up to 31 lowercase letters, digits or hyphens."`
 	}
+}
+
+// ClearFederationSpokeNameRequest removes an enrolled instance's hub-local label.
+type ClearFederationSpokeNameRequest struct {
+	SpokeInstanceUID string `path:"spoke_instance_uid"`
 }
 
 // FederationSpokeNameOut confirms the current label without exposing a credential.

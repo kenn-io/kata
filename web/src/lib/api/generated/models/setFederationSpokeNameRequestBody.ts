@@ -3,6 +3,9 @@
  */
 
 export interface SetFederationSpokeNameRequestBody {
-  /** Lowercase spoke name, or empty to clear. */
+  /**
+   * Lowercase spoke name: a letter, then up to 31 lowercase letters, digits or hyphens.
+   * @minLength 1
+   */
   name: string
 }

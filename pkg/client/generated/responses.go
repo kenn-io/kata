@@ -73,6 +73,10 @@ type RotateFederationEnrollmentResponse = FederationEnrollmentOut
 
 type RotateFederationEnrollmentErrorResponse = ErrorEnvelope
 
+type ClearFederationSpokeNameResponse = FederationSpokeNameOut
+
+type ClearFederationSpokeNameErrorResponse = ErrorEnvelope
+
 type SetFederationSpokeNameResponse = FederationSpokeNameOut
 
 type SetFederationSpokeNameErrorResponse = ErrorEnvelope
@@ -723,6 +727,14 @@ type RotateFederationEnrollmentResp struct {
 	StatusCode   int
 	JSON200      *RotateFederationEnrollmentResponse
 	JSONDefault  *RotateFederationEnrollmentErrorResponse
+}
+
+type ClearFederationSpokeNameResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ClearFederationSpokeNameResponse
+	JSONDefault  *ClearFederationSpokeNameErrorResponse
 }
 
 type SetFederationSpokeNameResp struct {

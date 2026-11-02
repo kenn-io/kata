@@ -6359,7 +6359,8 @@ components:
       additionalProperties: false
       properties:
         name:
-          description: Lowercase spoke name, or empty to clear.
+          description: "Lowercase spoke name: a letter, then up to 31 lowercase letters, digits or hyphens."
+          minLength: 1
           type: string
       required:
         - name
@@ -7695,6 +7696,28 @@ paths:
           description: Error
       summary: Rotate a federation enrollment
   /api/v1/federation/enrollments/spokes/{spoke_instance_uid}/name:
+    delete:
+      operationId: clearFederationSpokeName
+      parameters:
+        - in: path
+          name: spoke_instance_uid
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationSpokeNameOut"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+      summary: Clear an enrolled spoke's hub-local name
     put:
       operationId: setFederationSpokeName
       parameters:
@@ -7722,7 +7745,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
-      summary: Set or clear an enrolled spoke's hub-local name
+      summary: Set an enrolled spoke's hub-local name
   /api/v1/federation/enrollments/{enrollment_id}/revoke:
     post:
       operationId: revokeFederationEnrollment

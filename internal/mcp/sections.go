@@ -113,7 +113,7 @@ func toolSections(storageAvailable, tokenAdminAvailable bool) []toolSection {
 		{
 			loader: "kata.load_federation", section: "federation", title: "Load federation tools",
 			description: "Load typed project bridge connect/status/disconnect, federation status, enrollment revocation, rebind, leave, quarantine, and root key repin tools, then refresh the MCP tool list.",
-			tools:       []string{"kata.federation_bridge_connect", "kata.federation_bridge_disconnect", "kata.federation_bridge_status", "kata.federation_enrollment_revoke", "kata.federation_leave", "kata.federation_quarantine", "kata.federation_rebind", "kata.federation_root_key_repin", "kata.federation_status"},
+			tools:       []string{"kata.federation_bridge_connect", "kata.federation_bridge_disconnect", "kata.federation_bridge_status", "kata.federation_enrollment_revoke", "kata.federation_leave", "kata.federation_quarantine", "kata.federation_rebind", "kata.federation_root_key_repin", "kata.federation_spoke_name", "kata.federation_status"},
 			available:   true, register: registerFederationTools,
 		},
 		{

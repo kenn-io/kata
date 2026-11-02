@@ -14,8 +14,13 @@ import (
 // FederationSpokeNamePrefix stores hub-local display labels in existing metadata.
 const FederationSpokeNamePrefix = "federation_spoke_name."
 
-// ErrFederationSpokeNameValidation identifies invalid or conflicting labels.
+// ErrFederationSpokeNameValidation identifies malformed labels and invalid
+// backup label records.
 var ErrFederationSpokeNameValidation = errors.New("invalid federation spoke name")
+
+// ErrFederationSpokeNameConflict identifies a live write of a well-formed
+// label that another instance already holds.
+var ErrFederationSpokeNameConflict = errors.New("federation spoke name already held")
 var spokeNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 
 // ValidateFederationSpokeName is shared by live writes and backup replay.
@@ -79,8 +84,8 @@ func WriteFederationSpokeName(ctx context.Context, tx *sql.Tx, uid, name string)
 		return err
 	}
 	for holder, taken := range names {
-		if holder != uid && strings.EqualFold(taken, name) {
-			return fmt.Errorf("%w: %q is held by spoke %s", ErrFederationSpokeNameValidation, name, holder)
+		if holder != uid && taken == name {
+			return fmt.Errorf("%w: %q is held by spoke %s", ErrFederationSpokeNameConflict, name, holder)
 		}
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, name)
@@ -112,11 +117,10 @@ func validateSpokeNameReplay(records []ImportRecord) error {
 			return fmt.Errorf("%w: repeated name for spoke %s", ErrFederationSpokeNameValidation, uid)
 		}
 		seen[uid] = true
-		key := strings.ToLower(m.Value)
-		if holder, ok := names[key]; ok && holder != uid {
+		if holder, ok := names[m.Value]; ok && holder != uid {
 			return fmt.Errorf("%w: %q is held by spoke %s", ErrFederationSpokeNameValidation, m.Value, holder)
 		}
-		names[key] = uid
+		names[m.Value] = uid
 	}
 	return nil
 }

@@ -6400,14 +6400,13 @@ func (s SearchResponseBody) Validate() error {
 	return errors
 }
 
-// Name is always emitted: an empty string is the explicit clear operation.
-// A required JSON property must not become a nonempty-string validator.
 type SetFederationSpokeNameRequestBody struct {
-	Name string `json:"name"`
+	// Name Lowercase spoke name: a letter, then up to 31 lowercase letters, digits or hyphens.
+	Name string `json:"name" validate:"required,min=1"`
 }
 
 func (s SetFederationSpokeNameRequestBody) Validate() error {
-	return nil
+	return runtime.ConvertValidatorError(typesValidator.Struct(s))
 }
 
 type SetProjectAccessRequestBody struct {

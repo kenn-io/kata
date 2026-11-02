@@ -603,7 +603,10 @@ func federationSpokeNameCmd() *cobra.Command {
 		Use: "name <spoke-instance-uid> [name]", Short: "set or clear a spoke's hub-local name",
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if clearName && len(args) != 1 || !clearName && len(args) != 2 {
+			if clearName && len(args) != 1 {
+				return &cliError{Message: "--clear does not take a name", Kind: kindValidation, ExitCode: ExitValidation}
+			}
+			if !clearName && len(args) != 2 {
 				return &cliError{Message: "provide a name or --clear", Kind: kindValidation, ExitCode: ExitValidation}
 			}
 			name := ""
@@ -626,14 +629,26 @@ func federationSpokeNameCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, callErr := apiClient.SetFederationSpokeNameWithResponse(a.ctx, &generated.SetFederationSpokeNameRequestOptions{PathParams: &generated.SetFederationSpokeNamePath{SpokeInstanceUID: args[0]}, Body: &generated.SetFederationSpokeNameBody{Name: name}})
-			if err := externalCLITransportError(resp, callErr); err != nil {
+			var body []byte
+			if clearName {
+				resp, callErr := apiClient.ClearFederationSpokeNameWithResponse(a.ctx, &generated.ClearFederationSpokeNameRequestOptions{PathParams: &generated.ClearFederationSpokeNamePath{SpokeInstanceUID: args[0]}})
+				if err := externalCLITransportError(resp, callErr); err != nil {
+					return err
+				}
+				body = resp.Body
+				err = externalCLIResponseError(resp.StatusCode, body, callErr)
+			} else {
+				resp, callErr := apiClient.SetFederationSpokeNameWithResponse(a.ctx, &generated.SetFederationSpokeNameRequestOptions{PathParams: &generated.SetFederationSpokeNamePath{SpokeInstanceUID: args[0]}, Body: &generated.SetFederationSpokeNameBody{Name: name}})
+				if err := externalCLITransportError(resp, callErr); err != nil {
+					return err
+				}
+				body = resp.Body
+				err = externalCLIResponseError(resp.StatusCode, body, callErr)
+			}
+			if err != nil {
 				return err
 			}
-			if err := externalCLIResponseError(resp.StatusCode, resp.Body, callErr); err != nil {
-				return err
-			}
-			_, emitted, err := emitPassthrough(cmd, resp.Body)
+			_, emitted, err := emitPassthrough(cmd, body)
 			if err != nil || emitted {
 				return err
 			}

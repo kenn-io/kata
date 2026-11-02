@@ -17,12 +17,3 @@ func TestFederationSpokeNameEventRoundTrip(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &wire))
 	require.Equal(t, "laptop", wire["origin_spoke_name"])
 }
-
-func TestFederationSpokeNameClearClientValidation(t *testing.T) {
-	// Required means the JSON property is present; an empty value clears it.
-	body := generated.SetFederationSpokeNameBody{Name: ""}
-	require.NoError(t, body.Validate())
-	raw, err := json.Marshal(body)
-	require.NoError(t, err)
-	require.JSONEq(t, `{"name":""}`, string(raw))
-}

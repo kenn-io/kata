@@ -21,14 +21,17 @@ func RunFederationSpokeNames(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	require.Equal(t, "laptop", names[first])
 	require.NoError(t, create(first, ""))
-	require.ErrorIs(t, create(second, "laptop"), db.ErrFederationSpokeNameValidation)
+	require.ErrorIs(t, create(second, "laptop"), db.ErrFederationSpokeNameConflict)
 	enrollments, err := store.ListFederationEnrollments(ctx)
 	require.NoError(t, err)
 	require.Len(t, enrollments, 2, "a rejected name must not strand a new credential")
 	require.NoError(t, create(second, "build-box"))
+	require.ErrorIs(t, store.SetFederationSpokeName(ctx, second, "laptop"), db.ErrFederationSpokeNameConflict)
 	require.ErrorContains(t, store.SetFederationSpokeName(ctx, second, "laptop"), first)
 	for _, bad := range []string{"Laptop", "bad name", "bad\nname", "-bad", "abcdefghijklmnopqrstuvwxyzabcdefg"} {
-		require.ErrorIs(t, store.SetFederationSpokeName(ctx, second, bad), db.ErrFederationSpokeNameValidation)
+		err := store.SetFederationSpokeName(ctx, second, bad)
+		require.ErrorIs(t, err, db.ErrFederationSpokeNameValidation)
+		require.NotErrorIs(t, err, db.ErrFederationSpokeNameConflict)
 	}
 	require.ErrorIs(t, store.SetFederationSpokeName(ctx, "invalid", "phone"), db.ErrFederationSpokeNameValidation)
 	require.ErrorIs(t, store.SetFederationSpokeName(ctx, "01HZNQ7VFPK1XGD8R5MABCD4EC", "phone"), db.ErrNotFound)
@@ -102,9 +105,9 @@ func RunFederationSpokeNames(t *testing.T, store db.Storage) {
 	close(start)
 	a, b := <-results, <-results
 	if a == nil {
-		require.ErrorIs(t, b, db.ErrFederationSpokeNameValidation)
+		require.ErrorIs(t, b, db.ErrFederationSpokeNameConflict)
 	} else {
-		require.ErrorIs(t, a, db.ErrFederationSpokeNameValidation)
+		require.ErrorIs(t, a, db.ErrFederationSpokeNameConflict)
 		require.NoError(t, b)
 	}
 
@@ -133,5 +136,4 @@ func RunFederationSpokeNames(t *testing.T, store db.Storage) {
 		}
 	}
 	require.NoError(t, store.SetFederationSpokeName(ctx, first, "tablet"), "the removed spoke's name is available again")
-
 }

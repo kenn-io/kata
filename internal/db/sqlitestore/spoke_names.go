@@ -29,6 +29,10 @@ func (s *Store) SetFederationSpokeName(ctx context.Context, uid, name string) er
 		return tx.Commit()
 	})
 }
+
+// lockSpokeNames mirrors the PostgreSQL lock call sites. SQLite already
+// serializes writers on one connection, so the zero-row update only reserves
+// the writer before the uniqueness read.
 func lockSpokeNames(ctx context.Context, tx *sql.Tx) error {
 	_, err := tx.ExecContext(ctx, `UPDATE meta SET value=value WHERE 0`)
 	return err

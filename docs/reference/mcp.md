@@ -286,7 +286,7 @@ model context at startup.
 | `kata.load_teams` | `kata.teams`, `kata.team_create`, `kata.team_show`, `kata.team_delete`, `kata.team_member_set`, `kata.project_access_show`, `kata.project_access_set` with the same explicit daemon-wide administration capability |
 | `kata.load_tokens` | `kata.tokens`, `kata.token_create`, `kata.token_revoke` when `--enable-token-admin` is set in daemon-wide mode |
 | `kata.load_system` | `kata.system` |
-| `kata.load_federation` | `kata.federation_bridge_connect`, `kata.federation_bridge_status`, `kata.federation_bridge_disconnect`, `kata.federation_status`, `kata.federation_enrollment_revoke`, `kata.federation_rebind`, `kata.federation_leave`, `kata.federation_quarantine`, `kata.federation_root_key_repin` |
+| `kata.load_federation` | `kata.federation_bridge_connect`, `kata.federation_bridge_status`, `kata.federation_bridge_disconnect`, `kata.federation_status`, `kata.federation_enrollment_revoke`, `kata.federation_spoke_name`, `kata.federation_rebind`, `kata.federation_leave`, `kata.federation_quarantine`, `kata.federation_root_key_repin` |
 | `kata.load_sync` | `kata.sync_status`, `kata.sync_update`, `kata.sync_once` |
 | `kata.load_recurrence` | `kata.recurrences`, `kata.recurrence_update`, `kata.recurrence_delete` |
 | `kata.load_activity` | `kata.digest`, `kata.events` |
@@ -555,8 +555,15 @@ optional `previous_key_file`, and optional `strand_relays`, and calls the
 [root key repin endpoint](../operations/federation.md#root-signing-key). It
 requires `--all` and daemon-owner authority at the API.
 
-`kata.federation_status` lists secret-free enrollment records, and
+`kata.federation_status` lists secret-free enrollment records, including each
+instance's hub-local `spoke_name` when set, and
 `kata.federation_enrollment_revoke` can revoke one.
+
+`kata.federation_spoke_name` accepts `spoke_instance_uid` and either `name` or
+`clear: true`, and sets or clears that instance's
+[hub-local name](../operations/federation.md#operator-commands). A name belongs
+to the instance across every project, so the tool requires `--all` and
+daemon-owner authority at the API.
 
 Enabling issue synchronization selects which external repository the daemon's
 configured GitHub credentials read, so `kata.sync_update` with

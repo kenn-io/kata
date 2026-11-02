@@ -41,16 +41,6 @@
     func (e EventEnvelope) Validate() error {
         return runtime.ConvertValidatorError(typesValidator.Struct(e))
     }
-    {{ else if eq $td.Name "SetFederationSpokeNameRequestBody" }}
-    // Name is always emitted: an empty string is the explicit clear operation.
-    // A required JSON property must not become a nonempty-string validator.
-    type SetFederationSpokeNameRequestBody struct {
-        Name string `json:"name"`
-    }
-
-    func (s SetFederationSpokeNameRequestBody) Validate() error {
-        return nil
-    }
     {{ else if eq $td.Name "FederationIngestEventEnvelope" }}
     {{ if not $config.Generate.OmitDescription}}{{ toGoComment $td.Schema.Description $td.Name }}{{ end }}
     type FederationIngestEventEnvelope struct {
