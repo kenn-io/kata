@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/testfix"
 )
 
 func TestAuthMiddleware_NoTokenConfigured_AllRequestsPass(t *testing.T) {
@@ -455,7 +456,7 @@ func openAuthTestDB(t *testing.T) *sqlitestore.Store {
 	t.Helper()
 	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := t.Context()
-	d, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
+	d, err := testfix.OpenSQLite(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
 	return d

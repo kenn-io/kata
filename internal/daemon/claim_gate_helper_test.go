@@ -17,6 +17,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/testfix"
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
@@ -442,7 +443,7 @@ func openClaimGateHelperDB(t *testing.T) *sqlitestore.Store {
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
 	ctx := t.Context()
-	store, err := sqlitestore.Open(ctx, filepath.Join(home, "kata.db"))
+	store, err := testfix.OpenSQLite(ctx, filepath.Join(home, "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	return store

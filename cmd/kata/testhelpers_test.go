@@ -23,6 +23,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kata/internal/testfix"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
 	gitcmd "go.kenn.io/kit/git/cmd"
@@ -42,7 +43,7 @@ func setupKataEnv(t *testing.T) string {
 func openKataTestDB(t *testing.T, path string) *sqlitestore.Store {
 	t.Helper()
 	ctx := t.Context()
-	d, err := sqlitestore.Open(ctx, path)
+	d, err := testfix.OpenSQLite(ctx, path)
 	require.NoError(t, err)
 	return d
 }
