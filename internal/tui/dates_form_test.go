@@ -246,6 +246,25 @@ func TestDatesFormReloadsWhenTheIssueChangedMeanwhile(t *testing.T) {
 		"the next save is guarded on the revision just read")
 }
 
+func TestDatesFormConflictRefreshesResolvedDatesAndTodayMembership(t *testing.T) {
+	withClock(t, func() time.Time { return datesNow })
+	h := newDatesHarness(t, map[string]string{"scheduled_on": "2026-11-02", "deadline_on": "2026-11-02"}, viewList)
+	h.m.list.filter = ListFilter{Date: dateToday}.stampDay()
+	require.Len(t, h.m.list.visibleRows(), 1)
+	h.openForm()
+	h.patchDaemon(map[string]string{"scheduled_on": "2026-12-01", "deadline_on": "2026-12-02"})
+	h.fill("2026-11-09", "2026-11-02")
+	h.save()
+
+	require.Equal(t, inputDatesForm, h.m.input.kind)
+	require.Equal(t, datesChangedMessage, h.m.input.err)
+	assert.Equal(t, "2026-12-01", h.m.list.issues[0].ScheduledOnDate)
+	assert.Equal(t, "2026-12-02", h.m.list.issues[0].DeadlineOnDate)
+	assert.Equal(t, "2026-12-01", h.m.detail.issue.ScheduledOnDate)
+	assert.Equal(t, "2026-12-02", h.m.detail.issue.DeadlineOnDate)
+	assert.Empty(t, h.m.list.visibleRows(), "the rescheduled issue leaves Today without a refetch")
+}
+
 func TestDatesUndoWritesThePreviousDatesBack(t *testing.T) {
 	h := newDatesHarness(t, map[string]string{"scheduled_on": "2026-11-02", "deadline_on": "2026-11-20"}, viewDetail)
 	h.openForm()

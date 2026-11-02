@@ -188,11 +188,11 @@ func (m Model) reloadDatesForm(current Issue) Model {
 	m.input.err = datesChangedMessage
 	for i := range m.list.issues {
 		if m.list.issues[i].UID == current.UID {
-			m.list.issues[i].Metadata, m.list.issues[i].Revision = current.Metadata, current.Revision
+			m.list.issues[i].Metadata, m.list.issues[i].Revision, m.list.issues[i].ScheduledOnDate, m.list.issues[i].DeadlineOnDate = current.Metadata, current.Revision, current.ScheduledOnDate, current.DeadlineOnDate
 		}
 	}
 	if m.detail.issue != nil && m.detail.issue.UID == current.UID {
-		m.detail.issue.Metadata, m.detail.issue.Revision = current.Metadata, current.Revision
+		m.detail.issue.Metadata, m.detail.issue.Revision, m.detail.issue.ScheduledOnDate, m.detail.issue.DeadlineOnDate = current.Metadata, current.Revision, current.ScheduledOnDate, current.DeadlineOnDate
 	}
 	return m
 }
