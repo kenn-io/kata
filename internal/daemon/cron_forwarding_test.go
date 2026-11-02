@@ -125,7 +125,7 @@ func TestCronSpokeForwardLifecycle(t *testing.T) {
 		_, err := spoke.DB.CronJob(t.Context(), sp.ID, current.UID)
 		require.ErrorIs(t, err, db.ErrNotFound)
 	}
-	_, err := hub.DB.IssueByUID(context.Background(), parent.UID, db.IncludeDeletedNo)
+	_, err := hub.DB.IssueByUID(t.Context(), parent.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	binding, err := spoke.DB.FederationBindingByProject(t.Context(), sp.ID)
 	require.NoError(t, err)
