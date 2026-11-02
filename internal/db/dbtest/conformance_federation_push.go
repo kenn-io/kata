@@ -24,7 +24,7 @@ func checkFederationPushSnapshotRuns(t *testing.T, store db.Storage) error {
 	var uids []string
 	for i, typ := range []string{
 		"issue.updated", "issue.snapshot", "issue.snapshot", "project.restored", "issue.snapshot", "issue.snapshot",
-		"issue.updated", "issue.snapshot", "issue.snapshot", "issue.updated", "issue.snapshot",
+		"issue.updated", "issue.snapshot", "issue.snapshot", "issue.updated", "issue.snapshot", "issue.snapshot",
 	} {
 		payload := jsontext.Value(fmt.Sprintf(`{"uid":%q,"title":"work","author":"tester","status":"open"}`, issue.UID))
 		event := newRemoteEvent(t, project, &issue.UID, typ, "tester", store.InstanceUID(), int64(100+i), payload)
@@ -64,6 +64,12 @@ func checkFederationPushSnapshotRuns(t *testing.T, store db.Storage) error {
 			}
 			require.Len(t, continued, 3)
 			require.Equal(t, []string{uids[5], uids[6], uids[7]}, []string{continued[0].UID, continued[1].UID, continued[2].UID})
+			continued, err = store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), continued[2].ID, 2)
+			if err != nil {
+				return err
+			}
+			require.Len(t, continued, 3)
+			require.Equal(t, []string{uids[8], uids[9], uids[10]}, []string{continued[0].UID, continued[1].UID, continued[2].UID})
 		}
 	}
 	return nil
