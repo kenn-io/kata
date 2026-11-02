@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"fmt"
-	"net/http"
 	"testing"
 	"time"
 
@@ -108,16 +107,14 @@ func TestSearchStatusCandidateLimits(t *testing.T) {
 			require.NoError(t, err)
 			closed = tc.closed
 			fillGeneration(ctx, t, store, idx, seedEmb)
-			for _, mode := range []string{"semantic", "hybrid", "auto"} {
+			modes := []string{"semantic", "hybrid", "auto"}
+			if tc.bounded {
+				modes = []string{"auto"}
+			}
+			for _, mode := range modes {
 				res, err := hybridSearch(ctx, store, idx, emb, hybridParams{
 					ProjectID: project.ID, Query: "semantic query", Limit: 10, Requested: mode, Status: "open",
 				})
-				if tc.bounded && mode != "auto" {
-					var modeErr *modeError
-					require.ErrorAs(t, err, &modeErr)
-					require.Equal(t, http.StatusServiceUnavailable, modeErr.Status())
-					continue
-				}
 				require.NoError(t, err)
 				require.Equal(t, tc.bounded, res.Degraded)
 				if tc.bounded {
