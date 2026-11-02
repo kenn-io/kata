@@ -21,7 +21,7 @@ func checkFederationPushSnapshotRuns(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return err
 	}
-	var uids []string
+	uids := make([]string, 0)
 	for i, typ := range []string{
 		"issue.updated", "issue.snapshot", "issue.snapshot", "project.restored", "issue.snapshot", "issue.snapshot",
 		"issue.updated", "issue.snapshot", "issue.snapshot", "issue.updated", "issue.snapshot", "issue.snapshot",
