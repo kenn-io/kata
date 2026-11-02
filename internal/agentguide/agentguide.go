@@ -193,8 +193,8 @@ const fragSearchCreateUpdate = `3. Search before creating:
    kata label add abc4 safari --agent
    kata edit abc4 --blocks d4ex --agent
 
-   Answer a specific comment with a typed reply. Copy its handle from
-   kata show; --confirm and --refute take evidence in the body:
+   Answer a specific comment with a typed reply, using the handle shown
+   by kata show. --confirm and --refute take evidence in the body:
 
    kata comment abc4 --reply c:xbzxrq -m "This builds on the finding." --agent
    kata comment abc4 --confirm c:xbzxrq -m "Reproduced with the documented retry steps." --agent
