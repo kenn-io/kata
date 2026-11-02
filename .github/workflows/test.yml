@@ -142,7 +142,7 @@ jobs:
             --workdir "$GITHUB_WORKSPACE/web" \
             "$PLAYWRIGHT_IMAGE" node "$cli" run-server --host 127.0.0.1 --port 3000)
           echo "container_id=$container_id" >> "$GITHUB_OUTPUT"
-          for attempt in {1..30}; do
+          for _ in {1..30}; do
             if [ "$(docker inspect --format '{{.State.Running}}' "$container_id")" != true ]; then
               echo 'Browser server container exited before becoming ready.' >&2
               exit 1
