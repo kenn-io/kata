@@ -118,7 +118,9 @@ func TestDaemonRestartAccept_IgnoresFieldsFromNewerClients(t *testing.T) {
 	err = restart.accept(t.Context(), dir, rec)
 
 	require.ErrorContains(t, err, "check replacement startup")
-	require.ErrorContains(t, err, executable)
+	// The exec error quotes the path, which doubles Windows separators, so
+	// match the requested file name rather than the full path.
+	require.ErrorContains(t, err, filepath.Base(executable))
 	failure, err := os.ReadFile(reply) //nolint:gosec // test-owned reply under t.TempDir
 	require.NoError(t, err)
 	assert.Contains(t, string(failure), "check replacement startup")
