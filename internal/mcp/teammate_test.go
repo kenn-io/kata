@@ -290,7 +290,7 @@ func TestMCPDisplayContributionPerCall(t *testing.T) {
 		{"kata.create", map[string]any{"title": "New work", "idempotency_key": "create-display", "project": "spoke-project"}, 1},
 		{"kata.comment", map[string]any{"body": "Progress", "idempotency_key": "comment-display"}, 1},
 		{"kata.edit_comment", map[string]any{"body": "Updated progress", "comment_ref": "c:abc123"}, 1},
-		{"kata.move", map[string]any{"to_project": "hub-project", "revision": 7}, 1},
+		{"kata.move", map[string]any{"to_project": "hub-project", "revision": 7, "single": true}, 1},
 		{"kata.bridge_bind", map[string]any{"connector": "example-connector", "external": "root-locator"}, 1},
 		{"kata.bridge_pause", nil, 1},
 		{"kata.bridge_resume", nil, 1},
