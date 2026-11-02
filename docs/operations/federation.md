@@ -329,12 +329,25 @@ managed with `kata tokens ...`.
 Federation enrollment tokens authorize spoke-to-hub transport routes. Bridge
 connection or direct enrollment creates them. They are stored hashed on the hub
 and plaintext only in spoke federation credentials. They authorize pull, push,
-join metadata fetches and forwarded lease actions.
+join metadata fetches, forwarded lease actions and native recurring job writes.
 
 Each enrollment is bound to one account. Direct-spoke transport authors local
 events and lease requests as that account; the hub rejects a different event
 actor. Negotiated relays preserve the original source actor across hops. Their
 authenticated connection and root receipts establish accountable attribution.
+
+A direct project-scoped enrollment with `push` can create, replace, archive and
+restore [native recurring jobs](../reference/cron.md) on its enabled owning hub.
+The hub attributes each write to the enrollment's bound account. An omitted
+body `actor` uses that account; a different account is refused. The account
+must retain project access and the enrollment must remain live through commit.
+The hub validates the definition and creates its progress anchor atomically.
+Adapter jobs and workflows require ordinary daemon credentials. Relay grants
+cannot authorize native job writes, and a spoke never relays these requests
+onward. Hubs advertise this transport support as `native_cron_writes` in
+project federation metadata. When federation request signing is required,
+enrollment job writes must be signed on either listener; ordinary daemon
+credentials still work on the normal listener.
 
 Enrollment tokens are not general daemon API tokens.
 

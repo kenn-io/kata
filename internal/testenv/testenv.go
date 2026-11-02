@@ -4,6 +4,7 @@ package testenv
 
 import (
 	"context"
+	"crypto/ed25519"
 	"fmt"
 	"io"
 	"net"
@@ -17,6 +18,7 @@ import (
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -74,6 +76,16 @@ func WithAuthToken(token string) Option {
 func WithRequireTokenIdentity() Option {
 	return func(cfg *daemon.ServerConfig) {
 		cfg.Auth.RequireTokenIdentity = true
+	}
+}
+
+// WithRootSigning makes the test daemon sign native root receipts with the
+// given key under the store's own signing authority, mirroring a
+// RootSigning-enabled hub. Tests keep the matching public key to pin and
+// verify receipts.
+func WithRootSigning(key ed25519.PrivateKey) Option {
+	return func(cfg *daemon.ServerConfig) {
+		cfg.RootSigning = daemon.NewRootSigning(db.RootAttributionSigner{AuthorityUID: cfg.DB.InstanceUID(), PrivateKey: key})
 	}
 }
 
