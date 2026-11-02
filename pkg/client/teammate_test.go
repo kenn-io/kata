@@ -30,7 +30,7 @@ func TestTeammateRequestIsolation(t *testing.T) {
 	defer server.Close()
 	c, err := New(server.URL)
 	require.NoError(t, err)
-	parent := WithTeammate(context.Background(), "default-1")
+	parent := WithTeammate(t.Context(), "default-1")
 	for _, handle := range []string{"worker-1", "worker-2", ""} {
 		ctx := WithTeammate(parent, handle)
 		_, err = c.ReopenIssue(ctx, &generated.ReopenIssueRequestOptions{PathParams: &generated.ReopenIssuePath{ProjectID: 1, Ref: "abc1"}, Body: &generated.ReopenIssueBody{Actor: new("coordinator")}}, func(_ context.Context, r *http.Request) error { r.Header.Set("Idempotency-Key", handle); return nil })

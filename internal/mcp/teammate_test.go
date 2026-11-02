@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -330,9 +331,7 @@ func TestMCPDisplayContributionPerCall(t *testing.T) {
 			} {
 				t.Run(selection.name, func(t *testing.T) {
 					args := map[string]any{"ref": "spoke-project#abc1"}
-					for k, v := range tc.args {
-						args[k] = v
-					}
+					maps.Copy(args, tc.args)
 					if tc.tool == "kata.create" {
 						delete(args, "ref")
 					}

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -16,7 +15,7 @@ import (
 func TestTeammateResolutionFrozen(t *testing.T) {
 	t.Setenv("KATA_TEAMMATE", "worker-1")
 	cmd := newRootCmd()
-	cmd.SetContext(context.Background())
+	cmd.SetContext(t.Context())
 	first, err := resolveTeammate(cmd)
 	require.NoError(t, err)
 	t.Setenv("KATA_TEAMMATE", "worker-2")
@@ -110,7 +109,7 @@ func TestTeammateInvalidExplicitFlagClassification(t *testing.T) {
 func TestTeammateInvalidResolutionFrozen(t *testing.T) {
 	t.Setenv("KATA_TEAMMATE", "bad/handle")
 	cmd := newRootCmd()
-	cmd.SetContext(context.Background())
+	cmd.SetContext(t.Context())
 	first, firstErr := resolveTeammate(cmd)
 	require.Error(t, firstErr)
 	t.Setenv("KATA_TEAMMATE", "worker-2")
