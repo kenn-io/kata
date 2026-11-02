@@ -146,6 +146,13 @@ func forwardCronJob(ctx context.Context, cfg ServerConfig, projectID int64, uid,
 			// spoke-local after all, and the ordinary local path owns it.
 			return nil, false, nil
 		}
+		if isFederationAdapterOwnershipDenied(err) {
+			// The hub owns this UID as an adapter job. Its ownership refusal
+			// precedes compare-and-swap, so the local projection must produce
+			// the caller's ordinary conflict envelope instead of surfacing a
+			// transport-credential error.
+			return nil, false, nil
+		}
 	}
 	if err != nil {
 		return nil, true, err

@@ -652,6 +652,43 @@ func TestCronSpokeForwardRefusesAdapterConversion(t *testing.T) {
 	require.Equal(t, string(current.Definition.Options), string(kept.Definition.Options))
 }
 
+func TestCronSpokeForwardStaleAdapterLifecycleUsesLocalConflict(t *testing.T) {
+	f := newCronForwardFixture(t, nil)
+	adapter := cron.JobDefinition{Version: 1, Kind: "job", Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Inspect"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Inspect"}, Overlap: "forbid", Catchup: "all"}
+	uid := cronHTTPUID(t)
+	hubCurrent, _, err := f.hub.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: f.hp.ID, UID: uid, Name: "Adapter", Definition: adapter, Actor: "tester"})
+	require.NoError(t, err)
+	localCurrent, _, err := f.spoke.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: f.sp.ID, UID: uid, Name: "Adapter", Definition: adapter, Actor: "tester"})
+	require.NoError(t, err)
+	last, err := f.spoke.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, f.spoke.DB.AdvanceFederationPushCursor(t.Context(), f.sp.ID, last))
+
+	path := fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s", f.sp.ID, url.PathEscape(uid))
+	response, raw := envDoRaw(t, f.target, http.MethodDelete, path, map[string]any{"actor": "tester", "expected_event_uid": cronHTTPUID(t)}, nil)
+	require.Equalf(t, http.StatusConflict, response.StatusCode, "%s", raw)
+	var conflict struct {
+		Error struct {
+			Code string `json:"code"`
+			Data struct {
+				Current api.CronJob `json:"current"`
+			} `json:"data"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &conflict))
+	require.Equal(t, "cron_conflict", conflict.Error.Code)
+	require.Equal(t, localCurrent.DefinitionEventUID, conflict.Error.Data.Current.DefinitionEventUID)
+
+	kept, err := f.hub.DB.CronJob(t.Context(), f.hp.ID, uid)
+	require.NoError(t, err)
+	require.Equal(t, hubCurrent.DefinitionEventUID, kept.DefinitionEventUID)
+	require.Nil(t, kept.DeletedAt)
+	local, err := f.spoke.DB.CronJob(t.Context(), f.sp.ID, uid)
+	require.NoError(t, err)
+	require.Equal(t, localCurrent.DefinitionEventUID, local.DefinitionEventUID)
+	require.Nil(t, local.DeletedAt)
+}
+
 func TestCronSpokeForwardPOSTCreate(t *testing.T) {
 	f := newCronForwardFixture(t, nil)
 	response, raw := envDoRaw(t, f.target, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/cron/jobs", f.sp.ID), map[string]any{"actor": "local-author", "name": "Review", "definition": f.definition}, nil)

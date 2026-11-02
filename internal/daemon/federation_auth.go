@@ -324,3 +324,15 @@ func federationCredentialDenied() error {
 	return api.NewError(http.StatusForbidden, "auth_invalid",
 		"federation credential is not currently authorized", "", nil)
 }
+
+const federationAdapterOwnershipErrorCode = "federation_adapter_ownership"
+
+func federationAdapterOwnershipDenied() error {
+	return api.NewError(http.StatusForbidden, federationAdapterOwnershipErrorCode,
+		"federation enrollment cannot modify an adapter job", "", nil)
+}
+
+func isFederationAdapterOwnershipDenied(err error) bool {
+	apiErr, ok := errors.AsType[*api.APIError](err)
+	return ok && apiErr.Code == federationAdapterOwnershipErrorCode
+}
