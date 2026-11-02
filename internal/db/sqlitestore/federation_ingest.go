@@ -26,10 +26,14 @@ func (d *Store) IngestFederationEvents(
 	ctx context.Context,
 	p db.FederationIngestParams,
 ) (db.FederationIngestResult, error) {
+	moved := false
 	for _, input := range p.Events {
-		if input.Event.Type != "issue.moved" {
-			continue
+		if input.Event.Type == "issue.moved" {
+			moved = true
+			break
 		}
+	}
+	if moved {
 		original := ctx
 		ctx = db.WithTransactionFence(ctx, func(fenceCtx context.Context, tx db.Transaction) error {
 			if err := lockProjectAccess(fenceCtx, tx); err != nil {
@@ -37,7 +41,6 @@ func (d *Store) IngestFederationEvents(
 			}
 			return db.ApplyTransactionFence(original, tx)
 		})
-		break
 	}
 	var result db.FederationIngestResult
 	attempt := 0

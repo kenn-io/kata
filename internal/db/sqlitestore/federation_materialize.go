@@ -70,7 +70,7 @@ func prepareFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID
 	if err != nil {
 		return federationMaterialization{}, err
 	}
-if !alreadyStored {
+	if !alreadyStored {
 		events = append(events, fresh...)
 	}
 	for _, event := range events {
