@@ -169,13 +169,12 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(st
 	if err != nil {
 		return data, err
 	}
-	type handleUniverse struct {
-		where string
-		args  []any
-	}
-	universes := map[int64]*handleUniverse{}
 	if query.SelectedIssueID > 0 && len(data.Comments) > 0 {
-		universes[query.ProjectID] = &handleUniverse{where: where, args: args}
+		uids, err := readCommentGraphUIDs(ctx, tx, where, args, query.SelectedIssueID, bind)
+		if err != nil {
+			return data, err
+		}
+		data.CommentUIDsByProject[query.ProjectID] = uids
 	}
 
 	visible := make(map[string]bool, len(data.Comments))
@@ -206,12 +205,8 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(st
 		if err == nil {
 			targetWhere := " WHERE i.project_id=" + bind(1) + " AND i.deleted_at IS NULL AND p.deleted_at IS NULL"
 			targetArgs := []any{target.ProjectID}
-			if query.SelectedIssueID > 0 {
-				if _, loaded := universes[target.ProjectID]; !loaded {
-					universes[target.ProjectID] = &handleUniverse{where: targetWhere, args: targetArgs}
-				}
-			} else if _, loaded := data.CommentUIDsByProject[target.ProjectID]; !loaded {
-				uids, err := readCommentGraphUIDs(ctx, tx, targetWhere, targetArgs, 0, bind)
+			if _, loaded := data.CommentUIDsByProject[target.ProjectID]; !loaded {
+				uids, err := readCommentGraphUIDs(ctx, tx, targetWhere, targetArgs, query.SelectedIssueID, bind)
 				if err != nil {
 					return data, err
 				}
@@ -250,13 +245,6 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(st
 			state.ProjectID = projectID
 		}
 		data.Targets[targetUID] = state
-	}
-	for projectID, universe := range universes {
-		uids, err := readCommentGraphUIDs(ctx, tx, universe.where, universe.args, query.SelectedIssueID, bind)
-		if err != nil {
-			return data, err
-		}
-		data.CommentUIDsByProject[projectID] = uids
 	}
 	return data, nil
 }
