@@ -1441,7 +1441,18 @@ func (m Model) restoreSearchDetailIfNeeded(
 }
 
 func (m Model) canRestoreSearchDetail(snapshot *detailModel) bool {
-	return snapshot != nil && (m.list.filter.Date == "" || snapshot.issue == nil || matchesDate(*snapshot.issue, m.list.filter))
+	return snapshot != nil && (m.list.filter.Date == "" || snapshot.issue == nil || matchesDate(m.list.cachedIssue(*snapshot.issue), m.list.filter))
+}
+
+// cachedIssue returns the list's current row for iss, or iss when the list
+// no longer holds it, so date checks see a refetch that moved the issue.
+func (lm listModel) cachedIssue(iss Issue) Issue {
+	for _, cached := range lm.issues {
+		if cached.UID == iss.UID {
+			return cached
+		}
+	}
+	return iss
 }
 
 func (m *Model) refetchRestoredDetail() tea.Cmd {

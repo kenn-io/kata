@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kit/tui/splitlayout"
 )
 
 // withClock pins the TUI clock for one test. The instant carries its
@@ -352,6 +353,28 @@ func TestDateToggle_SearchCancelKeepsExpiredScheduledDetailEmpty(t *testing.T) {
 	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
 	m, _ = stepModel(m, runeKey('d'))
 	assert.NotEqual(t, inputDatesForm, m.input.kind, "an empty Scheduled result has no row to edit")
+}
+
+func TestDateToggle_SearchCancelKeepsRemotelyRescheduledIssueOutOfToday(t *testing.T) {
+	withClock(t, func() time.Time { return datesNow })
+	h := newDatesHarness(t, map[string]string{"scheduled_on": "2026-11-02"}, viewList)
+	h.m.sseCh = nil
+	h.m, _ = updateModel(h.m, tea.WindowSizeMsg{Width: 160, Height: 40})
+	require.Equal(t, splitlayout.Split, h.m.layout)
+	h.m.list.filter = ListFilter{Date: dateToday}.stampDay()
+	h.m = openBarFromCmd(t, h.m, '/')
+	h.m = typeString(h.m, "missing")
+	remote := NewClient(h.env.URL, h.env.HTTP)
+	_, err := remote.SetDates(t.Context(), h.issue.ProjectID, h.issue.UID, DatesInput{
+		Actor: "bob", IfMatchRevision: h.revision(), Set: map[string]*string{"scheduled_on": new("2026-12-01")},
+	})
+	require.NoError(t, err)
+	h.m = drainInboxCmds(h.m, h.m.list.refetchCmd(h.m.api, h.m.scope))
+	require.Empty(t, h.m.list.visibleRows())
+	cancel := h.key(tea.KeyPressMsg{Code: tea.KeyEsc})
+	h.m = drainInboxCmds(h.m, cancel)
+	require.Empty(t, h.m.list.visibleRows())
+	assert.Nil(t, h.m.detail.issue, "cancel leaves Today detail empty after the sole issue moves to December")
 }
 
 func TestDateToggle_MidnightFetchPreservesFreshlyFilteredSelection(t *testing.T) {
