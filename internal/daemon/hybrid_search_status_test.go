@@ -1,8 +1,10 @@
 package daemon
 
 import (
+	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -81,6 +83,7 @@ func TestSearchStatusCandidateLimits(t *testing.T) {
 	idx := openTestVectorIndex(t)
 	seedEmb := labelAxisEmbedClient(t)
 	emb := fixedVectorEmbedClient(t, []float32{1, 0, 0, 0})
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	closed := 0
 	// The rows grow one corpus, so each sees the same issues its own store held.
 	for _, tc := range []struct {
@@ -92,7 +95,14 @@ func TestSearchStatusCandidateLimits(t *testing.T) {
 		{name: "exact ceiling", closed: knnDeepLimit - 1},
 		{name: "beyond ceiling", closed: knnDeepLimit + 1, bounded: true},
 	} {
-		items := searchImportItems(closed, tc.closed-closed, "distractor", "closed", nil)
+		items := make([]db.ImportItem, tc.closed-closed)
+		for i := range items {
+			n := closed + i
+			items[i] = db.ImportItem{
+				ExternalID: fmt.Sprint(n), Title: fmt.Sprintf("distractor %d", n), Body: "x", Author: "a",
+				Status: "closed", ClosedReason: new("done"), CreatedAt: base, UpdatedAt: base, ClosedAt: &base,
+			}
+		}
 		_, _, err := store.ImportBatch(ctx, db.ImportBatchParams{ProjectID: project.ID, Source: "fixture", Actor: "a", Items: items})
 		require.NoError(t, err)
 		closed = tc.closed

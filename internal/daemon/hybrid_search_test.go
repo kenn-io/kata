@@ -10,7 +10,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -19,23 +18,6 @@ import (
 	"go.kenn.io/kata/internal/embedding"
 	"go.kenn.io/kata/internal/vector"
 )
-
-func searchImportItems(start, count int, prefix, status string, labels []string) []db.ImportItem {
-	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	items := make([]db.ImportItem, count)
-	for i := range items {
-		title := fmt.Sprintf("%s %d", prefix, start+i)
-		items[i] = db.ImportItem{
-			ExternalID: title, Title: title, Body: "x", Author: "a", Status: status,
-			CreatedAt: base, UpdatedAt: base, Labels: labels,
-		}
-		if status == "closed" {
-			items[i].ClosedReason = new("done")
-			items[i].ClosedAt = &base
-		}
-	}
-	return items
-}
 
 func TestHybridSearchLexicalWhenUnconfigured(t *testing.T) {
 	ctx := t.Context()
@@ -512,12 +494,12 @@ func TestVectorLegDeepRetryBeatsCrossProjectStarvation(t *testing.T) {
 	}
 	// fetchCap+1 distractors in project B whose vectors score above the
 	// target for the query vector, so the first KNN batch holds only them.
-	_, _, err = store.ImportBatch(ctx, db.ImportBatchParams{
-		ProjectID: projB.ID, Source: "fixture", Actor: "a",
-		Items: searchImportItems(0, fetchCap+1, "distractor", "open", nil),
-	})
-	if err != nil {
-		t.Fatal(err)
+	for i := range fetchCap + 1 {
+		if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: projB.ID, Title: fmt.Sprintf("distractor %d", i), Body: "x", Author: "a",
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	idx := openTestVectorIndex(t)
@@ -850,12 +832,12 @@ func TestVectorLegLabelFilterUsesDeepRetry(t *testing.T) {
 	}
 	// fetchCap+1 unlabeled issues whose vectors outscore the target, so the
 	// first batch holds only issues the label filter drops.
-	_, _, err = store.ImportBatch(ctx, db.ImportBatchParams{
-		ProjectID: proj.ID, Source: "fixture", Actor: "a",
-		Items: searchImportItems(0, fetchCap+1, "distractor", "open", nil),
-	})
-	if err != nil {
-		t.Fatal(err)
+	for i := range fetchCap + 1 {
+		if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: proj.ID, Title: fmt.Sprintf("distractor %d", i), Body: "x", Author: "a",
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	idx := openTestVectorIndex(t)
@@ -976,11 +958,23 @@ func TestSearchLabelCeilingRequiresRelevantProbeCandidate(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			items := searchImportItems(0, ceilingSurvivors, "relevant candidate", "open", []string{"bug"})
-			items = append(items, searchImportItems(0, tt.irrelevantCount, "irrelevant candidate", "open", nil)...)
-			_, _, err = store.ImportBatch(ctx, db.ImportBatchParams{ProjectID: proj.ID, Source: "fixture", Actor: "a", Items: items})
-			if err != nil {
-				t.Fatal(err)
+			for i := range ceilingSurvivors {
+				iss, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+					ProjectID: proj.ID, Title: fmt.Sprintf("relevant candidate %d", i), Body: "x", Author: "a",
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := store.AddLabel(ctx, iss.ID, "bug", "a"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for i := 0; i < tt.irrelevantCount; i++ {
+				if _, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+					ProjectID: proj.ID, Title: fmt.Sprintf("irrelevant candidate %d", i), Body: "x", Author: "a",
+				}); err != nil {
+					t.Fatal(err)
+				}
 			}
 
 			idx := openTestVectorIndex(t)
@@ -1039,19 +1033,30 @@ const ceilingSurvivors = 3
 // generation is left to the caller, which may still be seeding other projects.
 func seedLabelCeilingCorpus(ctx context.Context, t *testing.T, store db.Storage, projectID int64) db.Issue {
 	t.Helper()
-	items := searchImportItems(0, ceilingSurvivors, "labeled login race", "open", []string{"bug"})
-	items = append(items, searchImportItems(0, knnDeepLimit, "distractor", "open", nil)...)
-	target := searchImportItems(0, 1, "target", "open", []string{"bug"})
-	target[0].Title = "target semantic-only candidate"
-	items = append(items, target...)
-	result, _, err := store.ImportBatch(ctx, db.ImportBatchParams{ProjectID: projectID, Source: "fixture", Actor: "a", Items: items})
-	if err != nil {
-		t.Fatal(err)
+	label := func(iss db.Issue) {
+		t.Helper()
+		if _, err := store.AddLabel(ctx, iss.ID, "bug", "a"); err != nil {
+			t.Fatal(err)
+		}
 	}
-	beyond, err := store.IssueByShortID(ctx, projectID, result.Items[len(result.Items)-1].IssueShortID, db.IncludeDeletedNo)
-	if err != nil {
-		t.Fatal(err)
+	create := func(title string) db.Issue {
+		t.Helper()
+		iss, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: projectID, Title: title, Body: "x", Author: "a",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return iss
 	}
+	for i := range ceilingSurvivors {
+		label(create(fmt.Sprintf("labeled login race %d", i)))
+	}
+	for i := range knnDeepLimit {
+		create(fmt.Sprintf("distractor %d", i))
+	}
+	beyond := create("target semantic-only candidate")
+	label(beyond)
 	return beyond
 }
 
