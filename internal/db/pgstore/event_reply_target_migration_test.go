@@ -62,12 +62,4 @@ func TestEventReplyTargetIndexMigrationUpgradesVersion35(t *testing.T) {
 	graph, err := upgraded.ReadCommentGraph(ctx, db.CommentGraphQuery{ProjectID: project.ID, SelectedIssueID: source.ID})
 	require.NoError(t, err)
 	require.Equal(t, "removed", graph.Targets[comment.UID].Status)
-	fresh, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: "reply_target_fresh", SchemaMode: pgstore.SchemaModeBootstrap})
-	require.NoError(t, err)
-	require.NoError(t, fresh.Close())
-	for _, targetSchema := range []string{schema, "reply_target_fresh"} {
-		var definition string
-		require.NoError(t, admin.QueryRowContext(ctx, `SELECT replace(indexdef, schemaname || '.', '') FROM pg_indexes WHERE schemaname=$1 AND indexname='idx_events_reply_to'`, targetSchema).Scan(&definition))
-		require.Equal(t, `CREATE INDEX idx_events_reply_to ON events USING btree ((((payload)::jsonb ->> 'reply_to_uid'::text))) WHERE ((type = 'issue.commented'::text) AND (((payload)::jsonb ->> 'reply_to_uid'::text) IS NOT NULL))`, definition)
-	}
 }

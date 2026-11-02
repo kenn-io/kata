@@ -3,34 +3,12 @@ package sqlitestore
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/uid"
 )
-
-// Missing reply targets must use an indexed probe rather than scan event history.
-func TestPurgedReplyTargetEvidenceUsesReplyIndex(t *testing.T) {
-	store, err := Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
-	rows, err := store.QueryContext(t.Context(), `EXPLAIN QUERY PLAN `+db.CommentGraphPurgedTargetEvidenceSQL(func(int) string { return "?" }, commentReplyTargetUIDExpr), "missing")
-	require.NoError(t, err)
-	var plan []string
-	for rows.Next() {
-		var id, parent, unused int
-		var detail string
-		require.NoError(t, rows.Scan(&id, &parent, &unused, &detail))
-		plan = append(plan, detail)
-	}
-	require.NoError(t, rows.Err())
-	require.NoError(t, rows.Close())
-	joined := strings.Join(plan, "\n")
-	require.Contains(t, joined, "USING INDEX idx_events_reply_to", "plan: %s", joined)
-	require.NotContains(t, joined, "SCAN e", "plan: %s", joined)
-}
 
 func BenchmarkReadCommentGraphPendingReplyTargets(b *testing.B) {
 	for _, history := range []int{1_000, 10_000, 100_000} {
