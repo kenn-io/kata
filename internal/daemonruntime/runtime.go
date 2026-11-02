@@ -20,6 +20,9 @@ const RuntimeRestartExecutableKey = "restart_executable"
 // RuntimeRestartReplyKey names the restart request a replacement daemon was started for.
 const RuntimeRestartReplyKey = "restart_reply"
 
+// RuntimeRestartFromKey names the daemon generation a replacement replaced.
+const RuntimeRestartFromKey = "restart_from"
+
 // RuntimeProcessAlive reports whether a runtime record still identifies a local
 // process that created it. For legacy records without an identity, a process
 // created after the record was published proves that the PID has been reused.

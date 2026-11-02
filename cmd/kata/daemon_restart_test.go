@@ -4,14 +4,17 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/daemonruntime"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
@@ -133,4 +136,66 @@ func TestDaemonRestartExec_ReportsExecFailureToWaitingCaller(t *testing.T) {
 		require.ErrorContains(t, execErr, "restart daemon")
 		require.ErrorContains(t, <-result, errors.Unwrap(execErr).Error(), "the waiting caller must see the exec error")
 	})
+}
+
+func TestDaemonRestartAccept_WaitsForSlowReplacementCheck(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a shell script as the replacement executable")
+	}
+	dir := t.TempDir()
+	// A freshly installed binary can take several seconds to start, for
+	// example while a scanner inspects it.
+	slow := filepath.Join(dir, "slow-kata")
+	require.NoError(t, os.WriteFile(slow, []byte("#!/bin/sh\nsleep 6\n"), 0o700)) //nolint:gosec // G306: test-owned executable script
+	rec := kitdaemon.RuntimeRecord{PID: os.Getpid(), StartedAt: time.Now()}
+	payload, err := json.Marshal(restartRequest{Executable: slow, Reply: "restart-reply"})
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(restartRequestPath(dir, rec), payload, 0o600))
+	reply := filepath.Join(dir, "restart-reply")
+	require.NoError(t, os.WriteFile(reply, nil, 0o600))
+	restart := &daemonRestart{executable: "original-kata"}
+
+	require.NoError(t, restart.accept(t.Context(), dir, rec))
+
+	assert.Equal(t, slow, restart.executable)
+	failure, err := os.ReadFile(reply) //nolint:gosec // test-owned reply under t.TempDir
+	require.NoError(t, err)
+	assert.Empty(t, failure)
+}
+
+func TestRestartLocalDaemon_UnresolvableExecutableKeepsCallerStderrQuiet(t *testing.T) {
+	stubDaemonExecutable(t, func() (string, error) { return "", errors.New("procfs unavailable") })
+	read, write, err := os.Pipe()
+	require.NoError(t, err)
+	original := os.Stderr
+	os.Stderr = write
+	t.Cleanup(func() { os.Stderr = original })
+
+	_, restartErr := client.RestartLocalDaemon(t.Context(), &daemonruntime.Namespace{DataDir: t.TempDir()}, kitdaemon.RuntimeRecord{PID: 1 << 30})
+
+	os.Stderr = original
+	require.NoError(t, write.Close())
+	stderr, err := io.ReadAll(read)
+	require.NoError(t, err)
+	require.ErrorContains(t, restartErr, "cannot resolve installed executable")
+	assert.Empty(t, string(stderr), "a CLI command must not print the daemon's startup diagnostic")
+}
+
+func TestDaemonRestart_RemovesAbandonedRestartFiles(t *testing.T) {
+	dir := t.TempDir()
+	abandoned := []string{"restart-reply-abandoned", "restart-reply-abandoned.pid", "restart.4242.1700000000000000000"}
+	for _, name := range abandoned {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), nil, 0o600))
+	}
+	log := filepath.Join(dir, "daemon.log")
+	require.NoError(t, os.WriteFile(log, nil, 0o600))
+	rec := kitdaemon.RuntimeRecord{PID: 1 << 30, StartedAt: time.Now().UTC(), Metadata: map[string]string{daemonruntime.RuntimeRestartExecutableKey: "1"}}
+
+	_, err := requestDaemonRestart(t.Context(), &daemonruntime.Namespace{DataDir: dir}, rec, "/installed/kata", nil)
+
+	require.ErrorContains(t, err, "signal daemon pid")
+	for _, name := range abandoned {
+		assert.NoFileExists(t, filepath.Join(dir, name), "the caller holds the start lock, so earlier restart files are abandoned")
+	}
+	assert.FileExists(t, log)
 }

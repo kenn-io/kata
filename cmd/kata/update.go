@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -160,7 +161,7 @@ func restartDaemonAfterUpdate(ctx context.Context, stderr io.Writer, executable,
 			return err
 		}
 		if record.Metadata[daemonruntime.RuntimeRestartExecutableKey] != "1" && replacement.Version != installedVersion {
-			return olderDaemonRestartError(replacement)
+			return unsupportedDaemonRestartError(replacement)
 		}
 		if _, err := fmt.Fprintf(stderr, "restarted daemon pid=%d address=%s\n",
 			replacement.PID, replacement.Endpoint().ConfigAddress()); err != nil {
@@ -180,26 +181,59 @@ func waitForDaemonReplacement(
 	ctx context.Context, store kitdaemon.RuntimeStore, previous kitdaemon.RuntimeRecord, reply string,
 ) (kitdaemon.RuntimeRecord, error) {
 	var replacement kitdaemon.RuntimeRecord
-	err := client.WaitForDaemonStartup(ctx, nil, daemonShutdownDrainTimeout+daemonOwnerLockWait+5*time.Second, nil, func(context.Context) (bool, error) {
+	wait := daemonReplacementCheckTimeout + daemonShutdownDrainTimeout + daemonOwnerLockWait + 5*time.Second
+	err := client.WaitForDaemonStartup(ctx, nil, wait, nil, func(context.Context) (bool, error) {
 		records, err := store.List()
 		if err != nil {
 			return false, err
 		}
 		for _, record := range records {
-			if record.StartedAt.After(previous.StartedAt) && daemonruntime.RuntimeProcessAlive(record) {
-				replacement = record
-				return true, restartReplyError(reply, previous.PID, &record)
+			if !record.StartedAt.After(previous.StartedAt) || !daemonruntime.RuntimeProcessAlive(record) {
+				continue
 			}
+			if from := record.Metadata[daemonruntime.RuntimeRestartFromKey]; from != "" && from != restartGeneration(previous) {
+				continue // the replacement of another daemon
+			}
+			replacement = record
+			return true, restartReplyError(reply, previous.PID, &record)
 		}
 		if err := restartReplyError(reply, previous.PID, nil); err != nil {
 			return false, err
 		}
-		if runtime.GOOS != "windows" && !daemonruntime.RuntimeProcessAlive(previous) {
-			return false, fmt.Errorf("daemon pid %d exited without starting a replacement; check the daemon log", previous.PID)
+		if daemonruntime.RuntimeProcessAlive(previous) {
+			return false, nil
 		}
-		return false, nil
+		return false, replacementExitError(reply, previous.PID)
 	})
 	return replacement, err
+}
+
+// replacementExitError reports a replacement that can no longer become ready
+// after the previous daemon exited. Unix keeps the PID across exec; a Windows
+// daemon names the separate process it started before exiting.
+func replacementExitError(reply string, pid int) error {
+	if reply == "" {
+		if runtime.GOOS == "windows" {
+			return nil // older daemons do not name their replacement process
+		}
+		return fmt.Errorf("daemon pid %d exited without starting a replacement; check the daemon log", pid)
+	}
+	// A failing replacement writes its reply just before it exits.
+	if err := restartReplyError(reply, pid, nil); err != nil {
+		return err
+	}
+	started, err := os.ReadFile(reply + restartReplacementPIDSuffix) //nolint:gosec // caller-owned file beside the private reply
+	if err != nil {
+		return fmt.Errorf("daemon pid %d exited without starting a replacement; check the daemon log", pid)
+	}
+	replacementPID, err := strconv.Atoi(strings.TrimSpace(string(started)))
+	if err != nil {
+		return fmt.Errorf("read replacement pid for daemon pid %d: %w", pid, err)
+	}
+	if kitdaemon.ProcessAlive(replacementPID) {
+		return nil
+	}
+	return fmt.Errorf("daemon pid %d stopped, and its replacement pid %d exited before it was ready; check the daemon log", pid, replacementPID)
 }
 
 // restartReplyError reads the daemon's refusal of this caller's request after

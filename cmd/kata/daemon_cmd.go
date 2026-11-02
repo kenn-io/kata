@@ -865,12 +865,18 @@ type daemonStopOutput struct {
 	PIDs    []int  `json:"pids"`
 }
 
-func olderDaemonRestartError(rec kitdaemon.RuntimeRecord) error {
+// unsupportedDaemonRestartError explains how to replace a daemon that cannot
+// accept an installed-executable restart request.
+func unsupportedDaemonRestartError(rec kitdaemon.RuntimeRecord) error {
 	note := ""
 	if endpoint := rec.Endpoint(); !endpoint.IsUnix() && endpoint.Address != "" {
 		note = " (it was listening on " + endpoint.Address + ")"
 	}
-	return fmt.Errorf("daemon pid %d is from an older kata release; as a one-time step, run 'kata daemon stop', then 'kata daemon start' in its original host shell or service with its original startup options%s", rec.PID, note)
+	reason := "is from an older kata release; as a one-time step,"
+	if rec.Metadata[daemonruntime.RuntimeRestartExecutableKey] == "0" {
+		reason = "could not identify its installed executable at startup, so it cannot restart itself;"
+	}
+	return fmt.Errorf("daemon pid %d %s run 'kata daemon stop', then 'kata daemon start' in its original host shell or service with its original startup options%s", rec.PID, reason, note)
 }
 
 func daemonRestartCmd() *cobra.Command {
@@ -897,7 +903,7 @@ func daemonRestartCmd() *cobra.Command {
 			defer release()
 			for _, rec := range running {
 				if rec.Metadata[daemonruntime.RuntimeRestartExecutableKey] != "1" {
-					return olderDaemonRestartError(rec)
+					return unsupportedDaemonRestartError(rec)
 				}
 			}
 			pids := make([]int, 0, len(running))

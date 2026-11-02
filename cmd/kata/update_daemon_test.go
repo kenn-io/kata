@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -548,6 +549,8 @@ func testDaemonRestartLifecycle(t *testing.T, fixture func(*testing.T, string) *
 			after := f.record()
 			require.True(t, after.StartedAt.After(before.StartedAt))
 			assert.Equal(t, "v0.2.0", after.Version)
+			assert.Equal(t, fmt.Sprintf("%d.%d", before.PID, before.StartedAt.UnixNano()), after.Metadata[daemonruntime.RuntimeRestartFromKey],
+				"the replacement names the daemon it replaced so other waiters ignore it")
 			if scenario == "new config" {
 				assert.Contains(t, stdout, fmt.Sprintf("restarted pid=%d address=%s\n", after.PID, after.Endpoint().ConfigAddress()))
 			}
@@ -607,13 +610,50 @@ func TestWaitForDaemonReplacement(t *testing.T) {
 		_, err := waitForDaemonReplacement(t.Context(), store, kitdaemon.RuntimeRecord{PID: 1 << 30, StartedAt: time.Now()}, "")
 		assert.ErrorContains(t, err, "exited without starting a replacement")
 	})
-	t.Run("late readiness after previous exits", func(t *testing.T) {
-		if runtime.GOOS != "windows" {
-			t.Skip("Windows replacement starts a new PID")
-		}
+	t.Run("replacement process exits before readiness", func(t *testing.T) {
 		store := kitdaemon.RuntimeStore{Dir: t.TempDir()}
 		reply := filepath.Join(store.Dir, "restart-reply-caller")
 		require.NoError(t, os.WriteFile(reply, nil, 0600))
+		// A Windows daemon names the separate process it started before exiting.
+		require.NoError(t, os.WriteFile(reply+".pid", []byte(strconv.Itoa(1<<30+4)), 0600))
+		_, err := waitForDaemonReplacement(t.Context(), store, kitdaemon.RuntimeRecord{PID: 1 << 30, StartedAt: time.Now()}, reply)
+		assert.ErrorContains(t, err, fmt.Sprintf("replacement pid %d exited before it was ready", 1<<30+4))
+	})
+	t.Run("replacement of another daemon", func(t *testing.T) {
+		store := kitdaemon.RuntimeStore{Dir: t.TempDir()}
+		reply := filepath.Join(store.Dir, "restart-reply-caller")
+		require.NoError(t, os.WriteFile(reply, nil, 0600))
+		synctest.Test(t, func(t *testing.T) {
+			previous := kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: identity, StartedAt: time.Now()}
+			time.Sleep(time.Second)
+			_, err := store.Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: identity, StartedAt: time.Now(), Address: "127.0.0.1:7001", Metadata: map[string]string{
+				daemonruntime.RuntimeRestartFromKey:  "4242.1700000000000000000",
+				daemonruntime.RuntimeRestartReplyKey: "restart-reply-other",
+			}})
+			require.NoError(t, err)
+			published := make(chan error, 1)
+			go func() {
+				time.Sleep(3 * time.Second)
+				_, err := store.Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: identity, StartedAt: time.Now(), Address: "127.0.0.1:7002", Metadata: map[string]string{
+					daemonruntime.RuntimeRestartFromKey:  fmt.Sprintf("%d.%d", previous.PID, previous.StartedAt.UnixNano()),
+					daemonruntime.RuntimeRestartReplyKey: filepath.Base(reply),
+				}})
+				published <- err
+			}()
+
+			replacement, err := waitForDaemonReplacement(t.Context(), store, previous, reply)
+
+			require.NoError(t, <-published)
+			require.NoError(t, err)
+			assert.Equal(t, "127.0.0.1:7002", replacement.Address)
+		})
+	})
+	t.Run("late readiness after previous exits", func(t *testing.T) {
+		store := kitdaemon.RuntimeStore{Dir: t.TempDir()}
+		reply := filepath.Join(store.Dir, "restart-reply-caller")
+		require.NoError(t, os.WriteFile(reply, nil, 0600))
+		// A Windows daemon names the separate process it started before exiting.
+		require.NoError(t, os.WriteFile(reply+".pid", []byte(strconv.Itoa(os.Getpid())), 0600))
 		identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
 		require.True(t, ok)
 		synctest.Test(t, func(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -33,20 +34,32 @@ import (
 type daemonRestart struct {
 	executable string
 	args       []string
+	dir        string
 	reply      string
+	from       string
 	requested  atomic.Bool
 }
 
-// daemonRestartReplyEnv names the accepted request in the replacement's environment.
-const daemonRestartReplyEnv = "KATA_DAEMON_RESTART_REPLY"
+const (
+	// daemonRestartReplyEnv names the accepted request in the replacement's environment.
+	daemonRestartReplyEnv = "KATA_DAEMON_RESTART_REPLY"
+	// daemonRestartFromEnv names the daemon generation the replacement replaces.
+	daemonRestartFromEnv = "KATA_DAEMON_RESTART_FROM"
+	// daemonReplacementCheckTimeout bounds the replacement's startup check,
+	// which can be slow the first time a newly installed binary runs.
+	daemonReplacementCheckTimeout = 30 * time.Second
+)
 
-// startedForRestartReply is unset at process start so children never inherit it.
-var startedForRestartReply = takeRestartReply()
+// The restart variables are unset at process start so children never inherit them.
+var (
+	startedForRestartReply = takeEnv(daemonRestartReplyEnv)
+	startedForRestartFrom  = takeEnv(daemonRestartFromEnv)
+)
 
-func takeRestartReply() string {
-	reply := os.Getenv(daemonRestartReplyEnv)
-	_ = os.Unsetenv(daemonRestartReplyEnv)
-	return reply
+func takeEnv(key string) string {
+	value := os.Getenv(key)
+	_ = os.Unsetenv(key)
+	return value
 }
 
 // resolveDaemonExecutable is swapped in tests that exercise unsupported hosts.
@@ -54,7 +67,7 @@ var resolveDaemonExecutable = os.Executable
 
 func init() {
 	client.RestartLocalDaemon = func(ctx context.Context, ns *daemonruntime.Namespace, previous kitdaemon.RuntimeRecord) (kitdaemon.RuntimeRecord, error) {
-		restart := newDaemonRestart(os.Stderr)
+		restart := newDaemonRestart(io.Discard)
 		if restart == nil {
 			return kitdaemon.RuntimeRecord{}, errors.New("cannot resolve installed executable for daemon replacement")
 		}
@@ -107,22 +120,30 @@ func (r *daemonRestart) exec(ctx context.Context) error {
 	if r == nil || !r.requested.Load() {
 		return nil
 	}
-	if err := reexecDaemon(ctx, r.executable, r.args, append(os.Environ(), daemonRestartReplyEnv+"="+r.reply)); err != nil {
+	env := append(os.Environ(), daemonRestartReplyEnv+"="+r.reply, daemonRestartFromEnv+"="+r.from)
+	started := func(pid int) {
+		writeRestartReply(r.dir, r.reply, restartReplacementPIDSuffix, []byte(strconv.Itoa(pid)))
+	}
+	if err := reexecDaemon(ctx, r.executable, r.args, env, started); err != nil {
 		return reportRestartFailure(r.reply, fmt.Errorf("restart daemon: %w", err))
 	}
 	return nil
 }
 
-// metadata advertises restart support and the request this daemon was started for.
+// metadata advertises restart support and the request this daemon was started
+// for. A daemon without an installed executable says so, which distinguishes
+// it from an older release that cannot accept executable requests.
 func (r *daemonRestart) metadata() map[string]string {
-	if r == nil {
-		return nil
-	}
-	return map[string]string{
-		daemonruntime.RuntimeRestartMetadataKey:   "1",
-		daemonruntime.RuntimeRestartExecutableKey: "1",
+	metadata := map[string]string{
+		daemonruntime.RuntimeRestartExecutableKey: "0",
 		daemonruntime.RuntimeRestartReplyKey:      startedForRestartReply,
+		daemonruntime.RuntimeRestartFromKey:       startedForRestartFrom,
 	}
+	if r != nil {
+		metadata[daemonruntime.RuntimeRestartMetadataKey] = "1"
+		metadata[daemonruntime.RuntimeRestartExecutableKey] = "1"
+	}
+	return metadata
 }
 
 // daemonArgs returns this daemon's arguments with extra flags replacing any
@@ -162,7 +183,7 @@ func withoutFlags(args, overrides []string) []string {
 }
 
 func validateDaemonReplacement(ctx context.Context, executable string, flags []string) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, daemonReplacementCheckTimeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, executable, daemonArgs(append(flags, "--check-startup")...)...) //nolint:gosec // selected installed executable with daemon-owned arguments
 	if output, err := command.CombinedOutput(); err != nil {
@@ -202,16 +223,28 @@ func (r *daemonRestart) accept(ctx context.Context, dir string, rec kitdaemon.Ru
 		return err
 	}
 	r.executable, r.args, r.reply = executable, daemonArgs(req.Flags...), req.Reply
+	r.dir, r.from = dir, restartGeneration(rec)
 	return nil
 }
 
-func writeRestartFailure(dir, name string, err error) {
-	if err == nil || name == "" {
+// restartReplacementPIDSuffix names the file beside a caller's reply where a
+// Windows daemon records the separate replacement process it started.
+const restartReplacementPIDSuffix = ".pid"
+
+// writeRestartReply answers the caller waiting on reply, if it still waits.
+func writeRestartReply(dir, reply, suffix string, content []byte) {
+	if reply == "" {
 		return
 	}
-	reply := filepath.Join(dir, filepath.Base(name))
-	if _, statErr := os.Lstat(reply); statErr == nil {
-		_ = atomicfile.WriteFile(reply, []byte(err.Error()), atomicfile.WithPrivate())
+	path := filepath.Join(dir, filepath.Base(reply))
+	if _, err := os.Lstat(path); err == nil {
+		_ = atomicfile.WriteFile(path+suffix, content, atomicfile.WithPrivate())
+	}
+}
+
+func writeRestartFailure(dir, reply string, err error) {
+	if err != nil {
+		writeRestartReply(dir, reply, "", []byte(err.Error()))
 	}
 }
 
@@ -224,8 +257,26 @@ func reportRestartFailure(reply string, err error) error {
 	return err
 }
 
+// restartGeneration identifies one daemon process start; Unix keeps the PID
+// across in-place restarts.
+func restartGeneration(rec kitdaemon.RuntimeRecord) string {
+	return fmt.Sprintf("%d.%d", rec.PID, rec.StartedAt.UnixNano())
+}
+
 func restartRequestPath(dir string, rec kitdaemon.RuntimeRecord) string {
-	return filepath.Join(dir, fmt.Sprintf("restart.%d.%d", rec.PID, rec.StartedAt.UnixNano()))
+	return filepath.Join(dir, "restart."+restartGeneration(rec))
+}
+
+// removeAbandonedRestartFiles deletes requests and replies left by restart
+// callers that were killed. Every caller holds the start lock while its files
+// exist, so none can belong to a caller that is still waiting.
+func removeAbandonedRestartFiles(dir string) {
+	for _, pattern := range []string{"restart-reply-*", "restart.[0-9]*"} {
+		matches, _ := filepath.Glob(filepath.Join(dir, pattern))
+		for _, match := range matches {
+			_ = os.Remove(match)
+		}
+	}
 }
 
 // lockLiveDaemons takes the runtime store's start lock and lists the live
@@ -249,9 +300,11 @@ func lockLiveDaemons(ctx context.Context, ns *daemonruntime.Namespace, stderr io
 }
 
 // requestDaemonRestart keeps the caller waiting through replacement readiness,
-// including SQLite migrations, once the restart request begins.
+// including SQLite migrations, once the restart request begins. The caller
+// holds the runtime store's start lock.
 func requestDaemonRestart(ctx context.Context, ns *daemonruntime.Namespace, previous kitdaemon.RuntimeRecord, executable string, flags []string) (kitdaemon.RuntimeRecord, error) {
 	ctx = context.WithoutCancel(ctx)
+	removeAbandonedRestartFiles(ns.DataDir)
 	var reply string
 	if previous.Metadata[daemonruntime.RuntimeRestartExecutableKey] == "1" {
 		file, err := safefileio.CreatePrivateTemp(ns.DataDir, "restart-reply-*")
@@ -259,7 +312,10 @@ func requestDaemonRestart(ctx context.Context, ns *daemonruntime.Namespace, prev
 			return kitdaemon.RuntimeRecord{}, err
 		}
 		reply = file.Name()
-		defer func() { _ = os.Remove(reply) }()
+		defer func() {
+			_ = os.Remove(reply)
+			_ = os.Remove(reply + restartReplacementPIDSuffix)
+		}()
 		if err := file.Close(); err != nil {
 			return kitdaemon.RuntimeRecord{}, err
 		}

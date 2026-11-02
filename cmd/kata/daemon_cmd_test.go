@@ -1341,6 +1341,30 @@ func TestDaemonRestart_AgentReportsStartedDaemon(t *testing.T) {
 		"web_url=http://127.0.0.1:28888\n", string(out))
 }
 
+func TestDaemonRestart_ExplainsDaemonWithoutInstalledExecutable(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
+	require.True(t, ok)
+	// A current daemon that could not resolve its executable at startup.
+	var unavailable *daemonRestart
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+		ProcessIdentityV2: identity, PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:7777",
+		StartedAt: time.Now(), Metadata: unavailable.metadata(),
+	})
+	require.NoError(t, err)
+
+	_, _, err = executeRootCapture(t, t.Context(), "daemon", "restart")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "could not identify its installed executable at startup")
+	assert.Contains(t, err.Error(), "run 'kata daemon stop', then 'kata daemon start'")
+	assert.NotContains(t, err.Error(), "older kata release")
+}
+
 func TestDaemonRestart_ValidatesStoppedDaemonStartup(t *testing.T) {
 	tests := []struct {
 		name    string
