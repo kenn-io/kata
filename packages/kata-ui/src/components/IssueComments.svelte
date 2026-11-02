@@ -115,7 +115,7 @@
           />
           {#if onReplyComment && comment.uid && comment.handle}
             <div class="reply-actions">
-              {#each kinds as kind}<Button
+              {#each kinds as kind (kind)}<Button
                   size="sm"
                   label={kind[0]!.toUpperCase() + kind.slice(1)}
                   disabled={actionsDisabled}

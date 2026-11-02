@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/teammate"
 )
 
 func checkCommentDisplayContribution(t *testing.T, store db.Storage, backend Backend) error {
@@ -19,7 +20,7 @@ func checkCommentDisplayContribution(t *testing.T, store db.Storage, backend Bac
 	require.NoError(t, err)
 	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Display", Author: "actor"})
 	require.NoError(t, err)
-	comment, event, err := store.CreateComment(db.WithEventTeammate(ctx, "writer"), db.CreateCommentParams{IssueID: issue.ID, Author: "actor", Teammate: "route", Body: "Original", IdempotencyKey: "display-key", IdempotencyFingerprint: "fingerprint"})
+	comment, event, err := store.CreateComment(teammate.WithRequest(ctx, "writer"), db.CreateCommentParams{IssueID: issue.ID, Author: "actor", Teammate: "route", Body: "Original", IdempotencyKey: "display-key", IdempotencyFingerprint: "fingerprint"})
 	require.NoError(t, err)
 	assertDisplay := func(value any) {
 		t.Helper()
@@ -31,7 +32,7 @@ func checkCommentDisplayContribution(t *testing.T, store db.Storage, backend Bac
 		require.Equal(t, "route", fields["teammate"])
 	}
 	assertDisplay(comment)
-	edited, _, changed, err := store.EditComment(db.WithEventTeammate(ctx, "editor"), db.EditCommentParams{IssueID: issue.ID, CommentUID: comment.UID, Actor: "other", Body: "Edited"})
+	edited, _, changed, err := store.EditComment(teammate.WithRequest(ctx, "editor"), db.EditCommentParams{IssueID: issue.ID, CommentUID: comment.UID, Actor: "other", Body: "Edited"})
 	require.NoError(t, err)
 	require.True(t, changed)
 	assertDisplay(edited)
@@ -64,14 +65,14 @@ func checkCommentDisplayContribution(t *testing.T, store db.Storage, backend Bac
 	require.NoError(t, err)
 	pin := db.RootKeyPin{ProjectUID: signedProject.UID, AuthorityUID: store.InstanceUID(), KeyID: db.RootPublicKeyID(public), PublicKey: public}
 	require.NoError(t, store.PinRootAuthority(ctx, pin))
-	signedCtx := db.WithRootAttribution(db.WithEventTeammate(ctx, "writer"), db.RootAttributionSigner{AuthorityUID: pin.AuthorityUID, PrivateKey: private}, "member")
+	signedCtx := db.WithRootAttribution(teammate.WithRequest(ctx, "writer"), db.RootAttributionSigner{AuthorityUID: pin.AuthorityUID, PrivateKey: private}, "member")
 	signed, _, err := store.CreateComment(signedCtx, db.CreateCommentParams{IssueID: signedIssue.ID, Author: "actor", Teammate: "route", Body: "Signed creation"})
 	require.NoError(t, err)
 	receipt, err := store.EntityAttribution(ctx, signedProject.UID, "comment", signed.UID)
 	require.NoError(t, err)
 	assertDisplay(signed)
 	require.Equal(t, "route", receipt.Teammate)
-	_, _, _, err = store.EditComment(db.WithEventTeammate(ctx, "editor"), db.EditCommentParams{IssueID: signedIssue.ID, CommentUID: signed.UID, Actor: "other", Body: "Revised signed creation"})
+	_, _, _, err = store.EditComment(teammate.WithRequest(ctx, "editor"), db.EditCommentParams{IssueID: signedIssue.ID, CommentUID: signed.UID, Actor: "other", Body: "Revised signed creation"})
 	require.NoError(t, err)
 	receiptAfter, err := store.EntityAttribution(ctx, signedProject.UID, "comment", signed.UID)
 	require.NoError(t, err)
@@ -205,12 +206,12 @@ func checkAdoptionCommentDisplay(t *testing.T, backend Backend) {
 	require.NoError(t, err)
 	wantRouting := map[string]string{}
 	for _, route := range []string{"", "route"} {
-		comment, _, err := store.CreateComment(db.WithEventTeammate(ctx, "writer"), db.CreateCommentParams{
+		comment, _, err := store.CreateComment(teammate.WithRequest(ctx, "writer"), db.CreateCommentParams{
 			IssueID: issue.ID, Author: "actor", Teammate: route, Body: "Original",
 		})
 		require.NoError(t, err)
 		wantRouting[comment.UID] = route
-		_, _, changed, err := store.EditComment(db.WithEventTeammate(ctx, "editor"), db.EditCommentParams{
+		_, _, changed, err := store.EditComment(teammate.WithRequest(ctx, "editor"), db.EditCommentParams{
 			IssueID: issue.ID, CommentUID: comment.UID, Actor: "other", Body: "Edited",
 		})
 		require.NoError(t, err)

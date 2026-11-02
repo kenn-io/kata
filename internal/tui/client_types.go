@@ -301,8 +301,9 @@ type ProjectSummaryWithStats struct {
 
 // CommentEntry is the per-comment projection rendered in the comments tab.
 type CommentEntry struct {
-	depth  int
-	leaves []commentLeaf
+	depth              int
+	leaves             []commentLeaf
+	AttributedTeammate *string `json:"attributed_teammate,omitempty"`
 	db.AttributionView
 	UID                string            `json:"uid"`
 	Handle             string            `json:"handle"`
