@@ -836,6 +836,12 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case cronLoadedMsg:
 		return m.cronLoaded(msg), nil, true
+	case cronEditOpenedMsg:
+		next, cmd := m.cronEditOpened(msg)
+		return next, cmd, true
+	case cronSavedMsg:
+		next, cmd := m.cronSaved(msg)
+		return next, cmd, true
 	case tea.BackgroundColorMsg:
 		// The terminal answered Init's in-loop background query. Only
 		// colorAuto consults the answer — explicit KATA_COLOR_MODE
@@ -847,6 +853,12 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	case tea.PasteMsg:
 		if m.view == viewCron && m.cron.filtering && m.modal == modalNone {
 			return m.cronFilter(m.cron.lists[m.cron.tab].query + msg.Content), nil, true
+		}
+		if m.view == viewCron && m.cron.form != nil {
+			if m.modal == modalNone {
+				m.cron.form.paste(msg)
+			}
+			return m, nil, true
 		}
 		// Bubble Tea v2 delivers bracketed pastes as their own message
 		// type. Forward to the active input's bubbles model so a paste
@@ -933,15 +945,10 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 			next, cmd := m.routeCredentialsViewKey(msg)
 			return next, cmd, true
 		}
-		if withinSubtree, mutation := m.mutationForKey(msg); mutation && !m.mutationAllowed(withinSubtree) {
-			if m.authCapabilitiesRequired && !m.authCapabilitiesReady {
-				m.toast = &toast{
-					text:  "Checking daemon permissions; retry your action when connected",
-					level: toastInfo, expiresAt: m.toastNow().Add(3 * time.Second),
-				}
-				return m, tea.Batch(m.fetchAuthCapabilities(), toastExpireCmd(3*time.Second)), true
+		if withinSubtree, mutation := m.mutationForKey(msg); mutation {
+			if next, cmd, blocked := m.blockMutation(withinSubtree); blocked {
+				return next, cmd, true
 			}
-			return m, nil, true
 		}
 		if next, cmd, ok := m.routeCloseKey(msg); ok {
 			return next, cmd, true
@@ -1011,6 +1018,22 @@ func (m Model) inboxEntryKeptKey(msg tea.KeyPressMsg) bool {
 		}
 	}
 	return false
+}
+
+// blockMutation reports whether a mutation must wait, and retries permission
+// discovery when that is what it waits on.
+func (m Model) blockMutation(withinSubtree bool) (Model, tea.Cmd, bool) {
+	if m.mutationAllowed(withinSubtree) {
+		return m, nil, false
+	}
+	if m.authCapabilitiesRequired && !m.authCapabilitiesReady {
+		m.toast = &toast{
+			text:  "Checking daemon permissions; retry your action when connected",
+			level: toastInfo, expiresAt: m.toastNow().Add(3 * time.Second),
+		}
+		return m, tea.Batch(m.fetchAuthCapabilities(), toastExpireCmd(3*time.Second)), true
+	}
+	return m, nil, true
 }
 
 func (m Model) mutationForKey(msg tea.KeyPressMsg) (withinSubtree, mutation bool) {
@@ -1833,6 +1856,15 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 // status line. The textarea is NOT repopulated — preserves what the
 // user typed before the editor opened.
 func (m Model) routeEditorReturn(msg editorReturnedMsg) (Model, tea.Cmd) {
+	if f := m.cron.form; f != nil && msg.formGen != 0 && msg.formGen == f.formGen {
+		if msg.err != nil {
+			f.general = "editor: " + msg.err.Error()
+		} else {
+			f.val[f.focus] = msg.content
+			f.validate()
+		}
+		return m, nil
+	}
 	if msg.formGen == 0 {
 		return m, nil
 	}
@@ -3024,7 +3056,7 @@ func toastExpireCmd(d time.Duration) tea.Cmd {
 // /forms) or a confirm modal (quit or draft discard) is open. Both
 // gates redirect global keys into the field instead of firing.
 func (m Model) canQuit() bool {
-	if m.view == viewCron && m.cron.filtering {
+	if m.view == viewCron && (m.cron.filtering || m.cron.form != nil) {
 		return false
 	}
 	if m.modal != modalNone {
@@ -3056,6 +3088,15 @@ func (m Model) routeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		case "y", "Y":
 			m.detail.cancelReads()
 			return m, tea.Quit
+		case "n", "N", "esc":
+			m.modal = modalNone
+			return m, nil
+		}
+	case modalDiscardCronJob:
+		switch msg.String() {
+		case "y", "Y":
+			m.modal, m.cron.form = modalNone, nil
+			return m, nil
 		case "n", "N", "esc":
 			m.modal = modalNone
 			return m, nil
@@ -3637,6 +3678,9 @@ func (m Model) viewBody() string {
 	case viewCron:
 		if m.cron.help {
 			return cronHelp(m)
+		}
+		if m.cron.form != nil {
+			return renderCronForm(m)
 		}
 		return renderCron(m)
 	case viewHelp:
