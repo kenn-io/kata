@@ -10,6 +10,9 @@ import (
 	"time"
 )
 
+// SQLiteCommentReplyTargetUIDExpr must match the expression in idx_events_reply_to.
+const SQLiteCommentReplyTargetUIDExpr = `json_extract(e.payload,'$.reply_to_uid')`
+
 // CommentGraphQuery scopes a coherent comment read to one active project.
 type CommentGraphQuery struct {
 	ProjectID                   int64

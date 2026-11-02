@@ -19,7 +19,7 @@ func TestPurgedReplyTargetEvidenceUsesReplyIndex(t *testing.T) {
 	require.NoError(t, err)
 	_, err = pool.ExecContext(t.Context(), string(schema))
 	require.NoError(t, err)
-	rows, err := pool.QueryContext(t.Context(), `EXPLAIN QUERY PLAN `+commentGraphPurgedTargetEvidenceSQL(func(int) string { return "?" }, `json_extract(e.payload,'$.reply_to_uid')`), "missing")
+	rows, err := pool.QueryContext(t.Context(), `EXPLAIN QUERY PLAN `+commentGraphPurgedTargetEvidenceSQL(func(int) string { return "?" }, SQLiteCommentReplyTargetUIDExpr), "missing")
 	require.NoError(t, err)
 	var plan []string
 	for rows.Next() {
