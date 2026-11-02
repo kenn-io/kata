@@ -8,6 +8,7 @@ describe('normalizeKataUISnapshot', () => {
     ['blocks chain', 2000, 8000],
     ['related chain', 2000, 8000],
     ['blocks hub', 4000, 16000],
+    ['hub with back-link', 1000, 8000],
     ['related hub', 2000, 8000],
     ['hub fan-in/out', 2000, 8000],
     ['layered10', 2000, 8000],
@@ -36,7 +37,7 @@ describe('normalizeKataUISnapshot', () => {
         }
         for (let index = 1; index < size; index++) {
           if (shape.endsWith('chain')) connect(index - 1, index)
-          else if (shape.endsWith('hub')) connect(0, index)
+          else if (shape.endsWith('hub') || shape === 'hub with back-link') connect(0, index)
           else if (shape === 'hub fan-in/out') {
             if (index < size / 2) connect(index, 0)
             else connect(0, index)
@@ -49,6 +50,7 @@ describe('normalizeKataUISnapshot', () => {
             for (let skip = 1; skip <= 4 && skip <= index; skip++) connect(index - skip, index)
           }
         }
+        if (shape === 'hub with back-link') connect(1, 0)
         wire.selected!.issue = issues[0]!
         wire.graph = { issues, links, edges: [], unresolved_refs: [] }
         expect(normalizeKataUISnapshot(wire).selected_graph?.nodes).toHaveLength(size)

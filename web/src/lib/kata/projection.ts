@@ -283,31 +283,62 @@ function markTransitiveBlockLayout(edges: KataReachableGraphEdge[]): void {
     }
   }
 
-  blocks.forEach((edge, index) => {
-    const [from, to] = ends[index]!
-    const cyclic = groups[componentOf[from]!]!.length > 1
-    if (cyclic ? hasAlternateBlockPath(targets, from, to) : hidden.has(from * count + to))
-      edge.layout = false
-  })
-}
+  const seen = new Int32Array(count).fill(-1)
+  const first = new Int32Array(count)
+  const second = new Int32Array(count)
+  const queue = new Int32Array(2 * count)
+  const origins = new Int32Array(2 * count)
 
-function hasAlternateBlockPath(
-  adjacency: readonly (readonly number[])[],
-  from: number,
-  to: number,
-): boolean {
-  const seen = new Set([from])
-  const queue = [...adjacency[from]!]
-  while (queue.length > 0) {
-    const next = queue.shift()!
-    if (next === to || seen.has(next)) continue
-    seen.add(next)
-    for (const peer of adjacency[next]!) {
-      if (peer === to) return true
-      if (!seen.has(peer)) queue.push(peer)
+  for (const group of groups) {
+    if (group.length === 1) continue
+    // Cyclic sources need paths that never return through the source.
+    // Two distinct starting targets per task suffice to detect alternate paths.
+    for (const source of group) {
+      if (targets[source]!.length < 2) continue
+      const pending = targets[source]!.slice().sort((a, b) => componentOf[a]! - componentOf[b]!)
+      let remaining = pending.length
+      let lowest = 0
+      let floor = componentOf[pending[lowest]!]!
+      let tail = 0
+      for (const target of pending) {
+        seen[target] = source
+        first[target] = target
+        second[target] = -1
+        origins[tail] = target
+        queue[tail++] = target
+      }
+      for (let head = 0; head < tail && remaining > 0; head++) {
+        const current = queue[head]!
+        if (componentOf[current]! < floor) continue
+        for (const target of targets[current]!) {
+          if (target === source || componentOf[target]! < floor) continue
+          const origin = origins[head]!
+          if (seen[target] !== source) {
+            seen[target] = source
+            first[target] = origin
+            second[target] = -1
+          } else if (first[target] === origin || second[target] !== -1) continue
+          else {
+            second[target] = origin
+            if (first[target] === target) {
+              hidden.add(source * count + target)
+              if (--remaining === 0) break
+              // Hidden targets no longer require exploring lower components.
+              while (hidden.has(source * count + pending[lowest]!)) lowest++
+              floor = componentOf[pending[lowest]!]!
+            }
+          }
+          origins[tail] = origin
+          queue[tail++] = target
+        }
+      }
     }
   }
-  return false
+
+  blocks.forEach((edge, index) => {
+    const [from, to] = ends[index]!
+    if (hidden.has(from * count + to)) edge.layout = false
+  })
 }
 
 function normalizeEvent(
