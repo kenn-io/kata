@@ -440,6 +440,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if checked, ok := msg.(dateFilterCheckedMsg); ok {
+		if !m.staleConnMsg(checked.connGen) && m.list.filter.Date == checked.mode && checked.err != nil {
+			m.list.status = checked.err.Error()
+		}
+		return m, nil
+	}
 	m = m.syncSearchDetailSnapshot(msg)
 	if mut, ok := msg.(mutationDoneMsg); ok {
 		m = m.syncAttentionReturnMutation(mut)
@@ -1978,6 +1984,7 @@ func (m Model) commitFilterForm(form inputState) (Model, tea.Cmd) {
 		m.input = form
 		return m, nil
 	}
+	prevPID, prevUID, prevHas := highlightedIdentity(m.list)
 	previousSearch := m.list.filter.Search
 	m.list.filter = ListFilter{
 		Status: form.fieldValue(fieldStatus),
@@ -1999,10 +2006,37 @@ func (m Model) commitFilterForm(form inputState) (Model, tea.Cmd) {
 	m.list.selectedUID = ""
 	m.list.status = ""
 	m.input = inputState{}
+	m, cmd := m.reconcileSplitDetailAfterRefetch(prevPID, prevUID, prevHas)
+	cmd = combineCmds(cmd, m.checkDateFilter())
 	if m.list.filter.Search != previousSearch {
-		return m.submitSearch()
+		var searchCmd tea.Cmd
+		m, searchCmd = m.submitSearch()
+		cmd = combineCmds(cmd, searchCmd)
 	}
-	return m, nil
+	return m, cmd
+}
+
+type dateFilterCheckedMsg struct {
+	connGen uint64
+	mode    string
+	err     error
+}
+
+type dateFilterAPI interface {
+	CheckDateFilter(context.Context) error
+}
+
+func (m Model) checkDateFilter() tea.Cmd {
+	api, ok := m.api.(dateFilterAPI)
+	if !ok || m.list.filter.Date == "" {
+		return nil
+	}
+	mode, gen := m.list.filter.Date, m.connGen
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return dateFilterCheckedMsg{connGen: gen, mode: mode, err: api.CheckDateFilter(ctx)}
+	}
 }
 
 // commitFormInput handles canonical ctrl+o and compatible ctrl+s on a
@@ -2517,11 +2551,14 @@ func (m Model) routeSSE(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		next, cmd := m.handleRefetchTick()
 		return next, cmd, true
 	case dayTickMsg:
+		var cmd tea.Cmd
 		if m.list.filter.Date != "" && m.list.filter.Day != renderNow().Format(time.DateOnly) {
+			prevPID, prevUID, prevHas := highlightedIdentity(m.list)
 			m.list = m.list.syncSelection(m.list.visibleRows())
 			m.list = m.list.refreshDay()
+			m, cmd = m.reconcileSplitDetailAfterRefetch(prevPID, prevUID, prevHas)
 		}
-		return m, dayTick(), true
+		return m, combineCmds(cmd, dayTick()), true
 	case toastExpiredMsg:
 		next, cmd := m.handleToastExpired()
 		return next, cmd, true

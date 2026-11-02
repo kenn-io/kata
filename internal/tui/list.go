@@ -736,11 +736,10 @@ func (lm listModel) applyFilterKey(msg tea.KeyPressMsg, km keymap) (listModel, t
 			lm.status = "Inbox shows open issues only"
 			return lm, nil, true
 		}
-		if lm.filter.Date != "" && nextStatus(lm.filter.Status) == "closed" {
-			lm.status = "Today and Scheduled show open issues only"
-			return lm, nil, true
-		}
 		lm.filter.Status = nextStatus(lm.filter.Status)
+		if lm.filter.Date != "" && lm.filter.Status == "closed" {
+			lm.filter.Status = nextStatus(lm.filter.Status)
+		}
 		lm.cursor = 0
 		lm.windowStart = 0
 		lm.selectedUID = ""

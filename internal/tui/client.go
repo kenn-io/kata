@@ -1299,6 +1299,26 @@ type mutationPreflightError struct{ error }
 
 func (e *mutationPreflightError) Unwrap() error { return e.error }
 
+// CheckDateFilter verifies that list rows include resolved planning dates.
+func (c *Client) CheckDateFilter(ctx context.Context) error {
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return err
+	}
+	health, err := apiClient.Health(ctx)
+	if err != nil {
+		return fmt.Errorf("date filters require daemon API 0.36.0 or newer: %w", err)
+	}
+	reported := ""
+	if health.APISchemaVersion != nil {
+		reported = *health.APISchemaVersion
+	}
+	if !semver.IsValid("v"+reported) || semver.Compare("v"+reported, "v0.36.0") < 0 {
+		return fmt.Errorf("date filters require daemon API 0.36.0 or newer; upgrade the daemon")
+	}
+	return nil
+}
+
 // AddCommentReply sends an attributed typed reply with a retry-stable key.
 func (c *Client) AddCommentReply(ctx context.Context, projectID int64, ref, body, actor, target, kind string, force bool, key string) (*MutationResp, error) {
 	apiClient, err := c.generatedClient()

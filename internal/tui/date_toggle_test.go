@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"net/http"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -14,10 +15,10 @@ import (
 // withClock pins the TUI clock for one test. The instant carries its
 // own location because the Today check reads the calendar day in the
 // zone time.Now reports (the local zone in production).
-func withClock(t *testing.T, now time.Time) {
+func withClock(t *testing.T, now func() time.Time) {
 	t.Helper()
 	prior := renderNow
-	renderNow = func() time.Time { return now }
+	renderNow = now
 	t.Cleanup(func() { renderNow = prior })
 }
 
@@ -37,7 +38,7 @@ func shortIDs(issues []Issue) []string {
 }
 
 func TestDateToggle_TodayAndScheduledSplitOnLocalDay(t *testing.T) {
-	withClock(t, time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC))
+	withClock(t, func() time.Time { return time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC) })
 	issues := []Issue{
 		dated("past", "2026-11-09", ""),
 		dated("same", "2026-11-10", ""),
@@ -57,19 +58,19 @@ func TestDateToggle_ZoneBoundaryMovesTheDay(t *testing.T) {
 	instant := time.Date(2026, 11, 10, 23, 30, 0, 0, time.UTC)
 	issues := []Issue{dated("nov11", "2026-11-11", "")}
 
-	withClock(t, instant)
+	withClock(t, func() time.Time { return instant })
 	assert.Empty(t, filteredIssues(issues, ListFilter{Date: dateToday}.stampDay()))
 	assert.Equal(t, []string{"nov11"},
 		shortIDs(filteredIssues(issues, ListFilter{Date: dateScheduled}.stampDay())))
 
-	withClock(t, instant.In(time.FixedZone("UTC+10", 10*3600)))
+	withClock(t, func() time.Time { return instant.In(time.FixedZone("UTC+10", 10*3600)) })
 	assert.Equal(t, []string{"nov11"},
 		shortIDs(filteredIssues(issues, ListFilter{Date: dateToday}.stampDay())))
 	assert.Empty(t, filteredIssues(issues, ListFilter{Date: dateScheduled}.stampDay()))
 }
 
 func TestDateToggle_RowsMissingDatesDoNotMatch(t *testing.T) {
-	withClock(t, time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC))
+	withClock(t, func() time.Time { return time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC) })
 	closed := dated("done", "2026-11-01", "2026-11-01")
 	closed.Status = "closed"
 	issues := []Issue{
@@ -85,7 +86,7 @@ func TestDateToggle_RowsMissingDatesDoNotMatch(t *testing.T) {
 }
 
 func TestDateToggle_ComposesWithOwnerLabelsAndSearch(t *testing.T) {
-	withClock(t, time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC))
+	withClock(t, func() time.Time { return time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC) })
 	alice, bob := "alice", "bob"
 	a := dated("a", "2026-11-10", "")
 	a.Owner, a.Labels, a.Title = &alice, []string{"bug"}, "fix login"
@@ -127,7 +128,7 @@ func TestDateToggle_FilterFormCommitsAndResetsDate(t *testing.T) {
 }
 
 func TestDateToggle_RowsShowResolvedDates(t *testing.T) {
-	withClock(t, time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC))
+	withClock(t, func() time.Time { return time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC) })
 	rows := buildRows([]queueRow{
 		{issue: dated("both", "2026-11-12", "2027-01-05")},
 		{issue: dated("sched", "2026-11-12", "")},
@@ -145,7 +146,7 @@ func TestDateToggle_RowsShowResolvedDates(t *testing.T) {
 }
 
 func TestDateToggle_RowDatesYieldToTheTitleOnNarrowCells(t *testing.T) {
-	withClock(t, time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC))
+	withClock(t, func() time.Time { return time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC) })
 	iss := dated("both", "2026-11-12", "2026-11-15")
 	iss.Title = "a reasonably long title"
 	rows := buildRows([]queueRow{{issue: iss}}, 0, 24, false, viewChrome{})
@@ -155,9 +156,7 @@ func TestDateToggle_RowDatesYieldToTheTitleOnNarrowCells(t *testing.T) {
 
 func TestDateToggle_MidnightRolloverKeepsRowActionsOnTheSelectedIssue(t *testing.T) {
 	now := time.Date(2026, 11, 10, 23, 59, 0, 0, time.UTC)
-	prior := renderNow
-	renderNow = func() time.Time { return now }
-	t.Cleanup(func() { renderNow = prior })
+	withClock(t, func() time.Time { return now })
 
 	m := filterFormFixture()
 	m.list.issues = []Issue{
@@ -190,9 +189,7 @@ func TestDateToggle_MidnightRolloverKeepsRowActionsOnTheSelectedIssue(t *testing
 
 func TestDateToggle_CancelingFormAfterMidnightRefreshKeepsDayAndSelection(t *testing.T) {
 	now := time.Date(2026, 11, 10, 23, 59, 0, 0, time.UTC)
-	prior := renderNow
-	renderNow = func() time.Time { return now }
-	t.Cleanup(func() { renderNow = prior })
+	withClock(t, func() time.Time { return now })
 
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
@@ -242,9 +239,7 @@ func TestDateToggle_IdleMidnightRefetchKeepsSelection(t *testing.T) {
 				synctest.Test(t, func(t *testing.T) {
 					base := time.Now()
 					wallJump := time.Duration(0)
-					prior := renderNow
-					renderNow = func() time.Time { return tc.start.Add(time.Since(base) + wallJump) }
-					t.Cleanup(func() { renderNow = prior })
+					withClock(t, func() time.Time { return tc.start.Add(time.Since(base) + wallJump) })
 					priorColor := activeColorMode
 					activeColorMode = colorNone
 					t.Cleanup(func() { activeColorMode = priorColor })
@@ -310,8 +305,82 @@ func TestDateToggle_ClosedStatusControls(t *testing.T) {
 			require.Equal(t, inputNone, m.input.kind)
 			assert.Equal(t, mode, m.list.filter.Date)
 			m, _ = stepModel(m, tea.KeyPressMsg{Code: 's'})
+			assert.Empty(t, m.list.filter.Status)
+			m, _ = stepModel(m, tea.KeyPressMsg{Code: 's'})
 			assert.Equal(t, "open", m.list.filter.Status)
-			assert.Equal(t, "Today and Scheduled show open issues only", m.list.status)
+			assert.Empty(t, m.list.status)
 		})
+	}
+}
+
+func TestReviewDateRolloverReconcilesSplitDetail(t *testing.T) {
+	for _, empty := range []bool{false, true} {
+		t.Run(map[bool]string{false: "replacement", true: "empty"}[empty], func(t *testing.T) {
+			withClock(t, func() time.Time { return time.Date(2026, 11, 11, 0, 1, 0, 0, time.UTC) })
+			m, cleanup := splitTestSetup(t)
+			defer cleanup()
+			m.list.issues = []Issue{dated("tomorrow", "2026-11-11", "")}
+			if !empty {
+				m.list.issues = append(m.list.issues, dated("later", "2026-11-12", ""))
+			}
+			m.list.filter = ListFilter{Date: dateScheduled, Day: "2026-11-10"}
+			old := m.list.issues[0]
+			m.detail.issue, m.detail.scopePID = &old, 7
+			m, _ = stepModel(m, dayTickMsg{})
+			if empty {
+				require.Nil(t, m.detail.issue)
+				return
+			}
+			require.NotNil(t, m.detail.issue)
+			assert.Equal(t, "later", m.detail.issue.ShortID)
+			m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
+			m, _ = stepModel(m, tea.KeyPressMsg{Code: 'd'})
+			assert.Equal(t, "later", m.input.target.issueShortID)
+		})
+	}
+}
+
+func TestReviewDateFilterCommitReconcilesSplitDetail(t *testing.T) {
+	withClock(t, func() time.Time { return time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC) })
+	m, cleanup := splitTestSetup(t)
+	defer cleanup()
+	m.list.issues = []Issue{dated("future", "2026-11-12", ""), dated("due", "2026-11-10", "")}
+	old := m.list.issues[0]
+	m.detail.issue, m.detail.scopePID = &old, 7
+	m = openFilterForm(t, m)
+	m.input.field(fieldDate).radio.set(dateToday)
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	require.NotNil(t, m.detail.issue)
+	assert.Equal(t, "due", m.detail.issue.ShortID)
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: 'd'})
+	assert.Equal(t, "due", m.input.target.issueShortID)
+}
+
+func TestReviewDateFilterDaemonSupport(t *testing.T) {
+	for _, version := range []string{"0.35.0", "", "invalid", "0.36.0", "0.37.0"} {
+		for _, mode := range []string{dateToday, dateScheduled} {
+			t.Run(version+"/"+mode, func(t *testing.T) {
+				calls := 0
+				client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+					require.Equal(t, "/api/v1/health", r.URL.Path)
+					calls++
+					respondJSON(t, w, map[string]any{"api_schema_version": version})
+				})
+				m := filterFormFixture()
+				m.api = newUndoClient(client)
+				form := newFilterForm(m.list.filter, m.scope)
+				form.field(fieldDate).radio.set(mode)
+				m, cmd := m.commitFilterForm(form)
+				m = drainInboxCmds(m, cmd)
+				assert.Equal(t, 1, calls)
+				assert.Equal(t, mode, m.list.filter.Date)
+				if version == "0.36.0" || version == "0.37.0" {
+					assert.Empty(t, m.list.status)
+				} else {
+					assert.Contains(t, m.list.status, "upgrade the daemon")
+				}
+			})
+		}
 	}
 }
