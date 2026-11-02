@@ -16,6 +16,7 @@ func BenchmarkReadCommentGraphFullUIDReference(b *testing.B) {
 			d, err := Open(ctx, filepath.Join(b.TempDir(), "kata.db"))
 			require.NoError(b, err)
 			b.Cleanup(func() { _ = d.Close() })
+			// Dropping the FTS triggers speeds up setup without affecting the read path.
 			for _, statement := range []string{
 				`DROP TRIGGER comments_ai_fts`,
 				`DROP TRIGGER comments_au_fts`,
@@ -31,10 +32,8 @@ func BenchmarkReadCommentGraphFullUIDReference(b *testing.B) {
 			query := db.CommentGraphQuery{ProjectID: 2, Reference: &db.CommentGraphReference{UID: fmt.Sprintf("01M5%022d", comments)}}
 			b.ResetTimer()
 			for b.Loop() {
-				graph, err := d.ReadCommentGraph(ctx, query)
+				_, err := d.ReadCommentGraph(ctx, query)
 				require.NoError(b, err)
-				require.Len(b, graph.Comments, 1)
-				require.Equal(b, query.Reference.UID, graph.Comments[0].Comment.UID)
 			}
 		})
 	}

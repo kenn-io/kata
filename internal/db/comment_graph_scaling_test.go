@@ -12,60 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCommentGraphFullUIDReferenceUsesHandleIndex(t *testing.T) {
-	ctx := t.Context()
-	work := &referenceWork{}
-	pool := sql.OpenDB(referenceConnector{work})
-	pool.SetMaxOpenConns(1)
-	t.Cleanup(func() { _ = pool.Close() })
-	schema, err := os.ReadFile("sqlitestore/schema.sql")
-	require.NoError(t, err)
-	_, err = pool.ExecContext(ctx, string(schema))
-	require.NoError(t, err)
-	const targetUID = "01m40000000000000000abcdef"
-	for _, statement := range []string{
-		`INSERT INTO projects(id,uid,name) VALUES(1,'01M40000000000000000000001','example-project')`,
-		`INSERT INTO issues(id,uid,short_id,project_id,title,author) VALUES(1,'01M40000000000000000000002','0002',1,'First','worker'),(2,'01M40000000000000000000003','0003',1,'Second','worker')`,
-		`WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<512) INSERT INTO comments(uid,issue_id,author,body) SELECT printf('01M5%022d',x),1+x%2,'worker','Unrelated' FROM n`,
-		`INSERT INTO comments(uid,issue_id,author,body) VALUES('01m40000000000000000abcdef',1,'worker','Target')`,
-	} {
-		_, err := pool.ExecContext(ctx, statement)
-		require.NoError(t, err)
-	}
-	var statement string
-	var arguments []any
-	work.capture = func(query string, args []driver.NamedValue) {
-		statement = query
-		for _, arg := range args {
-			arguments = append(arguments, arg.Value)
-		}
-	}
-	tx, err := pool.BeginTx(ctx, nil)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = tx.Rollback() })
-	graph, err := ReadCommentGraphTx(ctx, tx, CommentGraphQuery{ProjectID: 1, Reference: &CommentGraphReference{UID: strings.ToUpper(targetUID)}},
-		func(int) string { return "?" },
-		func(value string) (time.Time, error) { return time.Parse(time.RFC3339Nano, value) },
-		`json_extract(e.payload,'$.reply_to_uid')`, "NULL")
-	require.NoError(t, err)
-	require.Len(t, graph.Comments, 1)
-	require.Equal(t, targetUID, graph.Comments[0].Comment.UID)
-	work.capture = nil
-	rows, err := tx.QueryContext(ctx, "EXPLAIN QUERY PLAN "+statement, arguments...)
-	require.NoError(t, err)
-	defer func() { _ = rows.Close() }()
-	var plan []string
-	for rows.Next() {
-		var id, parent, unused int
-		var detail string
-		require.NoError(t, rows.Scan(&id, &parent, &unused, &detail))
-		plan = append(plan, detail)
-	}
-	require.NoError(t, rows.Err())
-	require.Contains(t, strings.Join(plan, "\n"), "USING INDEX idx_comments_uid_handle")
-	require.NotContains(t, strings.Join(plan, "\n"), "idx_comments_issue")
-}
-
 func TestSelectedCommentGraphWorkIgnoresUnrelatedBodies(t *testing.T) {
 	for _, unrelated := range []int{0, 256} {
 		var singleCommentSuffixArgs int
@@ -194,7 +140,7 @@ func TestReadCommentGraphPendingTargetWork(t *testing.T) {
 	}
 }
 
-// A selected issue must use both lookup indexes without ANALYZE, as production does.
+// Comment graph reads must use lookup indexes without ANALYZE, as production does.
 func TestSelectedCommentGraphUsesLookupIndexes(t *testing.T) {
 	ctx := t.Context()
 	work := &referenceWork{}
@@ -205,53 +151,80 @@ func TestSelectedCommentGraphUsesLookupIndexes(t *testing.T) {
 	require.NoError(t, err)
 	_, err = pool.ExecContext(ctx, string(schema))
 	require.NoError(t, err)
+	const targetUID = "01m40000000000000000abcdef"
 	for _, statement := range []string{
 		`INSERT INTO projects(id,uid,name) VALUES(1,'01M40000000000000000000001','example-project')`,
 		`INSERT INTO issues(id,uid,short_id,project_id,title,author) VALUES(1,'01M40000000000000000000002','0002',1,'Selected','worker')`,
 		`INSERT INTO comments(uid,issue_id,author,body) VALUES('01M40000000000000000000004',1,'worker','Selected comment')`,
 		`INSERT INTO comments(uid,issue_id,author,body) VALUES('01M40000000000000000000005',1,'worker','Second comment'),('01M40000000000000000000006',1,'worker','Third comment')`,
 		`WITH RECURSIVE n(x) AS (VALUES(1000) UNION ALL SELECT x+1 FROM n WHERE x<1999) INSERT INTO issues(id,uid,short_id,project_id,title,author) SELECT x,printf('01M4%022d',x),printf('%04d',x),1,'Other','worker' FROM n`,
+		`INSERT INTO comments(uid,issue_id,author,body) VALUES('01m40000000000000000abcdef',1,'worker','Target')`,
 		`INSERT INTO comments(uid,issue_id,author,body) SELECT printf('01M5%022d',id),id,'worker','Unrelated' FROM issues WHERE id>=1000`,
 	} {
 		_, err := pool.ExecContext(ctx, statement)
 		require.NoError(t, err)
 	}
-	var statements []string
-	var arguments [][]any
-	work.capture = func(statement string, args []driver.NamedValue) {
-		statements = append(statements, statement)
-		values := make([]any, len(args))
-		for index, arg := range args {
-			values[index] = arg.Value
-		}
-		arguments = append(arguments, values)
-	}
-	tx, err := pool.BeginTx(ctx, nil)
-	require.NoError(t, err)
-	_, err = ReadCommentGraphTx(ctx, tx, CommentGraphQuery{ProjectID: 1, SelectedIssueID: 1},
-		func(int) string { return "?" },
-		func(value string) (time.Time, error) { return time.Parse(time.RFC3339Nano, value) },
-		`json_extract(e.payload,'$.reply_to_uid')`, "NULL")
-	require.NoError(t, err)
-	require.NoError(t, tx.Rollback())
-	work.capture = nil
-	require.Len(t, statements, 2)
-	for index, statement := range statements {
-		rows, err := pool.QueryContext(ctx, "EXPLAIN QUERY PLAN "+statement, arguments[index]...)
-		require.NoError(t, err)
-		var plan []string
-		for rows.Next() {
-			var id, parent, unused int
-			var detail string
-			require.NoError(t, rows.Scan(&id, &parent, &unused, &detail))
-			plan = append(plan, detail)
-		}
-		require.NoError(t, rows.Err())
-		require.NoError(t, rows.Close())
-		expected := "idx_comments_reply_to"
-		if index == 1 {
-			expected = "idx_comments_uid_handle"
-		}
-		require.Contains(t, strings.Join(plan, "\n"), "INDEX "+expected)
+	for _, tc := range []struct {
+		name    string
+		query   CommentGraphQuery
+		indexes []string
+	}{
+		{
+			name:    "selected issue",
+			query:   CommentGraphQuery{ProjectID: 1, SelectedIssueID: 1},
+			indexes: []string{"idx_comments_reply_to", "idx_comments_uid_handle"},
+		},
+		{
+			name:    "full UID reference",
+			query:   CommentGraphQuery{ProjectID: 1, Reference: &CommentGraphReference{UID: strings.ToUpper(targetUID)}},
+			indexes: []string{"idx_comments_uid_handle"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			var statements []string
+			var arguments [][]any
+			work.capture = func(statement string, args []driver.NamedValue) {
+				statements = append(statements, statement)
+				values := make([]any, len(args))
+				for index, arg := range args {
+					values[index] = arg.Value
+				}
+				arguments = append(arguments, values)
+			}
+			t.Cleanup(func() { work.capture = nil })
+			tx, err := pool.BeginTx(ctx, nil)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = tx.Rollback() })
+			graph, err := ReadCommentGraphTx(ctx, tx, tc.query,
+				func(int) string { return "?" },
+				func(value string) (time.Time, error) { return time.Parse(time.RFC3339Nano, value) },
+				`json_extract(e.payload,'$.reply_to_uid')`, "NULL")
+			require.NoError(t, err)
+			if tc.query.Reference != nil {
+				require.Len(t, graph.Comments, 1)
+				require.Equal(t, targetUID, graph.Comments[0].Comment.UID)
+			}
+			require.NoError(t, tx.Rollback())
+			work.capture = nil
+			require.Len(t, statements, len(tc.indexes))
+			for index, statement := range statements {
+				rows, err := pool.QueryContext(ctx, "EXPLAIN QUERY PLAN "+statement, arguments[index]...)
+				require.NoError(t, err)
+				var plan []string
+				for rows.Next() {
+					var id, parent, unused int
+					var detail string
+					require.NoError(t, rows.Scan(&id, &parent, &unused, &detail))
+					plan = append(plan, detail)
+				}
+				require.NoError(t, rows.Err())
+				require.NoError(t, rows.Close())
+				require.Contains(t, strings.Join(plan, "\n"), "INDEX "+tc.indexes[index])
+				if tc.query.Reference != nil {
+					require.NotContains(t, strings.Join(plan, "\n"), "idx_comments_issue")
+				}
+			}
+		})
 	}
 }
