@@ -204,7 +204,7 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 		name, method, suffix string
 		deleted              bool
 	}{{"archive", http.MethodDelete, "", true}, {"restore", http.MethodPost, "/restore", false}} {
-		huma.Register(h, huma.Operation{OperationID: action.name + "CronJob", Method: action.method, Path: path + "/{cron_uid}" + action.suffix}, func(ctx context.Context, in *api.CronDefinitionActionRequest) (*api.CronJobResponse, error) {
+		huma.Register(h, huma.Operation{OperationID: action.name + "CronJob", Method: action.method, Path: path + "/{cron_uid}" + action.suffix}, func(ctx context.Context, in *api.CronJobActionRequest) (*api.CronJobResponse, error) {
 			ctx, actor, enrollment, err := cronJobWriteContext(ctx, cfg, in.ProjectID, in.Authorization, in.Body.Actor, action.name+"CronJob")
 			if err != nil {
 				return nil, err

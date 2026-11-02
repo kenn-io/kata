@@ -8557,10 +8557,6 @@ paths:
     delete:
       operationId: archiveCronWorkflow
       parameters:
-        - in: header
-          name: Authorization
-          schema:
-            type: string
         - in: path
           name: project_id
           required: true
@@ -8655,10 +8651,6 @@ paths:
     post:
       operationId: restoreCronWorkflow
       parameters:
-        - in: header
-          name: Authorization
-          schema:
-            type: string
         - in: path
           name: project_id
           required: true

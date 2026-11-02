@@ -2304,7 +2304,6 @@ func (o *CreateCronWorkflowRequestOptions) GetHeader() (map[string]string, error
 type ArchiveCronWorkflowRequestOptions struct {
 	PathParams *ArchiveCronWorkflowPath
 	Body       *ArchiveCronWorkflowBody
-	Header     *ArchiveCronWorkflowHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -2324,14 +2323,6 @@ func (o *ArchiveCronWorkflowRequestOptions) Validate() error {
 		if v, ok := any(o.Body).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Body", err)
-			}
-		}
-	}
-
-	if o.Header != nil {
-		if v, ok := any(o.Header).(runtime.Validator); ok {
-			if err := v.Validate(); err != nil {
-				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -2359,7 +2350,7 @@ func (o *ArchiveCronWorkflowRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *ArchiveCronWorkflowRequestOptions) GetHeader() (map[string]string, error) {
-	return runtime.AsMap[string](o.Header)
+	return nil, nil
 }
 
 // ShowCronWorkflowRequestOptions is the options needed to make a request to ShowCronWorkflow.
@@ -2463,7 +2454,6 @@ func (o *ReplaceCronWorkflowRequestOptions) GetHeader() (map[string]string, erro
 type RestoreCronWorkflowRequestOptions struct {
 	PathParams *RestoreCronWorkflowPath
 	Body       *RestoreCronWorkflowBody
-	Header     *RestoreCronWorkflowHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -2483,14 +2473,6 @@ func (o *RestoreCronWorkflowRequestOptions) Validate() error {
 		if v, ok := any(o.Body).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Body", err)
-			}
-		}
-	}
-
-	if o.Header != nil {
-		if v, ok := any(o.Header).(runtime.Validator); ok {
-			if err := v.Validate(); err != nil {
-				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -2518,7 +2500,7 @@ func (o *RestoreCronWorkflowRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *RestoreCronWorkflowRequestOptions) GetHeader() (map[string]string, error) {
-	return runtime.AsMap[string](o.Header)
+	return nil, nil
 }
 
 // DigestProjectRequestOptions is the options needed to make a request to DigestProject.

@@ -114,9 +114,15 @@ type CronDefinitionActionBody struct {
 
 // CronDefinitionActionRequest addresses an attributed definition lifecycle change.
 type CronDefinitionActionRequest struct {
-	Authorization string `header:"Authorization"`
 	CronDefinitionRequest
 	Body CronDefinitionActionBody
+}
+
+// CronJobActionRequest addresses a job lifecycle change, which a push
+// enrollment may authorize.
+type CronJobActionRequest struct {
+	Authorization string `header:"Authorization"`
+	CronDefinitionActionRequest
 }
 
 // PutCronJobBody carries a job definition and optional replacement precondition.
