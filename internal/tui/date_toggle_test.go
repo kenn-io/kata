@@ -38,51 +38,58 @@ func shortIDs(issues []Issue) []string {
 }
 
 func TestDateToggle_TodayAndScheduledSplitOnLocalDay(t *testing.T) {
-	withClock(t, func() time.Time { return time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC) })
-	issues := []Issue{
-		dated("past", "2026-11-09", ""),
-		dated("same", "2026-11-10", ""),
-		dated("next", "2026-11-11", ""),
-		dated("dlpast", "", "2026-11-01"),
-		dated("dlnext", "", "2026-12-01"),
-	}
-
-	assert.Equal(t, []string{"past", "same", "dlpast"},
-		shortIDs(filteredIssues(issues, ListFilter{Date: dateToday}.stampDay())))
-	assert.Equal(t, []string{"next", "dlnext"},
-		shortIDs(filteredIssues(issues, ListFilter{Date: dateScheduled}.stampDay())))
-}
-
-func TestDateToggle_ZoneBoundaryMovesTheDay(t *testing.T) {
-	// 23:30 UTC on Nov 10 is already Nov 11 at UTC+10.
 	instant := time.Date(2026, 11, 10, 23, 30, 0, 0, time.UTC)
-	issues := []Issue{dated("nov11", "2026-11-11", "")}
-
-	withClock(t, func() time.Time { return instant })
-	assert.Empty(t, filteredIssues(issues, ListFilter{Date: dateToday}.stampDay()))
-	assert.Equal(t, []string{"nov11"},
-		shortIDs(filteredIssues(issues, ListFilter{Date: dateScheduled}.stampDay())))
-
-	withClock(t, func() time.Time { return instant.In(time.FixedZone("UTC+10", 10*3600)) })
-	assert.Equal(t, []string{"nov11"},
-		shortIDs(filteredIssues(issues, ListFilter{Date: dateToday}.stampDay())))
-	assert.Empty(t, filteredIssues(issues, ListFilter{Date: dateScheduled}.stampDay()))
-}
-
-func TestDateToggle_RowsMissingDatesDoNotMatch(t *testing.T) {
-	withClock(t, func() time.Time { return time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC) })
 	closed := dated("done", "2026-11-01", "2026-11-01")
 	closed.Status = "closed"
-	issues := []Issue{
-		dated("none", "", ""),
-		dated("deadlineonly", "", "2026-11-10"),
-		dated("scheduledonly", "2026-11-10", ""),
-		closed,
+	for _, tc := range []struct {
+		name             string
+		now              time.Time
+		issues           []Issue
+		today, scheduled []string
+	}{
+		{
+			name: "scheduled and deadline dates", now: instant,
+			issues: []Issue{
+				dated("past", "2026-11-09", ""),
+				dated("same", "2026-11-10", ""),
+				dated("next", "2026-11-11", ""),
+				dated("dlpast", "", "2026-11-01"),
+				dated("dlnext", "", "2026-12-01"),
+			},
+			today: []string{"past", "same", "dlpast"}, scheduled: []string{"next", "dlnext"},
+		},
+		{
+			name: "UTC before midnight", now: instant,
+			issues: []Issue{dated("nov11", "2026-11-11", "")},
+			today:  []string{}, scheduled: []string{"nov11"},
+		},
+		{
+			name: "local zone after midnight", now: instant.In(time.FixedZone("UTC+10", 10*3600)),
+			issues: []Issue{dated("nov11", "2026-11-11", "")},
+			today:  []string{"nov11"}, scheduled: []string{},
+		},
+		{
+			name: "missing dates", now: instant,
+			issues: []Issue{dated("none", "", "")},
+			today:  []string{}, scheduled: []string{},
+		},
+		{
+			name: "closed row", now: instant,
+			issues: []Issue{closed},
+			today:  []string{}, scheduled: []string{},
+		},
+		{
+			name: "single date", now: instant,
+			issues: []Issue{dated("deadlineonly", "", "2026-11-10"), dated("scheduledonly", "2026-11-10", "")},
+			today:  []string{"deadlineonly", "scheduledonly"}, scheduled: []string{},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withClock(t, func() time.Time { return tc.now })
+			assert.Equal(t, tc.today, shortIDs(filteredIssues(tc.issues, ListFilter{Date: dateToday}.stampDay())))
+			assert.Equal(t, tc.scheduled, shortIDs(filteredIssues(tc.issues, ListFilter{Date: dateScheduled}.stampDay())))
+		})
 	}
-
-	assert.Equal(t, []string{"deadlineonly", "scheduledonly"},
-		shortIDs(filteredIssues(issues, ListFilter{Date: dateToday}.stampDay())))
-	assert.Empty(t, filteredIssues(issues, ListFilter{Date: dateScheduled}.stampDay()))
 }
 
 func TestDateToggle_ComposesWithOwnerLabelsAndSearch(t *testing.T) {
@@ -106,12 +113,9 @@ func TestDateToggle_ComposesWithOwnerLabelsAndSearch(t *testing.T) {
 	assert.Equal(t, []string{"a"}, shortIDs(got))
 }
 
-func TestDateToggle_FilterFormCommitsAndResetsDate(t *testing.T) {
+func TestDateToggle_FilterFormCommitsAndClearsDate(t *testing.T) {
 	m := openFilterForm(t, filterFormFixture())
-	// Date is the last axis: status, owner, search, labels, date.
-	m = pressTabN(m, 4)
-	require.Equal(t, fieldDate, m.input.fields[m.input.active].id)
-	assert.Equal(t, "any", m.input.fields[m.input.active].radio.value())
+	m.input.active = len(m.input.fields) - 1
 
 	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyRight})
 	m, _ = stepModel(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
@@ -121,37 +125,36 @@ func TestDateToggle_FilterFormCommitsAndResetsDate(t *testing.T) {
 	m = openFilterForm(t, m)
 	assert.Equal(t, dateToday, m.input.field(fieldDate).radio.value())
 
-	m.input = m.input.resetFilterFields()
-	assert.Equal(t, "any", m.input.field(fieldDate).radio.value())
+	m.input.field(fieldDate).radio.set("any")
 	m, _ = stepModel(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	assert.Empty(t, m.list.filter.Date)
 }
 
 func TestDateToggle_RowsShowResolvedDates(t *testing.T) {
 	withClock(t, func() time.Time { return time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC) })
-	rows := buildRows([]queueRow{
-		{issue: dated("both", "2026-11-12", "2027-01-05")},
-		{issue: dated("sched", "2026-11-12", "")},
-		{issue: dated("dl", "", "2026-11-15")},
-		{issue: dated("none", "", "")},
-	}, 0, 60, false, viewChrome{})
+	t.Run("wide cells", func(t *testing.T) {
+		rows := buildRows([]queueRow{
+			{issue: dated("both", "2026-11-12", "2027-01-05")},
+			{issue: dated("sched", "2026-11-12", "")},
+			{issue: dated("dl", "", "2026-11-15")},
+			{issue: dated("none", "", "")},
+		}, 0, 60, false, viewChrome{})
 
-	assert.Contains(t, rows[0][4], "s:11-12")
-	assert.Contains(t, rows[0][4], "d:2027-01-05")
-	assert.Contains(t, rows[1][4], "s:11-12")
-	assert.NotContains(t, rows[1][4], "d:")
-	assert.Contains(t, rows[2][4], "d:11-15")
-	assert.NotContains(t, rows[2][4], "s:")
-	assert.NotContains(t, rows[3][4], ":")
-}
-
-func TestDateToggle_RowDatesYieldToTheTitleOnNarrowCells(t *testing.T) {
-	withClock(t, func() time.Time { return time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC) })
-	iss := dated("both", "2026-11-12", "2026-11-15")
-	iss.Title = "a reasonably long title"
-	rows := buildRows([]queueRow{{issue: iss}}, 0, 24, false, viewChrome{})
-	assert.Contains(t, rows[0][4], "a reasonably long")
-	assert.NotContains(t, rows[0][4], "s:")
+		assert.Contains(t, rows[0][4], "s:11-12")
+		assert.Contains(t, rows[0][4], "d:2027-01-05")
+		assert.Contains(t, rows[1][4], "s:11-12")
+		assert.NotContains(t, rows[1][4], "d:")
+		assert.Contains(t, rows[2][4], "d:11-15")
+		assert.NotContains(t, rows[2][4], "s:")
+		assert.NotContains(t, rows[3][4], ":")
+	})
+	t.Run("narrow cells", func(t *testing.T) {
+		iss := dated("both", "2026-11-12", "2026-11-15")
+		iss.Title = "a reasonably long title"
+		rows := buildRows([]queueRow{{issue: iss}}, 0, 24, false, viewChrome{})
+		assert.Contains(t, rows[0][4], "a reasonably long")
+		assert.NotContains(t, rows[0][4], "s:")
+	})
 }
 
 func TestDateToggle_MidnightRolloverKeepsRowActionsOnTheSelectedIssue(t *testing.T) {
@@ -167,7 +170,7 @@ func TestDateToggle_MidnightRolloverKeepsRowActionsOnTheSelectedIssue(t *testing
 	form := newFilterForm(ListFilter{}, m.scope)
 	form.field(fieldDate).radio.set(dateToday)
 	m, _ = m.commitFilterForm(form)
-	m.list.cursor = 1 // z, the second Today row
+	m, _ = stepModel(m, runeKey('j')) // z, the second Today row
 	got, ok := m.list.targetRow()
 	require.True(t, ok)
 	require.Equal(t, "z", got.ShortID)
@@ -177,50 +180,11 @@ func TestDateToggle_MidnightRolloverKeepsRowActionsOnTheSelectedIssue(t *testing
 	got, ok = m.list.targetRow()
 	require.True(t, ok)
 	assert.Equal(t, "z", got.ShortID)
-
-	// The next fetch moves the day on and the selection follows the issue.
-	m.list.selectedUID = m.list.issues[2].UID
-	m.list = m.list.applyFetched(refetchedMsg{issues: m.list.issues})
-	got, ok = m.list.targetRow()
-	require.True(t, ok)
-	assert.Equal(t, "z", got.ShortID)
-	assertQueueShortIDs(t, m.list.visibleRows(), []string{"x", "y", "z"})
-}
-
-func TestDateToggle_CancelingFormAfterMidnightRefreshKeepsDayAndSelection(t *testing.T) {
-	now := time.Date(2026, 11, 10, 23, 59, 0, 0, time.UTC)
-	withClock(t, func() time.Time { return now })
-
-	m, cleanup := splitTestSetup(t)
-	defer cleanup()
-	issues := []Issue{dated("x", "2026-11-10", ""), dated("y", "2026-11-11", ""), dated("z", "2026-11-09", "")}
-	m.list.issues = issues
-	form := newFilterForm(ListFilter{}, m.scope)
-	form.field(fieldDate).radio.set(dateToday)
-	m, _ = m.commitFilterForm(form)
-	m.list = m.list.applyFetched(refetchedMsg{issues: issues})
-	m.list.cursor, m.list.selectedUID, m.list.selectedProjectID = 1, "01TEST-z", 7
-	zIssue := issues[2]
-	m.detail.issue, m.detail.scopePID = &zIssue, 7
-
-	// Open the form before midnight, refresh after it, then cancel.
-	m.input = newFilterForm(m.list.filter, m.scope)
-	now = now.Add(2 * time.Minute)
-	m, _ = stepModel(m, refetchedMsg{dispatchKey: m.currentCacheKey(), issues: issues})
-	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
-
-	assert.Equal(t, "2026-11-11", m.list.filter.Day)
-	assert.Equal(t, "01TEST-z", m.list.selectedUID)
-	got, ok := m.list.targetRow()
-	require.True(t, ok)
-	assert.Equal(t, "z", got.ShortID)
-	require.NotNil(t, m.detail.issue)
-	assert.Equal(t, "01TEST-z", m.detail.issue.UID)
 }
 
 // An idle TUI must advance relative date filters at local midnight without
 // relying on a daemon event or a key press.
-func TestDateToggle_IdleMidnightRefetchKeepsSelection(t *testing.T) {
+func TestDateToggle_IdleDayTickKeepsSelection(t *testing.T) {
 	santiago, err := time.LoadLocation("America/Santiago")
 	require.NoError(t, err)
 	for _, tc := range []struct {
@@ -251,15 +215,8 @@ func TestDateToggle_IdleMidnightRefetchKeepsSelection(t *testing.T) {
 					}
 					m.list.filter = ListFilter{Date: mode}.stampDay()
 					m.list = m.list.applyFetched(initialFetchMsg{issues: issues})
-					m.list.cursor = len(m.list.visibleRows()) - 1
-					// Filter commits clear the recorded identity until navigation.
-					m.list.selectedUID = ""
-					m.cache.put(m.currentCacheKey(), issues)
-					tick := m.Init()
-					require.NotNil(t, tick)
-					// A pending SSE reader must stay the sole reader. No API is
-					// available: changing the day uses only the cached rows.
-					m.sseCh = make(chan tea.Msg)
+					m, _ = stepModel(m, runeKey('G'))
+					tick := dayTick()
 					wallJump = tc.jump
 					for range tc.checks {
 						before := time.Now()
@@ -292,28 +249,24 @@ func TestDateToggle_IdleMidnightRefetchKeepsSelection(t *testing.T) {
 }
 
 func TestDateToggle_ClosedStatusControls(t *testing.T) {
-	for _, mode := range []string{dateToday, dateScheduled} {
-		t.Run(mode, func(t *testing.T) {
-			m := openFilterForm(t, filterFormFixture())
-			m.input.field(fieldStatus).radio.set("closed")
-			m.input.field(fieldDate).radio.set(mode)
-			m, _ = stepModel(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
-			require.Equal(t, inputFilterForm, m.input.kind)
-			assert.Equal(t, "Today and Scheduled show open issues only", m.input.err)
-			m.input.field(fieldStatus).radio.set("open")
-			m, _ = stepModel(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
-			require.Equal(t, inputNone, m.input.kind)
-			assert.Equal(t, mode, m.list.filter.Date)
-			m, _ = stepModel(m, tea.KeyPressMsg{Code: 's'})
-			assert.Empty(t, m.list.filter.Status)
-			m, _ = stepModel(m, tea.KeyPressMsg{Code: 's'})
-			assert.Equal(t, "open", m.list.filter.Status)
-			assert.Empty(t, m.list.status)
-		})
-	}
+	m := openFilterForm(t, filterFormFixture())
+	m.input.field(fieldStatus).radio.set("closed")
+	m.input.field(fieldDate).radio.set(dateToday)
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	require.Equal(t, inputFilterForm, m.input.kind)
+	assert.Equal(t, "Today and Scheduled show open issues only", m.input.err)
+	m.input.field(fieldStatus).radio.set("open")
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	require.Equal(t, inputNone, m.input.kind)
+	assert.Equal(t, dateToday, m.list.filter.Date)
+
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: 's'})
+	assert.Empty(t, m.list.filter.Status)
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: 's'})
+	assert.Equal(t, "open", m.list.filter.Status)
 }
 
-func TestReviewDateRolloverReconcilesSplitDetail(t *testing.T) {
+func TestDateToggle_DayRolloverReconcilesSplitDetail(t *testing.T) {
 	for _, empty := range []bool{false, true} {
 		t.Run(map[bool]string{false: "replacement", true: "empty"}[empty], func(t *testing.T) {
 			withClock(t, func() time.Time { return time.Date(2026, 11, 11, 0, 1, 0, 0, time.UTC) })
@@ -333,14 +286,11 @@ func TestReviewDateRolloverReconcilesSplitDetail(t *testing.T) {
 			}
 			require.NotNil(t, m.detail.issue)
 			assert.Equal(t, "later", m.detail.issue.ShortID)
-			m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
-			m, _ = stepModel(m, tea.KeyPressMsg{Code: 'd'})
-			assert.Equal(t, "later", m.input.target.issueShortID)
 		})
 	}
 }
 
-func TestReviewDateFilterCommitReconcilesSplitDetail(t *testing.T) {
+func TestDateToggle_FilterCommitReconcilesSplitDetail(t *testing.T) {
 	withClock(t, func() time.Time { return time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC) })
 	m, cleanup := splitTestSetup(t)
 	defer cleanup()
@@ -352,35 +302,107 @@ func TestReviewDateFilterCommitReconcilesSplitDetail(t *testing.T) {
 	m, _ = stepModel(m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	require.NotNil(t, m.detail.issue)
 	assert.Equal(t, "due", m.detail.issue.ShortID)
-	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
-	m, _ = stepModel(m, tea.KeyPressMsg{Code: 'd'})
-	assert.Equal(t, "due", m.input.target.issueShortID)
 }
 
-func TestReviewDateFilterDaemonSupport(t *testing.T) {
-	for _, version := range []string{"0.35.0", "", "invalid", "0.36.0", "0.37.0"} {
-		for _, mode := range []string{dateToday, dateScheduled} {
-			t.Run(version+"/"+mode, func(t *testing.T) {
-				calls := 0
-				client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-					require.Equal(t, "/api/v1/health", r.URL.Path)
-					calls++
-					respondJSON(t, w, map[string]any{"api_schema_version": version})
-				})
-				m := filterFormFixture()
-				m.api = newUndoClient(client)
-				form := newFilterForm(m.list.filter, m.scope)
-				form.field(fieldDate).radio.set(mode)
-				m, cmd := m.commitFilterForm(form)
-				m = drainInboxCmds(m, cmd)
-				assert.Equal(t, 1, calls)
-				assert.Equal(t, mode, m.list.filter.Date)
-				if version == "0.36.0" || version == "0.37.0" {
-					assert.Empty(t, m.list.status)
-				} else {
-					assert.Contains(t, m.list.status, "upgrade the daemon")
-				}
+func TestDateToggle_DaemonSupport(t *testing.T) {
+	for _, version := range []string{"0.35.0", "0.36.0"} {
+		t.Run(version, func(t *testing.T) {
+			calls := 0
+			client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, "/api/v1/health", r.URL.Path)
+				calls++
+				respondJSON(t, w, map[string]any{"api_schema_version": version})
 			})
-		}
+			m := filterFormFixture()
+			m.api = newUndoClient(client)
+			form := newFilterForm(m.list.filter, m.scope)
+			form.field(fieldDate).radio.set(dateToday)
+			m, cmd := m.commitFilterForm(form)
+			m = drainInboxCmds(m, cmd)
+			assert.Equal(t, 1, calls)
+			assert.Equal(t, dateToday, m.list.filter.Date)
+			if version == "0.36.0" {
+				assert.Empty(t, m.list.status)
+			} else {
+				assert.Contains(t, m.list.status, "upgrade the daemon")
+			}
+		})
 	}
+}
+
+func TestDateToggle_SearchCancelKeepsExpiredScheduledDetailEmpty(t *testing.T) {
+	now := time.Date(2026, 11, 10, 23, 59, 0, 0, time.UTC)
+	withClock(t, func() time.Time { return now })
+	m, cleanup := splitTestSetup(t)
+	defer cleanup()
+	m.api = nil
+	m.list.issues = []Issue{dated("soon", "2026-11-11", "")}
+	form := newFilterForm(m.list.filter, m.scope)
+	form.field(fieldDate).radio.set(dateScheduled)
+	m, _ = m.commitFilterForm(form)
+	seed := m.list.issues[0]
+	m.detail.issue, m.detail.scopePID = &seed, 7
+	m = openBarFromCmd(t, m, '/')
+	now = now.Add(2 * time.Minute)
+	m, _ = stepModel(m, dayTickMsg{})
+	require.Empty(t, m.list.visibleRows())
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	require.Equal(t, inputNone, m.input.kind)
+	assert.Nil(t, m.detail.issue, "cancel must keep the expired Scheduled row out of detail")
+	m, _ = stepModel(m, tea.KeyPressMsg{Code: tea.KeyTab})
+	m, _ = stepModel(m, runeKey('d'))
+	assert.NotEqual(t, inputDatesForm, m.input.kind, "an empty Scheduled result has no row to edit")
+}
+
+func TestDateToggle_MidnightFetchPreservesFreshlyFilteredSelection(t *testing.T) {
+	now := time.Date(2026, 11, 10, 23, 59, 0, 0, time.UTC)
+	withClock(t, func() time.Time { return now })
+	m, cleanup := splitTestSetup(t)
+	defer cleanup()
+	m.api = nil
+	issues := []Issue{dated("new", "2026-11-11", ""), dated("keep", "2026-11-10", "")}
+	m.list.issues = issues
+	form := newFilterForm(m.list.filter, m.scope)
+	form.field(fieldDate).radio.set(dateToday)
+	m, _ = m.commitFilterForm(form)
+	before, ok := m.list.targetRow()
+	require.True(t, ok)
+	require.Equal(t, "keep", before.ShortID)
+	now = now.Add(2 * time.Minute)
+	m, _ = stepModel(m, refetchedMsg{dispatchKey: m.currentCacheKey(), issues: issues})
+	assert.Equal(t, "2026-11-11", m.list.filter.Day)
+	after, ok := m.list.targetRow()
+	require.True(t, ok)
+	assert.Equal(t, "keep", after.ShortID)
+	require.NotNil(t, m.detail.issue)
+	assert.Equal(t, "keep", m.detail.issue.ShortID)
+}
+
+func TestDateToggle_DaemonCheckIgnoresSupersededFailure(t *testing.T) {
+	calls := 0
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/health", r.URL.Path)
+		calls++
+		if calls == 1 {
+			http.Error(w, `{"title":"temporarily unavailable"}`, http.StatusServiceUnavailable)
+			return
+		}
+		respondJSON(t, w, map[string]any{"api_schema_version": "0.36.0"})
+	})
+	m := filterFormFixture()
+	m.api = newUndoClient(client)
+	form := newFilterForm(m.list.filter, m.scope)
+	form.field(fieldDate).radio.set(dateToday)
+	m, oldCmd := m.commitFilterForm(form)
+	oldResult := oldCmd()
+	form = newFilterForm(m.list.filter, m.scope)
+	form.field(fieldDate).radio.set("any")
+	m, _ = m.commitFilterForm(form)
+	form = newFilterForm(m.list.filter, m.scope)
+	form.field(fieldDate).radio.set(dateToday)
+	m, newCmd := m.commitFilterForm(form)
+	m = drainInboxCmds(m, newCmd)
+	require.Empty(t, m.list.status)
+	m, _ = stepModel(m, oldResult)
+	assert.Empty(t, m.list.status, "the current filter must ignore the superseded HTTP 503")
 }

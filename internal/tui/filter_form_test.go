@@ -321,7 +321,7 @@ func TestFilterForm_EscKeepsAppliedFilter(t *testing.T) {
 	assertInputKind(t, nm, inputNone)
 	want := ListFilter{Status: "open", Owner: "wesm", Date: dateToday, Day: "2026-11-10"}
 	if !listFilterEqual(nm.list.filter, want) {
-		t.Fatalf("filter not restored: got %+v, want %+v", nm.list.filter, want)
+		t.Fatalf("applied filter changed on Esc: got %+v, want %+v", nm.list.filter, want)
 	}
 }
 
