@@ -45,14 +45,14 @@ ORDER BY e.id ASC LIMIT $4`, projectID, originInstanceUID, afterID, limit)
 		}
 		extra, err := s.queryPendingFederationPushEvents(ctx, eventSelect+`
 WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND e.type IN (`+db.FederationSnapshotEventTypesSQL()+`)
-  AND NOT EXISTS (
-    SELECT 1 FROM events barrier
+  AND e.id < COALESCE((
+    SELECT MIN(barrier.id) FROM events barrier
      WHERE barrier.project_id=e.project_id
        AND barrier.origin_instance_uid=e.origin_instance_uid
-       AND barrier.id>$4 AND barrier.id<e.id
+       AND barrier.id>$4
        AND `+pgFederationPushEventTypeCondition("barrier.type")+`
        AND barrier.type NOT IN (`+db.FederationSnapshotEventTypesSQL()+`)
-  )
+  ), 9223372036854775807)
 ORDER BY e.id ASC`, projectID, originInstanceUID, output[len(output)-1].ID, runStartAfterID)
 		if err != nil {
 			return nil, err
