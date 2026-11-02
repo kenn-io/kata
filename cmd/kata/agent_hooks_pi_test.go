@@ -630,7 +630,7 @@ func TestPiNativeRealKataTransport(t *testing.T) {
 	opts.Attention = true
 	opts.SourceSet = true
 	opts.Source = "contract '$;`.txt"
-	opts.Executable = kataTestBinary(t, "")
+	opts.Executable = kataTestBinary(t, "v1.2.3")
 	plan, err := planPiAgentHooks(opts, false)
 	if err != nil {
 		t.Fatal(err)
