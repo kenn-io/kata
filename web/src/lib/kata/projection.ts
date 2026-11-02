@@ -182,11 +182,7 @@ function markTransitiveBlockLayout(edges: KataReachableGraphEdge[]): void {
   const ends = blocks.map((edge) => [idOf(edge.from_uid), idOf(edge.to_uid)] as const)
   const count = ids.size
   const targets: number[][] = Array.from({ length: count }, () => [])
-  const linked = new Set<number>()
   for (const [from, to] of ends) {
-    const pair = from * count + to
-    if (linked.has(pair)) continue
-    linked.add(pair)
     targets[from]!.push(to)
   }
 

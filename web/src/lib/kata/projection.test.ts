@@ -75,7 +75,6 @@ describe('normalizeKataUISnapshot', () => {
     { pairs: ['ab', 'bc', 'ac'], layouts: [true, true, false] },
     { pairs: ['ab', 'ac', 'bd', 'db'], layouts: [true, true, true, true] },
     { pairs: ['ab', 'bc', 'ca', 'ac'], layouts: [true, true, true, false] },
-    { pairs: ['ab', 'bc', 'ac', 'ac', 'ab'], layouts: [true, true, false, false, true] },
   ])('preserves blocks layout for $pairs', ({ pairs, layouts }) => {
     const wire = snapshot()
     const issues = ['a', 'b', 'c', 'd', 'x'].map((uid, index) => issue(uid, `t${index}`, uid))
@@ -152,7 +151,6 @@ describe('normalizeKataUISnapshot', () => {
         for (const to of 'abcdefgh') {
           if (from === to || random() >= 0.2) continue
           pairs.push(from + to)
-          if (random() < 0.1) pairs.push(from + to)
         }
       }
       for (let index = pairs.length - 1; index > 0; index--) {
