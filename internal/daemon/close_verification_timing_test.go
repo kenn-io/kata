@@ -2,6 +2,7 @@ package daemon_test
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"net/http"
@@ -44,7 +45,7 @@ func TestCloseVerificationPreflightTiming(t *testing.T) {
 	ctx := t.Context()
 	p, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
-	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Author: "worker", Title: "Claim"})
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Author: "worker", Title: "Claim", Metadata: map[string]jsontext.Value{"verify.required": jsontext.Value("true")}})
 	require.NoError(t, err)
 	other, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Author: "worker", Title: "Review"})
 	require.NoError(t, err)
