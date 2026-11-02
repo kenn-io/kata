@@ -20,8 +20,26 @@ func openClawInstallRecorder(t *testing.T, target string) string {
 	openClawCopyRecorder(t, testBinary(t, "openclaw-recorder", "./testdata/openclaw/recorder"), target)
 	return target
 }
+
+func TestOpenClawCopyRecorderReplacesExistingTarget(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source")
+	target := filepath.Join(dir, "target")
+	require.NoError(t, os.WriteFile(source, []byte("recorder"), 0700))
+	openClawCopyRecorder(t, source, target)
+	openClawCopyRecorder(t, source, target)
+	for _, path := range []string{source, target} {
+		content, err := os.ReadFile(path)
+		require.NoError(t, err)
+		require.Equal(t, "recorder", string(content))
+	}
+}
+
 func openClawCopyRecorder(t *testing.T, source, target string) {
 	t.Helper()
+	if err := os.Remove(target); !os.IsNotExist(err) {
+		require.NoError(t, err)
+	}
 	if err := os.Link(source, target); err == nil {
 		return
 	}
