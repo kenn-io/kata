@@ -6,11 +6,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	"go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemonruntime"
 	"go.kenn.io/kata/internal/version"
@@ -22,6 +25,8 @@ type updateClient interface {
 	Check(context.Context, selfupdate.CheckOptions) (*selfupdate.Info, error)
 	Install(context.Context, *selfupdate.Info, selfupdate.InstallOptions) error
 }
+
+const updateBinaryName = "kata"
 
 type updateGuidance struct {
 	Distribution string
@@ -38,7 +43,7 @@ var newSelfUpdateClient = func(current string) (updateClient, error) {
 	return selfupdate.Client{
 		Owner:                  "kenn-io",
 		Repo:                   "kata",
-		BinaryName:             "kata",
+		BinaryName:             updateBinaryName,
 		CurrentVersion:         current,
 		CacheDir:               filepath.Join(home, "cache", "update"),
 		GitHubToken:            selfupdate.EnvironmentGitHubToken(),
@@ -101,7 +106,17 @@ func newUpdateCmd() *cobra.Command {
 					return err
 				}
 			}
-			if err := client.Install(cmd.Context(), info, selfupdate.InstallOptions{}); err != nil {
+			executable := ""
+			installOptions := selfupdate.InstallOptions{}
+			if restart := newDaemonRestart(io.Discard); restart != nil {
+				binaryName := updateBinaryName
+				if runtime.GOOS == "windows" {
+					binaryName += ".exe"
+				}
+				executable = filepath.Join(filepath.Dir(restart.executable), binaryName)
+				installOptions.DestinationPath = executable
+			}
+			if err := client.Install(cmd.Context(), info, installOptions); err != nil {
 				return &cliError{
 					Message:  "install update: " + err.Error(),
 					Kind:     kindInternal,
@@ -110,7 +125,7 @@ func newUpdateCmd() *cobra.Command {
 			}
 			// Restart output goes to stderr so JSON and agent stdout stay a
 			// single update record.
-			if err := restartDaemonAfterUpdate(cmd.Context(), cmd.ErrOrStderr()); err != nil {
+			if err := restartDaemonAfterUpdate(cmd.Context(), cmd.ErrOrStderr(), executable, latestUpdateVersion(info)); err != nil {
 				return fmt.Errorf("installed kata %s, but the daemon was not restarted: %w", latestUpdateVersion(info), err)
 			}
 			return printUpdateInstallResult(cmd, info)
@@ -126,30 +141,26 @@ func newUpdateCmd() *cobra.Command {
 // re-execute itself through the newly installed binary. The daemon restarts
 // with its own arguments and environment, so the updater needs neither its
 // startup options nor its credentials. A stopped daemon stays stopped.
-func restartDaemonAfterUpdate(ctx context.Context, stderr io.Writer) error {
+func restartDaemonAfterUpdate(ctx context.Context, stderr io.Writer, executable, installedVersion string) error {
 	ns, err := daemonruntime.NewNamespace()
 	if err != nil {
 		return err
 	}
-	store := kitdaemon.RuntimeStore{Dir: ns.DataDir}
-	records, err := store.List()
+	records, release, err := lockLiveDaemons(ctx, ns, stderr)
 	if err != nil {
 		return err
 	}
-	noteSkippedDaemons(stderr, records)
+	defer release()
 	for _, record := range records {
-		if !daemonruntime.RuntimeProcessAlive(record) {
-			continue
-		}
 		if !daemonruntime.RuntimeRecordRestartable(record) {
-			return fmt.Errorf("daemon pid %d does not support automatic restart; run 'kata daemon restart' with its original startup options", record.PID)
+			return fmt.Errorf("daemon pid %d does not support automatic restart; run 'kata daemon stop', then 'kata daemon start' in its original host shell or service with its original startup options", record.PID)
 		}
-		if err := daemonruntime.SignalDaemonRestart(record, ns.DBHash); err != nil {
-			return fmt.Errorf("signal daemon pid %d: %w", record.PID, err)
-		}
-		replacement, err := waitForDaemonReplacement(ctx, store, record)
+		replacement, err := requestDaemonRestart(ctx, ns, record, executable, nil)
 		if err != nil {
 			return err
+		}
+		if record.Metadata[daemonruntime.RuntimeRestartExecutableKey] != "1" && replacement.Version != installedVersion {
+			return olderDaemonRestartError(replacement)
 		}
 		if _, err := fmt.Fprintf(stderr, "restarted daemon pid=%d address=%s\n",
 			replacement.PID, replacement.Endpoint().ConfigAddress()); err != nil {
@@ -162,44 +173,47 @@ func restartDaemonAfterUpdate(ctx context.Context, stderr io.Writer) error {
 	return nil
 }
 
-// updateDaemonReplacementGrace bounds how long a replacement may take to
-// publish its runtime record once the previous daemon process has exited.
-const updateDaemonReplacementGrace = 5 * time.Second
-
 // waitForDaemonReplacement returns the first live runtime record started
 // after previous. On Unix the daemon keeps its PID across re-execution, so a
 // newer record rather than a new PID identifies the replacement.
 func waitForDaemonReplacement(
-	ctx context.Context, store kitdaemon.RuntimeStore, previous kitdaemon.RuntimeRecord,
+	ctx context.Context, store kitdaemon.RuntimeStore, previous kitdaemon.RuntimeRecord, reply string,
 ) (kitdaemon.RuntimeRecord, error) {
-	deadline := time.Now().Add(daemonRestartProcessWaitTimeout)
-	var exitedAt time.Time
-	for {
+	var replacement kitdaemon.RuntimeRecord
+	err := client.WaitForDaemonStartup(ctx, nil, daemonShutdownDrainTimeout+daemonOwnerLockWait+5*time.Second, nil, func(context.Context) (bool, error) {
 		records, err := store.List()
 		if err != nil {
-			return kitdaemon.RuntimeRecord{}, err
+			return false, err
 		}
 		for _, record := range records {
 			if record.StartedAt.After(previous.StartedAt) && daemonruntime.RuntimeProcessAlive(record) {
-				return record, nil
+				replacement = record
+				return true, restartReplyError(reply, previous.PID, &record)
 			}
 		}
-		now := time.Now()
-		if exitedAt.IsZero() && !kitdaemon.ProcessAlive(previous.PID) {
-			exitedAt = now
+		if err := restartReplyError(reply, previous.PID, nil); err != nil {
+			return false, err
 		}
-		switch {
-		case !exitedAt.IsZero() && now.Sub(exitedAt) > updateDaemonReplacementGrace:
-			return kitdaemon.RuntimeRecord{}, fmt.Errorf("daemon pid %d exited without starting a replacement; check the daemon log, then run 'kata daemon start' with its original startup options", previous.PID)
-		case now.After(deadline):
-			return kitdaemon.RuntimeRecord{}, fmt.Errorf("daemon pid %d did not restart within %s", previous.PID, daemonRestartProcessWaitTimeout)
+		if runtime.GOOS != "windows" && !daemonruntime.RuntimeProcessAlive(previous) {
+			return false, fmt.Errorf("daemon pid %d exited without starting a replacement; check the daemon log", previous.PID)
 		}
-		select {
-		case <-ctx.Done():
-			return kitdaemon.RuntimeRecord{}, ctx.Err()
-		case <-time.After(50 * time.Millisecond):
-		}
+		return false, nil
+	})
+	return replacement, err
+}
+
+// restartReplyError reads the daemon's refusal of this caller's request after
+// the runtime records were listed. A replacement started for this request
+// names its reply; any other was started for another request or start.
+func restartReplyError(reply string, pid int, replacement *kitdaemon.RuntimeRecord) error {
+	answer, _ := os.ReadFile(reply) //nolint:gosec // caller-owned private reply file
+	switch {
+	case len(answer) != 0:
+		return fmt.Errorf("restart failed: %s", answer)
+	case replacement != nil && reply != "" && replacement.Metadata[daemonruntime.RuntimeRestartReplyKey] != filepath.Base(reply):
+		return fmt.Errorf("another daemon replaced pid %d first; this restart was not applied", pid)
 	}
+	return nil
 }
 
 func printUpdateSummary(cmd *cobra.Command, info *selfupdate.Info) error {
