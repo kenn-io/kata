@@ -235,6 +235,8 @@ func mergeUndoIssue(current, updated *Issue, entry undoEntry) *Issue {
 		merged.Priority = updated.Priority
 	case "body.edit":
 		merged.Body = updated.Body
+	case "dates":
+		merged.Metadata = updated.Metadata
 	case "label.add":
 		merged.Labels = slices.DeleteFunc(slices.Clone(merged.Labels), func(label string) bool { return label == entry.label })
 	case "label.remove":
@@ -295,7 +297,7 @@ func (m *Model) rebaseUndoRevisions(entry undoEntry, resp *MutationResp) {
 		return
 	}
 	wantRevision := entry.revision
-	if entry.kind == "close" || entry.kind == "reopen" || entry.kind == "owner.assign" {
+	if entry.kind == "close" || entry.kind == "reopen" || entry.kind == "owner.assign" || entry.kind == "dates" {
 		wantRevision++
 	}
 	if resp.Issue.Revision != wantRevision {

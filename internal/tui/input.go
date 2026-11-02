@@ -35,6 +35,7 @@ const (
 	inputCommentForm         // detail `c` — centered multi-line comment editor
 	inputFilterForm          // list `f` — multi-axis filter modal: Status/Owner/Search
 	inputCloseForm           // list/detail `x` — authenticated close message + evidence
+	inputDatesForm           // list/detail `d` — Scheduled and Deadline dates
 )
 
 type searchFocus int
@@ -74,7 +75,7 @@ func (k inputKind) isCommandBar() bool {
 // branch that keeps it out of commitFormInput.
 func (k inputKind) isCenteredForm() bool {
 	switch k {
-	case inputBodyEditForm, inputCommentForm, inputNewIssueForm, inputFilterForm, inputCloseForm:
+	case inputBodyEditForm, inputCommentForm, inputNewIssueForm, inputFilterForm, inputCloseForm, inputDatesForm:
 		return true
 	}
 	return false
@@ -114,6 +115,8 @@ const (
 	fieldCloseMessage
 	fieldEvidenceType
 	fieldEvidenceValue
+	fieldScheduled
+	fieldDeadline
 )
 
 // radioField backs a fieldRadio inputField: a finite set of choices
@@ -338,6 +341,7 @@ type inputState struct {
 	preSplitDetailCaptured bool
 	target                 formTarget
 	formGen                int64
+	dates                  datesFormState
 	suggestHighlight       int
 	suggestScroll          int
 }
@@ -659,7 +663,7 @@ func (s inputState) resetFilterFields() inputState {
 // field at all so $EDITOR is never offered.
 func (s inputState) ctrlEAllowed() bool {
 	switch s.kind {
-	case inputFilterForm:
+	case inputFilterForm, inputDatesForm:
 		return false
 	case inputNewIssueForm:
 		return s.activeFieldIs(fieldBody)
@@ -678,7 +682,7 @@ func (s inputState) shouldCycleFields() bool {
 	if len(s.fields) <= 1 {
 		return false
 	}
-	return s.kind == inputNewIssueForm || s.kind == inputFilterForm || s.kind == inputCloseForm
+	return s.kind == inputNewIssueForm || s.kind == inputFilterForm || s.kind == inputCloseForm || s.kind == inputDatesForm
 }
 
 // shouldAdvanceOnEnter reports whether enter on the active single-
@@ -692,7 +696,7 @@ func (s inputState) shouldAdvanceOnEnter() bool {
 		return false
 	}
 	switch s.kind {
-	case inputFilterForm, inputCloseForm:
+	case inputFilterForm, inputCloseForm, inputDatesForm:
 		return true
 	case inputNewIssueForm:
 		return !s.activeFieldIs(fieldBody)

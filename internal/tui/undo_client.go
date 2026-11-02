@@ -250,6 +250,16 @@ func (c *undoClient) EditBody(ctx context.Context, projectID int64, ref, body, a
 	})
 }
 
+func (c *undoClient) SetDates(ctx context.Context, projectID int64, ref string, in DatesInput) (*MutationResp, error) {
+	writer, ok := c.KataAPI.(datesAPI)
+	if !ok {
+		return nil, errors.New("connected client cannot edit dates")
+	}
+	return c.edit(ctx, projectID, ref, in.Actor, "dates", func(uid string) (*MutationResp, error) {
+		return writer.SetDates(ctx, projectID, uid, in)
+	})
+}
+
 func (c *undoClient) CloseWithEvidence(ctx context.Context, projectID int64, ref string, in CloseInput) (*MutationResp, error) {
 	closer, ok := c.KataAPI.(evidenceCloseAPI)
 	if !ok {
