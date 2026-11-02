@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"net/http"
@@ -310,7 +309,7 @@ func interceptingProxy(t *testing.T, env *testenv.Env, intercept func(http.Respo
 
 func runCLIAgainst(t *testing.T, baseURL, dir string, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
-	return executeRootCapture(t, contextWithBaseURL(context.Background(), baseURL), append([]string{"--workspace", dir}, args...)...)
+	return executeRootCapture(t, contextWithBaseURL(t.Context(), baseURL), append([]string{"--workspace", dir}, args...)...)
 }
 
 func patchRecurrenceViaHTTP(t *testing.T, env *testenv.Env, pid int64, rec recurrenceRow, rule string) {
