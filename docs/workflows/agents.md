@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-28
+last_edited: 2026-10-30
 ---
 
 # Agent workflows
@@ -887,6 +887,9 @@ This is especially important before a long pause, context compaction, or
 handoff to another agent.
 
 ## Use relationships deliberately
+
+For ordered stages with a human approval step, follow
+[Gated workflows](gated-workflows.md).
 
 Create child work under a parent issue:
 

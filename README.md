@@ -226,6 +226,7 @@ The [docs site](docs/) is the definitive reference:
   [Model Context Protocol](docs/reference/mcp.md) ·
   [Configuration](docs/reference/configuration.md)
 - Workflows: [Agent workflows](docs/workflows/agents.md) ·
+  [Gated workflows](docs/workflows/gated-workflows.md) ·
   [Sharing models](docs/workflows/sharing.md)
 - Operations: [GitHub sync](docs/operations/github-sync.md) ·
   [Notion sync](docs/operations/notion-sync.md) ·
