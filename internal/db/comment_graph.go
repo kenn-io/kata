@@ -53,8 +53,13 @@ type CommentGraphTarget struct {
 	ProjectID int64
 }
 
+// commentHandleSuffixLength matches commentref.MinLength and the UID index expression.
+const commentHandleSuffixLength = 6
+
 // CommentGraphData is captured wholly inside one backend read transaction.
 type CommentGraphData struct {
+	// CommentUIDsByProject holds UIDs sharing a six-character suffix with a
+	// returned record, enough to derive the same handles as the full project.
 	CommentUIDsByProject map[int64][]string
 	Comments             []CommentGraphRecord
 	Targets              map[string]CommentGraphTarget
@@ -88,21 +93,25 @@ func ReadCommentGraphTx(
 		})
 	}
 	commentGraphSelect := `SELECT c.id,c.uid,c.issue_id,c.author,c.body,c.created_at,c.teammate,c.reply_to_uid,c.reply_kind,c.edited_at,` + attributionExpr + `,i.uid,i.short_id,i.project_id,p.uid,p.name` + commentGraphFrom
-	args := []any{query.ProjectID}
-	where := " WHERE i.project_id=" + bind(1) + " AND p.deleted_at IS NULL AND i.deleted_at IS NULL"
-	if query.IncludeDeletedSourceIssueID > 0 {
-		args = append(args, query.IncludeDeletedSourceIssueID)
-		where = " WHERE i.project_id=" + bind(1) + " AND p.deleted_at IS NULL AND (i.deleted_at IS NULL OR i.id=" + bind(2) + ")"
-	}
-	if query.AllowedIssueIDs != nil {
-		marks := make([]string, len(query.AllowedIssueIDs))
-		for index, id := range query.AllowedIssueIDs {
-			args = append(args, id)
-			marks[index] = bind(len(args))
+	visibleWhere := func(args *[]any) string {
+		*args = append(*args, query.ProjectID)
+		where := " WHERE i.project_id=" + bind(len(*args)) + " AND p.deleted_at IS NULL AND i.deleted_at IS NULL"
+		if query.IncludeDeletedSourceIssueID > 0 {
+			*args = append(*args, query.IncludeDeletedSourceIssueID)
+			where = " WHERE i.project_id=" + bind(len(*args)-1) + " AND p.deleted_at IS NULL AND (i.deleted_at IS NULL OR i.id=" + bind(len(*args)) + ")"
 		}
-		where += " AND i.id IN (" + strings.Join(marks, ",") + ")"
+		if query.AllowedIssueIDs != nil {
+			marks := make([]string, len(query.AllowedIssueIDs))
+			for index, id := range query.AllowedIssueIDs {
+				*args = append(*args, id)
+				marks[index] = bind(len(*args))
+			}
+			where += " AND i.id IN (" + strings.Join(marks, ",") + ")"
+		}
+		return where + " AND " + projectPredicate(args)
 	}
-	where += " AND " + projectPredicate(&args)
+	args := []any{}
+	where := visibleWhere(&args)
 	if query.Reference != nil {
 		ref := query.Reference
 		if ref.UID != "" {
@@ -143,7 +152,7 @@ func ReadCommentGraphTx(
 selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(args)) + `)
 ` + commentGraphSelect + ` WHERE c.uid IN (
  SELECT uid FROM selected
- UNION SELECT v.uid FROM visible v JOIN selected s ON v.reply_to_uid=s.uid
+ UNION SELECT v.uid FROM selected s CROSS JOIN visible v WHERE v.reply_to_uid=s.uid
  UNION SELECT v.uid FROM visible v JOIN selected s ON v.uid=s.reply_to_uid
 )`
 	}
@@ -165,14 +174,22 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(ar
 	if err != nil {
 		return data, err
 	}
-	if query.SelectedIssueID > 0 && len(data.Comments) > 0 {
-		// Handle uniqueness still spans the authorized project, but unrelated
-		// bodies and unavailable endpoints never need to leave the database.
-		uids, err := readCommentGraphUIDs(ctx, tx, where, args[:len(args)-1]...)
-		if err != nil {
-			return data, err
+	type handleUniverse struct {
+		where    func(*[]any) string
+		suffixes map[string]bool
+	}
+	universes := map[int64]*handleUniverse{}
+	addSuffix := func(record CommentGraphRecord) {
+		uid := record.Comment.UID
+		if len(uid) >= commentHandleSuffixLength {
+			universes[record.ProjectID].suffixes[strings.ToLower(uid[len(uid)-commentHandleSuffixLength:])] = true
 		}
-		data.CommentUIDsByProject[query.ProjectID] = uids
+	}
+	if query.SelectedIssueID > 0 && len(data.Comments) > 0 {
+		universes[query.ProjectID] = &handleUniverse{where: visibleWhere, suffixes: map[string]bool{}}
+		for _, record := range data.Comments {
+			addSuffix(record)
+		}
 	}
 
 	visible := make(map[string]bool, len(data.Comments))
@@ -201,8 +218,17 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(ar
 		target, err := scanCommentGraphRecord(tx.QueryRowContext(ctx,
 			commentGraphSelect+targetWhere, targetArgs...), parseTime)
 		if err == nil {
-			if _, loaded := data.CommentUIDsByProject[target.ProjectID]; !loaded {
-				uids, err := readCommentGraphUIDs(ctx, tx, " WHERE i.project_id="+bind(1)+" AND i.deleted_at IS NULL AND p.deleted_at IS NULL", target.ProjectID)
+			targetUniverse := func(args *[]any) string {
+				*args = append(*args, target.ProjectID)
+				return " WHERE i.project_id=" + bind(len(*args)) + " AND i.deleted_at IS NULL AND p.deleted_at IS NULL"
+			}
+			if query.SelectedIssueID > 0 {
+				if _, loaded := universes[target.ProjectID]; !loaded {
+					universes[target.ProjectID] = &handleUniverse{where: targetUniverse, suffixes: map[string]bool{}}
+				}
+				addSuffix(target)
+			} else if _, loaded := data.CommentUIDsByProject[target.ProjectID]; !loaded {
+				uids, err := readCommentGraphUIDs(ctx, tx, targetUniverse, nil, bind)
 				if err != nil {
 					return data, err
 				}
@@ -242,11 +268,33 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(ar
 		}
 		data.Targets[targetUID] = state
 	}
+	for projectID, universe := range universes {
+		uids, err := readCommentGraphUIDs(ctx, tx, universe.where, universe.suffixes, bind)
+		if err != nil {
+			return data, err
+		}
+		data.CommentUIDsByProject[projectID] = uids
+	}
 	return data, nil
 }
 
-func readCommentGraphUIDs(ctx context.Context, tx *sql.Tx, where string, args ...any) ([]string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT c.uid`+commentGraphFrom+where, args...) // #nosec G202 -- Callers supply static predicates and bind every value.
+func readCommentGraphUIDs(ctx context.Context, tx *sql.Tx, visibleWhere func(*[]any) string, suffixes map[string]bool, bind func(int) string) ([]string, error) {
+	args := []any{}
+	from := commentGraphFrom
+	if suffixes != nil {
+		marks := make([]string, 0, len(suffixes))
+		for suffix := range suffixes {
+			args = append(args, suffix)
+			marks = append(marks, bind(len(args)))
+		}
+		// CROSS JOIN keeps SQLite on the suffix index without planner statistics.
+		from = ` FROM (SELECT uid,issue_id FROM comments WHERE lower(substr(uid,21)) IN (` + strings.Join(marks, ",") + `)) c CROSS JOIN issues i CROSS JOIN projects p`
+	}
+	where := visibleWhere(&args)
+	if suffixes != nil {
+		where += " AND i.id=c.issue_id AND p.id=i.project_id"
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT c.uid`+from+where, args...) // #nosec G202 -- Callers supply static predicates and bind every value.
 	if err != nil {
 		return nil, err
 	}

@@ -2,7 +2,9 @@ package db
 
 import (
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -50,7 +52,12 @@ func TestSelectedCommentGraphWorkIgnoresUnrelatedBodies(t *testing.T) {
 				require.Equal(t, "01M40000000000000000000004", graph.Comments[0].Comment.UID)
 				if reference == nil {
 					require.Equal(t, "Selected issue comment", graph.Comments[0].Comment.Body)
-					require.Len(t, graph.CommentUIDsByProject[1], unrelated+1)
+					expected := []string{"01M40000000000000000000004"}
+					if unrelated > 4 {
+						expected = append(expected, "01M50000000000000000000004")
+					}
+					require.ElementsMatch(t, expected, graph.CommentUIDsByProject[1])
+					require.LessOrEqual(t, work.rows, 3, "handle rows stay bounded as unrelated comments grow")
 					require.Equal(t, 22, work.bodyBytes, "unrelated bodies must not be consumed and discarded")
 					require.LessOrEqual(t, work.queries, 2, "unrelated pending targets must not trigger endpoint lookups")
 				} else {
@@ -108,5 +115,67 @@ func TestReadCommentGraphPendingTargetWork(t *testing.T) {
 		} else {
 			require.Equal(t, singleReplyQueries, work.queries, "replies to the same target must reuse its snapshot evidence")
 		}
+	}
+}
+
+// A selected issue must use both lookup indexes without ANALYZE, as production does.
+func TestSelectedCommentGraphUsesLookupIndexes(t *testing.T) {
+	ctx := t.Context()
+	work := &referenceWork{}
+	pool := sql.OpenDB(referenceConnector{work})
+	pool.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = pool.Close() })
+	schema, err := os.ReadFile("sqlitestore/schema.sql")
+	require.NoError(t, err)
+	_, err = pool.ExecContext(ctx, string(schema))
+	require.NoError(t, err)
+	for _, statement := range []string{
+		`INSERT INTO projects(id,uid,name) VALUES(1,'01M40000000000000000000001','example-project')`,
+		`INSERT INTO issues(id,uid,short_id,project_id,title,author) VALUES(1,'01M40000000000000000000002','0002',1,'Selected','worker')`,
+		`INSERT INTO comments(uid,issue_id,author,body) VALUES('01M40000000000000000000004',1,'worker','Selected comment')`,
+		`INSERT INTO comments(uid,issue_id,author,body) VALUES('01M40000000000000000000005',1,'worker','Second comment'),('01M40000000000000000000006',1,'worker','Third comment')`,
+		`WITH RECURSIVE n(x) AS (VALUES(1000) UNION ALL SELECT x+1 FROM n WHERE x<1999) INSERT INTO issues(id,uid,short_id,project_id,title,author) SELECT x,printf('01M4%022d',x),printf('%04d',x),1,'Other','worker' FROM n`,
+		`INSERT INTO comments(uid,issue_id,author,body) SELECT printf('01M5%022d',id),id,'worker','Unrelated' FROM issues WHERE id>=1000`,
+	} {
+		_, err := pool.ExecContext(ctx, statement)
+		require.NoError(t, err)
+	}
+	var statements []string
+	var arguments [][]any
+	work.capture = func(statement string, args []driver.NamedValue) {
+		statements = append(statements, statement)
+		values := make([]any, len(args))
+		for index, arg := range args {
+			values[index] = arg.Value
+		}
+		arguments = append(arguments, values)
+	}
+	tx, err := pool.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	_, err = ReadCommentGraphTx(ctx, tx, CommentGraphQuery{ProjectID: 1, SelectedIssueID: 1},
+		func(int) string { return "?" },
+		func(value string) (time.Time, error) { return time.Parse(time.RFC3339Nano, value) },
+		`json_extract(e.payload,'$.reply_to_uid')`, "NULL")
+	require.NoError(t, err)
+	require.NoError(t, tx.Rollback())
+	work.capture = nil
+	require.Len(t, statements, 2)
+	for index, statement := range statements {
+		rows, err := pool.QueryContext(ctx, "EXPLAIN QUERY PLAN "+statement, arguments[index]...)
+		require.NoError(t, err)
+		var plan []string
+		for rows.Next() {
+			var id, parent, unused int
+			var detail string
+			require.NoError(t, rows.Scan(&id, &parent, &unused, &detail))
+			plan = append(plan, detail)
+		}
+		require.NoError(t, rows.Err())
+		require.NoError(t, rows.Close())
+		expected := "idx_comments_reply_to"
+		if index == 1 {
+			expected = "idx_comments_uid_handle"
+		}
+		require.Contains(t, strings.Join(plan, "\n"), "INDEX "+expected)
 	}
 }

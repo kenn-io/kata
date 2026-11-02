@@ -17,7 +17,10 @@ import (
 
 // The observer delegates SQL to real SQLite and counts consumed rows, rather
 // than guessing cost from query text or measuring scheduler-sensitive time.
-type referenceWork struct{ queries, rows, bodyBytes int }
+type referenceWork struct {
+	queries, rows, bodyBytes int
+	capture                  func(string, []driver.NamedValue)
+}
 type referenceConnector struct{ work *referenceWork }
 
 func (c referenceConnector) Driver() driver.Driver { return &sqlite.Driver{} }
@@ -36,6 +39,9 @@ type referenceConnection struct {
 
 func (c *referenceConnection) QueryContext(ctx context.Context, q string, a []driver.NamedValue) (driver.Rows, error) {
 	c.work.queries++
+	if c.work.capture != nil {
+		c.work.capture(q, a)
+	}
 	r, err := c.Conn.(driver.QueryerContext).QueryContext(ctx, q, a)
 	if err != nil {
 		return nil, err

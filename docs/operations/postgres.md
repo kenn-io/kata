@@ -116,6 +116,11 @@ for the offline window, grants, and rollback.
 Schema 38 indexes comment reply targets in event history. Stop daemons and
 imports while it builds. See the [schema 38 migration requirements](../development/postgres-migrations.md#schema-38-comment-reply-target-index).
 
+Schema 39 adds an index for comment handle collisions when showing one issue.
+Stop daemons and imports while the migration scans the comment table and builds
+the index. See the [schema 39 migration requirements](../development/postgres-migrations.md#schema-39-comment-handle-lookup-index)
+for the offline window, grants, and rollback.
+
 After preparation, grant the runtime role DML access and set default privileges
 for objects created by future migrations:
 

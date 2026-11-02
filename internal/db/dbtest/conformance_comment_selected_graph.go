@@ -24,7 +24,7 @@ func checkSelectedCommentGraph(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	incoming, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: other.ID, Author: "reviewer", Body: "Incoming evidence", ReplyToUID: reply.UID, ReplyKind: "reply"})
 	require.NoError(t, err)
-	unrelated, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: other.ID, Author: "worker", Body: "Unrelated response", ReplyToUID: "01AAAAAAAAAAAAAAAAAAAAAAAA", ReplyKind: "reply"})
+	_, _, err = store.CreateComment(ctx, db.CreateCommentParams{IssueID: other.ID, Author: "worker", Body: "Unrelated response", ReplyToUID: "01AAAAAAAAAAAAAAAAAAAAAAAA", ReplyKind: "reply"})
 	require.NoError(t, err)
 	query := db.CommentGraphQuery{ProjectID: project.ID, SelectedIssueID: source.ID}
 	graph, err := store.ReadCommentGraph(ctx, query)
@@ -36,7 +36,7 @@ func checkSelectedCommentGraph(t *testing.T, store db.Storage) error {
 	}
 	require.Equal(t, map[string]string{target.UID: "Finding", reply.UID: "Answer", incoming.UID: "Incoming evidence"}, bodies)
 	require.Empty(t, graph.Targets, "unrelated pending edges need no evidence resolution")
-	require.ElementsMatch(t, []string{target.UID, reply.UID, incoming.UID, unrelated.UID}, graph.CommentUIDsByProject[project.ID])
+	require.ElementsMatch(t, []string{target.UID, reply.UID, incoming.UID}, graph.CommentUIDsByProject[project.ID])
 	snapshot, err := store.(db.UIStore).ReadUISnapshot(ctx, db.UISnapshotQuery{SelectedIssueUID: source.UID})
 	require.NoError(t, err)
 	require.Len(t, snapshot.CommentGraph.Comments, 3)

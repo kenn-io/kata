@@ -63,6 +63,7 @@ func TestSelectedCommentGraphSkipsUnrelatedBodiesAndTargets(t *testing.T) {
 	require.Len(t, out.Body.Comments[0].Backlinks, 1)
 	require.Equal(t, backlink.Body, out.Body.Comments[0].Backlinks[0].Body)
 	require.Len(t, counted.graphs, 1)
+	require.ElementsMatch(t, []string{comment.UID, finding.UID, backlink.UID, "01BBBBBBBBBBBBBBBBBBABCDEF"}, counted.graphs[0].CommentUIDsByProject[project.ID])
 	require.Len(t, counted.graphs[0].Comments, 3, "only the selected comment and its direct endpoints need bodies")
 	require.Empty(t, counted.graphs[0].Targets, "unrelated pending endpoints need no evidence queries")
 
