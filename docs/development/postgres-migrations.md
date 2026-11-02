@@ -218,3 +218,24 @@ uses its normal JSONL cutover with backup and swap protections.
 Start the matching schema 35 binary after migration. Older binaries cannot open
 schema 35. Rollback requires the pre-upgrade backup and matching older binary;
 there is no down migration.
+
+## Schema 38: comment reply target index
+
+The 35→38 migration adds the partial `idx_events_reply_to` index on `events`,
+keyed by the payload's `reply_to_uid` for `issue.commented` rows with a reply
+target. Kata uses it to distinguish purged targets from comments that have yet
+to sync, without scanning event history for each missing target. Existing events
+are unchanged; the migration adds no columns or constraints. Fresh PostgreSQL
+and SQLite databases include the same index.
+
+Stop serving daemons and imports, back up the database, and run
+`kata storage postgres migrate` with schema-owner credentials. Creating the
+index reads every `events` row and blocks event writes while it runs; allow an
+offline window that fits the event table's size. Existing table grants remain
+sufficient. Validation-only runtime credentials cannot migrate. Versions 25–34
+follow the existing immutable migration chain before applying schema 38. SQLite
+uses its normal JSONL cutover with backup and swap protections.
+
+Start the matching schema 38 binary after migration. Older binaries cannot open
+schema 38. Rollback requires the pre-upgrade backup and matching older binary;
+there is no down migration.

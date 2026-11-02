@@ -259,6 +259,11 @@ func readCommentGraphUIDs(ctx context.Context, tx *sql.Tx, where string, args ..
 	return uids, rows.Err()
 }
 
+// CommentGraphPurgedTargetEvidenceSQL builds the indexed missing-target probe.
+func CommentGraphPurgedTargetEvidenceSQL(bind func(int) string, replyTargetUIDExpr string) string {
+	return `SELECT EXISTS(SELECT 1 FROM events e JOIN purge_log p ON p.issue_uid=e.related_issue_uid WHERE e.type='issue.commented' AND ` + replyTargetUIDExpr + "=" + bind(1) + ")"
+}
+
 func commentGraphPurgedTargetEvidence(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -268,7 +273,7 @@ func commentGraphPurgedTargetEvidence(
 ) (bool, error) {
 	var removed bool
 	err := tx.QueryRowContext(ctx,
-		`SELECT EXISTS(SELECT 1 FROM events e JOIN purge_log p ON p.issue_uid=e.related_issue_uid WHERE e.type='issue.commented' AND `+replyTargetUIDExpr+"="+bind(1)+")",
+		CommentGraphPurgedTargetEvidenceSQL(bind, replyTargetUIDExpr),
 		targetCommentUID,
 	).Scan(&removed)
 	return removed, err

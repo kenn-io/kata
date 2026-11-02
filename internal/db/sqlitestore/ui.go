@@ -106,7 +106,7 @@ func (d *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 				db.CommentGraphQuery{ProjectID: selected.ProjectID, AllowedIssueIDs: query.AllowedIssueIDs, SelectedIssueID: selected.ID},
 				func(int) string { return "?" },
 				func(value string) (time.Time, error) { return time.Parse(time.RFC3339Nano, value) },
-				`json_extract(e.payload,'$.reply_to_uid')`,
+				commentReplyTargetUIDExpr,
 				strings.ReplaceAll(commentAttributionColumn, "comments.", "c."),
 			)
 			if err != nil {
