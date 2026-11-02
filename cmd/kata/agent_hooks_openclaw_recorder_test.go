@@ -25,11 +25,11 @@ func TestOpenClawCopyRecorderKeepsLinkedSource(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source")
 	target := filepath.Join(dir, "target")
-	require.NoError(t, os.WriteFile(source, []byte("recorder"), 0700))
+	require.NoError(t, os.WriteFile(source, []byte("recorder"), 0700)) //nolint:gosec // G306: isolated recorder fixture must be executable.
 	openClawCopyRecorder(t, source, target)
 	openClawCopyRecorder(t, source, target)
 	for _, path := range []string{source, target} {
-		content, err := os.ReadFile(path)
+		content, err := os.ReadFile(path) //nolint:gosec // G304: source and target are test-owned files under TempDir.
 		require.NoError(t, err)
 		require.Equal(t, "recorder", string(content))
 	}
@@ -37,7 +37,7 @@ func TestOpenClawCopyRecorderKeepsLinkedSource(t *testing.T) {
 
 func openClawCopyRecorder(t *testing.T, source, target string) {
 	t.Helper()
-	if err := os.Remove(target); !os.IsNotExist(err) {
+	if err := os.Remove(target); !os.IsNotExist(err) { //nolint:gosec // G703: recorder target is a test-owned fixture path.
 		require.NoError(t, err)
 	}
 	if err := os.Link(source, target); err == nil {
