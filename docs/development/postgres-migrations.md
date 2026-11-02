@@ -232,7 +232,7 @@ Stop serving daemons and imports, back up the database, and run
 `kata storage postgres migrate` with schema-owner credentials. Creating the
 index reads every `events` row and blocks event writes while it runs; allow an
 offline window that fits the event table's size. Existing table grants remain
-sufficient. Validation-only runtime credentials cannot migrate. Versions 25–34
+sufficient. Validation-only runtime credentials cannot migrate. Versions 25–35
 follow the existing immutable migration chain before applying schema 38. SQLite
 uses its normal JSONL cutover with backup and swap protections.
 
