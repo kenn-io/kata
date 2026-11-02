@@ -23,7 +23,7 @@ func checkFederationPushSnapshotRuns(t *testing.T, store db.Storage) error {
 	}
 	var uids []string
 	for i, typ := range []string{
-		"issue.updated", "issue.snapshot", "issue.snapshot", "issue.snapshot", "issue.snapshot",
+		"issue.updated", "issue.snapshot", "issue.snapshot", "project.restored", "issue.snapshot", "issue.snapshot",
 		"issue.updated", "issue.snapshot", "issue.snapshot", "issue.updated", "issue.snapshot",
 	} {
 		payload := jsontext.Value(fmt.Sprintf(`{"uid":%q,"title":"work","author":"tester","status":"open"}`, issue.UID))
@@ -33,7 +33,9 @@ func checkFederationPushSnapshotRuns(t *testing.T, store db.Storage) error {
 			return err
 		}
 		require.True(t, inserted)
-		uids = append(uids, event.EventUID)
+		if typ != "project.restored" {
+			uids = append(uids, event.EventUID)
+		}
 	}
 	for _, limit := range []int{1, 3, 6, 100} {
 		pending, err := store.PendingFederationPushEvents(ctx, project.ID, store.InstanceUID(), created.ID, limit)

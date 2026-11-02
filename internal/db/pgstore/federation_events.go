@@ -47,8 +47,8 @@ ORDER BY e.id ASC LIMIT $4`, projectID, originInstanceUID, afterID, limit)
 WHERE e.project_id=$1 AND e.origin_instance_uid=$2 AND e.id>$3 AND e.type IN (`+db.FederationSnapshotEventTypesSQL()+`)
   AND e.id < COALESCE((
     SELECT MIN(barrier.id) FROM events barrier
-     WHERE barrier.project_id=e.project_id
-       AND barrier.origin_instance_uid=e.origin_instance_uid
+     WHERE barrier.project_id=$1
+       AND barrier.origin_instance_uid=$2
        AND barrier.id>$4
        AND `+pgFederationPushEventTypeCondition("barrier.type")+`
        AND barrier.type NOT IN (`+db.FederationSnapshotEventTypesSQL()+`)

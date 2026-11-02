@@ -49,13 +49,13 @@ func (d *Store) PendingFederationPushEvents(
 			  AND e.id < COALESCE((
 			    SELECT MIN(barrier.id)
 			      FROM events barrier
-			     WHERE barrier.project_id = e.project_id
-			       AND barrier.origin_instance_uid = e.origin_instance_uid
+			     WHERE barrier.project_id = ?
+			       AND barrier.origin_instance_uid = ?
 			       AND barrier.id > ?
 			       AND `+federationPushEventTypeCondition("barrier.type")+`
 			       AND barrier.type NOT IN (`+db.FederationSnapshotEventTypesSQL()+`)
 			  ), 9223372036854775807)
-			ORDER BY e.id ASC`, projectID, originInstanceUID, out[len(out)-1].ID, runStartAfterID)
+			ORDER BY e.id ASC`, projectID, originInstanceUID, out[len(out)-1].ID, projectID, originInstanceUID, runStartAfterID)
 		if err != nil {
 			return nil, err
 		}
