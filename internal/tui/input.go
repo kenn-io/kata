@@ -299,8 +299,8 @@ func (f *inputField) blur() {
 // reads field values and dispatches the mutation; on actionCancel it
 // discards and restores any pre-open snapshot.
 //
-// preFilter snapshots the filter when a command bar or filter form
-// opens. preListSelection additionally snapshots the highlighted row
+// preFilter snapshots the filter when a command bar opens.
+// preListSelection additionally snapshots the highlighted row
 // for a search bar, so cancel can revert every live-applied search
 // change without leaving cursor and stable identity out of sync.
 // restoreSplitDetail records whether that search has owned a populated split
@@ -924,11 +924,8 @@ var filterFormDateChoices = []string{"any", dateToday, dateScheduled}
 //   - Labels: single-line comma-separated textinput, pre-filled from
 //     current.Labels (joined with ", ").
 //
-// preFilter snapshots the at-open ListFilter so esc can restore the
-// previous narrowing without re-typing. The form has no daemon
-// mutation — commit applies the filter and refetches; routing is
-// handled by Model.commitInput's explicit early branch (see the
-// load-bearing comment there).
+// Commit applies the form's fields to the list; Esc discards the draft.
+// Model.commitInput routes this form through commitFilterForm.
 //
 // The Labels field is comma-separated text (mirrors the new-issue
 // form's Labels field). Wiring an autocomplete suggestion menu inside
@@ -980,10 +977,9 @@ func newFilterForm(current ListFilter, sc scope) inputState {
 	date.radio.set(current.Date)
 	fields = append(fields, date)
 	return inputState{
-		kind:      inputFilterForm,
-		title:     "filter",
-		fields:    fields,
-		preFilter: current,
+		kind:   inputFilterForm,
+		title:  "filter",
+		fields: fields,
 	}
 }
 

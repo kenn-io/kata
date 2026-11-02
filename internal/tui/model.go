@@ -280,7 +280,7 @@ func (m Model) Init() tea.Cmd {
 	// through the event loop — the v2 replacement for the v1-era
 	// blocking OSC probe at boot. Update restyles when the
 	// tea.BackgroundColorMsg answer lands.
-	cmds := []tea.Cmd{m.waitForSSE()}
+	cmds := []tea.Cmd{m.waitForSSE(), midnightRefetch()}
 	if m.api != nil {
 		// Init runs once per launch; daemon switches and reconnects never reach it.
 		cmds = append(cmds, m.fetchAuthCapabilities(), m.reportAppOpened())
@@ -2510,6 +2510,9 @@ func (m Model) routeSSE(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return m, m.waitForSSE(), true
 	case refetchTickMsg:
 		next, cmd := m.handleRefetchTick()
+		if msg.midnight {
+			cmd = tea.Batch(cmd, midnightRefetch())
+		}
 		return next, cmd, true
 	case toastExpiredMsg:
 		next, cmd := m.handleToastExpired()
@@ -2939,12 +2942,13 @@ func (msg eventReceivedMsg) parentLinkEndpointUIDs() (fromUID, toUID string, ok 
 }
 
 // handleRefetchTick fires after the debounce window. Clears the
-// pending flag and dispatches a refetch when the cache is stale; if a
-// race cleared the stale flag (e.g., a manual filter change refetched
-// already), the tick is a no-op so we don't spin a redundant request.
+// pending flag and refetches when the cache is stale or an active Date
+// filter needs the new local day. applyFetched advances the day and restores
+// the selected issue together.
 func (m Model) handleRefetchTick() (tea.Model, tea.Cmd) {
 	m.pendingRefetch = false
-	if !m.cache.isStale() {
+	dayChanged := m.list.filter.Date != "" && m.list.filter.Day != renderNow().Format(time.DateOnly)
+	if !m.cache.isStale() && !dayChanged {
 		return m, m.waitForSSE()
 	}
 	cmd := m.list.refetchCmd(m.api, m.scope)
@@ -3035,6 +3039,16 @@ const toastResyncedTTL = 2 * time.Second
 // without a default project) sticks around. Slightly longer than the
 // resynced toast because the user has to act on the hint, not just notice.
 const toastNoBindingTTL = 3 * time.Second
+
+// midnightRefetch wakes the list at the next local midnight, including across
+// daylight-saving changes. One timer per TUI launch keeps the chain independent
+// of filter edits and daemon events; Date=any makes the wakeup a fetch no-op.
+func midnightRefetch() tea.Cmd {
+	now := renderNow()
+	year, month, day := now.Date()
+	next := time.Date(year, month, day+1, 0, 0, 0, 0, now.Location())
+	return tea.Tick(next.Sub(now), func(time.Time) tea.Msg { return refetchTickMsg{midnight: true} })
+}
 
 // debouncedRefetch returns a tea.Cmd that emits refetchTickMsg after d.
 // The TEA loop receives the message, checks the cache, and dispatches

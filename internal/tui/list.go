@@ -1147,9 +1147,6 @@ func matchesDate(iss Issue, f ListFilter) bool {
 		return false
 	}
 	mode, today := f.Date, f.Day
-	if today == "" {
-		today = renderNow().Format(time.DateOnly)
-	}
 	for _, d := range [...]string{iss.ScheduledOnDate, iss.DeadlineOnDate} {
 		if d == "" {
 			continue

@@ -16,7 +16,8 @@ import (
 // contains a []string slice.
 func listFilterEqual(a, b ListFilter) bool {
 	if a.Status != b.Status || a.Owner != b.Owner ||
-		a.Author != b.Author || a.Search != b.Search {
+		a.Author != b.Author || a.Search != b.Search ||
+		a.Date != b.Date || a.Day != b.Day {
 		return false
 	}
 	if len(a.Labels) != len(b.Labels) {
@@ -271,24 +272,19 @@ func TestFilterForm_CommitResetsCursorToZero(t *testing.T) {
 	}
 }
 
-// TestFilterForm_CtrlRResetsFieldsOnly_PreFilterIntact: ctrl+r zeros
-// every field on the form but leaves preFilter intact so a subsequent
-// esc still restores the at-open snapshot. Plan 8 commit 5b: the
-// Labels field is now part of the reset.
-func TestFilterForm_CtrlRResetsFieldsOnly_PreFilterIntact(t *testing.T) {
+// Reset changes the draft fields while the applied filter stays intact.
+func TestFilterForm_CtrlRResetsFieldsOnly_AppliedFilterIntact(t *testing.T) {
 	m := filterFormFixture()
 	m.list.filter = ListFilter{
 		Status: "open", Owner: "wesm", Search: "bug",
 		Labels: []string{"prio-1", "needs-review"},
+		Date:   dateToday, Day: "2026-11-10",
 	}
 	m = openFilterForm(t, m)
-	// preFilter snapshot should match.
-	wantPre := ListFilter{
+	want := ListFilter{
 		Status: "open", Owner: "wesm", Search: "bug",
 		Labels: []string{"prio-1", "needs-review"},
-	}
-	if !listFilterEqual(m.input.preFilter, wantPre) {
-		t.Fatalf("preFilter = %+v, want %+v", m.input.preFilter, wantPre)
+		Date:   dateToday, Day: "2026-11-10",
 	}
 	// ctrl+r resets.
 	m, _ = stepModel(m, tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
@@ -304,19 +300,18 @@ func TestFilterForm_CtrlRResetsFieldsOnly_PreFilterIntact(t *testing.T) {
 	if got := m.input.fields[3].input.Value(); got != "" {
 		t.Fatalf("Labels not reset: %q, want empty", got)
 	}
-	if !listFilterEqual(m.input.preFilter, wantPre) {
-		t.Fatalf("preFilter mutated by ctrl+r: %+v, want %+v",
-			m.input.preFilter, wantPre)
+	if got := m.input.field(fieldDate).radio.value(); got != "any" {
+		t.Fatalf("Date not reset: %q, want any", got)
+	}
+	if !listFilterEqual(m.list.filter, want) {
+		t.Fatalf("applied filter changed by ctrl+r: %+v, want %+v", m.list.filter, want)
 	}
 }
 
-// TestFilterForm_EscRestoresPreFilter: esc closes the form AND
-// restores lm.filter to the preFilter snapshot (in case a future
-// "live preview" path mutated it; today the commit is the only mutator
-// but the symmetry is locked down for safety).
-func TestFilterForm_EscRestoresPreFilter(t *testing.T) {
+// Esc closes the form and leaves the applied filter intact.
+func TestFilterForm_EscKeepsAppliedFilter(t *testing.T) {
 	m := filterFormFixture()
-	m.list.filter = ListFilter{Status: "open", Owner: "wesm"}
+	m.list.filter = ListFilter{Status: "open", Owner: "wesm", Date: dateToday, Day: "2026-11-10"}
 	m = openFilterForm(t, m)
 	// Make a change inside the form (just type into Owner via tab+keys).
 	m = pressTabN(m, 1)
@@ -324,7 +319,7 @@ func TestFilterForm_EscRestoresPreFilter(t *testing.T) {
 	// Esc cancels.
 	nm, _ := stepModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	assertInputKind(t, nm, inputNone)
-	want := ListFilter{Status: "open", Owner: "wesm"}
+	want := ListFilter{Status: "open", Owner: "wesm", Date: dateToday, Day: "2026-11-10"}
 	if !listFilterEqual(nm.list.filter, want) {
 		t.Fatalf("filter not restored: got %+v, want %+v", nm.list.filter, want)
 	}

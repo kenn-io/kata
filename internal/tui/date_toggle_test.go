@@ -2,6 +2,7 @@ package tui
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -45,9 +46,9 @@ func TestDateToggle_TodayAndScheduledSplitOnLocalDay(t *testing.T) {
 	}
 
 	assert.Equal(t, []string{"past", "same", "dlpast"},
-		shortIDs(filteredIssues(issues, ListFilter{Date: dateToday})))
+		shortIDs(filteredIssues(issues, ListFilter{Date: dateToday}.stampDay())))
 	assert.Equal(t, []string{"next", "dlnext"},
-		shortIDs(filteredIssues(issues, ListFilter{Date: dateScheduled})))
+		shortIDs(filteredIssues(issues, ListFilter{Date: dateScheduled}.stampDay())))
 }
 
 func TestDateToggle_ZoneBoundaryMovesTheDay(t *testing.T) {
@@ -56,14 +57,14 @@ func TestDateToggle_ZoneBoundaryMovesTheDay(t *testing.T) {
 	issues := []Issue{dated("nov11", "2026-11-11", "")}
 
 	withClock(t, instant)
-	assert.Empty(t, filteredIssues(issues, ListFilter{Date: dateToday}))
+	assert.Empty(t, filteredIssues(issues, ListFilter{Date: dateToday}.stampDay()))
 	assert.Equal(t, []string{"nov11"},
-		shortIDs(filteredIssues(issues, ListFilter{Date: dateScheduled})))
+		shortIDs(filteredIssues(issues, ListFilter{Date: dateScheduled}.stampDay())))
 
 	withClock(t, instant.In(time.FixedZone("UTC+10", 10*3600)))
 	assert.Equal(t, []string{"nov11"},
-		shortIDs(filteredIssues(issues, ListFilter{Date: dateToday})))
-	assert.Empty(t, filteredIssues(issues, ListFilter{Date: dateScheduled}))
+		shortIDs(filteredIssues(issues, ListFilter{Date: dateToday}.stampDay())))
+	assert.Empty(t, filteredIssues(issues, ListFilter{Date: dateScheduled}.stampDay()))
 }
 
 func TestDateToggle_RowsMissingDatesDoNotMatch(t *testing.T) {
@@ -78,8 +79,8 @@ func TestDateToggle_RowsMissingDatesDoNotMatch(t *testing.T) {
 	}
 
 	assert.Equal(t, []string{"deadlineonly", "scheduledonly"},
-		shortIDs(filteredIssues(issues, ListFilter{Date: dateToday})))
-	assert.Empty(t, filteredIssues(issues, ListFilter{Date: dateScheduled}))
+		shortIDs(filteredIssues(issues, ListFilter{Date: dateToday}.stampDay())))
+	assert.Empty(t, filteredIssues(issues, ListFilter{Date: dateScheduled}.stampDay()))
 }
 
 func TestDateToggle_ComposesWithOwnerLabelsAndSearch(t *testing.T) {
@@ -99,7 +100,7 @@ func TestDateToggle_ComposesWithOwnerLabelsAndSearch(t *testing.T) {
 
 	got := filteredIssues(issues, ListFilter{
 		Date: dateToday, Owner: "alice", Labels: []string{"bug"}, Search: "login",
-	})
+	}.stampDay())
 	assert.Equal(t, []string{"a"}, shortIDs(got))
 }
 
@@ -184,15 +185,7 @@ func TestDateToggle_MidnightRolloverKeepsRowActionsOnTheSelectedIssue(t *testing
 	got, ok = m.list.targetRow()
 	require.True(t, ok)
 	assert.Equal(t, "z", got.ShortID)
-	assert.Equal(t, []string{"x", "y", "z"}, shortIDs(rowIssues(m.list.visibleRows())))
-}
-
-func rowIssues(rows []queueRow) []Issue {
-	out := make([]Issue, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, r.issue)
-	}
-	return out
+	assertQueueShortIDs(t, m.list.visibleRows(), []string{"x", "y", "z"})
 }
 
 func TestDateToggle_CancelingFormAfterMidnightRefreshKeepsDayAndSelection(t *testing.T) {
@@ -231,4 +224,71 @@ func TestDateToggle_CancelingFormAfterMidnightRefreshKeepsDayAndSelection(t *tes
 	assert.Equal(t, "z", got.ShortID)
 	require.NotNil(t, m.detail.issue)
 	assert.Equal(t, "uid-z", m.detail.issue.UID)
+}
+
+// An idle TUI must advance relative date filters at local midnight without
+// relying on a daemon event or a key press.
+func TestDateToggle_IdleMidnightRefetchKeepsSelection(t *testing.T) {
+	for _, mode := range []string{dateToday, dateScheduled, ""} {
+		t.Run(mode, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				base := time.Now()
+				start := time.Date(2026, 11, 10, 23, 59, 0, 0, time.FixedZone("local", -5*3600))
+				prior := renderNow
+				renderNow = func() time.Time { return start.Add(time.Since(base)) }
+				t.Cleanup(func() { renderNow = prior })
+				priorColor := activeColorMode
+				activeColorMode = colorNone
+				t.Cleanup(func() { activeColorMode = priorColor })
+
+				m := filterFormFixture()
+				issues := []Issue{
+					dated("new", "2026-11-11", ""),
+					dated("keep", "2026-11-09", "2026-11-20"),
+				}
+				for i := range issues {
+					issues[i].UID, issues[i].ProjectID = "uid-"+issues[i].ShortID, 7
+				}
+				m.list.filter = ListFilter{Date: mode}.stampDay()
+				m.list = m.list.applyFetched(initialFetchMsg{issues: issues})
+				m.list.cursor = len(m.list.visibleRows()) - 1
+				m.list.selectedUID, m.list.selectedProjectID = "uid-keep", 7
+				m.cache.put(m.currentCacheKey(), issues)
+				// No API during Init: only the midnight timer should run.
+				tick := m.Init()
+				require.NotNil(t, tick, "an idle TUI needs a local-midnight wakeup")
+				m.api = &inboxTestAPI{issues: issues}
+				for _, day := range []string{"2026-11-11", "2026-11-12"} {
+					msg := tick()
+					require.Equal(t, day+" 00:00", renderNow().Format("2006-01-02 15:04"))
+					next, work, handled := m.routeSSE(msg)
+					require.True(t, handled)
+					m = next.(Model)
+					require.NotNil(t, work)
+					if mode == "" {
+						// With Date=any, the wakeup only schedules the next midnight.
+						tick = work
+						continue
+					}
+					batch, ok := work().(tea.BatchMsg)
+					require.True(t, ok, "midnight must fetch and schedule the next wakeup")
+					require.Len(t, batch, 2)
+					fetched, ok := batch[0]().(refetchedMsg)
+					require.True(t, ok)
+					require.NoError(t, fetched.err)
+					m, _ = stepModel(m, fetched)
+					tick = batch[1]
+					assert.Equal(t, day, m.list.filter.Day)
+					if mode == dateToday {
+						assertQueueShortIDs(t, m.list.visibleRows(), []string{"new", "keep"})
+					} else {
+						assertQueueShortIDs(t, m.list.visibleRows(), []string{"keep"})
+					}
+					selected, ok := m.list.targetRow()
+					require.True(t, ok)
+					assert.Equal(t, "keep", selected.ShortID)
+				}
+			})
+		})
+	}
 }
