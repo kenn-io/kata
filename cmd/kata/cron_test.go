@@ -236,6 +236,41 @@ func TestCronCLIStableCreateAfterAcceptedResponseLoss(t *testing.T) {
 	require.NotNil(t, readback.Job.DeletedAt)
 }
 
+func TestCronCLIJobMutationWaitsForForwardingBudget(t *testing.T) {
+	t.Setenv("KATA_AUTHOR", "worker")
+	var mutation atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/projects" {
+			_, _ = io.WriteString(w, `{"projects":[{"id":7,"name":"spoke-project"}]}`)
+			return
+		}
+		if r.URL.Path == "/api/v1/projects/7" {
+			_, _ = io.WriteString(w, `{"project":{"id":7,"name":"spoke-project"}}`)
+			return
+		}
+		if r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/cron/jobs/") {
+			mutation.Store(true)
+			timer := time.NewTimer(6 * time.Second)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+			case <-r.Context().Done():
+				return
+			}
+			_, _ = io.WriteString(w, `{"job":{"uid":"01J00000000000000000000001","definition_event_uid":"01J00000000000000000000002"}}`)
+			return
+		}
+		t.Errorf("unexpected cron CLI request %s %s", r.Method, r.URL.Path)
+	}))
+	t.Cleanup(server.Close)
+
+	file := cronCLIFile(t, cronCLIJob(t))
+	_, _, err := executeCronCLI(t, server.URL, nil, "job", "create", "--uid", strings.ToLower(cronCLIUID(t)), "--file", file)
+	require.NoError(t, err)
+	require.True(t, mutation.Load(), "job mutation must reach the daemon")
+}
+
 func TestCronCLICapabilitiesEmptyProject(t *testing.T) {
 	env := testenv.New(t)
 	project, err := env.DB.CreateProject(t.Context(), "spoke-project")

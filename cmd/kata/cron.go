@@ -249,7 +249,17 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	client, err := kataclient.NewWithHTTPClient(daemon.baseURL, daemon.client)
+	mutationClient := daemon.client
+	if o.mutation() {
+		// A forwarded job write can spend the daemon's full 15-second
+		// preflight-and-write budget. The default CLI request budget would cancel
+		// a healthy forwarded mutation and turn its outcome uncertain.
+		mutationClient, err = longRunningClientForResolved(cmd.Context(), daemon.resolved)
+		if err != nil {
+			return err
+		}
+	}
+	client, err := kataclient.NewWithHTTPClient(daemon.baseURL, mutationClient)
 	if err != nil {
 		return err
 	}
