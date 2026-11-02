@@ -193,14 +193,21 @@ func (m Model) reloadDatesForm(current Issue) Model {
 	return m
 }
 
-// withCurrentIssue replaces the cached list row with the daemon's current issue.
+// withCurrentIssue refreshes conflict-owned fields while keeping list projections.
 func (lm listModel) withCurrentIssue(current Issue) listModel {
 	for i := range lm.issues {
 		if lm.issues[i].UID == current.UID {
-			lm.issues[i] = current
+			lm.issues[i] = lm.issues[i].withCurrentDates(current)
 		}
 	}
 	return lm
+}
+
+func (issue Issue) withCurrentDates(current Issue) Issue {
+	issue.Metadata, issue.Revision = current.Metadata, current.Revision
+	issue.Status, issue.ClosedAt = current.Status, current.ClosedAt
+	issue.ScheduledOnDate, issue.DeadlineOnDate = current.ScheduledOnDate, current.DeadlineOnDate
+	return issue
 }
 
 // renderDatesForm lays out the two date fields, each with the day its text

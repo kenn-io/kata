@@ -315,6 +315,38 @@ func TestDatesFormConflictRefreshesResolvedDatesAndTodayMembership(t *testing.T)
 	}
 }
 
+func TestDatesFormConflictPreservesHydratedListFields(t *testing.T) {
+	h := newDatesHarness(t, map[string]string{"scheduled_on": "2026-11-02"}, viewList)
+	row := &h.m.list.issues[0]
+	row.Parent = &LinkPeer{UID: "parent-uid", ShortID: "par1"}
+	row.ChildCounts = &ChildCounts{Open: 1, Total: 2}
+	row.Blocks = []LinkPeer{{UID: "blocked-uid", ShortID: "blk1"}}
+	row.BlockedBy = []LinkPeer{{UID: "blocker-uid", ShortID: "blk2"}}
+	row.Related = []LinkPeer{{UID: "related-uid", ShortID: "rel1"}}
+	row.QualifiedID = "example-project#" + row.ShortID
+	before := *row
+	h.openForm()
+	h.patchDaemon(map[string]string{"scheduled_on": "2026-12-01", "deadline_on": "2026-12-02"})
+	moved := h.revision()
+	h.fill("2026-11-09", "")
+	h.save()
+
+	require.Equal(t, datesChangedMessage, h.m.input.err)
+	require.Len(t, h.m.list.issues, 1)
+	got := h.m.list.issues[0]
+	assert.Equal(t, before.Parent, got.Parent)
+	assert.Equal(t, before.ChildCounts, got.ChildCounts)
+	assert.Equal(t, before.Blocks, got.Blocks)
+	assert.Equal(t, before.BlockedBy, got.BlockedBy)
+	assert.Equal(t, before.Related, got.Related)
+	assert.Equal(t, before.QualifiedID, got.QualifiedID)
+	assert.Equal(t, moved, got.Revision)
+	assert.Equal(t, "2026-12-01", got.scheduledOn())
+	assert.Equal(t, "2026-12-02", got.deadlineOn())
+	assert.Equal(t, "2026-12-01", got.ScheduledOnDate)
+	assert.Equal(t, "2026-12-02", got.DeadlineOnDate)
+}
+
 func TestDatesFormConflictRemovesRemotelyClosedIssueFromToday(t *testing.T) {
 	withClock(t, func() time.Time { return datesNow })
 	h := newDatesHarness(t, map[string]string{"scheduled_on": "2026-11-02"}, viewList)
