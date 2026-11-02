@@ -1305,16 +1305,20 @@ func (c *Client) CheckDateFilter(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	return requireAPIVersion(ctx, apiClient, "0.36.0", "date filters require daemon API 0.36.0 or newer")
+}
+
+func requireAPIVersion(ctx context.Context, apiClient *generated.Client, minimum, requirement string) error {
 	health, err := apiClient.Health(ctx)
 	if err != nil {
-		return fmt.Errorf("date filters require daemon API 0.36.0 or newer: %w", err)
+		return fmt.Errorf("%s: %w", requirement, err)
 	}
 	reported := ""
 	if health.APISchemaVersion != nil {
 		reported = *health.APISchemaVersion
 	}
-	if !semver.IsValid("v"+reported) || semver.Compare("v"+reported, "v0.36.0") < 0 {
-		return fmt.Errorf("date filters require daemon API 0.36.0 or newer; upgrade the daemon")
+	if !semver.IsValid("v"+reported) || semver.Compare("v"+reported, "v"+minimum) < 0 {
+		return fmt.Errorf("%s; upgrade the daemon", requirement)
 	}
 	return nil
 }
@@ -1325,16 +1329,8 @@ func (c *Client) AddCommentReply(ctx context.Context, projectID int64, ref, body
 	if err != nil {
 		return nil, &mutationPreflightError{err}
 	}
-	health, err := apiClient.Health(ctx)
-	if err != nil {
+	if err := requireAPIVersion(ctx, apiClient, "0.28.0", "typed replies require daemon API 0.28.0 or newer"); err != nil {
 		return nil, &mutationPreflightError{err}
-	}
-	reported := ""
-	if health.APISchemaVersion != nil {
-		reported = *health.APISchemaVersion
-	}
-	if !semver.IsValid("v"+reported) || semver.Compare("v"+reported, "v0.28.0") < 0 {
-		return nil, &mutationPreflightError{fmt.Errorf("typed replies require daemon API 0.28.0 or newer; upgrade the daemon")}
 	}
 	replyKind := generated.CommentRequestBodyKind(kind)
 	wire, callErr := apiClient.CreateCommentWithResponse(ctx, &generated.CreateCommentRequestOptions{PathParams: &generated.CreateCommentPath{ProjectID: fmt.Sprint(projectID), Ref: ref}, Body: &generated.CreateCommentBody{Actor: &actor, Body: body, ReplyTo: &target, Kind: &replyKind, Force: &force}, Header: &generated.CreateCommentHeaders{IdempotencyKey: &key}})

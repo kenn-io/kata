@@ -73,6 +73,7 @@ type Model struct {
 	sseStatus           sseConnState
 	pendingRefetch      bool
 	connGen             uint64
+	dateFilterCheckGen  uint64
 	daemonSwitchAttempt uint64
 	sseRestart          func(daemonConnection, uint64, chan tea.Msg) tea.Cmd
 	// projectsStale flags that the projects table needs a refetch. Set by
@@ -441,7 +442,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if checked, ok := msg.(dateFilterCheckedMsg); ok {
-		if !m.staleConnMsg(checked.connGen) && m.list.filter.Date == checked.mode && checked.err != nil {
+		if m.isCurrentDateFilterCheck(checked) && checked.err != nil {
 			m.list.status = checked.err.Error()
 		}
 		return m, nil
@@ -1431,12 +1432,16 @@ func (m Model) restoreSearchDetailIfNeeded(
 	// pending tick directly, then reinstate its inherited detail model or clear
 	// a pane that the search itself created.
 	m.nextDetailFollowGen++
-	if snapshot == nil {
+	if !m.canRestoreSearchDetail(snapshot) {
 		m.detail = m.applyDetailViewportCache(newDetailModel())
 		return m, prior
 	}
 	m.detail = m.applyDetailViewportCache(cloneDetailModel(*snapshot))
 	return m, combineCmds(prior, m.refetchRestoredDetail())
+}
+
+func (m Model) canRestoreSearchDetail(snapshot *detailModel) bool {
+	return snapshot != nil && (m.list.filter.Date == "" || snapshot.issue == nil || matchesDate(*snapshot.issue, m.list.filter))
 }
 
 func (m *Model) refetchRestoredDetail() tea.Cmd {
@@ -2017,25 +2022,35 @@ func (m Model) commitFilterForm(form inputState) (Model, tea.Cmd) {
 }
 
 type dateFilterCheckedMsg struct {
-	connGen uint64
-	mode    string
-	err     error
+	connGen  uint64
+	checkGen uint64
+	mode     string
+	err      error
+}
+
+func (m Model) isCurrentDateFilterCheck(result dateFilterCheckedMsg) bool {
+	return !m.staleConnMsg(result.connGen) && m.dateFilterCheckGen == result.checkGen && m.list.filter.Date == result.mode
 }
 
 type dateFilterAPI interface {
 	CheckDateFilter(context.Context) error
 }
 
-func (m Model) checkDateFilter() tea.Cmd {
+func (m *Model) checkDateFilter() tea.Cmd {
+	m.dateFilterCheckGen++
 	api, ok := m.api.(dateFilterAPI)
 	if !ok || m.list.filter.Date == "" {
 		return nil
 	}
-	mode, gen := m.list.filter.Date, m.connGen
+	return dateFilterCheckCommand(api, dateFilterCheckedMsg{connGen: m.connGen, checkGen: m.dateFilterCheckGen, mode: m.list.filter.Date})
+}
+
+func dateFilterCheckCommand(api dateFilterAPI, result dateFilterCheckedMsg) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		return dateFilterCheckedMsg{connGen: gen, mode: mode, err: api.CheckDateFilter(ctx)}
+		result.err = api.CheckDateFilter(ctx)
+		return result
 	}
 }
 

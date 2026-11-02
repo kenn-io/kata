@@ -889,6 +889,13 @@ func nextStatus(s string) string {
 // index clamped to the new visible-row count. Empty list clears both
 // cursor and selectedUID.
 func (lm listModel) applyFetched(msg tea.Msg) listModel {
+	if lm.selectedUID == "" {
+		lm = lm.syncSelection(lm.visibleRows())
+	}
+	return lm.storeFetched(msg).refreshDay()
+}
+
+func (lm listModel) storeFetched(msg tea.Msg) listModel {
 	switch m := msg.(type) {
 	case initialFetchMsg:
 		lm.loading = false
@@ -902,7 +909,7 @@ func (lm listModel) applyFetched(msg tea.Msg) listModel {
 			lm.issues, lm.truncated = trimQueueWorkingSet(m.issues)
 		}
 	}
-	return lm.refreshDay()
+	return lm
 }
 
 // refreshDay advances relative date filters and keeps selection on the same issue.
