@@ -2568,10 +2568,7 @@ func (m Model) routeSSE(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	case dayTickMsg:
 		var cmd tea.Cmd
 		if m.list.filter.Date != "" && m.list.filter.Day != renderNow().Format(time.DateOnly) {
-			prevPID, prevUID, prevHas := highlightedIdentity(m.list)
-			m.list = m.list.syncSelection(m.list.visibleRows())
-			m.list = m.list.refreshDay()
-			m, cmd = m.reconcileSplitDetailAfterRefetch(prevPID, prevUID, prevHas)
+			m, cmd = m.refreshListDay(nil)
 		}
 		return m, combineCmds(cmd, dayTick()), true
 	case toastExpiredMsg:
@@ -2585,6 +2582,18 @@ func (m Model) routeSSE(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return next, cmd, true
 	}
 	return m, nil, false
+}
+
+// refreshListDay applies edit to the list, re-filters relative dates, and
+// keeps selection and split detail on the issue that was highlighted before.
+func (m Model) refreshListDay(edit func(listModel) listModel) (Model, tea.Cmd) {
+	prevPID, prevUID, prevHas := highlightedIdentity(m.list)
+	m.list = m.list.syncSelection(m.list.visibleRows())
+	if edit != nil {
+		m.list = edit(m.list)
+	}
+	m.list = m.list.refreshDay()
+	return m.reconcileSplitDetailAfterRefetch(prevPID, prevUID, prevHas)
 }
 
 func (m Model) staleConnMsg(gen uint64) bool {

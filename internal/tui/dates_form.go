@@ -186,15 +186,25 @@ func (m Model) reloadDatesForm(current Issue) Model {
 	m.input = m.input.loadDates(current)
 	m.input.saving = false
 	m.input.err = datesChangedMessage
-	for i := range m.list.issues {
-		if m.list.issues[i].UID == current.UID {
-			m.list.issues[i].Metadata, m.list.issues[i].Revision, m.list.issues[i].ScheduledOnDate, m.list.issues[i].DeadlineOnDate = current.Metadata, current.Revision, current.ScheduledOnDate, current.DeadlineOnDate
+	if m.detail.issue != nil && m.detail.issue.UID == current.UID {
+		copyIssueDates(m.detail.issue, current)
+	}
+	m, _ = m.refreshListDay(func(lm listModel) listModel { return lm.withIssueDates(current) })
+	return m
+}
+
+// withIssueDates copies current's dates and revision onto its cached list row.
+func (lm listModel) withIssueDates(current Issue) listModel {
+	for i := range lm.issues {
+		if lm.issues[i].UID == current.UID {
+			copyIssueDates(&lm.issues[i], current)
 		}
 	}
-	if m.detail.issue != nil && m.detail.issue.UID == current.UID {
-		m.detail.issue.Metadata, m.detail.issue.Revision, m.detail.issue.ScheduledOnDate, m.detail.issue.DeadlineOnDate = current.Metadata, current.Revision, current.ScheduledOnDate, current.DeadlineOnDate
-	}
-	return m
+	return lm
+}
+
+func copyIssueDates(dst *Issue, src Issue) {
+	dst.Metadata, dst.Revision, dst.ScheduledOnDate, dst.DeadlineOnDate = src.Metadata, src.Revision, src.ScheduledOnDate, src.DeadlineOnDate
 }
 
 // renderDatesForm lays out the two date fields, each with the day its text
