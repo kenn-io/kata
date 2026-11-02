@@ -258,9 +258,8 @@ func TestResolve_ByProjectName_NotRegistered(t *testing.T) {
 	resp, bs := postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
 		"name": "never-registered",
 	})
-	assert.Equal(t, http.StatusNotFound, resp.StatusCode, string(bs))
-	assert.Contains(t, string(bs), "project_not_initialized")
-	assert.Contains(t, string(bs), "never-registered")
+	assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
+	assertErrorData(t, bs, map[string]any{"project": "never-registered"})
 }
 
 // TestResolve_NeitherFieldSet rejects a request that supplies neither
@@ -317,6 +316,35 @@ func TestResolve_ByAliasInput_NotRegistered(t *testing.T) {
 		},
 	})
 	assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
+	assertErrorData(t, bs, map[string]any{"alias": "github.com/wesm/never-seen"})
+}
+
+// TestResolve_ByStartPath_KataTomlNamesUnregisteredProject reports the
+// bound project name in error.data when .kata.toml names a project the
+// daemon does not know.
+func TestResolve_ByStartPath_KataTomlNamesUnregisteredProject(t *testing.T) {
+	ts := newTestServer(t)
+	dir := t.TempDir()
+	testfix.RunGit(t, dir, "init", "--quiet")
+	testfix.WriteKataToml(t, dir, "ghost-project")
+
+	resp, bs := postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
+		"start_path": dir,
+	})
+	assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
+	assertErrorData(t, bs, map[string]any{"project": "ghost-project"})
+}
+
+// assertErrorData asserts the error envelope's data object equals want exactly.
+func assertErrorData(t *testing.T, body []byte, want map[string]any) {
+	t.Helper()
+	var env struct {
+		Error struct {
+			Data map[string]any `json:"data"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(body, &env), string(body))
+	assert.Equal(t, want, env.Error.Data, string(body))
 }
 
 func TestListProjects_IncludeArchived(t *testing.T) {
@@ -514,6 +542,7 @@ func TestResolve_ByAliasInput_RejectsArchivedProject(t *testing.T) {
 		},
 	})
 	assertAPIError(t, resp2.StatusCode, bs2, http.StatusNotFound, "project_not_initialized")
+	assertErrorData(t, bs2, map[string]any{"alias": "github.com/wesm/kata"})
 	assert.Contains(t, string(bs2), "archived")
 }
 

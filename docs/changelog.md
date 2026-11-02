@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-31
+last_edited: 2026-11-02
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -19,6 +19,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Wait up to 90 seconds for the replacement's startup check, daemon shutdown,
   and replacement readiness during restart, extending the wait while an SQLite
   migration runs.
+- Read which alias or project Kata looked up from `error.data` when a command
+  fails with `project_not_initialized`, instead of parsing the message. `data`
+  holds `alias` or `project`. The message, hint and exit code are unchanged. See
+  [HTTP API errors](reference/http-api.md#errors).
+
 - Manage cron jobs, workflows and run evidence from MCP: load `kata.load_cron`
   for 17 tools over the daemon's existing cron API. Native notification jobs
   use the daemon scheduler; recording a run never starts work or changes who

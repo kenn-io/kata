@@ -67,6 +67,10 @@ kata init [--replace | --reassign]
 workspace. Pass `--project` to choose the project name explicitly instead of
 deriving it from the git remote.
 
+Project-scoped commands in a workspace with no registered project fail with
+`project_not_initialized` and exit code 4. With `--json`, `error.data` names the
+alias or project Kata looked up. See [HTTP API errors](http-api.md#errors).
+
 Pass `--with-agents` to add or refresh kata's marker-delimited guidance block
 where coding agents look for workspace instructions. Existing real `AGENTS.md`
 and `CLAUDE.md` files are both refreshed; if neither exists, kata creates
