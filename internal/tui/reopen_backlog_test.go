@@ -120,7 +120,7 @@ func TestReopenBacklogCountsRecurringJobs(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := backlogDaemon(t, tc.meta, tc.jobs...)
-			got, err := c.ReopenBacklog(context.Background(), 7, "abcd")
+			got, err := c.ReopenBacklog(t.Context(), 7, "abcd")
 			require.NoError(t, err)
 			require.Equal(t, tc.want, got)
 		})
@@ -129,7 +129,7 @@ func TestReopenBacklogCountsRecurringJobs(t *testing.T) {
 
 func TestReopenBacklogReportsMetadataFailure(t *testing.T) {
 	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "boom", http.StatusInternalServerError) })
-	_, err := c.ReopenBacklog(context.Background(), 7, "abcd")
+	_, err := c.ReopenBacklog(t.Context(), 7, "abcd")
 	require.Error(t, err)
 }
 
@@ -518,7 +518,7 @@ func TestUndoCloseSlowBacklogLookupStillReopens(t *testing.T) {
 	t.Cleanup(func() { undoBacklogLookupTimeout = previous })
 
 	m, f := undoCloseModel(t, 0, nil)
-	ctx, expireAttempt := context.WithCancel(context.Background())
+	ctx, expireAttempt := context.WithCancel(t.Context())
 	defer expireAttempt()
 	client := newConnectedUndoClient(t, &slowBacklogUndoAPI{undoTestAPI: f, expireAttempt: expireAttempt})
 
@@ -592,8 +592,8 @@ func TestReopenKeyCancelsPendingPriority(t *testing.T) {
 	require.Equal(t, modalReopenBacklog, m.modal)
 	m, _ = updateModel(m, runeKey('n'))
 
-	_, cmd = updateModel(m, runeKey('2'))
-	require.Nil(t, cmd, "a stale priority prompt must not turn the digit into a priority change")
+	m, _ = updateModel(m, runeKey('2'))
+	require.Equal(t, viewCron, m.view, "the digit switches tabs after the priority prompt is cancelled")
 }
 
 // Reopen has one owner at a time: a pending lookup, an undo in flight, or an
@@ -682,7 +682,7 @@ func TestUndoCloseSlowPreflightSkipsBacklogLookup(t *testing.T) {
 		m, f := undoCloseModel(t, 0, nil)
 		slow := &slowBacklogUndoAPI{undoTestAPI: f}
 		client := newConnectedUndoClient(t, &slowPreflightUndoAPI{slowBacklogUndoAPI: slow, delay: 4 * time.Second})
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer cancel()
 
 		out := client.undo(ctx, m.undoHistory.entries[0], undoOptions{checkBacklog: true})
