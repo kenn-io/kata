@@ -26,6 +26,7 @@ var (
 		"go.kenn.io/kata/internal/processtree",
 		"go.kenn.io/kata/internal/projectscope",
 		"go.kenn.io/kata/internal/tokenactor",
+		"go.kenn.io/kata/internal/teammate/selection",
 		"go.kenn.io/kata/internal/transcript",
 		"go.kenn.io/kata/internal/uid",
 		"go.kenn.io/kata/internal/version",
