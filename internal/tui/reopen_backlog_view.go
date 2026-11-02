@@ -54,7 +54,7 @@ func (m Model) routeReopenKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if m.reopenLookupPending || m.undoInFlight {
 		return m, nil, true
 	}
-	target, ok := m.activeCloseTarget()
+	target, _, ok := m.activeIssueTarget()
 	if !ok {
 		return m, nil, true
 	}
@@ -99,7 +99,7 @@ func (m Model) handleReopenBacklog(msg reopenBacklogMsg) (Model, tea.Cmd) {
 	if m.staleConnMsg(msg.connGen) {
 		return m, nil
 	}
-	if current, ok := m.activeCloseTarget(); !ok || current != msg.target {
+	if current, _, ok := m.activeIssueTarget(); !ok || current != msg.target {
 		return m, nil
 	}
 	if msg.count > 1 {
