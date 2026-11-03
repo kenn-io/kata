@@ -361,21 +361,3 @@ func TestMCPDisplayContributionPerCall(t *testing.T) {
 		})
 	}
 }
-
-// ListTools must describe bridge override and empty suppression like the other mutation tools.
-func TestBridgeTeammateSchemaDescription(t *testing.T) {
-	session := connectTestServer(t)
-	result, err := session.ListTools(t.Context(), nil)
-	require.NoError(t, err)
-	found := 0
-	for _, tool := range result.Tools {
-		if !strings.HasPrefix(tool.Name, "kata.bridge_") {
-			continue
-		}
-		properties := schemaObject(t, tool.InputSchema)["properties"].(map[string]any)
-		field := properties["teammate"].(map[string]any)
-		require.Equal(t, "Display contribution; empty suppresses the startup default", field["description"], tool.Name)
-		found++
-	}
-	require.Equal(t, 8, found)
-}

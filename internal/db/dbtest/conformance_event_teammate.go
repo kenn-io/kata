@@ -143,6 +143,34 @@ func checkEventTeammate(t *testing.T, store db.Storage, backend Backend) error {
 	_, empty, err := store.CreateIssue(teammate.WithRequest(ctx, ""), db.CreateIssueParams{ProjectID: project.ID, Title: "Unattributed work", Author: "coordinator"})
 	require.NoError(t, err)
 	require.NotContains(t, empty.Payload, "attributed_teammate")
+	importedAt := time.Now().UTC()
+	_, importedEvents, err := store.ImportBatch(ctx, db.ImportBatchParams{
+		ProjectID: project.ID,
+		Source:    "external-fixture",
+		Actor:     "importer",
+		Items: []db.ImportItem{{
+			ExternalID: "external-issue",
+			Title:      "Imported work",
+			Author:     "external-author",
+			Status:     "open",
+			CreatedAt:  importedAt,
+			UpdatedAt:  importedAt,
+			Comments: []db.ImportComment{{
+				ExternalID: "external-comment",
+				Author:     "external-author",
+				Body:       "Imported history",
+				CreatedAt:  importedAt,
+			}},
+		}},
+	})
+	require.NoError(t, err)
+	require.Len(t, importedEvents, 2)
+	for _, imported := range importedEvents {
+		require.NotContains(t, imported.Payload, "attributed_teammate", imported.Type)
+	}
+	_, nativeAfterImport, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Native after import", Author: "coordinator"})
+	require.NoError(t, err)
+	check(nativeAfterImport)
 	records, err := CollectImportRecords(t.Context(), store, db.ExportFilter{})
 	require.NoError(t, err)
 	target := backend.Open(t)
