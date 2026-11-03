@@ -83,10 +83,11 @@ func (m Model) routeReopenKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 }
 
 // promptReopenBacklog asks the user to confirm a reopen that delivers a
-// backlog. A modal or form that took control while the lookup ran keeps it:
-// the prompt is dropped, or its keys would answer a question the user never saw.
+// backlog. A modal, form or Jobs filter that took control while the lookup ran
+// keeps it: the prompt is dropped, or its keys would answer a question the user
+// never saw.
 func (m Model) promptReopenBacklog(prompt reopenPrompt) Model {
-	if m.modal != modalNone || m.input.kind != inputNone {
+	if !m.canQuit() {
 		return m
 	}
 	m.reopenPrompt = &prompt

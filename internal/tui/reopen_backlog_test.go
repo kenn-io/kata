@@ -471,6 +471,26 @@ func TestUndoBacklogAnswerDoesNotReplaceQuitConfirm(t *testing.T) {
 	require.Zero(t, f.reopenCalls)
 }
 
+// A Jobs form keeps its input on m.cron.form, not m.input. An undo backlog
+// answer that lands while it is open must not stack a confirmation the form's
+// `y` would answer.
+func TestUndoBacklogAnswerIgnoredWhileCronFormOpen(t *testing.T) {
+	m, f := undoCloseModel(t, 5, nil)
+	updated, cmd := m.Update(runeKey('u'))
+	require.NotNil(t, cmd)
+	m = updated.(Model)
+	reply := cmd()
+	m.view, m.cron.form = viewCron, newNativeForm(t)
+
+	m, cmd = updateModel(m, reply)
+	require.Nil(t, cmd)
+	require.Equal(t, modalNone, m.modal)
+	require.Nil(t, m.reopenPrompt)
+	require.False(t, m.undoInFlight)
+	require.Len(t, m.undoHistory.entries, 1, "the close stays undoable")
+	require.Zero(t, f.reopenCalls)
+}
+
 // In split layout the hidden selection must not be reopened from the help view.
 func TestReopenKeyIgnoredWhileHelpIsVisibleInSplitLayout(t *testing.T) {
 	spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
