@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-10-23
+last_edited: 2026-11-03
 ---
 
 # Federation
@@ -2180,21 +2180,16 @@ hub.
 
 A root can retain an issue's creation without sharing its original bytes when
 those bytes name an unshared project. Later metadata or assignment events can
-then refer to an issue the relay has never received. A root that has already
-served a signed checkpoint must check later history too; otherwise it can keep
-advertising the old checkpoint and a pull can quarantine with an error such as
-`issue.metadata_updated references unknown issue`.
+then refer to an issue the relay has never received, and a pull quarantines
+with an error such as `issue.metadata_updated references unknown issue`.
 
-Upgrade the **root daemon** to a build containing the retained-checkpoint
-history-boundary fix. The root then offers a fresh signed checkpoint with the
-selected project's current issues, keeping the private historical endpoints
-out of the shared history. Relays serving downstream peers should also run a
-build containing the withheld-creation recovery from
-[PR #634](https://github.com/kenn-io/kata/pull/634). The new root fix does not
-require a new relay protocol or a new quarantine-retry command.
+Upgrade the **root daemon** first. The root then offers a fresh signed
+checkpoint with the selected project's current issues and keeps the private
+historical endpoints out of shared history. Upgrade relays that serve
+downstream peers to the same release.
 
-For an existing negotiated relay pull quarantine, select that relay's daemon
-and project, inspect the error, then explicitly retry after the root upgrade:
+For an existing relay pull quarantine, select that relay's daemon and project,
+inspect the error, then retry after the root upgrade:
 
 ```sh
 kata --project spoke-project federation quarantine list
@@ -2207,21 +2202,17 @@ kata --project spoke-project federation status
 ```
 
 Retry clears the active rejection without advancing delivery cursors. The next
-automatic sync installs the refreshed root-signed checkpoint before resuming
-delivery. Existing issues, metadata, assignments and subsequent ordinary
-creations are retained. If pending local or downstream work blocks the reset,
-resolve the [normal reset blockers](#reset-recovery) before retrying recovery.
-Retrying against an unfixed root can quarantine the same batch again.
+automatic sync installs the refreshed checkpoint, then resumes delivery.
+Existing issues, metadata, assignments and later creations are kept. If pending
+local or downstream work blocks the reset, resolve the
+[normal reset blockers](#reset-recovery) first. Retrying against an unfixed
+root can quarantine the same batch again. Do not skip relay data or edit a
+database cursor instead.
 
-A still-live cross-project link remains unsupported. The root refuses to sign
-that current state or serve an older retained checkpoint while that boundary
-exists, preserving the owner's link and retained events. Resolve
-the live boundary explicitly before retrying recovery; a reset neither strips
-that link silently nor shares its private endpoint.
-
-There is no verified general workaround for this retained-checkpoint case on
-0.20.0. Preserve the quarantine and upgrade the root; skipping relay data or
-editing a database cursor is not a recovery path.
+A live cross-project link is unsupported. The root refuses to sign a checkpoint
+while the link exists and keeps the owner's link and events. Remove the link,
+then retry. A reset never strips the link silently or shares its private
+endpoint.
 
 ## Purge and reset
 
