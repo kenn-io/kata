@@ -84,6 +84,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
   again inside the transaction that starts the recurrence (daemon API 0.37.0),
   and an issue moved to another project is repeated in its current project.
 
+- Reopening a parent in the TUI now shows how many recurring children it will
+  deliver. Press `r` in the list or detail view, or `u` to undo a close, on a
+  parent whose `catchup: "all"` job missed several occurrences, and the TUI
+  asks you to reopen or cancel with the exact count. It names
+  `kata cron job update` for changing catch-up. One or zero due children reopen
+  without a prompt. See the [CLI reference](reference/cli.md).
 - Get an immediate error when a daemon in another PID namespace, such as one in
   a sandbox or container sharing your `KATA_HOME`, already owns the store.
   `kata` commands, `kata daemon start`, and foreground startup previously
