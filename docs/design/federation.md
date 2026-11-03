@@ -378,6 +378,35 @@ the same daemon.
 
 ## Leases And Write Gates
 
+### Cron occurrence claims on main
+
+Schema 36 adds non-expiring root-local reservations for adapter execution
+occurrences, separate from issue leases and asynchronous run observations.
+Only the root inserts `cron_occurrence_claims`. A relay or spoke forwards
+claim, lookup and effective capability discovery synchronously under its
+enrollment's existing `claim` permission. Offline or unsupported authority
+returns pending; no replica grants from cached state.
+
+Each forwarding hop runs incoming credential/host fences in a short admission
+transaction before sending the mutation. The root checks its immediate-hop
+enrollment and root role in the insert transaction. Requests admitted before
+later downstream revocation may finish in flight. No transaction spans the
+network. Negotiated relays assert the original installation and actor in
+bounded origin metadata; ordinary callers cannot supply that authority.
+Transport bearers remain pinned to their configured origin and redirects are
+rejected. The root instance identity is pinned locally before forwarding a
+claim and carried to the root, so endpoint rebinding cannot silently select
+another arbitration authority.
+
+Claims emit no events and do not enter federation baselines. Full owner backups
+retain them. Project transfers carry a non-authoritative namespace marker;
+detaching a replica preserves that boundary. Native project merge/adoption
+with retained root claims is refused. The [cron reference](../reference/cron.md#reserve-an-execution-occurrence)
+owns request, replay, occurrence-key and adapter recovery rules; the
+[backup guide](../operations/backup-restore.md#full-backup) owns restore limits.
+
+### Issue leases
+
 The root arbitrates leases, while replicas accept ordinary edits locally.
 A lease coordinates exclusive non-comment work; it is not required for every
 edit. Direct spokes derive the holder from their enrollment, and relays retain

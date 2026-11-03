@@ -420,6 +420,13 @@ unknown, or failed advertisements remain distinct outcomes. This is an ordinary 
 read and creates no permissions. Ordinary authentication, project isolation,
 and issue-scoped route restrictions apply.
 
+On main (schema 36), the response also contains `capabilities` and, when
+available, `claim_authority_instance_uid`. `cron_occurrence_claims_v1` means
+the project's root currently supports occurrence reservations. A spoke or
+relay asks the root synchronously; an offline, disabled, or older authority
+does not advertise effective claim support. Local `cron_v1` event support
+remains independent. Capability reads never reserve an occurrence.
+
 ### Upgrade limits
 
 These limits apply to projects with cron data and the adapters that consume
@@ -445,6 +452,87 @@ supported across this change:
 Stored definitions and events stay unchanged. Deleting a cron job does not
 remove its retained history or the project's cron capability requirement.
 See [Cron triggers](#triggers) for the expression rules.
+
+## Reserve an execution occurrence
+
+On main (schema 36), adapters can reserve an occurrence before creating a
+per-run issue or launching work. Every participating runtime must claim for
+this to prevent competing launches. Observations and executor labels alone
+do not reserve anything.
+
+Generate a unique run UID for each independent attempt, persist it with the
+complete request, and reuse both after an uncertain response. Two workers
+sharing a daemon and actor still need different attempt UIDs. A deterministic
+UID derived only from job and occurrence is unsuitable: identical retries
+confirm the same reservation and cannot distinguish independent executions.
+
+```sh
+kata cron run claim <run-uid> --job-uid <job-uid> \
+  --definition-event-uid <event-uid> \
+  --occurrence-key 2030-01-02T03:04:05Z \
+  --executor-label example-executor --json
+kata cron run claim show <run-uid> --json
+```
+
+Optional `--workflow-uid` and `--workflow-definition-event-uid` must be
+paired. `--as` and `--teammate` use ordinary actor attribution. Authenticated
+accounts and federation enrollments determine authority; labels do not.
+The root validates a live, enabled execute job and the supplied definition
+references. A definition that has not reached the root keeps the claim
+pending. Ordinary read-only clients and issue-subtree tokens cannot claim
+project-wide executions.
+
+The API is POST
+`/api/v1/projects/{project_id}/cron/jobs/{job_uid}/claims`, with `run_uid`,
+`definition_event_uid`, `occurrence_key`, optional workflow/event pair,
+`actor`, `teammate`, and `executor_label`. GET
+`/api/v1/projects/{project_id}/cron/claims/{run_uid}` looks up a reservation.
+The CLI returns JSON and exits unsuccessfully for conflict or pending.
+
+| Response | Adapter action |
+| --- | --- |
+| `201`, `claimed: true` | The attempt holds the reservation. Persist the grant before launching. |
+| `200`, `claimed: true`, `replayed: true` | The same immutable request already holds it. Consult durable execution state before recovering; replay never means work has not started. |
+| `409 cron_occurrence_claimed` | Another attempt holds this occurrence. The error's `data.claim` names its run UID and executor label. Skip this occurrence. |
+| `409 cron_claim_identity_conflict` | A retained successful run UID was reused with changed identity. Recover the original request. Cross-project conflicts disclose no other claim. |
+| `503 cron_claim_pending` | Keep the occurrence pending inside the catchup window. Do not launch or fall back to local arbitration. |
+
+Only successful reservations are retained. Reevaluate losing or pending
+requests after repair; there is no stored negative decision. The reservation
+key is `(project_uid, job_uid, occurrence_key)`, independent of job revision,
+actor, and executor label. Editing or deleting a job does not reopen it.
+Successful run UIDs are unique within the root database. Reservations have
+no expiry, release, or takeover. A crash after a grant can strand an occurrence;
+recover with its original request and execution journal, or ask an operator
+to reconcile ambiguous side effects. A manual retry uses a new occurrence.
+
+The root alone stores claims. Spokes and relays forward synchronously using
+project-scoped enrollment credentials. Relays preserve the originating
+installation and actor. Each hop checks incoming credentials at admission;
+requests admitted before later revocation may finish in flight. No database
+transaction spans network I/O. This reserves work, but cannot make external
+side effects exactly once.
+
+Use these shared key forms, bounded to **1,024 UTF-8 bytes**:
+
+| Occurrence | Canonical key |
+| --- | --- |
+| `cron`, `interval`, or `once` | Scheduled instant in UTC RFC3339Nano, for example `2030-01-02T03:04:05Z`. Trim unnecessary fractional zeros; never use the actual launch time. |
+| Issue date | `date:<issue_uid>:scheduled_on:<value>` or `date:<issue_uid>:deadline_on:<value>`. Use the normalized stored field value: `2030-01-02`, civil `2030-01-02T03:04:00`, or a UTC RFC3339Nano instant. Normalize omitted civil seconds to `:00`. |
+| Manual | `manual:<request_uid>`, with a unique request UID persisted across retries. |
+
+All adapters must agree on the scheduled instant, including the job's cron
+timezone and interval anchor. Use the job's creation time as the interval
+anchor, rather than installation or restart time. Issue-date keys never
+resolve civil values through a daemon's default timezone; both sides of a
+DST overlap share the same field identity. Keep deadline lead offsets, job
+revisions, timezone metadata, and executor labels out of keys. Kata treats
+keys as opaque strings; it cannot correct adapters that choose different keys.
+
+Full owner backups preserve reservations present in their snapshot. Project
+copies and detached replicas cannot become a second authority for the same
+namespace. See [backup and restore](../operations/backup-restore.md#full-backup)
+for authority migration and older-snapshot recovery limits.
 
 ## Independent run evidence
 
