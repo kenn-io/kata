@@ -589,6 +589,10 @@ workflow. PostgreSQL runtime roles still cannot perform owner-only migrations.
 
 [Herdr Kata](https://github.com/salmonumbrella/herdr-kata/blob/main/docs/native.md)
 is one adapter that implements this contract; its documentation covers setup.
+[tern-kata](https://github.com/Dangerboi/tern-kata/blob/main/docs/guide/worker.md)
+is another: its worker runs prompt and workflow jobs through
+[omp](https://github.com/can1357/oh-my-pi) on the user's machine; its guide
+covers setup.
 
 ## Storage and backup
 
