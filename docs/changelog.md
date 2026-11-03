@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-02
+last_edited: 2026-11-03
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -21,8 +21,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   migration runs.
 - Read which alias or project Kata looked up from `error.data` when a command
   fails with `project_not_initialized`, instead of parsing the message. `data`
-  holds `alias` or `project`. The message, hint and exit code are unchanged. See
-  [HTTP API errors](reference/http-api.md#errors).
+  holds `alias` or `project` when the message names that alias or project. See
+  the [HTTP API errors table](reference/http-api.md#errors) for exceptions.
+  The message, hint, and exit code are unchanged. Thanks to
+  [Dangerboi](https://github.com/Dangerboi).
 
 - Manage cron jobs, workflows and run evidence from MCP: load `kata.load_cron`
   for 17 tools over the daemon's existing cron API. Native notification jobs
