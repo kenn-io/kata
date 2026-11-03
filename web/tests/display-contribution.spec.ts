@@ -173,6 +173,7 @@ test('retained contribution survives refresh and fits the existing history and c
               attributed_teammate: 'reviewer',
               payload: JSON.stringify({
                 transcript: {
+                  agent: 'codex',
                   session_id: '00000000-0000-4000-8000-000000000001',
                   url: 'https://sessions.example/00000000-0000-4000-8000-000000000001',
                 },

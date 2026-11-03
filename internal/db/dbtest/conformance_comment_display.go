@@ -157,7 +157,7 @@ func checkCommentDisplayContribution(t *testing.T, store db.Storage, backend Bac
 		assertDisplay(c)
 	}
 	// A malformed display field omits only that label, retaining the whole snapshot.
-	var malformed map[string]jsontext.Value
+	malformed := make(map[string]jsontext.Value)
 	require.NoError(t, json.Unmarshal([]byte(retained.Payload), &malformed))
 	document.Comments[0]["attributed_teammate"] = 42
 	malformed["comments"], err = json.Marshal(document.Comments)

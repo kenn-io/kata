@@ -26,7 +26,7 @@ func TestSelectedCommentGraphWorkIgnoresUnrelatedBodies(t *testing.T) {
 					`CREATE TABLE projects(id INTEGER PRIMARY KEY,uid TEXT,name TEXT,deleted_at TEXT)`,
 					`CREATE TABLE issues(id INTEGER PRIMARY KEY,uid TEXT,short_id TEXT,project_id INTEGER,deleted_at TEXT)`,
 					`CREATE TABLE comments(id INTEGER PRIMARY KEY,uid TEXT,issue_id INTEGER,author TEXT,body TEXT,created_at TEXT,teammate TEXT,reply_to_uid TEXT,reply_kind TEXT,edited_at TEXT)`,
-					`CREATE TABLE events(type TEXT,related_issue_uid TEXT,payload TEXT)`,
+					`CREATE TABLE events(uid TEXT,origin_instance_uid TEXT,type TEXT,issue_uid TEXT,hlc_physical_ms INTEGER,hlc_counter INTEGER,related_issue_uid TEXT,payload TEXT)`,
 					`CREATE TABLE purge_log(issue_uid TEXT)`,
 					`INSERT INTO projects VALUES(1,'01M40000000000000000000001','example-project',NULL)`,
 					`INSERT INTO issues VALUES(1,'01M40000000000000000000002','0002',1,NULL),(2,'01M40000000000000000000003','0003',1,NULL)`,
@@ -79,7 +79,7 @@ func TestSelectedCommentGraphWorkIgnoresUnrelatedBodies(t *testing.T) {
 						require.ElementsMatch(t, expected, graph.CommentUIDsByProject[1])
 						require.LessOrEqual(t, work.rows, 2*selected+1, "handle rows stay bounded as unrelated comments grow")
 						require.Equal(t, 22*selected, work.bodyBytes, "unrelated bodies must not be consumed and discarded")
-						require.LessOrEqual(t, work.queries, 2, "unrelated pending targets must not trigger endpoint lookups")
+						require.LessOrEqual(t, work.queries, 3, "one contributor history read is allowed; unrelated pending targets must not trigger endpoint lookups")
 					} else {
 						require.Len(t, graph.Comments, 1)
 						require.Zero(t, work.bodyBytes)
@@ -105,7 +105,7 @@ func TestReadCommentGraphPendingTargetWork(t *testing.T) {
 			`CREATE TABLE projects(id INTEGER PRIMARY KEY,uid TEXT,name TEXT,deleted_at TEXT)`,
 			`CREATE TABLE issues(id INTEGER PRIMARY KEY,uid TEXT,short_id TEXT,project_id INTEGER,deleted_at TEXT)`,
 			`CREATE TABLE comments(id INTEGER PRIMARY KEY,uid TEXT,issue_id INTEGER,author TEXT,body TEXT,created_at TEXT,teammate TEXT,reply_to_uid TEXT,reply_kind TEXT,edited_at TEXT)`,
-			`CREATE TABLE events(type TEXT,related_issue_uid TEXT,payload TEXT)`,
+			`CREATE TABLE events(uid TEXT,origin_instance_uid TEXT,type TEXT,issue_uid TEXT,hlc_physical_ms INTEGER,hlc_counter INTEGER,related_issue_uid TEXT,payload TEXT)`,
 			`CREATE TABLE purge_log(issue_uid TEXT)`,
 			`INSERT INTO projects VALUES(1,'01M40000000000000000000001','example-project',NULL)`,
 			`INSERT INTO issues VALUES(1,'01M40000000000000000000002','0002',1,NULL)`,

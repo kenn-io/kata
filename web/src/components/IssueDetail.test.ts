@@ -146,7 +146,7 @@ describe('IssueDetail', () => {
     const shared = within(sharedDetail as HTMLElement)
 
     expect(shared.getByText('Weekly example')).toBeTruthy()
-    expect(shared.getByText('commented')).toBeTruthy()
+    expect(shared.getByText('user-a — commented')).toBeTruthy()
     expect(shared.getByRole('heading', { name: 'Events' })).toBeTruthy()
     expect((shared.getByRole('button', { name: 'Edit issue' }) as HTMLButtonElement).disabled).toBe(
       true,
@@ -380,7 +380,7 @@ describe('IssueDetail', () => {
     expect(screen.getByText('Weekly example')).not.toBeNull()
     expect(screen.getByText('Accepted comment')).not.toBeNull()
     expect(screen.getByText('user-a / teammate-1')).not.toBeNull()
-    expect(screen.getByText('commented')).not.toBeNull()
+    expect(screen.getByText('user-a — commented')).not.toBeNull()
 
     await fireEvent.input(screen.getByLabelText('Comment'), {
       target: { value: 'New comment' },
