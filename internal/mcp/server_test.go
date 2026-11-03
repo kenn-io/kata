@@ -131,7 +131,7 @@ func TestServerRejectsInvalidStartupSections(t *testing.T) {
 		{name: "teams disabled", sections: []string{"teams"}, want: `MCP startup section "teams" is unavailable`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			server, err := New(Options{
+			server, err := New(t.Context(), Options{
 				Client: inertTestClient(t), Scope: NewAllScope(), Actor: "example-agent", Version: "test-version",
 				StartupSections: tt.sections,
 			})
@@ -169,11 +169,12 @@ func TestSectionLoaderActivatesOnlyItsTypedToolsAndIsIdempotent(t *testing.T) {
 
 	t.Run("preloaded sections", func(t *testing.T) {
 		changed := make(chan struct{}, 1)
-		session := connectRawTestServerWithClientOptions(t, Options{
+		options := withTestBoundScope(t, Options{
 			Client: inertTestClient(t), ProjectID: 42, ProjectName: "spoke-project",
 			Actor: "example-agent", Version: "test-version",
 			StartupSections: []string{"issue_discovery", "issue_mutation", "coordination", "issue_lifecycle", "projects", "docs"},
-		}, &sdkmcp.ClientOptions{ToolListChangedHandler: func(context.Context, *sdkmcp.ToolListChangedRequest) {
+		})
+		session := connectRawTestServerWithClientOptions(t, options, &sdkmcp.ClientOptions{ToolListChangedHandler: func(context.Context, *sdkmcp.ToolListChangedRequest) {
 			select {
 			case changed <- struct{}{}:
 			default:
@@ -889,7 +890,7 @@ func TestToolsRoundTripAgainstRealDaemon(t *testing.T) {
 	apiClient, err := kataclient.NewWithHTTPClient(httpServer.URL, httpServer.Client())
 	require.NoError(t, err)
 	session := connectTestServerWithOptions(t, Options{
-		Client: apiClient, ProjectID: project.ID, ProjectName: project.Name,
+		Client: apiClient, Scope: testBoundScopeForProject(t, project),
 		Actor: "example-agent", Version: "test-version",
 	})
 
@@ -1264,7 +1265,14 @@ func connectTestServerWithClient(t *testing.T, apiClient *kataclient.Client) *sd
 
 func connectTestServerWithOptions(t *testing.T, options Options) *sdkmcp.ClientSession {
 	t.Helper()
-	session := connectRawTestServerWithOptions(t, options)
+	return connectTestServerWithOptionsAsProvided(t, withTestBoundScope(t, options))
+}
+
+// connectTestServerWithOptionsAsProvided leaves Scope unset so the test can
+// exercise New's startup project resolution from the legacy ID/name options.
+func connectTestServerWithOptionsAsProvided(t *testing.T, options Options) *sdkmcp.ClientSession {
+	t.Helper()
+	session := connectRawTestServerWithClientOptions(t, options, nil)
 	for _, name := range sectionLoaderNames {
 		result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: name, Arguments: map[string]any{}})
 		require.NoError(t, err)
@@ -1275,12 +1283,32 @@ func connectTestServerWithOptions(t *testing.T, options Options) *sdkmcp.ClientS
 
 func connectRawTestServerWithOptions(t *testing.T, options Options) *sdkmcp.ClientSession {
 	t.Helper()
-	return connectRawTestServerWithClientOptions(t, options, nil)
+	return connectRawTestServerWithClientOptions(t, withTestBoundScope(t, options), nil)
+}
+
+func withTestBoundScope(t *testing.T, options Options) Options {
+	t.Helper()
+	if options.Scope != nil || options.ProjectID == 0 || options.ProjectName == "" {
+		return options
+	}
+	scope, err := NewBoundScope(ProjectIdentity{
+		ID: options.ProjectID, Name: options.ProjectName,
+	})
+	require.NoError(t, err)
+	options.Scope = scope
+	return options
+}
+
+func testBoundScopeForProject(t *testing.T, project db.Project) *Scope {
+	t.Helper()
+	scope, err := NewBoundScope(ProjectIdentity{ID: project.ID, UID: project.UID, Name: project.Name})
+	require.NoError(t, err)
+	return scope
 }
 
 func connectRawTestServerWithClientOptions(t *testing.T, options Options, clientOptions *sdkmcp.ClientOptions) *sdkmcp.ClientSession {
 	t.Helper()
-	server, err := New(options)
+	server, err := New(t.Context(), options)
 	require.NoError(t, err)
 
 	serverConn, clientConn := net.Pipe()

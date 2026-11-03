@@ -42,7 +42,7 @@ func newCronFixture(t *testing.T) cronFixture {
 	t.Cleanup(httpServer.Close)
 	client, err := kataclient.NewWithHTTPClient(httpServer.URL, httpServer.Client())
 	require.NoError(t, err)
-	session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: project.ID, ProjectName: project.Name, Actor: "example-agent", Version: "test", Teammate: "default-worker"})
+	session := connectTestServerWithOptions(t, Options{Client: client, Scope: testBoundScopeForProject(t, project), Actor: "example-agent", Version: "test", Teammate: "default-worker"})
 	return cronFixture{session, store, project, client, server.Handler()}
 }
 
@@ -129,7 +129,7 @@ func TestCronCreateLostResponseReadback(t *testing.T) {
 	t.Cleanup(server.Close)
 	client, err := kataclient.NewWithHTTPClient(server.URL, server.Client())
 	require.NoError(t, err)
-	s := connectTestServerWithOptions(t, Options{Client: client, ProjectID: f.project.ID, ProjectName: f.project.Name, Actor: "example-agent", Version: "test"})
+	s := connectTestServerWithOptions(t, Options{Client: client, Scope: testBoundScopeForProject(t, f.project), Actor: "example-agent", Version: "test"})
 	require.True(t, cronCall(t, s, "cron_job_create", map[string]any{"uid": id, "name": "Recoverable", "definition": cronDefinition()}).IsError)
 
 	recovered := cronRecord(t, f.session, "cron_job", map[string]any{"uid": id}, "job")
@@ -256,7 +256,7 @@ func TestCronReadonlyAndIssueScopedCredentials(t *testing.T) {
 	t.Cleanup(httpServer.Close)
 	client, err := kataclient.NewWithHTTPClient(httpServer.URL, httpServer.Client())
 	require.NoError(t, err)
-	s := connectTestServerWithOptions(t, Options{Client: client, ProjectID: f.project.ID, ProjectName: f.project.Name, Actor: "example-agent", Version: "test"})
+	s := connectTestServerWithOptions(t, Options{Client: client, Scope: testBoundScopeForProject(t, f.project), Actor: "example-agent", Version: "test"})
 	cronOK(t, s, "cron_capabilities", map[string]any{})
 	require.True(t, cronCall(t, s, "cron_job_create", map[string]any{"uid": cronNewUID(t, s), "name": "Denied", "definition": cronDefinition()}).IsError)
 	parent, _, err := f.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: f.project.ID, Title: "Scoped root", Author: "example-agent"})
@@ -274,7 +274,7 @@ func TestCronReadonlyAndIssueScopedCredentials(t *testing.T) {
 		return nil
 	}))
 	require.NoError(t, err)
-	scoped := connectTestServerWithOptions(t, Options{Client: scopedClient, ProjectID: f.project.ID, ProjectName: f.project.Name, Actor: "example-agent", Version: "test"})
+	scoped := connectTestServerWithOptions(t, Options{Client: scopedClient, Scope: testBoundScopeForProject(t, f.project), Actor: "example-agent", Version: "test"})
 	for _, tc := range []struct {
 		name      string
 		arguments map[string]any

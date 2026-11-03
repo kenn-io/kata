@@ -149,7 +149,7 @@ func newMCPServeCmd() *cobra.Command {
 			}
 			observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved)
 			defer stopReporting()
-			server, err := mcpserver.New(mcpserver.Options{
+			server, err := mcpserver.New(ctx, mcpserver.Options{
 				Client:            apiClient,
 				ObserveToolCall:   observe,
 				LongRunningClient: longRunningAPIClient,

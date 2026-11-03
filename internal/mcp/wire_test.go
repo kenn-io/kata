@@ -186,12 +186,13 @@ func rawServerConnection(t *testing.T) (net.Conn, *bufio.Reader) {
 
 func rawServerConnectionWithClient(t *testing.T, client *kataclient.Client) (net.Conn, *bufio.Reader) {
 	t.Helper()
-	server, err := New(Options{
-		Client:      client,
-		ProjectID:   42,
-		ProjectName: "spoke-project",
-		Actor:       "example-agent",
-		Version:     "test-version",
+	scope, err := NewBoundScope(ProjectIdentity{ID: 42, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project"})
+	require.NoError(t, err)
+	server, err := New(t.Context(), Options{
+		Client:  client,
+		Scope:   scope,
+		Actor:   "example-agent",
+		Version: "test-version",
 	})
 	require.NoError(t, err)
 	serverConn, clientConn := net.Pipe()

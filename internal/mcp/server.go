@@ -48,7 +48,7 @@ type Options struct {
 }
 
 // New creates a tools-only MCP server for one startup project scope.
-func New(options Options) (*sdkmcp.Server, error) {
+func New(ctx context.Context, options Options) (*sdkmcp.Server, error) {
 	if options.Client == nil {
 		return nil, errors.New("kata API client is required")
 	}
@@ -56,7 +56,7 @@ func New(options Options) (*sdkmcp.Server, error) {
 		options.LongRunningClient = options.Client
 	}
 	if options.Scope == nil {
-		scope, err := NewBoundScope(ProjectIdentity{ID: options.ProjectID, Name: options.ProjectName})
+		scope, err := ResolveBoundScope(ctx, options.Client, ProjectIdentity{ID: options.ProjectID, Name: options.ProjectName})
 		if err != nil {
 			return nil, err
 		}

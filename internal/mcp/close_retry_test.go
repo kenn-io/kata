@@ -305,38 +305,7 @@ func TestScopedCloseDryRunUsesResponseEndpointProjectUIDs(t *testing.T) {
 	require.NotContains(t, *output.Warnings[0].Refutations[0].Summary, "Hidden review")
 }
 
-func TestVerificationReferenceScopeUsesProjectUIDs(t *testing.T) {
-	// A comment handle's display form cannot establish its owning project.
-	hegel.Test(t, func(ht *hegel.T) {
-		provenance := hegel.Draw(ht, hegel.Booleans())
-		projectMatches := hegel.Draw(ht, hegel.Booleans())
-		suffix := hegel.Draw(ht, hegel.Text())
-
-		const allowedProjectUID = "01HAAAAAAAAAAAAAAAAAAAAAAA"
-		ownerProjectUID := "01HBBBBBBBBBBBBBBBBBBBBBBB"
-		if projectMatches {
-			ownerProjectUID = allowedProjectUID
-		}
-		reference := "c:" + suffix
-		endpointProjects := map[string]string{}
-		if provenance {
-			endpointProjects[reference] = ownerProjectUID
-		}
-
-		require.Equal(ht, provenance && projectMatches, verificationReferenceInScope(
-			reference,
-			endpointProjects,
-			map[string]bool{allowedProjectUID: true},
-		))
-		require.False(ht, verificationReferenceInScope(
-			reference+":near-miss",
-			endpointProjects,
-			map[string]bool{allowedProjectUID: true},
-		), "similar display handles must not borrow endpoint provenance")
-	}, hegel.WithTestCases(40), hegel.WithDatabase(t.TempDir()))
-}
-
-func TestScopedVerificationWarningsRequireProvenanceForBothEndpoints(t *testing.T) {
+func TestScopedVerificationWarningsRequireExactProvenanceForBothEndpoints(t *testing.T) {
 	const (
 		allowedProjectUID = "01HAAAAAAAAAAAAAAAAAAAAAAA"
 		foreignProjectUID = "01HBBBBBBBBBBBBBBBBBBBBBBB"
@@ -356,8 +325,14 @@ func TestScopedVerificationWarningsRequireProvenanceForBothEndpoints(t *testing.
 		refMatchesScope := hegel.Draw(ht, hegel.Booleans())
 		targetHasProvenance := hegel.Draw(ht, hegel.Booleans())
 		targetMatchesScope := hegel.Draw(ht, hegel.Booleans())
-		refutationRef, targetRef := "c:refutation", "c:claim"
+		refutationRef := "refutation:" + hegel.Draw(ht, hegel.Text())
+		targetRef := "target:" + hegel.Draw(ht, hegel.Text())
+		author := "reviewer:" + hegel.Draw(ht, hegel.Text())
+		summary := "summary:" + hegel.Draw(ht, hegel.Text())
 		endpointProjects := map[string]string{}
+		// Similar handles never substitute for the exact rendered key.
+		endpointProjects[refutationRef+":near-miss"] = allowedProjectUID
+		endpointProjects[targetRef+":near-miss"] = allowedProjectUID
 		if refHasProvenance {
 			endpointProjects[refutationRef] = foreignProjectUID
 			if refMatchesScope {
@@ -370,12 +345,11 @@ func TestScopedVerificationWarningsRequireProvenanceForBothEndpoints(t *testing.
 				endpointProjects[targetRef] = allowedProjectUID
 			}
 		}
-		summary := "Visible only with both endpoint proofs"
 		warnings := []generated.VerificationWarning{{
 			Code: "open_refutations",
 			Refutations: []generated.OpenRefutation{{
 				Refutation: refutationRef, Target: targetRef,
-				Author: "reviewer", Summary: &summary,
+				Author: author, Summary: &summary,
 			}},
 		}}
 

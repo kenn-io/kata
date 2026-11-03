@@ -29,9 +29,10 @@ func TestMCPVerdictCloseAndWarnings(t *testing.T) {
 	t.Cleanup(httpServer.Close)
 	client, err := kataclient.NewWithHTTPClient(httpServer.URL, httpServer.Client())
 	require.NoError(t, err)
-	scope, err := NewBoundScope(ProjectIdentity{ID: project.ID, UID: project.UID, Name: project.Name})
-	require.NoError(t, err)
-	session := connectTestServerWithOptions(t, Options{Client: client, Scope: scope, Actor: "worker", Version: "test-version"})
+	session := connectTestServerWithOptionsAsProvided(t, Options{
+		Client: client, ProjectID: project.ID, ProjectName: project.Name,
+		Actor: "worker", Version: "test-version",
+	})
 	for _, kind := range []string{"confirmed", "refuted", "warning", "overrule"} {
 		t.Run(kind, func(t *testing.T) {
 			meta := map[string]jsontext.Value{}
