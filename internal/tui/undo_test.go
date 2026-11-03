@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -30,6 +31,7 @@ type undoTestAPI struct {
 	reopenErr     error
 	links         []LinkEntry
 	removedLinkID int64
+	writes        []string
 }
 
 func (f *undoTestAPI) GetInstance(_ context.Context) (InstanceInfo, error) {
@@ -84,7 +86,8 @@ func (f *undoTestAPI) Reopen(_ context.Context, _ int64, _, _ string) (*Mutation
 	return f.completeResponse(f.writeResp), f.reopenErr
 }
 
-func (f *undoTestAPI) Assign(_ context.Context, _ int64, _, _, _ string) (*MutationResp, error) {
+func (f *undoTestAPI) Assign(_ context.Context, _ int64, _, owner, _ string) (*MutationResp, error) {
+	f.writes = append(f.writes, "assign "+owner)
 	return f.completeResponse(f.writeResp), nil
 }
 
@@ -94,18 +97,26 @@ func (f *undoTestAPI) ClaimTimedAssignment(_ context.Context, _ int64, _, _ stri
 
 func (f *undoTestAPI) SetPriority(_ context.Context, _ int64, _ string, priority *int64, _ string) (*MutationResp, error) {
 	f.priorities = append(f.priorities, priority)
+	if priority == nil {
+		f.writes = append(f.writes, "priority clear")
+	} else {
+		f.writes = append(f.writes, fmt.Sprintf("priority %d", *priority))
+	}
 	return f.completeResponse(f.writeResp), nil
 }
 
-func (f *undoTestAPI) AddLabel(_ context.Context, _ int64, _, _, _ string) (*MutationResp, error) {
+func (f *undoTestAPI) AddLabel(_ context.Context, _ int64, _, label, _ string) (*MutationResp, error) {
+	f.writes = append(f.writes, "label add "+label)
 	return f.completeResponse(f.writeResp), nil
 }
 
-func (f *undoTestAPI) RemoveLabel(_ context.Context, _ int64, _, _, _ string) (*MutationResp, error) {
+func (f *undoTestAPI) RemoveLabel(_ context.Context, _ int64, _, label, _ string) (*MutationResp, error) {
+	f.writes = append(f.writes, "label remove "+label)
 	return f.completeResponse(f.writeResp), nil
 }
 
-func (f *undoTestAPI) EditBody(_ context.Context, _ int64, _, _, _ string) (*MutationResp, error) {
+func (f *undoTestAPI) EditBody(_ context.Context, _ int64, _, body, _ string) (*MutationResp, error) {
+	f.writes = append(f.writes, "body "+body)
 	return f.completeResponse(f.writeResp), nil
 }
 
@@ -406,12 +417,13 @@ func TestUndoClientRestoresFieldEdits(t *testing.T) {
 		name    string
 		entry   undoEntry
 		current Issue
+		want    string
 	}{
-		{"owner", undoEntry{kind: "owner.assign", before: Issue{}, after: Issue{Owner: &owner}}, Issue{Owner: &owner}},
-		{"priority zero", undoEntry{kind: "priority.set", before: Issue{}, after: Issue{Priority: &priority}}, Issue{Priority: &priority}},
-		{"body", undoEntry{kind: "body.edit", before: Issue{Body: "before"}, after: Issue{Body: "after"}}, Issue{Body: "after"}},
-		{"label add", undoEntry{kind: "label.add", label: "urgent", before: Issue{}, after: Issue{}}, Issue{Labels: []string{"urgent"}}},
-		{"label remove", undoEntry{kind: "label.remove", label: "urgent", before: Issue{Labels: []string{"urgent"}}, after: Issue{}}, Issue{}},
+		{"owner", undoEntry{kind: "owner.assign", before: Issue{}, after: Issue{Owner: &owner}}, Issue{Owner: &owner}, "assign "},
+		{"priority zero", undoEntry{kind: "priority.set", before: Issue{}, after: Issue{Priority: &priority}}, Issue{Priority: &priority}, "priority clear"},
+		{"body", undoEntry{kind: "body.edit", before: Issue{Body: "before"}, after: Issue{Body: "after"}}, Issue{Body: "after"}, "body before"},
+		{"label add", undoEntry{kind: "label.add", label: "urgent", before: Issue{}, after: Issue{}}, Issue{Labels: []string{"urgent"}}, "label remove urgent"},
+		{"label remove", undoEntry{kind: "label.remove", label: "urgent", before: Issue{Labels: []string{"urgent"}}, after: Issue{}}, Issue{}, "label add urgent"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			uid := "01JZ0000000000000000000001"
@@ -422,6 +434,7 @@ func TestUndoClientRestoresFieldEdits(t *testing.T) {
 			outcome := newConnectedUndoClient(t, f).undo(t.Context(), tc.entry, undoOptions{})
 			require.NoError(t, outcome.err)
 			require.True(t, outcome.changed)
+			require.Equal(t, []string{tc.want}, f.writes)
 		})
 	}
 }
