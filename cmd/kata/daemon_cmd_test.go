@@ -43,6 +43,7 @@ import (
 	"go.kenn.io/kata/internal/issuesync"
 	"go.kenn.io/kata/internal/notionsync"
 	"go.kenn.io/kata/internal/rootbridge"
+	"go.kenn.io/kata/internal/teammate"
 	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/vector"
@@ -4012,6 +4013,9 @@ func TestDaemonLaunchContributionDoesNotReachBackgroundSync(t *testing.T) {
 		t.Fatal("sync runner did not start")
 	}
 	require.Equal(t, "preserved", workerContext.Value(contextMarker{}))
+	selection, present := teammate.FromRequest(workerContext)
+	require.True(t, present)
+	require.Empty(t, selection, "daemon startup must clear the launch teammate before the sync runner starts")
 	var event db.Event
 	select {
 	case event = <-imported:
