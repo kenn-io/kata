@@ -469,6 +469,64 @@ func TestOptionalSigningRejectsEmptySignatureHeader(t *testing.T) {
 	}
 }
 
+// Claim enrollment routes require signatures on ordinary and restricted listeners.
+func TestSignedCronOccurrenceClaims(t *testing.T) {
+	env := testenv.New(t)
+	project, err := env.DB.CreateProject(t.Context(), "hub-project")
+	require.NoError(t, err)
+	_, err = env.DB.EnableProjectFederation(t.Context(), project.ID, "worker")
+	require.NoError(t, err)
+	job := cronClaimJob(t, env, project)
+	enrollment, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{ProjectID: &project.ID, SpokeInstanceUID: federationTestSpokeUID, Actor: "worker", Capabilities: "claim"})
+	require.NoError(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		t.Setenv("TEST_CLAIMS_SIGNING_KEY", strings.Repeat("c", 64))
+		source := signingpolicy.Source{KeyID: "claim-key", KeyEnv: "TEST_CLAIMS_SIGNING_KEY"}
+		state := filepath.Join(t.TempDir(), "replay.state")
+		require.NoError(t, federationsigning.InitializeReplayState(state))
+		verifier, err := federationsigning.NewVerifier("https://daemon.example", []signingpolicy.Key{{Source: source, EnrollmentID: enrollment.Enrollment.ID}}, state)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = verifier.Close() })
+		server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, FederationSigning: verifier, FederationSigningRequired: true})
+		t.Cleanup(func() { _ = server.Close() })
+		ingress, err := server.HandlerFor(daemon.ListenerPolicy{Kind: daemon.ListenerFederation})
+		require.NoError(t, err)
+		time.Sleep(federationsigning.Quarantine)
+		for i, handler := range []http.Handler{server.Handler(), ingress} {
+			run := fmt.Sprintf("000000000000000000000000%02d", i+3)
+			body := cronClaimBody(job, run)
+			body["occurrence_key"] = fmt.Sprintf("2030-01-02T03:04:0%dZ", i)
+			payload, err := json.Marshal(body)
+			require.NoError(t, err)
+			for _, route := range []struct {
+				method, path string
+				body         []byte
+				status       int
+			}{
+				{http.MethodPost, cronClaimPath(project.ID, job.UID), payload, http.StatusCreated},
+				{http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/capabilities", project.ID), nil, http.StatusOK},
+				{http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/claims/%s", project.ID, run), nil, http.StatusOK},
+			} {
+				for _, signed := range []bool{false, true} {
+					request := httptest.NewRequestWithContext(t.Context(), route.method, "https://daemon.example"+route.path, bytes.NewReader(route.body))
+					request.Header.Set("Authorization", "Bearer "+enrollment.Token)
+					request.Header.Set("Content-Type", "application/json")
+					if signed {
+						require.NoError(t, federationsigning.Sign(request, source))
+					}
+					response := httptest.NewRecorder()
+					handler.ServeHTTP(response, request)
+					want := http.StatusUnauthorized
+					if signed {
+						want = route.status
+					}
+					require.Equal(t, want, response.Code, "signed=%t %s %s: %s", signed, route.method, route.path, response.Body.String())
+				}
+			}
+		}
+	})
+}
+
 // Required signing applies to enrollment writes on both listeners, while
 // ordinary daemon authority still authors jobs without a federation signature.
 func TestSignedNativeCronEnrollment(t *testing.T) {

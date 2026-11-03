@@ -265,7 +265,8 @@ func exportMeta(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportO
 		if err != nil {
 			return err
 		}
-		if number >= 33 {
+		// Stable project UIDs exist from schema 2, before cron and relay state.
+		if number >= 2 {
 			if err := d.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=?`, opts.ProjectID).Scan(&selectedProjectUID); err != nil {
 				return err
 			}

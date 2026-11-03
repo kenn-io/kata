@@ -18,6 +18,9 @@ import (
 // These operation IDs are the explicit restricted-ingress allowlist. Paths
 // come from native registration so ingress cannot drift from actual routes.
 var signingCapabilities = map[string][]string{
+	"claimCronOccurrence":           {"claim"},
+	"showCronOccurrenceClaim":       {"claim"},
+	"getCronCapabilities":           {"claim"},
 	"createCronJob":                 {"push"},
 	"replaceCronJob":                {"push"},
 	"archiveCronJob":                {"push"},
