@@ -33,6 +33,7 @@ x           close
 r           reopen
 d           set dates
 X           delete issue
+O           set repeat
 u           undo last issue action
 
 Detail

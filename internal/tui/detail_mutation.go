@@ -184,6 +184,7 @@ var successTemplates = map[string]string{
 	"priority.set":     "set priority of #%s",
 	"priority.clear":   "cleared priority of #%s",
 	"dates":            "updated dates of #%s",
+	"recurrence":       "updated repeat of #%s",
 }
 
 // mutationSuccessText is the per-kind toast for a successful mutation.

@@ -20,6 +20,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/recurrence"
 	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/telemetry"
 	katauid "go.kenn.io/kata/internal/uid"
@@ -267,11 +268,30 @@ func (c *Client) GetIssueDetail(ctx context.Context, projectID int64, ref string
 		lease = body.Claim
 	}
 	return &IssueDetail{
-		Issue:    &body.Issue,
-		Parent:   body.Parent,
-		Children: body.Children,
-		Lease:    lease,
+		Issue:      &body.Issue,
+		Parent:     body.Parent,
+		Children:   body.Children,
+		Lease:      lease,
+		Recurrence: c.readRecurrence(ctx, projectID, body.Issue.RecurrenceID),
 	}, nil
+}
+
+// readRecurrence reads the live recurrence an issue belongs to. It is best
+// effort, as it is in kata show: a token that may not list recurrences still
+// reads the issue, which then shows no recurrence.
+func (c *Client) readRecurrence(ctx context.Context, projectID int64, id *int64) *recurrence.View {
+	if id == nil {
+		return nil
+	}
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil
+	}
+	rec, err := recurrence.Active(ctx, apiClient, projectID, id)
+	if err != nil {
+		return nil
+	}
+	return rec
 }
 
 // CreateIssue posts a new issue. body.IdempotencyKey rides the

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/commentref"
+	"go.kenn.io/kata/internal/recurrence"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -104,6 +105,7 @@ type detailModel struct {
 	issue              *Issue
 	parent             *IssueRef
 	children           []Issue
+	recurrence         *recurrence.View
 	detailFocus        detailFocus
 	loading            bool
 	err                error
@@ -351,6 +353,7 @@ func (dm detailModel) applyFetchedIfFresh(msg tea.Msg) (detailModel, bool) {
 		}
 		dm.parent = m.parent
 		dm.children = m.children
+		dm.recurrence = m.recurrence
 		dm = dm.clampChildFocus()
 		dm.err = mergeErr(dm.err, m.err)
 	case commentsFetchedMsg:

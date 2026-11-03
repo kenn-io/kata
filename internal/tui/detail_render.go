@@ -116,6 +116,9 @@ func (dm detailModel) documentHeader(width int, chrome viewChrome) []string {
 	) {
 		lines = append(lines, withGutter(row))
 	}
+	if dm.recurrence != nil {
+		lines = append(lines, withGutter(renderRecurrenceRow(dm.recurrence, width)))
+	}
 	return lines
 }
 
