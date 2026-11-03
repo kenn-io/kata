@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/teammate"
 )
 
 type externalRootSafetyFixture struct {
@@ -1051,12 +1052,15 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 			KataField: "scheduled_on", IntegrationActor: "connector:notes",
 			Patch: patch, ExpectedIssueRevision: fixture.issue.Revision,
 		}
-		projected, event, changed, err := store.ApplyExternalFieldProjection(ctx, params)
+		projected, event, changed, err := store.ApplyExternalFieldProjection(
+			teammate.WithRequest(ctx, "worker-1"), params,
+		)
 		require.NoError(t, err)
 		assert.True(t, changed)
 		require.NotNil(t, event)
 		assert.Equal(t, "issue.metadata_updated", event.Type)
 		assert.Equal(t, "connector:notes", event.Actor)
+		assert.NotContains(t, event.Payload, `"attributed_teammate"`)
 		var metadata map[string]jsontext.Value
 		require.NoError(t, json.Unmarshal([]byte(projected.Metadata), &metadata))
 		assert.JSONEq(t, `"2026-08-21T09:30"`, string(metadata["scheduled_on"]))
@@ -1179,13 +1183,16 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 		if clearErr == nil {
 			return
 		}
-		resolved, event, err := store.ResolveExternalFieldConflict(ctx, db.ResolveExternalFieldConflictParams{
-			BindingID: fixture.binding.ID, MappingID: mapping.ID, ClaimToken: fixture.token,
-			Baseline: jsontext.Value(`"2026-08-23"`), Actor: "tester", At: fixture.now.Add(3 * time.Minute),
-		})
+		resolved, event, err := store.ResolveExternalFieldConflict(
+			teammate.WithRequest(ctx, "resolver-1"), db.ResolveExternalFieldConflictParams{
+				BindingID: fixture.binding.ID, MappingID: mapping.ID, ClaimToken: fixture.token,
+				Baseline: jsontext.Value(`"2026-08-23"`), Actor: "tester", At: fixture.now.Add(3 * time.Minute),
+			},
+		)
 		require.NoError(t, err)
 		assert.False(t, resolved.Conflicted)
 		assert.Equal(t, "issue.external_field_resolved", event.Type)
+		assert.Contains(t, event.Payload, `"attributed_teammate":"resolver-1"`)
 	})
 
 	t.Run("inbound projections are native idempotent and claim guarded", func(t *testing.T) {
@@ -1752,7 +1759,9 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 		require.NoError(t, err)
 		require.True(t, providerCreated)
 
-		comment, events, created, err := store.EnsureExternalRootLifecycleRequest(ctx, params)
+		comment, events, created, err := store.EnsureExternalRootLifecycleRequest(
+			teammate.WithRequest(ctx, "worker-1"), params,
+		)
 		require.NoError(t, err)
 		assert.True(t, created)
 		assert.NotEqual(t, providerComment.ID, comment.ID)
@@ -1764,6 +1773,9 @@ func checkExternalRootSafetyInvariants(t *testing.T, store db.Storage, backend B
 		assert.Empty(t, comment.Teammate)
 		assert.Equal(t, providerTime, comment.CreatedAt)
 		require.Len(t, events, 2)
+		for _, event := range events {
+			assert.NotContains(t, event.Payload, `"attributed_teammate"`, event.Type)
+		}
 		assert.Equal(t, "issue.commented", events[0].Type)
 		assert.Equal(t, integrationActor, events[0].Actor)
 		assert.Equal(t, "issue.labeled", events[1].Type)

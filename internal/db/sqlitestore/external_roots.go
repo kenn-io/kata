@@ -1051,6 +1051,9 @@ func (d *Store) EnsureExternalRootLifecycleRequest(
 	if err := db.ValidateExternalRootLifecycleRequestParams(params); err != nil {
 		return db.Comment{}, nil, false, err
 	}
+	// External lifecycle state comes from the provider, independent of the caller's
+	// request contribution. WithRequest preserves cancellation.
+	ctx = teammate.WithRequest(ctx, "")
 	return retryWrite3(ctx, d, func() (db.Comment, []db.Event, bool, error) {
 		tx, err := d.BeginTx(ctx, nil)
 		if err != nil {
@@ -1738,6 +1741,9 @@ func (d *Store) ApplyExternalFieldProjection(
 			return db.Issue{}, nil, false, fmt.Errorf("validate %q: %w", key, err)
 		}
 	}
+	// External field values come from the provider, independent of the caller's
+	// request contribution. WithRequest preserves cancellation.
+	ctx = teammate.WithRequest(ctx, "")
 	return retryWrite3(ctx, d, func() (db.Issue, *db.Event, bool, error) {
 		tx, err := d.BeginTx(ctx, nil)
 		if err != nil {

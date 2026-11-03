@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.kenn.io/kata/internal/db"
@@ -323,7 +324,14 @@ const HookVersionEnv = "KATA_HOOK_VERSION"
 // env is fed by the caller (runJob) which resolved it once for both
 // the stdin payload and this env slice.
 func buildEnv(baseEnv, userEnv []string, evt db.Event, asnap AliasSnapshot, hasAlias bool) []string {
-	env := append([]string{}, baseEnv...)
+	env := make([]string, 0, len(baseEnv)+len(userEnv)+8)
+	for _, variable := range baseEnv {
+		name, _, _ := strings.Cut(variable, "=")
+		if strings.EqualFold(name, "KATA_TEAMMATE") {
+			continue
+		}
+		env = append(env, variable)
+	}
 	env = append(env, userEnv...)
 	env = append(env,
 		HookVersionEnv+"=1",
