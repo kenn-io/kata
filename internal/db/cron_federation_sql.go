@@ -119,6 +119,12 @@ func MaterializeCronDefinitions(ctx context.Context, tx *sql.Tx, projectID int64
 // PrepareCronAdoption captures portable history before rebinding its
 // project envelope; ordinary federation guards remain with the caller.
 func PrepareCronAdoption(ctx context.Context, tx *sql.Tx, project Project, targetUID string, emptyOnly bool) ([]CronEvent, error) {
+	if err := RejectCronClaimTransfer(ctx, tx, project.ID); err != nil {
+		return nil, err
+	}
+	if err := MarkCronReplica(ctx, tx, targetUID); err != nil {
+		return nil, err
+	}
 	// Adoption replaces history with new spoke-originated snapshots. Native
 	// delivery state cannot enter through that path; refuse before rebinding or
 	// deleting local history so the current authority can keep delivering.

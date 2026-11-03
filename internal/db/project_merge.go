@@ -4,6 +4,7 @@ import (
 	"encoding/json/jsontext"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 )
 
@@ -139,9 +140,20 @@ func PrepareProjectMergeRecords(
 	out := make([]ImportRecord, 0, len(recs)-2)
 	var issueSequenceFloor, eventSequenceFloor int64
 	for _, rec := range recs {
-		if _, ok := rec.(*MetaKV); ok {
+
+		if meta, ok := rec.(*MetaKV); ok {
+			if strings.HasPrefix(meta.Key, CronClaimAuthorityPrefix) {
+				// This owner marker follows the unchanged project UID; ordinary metadata
+				// remains excluded. A merged project copy still cannot arbitrate claims.
+				marker := *meta
+				out = append(out, &marker)
+			}
 			continue
 		}
+		if _, ok := rec.(*CronClaimExport); ok {
+			return nil, fmt.Errorf("owner occurrence claims cannot merge projects")
+		}
+
 		cloned := cloneImportRecord(rec)
 		var err error
 		switch payload := cloned.(type) {

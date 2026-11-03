@@ -16,6 +16,7 @@ import (
 // Production entry points hold a db.Storage; backend selection happens
 // through the storeopen DSN dispatcher.
 type Storage interface {
+	ExportCronClaims(context.Context, ExportFilter) iter.Seq2[CronClaimExport, error]
 	ClaimCronOccurrence(context.Context, CronOccurrenceClaim) (CronClaimResult, error)
 	CronOccurrenceClaim(context.Context, int64, string) (CronOccurrenceClaim, error)
 	// Shared definitions, native recurring delivery and independently attributed execution evidence.

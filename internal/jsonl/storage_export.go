@@ -64,9 +64,17 @@ func Export(ctx context.Context, store db.Storage, w io.Writer, opts ExportOptio
 		}
 		selectedProjectUID = project.UID
 	}
+	if opts.ProjectID > 0 {
+		if err := writeRecord(enc, KindMeta, db.MetaKV{Key: db.CronClaimAuthorityPrefix + selectedProjectUID, Value: "copy"}); err != nil {
+			return err
+		}
+	}
 	for record, err := range store.ExportMeta(ctx) {
 		if err != nil {
 			return err
+		}
+		if opts.ProjectID > 0 && strings.HasPrefix(record.Key, db.CronClaimAuthorityPrefix) {
+			continue
 		}
 		if opts.ProjectID > 0 && (strings.HasPrefix(record.Key, db.FederationSpokeNamePrefix) || strings.HasPrefix(record.Key, db.AttributionUIResetMetadataPrefix) || strings.HasPrefix(record.Key, db.ProjectStreamResetMetadataPrefix) || strings.HasPrefix(record.Key, db.RelayResetMetadataPrefix) || strings.HasPrefix(record.Key, db.RelayResetSupersededMetadataPrefix) || strings.HasPrefix(record.Key, db.PendingCreationMetadataPrefix)) {
 			continue
@@ -147,6 +155,11 @@ func Export(ctx context.Context, store db.Storage, w io.Writer, opts ExportOptio
 	}
 	if err := streamExport(enc, KindCronRun, store.ExportCronRuns(ctx, f)); err != nil {
 		return err
+	}
+	if f.ProjectID == nil {
+		if err := streamExport(enc, KindCronClaim, store.ExportCronClaims(ctx, f)); err != nil {
+			return err
+		}
 	}
 	if err := streamExport(enc, KindEvent, store.ExportEvents(ctx, f)); err != nil {
 		return err

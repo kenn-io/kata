@@ -21,3 +21,8 @@ func (s *Store) ExportCronWorkflows(ctx context.Context, filter db.ExportFilter)
 func (s *Store) ExportCronRuns(ctx context.Context, filter db.ExportFilter) iter.Seq2[db.CronRunExport, error] {
 	return db.ExportCronRunsSQL(ctx, s.exportQueryContext, filter)
 }
+
+// ExportCronClaims streams root reservations only for full owner backups.
+func (s *Store) ExportCronClaims(ctx context.Context, f db.ExportFilter) iter.Seq2[db.CronClaimExport, error] {
+	return db.ExportCronClaimsSQL(ctx, s.exportQueryContext, f)
+}

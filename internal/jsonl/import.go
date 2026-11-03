@@ -109,7 +109,7 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 		}
 		if opts.AsStandalone {
 			switch record := rec.(type) {
-			case *db.FederationBindingExport, *db.FederationSyncStatusExport,
+			case *db.CronClaimExport, *db.FederationBindingExport, *db.FederationSyncStatusExport,
 				*db.FederationQuarantineExport, *db.FederationEnrollmentExport,
 				*db.IssueClaimExport, *db.PendingClaimRequestExport,
 				*db.RootKeyPin, *db.AttributionReceipt, *db.EntityProvenance,
@@ -134,6 +134,26 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 			}
 		}
 		recs = append(recs, rec)
+	}
+	// A new installation never inherits execution authority for unchanged project UIDs,
+	// including a backup taken before the source's first reservation.
+	if opts.NewInstance {
+		marked := map[string]bool{}
+		for _, r := range recs {
+			if m, ok := r.(*db.MetaKV); ok && strings.HasPrefix(m.Key, db.CronClaimAuthorityPrefix) {
+				m.Value = "copy"
+				marked[m.Key] = true
+			}
+		}
+		for _, r := range recs {
+			if p, ok := r.(*db.ProjectExport); ok && p.UID != db.SystemProjectUID {
+				key := db.CronClaimAuthorityPrefix + p.UID
+				if !marked[key] {
+					recs = append(recs, &db.MetaKV{Key: key, Value: "copy"})
+					marked[key] = true
+				}
+			}
+		}
 	}
 	return store.ImportReplay(ctx, recs, db.ImportOptions{
 		RequireFreshTarget:                  opts.RequireFreshTarget,
@@ -499,6 +519,12 @@ func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, pr
 			return nil, err
 		}
 		if err := normalizePendingClaimRequestTimes(&rec); err != nil {
+			return nil, err
+		}
+		return &rec, nil
+	case KindCronClaim:
+		var rec db.CronClaimExport
+		if err := json.Unmarshal(env.Data, &rec); err != nil {
 			return nil, err
 		}
 		return &rec, nil

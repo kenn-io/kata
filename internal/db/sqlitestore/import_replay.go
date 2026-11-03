@@ -449,6 +449,8 @@ const (
 // per-reason aggregate notes.
 func importRecord(ctx context.Context, tx *sql.Tx, r db.ImportRecord, opts db.ImportOptions, skippedLinkIDs map[int64]struct{}) (linkSkip, error) {
 	switch rec := r.(type) {
+	case *db.CronClaimExport:
+		return linkSkipNone, db.ReplayCronClaim(ctx, tx, db.CronOccurrenceClaim(*rec))
 	case *db.CronJobExport, *db.CronWorkflowExport, *db.CronRunExport:
 		return linkSkipNone, db.ReplayCronRecord(ctx, tx, rec, false)
 	case *db.MetaKV:

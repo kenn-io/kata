@@ -63,6 +63,13 @@ func checkCronOccurrenceClaims(t *testing.T, s db.Storage, b Backend) error {
 	replay, err = s.ClaimCronOccurrence(ctx, in)
 	require.NoError(t, err, "retained grant survives job tombstone")
 	require.True(t, replay.Replayed)
+	var exported []db.CronClaimExport
+	for claim, e := range s.ExportCronClaims(ctx, db.ExportFilter{ProjectID: &p.ID, IncludeDeleted: true}) {
+		require.NoError(t, e)
+		exported = append(exported, claim)
+	}
+	require.Len(t, exported, 1)
+	require.Equal(t, got.Claim, db.CronOccurrenceClaim(exported[0]))
 	read, err := s.CronOccurrenceClaim(ctx, p.ID, in.RunUID)
 	require.NoError(t, err)
 	require.Equal(t, got.Claim, read)
@@ -88,6 +95,10 @@ func checkCronOccurrenceClaims(t *testing.T, s db.Storage, b Backend) error {
 	unknown.OccurrenceKey = "unseen"
 	_, err = s.ClaimCronOccurrence(ctx, unknown)
 	require.ErrorIs(t, err, db.ErrCronClaimPending)
+	_, err = s.MergeProjects(ctx, db.MergeProjectsParams{SourceProjectID: p.ID, TargetProjectID: second.ID, Actor: "worker"})
+	require.ErrorIs(t, err, db.ErrFederatedSpokeUnsupported, "merging cannot erase a retained exclusion")
+	_, err = s.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: p.ID, HubURL: "https://daemon.example", HubProjectID: 42, HubProjectUID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Actor: "worker"})
+	require.ErrorIs(t, err, db.ErrFederatedSpokeUnsupported, "adoption cannot discard root claims")
 	// An authority transition must not discard retained root exclusions.
 	_, err = s.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: p.ID, Role: db.FederationRoleSpoke, HubURL: "https://daemon.example", HubProjectID: p.ID, HubProjectUID: p.UID, Enabled: true})
 	require.Error(t, err, "a root with retained claims cannot become a replica")
@@ -142,5 +153,11 @@ func checkCronOccurrenceClaims(t *testing.T, s db.Storage, b Backend) error {
 	require.Equal(t, 1, wins)
 	require.Equal(t, 1, losses)
 
+	_, _, err = s.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: p.ID, Actor: "worker", Force: true})
+	require.NoError(t, err)
+	_, err = s.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: p.ID, Actor: "worker"})
+	require.NoError(t, err, "explicit project purge removes root reservations")
+	_, err = s.CronOccurrenceClaim(ctx, p.ID, in.RunUID)
+	require.ErrorIs(t, err, db.ErrNotFound)
 	return nil
 }

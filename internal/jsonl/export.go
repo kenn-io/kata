@@ -144,6 +144,7 @@ func exportSnapshot(ctx context.Context, d exportQuerier, w io.Writer, opts Expo
 			return err
 		}
 	}
+
 	if sourceSchemaVersion >= 31 {
 		f := db.ExportFilter{IncludeDeleted: opts.IncludeDeleted}
 		if opts.ProjectID > 0 {
@@ -156,6 +157,11 @@ func exportSnapshot(ctx context.Context, d exportQuerier, w io.Writer, opts Expo
 			return err
 		}
 		if err := streamExport(enc, KindCronRun, db.ExportCronRunsSQL(ctx, d.QueryContext, f)); err != nil {
+			return err
+		}
+	}
+	if sourceSchemaVersion >= 40 && opts.ProjectID == 0 {
+		if err := streamExport(enc, KindCronClaim, db.ExportCronClaimsSQL(ctx, d.QueryContext, db.ExportFilter{IncludeDeleted: opts.IncludeDeleted})); err != nil {
 			return err
 		}
 	}
@@ -265,6 +271,11 @@ func exportMeta(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportO
 			}
 		}
 	}
+	if selectedProjectUID != "" {
+		if err := writeRecord(enc, KindMeta, db.MetaKV{Key: db.CronClaimAuthorityPrefix + selectedProjectUID, Value: "copy"}); err != nil {
+			return err
+		}
+	}
 	rows, err := d.QueryContext(ctx, `SELECT key, value FROM meta ORDER BY key ASC`)
 	if err != nil {
 		return fmt.Errorf("export meta: %w", err)
@@ -274,6 +285,9 @@ func exportMeta(ctx context.Context, d exportQuerier, enc *Encoder, opts ExportO
 		var rec metaRecord
 		if err := rows.Scan(&rec.Key, &rec.Value); err != nil {
 			return fmt.Errorf("scan meta: %w", err)
+		}
+		if opts.ProjectID != 0 && strings.HasPrefix(rec.Key, db.CronClaimAuthorityPrefix) {
+			continue
 		}
 		if opts.ProjectID != 0 && (strings.HasPrefix(rec.Key, db.FederationSpokeNamePrefix) || strings.HasPrefix(rec.Key, db.AttributionUIResetMetadataPrefix) || strings.HasPrefix(rec.Key, db.ProjectStreamResetMetadataPrefix) || strings.HasPrefix(rec.Key, db.RelayResetMetadataPrefix) || strings.HasPrefix(rec.Key, db.RelayResetSupersededMetadataPrefix) || strings.HasPrefix(rec.Key, db.PendingCreationMetadataPrefix)) {
 			continue

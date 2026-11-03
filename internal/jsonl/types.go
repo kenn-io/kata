@@ -46,6 +46,7 @@ const (
 	KindPendingClaimRequest  Kind = "pending_claim_request"
 	KindCronJob              Kind = "cron_job"
 	KindCronWorkflow         Kind = "cron_workflow"
+	KindCronClaim            Kind = "cron_occurrence_claim"
 	KindCronRun              Kind = "cron_run"
 	KindEvent                Kind = "event"
 	KindPurgeLog             Kind = "purge_log"
@@ -91,6 +92,7 @@ var kindOrder = map[Kind]int{
 	KindCronJob:              21,
 	KindCronWorkflow:         22,
 	KindCronRun:              23,
+	KindCronClaim:            24,
 	KindEvent:                24,
 	KindPurgeLog:             25,
 	KindProjectPurgeLog:      26,

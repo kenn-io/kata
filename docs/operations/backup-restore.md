@@ -1,7 +1,7 @@
 ---
 title: Backup and restore
 description: Back up, restore, and move Kata data safely with JSONL export and import workflows.
-last_edited: 2026-10-31
+last_edited: 2026-11-03
 ---
 
 # Backup and restore
@@ -148,6 +148,19 @@ Full backups retain local browser reset cursors for late creation receipts.
 Project exports omit those local cursors. Receiving a new creation receipt
 invalidates the browser snapshot; an idle event stream requests a refresh on
 its next heartbeat.
+
+On main (schema 36), full owner backups also retain cron occurrence
+reservations. Restoring the same owner identity preserves reservations present
+in that snapshot. A snapshot cannot recover grants committed after it was
+taken. After rolling back to an older backup, reconcile ambiguous executions
+before adapters resume claiming those occurrences.
+
+To move claim authority, stop the old root before taking the final full owner
+backup, then restore it with its original instance identity. Do not serve both
+copies. Project exports omit reservations and mark the copied namespace as
+non-authoritative. Ordinary project imports, `--merge`, `--as-standalone`,
+`--new-instance`, and detached replicas cannot create another claim root for
+the original namespace. Job edits and deletion do not release reservations.
 Back up the hub's root signing key separately. It is the owner-only file
 `federation-root.key` in the daemon's namespace data directory,
 `<KATA_HOME>/runtime/<storage-id>/`, and JSONL backups never contain it. Restore

@@ -20,7 +20,7 @@ type cronEventQuery interface {
 
 // DeleteCronProject removes the project's cron projections during purge.
 func DeleteCronProject(ctx context.Context, q cronLifecycleQuery, projectID int64) error {
-	for _, table := range []string{"cron_runs", "cron_jobs", "cron_workflows"} {
+	for _, table := range []string{"cron_occurrence_claims", "cron_runs", "cron_jobs", "cron_workflows"} {
 		if _, err := q.ExecContext(ctx, "DELETE FROM "+table+" WHERE project_id=$1", projectID); err != nil {
 			return err
 		}
@@ -30,6 +30,11 @@ func DeleteCronProject(ctx context.Context, q cronLifecycleQuery, projectID int6
 
 // MergeCronProjects moves cron projections in the project merge transaction.
 func MergeCronProjects(ctx context.Context, tx *sql.Tx, source, target Project) error {
+	for _, p := range []Project{source, target} {
+		if err := RejectCronClaimTransfer(ctx, tx, p.ID); err != nil {
+			return err
+		}
+	}
 	if err := rebindCronEventProjectUIDs(ctx, tx, source, target); err != nil {
 		return err
 	}
