@@ -176,6 +176,7 @@ CREATE TABLE comments (
 CREATE INDEX idx_comments_issue ON comments(issue_id, created_at);
 
 CREATE INDEX idx_comments_reply_to ON comments(reply_to_uid) WHERE reply_to_uid IS NOT NULL;
+CREATE INDEX idx_comments_uid_handle ON comments((lower(substr(uid, 21))));
 
 CREATE TABLE links (
   id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
