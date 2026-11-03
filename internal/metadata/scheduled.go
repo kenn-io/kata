@@ -27,6 +27,13 @@ type scheduleMetadata struct {
 	Timezone    string  `json:"timezone"`
 }
 
+// ScheduleDueCutoff returns a byte-order upper bound for dates that may be due.
+// A planning value sorting after it cannot be due at now in any timezone:
+// tzdata offsets stay within 16 hours of UTC, and DST gaps only delay a value.
+func ScheduleDueCutoff(now time.Time) string {
+	return now.UTC().Add(24 * time.Hour).Format("2006-01-02T15:04:05")
+}
+
 // ScheduledOnDue reports whether metadata's scheduled_on gate has opened.
 // A date or local date-time uses the issue timezone, then the daemon timezone,
 // then UTC. A UTC value ending in Z is an instant and ignores those zones.

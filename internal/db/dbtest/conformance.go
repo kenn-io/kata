@@ -689,6 +689,10 @@ var storageScenarios = []scenario{
 		run: checkDueNotifications,
 	},
 	{
+		name: "due notification candidates",
+		run:  checkDueNotificationCandidates,
+	},
+	{
 		name: "scheduled reached",
 		methods: []string{
 			"CloseIssue", "CreateIssue", "CreateProject", "EventsByUIDs", "IssueByID", "PatchIssueMetadata",

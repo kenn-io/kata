@@ -1,6 +1,7 @@
 package daemon_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -133,4 +134,56 @@ func TestDueNotificationSweeperContinuesAfterInvalidRecipient(t *testing.T) {
 	require.Len(t, hookSink.events, 1)
 	require.NotNil(t, hookSink.events[0].IssueID)
 	assert.Equal(t, valid.ID, *hookSink.events[0].IssueID)
+}
+
+type dueReconcileCounter struct {
+	db.Storage
+	calls []int64
+}
+
+func (s *dueReconcileCounter) ReconcileDueNotification(ctx context.Context, in db.ReconcileDueNotificationIn) (db.ReconcileDueNotificationOut, error) {
+	s.calls = append(s.calls, in.IssueID)
+	return s.Storage.ReconcileDueNotification(ctx, in)
+}
+
+func TestDueNotificationSweeperSkipsIssuesWithNothingDue(t *testing.T) {
+	ctx := t.Context()
+	env := testenv.New(t)
+	project, err := env.DB.CreateProject(ctx, "future-project")
+	require.NoError(t, err)
+	for _, raw := range []string{
+		`{"scheduled_on":"2099-01-01"}`,
+		`{"scheduled_on":"2099-01-01T09:00"}`,
+		`{"scheduled_on":"2099-01-01T09:00:00Z"}`,
+		`{"deadline_on":"2099-01-01"}`,
+		`{"notify.coordinator":{"from":"reviewer","message":"Please review"}}`,
+	} {
+		var values map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal([]byte(raw), &values))
+		_, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: project.ID, Title: "Future work", Author: "coordinator", Metadata: values,
+		})
+		require.NoError(t, err)
+	}
+	now := time.Date(2026, 9, 16, 10, 0, 0, 0, time.UTC)
+	overdue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Delivered work", Author: "coordinator",
+		Metadata: map[string]json.RawMessage{"scheduled_on": json.RawMessage(`"2020-01-01"`)},
+	})
+	require.NoError(t, err)
+	floor := time.Time{}
+	out, err := env.DB.ReconcileDueNotification(ctx, db.ReconcileDueNotificationIn{IssueID: overdue.ID, Now: now, DefaultTimezone: "UTC", ScheduledReachedFloor: &floor})
+	require.NoError(t, err)
+	require.True(t, out.Changed)
+	before, err := env.DB.IssueByID(ctx, overdue.ID)
+	require.NoError(t, err)
+	counter := &dueReconcileCounter{Storage: env.DB}
+	sink := &captureHookSink{}
+	sweeper := daemon.NewDueNotificationSweeper(counter, daemon.NewEventPublisher(daemon.NewEventBroadcaster(), sink), "UTC")
+	require.NoError(t, sweeper.RunOnce(ctx, now))
+	assert.Equal(t, []int64{overdue.ID}, counter.calls)
+	after, err := env.DB.IssueByID(ctx, overdue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, before.Revision, after.Revision)
+	assert.Empty(t, sink.events)
 }

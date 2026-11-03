@@ -13,10 +13,10 @@ import (
 	"go.kenn.io/kata/internal/metadata"
 )
 
-// ListDueNotificationIssueIDs returns live open issues that have a planning
-// date or inbox metadata that may need automatic cleanup. Enabled spokes are
+// ListDueNotificationIssueIDs returns live open issues that may be due at now
+// or hold an automatic inbox entry that may need cleanup. Enabled spokes are
 // projections of their hub and never originate these writes.
-func (d *Store) ListDueNotificationIssueIDs(ctx context.Context) ([]int64, error) {
+func (d *Store) ListDueNotificationIssueIDs(ctx context.Context, now time.Time) ([]int64, error) {
 	rows, err := d.QueryContext(ctx, `
 		SELECT i.id
 		  FROM issues i
@@ -27,14 +27,17 @@ func (d *Store) ListDueNotificationIssueIDs(ctx context.Context) ([]int64, error
 		   AND i.status = 'open'
 		   AND NOT (COALESCE(fb.enabled, 0) = 1 AND fb.role = 'spoke')
 		   AND (
-			 json_type(i.metadata, '$.scheduled_on') IS NOT NULL
-			 OR json_type(i.metadata, '$.deadline_on') IS NOT NULL
+			 (json_type(i.metadata, '$.scheduled_on') = 'text'
+			  AND json_extract(i.metadata, '$.scheduled_on') <= ?)
+			 OR (json_type(i.metadata, '$.deadline_on') = 'text'
+			  AND json_extract(i.metadata, '$.deadline_on') <= ?)
 			 OR EXISTS (
 				 SELECT 1 FROM json_each(i.metadata) entry
 				  WHERE entry.key LIKE 'notify.%'
+				    AND CASE WHEN entry.type = 'object' THEN json_extract(entry.value, '$.from') END = 'system'
 			 )
 		   )
-		 ORDER BY i.id`)
+		 ORDER BY i.id`, metadata.ScheduleDueCutoff(now), metadata.ScheduleDueCutoff(now))
 	if err != nil {
 		return nil, fmt.Errorf("list due notification issues: %w", err)
 	}
@@ -55,14 +58,18 @@ func (d *Store) ListDueNotificationIssueIDs(ctx context.Context) ([]int64, error
 // metadata event as a manual patch. A newly reached scheduled_on value is also
 // recorded as issue.scheduled_reached, whether or not the inbox slot is free.
 func (d *Store) ReconcileDueNotification(ctx context.Context, in db.ReconcileDueNotificationIn) (db.ReconcileDueNotificationOut, error) {
+	out, err := d.reconcileDueNotification(ctx, in, true)
+	if err == nil && !out.Changed && out.NotificationErr == nil {
+		return out, nil
+	}
 	return retryWrite1(ctx, d, func() (db.ReconcileDueNotificationOut, error) {
-		return d.reconcileDueNotification(ctx, in)
+		return d.reconcileDueNotification(ctx, in, false)
 	})
 }
 
-func (d *Store) reconcileDueNotification(ctx context.Context, in db.ReconcileDueNotificationIn) (db.ReconcileDueNotificationOut, error) {
+func (d *Store) reconcileDueNotification(ctx context.Context, in db.ReconcileDueNotificationIn, readOnly bool) (db.ReconcileDueNotificationOut, error) {
 	var out db.ReconcileDueNotificationOut
-	tx, err := d.BeginTx(ctx, nil)
+	tx, err := d.BeginTx(ctx, &sql.TxOptions{ReadOnly: readOnly})
 	if err != nil {
 		return out, err
 	}
@@ -108,6 +115,11 @@ func (d *Store) reconcileDueNotification(ctx context.Context, in db.ReconcileDue
 		out.NotificationErr, patch = err, nil
 	}
 	if len(patch) == 0 && reached == nil {
+		return commitDueNotification(tx, out)
+	}
+	if readOnly {
+		// The write transaction must reread and replan against current state.
+		out.Changed = true
 		return commitDueNotification(tx, out)
 	}
 	var projectName string

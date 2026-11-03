@@ -219,3 +219,30 @@ func TestWriteQueueCancellationRacesHandoff(t *testing.T) {
 		}
 	})
 }
+
+// A settled schedule must stay readable while another operation owns the writer.
+func TestReconcileDueNotificationSettledDoesNotWaitForWriter(t *testing.T) {
+	ctx := t.Context()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	project, err := store.CreateProject(ctx, "settled-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Delivered work", Author: "worker-a",
+		Metadata: map[string]jsontext.Value{"scheduled_on": []byte(`"2020-01-01"`)},
+	})
+	require.NoError(t, err)
+	in := db.ReconcileDueNotificationIn{IssueID: issue.ID, Now: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC), DefaultTimezone: "UTC"}
+	out, err := store.ReconcileDueNotification(ctx, in)
+	require.NoError(t, err)
+	require.True(t, out.Changed)
+	writer, err := store.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, writer.Rollback()) }()
+	readCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	out, err = store.ReconcileDueNotification(readCtx, in)
+	require.NoError(t, err)
+	require.False(t, out.Changed)
+}

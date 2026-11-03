@@ -119,7 +119,7 @@ func checkRecurringCron(t *testing.T, s db.Storage, b Backend) error {
 		out, e := s.DispatchRecurringCron(ctx, in)
 		require.NoError(t, e)
 		require.Empty(t, out.Events)
-		ids, e := s.ListDueNotificationIssueIDs(ctx)
+		ids, e := s.ListDueNotificationIssueIDs(ctx, in.Now)
 		require.NoError(t, e)
 		require.Empty(t, ids)
 		children, e = s.ListIssues(ctx, db.ListIssuesParams{ProjectID: p.ID})
