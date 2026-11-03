@@ -11,11 +11,6 @@ import (
 // UISnapshotContractVersion identifies the browser snapshot wire contract.
 const UISnapshotContractVersion = "2"
 
-// UIReadOnlyReasonHubAccountBound marks a gateway connection whose target
-// credential is bound to an account, so it cannot carry the browser's request
-// actor and the gateway serves it read-only.
-const UIReadOnlyReasonHubAccountBound = "hub_account_bound"
-
 // UICapabilities describes the browser behavior authorized for this request.
 type UICapabilities struct {
 	Attachments           bool           `json:"attachments,omitempty,omitzero"`
@@ -30,7 +25,6 @@ type UICapabilities struct {
 	AllowedActions        []string       `json:"allowed_actions,omitempty"`
 	CloseRequiresEvidence bool           `json:"close_requires_evidence,omitempty,omitzero"`
 	TokenAuditRead        bool           `json:"token_audit_read,omitempty,omitzero"`
-	ReadOnlyReason        string         `json:"read_only_reason,omitempty" enum:"hub_account_bound" doc:"Why the daemon switcher serves this connection read-only when the target itself would allow writes."`
 }
 
 // UISnapshotRequest is the normalized route and projection intent accepted by

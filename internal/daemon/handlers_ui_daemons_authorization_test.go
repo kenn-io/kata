@@ -196,28 +196,30 @@ func TestWebDaemonGatewayPreservesIdentitySourceAttribution(t *testing.T) {
 	assert.Equal(t, 0, mutationCalls)
 }
 
-// A hub token bound to an account cannot carry the browser's request actor, so
-// the gateway serves it read-only and names why for the connection summary.
-func TestWebDaemonGatewayExplainsAccountBoundTargetReadOnly(t *testing.T) {
+// A request-actor browser may write through a hub token bound to an account.
+// The hub records those writes as the token's account, as it does for the CLI,
+// so the gateway reports that identity policy and the page omits its own actor.
+func TestWebDaemonGatewayLetsRequestActorSourceWriteThroughAccountBoundTarget(t *testing.T) {
 	for _, test := range []struct {
-		name         string
-		target       api.UICapabilities
-		wantWritable bool
-		wantReason   string
+		name            string
+		target          api.UICapabilities
+		wantWritable    bool
+		wantActorPolicy string
 	}{
 		{
-			name:       "account bound target",
-			target:     api.UICapabilities{Writable: true, Updates: "sse", ActorPolicy: "identity"},
-			wantReason: api.UIReadOnlyReasonHubAccountBound,
+			name:         "account bound target",
+			target:       api.UICapabilities{Writable: true, Updates: "sse", ActorPolicy: "identity", Account: "member-one"},
+			wantWritable: true, wantActorPolicy: "identity",
 		},
 		{
 			name:         "request actor target",
 			target:       api.UICapabilities{Writable: true, Updates: "sse", ActorPolicy: "request"},
-			wantWritable: true,
+			wantWritable: true, wantActorPolicy: "request",
 		},
 		{
-			name:   "read only account bound target",
-			target: api.UICapabilities{Writable: false, Updates: "sse", ActorPolicy: "identity"},
+			name:            "read only account bound target",
+			target:          api.UICapabilities{Writable: false, Updates: "sse", ActorPolicy: "identity"},
+			wantActorPolicy: "identity",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -243,9 +245,51 @@ func TestWebDaemonGatewayExplainsAccountBoundTargetReadOnly(t *testing.T) {
 			var snapshot api.UISnapshotResponseBody
 			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &snapshot))
 			assert.Equal(t, test.wantWritable, snapshot.Capabilities.Writable)
-			assert.Equal(t, test.wantReason, snapshot.Capabilities.ReadOnlyReason)
+			assert.Equal(t, test.wantActorPolicy, snapshot.Capabilities.ActorPolicy)
+			assert.Equal(t, test.target.Account, snapshot.Capabilities.Account)
 		})
 	}
+}
+
+// A write through an account-bound hub token lands as that account even when
+// the browser sends another actor, so the gateway grants no actor forgery.
+func TestWebDaemonGatewayAccountBoundTargetAttributesWritesToTokenAccount(t *testing.T) {
+	targetStore := openAuthTestDB(t)
+	project, err := targetStore.CreateProject(t.Context(), "example-workspace")
+	require.NoError(t, err)
+	_, _, err = targetStore.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+		PlaintextToken: "member-token", Actor: "member-one", AdminActor: db.BootstrapActor,
+	})
+	require.NoError(t, err)
+	targetDaemon := NewServer(ServerConfig{
+		DB: targetStore, StartedAt: time.Now().UTC(),
+		Auth: config.AuthConfig{Token: "bootstrap-token", RequireTokenIdentity: true},
+	})
+	t.Cleanup(func() { _ = targetDaemon.Close() })
+	target := httptest.NewServer(targetDaemon.Handler())
+	t.Cleanup(target.Close)
+
+	handler, manager := newAuthorizedWebDaemonGateway(t, false, true, config.CatalogDaemonConfig{
+		Name: "example-remote", URL: target.URL, Token: "member-token", AllowInsecure: true,
+	})
+	issued, err := manager.IssueSession(Principal{Kind: PrincipalWebLocal}, "/kata")
+	require.NoError(t, err)
+
+	response := authorizedGatewayRequest(t, handler, manager, issued, http.MethodPost,
+		fmt.Sprintf("/api/v1/projects/%d/issues", project.ID),
+		bytes.NewBufferString(`{"title":"written from the switcher","actor":"forged"}`), "")
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var created struct {
+		Issue struct {
+			ID     int64  `json:"id"`
+			Author string `json:"author"`
+		} `json:"issue"`
+	}
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &created))
+	got, err := targetStore.IssueByID(t.Context(), created.Issue.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "member-one", got.Author)
 }
 
 // The lower gateway layer also preserves identity policy when a trusted host
@@ -274,11 +318,11 @@ func TestWebDaemonGatewayChecksTargetAuthorityBeforeMutation(t *testing.T) {
 			want: http.StatusForbidden,
 		},
 		{
-			name: "identity target",
+			name: "account bound target",
 			capabilities: api.UICapabilities{
 				Writable: true, Updates: "poll", ActorPolicy: "identity",
 			},
-			want: http.StatusForbidden,
+			want: http.StatusNoContent, wantMutation: 1,
 		},
 		{
 			name: "compatible request actor target",

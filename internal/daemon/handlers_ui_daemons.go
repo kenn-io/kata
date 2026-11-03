@@ -433,8 +433,26 @@ func (g *webDaemonGateway) targetAllowsWebDaemonMutation(
 	if instance.ContractVersion != api.UISnapshotContractVersion {
 		return false, errWebDaemonUpgradeRequired
 	}
-	return instance.Capabilities.Writable &&
-		instance.Capabilities.ActorPolicy == source.actorPolicy, nil
+	_, compatible := webDaemonEffectiveActorPolicy(instance.Capabilities.ActorPolicy, source.actorPolicy)
+	return instance.Capabilities.Writable && compatible, nil
+}
+
+// webDaemonEffectiveActorPolicy reports the actor policy a proxied write runs
+// under and whether the source may write through the target at all. A
+// request-actor source may write through a target credential bound to an
+// account: the target records each write as that account, as it does for the
+// CLI using the same catalog token, so the browser cannot claim another actor.
+// An identity-bound source stays read-only through any target because Kata has
+// no delegated-identity protocol to carry its account across the hop.
+func webDaemonEffectiveActorPolicy(target, source string) (string, bool) {
+	switch {
+	case target == source:
+		return source, true
+	case source == "request" && target == "identity":
+		return target, true
+	default:
+		return source, false
+	}
 }
 
 func (g *webDaemonGateway) effectiveCatalog() []config.CatalogDaemonConfig {
@@ -772,14 +790,10 @@ func restrictWebDaemonCapabilities(response *http.Response, policy webDaemonSour
 	if err := json.Unmarshal(envelope["capabilities"], &capabilities); err != nil {
 		return fmt.Errorf("decode daemon capabilities: %w", err)
 	}
-	if capabilities.Writable && policy.writable &&
-		capabilities.ActorPolicy == "identity" && policy.actorPolicy == "request" {
-		capabilities.ReadOnlyReason = api.UIReadOnlyReasonHubAccountBound
-	}
-	capabilities.Writable = capabilities.Writable && policy.writable &&
-		capabilities.ActorPolicy == policy.actorPolicy
+	actorPolicy, compatible := webDaemonEffectiveActorPolicy(capabilities.ActorPolicy, policy.actorPolicy)
+	capabilities.Writable = capabilities.Writable && policy.writable && compatible
 	capabilities.Updates = "poll"
-	capabilities.ActorPolicy = policy.actorPolicy
+	capabilities.ActorPolicy = actorPolicy
 	// Target credentials stay server-side and may not upgrade the source
 	// browser into a token-audit principal.
 	capabilities.TokenAuditRead = false

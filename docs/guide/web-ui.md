@@ -196,11 +196,9 @@ labels:
 | Trusted proxy request without an asserted actor | **Proxy without account** |
 | Daemon too old to report how it authenticated | **Not reported by hub** |
 
-A configured target whose `[[daemon]]` token belongs to an account is read-only
-in the switcher. The direct local browser tab attributes writes to the actor it
-sends, and the gateway cannot pass that actor through a token bound to another
-account. The summary says so and names the CLI command to use instead, such as
-`kata --daemon <name>`, which writes as the token's account.
+When a configured target's `[[daemon]]` token belongs to an account, changes
+you make through the switcher are recorded as that account, the same as
+`kata --daemon <name>`.
 
 Switching daemons or losing current authority clears the previous account
 while reconnection is pending. Finite credentials show **Credential expired**

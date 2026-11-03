@@ -223,13 +223,6 @@
             ? 'Not reported by hub'
             : actorlessConnectionLabels[snapshot.capabilities.auth_kind] || 'No account'),
   )
-  let connectionReadOnlyReason = $derived(
-    connectionStatus === 'Read-only' &&
-      snapshot.capabilities.read_only_reason === 'hub_account_bound' &&
-      activeDaemonID
-      ? `This hub's token belongs to an account, so this page can only read it. Make changes with kata --daemon ${activeDaemonID}.`
-      : undefined,
-  )
 
   let captureOpen = $state(false)
   let inboxChooserOpen = $state(false)
@@ -588,9 +581,6 @@
       >
       <span>Account: <strong>{connectionAccount}</strong></span>
       <span>Credential: <strong>{connectionStatus}</strong></span>
-      {#if connectionReadOnlyReason}
-        <span>{connectionReadOnlyReason}</span>
-      {/if}
       {#if stale}
         <span>Snapshot may be out of date. Changes are paused.</span>
       {/if}
