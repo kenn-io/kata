@@ -293,7 +293,7 @@ jobs:
           --packages "$(go list ./... | grep -v '/e2e$')" --
 
       - name: Upload Go test results
-        if: failure() || hashFiles('gotestsum/go-reruns.txt') != ''
+        if: failure() || github.run_attempt > 1 || hashFiles('gotestsum/go-reruns.txt') != ''
         uses: actions/upload-artifact@v7.0.2
         with:
           name: gotestsum-go-attempt-${{ github.run_attempt }}
@@ -312,7 +312,7 @@ jobs:
           --packages ./e2e -- -p 1
 
       - name: Upload e2e test results
-        if: failure() || hashFiles('gotestsum/go-e2e-reruns.txt') != ''
+        if: failure() || github.run_attempt > 1 || hashFiles('gotestsum/go-e2e-reruns.txt') != ''
         uses: actions/upload-artifact@v7.0.2
         with:
           name: gotestsum-go-e2e-attempt-${{ github.run_attempt }}
@@ -370,7 +370,7 @@ jobs:
           -run '^Test(PiNative(InstalledRunner|RealKataTransport|InstalledRuntimeReplacement)|NativePlugins(Runtime|PublishedDeclarations)|OpenClawPublishedNativeLoader)$'
 
       - name: Upload native plugin test results
-        if: failure() || hashFiles('gotestsum/native-agent-plugins-reruns.txt') != ''
+        if: failure() || github.run_attempt > 1 || hashFiles('gotestsum/native-agent-plugins-reruns.txt') != ''
         uses: actions/upload-artifact@v7.0.2
         with:
           name: gotestsum-native-agent-plugins-attempt-${{ github.run_attempt }}
@@ -514,7 +514,7 @@ jobs:
           ./internal/db/storeopen ./internal/daemon ./internal/jsonl ./internal/vector" -- -count=1 -p 4
 
       - name: Upload PostgreSQL test results
-        if: failure() || hashFiles(format('gotestsum/postgres-{0}-reruns.txt', matrix.postgres)) != ''
+        if: failure() || github.run_attempt > 1 || hashFiles(format('gotestsum/postgres-{0}-reruns.txt', matrix.postgres)) != ''
         uses: actions/upload-artifact@v7.0.2
         with:
           name: gotestsum-postgres-${{ matrix.postgres }}-attempt-${{ github.run_attempt }}
@@ -533,7 +533,7 @@ jobs:
           --packages ./cmd/kata -- -count=1 -run Postgres
 
       - name: Upload PostgreSQL CLI test results
-        if: failure() || hashFiles(format('gotestsum/postgres-{0}-cli-reruns.txt', matrix.postgres)) != ''
+        if: failure() || github.run_attempt > 1 || hashFiles(format('gotestsum/postgres-{0}-cli-reruns.txt', matrix.postgres)) != ''
         uses: actions/upload-artifact@v7.0.2
         with:
           name: gotestsum-postgres-${{ matrix.postgres }}-cli-attempt-${{ github.run_attempt }}
@@ -552,7 +552,7 @@ jobs:
           --packages ./e2e -- -count=1 -p 1
 
       - name: Upload PostgreSQL e2e test results
-        if: failure() || hashFiles(format('gotestsum/postgres-{0}-e2e-reruns.txt', matrix.postgres)) != ''
+        if: failure() || github.run_attempt > 1 || hashFiles(format('gotestsum/postgres-{0}-e2e-reruns.txt', matrix.postgres)) != ''
         uses: actions/upload-artifact@v7.0.2
         with:
           name: gotestsum-postgres-${{ matrix.postgres }}-e2e-attempt-${{ github.run_attempt }}
@@ -645,7 +645,7 @@ jobs:
             --packages "$packages" -- -timeout 15m -p 4 -vet=off
 
       - name: Upload Windows test results
-        if: ${{ !matrix.cli && (failure() || hashFiles('gotestsum/windows-reruns.txt') != '') }}
+        if: ${{ !matrix.cli && (failure() || github.run_attempt > 1 || hashFiles('gotestsum/windows-reruns.txt') != '') }}
         uses: actions/upload-artifact@v7.0.2
         with:
           name: gotestsum-windows-attempt-${{ github.run_attempt }}
@@ -671,7 +671,7 @@ jobs:
             --packages ./cmd/kata -- -timeout 15m -vet=off -run "$TEST_RUN" -skip "$TEST_SKIP"
 
       - name: Upload Windows CLI test results
-        if: ${{ matrix.cli && (failure() || hashFiles(format('gotestsum/windows-cli-{0}-reruns.txt', matrix.shard)) != '') }}
+        if: ${{ matrix.cli && (failure() || github.run_attempt > 1 || hashFiles(format('gotestsum/windows-cli-{0}-reruns.txt', matrix.shard)) != '') }}
         uses: actions/upload-artifact@v7.0.2
         with:
           name: gotestsum-windows-cli-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
@@ -760,7 +760,7 @@ jobs:
         run: env -u KATA_AUTH_TOKEN make test-stress FEDERATION_STRESS_TIMEOUT=4m
 
       - name: Upload federation stress test results
-        if: failure() || hashFiles('gotestsum/federation-stress-reruns.txt') != ''
+        if: failure() || github.run_attempt > 1 || hashFiles('gotestsum/federation-stress-reruns.txt') != ''
         uses: actions/upload-artifact@v7.0.2
         with:
           name: gotestsum-federation-stress-attempt-${{ github.run_attempt }}
