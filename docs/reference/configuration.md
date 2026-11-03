@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-10-28
+last_edited: 2026-11-02
 ---
 
 # Configuration
@@ -922,6 +922,33 @@ This setting changes only DB-backed token authority. The identity-mode
 bootstrap token, browser sessions, trusted-proxy principals, insecure read-only
 requests, and unauthenticated private-network requests still cannot administer
 connectors.
+
+## Close verification
+
+Choose how the accepting daemon handles unresolved comment refutations when
+closing an issue as `done` or `audit-no-change`:
+
+```toml
+[close.verification]
+open_refutations = "warn"
+```
+
+| Value | Behavior |
+| --- | --- |
+| `"warn"` (default) | Close succeeds with CLI stderr warnings retained in the close event. |
+| `"block"` | Close returns `409 open_refutations` until each dispute is resolved or explicitly overruled. |
+| `"off"` | No refutation warning or refusal. |
+
+Invalid values prevent daemon startup. This policy is daemon-wide. Under
+`block`, repeat `--overrule c:<refutation>` for each open refutation you intend
+to overrule. An unknown or resolved handle is a validation error, even under
+`warn` or `off`. Overrules are recorded in the close event and audit output.
+
+Issue metadata `verify.required=true` independently requires a clean,
+explicitly cited `confirmed` evidence entry for `close --done`. An overrule
+cannot satisfy that check. See [Verified claims](../workflows/agents.md#verified-claims)
+for the workflow, independent teammate/author requirement, dispute resolution,
+current-project boundary, and preflight timing limit.
 
 ## Close throttle
 

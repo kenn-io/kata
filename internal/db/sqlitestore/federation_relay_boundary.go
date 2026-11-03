@@ -77,6 +77,10 @@ func relayEventCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID int64
 		if err != nil || crossing {
 			return crossing, err
 		}
+		crossing, err = relayCloseVerificationCrossesProjectTx(ctx, tx, projectID, payload)
+		if err != nil || crossing {
+			return crossing, err
+		}
 	}
 	refs, err := payloadReferencedIssueUIDs(event, payload)
 	if err != nil {
@@ -91,6 +95,35 @@ func relayEventCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID int64
 		}
 		var own bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issues WHERE uid=? AND project_id=?)`, ref, projectID).Scan(&own); err != nil {
+			return false, err
+		}
+		if !own {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func relayCloseVerificationCrossesProjectTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	payload map[string]jsontext.Value,
+) (bool, error) {
+	raw, ok := payload["verification_issue_uids"]
+	if !ok {
+		return false, nil
+	}
+	var issueUIDs []string
+	if json.Unmarshal(raw, &issueUIDs) != nil || issueUIDs == nil {
+		return true, nil
+	}
+	for _, issueUID := range issueUIDs {
+		if issueUID == "" {
+			return true, nil
+		}
+		var own bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issues WHERE uid=? AND project_id=?)`, issueUID, projectID).Scan(&own); err != nil {
 			return false, err
 		}
 		if !own {

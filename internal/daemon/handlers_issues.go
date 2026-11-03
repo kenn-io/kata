@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"net/http"
@@ -978,6 +979,94 @@ func buildShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issu
 	return out, nil
 }
 
+// effectiveCloseEventForShow returns the explicit close event whose status
+// intent still supplies the issue's current closed state. A later reopen or
+// imported status transition can leave the issue closed without carrying any
+// close receipt. A project-scope reset invalidates receipts at or before its
+// redacted event clock, while a later visible close can establish a new one.
+func effectiveCloseEventForShow(ctx context.Context, store db.Storage, issue db.Issue) (*db.Event, error) {
+	var foldEvents []db.FoldEvent
+	closeEvents := map[string]db.Event{}
+	var latestReset *db.FoldClock
+	query := db.EventsAfterParams{
+		IssueUID: issue.UID,
+		Types:    []string{"issue.created", "issue.snapshot", "issue.updated", "issue.closed", "issue.reopened"},
+		Limit:    100,
+	}
+	for {
+		page, err := store.EventsAfter(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		if len(page) == 0 {
+			break
+		}
+		for _, event := range page {
+			if event.Type == db.ProjectScopeResetEventType {
+				if event.EffectiveOrder.EventUID == "" {
+					return nil, nil
+				}
+				if latestReset == nil || foldClockAfter(event.EffectiveOrder, *latestReset) {
+					reset := event.EffectiveOrder
+					latestReset = &reset
+				}
+				continue
+			}
+			foldEvents = append(foldEvents, db.FoldEvent{
+				UID: event.UID, OriginInstanceUID: event.OriginInstanceUID,
+				ProjectUID: event.ProjectUID, IssueUID: issue.UID,
+				Type: event.Type, Actor: event.Actor,
+				HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter,
+				CreatedAt: event.CreatedAt.UTC().Format(db.EventTimestampFormat),
+				Payload:   jsontext.Value(event.Payload),
+			})
+			if event.Type == "issue.closed" {
+				closeEvents[event.UID] = event
+			}
+		}
+		query.AfterID = page[len(page)-1].ID
+		if len(page) < query.Limit {
+			break
+		}
+	}
+	folded, ok := db.FoldEvents(foldEvents).Issues[issue.UID]
+	if !ok || folded.Status != issue.Status || folded.Status != "closed" || folded.StatusIntentUID == "" {
+		return nil, nil
+	}
+	event, ok := closeEvents[folded.StatusIntentUID]
+	if !ok {
+		return nil, nil
+	}
+	if latestReset != nil && !foldClockAfter(eventFoldClock(event), *latestReset) {
+		return nil, nil
+	}
+	return &event, nil
+}
+
+// foldClockAfter matches FoldEvents' deterministic HLC ordering.
+func foldClockAfter(candidate, current db.FoldClock) bool {
+	switch {
+	case candidate.HLCPhysicalMS != current.HLCPhysicalMS:
+		return candidate.HLCPhysicalMS > current.HLCPhysicalMS
+	case candidate.HLCCounter != current.HLCCounter:
+		return candidate.HLCCounter > current.HLCCounter
+	case candidate.OriginInstanceUID != current.OriginInstanceUID:
+		return candidate.OriginInstanceUID > current.OriginInstanceUID
+	default:
+		return candidate.EventUID > current.EventUID
+	}
+}
+
+func eventFoldClock(event db.Event) db.FoldClock {
+	if event.EffectiveOrder.EventUID != "" {
+		return event.EffectiveOrder
+	}
+	return db.FoldClock{
+		HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter,
+		OriginInstanceUID: event.OriginInstanceUID, EventUID: event.UID,
+	}
+}
+
 func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issue, includeDeleted bool, selectors ...commentref.Options) (*api.ShowIssueResponse, error) {
 	if issue.DeletedAt != nil && !includeDeleted {
 		return nil, api.NewError(404, "issue_not_found",
@@ -1035,17 +1124,76 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 	if len(selectors) > 0 {
 		opts = selectors[0]
 	}
-	query := db.CommentGraphQuery{ProjectID: issue.ProjectID, IncludeDeletedSourceIssueID: includeDeletedSourceIssueID}
+	query := db.CommentGraphQuery{ProjectID: issue.ProjectID, IncludeDeletedSourceIssueID: includeDeletedSourceIssueID, VerificationIssueID: issue.ID, IssueScope: issueScopeFromContext(ctx)}
 	if opts.Thread == "" && opts.Inbound == "" && opts.Since == "" {
 		query.SelectedIssueID = issue.ID
 	}
-	records, err := readCommentRecords(ctx, cfg.DB, query)
+	data, err := cfg.DB.ReadCommentGraph(ctx, query)
+	if err != nil {
+		return nil, internalAPIError(err)
+	}
+	records, err := projectCommentGraph(ctx, data)
 	if err != nil {
 		return nil, err
+	}
+	verificationRecords := records
+	v := commentref.Evaluate(records, issue.UID, nil)
+	v.Required = verificationRequired(issue)
+	v.Redacted += data.Redacted
+	if v.Activity && query.SelectedIssueID > 0 {
+		verificationRecords, v, err = readVerification(ctx, cfg.DB, issue)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if issue.Status == "closed" {
+		var latest *db.Event
+		effective, err := effectiveCloseEventForShow(ctx, cfg.DB, issue)
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
+		if effective != nil {
+			latest, err = scopedMutationEvent(ctx, cfg.DB, effective)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		if latest != nil {
+			var payload struct {
+				Evidence []db.Evidence `json:"evidence"`
+			}
+			if err := json.Unmarshal([]byte(latest.Payload), &payload); err != nil {
+				return nil, internalAPIError(err)
+			}
+
+			for _, e := range payload.Evidence {
+				if e.Type == "confirmed" || e.Type == "refuted" {
+					v.Evidence = append(v.Evidence, db.VerdictEvidence{Type: e.Type, Comment: e.Comment})
+				}
+			}
+		}
+	}
+	if v.Activity || v.Required || v.Redacted > 0 || len(v.Evidence) > 0 {
+		if v.Required && len(v.Confirmed) == 0 {
+			v.Hint, err = closeShowCommand(ctx, cfg.DB, issue)
+			if err != nil {
+				return nil, err
+			}
+			if issue.Status == "open" {
+				v.Hint += "\nPost a completion claim comment and ask another teammate or author to confirm it, then close --done with --confirmed."
+			} else {
+				v.Hint += "\nVerification describes current comments; the recorded close keeps its original cited evidence."
+			}
+		}
+		out.Body.Verification = &v
 	}
 	selected, err := commentref.Select(records, issue.UID, opts)
 	if err != nil {
 		return nil, commentReferenceError(err)
+	}
+	if err := recordVerificationResponseScope(ctx, verificationRecords, issue.UID, v); err != nil {
+		return nil, err
 	}
 	recordCommentResponseScope(ctx, records, selected.Comments)
 	out.Body.Comments = selected.Comments

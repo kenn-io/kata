@@ -96,7 +96,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			if match != nil {
 				idempotencyFingerprint = closeIdempotencyFingerprint(
 					issue.UID, in.Ref, actor, in.Body.Reason, in.Body.Message, in.Body.Source,
-					in.Body.Evidence, in.Body.DryRun, ifMatchRev, in.Body.Transcript)
+					in.Body.Evidence, in.Body.DryRun, ifMatchRev, in.Body.Transcript, in.Body.Overrule)
 				return closeIdempotencyResponse(ctx, cfg, match, idempotencyFingerprint)
 			}
 		}
@@ -106,7 +106,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if in.IdempotencyKey != "" {
 			idempotencyFingerprint = closeIdempotencyFingerprint(
 				issue.UID, in.Ref, actor, in.Body.Reason, in.Body.Message, in.Body.Source,
-				in.Body.Evidence, in.Body.DryRun, ifMatchRev, in.Body.Transcript)
+				in.Body.Evidence, in.Body.DryRun, ifMatchRev, in.Body.Transcript, in.Body.Overrule)
 		}
 		if ifMatchRev != nil && issue.Revision != *ifMatchRev {
 			return nil, api.NewError(412, "revision_conflict",
@@ -134,14 +134,19 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		}
 		if !tuiBypass {
 			if err := ValidateCloseInput(in.Body.Reason, in.Body.Message, in.Body.Evidence); err != nil {
-				return nil, api.NewError(400, "validation", err.Error(), "", nil)
+				return nil, closeRefusalHint(ctx, cfg.DB, issue, in.Body, api.NewError(400, "validation", err.Error(), "", nil))
 			}
 		}
 		// Every close stores resolved target UIDs, so later moves cannot change
 		// which issue the evidence names.
 		dbEvidence, err := resolveEvidenceTargets(ctx, cfg.DB, in.ProjectID, issue, in.Body.Evidence)
 		if err != nil {
-			return nil, api.NewError(400, "validation", err.Error(), "", nil)
+			return nil, closeRefusalHint(ctx, cfg.DB, issue, in.Body, api.NewError(400, "validation", err.Error(), "", nil))
+		}
+		var verificationIssues []string
+		warnings, overruled, err := checkCloseVerification(ctx, cfg, issue, in.Body, dbEvidence, &verificationIssues)
+		if err != nil {
+			return nil, closeRefusalHint(ctx, cfg.DB, issue, in.Body, err)
 		}
 		if err := CheckParentCloseCompleteness(ctx, cfg.DB, issue.ID, issue.ShortID, issue.ProjectID); err != nil {
 			return nil, api.NewError(409, "parent_has_open_children",
@@ -194,6 +199,16 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if in.Body.DryRun {
 			out := &api.MutationResponse{}
 			out.Body.Issue = issue
+			raw, err := json.Marshal(map[string]any{"verification_warnings": warnings})
+			if err != nil {
+				return nil, internalAPIError(err)
+			}
+			preview, err := projectCloseEvent(ctx, cfg.DB, &db.Event{Type: "issue.closed", IssueUID: &issue.UID, ProjectUID: issue.ProjectUID, Payload: string(raw)})
+			if err != nil {
+				return nil, internalAPIError(err)
+			}
+			out.Body.Warnings = projectedCloseWarnings(preview)
+			out.Body.VerificationEndpointProjects = projectedCloseEndpointProjects(preview)
 			return out, nil
 		}
 		var updated db.Issue
@@ -208,6 +223,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				IssueID: issue.ID, ExpectedProjectID: issue.ProjectID,
 				Reason: in.Body.Reason, Actor: actor,
 				Message: in.Body.Message, Evidence: dbEvidence, IfMatchRev: ifMatchRev,
+				VerificationWarnings: warnings, OverruledRefutations: overruled, VerificationIssueUIDs: verificationIssues,
 				Transcript:     in.Body.Transcript,
 				IdempotencyKey: in.IdempotencyKey, IdempotencyFingerprint: idempotencyFingerprint,
 				DisallowRecurrenceEffects: issueScopeFromContext(ctx) != nil,
@@ -299,6 +315,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out.Body.Issue = updated
 		out.Body.Event = evt
 		out.Body.Changed = changed
+		out.Body.Warnings = projectedCloseWarnings(evt)
 		return out, nil
 	})
 
@@ -433,6 +450,7 @@ func closeIdempotencyResponse(
 	out.Body.Issue = current
 	out.Body.OriginalEvent = original
 	out.Body.Reused = true
+	out.Body.Warnings = projectedCloseWarnings(original)
 	return out, nil
 }
 
@@ -453,7 +471,7 @@ func scopedMutationEvent(
 	}
 	if scope == nil {
 		if _, restricted := db.AuthorizedProjects(ctx); !restricted {
-			return event, nil
+			return projectCloseEvent(ctx, store, event)
 		}
 		return projectScopedMutationEvent(ctx, store, event)
 	}
@@ -509,7 +527,7 @@ func projectScopedMutationEvent(
 	if reset {
 		return nil, nil
 	}
-	return event, nil
+	return projectCloseEvent(ctx, store, event)
 }
 
 // scopedMutationEvents is the multi-event form of scopedMutationEvent for
@@ -547,6 +565,7 @@ func closeIdempotencyFingerprint(
 	dryRun bool,
 	ifMatchRev *int64,
 	ref *transcript.Transcript,
+	overrules ...[]string,
 ) string {
 	// The session identifies the request; its URL is a derived locator, so a
 	// changed AgentsView base still replays the original close.
@@ -554,7 +573,12 @@ func closeIdempotencyFingerprint(
 	if ref != nil {
 		session = &transcript.Transcript{Agent: ref.Agent, SessionID: ref.SessionID}
 	}
+	var overrule []string
+	if len(overrules) > 0 {
+		overrule = overrules[0]
+	}
 	encoded, _ := json.Marshal(struct {
+		Overrule   []string               `json:"overrule,omitempty"`
 		IssueUID   string                 `json:"issue_uid"`
 		RequestRef string                 `json:"request_ref"`
 		Actor      string                 `json:"actor"`
@@ -566,6 +590,7 @@ func closeIdempotencyFingerprint(
 		IfMatchRev *int64                 `json:"if_match_revision"`
 		Transcript *transcript.Transcript `json:"transcript,omitempty"`
 	}{
+		Overrule: overrule,
 		IssueUID: issueUID, RequestRef: requestRef,
 		Actor: actor, Reason: reason, Message: message,
 		Source: source, Evidence: evidence, DryRun: dryRun, IfMatchRev: ifMatchRev,
@@ -628,6 +653,7 @@ func evidenceToDB(in []api.Evidence) []db.Evidence {
 	for i, e := range in {
 		out[i] = db.Evidence{
 			Type:      string(e.Type),
+			Comment:   e.Comment,
 			SHA:       e.SHA,
 			URL:       e.URL,
 			Command:   e.Command,

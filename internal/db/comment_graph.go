@@ -12,6 +12,8 @@ import (
 
 // CommentGraphQuery scopes a coherent comment read to one active project.
 type CommentGraphQuery struct {
+	// VerificationIssueID requests a count of redacted inbound verdicts.
+	VerificationIssueID         int64
 	ProjectID                   int64
 	AllowedIssueIDs             []int64
 	IssueScope                  *APITokenScope
@@ -33,12 +35,13 @@ type CommentGraphReference struct {
 
 // CommentGraphRecord retains the comment's current owning issue and project.
 type CommentGraphRecord struct {
-	Comment      Comment
-	IssueUID     string
-	IssueShortID string
-	ProjectID    int64
-	ProjectUID   string
-	ProjectName  string
+	Comment           Comment
+	OriginalReplyKind string `json:"-"`
+	IssueUID          string
+	IssueShortID      string
+	ProjectID         int64
+	ProjectUID        string
+	ProjectName       string
 }
 
 // CommentGraphTarget retains lookup and lineage evidence for unavailable endpoints.
@@ -52,6 +55,7 @@ type CommentGraphTarget struct {
 
 // CommentGraphData is captured wholly inside one backend read transaction.
 type CommentGraphData struct {
+	Redacted             int
 	CommentUIDsByProject map[int64][]string
 	Comments             []CommentGraphRecord
 	Targets              map[string]CommentGraphTarget
@@ -132,6 +136,24 @@ func ReadCommentGraphTx(
 		}
 		return data, rows.Err()
 	}
+	if query.VerificationIssueID > 0 && query.AllowedIssueIDs != nil {
+		countArgs := slices.Clone(args)
+		countArgs = append(countArgs, query.VerificationIssueID, query.ProjectID)
+		// Only a count crosses the scope boundary; hidden endpoints and bodies do not.
+		statement := `WITH RECURSIVE visible AS (SELECT c.uid,c.issue_id,c.reply_to_uid,c.reply_kind` + commentGraphFrom + where + `),
+ relevant(uid) AS (
+  SELECT uid FROM visible WHERE issue_id=` + bind(len(countArgs)-1) + `
+  UNION SELECT v.uid FROM visible v JOIN relevant r ON v.reply_to_uid=r.uid
+  WHERE v.reply_kind IN ('confirm','refute','supersede')
+ )
+ SELECT COUNT(*)` + commentGraphFrom + ` WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL
+ AND i.project_id=` + bind(len(countArgs)) + ` AND c.reply_kind IN ('confirm','refute','supersede')
+ AND c.reply_to_uid IN (SELECT uid FROM relevant)
+ AND c.uid NOT IN (SELECT uid FROM visible)`
+		if err := tx.QueryRowContext(ctx, statement, countArgs...).Scan(&data.Redacted); err != nil {
+			return data, err
+		}
+	}
 	statement := commentGraphSelect + where // #nosec G202 -- Only backend placeholders and static predicates are concatenated.
 	if query.SelectedIssueID > 0 {
 		args = append(args, query.SelectedIssueID)
@@ -182,6 +204,9 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(ar
 			continue
 		}
 		if query.AllowedIssueIDs != nil {
+			// Keep the reply classification for internal verification checks while
+			// the hidden target identity and wire-visible edge stay redacted.
+			data.Comments[index].OriginalReplyKind = data.Comments[index].Comment.ReplyKind
 			data.Comments[index].Comment.ReplyToUID = ""
 			data.Comments[index].Comment.ReplyKind = ""
 			continue

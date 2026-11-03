@@ -215,6 +215,10 @@ components:
           type: string
         message:
           type: string
+        overruled_refutations:
+          items:
+            type: string
+          type: array
         parent:
           type: string
         parent_uid:
@@ -223,6 +227,15 @@ components:
           type: string
         time:
           type: string
+        verdict_evidence:
+          items:
+            $ref: "#/components/schemas/EvidenceResponse"
+          type: array
+        verification_endpoint_projects:
+          additionalProperties:
+            type: string
+          description: Maps each rendered verification reference to its current owning project UID so clients can enforce fixed project scopes.
+          type: object
       required:
         - time
         - actor
@@ -499,6 +512,10 @@ components:
           type: array
         message:
           type: string
+        overrule:
+          items:
+            type: string
+          type: array
         reason:
           enum:
             - done
@@ -723,6 +740,17 @@ components:
           type: string
       required:
         - key_id
+      type: object
+    ConfirmedClaim:
+      properties:
+        comment:
+          type: string
+        confirmations:
+          format: int64
+          type: integer
+      required:
+        - comment
+        - confirmations
       type: object
     ConnectFederationBridgeRequestBody:
       additionalProperties: false
@@ -2018,6 +2046,33 @@ components:
         account:
           type: string
         command:
+          type: string
+        comment:
+          type: string
+        issue_ref:
+          type: string
+        paths:
+          items:
+            type: string
+          type: array
+        rationale:
+          type: string
+        sha:
+          type: string
+        type:
+          type: string
+        url:
+          type: string
+      required:
+        - type
+      type: object
+    EvidenceResponse:
+      properties:
+        account:
+          type: string
+        command:
+          type: string
+        comment:
           type: string
         issue_ref:
           type: string
@@ -4341,6 +4396,15 @@ components:
           $ref: "#/components/schemas/Event"
         reused:
           type: boolean
+        verification_endpoint_projects:
+          additionalProperties:
+            type: string
+          description: Maps each rendered verification reference to its current owning project UID so clients can enforce fixed project scopes.
+          type: object
+        warnings:
+          items:
+            $ref: "#/components/schemas/VerificationWarning"
+          type: array
       required:
         - issue
         - event
@@ -4444,6 +4508,23 @@ components:
         - run
         - events
         - replayed
+      type: object
+    OpenRefutation:
+      properties:
+        author:
+          type: string
+        refutation:
+          type: string
+        summary:
+          type: string
+        target:
+          type: string
+        teammate:
+          type: string
+      required:
+        - refutation
+        - target
+        - author
       type: object
     PatchIssueMetadataRequestBody:
       additionalProperties: false
@@ -6334,6 +6415,8 @@ components:
           items:
             $ref: "#/components/schemas/PendingClaimOut"
           type: array
+        verification:
+          $ref: "#/components/schemas/Verification"
         web_url:
           description: Browser URL for this issue in the owning daemon.
           type: string
@@ -6986,6 +7069,57 @@ components:
           type: string
         expected_owner:
           type: string
+      type: object
+    VerdictEvidence:
+      properties:
+        comment:
+          type: string
+        type:
+          type: string
+      required:
+        - type
+        - comment
+      type: object
+    Verification:
+      properties:
+        confirmed:
+          items:
+            $ref: "#/components/schemas/ConfirmedClaim"
+          type: array
+        evidence:
+          items:
+            $ref: "#/components/schemas/VerdictEvidence"
+          type: array
+        hint:
+          type: string
+        open_refutations:
+          items:
+            $ref: "#/components/schemas/OpenRefutation"
+          type: array
+        redacted:
+          format: int64
+          type: integer
+        required:
+          type: boolean
+      required:
+        - required
+        - confirmed
+        - open_refutations
+        - redacted
+      type: object
+    VerificationWarning:
+      properties:
+        code:
+          type: string
+        hint:
+          type: string
+        refutations:
+          items:
+            $ref: "#/components/schemas/OpenRefutation"
+          type: array
+      required:
+        - code
+        - refutations
       type: object
 info:
   title: kata

@@ -161,6 +161,9 @@ func readVisibleEvents(
 			if err != nil {
 				return nil, afterID, 0, internalAPIError(err)
 			}
+			if string(raw) != event.Payload {
+				rows[index].ContentHash = ""
+			}
 			rows[index].Payload = string(raw)
 		}
 		next := nextAfterID(rows, afterID)
@@ -222,9 +225,12 @@ func readVisibleEvents(
 			}
 			projected, ok := projectedRows[index], visibleRows[index]
 			if ok && event.Type != "issue.links_changed" {
-				raw, err := projectNotificationEventPayload(ctx, store, projected)
+				raw, err := projectNotificationsInEventPayload(ctx, store, projected)
 				if err != nil {
 					return nil, cursor, 0, internalAPIError(err)
+				}
+				if string(raw) != projected.Payload {
+					projected.ContentHash = ""
 				}
 				projected.Payload = string(raw)
 				visible = append(visible, projected)
@@ -488,7 +494,7 @@ func scopedEventPayload(event db.Event) (string, bool) {
 		"issue.scheduled_reached": keySet("field", "value", "timezone", "instant"),
 		"issue.linked":            keySet("type", "from_short_id", "from_uid", "to_short_id", "to_uid", "incoming"),
 		"issue.unlinked":          keySet("type", "from_short_id", "from_uid", "to_short_id", "to_uid", "incoming"),
-		"issue.closed":            keySet("reason", "closed_at", "message", "evidence", "transcript"),
+		"issue.closed":            keySet("reason", "closed_at", "message", "evidence", "transcript", "verification_warnings", "overruled_refutations", "verification_issue_uids", "verification_endpoint_projects"),
 		"issue.reopened":          keySet("reopened_at"),
 		// Ladder verbs carry only mutation timestamps.
 		"issue.soft_deleted": keySet("deleted_at"),
@@ -1071,6 +1077,16 @@ func scopedEventStillVisible(ctx context.Context, store db.Storage, event db.Eve
 	ids := []*int64{event.IssueID}
 	if event.RelatedIssueID != nil {
 		ids = append(ids, event.RelatedIssueID)
+	}
+	for _, uid := range event.VerificationIssueUIDs {
+		issue, err := store.IssueByUID(ctx, uid, db.IncludeDeletedNo)
+		if errors.Is(err, db.ErrNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, internalAPIError(err)
+		}
+		ids = append(ids, &issue.ID)
 	}
 	for _, issueID := range ids {
 		issue, err := store.IssueByID(ctx, *issueID)

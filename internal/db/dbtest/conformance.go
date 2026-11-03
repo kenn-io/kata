@@ -50,6 +50,12 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "verification same millisecond", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "ReadCommentGraph"}, runWithBackend: checkVerificationSameMillisecond},
+	{name: "verification late replication", methods: []string{"CreateProject", "UpsertFederationBinding", "InsertRemoteEvent", "MaterializeFederatedProject", "ReadCommentGraph", "EventsByUIDs", "IssueByUID"}, run: checkVerificationLateReplication},
+	{name: "verification nested redaction", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "ReadCommentGraph", "CreateLink"}, run: checkVerificationNestedRedaction},
+	{name: "verification lifecycle", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "ReadCommentGraph", "EditComment"}, runWithBackend: checkVerificationLifecycle},
+	{name: "verification moves and history", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "ReadCommentGraph", "CloseIssueGuarded", "EventsAfter", "MoveIssueProject", "IssueByID", "SoftDeleteIssue"}, run: checkVerificationMovesAndHistory},
+	{name: "verification graph", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "ReadCommentGraph", "SoftDeleteIssue"}, run: checkVerificationGraph},
 	{name: "setup finished delivery", methods: []string{"PrepareSetupFinished", "CompleteSetupFinished", "SystemProject", "CloseIssue", "SoftDeleteIssue", "RemoveProject"}, runWithBackend: checkSetupFinishedDelivery},
 	{name: "comment graph project access", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "MoveIssueProject", "ReadCommentGraph"}, run: checkCommentGraphProjectAccess},
 	{name: "recurring adoption snapshots", run: checkRecurringAdoptionSnapshots},
@@ -101,6 +107,10 @@ var storageScenarios = []scenario{
 	{name: "relay topology", methods: []string{"SetRelayBindingConfig"}, run: func(t *testing.T, store db.Storage) error { RunRelayTopology(t, store); return nil }},
 	{name: "relay enrollment", methods: []string{"CreateRelayEnrollment"}, run: func(t *testing.T, store db.Storage) error { RunRelayEnrollmentScope(t, store); return nil }},
 	{name: "relay cross-project boundary", methods: []string{"AdoptProjectIntoFederation", "AuthorizeFederationToken", "CheckRelayProjectLinks", "CloseIssueWithEvents", "CreateAPIToken", "CreateIssue", "CreateLink", "CreateLinkAndEvent", "CreateProject", "CreateRelayEnrollment", "DeleteLinkAndEvent", "EditIssueAtomic", "EventsAfter", "FederationBindingByProject", "InstanceUID", "IssueByID", "LinkByID", "LinksByIssue", "MoveIssueProject", "ParentOf", "PendingRelayDeliveries", "PinRootAuthority", "ProjectByID", "SetRelayBindingConfig", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error { RunRelayCrossProjectBoundary(t, store); return nil }},
+	{name: "relay checkpoint close verification boundary", methods: []string{"CloseIssueGuarded", "CreateAPIToken", "CreateComment", "CreateIssue", "CreateProject", "CreateRelayEnrollment", "IssueByID", "InstanceUID", "MoveIssueProject", "PinRootAuthority", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {
+		RunRelayCheckpointCloseVerificationBoundary(t, store)
+		return nil
+	}},
 	{name: "relay checkpoint capacity", methods: []string{"CreateAPIToken", "CreateIssue", "CreateProject", "CreateRelayEnrollment", "ListFederationEnrollments", "PinRootAuthority", "UpsertFederationBinding"}, runWithBackend: func(t *testing.T, _ db.Storage, backend Backend) error {
 		RunRelayCheckpointCapacity(t, backend)
 		return nil

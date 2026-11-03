@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/commentref"
 )
 
 // isHexSHA reports whether s is 7-40 lowercase or uppercase hex characters,
@@ -36,6 +37,10 @@ func isHexSHA(s string) bool {
 // {"type":"duplicate-of","issue":0} would slip through.
 func validateEvidenceShape(index int, e api.Evidence) error {
 	switch e.Type {
+	case api.EvidenceConfirmed, api.EvidenceRefuted:
+		if _, err := commentref.Parse(e.Comment); err != nil {
+			return fmt.Errorf("evidence[%d] %s requires a comment handle or UID: %w", index, e.Type, err)
+		}
 	case api.EvidenceCommit:
 		sha := strings.TrimSpace(e.SHA)
 		if sha == "" {
@@ -167,35 +172,38 @@ func ValidateCloseInput(reason, message string, evidence []api.Evidence) error {
 
 	switch reason {
 	case "done":
+		if has(api.EvidenceRefuted) {
+			return fmt.Errorf("--refuted is not valid with --done; use --overrule")
+		}
 		if err := onlyAllow(api.EvidenceCommit, api.EvidencePR,
-			api.EvidenceTest, api.EvidenceReviewedPaths, api.EvidenceExternal); err != nil {
+			api.EvidenceTest, api.EvidenceReviewedPaths, api.EvidenceExternal, api.EvidenceConfirmed); err != nil {
 			return err
 		}
 		if !has(api.EvidenceCommit) && !has(api.EvidencePR) &&
 			!has(api.EvidenceTest) && !has(api.EvidenceReviewedPaths) &&
-			!has(api.EvidenceExternal) {
+			!has(api.EvidenceExternal) && !has(api.EvidenceConfirmed) {
 			return fmt.Errorf("evidence required for reason=done. " +
 				"Accepted: commit:<sha>, pr:<url>, test:<cmd>, reviewed-paths:<path>, " +
-				"external:<account>. " +
+				"external:<account>, confirmed:c:<comment>. " +
 				"If the work is not actually complete, do not close — use " +
 				"`kata label add <ref> needs-review --comment \"<what remains>\"`")
 		}
 	case "wontfix":
-		if len(evidence) > 0 {
-			return fmt.Errorf("evidence not allowed for reason=wontfix")
+		if err := onlyAllow(api.EvidenceRefuted); err != nil {
+			return err
 		}
 	case "duplicate":
 		if counts[api.EvidenceDuplicateOf] != 1 {
 			return fmt.Errorf("reason=duplicate requires exactly one duplicate-of evidence item")
 		}
-		if err := onlyAllow(api.EvidenceDuplicateOf); err != nil {
+		if err := onlyAllow(api.EvidenceDuplicateOf, api.EvidenceRefuted); err != nil {
 			return err
 		}
 	case "superseded":
 		if counts[api.EvidenceSupersededBy] != 1 {
 			return fmt.Errorf("reason=superseded requires exactly one superseded-by evidence item")
 		}
-		if err := onlyAllow(api.EvidenceSupersededBy); err != nil {
+		if err := onlyAllow(api.EvidenceSupersededBy, api.EvidenceRefuted); err != nil {
 			return err
 		}
 	case "audit-no-change":

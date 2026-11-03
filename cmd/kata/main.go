@@ -15,6 +15,8 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+
+	"go.kenn.io/kata/internal/textsafe"
 )
 
 // globalFlags carries the universal flags applied on every command. Sel is the
@@ -302,9 +304,15 @@ func emitJSONError(w io.Writer, err error, runEReached bool) {
 
 func emitHumanError(w io.Writer, err error, runEReached bool) {
 	cli := cliErrorForErr(err, runEReached)
-	_, _ = fmt.Fprintln(w, "kata:", cli.Message) //nolint:gosec // G705: CLI stderr error text, not HTML.
-	if cli.Hint != "" {
-		_, _ = fmt.Fprintln(w, "hint:", cli.Hint)
+	message := cli.Message
+	hint := cli.Hint
+	if cli.Code == "open_refutations" {
+		message = textsafe.Block(message)
+		hint = textsafe.Block(hint)
+	}
+	_, _ = fmt.Fprintln(w, "kata:", message) //nolint:gosec // G705: CLI stderr error text, not HTML.
+	if hint != "" {
+		_, _ = fmt.Fprintln(w, "hint:", hint)
 	}
 }
 

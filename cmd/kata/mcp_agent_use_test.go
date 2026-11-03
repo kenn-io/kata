@@ -29,8 +29,10 @@ func agentUseMCPSession(t *testing.T, apiClient *kataclient.Client) *sdkmcp.Clie
 	t.Helper()
 	observe, stop := startMCPAgentUseReporter(t.Context(), apiClient, client.ResolvedDaemon{})
 	t.Cleanup(stop)
-	server, err := mcpserver.New(mcpserver.Options{
-		Client: apiClient, ProjectID: 42, ProjectName: "spoke-project", Actor: "example-agent", Version: "test-version", ObserveToolCall: observe,
+	scope, err := mcpserver.NewBoundScope(mcpserver.ProjectIdentity{ID: 42, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project"})
+	require.NoError(t, err)
+	server, err := mcpserver.New(t.Context(), mcpserver.Options{
+		Client: apiClient, Scope: scope, Actor: "example-agent", Version: "test-version", ObserveToolCall: observe,
 	})
 	require.NoError(t, err)
 	serverTransport, clientTransport := sdkmcp.NewInMemoryTransports()
@@ -90,6 +92,10 @@ func TestMCPStalledTelemetryPreservesTypedCallDeadline(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			if r.URL.Path == "/api/v1/health" {
 				_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.27.0"}`))
+				return
+			}
+			if r.URL.Path == "/api/v1/projects" {
+				_, _ = w.Write([]byte(`{"projects":[{"id":42,"uid":"01HAAAAAAAAAAAAAAAAAAAAAAA","name":"spoke-project","metadata":{},"revision":1,"created_at":"2026-08-11T00:00:00Z"}]}`))
 				return
 			}
 			_, _ = w.Write([]byte(`{"issues":[],"complete":true,"truncated":false}`))

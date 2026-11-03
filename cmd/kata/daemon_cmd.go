@@ -1629,6 +1629,7 @@ func runDaemonProcess(
 		ExternalRootService:       externalRootService,
 		ExternalRootReconciler:    externalRootReconciler,
 		ExternalRootWake:          externalRootWake,
+		CloseVerification:         dcfg.Close.Verification.Policy(),
 		CloseThrottle: daemon.CloseThrottlePolicy{
 			SiblingBurstEnabled: dcfg.Close.Throttle.ThrottleEnabled(),
 			SiblingBurstWindow:  closeThrottleWindow,

@@ -684,6 +684,34 @@ func (h toolHandlers) auditCloses(ctx context.Context, _ *sdkmcp.CallToolRequest
 	if err != nil {
 		return nil, AuditClosesOutput{}, err
 	}
+	if h.options.Scope.Mode() != ScopeAll {
+		allowedProjectUIDs, err := h.verificationProjectUIDs(ctx)
+		if err != nil {
+			return nil, AuditClosesOutput{}, err
+		}
+		for i := range rows {
+			endpointProjects := rows[i].VerificationEndpointProjects
+			overrules := []string{}
+			for _, ref := range rows[i].OverruledRefutations {
+				if verificationReferenceInScope(ref, endpointProjects, allowedProjectUIDs) {
+					overrules = append(overrules, ref)
+				}
+			}
+			rows[i].OverruledRefutations = overrules
+			evidence := []generated.EvidenceResponse{}
+			for _, entry := range rows[i].VerdictEvidence {
+				if entry.Comment != nil && verificationReferenceInScope(*entry.Comment, endpointProjects, allowedProjectUIDs) {
+					evidence = append(evidence, entry)
+				}
+			}
+			rows[i].VerdictEvidence = evidence
+			rows[i].VerificationEndpointProjects = nil
+		}
+	} else {
+		for i := range rows {
+			rows[i].VerificationEndpointProjects = nil
+		}
+	}
 	output.Rows = rows
 	return successResult(), output, nil
 }
@@ -1169,7 +1197,13 @@ func streamEvent(event generated.EventEnvelope) StreamEvent {
 }
 
 func (h toolHandlers) redactEventsOutsideScope(ctx context.Context, output *EventsOutput) error {
-	if output == nil || h.options.Scope.Mode() == ScopeAll || len(output.Events) == 0 {
+	if output == nil || len(output.Events) == 0 {
+		return nil
+	}
+	if h.options.Scope.Mode() == ScopeAll {
+		for index := range output.Events {
+			removeCloseVerificationProvenance(output.Events[index].Type, output.Events[index].Payload)
+		}
 		return nil
 	}
 	projects, err := h.options.Scope.Projects(ctx, h.options.Client, false)
@@ -1178,10 +1212,12 @@ func (h toolHandlers) redactEventsOutsideScope(ctx context.Context, output *Even
 	}
 	allowedProjects := make(map[int64]struct{}, len(projects))
 	allowedProjectUIDs := make(map[string]bool, len(projects))
+	startupProjectUIDs := make(map[string]bool, len(projects))
 	for _, project := range projects {
 		allowedProjects[project.ID] = struct{}{}
 		if project.UID != "" {
 			allowedProjectUIDs[project.UID] = true
+			startupProjectUIDs[project.UID] = true
 		}
 	}
 	// An event's own immutable project UID passed the scope filter already.
@@ -1226,10 +1262,116 @@ func (h toolHandlers) redactEventsOutsideScope(ctx context.Context, output *Even
 			event.RelatedIssueUID = ""
 			event.RelatedIssueShortID = ""
 		}
+		redactCloseVerificationReferences(event.Type, event.Payload, startupProjectUIDs)
 		event.Payload = redactEventPayloadPeers(event.Payload, allowedPeers, allowedProjectUIDs)
 		redactEventTypedDisplayRefs(event, allowedPeers)
 	}
 	return nil
+}
+
+// removeCloseVerificationProvenance strips the endpoint owner map from MCP
+// output when no fixed-scope filtering is required.
+func removeCloseVerificationProvenance(eventType string, raw any) {
+	if eventType != "issue.closed" {
+		return
+	}
+	if payload, ok := raw.(map[string]any); ok {
+		delete(payload, "verification_endpoint_projects")
+	}
+}
+
+// redactCloseVerificationReferences authorizes retained comment handles by
+// their canonical current project UIDs. Handle qualification is display data
+// and cannot prove a reference belongs to the MCP startup scope.
+func redactCloseVerificationReferences(eventType string, raw any, allowedProjectUIDs map[string]bool) {
+	if eventType != "issue.closed" {
+		return
+	}
+	payload, ok := raw.(map[string]any)
+	if !ok {
+		return
+	}
+	endpointProjects := map[string]string{}
+	if rawProjects, ok := payload["verification_endpoint_projects"].(map[string]any); ok {
+		for handle, rawProjectUID := range rawProjects {
+			projectUID, ok := rawProjectUID.(string)
+			if ok && allowedProjectUIDs[projectUID] {
+				endpointProjects[handle] = projectUID
+			}
+		}
+	}
+	delete(payload, "verification_endpoint_projects")
+	visible := func(raw any) bool {
+		handle, ok := raw.(string)
+		if !ok {
+			return false
+		}
+		_, ok = endpointProjects[handle]
+		return ok
+	}
+	if rawEvidence, ok := payload["evidence"].([]any); ok {
+		kept := make([]any, 0, len(rawEvidence))
+		for _, element := range rawEvidence {
+			entry, ok := element.(map[string]any)
+			if !ok {
+				continue
+			}
+			kind, _ := entry["type"].(string)
+			if (kind == "confirmed" || kind == "refuted") && !visible(entry["comment"]) {
+				continue
+			}
+			kept = append(kept, entry)
+		}
+		if len(kept) == 0 {
+			delete(payload, "evidence")
+		} else {
+			payload["evidence"] = kept
+		}
+	}
+	if rawWarnings, ok := payload["verification_warnings"].([]any); ok {
+		warnings := make([]any, 0, len(rawWarnings))
+		for _, element := range rawWarnings {
+			warning, ok := element.(map[string]any)
+			if !ok {
+				continue
+			}
+			rawRefutations, ok := warning["refutations"].([]any)
+			if !ok {
+				continue
+			}
+			refutations := make([]any, 0, len(rawRefutations))
+			for _, rawRefutation := range rawRefutations {
+				refutation, ok := rawRefutation.(map[string]any)
+				if !ok || !visible(refutation["refutation"]) || !visible(refutation["target"]) {
+					continue
+				}
+				refutations = append(refutations, refutation)
+			}
+			if len(refutations) == 0 {
+				continue
+			}
+			warning["refutations"] = refutations
+			warnings = append(warnings, warning)
+		}
+		if len(warnings) == 0 {
+			delete(payload, "verification_warnings")
+		} else {
+			payload["verification_warnings"] = warnings
+		}
+	}
+	if rawOverruled, ok := payload["overruled_refutations"].([]any); ok {
+		overruled := make([]any, 0, len(rawOverruled))
+		for _, ref := range rawOverruled {
+			if visible(ref) {
+				overruled = append(overruled, ref)
+			}
+		}
+		if len(overruled) == 0 {
+			delete(payload, "overruled_refutations")
+		} else {
+			payload["overruled_refutations"] = overruled
+		}
+	}
 }
 
 // daemonSupportsSubtreeMoves reports whether the daemon has API 0.35.0, which

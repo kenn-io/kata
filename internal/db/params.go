@@ -91,6 +91,9 @@ type CreateIssueParams struct {
 // fields are written to the close event so a caller can recover its original
 // receipt after losing the response.
 type CloseIssueParams struct {
+	VerificationIssueUIDs  []string
+	VerificationWarnings   []VerificationWarning
+	OverruledRefutations   []string
 	IssueID                int64
 	ExpectedProjectID      int64
 	Reason                 string

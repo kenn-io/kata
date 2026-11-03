@@ -111,6 +111,8 @@ type ServerConfig struct {
 	// CloseThrottle controls whether the opt-in sibling-burst and repeated-
 	// message guards run on close. Zero-value means "guards off".
 	CloseThrottle CloseThrottlePolicy
+	// CloseVerification selects block, warn (default), or off for disputes.
+	CloseVerification string
 
 	// Auth carries the bearer-token policy resolved at daemon start.
 	// Token == "" disables bearer auth (appropriate for Unix-socket and

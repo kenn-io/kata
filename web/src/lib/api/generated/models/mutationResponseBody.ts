@@ -3,6 +3,8 @@
  */
 import type { Event } from './event.ts'
 import type { Issue } from './issue.ts'
+import type { MutationResponseBodyVerificationEndpointProjects } from './mutationResponseBodyVerificationEndpointProjects.ts'
+import type { VerificationWarning } from './verificationWarning.ts'
 
 export interface MutationResponseBody {
   changed: boolean
@@ -10,5 +12,8 @@ export interface MutationResponseBody {
   issue: Issue
   original_event?: Event
   reused?: boolean
+  /** Maps each rendered verification reference to its current owning project UID so clients can enforce fixed project scopes. */
+  verification_endpoint_projects?: MutationResponseBodyVerificationEndpointProjects
+  warnings?: VerificationWarning[]
   [key: string]: unknown
 }

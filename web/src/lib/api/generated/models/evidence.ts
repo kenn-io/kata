@@ -5,6 +5,7 @@
 export interface Evidence {
   account?: string
   command?: string
+  comment?: string
   issue_ref?: string
   paths?: string[]
   rationale?: string

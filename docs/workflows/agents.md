@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-30
+last_edited: 2026-11-03
 ---
 
 # Agent workflows
@@ -904,6 +904,68 @@ kata edit cli-ref --blocked-by scaffold --agent
 ```
 
 Use `--related` only for context.
+
+## Verified claims
+
+Have another teammate or author verify a completion claim before closing it.
+Post that claim as a comment about completed work. This differs from
+`kata claim`, which takes ownership. Another author counts, as does another
+teammate under the same author. Self-verdicts do not count.
+
+```sh
+kata comment abc4 -m "Implemented the retry fix; the focused retry tests pass."
+kata meta set abc4 verify.required true --json-value
+kata notify abc4 --to worker/reviewer --re c:abc123 --message "Please confirm or refute"
+kata --teammate reviewer comment abc4 --confirm c:abc123 -m "Checked the retry fix and reran the focused tests successfully."
+kata close abc4 --done --confirmed c:abc123 --commit <sha> \
+  -m "Fixed the retry handling; reviewed and checked the focused tests."
+```
+
+Use the handle printed by the claim comment in place of `c:abc123`. A confirm
+can also record a reproduced bug. Cite the completion claim that supports the
+close. With `verify.required=true` (the JSON boolean), `close --done` requires
+an explicit `confirmed` evidence entry; an uncited confirmation is insufficient.
+Other values and other close reasons do not enable this requirement.
+The `verify.*` namespace is read by the daemon; `work.*` remains agent-owned.
+
+Refute a claim with `kata comment abc4 --refute c:abc123 -m "<40+ characters of evidence>"`.
+A later confirmation does not resolve that dispute. Supersede the claim or
+the refutation, or rebut the refutation with another `--refute` reply.
+Refuting the rebuttal reopens the original dispute. Rebuttals resolve the
+original dispute and do not become separate close blockers. Evaluation stops
+after eight levels; unresolved deep or cyclic chains remain open.
+
+The daemon warns about open refutations by default. Operators can set
+`[close.verification] open_refutations` to `warn`, `block`, or `off` in the
+[daemon configuration](../reference/configuration.md#close-verification).
+A deliberate `--overrule c:<refutation>` permits that refutation under blocking
+policy; repeat it for each blocker. Audit closes records the overrules.
+Use `--refuted c:<claim>` with `--wontfix`, `--duplicate-of`, or
+`--superseded-by` to cite a claim another teammate refuted. Both evidence types
+cite the claim, never its verdict reply. `--confirmed` is allowed only on
+`--done`; `--refuted` is optional on retirement and is rejected on `--done`.
+A claim with both an independent confirmation and an open refutation is
+contested and supports neither type. Overrules cannot change that decision.
+
+A superseded claim cannot be cited. Superseding a confirmation withdraws it;
+superseding that withdrawal does not revive it. A confirmation written before
+the claim's last body edit does not certify the edited text. Confirmations with
+ambiguous ordering within an edit's millisecond do not count. Body edits never
+clear open refutations. Old replies remain visible.
+
+Verification checks one preflight snapshot before the close transaction. A
+verdict that arrives between that read and the close write is not considered.
+Late local or replicated verdicts change live `show` state, while the recorded
+close decision and cited evidence stay historical.
+Replies from other readable issues in the claim issue's current project count.
+Moving either endpoint to another project hides the verdict from this
+evaluation; moving it back restores it. Hidden replies
+contribute only to the `redacted` count in `show`.
+
+The accepting daemon applies its policy. A spoke accepts a close locally after
+its federated claim gate, then replicates the event; the hub does not recheck
+that close. `audit-no-change` observes the refutation policy too. `wontfix`,
+`duplicate`, and `superseded` do not.
 
 ## Close only when verified
 

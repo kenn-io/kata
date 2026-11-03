@@ -35,6 +35,9 @@ Launch each child with KATA_TEAMMATE=teammate-1 and KATA_INBOX_USER=coordinator/
 Comments store teammate; new issues store metadata.teammate while author remains accountable.
 Record progress: kata comment <ref> -m "<what changed>".
 Respond to a comment: kata comment <ref> --reply|--confirm|--refute|--supersede c:<id> -m "<evidence>".
+Close on a verdict: kata close <ref> --done --confirmed c:<claim> --message "<scope and verification, 40+ characters>" (or --wontfix --refuted c:<claim> with a 60+ character message).
+verify.required=true needs an explicit confirmed completion claim; another author or teammate counts, self-verdicts and contested claims do not.
+Resolve refutations by superseding or rebutting before deliberately using --overrule c:<refutation>; warnings and refusals provide a next command.
 When a comment-sized task needs ownership or tracked completion, make it a child issue: kata create "fix retry handling" --parent <ref>, then kata claim <child>.
 KATA_INBOX_USER selects an inbox and does not set attribution; --teammate overrides the attribution default.
 Request actor or teammate attention: kata notify <ref> --to <actor>[/<teammate>] --message "<reason>".

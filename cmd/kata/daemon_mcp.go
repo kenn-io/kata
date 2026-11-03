@@ -54,7 +54,7 @@ func newDaemonMCPHandler(ctx context.Context, store db.Storage, cfg config.MCPCo
 	}
 	observe, stopReporting := startMCPAgentUseReporter(ctx, apiClient, resolved)
 	// Token admin is sidecar-only: the mount needs require_token_identity off, under which token creation 409s.
-	server, err := mcpserver.New(mcpserver.Options{
+	server, err := mcpserver.New(ctx, mcpserver.Options{
 		Client: apiClient, LongRunningClient: longRunningClient,
 		Scope: scope, Actor: cfg.Actor, Version: version.Version,
 		StartupSections: cfg.StartupSections,

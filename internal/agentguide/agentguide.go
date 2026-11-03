@@ -31,8 +31,8 @@ digraph kata {
   }
 
   done     [shape=diamond label="Verified complete?"];
-  close    [label="kata close <ref> --done --message \"<scope and verification, 40+ chars>\"\n--evidence commit:<sha> | pr:<url> | test:<cmd> | reviewed-paths:<path>\n(or --commit, --pr, --test, --reviewed)"];
-  retire   [label="kata close <ref> --message \"<why>\"\n--duplicate-of <ref> | --superseded-by <ref> (20+ chars)\n| --wontfix (60+ chars)"];
+  close    [label="kata close <ref> --done --message \"<scope and verification, 40+ chars>\"\n--evidence commit:<sha> | pr:<url> | test:<cmd> | reviewed-paths:<path>\n(or --commit, --pr, --test, --reviewed)\n--confirmed c:<claim> (teammate-confirmed; required if verify.required)"];
+  retire   [label="kata close <ref> --message \"<why>\"\n--duplicate-of <ref> | --superseded-by <ref> (20+ chars)\n| --wontfix (60+ chars) [--refuted c:<claim>]"];
   review   [label="kata label add <ref> needs-review --comment \"<what remains>\""];
   park     [shape=diamond label="Park it?"];
   schedule [label="kata schedule <ref> <date-or-time>\nsets scheduled_on; clear with -"];
@@ -123,8 +123,15 @@ const fragClosing = `2. Closing an issue asserts that the work is complete. If t
         --commit <sha>
 
    Typed --evidence accepts commit:<sha>, pr:<url>, test:<cmd>,
-   reviewed-paths:<path>, or external:<account>. Shortcuts are --commit,
-   --pr, --test, and --reviewed.
+   reviewed-paths:<path>, external:<account>, confirmed:c:<claim>, or
+   refuted:c:<claim>. Shortcuts are --commit, --pr, --test, --reviewed,
+   --confirmed and --refuted; verdict types follow the reason pairings below.
+
+   --confirmed c:<claim> cites a completion claim that another teammate
+   confirmed (kata comment --confirm); required on done when
+   verify.required=true. --refuted c:<claim> cites an independent
+   refutation on --wontfix/--duplicate-of/--superseded-by.
+   Refused closes print the next command to run.
 
    Close each issue as soon as its work is verified, not in a batch or a
    single "close everything" pass at the end. By default the daemon permits

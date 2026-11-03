@@ -432,7 +432,8 @@ func (h toolHandlers) show(ctx context.Context, _ *sdkmcp.CallToolRequest, input
 		metadata = map[string]any{}
 	}
 	return successResult(), ShowOutput{
-		Project: project,
+		Verification: response.Verification,
+		Project:      project,
 		Issue: IssueDetail{
 			IssueSummary: summary,
 			Labels:       labels,
@@ -844,6 +845,18 @@ func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 			headers.IfMatch = &ifMatch
 		}
 	}
+	if h.options.Scope.Mode() != ScopeAll {
+		shown, err := h.options.Client.ShowIssue(ctx, &generated.ShowIssueRequestOptions{
+			PathParams: &generated.ShowIssuePath{ProjectID: project.ID, Ref: ref},
+			Query:      &generated.ShowIssueQuery{IncludeDeleted: optionalTrue(input.IdempotencyKey != "")},
+		})
+		if err != nil {
+			return nil, MutationOutput{}, err
+		}
+		if _, err := h.closeMutationProject(ctx, project, issueFromShow(shown.Issue)); err != nil {
+			return nil, MutationOutput{}, err
+		}
+	}
 	response, err := h.options.Client.CloseIssue(ctx, &generated.CloseIssueRequestOptions{
 		PathParams: &generated.CloseIssuePath{ProjectID: project.ID, Ref: ref},
 		Body: &generated.CloseIssueBody{
@@ -851,6 +864,7 @@ func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 			Reason:        &reason,
 			Message:       &input.Message,
 			Evidence:      evidence,
+			Overrule:      input.Overrule,
 			DryRun:        optionalTrue(input.DryRun),
 			RetryProtocol: retryProtocol,
 		},
@@ -867,12 +881,24 @@ func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
-	return h.mutationResult(ctx, project, response.Issue, response.Changed, response.Reused, event)
+	result, out, err := h.mutationResult(ctx, project, response.Issue, response.Changed, response.Reused, event)
+	if err != nil {
+		return nil, MutationOutput{}, err
+	}
+	endpointProjects := response.VerificationEndpointProjects
+	if len(endpointProjects) == 0 {
+		endpointProjects = verificationEndpointProjects(event.Payload)
+	}
+	out.Warnings, err = h.scopedVerificationWarnings(ctx, response.Warnings, endpointProjects)
+	if err != nil {
+		return nil, MutationOutput{}, err
+	}
+	return result, out, err
 }
 
-// closeMutationProject keeps replayed close receipts inside the immutable MCP
-// startup scope. A retry can return an issue that moved after the original
-// close, so the request project is only valid while its UID still matches.
+// closeMutationProject keeps preflight issues and replayed close receipts
+// inside the currently available MCP scope. A retry can return an issue that
+// moved or whose project was archived after the original close.
 func (h toolHandlers) closeMutationProject(
 	ctx context.Context, requestProject ProjectIdentity, issue generated.Issue,
 ) (ProjectIdentity, error) {
@@ -883,15 +909,20 @@ func (h toolHandlers) closeMutationProject(
 	if projectUID == "" {
 		return ProjectIdentity{}, errors.New("close response did not include the issue project UID")
 	}
-	if requestProject.UID == projectUID || requestProject.UID == "" && requestProject.ID == issue.ProjectID {
-		return requestProject, nil
-	}
 	projects, err := h.options.Scope.Projects(ctx, h.options.Client, false)
 	if err != nil {
 		return ProjectIdentity{}, err
 	}
 	for _, project := range projects {
 		if project.UID == projectUID {
+			return project, nil
+		}
+		if h.options.Scope.Mode() == ScopeBound && requestProject.UID == "" &&
+			project.UID == "" && project.ID == requestProject.ID &&
+			(issue.ProjectID == 0 || issue.ProjectID == project.ID) {
+			// ID-only bound scopes are the legacy MCP compatibility path. The
+			// normal command startup resolves and pins the project UID first.
+			project.UID = projectUID
 			return project, nil
 		}
 	}
@@ -915,6 +946,12 @@ func (h toolHandlers) scopedCloseError(err error) error {
 	var envelope generated.ErrorEnvelope
 	if !errors.As(err, &envelope) {
 		return err
+	}
+	if envelope.ErrorData.Code == "open_refutations" {
+		// The refusal envelope has no endpoint-project provenance. A fixed MCP
+		// scope must not forward author and excerpt text that may belong to a
+		// project outside its startup boundary.
+		return errors.New("open_refutations: close refused because open refutations remain; inspect the issue within the MCP startup scope")
 	}
 	if message, guarded := crossScopeCloseGuardMessages[envelope.ErrorData.Code]; guarded {
 		return fmt.Errorf("%s: %s", envelope.ErrorData.Code, message)
@@ -1538,7 +1575,7 @@ func (h toolHandlers) convertEvidence(ctx context.Context, project ProjectIdenti
 	typeName := strings.TrimSpace(input.Type)
 	allowed := map[string]bool{
 		"commit": true, "pr": true, "test": true, "reviewed-paths": true,
-		"external": true, "no-change-audit": true, "duplicate-of": true, "superseded-by": true,
+		"external": true, "no-change-audit": true, "duplicate-of": true, "superseded-by": true, "confirmed": true, "refuted": true,
 	}
 	if !allowed[typeName] {
 		return generated.Evidence{}, fmt.Errorf("unknown type %q", typeName)
@@ -1548,6 +1585,7 @@ func (h toolHandlers) convertEvidence(ctx context.Context, project ProjectIdenti
 	result.Sha = optionalString(input.SHA)
 	result.URL = optionalString(input.URL)
 	result.Command = optionalString(input.Command)
+	result.Comment = optionalString(input.Comment)
 	result.Account = optionalString(input.Account)
 	result.Rationale = optionalString(input.Rationale)
 	if input.IssueRef != "" {
@@ -1558,6 +1596,10 @@ func (h toolHandlers) convertEvidence(ctx context.Context, project ProjectIdenti
 		result.IssueRef = &target.IssueUID
 	}
 	switch typeName {
+	case "confirmed", "refuted":
+		if result.Comment == nil {
+			return generated.Evidence{}, fmt.Errorf("%s evidence requires comment", typeName)
+		}
 	case "commit":
 		if result.Sha == nil {
 			return generated.Evidence{}, errors.New("commit evidence requires sha")
@@ -1737,4 +1779,63 @@ func optionalCommentEnum[T ~string](value string) *T {
 	}
 	converted := T(value)
 	return &converted
+}
+
+// A connected daemon credential can be broader than the MCP startup scope.
+// Canonical endpoint authorization is daemon-side; display qualification also
+// lets this broker withhold retained warnings whose source left its projects.
+func (h toolHandlers) scopedVerificationWarnings(
+	ctx context.Context, warnings []generated.VerificationWarning, endpointProjects map[string]string,
+) ([]generated.VerificationWarning, error) {
+	if len(warnings) == 0 || h.options.Scope.Mode() == ScopeAll {
+		return warnings, nil
+	}
+	allowedProjectUIDs, err := h.verificationProjectUIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	kept := []generated.VerificationWarning{}
+	for _, warning := range warnings {
+		refs := []generated.OpenRefutation{}
+		for _, r := range warning.Refutations {
+			if verificationReferenceInScope(r.Refutation, endpointProjects, allowedProjectUIDs) &&
+				verificationReferenceInScope(r.Target, endpointProjects, allowedProjectUIDs) {
+				refs = append(refs, r)
+			}
+		}
+		if len(refs) > 0 {
+			warning.Refutations = refs
+			kept = append(kept, warning)
+		}
+	}
+	return kept, nil
+}
+
+func (h toolHandlers) verificationProjectUIDs(ctx context.Context) (map[string]bool, error) {
+	projects, err := h.options.Scope.Projects(ctx, h.options.Client, false)
+	if err != nil {
+		return nil, err
+	}
+	allowed := map[string]bool{}
+	for _, project := range projects {
+		if project.UID != "" {
+			allowed[project.UID] = true
+		}
+	}
+	return allowed, nil
+}
+
+func verificationReferenceInScope(ref string, endpointProjects map[string]string, allowedProjectUIDs map[string]bool) bool {
+	projectUID, ok := endpointProjects[ref]
+	return ok && allowedProjectUIDs[projectUID]
+}
+
+func verificationEndpointProjects(payload string) map[string]string {
+	var envelope struct {
+		Projects map[string]string `json:"verification_endpoint_projects"`
+	}
+	if json.Unmarshal([]byte(payload), &envelope) != nil {
+		return nil
+	}
+	return envelope.Projects
 }
