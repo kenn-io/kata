@@ -3,6 +3,7 @@ package jsonl_test
 import (
 	"bytes"
 	"encoding/json/v2"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -134,6 +135,47 @@ func TestCronClaimsProjectMergeDerivesCopyAuthority(t *testing.T) {
 			_, err = target.ClaimCronOccurrence(t.Context(), in)
 			require.ErrorIs(t, err, db.ErrCronClaimPending, "every imported project copy lacks authority, including schema 35")
 		})
+	}
+}
+
+func TestCronClaimsLegacyMarkerFreeImport(t *testing.T) {
+	for _, version := range []int{31, 32, 35} {
+		for _, scoped := range []bool{false, true} {
+			t.Run(fmt.Sprintf("version_%d_scoped_%t", version, scoped), func(t *testing.T) {
+				source, in := claimBackupFixture(t)
+				opts := jsonl.ExportOptions{IncludeDeleted: true}
+				if scoped {
+					opts.ProjectID = in.ProjectID
+				}
+				var snapshot bytes.Buffer
+				require.NoError(t, jsonl.Export(t.Context(), source, &snapshot, opts))
+				var legacy bytes.Buffer
+				for line := range bytes.SplitSeq(bytes.TrimSpace(snapshot.Bytes()), []byte("\n")) {
+					if bytes.Contains(line, []byte(db.CronClaimAuthorityPrefix)) {
+						continue
+					}
+					line = bytes.ReplaceAll(line, []byte(`"value":"36"`), fmt.Appendf(nil, `"value":"%d"`, version))
+					legacy.Write(line)
+					legacy.WriteByte('\n')
+				}
+				_, err := source.ClaimCronOccurrence(t.Context(), in)
+				require.NoError(t, err, "the upgraded source still arbitrates its namespace")
+				target, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "target.db"))
+				require.NoError(t, err)
+				t.Cleanup(func() { _ = target.Close() })
+				require.NoError(t, jsonl.Import(t.Context(), &legacy, target))
+				authority, err := target.CronClaimAuthority(t.Context(), in.ProjectID)
+				if scoped {
+					require.ErrorIs(t, err, db.ErrCronClaimPending)
+					in.HolderInstanceUID = target.InstanceUID()
+					_, err = target.ClaimCronOccurrence(t.Context(), in)
+					require.ErrorIs(t, err, db.ErrCronClaimPending)
+				} else {
+					require.NoError(t, err, "full owner snapshots preserve authority")
+					require.Equal(t, source.InstanceUID(), authority)
+				}
+			})
+		}
 	}
 }
 

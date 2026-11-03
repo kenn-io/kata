@@ -161,6 +161,11 @@ copies. Project exports omit reservations and mark the copied namespace as
 non-authoritative. Ordinary project imports, `--merge`, `--as-standalone`,
 `--new-instance`, and detached replicas cannot create another claim root for
 the original namespace. Job edits and deletion do not release reservations.
+
+Imports also recognize legacy cron snapshots without a copy marker. Full owner
+snapshots from schema 31 onward include the hidden `.kata-system` project;
+snapshots that omit it remain non-authoritative for their project namespaces.
+
 Back up the hub's root signing key separately. It is the owner-only file
 `federation-root.key` in the daemon's namespace data directory,
 `<KATA_HOME>/runtime/<storage-id>/`, and JSONL backups never contain it. Restore

@@ -135,9 +135,18 @@ func ImportWithOptions(ctx context.Context, r io.Reader, store db.Storage, opts 
 		}
 		recs = append(recs, rec)
 	}
-	// A new installation never inherits execution authority for unchanged project UIDs,
+	// Cron-era full owner snapshots include the hidden system project. Scoped
+	// snapshots omit it, including legacy exports made before copy markers existed.
+	// Derive their non-authority locally instead of trusting incoming metadata.
+	var hasSystemProject bool
+	for _, r := range recs {
+		if p, ok := r.(*db.ProjectExport); ok && p.UID == db.SystemProjectUID {
+			hasSystemProject = true
+		}
+	}
+	// A new installation also never inherits authority for unchanged project UIDs,
 	// including a backup taken before the source's first reservation.
-	if opts.NewInstance {
+	if opts.NewInstance || (exportVersion >= 31 && !hasSystemProject) {
 		marked := map[string]bool{}
 		for _, r := range recs {
 			if m, ok := r.(*db.MetaKV); ok && strings.HasPrefix(m.Key, db.CronClaimAuthorityPrefix) {
