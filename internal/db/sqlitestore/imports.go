@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/teammate"
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
@@ -32,7 +31,7 @@ type importIssueState struct {
 func (d *Store) ImportBatch(ctx context.Context, p db.ImportBatchParams) (db.ImportBatchResult, []db.Event, error) {
 	// Imported provider history belongs to its source, not the request that
 	// triggered a foreground sync. The derived context retains cancellation.
-	ctx = teammate.WithRequest(ctx, "")
+	ctx = db.WithoutEventTeammate(ctx)
 	return retryWrite2(ctx, d, func() (db.ImportBatchResult, []db.Event, error) {
 		return d.importBatch(ctx, p)
 	})

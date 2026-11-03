@@ -24,7 +24,7 @@ func TestStampEventTeammateScope(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, `{"keep":true}`, got, kind)
 	}
-	for _, test := range []struct{ actor, handle string }{{"system", "worker-1"}, {"coordinator", ""}} {
+	for _, test := range []struct{ actor, handle string }{{"system", "worker-1"}} {
 		got, err := StampEventTeammate(teammate.WithRequest(ctx, test.handle), "issue.created", test.actor, `{"keep":true}`)
 		require.NoError(t, err)
 		require.Equal(t, `{"keep":true}`, got)
@@ -36,4 +36,35 @@ func TestStampEventTeammateSkipsCronOwnedMetadata(t *testing.T) {
 	got, err := StampEventTeammate(ctx, "issue.metadata_updated", "coordinator", `{"diff":{}}`)
 	require.NoError(t, err)
 	require.Equal(t, `{"diff":{}}`, got)
+}
+
+func TestStampEventTeammateWritesExplicitEmptyDisplay(t *testing.T) {
+	for _, tc := range []struct{ kind, payload string }{
+		{"issue.created", `{"metadata":{"teammate":"route"}}`},
+		{"issue.commented", `{"teammate":"route"}`},
+	} {
+		for _, explicitEmpty := range []bool{false, true} {
+			name := "unselected"
+			if explicitEmpty {
+				name = "explicit-empty"
+			}
+			t.Run(tc.kind+"/"+name, func(t *testing.T) {
+				ctx := t.Context()
+				if explicitEmpty {
+					ctx = teammate.WithRequest(ctx, "")
+				}
+				got, err := StampEventTeammate(ctx, tc.kind, "coordinator", tc.payload)
+				require.NoError(t, err)
+				require.Contains(t, got, `"attributed_teammate":""`)
+				require.Contains(t, got, `"teammate":"route"`)
+			})
+		}
+	}
+}
+
+func TestStampEventTeammateHonorsSuppression(t *testing.T) {
+	payload := `{"teammate":"route"}`
+	got, err := StampEventTeammate(WithoutEventTeammate(teammate.WithRequest(t.Context(), "worker-1")), "issue.commented", "coordinator", payload)
+	require.NoError(t, err)
+	require.Equal(t, payload, got)
 }

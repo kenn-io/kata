@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/teammate"
 )
 
 var _ db.IssueStatusWriter = (*Store)(nil)
@@ -17,8 +16,8 @@ var _ db.IssueStatusWriter = (*Store)(nil)
 // and exact-event acknowledgement under the existing binding claim fence.
 func (s *Store) ObserveIssueStatus(ctx context.Context, p db.IssueStatusObservationParams) (bool, []db.Event, error) {
 	// Provider status is imported history, not a contribution by the request
-	// that happened to observe it. WithRequest preserves cancellation.
-	ctx = teammate.WithRequest(ctx, "")
+	// that happened to observe it. The derived context preserves cancellation.
+	ctx = db.WithoutEventTeammate(ctx)
 	return retryWrite2(ctx, s, func() (bool, []db.Event, error) {
 		tx, err := s.BeginTx(ctx, nil)
 		if err != nil {

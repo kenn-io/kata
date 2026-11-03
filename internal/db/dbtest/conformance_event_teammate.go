@@ -142,7 +142,13 @@ func checkEventTeammate(t *testing.T, store db.Storage, backend Backend) error {
 	require.NotContains(t, system.Payload, "attributed_teammate")
 	_, empty, err := store.CreateIssue(teammate.WithRequest(ctx, ""), db.CreateIssueParams{ProjectID: project.ID, Title: "Unattributed work", Author: "coordinator"})
 	require.NoError(t, err)
-	require.NotContains(t, empty.Payload, "attributed_teammate")
+	require.Contains(t, empty.Payload, `"attributed_teammate":""`)
+	_, emptyComment, err := store.CreateComment(teammate.WithRequest(ctx, ""), db.CreateCommentParams{
+		IssueID: issue.ID, Author: "coordinator", Body: "No selected contributor", Teammate: "route",
+	})
+	require.NoError(t, err)
+	require.Contains(t, emptyComment.Payload, `"attributed_teammate":""`)
+	require.Contains(t, emptyComment.Payload, `"teammate":"route"`)
 	importedAt := time.Now().UTC()
 	_, importedEvents, err := store.ImportBatch(ctx, db.ImportBatchParams{
 		ProjectID: project.ID,
