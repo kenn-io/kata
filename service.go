@@ -459,6 +459,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		FederationWake:        wakeFederation,
 		FederationCredentials: federationCredentials,
 		FederationPushPending: federation.DirectSpokePushPending(store),
+		FederationHubClient:   federation.CredentialHTTPClient,
 		DisableFederationRebind:   true,
 		GitHubSyncFetcher:         gitHubSyncFetcher,
 		GitHubSyncProgress:        gitHubSyncProgress,

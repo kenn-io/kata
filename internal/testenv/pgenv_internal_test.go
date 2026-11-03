@@ -1,4 +1,4 @@
-package testpg
+package testenv
 
 import (
 	"testing"

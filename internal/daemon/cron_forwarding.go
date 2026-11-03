@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/api"
-	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
@@ -92,16 +91,14 @@ func forwardCronJob(ctx context.Context, cfg ServerConfig, projectID int64, uid,
 		return nil, true, cronForwardUnavailable("federation credential target differs from the binding; reconnect before retrying")
 	}
 	cred = config.FederationTransportCredential(binding.HubURL, binding.HubProjectID, binding.AllowInsecure, cred)
-	client, err := clientpkg.NewHTTPClientWithBearer(ctx, cred.HubURL, cred.Token, clientpkg.Opts{Timeout: 15 * time.Second, AllowInsecure: cred.AllowInsecure})
+	if cfg.FederationHubClient == nil || cfg.FederationPushPending == nil {
+		return nil, true, cronForwardUnavailable("federation push transport is unavailable")
+	}
+	client, err := cfg.FederationHubClient(ctx, cred)
 	if err != nil {
 		return nil, true, cronForwardUnavailable("federation transport is unavailable")
 	}
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	if cred.Signing != nil {
-		if err := federationsigning.ConfigureClient(client, cred.HubURL, cred.Token, *cred.Signing); err != nil {
-			return nil, true, cronForwardUnavailable("federation signing is unavailable")
-		}
-	}
 	path := fmt.Sprintf("%s/api/v1/projects/%d", bindingOrigin, binding.HubProjectID)
 	var meta api.ProjectFederationBody
 	if err := cronHubRequest(ctx, client, http.MethodGet, path+"/federation/metadata", nil, &meta, projectID); err != nil {
@@ -109,9 +106,6 @@ func forwardCronJob(ctx context.Context, cfg ServerConfig, projectID int64, uid,
 	}
 	if !meta.NativeCronWrites {
 		return nil, true, api.NewError(409, "federated_read_only", "owning hub does not support native cron writes", "Upgrade the hub, or run the command against it with --daemon <hub-name>.", nil)
-	}
-	if cfg.FederationPushPending == nil {
-		return nil, true, cronForwardUnavailable("federation push transport is unavailable")
 	}
 	if err := cfg.FederationPushPending(ctx, binding, cred); err != nil {
 		return nil, true, cronForwardUnavailable("pending federation push failed; no cron write was sent")

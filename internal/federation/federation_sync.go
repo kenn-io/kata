@@ -263,6 +263,16 @@ func PushDirectSpoke(ctx context.Context, store db.Storage, binding db.Federatio
 	return pushDirectSpoke(ctx, store, &binding, hubProjectID, client, nil)
 }
 
+// CredentialHTTPClient builds a bearer-pinned, signing-aware HTTP client for
+// the hub a stored credential targets.
+func CredentialHTTPClient(ctx context.Context, credential config.FederationCredential) (*http.Client, error) {
+	client, err := NewClient(ctx, credential.HubURL, credential.Token, clientpkg.Opts{AllowInsecure: credential.AllowInsecure, FederationSigning: credential.Signing})
+	if err != nil {
+		return nil, err
+	}
+	return client.client, nil
+}
+
 // DirectSpokePushPending returns the daemon hook that drains a direct spoke's
 // pending events to its hub with the stored credential.
 func DirectSpokePushPending(store db.Storage) func(context.Context, db.FederationBinding, config.FederationCredential) error {
