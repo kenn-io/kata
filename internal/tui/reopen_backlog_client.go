@@ -55,18 +55,16 @@ func (c *Client) ReopenBacklog(ctx context.Context, projectID int64, ref string)
 			continue
 		}
 		job, err := recurringJob(ctx, apiClient, projectID, strings.TrimPrefix(key, cronProgressPrefix))
-		if err != nil {
-			continue
+		if err == nil {
+			var count int
+			if count, err = cron.RecurringBacklog(ctx, job.Definition.Native(), job.DefinitionEventUID, progress, now); err == nil {
+				total += count
+			}
 		}
-		count, err := cron.RecurringBacklog(ctx, job.Definition.Native(), job.DefinitionEventUID, progress, now)
 		if ctx.Err() != nil {
 			// An unfinished count is not a count; let the caller treat it as a failed lookup.
 			return 0, ctx.Err()
 		}
-		if err != nil {
-			continue
-		}
-		total += count
 	}
 	return total, nil
 }

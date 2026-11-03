@@ -134,6 +134,32 @@ func TestReopenBacklogReportsMetadataFailure(t *testing.T) {
 	require.Error(t, err)
 }
 
+// A lookup canceled while a job is being read must fail rather than report
+// the children of only the jobs it read before the cancellation.
+func TestReopenBacklogCanceledJobReadFails(t *testing.T) {
+	counted, canceled := backlogJob{uid: "job-a", catchup: "all", missed: 3}, backlogJob{uid: "job-b", catchup: "all", missed: 4}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects/7/issues/abcd/metadata":
+			respondJSON(t, w, map[string]any{"issue": map[string]any{"short_id": "abcd", "revision": 3, "metadata": map[string]any{
+				cronProgressPrefix + counted.uid: counted.progress(), cronProgressPrefix + canceled.uid: canceled.progress()}}})
+		case "/api/v1/projects/7/cron/jobs/" + counted.uid:
+			respondJSON(t, w, map[string]any{"job": counted.definition()})
+		case "/api/v1/projects/7/cron/jobs/" + canceled.uid:
+			cancel()
+			<-r.Context().Done()
+		default:
+			t.Errorf("unexpected request %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	})
+	count, err := c.ReopenBacklog(ctx, 7, "abcd")
+	require.ErrorIs(t, err, context.Canceled)
+	require.Zero(t, count)
+}
+
 // reopenSpyAPI counts the reopens the model sends to the daemon.
 type reopenSpyAPI struct {
 	*Client
