@@ -19,6 +19,5 @@ export function task(overrides: Partial<KataTaskSummary> = {}): KataTaskSummary 
     closed_reason: overrides.closed_reason,
     created_at: overrides.created_at ?? '2026-08-01T12:00:00Z',
     updated_at: overrides.updated_at ?? '2026-08-01T12:00:00Z',
-    ...overrides,
   }
 }

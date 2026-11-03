@@ -10,7 +10,6 @@ import type { ComponentProps } from 'svelte'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { KataTaskSummary } from '../lib/kata/types'
-import { task as makeTask } from '../test/task'
 import type { KataCurrentView } from '../lib/kata/authority'
 import IssueCollection from './IssueCollection.svelte'
 import { KATA_TASK_COLUMNS_STORAGE_KEY } from '../lib/kata/columns'
@@ -1786,17 +1785,24 @@ function viewWithIssues(issues: KataTaskSummary[]): KataCurrentView {
 }
 
 function task(overrides: Partial<KataTaskSummary>): KataTaskSummary {
-  return makeTask({
+  return {
     id: 1,
     uid: 'issue-uid',
     project_id: 2,
+    project_uid: 'project-example',
     short_id: 'task',
     qualified_id: 'example-project#task',
     title: 'Task',
+    status: 'open',
+    project_name: 'example-project',
+    metadata: {},
+    revision: 1,
+    author: 'user-a',
     owner: undefined,
+    priority: undefined,
     labels: [],
     created_at: '2026-05-10T08:00:00Z',
     updated_at: '2026-05-15T08:00:00Z',
     ...overrides,
-  })
+  }
 }
