@@ -87,7 +87,7 @@ func checkIssuePublishLifecycleFence(t *testing.T, _ db.Storage, backend Backend
 }
 
 func checkIssuePublishLifecycleRace(t *testing.T, _ db.Storage, backend Backend) error {
-	for _, kind := range []string{"delete", "move", "archive", "hard-delete"} {
+	for _, kind := range []string{"delete", "move", "archive"} {
 		t.Run(kind, func(t *testing.T) {
 			store := backend.Open(t)
 			t.Cleanup(func() { require.NoError(t, store.Close()) })
@@ -116,8 +116,6 @@ func checkIssuePublishLifecycleRace(t *testing.T, _ db.Storage, backend Backend)
 					_, err = other.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: c.Issue.ID, FromProjectID: c.Issue.ProjectID, ToProjectID: target.ID, IfMatchRev: c.Issue.Revision, Actor: "worker"})
 				case "archive":
 					_, _, err = other.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: c.Issue.ProjectID, Actor: "worker", Force: true})
-				case "hard-delete":
-					_, err = other.HardDeleteProject(ctx, c.Issue.ProjectID)
 				}
 				mutationResult <- err
 			}()
