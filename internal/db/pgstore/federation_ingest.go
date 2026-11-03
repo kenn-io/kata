@@ -240,6 +240,19 @@ func (s *Store) IngestFederationEvents(
 		if err != nil {
 			return err
 		}
+		// Route after materialization so stored sibling-project references stay local.
+		for _, event := range result.Events {
+			crossing, err := relayEventReferencesOtherProjectTx(ctx, tx, event.ProjectID, db.RemoteEventFromStored(event))
+			if err != nil {
+				return err
+			}
+			if crossing {
+				continue
+			}
+			if err := s.queueRelaySourceTx(ctx, tx, event); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	return result, err
@@ -267,6 +280,7 @@ func (s *Store) insertFederationEventTx(
 		Type: event.Type, Actor: event.Actor, Payload: string(event.Payload),
 		UID: event.EventUID, OriginInstanceUID: event.OriginInstanceUID, HLC: &clock,
 		CreatedAt: formatStoredTime(event.CreatedAt), ContentHash: event.ContentHash,
+		SkipRelay: true, // Route after the accepted batch materializes.
 	})
 	if err == nil {
 		return true, nil

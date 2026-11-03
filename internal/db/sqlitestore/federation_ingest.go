@@ -282,6 +282,19 @@ func (d *Store) ingestFederationEventsOnce(
 	if err != nil {
 		return db.FederationIngestResult{}, err
 	}
+	// Route after materialization so stored sibling-project references stay local.
+	for _, event := range result.Events {
+		crossing, err := relayEventReferencesOtherProjectTx(ctx, tx, event.ProjectID, db.RemoteEventFromStored(event))
+		if err != nil {
+			return db.FederationIngestResult{}, err
+		}
+		if crossing {
+			continue
+		}
+		if err := d.queueRelaySourceTx(ctx, tx, event); err != nil {
+			return db.FederationIngestResult{}, err
+		}
+	}
 	if err := federationFailpoint("before_federation_ingest_commit"); err != nil {
 		return db.FederationIngestResult{}, err
 	}

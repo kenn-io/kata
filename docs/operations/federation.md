@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-10-30
+last_edited: 2026-11-03
 ---
 
 # Federation
@@ -2208,6 +2208,12 @@ kata federation quarantine skip <id> \
 For a legacy spoke, skipping advances its push cursor past the quarantined event range. It
 does not delete local events and it does not make skipped work appear on the
 hub.
+
+### Missing creations from direct legacy spokes
+
+Events accepted from a direct legacy spoke reach negotiated relays with their original identity and hash. SQLite and PostgreSQL roots queue accepted events in ingest order after materialization. Events that reference an issue already stored in another project remain owner-local. References to peers that haven't arrived yet can travel through relays.
+
+After upgrading the root, relays that quarantined because an older SQLite root omitted a creation need a fresh checkpoint. Reconnect the affected bridge with `kata --project spoke-project federation bridge disconnect --as member`, then `kata --project spoke-project federation bridge connect --hub-daemon root-hub --hub-project hub-project --serve-downstream --as member`. Reconnecting also recovers a withheld creation. Follow the existing [bridge disconnect and reconnect procedure](../guide/project-relays.md) to resolve pending deliveries and downstream enrollments first.
 
 ## Purge and reset
 

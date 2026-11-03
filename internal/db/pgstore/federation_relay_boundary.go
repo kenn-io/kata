@@ -63,6 +63,28 @@ func rejectRelayProjectLinksTx(ctx context.Context, tx *sql.Tx, projectID int64)
 	return nil
 }
 
+// Unknown peers may arrive in a later ingest batch. Withhold only references
+// to issues already stored in another project.
+func relayEventReferencesOtherProjectTx(ctx context.Context, tx *sql.Tx, projectID int64, event db.RemoteEvent) (bool, error) {
+	refs, err := payloadReferencedIssueUIDs(event, db.PayloadMap(event.Payload))
+	if err != nil {
+		return false, err
+	}
+	if event.IssueUID != nil {
+		refs = append(refs, *event.IssueUID)
+	}
+	for _, ref := range refs {
+		var crossing bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issues WHERE uid=$1 AND project_id<>$2)`, ref, projectID).Scan(&crossing); err != nil {
+			return false, err
+		}
+		if crossing {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // Original cross-project event bytes remain on the owner store. Initial relay
 // sync uses a signed current-state checkpoint rather than rewriting or sharing
 // those historical private endpoints.
