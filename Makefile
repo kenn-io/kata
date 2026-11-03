@@ -73,7 +73,7 @@ kata-ui-test:
 	bun run --cwd packages/kata-ui test
 
 kata-ui-pack-check:
-	cd packages/kata-ui && bun x vp test pack.test.ts
+	cd packages/kata-ui && bun x vp test pack.test.ts --outputFile.json=test-results/vitest/kata-ui-pack.json
 
 web-check: kata-ui-check
 	cd web && bun run check

@@ -86,6 +86,33 @@ jobs:
       - name: Run shared UI and web static checks
         run: make web-check web-test
 
+      - name: Upload vitest kata-ui results
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: vitest-kata-ui-attempt-${{ github.run_attempt }}
+          path: packages/kata-ui/test-results/vitest/kata-ui.json
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload vitest kata-ui-pack results
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: vitest-kata-ui-pack-attempt-${{ github.run_attempt }}
+          path: packages/kata-ui/test-results/vitest/kata-ui-pack.json
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload vitest web results
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: vitest-web-attempt-${{ github.run_attempt }}
+          path: web/test-results/vitest/web.json
+          retention-days: 14
+          if-no-files-found: ignore
+
   web-browser:
     needs: changes
     if: &go-frontend-changes ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go') || contains(fromJSON(needs.changes.outputs.groups), 'frontend') || contains(fromJSON(needs.changes.outputs.groups), 'embedded-docs')) }}
@@ -162,9 +189,38 @@ jobs:
           KATA_HOME: ${{ runner.temp }}/kata-web-browser/home
           KATA_DB: ${{ runner.temp }}/kata-web-browser/home/kata.db
           KATA_WORKSPACE: ${{ runner.temp }}/kata-web-browser/workspace
+          KATA_PLAYWRIGHT_SUITE: web-e2e
         run: |
           mkdir -p "$KATA_HOME" "$KATA_WORKSPACE"
-          make web-e2e web-e2e-firefox
+          make web-e2e
+
+      - name: Upload playwright web-e2e results
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: playwright-web-e2e-attempt-${{ github.run_attempt }}
+          path: web/test-results/playwright/web-e2e.json
+          retention-days: 14
+          if-no-files-found: ignore
+
+      # Each Playwright run clears web/test-results, so Firefox runs after the upload above.
+      - name: Run isolated Firefox browser tests
+        env:
+          PW_TEST_CONNECT_WS_ENDPOINT: ws://127.0.0.1:3000/
+          KATA_HOME: ${{ runner.temp }}/kata-web-browser/home
+          KATA_DB: ${{ runner.temp }}/kata-web-browser/home/kata.db
+          KATA_WORKSPACE: ${{ runner.temp }}/kata-web-browser/workspace
+          KATA_PLAYWRIGHT_SUITE: web-e2e-firefox
+        run: make web-e2e-firefox
+
+      - name: Upload playwright web-e2e-firefox results
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: playwright-web-e2e-firefox-attempt-${{ github.run_attempt }}
+          path: web/test-results/playwright/web-e2e-firefox.json
+          retention-days: 14
+          if-no-files-found: ignore
 
       - name: Upload browser failure artifacts
         if: failure()
