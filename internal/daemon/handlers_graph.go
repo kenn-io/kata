@@ -357,7 +357,7 @@ func markTransitiveBlockLayout(edges []api.ReachableGraphEdge) {
 		ids[uid] = id
 		return id
 	}
-	var blocks []int
+	blocks := []int{}
 	var ends [][2]int
 	for i, edge := range edges {
 		if edge.Kind == "blocks" {
@@ -380,7 +380,7 @@ func markTransitiveBlockLayout(edges []api.ReachableGraphEdge) {
 	var stack []int
 	var groups [][]int
 	visited := 0
-	for root := range count {
+	for root := range targets {
 		if order[root] >= 0 {
 			continue
 		}
