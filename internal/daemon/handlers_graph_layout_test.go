@@ -31,14 +31,25 @@ func TestMarkTransitiveBlockLayoutScaling(t *testing.T) {
 			var timings []time.Duration
 			for _, size := range []int{tc.small, tc.large} {
 				edges := layoutShape(tc.shape, size)
-				markTransitiveBlockLayout(edges)
 				var samples []time.Duration
-				for range 3 {
+				calls := 2
+				for len(samples) < 3 {
+					copies := make([][]api.ReachableGraphEdge, calls)
+					for i := range copies {
+						copies[i] = slices.Clone(edges)
+					}
 					// Discard garbage from the preceding graph before timing.
 					runtime.GC()
 					start := time.Now()
-					markTransitiveBlockLayout(edges)
-					samples = append(samples, time.Since(start))
+					for _, copy := range copies {
+						markTransitiveBlockLayout(copy)
+					}
+					elapsed := time.Since(start)
+					if elapsed < 100*time.Millisecond {
+						calls *= 2
+						continue
+					}
+					samples = append(samples, elapsed/time.Duration(calls))
 				}
 				slices.Sort(samples)
 				timings = append(timings, samples[1])
