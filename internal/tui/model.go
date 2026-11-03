@@ -3566,14 +3566,15 @@ func (m Model) viewContent() string {
 			body = renderCredentials(m)
 		default:
 			if m.modal == modalReopenBacklog {
-				rows := modalHelpRows(m.modal)
-				body = joinNonEmpty([]string{
-					renderTooNarrow(m.width, max(1, m.height-helpLines(rows, m.width))),
-					renderFooterHelpTable(rows, m.width),
-				})
-			} else {
-				body = renderTooNarrow(m.width, m.height)
+				footer := renderFooterHelpTable(modalHelpRows(m.modal), m.width)
+				bodyHeight := max(0, m.height-lipgloss.Height(footer))
+				body = renderTooNarrow(m.width, bodyHeight)
+				body = m.withActiveConnectionHeader(m.appendNonListDetailExtras(body))
+				body = overlayModal(body, renderConfirmModal(m.modal, m.reopenPrompt), m.width, bodyHeight)
+				lines := strings.Split(body, "\n")
+				return joinNonEmpty([]string{strings.Join(lines[:min(bodyHeight, len(lines))], "\n"), footer})
 			}
+			body = renderTooNarrow(m.width, m.height)
 		}
 		body = m.withActiveConnectionHeader(m.appendNonListDetailExtras(body))
 		return m.overlayInputAndModal(body)

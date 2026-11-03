@@ -780,9 +780,10 @@ func TestReopenBacklogActionsSurviveNarrowResize(t *testing.T) {
 	m := newTestModel()
 	m.modal = modalReopenBacklog
 	m.reopenPrompt = &reopenPrompt{ref: "#abcd", count: 3}
-	for _, width := range []int{100, 60, 100} {
-		m = resizeModel(m, width, 24)
+	for _, size := range [][2]int{{100, 24}, {60, 24}, {60, 11}, {100, 24}} {
+		m = resizeModel(m, size[0], size[1])
 		view := stripANSI(m.viewContent())
+		require.LessOrEqual(t, len(strings.Split(view, "\n")), size[1])
 		require.Contains(t, view, "Reopen #abcd?")
 		require.Contains(t, view, "reopen")
 		require.Contains(t, view, "n/esc")
