@@ -101,6 +101,8 @@ func forwardCronJob(ctx context.Context, cfg ServerConfig, projectID int64, uid,
 	if err := cfg.FederationPushPending(ctx, binding, cred); err != nil {
 		return nil, true, cronForwardUnavailable("pending federation push failed; no cron write was sent")
 	}
+	// Admission excludes rebind and leave, but a rejoin can rewrite the binding
+	// without that gate while the push runs. Recheck the target before writing.
 	current, err := cfg.DB.FederationBindingByProject(ctx, projectID)
 	if err != nil || !current.Enabled || !current.PushEnabled || current.Role != binding.Role || current.RelayConfig != nil || current.HubURL != binding.HubURL || current.HubProjectID != binding.HubProjectID || current.HubProjectUID != binding.HubProjectUID || current.AllowInsecure != binding.AllowInsecure {
 		return nil, true, cronForwardUnavailable("federation binding changed; retry with fresh credentials")
