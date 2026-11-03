@@ -56,7 +56,7 @@ Errors go to stderr in the selected output mode.
 | 7 | Daemon unavailable. |
 | 8 | Wait timeout. |
 
-CLI panics on the main goroutine exit 1 as internal errors; daemon panics retain runtime handling.
+CLI panics exit 1 as internal errors; daemon and background task panics keep diagnostic traces.
 
 With `--json`, a `project_not_initialized` error names the alias or project Kata
 looked up in `error.data`; see [HTTP API errors](http-api.md#errors).
