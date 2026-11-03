@@ -31,7 +31,10 @@ func TestIssuePublishServiceStartupAllProviders(t *testing.T) {
 			require.NoError(t, err)
 			body, err := json.Marshal(map[string]any{"issue_ref": i.ShortID, "actor": "worker"})
 			require.NoError(t, err)
-			resp, err := http.Post(fmt.Sprintf("%s/api/v1/projects/%d/issue-sync/%s/publish", server.URL, p.ID, provider), "application/json", bytes.NewReader(body))
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, fmt.Sprintf("%s/api/v1/projects/%d/issue-sync/%s/publish", server.URL, p.ID, provider), bytes.NewReader(body))
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := http.DefaultClient.Do(req)
 			require.NoError(t, err)
 			defer func() { _ = resp.Body.Close() }()
 			var out map[string]any

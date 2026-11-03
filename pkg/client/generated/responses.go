@@ -1264,6 +1264,7 @@ type PublishIssueResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *PublishIssueResponse
+	JSONDefault  *PublishIssueErrorResponse
 }
 
 type GetIssueSyncStatusResp struct {

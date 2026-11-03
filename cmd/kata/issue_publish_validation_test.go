@@ -293,7 +293,10 @@ func TestIssuePublishActionableValidation(t *testing.T) {
 			}
 			_, err = env.DB.UpsertIssueSyncBinding(t.Context(), binding)
 			require.NoError(t, err)
-			resp, err := env.HTTP.Post(fmt.Sprintf("%s/api/v1/projects/%d/issue-sync/%s/publish", env.URL, project.ID, tc.provider), "application/json", strings.NewReader(fmt.Sprintf(`{"issue_ref":%q,"actor":"worker"}`, issue.ShortID)))
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, fmt.Sprintf("%s/api/v1/projects/%d/issue-sync/%s/publish", env.URL, project.ID, tc.provider), strings.NewReader(fmt.Sprintf(`{"issue_ref":%q,"actor":"worker"}`, issue.ShortID)))
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := env.HTTP.Do(req)
 			require.NoError(t, err)
 			raw, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
