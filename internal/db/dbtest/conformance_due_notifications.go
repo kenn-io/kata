@@ -437,18 +437,21 @@ func checkDueNotificationCandidates(t *testing.T, store db.Storage) error {
 	project, err := store.CreateProject(ctx, "candidate-project")
 	require.NoError(t, err)
 	now := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	notificationKey := notification.MetadataKey("worker-a")
+	automatic, err := notification.MarshalSystem(notification.Scheduled, "2020-01-01")
+	require.NoError(t, err)
 	for _, test := range []struct {
-		name, raw       string
-		listed, settled bool
+		name, raw                string
+		listed, settled, cleanup bool
 	}{
-		{"future date", `{"scheduled_on":"2099-01-01"}`, false, false},
-		{"future local time", `{"scheduled_on":"2099-01-01T09:00"}`, false, false},
-		{"future instant", `{"scheduled_on":"2099-01-01T09:00:00Z"}`, false, false},
-		{"future deadline", `{"deadline_on":"2099-01-01"}`, false, false},
-		{"manual notification", `{"notify.worker-a":{"from":"reviewer","message":"Please review"}}`, false, false},
-		{"due east of UTC", `{"scheduled_on":"2026-09-17","timezone":"Pacific/Kiritimati"}`, true, false},
-		{"stale automatic notification", `{"scheduled_on":"2099-01-01","notify.worker-a":{"from":"system","message":"Scheduled date reached: 2020-01-01"}}`, true, false},
-		{"delivered overdue", `{"scheduled_on":"2020-01-01"}`, true, true},
+		{"future date", `{"scheduled_on":"2099-01-01"}`, false, false, false},
+		{"future local time", `{"scheduled_on":"2099-01-01T09:00"}`, false, false, false},
+		{"future instant", `{"scheduled_on":"2099-01-01T09:00:00Z"}`, false, false, false},
+		{"future deadline", `{"deadline_on":"2099-01-01"}`, false, false, false},
+		{"manual notification", fmt.Sprintf(`{%q:{"from":"reviewer","message":"Please review"}}`, notificationKey), false, false, false},
+		{"due east of UTC", `{"scheduled_on":"2026-09-17","timezone":"Pacific/Kiritimati"}`, true, false, false},
+		{"stale automatic notification", fmt.Sprintf(`{"scheduled_on":"2099-01-01",%q:%s}`, notificationKey, automatic), true, false, true},
+		{"delivered overdue", `{"scheduled_on":"2020-01-01"}`, true, true, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var values map[string]jsontext.Value
@@ -478,6 +481,14 @@ func checkDueNotificationCandidates(t *testing.T, store db.Storage) error {
 			}
 			if test.settled {
 				assert.False(t, out.Changed, "settled schedules do not repeat")
+			}
+			if test.cleanup {
+				require.True(t, out.Changed, "stale automatic notifications must be cleared")
+				got, err := store.IssueByID(ctx, issue.ID)
+				require.NoError(t, err)
+				var remaining map[string]jsontext.Value
+				require.NoError(t, json.Unmarshal([]byte(got.Metadata), &remaining))
+				assert.NotContains(t, remaining, notificationKey)
 			}
 		})
 	}

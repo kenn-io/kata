@@ -246,3 +246,48 @@ func TestReconcileDueNotificationSettledDoesNotWaitForWriter(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, out.Changed)
 }
+
+func TestReconcileDueNotificationInvalidRecipientDoesNotWaitForWriter(t *testing.T) {
+	for _, recipient := range []string{"author", "owner"} {
+		t.Run(recipient, func(t *testing.T) {
+			ctx := t.Context()
+			store, err := Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, store.Close()) })
+			project, err := store.CreateProject(ctx, "unaddressable-project")
+			require.NoError(t, err)
+			params := db.CreateIssueParams{
+				ProjectID: project.ID, Title: "Unaddressable scheduled work", Author: "bad\nactor",
+				Metadata: map[string]jsontext.Value{"scheduled_on": []byte(`"2020-01-01"`)},
+			}
+			if recipient == "owner" {
+				params.Author = "worker-a"
+				params.Owner = new("bad\nactor")
+			}
+			issue, _, err := store.CreateIssue(ctx, params)
+			require.NoError(t, err)
+			floor := time.Time{}
+			in := db.ReconcileDueNotificationIn{
+				IssueID: issue.ID, Now: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC),
+				DefaultTimezone: "UTC", ScheduledReachedFloor: &floor,
+			}
+			out, err := store.ReconcileDueNotification(ctx, in)
+			require.NoError(t, err)
+			require.Error(t, out.NotificationErr)
+			require.NotNil(t, out.Reached)
+			require.Nil(t, out.Event)
+
+			writer, err := store.BeginTx(ctx, nil)
+			require.NoError(t, err)
+			defer func() { require.NoError(t, writer.Rollback()) }()
+			readCtx, cancel := context.WithTimeout(ctx, time.Second)
+			defer cancel()
+			out, err = store.ReconcileDueNotification(readCtx, in)
+			require.NoError(t, err)
+			require.Error(t, out.NotificationErr)
+			require.False(t, out.Changed)
+			require.Nil(t, out.Reached)
+			require.Nil(t, out.Event)
+		})
+	}
+}

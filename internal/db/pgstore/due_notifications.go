@@ -34,7 +34,6 @@ func (s *Store) ListDueNotificationIssueIDs(ctx context.Context, now time.Time) 
 			 OR EXISTS (
 				 SELECT 1 FROM jsonb_each((i.metadata)::jsonb) AS entry(key, value)
 				  WHERE entry.key LIKE 'notify.%'
-				    AND jsonb_typeof(entry.value) = 'object'
 				    AND entry.value ->> 'from' = 'system'
 			 )
 		   )

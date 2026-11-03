@@ -58,18 +58,14 @@ func (d *Store) ListDueNotificationIssueIDs(ctx context.Context, now time.Time) 
 // metadata event as a manual patch. A newly reached scheduled_on value is also
 // recorded as issue.scheduled_reached, whether or not the inbox slot is free.
 func (d *Store) ReconcileDueNotification(ctx context.Context, in db.ReconcileDueNotificationIn) (db.ReconcileDueNotificationOut, error) {
-	out, err := d.reconcileDueNotification(ctx, in, true)
-	if err == nil && !out.Changed && out.NotificationErr == nil {
-		return out, nil
-	}
 	return retryWrite1(ctx, d, func() (db.ReconcileDueNotificationOut, error) {
-		return d.reconcileDueNotification(ctx, in, false)
+		return d.reconcileDueNotification(ctx, in)
 	})
 }
 
-func (d *Store) reconcileDueNotification(ctx context.Context, in db.ReconcileDueNotificationIn, readOnly bool) (db.ReconcileDueNotificationOut, error) {
+func (d *Store) reconcileDueNotification(ctx context.Context, in db.ReconcileDueNotificationIn) (db.ReconcileDueNotificationOut, error) {
 	var out db.ReconcileDueNotificationOut
-	tx, err := d.BeginTx(ctx, &sql.TxOptions{ReadOnly: readOnly})
+	tx, err := d.BeginTx(withOptimisticWrite(ctx), nil)
 	if err != nil {
 		return out, err
 	}
@@ -115,11 +111,6 @@ func (d *Store) reconcileDueNotification(ctx context.Context, in db.ReconcileDue
 		out.NotificationErr, patch = err, nil
 	}
 	if len(patch) == 0 && reached == nil {
-		return commitDueNotification(tx, out)
-	}
-	if readOnly {
-		// The write transaction must reread and replan against current state.
-		out.Changed = true
 		return commitDueNotification(tx, out)
 	}
 	var projectName string
