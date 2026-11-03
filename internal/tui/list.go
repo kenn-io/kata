@@ -160,7 +160,7 @@ func (lm listModel) applyNavKey(
 	if next, cmd, ok := lm.applyPromptKey(msg, km, sc); ok {
 		return next, cmd
 	}
-	if next, cmd, ok := lm.applyMutationKey(msg, km, api, sc); ok {
+	if next, cmd, ok := lm.applyMutationKey(msg, km); ok {
 		return next, cmd
 	}
 	if next, cmd, ok := lm.applyOpenKey(msg, km); ok {
@@ -176,13 +176,9 @@ func (lm listModel) applyNavKey(
 // does nothing. `!` arms pendingPriority; the next 0..4 / `-` keystroke
 // is consumed by applyPendingPriorityKey before it reaches any other
 // handler.
-func (lm listModel) applyMutationKey(
-	msg tea.KeyPressMsg, km keymap, api listAPI, sc scope,
-) (listModel, tea.Cmd, bool) {
-	switch {
-	case km.SetPriority.matches(msg):
-		next := lm.armPendingPriority()
-		return next, nil, true
+func (lm listModel) applyMutationKey(msg tea.KeyPressMsg, km keymap) (listModel, tea.Cmd, bool) {
+	if km.SetPriority.matches(msg) {
+		return lm.armPendingPriority(), nil, true
 	}
 	return lm, nil, false
 }
