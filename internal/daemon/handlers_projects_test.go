@@ -24,7 +24,8 @@ func TestResolve_FailsOutsideKataTomlAndWithoutAlias(t *testing.T) {
 	resp, bs := postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
 		"start_path": t.TempDir(),
 	})
-	assertAPIError(t, resp.StatusCode, bs, 404, "project_not_initialized")
+	envelope := assertAPIError(t, resp.StatusCode, bs, 404, "project_not_initialized")
+	assert.Empty(t, envelope.Error.Data, string(bs))
 }
 
 func TestInit_FromGitRemoteCreatesProject(t *testing.T) {
@@ -317,6 +318,16 @@ func TestResolve_ByAliasInput_NotRegistered(t *testing.T) {
 	})
 	envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
 	assert.Equal(t, map[string]any{"alias": "github.com/wesm/never-seen"}, map[string]any(envelope.Error.Data), string(bs))
+
+	resp, bs = postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
+		"alias": map[string]any{
+			"identity": "github.com/wesm/never-seen",
+			"kind":     "git",
+		},
+		"name": "ghost-project",
+	})
+	envelope = assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
+	assert.Equal(t, map[string]any{"project": "ghost-project"}, map[string]any(envelope.Error.Data), string(bs))
 }
 
 // TestResolve_ByStartPath_KataTomlNamesUnregisteredProject reports the
