@@ -207,6 +207,12 @@ test('move picker counts stay in place when clearing its search makes the list s
 })
 
 test('website column stays in place when leaving the short not-found page', async ({ page }) => {
+  // A Playwright browser server drops ignoreDefaultArgs unless started with
+  // --unsafe, so it keeps hiding the root scrollbar this test measures.
+  test.skip(
+    Boolean(process.env.PW_TEST_CONNECT_WS_ENDPOINT),
+    'remote browser servers hide the root scrollbar',
+  )
   await page.setViewportSize({ width: 1700, height: 900 })
   await page.route('**/*', (route) => {
     const { hostname, pathname } = new URL(route.request().url())
