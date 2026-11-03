@@ -537,11 +537,31 @@ jobs:
 
       - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
 
+      - name: Locate Go caches
+        run: |
+          echo "GOCACHE=$(go env GOCACHE)" >> "$GITHUB_ENV"
+          echo "GOMODCACHE=$(go env GOMODCACHE)" >> "$GITHUB_ENV"
+
+      # Main writes one entry per push; PRs read the newest matching entry.
+      - name: Restore lint caches
+        id: restore-lint-cache
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: |
+            .cache/golangci-lint
+            ${{ env.GOCACHE }}
+            ${{ env.GOMODCACHE }}
+          key: golangci-lint-${{ runner.os }}-${{ hashFiles('.custom-gcl.yml', 'go.mod') }}-${{ github.sha }}
+          restore-keys: golangci-lint-${{ runner.os }}-${{ hashFiles('.custom-gcl.yml', 'go.mod') }}-
+
       - name: Fetch Go checkers
         run: GOFLAGS="${GOFLAGS:+$GOFLAGS }-n" kit-retry 3 5 make lint-workflow-retries
 
       - name: Build custom Go linter
-        run: kit-retry 3 5 make "$PWD/.cache/golangci-lint/custom-gcl"
+        run: |
+          # The key matches .custom-gcl.yml and go.mod; checkout only made them look newer.
+          touch -c "$PWD/.cache/golangci-lint/custom-gcl"
+          kit-retry 3 5 make "$PWD/.cache/golangci-lint/custom-gcl"
 
       - name: Run golangci-lint
         run: make lint
@@ -550,6 +570,16 @@ jobs:
         env:
           GOOS: windows
         run: make lint
+
+      - name: Save lint caches
+        if: github.event_name == 'push' && steps.restore-lint-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: |
+            .cache/golangci-lint
+            ${{ env.GOCACHE }}
+            ${{ env.GOMODCACHE }}
+          key: ${{ steps.restore-lint-cache.outputs.cache-primary-key }}
 
   nilaway:
     needs: changes
