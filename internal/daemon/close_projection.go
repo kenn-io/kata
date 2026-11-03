@@ -5,6 +5,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
+	"slices"
 	"strings"
 
 	"go.kenn.io/kata/internal/commentref"
@@ -32,6 +33,9 @@ func projectCloseEvent(ctx context.Context, store db.Storage, event *db.Event) (
 	var fields map[string]jsontext.Value
 	if err := json.Unmarshal([]byte(event.Payload), &fields); err != nil {
 		return nil, err
+	}
+	if fields == nil {
+		return event, nil
 	}
 	var evidence []db.Evidence
 	var warnings []db.VerificationWarning
@@ -122,12 +126,16 @@ func projectCloseEvent(ctx context.Context, store db.Storage, event *db.Event) (
 	}
 	_, restricted := db.AuthorizedProjects(ctx)
 	fallback := !restricted && issueScopeFromContext(ctx) == nil
+	verificationIssueUIDs := slices.Clone(event.VerificationIssueUIDs)
 	render := func(uid string) (string, bool) {
 		r, ok := visible[uid]
 		if !ok {
 			return uid, fallback
 		}
 		db.RecordIssueScopeTarget(ctx, r.IssueID)
+		if !slices.Contains(verificationIssueUIDs, r.IssueUID) {
+			verificationIssueUIDs = append(verificationIssueUIDs, r.IssueUID)
+		}
 		shown := ""
 		if event.IssueUID != nil {
 			shown = *event.IssueUID
@@ -206,5 +214,6 @@ func projectCloseEvent(ctx context.Context, store db.Storage, event *db.Event) (
 	projected := *event
 	projected.Payload = string(raw)
 	projected.ContentHash = ""
+	projected.VerificationIssueUIDs = verificationIssueUIDs
 	return &projected, nil
 }

@@ -1069,6 +1069,8 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 				break
 			}
 			for i := range page {
+				// A redacted/reset latest close must not reuse an older close.
+				latest = nil
 				if page[i].Type != "issue.closed" {
 					continue
 				}

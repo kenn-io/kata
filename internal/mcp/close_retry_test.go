@@ -55,6 +55,58 @@ func TestCloseForwardsRetryGuardsAndReturnsOriginalReceipt(t *testing.T) {
 	require.Equal(t, "01HCCCCCCCCCCCCCCCCCCCCCCC", output.Event.UID)
 }
 
+// A close receipt must fail closed when its returned issue cannot be projected
+// into the MCP startup scope. Warning projection must not erase that error.
+func TestClosePreservesMutationProjectionError(t *testing.T) {
+	const projectUID = "01HAAAAAAAAAAAAAAAAAAAAAAA"
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.URL.Path == "/api/v1/projects":
+			writeJSON(writer, map[string]any{"projects": []any{projectJSON(1, projectUID, "spoke-project")}})
+		case strings.HasSuffix(request.URL.Path, "/actions/close"):
+			issue := issueJSON(2, "other-project", "abc1")
+			issue["project_uid"] = projectUID
+			writeJSON(writer, map[string]any{"issue": issue, "changed": false})
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{{ID: 1, UID: projectUID, Name: "spoke-project"}})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope, Actor: "example-agent"}}
+	_, _, err = handlers.close(t.Context(), nil, CloseInput{
+		Ref: "spoke-project#abc1", Reason: "wontfix",
+		Message: "Reviewed the request and recorded why the work should stop here.",
+	})
+	require.ErrorContains(t, err, "outside the MCP startup scope")
+}
+
+func TestAuditClosesRedactsForeignVerdictReferences(t *testing.T) {
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/api/v1/projects":
+			writeJSON(writer, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
+		case "/api/v1/audit/closes":
+			writeJSON(writer, map[string]any{"rows": []any{map[string]any{
+				"time": "2026-08-12T00:00:00Z", "actor": "worker", "reason": "done", "issue": "abc1", "event_id": 1,
+				"overruled_refutations": []string{"c:abc123", "other-project#def2:def456", "01HAAAAAAAAAAAAAAAAAAAAAAA"},
+				"verdict_evidence":      []any{map[string]any{"type": "confirmed", "comment": "c:abc123"}, map[string]any{"type": "confirmed", "comment": "other-project#def2:def456"}},
+			}}})
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{{ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project"}})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope}}
+	_, out, err := handlers.auditCloses(t.Context(), nil, AuditClosesInput{Project: "spoke-project"})
+	require.NoError(t, err)
+	require.Len(t, out.Rows, 1)
+	require.Equal(t, []string{"c:abc123"}, out.Rows[0].OverruledRefutations)
+	require.Len(t, out.Rows[0].VerdictEvidence, 1)
+	require.Equal(t, "c:abc123", *out.Rows[0].VerdictEvidence[0].Comment)
+}
+
 func TestCloseRejectsReusedIssueMovedOutsideFixedScope(t *testing.T) {
 	const (
 		allowedProjectUID = "01HAAAAAAAAAAAAAAAAAAAAAAA"

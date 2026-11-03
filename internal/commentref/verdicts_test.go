@@ -1,10 +1,11 @@
 package commentref
 
 import (
-	"github.com/stretchr/testify/require"
-	"hegel.dev/go/hegel"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
+	"hegel.dev/go/hegel"
 )
 
 // The close-verification contract requires independent principals and explicit
@@ -40,6 +41,47 @@ func TestVerdicts(t *testing.T) {
 	require.Empty(t, v.Confirmed)
 	require.Empty(t, v.OpenRefutations)
 	require.Equal(t, 2, v.Redacted)
+}
+
+func TestVerdictEligibilitySurvivesTargetRedaction(t *testing.T) {
+	for _, kind := range []string{"confirm", "refute"} {
+		t.Run(kind, func(t *testing.T) {
+			target := graphRecord(1, "hidden", "", "")
+			verdict := graphRecord(2, "visible", target.UID, kind)
+			confirmation := graphRecord(3, "visible", verdict.UID, "confirm")
+			confirmation.Author = "reviewer"
+			rows := Project([]Record{verdict, confirmation}, map[string]TargetState{target.UID: {Status: "hidden"}})
+			require.Empty(t, rows[0].ReplyKind, "response fields still redact the hidden edge")
+			v := Evaluate(rows, "visible", nil)
+			require.False(t, v.Claims[rows[0].Handle].Eligible)
+			require.Empty(t, v.Confirmed)
+		})
+	}
+}
+
+func TestConfirmationEditOrdering(t *testing.T) {
+	base := time.Unix(100, 123_000_000)
+	for _, tc := range []struct {
+		name               string
+		edit, confirmation time.Time
+		counts             bool
+	}{
+		{"same millisecond equal", base, base, false},
+		{"same millisecond finer confirmation", base, base.Add(500 * time.Microsecond), false},
+		{"next millisecond", base, base.Add(time.Millisecond), true},
+		{"precise before", base.Add(600 * time.Microsecond), base.Add(500 * time.Microsecond), false},
+		{"precise after", base.Add(600 * time.Microsecond), base.Add(700 * time.Microsecond), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			claim := graphRecord(1, "issue", "", "")
+			claim.EditedAt = &tc.edit
+			review := graphRecord(2, "issue", claim.UID, "confirm")
+			review.Author = "reviewer"
+			review.CreatedAt = tc.confirmation
+			v := Evaluate([]Record{claim, review}, "issue", nil)
+			require.Equal(t, tc.counts, len(v.Confirmed) == 1)
+		})
+	}
 }
 
 func TestVerdictsLocalRebuttalDoesNotBecomeNewBlocker(t *testing.T) {

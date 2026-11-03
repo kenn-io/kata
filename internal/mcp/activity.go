@@ -684,6 +684,28 @@ func (h toolHandlers) auditCloses(ctx context.Context, _ *sdkmcp.CallToolRequest
 	if err != nil {
 		return nil, AuditClosesOutput{}, err
 	}
+	if h.options.Scope.Mode() != ScopeAll {
+		visible, err := h.verificationReferenceFilter(ctx)
+		if err != nil {
+			return nil, AuditClosesOutput{}, err
+		}
+		for i := range rows {
+			overrules := []string{}
+			for _, ref := range rows[i].OverruledRefutations {
+				if visible(ref) {
+					overrules = append(overrules, ref)
+				}
+			}
+			rows[i].OverruledRefutations = overrules
+			evidence := []generated.EvidenceResponse{}
+			for _, entry := range rows[i].VerdictEvidence {
+				if entry.Comment != nil && visible(*entry.Comment) {
+					evidence = append(evidence, entry)
+				}
+			}
+			rows[i].VerdictEvidence = evidence
+		}
+	}
 	output.Rows = rows
 	return successResult(), output, nil
 }

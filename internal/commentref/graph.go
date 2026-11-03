@@ -27,6 +27,8 @@ type CommentOut struct {
 	Reply              *Link  `json:"reply,omitempty"`
 	Backlinks          []Link `json:"backlinks,omitempty"`
 	BacklinksTruncated bool   `json:"backlinks_truncated,omitempty"`
+	// Preserve citation eligibility when a hidden endpoint redacts ReplyKind.
+	OriginalReplyKind string `json:"-"`
 }
 
 // Link describes one visible reply target or backlink.
@@ -99,6 +101,7 @@ func Project(records []Record, states map[string]TargetState) []Record {
 		}
 		state, ok := states[r.ReplyToUID]
 		if state.Status == "hidden" {
+			result[i].OriginalReplyKind = r.ReplyKind
 			result[i].ReplyToUID = ""
 			result[i].ReplyKind = ""
 			continue

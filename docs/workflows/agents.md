@@ -949,7 +949,8 @@ contested and supports neither type. Overrules cannot change that decision.
 
 A superseded claim cannot be cited. Superseding a confirmation withdraws it;
 superseding that withdrawal does not revive it. A confirmation written before
-the claim's last body edit does not certify the edited text. Body edits never
+the claim's last body edit does not certify the edited text. Confirmations with
+ambiguous ordering within an edit's millisecond do not count. Body edits never
 clear open refutations. Old replies remain visible.
 
 Verification checks one preflight snapshot before the close transaction. A

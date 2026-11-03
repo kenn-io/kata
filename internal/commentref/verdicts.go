@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"slices"
 	"strings"
+	"time"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -71,14 +72,18 @@ func Evaluate(comments []Record, issueUID string, readable func(uid string) bool
 		if target.IssueUID != issueUID {
 			continue
 		}
-		claimVerdict := db.ClaimVerdict{Eligible: target.ReplyKind != "confirm" && target.ReplyKind != "refute" && !superseded(target.UID)}
+		kind := target.ReplyKind
+		if target.OriginalReplyKind != "" {
+			kind = target.OriginalReplyKind
+		}
+		claimVerdict := db.ClaimVerdict{Eligible: kind != "confirm" && kind != "refute" && !superseded(target.UID)}
 		confirmations := 0
 		hasOpenRefutation := false
 		for _, r := range incoming[target.UID] {
 			if r.ReplyKind == "confirm" || r.ReplyKind == "refute" {
 				v.Activity = true
 			}
-			if r.ReplyKind == "confirm" && !superseded(r.UID) && (target.EditedAt == nil || !r.CreatedAt.Before(*target.EditedAt)) && (r.Author != target.Author || r.Teammate != target.Teammate) {
+			if r.ReplyKind == "confirm" && !superseded(r.UID) && confirmationFollowsEdit(r.CreatedAt, target.EditedAt) && (r.Author != target.Author || r.Teammate != target.Teammate) {
 				confirmations++
 				claimVerdict.Confirmations = append(claimVerdict.Confirmations, verdictHandle(r, issueUID))
 			}
@@ -113,6 +118,18 @@ func Evaluate(comments []Record, issueUID string, readable func(uid string) bool
 	slices.SortFunc(v.Confirmed, func(a, b db.ConfirmedClaim) int { return cmp.Compare(a.Comment, b.Comment) })
 	slices.SortFunc(v.OpenRefutations, func(a, b db.OpenRefutation) int { return cmp.Compare(a.Refutation, b.Refutation) })
 	return v
+}
+
+func confirmationFollowsEdit(created time.Time, edited *time.Time) bool {
+	if edited == nil {
+		return true
+	}
+	// Millisecond edit stamps cannot establish ordering within that bucket,
+	// even when a confirmation retains finer precision. Reject that ambiguity.
+	if edited.Nanosecond()%int(time.Millisecond) == 0 {
+		created = created.Truncate(time.Millisecond)
+	}
+	return created.After(*edited)
 }
 
 func verdictHandle(r Record, issueUID string) string {

@@ -870,6 +870,9 @@ func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 		return nil, MutationOutput{}, err
 	}
 	result, out, err := h.mutationResult(ctx, project, response.Issue, response.Changed, response.Reused, event)
+	if err != nil {
+		return nil, MutationOutput{}, err
+	}
 	out.Warnings, err = h.scopedVerificationWarnings(ctx, response.Warnings)
 	if err != nil {
 		return nil, MutationOutput{}, err
@@ -1758,19 +1761,9 @@ func (h toolHandlers) scopedVerificationWarnings(ctx context.Context, warnings [
 	if len(warnings) == 0 || h.options.Scope.Mode() == ScopeAll {
 		return warnings, nil
 	}
-	projects, err := h.options.Scope.Projects(ctx, h.options.Client, false)
+	visible, err := h.verificationReferenceFilter(ctx)
 	if err != nil {
 		return nil, err
-	}
-	allowed := map[string]bool{}
-	for _, project := range projects {
-		allowed[project.Name] = true
-	}
-	visible := func(ref string) bool {
-		if project, _, qualified := strings.Cut(ref, "#"); qualified {
-			return allowed[project]
-		}
-		return strings.Contains(ref, ":")
 	}
 	kept := []generated.VerificationWarning{}
 	for _, warning := range warnings {
@@ -1786,4 +1779,23 @@ func (h toolHandlers) scopedVerificationWarnings(ctx context.Context, warnings [
 		}
 	}
 	return kept, nil
+}
+
+// Retained display references are already authorized by the daemon. The MCP
+// broker additionally enforces its fixed startup project identities.
+func (h toolHandlers) verificationReferenceFilter(ctx context.Context) (func(string) bool, error) {
+	projects, err := h.options.Scope.Projects(ctx, h.options.Client, false)
+	if err != nil {
+		return nil, err
+	}
+	allowed := map[string]bool{}
+	for _, project := range projects {
+		allowed[project.Name] = true
+	}
+	return func(ref string) bool {
+		if project, _, qualified := strings.Cut(ref, "#"); qualified {
+			return allowed[project]
+		}
+		return strings.Contains(ref, ":")
+	}, nil
 }

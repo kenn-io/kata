@@ -584,7 +584,10 @@ func closeReasonSchemas() []*jsonschema.Schema {
 		schema *jsonschema.Schema
 		kind   string
 	}{{duplicate, "duplicate-of"}, {superseded, "superseded-by"}} {
-		evidence := item.schema.Properties["evidence"]
+		evidence, ok := item.schema.Properties["evidence"]
+		if !ok || evidence == nil {
+			panic("retirement close schema has no evidence property")
+		}
 		evidence.Contains = evidenceVariant(item.kind)
 		evidence.MinContains = &one
 		evidence.MaxContains = &one

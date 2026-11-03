@@ -45,7 +45,7 @@ func TestMCPVerdictCloseAndWarnings(t *testing.T) {
 				replyKind = "confirm"
 			}
 			reviewIssue := issue
-			if kind == "warning" {
+			if kind == "warning" || kind == "overrule" {
 				reviewIssue, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Author: "reviewer", Title: "Review"})
 				require.NoError(t, err)
 			}
@@ -72,8 +72,18 @@ func TestMCPVerdictCloseAndWarnings(t *testing.T) {
 			require.NoError(t, err)
 			require.False(t, closed.IsError, closed.Content)
 			output := closed.StructuredContent.(map[string]any)
-			if kind == "warning" {
-				require.Contains(t, output, "warnings")
+			if kind == "warning" || kind == "overrule" {
+				if kind == "warning" {
+					require.Contains(t, output, "warnings")
+				}
+				if kind == "overrule" {
+					before, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.audit_closes", Arguments: map[string]any{"until": "2100-01-01T00:00:00Z"}})
+					require.NoError(t, err)
+					require.False(t, before.IsError, before.Content)
+					raw, err := json.Marshal(before.StructuredContent)
+					require.NoError(t, err)
+					require.Contains(t, string(raw), "overruled_refutations", "readable retained overrules must be included before the move")
+				}
 				current, err := store.IssueByID(t.Context(), reviewIssue.ID)
 				require.NoError(t, err)
 				_, err = store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: current.ID, FromProjectID: project.ID, ToProjectID: foreign.ID, IfMatchRev: current.Revision, Actor: "reviewer"})
@@ -85,6 +95,12 @@ func TestMCPVerdictCloseAndWarnings(t *testing.T) {
 				require.NoError(t, err)
 				require.NotContains(t, string(raw), "Independent review")
 				require.NotContains(t, replay.StructuredContent.(map[string]any), "warnings")
+				audit, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.audit_closes", Arguments: map[string]any{"until": "2100-01-01T00:00:00Z"}})
+				require.NoError(t, err)
+				require.False(t, audit.IsError, audit.Content)
+				raw, err = json.Marshal(audit.StructuredContent)
+				require.NoError(t, err)
+				require.NotContains(t, string(raw), foreign.Name+"#", "audit references obey the same startup scope as replay warnings")
 			} else {
 				require.NotContains(t, output, "warnings")
 			}

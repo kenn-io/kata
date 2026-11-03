@@ -1078,6 +1078,16 @@ func scopedEventStillVisible(ctx context.Context, store db.Storage, event db.Eve
 	if event.RelatedIssueID != nil {
 		ids = append(ids, event.RelatedIssueID)
 	}
+	for _, uid := range event.VerificationIssueUIDs {
+		issue, err := store.IssueByUID(ctx, uid, db.IncludeDeletedNo)
+		if errors.Is(err, db.ErrNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, internalAPIError(err)
+		}
+		ids = append(ids, &issue.ID)
+	}
 	for _, issueID := range ids {
 		issue, err := store.IssueByID(ctx, *issueID)
 		if errors.Is(err, db.ErrNotFound) {

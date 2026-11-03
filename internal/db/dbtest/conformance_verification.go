@@ -1,6 +1,8 @@
 package dbtest
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json/jsontext"
 	"testing"
 	"time"
@@ -9,6 +11,38 @@ import (
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
 )
+
+func checkVerificationSameMillisecond(t *testing.T, store db.Storage, backend Backend) error {
+	ctx := t.Context()
+	p, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Author: "worker", Title: "Edited claim"})
+	require.NoError(t, err)
+	claim, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "Completion claim"})
+	require.NoError(t, err)
+	confirmation, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "reviewer", Body: "Confirmed", ReplyToUID: claim.UID, ReplyKind: "confirm"})
+	require.NoError(t, err)
+	// Both stores retain historical millisecond edit stamps. A confirmation
+	// inside that millisecond cannot establish whether it reviewed the edit.
+	anchor := time.Date(2026, 10, 7, 12, 0, 0, 123_000_000, time.UTC)
+	writer := store.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	})
+	_, err = writer.ExecContext(ctx, "UPDATE comments SET edited_at = $1 WHERE id = $2", anchor.Format(time.RFC3339Nano), claim.ID)
+	require.NoError(t, err)
+	for _, offset := range []time.Duration{0, 500 * time.Microsecond, time.Millisecond} {
+		require.NoError(t, backend.BackdateCommentCreated(ctx, store, confirmation.ID, anchor.Add(offset)))
+		graph, err := store.ReadCommentGraph(ctx, db.CommentGraphQuery{ProjectID: p.ID})
+		require.NoError(t, err)
+		rows := make([]commentref.Record, 0, len(graph.Comments))
+		for _, record := range graph.Comments {
+			rows = append(rows, commentref.Record{Comment: record.Comment, IssueUID: record.IssueUID, IssueShortID: record.IssueShortID})
+		}
+		v := commentref.Evaluate(rows, issue.UID, nil)
+		require.Equal(t, offset == time.Millisecond, len(v.Confirmed) == 1)
+	}
+	return nil
+}
 
 // M6: trusted late replication updates live verdicts without reopening the
 // issue or rewriting the evidence accepted by the closing daemon.

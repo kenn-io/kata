@@ -38,9 +38,10 @@ func closeRefusalHint(ctx context.Context, store db.Storage, issue db.Issue, bod
 	case "open_refutations":
 		refusal.Hint += "\nResolve the dispute by superseding the claim or refutation, or by rebutting the refutation."
 		if refs, ok := refusal.Data["refutations"].([]db.OpenRefutation); ok && ValidateCloseInput(body.Reason, body.Message, body.Evidence) == nil {
-			retry := "kata close " + strings.TrimPrefix(command, "kata show ") + " --reason " + shellHintArg(body.Reason) + " --message " + shellHintArg(body.Message)
+			var retry strings.Builder
+			retry.WriteString("kata close " + strings.TrimPrefix(command, "kata show ") + " --reason " + shellHintArg(body.Reason) + " --message " + shellHintArg(body.Message))
 			if body.DryRun {
-				retry += " --dry"
+				retry.WriteString(" --dry")
 			}
 			for _, e := range body.Evidence {
 				values := []string{}
@@ -63,16 +64,16 @@ func closeRefusalHint(ctx context.Context, store db.Storage, issue db.Issue, bod
 					values = []string{e.IssueRef}
 				}
 				for _, value := range values {
-					retry += " --evidence " + shellHintArg(string(e.Type)+":"+value)
+					retry.WriteString(" --evidence " + shellHintArg(string(e.Type)+":"+value))
 				}
 			}
 			for _, ref := range body.Overrule {
-				retry += " --overrule " + shellHintArg(ref)
+				retry.WriteString(" --overrule " + shellHintArg(ref))
 			}
 			for _, ref := range refs {
-				retry += " --overrule " + shellHintArg(ref.Refutation)
+				retry.WriteString(" --overrule " + shellHintArg(ref.Refutation))
 			}
-			refusal.Hint += "\nTo deliberately overrule the listed disputes while keeping this message and evidence:\n" + retry
+			refusal.Hint += "\nTo deliberately overrule the listed disputes while keeping this message and evidence:\n" + retry.String()
 		}
 	}
 	return refusal

@@ -464,6 +464,8 @@ type Event struct {
 	HLCCounter          int64     `json:"hlc_counter"`
 	ContentHash         string    `json:"content_hash"`
 	CreatedAt           time.Time `json:"created_at"`
+	// Response-only dependencies rechecked before sending projected SSE frames.
+	VerificationIssueUIDs []string `json:"-"`
 }
 
 // RemoteEvent is the portable event shape accepted from a federation hub.

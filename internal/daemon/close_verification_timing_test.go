@@ -25,7 +25,7 @@ type lateCloseVerdictStore struct {
 func (s *lateCloseVerdictStore) CloseIssueGuarded(ctx context.Context, p db.CloseIssueParams) (db.Issue, []db.Event, bool, error) {
 	if !s.inserted {
 		s.inserted = true
-		if _, _, err := s.Storage.CreateComment(ctx, db.CreateCommentParams{IssueID: s.issueID, Author: "late-reviewer", Body: "A late refutation arrived after the preflight snapshot.", ReplyToUID: s.target, ReplyKind: "refute"}); err != nil {
+		if _, _, err := s.CreateComment(ctx, db.CreateCommentParams{IssueID: s.issueID, Author: "late-reviewer", Body: "A late refutation arrived after the preflight snapshot.", ReplyToUID: s.target, ReplyKind: "refute"}); err != nil {
 			return db.Issue{}, nil, false, err
 		}
 	}
