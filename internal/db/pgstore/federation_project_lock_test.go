@@ -75,3 +75,75 @@ func TestFederationProjectAdvisoryLockCoordinatesStores(t *testing.T) {
 		t.Fatal("shared project lock did not acquire after exclusive lock release")
 	}
 }
+
+func TestFederationProjectTrySharedLock(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
+	t.Cleanup(cleanup)
+	first, err := pgstore.Open(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, first.Close()) })
+	second, err := pgstore.Open(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, second.Close()) })
+	try, ok := any(second).(interface {
+		TryAcquireFederationProjectSharedLock(context.Context, int64) (func(), bool, error)
+	})
+	require.True(t, ok, "interactive transport must support nonblocking backend coordination")
+	release, err := first.AcquireFederationProjectExclusiveLock(ctx, 42)
+	require.NoError(t, err)
+	start := time.Now()
+	_, acquired, err := try.TryAcquireFederationProjectSharedLock(ctx, 42)
+	require.NoError(t, err)
+	require.False(t, acquired)
+	require.Less(t, time.Since(start), time.Second)
+	release()
+	a, acquired, err := try.TryAcquireFederationProjectSharedLock(ctx, 42)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	defer a()
+	b, acquired, err := try.TryAcquireFederationProjectSharedLock(ctx, 42)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	b()
+	b()
+}
+
+func TestFederationProjectTrySharedLockReturnsBusyWhenPoolIsFull(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
+	t.Cleanup(cleanup)
+	store, err := pgstore.Open(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+
+	// federationLockMaxOpenConns is 25. Hold every coordinator connection so
+	// the try path cannot borrow one for pg_try_advisory_xact_lock_shared.
+	const poolCapacity = 25
+	releases := make([]func(), 0, poolCapacity)
+	defer func() {
+		for _, release := range releases {
+			release()
+		}
+	}()
+	for i := range poolCapacity {
+		release, err := store.AcquireFederationProjectSharedLock(ctx, int64(1_000+i))
+		require.NoError(t, err)
+		releases = append(releases, release)
+	}
+
+	start := time.Now()
+	_, acquired, err := store.TryAcquireFederationProjectSharedLock(ctx, 2_000)
+	require.NoError(t, err)
+	require.False(t, acquired)
+	require.Less(t, time.Since(start), time.Second)
+
+	releases[0]()
+	releases = releases[1:]
+	release, acquired, err := store.TryAcquireFederationProjectSharedLock(ctx, 2_000)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	release()
+}
