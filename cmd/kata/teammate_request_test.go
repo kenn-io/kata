@@ -62,7 +62,7 @@ func TestTeammateInterruptedCloseContribution(t *testing.T) {
 				var payload map[string]any
 				require.NoError(t, json.Unmarshal([]byte(event.Payload), &payload))
 				if original == "" {
-					require.NotContains(t, payload, "attributed_teammate")
+					require.Equal(t, "", payload["attributed_teammate"])
 				} else {
 					require.Equal(t, original, payload["attributed_teammate"])
 				}

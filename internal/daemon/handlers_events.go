@@ -525,6 +525,8 @@ func scopedEventPayload(event db.Event) (string, bool) {
 		var handle string
 		if json.Unmarshal(value, &handle) == nil && handle != "" && teammate.Validate(handle) == nil {
 			projected["attributed_teammate"] = value
+		} else {
+			projected["attributed_teammate"] = jsontext.Value(`""`)
 		}
 	}
 	if event.Type == "issue.links_changed" && len(projected) == 0 {
