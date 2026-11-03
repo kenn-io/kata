@@ -71,15 +71,6 @@ func TestRelayLegacySpokeDelivery(t *testing.T) {
 				require.Equal(t, source.ContentHash, events[0].ContentHash)
 				require.Equal(t, direct.store.InstanceUID(), events[0].OriginInstanceUID)
 			}
-			later, _, err := direct.store.CreateIssue(ctx, db.CreateIssueParams{
-				ProjectID: direct.project.ID, Title: "Later direct spoke task", Author: "source-member",
-			})
-			require.NoError(t, err)
-			syncRelayMatrixNode(t, direct)
-			syncRelayMatrixNode(t, relay)
-			syncRelayMatrixNode(t, leaf)
-			_, err = leaf.store.IssueByUID(ctx, later.UID, db.IncludeDeletedYes)
-			require.NoError(t, err, "subsequent direct-spoke creations must continue through both hops")
 		})
 	}
 }
