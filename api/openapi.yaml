@@ -3996,9 +3996,6 @@ components:
           type: integer
         path:
           type: string
-        reuse_existing:
-          description: When true, return the smallest existing attachment ID for this resolved Docbank version, or create a reference if none exists.
-          type: boolean
         version_id:
           format: uuid
           type: string
@@ -7238,7 +7235,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.39.0
+  version: 0.38.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:

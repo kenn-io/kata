@@ -6,7 +6,5 @@ export interface LinkAttachmentInput {
   actor?: string
   node_id?: number
   path?: string
-  /** When true, return the smallest existing attachment ID for this resolved Docbank version, or create a reference if none exists. */
-  reuse_existing?: boolean
   version_id?: string
 }

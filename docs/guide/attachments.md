@@ -52,7 +52,7 @@ Choose one positive node ID or an absolute Docbank path. The link pins the curre
 
 Linking requires daemon API 0.38.0 or newer.
 
-Kata refuses directories, trashed files, versions belonging to another node, and file names that fail the same rules as uploads. Names must be valid UTF-8, contain 1 to 255 bytes, and contain no `/`, `\`, or control characters. The names `.` and `..` are invalid. A missing Docbank file or version returns 404 `docbank_not_found`. A trashed node returns 410 `attachment_content_missing`. Each link adds a new reference by default, even when that version is already attached. API clients on daemons that support API 0.39.0 or newer can set `reuse_existing` to return the smallest existing attachment ID for the selected version, or create one if no reference exists. Remove extra references with `rm`.
+Kata refuses directories, trashed files, versions belonging to another node, and file names that fail the same rules as uploads. Names must be valid UTF-8, contain 1 to 255 bytes, and contain no `/`, `\`, or control characters. The names `.` and `..` are invalid. A missing Docbank file or version returns 404 `docbank_not_found`. A trashed node returns 410 `attachment_content_missing`. Each link adds a new reference, like `add`, even when that version is already attached. Remove extra references with `rm`.
 
 The saved name and size come from link time. Later changes in Docbank leave the reference pinned to the selected version.
 

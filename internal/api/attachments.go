@@ -31,11 +31,10 @@ type AddAttachmentResponse struct {
 
 // LinkAttachmentInput selects an existing Docbank file version.
 type LinkAttachmentInput struct {
-	NodeID        *int64     `json:"node_id,omitempty"`
-	Path          *string    `json:"path,omitempty"`
-	VersionID     *uuid.UUID `json:"version_id,omitempty"`
-	Actor         string     `json:"actor,omitempty"`
-	ReuseExisting bool       `json:"reuse_existing,omitempty" doc:"When true, return the smallest existing attachment ID for this resolved Docbank version, or create a reference if none exists."`
+	NodeID    *int64     `json:"node_id,omitempty"`
+	Path      *string    `json:"path,omitempty"`
+	VersionID *uuid.UUID `json:"version_id,omitempty"`
+	Actor     string     `json:"actor,omitempty"`
 }
 
 type LinkAttachmentRequest struct {
