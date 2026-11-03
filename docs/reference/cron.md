@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-10-31
+last_edited: 2026-11-03
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -293,7 +293,10 @@ with `--daemon <hub-name>`. An older hub must be upgraded to advertise native
 cron authoring; `cron_v1` alone does not advertise that capability.
 
 The returned `definition_event_uid` can immediately authorize the next update
-or lifecycle action, even before pull. Local `show` and `list` catch up through
+or lifecycle action, even before pull. One exception: when the hub converted an
+adapter job to native and the spoke has not pulled that change yet, the spoke
+still routes delete and restore for that job locally and reports a conflict.
+Wait for the next pull, or run the action against the hub. Local `show` and `list` catch up through
 normal replication. Forwarded jobs report the local project ID and zero job
 `id` and `revision` until a local projection exists; response events are omitted.
 A lost write response means the outcome may be unknown. Inspect the job on the
