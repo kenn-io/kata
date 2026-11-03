@@ -14,6 +14,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"go.kenn.io/kata/internal/commentref"
+	"go.kenn.io/kata/internal/mcpicon"
 	"go.kenn.io/kata/internal/notification"
 	"go.kenn.io/kata/internal/storageadmin"
 	"go.kenn.io/kata/internal/teammate"
@@ -108,6 +109,10 @@ func New(options Options) (*sdkmcp.Server, error) {
 		Title:       "Kata issue tracker",
 		Description: "Scoped Kata data and administration tools for coding agents.",
 		Version:     options.Version,
+		WebsiteURL:  "https://katatracker.com",
+		Icons: []sdkmcp.Icon{{
+			Source: mcpicon.Source, MIMEType: "image/png", Sizes: []string{"256x256"},
+		}},
 	}, &sdkmcp.ServerOptions{
 		Instructions: "Use returned web_url values when linking to issues. Use Kata to search before creating work, claim actionable issues, record progress, and close only with evidence. All tools are fixed to " + scopeDescription + " and actor " + options.Actor + `. Call kata.skills with {"name":"workflow"} before your first write; call it with no arguments to list the other guides.`,
 		Capabilities: &sdkmcp.ServerCapabilities{
