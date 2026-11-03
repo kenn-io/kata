@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-31
+last_edited: 2026-11-03
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,6 +9,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Load the web UI's issue list and graph on SQLite and PostgreSQL stores with
+  tens of thousands of issues without exceeding SQL parameter limits.
 - Keep the browser reachable when `kata daemon restart` runs from a sandbox or
   container that sees the daemon's process IDs and executable paths. The daemon
   uses the CLI's installed executable with its own environment and idle policy.

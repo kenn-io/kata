@@ -929,20 +929,14 @@ func readUIGraphLinks(ctx context.Context, tx *sql.Tx, issues []db.UIIssue) ([]d
 	if len(issues) == 0 {
 		return []db.UILink{}, nil
 	}
-	args := make([]any, 0, len(issues)*2)
-	fromPlaceholders := make([]string, len(issues))
-	toPlaceholders := make([]string, len(issues))
-	for idx, issue := range issues {
-		args = append(args, issue.ID)
-		fromPlaceholders[idx] = fmt.Sprintf("$%d", len(args))
+	ids := make([]int64, 0, len(issues))
+	for _, issue := range issues {
+		ids = append(ids, issue.ID)
 	}
-	for idx, issue := range issues {
-		args = append(args, issue.ID)
-		toPlaceholders[idx] = fmt.Sprintf("$%d", len(args))
-	}
-	rows, err := tx.QueryContext(ctx, linkSelect+` WHERE from_issue_id IN (`+
-		strings.Join(fromPlaceholders, ",")+`) AND to_issue_id IN (`+
-		strings.Join(toPlaceholders, ",")+`) ORDER BY id`, args...)
+	args := make([]any, 0, 2)
+	fromSet := uiPostgresIssueAllowlist(&args, "from_issue_id", ids)
+	toSet := uiPostgresIssueAllowlist(&args, "to_issue_id", ids)
+	rows, err := tx.QueryContext(ctx, linkSelect+` WHERE `+fromSet+` AND `+toSet+` ORDER BY id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read UI graph links: %w", mapSQLError(err, nil))
 	}
@@ -963,21 +957,15 @@ func readUIGraphUnresolved(
 		return []db.UIGraphEdge{}, []db.UIGraphUnresolvedRef{}, nil
 	}
 	visible := make(map[int64]struct{}, len(issues))
-	args := make([]any, 0, len(issues)*2)
-	fromPlaceholders := make([]string, len(issues))
-	toPlaceholders := make([]string, len(issues))
-	for idx, issue := range issues {
+	ids := make([]int64, 0, len(issues))
+	for _, issue := range issues {
 		visible[issue.ID] = struct{}{}
-		args = append(args, issue.ID)
-		fromPlaceholders[idx] = fmt.Sprintf("$%d", len(args))
+		ids = append(ids, issue.ID)
 	}
-	for idx, issue := range issues {
-		args = append(args, issue.ID)
-		toPlaceholders[idx] = fmt.Sprintf("$%d", len(args))
-	}
-	rows, err := tx.QueryContext(ctx, linkSelect+` WHERE from_issue_id IN (`+
-		strings.Join(fromPlaceholders, ",")+`) OR to_issue_id IN (`+
-		strings.Join(toPlaceholders, ",")+`) ORDER BY id`, args...)
+	args := make([]any, 0, 2)
+	fromSet := uiPostgresIssueAllowlist(&args, "from_issue_id", ids)
+	toSet := uiPostgresIssueAllowlist(&args, "to_issue_id", ids)
+	rows, err := tx.QueryContext(ctx, linkSelect+` WHERE `+fromSet+` OR `+toSet+` ORDER BY id`, args...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read unresolved UI graph links: %w", mapSQLError(err, nil))
 	}
@@ -1026,22 +1014,16 @@ func readUICollectionLinks(
 	if len(issues) == 0 {
 		return []db.UILink{}, nil
 	}
-	args := make([]any, 0, len(issues)*2)
-	fromPlaceholders := make([]string, len(issues))
-	toPlaceholders := make([]string, len(issues))
-	for idx, issue := range issues {
-		args = append(args, issue.ID)
-		fromPlaceholders[idx] = fmt.Sprintf("$%d", len(args))
+	ids := make([]int64, 0, len(issues))
+	for _, issue := range issues {
+		ids = append(ids, issue.ID)
 	}
-	for idx, issue := range issues {
-		args = append(args, issue.ID)
-		toPlaceholders[idx] = fmt.Sprintf("$%d", len(args))
-	}
-	statement := uiLinkSelect + ` WHERE (l.from_issue_id IN (` +
-		strings.Join(fromPlaceholders, ",") + `) OR l.to_issue_id IN (` +
-		strings.Join(toPlaceholders, ",") + `))
+	args := make([]any, 0, 2)
+	fromSet := uiPostgresIssueAllowlist(&args, "l.from_issue_id", ids)
+	toSet := uiPostgresIssueAllowlist(&args, "l.to_issue_id", ids)
+	statement := uiLinkSelect + ` WHERE (` + fromSet + ` OR ` + toSet + `)
 		AND fi.deleted_at IS NULL AND fp.deleted_at IS NULL
-		AND ti.deleted_at IS NULL AND tp.deleted_at IS NULL` // #nosec G202 -- the dynamic fragments contain only generated $N placeholders; issue IDs stay bound.
+		AND ti.deleted_at IS NULL AND tp.deleted_at IS NULL` // #nosec G202 -- endpoint predicates use fixed column names and bound issue ID sets.
 	if allow := uiPostgresIssueAllowlist(&args, `l.from_issue_id`, allowedIssueIDs); allow != "" {
 		statement += ` AND ` + allow
 	}
