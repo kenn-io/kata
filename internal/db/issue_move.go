@@ -272,8 +272,11 @@ func MovedIssueUID(ctx context.Context, q interface {
 		return "", err
 	}
 	var uid string
+	// A reset can preserve a receiver-local short ID that differs from the
+	// signed move's from_short_id, so either reference may select the move.
 	err = q.QueryRowContext(ctx, `SELECT e.issue_uid FROM events e`+resetJoin+`
- WHERE e.type='issue.moved' AND `+fromProject+`=$3 AND `+moveMatch+`
+	 WHERE e.type='issue.moved' AND `+fromProject+`=$3
+	 AND (`+moveMatch+` OR reset.id IS NOT NULL)
  AND EXISTS (SELECT 1 FROM issues WHERE uid=e.issue_uid)
  AND NOT EXISTS (SELECT 1 FROM issues WHERE project_id=$1 AND short_id=$2)
  AND NOT EXISTS (SELECT 1 FROM purge_log WHERE project_id=$1 AND short_id=$2)
