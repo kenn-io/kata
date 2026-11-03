@@ -963,7 +963,9 @@ func readUIGraphLinks(ctx context.Context, tx *sql.Tx, issues []db.UIIssue) ([]d
 		ids = append(ids, issue.ID)
 	}
 	fromSet, fromSetArgs := uiSQLiteIssueAllowlist("from_issue_id", ids)
-	toSet, toSetArgs := uiSQLiteIssueAllowlist("to_issue_id", ids)
+	// Use the destination as a filter so SQLite doesn't probe the composite
+	// index for every pair of issue IDs. Both operands remain integers.
+	toSet, toSetArgs := uiSQLiteIssueAllowlist("+to_issue_id", ids)
 	args := append(fromSetArgs, toSetArgs...)
 	rows, err := tx.QueryContext(ctx, linkSelect+` WHERE `+fromSet+` AND `+toSet+` ORDER BY id`, args...)
 	if err != nil {
