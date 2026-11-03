@@ -63,12 +63,6 @@ func TryBeginSync(ctx context.Context, key string, backend any, projectID int64)
 			return nil, ErrBusy
 		}
 		backendRelease = release
-	} else if _, ok := backend.(interface {
-		AcquireFederationProjectSharedLock(context.Context, int64) (func(), error)
-	}); ok {
-		// A backend with only blocking admission cannot satisfy interactive writes.
-		gate.RUnlock()
-		return nil, ErrBusy
 	}
 	return coordinatedRelease(backendRelease, gate.RUnlock), nil
 }
