@@ -841,7 +841,7 @@ func TestReopenBacklogAnswerAfterHelpIsDropped(t *testing.T) {
 // The confirmation's keys must stay on screen however short the terminal is.
 func TestReopenBacklogActionsVisibleOnShortTerminals(t *testing.T) {
 	for _, origin := range []string{"list", "detail"} {
-		for _, size := range [][2]int{{100, 8}, {100, 5}, {200, 6}, {60, 8}} {
+		for _, size := range [][2]int{{100, 8}, {100, 5}, {100, 3}, {100, 2}, {200, 6}, {60, 8}} {
 			t.Run(fmt.Sprintf("%s/%dx%d", origin, size[0], size[1]), func(t *testing.T) {
 				spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
 				model := listReopenModel
@@ -854,6 +854,7 @@ func TestReopenBacklogActionsVisibleOnShortTerminals(t *testing.T) {
 				view := stripANSI(m.View().Content)
 				require.LessOrEqual(t, len(strings.Split(view, "\n")), size[1])
 				require.Contains(t, view, "Reopen #abcd?")
+				require.Contains(t, view, "3 recurring child", "the backlog being confirmed stays on screen")
 				require.Contains(t, view, "y reopen")
 				require.Contains(t, view, "n/esc cancel")
 

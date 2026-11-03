@@ -152,9 +152,30 @@ func (m Model) overlayReopenBacklog(body string) string {
 	bodyHeight := max(0, m.height-lipgloss.Height(footer))
 	lines := strings.Split(body, "\n")
 	body = strings.Join(lines[:min(bodyHeight, len(lines))], "\n")
-	body = overlayModal(body, renderReopenBacklogModal(m.reopenPrompt), m.width, bodyHeight)
+	body = overlayModal(body, fitReopenBacklogModal(m.reopenPrompt, m.width, bodyHeight), m.width, bodyHeight)
 	lines = strings.Split(body, "\n")
 	return joinNonEmpty([]string{strings.Join(lines[:min(bodyHeight, len(lines))], "\n"), footer})
+}
+
+// fitReopenBacklogModal returns the full confirmation when it fits in height
+// rows, else a compact one that drops padding, then the border, before it drops
+// the target or the backlog it warns about.
+func fitReopenBacklogModal(prompt *reopenPrompt, width, height int) string {
+	if prompt == nil {
+		return ""
+	}
+	if full := renderReopenBacklogModal(prompt); lipgloss.Height(full) <= height {
+		return full
+	}
+	lines := []string{
+		fmt.Sprintf("Reopen %s? It delivers %d recurring child issues.", sanitizeForLine(prompt.ref), prompt.count),
+		"Missed runs: `kata cron job update`.",
+	}
+	if height >= len(lines)+2 {
+		return modalBoxStyle.Padding(0, 1).MaxWidth(max(width, 1)).Render(strings.Join(lines, "\n"))
+	}
+	lines = lines[:min(max(height, 1), len(lines))]
+	return lipgloss.NewStyle().MaxWidth(max(width, 1)).Render(strings.Join(lines, "\n"))
 }
 
 func renderReopenBacklogModal(prompt *reopenPrompt) string {
