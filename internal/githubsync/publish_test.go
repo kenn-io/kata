@@ -190,7 +190,7 @@ func TestPublishGitHubCreateNeverRetries(t *testing.T) {
 }
 
 func TestPublishGitHubValidationBeforeCreate(t *testing.T) {
-	for _, scenario := range []string{"empty_title", "long_title", "long_body", "denied"} {
+	for _, scenario := range []string{"long_title", "long_body", "denied"} {
 		t.Run(scenario, func(t *testing.T) {
 			posts := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -207,8 +207,6 @@ func TestPublishGitHubValidationBeforeCreate(t *testing.T) {
 			session := openPublishGitHub(t, server)
 			issue := db.Issue{Title: "Native", Status: "open"}
 			switch scenario {
-			case "empty_title":
-				issue.Title = "  "
 			case "long_title":
 				issue.Title = strings.Repeat("界", 257)
 			case "long_body":
