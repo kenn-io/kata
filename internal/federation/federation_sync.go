@@ -263,6 +263,18 @@ func PushDirectSpoke(ctx context.Context, store db.Storage, binding db.Federatio
 	return pushDirectSpoke(ctx, store, &binding, hubProjectID, client, nil)
 }
 
+// DirectSpokePushPending returns the daemon hook that drains a direct spoke's
+// pending events to its hub with the stored credential.
+func DirectSpokePushPending(store db.Storage) func(context.Context, db.FederationBinding, config.FederationCredential) error {
+	return func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
+		client, err := NewClient(ctx, credential.HubURL, credential.Token, clientpkg.Opts{AllowInsecure: credential.AllowInsecure, FederationSigning: credential.Signing})
+		if err != nil {
+			return err
+		}
+		return PushDirectSpoke(ctx, store, binding, credential.HubProjectID, client)
+	}
+}
+
 func syncDirectSpoke(
 	ctx context.Context,
 	store db.Storage,

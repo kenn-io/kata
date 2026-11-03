@@ -19,7 +19,6 @@ import (
 	"sync"
 	"time"
 
-	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
@@ -459,13 +458,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		Broadcaster:           broadcaster,
 		FederationWake:        wakeFederation,
 		FederationCredentials: federationCredentials,
-		FederationPushPending: func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
-			client, err := federation.NewClient(ctx, credential.HubURL, credential.Token, clientpkg.Opts{AllowInsecure: credential.AllowInsecure, FederationSigning: credential.Signing})
-			if err != nil {
-				return err
-			}
-			return federation.PushDirectSpoke(ctx, store, binding, credential.HubProjectID, client)
-		},
+		FederationPushPending: federation.DirectSpokePushPending(store),
 		DisableFederationRebind:   true,
 		GitHubSyncFetcher:         gitHubSyncFetcher,
 		GitHubSyncProgress:        gitHubSyncProgress,
