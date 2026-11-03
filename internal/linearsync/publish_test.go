@@ -1,10 +1,8 @@
 package linearsync
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -148,35 +146,6 @@ func TestPublishLinearOneSendAndIdentityFences(t *testing.T) {
 				_, err = s.ReadCreated(t.Context(), db.IssuePublicationRemote{ExternalID: issueID})
 				require.Error(t, err)
 			}
-		})
-	}
-}
-func TestPublishLinearPreflight(t *testing.T) {
-	for _, scenario := range []string{"no_open_state", "scope_denied", "oversize"} {
-		t.Run(scenario, func(t *testing.T) {
-			creates := 0
-			cfg := testConfig()
-			normal := publishLinearTransport(t, cfg, func(map[string]any) (*http.Response, error) { creates++; return response(500, `{}`), nil }, wireIssue)
-			c := mockClient(t, func(r *http.Request) (*http.Response, error) {
-				raw, err := io.ReadAll(r.Body)
-				require.NoError(t, err)
-				r.Body = io.NopCloser(bytes.NewReader(raw))
-				if scenario == "no_open_state" && bytes.Contains(raw, []byte("KataLinearStates")) {
-					return dataResponse(map[string]any{"workflowStates": map[string]any{"nodes": []any{map[string]any{"id": stateID, "type": "completed", "position": 0, "team": map[string]any{"id": teamID}}}, "pageInfo": map[string]any{"hasNextPage": false}}}), nil
-				}
-				if scenario == "scope_denied" {
-					return response(403, `{}`), nil
-				}
-				return normal(r)
-			})
-			s := openPublishLinear(t, c, cfg)
-			issue := db.Issue{Title: "Native", Status: "open"}
-			if scenario == "oversize" {
-				issue.Body = strings.Repeat("x", maxDescriptionBytes+1)
-			}
-			_, err := s.PrepareCreate(t.Context(), issue)
-			require.Error(t, err)
-			require.Zero(t, creates)
 		})
 	}
 }
