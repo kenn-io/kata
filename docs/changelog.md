@@ -86,6 +86,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   inherits its `KATA_REF`, and reaches the same daemon, so the child no longer
   marks the lead's issue as needing a human. Rerun
   `kata agent-hook install pi` and restart pi to pick up the fix.
+- MCP clients can call `kata.skills` to list and read Kata's agent workflow
+  guides (searching first, claiming, attention, closing with evidence,
+  teammates, scheduling and events), each built from the same text
+  `kata quickstart` prints. See [Agent guides](reference/mcp.md#agent-guides-kataskills).
 
 - List the daemon catalog from Go with `client.DaemonCatalog()`, and connect
   to an entry by name with `client.DiscoverOptions{Daemon: name}`, which

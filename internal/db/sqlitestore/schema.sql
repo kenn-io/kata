@@ -221,6 +221,7 @@ CREATE INDEX idx_events_issue   ON events(issue_id, id) WHERE issue_id IS NOT NU
 CREATE INDEX idx_events_related ON events(related_issue_id, id) WHERE related_issue_id IS NOT NULL;
 CREATE INDEX idx_events_issue_uid ON events(issue_uid) WHERE issue_uid IS NOT NULL;
 CREATE INDEX idx_events_moved_from ON events(json_extract(payload, '$.from_project_uid'), json_extract(payload, '$.from_short_id')) WHERE type = 'issue.moved';
+CREATE INDEX idx_events_reply_to ON events(json_extract(payload, '$.reply_to_uid')) WHERE type = 'issue.commented' AND json_extract(payload, '$.reply_to_uid') IS NOT NULL;
 CREATE INDEX idx_events_related_issue_uid ON events(related_issue_uid) WHERE related_issue_uid IS NOT NULL;
 CREATE INDEX idx_events_origin_instance ON events(origin_instance_uid);
 CREATE INDEX idx_events_origin_project_id

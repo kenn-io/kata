@@ -12,10 +12,11 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-// dropEventMoveHistoryIndex returns a schema to its pre-35 index set. Every
-// older-version fixture needs it because fresh schemas include the index.
+// dropEventMoveHistoryIndex removes the move history and reply target indexes.
+// Older-version fixtures need it because fresh schemas include both indexes.
 func dropEventMoveHistoryIndex(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
+	dropEventReplyTargetIndex(ctx, t, admin, schema)
 	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %s.idx_events_moved_from`, schema)) // #nosec G201 -- fixed test schema.
 	require.NoError(t, err)
 }
