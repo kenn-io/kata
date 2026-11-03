@@ -36,7 +36,11 @@ func newIssuePublishCmd(provider string) *cobra.Command {
 			return err
 		}
 		actor, _ := resolveActor(ctx, flags.As, nil)
-		response, callErr := client.PublishIssueWithResponse(ctx, &generated.PublishIssueRequestOptions{PathParams: &generated.PublishIssuePath{ProjectID: pid, Provider: provider}, Body: &generated.PublishIssueBody{IssueRef: ref.RefForAPI, Actor: &actor, Adopt: &adopt, ResolveNotCreated: &resolve, Attempt: &attempt, Message: &message}})
+		var adoptArg *string
+		if cmd.Flags().Changed("adopt") {
+			adoptArg = &adopt
+		}
+		response, callErr := client.PublishIssueWithResponse(ctx, &generated.PublishIssueRequestOptions{PathParams: &generated.PublishIssuePath{ProjectID: pid, Provider: provider}, Body: &generated.PublishIssueBody{IssueRef: ref.RefForAPI, Actor: &actor, Adopt: adoptArg, ResolveNotCreated: &resolve, Attempt: &attempt, Message: &message}})
 		if err := externalCLITransportError(response, callErr); err != nil {
 			return err
 		}

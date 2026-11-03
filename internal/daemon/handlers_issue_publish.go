@@ -29,7 +29,7 @@ func registerIssuePublishHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		b := in.Body
-		if (b.Adopt != "" && b.ResolveNotCreated) || (b.ResolveNotCreated && (strings.TrimSpace(b.Attempt) == "" || strings.TrimSpace(b.Message) == "")) || (!b.ResolveNotCreated && (b.Attempt != "" || b.Message != "")) {
+		if (b.Adopt != nil && strings.TrimSpace(*b.Adopt) == "") || (b.Adopt != nil && b.ResolveNotCreated) || (b.ResolveNotCreated && (strings.TrimSpace(b.Attempt) == "" || strings.TrimSpace(b.Message) == "")) || (!b.ResolveNotCreated && (b.Attempt != "" || b.Message != "")) {
 			return nil, api.NewError(http.StatusBadRequest, "invalid_publish_request", "use --adopt or --resolve-not-created; resolution requires --attempt and --message", "", nil)
 		}
 		actor, err := attributedActor(ctx, b.Actor)
@@ -47,7 +47,11 @@ func registerIssuePublishHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		publisher := issuesync.NewPublisher(issuesync.PublisherConfig{Store: cfg.DB, Adapter: issuePublishAdapter(cfg, provider), EventSink: githubSyncEventSink(cfg)})
-		result, err := publisher.Publish(ctx, issuesync.PublishRequest{ProjectID: in.ProjectID, IssueID: issue.ID, Provider: provider, Actor: actor, Adopt: b.Adopt, ResolveNotCreated: b.ResolveNotCreated, AttemptUID: b.Attempt, Message: b.Message})
+		adopt := ""
+		if b.Adopt != nil {
+			adopt = *b.Adopt
+		}
+		result, err := publisher.Publish(ctx, issuesync.PublishRequest{ProjectID: in.ProjectID, IssueID: issue.ID, Provider: provider, Actor: actor, Adopt: adopt, ResolveNotCreated: b.ResolveNotCreated, AttemptUID: b.Attempt, Message: b.Message})
 		if err != nil {
 			return nil, issuePublishError(err, provider)
 		}

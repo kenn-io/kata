@@ -180,6 +180,41 @@ func TestIssuePublishCreateAndDisabledAdoptionThroughRealAdapter(t *testing.T) {
 	}
 }
 
+func TestIssuePublishRejectsExplicitEmptyAdoptionBeforeProvider(t *testing.T) {
+	requests := 0
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.URL.Path == "/repos/example-owner/example-repo" {
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"id": 123, "node_id": "R_example", "full_name": "example-owner/example-repo", "has_issues": true, "archived": false}))
+			return
+		}
+		if r.URL.Path == "/repos/example-owner/example-repo/issues" && r.Method == http.MethodPost {
+			require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"id": 456, "node_id": "I_example", "number": 7, "url": "https://api.github.com/repos/example-owner/example-repo/issues/7", "html_url": "https://github.com/example-owner/example-repo/issues/7", "title": "Native issue", "body": "Exact body", "state": "open", "created_at": "2026-09-01T00:00:00Z", "updated_at": "2026-09-02T00:00:00Z"}))
+			return
+		}
+		t.Errorf("unexpected provider request %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer remote.Close()
+	h := newGitHubSyncHandlerHarnessWithOpts(t, gitHubSyncHarnessOpts{omitFetcher: true, fetcherFactory: func(config.GitHubSyncConfig) githubsync.Fetcher {
+		return githubsync.NewHTTPFetcher(githubsync.HTTPFetcherConfig{Client: remote.Client(), RESTBaseURLOverride: remote.URL, CredentialResolver: publishTestTransportResolver{}})
+	}})
+	raw, err := githubsync.EncodeConfig(githubsync.Config{Host: "github.com", Owner: "example-owner", Repo: "example-repo", RepoID: 123})
+	require.NoError(t, err)
+	_, err = h.store.UpsertIssueSyncBinding(t.Context(), db.UpsertIssueSyncBindingParams{ProjectID: h.project.ID, Provider: "github", SourceKey: "github:R_example", RemoteID: "R_example", DisplayName: "Example source", Config: raw, IntervalSeconds: 300})
+	require.NoError(t, err)
+	i, _, err := h.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: h.project.ID, Title: "Native issue", Body: "Exact body", Author: "worker"})
+	require.NoError(t, err)
+	resp, body := postJSON(t, h.server, issueSyncEndpoint(h.project.ID, "github", "publish"), map[string]any{"issue_ref": i.ShortID, "actor": "worker", "adopt": ""})
+	assertAPIError(t, resp.StatusCode, body, http.StatusBadRequest, "invalid_publish_request")
+	require.Zero(t, requests, "an invalid adoption identity must not contact the provider")
+	publication, ok := h.store.(db.IssuePublicationStore)
+	require.True(t, ok)
+	pending, err := publication.PendingIssuePublication(t.Context(), h.project.ID)
+	require.NoError(t, err)
+	require.Nil(t, pending, "an invalid adoption identity must not create a publication attempt")
+}
+
 func TestIssuePublishRejectsSpokeAndArchivedProject(t *testing.T) {
 	for _, kind := range []string{"spoke", "archived"} {
 		t.Run(kind, func(t *testing.T) {

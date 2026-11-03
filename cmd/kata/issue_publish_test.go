@@ -53,6 +53,7 @@ func TestIssuePublishCLI(t *testing.T) {
 					require.NoError(t, json.NewDecoder(r.Body).Decode(&b))
 					require.Equal(t, "abc4", b["issue_ref"])
 					require.NotEmpty(t, b["actor"])
+					require.NotContains(t, b, "adopt")
 					require.NoError(t, json.NewEncoder(w).Encode(map[string]any{"provider": p, "issue_uid": "example-uid", "issue_ref": "abc4", "source_key": p + ":source", "external_id": "native:42", "result": "created", "url": "https://tracker.example/task/42"}))
 				})
 				args := []string{"sync", p, "publish", "abc4"}

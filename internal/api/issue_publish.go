@@ -9,12 +9,12 @@ type PublishIssueRequest struct {
 
 // PublishIssueRequestBody selects the native issue and explicit recovery action.
 type PublishIssueRequestBody struct {
-	IssueRef          string `json:"issue_ref" minLength:"1"`
-	Actor             string `json:"actor,omitempty"`
-	Adopt             string `json:"adopt,omitempty"`
-	ResolveNotCreated bool   `json:"resolve_not_created,omitempty"`
-	Attempt           string `json:"attempt,omitempty"`
-	Message           string `json:"message,omitempty"`
+	IssueRef          string  `json:"issue_ref" minLength:"1"`
+	Actor             string  `json:"actor,omitempty"`
+	Adopt             *string `json:"adopt,omitempty"`
+	ResolveNotCreated bool    `json:"resolve_not_created,omitempty"`
+	Attempt           string  `json:"attempt,omitempty"`
+	Message           string  `json:"message,omitempty"`
 }
 
 // PublishIssueResponse wraps the publication identity returned to a client.

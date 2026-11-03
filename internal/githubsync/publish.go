@@ -139,7 +139,7 @@ func (s *githubPublishSession) observation(wire statusIssue, id int64, number in
 		return remote, err
 	}
 	remote.ExternalID = "issue-id:" + strconv.FormatInt(id, 10)
-	remote.LegacyExternalIDs = issueLegacyExternalIDs(wire.Issue)
+	remote.LegacyExternalIDs = statusLocatorAliases(wire.Issue)
 	remote.Locator = strconv.Itoa(number)
 	remote.URL = "https://" + s.session.binding.Host + "/" + s.session.binding.Owner + "/" + s.session.binding.Repo + "/issues/" + remote.Locator
 	if err := s.session.validateStatusIssue(wire, id, number); err != nil {
