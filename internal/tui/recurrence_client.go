@@ -27,6 +27,10 @@ type recurrenceAPI interface {
 	SaveRecurrence(ctx context.Context, projectID int64, ref string, in RecurrenceInput) (*MutationResp, error)
 }
 
+type recurrenceReadAPI interface {
+	ReadRecurrence(ctx context.Context, projectID int64, id *int64) (*recurrence.View, error)
+}
+
 // recurrenceSnapshot is an issue and its recurrence as the daemon holds them.
 type recurrenceSnapshot struct {
 	issue Issue

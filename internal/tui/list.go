@@ -978,8 +978,12 @@ func listMutationSuccessText(m mutationDoneMsg) string {
 		return fmt.Sprintf("cleared priority of #%s", ref)
 	case "dates":
 		return fmt.Sprintf("updated dates of #%s", ref)
-	case "recurrence":
-		return fmt.Sprintf("updated repeat of #%s", ref)
+	case "recurrence.start":
+		return fmt.Sprintf("started repeat of #%s", ref)
+	case "recurrence.change":
+		return fmt.Sprintf("changed repeat of #%s", ref)
+	case "recurrence.stop":
+		return fmt.Sprintf("stopped repeat of #%s", ref)
 	}
 	return ""
 }

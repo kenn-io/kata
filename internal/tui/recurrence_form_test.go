@@ -3,6 +3,9 @@ package tui
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -169,31 +172,56 @@ func (h *recurrenceHarness) save() {
 
 func (h *recurrenceHarness) page() string { return stripANSI(h.m.viewContent()) }
 
+// failingRecurrenceList fails the recurrence list and passes everything else
+// to the daemon.
+type failingRecurrenceList struct{ inner *http.Client }
+
+func (f failingRecurrenceList) RoundTrip(req *http.Request) (*http.Response, error) {
+	if strings.HasSuffix(req.URL.Path, "/recurrences") {
+		return nil, errors.New("recurrence list unavailable")
+	}
+	return f.inner.Do(req)
+}
+
+func TestRecurrenceFormShowsTheReadErrorForARecurringIssue(t *testing.T) {
+	h := newRecurrenceHarness(t, viewDetail)
+	h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
+	h.m.api = newConnectedUndoClient(t, NewClient(h.env.URL, &http.Client{Transport: failingRecurrenceList{inner: h.env.HTTP}}))
+
+	cmd := h.key(runeKey('O'))
+	out, _ := h.m.Update(msgOfType[recurrenceFormLoadedMsg](t, cmd))
+	h.m = out.(Model)
+
+	assert.Equal(t, inputNone, h.m.input.kind, "a recurring issue never opens as a new recurrence")
+	require.NotNil(t, h.m.toast)
+	assert.Contains(t, h.m.toast.text, "recurrence list unavailable")
+}
+
 func TestRecurrenceFormOpensPrefilledFromListAndDetail(t *testing.T) {
+	t.Run("new recurrence uses the issue's date and zone", func(t *testing.T) {
+		h := newRecurrenceHarness(t, viewDetail)
+		h.patchMetadata(map[string]string{"scheduled_on": "2026-11-02", "timezone": "Europe/Paris"})
+		h.reload()
+
+		h.open()
+
+		rule, start, zone := h.values()
+		assert.Empty(t, rule)
+		assert.Equal(t, "2026-11-02", start)
+		assert.Equal(t, "Europe/Paris", zone)
+	})
+	t.Run("zone falls back to the caller's own IANA zone", func(t *testing.T) {
+		h := newRecurrenceHarness(t, viewDetail)
+
+		h.open()
+
+		_, _, zone := h.values()
+		assert.Equal(t, "Asia/Tokyo", zone, "never Local")
+	})
 	for _, from := range []struct {
 		name string
 		view viewID
 	}{{"list", viewList}, {"detail", viewDetail}} {
-		t.Run(from.name+" new recurrence uses the issue's date and zone", func(t *testing.T) {
-			h := newRecurrenceHarness(t, from.view)
-			h.patchMetadata(map[string]string{"scheduled_on": "2026-11-02", "timezone": "Europe/Paris"})
-			h.reload()
-
-			h.open()
-
-			rule, start, zone := h.values()
-			assert.Empty(t, rule)
-			assert.Equal(t, "2026-11-02", start)
-			assert.Equal(t, "Europe/Paris", zone)
-		})
-		t.Run(from.name+" zone falls back to the caller's own IANA zone", func(t *testing.T) {
-			h := newRecurrenceHarness(t, from.view)
-
-			h.open()
-
-			_, _, zone := h.values()
-			assert.Equal(t, "Asia/Tokyo", zone, "never Local")
-		})
 		t.Run(from.name+" existing recurrence shows its rule, start and zone", func(t *testing.T) {
 			h := newRecurrenceHarness(t, from.view)
 			h.startBehindTheTUI("FREQ=WEEKLY;BYDAY=MO", "2026-11-09", "Europe/Paris")
@@ -214,6 +242,7 @@ func TestRecurrenceFormStartsChangesAndStopsARecurrence(t *testing.T) {
 	h.open()
 	h.fill("FREQ=WEEKLY;BYDAY=MO", "2026-11-09", "Europe/Paris")
 	h.save()
+	assert.Equal(t, "started repeat of #"+h.issue.ShortID, h.m.detail.status)
 
 	require.Equal(t, inputNone, h.m.input.kind, "a saved form closes")
 	recs := h.rows()
@@ -232,6 +261,7 @@ func TestRecurrenceFormStartsChangesAndStopsARecurrence(t *testing.T) {
 	require.Equal(t, "FREQ=WEEKLY;BYDAY=MO", rule)
 	h.fill("FREQ=DAILY", "2026-11-09", "Europe/Paris")
 	h.save()
+	assert.Equal(t, "changed repeat of #"+h.issue.ShortID, h.m.detail.status)
 
 	changed := h.rows()
 	require.Len(t, changed, 1)
@@ -250,6 +280,7 @@ func TestRecurrenceFormStartsChangesAndStopsARecurrence(t *testing.T) {
 
 	h.key(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	h.send(h.key(runeKey('y')))
+	assert.Equal(t, "stopped repeat of #"+h.issue.ShortID, h.m.detail.status)
 
 	assert.Empty(t, h.rows())
 	assert.Equal(t, inputNone, h.m.input.kind)
@@ -257,31 +288,43 @@ func TestRecurrenceFormStartsChangesAndStopsARecurrence(t *testing.T) {
 	assert.NotContains(t, h.page(), "repeats:")
 }
 
-func TestRecurrenceFormShowsTheDaemonsRefusalAndKeepsTheInput(t *testing.T) {
-	h := newRecurrenceHarness(t, viewDetail)
-	h.open()
-	h.fill("every other tuesday", "2026-11-09", "Europe/Paris")
+func TestRecurrenceFormRefusesAndKeepsTheInput(t *testing.T) {
+	cronParent := func(h *recurrenceHarness) {
+		_, err := h.env.DB.ExecContext(t.Context(),
+			`UPDATE issues SET metadata='{"cron.progress.01ARZ3NDEKTSV4RRFFQ69G5FAV":{}}' WHERE id=?`, h.issue.ID)
+		require.NoError(t, err)
+	}
+	for _, tc := range []struct {
+		name       string
+		setup      func(*recurrenceHarness)
+		rule, zone string
+		wantErr    []string
+	}{
+		{"the daemon's refusal is shown as is", nil, "every other tuesday", "Europe/Paris", []string{"every other tuesday"}},
+		{"Local is never sent as a zone", nil, "FREQ=DAILY", "Local", []string{"Local"}},
+		{"the parent of a cron job is refused", cronParent, "FREQ=DAILY", "Europe/Paris",
+			[]string{recurrence.CronParentRefusal, "kata cron job create --parent"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newRecurrenceHarness(t, viewDetail)
+			if tc.setup != nil {
+				tc.setup(h)
+			}
+			h.open()
+			h.fill(tc.rule, "2026-11-09", tc.zone)
 
-	h.save()
+			h.save()
 
-	assert.Equal(t, inputRecurrenceForm, h.m.input.kind)
-	assert.False(t, h.m.input.saving, "the form can be saved again")
-	assert.Contains(t, h.m.input.err, "every other tuesday", "the daemon's message is shown as is")
-	rule, start, zone := h.values()
-	assert.Equal(t, []string{"every other tuesday", "2026-11-09", "Europe/Paris"}, []string{rule, start, zone})
-	assert.Empty(t, h.rows())
-}
-
-func TestRecurrenceFormNeverSendsLocal(t *testing.T) {
-	h := newRecurrenceHarness(t, viewDetail)
-	h.open()
-	h.fill("FREQ=DAILY", "2026-11-09", "Local")
-
-	h.save()
-
-	assert.Equal(t, inputRecurrenceForm, h.m.input.kind)
-	assert.Contains(t, h.m.input.err, "Local")
-	assert.Empty(t, h.rows())
+			assert.Equal(t, inputRecurrenceForm, h.m.input.kind)
+			assert.False(t, h.m.input.saving, "the form can be saved again")
+			for _, want := range tc.wantErr {
+				assert.Contains(t, h.m.input.err, want)
+			}
+			rule, start, zone := h.values()
+			assert.Equal(t, []string{tc.rule, "2026-11-09", tc.zone}, []string{rule, start, zone}, "the input stays")
+			assert.Empty(t, h.rows())
+		})
+	}
 }
 
 func TestRecurrenceFormConflictKeepsInputAndShowsTheCurrentRecurrence(t *testing.T) {
@@ -326,22 +369,6 @@ func TestRecurrenceFormConflictKeepsInputAndShowsTheCurrentRecurrence(t *testing
 		assert.Equal(t, inputNone, h.m.input.kind)
 		assert.Len(t, h.rows(), 1)
 	})
-}
-
-func TestRecurrenceFormRefusesTheParentOfACronJob(t *testing.T) {
-	h := newRecurrenceHarness(t, viewDetail)
-	_, err := h.env.DB.ExecContext(t.Context(),
-		`UPDATE issues SET metadata='{"cron.progress.01ARZ3NDEKTSV4RRFFQ69G5FAV":{}}' WHERE id=?`, h.issue.ID)
-	require.NoError(t, err)
-	h.open()
-	h.fill("FREQ=DAILY", "2026-11-09", "Europe/Paris")
-
-	h.save()
-
-	assert.Equal(t, inputRecurrenceForm, h.m.input.kind)
-	assert.Contains(t, h.m.input.err, recurrence.CronParentRefusal)
-	assert.Contains(t, h.m.input.err, "kata cron job create --parent")
-	assert.Empty(t, h.rows())
 }
 
 func TestRecurrenceWriteClearsUndoHistory(t *testing.T) {
