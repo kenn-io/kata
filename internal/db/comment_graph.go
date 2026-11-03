@@ -111,6 +111,9 @@ func ReadCommentGraphTx(
 		if ref.UID != "" {
 			args = append(args, strings.ToUpper(ref.UID))
 			where += " AND UPPER(c.uid)=" + bind(len(args))
+			// The suffix equality enables the handle index; UPPER remains the exact match.
+			args = append(args, strings.ToUpper(ref.UID))
+			where += " AND lower(substr(c.uid,21))=lower(substr(" + bind(len(args)) + ",21))"
 		} else {
 			args = append(args, "%"+ref.Suffix)
 			where += " AND LOWER(c.uid) LIKE " + bind(len(args))
