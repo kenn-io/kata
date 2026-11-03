@@ -177,51 +177,6 @@ func TestUISnapshotWithoutLimitRequestsCompleteAuthority(t *testing.T) {
 	require.Zero(t, store.lastSnapshot.Limit)
 }
 
-func TestUISnapshotPastSQLiteVariableLimit(t *testing.T) {
-	for _, status := range []string{"open", "closed"} {
-		t.Run(status, func(t *testing.T) {
-			h, ts, projectID := graphProject(t)
-			source := graphIssue(t, h, projectID, "01J00000000000000000000001", "Source issue")
-			neighbor := graphIssue(t, h, projectID, "01J00000000000000000000002", "Neighbor issue")
-			graphLink(t, h, projectID, source.ID, neighbor.ID, "blocks")
-			_, err := h.DB().ExecContext(t.Context(), `
-				WITH RECURSIVE filler(n) AS (
-					SELECT 1 UNION ALL SELECT n + 1 FROM filler WHERE n < 16384
-				)
-				INSERT INTO issues (uid, project_id, short_id, title, status, author)
-				SELECT printf('%026d', n), ?, printf('%08d', n), 'Filler issue', ?, 'tester'
-				FROM filler`, projectID, status)
-			require.NoError(t, err)
-
-			response, body := getUISnapshot(t, ts, url.Values{
-				"view": {"all-open"}, "include_graph": {"true"}, "selected_issue_uid": {source.UID},
-			}, "")
-			require.Equal(t, http.StatusOK, response.StatusCode, string(body))
-			var snapshot struct {
-				Collection      []db.UIIssue `json:"collection"`
-				CollectionLinks []db.UILink  `json:"collection_links"`
-				Graph           struct {
-					Issues []db.UIIssue `json:"issues"`
-					Links  []db.UILink  `json:"links"`
-				} `json:"graph"`
-			}
-			require.NoError(t, json.Unmarshal(body, &snapshot))
-			wantOpen := 2
-			if status == "open" {
-				wantOpen += 16384
-			}
-			require.Len(t, snapshot.Collection, wantOpen)
-			require.Len(t, snapshot.Graph.Issues, 16386)
-			for _, links := range [][]db.UILink{snapshot.CollectionLinks, snapshot.Graph.Links} {
-				require.Len(t, links, 1)
-				require.Equal(t, source.UID, links[0].FromIssueUID)
-				require.Equal(t, neighbor.UID, links[0].ToIssueUID)
-				require.Equal(t, "blocks", links[0].Type)
-			}
-		})
-	}
-}
-
 func TestUISnapshotPreservesRelationshipIntentAndCollectionLinks(t *testing.T) {
 	store := &countingUIStore{
 		cursor: 41, snapshotCursor: 41,

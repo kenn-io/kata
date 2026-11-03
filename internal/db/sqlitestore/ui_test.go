@@ -153,23 +153,27 @@ func TestReadUIGraphLinksLargeIssueSet(t *testing.T) {
 			wantIDs = append(wantIDs, link.ID)
 		}
 	}
-	issues := make([]db.UIIssue, 16384)
-	for index := range issues {
-		issues[index].ID = int64(index + 1)
+	// Keep links with one or both endpoints outside the visible snapshot.
+	for _, id := range []int64{16385, 16386} {
+		_, _, _, err := store.SoftDeleteIssue(t.Context(), id, "user-a")
+		require.NoError(t, err)
 	}
 	// Leave ample headroom for slow runners, while catching quadratic ID-pair probes.
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	tx, err := store.BeginTx(ctx, nil)
+	snapshot, err := store.ReadUISnapshot(ctx, db.UISnapshotQuery{
+		View: "all-open", IncludeGraph: true,
+	})
 	require.NoError(t, err)
-	defer func() { _ = tx.Rollback() }()
-	links, err := readUIGraphLinks(ctx, tx, issues)
-	require.NoError(t, err)
-	gotIDs := make([]int64, 0, len(links))
-	for _, link := range links {
-		gotIDs = append(gotIDs, link.ID)
+	require.Len(t, snapshot.Issues, 16384)
+	require.Len(t, snapshot.GraphIssues, 16384)
+	for _, links := range [][]db.UILink{snapshot.CollectionLinks, snapshot.GraphLinks} {
+		gotIDs := make([]int64, 0, len(links))
+		for _, link := range links {
+			gotIDs = append(gotIDs, link.ID)
+		}
+		require.Equal(t, wantIDs, gotIDs)
 	}
-	require.Equal(t, wantIDs, gotIDs)
 }
 
 func TestUISnapshotReadyAssignmentExpiryContract(t *testing.T) {
