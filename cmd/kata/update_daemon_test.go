@@ -61,44 +61,36 @@ func daemonLifecycle(t *testing.T) func(*testing.T, string) *daemonLifecycleFixt
 	if testing.Short() {
 		t.Skip("builds and runs isolated daemon binaries")
 	}
-	childEnv := daemonLifecycleEnvironment(t)
+	// Build before the child environment clears GOFLAGS, so these builds reuse
+	// the package cache and run from the module directory.
 	moduleDir, err := os.Getwd()
 	require.NoError(t, err)
+	source := filepath.Join(moduleDir, "..", "..", "internal", "config", "daemon_config.go")
+	contents, err := os.ReadFile(source) //nolint:gosec // test-owned source overlay
+	require.NoError(t, err)
+	overlaySource := filepath.Join(t.TempDir(), "daemon_config.go")
+	contents = bytes.Replace(contents, []byte("type DaemonConfig struct {"), []byte("type DaemonConfig struct {\n FutureSetting string `toml:\"future_setting\"`"), 1)
+	require.NoError(t, os.WriteFile(overlaySource, contents, 0600)) //nolint:gosec // G703: source overlay lives in a test-owned temporary directory
+	overlay, err := json.Marshal(map[string]any{"Replace": map[string]string{source: overlaySource}})
+	require.NoError(t, err)
+	overlayPath := filepath.Join(t.TempDir(), "overlay.json")
+	require.NoError(t, os.WriteFile(overlayPath, overlay, 0600))
+	binaries := map[string]string{
+		"v0.1.0": kataTestBinary(t, "v0.1.0"),
+		"v0.2.0": testBinary(t, "kata-v0.2.0-future-setting", "-buildvcs=false", "-overlay="+overlayPath, "-ldflags", "-X go.kenn.io/kata/internal/version.Version=v0.2.0", "go.kenn.io/kata/cmd/kata"),
+	}
+	childEnv := daemonLifecycleEnvironment(t)
 	workspace := t.TempDir()
 	t.Chdir(workspace)
-	binaries := make(map[string]string)
-	for _, version := range []string{"v0.1.0", "v0.2.0"} {
-		binary := filepath.Join(t.TempDir(), "kata")
-		if runtime.GOOS == "windows" {
-			binary += ".exe"
-		}
-		build := exec.CommandContext(t.Context(), "go", "build", "-buildvcs=false", "-ldflags", "-X go.kenn.io/kata/internal/version.Version="+version, "-o", binary, "go.kenn.io/kata/cmd/kata") //nolint:gosec // test-owned executable and fixed build arguments
-		// Build inside the module, while runtime commands use a scratch workspace.
-		build.Dir = moduleDir
-		if version == "v0.2.0" {
-			source := filepath.Join(moduleDir, "..", "..", "internal", "config", "daemon_config.go")
-			contents, err := os.ReadFile(source) //nolint:gosec // test-owned source overlay
-			require.NoError(t, err)
-			overlaySource := filepath.Join(t.TempDir(), "daemon_config.go")
-			contents = bytes.Replace(contents, []byte("type DaemonConfig struct {"), []byte("type DaemonConfig struct {\n FutureSetting string `toml:\"future_setting\"`"), 1)
-			require.NoError(t, os.WriteFile(overlaySource, contents, 0600)) //nolint:gosec // G703: source overlay lives in a test-owned temporary directory
-			overlay, err := json.Marshal(map[string]any{"Replace": map[string]string{source: overlaySource}})
-			require.NoError(t, err)
-			overlayPath := filepath.Join(t.TempDir(), "overlay.json")
-			require.NoError(t, os.WriteFile(overlayPath, overlay, 0600))
-			build.Args = append(build.Args[:2], append([]string{"-overlay=" + overlayPath}, build.Args[2:]...)...)
-		}
-		build.Env = childEnv
-		output, err := build.CombinedOutput()
-		require.NoError(t, err, "%s", output)
-		binaries[version] = binary
-	}
 	return func(t *testing.T, scenario string) *daemonLifecycleFixture {
 		t.Helper()
 		resetFlags(t)
 		home, err := config.KataHome()
 		require.NoError(t, err)
-		binary := filepath.Join(t.TempDir(), filepath.Base(binaries["v0.1.0"]))
+		binary := filepath.Join(t.TempDir(), "kata")
+		if runtime.GOOS == "windows" {
+			binary += ".exe"
+		}
 		// This is a fresh test path, so a direct copy is enough. Keep the
 		// staged replacement exercised by fake.install below, where the
 		// existing daemon binary really must be replaced.
