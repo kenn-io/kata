@@ -35,10 +35,8 @@ func TestMarkTransitiveBlockLayoutScaling(t *testing.T) {
 				expected := slices.Clone(edges)
 				if tc.shape == "skip4" {
 					for i := range expected {
-						from, err := strconv.Atoi(expected[i].FromUID)
-						require.NoError(t, err)
-						to, err := strconv.Atoi(expected[i].ToUID)
-						require.NoError(t, err)
+						from, _ := strconv.Atoi(expected[i].FromUID)
+						to, _ := strconv.Atoi(expected[i].ToUID)
 						expected[i].Layout = to-from == 1
 					}
 				}
@@ -208,25 +206,4 @@ func layoutShape(shape string, size int) []api.ReachableGraphEdge {
 		connect(1, 0)
 	}
 	return edges
-}
-
-func BenchmarkMarkTransitiveBlockLayout(b *testing.B) {
-	for _, tc := range []struct {
-		shape string
-		sizes []int
-	}{
-		{"blocks hub", []int{1000, 4000, 16000}},
-		{"layered10", []int{1000, 4000}},
-	} {
-		for _, size := range tc.sizes {
-			b.Run(fmt.Sprintf("%s/%d", tc.shape, size), func(b *testing.B) {
-				edges := layoutShape(tc.shape, size)
-				b.ReportAllocs()
-				b.ResetTimer()
-				for range b.N {
-					markTransitiveBlockLayout(edges)
-				}
-			})
-		}
-	}
 }

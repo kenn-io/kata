@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"slices"
@@ -444,7 +443,6 @@ func markTransitiveBlockLayout(edges []api.ReachableGraphEdge) {
 	}
 	words := (bits + 63) / 64
 	reach := make([][]uint64, len(groups))
-	reachWords := make([]uint64, len(groups)*words)
 	absorb := func(row []uint64, component int) {
 		if slot := bit[component]; slot >= 0 {
 			row[slot>>6] |= uint64(1) << (slot & 63)
@@ -455,7 +453,7 @@ func markTransitiveBlockLayout(edges []api.ReachableGraphEdge) {
 	}
 	hidden := map[int]bool{}
 	for component, group := range groups {
-		row := reachWords[component*words : (component+1)*words]
+		row := make([]uint64, words)
 		reach[component] = row
 		if len(group) > 1 {
 			for _, member := range group {
@@ -471,7 +469,7 @@ func markTransitiveBlockLayout(edges []api.ReachableGraphEdge) {
 		// Read nearest targets first, then hide targets already in the row.
 		node := group[0]
 		near := slices.Clone(targets[node])
-		slices.SortFunc(near, func(a, b int) int { return cmp.Compare(componentOf[b], componentOf[a]) })
+		slices.SortFunc(near, func(a, b int) int { return componentOf[b] - componentOf[a] })
 		for index, target := range near {
 			targetComponent := componentOf[target]
 			if slot := bit[targetComponent]; slot >= 0 {
@@ -502,7 +500,7 @@ func markTransitiveBlockLayout(edges []api.ReachableGraphEdge) {
 				continue
 			}
 			pending := slices.Clone(targets[source])
-			slices.SortFunc(pending, func(a, b int) int { return cmp.Compare(componentOf[a], componentOf[b]) })
+			slices.SortFunc(pending, func(a, b int) int { return componentOf[a] - componentOf[b] })
 			remaining, lowest := len(pending), 0
 			floor := componentOf[pending[lowest]]
 			tail := 0
