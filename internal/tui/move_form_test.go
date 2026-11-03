@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/require"
@@ -137,12 +136,9 @@ func moveLabels(m Model) []string {
 }
 
 func TestMovePickerOffersOnlyProjectsAnIssueCanMoveTo(t *testing.T) {
-	archived := moveProject(5, "retired-project", "", "")
-	archived.DeletedAt = new(time.Now())
 	api := &moveTestAPI{projects: []ProjectSummary{
 		moveProject(7, "own-project", "", ""),
 		moveProject(1, "inbox", "inbox", ""),
-		archived,
 		moveProject(2, "hub-project", "", ""),
 	}}
 	m := openMove(t, moveModel(t, api))
@@ -157,70 +153,69 @@ func TestMovePickerShowsAreaToTellSameNamedProjectsApart(t *testing.T) {
 		moveProject(6, "solo", "", "work"),
 	}}
 	m := openMove(t, moveModel(t, api))
-	labels := moveLabels(m)
 	require.Equal(t, []string{
 		"docs · work",
 		"docs · uid-3",
 		"docs · uid-4",
 		"solo",
-	}, labels, "an area names a project only when no same-named project shares it; otherwise the UID does")
+	}, moveLabels(m), "an area names a project only when no same-named project shares it; otherwise the UID does")
 
 	m = typeText(m, "WORK")
-	require.Equal(t, []string{"docs · work"}, moveLabels(m))
-}
-
-func TestMovePickerFilterMatchesNameAndArea(t *testing.T) {
-	api := &moveTestAPI{projects: []ProjectSummary{
-		moveProject(2, "docs", "", "work"),
-		moveProject(3, "docs", "", "home"),
-		moveProject(6, "solo", "", "work"),
-	}}
-	m := openMove(t, moveModel(t, api))
-	m = typeText(m, "so")
-	require.Equal(t, []string{"solo"}, moveLabels(m), "the filter matches names, case-insensitively")
+	require.Equal(t, []string{"docs · work"}, moveLabels(m), "the filter matches the area shown beside a name, case-insensitively")
 
 	m, _ = updateModel(m, tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
-	m = typeText(m, "home")
-	require.Equal(t, []string{"docs · home"}, moveLabels(m), "the filter matches the area shown beside a name")
+	m = typeText(m, "so")
+	require.Equal(t, []string{"solo"}, moveLabels(m), "the filter matches names")
 }
 
-func TestMovePreviewListsEveryDescendantAndWritesNothing(t *testing.T) {
-	api := &moveTestAPI{
-		projects: []ProjectSummary{moveProject(2, "hub-project", "", "")},
-		preview: func(int, MoveInput) (*MutationResp, error) {
-			return &MutationResp{
-				Issue: &Issue{UID: "issue-b", ShortID: "bbbb", ProjectID: 7},
-				Issues: []Issue{
-					{UID: "issue-b", ShortID: "bbbb", Title: "Second", ProjectID: 7},
-					{UID: "kid-1", ShortID: "k001", Title: "Child one", ProjectID: 7},
-					{UID: "kid-2", ShortID: "k002", Title: "Child two", ProjectID: 9},
-				},
-				Revision: 4,
-			}, nil
-		},
-	}
-	m := openMove(t, moveModel(t, api))
-	m, cmd := enter(m)
-	m, _ = deliver(t, m, cmd)
-
-	view := stripANSI(renderMoveModal(m.move, 100, 40))
-	require.Contains(t, view, "Subtree move")
-	require.Contains(t, view, "#k001 Child one")
-	require.Contains(t, view, "#k002 Child two")
-	require.Len(t, api.calls, 1)
-	require.True(t, api.calls[0].DryRun, "the first enter only previews")
-	require.Zero(t, api.calls[0].IfMatchRevision)
-	require.Equal(t, "uid-2", api.calls[0].ToProjectUID)
-}
-
-func TestMovePreviewOfLoneIssueSaysSingle(t *testing.T) {
+func TestMovePickerShowsNoPlaceholderFragmentBeforeTyping(t *testing.T) {
 	api := &moveTestAPI{projects: []ProjectSummary{moveProject(2, "hub-project", "", "")}}
 	m := openMove(t, moveModel(t, api))
-	m, cmd := enter(m)
-	m, _ = deliver(t, m, cmd)
-	view := stripANSI(renderMoveModal(m.move, 100, 40))
-	require.Contains(t, view, "Single move")
-	require.NotContains(t, view, "Subtree move")
+	view := flattenModal(stripANSI(renderMoveModal(m.move, 100, 40)))
+	require.NotContains(t, view, "Project: t", "an empty filter must not show a clipped placeholder")
+}
+
+func TestMovePreviewNamesTheMoveAndListsDescendants(t *testing.T) {
+	family := func(kids ...Issue) func(int, MoveInput) (*MutationResp, error) {
+		return func(int, MoveInput) (*MutationResp, error) {
+			return &MutationResp{
+				Issue:    &Issue{UID: "issue-b", ShortID: "bbbb", ProjectID: 7},
+				Issues:   append([]Issue{{UID: "issue-b", ShortID: "bbbb", Title: "Second", ProjectID: 7}}, kids...),
+				Revision: 4,
+			}, nil
+		}
+	}
+	for _, tc := range []struct {
+		name    string
+		preview func(int, MoveInput) (*MutationResp, error)
+		want    []string
+		notWant string
+	}{
+		{"lone issue", nil, []string{"Single move"}, "Subtree move"},
+		{"one descendant", family(Issue{UID: "kid-1", ShortID: "k001", Title: "Child one", ProjectID: 7}),
+			[]string{"Subtree move", "its 1 descendant move", "#k001 Child one"}, "1 descendants"},
+		{"several descendants", family(
+			Issue{UID: "kid-1", ShortID: "k001", Title: "Child one", ProjectID: 7},
+			Issue{UID: "kid-2", ShortID: "k002", Title: "Child two", ProjectID: 9}),
+			[]string{"Subtree move", "its 2 descendants move", "#k001 Child one", "#k002 Child two"}, "Single move"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := &moveTestAPI{projects: []ProjectSummary{moveProject(2, "hub-project", "", "")}, preview: tc.preview}
+			m := openMove(t, moveModel(t, api))
+			m, cmd := enter(m)
+			m, _ = deliver(t, m, cmd)
+
+			view := flattenModal(stripANSI(renderMoveModal(m.move, 100, 40)))
+			for _, want := range tc.want {
+				require.Contains(t, view, want)
+			}
+			require.NotContains(t, view, tc.notWant)
+			require.Len(t, api.calls, 1)
+			require.True(t, api.calls[0].DryRun, "the first enter only previews")
+			require.Zero(t, api.calls[0].IfMatchRevision)
+			require.Equal(t, "uid-2", api.calls[0].ToProjectUID)
+		})
+	}
 }
 
 func TestMoveRefusedPreviewShowsDaemonWordsAndWritesNothing(t *testing.T) {
@@ -367,28 +362,21 @@ func TestMoveFollowsTheSamePermissionGateAsOtherEdits(t *testing.T) {
 }
 
 func TestMoveIssueNeedsDaemonWithSubtreeMoves(t *testing.T) {
-	for _, tc := range []struct{ reported, want string }{
-		{"0.22.0", "0.23.0"},
-		{"0.34.0", "0.35.0"},
-	} {
-		t.Run(tc.reported, func(t *testing.T) {
-			var posts atomic.Int32
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/api/v1/health" {
-					w.Header().Set("Content-Type", "application/json")
-					_, _ = fmt.Fprintf(w, `{"ok":true,"api_schema_version":%q}`, tc.reported)
-					return
-				}
-				posts.Add(1)
-			}))
-			defer srv.Close()
-			_, err := NewClient(srv.URL, srv.Client()).MoveIssue(t.Context(), 7, "bbbb",
-				MoveInput{Actor: "alice", ToProjectUID: "uid-2", DryRun: true})
-			require.ErrorContains(t, err, tc.want)
-			require.ErrorContains(t, err, "upgrade the daemon")
-			require.Zero(t, posts.Load(), "an old daemon is never sent a move it would run as a single-issue move")
-		})
-	}
+	var posts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/health" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"ok":true,"api_schema_version":"0.34.0"}`)
+			return
+		}
+		posts.Add(1)
+	}))
+	defer srv.Close()
+	_, err := NewClient(srv.URL, srv.Client()).MoveIssue(t.Context(), 7, "bbbb",
+		MoveInput{Actor: "alice", ToProjectUID: "uid-2", DryRun: true})
+	require.ErrorContains(t, err, "0.35.0")
+	require.ErrorContains(t, err, "upgrade the daemon")
+	require.Zero(t, posts.Load(), "an old daemon is never sent a move it would run as a single-issue move")
 }
 
 func TestMoveIssueAgainstDaemonKeepsCommentsAndLinks(t *testing.T) {
@@ -458,6 +446,14 @@ func TestMoveIssueAgainstDaemonKeepsCommentsAndLinks(t *testing.T) {
 	detail, err := base.GetIssueDetail(ctx, dest.ID, moved.UID)
 	require.NoError(t, err)
 	require.Len(t, detail.Children, 1)
+	events, err := env.DB.EventsAfter(ctx, db.EventsAfterParams{IssueUID: moved.UID, Limit: 100})
+	require.NoError(t, err)
+	var types []string
+	for _, e := range events {
+		types = append(types, e.Type)
+	}
+	require.Contains(t, types, "issue.created", "the issue's history survives the move")
+	require.Contains(t, types, "issue.moved")
 
 	require.NotNil(t, m.toast)
 	require.Contains(t, m.toast.text, "spoke-project#"+moved.ShortID, "the notice names the new short id")

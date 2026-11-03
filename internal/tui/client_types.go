@@ -227,8 +227,6 @@ type ProjectSummary struct {
 		Role jsontext.Value `json:"role"`
 		Area jsontext.Value `json:"area"`
 	} `json:"metadata"`
-	// DeletedAt is set on an archived project.
-	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 }
 
 // InstanceInfo is the daemon instance identity returned by /api/v1/instance.

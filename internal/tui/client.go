@@ -547,13 +547,10 @@ func (c *Client) SetDates(ctx context.Context, projectID int64, ref string, in D
 	return &resp, nil
 }
 
-// Daemon API versions the move action needs: previews from 0.23.0, and moving
-// an issue together with its descendants from 0.35.0. Older daemons move only
-// the selected issue and would ignore the difference.
-const (
-	moveDryRunAPIVersion  = "0.23.0"
-	moveSubtreeAPIVersion = "0.35.0"
-)
+// moveSubtreeAPIVersion is the first daemon API that moves an issue together
+// with its descendants; older daemons move only the selected issue and would
+// ignore the difference. It also answers dry runs, so one check covers both.
+const moveSubtreeAPIVersion = "0.35.0"
 
 // MoveIssue moves an issue and its active descendants to another project, or
 // previews that with DryRun. A move is guarded by If-Match on
@@ -566,10 +563,6 @@ func (c *Client) MoveIssue(ctx context.Context, projectID int64, ref string, in 
 		return nil, err
 	}
 	if in.DryRun {
-		if err := requireAPIVersion(ctx, apiClient, moveDryRunAPIVersion,
-			"move preview requires daemon API "+moveDryRunAPIVersion+" or newer"); err != nil {
-			return nil, err
-		}
 		if err := requireAPIVersion(ctx, apiClient, moveSubtreeAPIVersion,
 			"moving an issue with its subtree requires daemon API "+moveSubtreeAPIVersion+" or newer"); err != nil {
 			return nil, err

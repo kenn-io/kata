@@ -113,7 +113,6 @@ func (m Model) routeMoveKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	m.nextFormGen++
 	filter := textinput.New()
 	filter.Prompt = ""
-	filter.Placeholder = "type to filter"
 	_ = filter.Focus()
 	m.move = moveState{
 		target: target, formGen: m.nextFormGen, loading: true, filter: filter,
@@ -150,7 +149,7 @@ func (m Model) handleMoveProjects(msg moveProjectsMsg) Model {
 	for _, p := range msg.projects {
 		s.names[p.ID] = p.Name
 		own := p.ID == s.ownProjectID || (s.ownProjectUID != "" && p.UID == s.ownProjectUID)
-		if own || p.UID == "" || p.DeletedAt != nil || jsonString(p.Metadata.Role) == "inbox" {
+		if own || p.UID == "" || jsonString(p.Metadata.Role) == "inbox" {
 			continue
 		}
 		s.projects = append(s.projects, p)
@@ -333,7 +332,7 @@ func (m Model) handleMovePreview(msg movePreviewMsg) Model {
 		m.move = s
 		return m
 	}
-	if msg.resp == nil || msg.resp.Issue == nil {
+	if msg.resp == nil {
 		s.err = "the daemon's preview did not describe the move"
 		m.move = s
 		return m
@@ -476,8 +475,12 @@ func renderMoveModal(s moveState, width, height int) string {
 			if len(preview.descendants) == 0 {
 				parts = append(parts, wrap(fmt.Sprintf("Single move: #%s has no descendants, so it moves alone.", sanitizeForLine(s.shortID))))
 			} else {
-				parts = append(parts, wrap(fmt.Sprintf("Subtree move: #%s and its %d descendants move together.",
-					sanitizeForLine(s.shortID), len(preview.descendants))))
+				noun := "descendants"
+				if len(preview.descendants) == 1 {
+					noun = "descendant"
+				}
+				parts = append(parts, wrap(fmt.Sprintf("Subtree move: #%s and its %d %s move together.",
+					sanitizeForLine(s.shortID), len(preview.descendants), noun)))
 				shown := min(len(preview.descendants), max(height-16, 3))
 				for _, line := range preview.descendants[:shown] {
 					parts = append(parts, "  "+truncate(line, innerW-2))
