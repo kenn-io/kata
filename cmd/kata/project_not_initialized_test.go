@@ -14,8 +14,6 @@ import (
 // envelope carries the looked-up alias or project name in error.data, and
 // omits data when the message names nothing.
 func TestProjectNotInitializedErrorData(t *testing.T) {
-	setupKataEnv(t)
-	t.Setenv("KATA_SERVER", "")
 	env := testenv.New(t)
 
 	gitWorkspace := func(t *testing.T) string {
@@ -64,17 +62,16 @@ func TestProjectNotInitializedErrorData(t *testing.T) {
 			require.Error(t, err)
 			assert.Empty(t, stdout)
 
-			var got struct {
-				Error struct {
-					Code     string         `json:"code"`
-					ExitCode int            `json:"exit_code"`
-					Data     map[string]any `json:"data"`
-				} `json:"error"`
-			}
-			require.NoError(t, json.Unmarshal([]byte(stderr), &got), stderr)
+			got := parseErrorEnvelope(t, []byte(stderr))
 			assert.Equal(t, "project_not_initialized", got.Error.Code)
 			assert.Equal(t, ExitNotFound, got.Error.ExitCode)
-			assert.Equal(t, tc.wantData, got.Error.Data)
+			if tc.wantData == nil {
+				assert.Nil(t, got.Error.Data, "error.data must be absent: %s", stderr)
+			} else {
+				var data map[string]any
+				require.NoError(t, json.Unmarshal(got.Error.Data, &data), stderr)
+				assert.Equal(t, tc.wantData, data)
+			}
 		})
 	}
 }

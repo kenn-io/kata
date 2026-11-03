@@ -258,8 +258,8 @@ func TestResolve_ByProjectName_NotRegistered(t *testing.T) {
 	resp, bs := postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
 		"name": "never-registered",
 	})
-	assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
-	assertErrorData(t, bs, map[string]any{"project": "never-registered"})
+	envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
+	assert.Equal(t, map[string]any{"project": "never-registered"}, map[string]any(envelope.Error.Data), string(bs))
 }
 
 // TestResolve_NeitherFieldSet rejects a request that supplies neither
@@ -315,8 +315,8 @@ func TestResolve_ByAliasInput_NotRegistered(t *testing.T) {
 			"kind":     "git",
 		},
 	})
-	assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
-	assertErrorData(t, bs, map[string]any{"alias": "github.com/wesm/never-seen"})
+	envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
+	assert.Equal(t, map[string]any{"alias": "github.com/wesm/never-seen"}, map[string]any(envelope.Error.Data), string(bs))
 }
 
 // TestResolve_ByStartPath_KataTomlNamesUnregisteredProject reports the
@@ -331,8 +331,8 @@ func TestResolve_ByStartPath_KataTomlNamesUnregisteredProject(t *testing.T) {
 	resp, bs := postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
 		"start_path": dir,
 	})
-	assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
-	assertErrorData(t, bs, map[string]any{"project": "ghost-project"})
+	envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
+	assert.Equal(t, map[string]any{"project": "ghost-project"}, map[string]any(envelope.Error.Data), string(bs))
 }
 
 func TestListProjects_IncludeArchived(t *testing.T) {
@@ -529,8 +529,8 @@ func TestResolve_ByAliasInput_RejectsArchivedProject(t *testing.T) {
 			"kind":     "git",
 		},
 	})
-	assertAPIError(t, resp2.StatusCode, bs2, http.StatusNotFound, "project_not_initialized")
-	assertErrorData(t, bs2, map[string]any{"alias": "github.com/wesm/kata"})
+	envelope := assertAPIError(t, resp2.StatusCode, bs2, http.StatusNotFound, "project_not_initialized")
+	assert.Equal(t, map[string]any{"alias": "github.com/wesm/kata"}, map[string]any(envelope.Error.Data), string(bs2))
 	assert.Contains(t, string(bs2), "archived")
 }
 
