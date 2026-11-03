@@ -13,6 +13,7 @@ import (
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/metadata"
+	"go.kenn.io/kata/internal/teammate"
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
@@ -830,6 +831,9 @@ func (d *Store) ApplyExternalRootProjection(
 	ctx context.Context,
 	params db.ExternalRootProjectionParams,
 ) (db.Issue, *db.Event, bool, error) {
+	// External root state comes from the provider, independent of the caller's
+	// request contribution. WithRequest preserves cancellation.
+	ctx = teammate.WithRequest(ctx, "")
 	if err := db.ValidateExternalRootProjectionParams(params); err != nil {
 		return db.Issue{}, nil, false, err
 	}
@@ -963,6 +967,9 @@ func (d *Store) UpsertExternalCommentProjection(
 	ctx context.Context,
 	params db.ExternalCommentProjectionParams,
 ) (db.Comment, *db.Event, bool, error) {
+	// External comments come from the provider, independent of the caller's
+	// request contribution. WithRequest preserves cancellation.
+	ctx = teammate.WithRequest(ctx, "")
 	if err := db.ValidateExternalCommentProjectionParams(params); err != nil {
 		return db.Comment{}, nil, false, err
 	}

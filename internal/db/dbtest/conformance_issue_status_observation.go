@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/teammate"
 )
 
 func checkIssueStatusObservation(t *testing.T, store db.Storage, backend Backend) error {
@@ -40,7 +41,7 @@ func checkIssueStatusObservation(t *testing.T, store db.Storage, backend Backend
 	reader := store.(db.IssueStatusReader)
 	complete, todo := "complete-a", "todo-a"
 	params := db.IssueStatusObservationParams{Guard: guard, MappingID: mapping.ID, ExternalID: mapping.ExternalID, IssueUID: issue.UID, Observation: db.IssueStatusObservation{Raw: &complete, Version: base}, Status: "closed"}
-	changed, events, err := writer.ObserveIssueStatus(ctx, params)
+	changed, events, err := writer.ObserveIssueStatus(teammate.WithRequest(ctx, "worker-1"), params)
 	require.NoError(t, err)
 	require.True(t, changed, "provider status authority is independent of a newer local title")
 	require.Len(t, events, 1)
@@ -49,6 +50,7 @@ func checkIssueStatusObservation(t *testing.T, store db.Storage, backend Backend
 	var payload map[string]any
 	require.NoError(t, json.Unmarshal([]byte(events[0].Payload), &payload))
 	require.Equal(t, "closed", payload["status"])
+	require.NotContains(t, payload, "attributed_teammate", "provider observations are imported history")
 	require.NotContains(t, payload, "title")
 	require.NotContains(t, payload, "body")
 	closed, err := store.IssueByID(ctx, issue.ID)
