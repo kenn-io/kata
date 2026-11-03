@@ -115,7 +115,7 @@ func checkEnrollmentCronJob(ctx context.Context, cfg ServerConfig, projectID int
 			// Adapter ownership is final. A push enrollment can neither replace
 			// an adapter job with a native definition nor discard the adapter
 			// configuration irreversibly.
-			return federationAdapterOwnershipDenied()
+			return federationCredentialDenied()
 		case err == nil:
 			current = &value
 		case errors.Is(err, db.ErrNotFound):
@@ -128,7 +128,7 @@ func checkEnrollmentCronJob(ctx context.Context, cfg ServerConfig, projectID int
 		return nil
 	}
 	if current == nil {
-		return federationAdapterOwnershipDenied()
+		return federationCredentialDenied()
 	}
 	// A non-native submission may only retouch the existing native job; storage
 	// rejects replacements that abandon native ownership.
@@ -226,7 +226,7 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 				return nil, cronAPIError(ctx, cfg, err, in.ProjectID, in.UID, true)
 			}
 			if enrollment && !cron.IsRecurringIssueJob(value.Definition) {
-				return nil, federationAdapterOwnershipDenied()
+				return nil, federationCredentialDenied()
 			}
 			if err := checkCronLifecycleState(value.CronDefinition, in.Body.ExpectedEventUID, action.deleted); err != nil {
 				return nil, cronAPIError(ctx, cfg, err, in.ProjectID, in.UID, true)
