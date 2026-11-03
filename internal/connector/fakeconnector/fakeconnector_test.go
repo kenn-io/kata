@@ -66,13 +66,13 @@ func TestAdvanceRootDoesNotRegressProviderTimestamp(t *testing.T) {
 
 func TestStateLockHonorsContextWhileOwnerIsLive(t *testing.T) {
 	lockPath := filepath.Join(t.TempDir(), "state.lock")
-	release, err := lockContext(context.Background(), lockPath)
+	release, err := lockContext(t.Context(), lockPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer release()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond) //nolint:kennlint // deadlinetest: the deadline is the expected result; the held lock keeps the second owner blocked until it fires
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond) //nolint:kennlint // deadlinetest: the deadline is the expected result; the held lock keeps the second owner blocked until it fires
 	defer cancel()
 	secondRelease, err := lockContext(ctx, lockPath)
 	if secondRelease != nil {
@@ -90,7 +90,8 @@ func TestStateUpdateDoesNotStealLiveLockAndRecoversAfterKill(t *testing.T) {
 	if err := os.WriteFile(statePath, []byte("{}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.CommandContext(context.Background(), os.Args[0], "-test.run=^TestKilledStateUpdateProbe$") // #nosec G204,G702 -- the current test executable is fixed by the Go test runner.
+	// t.Cleanup owns this process; t.Context() would kill it before that runs.
+	command := exec.CommandContext(context.WithoutCancel(t.Context()), os.Args[0], "-test.run=^TestKilledStateUpdateProbe$") // #nosec G204,G702 -- the current test executable is fixed by the Go test runner.
 	command.Env = append(os.Environ(), "KATA_FAKE_STATE_PROBE="+statePath, "KATA_FAKE_READY_PROBE="+readyPath)
 	if err := command.Start(); err != nil {
 		t.Fatal(err)

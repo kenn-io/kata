@@ -74,7 +74,7 @@ var storageScenarios = []scenario{
 	{name: "comment metadata multi issue", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "EventsAfter", "IssueByID", "MaxEventID", "PatchIssueMetadata"}, run: checkCommentMetadataMultiIssue},
 	{name: "metadata patch transaction hook", methods: []string{"CreateIssue", "CreateProject", "EventsAfter", "PatchIssueMetadata"}, run: checkMetadataPatchTransactionHook},
 	{name: "comment graph deleted source", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "IssueByID", "MoveIssueProject", "ReadCommentGraph", "SoftDeleteIssue"}, run: checkCommentGraphDeletedSource},
-	{name: "selected comment graph", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "EditComment", "ImportReplay", "ReadCommentGraph", "SoftDeleteIssue"}, run: checkSelectedCommentGraph},
+	{name: "selected comment graph", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "EditComment", "ImportReplay", "IssueByID", "MoveIssueProject", "ReadCommentGraph", "SoftDeleteIssue"}, run: checkSelectedCommentGraph},
 	{name: "comment graph purge evidence order", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "ImportReplay", "IssueByID", "IssueByUID", "MoveIssueProject", "ProjectByUID", "PurgeIssue", "ReadCommentGraph"}, run: checkCommentGraphPurgeEvidenceOrder},
 	{name: "comment graph purge evidence from hidden source", methods: []string{"CreateComment", "ImportReplay", "IssueByUID", "PurgeIssue", "ReadCommentGraph", "SoftDeleteIssue"}, run: checkCommentGraphPurgeEvidenceFromHiddenSource},
 	{name: "comment event export after target deletion", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "EventsByUIDs", "ExportComments", "ExportEvents", "ExportExternalFieldMappings", "ExportExternalFieldStates", "ExportExternalRootBindings", "ExportFederationBindings", "ExportFederationEnrollments", "ExportFederationQuarantine", "ExportFederationSyncStatus", "ExportImportMappings", "ExportIssueClaims", "ExportIssueLabels", "ExportIssueSyncBindings", "ExportIssueSyncStatus", "ExportIssues", "ExportLinks", "ExportMeta", "ExportPendingClaimRequests", "ExportProjectAliases", "ExportProjectPurgeLog", "ExportProjects", "ExportPurgeLog", "ExportRecurrences", "ExportSequences", "ImportReplay", "ProjectByUID", "PurgeIssue", "ReadCommentGraph", "SoftDeleteIssue"}, runWithBackend: checkCommentEventExportAfterTargetDeletion},
@@ -821,6 +821,11 @@ var storageScenarios = []scenario{
 		runWithBackend: checkClaimViolationQueries,
 	},
 	{
+		name:    "federation spoke names",
+		methods: []string{"CreateProject", "RemoveProject", "PurgeProject", "CreateFederationEnrollment", "ListFederationSpokeNames", "SetFederationSpokeName", "ListFederationEnrollments", "ExportMeta", "ExportProjects", "ExportFederationEnrollments", "ImportReplay"},
+		run:     func(t *testing.T, store db.Storage) error { RunFederationSpokeNames(t, store); return nil },
+	},
+	{
 		name: "federation control lifecycle",
 		methods: []string{
 			"ActiveFederationQuarantine", "ActiveFederationQuarantinesByProject",
@@ -862,6 +867,11 @@ var storageScenarios = []scenario{
 			"ListProjectFederationEnrollments", "RevokeFederationEnrollment",
 		},
 		run: checkProjectFederationEnrollmentScope,
+	},
+	{
+		name:    "federation push snapshot runs",
+		methods: []string{"CreateProject", "CreateIssue", "InsertRemoteEvent", "PendingFederationPushEvents"},
+		run:     checkFederationPushSnapshotRuns,
 	},
 	{
 		name: "federation event transport",

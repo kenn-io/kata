@@ -62,6 +62,14 @@ func (m *Model) advanceMutationEpoch() {
 
 func newUndoClient(base KataAPI) *undoClient { return &undoClient{KataAPI: base} }
 
+func (c *undoClient) CheckDateFilter(ctx context.Context) error {
+	api, ok := c.KataAPI.(dateFilterAPI)
+	if !ok {
+		return errors.New("date filter client unavailable")
+	}
+	return api.CheckDateFilter(ctx)
+}
+
 func (c *undoClient) ListTokens(ctx context.Context) ([]TokenInfo, time.Time, error) {
 	audit, ok := c.KataAPI.(credentialAuditAPI)
 	if !ok {
@@ -247,6 +255,16 @@ func (c *undoClient) RemoveLabel(ctx context.Context, projectID int64, ref, labe
 func (c *undoClient) EditBody(ctx context.Context, projectID int64, ref, body, actor string) (*MutationResp, error) {
 	return c.edit(ctx, projectID, ref, actor, "body.edit", func(uid string) (*MutationResp, error) {
 		return c.KataAPI.EditBody(ctx, projectID, uid, body, actor)
+	})
+}
+
+func (c *undoClient) SetDates(ctx context.Context, projectID int64, ref string, in DatesInput) (*MutationResp, error) {
+	writer, ok := c.KataAPI.(datesAPI)
+	if !ok {
+		return nil, errors.New("connected client cannot edit dates")
+	}
+	return c.edit(ctx, projectID, ref, in.Actor, "dates", func(uid string) (*MutationResp, error) {
+		return writer.SetDates(ctx, projectID, uid, in)
 	})
 }
 

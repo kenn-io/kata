@@ -36,7 +36,7 @@ func TestCredentialResolverPrefersAppOverEnvAndGH(t *testing.T) {
 		},
 	}, runner)
 
-	kind, err := resolver.ResolveKind(context.Background(), Binding{
+	kind, err := resolver.ResolveKind(t.Context(), Binding{
 		Host:  "github.example",
 		Owner: "example-owner",
 		Repo:  "example-repo",
@@ -63,7 +63,7 @@ func TestCredentialResolverDoesNotUseAppForDifferentOwner(t *testing.T) {
 		},
 	}, runner)
 
-	kind, err := resolver.ResolveKind(context.Background(), Binding{
+	kind, err := resolver.ResolveKind(t.Context(), Binding{
 		Host:  "github.com",
 		Owner: "other-owner",
 		Repo:  "example-repo",
@@ -84,7 +84,7 @@ func TestCredentialResolverUsesConfiguredEnvToken(t *testing.T) {
 	}, runner)
 	resolver.baseTransport = next
 
-	rt, kind, err := resolver.transport(context.Background(), Binding{
+	rt, kind, err := resolver.transport(t.Context(), Binding{
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
@@ -92,7 +92,7 @@ func TestCredentialResolverUsesConfiguredEnvToken(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, CredentialKind("env"), kind)
 
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/example-owner/example-repo/issues", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://api.github.com/repos/example-owner/example-repo/issues", nil)
 	require.NoError(t, err)
 	resp, err := rt.RoundTrip(req)
 	require.NoError(t, err)
@@ -117,7 +117,7 @@ func TestCredentialResolverDoesNotUseDefaultEnvTokenForEnterpriseHost(t *testing
 		TokenEnv: tokenEnv,
 	}, runner)
 
-	kind, err := resolver.ResolveKind(context.Background(), Binding{
+	kind, err := resolver.ResolveKind(t.Context(), Binding{
 		Host:  "github.example",
 		Owner: "example-owner",
 		Repo:  "example-repo",
@@ -139,7 +139,7 @@ func TestCredentialResolverUsesEnvTokenForConfiguredEnterpriseTokenHost(t *testi
 		TokenHost: " GitHub.Example ",
 	}, runner)
 
-	kind, err := resolver.ResolveKind(context.Background(), Binding{
+	kind, err := resolver.ResolveKind(t.Context(), Binding{
 		Host:  "github.example",
 		Owner: "example-owner",
 		Repo:  "example-repo",
@@ -161,14 +161,14 @@ func TestCredentialResolverTransportWrapsSuppliedBaseTransport(t *testing.T) {
 	}, runner)
 	resolver.baseTransport = fallback
 
-	rt, err := resolver.Transport(context.Background(), Binding{
+	rt, err := resolver.Transport(t.Context(), Binding{
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
 	}, supplied)
 	require.NoError(t, err)
 
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/example-owner/example-repo/issues", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://api.github.com/repos/example-owner/example-repo/issues", nil)
 	require.NoError(t, err)
 	resp, err := rt.RoundTrip(req)
 	require.NoError(t, err)
@@ -190,9 +190,9 @@ func TestCredentialResolverCallsGHAuthTokenForEachResolve(t *testing.T) {
 	resolver := NewCredentialResolver(config.GitHubSyncConfig{}, runner)
 	binding := Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}
 
-	first, err := resolver.ResolveKind(context.Background(), binding)
+	first, err := resolver.ResolveKind(t.Context(), binding)
 	require.NoError(t, err)
-	second, err := resolver.ResolveKind(context.Background(), binding)
+	second, err := resolver.ResolveKind(t.Context(), binding)
 	require.NoError(t, err)
 
 	assert.Equal(t, CredentialKind("gh"), first)
@@ -213,7 +213,7 @@ func TestCredentialResolverNoCredentialsErrorNamesRemedies(t *testing.T) {
 		TokenEnv: exampleGitHubTokenEnv(),
 	}, runner)
 
-	_, err := resolver.ResolveKind(context.Background(), Binding{
+	_, err := resolver.ResolveKind(t.Context(), Binding{
 		Host:  "github.example",
 		Owner: "example-owner",
 		Repo:  "example-repo",
@@ -281,7 +281,7 @@ func TestOriginGuardAllowsExpectedGitHubAPITargets(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			next := &recordingRoundTripper{}
 			guard := newOriginGuardTransport(tt.binding, next)
-			req, err := http.NewRequest(http.MethodPost, tt.url, strings.NewReader(tt.body))
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, tt.url, strings.NewReader(tt.body))
 			require.NoError(t, err)
 
 			resp, err := guard.RoundTrip(req)
@@ -355,7 +355,7 @@ func TestOriginGuardBlocksWrongTargetBeforeNextTransport(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			next := &recordingRoundTripper{}
 			guard := newOriginGuardTransport(tt.binding, next)
-			req, err := http.NewRequest(http.MethodPost, tt.url, strings.NewReader(tt.body))
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, tt.url, strings.NewReader(tt.body))
 			require.NoError(t, err)
 
 			resp, err := guard.RoundTrip(req)

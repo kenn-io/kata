@@ -42,7 +42,7 @@ func TestDaemonMCPUnavailableHandler(t *testing.T) {
 	require.Equal(t, `project "missing" was not found`, entry["err"])
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
 		response := httptest.NewRecorder()
-		handler.ServeHTTP(response, httptest.NewRequest(method, "/mcp", nil))
+		handler.ServeHTTP(response, httptest.NewRequestWithContext(t.Context(), method, "/mcp", nil))
 		require.Equal(t, http.StatusServiceUnavailable, response.Code)
 		require.Equal(t, "application/json", response.Header().Get("Content-Type"))
 		require.JSONEq(t, `{"error":"kata MCP endpoint unavailable; see daemon log"}`, response.Body.String())
@@ -180,6 +180,7 @@ token_env = "KATA_MCP_TEST_TOKEN"
 				session, err := newMCPHTTPTestClient().Connect(callCtx, mcpTransport, nil)
 				require.NoError(t, err)
 				defer func() { _ = session.Close() }()
+				assertMCPHTTPPublicIcon(t, httpClient, endpoint, tt.host, session.InitializeResult().ServerInfo)
 				if tt.checkMountPolicy {
 					loaded, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "kata.load_tokens"})
 					require.NoError(t, err)

@@ -70,7 +70,7 @@ func TestGitHubSyncHandlers_EnableValidatesStoresStableSourceAndWakesRunner(t *t
 	}}, h.fetcher.repositoryCallLog)
 	assert.Equal(t, 1, h.wakeCount())
 
-	stored, err := h.store.IssueSyncBindingByProject(context.Background(), h.project.ID)
+	stored, err := h.store.IssueSyncBindingByProject(t.Context(), h.project.ID)
 	require.NoError(t, err)
 	assert.Equal(t, out.Binding.SourceKey, stored.SourceKey)
 	assert.Equal(t, "github", stored.Provider)
@@ -152,7 +152,7 @@ func TestGitHubSyncHandlers_EnableValidationErrors(t *testing.T) {
 
 func TestGitHubSyncHandlers_EnableAllowsFederationHub(t *testing.T) {
 	h := newGitHubSyncHandlerHarness(t)
-	_, err := h.store.EnableProjectFederation(context.Background(), h.project.ID, "tester")
+	_, err := h.store.EnableProjectFederation(t.Context(), h.project.ID, "tester")
 	require.NoError(t, err)
 
 	resp, body := postJSON(t, h.server, githubSyncEndpoint(h.project.ID, "enable"), map[string]any{
@@ -175,7 +175,7 @@ func TestGitHubSyncHandlers_EnableAllowsFederationHub(t *testing.T) {
 
 func TestGitHubSyncHandlers_EnableRejectsFederationSpoke(t *testing.T) {
 	h := newGitHubSyncHandlerHarness(t)
-	_, err := h.store.UpsertFederationBinding(context.Background(), db.FederationBinding{
+	_, err := h.store.UpsertFederationBinding(t.Context(), db.FederationBinding{
 		ProjectID:            h.project.ID,
 		Role:                 db.FederationRoleSpoke,
 		HubURL:               "http://127.0.0.1:7373",
@@ -215,7 +215,7 @@ func TestGitHubSyncHandlers_DisableDisablesWithoutDeleting(t *testing.T) {
 	assert.Equal(t, "disabled", out.Status.State)
 	assert.False(t, out.Status.Enabled)
 
-	stored, err := h.store.IssueSyncBindingByProject(context.Background(), h.project.ID)
+	stored, err := h.store.IssueSyncBindingByProject(t.Context(), h.project.ID)
 	require.NoError(t, err)
 	assert.Equal(t, binding.ID, stored.ID)
 	assert.False(t, stored.Enabled)
@@ -225,7 +225,7 @@ func TestGitHubSyncHandlers_StatusReturnsDisabledAndMissingStates(t *testing.T) 
 	t.Run("disabled binding remains readable", func(t *testing.T) {
 		h := newGitHubSyncHandlerHarness(t)
 		binding := h.mustUpsertBinding(t, true)
-		_, err := h.store.DisableIssueSyncBinding(context.Background(), h.project.ID)
+		_, err := h.store.DisableIssueSyncBinding(t.Context(), h.project.ID)
 		require.NoError(t, err)
 
 		resp, body := getStatusBody(t, h.server, githubSyncEndpoint(h.project.ID, "status"))
@@ -429,7 +429,7 @@ func TestGitHubSyncHandlers_MutationsRejectUnattributedTrustedProxy(t *testing.T
 		resp, body := postJSON(t, h.server, githubSyncEndpoint(h.project.ID, "disable"), map[string]any{})
 		assertAPIError(t, resp.StatusCode, body, http.StatusBadRequest, "actor_header_required")
 
-		stored, err := h.store.IssueSyncBindingByProject(context.Background(), h.project.ID)
+		stored, err := h.store.IssueSyncBindingByProject(t.Context(), h.project.ID)
 		require.NoError(t, err)
 		assert.Equal(t, binding.ID, stored.ID)
 		assert.True(t, stored.Enabled, "rejected disable must not flip the binding")
@@ -488,7 +488,7 @@ func newGitHubSyncHandlerHarnessWithFakeRunner(t *testing.T) *gitHubSyncHandlerH
 func newGitHubSyncHandlerHarnessWithOpts(t *testing.T, opts gitHubSyncHarnessOpts) *gitHubSyncHandlerHarness {
 	t.Helper()
 	d := openTestDB(t)
-	project, err := d.db.CreateProject(context.Background(), "spoke-project")
+	project, err := d.db.CreateProject(t.Context(), "spoke-project")
 	require.NoError(t, err)
 	h := &gitHubSyncHandlerHarness{
 		store:       d.db,
@@ -538,7 +538,7 @@ func newGitHubSyncHandlerHarnessWithOpts(t *testing.T, opts gitHubSyncHarnessOpt
 // PrincipalTrustedProxyAbsent, which the write-attribution guard must reject.
 func startGitHubSyncTrustedProxyServer(t *testing.T, cfg daemon.ServerConfig, headerName string) *httptest.Server {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	l, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	cfg.Auth = config.AuthConfig{
 		Proxy: config.ProxyConfig{
@@ -576,7 +576,7 @@ func (h *gitHubSyncHandlerHarness) runnerRunCount() int {
 
 func (h *gitHubSyncHandlerHarness) mustUpsertBinding(t *testing.T, enabled bool) db.IssueSyncBinding {
 	t.Helper()
-	binding, err := h.store.UpsertIssueSyncBinding(context.Background(), db.UpsertIssueSyncBindingParams{
+	binding, err := h.store.UpsertIssueSyncBinding(t.Context(), db.UpsertIssueSyncBindingParams{
 		ProjectID:       h.project.ID,
 		Provider:        "github",
 		SourceKey:       "github:R_exampleNode",
@@ -587,7 +587,7 @@ func (h *gitHubSyncHandlerHarness) mustUpsertBinding(t *testing.T, enabled bool)
 	})
 	require.NoError(t, err)
 	if !enabled {
-		binding, err = h.store.DisableIssueSyncBinding(context.Background(), h.project.ID)
+		binding, err = h.store.DisableIssueSyncBinding(t.Context(), h.project.ID)
 		require.NoError(t, err)
 	}
 	return binding
@@ -728,7 +728,7 @@ func TestGitHubSyncSinceValidatesBeforeNetwork(t *testing.T) {
 	h := newGitHubSyncHandlerHarness(t)
 	resp, body := postJSON(t, h.server, githubSyncEndpoint(h.project.ID, "enable"), map[string]any{"config": map[string]any{"owner": "example-owner", "repo": "example-repo", "since": "2026-01-01"}})
 	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-	binding, err := h.store.IssueSyncBindingByProject(context.Background(), h.project.ID)
+	binding, err := h.store.IssueSyncBindingByProject(t.Context(), h.project.ID)
 	require.NoError(t, err)
 	assert.Contains(t, string(binding.Config), `"since":"2026-01-01T00:00:00Z"`)
 }
@@ -751,7 +751,7 @@ func TestGitHubSyncSincePreservesOmittedAndClearsExplicitValues(t *testing.T) {
 
 			resp, body = postJSON(t, h.server, endpoint, map[string]any{"config": tt.config, "interval": "10m"})
 			require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-			binding, err := h.store.IssueSyncBindingByProject(context.Background(), h.project.ID)
+			binding, err := h.store.IssueSyncBindingByProject(t.Context(), h.project.ID)
 			require.NoError(t, err)
 			cfg, err := githubsync.DecodeConfig(binding.Config)
 			require.NoError(t, err)
@@ -765,7 +765,7 @@ func TestGitHubSyncProgressStatusFencesDurableClaim(t *testing.T) {
 	h := newGitHubSyncHandlerHarnessWithOpts(t, gitHubSyncHarnessOpts{progress: tracker})
 	binding := h.mustUpsertBinding(t, true)
 	at := time.Now().UTC().Truncate(time.Millisecond)
-	_, claimed, err := h.store.ClaimIssueSyncBinding(context.Background(), binding.ID, "github", at, at.Add(-time.Hour))
+	_, claimed, err := h.store.ClaimIssueSyncBinding(t.Context(), binding.ID, "github", at, at.Add(-time.Hour))
 	require.NoError(t, err)
 	require.True(t, claimed)
 	tracker.Begin(binding.ID, at)
@@ -795,7 +795,7 @@ func TestGitHubSyncProgressStatusFencesDurableClaim(t *testing.T) {
 	decodeJSON(t, body, &out)
 	assert.Equal(t, "running", out.Status.State)
 	assert.Nil(t, out.Status.Progress)
-	_, err = h.store.DisableIssueSyncBinding(context.Background(), h.project.ID)
+	_, err = h.store.DisableIssueSyncBinding(t.Context(), h.project.ID)
 	require.NoError(t, err)
 	_, body = getStatusBody(t, h.server, githubSyncEndpoint(h.project.ID, "status"))
 	decodeJSON(t, body, &out)
@@ -832,7 +832,7 @@ func TestGitHubSyncProgressVisibleWhileOnceIsFetching(t *testing.T) {
 	assert.Equal(t, "issues", out.Status.Progress.Phase)
 	close(h.fetcher.issuesRelease)
 	assert.Equal(t, http.StatusOK, <-done)
-	status, err := h.store.IssueSyncStatusByProject(context.Background(), h.project.ID)
+	status, err := h.store.IssueSyncStatusByProject(t.Context(), h.project.ID)
 	require.NoError(t, err)
 	assert.Nil(t, status.SyncStartedAt)
 	assert.Nil(t, tracker.Snapshot(binding.ID, time.Now()))

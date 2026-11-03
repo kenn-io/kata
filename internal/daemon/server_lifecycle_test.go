@@ -22,7 +22,7 @@ func TestServeWaitsForActiveHandlerDuringShutdown(t *testing.T) {
 		{name: "concurrent_close", closeError: true, timeout: time.Second},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 			require.NoError(t, err)
 			t.Cleanup(func() { _ = listener.Close() })
 
@@ -34,7 +34,7 @@ func TestServeWaitsForActiveHandlerDuringShutdown(t *testing.T) {
 				w.WriteHeader(http.StatusNoContent)
 			})
 			server := &Server{handler: handler}
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(t.Context())
 			done := make(chan error, 1)
 			serveListener := listener
 			if tt.closeError {
@@ -44,7 +44,9 @@ func TestServeWaitsForActiveHandlerDuringShutdown(t *testing.T) {
 
 			responseDone := make(chan error, 1)
 			go func() {
-				response, err := http.Get("http://" + listener.Addr().String())
+				req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+listener.Addr().String(), nil)
+				require.NoError(t, reqErr)
+				response, err := http.DefaultClient.Do(req)
 				if err == nil {
 					_ = response.Body.Close()
 				}
@@ -87,7 +89,7 @@ func (l closeErrorListener) Close() error {
 }
 
 func TestServeReportsHandlerThatOutlivesShutdownTimeout(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = listener.Close() })
 
@@ -98,11 +100,13 @@ func TestServeReportsHandlerThatOutlivesShutdownTimeout(t *testing.T) {
 		<-release
 	})
 	server := &Server{handler: handler, shutdownTimeout: 20 * time.Millisecond} //nolint:kennlint // deadlinetest: the handler stays blocked; shutdown deadline expiry must prevent safe dependency cleanup
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(ctx, listener) }()
 	go func() {
-		response, requestErr := http.Get("http://" + listener.Addr().String())
+		req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+listener.Addr().String(), nil)
+		require.NoError(t, reqErr)
+		response, requestErr := http.DefaultClient.Do(req)
 		if requestErr == nil {
 			_ = response.Body.Close()
 		}
@@ -126,9 +130,9 @@ func TestServeReportsHandlerThatOutlivesShutdownTimeout(t *testing.T) {
 }
 
 func TestServeListenersNotifiesAtFirstListenerExitBeforeHandlerDrain(t *testing.T) {
-	first, err := net.Listen("tcp", "127.0.0.1:0")
+	first, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
-	second, err := net.Listen("tcp", "127.0.0.1:0")
+	second, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 
 	entered := make(chan struct{})
@@ -141,7 +145,7 @@ func TestServeListenersNotifiesAtFirstListenerExitBeforeHandlerDrain(t *testing.
 	stopping := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
-		done <- server.ServeListenersWithStop(context.Background(), func() {
+		done <- server.ServeListenersWithStop(t.Context(), func() {
 			close(stopping)
 		},
 			ListenerBinding{Listener: first, Policy: ListenerPolicy{Kind: ListenerSocket}},
@@ -149,7 +153,9 @@ func TestServeListenersNotifiesAtFirstListenerExitBeforeHandlerDrain(t *testing.
 		)
 	}()
 	go func() {
-		response, requestErr := http.Get("http://" + second.Addr().String())
+		req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+second.Addr().String(), nil)
+		require.NoError(t, reqErr)
+		response, requestErr := http.DefaultClient.Do(req)
 		if requestErr == nil {
 			_ = response.Body.Close()
 		}
@@ -178,14 +184,14 @@ func TestServeListenersNotifiesAtFirstListenerExitBeforeHandlerDrain(t *testing.
 }
 
 func TestServeListenersDoesNotNotifyReadyBeforeHandlerValidation(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = listener.Close() })
 
 	server := &Server{handler: http.NotFoundHandler()}
 	ready := false
 	err = server.ServeListenersWithLifecycle(
-		context.Background(),
+		t.Context(),
 		func() error {
 			ready = true
 			return nil

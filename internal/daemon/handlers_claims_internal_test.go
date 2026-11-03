@@ -51,7 +51,7 @@ func TestBoundSpokeClaimPrincipalKeepsLegacyClientIdentity(t *testing.T) {
 }
 
 func TestApplyForwardedPendingClaimResponsePreservesCachedLease(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openClaimGateHelperDB(t)
 	project, issue := createClaimGateHelperIssue(t, store)
 	now := time.Now().UTC()
@@ -86,7 +86,7 @@ func TestApplyForwardedPendingClaimResponsePreservesCachedLease(t *testing.T) {
 func TestNewClaimHubClientHonorsTrustedPrivateNetwork(t *testing.T) {
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "1")
 
-	client, err := newClaimHubClient(context.Background(), "http://100.64.0.5:7787", "enrollment-token", false, nil)
+	client, err := newClaimHubClient(t.Context(), "http://100.64.0.5:7787", "enrollment-token", false, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, client)
@@ -94,7 +94,7 @@ func TestNewClaimHubClientHonorsTrustedPrivateNetwork(t *testing.T) {
 }
 
 func TestNewClaimHubClientHonorsAllowInsecureHostnameOptIn(t *testing.T) {
-	client, err := newClaimHubClient(context.Background(), "http://tailnet-hub.internal:7787", "enrollment-token", true, nil)
+	client, err := newClaimHubClient(t.Context(), "http://tailnet-hub.internal:7787", "enrollment-token", true, nil)
 
 	require.NoError(t, err)
 	require.NotNil(t, client)
@@ -118,7 +118,7 @@ func TestClaimHubClientNormalizesDeprecatedClaimFields(t *testing.T) {
 	}))
 	t.Cleanup(hub.Close)
 
-	client, err := newClaimHubClient(context.Background(), hub.URL, "enrollment-token", false, nil)
+	client, err := newClaimHubClient(t.Context(), hub.URL, "enrollment-token", false, nil)
 	require.NoError(t, err)
 
 	actions := []struct {
@@ -126,13 +126,13 @@ func TestClaimHubClientNormalizesDeprecatedClaimFields(t *testing.T) {
 		call func() (api.ClaimActionResponseBody, error)
 	}{
 		{"acquire", func() (api.ClaimActionResponseBody, error) {
-			return client.AcquireClaim(context.Background(), 42, "ABC", api.ClaimActionBody{})
+			return client.AcquireClaim(t.Context(), 42, "ABC", api.ClaimActionBody{})
 		}},
 		{"renew", func() (api.ClaimActionResponseBody, error) {
-			return client.RenewClaim(context.Background(), 42, "ABC", api.ClaimActionBody{})
+			return client.RenewClaim(t.Context(), 42, "ABC", api.ClaimActionBody{})
 		}},
 		{"release", func() (api.ClaimActionResponseBody, error) {
-			return client.ReleaseClaim(context.Background(), 42, "ABC", api.ClaimActionBody{})
+			return client.ReleaseClaim(t.Context(), 42, "ABC", api.ClaimActionBody{})
 		}},
 	}
 	for _, action := range actions {
@@ -144,7 +144,7 @@ func TestClaimHubClientNormalizesDeprecatedClaimFields(t *testing.T) {
 		})
 	}
 
-	status, err := client.ClaimStatus(context.Background(), 42, "ABC")
+	status, err := client.ClaimStatus(t.Context(), 42, "ABC")
 	require.NoError(t, err)
 	assert.Equal(t, legacyClaim, status.Lease)
 	assert.Equal(t, legacyClaim, status.Claim)
@@ -164,7 +164,7 @@ func TestClaimHubClientUsesUnixRuntimeForKataInvalid(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, ns.EnsureDirs())
 	sock := filepath.Join(ns.SocketDir, "daemon.sock")
-	ln, err := net.Listen("unix", sock)
+	ln, err := new(net.ListenConfig).Listen(t.Context(), "unix", sock)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ln.Close() })
 
@@ -191,7 +191,8 @@ func TestClaimHubClientUsesUnixRuntimeForKataInvalid(t *testing.T) {
 		ReadHeaderTimeout: time.Second,
 	}
 	go func() { _ = srv.Serve(ln) }()
-	t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
+	// t.Context() is already canceled when cleanup runs.
+	t.Cleanup(func() { _ = srv.Shutdown(context.WithoutCancel(t.Context())) })
 	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
 		PID:       os.Getpid(),
 		Network:   "unix",
@@ -201,9 +202,9 @@ func TestClaimHubClientUsesUnixRuntimeForKataInvalid(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	client, err := newClaimHubClient(context.Background(), "http://kata.invalid", "enrollment-token", false, nil)
+	client, err := newClaimHubClient(t.Context(), "http://kata.invalid", "enrollment-token", false, nil)
 	require.NoError(t, err)
-	_, err = client.AcquireClaim(context.Background(), 42, "ABC", api.ClaimActionBody{})
+	_, err = client.AcquireClaim(t.Context(), 42, "ABC", api.ClaimActionBody{})
 
 	require.NoError(t, err)
 	assert.Equal(t, "/api/v1/projects/42/issues/ABC/lease/actions/acquire", gotPath)
@@ -215,7 +216,7 @@ func TestClaimHubClientUsesUnixRuntimeForKataInvalid(t *testing.T) {
 // path normalizes a nil slice (a hub body with no events) to the empty
 // array rather than relying on the encoder's nil-slice rendering.
 func TestApplyForwardedAssignmentClaimNoOpNormalizesEmptyEvents(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, store.Close()) })
@@ -286,7 +287,7 @@ func forwardedHubWireEvent(
 // hooks keep their durable form; shipped middleware already rejects scoped
 // tokens on spokes, so this seam test exercises the response projection only.
 func TestApplyForwardedAssignmentClaimProjectsScopedResponseAndPublishesRaw(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, store.Close()) })
@@ -381,7 +382,7 @@ func receiveInternalMsg(t *testing.T, ch <-chan StreamMsg, label string) StreamM
 // materialized. That reload is recorded like every issue read, so the final
 // access recheck withholds it from a member who lost the project.
 func TestApplyForwardedAssignmentClaimRecordsReloadedIssue(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, store.Close()) })

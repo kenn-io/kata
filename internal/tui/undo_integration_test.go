@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -20,7 +19,7 @@ import (
 func TestCommentFormPreventsUndoingEarlierEdit(t *testing.T) {
 	for _, kind := range []string{"plain", "reply"} {
 		t.Run(kind, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			env := testenv.New(t)
 			base := NewClient(env.URL, env.HTTP)
 			project, err := base.EnsureProject(ctx, "example:project", "alice")
@@ -160,7 +159,7 @@ func TestTypedReplyPreflightFailurePreservesUndo(t *testing.T) {
 }
 
 func TestUndoClientRealDaemonCloseAndParentLink(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t)
 	project, err := env.DB.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
@@ -198,7 +197,7 @@ func TestUndoClientRealDaemonCloseAndParentLink(t *testing.T) {
 }
 
 func TestUndoClientRealDaemonScopedReopenRequiresEvidence(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	project, err := env.DB.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
@@ -245,7 +244,7 @@ func TestUndoClientRealDaemonScopedReopenRequiresEvidence(t *testing.T) {
 }
 
 func TestUndoClientRealDaemonBodyConflictWithoutRevisionChange(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t)
 	project, err := env.DB.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
@@ -271,7 +270,7 @@ func TestUndoClientRealDaemonBodyConflictWithoutRevisionChange(t *testing.T) {
 }
 
 func TestUndoClientRealDaemonDetectsStatusChangedAwayAndBack(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t)
 	project, err := env.DB.CreateProject(ctx, "example-project")
 	require.NoError(t, err)

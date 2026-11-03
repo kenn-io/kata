@@ -39,7 +39,7 @@ func (s *projectLookupGateStorage) ProjectByID(ctx context.Context, projectID in
 
 func mkProject(t *testing.T, env *testenv.Env, _ string, name string) int64 {
 	t.Helper()
-	p, err := env.DB.CreateProject(context.Background(), name)
+	p, err := env.DB.CreateProject(t.Context(), name)
 	require.NoError(t, err)
 	// Register env for issuePath's int64→short_id resolution.
 	currentEnvForIssuePath = env
@@ -59,7 +59,7 @@ func mkIssue(t *testing.T, env *testenv.Env, projectID int64, title string) db.I
 
 func mkIssueWithEvent(t *testing.T, env *testenv.Env, projectID int64, title string) (db.Issue, db.Event) {
 	t.Helper()
-	is, evt, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
+	is, evt, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: projectID, Title: title, Author: "tester",
 	})
 	require.NoError(t, err)
@@ -77,7 +77,7 @@ func setupLiveSSE(t *testing.T, env *testenv.Env) (int64, db.Issue, *sseFramer) 
 	pid := mkProject(t, env, "github.com/test/a", "a")
 	sentinelIssue, sentinelEvt := mkIssueWithEvent(t, env, pid, "sentinel")
 
-	hwm, err := env.DB.MaxEventID(context.Background())
+	hwm, err := env.DB.MaxEventID(t.Context())
 	require.NoError(t, err)
 	resp := openSSE(t, env, "after_id="+strconv.FormatInt(hwm-1, 10), nil)
 	t.Cleanup(func() { _ = resp.Body.Close() })
@@ -106,7 +106,7 @@ func TestPollEvents_ReturnsEventsAndAdvancesCursor(t *testing.T) {
 	pid := mkProject(t, env, "github.com/test/a", "a")
 	first := mkIssue(t, env, pid, "first")
 	mkIssue(t, env, pid, "second")
-	project, err := env.DB.ProjectByID(context.Background(), pid)
+	project, err := env.DB.ProjectByID(t.Context(), pid)
 	require.NoError(t, err)
 
 	var b struct {
@@ -139,7 +139,7 @@ func TestPollEvents_OmitsTokenEvents(t *testing.T) {
 	env := testenv.New(t)
 	pid := mkProject(t, env, "github.com/test/a", "a")
 	mkIssue(t, env, pid, "first")
-	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	_, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "secret-token",
 		Actor:          "wesm",
 		AdminActor:     db.BootstrapActor,
@@ -189,9 +189,9 @@ func TestPollEvents_UIDsIncludeRelatedIssue(t *testing.T) {
 	pid := mkProject(t, env, "github.com/test/a", "a")
 	from := mkIssue(t, env, pid, "from")
 	to := mkIssue(t, env, pid, "to")
-	project, err := env.DB.ProjectByID(context.Background(), pid)
+	project, err := env.DB.ProjectByID(t.Context(), pid)
 	require.NoError(t, err)
-	_, _, err = env.DB.CreateLinkAndEvent(context.Background(), db.CreateLinkParams{
+	_, _, err = env.DB.CreateLinkAndEvent(t.Context(), db.CreateLinkParams{
 		FromIssueID: from.ID, ToIssueID: to.ID, Type: "blocks", Author: "tester",
 	}, db.LinkEventParams{
 		EventType: "issue.linked", EventIssueID: from.ID,
@@ -233,7 +233,7 @@ func TestPollEvents_RelatedShortIDForCrossProjectLink(t *testing.T) {
 	pidB := mkProject(t, env, "github.com/test/b", "b")
 	from := mkIssue(t, env, pidA, "from")
 	to := mkIssue(t, env, pidB, "to")
-	_, _, err := env.DB.CreateLinkAndEvent(context.Background(), db.CreateLinkParams{
+	_, _, err := env.DB.CreateLinkAndEvent(t.Context(), db.CreateLinkParams{
 		FromIssueID: from.ID, ToIssueID: to.ID, Type: "blocks", Author: "tester",
 	}, db.LinkEventParams{
 		EventType: "issue.linked", EventIssueID: from.ID,
@@ -276,7 +276,7 @@ func TestPollEvents_IssueShortIDSurvivesMove(t *testing.T) {
 	pidA := mkProject(t, env, "github.com/test/a", "a")
 	pidB := mkProject(t, env, "github.com/test/b", "b")
 	issue := mkIssue(t, env, pidA, "movable")
-	moved, err := env.DB.MoveIssueProject(context.Background(), db.MoveIssueProjectIn{
+	moved, err := env.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
 		IssueID:       issue.ID,
 		FromProjectID: pidA,
 		ToProjectID:   pidB,
@@ -340,7 +340,7 @@ func TestPollEvents_ResetRequiredAfterPurge(t *testing.T) {
 	env := testenv.New(t)
 	pid := mkProject(t, env, "github.com/test/a", "a")
 	is := mkIssue(t, env, pid, "doomed")
-	_, err := env.DB.PurgeIssue(context.Background(), is.ID, "tester", nil)
+	_, err := env.DB.PurgeIssue(t.Context(), is.ID, "tester", nil)
 	require.NoError(t, err)
 
 	// Cursor below the reset → reset_required:true
@@ -433,7 +433,7 @@ func TestPollEvents_PerProject_UnknownProjectIs404(t *testing.T) {
 
 func TestPollEvents_PerProject_SystemProjectIs404(t *testing.T) {
 	env := testenv.New(t)
-	sys, err := env.DB.SystemProject(context.Background())
+	sys, err := env.DB.SystemProject(t.Context())
 	require.NoError(t, err)
 	resp, bs := envGetRaw(t, env,
 		"/api/v1/projects/"+strconv.FormatInt(sys.ID, 10)+"/events?after_id=0&limit=10")
@@ -529,7 +529,7 @@ func readSSEFramesUntilN(t *testing.T, body interface {
 
 func openSSE(t *testing.T, env *testenv.Env, query string, header http.Header) *http.Response {
 	t.Helper()
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		env.URL+"/api/v1/events/stream?"+query, nil)
 	require.NoError(t, err)
 	maps.Copy(req.Header, header)
@@ -641,7 +641,7 @@ func TestSSE_DrainOmitsTokenEvents(t *testing.T) {
 	env := testenv.New(t)
 	pid := mkProject(t, env, "github.com/test/a", "a")
 	mkIssue(t, env, pid, "first")
-	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	_, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "secret-token",
 		Actor:          "wesm",
 		AdminActor:     db.BootstrapActor,
@@ -682,7 +682,7 @@ func TestSSE_ResetWhenCursorInsidePurgeGap(t *testing.T) {
 	env := testenv.New(t)
 	pid := mkProject(t, env, "github.com/test/a", "a")
 	is := mkIssue(t, env, pid, "doomed")
-	_, err := env.DB.PurgeIssue(context.Background(), is.ID, "tester", nil)
+	_, err := env.DB.PurgeIssue(t.Context(), is.ID, "tester", nil)
 	require.NoError(t, err)
 
 	resp := openSSE(t, env, "after_id=0", nil)
@@ -831,9 +831,9 @@ func TestSSE_LivePhaseOmitsTokenEvents(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	framer := newSSEFramer(resp.Body)
 
-	sys, err := env.DB.SystemProject(context.Background())
+	sys, err := env.DB.SystemProject(t.Context())
 	require.NoError(t, err)
-	_, tokenEvt, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	_, tokenEvt, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "secret-token",
 		Actor:          "wesm",
 		AdminActor:     db.BootstrapActor,
@@ -855,12 +855,12 @@ func TestSSE_UnscopedDBTokenExpiryClosesStream(t *testing.T) {
 	projectID := mkProject(t, env, "example-project", "example-project")
 	token := strings.Repeat("x", 64)
 	expiresAt := time.Now().UTC().Add(750 * time.Millisecond)
-	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	_, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: token, Actor: "worker", AdminActor: db.BootstrapActor,
 		ExpiresAt: &expiresAt,
 	})
 	require.NoError(t, err)
-	afterID, err := env.DB.MaxEventID(context.Background())
+	afterID, err := env.DB.MaxEventID(t.Context())
 	require.NoError(t, err)
 
 	resp := openSSE(t, env, "after_id="+strconv.FormatInt(afterID, 10),
@@ -872,7 +872,7 @@ func TestSSE_UnscopedDBTokenExpiryClosesStream(t *testing.T) {
 	expiryWait := time.NewTimer(time.Until(expiresAt) + 10*time.Millisecond)
 	defer expiryWait.Stop()
 	<-expiryWait.C
-	_, event, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
+	_, event, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: projectID, Title: "after expiry", Author: "worker",
 	})
 	require.NoError(t, err)
@@ -907,7 +907,7 @@ func TestSSE_LiveResetClosesStream(t *testing.T) {
 	require.True(t, ok, "issue drain frame should arrive")
 	assert.Equal(t, "issue.created", second.event)
 
-	project, perr := env.DB.ProjectByID(context.Background(), pid)
+	project, perr := env.DB.ProjectByID(t.Context(), pid)
 	require.NoError(t, perr)
 	purgeResp, _ := envDoRaw(t, env, http.MethodPost,
 		issuePathRef(pid, is.ShortID, "actions/purge"),
@@ -941,7 +941,7 @@ func TestSSE_ParentReplaceEmitsTwoFrames(t *testing.T) {
 		map[string]any{"actor": "tester", "type": "parent", "to_ref": first.ShortID}, nil)
 
 	// Subscribe AFTER the initial link so we don't see its frame in the drain.
-	maxID, err := env.DB.MaxEventID(context.Background())
+	maxID, err := env.DB.MaxEventID(t.Context())
 	require.NoError(t, err)
 	sseResp := openSSE(t, env, "after_id="+strconv.FormatInt(maxID, 10), nil)
 	defer func() { _ = sseResp.Body.Close() }()
@@ -966,7 +966,7 @@ func TestSSE_UnknownProjectIDReturns404(t *testing.T) {
 
 func TestSSE_SystemProjectIDReturns404(t *testing.T) {
 	env := testenv.New(t)
-	sys, err := env.DB.SystemProject(context.Background())
+	sys, err := env.DB.SystemProject(t.Context())
 	require.NoError(t, err)
 	resp, bs := envDoRaw(t, env, http.MethodGet,
 		"/api/v1/events/stream?project_id="+strconv.FormatInt(sys.ID, 10), nil,

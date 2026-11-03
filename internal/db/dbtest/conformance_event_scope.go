@@ -15,7 +15,7 @@ import (
 // includes public authority pins needed to restore retained federation bindings.
 func RunArchivedFederationPinExport(t *testing.T, store db.Storage) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
 	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -51,7 +51,7 @@ func RunArchivedFederationPinExport(t *testing.T, store db.Storage) {
 // selected-issue history continue to omit events that cannot be projected.
 func RunEventReferenceProjectScope(t *testing.T, store db.Storage) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	visibleProject, err := store.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
 	hiddenProject, err := store.CreateProject(ctx, "hub-project")
@@ -305,7 +305,7 @@ func assertVisibleEventUIDs(t *testing.T, events []db.Event, hiddenUIDs, visible
 // no issue and registers nothing.
 func RunEventReleaseExposure(t *testing.T, store db.Storage) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	visibleProject, err := store.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
 	hiddenProject, err := store.CreateProject(ctx, "hub-project")
@@ -384,7 +384,7 @@ func RunEventReleaseExposure(t *testing.T, store db.Storage) {
 func RunUIDOnlyEventSubjectOutOfReach(t *testing.T, store db.Storage, backend Backend) {
 	t.Helper()
 	require.NotNil(t, backend.DetachEventIssueID, "backend must detach event issue IDs")
-	ctx := context.Background()
+	ctx := t.Context()
 	source, err := store.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
 	target, err := store.CreateProject(ctx, "example-workspace")

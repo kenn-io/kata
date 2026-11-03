@@ -34,7 +34,7 @@ func TestCronSchema30ExecutableCompatibility(t *testing.T) {
 	}
 	home := t.TempDir()
 	workspace := t.TempDir()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	address := listener.Addr().String()
 	require.NoError(t, listener.Close())
@@ -49,8 +49,9 @@ func TestCronSchema30ExecutableCompatibility(t *testing.T) {
 	//nolint:gosec // Owned test daemon binary, arguments and temporary directory.
 	log, err := os.Create(filepath.Join(home, "daemon.log"))
 	require.NoError(t, err)
+	// t.Cleanup owns this process; t.Context() would kill it before that runs.
 	//nolint:gosec // Owned test daemon binary, arguments and temporary directory.
-	process := exec.Command(binary, "daemon", "start", "--foreground", "--listen", address)
+	process := exec.CommandContext(context.WithoutCancel(t.Context()), binary, "daemon", "start", "--foreground", "--listen", address)
 	process.Env = env
 	process.Dir = workspace
 	process.Stdout = log

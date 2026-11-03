@@ -329,12 +329,25 @@ managed with `kata tokens ...`.
 Federation enrollment tokens authorize spoke-to-hub transport routes. Bridge
 connection or direct enrollment creates them. They are stored hashed on the hub
 and plaintext only in spoke federation credentials. They authorize pull, push,
-join metadata fetches and forwarded lease actions.
+join metadata fetches, forwarded lease actions and native recurring job writes.
 
 Each enrollment is bound to one account. Direct-spoke transport authors local
 events and lease requests as that account; the hub rejects a different event
 actor. Negotiated relays preserve the original source actor across hops. Their
 authenticated connection and root receipts establish accountable attribution.
+
+A direct project-scoped enrollment with `push` can create, replace, archive and
+restore [native recurring jobs](../reference/cron.md) on its enabled owning hub.
+The hub attributes each write to the enrollment's bound account. An omitted
+body `actor` uses that account; a different account is refused. The account
+must retain project access and the enrollment must remain live through commit.
+The hub validates the definition and creates its progress anchor atomically.
+Adapter jobs and workflows require ordinary daemon credentials. Relay grants
+cannot authorize native job writes, and a spoke never relays these requests
+onward. Hubs advertise this transport support as `native_cron_writes` in
+project federation metadata. When federation request signing is required,
+enrollment job writes must be signed on either listener; ordinary daemon
+credentials still work on the normal listener.
 
 Enrollment tokens are not general daemon API tokens.
 
@@ -2014,7 +2027,7 @@ fails with `root_key_not_local` for a project that this daemon does not root.
 kata federation identity
 kata federation enable --project <project>
 kata federation enroll --project <project> --spoke-instance <uid> --hub-url <url> \
-  --actor <actor> [--hub-token-env <env-name>] [--allow-insecure]
+  --actor <actor> [--spoke-name laptop] [--hub-token-env <env-name>] [--allow-insecure]
 kata federation join --project <project> --hub-url <url> --hub-project-id <id> \
   --token <token> --actor <actor> [--push]
 kata federation enroll --project <project> --spoke-instance <uid> \
@@ -2024,6 +2037,8 @@ kata federation join --project <project> --hub-url <http-hostname-url> \
 kata federation join --project <existing-project> --hub-url <url> \
   --hub-project-id <id> --token <token> --actor <actor> --push --adopt-existing
 kata federation enrollments list
+kata federation enrollments name <spoke-instance-uid> laptop
+kata federation enrollments name <spoke-instance-uid> --clear
 kata federation revoke <enrollment-id>
 kata federation leave <project> [--delete [--force]] [--local-only] [--hub <name>]
 kata federation rebind <project> --hub <name>
@@ -2040,6 +2055,24 @@ kata federation lease release <issue-ref>
 `kata federation enroll --project <project>` creates `<project>` on the hub
 when it does not already exist, then enables federation and creates the
 enrollment.
+
+Give a spoke a hub-local name with `federation enroll --spoke-name laptop`,
+or name an existing enrollment with `federation enrollments name <uid> laptop`.
+Use `--clear` instead of a name to remove it. Names start with a lowercase
+letter, contain only lowercase letters, digits and hyphens, and have at most
+32 characters. A name belongs to one instance across all of its enrollments
+on this hub and must be unique on the hub. Re-enrolling with a name replaces
+the instance's previous name; omitting the flag keeps it. A name stays while
+any enrollment for that instance remains, including revoked enrollments.
+Purging its last enrollment's project removes the name.
+
+Naming requires the same hub administration authority as listing and revoking
+enrollments. For a relay enrolled through an account credential, ask the hub
+owner to run the naming command after enrollment. Enrollment lists show names
+next to instance UIDs; JSON adds `spoke_name` when a name is set. Ordinary hub
+event responses (polling, issue history and SSE) add `origin_spoke_name` for
+named origins. Names stay on the hub and are included in owner backups; they
+are not replicated to spokes and do not change event hashes or attribution.
 
 `kata federation status` reports local bindings, enabled/push state, cursors,
 pending push depth, sync timestamps, enrollment counts, lease counts,

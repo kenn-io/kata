@@ -44,7 +44,7 @@ func TestOwnerFederationEnrollmentRotation(t *testing.T) {
 		ctx := t.Context()
 		_, err := store.EnableProjectFederation(ctx, f.public.ID, "member")
 		require.NoError(t, err)
-		old, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: federationTestSpokeUID, ProjectID: &f.public.ID, Actor: "member", Capabilities: "pull"})
+		old, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: federationTestSpokeUID, SpokeName: "laptop", ProjectID: &f.public.ID, Actor: "member", Capabilities: "pull"})
 		require.NoError(t, err)
 		request := map[string]any{"spoke_instance_uid": federationTestSpokeUID, "project_id": f.public.ID, "capabilities": "pull", "actor": "member", "token": "owner-replacement-fixture"}
 		status, _, raw := f.request(t, http.MethodPost, "/api/v1/federation/enrollments/actions/rotate", "admin", request, nil)
@@ -53,6 +53,7 @@ func TestOwnerFederationEnrollmentRotation(t *testing.T) {
 		require.NoError(t, json.Unmarshal(raw, &rotated))
 		assert.Equal(t, "member", rotated.Actor)
 		assert.Equal(t, "owner-replacement-fixture", rotated.Token)
+		assert.Equal(t, "laptop", rotated.SpokeName, "rotation keeps reporting the instance's hub-local name")
 		grant, err := store.AuthorizeFederationToken(ctx, rotated.Token, f.public.ID, "pull")
 		require.NoError(t, err)
 		assert.Equal(t, rotated.ID, grant.ID)

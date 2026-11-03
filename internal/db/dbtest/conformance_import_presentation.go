@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -15,7 +14,7 @@ import (
 // Exercise real provider mapping and storage: dropping same-version label
 // refresh leaves existing imports without tags when the presentation changes.
 func checkImportPresentationLabels(t *testing.T, store db.Storage) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	sourceAt := time.Date(2026, 7, 1, 10, 0, 0, 0, time.UTC)
 	for _, provider := range []string{"notion", "github"} {
 		for _, collision := range []string{"none", "local", "upstream"} {
@@ -192,7 +191,7 @@ func checkImportPresentationLabels(t *testing.T, store db.Storage) error {
 // Retaining the latest observed source time prevents a second older replay
 // from being mistaken for a current presentation refresh after a local edit.
 func checkImportPresentationLabelStaleReplay(t *testing.T, store db.Storage) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "example-stale-replay")
 	require.NoError(t, err)
 	config := notionsync.Config{DataSourceID: "11111111-1111-4111-8111-111111111111", DatabaseID: "22222222-2222-4222-8222-222222222222", TitlePropertyID: "title", StatusPropertyID: "status", AssigneePropertyID: "people", DoneStatusIDs: []string{"done"}, TitlePrefix: new(false)}

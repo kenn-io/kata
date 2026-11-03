@@ -31,7 +31,8 @@ func TestForeignOwnerHelperProcess(t *testing.T) {
 // a daemon in another PID namespace.
 func TestAutoStartRefusesStoreOwnedFromAnotherPIDNamespace(t *testing.T) {
 	setupKataEnv(t)
-	child := exec.Command(os.Args[0], "-test.run=^TestForeignOwnerHelperProcess$") //nolint:gosec // test binary
+	// t.Cleanup owns this process; t.Context() would kill it before that runs.
+	child := exec.CommandContext(context.WithoutCancel(t.Context()), os.Args[0], "-test.run=^TestForeignOwnerHelperProcess$") //nolint:gosec // test binary
 	child.Env = append(os.Environ(), "KATA_CLIENT_PIDNS_HELPER=1")
 	child.SysProcAttr = &syscall.SysProcAttr{
 		Cloneflags:  syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID,

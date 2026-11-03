@@ -45,7 +45,7 @@ func editorCmd(kind, template string, formGen int64) tea.Cmd {
 	}
 	_ = tmp.Close()
 	editor := resolveEditor()
-	//nolint:gosec // user-controlled $EDITOR is intentional
+	//nolint:gosec,noctx // user-controlled $EDITOR is intentional; tea.ExecProcess runs it interactively and Bubble Tea commands have no context.
 	cmd := exec.Command(editor[0], append(editor[1:], name)...)
 	return tea.ExecProcess(cmd, func(execErr error) tea.Msg {
 		defer func() { _ = os.Remove(name) }() //nolint:gosec // path is os.CreateTemp output

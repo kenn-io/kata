@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -22,7 +23,8 @@ import (
 // and returns its host PID; it runs until the test ends.
 func startForeignNamespaceProcess(t *testing.T) int {
 	t.Helper()
-	child := exec.Command(os.Args[0], "-test.run=^TestForeignNamespaceHelperProcess$") //nolint:gosec // test binary
+	// t.Cleanup owns this process; t.Context() would kill it before that runs.
+	child := exec.CommandContext(context.WithoutCancel(t.Context()), os.Args[0], "-test.run=^TestForeignNamespaceHelperProcess$") //nolint:gosec // test binary
 	child.Env = append(os.Environ(), "KATA_PIDNS_HELPER=1")
 	child.SysProcAttr = &syscall.SysProcAttr{
 		Cloneflags:  syscall.CLONE_NEWUSER | syscall.CLONE_NEWPID,

@@ -50,7 +50,7 @@ func TestLongRunningClientForLeavesResponseHeadersUnbounded(t *testing.T) {
 	resetFlags(t)
 	t.Setenv("KATA_HOME", t.TempDir())
 
-	c, err := longRunningClientFor(context.Background(), "http://127.0.0.1:7373")
+	c, err := longRunningClientFor(t.Context(), "http://127.0.0.1:7373")
 	if err != nil {
 		t.Fatalf("longRunningClientFor: %v", err)
 	}
@@ -539,7 +539,7 @@ func newUnixGeneratedTestClient(t *testing.T, handler http.Handler, timeout time
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, os.RemoveAll(socketDir)) })
 	socketPath := filepath.Join(socketDir, "daemon.sock")
-	listener, err := net.Listen("unix", socketPath)
+	listener, err := new(net.ListenConfig).Listen(t.Context(), "unix", socketPath)
 	require.NoError(t, err)
 	server := &http.Server{Handler: handler, ReadHeaderTimeout: time.Second}
 	go func() { _ = server.Serve(listener) }()

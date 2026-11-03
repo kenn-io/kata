@@ -18,6 +18,40 @@ All notable changes to kata, grouped by release. Versioned releases start with
   parent is closed, shows none. An issue-deadline trigger now says how long
   before the deadline it fires. See
   [CLI reference](reference/cli.md#daemon-and-diagnostics).
+- Keep the browser reachable when `kata daemon restart` runs from a sandbox or
+  container that sees the daemon's process IDs and executable paths. The daemon
+  uses the CLI's installed executable with its own environment and idle policy.
+  Explicit restart flags persist until stop/start, which also replaces older
+  daemons that support only restart signals. Separate PID or filesystem views
+  can prevent discovery or executable handoff.
+  `kata update` also reports the startup error when the daemon refuses to restart.
+- Wait up to 90 seconds for the replacement's startup check, daemon shutdown,
+  and replacement readiness during restart, extending the wait while an SQLite
+  migration runs.
+- Manage cron jobs, workflows and run evidence from MCP: load `kata.load_cron`
+  for 17 tools over the daemon's existing cron API. Native notification jobs
+  use the daemon scheduler; recording a run never starts work or changes who
+  owns an issue. See [MCP](reference/mcp.md#native-cron-through-mcp). Thanks to
+  [Rusty Shackleford](https://github.com/salmonumbrella).
+
+- Set, change or clear an issue's Scheduled and Deadline dates in `kata tui`
+  with `d`, from the list or the detail. Fields take the same values as
+  `kata schedule` and `kata deadline`, plus `today`, `tomorrow`, `+Nd` and `+Nw`
+  with a preview of the resolved day. A save is one revision-guarded patch of
+  the dates you changed, and `u` undoes it. The detail now shows both dates.
+  See the [CLI reference](reference/cli.md#daemon-and-diagnostics).
+- Create and edit cron jobs from `kata tui` with `n` and `e` on the Jobs tab.
+  The form covers recurring child issues, agent prompts, workflow runs, and
+  notifications. Edit long text in `$VISUAL` or `$EDITOR`, preserving tabs
+  and line endings. Unknown adapter `options` keys and exact numbers survive
+  an edit. If a revision changes while you edit, the form keeps your draft.
+  Inspect a supported current definition, then save your whole
+  draft against its revision. See [the `kata tui` keys](reference/cli.md#daemon-and-diagnostics).
+- Find what is due or planned in `kata tui` with the new **Date** choice in the
+  filter form (`f`). **today** lists open issues with a scheduled or deadline
+  date today or earlier in your local time zone; **scheduled** lists those with
+  a later date. It combines with status, owner, labels, and search, and rows now
+  show their dates. Daemon API `0.36.0` or newer is required.
 - Show what is stuck in any web collection, Inbox and Today included, with the
   optional **Blocked by** column. It lists each task's open blockers, three IDs
   at most and then `+N`; closed blockers are left out. It is off by default;
@@ -29,6 +63,17 @@ All notable changes to kata, grouped by release. Versioned releases start with
   resolve in the issue `timezone`, then the daemon `timezone`, then UTC, and
   need daemon API `0.36.0` or newer. See
   [Calendar dates on issue rows](reference/metadata.md#calendar-dates-on-issue-rows).
+
+- Start, change, and stop a recurrence from the CLI with `kata schedule <ref>
+  <date> --repeat '<rrule>'` and `kata schedule <ref> --repeat -`. The zone is
+  `--timezone`, the recurrence's own zone, the issue's `timezone` metadata, or
+  your own IANA zone (`TZ`, then the `/etc/localtime` link; an empty `TZ` means
+  UTC). `kata show` prints an issue's rule, start, zone, and next occurrence,
+  and `kata show --json` returns them under `recurrence`. See
+  [Repeat an issue](reference/cli.md#repeat-an-issue). `--if-match` is checked
+  again inside the transaction that starts the recurrence (daemon API 0.37.0),
+  and an issue moved to another project is repeated in its current project.
+
 - Get an immediate error when a daemon in another PID namespace, such as one in
   a sandbox or container sharing your `KATA_HOME`, already owns the store.
   `kata` commands, `kata daemon start`, and foreground startup previously
@@ -65,6 +110,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   inherits its `KATA_REF`, and reaches the same daemon, so the child no longer
   marks the lead's issue as needing a human. Rerun
   `kata agent-hook install pi` and restart pi to pick up the fix.
+- MCP clients can call `kata.skills` to list and read Kata's agent workflow
+  guides (searching first, claiming, attention, closing with evidence,
+  teammates, scheduling and events), each built from the same text
+  `kata quickstart` prints. See [Agent guides](reference/mcp.md#agent-guides-kataskills).
 
 - List the daemon catalog from Go with `client.DaemonCatalog()`, and connect
   to an entry by name with `client.DiscoverOptions{Daemon: name}`, which

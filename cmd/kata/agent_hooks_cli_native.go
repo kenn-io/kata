@@ -336,7 +336,7 @@ func newNativeAgentHooksMutationCmdWithTerminalCheck(remove bool, isTerminal fun
 				result.State = "partial"
 			}
 			if !remove && agentHookUsesKit(opts.Agent) {
-				hint, err := agentHookDuplicateHint(agenthook.Agent(opts.Agent), plan.Path, dir)
+				hint, err := agentHookDuplicateHint(cmd.Context(), agenthook.Agent(opts.Agent), plan.Path, dir)
 				if err != nil {
 					result.Warnings = append(result.Warnings, err.Error())
 				}
@@ -435,7 +435,7 @@ func newAgentHooksStatusCmd() *cobra.Command {
 			}
 			targets = append(targets, selected...)
 		}
-		report := collectAgentHookWorkspaceStatus(dir)
+		report := collectAgentHookWorkspaceStatus(cmd.Context(), dir)
 		report.Warnings = append(report.Warnings, "Offline status reports owned configured artifacts; it cannot confirm native loading, hook trust, or runtime permissions.")
 		var inspectionErrors []error
 		appendStatus := func(row agentHookHarnessStatus) {

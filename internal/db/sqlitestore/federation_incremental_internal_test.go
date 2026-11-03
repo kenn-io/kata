@@ -18,7 +18,7 @@ import (
 
 func incrementalTestStore(t testing.TB) (*Store, db.Project, db.Issue) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	d, err := Open(ctx, filepath.Join(t.TempDir(), "hub.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, d.Close()) })
@@ -52,7 +52,7 @@ func incrementalRemoteEvent(t testing.TB, p db.Project, issueUID, typ, payload s
 func TestFederationIngestRetriesPreparedSnapshot(t *testing.T) {
 	t.Parallel()
 	d, p, issue := incrementalTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	enrollment, err := d.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{Token: "test-enrollment-token", SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EZ", ProjectID: &p.ID, Capabilities: "pull,push", Actor: "tester"})
 	require.NoError(t, err)
 	ctx = db.WithTransactionFence(ctx, d.FederationEnrollmentTransactionFence(enrollment.Enrollment, p.ID, "push"))
@@ -83,7 +83,7 @@ func TestFederationIngestRetriesPreparedSnapshot(t *testing.T) {
 func TestFederationIngestSucceedsWhenEveryPreparedSnapshotIsStale(t *testing.T) {
 	t.Parallel()
 	d, p, issue := incrementalTestStore(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	other, err := d.CreateProject(ctx, "other-project")
 	require.NoError(t, err)
@@ -110,7 +110,7 @@ func TestFederationIngestSucceedsWhenEveryPreparedSnapshotIsStale(t *testing.T) 
 func TestFederationPreparationExcludesUntouchedRows(t *testing.T) {
 	t.Parallel()
 	d, p, issue := incrementalTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	other, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "untouched", Author: "tester"})
 	require.NoError(t, err)
 	_, _, err = d.CreateComment(ctx, db.CreateCommentParams{IssueID: other.ID, Author: "tester", Body: "retained"})
@@ -146,11 +146,11 @@ func TestFederationStatusIntentUsesPayloadUIDWhenEnvelopeOmitsIt(t *testing.T) {
 func testFederationStatusIntentUsesPayloadIdentityWhenEnvelopeOmitsIt(t *testing.T, payloadKey string) {
 	t.Parallel()
 	d, p, issue := incrementalTestStore(t)
-	ctx := context.Background()
-	_, err := d.Exec(`INSERT INTO issue_sync_bindings(project_id,provider,source_key,remote_id,display_name,config_json,interval_seconds)
+	ctx := t.Context()
+	_, err := d.ExecContext(t.Context(), `INSERT INTO issue_sync_bindings(project_id,provider,source_key,remote_id,display_name,config_json,interval_seconds)
 VALUES(?,'example','example:remote','remote','Remote','{"status_sync":"two-way"}',60)`, p.ID)
 	require.NoError(t, err)
-	res, err := d.Exec(`INSERT INTO import_mappings(source,external_id,object_type,project_id,issue_id)
+	res, err := d.ExecContext(t.Context(), `INSERT INTO import_mappings(source,external_id,object_type,project_id,issue_id)
 VALUES('example:remote','remote-issue','issue',?,?)`, p.ID, issue.ID)
 	require.NoError(t, err)
 	mappingID, err := res.LastInsertId()
@@ -165,11 +165,11 @@ VALUES('example:remote','remote-issue','issue',?,?)`, p.ID, issue.ID)
 	require.NoError(t, err)
 	require.Equal(t, 1, result.Accepted)
 	var status string
-	require.NoError(t, d.QueryRow(`SELECT status FROM issues WHERE id=?`, issue.ID).Scan(&status))
+	require.NoError(t, d.QueryRowContext(t.Context(), `SELECT status FROM issues WHERE id=?`, issue.ID).Scan(&status))
 	require.Equal(t, "closed", status, "the payload UID must identify the issue being materialized")
 
 	var pending string
-	require.NoError(t, d.QueryRow(`SELECT COALESCE(pending_event_uid,'') FROM import_mappings WHERE id=?`, mappingID).Scan(&pending))
+	require.NoError(t, d.QueryRowContext(t.Context(), `SELECT COALESCE(pending_event_uid,'') FROM import_mappings WHERE id=?`, mappingID).Scan(&pending))
 	require.Equal(t, ev.EventUID, pending, "accepted status event should enqueue intent for its payload issue")
 
 	tx, err := d.BeginTx(ctx, nil)
@@ -186,7 +186,7 @@ VALUES('example:remote','remote-issue','issue',?,?)`, p.ID, issue.ID)
 func TestFederationPreparationExcludesUntouchedLinks(t *testing.T) {
 	t.Parallel()
 	d, p, issue := incrementalTestStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	other, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "peer", Author: "tester"})
 	require.NoError(t, err)
 	_, _, err = d.CreateLinkAndEvent(ctx, db.CreateLinkParams{FromIssueID: issue.ID, ToIssueID: other.ID, Type: "related", Author: "tester"}, db.LinkEventParams{EventType: "issue.linked", EventIssueID: issue.ID, FromShortID: issue.ShortID, FromUID: issue.UID, ToShortID: other.ShortID, ToUID: other.UID, Actor: "tester"})
@@ -246,9 +246,9 @@ func ingestFullRebuildReference(ctx context.Context, d *Store, p db.FederationIn
 func cloneIncrementalStore(t testing.TB, d *Store) *Store {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "reference.db")
-	_, err := d.Exec(`VACUUM INTO ?`, path)
+	_, err := d.ExecContext(t.Context(), `VACUUM INTO ?`, path)
 	require.NoError(t, err)
-	reference, err := Open(context.Background(), path)
+	reference, err := Open(t.Context(), path)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, reference.Close()) })
 	return reference
@@ -256,7 +256,7 @@ func cloneIncrementalStore(t testing.TB, d *Store) *Store {
 
 func federationProjectionRows(t testing.TB, d *Store, projectID int64) [][][]any {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	tx, err := d.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	binding, err := scanFederationBinding(tx.QueryRowContext(ctx, federationBindingSelect+` WHERE project_id = ?`, projectID))
@@ -280,7 +280,7 @@ func federationProjectionRows(t testing.TB, d *Store, projectID int64) [][][]any
 		if strings.Contains(query, "OR t.project_id") {
 			args = append(args, projectID)
 		}
-		rows, err := d.Query(query, args...)
+		rows, err := d.QueryContext(t.Context(), query, args...)
 		require.NoError(t, err)
 		columns, err := rows.Columns()
 		require.NoError(t, err)
@@ -307,7 +307,7 @@ func federationProjectionRows(t testing.TB, d *Store, projectID int64) [][][]any
 		out = append(out, table)
 	}
 	for _, term := range []string{"work", "snapshot", "baseline", "comment", "edited"} {
-		rows, err := d.Query(`SELECT i.uid FROM issues_fts f JOIN issues i ON i.id=f.rowid WHERE issues_fts MATCH ? AND i.project_id=? ORDER BY i.uid`, term, projectID)
+		rows, err := d.QueryContext(t.Context(), `SELECT i.uid FROM issues_fts f JOIN issues i ON i.id=f.rowid WHERE issues_fts MATCH ? AND i.project_id=? ORDER BY i.uid`, term, projectID)
 		require.NoError(t, err)
 		var matches [][]any
 		for rows.Next() {
@@ -324,8 +324,8 @@ func federationProjectionRows(t testing.TB, d *Store, projectID int64) [][][]any
 
 func assertIncrementalBatch(t testing.TB, d, reference *Store, p db.FederationIngestParams) {
 	t.Helper()
-	got, err := d.IngestFederationEvents(context.Background(), p)
-	want, referenceErr := ingestFullRebuildReference(context.Background(), reference, p)
+	got, err := d.IngestFederationEvents(t.Context(), p)
+	want, referenceErr := ingestFullRebuildReference(t.Context(), reference, p)
 	require.NoError(t, err)
 	require.NoError(t, referenceErr)
 	require.Equal(t, want.Accepted, got.Accepted)
@@ -363,9 +363,9 @@ func checkFederationSequence(t *testing.T, data []byte) {
 	}
 	d, p, initial := incrementalTestStore(t)
 	// Exercise status-intent pointers on one mapped issue in every run.
-	_, err := d.Exec(`INSERT INTO issue_sync_bindings(project_id,provider,source_key,remote_id,display_name,config_json,interval_seconds) VALUES(?,'example','example','example','Example','{"status_sync":"two-way"}',60)`, p.ID)
+	_, err := d.ExecContext(t.Context(), `INSERT INTO issue_sync_bindings(project_id,provider,source_key,remote_id,display_name,config_json,interval_seconds) VALUES(?,'example','example','example','Example','{"status_sync":"two-way"}',60)`, p.ID)
 	require.NoError(t, err)
-	_, err = d.Exec(`INSERT INTO import_mappings(source,external_id,object_type,project_id,issue_id) VALUES('example','mapped','issue',?,?)`, p.ID, initial.ID)
+	_, err = d.ExecContext(t.Context(), `INSERT INTO import_mappings(source,external_id,object_type,project_id,issue_id) VALUES('example','mapped','issue',?,?)`, p.ID, initial.ID)
 	require.NoError(t, err)
 	reference := cloneIncrementalStore(t, d)
 	uids := []string{initial.UID, "01HZNQ7VFPK1XGD8R5MABC0001", "01HZNQ7VFPK1XGD8R5MABC0002", "01HZNQ7VFPK1XGD8R5MABC0003"}
@@ -459,7 +459,7 @@ func incrementalFuzzPayload(kind byte, uid, peer string, value int) (string, str
 
 func TestFederationIncrementalNewEndpointsAndShortIDCollisions(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	d, p, _ := incrementalTestStore(t)
 	peer, err := d.CreateProject(ctx, "peer-project")
 	require.NoError(t, err)
@@ -485,7 +485,7 @@ func TestFederationIncrementalNewEndpointsAndShortIDCollisions(t *testing.T) {
 	assertIncrementalBatch(t, d, reference, params)
 	require.Equal(t, federationProjectionRows(t, reference, p.ID), federationProjectionRows(t, d, p.ID))
 	var shortIDs []string
-	rows, err := d.Query(`SELECT short_id FROM issues WHERE uid IN (?,?) ORDER BY uid`, first, second)
+	rows, err := d.QueryContext(t.Context(), `SELECT short_id FROM issues WHERE uid IN (?,?) ORDER BY uid`, first, second)
 	require.NoError(t, err)
 	for rows.Next() {
 		var id string
@@ -496,6 +496,6 @@ func TestFederationIncrementalNewEndpointsAndShortIDCollisions(t *testing.T) {
 	require.Equal(t, "0001", shortIDs[0])
 	require.Greater(t, len(shortIDs[1]), 4)
 	var links int
-	require.NoError(t, d.QueryRow(`SELECT count(*) FROM links`).Scan(&links))
+	require.NoError(t, d.QueryRowContext(t.Context(), `SELECT count(*) FROM links`).Scan(&links))
 	require.Equal(t, 2, links)
 }

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"strings"
@@ -58,7 +57,7 @@ func executeAttentionAtDaemon(t *testing.T, env *testenv.Env, input io.Reader, a
 	t.Helper()
 	resetFlags(t)
 	cmd := newRootCmd()
-	cmd.SetContext(contextWithBaseURL(context.Background(), env.URL))
+	cmd.SetContext(contextWithBaseURL(t.Context(), env.URL))
 	var stdout, stderr bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)

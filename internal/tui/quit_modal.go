@@ -19,6 +19,7 @@ const (
 	modalQuitConfirm
 	modalDiscardComment
 	modalDiscardNewIssue
+	modalDiscardCronJob
 )
 
 // renderQuitConfirmModal returns the centered "Are you sure?" panel.
@@ -37,10 +38,14 @@ func renderQuitConfirmModal() string {
 }
 
 func renderDiscardCommentModal() string {
+	return renderDiscardDraftModal("Discard comment draft?", "Your unsaved comment will be lost.")
+}
+
+func renderDiscardDraftModal(prompt, warning string) string {
 	body := strings.Join([]string{
-		"Discard comment draft?",
+		prompt,
 		"",
-		"Your unsaved comment will be lost.",
+		warning,
 		"",
 		"[Y] Discard    [N] Keep editing",
 	}, "\n")
@@ -48,14 +53,7 @@ func renderDiscardCommentModal() string {
 }
 
 func renderDiscardNewIssueModal() string {
-	body := strings.Join([]string{
-		"Discard new issue draft?",
-		"",
-		"Your unsaved issue will be lost.",
-		"",
-		"[Y] Discard    [N] Keep editing",
-	}, "\n")
-	return modalBoxStyle.Render(body)
+	return renderDiscardDraftModal("Discard new issue draft?", "Your unsaved issue will be lost.")
 }
 
 func renderConfirmModal(kind modalKind) string {
@@ -66,6 +64,8 @@ func renderConfirmModal(kind modalKind) string {
 		return renderDiscardCommentModal()
 	case modalDiscardNewIssue:
 		return renderDiscardNewIssueModal()
+	case modalDiscardCronJob:
+		return renderDiscardDraftModal("Discard job draft?", "Your unsaved job changes will be lost.")
 	}
 	return ""
 }

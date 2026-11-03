@@ -18,7 +18,7 @@ import (
 
 func TestImportReplayInsertsGitHubSyncState(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openTestDB(t)
 	recs := []db.ImportRecord{
 		&db.ProjectExport{
@@ -85,7 +85,7 @@ func TestImportReplayInsertsGitHubSyncState(t *testing.T) {
 
 func TestImportReplayCanPreserveIssueSyncBindingEnabledForTrustedCutover(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openTestDB(t)
 	recs := []db.ImportRecord{
 		&db.ProjectExport{
@@ -124,7 +124,7 @@ func TestImportReplayCanPreserveIssueSyncBindingEnabledForTrustedCutover(t *test
 // fixture touches.
 func TestImportReplayInsertsEveryEntity(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	src, _, p, issue := setupTestIssue(t)
 	other, _, err := src.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "b", Author: "a"})
 	require.NoError(t, err)
@@ -147,7 +147,7 @@ func TestImportReplayInsertsEveryEntity(t *testing.T) {
 
 func TestImportReplayStoresTokenExpiryInSortableUTCFormat(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	src := openTestDB(t)
 	expiresAt := time.Date(2026, time.September, 15, 12, 34, 56, 789000000, time.FixedZone("test", 2*60*60))
 	token, _, err := src.CreateAPIToken(ctx, db.CreateAPITokenParams{
@@ -178,7 +178,7 @@ func TestImportReplayStoresTokenExpiryInSortableUTCFormat(t *testing.T) {
 // snapshot identity, the counts, and the SSE reset cursor).
 func TestImportReplayRoundTripsProjectPurgeLog(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	src := openTestDB(t)
 	project, err := src.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
@@ -250,7 +250,7 @@ func scanRoundTripProjectPurgeLog(ctx context.Context, d *sqlitestore.Store, id 
 // importing the peer project's envelope later self-heals the edge once.
 func TestImportReplay_SkipsDanglingCrossProjectLink(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	src := openTestDB(t)
 	alpha, err := src.CreateProject(ctx, "alpha")
 	require.NoError(t, err)
@@ -299,7 +299,7 @@ func TestImportReplay_SkipsDanglingCrossProjectLink(t *testing.T) {
 // UNIQUE(from_issue_id, to_issue_id, type).
 func TestImportReplay_DedupesRepeatedCrossProjectLink(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	src := openTestDB(t)
 	alpha, err := src.CreateProject(ctx, "alpha")
 	require.NoError(t, err)
@@ -333,7 +333,7 @@ func TestImportReplay_DedupesRepeatedCrossProjectLink(t *testing.T) {
 
 func TestImportReplayRejectsEventHashComputedBeforeResolvedIssueUID(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	src, _, _, _ := setupTestIssue(t)
 	recs := collectImportRecords(t, ctx, src)
 	staleEventID, _, _ := makeFirstIssueEventHashStale(t, recs)
@@ -348,7 +348,7 @@ func TestImportReplayRejectsEventHashComputedBeforeResolvedIssueUID(t *testing.T
 
 func TestImportReplayRecomputesLegacyEventHashAfterResolvedIssueUID(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	src, _, _, _ := setupTestIssue(t)
 	recs := collectImportRecords(t, ctx, src)
 	staleEventID, wantHash, wantIssueUID := makeFirstIssueEventHashStale(t, recs)
@@ -451,7 +451,7 @@ func tableCount(t *testing.T, ctx context.Context, d *sqlitestore.Store, table s
 // preserves the target's (the value db.Open wrote on first open).
 func TestImportReplayInstanceUID(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	src, _, _, _ := setupTestIssue(t)
 	srcUID := src.InstanceUID()
 	recs := collectImportRecords(t, ctx, src)
@@ -475,7 +475,7 @@ func TestImportReplayInstanceUID(t *testing.T) {
 // row directly — the value reconcile is uniquely responsible for raising.
 func TestImportReplayReconcilesSequence(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	src, _, p, _ := setupTestIssue(t)
 	for range 3 {
 		_, _, err := src.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "x", Author: "a"})
@@ -531,7 +531,7 @@ func tableMax(t *testing.T, ctx context.Context, d *sqlitestore.Store, table str
 // cleanly — a deferred-FK violation would only surface at commit.
 func TestImportReplayIsAtomic(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	src, _, _, _ := setupTestIssue(t)
 	recs := collectImportRecords(t, ctx, src)
 
@@ -566,7 +566,7 @@ func TestImportReplayIsAtomic(t *testing.T) {
 // fail with a slice-ordinal-bearing error and leave the target untouched.
 func TestImportReplayRejectsMalformedRecord(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	dst := openTestDB(t)
 	recs := []db.ImportRecord{
 		&db.MetaKV{Key: "instance_uid", Value: "x"},
@@ -587,7 +587,7 @@ func TestImportReplayRejectsMalformedRecord(t *testing.T) {
 // commit fails. With the fix, the mapping is silently skipped and a note is
 // emitted on stderr.
 func TestImportReplay_SkipsMappingForSkippedLink(t *testing.T) { //nolint:paralleltest // captureStderr swaps os.Stderr
-	ctx := context.Background()
+	ctx := t.Context()
 	src := openTestDB(t)
 	spoke, err := src.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
@@ -661,7 +661,7 @@ func captureStderr(t *testing.T) (*bytes.Buffer, func() *bytes.Buffer) {
 // aggregate note is emitted when only missing-peer skips occur, and the
 // duplicate-skip note is absent.
 func TestImportReplay_StderrNotesMissingPeerOnly(t *testing.T) { //nolint:paralleltest // captureStderr swaps os.Stderr
-	ctx := context.Background()
+	ctx := t.Context()
 	src := openTestDB(t)
 	alpha, err := src.CreateProject(ctx, "alpha")
 	require.NoError(t, err)
@@ -691,7 +691,7 @@ func TestImportReplay_StderrNotesMissingPeerOnly(t *testing.T) { //nolint:parall
 // aggregate note is emitted when only duplicate skips occur, and the
 // missing-peer note is absent.
 func TestImportReplay_StderrNotesDuplicateOnly(t *testing.T) { //nolint:paralleltest // captureStderr swaps os.Stderr
-	ctx := context.Background()
+	ctx := t.Context()
 	src := openTestDB(t)
 	alpha, err := src.CreateProject(ctx, "alpha")
 	require.NoError(t, err)
@@ -730,7 +730,7 @@ func TestImportReplay_StderrNotesDuplicateOnly(t *testing.T) { //nolint:parallel
 // TestImportReplay_StderrNotesMixed pins that both aggregate notes are emitted
 // with the correct individual counts when both skip reasons occur in one replay.
 func TestImportReplay_StderrNotesMixed(t *testing.T) { //nolint:paralleltest // captureStderr swaps os.Stderr
-	ctx := context.Background()
+	ctx := t.Context()
 	src := openTestDB(t)
 	alpha, err := src.CreateProject(ctx, "alpha")
 	require.NoError(t, err)
@@ -786,7 +786,7 @@ func TestImportReplay_StderrNotesMixed(t *testing.T) { //nolint:paralleltest // 
 func TestFKColumnResolverResolvesIssuesProjectID(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	resolver := sqlitestore.NewFKColumnResolver(d)
 
 	var found string
@@ -820,7 +820,7 @@ func TestFKColumnResolverResolvesIssuesProjectID(t *testing.T) {
 // exactly how a malicious envelope would be produced.
 func TestImportReplay_RejectsControlCharacterProjectName(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	src := openTestDB(t)
 	_, err := src.CreateProject(ctx, "evil\x1b]0;pwned\x07proj")
 	require.NoError(t, err)

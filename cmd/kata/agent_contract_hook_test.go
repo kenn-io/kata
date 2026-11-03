@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"maps"
 	"os"
@@ -35,7 +34,7 @@ func assertCodexPrompt(t *testing.T, output, prompt string) {
 func TestAgentContractHookBare(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
-	stdout, stderr, err := executeRootCapture(t, context.Background(), "agent-contract-hook")
+	stdout, stderr, err := executeRootCapture(t, t.Context(), "agent-contract-hook")
 	require.NoError(t, err)
 	assert.Empty(t, stderr)
 	assertCodexPrompt(t, stdout, agentContractText)
@@ -59,7 +58,7 @@ func TestAgentContractHookCustomSource(t *testing.T) {
 			}
 			resetRunEEntered(t)
 			resetFlags(t)
-			out, stderr, err := executeRootCapture(t, context.Background(), "agent-contract-hook", "--source", tc.path)
+			out, stderr, err := executeRootCapture(t, t.Context(), "agent-contract-hook", "--source", tc.path)
 			require.NoError(t, err)
 			assert.Empty(t, stderr)
 			assertCodexPrompt(t, out, tc.text)
@@ -67,7 +66,7 @@ func TestAgentContractHookCustomSource(t *testing.T) {
 	}
 	absolute := filepath.Join(t.TempDir(), "absolute prompt.txt")
 	require.NoError(t, os.WriteFile(absolute, []byte("absolute"), 0o600))
-	out, _, err := executeRootCapture(t, context.Background(), "agent-contract-hook", "--source", absolute)
+	out, _, err := executeRootCapture(t, t.Context(), "agent-contract-hook", "--source", absolute)
 	require.NoError(t, err)
 	assertCodexPrompt(t, out, "absolute")
 }
@@ -76,7 +75,7 @@ func TestAgentContractHooksLegacyMarkerKeepsBuiltInContract(t *testing.T) {
 	t.Chdir(t.TempDir())
 	for _, content := range []string{"authored replacement", ""} {
 		require.NoError(t, os.WriteFile("kata-agent-contract-hook", []byte(content), 0o600))
-		out, stderr, err := executeRootCapture(t, context.Background(), "agent-contract-hook", "--source", "kata-agent-contract-hook")
+		out, stderr, err := executeRootCapture(t, t.Context(), "agent-contract-hook", "--source", "kata-agent-contract-hook")
 		require.NoError(t, err, stderr)
 		assertCodexPrompt(t, out, agentContractText)
 		for _, agent := range []agenthook.Agent{agenthook.AgentClaude, agenthook.AgentCodex} {
@@ -101,7 +100,7 @@ func TestAgentContractHookFileErrors(t *testing.T) {
 			}
 			resetRunEEntered(t)
 			resetFlags(t)
-			out, stderr, err := executeRootCapture(t, context.Background(), "agent-contract-hook", "--source", path)
+			out, stderr, err := executeRootCapture(t, t.Context(), "agent-contract-hook", "--source", path)
 			require.Error(t, err)
 			assert.Empty(t, out)
 			assert.Contains(t, stderr, "source")
@@ -122,7 +121,7 @@ func TestAgentContractHookRejectsRelativeSourceEscapingCurrentDirectory(t *testi
 
 	resetRunEEntered(t)
 	resetFlags(t)
-	stdout, stderr, err := executeRootCapture(t, context.Background(), "agent-contract-hook", "--source", "prompt.txt")
+	stdout, stderr, err := executeRootCapture(t, t.Context(), "agent-contract-hook", "--source", "prompt.txt")
 	require.Error(t, err)
 	assert.Empty(t, stdout)
 	assert.Contains(t, stderr, "source")
@@ -139,7 +138,7 @@ func TestAgentContractHookRejectsRelativeParentSource(t *testing.T) {
 
 	resetRunEEntered(t)
 	resetFlags(t)
-	stdout, stderr, err := executeRootCapture(t, context.Background(), "agent-contract-hook", "--source", relative)
+	stdout, stderr, err := executeRootCapture(t, t.Context(), "agent-contract-hook", "--source", relative)
 	require.Error(t, err)
 	assert.Empty(t, stdout)
 	assert.Contains(t, stderr, "source")
@@ -151,12 +150,12 @@ func TestAgentContractHookUsage(t *testing.T) {
 		t.Run(args[0], func(t *testing.T) {
 			resetRunEEntered(t)
 			resetFlags(t)
-			out, _, err := executeRootCapture(t, context.Background(), append([]string{"agent-contract-hook"}, args...)...)
+			out, _, err := executeRootCapture(t, t.Context(), append([]string{"agent-contract-hook"}, args...)...)
 			require.Error(t, err)
 			assert.Empty(t, out)
 		})
 	}
-	out, _, err := executeRootCapture(t, context.Background(), "agent-contract-hook", "--help")
+	out, _, err := executeRootCapture(t, t.Context(), "agent-contract-hook", "--help")
 	require.NoError(t, err)
 	assert.Contains(t, out, "--source")
 	assert.Contains(t, out, "local")

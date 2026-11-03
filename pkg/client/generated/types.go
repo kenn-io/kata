@@ -1012,6 +1012,7 @@ type CreateFederationEnrollmentRequestBody struct {
 	ProjectID                    int64                   `json:"project_id"`
 	Relay                        *RelayEnrollmentOptions `json:"relay,omitempty"`
 	SpokeInstanceUID             string                  `json:"spoke_instance_uid" validate:"required"`
+	SpokeName                    *string                 `json:"spoke_name,omitempty"`
 	Token                        *string                 `json:"token,omitempty"`
 }
 
@@ -2292,6 +2293,7 @@ type EventEnvelope struct {
 	IssueShortID        *string         `json:"issue_short_id,omitempty"`
 	IssueUID            *string         `json:"issue_uid,omitempty"`
 	OriginInstanceUID   string          `json:"origin_instance_uid" validate:"required"`
+	OriginSpokeName     *string         `json:"origin_spoke_name,omitempty"`
 	Payload             json.RawMessage `json:"payload,omitempty"`
 	ProjectID           int64           `json:"project_id"`
 	ProjectName         string          `json:"project_name" validate:"required"`
@@ -2691,6 +2693,7 @@ type FederationEnrollmentOut struct {
 	Relay            *RelayHandshake             `json:"relay,omitempty"`
 	RevokedAt        *time.Time                  `json:"revoked_at,omitempty"`
 	SpokeInstanceUID string                      `json:"spoke_instance_uid" validate:"required"`
+	SpokeName        *string                     `json:"spoke_name,omitempty"`
 	Token            *string                     `json:"token,omitempty"`
 	UpdatedAt        time.Time                   `json:"updated_at" validate:"required"`
 }
@@ -2962,6 +2965,15 @@ func (f FederationRootKeyRepinResult) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type FederationSpokeNameOut struct {
+	SpokeInstanceUID string  `json:"spoke_instance_uid" validate:"required"`
+	SpokeName        *string `json:"spoke_name,omitempty"`
+}
+
+func (f FederationSpokeNameOut) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(f))
 }
 
 type FederationStatusBody struct {
@@ -4976,11 +4988,14 @@ func (p ProjectEmbeddingProducer) Validate() error {
 }
 
 type ProjectFederationBody struct {
-	BaselineThroughEventID int64           `json:"baseline_through_event_id"`
-	ProjectID              int64           `json:"project_id"`
-	ProjectName            string          `json:"project_name" validate:"required"`
-	ProjectUID             string          `json:"project_uid" validate:"required"`
-	Relay                  *RelayHandshake `json:"relay,omitempty"`
+	BaselineThroughEventID int64 `json:"baseline_through_event_id"`
+
+	// NativeCronWrites Supports native recurring job writes using direct project-scoped push enrollments.
+	NativeCronWrites *bool           `json:"native_cron_writes,omitempty"`
+	ProjectID        int64           `json:"project_id"`
+	ProjectName      string          `json:"project_name" validate:"required"`
+	ProjectUID       string          `json:"project_uid" validate:"required"`
+	Relay            *RelayHandshake `json:"relay,omitempty"`
 
 	// RelayLinksChecked True when relay_protocol_version was requested and the project has no cross-project issue links. Older daemons omit it.
 	RelayLinksChecked    *bool `json:"relay_links_checked,omitempty"`
@@ -6386,6 +6401,15 @@ func (s SearchResponseBody) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type SetFederationSpokeNameRequestBody struct {
+	// Name Lowercase spoke name: a letter, then up to 31 lowercase letters, digits or hyphens.
+	Name string `json:"name" validate:"required,min=1"`
+}
+
+func (s SetFederationSpokeNameRequestBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(s))
 }
 
 type SetProjectAccessRequestBody struct {

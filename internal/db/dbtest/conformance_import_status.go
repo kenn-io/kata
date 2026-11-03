@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"encoding/json/v2"
 	"testing"
 	"time"
@@ -16,7 +15,7 @@ import (
 // and the replayable issue.updated event.
 func checkImportStatusCloseClearsAssignmentExpiry(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "import-status-expiry")
 	require.NoError(t, err)
 	base := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
@@ -83,7 +82,7 @@ func checkImportStatusCloseClearsAssignmentExpiry(t *testing.T, store db.Storage
 // observation cannot be replayed over a later local reopen.
 func checkImportStatusObservationAcknowledgement(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "import-status-ack")
 	require.NoError(t, err)
 	base := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
@@ -140,7 +139,7 @@ func checkImportStatusObservationAcknowledgement(t *testing.T, store db.Storage)
 // later provider reopen still applies.
 func checkImportStatusKeepsLocalClosure(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "import-status-local-closure")
 	require.NoError(t, err)
 	base := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
@@ -191,7 +190,7 @@ func checkImportStatusKeepsLocalClosure(t *testing.T, store db.Storage) error {
 // Plane state-group edits leave work-item timestamps unchanged. Derived status
 // may refresh only while the source still owns the stored scalar version.
 func checkImportDerivedStatus(t *testing.T, store db.Storage) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := store.CreateProject(ctx, "example-derived-status")
 	require.NoError(t, err)
 	at := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)

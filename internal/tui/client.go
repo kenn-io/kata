@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -504,6 +505,38 @@ func (c *Client) SetPriority(ctx context.Context, projectID int64, ref string, p
 		return nil, err
 	}
 	wire, callErr := apiClient.SetIssuePriorityWithResponse(ctx, &generated.SetIssuePriorityRequestOptions{PathParams: &generated.SetIssuePriorityPath{ProjectID: projectID, Ref: ref}, Body: &generated.SetIssuePriorityBody{Actor: &actor, Priority: priority}})
+	if wire == nil {
+		return nil, callErr
+	}
+	var resp MutationResp
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// SetDates patches scheduled_on and deadline_on in one metadata request,
+// guarded by If-Match on the revision the caller read. A nil value clears
+// its key. A stale revision comes back as a 412 *APIError and writes nothing.
+func (c *Client) SetDates(ctx context.Context, projectID int64, ref string, in DatesInput) (*MutationResp, error) {
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	patch := make(map[string]any, len(in.Set))
+	for key, value := range in.Set {
+		if value == nil {
+			patch[key] = nil
+		} else {
+			patch[key] = *value
+		}
+	}
+	etag := fmt.Sprintf(`"rev-%d"`, in.IfMatchRevision)
+	wire, callErr := apiClient.PatchIssueMetadataWithResponse(ctx, &generated.PatchIssueMetadataRequestOptions{
+		PathParams: &generated.PatchIssueMetadataPath{ProjectID: projectID, Ref: ref},
+		Header:     &generated.PatchIssueMetadataHeaders{IfMatch: &etag},
+		Body:       &generated.PatchIssueMetadataBody{Actor: &in.Actor, Patch: patch},
+	})
 	if wire == nil {
 		return nil, callErr
 	}
@@ -1243,9 +1276,10 @@ func decodeError(body []byte, status int, method, path string) error {
 	var env struct {
 		Status int `json:"status"`
 		Error  struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-			Hint    string `json:"hint"`
+			Code    string         `json:"code"`
+			Message string         `json:"message"`
+			Hint    string         `json:"hint"`
+			Data    jsontext.Value `json:"data"`
 		} `json:"error"`
 	}
 	_ = json.Unmarshal(body, &env)
@@ -1256,6 +1290,7 @@ func decodeError(body []byte, status int, method, path string) error {
 		Code:    env.Error.Code,
 		Message: env.Error.Message,
 		Hint:    env.Error.Hint,
+		Data:    env.Error.Data,
 	}
 }
 
@@ -1264,22 +1299,38 @@ type mutationPreflightError struct{ error }
 
 func (e *mutationPreflightError) Unwrap() error { return e.error }
 
+// CheckDateFilter verifies that list rows include resolved planning dates.
+func (c *Client) CheckDateFilter(ctx context.Context) error {
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return err
+	}
+	return requireAPIVersion(ctx, apiClient, "0.36.0", "date filters require daemon API 0.36.0 or newer")
+}
+
+func requireAPIVersion(ctx context.Context, apiClient *generated.Client, minimum, requirement string) error {
+	health, err := apiClient.Health(ctx)
+	if err != nil {
+		return fmt.Errorf("%s: %w", requirement, err)
+	}
+	reported := ""
+	if health.APISchemaVersion != nil {
+		reported = *health.APISchemaVersion
+	}
+	if !semver.IsValid("v"+reported) || semver.Compare("v"+reported, "v"+minimum) < 0 {
+		return fmt.Errorf("%s; upgrade the daemon", requirement)
+	}
+	return nil
+}
+
 // AddCommentReply sends an attributed typed reply with a retry-stable key.
 func (c *Client) AddCommentReply(ctx context.Context, projectID int64, ref, body, actor, target, kind string, force bool, key string) (*MutationResp, error) {
 	apiClient, err := c.generatedClient()
 	if err != nil {
 		return nil, &mutationPreflightError{err}
 	}
-	health, err := apiClient.Health(ctx)
-	if err != nil {
+	if err := requireAPIVersion(ctx, apiClient, "0.28.0", "typed replies require daemon API 0.28.0 or newer"); err != nil {
 		return nil, &mutationPreflightError{err}
-	}
-	reported := ""
-	if health.APISchemaVersion != nil {
-		reported = *health.APISchemaVersion
-	}
-	if !semver.IsValid("v"+reported) || semver.Compare("v"+reported, "v0.28.0") < 0 {
-		return nil, &mutationPreflightError{fmt.Errorf("typed replies require daemon API 0.28.0 or newer; upgrade the daemon")}
 	}
 	replyKind := generated.CommentRequestBodyKind(kind)
 	wire, callErr := apiClient.CreateCommentWithResponse(ctx, &generated.CreateCommentRequestOptions{PathParams: &generated.CreateCommentPath{ProjectID: fmt.Sprint(projectID), Ref: ref}, Body: &generated.CreateCommentBody{Actor: &actor, Body: body, ReplyTo: &target, Kind: &replyKind, Force: &force}, Header: &generated.CreateCommentHeaders{IdempotencyKey: &key}})

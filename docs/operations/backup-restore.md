@@ -1,7 +1,7 @@
 ---
 title: Backup and restore
 description: Back up, restore, and move Kata data safely with JSONL export and import workflows.
-last_edited: 2026-10-27
+last_edited: 2026-10-31
 ---
 
 # Backup and restore
@@ -58,9 +58,12 @@ damaged database.
 An SQLite upgrade exports the old database and imports a replacement before
 publishing a ready daemon. Large databases can take minutes. Detached
 `kata daemon start` and `kata daemon restart` keep waiting while an SQLite
-migration is pending and report that progress on stderr. Cancelling the CLI
-stops waiting; it does not stop the detached daemon. Use `kata daemon logs`
-to inspect progress. A daemon that exits before readiness reports its startup
+migration is pending and report that progress on stderr. Cancelling detached
+startup stops waiting; the detached daemon keeps running. After a running-daemon restart
+starts, one Ctrl-C keeps the CLI waiting and holding the start lock until the
+restart completes or its readiness budget expires. That budget extends while an
+SQLite migration runs. Use `kata daemon logs` to inspect progress. A daemon
+that exits before readiness reports its startup
 error rather than a readiness timeout.
 
 Before upgrading, stop older daemons and offline import/export processes and

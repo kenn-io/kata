@@ -238,7 +238,7 @@ func TestConnectorMapFieldUsesExactBidirectionalPayload(t *testing.T) {
 	assert.Nil(t, cmd.Flags().Lookup("direction"))
 
 	f := newExternalCLIFixture(t)
-	out, err := runExternalCLI(context.Background(), t, f, "--agent", "connector", "field", "map", "example-connector", "scheduled_on", "--external", "start-date")
+	out, err := runExternalCLI(t.Context(), t, f, "--agent", "connector", "field", "map", "example-connector", "scheduled_on", "--external", "start-date")
 	require.NoError(t, err)
 	assert.Contains(t, out, "instance=example-connector")
 	assert.Contains(t, out, "field=scheduled_on")
@@ -249,7 +249,7 @@ func TestConnectorMapFieldUsesExactBidirectionalPayload(t *testing.T) {
 	assert.Equal(t, map[string]any{"external_field": "start-date"}, requests[0].Body)
 
 	f.resetRequests()
-	_, err = runExternalCLI(context.Background(), t, f, "connector", "field", "unmap", "example-connector", "scheduled_on")
+	_, err = runExternalCLI(t.Context(), t, f, "connector", "field", "unmap", "example-connector", "scheduled_on")
 	require.NoError(t, err)
 	requests = f.snapshotRequests()
 	require.Len(t, requests, 1)
@@ -270,7 +270,7 @@ func TestConnectorProcessCallsUseLongRunningClient(t *testing.T) {
 		{"connector", "field", "map", "example-connector", "scheduled_on", "--external", "start-date"},
 		{"connector", "field", "unmap", "example-connector", "scheduled_on"},
 	} {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 		_, err := runExternalCLI(ctx, t, f, args...)
 		cancel()
 		require.NoErrorf(t, err, "%v", args)
@@ -302,7 +302,7 @@ func TestConnectorEveryCommandRendersHumanJSONAndAgent(t *testing.T) {
 				if mode.flag != "" {
 					args = append([]string{mode.flag}, args...)
 				}
-				out, err := runExternalCLI(context.Background(), t, f, args...)
+				out, err := runExternalCLI(t.Context(), t, f, args...)
 				require.NoError(t, err)
 				for _, want := range mode.want {
 					assert.Contains(t, out, want)
@@ -323,7 +323,7 @@ func TestConnectorHumanOutputContainsOnlyPublicStatus(t *testing.T) {
 			if mode != "" {
 				args = append([]string{mode}, args...)
 			}
-			out, err := runExternalCLI(context.Background(), t, f, args...)
+			out, err := runExternalCLI(t.Context(), t, f, args...)
 			require.NoError(t, err)
 			for _, forbidden := range []string{"settings", "command", "arguments", "environment", "account_identity", "example-account"} {
 				assert.NotContains(t, out, forbidden)
@@ -337,7 +337,7 @@ func TestConnectorMissingInstanceKeepsSafeDaemonError(t *testing.T) {
 	f.fail(http.MethodGet, "/api/v1/connectors/example-connector", http.StatusNotFound, map[string]any{
 		"error": map[string]any{"code": "connector_not_found", "message": "connector instance was not found", "detail": "diagnostic-sentinel"},
 	})
-	_, err := runExternalCLI(context.Background(), t, f, "connector", "status", "example-connector")
+	_, err := runExternalCLI(t.Context(), t, f, "connector", "status", "example-connector")
 	require.Error(t, err)
 	var cli *cliError
 	require.ErrorAs(t, err, &cli)
@@ -383,7 +383,7 @@ func TestExternalCommandsRedactMalformedErrorBodiesInEveryOutputMode(t *testing.
 				if mode != "" {
 					args = append([]string{mode}, args...)
 				}
-				stdout, stderr, err := runExternalCLIWithErrorOutput(context.Background(), t, f, args...)
+				stdout, stderr, err := runExternalCLIWithErrorOutput(t.Context(), t, f, args...)
 				assert.Empty(t, stdout)
 				cli := requireCLIError(t, err, test.exit)
 				assert.Equal(t, test.kind, cli.Kind)

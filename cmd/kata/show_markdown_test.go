@@ -34,7 +34,7 @@ func TestExternalShowMarkdownRendererPassesArgvEnvAndStdin(t *testing.T) {
 	t.Setenv("SHOW_RENDER_ENV", "inherited")
 	renderer := helperRenderer(t, "echo", "argument with spaces")
 
-	got, err := renderer.Render(context.Background(), markdownComment, "**hello**", 80)
+	got, err := renderer.Render(t.Context(), markdownComment, "**hello**", 80)
 	require.NoError(t, err)
 	assert.Equal(t, "arg=argument with spaces env=inherited input=**hello**", got)
 }
@@ -44,7 +44,7 @@ func TestExternalShowMarkdownRendererSanitizesStdin(t *testing.T) {
 	renderer := helperRenderer(t, "echo", "argument")
 
 	got, err := renderer.Render(
-		context.Background(), markdownComment,
+		t.Context(), markdownComment,
 		"before\x1b[2Jafter\x1b]8;;https://evil.example/\x1b\\link\x1b]8;;\x1b\\\u202espoof&#27;[8mvisible\tok\nnext", 80,
 	)
 	require.NoError(t, err)
@@ -56,7 +56,7 @@ func TestExternalShowMarkdownRendererNormalizesFinalNewlineAtReinsertion(t *test
 	var got [][]string
 	for _, mode := range []string{"echo", "echo-newline"} {
 		renderer := helperRenderer(t, mode, "argument")
-		rendered, err := renderer.Render(context.Background(), markdownComment, "body", 80)
+		rendered, err := renderer.Render(t.Context(), markdownComment, "body", 80)
 		require.NoError(t, err)
 		got = append(got, markdownrender.ANSIWrappedLines(rendered, 80))
 	}
@@ -67,7 +67,7 @@ func TestExternalShowMarkdownRendererDiscardsStderr(t *testing.T) {
 	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
 	renderer := helperRenderer(t, "fail")
 
-	_, err := renderer.Render(context.Background(), markdownComment, "private body", 80)
+	_, err := renderer.Render(t.Context(), markdownComment, "private body", 80)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "renderer")
 	assert.Contains(t, err.Error(), "comment")
@@ -79,7 +79,7 @@ func TestExternalShowMarkdownRendererNamesMissingExecutable(t *testing.T) {
 	executable := filepath.Join(t.TempDir(), "missing-renderer")
 	renderer := newExternalShowMarkdownRenderer([]string{executable})
 
-	_, err := renderer.Render(context.Background(), markdownDescription, "private body", 80)
+	_, err := renderer.Render(t.Context(), markdownDescription, "private body", 80)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), strconv.Quote(executable))
 	assert.Contains(t, err.Error(), "description")
@@ -92,7 +92,7 @@ func TestExternalShowMarkdownRendererTimesOutPerInvocation(t *testing.T) {
 	renderer.timeout = 50 * time.Millisecond //nolint:kennlint // deadlinetest: the helper waits indefinitely; per-invocation deadline expiry is the asserted result
 
 	started := time.Now()
-	_, err := renderer.Render(context.Background(), markdownDescription, "body", 80)
+	_, err := renderer.Render(t.Context(), markdownDescription, "body", 80)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Less(t, time.Since(started), time.Second)
@@ -101,7 +101,7 @@ func TestExternalShowMarkdownRendererTimesOutPerInvocation(t *testing.T) {
 func TestExternalShowMarkdownRendererPreservesParentCancellation(t *testing.T) {
 	t.Setenv("GO_WANT_SHOW_MARKDOWN_HELPER", "1")
 	renderer := helperRenderer(t, "wait")
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	_, err := renderer.Render(ctx, markdownDescription, "body", 80)
@@ -112,7 +112,7 @@ func TestExternalShowMarkdownRendererPreservesParentCancellation(t *testing.T) {
 func TestBuiltinShowMarkdownRendererUsesSharedStyle(t *testing.T) {
 	rows := newRowRendererFor(colorprofile.ANSI256)
 	got, err := rows.markdownRenderer().Render(
-		context.Background(), markdownDescription, "## Steps", 80,
+		t.Context(), markdownDescription, "## Steps", 80,
 	)
 	require.NoError(t, err)
 	assert.Contains(t, textsafe.StripANSI(got), "Steps")
@@ -125,7 +125,7 @@ func TestBuiltinShowMarkdownRendererUsesSharedStyle(t *testing.T) {
 
 	noColorRows := newRowRendererFor(colorprofile.NoTTY)
 	plain, err := noColorRows.markdownRenderer().Render(
-		context.Background(), markdownDescription, "## Steps", 80,
+		t.Context(), markdownDescription, "## Steps", 80,
 	)
 	require.NoError(t, err)
 	var noColor bytes.Buffer
@@ -151,7 +151,7 @@ func TestBuiltinShowMarkdownRendererCodeBlockBackgroundFollowsColorMode(t *testi
 			t.Setenv("KATA_COLOR_MODE", tt.mode)
 			rows := newRowRendererFor(colorprofile.ANSI256)
 			rendered, err := rows.markdownRenderer().Render(
-				context.Background(), markdownDescription, "```text\ncode\n```", 80,
+				t.Context(), markdownDescription, "```text\ncode\n```", 80,
 			)
 			require.NoError(t, err)
 

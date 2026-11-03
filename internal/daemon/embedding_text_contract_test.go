@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -16,7 +15,7 @@ import (
 // search falls back to lexical until the new generation fills, then queries
 // carry the configured query affixes.
 func TestLiteralEmbeddingGenerationCutover(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	project, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)

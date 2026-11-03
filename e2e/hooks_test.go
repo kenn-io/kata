@@ -178,7 +178,8 @@ func buildKataBinary(t interface {
 			return
 		}
 		kataBuildBin = filepath.Join(kataBuildDir, "kata")
-		build := exec.Command("go", "build", "-o", kataBuildBin, "go.kenn.io/kata/cmd/kata") //nolint:gosec // G204: fixed args, test-only
+		// Every test in the process shares this build; no single test context owns it.
+		build := exec.CommandContext(context.Background(), "go", "build", "-o", kataBuildBin, "go.kenn.io/kata/cmd/kata") //nolint:gosec // G204: fixed args, test-only
 		var stderr bytes.Buffer
 		build.Stderr = &stderr
 		if err := build.Run(); err != nil {
@@ -196,8 +197,9 @@ func buildKataBinary(t interface {
 func startDaemon(t *testing.T, bin string, env []string) *safeBuffer {
 	t.Helper()
 	stderr := &safeBuffer{}
+	// t.Cleanup owns this process; t.Context() would kill it before that runs.
 	//nolint:gosec // G204: bin is buildKataBinary's output
-	cmd := exec.Command(bin, "daemon", "start", "--foreground")
+	cmd := exec.CommandContext(context.WithoutCancel(t.Context()), bin, "daemon", "start", "--foreground")
 	cmd.Env = env
 	cmd.Stderr = stderr
 	cmd.Stdout = io.Discard
@@ -321,7 +323,7 @@ func newUnixTransport(path string) *http.Transport {
 func initProjectE2E(t *testing.T, client *http.Client, baseURL, repoDir string) int64 {
 	t.Helper()
 	body := strings.NewReader(`{"start_path":"` + repoDir + `","actor":"user-a"}`)
-	req, err := http.NewRequestWithContext(context.Background(),
+	req, err := http.NewRequestWithContext(t.Context(),
 		http.MethodPost, baseURL+"/api/v1/projects", body)
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
@@ -348,7 +350,7 @@ func createIssueE2E(t *testing.T, client *http.Client, baseURL string, pid int64
 	t.Helper()
 	url := baseURL + "/api/v1/projects/" + strconv.FormatInt(pid, 10) + "/issues"
 	body := strings.NewReader(`{"actor":"tester","title":"e2e"}`)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, body)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, url, body)
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req) //nolint:gosec // G704: test-only unix socket, fixed URL
@@ -409,7 +411,7 @@ func verifyRunsJSONL(t *testing.T, d e2eDirs) {
 // roundtrips, which is the design intent of `daemon logs --hooks`.
 func verifyDaemonLogsHooks(t *testing.T, bin string, env []string) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	//nolint:gosec // G204: bin is the test-built binary
 	logs := exec.CommandContext(ctx, bin, "daemon", "logs", "--hooks")

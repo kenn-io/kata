@@ -1,7 +1,6 @@
 package sqlitestore_test
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -13,7 +12,7 @@ import (
 func TestCreateLink_RoundTrips(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p := createKataProject(ctx, t, d)
 	a := makeIssue(t, ctx, d, p.ID, "child", "tester")
 	b := makeIssue(t, ctx, d, p.ID, "parent", "tester")
@@ -56,7 +55,7 @@ func TestLinksRejectMismatchedUIDCache(t *testing.T) {
 func TestCreateLink_DuplicateIsErrLinkExists(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p := createKataProject(ctx, t, d)
 	a := makeIssue(t, ctx, d, p.ID, "a", "tester")
 	b := makeIssue(t, ctx, d, p.ID, "b", "tester")
@@ -71,7 +70,7 @@ func TestCreateLink_DuplicateIsErrLinkExists(t *testing.T) {
 func TestCreateLink_SecondParentIsErrParentAlreadySet(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p := createKataProject(ctx, t, d)
 	child := makeIssue(t, ctx, d, p.ID, "child", "tester")
 	p1 := makeIssue(t, ctx, d, p.ID, "p1", "tester")
@@ -108,7 +107,7 @@ func TestCreateLink_ExactDuplicateParentIsErrLinkExists(t *testing.T) {
 func TestCreateLink_CrossProject(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	pa := createProject(ctx, t, d, "alpha")
 	pb := createProject(ctx, t, d, "beta")
@@ -300,7 +299,7 @@ func TestDeleteLinkByID_RemovesRow(t *testing.T) {
 func TestRelationshipQueries_CrossProjectPeersVisible(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	alpha := createProject(ctx, t, d, "alpha")
 	beta := createProject(ctx, t, d, "beta")
@@ -419,7 +418,7 @@ func TestRelationshipQueries_CrossProjectPeersVisible(t *testing.T) {
 func TestOpenChildrenOf_ExcludesArchivedProjectChildren(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	pa := createProject(ctx, t, d, "alpha")
 	pb := createProject(ctx, t, d, "beta")
 	parent := makeIssue(t, ctx, d, pa.ID, "parent", "tester")
@@ -441,7 +440,7 @@ func TestOpenChildrenOf_ExcludesArchivedProjectChildren(t *testing.T) {
 func TestChildrenOfIssue_ExcludesArchivedProjectChildren(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	pa := createProject(ctx, t, d, "alpha")
 	pb := createProject(ctx, t, d, "beta")
 	parent := makeIssue(t, ctx, d, pa.ID, "parent", "tester")
@@ -462,7 +461,7 @@ func TestChildrenOfIssue_ExcludesArchivedProjectChildren(t *testing.T) {
 func TestRelationshipsByIssues_ExcludesArchivedProjectChildren(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	pa := createProject(ctx, t, d, "alpha")
 	pb := createProject(ctx, t, d, "beta")
 	parent := makeIssue(t, ctx, d, pa.ID, "parent", "tester")

@@ -2,7 +2,6 @@ package federation
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"io"
@@ -36,9 +35,9 @@ func TestFederationClientPollProjectEvents(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client, err := NewClient(context.Background(), srv.URL, "hub-token", clientpkg.Opts{})
+	client, err := NewClient(t.Context(), srv.URL, "hub-token", clientpkg.Opts{})
 	require.NoError(t, err)
-	body, err := client.PollProjectEvents(context.Background(), 42, 7, 2)
+	body, err := client.PollProjectEvents(t.Context(), 42, 7, 2)
 	require.NoError(t, err)
 
 	assert.Equal(t, "Bearer hub-token", gotAuth)
@@ -68,11 +67,11 @@ func TestFederationClientSignsRelayBatchAbovePreviousBodyLimit(t *testing.T) {
 	source := signingpolicy.Source{
 		KeyID: "relay-batch-key", KeyEnv: "TEST_RELAY_BATCH_SIGNING_KEY", HubURL: hub.URL,
 	}
-	client, err := NewClient(context.Background(), hub.URL, "relay-enrollment-token", clientpkg.Opts{
+	client, err := NewClient(t.Context(), hub.URL, "relay-enrollment-token", clientpkg.Opts{
 		FederationSigning: &source,
 	})
 	require.NoError(t, err)
-	_, err = client.AcceptRelayDeliveries(context.Background(), 42, db.RelayBatch{
+	_, err = client.AcceptRelayDeliveries(t.Context(), 42, db.RelayBatch{
 		Stream: db.RelayStreamEvent,
 		Envelopes: []db.RelayEnvelope{{
 			Version: 1, BindingUID: "01HZNQ7VFPK1XGD8R5MABCD4EA",
@@ -121,9 +120,9 @@ func TestFederationClientIngestProjectEvents(t *testing.T) {
 		Payload:           jsontext.Value(`{"title":"pushed"}`),
 	}}
 
-	client, err := NewClient(context.Background(), srv.URL, "hub-token", clientpkg.Opts{})
+	client, err := NewClient(t.Context(), srv.URL, "hub-token", clientpkg.Opts{})
 	require.NoError(t, err)
-	got, err := client.IngestProjectEventsWithOptions(context.Background(), 42, events, IngestProjectEventsOptions{
+	got, err := client.IngestProjectEventsWithOptions(t.Context(), 42, events, IngestProjectEventsOptions{
 		AdoptionBaseline:           api.FederationAdoptionBaselineOpen,
 		AdoptionBaselineEndEventID: 8,
 	})
@@ -151,9 +150,9 @@ func TestFederationClientIngestProjectEventsError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client, err := NewClient(context.Background(), srv.URL, "hub-token", clientpkg.Opts{})
+	client, err := NewClient(t.Context(), srv.URL, "hub-token", clientpkg.Opts{})
 	require.NoError(t, err)
-	_, err = client.IngestProjectEvents(context.Background(), 42, []api.FederationIngestEventEnvelope{{
+	_, err = client.IngestProjectEvents(t.Context(), 42, []api.FederationIngestEventEnvelope{{
 		EventID: 1, Type: "issue.created",
 	}})
 
@@ -174,9 +173,9 @@ func TestFederationClientProjectFederation(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client, err := NewClient(context.Background(), srv.URL, "", clientpkg.Opts{})
+	client, err := NewClient(t.Context(), srv.URL, "", clientpkg.Opts{})
 	require.NoError(t, err)
-	body, err := client.ProjectFederation(context.Background(), 42)
+	body, err := client.ProjectFederation(t.Context(), 42)
 	require.NoError(t, err)
 
 	assert.Equal(t, int64(42), body.ProjectID)
@@ -197,10 +196,10 @@ func TestFederationClientPreservesConfiguredPathPrefix(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	client, err := NewClient(
-		context.Background(), srv.URL+"/proxy//segment/../mount", "hub-token", clientpkg.Opts{},
+		t.Context(), srv.URL+"/proxy//segment/../mount", "hub-token", clientpkg.Opts{},
 	)
 	require.NoError(t, err)
-	_, err = client.ProjectFederation(context.Background(), 42)
+	_, err = client.ProjectFederation(t.Context(), 42)
 	require.NoError(t, err)
 
 	assert.Equal(
@@ -216,9 +215,9 @@ func TestFederationClientPostJSONRejectsNonJSONResponse(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client, err := NewClient(context.Background(), srv.URL, "hub-token", clientpkg.Opts{})
+	client, err := NewClient(t.Context(), srv.URL, "hub-token", clientpkg.Opts{})
 	require.NoError(t, err)
-	_, err = client.IngestProjectEvents(context.Background(), 42, nil)
+	_, err = client.IngestProjectEvents(t.Context(), 42, nil)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "decode hub")
@@ -246,9 +245,9 @@ func TestFederationClientIngestDeclaresCommentReplyWireVersion(t *testing.T) {
 			}))
 			t.Cleanup(srv.Close)
 			issueUID := "01HZNQ7VFPK1XGD8R5MABCD4EY"
-			client, err := NewClient(context.Background(), srv.URL, "hub-token", clientpkg.Opts{})
+			client, err := NewClient(t.Context(), srv.URL, "hub-token", clientpkg.Opts{})
 			require.NoError(t, err)
-			_, err = client.IngestProjectEvents(context.Background(), 42, []api.FederationIngestEventEnvelope{{
+			_, err = client.IngestProjectEvents(t.Context(), 42, []api.FederationIngestEventEnvelope{{
 				EventID: 8, EventUID: "01HZNQ7VFPK1XGD8R5MABCD4EX", IssueUID: &issueUID,
 				Type: tc.eventType, Actor: "spoke", Payload: jsontext.Value(tc.payload),
 			}})

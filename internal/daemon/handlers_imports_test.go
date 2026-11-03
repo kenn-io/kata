@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"encoding/json"
 	"maps"
 	"net/http"
@@ -68,10 +67,10 @@ func TestImportEndpoint_CreatesAndReimports(t *testing.T) {
 	assert.Equal(t, 1, second.Unchanged)
 	assert.Equal(t, 0, second.Comments)
 
-	issue, err := env.DB.IssueByShortID(context.Background(), pid, out.Items[0].IssueShortID, db.IncludeDeletedNo)
+	issue, err := env.DB.IssueByShortID(t.Context(), pid, out.Items[0].IssueShortID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	var commentCount int
-	err = env.DB.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM comments WHERE issue_id = ?`, issue.ID).Scan(&commentCount)
+	err = env.DB.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM comments WHERE issue_id = ?`, issue.ID).Scan(&commentCount)
 	require.NoError(t, err)
 	assert.Equal(t, 1, commentCount, "reimport should not duplicate mapped comments")
 }
@@ -162,7 +161,7 @@ func TestImportEndpoint_SourceNewerUpdatesIssue(t *testing.T) {
 	envPostJSON(t, env, importEndpointPath(pid), body, &second)
 	assert.Equal(t, 1, second.Updated)
 
-	issue, err := env.DB.IssueByShortID(context.Background(), pid, first.Items[0].IssueShortID, db.IncludeDeletedNo)
+	issue, err := env.DB.IssueByShortID(t.Context(), pid, first.Items[0].IssueShortID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	assert.Equal(t, "New title", issue.Title)
 	assert.Equal(t, "new body", issue.Body)
@@ -185,19 +184,19 @@ func TestImportEndpoint_ExternalRootContentOwnedReturnsNeutralConflict(t *testin
 	}
 	envPostJSON(t, env, importEndpointPath(project.ID), initial, &struct{}{})
 	mapping, err := env.DB.ImportMappingBySource(
-		context.Background(), project.ID, "example-import", "issue", "bound-root",
+		t.Context(), project.ID, "example-import", "issue", "bound-root",
 	)
 	require.NoError(t, err)
 	require.NotNil(t, mapping.IssueID)
-	issue, err := env.DB.IssueByID(context.Background(), *mapping.IssueID)
+	issue, err := env.DB.IssueByID(t.Context(), *mapping.IssueID)
 	require.NoError(t, err)
-	_, _, err = env.DB.CreateExternalRootBinding(context.Background(), db.CreateExternalRootBindingParams{
+	_, _, err = env.DB.CreateExternalRootBinding(t.Context(), db.CreateExternalRootBindingParams{
 		ProjectID: project.ID, IssueID: issue.ID, ConnectorInstance: "example-connector",
 		ExternalRootKey: "opaque-root-key", ExternalAccountKey: "opaque-account-key",
 		Actor: "tester", ReceiveCommentsAfter: time.Date(2026, 8, 20, 8, 0, 0, 0, time.UTC),
 	})
 	require.NoError(t, err)
-	beforeEventID, err := env.DB.MaxEventID(context.Background())
+	beforeEventID, err := env.DB.MaxEventID(t.Context())
 	require.NoError(t, err)
 
 	priority := int64(2)
@@ -218,19 +217,19 @@ func TestImportEndpoint_ExternalRootContentOwnedReturnsNeutralConflict(t *testin
 	assert.Contains(t, string(raw), "kata bridge unbind")
 	assert.NotContains(t, string(raw), "example-connector")
 	assert.NotContains(t, string(raw), "opaque-root-key")
-	after, readErr := env.DB.IssueByID(context.Background(), issue.ID)
+	after, readErr := env.DB.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, readErr)
 	assert.Equal(t, issue.Title, after.Title)
 	assert.Equal(t, issue.Body, after.Body)
 	assert.Equal(t, issue.Priority, after.Priority)
 	assert.Equal(t, issue.Revision, after.Revision)
-	afterEventID, readErr := env.DB.MaxEventID(context.Background())
+	afterEventID, readErr := env.DB.MaxEventID(t.Context())
 	require.NoError(t, readErr)
 	assert.Equal(t, beforeEventID, afterEventID)
 }
 
 func TestImportEndpoint_FederatedExistingIssueAllowsUnclaimedUpdate(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t)
 	project := createImportTestProject(t, env, "github.com/wesm/kata", "kata")
 	initial := map[string]any{
@@ -291,7 +290,7 @@ func TestImportEndpoint_FederatedExistingIssueAllowsUnclaimedUpdate(t *testing.T
 }
 
 func TestImportEndpoint_FederatedExistingIssueDeniesOtherLeaseHolder(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t)
 	project := createImportTestProject(t, env, "github.com/wesm/kata", "kata")
 	initial := map[string]any{
@@ -360,7 +359,7 @@ func TestImportEndpoint_FederatedExistingIssueDeniesOtherLeaseHolder(t *testing.
 }
 
 func TestImportEndpoint_FederatedCommentOnlyImportBypassesOtherLeaseHolder(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t)
 	project := createImportTestProject(t, env, "github.com/wesm/kata", "kata")
 	initial := map[string]any{
@@ -454,7 +453,7 @@ func TestImportEndpoint_FederatedIdempotentReimportDoesNotRequireLease(t *testin
 		}},
 	}
 	envPostJSON(t, env, importEndpointPath(project.ID), body, &struct{}{})
-	_, err := env.DB.EnableProjectFederation(context.Background(), project.ID, "tester")
+	_, err := env.DB.EnableProjectFederation(t.Context(), project.ID, "tester")
 	require.NoError(t, err)
 	var out struct {
 		Unchanged int `json:"unchanged"`
@@ -484,7 +483,7 @@ func TestImportEndpoint_FederatedNewIssueLinkTargetDoesNotRequireTargetLease(t *
 		}},
 	}
 	envPostJSON(t, env, importEndpointPath(project.ID), parent, &struct{}{})
-	_, err := env.DB.EnableProjectFederation(context.Background(), project.ID, "tester")
+	_, err := env.DB.EnableProjectFederation(t.Context(), project.ID, "tester")
 	require.NoError(t, err)
 	child := map[string]any{
 		"actor":  "importer",
@@ -515,7 +514,7 @@ func TestImportEndpoint_FederatedNewIssueLinkTargetDoesNotRequireTargetLease(t *
 }
 
 func TestImportEndpoint_FederatedImportLinkAddDeniesOtherPeerLeaseHolder(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t)
 	project := createImportTestProject(t, env, "github.com/wesm/kata", "kata")
 	parent := map[string]any{
@@ -577,7 +576,7 @@ func TestImportEndpoint_FederatedImportLinkAddDeniesOtherPeerLeaseHolder(t *test
 }
 
 func TestImportEndpoint_FederatedImportLinkRemovalDeniesOtherPeerLeaseHolder(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env := testenv.New(t)
 	project := createImportTestProject(t, env, "github.com/wesm/kata", "kata")
 	initial := map[string]any{
@@ -674,7 +673,7 @@ func TestImportEndpoint_PriorityRoundtrips(t *testing.T) {
 	}
 	envPostJSON(t, env, importEndpointPath(pid), body, &out)
 	require.Len(t, out.Items, 1)
-	issue, err := env.DB.IssueByShortID(context.Background(), pid, out.Items[0].IssueShortID, db.IncludeDeletedNo)
+	issue, err := env.DB.IssueByShortID(t.Context(), pid, out.Items[0].IssueShortID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.NotNil(t, issue.Priority)
 	assert.Equal(t, int64(1), *issue.Priority)
@@ -768,7 +767,7 @@ func importEndpointPath(projectID int64) string {
 
 func createImportTestProject(t *testing.T, env *testenv.Env, _ string, name string) db.Project {
 	t.Helper()
-	p, err := env.DB.CreateProject(context.Background(), name)
+	p, err := env.DB.CreateProject(t.Context(), name)
 	require.NoError(t, err)
 	return p
 }

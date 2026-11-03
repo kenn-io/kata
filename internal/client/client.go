@@ -337,7 +337,7 @@ func NewHTTPClient(ctx context.Context, baseURL string, opts Opts) (*http.Client
 		auth := resolveAuthConfig()
 		return newHTTPClientWithAuth(ctx, baseURL, auth, opts)
 	}
-	if auth, ok, err := activeRemoteTargetAuthForBaseURL(baseURL, opts.WorkspaceStart); err != nil {
+	if auth, ok, err := activeRemoteTargetAuthForBaseURL(ctx, baseURL, opts.WorkspaceStart); err != nil {
 		return nil, err
 	} else if ok {
 		return NewHTTPClientForTarget(ctx, baseURL, auth, opts)
@@ -424,7 +424,7 @@ func newHTTPClientWithAuth(ctx context.Context, baseURL string, auth config.Auth
 	if err != nil {
 		return nil, err
 	}
-	allowInsecure := opts.AllowInsecure || remoteAllowInsecureForBaseURL(baseURL, opts.WorkspaceStart)
+	allowInsecure := opts.AllowInsecure || remoteAllowInsecureForBaseURL(ctx, baseURL, opts.WorkspaceStart)
 	rt, err := authBearerTransport(c.Transport, auth.Token, baseURL,
 		auth.TrustPrivateNetwork, allowInsecure)
 	if err != nil {

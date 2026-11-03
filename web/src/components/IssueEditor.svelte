@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Markdown, type TypeaheadOption } from '@kenn-io/kit-ui'
+  import { Markdown, PageHeader, type TypeaheadOption } from '@kenn-io/kit-ui'
   import NetworkIcon from '@lucide/svelte/icons/network'
   import PencilIcon from '@lucide/svelte/icons/pencil'
   import {
@@ -141,6 +141,13 @@
   let titleDraft = $state('')
   let bodyDraft = $state('')
   let titleInput: HTMLInputElement | null = $state(null)
+  let titleHeading: HTMLHeadingElement | undefined = $state()
+
+  // The heading holds the edit button, whose name is "Edit title"; name the
+  // heading by the task title so heading navigation still reads the title.
+  $effect(() => {
+    titleHeading?.setAttribute('aria-label', issue.issue.title)
+  })
   let bodyTextarea: HTMLTextAreaElement | null = $state(null)
   let cancelingTitle = $state(false)
   let lastIssueUID = $state<string | null>(null)
@@ -346,37 +353,41 @@
   <fieldset class="mutation-controls" disabled={actionsDisabled || detailInert}>
     <div class="detail-heading">
       <div class="detail-heading-main">
-        <div class="detail-kicker">
-          <span class="crumb-project">{currentProjectName()}</span>
-          <span class="crumb-sep">/</span>
-          <span class="crumb-id">{issue.issue.short_id}</span>
-          <span class="kit-sr-only">{issue.issue.qualified_id}</span>
-        </div>
-        {#if editingTitle}
-          <input
-            class="title-edit"
-            aria-label="Edit title"
-            bind:this={titleInput}
-            bind:value={titleDraft}
-            disabled={savingTitle}
-            onkeydown={handleTitleKeydown}
-            onblur={() => {
-              void commitTitle()
-            }}
-          />
-        {:else}
-          <h2 aria-label={issue.issue.title}>
-            <button
-              type="button"
-              class="title-button"
-              aria-label="Edit title"
-              onclick={startEditingTitle}
-            >
-              <span>{issue.issue.title}</span>
-              <PencilIcon size={13} strokeWidth={1.8} />
-            </button>
-          </h2>
-        {/if}
+        <PageHeader level={2} bind:titleElement={titleHeading}>
+          {#snippet before()}
+            <div class="detail-kicker">
+              <span class="crumb-project">{currentProjectName()}</span>
+              <span class="crumb-sep">/</span>
+              <span class="crumb-id">{issue.issue.short_id}</span>
+              <span class="kit-sr-only">{issue.issue.qualified_id}</span>
+            </div>
+          {/snippet}
+          {#snippet title()}
+            {#if editingTitle}
+              <input
+                class="title-edit"
+                aria-label="Edit title"
+                bind:this={titleInput}
+                bind:value={titleDraft}
+                disabled={savingTitle}
+                onkeydown={handleTitleKeydown}
+                onblur={() => {
+                  void commitTitle()
+                }}
+              />
+            {:else}
+              <button
+                type="button"
+                class="title-button"
+                aria-label="Edit title"
+                onclick={startEditingTitle}
+              >
+                <span>{issue.issue.title}</span>
+                <PencilIcon size={13} strokeWidth={1.8} />
+              </button>
+            {/if}
+          {/snippet}
+        </PageHeader>
       </div>
       <div class="detail-actions">
         <time
@@ -598,6 +609,12 @@
     flex: 1;
   }
 
+  /* The title button and its edit field span the pane, so the heading fills
+     its row. */
+  .detail-heading-main :global(h2) {
+    flex: 1 1 auto;
+  }
+
   .detail-kicker {
     display: flex;
     align-items: center;
@@ -628,12 +645,6 @@
 
   .crumb-sep {
     color: var(--text-muted);
-  }
-
-  .detail-heading h2 {
-    margin: 4px 0 0;
-    font-size: var(--font-size-xl);
-    line-height: 1.25;
   }
 
   .detail-actions {
@@ -723,7 +734,7 @@
 
   .title-edit {
     width: 100%;
-    margin: 4px 0 0;
+    margin: 0;
     border: 1px solid var(--border-default);
     border-radius: 6px;
     background: var(--bg-primary);

@@ -14,7 +14,7 @@ import (
 
 func checkExternalImportLifecycle(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "external-import-project")
 	if err != nil {
 		return err
@@ -243,7 +243,7 @@ func checkExternalImportLifecycle(t *testing.T, store db.Storage) error {
 // must also never fire during expiry sweeps.
 func checkExternalImportAssignmentExpiry(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "external-import-expiry")
 	if err != nil {
 		return err
@@ -387,7 +387,7 @@ func foldProjectIssues(ctx context.Context, store db.Storage, projectID int64) (
 
 func checkExternalImportEdgeCases(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := checkImportPresentationAndLegacyKeys(ctx, t, store); err != nil {
 		return err
 	}
@@ -870,7 +870,7 @@ func checkImportFederationActor(ctx context.Context, t *testing.T, store db.Stor
 // microsecond storage but must never collapse to the millisecond.
 func checkImportCommentTimestampPrecision(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "external-import-precision")
 	if err != nil {
 		return err

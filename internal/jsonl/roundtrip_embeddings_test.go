@@ -1,7 +1,6 @@
 package jsonl_test
 
 import (
-	"context"
 	"encoding/base64"
 	"strings"
 	"testing"
@@ -18,7 +17,7 @@ import (
 // legacy envelope is acknowledged and dropped rather than erroring old
 // archives or requiring the now-removed issue_embeddings table.
 func TestImportSkipsLegacyIssueEmbeddingRecords(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	const (
 		projUID  = "01HZZZZZZZZZZZZZZZZZZZZZZZ"
 		issueUID = "01HZZZZZZZZZZZZZZZZZZZZA01"

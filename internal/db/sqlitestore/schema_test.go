@@ -91,7 +91,7 @@ func TestIssuesTimedAssignmentRequiresOwner(t *testing.T) {
 func TestIssuesTimedAssignmentDueLookupUsesExpiryIndex(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	rows, err := d.Query(`
+	rows, err := d.QueryContext(t.Context(), `
 		EXPLAIN QUERY PLAN
 		SELECT id
 		  FROM issues
@@ -155,7 +155,7 @@ func TestProjectAliasesDoNotPersistPathTelemetry(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
 
-	rows, err := d.Query(`PRAGMA table_info(project_aliases)`)
+	rows, err := d.QueryContext(t.Context(), `PRAGMA table_info(project_aliases)`)
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()
 

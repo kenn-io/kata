@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -52,9 +51,9 @@ query_suffix = " query end "
 	require.NoError(t, err)
 	c, _, err := preflightEmbeddingStartup(cfg.Search.Embeddings, filepath.Join(home, "kata.db"))
 	require.NoError(t, err)
-	_, err = c.EncodeFunc()(context.Background(), []string{embedding.EmbedText("login", "expired")})
+	_, err = c.EncodeFunc()(t.Context(), []string{embedding.EmbedText("login", "expired")})
 	require.NoError(t, err)
-	_, err = c.EmbedQuery(context.Background(), []string{"login"})
+	_, err = c.EmbedQuery(t.Context(), []string{"login"})
 	require.NoError(t, err)
 	require.Equal(t, [][]string{{"title: none | text: login\n\nexpired document end "}, {"task: search result | query: login query end "}}, inputs)
 }

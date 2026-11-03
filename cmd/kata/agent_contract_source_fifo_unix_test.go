@@ -19,7 +19,7 @@ func TestAgentContractSourceRejectsFIFO(t *testing.T) {
 	path := filepath.Join(dir, "prompt.pipe")
 	require.NoError(t, unix.Mkfifo(path, 0600))
 	for _, source := range []string{path, "prompt.pipe"} {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestAgentContractSourceFIFOHelper$") //nolint:gosec // G204: controlled native fixture command or current test executable, with fixed test arguments.
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(), "KATA_TEST_FIFO_SOURCE="+source)

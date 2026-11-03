@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+
+	"go.kenn.io/kata/internal/api"
 )
 
 type undoOutcome struct {
@@ -125,6 +127,30 @@ func (c *undoClient) undo(ctx context.Context, entry undoEntry, evidenceRequired
 			return out
 		}
 		out.resp, out.err = c.KataAPI.EditBody(ctx, entry.projectID, entry.uid, entry.before.Body, entry.actor)
+	case "dates":
+		keys := changedDateKeys(&entry.before, &entry.after)
+		if sameDates(current, &entry.before, keys) {
+			out.already = true
+			return out
+		}
+		if !sameDates(current, &entry.after, keys) || current.Revision != entry.revision {
+			out.conflict = "issue dates changed since the action"
+			return out
+		}
+		writer, ok := c.KataAPI.(datesAPI)
+		if !ok {
+			out.err = errors.New("connected client cannot edit dates")
+			return out
+		}
+		restore := DatesInput{Actor: entry.actor, IfMatchRevision: entry.revision, Set: map[string]*string{}}
+		for _, key := range keys {
+			if value := issueDate(&entry.before, key); value != "" {
+				restore.Set[key] = &value
+			} else {
+				restore.Set[key] = nil
+			}
+		}
+		out.resp, out.err = writer.SetDates(ctx, entry.projectID, entry.uid, restore)
 	case "label.add", "label.remove":
 		present := slices.Contains(current.Labels, entry.label)
 		if (entry.kind == "label.add" && !present) || (entry.kind == "label.remove" && present) {
@@ -222,6 +248,8 @@ func (c *undoClient) restoredAfterNoop(ctx context.Context, entry undoEntry) (bo
 		return equalInt64Ptr(current.Priority, entry.before.Priority), nil
 	case "body.edit":
 		return current.Body == entry.before.Body, nil
+	case "dates":
+		return sameDates(current, &entry.before, changedDateKeys(&entry.before, &entry.after)), nil
 	case "label.add":
 		return !slices.Contains(current.Labels, entry.label), nil
 	case "label.remove":
@@ -250,6 +278,30 @@ func ambiguousWriteError(err error) bool {
 		return false
 	}
 	return err != nil
+}
+
+var dateKeys = []string{api.MetadataKeyScheduledOn, api.MetadataKeyDeadlineOn}
+
+func issueDate(i *Issue, key string) string {
+	if key == api.MetadataKeyScheduledOn {
+		return i.scheduledOn()
+	}
+	return i.deadlineOn()
+}
+
+// changedDateKeys lists the planning-date keys whose stored value differs
+// between two reads of an issue.
+func changedDateKeys(before, after *Issue) []string {
+	return slices.DeleteFunc(slices.Clone(dateKeys), func(key string) bool {
+		return issueDate(before, key) == issueDate(after, key)
+	})
+}
+
+// sameDates reports whether a and b hold the same stored value under every key.
+func sameDates(a, b *Issue, keys []string) bool {
+	return len(keys) > 0 && !slices.ContainsFunc(keys, func(key string) bool {
+		return issueDate(a, key) != issueDate(b, key)
+	})
 }
 
 func equalStringPtr(a, b *string) bool {

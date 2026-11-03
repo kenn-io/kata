@@ -173,7 +173,7 @@ Name agents for explicit setup; use --local for project scope. If a user-level h
 			if err != nil {
 				return err
 			}
-			if _, _, err := planInitHookOptions(callOpts, startPath); err != nil {
+			if _, _, err := planInitHookOptions(cmd.Context(), callOpts, startPath); err != nil {
 				return err
 			}
 			ctx, baseURL, err := ensureDaemonContext(cmd.Context())
@@ -218,7 +218,7 @@ func callInit(ctx context.Context, baseURL, startPath string, opts callInitOpts)
 	if err != nil {
 		return "", err
 	}
-	if _, _, err := planInitHookOptions(opts, startPath); err != nil {
+	if _, _, err := planInitHookOptions(ctx, opts, startPath); err != nil {
 		return "", err
 	}
 	if strings.TrimSpace(opts.Actor) == "" {
@@ -388,14 +388,14 @@ func runNameInit(ctx context.Context, baseURL string, in localInit, opts callIni
 	codexHooksChanged := false
 	if opts.WithCodexHooks {
 		var warnings []string
-		codexHooksChanged, warnings, err = applyCodexHooks(dest)
+		codexHooksChanged, warnings, err = applyCodexHooks(ctx, dest)
 		if err != nil {
 			warnCodexHooksUpdate(err)
 		}
 		emitHookWarnings(warnings)
 	}
 
-	nativeHooksChanged, hookResults, err := applyInitHookOptions(opts, dest)
+	nativeHooksChanged, hookResults, err := applyInitHookOptions(ctx, opts, dest)
 	if err != nil {
 		return "", initAgentHooksFailure(bs, resp.Project.Name, dest, resp.Created, nativeHooksChanged, err)
 	}
@@ -462,14 +462,14 @@ func runStartPathInit(ctx context.Context, baseURL, startPath string, opts callI
 	codexHooksChanged := false
 	if opts.WithCodexHooks {
 		var warnings []string
-		codexHooksChanged, warnings, err = applyCodexHooks(gitignoreDir)
+		codexHooksChanged, warnings, err = applyCodexHooks(ctx, gitignoreDir)
 		if err != nil {
 			warnCodexHooksUpdate(err)
 		}
 		emitHookWarnings(warnings)
 	}
 
-	nativeHooksChanged, hookResults, err := applyInitHookOptions(opts, gitignoreDir)
+	nativeHooksChanged, hookResults, err := applyInitHookOptions(ctx, opts, gitignoreDir)
 	if err != nil {
 		return "", initAgentHooksFailure(bs, resp.Project.Name, gitignoreDir, resp.Created, nativeHooksChanged, err)
 	}

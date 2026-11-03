@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -36,7 +35,7 @@ func TestCronNamespaceExecutesAgainstDaemon(t *testing.T) {
 			var out bytes.Buffer
 			root.SetOut(&out)
 			root.SetErr(&out)
-			root.SetContext(contextWithBaseURL(context.Background(), env.URL))
+			root.SetContext(contextWithBaseURL(t.Context(), env.URL))
 			root.SetArgs(append([]string{"--project", "spoke-project", "--json", "cron"}, command...))
 			require.NoError(t, root.Execute(), out.String())
 			var response map[string]any

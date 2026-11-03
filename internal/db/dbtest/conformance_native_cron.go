@@ -33,7 +33,7 @@ func checkNativeCronDormancy(t *testing.T, store db.Storage) error {
 }
 
 func checkNativeCronConstraints(t *testing.T, store db.Storage) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	q := store.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 		QueryRowContext(context.Context, string, ...any) *sql.Row

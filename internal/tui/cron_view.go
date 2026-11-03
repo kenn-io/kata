@@ -65,11 +65,16 @@ type cronState struct {
 	events          uint64
 	out             bool
 	conn, scope     uint64
+	form            *cronForm
+	editSeq         uint64
 }
 
 // Synchronize after every update and retain visible records during refresh.
 func (m Model) cronSync() (Model, tea.Cmd) {
 	if m.cron.conn != m.connGen || m.cron.scope != m.scopeGen {
+		if m.modal == modalDiscardCronJob {
+			m.modal = modalNone
+		}
 		m.cron = cronState{tab: m.cron.tab, conn: m.connGen, scope: m.scopeGen}
 	}
 	if m.view != viewCron || m.scope.allProjects || m.scope.projectID == 0 || m.cron.out {
@@ -205,6 +210,9 @@ func (m Model) cronFilter(text string) Model {
 
 func (m Model) routeCronKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	key := msg.String()
+	if m.cron.form != nil {
+		return m.routeCronFormKey(msg)
+	}
 	if m.cron.help {
 		if key == "esc" || key == "h" {
 			m.cron.help = false
@@ -246,6 +254,11 @@ func (m Model) routeCronKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		*cursor -= max(m.height-8, 1)
 	case m.keymap.PageDown.matches(msg):
 		*cursor += max(m.height-8, 1)
+	case key == "n", key == "e":
+		next, cmd, handled := m.routeCronJobKey(key, lines, *cursor)
+		if handled {
+			return next, cmd
+		}
 	case key == "enter" || key == "l":
 		if len(lines) > 0 && lines[*cursor].target.uid != "" {
 			m.cron.stack = append(m.cron.stack, cronFrame{ref: lines[*cursor].target})

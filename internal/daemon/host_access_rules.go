@@ -50,7 +50,8 @@ func buildHostAccessRules() map[string]hostAccessRule {
 		SelfAuthenticated: true, AcceptsFederationBearer: true,
 	}, "getRelayReset", "offerRelayDeliveries", "acceptRelayDeliveries", "ackRelayDeliveries", "getFederationProjectMetadata", "pollFederationProjectEvents",
 		"ingestFederationProjectEvents", "acquireIssueLease", "renewIssueLease",
-		"releaseIssueLease", "getIssueLeaseStatus", "claimIssue")
+		"releaseIssueLease", "getIssueLeaseStatus", "claimIssue",
+		"createCronJob", "replaceCronJob", "archiveCronJob", "restoreCronJob")
 	registerHostAccessRules(rules, hostAccessRule{SelfAuthenticated: true},
 		"forceReleaseIssueLease")
 	registerHostAccessRules(rules, hostAccessRule{ResolvedByHandler: true},

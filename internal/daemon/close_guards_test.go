@@ -48,16 +48,16 @@ func TestCloseIssue_RejectsWrongCaseDryRunField(t *testing.T) {
 		}, nil)
 
 	assertAPIError(t, resp.StatusCode, body, http.StatusBadRequest, "validation")
-	issue, err := env.DB.IssueByID(context.Background(), issueID)
+	issue, err := env.DB.IssueByID(t.Context(), issueID)
 	require.NoError(t, err)
 	assert.Equal(t, "open", issue.Status)
 }
 
 func TestCloseIssue_NonLoopbackStaticTokenCannotForgeTUIBypass(t *testing.T) {
 	d := openTestDB(t)
-	project, err := d.db.CreateProject(context.Background(), "example-workspace")
+	project, err := d.db.CreateProject(t.Context(), "example-workspace")
 	require.NoError(t, err)
-	issue, _, err := d.db.CreateIssue(context.Background(), db.CreateIssueParams{
+	issue, _, err := d.db.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: project.ID,
 		Title:     "close me",
 		Author:    "setup",
@@ -71,7 +71,7 @@ func TestCloseIssue_NonLoopbackStaticTokenCannotForgeTUIBypass(t *testing.T) {
 	})
 	t.Cleanup(func() { _ = server.Close() })
 
-	request := httptest.NewRequest(http.MethodPost,
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
 		issuePathRef(project.ID, issue.ShortID, "actions/close"),
 		strings.NewReader(`{"actor":"agent","source":"tui","reason":"done"}`))
 	request.Header.Set("Authorization", "Bearer static-token")
@@ -85,16 +85,16 @@ func TestCloseIssue_NonLoopbackStaticTokenCannotForgeTUIBypass(t *testing.T) {
 	server.Handler().ServeHTTP(response, request)
 
 	assertAPIError(t, response.Code, response.Body.Bytes(), http.StatusBadRequest, "validation")
-	got, err := d.db.IssueByID(context.Background(), issue.ID)
+	got, err := d.db.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "open", got.Status)
 }
 
 func TestCloseIssue_NonLoopbackUnauthenticatedWritesCannotForgeTUIBypass(t *testing.T) {
 	d := openTestDB(t)
-	project, err := d.db.CreateProject(context.Background(), "example-workspace")
+	project, err := d.db.CreateProject(t.Context(), "example-workspace")
 	require.NoError(t, err)
-	issue, _, err := d.db.CreateIssue(context.Background(), db.CreateIssueParams{
+	issue, _, err := d.db.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: project.ID,
 		Title:     "close me",
 		Author:    "setup",
@@ -110,7 +110,7 @@ func TestCloseIssue_NonLoopbackUnauthenticatedWritesCannotForgeTUIBypass(t *test
 	})
 	t.Cleanup(func() { _ = server.Close() })
 
-	request := httptest.NewRequest(http.MethodPost,
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
 		issuePathRef(project.ID, issue.ShortID, "actions/close"),
 		strings.NewReader(`{"actor":"agent","source":"tui","reason":"done"}`))
 	request.Header.Set("Content-Type", "application/json")
@@ -122,16 +122,16 @@ func TestCloseIssue_NonLoopbackUnauthenticatedWritesCannotForgeTUIBypass(t *test
 	server.Handler().ServeHTTP(response, request)
 
 	assertAPIError(t, response.Code, response.Body.Bytes(), http.StatusBadRequest, "validation")
-	got, err := d.db.IssueByID(context.Background(), issue.ID)
+	got, err := d.db.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "open", got.Status)
 }
 
 func TestCloseIssue_LoopbackStaticTokenPreservesTUIBypass(t *testing.T) {
 	d := openTestDB(t)
-	project, err := d.db.CreateProject(context.Background(), "example-workspace")
+	project, err := d.db.CreateProject(t.Context(), "example-workspace")
 	require.NoError(t, err)
-	issue, _, err := d.db.CreateIssue(context.Background(), db.CreateIssueParams{
+	issue, _, err := d.db.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: project.ID,
 		Title:     "close me",
 		Author:    "setup",
@@ -145,7 +145,7 @@ func TestCloseIssue_LoopbackStaticTokenPreservesTUIBypass(t *testing.T) {
 	})
 	t.Cleanup(func() { _ = server.Close() })
 
-	request := httptest.NewRequest(http.MethodPost,
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
 		issuePathRef(project.ID, issue.ShortID, "actions/close"),
 		strings.NewReader(`{"actor":"agent","source":"tui","reason":"done"}`))
 	request.Header.Set("Authorization", "Bearer static-token")
@@ -159,16 +159,16 @@ func TestCloseIssue_LoopbackStaticTokenPreservesTUIBypass(t *testing.T) {
 	server.Handler().ServeHTTP(response, request)
 
 	assert.Equal(t, http.StatusOK, response.Code, response.Body.String())
-	got, err := d.db.IssueByID(context.Background(), issue.ID)
+	got, err := d.db.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "closed", got.Status)
 }
 
 func TestCloseIssue_StaticTokenBrowserSessionCannotForgeTUIBypass(t *testing.T) {
 	d := openTestDB(t)
-	project, err := d.db.CreateProject(context.Background(), "example-workspace")
+	project, err := d.db.CreateProject(t.Context(), "example-workspace")
 	require.NoError(t, err)
-	issue, _, err := d.db.CreateIssue(context.Background(), db.CreateIssueParams{
+	issue, _, err := d.db.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: project.ID,
 		Title:     "close me",
 		Author:    "setup",
@@ -192,7 +192,7 @@ func TestCloseIssue_StaticTokenBrowserSessionCannotForgeTUIBypass(t *testing.T) 
 	})
 	require.NoError(t, err)
 
-	request := httptest.NewRequest(http.MethodPost,
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
 		"http://127.0.0.1:27123"+issuePathRef(project.ID, issue.ShortID, "actions/close"),
 		strings.NewReader(`{"actor":"forged","source":"tui","reason":"done"}`))
 	request.Host = "127.0.0.1:27123"
@@ -210,16 +210,16 @@ func TestCloseIssue_StaticTokenBrowserSessionCannotForgeTUIBypass(t *testing.T) 
 	handler.ServeHTTP(response, request)
 
 	assertAPIError(t, response.Code, response.Body.Bytes(), http.StatusBadRequest, "validation")
-	got, err := d.db.IssueByID(context.Background(), issue.ID)
+	got, err := d.db.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "open", got.Status)
 }
 
 func TestCloseIssue_HostPrincipalCannotForgeTUIBypass(t *testing.T) {
 	d := openTestDB(t)
-	project, err := d.db.CreateProject(context.Background(), "example-workspace")
+	project, err := d.db.CreateProject(t.Context(), "example-workspace")
 	require.NoError(t, err)
-	issue, _, err := d.db.CreateIssue(context.Background(), db.CreateIssueParams{
+	issue, _, err := d.db.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: project.ID,
 		Title:     "close me",
 		Author:    "setup",
@@ -232,7 +232,7 @@ func TestCloseIssue_HostPrincipalCannotForgeTUIBypass(t *testing.T) {
 	})
 	t.Cleanup(func() { _ = server.Close() })
 
-	request := httptest.NewRequest(http.MethodPost,
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
 		issuePathRef(project.ID, issue.ShortID, "actions/close"),
 		strings.NewReader(`{"actor":"forged","source":"tui","reason":"done"}`))
 	request.Header.Set("Content-Type", "application/json")
@@ -248,16 +248,16 @@ func TestCloseIssue_HostPrincipalCannotForgeTUIBypass(t *testing.T) {
 	server.Handler().ServeHTTP(response, request)
 
 	assertAPIError(t, response.Code, response.Body.Bytes(), http.StatusBadRequest, "validation")
-	got, err := d.db.IssueByID(context.Background(), issue.ID)
+	got, err := d.db.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "open", got.Status)
 }
 
 func TestCloseIssue_MultiValueForwardedLoopbackCannotForgeTUIBypass(t *testing.T) {
 	d := openTestDB(t)
-	project, err := d.db.CreateProject(context.Background(), "example-workspace")
+	project, err := d.db.CreateProject(t.Context(), "example-workspace")
 	require.NoError(t, err)
-	issue, _, err := d.db.CreateIssue(context.Background(), db.CreateIssueParams{
+	issue, _, err := d.db.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: project.ID,
 		Title:     "close me",
 		Author:    "setup",
@@ -271,7 +271,7 @@ func TestCloseIssue_MultiValueForwardedLoopbackCannotForgeTUIBypass(t *testing.T
 	})
 	t.Cleanup(func() { _ = server.Close() })
 
-	request := httptest.NewRequest(http.MethodPost,
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost,
 		issuePathRef(project.ID, issue.ShortID, "actions/close"),
 		strings.NewReader(`{"actor":"agent","source":"tui","reason":"done"}`))
 	request.Header.Set("Authorization", "Bearer static-token")
@@ -286,7 +286,7 @@ func TestCloseIssue_MultiValueForwardedLoopbackCannotForgeTUIBypass(t *testing.T
 	server.Handler().ServeHTTP(response, request)
 
 	assertAPIError(t, response.Code, response.Body.Bytes(), http.StatusBadRequest, "validation")
-	got, err := d.db.IssueByID(context.Background(), issue.ID)
+	got, err := d.db.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "open", got.Status)
 }
@@ -295,7 +295,7 @@ func TestCloseIssue_IdentityModeDoesNotTrustBodySourceTUI(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	pid := mkProject(t, env, "github.com/test/a", "a")
 	issue := mkIssue(t, env, pid, "close me")
-	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	_, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "alice-token",
 		Actor:          "alice",
 		AdminActor:     db.BootstrapActor,
@@ -308,7 +308,7 @@ func TestCloseIssue_IdentityModeDoesNotTrustBodySourceTUI(t *testing.T) {
 		map[string]string{"Authorization": "Bearer alice-token"})
 	assertAPIError(t, resp.StatusCode, bs, http.StatusBadRequest, "validation")
 
-	got, err := env.DB.IssueByID(context.Background(), issue.ID)
+	got, err := env.DB.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "open", got.Status)
 }
@@ -317,7 +317,7 @@ func TestCloseIssue_IdentityModeDBTokenCannotUseTUIBypassForMatchingTokenActor(t
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	pid := mkProject(t, env, "github.com/test/a", "a")
 	issue := mkIssue(t, env, pid, "close me")
-	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	_, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "alice-token",
 		Actor:          "alice",
 		AdminActor:     db.BootstrapActor,
@@ -330,7 +330,7 @@ func TestCloseIssue_IdentityModeDBTokenCannotUseTUIBypassForMatchingTokenActor(t
 		map[string]string{"Authorization": "Bearer alice-token"})
 	assertAPIError(t, resp.StatusCode, bs, http.StatusBadRequest, "validation")
 
-	got, err := env.DB.IssueByID(context.Background(), issue.ID)
+	got, err := env.DB.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "open", got.Status)
 }
@@ -571,7 +571,7 @@ func TestSiblingThrottle_CountsCrossProjectSiblings(t *testing.T) {
 	pidA := initLocalWorkspace(t, env, "hub-project")
 	pidB := mkProject(t, env, "github.com/example/spoke-project", "spoke-project")
 	parent := createIssueViaHTTP(t, env, pidA, "parent issue")
-	parentIssue, err := env.DB.IssueByID(context.Background(), parent)
+	parentIssue, err := env.DB.IssueByID(t.Context(), parent)
 	require.NoError(t, err)
 
 	spokeRefs := make([]string, 0, 3)
@@ -637,7 +637,7 @@ func TestRepeatedMessageGuard_CountsCrossProjectSiblings(t *testing.T) {
 	pidA := initLocalWorkspace(t, env, "hub-project")
 	pidB := mkProject(t, env, "github.com/example/spoke-project", "spoke-project")
 	parent := createIssueViaHTTP(t, env, pidA, "parent issue")
-	parentIssue, err := env.DB.IssueByID(context.Background(), parent)
+	parentIssue, err := env.DB.IssueByID(t.Context(), parent)
 	require.NoError(t, err)
 
 	const message = "Verified fix across the shared component and tests pass."

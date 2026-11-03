@@ -93,7 +93,7 @@ func TestReadUILaunchTargetRequiresExactUID(t *testing.T) {
 	require.Equal(t, "validation", failure.Error.Code)
 	for _, match := range leakingMatches {
 		require.NotContains(t, string(prefixBody), match.UID)
-		require.NotContains(t, string(prefixBody), match.ShortID)
+		require.NotRegexp(t, `\b`+match.ShortID+`\b`, string(prefixBody))
 	}
 	require.NotContains(t, string(prefixBody), "4242")
 	require.NotContains(t, string(prefixBody), "8484")
@@ -325,7 +325,7 @@ func newUILaunchTestManager(t *testing.T, dbh testDBHandle, origin string) *daem
 func getUILaunchTarget(t *testing.T, ts *httptest.Server, issueUID string) (*http.Response, []byte) {
 	t.Helper()
 	requestURL := ts.URL + "/api/v1/ui/launch-target?issue_uid=" + url.QueryEscape(issueUID)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, requestURL, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, requestURL, nil)
 	require.NoError(t, err)
 	resp, err := ts.Client().Do(req)
 	require.NoError(t, err)

@@ -39,16 +39,16 @@ func (a *statusErrorTestAdapter) OpenStatus(context.Context, db.IssueSyncBinding
 func testStore(t *testing.T) *sqlitestore.Store {
 	t.Helper()
 	t.Setenv("KATA_HOME", t.TempDir())
-	s, err := sqlitestore.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	s, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, s.Close()) })
 	return s
 }
 func testBinding(t *testing.T, s db.Storage, name, provider string) db.IssueSyncBinding {
 	t.Helper()
-	p, err := s.CreateProject(context.Background(), name)
+	p, err := s.CreateProject(t.Context(), name)
 	require.NoError(t, err)
-	b, err := s.UpsertIssueSyncBinding(context.Background(), db.UpsertIssueSyncBindingParams{ProjectID: p.ID, Provider: provider, SourceKey: provider + ":" + name, RemoteID: name, DisplayName: name, Config: []byte(`{}`), IntervalSeconds: 300})
+	b, err := s.UpsertIssueSyncBinding(t.Context(), db.UpsertIssueSyncBindingParams{ProjectID: p.ID, Provider: provider, SourceKey: provider + ":" + name, RemoteID: name, DisplayName: name, Config: []byte(`{}`), IntervalSeconds: 300})
 	require.NoError(t, err)
 	return b
 }
@@ -92,22 +92,22 @@ func TestRunnerAdapterIsolationAndReplay(t *testing.T) {
 		return nil
 	}})
 	done := make(chan error, 1)
-	go func() { done <- r.Run(context.Background()) }()
+	go func() { done <- r.Run(t.Context()) }()
 	receive(t, entered)
 	require.Equal(t, "source", tracker.Snapshot(b.ID, at).Phase)
-	_, err := r.RunOnce(context.Background(), b.ID)
+	_, err := r.RunOnce(t.Context(), b.ID)
 	require.ErrorIs(t, err, db.ErrIssueSyncAlreadyRunning)
 	close(release)
 	require.NoError(t, receive(t, done))
-	status, err := s.IssueSyncStatusByProject(context.Background(), b.ProjectID)
+	status, err := s.IssueSyncStatusByProject(t.Context(), b.ProjectID)
 	require.NoError(t, err)
 	require.Equal(t, 1, status.LastCreated)
-	untouched, err := s.IssueSyncStatusByProject(context.Background(), other.ProjectID)
+	untouched, err := s.IssueSyncStatusByProject(t.Context(), other.ProjectID)
 	require.NoError(t, err)
 	require.Nil(t, untouched.LastAttemptAt)
 	eventsAfterFirst := events
 	require.Positive(t, eventsAfterFirst)
-	replay, err := r.RunOnce(context.Background(), b.ID)
+	replay, err := r.RunOnce(t.Context(), b.ID)
 	require.NoError(t, err)
 	require.Equal(t, 1, replay.Import.Unchanged)
 	require.Equal(t, eventsAfterFirst, events)
@@ -141,7 +141,7 @@ func TestRunnerOnceOnlyClassifiesStatusPassBlocksAsWarnings(t *testing.T) {
 			}
 			r := NewRunner(RunnerConfig{Store: s, Adapter: a, Clock: func() time.Time { return at }})
 
-			result, err := r.RunOnce(context.Background(), b.ID)
+			result, err := r.RunOnce(t.Context(), b.ID)
 
 			if tc.contentErr != nil {
 				require.ErrorIs(t, err, tc.contentErr)
@@ -172,7 +172,7 @@ func TestRunnerBindingDeadlineKeepsSchedulerAlive(t *testing.T) {
 		return testPrepared(b, at), nil
 	}}
 	wake := make(chan struct{}, 1)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	r := NewRunner(RunnerConfig{Store: s, Adapter: a, Clock: func() time.Time { return at.Add(time.Duration(ticks.Load()) * time.Minute) }, RunTimeout: time.Second, Interval: time.Hour, Wake: wake, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	done := make(chan error, 1)
@@ -182,10 +182,10 @@ func TestRunnerBindingDeadlineKeepsSchedulerAlive(t *testing.T) {
 	require.Equal(t, good.ProjectID, committed.ProjectID)
 	require.Equal(t, good.ID, committed.BindingID)
 	require.NotNil(t, committed.LastSuccessAt)
-	failed, err := s.IssueSyncBindingByID(context.Background(), bad.ID)
+	failed, err := s.IssueSyncBindingByID(t.Context(), bad.ID)
 	require.NoError(t, err)
 	require.Nil(t, failed.LastCursorAt)
-	status, err := s.IssueSyncStatusByProject(context.Background(), bad.ProjectID)
+	status, err := s.IssueSyncStatusByProject(t.Context(), bad.ProjectID)
 	require.NoError(t, err)
 	require.Contains(t, status.LastError, "deadline exceeded")
 	select {
@@ -208,12 +208,12 @@ func TestRunnerClaimFences(t *testing.T) {
 			at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 			originalCursor := at.Add(-time.Hour)
 			claim := originalCursor.Add(-time.Minute)
-			_, ok, err := s.ClaimIssueSyncBinding(context.Background(), b.ID, "synthetic", claim, claim.Add(-time.Hour))
+			_, ok, err := s.ClaimIssueSyncBinding(t.Context(), b.ID, "synthetic", claim, claim.Add(-time.Hour))
 			require.NoError(t, err)
 			require.True(t, ok)
-			_, err = s.RecordIssueSyncSuccess(context.Background(), db.IssueSyncSuccessParams{BindingID: b.ID, StartedAt: claim, At: originalCursor, CursorAt: originalCursor})
+			_, err = s.RecordIssueSyncSuccess(t.Context(), db.IssueSyncSuccessParams{BindingID: b.ID, StartedAt: claim, At: originalCursor, CursorAt: originalCursor})
 			require.NoError(t, err)
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			successor := at.Add(time.Hour)
 			finalized := false
@@ -253,7 +253,7 @@ func TestRunnerClaimFences(t *testing.T) {
 					cancel()
 				}
 				if mode == "stale-finalizer" && store.calls == 2 {
-					_, ok, err := s.ClaimIssueSyncBinding(context.Background(), b.ID, b.Provider, successor, at.Add(time.Minute))
+					_, ok, err := s.ClaimIssueSyncBinding(t.Context(), b.ID, b.Provider, successor, at.Add(time.Minute))
 					require.NoError(t, err)
 					require.True(t, ok)
 				}
@@ -278,10 +278,10 @@ func TestRunnerClaimFences(t *testing.T) {
 			} else {
 				require.False(t, finalized)
 			}
-			failedBinding, err := s.IssueSyncBindingByID(context.Background(), b.ID)
+			failedBinding, err := s.IssueSyncBindingByID(t.Context(), b.ID)
 			require.NoError(t, err)
 			require.Equal(t, &originalCursor, failedBinding.LastCursorAt)
-			status, err := s.IssueSyncStatusByProject(context.Background(), b.ProjectID)
+			status, err := s.IssueSyncStatusByProject(t.Context(), b.ProjectID)
 			require.NoError(t, err)
 			if mode == "stale-replacement" || mode == "stale-finalizer" {
 				require.NotNil(t, status.SyncStartedAt)
@@ -313,7 +313,7 @@ func TestRunnerBoundedFinalizerContext(t *testing.T) {
 			b := testBinding(t, s, "spoke-project", "synthetic")
 			at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 			entered := make(chan struct{}, 1)
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			a := &testAdapter{prepare: func(_ context.Context, binding db.IssueSyncBinding, _ time.Time) (Prepared, error) {
 				p := testPrepared(binding, at)
@@ -340,7 +340,7 @@ func TestRunnerBoundedFinalizerContext(t *testing.T) {
 			got := receive(t, done)
 			require.ErrorIs(t, got.err, want)
 			require.Equal(t, 1, got.result.Import.Created)
-			failed, err := s.IssueSyncBindingByID(context.Background(), b.ID)
+			failed, err := s.IssueSyncBindingByID(t.Context(), b.ID)
 			require.NoError(t, err)
 			require.Nil(t, failed.LastCursorAt)
 			require.Nil(t, got.result.Status.SyncStartedAt)
@@ -375,9 +375,9 @@ func TestRunnerBoundedFinalizerSuccessAfterCleanupWindow(t *testing.T) {
 					store = &delayedSuccessStore{Storage: s, delay: 2 * time.Second}
 				}
 				r := NewRunner(RunnerConfig{Store: store, Adapter: a, Clock: time.Now, RunTimeout: runTimeout})
-				result, err := r.RunOnce(context.Background(), b.ID)
+				result, err := r.RunOnce(t.Context(), b.ID)
 				require.Equal(t, 1, result.Import.Created)
-				binding, readErr := s.IssueSyncBindingByID(context.Background(), b.ID)
+				binding, readErr := s.IssueSyncBindingByID(t.Context(), b.ID)
 				require.NoError(t, readErr)
 				if mode == "remaining-run-deadline" {
 					require.ErrorIs(t, err, context.DeadlineExceeded)

@@ -94,7 +94,7 @@ func issueURLRef(projectID int64, ref, suffix string) string {
 // tests that need to call the surface API with a wire-format ref.
 func issueRefByID(t *testing.T, h *httptestServerHandle, issueID int64) string {
 	t.Helper()
-	issue, err := h.DB().IssueByID(context.Background(), issueID)
+	issue, err := h.DB().IssueByID(t.Context(), issueID)
 	require.NoError(t, err)
 	return issue.ShortID
 }
@@ -198,8 +198,8 @@ type testDBHandle struct {
 func openTestDB(t *testing.T) testDBHandle {
 	t.Helper()
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
-	d, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
+	ctx := t.Context()
+	d, err := testfix.OpenSQLite(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
 	return testDBHandle{db: d, now: time.Now().UTC()}
@@ -255,9 +255,9 @@ func newServerWithLocalWorkspace(
 	dir := t.TempDir()
 	require.NoError(t, config.WriteProjectConfig(dir, projectName))
 	d := openTestDB(t)
-	project, err := d.db.CreateProject(context.Background(), projectName)
+	project, err := d.db.CreateProject(t.Context(), projectName)
 	require.NoError(t, err)
-	_, err = d.db.AttachAlias(context.Background(), project.ID, "local://"+dir, "local")
+	_, err = d.db.AttachAlias(t.Context(), project.ID, "local://"+dir, "local")
 	require.NoError(t, err)
 	cfg := daemon.ServerConfig{DB: d.db, StartedAt: d.now}
 	for _, opt := range opts {
@@ -288,7 +288,10 @@ func postJSON(t *testing.T, ts *httptest.Server, path string, body any) (*http.R
 	t.Helper()
 	js, err := json.Marshal(body)
 	require.NoError(t, err)
-	resp, err := http.Post(ts.URL+path, "application/json", bytes.NewReader(js))
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodPost, ts.URL+path, bytes.NewReader(js))
+	require.NoError(t, reqErr)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	bs, _ := io.ReadAll(resp.Body)
@@ -309,7 +312,7 @@ func patchJSON(t *testing.T, ts *httptest.Server, path string, body any) (*http.
 	t.Helper()
 	js, err := json.Marshal(body)
 	require.NoError(t, err)
-	req, err := http.NewRequest(http.MethodPatch, ts.URL+path, bytes.NewReader(js))
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPatch, ts.URL+path, bytes.NewReader(js))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req) //nolint:gosec // test request to httptest server URL
@@ -331,7 +334,7 @@ func doReq(t *testing.T, ts *httptest.Server, method, path string, body any, hea
 		require.NoError(t, err)
 		bodyReader = bytes.NewReader(js)
 	}
-	req, err := http.NewRequestWithContext(context.Background(), method, ts.URL+path, bodyReader)
+	req, err := http.NewRequestWithContext(t.Context(), method, ts.URL+path, bodyReader)
 	require.NoError(t, err)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -353,7 +356,7 @@ func doReq(t *testing.T, ts *httptest.Server, method, path string, body any, hea
 // through the HTTP DELETE path.
 func archiveProject(t *testing.T, h *httptestServerHandle, projectID int64, force bool) {
 	t.Helper()
-	_, _, err := h.DB().RemoveProject(context.Background(), db.RemoveProjectParams{
+	_, _, err := h.DB().RemoveProject(t.Context(), db.RemoveProjectParams{
 		ProjectID: projectID,
 		Actor:     "tester",
 		Force:     force,
@@ -365,7 +368,7 @@ func archiveProject(t *testing.T, h *httptestServerHandle, projectID int64, forc
 // the body as a string for easy substring assertions.
 func getBody(t *testing.T, ts *httptest.Server, path string) string {
 	t.Helper()
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, ts.URL+path, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+path, nil)
 	require.NoError(t, err)
 	resp, err := ts.Client().Do(req) //nolint:gosec // G704: test request to httptest server URL
 	require.NoError(t, err)
@@ -390,7 +393,7 @@ func getAndUnmarshal(t *testing.T, ts *httptest.Server, path string, wantStatus 
 // on non-2xx status codes.
 func getStatusBody(t *testing.T, ts *httptest.Server, path string) (*http.Response, []byte) {
 	t.Helper()
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, ts.URL+path, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+path, nil)
 	require.NoError(t, err)
 	resp, err := ts.Client().Do(req) //nolint:gosec // G704: test request to httptest server URL
 	require.NoError(t, err)
@@ -413,7 +416,7 @@ func postWithHeader(t *testing.T, ts *httptest.Server, path string, headers map[
 	t.Helper()
 	bs, err := json.Marshal(body)
 	require.NoError(t, err)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
 		ts.URL+path, bytes.NewReader(bs))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
@@ -501,7 +504,7 @@ func doReqEnv(t *testing.T, env *testenv.Env, method, url, body, ifMatch string)
 	if body != "" {
 		r = strings.NewReader(body)
 	}
-	req, err := http.NewRequest(method, url, r)
+	req, err := http.NewRequestWithContext(t.Context(), method, url, r)
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer tok")
 	if body != "" {
@@ -561,7 +564,7 @@ func TestBootstrapProjectUsesFastLocalBinding(t *testing.T) {
 	require.NotZero(t, projectID)
 	require.NoDirExists(t, filepath.Join(h.dir, ".git"))
 
-	aliases, err := h.DB().ProjectAliases(context.Background(), projectID)
+	aliases, err := h.DB().ProjectAliases(t.Context(), projectID)
 	require.NoError(t, err)
 	require.Len(t, aliases, 1)
 	require.Equal(t, "local", aliases[0].AliasKind)

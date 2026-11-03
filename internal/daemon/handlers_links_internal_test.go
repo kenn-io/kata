@@ -58,7 +58,7 @@ func TestParentReplaceWouldCycle_DepthMatchesTxGuard(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			store := chainParentStore{chainTop: tt.chainTop}
-			cycle, err := parentReplaceWouldCycle(context.Background(), store, tt.childID, 1)
+			cycle, err := parentReplaceWouldCycle(t.Context(), store, tt.childID, 1)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("parentReplaceWouldCycle tolerated a %d-deep chain; the in-tx guard refuses at %d, so the replace would unlink the old parent and then fail", tt.chainTop, db.MaxParentDepth)

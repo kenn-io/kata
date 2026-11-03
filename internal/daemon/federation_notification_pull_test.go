@@ -48,7 +48,7 @@ func TestFederationPullKeepsNotificationPayloadsVerbatim(t *testing.T) {
 
 		server := daemon.NewServer(daemon.ServerConfig{DB: store})
 		t.Cleanup(func() { require.NoError(t, server.Close()) })
-		request := httptest.NewRequest(http.MethodGet,
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
 			projectPath(project.ID)+"/federation/events?after_id=0&limit=100", nil)
 		request.Header.Set("Authorization", "Bearer "+enrollment.Token)
 		response := httptest.NewRecorder()

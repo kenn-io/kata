@@ -50,7 +50,7 @@ func TestStandaloneTelemetryAdmission(t *testing.T) {
 		if runtime.GOOS == "windows" {
 			binary += ".exe"
 		}
-		command := exec.Command("go", append(append([]string{"build"}, args...), "-o", binary, "./testprogram")...) //nolint:gosec // fixed tool and test-owned output
+		command := exec.CommandContext(t.Context(), "go", append(append([]string{"build"}, args...), "-o", binary, "./testprogram")...) //nolint:gosec // fixed tool and test-owned output
 		output, err := command.CombinedOutput()
 		require.NoError(t, err, string(output))
 		return binary
@@ -64,7 +64,7 @@ func TestStandaloneTelemetryAdmission(t *testing.T) {
 		{"no project key", source, EnabledEnv + "=1", "v1.2.3", "disabled"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			command := exec.Command(tc.binary, "-version", tc.version) //nolint:gosec // test-owned standalone fixture
+			command := exec.CommandContext(t.Context(), tc.binary, "-version", tc.version) //nolint:gosec // test-owned standalone fixture
 			command.Env = append(os.Environ(), "KATA_HOME="+scratch, "KATA_DB="+filepath.Join(scratch, "kata.db"), "TELEMETRY_ENABLED=1", EnabledEnv+"=1", tc.env)
 			output, err := command.CombinedOutput()
 			require.NoError(t, err, string(output))

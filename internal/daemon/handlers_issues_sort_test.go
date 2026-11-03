@@ -18,7 +18,7 @@ import (
 
 func TestListIssuesSort(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "list-sort-project")
 	require.NoError(t, err)
 	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)

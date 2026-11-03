@@ -2,7 +2,6 @@ package jsonl_test
 
 import (
 	"bytes"
-	"context"
 	"strings"
 	"testing"
 
@@ -13,7 +12,7 @@ import (
 )
 
 func TestRoundtripPreservesPriority(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	src := openExportTestDB(t)
 	p, err := src.CreateProject(ctx, "kata")
 	require.NoError(t, err)
@@ -68,7 +67,7 @@ func TestRoundtripPreservesPriority(t *testing.T) {
 // nil priority drops the "priority" key entirely rather than emitting
 // "priority":null. Stable wire shape matters for diffing JSONL backups.
 func TestRoundtripOmitsPriorityKeyWhenUnset(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	src := openExportTestDB(t)
 	p, err := src.CreateProject(ctx, "kata")
 	require.NoError(t, err)

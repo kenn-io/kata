@@ -199,7 +199,9 @@ func TestMCPServeHTTPBearerProtectsMCPButNotHealth(t *testing.T) {
 	t.Cleanup(daemon.Close)
 
 	endpoint := startMCPHTTPTestServer(t, daemon.URL)
-	healthResponse, err := http.Get(strings.TrimSuffix(endpoint, "/mcp") + "/healthz") //nolint:noctx // bounded local test server
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, strings.TrimSuffix(endpoint, "/mcp")+"/healthz", nil)
+	require.NoError(t, reqErr)
+	healthResponse, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	require.NoError(t, healthResponse.Body.Close())
 	require.Equal(t, http.StatusOK, healthResponse.StatusCode)
@@ -347,7 +349,7 @@ func TestMCPServeHTTPLoopbackRequiresBearer(t *testing.T) {
 }
 
 func TestRunMCPHTTPServerWaitsForInflightHandlersDuringShutdown(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	started := make(chan struct{})
 	release := make(chan struct{})

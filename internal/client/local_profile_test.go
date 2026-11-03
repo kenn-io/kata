@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
@@ -26,7 +27,7 @@ import (
 )
 
 func TestLocalProfileStorageIdentityReadOnly(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	home := t.TempDir()
 	path := filepath.Join(home, "kata.db")
 	store, err := sqlitestore.Open(ctx, path)
@@ -65,7 +66,7 @@ func TestLocalProfileStorageMissingStaysMissing(t *testing.T) {
 	home := t.TempDir()
 	profile, err := config.ResolveLocalProfile(config.CatalogDaemonConfig{Name: "work", Local: true, Home: home, InstanceUID: "01HZZZZZZZZZZZZZZZZZZZZZ01"})
 	require.NoError(t, err)
-	_, err = InspectLocalProfileStorage(context.Background(), profile)
+	_, err = InspectLocalProfileStorage(t.Context(), profile)
 	require.Error(t, err)
 	_, err = os.Stat(profile.DSN)
 	assert.ErrorIs(t, err, os.ErrNotExist)
@@ -81,7 +82,7 @@ func TestLocalProfileUnreadableMetadataIsStorageUnavailable(t *testing.T) {
 			name:  "instance identity",
 			cause: "no such table: meta",
 			corrupt: func(store *sqlitestore.Store) error {
-				_, err := store.ExecContext(context.Background(), "DROP TABLE meta")
+				_, err := store.ExecContext(t.Context(), "DROP TABLE meta")
 				return err
 			},
 		},
@@ -89,13 +90,13 @@ func TestLocalProfileUnreadableMetadataIsStorageUnavailable(t *testing.T) {
 			name:  "schema version",
 			cause: "invalid syntax",
 			corrupt: func(store *sqlitestore.Store) error {
-				_, err := store.ExecContext(context.Background(), "UPDATE meta SET value='invalid' WHERE key='schema_version'")
+				_, err := store.ExecContext(t.Context(), "UPDATE meta SET value='invalid' WHERE key='schema_version'")
 				return err
 			},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			home := t.TempDir()
 			store, err := sqlitestore.Open(ctx, filepath.Join(home, "kata.db"))
 			require.NoError(t, err)
@@ -116,7 +117,7 @@ func TestLocalProfileUnreadableMetadataIsStorageUnavailable(t *testing.T) {
 func TestLocalProfileStorageInspectionRetainsUnsupportedSchema(t *testing.T) {
 	for _, version := range []int{db.CurrentSchemaVersion() - 1, db.CurrentSchemaVersion() + 1} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			home := t.TempDir()
 			path := filepath.Join(home, "kata.db")
 			store, err := sqlitestore.Open(ctx, path)
@@ -321,6 +322,44 @@ func TestLocalProfileKeepsNewerReleaseDaemon(t *testing.T) {
 	require.ErrorIs(t, err, ErrDaemonNotReplaceable)
 	assert.Contains(t, err.Error(), "kata daemon v0.19.0 is newer than this kata binary v0.18.0")
 	assert.Zero(t, calls)
+}
+
+func TestLocalProfileDiscoveryWaitsForStartLockBeforeStoppingDaemon(t *testing.T) {
+	profile, root := localProfileFixture(t)
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ping" {
+			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":"v0.19.0","pid":%d}`, os.Getpid())
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, profile.InstanceUID)
+	}))
+	defer live.Close()
+	ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	identity, _ := kitdaemon.ReadProcessIdentity(os.Getpid())
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: identity, Network: "tcp", Address: strings.TrimPrefix(live.URL, "http://"), StartedAt: time.Now()})
+	require.NoError(t, err)
+	calls := 0
+	oldVersion, oldStop, oldStart := currentVersionForEnsure, stopRunningDaemonsForEnsure, startDetachedDaemonForEnsure
+	defer func() {
+		currentVersionForEnsure, stopRunningDaemonsForEnsure, startDetachedDaemonForEnsure = oldVersion, oldStop, oldStart
+	}()
+	currentVersionForEnsure = func() string { return "v0.20.0" }
+	stopRunningDaemonsForEnsure = func(context.Context, string, string) error { calls++; return nil }
+	startDetachedDaemonForEnsure = func(context.Context, kitdaemon.StartDetachedOptions) error { calls++; return nil }
+
+	release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireStartLock(t.Context())
+	require.NoError(t, err)
+	defer release()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+
+	_, err = EnsureResolvedInWorkspace(ctx, root)
+
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Zero(t, calls, "another restart owns validation; its profile daemon must keep running")
 }
 
 func TestLocalProfileNamedDiscoveryCannotUsePersonalRuntime(t *testing.T) {
@@ -655,4 +694,58 @@ func TestLocalProfileWithoutInstalledStorageDiscoversButCannotStart(t *testing.T
 	_, err = EnsureResolvedInWorkspace(t.Context(), root)
 	require.ErrorIs(t, err, ErrProfileStorageUnavailable)
 	assert.Zero(t, calls)
+}
+
+func TestLocalProfileReplacesCapableDaemonInPlace(t *testing.T) {
+	profile, root := localProfileFixture(t)
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/ping" {
+			_, _ = fmt.Fprintf(w, `{"ok":true,"service":"kata","version":"v0.1.0","pid":%d}`, os.Getpid())
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"instance_uid":%q}`, profile.InstanceUID)
+	}))
+	defer live.Close()
+	ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	identity, _ := kitdaemon.ReadProcessIdentity(os.Getpid())
+	record := kitdaemon.RuntimeRecord{
+		PID: os.Getpid(), Network: "tcp", Address: strings.TrimPrefix(live.URL, "http://"), StartedAt: time.Now(),
+		ProcessIdentityV2: identity,
+		Metadata:          map[string]string{daemonruntime.RuntimeRestartExecutableKey: "1"},
+	}
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(record)
+	require.NoError(t, err)
+	state := patchEnsureHooks(t, "v0.2.0", "http://caller-started")
+	original := RestartLocalDaemon
+	t.Cleanup(func() { RestartLocalDaemon = original })
+	requests := 0
+	RestartLocalDaemon = func(_ context.Context, target *daemonruntime.Namespace, previous kitdaemon.RuntimeRecord) (kitdaemon.RuntimeRecord, error) {
+		requests++
+		require.Equal(t, ns.DataDir, target.DataDir)
+		require.Equal(t, profile.StorageID, target.DBHash)
+		require.Equal(t, os.Getpid(), previous.PID)
+		path, err := (kitdaemon.RuntimeStore{Dir: target.DataDir}).LockPath()
+		require.NoError(t, err)
+		lock := flock.New(path)
+		defer func() { require.NoError(t, lock.Close()) }()
+		acquired, err := lock.TryLock()
+		require.NoError(t, err)
+		require.False(t, acquired, "start lock must remain held through replacement readiness")
+		return record, nil
+	}
+	originalStart := startDetachedDaemonForEnsure
+	t.Cleanup(func() { startDetachedDaemonForEnsure = originalStart })
+	startDetachedDaemonForEnsure = func(context.Context, kitdaemon.StartDetachedOptions) error {
+		return errors.New("replacement started from caller")
+	}
+
+	resolved, err := EnsureResolvedInWorkspace(t.Context(), root)
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, requests, "older profile daemon must receive an in-place request")
+	assert.Zero(t, state.stopCalls)
+	assert.Equal(t, live.URL, resolved.BaseURL)
 }

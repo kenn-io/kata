@@ -17,6 +17,7 @@ type claimPrincipal struct {
 	db.ClaimPrincipal
 	IdentityToken    bool
 	Enrollment       bool
+	Federation       *federationPrincipal
 	OwnerAuthority   bool
 	RequestPrincipal *Principal
 }
@@ -32,6 +33,16 @@ func resolveClaimPrincipal(
 	operation HostFederationOperation,
 	allowEnrollment bool,
 ) (context.Context, claimPrincipal, error) {
+	return resolveCapabilityPrincipal(ctx, cfg, projectID, authz, body, operation, allowEnrollment, "claim", true)
+}
+
+// resolveCapabilityPrincipal shares ordinary credential handling with claims.
+// Only claim callers retain the historical keyless invalid-bearer fallback.
+func resolveCapabilityPrincipal(
+	ctx context.Context, cfg ServerConfig, projectID int64, authz string,
+	body api.ClaimActionBody, operation HostFederationOperation,
+	allowEnrollment bool, capability string, keylessBearerFallback bool,
+) (context.Context, claimPrincipal, error) {
 	if cfg.HostAccess != nil {
 		if requestPrincipal, ok := PrincipalFromContext(ctx); ok {
 			if !validHostPrincipal(requestPrincipal) {
@@ -41,7 +52,7 @@ func resolveClaimPrincipal(
 			return ctx, hostClaimPrincipal(cfg, body, requestPrincipal.Subject), nil
 		}
 		if allowEnrollment && hasBearerHeader(authz) {
-			return resolveEnrollmentClaimPrincipal(ctx, cfg, projectID, authz, body, operation)
+			return resolveEnrollmentCapabilityPrincipal(ctx, cfg, projectID, authz, body, operation, capability)
 		}
 		return ctx, claimPrincipal{}, api.NewError(http.StatusUnauthorized, "auth_required",
 			"host principal or scoped federation bearer required", "", nil)
@@ -61,19 +72,19 @@ func resolveClaimPrincipal(
 			return claimRequestContext(ctx, principal), principal, err
 		}
 		if allowEnrollment && hasBearerHeader(authz) {
-			return resolveEnrollmentClaimPrincipal(ctx, cfg, projectID, authz, body, operation)
+			return resolveEnrollmentCapabilityPrincipal(ctx, cfg, projectID, authz, body, operation, capability)
 		}
 		return ctx, claimPrincipal{}, localAuthError(cfg, authz)
 	}
 
 	if allowEnrollment && hasBearerHeader(authz) {
-		authorizedCtx, principal, err := resolveEnrollmentClaimPrincipal(
-			ctx, cfg, projectID, authz, body, operation,
+		authorizedCtx, principal, err := resolveEnrollmentCapabilityPrincipal(
+			ctx, cfg, projectID, authz, body, operation, capability,
 		)
 		if err == nil {
 			return authorizedCtx, principal, nil
 		}
-		if cfg.InsecureReadonly || cfg.HostFederationAccess != nil {
+		if !keylessBearerFallback || cfg.InsecureReadonly || cfg.HostFederationAccess != nil {
 			return ctx, claimPrincipal{}, err
 		}
 	}
@@ -98,15 +109,16 @@ func hostClaimHolder(subject string) string {
 	return "host:" + base64.RawURLEncoding.EncodeToString(digest[:])
 }
 
-func resolveEnrollmentClaimPrincipal(
+func resolveEnrollmentCapabilityPrincipal(
 	ctx context.Context,
 	cfg ServerConfig,
 	projectID int64,
 	authz string,
 	body api.ClaimActionBody,
 	operation HostFederationOperation,
+	capability string,
 ) (context.Context, claimPrincipal, error) {
-	authorizedCtx, fed, err := authorizeFederationRequest(ctx, cfg, authz, projectID, "claim",
+	authorizedCtx, fed, err := authorizeFederationRequest(ctx, cfg, authz, projectID, capability,
 		operation)
 	if err != nil {
 		return ctx, claimPrincipal{}, err
@@ -115,7 +127,8 @@ func resolveEnrollmentClaimPrincipal(
 		HolderInstanceUID: fed.SpokeInstanceUID,
 		Holder:            fed.Actor,
 		ClientKind:        strings.TrimSpace(body.ClientKind),
-		Enrollment:        true}, nil
+		Enrollment:        true,
+		Federation:        &fed}, nil
 }
 
 func authorizeClaimStatusRead(

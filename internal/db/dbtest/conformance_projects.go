@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -16,7 +15,7 @@ import (
 
 func checkProjectRelocation(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	source, err := store.CreateProject(ctx, "move-source")
 	if err != nil {
 		return fmt.Errorf("create move source: %w", err)
@@ -492,7 +491,7 @@ func checkProjectRelocation(t *testing.T, store db.Storage) error {
 
 func checkProjectMerge(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	source, err := store.CreateProject(ctx, "merge-source")
 	if err != nil {
 		return fmt.Errorf("create merge source: %w", err)
@@ -810,7 +809,7 @@ func checkProjectMerge(t *testing.T, store db.Storage) error {
 
 func checkActiveProjectionExports(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "export-project")
 	if err != nil {
 		return err

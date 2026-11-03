@@ -328,6 +328,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 	if logger == nil {
 		logger = slog.Default()
 	}
+	// The service outlives New's ctx; Close cancels this lifetime root.
 	lifetimeCtx, lifetimeCancel := context.WithCancel(context.Background())
 	broadcaster := daemon.NewEventBroadcaster()
 	hookSink := hooks.NewNoop()

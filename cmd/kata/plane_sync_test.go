@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -153,7 +152,7 @@ func TestPlaneReadOnlyAcceptance(t *testing.T) {
 	dir, id := initLocalBoundWorkspace(t, env, "spoke-project")
 	require.Contains(t, runCLI(t, env, dir, "sync", "plane", "enable", "--plane-workspace", "example-workspace", "--plane-project", cliPlaneProject), "Plane sync enabled")
 	require.Contains(t, runCLI(t, env, dir, "sync", "plane", "once"), "created=1")
-	items, err := env.DB.ListIssues(context.Background(), db.ListIssuesParams{ProjectID: id})
+	items, err := env.DB.ListIssues(t.Context(), db.ListIssuesParams{ProjectID: id})
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 	i := items[0]
@@ -164,7 +163,7 @@ func TestPlaneReadOnlyAcceptance(t *testing.T) {
 	out := runCLI(t, env, dir, "sync", "plane", "once")
 	require.Contains(t, out, " updated=1 ")
 	require.Contains(t, out, "status_updated=0", "one-way status arrives with content")
-	closed, err := env.DB.IssueByID(context.Background(), i.ID)
+	closed, err := env.DB.IssueByID(t.Context(), i.ID)
 	require.NoError(t, err)
 	require.Equal(t, "closed", closed.Status)
 	require.True(t, i.UpdatedAt.Equal(closed.UpdatedAt))

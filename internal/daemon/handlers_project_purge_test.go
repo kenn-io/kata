@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,7 +43,7 @@ func TestPurgeProjectHandler_PurgesArchived(t *testing.T) {
 		require.NoError(t, json.Unmarshal(resp.body, &body), string(resp.body))
 		assert.Equal(t, "kata", body.ProjectPurgeLog.ProjectName)
 
-		_, err := h.DB().ProjectByNameIncludingArchived(context.Background(), "kata")
+		_, err := h.DB().ProjectByNameIncludingArchived(t.Context(), "kata")
 		assert.True(t, errors.Is(err, db.ErrNotFound),
 			"name should be freed after purge, got err=%v", err)
 	})
@@ -101,7 +100,7 @@ func TestPurgeProjectHandler_PurgesArchived(t *testing.T) {
 		ts := h.ts.(*httptest.Server)
 		archiveProject(t, h, pid, false)
 		// A federation binding blocks purge with a role-aware error.
-		_, err := h.DB().ExecContext(context.Background(),
+		_, err := h.DB().ExecContext(t.Context(),
 			`INSERT INTO federation_bindings(project_id, role, hub_project_uid, enabled, push_enabled)
 			 VALUES(?, 'hub', '0000000000000000000000000A', 1, 0)`, pid)
 		require.NoError(t, err)

@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -38,7 +37,7 @@ func TestAttentionClientList(t *testing.T) {
 			if all {
 				pid = nil
 			}
-			rows, skipped, err := c.ListAttentionRequests(context.Background(), pid, "alex/reviewer")
+			rows, skipped, err := c.ListAttentionRequests(t.Context(), pid, "alex/reviewer")
 			require.NoError(t, err)
 			require.Zero(t, skipped)
 			require.Len(t, rows, 201)
@@ -59,7 +58,7 @@ func TestAttentionClientDecode(t *testing.T) {
 		}
 		respondJSON(t, w, map[string]any{"issues": rows})
 	})
-	rows, skipped, err := c.ListAttentionRequests(context.Background(), nil, "alex")
+	rows, skipped, err := c.ListAttentionRequests(t.Context(), nil, "alex")
 	require.NoError(t, err)
 	require.Equal(t, 2, skipped)
 	require.Len(t, rows, 4)
@@ -140,7 +139,7 @@ func TestAttentionClientClear(t *testing.T) {
 				require.Equal(t, string(raw), body.Guard.IfValue)
 				respondJSON(t, w, map[string]any{})
 			})
-			err := c.ClearAttentionRequest(context.Background(), 7, "issue-uid", key, raw, "writer")
+			err := c.ClearAttentionRequest(t.Context(), 7, "issue-uid", key, raw, "writer")
 			if version == "0.13.0" || version == "0.28.0" {
 				require.NoError(t, err)
 				require.Equal(t, 1, posts)
@@ -164,7 +163,7 @@ func TestAttentionClientClearConflict(t *testing.T) {
 		w.WriteHeader(409)
 		_, _ = fmt.Fprint(w, `{"error":{"code":"metadata_guard_failed","message":"changed"}}`)
 	})
-	err := c.ClearAttentionRequest(context.Background(), 7, "abc4", "key", jsontext.Value(`{}`), "writer")
+	err := c.ClearAttentionRequest(t.Context(), 7, "abc4", "key", jsontext.Value(`{}`), "writer")
 	var apiErr *APIError
 	require.ErrorAs(t, err, &apiErr)
 	require.Equal(t, 409, apiErr.Status)
@@ -192,20 +191,20 @@ func TestAttentionUndoClientForwarding(t *testing.T) {
 		}
 	})
 	wrapped := newUndoClient(c)
-	rows, skipped, err := wrapped.ListAttentionRequests(context.Background(), nil, "alex")
+	rows, skipped, err := wrapped.ListAttentionRequests(t.Context(), nil, "alex")
 	require.NoError(t, err)
 	require.Zero(t, skipped)
 	require.Len(t, rows, 1)
 	require.Equal(t, "abc4", rows[0].issue.ShortID)
 	require.Equal(t, "Review", rows[0].message)
 	require.Equal(t, 1, listRequests, "list must reach the wrapped client")
-	require.NoError(t, wrapped.ClearAttentionRequest(context.Background(), 7, "abc4", "key", jsontext.Value(`{}`), "writer"))
+	require.NoError(t, wrapped.ClearAttentionRequest(t.Context(), 7, "abc4", "key", jsontext.Value(`{}`), "writer"))
 	require.Equal(t, 1, clearRequests, "clear must reach the wrapped client")
 	require.Empty(t, wrapped.pending)
 	unavailable := newUndoClient(&struct{ KataAPI }{})
-	_, _, err = unavailable.ListAttentionRequests(context.Background(), nil, "alex")
+	_, _, err = unavailable.ListAttentionRequests(t.Context(), nil, "alex")
 	require.Error(t, err)
-	require.Error(t, unavailable.ClearAttentionRequest(context.Background(), 7, "abc4", "key", nil, "writer"))
+	require.Error(t, unavailable.ClearAttentionRequest(t.Context(), 7, "abc4", "key", nil, "writer"))
 }
 
 // Exact recipients must stay distinct across arbitrary valid addresses.
@@ -227,7 +226,7 @@ func FuzzAttentionClientExactRecipient(f *testing.F) {
 		c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 			respondJSON(t, w, map[string]any{"issues": []any{map[string]any{"status": "open", "short_id": "abc4", "metadata": map[string]any{key: jsontext.Value(raw)}}, map[string]any{"status": "open", "metadata": map[string]any{other: jsontext.Value(raw)}}}})
 		})
-		rows, skipped, err := c.ListAttentionRequests(context.Background(), nil, recipient)
+		rows, skipped, err := c.ListAttentionRequests(t.Context(), nil, recipient)
 		require.NoError(t, err)
 		if strings.TrimSpace(message) == "" {
 			require.Empty(t, rows)

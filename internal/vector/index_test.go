@@ -1,7 +1,6 @@
 package vector
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 
@@ -12,7 +11,7 @@ import (
 func TestOpenUsesFastSQLitePragmasWhenTestHarnessRequestsIt(t *testing.T) {
 	t.Setenv("KATA_TEST_FAST_SQLITE", "1")
 
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "vectors.db")
 	ix, err := Open(ctx, path)
 	require.NoError(t, err)
@@ -32,7 +31,7 @@ func TestOpenUsesFastSQLitePragmasWhenTestHarnessRequestsIt(t *testing.T) {
 }
 
 func TestOpenCreatesAndReopens(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "vectors.db")
 	ix, err := Open(ctx, path)
 	if err != nil {
@@ -57,7 +56,7 @@ func TestOpenCreatesAndReopens(t *testing.T) {
 }
 
 func TestOpenResetsOnVersionMismatch(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "vectors.db")
 	ix, err := Open(ctx, path)
 	if err != nil {

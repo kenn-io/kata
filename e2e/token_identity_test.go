@@ -29,7 +29,7 @@ const identityBootstrapToken = "identity-bootstrap-token"
 
 func TestTokenIdentity_OverridesClientActor(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
-	project, err := env.DB.CreateProject(context.Background(), "identity-e2e")
+	project, err := env.DB.CreateProject(t.Context(), "identity-e2e")
 	require.NoError(t, err)
 
 	createTokenResp := doJSONWithBearer(t, env.HTTP, http.MethodPost, env.URL+"/api/v1/tokens",
@@ -142,7 +142,7 @@ func TestTokenIdentity_FederationPersonalTokenBridgeConnectAndPush(t *testing.T)
 	if testing.Short() {
 		t.Skip("e2e")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	const projectName = "identity-federation-e2e"
 	const pushedTitle = "spoke issue from token-bound federation"
 
@@ -225,7 +225,7 @@ func doJSONWithBearer(t *testing.T, client *http.Client, method, url, bearer str
 	t.Helper()
 	bs, err := json.Marshal(body)
 	require.NoError(t, err)
-	req, err := http.NewRequestWithContext(context.Background(), method, url, bytes.NewReader(bs))
+	req, err := http.NewRequestWithContext(t.Context(), method, url, bytes.NewReader(bs))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+bearer)
@@ -244,7 +244,8 @@ func startIdentityDaemon(t *testing.T, bin string) (addr, serverHome string, sto
 		[]byte("[auth]\ntoken = \""+identityBootstrapToken+"\"\nrequire_token_identity = true\n"), 0o600))
 
 	stderr := &safeBuffer{}
-	cmd := exec.Command(bin, "daemon", "start", "--foreground", "--listen", addr) //nolint:gosec
+	// t.Cleanup owns this process; t.Context() would kill it before that runs.
+	cmd := exec.CommandContext(context.WithoutCancel(t.Context()), bin, "daemon", "start", "--foreground", "--listen", addr) //nolint:gosec
 	cmd.Env = append(os.Environ(),
 		"KATA_HOME="+serverHome,
 		"KATA_DB="+filepath.Join(serverHome, "kata.db"),
@@ -301,7 +302,7 @@ func createIdentityTokenCLI(t *testing.T, bin string, env []string, actor string
 
 func runRemoteCmdOutputErr(t *testing.T, bin, workdir string, env []string, args ...string) (string, error) {
 	t.Helper()
-	cmd := exec.Command(bin, args...) //nolint:gosec
+	cmd := exec.CommandContext(t.Context(), bin, args...) //nolint:gosec
 	cmd.Dir = workdir
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()

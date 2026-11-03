@@ -14,7 +14,7 @@ import (
 // of the timed assignment expiry: both full-text entry points must return the
 // exact expires-on instant ClaimOwner recorded for the issue.
 func checkSearchRoundTripsAssignmentExpiry(t *testing.T, store db.Storage) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	fixture, err := createIssueFixture(ctx, store, "search-expiry-project", "searchable timed assignment", "operator", nil)
 	require.NoError(t, err)
 	now := time.Date(2026, time.September, 17, 12, 0, 0, 0, time.UTC)

@@ -1,7 +1,6 @@
 package sqlitestore_test
 
 import (
-	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"testing"
@@ -35,7 +34,7 @@ func TestCreateRecurrence_HappyPath(t *testing.T) {
 
 	assertEventCount(t, d, "recurrence.created", 1)
 	var payload string
-	require.NoError(t, d.QueryRow(`SELECT payload FROM events
+	require.NoError(t, d.QueryRowContext(t.Context(), `SELECT payload FROM events
         WHERE type='recurrence.created' ORDER BY id DESC LIMIT 1`).Scan(&payload))
 	createdPayload := unmarshalPayload[struct {
 		RecurrenceUID     string         `json:"recurrence_uid"`
@@ -84,7 +83,7 @@ func TestPatchRecurrence_BumpsRevisionAndEmitsDiff(t *testing.T) {
 	assert.Equal(t, int64(2), res.NewRevision)
 
 	var payload string
-	require.NoError(t, d.QueryRow(`SELECT payload FROM events
+	require.NoError(t, d.QueryRowContext(t.Context(), `SELECT payload FROM events
         WHERE type='recurrence.updated' ORDER BY id DESC LIMIT 1`).Scan(&payload))
 	var p2 struct {
 		Diff map[string]struct {
@@ -167,7 +166,7 @@ func TestGetRecurrenceByUID(t *testing.T) {
 func TestGetRecurrenceByUID_MissingReturnsErrNotFound(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	_, err := d.GetRecurrenceByUID(ctx, "nosuchuid")
 	assert.ErrorIs(t, err, db.ErrNotFound)
 }
@@ -175,7 +174,7 @@ func TestGetRecurrenceByUID_MissingReturnsErrNotFound(t *testing.T) {
 func TestListRecurrencesByProject_ExcludesArchivedProject(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	p, err := d.CreateProject(ctx, "archived-p")
 	require.NoError(t, err)
@@ -216,7 +215,7 @@ func TestCreateRecurrence_DedupesTemplateLabels(t *testing.T) {
 func TestCreateRecurrence_RejectsInvalidLabel(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, _ := d.CreateProject(ctx, "p")
 
 	// "hello world" contains a space (after trimming the full label, spaces
@@ -254,7 +253,7 @@ func TestCreateRecurrence_SeedsNextOccurrenceCursor(t *testing.T) {
 func TestCreateRecurrence_RejectsBadRecurrenceInputs(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.CreateProject(ctx, "p")
 	require.NoError(t, err)
 

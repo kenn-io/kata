@@ -22,7 +22,8 @@ func newReadyCmd() *cobra.Command {
 		Long: `List open issues that nothing open blocks (--blocked-by), that are not
 scheduled for a future date, and not marked someday. Parent links do not
 block. Most recently updated first; kata next selects by priority (0 = highest).
-Use --unowned to see unclaimed work; kata next returns just the top one.`,
+Use --unowned to see unclaimed work; kata next returns just the top one.
+For stages with human approval, see docs/workflows/gated-workflows.md.`,
 		Example: `  kata ready --unowned --agent
   kata ready --project example-project --label bug --no-label blocked --agent`,
 		Args: cobra.NoArgs,

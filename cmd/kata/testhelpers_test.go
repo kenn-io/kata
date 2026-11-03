@@ -23,6 +23,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kata/internal/testfix"
 	"go.kenn.io/kata/internal/version"
 	kitdaemon "go.kenn.io/kit/daemon"
 	gitcmd "go.kenn.io/kit/git/cmd"
@@ -41,8 +42,8 @@ func setupKataEnv(t *testing.T) string {
 // openKataTestDB opens a SQLite store at path.
 func openKataTestDB(t *testing.T, path string) *sqlitestore.Store {
 	t.Helper()
-	ctx := context.Background()
-	d, err := sqlitestore.Open(ctx, path)
+	ctx := t.Context()
+	d, err := testfix.OpenSQLite(ctx, path)
 	require.NoError(t, err)
 	return d
 }
@@ -86,7 +87,7 @@ func executeRootCapture(t *testing.T, ctx context.Context, args ...string) (stdo
 // GET /api/v1/ping, and returns the host:port address and a cleanup function.
 func pipeServer(t *testing.T) (addr string, cleanup func()) {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	l, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("pipeServer: listen: %v", err)
 	}
@@ -145,7 +146,10 @@ func postJSON[Resp any](t *testing.T, url string, reqBody any) Resp {
 	t.Helper()
 	body, err := json.Marshal(reqBody)
 	require.NoError(t, err)
-	resp, err := http.Post(url, "application/json", bytes.NewReader(body)) //nolint:noctx,gosec // test-only loopback
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodPost, url, bytes.NewReader(body))
+	require.NoError(t, reqErr)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // test-only loopback
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	require.Equalf(t, 200, resp.StatusCode, "POST %s", url)
@@ -160,7 +164,10 @@ func postJSONOK(t *testing.T, url string, reqBody any) {
 	t.Helper()
 	body, err := json.Marshal(reqBody)
 	require.NoError(t, err)
-	resp, err := http.Post(url, "application/json", bytes.NewReader(body)) //nolint:noctx,gosec // test-only loopback
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodPost, url, bytes.NewReader(body))
+	require.NoError(t, reqErr)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // test-only loopback
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	require.Equalf(t, 200, resp.StatusCode, "POST %s", url)
@@ -169,7 +176,9 @@ func postJSONOK(t *testing.T, url string, reqBody any) {
 // getJSON GETs url, asserts a 200 response, and decodes the body into Resp.
 func getJSON[Resp any](t *testing.T, url string) Resp {
 	t.Helper()
-	resp, err := http.Get(url) //nolint:noctx,gosec // test-only loopback
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+	require.NoError(t, reqErr)
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec // test-only loopback
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	require.Equalf(t, 200, resp.StatusCode, "GET %s", url)
@@ -197,7 +206,7 @@ func initBoundWorkspace(t *testing.T, baseURL, origin string) string {
 // resolved project; init/git-specific tests should keep using initBoundWorkspace.
 func initLocalBoundWorkspace(t *testing.T, env *testenv.Env, projectName string) (string, int64) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	dir := t.TempDir()
 	require.NoError(t, config.WriteProjectConfig(dir, projectName))
 	project, err := env.DB.CreateProject(ctx, projectName)
@@ -290,7 +299,7 @@ func runCmdOutput(t *testing.T, env *testenv.Env, args ...string) (string, error
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetArgs(args)
-	ctx := context.Background()
+	ctx := t.Context()
 	if env != nil {
 		ctx = contextWithBaseURL(ctx, env.URL)
 	}
@@ -308,7 +317,7 @@ func runCmdCapture(t *testing.T, env *testenv.Env, args ...string) (stdout, stde
 	cmd.SetOut(&so)
 	cmd.SetErr(&se)
 	cmd.SetArgs(args)
-	ctx := context.Background()
+	ctx := t.Context()
 	if env != nil {
 		ctx = contextWithBaseURL(ctx, env.URL)
 	}
@@ -329,7 +338,7 @@ func requireCmdOutput(t *testing.T, env *testenv.Env, args ...string) string {
 // with a matching git alias, used by ProjectsMerge tests.
 func setupMergeProjects(t *testing.T, env *testenv.Env) (alpha, beta db.Project) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	var err error
 	alpha, err = env.DB.CreateProject(ctx, "alpha")
 	require.NoError(t, err)
@@ -352,7 +361,7 @@ func runCLI(t *testing.T, env *testenv.Env, dir string, args ...string) string {
 	cmd.SetErr(&buf)
 	fullArgs := append([]string{"--workspace", dir}, args...)
 	cmd.SetArgs(fullArgs)
-	cmd.SetContext(contextWithBaseURL(context.Background(), env.URL))
+	cmd.SetContext(contextWithBaseURL(t.Context(), env.URL))
 	require.NoError(t, cmd.Execute())
 	return strings.TrimSpace(buf.String())
 }
@@ -378,7 +387,7 @@ func runCLICapture(t *testing.T, env *testenv.Env, dir string, args ...string) (
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
 	cmd.SetArgs(append([]string{"--workspace", dir}, args...))
-	cmd.SetContext(contextWithBaseURL(context.Background(), env.URL))
+	cmd.SetContext(contextWithBaseURL(t.Context(), env.URL))
 	err := cmd.Execute()
 	return buf.String(), err
 }
@@ -395,7 +404,7 @@ func runCLIWithErr(t *testing.T, env *testenv.Env, dir string, args ...string) (
 	cmd.SetOut(&so)
 	cmd.SetErr(&se)
 	cmd.SetArgs(append([]string{"--workspace", dir}, args...))
-	cmd.SetContext(contextWithBaseURL(context.Background(), env.URL))
+	cmd.SetContext(contextWithBaseURL(t.Context(), env.URL))
 	err = cmd.Execute()
 	if err != nil {
 		emitErrorForMode(&se, err, outputHuman, true)
@@ -489,7 +498,7 @@ func newCLIFixture(t *testing.T) *cliFixture {
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetErr(&buf)
-	cmd.SetContext(contextWithBaseURL(context.Background(), env.URL))
+	cmd.SetContext(contextWithBaseURL(t.Context(), env.URL))
 	return &cliFixture{env: env, dir: dir, cmd: cmd, buf: &buf}
 }
 

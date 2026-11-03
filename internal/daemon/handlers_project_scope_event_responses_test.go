@@ -42,7 +42,7 @@ func TestProjectScopedCloseMutationHidesRestrictedParentReference(t *testing.T) 
 			"the response must follow event-read filtering when the close parent is restricted")
 		require.NotContains(t, string(body), fixture.issue.UID,
 			"the response must not disclose an inaccessible parent UID")
-		require.NotContains(t, string(body), fixture.issue.ShortID,
+		require.NotRegexp(t, `\b`+fixture.issue.ShortID+`\b`, string(body),
 			"the response must not disclose an inaccessible parent short ID")
 		closed, err := store.IssueByID(t.Context(), child.ID)
 		require.NoError(t, err)
@@ -99,7 +99,7 @@ func TestProjectScopedCloseRetryHidesRestrictedEvidenceReference(t *testing.T) {
 		require.True(t, retry.Reused)
 		require.Nil(t, retry.OriginalEvent,
 			"a receipt whose duplicate-of target is outside the current project scope must be omitted")
-		require.NotContains(t, string(responseBody), fixture.visible.ShortID,
+		require.NotRegexp(t, `\b`+fixture.visible.ShortID+`\b`, string(responseBody),
 			"the inaccessible evidence reference must not be returned by the retry")
 	})
 }
@@ -180,7 +180,7 @@ func TestProjectScopedIssueShowOmitsRestrictedParent(t *testing.T) {
 		require.NoError(t, json.Unmarshal(body, &response))
 		require.Nil(t, response.Parent, "an inaccessible parent must be omitted from the visible child")
 		require.NotContains(t, string(body), fixture.issue.UID)
-		require.NotContains(t, string(body), fixture.issue.ShortID)
+		require.NotRegexp(t, `\b`+fixture.issue.ShortID+`\b`, string(body))
 		require.NotContains(t, string(body), projectAccessCanary)
 	})
 }

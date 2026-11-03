@@ -13,7 +13,10 @@ observations. External adapters schedule other jobs, resolve checkout and provid
 configuration, create or update ordinary issues, deliver notifications, and launch processes.
 An observation records evidence; its status does not control whether anything runs.
 
-Browse jobs, runs, and workflows in `kata tui` with the `2`, `3`, and `4` tabs for the current project.
+Browse jobs, runs, and workflows in `kata tui` with the `2`, `3`, and `4` tabs for the current project. On the Jobs tab, create and edit jobs; see the [`kata tui` keys](cli.md#daemon-and-diagnostics).
+
+For a run organized as dependent issues with human approval, see
+[Gated workflows](../workflows/gated-workflows.md).
 
 ## Vocabulary
 
@@ -589,6 +592,10 @@ workflow. PostgreSQL runtime roles still cannot perform owner-only migrations.
 
 [Herdr Kata](https://github.com/salmonumbrella/herdr-kata/blob/main/docs/native.md)
 is one adapter that implements this contract; its documentation covers setup.
+[tern-kata](https://github.com/Dangerboi/tern-kata/blob/main/docs/guide/worker.md)
+is another: its worker runs prompt and workflow jobs through
+[omp](https://github.com/can1357/oh-my-pi) on the user's machine; its guide
+covers setup.
 
 ## Storage and backup
 

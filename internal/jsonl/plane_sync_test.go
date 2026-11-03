@@ -2,7 +2,6 @@ package jsonl_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json/v2"
 	"testing"
 	"time"
@@ -24,7 +23,7 @@ type planeExportFixture struct {
 
 func exportPlaneFixture(t *testing.T) planeExportFixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	s := openExportTestDB(t)
 	p, err := s.CreateProject(ctx, "example-plane-project")
 	require.NoError(t, err)
@@ -84,7 +83,7 @@ func TestPlaneSyncExportPreservesConfigSourceAndMappings(t *testing.T) {
 	require.Equal(t, "work-item:22222222-2222-4222-8222-222222222222", mapping["external_id"])
 }
 func TestPlaneSyncRestoreRequiresLocalReenable(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	fixture := exportPlaneFixture(t)
 	target := openImportTargetDB(t)
 	require.NoError(t, jsonl.Import(ctx, bytes.NewReader(fixture.exported), target))
@@ -122,7 +121,7 @@ func TestPlaneSyncRestoreRequiresLocalReenable(t *testing.T) {
 }
 
 func TestPlaneSyncTrustedCutoverPreservesEnabled(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	fixture := exportPlaneFixture(t)
 	target := openImportTargetDB(t)
 	require.NoError(t, jsonl.ImportWithOptions(ctx, bytes.NewReader(fixture.exported), target, jsonl.ImportOptions{PreserveIssueSyncBindingEnabled: true}))

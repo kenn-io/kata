@@ -50,20 +50,20 @@ func (f *runtimeTwentyFetcher) Tasks(ctx context.Context, _ twentysync.Config) (
 func readRuntimeTwentyStatus(t *testing.T, h http.Handler, id int64) runtimeNotionStatus {
 	t.Helper()
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issue-sync/twenty/status", id), nil))
+	h.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issue-sync/twenty/status", id), nil))
 	require.Equal(t, 200, w.Code, w.Body.String())
 	var s runtimeNotionStatus
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &s))
 	return s
 }
-func twentyRuntimePost(id int64, action string, body io.Reader) *http.Request {
-	r := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issue-sync/twenty/%s", id, action), body)
+func twentyRuntimePost(ctx context.Context, id int64, action string, body io.Reader) *http.Request {
+	r := httptest.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issue-sync/twenty/%s", id, action), body)
 	r.Header.Set("Content-Type", "application/json")
 	return r
 }
 
 func TestServiceTwentyScheduledProgress(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newRuntimeTwentyFetcher()
 	var resolved config.TwentySyncConfig
 	s, err := newService(ctx, Config{DSN: filepath.Join(t.TempDir(), "service.db"), Auth: AuthConfig{TrustCallerAuthentication: true}, TwentySync: TwentySyncConfig{APIOrigin: "https://twenty.example/", TokenEnv: " EXAMPLE_PLANE_TOKEN "}}, serviceDeps{twentySyncFetcherFactory: func(c config.TwentySyncConfig) twentysync.Fetcher { resolved = c; return f }})
@@ -75,7 +75,7 @@ func TestServiceTwentyScheduledProgress(t *testing.T) {
 	p, err := s.store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	w := httptest.NewRecorder()
-	s.Handler().ServeHTTP(w, twentyRuntimePost(p.ID, "enable", strings.NewReader(`{}`)))
+	s.Handler().ServeHTTP(w, twentyRuntimePost(t.Context(), p.ID, "enable", strings.NewReader(`{}`)))
 	require.Equal(t, 200, w.Code, w.Body.String())
 	sub := s.broadcaster.Subscribe(daemon.SubFilter{ProjectID: p.ID})
 	defer sub.Unsub()
@@ -90,7 +90,7 @@ func TestServiceTwentyScheduledProgress(t *testing.T) {
 	require.NotNil(t, status.Status.Progress)
 	require.Equal(t, "tasks", status.Status.Progress.Phase)
 	w = httptest.NewRecorder()
-	s.Handler().ServeHTTP(w, twentyRuntimePost(p.ID, "once", strings.NewReader(`{}`)))
+	s.Handler().ServeHTTP(w, twentyRuntimePost(t.Context(), p.ID, "once", strings.NewReader(`{}`)))
 	require.Equal(t, 409, w.Code, w.Body.String())
 	close(f.release)
 	finished := waitRuntimeNotionRecord(t, record.recorded)
@@ -104,17 +104,17 @@ func TestServiceTwentyScheduledProgress(t *testing.T) {
 	}
 }
 func TestServiceTwentyConfigAndExplicitCredentials(t *testing.T) {
-	_, err := New(context.Background(), Config{DSN: filepath.Join(t.TempDir(), "bad.db"), Auth: AuthConfig{TrustCallerAuthentication: true}, TwentySync: TwentySyncConfig{APIOrigin: "http://twenty.example"}})
+	_, err := New(t.Context(), Config{DSN: filepath.Join(t.TempDir(), "bad.db"), Auth: AuthConfig{TrustCallerAuthentication: true}, TwentySync: TwentySyncConfig{APIOrigin: "http://twenty.example"}})
 	require.ErrorContains(t, err, "twenty_sync.api_origin")
 	t.Setenv("KATA_PLANE_TOKEN", "unrelated-example-secret")
 	t.Setenv("EXAMPLE_PLANE_TOKEN", "")
-	s, err := New(context.Background(), Config{DSN: filepath.Join(t.TempDir(), "service.db"), Auth: AuthConfig{TrustCallerAuthentication: true}, TwentySync: TwentySyncConfig{TokenEnv: "EXAMPLE_PLANE_TOKEN"}})
+	s, err := New(t.Context(), Config{DSN: filepath.Join(t.TempDir(), "service.db"), Auth: AuthConfig{TrustCallerAuthentication: true}, TwentySync: TwentySyncConfig{TokenEnv: "EXAMPLE_PLANE_TOKEN"}})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, s.Close()) }()
-	p, err := s.store.CreateProject(context.Background(), "example-project")
+	p, err := s.store.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
 	w := httptest.NewRecorder()
-	s.Handler().ServeHTTP(w, twentyRuntimePost(p.ID, "enable", strings.NewReader(`{}`)))
+	s.Handler().ServeHTTP(w, twentyRuntimePost(t.Context(), p.ID, "enable", strings.NewReader(`{}`)))
 	require.Equal(t, 400, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "credentials")
 	require.NotContains(t, w.Body.String(), "unrelated-example-secret")

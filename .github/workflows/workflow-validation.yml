@@ -68,8 +68,10 @@ jobs:
         with:
           bun-version: 1.4.4
 
+      - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
+
       - name: Install frozen web dependencies
-        run: make web-install
+        run: kit-retry 3 5 make web-install
 
       # `goreleaser check` intentionally exits nonzero for the pinned, deprecated
       # `brews` pipe. Executing the full snapshot validates that pipe and every
@@ -154,8 +156,10 @@ jobs:
           port=$(docker port "$container" 7777/tcp)
           # Docker's port proxy accepts and resets connections until the
           # daemon listens; plain --retry does not retry a reset.
+          # workflowretry: allow Poll the local service for readiness.
           curl --fail --retry 60 --retry-delay 1 --retry-all-errors \
             -H 'Host: 127.0.0.1:7777' "http://$port/api/v1/ping"
+          # workflowretry: allow Assert the local daemon health response.
           curl --fail -H 'Host: 127.0.0.1:7777' "http://$port/api/v1/health"
           test "$(docker exec "$container" id -u)" = 1000
           test "$(docker exec "$container" stat -c '%a' /data/auth-token)" = 600

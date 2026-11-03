@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -47,7 +46,7 @@ func TestMoveCLI_LegacyDaemonContract(t *testing.T) {
 				if dry {
 					args = append(args, "--dry")
 				}
-				_, _, err := executeRootCapture(t, contextWithBaseURL(context.Background(), server.URL), args...)
+				_, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), args...)
 				if single {
 					require.NoError(t, err)
 					assert.Equal(t, 1, moves)

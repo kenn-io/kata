@@ -1,7 +1,6 @@
 package sqlitestore
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -26,7 +25,7 @@ func BenchmarkFederationIngestWriterInterval(b *testing.B) {
 				d, p, issue := incrementalTestStore(b)
 				seedFederationBenchmarkHistory(b, d, p, history)
 				reference := cloneIncrementalStore(b, d)
-				ctx := context.Background()
+				ctx := b.Context()
 				var writerStart time.Time
 				var writerTotal, fullWriterTotal time.Duration
 				d.federationIngestPrepared = func() { writerStart = time.Now() }
@@ -64,7 +63,7 @@ func BenchmarkFederationIngestWriterInterval(b *testing.B) {
 
 func seedFederationBenchmarkHistory(b *testing.B, d *Store, p db.Project, count int) {
 	b.Helper()
-	ctx := context.Background()
+	ctx := b.Context()
 	tx, err := d.BeginTx(ctx, nil)
 	require.NoError(b, err)
 	defer func() { _ = tx.Rollback() }()

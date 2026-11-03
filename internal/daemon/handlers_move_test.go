@@ -70,7 +70,7 @@ func TestMoveIssue_HappyPath(t *testing.T) {
 	assert.Equal(t, iss.Revision+1, out.Issue.Revision)
 
 	// Verify the row really moved.
-	stored, err := env.DB.IssueByID(context.Background(), iss.ID)
+	stored, err := env.DB.IssueByID(t.Context(), iss.ID)
 	require.NoError(t, err)
 	assert.Equal(t, tgt.ID, stored.ProjectID)
 	assert.Equal(t, out.NewShortID, stored.ShortID)

@@ -57,7 +57,7 @@ func TestAgentHooksWorkspaceBareAndStable(t *testing.T) {
 				if harness == "claude" {
 					changed, err = applyClaudeHooks(dir)
 				} else {
-					changed, _, err = applyCodexHooks(dir)
+					changed, _, err = applyCodexHooks(t.Context(), dir)
 				}
 			}
 			apply()

@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"net/http"
@@ -72,7 +71,7 @@ func TestProjectMutations_IdentityModeBootstrapTokenCannotWrite(t *testing.T) {
 				return http.MethodPost, "/api/v1/projects", map[string]any{"name": "new-project"}
 			},
 			verify: func(t *testing.T, env *testenv.Env) {
-				_, err := env.DB.ProjectByName(context.Background(), "new-project")
+				_, err := env.DB.ProjectByName(t.Context(), "new-project")
 				assert.ErrorIs(t, err, db.ErrNotFound)
 			},
 		},
@@ -85,9 +84,9 @@ func TestProjectMutations_IdentityModeBootstrapTokenCannotWrite(t *testing.T) {
 					map[string]any{"source_project_id": source}
 			},
 			verify: func(t *testing.T, env *testenv.Env) {
-				_, err := env.DB.ProjectByName(context.Background(), "source")
+				_, err := env.DB.ProjectByName(t.Context(), "source")
 				require.NoError(t, err)
-				_, err = env.DB.ProjectByName(context.Background(), "target")
+				_, err = env.DB.ProjectByName(t.Context(), "target")
 				require.NoError(t, err)
 			},
 		},
@@ -99,9 +98,9 @@ func TestProjectMutations_IdentityModeBootstrapTokenCannotWrite(t *testing.T) {
 					map[string]any{"name": "new-name"}
 			},
 			verify: func(t *testing.T, env *testenv.Env) {
-				_, err := env.DB.ProjectByName(context.Background(), "old-name")
+				_, err := env.DB.ProjectByName(t.Context(), "old-name")
 				require.NoError(t, err)
-				_, err = env.DB.ProjectByName(context.Background(), "new-name")
+				_, err = env.DB.ProjectByName(t.Context(), "new-name")
 				assert.ErrorIs(t, err, db.ErrNotFound)
 			},
 		},
@@ -159,7 +158,7 @@ func TestProjectMutations_RequireAttributedActor(t *testing.T) {
 
 func TestResolveProject_IdentityModeBootstrapCanResolveWithoutMutatingAliases(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
-	project, err := env.DB.CreateProject(context.Background(), "target")
+	project, err := env.DB.CreateProject(t.Context(), "target")
 	require.NoError(t, err)
 
 	resp, bs := envDoRaw(t, env, http.MethodPost, "/api/v1/projects/resolve",
@@ -180,7 +179,7 @@ func TestResolveProject_IdentityModeBootstrapCanResolveWithoutMutatingAliases(t 
 	require.NoError(t, json.Unmarshal(bs, &resolved))
 	assert.Equal(t, project.ID, resolved.Project.ID)
 
-	aliases, err := env.DB.ProjectAliases(context.Background(), project.ID)
+	aliases, err := env.DB.ProjectAliases(t.Context(), project.ID)
 	require.NoError(t, err)
 	assert.Empty(t, aliases)
 

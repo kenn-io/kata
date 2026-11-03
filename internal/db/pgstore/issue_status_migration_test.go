@@ -30,7 +30,7 @@ func TestIssueStatusMigrationUpgradesVersion29(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires PostgreSQL")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	const schema = "status_upgrade"
@@ -82,6 +82,7 @@ func TestIssueStatusMigrationUpgradesVersion29(t *testing.T) {
 func dropProjectAccessSchema(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
 	dropEventMoveHistoryIndex(ctx, t, admin, schema)
+	dropCommentUIDHandleIndex(ctx, t, admin, schema)
 	dropRelaySchema(ctx, t, admin, schema)
 	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP TABLE %s.federation_entity_provenance,%s.federation_event_provenance,%s.federation_root_keys`, schema, schema, schema)) // #nosec G201 -- fixed test schema identifiers.
 	require.NoError(t, err)

@@ -2,7 +2,6 @@ package federation_test
 
 import (
 	"bytes"
-	"context"
 	"crypto/ed25519"
 	"encoding/json/v2"
 	"fmt"
@@ -76,7 +75,7 @@ func TestRelayClaimHolderMappingSupportsLeafMutationAndPendingRetry(t *testing.T
 		credential := leaf.credential
 		credential.HubURL = relay.http.URL
 		require.NoError(t, federation.RetryPendingClaimsOnce(
-			context.Background(), leaf.store, binding, credential, clientpkg.Opts{},
+			t.Context(), leaf.store, binding, credential, clientpkg.Opts{},
 		))
 		pending, err := leaf.store.ListPendingClaimRequests(t.Context(), leaf.project.ID, 10)
 		require.NoError(t, err)

@@ -16,7 +16,7 @@ import (
 )
 
 func TestKitMigrationReusesPersistedEmbeddingsForIndexingAndServing(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := newReconcilerTestStore(t)
 	project, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)

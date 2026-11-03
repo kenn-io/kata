@@ -1,7 +1,6 @@
 package client
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -77,7 +76,7 @@ func TestBearerTransportInjectsHeader(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := &http.Client{Transport: (config.BearerPolicy{}).Transport(http.DefaultTransport, "secret", srv.URL)}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
 	require.NoError(t, err)
@@ -99,7 +98,7 @@ func TestBearerTransportNoTokenPassthrough(t *testing.T) {
 		"empty token must return the base transport unchanged")
 
 	c := &http.Client{Transport: rt}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
 	require.NoError(t, err)
@@ -117,7 +116,7 @@ func TestBearerTransportPreservesCallerHeader(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := &http.Client{Transport: (config.BearerPolicy{}).Transport(http.DefaultTransport, "from-transport", srv.URL)}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 	require.NoError(t, err)
 	req.Header.Set("Authorization", "Bearer caller-supplied")
 	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
@@ -135,7 +134,7 @@ func TestBearerTransportDoesNotMutateRequest(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	c := &http.Client{Transport: (config.BearerPolicy{}).Transport(http.DefaultTransport, "secret", srv.URL)}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
 	require.NoError(t, err)
@@ -157,10 +156,10 @@ func TestNewHTTPClientAttachesAuthHeader(t *testing.T) {
 	t.Setenv("KATA_HOME", tmp)
 	t.Setenv("KATA_AUTH_TOKEN", "client-tok")
 
-	c, err := NewHTTPClient(context.Background(), srv.URL, Opts{})
+	c, err := NewHTTPClient(t.Context(), srv.URL, Opts{})
 	require.NoError(t, err)
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		srv.URL+"/api/v1/projects", nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
@@ -198,14 +197,14 @@ url = "`+srv.URL+`"
 token = "local-token"
 `), 0o600))
 
-	baseURL, ok, err := resolveRemote(context.Background(), "")
+	baseURL, ok, err := resolveRemote(t.Context(), "")
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, srv.URL, baseURL)
-	c, err := NewHTTPClient(context.Background(), baseURL, Opts{})
+	c, err := NewHTTPClient(t.Context(), baseURL, Opts{})
 	require.NoError(t, err)
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		srv.URL+"/api/v1/projects", nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
@@ -237,10 +236,10 @@ name = "example-workspace"
 token = "project-token"
 `), 0o600))
 
-	c, err := NewHTTPClient(context.Background(), srv.URL, Opts{})
+	c, err := NewHTTPClient(t.Context(), srv.URL, Opts{})
 	require.NoError(t, err)
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		srv.URL+"/api/v1/projects", nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
@@ -273,10 +272,10 @@ name = "broken"
 url = "::not-a-url::"
 `))
 
-	c, err := NewHTTPClient(context.Background(), srv.URL, Opts{})
+	c, err := NewHTTPClient(t.Context(), srv.URL, Opts{})
 	require.NoError(t, err)
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		srv.URL+"/api/v1/projects", nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
@@ -322,14 +321,14 @@ url = "::not-a-url::"
 url = "`+srv.URL+`"
 `), 0o600))
 
-	baseURL, ok, err := resolveRemote(context.Background(), "")
+	baseURL, ok, err := resolveRemote(t.Context(), "")
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, srv.URL, baseURL)
-	c, err := NewHTTPClient(context.Background(), baseURL, Opts{})
+	c, err := NewHTTPClient(t.Context(), baseURL, Opts{})
 	require.NoError(t, err)
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		srv.URL+"/api/v1/projects", nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
@@ -376,14 +375,14 @@ url = "::not-a-url::"
 url = "`+srv.URL+`"
 `), 0o600))
 
-	resolved, ok, err := ResolveRemoteDaemon(context.Background(), workspace)
+	resolved, ok, err := ResolveRemoteDaemon(t.Context(), workspace)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, srv.URL, resolved.BaseURL)
-	c, err := NewHTTPClientForResolved(context.Background(), resolved, Opts{})
+	c, err := NewHTTPClientForResolved(t.Context(), resolved, Opts{})
 	require.NoError(t, err)
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		srv.URL+"/api/v1/projects", nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
@@ -418,10 +417,10 @@ url = "`+active.URL+`"
 token = "active-token"
 `))
 
-	c, err := NewHTTPClient(context.Background(), active.URL, Opts{DaemonName: "shared"})
+	c, err := NewHTTPClient(t.Context(), active.URL, Opts{DaemonName: "shared"})
 	require.NoError(t, err)
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		active.URL+"/api/v1/projects", nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req) //nolint:gosec // G704: active.URL is the test's own httptest.Server
@@ -464,10 +463,10 @@ token = "active-token"
 url = "`+ambient.URL+`"
 `), 0o600))
 
-	c, err := NewHTTPClient(context.Background(), active.URL, Opts{})
+	c, err := NewHTTPClient(t.Context(), active.URL, Opts{})
 	require.NoError(t, err)
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		active.URL+"/api/v1/projects", nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req) //nolint:gosec // G704: active.URL is the test's own httptest.Server
@@ -508,10 +507,10 @@ url = "`+active.URL+`"
 	workspace := t.TempDir()
 	writeWorkspaceMarker(t, workspace)
 
-	c, err := NewHTTPClient(context.Background(), active.URL, Opts{WorkspaceStart: workspace})
+	c, err := NewHTTPClient(t.Context(), active.URL, Opts{WorkspaceStart: workspace})
 	require.NoError(t, err)
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		active.URL+"/api/v1/projects", nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req) //nolint:gosec // G704: active.URL is the test's own httptest.Server
@@ -529,10 +528,10 @@ func TestNewHTTPClientWithBearerAttachesExplicitToken(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, err := NewHTTPClientWithBearer(context.Background(), srv.URL, "explicit-token", Opts{})
+	c, err := NewHTTPClientWithBearer(t.Context(), srv.URL, "explicit-token", Opts{})
 	require.NoError(t, err)
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		srv.URL+"/api/v1/projects", nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
@@ -569,12 +568,12 @@ url = "`+srv.URL+`"
 token = "target-token"
 `))
 
-	resolved, err := EnsureResolvedInWorkspace(context.Background(), "")
+	resolved, err := EnsureResolvedInWorkspace(t.Context(), "")
 	require.NoError(t, err)
-	c, err := NewHTTPClientForResolved(context.Background(), resolved, Opts{})
+	c, err := NewHTTPClientForResolved(t.Context(), resolved, Opts{})
 	require.NoError(t, err)
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		srv.URL+"/api/v1/projects", nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
@@ -596,11 +595,11 @@ func TestNewHTTPClientForTargetAttachesExplicitTokenOverGlobal(t *testing.T) {
 	t.Setenv("KATA_HOME", tmp)
 	t.Setenv("KATA_AUTH_TOKEN", "global-token")
 
-	c, err := NewHTTPClientForTarget(context.Background(), srv.URL,
+	c, err := NewHTTPClientForTarget(t.Context(), srv.URL,
 		TargetAuth{Token: "target-token"}, Opts{})
 	require.NoError(t, err)
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		srv.URL+"/api/v1/projects", nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
@@ -611,7 +610,7 @@ func TestNewHTTPClientForTargetAttachesExplicitTokenOverGlobal(t *testing.T) {
 }
 
 func TestNewHTTPClientForTargetAllowsBearerForPrivateIPWhenAllowInsecureSet(t *testing.T) {
-	c, err := NewHTTPClientForTarget(context.Background(), "http://100.64.0.5:7373",
+	c, err := NewHTTPClientForTarget(t.Context(), "http://100.64.0.5:7373",
 		TargetAuth{Token: "target-token", AllowInsecure: true}, Opts{})
 
 	require.NoError(t, err)
@@ -619,7 +618,7 @@ func TestNewHTTPClientForTargetAllowsBearerForPrivateIPWhenAllowInsecureSet(t *t
 }
 
 func TestNewHTTPClientForTargetAllowsTailscaleHostnameWithAllowInsecure(t *testing.T) {
-	c, err := NewHTTPClientForTarget(context.Background(), "http://tailscale-host:7777",
+	c, err := NewHTTPClientForTarget(t.Context(), "http://tailscale-host:7777",
 		TargetAuth{Token: "target-token", AllowInsecure: true}, Opts{})
 
 	require.NoError(t, err)
@@ -627,7 +626,7 @@ func TestNewHTTPClientForTargetAllowsTailscaleHostnameWithAllowInsecure(t *testi
 }
 
 func TestNewHTTPClientForTargetRefusesPlaintextHostnameWithoutAllowInsecure(t *testing.T) {
-	_, err := NewHTTPClientForTarget(context.Background(), "http://daemon.internal:7373",
+	_, err := NewHTTPClientForTarget(t.Context(), "http://daemon.internal:7373",
 		TargetAuth{Token: "target-token"}, Opts{})
 
 	require.Error(t, err)
@@ -663,7 +662,7 @@ func TestNewHTTPClientForTargetEmptyTokenPolicy(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client, err := NewHTTPClientForTarget(context.Background(), tt.baseURL, tt.auth, Opts{})
+			client, err := NewHTTPClientForTarget(t.Context(), tt.baseURL, tt.auth, Opts{})
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.Nil(t, client)
@@ -683,7 +682,7 @@ func TestNewHTTPClientForTargetAllowInsecureStillRefusesCrossOrigin(t *testing.T
 	})
 	rt, err := authBearerTransport(base, "target-token", "http://100.64.0.5:7373", false, true)
 	require.NoError(t, err)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		"http://100.64.0.6:7373/api/v1/ping", nil)
 	require.NoError(t, err)
 
@@ -701,21 +700,21 @@ func TestNewHTTPClientForTargetAllowInsecureStillRefusesCrossOrigin(t *testing.T
 // non-loopback endpoint is reported at construction rather than silently
 // producing a client that will fail later as an opaque 401.
 func TestNewHTTPClientWithBearerEmptyTokenChecksTarget(t *testing.T) {
-	_, err := NewHTTPClientWithBearer(context.Background(), "http://example.invalid:7373", "", Opts{})
+	_, err := NewHTTPClientWithBearer(t.Context(), "http://example.invalid:7373", "", Opts{})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "plaintext")
 }
 
 func TestNewHTTPClientWithBearerEmptyTokenAllowsSafeTarget(t *testing.T) {
-	c, err := NewHTTPClientWithBearer(context.Background(), "http://127.0.0.1:7373", "", Opts{})
+	c, err := NewHTTPClientWithBearer(t.Context(), "http://127.0.0.1:7373", "", Opts{})
 
 	require.NoError(t, err)
 	assert.NotNil(t, c)
 }
 
 func TestNewHTTPClientWithBearerRefusesPlaintextNonLoopback(t *testing.T) {
-	_, err := NewHTTPClientWithBearer(context.Background(), "http://example.invalid:7373", "secret", Opts{})
+	_, err := NewHTTPClientWithBearer(t.Context(), "http://example.invalid:7373", "secret", Opts{})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "plaintext")
@@ -727,7 +726,7 @@ func TestNewHTTPClientWithBearerHonorsConfiguredRemoteAllowInsecure(t *testing.T
 	t.Setenv("KATA_SERVER", baseURL)
 	t.Setenv("KATA_ALLOW_INSECURE", "1")
 
-	c, err := NewHTTPClientWithBearer(context.Background(), baseURL, "secret", Opts{})
+	c, err := NewHTTPClientWithBearer(t.Context(), baseURL, "secret", Opts{})
 
 	require.NoError(t, err)
 	assert.NotNil(t, c)
@@ -745,12 +744,12 @@ func TestNewHTTPClientStreamingAttachesAuthHeader(t *testing.T) {
 	t.Setenv("KATA_HOME", tmp)
 	t.Setenv("KATA_AUTH_TOKEN", "stream-tok")
 
-	c, err := NewHTTPClient(context.Background(), srv.URL, Opts{
+	c, err := NewHTTPClient(t.Context(), srv.URL, Opts{
 		ResponseHeaderTimeout: SSEHandshakeTimeout,
 	})
 	require.NoError(t, err)
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		srv.URL+"/api/v1/events/stream", nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
@@ -774,7 +773,7 @@ func TestNewHTTPClient_RefusesBearerOnPlaintextNonLoopback(t *testing.T) {
 	t.Setenv("KATA_AUTH_TOKEN", "secret")
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "")
 
-	_, err := NewHTTPClient(context.Background(), "http://example.invalid:7373", Opts{})
+	_, err := NewHTTPClient(t.Context(), "http://example.invalid:7373", Opts{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "plaintext")
 }
@@ -785,7 +784,7 @@ func TestNewHTTPClient_AllowsBearerOnPlaintextNonLoopbackWhenTrustPrivateNetwork
 	t.Setenv("KATA_AUTH_TOKEN", "secret")
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "1")
 
-	_, err := NewHTTPClient(context.Background(), "http://100.64.0.5:7373", Opts{})
+	_, err := NewHTTPClient(t.Context(), "http://100.64.0.5:7373", Opts{})
 	require.NoError(t, err)
 }
 
@@ -795,7 +794,7 @@ func TestNewHTTPClient_TrustPrivateNetworkRejectsPublicPlaintextTarget(t *testin
 	t.Setenv("KATA_AUTH_TOKEN", "secret")
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "1")
 
-	_, err := NewHTTPClient(context.Background(), "http://8.8.8.8:7373", Opts{})
+	_, err := NewHTTPClient(t.Context(), "http://8.8.8.8:7373", Opts{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "non-public")
 }
@@ -806,7 +805,7 @@ func TestNewHTTPClient_TrustPrivateNetworkRejectsPlaintextHostname(t *testing.T)
 	t.Setenv("KATA_AUTH_TOKEN", "secret")
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "1")
 
-	_, err := NewHTTPClient(context.Background(), "http://example.internal:7373", Opts{})
+	_, err := NewHTTPClient(t.Context(), "http://example.internal:7373", Opts{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "literal IP")
 }
@@ -820,10 +819,10 @@ func TestNewHTTPClient_EnvRemoteAllowInsecureAllowsBearerOnPlaintextHostname(t *
 	t.Setenv("KATA_SERVER", "http://tailscale-host:7777")
 	t.Setenv("KATA_ALLOW_INSECURE", "1")
 
-	resolved, ok, err := ResolveRemoteDaemon(context.Background(), "")
+	resolved, ok, err := ResolveRemoteDaemon(t.Context(), "")
 	require.NoError(t, err)
 	require.True(t, ok)
-	_, err = NewHTTPClientForResolved(context.Background(), resolved, Opts{})
+	_, err = NewHTTPClientForResolved(t.Context(), resolved, Opts{})
 	require.NoError(t, err)
 }
 
@@ -845,10 +844,10 @@ url = "http://tailscale-host:7777"
 allow_insecure = true
 `), 0o600))
 
-	resolved, ok, err := ResolveRemoteDaemon(context.Background(), dir)
+	resolved, ok, err := ResolveRemoteDaemon(t.Context(), dir)
 	require.NoError(t, err)
 	require.True(t, ok)
-	_, err = NewHTTPClientForResolved(context.Background(), resolved, Opts{})
+	_, err = NewHTTPClientForResolved(t.Context(), resolved, Opts{})
 	require.NoError(t, err)
 }
 
@@ -866,7 +865,7 @@ func TestNewHTTPClient_AllowsBearerOnLoopback(t *testing.T) {
 		"http://localhost:7373",
 	} {
 		t.Run(base, func(t *testing.T) {
-			_, err := NewHTTPClient(context.Background(), base, Opts{})
+			_, err := NewHTTPClient(t.Context(), base, Opts{})
 			require.NoError(t, err)
 		})
 	}
@@ -879,7 +878,7 @@ func TestNewHTTPClient_AllowsBearerOverHTTPS(t *testing.T) {
 	t.Setenv("KATA_HOME", tmp)
 	t.Setenv("KATA_AUTH_TOKEN", "secret")
 
-	_, err := NewHTTPClient(context.Background(), "https://example.invalid", Opts{})
+	_, err := NewHTTPClient(t.Context(), "https://example.invalid", Opts{})
 	require.NoError(t, err)
 }
 
@@ -910,7 +909,7 @@ func TestNewHTTPClient_NoTokenChecksTarget(t *testing.T) {
 	t.Setenv("KATA_HOME", tmp)
 	t.Setenv("KATA_AUTH_TOKEN", "")
 
-	_, err := NewHTTPClient(context.Background(), "http://example.invalid:7373", Opts{})
+	_, err := NewHTTPClient(t.Context(), "http://example.invalid:7373", Opts{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "plaintext")
 }
@@ -923,12 +922,12 @@ func TestNewHTTPClient_NoTokenPrivateTargetNeedsTrustOptIn(t *testing.T) {
 	t.Setenv("KATA_HOME", tmp)
 	t.Setenv("KATA_AUTH_TOKEN", "")
 
-	_, err := NewHTTPClient(context.Background(), "http://100.64.0.5:7777", Opts{})
+	_, err := NewHTTPClient(t.Context(), "http://100.64.0.5:7777", Opts{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "KATA_TRUST_PRIVATE_NETWORK")
 
 	t.Setenv("KATA_TRUST_PRIVATE_NETWORK", "1")
-	c, err := NewHTTPClient(context.Background(), "http://100.64.0.5:7777", Opts{})
+	c, err := NewHTTPClient(t.Context(), "http://100.64.0.5:7777", Opts{})
 	require.NoError(t, err)
 	assert.NotNil(t, c)
 }
@@ -940,7 +939,7 @@ func TestNewHTTPClient_NoTokenLoopbackAlwaysSafe(t *testing.T) {
 	t.Setenv("KATA_HOME", tmp)
 	t.Setenv("KATA_AUTH_TOKEN", "")
 
-	c, err := NewHTTPClient(context.Background(), "http://127.0.0.1:7373", Opts{})
+	c, err := NewHTTPClient(t.Context(), "http://127.0.0.1:7373", Opts{})
 	require.NoError(t, err)
 	assert.NotNil(t, c)
 }
@@ -952,7 +951,7 @@ func TestNewHTTPClient_NoTokenLoopbackAlwaysSafe(t *testing.T) {
 // token reaches the wire.
 func TestBearerTransport_RefusesPlaintextNonLoopbackPerRequest(t *testing.T) {
 	rt := (config.BearerPolicy{}).Transport(http.DefaultTransport, "secret", "http://127.0.0.1:7373")
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		"http://example.invalid:7373/api/v1/ping", nil)
 	require.NoError(t, err)
 	resp, err := rt.RoundTrip(req)
@@ -977,7 +976,7 @@ func TestBearerTransport_AllowsPlaintextNonLoopbackWhenTrustPrivateNetworkSet(t 
 	rt := (config.BearerPolicy{TrustPrivateNetwork: true}).Transport(
 		base, "secret", "http://100.64.0.5:7373",
 	)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		"http://100.64.0.5:7373/api/v1/ping", nil)
 	require.NoError(t, err)
 
@@ -996,7 +995,7 @@ func TestBearerTransport_TrustPrivateNetworkStillRefusesCrossOrigin(t *testing.T
 	rt := (config.BearerPolicy{TrustPrivateNetwork: true}).Transport(
 		base, "secret", "http://100.64.0.5:7373",
 	)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		"http://100.64.0.6:7373/api/v1/ping", nil)
 	require.NoError(t, err)
 
@@ -1021,7 +1020,7 @@ func TestBearerTransport_BlocksTokenOnRedirectToPlaintextNonLoopback(t *testing.
 	t.Cleanup(srv.Close)
 
 	c := &http.Client{Transport: (config.BearerPolicy{}).Transport(http.DefaultTransport, "secret", srv.URL)}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
 	if resp != nil {
@@ -1038,7 +1037,7 @@ func TestBearerTransport_BlocksTokenOnRedirectToPlaintextNonLoopback(t *testing.
 // before the token reaches the wire.
 func TestBearerTransport_RefusesCrossOriginPerRequest(t *testing.T) {
 	rt := (config.BearerPolicy{}).Transport(http.DefaultTransport, "secret", "https://daemon.example")
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 		"https://attacker.example/api/v1/ping", nil)
 	require.NoError(t, err)
 	resp, err := rt.RoundTrip(req)
@@ -1067,7 +1066,7 @@ func TestBearerTransport_BlocksTokenOnCrossOriginHTTPSRedirect(t *testing.T) {
 
 	base := srv.Client().Transport
 	c := &http.Client{Transport: (config.BearerPolicy{}).Transport(base, "secret", srv.URL)}
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
 	require.NoError(t, err)
 	resp, err := c.Do(req) //nolint:gosec // G704: srv.URL is the test's own httptest.Server
 	if resp != nil {

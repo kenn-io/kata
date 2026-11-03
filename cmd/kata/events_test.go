@@ -140,7 +140,7 @@ func TestEvents_TailAgentEmitsOneLinePerEvent(t *testing.T) {
 	env := testenv.New(t)
 	dir := initBoundWorkspace(t, env.URL, "https://github.com/wesm/kata.git")
 
-	ctx, cancel := context.WithTimeout(contextWithBaseURL(context.Background(), env.URL), 5*time.Second)
+	ctx, cancel := context.WithTimeout(contextWithBaseURL(t.Context(), env.URL), 5*time.Second)
 	defer cancel()
 	a := startAsyncCLI(t, ctx, "--workspace", dir, "--agent", "events", "--tail", "--last-event-id=1")
 	defer a.stop()
@@ -207,7 +207,7 @@ func TestEvents_TailEmitsNDJSON(t *testing.T) {
 	env := testenv.New(t)
 	dir := initBoundWorkspace(t, env.URL, "https://github.com/wesm/kata.git")
 
-	ctx, cancel := context.WithTimeout(contextWithBaseURL(context.Background(), env.URL), 5*time.Second)
+	ctx, cancel := context.WithTimeout(contextWithBaseURL(t.Context(), env.URL), 5*time.Second)
 	defer cancel()
 	a := startAsyncCLI(t, ctx, "--workspace", dir, "events", "--tail", "--json", "--last-event-id=1")
 	defer a.stop()
@@ -254,7 +254,7 @@ func TestEvents_NegativeLastEventIDRejected(t *testing.T) {
 func TestEvents_TailFailsFastOn4xx(t *testing.T) {
 	resetFlags(t)
 	env := testenv.New(t)
-	ctx, cancel := context.WithTimeout(contextWithBaseURL(context.Background(), env.URL), 5*time.Second)
+	ctx, cancel := context.WithTimeout(contextWithBaseURL(t.Context(), env.URL), 5*time.Second)
 	defer cancel()
 	_, _, err := executeRootCapture(t, ctx, "events", "--project-id", "99999", "--tail")
 	require.Error(t, err, "tail must surface 404 instead of looping")
@@ -266,7 +266,7 @@ func TestEvents_TailFollowsResetRequired(t *testing.T) {
 	dir := initBoundWorkspace(t, env.URL, "https://github.com/wesm/kata.git")
 	short := createIssueViaHTTP(t, env, dir, "doomed")
 
-	ctx, cancel := context.WithTimeout(contextWithBaseURL(context.Background(), env.URL), 5*time.Second)
+	ctx, cancel := context.WithTimeout(contextWithBaseURL(t.Context(), env.URL), 5*time.Second)
 	defer cancel()
 	// --json so the reset envelope is emitted as JSON for the assertion;
 	// text mode would surface a reset line in a different shape.
@@ -279,7 +279,7 @@ func TestEvents_TailFollowsResetRequired(t *testing.T) {
 	require.NoError(t, err)
 	purgeURL := env.URL + "/api/v1/projects/" + itoa(pid) + "/issues/" + short + "/actions/purge"
 	body := strings.NewReader(`{"actor":"tester"}`)
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, purgeURL, body)
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, purgeURL, body)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Kata-Confirm", "PURGE "+project.Name+"#"+short)
 	resp, err := env.HTTP.Do(req) //nolint:gosec // G704: test server URL, not user-controlled

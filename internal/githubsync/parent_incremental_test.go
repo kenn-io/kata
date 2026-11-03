@@ -60,7 +60,7 @@ func TestIncrementalParentUnionAndBoundaryPaging(t *testing.T) {
 	defer server.Close()
 	f := newParentGraphQLTestFetcher(server.URL + "/graphql")
 	f.restBaseURLOverride = server.URL + "/"
-	data, err := f.ParentData(context.Background(), Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}, ParentRequest{Since: &since, IssueNumbers: []int{2, 2}})
+	data, err := f.ParentData(t.Context(), Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}, ParentRequest{Since: &since, IssueNumbers: []int{2, 2}})
 	require.NoError(t, err)
 	assert.Equal(t, 2, pages)
 	assert.Equal(t, 1, graphCalls)

@@ -1,7 +1,6 @@
 package db
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -16,7 +15,7 @@ func alwaysTransient(error) bool { return true }
 
 func TestRetryTransientRetriesUntilSuccess(t *testing.T) {
 	attempts := 0
-	err := retryTransient(context.Background(), retryConfig{
+	err := retryTransient(t.Context(), retryConfig{
 		maxElapsed: time.Second,
 		newBackOff: func() backoff.BackOff { return &backoff.ZeroBackOff{} },
 	}, alwaysTransient, func() error {
@@ -33,7 +32,7 @@ func TestRetryTransientRetriesUntilSuccess(t *testing.T) {
 func TestRetryTransientDoesNotRetryPermanentErrors(t *testing.T) {
 	wantErr := errors.New("permanent")
 	attempts := 0
-	err := retryTransient(context.Background(), retryConfig{
+	err := retryTransient(t.Context(), retryConfig{
 		maxElapsed: time.Second,
 		newBackOff: func() backoff.BackOff { return &backoff.ZeroBackOff{} },
 	}, func(error) bool { return false }, func() error {

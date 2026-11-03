@@ -98,7 +98,7 @@ func TestListProjectsRetainsInboxDesignation(t *testing.T) {
 		}})
 	})
 
-	projects, err := client.ListProjects(context.Background())
+	projects, err := client.ListProjects(t.Context())
 	require.NoError(t, err)
 	require.Len(t, projects, 3)
 	selected, ok := designatedInboxProject(projects)
@@ -520,7 +520,7 @@ func TestInboxFilterFormOmitsStatusAxis(t *testing.T) {
 	for _, id := range []fieldID{fieldOwner, fieldSearch, fieldLabels} {
 		require.NotNil(t, m.input.field(id), "Inbox filter form must preserve the %v axis", id)
 	}
-	frame := stripANSI(renderCenteredForm(m.input, 120, 30))
+	frame := stripANSI(renderCenteredForm(m.input, 120, 30, time.Time{}))
 	assertNotContains(t, frame, "closed", "Inbox filter form must not offer closed")
 	assertContains(t, frame, "Owner", "Inbox filter form must keep the owner axis")
 	assertContains(t, frame, "Search", "Inbox filter form must keep the search axis")

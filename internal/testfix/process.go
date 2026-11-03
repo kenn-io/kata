@@ -1,6 +1,7 @@
 package testfix
 
 import (
+	"context"
 	"encoding/json/v2"
 	"fmt"
 	"maps"
@@ -28,7 +29,7 @@ func RunIsolated(m *testing.M) int {
 			return 1
 		}
 	}
-	output, err := exec.Command("go", "env", "-json", "GOCACHE", "GOMODCACHE", "GOPATH", "GOROOT").Output()
+	output, err := exec.CommandContext(context.Background(), "go", "env", "-json", "GOCACHE", "GOMODCACHE", "GOPATH", "GOROOT").Output()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "resolve test toolchain: %v\n", err)
 		return 1

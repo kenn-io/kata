@@ -1,7 +1,6 @@
 package storeopen_test
 
 import (
-	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
@@ -19,7 +18,7 @@ func TestSQLiteConfiguredBusyTimeout(t *testing.T) {
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_SQLITE_BUSY_TIMEOUT", "")
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[storage.sqlite]\nbusy_timeout = \"1ms\"\n"), 0600))
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(home, "test.db")
 	first, err := storeopen.Open(ctx, path)
 	require.NoError(t, err)
@@ -79,7 +78,7 @@ func TestSQLiteBusyTimeoutInvalidBeforeOpen(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_SQLITE_BUSY_TIMEOUT", "0s")
 	path := filepath.Join(t.TempDir(), "missing.db")
-	_, err := storeopen.Open(context.Background(), path, db.Serving())
+	_, err := storeopen.Open(t.Context(), path, db.Serving())
 	require.ErrorContains(t, err, "storage.sqlite.busy_timeout")
 	_, err = os.Stat(path)
 	require.True(t, os.IsNotExist(err), "validation must happen before creating storage")
@@ -88,18 +87,18 @@ func TestSQLiteBusyTimeoutInvalidBeforeOpen(t *testing.T) {
 func TestSQLiteBusyTimeoutExplicitOptionWins(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_SQLITE_BUSY_TIMEOUT", "")
-	store, err := storeopen.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"), db.WithSQLiteBusyTimeout(2*time.Second))
+	store, err := storeopen.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"), db.WithSQLiteBusyTimeout(2*time.Second))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store.Close()) }()
 	var timeout int
-	require.NoError(t, store.(*sqlitestore.Store).QueryRowContext(context.Background(), "PRAGMA busy_timeout").Scan(&timeout))
+	require.NoError(t, store.(*sqlitestore.Store).QueryRowContext(t.Context(), "PRAGMA busy_timeout").Scan(&timeout))
 	require.Equal(t, 2000, timeout)
 }
 
 func TestSQLiteReadOnlyOpenUsesConfiguredBusyTimeout(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	t.Setenv("KATA_SQLITE_BUSY_TIMEOUT", "")
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "test.db")
 	writable, err := storeopen.Open(ctx, path)
 	require.NoError(t, err)

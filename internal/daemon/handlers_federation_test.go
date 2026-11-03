@@ -90,7 +90,7 @@ func (r *recordingEnrollmentHostAccess) Authorize(
 
 func TestFederationEnableAndMetadata(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "hub")
 	require.NoError(t, err)
 	_, _, err = env.DB.CreateIssue(ctx, db.CreateIssueParams{
@@ -129,7 +129,7 @@ func TestFederationEnableAndMetadata(t *testing.T) {
 
 func TestFederationEnableAllowsGitHubSyncedProject(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "hub-project")
 	require.NoError(t, err)
 	_, err = env.DB.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
@@ -260,7 +260,7 @@ func TestFederationEnableIdentityModeBootstrapReadsEnabledHub(t *testing.T) {
 
 func TestFederationEnableIdentityModeUsesDBTokenActor(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "hub")
 	require.NoError(t, err)
 	_, _, err = env.DB.CreateAPIToken(ctx, db.CreateAPITokenParams{
@@ -277,7 +277,7 @@ func TestFederationEnableIdentityModeUsesDBTokenActor(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, resp.StatusCode, "response: %s", raw)
 	var actor string
-	require.NoError(t, env.DB.QueryRow(`
+	require.NoError(t, env.DB.QueryRowContext(t.Context(), `
 		SELECT actor
 		  FROM events
 		 WHERE project_id = ? AND type = 'project.federation_enabled'`,
@@ -287,7 +287,7 @@ func TestFederationEnableIdentityModeUsesDBTokenActor(t *testing.T) {
 
 func TestFederationMetadataRecoversBaselineAfterPurgeReset(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "hub")
 	require.NoError(t, err)
 	issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
@@ -342,7 +342,7 @@ func TestFederationReplicaCreatesProjectAndBinding(t *testing.T) {
 	assert.Equal(t, int64(8), out.Binding.PullCursorEventID)
 	assert.Equal(t, "manual-agent", out.Binding.Actor)
 
-	binding, err := env.DB.FederationBindingByProject(context.Background(), out.Project.ID)
+	binding, err := env.DB.FederationBindingByProject(t.Context(), out.Project.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "manual-agent", binding.Actor)
 
@@ -403,7 +403,7 @@ func TestCreateFederationReplicaAcceptsCanonicalEquivalentHubEndpoint(t *testing
 
 func TestFederationRebindHandlerUsesNamedServerCatalog(t *testing.T) {
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := d.db.CreateProjectWithUID(ctx, "spoke-project", replicaHubProjectUID)
 	require.NoError(t, err)
 	_, err = d.db.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -496,7 +496,7 @@ func TestFederationRebindHandlerRejectsUnknownOrDuplicateCatalog(t *testing.T) {
 
 func TestFederationRebindHandlerRejectsHubBinding(t *testing.T) {
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := d.db.CreateProject(ctx, "hub-project")
 	require.NoError(t, err)
 	_, err = d.db.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -550,7 +550,7 @@ func TestCreateFederationReplicaRejectsCredentialConflictWithoutOverwrite(t *tes
 
 func TestFederationReplicaRejectsIssueSyncedLocalProject(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
 	_, err = env.DB.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
@@ -588,7 +588,7 @@ func TestFederationReplicaRejectsExternalRootLocalProject(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			env := testenv.New(t)
-			ctx := context.Background()
+			ctx := t.Context()
 			project, err := env.DB.CreateProject(ctx, "spoke-project")
 			require.NoError(t, err)
 			issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
@@ -652,10 +652,10 @@ func TestFederationReplicaSetupIsIdempotentAndUsesJSONTags(t *testing.T) {
 	assert.NotContains(t, string(raw), `"Role"`)
 	assert.NotContains(t, string(raw), `"HubProjectID"`)
 
-	projects, err := env.DB.ListProjects(context.Background())
+	projects, err := env.DB.ListProjects(t.Context())
 	require.NoError(t, err)
 	assert.Len(t, projects, 1)
-	binding, err := env.DB.FederationBindingByProject(context.Background(), first.Project.ID)
+	binding, err := env.DB.FederationBindingByProject(t.Context(), first.Project.ID)
 	require.NoError(t, err)
 	assert.Equal(t, int64(8), binding.PullCursorEventID)
 }
@@ -674,7 +674,7 @@ func TestFederationReplicaSetupRejoinWithNewReplayHorizonPreservesExistingBindin
 	var first api.CreateFederationReplicaResponseBody
 	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", body, &first)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	require.NoError(t, env.DB.AdvanceFederationPullCursor(context.Background(), first.Project.ID, 11))
+	require.NoError(t, env.DB.AdvanceFederationPullCursor(t.Context(), first.Project.ID, 11))
 
 	body["replay_horizon_event_id"] = int64(12)
 	body["token"] = "second-token"
@@ -733,7 +733,7 @@ func TestFederationReplicaSetupPushEnabledWritesCredentialAndEnablesPush(t *test
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.True(t, out.Binding.PushEnabled)
 
-	binding, err := env.DB.FederationBindingByProject(context.Background(), out.Project.ID)
+	binding, err := env.DB.FederationBindingByProject(t.Context(), out.Project.ID)
 	require.NoError(t, err)
 	assert.True(t, binding.PushEnabled)
 	assert.Zero(t, binding.PushCursorEventID)
@@ -763,7 +763,7 @@ func TestFederationReplicaSetupRejectsPushEnabledWithoutPushCapability(t *testin
 
 func TestFederationReplicaSetupAdoptsExistingProject(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProjectWithUID(ctx, "spoke", "01HZNQ7VFPK1XGD8R5MABCD4EA")
 	require.NoError(t, err)
 	_, _, err = env.DB.CreateIssue(ctx, db.CreateIssueParams{
@@ -821,7 +821,7 @@ func TestFederationReplicaSetupMapsAtomicRekeyConflictTo409WithoutMutation(t *te
 		cfg.FederationCredentials = credentials
 		cfg.FederationWake = func() { wakes++ }
 	})
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProjectWithUID(ctx, "spoke-project", replicaLocalProjectUID)
 	require.NoError(t, err)
 	source := config.FederationCredential{
@@ -865,7 +865,7 @@ func TestFederationReplicaSetupMapsAtomicRekeyConflictTo409WithoutMutation(t *te
 
 func TestFederationReplicaSetupAdoptExistingBindsUnboundProjectWithHubUID(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProjectWithUID(ctx, "spoke", "01HZNQ7VFPK1XGD8R5MABCD4EX")
 	require.NoError(t, err)
 	_, _, err = env.DB.CreateIssue(ctx, db.CreateIssueParams{
@@ -925,7 +925,7 @@ func TestFederationReplicaSetupRejectsInvalidHubProjectUID(t *testing.T) {
 
 func TestFederationReplicaSetupAdoptExistingRejectsArchivedProjectWithHubUID(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProjectWithUID(ctx, "spoke", "01HZNQ7VFPK1XGD8R5MABCD4EX")
 	require.NoError(t, err)
 	_, _, err = env.DB.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: project.ID, Actor: "tester"})
@@ -950,7 +950,7 @@ func TestFederationReplicaSetupAdoptExistingRejectsArchivedProjectWithHubUID(t *
 
 func TestFederationReplicaSetupAdoptExistingRejectsHubUIDBoundToDifferentProject(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	bound, err := env.DB.CreateProjectWithUID(ctx, "already-bound", "01HZNQ7VFPK1XGD8R5MABCD4EX")
 	require.NoError(t, err)
 	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -1004,7 +1004,7 @@ func TestFederationReplicaSetupAdoptExistingRequiresPullAndPushCapabilities(t *t
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			env := testenv.New(t)
-			ctx := context.Background()
+			ctx := t.Context()
 			_, err := env.DB.CreateProjectWithUID(ctx, "spoke", "01HZNQ7VFPK1XGD8R5MABCD4EA")
 			require.NoError(t, err)
 
@@ -1045,7 +1045,7 @@ func TestFederationReplicaSetupAdoptExistingRejectsMissingLocalProject(t *testin
 
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode, string(raw))
 	assert.Contains(t, string(raw), "federation_project_not_found")
-	projects, err := env.DB.ListProjects(context.Background())
+	projects, err := env.DB.ListProjects(t.Context())
 	require.NoError(t, err)
 	assert.Empty(t, projects)
 }
@@ -1095,9 +1095,9 @@ func TestFederationReplicaSetupPushRetryPreservesHigherCursors(t *testing.T) {
 	var first api.CreateFederationReplicaResponseBody
 	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", body, &first)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	require.NoError(t, env.DB.AdvanceFederationPullCursor(context.Background(), first.Project.ID, 99))
-	require.NoError(t, env.DB.AdvanceFederationPushCursor(context.Background(), first.Project.ID, 0))
-	res, err := env.DB.ExecContext(context.Background(), `
+	require.NoError(t, env.DB.AdvanceFederationPullCursor(t.Context(), first.Project.ID, 99))
+	require.NoError(t, env.DB.AdvanceFederationPushCursor(t.Context(), first.Project.ID, 0))
+	res, err := env.DB.ExecContext(t.Context(), `
 		INSERT INTO events(
 			uid, origin_instance_uid, project_id, project_name,
 			type, actor, payload, hlc_physical_ms, hlc_counter, content_hash, created_at
@@ -1148,7 +1148,7 @@ func TestFederationReplicaSetupPushDisabledRemainsReadOnly(t *testing.T) {
 
 func TestFederationReplicaSetupCanRepairLegacyBlankActorBinding(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProjectWithUID(ctx, "hub", "01HZNQ7VFPK1XGD8R5MABCD4EX")
 	require.NoError(t, err)
 	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -1202,7 +1202,7 @@ func TestFederationReplicaSetupCanUpgradePhase1BindingToPush(t *testing.T) {
 	resp := envDoJSON(t, env, http.MethodPost, "/api/v1/federation/replicas", body, &first)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.False(t, first.Binding.PushEnabled)
-	res, err := env.DB.ExecContext(context.Background(), `
+	res, err := env.DB.ExecContext(t.Context(), `
 		INSERT INTO events(
 			uid, origin_instance_uid, project_id, project_name,
 			type, actor, payload, hlc_physical_ms, hlc_counter, content_hash, created_at
@@ -1234,7 +1234,7 @@ func TestFederationReplicaSetupCanUpgradePhase1BindingToPush(t *testing.T) {
 // a partially-failed join (project created, binding upsert never ran).
 func TestFederationReplicaSetupRebindsUnboundUIDHolder(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	holder, err := env.DB.CreateProjectWithUID(ctx, "hub", "01HZNQ7VFPK1XGD8R5MABCD4EX")
 	require.NoError(t, err)
 
@@ -1274,7 +1274,7 @@ func TestFederationReplicaSetupValidatesProjectName(t *testing.T) {
 
 func TestFederationReplicaSetupRejectsNameCollisionWithDifferentUID(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	_, err := env.DB.CreateProject(ctx, "spoke")
 	require.NoError(t, err)
 
@@ -1294,7 +1294,7 @@ func TestFederationReplicaSetupRejectsNameCollisionWithDifferentUID(t *testing.T
 
 func TestFederatedSpokeMutationReturnsReadOnlyError(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "spoke")
 	require.NoError(t, err)
 	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -1345,7 +1345,7 @@ func TestFederationAuthConfiguredBearerStillProtectsCRUDAndEnrollmentSetup(t *te
 
 func TestFederationStatusNoBindingsIsEmpty(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "local")
 	require.NoError(t, err)
 
@@ -1360,7 +1360,7 @@ func TestFederationStatusNoBindingsIsEmpty(t *testing.T) {
 
 func TestFederationStatusSpokeIncludesCursorsQueuesAndLastSync(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "spoke")
 	require.NoError(t, err)
 	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -1450,7 +1450,7 @@ func TestFederationStatusSpokeIncludesCursorsQueuesAndLastSync(t *testing.T) {
 
 func TestFederationStatusSpokeIncludesBindingAndCredentialMetadata(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "spoke")
 	require.NoError(t, err)
 	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -1493,7 +1493,7 @@ func TestFederationStatusSpokeIncludesBindingAndCredentialMetadata(t *testing.T)
 
 func TestFederationStatusCredentialMissingDoesNotLookSecure(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "spoke")
 	require.NoError(t, err)
 	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -1519,7 +1519,7 @@ func TestFederationStatusCredentialMissingDoesNotLookSecure(t *testing.T) {
 
 func TestFederationStatusCredentialUnreadableDoesNotExposeDefaults(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "spoke")
 	require.NoError(t, err)
 	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -1551,7 +1551,7 @@ func TestFederationStatusCredentialUnreadableDoesNotExposeDefaults(t *testing.T)
 
 func TestFederationStatusIncludesActiveQuarantine(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "spoke")
 	require.NoError(t, err)
 	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -1599,7 +1599,7 @@ func TestFederationStatusIncludesActiveQuarantine(t *testing.T) {
 
 func TestFederationQuarantineSkipRequiresConfirmAndAdvancesCursor(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, q := createPushQuarantineFixture(t, env)
 	path := fmt.Sprintf("/api/v1/projects/%d/federation/quarantine/%d/skip", project.ID, q.ID)
 
@@ -1625,7 +1625,7 @@ func TestFederationQuarantineSkipRequiresConfirmAndAdvancesCursor(t *testing.T) 
 
 func TestFederationQuarantineRetryRequiresConfirmAndLeavesCursor(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, q := createPushQuarantineFixture(t, env)
 	path := fmt.Sprintf("/api/v1/projects/%d/federation/quarantine/%d/retry", project.ID, q.ID)
 
@@ -1657,7 +1657,7 @@ func TestFederationQuarantineRetryRequiresConfirmAndLeavesCursor(t *testing.T) {
 	_, err = env.DB.ActiveFederationQuarantine(ctx, project.ID, db.FederationQuarantineDirectionPush)
 	assert.ErrorIs(t, err, db.ErrNotFound)
 	var skipReason string
-	require.NoError(t, env.DB.QueryRow(`
+	require.NoError(t, env.DB.QueryRowContext(t.Context(), `
 		SELECT skip_reason
 		  FROM federation_quarantine
 		 WHERE id = ?`,
@@ -1667,7 +1667,7 @@ func TestFederationQuarantineRetryRequiresConfirmAndLeavesCursor(t *testing.T) {
 
 func TestFederationQuarantineRetryRejectsPullQuarantine(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "spoke")
 	require.NoError(t, err)
 	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -1709,7 +1709,7 @@ func TestFederationQuarantineRetryRejectsPullQuarantine(t *testing.T) {
 
 func TestFederationQuarantineSkipIdentityModeBootstrapTokenCannotWrite(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
-	ctx := context.Background()
+	ctx := t.Context()
 	project, q := createPushQuarantineFixture(t, env)
 	path := fmt.Sprintf("/api/v1/projects/%d/federation/quarantine/%d/skip", project.ID, q.ID)
 
@@ -1729,7 +1729,7 @@ func TestFederationQuarantineSkipIdentityModeBootstrapTokenCannotWrite(t *testin
 
 func TestFederationQuarantineSkipIdentityModeUsesDBTokenActor(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
-	ctx := context.Background()
+	ctx := t.Context()
 	project, q := createPushQuarantineFixture(t, env)
 	_, _, err := env.DB.CreateAPIToken(ctx, db.CreateAPITokenParams{
 		PlaintextToken: "alice-token",
@@ -1749,7 +1749,7 @@ func TestFederationQuarantineSkipIdentityModeUsesDBTokenActor(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, resp.StatusCode, "response: %s", raw)
 	var skippedBy string
-	require.NoError(t, env.DB.QueryRow(`
+	require.NoError(t, env.DB.QueryRowContext(t.Context(), `
 		SELECT skipped_by
 		  FROM federation_quarantine
 		 WHERE id = ?`,
@@ -1759,7 +1759,7 @@ func TestFederationQuarantineSkipIdentityModeUsesDBTokenActor(t *testing.T) {
 
 func TestFederationQuarantineSkipRejectsWrongProjectWithoutMutation(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "spoke")
 	require.NoError(t, err)
 	other, err := env.DB.CreateProject(ctx, "other")
@@ -1806,7 +1806,7 @@ func TestFederationQuarantineSkipRejectsWrongProjectWithoutMutation(t *testing.T
 
 func TestFederationStatusHubIncludesEnrollmentsClaimsAndViolations(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project := createFederatedHubProject(t, env, "hub")
 	issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: project.ID,
@@ -1855,7 +1855,7 @@ func TestFederationStatusHubIncludesEnrollmentsClaimsAndViolations(t *testing.T)
 
 func TestFederationStatusGlobalSkipsArchivedFederatedProjects(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	active := createFederatedHubProject(t, env, "active-hub")
 	archived := createFederatedHubProject(t, env, "archived-hub")
 	_, _, err := env.DB.RemoveProject(ctx, db.RemoveProjectParams{
@@ -1874,7 +1874,7 @@ func TestFederationStatusGlobalSkipsArchivedFederatedProjects(t *testing.T) {
 
 func TestFederationStatusDoesNotCountExpiredTimedClaimAsLive(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project := createFederatedHubProject(t, env, "hub")
 	issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: project.ID,
@@ -1906,7 +1906,7 @@ func TestFederationStatusDoesNotCountExpiredTimedClaimAsLive(t *testing.T) {
 
 func TestFederationStatusUsesAdminBearerNotEnrollmentBearer(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("admin-token"))
-	ctx := context.Background()
+	ctx := t.Context()
 	project := createFederatedHubProject(t, env, "hub")
 	enrollment, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
 		Token:            "enrollment-token",
@@ -1969,7 +1969,7 @@ func TestFederationEnrollmentExplicitTokenCreatesRowAndHidesHash(t *testing.T) {
 				actor        string
 				allowMarker  int
 			)
-			require.NoError(t, env.DB.QueryRow(`
+			require.NoError(t, env.DB.QueryRowContext(t.Context(), `
 		SELECT token_hash, project_id, capabilities, bound_actor, allow_adoption_snapshot_authors
 		  FROM federation_enrollments
 		 WHERE id = ?`, out.ID).Scan(&tokenHash, &projectID, &capabilities, &actor, &allowMarker))
@@ -2001,7 +2001,7 @@ func TestFederationEnrollmentExplicitTokenCreatesRowAndHidesHash(t *testing.T) {
 			}
 
 			var count int
-			require.NoError(t, env.DB.QueryRow(`
+			require.NoError(t, env.DB.QueryRowContext(t.Context(), `
 		SELECT COUNT(*)
 		  FROM federation_enrollments
 		 WHERE token_hash = ?`, db.FederationTokenHash("explicit-enrollment-token")).Scan(&count))
@@ -2028,13 +2028,13 @@ func TestRotateFederationEnrollment(t *testing.T) {
 	) {
 		t.Helper()
 		var oldRevokedAt sql.NullString
-		require.NoError(t, store.QueryRow(
+		require.NoError(t, store.QueryRowContext(t.Context(),
 			`SELECT revoked_at FROM federation_enrollments WHERE id = ?`, oldEnrollmentID,
 		).Scan(&oldRevokedAt))
 		assert.False(t, oldRevokedAt.Valid)
 
 		var replacementCount int
-		require.NoError(t, store.QueryRow(
+		require.NoError(t, store.QueryRowContext(t.Context(),
 			`SELECT COUNT(*) FROM federation_enrollments WHERE token_hash = ?`,
 			db.FederationTokenHash(replacementToken),
 		).Scan(&replacementCount))
@@ -2045,7 +2045,7 @@ func TestRotateFederationEnrollment(t *testing.T) {
 		for _, identityMode := range []bool{false, true} {
 			t.Run(fmt.Sprintf("identity=%t", identityMode), func(t *testing.T) {
 				env := testenv.New(t, testenv.WithAuthToken("rotation-admin-token"), func(cfg *daemon.ServerConfig) { cfg.Auth.RequireTokenIdentity = identityMode })
-				ctx := context.Background()
+				ctx := t.Context()
 				project, err := env.DB.CreateProject(ctx, "rotation-admin-project")
 				require.NoError(t, err)
 				var account db.APIToken
@@ -2089,7 +2089,7 @@ func TestRotateFederationEnrollment(t *testing.T) {
 				assert.Equal(t, "rotation-http-replacement-token", rotated.Token)
 
 				var oldRevokedAt sql.NullString
-				require.NoError(t, env.DB.QueryRow(
+				require.NoError(t, env.DB.QueryRowContext(t.Context(),
 					`SELECT revoked_at FROM federation_enrollments WHERE id = ?`, old.Enrollment.ID,
 				).Scan(&oldRevokedAt))
 				assert.True(t, oldRevokedAt.Valid)
@@ -2132,7 +2132,7 @@ func TestRotateFederationEnrollment(t *testing.T) {
 				assert.NotContains(t, string(conflictRaw), "rotation-http-replacement-token")
 
 				var survivorRevokedAt sql.NullString
-				require.NoError(t, env.DB.QueryRow(
+				require.NoError(t, env.DB.QueryRowContext(t.Context(),
 					`SELECT revoked_at FROM federation_enrollments WHERE id = ?`,
 					activeBeforeConflict.Enrollment.ID,
 				).Scan(&survivorRevokedAt))
@@ -2147,7 +2147,7 @@ func TestRotateFederationEnrollment(t *testing.T) {
 			testenv.WithAuthToken("rotation-bootstrap-token"),
 			testenv.WithRequireTokenIdentity(),
 		)
-		ctx := context.Background()
+		ctx := t.Context()
 		project, err := env.DB.CreateProject(ctx, "rotation-identity-project")
 		require.NoError(t, err)
 		_, _, err = env.DB.CreateAPIToken(ctx, db.CreateAPITokenParams{
@@ -2175,12 +2175,12 @@ func TestRotateFederationEnrollment(t *testing.T) {
 		)
 		assertAPIError(t, resp.StatusCode, raw, http.StatusForbidden, "federation_enrollment_requires_relay")
 		var revokedAt sql.NullString
-		require.NoError(t, env.DB.QueryRow(
+		require.NoError(t, env.DB.QueryRowContext(t.Context(),
 			`SELECT revoked_at FROM federation_enrollments WHERE id = ?`, old.Enrollment.ID,
 		).Scan(&revokedAt))
 		assert.False(t, revokedAt.Valid, "a rejected rotation must preserve the existing legacy grant")
 		var replacementCount int
-		require.NoError(t, env.DB.QueryRow(
+		require.NoError(t, env.DB.QueryRowContext(t.Context(),
 			`SELECT COUNT(*) FROM federation_enrollments WHERE token_hash = ?`,
 			db.FederationTokenHash("rotation-identity-replacement-token"),
 		).Scan(&replacementCount))
@@ -2189,7 +2189,7 @@ func TestRotateFederationEnrollment(t *testing.T) {
 
 	t.Run("static bearer rejects reserved body actor", func(t *testing.T) {
 		env := testenv.New(t, testenv.WithAuthToken("rotation-admin-token"))
-		ctx := context.Background()
+		ctx := t.Context()
 		project, err := env.DB.CreateProject(ctx, "rotation-reserved-actor-project")
 		require.NoError(t, err)
 		old, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
@@ -2221,7 +2221,7 @@ func TestRotateFederationEnrollment(t *testing.T) {
 			"X-Kata-Actor",
 			bearerProxyOpts{Token: "rotation-proxy-guard-token"},
 		)
-		ctx := context.Background()
+		ctx := t.Context()
 		project, err := store.CreateProject(ctx, "rotation-proxy-guard-project")
 		require.NoError(t, err)
 		old, err := store.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
@@ -2247,7 +2247,7 @@ func TestRotateFederationEnrollment(t *testing.T) {
 	})
 
 	t.Run("mounted host authorization matches create project scope", func(t *testing.T) {
-		ctx := context.Background()
+		ctx := t.Context()
 		store, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, store.Close()) })
@@ -2409,7 +2409,7 @@ func TestFederationEnrollmentRevokedExplicitTokenReturnsConflict(t *testing.T) {
 		ID int64 `json:"id"`
 	}
 	require.NoError(t, json.Unmarshal(raw, &created))
-	require.NoError(t, env.DB.RevokeFederationEnrollment(context.Background(), created.ID))
+	require.NoError(t, env.DB.RevokeFederationEnrollment(t.Context(), created.ID))
 
 	resp, raw = envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", request, nil)
 	assertAPIError(t, resp.StatusCode, raw, http.StatusConflict, "federation_enrollment_token_conflict")
@@ -2434,7 +2434,7 @@ func TestFederationEnrollmentRejectsWildcardAdoptionSnapshotAuthorMarker(t *test
 
 func TestFederationEnrollmentIdentityModeRequiresRelayForAccountToken(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
-	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	_, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "alice-token",
 		Actor:          "alice",
 		AdminActor:     db.BootstrapActor,
@@ -2453,7 +2453,7 @@ func TestFederationEnrollmentIdentityModeRequiresRelayForAccountToken(t *testing
 	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", request, bearer("alice-token"))
 	assertAPIError(t, resp.StatusCode, raw, http.StatusForbidden, "federation_enrollment_requires_relay")
 	var count int
-	require.NoError(t, env.DB.QueryRow(`
+	require.NoError(t, env.DB.QueryRowContext(t.Context(), `
 		SELECT COUNT(*)
 		  FROM federation_enrollments
 		 WHERE token_hash = ?`, db.FederationTokenHash("identity-enrollment-token")).Scan(&count))
@@ -2474,7 +2474,7 @@ func TestFederationEnrollmentStaticBearerRejectsReservedBodyActor(t *testing.T) 
 
 	assertAPIError(t, resp.StatusCode, raw, http.StatusBadRequest, "validation")
 	var count int
-	require.NoError(t, env.DB.QueryRow(
+	require.NoError(t, env.DB.QueryRowContext(t.Context(),
 		`SELECT COUNT(*) FROM federation_enrollments WHERE token_hash = ?`,
 		db.FederationTokenHash(token),
 	).Scan(&count))
@@ -2483,7 +2483,7 @@ func TestFederationEnrollmentStaticBearerRejectsReservedBodyActor(t *testing.T) 
 
 func TestFederationEnrollmentOmittedTokenReturnsGeneratedPlaintextOnce(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project := createFederatedHubProject(t, env, "hub")
 
 	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", map[string]any{
@@ -2510,7 +2510,7 @@ func TestFederationEnrollmentOmittedTokenReturnsGeneratedPlaintextOnce(t *testin
 	assert.Equal(t, federationTestSpokeUID, enrollment.SpokeInstanceUID)
 
 	var tokenHash string
-	require.NoError(t, env.DB.QueryRow(`
+	require.NoError(t, env.DB.QueryRowContext(t.Context(), `
 		SELECT token_hash
 		  FROM federation_enrollments
 		 WHERE id = ?`, out.ID).Scan(&tokenHash))
@@ -2538,7 +2538,7 @@ func TestFederationEnrollmentNullProjectIDCreatesWildcardGrant(t *testing.T) {
 	assert.Nil(t, out.ProjectID)
 
 	var projectID sql.NullInt64
-	require.NoError(t, env.DB.QueryRow(`
+	require.NoError(t, env.DB.QueryRowContext(t.Context(), `
 		SELECT project_id
 		  FROM federation_enrollments
 		 WHERE id = ?`, out.ID).Scan(&projectID))
@@ -2589,7 +2589,7 @@ func TestFederationAuthTransportPathsRequireEnrollmentBearer(t *testing.T) {
 
 func TestFederationAuthValidEnrollmentTokenReachesTransportHandlers(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project := createFederatedHubProject(t, env, "hub")
 	created, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
 		Token:            "transport-token",
@@ -2628,7 +2628,7 @@ func TestFederationIngestRejectsInvalidCredentialBeforeReadingBody(t *testing.T)
 	server := daemon.NewServer(daemon.ServerConfig{DB: d.db, StartedAt: d.now})
 	t.Cleanup(func() { require.NoError(t, server.Close()) })
 	body := &failingReadBody{}
-	request := httptest.NewRequest(
+	request := httptest.NewRequestWithContext(t.Context(),
 		http.MethodPost,
 		projectPath(project.ID)+"/federation/events:ingest",
 		body,
@@ -2650,7 +2650,7 @@ func TestFederationIngestRejectsInvalidProjectBeforeReadingBody(t *testing.T) {
 	server := daemon.NewServer(daemon.ServerConfig{DB: d.db, StartedAt: d.now})
 	t.Cleanup(func() { require.NoError(t, server.Close()) })
 	body := &failingReadBody{}
-	request := httptest.NewRequest(
+	request := httptest.NewRequestWithContext(t.Context(),
 		http.MethodPost,
 		"/api/v1/projects/not-a-number/federation/events:ingest",
 		body,
@@ -2678,7 +2678,7 @@ func (b *failingReadBody) Read([]byte) (int, error) {
 
 func TestFederationIngestRejectsSnapshotHistoricalAuthorWithoutAdoptionIntent(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project := createFederatedHubProject(t, env, "hub")
 	created, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
 		Token:            "snapshot-transport-token",
@@ -2702,7 +2702,7 @@ func TestFederationIngestRejectsSnapshotHistoricalAuthorWithoutAdoptionIntent(t 
 
 func TestFederationTransportPullMatchesProjectPollBody(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project := createFederatedHubProject(t, env, "hub")
 	_, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: project.ID,
@@ -2734,7 +2734,7 @@ func TestFederationTransportPullMatchesProjectPollBody(t *testing.T) {
 
 func TestNegotiatedRelayCredentialCannotUseLegacyFederationEvents(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	shared, err := env.DB.CreateProject(ctx, "shared-project")
 	require.NoError(t, err)
 	private, err := env.DB.CreateProject(ctx, "private-project")
@@ -2803,7 +2803,7 @@ func TestNegotiatedRelayCredentialCannotUseLegacyFederationEvents(t *testing.T) 
 
 func TestFederationTransportRejectsWrongCapability(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project := createFederatedHubProject(t, env, "hub")
 	pullOnly, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
 		Token:            "pull-only-transport-token",
@@ -2834,7 +2834,7 @@ func TestFederationTransportRejectsWrongCapability(t *testing.T) {
 
 func TestFederationMetadataTransportUsesEnrollmentPullAuth(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("admin-token"))
-	ctx := context.Background()
+	ctx := t.Context()
 	project := createFederatedHubProject(t, env, "hub")
 	created, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
 		Token:            "metadata-token",
@@ -2864,7 +2864,7 @@ func TestFederationMetadataTransportUsesEnrollmentPullAuth(t *testing.T) {
 
 func TestFederationIngestPersistsBroadcastsAndReturnsAck(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project := createFederatedHubProject(t, env, "hub")
 	created, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
 		Token:            "ingest-token",
@@ -2917,7 +2917,7 @@ func TestFederationIngestPersistsBroadcastsAndReturnsAck(t *testing.T) {
 
 func TestFederationIngestRejectsFutureSchemaVersion(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project := createFederatedHubProject(t, env, "hub")
 	created, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
 		Token:            "future-schema-token",
@@ -2947,7 +2947,7 @@ func TestFederationIngestRejectsFutureSchemaVersion(t *testing.T) {
 
 func TestFederationIngestRejectsMissingSchemaVersion(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project := createFederatedHubProject(t, env, "hub")
 	created, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
 		Token:            "missing-schema",
@@ -2974,7 +2974,7 @@ func TestFederationIngestRejectsMissingSchemaVersion(t *testing.T) {
 
 func TestFederationIngestRejectsZeroSchemaVersion(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project := createFederatedHubProject(t, env, "hub")
 	created, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
 		Token:            "zero-schema",
@@ -3004,7 +3004,7 @@ func TestFederationIngestRejectsZeroSchemaVersion(t *testing.T) {
 
 func TestFederationIngestInvalidBatchReturnsErrorAndDoesNotBroadcast(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project := createFederatedHubProject(t, env, "hub")
 	created, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
 		Token:            "invalid-ingest-token",
@@ -3034,7 +3034,7 @@ func TestFederationIngestInvalidBatchReturnsErrorAndDoesNotBroadcast(t *testing.
 
 func TestFederationIngestRejectsInvalidSourceCursor(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project := createFederatedHubProject(t, env, "hub")
 	created, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
 		Token:            "invalid-cursor-token",
@@ -3061,7 +3061,7 @@ func TestFederationIngestRejectsInvalidSourceCursor(t *testing.T) {
 
 func TestFederationAuthProjectScopedTokenRejectsNonFederatedProject(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "plain")
 	require.NoError(t, err)
 	created, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
@@ -3089,7 +3089,7 @@ func TestFederationAuthProjectScopedTokenRejectsNonFederatedProject(t *testing.T
 
 func TestFederationEnrollmentRevokedEnrollmentNoLongerAuthorizesTransport(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project := createFederatedHubProject(t, env, "hub")
 	created, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
 		Token:            "revoked-token",
@@ -3113,14 +3113,14 @@ func TestFederationEnrollmentRevokedEnrollmentNoLongerAuthorizesTransport(t *tes
 func assertFederationEventCount(t *testing.T, store *sqlitestore.Store, eventType string, expected int) {
 	t.Helper()
 	var got int
-	require.NoError(t, store.QueryRow(
+	require.NoError(t, store.QueryRowContext(t.Context(),
 		`SELECT count(*) FROM events WHERE type = ?`, eventType).Scan(&got))
 	assert.Equal(t, expected, got)
 }
 
 func createPushQuarantineFixture(t *testing.T, env *testenv.Env) (db.Project, db.FederationQuarantine) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "spoke")
 	require.NoError(t, err)
 	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -3152,7 +3152,7 @@ func createPushQuarantineFixture(t *testing.T, env *testenv.Env) (db.Project, db
 
 func createFederatedHubProject(t *testing.T, env *testenv.Env, name string) db.Project {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, name)
 	require.NoError(t, err)
 	_, err = env.DB.EnableProjectFederation(ctx, project.ID, "tester")
@@ -3163,14 +3163,14 @@ func createFederatedHubProject(t *testing.T, env *testenv.Env, name string) db.P
 func countEvents(t *testing.T, store *sqlitestore.Store) int {
 	t.Helper()
 	var got int
-	require.NoError(t, store.QueryRow(`SELECT count(*) FROM events`).Scan(&got))
+	require.NoError(t, store.QueryRowContext(t.Context(), `SELECT count(*) FROM events`).Scan(&got))
 	return got
 }
 
 func countIssues(t *testing.T, store *sqlitestore.Store) int {
 	t.Helper()
 	var got int
-	require.NoError(t, store.QueryRow(`SELECT count(*) FROM issues`).Scan(&got))
+	require.NoError(t, store.QueryRowContext(t.Context(), `SELECT count(*) FROM issues`).Scan(&got))
 	return got
 }
 
@@ -3399,7 +3399,7 @@ func federationIngestBody(events ...any) map[string]any {
 
 func newSpokeProject(t *testing.T, env *testenv.Env) (db.Project, db.FederationBinding) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	// Use CreateProject so the daemon generates a valid UID; read it back for credential ops.
 	project, err := env.DB.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
@@ -3426,7 +3426,7 @@ func newSpokeProject(t *testing.T, env *testenv.Env) (db.Project, db.FederationB
 
 func newSpokeProjectWithOpenIssue(t *testing.T, env *testenv.Env) (db.Project, db.FederationBinding) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	// Create the issue before the binding so the spoke read-only guard doesn't block it.
 	project, err := env.DB.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
@@ -3459,7 +3459,7 @@ func newSpokeProjectWithOpenIssue(t *testing.T, env *testenv.Env) (db.Project, d
 
 func TestLeaveFederationReplicaRouteDetach(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	project, _ := newSpokeProject(t, env)
 
@@ -3586,7 +3586,7 @@ func TestLeaveFederationReplicaManagedConflictRemainsRetryable(t *testing.T) {
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) {
 		cfg.FederationCredentials = credentials
 	})
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := env.DB.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
 	_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -3649,7 +3649,7 @@ func TestLeaveFederationReplicaWaitsForEnsureCredentialPersistence(t *testing.T)
 		cfg.FederationCredentials = credentials
 		cfg.FederationWake = func() { wakes <- struct{}{} }
 	})
-	ctx := context.Background()
+	ctx := t.Context()
 	params := replicaServiceParams()
 	params.PushEnabled = false
 	ensureDone := make(chan error, 1)
@@ -3730,7 +3730,7 @@ func TestFederationReplicaPersistsAllowInsecureOnBinding(t *testing.T) {
 	}, &out)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	binding, err := env.DB.FederationBindingByProject(context.Background(), out.Project.ID)
+	binding, err := env.DB.FederationBindingByProject(t.Context(), out.Project.ID)
 	require.NoError(t, err)
 	assert.True(t, binding.AllowInsecure, "join must persist allow_insecure on the binding")
 }
@@ -3743,7 +3743,7 @@ func TestFederationReplicaPersistsAllowInsecureOnBinding(t *testing.T) {
 func TestFederationStatusAllowInsecureBindingOrCredential(t *testing.T) {
 	t.Run("binding opt-in survives a missing credential", func(t *testing.T) {
 		env := testenv.New(t)
-		ctx := context.Background()
+		ctx := t.Context()
 		project, err := env.DB.CreateProject(ctx, "spoke-project")
 		require.NoError(t, err)
 		_, err = env.DB.UpsertFederationBinding(ctx, db.FederationBinding{
@@ -3770,7 +3770,7 @@ func TestFederationStatusAllowInsecureBindingOrCredential(t *testing.T) {
 
 	t.Run("legacy credential opt-in still surfaces", func(t *testing.T) {
 		env := testenv.New(t)
-		ctx := context.Background()
+		ctx := t.Context()
 		project, err := env.DB.CreateProject(ctx, "spoke-project")
 		require.NoError(t, err)
 		// Pre-persistence binding: allow_insecure lives only in the credential.
@@ -3803,7 +3803,7 @@ func TestFederationStatusAllowInsecureBindingOrCredential(t *testing.T) {
 
 	t.Run("stale credential for a different hub does not leak its opt-in", func(t *testing.T) {
 		env := testenv.New(t)
-		ctx := context.Background()
+		ctx := t.Context()
 		project, err := env.DB.CreateProject(ctx, "spoke-project")
 		require.NoError(t, err)
 		// Binding points at hub B with no transport opt-in...
@@ -3842,7 +3842,7 @@ func TestFederationStatusAllowInsecureBindingOrCredential(t *testing.T) {
 func TestLeaveFederationReplicaRoutePreflight(t *testing.T) {
 	t.Run("archive open-issue refusal mutates nothing", func(t *testing.T) {
 		env := testenv.New(t)
-		ctx := context.Background()
+		ctx := t.Context()
 		project, _ := newSpokeProjectWithOpenIssue(t, env)
 
 		resp, raw := envDoRaw(t, env, http.MethodPost,
@@ -3868,7 +3868,7 @@ func TestLeaveFederationReplicaRoutePreflight(t *testing.T) {
 
 	t.Run("force passes without mutating", func(t *testing.T) {
 		env := testenv.New(t)
-		ctx := context.Background()
+		ctx := t.Context()
 		project, _ := newSpokeProjectWithOpenIssue(t, env)
 
 		resp, raw := envDoRaw(t, env, http.MethodPost,
@@ -3892,7 +3892,7 @@ func TestLeaveFederationReplicaRoutePreflight(t *testing.T) {
 
 	t.Run("already-archived target passes for the resume", func(t *testing.T) {
 		env := testenv.New(t)
-		ctx := context.Background()
+		ctx := t.Context()
 		project, _ := newSpokeProject(t, env)
 		_, _, err := env.DB.RemoveProject(ctx, db.RemoveProjectParams{
 			ProjectID: project.ID, Actor: "tester",
@@ -3917,7 +3917,7 @@ func TestLeaveFederationReplicaRoutePreflight(t *testing.T) {
 // archived via projects remove or a partial archive-leave.
 func TestFederationStatusIncludeArchived(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	project, _ := newSpokeProject(t, env)
 	_, _, err := env.DB.RemoveProject(ctx, db.RemoveProjectParams{
 		ProjectID: project.ID, Actor: "tester",
@@ -3942,7 +3942,7 @@ func TestFederationStatusIncludeArchived(t *testing.T) {
 // report detached=false, since nothing was detached on this call.
 func TestLeaveFederationReplicaRouteResumeCleansStaleCredential(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	project, err := env.DB.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
@@ -4038,7 +4038,7 @@ func TestLeaveFederationReplicaRouteArchiveDoesNotCreateRelayDebt(t *testing.T) 
 // the spoke is not left in a "detached-but-not-archived" partial state.
 func TestLeaveFederationReplicaRouteArchiveOpenIssuesDoesNotDetach(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	project, _ := newSpokeProjectWithOpenIssue(t, env)
 
@@ -4069,7 +4069,7 @@ func TestLeaveFederationReplicaRouteArchiveOpenIssuesDoesNotDetach(t *testing.T)
 // project must rebind it (rejoin), not refuse it as a collision.
 func TestCreateFederationReplicaRejoinsAfterLeave(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	project, binding := newSpokeProject(t, env)
 
@@ -4110,7 +4110,7 @@ func TestCreateFederationReplicaRejoinsAfterLeave(t *testing.T) {
 // names the holder and explains how to rejoin, and must not bind anything.
 func TestCreateFederationReplicaRejoinNameMismatchIsActionable(t *testing.T) {
 	env := testenv.New(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	project, binding := newSpokeProject(t, env)
 
@@ -4198,7 +4198,7 @@ func TestLeaveFederationReplicaRouteArchiveAlreadyArchived(t *testing.T) {
 func TestLeaveFederationReplicaRouteArchiveResumeFinishesTeardown(t *testing.T) {
 	t.Run("binding survived the partial failure", func(t *testing.T) {
 		env := testenv.New(t)
-		ctx := context.Background()
+		ctx := t.Context()
 		project, _ := newSpokeProject(t, env)
 		// Archive directly (RemoveProject has no federation guard), leaving the
 		// binding and credential in place — the state after a leave that
@@ -4235,7 +4235,7 @@ func TestLeaveFederationReplicaRouteArchiveResumeFinishesTeardown(t *testing.T) 
 
 	t.Run("only the credential survived the partial failure", func(t *testing.T) {
 		env := testenv.New(t)
-		ctx := context.Background()
+		ctx := t.Context()
 		project, err := env.DB.CreateProject(ctx, "spoke-project")
 		require.NoError(t, err)
 		require.NoError(t, config.WriteFederationCredential(project.UID, config.FederationCredential{
@@ -4358,23 +4358,54 @@ func TestFederationEnrollmentWildcardOmitsJoinInstructions(t *testing.T) {
 	assert.False(t, hasJoin)
 }
 
-// Fail the response metadata read while retaining the real enrollment store.
+// Fail the post-commit spoke-name read while retaining the real enrollment store.
 type enrollmentMetadataFailureStore struct{ db.Storage }
 
-func (s enrollmentMetadataFailureStore) MaxFederationBaselineEventID(context.Context, int64, int64) (int64, error) {
-	return 0, errors.New("metadata unavailable")
+func (s enrollmentMetadataFailureStore) ListFederationSpokeNames(context.Context) (map[string]string, error) {
+	return nil, errors.New("metadata unavailable")
 }
 
-func TestFederationEnrollmentMetadataFailureDoesNotStrandGrant(t *testing.T) {
+func TestFederationEnrollmentSpokeNameFailureReturnsCreatedGrant(t *testing.T) {
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.DB = enrollmentMetadataFailureStore{cfg.DB} })
 	project := createFederatedHubProject(t, env, "hub-project")
 	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", map[string]any{
 		"spoke_instance_uid": federationTestSpokeUID, "project_id": project.ID, "capabilities": "pull", "actor": "tester",
 	}, nil)
-	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode, "%s", raw)
+	if assert.Equal(t, http.StatusOK, resp.StatusCode, "%s", raw) {
+		var out api.FederationEnrollmentOut
+		require.NoError(t, json.Unmarshal(raw, &out))
+		assert.NotEmpty(t, out.Token, "the response must return the token for the committed enrollment")
+	}
 	grants, err := env.DB.ListFederationEnrollments(t.Context())
 	require.NoError(t, err)
-	assert.Empty(t, grants)
+	assert.Len(t, grants, 1, "the enrollment transaction committed before optional response metadata failed")
+}
+
+func TestFederationEnrollmentRotationSpokeNameFailureReturnsCreatedGrant(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("rotation-admin-token"), func(cfg *daemon.ServerConfig) {
+		cfg.DB = enrollmentMetadataFailureStore{cfg.DB}
+	})
+	project := createFederatedHubProject(t, env, "hub-project")
+	_, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
+		Token: "old-enrollment-token", SpokeInstanceUID: federationTestSpokeUID,
+		ProjectID: &project.ID, Capabilities: "pull", Actor: "tester",
+	})
+	require.NoError(t, err)
+	const replacementToken = "replacement-enrollment-token" //nolint:gosec // test-only bearer token
+	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments/actions/rotate", map[string]any{
+		"spoke_instance_uid": federationTestSpokeUID,
+		"project_id":         project.ID,
+		"capabilities":       "pull",
+		"token":              replacementToken,
+		"actor":              "tester",
+	}, bearer("rotation-admin-token"))
+	require.Equal(t, http.StatusOK, resp.StatusCode, "%s", raw)
+	var out api.FederationEnrollmentOut
+	require.NoError(t, json.Unmarshal(raw, &out))
+	assert.Equal(t, replacementToken, out.Token)
+	active, err := env.DB.AuthorizeFederationToken(t.Context(), out.Token, project.ID, "pull")
+	require.NoError(t, err)
+	assert.Equal(t, out.ID, active.ID)
 }
 
 func TestFederationMetadataRequiresEnabledHub(t *testing.T) {

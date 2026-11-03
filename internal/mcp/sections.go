@@ -89,6 +89,12 @@ func toolSections(storageAvailable, tokenAdminAvailable bool) []toolSection {
 			tools:       []string{"kata.assign", "kata.inbox", "kata.status", "kata.unassign"}, available: true, register: registerCoordinationTools,
 		},
 		{
+			loader: "kata.load_cron", section: "cron", title: "Load cron tools",
+			description: "Load native recurring notification jobs and external-adapter execution definitions. Run evidence does not launch work. Distinct from RRULE recurrence tools; refresh the MCP tool list.",
+			tools:       []string{"kata.cron_capabilities", "kata.cron_new_uid", "kata.cron_jobs", "kata.cron_job", "kata.cron_job_create", "kata.cron_job_update", "kata.cron_job_delete", "kata.cron_job_restore", "kata.cron_workflows", "kata.cron_workflow", "kata.cron_workflow_create", "kata.cron_workflow_update", "kata.cron_workflow_delete", "kata.cron_workflow_restore", "kata.cron_runs", "kata.cron_run", "kata.cron_run_observe"},
+			available:   true, register: registerCronTools,
+		},
+		{
 			loader: "kata.load_docs", section: "docs", title: "Load documentation tools",
 			description: "Load typed tools that search and read Kata's bundled user documentation, then refresh the MCP tool list.",
 			tools:       []string{"kata.read_doc", "kata.search_docs"}, available: true, register: registerDocsTools,
@@ -107,7 +113,7 @@ func toolSections(storageAvailable, tokenAdminAvailable bool) []toolSection {
 		{
 			loader: "kata.load_federation", section: "federation", title: "Load federation tools",
 			description: "Load typed project bridge connect/status/disconnect, federation status, enrollment revocation, rebind, leave, quarantine, and root key repin tools, then refresh the MCP tool list.",
-			tools:       []string{"kata.federation_bridge_connect", "kata.federation_bridge_disconnect", "kata.federation_bridge_status", "kata.federation_enrollment_revoke", "kata.federation_leave", "kata.federation_quarantine", "kata.federation_rebind", "kata.federation_root_key_repin", "kata.federation_status"},
+			tools:       []string{"kata.federation_bridge_connect", "kata.federation_bridge_disconnect", "kata.federation_bridge_status", "kata.federation_enrollment_revoke", "kata.federation_leave", "kata.federation_quarantine", "kata.federation_rebind", "kata.federation_root_key_repin", "kata.federation_spoke_name", "kata.federation_status"},
 			available:   true, register: registerFederationTools,
 		},
 		{

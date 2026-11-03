@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -61,7 +60,7 @@ func TestClaim_TTLValidation(t *testing.T) {
 		{value: "120", want: "missing unit"},
 	} {
 		t.Run(tc.value, func(t *testing.T) {
-			_, _, err := executeRootCapture(t, context.Background(),
+			_, _, err := executeRootCapture(t, t.Context(),
 				"claim", "abcd", "--ttl", tc.value)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.want)
@@ -106,7 +105,7 @@ func TestClaim_IfUnownedRejectsSameActor(t *testing.T) {
 }
 
 func TestClaim_ForceAndIfUnownedAreMutuallyExclusive(t *testing.T) {
-	_, _, err := executeRootCapture(t, context.Background(),
+	_, _, err := executeRootCapture(t, t.Context(),
 		"claim", "abcd", "--force", "--if-unowned")
 
 	require.Error(t, err)

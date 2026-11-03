@@ -35,7 +35,7 @@ func TestBrowserHostPolicy(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:27123/", nil)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://127.0.0.1:27123/", nil)
 			req.Host = tt.host
 			response := httptest.NewRecorder()
 
@@ -58,7 +58,7 @@ func TestBrowserHostPolicyHostedOrigin(t *testing.T) {
 		"localhost":          http.StatusBadRequest,
 		"attacker.example":   http.StatusBadRequest,
 	} {
-		req := httptest.NewRequest(http.MethodGet, "https://daemon.example/", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://daemon.example/", nil)
 		req.Host = host
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, req)
@@ -78,7 +78,7 @@ func TestBrowserOriginPolicy(t *testing.T) {
 		"wrong port":   "http://127.0.0.1:27124",
 	} {
 		t.Run(name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:27123/api/v1/projects", nil)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://127.0.0.1:27123/api/v1/projects", nil)
 			req.Host = "127.0.0.1:27123"
 			req.Header.Set("Origin", origin)
 			response := httptest.NewRecorder()
@@ -87,7 +87,7 @@ func TestBrowserOriginPolicy(t *testing.T) {
 		})
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:27123/api/v1/projects", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://127.0.0.1:27123/api/v1/projects", nil)
 	req.Host = "127.0.0.1:27123"
 	req.Header.Set("Origin", "http://127.0.0.1:27123")
 	response := httptest.NewRecorder()
@@ -123,7 +123,7 @@ func TestMCPListenerPolicyAppliesOnlyWhenMounted(t *testing.T) {
 			if contentType == "" {
 				contentType = "application/json"
 			}
-			req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:27123/mcp", strings.NewReader("{}"))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://127.0.0.1:27123/mcp", strings.NewReader("{}"))
 			req.Host = "127.0.0.1:27123"
 			req.Header.Set("Content-Type", contentType)
 			if tt.origin != "" {
@@ -229,7 +229,7 @@ func TestLocalUISessionPolicyRequiresDirectLoopback(t *testing.T) {
 				})
 				require.NoError(t, err)
 
-				request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:27123/api/v1/ui/session/local", nil)
+				request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://127.0.0.1:27123/api/v1/ui/session/local", nil)
 				request.Host = tt.host
 				request.RemoteAddr = tt.remoteAddr
 				for name, value := range tt.headers {
@@ -303,7 +303,7 @@ func TestBrowserOriginPolicySharedTCPPreservesCLI(t *testing.T) {
 			if method == "" {
 				method = http.MethodGet
 			}
-			request := httptest.NewRequest(method, "http://127.0.0.1:27123"+tt.path, nil)
+			request := httptest.NewRequestWithContext(t.Context(), method, "http://127.0.0.1:27123"+tt.path, nil)
 			request.Host = tt.host
 			for name, value := range tt.headers {
 				request.Header.Set(name, value)
@@ -365,7 +365,7 @@ func TestSharedTCPHostPolicyAcceptsBackendAndPublicAuthorities(t *testing.T) {
 				}
 			}
 			for host, want := range tt.hosts {
-				request := httptest.NewRequest(http.MethodGet, tt.origin+"/api/v1/health", nil)
+				request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, tt.origin+"/api/v1/health", nil)
 				request.Host = host
 				response := httptest.NewRecorder()
 
@@ -383,7 +383,7 @@ func TestUnixSocketOriginPolicy(t *testing.T) {
 	}), ListenerPolicy{Kind: ListenerSocket})
 	require.NoError(t, err)
 
-	request := httptest.NewRequest(http.MethodGet, "http://kata.invalid/api/v1/ping", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "http://kata.invalid/api/v1/ping", nil)
 	request.Header.Set("Origin", "http://127.0.0.1:27123")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -418,9 +418,9 @@ func TestCheckWebStartup(t *testing.T) {
 }
 
 func TestServerListenerFailureStopsSibling(t *testing.T) {
-	first, err := net.Listen("tcp", "127.0.0.1:0")
+	first, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
-	second, err := net.Listen("tcp", "127.0.0.1:0")
+	second, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	server := &Server{handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
@@ -441,7 +441,7 @@ func TestServerListenerFailureStopsSibling(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("listener failure did not stop the server")
 	}
-	_, err = net.DialTimeout("tcp", second.Addr().String(), 100*time.Millisecond)
+	_, err = (&net.Dialer{Timeout: 100 * time.Millisecond}).DialContext(t.Context(), "tcp", second.Addr().String()) //nolint:kennlint // deadlinetest: the dial must be refused; the timeout only bounds a hung connect
 	require.Error(t, err)
 }
 
@@ -501,7 +501,7 @@ func TestSharedTCPTelemetryAcceptsOrdinaryClients(t *testing.T) {
 			if method == http.MethodPost {
 				body = strings.NewReader(`{"event":"app_opened","properties":{"surface":"tui"}}`)
 			}
-			request := httptest.NewRequest(method, "http://127.0.0.1:27123"+path, body)
+			request := httptest.NewRequestWithContext(t.Context(), method, "http://127.0.0.1:27123"+path, body)
 			request.Host = host
 			request.RemoteAddr = "127.0.0.1:40123"
 			if body != nil {

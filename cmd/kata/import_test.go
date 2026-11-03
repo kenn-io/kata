@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"io/fs"
 	"math"
 	"os"
@@ -34,7 +33,7 @@ func TestImportCreatesTargetDB(t *testing.T) {
 
 	d := openKataTestDB(t, target)
 	t.Cleanup(func() { _ = d.Close() })
-	got, err := d.ProjectByName(context.Background(), "kata")
+	got, err := d.ProjectByName(t.Context(), "kata")
 	require.NoError(t, err)
 	assert.Equal(t, "kata", got.Name)
 	assert.Contains(t, out, target)
@@ -48,7 +47,7 @@ func TestImportFormatAgentSelectsOutputMode(t *testing.T) {
 
 	d := openKataTestDB(t, target)
 	t.Cleanup(func() { _ = d.Close() })
-	got, err := d.ProjectByName(context.Background(), "kata")
+	got, err := d.ProjectByName(t.Context(), "kata")
 	require.NoError(t, err)
 	assert.Equal(t, "kata", got.Name)
 	// agentValue quotes Windows paths (backslashes); assert the formatted value.
@@ -68,7 +67,7 @@ func TestImportLegacyFormatBeadsAllowsAgentOutputMode(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
 
-	_, stderr, err := executeRootCapture(t, context.Background(),
+	_, stderr, err := executeRootCapture(t, t.Context(),
 		"import", "--format", "beads", "--agent", "--input", "beads.jsonl")
 	require.Error(t, err)
 	assert.Truef(t, strings.HasPrefix(stderr, "ERR import validation:"),
@@ -81,7 +80,7 @@ func TestImportLegacyFormatBeadsParseErrorPreservesAgentMode(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
 
-	_, stderr, err := executeRootCapture(t, context.Background(),
+	_, stderr, err := executeRootCapture(t, t.Context(),
 		"import", "--format", "beads", "--agent", "--bogus")
 	require.Error(t, err)
 	assert.Truef(t, strings.HasPrefix(stderr, "ERR import usage:"),
@@ -93,7 +92,7 @@ func TestImportLegacyFormatBeadsParseErrorPreservesJSONMode(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
 
-	_, stderr, err := executeRootCapture(t, context.Background(),
+	_, stderr, err := executeRootCapture(t, t.Context(),
 		"import", "--format", "beads", "--json", "--bogus")
 	require.Error(t, err)
 	got := parseErrorEnvelope(t, []byte(stderr))
@@ -104,7 +103,7 @@ func TestImportLegacyFormatBeadsParseErrorPreservesJSONMode(t *testing.T) {
 func TestImportRejectsExistingTargetWithoutForce(t *testing.T) {
 	_, input, target := setupImportTest(t)
 	d := openKataTestDB(t, target)
-	_, err := d.CreateProject(context.Background(), "existing")
+	_, err := d.CreateProject(t.Context(), "existing")
 	require.NoError(t, err)
 	require.NoError(t, d.Close())
 
@@ -137,7 +136,7 @@ func TestImportMergeRejectsUninitializedSQLiteTargetsWithoutMutation(t *testing.
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			home := setupKataEnv(t)
-			ctx := context.Background()
+			ctx := t.Context()
 			source := openKataTestDB(t, filepath.Join(home, "source.db"))
 			project, err := source.CreateProject(ctx, "spoke-project")
 			require.NoError(t, err)
@@ -168,7 +167,7 @@ func TestImportMergeRejectsUninitializedSQLiteTargetsWithoutMutation(t *testing.
 
 func TestImportMergeAfterPurgeAddsOneProjectWithoutChangingExistingProject(t *testing.T) {
 	home := setupKataEnv(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	sourcePath := filepath.Join(home, "source.db")
 	source := openKataTestDB(t, sourcePath)
@@ -311,7 +310,7 @@ func TestImportMergeAfterPurgeAddsOneProjectWithoutChangingExistingProject(t *te
 
 func TestImportMergeRefusesMultiProjectSnapshotWithoutMutation(t *testing.T) {
 	_, input, target := setupImportTest(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	targetStore := openKataTestDB(t, target)
 	existing, err := targetStore.CreateProject(ctx, "existing-project")
 	require.NoError(t, err)
@@ -331,7 +330,7 @@ func TestImportMergeRefusesMultiProjectSnapshotWithoutMutation(t *testing.T) {
 
 func TestImportMergeSkipsCrossProjectLink(t *testing.T) {
 	home := setupKataEnv(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	source := openKataTestDB(t, filepath.Join(home, "source-links.db"))
 	importedProject, err := source.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
@@ -426,7 +425,7 @@ func TestImportForcePreservesExistingTargetOnFailure(t *testing.T) {
 	input := filepath.Join(home, "bad.jsonl")
 	require.NoError(t, os.WriteFile(input, []byte(`{"kind":"issue","data":{}}`+"\n"), 0o600))
 	target := filepath.Join(home, "target.db")
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openKataTestDB(t, target)
 	_, err := d.CreateProject(ctx, "existing")
 	require.NoError(t, err)
@@ -496,16 +495,16 @@ func writeExportFixture(t *testing.T, home string) string {
 	t.Helper()
 	srcPath := filepath.Join(home, "source.db")
 	src := openKataTestDB(t, srcPath)
-	p, err := src.CreateProject(context.Background(), "kata")
+	p, err := src.CreateProject(t.Context(), "kata")
 	require.NoError(t, err)
-	_, _, err = src.CreateIssue(context.Background(), db.CreateIssueParams{
+	_, _, err = src.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: p.ID,
 		Title:     "imported issue",
 		Author:    "tester",
 	})
 	require.NoError(t, err)
 	var out bytes.Buffer
-	require.NoError(t, jsonl.Export(context.Background(), src, &out, jsonl.ExportOptions{IncludeDeleted: true}))
+	require.NoError(t, jsonl.Export(t.Context(), src, &out, jsonl.ExportOptions{IncludeDeleted: true}))
 	require.NoError(t, src.Close())
 	input := filepath.Join(home, "input.jsonl")
 	require.NoError(t, os.WriteFile(input, out.Bytes(), 0o600))

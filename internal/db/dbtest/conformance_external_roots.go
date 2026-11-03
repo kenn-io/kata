@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"encoding/json/jsontext"
 	"fmt"
 	"strings"
@@ -16,7 +15,7 @@ import (
 
 func checkExternalRootBindings(t *testing.T, store db.Storage, backend Backend) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "example-project")
 	if err != nil {
 		return fmt.Errorf("create project: %w", err)

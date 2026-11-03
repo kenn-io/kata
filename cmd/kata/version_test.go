@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"runtime"
@@ -124,7 +123,7 @@ func TestVersion_RootFlagMatchesSubcommand(t *testing.T) {
 func TestVersion_RootFlagHasNoShorthand(t *testing.T) {
 	assert.Empty(t, newRootCmd().Flags().Lookup("version").Shorthand)
 
-	_, _, err := executeRootCapture(t, context.Background(), "-v")
+	_, _, err := executeRootCapture(t, t.Context(), "-v")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown shorthand flag: 'v'")
 }
@@ -180,7 +179,7 @@ func TestRoot_NoArgsValidatesGlobalOutputFlags(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, stderr, err := executeRootCapture(t, context.Background(), tc.args...)
+			_, stderr, err := executeRootCapture(t, t.Context(), tc.args...)
 			require.Error(t, err)
 			var cli *cliError
 			require.ErrorAs(t, err, &cli)
@@ -197,7 +196,7 @@ func TestVersion_RootFlagDoesNotShadowSubcommandFlag(t *testing.T) {
 	out := string(executeRoot(t, newRootCmd(), "openapi", "--version", "3.0", "--format", "yaml"))
 	assert.Contains(t, out, "openapi: 3.0.3")
 
-	_, _, err := executeRootCapture(t, context.Background(), "list", "--version")
+	_, _, err := executeRootCapture(t, t.Context(), "list", "--version")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown flag: --version")
 }
@@ -205,7 +204,7 @@ func TestVersion_RootFlagDoesNotShadowSubcommandFlag(t *testing.T) {
 // An unknown command must stay a usage error rather than falling through to
 // the root's --version handler.
 func TestRoot_UnknownCommandStillFails(t *testing.T) {
-	_, _, err := executeRootCapture(t, context.Background(), "definitely-not-a-command")
+	_, _, err := executeRootCapture(t, t.Context(), "definitely-not-a-command")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown command")
 }

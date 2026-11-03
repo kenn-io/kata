@@ -58,13 +58,14 @@ func cleanupDispatcher(t *testing.T, d *Dispatcher) {
 	// Shutdown aborts in-flight work at deadline-2x GraceWindow, so a 2s
 	// budget is too tight for five sequential process spawns on Windows CI.
 	const budget = 20 * dispatcherTestGraceWindow
-	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	// Runs from t.Cleanup, after t.Context() is canceled.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), budget)
 	err := d.Shutdown(ctx)
 	cancel()
 	if err == nil {
 		return
 	}
-	waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	waitCtx, waitCancel := context.WithTimeout(context.WithoutCancel(t.Context()), 5*time.Second)
 	defer waitCancel()
 	require.NoError(t, d.Shutdown(waitCtx))
 }
@@ -244,7 +245,7 @@ func TestDispatcher_Enqueue_QueueFullDropsAndCounts(t *testing.T) {
 	if got := d.dropped.Load(); got < 5 {
 		t.Fatalf("dropped=%d, want >=5", got)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	require.NoError(t, d.Shutdown(ctx))
 	require.Equal(t, acquired.Load(), released.Load(), "every accepted or dropped job must release its lease")
@@ -253,7 +254,7 @@ func TestDispatcher_Enqueue_QueueFullDropsAndCounts(t *testing.T) {
 func TestDispatcher_Enqueue_AfterShutdown_NoOp(t *testing.T) {
 	cfg := defaultConfig()
 	d, _, _ := mustNewDispatcher(t, nil, cfg)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
 	if err := d.Shutdown(ctx); err != nil {
 		t.Fatal(err)
@@ -264,7 +265,7 @@ func TestDispatcher_Enqueue_AfterShutdown_NoOp(t *testing.T) {
 func TestDispatcher_Shutdown_Idempotent(t *testing.T) {
 	cfg := defaultConfig()
 	d, _, _ := mustNewDispatcher(t, nil, cfg)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
 	if err := d.Shutdown(ctx); err != nil {
 		t.Fatal(err)
@@ -283,7 +284,7 @@ func TestDispatcher_Shutdown_Timeout_ReportsInflight(t *testing.T) {
 	d, logBuf, _ := mustNewDispatcher(t, []ResolvedHook{stuck}, cfg)
 	enqueueEvents(d, "issue.created", 300, 1)
 	waitForInflight(t, d, 1, 5*time.Second)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond) //nolint:kennlint // deadlinetest: the deadline is the expected result; the term-ignore hook keeps Shutdown waiting until it fires
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Millisecond) //nolint:kennlint // deadlinetest: the deadline is the expected result; the term-ignore hook keeps Shutdown waiting until it fires
 	defer cancel()
 	if err := d.Shutdown(ctx); err == nil {
 		t.Fatal("Shutdown with 5ms ctx vs term-ignore should return error")
@@ -377,7 +378,7 @@ func TestDispatcher_ProducerDrainAcceptsHandoffsAfterIdleAdmissionCloses(t *test
 		return nil, false
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	require.NoError(t, d.Shutdown(ctx))
 	require.Equal(t, 2, countJSONLLines(runsPath))
@@ -440,7 +441,7 @@ func TestDispatcher_AliasResolverContext_CancelsOnShutdown(t *testing.T) {
 		t.Fatal("alias resolver was never invoked")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	_ = d.Shutdown(ctx)
 	select {
@@ -448,7 +449,7 @@ func TestDispatcher_AliasResolverContext_CancelsOnShutdown(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("alias resolver context did not cancel after Shutdown")
 	}
-	waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	waitCtx, waitCancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer waitCancel()
 	require.NoError(t, d.Shutdown(waitCtx))
 }

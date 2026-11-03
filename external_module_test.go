@@ -36,7 +36,7 @@ replace go.kenn.io/kata => %s
 		0o600,
 	))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "go", "test", "-mod=mod", "./...")
 	cmd.Dir = consumerDir
