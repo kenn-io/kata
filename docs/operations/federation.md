@@ -476,6 +476,14 @@ names an unrelated event or another project's definition is refused.
 
 A rejected push returns a validation error and changes nothing.
 
+### Missing creations from direct legacy spokes
+
+SQLite roots now forward accepted direct legacy spoke events to relays before later root updates, preventing relays from reporting "references unknown issue" after a root update. PostgreSQL roots already behaved this way.
+
+Events keep their original identity and hash and travel in ingest order after materialization. Accepted creations reach relays even when they reference issues that haven't arrived yet.
+
+Creations a SQLite root accepted before the upgrade need the existing [bridge disconnect](../guide/project-relays.md#recover-or-disconnect) and [reconnect](../guide/project-relays.md#3-connect-with-the-same-choices) procedure to reach relays.
+
 ### Delivery acknowledgements and retention
 
 Lost replies replay the same bytes and identities. An acknowledgement confirms
@@ -2208,10 +2216,6 @@ kata federation quarantine skip <id> \
 For a legacy spoke, skipping advances its push cursor past the quarantined event range. It
 does not delete local events and it does not make skipped work appear on the
 hub.
-
-### Missing creations from direct legacy spokes
-
-Events accepted by a SQLite root from a direct legacy spoke reach negotiated relays with their original identity and hash. SQLite roots queue accepted events in ingest order after materialization. References to peers that haven't arrived yet can travel through relays.
 
 ## Purge and reset
 
