@@ -17,6 +17,9 @@ import (
 )
 
 func TestMarkTransitiveBlockLayoutScaling(t *testing.T) {
+	if testing.Short() {
+		t.Skip("scaling test")
+	}
 	for _, tc := range []struct {
 		shape        string
 		small, large int
