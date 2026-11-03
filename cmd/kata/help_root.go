@@ -129,6 +129,7 @@ command-specific details; --json prints the full JSON envelope for scripts.
 Errors go to stderr.
 Exit codes: 0 ok, 1 internal, 2 usage, 3 validation, 4 not found, 5 conflict,
 6 confirmation required, 7 daemon unavailable, 8 wait timeout.
+CLI panics on the main goroutine exit 1 as internal errors; daemon panics retain runtime handling.
 Environment: KATA_AUTHOR actor; KATA_TEAMMATE teammate attribution;
 KATA_INBOX_USER inbox address (actor or actor/teammate); KATA_SERVER remote
 daemon URL; KATA_HOME local daemon state; KATA_AUTH_TOKEN daemon bearer token.`

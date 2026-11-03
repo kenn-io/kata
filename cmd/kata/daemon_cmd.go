@@ -280,6 +280,7 @@ func daemonStartCmd() *cobra.Command {
 			if foreground {
 				ctx, cancel := context.WithCancel(cmd.Context())
 				defer cancel()
+				daemonProcessEntered = true
 				return runDaemonForeground(ctx, listen, insecureReadonly, noAutoToken)
 			}
 			out, err := startDetachedDaemonLocked(cmd.Context(), listen, insecureReadonly, noAutoToken)
