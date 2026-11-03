@@ -37,16 +37,19 @@ func TestShowDisplayContribution(t *testing.T) {
 		require.Contains(t, agent.String(), "teammate=route")
 	}
 	if root := os.Getenv("KATA_DISPLAY_CAPTURE_DIR"); root != "" {
+		// #nosec G703 -- The developer explicitly selects this local test-artifact directory.
 		require.NoError(t, os.MkdirAll(root, 0750))
 		phase := os.Getenv("KATA_DISPLAY_PHASE")
 		if phase == "" {
 			phase = "after"
 		}
+		// #nosec G703 -- The developer explicitly selects the local test-artifact path and phase.
 		require.NoError(t, os.WriteFile(filepath.Join(root, "cli-"+phase+"-show.ansi"), human.Bytes(), 0600))
 		cmd := &cobra.Command{}
 		var events bytes.Buffer
 		cmd.SetOut(&events)
 		require.NoError(t, printEventsHuman(cmd, []byte(`{"events":[{"event_id":1,"type":"issue.created","project_id":1,"actor":"coordinator","attributed_teammate":"planner","created_at":"2026-08-01T12:00:00Z"},{"event_id":2,"type":"issue.commented","project_id":1,"actor":"coordinator","attributed_teammate":"writer","created_at":"2026-08-01T12:01:00Z"},{"event_id":3,"type":"issue.comment_edited","project_id":1,"actor":"editor","attributed_teammate":"editor","created_at":"2026-08-01T12:05:00Z"}]}`)))
+		// #nosec G703 -- The developer explicitly selects the local test-artifact path and phase.
 		require.NoError(t, os.WriteFile(filepath.Join(root, "cli-"+phase+"-events.ansi"), events.Bytes(), 0600))
 	}
 }

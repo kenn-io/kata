@@ -59,12 +59,14 @@ func TestDisplayContributionRendering(t *testing.T) {
 						require.Contains(t, ansi.Strip(output), "coordinator / ")
 					}
 					if root := os.Getenv("KATA_DISPLAY_CAPTURE_DIR"); root != "" {
+						// #nosec G703 -- The developer explicitly selects this local test-artifact directory.
 						require.NoError(t, os.MkdirAll(root, 0750))
 						phase := os.Getenv("KATA_DISPLAY_PHASE")
 						if phase == "" {
 							phase = "after"
 						}
 						path := filepath.Join(root, fmt.Sprintf("tui-%s-%s-%s-%s.ansi", phase, theme, state, tab.name))
+						// #nosec G703 -- The developer explicitly selects the local test-artifact path and phase.
 						require.NoError(t, os.WriteFile(path, []byte(output), 0600))
 					}
 				}
