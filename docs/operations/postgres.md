@@ -1,7 +1,7 @@
 ---
 title: PostgreSQL operations
 description: Operate Kata on PostgreSQL with split migration and runtime roles, backups, upgrades, and health checks.
-last_edited: 2026-10-28
+last_edited: 2026-11-02
 ---
 
 # PostgreSQL operations
@@ -112,6 +112,9 @@ Schema 35 adds an index for resolving moved issues' former short IDs. Stop
 daemons and imports while the migration scans the event table and builds the
 index. See the [schema 35 migration requirements](../development/postgres-migrations.md#schema-35-move-history-lookup-index)
 for the offline window, grants, and rollback.
+
+Schema 38 indexes comment reply targets in event history. Stop daemons and
+imports while it builds. See the [schema 38 migration requirements](../development/postgres-migrations.md#schema-38-comment-reply-target-index).
 
 After preparation, grant the runtime role DML access and set default privileges
 for objects created by future migrations:
