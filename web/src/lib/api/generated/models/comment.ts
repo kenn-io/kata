@@ -5,7 +5,8 @@ import type { CommentVerification } from './commentVerification.ts'
 
 export interface Comment {
   accountable_actor?: string
-  attributed_teammate?: string
+  /** @nullable */
+  attributed_teammate?: string | null
   author: string
   authority_uid?: string
   body: string

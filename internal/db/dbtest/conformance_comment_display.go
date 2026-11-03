@@ -22,6 +22,25 @@ func checkCommentDisplayContribution(t *testing.T, store db.Storage, backend Bac
 	require.NoError(t, err)
 	comment, event, err := store.CreateComment(teammate.WithRequest(ctx, "writer"), db.CreateCommentParams{IssueID: issue.ID, Author: "actor", Teammate: "route", Body: "Original", IdempotencyKey: "display-key", IdempotencyFingerprint: "fingerprint"})
 	require.NoError(t, err)
+	orderProject, err := store.CreateProject(ctx, "comment-order-project")
+	require.NoError(t, err)
+	firstIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: orderProject.ID, Title: "First", Author: "actor"})
+	require.NoError(t, err)
+	interleavedIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: orderProject.ID, Title: "Interleaved", Author: "actor"})
+	require.NoError(t, err)
+	firstIssueComment, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: firstIssue.ID, Author: "actor", Body: "First issue comment"})
+	require.NoError(t, err)
+	secondIssueComment, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: interleavedIssue.ID, Author: "actor", Body: "Interleaved comment"})
+	require.NoError(t, err)
+	lastIssueComment, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: firstIssue.ID, Author: "actor", Body: "Last issue comment"})
+	require.NoError(t, err)
+	var exportedCommentIDs []int64
+	for exported, err := range store.ExportComments(ctx, db.ExportFilter{ProjectID: &orderProject.ID}) {
+		require.NoError(t, err)
+		exportedCommentIDs = append(exportedCommentIDs, exported.ID)
+	}
+	require.Equal(t, []int64{firstIssueComment.ID, secondIssueComment.ID, lastIssueComment.ID}, exportedCommentIDs,
+		"comment exports preserve global ID order when issues have interleaved comments")
 	assertDisplay := func(value any) {
 		t.Helper()
 		data, err := json.Marshal(value)
@@ -94,6 +113,35 @@ func checkCommentDisplayContribution(t *testing.T, store db.Storage, backend Bac
 	require.Equal(t, "moved", graph.Targets[comment.UID].Status)
 	require.NotNil(t, graph.Targets[comment.UID].Record)
 	assertDisplay(graph.Targets[comment.UID].Record.Comment)
+
+	// A project-only export must retain comment display data when the original
+	// creation event remains in the source project after the issue moves.
+	destinationRecords, err := CollectImportRecords(ctx, store, db.ExportFilter{ProjectID: &movedProject.ID, IncludeDeleted: true})
+	require.NoError(t, err)
+	var exportedComment *db.CommentExport
+	for _, record := range destinationRecords {
+		if commentRecord, ok := record.(*db.CommentExport); ok && commentRecord.UID == comment.UID {
+			exportedComment = commentRecord
+			break
+		}
+	}
+	require.NotNil(t, exportedComment)
+	require.NotNil(t, exportedComment.AttributedTeammate)
+	require.Equal(t, "writer", *exportedComment.AttributedTeammate)
+	exportedCommentJSON, err := json.Marshal(exportedComment)
+	require.NoError(t, err)
+	var exportedCommentFields map[string]any
+	require.NoError(t, json.Unmarshal(exportedCommentJSON, &exportedCommentFields))
+	require.Equal(t, "writer", exportedCommentFields["attributed_teammate"])
+	destinationRestore := backend.Open(t)
+	t.Cleanup(func() { require.NoError(t, destinationRestore.Close()) })
+	require.NoError(t, destinationRestore.ImportReplay(ctx, destinationRecords, db.ImportOptions{}))
+	destinationIssue, err := destinationRestore.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	destinationComments, err := destinationRestore.CommentsByIssue(ctx, destinationIssue.ID)
+	require.NoError(t, err)
+	require.Len(t, destinationComments, 1)
+	assertDisplay(destinationComments[0])
 
 	// Existing portable exports carry display in retained events, not new row fields.
 	records, err := CollectImportRecords(ctx, store, db.ExportFilter{IncludeDeleted: true})
@@ -189,9 +237,96 @@ func checkCommentDisplayContribution(t *testing.T, store db.Storage, backend Bac
 		require.Equal(t, "route", c.Teammate)
 		require.NotEmpty(t, c.Body)
 	}
+
 	t.Run("federation adoption", func(t *testing.T) {
 		checkAdoptionCommentDisplay(t, backend)
 	})
+	return nil
+}
+
+func checkEmptyCommentDisplayContribution(t *testing.T, store db.Storage, backend Backend) error {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "suppressed-display-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Suppressed display", Author: "actor"})
+	require.NoError(t, err)
+	comment, _, err := store.CreateComment(teammate.WithRequest(ctx, ""), db.CreateCommentParams{
+		IssueID: issue.ID, Author: "actor", Teammate: "route", Body: "Explicitly suppressed",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, comment.AttributedTeammate)
+	require.Empty(t, *comment.AttributedTeammate)
+	assertSuppressed := func(value any) {
+		t.Helper()
+		data, err := json.Marshal(value)
+		require.NoError(t, err)
+		var fields map[string]any
+		require.NoError(t, json.Unmarshal(data, &fields))
+		require.Contains(t, fields, "attributed_teammate")
+		require.Equal(t, "", fields["attributed_teammate"])
+		require.Equal(t, "route", fields["teammate"])
+	}
+	assertSuppressed(comment)
+	var exportedSuppressed *db.CommentExport
+	for record, err := range store.ExportComments(ctx, db.ExportFilter{ProjectID: &project.ID, IncludeDeleted: true}) {
+		require.NoError(t, err)
+		if record.UID == comment.UID {
+			exportedSuppressed = &record
+			break
+		}
+	}
+	require.NotNil(t, exportedSuppressed)
+	require.NotNil(t, exportedSuppressed.AttributedTeammate)
+	require.Empty(t, *exportedSuppressed.AttributedTeammate)
+	exportedSuppressedJSON, err := json.Marshal(exportedSuppressed)
+	require.NoError(t, err)
+	var exportedSuppressedFields map[string]any
+	require.NoError(t, json.Unmarshal(exportedSuppressedJSON, &exportedSuppressedFields))
+	require.Contains(t, exportedSuppressedFields, "attributed_teammate")
+	require.Equal(t, "", exportedSuppressedFields["attributed_teammate"])
+
+	_, err = store.EnableProjectFederation(ctx, project.ID, "actor")
+	require.NoError(t, err)
+	events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Limit: 100})
+	require.NoError(t, err)
+	var snapshot *db.Event
+	for i := range events {
+		if events[i].Type == "issue.snapshot" && events[i].IssueUID != nil && *events[i].IssueUID == issue.UID {
+			snapshot = &events[i]
+			break
+		}
+	}
+	require.NotNil(t, snapshot)
+	var document struct {
+		Comments []map[string]any `json:"comments"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(snapshot.Payload), &document))
+	require.Len(t, document.Comments, 1)
+	require.Contains(t, document.Comments[0], "attributed_teammate")
+	require.Equal(t, "", document.Comments[0]["attributed_teammate"])
+	require.Equal(t, "route", document.Comments[0]["teammate"])
+
+	restored := backend.Open(t)
+	t.Cleanup(func() { require.NoError(t, restored.Close()) })
+	target, err := restored.CreateProject(ctx, "suppressed-snapshot-project")
+	require.NoError(t, err)
+	_, err = restored.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: target.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example",
+		HubProjectID: 42, HubProjectUID: target.UID, Enabled: true,
+	})
+	require.NoError(t, err)
+	remote := newRemoteEvent(t, target, &issue.UID, "issue.snapshot", "actor", snapshot.OriginInstanceUID, 1, jsontext.Value(snapshot.Payload))
+	_, err = restored.InsertRemoteEvent(ctx, target.ID, remote)
+	require.NoError(t, err)
+	require.NoError(t, restored.MaterializeFederatedProject(ctx, target.ID))
+	restoredIssue, err := restored.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	restoredComments, err := restored.CommentsByIssue(ctx, restoredIssue.ID)
+	require.NoError(t, err)
+	require.Len(t, restoredComments, 1)
+	require.NotNil(t, restoredComments[0].AttributedTeammate)
+	require.Empty(t, *restoredComments[0].AttributedTeammate)
+	assertSuppressed(restoredComments[0])
 	return nil
 }
 

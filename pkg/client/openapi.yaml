@@ -526,6 +526,7 @@ components:
         accountable_actor:
           type: string
         attributed_teammate:
+          nullable: true
           type: string
         author:
           type: string
@@ -572,6 +573,7 @@ components:
     CommentLink:
       properties:
         attributed_teammate:
+          nullable: true
           type: string
         author:
           type: string
@@ -612,6 +614,7 @@ components:
         accountable_actor:
           type: string
         attributed_teammate:
+          nullable: true
           type: string
         author:
           type: string

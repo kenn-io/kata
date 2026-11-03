@@ -6,7 +6,8 @@ import type { CommentOutVerification } from './commentOutVerification.ts'
 
 export interface CommentOut {
   accountable_actor?: string
-  attributed_teammate?: string
+  /** @nullable */
+  attributed_teammate?: string | null
   author: string
   authority_uid?: string
   backlinks?: CommentLink[]

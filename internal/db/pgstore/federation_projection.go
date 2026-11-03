@@ -388,7 +388,7 @@ func federationIssueComments(
 		return nil, err
 	}
 	for i := range output {
-		value, found := display[output[i].CommentUID]
+		value, found := display[db.CanonicalCommentUID(output[i].CommentUID)]
 		if !found {
 			value = db.LegacyDisplayContribution(output[i].Teammate)
 		}

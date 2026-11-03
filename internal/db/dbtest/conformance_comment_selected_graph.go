@@ -1,12 +1,14 @@
 package dbtest
 
 import (
+	"encoding/json/v2"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/teammate"
 )
 
 func checkSelectedCommentGraph(t *testing.T, store db.Storage) error {
@@ -19,7 +21,9 @@ func checkSelectedCommentGraph(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	other, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Author: "worker", Title: "Other issue"})
 	require.NoError(t, err)
-	target, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: other.ID, Author: "finder", Body: "Finding"})
+	target, _, err := store.CreateComment(teammate.WithRequest(ctx, "writer"), db.CreateCommentParams{
+		IssueID: other.ID, Author: "finder", Teammate: "route", Body: "Finding",
+	})
 	require.NoError(t, err)
 	reply, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: source.ID, Author: "worker", Body: "Answer", ReplyToUID: target.UID, ReplyKind: "reply"})
 	require.NoError(t, err)
@@ -83,13 +87,62 @@ func checkSelectedCommentGraph(t *testing.T, store db.Storage) error {
 
 	records, err := CollectImportRecords(ctx, store, db.ExportFilter{ProjectID: &project.ID, IncludeDeleted: true})
 	require.NoError(t, err)
+	countTargetCommentEvents := func() int {
+		t.Helper()
+		events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Limit: 1000})
+		require.NoError(t, err)
+		count := 0
+		for _, event := range events {
+			if event.Type != "issue.commented" {
+				continue
+			}
+			var payload struct {
+				CommentUID string `json:"comment_uid"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(event.Payload), &payload))
+			if strings.EqualFold(payload.CommentUID, target.UID) {
+				count++
+			}
+		}
+		return count
+	}
+	originalTargetEvents := countTargetCommentEvents()
+	require.Equal(t, 1, originalTargetEvents)
+	var restoredUID string
 	for _, persistedUID := range []string{strings.ToLower(target.UID), strings.ToLower(target.UID[:13]) + target.UID[13:]} {
+		restoredUID = persistedUID
 		for _, record := range records {
 			if comment, ok := record.(*db.CommentExport); ok && comment.ID == target.ID {
 				comment.UID = persistedUID
 			}
 		}
 		require.NoError(t, store.ImportReplay(ctx, records, db.ImportOptions{}))
+		require.Equal(t, originalTargetEvents, countTargetCommentEvents(),
+			"case-only comment UID changes do not duplicate retained creation history")
+		comments, err := store.CommentsByIssue(ctx, other.ID)
+		require.NoError(t, err)
+		var imported *db.Comment
+		for i := range comments {
+			if comments[i].UID == persistedUID {
+				imported = &comments[i]
+				break
+			}
+		}
+		require.NotNil(t, imported)
+		require.NotNil(t, imported.AttributedTeammate)
+		require.Equal(t, "writer", *imported.AttributedTeammate)
+		require.Equal(t, "route", imported.Teammate)
+		var exported *db.CommentExport
+		for record, err := range store.ExportComments(ctx, db.ExportFilter{ProjectID: &project.ID, IncludeDeleted: true}) {
+			require.NoError(t, err)
+			if strings.EqualFold(record.UID, persistedUID) {
+				exported = &record
+				break
+			}
+		}
+		require.NotNil(t, exported)
+		require.NotNil(t, exported.AttributedTeammate)
+		require.Equal(t, "writer", *exported.AttributedTeammate)
 		identity, err := store.ReadCommentGraph(ctx, db.CommentGraphQuery{ProjectID: project.ID, Reference: &db.CommentGraphReference{UID: target.UID}})
 		require.NoError(t, err)
 		require.Len(t, identity.Comments, 1, "imported UID case must not change reference resolution")
@@ -102,6 +155,38 @@ func checkSelectedCommentGraph(t *testing.T, store db.Storage) error {
 		require.Equal(t, persistedUID, edited.UID)
 		require.Equal(t, "Updated imported finding", edited.Body)
 	}
+	_, err = store.EnableProjectFederation(ctx, project.ID, "worker")
+	require.NoError(t, err)
+	events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Limit: 1000})
+	require.NoError(t, err)
+	var federationSnapshot *db.Event
+	for i := range events {
+		if events[i].Type == "issue.snapshot" && events[i].IssueUID != nil && *events[i].IssueUID == other.UID {
+			federationSnapshot = &events[i]
+			break
+		}
+	}
+	require.NotNil(t, federationSnapshot)
+	var snapshotComments struct {
+		Comments []struct {
+			CommentUID         string  `json:"comment_uid"`
+			Teammate           string  `json:"teammate"`
+			AttributedTeammate *string `json:"attributed_teammate"`
+		} `json:"comments"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(federationSnapshot.Payload), &snapshotComments))
+	var foundSnapshotComment bool
+	for _, snapshotComment := range snapshotComments.Comments {
+		if !strings.EqualFold(snapshotComment.CommentUID, restoredUID) {
+			continue
+		}
+		foundSnapshotComment = true
+		require.Equal(t, "route", snapshotComment.Teammate)
+		require.NotNil(t, snapshotComment.AttributedTeammate)
+		require.Equal(t, "writer", *snapshotComment.AttributedTeammate)
+		break
+	}
+	require.True(t, foundSnapshotComment)
 	collider, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: other.ID, Author: "finder", Body: "Collision"})
 	require.NoError(t, err)
 	records, err = CollectImportRecords(ctx, store, db.ExportFilter{ProjectID: &project.ID, IncludeDeleted: true})

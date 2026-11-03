@@ -146,6 +146,9 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 			"note: skipped %d import mapping record(s) referencing skipped link(s)\n",
 			skippedMappings)
 	}
+	if err := d.replayCommentDisplayEvents(ctx, tx, recs); err != nil {
+		return err
+	}
 	if err := ensureSystemProject(ctx, tx); err != nil {
 		return err
 	}
@@ -170,6 +173,56 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit import: %w", err)
+	}
+	return nil
+}
+
+func (d *Store) replayCommentDisplayEvents(ctx context.Context, tx *sql.Tx, records []db.ImportRecord) error {
+	var instanceUID string
+	displayByIssue := make(map[int64]map[string]string)
+	for _, record := range records {
+		comment, ok := record.(*db.CommentExport)
+		if !ok || comment.AttributedTeammate == nil {
+			continue
+		}
+		var issueID, projectID int64
+		var issueUID, projectUID, projectName string
+		err := tx.QueryRowContext(ctx, `SELECT i.id, i.uid, i.project_id, p.uid, p.name
+ FROM comments c JOIN issues i ON i.id=c.issue_id JOIN projects p ON p.id=i.project_id
+ WHERE c.uid=?`, comment.UID).Scan(&issueID, &issueUID, &projectID, &projectUID, &projectName)
+		if err != nil {
+			return fmt.Errorf("restore comment display %q: find owning issue: %w", comment.UID, err)
+		}
+		display, loaded := displayByIssue[issueID]
+		if !loaded {
+			display, err = db.CommentDisplayContributionsTx(ctx, tx, issueID, func(int) string { return "?" })
+			if err != nil {
+				return fmt.Errorf("restore comment display %q: read retained history: %w", comment.UID, err)
+			}
+			displayByIssue[issueID] = display
+		}
+		commentUID := db.CanonicalCommentUID(comment.UID)
+		if retained, found := display[commentUID]; found && retained == *comment.AttributedTeammate {
+			continue
+		}
+		if instanceUID == "" {
+			if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=?`, "instance_uid").Scan(&instanceUID); err != nil {
+				return fmt.Errorf("restore comment display: read instance uid: %w", err)
+			}
+		}
+		payload, err := db.CommentDisplayEventPayload(*comment)
+		if err != nil {
+			return fmt.Errorf("restore comment display %q: encode event: %w", comment.UID, err)
+		}
+		if _, err := d.insertEventTx(ctx, tx, eventInsert{
+			ProjectID: projectID, ProjectUID: projectUID, ProjectName: projectName,
+			IssueID: &issueID, IssueUID: &issueUID,
+			Type: "issue.commented", Actor: comment.Author, Payload: string(payload),
+			OriginInstanceUID: instanceUID, CreatedAt: comment.CreatedAt, SkipRelay: true,
+		}); err != nil {
+			return fmt.Errorf("restore comment display %q: insert event: %w", comment.UID, err)
+		}
+		display[commentUID] = *comment.AttributedTeammate
 	}
 	return nil
 }
