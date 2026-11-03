@@ -979,31 +979,57 @@ func buildShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issu
 	return out, nil
 }
 
-func issueEventFoldClock(event db.Event) db.FoldClock {
-	if event.Type == db.ProjectScopeResetEventType && event.EffectiveOrder.EventUID != "" {
-		return event.EffectiveOrder
+// effectiveCloseEventForShow returns the explicit close event whose status
+// intent still supplies the issue's current closed state. A later reopen or
+// imported status transition can leave the issue closed without carrying any
+// close receipt. Project-scope reset markers hide event identity and state, so
+// they must clear the historical receipt instead of letting an older close win.
+func effectiveCloseEventForShow(ctx context.Context, store db.Storage, issue db.Issue) (*db.Event, error) {
+	var foldEvents []db.FoldEvent
+	closeEvents := map[string]db.Event{}
+	query := db.EventsAfterParams{
+		IssueUID: issue.UID,
+		Types:    []string{"issue.created", "issue.snapshot", "issue.updated", "issue.closed", "issue.reopened"},
+		Limit:    100,
 	}
-	return db.FoldClock{
-		HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter,
-		OriginInstanceUID: event.OriginInstanceUID, EventUID: event.UID,
+	for {
+		page, err := store.EventsAfter(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		if len(page) == 0 {
+			break
+		}
+		for _, event := range page {
+			if event.Type == db.ProjectScopeResetEventType {
+				return nil, nil
+			}
+			foldEvents = append(foldEvents, db.FoldEvent{
+				UID: event.UID, OriginInstanceUID: event.OriginInstanceUID,
+				ProjectUID: event.ProjectUID, IssueUID: issue.UID,
+				Type: event.Type, Actor: event.Actor,
+				HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter,
+				CreatedAt: event.CreatedAt.UTC().Format(db.EventTimestampFormat),
+				Payload:   jsontext.Value(event.Payload),
+			})
+			if event.Type == "issue.closed" {
+				closeEvents[event.UID] = event
+			}
+		}
+		query.AfterID = page[len(page)-1].ID
+		if len(page) < query.Limit {
+			break
+		}
 	}
-}
-
-// closeEventClockAfter matches FoldEvents' deterministic last-writer ordering
-// so delayed federation delivery cannot replace the close that set current status.
-func closeEventClockAfter(candidate, current db.Event) bool {
-	candidateClock := issueEventFoldClock(candidate)
-	currentClock := issueEventFoldClock(current)
-	switch {
-	case candidateClock.HLCPhysicalMS != currentClock.HLCPhysicalMS:
-		return candidateClock.HLCPhysicalMS > currentClock.HLCPhysicalMS
-	case candidateClock.HLCCounter != currentClock.HLCCounter:
-		return candidateClock.HLCCounter > currentClock.HLCCounter
-	case candidateClock.OriginInstanceUID != currentClock.OriginInstanceUID:
-		return candidateClock.OriginInstanceUID > currentClock.OriginInstanceUID
-	default:
-		return candidateClock.EventUID > currentClock.EventUID
+	folded, ok := db.FoldEvents(foldEvents).Issues[issue.UID]
+	if !ok || folded.Status != issue.Status || folded.Status != "closed" || folded.StatusIntentUID == "" {
+		return nil, nil
 	}
+	event, ok := closeEvents[folded.StatusIntentUID]
+	if !ok {
+		return nil, nil
+	}
+	return &event, nil
 }
 
 func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issue, includeDeleted bool, selectors ...commentref.Options) (*api.ShowIssueResponse, error) {
@@ -1087,36 +1113,14 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 	}
 	if issue.Status == "closed" {
 		var latest *db.Event
-		var latestCloseEvent db.Event
-		haveLatestCloseEvent := false
-		query := db.EventsAfterParams{IssueUID: issue.UID, Types: []string{"issue.closed"}, Limit: 100}
-		for {
-			page, err := cfg.DB.EventsAfter(ctx, query)
+		effective, err := effectiveCloseEventForShow(ctx, cfg.DB, issue)
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
+		if effective != nil {
+			latest, err = scopedMutationEvent(ctx, cfg.DB, effective)
 			if err != nil {
-				return nil, internalAPIError(err)
-			}
-			if len(page) == 0 {
-				break
-			}
-			for i := range page {
-				var projected *db.Event
-				if page[i].Type == "issue.closed" {
-					projected, err = scopedMutationEvent(ctx, cfg.DB, &page[i])
-					if err != nil {
-						return nil, err
-					}
-				}
-				if haveLatestCloseEvent && !closeEventClockAfter(page[i], latestCloseEvent) {
-					continue
-				}
-				// A redacted/reset effective close must not reuse older evidence.
-				latestCloseEvent = page[i]
-				haveLatestCloseEvent = true
-				latest = projected
-			}
-			query.AfterID = page[len(page)-1].ID
-			if len(page) < query.Limit {
-				break
+				return nil, err
 			}
 		}
 

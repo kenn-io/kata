@@ -144,6 +144,69 @@ func TestShowUsesFederationOrderForCloseEvidence(t *testing.T) {
 	require.Equal(t, "confirmed", shown.Verification.Evidence[0].Type)
 }
 
+func TestShowDoesNotReuseCloseEvidenceAfterFederatedStatusUpdate(t *testing.T) {
+	env := testenv.New(t)
+	project := createFederatedHubProject(t, env, "example-project")
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Federated completion", Author: "example-agent",
+	})
+	require.NoError(t, err)
+	claim, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: issue.ID, Author: "example-agent", Body: "The requested behavior is complete.",
+	})
+	require.NoError(t, err)
+	_, _, _, err = env.DB.CloseIssueGuarded(t.Context(), db.CloseIssueParams{
+		IssueID: issue.ID, ExpectedProjectID: project.ID, Actor: "example-agent", Reason: "done",
+		Message:  "Completed the requested work and verified its focused tests.",
+		Evidence: []db.Evidence{{Type: "confirmed", Comment: claim.UID}},
+	})
+	require.NoError(t, err)
+	_, _, _, err = env.DB.ReopenIssue(t.Context(), issue.ID, "example-agent")
+	require.NoError(t, err)
+
+	updatedAt := time.Now().UTC().Add(time.Hour).Truncate(time.Millisecond)
+	updatedAtText := updatedAt.Format(db.EventTimestampFormat)
+	payload, err := json.Marshal(map[string]any{
+		"issue_uid": issue.UID, "status": "closed", "closed_reason": "done",
+		"closed_at": updatedAtText, "updated_at": updatedAtText,
+	})
+	require.NoError(t, err)
+	event := db.RemoteEvent{
+		EventUID: "01HZNQ7VFPK1XGD8R5MABCD4EX", OriginInstanceUID: federationTestSpokeUID,
+		ProjectUID: project.UID, ProjectName: project.Name, IssueUID: &issue.UID,
+		Type: "issue.updated", Actor: "example-agent", HLCPhysicalMS: updatedAt.UnixMilli(),
+		Payload: jsontext.Value(payload), CreatedAt: updatedAt,
+	}
+	event.ContentHash, err = db.EventContentHash(db.EventHashInput{
+		UID: event.EventUID, OriginInstanceUID: event.OriginInstanceUID,
+		ProjectUID: event.ProjectUID, ProjectName: event.ProjectName,
+		IssueUID: event.IssueUID, RelatedIssueUID: event.RelatedIssueUID,
+		Type: event.Type, Actor: event.Actor, HLCPhysicalMS: event.HLCPhysicalMS,
+		HLCCounter: event.HLCCounter, CreatedAt: event.CreatedAt.UTC().Format(db.EventTimestampFormat),
+		Payload: event.Payload,
+	})
+	require.NoError(t, err)
+	_, err = env.DB.IngestFederationEvents(t.Context(), db.FederationIngestParams{
+		ProjectID: project.ID, SpokeInstanceUID: federationTestSpokeUID,
+		Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: event}},
+	})
+	require.NoError(t, err)
+	issue, err = env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Equal(t, "closed", issue.Status)
+
+	resp, raw := envDoRaw(t, env, http.MethodGet, issuePathRef(project.ID, issue.ShortID, ""), nil, nil)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "%s", string(raw))
+	var shown struct {
+		Verification *db.Verification `json:"verification"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &shown))
+	if shown.Verification != nil {
+		require.Empty(t, shown.Verification.Evidence,
+			"an imported status transition without an explicit close must not resurrect earlier close evidence")
+	}
+}
+
 func TestCloseVerificationResolution(t *testing.T) {
 	for _, resolution := range []string{"supersede-claim", "supersede-refutation", "rebuttal", "conflict", "refuted-rebuttal"} {
 		t.Run(resolution, func(t *testing.T) {
