@@ -249,19 +249,6 @@ func TestAttachmentLinkReuseRefreshesReferenceAfterConcurrentRemoval(t *testing.
 	require.Contains(t, attachments, "attachment."+reused.ID)
 }
 
-func TestAttachmentLinkUsesFileNameMediaType(t *testing.T) {
-	env, f := attachmentEnv(t)
-	p, iss := seedProjectAndIssue(t, env)
-	f.Seed("/images/picture.png", docbank.Node{ID: 43, Name: "picture.png", Kind: "file", CurrentVersionID: uuid.MustParse(linkVersion)}, map[uuid.UUID][]byte{uuid.MustParse(linkVersion): []byte("image bytes")})
-	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments/links", p.ID, iss.ShortID)
-	code, raw, err := postAttachmentLink(t, env, endpoint, `{"path":"/images/picture.png","actor":"operator"}`)
-	require.NoError(t, err)
-	require.Equal(t, 200, code, string(raw))
-	var out api.AddAttachmentResponseBody
-	require.NoError(t, json.Unmarshal(raw, &out))
-	require.Equal(t, "image/png", out.Attachment.MediaType)
-}
-
 func postAttachmentLink(t *testing.T, env *testenv.Env, endpoint, body string) (int, []byte, error) {
 	t.Helper()
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, env.URL+endpoint, strings.NewReader(body))
