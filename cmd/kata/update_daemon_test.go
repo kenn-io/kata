@@ -87,7 +87,10 @@ func daemonLifecycle(t *testing.T) func(*testing.T, string) *daemonLifecycleFixt
 		resetFlags(t)
 		home, err := config.KataHome()
 		require.NoError(t, err)
-		binary := filepath.Join(t.TempDir(), filepath.Base(binaries["v0.1.0"]))
+		binary := filepath.Join(t.TempDir(), "kata")
+		if runtime.GOOS == "windows" {
+			binary += ".exe"
+		}
 		// This is a fresh test path, so a direct copy is enough. Keep the
 		// staged replacement exercised by fake.install below, where the
 		// existing daemon binary really must be replaced.
