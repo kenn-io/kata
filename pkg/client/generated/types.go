@@ -3962,13 +3962,10 @@ func (l LeaveFederationReplicaResultBody) Validate() error {
 }
 
 type LinkAttachmentInput struct {
-	Actor  *string `json:"actor,omitempty"`
-	NodeID *int64  `json:"node_id,omitempty"`
-	Path   *string `json:"path,omitempty"`
-
-	// ReuseExisting When true, return the smallest existing attachment ID for this resolved Docbank version, or create a reference if none exists.
-	ReuseExisting *bool      `json:"reuse_existing,omitempty"`
-	VersionID     *uuid.UUID `json:"version_id,omitempty"`
+	Actor     *string    `json:"actor,omitempty"`
+	NodeID    *int64     `json:"node_id,omitempty"`
+	Path      *string    `json:"path,omitempty"`
+	VersionID *uuid.UUID `json:"version_id,omitempty"`
 }
 
 func (l LinkAttachmentInput) Validate() error {
