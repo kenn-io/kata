@@ -56,7 +56,7 @@ type rebindFailingLeaveFenceStore struct {
 
 func (s *rebindFailingLeaveFenceStore) FenceRelayDisconnect(
 	ctx context.Context,
-	projectID int64,
+	_ int64,
 ) error {
 	close(s.fenceEntered)
 	select {
@@ -967,8 +967,8 @@ func TestPrepareNativeLeaveFailureReleasesReplicaMutexBeforeGateWait(t *testing.
 	case operationErr := <-operationDone:
 		operationFinished = true
 		require.ErrorIs(t, operationErr, daemon.ErrFederationReplicaReservationChanged)
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("native leave cleanup held the global replica mutex while waiting for the project gate")
+	case <-ctx.Done():
+		t.Fatalf("native leave cleanup held the global replica mutex while waiting for the project gate: %v", ctx.Err())
 	}
 
 	releaseGate()
@@ -1072,8 +1072,8 @@ func TestAbortNativeLeaveDoesNotHoldReplicaMutexWhileWaitingForGate(t *testing.T
 	case operationErr := <-operationDone:
 		operationFinished = true
 		require.ErrorIs(t, operationErr, daemon.ErrFederationReplicaLeavePending)
-	case <-time.After(200 * time.Millisecond):
-		t.Fatal("native leave abort held the global replica mutex while waiting for the project gate")
+	case <-ctx.Done():
+		t.Fatalf("native leave abort held the global replica mutex while waiting for the project gate: %v", ctx.Err())
 	}
 
 	releaseGate()
