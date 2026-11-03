@@ -12,7 +12,7 @@ import (
 // RunCreateRelayResetAfterCompaction exercises create relay reset after compaction on the supplied native store.
 // R4/R5: compacted roots supply signed current state and original creation
 // proofs. Lost responses retry one durable checkpoint, not new snapshot IDs.
-func RunCreateRelayResetAfterCompaction(t *testing.T, store db.Storage, compact func(context.Context, int64) error) {
+func RunCreateRelayResetAfterCompaction(t *testing.T, store db.Storage, backendName string, compact func(context.Context, int64) error) {
 	creator, ok := store.(interface {
 		CreateRelayReset(context.Context, string, db.RootAttributionSigner) (db.RelayResetCheckpoint, error)
 	})
@@ -32,7 +32,7 @@ func RunCreateRelayResetAfterCompaction(t *testing.T, store db.Storage, compact 
 	writeCtx := db.WithRootAttribution(ctx, signer, "company-member")
 	issue, _, err := store.CreateIssue(writeCtx, db.CreateIssueParams{ProjectID: project.ID, Title: "Original title", Author: "source-assistant"})
 	require.NoError(t, err)
-	comment, _, err := store.CreateComment(writeCtx, db.CreateCommentParams{IssueID: issue.ID, Author: "comment-assistant", Teammate: "reviewer", Body: "Original comment"})
+	comment, signedEvent, err := store.CreateComment(writeCtx, db.CreateCommentParams{IssueID: issue.ID, Author: "comment-assistant", Teammate: "reviewer", Body: "Original comment"})
 	require.NoError(t, err)
 	title := "Current title"
 	_, _, _, err = store.EditIssue(writeCtx, db.EditIssueParams{IssueID: issue.ID, Actor: "editor", Title: &title})
@@ -43,6 +43,8 @@ func RunCreateRelayResetAfterCompaction(t *testing.T, store db.Storage, compact 
 	require.NoError(t, err)
 	commentProof, err := store.EntityAttribution(ctx, project.UID, "comment", comment.UID)
 	require.NoError(t, err)
+	lowerCommentUID, commentProof := rewriteSignedCommentCreationUIDForTest(ctx, t, store, Backend{Name: backendName}, project.UID, comment.UID, signedEvent, commentProof, private)
+	validateCommentBackupWithCanonicalizedRow(ctx, t, store, project.ID)
 	parent, _, err := store.CreateAPIToken(ctx, db.CreateAPITokenParams{PlaintextToken: "checkpoint-parent-test-token", Actor: "company-member", AdminActor: "admin"})
 	require.NoError(t, err)
 	grant, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: project.ID, ParentTokenID: parent.ID, SpokeInstanceUID: "00000000000000000000000008", ProtocolVersion: db.RelayProtocolVersion, Token: "checkpoint-child-test-token"})
@@ -87,7 +89,7 @@ func RunCreateRelayResetAfterCompaction(t *testing.T, store db.Storage, compact 
 	require.Contains(t, provenance.Receipts, issueProof)
 	require.Contains(t, provenance.Receipts, commentProof)
 	require.Contains(t, provenance.Entities, db.EntityProvenance{ProjectUID: project.UID, Kind: "issue", EntityUID: issue.UID, EventUID: issueProof.EventUID})
-	require.Contains(t, provenance.Entities, db.EntityProvenance{ProjectUID: project.UID, Kind: "comment", EntityUID: comment.UID, EventUID: commentProof.EventUID})
+	require.Contains(t, provenance.Entities, db.EntityProvenance{ProjectUID: project.UID, Kind: "comment", EntityUID: lowerCommentUID, EventUID: commentProof.EventUID})
 	for _, ref := range provenance.Entities {
 		require.NotEqual(t, legacy.UID, ref.EntityUID, "snapshot signing never manufactures legacy creation attribution")
 	}

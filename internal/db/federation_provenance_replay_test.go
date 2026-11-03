@@ -3,6 +3,7 @@ package db_test
 import (
 	"crypto/ed25519"
 	"crypto/sha256"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,4 +38,30 @@ func TestProvenanceReplayValidatesPinnedSignatures(t *testing.T) {
 	// protocol; an ordinary project merge cannot establish root authority.
 	_, err := db.PrepareProjectMergeRecords(records, db.ProjectMergeOffsets{TargetProjectID: 100}, nil)
 	require.ErrorContains(t, err, "trusted provenance")
+}
+
+func TestProvenanceReplayAcceptsCanonicalizedCommentReference(t *testing.T) {
+	seed := sha256.Sum256([]byte("fixture-root"))
+	private := ed25519.NewKeyFromSeed(seed[:])
+	public := private.Public().(ed25519.PublicKey)
+	project := &db.ProjectExport{ID: 42, UID: "00000000000000000000000001", Name: "example-project"}
+	pin := &db.RootKeyPin{ProjectUID: project.UID, AuthorityUID: "00000000000000000000000002", KeyID: db.RootPublicKeyID(public), PublicKey: public}
+	issue := &db.IssueExport{ID: 5, ProjectID: project.ID, UID: "00000000000000000000000009", Title: "Finding", Author: "worker", CreatedAt: "2026-10-01T00:00:00Z"}
+	commentUID := "0000000000000000000000000A"
+	comment := &db.CommentExport{ID: 7, UID: commentUID, IssueID: issue.ID, Author: "worker", Body: "Comment", CreatedAt: "2026-10-01T00:01:00Z"}
+	receipt, err := db.SignRootReceipt(db.AttributionReceipt{
+		Version: 1, ProjectUID: project.UID, EventUID: "00000000000000000000000003",
+		ContentHash:  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		AuthorityUID: pin.AuthorityUID, AccountableActor: "member", SourceActor: "assistant",
+		IngressInstanceUID: "00000000000000000000000004", AcceptedAt: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC),
+		ResetEpoch: 1, Sequence: 1, KeyID: pin.KeyID,
+	}, private)
+	require.NoError(t, err)
+	ref := &db.EntityProvenance{
+		ProjectUID: project.UID, Kind: "comment", EntityUID: strings.ToLower(commentUID), EventUID: receipt.EventUID,
+	}
+	records := []db.ImportRecord{project, issue, comment, pin, &receipt, ref}
+
+	require.NoError(t, db.ValidateImportReplay(records, db.ImportOptions{}),
+		"a compacted backup must retain signed creation provenance when the stored comment UID was normalized to canonical case")
 }

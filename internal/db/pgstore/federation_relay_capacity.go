@@ -200,7 +200,7 @@ func relayCheckpointProvenanceTx(ctx context.Context, tx *sql.Tx, projectUID str
 	rows, err = tx.QueryContext(ctx, `SELECT ep.project_uid,ep.kind,ep.entity_uid,ep.event_uid FROM federation_entity_provenance ep
 WHERE ep.project_uid=$1 AND (
  (ep.kind='issue' AND EXISTS(SELECT 1 FROM issues i JOIN projects p ON p.id=i.project_id WHERE p.uid=ep.project_uid AND i.uid=ep.entity_uid)) OR
- (ep.kind='comment' AND EXISTS(SELECT 1 FROM comments c JOIN issues i ON i.id=c.issue_id JOIN projects p ON p.id=i.project_id WHERE p.uid=ep.project_uid AND c.uid=ep.entity_uid)))
+ (ep.kind='comment' AND EXISTS(SELECT 1 FROM comments c JOIN issues i ON i.id=c.issue_id JOIN projects p ON p.id=i.project_id WHERE p.uid=ep.project_uid AND `+db.CommentUIDEqualSQL("c.uid", "ep.entity_uid", db.CommentDisplayPostgres)+`)))
 ORDER BY ep.kind,ep.entity_uid`, projectUID)
 	if err != nil {
 		return provenance, err

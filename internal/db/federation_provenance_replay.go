@@ -70,7 +70,7 @@ func validateProvenanceReplay(records []ImportRecord) error {
 			issue := issues[rec.IssueID]
 			if issue != nil {
 				if project := projectUIDByID[issue.ProjectID]; project != "" {
-					entities[entityIdentity{project, "comment", rec.UID}] = true
+					entities[entityIdentity{project, "comment", creationReferenceUID("comment", rec.UID)}] = true
 				}
 			}
 		}
@@ -157,7 +157,7 @@ func validateProvenanceReplay(records []ImportRecord) error {
 		if !ok {
 			continue
 		}
-		id := entityIdentity{ref.ProjectUID, ref.Kind, ref.EntityUID}
+		id := entityIdentity{ref.ProjectUID, ref.Kind, creationReferenceUID(ref.Kind, ref.EntityUID)}
 		if seenRefs[id] || !entities[id] || receipts[eventIdentity{ref.ProjectUID, ref.EventUID}] == nil {
 			return errors.New("duplicate or orphan creation provenance in backup")
 		}
@@ -174,4 +174,13 @@ func validateProvenanceReplay(records []ImportRecord) error {
 		}
 	}
 	return nil
+}
+
+// creationReferenceUID compares comment provenance with the canonical comment
+// projection identity while preserving the signed spelling in exported data.
+func creationReferenceUID(kind, value string) string {
+	if kind == "comment" {
+		return CanonicalCommentUID(value)
+	}
+	return value
 }

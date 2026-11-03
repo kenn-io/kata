@@ -125,10 +125,11 @@ func DecodeRootResetPayload(pin RootKeyPin, snapshot RootResetSnapshot) ([]Remot
 	}
 	refs := map[string]bool{}
 	for _, ref := range provenance.Entities {
-		identity := ref.Kind + "/" + ref.EntityUID
+		entityUID := creationReferenceUID(ref.Kind, ref.EntityUID)
+		identity := ref.Kind + "/" + entityUID
 		_, receiptExists := receipts[ref.EventUID]
-		_, issueExists := projection.Issues[ref.EntityUID]
-		_, commentExists := projection.Comments[ref.EntityUID]
+		_, issueExists := projection.Issues[entityUID]
+		_, commentExists := projection.Comments[entityUID]
 		if ref.ProjectUID != pin.ProjectUID || !uid.Valid(ref.EntityUID) || !receiptExists || refs[identity] || (ref.Kind != "issue" && ref.Kind != "comment") || (ref.Kind == "issue" && !issueExists) || (ref.Kind == "comment" && !commentExists) {
 			return nil, provenance, errors.New("invalid reset creation reference")
 		}

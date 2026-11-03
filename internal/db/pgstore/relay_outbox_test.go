@@ -54,7 +54,7 @@ func TestCreateRelayResetAfterCompaction(t *testing.T) {
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
-	dbtest.RunCreateRelayResetAfterCompaction(t, store, func(ctx context.Context, projectID int64) error {
+	dbtest.RunCreateRelayResetAfterCompaction(t, store, "postgres", func(ctx context.Context, projectID int64) error {
 		_, err := store.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1`, projectID)
 		return err
 	})
