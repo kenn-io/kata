@@ -116,6 +116,12 @@ func (s *Store) moveIssueProjectTx(ctx context.Context, tx *sql.Tx, input db.Mov
 			output.NewRevision = current.Revision
 			return nil
 		}
+		commentDisplay, err := db.CommentDisplayContributionsForMoveTx(
+			ctx, tx, current.ID, dollarPlaceholder, db.CommentDisplayPostgres,
+		)
+		if err != nil {
+			return fmt.Errorf("read comment display contributions for move: %w", mapSQLError(err, nil))
+		}
 		newShortID, err := s.resolveShortIDTx(ctx, tx, target.ID, current.UID, "")
 		if err != nil {
 			return fmt.Errorf("allocate short_id in target: %w", err)
@@ -158,11 +164,15 @@ SET project_id = $1 WHERE issue_id = $2`,
 			return fmt.Errorf("rehome external root bindings: %w", mapSQLError(err, nil))
 		}
 
-		payload, err := json.Marshal(map[string]string{
+		payloadFields := map[string]any{
 			"issue_uid": current.UID, "from_project_uid": source.UID,
 			"from_short_id": current.ShortID, "to_project_uid": target.UID,
 			"to_short_id": newShortID, "updated_at": updatedAt,
-		})
+		}
+		if len(commentDisplay) > 0 {
+			payloadFields[db.CommentDisplayContributionsMoveField] = commentDisplay
+		}
+		payload, err := json.Marshal(payloadFields)
 		if err != nil {
 			return fmt.Errorf("marshal issue move event: %w", err)
 		}

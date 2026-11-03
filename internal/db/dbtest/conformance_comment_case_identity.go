@@ -45,11 +45,13 @@ func checkSelectedCommentGraphCanonicalIdentity(t *testing.T, store db.Storage, 
 	require.NoError(t, err)
 	target, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: other.ID, Author: "reader", Body: "Finding"})
 	require.NoError(t, err)
-	target.UID = "0" + strings.Repeat("A", 24) + "Z"
+	target.UID = "0" + strings.Repeat("A", 24) + "S"
 	updateCommentIdentityForTest(ctx, t, store, backend, "uid", target.UID, target.ID)
 	malformed, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: other.ID, Author: "reader", Body: "Unrelated opaque identity"})
 	require.NoError(t, err)
-	malformedUID := strings.Replace(target.UID, "Z", "\u017f", 1)
+	malformedUID := strings.Replace(target.UID, "S", "\u017f", 1)
+	require.Equal(t, target.UID, strings.ToUpper(malformedUID),
+		"the malformed Unicode spelling must uppercase to the valid ULID target")
 	updateCommentIdentityForTest(ctx, t, store, backend, "uid", malformedUID, malformed.ID)
 	reply, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: selected.ID, Author: "worker", Body: "Response", ReplyToUID: target.UID, ReplyKind: "reply"})
 	require.NoError(t, err)

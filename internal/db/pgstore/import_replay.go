@@ -142,6 +142,7 @@ func (s *Store) importReplayTx(
 func (s *Store) replayCommentDisplayEvents(ctx context.Context, tx *sql.Tx, records []db.ImportRecord) error {
 	var instanceUID string
 	displayByIssue := make(map[int64]map[string]string)
+	creationHistoryByIssue := make(map[int64]map[string]struct{})
 	for _, record := range records {
 		comment, ok := record.(*db.CommentExport)
 		if !ok || comment.AttributedTeammate == nil {
@@ -157,17 +158,22 @@ func (s *Store) replayCommentDisplayEvents(ctx context.Context, tx *sql.Tx, reco
 		}
 		display, loaded := displayByIssue[issueID]
 		if !loaded {
-			display, err = db.CommentDisplayContributionsTx(ctx, tx, issueID, func(position int) string {
-				return fmt.Sprintf("$%d", position)
-			}, db.CommentDisplayPostgres)
+			var creationHistory map[string]struct{}
+			display, creationHistory, err = db.CommentDisplayContributionsWithHistoryTx(
+				ctx, tx, issueID, func(position int) string { return fmt.Sprintf("$%d", position) },
+				db.CommentDisplayPostgres,
+			)
 			if err != nil {
 				return fmt.Errorf("restore comment display %q: read retained history: %w", comment.UID, mapSQLError(err, nil))
 			}
 			displayByIssue[issueID] = display
+			creationHistoryByIssue[issueID] = creationHistory
 		}
 		commentUID := db.CanonicalCommentUID(comment.UID)
 		if retained, found := display[commentUID]; found && retained == *comment.AttributedTeammate {
-			continue
+			if _, hasCreationHistory := creationHistoryByIssue[issueID][commentUID]; hasCreationHistory {
+				continue
+			}
 		}
 		if db.CommentDisplayContribution(nil, comment.Teammate) == *comment.AttributedTeammate {
 			continue
@@ -190,6 +196,7 @@ func (s *Store) replayCommentDisplayEvents(ctx context.Context, tx *sql.Tx, reco
 			return fmt.Errorf("restore comment display %q: insert event: %w", comment.UID, mapSQLError(err, nil))
 		}
 		display[commentUID] = *comment.AttributedTeammate
+		creationHistoryByIssue[issueID][commentUID] = struct{}{}
 	}
 	return nil
 }

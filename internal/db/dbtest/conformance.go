@@ -51,6 +51,8 @@ type scenario struct {
 
 var storageScenarios = []scenario{
 	{name: "comment display contribution", methods: []string{"CommentsByIssue", "CreateComment", "CreateIssue", "CreateProject", "EditComment", "EnableProjectFederation", "EntityAttribution", "EventsAfter", "ExportComments", "ImportReplay", "InsertRemoteEvent", "IssueByID", "IssueByUID", "LookupCommentIdempotency", "MaterializeFederatedProject", "MoveIssueProject", "PinRootAuthority", "ProjectByUID", "ReadCommentGraph", "UpsertFederationBinding"}, runWithBackend: checkCommentDisplayContribution},
+	{name: "comment export includes non-positive IDs", methods: []string{"CreateIssue", "CreateProject", "ExportComments", "ImportReplay"}, run: checkCommentExportIncludesNonPositiveIDs},
+	{name: "moved comment display survives source purge", methods: []string{"CommentsByIssue", "CreateComment", "CreateIssue", "CreateProject", "IssueByID", "MoveIssueProject", "PurgeProject", "RemoveProject"}, run: checkMovedCommentDisplaySurvivesSourcePurge},
 	{name: "payload-only snapshot comment display", methods: []string{"CommentsByIssue", "CreateProject", "InsertRemoteEvent", "IssueByUID", "MaterializeFederatedProject", "UpsertFederationBinding"}, run: checkPayloadOnlySnapshotCommentDisplay},
 	{name: "empty comment display contribution", runWithBackend: checkEmptyCommentDisplayContribution},
 	{name: "event teammate", runWithBackend: checkEventTeammate},

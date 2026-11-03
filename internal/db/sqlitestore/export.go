@@ -336,14 +336,19 @@ func (d *Store) ExportComments(ctx context.Context, f db.ExportFilter) iter.Seq2
 
 		displayByIssue := make(map[int64]map[string]string)
 		var lastID int64
+		hasLastID := false
 		for {
 			where := filterWhere
-			if where == "" {
-				where = " WHERE comments.id > ?"
-			} else {
-				where += " AND comments.id > ?"
+			args := exportArgs(f)
+			if hasLastID {
+				if where == "" {
+					where = " WHERE comments.id > ?"
+				} else {
+					where += " AND comments.id > ?"
+				}
+				args = append(args, lastID)
 			}
-			args := append(exportArgs(f), lastID, batchSize)
+			args = append(args, batchSize)
 			rows, err := d.readQ.QueryContext(ctx, `SELECT comments.id, comments.uid, comments.issue_id, comments.author, comments.body,
 			       CAST(comments.created_at AS TEXT), comments.teammate, comments.reply_to_uid, comments.reply_kind, CAST(comments.edited_at AS TEXT)
 		          FROM comments JOIN issues ON issues.id = comments.issue_id`+where+` ORDER BY comments.id ASC LIMIT ?`, args...)
@@ -393,6 +398,7 @@ func (d *Store) ExportComments(ctx context.Context, f db.ExportFilter) iter.Seq2
 					return
 				}
 				lastID = records[i].ID
+				hasLastID = true
 				if maximumIDByIssue[records[i].IssueID] == lastID {
 					delete(displayByIssue, records[i].IssueID)
 				}

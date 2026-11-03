@@ -64,15 +64,27 @@ func displayHandle(raw jsontext.Value) string {
 	return value
 }
 
-// CommentDisplayContributionsTx loads only creation-bearing history for an
-// issue, once per read group. Using the caller's transaction keeps display data
-// in the same snapshot as the comment rows, including moved and restored rows.
+// CommentDisplayContributionsTx loads retained history for an issue, once per
+// read group. Using the caller's transaction keeps display data in the same
+// snapshot as the comment rows, including moved and restored rows.
 func CommentDisplayContributionsTx(ctx context.Context, tx *sql.Tx, issueID int64, bind func(int) string, dialect CommentDisplaySQLDialect) (map[string]string, error) {
 	return CommentDisplayContributions(ctx, tx.QueryContext, issueID, bind, dialect)
 }
 
-// CommentDisplayContributions reads retained creation-bearing history for an
-// issue through query. Export iterators use their pinned snapshot queryer; read
+// CommentDisplayContributionsWithHistoryTx returns retained values alongside
+// comments represented by creation-bearing events in the same history.
+func CommentDisplayContributionsWithHistoryTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	issueID int64,
+	bind func(int) string,
+	dialect CommentDisplaySQLDialect,
+) (map[string]string, map[string]struct{}, error) {
+	return CommentDisplayContributionsWithHistory(ctx, tx.QueryContext, issueID, bind, dialect)
+}
+
+// CommentDisplayContributions reads retained display history for an issue
+// through query. Export iterators use their pinned snapshot queryer; read
 // methods use the caller's transaction.
 func CommentDisplayContributions(
 	ctx context.Context,
@@ -81,9 +93,23 @@ func CommentDisplayContributions(
 	bind func(int) string,
 	dialect CommentDisplaySQLDialect,
 ) (map[string]string, error) {
+	display, _, err := CommentDisplayContributionsWithHistory(ctx, query, issueID, bind, dialect)
+	return display, err
+}
+
+// CommentDisplayContributionsWithHistory reads retained display values and
+// identifies which comments have creation-bearing event history, separately
+// from values carried only by issue.moved events.
+func CommentDisplayContributionsWithHistory(
+	ctx context.Context,
+	query func(context.Context, string, ...any) (*sql.Rows, error),
+	issueID int64,
+	bind func(int) string,
+	dialect CommentDisplaySQLDialect,
+) (map[string]string, map[string]struct{}, error) {
 	moveFromProjectUID := dialect.moveFromProjectUID("moved")
 	if moveFromProjectUID == "" {
-		return nil, fmt.Errorf("unsupported comment display SQL dialect %d", dialect)
+		return nil, nil, fmt.Errorf("unsupported comment display SQL dialect %d", dialect)
 	}
 	queryText := `WITH issue AS (
  SELECT uid, project_id FROM issues WHERE id=` + bind(1) + `
@@ -99,7 +125,7 @@ func CommentDisplayContributions(
 SELECT i.uid,e.uid,e.origin_instance_uid,e.type,e.issue_uid,e.hlc_physical_ms,e.hlc_counter,e.payload
 FROM issue i
 JOIN events e ON e.issue_uid=i.uid
-WHERE e.type IN ('issue.commented','issue.created','issue.snapshot')
+WHERE e.type IN ('issue.commented','issue.created','issue.snapshot','issue.moved')
 UNION ALL
 SELECT i.uid,e.uid,e.origin_instance_uid,e.type,e.issue_uid,e.hlc_physical_ms,e.hlc_counter,e.payload
 FROM issue i
@@ -107,10 +133,10 @@ CROSS JOIN relevant_projects rp
 CROSS JOIN events e
 WHERE e.project_id=rp.project_id
   AND (e.issue_uid IS NULL OR e.issue_uid='')
-  AND e.type IN ('issue.commented','issue.created','issue.snapshot')`
+  AND e.type IN ('issue.commented','issue.created','issue.snapshot','issue.moved')`
 	rows, err := query(ctx, queryText, issueID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	var events []FoldEvent
@@ -120,7 +146,7 @@ WHERE e.project_id=rp.project_id
 		var envelopeIssueUID, payload sql.NullString
 		if err := rows.Scan(&targetIssueUID, &event.UID, &event.OriginInstanceUID, &event.Type, &envelopeIssueUID,
 			&event.HLCPhysicalMS, &event.HLCCounter, &payload); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		event.IssueUID = envelopeIssueUID.String
 		event.Payload = jsontext.Value(payload.String)
@@ -130,13 +156,97 @@ WHERE e.project_id=rp.project_id
 		events = append(events, event)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	display := make(map[string]string)
+	creationHistory := make(map[string]struct{})
 	for uid, comment := range FoldEvents(events).Comments {
-		display[CanonicalCommentUID(uid)] = comment.AttributedTeammate
+		canonicalUID := CanonicalCommentUID(uid)
+		display[canonicalUID] = comment.AttributedTeammate
+		creationHistory[canonicalUID] = struct{}{}
 	}
-	return display, nil
+	for _, event := range events {
+		if event.Type != "issue.moved" {
+			continue
+		}
+		for commentUID, value := range commentDisplayContributionsFromMoveEvent(event.Payload) {
+			if _, found := display[commentUID]; !found {
+				display[commentUID] = value
+			}
+		}
+	}
+	return display, creationHistory, nil
+}
+
+// CommentDisplayContributionsMoveField stores retained comment display values
+// on the destination-owned issue.moved event.
+const CommentDisplayContributionsMoveField = "comment_display_contributions"
+
+// CommentDisplayContributionsForMoveTx copies only values that differ from a
+// comment's routing fallback into the destination-owned move event. This keeps
+// display data available after the source project's history is purged.
+func CommentDisplayContributionsForMoveTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	issueID int64,
+	bind func(int) string,
+	dialect CommentDisplaySQLDialect,
+) (map[string]string, error) {
+	display, err := CommentDisplayContributionsTx(ctx, tx, issueID, bind, dialect)
+	if err != nil {
+		return nil, err
+	}
+	var query string
+	switch dialect {
+	case CommentDisplaySQLite:
+		query = `SELECT uid, teammate FROM comments WHERE issue_id=? ORDER BY id ASC`
+	case CommentDisplayPostgres:
+		query = `SELECT uid, teammate FROM comments WHERE issue_id=$1 ORDER BY id ASC`
+	default:
+		return nil, fmt.Errorf("unsupported comment display SQL dialect %d", dialect)
+	}
+	rows, err := tx.QueryContext(ctx, query, issueID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	contributions := make(map[string]string)
+	for rows.Next() {
+		var commentUID string
+		var routingTeammate sql.NullString
+		if err := rows.Scan(&commentUID, &routingTeammate); err != nil {
+			return nil, err
+		}
+		canonicalUID := CanonicalCommentUID(commentUID)
+		value, found := display[canonicalUID]
+		if !found {
+			value = CommentDisplayContribution(nil, routingTeammate.String)
+		}
+		if value != LegacyDisplayContribution(routingTeammate.String) {
+			contributions[canonicalUID] = value
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return contributions, nil
+}
+
+func commentDisplayContributionsFromMoveEvent(payload jsontext.Value) map[string]string {
+	var event struct {
+		Contributions map[string]string `json:"comment_display_contributions"`
+	}
+	if err := json.Unmarshal(payload, &event); err != nil || len(event.Contributions) == 0 {
+		return nil
+	}
+	contributions := make(map[string]string, len(event.Contributions))
+	for commentUID, value := range event.Contributions {
+		if commentUID == "" {
+			continue
+		}
+		contributions[CanonicalCommentUID(commentUID)] = LegacyDisplayContribution(value)
+	}
+	return contributions
 }
 
 // CommentDisplayEventPayload returns a canonical comment event payload for a

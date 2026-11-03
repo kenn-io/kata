@@ -300,16 +300,19 @@ func (s *Store) ExportComments(ctx context.Context, filter db.ExportFilter) iter
 
 		displayByIssue := make(map[int64]map[string]string)
 		var lastID int64
+		hasLastID := false
 		for {
 			where := filterWhere
 			args := append([]any(nil), filterArgs...)
-			cursor := fmt.Sprintf("$%d", len(args)+1)
-			if where == "" {
-				where = " WHERE comments.id > " + cursor
-			} else {
-				where += " AND comments.id > " + cursor
+			if hasLastID {
+				cursor := fmt.Sprintf("$%d", len(args)+1)
+				if where == "" {
+					where = " WHERE comments.id > " + cursor
+				} else {
+					where += " AND comments.id > " + cursor
+				}
+				args = append(args, lastID)
 			}
-			args = append(args, lastID)
 			limit := fmt.Sprintf("$%d", len(args)+1)
 			args = append(args, batchSize)
 			rows, err := s.exportQueryContext(ctx, `SELECT comments.id, comments.uid, comments.issue_id, comments.author, comments.body,
@@ -361,6 +364,7 @@ func (s *Store) ExportComments(ctx context.Context, filter db.ExportFilter) iter
 					return
 				}
 				lastID = records[i].ID
+				hasLastID = true
 				if maximumIDByIssue[records[i].IssueID] == lastID {
 					delete(displayByIssue, records[i].IssueID)
 				}

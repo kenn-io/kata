@@ -157,6 +157,12 @@ func (d *Store) moveIssueProjectTx(ctx context.Context, tx *sql.Tx, in db.MoveIs
 	if err != nil {
 		return out, fmt.Errorf("allocate short_id in target: %w", err)
 	}
+	commentDisplay, err := db.CommentDisplayContributionsForMoveTx(
+		ctx, tx, in.IssueID, func(int) string { return "?" }, db.CommentDisplaySQLite,
+	)
+	if err != nil {
+		return out, fmt.Errorf("read comment display contributions for move: %w", err)
+	}
 
 	newRev := curRev + 1
 	ts := nowTimestamp()
@@ -207,14 +213,21 @@ func (d *Store) moveIssueProjectTx(ctx context.Context, tx *sql.Tx, in db.MoveIs
 		return out, fmt.Errorf("rehome external root bindings: %w", err)
 	}
 
-	payload, _ := json.Marshal(map[string]string{
+	payloadFields := map[string]any{
 		"issue_uid":        issueUID,
 		"from_project_uid": fromProjectUID,
 		"from_short_id":    curShortID,
 		"to_project_uid":   toProjectUID,
 		"to_short_id":      newShortID,
 		"updated_at":       ts,
-	})
+	}
+	if len(commentDisplay) > 0 {
+		payloadFields[db.CommentDisplayContributionsMoveField] = commentDisplay
+	}
+	payload, err := json.Marshal(payloadFields)
+	if err != nil {
+		return out, fmt.Errorf("marshal issue move event: %w", err)
+	}
 	ev, err := d.insertEventTx(ctx, tx, eventInsert{
 		ProjectID:   in.ToProjectID,
 		ProjectName: toProjectName,
