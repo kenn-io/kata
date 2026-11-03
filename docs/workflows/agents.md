@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-11-02
+last_edited: 2026-11-03
 ---
 
 # Agent workflows
@@ -935,8 +935,9 @@ Refuting the rebuttal reopens the original dispute. Rebuttals resolve the
 original dispute and do not become separate close blockers. Evaluation stops
 after eight levels; unresolved deep or cyclic chains remain open.
 
-The daemon warns about open refutations by default. Operators can
-[block or disable those warnings](../reference/configuration.md#close-verification).
+The daemon warns about open refutations by default. Operators can set
+`[close.verification] open_refutations` to `warn`, `block`, or `off` in the
+[daemon configuration](../reference/configuration.md#close-verification).
 A deliberate `--overrule c:<refutation>` permits that refutation under blocking
 policy; repeat it for each blocker. Audit closes records the overrules.
 Use `--refuted c:<claim>` with `--wontfix`, `--duplicate-of`, or
