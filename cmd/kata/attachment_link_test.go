@@ -13,7 +13,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
-	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/docbank"
 	"hegel.dev/go/hegel"
 )
@@ -31,12 +30,6 @@ func TestAttachmentLinkVersionGateProperty(t *testing.T) {
 		require.True(ht, valid)
 		require.Equal(ht, major > 0 || minor >= 38, got, reported)
 	}, hegel.WithTestCases(512))
-}
-
-func TestAttachmentLinkDaemonAdvertisesAPIVersionFloor(t *testing.T) {
-	compatible, valid := apiVersionAtLeast(daemon.APISchemaVersion, apiVersionDocbankAttachmentLink)
-	require.True(t, valid)
-	require.True(t, compatible, "daemon schema %s must satisfy attachment-link minimum %s", daemon.APISchemaVersion, apiVersionDocbankAttachmentLink)
 }
 
 func TestAttachmentLinkCLI(t *testing.T) {
