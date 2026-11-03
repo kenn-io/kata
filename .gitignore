@@ -10,6 +10,7 @@
 *.test
 *.out
 coverage.out
+/gotestsum/
 
 # Local data dir for manual testing
 /.kata/
@@ -23,6 +24,7 @@ __pycache__/
 /docs/zensical-public-docs.*/
 /node_modules/
 /packages/*/node_modules/
+/packages/*/test-results/
 /web/node_modules/
 /web/dist/
 /web/coverage/

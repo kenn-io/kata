@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-10-31
+last_edited: 2026-11-02
 ---
 
 # CLI reference
@@ -1827,12 +1827,14 @@ restart it. Restart output, including the new web UI address, goes to stderr
 so JSON and agent stdout remain a single update result. If the replacement
 fails to start, or the running daemon does not support automatic restart, the command
 returns an error identifying the installed version and directs you to
-`kata daemon restart` with the daemon's original startup options. Remote
-daemons must be updated on their own hosts.
+`kata daemon stop` followed by `kata daemon start` with the daemon's original
+startup options. Run the start command in its original host shell or service
+environment. Remote daemons must be updated on their own hosts.
 
 Local commands auto-start the daemon when appropriate. When the running local
-daemon reports a different version, a local command stops it and starts one from
-the current binary. It leaves the daemon running and fails instead in these
+daemon reports a different version and supports executable replacement, a local
+command asks it to restart in place using the current binary. Older daemons
+use stop-and-start replacement. It leaves the daemon running and fails in these
 cases:
 
 - The database schema is newer than the current binary supports, or the current
@@ -1850,11 +1852,27 @@ daemon was auto-started with `autostart_idle_timeout` in effect, `daemon start`
 stops it and starts an explicit daemon in its place, reporting the replaced
 PID; a resident daemon is reported as already running. Use
 `daemon start --foreground` for service managers, hosted deployments, and any
-setup where the daemon process should stay attached to the terminal. `daemon
-restart` gracefully stops any running local daemon, waits for it to exit, and
-starts a replacement using the configured listener. It validates replacement
-settings before stopping the current daemon; use the restart flags to repeat
-transient startup overrides. Background start and restart output reports the
+setup where the daemon process should stay attached to the terminal.
+`daemon stop` waits until the daemon stops serving before reporting success.
+
+`daemon restart` asks each running local daemon to replace itself in its original
+environment, using the installed executable invoked by the CLI and retaining
+its startup options, credentials, network, and idle policy. The CLI and daemon
+must see the same process IDs and executable paths. Separate PID or filesystem
+views can prevent daemon discovery or executable handoff. The selected
+executable validates configuration in the daemon's environment before stopping
+it. Configuration validation errors leave the daemon serving; listener binding
+happens during replacement startup. Explicit restart flags override startup
+options and persist through later restarts. `kata daemon stop` followed by
+`kata daemon start` clears these overrides and uses the current startup settings.
+
+Start and restart keep waiting while an SQLite migration runs and report that
+progress on stderr.
+
+To replace an older daemon that supports only restart signals rather than
+executable selection, run `kata daemon stop` followed by `kata daemon start`
+with the desired options in its original host shell or service environment.
+Background start and restart output reports the
 resolved web UI URL on its own line after the daemon transport address.
 `daemon start`, `stop`, `restart`, `reload`, and `logs` administer the current
 `KATA_HOME` and reject `--daemon`. Set the home explicitly for those operations.
@@ -1889,6 +1907,8 @@ accepts the same bare short ID, qualified short ID, and full UID forms as
 `kata show`.
 
 **Cron tabs.** Press `1` for Kata, `2` for Jobs, `3` for Runs, or `4` for Workflows. Runs and Workflows are read-only; Jobs can create and change jobs (below). Cron tabs show the current project. In All projects, press `P` to pick one. Each tab keeps its filter and position when you switch tabs. Returning to Kata preserves the issue you were browsing.
+
+A job's detail lists its next three run times in the trigger's timezone, with the zone abbreviation so daylight-saving changes read clearly. A native recurring job shows them as **Next**, stepping from the progress the daemon saved on its parent issue. An adapter job shows its cron and `once` trigger times as **Triggers**; they are when the adapter's trigger fires, because Kata holds no anchor or catch-up for an adapter, and an adapter interval shows no time. A paused job shows none, as does a native job whose parent issue is closed or deleted, because the daemon delivers only while the parent is open. A native job whose parent or progress cannot be read shows **unavailable**. An adapter cron expression is read in its own `TZ=` or `CRON_TZ=` zone when it has one, and an `@every` expression shows no time.
 
 | Key | Cron lists and details |
 | --- | --- |
@@ -1933,6 +1953,21 @@ Esc from the Inbox list restores the browsing context and its filters. If no
 project is designated, the TUI shows a notice. [Choose the Inbox project](metadata.md#project-inbox-designation)
 in the web UI or through the project metadata API. This view is separate from
 `kata inbox`, which lists attention requests sent to an actor.
+
+Press `f` in the issue list to open the filter form. Its **Date** choice,
+the last field, narrows the list by each row's resolved dates. **today** keeps
+open issues whose `scheduled_on_date` or `deadline_on_date` is today or earlier.
+**scheduled** keeps open issues with either date after today. Row dates are
+resolved in the issue's or daemon's time zone, while "today" is the TUI's local
+day. The choice combines with status, owner, labels, and search, and shows as a
+`date:` chip. The choice filters the current project scope and does not change
+it; for Today across every project, choose All projects in the projects view
+(`P`) and then set **today**. Rows show their dates as `s:MM-DD` and `d:MM-DD`,
+with the year added for other years; the dates are left off where the title
+column is too narrow. An issue missing a date never matches on it, and daemons
+older than API `0.36.0` send no dates, so neither choice lists anything from
+them. See
+[Calendar dates on issue rows](metadata.md#calendar-dates-on-issue-rows).
 
 Press `T` to open Attention: the requests `kata notify` addressed to you, read
 from open issues in the current project or across all projects when the TUI is
@@ -2208,7 +2243,7 @@ kata federation bridge status --project <local-project>
 kata federation bridge disconnect --project <local-project> [--preflight] [--local-only]
 kata federation enable --project <project>
 kata federation enroll [project] [--project <project>] --spoke-instance <uid> --hub-url <url> \
-  --actor <actor> [--hub-token-env <env-name>] [--allow-insecure]
+  --actor <actor> [--spoke-name laptop] [--hub-token-env <env-name>] [--allow-insecure]
 kata federation join --project <project> --hub-url <url> --hub-project-id <id> \
   --token <token> --actor <actor> [--push]
 kata federation join --project <existing-project> --hub-url <url> \
@@ -2218,6 +2253,8 @@ kata federation rebind --all --hub <catalog-name>
 kata federation root-key repin --project <project> [--preflight] [--previous-key-file <path>] [--strand-relays]
 kata federation status
 kata federation enrollments list
+kata federation enrollments name <spoke-instance-uid> <name>
+kata federation enrollments name <spoke-instance-uid> --clear
 kata federation revoke <enrollment-id>
 kata federation lease acquire <issue-ref> [--ttl 30m]
 kata federation lease renew <issue-ref> --ttl 30m
@@ -2288,6 +2325,14 @@ prints a warning to stderr that the hub grant was not revoked; the hub operator
 must revoke it. Active downstream enrollments block it. Combine it with
 `--preflight` to check first. See
 [Detach a bridge whose hub is gone](../operations/federation.md#detach-a-bridge-whose-hub-is-gone).
+
+Use `federation enroll --spoke-name laptop` to assign a hub-local name when
+enrolling, or `federation enrollments name <uid> build-box` to change it later.
+Use `federation enrollments name <uid> --clear` to remove it. Names are unique
+on the hub, shared by an instance's enrollments across projects, and shown in
+enrollment lists and ordinary hub event responses. Naming requires hub
+administration authority. See [spoke names](../operations/federation.md#operator-commands)
+for naming rules, backups and relay enrollment.
 
 `kata federation enroll --project <project> --hub-url <url>` sends the
 enrollment API call to `<url>` using `--hub-token-env` or a daemon catalog

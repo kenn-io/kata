@@ -62,6 +62,14 @@ func (m *Model) advanceMutationEpoch() {
 
 func newUndoClient(base KataAPI) *undoClient { return &undoClient{KataAPI: base} }
 
+func (c *undoClient) CheckDateFilter(ctx context.Context) error {
+	api, ok := c.KataAPI.(dateFilterAPI)
+	if !ok {
+		return errors.New("date filter client unavailable")
+	}
+	return api.CheckDateFilter(ctx)
+}
+
 func (c *undoClient) ListTokens(ctx context.Context) ([]TokenInfo, time.Time, error) {
 	audit, ok := c.KataAPI.(credentialAuditAPI)
 	if !ok {

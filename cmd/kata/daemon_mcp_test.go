@@ -180,6 +180,7 @@ token_env = "KATA_MCP_TEST_TOKEN"
 				session, err := newMCPHTTPTestClient().Connect(callCtx, mcpTransport, nil)
 				require.NoError(t, err)
 				defer func() { _ = session.Close() }()
+				assertMCPHTTPPublicIcon(t, httpClient, endpoint, tt.host, session.InitializeResult().ServerInfo)
 				if tt.checkMountPolicy {
 					loaded, err := session.CallTool(callCtx, &sdkmcp.CallToolParams{Name: "kata.load_tokens"})
 					require.NoError(t, err)

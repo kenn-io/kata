@@ -236,6 +236,25 @@ func (p RelayResetProtocol) captureRootCheckpoint(ctx context.Context, create re
 	if err := p.Backend.PutMeta(ctx, create.key, string(raw)); err != nil {
 		return RelayResetCheckpoint{}, err
 	}
+	// The signed current state replaces old event/artifact offers, including
+	// private source bytes excluded from the checkpoint's history. Reuse the
+	// same covered-delivery record as forwarded resets; receipts stay owed.
+	summary, err := p.Backend.RelayOutboxEpochSummary(ctx, create.bindingUID, grant.RelayResetEpoch)
+	if err != nil {
+		return RelayResetCheckpoint{}, err
+	}
+	covered := RelayResetSupersededDeliveries{
+		Epoch: grant.RelayResetEpoch, NextEpoch: newEpoch, SnapshotUID: snapshotUID,
+		ThroughID: max(baselines.Events, baselines.Artifacts),
+		Events:    summary.UnacknowledgedEvents, Artifacts: summary.UnacknowledgedArtifacts,
+	}
+	raw, err = json.Marshal(covered)
+	if err != nil {
+		return RelayResetCheckpoint{}, err
+	}
+	if err := p.Backend.PutMeta(ctx, RelayResetSupersededMetadataKey(project.UID, create.bindingUID), string(raw)); err != nil {
+		return RelayResetCheckpoint{}, err
+	}
 	grant.RelayResetEpoch = newEpoch
 	if err := p.Backend.SeedRelayArtifactManifests(ctx, grant, project.UID); err != nil {
 		return RelayResetCheckpoint{}, err

@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-31
+last_edited: 2026-11-03
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,6 +9,27 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- See when a cron job runs next: the `kata tui` Jobs tab detail lists the next
+  three times in the trigger's timezone, computed with the same schedule code
+  the daemon delivers with, including daylight-saving changes. A native
+  recurring job reads **Next** and steps from its saved progress. An adapter's
+  cron or `once` trigger reads **Triggers**, since the adapter decides when it
+  fires; an adapter interval shows no time. A paused job, or a native job whose
+  parent is closed, shows none. An issue-deadline trigger now says how long
+  before the deadline it fires. See
+  [CLI reference](reference/cli.md#daemon-and-diagnostics).
+- Receive direct legacy spoke creations through relays on SQLite roots before later root updates, preventing "references unknown issue" errors on relays while preserving the original event identity and hash. Thanks to [Rusty Shackleford](https://github.com/salmonumbrella).
+
+- Keep the browser reachable when `kata daemon restart` runs from a sandbox or
+  container that sees the daemon's process IDs and executable paths. The daemon
+  uses the CLI's installed executable with its own environment and idle policy.
+  Explicit restart flags persist until stop/start, which also replaces older
+  daemons that support only restart signals. Separate PID or filesystem views
+  can prevent discovery or executable handoff.
+  `kata update` also reports the startup error when the daemon refuses to restart.
+- Wait up to 90 seconds for the replacement's startup check, daemon shutdown,
+  and replacement readiness during restart, extending the wait while an SQLite
+  migration runs.
 - Manage cron jobs, workflows and run evidence from MCP: load `kata.load_cron`
   for 17 tools over the daemon's existing cron API. Native notification jobs
   use the daemon scheduler; recording a run never starts work or changes who
@@ -28,6 +49,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
   an edit. If a revision changes while you edit, the form keeps your draft.
   Inspect a supported current definition, then save your whole
   draft against its revision. See [the `kata tui` keys](reference/cli.md#daemon-and-diagnostics).
+- Find what is due or planned in `kata tui` with the new **Date** choice in the
+  filter form (`f`). **today** lists open issues with a scheduled or deadline
+  date today or earlier in your local time zone; **scheduled** lists those with
+  a later date. It combines with status, owner, labels, and search, and rows now
+  show their dates. Daemon API `0.36.0` or newer is required.
 - Show what is stuck in any web collection, Inbox and Today included, with the
   optional **Blocked by** column. It lists each task's open blockers, three IDs
   at most and then `+N`; closed blockers are left out. It is off by default;

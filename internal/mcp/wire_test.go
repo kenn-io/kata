@@ -37,8 +37,7 @@ func TestWireDiscoveryPublishesNegotiatedToolsCapability(t *testing.T) {
 	require.Equal(t, map[string]any{"tools": map[string]any{"listChanged": true}}, capabilities)
 	meta := result["_meta"].(map[string]any)
 	serverInfo := meta["io.modelcontextprotocol/serverInfo"].(map[string]any)
-	require.Equal(t, "kata", serverInfo["name"])
-	require.Equal(t, "test-version", serverInfo["version"])
+	assertServerIcon(t, serverInfo)
 }
 
 func TestWireNegotiatesLegacyInitialization(t *testing.T) {
@@ -56,8 +55,7 @@ func TestWireNegotiatesLegacyInitialization(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, legacyProtocolVersion, result["protocolVersion"])
 	serverInfo := result["serverInfo"].(map[string]any)
-	require.Equal(t, "kata", serverInfo["name"])
-	require.Equal(t, "test-version", serverInfo["version"])
+	assertServerIcon(t, serverInfo)
 
 	writeWireNotification(t, connection, "notifications/initialized", map[string]any{})
 	writeWireRequest(t, connection, 2, "tools/list", map[string]any{})

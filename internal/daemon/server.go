@@ -29,6 +29,7 @@ import (
 	"go.kenn.io/kata/internal/hooks"
 	"go.kenn.io/kata/internal/issuesync"
 	"go.kenn.io/kata/internal/linearsync"
+	"go.kenn.io/kata/internal/mcpicon"
 	"go.kenn.io/kata/internal/notionsync"
 	"go.kenn.io/kata/internal/planesync"
 	"go.kenn.io/kata/internal/rootbridge"
@@ -384,6 +385,7 @@ func NewServer(cfg ServerConfig) *Server {
 	registerOpenAPIYAML(mux, cfg.HostAccess)
 	registerPprofHandlers(mux)
 	if cfg.MCPHandler != nil {
+		mcpicon.RegisterRoutes(mux)
 		mux.Handle(mcpPath, cfg.MCPHandler)
 	}
 	if cfg.WebHandler != nil {

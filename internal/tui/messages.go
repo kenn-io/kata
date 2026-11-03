@@ -352,9 +352,11 @@ const (
 	sseDisconnected
 )
 
-// refetchTickMsg fires after the 150ms debounce window so a single
-// fetch covers a burst of events.
+// refetchTickMsg fires after the event debounce window.
 type refetchTickMsg struct{}
+
+// dayTickMsg checks whether relative date filters need a new local day.
+type dayTickMsg struct{}
 
 // detailFollowTickMsg fires after the 75ms M6 split-mode debounce
 // window so a burst of cursor moves coalesces into one detail fetch.

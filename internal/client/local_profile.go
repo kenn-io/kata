@@ -166,10 +166,11 @@ func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (Resolve
 	if err := safefileio.ValidatePrivateDir(resolved.LocalProfile.DataDir); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return resolved, err
 	}
-	found, err := discoverForEnsure(ctx, resolved.LocalProfile.DataDir)
+	found, release, err := discoverForStart(ctx, resolved.LocalProfile.DataDir)
 	if err != nil {
 		return resolved, err
 	}
+	defer release()
 	if found.Outcome != daemonScanNone {
 		resolved = resolved.WithRunning(runningDaemonForLive(found.Daemon))
 		resolved.UnixSocket = found.Daemon.UnixSocket
@@ -181,6 +182,18 @@ func ensureLocalProfile(ctx context.Context, selection DaemonSelection) (Resolve
 		}
 		if err := refuseDaemonDowngrade(found.Daemon.Info); err != nil {
 			return resolved, err
+		}
+		if canRestartLocalDaemon(found.Daemon.Record) {
+			ns, err := daemonruntime.NewNamespaceForHome(profile.Home, profile.StorageID)
+			if err != nil {
+				return resolved, err
+			}
+			running, err := restartLocalDaemon(ctx, ns, found.Daemon.Record)
+			if err != nil {
+				return resolved, err
+			}
+			resolved = resolved.WithRunning(running)
+			return resolved, verifyLocalProfileInstance(ctx, resolved)
 		}
 		if err := stopRunningDaemonsForEnsure(ctx, resolved.LocalProfile.DataDir, profile.StorageID); err != nil {
 			return resolved, err

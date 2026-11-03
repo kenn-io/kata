@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-10-31
+last_edited: 2026-11-03
 ---
 
 # Model Context Protocol server
@@ -38,6 +38,17 @@ With the default stdio transport, JSON-RPC uses stdin and stdout. Kata writes
 no status text or logs to stdout. The actor is fixed when the process starts
 and uses the normal precedence: `--as`, `KATA_AUTHOR`, `USER`, Git `user.name`,
 then `anonymous`.
+
+### Server identity (unreleased)
+
+On `main`, MCP clients receive Kata's website and icon in server metadata.
+The icon is an embedded PNG data URI, so stdio and HTTP clients can load it
+without an external request. Whether it appears depends on the client.
+
+The standalone HTTP listener and the daemon's enabled MCP mount also serve
+the same PNG at `/icon.png` and `/favicon.ico`. These public image routes
+accept GET and HEAD without a bearer token. Listener Host validation still
+applies, and `/mcp` still requires its configured MCP bearer.
 
 ### Discover running HTTP listeners
 
@@ -286,7 +297,7 @@ model context at startup.
 | `kata.load_teams` | `kata.teams`, `kata.team_create`, `kata.team_show`, `kata.team_delete`, `kata.team_member_set`, `kata.project_access_show`, `kata.project_access_set` with the same explicit daemon-wide administration capability |
 | `kata.load_tokens` | `kata.tokens`, `kata.token_create`, `kata.token_revoke` when `--enable-token-admin` is set in daemon-wide mode |
 | `kata.load_system` | `kata.system` |
-| `kata.load_federation` | `kata.federation_bridge_connect`, `kata.federation_bridge_status`, `kata.federation_bridge_disconnect`, `kata.federation_status`, `kata.federation_enrollment_revoke`, `kata.federation_rebind`, `kata.federation_leave`, `kata.federation_quarantine`, `kata.federation_root_key_repin` |
+| `kata.load_federation` | `kata.federation_bridge_connect`, `kata.federation_bridge_status`, `kata.federation_bridge_disconnect`, `kata.federation_status`, `kata.federation_enrollment_revoke`, `kata.federation_spoke_name`, `kata.federation_rebind`, `kata.federation_leave`, `kata.federation_quarantine`, `kata.federation_root_key_repin` |
 | `kata.load_sync` | `kata.sync_status`, `kata.sync_update`, `kata.sync_once` |
 | `kata.load_recurrence` | `kata.recurrences`, `kata.recurrence_update`, `kata.recurrence_delete` |
 | `kata.load_activity` | `kata.digest`, `kata.events` |
@@ -584,8 +595,15 @@ optional `previous_key_file`, and optional `strand_relays`, and calls the
 [root key repin endpoint](../operations/federation.md#root-signing-key). It
 requires `--all` and daemon-owner authority at the API.
 
-`kata.federation_status` lists secret-free enrollment records, and
+`kata.federation_status` lists secret-free enrollment records, including each
+instance's hub-local `spoke_name` when set, and
 `kata.federation_enrollment_revoke` can revoke one.
+
+`kata.federation_spoke_name` accepts `spoke_instance_uid` and either `name` or
+`clear: true`, and sets or clears that instance's
+[hub-local name](../operations/federation.md#operator-commands). A name belongs
+to the instance across every project, so the tool requires `--all` and
+daemon-owner authority at the API.
 
 Enabling issue synchronization selects which external repository the daemon's
 configured GitHub credentials read, so `kata.sync_update` with

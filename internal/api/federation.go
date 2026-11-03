@@ -204,6 +204,7 @@ type FederationViolationSummary struct {
 // credential for one spoke.
 type CreateFederationEnrollmentRequest struct {
 	Body struct {
+		SpokeName                    string                  `json:"spoke_name,omitempty"`
 		HubURL                       string                  `json:"hub_url,omitempty"`
 		AllowInsecure                bool                    `json:"allow_insecure,omitempty,omitzero"`
 		SpokeInstanceUID             string                  `json:"spoke_instance_uid"`
@@ -296,6 +297,7 @@ type RelayAckResponse struct {
 // FederationEnrollmentOut is the API-owned enrollment representation. It
 // deliberately omits token_hash; Token is populated only on creation.
 type FederationEnrollmentOut struct {
+	SpokeName        string                      `json:"spoke_name,omitempty"`
 	ID               int64                       `json:"id"`
 	SpokeInstanceUID string                      `json:"spoke_instance_uid"`
 	ProjectID        *int64                      `json:"project_id"`
@@ -759,3 +761,25 @@ type FederationEmbeddingArtifactStatus struct {
 	State    string `json:"state"`
 	Reason   string `json:"reason,omitempty"`
 }
+
+// SetFederationSpokeNameRequest changes a hub-local label for an enrolled instance.
+type SetFederationSpokeNameRequest struct {
+	SpokeInstanceUID string `path:"spoke_instance_uid"`
+	Body             struct {
+		Name string `json:"name" minLength:"1" doc:"Lowercase spoke name: a letter, then up to 31 lowercase letters, digits or hyphens."`
+	}
+}
+
+// ClearFederationSpokeNameRequest removes an enrolled instance's hub-local label.
+type ClearFederationSpokeNameRequest struct {
+	SpokeInstanceUID string `path:"spoke_instance_uid"`
+}
+
+// FederationSpokeNameOut confirms the current label without exposing a credential.
+type FederationSpokeNameOut struct {
+	SpokeInstanceUID string `json:"spoke_instance_uid"`
+	SpokeName        string `json:"spoke_name,omitempty"`
+}
+
+// SetFederationSpokeNameResponse wraps the updated label.
+type SetFederationSpokeNameResponse struct{ Body FederationSpokeNameOut }

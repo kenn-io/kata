@@ -427,7 +427,7 @@ func stopStartupFixture(t *testing.T, home string) {
 		return
 	}
 	// Runs from t.Cleanup, after t.Context() is canceled.
-	if err := waitForDaemonProcesses(context.WithoutCancel(t.Context()), []int{pid}, 5*time.Second); err != nil {
+	if err := waitForDaemonProcesses(context.WithoutCancel(t.Context()), []int{pid}, 5*time.Second, kitdaemon.ProcessAlive); err != nil {
 		t.Errorf("wait for detached cutover fixture process %d: %v", pid, err)
 	}
 }

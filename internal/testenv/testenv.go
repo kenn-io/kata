@@ -20,6 +20,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/testfix"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -116,7 +117,7 @@ func New(t *testing.T, opts ...Option) *Env {
 	t.Setenv("KATA_DB", filepath.Join(home, "kata.db"))
 
 	ctx := t.Context()
-	d, err := sqlitestore.Open(ctx, filepath.Join(home, "kata.db"))
+	d, err := testfix.OpenSQLite(ctx, filepath.Join(home, "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
 
