@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"fmt"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -131,4 +134,134 @@ func TestPulledMaterializationRetainsUntouchedLinkEndpoints(t *testing.T) {
 	full, err := d.LinksByIssue(ctx, source.ID)
 	require.NoError(t, err)
 	require.Equal(t, full, links)
+}
+
+func TestPulledMaterializationReconcilesCommentIdentityAndReplyFields(t *testing.T) {
+	ctx := t.Context()
+	origin, err := Open(ctx, filepath.Join(t.TempDir(), "origin.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, origin.Close()) })
+	target, err := Open(ctx, filepath.Join(t.TempDir(), "hub.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, target.Close()) })
+
+	originProject, err := origin.CreateProject(ctx, "origin-project")
+	require.NoError(t, err)
+	originIssue, _, err := origin.CreateIssue(ctx, db.CreateIssueParams{ProjectID: originProject.ID, Title: "Task", Author: "tester"})
+	require.NoError(t, err)
+	originTarget, _, err := origin.CreateComment(ctx, db.CreateCommentParams{IssueID: originIssue.ID, Author: "tester", Body: "Target"})
+	require.NoError(t, err)
+	originReply, _, err := origin.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: originIssue.ID, Author: "tester", Body: "Reply", ReplyToUID: originTarget.UID, ReplyKind: "confirm",
+	})
+	require.NoError(t, err)
+	originKindReply, _, err := origin.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: originIssue.ID, Author: "tester", Body: "Reply kind", ReplyToUID: originTarget.UID, ReplyKind: "reply",
+	})
+	require.NoError(t, err)
+	originEditedReply, _, err := origin.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: originIssue.ID, Author: "tester", Body: "Edited reply", ReplyToUID: originTarget.UID, ReplyKind: "reply",
+	})
+	require.NoError(t, err)
+
+	var imported []db.ImportRecord
+	for record, err := range origin.ExportProjects(ctx, db.ExportFilter{ProjectID: &originProject.ID}) {
+		require.NoError(t, err)
+		exported := record
+		imported = append(imported, &exported)
+	}
+	var issueRecord *db.IssueExport
+	for record, err := range origin.ExportIssues(ctx, db.ExportFilter{ProjectID: &originProject.ID}) {
+		require.NoError(t, err)
+		exported := record
+		issueRecord = &exported
+		imported = append(imported, issueRecord)
+	}
+	require.NotNil(t, issueRecord)
+	recordsByUID := make(map[string]*db.CommentExport, 4)
+	for record, err := range origin.ExportComments(ctx, db.ExportFilter{ProjectID: &originProject.ID}) {
+		require.NoError(t, err)
+		exported := record
+		recordsByUID[record.UID] = &exported
+	}
+	targetRecord := recordsByUID[originTarget.UID]
+	replyRecord := recordsByUID[originReply.UID]
+	kindReplyRecord := recordsByUID[originKindReply.UID]
+	editedReplyRecord := recordsByUID[originEditedReply.UID]
+	require.NotNil(t, targetRecord)
+	require.NotNil(t, replyRecord)
+	require.NotNil(t, kindReplyRecord)
+	require.NotNil(t, editedReplyRecord)
+	const editedAt = "2026-10-07T11:03:00.123456789Z"
+	const staleEditedAt = "2026-10-07T10:03:00.123456789Z"
+	lowerTargetUID := strings.ToLower(targetRecord.UID)
+	targetRecord.UID = lowerTargetUID
+	replyRecord.ReplyToUID = lowerTargetUID
+	editedReplyRecord.EditedAt = editedAt
+	imported = append(imported, targetRecord, replyRecord, kindReplyRecord, editedReplyRecord)
+	require.NoError(t, target.ImportReplay(ctx, imported, db.ImportOptions{}))
+
+	project, err := target.ProjectByUID(ctx, originProject.UID)
+	require.NoError(t, err)
+	issue, err := target.IssueByUID(ctx, originIssue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	_, err = target.EnableProjectFederation(ctx, project.ID, "tester")
+	require.NoError(t, err)
+	_, err = target.ExecContext(ctx, `UPDATE comments SET reply_kind = ? WHERE id = ?`, "confirm", kindReplyRecord.ID)
+	require.NoError(t, err)
+	_, err = target.ExecContext(ctx, `UPDATE comments SET edited_at = ? WHERE id = ?`, staleEditedAt, editedReplyRecord.ID)
+	require.NoError(t, err)
+
+	targetPayload := fmt.Sprintf(
+		"{\"comment_uid\":%q,\"author\":%q,\"body\":%q,\"created_at\":%q}",
+		originTarget.UID, targetRecord.Author, targetRecord.Body, targetRecord.CreatedAt,
+	)
+	replyPayload := fmt.Sprintf(
+		"{\"comment_uid\":%q,\"author\":%q,\"body\":%q,\"created_at\":%q,\"reply_to_uid\":%q,\"reply_kind\":\"confirm\"}",
+		originReply.UID, replyRecord.Author, replyRecord.Body, replyRecord.CreatedAt, originTarget.UID,
+	)
+	kindReplyPayload := fmt.Sprintf(
+		"{\"comment_uid\":%q,\"author\":%q,\"body\":%q,\"created_at\":%q,\"reply_to_uid\":%q,\"reply_kind\":\"reply\"}",
+		originKindReply.UID, kindReplyRecord.Author, kindReplyRecord.Body, kindReplyRecord.CreatedAt, originTarget.UID,
+	)
+	editedReplyPayload := fmt.Sprintf(
+		"{\"comment_uid\":%q,\"author\":%q,\"body\":%q,\"created_at\":%q,\"reply_to_uid\":%q,\"reply_kind\":\"reply\",\"edited_at\":%q}",
+		originEditedReply.UID, editedReplyRecord.Author, editedReplyRecord.Body, editedReplyRecord.CreatedAt, originTarget.UID, editedAt,
+	)
+	snapshot := fmt.Sprintf(
+		"{\"uid\":%q,\"title\":%q,\"author\":%q,\"status\":%q,\"created_at\":%q,\"comments\":[%s,%s,%s,%s]}",
+		issueRecord.UID, issueRecord.Title, issueRecord.Author, issueRecord.Status, issueRecord.CreatedAt,
+		targetPayload, replyPayload, kindReplyPayload, editedReplyPayload,
+	)
+	event := incrementalRemoteEvent(t, project, issue.UID, "issue.snapshot", snapshot, 9_000_000_000_000)
+	_, err = target.InsertRemoteEvents(ctx, project.ID, []db.RemoteEvent{event})
+	require.NoError(t, err)
+	require.NoError(t, target.MaterializeFederatedEvents(ctx, project.ID, []string{event.EventUID}))
+
+	comments, err := target.CommentsByIssue(ctx, issue.ID)
+	require.NoError(t, err)
+	var gotTarget, gotReply, gotKindReply, gotEditedReply *db.Comment
+	for index := range comments {
+		switch comments[index].ID {
+		case targetRecord.ID:
+			gotTarget = &comments[index]
+		case replyRecord.ID:
+			gotReply = &comments[index]
+		case kindReplyRecord.ID:
+			gotKindReply = &comments[index]
+		case editedReplyRecord.ID:
+			gotEditedReply = &comments[index]
+		}
+	}
+	require.NotNil(t, gotTarget)
+	require.Equal(t, originTarget.UID, gotTarget.UID, "incremental materialization must normalize the restored target UID")
+	require.NotNil(t, gotReply)
+	require.Equal(t, originTarget.UID, gotReply.ReplyToUID, "incremental materialization must normalize the restored reply target")
+	require.Equal(t, "confirm", gotReply.ReplyKind)
+	require.NotNil(t, gotKindReply)
+	require.Equal(t, "reply", gotKindReply.ReplyKind, "incremental materialization must restore changed reply kinds")
+	require.NotNil(t, gotEditedReply)
+	require.Equal(t, "reply", gotEditedReply.ReplyKind)
+	require.NotNil(t, gotEditedReply.EditedAt)
+	require.Equal(t, editedAt, gotEditedReply.EditedAt.UTC().Format(time.RFC3339Nano), "incremental materialization must restore changed edit timestamps")
 }

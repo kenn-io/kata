@@ -780,6 +780,9 @@ func reconcileFederatedComments(
 				if err := normalizeFederatedPendingCommentUIDTx(ctx, tx, projectID, row.uid, comment.UID); err != nil {
 					return err
 				}
+				if err := normalizeFederatedCommentReplyTargetsTx(ctx, tx, row.uid, comment.UID); err != nil {
+					return err
+				}
 				continue
 			}
 			_, err = tx.ExecContext(ctx, `UPDATE comments SET uid=$1,issue_id=$2,author=$3,body=$4,created_at=$5,teammate=NULLIF($6, ''),reply_to_uid=NULLIF($7, ''),reply_kind=NULLIF($8, ''),edited_at=NULLIF($9, '')
@@ -789,6 +792,9 @@ WHERE id=$10`, comment.UID, issueID, nonEmptyFederationAuthor(comment.Author), c
 				return mapSQLError(err, nil)
 			}
 			if err := normalizeFederatedPendingCommentUIDTx(ctx, tx, projectID, row.uid, comment.UID); err != nil {
+				return err
+			}
+			if err := normalizeFederatedCommentReplyTargetsTx(ctx, tx, row.uid, comment.UID); err != nil {
 				return err
 			}
 			continue
@@ -810,6 +816,15 @@ func normalizeFederatedPendingCommentUIDTx(ctx context.Context, tx *sql.Tx, proj
 	}
 	_, err := tx.ExecContext(ctx, `UPDATE external_root_bindings SET pending_comment_uid=$1
 WHERE project_id=$2 AND pending_comment_uid=$3`, newUID, projectID, oldUID)
+	return mapSQLError(err, nil)
+}
+
+func normalizeFederatedCommentReplyTargetsTx(ctx context.Context, tx *sql.Tx, oldUID, newUID string) error {
+	if oldUID == "" || oldUID == newUID {
+		return nil
+	}
+	// Replies can stay in a source project after their target issue moves.
+	_, err := tx.ExecContext(ctx, "UPDATE comments SET reply_to_uid = $1 WHERE reply_to_uid = $2", newUID, oldUID)
 	return mapSQLError(err, nil)
 }
 

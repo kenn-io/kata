@@ -2136,6 +2136,9 @@ func reconcileFederatedCommentsFromRows(ctx context.Context, tx *sql.Tx, project
 				if err := normalizeFederatedPendingCommentUIDTx(ctx, tx, projectID, row.uid, comment.UID); err != nil {
 					return err
 				}
+				if err := normalizeFederatedCommentReplyTargetsTx(ctx, tx, row.uid, comment.UID); err != nil {
+					return err
+				}
 				continue
 			}
 			if row.uid == comment.UID && row.issueID == issueID && row.author == nonEmptyAuthor(comment.Author) &&
@@ -2150,6 +2153,9 @@ func reconcileFederatedCommentsFromRows(ctx context.Context, tx *sql.Tx, project
 				return fmt.Errorf("update federated comment %s: %w", uid, err)
 			}
 			if err := normalizeFederatedPendingCommentUIDTx(ctx, tx, projectID, row.uid, comment.UID); err != nil {
+				return err
+			}
+			if err := normalizeFederatedCommentReplyTargetsTx(ctx, tx, row.uid, comment.UID); err != nil {
 				return err
 			}
 			continue
@@ -2171,6 +2177,17 @@ func normalizeFederatedPendingCommentUIDTx(ctx context.Context, tx *sql.Tx, proj
 WHERE project_id = ? AND pending_comment_uid = ?`, newUID, projectID, oldUID)
 	if err != nil {
 		return fmt.Errorf("normalize pending external comment UID: %w", err)
+	}
+	return nil
+}
+
+func normalizeFederatedCommentReplyTargetsTx(ctx context.Context, tx *sql.Tx, oldUID, newUID string) error {
+	if oldUID == "" || oldUID == newUID {
+		return nil
+	}
+	// Replies can stay in a source project after their target issue moves.
+	if _, err := tx.ExecContext(ctx, "UPDATE comments SET reply_to_uid = ? WHERE reply_to_uid = ?", newUID, oldUID); err != nil {
+		return fmt.Errorf("normalize federated comment reply targets: %w", err)
 	}
 	return nil
 }

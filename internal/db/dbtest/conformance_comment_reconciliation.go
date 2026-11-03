@@ -2,6 +2,7 @@ package dbtest
 
 import (
 	"encoding/json/jsontext"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -220,5 +221,104 @@ func checkMixedCaseRestoredCommentReconciliation(t *testing.T, store db.Storage,
 		require.NotNil(t, reply)
 		require.Equal(t, originTarget.UID, reply.ReplyToUID)
 	}
+	return nil
+}
+
+func checkFederatedCommentUIDNormalizationPreservesMovedReplies(t *testing.T, store db.Storage, backend Backend) error {
+	ctx := t.Context()
+	origin := backend.Open(t)
+	t.Cleanup(func() { require.NoError(t, origin.Close()) })
+	originProject, err := origin.CreateProject(ctx, "source-project")
+	require.NoError(t, err)
+	targetIssue, _, err := origin.CreateIssue(ctx, db.CreateIssueParams{ProjectID: originProject.ID, Title: "Target", Author: "worker"})
+	require.NoError(t, err)
+	replyIssue, _, err := origin.CreateIssue(ctx, db.CreateIssueParams{ProjectID: originProject.ID, Title: "Reply", Author: "worker"})
+	require.NoError(t, err)
+	targetComment, _, err := origin.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: targetIssue.ID, Author: "worker", Body: "Target comment",
+	})
+	require.NoError(t, err)
+	replyComment, _, err := origin.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: replyIssue.ID, Author: "worker", Body: "Cross-issue reply", ReplyToUID: targetComment.UID, ReplyKind: "reply",
+	})
+	require.NoError(t, err)
+
+	var imported []db.ImportRecord
+	for record, err := range origin.ExportProjects(ctx, db.ExportFilter{ProjectID: &originProject.ID}) {
+		require.NoError(t, err)
+		exported := record
+		imported = append(imported, &exported)
+	}
+	for record, err := range origin.ExportIssues(ctx, db.ExportFilter{ProjectID: &originProject.ID}) {
+		require.NoError(t, err)
+		exported := record
+		imported = append(imported, &exported)
+	}
+	recordsByUID := make(map[string]*db.CommentExport, 2)
+	for record, err := range origin.ExportComments(ctx, db.ExportFilter{ProjectID: &originProject.ID}) {
+		require.NoError(t, err)
+		exported := record
+		recordsByUID[record.UID] = &exported
+	}
+	targetRecord := recordsByUID[targetComment.UID]
+	replyRecord := recordsByUID[replyComment.UID]
+	require.NotNil(t, targetRecord)
+	require.NotNil(t, replyRecord)
+	lowerTargetUID := strings.ToLower(targetRecord.UID)
+	targetRecord.UID = lowerTargetUID
+	replyRecord.ReplyToUID = lowerTargetUID
+	imported = append(imported, targetRecord, replyRecord)
+	require.NoError(t, store.ImportReplay(ctx, imported, db.ImportOptions{}))
+
+	project, err := store.ProjectByUID(ctx, originProject.UID)
+	require.NoError(t, err)
+	sourceReplyIssue, err := store.IssueByUID(ctx, replyIssue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	movedTargetIssue, err := store.IssueByUID(ctx, targetIssue.UID, db.IncludeDeletedYes)
+	require.NoError(t, err)
+	destination, err := store.CreateProject(ctx, "destination-project")
+	require.NoError(t, err)
+	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: movedTargetIssue.ID, FromProjectID: project.ID, ToProjectID: destination.ID,
+		IfMatchRev: movedTargetIssue.Revision, Actor: "worker",
+	})
+	require.NoError(t, err)
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: destination.ID, Role: db.FederationRoleHub,
+		HubProjectID: destination.ID, HubProjectUID: destination.UID, Enabled: true,
+	})
+	require.NoError(t, err)
+
+	issueUID := targetIssue.UID
+	payload := jsontext.Value(fmt.Sprintf(
+		"{\"uid\":%q,\"title\":%q,\"author\":%q,\"status\":%q,\"created_at\":%q,\"comments\":[{\"comment_uid\":%q,\"author\":%q,\"body\":%q,\"created_at\":%q}]}",
+		issueUID, "Target", "worker", "open", movedTargetIssue.CreatedAt.UTC().Format(time.RFC3339Nano),
+		targetComment.UID, targetRecord.Author, targetRecord.Body, targetRecord.CreatedAt,
+	))
+	snapshot := newRemoteEvent(t, destination, &issueUID, "issue.snapshot", "worker", "01DDDDDDDDDDDDDDDDDDDDDDDD", time.Now().UnixMilli(), payload)
+	_, err = store.InsertRemoteEvent(ctx, destination.ID, snapshot)
+	require.NoError(t, err)
+	require.NoError(t, store.MaterializeFederatedProject(ctx, destination.ID))
+
+	movedComments, err := store.CommentsByIssue(ctx, movedTargetIssue.ID)
+	require.NoError(t, err)
+	require.Len(t, movedComments, 1)
+	require.Equal(t, targetRecord.ID, movedComments[0].ID)
+	require.Equal(t, targetComment.UID, movedComments[0].UID)
+	replies, err := store.CommentsByIssue(ctx, sourceReplyIssue.ID)
+	require.NoError(t, err)
+	require.Len(t, replies, 1)
+	require.Equal(t, replyRecord.ID, replies[0].ID)
+	require.Equal(t, targetComment.UID, replies[0].ReplyToUID,
+		"normalizing a moved target must update replies in its former project")
+
+	graph, err := store.ReadCommentGraph(ctx, db.CommentGraphQuery{ProjectID: project.ID, SelectedIssueID: sourceReplyIssue.ID})
+	require.NoError(t, err)
+	target, ok := graph.Targets[targetComment.UID]
+	require.True(t, ok)
+	require.Equal(t, "moved", target.Status)
+	require.NotNil(t, target.Record)
+	require.Equal(t, destination.ID, target.Record.ProjectID)
+	require.Equal(t, targetRecord.ID, target.Record.Comment.ID)
 	return nil
 }

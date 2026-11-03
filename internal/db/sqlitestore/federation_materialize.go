@@ -224,8 +224,9 @@ func (m *federationMaterialization) prepareRows(ctx context.Context, tx *sql.Tx,
 			continue
 		}
 		issueID, exists := m.issueIDs[comment.IssueUID]
-		if exists && row.issueID == issueID && row.author == nonEmptyAuthor(comment.Author) && row.body == comment.Body &&
-			row.teammate == comment.Teammate && row.createdAt == nonEmptyTime(comment.CreatedAt) {
+		if exists && row.uid == comment.UID && row.issueID == issueID && row.author == nonEmptyAuthor(comment.Author) && row.body == comment.Body &&
+			row.teammate == comment.Teammate && row.createdAt == nonEmptyTime(comment.CreatedAt) &&
+			row.replyTo == comment.ReplyToUID && row.replyKind == comment.ReplyKind && row.editedAt == comment.EditedAt {
 			delete(m.projection.Comments, uid)
 			delete(comments, uid)
 		}
