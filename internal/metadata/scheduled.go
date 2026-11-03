@@ -29,10 +29,11 @@ type scheduleMetadata struct {
 
 // ScheduleDueCutoff returns a byte-order upper bound for dates that may be due.
 // A planning value sorting after it cannot be due at now in any timezone.
-// The UTC+24h cutoff admits future wall-clock values up to 36 hours before
-// they're due in the westernmost zone, UTC-12. DST gaps only delay a value.
+// The cutoff is UTC now plus 24 hours minus one second, so the inclusive
+// comparison excludes values exactly 36 hours away in UTC-12, the westernmost
+// zone. DST gaps only delay a value.
 func ScheduleDueCutoff(now time.Time) string {
-	return now.UTC().Add(24 * time.Hour).Format("2006-01-02T15:04:05")
+	return now.UTC().Add(24*time.Hour - time.Second).Format("2006-01-02T15:04:05")
 }
 
 // ScheduledOnDue reports whether metadata's scheduled_on gate has opened.

@@ -275,6 +275,19 @@ func TestCalendarDateIgnoresAnUnreadableSiblingField(t *testing.T) {
 }
 
 func TestScheduleDueCutoffCoversEveryZone(t *testing.T) {
+	t.Run("36-hour boundary", func(t *testing.T) {
+		now := time.Date(2026, 9, 16, 0, 0, 0, 0, time.UTC)
+		cutoff := ScheduleDueCutoff(now)
+		for _, value := range []string{"2026-09-17", "2026-09-17T00:00", "2026-09-17T00:00:00"} {
+			raw, err := json.Marshal(map[string]string{"scheduled_on": value, "timezone": "Etc/GMT+12"})
+			require.NoError(t, err)
+			_, _, at, present, err := ScheduleFieldInstant(string(raw), "scheduled_on", "UTC")
+			require.NoError(t, err)
+			require.True(t, present)
+			require.Equal(t, now.Add(36*time.Hour), at)
+			assert.Greater(t, value, cutoff, "issues dated exactly 36 hours out must be excluded")
+		}
+	})
 	for _, zone := range []string{"UTC", "Pacific/Kiritimati", "Etc/GMT-14", "America/Los_Angeles"} {
 		t.Run(zone, func(t *testing.T) {
 			location, err := time.LoadLocation(zone)

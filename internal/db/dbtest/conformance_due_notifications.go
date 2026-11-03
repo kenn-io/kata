@@ -436,7 +436,7 @@ func checkDueNotificationCandidates(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "candidate-project")
 	require.NoError(t, err)
-	now := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 9, 16, 0, 0, 0, 0, time.UTC)
 	notificationKey := notification.MetadataKey("worker-a")
 	automatic, err := notification.MarshalSystem(notification.Scheduled, "2020-01-01")
 	require.NoError(t, err)
@@ -448,8 +448,11 @@ func checkDueNotificationCandidates(t *testing.T, store db.Storage) error {
 		{"future local time", `{"scheduled_on":"2099-01-01T09:00"}`, false, false, false},
 		{"future instant", `{"scheduled_on":"2099-01-01T09:00:00Z"}`, false, false, false},
 		{"future deadline", `{"deadline_on":"2099-01-01"}`, false, false, false},
+		{"36-hour date boundary", `{"scheduled_on":"2026-09-17","timezone":"Etc/GMT+12"}`, false, false, false},
+		{"36-hour minute boundary", `{"scheduled_on":"2026-09-17T00:00","timezone":"Etc/GMT+12"}`, false, false, false},
+		{"36-hour second boundary", `{"scheduled_on":"2026-09-17T00:00:00","timezone":"Etc/GMT+12"}`, false, false, false},
 		{"manual notification", fmt.Sprintf(`{%q:{"from":"reviewer","message":"Please review"}}`, notificationKey), false, false, false},
-		{"due east of UTC", `{"scheduled_on":"2026-09-17","timezone":"Pacific/Kiritimati"}`, true, false, false},
+		{"due east of UTC", `{"scheduled_on":"2026-09-16T14:00","timezone":"Pacific/Kiritimati"}`, true, false, false},
 		{"stale automatic notification", fmt.Sprintf(`{"scheduled_on":"2099-01-01",%q:%s}`, notificationKey, automatic), true, false, true},
 		{"delivered overdue", `{"scheduled_on":"2020-01-01"}`, true, true, false},
 	} {
