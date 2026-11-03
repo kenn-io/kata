@@ -276,6 +276,22 @@ func (c *undoClient) SetDates(ctx context.Context, projectID int64, ref string, 
 	})
 }
 
+// MoveIssue previews through to the daemon untouched; a real move is a
+// boundary, because the issue's short id changes and earlier edits can no
+// longer be written back to it.
+func (c *undoClient) MoveIssue(ctx context.Context, projectID int64, ref string, in MoveInput) (*MutationResp, error) {
+	mover, ok := c.KataAPI.(moveAPI)
+	if !ok {
+		return nil, errors.New("connected client cannot move issues")
+	}
+	if in.DryRun {
+		return mover.MoveIssue(ctx, projectID, ref, in)
+	}
+	return c.boundaryWrite(ctx, "moving an issue cannot be undone", func() (*MutationResp, error) {
+		return mover.MoveIssue(ctx, projectID, ref, in)
+	})
+}
+
 func (c *undoClient) CloseWithEvidence(ctx context.Context, projectID int64, ref string, in CloseInput) (*MutationResp, error) {
 	closer, ok := c.KataAPI.(evidenceCloseAPI)
 	if !ok {

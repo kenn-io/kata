@@ -213,6 +213,7 @@ type Model struct {
 	undoCloseEntryID         uint64
 	reopenPrompt             *reopenPrompt
 	reopenLookupPending      bool
+	move                     moveState
 	mutationEpoch            uint64
 }
 
@@ -485,6 +486,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.staleConnMsg(mut.connGen) {
 			return m, nil
 		}
+		if mut.origin == "move" {
+			return m.handleMoveDone(mut)
+		}
 		return m.routeMutation(mut)
 	}
 	if done, ok := msg.(undoDoneMsg); ok {
@@ -492,6 +496,12 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if backlog, ok := msg.(reopenBacklogMsg); ok {
 		return m.handleReopenBacklog(backlog)
+	}
+	if projects, ok := msg.(moveProjectsMsg); ok {
+		return m.handleMoveProjects(projects), nil
+	}
+	if preview, ok := msg.(movePreviewMsg); ok {
+		return m.handleMovePreview(preview), nil
 	}
 	// Editor returns from a centered form's ctrl+e handoff land here
 	// before dispatchToView so the writeback can hit m.input. formGen=0
@@ -885,6 +895,9 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 			}
 			m.input.err = ""
 		}
+		if m.modal == modalMoveIssue {
+			return m.pasteIntoMoveFilter(msg), nil, true
+		}
 		if m.modal == modalNone && m.input.kind != inputNone {
 			m.input, _ = m.input.delegateToField(msg)
 			if m.input.kind.isCommandBar() {
@@ -966,6 +979,9 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 			return next, cmd, true
 		}
 		if next, cmd, ok := m.routeDatesKey(msg); ok {
+			return next, cmd, true
+		}
+		if next, cmd, ok := m.routeMoveKey(msg); ok {
 			return next, cmd, true
 		}
 		if next, cmd, ok := m.routeReopenKey(msg); ok {
@@ -1055,7 +1071,7 @@ func (m Model) mutationForKey(msg tea.KeyPressMsg) (withinSubtree, mutation bool
 	switch {
 	case m.keymap.NewIssue.matches(msg):
 		return false, true
-	case m.keymap.Close.matches(msg), m.keymap.Reopen.matches(msg), m.keymap.SetDates.matches(msg):
+	case m.keymap.Close.matches(msg), m.keymap.Reopen.matches(msg), m.keymap.SetDates.matches(msg), m.keymap.MoveIssue.matches(msg):
 		return true, true
 	case !m.detailIsActive():
 		return false, false
@@ -3195,6 +3211,8 @@ func (m Model) routeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			m.modal = modalNone
 			return m, nil
 		}
+	case modalMoveIssue:
+		return m.routeMoveModalKey(msg)
 	case modalReopenBacklog:
 		switch msg.String() {
 		case "y", "Y":
@@ -3691,7 +3709,9 @@ func (m Model) overlayInputAndModal(body string) string {
 		form := renderCenteredForm(m.input, m.width, m.height, now)
 		body = overlayModal(body, form, m.width, m.height)
 	}
-	if m.modal != modalNone {
+	if m.modal == modalMoveIssue {
+		body = overlayModal(body, renderMoveModal(m.move, m.width, m.height), m.width, m.height)
+	} else if m.modal != modalNone {
 		body = overlayModal(body, renderConfirmModal(m.modal, m.reopenPrompt), m.width, m.height)
 	}
 	return body

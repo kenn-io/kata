@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,6 +9,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Move an issue to another project from `kata tui` with `M`, in the list or the
+  detail. Pick a project (same-named ones show their area), read the daemon's
+  preview of the subtree that would move, or its refusal, then press `Enter`
+  again to move it. The move is guarded on the previewed revision, previews
+  again if the issue changed, and shows the new `project#id`. See the
+  [CLI reference](reference/cli.md#daemon-and-diagnostics).
 - Load the web UI's issue list and graph on SQLite and PostgreSQL stores with
   tens of thousands of issues without exceeding SQL parameter limits.
 - See when a cron job runs next: the `kata tui` Jobs tab detail lists the next

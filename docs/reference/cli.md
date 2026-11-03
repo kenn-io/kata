@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-02
+last_edited: 2026-11-04
 ---
 
 # CLI reference
@@ -2006,7 +2006,8 @@ requires evidence.
 There is no redo; repeat the action manually if you undo by mistake. Issue edits
 run one at a time; quick successive edits wait for the current edit to finish.
 
-Creating an issue or comment, making a timed assignment or owner edit involving
+Creating an issue or comment, moving an issue to another project, making a
+timed assignment or owner edit involving
 an expiry, changing the status of a recurring issue, closing an issue with a
 live federation lease, or reopening an issue closed for a reason other than
 `done` clears the undo history. Switching daemons also clears it.
@@ -2046,6 +2047,24 @@ since the form opened, nothing is written; the form stays open and shows the
 current dates so you can edit them again. The detail properties show both
 dates once either is set, and `u` writes the previous dates back under the
 same revision check.
+
+In the issue list or detail, press `M` to move the selected issue to another
+project. A picker lists the daemon's projects except the issue's own, the Inbox
+project, and archived ones; typing filters by name or by the text beside it.
+Projects that share a name are told apart by their area, or by their UID when
+another of them has the same area. `Enter` on a project sends a dry run, so
+nothing is written, and shows what kata would do: whether it is a subtree move
+(the issue and its active descendants, listed one per line) or a single issue,
+or the daemon's refusal in its own words, such as a recurrence-pinned issue or
+an archived or federated project. `Esc` returns to the picker. A second `Enter`
+moves, guarded by `If-Match` on the revision the preview read, like
+`kata move`. If the issue changed since the preview, nothing is moved and the
+form previews again at the current revision. A preview needs daemon API 0.35.0
+or newer, because older daemons move only the selected issue; the form says so
+instead of previewing. After a move the selection goes to the neighboring row,
+an open detail closes, and a notice names the issue's new `project#id`. A move
+changes the short id, so it clears the undo history. The key follows the same
+permission check as the other edits.
 
 In the issue list, `v` toggles between nested and flat views: nested groups
 children under parents, while flat shows matching issues as peers in list

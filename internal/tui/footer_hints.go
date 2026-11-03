@@ -183,6 +183,7 @@ func (lm listModel) queueHelpRows() [][]helplayout.HelpItem {
 		helplayout.HelpItem{Key: "c", Description: "clear"},
 		helplayout.HelpItem{Key: "x", Description: "close"},
 		helplayout.HelpItem{Key: "d", Description: "dates"},
+		helplayout.HelpItem{Key: "M", Description: "move"},
 		helplayout.HelpItem{Key: "!", Description: "priority"},
 		helplayout.HelpItem{Key: "D", Description: "daemons"},
 		helplayout.HelpItem{Key: "F", Description: "federation"},
@@ -218,6 +219,7 @@ func (dm detailModel) detailHelpRows() [][]helplayout.HelpItem {
 		{Key: "x", Description: "close"},
 		{Key: "r", Description: "reopen"},
 		{Key: "d", Description: "dates"},
+		{Key: "M", Description: "move"},
 		{Key: "p", Description: "parent"},
 		{Key: "b", Description: "block"},
 		{Key: "l", Description: "related"},
@@ -262,6 +264,12 @@ func modalHelpRows(kind modalKind) [][]helplayout.HelpItem {
 		return [][]helplayout.HelpItem{{
 			{Key: "y", Description: "reopen"},
 			{Key: "n/esc", Description: "cancel"},
+		}}
+	case modalMoveIssue:
+		return [][]helplayout.HelpItem{{
+			{Key: "↑↓", Description: "choose"},
+			{Key: "enter", Description: "preview, then move"},
+			{Key: "esc", Description: "back"},
 		}}
 	case modalDiscardComment, modalDiscardNewIssue, modalDiscardCronJob:
 		return [][]helplayout.HelpItem{{

@@ -1,0 +1,527 @@
+package tui
+
+import (
+	"context"
+	"encoding/json/v2"
+	"errors"
+	"fmt"
+	"slices"
+	"strings"
+	"time"
+
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"go.kenn.io/kit/tui/splitlayout"
+)
+
+// moveAPI moves an issue and its descendants to another project, or previews
+// the move. A client that cannot is refused with a message when M is pressed.
+type moveAPI interface {
+	MoveIssue(ctx context.Context, projectID int64, ref string, in MoveInput) (*MutationResp, error)
+}
+
+// moveChoice is one project the picker offers; label tells same-named
+// projects apart.
+type moveChoice struct {
+	project ProjectSummary
+	label   string
+}
+
+// movePreview is what the daemon said a move would do. revision is the one
+// the daemon read, which the move is guarded on.
+type movePreview struct {
+	revision    int64
+	uids        []string
+	descendants []string
+}
+
+// moveState is the Move form behind `M`: first a project picker, then the
+// daemon's preview of moving there. It is a value on Model, replaced whole on
+// every change, so a render never sees a half-updated form.
+type moveState struct {
+	target   formTarget
+	formGen  int64
+	issueUID string
+	shortID  string
+	// ownProjectID and ownProjectUID name the issue's project, which is never
+	// a destination.
+	ownProjectID  int64
+	ownProjectUID string
+
+	// seq numbers the request whose answer the form waits for; an answer to
+	// an older one is dropped.
+	seq     int
+	sending bool
+	loading bool
+
+	filter   textinput.Model
+	projects []ProjectSummary
+	contexts map[string]string
+	names    map[int64]string
+	cursor   int
+
+	chosen  ProjectSummary
+	preview *movePreview
+	err     string
+	note    string
+}
+
+// closeMoveForm drops an open Move form, as when the daemon's answer about
+// what this principal may write takes the permission away.
+func (m Model) closeMoveForm() Model {
+	if m.modal == modalMoveIssue {
+		m.move, m.modal = moveState{}, modalNone
+	}
+	return m
+}
+
+// moveProjectsMsg carries the projects the picker offers.
+type moveProjectsMsg struct {
+	connGen  uint64
+	formGen  int64
+	projects []ProjectSummary
+	err      error
+}
+
+// movePreviewMsg is the daemon's answer to a dry run.
+type movePreviewMsg struct {
+	connGen uint64
+	formGen int64
+	seq     int
+	resp    *MutationResp
+	err     error
+}
+
+func (m Model) routeMoveKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
+	if !m.keymap.MoveIssue.matches(msg) {
+		return m, nil, false
+	}
+	// A pending undo or reopen owns the issue until it answers.
+	if m.undoInFlight || m.reopenLookupPending {
+		return m, nil, true
+	}
+	target, issue, ok := m.activeIssueTarget()
+	if !ok {
+		return m, nil, true
+	}
+	if _, ok := m.api.(moveAPI); !ok {
+		next, cmd := m.undoNotice("this connection cannot move issues", toastError)
+		return next, cmd, true
+	}
+	target.issueUID = issue.UID
+	m.nextFormGen++
+	filter := textinput.New()
+	filter.Prompt = ""
+	filter.Placeholder = "type to filter"
+	_ = filter.Focus()
+	m.move = moveState{
+		target: target, formGen: m.nextFormGen, loading: true, filter: filter,
+		issueUID: issue.UID, shortID: issue.ShortID,
+		ownProjectID: target.projectID, ownProjectUID: issue.ProjectUID,
+	}
+	m.modal = modalMoveIssue
+	return m, m.fetchMoveProjects(), true
+}
+
+func (m Model) fetchMoveProjects() tea.Cmd {
+	apiClient, connGen, formGen := m.api, m.connGen, m.move.formGen
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		projects, err := apiClient.ListProjects(ctx)
+		return moveProjectsMsg{connGen: connGen, formGen: formGen, projects: projects, err: err}
+	}
+}
+
+func (m Model) handleMoveProjects(msg moveProjectsMsg) Model {
+	if m.staleConnMsg(msg.connGen) || m.modal != modalMoveIssue || msg.formGen != m.move.formGen {
+		return m
+	}
+	s := m.move
+	s.loading = false
+	if msg.err != nil {
+		s.err = "projects unavailable: " + sanitizeForDisplay(msg.err.Error())
+		m.move = s
+		return m
+	}
+	s.names = map[int64]string{}
+	s.projects = nil
+	for _, p := range msg.projects {
+		s.names[p.ID] = p.Name
+		own := p.ID == s.ownProjectID || (s.ownProjectUID != "" && p.UID == s.ownProjectUID)
+		if own || p.UID == "" || p.DeletedAt != nil || jsonString(p.Metadata.Role) == "inbox" {
+			continue
+		}
+		s.projects = append(s.projects, p)
+	}
+	slices.SortFunc(s.projects, func(a, b ProjectSummary) int {
+		if c := strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)); c != 0 {
+			return c
+		}
+		return strings.Compare(a.UID, b.UID)
+	})
+	s.contexts = moveDestinationContexts(s.projects)
+	m.move = s
+	return m
+}
+
+// jsonString reads a metadata value that holds a string; anything else is "".
+func jsonString(raw []byte) string {
+	var s string
+	if len(raw) == 0 || json.Unmarshal(raw, &s) != nil {
+		return ""
+	}
+	return strings.TrimSpace(s)
+}
+
+// moveDestinationContexts names what tells same-named projects apart, as the
+// web's move dialog does: the project's area when no other project of that
+// name shares it, otherwise its UID. A project with a unique name needs none.
+func moveDestinationContexts(projects []ProjectSummary) map[string]string {
+	groups := map[string][]ProjectSummary{}
+	for _, p := range projects {
+		key := strings.ToLower(strings.TrimSpace(p.Name))
+		groups[key] = append(groups[key], p)
+	}
+	contexts := map[string]string{}
+	for _, group := range groups {
+		if len(group) < 2 {
+			continue
+		}
+		areaCount := map[string]int{}
+		for _, p := range group {
+			if area := jsonString(p.Metadata.Area); area != "" {
+				areaCount[area]++
+			}
+		}
+		for _, p := range group {
+			if area := jsonString(p.Metadata.Area); area != "" && areaCount[area] == 1 {
+				contexts[p.UID] = area
+			} else {
+				contexts[p.UID] = p.UID
+			}
+		}
+	}
+	return contexts
+}
+
+// choices are the projects whose name or context contains the filter text,
+// in any case.
+func (s moveState) choices() []moveChoice {
+	query := strings.ToLower(strings.TrimSpace(s.filter.Value()))
+	var out []moveChoice
+	for _, p := range s.projects {
+		extra := s.contexts[p.UID]
+		if query != "" && !strings.Contains(strings.ToLower(p.Name), query) &&
+			!strings.Contains(strings.ToLower(extra), query) {
+			continue
+		}
+		label := p.Name
+		if extra != "" {
+			label += " · " + extra
+		}
+		out = append(out, moveChoice{project: p, label: label})
+	}
+	return out
+}
+
+// routeMoveModalKey delivers a key to the open Move form.
+func (m Model) routeMoveModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
+	s := m.move
+	key := msg.String()
+	if s.sending {
+		return m, nil
+	}
+	if s.preview != nil {
+		switch key {
+		case "esc":
+			s.preview, s.note, s.err = nil, "", ""
+			m.move = s
+		case "enter":
+			return m.dispatchMove()
+		}
+		return m, nil
+	}
+	switch key {
+	case "esc":
+		m.move, m.modal = moveState{}, modalNone
+	case "up", "ctrl+p":
+		s.cursor = max(s.cursor-1, 0)
+		m.move = s
+	case "down", "ctrl+n":
+		s.cursor = min(s.cursor+1, max(len(s.choices())-1, 0))
+		m.move = s
+	case "ctrl+u":
+		s.filter.SetValue("")
+		s.cursor, s.err = 0, ""
+		m.move = s
+	case "enter":
+		choices := s.choices()
+		if s.loading || len(choices) == 0 {
+			return m, nil
+		}
+		s.chosen = choices[min(s.cursor, len(choices)-1)].project
+		m.move = s
+		return m.dispatchMovePreview()
+	default:
+		m.move = s.filterUpdated(msg)
+	}
+	return m, nil
+}
+
+// filterUpdated feeds a key or paste to the filter and returns to the first
+// match when the text changed.
+func (s moveState) filterUpdated(msg tea.Msg) moveState {
+	before := s.filter.Value()
+	s.filter, _ = s.filter.Update(msg)
+	if s.filter.Value() != before {
+		s.cursor, s.err = 0, ""
+	}
+	return s
+}
+
+// pasteIntoMoveFilter puts pasted text into the picker's filter.
+func (m Model) pasteIntoMoveFilter(msg tea.PasteMsg) Model {
+	if m.move.sending || m.move.preview != nil {
+		return m
+	}
+	m.move = m.move.filterUpdated(msg)
+	return m
+}
+
+// dispatchMovePreview asks the daemon what moving to the chosen project would
+// do. It sends no If-Match, so the preview reads the issue as it stands now.
+func (m Model) dispatchMovePreview() (Model, tea.Cmd) {
+	s := m.move
+	s.seq++
+	s.sending, s.err = true, ""
+	m.move = s
+	apiClient, connGen, target := m.api, m.connGen, s.target
+	in := MoveInput{Actor: m.moveActor(), ToProjectUID: s.chosen.UID, DryRun: true}
+	formGen, seq := s.formGen, s.seq
+	return m, func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		mover, ok := apiClient.(moveAPI)
+		if !ok {
+			return movePreviewMsg{connGen: connGen, formGen: formGen, seq: seq,
+				err: errors.New("this connection cannot move issues")}
+		}
+		resp, err := mover.MoveIssue(ctx, target.projectID, target.issueShortID, in)
+		return movePreviewMsg{connGen: connGen, formGen: formGen, seq: seq, resp: resp, err: err}
+	}
+}
+
+func (m Model) moveActor() string {
+	if m.move.target.origin == "detail" {
+		return m.detail.actor
+	}
+	return m.list.actor
+}
+
+func (m Model) handleMovePreview(msg movePreviewMsg) Model {
+	if m.staleConnMsg(msg.connGen) || m.modal != modalMoveIssue ||
+		msg.formGen != m.move.formGen || msg.seq != m.move.seq {
+		return m
+	}
+	s := m.move
+	s.sending = false
+	if msg.err != nil {
+		s.preview = nil
+		s.err = sanitizeForDisplay(msg.err.Error())
+		m.move = s
+		return m
+	}
+	if msg.resp == nil || msg.resp.Issue == nil {
+		s.err = "the daemon's preview did not describe the move"
+		m.move = s
+		return m
+	}
+	preview := &movePreview{revision: msg.resp.Revision}
+	for _, issue := range msg.resp.Issues {
+		preview.uids = append(preview.uids, issue.UID)
+		if issue.UID == s.issueUID {
+			continue
+		}
+		ref := "#" + issue.ShortID
+		if name := s.names[issue.ProjectID]; name != "" {
+			ref = name + ref
+		}
+		preview.descendants = append(preview.descendants, sanitizeForLine(ref+" "+issue.Title))
+	}
+	s.preview = preview
+	m.move = s
+	return m
+}
+
+// dispatchMove performs the move the preview showed, guarded on the revision
+// the preview read.
+func (m Model) dispatchMove() (Model, tea.Cmd) {
+	s := m.move
+	s.sending, s.err, s.note = true, "", ""
+	m.move = s
+	apiClient, target := m.api, s.target
+	in := MoveInput{Actor: m.moveActor(), ToProjectUID: s.chosen.UID, IfMatchRevision: s.preview.revision}
+	formGen := s.formGen
+	return m, withConnGen(func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		mover, ok := apiClient.(moveAPI)
+		if !ok {
+			return mutationDoneMsg{origin: "move", kind: "move", formGen: formGen,
+				err: errors.New("this connection cannot move issues")}
+		}
+		resp, err := mover.MoveIssue(ctx, target.projectID, target.issueShortID, in)
+		return mutationDoneMsg{origin: "move", kind: "move", formGen: formGen, resp: resp, err: err}
+	}, m.connGen)
+}
+
+// handleMoveDone applies the answer to a move. A stale revision previews again
+// at the current one; any other refusal stays on the preview to be read.
+func (m Model) handleMoveDone(mut mutationDoneMsg) (Model, tea.Cmd) {
+	if m.modal != modalMoveIssue || mut.formGen != m.move.formGen {
+		return m, nil
+	}
+	s := m.move
+	switch {
+	case isRevisionConflict(mut.err):
+		s.preview = nil
+		s.note = "The issue changed since the preview; nothing was moved. Showing the current preview."
+		m.move = s
+		return m.dispatchMovePreview()
+	case mut.err != nil:
+		s.sending = false
+		s.err = "move failed: " + sanitizeForDisplay(mut.err.Error())
+		m.move = s
+		return m, nil
+	}
+	return m.finishMove(mut)
+}
+
+// finishMove closes the form after a move. The selection goes to the row beside
+// the moved issue, the detail of a moved issue closes (it does not follow the
+// issue into its new project), and the notice names the new project#id.
+func (m Model) finishMove(mut mutationDoneMsg) (Model, tea.Cmd) {
+	s := m.move
+	moved := map[string]bool{s.issueUID: true}
+	for _, uid := range s.preview.uids {
+		moved[uid] = true
+	}
+	newRef := s.chosen.Name
+	if mut.resp != nil && mut.resp.NewShortID != "" {
+		newRef += "#" + mut.resp.NewShortID
+	}
+	m.move, m.modal = moveState{}, modalNone
+	m.list = m.list.selectBeside(s.issueUID, moved)
+	m.toast = &toast{
+		text:  sanitizeForLine(fmt.Sprintf("moved #%s to %s", s.shortID, newRef)),
+		level: toastSuccess, expiresAt: m.toastNow().Add(toastNoBindingTTL),
+	}
+	cmds := []tea.Cmd{toastExpireCmd(toastNoBindingTTL), withConnGen(m.list.refetchCmd(m.api, m.scope), m.connGen)}
+	if m.detail.issue != nil && moved[m.detail.issue.UID] {
+		m.detail.cancelReads()
+		switch {
+		case m.layout == splitlayout.Split:
+			m.focus = focusList
+			var cmd tea.Cmd
+			m, cmd = m.scheduleDetailFollow()
+			cmds = append(cmds, cmd)
+		case m.view == viewDetail && m.attention.returnToAttention:
+			var cmd tea.Cmd
+			m, cmd = m.returnFromAttentionDetail()
+			cmds = append(cmds, cmd)
+		case m.view == viewDetail:
+			m.view, m.focus = viewList, focusList
+		}
+	}
+	return m, tea.Batch(cmds...)
+}
+
+// selectBeside puts the selection on the row after the issue that is not
+// moving along with it, else on the nearest such row before it.
+func (lm listModel) selectBeside(uid string, moving map[string]bool) listModel {
+	rows := lm.visibleRows()
+	at := slices.IndexFunc(rows, func(r queueRow) bool { return r.issue.UID == uid })
+	if at < 0 {
+		return lm
+	}
+	next := -1
+	for i := at + 1; i < len(rows) && next < 0; i++ {
+		if !moving[rows[i].issue.UID] {
+			next = i
+		}
+	}
+	for i := at - 1; i >= 0 && next < 0; i-- {
+		if !moving[rows[i].issue.UID] {
+			next = i
+		}
+	}
+	if next < 0 {
+		return lm
+	}
+	lm.cursor, lm.selectedUID, lm.selectedProjectID = next, rows[next].issue.UID, rows[next].issue.ProjectID
+	return lm.ensureCursorVisible(len(rows))
+}
+
+// renderMoveModal draws the project picker, or the daemon's preview once a
+// project is chosen.
+func renderMoveModal(s moveState, width, height int) string {
+	innerW := max(min(width*7/10, 80), min(width-8, 30))
+	wrap := func(text string) string { return lipgloss.NewStyle().Width(innerW).Render(text) }
+	var parts []string
+	if s.preview != nil || (s.sending && s.chosen.UID != "") {
+		parts = append(parts, titleStyle.Render(sanitizeForLine(fmt.Sprintf("Move #%s to %s", s.shortID, s.chosen.Name))), "")
+		if preview := s.preview; preview != nil {
+			if len(preview.descendants) == 0 {
+				parts = append(parts, wrap(fmt.Sprintf("Single move: #%s has no descendants, so it moves alone.", sanitizeForLine(s.shortID))))
+			} else {
+				parts = append(parts, wrap(fmt.Sprintf("Subtree move: #%s and its %d descendants move together.",
+					sanitizeForLine(s.shortID), len(preview.descendants))))
+				shown := min(len(preview.descendants), max(height-16, 3))
+				for _, line := range preview.descendants[:shown] {
+					parts = append(parts, "  "+truncate(line, innerW-2))
+				}
+				if more := len(preview.descendants) - shown; more > 0 {
+					parts = append(parts, subtleStyle.Render(fmt.Sprintf("  … and %d more", more)))
+				}
+			}
+			parts = append(parts, "", wrap("Nothing has moved yet. Each issue gets a new id in "+sanitizeForLine(s.chosen.Name)+"."))
+		}
+	} else {
+		parts = append(parts, titleStyle.Render(sanitizeForLine(fmt.Sprintf("Move #%s to another project", s.shortID))))
+		parts = append(parts, "Project: "+s.filter.View(), "")
+		parts = append(parts, renderMoveChoices(s, innerW, max(min(height-12, 10), 3))...)
+	}
+	if s.note != "" {
+		parts = append(parts, "", wrap(s.note))
+	}
+	if s.err != "" {
+		parts = append(parts, "", errorStyle.Width(innerW).Render(s.err))
+	}
+	if s.sending {
+		parts = append(parts, "", statusStyle.Render("working…"))
+	}
+	return modalBoxStyle.Render(strings.Join(parts, "\n"))
+}
+
+func renderMoveChoices(s moveState, innerW, visible int) []string {
+	if s.loading {
+		return []string{subtleStyle.Render("loading projects…")}
+	}
+	choices := s.choices()
+	if len(choices) == 0 {
+		return []string{subtleStyle.Render("no project matches")}
+	}
+	cursor := min(s.cursor, len(choices)-1)
+	start := max(cursor-visible+1, 0)
+	var rows []string
+	for i := start; i < min(start+visible, len(choices)); i++ {
+		prefix := "  "
+		if i == cursor {
+			prefix = "▸ "
+		}
+		rows = append(rows, prefix+truncate(sanitizeForLine(choices[i].label), innerW-2))
+	}
+	return rows
+}
