@@ -11,6 +11,7 @@ import (
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/notification"
+	"go.kenn.io/kata/internal/teammate"
 )
 
 type federationIngestClaimAuditIssue struct {
@@ -25,6 +26,9 @@ func (s *Store) annotateFederationIngestClaimWorkTx(
 	event db.RemoteEvent,
 	rootHolder db.ClaimPrincipal,
 ) ([]db.Event, error) {
+	// These audits describe federation ingest, so they must not inherit the
+	// sync request's display contribution.
+	ctx = teammate.WithRequest(ctx, "")
 	issueUIDs, err := federationIngestClaimAuditIssueUIDs(event)
 	if err != nil || len(issueUIDs) == 0 {
 		return nil, err

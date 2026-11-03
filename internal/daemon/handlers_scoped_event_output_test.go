@@ -355,7 +355,7 @@ func TestIssueScopedPollAndLiveSSEUseTypedProjection(t *testing.T) {
 	require.NoError(t, json.Unmarshal(liveEnvelope.Payload, &livePayload))
 	for key := range livePayload {
 		require.Contains(t,
-			[]string{"comment_uid", "author", "body", "created_at"}, key,
+			[]string{"comment_uid", "author", "body", "created_at", "attributed_teammate"}, key,
 			"live scoped payload must be the typed projection")
 	}
 

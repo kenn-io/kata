@@ -10,6 +10,7 @@ import (
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/teammate"
+	"go.kenn.io/kata/internal/uid"
 )
 
 // The contribution is request display data: native writes hash it, while
@@ -177,6 +178,48 @@ func checkEventTeammate(t *testing.T, store db.Storage, backend Backend) error {
 	_, nativeAfterImport, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Native after import", Author: "coordinator"})
 	require.NoError(t, err)
 	check(nativeAfterImport)
+
+	// Ingested work is attributed to its source actor. Local claim audit events
+	// derived from that work are system events and must not inherit the sync
+	// worker's request display contribution.
+	claimProject, err := store.CreateProject(t.Context(), "claim-audit-project")
+	require.NoError(t, err)
+	_, err = store.EnableProjectFederation(t.Context(), claimProject.ID, "coordinator")
+	require.NoError(t, err)
+	claimedIssue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: claimProject.ID, Title: "Claimed work", Author: "coordinator",
+	})
+	require.NoError(t, err)
+	_, err = store.AcquireClaim(t.Context(), db.AcquireClaimParams{
+		ProjectID: claimProject.ID,
+		IssueRef:  claimedIssue.UID,
+		Principal: db.ClaimPrincipal{
+			HolderInstanceUID: store.InstanceUID(), Holder: "root-holder", ClientKind: "cli",
+		},
+		ClaimKind: "hard",
+		Now:       time.Now().UTC(),
+	})
+	require.NoError(t, err)
+	spokeUID, err := uid.New()
+	require.NoError(t, err)
+	remoteClosed := newRemoteEvent(t, claimProject, &claimedIssue.UID, "issue.closed", "sync-worker", spokeUID, 100,
+		jsontext.Value(`{"issue_uid":"`+claimedIssue.UID+`","reason":"done","closed_at":"2026-05-23T12:01:00.000Z"}`))
+	ingested, err := store.IngestFederationEvents(teammate.WithRequest(t.Context(), "sync-worker"), db.FederationIngestParams{
+		ProjectID: claimProject.ID, SpokeInstanceUID: spokeUID, BoundActor: "sync-worker",
+		Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: remoteClosed}},
+	})
+	require.NoError(t, err)
+	auditTypes := make(map[string]bool)
+	for _, event := range ingested.Events {
+		if event.Type != "claim.violated" && event.Type != "claim.released" {
+			continue
+		}
+		auditTypes[event.Type] = true
+		require.NotContains(t, event.Payload, "attributed_teammate", event.Type)
+	}
+	require.True(t, auditTypes["claim.violated"], "accepted non-holder close must record a claim violation")
+	require.True(t, auditTypes["claim.released"], "accepted close must release the live claim")
+
 	records, err := CollectImportRecords(t.Context(), store, db.ExportFilter{})
 	require.NoError(t, err)
 	target := backend.Open(t)
