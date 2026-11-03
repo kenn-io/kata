@@ -17,7 +17,7 @@ func ValidateCommentReply(uid, target, kind string) error {
 	if target == "" {
 		return nil
 	}
-	if utf8.RuneCountInString(target) != 26 || target == uid {
+	if utf8.RuneCountInString(target) != 26 || CanonicalCommentUID(target) == CanonicalCommentUID(uid) {
 		return fmt.Errorf("reply_to_uid must name another 26-character comment UID")
 	}
 	if !ValidCommentReplyKind(kind) {
@@ -54,6 +54,9 @@ func validateCommentEntry(entry map[string]jsontext.Value) error {
 			values[field] = *value
 			present[field] = true
 		}
+	}
+	if !present["comment_uid"] || values["comment_uid"] == "" {
+		return fmt.Errorf("comment_uid must be nonempty")
 	}
 	if present["reply_to_uid"] != present["reply_kind"] {
 		return fmt.Errorf("reply_to_uid and reply_kind must be paired")

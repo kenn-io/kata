@@ -27,8 +27,9 @@ type Ref struct {
 // Parse accepts full UIDs, c:<suffix>, <issue>:<suffix> and
 // <project>#<issue>:<suffix>. Only UID and suffix/issue case is normalized.
 func Parse(input string) (Ref, error) {
-	if uid.Valid(strings.ToUpper(input)) {
-		return Ref{UID: strings.ToUpper(input)}, nil
+	normalizedUID, isUID := canonicalUID(input)
+	if isUID {
+		return Ref{UID: normalizedUID}, nil
 	}
 	colon := strings.LastIndexByte(input, ':')
 	if colon < 0 {
@@ -56,13 +57,40 @@ func Parse(input string) (Ref, error) {
 	return Ref{Project: project, IssueRef: issue.ShortID, Suffix: suffix}, nil
 }
 
+func canonicalUID(value string) (string, bool) {
+	canonical := uppercaseASCII(value)
+	if !uid.Valid(canonical) {
+		return "", false
+	}
+	return canonical, true
+}
+
+func equalUID(left, right string) bool {
+	canonicalLeft, leftValid := canonicalUID(left)
+	canonicalRight, rightValid := canonicalUID(right)
+	return leftValid && rightValid && canonicalLeft == canonicalRight
+}
+
+func uppercaseASCII(value string) string {
+	bytes := []byte(value)
+	for index, char := range bytes {
+		if char >= 'a' && char <= 'z' {
+			bytes[index] = char - ('a' - 'A')
+		}
+	}
+	return string(bytes)
+}
+
 // Handles finds each UID's shortest unique project suffix. Repeated copies of
 // the same UID do not create an artificial collision.
 func Handles(uids []string) map[string]string {
 	counts := make(map[string]int)
 	unique := make(map[string]struct{}, len(uids))
 	for _, id := range uids {
-		unique[strings.ToUpper(id)] = struct{}{}
+		canonical, ok := canonicalUID(id)
+		if ok {
+			unique[canonical] = struct{}{}
+		}
 	}
 	for id := range unique {
 		for n := MinLength; n <= shortid.MaxLength; n++ {
@@ -73,8 +101,12 @@ func Handles(uids []string) map[string]string {
 	}
 	result := make(map[string]string, len(uids))
 	for _, id := range uids {
+		canonical, ok := canonicalUID(id)
+		if !ok {
+			continue
+		}
 		for n := MinLength; n <= shortid.MaxLength; n++ {
-			suffix, err := shortid.Derive(strings.ToUpper(id), n)
+			suffix, err := shortid.Derive(canonical, n)
 			if err == nil && counts[suffix] == 1 {
 				result[id] = suffix
 				break

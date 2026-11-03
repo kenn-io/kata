@@ -170,7 +170,7 @@ func Resolve(records []Record, issueUID, input, project string) (Record, error) 
 	var found *Record
 	for _, r := range records {
 		if ref.UID != "" {
-			if !strings.EqualFold(r.UID, ref.UID) {
+			if !equalUID(r.UID, ref.UID) {
 				continue
 			}
 		} else {

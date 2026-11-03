@@ -205,7 +205,8 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 		p.setLink(from, to, link.Type, true, clockOf(e), author, link.CreatedAt)
 	}
 	for _, comment := range in.Comments {
-		p.setComment(comment.CommentUID, uid, comment.Author, comment.Teammate, snapshotCommentDisplay(comment.AttributedTeammate, comment.Teammate), comment.Body, comment.CreatedAt, comment.ReplyToUID, comment.ReplyKind, comment.EditedAt, clockOf(e))
+		attributedTeammate, attributedTeammateExplicit := snapshotCommentDisplay(comment.AttributedTeammate, comment.Teammate)
+		p.setComment(comment.CommentUID, uid, comment.Author, comment.Teammate, attributedTeammate, attributedTeammateExplicit, comment.Body, comment.CreatedAt, comment.ReplyToUID, comment.ReplyKind, comment.EditedAt, clockOf(e))
 	}
 }
 
@@ -441,7 +442,8 @@ func (p *FoldProjection) applyComment(e FoldEvent, payload map[string]jsontext.V
 	if createdAt == "" {
 		createdAt = e.CreatedAt
 	}
-	p.setComment(commentUID, uid, author, teammate, DisplayContribution(e.Type, e.Payload), body, createdAt, replyTo, replyKind, editedAt, clockOf(e))
+	_, attributedTeammateExplicit := payload["attributed_teammate"]
+	p.setComment(commentUID, uid, author, teammate, DisplayContribution(e.Type, e.Payload), attributedTeammateExplicit, body, createdAt, replyTo, replyKind, editedAt, clockOf(e))
 	p.touchIssue(uid, createdAt)
 }
 
@@ -463,7 +465,7 @@ func (p *FoldProjection) applyCommentEdited(e FoldEvent, payload map[string]json
 	p.touchIssue(uid, editedAt)
 }
 
-func (p *FoldProjection) setComment(commentUID, issueUID, author, teammate, attributedTeammate, body, createdAt, replyTo, replyKind, editedAt string, clock FoldClock) {
+func (p *FoldProjection) setComment(commentUID, issueUID, author, teammate, attributedTeammate string, attributedTeammateExplicit bool, body, createdAt, replyTo, replyKind, editedAt string, clock FoldClock) {
 	if commentUID == "" {
 		return
 	}
@@ -472,6 +474,7 @@ func (p *FoldProjection) setComment(commentUID, issueUID, author, teammate, attr
 	comment.Author = author
 	comment.Teammate = teammate
 	comment.AttributedTeammate = attributedTeammate
+	comment.AttributedTeammateExplicit = attributedTeammateExplicit
 	comment.Body = body
 	comment.CreatedAt = createdAt
 	comment.ReplyToUID, comment.ReplyKind, comment.EditedAt = CanonicalCommentUID(replyTo), replyKind, editedAt
@@ -481,8 +484,15 @@ func (p *FoldProjection) setComment(commentUID, issueUID, author, teammate, attr
 			p.Comments[commentUID] = comment
 			return
 		}
+		if attributedTeammateExplicit && !existing.AttributedTeammateExplicit {
+			existing.AttributedTeammate = attributedTeammate
+			existing.AttributedTeammateExplicit = true
+			p.Comments[commentUID] = existing
+		}
+		attributionConflict := attributedTeammateExplicit && existing.AttributedTeammateExplicit &&
+			existing.AttributedTeammate != attributedTeammate
 		if existing.Author != comment.Author || existing.Teammate != comment.Teammate ||
-			existing.Body != comment.Body || existing.CreatedAt != comment.CreatedAt || existing.ReplyToUID != comment.ReplyToUID || existing.ReplyKind != comment.ReplyKind {
+			existing.Body != comment.Body || existing.CreatedAt != comment.CreatedAt || existing.ReplyToUID != comment.ReplyToUID || existing.ReplyKind != comment.ReplyKind || attributionConflict {
 			p.Warnings = append(p.Warnings, fmt.Sprintf("conflicting duplicate comment %s", commentUID))
 		}
 		return

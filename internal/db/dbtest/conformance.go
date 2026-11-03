@@ -51,6 +51,7 @@ type scenario struct {
 
 var storageScenarios = []scenario{
 	{name: "comment display contribution", methods: []string{"CommentsByIssue", "CreateComment", "CreateIssue", "CreateProject", "EditComment", "EnableProjectFederation", "EntityAttribution", "EventsAfter", "ExportComments", "ImportReplay", "InsertRemoteEvent", "IssueByID", "IssueByUID", "LookupCommentIdempotency", "MaterializeFederatedProject", "MoveIssueProject", "PinRootAuthority", "ProjectByUID", "ReadCommentGraph", "UpsertFederationBinding"}, runWithBackend: checkCommentDisplayContribution},
+	{name: "payload-only snapshot comment display", methods: []string{"CommentsByIssue", "CreateProject", "InsertRemoteEvent", "IssueByUID", "MaterializeFederatedProject", "UpsertFederationBinding"}, run: checkPayloadOnlySnapshotCommentDisplay},
 	{name: "empty comment display contribution", runWithBackend: checkEmptyCommentDisplayContribution},
 	{name: "event teammate", runWithBackend: checkEventTeammate},
 	{name: "setup finished delivery", methods: []string{"PrepareSetupFinished", "CompleteSetupFinished", "SystemProject", "CloseIssue", "SoftDeleteIssue", "RemoveProject"}, runWithBackend: checkSetupFinishedDelivery},
@@ -94,6 +95,7 @@ var storageScenarios = []scenario{
 	{name: "comment reply replay", methods: []string{"ExportComments", "ImportReplay"}, runWithBackend: checkCommentReplyReplay},
 	{name: "comment reply snapshot", methods: []string{"EnableProjectFederation", "EventsAfter"}, run: checkCommentReplySnapshot},
 	{name: "comment reply federation", methods: []string{"CommentsByIssue", "CreateProject", "InsertRemoteEvent", "IssueByUID", "MaterializeFederatedProject", "ReadCommentGraph", "UpsertFederationBinding"}, run: checkCommentReplyFederation},
+	{name: "mixed-case restored comment reconciliation", methods: []string{"ClaimExternalRootBinding", "CommentsByIssue", "CreateComment", "CreateExternalRootBinding", "CreateIssue", "CreateProject", "ExportComments", "ExportIssues", "ExportProjects", "ExternalRootBindingByID", "ImportMappingBySource", "ImportReplay", "InsertRemoteEvent", "IssueByUID", "MaterializeFederatedProject", "ReadCommentGraph", "SetPendingExternalComment", "UpsertFederationBinding", "UpsertImportMapping"}, runWithBackend: checkMixedCaseRestoredCommentReconciliation},
 	{name: "comment reply envelope", methods: []string{"CreateComment"}, run: checkCommentReplyEnvelope},
 	{name: "comment issue ids by uids", methods: []string{"CommentIssueIDsByUIDs"}, run: checkCommentIssueIDsByUIDs},
 	{name: "issues by uids", methods: []string{"CreateProject", "CreateIssue", "SoftDeleteIssue", "IssueByUID", "IssuesByUIDs"}, run: checkIssuesByUIDs},

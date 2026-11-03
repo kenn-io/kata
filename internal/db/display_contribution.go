@@ -6,7 +6,6 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
-	"strings"
 
 	"go.kenn.io/kata/internal/teammate"
 	"go.kenn.io/kata/internal/uid"
@@ -15,7 +14,16 @@ import (
 // CanonicalCommentUID normalizes valid ULIDs for case-insensitive comment
 // identity while leaving legacy opaque identifiers unchanged.
 func CanonicalCommentUID(value string) string {
-	canonical := strings.ToUpper(value)
+	if len(value) != 26 {
+		return value
+	}
+	bytes := []byte(value)
+	for i, char := range bytes {
+		if char >= 'a' && char <= 'z' {
+			bytes[i] = char - ('a' - 'A')
+		}
+	}
+	canonical := string(bytes)
 	if uid.Valid(canonical) {
 		return canonical
 	}
@@ -64,9 +72,12 @@ func CommentDisplayContributions(
 	bind func(int) string,
 ) (map[string]string, error) {
 	// #nosec G202 -- Only trusted backend placeholders are interpolated; issueID is bound.
-	rows, err := query(ctx, `SELECT uid,origin_instance_uid,type,issue_uid,hlc_physical_ms,hlc_counter,payload
- FROM events WHERE issue_uid=(SELECT uid FROM issues WHERE id=`+bind(1)+`)
- AND type IN ('issue.commented','issue.created','issue.snapshot')`, issueID)
+	// History follows the issue UID across project moves, so the event's project
+	// may differ from the current project that owns the issue row.
+	rows, err := query(ctx, `SELECT e.uid,e.origin_instance_uid,e.type,e.issue_uid,e.hlc_physical_ms,e.hlc_counter,e.payload,i.uid
+ FROM events e JOIN issues i ON i.id=`+bind(1)+`
+ WHERE (e.issue_uid=i.uid OR e.issue_uid IS NULL OR e.issue_uid='')
+	 AND e.type IN ('issue.commented','issue.created','issue.snapshot')`, issueID)
 	if err != nil {
 		return nil, err
 	}
@@ -75,10 +86,16 @@ func CommentDisplayContributions(
 	for rows.Next() {
 		var e FoldEvent
 		var payload string
-		if err := rows.Scan(&e.UID, &e.OriginInstanceUID, &e.Type, &e.IssueUID, &e.HLCPhysicalMS, &e.HLCCounter, &payload); err != nil {
+		var envelopeIssueUID sql.NullString
+		var targetIssueUID string
+		if err := rows.Scan(&e.UID, &e.OriginInstanceUID, &e.Type, &envelopeIssueUID, &e.HLCPhysicalMS, &e.HLCCounter, &payload, &targetIssueUID); err != nil {
 			return nil, err
 		}
 		e.Payload = jsontext.Value(payload)
+		e.IssueUID = envelopeIssueUID.String
+		if FederationEventIssueUID(&e.IssueUID, payload) != targetIssueUID {
+			continue
+		}
 		events = append(events, e)
 	}
 	if err := rows.Err(); err != nil {
@@ -144,14 +161,14 @@ func HydrateCommentDisplayTx(ctx context.Context, tx *sql.Tx, comments []*Commen
 	return nil
 }
 
-func snapshotCommentDisplay(raw jsontext.Value, legacy string) string {
+func snapshotCommentDisplay(raw jsontext.Value, legacy string) (string, bool) {
 	if len(raw) > 0 {
-		return displayHandle(raw)
+		return displayHandle(raw), true
 	}
 	if teammate.Validate(legacy) == nil {
-		return legacy
+		return legacy, false
 	}
-	return ""
+	return "", false
 }
 
 // LegacyDisplayContribution validates a retained explicit legacy teammate.

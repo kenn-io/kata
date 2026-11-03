@@ -30,9 +30,9 @@ func checkSnapshotReplayRejectsMalformedEventEntries(t *testing.T, store db.Stor
 		eventType string
 		payload   string
 	}{
-		{"issue.commented", `{"teammate":"reviewer-7","body":"checked"}`},
-		{"issue.created", `{"title":"Replay validation","comments":[{"teammate":"reviewer-7","body":"checked"}]}`},
-		{"issue.snapshot", `{"title":"Replay validation","comments":[{"teammate":"reviewer-7","body":"checked"}]}`},
+		{"issue.commented", `{"comment_uid":"comment-1","teammate":"reviewer-7","body":"checked"}`},
+		{"issue.created", `{"title":"Replay validation","comments":[{"comment_uid":"comment-1","teammate":"reviewer-7","body":"checked"}]}`},
+		{"issue.snapshot", `{"title":"Replay validation","comments":[{"comment_uid":"comment-1","teammate":"reviewer-7","body":"checked"}]}`},
 	} {
 		event := &db.EventExport{
 			ID: 10, UID: replayEventUID, OriginInstanceUID: replayInstanceUID,

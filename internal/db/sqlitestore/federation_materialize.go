@@ -149,7 +149,7 @@ func (m *federationMaterialization) apply(ctx context.Context, tx *sql.Tx, proje
 	if err := applyFederatedStatusIntentTx(ctx, tx, m.status); err != nil {
 		return err
 	}
-	if err := reconcileFederatedCommentsFromRows(ctx, tx, m.issueIDs, m.projection, m.commentRows); err != nil {
+	if err := reconcileFederatedCommentsFromRows(ctx, tx, projectID, m.issueIDs, m.projection, m.commentRows); err != nil {
 		return err
 	}
 	if err := reconcileFederatedLabelsFromRows(ctx, tx, m.issueIDs, m.projection, m.labelRows); err != nil {

@@ -78,9 +78,9 @@ func remoteEventCreatedAt(event RemoteEvent) string {
 	return event.CreatedAt.UTC().Format(EventTimestampFormat)
 }
 
-// ValidateFederationEntries checks comment teammate attribution and requires
-// embedded comments and links to be JSON objects on created and snapshot events.
-// Ingest and pull paths must call it before persisting the event.
+// ValidateFederationEntries checks comment identity, reply fields, and teammate
+// attribution, and requires embedded comments and links to be JSON objects on
+// created and snapshot events. Ingest and pull paths must call it before storing.
 func ValidateFederationEntries(eventType, eventUID string, payloadJSON jsontext.Value) error {
 	if eventType == "issue.commented" || eventType == "issue.comment_edited" {
 		var payload map[string]jsontext.Value
@@ -104,6 +104,7 @@ func ValidateFederationEntries(eventType, eventUID string, payloadJSON jsontext.
 		return fmt.Errorf("%w: event %s %s entries are invalid JSON",
 			ErrFederationIngestValidation, eventUID, eventType)
 	}
+	seenCommentUIDs := make(map[string]struct{}, len(payload.Comments))
 	for field, entries := range map[string][]map[string]jsontext.Value{
 		"comments": payload.Comments, "links": payload.Links,
 	} {
@@ -116,6 +117,17 @@ func ValidateFederationEntries(eventType, eventUID string, payloadJSON jsontext.
 				if err := validateCommentEntry(entry); err != nil {
 					return fmt.Errorf("%w: event %s %s: %v", ErrFederationIngestValidation, eventUID, eventType, err)
 				}
+				var commentUID string
+				if err := json.Unmarshal(entry["comment_uid"], &commentUID); err != nil {
+					return fmt.Errorf("%w: event %s %s comment_uid is invalid",
+						ErrFederationIngestValidation, eventUID, eventType)
+				}
+				canonicalUID := CanonicalCommentUID(commentUID)
+				if _, exists := seenCommentUIDs[canonicalUID]; exists {
+					return fmt.Errorf("%w: event %s %s contains duplicate comment UID %q",
+						ErrFederationIngestValidation, eventUID, eventType, canonicalUID)
+				}
+				seenCommentUIDs[canonicalUID] = struct{}{}
 				if err := validateFederationTeammate(entry["teammate"], eventUID, eventType); err != nil {
 					return err
 				}

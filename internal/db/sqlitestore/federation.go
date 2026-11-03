@@ -2085,10 +2085,10 @@ func reconcileFederatedComments(
 	if err != nil {
 		return err
 	}
-	return reconcileFederatedCommentsFromRows(ctx, tx, issueIDs, projection, existing)
+	return reconcileFederatedCommentsFromRows(ctx, tx, projectID, issueIDs, projection, existing)
 }
 
-func reconcileFederatedCommentsFromRows(ctx context.Context, tx *sql.Tx, issueIDs map[string]int64, projection db.FoldProjection, existing map[string]federatedCommentRow) error {
+func reconcileFederatedCommentsFromRows(ctx context.Context, tx *sql.Tx, projectID int64, issueIDs map[string]int64, projection db.FoldProjection, existing map[string]federatedCommentRow) error {
 	sorted := projection.SortedComments()
 	desired := make(map[string]struct{}, len(sorted))
 	for _, comment := range sorted {
@@ -2124,17 +2124,33 @@ func reconcileFederatedCommentsFromRows(ctx context.Context, tx *sql.Tx, issueID
 				if comment.Body != row.body || comment.Teammate != row.teammate {
 					return fmt.Errorf("%w: %w", db.ErrFederationIngestValidation, db.ErrExternalCommentContentOwned)
 				}
+				replyNeedsNormalization := row.replyTo != comment.ReplyToUID &&
+					db.CanonicalCommentUID(row.replyTo) == comment.ReplyToUID
+				if row.uid != comment.UID || replyNeedsNormalization {
+					if _, err := tx.ExecContext(ctx,
+						`UPDATE comments SET uid = ?, reply_to_uid = NULLIF(?, '') WHERE id = ?`,
+						comment.UID, comment.ReplyToUID, row.id); err != nil {
+						return fmt.Errorf("normalize federated comment %s identity: %w", uid, err)
+					}
+				}
+				if err := normalizeFederatedPendingCommentUIDTx(ctx, tx, projectID, row.uid, comment.UID); err != nil {
+					return err
+				}
 				continue
 			}
-			if row.issueID == issueID && row.author == nonEmptyAuthor(comment.Author) &&
+			if row.uid == comment.UID && row.issueID == issueID && row.author == nonEmptyAuthor(comment.Author) &&
 				row.body == comment.Body && row.teammate == comment.Teammate &&
-				row.createdAt == nonEmptyTime(comment.CreatedAt) {
+				row.createdAt == nonEmptyTime(comment.CreatedAt) && row.replyTo == comment.ReplyToUID &&
+				row.replyKind == comment.ReplyKind && row.editedAt == comment.EditedAt {
 				continue
 			}
 			if _, err := tx.ExecContext(ctx,
-				`UPDATE comments SET issue_id = ?, author = ?, body = ?, created_at = ?, teammate = NULLIF(?, ''), reply_to_uid=NULLIF(?, ''), reply_kind=NULLIF(?, ''), edited_at=NULLIF(?, '') WHERE id = ?`,
-				issueID, nonEmptyAuthor(comment.Author), comment.Body, nonEmptyTime(comment.CreatedAt), comment.Teammate, comment.ReplyToUID, comment.ReplyKind, comment.EditedAt, row.id); err != nil {
+				`UPDATE comments SET uid = ?, issue_id = ?, author = ?, body = ?, created_at = ?, teammate = NULLIF(?, ''), reply_to_uid=NULLIF(?, ''), reply_kind=NULLIF(?, ''), edited_at=NULLIF(?, '') WHERE id = ?`,
+				comment.UID, issueID, nonEmptyAuthor(comment.Author), comment.Body, nonEmptyTime(comment.CreatedAt), comment.Teammate, comment.ReplyToUID, comment.ReplyKind, comment.EditedAt, row.id); err != nil {
 				return fmt.Errorf("update federated comment %s: %w", uid, err)
+			}
+			if err := normalizeFederatedPendingCommentUIDTx(ctx, tx, projectID, row.uid, comment.UID); err != nil {
+				return err
 			}
 			continue
 		}
@@ -2147,13 +2163,29 @@ func reconcileFederatedCommentsFromRows(ctx context.Context, tx *sql.Tx, issueID
 	return nil
 }
 
+func normalizeFederatedPendingCommentUIDTx(ctx context.Context, tx *sql.Tx, projectID int64, oldUID, newUID string) error {
+	if oldUID == newUID {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE external_root_bindings SET pending_comment_uid = ?
+WHERE project_id = ? AND pending_comment_uid = ?`, newUID, projectID, oldUID)
+	if err != nil {
+		return fmt.Errorf("normalize pending external comment UID: %w", err)
+	}
+	return nil
+}
+
 type federatedCommentRow struct {
 	id        int64
 	issueID   int64
+	uid       string
 	author    string
 	createdAt string
 	body      string
 	teammate  string
+	replyTo   string
+	replyKind string
+	editedAt  string
 }
 
 func federatedExternalCommentOwnedTx(ctx context.Context, tx *sql.Tx, commentID int64) (bool, error) {
@@ -2175,7 +2207,7 @@ func federatedExternalCommentOwnedTx(ctx context.Context, tx *sql.Tx, commentID 
 
 func federatedCommentRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64, issueScope ...string) (map[string]federatedCommentRow, error) {
 	query := `
-		SELECT c.uid, c.id, c.issue_id, c.author, CAST(c.created_at AS TEXT), c.body, c.teammate
+		SELECT c.uid, c.id, c.issue_id, c.author, CAST(c.created_at AS TEXT), c.body, c.teammate, c.reply_to_uid, c.reply_kind, c.edited_at
 		  FROM comments c
 		  JOIN issues i ON i.id = c.issue_id
 		 WHERE i.project_id = ?`
@@ -2189,12 +2221,17 @@ func federatedCommentRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64,
 	for rows.Next() {
 		var uid string
 		var row federatedCommentRow
-		var teammate sql.NullString
-		if err := rows.Scan(&uid, &row.id, &row.issueID, &row.author, &row.createdAt, &row.body, &teammate); err != nil {
+		var teammate, replyTo, replyKind, editedAt sql.NullString
+		if err := rows.Scan(&uid, &row.id, &row.issueID, &row.author, &row.createdAt, &row.body, &teammate, &replyTo, &replyKind, &editedAt); err != nil {
 			return nil, fmt.Errorf("scan federated comment: %w", err)
 		}
-		row.teammate = teammate.String
-		out[uid] = row
+		row.uid = uid
+		row.teammate, row.replyTo, row.replyKind, row.editedAt = teammate.String, replyTo.String, replyKind.String, editedAt.String
+		canonicalUID := db.CanonicalCommentUID(uid)
+		if _, exists := out[canonicalUID]; exists {
+			return nil, fmt.Errorf("duplicate canonical federated comment UID %s", canonicalUID)
+		}
+		out[canonicalUID] = row
 	}
 	return out, rows.Err()
 }

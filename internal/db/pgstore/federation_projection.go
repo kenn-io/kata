@@ -754,9 +754,10 @@ func reconcileFederatedComments(
 			// A fold visits all existing comments, even when the incoming batch
 			// changed none of them. Avoid per-comment queries and writes while
 			// the ingest transaction holds the event-ordering fence.
-			if row.issueID == issueID && row.author == nonEmptyFederationAuthor(comment.Author) &&
+			if row.uid == comment.UID && row.issueID == issueID && row.author == nonEmptyFederationAuthor(comment.Author) &&
 				row.teammate == comment.Teammate && row.body == comment.Body &&
-				row.createdAt == nonEmptyFederationTime(comment.CreatedAt) && row.replyTo == comment.ReplyToUID && row.replyKind == comment.ReplyKind && row.editedAt == comment.EditedAt {
+				row.createdAt == nonEmptyFederationTime(comment.CreatedAt) && row.replyTo == comment.ReplyToUID &&
+				row.replyKind == comment.ReplyKind && row.editedAt == comment.EditedAt {
 				continue
 			}
 			owned, err := federatedExternalCommentOwnedTx(ctx, tx, row.id)
@@ -767,13 +768,28 @@ func reconcileFederatedComments(
 				if comment.Body != row.body || comment.Teammate != row.teammate {
 					return fmt.Errorf("%w: %w", db.ErrFederationIngestValidation, db.ErrExternalCommentContentOwned)
 				}
+				replyNeedsNormalization := row.replyTo != comment.ReplyToUID &&
+					db.CanonicalCommentUID(row.replyTo) == comment.ReplyToUID
+				if row.uid != comment.UID || replyNeedsNormalization {
+					_, err := tx.ExecContext(ctx, `UPDATE comments SET uid=$1,reply_to_uid=NULLIF($2, '') WHERE id=$3`,
+						comment.UID, comment.ReplyToUID, row.id)
+					if err != nil {
+						return mapSQLError(err, nil)
+					}
+				}
+				if err := normalizeFederatedPendingCommentUIDTx(ctx, tx, projectID, row.uid, comment.UID); err != nil {
+					return err
+				}
 				continue
 			}
-			_, err = tx.ExecContext(ctx, `UPDATE comments SET issue_id=$1,author=$2,body=$3,created_at=$4,teammate=NULLIF($5, ''),reply_to_uid=NULLIF($7, ''),reply_kind=NULLIF($8, ''),edited_at=NULLIF($9, '')
-WHERE id=$6`, issueID, nonEmptyFederationAuthor(comment.Author), comment.Body,
-				nonEmptyFederationTime(comment.CreatedAt), comment.Teammate, row.id, comment.ReplyToUID, comment.ReplyKind, comment.EditedAt)
+			_, err = tx.ExecContext(ctx, `UPDATE comments SET uid=$1,issue_id=$2,author=$3,body=$4,created_at=$5,teammate=NULLIF($6, ''),reply_to_uid=NULLIF($7, ''),reply_kind=NULLIF($8, ''),edited_at=NULLIF($9, '')
+WHERE id=$10`, comment.UID, issueID, nonEmptyFederationAuthor(comment.Author), comment.Body,
+				nonEmptyFederationTime(comment.CreatedAt), comment.Teammate, comment.ReplyToUID, comment.ReplyKind, comment.EditedAt, row.id)
 			if err != nil {
 				return mapSQLError(err, nil)
+			}
+			if err := normalizeFederatedPendingCommentUIDTx(ctx, tx, projectID, row.uid, comment.UID); err != nil {
+				return err
 			}
 			continue
 		}
@@ -788,10 +804,20 @@ WHERE id=$6`, issueID, nonEmptyFederationAuthor(comment.Author), comment.Body,
 	return nil
 }
 
+func normalizeFederatedPendingCommentUIDTx(ctx context.Context, tx *sql.Tx, projectID int64, oldUID, newUID string) error {
+	if oldUID == newUID {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE external_root_bindings SET pending_comment_uid=$1
+WHERE project_id=$2 AND pending_comment_uid=$3`, newUID, projectID, oldUID)
+	return mapSQLError(err, nil)
+}
+
 type federatedCommentRow struct {
 	replyTo, replyKind, editedAt string
 	id                           int64
 	issueID                      int64
+	uid                          string
 	author                       string
 	teammate                     string
 	body                         string
@@ -834,9 +860,14 @@ JOIN issues i ON i.id=c.issue_id WHERE i.project_id=$1`, projectID)
 		if err := rows.Scan(&commentUID, &row.id, &row.issueID, &row.author, &row.body, &row.createdAt, &teammate, &replyTo, &replyKind, &editedAt); err != nil {
 			return nil, mapSQLError(err, nil)
 		}
+		row.uid = commentUID
 		row.teammate = teammate.String
 		row.replyTo, row.replyKind, row.editedAt = replyTo.String, replyKind.String, editedAt.String
-		output[commentUID] = row
+		canonicalUID := db.CanonicalCommentUID(commentUID)
+		if _, exists := output[canonicalUID]; exists {
+			return nil, fmt.Errorf("duplicate canonical federated comment UID %s", canonicalUID)
+		}
+		output[canonicalUID] = row
 	}
 	return output, mapSQLError(rows.Err(), nil)
 }

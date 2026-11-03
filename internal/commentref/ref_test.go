@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"hegel.dev/go/hegel"
 )
 
 func TestCommentReferenceForms(t *testing.T) {
@@ -29,6 +30,27 @@ func TestCommentReferenceForms(t *testing.T) {
 		_, err := Parse(input)
 		require.Error(t, err, input)
 	}
+}
+
+func TestFullUIDReferencesRejectUnicodeCaseFoldAliasesProperty(t *testing.T) {
+	hegel.Test(t, func(ht *hegel.T) {
+		tail := hegel.Draw(ht, hegel.Text().Alphabet("0123456789ABCDEFGHJKMNPQRSTVWXYZ").MinSize(23).MaxSize(23))
+		validUID := "01S" + tail
+		parsed, err := Parse(validUID)
+		require.NoError(ht, err)
+		require.Equal(ht, validUID, parsed.UID)
+
+		malformedUID := "01ſ" + tail
+		_, err = Parse(malformedUID)
+		require.ErrorIs(ht, err, ErrInvalidRef)
+		_, err = Resolve([]Record{{UID: malformedUID}}, "", validUID, "")
+		require.ErrorIs(ht, err, ErrNotFound)
+		handles := Handles([]string{malformedUID, validUID, strings.ToLower(validUID)})
+		require.Contains(ht, handles, validUID)
+		require.Contains(ht, handles, strings.ToLower(validUID))
+		require.Equal(ht, handles[validUID], handles[strings.ToLower(validUID)])
+		require.NotContains(ht, handles, malformedUID)
+	}, hegel.WithTestCases(100), hegel.WithDatabase(t.TempDir()))
 }
 
 func TestHandlesExtendProjectCollisions(t *testing.T) {
