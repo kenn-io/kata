@@ -3,6 +3,7 @@ package dbtest
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"strings"
 	"testing"
 	"time"
 
@@ -117,8 +118,10 @@ func checkCommentReplyFederation(t *testing.T, store db.Storage) error {
 	const commentUID = "01AAAAAAAAAAAAAAAAAAAAAAAA"
 	const targetUID = "01BBBBBBBBBBBBBBBBBBBBBBBB"
 	const editedAt = "2026-10-07T12:00:00.123456789Z"
+	lowerCommentUID := strings.ToLower(commentUID)
+	lowerTargetUID := strings.ToLower(targetUID)
 	issueUIDValue := issueUID
-	snapshot := newRemoteEvent(t, p, &issueUIDValue, "issue.snapshot", "worker", "01DDDDDDDDDDDDDDDDDDDDDDDD", 1, jsontext.Value(`{"uid":"`+issueUID+`","title":"Task","author":"worker","status":"open","created_at":"2026-10-07T11:00:00Z","comments":[{"comment_uid":"`+commentUID+`","author":"worker","body":"Reply","created_at":"2026-10-07T11:00:00Z","reply_to_uid":"`+targetUID+`","reply_kind":"confirm","edited_at":"`+editedAt+`"}]}`))
+	snapshot := newRemoteEvent(t, p, &issueUIDValue, "issue.snapshot", "worker", "01DDDDDDDDDDDDDDDDDDDDDDDD", 1, jsontext.Value(`{"uid":"`+issueUID+`","title":"Task","author":"worker","status":"open","created_at":"2026-10-07T11:00:00Z","comments":[{"comment_uid":"`+lowerCommentUID+`","author":"worker","body":"Reply","created_at":"2026-10-07T11:00:00Z","reply_to_uid":"`+lowerTargetUID+`","reply_kind":"confirm","edited_at":"`+editedAt+`"}]}`))
 	_, err = store.InsertRemoteEvent(ctx, p.ID, snapshot)
 	require.NoError(t, err)
 	require.NoError(t, store.MaterializeFederatedProject(ctx, p.ID))
@@ -128,10 +131,18 @@ func checkCommentReplyFederation(t *testing.T, store db.Storage) error {
 		comments, err := store.CommentsByIssue(ctx, issue.ID)
 		require.NoError(t, err)
 		require.NotEmpty(t, comments)
-		require.Equal(t, targetUID, comments[0].ReplyToUID)
-		require.Equal(t, "confirm", comments[0].ReplyKind)
-		require.NotNil(t, comments[0].EditedAt)
-		require.Equal(t, editedAt, comments[0].EditedAt.UTC().Format(time.RFC3339Nano))
+		var reply *db.Comment
+		for i := range comments {
+			if comments[i].UID == commentUID {
+				reply = &comments[i]
+				break
+			}
+		}
+		require.NotNil(t, reply)
+		require.Equal(t, targetUID, reply.ReplyToUID)
+		require.Equal(t, "confirm", reply.ReplyKind)
+		require.NotNil(t, reply.EditedAt)
+		require.Equal(t, editedAt, reply.EditedAt.UTC().Format(time.RFC3339Nano))
 	}
 	assertReply()
 	target := newRemoteEvent(t, p, &issue.UID, "issue.commented", "worker", snapshot.OriginInstanceUID, 2, jsontext.Value(`{"comment_uid":"`+targetUID+`","author":"worker","body":"Finding","created_at":"2026-10-07T11:01:00Z"}`))
@@ -139,6 +150,17 @@ func checkCommentReplyFederation(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	require.NoError(t, store.MaterializeFederatedProject(ctx, p.ID))
 	assertReply()
+	graph, err := store.ReadCommentGraph(ctx, db.CommentGraphQuery{ProjectID: p.ID, SelectedIssueID: issue.ID})
+	require.NoError(t, err)
+	var graphReply *db.Comment
+	for i := range graph.Comments {
+		if graph.Comments[i].Comment.UID == commentUID {
+			graphReply = &graph.Comments[i].Comment
+			break
+		}
+	}
+	require.NotNil(t, graphReply)
+	require.Equal(t, targetUID, graphReply.ReplyToUID)
 	for range 2 {
 		require.NoError(t, store.MaterializeFederatedProject(ctx, p.ID))
 		assertReply()

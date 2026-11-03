@@ -200,6 +200,9 @@ func (d *Store) replayCommentDisplayEvents(ctx context.Context, tx *sql.Tx, reco
 		if retained, found := display[commentUID]; found && retained == *comment.AttributedTeammate {
 			continue
 		}
+		if db.CommentDisplayContribution(nil, comment.Teammate) == *comment.AttributedTeammate {
+			continue
+		}
 		if instanceUID == "" {
 			if err := tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=?`, "instance_uid").Scan(&instanceUID); err != nil {
 				return fmt.Errorf("restore comment display: read instance uid: %w", err)
