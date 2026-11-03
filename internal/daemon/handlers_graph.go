@@ -346,6 +346,7 @@ func appendUnresolvedRef(
 	})
 }
 
+// Keep in sync with markTransitiveBlockLayout in web/src/lib/kata/projection.ts.
 func markTransitiveBlockLayout(edges []api.ReachableGraphEdge) {
 	ids := map[string]int{}
 	idOf := func(uid string) int {

@@ -171,6 +171,7 @@ function reachableGraphUIDs(
   return reached
 }
 
+// Keep in sync with markTransitiveBlockLayout in internal/daemon/handlers_graph.go.
 function markTransitiveBlockLayout(edges: KataReachableGraphEdge[]): void {
   const ids = new Map<string, number>()
   const idOf = (uid: string): number => {
