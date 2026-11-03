@@ -1,16 +1,70 @@
 package federation
 
 import (
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
+
+func TestFederationMoveBackfillAcceptsPayloadIssueIdentity(t *testing.T) {
+	ctx := t.Context()
+	issueUID := "01ARZ3NDEKTSV4RRFFQ69AAA11"
+	sourceUID := "01ARZ3NDEKTSV4RRFFQ69AAA12"
+	targetUID := "01ARZ3NDEKTSV4RRFFQ69AAA13"
+	history := api.EventEnvelope{
+		EventID: 8, EventUID: "01ARZ3NDEKTSV4RRFFQ69AAA14", OriginInstanceUID: "01ARZ3NDEKTSV4RRFFQ69AAA15",
+		Type: "issue.updated", ProjectID: 41, ProjectUID: sourceUID, ProjectName: "history-source",
+		Actor: "worker", ContentHash: "history-hash", Payload: jsontext.Value(`{"uid":"` + issueUID + `","title":"payload history"}`),
+		CreatedAt: time.Unix(1, 0).UTC(),
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		afterID, err := strconv.ParseInt(r.URL.Query().Get("after_id"), 10, 64)
+		if err != nil {
+			http.Error(w, "invalid after_id", http.StatusBadRequest)
+			return
+		}
+		body := api.PollEventsBody{Events: []api.EventEnvelope{}, NextAfterID: afterID}
+		if afterID == 0 {
+			body.Events = []api.EventEnvelope{history}
+			body.NextAfterID = history.EventID
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.MarshalWrite(w, body); err != nil {
+			t.Errorf("write event page: %v", err)
+		}
+	}))
+	defer server.Close()
+	client, err := NewClient(ctx, server.URL, "token", clientpkg.Opts{})
+	require.NoError(t, err)
+	issueEnvelopeUID := issueUID
+	page := api.PollEventsBody{
+		Events: []api.EventEnvelope{{
+			EventID: 9, EventUID: "01ARZ3NDEKTSV4RRFFQ69AAA16", OriginInstanceUID: "01ARZ3NDEKTSV4RRFFQ69AAA15",
+			Type: "issue.moved", ProjectID: 42, ProjectUID: targetUID, ProjectName: "history-target",
+			IssueUID: &issueEnvelopeUID, Actor: "worker", ContentHash: "move-hash",
+			Payload:   jsontext.Value(`{"from_project_uid":"` + sourceUID + `","to_project_uid":"` + targetUID + `"}`),
+			CreatedAt: time.Unix(2, 0).UTC(),
+		}},
+		NextAfterID: 9,
+	}
+
+	backfilled, err := backfillFederationMoveHistory(ctx, client, 42, page)
+	require.NoError(t, err)
+	require.Len(t, backfilled, 2)
+	require.Nil(t, backfilled[0].IssueUID, "backfill keeps the signed envelope unchanged")
+	require.Equal(t, issueUID, db.FederationEventIssueUID(backfilled[0].IssueUID, string(backfilled[0].Payload)))
+}
 
 func TestSyncFederationMoveUsesBaselineAfterLocalMove(t *testing.T) {
 	for _, joinOriginal := range []bool{true, false} {

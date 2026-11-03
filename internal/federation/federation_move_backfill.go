@@ -6,8 +6,10 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"strings"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/db"
 )
 
 // Recover original source deltas before applying an inbound move. A project
@@ -65,7 +67,7 @@ func (c *Client) issueHistoryThrough(ctx context.Context, projectID int64, uid s
 			return nil, ErrFederationResetRequired
 		}
 		for _, event := range page.Events {
-			if event.IssueUID == nil || *event.IssueUID != uid {
+			if !strings.HasPrefix(event.Type, "issue.") || db.FederationEventIssueUID(event.IssueUID, string(event.Payload)) != uid {
 				return nil, errors.New("hub did not honor issue history filter")
 			}
 			if event.EventID <= through {

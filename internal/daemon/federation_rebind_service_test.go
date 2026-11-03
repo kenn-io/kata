@@ -23,6 +23,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federation"
+	"go.kenn.io/kata/internal/federationcoord"
 )
 
 const (
@@ -45,6 +46,25 @@ type rebindLeaveValidationBarrierStore struct {
 	db.Storage
 	validated chan struct{}
 	resume    chan struct{}
+}
+
+type rebindFailingLeaveFenceStore struct {
+	db.Storage
+	fenceEntered chan struct{}
+	fenceRelease chan struct{}
+}
+
+func (s *rebindFailingLeaveFenceStore) FenceRelayDisconnect(
+	ctx context.Context,
+	projectID int64,
+) error {
+	close(s.fenceEntered)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.fenceRelease:
+		return errors.New("injected native leave fence failure")
+	}
 }
 
 func (s *rebindLeaveValidationBarrierStore) ValidateRelayLifecycle(
@@ -873,6 +893,94 @@ func TestPrepareFederationReplicaLeaveFencesMoveAfterPreflight(t *testing.T) {
 	assert.False(t, found, "a refused leave must remove its temporary recovery credential")
 }
 
+func TestPrepareNativeLeaveFailureReleasesReplicaMutexBeforeGateWait(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	store, project, _ := prepareFederationRebind(t, rebindSourceURL)
+	credentials := newReplicaCredentialStore()
+	credential := rebindCredential(rebindSourceURL, false, false)
+	credentials.put(project.UID, credential)
+	baseline := config.FederationManagedCredentialReservation{
+		ProjectUID: project.UID,
+		Credential: credential,
+	}
+
+	releaseProjectGate, err := federationcoord.BeginRebind(
+		ctx, federationcoord.Key(store.InstanceUID(), project.ID), store, project.ID,
+	)
+	require.NoError(t, err)
+	projectGateReleased := false
+	releaseGate := func() {
+		if !projectGateReleased {
+			releaseProjectGate()
+			projectGateReleased = true
+		}
+	}
+	fenceEntered := make(chan struct{})
+	fenceRelease := make(chan struct{})
+	fencedStore := &rebindFailingLeaveFenceStore{
+		Storage: store, fenceEntered: fenceEntered, fenceRelease: fenceRelease,
+	}
+	prepareDone := make(chan error, 1)
+	go func() {
+		_, prepareErr := daemon.PrepareFederationReplicaLeave(
+			ctx, fencedStore, credentials, project.ID, "gate-wait-failure",
+		)
+		prepareDone <- prepareErr
+	}()
+	var prepareFinished bool
+	var operationDone chan error
+	var operationFinished bool
+	t.Cleanup(func() {
+		releaseGate()
+		if !prepareFinished {
+			select {
+			case <-prepareDone:
+			case <-time.After(time.Second):
+			}
+		}
+		if operationDone != nil && !operationFinished {
+			select {
+			case <-operationDone:
+			case <-time.After(time.Second):
+			}
+		}
+	})
+	select {
+	case <-fenceEntered:
+	case <-ctx.Done():
+		t.Fatalf("native leave did not reach its fence: %v", ctx.Err())
+	}
+
+	operationDone = make(chan error, 1)
+	go func() {
+		finish, beginErr := daemon.BeginFederationReplicaHubOperation(
+			ctx, store, credentials, project.Name, baseline,
+		)
+		if beginErr == nil {
+			_, beginErr = finish(ctx, 0)
+		}
+		operationDone <- beginErr
+	}()
+	close(fenceRelease)
+	select {
+	case operationErr := <-operationDone:
+		operationFinished = true
+		require.ErrorIs(t, operationErr, daemon.ErrFederationReplicaReservationChanged)
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("native leave cleanup held the global replica mutex while waiting for the project gate")
+	}
+
+	releaseGate()
+	select {
+	case prepareErr := <-prepareDone:
+		prepareFinished = true
+		require.ErrorContains(t, prepareErr, "injected native leave fence failure")
+	case <-ctx.Done():
+		t.Fatalf("failed native leave cleanup did not finish: %v", ctx.Err())
+	}
+}
+
 func TestAbortNativeFederationReplicaLeaveRestoresBindingAfterRestart(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	store, project, original := prepareFederationRebind(t, rebindSourceURL)
@@ -898,6 +1006,84 @@ func TestAbortNativeFederationReplicaLeaveRestoresBindingAfterRestart(t *testing
 	assert.Equal(t, original.PushEnabled, restored.PushEnabled)
 	assert.Equal(t, original.PullCursorEventID, restored.PullCursorEventID)
 	assert.Equal(t, original.PushCursorEventID, restored.PushCursorEventID)
+}
+
+func TestAbortNativeLeaveDoesNotHoldReplicaMutexWhileWaitingForGate(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	store, project, _ := prepareFederationRebind(t, rebindSourceURL)
+	credentials := newReplicaCredentialStore()
+	credential := rebindCredential(rebindSourceURL, false, false)
+	credentials.put(project.UID, credential)
+	prepared, err := daemon.PrepareFederationReplicaLeave(ctx, store, credentials, project.ID, "abort-gate-wait")
+	require.NoError(t, err)
+
+	releaseProjectGate, err := federationcoord.BeginRebind(
+		ctx, federationcoord.Key(store.InstanceUID(), project.ID), store, project.ID,
+	)
+	require.NoError(t, err)
+	projectGateReleased := false
+	releaseGate := func() {
+		if !projectGateReleased {
+			releaseProjectGate()
+			projectGateReleased = true
+		}
+	}
+	abortDone := make(chan error, 1)
+	go func() {
+		abortDone <- daemon.AbortFederationReplicaLeave(
+			ctx, store, credentials, project.ID, prepared.PreparationID,
+		)
+	}()
+	var abortFinished bool
+	var operationDone chan error
+	var operationFinished bool
+	t.Cleanup(func() {
+		releaseGate()
+		if !abortFinished {
+			select {
+			case <-abortDone:
+			case <-time.After(time.Second):
+			}
+		}
+		if operationDone != nil && !operationFinished {
+			select {
+			case <-operationDone:
+			case <-time.After(time.Second):
+			}
+		}
+	})
+
+	operationDone = make(chan error, 1)
+	go func() {
+		finish, beginErr := daemon.BeginFederationReplicaHubOperation(
+			ctx, store, credentials, project.Name,
+			config.FederationManagedCredentialReservation{
+				ProjectUID: project.UID,
+				Credential: credential,
+			},
+		)
+		if beginErr == nil {
+			_, beginErr = finish(ctx, 0)
+		}
+		operationDone <- beginErr
+	}()
+	select {
+	case operationErr := <-operationDone:
+		operationFinished = true
+		require.ErrorIs(t, operationErr, daemon.ErrFederationReplicaLeavePending)
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("native leave abort held the global replica mutex while waiting for the project gate")
+	}
+
+	releaseGate()
+	select {
+	case abortErr := <-abortDone:
+		abortFinished = true
+		require.NoError(t, abortErr)
+	case <-ctx.Done():
+		t.Fatalf("native leave abort did not finish: %v", ctx.Err())
+	}
 }
 
 func TestNativeFederationReplicaLeavePreparationBlocksRebindAfterRestart(t *testing.T) {

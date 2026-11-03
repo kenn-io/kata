@@ -27,18 +27,12 @@ func checkFederatedMovePayloadOnlyHistory(t *testing.T, hub db.Storage, backend 
 			})
 			require.NoError(t, err)
 			acceptedTitle := "accepted " + identityField + " edit"
-			updated, edit, changed, err := hub.EditIssue(ctx, db.EditIssueParams{
+			_, edit, changed, err := hub.EditIssue(ctx, db.EditIssueParams{
 				IssueID: issue.ID, Title: &acceptedTitle, Actor: "worker",
 			})
 			require.NoError(t, err)
 			require.True(t, changed)
 			require.NotNil(t, edit)
-			moved, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{
-				IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID,
-				IfMatchRev: updated.Revision, Actor: "worker",
-			})
-			require.NoError(t, err)
-			require.NotNil(t, moved.Event)
 
 			payload := db.PayloadMap(jsontext.Value(edit.Payload))
 			delete(payload, "issue_uid")
@@ -50,9 +44,35 @@ func checkFederatedMovePayloadOnlyHistory(t *testing.T, hub db.Storage, backend 
 			payloadOnlyEdit := remoteEventFromStored(*edit)
 			payloadOnlyEdit.EventUID, err = uid.New()
 			require.NoError(t, err)
+			payloadOnlyEdit.OriginInstanceUID, err = uid.New()
+			require.NoError(t, err)
 			payloadOnlyEdit.IssueUID = nil
+			payloadOnlyEdit.HLCCounter++
 			payloadOnlyEdit.Payload = jsontext.Value(rawPayload)
 			payloadOnlyEdit.ContentHash = remoteEventHash(t, payloadOnlyEdit)
+			_, err = hub.InsertRemoteEvents(ctx, source.ID, []db.RemoteEvent{payloadOnlyEdit})
+			require.NoError(t, err)
+			require.NoError(t, hub.MaterializeFederatedProject(ctx, source.ID))
+			issue, err = hub.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			moved, err := hub.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+				IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID,
+				IfMatchRev: issue.Revision, Actor: "worker",
+			})
+			require.NoError(t, err)
+			require.NotNil(t, moved.Event)
+
+			feed, err := hub.ReadFederation(ctx, db.FederationReadParams{
+				ProjectID: target.ID, IssueUID: issue.UID, Limit: 100,
+				Features: db.SupportedEventFeatures,
+			})
+			require.NoError(t, err)
+			foundPayloadOnlyEdit := false
+			for _, event := range feed.Events {
+				foundPayloadOnlyEdit = foundPayloadOnlyEdit || event.UID == payloadOnlyEdit.EventUID
+			}
+			require.True(t, foundPayloadOnlyEdit,
+				"destination move history must include accepted issue updates identified by payload issue_uid or uid")
 
 			replica := backend.Open(t)
 			t.Cleanup(func() { require.NoError(t, replica.Close()) })

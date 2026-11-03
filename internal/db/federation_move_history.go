@@ -34,7 +34,8 @@ func ReadFederationMoveHistory(ctx context.Context, tx *sql.Tx, afterID int64, l
 		}
 		for _, event := range page {
 			afterID = event.ID
-			if event.IssueUID != nil && event.ID < cutoffs[*event.IssueUID] {
+			issueUID := FederationEventIssueUID(event.IssueUID, event.Payload)
+			if issueUID != "" && event.ID < cutoffs[issueUID] {
 				continue
 			}
 			events = append(events, event)
@@ -52,12 +53,13 @@ func ReadFederationMoveHistory(ctx context.Context, tx *sql.Tx, afterID int64, l
 func loadFederationMoveHistoryCutoffs(ctx context.Context, tx federationHistoryQuery, page []Event, cutoffs map[string]int64) error {
 	var pending []string
 	for _, event := range page {
-		if event.IssueUID == nil {
+		issueUID := FederationEventIssueUID(event.IssueUID, event.Payload)
+		if issueUID == "" {
 			continue
 		}
-		if _, known := cutoffs[*event.IssueUID]; !known {
-			cutoffs[*event.IssueUID] = 0
-			pending = append(pending, *event.IssueUID)
+		if _, known := cutoffs[issueUID]; !known {
+			cutoffs[issueUID] = 0
+			pending = append(pending, issueUID)
 		}
 	}
 	for chunk := range slices.Chunk(pending, 500) {
@@ -79,6 +81,7 @@ func loadFederationMoveHistoryCutoffs(ctx context.Context, tx federationHistoryQ
 			eventID          int64
 			eventType        string
 			sourceProjectUID string
+			snapshotBearing  bool
 		}
 		history := make([]historyEvent, 0)
 		sourceProjectUIDs := make([]string, 0)
@@ -92,7 +95,10 @@ func loadFederationMoveHistoryCutoffs(ctx context.Context, tx federationHistoryQ
 			}
 			entry := historyEvent{issueUID: uid, eventID: eventID, eventType: eventType}
 			if eventType == "issue.moved" {
-				entry.sourceProjectUID, _ = StringValue(PayloadMap(jsontext.Value(payload))["from_project_uid"])
+				movePayload := PayloadMap(jsontext.Value(payload))
+				entry.sourceProjectUID, _ = StringValue(movePayload["from_project_uid"])
+				snapshot, exists := movePayload["snapshot"]
+				entry.snapshotBearing = exists && strings.TrimSpace(string(snapshot)) != "null"
 				if entry.sourceProjectUID != "" {
 					if _, exists := sourceProjectUIDSet[entry.sourceProjectUID]; !exists {
 						sourceProjectUIDSet[entry.sourceProjectUID] = struct{}{}
@@ -116,10 +122,12 @@ func loadFederationMoveHistoryCutoffs(ctx context.Context, tx federationHistoryQ
 		uncovered := map[string]bool{}
 		for _, event := range history {
 			if event.eventType == "issue.moved" {
-				// A later baseline can retire move history only when the move's
-				// source federation enrollment has ended. While the source hub is
-				// active, ordinary destination refreshes must not hide its move.
-				uncovered[event.issueUID] = event.sourceProjectUID == "" || !activeSources[event.sourceProjectUID]
+				// Local moves have no federated snapshot, so the first later
+				// federation baseline supersedes them even while their source hub
+				// remains active. Snapshot-bearing moves stay in the feed while
+				// that source hub is active; a later baseline retires them only
+				// after the source enrollment ends.
+				uncovered[event.issueUID] = !event.snapshotBearing || event.sourceProjectUID == "" || !activeSources[event.sourceProjectUID]
 			} else if uncovered[event.issueUID] {
 				cutoffs[event.issueUID] = event.eventID
 				uncovered[event.issueUID] = false

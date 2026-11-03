@@ -37,7 +37,15 @@ func newPulledDuplicateRecovery(store db.Storage, binding db.FederationBinding, 
 // different stream to recover its hooks. Recovery remains at-least-once when
 // existing cursors cannot prove acknowledgement; there is no outbox.
 func (r *pulledDuplicateRecovery) recover(ctx context.Context, event api.EventEnvelope) (publish, invalidate bool, err error) {
-	source, err := r.projectBinding(ctx, event.ProjectUID)
+	// A move is stored under its destination envelope, but its first pull and
+	// mutation-hook delivery belong to the source stream that exposed it.
+	publicationProjectUID := event.ProjectUID
+	if event.Type == "issue.moved" {
+		if from, ok := db.StringValue(db.PayloadMap(event.Payload)["from_project_uid"]); ok && from != "" {
+			publicationProjectUID = from
+		}
+	}
+	source, err := r.projectBinding(ctx, publicationProjectUID)
 	if err != nil {
 		return false, false, err
 	}

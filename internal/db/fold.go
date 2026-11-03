@@ -733,6 +733,17 @@ func FederationEventIssueUID(issueUID *string, payload string) string {
 	return resolveIssueUID(envelope, PayloadMap(jsontext.Value(payload)))
 }
 
+// FederationReadIssueUIDExpr returns the SQL expression that matches
+// FederationEventIssueUID for the federation-read event alias e. Payload
+// identity is used only for issue events; unrelated event payloads may mention
+// issue UIDs without becoming part of that issue's history.
+func FederationReadIssueUIDExpr(postgres bool) string {
+	if postgres {
+		return `CASE WHEN e.type LIKE 'issue.%' THEN COALESCE(NULLIF(e.issue_uid,''),e.payload::jsonb->>'issue_uid',e.payload::jsonb->>'uid') ELSE NULLIF(e.issue_uid,'') END`
+	}
+	return `CASE WHEN e.type LIKE 'issue.%' THEN COALESCE(NULLIF(e.issue_uid,''),json_extract(e.payload,'$.issue_uid'),json_extract(e.payload,'$.uid')) ELSE NULLIF(e.issue_uid,'') END`
+}
+
 func resolveIssueUID(envelope string, payload map[string]jsontext.Value) string {
 	if envelope != "" {
 		return envelope

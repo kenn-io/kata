@@ -230,6 +230,51 @@ func TestSyncFederationMovedIssueRecoversAcrossProjectStreams(t *testing.T) {
 	}
 }
 
+func TestSyncFederationMoveRecoversOnDestinationAfterSourcePullFailure(t *testing.T) {
+	ctx := t.Context()
+	hub, projects := newMoveDeliveryHub(t, "failed-move-source", "failed-move-target")
+	receiver := newMoveDeliverySpoke(t, hub, projects)
+	issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: projects[0].ID, Title: "move hook recovery", Author: "worker",
+	})
+	require.NoError(t, err)
+	for i := range projects {
+		require.NoError(t, receiver.sync(t, i))
+	}
+	moved, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: issue.ID, FromProjectID: projects[0].ID, ToProjectID: projects[1].ID,
+		IfMatchRev: issue.Revision, Actor: "worker",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, moved.Event)
+
+	var delivered []db.Event
+	sync := func(index int) error {
+		binding, err := receiver.env.DB.FederationBindingByProject(ctx, receiver.projects[index].ID)
+		if err != nil {
+			return err
+		}
+		return SyncFederationOnceWithPulledEvents(
+			ctx, receiver.env.DB, binding, receiver.credentials[projects[index].UID], clientpkg.Opts{},
+			func(_ int64, events []db.Event) { delivered = append(delivered, events...) }, receiver.credentials,
+		)
+	}
+	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "during_spoke_pull_apply_before_materialize=move-recovery")
+	require.Error(t, sync(0), "the source stream fails after retaining the move")
+	require.Empty(t, delivered)
+	t.Setenv("KATA_TEST_FEDERATION_FAILPOINTS", "")
+	require.NoError(t, sync(1), "the destination stream should recover the retained move hook")
+	require.NoError(t, sync(0), "the source stream can retry after the destination cursor advances")
+
+	movePublications := 0
+	for _, event := range delivered {
+		if event.UID == moved.Event.UID {
+			movePublications++
+		}
+	}
+	require.Equal(t, 1, movePublications, "the move hook must publish once despite duplicate cross-stream delivery")
+}
+
 type beforePullApplyStore struct {
 	db.Storage
 	before func()
