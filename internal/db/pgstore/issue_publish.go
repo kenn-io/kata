@@ -475,6 +475,10 @@ func (s *Store) ResolveIssuePublication(ctx context.Context, params db.IssuePubl
 		if pending == nil || pending.AttemptUID != params.AttemptUID || pending.IssueUID != g.IssueUID || pending.BindingID != g.BindingID {
 			return db.ErrImportValidation
 		}
+		var projectName string
+		if err := tx.QueryRowContext(ctx, `SELECT name FROM projects WHERE id=$1 AND uid=$2`, g.ProjectID, g.ProjectUID).Scan(&projectName); err != nil {
+			return mapSQLError(err, nil)
+		}
 		payload, err := json.Marshal(struct {
 			AttemptUID string `json:"attempt_uid"`
 			Message    string `json:"message"`
@@ -484,7 +488,7 @@ func (s *Store) ResolveIssuePublication(ctx context.Context, params db.IssuePubl
 		if err != nil {
 			return err
 		}
-		event, err := s.insertEventTx(ctx, tx, eventInsert{ProjectID: g.ProjectID, ProjectUID: g.ProjectUID, IssueID: &g.IssueID, IssueUID: &g.IssueUID, Type: "issue.publication_resolved", Actor: params.Actor, Payload: string(payload), SkipRelay: true})
+		event, err := s.insertEventTx(ctx, tx, eventInsert{ProjectID: g.ProjectID, ProjectUID: g.ProjectUID, ProjectName: projectName, IssueID: &g.IssueID, IssueUID: &g.IssueUID, Type: "issue.publication_resolved", Actor: params.Actor, Payload: string(payload), SkipRelay: true})
 		if err != nil {
 			return err
 		}

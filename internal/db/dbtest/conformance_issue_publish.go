@@ -246,6 +246,7 @@ func checkIssuePublishResolve(t *testing.T, store db.Storage, _ Backend) error {
 	require.NoError(t, err)
 	require.Len(t, events, 1)
 	require.Equal(t, "operator", events[0].Actor)
+	require.Equal(t, "example-project", events[0].ProjectName)
 	require.Contains(t, events[0].Payload, params.Message)
 	require.Contains(t, events[0].Payload, pending.AttemptUID)
 	saved, err := p.PendingIssuePublication(ctx, claim.Issue.ProjectID)

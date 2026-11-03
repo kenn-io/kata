@@ -16,7 +16,7 @@ func newIssuePublishCmd(provider string) *cobra.Command {
 	var adopt, attempt, message string
 	var resolve bool
 	cmd := &cobra.Command{Use: "publish <issue-ref>", Short: "publish one native issue to " + issueSyncLabel(provider), Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		if (adopt != "" && resolve) || (resolve && (strings.TrimSpace(attempt) == "" || strings.TrimSpace(message) == "")) || (!resolve && (cmd.Flags().Changed("attempt") || cmd.Flags().Changed("message"))) {
+		if (cmd.Flags().Changed("adopt") && strings.TrimSpace(adopt) == "") || (adopt != "" && resolve) || (resolve && (strings.TrimSpace(attempt) == "" || strings.TrimSpace(message) == "")) || (!resolve && (cmd.Flags().Changed("attempt") || cmd.Flags().Changed("message"))) {
 			return &cliError{Message: "use --adopt or --resolve-not-created; resolution requires --attempt and --message", Kind: kindValidation, ExitCode: ExitValidation}
 		}
 		ctx, baseURL, pid, ref, err := resolveIssueRefForCommand(cmd, args[0])

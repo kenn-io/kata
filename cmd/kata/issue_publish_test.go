@@ -164,7 +164,7 @@ func TestIssuePublishCLIStatusRecoveryIdentity(t *testing.T) {
 
 func TestIssuePublishCLIRecoveryValidation(t *testing.T) {
 	env, dir := publishCLIHTTP(t, true, func(http.ResponseWriter, *http.Request) { t.Error("invalid recovery reached daemon") })
-	for _, extra := range [][]string{{"--adopt", "7", "--resolve-not-created"}, {"--resolve-not-created"}, {"--attempt", "attempt-example"}, {"--message", "inspection"}} {
+	for _, extra := range [][]string{{"--adopt", "7", "--resolve-not-created"}, {"--adopt", ""}, {"--adopt", "  "}, {"--resolve-not-created"}, {"--attempt", "attempt-example"}, {"--message", "inspection"}} {
 		args := append([]string{"sync", "github", "publish", "abc4"}, extra...)
 		_, _, err := runCLIWithErr(t, env, dir, args...)
 		require.Error(t, err)
