@@ -282,6 +282,11 @@ func (d *Store) ingestFederationEventsOnce(
 	if err != nil {
 		return db.FederationIngestResult{}, err
 	}
+	for _, event := range result.Events {
+		if err := d.queueRelaySourceTx(ctx, tx, event); err != nil {
+			return db.FederationIngestResult{}, err
+		}
+	}
 	if err := federationFailpoint("before_federation_ingest_commit"); err != nil {
 		return db.FederationIngestResult{}, err
 	}
