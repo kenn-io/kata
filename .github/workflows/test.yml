@@ -261,8 +261,8 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      - name: Restore and save Linux Go cache
-        uses: actions/cache@v6.1.0
+      - name: Restore Linux Go cache
+        uses: actions/cache/restore@v6.1.0
         with: &linux-go-cache
           path: |
             ~/.cache/go-build
@@ -331,6 +331,15 @@ jobs:
           path: gotestsum/go-e2e.json
           retention-days: 14
           if-no-files-found: ignore
+
+      - name: Save Linux Go cache
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: linux-go-${{ runner.os }}-${{ runner.arch }}-go-${{ steps.setup-go.outputs.go-version }}-${{ github.sha }}
 
   native-agent-plugins:
     needs: changes
