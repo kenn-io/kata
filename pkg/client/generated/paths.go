@@ -153,6 +153,15 @@ type GetCronCapabilitiesPath struct {
 	ProjectID int64 `json:"project_id"`
 }
 
+type ShowCronOccurrenceClaimPath struct {
+	ProjectID int64  `json:"project_id"`
+	RunUID    string `json:"run_uid" validate:"required"`
+}
+
+func (s ShowCronOccurrenceClaimPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(s))
+}
+
 type ListCronJobsPath struct {
 	ProjectID int64 `json:"project_id"`
 }
@@ -195,6 +204,15 @@ type RestoreCronJobPath struct {
 
 func (r RestoreCronJobPath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
+type ClaimCronOccurrencePath struct {
+	ProjectID int64  `json:"project_id"`
+	JobUID    string `json:"job_uid" validate:"required"`
+}
+
+func (c ClaimCronOccurrencePath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
 }
 
 type ListCronRunsPath struct {

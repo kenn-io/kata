@@ -50,6 +50,8 @@ type ReplaceCronJobBody = PutCronJobBody
 
 type RestoreCronJobBody = CronDefinitionActionBody
 
+type ClaimCronOccurrenceBody = CronClaimBody
+
 type CreateCronWorkflowBody = PutCronWorkflowBody
 
 type ArchiveCronWorkflowBody = CronDefinitionActionBody

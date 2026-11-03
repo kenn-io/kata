@@ -55,3 +55,28 @@ func TestCronUIDRetryReplaysObservation(t *testing.T) {
 	require.Len(t, runs, 1)
 	require.Equal(t, runUID, runs[0].UID)
 }
+
+func TestCronClaimClientRetainsDecisionOnReplay(t *testing.T) {
+	env := testenv.New(t)
+	p, err := env.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	def := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Review"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "skip"}
+	j, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Name: "Review", Actor: "worker", Definition: def})
+	require.NoError(t, err)
+	c, err := client.NewWithHTTPClient(env.URL, env.HTTP)
+	require.NoError(t, err)
+	run, err := client.NewCronUID()
+	require.NoError(t, err)
+	actor := "worker"
+	opts := &generated.ClaimCronOccurrenceRequestOptions{PathParams: &generated.ClaimCronOccurrencePath{ProjectID: p.ID, JobUID: j.UID}, Body: &generated.CronClaimBody{RunUID: run, DefinitionEventUID: j.DefinitionEventUID, OccurrenceKey: "2030-01-02T03:04:05Z", Actor: &actor}}
+	first, err := c.ClaimCronOccurrenceWithResponse(t.Context(), opts)
+	require.NoError(t, err)
+	require.Equal(t, 201, first.StatusCode)
+	replay, err := c.ClaimCronOccurrenceWithResponse(t.Context(), opts)
+	require.NoError(t, err)
+	require.Equal(t, 200, replay.StatusCode)
+	// The successful response must remain decoded by the public generated client.
+	require.NotNil(t, replay.JSON200)
+	require.True(t, replay.JSON200.Replayed)
+	require.Equal(t, run, replay.JSON200.Claim.RunUID)
+}

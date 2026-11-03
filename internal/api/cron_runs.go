@@ -18,12 +18,20 @@ type CronProjectRequest struct {
 	ProjectID int64 `path:"project_id"`
 }
 
+// CronCapabilitiesRequest allows a scoped enrollment to negotiate root support.
+type CronCapabilitiesRequest struct {
+	CronProjectRequest
+	Authorization string `header:"Authorization"`
+}
+
 // CronCapabilitiesResponse advertises ordinary read-only feature support.
 type CronCapabilitiesResponse struct {
 	EventFeatures string `header:"X-Kata-Event-Features"`
 	Body          struct {
-		ProjectUID    string   `json:"project_uid"`
-		EventFeatures []string `json:"event_features"`
+		ProjectUID                string   `json:"project_uid"`
+		EventFeatures             []string `json:"event_features"`
+		Capabilities              []string `json:"capabilities"`
+		ClaimAuthorityInstanceUID string   `json:"claim_authority_instance_uid,omitempty"`
 	}
 }
 

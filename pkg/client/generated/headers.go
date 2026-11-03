@@ -19,6 +19,14 @@ type PurgeProjectHeaders struct {
 	XKataConfirm *string `json:"X-Kata-Confirm,omitempty"`
 }
 
+type GetCronCapabilitiesHeaders struct {
+	Authorization *string `json:"Authorization,omitempty"`
+}
+
+type ShowCronOccurrenceClaimHeaders struct {
+	Authorization *string `json:"Authorization,omitempty"`
+}
+
 type CreateCronJobHeaders struct {
 	Authorization *string `json:"Authorization,omitempty"`
 }
@@ -32,6 +40,10 @@ type ReplaceCronJobHeaders struct {
 }
 
 type RestoreCronJobHeaders struct {
+	Authorization *string `json:"Authorization,omitempty"`
+}
+
+type ClaimCronOccurrenceHeaders struct {
 	Authorization *string `json:"Authorization,omitempty"`
 }
 

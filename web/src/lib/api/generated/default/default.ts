@@ -27,6 +27,7 @@ import type {
   CaptureTelemetryEventResponseBody,
   ClaimActionBody,
   ClaimActionResponseBody,
+  ClaimCronOccurrencePathParameters,
   ClaimIssuePathParameters,
   ClaimRequestBody,
   ClaimResponseBody,
@@ -60,6 +61,8 @@ import type {
   CreateTokenRequestBody,
   CreateTokenResponseBody,
   CronCapabilitiesResponseBody,
+  CronClaimBody,
+  CronClaimResponseBody,
   CronDefinitionActionBody,
   CronJobResponseBody,
   CronRunResponseBody,
@@ -287,6 +290,7 @@ import type {
   SetProjectAccessPathParameters,
   SetProjectAccessRequestBody,
   ShowCronJobPathParameters,
+  ShowCronOccurrenceClaimPathParameters,
   ShowCronRunPathParameters,
   ShowCronWorkflowPathParameters,
   ShowIssueByUIDParams,
@@ -2187,6 +2191,79 @@ export const getCronCapabilities = async (
   })
 }
 
+export type showCronOccurrenceClaimResponse200 = {
+  data: CronClaimResponseBody
+  status: 200
+}
+
+export type showCronOccurrenceClaimResponse401 = {
+  data: ErrorEnvelope
+  status: 401
+}
+
+export type showCronOccurrenceClaimResponse403 = {
+  data: ErrorEnvelope
+  status: 403
+}
+
+export type showCronOccurrenceClaimResponse404 = {
+  data: ErrorEnvelope
+  status: 404
+}
+
+export type showCronOccurrenceClaimResponse422 = {
+  data: ErrorEnvelope
+  status: 422
+}
+
+export type showCronOccurrenceClaimResponse500 = {
+  data: ErrorEnvelope
+  status: 500
+}
+
+export type showCronOccurrenceClaimResponse503 = {
+  data: ErrorEnvelope
+  status: 503
+}
+
+export type showCronOccurrenceClaimResponseSuccess = showCronOccurrenceClaimResponse200 & {
+  headers: Headers
+}
+export type showCronOccurrenceClaimResponseError = (
+  | showCronOccurrenceClaimResponse401
+  | showCronOccurrenceClaimResponse403
+  | showCronOccurrenceClaimResponse404
+  | showCronOccurrenceClaimResponse422
+  | showCronOccurrenceClaimResponse500
+  | showCronOccurrenceClaimResponse503
+) & {
+  headers: Headers
+}
+
+export type showCronOccurrenceClaimResponse =
+  | showCronOccurrenceClaimResponseSuccess
+  | showCronOccurrenceClaimResponseError
+
+export const getShowCronOccurrenceClaimUrl = ({
+  projectId,
+  runUid,
+}: ShowCronOccurrenceClaimPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/claims/${encodeURIComponent(String(runUid))}`
+}
+
+export const showCronOccurrenceClaim = async (
+  { projectId, runUid }: ShowCronOccurrenceClaimPathParameters,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<showCronOccurrenceClaimResponse> => {
+  return orvalFetch<showCronOccurrenceClaimResponse>(
+    getShowCronOccurrenceClaimUrl({ projectId, runUid }),
+    {
+      ...options,
+      method: 'GET',
+    },
+  )
+}
+
 export type listCronJobsResponse200 = {
   data: ListCronJobsResponseBody
   status: 200
@@ -2442,6 +2519,107 @@ export const restoreCronJob = async (
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(cronDefinitionActionBody),
+  })
+}
+
+export type claimCronOccurrenceResponse200 = {
+  data: CronClaimResponseBody
+  status: 200
+}
+
+export type claimCronOccurrenceResponse201 = {
+  data: CronClaimResponseBody
+  status: 201
+}
+
+export type claimCronOccurrenceResponse400 = {
+  data: ErrorEnvelope
+  status: 400
+}
+
+export type claimCronOccurrenceResponse401 = {
+  data: ErrorEnvelope
+  status: 401
+}
+
+export type claimCronOccurrenceResponse403 = {
+  data: ErrorEnvelope
+  status: 403
+}
+
+export type claimCronOccurrenceResponse404 = {
+  data: ErrorEnvelope
+  status: 404
+}
+
+export type claimCronOccurrenceResponse409 = {
+  data: ErrorEnvelope
+  status: 409
+}
+
+export type claimCronOccurrenceResponse422 = {
+  data: ErrorEnvelope
+  status: 422
+}
+
+export type claimCronOccurrenceResponse500 = {
+  data: ErrorEnvelope
+  status: 500
+}
+
+export type claimCronOccurrenceResponse503 = {
+  data: ErrorEnvelope
+  status: 503
+}
+
+export type claimCronOccurrenceResponseSuccess = (
+  | claimCronOccurrenceResponse200
+  | claimCronOccurrenceResponse201
+) & {
+  headers: Headers
+}
+export type claimCronOccurrenceResponseError = (
+  | claimCronOccurrenceResponse400
+  | claimCronOccurrenceResponse401
+  | claimCronOccurrenceResponse403
+  | claimCronOccurrenceResponse404
+  | claimCronOccurrenceResponse409
+  | claimCronOccurrenceResponse422
+  | claimCronOccurrenceResponse500
+  | claimCronOccurrenceResponse503
+) & {
+  headers: Headers
+}
+
+export type claimCronOccurrenceResponse =
+  | claimCronOccurrenceResponseSuccess
+  | claimCronOccurrenceResponseError
+
+export const getClaimCronOccurrenceUrl = ({
+  projectId,
+  jobUid,
+}: ClaimCronOccurrencePathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/jobs/${encodeURIComponent(String(jobUid))}/claims`
+}
+
+export const claimCronOccurrence = async (
+  { projectId, jobUid }: ClaimCronOccurrencePathParameters,
+  cronClaimBody: CronClaimBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<claimCronOccurrenceResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<claimCronOccurrenceResponse>(getClaimCronOccurrenceUrl({ projectId, jobUid }), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(cronClaimBody),
   })
 }
 

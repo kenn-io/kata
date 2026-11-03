@@ -818,6 +818,7 @@ func registerRecurrences(humaAPI huma.API, cfg ServerConfig) {
 	registerRecurrencesHandlers(humaAPI, cfg)
 	registerCronDefinitionHandlers(humaAPI, cfg)
 	registerCronRunHandlers(humaAPI, cfg)
+	registerCronClaimHandlers(humaAPI, cfg)
 }
 
 // registerMetadata registers metadata patch routes.

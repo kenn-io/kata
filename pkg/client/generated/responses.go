@@ -175,6 +175,20 @@ type GetCronCapabilitiesResponse = CronCapabilitiesResponseBody
 
 type GetCronCapabilitiesErrorResponse = ErrorEnvelope
 
+type ShowCronOccurrenceClaimResponse = CronClaimResponseBody
+
+type ShowCronOccurrenceClaimErrorResponse = ErrorEnvelope
+
+type ShowCronOccurrenceClaimErrorResponseJSON = ErrorEnvelope
+
+type ShowCronOccurrenceClaimErrorResponseJSON404 = ErrorEnvelope
+
+type ShowCronOccurrenceClaimErrorResponseJSON422 = ErrorEnvelope
+
+type ShowCronOccurrenceClaimErrorResponseJSON500 = ErrorEnvelope
+
+type ShowCronOccurrenceClaimErrorResponseJSON503 = ErrorEnvelope
+
 type ListCronJobsResponse = ListCronJobsResponseBody
 
 type ListCronJobsErrorResponse = ErrorEnvelope
@@ -198,6 +212,26 @@ type ReplaceCronJobErrorResponse = ErrorEnvelope
 type RestoreCronJobResponse = CronJobResponseBody
 
 type RestoreCronJobErrorResponse = ErrorEnvelope
+
+type ClaimCronOccurrenceResponse = CronClaimResponseBody
+
+type ClaimCronOccurrenceResponseJSON = CronClaimResponseBody
+
+type ClaimCronOccurrenceErrorResponse = ErrorEnvelope
+
+type ClaimCronOccurrenceErrorResponseJSON = ErrorEnvelope
+
+type ClaimCronOccurrenceErrorResponseJSON403 = ErrorEnvelope
+
+type ClaimCronOccurrenceErrorResponseJSON404 = ErrorEnvelope
+
+type ClaimCronOccurrenceErrorResponseJSON409 = ErrorEnvelope
+
+type ClaimCronOccurrenceErrorResponseJSON422 = ErrorEnvelope
+
+type ClaimCronOccurrenceErrorResponseJSON500 = ErrorEnvelope
+
+type ClaimCronOccurrenceErrorResponseJSON503 = ErrorEnvelope
 
 type ListCronRunsResponse = CronRunsResponseBody
 
@@ -945,6 +979,19 @@ type GetCronCapabilitiesResp struct {
 	JSONDefault  *GetCronCapabilitiesErrorResponse
 }
 
+type ShowCronOccurrenceClaimResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ShowCronOccurrenceClaimResponse
+	JSON401      *ShowCronOccurrenceClaimErrorResponse
+	JSON403      *ShowCronOccurrenceClaimErrorResponseJSON
+	JSON404      *ShowCronOccurrenceClaimErrorResponseJSON404
+	JSON422      *ShowCronOccurrenceClaimErrorResponseJSON422
+	JSON500      *ShowCronOccurrenceClaimErrorResponseJSON500
+	JSON503      *ShowCronOccurrenceClaimErrorResponseJSON503
+}
+
 type ListCronJobsResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
@@ -991,6 +1038,22 @@ type RestoreCronJobResp struct {
 	StatusCode   int
 	JSON200      *RestoreCronJobResponse
 	JSONDefault  *RestoreCronJobErrorResponse
+}
+
+type ClaimCronOccurrenceResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ClaimCronOccurrenceResponse
+	JSON201      *ClaimCronOccurrenceResponseJSON
+	JSON400      *ClaimCronOccurrenceErrorResponse
+	JSON401      *ClaimCronOccurrenceErrorResponseJSON
+	JSON403      *ClaimCronOccurrenceErrorResponseJSON403
+	JSON404      *ClaimCronOccurrenceErrorResponseJSON404
+	JSON409      *ClaimCronOccurrenceErrorResponseJSON409
+	JSON422      *ClaimCronOccurrenceErrorResponseJSON422
+	JSON500      *ClaimCronOccurrenceErrorResponseJSON500
+	JSON503      *ClaimCronOccurrenceErrorResponseJSON503
 }
 
 type ListCronRunsResp struct {

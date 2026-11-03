@@ -3,6 +3,8 @@
  */
 
 export interface CronCapabilitiesResponseBody {
+  capabilities: string[]
+  claim_authority_instance_uid?: string
   event_features: string[]
   project_uid: string
   [key: string]: unknown

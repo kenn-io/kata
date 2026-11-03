@@ -1299,12 +1299,95 @@ func (c CreateTokenResponseBody) Validate() error {
 }
 
 type CronCapabilitiesResponseBody struct {
-	EventFeatures []string `json:"event_features" validate:"required"`
-	ProjectUID    string   `json:"project_uid" validate:"required"`
+	Capabilities              []string `json:"capabilities" validate:"required"`
+	ClaimAuthorityInstanceUID *string  `json:"claim_authority_instance_uid,omitempty"`
+	EventFeatures             []string `json:"event_features" validate:"required"`
+	ProjectUID                string   `json:"project_uid" validate:"required"`
 }
 
 func (c CronCapabilitiesResponseBody) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+}
+
+type CronClaimBody struct {
+	Actor                      *string          `json:"actor,omitempty"`
+	DefinitionEventUID         string           `json:"definition_event_uid" validate:"required"`
+	ExecutorLabel              *string          `json:"executor_label,omitempty"`
+	OccurrenceKey              string           `json:"occurrence_key" validate:"required,max=1024"`
+	Origin                     *CronClaimOrigin `json:"origin,omitempty"`
+	RunUID                     string           `json:"run_uid" validate:"required"`
+	Teammate                   *string          `json:"teammate,omitempty"`
+	WorkflowDefinitionEventUID *string          `json:"workflow_definition_event_uid,omitempty"`
+	WorkflowUID                *string          `json:"workflow_uid,omitempty"`
+}
+
+func (c CronClaimBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(c.DefinitionEventUID, "required"); err != nil {
+		errors = errors.Append("DefinitionEventUID", err)
+	}
+	if err := typesValidator.Var(c.OccurrenceKey, "required,max=1024"); err != nil {
+		errors = errors.Append("OccurrenceKey", err)
+	}
+	if c.Origin != nil {
+		if v, ok := any(c.Origin).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Origin", err)
+			}
+		}
+	}
+	if err := typesValidator.Var(c.RunUID, "required"); err != nil {
+		errors = errors.Append("RunUID", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type CronClaimOrigin struct {
+	Actor             string   `json:"actor" validate:"required"`
+	HolderInstanceUID string   `json:"holder_instance_uid" validate:"required"`
+	Path              []string `json:"path" validate:"required"`
+}
+
+func (c CronClaimOrigin) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(c.Actor, "required"); err != nil {
+		errors = errors.Append("Actor", err)
+	}
+	if err := typesValidator.Var(c.HolderInstanceUID, "required"); err != nil {
+		errors = errors.Append("HolderInstanceUID", err)
+	}
+	if err := typesValidator.Var(c.Path, "required"); err != nil {
+		errors = errors.Append("Path", err)
+	}
+	if len(c.Path) > 16 {
+		errors = errors.Add("Path", fmt.Sprintf("must have at most 16 items, got %d", len(c.Path)))
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type CronClaimResponseBody struct {
+	Claim    CronOccurrenceClaim `json:"claim"`
+	Claimed  bool                `json:"claimed"`
+	Replayed bool                `json:"replayed"`
+}
+
+func (c CronClaimResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(c.Claim).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Claim", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type CronDefinitionActionBody struct {
@@ -1504,6 +1587,26 @@ func (c CronJobResponseBody) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type CronOccurrenceClaim struct {
+	Actor                      string    `json:"actor" validate:"required"`
+	AuthorityInstanceUID       string    `json:"authority_instance_uid" validate:"required"`
+	CreatedAt                  time.Time `json:"created_at" validate:"required"`
+	DefinitionEventUID         string    `json:"definition_event_uid" validate:"required"`
+	ExecutorLabel              *string   `json:"executor_label,omitempty"`
+	HolderInstanceUID          string    `json:"holder_instance_uid" validate:"required"`
+	JobUID                     string    `json:"job_uid" validate:"required"`
+	OccurrenceKey              string    `json:"occurrence_key" validate:"required"`
+	ProjectID                  int64     `json:"project_id"`
+	RunUID                     string    `json:"run_uid" validate:"required"`
+	Teammate                   *string   `json:"teammate,omitempty"`
+	WorkflowDefinitionEventUID *string   `json:"workflow_definition_event_uid,omitempty"`
+	WorkflowUID                *string   `json:"workflow_uid,omitempty"`
+}
+
+func (c CronOccurrenceClaim) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
 }
 
 type CronRun struct {

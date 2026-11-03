@@ -1040,6 +1040,12 @@ components:
       type: object
     CronCapabilitiesResponseBody:
       properties:
+        capabilities:
+          items:
+            type: string
+          type: array
+        claim_authority_instance_uid:
+          type: string
         event_features:
           items:
             type: string
@@ -1049,6 +1055,64 @@ components:
       required:
         - project_uid
         - event_features
+        - capabilities
+      type: object
+    CronClaimBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        definition_event_uid:
+          type: string
+        executor_label:
+          type: string
+        occurrence_key:
+          maxLength: 1024
+          type: string
+        origin:
+          $ref: "#/components/schemas/CronClaimOrigin"
+        run_uid:
+          type: string
+        teammate:
+          type: string
+        workflow_definition_event_uid:
+          type: string
+        workflow_uid:
+          type: string
+      required:
+        - run_uid
+        - definition_event_uid
+        - occurrence_key
+      type: object
+    CronClaimOrigin:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        holder_instance_uid:
+          type: string
+        path:
+          items:
+            type: string
+          maxItems: 16
+          type: array
+      required:
+        - holder_instance_uid
+        - actor
+        - path
+      type: object
+    CronClaimResponseBody:
+      properties:
+        claim:
+          $ref: "#/components/schemas/CronOccurrenceClaim"
+        claimed:
+          type: boolean
+        replayed:
+          type: boolean
+      required:
+        - claimed
+        - replayed
+        - claim
       type: object
     CronDefinitionActionBody:
       additionalProperties: false
@@ -1202,6 +1266,47 @@ components:
           $ref: "#/components/schemas/CronJob"
       required:
         - job
+      type: object
+    CronOccurrenceClaim:
+      properties:
+        actor:
+          type: string
+        authority_instance_uid:
+          type: string
+        created_at:
+          format: date-time
+          type: string
+        definition_event_uid:
+          type: string
+        executor_label:
+          type: string
+        holder_instance_uid:
+          type: string
+        job_uid:
+          type: string
+        occurrence_key:
+          type: string
+        project_id:
+          format: int64
+          type: integer
+        run_uid:
+          type: string
+        teammate:
+          type: string
+        workflow_definition_event_uid:
+          type: string
+        workflow_uid:
+          type: string
+      required:
+        - project_id
+        - job_uid
+        - occurrence_key
+        - run_uid
+        - holder_instance_uid
+        - actor
+        - definition_event_uid
+        - authority_instance_uid
+        - created_at
       type: object
     CronRun:
       properties:
@@ -8268,6 +8373,10 @@ paths:
           schema:
             format: int64
             type: integer
+        - in: header
+          name: Authorization
+          schema:
+            type: string
       responses:
         "200":
           content:
@@ -8285,6 +8394,68 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
+  /api/v1/projects/{project_id}/cron/claims/{run_uid}:
+    get:
+      operationId: showCronOccurrenceClaim
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+        - in: path
+          name: run_uid
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CronClaimResponseBody"
+          description: OK
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Not Found
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Internal Server Error
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Service Unavailable
   /api/v1/projects/{project_id}/cron/jobs:
     get:
       operationId: listCronJobs
@@ -8485,6 +8656,92 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
+  /api/v1/projects/{project_id}/cron/jobs/{job_uid}/claims:
+    post:
+      operationId: claimCronOccurrence
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+        - in: path
+          name: job_uid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CronClaimBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CronClaimResponseBody"
+          description: Retained grant replay
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CronClaimResponseBody"
+          description: Created
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Bad Request
+        "401":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Unauthorized
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Conflict
+        "422":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Unprocessable Entity
+        "500":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Internal Server Error
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Service Unavailable
   /api/v1/projects/{project_id}/cron/runs:
     get:
       operationId: listCronRuns

@@ -799,3 +799,34 @@ func TestCronCLIParentUpdateKeepsBindingProtections(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, parents[0].UID, stored.Definition.Issue.ParentUID)
 }
+
+func TestCronClaimCommand(t *testing.T) {
+	t.Setenv("KATA_AUTHOR", "worker")
+	env := testenv.New(t)
+	p, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	def, err := cron.ParseJob([]byte(`{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"manual"},"action":{"kind":"execute","prompt":"Review"},"issue":{"kind":"per-run","title":"Review"},"overlap":"forbid","catchup":"skip"}`))
+	require.NoError(t, err)
+	j, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Name: "Review", Actor: "worker", Definition: def})
+	require.NoError(t, err)
+	id := cronCLIUID(t)
+	args := []string{"run", "claim", id, "--job-uid", j.UID, "--definition-event-uid", j.DefinitionEventUID, "--occurrence-key", "2030-01-02T03:04:05Z", "--executor-label", "example-executor"}
+	out, _, err := executeCronCLI(t, env.URL, nil, args...)
+	require.NoError(t, err)
+	require.Contains(t, out, `"claimed":true`)
+	out, _, err = executeCronCLI(t, env.URL, nil, args...)
+	require.NoError(t, err)
+	require.Contains(t, out, `"replayed":true`)
+	out, _, err = executeCronCLI(t, env.URL, nil, "run", "claim", "show", id)
+	require.NoError(t, err)
+	require.Contains(t, out, id)
+	args[2] = cronCLIUID(t)
+	_, _, err = executeCronCLI(t, env.URL, nil, args...)
+	require.Error(t, err)
+	var conflict *cliError
+	require.ErrorAs(t, err, &conflict)
+	require.Equal(t, "cron_occurrence_claimed", conflict.Code)
+	require.Contains(t, string(conflict.Data), id)
+	_, _, err = executeCronCLI(t, env.URL, nil, "run", "claim", cronCLIUID(t), "--job-uid", j.UID, "--occurrence-key", "another")
+	require.Error(t, err)
+}

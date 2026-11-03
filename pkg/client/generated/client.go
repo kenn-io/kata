@@ -263,6 +263,9 @@ type ClientInterface interface {
 	GetCronCapabilities(ctx context.Context, options *GetCronCapabilitiesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetCronCapabilitiesResponse, error)
 	GetCronCapabilitiesWithResponse(ctx context.Context, options *GetCronCapabilitiesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*GetCronCapabilitiesResp, error)
 
+	ShowCronOccurrenceClaim(ctx context.Context, options *ShowCronOccurrenceClaimRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ShowCronOccurrenceClaimResponse, error)
+	ShowCronOccurrenceClaimWithResponse(ctx context.Context, options *ShowCronOccurrenceClaimRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ShowCronOccurrenceClaimResp, error)
+
 	ListCronJobs(ctx context.Context, options *ListCronJobsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListCronJobsResponse, error)
 	ListCronJobsWithResponse(ctx context.Context, options *ListCronJobsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListCronJobsResp, error)
 
@@ -280,6 +283,9 @@ type ClientInterface interface {
 
 	RestoreCronJob(ctx context.Context, options *RestoreCronJobRequestOptions, reqEditors ...runtime.RequestEditorFn) (*RestoreCronJobResponse, error)
 	RestoreCronJobWithResponse(ctx context.Context, options *RestoreCronJobRequestOptions, reqEditors ...runtime.RequestEditorFn) (*RestoreCronJobResp, error)
+
+	ClaimCronOccurrence(ctx context.Context, options *ClaimCronOccurrenceRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ClaimCronOccurrenceResponseJSON, error)
+	ClaimCronOccurrenceWithResponse(ctx context.Context, options *ClaimCronOccurrenceRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ClaimCronOccurrenceResp, error)
 
 	ListCronRuns(ctx context.Context, options *ListCronRunsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListCronRunsResponse, error)
 	ListCronRunsWithResponse(ctx context.Context, options *ListCronRunsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListCronRunsResp, error)
@@ -3302,6 +3308,68 @@ func (c *Client) GetCronCapabilities(ctx context.Context, options *GetCronCapabi
 	return responseParser(ctx, resp)
 }
 
+func (c *Client) ShowCronOccurrenceClaim(ctx context.Context, options *ShowCronOccurrenceClaimRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ShowCronOccurrenceClaimResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/claims/{run_uid}",
+		Method:     "GET",
+		Options:    options,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*ShowCronOccurrenceClaimResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(ShowCronOccurrenceClaimErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "ShowCronOccurrenceClaimErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(ShowCronOccurrenceClaimResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "ShowCronOccurrenceClaimResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/claims/{run_uid}")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
 func (c *Client) ListCronJobs(ctx context.Context, options *ListCronJobsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListCronJobsResponse, error) {
 	var err error
 
@@ -3677,6 +3745,69 @@ func (c *Client) RestoreCronJob(ctx context.Context, options *RestoreCronJobRequ
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/jobs/{cron_uid}/restore")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) ClaimCronOccurrence(ctx context.Context, options *ClaimCronOccurrenceRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ClaimCronOccurrenceResponseJSON, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/jobs/{job_uid}/claims",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*ClaimCronOccurrenceResponseJSON, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 201 {
+			target := new(ClaimCronOccurrenceErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "ClaimCronOccurrenceErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(ClaimCronOccurrenceResponseJSON)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "ClaimCronOccurrenceResponseJSON",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/jobs/{job_uid}/claims")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}

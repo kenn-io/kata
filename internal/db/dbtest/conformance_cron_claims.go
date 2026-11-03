@@ -24,6 +24,9 @@ func checkCronOccurrenceClaims(t *testing.T, s db.Storage, b Backend) error {
 	run, err := uid.New()
 	require.NoError(t, err)
 	in := db.CronOccurrenceClaim{ProjectID: p.ID, JobUID: job.UID, RunUID: run, DefinitionEventUID: job.DefinitionEventUID, OccurrenceKey: "2030-01-02T03:04:05Z", HolderInstanceUID: s.InstanceUID(), Actor: "worker", ExecutorLabel: new("executor-a")}
+	authority, err := s.CronClaimAuthority(ctx, p.ID)
+	require.NoError(t, err)
+	require.Equal(t, s.InstanceUID(), authority)
 	got, err := s.ClaimCronOccurrence(ctx, in)
 	require.NoError(t, err)
 	require.False(t, got.Replayed)

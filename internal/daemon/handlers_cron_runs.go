@@ -22,7 +22,11 @@ func cronRunAPIError(ctx context.Context, cfg ServerConfig, err error, projectID
 }
 func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 	base := "/api/v1/projects/{project_id}/cron"
-	huma.Register(h, huma.Operation{OperationID: "getCronCapabilities", Method: http.MethodGet, Path: base + "/capabilities"}, func(ctx context.Context, in *api.CronProjectRequest) (*api.CronCapabilitiesResponse, error) {
+	huma.Register(h, huma.Operation{OperationID: "getCronCapabilities", Method: http.MethodGet, Path: base + "/capabilities"}, func(ctx context.Context, in *api.CronCapabilitiesRequest) (*api.CronCapabilitiesResponse, error) {
+		ctx, err := authorizeCronClaimRead(ctx, cfg, in.ProjectID, in.Authorization, "getCronCapabilities")
+		if err != nil {
+			return nil, err
+		}
 		project, err := activeProjectByID(ctx, cfg.DB, in.ProjectID)
 		if err != nil {
 			return nil, err
@@ -30,6 +34,11 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 		out := &api.CronCapabilitiesResponse{EventFeatures: db.SupportedEventFeatures}
 		out.Body.ProjectUID = project.UID
 		out.Body.EventFeatures = []string{db.CronEventFeature}
+		out.Body.Capabilities = []string{}
+		if authority, err := cfg.DB.CronClaimAuthority(ctx, in.ProjectID); err == nil {
+			out.Body.Capabilities = append(out.Body.Capabilities, cronOccurrenceClaimsCapability)
+			out.Body.ClaimAuthorityInstanceUID = authority
+		}
 		return out, nil
 	})
 	huma.Register(h, huma.Operation{OperationID: "observeCronRun", Method: http.MethodPut, Path: base + "/runs/{run_uid}", MaxBodyBytes: db.CronObservationLimit}, func(ctx context.Context, in *api.ObserveCronRunRequest) (*api.ObserveCronRunResponse, error) {

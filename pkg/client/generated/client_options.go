@@ -1755,6 +1755,7 @@ func (o *DetachProjectAliasRequestOptions) GetHeader() (map[string]string, error
 // GetCronCapabilitiesRequestOptions is the options needed to make a request to GetCronCapabilities.
 type GetCronCapabilitiesRequestOptions struct {
 	PathParams *GetCronCapabilitiesPath
+	Header     *GetCronCapabilitiesHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -1766,6 +1767,14 @@ func (o *GetCronCapabilitiesRequestOptions) Validate() error {
 		if v, ok := any(o.PathParams).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -1793,7 +1802,60 @@ func (o *GetCronCapabilitiesRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *GetCronCapabilitiesRequestOptions) GetHeader() (map[string]string, error) {
+	return runtime.AsMap[string](o.Header)
+}
+
+// ShowCronOccurrenceClaimRequestOptions is the options needed to make a request to ShowCronOccurrenceClaim.
+type ShowCronOccurrenceClaimRequestOptions struct {
+	PathParams *ShowCronOccurrenceClaimPath
+	Header     *ShowCronOccurrenceClaimHeaders
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *ShowCronOccurrenceClaimRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *ShowCronOccurrenceClaimRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *ShowCronOccurrenceClaimRequestOptions) GetQuery() (map[string]any, error) {
 	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *ShowCronOccurrenceClaimRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *ShowCronOccurrenceClaimRequestOptions) GetHeader() (map[string]string, error) {
+	return runtime.AsMap[string](o.Header)
 }
 
 // ListCronJobsRequestOptions is the options needed to make a request to ListCronJobs.
@@ -2138,6 +2200,68 @@ func (o *RestoreCronJobRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *RestoreCronJobRequestOptions) GetHeader() (map[string]string, error) {
+	return runtime.AsMap[string](o.Header)
+}
+
+// ClaimCronOccurrenceRequestOptions is the options needed to make a request to ClaimCronOccurrence.
+type ClaimCronOccurrenceRequestOptions struct {
+	PathParams *ClaimCronOccurrencePath
+	Body       *ClaimCronOccurrenceBody
+	Header     *ClaimCronOccurrenceHeaders
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *ClaimCronOccurrenceRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *ClaimCronOccurrenceRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *ClaimCronOccurrenceRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *ClaimCronOccurrenceRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *ClaimCronOccurrenceRequestOptions) GetHeader() (map[string]string, error) {
 	return runtime.AsMap[string](o.Header)
 }
 

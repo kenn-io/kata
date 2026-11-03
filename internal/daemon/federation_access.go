@@ -26,10 +26,13 @@ type HostFederationOperation struct {
 // hostOperationPolicies declares for the same route, which is why this table is
 // its own source of truth and not derived from that registry.
 var federationTransportOperations = map[string]HostFederationOperation{
-	"createCronJob":  {ID: "createCronJob", Mutation: true},
-	"replaceCronJob": {ID: "replaceCronJob", Mutation: true},
-	"archiveCronJob": {ID: "archiveCronJob", Mutation: true},
-	"restoreCronJob": {ID: "restoreCronJob", Mutation: true},
+	"claimCronOccurrence":     {ID: "claimCronOccurrence", Mutation: true},
+	"showCronOccurrenceClaim": {ID: "showCronOccurrenceClaim"},
+	"getCronCapabilities":     {ID: "getCronCapabilities"},
+	"createCronJob":           {ID: "createCronJob", Mutation: true},
+	"replaceCronJob":          {ID: "replaceCronJob", Mutation: true},
+	"archiveCronJob":          {ID: "archiveCronJob", Mutation: true},
+	"restoreCronJob":          {ID: "restoreCronJob", Mutation: true},
 	// Cleanup authenticates its exact secret/project/peer inside the native
 	// revocation transaction; it cannot acquire project data or write authority.
 	"disconnectRelayEnrollment": {ID: "disconnectRelayEnrollment", Mutation: true},
