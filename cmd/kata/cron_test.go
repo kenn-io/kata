@@ -247,7 +247,7 @@ func TestCronCLIJobMutationWaitsForForwardingBudget(t *testing.T) {
 		}
 		if r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/cron/jobs/") {
 			mutation.Store(true)
-			timer := time.NewTimer(300 * time.Millisecond)
+			timer := time.NewTimer(300 * time.Millisecond) //nolint:kennlint // deadlinetest: absence window; the fake holds the response past the 100ms KATA_HTTP_TIMEOUT, so only the long-running mutation client waits for it
 			defer timer.Stop()
 			select {
 			case <-timer.C:

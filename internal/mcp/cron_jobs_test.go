@@ -126,7 +126,7 @@ func TestCronJobMutationsUseLongRunningClient(t *testing.T) {
 		}
 		response := httptest.NewRecorder()
 		f.handler.ServeHTTP(response, r)
-		timer := time.NewTimer(responseDelay)
+		timer := time.NewTimer(responseDelay) //nolint:kennlint // deadlinetest: absence window; the fake holds the response past the ordinary client timeout, so only the long-running client waits for it
 		defer timer.Stop()
 		select {
 		case <-timer.C:
@@ -143,7 +143,7 @@ func TestCronJobMutationsUseLongRunningClient(t *testing.T) {
 	}))
 	t.Cleanup(slowServer.Close)
 
-	client, err := kataclient.NewWithHTTPClient(slowServer.URL, &http.Client{Timeout: ordinaryTimeout})
+	client, err := kataclient.NewWithHTTPClient(slowServer.URL, &http.Client{Timeout: ordinaryTimeout}) //nolint:kennlint // deadlinetest: the ordinary client must expire before the delayed response; mutations must not use it
 	require.NoError(t, err)
 	longRunningClient, err := kataclient.NewWithHTTPClient(slowServer.URL, &http.Client{})
 	require.NoError(t, err)
