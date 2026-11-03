@@ -86,6 +86,33 @@ func checkCommentReplyEnvelope(t *testing.T, store db.Storage) error {
 	return nil
 }
 
+func checkCaseNormalizedReplyEnvelope(t *testing.T, store db.Storage, backend Backend) error {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	source, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Reply issue", Author: "worker"})
+	require.NoError(t, err)
+	target, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Target issue", Author: "worker"})
+	require.NoError(t, err)
+	targetComment, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: target.ID, Author: "worker", Body: "Finding"})
+	require.NoError(t, err)
+	lowerTargetUID := strings.ToLower(targetComment.UID)
+	require.NotEqual(t, targetComment.UID, lowerTargetUID)
+	updateCommentIdentityForTest(ctx, t, store, backend, "uid", lowerTargetUID, targetComment.ID)
+	updateCommentIdentityForTest(ctx, t, store, backend, "uid", targetComment.UID, targetComment.ID)
+
+	reply, event, err := store.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: source.ID, Author: "worker", Body: "Answer",
+		ReplyToUID: lowerTargetUID, ReplyKind: "reply", ValidateReply: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, lowerTargetUID, reply.ReplyToUID)
+	require.Equal(t, &target.ID, event.RelatedIssueID,
+		"the event must retain the issue relation when federation normalizes a resolved reply target")
+	require.Equal(t, &target.UID, event.RelatedIssueUID)
+	return nil
+}
+
 func checkCommentIssueIDsByUIDs(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "example-project")

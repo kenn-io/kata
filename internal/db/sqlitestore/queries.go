@@ -1456,7 +1456,10 @@ func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (db
 	var relatedID *int64
 	if p.ReplyToUID != "" {
 		var targetIssueID int64
-		err := tx.QueryRowContext(ctx, `SELECT i.id FROM comments c JOIN issues i ON i.id=c.issue_id WHERE c.uid=? AND i.project_id=?`, p.ReplyToUID, issue.ProjectID).Scan(&targetIssueID)
+		relatedArgs := []any{}
+		replyTargetPredicate := db.CommentUIDLookupPredicate("c.uid", p.ReplyToUID, &relatedArgs, func(int) string { return "?" }, db.CommentDisplaySQLite)
+		relatedArgs = append(relatedArgs, issue.ProjectID)
+		err := tx.QueryRowContext(ctx, `SELECT i.id FROM comments c JOIN issues i ON i.id=c.issue_id WHERE `+replyTargetPredicate+` AND i.project_id=?`, relatedArgs...).Scan(&targetIssueID)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return db.Comment{}, db.Event{}, fmt.Errorf("lookup reply target issue: %w", err)
 		}

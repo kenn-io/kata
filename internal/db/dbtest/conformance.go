@@ -105,6 +105,7 @@ var storageScenarios = []scenario{
 	{name: "federated comment UID normalization preserves moved replies", methods: []string{"CommentsByIssue", "CreateComment", "CreateIssue", "CreateProject", "ExportComments", "ExportIssues", "ExportProjects", "ImportReplay", "InsertRemoteEvent", "IssueByUID", "MaterializeFederatedProject", "MoveIssueProject", "ProjectByUID", "ReadCommentGraph", "UpsertFederationBinding"}, runWithBackend: checkFederatedCommentUIDNormalizationPreservesMovedReplies},
 	{name: "federated comment UID normalization resolves untouched targets", methods: []string{"CommentsByIssue", "CreateIssue", "CreateProject", "ImportReplay", "InsertRemoteEvent", "IssueByUID", "MaterializeFederatedProject", "ReadCommentGraph", "UpsertFederationBinding"}, run: checkFederatedCommentUIDNormalizationResolvesUntouchedTargets},
 	{name: "comment reply envelope", methods: []string{"CreateComment"}, run: checkCommentReplyEnvelope},
+	{name: "case-normalized reply envelope", methods: []string{"CreateComment", "CreateIssue", "CreateProject"}, runWithBackend: checkCaseNormalizedReplyEnvelope},
 	{name: "comment issue ids by uids", methods: []string{"CommentIssueIDsByUIDs"}, run: checkCommentIssueIDsByUIDs},
 	{name: "issues by uids", methods: []string{"CreateProject", "CreateIssue", "SoftDeleteIssue", "IssueByUID", "IssuesByUIDs"}, run: checkIssuesByUIDs},
 	{name: "comment replies", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "EditComment", "CommentsByIssue"}, run: checkCommentReplies},

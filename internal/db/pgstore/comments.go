@@ -99,7 +99,11 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 		if params.ReplyToUID != "" {
 			var id int64
 			var uid string
-			err := tx.QueryRowContext(ctx, `SELECT i.id,i.uid FROM comments c JOIN issues i ON i.id=c.issue_id WHERE c.uid=$1 AND i.project_id=$2`, params.ReplyToUID, project.ID).Scan(&id, &uid)
+			relatedArgs := []any{}
+			replyTargetPredicate := db.CommentUIDLookupPredicate("c.uid", params.ReplyToUID, &relatedArgs, dollarPlaceholder, db.CommentDisplayPostgres)
+			projectPlaceholder := dollarPlaceholder(len(relatedArgs) + 1)
+			relatedArgs = append(relatedArgs, project.ID)
+			err := tx.QueryRowContext(ctx, `SELECT i.id,i.uid FROM comments c JOIN issues i ON i.id=c.issue_id WHERE `+replyTargetPredicate+` AND i.project_id=`+projectPlaceholder, relatedArgs...).Scan(&id, &uid)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return fmt.Errorf("lookup reply target issue: %w", err)
 			}
