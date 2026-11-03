@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 
 import type { KataTaskSummary } from './types'
+import { task as makeTask } from '../../test/task'
 import {
   DEFAULT_KATA_TASK_SORT,
   sortKataTasks,
@@ -9,23 +10,19 @@ import {
 } from './sort'
 
 function task(overrides: Partial<KataTaskSummary>): KataTaskSummary {
-  return {
+  return makeTask({
     id: 1,
     uid: 'task-a',
     project_id: 1,
     short_id: 'a',
     qualified_id: 'Roadmap#a',
     title: 'Alpha',
-    status: 'open',
     project_uid: 'project-roadmap',
     project_name: 'Roadmap',
-    metadata: {},
-    revision: 1,
-    author: 'user-a',
     created_at: '2026-05-01T00:00:00Z',
     updated_at: '2026-05-01T00:00:00Z',
     ...overrides,
-  }
+  })
 }
 
 describe('kata task sorting', () => {

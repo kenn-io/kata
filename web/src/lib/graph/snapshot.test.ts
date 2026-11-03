@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest'
 
 import type { KataReachableGraphResponse } from '../kata/types'
-import { task } from '../kata/test-helpers'
+import { task } from '../../test/task'
 import { graphDistanceByUID } from './distance'
 import { buildKataReachableGraph } from './layout'
 import { filterSnapshotGraph } from './snapshot'

@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { KataReachableGraphResponse, KataTaskSummary } from '../lib/kata/types'
-import { task } from '../lib/kata/test-helpers'
+import { task } from '../test/task'
 import IssueGraph from './IssueGraph.svelte'
 
 function graphResponse(

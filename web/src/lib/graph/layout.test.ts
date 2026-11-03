@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { KataReachableGraphResponse } from '../kata/types'
-import { task } from '../kata/test-helpers'
+import { task } from '../../test/task'
 import { buildKataReachableGraph } from './layout'
 
 function graph(overrides: Partial<KataReachableGraphResponse> = {}): KataReachableGraphResponse {
