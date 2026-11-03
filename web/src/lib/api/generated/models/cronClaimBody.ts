@@ -7,6 +7,7 @@ export interface CronClaimBody {
   actor?: string
   definition_event_uid: string
   executor_label?: string
+  expected_authority_instance_uid?: string
   /** @maxLength 1024 */
   occurrence_key: string
   origin?: CronClaimOrigin

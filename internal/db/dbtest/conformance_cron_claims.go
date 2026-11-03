@@ -119,6 +119,11 @@ func checkCronOccurrenceClaims(t *testing.T, s db.Storage, b Backend) error {
 	require.NoError(t, err)
 	_, err = s.ClaimCronOccurrence(ctx, candidate)
 	require.ErrorIs(t, err, db.ErrCronClaimPending)
+	expectedRoot := "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+	require.NoError(t, s.CheckCronClaimUpstream(ctx, replica.ID, expectedRoot))
+	require.NoError(t, s.AdmitCronClaim(ctx, replica.ID, expectedRoot))
+	require.ErrorIs(t, s.CheckCronClaimUpstream(ctx, replica.ID, s.InstanceUID()), db.ErrCronClaimPending)
+	require.ErrorIs(t, s.AdmitCronClaim(ctx, replica.ID, s.InstanceUID()), db.ErrCronClaimPending)
 	_, err = s.LeaveFederationReplica(ctx, replica.ID)
 	require.NoError(t, err)
 	_, err = s.EnableProjectFederation(ctx, replica.ID, "worker")

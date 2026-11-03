@@ -20,11 +20,21 @@ type PurgeProjectHeaders struct {
 }
 
 type GetCronCapabilitiesHeaders struct {
+	XKataCronHops *int64  `json:"X-Kata-Cron-Hops,omitempty" validate:"omitempty,gte=0,lte=16"`
 	Authorization *string `json:"Authorization,omitempty"`
+}
+
+func (g GetCronCapabilitiesHeaders) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(g))
 }
 
 type ShowCronOccurrenceClaimHeaders struct {
 	Authorization *string `json:"Authorization,omitempty"`
+	XKataCronHops *int64  `json:"X-Kata-Cron-Hops,omitempty" validate:"omitempty,gte=0,lte=16"`
+}
+
+func (s ShowCronOccurrenceClaimHeaders) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(s))
 }
 
 type CreateCronJobHeaders struct {
@@ -45,6 +55,11 @@ type RestoreCronJobHeaders struct {
 
 type ClaimCronOccurrenceHeaders struct {
 	Authorization *string `json:"Authorization,omitempty"`
+	XKataCronHops *int64  `json:"X-Kata-Cron-Hops,omitempty" validate:"omitempty,gte=0,lte=16"`
+}
+
+func (c ClaimCronOccurrenceHeaders) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
 }
 
 type PollFederationProjectEventsHeaders struct {

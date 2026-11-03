@@ -31,10 +31,30 @@ func registerCronClaimHandlers(h huma.API, cfg ServerConfig) {
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
-		if in.Body.Origin != nil {
-			return nil, federationCredentialDenied()
+		origin, err := cronClaimOrigin(cfg, principal, in.Body.Origin)
+		if err != nil {
+			return nil, err
 		}
-		result, err := cfg.DB.ClaimCronOccurrence(ctx, db.CronOccurrenceClaim{ProjectID: in.ProjectID, JobUID: in.JobUID, RunUID: in.Body.RunUID, DefinitionEventUID: in.Body.DefinitionEventUID, OccurrenceKey: in.Body.OccurrenceKey, HolderInstanceUID: principal.HolderInstanceUID, Actor: principal.Holder, Teammate: in.Body.Teammate, ExecutorLabel: in.Body.ExecutorLabel, WorkflowUID: in.Body.WorkflowUID, WorkflowDefinitionEventUID: in.Body.WorkflowDefinitionEventUID})
+		if in.Hops >= 16 {
+			return nil, cronClaimPending()
+		}
+		finish, err := beginClaimFederationTransport(ctx, cfg, in.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		defer finish()
+		binding, forward, err := cronClaimBinding(ctx, cfg, in.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		if forward {
+			return forwardCronClaim(ctx, cfg, binding, principal, origin, in.JobUID, in.Body, in.Hops)
+		}
+		if in.Body.ExpectedAuthorityInstanceUID != "" && in.Body.ExpectedAuthorityInstanceUID != cfg.DB.InstanceUID() {
+			return nil, cronClaimPending()
+		}
+
+		result, err := cfg.DB.ClaimCronOccurrence(ctx, db.CronOccurrenceClaim{ProjectID: in.ProjectID, JobUID: in.JobUID, RunUID: in.Body.RunUID, DefinitionEventUID: in.Body.DefinitionEventUID, OccurrenceKey: in.Body.OccurrenceKey, HolderInstanceUID: origin.HolderInstanceUID, Actor: origin.Actor, Teammate: in.Body.Teammate, ExecutorLabel: in.Body.ExecutorLabel, WorkflowUID: in.Body.WorkflowUID, WorkflowDefinitionEventUID: in.Body.WorkflowDefinitionEventUID})
 		if err != nil {
 			return nil, cronClaimAPIError(ctx, cfg, in.ProjectID, result, err)
 		}
@@ -51,6 +71,21 @@ func registerCronClaimHandlers(h huma.API, cfg ServerConfig) {
 		}
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
+		}
+		if in.Hops >= 16 {
+			return nil, cronClaimPending()
+		}
+		finish, err := beginClaimFederationTransport(ctx, cfg, in.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		defer finish()
+		binding, forward, err := cronClaimBinding(ctx, cfg, in.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		if forward {
+			return forwardCronClaimLookup(ctx, cfg, binding, in.RunUID, in.Hops)
 		}
 		claim, err := cfg.DB.CronOccurrenceClaim(ctx, in.ProjectID, in.RunUID)
 		if err != nil {

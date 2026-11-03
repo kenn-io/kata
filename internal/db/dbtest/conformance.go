@@ -190,7 +190,7 @@ var storageScenarios = []scenario{
 	{name: "pushed definition authorship", methods: []string{"PutCronWorkflow", "IngestFederationEvents", "CronWorkflow"}, run: checkPushedDefinitionAuthorship},
 	{name: "run actor survives push enablement", methods: []string{"ObserveCronRun", "AdoptProjectIntoFederation", "EnableFederationPush"}, run: checkRunActorSurvivesPushEnablement},
 	{name: "hub accepts known run actor", methods: []string{"ObserveCronRun", "IngestFederationEvents"}, run: checkHubAcceptsKnownRunActor},
-	{name: "cron occurrence claims", methods: []string{"ClaimCronOccurrence", "CronOccurrenceClaim", "ExportCronClaims", "CronClaimAuthority"}, runWithBackend: checkCronOccurrenceClaims},
+	{name: "cron occurrence claims", methods: []string{"ClaimCronOccurrence", "CronOccurrenceClaim", "ExportCronClaims", "CronClaimAuthority", "AdmitCronClaim", "CheckCronClaimUpstream"}, runWithBackend: checkCronOccurrenceClaims},
 	{name: "cron reads tolerate tightened rules", methods: []string{"PutCronJob", "CronJob", "ListCronJobs", "ExportCronJobs"}, run: checkCronReadsTolerateTightenedRules},
 	{name: "federation metadata requires enabled hub", methods: []string{"CreateProject", "AdoptProjectIntoFederation", "ReadFederation"}, run: checkFederationMetadataRequiresEnabledHub},
 	{name: "peer ingest committed events", methods: []string{"IngestFederationEvents"}, run: checkPeerIngestCommittedEvents},

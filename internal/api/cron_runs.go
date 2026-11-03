@@ -20,6 +20,7 @@ type CronProjectRequest struct {
 
 // CronCapabilitiesRequest allows a scoped enrollment to negotiate root support.
 type CronCapabilitiesRequest struct {
+	Hops int `header:"X-Kata-Cron-Hops" minimum:"0" maximum:"16"`
 	CronProjectRequest
 	Authorization string `header:"Authorization"`
 }

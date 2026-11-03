@@ -192,7 +192,7 @@ func insertCronClaim(ctx context.Context, tx *sql.Tx, c CronOccurrenceClaim) err
 
 // MarkCronReplica retains the namespace boundary after its transport binding ends.
 func MarkCronReplica(ctx context.Context, tx Transaction, projectUID string) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,'replica') ON CONFLICT(key) DO UPDATE SET value='replica'`, CronClaimAuthorityPrefix+projectUID)
+	_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,'replica') ON CONFLICT(key) DO NOTHING`, CronClaimAuthorityPrefix+projectUID)
 	return err
 }
 
@@ -220,4 +220,56 @@ func CheckCronClaimReplicaTransition(ctx context.Context, tx *sql.Tx, projectID 
 		return err
 	}
 	return MarkCronReplica(ctx, tx, id)
+}
+
+// CheckCronClaimUpstream reads the existing namespace pin without changing state.
+func CheckCronClaimUpstream(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, p int64, authority string) error {
+	if !cronUID(authority) {
+		return ErrCronClaimPending
+	}
+	var projectUID string
+	if err := q.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1 AND deleted_at IS NULL`, p).Scan(&projectUID); err != nil {
+		return err
+	}
+	var role, hubUID string
+	var enabled int
+	if err := q.QueryRowContext(ctx, `SELECT role,enabled,hub_project_uid FROM federation_bindings WHERE project_id=$1`, p).Scan(&role, &enabled, &hubUID); err != nil {
+		return err
+	}
+	if role != string(FederationRoleSpoke) || enabled != 1 || hubUID != projectUID {
+		return ErrCronClaimPending
+	}
+	var retained string
+	err := q.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=$1`, CronClaimAuthorityPrefix+projectUID).Scan(&retained)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if strings.HasPrefix(retained, "root:") && retained != "root:"+authority {
+		return ErrCronClaimPending
+	}
+	var foreign bool
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_root_keys WHERE project_uid=$1 AND active=1 AND authority_uid<>$2)`, projectUID, authority).Scan(&foreign); err != nil {
+		return err
+	}
+	if foreign {
+		return ErrCronClaimPending
+	}
+	return nil
+}
+
+// AdmitClaim runs incoming fences before forwarding and pins the root identity.
+// The transaction ends before any remote mutation; admitted requests can finish in flight.
+func (a CronSQL) AdmitClaim(ctx context.Context, p int64, authority string) error {
+	return a.transactProject(ctx, p, func(tx *sql.Tx) error {
+		if err := LockCronProject(ctx, tx, p); err != nil {
+			return err
+		}
+		if err := CheckCronClaimUpstream(ctx, tx, p, authority); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) SELECT $1||uid,$2 FROM projects WHERE id=$3 ON CONFLICT(key) DO UPDATE SET value=excluded.value`, CronClaimAuthorityPrefix, "root:"+authority, p)
+		return err
+	})
 }

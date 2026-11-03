@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json/v2"
 	"fmt"
-	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/daemon"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/daemon"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/cron"

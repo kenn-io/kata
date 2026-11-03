@@ -1066,6 +1066,8 @@ components:
           type: string
         executor_label:
           type: string
+        expected_authority_instance_uid:
+          type: string
         occurrence_key:
           maxLength: 1024
           type: string
@@ -8367,6 +8369,13 @@ paths:
     get:
       operationId: getCronCapabilities
       parameters:
+        - in: header
+          name: X-Kata-Cron-Hops
+          schema:
+            format: int64
+            maximum: 16
+            minimum: 0
+            type: integer
         - in: path
           name: project_id
           required: true
@@ -8408,6 +8417,13 @@ paths:
           name: Authorization
           schema:
             type: string
+        - in: header
+          name: X-Kata-Cron-Hops
+          schema:
+            format: int64
+            maximum: 16
+            minimum: 0
+            type: integer
         - in: path
           name: run_uid
           required: true
@@ -8670,6 +8686,13 @@ paths:
           name: Authorization
           schema:
             type: string
+        - in: header
+          name: X-Kata-Cron-Hops
+          schema:
+            format: int64
+            maximum: 16
+            minimum: 0
+            type: integer
         - in: path
           name: job_uid
           required: true

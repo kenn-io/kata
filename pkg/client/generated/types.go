@@ -1310,15 +1310,16 @@ func (c CronCapabilitiesResponseBody) Validate() error {
 }
 
 type CronClaimBody struct {
-	Actor                      *string          `json:"actor,omitempty"`
-	DefinitionEventUID         string           `json:"definition_event_uid" validate:"required"`
-	ExecutorLabel              *string          `json:"executor_label,omitempty"`
-	OccurrenceKey              string           `json:"occurrence_key" validate:"required,max=1024"`
-	Origin                     *CronClaimOrigin `json:"origin,omitempty"`
-	RunUID                     string           `json:"run_uid" validate:"required"`
-	Teammate                   *string          `json:"teammate,omitempty"`
-	WorkflowDefinitionEventUID *string          `json:"workflow_definition_event_uid,omitempty"`
-	WorkflowUID                *string          `json:"workflow_uid,omitempty"`
+	Actor                        *string          `json:"actor,omitempty"`
+	DefinitionEventUID           string           `json:"definition_event_uid" validate:"required"`
+	ExecutorLabel                *string          `json:"executor_label,omitempty"`
+	ExpectedAuthorityInstanceUID *string          `json:"expected_authority_instance_uid,omitempty"`
+	OccurrenceKey                string           `json:"occurrence_key" validate:"required,max=1024"`
+	Origin                       *CronClaimOrigin `json:"origin,omitempty"`
+	RunUID                       string           `json:"run_uid" validate:"required"`
+	Teammate                     *string          `json:"teammate,omitempty"`
+	WorkflowDefinitionEventUID   *string          `json:"workflow_definition_event_uid,omitempty"`
+	WorkflowUID                  *string          `json:"workflow_uid,omitempty"`
 }
 
 func (c CronClaimBody) Validate() error {

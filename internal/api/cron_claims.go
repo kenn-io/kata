@@ -11,21 +11,23 @@ type CronClaimOrigin struct {
 
 // CronClaimBody is an immutable, caller-retained attempt identity.
 type CronClaimBody struct {
-	RunUID                     string           `json:"run_uid"`
-	DefinitionEventUID         string           `json:"definition_event_uid"`
-	OccurrenceKey              string           `json:"occurrence_key" maxLength:"1024"`
-	Actor                      string           `json:"actor,omitempty"`
-	Teammate                   *string          `json:"teammate,omitempty"`
-	ExecutorLabel              *string          `json:"executor_label,omitempty"`
-	WorkflowUID                *string          `json:"workflow_uid,omitempty"`
-	WorkflowDefinitionEventUID *string          `json:"workflow_definition_event_uid,omitempty"`
-	Origin                     *CronClaimOrigin `json:"origin,omitempty"`
+	ExpectedAuthorityInstanceUID string           `json:"expected_authority_instance_uid,omitempty"`
+	RunUID                       string           `json:"run_uid"`
+	DefinitionEventUID           string           `json:"definition_event_uid"`
+	OccurrenceKey                string           `json:"occurrence_key" maxLength:"1024"`
+	Actor                        string           `json:"actor,omitempty"`
+	Teammate                     *string          `json:"teammate,omitempty"`
+	ExecutorLabel                *string          `json:"executor_label,omitempty"`
+	WorkflowUID                  *string          `json:"workflow_uid,omitempty"`
+	WorkflowDefinitionEventUID   *string          `json:"workflow_definition_event_uid,omitempty"`
+	Origin                       *CronClaimOrigin `json:"origin,omitempty"`
 }
 
 // ClaimCronOccurrenceRequest identifies a job and its attempt.
 type ClaimCronOccurrenceRequest struct {
 	CronProjectRequest
 	Authorization string `header:"Authorization"`
+	Hops          int    `header:"X-Kata-Cron-Hops" minimum:"0" maximum:"16"`
 	JobUID        string `path:"job_uid"`
 	Body          CronClaimBody
 }
@@ -34,6 +36,7 @@ type ClaimCronOccurrenceRequest struct {
 type CronClaimRequest struct {
 	CronProjectRequest
 	Authorization string `header:"Authorization"`
+	Hops          int    `header:"X-Kata-Cron-Hops" minimum:"0" maximum:"16"`
 	RunUID        string `path:"run_uid"`
 }
 

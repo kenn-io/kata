@@ -35,7 +35,7 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 		out.Body.ProjectUID = project.UID
 		out.Body.EventFeatures = []string{db.CronEventFeature}
 		out.Body.Capabilities = []string{}
-		if authority, err := cfg.DB.CronClaimAuthority(ctx, in.ProjectID); err == nil {
+		if authority, err := effectiveCronClaimCapability(ctx, cfg, in.ProjectID, in.Hops); err == nil {
 			out.Body.Capabilities = append(out.Body.Capabilities, cronOccurrenceClaimsCapability)
 			out.Body.ClaimAuthorityInstanceUID = authority
 		}
