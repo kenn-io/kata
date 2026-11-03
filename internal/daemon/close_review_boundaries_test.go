@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"path/filepath"
 	"testing"
@@ -87,15 +88,65 @@ func TestShowDoesNotReuseEvidenceFromAnOlderClose(t *testing.T) {
 	require.NoError(t, err)
 	_, _, _, err = store.CloseIssueGuarded(ctx, db.CloseIssueParams{IssueID: issue.ID, ExpectedProjectID: p.ID, Actor: "worker", Reason: "done", Message: "Completed the first change and verified the focused tests.", Evidence: []db.Evidence{{Type: "confirmed", Comment: claim.UID}}})
 	require.NoError(t, err)
+	closeEvents, err := store.EventsAfter(ctx, db.EventsAfterParams{IssueUID: issue.UID, Types: []string{"issue.closed"}, Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, closeEvents, 1)
+	var firstClosePayload struct {
+		ClosedAt string `json:"closed_at"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(closeEvents[0].Payload), &firstClosePayload))
 	_, _, _, err = store.ReopenIssue(ctx, issue.ID, "worker")
 	require.NoError(t, err)
 	review, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Author: "reviewer", Title: "Later review"})
 	require.NoError(t, err)
 	issue, _, _, err = store.CloseIssueGuarded(ctx, db.CloseIssueParams{IssueID: issue.ID, ExpectedProjectID: p.ID, Actor: "worker", Reason: "done", Message: "Completed the later change and checked its focused tests.", Evidence: []db.Evidence{{Type: "test", Command: "go test ./example"}}, VerificationIssueUIDs: []string{review.UID}})
 	require.NoError(t, err)
+	closeEvents, err = store.EventsAfter(ctx, db.EventsAfterParams{IssueUID: issue.UID, Types: []string{"issue.closed"}, Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, closeEvents, 2)
+	_, err = store.ExecContext(ctx, `UPDATE events SET payload=json_set(payload, '$.closed_at', ?) WHERE uid = ?`, firstClosePayload.ClosedAt, closeEvents[1].UID)
+	require.NoError(t, err)
+	closeEvents, err = store.EventsAfter(ctx, db.EventsAfterParams{IssueUID: issue.UID, Types: []string{"issue.closed"}, Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, closeEvents, 2)
+	closeEvents[1].ContentHash, err = db.EventContentHash(db.EventHashInput{
+		UID: closeEvents[1].UID, OriginInstanceUID: closeEvents[1].OriginInstanceUID,
+		ProjectUID: closeEvents[1].ProjectUID, ProjectName: closeEvents[1].ProjectName,
+		IssueUID: closeEvents[1].IssueUID, RelatedIssueUID: closeEvents[1].RelatedIssueUID,
+		Type: closeEvents[1].Type, Actor: closeEvents[1].Actor,
+		HLCPhysicalMS: closeEvents[1].HLCPhysicalMS, HLCCounter: closeEvents[1].HLCCounter,
+		CreatedAt: closeEvents[1].CreatedAt.UTC().Format(db.EventTimestampFormat),
+		Payload:   jsontext.Value(closeEvents[1].Payload),
+	})
+	require.NoError(t, err)
+	_, err = store.ExecContext(ctx, `UPDATE events SET content_hash = ? WHERE uid = ?`, closeEvents[1].ContentHash, closeEvents[1].UID)
+	require.NoError(t, err)
+	_, err = store.ExecContext(ctx, `UPDATE issues SET closed_at = ? WHERE id = ?`, firstClosePayload.ClosedAt, issue.ID)
+	require.NoError(t, err)
+	issue, err = store.IssueByID(ctx, issue.ID)
+	require.NoError(t, err)
 	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: review.ID, FromProjectID: p.ID, ToProjectID: q.ID, IfMatchRev: review.Revision, Actor: "reviewer"})
 	require.NoError(t, err)
 	restricted := db.WithAuthorizedProjects(ctx, []string{p.UID})
+	scopedCloses, err := store.EventsAfter(restricted, db.EventsAfterParams{IssueUID: issue.UID, Types: []string{"issue.closed"}, Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, scopedCloses, 2)
+	require.Equal(t, "issue.closed", scopedCloses[0].Type)
+	require.Equal(t, db.ProjectScopeResetEventType, scopedCloses[1].Type)
+	require.Equal(t, db.FoldClock{
+		HLCPhysicalMS: closeEvents[1].HLCPhysicalMS, HLCCounter: closeEvents[1].HLCCounter,
+		OriginInstanceUID: closeEvents[1].OriginInstanceUID, EventUID: closeEvents[1].UID,
+	}, scopedCloses[1].EffectiveOrder)
+	require.Zero(t, scopedCloses[1].HLCPhysicalMS)
+	require.Zero(t, scopedCloses[1].HLCCounter)
+	require.Empty(t, scopedCloses[1].UID)
+	require.Empty(t, scopedCloses[1].OriginInstanceUID)
+	serializedReset, err := json.Marshal(scopedCloses[1])
+	require.NoError(t, err)
+	require.NotContains(t, string(serializedReset), closeEvents[1].UID)
+	require.NotContains(t, string(serializedReset), closeEvents[1].OriginInstanceUID)
+	require.NotContains(t, string(serializedReset), "effective_order")
+	require.NotContains(t, string(serializedReset), "EffectiveOrder")
 	out, err := buildShowIssueResponse(restricted, ServerConfig{DB: store}, issue, false)
 	require.NoError(t, err)
 	if out.Body.Verification != nil {

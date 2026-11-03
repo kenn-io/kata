@@ -1,9 +1,12 @@
 package daemon_test
 
 import (
+	"encoding/json"
+	"encoding/json/jsontext"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemon"
@@ -48,6 +51,97 @@ func TestCloseVerificationGuard(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestShowUsesFederationOrderForCloseEvidence(t *testing.T) {
+	env := testenv.New(t)
+	project := createFederatedHubProject(t, env, "example-project")
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Federated completion", Author: "example-agent",
+	})
+	require.NoError(t, err)
+	claim, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: issue.ID, Author: "example-agent", Body: "The requested behavior is complete.",
+	})
+	require.NoError(t, err)
+
+	created, err := env.DB.EventsAfter(t.Context(), db.EventsAfterParams{
+		IssueUID: issue.UID, Types: []string{"issue.created"}, Limit: 1,
+	})
+	require.NoError(t, err)
+	require.Len(t, created, 1)
+
+	closeEvent := func(eventUID string, hlc int64, evidence db.Evidence) db.RemoteEvent {
+		t.Helper()
+		createdAt := time.UnixMilli(hlc).UTC()
+		payload, err := json.Marshal(struct {
+			IssueUID string        `json:"issue_uid"`
+			Reason   string        `json:"reason"`
+			ClosedAt string        `json:"closed_at"`
+			Evidence []db.Evidence `json:"evidence"`
+		}{
+			IssueUID: issue.UID,
+			Reason:   "done",
+			ClosedAt: createdAt.Format(db.EventTimestampFormat),
+			Evidence: []db.Evidence{evidence},
+		})
+		require.NoError(t, err)
+		event := db.RemoteEvent{
+			EventUID: eventUID, OriginInstanceUID: federationTestSpokeUID,
+			ProjectUID: project.UID, ProjectName: project.Name, IssueUID: &issue.UID,
+			Type: "issue.closed", Actor: "example-agent", HLCPhysicalMS: hlc,
+			Payload: jsontext.Value(payload), CreatedAt: createdAt,
+		}
+		event.ContentHash, err = db.EventContentHash(db.EventHashInput{
+			UID: event.EventUID, OriginInstanceUID: event.OriginInstanceUID,
+			ProjectUID: event.ProjectUID, ProjectName: event.ProjectName,
+			IssueUID: event.IssueUID, RelatedIssueUID: event.RelatedIssueUID,
+			Type: event.Type, Actor: event.Actor, HLCPhysicalMS: event.HLCPhysicalMS,
+			HLCCounter: event.HLCCounter,
+			CreatedAt:  event.CreatedAt.UTC().Format(db.EventTimestampFormat), Payload: event.Payload,
+		})
+		require.NoError(t, err)
+		return event
+	}
+	ingestClose := func(sourceEventID int64, event db.RemoteEvent) {
+		t.Helper()
+		_, err := env.DB.IngestFederationEvents(t.Context(), db.FederationIngestParams{
+			ProjectID: project.ID, SpokeInstanceUID: federationTestSpokeUID,
+			Events: []db.FederationIngestEvent{{SourceEventID: sourceEventID, Event: event}},
+		})
+		require.NoError(t, err)
+	}
+
+	newer := closeEvent("01HZNQ7VFPK1XGD8R5MABCD4EV", created[0].HLCPhysicalMS+2000,
+		db.Evidence{Type: "confirmed", Comment: claim.UID})
+	older := closeEvent("01HZNQ7VFPK1XGD8R5MABCD4EW", created[0].HLCPhysicalMS+1000,
+		db.Evidence{Type: "refuted", Comment: claim.UID})
+	ingestClose(1, newer)
+	ingestClose(2, older)
+
+	issue, err = env.DB.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	require.Equal(t, "closed", issue.Status)
+	closes, err := env.DB.EventsAfter(t.Context(), db.EventsAfterParams{
+		IssueUID: issue.UID, Types: []string{"issue.closed"}, Limit: 10,
+	})
+	require.NoError(t, err)
+	require.Len(t, closes, 2)
+	require.Equal(t, newer.EventUID, closes[0].UID)
+	require.Equal(t, older.EventUID, closes[1].UID)
+	require.Less(t, closes[0].ID, closes[1].ID, "the older close must arrive later locally")
+	require.Greater(t, closes[0].HLCPhysicalMS, closes[1].HLCPhysicalMS,
+		"federation order must keep the first close effective")
+
+	resp, raw := envDoRaw(t, env, http.MethodGet, issuePathRef(project.ID, issue.ShortID, ""), nil, nil)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "%s", string(raw))
+	var shown struct {
+		Verification *db.Verification `json:"verification"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &shown))
+	require.NotNil(t, shown.Verification)
+	require.Len(t, shown.Verification.Evidence, 1)
+	require.Equal(t, "confirmed", shown.Verification.Evidence[0].Type)
 }
 
 func TestCloseVerificationResolution(t *testing.T) {
