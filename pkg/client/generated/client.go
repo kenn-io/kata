@@ -4330,9 +4330,10 @@ func (c *Client) PollProjectEvents(ctx context.Context, options *PollProjectEven
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
-		"after_id": {Style: "form", Explode: &[]bool{false}[0]},
-		"issue":    {Style: "form", Explode: &[]bool{false}[0]},
-		"limit":    {Style: "form", Explode: &[]bool{false}[0]},
+		"after_id":                          {Style: "form", Explode: &[]bool{false}[0]},
+		"include_effective_close_event_uid": {Style: "form", Explode: &[]bool{false}[0]},
+		"issue":                             {Style: "form", Explode: &[]bool{false}[0]},
+		"limit":                             {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{
 		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/events",

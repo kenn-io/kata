@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"fmt"
@@ -17,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/docbank/docbanktest"
 	"go.kenn.io/kata/internal/metadata"
 )
@@ -28,7 +28,7 @@ func executeCloseAttachmentCLI(t *testing.T, base string, args ...string) (strin
 	var b bytes.Buffer
 	cmd.SetOut(&b)
 	cmd.SetErr(&b)
-	cmd.SetContext(contextWithBaseURL(context.Background(), base))
+	cmd.SetContext(contextWithBaseURL(t.Context(), base))
 	cmd.SetArgs(append([]string{"--project", "spoke-project"}, args...))
 	err := cmd.Execute()
 	return b.String(), err
@@ -165,7 +165,7 @@ func TestCloseAttachmentAgentOutputKeepsEvidenceID(t *testing.T) {
 }
 
 func seedCLILink(f *docbanktest.Fake) {
-	f.Seed("/reports/report.pdf", docbanktest.Node{ID: 42, Name: "report.pdf", Kind: "file", CurrentVersionID: cliLinkVersion}, docbanktest.Version{ID: cliLinkVersion, NodeID: 42, Size: 12, MediaType: "application/pdf"})
+	f.Seed("/reports/report.pdf", docbank.Node{ID: 42, Name: "report.pdf", Kind: "file", CurrentVersionID: uuid.MustParse(cliLinkVersion)}, map[uuid.UUID][]byte{uuid.MustParse(cliLinkVersion): []byte("sample bytes")})
 }
 
 func TestCloseAttachmentPreservesLowercaseFullIDForReplay(t *testing.T) {

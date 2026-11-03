@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"encoding/json/jsontext"
+	"fmt"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
@@ -17,7 +19,7 @@ import (
 // returns the purge-reset envelope: a purge removes only rows naming the purged
 // issue, and the next read omits them. Project-scope reset markers stand in for
 // rows naming a private peer; history omits them rather than ending there.
-func pollIssueHistory(ctx context.Context, store db.Storage, afterID int64, rawLimit api.OptionalInt, issue db.Issue) (*api.PollEventsResponse, error) {
+func pollIssueHistory(ctx context.Context, store db.Storage, afterID int64, rawLimit api.OptionalInt, issue db.Issue, includeEffectiveCloseEventUID bool) (*api.PollEventsResponse, error) {
 	if afterID < 0 {
 		return nil, api.NewError(400, "validation", "after_id must be a non-negative integer", "", nil)
 	}
@@ -32,6 +34,13 @@ func pollIssueHistory(ctx context.Context, store db.Storage, afterID int64, rawL
 		}
 	}
 	out := &api.PollEventsResponse{IssueUID: issue.UID}
+	if includeEffectiveCloseEventUID {
+		uid, err := effectiveIssueCloseEventUID(ctx, store, issue)
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
+		out.Body.EffectiveCloseEventUID = uid
+	}
 	out.Body.Events = make([]api.EventEnvelope, 0, limit)
 	out.Body.NextAfterID = afterID
 	for len(out.Body.Events) < limit {
@@ -44,6 +53,7 @@ func pollIssueHistory(ctx context.Context, store db.Storage, afterID int64, rawL
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		rows = attachResolvedIssueID(issue, rows)
 		projected := rows
 		visible := make([]bool, len(rows))
 		if scope == nil {
@@ -85,4 +95,85 @@ func pollIssueHistory(ctx context.Context, store db.Storage, afterID int64, rawL
 		}
 	}
 	return out, nil
+}
+
+// effectiveIssueCloseEventUID uses the same HLC fold as federation to select
+// native close intent. Scoped history deliberately redacts origin identity and
+// status transitions, so clients cannot safely re-derive this choice.
+func effectiveIssueCloseEventUID(ctx context.Context, store db.Storage, issue db.Issue) (string, error) {
+	scope := issueScopeFromContext(ctx)
+	var allowed map[int64]struct{}
+	if scope != nil {
+		if err := revalidateIssueScopedPrincipal(ctx, store); err != nil {
+			return "", err
+		}
+		var err error
+		allowed, _, err = issueScopedEventMembership(ctx, store, *scope)
+		if err != nil {
+			return "", err
+		}
+	}
+
+	const batchLimit = pollLimitMax
+	afterID := int64(0)
+	var foldEvents []db.FoldEvent
+	visibleCloseUIDs := make(map[string]struct{})
+	for {
+		rows, err := store.EventsAfter(ctx, db.EventsAfterParams{
+			AfterID: afterID, IssueUID: issue.UID, Limit: batchLimit,
+		})
+		if err != nil {
+			return "", err
+		}
+		rows = attachResolvedIssueID(issue, rows)
+		previousAfterID := afterID
+		for _, event := range rows {
+			visible := scope == nil
+			if scope != nil {
+				_, visible = projectIssueScopedEvent(event, allowed, scope.ProjectUID)
+			}
+			foldEvents = append(foldEvents, db.FoldEvent{
+				UID: event.UID, OriginInstanceUID: event.OriginInstanceUID,
+				ProjectUID: event.ProjectUID, IssueUID: issue.UID,
+				Type: event.Type, Actor: event.Actor,
+				HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter,
+				CreatedAt: event.CreatedAt.UTC().Format(db.EventTimestampFormat),
+				Payload:   jsontext.Value(event.Payload),
+			})
+			if visible && event.Type == "issue.closed" {
+				visibleCloseUIDs[event.UID] = struct{}{}
+			}
+			afterID = event.ID
+		}
+		if len(rows) < batchLimit {
+			break
+		}
+		if afterID <= previousAfterID {
+			return "", fmt.Errorf("issue history cursor did not advance")
+		}
+	}
+
+	state := db.FoldEvents(foldEvents).Issues[issue.UID]
+	if state.Status != "closed" || state.StatusIntentUID == "" {
+		return "", nil
+	}
+	if _, ok := visibleCloseUIDs[state.StatusIntentUID]; !ok {
+		return "", nil
+	}
+	return state.StatusIntentUID, nil
+}
+
+// attachResolvedIssueID lets the scoped projection authorize federated history
+// rows whose stable issue UID is present but whose local issue_id is NULL. The
+// history query already resolved and filtered this exact subject in the active
+// project, so the local row ID is the principal's authorized issue identity.
+func attachResolvedIssueID(issue db.Issue, events []db.Event) []db.Event {
+	for index := range events {
+		event := &events[index]
+		if event.IssueID == nil && event.IssueUID != nil && *event.IssueUID == issue.UID {
+			issueID := issue.ID
+			event.IssueID = &issueID
+		}
+	}
+	return events
 }

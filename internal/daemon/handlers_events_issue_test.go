@@ -2,10 +2,12 @@ package daemon_test
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
@@ -125,6 +127,101 @@ func TestPollProjectEventsIssueScopedHistory(t *testing.T) {
 	require.Equal(t, "issue.links_changed", page.Events[0].Type)
 	require.Empty(t, page.Events[0].Payload)
 	require.NotContains(t, string(body), hidden.UID)
+}
+
+func TestPollProjectEventsIssueReturnsEffectiveCloseEvent(t *testing.T) {
+	t.Run("federated tie keeps origin identity private", func(t *testing.T) {
+		env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+		project, err := env.DB.CreateProject(t.Context(), "example-project")
+		require.NoError(t, err)
+		issue := createScopedHTTPTestIssue(t, env, project.ID, "Close evidence", nil)
+		newScopedTokens(t, env, project, issue)
+		_, closedEvents, changed, err := env.DB.CloseIssueWithEvents(t.Context(), issue.ID, "done", "tester", "Completed with a source close event.", nil)
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Len(t, closedEvents, 1)
+
+		remoteUID := "00000000000000000000000001"
+		remoteOrigin := "7ZZZZZZZZZZZZZZZZZZZZZZZZZ"
+		insertRemoteIssueHistoryEvent(t, env, project, issue, remoteUID, remoteOrigin, "issue.closed",
+			closedEvents[0].HLCPhysicalMS, closedEvents[0].HLCCounter,
+			`{"reason":"done","evidence":[{"type":"commit","sha":"0123456789abcdef0123456789abcdef01234567"}]}`,
+			closedEvents[0].CreatedAt)
+
+		path := fmt.Sprintf("%s?issue=%s&include_effective_close_event_uid=true", scopedProjectPath(project.ID, "events"), url.QueryEscape(issue.UID))
+		resp, body := envDoRaw(t, env, http.MethodGet, path, nil, map[string]string{"Authorization": "Bearer worker-token"})
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+		require.Equal(t, issue.UID, resp.Header.Get("X-Kata-Events-Issue-UID"))
+		var raw map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(body, &raw))
+		var effectiveUID string
+		require.NoError(t, json.Unmarshal(raw["effective_close_event_uid"], &effectiveUID), string(body))
+		require.Equal(t, remoteUID, effectiveUID, string(body))
+		var page api.PollEventsBody
+		require.NoError(t, json.Unmarshal(body, &page))
+		require.NotEmpty(t, page.Events)
+		foundEffectiveClose := false
+		for _, event := range page.Events {
+			require.Empty(t, event.OriginInstanceUID, "scoped history keeps origin identity redacted")
+			foundEffectiveClose = foundEffectiveClose || event.EventUID == remoteUID
+		}
+		require.True(t, foundEffectiveClose, "the selected close must remain available in scoped history")
+		require.NotContains(t, string(body), remoteOrigin)
+	})
+
+	t.Run("provider transitions clear prior evidence", func(t *testing.T) {
+		env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+		project, err := env.DB.CreateProject(t.Context(), "example-project")
+		require.NoError(t, err)
+		issue := createScopedHTTPTestIssue(t, env, project.ID, "Provider status", nil)
+		newScopedTokens(t, env, project, issue)
+		_, closedEvents, changed, err := env.DB.CloseIssueWithEvents(t.Context(), issue.ID, "done", "tester", "Completed with evidence.", nil)
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Len(t, closedEvents, 1)
+		baseHLC := closedEvents[0].HLCPhysicalMS
+		origin := "7ZZZZZZZZZZZZZZZZZZZZZZZZZ"
+		createdAt := closedEvents[0].CreatedAt
+		insertRemoteIssueHistoryEvent(t, env, project, issue, "00000000000000000000000002", origin, "issue.updated",
+			baseHLC+1, 0, `{"status":"open"}`, createdAt)
+		insertRemoteIssueHistoryEvent(t, env, project, issue, "00000000000000000000000003", origin, "issue.snapshot",
+			baseHLC+2, 0, `{"uid":"`+issue.UID+`","short_id":"`+issue.ShortID+`","title":"Provider status","status":"closed"}`, createdAt)
+
+		path := fmt.Sprintf("%s?issue=%s&include_effective_close_event_uid=true", scopedProjectPath(project.ID, "events"), url.QueryEscape(issue.UID))
+		resp, body := envDoRaw(t, env, http.MethodGet, path, nil, map[string]string{"Authorization": "Bearer worker-token"})
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+		var raw map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(body, &raw))
+		_, hasEffectiveClose := raw["effective_close_event_uid"]
+		require.False(t, hasEffectiveClose, string(body))
+		require.NotContains(t, string(body), `"status":"open"`)
+	})
+}
+
+func insertRemoteIssueHistoryEvent(
+	t *testing.T,
+	env *testenv.Env,
+	project db.Project,
+	issue db.Issue,
+	eventUID, originUID, eventType string,
+	hlcPhysicalMS, hlcCounter int64,
+	payload string,
+	createdAt time.Time,
+) {
+	t.Helper()
+	issueUID := issue.UID
+	event := db.RemoteEvent{
+		EventUID: eventUID, OriginInstanceUID: originUID,
+		ProjectUID: project.UID, ProjectName: project.Name, IssueUID: &issueUID,
+		Type: eventType, Actor: "tester", HLCPhysicalMS: hlcPhysicalMS, HLCCounter: hlcCounter,
+		Payload: jsontext.Value(payload), CreatedAt: createdAt,
+	}
+	hash, err := db.RemoteEventContentHash(event)
+	require.NoError(t, err)
+	event.ContentHash = hash
+	inserted, err := env.DB.InsertRemoteEvent(t.Context(), project.ID, event)
+	require.NoError(t, err)
+	require.True(t, inserted)
 }
 
 func TestPollProjectEventsIssueOmitsPrivatePeerEvents(t *testing.T) {

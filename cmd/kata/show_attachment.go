@@ -1,14 +1,12 @@
 package main
 
 import (
-	"cmp"
 	"context"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"slices"
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/metadata"
@@ -20,7 +18,7 @@ import (
 // optionalCloseEvidenceForShow leaves ordinary issue display available when
 // scoped history is unsupported or the host does not grant history access.
 func optionalCloseEvidenceForShow(ctx context.Context, hc *http.Client, base string, pid int64, ref string) ([]db.Evidence, error) {
-	if err := requireDaemonAPIVersion(ctx, hc, base, "0.32.0", "issue history"); err != nil {
+	if err := requireDaemonAPIVersion(ctx, hc, base, apiVersionEffectiveCloseEventUID, "attachment close evidence in issue history"); err != nil {
 		return nil, nil
 	}
 	evidence, err := closeEvidenceForShow(ctx, hc, base, pid, ref)
@@ -39,10 +37,15 @@ func closeEvidenceForShow(ctx context.Context, hc *http.Client, base string, pid
 		return nil, err
 	}
 	var events []generated.EventEnvelope
+	var effectiveCloseEventUID string
 	var after int64
 	const limit = int64(1000)
 	for {
-		response, err := client.PollProjectEventsWithResponse(ctx, &generated.PollProjectEventsRequestOptions{PathParams: &generated.PollProjectEventsPath{ProjectID: pid}, Query: &generated.PollProjectEventsQuery{Issue: &ref, AfterID: &after, Limit: new(limit)}})
+		query := &generated.PollProjectEventsQuery{Issue: &ref, AfterID: &after, Limit: new(limit)}
+		if after == 0 {
+			query.IncludeEffectiveCloseEventUID = new(true)
+		}
+		response, err := client.PollProjectEventsWithResponse(ctx, &generated.PollProjectEventsRequestOptions{PathParams: &generated.PollProjectEventsPath{ProjectID: pid}, Query: query})
 		if response == nil {
 			return nil, externalCLITransportError(response, err)
 		}
@@ -60,6 +63,14 @@ func closeEvidenceForShow(ctx context.Context, hc *http.Client, base string, pid
 		if page.ResetRequired {
 			return nil, fmt.Errorf("issue history requires a reset")
 		}
+		if after == 0 {
+			if page.EffectiveCloseEventUID != nil {
+				effectiveCloseEventUID = *page.EffectiveCloseEventUID
+			}
+			if effectiveCloseEventUID == "" {
+				return nil, nil
+			}
+		}
 		for _, event := range page.Events {
 			switch event.Type {
 			case "issue.closed", "issue.reopened", "issue.updated", "issue.created", "issue.snapshot":
@@ -70,7 +81,7 @@ func closeEvidenceForShow(ctx context.Context, hc *http.Client, base string, pid
 			}
 		}
 		if len(page.Events) < int(limit) {
-			return effectiveCloseEvidence(events)
+			return effectiveCloseEvidence(events, effectiveCloseEventUID)
 		}
 		if page.NextAfterID <= after {
 			return nil, fmt.Errorf("issue history cursor did not advance")
@@ -78,40 +89,24 @@ func closeEvidenceForShow(ctx context.Context, hc *http.Client, base string, pid
 		after = page.NextAfterID
 	}
 }
-func effectiveCloseEvidence(events []generated.EventEnvelope) ([]db.Evidence, error) {
-	slices.SortStableFunc(events, func(a, b generated.EventEnvelope) int {
-		return cmp.Or(cmp.Compare(a.HlcPhysicalMs, b.HlcPhysicalMs),
-			cmp.Compare(a.HlcCounter, b.HlcCounter),
-			cmp.Compare(a.OriginInstanceUID, b.OriginInstanceUID),
-			cmp.Compare(a.EventUID, b.EventUID))
-	})
-	var evidence []db.Evidence
-	var status string
+
+func effectiveCloseEvidence(events []generated.EventEnvelope, effectiveCloseEventUID string) ([]db.Evidence, error) {
 	for _, event := range events {
-		switch event.Type {
-		case "issue.closed":
-			var payload struct {
-				Evidence []db.Evidence `json:"evidence"`
-			}
-			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				return nil, fmt.Errorf("decode close history: %w", err)
-			}
-			status, evidence = "closed", payload.Evidence
-		case "issue.reopened":
-			status, evidence = "open", nil
-		default:
-			var payload struct {
-				Status *string `json:"status"`
-			}
-			if err := json.Unmarshal(event.Payload, &payload); err != nil {
-				return nil, fmt.Errorf("decode issue history: %w", err)
-			}
-			if payload.Status != nil && *payload.Status != status {
-				status, evidence = *payload.Status, nil
-			}
+		if event.EventUID != effectiveCloseEventUID {
+			continue
 		}
+		if event.Type != "issue.closed" {
+			return nil, fmt.Errorf("effective close history event %s is not an issue close", effectiveCloseEventUID)
+		}
+		var payload struct {
+			Evidence []db.Evidence `json:"evidence"`
+		}
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			return nil, fmt.Errorf("decode close history: %w", err)
+		}
+		return payload.Evidence, nil
 	}
-	return evidence, nil
+	return nil, fmt.Errorf("effective close history event %s is missing", effectiveCloseEventUID)
 }
 
 func printShowAttachmentEvidence(out io.Writer, b showResponseForCLI) error {

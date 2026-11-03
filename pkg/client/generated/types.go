@@ -4901,10 +4901,11 @@ func (p PingResponseBody) Validate() error {
 }
 
 type PollEventsBody struct {
-	Events        []EventEnvelope `json:"events" validate:"required"`
-	NextAfterID   int64           `json:"next_after_id"`
-	ResetAfterID  *int64          `json:"reset_after_id,omitempty"`
-	ResetRequired bool            `json:"reset_required"`
+	EffectiveCloseEventUID *string         `json:"effective_close_event_uid,omitempty"`
+	Events                 []EventEnvelope `json:"events" validate:"required"`
+	NextAfterID            int64           `json:"next_after_id"`
+	ResetAfterID           *int64          `json:"reset_after_id,omitempty"`
+	ResetRequired          bool            `json:"reset_required"`
 }
 
 func (p PollEventsBody) Validate() error {

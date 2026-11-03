@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"context"
 	"encoding/json/jsontext"
 	"path/filepath"
 	"testing"
