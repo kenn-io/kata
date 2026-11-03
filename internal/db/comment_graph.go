@@ -111,9 +111,8 @@ func ReadCommentGraphTx(
 	if query.Reference != nil {
 		ref := query.Reference
 		if ref.UID != "" {
-			args = append(args, strings.ToUpper(ref.UID))
-			where += " AND UPPER(c.uid)=" + bind(len(args))
-			// The suffix equality enables the handle index; UPPER remains the exact match.
+			where += " AND " + CommentUIDLookupPredicate("c.uid", ref.UID, &args, bind, displayDialect)
+			// The suffix equality enables the handle index; the identity predicate enforces ASCII-only case folding.
 			args = append(args, strings.ToUpper(ref.UID))
 			where += " AND lower(substr(c.uid,21))=lower(substr(" + bind(len(args)) + ",21))"
 		} else {
@@ -153,7 +152,8 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(st
 ` + commentGraphSelect + ` WHERE c.uid IN (
  SELECT uid FROM selected
  UNION SELECT v.uid FROM selected s CROSS JOIN visible v WHERE v.reply_to_uid=s.uid
- UNION SELECT v.uid FROM visible v JOIN selected s ON v.uid=s.reply_to_uid
+ UNION SELECT v.uid FROM visible v JOIN selected s ON ` + CommentUIDEqualSQL("v.reply_to_uid", "s.uid", displayDialect) + `
+ UNION SELECT v.uid FROM visible v JOIN selected s ON ` + CommentUIDEqualSQL("v.uid", "s.reply_to_uid", displayDialect) + `
 )`
 	}
 	rows, err := tx.QueryContext(ctx, statement, statementArgs...)
@@ -207,7 +207,7 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(st
 		}
 
 		targetArgs := []any{}
-		targetUIDPredicate := commentUIDPredicate("c.uid", targetUID, &targetArgs, bind)
+		targetUIDPredicate := CommentUIDLookupPredicate("c.uid", targetUID, &targetArgs, bind, displayDialect)
 		targetWhere := " WHERE " + targetUIDPredicate + " AND i.deleted_at IS NULL AND p.deleted_at IS NULL AND " + projectPredicate(&targetArgs)
 		target, err := findCommentGraphRecord(ctx, tx,
 			commentGraphSelect+targetWhere+" ORDER BY c.uid", targetArgs, targetUID, parseTime)
@@ -233,7 +233,7 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(st
 
 		statusArgs := []any{}
 		visibleProject := projectPredicate(&statusArgs)
-		targetUIDPredicate = commentUIDPredicate("c.uid", targetUID, &statusArgs, bind)
+		targetUIDPredicate = CommentUIDLookupPredicate("c.uid", targetUID, &statusArgs, bind, displayDialect)
 		status, projectID, err := findCommentGraphTargetStatus(ctx, tx,
 			`SELECT CASE WHEN p.deleted_at IS NOT NULL OR NOT (`+visibleProject+`) THEN 'hidden' WHEN i.deleted_at IS NOT NULL THEN 'removed' ELSE 'pending' END, i.project_id,c.uid`+commentGraphFrom+` WHERE `+targetUIDPredicate+" ORDER BY c.uid",
 			statusArgs, targetUID)
@@ -241,7 +241,7 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(st
 			return data, err
 		}
 		if status == "" {
-			removed, err := commentGraphPurgedTargetEvidence(ctx, tx, targetUID, bind, replyTargetUIDExpr)
+			removed, err := commentGraphPurgedTargetEvidence(ctx, tx, targetUID, bind, replyTargetUIDExpr, displayDialect)
 			if err != nil {
 				return data, err
 			}
@@ -273,14 +273,36 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(st
 	return data, nil
 }
 
-func commentUIDPredicate(column, value string, args *[]any, bind func(int) string) string {
+// CommentUIDLookupPredicate matches a valid ULID by ASCII case while keeping
+// malformed and opaque identifiers exact. Column must be a static SQL expression.
+func CommentUIDLookupPredicate(column, value string, args *[]any, bind func(int) string, dialect CommentDisplaySQLDialect) string {
 	identity := CanonicalCommentUID(value)
 	if uid.Valid(identity) {
 		*args = append(*args, identity)
-		return "UPPER(" + column + ")=" + bind(len(*args))
+		exact := bind(len(*args))
+		*args = append(*args, identity)
+		caseInsensitive := bind(len(*args))
+		return "(" + column + "=" + exact + " OR (" + commentUIDValidSQL(column, dialect) + " AND UPPER(" + column + ")=" + caseInsensitive + "))"
 	}
 	*args = append(*args, value)
 	return column + "=" + bind(len(*args))
+}
+
+// CommentUIDEqualSQL compares two comment identity expressions. Column
+// expressions must be static SQL controlled by the caller.
+func CommentUIDEqualSQL(left, right string, dialect CommentDisplaySQLDialect) string {
+	return "(" + left + "=" + right + " OR (" + commentUIDValidSQL(left, dialect) + " AND " + commentUIDValidSQL(right, dialect) + " AND UPPER(" + left + ")=UPPER(" + right + ")))"
+}
+
+func commentUIDValidSQL(column string, dialect CommentDisplaySQLDialect) string {
+	switch dialect {
+	case CommentDisplaySQLite:
+		return "(length(" + column + ")=26 AND substr(" + column + ",1,1) GLOB '[0-7]' AND " + column + " NOT GLOB '*[^0123456789ABCDEFGHJKMNPQRSTVWXYZabcdefghjkmnpqrstvwxyz]*')"
+	case CommentDisplayPostgres:
+		return "(char_length(" + column + ")=26 AND " + column + " ~ '^[0-7][0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{25}$')"
+	default:
+		return "0"
+	}
 }
 
 func findCommentGraphRecord(
@@ -393,11 +415,14 @@ func commentGraphPurgedTargetEvidence(
 	targetCommentUID string,
 	bind func(int) string,
 	replyTargetUIDExpr string,
+	dialect CommentDisplaySQLDialect,
 ) (bool, error) {
 	var removed bool
+	args := []any{}
+	uidPredicate := CommentUIDLookupPredicate(replyTargetUIDExpr, targetCommentUID, &args, bind, dialect)
 	err := tx.QueryRowContext(ctx,
-		commentGraphPurgedTargetEvidenceSQL(bind, replyTargetUIDExpr),
-		targetCommentUID,
+		`SELECT EXISTS(SELECT 1 FROM events e JOIN purge_log p ON p.issue_uid=e.related_issue_uid WHERE e.type='issue.commented' AND `+uidPredicate+")",
+		args...,
 	).Scan(&removed)
 	return removed, err
 }

@@ -109,7 +109,7 @@ func checkSelectedCommentGraph(t *testing.T, store db.Storage) error {
 	originalTargetEvents := countTargetCommentEvents()
 	require.Equal(t, 1, originalTargetEvents)
 	var restoredUID string
-	for _, persistedUID := range []string{strings.ToLower(target.UID), strings.ToLower(target.UID[:13]) + target.UID[13:]} {
+	for index, persistedUID := range []string{strings.ToLower(target.UID), strings.ToLower(target.UID[:13]) + target.UID[13:]} {
 		restoredUID = persistedUID
 		for _, record := range records {
 			if comment, ok := record.(*db.CommentExport); ok && comment.ID == target.ID {
@@ -147,7 +147,8 @@ func checkSelectedCommentGraph(t *testing.T, store db.Storage) error {
 		require.NoError(t, err)
 		require.Len(t, identity.Comments, 1, "imported UID case must not change reference resolution")
 		require.Equal(t, persistedUID, identity.Comments[0].Comment.UID)
-		created, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: other.ID, Author: "worker", Body: "Reply to imported finding", ReplyToUID: identity.Comments[0].Comment.UID, ReplyKind: "reply", ValidateReply: true})
+		author := []string{"worker-one", "worker-two"}[index]
+		created, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: other.ID, Author: author, Body: "Reply to imported finding", ReplyToUID: identity.Comments[0].Comment.UID, ReplyKind: "reply", ValidateReply: true})
 		require.NoError(t, err)
 		require.Equal(t, persistedUID, created.ReplyToUID)
 		edited, _, _, err := store.EditComment(ctx, db.EditCommentParams{IssueID: other.ID, CommentUID: identity.Comments[0].Comment.UID, Actor: "finder", Body: "Updated imported finding"})

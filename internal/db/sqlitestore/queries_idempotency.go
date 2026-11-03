@@ -247,9 +247,11 @@ func (d *Store) LookupCommentIdempotency(
 	if err := json.Unmarshal([]byte(evt.Payload), &payload); err != nil {
 		return nil, fmt.Errorf("decode comment idempotency payload: %w", err)
 	}
+	commentArgs := []any{*evt.IssueID}
+	commentUIDPredicate := db.CommentUIDLookupPredicate("uid", payload.CommentUID, &commentArgs, func(int) string { return "?" }, db.CommentDisplaySQLite)
 	comment, err := scanComment(tx.QueryRowContext(ctx,
-		`SELECT `+commentColumns+` FROM comments WHERE issue_id = ? AND uid = ?`,
-		*evt.IssueID, payload.CommentUID,
+		`SELECT `+commentColumns+` FROM comments WHERE issue_id = ? AND `+commentUIDPredicate,
+		commentArgs...,
 	))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("comment idempotency match comment: %w", db.ErrNotFound)

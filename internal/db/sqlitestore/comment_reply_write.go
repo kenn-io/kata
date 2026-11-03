@@ -16,7 +16,10 @@ func validateLocalCommentReplyTx(ctx context.Context, tx *sql.Tx, uid string, p 
 	var duplicate *db.Comment
 	if p.ReplyToUID != "" {
 		var issue db.Issue
-		err := tx.QueryRowContext(ctx, `SELECT i.id,i.uid,i.project_id,i.status FROM comments c JOIN issues i ON i.id=c.issue_id JOIN projects p ON p.id=i.project_id WHERE c.uid=? AND i.project_id=? AND i.deleted_at IS NULL AND p.deleted_at IS NULL`, p.ReplyToUID, source.ProjectID).Scan(&issue.ID, &issue.UID, &issue.ProjectID, &issue.Status)
+		targetArgs := []any{}
+		targetUIDPredicate := db.CommentUIDLookupPredicate("c.uid", p.ReplyToUID, &targetArgs, func(int) string { return "?" }, db.CommentDisplaySQLite)
+		targetArgs = append(targetArgs, source.ProjectID)
+		err := tx.QueryRowContext(ctx, `SELECT i.id,i.uid,i.project_id,i.status FROM comments c JOIN issues i ON i.id=c.issue_id JOIN projects p ON p.id=i.project_id WHERE `+targetUIDPredicate+` AND i.project_id=? AND i.deleted_at IS NULL AND p.deleted_at IS NULL`, targetArgs...).Scan(&issue.ID, &issue.UID, &issue.ProjectID, &issue.Status)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
@@ -24,7 +27,10 @@ func validateLocalCommentReplyTx(ctx context.Context, tx *sql.Tx, uid string, p 
 			target = &issue
 		}
 		if !p.Force {
-			comment, err := scanComment(tx.QueryRowContext(ctx, `SELECT `+commentColumns+` FROM comments WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?) AND reply_to_uid=? AND reply_kind=? AND author=? AND COALESCE(teammate,'')=? ORDER BY created_at,uid LIMIT 1`, source.ProjectID, p.ReplyToUID, p.ReplyKind, p.Author, p.Teammate))
+			duplicateArgs := []any{source.ProjectID}
+			replyTargetPredicate := db.CommentUIDLookupPredicate("reply_to_uid", p.ReplyToUID, &duplicateArgs, func(int) string { return "?" }, db.CommentDisplaySQLite)
+			duplicateArgs = append(duplicateArgs, p.ReplyKind, p.Author, p.Teammate)
+			comment, err := scanComment(tx.QueryRowContext(ctx, `SELECT `+commentColumns+` FROM comments WHERE issue_id IN (SELECT id FROM issues WHERE project_id=?) AND `+replyTargetPredicate+` AND reply_kind=? AND author=? AND COALESCE(teammate,'')=? ORDER BY created_at,uid LIMIT 1`, duplicateArgs...))
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return err
 			}

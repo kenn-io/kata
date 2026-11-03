@@ -94,7 +94,7 @@ func LinkPatch(in LinkInput) (map[string]jsontext.Value, error) {
 		if !linkSlotWritable(in.Current, key) {
 			continue
 		}
-		if in.Kind == "confirm" && in.PendingTargets[recipient] == in.TargetUID {
+		if in.Kind == "confirm" && uid.Canonical(in.PendingTargets[recipient]) == uid.Canonical(in.TargetUID) {
 			continue
 		}
 		patch[key] = value

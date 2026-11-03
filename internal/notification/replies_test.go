@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"hegel.dev/go/hegel"
 )
 
 func TestLinkPatchRecipients(t *testing.T) {
@@ -72,6 +73,54 @@ func TestLinkPatchConfirmBoundAndPendingTarget(t *testing.T) {
 	require.NotContains(t, p, MetadataKey("reader"))
 	require.Contains(t, p, MetadataKey("linker-07"))
 	require.NotContains(t, p, MetadataKey("linker-08"))
+}
+
+func TestLinkPatchConfirmUsesCanonicalPendingTarget(t *testing.T) {
+	const targetUID = "01AAAAAAAAAAAAAAAAAAAAAAAA"
+	lowerTargetUID := strings.ToLower(targetUID)
+	key := MetadataKey("reader")
+	current := map[string]jsontext.Value{
+		key: jsontext.Value(`{"from":"earlier","message":"existing confirmation","re":"earlier-reply","kind":"confirm"}`),
+	}
+	patch, err := LinkPatch(LinkInput{
+		Sender: Identity{Actor: "worker"}, Target: Identity{Actor: "reader"},
+		ReplyUID: "new-reply", TargetUID: targetUID, Kind: "confirm",
+		Current: current, PendingTargets: map[string]string{"reader": lowerTargetUID},
+	})
+	require.NoError(t, err)
+	require.NotContains(t, patch, key, "a case-equivalent pending target already has a confirmation notice")
+
+	patch, err = LinkPatch(LinkInput{
+		Sender: Identity{Actor: "worker"}, Target: Identity{Actor: "reader"},
+		ReplyUID: "new-reply", TargetUID: "OpaqueTarget", Kind: "confirm",
+		Current: current, PendingTargets: map[string]string{"reader": "opaquetarget"},
+	})
+	require.NoError(t, err)
+	require.Contains(t, patch, key, "opaque identifiers retain exact matching")
+}
+
+func TestLinkPatchConfirmCanonicalPendingTargetProperty(t *testing.T) {
+	hegel.Test(t, func(ht *hegel.T) {
+		first := hegel.Draw(ht, hegel.SampledFrom([]string{"0", "1", "2", "3", "4", "5", "6", "7"}))
+		tail := hegel.Draw(ht, hegel.Text().Alphabet("0123456789ABCDEFGHJKMNPQRSTVWXYZ").MinSize(25).MaxSize(25))
+		mask := hegel.Draw(ht, hegel.Text().Alphabet("01").MinSize(25).MaxSize(25))
+		canonical := first + tail
+		variant := []byte(canonical)
+		for index, value := range variant[1:] {
+			if value >= 'A' && value <= 'Z' && mask[index] == '1' {
+				variant[index+1] = value + ('a' - 'A')
+			}
+		}
+		key := MetadataKey("reader")
+		patch, err := LinkPatch(LinkInput{
+			Sender: Identity{Actor: "worker"}, Target: Identity{Actor: "reader"},
+			ReplyUID: "new-reply", TargetUID: canonical, Kind: "confirm",
+			Current:        map[string]jsontext.Value{key: jsontext.Value(`{"from":"earlier","message":"existing confirmation","re":"earlier-reply","kind":"confirm"}`)},
+			PendingTargets: map[string]string{"reader": string(variant)},
+		})
+		require.NoError(t, err)
+		require.NotContains(t, patch, key)
+	}, hegel.WithTestCases(200), hegel.WithDatabase(t.TempDir()))
 }
 
 func FuzzLinkPatchHumanPreservation(f *testing.F) {

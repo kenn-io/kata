@@ -326,7 +326,15 @@ func (d *Store) EntityAttribution(ctx context.Context, projectUID, kind, entityU
 	if !db.ProjectAttributionVisible(ctx, projectUID) {
 		return db.AttributionReceipt{}, db.ErrNotFound
 	}
-	return readReceipt(d.QueryRowContext(ctx, `SELECT p.receipt FROM federation_entity_provenance e JOIN federation_event_provenance p ON p.project_uid=e.project_uid AND p.event_uid=e.event_uid WHERE e.project_uid=$1 AND e.kind=$2 AND e.entity_uid=$3`, projectUID, kind, entityUID))
+	args := []any{projectUID, kind}
+	var entityPredicate string
+	if kind == "comment" {
+		entityPredicate = db.CommentUIDLookupPredicate("e.entity_uid", entityUID, &args, dollarPlaceholder, db.CommentDisplayPostgres)
+	} else {
+		args = append(args, entityUID)
+		entityPredicate = "e.entity_uid=" + dollarPlaceholder(len(args))
+	}
+	return readReceipt(d.QueryRowContext(ctx, `SELECT p.receipt FROM federation_entity_provenance e JOIN federation_event_provenance p ON p.project_uid=e.project_uid AND p.event_uid=e.event_uid WHERE e.project_uid=$1 AND e.kind=$2 AND `+entityPredicate, args...))
 }
 
 // AttributionReceiptsAfter reads the next bounded prefix of retained attribution receipts.
@@ -373,7 +381,7 @@ func (d *Store) ExportAttribution(ctx context.Context, filter db.ExportFilter) i
 				if !filter.IncludeDeleted {
 					deleted = " AND i.deleted_at IS NULL"
 				}
-				where = append(where, "((k.kind='issue' AND EXISTS(SELECT 1 FROM issues i WHERE i.uid=k.entity_uid AND i.project_id=p.id"+deleted+")) OR (k.kind='comment' AND EXISTS(SELECT 1 FROM comments c JOIN issues i ON i.id=c.issue_id WHERE c.uid=k.entity_uid AND i.project_id=p.id"+deleted+")))")
+				where = append(where, "((k.kind='issue' AND EXISTS(SELECT 1 FROM issues i WHERE i.uid=k.entity_uid AND i.project_id=p.id"+deleted+")) OR (k.kind='comment' AND EXISTS(SELECT 1 FROM comments c JOIN issues i ON i.id=c.issue_id WHERE "+db.CommentUIDEqualSQL("c.uid", "k.entity_uid", db.CommentDisplayPostgres)+" AND i.project_id=p.id"+deleted+")))")
 			}
 			if filter.ProjectID != nil {
 				where = append(where, `p.id=$1`)

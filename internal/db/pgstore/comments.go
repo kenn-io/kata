@@ -15,7 +15,7 @@ import (
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
-const commentSelect = `SELECT ` + commentColumns + ` FROM comments`
+var commentSelect = `SELECT ` + commentColumns + ` FROM comments`
 
 // CreateComment appends a comment and its issue.commented event atomically.
 func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams) (db.Comment, db.Event, error) {

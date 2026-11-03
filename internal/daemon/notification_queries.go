@@ -41,6 +41,45 @@ func notificationIssueAllowed(allowed map[int64]bool, id int64) bool {
 	return allowed == nil || allowed[id]
 }
 
+func notificationCommentUIDPredicate(column string) string {
+	return "(" + column + "=$1 OR UPPER(" + column + ")=UPPER($1))"
+}
+
+func sameNotificationCommentUID(left, right string) bool {
+	return db.CanonicalCommentUID(left) == db.CanonicalCommentUID(right)
+}
+
+func notificationCommentReplyTargetTx(ctx context.Context, tx *sql.Tx, uid string, projectID int64) (string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT c.uid,COALESCE(c.reply_to_uid,'') FROM comments c JOIN issues i ON i.id=c.issue_id WHERE `+notificationCommentUIDPredicate("c.uid")+` AND i.project_id=$2 ORDER BY CASE WHEN c.uid=$1 THEN 0 ELSE 1 END`, uid, projectID) // #nosec G202 -- Predicate columns are fixed package expressions; values remain bound.
+	if err != nil {
+		return "", err
+	}
+	var target string
+	for rows.Next() {
+		var storedUID, candidateTarget string
+		if err := rows.Scan(&storedUID, &candidateTarget); err != nil {
+			_ = rows.Close()
+			return "", err
+		}
+		if !sameNotificationCommentUID(storedUID, uid) {
+			continue
+		}
+		target = candidateTarget
+		if storedUID == uid {
+			break
+		}
+	}
+	err = rows.Err()
+	closeErr := rows.Close()
+	if err != nil {
+		return "", err
+	}
+	if closeErr != nil {
+		return "", closeErr
+	}
+	return target, nil
+}
+
 // notificationMutationActorTx resolves the actor used by local mutations on
 // a push-enabled spoke while the notification patch transaction is open.
 // Event insertion applies the same binding in that transaction.
@@ -69,13 +108,35 @@ WHERE project_id=$1 AND role=$2 AND enabled=1 AND push_enabled=1 AND relay_confi
 // Pin a selected comment to its currently authorized issue. B's comment
 // validation handles link creation; explicit notify uses this check as well.
 func notificationCommentTx(ctx context.Context, tx *sql.Tx, issue db.Issue, uid string, allowed map[int64]bool) error {
-	var id int64
-	err := tx.QueryRowContext(ctx, `SELECT c.issue_id FROM comments c JOIN issues i ON i.id=c.issue_id JOIN projects p ON p.id=i.project_id WHERE c.uid=$1 AND i.project_id=$2 AND i.deleted_at IS NULL AND p.deleted_at IS NULL`, uid, issue.ProjectID).Scan(&id)
-	if err == sql.ErrNoRows {
-		return db.ErrNotFound
-	}
+	rows, err := tx.QueryContext(ctx, `SELECT c.uid,c.issue_id FROM comments c JOIN issues i ON i.id=c.issue_id JOIN projects p ON p.id=i.project_id WHERE `+notificationCommentUIDPredicate("c.uid")+` AND i.project_id=$2 AND i.deleted_at IS NULL AND p.deleted_at IS NULL ORDER BY CASE WHEN c.uid=$1 THEN 0 ELSE 1 END`, uid, issue.ProjectID) // #nosec G202 -- Predicate columns are fixed package expressions; values remain bound.
 	if err != nil {
 		return err
+	}
+	var id int64
+	for rows.Next() {
+		var storedUID string
+		var candidateID int64
+		if err := rows.Scan(&storedUID, &candidateID); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if sameNotificationCommentUID(storedUID, uid) {
+			id = candidateID
+			if storedUID == uid {
+				break
+			}
+		}
+	}
+	err = rows.Err()
+	closeErr := rows.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if id == 0 {
+		return db.ErrNotFound
 	}
 	if !notificationIssueAllowed(allowed, id) {
 		return db.ErrNotFound

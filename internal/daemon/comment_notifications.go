@@ -33,12 +33,37 @@ func commentNotificationHook() db.CommentMetadataHook {
 			return nil, err
 		}
 		in := notification.LinkInput{Sender: notification.Identity{Actor: reply.Author, Teammate: reply.Teammate}, ReplyUID: reply.UID, TargetUID: reply.ReplyToUID, Kind: reply.ReplyKind, PendingTargets: map[string]string{}}
-		err = tx.QueryRowContext(ctx, `SELECT c.author,COALESCE(c.teammate,'') FROM comments c JOIN issues i ON i.id=c.issue_id WHERE c.uid=$1 AND i.project_id=$2 AND i.deleted_at IS NULL`, reply.ReplyToUID, issue.ProjectID).Scan(&in.Target.Actor, &in.Target.Teammate)
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
-		}
+		targetRows, err := tx.QueryContext(ctx, `SELECT c.uid,c.author,COALESCE(c.teammate,'') FROM comments c JOIN issues i ON i.id=c.issue_id WHERE `+notificationCommentUIDPredicate("c.uid")+` AND i.project_id=$2 AND i.deleted_at IS NULL ORDER BY CASE WHEN c.uid=$1 THEN 0 ELSE 1 END`, reply.ReplyToUID, issue.ProjectID) // #nosec G202 -- Predicate columns are fixed package expressions; values remain bound.
 		if err != nil {
 			return nil, err
+		}
+		targetFound := false
+		for targetRows.Next() {
+			var storedUID string
+			var actor, targetTeammate string
+			if err := targetRows.Scan(&storedUID, &actor, &targetTeammate); err != nil {
+				_ = targetRows.Close()
+				return nil, err
+			}
+			if !sameNotificationCommentUID(storedUID, reply.ReplyToUID) {
+				continue
+			}
+			in.Target = notification.Identity{Actor: actor, Teammate: targetTeammate}
+			targetFound = true
+			if storedUID == reply.ReplyToUID {
+				break
+			}
+		}
+		err = targetRows.Err()
+		targetCloseErr := targetRows.Close()
+		if err != nil {
+			return nil, err
+		}
+		if targetCloseErr != nil {
+			return nil, targetCloseErr
+		}
+		if !targetFound {
+			return nil, nil
 		}
 		if issue.Owner != nil {
 			in.Owner = *issue.Owner
@@ -69,7 +94,7 @@ func commentNotificationHook() db.CommentMetadataHook {
 			}
 		}
 		if reply.ReplyKind == "confirm" {
-			rows, err := tx.QueryContext(ctx, `SELECT c.issue_id,c.uid,c.author,COALESCE(c.teammate,''),c.created_at FROM comments c JOIN issues i ON i.id=c.issue_id JOIN projects p ON p.id=i.project_id WHERE c.reply_to_uid=$1 AND c.uid<>$2 AND i.project_id=$3 AND i.deleted_at IS NULL AND p.deleted_at IS NULL`, reply.ReplyToUID, reply.UID, issue.ProjectID)
+			rows, err := tx.QueryContext(ctx, `SELECT c.issue_id,c.uid,c.reply_to_uid,c.author,COALESCE(c.teammate,''),c.created_at FROM comments c JOIN issues i ON i.id=c.issue_id JOIN projects p ON p.id=i.project_id WHERE `+notificationCommentUIDPredicate("c.reply_to_uid")+` AND c.uid<>$2 AND i.project_id=$3 AND i.deleted_at IS NULL AND p.deleted_at IS NULL`, reply.ReplyToUID, reply.UID, issue.ProjectID) // #nosec G202 -- Predicate columns are fixed package expressions; values remain bound.
 			if err != nil {
 				return nil, err
 			}
@@ -82,10 +107,14 @@ func commentNotificationHook() db.CommentMetadataHook {
 			var priorLinkers []priorLinker
 			for rows.Next() {
 				var linker priorLinker
+				var priorTargetUID string
 				var createdAt string
-				if err := rows.Scan(&linker.issueID, &linker.uid, &linker.identity.Actor, &linker.identity.Teammate, &createdAt); err != nil {
+				if err := rows.Scan(&linker.issueID, &linker.uid, &priorTargetUID, &linker.identity.Actor, &linker.identity.Teammate, &createdAt); err != nil {
 					_ = rows.Close()
 					return nil, err
+				}
+				if !sameNotificationCommentUID(priorTargetUID, reply.ReplyToUID) {
+					continue
 				}
 				linker.createdAt, err = time.Parse(time.RFC3339Nano, createdAt)
 				if err != nil {
@@ -118,9 +147,8 @@ func commentNotificationHook() db.CommentMetadataHook {
 				if json.Unmarshal(raw, &value) != nil || value.Re == "" {
 					continue
 				}
-				var target string
-				err := tx.QueryRowContext(ctx, `SELECT COALESCE(c.reply_to_uid,'') FROM comments c JOIN issues i ON i.id=c.issue_id WHERE c.uid=$1 AND i.project_id=$2`, value.Re, issue.ProjectID).Scan(&target)
-				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				target, err := notificationCommentReplyTargetTx(ctx, tx, value.Re, issue.ProjectID)
+				if err != nil {
 					return nil, err
 				}
 				// Compare keys directly without trusting malformed recipient encodings.

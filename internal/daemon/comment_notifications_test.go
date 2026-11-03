@@ -166,6 +166,101 @@ func checkCommentNotificationSettlesCaseNormalizedCommentUID(
 	require.Equal(t, "reply", notice.Kind)
 }
 
+func TestCommentNotificationFindsCaseNormalizedPriorLinker(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var store interface {
+				db.Storage
+				ExecContext(context.Context, string, ...any) (sql.Result, error)
+			}
+			updateCommentUID := `UPDATE comments SET uid=? WHERE id=?`
+			var err error
+			if backend == "postgres" {
+				if testing.Short() {
+					t.Skip("requires PostgreSQL test database")
+				}
+				dsn := os.Getenv("KATA_TEST_POSTGRES_DSN")
+				if dsn == "" {
+					t.Skip("requires explicit PostgreSQL test service")
+				}
+				id, err := uid.New()
+				require.NoError(t, err)
+				schema := "notify_prior_linker_" + strings.ToLower(id)
+				updateCommentUID = `UPDATE comments SET uid=$1 WHERE id=$2`
+				t.Cleanup(func() {
+					admin, cleanupErr := sql.Open("pgx", dsn)
+					require.NoError(t, cleanupErr)
+					defer func() { _ = admin.Close() }()
+					_, cleanupErr = admin.ExecContext(context.WithoutCancel(t.Context()), "DROP SCHEMA IF EXISTS "+schema+" CASCADE")
+					require.NoError(t, cleanupErr)
+				})
+				opened, openErr := pgstore.OpenWithConfig(t.Context(), dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
+				require.NoError(t, openErr)
+				store = opened
+			} else {
+				store, err = sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"))
+			}
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, store.Close()) })
+			checkCommentNotificationFindsCaseNormalizedPriorLinker(t.Context(), t, store, updateCommentUID)
+		})
+	}
+}
+
+func checkCommentNotificationFindsCaseNormalizedPriorLinker(
+	ctx context.Context,
+	t *testing.T,
+	store interface {
+		db.Storage
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	},
+	updateCommentUID string,
+) {
+	t.Helper()
+	project, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Finding", Author: "worker"})
+	require.NoError(t, err)
+	target, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "reader", Body: "Finding"})
+	require.NoError(t, err)
+	prior, _, err := store.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: issue.ID, Author: "prior-author", Body: "Earlier response",
+		ReplyToUID: target.UID, ReplyKind: "reply",
+	})
+	require.NoError(t, err)
+	lowerTargetUID := strings.ToLower(target.UID)
+	_, err = store.ExecContext(ctx, updateCommentUID, lowerTargetUID, target.ID)
+	require.NoError(t, err)
+	pending, err := json.Marshal(notification.Value{From: "earlier", Message: "existing confirmation", Re: prior.UID, Kind: "confirm"})
+	require.NoError(t, err)
+	_, err = store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
+		IssueID: issue.ID, Actor: "lead",
+		Patch: map[string]jsontext.Value{notification.MetadataKey("reader"): pending},
+	})
+	require.NoError(t, err)
+
+	confirmation, _, err := store.CreateComment(
+		db.WithCommentMetadataHook(ctx, commentNotificationHook(), nil),
+		db.CreateCommentParams{
+			IssueID: issue.ID, Author: "confirmer", Body: "Confirmed with the same finding and independent reproduction evidence.",
+			ReplyToUID: lowerTargetUID, ReplyKind: "confirm", ValidateReply: true,
+		},
+	)
+	require.NoError(t, err)
+	updated, err := store.IssueByID(ctx, issue.ID)
+	require.NoError(t, err)
+	var slots map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal([]byte(updated.Metadata), &slots))
+	require.Contains(t, slots, notification.MetadataKey("prior-author"), "case-equivalent prior linker receives the confirmation")
+	var notice notification.Value
+	require.NoError(t, json.Unmarshal(slots[notification.MetadataKey("prior-author")], &notice))
+	require.Equal(t, confirmation.UID, notice.Re)
+	require.Equal(t, "confirm", notice.Kind)
+	var preserved notification.Value
+	require.NoError(t, json.Unmarshal(slots[notification.MetadataKey("reader")], &preserved))
+	require.Equal(t, prior.UID, preserved.Re, "a case-equivalent pending target keeps its existing confirmation notice")
+}
+
 func FuzzCommentNotificationConfirmTimestampInstantOrder(f *testing.F) {
 	f.Add("12", "1")
 	f.Fuzz(func(t *testing.T, newerFraction, olderFraction string) {
