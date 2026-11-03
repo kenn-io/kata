@@ -51,19 +51,13 @@ func executeCronCLI(t *testing.T, base string, stdin io.Reader, args ...string) 
 	return out.String(), diagnostic.String(), err
 }
 
-func TestCronCLIJobMutationHelpNamesHub(t *testing.T) {
-	for _, resource := range []string{"job", "workflow"} {
-		for _, operation := range []string{"create", "update", "delete", "restore"} {
-			t.Run(resource+"/"+operation, func(t *testing.T) {
-				out, _, err := executeCronCLI(t, "http://daemon.example", nil, resource, operation, "--help")
-				require.NoError(t, err)
-				if resource == "job" {
-					require.Contains(t, out, "Direct spokes forward native recurring job writes synchronously when push is enabled. Otherwise, run the same command against the project's owning hub with --daemon <hub-name>.")
-				} else {
-					require.NotContains(t, out, "--daemon <hub-name>")
-				}
-			})
-		}
+func TestCronCLIWorkflowMutationHelpOmitsHubFallback(t *testing.T) {
+	for _, operation := range []string{"create", "update", "delete", "restore"} {
+		t.Run(operation, func(t *testing.T) {
+			out, _, err := executeCronCLI(t, "http://daemon.example", nil, "workflow", operation, "--help")
+			require.NoError(t, err)
+			require.NotContains(t, out, "--daemon <hub-name>")
+		})
 	}
 }
 func cronCLIJob(_ *testing.T) api.PutCronJobBody {

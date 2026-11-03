@@ -110,6 +110,64 @@ func TestCronJobLifecycle(t *testing.T) {
 	restored := cronRecord(t, f.session, "cron_job_restore", map[string]any{"uid": id, "expected_event_uid": deleted["definition_event_uid"]}, "job")
 	require.Nil(t, restored["deleted_at"])
 }
+
+func TestCronJobMutationsUseLongRunningClient(t *testing.T) {
+	f := newCronFixture(t)
+	const responseDelay = 5250 * time.Millisecond
+
+	// Let the daemon commit each write before delaying the response. This
+	// reproduces a healthy forwarded mutation whose response takes longer than
+	// the ordinary five-second MCP client timeout.
+	slowServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+			f.handler.ServeHTTP(w, r)
+			return
+		}
+		response := httptest.NewRecorder()
+		f.handler.ServeHTTP(response, r)
+		timer := time.NewTimer(responseDelay)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-r.Context().Done():
+			return
+		}
+		for key, values := range response.Header() {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		w.WriteHeader(response.Code)
+		_, _ = w.Write(response.Body.Bytes())
+	}))
+	t.Cleanup(slowServer.Close)
+
+	client, err := kataclient.NewWithHTTPClient(slowServer.URL, &http.Client{Timeout: 5 * time.Second})
+	require.NoError(t, err)
+	longRunningClient, err := kataclient.NewWithHTTPClient(slowServer.URL, &http.Client{})
+	require.NoError(t, err)
+	session := connectTestServerWithOptions(t, Options{
+		Client: client, LongRunningClient: longRunningClient,
+		ProjectID: f.project.ID, ProjectName: f.project.Name,
+		Actor: "example-agent", Version: "test",
+	})
+
+	id := cronNewUID(t, f.session)
+	args := map[string]any{"uid": id, "name": "Delayed job", "definition": cronDefinition()}
+	created := cronRecord(t, session, "cron_job_create", args, "job")
+
+	args["expected_event_uid"] = created["definition_event_uid"]
+	args["name"] = "Updated delayed job"
+	updated := cronRecord(t, session, "cron_job_update", args, "job")
+
+	deleted := cronRecord(t, session, "cron_job_delete", map[string]any{
+		"uid": id, "expected_event_uid": updated["definition_event_uid"],
+	}, "job")
+	cronRecord(t, session, "cron_job_restore", map[string]any{
+		"uid": id, "expected_event_uid": deleted["definition_event_uid"],
+	}, "job")
+}
+
 func TestCronCreateLostResponseReadback(t *testing.T) {
 	f := newCronFixture(t)
 	id := cronNewUID(t, f.session)
