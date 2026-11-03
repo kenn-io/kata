@@ -127,6 +127,9 @@ func projectCloseEvent(ctx context.Context, store db.Storage, event *db.Event) (
 	_, restricted := db.AuthorizedProjects(ctx)
 	fallback := !restricted && issueScopeFromContext(ctx) == nil
 	verificationIssueUIDs := slices.Clone(event.VerificationIssueUIDs)
+	// Preserve the current endpoint owner for clients with a fixed startup
+	// scope; an unqualified comment handle cannot identify its project.
+	verificationEndpointProjects := map[string]string{}
 	render := func(uid string) (string, bool) {
 		r, ok := visible[uid]
 		if !ok {
@@ -144,6 +147,7 @@ func projectCloseEvent(ctx context.Context, store db.Storage, event *db.Event) (
 		if r.ProjectUID != subjectProject {
 			handle = r.ProjectName + "#" + handle
 		}
+		verificationEndpointProjects[handle] = r.ProjectUID
 		return handle, true
 	}
 	keptEvidence := []db.Evidence{}
@@ -205,6 +209,14 @@ func projectCloseEvent(ctx context.Context, store db.Storage, event *db.Event) (
 			}
 			fields[key] = raw
 		}
+	}
+	delete(fields, "verification_endpoint_projects")
+	if len(verificationEndpointProjects) > 0 {
+		projectJSON, err := json.Marshal(verificationEndpointProjects, json.Deterministic(true))
+		if err != nil {
+			return nil, err
+		}
+		fields["verification_endpoint_projects"] = projectJSON
 	}
 	delete(fields, "verification_issue_uids")
 	raw, err := json.Marshal(fields, json.Deterministic(true))

@@ -238,6 +238,9 @@ type AuditCloseRow struct {
 	Reason               string             `json:"reason" validate:"required"`
 	Time                 string             `json:"time" validate:"required"`
 	VerdictEvidence      []EvidenceResponse `json:"verdict_evidence,omitempty"`
+
+	// VerificationEndpointProjects Maps each rendered verification reference to its current owning project UID so clients can enforce fixed project scopes.
+	VerificationEndpointProjects map[string]string `json:"verification_endpoint_projects,omitempty"`
 }
 
 func (a AuditCloseRow) Validate() error {

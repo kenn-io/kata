@@ -216,6 +216,60 @@ func TestEventRedactionCoversClosedParentFields(t *testing.T) {
 	require.Equal(t, "done", payload["reason"])
 }
 
+func TestEventRedactionScopesCloseVerificationReferencesByProjectUID(t *testing.T) {
+	const (
+		allowedProjectUID = "01HAAAAAAAAAAAAAAAAAAAAAAA"
+		foreignProjectUID = "01HBBBBBBBBBBBBBBBBBBBBBBB"
+	)
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/v1/projects" {
+			writeJSON(writer, map[string]any{"projects": []any{
+				projectJSON(1, allowedProjectUID, "spoke-project"),
+			}})
+			return
+		}
+		http.NotFound(writer, request)
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{{
+		ID: 1, UID: allowedProjectUID, Name: "spoke-project",
+	}})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope}}
+	output := EventsOutput{Events: []StreamEvent{{
+		Type: "issue.closed",
+		Payload: map[string]any{
+			"reason": "done",
+			"verification_endpoint_projects": map[string]any{
+				"c:local123": allowedProjectUID,
+				"c:foreign1": foreignProjectUID,
+			},
+			"verification_warnings": []any{map[string]any{
+				"code": "open_refutations",
+				"refutations": []any{
+					map[string]any{"refutation": "c:foreign1", "target": "c:local123", "author": "reviewer", "summary": "foreign review excerpt"},
+					map[string]any{"refutation": "c:local123", "target": "c:local123", "author": "reviewer", "summary": "visible review excerpt"},
+				},
+			}},
+			"overruled_refutations": []any{"c:foreign1", "c:local123"},
+			"evidence": []any{
+				map[string]any{"type": "confirmed", "comment": "c:foreign1"},
+				map[string]any{"type": "confirmed", "comment": "c:local123"},
+			},
+		},
+	}}}
+
+	require.NoError(t, handlers.redactEventsOutsideScope(t.Context(), &output))
+	payload := output.Events[0].Payload.(map[string]any)
+	require.NotContains(t, payload, "verification_endpoint_projects")
+	require.NotContains(t, fmt.Sprint(payload), "foreign review excerpt")
+	require.Equal(t, []any{"c:local123"}, payload["overruled_refutations"])
+	require.Len(t, payload["evidence"], 1)
+	warning := payload["verification_warnings"].([]any)[0].(map[string]any)
+	refutations := warning["refutations"].([]any)
+	require.Len(t, refutations, 1)
+	require.Equal(t, "visible review excerpt", refutations[0].(map[string]any)["summary"])
+}
+
 func TestDigestRedactsForeignLinkActionTargets(t *testing.T) {
 	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {

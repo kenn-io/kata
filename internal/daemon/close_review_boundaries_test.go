@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json/v2"
 	"path/filepath"
 	"testing"
 
@@ -29,6 +30,14 @@ func TestScopedSSERechecksCloseVerificationEndpoints(t *testing.T) {
 	projected, err := projectCloseEvent(f.ctx, f.store, &events[0])
 	require.NoError(t, err)
 	require.Contains(t, projected.Payload, review.Body)
+	var payload struct {
+		VerificationEndpointProjects map[string]string `json:"verification_endpoint_projects"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(projected.Payload), &payload))
+	require.Len(t, payload.VerificationEndpointProjects, 2)
+	for _, projectUID := range payload.VerificationEndpointProjects {
+		require.Equal(t, f.project.UID, projectUID)
+	}
 	require.NoError(t, f.store.DeleteLinkByID(f.ctx, f.parentLinkID))
 	visible, err := scopedEventStillVisible(f.ctx, f.store, *projected)
 	require.NoError(t, err)

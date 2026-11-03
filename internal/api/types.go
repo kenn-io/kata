@@ -1544,18 +1544,19 @@ type AuditClosesRequest struct {
 // the event recorded one, giving Parent's display ref immutable
 // provenance.
 type AuditCloseRow struct {
-	VerdictEvidence      []Evidence `json:"verdict_evidence,omitempty"`
-	OverruledRefutations []string   `json:"overruled_refutations,omitempty"`
-	Time                 string     `json:"time"`
-	Actor                string     `json:"actor"`
-	Issue                string     `json:"issue"`
-	Parent               string     `json:"parent,omitempty"`
-	ParentUID            string     `json:"parent_uid,omitempty"`
-	Reason               string     `json:"reason"`
-	EvidenceTypes        []string   `json:"evidence_types,omitempty"`
-	Flags                []string   `json:"flags,omitempty"`
-	Message              string     `json:"message,omitempty"`
-	EventID              int64      `json:"event_id"`
+	VerdictEvidence              []Evidence        `json:"verdict_evidence,omitempty"`
+	OverruledRefutations         []string          `json:"overruled_refutations,omitempty"`
+	VerificationEndpointProjects map[string]string `json:"verification_endpoint_projects,omitempty" doc:"Maps each rendered verification reference to its current owning project UID so clients can enforce fixed project scopes."`
+	Time                         string            `json:"time"`
+	Actor                        string            `json:"actor"`
+	Issue                        string            `json:"issue"`
+	Parent                       string            `json:"parent,omitempty"`
+	ParentUID                    string            `json:"parent_uid,omitempty"`
+	Reason                       string            `json:"reason"`
+	EvidenceTypes                []string          `json:"evidence_types,omitempty"`
+	Flags                        []string          `json:"flags,omitempty"`
+	Message                      string            `json:"message,omitempty"`
+	EventID                      int64             `json:"event_id"`
 }
 
 // AuditClosesResponse wraps the AuditCloseRow list. Rows is never nil

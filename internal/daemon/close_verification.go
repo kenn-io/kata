@@ -128,7 +128,13 @@ func checkCloseVerification(ctx context.Context, cfg ServerConfig, issue db.Issu
 		}
 		cited = cited || e.Type == api.EvidenceConfirmed
 		claim, err := commentref.Resolve(records, issue.UID, e.Comment, projectNameForRecords(records, issue.UID))
-		if err != nil || claim.IssueUID != issue.UID {
+		if err != nil {
+			return nil, nil, api.NewError(400, "validation", fmt.Sprintf("%s comment %q is not a live comment on this issue", e.Type, e.Comment), "", nil)
+		}
+		// Fence every resolved citation and its inbound verdicts before any
+		// validation error can echo a handle from a graph that has gone stale.
+		recordCommentResponseScope(ctx, records, []commentref.Record{claim})
+		if claim.IssueUID != issue.UID {
 			return nil, nil, api.NewError(400, "validation", fmt.Sprintf("%s comment %q is not a live comment on this issue", e.Type, e.Comment), "", nil)
 		}
 		if claim.ReplyKind == "confirm" || claim.ReplyKind == "refute" {

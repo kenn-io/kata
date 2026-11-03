@@ -873,7 +873,7 @@ func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
-	out.Warnings, err = h.scopedVerificationWarnings(ctx, response.Warnings)
+	out.Warnings, err = h.scopedVerificationWarnings(ctx, response.Warnings, verificationEndpointProjects(event.Payload))
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
@@ -1757,11 +1757,13 @@ func optionalCommentEnum[T ~string](value string) *T {
 // A connected daemon credential can be broader than the MCP startup scope.
 // Canonical endpoint authorization is daemon-side; display qualification also
 // lets this broker withhold retained warnings whose source left its projects.
-func (h toolHandlers) scopedVerificationWarnings(ctx context.Context, warnings []generated.VerificationWarning) ([]generated.VerificationWarning, error) {
+func (h toolHandlers) scopedVerificationWarnings(
+	ctx context.Context, warnings []generated.VerificationWarning, endpointProjects map[string]string,
+) ([]generated.VerificationWarning, error) {
 	if len(warnings) == 0 || h.options.Scope.Mode() == ScopeAll {
 		return warnings, nil
 	}
-	visible, err := h.verificationReferenceFilter(ctx)
+	allowedProjectUIDs, err := h.verificationProjectUIDs(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1769,7 +1771,8 @@ func (h toolHandlers) scopedVerificationWarnings(ctx context.Context, warnings [
 	for _, warning := range warnings {
 		refs := []generated.OpenRefutation{}
 		for _, r := range warning.Refutations {
-			if visible(r.Refutation) && visible(r.Target) {
+			if verificationReferenceInScope(r.Refutation, endpointProjects, allowedProjectUIDs) &&
+				verificationReferenceInScope(r.Target, endpointProjects, allowedProjectUIDs) {
 				refs = append(refs, r)
 			}
 		}
@@ -1781,21 +1784,31 @@ func (h toolHandlers) scopedVerificationWarnings(ctx context.Context, warnings [
 	return kept, nil
 }
 
-// Retained display references are already authorized by the daemon. The MCP
-// broker additionally enforces its fixed startup project identities.
-func (h toolHandlers) verificationReferenceFilter(ctx context.Context) (func(string) bool, error) {
+func (h toolHandlers) verificationProjectUIDs(ctx context.Context) (map[string]bool, error) {
 	projects, err := h.options.Scope.Projects(ctx, h.options.Client, false)
 	if err != nil {
 		return nil, err
 	}
 	allowed := map[string]bool{}
 	for _, project := range projects {
-		allowed[project.Name] = true
-	}
-	return func(ref string) bool {
-		if project, _, qualified := strings.Cut(ref, "#"); qualified {
-			return allowed[project]
+		if project.UID != "" {
+			allowed[project.UID] = true
 		}
-		return strings.Contains(ref, ":")
-	}, nil
+	}
+	return allowed, nil
+}
+
+func verificationReferenceInScope(ref string, endpointProjects map[string]string, allowedProjectUIDs map[string]bool) bool {
+	projectUID, ok := endpointProjects[ref]
+	return ok && allowedProjectUIDs[projectUID]
+}
+
+func verificationEndpointProjects(payload string) map[string]string {
+	var envelope struct {
+		Projects map[string]string `json:"verification_endpoint_projects"`
+	}
+	if json.Unmarshal([]byte(payload), &envelope) != nil {
+		return nil
+	}
+	return envelope.Projects
 }

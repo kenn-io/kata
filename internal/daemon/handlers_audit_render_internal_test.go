@@ -92,3 +92,62 @@ func TestDoAuditCloses_SameProjectParentRendersBare(t *testing.T) {
 	assert.Equal(t, parent.ShortID, resp.Body.Rows[0].Parent,
 		"same-project parent must render as a bare short_id")
 }
+
+func TestDoAuditClosesCarriesCurrentVerificationEndpointProjects(t *testing.T) {
+	ctx := t.Context()
+	store, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "audit.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	spoke, err := store.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	hub, err := store.CreateProject(ctx, "hub-project")
+	require.NoError(t, err)
+	claimIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: spoke.ID, Title: "completed task", Author: "worker",
+	})
+	require.NoError(t, err)
+	reviewIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: spoke.ID, Title: "review", Author: "reviewer",
+	})
+	require.NoError(t, err)
+	claim, _, err := store.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: claimIssue.ID, Author: "worker", Body: "Completion claim",
+	})
+	require.NoError(t, err)
+	refutation, _, err := store.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: reviewIssue.ID, Author: "reviewer", Body: "Open review concern",
+		ReplyToUID: claim.UID, ReplyKind: "refute",
+	})
+	require.NoError(t, err)
+	claimIssue, _, _, err = store.CloseIssueGuarded(ctx, db.CloseIssueParams{
+		IssueID: claimIssue.ID, ExpectedProjectID: spoke.ID, Actor: "worker", Reason: "done",
+		Message:               "Completed the requested change and checked its focused tests.",
+		Evidence:              []db.Evidence{{Type: "test", Command: "go test ./example"}},
+		VerificationIssueUIDs: []string{claimIssue.UID, reviewIssue.UID},
+		VerificationWarnings: []db.VerificationWarning{{Code: "open_refutations", Refutations: []db.OpenRefutation{{
+			Refutation: refutation.UID, Target: claim.UID, Author: refutation.Author, Summary: refutation.Body,
+		}}}},
+	})
+	require.NoError(t, err)
+	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: claimIssue.ID, FromProjectID: spoke.ID, ToProjectID: hub.ID,
+		IfMatchRev: claimIssue.Revision, Actor: "worker",
+	})
+	require.NoError(t, err)
+	reviewIssue, err = store.IssueByUID(ctx, reviewIssue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: reviewIssue.ID, FromProjectID: spoke.ID, ToProjectID: hub.ID,
+		IfMatchRev: reviewIssue.Revision, Actor: "reviewer",
+	})
+	require.NoError(t, err)
+
+	resp, err := doAuditCloses(ctx, ServerConfig{DB: store}, &api.AuditClosesRequest{ProjectID: spoke.ID})
+	require.NoError(t, err)
+	require.Len(t, resp.Body.Rows, 1)
+	projects := resp.Body.Rows[0].VerificationEndpointProjects
+	require.Len(t, projects, 2)
+	for _, projectUID := range projects {
+		assert.Equal(t, hub.UID, projectUID)
+	}
+}

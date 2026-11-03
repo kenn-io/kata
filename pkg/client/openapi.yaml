@@ -231,6 +231,11 @@ components:
           items:
             $ref: "#/components/schemas/EvidenceResponse"
           type: array
+        verification_endpoint_projects:
+          additionalProperties:
+            type: string
+          description: Maps each rendered verification reference to its current owning project UID so clients can enforce fixed project scopes.
+          type: object
       required:
         - time
         - actor
