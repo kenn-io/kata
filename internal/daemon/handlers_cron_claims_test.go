@@ -1,6 +1,7 @@
 package daemon_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json/v2"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/jsonl"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -72,6 +74,45 @@ func TestCronOccurrenceClaimLocalGrantReplayConflict(t *testing.T) {
 	resp, raw = envDoRaw(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/capabilities", p.ID), nil, nil)
 	require.Equal(t, 200, resp.StatusCode)
 	require.Contains(t, string(raw), "cron_occurrence_claims_v1")
+}
+
+func TestCronOccurrenceClaimLookupRequiresAuthority(t *testing.T) {
+	root := testenv.New(t)
+	p, err := root.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	j := cronClaimJob(t, root, p)
+	run := "00000000000000000000000003"
+	path := fmt.Sprintf("/api/v1/projects/%d/cron/claims/%s", p.ID, run)
+	resp, raw := envDoRaw(t, root, http.MethodPost, cronClaimPath(p.ID, j.UID), cronClaimBody(j, run), nil)
+	require.Equal(t, 201, resp.StatusCode, string(raw))
+	resp, raw = envDoRaw(t, root, http.MethodGet, path+"unknown", nil, nil)
+	require.Equal(t, 404, resp.StatusCode, string(raw))
+	var backup bytes.Buffer
+	require.NoError(t, jsonl.Export(t.Context(), root.DB, &backup, jsonl.ExportOptions{IncludeDeleted: true}))
+	for _, newInstance := range []bool{false, true} {
+		t.Run(fmt.Sprintf("new_instance_%t", newInstance), func(t *testing.T) {
+			target := testenv.New(t)
+			require.NoError(t, jsonl.ImportWithOptions(t.Context(), bytes.NewReader(backup.Bytes()), target.DB, jsonl.ImportOptions{NewInstance: newInstance}))
+			resp, raw := envDoRaw(t, target, http.MethodGet, path, nil, nil)
+			if newInstance {
+				assertAPIError(t, resp.StatusCode, raw, 503, "cron_claim_pending")
+				require.NotContains(t, string(raw), `"claimed":true`)
+			} else {
+				require.Equal(t, 200, resp.StatusCode, string(raw))
+				require.Contains(t, string(raw), run)
+			}
+		})
+	}
+	t.Run("detached_replica", func(t *testing.T) {
+		_, err := root.DB.EnableProjectFederation(t.Context(), p.ID, "worker")
+		require.NoError(t, err)
+		spoke, local, _, _ := newCronClaimSpoke(t, root, p, "member")
+		_, err = spoke.DB.LeaveFederationReplica(t.Context(), local.ID)
+		require.NoError(t, err)
+		resp, raw := envDoRaw(t, spoke, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/claims/%s", local.ID, run), nil, nil)
+		assertAPIError(t, resp.StatusCode, raw, 503, "cron_claim_pending")
+		require.NotContains(t, string(raw), `"claimed":true`)
+	})
 }
 
 func TestCronOccurrenceClaimAuthBoundaries(t *testing.T) {
@@ -142,11 +183,11 @@ func TestCronOccurrenceClaimScopeAndArchive(t *testing.T) {
 	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: p.ID, Title: "Delegated work", Author: "worker"})
 	require.NoError(t, err)
 	expiry := time.Now().Add(time.Hour)
-	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: "scoped-claim-test-token", Actor: "worker", AdminActor: db.BootstrapActor, Scope: &db.APITokenScope{Kind: db.APITokenScopeIssueSubtree, ProjectUID: p.UID, RootIssueUID: issue.UID}, ExpiresAt: &expiry})
+	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: "scoped-claim-test-token", Actor: "worker", AdminActor: db.BootstrapActor, Scope: &db.APITokenScope{Kind: db.APITokenScopeIssueSubtree, ProjectUID: p.UID, RootIssueUID: issue.UID}, ExpiresAt: &expiry}) // #nosec G101 -- synthetic token used only by this test.
 	require.NoError(t, err)
 	resp, raw := envDoRaw(t, env, http.MethodPost, cronClaimPath(p.ID, j.UID), cronClaimBody(j, "00000000000000000000000003"), bearer("scoped-claim-test-token"))
 	require.Equal(t, 403, resp.StatusCode, string(raw))
-	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: "worker-claim-test-token", Actor: "worker", AdminActor: db.BootstrapActor})
+	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: "worker-claim-test-token", Actor: "worker", AdminActor: db.BootstrapActor}) // #nosec G101 -- synthetic token used only by this test.
 	require.NoError(t, err)
 	_, _, err = env.DB.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: p.ID, Actor: "worker", Force: true})
 	require.NoError(t, err)

@@ -126,11 +126,11 @@ func TestCronOccurrenceClaimsUnavailableCapabilityAndRedirect(t *testing.T) {
 			j := cronClaimJob(t, root, p)
 			var posts, leaks atomic.Int32
 			var holder string
-			target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { leaks.Add(1) }))
+			target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) { leaks.Add(1) }))
 			t.Cleanup(target.Close)
 			fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if mode == "redirect" {
-					http.Redirect(w, r, target.URL+r.URL.Path, 302)
+					http.Redirect(w, r, target.URL, http.StatusFound)
 					return
 				}
 				w.Header().Set("Content-Type", "application/json")
@@ -246,7 +246,7 @@ func TestCronOccurrenceClaimsRelayPreservesOrigin(t *testing.T) {
 	relay, rp, creds, oldGrant := newCronClaimSpoke(t, root, p, "relay-member")
 	err = root.DB.RevokeFederationEnrollment(t.Context(), oldGrant.Enrollment.ID)
 	require.NoError(t, err)
-	parent, _, err := root.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: "relay-parent-test-token", Actor: "relay-member", AdminActor: "admin"})
+	parent, _, err := root.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: "relay-parent-test-token", Actor: "relay-member", AdminActor: "admin"}) // #nosec G101 -- synthetic token used only by this test.
 	require.NoError(t, err)
 	grant, err := root.DB.CreateRelayEnrollment(t.Context(), db.CreateRelayEnrollmentParams{ProjectID: p.ID, ParentTokenID: parent.ID, SpokeInstanceUID: relay.DB.InstanceUID(), ProtocolVersion: db.RelayProtocolVersion, ServeDownstream: true})
 	require.NoError(t, err)
@@ -315,19 +315,19 @@ func TestCronOccurrenceClaimsLostResponseLookup(t *testing.T) {
 		request.URL.Scheme = rootURL.Scheme
 		request.URL.Host = rootURL.Host
 		request.Host = rootURL.Host
-		response, e := root.HTTP.Do(request)
+		response, e := root.HTTP.Do(request) //nolint:gosec // G704: destination is the fixed local httptest root, not the incoming URL.
 		if e != nil {
-			http.Error(w, "transport failed", 503)
+			http.Error(w, "transport failed", http.StatusServiceUnavailable)
 			return
 		}
 		defer func() { _ = response.Body.Close() }()
 		raw, e := io.ReadAll(response.Body)
 		if e != nil {
-			http.Error(w, "read failed", 503)
+			http.Error(w, "read failed", http.StatusServiceUnavailable)
 			return
 		}
 		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/claims") && lose.Swap(false) {
-			http.Error(w, "response lost after root commit", 503)
+			http.Error(w, "response lost after root commit", http.StatusServiceUnavailable)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")

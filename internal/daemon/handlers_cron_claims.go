@@ -87,6 +87,9 @@ func registerCronClaimHandlers(h huma.API, cfg ServerConfig) {
 		if forward {
 			return forwardCronClaimLookup(ctx, cfg, binding, in.RunUID, in.Hops)
 		}
+		if _, err := cfg.DB.CronClaimAuthority(ctx, in.ProjectID); err != nil {
+			return nil, cronClaimAPIError(ctx, cfg, in.ProjectID, db.CronClaimResult{}, err)
+		}
 		claim, err := cfg.DB.CronOccurrenceClaim(ctx, in.ProjectID, in.RunUID)
 		if err != nil {
 			return nil, cronClaimAPIError(ctx, cfg, in.ProjectID, db.CronClaimResult{}, err)

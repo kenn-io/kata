@@ -6,9 +6,12 @@ import (
 )
 
 var (
+	// ErrCronOccurrenceClaimed means another run already reserved the occurrence.
 	ErrCronOccurrenceClaimed = errors.New("cron occurrence is already claimed")
-	ErrCronClaimIdentity     = errors.New("cron claim run identity conflicts")
-	ErrCronClaimPending      = errors.New("cron claim authority or definition is unavailable")
+	// ErrCronClaimIdentity means a run UID was reused with different evidence.
+	ErrCronClaimIdentity = errors.New("cron claim run identity conflicts")
+	// ErrCronClaimPending means no authoritative grant can currently be decided.
+	ErrCronClaimPending = errors.New("cron claim authority or definition is unavailable")
 )
 
 // CronClaimAuthorityPrefix is internal owner metadata, never replicated project metadata.

@@ -43,6 +43,13 @@ const (
 // *sql.DB. Each method that lands a real query gets added here, and
 // the generator's output for that method disappears on the next regenerate.
 var alreadyImplemented = map[string]bool{
+	"AdmitCronClaim":         true, // cron_claims.go
+	"CheckCronClaimUpstream": true, // cron_claims.go
+	"ClaimCronOccurrence":    true, // cron_claims.go
+	"CronOccurrenceClaim":    true, // cron_claims.go
+	"CronClaimAuthority":     true, // cron_claims.go
+	"ExportCronClaims":       true, // cron_export.go
+
 	"DispatchRecurringCron": true, // cron.go
 	"ListRecurringCronJobs": true, // cron.go
 
