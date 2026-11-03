@@ -1,26 +1,9 @@
 import { describe, expect, test } from 'vitest'
 
-import type { KataReachableGraphResponse, KataTaskSummary } from '../kata/types'
-import { filterSnapshotGraph, graphDistanceByUID } from './snapshot'
-
-function task(uid: string, status: KataTaskSummary['status'] = 'open'): KataTaskSummary {
-  return {
-    id: 1,
-    uid,
-    short_id: uid,
-    qualified_id: `example-project#${uid}`,
-    project_id: 1,
-    project_uid: 'project-example',
-    project_name: 'example-project',
-    title: uid,
-    status,
-    metadata: {},
-    revision: 1,
-    author: 'user-a',
-    created_at: '2026-08-01T12:00:00Z',
-    updated_at: '2026-08-01T12:00:00Z',
-  }
-}
+import type { KataReachableGraphResponse } from '../kata/types'
+import { task } from '../kata/test-helpers'
+import { graphDistanceByUID } from './distance'
+import { filterSnapshotGraph } from './snapshot'
 
 describe('filterSnapshotGraph', () => {
   test.each([
@@ -46,13 +29,13 @@ describe('filterSnapshotGraph', () => {
         depth: 'full',
         hide_done: false,
         nodes: [
-          task('root', 'closed'),
-          task('a'),
-          task('b', 'closed'),
-          task('c'),
-          task('d'),
-          task('e'),
-          task('isolated'),
+          task({ uid: 'root', status: 'closed' }),
+          task({ uid: 'a' }),
+          task({ uid: 'b', status: 'closed' }),
+          task({ uid: 'c' }),
+          task({ uid: 'd' }),
+          task({ uid: 'e' }),
+          task({ uid: 'isolated' }),
         ],
         edges: [
           { from_uid: 'a', to_uid: 'root', kind: 'parent', layout: true },
@@ -77,7 +60,9 @@ describe('filterSnapshotGraph', () => {
         source_uid: 'root',
         depth,
         hide_done: hideDone,
-        nodes: uids.map((uid) => task(uid, uid === 'root' || uid === 'b' ? 'closed' : 'open')),
+        nodes: uids.map((uid) =>
+          task({ uid, status: uid === 'root' || uid === 'b' ? 'closed' : 'open' }),
+        ),
         edges: edgeIndexes.map((index) => snapshot.edges[index]),
         unresolved_refs: uids.map((uid) => ({
           uid: `missing-${uid}`,
@@ -99,6 +84,32 @@ describe('filterSnapshotGraph', () => {
     },
   )
 
+  test('stops at the selected depth on a longer chain', () => {
+    const snapshot: KataReachableGraphResponse = {
+      source_uid: 'root',
+      depth: 'full',
+      hide_done: false,
+      nodes: ['root', 'a', 'b', 'c', 'd'].map((uid) => task({ uid })),
+      edges: [
+        { from_uid: 'root', to_uid: 'a', kind: 'blocks', layout: true },
+        { from_uid: 'a', to_uid: 'b', kind: 'blocks', layout: true },
+        { from_uid: 'b', to_uid: 'c', kind: 'blocks', layout: true },
+        { from_uid: 'c', to_uid: 'd', kind: 'blocks', layout: true },
+      ],
+      unresolved_refs: [],
+      fetched_at: '2026-08-01T12:00:00Z',
+    }
+
+    expect([...graphDistanceByUID('root', snapshot.edges, 2)]).toEqual([
+      ['root', 0],
+      ['a', 1],
+      ['b', 2],
+    ])
+    const result = filterSnapshotGraph(snapshot, 'root', '2', false)
+    expect(result.nodes.map((node) => node.uid)).toEqual(['root', 'a', 'b'])
+    expect(result.edges).toEqual(snapshot.edges.slice(0, 2))
+  })
+
   test('scales with the number of edges', () => {
     const timings = [1000, 4000, 16000].map((size) => {
       const snapshot: KataReachableGraphResponse = {
@@ -106,8 +117,8 @@ describe('filterSnapshotGraph', () => {
         depth: 'full',
         hide_done: false,
         nodes: [
-          task('root'),
-          ...Array.from({ length: size }, (_, index) => task(`issue-${index}`)),
+          task({ uid: 'root' }),
+          ...Array.from({ length: size }, (_, index) => task({ uid: `issue-${index}` })),
         ],
         edges: Array.from({ length: size }, (_, index) => ({
           from_uid: 'root',
