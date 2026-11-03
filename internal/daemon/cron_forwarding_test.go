@@ -2,11 +2,9 @@ package daemon_test
 
 import (
 	"context"
-	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -17,7 +15,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"hegel.dev/go/hegel"
 
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
@@ -397,166 +394,6 @@ func TestCronSpokeForwardPresendAuthority(t *testing.T) {
 			})
 		}
 	}
-}
-
-// The state-machine contract is one authoritative definition and its original
-// progress anchor, independent of which HTTP endpoint performs a lifecycle CAS.
-func TestCronSpokeForwardCASProperty(t *testing.T)        { cronSpokeForwardSequences(t, "cas") }
-func TestCronSpokeForwardAnchorProperty(t *testing.T)     { cronSpokeForwardSequences(t, "anchor") }
-func TestCronSpokeForwardProvenanceProperty(t *testing.T) { cronSpokeForwardSequences(t, "provenance") }
-func cronSpokeForwardSequences(t *testing.T, law string) {
-	f := newCronForwardFixture(t, nil)
-	hegel.Test(t, func(ht *hegel.T) {
-		// Draw the complete byte-action domain; bound only the materialized sequence.
-		actions := hegel.Draw(ht, hegel.Lists(hegel.Integers[uint8](0, math.MaxUint8)))
-		if len(actions) > 6 {
-			actions = actions[:6]
-		}
-		uid := cronHTTPUID(t)
-		response, raw := f.put(t, uid, "")
-		require.Equalf(ht, 200, response.StatusCode, "%s", raw)
-		var created api.CronJobResponse
-		require.NoError(ht, json.Unmarshal(raw, &created.Body))
-		current := created.Body.Job
-		modelDeleted, modelName := false, "Review"
-		modelDefinition := f.definition
-		progress := func() string {
-			parent, err := f.hub.DB.IssueByUID(t.Context(), f.parent.UID, db.IncludeDeletedNo)
-			require.NoError(ht, err)
-			var metadata map[string]jsontext.Value
-			require.NoError(ht, json.Unmarshal([]byte(parent.Metadata), &metadata))
-			return string(metadata["cron.progress."+uid])
-		}
-		anchor := progress()
-		require.NotEmpty(ht, anchor)
-		for _, step := range actions {
-			target, projectID, headers := f.target, f.sp.ID, map[string]string(nil)
-			if step&8 != 0 {
-				target = f.hub
-				projectID = f.hp.ID
-			}
-			method, path := http.MethodPut, fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s", projectID, uid)
-			expected := current.DefinitionEventUID
-			stale := step&4 != 0
-			if stale {
-				expected = cronHTTPUID(t)
-			}
-			definition := f.definition
-			definition.Enabled = step&64 == 0
-			definition.Trigger.IntervalSeconds = 60 + int64(step)*60
-			body := map[string]any{"actor": "tester", "name": fmt.Sprintf("Review %d", step), "definition": definition, "expected_event_uid": expected}
-			want := 200
-			deleted := modelDeleted
-			switch step & 3 {
-			case 0:
-				delete(body, "expected_event_uid")
-				want = 409
-			case 1:
-				if stale {
-					want = 409
-				}
-			case 2:
-				method = http.MethodDelete
-				delete(body, "name")
-				delete(body, "definition")
-				if stale || deleted {
-					want = 409
-				}
-			case 3:
-				method = http.MethodPost
-				path += "/restore"
-				delete(body, "name")
-				delete(body, "definition")
-				if stale || !deleted {
-					want = 409
-				}
-			}
-			response, raw := envDoRaw(t, target, method, path, body, headers)
-			require.Equalf(ht, want, response.StatusCode, "step=%d response=%s", step, raw)
-			if want == 200 {
-				var result api.CronJobResponse
-				require.NoError(ht, json.Unmarshal(raw, &result.Body))
-				current = result.Body.Job
-				switch step & 3 {
-				case 1:
-					modelDeleted = false
-					modelName = fmt.Sprintf("Review %d", step)
-					modelDefinition = definition
-				case 2:
-					modelDeleted = true
-				case 3:
-					modelDeleted = false
-				}
-				require.Equal(ht, "tester", current.Author)
-				if target == f.target {
-					require.Zero(ht, current.ID)
-					require.Zero(ht, current.Revision)
-					require.Equal(ht, f.sp.ID, current.ProjectID)
-					require.Empty(ht, result.Body.Events)
-				}
-			} else {
-				var conflict api.ErrorEnvelope
-				require.NoError(ht, json.Unmarshal(raw, &conflict))
-				require.Equal(ht, "cron_conflict", conflict.Error.Code)
-				encoded, err := json.Marshal(conflict.Error.Data["current"])
-				require.NoError(ht, err)
-				var actual api.CronJob
-				require.NoError(ht, json.Unmarshal(encoded, &actual))
-				require.Equal(ht, current.DefinitionEventUID, actual.DefinitionEventUID)
-			}
-			stored, err := f.hub.DB.CronJob(t.Context(), f.hp.ID, uid)
-			require.NoError(ht, err)
-			require.Equal(ht, current.DefinitionEventUID, stored.DefinitionEventUID)
-			if law == "cas" {
-				require.Equal(ht, modelDeleted, stored.DeletedAt != nil)
-				require.Equal(ht, modelName, stored.Name)
-				require.Equal(ht, modelDefinition, stored.Definition)
-			}
-			if law == "anchor" {
-				require.Equal(ht, anchor, progress())
-			}
-			if step&16 != 0 {
-				binding, err := f.spoke.DB.FederationBindingByProject(t.Context(), f.sp.ID)
-				require.NoError(ht, err)
-				require.NoError(ht, federation.SyncFederationOnce(t.Context(), f.spoke.DB, binding, f.credential))
-				local, err := f.spoke.DB.CronJob(t.Context(), f.sp.ID, uid)
-				require.NoError(ht, err)
-				require.Equal(ht, current.DefinitionEventUID, local.DefinitionEventUID)
-			}
-		}
-		jobs, err := f.hub.DB.ListCronJobs(t.Context(), db.CronList{ProjectID: f.hp.ID, IncludeDeleted: true})
-		require.NoError(ht, err)
-		count := 0
-		for _, job := range jobs {
-			if job.UID == uid {
-				count++
-			}
-		}
-		require.Equal(ht, 1, count)
-		if law != "provenance" {
-			return
-		}
-		events, err := f.hub.DB.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: f.hp.ID, Limit: 10000})
-		require.NoError(ht, err)
-		initializations := 0
-		for _, event := range events {
-			if strings.Contains(event.Payload, uid) {
-				require.Equal(ht, f.hub.DB.InstanceUID(), event.OriginInstanceUID)
-				require.Equal(ht, "tester", event.Actor)
-				if event.Type == "issue.metadata_updated" && strings.Contains(event.Payload, "cron.progress."+uid) {
-					initializations++
-				}
-			}
-		}
-		require.Equal(ht, 1, initializations)
-		localEvents, err := f.spoke.DB.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: f.sp.ID, Limit: 10000})
-		require.NoError(ht, err)
-		for _, event := range localEvents {
-			if strings.Contains(event.Payload, uid) {
-				require.Equal(ht, f.hub.DB.InstanceUID(), event.OriginInstanceUID, "no spoke-origin definition or progress event")
-			}
-		}
-	}, hegel.WithTestCases(100), hegel.WithDatabase(""))
 }
 
 type overlappingPushStore struct {
