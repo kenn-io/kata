@@ -253,11 +253,15 @@ jobs:
         with:
           persist-credentials: false
 
+      # Go tests is the only writer of this key; shorter Linux jobs sharing the default key finished first and saved a near-empty cache.
       - name: Set up Go
         uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: |
+            go.mod
+            go.sum
 
       - name: Set up Node
         uses: actions/setup-node@v7.1.0
@@ -290,7 +294,7 @@ jobs:
           go tool gotestsum --format pkgname-and-test-fails --format-icons text
           --jsonfile "gotestsum/go.json" --rerun-fails=2
           --rerun-fails-report "gotestsum/go-reruns.txt"
-          --packages "$(go list ./... | grep -v '/e2e$')" --
+          --packages "$(go list ./... | grep -v '/e2e$')" -- -count=1
 
       - name: Upload Go test results
         if: failure() || github.run_attempt > 1 || hashFiles('gotestsum/go-reruns.txt') != ''
@@ -309,7 +313,7 @@ jobs:
           go tool gotestsum --format pkgname-and-test-fails --format-icons text
           --jsonfile "gotestsum/go-e2e.json" --rerun-fails=2
           --rerun-fails-report "gotestsum/go-e2e-reruns.txt"
-          --packages ./e2e -- -p 1
+          --packages ./e2e -- -count=1 -p 1
 
       - name: Upload e2e test results
         if: failure() || github.run_attempt > 1 || hashFiles('gotestsum/go-e2e-reruns.txt') != ''
