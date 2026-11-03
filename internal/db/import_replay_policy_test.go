@@ -1,11 +1,14 @@
 package db_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"hegel.dev/go/hegel"
+
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -81,6 +84,46 @@ func TestValidateImportRecordsAcceptsEveryPayloadType(t *testing.T) {
 	}
 	require.Len(t, records, 25)
 	assert.NoError(t, db.ValidateImportRecords(records))
+}
+
+func TestValidateImportRecordsRejectsCanonicalCommentUIDDuplicates(t *testing.T) {
+	uid := "01ARZ3NDEKTSV4RRFFQ69G5FAJ"
+	records := []db.ImportRecord{
+		&db.CommentExport{UID: uid},
+		&db.CommentExport{UID: strings.ToLower(uid)},
+	}
+
+	err := db.ValidateImportRecords(records)
+	require.ErrorContains(t, err, "duplicate canonical comment UID")
+	require.ErrorContains(t, db.ValidateImportReplay(records, db.ImportOptions{}), "duplicate canonical comment UID")
+}
+
+func drawImportCommentUID(ht *hegel.T) string {
+	first := hegel.Draw(ht, hegel.SampledFrom([]string{"0", "1", "2", "3", "4", "5", "6", "7"}))
+	tail := "A" + hegel.Draw(ht, hegel.Text().Alphabet("0123456789ABCDEFGHJKMNPQRSTVWXYZ").MinSize(24).MaxSize(24))
+	return first + tail
+}
+
+func TestValidateImportRecordsRejectsCanonicalCommentUIDDuplicatesProperty(t *testing.T) {
+	hegel.Test(t, func(ht *hegel.T) {
+		uid := drawImportCommentUID(ht)
+		alias := strings.ToLower(uid)
+		records := []db.ImportRecord{
+			&db.CommentExport{UID: uid},
+			&db.CommentExport{UID: alias},
+		}
+
+		require.ErrorContains(ht, db.ValidateImportRecords(records), "duplicate canonical comment UID")
+	}, hegel.WithTestCases(1000), hegel.WithDatabase(t.TempDir()))
+}
+
+func TestValidateImportRecordsKeepsOpaqueCommentUIDsCaseSensitive(t *testing.T) {
+	records := []db.ImportRecord{
+		&db.CommentExport{UID: "legacy-comment-a"},
+		&db.CommentExport{UID: "LEGACY-COMMENT-A"},
+	}
+
+	require.NoError(t, db.ValidateImportRecords(records))
 }
 
 // TestOrderImportRecordsPlacesDependenciesFirst pins the replay order the

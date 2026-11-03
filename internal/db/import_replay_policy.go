@@ -73,6 +73,9 @@ func ValidateImportRecords(records []ImportRecord) error {
 	if err := validateSpokeNameReplay(records); err != nil {
 		return err
 	}
+	if err := validateImportCommentUIDIdentities(records); err != nil {
+		return err
+	}
 	if err := validateCronImportEvents(records); err != nil {
 		return err
 	}
@@ -92,6 +95,22 @@ func ValidateImportRecords(records []ImportRecord) error {
 		return err
 	}
 	return validateProvenanceReplay(records)
+}
+
+func validateImportCommentUIDIdentities(records []ImportRecord) error {
+	seen := make(map[string]struct{})
+	for index, record := range records {
+		comment, ok := record.(*CommentExport)
+		if !ok || comment == nil {
+			continue
+		}
+		canonical := CanonicalCommentUID(comment.UID)
+		if _, exists := seen[canonical]; exists {
+			return fmt.Errorf("import record %d: duplicate canonical comment UID %q", index, canonical)
+		}
+		seen[canonical] = struct{}{}
+	}
+	return nil
 }
 
 // Validate complete portable cron documents before either backend clears
