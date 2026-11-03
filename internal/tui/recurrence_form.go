@@ -116,6 +116,9 @@ func readRecurrenceForm(api detailAPI, target formTarget, formGen int64, connGen
 			return msg
 		}
 		msg.issue, msg.recurrence = *detail.Issue, detail.Recurrence
+		if reader, ok := api.(recurrenceReadAPI); ok && detail.Issue.RecurrenceID != nil {
+			msg.recurrence, msg.err = reader.ReadRecurrence(ctx, target.projectID, detail.Issue.RecurrenceID)
+		}
 		return msg
 	}
 }
@@ -191,11 +194,18 @@ func (m Model) saveRecurrence(in RecurrenceInput) (Model, tea.Cmd) {
 }
 
 func dispatchFormSaveRecurrence(apiClient any, target formTarget, in RecurrenceInput, formGen int64) tea.Cmd {
+	kind := "recurrence.change"
+	switch {
+	case in.Stop:
+		kind = "recurrence.stop"
+	case in.Recurrence == nil:
+		kind = "recurrence.start"
+	}
 	return func() tea.Msg {
 		writer, ok := apiClient.(recurrenceAPI)
 		if !ok {
 			return mutationDoneMsg{
-				origin: "form", kind: "recurrence", formGen: formGen,
+				origin: "form", kind: kind, formGen: formGen,
 				err: errors.New("TUI client does not support editing recurrences"),
 			}
 		}
@@ -206,7 +216,7 @@ func dispatchFormSaveRecurrence(apiClient any, target formTarget, in RecurrenceI
 			resp = withCurrentRecurrence(ctx, apiClient, target, resp)
 		}
 		return mutationDoneMsg{
-			origin: "form", gen: target.detailGen, kind: "recurrence", formGen: formGen,
+			origin: "form", gen: target.detailGen, kind: kind, formGen: formGen,
 			resp: resp, err: err,
 		}
 	}

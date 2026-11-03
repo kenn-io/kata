@@ -280,18 +280,25 @@ func (c *Client) GetIssueDetail(ctx context.Context, projectID int64, ref string
 // effort, as it is in kata show: a token that may not list recurrences still
 // reads the issue, which then shows no recurrence.
 func (c *Client) readRecurrence(ctx context.Context, projectID int64, id *int64) *recurrence.View {
-	if id == nil {
-		return nil
-	}
-	apiClient, err := c.generatedClient()
-	if err != nil {
-		return nil
-	}
-	rec, err := recurrence.Active(ctx, apiClient, projectID, id)
+	rec, err := c.ReadRecurrence(ctx, projectID, id)
 	if err != nil {
 		return nil
 	}
 	return rec
+}
+
+// ReadRecurrence reads the live recurrence an issue belongs to and reports
+// why it could not, for callers that must not mistake a failed read for an
+// issue that does not repeat.
+func (c *Client) ReadRecurrence(ctx context.Context, projectID int64, id *int64) (*recurrence.View, error) {
+	if id == nil {
+		return nil, nil
+	}
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	return recurrence.Active(ctx, apiClient, projectID, id)
 }
 
 // CreateIssue posts a new issue. body.IdempotencyKey rides the
