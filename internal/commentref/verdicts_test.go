@@ -91,6 +91,19 @@ func TestVerdictsLocalRebuttalDoesNotBecomeNewBlocker(t *testing.T) {
 	require.Empty(t, Evaluate([]Record{claim, r, b}, "issue", nil).OpenRefutations)
 }
 
+func TestVerdictsRedactedRefutationDoesNotMakeRebuttalIndependentBlocker(t *testing.T) {
+	hiddenTarget := graphRecord(1, "hidden", "", "")
+	refutation := graphRecord(2, "issue", hiddenTarget.UID, "refute")
+	rebuttal := graphRecord(3, "issue", refutation.UID, "refute")
+	rows := Project([]Record{refutation, rebuttal}, map[string]TargetState{
+		hiddenTarget.UID: {Status: "hidden"},
+	})
+	require.Empty(t, rows[0].ReplyKind)
+	require.Equal(t, "refute", rows[0].OriginalReplyKind)
+	require.Empty(t, Evaluate(rows, "issue", nil).OpenRefutations,
+		"a rebuttal answers the original dispute instead of blocking the issue independently")
+}
+
 func TestVerdictsBoundedAndCyclic(t *testing.T) {
 	claim := graphRecord(1, "issue", "", "")
 	rows := []Record{claim}

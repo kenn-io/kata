@@ -35,12 +35,13 @@ type CommentGraphReference struct {
 
 // CommentGraphRecord retains the comment's current owning issue and project.
 type CommentGraphRecord struct {
-	Comment      Comment
-	IssueUID     string
-	IssueShortID string
-	ProjectID    int64
-	ProjectUID   string
-	ProjectName  string
+	Comment           Comment
+	OriginalReplyKind string `json:"-"`
+	IssueUID          string
+	IssueShortID      string
+	ProjectID         int64
+	ProjectUID        string
+	ProjectName       string
 }
 
 // CommentGraphTarget retains lookup and lineage evidence for unavailable endpoints.
@@ -203,6 +204,9 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(ar
 			continue
 		}
 		if query.AllowedIssueIDs != nil {
+			// Keep the reply classification for internal verification checks while
+			// the hidden target identity and wire-visible edge stay redacted.
+			data.Comments[index].OriginalReplyKind = data.Comments[index].Comment.ReplyKind
 			data.Comments[index].Comment.ReplyToUID = ""
 			data.Comments[index].Comment.ReplyKind = ""
 			continue

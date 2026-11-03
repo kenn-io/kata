@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -73,6 +74,54 @@ func TestCloseConfirmedCitationMustBeClean(t *testing.T) {
 			require.Contains(t, string(raw), "open refutation")
 		})
 	}
+}
+
+func TestIssueScopedCloseCannotCiteRedactedVerdictReply(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	root := createScopedHTTPTestIssue(t, env, project.ID, "Root", nil)
+	hiddenIssue := createScopedHTTPTestIssue(t, env, project.ID, "Outside subtree", nil)
+	hiddenClaim, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: hiddenIssue.ID, Author: "worker-a", Body: "Hidden claim",
+	})
+	require.NoError(t, err)
+	verdictReply, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: root.ID, Author: "reviewer-a", Body: "Confirmation on a hidden claim",
+		ReplyToUID: hiddenClaim.UID, ReplyKind: "confirm",
+	})
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: root.ID, Author: "reviewer-b", Body: "Confirmation of the visible reply",
+		ReplyToUID: verdictReply.UID, ReplyKind: "confirm",
+	})
+	require.NoError(t, err)
+	_, err = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+		IssueID: root.ID, Actor: "coordinator",
+		Patch: map[string]jsontext.Value{"verify.required": jsontext.Value("true")},
+	})
+	require.NoError(t, err)
+	expiresAt := time.Now().UTC().Add(time.Hour)
+	scope := &db.APITokenScope{
+		Kind: db.APITokenScopeIssueSubtree, ProjectUID: project.UID, RootIssueUID: root.UID,
+	}
+	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+		PlaintextToken: "worker-token", Actor: "worker-a", AdminActor: db.BootstrapActor,
+		Scope: scope, ExpiresAt: &expiresAt,
+	})
+	require.NoError(t, err)
+	headers := map[string]string{"Authorization": "Bearer worker-token"}
+	showResp, showRaw := envDoRaw(t, env, http.MethodGet, issuePathRef(project.ID, root.ShortID, ""), nil, headers)
+	require.Equalf(t, http.StatusOK, showResp.StatusCode, "show body: %s", showRaw)
+	body := map[string]any{
+		"actor": "worker-a", "reason": "done",
+		"message":  "Completed the requested work and checked its focused tests.",
+		"evidence": []map[string]any{{"type": "confirmed", "comment": verdictReply.UID}},
+	}
+	resp, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(project.ID, root.ShortID, "actions/close"), body,
+		headers)
+	require.Equalf(t, http.StatusBadRequest, resp.StatusCode, "body: %s", raw)
+	require.Contains(t, string(raw), "verdict reply")
 }
 
 func TestCloseRefutedEvidence(t *testing.T) {

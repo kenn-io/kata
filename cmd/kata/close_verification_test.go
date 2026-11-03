@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -37,6 +38,75 @@ func TestCloseVerificationCLI(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCloseRefutationTerminalOutputSanitization(t *testing.T) {
+	env, dir, pid, ref := setupWorkspaceWithIssueOptions(t, "Claim", func(cfg *daemon.ServerConfig) {
+		cfg.CloseVerification = "block"
+	})
+	issue, err := env.DB.IssueByShortID(t.Context(), pid, ref, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	claim, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: issue.ID, Author: "worker", Body: "Completion claim",
+	})
+	require.NoError(t, err)
+	unsafeSummary := "hostile \x1b[2Jclear-screen \x1b]0;spoof-title\x07 tail"
+	_, _, err = env.DB.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: issue.ID, Author: "reviewer", Body: unsafeSummary,
+		ReplyToUID: claim.UID, ReplyKind: "refute",
+	})
+	require.NoError(t, err)
+	args := []string{"close", ref, "--done", "-m", "Implemented the fix and checked the focused tests.", "--test", "go test ./example"}
+	_, humanStderr, err := runCLIWithErr(t, env, dir, args...)
+	require.Error(t, err)
+	require.NotContains(t, humanStderr, "\x1b")
+	require.NotContains(t, humanStderr, "\x07")
+	require.Contains(t, humanStderr, "open refutations")
+
+	_, jsonStderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), env.URL),
+		append([]string{"--workspace", dir, "--json"}, args...)...)
+	require.Error(t, err)
+	var jsonError struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(jsonStderr), &jsonError))
+	require.Contains(t, jsonError.Error.Message, unsafeSummary,
+		"JSON errors preserve the daemon's raw message")
+}
+
+func TestCloseWarningSanitizesTerminalButPreservesJSON(t *testing.T) {
+	env, dir, pid, ref := setupWorkspaceWithIssue(t, "Claim")
+	issue, err := env.DB.IssueByShortID(t.Context(), pid, ref, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	claim, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: issue.ID, Author: "worker", Body: "Completion claim",
+	})
+	require.NoError(t, err)
+	unsafeSummary := "hostile \x1b[2Jclear-screen \x1b]0;spoof-title\x07 tail"
+	_, _, err = env.DB.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: issue.ID, Author: "reviewer", Body: unsafeSummary,
+		ReplyToUID: claim.UID, ReplyKind: "refute",
+	})
+	require.NoError(t, err)
+	stdout, stderr, err := runCLIWithErr(t, env, dir,
+		"--json", "close", ref, "--done", "-m", "Implemented the fix and checked the focused tests.",
+		"--test", "go test ./example")
+	require.NoError(t, err, stderr)
+	require.NotContains(t, stderr, "\x1b")
+	require.NotContains(t, stderr, "\x07")
+	var response struct {
+		Warnings []struct {
+			Refutations []struct {
+				Summary string `json:"summary"`
+			} `json:"refutations"`
+		} `json:"warnings"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(stdout), &response))
+	require.Len(t, response.Warnings, 1)
+	require.Equal(t, unsafeSummary, response.Warnings[0].Refutations[0].Summary,
+		"JSON responses preserve the daemon's raw summary")
 }
 
 func TestShowVerificationRender(t *testing.T) {

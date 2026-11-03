@@ -137,6 +137,55 @@ func TestCommentGraphResponseRejectsReparentedBacklink(t *testing.T) {
 	}
 }
 
+func TestVerificationSourceIssueReparentedDuringShowIsWithheld(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	root := createScopedAuthIssue(t, store, project.ID, "Root", nil)
+	container := createScopedAuthIssue(t, store, project.ID, "Container", &root)
+	nestedContainer := createScopedAuthIssue(t, store, project.ID, "Nested container", &container)
+	source := createScopedAuthIssue(t, store, project.ID, "Refutation", &nestedContainer)
+	claim, _, err := store.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: root.ID, Author: "worker", Body: "Completion claim",
+	})
+	require.NoError(t, err)
+	thread, _, err := store.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: root.ID, Author: "worker", Body: "Unrelated thread",
+	})
+	require.NoError(t, err)
+	refutation, _, err := store.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: source.ID, Author: "reviewer", Body: "Private refutation excerpt",
+		ReplyToUID: claim.UID, ReplyKind: "refute",
+	})
+	require.NoError(t, err)
+	parent, err := store.ParentOf(t.Context(), source.ID)
+	require.NoError(t, err)
+	ctx := withScopedAuthorizationTestPrincipal(t, store, project, root)
+	storeWithReparent := &reparentAfterCommentGraphReadStore{
+		Storage: store, parentLinkID: parent.ID, reparentAfter: 1,
+	}
+	handler := withScopedPrincipalRevalidation(storeWithReparent, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		out, err := hydrateShowIssueResponse(r.Context(), ServerConfig{DB: storeWithReparent, InsecureReadonly: true}, root, false,
+			commentref.Options{Thread: thread.UID})
+		require.NoError(t, err)
+		require.NotNil(t, out.Body.Verification)
+		require.Len(t, out.Body.Verification.OpenRefutations, 1)
+		require.Equal(t, "reviewer", out.Body.Verification.OpenRefutations[0].Author)
+		require.Equal(t, "Private refutation excerpt", out.Body.Verification.OpenRefutations[0].Summary)
+		body, err := json.Marshal(out.Body)
+		require.NoError(t, err)
+		_, err = w.Write(body)
+		require.NoError(t, err)
+	}))
+	response := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil).WithContext(ctx)
+	handler.ServeHTTP(response, request)
+	require.Equal(t, http.StatusNotFound, response.Code, response.Body.String())
+	require.NotContains(t, response.Body.String(), refutation.Body)
+}
+
 func TestDuplicateReplyResponseRejectsReparentedExistingReply(t *testing.T) {
 	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)

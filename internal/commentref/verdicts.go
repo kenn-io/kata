@@ -97,7 +97,7 @@ func Evaluate(comments []Record, issueUID string, readable func(uid string) bool
 				if r.Author != target.Author || r.Teammate != target.Teammate {
 					claimVerdict.IndependentRefutations = append(claimVerdict.IndependentRefutations, verdictHandle(r, issueUID))
 				}
-				if target.ReplyKind == "refute" {
+				if kind == "refute" {
 					continue
 				}
 				summary := []rune(strings.Join(strings.Fields(r.Body), " "))

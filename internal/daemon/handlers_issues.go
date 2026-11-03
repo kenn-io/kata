@@ -1048,11 +1048,12 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 	if err != nil {
 		return nil, err
 	}
+	verificationRecords := records
 	v := commentref.Evaluate(records, issue.UID, nil)
 	v.Required = verificationRequired(issue)
 	v.Redacted += data.Redacted
 	if v.Activity && query.SelectedIssueID > 0 && issue.DeletedAt == nil {
-		_, v, err = readVerification(ctx, cfg.DB, issue)
+		verificationRecords, v, err = readVerification(ctx, cfg.DB, issue)
 		if err != nil {
 			return nil, err
 		}
@@ -1120,6 +1121,9 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 	selected, err := commentref.Select(records, issue.UID, opts)
 	if err != nil {
 		return nil, commentReferenceError(err)
+	}
+	if err := recordVerificationResponseScope(ctx, verificationRecords, issue.UID, v); err != nil {
+		return nil, err
 	}
 	recordCommentResponseScope(ctx, records, selected.Comments)
 	out.Body.Comments = selected.Comments

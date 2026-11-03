@@ -12,6 +12,7 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/textsafe"
 )
 
 func newCloseCmd() *cobra.Command {
@@ -419,10 +420,11 @@ func runActionWithHeaders(
 		}
 		for _, warning := range result.Warnings {
 			if warning.Hint != "" {
-				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "hint: "+selectedVerificationHint(warning.Hint))
+				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "hint: "+textsafe.Line(selectedVerificationHint(warning.Hint)))
 			}
 			for _, r := range warning.Refutations {
-				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s: %s %s\n", warning.Code, r.Refutation, r.Summary)
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s: %s %s\n",
+					textsafe.Line(warning.Code), textsafe.Line(r.Refutation), textsafe.Line(r.Summary))
 			}
 		}
 	}
