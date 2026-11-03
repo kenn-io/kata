@@ -62,7 +62,7 @@ func checkFederatedMoveSnapshotPayloadOnlyCommentEdit(t *testing.T, store db.Sto
 				"to_project_uid": target.UID, "to_short_id": targetShortID, "snapshot": snapshot,
 			})
 			require.NoError(t, err)
-			moveAt := editedAt.Add(time.Millisecond)
+			moveAt := editedAt.Add(2 * time.Second)
 			move := newRemoteEvent(t, target, &issue.UID, "issue.moved", "worker", origin, moveAt.UnixMilli(), jsontext.Value(movePayload))
 			move.CreatedAt = moveAt
 			move.ContentHash = remoteEventHash(t, move)
@@ -80,19 +80,43 @@ func checkFederatedMoveSnapshotPayloadOnlyCommentEdit(t *testing.T, store db.Sto
 				FederationEnrollmentID:  grants[target.UID],
 				MoveSourceEnrollmentIDs: map[string]int64{source.UID: grants[source.UID]},
 				EventFeatures:           db.SupportedEventFeatures,
-				Events: []db.FederationIngestEvent{
-					{SourceEventID: 1, Event: edit},
-					{SourceEventID: 2, Event: move},
-				},
+				Events:                  []db.FederationIngestEvent{{SourceEventID: 1, Event: edit}},
 			})
-			require.NoError(t, err, "the move snapshot may include a comment edit from this batch")
+			require.NoError(t, err, "accept the payload-only comment edit before the move batch")
+
+			newerEditedAt := editedAt.Add(time.Second)
+			newerEditPayload, err := json.Marshal(map[string]any{
+				identityField: issue.UID, "comment_uid": comment.UID,
+				"body": "newer discussion", "edited_at": newerEditedAt.Format(time.RFC3339Nano),
+			})
+			require.NoError(t, err)
+			newerEdit := newRemoteEvent(t, target, nil, "issue.comment_edited", "worker", origin,
+				newerEditedAt.UnixMilli(), jsontext.Value(newerEditPayload))
+			newerEdit.CreatedAt = newerEditedAt
+			newerEdit.ContentHash = remoteEventHash(t, newerEdit)
+			_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{
+				ProjectID: target.ID, SpokeInstanceUID: origin, BoundActor: "worker",
+				FederationEnrollmentID:  grants[target.UID],
+				MoveSourceEnrollmentIDs: map[string]int64{source.UID: grants[source.UID]},
+				EventFeatures:           db.SupportedEventFeatures,
+				Events:                  []db.FederationIngestEvent{{SourceEventID: 2, Event: newerEdit}},
+			})
+			require.NoError(t, err, "a later edit may replace the current comment version")
+			_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{
+				ProjectID: target.ID, SpokeInstanceUID: origin, BoundActor: "worker",
+				FederationEnrollmentID:  grants[target.UID],
+				MoveSourceEnrollmentIDs: map[string]int64{source.UID: grants[source.UID]},
+				EventFeatures:           db.SupportedEventFeatures,
+				Events:                  []db.FederationIngestEvent{{SourceEventID: 3, Event: move}},
+			})
+			require.NoError(t, err, "the move snapshot may use an earlier retained payload-only comment edit")
 			moved, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 			require.NoError(t, err)
 			require.Equal(t, target.ID, moved.ProjectID)
 			comments, err := store.CommentsByIssue(ctx, moved.ID)
 			require.NoError(t, err)
 			require.Len(t, comments, 1)
-			require.Equal(t, "edited discussion", comments[0].Body)
+			require.Equal(t, "newer discussion", comments[0].Body)
 		})
 	}
 	return nil

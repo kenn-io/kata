@@ -11,6 +11,7 @@ import (
 
 type federationHistoryQuery interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
 // ReadFederationMoveHistory fills a page after excluding move history covered

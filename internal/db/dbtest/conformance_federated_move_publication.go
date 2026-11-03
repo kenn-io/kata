@@ -139,6 +139,30 @@ func checkFederatedMovedIssueCurrentProjectReset(t *testing.T, store db.Storage,
 		require.NoError(t, err)
 		require.Greater(t, reset, before, "conditional owner folds still require current-project invalidation")
 		require.Contains(t, result.Resets, db.FederationProjectReset{ProjectID: target.ID, EventID: reset})
+
+		payloadOnlyRenewed := renewed.Add(time.Hour)
+		payloadOnlyPayload, err := json.Marshal(map[string]string{
+			"issue_uid": issue.UID, "owner": "worker",
+			"old_assignment_expires_on": renewed.UTC().Format(time.RFC3339Nano),
+			"assignment_expires_on":     payloadOnlyRenewed.UTC().Format(time.RFC3339Nano),
+		})
+		require.NoError(t, err)
+		payloadOnly := newRemoteEvent(t, source, nil, "issue.assignment_renewed", "worker", origin, time.Now().Add(2*time.Hour).UnixMilli(), payloadOnlyPayload)
+		before, err = store.MaxEventID(ctx)
+		require.NoError(t, err)
+		result, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{
+			ProjectID: source.ID, SpokeInstanceUID: origin, BoundActor: "worker",
+			FederationEnrollmentID: grant.Enrollment.ID, EventFeatures: db.SupportedEventFeatures,
+			Events: []db.FederationIngestEvent{{SourceEventID: 3, Event: payloadOnly}},
+		})
+		require.NoError(t, err)
+		got, err = store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		require.Equal(t, &payloadOnlyRenewed, got.AssignmentExpiresOn)
+		reset, err = store.PurgeResetCheck(ctx, before, target.ID)
+		require.NoError(t, err)
+		require.Greater(t, reset, before, "payload-only conditional events must invalidate the current project")
+		require.Contains(t, result.Resets, db.FederationProjectReset{ProjectID: target.ID, EventID: reset})
 	})
 	return nil
 }

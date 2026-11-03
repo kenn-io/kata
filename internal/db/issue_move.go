@@ -246,21 +246,6 @@ func MovedIssueUID(ctx context.Context, q interface {
 		moveMatch = "e.issue_uid=upper($2)"
 		resetMatch = "reset.issue_uid=upper($2)"
 	}
-	resetJoin := ` LEFT JOIN events reset ON reset.project_id=$1 AND reset.type='sync.reset_required'
- AND reset.issue_uid=e.issue_uid AND ` + resetFromProject + `=$3 AND ` + resetMatch + `
- AND ` + resetMoveEvent + `=e.uid`
-	if postgres {
-		// LATERAL keeps PostgreSQL's reset lookup parameterized by the moved
-		// issue UID, so it uses idx_events_issue_uid instead of scanning the
-		// project's event range for every candidate reference.
-		resetJoin = ` LEFT JOIN LATERAL (
- SELECT reset.id FROM events reset
- WHERE reset.project_id=$1 AND reset.type='sync.reset_required'
- AND reset.issue_uid=e.issue_uid AND ` + resetFromProject + `=$3 AND ` + resetMatch + `
- AND ` + resetMoveEvent + `=e.uid
- ORDER BY reset.id DESC LIMIT 1
-) reset ON TRUE`
-	}
 	// Bind the project UID: SQLite cannot search an expression index with a
 	// value produced by a subquery.
 	var projectUID string
@@ -272,12 +257,27 @@ func MovedIssueUID(ctx context.Context, q interface {
 		return "", err
 	}
 	var uid string
-	// A reset can preserve a receiver-local short ID that differs from the
-	// signed move's from_short_id, so either reference may select the move.
-	err = q.QueryRowContext(ctx, `SELECT e.issue_uid FROM events e`+resetJoin+`
-	 WHERE e.type='issue.moved' AND `+fromProject+`=$3
-	 AND (`+moveMatch+` OR reset.id IS NOT NULL)
+	// Move history uses the signed source and reference. A receiver-local reset
+	// uses its own source and reference, which may differ after a competing pull.
+	// Check indexed move history first so ordinary references do not scan resets.
+	err = q.QueryRowContext(ctx, `SELECT e.issue_uid FROM events e
+ WHERE e.type='issue.moved' AND `+fromProject+`=$3 AND `+moveMatch+`
  AND EXISTS (SELECT 1 FROM issues WHERE uid=e.issue_uid)
+ AND NOT EXISTS (SELECT 1 FROM issues WHERE project_id=$1 AND short_id=$2)
+ AND NOT EXISTS (SELECT 1 FROM purge_log WHERE project_id=$1 AND short_id=$2)
+ ORDER BY e.id DESC LIMIT 1`, projectID, shortID, projectUID).Scan(&uid)
+	if err == nil {
+		return uid, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	err = q.QueryRowContext(ctx, `SELECT reset.issue_uid FROM events reset
+ JOIN events e ON `+resetMoveEvent+`=e.uid
+            AND e.type='issue.moved' AND e.issue_uid=reset.issue_uid
+ WHERE reset.project_id=$1 AND reset.type='sync.reset_required'
+ AND reset.issue_uid IS NOT NULL AND `+resetFromProject+`=$3 AND `+resetMatch+`
+ AND EXISTS (SELECT 1 FROM issues WHERE uid=reset.issue_uid)
  AND NOT EXISTS (SELECT 1 FROM issues WHERE project_id=$1 AND short_id=$2)
  AND NOT EXISTS (SELECT 1 FROM purge_log WHERE project_id=$1 AND short_id=$2)
  ORDER BY CASE WHEN reset.id > e.id THEN reset.id ELSE e.id END DESC LIMIT 1`, projectID, shortID, projectUID).Scan(&uid)

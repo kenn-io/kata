@@ -85,18 +85,26 @@ func TestMovedIssueLookupUsesIssueHistoryIndexes(t *testing.T) {
 					movePlans++
 					index := "idx_events_moved_from"
 					if ref == issue.UID {
-						index = "idx_events_issue_uid"
+						// PostgreSQL may prefer the partial move index on source
+						// project because it excludes the unrelated event history.
+						require.True(t, strings.Contains(joined, "idx_events_issue_uid") || strings.Contains(joined, "idx_events_moved_from"),
+							"UID move lookup must use an event index: %s", joined)
+					} else {
+						require.Contains(t, joined, index, "move history must use its reference index: %s", joined)
 					}
-					require.Contains(t, joined, index, "move history must use its reference index: %s", joined)
 				}
 				if strings.Contains(captured.query, "sync.reset_required") {
 					resetPlans++
 					require.Contains(t, joined, "idx_events_issue_uid on events reset",
-						"reset references must use the moved issue UID index: %s", joined)
+						"reset references must use an event index: %s", joined)
 				}
 			}
 			require.Positive(t, movePlans, "expected to inspect the move-history lookup plan")
-			require.Positive(t, resetPlans, "expected to inspect the reset-reference lookup plan")
+			if ref == "zzzz" {
+				require.Positive(t, resetPlans, "a move-history miss must inspect the reset-reference lookup plan")
+			} else {
+				require.Zero(t, resetPlans, "a move-history hit must not inspect reset references")
+			}
 		})
 	}
 }

@@ -527,6 +527,9 @@ func ClearFederatedMovedIssueHistory(ctx context.Context, tx *sql.Tx, projectID 
 	if pending {
 		return ErrFederationResetBlockedByPendingPush
 	}
+	if err := PreserveFederationProjectIdentityDependencies(ctx, tx, projectID, postgres); err != nil {
+		return fmt.Errorf("preserve former project identity dependencies: %w", err)
+	}
 	//nolint:gosec // G202: issueUIDExpr is a fixed dialect expression; values are bound.
 	_, err = tx.ExecContext(ctx, `DELETE FROM events AS e WHERE `+issueUIDExpr+` IN (SELECT uid FROM issues WHERE project_id=$1)`, projectID)
 	return err

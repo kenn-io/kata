@@ -48,6 +48,9 @@ func RecordFederationCurrentProjectResets(ctx context.Context, tx *sql.Tx, uids 
 		}
 		event.UID, event.IssueUID, event.RelatedIssueUID = uid, issue.String, related.String
 		event.Payload = []byte(payload)
+		if strings.HasPrefix(event.Type, "issue.") {
+			event.IssueUID = FederationEventIssueUID(&issue.String, payload)
+		}
 		projection := FoldEvents([]FoldEvent{event})
 		affected := map[string]bool{}
 		if event.IssueUID != "" && strings.HasPrefix(event.Type, "issue.") {

@@ -101,14 +101,15 @@ func (p *moveSnapshotProof) addComment(comment moveSnapshotComment) {
 // Nested move snapshots and unvalidated batch baselines are never evidence.
 type FederationMoveSnapshotValidator struct {
 	tx            *sql.Tx
+	postgres      bool
 	proofs        map[string]*moveSnapshotProof
 	edits         map[string][]FoldEvent
 	commentOwners map[string]string
 }
 
 // NewFederationMoveSnapshotValidator creates one transaction's proof cache.
-func NewFederationMoveSnapshotValidator(tx *sql.Tx) *FederationMoveSnapshotValidator {
-	return &FederationMoveSnapshotValidator{tx: tx, proofs: map[string]*moveSnapshotProof{}, edits: map[string][]FoldEvent{}, commentOwners: map[string]string{}}
+func NewFederationMoveSnapshotValidator(tx *sql.Tx, postgres bool) *FederationMoveSnapshotValidator {
+	return &FederationMoveSnapshotValidator{tx: tx, postgres: postgres, proofs: map[string]*moveSnapshotProof{}, edits: map[string][]FoldEvent{}, commentOwners: map[string]string{}}
 }
 
 // ObservePrepared preserves earlier ordinary edit versions after envelope,
@@ -293,7 +294,9 @@ func (v *FederationMoveSnapshotValidator) proof(ctx context.Context, event Remot
 	if err := closeMoveSnapshotRows(rows); err != nil {
 		return nil, err
 	}
-	rows, err = v.tx.QueryContext(ctx, `SELECT e.uid,e.origin_instance_uid,p.uid,COALESCE(e.issue_uid,''),COALESCE(e.related_issue_uid,''),e.type,e.actor,e.payload,e.hlc_physical_ms,e.hlc_counter,e.created_at FROM events e JOIN projects p ON p.id=e.project_id WHERE e.issue_uid=$1 OR e.related_issue_uid=$1`, uid)
+	issueUIDExpr := FederationReadIssueUIDExpr(v.postgres)
+	//nolint:gosec // G202: issueUIDExpr is a fixed dialect expression; values are bound.
+	rows, err = v.tx.QueryContext(ctx, `SELECT e.uid,e.origin_instance_uid,p.uid,`+issueUIDExpr+`,COALESCE(e.related_issue_uid,''),e.type,e.actor,e.payload,e.hlc_physical_ms,e.hlc_counter,e.created_at FROM events e JOIN projects p ON p.id=e.project_id WHERE `+issueUIDExpr+`=$1 OR e.related_issue_uid=$1`, uid)
 	if err != nil {
 		return nil, err
 	}
@@ -306,6 +309,7 @@ func (v *FederationMoveSnapshotValidator) proof(ctx context.Context, event Remot
 			return nil, err
 		}
 		retained.Payload = []byte(payload)
+		retained.IssueUID = FederationEventIssueUID(&retained.IssueUID, payload)
 		history = append(history, retained)
 	}
 	if err := closeMoveSnapshotRows(rows); err != nil {

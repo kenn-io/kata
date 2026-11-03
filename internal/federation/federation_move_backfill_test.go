@@ -75,10 +75,16 @@ func TestSyncFederationMoveBackfillsClaimAuditHistory(t *testing.T) {
 		ProjectID: projects[0].ID, Title: "claimed issue", Author: "worker",
 	})
 	require.NoError(t, err)
-	_, err = hub.DB.ClaimOwner(ctx, db.ClaimOwnerParams{
-		IssueID: issue.ID, Actor: "worker", TTL: time.Hour,
+	lease, err := hub.DB.AcquireClaim(ctx, db.AcquireClaimParams{
+		ProjectID: projects[0].ID, IssueRef: issue.UID,
+		Principal: db.ClaimPrincipal{HolderInstanceUID: hub.DB.InstanceUID(), Holder: "worker", ClientKind: "agent"},
+		ClaimKind: "timed", TTL: time.Hour,
 	})
 	require.NoError(t, err)
+	require.True(t, lease.Granted)
+	require.NotNil(t, lease.Event)
+	require.Equal(t, "claim.acquired", lease.Event.Type)
+	claimEventUID := lease.Event.UID
 	issue, err = hub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	_, err = hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
@@ -87,12 +93,12 @@ func TestSyncFederationMoveBackfillsClaimAuditHistory(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	require.NoError(t, spoke.sync(t, 1), "destination backfill must retain issue-scoped claim audit events")
-	got, err := spoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, spoke.sync(t, 1), "destination synchronization must backfill issue-scoped claim audit events")
+	retained, err := spoke.env.DB.EventsByUIDs(ctx, spoke.projects[0].ID, []string{claimEventUID})
 	require.NoError(t, err)
-	require.Equal(t, spoke.projects[1].ID, got.ProjectID)
-	require.NotNil(t, got.Owner)
-	require.Equal(t, "worker", *got.Owner)
+	require.Len(t, retained, 1)
+	require.Equal(t, claimEventUID, retained[0].UID)
+	require.Equal(t, "claim.acquired", retained[0].Type)
 }
 
 func TestFederationMoveBackfillAcceptsIssueScopedAuditEvents(t *testing.T) {

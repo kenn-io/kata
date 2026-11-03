@@ -134,5 +134,45 @@ func checkFederatedFormerProjectIdentityCleanup(t *testing.T, store db.Storage) 
 			require.NoError(t, err, "the adoption baseline covers incompatible local history, so no federation identity dependency remains")
 		}
 	})
+	t.Run("destination reset retains former identity", func(t *testing.T) {
+		for _, operation := range []string{"purge", "merge"} {
+			t.Run(operation, func(t *testing.T) {
+				source, target := resetFederatedRehomeAfterSourceLeave(t, store, "reset-cleanup-"+operation)
+				mergeTarget, err := store.CreateProject(t.Context(), "reset-merge-target-"+operation)
+				require.NoError(t, err)
+				if operation == "purge" {
+					_, _, err = store.RemoveProject(t.Context(), db.RemoveProjectParams{ProjectID: source.ID, Actor: "worker"})
+					require.NoError(t, err)
+				}
+				cleanup := func() error {
+					if operation == "purge" {
+						_, err := store.PurgeProject(t.Context(), db.PurgeProjectParams{ProjectID: source.ID, Actor: "worker"})
+						return err
+					}
+					_, err := store.MergeProjects(t.Context(), db.MergeProjectsParams{SourceProjectID: source.ID, TargetProjectID: mergeTarget.ID, Actor: "worker"})
+					return err
+				}
+				require.ErrorIs(t, cleanup(), db.ErrFederationProjectIdentityRequired,
+					"a joined destination still needs its former project identity after reset")
+				_, err = store.LeaveFederationReplica(t.Context(), target.ID)
+				require.NoError(t, err)
+				require.NoError(t, cleanup(), "leaving the dependent stream retires the identity requirement")
+			})
+		}
+	})
 	return nil
+}
+
+func resetFederatedRehomeAfterSourceLeave(t *testing.T, store db.Storage, suffix string) (db.Project, db.Project) {
+	t.Helper()
+	source, target, _, move := federatedRehomeFixture(t, store, suffix)
+	prepareRehomePull(t, store, source, target, "pull")
+	acknowledgeFederatedRehomeSourceEvents(t, store, source)
+	replayFederatedRehome(t, store, target, move, "pull")
+	_, err := store.LeaveFederationReplica(t.Context(), source.ID)
+	require.NoError(t, err)
+	cursor, err := store.MaxEventID(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, store.ResetFederatedProject(t.Context(), target.ID, cursor+1, cursor))
+	return source, target
 }

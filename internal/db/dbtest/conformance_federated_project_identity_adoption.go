@@ -9,6 +9,24 @@ import (
 )
 
 func checkFederatedFormerProjectIdentityAdoption(t *testing.T, store db.Storage) error {
+	t.Run("destination reset retains former UID", func(t *testing.T) {
+		ctx := t.Context()
+		source, target := resetFederatedRehomeAfterSourceLeave(t, store, "reset-adoption-identity")
+		newUID, err := uid.New()
+		require.NoError(t, err)
+		params := db.AdoptProjectIntoFederationParams{
+			ProjectID: source.ID, HubURL: "https://hub.example", HubProjectID: 42,
+			HubProjectUID: newUID, Actor: "worker",
+		}
+		_, err = store.AdoptProjectIntoFederation(ctx, params)
+		require.ErrorIs(t, err, db.ErrFederationProjectIdentityRequired,
+			"adoption must retain an identity required by a joined destination after reset")
+		_, err = store.LeaveFederationReplica(ctx, target.ID)
+		require.NoError(t, err)
+		adopted, err := store.AdoptProjectIntoFederation(ctx, params)
+		require.NoError(t, err, "leaving the dependent stream retires the identity requirement")
+		require.Equal(t, newUID, adopted.Project.UID)
+	})
 	t.Run("joined moved history retains former UID", func(t *testing.T) {
 		ctx := t.Context()
 		source, target, issue, move := federatedRehomeFixture(t, store, "adoption-identity")

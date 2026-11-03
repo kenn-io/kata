@@ -128,6 +128,9 @@ func (d *Store) AcceptRelayDeliveries(ctx context.Context, bindingUID string, ba
 				if err != nil {
 					return err
 				}
+				if err := db.ValidateRelaySourceEventType(source.Type); err != nil {
+					return err
+				}
 				if source.EventUID != envelope.SourceUID || source.ContentHash != envelope.SourceHash || source.ProjectUID != projectUID || source.OriginInstanceUID != envelope.Path[0] {
 					return fmt.Errorf("%w: relay source differs from its hop commitment", db.ErrFederationIngestValidation)
 				}

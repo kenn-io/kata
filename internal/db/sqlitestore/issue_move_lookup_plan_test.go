@@ -67,8 +67,9 @@ func TestMovedIssueLookupUsesIssueHistoryIndex(t *testing.T) {
 				require.NoError(t, rows.Err())
 				require.NoError(t, rows.Close())
 				joined := strings.Join(plan, "\n")
-				// Issue creation checks historical reservations, so neither lookup may scan a table.
-				require.NotContains(t, joined, "SCAN ", "move lookup must not scan a table: %s", joined)
+				// Issue creation checks historical reservations, so neither lookup may scan event rows.
+				require.NotContains(t, joined, "SCAN e ", "move lookup must not scan event rows: %s", joined)
+				require.NotContains(t, joined, "SCAN reset ", "reset lookup must not scan event rows: %s", joined)
 				if strings.Contains(captured.query, "WHERE e.type='issue.moved'") {
 					movePlans++
 					index := "idx_events_moved_from"
@@ -79,11 +80,19 @@ func TestMovedIssueLookupUsesIssueHistoryIndex(t *testing.T) {
 				}
 				if strings.Contains(captured.query, "sync.reset_required") {
 					resetPlans++
-					require.Contains(t, joined, "INDEX idx_events_issue_uid", "reset references must be found through the moved issue UID: %s", joined)
+					resetIndex := "idx_events_project"
+					if ref == issue.UID {
+						resetIndex = "idx_events_issue_uid"
+					}
+					require.Contains(t, joined, "INDEX "+resetIndex, "reset references must use an event index: %s", joined)
 				}
 			}
 			require.Positive(t, movePlans, "expected to inspect the move-history lookup plan")
-			require.Positive(t, resetPlans, "expected to inspect the reset-reference lookup plan")
+			if ref == "zzzz" {
+				require.Positive(t, resetPlans, "a move-history miss must inspect the reset-reference lookup plan")
+			} else {
+				require.Zero(t, resetPlans, "a move-history hit must not inspect reset references")
+			}
 		})
 	}
 }

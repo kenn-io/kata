@@ -2,7 +2,13 @@ package db
 
 import (
 	"context"
+	"database/sql"
+	"strings"
 )
+
+// FederationProjectIdentityDependencyPrefix stores former project UIDs that a
+// joined replica still needs after a reset removes its move events.
+const FederationProjectIdentityDependencyPrefix = "federation_identity_dependency."
 
 // CheckFederationProjectIdentityRetirement protects only former identities
 // still referenced by another joined project's portable issue history. Archive
@@ -33,6 +39,16 @@ func CheckFederationProjectIdentityRetirement(ctx context.Context, tx federation
 	}
 	if len(joinedIDs) == 0 {
 		return nil
+	}
+	for dependentUID := range joinedUIDs {
+		key := FederationProjectIdentityDependencyPrefix + dependentUID + "." + project.UID
+		var depends bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM meta WHERE key=$1)`, key).Scan(&depends); err != nil {
+			return err
+		}
+		if depends {
+			return ErrFederationProjectIdentityRequired
+		}
 	}
 	owners := map[string]int64{}
 	cutoffs := map[string]int64{}
@@ -100,4 +116,67 @@ func CheckFederationProjectIdentityRetirement(ctx context.Context, tx federation
 			return nil
 		}
 	}
+}
+
+// PreserveFederationProjectIdentityDependencies records native move endpoints
+// before a reset deletes their events. The dependency belongs to the joined
+// project stream and is retired when that stream leaves federation.
+func PreserveFederationProjectIdentityDependencies(ctx context.Context, tx *sql.Tx, projectID int64, postgres bool) error {
+	var dependentUID string
+	var role sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT p.uid,b.role FROM projects p
+ LEFT JOIN federation_bindings b ON b.project_id=p.id WHERE p.id=$1`, projectID).Scan(&dependentUID, &role); err != nil {
+		return err
+	}
+	if !role.Valid || role.String != string(FederationRoleSpoke) {
+		return nil
+	}
+	issueUIDExpr := FederationReadIssueUIDExpr(postgres)
+	//nolint:gosec // G202: issueUIDExpr is a fixed dialect expression; values are bound.
+	rows, err := tx.QueryContext(ctx, `SELECT e.payload FROM events e
+ WHERE e.type='issue.moved' AND `+issueUIDExpr+` IN (SELECT uid FROM issues WHERE project_id=$1)`, projectID)
+	if err != nil {
+		return err
+	}
+	dependencies := map[string]struct{}{}
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		payload := PayloadMap([]byte(raw))
+		snapshot, hasSnapshot := payload["snapshot"]
+		if !hasSnapshot || strings.TrimSpace(string(snapshot)) == "null" {
+			continue // A local snapshotless move has no portable federation lineage.
+		}
+		for _, key := range []string{"from_project_uid", "to_project_uid"} {
+			projectUID, _ := StringValue(payload[key])
+			if projectUID != "" && projectUID != dependentUID {
+				dependencies[projectUID] = struct{}{}
+			}
+		}
+	}
+	readErr, closeErr := rows.Err(), rows.Close()
+	if readErr != nil {
+		return readErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	for requiredUID := range dependencies {
+		key := FederationProjectIdentityDependencyPrefix + dependentUID + "." + requiredUID
+		if _, err := tx.ExecContext(ctx, `INSERT INTO meta(key,value) VALUES($1,'1') ON CONFLICT(key) DO NOTHING`, key); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ClearFederationProjectIdentityDependencies retires the identity holds owned
+// by a replica after its federation stream has been detached.
+func ClearFederationProjectIdentityDependencies(ctx context.Context, tx *sql.Tx, dependentUID string) error {
+	prefix := FederationProjectIdentityDependencyPrefix + dependentUID + "."
+	_, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE substr(key,1,length($1))=$1`, prefix)
+	return err
 }
