@@ -20,7 +20,7 @@ type fakeUpdateClient struct {
 	checkErr     error
 	installed    []*selfupdate.Info
 	installErr   error
-	install      func() error
+	install      func(selfupdate.InstallOptions) error
 }
 
 func (f *fakeUpdateClient) Check(_ context.Context, opts selfupdate.CheckOptions) (*selfupdate.Info, error) {
@@ -36,10 +36,10 @@ func (f *fakeUpdateClient) Check(_ context.Context, opts selfupdate.CheckOptions
 	return info, nil
 }
 
-func (f *fakeUpdateClient) Install(_ context.Context, info *selfupdate.Info, _ selfupdate.InstallOptions) error {
+func (f *fakeUpdateClient) Install(_ context.Context, info *selfupdate.Info, opts selfupdate.InstallOptions) error {
 	f.installed = append(f.installed, info)
 	if f.install != nil {
-		return f.install()
+		return f.install(opts)
 	}
 	return f.installErr
 }

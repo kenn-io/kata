@@ -9,6 +9,16 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Keep the browser reachable when `kata daemon restart` runs from a sandbox or
+  container that sees the daemon's process IDs and executable paths. The daemon
+  uses the CLI's installed executable with its own environment and idle policy.
+  Explicit restart flags persist until stop/start, which also replaces older
+  daemons that support only restart signals. Separate PID or filesystem views
+  can prevent discovery or executable handoff.
+  `kata update` also reports the startup error when the daemon refuses to restart.
+- Wait up to 90 seconds for the replacement's startup check, daemon shutdown,
+  and replacement readiness during restart, extending the wait while an SQLite
+  migration runs.
 - Manage cron jobs, workflows and run evidence from MCP: load `kata.load_cron`
   for 17 tools over the daemon's existing cron API. Native notification jobs
   use the daemon scheduler; recording a run never starts work or changes who

@@ -86,6 +86,10 @@ const (
 // release than the daemon.
 var ErrDaemonNotReplaceable = errors.New("left the running daemon in place")
 
+// RestartLocalDaemon is installed by the CLI to replace a capable daemon in
+// its own environment. The caller holds the start lock through readiness.
+var RestartLocalDaemon func(context.Context, *daemonruntime.Namespace, kitdaemon.RuntimeRecord) (kitdaemon.RuntimeRecord, error)
+
 var (
 	currentVersionForEnsure      = func() string { return version.Version }
 	startDaemonForEnsure         = autoStart
@@ -177,10 +181,11 @@ func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
 	if err != nil {
 		return RunningDaemon{}, err
 	}
-	found, err := discoverForEnsure(ctx, ns.DataDir)
+	found, release, err := discoverForStart(ctx, ns.DataDir)
 	if err != nil {
 		return RunningDaemon{}, err
 	}
+	defer release()
 	switch found.Outcome {
 	case daemonScanCompatible:
 		return runningDaemonForLive(found.Daemon), nil
@@ -188,11 +193,52 @@ func ensureLocalRunningTarget(ctx context.Context) (RunningDaemon, error) {
 		if err := checkDaemonReplaceable(ctx, found.Daemon.Info); err != nil {
 			return RunningDaemon{}, err
 		}
+		if canRestartLocalDaemon(found.Daemon.Record) {
+			return restartLocalDaemon(ctx, ns, found.Daemon.Record)
+		}
 		if err := stopRunningDaemonsForEnsure(ctx, ns.DataDir, ns.DBHash); err != nil {
 			return RunningDaemon{}, err
 		}
 	}
 	return startDaemonForEnsure(ctx, ns.DataDir)
+}
+
+func canRestartLocalDaemon(record kitdaemon.RuntimeRecord) bool {
+	return record.Metadata[daemonruntime.RuntimeRestartExecutableKey] == "1" && daemonruntime.RuntimeProcessAlive(record)
+}
+
+func restartLocalDaemon(ctx context.Context, ns *daemonruntime.Namespace, previous kitdaemon.RuntimeRecord) (RunningDaemon, error) {
+	if RestartLocalDaemon == nil {
+		return RunningDaemon{}, errors.New("in-place daemon restart is unavailable in this client")
+	}
+	record, err := RestartLocalDaemon(ctx, ns, previous)
+	if err != nil {
+		return RunningDaemon{}, err
+	}
+	_, baseURL := LocalHTTPClient(record.Endpoint().ConfigAddress())
+	return runningDaemonForLive(liveDaemon{Record: record, BaseURL: baseURL}), nil
+}
+
+// discoverForStart returns a compatible daemon without locking. Any other
+// outcome is discovered again under the runtime store's start lock, which an
+// in-place restart holds until its replacement is ready, so the caller's stop,
+// replace, and start decisions follow that restart. The caller holds the lock
+// until it calls release.
+func discoverForStart(ctx context.Context, dataDir string) (ensureDiscovery, func(), error) {
+	found, err := discoverForEnsure(ctx, dataDir)
+	if (err != nil && !errors.Is(err, ErrLocalDaemonUnreachable)) || found.Outcome == daemonScanCompatible {
+		return found, func() {}, err
+	}
+	release, err := (kitdaemon.RuntimeStore{Dir: dataDir}).AcquireStartLock(ctx)
+	if err != nil {
+		return ensureDiscovery{}, nil, fmt.Errorf("auto-start daemon: %w", err)
+	}
+	found, err = discoverForEnsure(ctx, dataDir)
+	if err != nil {
+		release()
+		return ensureDiscovery{}, nil, err
+	}
+	return found, release, nil
 }
 
 // checkDaemonReplaceable refuses to stop a live daemon that this binary could
