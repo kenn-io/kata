@@ -79,12 +79,14 @@ func doAuditCloses(
 	if err != nil {
 		return nil, err
 	}
-	for i := range events {
-		projected, err := projectCloseEvent(ctx, cfg.DB, &events[i])
-		if err != nil {
-			return nil, internalAPIError(err)
+	if issueScopeFromContext(ctx) == nil {
+		for i := range events {
+			projected, err := projectCloseEvent(ctx, cfg.DB, &events[i])
+			if err != nil {
+				return nil, internalAPIError(err)
+			}
+			events[i] = *projected
 		}
-		events[i] = *projected
 	}
 	rows, err := buildAuditRows(ctx, cfg, in, events)
 	if err != nil {

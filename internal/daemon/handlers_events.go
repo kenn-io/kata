@@ -225,7 +225,7 @@ func readVisibleEvents(
 			}
 			projected, ok := projectedRows[index], visibleRows[index]
 			if ok && event.Type != "issue.links_changed" {
-				raw, err := projectNotificationEventPayload(ctx, store, projected)
+				raw, err := projectNotificationsInEventPayload(ctx, store, projected)
 				if err != nil {
 					return nil, cursor, 0, internalAPIError(err)
 				}

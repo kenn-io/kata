@@ -891,7 +891,7 @@ func authorizedSnapshotResponse(ctx context.Context, store db.Storage, data db.U
 	data.History = slices.Clone(data.History)
 	history := data.History[:0]
 	for _, event := range data.History {
-		if event.Type == "issue.closed" {
+		if event.Type == "issue.closed" && issueScopeFromContext(ctx) == nil {
 			projected, err := scopedMutationEvent(ctx, store, &event)
 			if err != nil {
 				return nil, err
