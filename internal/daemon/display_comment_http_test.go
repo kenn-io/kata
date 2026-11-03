@@ -2,6 +2,7 @@ package daemon_test
 
 import (
 	"encoding/json"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -44,7 +45,9 @@ func TestCommentDisplayContributionHTTPKeepsRouting(t *testing.T) {
 		inbound string
 		count   int
 	}{{"finder/review", 1}, {"finder/target-display", 0}} {
-		response, err := ts.Client().Get(ts.URL + issueURL(pid, id, "") + "?inbound=" + tc.inbound)
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+issueURL(pid, id, "")+"?inbound="+tc.inbound, nil)
+		require.NoError(t, err)
+		response, err := ts.Client().Do(request)
 		require.NoError(t, err)
 		var shown struct{ Comments []commentref.Record }
 		require.NoError(t, json.NewDecoder(response.Body).Decode(&shown))

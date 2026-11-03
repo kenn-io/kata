@@ -38,6 +38,7 @@ func displayHandle(raw jsontext.Value) string {
 // issue, once per read group. Using the caller's transaction keeps display data
 // in the same snapshot as the comment rows, including moved and restored rows.
 func CommentDisplayContributionsTx(ctx context.Context, tx *sql.Tx, issueID int64, bind func(int) string) (map[string]string, error) {
+	// #nosec G202 -- Only trusted backend placeholders are interpolated; issueID is bound.
 	rows, err := tx.QueryContext(ctx, `SELECT uid,origin_instance_uid,type,issue_uid,hlc_physical_ms,hlc_counter,payload
  FROM events WHERE issue_uid=(SELECT uid FROM issues WHERE id=`+bind(1)+`)
  AND type IN ('issue.commented','issue.created','issue.snapshot')`, issueID)

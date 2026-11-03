@@ -5,14 +5,13 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/db"
 )
 
 func TestDisplayContributionKeepsRoutingIdentity(t *testing.T) {
 	writer := "writer"
 	records := []Record{
-		{Comment: db.Comment{UID: "01AAAAAAAAAAAAAAAAAAAAAAA1", Author: "actor", Teammate: "route", AttributedTeammate: &writer}, IssueUID: "issue", IssueShortID: "abcd", ProjectID: 1},
-		{Comment: db.Comment{UID: "01AAAAAAAAAAAAAAAAAAAAAAA2", Author: "reviewer", ReplyToUID: "01AAAAAAAAAAAAAAAAAAAAAAA1", ReplyKind: "reply"}, IssueUID: "issue", IssueShortID: "abcd", ProjectID: 1},
+		{UID: "01AAAAAAAAAAAAAAAAAAAAAAA1", Author: "actor", Teammate: "route", AttributedTeammate: &writer, IssueUID: "issue", IssueShortID: "abcd", ProjectID: 1},
+		{UID: "01AAAAAAAAAAAAAAAAAAAAAAA2", Author: "reviewer", ReplyToUID: "01AAAAAAAAAAAAAAAAAAAAAAA1", ReplyKind: "reply", IssueUID: "issue", IssueShortID: "abcd", ProjectID: 1},
 	}
 	projected := Project(records, nil)
 	data, err := json.Marshal(projected[1].Reply)
