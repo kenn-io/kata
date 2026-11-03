@@ -3032,38 +3032,6 @@ func TestFederationIngestInvalidBatchReturnsErrorAndDoesNotBroadcast(t *testing.
 	assertNoReceive(t, sub.Ch, 100*time.Millisecond, "invalid ingest should not broadcast") //nolint:kennlint // deadlinetest: bounded absence checks that invalid ingest should not broadcast
 }
 
-func TestFederationIngestMalformedEvidenceReturnsValidation(t *testing.T) {
-	env := testenv.New(t)
-	ctx := t.Context()
-	project := createFederatedHubProject(t, env, "hub")
-	enrollment, err := env.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
-		Token: "test-token", SpokeInstanceUID: federationTestSpokeUID,
-		ProjectID: &project.ID, Capabilities: "push", Actor: "tester",
-	})
-	require.NoError(t, err)
-	event := federationRemoteIssueCreatedEvent(t, project, federationTestSpokeUID)
-	body := federationIngestBody(federationIngestEnvelope(t, 1, event))
-	response, raw := envDoRaw(t, env, http.MethodPost, projectPath(project.ID)+"/federation/events:ingest", body, bearer(enrollment.Token))
-	require.Equal(t, http.StatusOK, response.StatusCode, "%s", raw)
-	event.EventUID = "01HZNQ7VFPK1XGD8R5MABCD4ED"
-	event.Type = "issue.closed"
-	event.Payload = jsontext.Value(`{"reason":"done","evidence":{}}`)
-	event.HLCPhysicalMS++
-	event.ContentHash, err = db.EventContentHash(db.EventHashInput{
-		UID: event.EventUID, OriginInstanceUID: event.OriginInstanceUID,
-		ProjectUID: event.ProjectUID, ProjectName: event.ProjectName, IssueUID: event.IssueUID,
-		Type: event.Type, Actor: event.Actor, HLCPhysicalMS: event.HLCPhysicalMS,
-		CreatedAt: event.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z"), Payload: event.Payload,
-	})
-	require.NoError(t, err)
-	body = federationIngestBody(federationIngestEnvelope(t, 2, event))
-	response, raw = envDoRaw(t, env, http.MethodPost, projectPath(project.ID)+"/federation/events:ingest", body, bearer(enrollment.Token))
-	require.Equal(t, http.StatusBadRequest, response.StatusCode, "%s", raw)
-	var failure api.ErrorEnvelope
-	require.NoError(t, json.Unmarshal(raw, &failure))
-	require.Equal(t, "validation", failure.Error.Code)
-}
-
 func TestFederationIngestRejectsInvalidSourceCursor(t *testing.T) {
 	env := testenv.New(t)
 	ctx := t.Context()

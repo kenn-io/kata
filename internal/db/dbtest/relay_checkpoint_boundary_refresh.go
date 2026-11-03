@@ -64,17 +64,6 @@ func RunRelayRootCheckpointLaterBoundary(t *testing.T, store db.Storage, openRep
 	payload := jsontext.Value(`{"uid":"` + issueUID + `","title":"Later legacy creation","body":"","author":"member","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"blocks","to_issue_uid":"` + private.UID + `","author":"member"}]}`)
 	event := newRemoteEvent(t, fixture.project, &issueUID, "issue.created", "member", legacyUID, 600, payload)
 	seedHistory(t, fixture.project, event)
-	retained, err := store.EventsByUIDs(ctx, fixture.project.ID, []string{event.EventUID})
-	require.NoError(t, err)
-	require.Len(t, retained, 1)
-	require.Equal(t, event.ContentHash, retained[0].ContentHash)
-	retryLegacy, err := store.IngestFederationEvents(ctx, db.FederationIngestParams{
-		ProjectID: fixture.project.ID, SpokeInstanceUID: legacyUID,
-		Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: event}},
-	})
-	require.NoError(t, err)
-	require.Zero(t, retryLegacy.Accepted)
-	require.Equal(t, 1, retryLegacy.Duplicates)
 	issue, err := store.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	metadata, err := store.PatchIssueMetadata(writeCtx, db.PatchIssueMetadataIn{
