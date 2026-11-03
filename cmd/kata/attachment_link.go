@@ -40,6 +40,9 @@ func newAttachmentLinkCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		if err := requireDaemonAPIVersion(ctx, hc, base, apiVersionDocbankAttachmentLink, "Docbank attachment linking"); err != nil {
+			return err
+		}
 		response, callErr := apiClient.LinkAttachmentWithResponse(ctx, &generated.LinkAttachmentRequestOptions{
 			PathParams: &generated.LinkAttachmentPath{ProjectID: pid, Ref: ref.RefForAPI},
 			Body:       &input,

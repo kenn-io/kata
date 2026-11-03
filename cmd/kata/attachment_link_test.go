@@ -2,18 +2,42 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
+	"sync/atomic"
 	"testing"
 	"uuid"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/docbank"
+	"hegel.dev/go/hegel"
 )
 
 const cliLinkVersion = "6f1c2e8a-2222-4222-8222-222222222222"
 const cliOldLinkVersion = "6f1c2e8a-2222-4222-8222-222222222223"
+
+func TestAttachmentLinkVersionGateProperty(t *testing.T) {
+	hegel.Test(t, func(ht *hegel.T) {
+		major := hegel.Draw(ht, hegel.Integers(0, 2))
+		minor := hegel.Draw(ht, hegel.Integers(0, 50))
+		patch := hegel.Draw(ht, hegel.Integers(0, 50))
+		reported := fmt.Sprintf("%d.%d.%d", major, minor, patch)
+		got, valid := apiVersionAtLeast(reported, apiVersionDocbankAttachmentLink)
+		require.True(ht, valid)
+		require.Equal(ht, major > 0 || minor >= 38, got, reported)
+	}, hegel.WithTestCases(512))
+}
+
+func TestAttachmentLinkDaemonAdvertisesAPIVersionFloor(t *testing.T) {
+	compatible, valid := apiVersionAtLeast(daemon.APISchemaVersion, apiVersionDocbankAttachmentLink)
+	require.True(t, valid)
+	require.True(t, compatible, "daemon schema %s must satisfy attachment-link minimum %s", daemon.APISchemaVersion, apiVersionDocbankAttachmentLink)
+}
 
 func TestAttachmentLinkCLI(t *testing.T) {
 	env, f, ref := attachmentCLIEnv(t)
@@ -28,6 +52,30 @@ func TestAttachmentLinkCLI(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, out, "OK docbank-attachments-link")
 	require.Contains(t, out, "size=7")
+}
+
+func TestAttachmentLinkCLIRequiresCurrentAPIVersion(t *testing.T) {
+	env, _, ref := attachmentCLIEnv(t)
+	target, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	var linkCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/health" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.37.0"}`))
+			return
+		}
+		if r.URL.Path == "/api/v1/projects/1/issues/"+ref+"/attachments/links" {
+			linkCalls.Add(1)
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	_, err = executeAttachmentCLI(t, server.URL, "link", ref, "/reports/report.pdf")
+	require.ErrorContains(t, err, "requires daemon API 0.38.0 or newer")
+	require.Zero(t, linkCalls.Load(), "old daemons must not receive the new link request")
 }
 
 func TestAttachmentLinkCLIInvalidSelector(t *testing.T) {
