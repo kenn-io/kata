@@ -467,6 +467,7 @@ func (p *FoldProjection) setComment(commentUID, issueUID, author, teammate, attr
 	if commentUID == "" {
 		return
 	}
+	commentUID = CanonicalCommentUID(commentUID)
 	comment := FoldComment{UID: commentUID, IssueUID: issueUID, Clock: clock}
 	comment.Author = author
 	comment.Teammate = teammate
@@ -493,6 +494,7 @@ func (p *FoldProjection) editCommentBody(commentUID, issueUID, body, editedAt st
 	if commentUID == "" {
 		return
 	}
+	commentUID = CanonicalCommentUID(commentUID)
 	comment, exists := p.Comments[commentUID]
 	if !exists {
 		comment = FoldComment{UID: commentUID, IssueUID: issueUID, Clock: clock}

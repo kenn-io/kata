@@ -145,7 +145,7 @@ export interface KataCommentReplyIntent {
 }
 
 export interface KataComment extends KataCreationAttributionWire {
-  attributed_teammate?: string
+  attributed_teammate?: string | null
   uid?: string
   handle?: string
   reply?: KataCommentLink

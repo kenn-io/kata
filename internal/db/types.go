@@ -427,7 +427,7 @@ type IssueContent struct {
 // Comment mirrors a row in comments.
 type Comment struct {
 	// AttributedTeammate is display-only creation contribution, separate from routing.
-	AttributedTeammate *string `json:"attributed_teammate,omitempty"`
+	AttributedTeammate *string `json:"attributed_teammate,omitzero"`
 	AttributionView
 	ReplyToUID string     `json:"reply_to_uid,omitempty"`
 	ReplyKind  string     `json:"reply_kind,omitempty"`

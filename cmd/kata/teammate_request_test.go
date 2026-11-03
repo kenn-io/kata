@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -54,11 +55,14 @@ func TestTeammateInterruptedCloseContribution(t *testing.T) {
 			events, err := env.DB.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: pid, Limit: 100})
 			require.NoError(t, err)
 			var found bool
+			var issueUID string
 			for _, event := range events {
 				if event.Type != "issue.commented" {
 					continue
 				}
 				found = true
+				require.NotNil(t, event.IssueUID)
+				issueUID = *event.IssueUID
 				var payload map[string]any
 				require.NoError(t, json.Unmarshal([]byte(event.Payload), &payload))
 				if original == "" {
@@ -69,6 +73,20 @@ func TestTeammateInterruptedCloseContribution(t *testing.T) {
 				require.Equal(t, "new-worker", payload["teammate"], "explicit comment addressing remains main's")
 			}
 			require.True(t, found)
+			issue, err := env.DB.IssueByUID(t.Context(), issueUID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			comments, err := env.DB.CommentsByIssue(t.Context(), issue.ID)
+			require.NoError(t, err)
+			require.Len(t, comments, 1)
+			require.Equal(t, "new-worker", comments[0].Teammate)
+			require.NotNil(t, comments[0].AttributedTeammate)
+			require.Equal(t, original, *comments[0].AttributedTeammate)
+			returned, err := jsonv2.Marshal(comments[0])
+			require.NoError(t, err)
+			var returnedFields map[string]any
+			require.NoError(t, json.Unmarshal(returned, &returnedFields))
+			require.Contains(t, returnedFields, "attributed_teammate")
+			require.Equal(t, original, returnedFields["attributed_teammate"])
 		})
 	}
 }

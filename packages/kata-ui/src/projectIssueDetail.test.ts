@@ -144,6 +144,32 @@ describe('projectIssueDetail', () => {
     })
   })
 
+  it('treats null display as absent while preserving explicit empty suppression', () => {
+    const model = projectIssueDetail({
+      issue: { uid: '01TASK', title: 'Review', status: 'open' },
+      comments: [
+        {
+          id: 1,
+          author: 'actor',
+          teammate: 'route',
+          attributed_teammate: null,
+          body: 'Legacy projection',
+          created_at: '2026-09-13T12:00:00Z',
+        },
+        {
+          id: 2,
+          author: 'actor',
+          teammate: 'route',
+          attributed_teammate: '',
+          body: 'Suppressed contribution',
+          created_at: '2026-09-13T12:01:00Z',
+        },
+      ],
+    })
+    expect(model.comments[0]).not.toHaveProperty('attributedTeammate')
+    expect(model.comments[1]).toHaveProperty('attributedTeammate', '')
+  })
+
   it('projects an optional teammate without inventing one for legacy comments', () => {
     const model = projectIssueDetail({
       issue: { uid: '01TASK', title: 'Review retries', status: 'open' },

@@ -28,3 +28,15 @@ func TestDisplayContributionKeepsRoutingIdentity(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, selected.Comments)
 }
+
+func TestCommentLinkJSONPreservesExplicitSuppression(t *testing.T) {
+	empty := ""
+	link := CommentLink{AttributedTeammate: &empty, Teammate: "route"}
+	data, err := json.Marshal(link)
+	require.NoError(t, err)
+	var fields map[string]any
+	require.NoError(t, json.Unmarshal(data, &fields))
+	require.Contains(t, fields, "attributed_teammate")
+	require.Equal(t, "", fields["attributed_teammate"])
+	require.Equal(t, "route", fields["teammate"])
+}

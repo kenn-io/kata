@@ -1723,7 +1723,7 @@ func federationIssueComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]
 		return nil, err
 	}
 	for i := range out {
-		value, found := display[out[i].CommentUID]
+		value, found := display[db.CanonicalCommentUID(out[i].CommentUID)]
 		if !found {
 			value = db.LegacyDisplayContribution(out[i].Teammate)
 		}

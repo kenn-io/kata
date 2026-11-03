@@ -34,7 +34,7 @@ type Link = CommentLink
 
 // CommentLink retains canonical endpoint identities for client navigation.
 type CommentLink struct {
-	AttributedTeammate *string    `json:"attributed_teammate,omitempty"`
+	AttributedTeammate *string    `json:"attributed_teammate,omitzero"`
 	UID                string     `json:"uid,omitempty"`
 	Handle             string     `json:"handle,omitempty"`
 	Kind               string     `json:"kind"`

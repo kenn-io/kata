@@ -5,9 +5,22 @@ import (
 	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"fmt"
+	"strings"
 
 	"go.kenn.io/kata/internal/teammate"
+	"go.kenn.io/kata/internal/uid"
 )
+
+// CanonicalCommentUID normalizes valid ULIDs for case-insensitive comment
+// identity while leaving legacy opaque identifiers unchanged.
+func CanonicalCommentUID(value string) string {
+	canonical := strings.ToUpper(value)
+	if uid.Valid(canonical) {
+		return canonical
+	}
+	return value
+}
 
 // DisplayContribution reads retained display data, never routing or receipt
 // identity. A present native value takes precedence, including empty or invalid
@@ -38,8 +51,20 @@ func displayHandle(raw jsontext.Value) string {
 // issue, once per read group. Using the caller's transaction keeps display data
 // in the same snapshot as the comment rows, including moved and restored rows.
 func CommentDisplayContributionsTx(ctx context.Context, tx *sql.Tx, issueID int64, bind func(int) string) (map[string]string, error) {
+	return CommentDisplayContributions(ctx, tx.QueryContext, issueID, bind)
+}
+
+// CommentDisplayContributions reads retained creation-bearing history for an
+// issue through query. Export iterators use their pinned snapshot queryer; read
+// methods use the caller's transaction.
+func CommentDisplayContributions(
+	ctx context.Context,
+	query func(context.Context, string, ...any) (*sql.Rows, error),
+	issueID int64,
+	bind func(int) string,
+) (map[string]string, error) {
 	// #nosec G202 -- Only trusted backend placeholders are interpolated; issueID is bound.
-	rows, err := tx.QueryContext(ctx, `SELECT uid,origin_instance_uid,type,issue_uid,hlc_physical_ms,hlc_counter,payload
+	rows, err := query(ctx, `SELECT uid,origin_instance_uid,type,issue_uid,hlc_physical_ms,hlc_counter,payload
  FROM events WHERE issue_uid=(SELECT uid FROM issues WHERE id=`+bind(1)+`)
  AND type IN ('issue.commented','issue.created','issue.snapshot')`, issueID)
 	if err != nil {
@@ -61,9 +86,37 @@ func CommentDisplayContributionsTx(ctx context.Context, tx *sql.Tx, issueID int6
 	}
 	display := make(map[string]string)
 	for uid, comment := range FoldEvents(events).Comments {
-		display[uid] = comment.AttributedTeammate
+		display[CanonicalCommentUID(uid)] = comment.AttributedTeammate
 	}
 	return display, nil
+}
+
+// CommentDisplayEventPayload returns a canonical comment event payload for a
+// scoped export whose source creation event is outside the export. The explicit
+// display value is retained independently of the comment routing teammate.
+func CommentDisplayEventPayload(comment CommentExport) (jsontext.Value, error) {
+	if comment.AttributedTeammate == nil {
+		return nil, fmt.Errorf("comment %q has no display contribution", comment.UID)
+	}
+	if err := teammate.Validate(*comment.AttributedTeammate); err != nil {
+		return nil, fmt.Errorf("comment %q attributed_teammate: %w", comment.UID, err)
+	}
+	payload, err := json.Marshal(struct {
+		ReplyToUID         string  `json:"reply_to_uid,omitempty"`
+		ReplyKind          string  `json:"reply_kind,omitempty"`
+		CommentUID         string  `json:"comment_uid"`
+		Author             string  `json:"author"`
+		Teammate           string  `json:"teammate,omitempty"`
+		AttributedTeammate *string `json:"attributed_teammate,omitzero"`
+		Body               string  `json:"body"`
+		CreatedAt          string  `json:"created_at"`
+	}{
+		ReplyToUID: comment.ReplyToUID, ReplyKind: comment.ReplyKind,
+		CommentUID: comment.UID, Author: comment.Author, Teammate: comment.Teammate,
+		AttributedTeammate: comment.AttributedTeammate,
+		Body:               comment.Body, CreatedAt: comment.CreatedAt,
+	})
+	return jsontext.Value(payload), err
 }
 
 // HydrateCommentDisplayTx groups comments by owning issue, so a thread never
@@ -80,7 +133,7 @@ func HydrateCommentDisplayTx(ctx context.Context, tx *sql.Tx, comments []*Commen
 			return err
 		}
 		for _, comment := range group {
-			value, found := display[comment.UID]
+			value, found := display[CanonicalCommentUID(comment.UID)]
 			if !found && teammate.Validate(comment.Teammate) == nil {
 				value = comment.Teammate
 			}

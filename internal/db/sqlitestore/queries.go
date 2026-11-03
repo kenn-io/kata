@@ -780,7 +780,7 @@ type createdLinkOut struct {
 }
 
 type issueSnapshotComment struct {
-	AttributedTeammate *string `json:"attributed_teammate,omitempty"`
+	AttributedTeammate *string `json:"attributed_teammate,omitzero"`
 	ReplyToUID         string  `json:"reply_to_uid,omitempty"`
 	ReplyKind          string  `json:"reply_kind,omitempty"`
 	EditedAt           string  `json:"edited_at,omitempty"`

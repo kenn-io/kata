@@ -306,21 +306,102 @@ func (d *Store) ExportIssueSyncStatus(ctx context.Context, f db.ExportFilter) it
 // ExportComments streams comments ordered by id, scoped via the parent issue
 // (project + soft-delete rides on issues).
 func (d *Store) ExportComments(ctx context.Context, f db.ExportFilter) iter.Seq2[db.CommentExport, error] {
-	query := `SELECT comments.id, comments.uid, comments.issue_id, comments.author, comments.body, CAST(comments.created_at AS TEXT), comments.teammate, comments.reply_to_uid, comments.reply_kind, CAST(comments.edited_at AS TEXT)
-	          FROM comments
-	          JOIN issues ON issues.id = comments.issue_id` +
-		exportWhere("issues", f) + ` ORDER BY comments.id ASC`
-	return streamRows(ctx, d.readQ, "comments", query, exportArgs(f),
-		func(rows *sql.Rows) (db.CommentExport, error) {
-			var rec db.CommentExport
-			var teammate, replyTo, replyKind, editedAt sql.NullString
-			if err := rows.Scan(&rec.ID, &rec.UID, &rec.IssueID, &rec.Author, &rec.Body, &rec.CreatedAt, &teammate, &replyTo, &replyKind, &editedAt); err != nil {
-				return db.CommentExport{}, scanError("comment", err)
+	return func(yield func(db.CommentExport, error) bool) {
+		var zero db.CommentExport
+		const batchSize = 128
+		filterWhere := exportWhere("issues", f)
+		maximumRows, err := d.readQ.QueryContext(ctx, `SELECT comments.issue_id, MAX(comments.id)
+		          FROM comments JOIN issues ON issues.id = comments.issue_id`+filterWhere+`
+		          GROUP BY comments.issue_id`, exportArgs(f)...)
+		if err != nil {
+			yield(zero, fmt.Errorf("export comments: %w", err))
+			return
+		}
+		maximumIDByIssue := make(map[int64]int64)
+		for maximumRows.Next() {
+			var issueID, maximumID int64
+			if err := maximumRows.Scan(&issueID, &maximumID); err != nil {
+				_ = maximumRows.Close()
+				yield(zero, scanError("comment issue", err))
+				return
 			}
-			rec.Teammate = teammate.String
-			rec.ReplyToUID, rec.ReplyKind, rec.EditedAt = replyTo.String, replyKind.String, editedAt.String
-			return rec, nil
-		})
+			maximumIDByIssue[issueID] = maximumID
+		}
+		if err := maximumRows.Err(); err != nil {
+			_ = maximumRows.Close()
+			yield(zero, fmt.Errorf("export comments: %w", err))
+			return
+		}
+		_ = maximumRows.Close()
+
+		displayByIssue := make(map[int64]map[string]string)
+		var lastID int64
+		for {
+			where := filterWhere
+			if where == "" {
+				where = " WHERE comments.id > ?"
+			} else {
+				where += " AND comments.id > ?"
+			}
+			args := append(exportArgs(f), lastID, batchSize)
+			rows, err := d.readQ.QueryContext(ctx, `SELECT comments.id, comments.uid, comments.issue_id, comments.author, comments.body,
+			       CAST(comments.created_at AS TEXT), comments.teammate, comments.reply_to_uid, comments.reply_kind, CAST(comments.edited_at AS TEXT)
+		          FROM comments JOIN issues ON issues.id = comments.issue_id`+where+` ORDER BY comments.id ASC LIMIT ?`, args...)
+			if err != nil {
+				yield(zero, fmt.Errorf("export comments: %w", err))
+				return
+			}
+			records := make([]db.CommentExport, 0, batchSize)
+			for rows.Next() {
+				var record db.CommentExport
+				var teammate, replyTo, replyKind, editedAt sql.NullString
+				if err := rows.Scan(&record.ID, &record.UID, &record.IssueID, &record.Author,
+					&record.Body, &record.CreatedAt, &teammate, &replyTo, &replyKind, &editedAt); err != nil {
+					_ = rows.Close()
+					yield(zero, scanError("comment", err))
+					return
+				}
+				record.Teammate = teammate.String
+				record.ReplyToUID, record.ReplyKind, record.EditedAt = replyTo.String, replyKind.String, editedAt.String
+				records = append(records, record)
+			}
+			if err := rows.Err(); err != nil {
+				_ = rows.Close()
+				yield(zero, fmt.Errorf("export comments: %w", err))
+				return
+			}
+			_ = rows.Close()
+
+			for i := range records {
+				display, ok := displayByIssue[records[i].IssueID]
+				if !ok {
+					display, err = db.CommentDisplayContributions(ctx, d.readQ.QueryContext, records[i].IssueID, func(int) string { return "?" })
+					if err != nil {
+						yield(zero, fmt.Errorf("export comments: comment issue %d display: %w", records[i].IssueID, err))
+						return
+					}
+					displayByIssue[records[i].IssueID] = display
+				}
+				value, ok := display[db.CanonicalCommentUID(records[i].UID)]
+				if !ok {
+					value = db.CommentDisplayContribution(nil, records[i].Teammate)
+				}
+				records[i].AttributedTeammate = &value
+			}
+			for i := range records {
+				if !yield(records[i], nil) {
+					return
+				}
+				lastID = records[i].ID
+				if maximumIDByIssue[records[i].IssueID] == lastID {
+					delete(displayByIssue, records[i].IssueID)
+				}
+			}
+			if len(records) < batchSize {
+				return
+			}
+		}
+	}
 }
 
 // ExportIssueLabels streams labels ordered by (issue_id, label), scoped via

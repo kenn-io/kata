@@ -544,7 +544,9 @@ components:
         accountable_actor:
           type: string
         attributed_teammate:
-          type: string
+          type:
+            - string
+            - "null"
         author:
           type: string
         authority_uid:
@@ -591,7 +593,9 @@ components:
       additionalProperties: true
       properties:
         attributed_teammate:
-          type: string
+          type:
+            - string
+            - "null"
         author:
           type: string
         body:
@@ -632,7 +636,9 @@ components:
         accountable_actor:
           type: string
         attributed_teammate:
-          type: string
+          type:
+            - string
+            - "null"
         author:
           type: string
         authority_uid:
