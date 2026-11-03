@@ -38,71 +38,30 @@ func relayProjectsActiveTx(ctx context.Context, tx *sql.Tx, fromProject, toProje
 	return relayed, err
 }
 
-// validateLegacyRelayAdmissionTx checks additions against stored peers. Missing
-// peers remain admissible, and retained duplicates never enter this path.
 func validateLegacyRelayAdmissionTx(ctx context.Context, tx *sql.Tx, projectID int64, event db.RemoteEvent) error {
-	var lookupErr error
-	crossing := false
-	checkProject := func(peerProject int64) {
-		if lookupErr == nil && peerProject != projectID {
-			var restricted bool
-			restricted, lookupErr = relayProjectsActiveTx(ctx, tx, projectID, peerProject)
-			crossing = crossing || restricted
+	crossesProject := func(ctx context.Context, peerProject int64) (bool, error) {
+		if peerProject == projectID {
+			return false, nil
 		}
+		return relayProjectsActiveTx(ctx, tx, projectID, peerProject)
 	}
-	checkUID := func(peer string) bool {
-		if peer == "" || lookupErr != nil {
-			return false
-		}
+	return db.ValidateLegacyRelayAdmission(ctx, event, func(ctx context.Context, peer string) (bool, error) {
 		var peerProject int64
-		lookupErr = tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT project_id FROM issues WHERE uid=?),?)`, peer, projectID).Scan(&peerProject)
-		checkProject(peerProject)
-		return false // Inspect additions without rewriting the hashed payload.
-	}
-	payload := db.PayloadMap(event.Payload)
-	switch event.Type {
-	case "issue.linked", "issue.links_changed", "issue.created", "issue.snapshot":
-		fold := db.FoldEvent{UID: event.EventUID, Type: event.Type, Payload: event.Payload}
-		if _, _, err := db.StripCrossProjectLinkAdditions(fold, checkUID); err != nil {
-			return err
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT project_id FROM issues WHERE uid=?),?)`, peer, projectID).Scan(&peerProject); err != nil {
+			return false, err
 		}
-	}
-	if event.Type == "issue.closed" && lookupErr == nil {
-		if parent, _ := db.StringValue(payload["parent_uid"]); parent != "" {
-			checkUID(parent) // The UID takes precedence over historical short IDs.
+		return crossesProject(ctx, peerProject)
+	}, func(ctx context.Context, ref string) (bool, error) {
+		// Membership, rather than caller visibility, decides admission.
+		target, err := eventIssueByRef(db.WithAuthorizedProjects(ctx, nil), tx, event.ProjectUID, ref)
+		if errors.Is(err, db.ErrNotFound) {
+			return false, nil
 		}
-		var evidence []db.Evidence
-		if raw, ok := payload["evidence"]; ok {
-			if err := json.Unmarshal(raw, &evidence); err != nil {
-				return err
-			}
+		if err != nil {
+			return false, err
 		}
-		var projectUID string
-		if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=?`, projectID).Scan(&projectUID); err != nil {
-			return err
-		}
-		for _, item := range evidence {
-			if item.Type != "duplicate-of" && item.Type != "superseded-by" {
-				continue
-			}
-			// Membership, rather than caller visibility, decides admission.
-			target, err := eventIssueByRef(db.WithAuthorizedProjects(ctx, nil), tx, projectUID, item.IssueRef)
-			if errors.Is(err, db.ErrNotFound) {
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			checkProject(target.ProjectID)
-		}
-	}
-	if lookupErr != nil {
-		return lookupErr
-	}
-	if crossing {
-		return errors.Join(db.ErrFederationIngestValidation, db.ErrFederationCrossProjectBoundary)
-	}
-	return nil
+		return crossesProject(ctx, target.ProjectID)
+	})
 }
 
 // CheckRelayProjectLinks uses the same native boundary check as enrollment.

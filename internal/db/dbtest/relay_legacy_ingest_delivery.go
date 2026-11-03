@@ -142,6 +142,7 @@ func RunRelayOffersLegacyIngestedEvents(t *testing.T, store db.Storage) {
 		})
 		require.ErrorIs(t, err, db.ErrFederationIngestValidation)
 		require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary)
+		require.ErrorContains(t, err, created.EventUID)
 		require.NotContains(t, err.Error(), sibling.UID)
 		for _, event := range []db.RemoteEvent{valid, created} {
 			_, err = store.EventsByUIDs(ctx, fixture.project.ID, []string{event.EventUID})
@@ -157,7 +158,7 @@ func RunRelayOffersLegacyIngestedEvents(t *testing.T, store db.Storage) {
 
 // RunLegacyRelayAdmission separates fresh additions from retained delivery and cleanup.
 func RunLegacyRelayAdmission(t *testing.T, store db.Storage) {
-	for _, kind := range []string{"creation", "snapshot", "single link", "composite", "parent", "duplicate-of", "superseded-by", "unlink", "composite cleanup", "parent replacement"} {
+	for _, kind := range []string{"creation", "snapshot", "single link", "composite", "parent", "duplicate-of", "superseded-by", "malformed evidence", "unlink", "composite cleanup", "parent replacement"} {
 		for _, mode := range []string{"sibling", "same project", "relayed peer", "revoked", "missing"} {
 			t.Run(kind+"/"+mode, func(t *testing.T) {
 				ctx := t.Context()
@@ -223,6 +224,9 @@ func RunLegacyRelayAdmission(t *testing.T, store db.Storage) {
 						ref = peerProject.Name + "#" + peer.ShortID
 					}
 					payload = `{"reason":"done","evidence":[{"type":"` + kind + `","issue_ref":"` + ref + `"}]}`
+				case "malformed evidence":
+					eventType = "issue.closed"
+					payload = `{"reason":"done","evidence":{}}`
 				case "unlink":
 					eventType = "issue.unlinked"
 				}
@@ -231,6 +235,10 @@ func RunLegacyRelayAdmission(t *testing.T, store db.Storage) {
 				event := newRemoteEvent(t, fixture.project, &primary.UID, eventType, "member", spoke, 900, jsontext.Value(payload))
 				push := db.FederationIngestParams{ProjectID: fixture.project.ID, SpokeInstanceUID: spoke, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: event}}}
 				result, err := store.IngestFederationEvents(db.WithAuthorizedProjects(ctx, []string{fixture.project.UID}), push)
+				if kind == "malformed evidence" {
+					require.ErrorIs(t, err, db.ErrFederationIngestValidation)
+					return
+				}
 				refuse := (mode == "sibling" || mode == "relayed peer") && kind != "unlink" && kind != "composite cleanup" && kind != "parent replacement"
 				if refuse {
 					require.ErrorIs(t, err, db.ErrFederationIngestValidation)
