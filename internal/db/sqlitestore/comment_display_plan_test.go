@@ -69,7 +69,7 @@ func TestCommentDisplayContributionsUsesEventIndexes(t *testing.T) {
 	require.NoError(t, err)
 
 	otherProject := createProject(ctx, t, store, "other-project")
-	for i := 0; i < 256; i++ {
+	for i := range 256 {
 		eventUID, err := uid.New()
 		require.NoError(t, err)
 		_, err = store.ExecContext(ctx, `INSERT INTO events(

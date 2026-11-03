@@ -16,7 +16,9 @@ import (
 type CommentDisplaySQLDialect uint8
 
 const (
+	// CommentDisplaySQLite selects SQLite's JSON text extraction syntax.
 	CommentDisplaySQLite CommentDisplaySQLDialect = iota + 1
+	// CommentDisplayPostgres selects PostgreSQL's JSON text extraction syntax.
 	CommentDisplayPostgres
 )
 

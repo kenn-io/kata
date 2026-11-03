@@ -312,8 +312,8 @@ func findCommentGraphRecord(
 		if match != nil && match.Comment.UID != record.Comment.UID {
 			return nil, fmt.Errorf("comment UID %q has multiple case variants", targetUID)
 		}
-		copy := record
-		match = &copy
+		copiedRecord := record
+		match = &copiedRecord
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
