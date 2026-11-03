@@ -69,6 +69,46 @@ func TestPublishNotionTitleMarkdownAndRecovery(t *testing.T) {
 		})
 	}
 }
+
+func TestPublishNotionAfterOneWayReenableAddsOpenTarget(t *testing.T) {
+	ds := groupSchema()
+	ds.Properties[1].Groups[2].Name = "Waiting"
+	previous, err := ResolveConfig(ds, Selectors{StatusSync: "one-way"}, "")
+	require.NoError(t, err)
+	require.Empty(t, previous.TodoGroupID)
+
+	next, err := ResolveConfig(ds, Selectors{StatusSync: "one-way", TodoGroup: "g-todo"}, "")
+	require.NoError(t, err)
+	require.Equal(t, previous.CompleteGroupID, next.CompleteGroupID)
+	require.NoError(t, ValidateReenable(previous, next))
+	raw, err := EncodeConfig(next)
+	require.NoError(t, err)
+
+	creates := 0
+	c, _ := testClient(t, func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/v1/data_sources/" + sourceID:
+			return jsonResponse(t, statusSchemaWire()), nil
+		case "/v1/databases/" + databaseID:
+			return jsonResponse(t, databaseWire()), nil
+		case "/v1/pages":
+			creates++
+			return jsonResponse(t, statusPageWire(new("ready"))), nil
+		default:
+			t.Fatalf("unexpected provider endpoint %s", r.URL.Path)
+			return nil, nil
+		}
+	})
+	s, err := NewAdapter(nil, c).OpenPublish(t.Context(), db.IssueSyncBinding{Provider: "notion", SourceKey: "notion:" + sourceID, RemoteID: sourceID, Config: raw})
+	require.NoError(t, err)
+	payload, err := s.PrepareCreate(t.Context(), db.Issue{Title: "Native", Status: "open"})
+	require.NoError(t, err)
+	remote, err := s.Create(t.Context(), payload, func(context.Context) error { return nil })
+	require.NoError(t, err)
+	require.Equal(t, "open", remote.Status)
+	require.Equal(t, 1, creates)
+}
+
 func TestPublishNotionOneSendAndSourceFences(t *testing.T) {
 	for _, scenario := range []string{"drop", "503", "malformed", "async", "redirect", "wrong_parent", "incomplete", "denied", "title_removed", "legacy", "admission", "oversize"} {
 		t.Run(scenario, func(t *testing.T) {

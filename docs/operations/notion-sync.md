@@ -1,7 +1,7 @@
 ---
 title: Notion sync
 description: Mirror a Notion task data source into Kata with workflow groups, optional two-way status, and bounded polling.
-last_edited: 2026-10-19
+last_edited: 2026-11-03
 ---
 
 # Notion sync
@@ -28,7 +28,7 @@ updates the same Kata issue UID, with the existing source formatting and
 source-newer rules. Later local content edits stay local. Publishing preserves
 the binding's one-way or two-way status setting and adds no second binding.
 
-The shared database must grant the daemon connection read-content and insert-content capabilities. Two-way status still requires update-content. Publishing uses the configured title property and synchronous Markdown content; the live workflow must supply a known open status. Legacy bindings without a live workflow-group mapping cannot publish.
+The shared database must grant the daemon connection read-content and insert-content capabilities. Two-way status still requires update-content. Publishing uses the configured title property and synchronous Markdown content. The live workflow must supply a known open status. Re-enable a one-way binding with `--todo-group` to set its initial open target without changing status direction. Legacy bindings without a live workflow-group mapping cannot publish.
 
 If the result is uncertain, inspect the pending attempt in `status` and inspect
 Notion before acting. To attach a confirmed object without creating another,
@@ -95,7 +95,7 @@ so a replacement worker cannot overlap an admitted status write.
 | `--assignee-property ID-or-name` | A People property is required; omit the selector only when exactly one exists. |
 | `--status-sync one-way-or-two-way` | Status direction; omitted preserves the saved mode and new bindings default to one-way. |
 | `--complete-group ID-or-name` | Complete workflow group; defaults to exact name `Complete`. |
-| `--todo-group ID-or-name` | To-do workflow group; defaults to exact name `To-do` and is required for two-way status. |
+| `--todo-group ID-or-name` | To-do group; defaults to exact name `To-do`. Required for two-way status; on one-way bindings, it can set the initial publication target during re-enable. |
 | `--closed-status ID-or-name` | Optional closed write target within Complete; empty clears the override. |
 | `--open-status ID-or-name` | Optional open write target within To-do; empty clears the override. |
 | `--done-status ID-or-name` | Legacy one-way completed option set; repeat for each option. Rejected with two-way status. |
