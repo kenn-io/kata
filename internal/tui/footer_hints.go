@@ -71,7 +71,7 @@ func listHelpRows(lm listModel, chrome viewChrome) [][]helplayout.HelpItem {
 	if chrome.input.kind != inputNone {
 		return inputHelpRows(chrome.input)
 	}
-	return appendUndoHint(lm.queueHelpRows(), chrome.undoAvailable)
+	return appendUndoHint(withoutDeleteHint(lm.queueHelpRows(), chrome.deleteHidden), chrome.undoAvailable)
 }
 
 func detailHelpRows(dm detailModel, chrome viewChrome) [][]helplayout.HelpItem {
@@ -81,7 +81,22 @@ func detailHelpRows(dm detailModel, chrome viewChrome) [][]helplayout.HelpItem {
 	if chrome.input.kind != inputNone {
 		return inputHelpRows(chrome.input)
 	}
-	return appendUndoHint(dm.detailHelpRows(), chrome.undoAvailable)
+	return appendUndoHint(withoutDeleteHint(dm.detailHelpRows(), chrome.deleteHidden), chrome.undoAvailable)
+}
+
+// withoutDeleteHint drops the delete key from the footer when the connected
+// credentials cannot delete.
+func withoutDeleteHint(rows [][]helplayout.HelpItem, hidden bool) [][]helplayout.HelpItem {
+	if !hidden {
+		return rows
+	}
+	out := make([][]helplayout.HelpItem, len(rows))
+	for i, row := range rows {
+		out[i] = slices.DeleteFunc(slices.Clone(row), func(item helplayout.HelpItem) bool {
+			return item.Key == "X" && item.Description == "delete"
+		})
+	}
+	return out
 }
 
 func appendUndoHint(rows [][]helplayout.HelpItem, available bool) [][]helplayout.HelpItem {
@@ -125,6 +140,14 @@ func inputHelpRows(input inputState) [][]helplayout.HelpItem {
 			{Key: "ctrl+o", Description: "apply"},
 			{Key: "esc", Description: "cancel"},
 			{Key: "ctrl+r", Description: "reset"},
+		}}
+	case kind == inputDeleteForm:
+		if input.saving {
+			return nil
+		}
+		return [][]helplayout.HelpItem{{
+			{Key: "enter", Description: "delete"},
+			{Key: "esc", Description: "cancel"},
 		}}
 	case kind == inputDatesForm:
 		return [][]helplayout.HelpItem{{
@@ -183,6 +206,7 @@ func (lm listModel) queueHelpRows() [][]helplayout.HelpItem {
 		helplayout.HelpItem{Key: "c", Description: "clear"},
 		helplayout.HelpItem{Key: "x", Description: "close"},
 		helplayout.HelpItem{Key: "d", Description: "dates"},
+		helplayout.HelpItem{Key: "X", Description: "delete"},
 		helplayout.HelpItem{Key: "!", Description: "priority"},
 		helplayout.HelpItem{Key: "D", Description: "daemons"},
 		helplayout.HelpItem{Key: "F", Description: "federation"},
@@ -218,6 +242,7 @@ func (dm detailModel) detailHelpRows() [][]helplayout.HelpItem {
 		{Key: "x", Description: "close"},
 		{Key: "r", Description: "reopen"},
 		{Key: "d", Description: "dates"},
+		{Key: "X", Description: "delete"},
 		{Key: "p", Description: "parent"},
 		{Key: "b", Description: "block"},
 		{Key: "l", Description: "related"},

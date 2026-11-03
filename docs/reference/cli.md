@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-02
+last_edited: 2026-11-04
 ---
 
 # CLI reference
@@ -1997,8 +1997,8 @@ read the jobs, it reopens without a prompt.
 
 Press `u` in the issue list or detail view to undo the latest eligible issue
 edit from this TUI session. Repeated presses walk back through up to 20 edits,
-including close, reopen, owner, priority, label, body, dates, and newly added
-parent, blocker, or related links. Undo follows the recorded issue across
+including close, reopen, owner, priority, label, body, dates, delete, and newly
+added parent, blocker, or related links. Undo follows the recorded issue across
 navigation and projects; it does not target whichever row is currently
 selected. It makes a new attributed change, so the original audit event
 remains. Undoing a reopen may open the normal completion form when the daemon
@@ -2046,6 +2046,17 @@ since the form opened, nothing is written; the form stays open and shows the
 current dates so you can edit them again. The detail properties show both
 dates once either is set, and `u` writes the previous dates back under the
 same revision check.
+
+In the issue list or detail, press `X` to soft-delete the selected issue. The
+form shows the issue's title and the header `DELETE <project>#<id>`, the string
+`kata delete --confirm` takes. Type `<project>#<id>` and press `Enter`; `Enter`
+does nothing until the text matches, and `Esc` cancels. The selection then moves
+to the next row (the previous one after the last), a detail showing the issue
+closes, and a notice names `u`. `u` restores the issue the way `kata restore`
+does; if the issue was restored elsewhere in the meantime, the TUI says so and
+changes nothing. There is no restore prompt for older deletions: use
+`kata restore`. Issue-scoped credentials cannot delete or restore, so `X` is
+not offered to them and does nothing.
 
 In the issue list, `v` toggles between nested and flat views: nested groups
 children under parents, while flat shows matching issues as peers in list

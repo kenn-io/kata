@@ -71,6 +71,9 @@ func (c *undoClient) undo(ctx context.Context, entry undoEntry, opts undoOptions
 		out.conflict = "daemon principal changed"
 		return out
 	}
+	if entry.kind == "delete" {
+		return c.undoDelete(ctx, entry, out)
+	}
 	detail, err := c.GetIssueDetail(ctx, entry.projectID, entry.uid)
 	if err != nil {
 		out.err = err

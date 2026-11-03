@@ -968,6 +968,9 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		if next, cmd, ok := m.routeDatesKey(msg); ok {
 			return next, cmd, true
 		}
+		if next, cmd, ok := m.routeDeleteKey(msg); ok {
+			return next, cmd, true
+		}
 		if next, cmd, ok := m.routeReopenKey(msg); ok {
 			return next, cmd, true
 		}
@@ -1054,6 +1057,9 @@ func (m Model) blockMutation(withinSubtree bool) (Model, tea.Cmd, bool) {
 func (m Model) mutationForKey(msg tea.KeyPressMsg) (withinSubtree, mutation bool) {
 	switch {
 	case m.keymap.NewIssue.matches(msg):
+		return false, true
+	case m.keymap.Delete.matches(msg):
+		// Issue-scoped credentials cannot delete, whatever else they may edit.
 		return false, true
 	case m.keymap.Close.matches(msg), m.keymap.Reopen.matches(msg), m.keymap.SetDates.matches(msg):
 		return true, true
@@ -1857,6 +1863,9 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 	}
 	target := m.input.target
 	formKind := m.input.kind
+	if formKind == inputDeleteForm {
+		return m.finishDelete(target, mut)
+	}
 	m.input = inputState{}
 	// Hand off to the existing per-view mutation routing so the
 	// detail's body / comments list updates. Re-classify as if it
@@ -2091,6 +2100,9 @@ func (m Model) commitFormInput(kind inputKind) (Model, tea.Cmd) {
 	}
 	if kind == inputDatesForm {
 		return m.commitDatesForm()
+	}
+	if kind == inputDeleteForm {
+		return m.commitDeleteForm()
 	}
 	if kind == inputCloseForm {
 		in, err := closeInputFromForm(m.input, m.list.actor)
@@ -3794,7 +3806,7 @@ func (m Model) viewBody() string {
 		}
 		return renderCron(m)
 	case viewHelp:
-		return renderHelp(m.keymap, m.width, m.list.filter)
+		return renderHelp(m.helpKeymap(), m.width, m.list.filter)
 	case viewEmpty:
 		return renderEmpty(m.width, m.height)
 	case viewProjects:
@@ -3837,6 +3849,7 @@ func (m Model) chrome() viewChrome {
 		daemon:        activeDaemonDisplay(m.activeDaemon),
 		modal:         m.modal,
 		undoAvailable: len(m.undoHistory.entries) > 0,
+		deleteHidden:  !m.mutationAllowed(false),
 	}
 }
 
