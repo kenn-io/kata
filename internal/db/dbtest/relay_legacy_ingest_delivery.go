@@ -111,8 +111,8 @@ func RunRelayOffersLegacyIngestedEvents(t *testing.T, store db.Storage) {
 }
 
 func runRelayRejectsLegacyCrossProjectEvents(t *testing.T, store db.Storage) {
-	for _, kind := range []string{"creation with sibling link", "close parent"} {
-		t.Run("refuse cross-project "+kind, func(t *testing.T) {
+	for _, kind := range []string{"creation with sibling link", "close parent", "unresolved parent UID", "unresolved parent short ID", "sibling parent short ID"} {
+		t.Run("legacy boundary "+kind, func(t *testing.T) {
 			ctx := t.Context()
 			fixture := newRelayLinkBoundaryFixture(t, store, "legacy-boundary-"+kind)
 			private, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.sibling.ID, Title: "Sibling endpoint", Author: "member"})
@@ -144,11 +144,34 @@ func runRelayRejectsLegacyCrossProjectEvents(t *testing.T, store db.Storage) {
 				require.Len(t, offered, 1)
 				require.NoError(t, store.AckRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, 1, db.RelayStreamEvent, offered[0].Sequence, offered[0].Digest))
 				payload := jsontext.Value(`{"reason":"done","parent_uid":"` + private.UID + `","parent_short_id":"` + private.ShortID + `"}`)
+				switch kind {
+				case "unresolved parent UID":
+					payload = jsontext.Value(`{"reason":"done","parent_uid":"` + peer + `"}`)
+				case "unresolved parent short ID":
+					payload = jsontext.Value(`{"reason":"done","parent_short_id":"unknown"}`)
+				case "sibling parent short ID":
+					payload = jsontext.Value(`{"reason":"done","parent_short_id":"` + private.ShortID + `"}`)
+				}
 				closed := newRemoteEvent(t, fixture.project, &issueUID, "issue.closed", "spoke", spoke, 701, payload)
 				events = []db.FederationIngestEvent{{SourceEventID: 2, Event: closed}}
 			}
 			push.Events = events
-			_, err = store.IngestFederationEvents(ctx, push)
+			result, err := store.IngestFederationEvents(ctx, push)
+			if kind == "unresolved parent UID" || kind == "unresolved parent short ID" {
+				require.NoError(t, err)
+				require.Equal(t, 1, result.Accepted)
+				retained, err := store.EventsByUIDs(ctx, fixture.project.ID, []string{events[0].Event.EventUID})
+				require.NoError(t, err)
+				require.Len(t, retained, 1)
+				offered, err := store.PendingRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, db.RelayStreamEvent, 100)
+				require.NoError(t, err)
+				require.Len(t, offered, 1)
+				require.Equal(t, events[0].Event.EventUID, offered[0].SourceUID)
+				issue, err := store.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
+				require.NoError(t, err)
+				require.Equal(t, "closed", issue.Status)
+				return
+			}
 			require.ErrorIs(t, err, db.ErrFederationIngestValidation)
 			require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary)
 			offered, err := store.PendingRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, db.RelayStreamEvent, 100)
@@ -162,6 +185,9 @@ func runRelayRejectsLegacyCrossProjectEvents(t *testing.T, store db.Storage) {
 			} else {
 				require.NoError(t, err)
 				require.Equal(t, "open", issue.Status)
+				if kind != "close parent" {
+					return
+				}
 				_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{
 					ProjectID: fixture.project.ID, UID: "01HZNQ7VFPK1XGD8R5MABCD4EX", Title: "Short ID collision", Author: "member",
 				})

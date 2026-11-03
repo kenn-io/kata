@@ -74,7 +74,7 @@ func rejectRelayProjectLinksTx(ctx context.Context, tx *sql.Tx, projectID int64)
 func relayEventCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID int64, event db.RemoteEvent, unresolvedOK bool) (bool, error) {
 	payload := db.PayloadMap(event.Payload)
 	if event.Type == "issue.closed" {
-		crossing, err := relayCloseParentCrossesProjectTx(ctx, tx, projectID, payload)
+		crossing, err := relayCloseParentCrossesProjectTx(ctx, tx, projectID, payload, unresolvedOK)
 		if err != nil || crossing {
 			return crossing, err
 		}
@@ -147,12 +147,7 @@ func relayCloseEvidenceCrossesProjectTx(
 	return false, nil
 }
 
-func relayCloseParentCrossesProjectTx(
-	ctx context.Context,
-	tx *sql.Tx,
-	projectID int64,
-	payload map[string]jsontext.Value,
-) (bool, error) {
+func relayCloseParentCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID int64, payload map[string]jsontext.Value, unresolvedOK bool) (bool, error) {
 	parentUID, uidPresent := db.StringValue(payload["parent_uid"])
 	parentShortID, shortIDPresent := db.StringValue(payload["parent_short_id"])
 	if _, exists := payload["parent_uid"]; exists && !uidPresent {
@@ -167,7 +162,7 @@ func relayCloseParentCrossesProjectTx(
 	var own bool
 	if parentUID != "" {
 		if err := tx.QueryRowContext(ctx,
-			`SELECT EXISTS(SELECT 1 FROM issues WHERE uid=$1 AND project_id=$2)`, parentUID, projectID,
+			`SELECT COALESCE((SELECT project_id=$1 FROM issues WHERE uid=$2),$3)`, projectID, parentUID, unresolvedOK,
 		).Scan(&own); err != nil {
 			return false, mapSQLError(err, nil)
 		}
@@ -180,7 +175,7 @@ func relayCloseParentCrossesProjectTx(
 	).Scan(&matches, &resolvedProjectID); err != nil {
 		return false, mapSQLError(err, nil)
 	}
-	return matches != 1 || resolvedProjectID != projectID, nil
+	return (matches != 0 || !unresolvedOK) && (matches != 1 || resolvedProjectID != projectID), nil
 }
 
 func relayHistoryHasBoundaryTx(ctx context.Context, tx *sql.Tx, projectID int64) (bool, error) {
