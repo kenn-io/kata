@@ -10,6 +10,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/recurrence"
 )
 
 // Issue is a strict subset of the daemon's wire shape. Labels rides on
@@ -56,16 +57,19 @@ type Issue struct {
 	DeadlineOnDate  string `json:"deadline_on_date,omitempty"`
 }
 
-// issueMetadata keeps the two planning-date keys of an issue's metadata as
-// the daemon stores them. Other keys are not read by the TUI.
+// issueMetadata keeps the two planning-date keys and the timezone of an
+// issue's metadata as the daemon stores them. Other keys are not read by the TUI.
 type issueMetadata struct {
 	ScheduledOn jsontext.Value `json:"scheduled_on,omitzero"`
 	DeadlineOn  jsontext.Value `json:"deadline_on,omitzero"`
+	Timezone    jsontext.Value `json:"timezone,omitzero"`
 }
 
-// scheduledOn and deadlineOn are the raw stored dates, "" when absent.
+// scheduledOn, deadlineOn and timezone are the raw stored values, "" when
+// absent.
 func (i Issue) scheduledOn() string { return rawDate(i.Metadata.ScheduledOn) }
 func (i Issue) deadlineOn() string  { return rawDate(i.Metadata.DeadlineOn) }
+func (i Issue) timezone() string    { return rawDate(i.Metadata.Timezone) }
 
 func rawDate(v jsontext.Value) string {
 	var s string
@@ -174,6 +178,9 @@ type MutationResp struct {
 	Changed bool           `json:"changed"`
 	Reused  bool           `json:"reused,omitempty"`
 	undo    *undoAttempt
+	// current is the issue and recurrence as the daemon holds them after a
+	// refused recurrence write.
+	current *recurrenceSnapshot
 }
 
 // EventEnvelope is the minimal event projection embedded in mutation
@@ -399,6 +406,9 @@ type IssueDetail struct {
 	Parent   *IssueRef
 	Children []Issue
 	Lease    *api.IssueClaimOut
+	// Recurrence is the live recurrence the issue belongs to; nil when it
+	// has none or the daemon would not list it.
+	Recurrence *recurrence.View
 }
 
 // showIssueLabel is the per-label projection from showIssue's labels

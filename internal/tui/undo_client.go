@@ -276,6 +276,16 @@ func (c *undoClient) SetDates(ctx context.Context, projectID int64, ref string, 
 	})
 }
 
+func (c *undoClient) SaveRecurrence(ctx context.Context, projectID int64, ref string, in RecurrenceInput) (*MutationResp, error) {
+	writer, ok := c.KataAPI.(recurrenceAPI)
+	if !ok {
+		return nil, errors.New("connected client cannot edit recurrences")
+	}
+	return c.boundaryWrite(ctx, "changing a recurrence cannot be undone", func() (*MutationResp, error) {
+		return writer.SaveRecurrence(ctx, projectID, ref, in)
+	})
+}
+
 func (c *undoClient) CloseWithEvidence(ctx context.Context, projectID int64, ref string, in CloseInput) (*MutationResp, error) {
 	closer, ok := c.KataAPI.(evidenceCloseAPI)
 	if !ok {

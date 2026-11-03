@@ -639,7 +639,9 @@ func TestModel_FetchInitialUsesQueueFetchFilter(t *testing.T) {
 func TestClient_GetIssueDetail_DecodesWrappedEnvelope(t *testing.T) {
 	var gotPath string
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
+		if gotPath == "" {
+			gotPath = r.URL.Path // the issue read; a recurring issue also reads its recurrence
+		}
 		respondJSON(t, w, map[string]any{
 			"issue": map[string]any{
 				"uid": "01JZ0000000000000000000001", "project_uid": "01JZ0000000000000000000002",
