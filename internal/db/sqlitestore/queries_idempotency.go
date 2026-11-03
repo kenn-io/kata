@@ -257,7 +257,7 @@ func (d *Store) LookupCommentIdempotency(
 	if err != nil {
 		return nil, fmt.Errorf("comment idempotency match comment: %w", err)
 	}
-	if err := db.HydrateCommentDisplayTx(ctx, tx, []*db.Comment{&comment}, func(int) string { return "?" }); err != nil {
+	if err := db.HydrateCommentDisplayTx(ctx, tx, []*db.Comment{&comment}, func(int) string { return "?" }, db.CommentDisplaySQLite); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {

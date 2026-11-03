@@ -115,7 +115,7 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 		if err != nil {
 			return err
 		}
-		if err := db.HydrateCommentDisplayTx(ctx, tx, []*db.Comment{&comment}, dollarPlaceholder); err != nil {
+		if err := db.HydrateCommentDisplayTx(ctx, tx, []*db.Comment{&comment}, dollarPlaceholder, db.CommentDisplayPostgres); err != nil {
 			return err
 		}
 		committedEvents = []db.Event{event}
@@ -180,7 +180,7 @@ func (s *Store) editComment(
 			return err
 		}
 		if comment.Body == params.Body {
-			return db.HydrateCommentDisplayTx(ctx, tx, []*db.Comment{&comment}, dollarPlaceholder)
+			return db.HydrateCommentDisplayTx(ctx, tx, []*db.Comment{&comment}, dollarPlaceholder, db.CommentDisplayPostgres)
 		}
 		var externallyOwned bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (
@@ -227,7 +227,7 @@ func (s *Store) editComment(
 			return err
 		}
 		event, changed = &created, true
-		return db.HydrateCommentDisplayTx(ctx, tx, []*db.Comment{&comment}, dollarPlaceholder)
+		return db.HydrateCommentDisplayTx(ctx, tx, []*db.Comment{&comment}, dollarPlaceholder, db.CommentDisplayPostgres)
 	})
 	return comment, event, changed, err
 }
@@ -373,7 +373,7 @@ func (s *Store) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Commen
 	for i := range comments {
 		pointers[i] = &comments[i]
 	}
-	if err := db.HydrateCommentDisplayTx(ctx, tx, pointers, dollarPlaceholder); err != nil {
+	if err := db.HydrateCommentDisplayTx(ctx, tx, pointers, dollarPlaceholder, db.CommentDisplayPostgres); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {

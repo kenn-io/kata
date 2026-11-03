@@ -159,7 +159,7 @@ func (s *Store) replayCommentDisplayEvents(ctx context.Context, tx *sql.Tx, reco
 		if !loaded {
 			display, err = db.CommentDisplayContributionsTx(ctx, tx, issueID, func(position int) string {
 				return fmt.Sprintf("$%d", position)
-			})
+			}, db.CommentDisplayPostgres)
 			if err != nil {
 				return fmt.Errorf("restore comment display %q: read retained history: %w", comment.UID, mapSQLError(err, nil))
 			}

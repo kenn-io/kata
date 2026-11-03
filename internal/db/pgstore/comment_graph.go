@@ -46,7 +46,7 @@ func (s *Store) ReadCommentGraph(ctx context.Context, query db.CommentGraphQuery
 	}
 
 	data, err := db.ReadCommentGraphTx(ctx, tx, query, func(n int) string { return "$" + strconv.Itoa(n) },
-		parseStoredTime, commentReplyTargetUIDExpr, strings.ReplaceAll(commentAttributionColumn, "comments.", "c."))
+		parseStoredTime, commentReplyTargetUIDExpr, strings.ReplaceAll(commentAttributionColumn, "comments.", "c."), db.CommentDisplayPostgres)
 	if err != nil {
 		return data, err
 	}

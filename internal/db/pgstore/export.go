@@ -343,7 +343,7 @@ func (s *Store) ExportComments(ctx context.Context, filter db.ExportFilter) iter
 			for i := range records {
 				display, ok := displayByIssue[records[i].IssueID]
 				if !ok {
-					display, err = db.CommentDisplayContributions(ctx, s.exportQueryContext, records[i].IssueID, dollarPlaceholder)
+					display, err = db.CommentDisplayContributions(ctx, s.exportQueryContext, records[i].IssueID, dollarPlaceholder, db.CommentDisplayPostgres)
 					if err != nil {
 						yield(zero, fmt.Errorf("export comments: comment issue %d display: %w", records[i].IssueID, mapSQLError(err, nil)))
 						return

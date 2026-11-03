@@ -47,6 +47,7 @@ func (d *Store) ReadCommentGraph(ctx context.Context, query db.CommentGraphQuery
 		func(value string) (time.Time, error) { return time.Parse(time.RFC3339Nano, value) },
 		db.SQLiteCommentReplyTargetUIDExpr,
 		strings.ReplaceAll(commentAttributionColumn, "comments.", "c."),
+		db.CommentDisplaySQLite,
 	)
 	if err != nil {
 		return data, err

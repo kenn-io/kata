@@ -1334,7 +1334,7 @@ func commentByUIDForIssueTx(ctx context.Context, tx *sql.Tx, issueID int64, comm
 	if err != nil {
 		return db.Comment{}, fmt.Errorf("lookup comment: %w", err)
 	}
-	if err := db.HydrateCommentDisplayTx(ctx, tx, []*db.Comment{&c}, func(int) string { return "?" }); err != nil {
+	if err := db.HydrateCommentDisplayTx(ctx, tx, []*db.Comment{&c}, func(int) string { return "?" }, db.CommentDisplaySQLite); err != nil {
 		return db.Comment{}, err
 	}
 	return c, nil
@@ -1350,7 +1350,7 @@ func commentByIDTx(ctx context.Context, tx *sql.Tx, commentID int64) (db.Comment
 	if err != nil {
 		return db.Comment{}, fmt.Errorf("read comment: %w", err)
 	}
-	if err := db.HydrateCommentDisplayTx(ctx, tx, []*db.Comment{&c}, func(int) string { return "?" }); err != nil {
+	if err := db.HydrateCommentDisplayTx(ctx, tx, []*db.Comment{&c}, func(int) string { return "?" }, db.CommentDisplaySQLite); err != nil {
 		return db.Comment{}, err
 	}
 	return c, nil
@@ -1639,7 +1639,7 @@ func (d *Store) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Commen
 	for i := range out {
 		comments[i] = &out[i]
 	}
-	if err := db.HydrateCommentDisplayTx(ctx, tx, comments, func(int) string { return "?" }); err != nil {
+	if err := db.HydrateCommentDisplayTx(ctx, tx, comments, func(int) string { return "?" }, db.CommentDisplaySQLite); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {

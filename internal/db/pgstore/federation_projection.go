@@ -383,7 +383,7 @@ func federationIssueComments(
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
-	display, err := db.CommentDisplayContributionsTx(ctx, tx, issueID, dollarPlaceholder)
+	display, err := db.CommentDisplayContributionsTx(ctx, tx, issueID, dollarPlaceholder, db.CommentDisplayPostgres)
 	if err != nil {
 		return nil, err
 	}

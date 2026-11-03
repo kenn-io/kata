@@ -1718,7 +1718,7 @@ func federationIssueComments(ctx context.Context, tx *sql.Tx, issueID int64) ([]
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
-	display, err := db.CommentDisplayContributionsTx(ctx, tx, issueID, func(int) string { return "?" })
+	display, err := db.CommentDisplayContributionsTx(ctx, tx, issueID, func(int) string { return "?" }, db.CommentDisplaySQLite)
 	if err != nil {
 		return nil, err
 	}

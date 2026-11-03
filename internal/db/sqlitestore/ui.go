@@ -108,6 +108,7 @@ func (d *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 				func(value string) (time.Time, error) { return time.Parse(time.RFC3339Nano, value) },
 				db.SQLiteCommentReplyTargetUIDExpr,
 				strings.ReplaceAll(commentAttributionColumn, "comments.", "c."),
+				db.CommentDisplaySQLite,
 			)
 			if err != nil {
 				return db.UISnapshotData{}, err

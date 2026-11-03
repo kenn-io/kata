@@ -103,6 +103,7 @@ func (s *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 				parseStoredTime,
 				commentReplyTargetUIDExpr,
 				strings.ReplaceAll(commentAttributionColumn, "comments.", "c."),
+				db.CommentDisplayPostgres,
 			)
 			if err != nil {
 				return db.UISnapshotData{}, err

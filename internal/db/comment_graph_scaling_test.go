@@ -26,7 +26,7 @@ func TestSelectedCommentGraphWorkIgnoresUnrelatedBodies(t *testing.T) {
 					`CREATE TABLE projects(id INTEGER PRIMARY KEY,uid TEXT,name TEXT,deleted_at TEXT)`,
 					`CREATE TABLE issues(id INTEGER PRIMARY KEY,uid TEXT,short_id TEXT,project_id INTEGER,deleted_at TEXT)`,
 					`CREATE TABLE comments(id INTEGER PRIMARY KEY,uid TEXT,issue_id INTEGER,author TEXT,body TEXT,created_at TEXT,teammate TEXT,reply_to_uid TEXT,reply_kind TEXT,edited_at TEXT)`,
-					`CREATE TABLE events(uid TEXT,origin_instance_uid TEXT,type TEXT,issue_uid TEXT,hlc_physical_ms INTEGER,hlc_counter INTEGER,related_issue_uid TEXT,payload TEXT)`,
+					`CREATE TABLE events(uid TEXT,origin_instance_uid TEXT,project_id INTEGER,type TEXT,issue_uid TEXT,hlc_physical_ms INTEGER,hlc_counter INTEGER,related_issue_uid TEXT,payload TEXT)`,
 					`CREATE TABLE purge_log(issue_uid TEXT)`,
 					`INSERT INTO projects VALUES(1,'01M40000000000000000000001','example-project',NULL)`,
 					`INSERT INTO issues VALUES(1,'01M40000000000000000000002','0002',1,NULL),(2,'01M40000000000000000000003','0003',1,NULL)`,
@@ -64,7 +64,7 @@ func TestSelectedCommentGraphWorkIgnoresUnrelatedBodies(t *testing.T) {
 					graph, err := ReadCommentGraphTx(ctx, tx, CommentGraphQuery{ProjectID: 1, SelectedIssueID: 1, Reference: reference},
 						func(int) string { return "?" },
 						func(value string) (time.Time, error) { return time.Parse(time.RFC3339Nano, value) },
-						`json_extract(e.payload,'$.reply_to_uid')`, "NULL")
+						`json_extract(e.payload,'$.reply_to_uid')`, "NULL", CommentDisplaySQLite)
 					require.NoError(t, err)
 					require.Equal(t, "01M40000000000000000000004", graph.Comments[0].Comment.UID)
 					if reference == nil {
@@ -105,7 +105,7 @@ func TestReadCommentGraphPendingTargetWork(t *testing.T) {
 			`CREATE TABLE projects(id INTEGER PRIMARY KEY,uid TEXT,name TEXT,deleted_at TEXT)`,
 			`CREATE TABLE issues(id INTEGER PRIMARY KEY,uid TEXT,short_id TEXT,project_id INTEGER,deleted_at TEXT)`,
 			`CREATE TABLE comments(id INTEGER PRIMARY KEY,uid TEXT,issue_id INTEGER,author TEXT,body TEXT,created_at TEXT,teammate TEXT,reply_to_uid TEXT,reply_kind TEXT,edited_at TEXT)`,
-			`CREATE TABLE events(uid TEXT,origin_instance_uid TEXT,type TEXT,issue_uid TEXT,hlc_physical_ms INTEGER,hlc_counter INTEGER,related_issue_uid TEXT,payload TEXT)`,
+			`CREATE TABLE events(uid TEXT,origin_instance_uid TEXT,project_id INTEGER,type TEXT,issue_uid TEXT,hlc_physical_ms INTEGER,hlc_counter INTEGER,related_issue_uid TEXT,payload TEXT)`,
 			`CREATE TABLE purge_log(issue_uid TEXT)`,
 			`INSERT INTO projects VALUES(1,'01M40000000000000000000001','example-project',NULL)`,
 			`INSERT INTO issues VALUES(1,'01M40000000000000000000002','0002',1,NULL)`,
@@ -127,7 +127,7 @@ func TestReadCommentGraphPendingTargetWork(t *testing.T) {
 		graph, err := ReadCommentGraphTx(ctx, tx, CommentGraphQuery{ProjectID: 1, SelectedIssueID: 1},
 			func(int) string { return "?" },
 			func(value string) (time.Time, error) { return time.Parse(time.RFC3339Nano, value) },
-			`json_extract(e.payload,'$.reply_to_uid')`, "NULL")
+			`json_extract(e.payload,'$.reply_to_uid')`, "NULL", CommentDisplaySQLite)
 		require.NoError(t, err)
 		require.Len(t, graph.Comments, replies)
 		require.Equal(t, map[string]CommentGraphTarget{targetUID: {Status: "pending"}}, graph.Targets)
@@ -185,6 +185,10 @@ func TestSelectedCommentGraphUsesLookupIndexes(t *testing.T) {
 			var statements []string
 			var arguments [][]any
 			work.capture = func(statement string, args []driver.NamedValue) {
+				// Contributor-history reads have their own index-plan test.
+				if !strings.Contains(statement, "comments c") {
+					return
+				}
 				statements = append(statements, statement)
 				values := make([]any, len(args))
 				for index, arg := range args {
@@ -199,7 +203,7 @@ func TestSelectedCommentGraphUsesLookupIndexes(t *testing.T) {
 			graph, err := ReadCommentGraphTx(ctx, tx, tc.query,
 				func(int) string { return "?" },
 				func(value string) (time.Time, error) { return time.Parse(time.RFC3339Nano, value) },
-				`json_extract(e.payload,'$.reply_to_uid')`, "NULL")
+				`json_extract(e.payload,'$.reply_to_uid')`, "NULL", CommentDisplaySQLite)
 			require.NoError(t, err)
 			if tc.query.Reference != nil {
 				require.Len(t, graph.Comments, 1)

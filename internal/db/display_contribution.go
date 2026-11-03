@@ -11,6 +11,26 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
+// CommentDisplaySQLDialect selects the backend's JSON text extraction syntax
+// used to find the source projects recorded by issue.moved events.
+type CommentDisplaySQLDialect uint8
+
+const (
+	CommentDisplaySQLite CommentDisplaySQLDialect = iota + 1
+	CommentDisplayPostgres
+)
+
+func (dialect CommentDisplaySQLDialect) moveFromProjectUID(alias string) string {
+	switch dialect {
+	case CommentDisplaySQLite:
+		return "json_extract(" + alias + ".payload, '$.from_project_uid')"
+	case CommentDisplayPostgres:
+		return alias + ".payload::jsonb->>'from_project_uid'"
+	default:
+		return ""
+	}
+}
+
 // CanonicalCommentUID normalizes valid ULIDs for case-insensitive comment
 // identity while leaving legacy opaque identifiers unchanged.
 func CanonicalCommentUID(value string) string {
@@ -45,8 +65,8 @@ func displayHandle(raw jsontext.Value) string {
 // CommentDisplayContributionsTx loads only creation-bearing history for an
 // issue, once per read group. Using the caller's transaction keeps display data
 // in the same snapshot as the comment rows, including moved and restored rows.
-func CommentDisplayContributionsTx(ctx context.Context, tx *sql.Tx, issueID int64, bind func(int) string) (map[string]string, error) {
-	return CommentDisplayContributions(ctx, tx.QueryContext, issueID, bind)
+func CommentDisplayContributionsTx(ctx context.Context, tx *sql.Tx, issueID int64, bind func(int) string, dialect CommentDisplaySQLDialect) (map[string]string, error) {
+	return CommentDisplayContributions(ctx, tx.QueryContext, issueID, bind, dialect)
 }
 
 // CommentDisplayContributions reads retained creation-bearing history for an
@@ -57,33 +77,55 @@ func CommentDisplayContributions(
 	query func(context.Context, string, ...any) (*sql.Rows, error),
 	issueID int64,
 	bind func(int) string,
+	dialect CommentDisplaySQLDialect,
 ) (map[string]string, error) {
-	// #nosec G202 -- Only trusted backend placeholders are interpolated; issueID is bound.
-	// History follows the issue UID across project moves, so the event's project
-	// may differ from the current project that owns the issue row.
-	rows, err := query(ctx, `SELECT e.uid,e.origin_instance_uid,e.type,e.issue_uid,e.hlc_physical_ms,e.hlc_counter,e.payload,i.uid
- FROM events e JOIN issues i ON i.id=`+bind(1)+`
- WHERE (e.issue_uid=i.uid OR e.issue_uid IS NULL OR e.issue_uid='')
-	 AND e.type IN ('issue.commented','issue.created','issue.snapshot')`, issueID)
+	moveFromProjectUID := dialect.moveFromProjectUID("moved")
+	if moveFromProjectUID == "" {
+		return nil, fmt.Errorf("unsupported comment display SQL dialect %d", dialect)
+	}
+	queryText := `WITH issue AS (
+ SELECT uid, project_id FROM issues WHERE id=` + bind(1) + `
+), relevant_projects AS (
+ SELECT project_id FROM issue
+ UNION
+ SELECT p.id
+ FROM issue i
+ CROSS JOIN events moved
+ JOIN projects p ON p.uid=` + moveFromProjectUID + `
+ WHERE moved.issue_uid=i.uid AND moved.type='issue.moved'
+)
+SELECT i.uid,e.uid,e.origin_instance_uid,e.type,e.issue_uid,e.hlc_physical_ms,e.hlc_counter,e.payload
+FROM issue i
+JOIN events e ON e.issue_uid=i.uid
+WHERE e.type IN ('issue.commented','issue.created','issue.snapshot')
+UNION ALL
+SELECT i.uid,e.uid,e.origin_instance_uid,e.type,e.issue_uid,e.hlc_physical_ms,e.hlc_counter,e.payload
+FROM issue i
+CROSS JOIN relevant_projects rp
+CROSS JOIN events e
+WHERE e.project_id=rp.project_id
+  AND (e.issue_uid IS NULL OR e.issue_uid='')
+  AND e.type IN ('issue.commented','issue.created','issue.snapshot')`
+	rows, err := query(ctx, queryText, issueID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	var events []FoldEvent
 	for rows.Next() {
-		var e FoldEvent
-		var payload string
-		var envelopeIssueUID sql.NullString
 		var targetIssueUID string
-		if err := rows.Scan(&e.UID, &e.OriginInstanceUID, &e.Type, &envelopeIssueUID, &e.HLCPhysicalMS, &e.HLCCounter, &payload, &targetIssueUID); err != nil {
+		var event FoldEvent
+		var envelopeIssueUID, payload sql.NullString
+		if err := rows.Scan(&targetIssueUID, &event.UID, &event.OriginInstanceUID, &event.Type, &envelopeIssueUID,
+			&event.HLCPhysicalMS, &event.HLCCounter, &payload); err != nil {
 			return nil, err
 		}
-		e.Payload = jsontext.Value(payload)
-		e.IssueUID = envelopeIssueUID.String
-		if FederationEventIssueUID(&e.IssueUID, payload) != targetIssueUID {
+		event.IssueUID = envelopeIssueUID.String
+		event.Payload = jsontext.Value(payload.String)
+		if FederationEventIssueUID(&event.IssueUID, string(event.Payload)) != targetIssueUID {
 			continue
 		}
-		events = append(events, e)
+		events = append(events, event)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -127,13 +169,13 @@ func CommentDisplayEventPayload(comment CommentExport) (jsontext.Value, error) {
 // HydrateCommentDisplayTx groups comments by owning issue, so a thread never
 // repeats a history read for each comment. Missing history uses legacy routing
 // data only as a display fallback; the routing fields themselves stay intact.
-func HydrateCommentDisplayTx(ctx context.Context, tx *sql.Tx, comments []*Comment, bind func(int) string) error {
+func HydrateCommentDisplayTx(ctx context.Context, tx *sql.Tx, comments []*Comment, bind func(int) string, dialect CommentDisplaySQLDialect) error {
 	byIssue := make(map[int64][]*Comment)
 	for _, comment := range comments {
 		byIssue[comment.IssueID] = append(byIssue[comment.IssueID], comment)
 	}
 	for issueID, group := range byIssue {
-		display, err := CommentDisplayContributionsTx(ctx, tx, issueID, bind)
+		display, err := CommentDisplayContributionsTx(ctx, tx, issueID, bind, dialect)
 		if err != nil {
 			return err
 		}

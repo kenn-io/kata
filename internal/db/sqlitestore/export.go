@@ -375,7 +375,7 @@ func (d *Store) ExportComments(ctx context.Context, f db.ExportFilter) iter.Seq2
 			for i := range records {
 				display, ok := displayByIssue[records[i].IssueID]
 				if !ok {
-					display, err = db.CommentDisplayContributions(ctx, d.readQ.QueryContext, records[i].IssueID, func(int) string { return "?" })
+					display, err = db.CommentDisplayContributions(ctx, d.readQ.QueryContext, records[i].IssueID, func(int) string { return "?" }, db.CommentDisplaySQLite)
 					if err != nil {
 						yield(zero, fmt.Errorf("export comments: comment issue %d display: %w", records[i].IssueID, err))
 						return

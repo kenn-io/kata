@@ -75,6 +75,7 @@ func ReadCommentGraphTx(
 	parseTime func(string) (time.Time, error),
 	replyTargetUIDExpr string,
 	attributionExpr string,
+	displayDialect CommentDisplaySQLDialect,
 ) (CommentGraphData, error) {
 	data := CommentGraphData{
 		Comments:             []CommentGraphRecord{},
@@ -266,7 +267,7 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(st
 			comments = append(comments, &target.Record.Comment)
 		}
 	}
-	if err := HydrateCommentDisplayTx(ctx, tx, comments, bind); err != nil {
+	if err := HydrateCommentDisplayTx(ctx, tx, comments, bind, displayDialect); err != nil {
 		return data, err
 	}
 	return data, nil

@@ -195,7 +195,7 @@ func (d *Store) replayCommentDisplayEvents(ctx context.Context, tx *sql.Tx, reco
 		}
 		display, loaded := displayByIssue[issueID]
 		if !loaded {
-			display, err = db.CommentDisplayContributionsTx(ctx, tx, issueID, func(int) string { return "?" })
+			display, err = db.CommentDisplayContributionsTx(ctx, tx, issueID, func(int) string { return "?" }, db.CommentDisplaySQLite)
 			if err != nil {
 				return fmt.Errorf("restore comment display %q: read retained history: %w", comment.UID, err)
 			}
