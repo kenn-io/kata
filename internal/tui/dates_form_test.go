@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kit/tui/splitlayout"
 )
 
 var datesNow = time.Date(2026, time.November, 2, 9, 30, 0, 0, time.UTC)
@@ -244,6 +245,125 @@ func TestDatesFormReloadsWhenTheIssueChangedMeanwhile(t *testing.T) {
 	assert.Equal(t, inputNone, h.m.input.kind)
 	assert.Equal(t, map[string]string{"scheduled_on": "2026-11-09", "deadline_on": "2026-12-01"}, h.stored(),
 		"the next save is guarded on the revision just read")
+}
+
+func TestDatesFormConflictRefreshesResolvedDatesAndTodayMembership(t *testing.T) {
+	withClock(t, func() time.Time { return datesNow })
+	for _, tc := range []struct {
+		name       string
+		otherToday bool
+	}{
+		{"another Today issue remains", true},
+		{"Today becomes empty", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newDatesHarness(t, map[string]string{"scheduled_on": "2026-11-02", "deadline_on": "2026-11-02"}, viewList)
+			h.m.list.filter = ListFilter{Date: dateToday}.stampDay()
+			var otherUID string
+			if tc.otherToday {
+				other, _, err := h.env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+					ProjectID: h.issue.ProjectID, Title: "Other Today issue", Author: "alice",
+				})
+				require.NoError(t, err)
+				_, err = h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+					IssueID: other.ID, Actor: "alice",
+					Patch: map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2026-11-02"`)},
+				})
+				require.NoError(t, err)
+				detail, err := h.client.GetIssueDetail(t.Context(), other.ProjectID, other.UID)
+				require.NoError(t, err)
+				h.m.list.issues = append(h.m.list.issues, *detail.Issue)
+				otherUID = other.UID
+			}
+			h.m.list = h.m.list.selectVisibleRow(h.m.list.visibleRows(), 0)
+			h.m, _ = updateModel(h.m, tea.WindowSizeMsg{Width: 160, Height: 40})
+			require.Equal(t, splitlayout.Split, h.m.layout)
+			highlighted, ok := pickHighlightedIssue(h.m.list)
+			require.True(t, ok)
+			require.Equal(t, h.issue.UID, highlighted.UID)
+			require.Equal(t, h.issue.UID, h.m.detail.issue.UID)
+			h.openForm()
+			h.patchDaemon(map[string]string{"scheduled_on": "2026-12-01", "deadline_on": "2026-12-02"})
+			h.fill("2026-11-09", "2026-11-02")
+			follow := h.save()
+
+			require.Equal(t, inputDatesForm, h.m.input.kind)
+			require.Equal(t, datesChangedMessage, h.m.input.err)
+			assert.Equal(t, "2026-12-01", h.m.list.issues[0].ScheduledOnDate)
+			assert.Equal(t, "2026-12-02", h.m.list.issues[0].DeadlineOnDate)
+			for _, row := range h.m.list.visibleRows() {
+				assert.NotEqual(t, h.issue.UID, row.issue.UID, "the rescheduled issue leaves Today without a refetch")
+			}
+			h.m = drainInboxCmds(h.m, follow)
+			cancel := h.key(tea.KeyPressMsg{Code: tea.KeyEsc})
+			h.m = drainInboxCmds(h.m, cancel)
+			require.Equal(t, inputNone, h.m.input.kind)
+			if tc.otherToday {
+				require.Len(t, h.m.list.visibleRows(), 1)
+				highlighted, ok := pickHighlightedIssue(h.m.list)
+				require.True(t, ok)
+				assert.Equal(t, otherUID, highlighted.UID, "the list highlights the remaining Today issue")
+				assert.Equal(t, otherUID, h.m.list.selectedUID, "selection follows the highlighted issue")
+				require.NotNil(t, h.m.detail.issue)
+				assert.Equal(t, otherUID, h.m.detail.issue.UID, "split detail follows the remaining Today issue after Escape")
+			} else {
+				assert.Empty(t, h.m.list.visibleRows())
+				assert.Empty(t, h.m.list.selectedUID, "an empty Today list clears selection")
+				assert.Nil(t, h.m.detail.issue, "split detail is empty after Escape when Today has no issues")
+			}
+		})
+	}
+}
+
+func TestDatesFormConflictPreservesHydratedListFields(t *testing.T) {
+	h := newDatesHarness(t, map[string]string{"scheduled_on": "2026-11-02"}, viewList)
+	row := &h.m.list.issues[0]
+	row.Parent = &LinkPeer{UID: "parent-uid", ShortID: "par1"}
+	row.ChildCounts = &ChildCounts{Open: 1, Total: 2}
+	row.Blocks = []LinkPeer{{UID: "blocked-uid", ShortID: "blk1"}}
+	row.BlockedBy = []LinkPeer{{UID: "blocker-uid", ShortID: "blk2"}}
+	row.Related = []LinkPeer{{UID: "related-uid", ShortID: "rel1"}}
+	row.QualifiedID = "example-project#" + row.ShortID
+	before := *row
+	h.openForm()
+	h.patchDaemon(map[string]string{"scheduled_on": "2026-12-01", "deadline_on": "2026-12-02"})
+	moved := h.revision()
+	h.fill("2026-11-09", "")
+	h.save()
+
+	require.Equal(t, datesChangedMessage, h.m.input.err)
+	require.Len(t, h.m.list.issues, 1)
+	got := h.m.list.issues[0]
+	assert.Equal(t, before.Parent, got.Parent)
+	assert.Equal(t, before.ChildCounts, got.ChildCounts)
+	assert.Equal(t, before.Blocks, got.Blocks)
+	assert.Equal(t, before.BlockedBy, got.BlockedBy)
+	assert.Equal(t, before.Related, got.Related)
+	assert.Equal(t, before.QualifiedID, got.QualifiedID)
+	assert.Equal(t, moved, got.Revision)
+	assert.Equal(t, "2026-12-01", got.scheduledOn())
+	assert.Equal(t, "2026-12-02", got.deadlineOn())
+	assert.Equal(t, "2026-12-01", got.ScheduledOnDate)
+	assert.Equal(t, "2026-12-02", got.DeadlineOnDate)
+}
+
+func TestDatesFormConflictRemovesRemotelyClosedIssueFromToday(t *testing.T) {
+	withClock(t, func() time.Time { return datesNow })
+	h := newDatesHarness(t, map[string]string{"scheduled_on": "2026-11-02"}, viewList)
+	h.m.sseCh = nil
+	h.m.list.filter = ListFilter{Date: dateToday}.stampDay()
+	h.openForm()
+	remote := NewClient(h.env.URL, h.env.HTTP)
+	_, err := remote.Close(t.Context(), h.issue.ProjectID, h.issue.UID, "bob")
+	require.NoError(t, err)
+	h.fill("2026-11-03", "")
+	follow := h.save()
+	h.m = drainInboxCmds(h.m, follow)
+	require.Equal(t, inputDatesForm, h.m.input.kind)
+	require.Equal(t, datesChangedMessage, h.m.input.err)
+	cancel := h.key(tea.KeyPressMsg{Code: tea.KeyEsc})
+	h.m = drainInboxCmds(h.m, cancel)
+	assert.Empty(t, h.m.list.visibleRows(), "a remotely closed issue leaves Today after the conflict reload")
 }
 
 func TestDatesUndoWritesThePreviousDatesBack(t *testing.T) {
