@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"io"
@@ -585,10 +586,24 @@ func TestReopenBacklogAgainstRealDaemon(t *testing.T) {
 	_, err = client.Close(ctx, project.ID, parent.ShortID, "operator")
 	require.NoError(t, err)
 
-	// Closing pauses the job; move its stored progress back so three
-	// occurrences came due while the parent was closed.
-	stale := backlogJob{uid: created.Job.UID, missed: 3}.progress()
-	raw, err := json.Marshal(map[string]cron.RecurringProgress{cronProgressPrefix + created.Job.UID: stale})
+	// Closing pauses the job; move the progress the daemon stored back so
+	// three occurrences came due while the parent was closed. The daemon's own
+	// key is kept so a client reading a different key finds no backlog.
+	stored, err := env.DB.IssueByID(ctx, parent.ID)
+	require.NoError(t, err)
+	var values map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal([]byte(stored.Metadata), &values))
+	var progressKeys []string
+	for key := range values {
+		if strings.HasSuffix(key, created.Job.UID) {
+			progressKeys = append(progressKeys, key)
+		}
+	}
+	require.Len(t, progressKeys, 1, "job creation stores one progress checkpoint on the parent")
+	stale, err := json.Marshal(backlogJob{uid: created.Job.UID, missed: 3}.progress())
+	require.NoError(t, err)
+	values[progressKeys[0]] = stale
+	raw, err := json.Marshal(values)
 	require.NoError(t, err)
 	_, err = env.DB.ExecContext(ctx, `UPDATE issues SET metadata=? WHERE id=?`, string(raw), parent.ID)
 	require.NoError(t, err)
