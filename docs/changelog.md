@@ -25,7 +25,6 @@ All notable changes to kata, grouped by release. Versioned releases start with
   the [HTTP API errors table](reference/http-api.md#errors) for exceptions.
   The message, hint, and exit code are unchanged. Thanks to
   [Dangerboi](https://github.com/Dangerboi).
-
 - Manage cron jobs, workflows and run evidence from MCP: load `kata.load_cron`
   for 17 tools over the daemon's existing cron API. Native notification jobs
   use the daemon scheduler; recording a run never starts work or changes who
