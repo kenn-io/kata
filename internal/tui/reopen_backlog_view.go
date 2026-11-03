@@ -167,15 +167,19 @@ func fitReopenBacklogModal(prompt *reopenPrompt, width, height int) string {
 	if full := renderReopenBacklogModal(prompt); lipgloss.Height(full) <= height {
 		return full
 	}
-	lines := []string{
-		fmt.Sprintf("Reopen %s? It delivers %d recurring child issues.", sanitizeForLine(prompt.ref), prompt.count),
-		"Missed runs: `kata cron job update`.",
+	ref := sanitizeForLine(prompt.ref)
+	count := fmt.Sprintf("Delivers %d recurring child issues.", prompt.count)
+	clip := lipgloss.NewStyle().MaxWidth(max(width, 1))
+	if height <= 1 {
+		// One row: the count leads, so a long reference is what gets cut.
+		return clip.Render(fmt.Sprintf("%d recurring child issues: reopen %s?", prompt.count, ref))
 	}
+	// The count has a row of its own, so a long reference cannot push it off.
+	lines := []string{"Reopen " + ref + "?", count, "Missed runs: `kata cron job update`."}
 	if height >= len(lines)+2 {
 		return modalBoxStyle.Padding(0, 1).MaxWidth(max(width, 1)).Render(strings.Join(lines, "\n"))
 	}
-	lines = lines[:min(max(height, 1), len(lines))]
-	return lipgloss.NewStyle().MaxWidth(max(width, 1)).Render(strings.Join(lines, "\n"))
+	return clip.Render(strings.Join(lines[:min(height, len(lines))], "\n"))
 }
 
 func renderReopenBacklogModal(prompt *reopenPrompt) string {

@@ -853,7 +853,7 @@ func TestReopenBacklogActionsVisibleOnShortTerminals(t *testing.T) {
 				require.Equal(t, modalReopenBacklog, m.modal)
 				view := stripANSI(m.View().Content)
 				require.LessOrEqual(t, len(strings.Split(view, "\n")), size[1])
-				require.Contains(t, view, "Reopen #abcd?")
+				require.Contains(t, strings.ToLower(view), "reopen #abcd?")
 				require.Contains(t, view, "3 recurring child", "the backlog being confirmed stays on screen")
 				require.Contains(t, view, "y reopen")
 				require.Contains(t, view, "n/esc cancel")
@@ -864,5 +864,20 @@ func TestReopenBacklogActionsVisibleOnShortTerminals(t *testing.T) {
 				require.Zero(t, spy.reopens)
 			})
 		}
+	}
+}
+
+// Undo names the issue with its project, so a long reference must not push the
+// backlog count off a narrow compact confirmation.
+func TestReopenBacklogCountSurvivesLongReference(t *testing.T) {
+	m := newTestModel()
+	m.modal = modalReopenBacklog
+	m.reopenPrompt = &reopenPrompt{ref: "example-workspace-recurring-automation#abcd", count: 3, undoEntryID: 1}
+	for _, size := range [][2]int{{60, 8}, {60, 5}, {60, 3}, {60, 2}} {
+		m = resizeModel(m, size[0], size[1])
+		view := stripANSI(m.viewContent())
+		require.LessOrEqual(t, len(strings.Split(view, "\n")), size[1])
+		require.Contains(t, view, "3 recurring child", "%dx%d", size[0], size[1])
+		require.Contains(t, view, "n/esc cancel")
 	}
 }
