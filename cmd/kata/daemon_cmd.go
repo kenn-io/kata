@@ -1647,7 +1647,7 @@ func runDaemonProcess(
 		Broadcaster:               broadcaster,
 		FederationWake:            federationWake,
 		FederationPullOnce: func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
-			return federation.SyncFederationOnceWithPulledEvents(ctx, store, binding, credential, client.Opts{}, publisher.Events)
+			return federation.SyncFederationPullOnlyOnceWithPulledEvents(ctx, store, binding, credential, client.Opts{}, publisher.Events)
 		},
 		EmbeddingWake:             embeddingWake,
 		FederationCatalog:         append([]config.CatalogDaemonConfig(nil), dcfg.Daemons...),

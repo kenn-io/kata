@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federation"
@@ -232,10 +233,29 @@ func TestClaim_TimedAssignmentForwardingSpokeRepairsWithoutIssueContent(t *testi
 }
 
 func TestClaim_TimedAssignmentPullsUnseenMoveWithDestinationCredential(t *testing.T) {
+	runTimedAssignmentPullsUnseenMove(t, false)
+}
+
+func TestClaim_TimedAssignmentResetPreservesUnpushedDestinationWork(t *testing.T) {
+	runTimedAssignmentPullsUnseenMove(t, true)
+}
+
+func runTimedAssignmentPullsUnseenMove(t *testing.T, pendingDestinationWork bool) {
 	ctx := t.Context()
 	hub := testenv.New(t)
 	source := createPrivateContentHubProject(t, hub, "example-source")
 	target := createPrivateContentHubProject(t, hub, "example-target")
+	if pendingDestinationWork {
+		resetIssue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: target.ID, Title: "purged reset trigger", Author: "tester",
+		})
+		require.NoError(t, err)
+		_, err = hub.DB.PurgeIssue(ctx, resetIssue.ID, "tester", nil)
+		require.NoError(t, err)
+		_, refreshed, err := hub.DB.RefreshProjectFederationBaseline(ctx, target.ID, "tester")
+		require.NoError(t, err)
+		require.True(t, refreshed)
+	}
 	for i := range 1001 {
 		_, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: target.ID, Title: fmt.Sprintf("unrelated pending issue %d", i), Author: "tester",
@@ -254,11 +274,14 @@ func TestClaim_TimedAssignmentPullsUnseenMoveWithDestinationCredential(t *testin
 	var pullCalls int
 	var localTarget db.Project
 	var firstPullCursor int64
+	var pullErr error
 	spoke := testenv.New(t, testenv.WithFederationPullOnce(func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
 		pullCalls++
-		binding.PushEnabled = false
-		if err := federation.SyncFederationOnce(ctx, spokeStore, binding, credential, config.DefaultFederationCredentialStore()); err != nil {
-			return err
+		if pendingDestinationWork {
+			require.True(t, binding.PushEnabled, "claim recovery must preserve the durable destination push capability")
+		}
+		if pullErr = federation.SyncFederationPullOnlyOnce(ctx, spokeStore, binding, credential, config.DefaultFederationCredentialStore()); pullErr != nil {
+			return pullErr
 		}
 		pulled, err := spokeStore.FederationBindingByProject(ctx, localTarget.ID)
 		if err != nil {
@@ -278,13 +301,27 @@ func TestClaim_TimedAssignmentPullsUnseenMoveWithDestinationCredential(t *testin
 		local       db.Project
 		hub         db.Project
 		pushEnabled bool
-	}{{localSource, source, true}, {localTarget, target, false}} {
+	}{{localSource, source, true}, {localTarget, target, pendingDestinationWork}} {
 		_, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
 			ProjectID: pair.local.ID, Role: db.FederationRoleSpoke,
 			HubURL: hub.URL, HubProjectID: pair.hub.ID, HubProjectUID: pair.hub.UID,
 			ReplayHorizonEventID: 1, Actor: "tester", Enabled: true, PushEnabled: pair.pushEnabled,
 		})
 		require.NoError(t, err)
+	}
+	var localPendingIssue db.Issue
+	var pendingEvents []db.Event
+	if pendingDestinationWork {
+		localPendingIssue, _, err = spoke.DB.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: localTarget.ID, Title: "local destination work", Author: "local-worker",
+		})
+		require.NoError(t, err)
+		binding, err := spoke.DB.FederationBindingByProject(ctx, localTarget.ID)
+		require.NoError(t, err)
+		require.True(t, binding.PushEnabled, "the destination spoke must retain its durable push capability")
+		pendingEvents, err = spoke.DB.PendingFederationPushEvents(ctx, localTarget.ID, spoke.DB.InstanceUID(), binding.PushCursorEventID, 10)
+		require.NoError(t, err)
+		require.NotEmpty(t, pendingEvents)
 	}
 	created, err := hub.DB.EventsAfter(ctx, db.EventsAfterParams{
 		ProjectID: source.ID, IssueUID: issue.UID, Types: []string{"issue.created"}, Limit: 1,
@@ -323,6 +360,16 @@ func TestClaim_TimedAssignmentPullsUnseenMoveWithDestinationCredential(t *testin
 		HubURL: hub.URL, HubProjectID: target.ID, Token: pullEnrollment.Token,
 		Capabilities: "pull", Actor: "tester",
 	}))
+	if pendingDestinationWork {
+		localBinding, err := spoke.DB.FederationBindingByProject(ctx, localTarget.ID)
+		require.NoError(t, err)
+		pullClient, err := federation.NewClient(ctx, hub.URL, pullEnrollment.Token, clientpkg.Opts{})
+		require.NoError(t, err)
+		page, err := pullClient.PollProjectEvents(ctx, target.ID, localBinding.PullCursorEventID, 1000)
+		require.NoError(t, err)
+		require.True(t, page.ResetRequired,
+			"fixture must require a reset: hub replay horizon %d, spoke cursor %d", hubTargetBinding.ReplayHorizonEventID, localBinding.PullCursorEventID)
+	}
 
 	moved, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
 		IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID,
@@ -356,6 +403,22 @@ func TestClaim_TimedAssignmentPullsUnseenMoveWithDestinationCredential(t *testin
 	resp, raw = envDoRaw(t, spoke, http.MethodPost,
 		issuePathRef(localSource.ID, localIssue.ShortID, "actions/claim"),
 		map[string]any{"actor": "tester", "ttl_seconds": 300}, nil)
+	if pendingDestinationWork {
+		require.Equalf(t, http.StatusBadGateway, resp.StatusCode, "body: %s", raw)
+		require.ErrorIs(t, pullErr, db.ErrFederationResetBlockedByPendingPush)
+		preserved, err := spoke.DB.IssueByUID(ctx, localPendingIssue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		require.Equal(t, "local destination work", preserved.Title)
+		binding, err := spoke.DB.FederationBindingByProject(ctx, localTarget.ID)
+		require.NoError(t, err)
+		pendingAfter, err := spoke.DB.PendingFederationPushEvents(ctx, localTarget.ID, spoke.DB.InstanceUID(), binding.PushCursorEventID, 10)
+		require.NoError(t, err)
+		require.Equal(t, pendingEvents, pendingAfter)
+		staleIssue, err := spoke.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		require.Equal(t, localSource.ID, staleIssue.ProjectID, "failed reset must leave the stale source projection intact")
+		return
+	}
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", raw)
 	var spokeClaim api.ClaimResponseBody
 	require.NoError(t, json.Unmarshal(raw, &spokeClaim))

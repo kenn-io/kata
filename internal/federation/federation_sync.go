@@ -91,6 +91,51 @@ func SyncFederationOnceWithPulledEvents(
 	onPulledEvents func(projectID int64, events []db.Event),
 	credentialStores ...config.FederationCredentialStore,
 ) error {
+	return syncFederationOnceWithPulledEvents(ctx, store, binding, creds, opts, true, onPulledEvents, credentialStores...)
+}
+
+// SyncFederationPullOnlyOnce performs one synchronous pull without changing
+// the binding's configured push capability. Reset safety still checks and
+// retains local work that the hub has not acknowledged.
+func SyncFederationPullOnlyOnce(
+	ctx context.Context,
+	store db.Storage,
+	binding db.FederationBinding,
+	creds config.FederationCredential,
+	credentialStores ...config.FederationCredentialStore,
+) error {
+	return SyncFederationPullOnlyOnceWithPulledEvents(
+		ctx, store, binding, creds, clientOptsWithDefault(clientpkg.Opts{}), nil, credentialStores...,
+	)
+}
+
+// SyncFederationPullOnlyOnceWithPulledEvents is the pull-only form of
+// SyncFederationOnceWithPulledEvents for direct spoke bindings.
+func SyncFederationPullOnlyOnceWithPulledEvents(
+	ctx context.Context,
+	store db.Storage,
+	binding db.FederationBinding,
+	creds config.FederationCredential,
+	opts clientpkg.Opts,
+	onPulledEvents func(projectID int64, events []db.Event),
+	credentialStores ...config.FederationCredentialStore,
+) error {
+	if binding.RelayConfig != nil {
+		return errors.New("pull-only federation sync is not supported for relay bindings")
+	}
+	return syncFederationOnceWithPulledEvents(ctx, store, binding, creds, opts, false, onPulledEvents, credentialStores...)
+}
+
+func syncFederationOnceWithPulledEvents(
+	ctx context.Context,
+	store db.Storage,
+	binding db.FederationBinding,
+	creds config.FederationCredential,
+	opts clientpkg.Opts,
+	allowPush bool,
+	onPulledEvents func(projectID int64, events []db.Event),
+	credentialStores ...config.FederationCredentialStore,
+) error {
 	finish, err := federationcoord.BeginSync(
 		ctx,
 		federationcoord.Key(store.InstanceUID(), binding.ProjectID),
@@ -102,7 +147,8 @@ func SyncFederationOnceWithPulledEvents(
 	}
 	defer finish()
 	for {
-		remaining, err := syncFederationOnceWithFence(ctx, store, binding, creds, opts, onPulledEvents, nil, credentialStores...)
+		pushThisTurn := allowPush && binding.PushEnabled
+		remaining, err := syncFederationOnceWithFence(ctx, store, binding, creds, pushThisTurn, opts, onPulledEvents, nil, credentialStores...)
 		if err != nil || !remaining {
 			return err
 		}
@@ -120,11 +166,14 @@ func SyncFederationOnceWithPulledEvents(
 // syncFederationOnceWithFence runs one sync turn. It reports true when a
 // relay stream stopped at its turn budget with deliveries still pending, so
 // the caller schedules another turn promptly instead of waiting an interval.
+// pushThisTurn controls whether this invocation may push; binding.PushEnabled
+// remains the durable write capability used to guard destructive resets.
 func syncFederationOnceWithFence(
 	ctx context.Context,
 	store db.Storage,
 	binding db.FederationBinding,
 	creds config.FederationCredential,
+	pushThisTurn bool,
 	opts clientpkg.Opts,
 	onPulledEvents func(projectID int64, events []db.Event),
 	validateLease func(context.Context) error,
@@ -144,7 +193,7 @@ func syncFederationOnceWithFence(
 	if hubProjectID == 0 {
 		hubProjectID = binding.HubProjectID
 	}
-	if binding.PushEnabled {
+	if pushThisTurn {
 		if err := store.RecordFederationSyncPushStarted(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
 			return false, err
 		}
@@ -155,7 +204,7 @@ func syncFederationOnceWithFence(
 	}
 	client, err := NewClient(ctx, hubURL, creds.Token, clientOptsForCredential(opts, creds))
 	if err != nil {
-		if !binding.PushEnabled && binding.RelayConfig == nil {
+		if !pushThisTurn && binding.RelayConfig == nil {
 			_, startedAt, startErr := startFederationPull(ctx, store, binding.ProjectID)
 			if startErr != nil {
 				return false, errors.Join(err, startErr)
@@ -183,7 +232,7 @@ func syncFederationOnceWithFence(
 	if len(credentialStores) > 0 && credentialStores[0] != nil {
 		credentials = credentialStores[0]
 	}
-	return false, syncDirectSpoke(ctx, store, binding, hubProjectID, client, onPulledEvents, validateLease, credentials, opts)
+	return false, syncDirectSpoke(ctx, store, binding, pushThisTurn, hubProjectID, client, onPulledEvents, validateLease, credentials, opts)
 }
 
 // syncDirectSpoke pushes and pulls one ordinary spoke binding to completion.
@@ -236,7 +285,7 @@ func pushDirectSpoke(
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
-				sourceTokens, err := federationMoveSourceTokens(ctx, store, credentials, binding, client.baseURL, batch, opts)
+				sourceTokens, err := federationMoveSourceTokens(ctx, store, credentials, *binding, client.baseURL, batch, opts)
 				if err != nil {
 					return recordFederationSyncError(ctx, store, binding.ProjectID, err)
 				}
@@ -286,7 +335,7 @@ func pushDirectSpoke(
 // PushDirectSpoke drains pending direct-spoke events without requiring pull authority.
 // The caller holds shared federation coordination for the complete operation.
 func PushDirectSpoke(ctx context.Context, store db.Storage, binding db.FederationBinding, hubProjectID int64, client *Client) error {
-	return pushDirectSpoke(ctx, store, &binding, hubProjectID, client, nil)
+	return pushDirectSpoke(ctx, store, &binding, hubProjectID, client, nil, config.DefaultFederationCredentialStore(), clientpkg.Opts{})
 }
 
 // CredentialHTTPClient builds a bearer-pinned, signing-aware HTTP client for
@@ -315,14 +364,19 @@ func syncDirectSpoke(
 	ctx context.Context,
 	store db.Storage,
 	binding db.FederationBinding,
+	pushThisTurn bool,
 	hubProjectID int64,
 	client *Client,
 	onPulledEvents func(projectID int64, events []db.Event),
 	validateLease func(context.Context) error,
+	credentials config.FederationCredentialStore,
+	opts clientpkg.Opts,
 ) error {
 	runStartBinding := binding
-	if err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, validateLease); err != nil {
-		return err
+	if pushThisTurn {
+		if err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, validateLease, credentials, opts); err != nil {
+			return err
+		}
 	}
 	resumePull, pullStartedAt, err := startFederationPull(ctx, store, binding.ProjectID)
 	if err != nil {
@@ -340,6 +394,8 @@ func syncDirectSpoke(
 		return recordPullError(err)
 	}
 	if body.ResetRequired {
+		// A pull-only turn may still carry a writable binding. Reset safety
+		// follows that durable capability, not this turn's push decision.
 		if binding.PushEnabled {
 			if _, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
 				return recordPullError(ErrFederationResetBlockedByQuarantine)
@@ -360,15 +416,15 @@ func syncDirectSpoke(
 			return recordPullError(err)
 		}
 		cursor := max(meta.ReplayHorizonEventID-1, 0)
+		var resetErr error
 		if binding.PushEnabled {
-			if err := store.ResetFederatedProjectIfNoPendingPush(
-				ctx, binding.ProjectID, meta.ReplayHorizonEventID, cursor, store.InstanceUID(), binding.PushCursorEventID); err != nil {
-				return recordPullError(err)
-			}
+			resetErr = store.ResetFederatedProjectIfNoPendingPush(
+				ctx, binding.ProjectID, meta.ReplayHorizonEventID, cursor, store.InstanceUID(), binding.PushCursorEventID)
 		} else {
-			if err := store.ResetFederatedProject(ctx, binding.ProjectID, meta.ReplayHorizonEventID, cursor); err != nil {
-				return recordPullError(err)
-			}
+			resetErr = store.ResetFederatedProject(ctx, binding.ProjectID, meta.ReplayHorizonEventID, cursor)
+		}
+		if resetErr != nil {
+			return recordPullError(resetErr)
 		}
 		binding.ReplayHorizonEventID = meta.ReplayHorizonEventID
 		binding.PullCursorEventID = cursor
@@ -1196,7 +1252,7 @@ func (r *Runner) runSpoke(
 			r.OnPulledEventsFrom(projectID, events, fork)
 		}
 	}
-	remaining, syncErr := syncFederationOnceWithFence(ctx, r.DB, binding, cred, opts, onPulledEvents, validateLease, credentialStore)
+	remaining, syncErr := syncFederationOnceWithFence(ctx, r.DB, binding, cred, binding.PushEnabled, opts, onPulledEvents, validateLease, credentialStore)
 	if r.OnSyncComplete != nil {
 		r.OnSyncComplete()
 	}

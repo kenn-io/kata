@@ -482,7 +482,6 @@ func syncForwardedAssignmentDestination(
 			return internalAPIError(err)
 		}
 		previousCursor := currentBinding.PullCursorEventID
-		currentBinding.PushEnabled = false
 		if err := cfg.FederationPullOnce(ctx, currentBinding, credential); err != nil {
 			return api.NewError(http.StatusBadGateway, "federation_pull_failed",
 				"could not synchronize the moved issue's destination project", "retry the claim after federation sync succeeds", nil)
