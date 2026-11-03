@@ -1,13 +1,15 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-31
+last_edited: 2026-11-03
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Receive direct legacy spoke creations through relays on SQLite roots before later root updates, preventing "references unknown issue" errors on relays while preserving the original event identity and hash. Thanks to [Rusty Shackleford](https://github.com/salmonumbrella).
 
 - Keep the browser reachable when `kata daemon restart` runs from a sandbox or
   container that sees the daemon's process IDs and executable paths. The daemon

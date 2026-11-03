@@ -121,6 +121,10 @@ var storageScenarios = []scenario{
 		RunRelayIngestReturnsLocalIssueIDs(t, store)
 		return nil
 	}},
+	{name: "relay offers legacy ingested events", methods: []string{"IngestFederationEvents", "PendingRelayDeliveries", "PatchIssueMetadata"}, run: func(t *testing.T, store db.Storage) error {
+		RunRelayOffersLegacyIngestedEvents(t, store)
+		return nil
+	}},
 	{name: "relay delivery", methods: []string{"PendingRelayDeliveries", "AckRelayDeliveries", "ExportRelayState"}, run: func(t *testing.T, store db.Storage) error {
 		RunRelayOutboxAtomicity(t, store)
 		seen := 0
