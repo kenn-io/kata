@@ -790,3 +790,78 @@ func TestReopenBacklogActionsSurviveNarrowResize(t *testing.T) {
 		require.Contains(t, view, "cancel")
 	}
 }
+
+// An undo backlog answer that lands after the user opened Help must not open a
+// confirmation there: Help hides the issue it would reopen, and the modal would
+// swallow the `?` that leaves Help. The close stays undoable.
+func TestUndoBacklogAnswerAfterHelpKeepsEntryAndHelpExit(t *testing.T) {
+	m, f := undoCloseModel(t, 5, nil)
+	m = resizeModel(m, 120, 40)
+	updated, cmd := m.Update(runeKey('u'))
+	require.NotNil(t, cmd)
+	m = updated.(Model)
+	reply := cmd()
+	m, _ = updateModel(m, runeKey('?'))
+	require.Equal(t, viewHelp, m.view)
+
+	m, cmd = updateModel(m, reply)
+	require.Nil(t, cmd)
+	require.Equal(t, modalNone, m.modal)
+	require.Nil(t, m.reopenPrompt)
+	require.False(t, m.undoInFlight)
+	require.Len(t, m.undoHistory.entries, 1, "the close stays undoable")
+	require.Zero(t, f.reopenCalls)
+
+	m, _ = updateModel(m, runeKey('?'))
+	require.Equal(t, viewList, m.view, "? still leaves Help")
+
+	m, _ = pressUndo(t, m)
+	require.Equal(t, modalReopenBacklog, m.modal, "undo asks again once the list is back")
+	require.Zero(t, f.reopenCalls)
+}
+
+// A reopen lookup that lands after the user opened Help is dropped the same way.
+func TestReopenBacklogAnswerAfterHelpIsDropped(t *testing.T) {
+	spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
+	m, _ := updateModel(listReopenModel(t, spy), tea.WindowSizeMsg{Width: 120, Height: 40})
+	m, cmd := updateModel(m, runeKey('r'))
+	require.NotNil(t, cmd)
+	reply := cmd()
+	m, _ = updateModel(m, runeKey('?'))
+	require.Equal(t, viewHelp, m.view)
+
+	m, cmd = updateModel(m, reply)
+	require.Nil(t, cmd)
+	require.Equal(t, modalNone, m.modal)
+	require.Zero(t, spy.reopens)
+	m, _ = updateModel(m, runeKey('?'))
+	require.Equal(t, viewList, m.view)
+}
+
+// The confirmation's keys must stay on screen however short the terminal is.
+func TestReopenBacklogActionsVisibleOnShortTerminals(t *testing.T) {
+	for _, origin := range []string{"list", "detail"} {
+		for _, size := range [][2]int{{100, 8}, {100, 5}, {200, 6}, {60, 8}} {
+			t.Run(fmt.Sprintf("%s/%dx%d", origin, size[0], size[1]), func(t *testing.T) {
+				spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
+				model := listReopenModel
+				if origin == "detail" {
+					model = detailReopenModel
+				}
+				m, _ := updateModel(model(t, spy), tea.WindowSizeMsg{Width: size[0], Height: size[1]})
+				m, _ = pressReopen(t, m)
+				require.Equal(t, modalReopenBacklog, m.modal)
+				view := stripANSI(m.View().Content)
+				require.LessOrEqual(t, len(strings.Split(view, "\n")), size[1])
+				require.Contains(t, view, "Reopen #abcd?")
+				require.Contains(t, view, "y reopen")
+				require.Contains(t, view, "n/esc cancel")
+
+				m, cmd := updateModel(m, runeKey('n'))
+				require.Nil(t, cmd)
+				require.Equal(t, modalNone, m.modal)
+				require.Zero(t, spy.reopens)
+			})
+		}
+	}
+}

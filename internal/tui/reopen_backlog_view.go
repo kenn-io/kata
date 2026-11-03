@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // reopenPrompt is the pending confirmation for a reopen that would deliver a
@@ -85,9 +86,11 @@ func (m Model) routeReopenKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 // promptReopenBacklog asks the user to confirm a reopen that delivers a
 // backlog. A modal, form or Jobs filter that took control while the lookup ran
 // keeps it: the prompt is dropped, or its keys would answer a question the user
-// never saw.
+// never saw. Help and the other full-screen views hide the issue the prompt
+// names, so an answer that lands there is dropped too; an undo keeps its entry
+// and asks again on the next undo.
 func (m Model) promptReopenBacklog(prompt reopenPrompt) Model {
-	if !m.canQuit() {
+	if !m.canQuit() || (m.view != viewList && m.view != viewDetail) {
 		return m
 	}
 	m.reopenPrompt = &prompt
@@ -138,6 +141,20 @@ func (m Model) confirmReopenBacklog() (Model, tea.Cmd) {
 func (m Model) cancelReopenBacklog() Model {
 	m.modal, m.reopenPrompt = modalNone, nil
 	return m
+}
+
+// overlayReopenBacklog draws the reopen confirmation over body with its
+// choices on a footer row of their own. The footer is reserved before the modal
+// is placed, so no terminal height lets the modal or a compact view layout hide
+// the keys that answer it.
+func (m Model) overlayReopenBacklog(body string) string {
+	footer := renderFooterHelpTable(modalHelpRows(modalReopenBacklog), max(m.width, 1))
+	bodyHeight := max(0, m.height-lipgloss.Height(footer))
+	lines := strings.Split(body, "\n")
+	body = strings.Join(lines[:min(bodyHeight, len(lines))], "\n")
+	body = overlayModal(body, renderReopenBacklogModal(m.reopenPrompt), m.width, bodyHeight)
+	lines = strings.Split(body, "\n")
+	return joinNonEmpty([]string{strings.Join(lines[:min(bodyHeight, len(lines))], "\n"), footer})
 }
 
 func renderReopenBacklogModal(prompt *reopenPrompt) string {
