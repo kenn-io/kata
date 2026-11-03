@@ -162,6 +162,30 @@ func runRelayRejectsLegacyCrossProjectEvents(t *testing.T, store db.Storage) {
 			} else {
 				require.NoError(t, err)
 				require.Equal(t, "open", issue.Status)
+				_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{
+					ProjectID: fixture.project.ID, UID: "01HZNQ7VFPK1XGD8R5MABCD4EX", Title: "Short ID collision", Author: "member",
+				})
+				require.NoError(t, err)
+				parentUID := "01HZNQ7VFPK1XGD8R5MABXD4EX"
+				parent := newRemoteEvent(t, fixture.project, &parentUID, "issue.created", "spoke", spoke, 702, jsontext.Value(`{"uid":"`+parentUID+`","short_id":"d4ex","title":"Parent","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`))
+				closed := newRemoteEvent(t, fixture.project, &issueUID, "issue.closed", "spoke", spoke, 703, jsontext.Value(`{"reason":"done","parent_uid":"`+parentUID+`","parent_short_id":"d4ex"}`))
+				push.Events = []db.FederationIngestEvent{{SourceEventID: 2, Event: parent}, {SourceEventID: 3, Event: closed}}
+				result, err := store.IngestFederationEvents(ctx, push)
+				require.NoError(t, err, "a same-project parent UID must resolve despite its historical short ID")
+				require.Equal(t, 2, result.Accepted)
+				resolvedParent, err := store.IssueByUID(ctx, parentUID, db.IncludeDeletedYes)
+				require.NoError(t, err)
+				require.Equal(t, "xd4ex", resolvedParent.ShortID)
+				issue, err = store.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
+				require.NoError(t, err)
+				require.Equal(t, "closed", issue.Status)
+				offered, err = store.PendingRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, db.RelayStreamEvent, 100)
+				require.NoError(t, err)
+				var sources []string
+				for _, envelope := range offered {
+					sources = append(sources, envelope.SourceUID)
+				}
+				require.Contains(t, sources, closed.EventUID, "the accepted close must reach the relay")
 			}
 		})
 	}

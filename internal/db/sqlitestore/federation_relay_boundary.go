@@ -166,14 +166,9 @@ func relayCloseParentCrossesProjectTx(
 	}
 	var own bool
 	if parentUID != "" {
-		query := `SELECT EXISTS(SELECT 1 FROM issues WHERE uid=? AND project_id=?`
-		args := []any{parentUID, projectID}
-		if parentShortID != "" {
-			query += ` AND short_id=?`
-			args = append(args, parentShortID)
-		}
-		query += `)`
-		if err := tx.QueryRowContext(ctx, query, args...).Scan(&own); err != nil {
+		if err := tx.QueryRowContext(ctx,
+			`SELECT EXISTS(SELECT 1 FROM issues WHERE uid=? AND project_id=?)`, parentUID, projectID,
+		).Scan(&own); err != nil {
 			return false, err
 		}
 		return !own, nil
