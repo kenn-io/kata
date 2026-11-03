@@ -48,7 +48,7 @@ func (s *Store) ReadFederation(ctx context.Context, in db.FederationReadParams) 
 			return events, rows.Err()
 		}
 		readEvents := func() ([]db.Event, error) {
-			return db.ReadFederationMoveHistory(ctx, tx, in.AfterID, in.Limit, `m.payload::jsonb->'snapshot'`, readPage)
+			return db.ReadFederationMoveHistory(ctx, tx, in.AfterID, in.Limit, readPage)
 		}
 		out, err = db.ReadFederationTransaction(ctx, tx, in, project, binding, refresh, readEvents)
 		return err

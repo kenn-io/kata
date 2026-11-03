@@ -41,6 +41,33 @@ type rebindBlockingClaimCommitStore struct {
 	commitRelease chan struct{}
 }
 
+type rebindLeaveValidationBarrierStore struct {
+	db.Storage
+	validated chan struct{}
+	resume    chan struct{}
+}
+
+func (s *rebindLeaveValidationBarrierStore) ValidateRelayLifecycle(
+	ctx context.Context,
+	projectID int64,
+) error {
+	validator := s.Storage.(db.RelayLifecycleStore)
+	if err := validator.ValidateRelayLifecycle(ctx, projectID); err != nil {
+		return err
+	}
+	close(s.validated)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.resume:
+		return nil
+	}
+}
+
+func (s *rebindLeaveValidationBarrierStore) FenceRelayDisconnect(ctx context.Context, projectID int64) error {
+	return s.Storage.(db.RelayDisconnectFenceStore).FenceRelayDisconnect(ctx, projectID)
+}
+
 func (s rebindBlockingClaimCommitStore) ApplyClaimStatus(
 	ctx context.Context,
 	projectID int64,
@@ -784,6 +811,152 @@ func TestAbortedFederationReplicaLeaveAllowsRebind(t *testing.T) {
 	binding, err := store.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, err)
 	assert.Equal(t, rebindTargetURL, binding.HubURL)
+}
+
+func TestPrepareFederationReplicaLeaveFencesMoveAfterPreflight(t *testing.T) {
+	ctx := t.Context()
+	store, source, sourceBinding := prepareFederationRebind(t, rebindSourceURL)
+	sourceBinding.PushCursorEventID = 0
+	_, err := store.UpsertFederationBinding(ctx, sourceBinding)
+	require.NoError(t, err)
+	target, err := store.CreateProject(ctx, "example-target")
+	require.NoError(t, err)
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: target.ID, Role: db.FederationRoleSpoke,
+		HubURL: rebindSourceURL, HubProjectID: 43, HubProjectUID: target.UID,
+		ReplayHorizonEventID: 1, Actor: "sync-agent", AllowInsecure: true,
+		Enabled: true, PushEnabled: true,
+	})
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: source.ID, Title: "move during leave", Author: "worker",
+	})
+	require.NoError(t, err)
+
+	gate := &rebindLeaveValidationBarrierStore{
+		Storage: store, validated: make(chan struct{}), resume: make(chan struct{}),
+	}
+	credentials := newReplicaCredentialStore()
+	prepared := make(chan error, 1)
+	go func() {
+		_, err := daemon.PrepareFederationReplicaLeave(ctx, gate, credentials, source.ID, "move-race")
+		prepared <- err
+	}()
+	select {
+	case <-gate.validated:
+	case err := <-prepared:
+		t.Fatalf("leave preparation stopped before its preflight barrier: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("leave preflight did not reach the barrier")
+	}
+
+	moved, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID,
+		IfMatchRev: issue.Revision, Actor: "worker",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, moved.Event)
+	close(gate.resume)
+
+	select {
+	case err := <-prepared:
+		require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush,
+			"leave must revalidate and durably fence a move committed after its read-only preflight")
+	case <-time.After(time.Second):
+		t.Fatal("leave preparation did not finish after the raced move")
+	}
+	binding, err := store.FederationBindingByProject(ctx, source.ID)
+	require.NoError(t, err)
+	assert.True(t, binding.PushEnabled, "a refused leave must restore native push")
+	_, found, err := credentials.FederationCredential(ctx, source.UID)
+	require.NoError(t, err)
+	assert.False(t, found, "a refused leave must remove its temporary recovery credential")
+}
+
+func TestAbortNativeFederationReplicaLeaveRestoresBindingAfterRestart(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	store, project, original := prepareFederationRebind(t, rebindSourceURL)
+	credentials := config.DefaultFederationCredentialStore()
+	require.NoError(t, credentials.StoreFederationCredential(
+		t.Context(), project.UID, rebindCredential(rebindSourceURL, false, false),
+	))
+
+	prepared, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID, "restart-abort")
+	require.NoError(t, err)
+	fenced, err := store.FederationBindingByProject(t.Context(), project.ID)
+	require.NoError(t, err)
+	require.False(t, fenced.PushEnabled, "leave preparation must pause native push before the hub revoke")
+
+	// A daemon restart clears the transition registry but leaves the credential
+	// file and database binding in place for the client's abort request.
+	daemon.ForgetFederationReplicaTransitionsForTest(store)
+	require.NoError(t, daemon.AbortFederationReplicaLeave(t.Context(), store, credentials, project.ID, prepared.PreparationID))
+
+	restored, err := store.FederationBindingByProject(t.Context(), project.ID)
+	require.NoError(t, err)
+	assert.Equal(t, original.Enabled, restored.Enabled)
+	assert.Equal(t, original.PushEnabled, restored.PushEnabled)
+	assert.Equal(t, original.PullCursorEventID, restored.PullCursorEventID)
+	assert.Equal(t, original.PushCursorEventID, restored.PushCursorEventID)
+}
+
+func TestNativeFederationReplicaLeavePreparationBlocksRebindAfterRestart(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	store, project, _ := prepareFederationRebind(t, rebindSourceURL)
+	credential := rebindCredential(rebindSourceURL, false, false)
+	credentials := config.DefaultFederationCredentialStore()
+	require.NoError(t, credentials.StoreFederationCredential(
+		t.Context(), project.UID, credential,
+	))
+
+	prepared, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID, "restart-pending")
+	require.NoError(t, err)
+	daemon.ForgetFederationReplicaTransitionsForTest(store)
+
+	require.ErrorIs(t, rebindToTarget(t, store, credentials, project), daemon.ErrFederationReplicaLeavePending)
+	require.NoError(t, daemon.AbortFederationReplicaLeave(t.Context(), store, credentials, project.ID, prepared.PreparationID))
+	require.NoError(t, rebindToTarget(t, store, credentials, project))
+}
+
+func TestNativeFederationReplicaLeavePreparationBlocksEnsureAfterRestart(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	store, project, original := prepareFederationRebind(t, rebindSourceURL)
+	credential := rebindCredential(rebindSourceURL, false, false)
+	credentials := config.DefaultFederationCredentialStore()
+	require.NoError(t, credentials.StoreFederationCredential(t.Context(), project.UID, credential))
+	prepared, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID, "ensure-after-restart")
+	require.NoError(t, err)
+	daemon.ForgetFederationReplicaTransitionsForTest(store)
+
+	_, err = daemon.EnsureFederationReplica(t.Context(), store, credentials, nil, daemon.EnsureFederationReplicaParams{
+		HubURL: original.HubURL, HubProjectID: original.HubProjectID, HubProjectUID: project.UID,
+		ProjectName: project.Name, ReplayHorizonEventID: original.ReplayHorizonEventID,
+		Credential: credential, PushEnabled: original.PushEnabled,
+	})
+	require.ErrorIs(t, err, daemon.ErrFederationReplicaLeavePending)
+	require.NoError(t, daemon.AbortFederationReplicaLeave(t.Context(), store, credentials, project.ID, prepared.PreparationID))
+}
+
+func TestAbortNativeFederationReplicaLeaveRetainsOtherPreparationAfterRestart(t *testing.T) {
+	t.Setenv("KATA_HOME", t.TempDir())
+	store, project, _ := prepareFederationRebind(t, rebindSourceURL)
+	credentials := config.DefaultFederationCredentialStore()
+	require.NoError(t, credentials.StoreFederationCredential(
+		t.Context(), project.UID, rebindCredential(rebindSourceURL, false, false),
+	))
+	first, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID, "restart-first")
+	require.NoError(t, err)
+	second, err := daemon.PrepareFederationReplicaLeave(t.Context(), store, credentials, project.ID, "restart-second")
+	require.NoError(t, err)
+	daemon.ForgetFederationReplicaTransitionsForTest(store)
+
+	require.NoError(t, daemon.AbortFederationReplicaLeave(t.Context(), store, credentials, project.ID, first.PreparationID))
+	assert.True(t, daemon.FederationReplicaMappingSuppressed(store, project.Name),
+		"the remaining persisted preparation must reestablish its in-memory fence after restart")
+	require.ErrorIs(t, rebindToTarget(t, store, credentials, project), daemon.ErrFederationReplicaLeavePending)
+
+	require.NoError(t, daemon.AbortFederationReplicaLeave(t.Context(), store, credentials, project.ID, second.PreparationID))
+	assert.False(t, daemon.FederationReplicaMappingSuppressed(store, project.Name))
 }
 
 func TestAbortFederationReplicaLeaveKeepsLeaveThatMustFinish(t *testing.T) {

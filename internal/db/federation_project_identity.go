@@ -8,7 +8,7 @@ import (
 // still referenced by another joined project's portable issue history. Archive
 // and leave retain the identity; purge and merge must wait for those streams to
 // detach. Local history covered by an adoption baseline creates no dependency.
-func CheckFederationProjectIdentityRetirement(ctx context.Context, tx federationHistoryQuery, project Project, snapshotExpression string) error {
+func CheckFederationProjectIdentityRetirement(ctx context.Context, tx federationHistoryQuery, project Project) error {
 	joinedIDs, joinedUIDs := map[int64]bool{}, map[string]bool{}
 	rows, err := tx.QueryContext(ctx, `SELECT p.id,p.uid FROM projects p
  JOIN federation_bindings b ON b.project_id=p.id WHERE p.id<>$1`, project.ID)
@@ -66,7 +66,7 @@ func CheckFederationProjectIdentityRetirement(ctx context.Context, tx federation
 		if closeErr != nil {
 			return closeErr
 		}
-		if err := loadFederationMoveHistoryCutoffs(ctx, tx, events, cutoffs, snapshotExpression); err != nil {
+		if err := loadFederationMoveHistoryCutoffs(ctx, tx, events, cutoffs); err != nil {
 			return err
 		}
 		for _, event := range events {

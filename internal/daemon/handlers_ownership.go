@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -12,7 +13,9 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/httpurl"
 )
 
 func registerOwnershipHandlers(humaAPI huma.API, cfg ServerConfig) {
@@ -392,11 +395,79 @@ func forwardTimedAssignmentClaim(
 	if err != nil {
 		return nil, true, assignmentClaimForwardError(err)
 	}
+	if forwarded.Issue.ProjectUID != "" && forwarded.Issue.ProjectUID != binding.HubProjectUID {
+		if err := syncForwardedAssignmentDestination(ctx, cfg, binding, forwarded.Issue.ProjectUID); err != nil {
+			return nil, true, err
+		}
+	}
 	response, err := applyForwardedAssignmentClaim(ctx, cfg, issue.ProjectID, issue.UID, forwarded)
 	if err != nil {
 		return nil, true, claimAPIError(err)
 	}
 	return response, true, nil
+}
+
+func syncForwardedAssignmentDestination(
+	ctx context.Context,
+	cfg ServerConfig,
+	sourceBinding db.FederationBinding,
+	destinationUID string,
+) error {
+	ctx, err := authorizeHostProjectScope(ctx, nil, []string{destinationUID}, false)
+	if err != nil {
+		return err
+	}
+	destination, err := activeProjectByUID(ctx, cfg.DB, destinationUID)
+	if err != nil {
+		return err
+	}
+	binding, err := cfg.DB.FederationBindingByProject(ctx, destination.ID)
+	if errors.Is(err, db.ErrNotFound) {
+		return api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
+	}
+	if err != nil {
+		return internalAPIError(err)
+	}
+	if binding.Role != db.FederationRoleSpoke || !binding.Enabled || binding.HubProjectUID != destinationUID {
+		return api.NewError(http.StatusNotFound, "not_found", "resource not found", "", nil)
+	}
+	sourceBase, err := httpurl.CanonicalHTTPBaseURL(sourceBinding.HubURL)
+	if err != nil {
+		return api.NewError(http.StatusConflict, "federation_project_moved",
+			"the moved issue is not available through this federation connection", "", nil)
+	}
+	destinationBase, err := httpurl.CanonicalHTTPBaseURL(binding.HubURL)
+	if err != nil || sourceBase != destinationBase {
+		return api.NewError(http.StatusConflict, "federation_project_moved",
+			"the moved issue is not available through this federation connection", "", nil)
+	}
+	credentials := cfg.federationCredentialStore()
+	credential, found, err := credentials.FederationCredential(ctx, destination.UID)
+	if err != nil {
+		return internalAPIError(err)
+	}
+	if !found || strings.TrimSpace(credential.Token) == "" {
+		return api.NewError(http.StatusServiceUnavailable, "federation_offline",
+			"destination federation pull credentials are unavailable", "", nil)
+	}
+	credentialBase, err := httpurl.CanonicalHTTPBaseURL(credential.HubURL)
+	if err != nil || credentialBase != destinationBase || credential.HubProjectID != binding.HubProjectID {
+		return api.NewError(http.StatusServiceUnavailable, "federation_offline",
+			"destination federation credentials do not match the joined project", "", nil)
+	}
+	if cfg.FederationPullOnce == nil {
+		return api.NewError(http.StatusServiceUnavailable, "federation_offline",
+			"synchronous federation pull is unavailable", "", nil)
+	}
+	credential = config.FederationTransportCredential(
+		binding.HubURL, binding.HubProjectID, binding.AllowInsecure, credential,
+	)
+	binding.PushEnabled = false
+	if err := cfg.FederationPullOnce(ctx, binding, credential); err != nil {
+		return api.NewError(http.StatusBadGateway, "federation_pull_failed",
+			"could not synchronize the moved issue's destination project", "retry the claim after federation sync succeeds", nil)
+	}
+	return nil
 }
 
 func assignmentClaimForwardError(err error) error {

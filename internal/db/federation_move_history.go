@@ -13,12 +13,15 @@ type federationHistoryQuery interface {
 }
 
 // ReadFederationMoveHistory fills a page after excluding local move history
-// covered by a retained federation baseline. Each standalone move waits for
-// its first covering snapshot; refreshes without another standalone move cannot
-// hide later deltas, and an uncovered trailing move remains visible. Cutoffs are
-// computed once per issue in this read transaction, using bounded UID-indexed
-// lookups rather than scanning the same subject history for every event.
-func ReadFederationMoveHistory(ctx context.Context, tx *sql.Tx, afterID int64, limit int, snapshotExpression string, readPage func(int64, int) ([]Event, error)) ([]Event, error) {
+// covered by a retained federation baseline. Each move waits for its first
+// later covering snapshot, including a move that carried its own snapshot:
+// that move may have crossed an enrollment boundary and must not leak its old
+// source identity into a new baseline. Refreshes without another move cannot
+// hide later deltas, and an uncovered trailing move remains visible. Cutoffs
+// are computed once per issue in this read transaction, using bounded
+// UID-indexed lookups rather than scanning the same subject history for every
+// event.
+func ReadFederationMoveHistory(ctx context.Context, tx *sql.Tx, afterID int64, limit int, readPage func(int64, int) ([]Event, error)) ([]Event, error) {
 	events := []Event{}
 	cutoffs := map[string]int64{}
 	for len(events) < limit {
@@ -27,7 +30,7 @@ func ReadFederationMoveHistory(ctx context.Context, tx *sql.Tx, afterID int64, l
 		if err != nil {
 			return nil, err
 		}
-		if err := loadFederationMoveHistoryCutoffs(ctx, tx, page, cutoffs, snapshotExpression); err != nil {
+		if err := loadFederationMoveHistoryCutoffs(ctx, tx, page, cutoffs); err != nil {
 			return nil, err
 		}
 		for _, event := range page {
@@ -47,7 +50,7 @@ func ReadFederationMoveHistory(ctx context.Context, tx *sql.Tx, afterID int64, l
 	return events, nil
 }
 
-func loadFederationMoveHistoryCutoffs(ctx context.Context, tx federationHistoryQuery, page []Event, cutoffs map[string]int64, snapshotExpression string) error {
+func loadFederationMoveHistoryCutoffs(ctx context.Context, tx federationHistoryQuery, page []Event, cutoffs map[string]int64) error {
 	var pending []string
 	for _, event := range page {
 		if event.IssueUID == nil {
@@ -67,7 +70,7 @@ func loadFederationMoveHistoryCutoffs(ctx context.Context, tx federationHistoryQ
 		//nolint:gosec // G202: the concatenated SQL fragments contain no user data.
 		rows, err := tx.QueryContext(ctx, `SELECT m.issue_uid,m.id,m.type FROM events m
  WHERE m.issue_uid IN (`+strings.Join(slots, ",")+`)
- AND (m.type='issue.snapshot' OR (m.type='issue.moved' AND `+snapshotExpression+` IS NULL))
+ AND (m.type='issue.snapshot' OR m.type='issue.moved')
  ORDER BY m.id`, args...)
 		if err != nil {
 			return err

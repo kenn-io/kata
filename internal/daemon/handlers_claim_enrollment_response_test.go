@@ -1,6 +1,7 @@
 package daemon_test
 
 import (
+	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/federation"
 	"go.kenn.io/kata/internal/testenv"
 	katauid "go.kenn.io/kata/internal/uid"
 )
@@ -226,4 +228,111 @@ func TestClaim_TimedAssignmentForwardingSpokeRepairsWithoutIssueContent(t *testi
 	require.NoError(t, err)
 	assert.Equal(t, authoritative.AssignmentExpiresOn, stored.AssignmentExpiresOn)
 	assert.Equal(t, out.Issue.AssignmentExpiresOn, stored.AssignmentExpiresOn)
+}
+
+func TestClaim_TimedAssignmentPullsUnseenMoveWithDestinationCredential(t *testing.T) {
+	ctx := t.Context()
+	hub := testenv.New(t)
+	source := createPrivateContentHubProject(t, hub, "example-source")
+	target := createPrivateContentHubProject(t, hub, "example-target")
+	issue := createPrivateEnrollmentIssue(t, hub, source.ID)
+	var spokeStore db.Storage
+	spoke := testenv.New(t, testenv.WithFederationPullOnce(func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
+		binding.PushEnabled = false
+		return federation.SyncFederationOnce(ctx, spokeStore, binding, credential, config.DefaultFederationCredentialStore())
+	}))
+	spokeStore = spoke.DB
+	localSource, err := spoke.DB.CreateProjectWithUID(ctx, source.Name, source.UID)
+	require.NoError(t, err)
+	localTarget, err := spoke.DB.CreateProjectWithUID(ctx, target.Name, target.UID)
+	require.NoError(t, err)
+	for _, pair := range []struct {
+		local       db.Project
+		hub         db.Project
+		pushEnabled bool
+	}{{localSource, source, true}, {localTarget, target, false}} {
+		_, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
+			ProjectID: pair.local.ID, Role: db.FederationRoleSpoke,
+			HubURL: hub.URL, HubProjectID: pair.hub.ID, HubProjectUID: pair.hub.UID,
+			ReplayHorizonEventID: 1, Actor: "tester", Enabled: true, PushEnabled: pair.pushEnabled,
+		})
+		require.NoError(t, err)
+	}
+	created, err := hub.DB.EventsAfter(ctx, db.EventsAfterParams{
+		ProjectID: source.ID, IssueUID: issue.UID, Types: []string{"issue.created"}, Limit: 1,
+	})
+	require.NoError(t, err)
+	require.Len(t, created, 1)
+	inserted, err := spoke.DB.InsertRemoteEvent(ctx, localSource.ID, db.RemoteEvent{
+		EventUID: created[0].UID, OriginInstanceUID: created[0].OriginInstanceUID,
+		ProjectUID: created[0].ProjectUID, ProjectName: created[0].ProjectName,
+		IssueUID: created[0].IssueUID, RelatedIssueUID: created[0].RelatedIssueUID,
+		Type: created[0].Type, Actor: created[0].Actor,
+		HLCPhysicalMS: created[0].HLCPhysicalMS, HLCCounter: created[0].HLCCounter,
+		ContentHash: created[0].ContentHash, Payload: jsontext.Value(created[0].Payload),
+		CreatedAt: created[0].CreatedAt,
+	})
+	require.NoError(t, err)
+	require.True(t, inserted)
+	require.NoError(t, spoke.DB.MaterializeFederatedProject(ctx, localSource.ID))
+	localIssue, err := spoke.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, localSource.ID, localIssue.ProjectID)
+
+	claimEnrollment, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		SpokeInstanceUID: spoke.DB.InstanceUID(), Capabilities: "claim", Actor: "tester",
+	})
+	require.NoError(t, err)
+	pullEnrollment, err := hub.DB.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{
+		SpokeInstanceUID: spoke.DB.InstanceUID(), ProjectID: &target.ID, Capabilities: "pull", Actor: "tester",
+	})
+	require.NoError(t, err)
+	require.NoError(t, config.WriteFederationCredential(localSource.UID, config.FederationCredential{
+		HubURL: hub.URL, HubProjectID: source.ID, Token: claimEnrollment.Token,
+		Capabilities: "claim", Actor: "tester",
+	}))
+	require.NoError(t, config.WriteFederationCredential(localTarget.UID, config.FederationCredential{
+		HubURL: hub.URL, HubProjectID: target.ID, Token: pullEnrollment.Token,
+		Capabilities: "pull", Actor: "tester",
+	}))
+
+	moved, err := hub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID,
+		IfMatchRev: issue.Revision, Actor: "tester",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, moved.Event)
+
+	// The all-project claim-only credential can make the move destination's
+	// assignment without seeing the issue snapshot in its response.
+	resp, raw := envDoRaw(t, hub, http.MethodPost,
+		issuePathRef(target.ID, issue.ShortID, "actions/claim"),
+		map[string]any{"ttl_seconds": 300}, bearer(claimEnrollment.Token))
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", raw)
+	for _, secret := range enrollmentSecrets() {
+		assert.NotContainsf(t, string(raw), secret, "claim-only response leaked project content")
+	}
+	var hubClaim api.ClaimResponseBody
+	require.NoError(t, json.Unmarshal(raw, &hubClaim))
+	require.Equal(t, target.UID, hubClaim.Issue.ProjectUID)
+	for _, event := range hubClaim.Events {
+		assert.Truef(t, enrollmentAssignmentSafeEventTypes[event.Type],
+			"claim-only response carried non-assignment event %q", event.Type)
+	}
+
+	// The spoke forwards from its stale source replica. It must use the
+	// destination's separate pull-only credential to recover the move before
+	// returning the now-current assignment state.
+	resp, raw = envDoRaw(t, spoke, http.MethodPost,
+		issuePathRef(localSource.ID, localIssue.ShortID, "actions/claim"),
+		map[string]any{"actor": "tester", "ttl_seconds": 300}, nil)
+	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", raw)
+	var spokeClaim api.ClaimResponseBody
+	require.NoError(t, json.Unmarshal(raw, &spokeClaim))
+	current, err := spoke.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, localTarget.ID, current.ProjectID)
+	require.NotNil(t, current.Owner)
+	assert.Equal(t, "tester", *current.Owner)
+	assert.Equal(t, target.UID, spokeClaim.Issue.ProjectUID)
 }

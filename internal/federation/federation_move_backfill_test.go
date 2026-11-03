@@ -342,3 +342,56 @@ func TestSyncFederationMoveUsesReenrollmentBaselineAfterLocalMove(t *testing.T) 
 	_, err = receiver.env.DB.ProjectByUID(ctx, original[0].UID)
 	require.ErrorIs(t, err, db.ErrNotFound, "covered prior enrollment identities need not be joined")
 }
+
+func TestSyncFederationMoveSkipsHistoryBeforeNewHubBaseline(t *testing.T) {
+	ctx := t.Context()
+	oldHub, original := newMoveDeliveryHub(t, "retired-source", "retained-project")
+	oldSpoke := newMoveDeliverySpoke(t, oldHub, original)
+	issue, _, err := oldHub.DB.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: original[0].ID, Title: "moved issue", Author: "worker",
+	})
+	require.NoError(t, err)
+	for i := range original {
+		require.NoError(t, oldSpoke.sync(t, i))
+	}
+	hubIssue, err := oldHub.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, err = oldHub.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: hubIssue.ID, FromProjectID: original[0].ID, ToProjectID: original[1].ID,
+		IfMatchRev: hubIssue.Revision, Actor: "worker",
+	})
+	require.NoError(t, err)
+	require.NoError(t, oldSpoke.sync(t, 1), "the spoke records the snapshot-bearing A-to-B move")
+
+	for i := range original {
+		_, err = oldSpoke.env.DB.LeaveFederationReplica(ctx, oldSpoke.projects[i].ID)
+		require.NoError(t, err)
+		delete(oldSpoke.credentials, oldSpoke.projects[i].UID)
+	}
+	_, _, err = oldSpoke.env.DB.RemoveProject(ctx, db.RemoveProjectParams{
+		ProjectID: oldSpoke.projects[0].ID, Actor: "worker", Force: true,
+	})
+	require.NoError(t, err)
+	_, err = oldSpoke.env.DB.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: oldSpoke.projects[0].ID, Actor: "worker"})
+	require.NoError(t, err)
+	retained := oldSpoke.projects[1]
+	_, err = oldSpoke.env.DB.EnableProjectFederation(ctx, retained.ID, "worker")
+	require.NoError(t, err)
+	target, err := oldSpoke.env.DB.CreateProject(ctx, "new-target")
+	require.NoError(t, err)
+	_, err = oldSpoke.env.DB.EnableProjectFederation(ctx, target.ID, "worker")
+	require.NoError(t, err)
+	localIssue, err := oldSpoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	_, err = oldSpoke.env.DB.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: localIssue.ID, FromProjectID: retained.ID, ToProjectID: target.ID,
+		IfMatchRev: localIssue.Revision, Actor: "worker",
+	})
+	require.NoError(t, err)
+
+	newSpoke := newMoveDeliverySpoke(t, oldSpoke.env, []db.Project{retained, target})
+	require.NoError(t, newSpoke.sync(t, 1), "the new target baseline must exclude the retired source lineage")
+	got, err := newSpoke.env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, newSpoke.projects[1].ID, got.ProjectID)
+}

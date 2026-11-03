@@ -318,6 +318,35 @@ func (r *federationReplicaRegistry) preparationKeys(
 	return keys
 }
 
+func (r *federationReplicaRegistry) preparationHoldCount(
+	preparation federationReplicaPreparation,
+) int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var total int
+	for _, transition := range r.transitions {
+		total += transition.preparations[preparation]
+	}
+	return total
+}
+
+func (r *federationReplicaRegistry) nativeFenceForProject(
+	instanceUID string,
+	projectID int64,
+) *federationReplicaNativeFence {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, transition := range r.transitions {
+		if transition.nativeFence == nil || transition.nativeFence.instanceUID != instanceUID ||
+			transition.nativeFence.projectID != projectID {
+			continue
+		}
+		fence := *transition.nativeFence
+		return &fence
+	}
+	return nil
+}
+
 // releasePreparedLeave releases a preparation of a leave that stopped before
 // local teardown, however many prepare calls hold it. An unknown, already
 // released, or completed preparation is a no-op, so a retried release cannot

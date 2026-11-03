@@ -70,7 +70,7 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 	if err := rejectFederatedProjectMerge(ctx, tx, source.ID, target.ID); err != nil {
 		return db.ProjectMergeResult{}, err
 	}
-	if err := db.CheckFederationProjectIdentityRetirement(ctx, tx, source, `json_type(m.payload,'$.snapshot')`); err != nil {
+	if err := db.CheckFederationProjectIdentityRetirement(ctx, tx, source); err != nil {
 		return db.ProjectMergeResult{}, err
 	}
 	if err := rejectProjectMergeAccessWideningTx(ctx, tx, source.UID, target.UID); err != nil {

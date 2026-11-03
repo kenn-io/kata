@@ -266,3 +266,88 @@ func checkFederatedMoveDelivery(t *testing.T, store db.Storage) error {
 	}
 	return nil
 }
+
+func checkFederatedMoveReenrollmentBaseline(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	oldSource, err := store.CreateProject(ctx, "reenrollment-old-source")
+	require.NoError(t, err)
+	retained, err := store.CreateProject(ctx, "reenrollment-retained-project")
+	require.NoError(t, err)
+	newTarget, err := store.CreateProject(ctx, "reenrollment-new-target")
+	require.NoError(t, err)
+	for _, project := range []db.Project{oldSource, retained} {
+		_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{
+			ProjectID: project.ID, Role: db.FederationRoleSpoke,
+			HubURL: "https://hub.example", HubProjectID: project.ID,
+			HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true,
+		})
+		require.NoError(t, err)
+	}
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: oldSource.ID, Title: "move history baseline", Author: "worker",
+	})
+	require.NoError(t, err)
+	firstMove, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: issue.ID, FromProjectID: oldSource.ID, ToProjectID: retained.ID,
+		IfMatchRev: issue.Revision, Actor: "worker",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, firstMove.Event)
+	require.Contains(t, string(firstMove.Event.Payload), `"snapshot"`,
+		"a move from a federated source must carry a full baseline snapshot")
+
+	// The project identities belong to the old joined hub until both replicas
+	// leave. The destination is later enrolled as a new hub with a fresh issue
+	// baseline, after the former source identity has been retired. Move events
+	// belong to the destination project's event stream.
+	require.NoError(t, store.AdvanceFederationPushCursor(ctx, oldSource.ID, firstMove.EventID))
+	require.NoError(t, store.AdvanceFederationPushCursor(ctx, retained.ID, firstMove.EventID))
+	_, err = store.LeaveFederationReplica(ctx, oldSource.ID)
+	require.NoError(t, err)
+	_, err = store.LeaveFederationReplica(ctx, retained.ID)
+	require.NoError(t, err)
+	_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: oldSource.ID, Actor: "worker"})
+	require.NoError(t, err)
+	_, err = store.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: oldSource.ID, Actor: "worker"})
+	require.NoError(t, err)
+	_, err = store.EnableProjectFederation(ctx, retained.ID, "worker")
+	require.NoError(t, err)
+	baseline, err := store.ReadFederation(ctx, db.FederationReadParams{
+		ProjectID: retained.ID, IssueUID: issue.UID, Limit: 100, Features: db.SupportedEventFeatures,
+	})
+	require.NoError(t, err)
+	for _, event := range baseline.Events {
+		require.NotEqual(t, firstMove.Event.UID, event.UID,
+			"the new federation baseline must hide move history that references a retired project")
+	}
+	_, err = store.EnableProjectFederation(ctx, newTarget.ID, "worker")
+	require.NoError(t, err)
+
+	current, err := store.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	secondMove, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: current.ID, FromProjectID: retained.ID, ToProjectID: newTarget.ID,
+		IfMatchRev: current.Revision, Actor: "worker",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, secondMove.Event)
+
+	page, err := store.ReadFederation(ctx, db.FederationReadParams{
+		ProjectID: newTarget.ID, IssueUID: issue.UID, Limit: 100, Features: db.SupportedEventFeatures,
+	})
+	require.NoError(t, err)
+	for _, event := range page.Events {
+		require.NotEqual(t, firstMove.Event.UID, event.UID,
+			"a fresh reenrollment baseline must retire move history that references a purged project")
+	}
+	require.Contains(t, eventUIDs(page.Events), secondMove.Event.UID)
+	return nil
+}
+
+func eventUIDs(events []db.Event) []string {
+	uids := make([]string, 0, len(events))
+	for _, event := range events {
+		uids = append(uids, event.UID)
+	}
+	return uids
+}

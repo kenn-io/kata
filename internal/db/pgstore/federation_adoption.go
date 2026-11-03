@@ -88,7 +88,7 @@ func (s *Store) AdoptProjectIntoFederation(
 		}
 
 		if project.UID != params.HubProjectUID {
-			if err := db.CheckFederationProjectIdentityRetirement(ctx, tx, project, `m.payload::jsonb->'snapshot'`); err != nil {
+			if err := db.CheckFederationProjectIdentityRetirement(ctx, tx, project); err != nil {
 				return err
 			}
 		}
