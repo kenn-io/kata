@@ -152,8 +152,6 @@ func renderReopenBacklogModal(prompt *reopenPrompt) string {
 		"",
 		"To change how missed runs are handled,",
 		"use `kata cron job update`.",
-		"",
-		"[Y] Reopen    [N] Cancel",
 	}, "\n")
 	return modalBoxStyle.Render(body)
 }
