@@ -133,7 +133,7 @@ func printShowAttachmentEvidence(out io.Writer, b showResponseForCLI) error {
 				} else if current.DocbankVersion != frozen.DocbankVersion {
 					state = " (changed)"
 				}
-				label = fmt.Sprintf("attachment %s: %s · %s · %d bytes%s", e.AttachmentID, frozen.Name, frozen.MediaType, frozen.Size, state)
+				label = fmt.Sprintf("attachment %s: %s · %d bytes%s", e.AttachmentID, frozen.Name, frozen.Size, state)
 			} else {
 				label = "attachment " + e.AttachmentID + " (invalid snapshot)"
 			}

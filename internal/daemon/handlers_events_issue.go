@@ -123,9 +123,10 @@ func effectiveIssueCloseEventUID(ctx context.Context, store db.Storage, issue db
 	afterID := int64(0)
 	var foldEvents []db.FoldEvent
 	visibleCloseUIDs := make(map[string]struct{})
+	eventIssueLookup := newProjectScopeEventIssueLookup(ctx, store)
 	// Status provenance must include transitions in projects the caller cannot
-	// inspect. Only a selected close event whose project and issue scope are
-	// visible below may be returned to the caller.
+	// inspect. Only a selected close event whose project, issue scope, and
+	// structured references are visible may be returned to the caller.
 	historyCtx := db.WithAuthorizedProjects(ctx, nil)
 	for {
 		rows, err := store.EventsAfter(historyCtx, db.EventsAfterParams{
@@ -143,6 +144,15 @@ func effectiveIssueCloseEventUID(ctx context.Context, store db.Storage, issue db
 			}
 			if visible && scope != nil {
 				_, visible = projectIssueScopedEvent(event, allowed, scope.ProjectUID)
+			}
+			if visible && event.Type == "issue.closed" {
+				requiresReset, err := db.EventRequiresProjectScopeReset(
+					ctx, event, eventIssueLookup.IssueByUID, eventIssueLookup.IssueByRef,
+				)
+				if err != nil {
+					return "", err
+				}
+				visible = !requiresReset
 			}
 			foldEvents = append(foldEvents, db.FoldEvent{
 				UID: event.UID, OriginInstanceUID: event.OriginInstanceUID,

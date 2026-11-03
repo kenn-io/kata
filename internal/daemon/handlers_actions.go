@@ -484,7 +484,19 @@ func scopedMutationEvent(
 func projectScopedMutationEvent(
 	ctx context.Context, store db.Storage, event *db.Event,
 ) (*db.Event, error) {
-	reset, err := db.EventRequiresProjectScopeReset(ctx, *event,
+	lookup := newProjectScopeEventIssueLookup(ctx, store)
+	reset, err := db.EventRequiresProjectScopeReset(ctx, *event, lookup.IssueByUID, lookup.IssueByRef)
+	if err != nil {
+		return nil, err
+	}
+	if reset {
+		return nil, nil
+	}
+	return event, nil
+}
+
+func newProjectScopeEventIssueLookup(ctx context.Context, store db.Storage) *db.EventIssueLookup {
+	return db.NewEventIssueLookup(
 		func(uid string) (db.Issue, error) {
 			return store.IssueByUID(ctx, uid, db.IncludeDeletedYes)
 		},
@@ -509,13 +521,6 @@ func projectScopedMutationEvent(
 			return store.IssueByShortID(ctx, project.ID, parsed.ShortID, db.IncludeDeletedYes)
 		},
 	)
-	if err != nil {
-		return nil, err
-	}
-	if reset {
-		return nil, nil
-	}
-	return event, nil
 }
 
 // scopedMutationEvents is the multi-event form of scopedMutationEvent for

@@ -13,6 +13,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
+	"hegel.dev/go/hegel"
 )
 
 // The issue history contract filters before limit and acknowledges the resolved
@@ -250,6 +251,46 @@ func TestPollProjectEventsIssueReturnsEffectiveCloseEvent(t *testing.T) {
 		_, hasEffectiveClose := raw["effective_close_event_uid"]
 		require.False(t, hasEffectiveClose, string(body))
 		require.NotContains(t, string(body), hiddenCloseUID)
+	})
+}
+
+func TestPollProjectEventsIssueHidesEffectiveCloseWithPrivateReference(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		hegel.Test(t, func(ht *hegel.T) {
+			referenceForm := hegel.Draw(ht, hegel.Integers(0, 1))
+			evidenceForm := hegel.Draw(ht, hegel.Integers(0, 1))
+			visible, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+				ProjectID: f.public.ID, Title: "Visible close evidence source", Author: "member",
+			})
+			require.NoError(ht, err)
+
+			evidenceType, reason := "duplicate-of", "duplicate"
+			if evidenceForm == 1 {
+				evidenceType, reason = "superseded-by", "superseded"
+			}
+			issueRef := f.issue.UID
+			if referenceForm == 1 {
+				issueRef = f.private.Name + "#" + f.issue.ShortID
+			}
+			_, closeEvents, changed, err := store.CloseIssueWithEvents(t.Context(), visible.ID, reason, "member",
+				"Closed with a reference to a restricted issue.", []db.Evidence{{
+					Type: evidenceType, IssueRef: issueRef,
+				}})
+			require.NoError(ht, err)
+			require.True(ht, changed)
+			require.Len(ht, closeEvents, 1)
+
+			path := fmt.Sprintf("%s?issue=%s&include_effective_close_event_uid=true", scopedProjectPath(f.public.ID, "events"), url.QueryEscape(visible.UID))
+			status, _, body := f.request(t, http.MethodGet, path, "nonmember", nil, nil)
+			require.Equal(ht, http.StatusOK, status, string(body))
+			var page api.PollEventsBody
+			require.NoError(ht, json.Unmarshal(body, &page))
+			require.Empty(ht, page.EffectiveCloseEventUID, string(body))
+			for _, event := range page.Events {
+				require.NotEqual(ht, "issue.closed", event.Type, "a close with a hidden evidence target must remain omitted")
+			}
+		}, hegel.WithTestCases(8))
 	})
 }
 

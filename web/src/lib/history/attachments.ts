@@ -48,12 +48,11 @@ export function closingAttachments(
     const current = attachment(metadata[`attachment.${id}`])
     const hasSnapshot = Object.hasOwn(evidence, 'attachment')
     const frozen = hasSnapshot ? attachment(evidence.attachment) : current
-    if (!frozen)
-      return [{ label: `attachment ${id} (${hasSnapshot ? 'invalid snapshot' : 'removed'})` }]
+    if (!frozen) return [{ label: hasSnapshot ? 'Invalid attachment' : 'Attachment removed' }]
     const matches =
       current && current.docbank_version.toLowerCase() === frozen.docbank_version.toLowerCase()
     const state = matches ? '' : current ? ' (changed)' : ' (removed)'
-    const label = `${frozen.name} · ${frozen.media_type} · ${frozen.size} bytes${state}`
+    const label = `${frozen.name} · ${frozen.size} bytes${state}`
     return [{ label, ...(matches ? { href: `#kata-attachment-${encodeURIComponent(id)}` } : {}) }]
   })
 }

@@ -1,14 +1,31 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 )
+
+func TestPrintShowAttachmentEvidenceOmitsMediaType(t *testing.T) {
+	const attachmentID = "attachment-1"
+	var response showResponseForCLI
+	response.Issue.Metadata = map[string]jsontext.Value{
+		metadata.AttachmentPrefix + attachmentID: jsontext.Value(`{"name":"report.pdf","media_type":"application/pdf","size":5,"docbank_version":"00000000-0000-4000-8000-000000000001"}`),
+	}
+	response.CloseEvidence = []db.Evidence{{Type: "attachment", AttachmentID: attachmentID}}
+
+	var output bytes.Buffer
+	require.NoError(t, printShowAttachmentEvidence(&output, response))
+	require.Equal(t, "Evidence: attachment attachment-1: report.pdf · 5 bytes\n", output.String())
+}
 
 func TestShowAttachmentHistoryRequiresSubjectAcknowledgement(t *testing.T) {
 	const subject = "01K7E222222222222222222222"

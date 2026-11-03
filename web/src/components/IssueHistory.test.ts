@@ -158,7 +158,7 @@ it('links frozen attachment evidence to the matching panel entry', () => {
   expect(screen.getByRole('link', { name: /report.pdf/ }).getAttribute('href')).toBe(
     `#kata-attachment-${attachmentID}`,
   )
-  expect(screen.getByText(/application\/pdf.*12 bytes/)).toBeTruthy()
+  expect(screen.getByRole('link', { name: 'report.pdf · 12 bytes' })).toBeTruthy()
 })
 it.each(['removed', 'changed'])(
   'retains the frozen descriptor when the reference is %s',
@@ -198,5 +198,5 @@ it('does not retarget malformed historical descriptors', () => {
     },
   })
   expect(screen.queryByRole('link')).toBeNull()
-  expect(screen.getByText(/invalid snapshot/)).toBeTruthy()
+  expect(screen.getByText('Invalid attachment')).toBeTruthy()
 })
