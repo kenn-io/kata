@@ -56,6 +56,9 @@ Errors go to stderr in the selected output mode.
 | 7 | Daemon unavailable. |
 | 8 | Wait timeout. |
 
+With `--json`, a `project_not_initialized` error names the alias or project Kata
+looked up in `error.data`; see [HTTP API errors](http-api.md#errors).
+
 ## Workspace initialization
 
 ```sh

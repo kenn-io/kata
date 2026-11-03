@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-10-30
+last_edited: 2026-11-02
 ---
 
 # HTTP API schema
@@ -40,6 +40,22 @@ code to branch in scripts, rather than matching the message or hint.
 
 ```json
 {"error":{"code":"project_not_initialized","message":"no .kata.toml ancestor and no git ancestor","hint":"run \"kata init --project <name>\" in the workspace root, or pass --project <name>"}}
+```
+
+`project_not_initialized` puts the name it looked up in `data`, only when the
+message names it:
+
+| Request | `data` |
+| --- | --- |
+| An alias that points at an archived project | `alias` |
+| Only an alias, not registered (the CLI in a git workspace without `.kata.toml`) | `alias` |
+| A project name that is not registered, from `--project`, `.kata.toml`, or a `name:` project selector, with or without an alias | `project` |
+| A `start_path` whose `.kata.toml` names an unregistered project | `project` |
+| A `start_path` in a git workspace whose alias is not registered | none |
+| No `.kata.toml` and no git ancestor | none |
+
+```json
+{"error":{"code":"project_not_initialized","message":"alias github.com/example/spoke-project is not registered","hint":"run \"kata init\" in this workspace","data":{"alias":"github.com/example/spoke-project"}}}
 ```
 
 The CLI preserves the hint in human, agent, and JSON errors. See
