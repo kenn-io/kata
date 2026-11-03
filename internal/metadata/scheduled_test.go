@@ -288,38 +288,51 @@ func TestScheduleDueCutoffCoversEveryZone(t *testing.T) {
 			assert.Greater(t, value, cutoff, "issues dated exactly 36 hours out must be excluded")
 		}
 	})
-	for _, zone := range []string{"UTC", "Pacific/Kiritimati", "Etc/GMT-14", "America/Los_Angeles"} {
-		t.Run(zone, func(t *testing.T) {
-			location, err := time.LoadLocation(zone)
-			require.NoError(t, err)
-			for _, now := range []time.Time{
-				time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC),
-				time.Date(2026, 3, 8, 10, 0, 0, 0, time.UTC),
-			} {
-				cutoff := ScheduleDueCutoff(now)
-				assert.Greater(t, "2099-01-01", cutoff, "distant future dates must be excluded")
+	for _, now := range []time.Time{
+		time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC),
+		time.Date(2026, 3, 8, 10, 0, 0, 0, time.UTC),
+	} {
+		cutoff := ScheduleDueCutoff(now)
+		assert.Greater(t, "2099-01-01", cutoff, "distant future dates must be excluded")
+		for _, offset := range []time.Duration{-25 * time.Hour, -time.Second, 0, time.Second, 25 * time.Hour} {
+			value := now.Add(offset).UTC().Format(time.RFC3339)
+			for _, field := range []string{"scheduled_on", "deadline_on"} {
+				raw, err := json.Marshal(map[string]string{field: value})
+				require.NoError(t, err)
+				_, present, due, err := ScheduleFieldDue(string(raw), field, now, "UTC")
+				require.NoError(t, err)
+				require.True(t, present)
+				if due {
+					assert.LessOrEqual(t, value, cutoff, "%s at %s", value, now)
+				}
+			}
+		}
+		for _, zone := range []string{"UTC", "Pacific/Kiritimati", "Etc/GMT-14", "America/Los_Angeles"} {
+			t.Run(zone, func(t *testing.T) {
+				location, err := time.LoadLocation(zone)
+				require.NoError(t, err)
+				values := []string{"2026-03-08T02:30"}
 				for _, offset := range []time.Duration{-25 * time.Hour, -time.Second, 0, time.Second, 25 * time.Hour} {
-					instant := now.Add(offset)
-					for _, value := range []string{
-						instant.In(location).Format(time.DateOnly),
-						instant.In(location).Format("2006-01-02T15:04"),
-						instant.In(location).Format("2006-01-02T15:04:05"),
-						instant.UTC().Format(time.RFC3339),
-						"2026-03-08T02:30",
-					} {
-						for _, field := range []string{"scheduled_on", "deadline_on"} {
-							raw, err := json.Marshal(map[string]string{field: value, "timezone": zone})
-							require.NoError(t, err)
-							_, present, due, err := ScheduleFieldDue(string(raw), field, now, "UTC")
-							require.NoError(t, err)
-							require.True(t, present)
-							if due {
-								assert.LessOrEqual(t, value, cutoff, "%s in %s at %s", value, zone, now)
-							}
+					instant := now.Add(offset).In(location)
+					values = append(values,
+						instant.Format(time.DateOnly),
+						instant.Format("2006-01-02T15:04"),
+						instant.Format("2006-01-02T15:04:05"),
+					)
+				}
+				for _, value := range values {
+					for _, field := range []string{"scheduled_on", "deadline_on"} {
+						raw, err := json.Marshal(map[string]string{field: value, "timezone": zone})
+						require.NoError(t, err)
+						_, present, due, err := ScheduleFieldDue(string(raw), field, now, "UTC")
+						require.NoError(t, err)
+						require.True(t, present)
+						if due {
+							assert.LessOrEqual(t, value, cutoff, "%s in %s at %s", value, zone, now)
 						}
 					}
 				}
-			}
-		})
+			})
+		}
 	}
 }

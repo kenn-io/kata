@@ -220,35 +220,8 @@ func TestWriteQueueCancellationRacesHandoff(t *testing.T) {
 	})
 }
 
-// A settled schedule must stay readable while another operation owns the writer.
-func TestReconcileDueNotificationSettledDoesNotWaitForWriter(t *testing.T) {
-	ctx := t.Context()
-	store, err := Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
-	project, err := store.CreateProject(ctx, "settled-project")
-	require.NoError(t, err)
-	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
-		ProjectID: project.ID, Title: "Delivered work", Author: "worker-a",
-		Metadata: map[string]jsontext.Value{"scheduled_on": []byte(`"2020-01-01"`)},
-	})
-	require.NoError(t, err)
-	in := db.ReconcileDueNotificationIn{IssueID: issue.ID, Now: time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC), DefaultTimezone: "UTC"}
-	out, err := store.ReconcileDueNotification(ctx, in)
-	require.NoError(t, err)
-	require.True(t, out.Changed)
-	writer, err := store.BeginTx(ctx, nil)
-	require.NoError(t, err)
-	defer func() { require.NoError(t, writer.Rollback()) }()
-	readCtx, cancel := context.WithTimeout(ctx, time.Second)
-	defer cancel()
-	out, err = store.ReconcileDueNotification(readCtx, in)
-	require.NoError(t, err)
-	require.False(t, out.Changed)
-}
-
 func TestReconcileDueNotificationInvalidRecipientDoesNotWaitForWriter(t *testing.T) {
-	for _, recipient := range []string{"author", "owner"} {
+	for _, recipient := range []string{"valid", "author", "owner"} {
 		t.Run(recipient, func(t *testing.T) {
 			ctx := t.Context()
 			store, err := Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
@@ -260,8 +233,10 @@ func TestReconcileDueNotificationInvalidRecipientDoesNotWaitForWriter(t *testing
 				ProjectID: project.ID, Title: "Unaddressable scheduled work", Author: "bad\nactor",
 				Metadata: map[string]jsontext.Value{"scheduled_on": []byte(`"2020-01-01"`)},
 			}
-			if recipient == "owner" {
+			if recipient != "author" {
 				params.Author = "worker-a"
+			}
+			if recipient == "owner" {
 				params.Owner = new("bad\nactor")
 			}
 			issue, _, err := store.CreateIssue(ctx, params)
@@ -273,9 +248,14 @@ func TestReconcileDueNotificationInvalidRecipientDoesNotWaitForWriter(t *testing
 			}
 			out, err := store.ReconcileDueNotification(ctx, in)
 			require.NoError(t, err)
-			require.Error(t, out.NotificationErr)
+			if recipient == "valid" {
+				require.NoError(t, out.NotificationErr)
+				require.NotNil(t, out.Event)
+			} else {
+				require.Error(t, out.NotificationErr)
+				require.Nil(t, out.Event)
+			}
 			require.NotNil(t, out.Reached)
-			require.Nil(t, out.Event)
 
 			writer, err := store.BeginTx(ctx, nil)
 			require.NoError(t, err)
@@ -284,7 +264,11 @@ func TestReconcileDueNotificationInvalidRecipientDoesNotWaitForWriter(t *testing
 			defer cancel()
 			out, err = store.ReconcileDueNotification(readCtx, in)
 			require.NoError(t, err)
-			require.Error(t, out.NotificationErr)
+			if recipient == "valid" {
+				require.NoError(t, out.NotificationErr)
+			} else {
+				require.Error(t, out.NotificationErr)
+			}
 			require.False(t, out.Changed)
 			require.Nil(t, out.Reached)
 			require.Nil(t, out.Event)

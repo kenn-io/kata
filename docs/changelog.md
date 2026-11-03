@@ -9,9 +9,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
-- Keep issue writes responsive during due-date sweeps. Sweeps skip issues dated
-  36h or more in the future, check the rest without taking SQLite's writer, and
-  take it only for due notifications or cleanup.
+- Keep issue writes responsive during due-date sweeps. Sweeps skip date values
+  more than 24h past UTC now, including every issue 36h or more out in any zone.
+  Other checks take SQLite's writer only for due notifications or cleanup.
 - Keep the browser reachable when `kata daemon restart` runs from a sandbox or
   container that sees the daemon's process IDs and executable paths. The daemon
   uses the CLI's installed executable with its own environment and idle policy.
