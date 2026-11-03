@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"uuid"
@@ -27,7 +28,7 @@ func TestAttachmentLinkPinsExistingVersion(t *testing.T) {
 	p, iss := seedProjectAndIssue(t, env)
 	seedLinkFile(f)
 	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments/links", p.ID, iss.ShortID)
-	code, raw, err := postAttachmentLink(env, endpoint, `{"path":"/reports/report.pdf","actor":"operator"}`)
+	code, raw, err := postAttachmentLink(t, env, endpoint, `{"path":"/reports/report.pdf","actor":"operator"}`)
 	require.NoError(t, err)
 	require.Equal(t, 200, code, string(raw))
 	var out api.AddAttachmentResponseBody
@@ -37,20 +38,22 @@ func TestAttachmentLinkPinsExistingVersion(t *testing.T) {
 	require.Equal(t, linkVersion, out.Attachment.DocbankVersion.String())
 	require.EqualValues(t, 12, out.Attachment.Size)
 	require.Equal(t, []string{"GET /api/v1/path"}, f.Requests())
-	code, raw, err = postAttachmentLink(env, endpoint, `{"node_id":42,"actor":"operator"}`)
+	code, raw, err = postAttachmentLink(t, env, endpoint, `{"node_id":42,"actor":"operator"}`)
 	require.NoError(t, err)
 	require.Equal(t, 200, code, string(raw))
 	require.NoError(t, json.Unmarshal(raw, &out))
 	require.Equal(t, linkVersion, out.Attachment.DocbankVersion.String())
 	require.EqualValues(t, 12, out.Attachment.Size)
 	require.Equal(t, []string{"GET /api/v1/path", "GET /api/v1/nodes/42"}, f.Requests())
-	code, raw, err = postAttachmentLink(env, endpoint, `{"node_id":42,"version_id":"`+oldLinkVersion+`","actor":"operator"}`)
+	code, raw, err = postAttachmentLink(t, env, endpoint, `{"node_id":42,"version_id":"`+oldLinkVersion+`","actor":"operator"}`)
 	require.NoError(t, err)
 	require.Equal(t, 200, code, string(raw))
 	require.NoError(t, json.Unmarshal(raw, &out))
 	require.Equal(t, oldLinkVersion, out.Attachment.DocbankVersion.String())
 	require.EqualValues(t, 7, out.Attachment.Size)
-	resp, err := env.HTTP.Get(fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/attachments/%s/content", env.URL, p.ID, iss.ShortID, out.ID))
+	contentRequest, err := http.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/attachments/%s/content", env.URL, p.ID, iss.ShortID, out.ID), nil)
+	require.NoError(t, err)
+	resp, err := env.HTTP.Do(contentRequest)
 	require.NoError(t, err)
 	content, err := io.ReadAll(resp.Body)
 	require.NoError(t, resp.Body.Close())
@@ -62,8 +65,14 @@ func TestAttachmentLinkPinsExistingVersion(t *testing.T) {
 	}
 }
 
-func postAttachmentLink(env *testenv.Env, endpoint, body string) (int, []byte, error) {
-	resp, err := env.HTTP.Post(env.URL+endpoint, "application/json", strings.NewReader(body))
+func postAttachmentLink(t *testing.T, env *testenv.Env, endpoint, body string) (int, []byte, error) {
+	t.Helper()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, env.URL+endpoint, strings.NewReader(body))
+	if err != nil {
+		return 0, nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := env.HTTP.Do(req)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -126,7 +135,7 @@ func TestAttachmentLinkRejectsInvalidSelections(t *testing.T) {
 			input["actor"] = "operator"
 			rawInput, err := json.Marshal(input)
 			require.NoError(t, err)
-			status, raw, err := postAttachmentLink(env, fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments/links", p.ID, iss.ShortID), string(rawInput))
+			status, raw, err := postAttachmentLink(t, env, fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments/links", p.ID, iss.ShortID), string(rawInput))
 			require.NoError(t, err)
 			assertAPIError(t, status, raw, tc.status, tc.code)
 			stored, err := env.DB.IssueByID(t.Context(), iss.ID)
