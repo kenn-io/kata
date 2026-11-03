@@ -2286,6 +2286,7 @@ func (e Event) Validate() error {
 
 type EventEnvelope struct {
 	Actor               string          `json:"actor" validate:"required"`
+	AttributedTeammate  *string         `json:"attributed_teammate,omitempty"`
 	ContentHash         string          `json:"content_hash" validate:"required"`
 	CreatedAt           time.Time       `json:"created_at" validate:"required"`
 	EventID             int64           `json:"event_id"`

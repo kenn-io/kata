@@ -408,6 +408,26 @@ func TestGeneratedPollEventsPreservesPayload(t *testing.T) {
 	assert.JSONEq(t, `{"labels":["bug"],"nested":{"ok":true}}`, string(body.Events[0].Payload))
 }
 
+func TestGeneratedEventEnvelopePreservesDisplayContribution(t *testing.T) {
+	for _, field := range []string{`"attributed_teammate":"writer",`, `"attributed_teammate":"",`, ""} {
+		t.Run(field, func(t *testing.T) {
+			var event generated.EventEnvelope
+			require.NoError(t, json.Unmarshal([]byte(`{`+field+`"actor":"coordinator","payload":{"teammate":"route"}}`), &event))
+			encoded, err := json.Marshal(event)
+			require.NoError(t, err)
+			var fields map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(encoded, &fields))
+			if field == "" {
+				require.NotContains(t, fields, "attributed_teammate")
+			} else {
+				require.Contains(t, fields, "attributed_teammate")
+				require.JSONEq(t, `{`+field+`"actor":"coordinator"}`, `{"attributed_teammate":`+string(fields["attributed_teammate"])+`,"actor":`+string(fields["actor"])+`}`)
+			}
+			require.JSONEq(t, `{"teammate":"route"}`, string(event.Payload))
+		})
+	}
+}
+
 func TestGeneratedFederationIngestEventPreservesPayload(t *testing.T) {
 	payload := jsontext.Value(`{"items":[{"id":1}],"source":"hub-project"}`)
 	event := generated.FederationIngestEventEnvelope{
