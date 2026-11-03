@@ -818,7 +818,7 @@ func snapshotResponse(ctx context.Context, data db.UISnapshotData, intent normal
 			State: state, Issue: data.SelectedIssue,
 			Comments: []api.CommentOut{}, Labels: nonNil(data.SelectedLabels),
 			Links: nonNil(data.SelectedLinks), Recurrences: nonNil(data.Recurrences),
-			History: nonNil(data.History),
+			History: uiHistoryEvents(data.History),
 		}
 	}
 	if out.Body.Selected != nil && data.SelectedIssue != nil {
@@ -885,4 +885,13 @@ func nonNil[S ~[]E, E any](value S) S {
 		return S{}
 	}
 	return value
+}
+
+// uiHistoryEvents keeps the established raw-event shape of snapshot history.
+func uiHistoryEvents(events []db.Event) []api.UIHistoryEvent {
+	out := make([]api.UIHistoryEvent, 0, len(events))
+	for _, event := range events {
+		out = append(out, api.UIHistoryEvent{Event: event, AttributedTeammate: db.DisplayContribution(event.Type, []byte(event.Payload))})
+	}
+	return out
 }

@@ -12,6 +12,7 @@ import (
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/notification"
+	"go.kenn.io/kata/internal/teammate"
 
 	katauid "go.kenn.io/kata/internal/uid"
 )
@@ -1182,6 +1183,9 @@ func (d *Store) annotateFederationIngestClaimWorkTx(
 	ev db.RemoteEvent,
 	rootHolder db.ClaimPrincipal,
 ) ([]db.Event, error) {
+	// These audits describe federation ingest, so they must not inherit the
+	// sync request's display contribution.
+	ctx = teammate.WithRequest(ctx, "")
 	issueUIDs, err := federationIngestClaimAuditIssueUIDs(ev)
 	if err != nil {
 		return nil, err
@@ -1513,6 +1517,11 @@ func (d *Store) insertClaimEventTx(ctx context.Context, tx claimStore, in claimE
 	if err != nil {
 		return db.Event{}, fmt.Errorf("marshal claim event payload: %w", err)
 	}
+	stamped, err := db.StampEventTeammate(ctx, in.Type, in.Actor, string(b))
+	if err != nil {
+		return db.Event{}, err
+	}
+	b = []byte(stamped)
 	eventUID, err := katauid.New()
 	if err != nil {
 		return db.Event{}, fmt.Errorf("generate event uid: %w", err)

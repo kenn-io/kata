@@ -16,12 +16,14 @@ import (
 
 // AssignInput names the issue and its new owner.
 type AssignInput struct {
-	Ref   string `json:"ref"`
-	Owner string `json:"owner" jsonschema:"Actor that will own the issue"`
+	Teammate *string `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
+	Ref      string  `json:"ref"`
+	Owner    string  `json:"owner" jsonschema:"Actor that will own the issue"`
 }
 
 // UnassignInput names the issue whose owner to clear.
 type UnassignInput struct {
+	Teammate      *string `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
 	Ref           string  `json:"ref"`
 	ExpectedOwner *string `json:"expected_owner,omitempty" jsonschema:"Clear only while this actor still owns the issue"`
 }
@@ -87,6 +89,11 @@ func registerCoordinationTools(server *sdkmcp.Server, handlers toolHandlers) {
 }
 
 func (h toolHandlers) assign(ctx context.Context, _ *sdkmcp.CallToolRequest, input AssignInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
+	var contributionErr error
+	ctx, contributionErr = h.contributionContext(ctx, input.Teammate)
+	if contributionErr != nil {
+		return nil, MutationOutput{}, contributionErr
+	}
 	owner := strings.TrimSpace(input.Owner)
 	if owner == "" {
 		return nil, MutationOutput{}, errors.New("owner must not be empty")
@@ -106,6 +113,11 @@ func (h toolHandlers) assign(ctx context.Context, _ *sdkmcp.CallToolRequest, inp
 }
 
 func (h toolHandlers) unassign(ctx context.Context, _ *sdkmcp.CallToolRequest, input UnassignInput) (*sdkmcp.CallToolResult, MutationOutput, error) {
+	var contributionErr error
+	ctx, contributionErr = h.contributionContext(ctx, input.Teammate)
+	if contributionErr != nil {
+		return nil, MutationOutput{}, contributionErr
+	}
 	var expected *string
 	if input.ExpectedOwner != nil {
 		if expected = optionalString(*input.ExpectedOwner); expected == nil {

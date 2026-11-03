@@ -347,6 +347,11 @@ func validateImportRecord(record ImportRecord) error {
 		if err := teammate.Validate(rec.Teammate); err != nil {
 			return fmt.Errorf("kind %q: %w", ImportKindComment, err)
 		}
+		if rec.AttributedTeammate != nil {
+			if err := teammate.Validate(*rec.AttributedTeammate); err != nil {
+				return fmt.Errorf("kind %q attributed_teammate: %w", ImportKindComment, err)
+			}
+		}
 		if err := ValidateCommentReply(rec.UID, rec.ReplyToUID, rec.ReplyKind); err != nil {
 			return fmt.Errorf("kind %q: %w", ImportKindComment, err)
 		}

@@ -3,6 +3,8 @@
  */
 
 export interface CommentLink {
+  /** @nullable */
+  attributed_teammate?: string | null
   author?: string
   body?: string
   created_at?: string

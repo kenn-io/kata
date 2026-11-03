@@ -723,20 +723,21 @@ func (c CloseActionRequestBody) Validate() error {
 }
 
 type Comment struct {
-	AccountableActor *string              `json:"accountable_actor,omitempty"`
-	Author           string               `json:"author" validate:"required"`
-	AuthorityUID     *string              `json:"authority_uid,omitempty"`
-	Body             string               `json:"body" validate:"required"`
-	CreatedAt        time.Time            `json:"created_at" validate:"required"`
-	EditedAt         *time.Time           `json:"edited_at,omitempty"`
-	ID               int64                `json:"id"`
-	IssueID          int64                `json:"issue_id"`
-	ReplyKind        *string              `json:"reply_kind,omitempty"`
-	ReplyToUID       *string              `json:"reply_to_uid,omitempty"`
-	SourceActor      *string              `json:"source_actor,omitempty"`
-	Teammate         *string              `json:"teammate,omitempty"`
-	UID              string               `json:"uid" validate:"required"`
-	Verification     *CommentVerification `json:"verification,omitempty"`
+	AccountableActor   *string              `json:"accountable_actor,omitempty"`
+	AttributedTeammate *string              `json:"attributed_teammate,omitempty"`
+	Author             string               `json:"author" validate:"required"`
+	AuthorityUID       *string              `json:"authority_uid,omitempty"`
+	Body               string               `json:"body" validate:"required"`
+	CreatedAt          time.Time            `json:"created_at" validate:"required"`
+	EditedAt           *time.Time           `json:"edited_at,omitempty"`
+	ID                 int64                `json:"id"`
+	IssueID            int64                `json:"issue_id"`
+	ReplyKind          *string              `json:"reply_kind,omitempty"`
+	ReplyToUID         *string              `json:"reply_to_uid,omitempty"`
+	SourceActor        *string              `json:"source_actor,omitempty"`
+	Teammate           *string              `json:"teammate,omitempty"`
+	UID                string               `json:"uid" validate:"required"`
+	Verification       *CommentVerification `json:"verification,omitempty"`
 }
 
 func (c Comment) Validate() error {
@@ -767,20 +768,21 @@ func (c Comment) Validate() error {
 }
 
 type CommentLink struct {
-	Author       *string    `json:"author,omitempty"`
-	Body         *string    `json:"body,omitempty"`
-	CreatedAt    *time.Time `json:"created_at,omitempty"`
-	EditedAt     *time.Time `json:"edited_at,omitempty"`
-	Handle       *string    `json:"handle,omitempty"`
-	IssueShortID *string    `json:"issue_short_id,omitempty"`
-	IssueUID     *string    `json:"issue_uid,omitempty"`
-	Kind         string     `json:"kind" validate:"required"`
-	ProjectID    *int64     `json:"project_id,omitempty"`
-	ProjectUID   *string    `json:"project_uid,omitempty"`
-	Status       *string    `json:"status,omitempty"`
-	TargetEdited *bool      `json:"target_edited,omitempty"`
-	Teammate     *string    `json:"teammate,omitempty"`
-	UID          *string    `json:"uid,omitempty"`
+	AttributedTeammate *string    `json:"attributed_teammate,omitempty"`
+	Author             *string    `json:"author,omitempty"`
+	Body               *string    `json:"body,omitempty"`
+	CreatedAt          *time.Time `json:"created_at,omitempty"`
+	EditedAt           *time.Time `json:"edited_at,omitempty"`
+	Handle             *string    `json:"handle,omitempty"`
+	IssueShortID       *string    `json:"issue_short_id,omitempty"`
+	IssueUID           *string    `json:"issue_uid,omitempty"`
+	Kind               string     `json:"kind" validate:"required"`
+	ProjectID          *int64     `json:"project_id,omitempty"`
+	ProjectUID         *string    `json:"project_uid,omitempty"`
+	Status             *string    `json:"status,omitempty"`
+	TargetEdited       *bool      `json:"target_edited,omitempty"`
+	Teammate           *string    `json:"teammate,omitempty"`
+	UID                *string    `json:"uid,omitempty"`
 }
 
 func (c CommentLink) Validate() error {
@@ -789,6 +791,7 @@ func (c CommentLink) Validate() error {
 
 type CommentOut struct {
 	AccountableActor   *string                 `json:"accountable_actor,omitempty"`
+	AttributedTeammate *string                 `json:"attributed_teammate,omitempty"`
 	Author             string                  `json:"author" validate:"required"`
 	AuthorityUID       *string                 `json:"authority_uid,omitempty"`
 	Backlinks          []CommentLink           `json:"backlinks,omitempty"`
@@ -2282,6 +2285,7 @@ func (e Event) Validate() error {
 
 type EventEnvelope struct {
 	Actor               string          `json:"actor" validate:"required"`
+	AttributedTeammate  *string         `json:"attributed_teammate,omitempty"`
 	ContentHash         string          `json:"content_hash" validate:"required"`
 	CreatedAt           time.Time       `json:"created_at" validate:"required"`
 	EventID             int64           `json:"event_id"`
@@ -7018,6 +7022,33 @@ func (u UIGraphUnresolvedRef) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(u))
 }
 
+type UIHistoryEvent struct {
+	Actor               string    `json:"actor" validate:"required"`
+	AttributedTeammate  *string   `json:"attributed_teammate,omitempty"`
+	ContentHash         string    `json:"content_hash" validate:"required"`
+	CreatedAt           time.Time `json:"created_at" validate:"required"`
+	HlcCounter          int64     `json:"hlc_counter"`
+	HlcPhysicalMs       int64     `json:"hlc_physical_ms"`
+	ID                  int64     `json:"id"`
+	IssueID             *int64    `json:"issue_id,omitempty"`
+	IssueShortID        *string   `json:"issue_short_id,omitempty"`
+	IssueUID            *string   `json:"issue_uid,omitempty"`
+	OriginInstanceUID   string    `json:"origin_instance_uid" validate:"required"`
+	Payload             string    `json:"payload" validate:"required"`
+	ProjectID           int64     `json:"project_id"`
+	ProjectName         string    `json:"project_name" validate:"required"`
+	ProjectUID          string    `json:"project_uid" validate:"required"`
+	RelatedIssueID      *int64    `json:"related_issue_id,omitempty"`
+	RelatedIssueShortID *string   `json:"related_issue_short_id,omitempty"`
+	RelatedIssueUID     *string   `json:"related_issue_uid,omitempty"`
+	Type                string    `json:"type" validate:"required"`
+	UID                 string    `json:"uid" validate:"required"`
+}
+
+func (u UIHistoryEvent) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(u))
+}
+
 type UIIssue struct {
 	AccountableActor    *string              `json:"accountable_actor,omitempty"`
 	AssignmentExpiresOn *time.Time           `json:"assignment_expires_on,omitempty"`
@@ -7258,13 +7289,13 @@ func (u UIReferencesResponseBody) Validate() error {
 }
 
 type UISelectedAuthority struct {
-	Comments    []CommentOut `json:"comments" validate:"required"`
-	History     []Event      `json:"history" validate:"required"`
-	Issue       *UIIssue     `json:"issue,omitempty"`
-	Labels      []IssueLabel `json:"labels" validate:"required"`
-	Links       []UILink     `json:"links" validate:"required"`
-	Recurrences []Recurrence `json:"recurrences" validate:"required"`
-	State       string       `json:"state" validate:"required"`
+	Comments    []CommentOut     `json:"comments" validate:"required"`
+	History     []UIHistoryEvent `json:"history" validate:"required"`
+	Issue       *UIIssue         `json:"issue,omitempty"`
+	Labels      []IssueLabel     `json:"labels" validate:"required"`
+	Links       []UILink         `json:"links" validate:"required"`
+	Recurrences []Recurrence     `json:"recurrences" validate:"required"`
+	State       string           `json:"state" validate:"required"`
 }
 
 func (u UISelectedAuthority) Validate() error {

@@ -57,7 +57,8 @@
   })
   const kinds: KataReplyKind[] = ['reply', 'confirm', 'refute', 'supersede']
   function linkLabel(link: KataCommentLink): string {
-    return `${({ reply: 'Replies to', confirm: 'Confirms', refute: 'Refutes', supersede: 'Supersedes' } as Record<string, string>)[link.kind] ?? link.kind} ${link.handle ?? `(${link.status ?? 'unresolved'})`}${link.author ? ` (${link.author}${link.teammate ? ` / ${link.teammate}` : ''})` : ''}${link.status && link.handle ? ` (${link.status})` : ''}`
+    const contribution = link.attributed_teammate ?? link.teammate
+    return `${({ reply: 'Replies to', confirm: 'Confirms', refute: 'Refutes', supersede: 'Supersedes' } as Record<string, string>)[link.kind] ?? link.kind} ${link.handle ?? `(${link.status ?? 'unresolved'})`}${link.author ? ` (${link.author}${contribution ? ` / ${contribution}` : ''})` : ''}${link.status && link.handle ? ` (${link.status})` : ''}`
   }
   function open(link: KataCommentLink, sourceUID?: string): void {
     if (link.issue_uid && link.uid)
@@ -78,6 +79,7 @@
   {:else}
     <ol bind:this={listElement}>
       {#each comments as comment (comment.id)}
+        {@const contribution = comment.attributedTeammate ?? comment.teammate}
         <li
           id={comment.uid ? `comment-${comment.uid}` : undefined}
           class:selected={selectedCommentUID !== undefined && comment.uid === selectedCommentUID}
@@ -88,11 +90,7 @@
             {#if comment.editedAt}<span title={localDateTimeLabel(comment.editedAt)}>(edited)</span
               >{/if}
             <span class="avatar" aria-hidden="true">{comment.author.slice(0, 1)}</span>
-            <strong
-              >{comment.teammate
-                ? `${comment.author} / ${comment.teammate}`
-                : comment.author}</strong
-            >
+            <strong>{contribution ? `${comment.author} / ${contribution}` : comment.author}</strong>
             <time datetime={comment.createdAt} title={localDateTimeLabel(comment.createdAt)}
               >{timeAgo(comment.createdAt)}</time
             >
@@ -117,7 +115,7 @@
           />
           {#if onReplyComment && comment.uid && comment.handle}
             <div class="reply-actions">
-              {#each kinds as kind}<Button
+              {#each kinds as kind (kind)}<Button
                   size="sm"
                   label={kind[0]!.toUpperCase() + kind.slice(1)}
                   disabled={actionsDisabled}

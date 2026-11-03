@@ -830,6 +830,9 @@ func (d *Store) ApplyExternalRootProjection(
 	ctx context.Context,
 	params db.ExternalRootProjectionParams,
 ) (db.Issue, *db.Event, bool, error) {
+	// External root state comes from the provider, independent of the caller's
+	// request contribution. The derived context preserves cancellation.
+	ctx = db.WithoutEventTeammate(ctx)
 	if err := db.ValidateExternalRootProjectionParams(params); err != nil {
 		return db.Issue{}, nil, false, err
 	}
@@ -963,6 +966,9 @@ func (d *Store) UpsertExternalCommentProjection(
 	ctx context.Context,
 	params db.ExternalCommentProjectionParams,
 ) (db.Comment, *db.Event, bool, error) {
+	// External comments come from the provider, independent of the caller's
+	// request contribution. The derived context preserves cancellation.
+	ctx = db.WithoutEventTeammate(ctx)
 	if err := db.ValidateExternalCommentProjectionParams(params); err != nil {
 		return db.Comment{}, nil, false, err
 	}
@@ -1159,6 +1165,9 @@ func (d *Store) EnsureExternalRootLifecycleRequest(
 	if err := db.ValidateExternalRootLifecycleRequestParams(params); err != nil {
 		return db.Comment{}, nil, false, err
 	}
+	// External lifecycle state comes from the provider, independent of the caller's
+	// request contribution. The derived context preserves cancellation.
+	ctx = db.WithoutEventTeammate(ctx)
 	return retryExternalRootWrite3(ctx, d, func() (db.Comment, []db.Event, bool, error) {
 		tx, err := d.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 		if err != nil {
@@ -1866,6 +1875,9 @@ func (d *Store) ApplyExternalFieldProjection(
 			return db.Issue{}, nil, false, fmt.Errorf("validate %q: %w", key, err)
 		}
 	}
+	// External field values come from the provider, independent of the caller's
+	// request contribution. The derived context preserves cancellation.
+	ctx = db.WithoutEventTeammate(ctx)
 	return retryExternalRootWrite3(ctx, d, func() (db.Issue, *db.Event, bool, error) {
 		tx, err := d.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 		if err != nil {

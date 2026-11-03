@@ -16,6 +16,7 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/teammate"
 )
 
 const (
@@ -506,7 +507,7 @@ func scopedEventPayload(event db.Event) (string, bool) {
 		// History and mutation responses omit compound peers that may be
 		// outside the subtree. Polling and SSE reset so linked issue views
 		// refresh; reports re-add authorized peers (scoped_authorization.go).
-		return "", true
+		allowedKeys[event.Type] = keySet()
 	}
 	keys, known := allowedKeys[event.Type]
 	if !known {
@@ -519,7 +520,18 @@ func scopedEventPayload(event db.Event) (string, bool) {
 	if json.Unmarshal([]byte(event.Payload), &raw) != nil {
 		return "", false
 	}
-	projected := make(map[string]jsontext.Value, len(keys))
+	projected := make(map[string]jsontext.Value, len(keys)+1)
+	if value, ok := raw["attributed_teammate"]; ok {
+		var handle string
+		if json.Unmarshal(value, &handle) == nil && handle != "" && teammate.Validate(handle) == nil {
+			projected["attributed_teammate"] = value
+		} else {
+			projected["attributed_teammate"] = jsontext.Value(`""`)
+		}
+	}
+	if event.Type == "issue.links_changed" && len(projected) == 0 {
+		return "", true
+	}
 	for key := range keys {
 		if value, ok := raw[key]; ok {
 			projected[key] = value
@@ -581,15 +593,16 @@ func eventToEnvelope(e db.Event) api.EventEnvelope {
 		payload = jsontext.Value(e.Payload)
 	}
 	return api.EventEnvelope{
-		EventID:           e.ID,
-		EventUID:          e.UID,
-		OriginInstanceUID: e.OriginInstanceUID,
-		Type:              e.Type,
-		ProjectID:         e.ProjectID,
-		ProjectUID:        e.ProjectUID,
-		ProjectName:       e.ProjectName,
-		IssueID:           e.IssueID,
-		IssueUID:          e.IssueUID,
+		AttributedTeammate: db.DisplayContribution(e.Type, []byte(e.Payload)),
+		EventID:            e.ID,
+		EventUID:           e.UID,
+		OriginInstanceUID:  e.OriginInstanceUID,
+		Type:               e.Type,
+		ProjectID:          e.ProjectID,
+		ProjectUID:         e.ProjectUID,
+		ProjectName:        e.ProjectName,
+		IssueID:            e.IssueID,
+		IssueUID:           e.IssueUID,
 		// IssueShortID / RelatedIssueShortID are joined from issues.short_id
 		// at query time so old events render correctly across short_id
 		// shifts (project merge, federation merge). UIDs remain canonical.

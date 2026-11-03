@@ -137,6 +137,9 @@ export function projectIssueDetail(wire: KataIssueDetailWire): KataIssueDetailMo
       author: comment.author,
       ...creationFor(comment),
       ...(comment.teammate === undefined ? {} : { teammate: comment.teammate }),
+      ...(comment.attributed_teammate == null
+        ? {}
+        : { attributedTeammate: comment.attributed_teammate }),
       body: comment.body,
       createdAt: comment.created_at,
     })),

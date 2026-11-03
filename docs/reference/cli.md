@@ -24,7 +24,7 @@ compactly; `kata --help` has their full descriptions.
 | `--project <name>` | Select a project explicitly; otherwise resolve `.kata.toml` at or above `--workspace`. |
 | `--daemon <name>` | Target a named daemon catalog entry. Without it, select `KATA_SERVER`, workspace config, `active_daemon`, then local. |
 | `--as <actor>` | Override the actor for this command. An explicitly empty value is a validation error; actor fallback applies only when the flag is absent. |
-| `--teammate <handle>` | Attribute supported comments, new issues, and cron run observations to one teammate under the accountable actor. An explicit empty value suppresses `KATA_TEAMMATE`. |
+| `--teammate <handle>` | Attribute native issue actions, supported comments, new issues, and cron run observations to one teammate under the accountable actor. An explicit empty value suppresses `KATA_TEAMMATE`. |
 | `--agent` | Emit an `OK` or `ERR` status line, then command-specific details. Use in agent sessions. |
 | `--json` | Emit the full JSON envelope for scripts. |
 | `--format <mode>` | Select an output mode explicitly. General commands accept `human`, `json`, or `agent`; `quickstart` also accepts `contract`. |
@@ -942,10 +942,15 @@ kind with that key is a conflict. Equivalent target spellings share a receipt.
 
 `KATA_TEAMMATE` supplies an optional default for comment creation;
 `--teammate` overrides it and `--teammate=''` suppresses it for one
-command. A nonempty teammate requires daemon API 0.18.0 or newer and is
-stored separately from the accountable author. The same default on `kata
-create` writes the string to the new issue's initial `metadata.teammate`.
+command. A nonempty comment teammate requires daemon API 0.18.0 or newer
+and is stored separately from the accountable author. The same default on
+`kata create` writes the string to the new issue's initial `metadata.teammate`.
 Commenting on an existing issue never changes that issue metadata.
+
+Native issue actions also carry this selection as optional request
+contribution in raw event history. It does not change the accountable actor
+or comment addressing. Older daemons may ignore this header without refusing
+the write. See [Request contribution](http-api.md#request-contribution).
 
 `kata comment edit` replaces the current comment body while preserving the
 comment UID, author, teammate, creation time, reply edge, and thread position.
@@ -954,9 +959,15 @@ the reply was posted. Use it for
 pre-federation content redaction; it does not rewrite historical events that
 have already been shared.
 
-Human views show attributed comments as `author / teammate`. JSON and agent
-output keep the two fields separate. Teammate-free comments retain the
-existing author-only shape.
+`kata show`, `kata events`, TUI history and comments, and web history and
+comments show retained contribution as `actor / teammate`. A comment keeps its
+original creation contributor after an edit, retry, refresh, or snapshot restore.
+Legacy comments use their explicit teammate when no retained contribution exists.
+
+JSON and agent output expose display contribution as `attributed_teammate`.
+The existing comment `teammate` remains the routing identity used by inbound
+filters, duplicate-reply checks, and notifications. Display contribution does
+not change those outcomes; missing or malformed display values show no suffix.
 
 Close:
 

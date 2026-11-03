@@ -222,6 +222,49 @@ this acknowledgement on every page: older daemons can ignore the query and
 return unfiltered project events. The TUI stops pagination with an upgrade
 daemon message when the acknowledgement is missing or changes between pages.
 
+### Request contribution
+
+Native issue mutations can carry the optional `X-Kata-Teammate` header. The
+handle uses 1–64 ASCII letters, digits, dots, underscores, or hyphens and starts
+with a letter or digit. An empty value suppresses contribution. The daemon
+authenticates the request before rejecting an invalid handle with HTTP `400`.
+
+The CLI freezes explicit `--teammate` or `KATA_TEAMMATE` selection for the
+command. Go callers can use `client.WithTeammate(ctx, handle)`; MCP issue
+mutation tools accept an optional `teammate`, with an empty string overriding
+the startup default. Clients send the header only on mutations to the selected
+daemon origin. No harness detection is involved. Invalid explicit CLI flags
+are validation errors. An invalid environment default does not block actions
+that do not consume explicit teammate identity; those requests carry no
+contribution. The selection applies only to that request. Daemon workers,
+including background synchronization, do not inherit the launch selection.
+Interactive TUI and browser mutation selection is outside this transport scope.
+
+Native user issue and existing live claim events retain the value as
+`attributed_teammate` in their raw JSON payload before hashing. Full and
+projectable scoped issue history preserve this display field. It does not
+change the accountable actor, explicit comment `teammate`, issue metadata,
+reply addresses, inbox matching, or idempotency fingerprints. System, project,
+cron, snapshot, imported history, and queued replay do not acquire a request
+contribution. Retries preserve the committed event's contribution; a recovered
+keyed close follow-up uses that close event's contribution, including its absence.
+If the response contains neither an original nor a returned event, the follow-up
+keeps the current invocation's selection.
+
+Event envelopes expose validated display contribution as optional
+`attributed_teammate`. Comment and comment-link reads expose the original
+creation contribution in the same field, including mutation responses and
+snapshot-only restores. Comment `teammate` still identifies the explicit routing
+participant. An empty display value suppresses the suffix; an absent field from
+an older daemon permits the client's legacy explicit-teammate display. Invalid
+retained handles are omitted from display without rewriting event payloads,
+content hashes, or signed creation receipts. No request-header or minimum-version
+change is required for these additive read fields.
+
+Older daemons can ignore the optional header and still accept ordinary writes
+and MCP startup. Explicit comment-body attribution retains its existing API
+version requirement. This header adds no version preflight.
+
 ### Version history
 
 | Version | Change |

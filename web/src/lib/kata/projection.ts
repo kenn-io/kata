@@ -216,6 +216,9 @@ function normalizeEvent(
     related_issue_uid: event.related_issue_uid,
     related_issue_short_id: event.related_issue_short_id,
     actor: event.actor,
+    ...(event.attributed_teammate === undefined
+      ? {}
+      : { attributed_teammate: event.attributed_teammate }),
     payload: parseEventPayload(event.payload),
     created_at: event.created_at,
   }
@@ -255,6 +258,9 @@ function normalizeSelectedDetail(
         : { backlinks_truncated: comment.backlinks_truncated }),
       issue_id: comment.issue_id,
       author: comment.author,
+      ...(comment.attributed_teammate === undefined
+        ? {}
+        : { attributed_teammate: comment.attributed_teammate }),
       ...creationFields(comment),
       body: comment.body,
       created_at: comment.created_at,

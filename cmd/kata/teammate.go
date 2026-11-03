@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -8,8 +9,21 @@ import (
 	"go.kenn.io/kata/internal/teammate"
 )
 
+type teammateResolutionKey struct{}
+type teammateResolution struct {
+	handle string
+	err    error
+}
+
 // resolveTeammate keeps an explicitly empty flag distinct from inheritance.
 func resolveTeammate(cmd *cobra.Command) (string, error) {
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if cached, ok := ctx.Value(teammateResolutionKey{}).(teammateResolution); ok {
+		return cached.handle, cached.err
+	}
 	var override *string
 	if cmd.Flags().Changed("teammate") {
 		value, _ := cmd.Flags().GetString("teammate")
@@ -17,9 +31,14 @@ func resolveTeammate(cmd *cobra.Command) (string, error) {
 	}
 	value, err := teammate.Resolve(override, os.Getenv("KATA_TEAMMATE"))
 	if err != nil {
-		return "", &cliError{Message: err.Error(), Kind: kindValidation, ExitCode: ExitValidation}
+		err = &cliError{Message: err.Error(), Kind: kindValidation, ExitCode: ExitValidation}
 	}
-	return value, nil
+	ctx = context.WithValue(ctx, teammateResolutionKey{}, teammateResolution{value, err})
+	if err == nil {
+		ctx = teammate.WithRequest(ctx, value)
+	}
+	cmd.SetContext(ctx)
+	return value, err
 }
 
 func preflightCommentTeammate(cmd *cobra.Command, handle string) error {

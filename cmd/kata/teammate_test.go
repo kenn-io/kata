@@ -185,6 +185,7 @@ func TestTeammateInvalidDefaultDoesNotAffectReadsOrUnattributedEdits(t *testing.
 	t.Setenv("KATA_TEAMMATE", "bad/handle")
 	runCLI(t, env, dir, "show", ref)
 	runCLI(t, env, dir, "edit", ref, "--title", "Updated")
+	runCLI(t, env, dir, "--teammate=", "edit", ref, "--title", "Updated")
 	runCLI(t, env, dir, "--teammate=", "comment", ref, "--body", "No attribution")
 	got := fetchIssueViaHTTPWithComments(t, env, pid, ref)
 	require.Equal(t, "Updated", got.Issue.Title)

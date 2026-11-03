@@ -780,14 +780,15 @@ type createdLinkOut struct {
 }
 
 type issueSnapshotComment struct {
-	ReplyToUID string `json:"reply_to_uid,omitempty"`
-	ReplyKind  string `json:"reply_kind,omitempty"`
-	EditedAt   string `json:"edited_at,omitempty"`
-	CommentUID string `json:"comment_uid"`
-	Author     string `json:"author"`
-	Teammate   string `json:"teammate,omitempty"`
-	Body       string `json:"body"`
-	CreatedAt  string `json:"created_at"`
+	AttributedTeammate *string `json:"attributed_teammate,omitzero"`
+	ReplyToUID         string  `json:"reply_to_uid,omitempty"`
+	ReplyKind          string  `json:"reply_kind,omitempty"`
+	EditedAt           string  `json:"edited_at,omitempty"`
+	CommentUID         string  `json:"comment_uid"`
+	Author             string  `json:"author"`
+	Teammate           string  `json:"teammate,omitempty"`
+	Body               string  `json:"body"`
+	CreatedAt          string  `json:"created_at"`
 }
 
 type issueCreatedPayload struct {
@@ -1333,6 +1334,9 @@ func commentByUIDForIssueTx(ctx context.Context, tx *sql.Tx, issueID int64, comm
 	if err != nil {
 		return db.Comment{}, fmt.Errorf("lookup comment: %w", err)
 	}
+	if err := db.HydrateCommentDisplayTx(ctx, tx, []*db.Comment{&c}, func(int) string { return "?" }); err != nil {
+		return db.Comment{}, err
+	}
 	return c, nil
 }
 
@@ -1345,6 +1349,9 @@ func commentByIDTx(ctx context.Context, tx *sql.Tx, commentID int64) (db.Comment
 	}
 	if err != nil {
 		return db.Comment{}, fmt.Errorf("read comment: %w", err)
+	}
+	if err := db.HydrateCommentDisplayTx(ctx, tx, []*db.Comment{&c}, func(int) string { return "?" }); err != nil {
+		return db.Comment{}, err
 	}
 	return c, nil
 }
@@ -1603,7 +1610,12 @@ func (d *Store) editComment(ctx context.Context, p db.EditCommentParams) (db.Com
 // CommentsByIssue returns every comment on issueID in chronological order
 // (created_at, then id as a stable tiebreaker).
 func (d *Store) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Comment, error) {
-	rows, err := d.QueryContext(ctx,
+	tx, err := d.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.QueryContext(ctx,
 		`SELECT `+commentColumns+` FROM comments WHERE issue_id = ?`, issueID)
 	if err != nil {
 		return nil, err
@@ -1618,6 +1630,19 @@ func (d *Store) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Commen
 		out = append(out, c)
 	}
 	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	comments := make([]*db.Comment, len(out))
+	for i := range out {
+		comments[i] = &out[i]
+	}
+	if err := db.HydrateCommentDisplayTx(ctx, tx, comments, func(int) string { return "?" }); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	slices.SortFunc(out, func(a, b db.Comment) int {
@@ -2664,6 +2689,14 @@ func scheduleDefaultTimezone(recurrenceTimezone, daemonTimezone string) string {
 }
 
 func (d *Store) insertEventTx(ctx context.Context, tx *sql.Tx, in eventInsert) (db.Event, error) {
+	// Explicit event identity belongs to replay/ingest; never rewrite its bytes.
+	if in.UID == "" && in.OriginInstanceUID == "" && in.ContentHash == "" {
+		payload, err := db.StampEventTeammate(ctx, in.Type, in.Actor, in.Payload)
+		if err != nil {
+			return db.Event{}, err
+		}
+		in.Payload = payload
+	}
 	eventUID := in.UID
 	var err error
 	if eventUID == "" {

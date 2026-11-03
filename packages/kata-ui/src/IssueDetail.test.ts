@@ -126,6 +126,28 @@ describe('IssueDetail', () => {
     expect(within(region).queryByText(/history/i)).toBeNull()
   })
 
+  it('renders the retained contributor separately from routing', () => {
+    render(IssueDetail, {
+      props: {
+        detail: {
+          ...detail,
+          comments: [
+            {
+              id: '7',
+              author: 'actor',
+              teammate: 'route',
+              attributedTeammate: 'writer',
+              body: 'Evidence',
+              createdAt: '2026-09-13T12:00:00Z',
+            },
+          ],
+        },
+      },
+    })
+    expect(screen.getByText('actor / writer')).toBeTruthy()
+    expect(screen.queryByText('actor / route')).toBeNull()
+  })
+
   it('shows the teammate beside the accountable author', () => {
     render(IssueDetail, {
       props: {
@@ -217,6 +239,8 @@ it('opens a comment endpoint and starts a typed reply from its canonical UID', a
           handle: 'abcd:abc123',
           kind: 'reply',
           author: 'finder',
+          teammate: 'target-route',
+          attributed_teammate: 'finder-display',
           target_edited: true,
         },
         backlinks: [
@@ -225,6 +249,9 @@ it('opens a comment endpoint and starts a typed reply from its canonical UID', a
             issue_uid: 'third-issue',
             handle: 'efgh:ghi789',
             kind: 'confirm',
+            author: 'reviewer',
+            teammate: 'review-route',
+            attributed_teammate: 'checker',
           },
         ],
       },
@@ -241,7 +268,11 @@ it('opens a comment endpoint and starts a typed reply from its canonical UID', a
     issueUID: '01TASK',
     commentUID: 'reply-comment',
   })
+  expect(screen.getByRole('button', { name: /Replies to abcd:abc123/ }).textContent).toContain(
+    'finder / finder-display',
+  )
   await fireEvent.click(screen.getByRole('button', { name: 'Show 1 confirmation reply' }))
+  expect(screen.getByText('reviewer / checker')).toBeDefined()
   await fireEvent.click(screen.getByRole('button', { name: 'Open efgh:ghi789' }))
   expect(onOpenComment).toHaveBeenCalledWith('third-issue', 'backlink-comment', {
     issueUID: '01TASK',
@@ -356,7 +387,14 @@ it('shows conflicting direct relation counts and chronological evidence without 
   const open = vi.fn()
   const model = {
     ...detail,
-    comments: [{ ...detail.comments[0]!, uid: 'original', handle: 'c:aaaaaa', backlinks: links }],
+    comments: [
+      {
+        ...detail.comments[0]!,
+        uid: 'original',
+        handle: 'c:aaaaaa',
+        backlinks: links,
+      },
+    ],
   }
   render(IssueDetail, { props: { detail: model, onOpenComment: open } })
   await vi.waitFor(() => expect(screen.getByText('Ready to ship')).toBeTruthy(), { timeout: 10000 })
@@ -366,7 +404,9 @@ it('shows conflicting direct relation counts and chronological evidence without 
   expect(screen.getByRole('button', { name: 'Show 2 superseding replies' }).textContent).toContain(
     'Superseding replies 2',
   )
-  const confirmations = screen.getByRole('button', { name: 'Show 2 confirmation replies' })
+  const confirmations = screen.getByRole('button', {
+    name: 'Show 2 confirmation replies',
+  })
   confirmations.focus()
   expect(document.activeElement).toBe(confirmations)
   await fireEvent.click(confirmations)
@@ -457,7 +497,10 @@ it('refreshes incoming counts from accepted data and labels partial evidence hon
   )
   expect(screen.getByText('More replies may be available')).toBeTruthy()
   await rerender({
-    detail: { ...detail, comments: [{ ...detail.comments[0]!, uid: 'original', backlinks: [] }] },
+    detail: {
+      ...detail,
+      comments: [{ ...detail.comments[0]!, uid: 'original', backlinks: [] }],
+    },
   })
   expect(screen.queryByRole('button', { name: /Show.*repl/ })).toBeNull()
   await vi.waitFor(() => expect(screen.getByText('Ready to ship')).toBeTruthy(), { timeout: 10000 })
@@ -491,7 +534,11 @@ it('keeps unresolved outgoing states and exposes an explicit return route', asyn
       detail: {
         ...detail,
         comments: [
-          { ...detail.comments[0]!, uid: 'response', reply: { kind: 'supersede', status } },
+          {
+            ...detail.comments[0]!,
+            uid: 'response',
+            reply: { kind: 'supersede', status },
+          },
         ],
       },
       onOpenComment,

@@ -131,14 +131,15 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 			CreatedAt  string `json:"created_at"`
 		} `json:"links"`
 		Comments []struct {
-			ReplyToUID string `json:"reply_to_uid"`
-			ReplyKind  string `json:"reply_kind"`
-			EditedAt   string `json:"edited_at"`
-			CommentUID string `json:"comment_uid"`
-			Author     string `json:"author"`
-			Teammate   string `json:"teammate,omitempty"`
-			Body       string `json:"body"`
-			CreatedAt  string `json:"created_at"`
+			ReplyToUID         string         `json:"reply_to_uid"`
+			ReplyKind          string         `json:"reply_kind"`
+			EditedAt           string         `json:"edited_at"`
+			CommentUID         string         `json:"comment_uid"`
+			Author             string         `json:"author"`
+			Teammate           string         `json:"teammate,omitempty"`
+			AttributedTeammate jsontext.Value `json:"attributed_teammate,omitempty"`
+			Body               string         `json:"body"`
+			CreatedAt          string         `json:"created_at"`
 		} `json:"comments"`
 		CreatedAt string `json:"created_at"`
 		UpdatedAt string `json:"updated_at"`
@@ -204,7 +205,7 @@ func (p *FoldProjection) applyIssueCreated(e FoldEvent) {
 		p.setLink(from, to, link.Type, true, clockOf(e), author, link.CreatedAt)
 	}
 	for _, comment := range in.Comments {
-		p.setComment(comment.CommentUID, uid, comment.Author, comment.Teammate, comment.Body, comment.CreatedAt, comment.ReplyToUID, comment.ReplyKind, comment.EditedAt, clockOf(e))
+		p.setComment(comment.CommentUID, uid, comment.Author, comment.Teammate, snapshotCommentDisplay(comment.AttributedTeammate, comment.Teammate), comment.Body, comment.CreatedAt, comment.ReplyToUID, comment.ReplyKind, comment.EditedAt, clockOf(e))
 	}
 }
 
@@ -440,7 +441,7 @@ func (p *FoldProjection) applyComment(e FoldEvent, payload map[string]jsontext.V
 	if createdAt == "" {
 		createdAt = e.CreatedAt
 	}
-	p.setComment(commentUID, uid, author, teammate, body, createdAt, replyTo, replyKind, editedAt, clockOf(e))
+	p.setComment(commentUID, uid, author, teammate, DisplayContribution(e.Type, e.Payload), body, createdAt, replyTo, replyKind, editedAt, clockOf(e))
 	p.touchIssue(uid, createdAt)
 }
 
@@ -462,16 +463,18 @@ func (p *FoldProjection) applyCommentEdited(e FoldEvent, payload map[string]json
 	p.touchIssue(uid, editedAt)
 }
 
-func (p *FoldProjection) setComment(commentUID, issueUID, author, teammate, body, createdAt, replyTo, replyKind, editedAt string, clock FoldClock) {
+func (p *FoldProjection) setComment(commentUID, issueUID, author, teammate, attributedTeammate, body, createdAt, replyTo, replyKind, editedAt string, clock FoldClock) {
 	if commentUID == "" {
 		return
 	}
+	commentUID = CanonicalCommentUID(commentUID)
 	comment := FoldComment{UID: commentUID, IssueUID: issueUID, Clock: clock}
 	comment.Author = author
 	comment.Teammate = teammate
+	comment.AttributedTeammate = attributedTeammate
 	comment.Body = body
 	comment.CreatedAt = createdAt
-	comment.ReplyToUID, comment.ReplyKind, comment.EditedAt = replyTo, replyKind, editedAt
+	comment.ReplyToUID, comment.ReplyKind, comment.EditedAt = CanonicalCommentUID(replyTo), replyKind, editedAt
 	if existing, exists := p.Comments[commentUID]; exists {
 		if existing.CreatedAt == "" {
 			comment.Body, comment.EditedAt, comment.Clock = existing.Body, existing.EditedAt, existing.Clock
@@ -491,6 +494,7 @@ func (p *FoldProjection) editCommentBody(commentUID, issueUID, body, editedAt st
 	if commentUID == "" {
 		return
 	}
+	commentUID = CanonicalCommentUID(commentUID)
 	comment, exists := p.Comments[commentUID]
 	if !exists {
 		comment = FoldComment{UID: commentUID, IssueUID: issueUID, Clock: clock}

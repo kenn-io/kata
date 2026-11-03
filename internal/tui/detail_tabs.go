@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"go.kenn.io/kata/internal/commentref"
+	"go.kenn.io/kata/internal/db"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
@@ -61,8 +62,8 @@ func commentChunks(cs []CommentEntry, width, cursor int, ts tabState) []entryChu
 			line := "  ↳ " + commentOutgoingLabel(r.Kind) + " " + label
 			if r.Author != "" {
 				line += " by " + r.Author
-				if r.Teammate != "" {
-					line += " / " + r.Teammate
+				if contribution := db.CommentDisplayContribution(r.AttributedTeammate, r.Teammate); contribution != "" {
+					line += " / " + contribution
 				}
 			}
 			if r.Status != "" && r.Handle != "" {
@@ -233,7 +234,7 @@ func commentAuthorWidth(cs []CommentEntry, availableWidth int) int {
 	width := 0
 	for _, c := range cs {
 		w := runewidth.StringWidth(sanitizeForDisplay(commentAttribution(c)))
-		if c.Teammate == "" {
+		if db.CommentDisplayContribution(c.AttributedTeammate, c.Teammate) == "" {
 			w = min(w, 16)
 		}
 		width = max(width, w)
@@ -241,10 +242,11 @@ func commentAuthorWidth(cs []CommentEntry, availableWidth int) int {
 	return min(width, max(1, availableWidth-16))
 }
 func commentAttribution(c CommentEntry) string {
-	if c.Teammate == "" {
+	contribution := db.CommentDisplayContribution(c.AttributedTeammate, c.Teammate)
+	if contribution == "" {
 		return c.Author
 	}
-	return c.Author + " / " + c.Teammate
+	return c.Author + " / " + contribution
 }
 
 // applyActivityCursor prefixes activity rows with a text cursor marker
@@ -463,8 +465,8 @@ func indentLines(lines []string, depth int) []string {
 
 func commentEvidenceHeader(link commentref.Link) string {
 	actor := link.Author
-	if link.Teammate != "" {
-		actor += " / " + link.Teammate
+	if contribution := db.CommentDisplayContribution(link.AttributedTeammate, link.Teammate); contribution != "" {
+		actor += " / " + contribution
 	}
 	header := link.Handle + "  " + actor + "  " + formatDocumentTime(link.CreatedAt)
 	if link.EditedAt != nil {

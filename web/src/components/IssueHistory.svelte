@@ -74,7 +74,9 @@
           <span class="event-icon" aria-hidden="true">
             <EventIcon size={14} strokeWidth={1.8} />
           </span>
-          <span class="event-label">{descriptor.label}</span>
+          <span class="event-label"
+            >{event.actor}{event.attributed_teammate ? ` / ${event.attributed_teammate}` : ''} — {descriptor.label}</span
+          >
           {#if time}
             <time class="event-time" datetime={event.created_at} title={time.full}
               >{time.short}</time

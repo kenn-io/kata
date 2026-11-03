@@ -41,6 +41,7 @@ import (
 	"go.kenn.io/kata/internal/notionsync"
 	"go.kenn.io/kata/internal/planesync"
 	"go.kenn.io/kata/internal/rootbridge"
+	"go.kenn.io/kata/internal/teammate"
 	"go.kenn.io/kata/internal/telemetry"
 	"go.kenn.io/kata/internal/todoistsync"
 	"go.kenn.io/kata/internal/twentysync"
@@ -1208,6 +1209,8 @@ func runDaemonWithListen(ctx context.Context, listen string, insecureReadonly, n
 func runDaemonProcess(
 	ctx context.Context, listen string, insecureReadonly, noAutoToken bool, restart *daemonRestart,
 ) (returnErr error) {
+	// A daemon lifetime is not the request that launched it.
+	ctx = teammate.WithRequest(ctx, "")
 	startup, err := preflightDaemonStartup(ctx, listen, insecureReadonly, noAutoToken)
 	if err != nil {
 		return err

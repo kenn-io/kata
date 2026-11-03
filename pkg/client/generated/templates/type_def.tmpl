@@ -17,6 +17,7 @@
     {{ if not $config.Generate.OmitDescription}}{{ toGoComment $td.Schema.Description $td.Name }}{{ end }}
     type EventEnvelope struct {
         Actor               string          `json:"actor" validate:"required"`
+        AttributedTeammate  *string          `json:"attributed_teammate,omitempty"`
         ContentHash         string          `json:"content_hash" validate:"required"`
         CreatedAt           time.Time       `json:"created_at" validate:"required"`
         EventID             int64           `json:"event_id"`

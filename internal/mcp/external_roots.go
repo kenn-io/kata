@@ -52,35 +52,40 @@ type ConnectorFieldMappingOutput struct {
 
 // BridgeInput selects one issue bridge inside the startup scope.
 type BridgeInput struct {
-	Ref string `json:"ref"`
+	Teammate *string `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
+	Ref      string  `json:"ref"`
 }
 
 // BridgeBindInput binds an issue to an existing external root.
 type BridgeBindInput struct {
-	Ref             string `json:"ref"`
-	Connector       string `json:"connector"`
-	External        string `json:"external"`
-	PublishComments bool   `json:"publish_comments,omitempty"`
+	Teammate        *string `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
+	Ref             string  `json:"ref"`
+	Connector       string  `json:"connector"`
+	External        string  `json:"external"`
+	PublishComments bool    `json:"publish_comments,omitempty"`
 }
 
 // BridgePauseInput pauses an issue bridge with an optional safe reason.
 type BridgePauseInput struct {
-	Ref    string `json:"ref"`
-	Reason string `json:"reason,omitempty"`
+	Teammate *string `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
+	Ref      string  `json:"ref"`
+	Reason   string  `json:"reason,omitempty"`
 }
 
 // BridgeResolveFieldInput selects the winner for one planning-field conflict.
 type BridgeResolveFieldInput struct {
-	Ref       string `json:"ref"`
-	KataField string `json:"kata_field"`
-	Use       string `json:"use"`
+	Teammate  *string `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
+	Ref       string  `json:"ref"`
+	KataField string  `json:"kata_field"`
+	Use       string  `json:"use"`
 }
 
 // BridgeResolveCommentInput resolves uncertain outbound comment delivery.
 type BridgeResolveCommentInput struct {
-	Ref               string `json:"ref"`
-	Action            string `json:"action"`
-	ExternalCommentID string `json:"external_comment_id,omitempty"`
+	Teammate          *string `json:"teammate,omitempty" jsonschema:"Display contribution; empty suppresses the startup default"`
+	Ref               string  `json:"ref"`
+	Action            string  `json:"action"`
+	ExternalCommentID string  `json:"external_comment_id,omitempty"`
 }
 
 // BridgeOutput reports one issue bridge inside its current project.
@@ -222,6 +227,11 @@ func (h toolHandlers) bridgeShow(ctx context.Context, _ *sdkmcp.CallToolRequest,
 }
 
 func (h toolHandlers) bridgeBind(ctx context.Context, _ *sdkmcp.CallToolRequest, input BridgeBindInput) (*sdkmcp.CallToolResult, BridgeOutput, error) {
+	var contributionErr error
+	ctx, contributionErr = h.contributionContext(ctx, input.Teammate)
+	if contributionErr != nil {
+		return nil, BridgeOutput{}, contributionErr
+	}
 	if err := h.requireAllProjectsScope("external-root bridge binding"); err != nil {
 		return nil, BridgeOutput{}, err
 	}
@@ -248,6 +258,11 @@ func (h toolHandlers) bridgeBind(ctx context.Context, _ *sdkmcp.CallToolRequest,
 }
 
 func (h toolHandlers) bridgeReconcile(ctx context.Context, _ *sdkmcp.CallToolRequest, input BridgeInput) (*sdkmcp.CallToolResult, BridgeReconcileOutput, error) {
+	var contributionErr error
+	ctx, contributionErr = h.contributionContext(ctx, input.Teammate)
+	if contributionErr != nil {
+		return nil, BridgeReconcileOutput{}, contributionErr
+	}
 	project, ref, err := h.bridgeTarget(ctx, input.Ref, true)
 	if err != nil {
 		return nil, BridgeReconcileOutput{}, err
@@ -264,6 +279,11 @@ func (h toolHandlers) bridgeReconcile(ctx context.Context, _ *sdkmcp.CallToolReq
 }
 
 func (h toolHandlers) bridgePause(ctx context.Context, _ *sdkmcp.CallToolRequest, input BridgePauseInput) (*sdkmcp.CallToolResult, BridgeOutput, error) {
+	var contributionErr error
+	ctx, contributionErr = h.contributionContext(ctx, input.Teammate)
+	if contributionErr != nil {
+		return nil, BridgeOutput{}, contributionErr
+	}
 	project, ref, err := h.bridgeTarget(ctx, input.Ref, true)
 	if err != nil {
 		return nil, BridgeOutput{}, err
@@ -279,6 +299,11 @@ func (h toolHandlers) bridgePause(ctx context.Context, _ *sdkmcp.CallToolRequest
 }
 
 func (h toolHandlers) bridgeResume(ctx context.Context, _ *sdkmcp.CallToolRequest, input BridgeInput) (*sdkmcp.CallToolResult, BridgeOutput, error) {
+	var contributionErr error
+	ctx, contributionErr = h.contributionContext(ctx, input.Teammate)
+	if contributionErr != nil {
+		return nil, BridgeOutput{}, contributionErr
+	}
 	project, ref, err := h.bridgeTarget(ctx, input.Ref, true)
 	if err != nil {
 		return nil, BridgeOutput{}, err
@@ -295,6 +320,11 @@ func (h toolHandlers) bridgeResume(ctx context.Context, _ *sdkmcp.CallToolReques
 }
 
 func (h toolHandlers) bridgeResolveField(ctx context.Context, _ *sdkmcp.CallToolRequest, input BridgeResolveFieldInput) (*sdkmcp.CallToolResult, BridgeOutput, error) {
+	var contributionErr error
+	ctx, contributionErr = h.contributionContext(ctx, input.Teammate)
+	if contributionErr != nil {
+		return nil, BridgeOutput{}, contributionErr
+	}
 	project, ref, err := h.bridgeTarget(ctx, input.Ref, true)
 	if err != nil {
 		return nil, BridgeOutput{}, err
@@ -319,6 +349,11 @@ func (h toolHandlers) bridgeResolveField(ctx context.Context, _ *sdkmcp.CallTool
 }
 
 func (h toolHandlers) bridgeResolveComment(ctx context.Context, _ *sdkmcp.CallToolRequest, input BridgeResolveCommentInput) (*sdkmcp.CallToolResult, BridgeOutput, error) {
+	var contributionErr error
+	ctx, contributionErr = h.contributionContext(ctx, input.Teammate)
+	if contributionErr != nil {
+		return nil, BridgeOutput{}, contributionErr
+	}
 	project, ref, err := h.options.Scope.IssueTargetIncludingArchived(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, BridgeOutput{}, err
@@ -348,6 +383,11 @@ func (h toolHandlers) bridgeResolveComment(ctx context.Context, _ *sdkmcp.CallTo
 }
 
 func (h toolHandlers) bridgeUnbind(ctx context.Context, _ *sdkmcp.CallToolRequest, input BridgeInput) (*sdkmcp.CallToolResult, BridgeOutput, error) {
+	var contributionErr error
+	ctx, contributionErr = h.contributionContext(ctx, input.Teammate)
+	if contributionErr != nil {
+		return nil, BridgeOutput{}, contributionErr
+	}
 	project, ref, err := h.options.Scope.IssueTargetIncludingArchived(ctx, h.options.Client, input.Ref, true)
 	if err != nil {
 		return nil, BridgeOutput{}, err

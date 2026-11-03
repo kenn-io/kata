@@ -145,6 +145,7 @@ export interface KataCommentReplyIntent {
 }
 
 export interface KataComment extends KataCreationAttributionWire {
+  attributed_teammate?: string | null
   uid?: string
   handle?: string
   reply?: KataCommentLink
@@ -201,6 +202,7 @@ export interface KataTaskDetail {
 export type KataWorkspaceTarget = Record<string, unknown>
 
 export interface KataTaskEvent {
+  attributed_teammate?: string
   event_id: number
   event_uid: string
   origin_instance_uid: string

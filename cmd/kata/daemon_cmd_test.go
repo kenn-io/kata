@@ -4059,3 +4059,90 @@ func TestDaemonControlsSkipUnknownRecord(t *testing.T) {
 		})
 	}
 }
+
+// Daemon startup must not copy the launch contribution into background sync.
+func TestDaemonLaunchContributionDoesNotReachBackgroundSync(t *testing.T) {
+	resetFlags(t)
+	setupKataEnv(t)
+	t.Setenv("PORT", "")
+	t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
+	t.Setenv("KATA_TEAMMATE", "launch-worker")
+	store, _, binding := newDaemonGitHubSyncStore(t)
+	t.Setenv("KATA_DB", store.Path())
+	require.NoError(t, store.Close())
+	fetcher := newDaemonGitHubSyncFetcher(binding)
+	fetcher.issues = []githubsync.Issue{daemonGitHubSyncIssue(101, 1, "Background imported issue")}
+	imported := make(chan db.Event, 1)
+	started := make(chan context.Context, 1)
+	originalRunner, originalTelemetry := newGitHubSyncDaemonRunner, newTelemetryReporter
+	newTelemetryReporter = func(telemetry.Options) telemetry.Client { return &fakeTelemetryReporter{} }
+	newGitHubSyncDaemonRunner = func(cfg githubsync.RunnerConfig) issueSyncDaemonRunner {
+		cfg.Fetcher = fetcher
+		sink := cfg.EventSinkFrom
+		cfg.EventSinkFrom = func(ctx context.Context, pid int64, events []db.Event, fork activity.Admission) error {
+			if err := sink(ctx, pid, events, fork); err != nil {
+				return err
+			}
+			for _, event := range events {
+				if event.Type == "issue.created" {
+					select {
+					case imported <- event:
+					default:
+					}
+				}
+			}
+			return nil
+		}
+		return &contributionSyncRunner{Runner: githubsync.NewRunner(cfg), started: started}
+	}
+	t.Cleanup(func() { newGitHubSyncDaemonRunner, newTelemetryReporter = originalRunner, originalTelemetry })
+	type contextMarker struct{}
+	root := newRootCmd()
+	root.SetContext(context.WithValue(t.Context(), contextMarker{}, "preserved"))
+	require.NoError(t, root.PersistentPreRunE(root, nil))
+	ctx, cancel := context.WithCancel(root.Context())
+	done := make(chan error, 1)
+	go func() { done <- runDaemonProcess(ctx, "127.0.0.1:0", false, true, nil) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("daemon shutdown: %v", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Error("daemon did not stop after cancellation")
+		}
+	})
+	var workerContext context.Context
+	select {
+	case workerContext = <-started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("sync runner did not start")
+	}
+	require.Equal(t, "preserved", workerContext.Value(contextMarker{}))
+	var event db.Event
+	select {
+	case event = <-imported:
+	case <-time.After(10 * time.Second):
+		t.Fatal("background import did not commit")
+	}
+	require.NotContains(t, event.Payload, "attributed_teammate")
+	cancel()
+	select {
+	case <-workerContext.Done():
+	case <-time.After(time.Second):
+		t.Fatal("background sync did not stop after cancellation")
+	}
+	require.ErrorIs(t, workerContext.Err(), context.Canceled)
+}
+
+type contributionSyncRunner struct {
+	*githubsync.Runner
+	started chan<- context.Context
+}
+
+func (r *contributionSyncRunner) Run(ctx context.Context) error {
+	r.started <- ctx
+	return r.Runner.Run(ctx)
+}

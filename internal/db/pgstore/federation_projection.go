@@ -377,7 +377,24 @@ func federationIssueComments(
 		comment.ReplyToUID, comment.ReplyKind, comment.EditedAt = replyTo.String, replyKind.String, editedAt.String
 		output = append(output, comment)
 	}
-	return output, mapSQLError(rows.Err(), nil)
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	display, err := db.CommentDisplayContributionsTx(ctx, tx, issueID, dollarPlaceholder)
+	if err != nil {
+		return nil, err
+	}
+	for i := range output {
+		value, found := display[db.CanonicalCommentUID(output[i].CommentUID)]
+		if !found {
+			value = db.LegacyDisplayContribution(output[i].Teammate)
+		}
+		output[i].AttributedTeammate = &value
+	}
+	return output, nil
 }
 
 func federationIssueRecurrenceUID(ctx context.Context, tx *sql.Tx, recurrenceID *int64) (string, error) {

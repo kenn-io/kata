@@ -34,20 +34,21 @@ type Link = CommentLink
 
 // CommentLink retains canonical endpoint identities for client navigation.
 type CommentLink struct {
-	UID          string     `json:"uid,omitempty"`
-	Handle       string     `json:"handle,omitempty"`
-	Kind         string     `json:"kind"`
-	Author       string     `json:"author,omitempty"`
-	Teammate     string     `json:"teammate,omitempty"`
-	IssueUID     string     `json:"issue_uid,omitempty"`
-	IssueShortID string     `json:"issue_short_id,omitempty"`
-	ProjectUID   string     `json:"project_uid,omitempty"`
-	ProjectID    int64      `json:"project_id,omitempty"`
-	Status       string     `json:"status,omitempty"`
-	TargetEdited bool       `json:"target_edited,omitempty"`
-	Body         string     `json:"body,omitempty"`
-	CreatedAt    time.Time  `json:"created_at,omitzero"`
-	EditedAt     *time.Time `json:"edited_at,omitempty"`
+	AttributedTeammate *string    `json:"attributed_teammate,omitzero"`
+	UID                string     `json:"uid,omitempty"`
+	Handle             string     `json:"handle,omitempty"`
+	Kind               string     `json:"kind"`
+	Author             string     `json:"author,omitempty"`
+	Teammate           string     `json:"teammate,omitempty"`
+	IssueUID           string     `json:"issue_uid,omitempty"`
+	IssueShortID       string     `json:"issue_short_id,omitempty"`
+	ProjectUID         string     `json:"project_uid,omitempty"`
+	ProjectID          int64      `json:"project_id,omitempty"`
+	Status             string     `json:"status,omitempty"`
+	TargetEdited       bool       `json:"target_edited,omitempty"`
+	Body               string     `json:"body,omitempty"`
+	CreatedAt          time.Time  `json:"created_at,omitzero"`
+	EditedAt           *time.Time `json:"edited_at,omitempty"`
 }
 
 // TargetState is supplied only after authorization and lookup of unavailable
@@ -147,7 +148,7 @@ func recordLink(r Record, kind, suffix, sourceIssue string) Link {
 	if r.IssueUID != sourceIssue {
 		handle = r.IssueShortID + ":" + suffix
 	}
-	return Link{Body: r.Body, CreatedAt: r.CreatedAt, EditedAt: r.EditedAt, UID: r.UID, Handle: handle, Kind: kind, Author: r.Author, Teammate: r.Teammate, IssueUID: r.IssueUID, IssueShortID: r.IssueShortID, ProjectUID: r.ProjectUID, ProjectID: r.ProjectID}
+	return Link{AttributedTeammate: r.AttributedTeammate, Body: r.Body, CreatedAt: r.CreatedAt, EditedAt: r.EditedAt, UID: r.UID, Handle: handle, Kind: kind, Author: r.Author, Teammate: r.Teammate, IssueUID: r.IssueUID, IssueShortID: r.IssueShortID, ProjectUID: r.ProjectUID, ProjectID: r.ProjectID}
 }
 
 var (

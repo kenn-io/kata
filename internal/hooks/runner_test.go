@@ -102,6 +102,18 @@ func TestRunner_OK_HookprobeStdin(t *testing.T) {
 	}
 }
 
+func TestRunner_DoesNotInheritDaemonTeammate(t *testing.T) {
+	t.Setenv("KATA_TEAMMATE", "daemon-starter")
+	rs := newRunnerSetup(t)
+	got := rs.runProbe(func(h *ResolvedHook) { h.Args = []string{"env", "KATA_TEAMMATE"} })
+	if got.Result != "ok" {
+		t.Fatalf("result = %q, want ok (log=%s)", got.Result, rs.logBuf.String())
+	}
+	if value := strings.TrimSpace(readRecordOut(t, got.StdoutPath)); value != "" {
+		t.Fatalf("hook inherited daemon KATA_TEAMMATE = %q, want empty", value)
+	}
+}
+
 func TestRunner_NonzeroExit(t *testing.T) {
 	rs := newRunnerSetup(t)
 	got := rs.runProbe(func(h *ResolvedHook) { h.Args = []string{"exit", "7"} })

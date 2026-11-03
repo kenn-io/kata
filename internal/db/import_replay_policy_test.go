@@ -39,6 +39,13 @@ func TestValidateImportRecordsRejectsMalformed(t *testing.T) {
 			records: []db.ImportRecord{valid, unknownRecord{}},
 			wantErr: "unknown record type",
 		},
+		{
+			name: "invalid comment display contribution",
+			records: []db.ImportRecord{valid, &db.CommentExport{
+				UID: "01KATA00000000000000000001", AttributedTeammate: new("bad/handle"),
+			}},
+			wantErr: "attributed_teammate",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -57,7 +64,8 @@ func TestValidateImportRecordsAcceptsEveryPayloadType(t *testing.T) {
 		&db.MetaKV{}, &db.ProjectExport{}, &db.AliasExport{},
 		&db.IssueSyncBindingExport{}, &db.IssueSyncStatusExport{},
 		&db.RecurrenceExport{}, &db.IssueExport{}, &db.IssueEmbeddingExport{},
-		&db.CommentExport{}, &db.IssueLabelExport{}, &db.LinkExport{},
+		&db.CommentExport{UID: "01KATA00000000000000000001", AttributedTeammate: new("")},
+		&db.IssueLabelExport{}, &db.LinkExport{},
 		&db.ImportMappingExport{}, &db.ExternalFieldMappingExport{
 			ConnectorInstance: "connector-one", KataField: "scheduled_on",
 			ExternalFieldID: "schedule-one", ExternalFieldName: "Schedule",
