@@ -73,6 +73,7 @@ type Model struct {
 	sseStatus           sseConnState
 	pendingRefetch      bool
 	connGen             uint64
+	dateFilterCheckGen  uint64
 	daemonSwitchAttempt uint64
 	sseRestart          func(daemonConnection, uint64, chan tea.Msg) tea.Cmd
 	// projectsStale flags that the projects table needs a refetch. Set by
@@ -282,7 +283,7 @@ func (m Model) Init() tea.Cmd {
 	// through the event loop — the v2 replacement for the v1-era
 	// blocking OSC probe at boot. Update restyles when the
 	// tea.BackgroundColorMsg answer lands.
-	cmds := []tea.Cmd{m.waitForSSE()}
+	cmds := []tea.Cmd{m.waitForSSE(), dayTick()}
 	if m.api != nil {
 		// Init runs once per launch; daemon switches and reconnects never reach it.
 		cmds = append(cmds, m.fetchAuthCapabilities(), m.reportAppOpened())
@@ -442,6 +443,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if checked, ok := msg.(dateFilterCheckedMsg); ok {
+		if m.isCurrentDateFilterCheck(checked) && checked.err != nil {
+			m.list.status = checked.err.Error()
+		}
+		return m, nil
+	}
 	m = m.syncSearchDetailSnapshot(msg)
 	if mut, ok := msg.(mutationDoneMsg); ok {
 		m = m.syncAttentionReturnMutation(mut)
@@ -1433,12 +1440,27 @@ func (m Model) restoreSearchDetailIfNeeded(
 	// pending tick directly, then reinstate its inherited detail model or clear
 	// a pane that the search itself created.
 	m.nextDetailFollowGen++
-	if snapshot == nil {
+	if !m.canRestoreSearchDetail(snapshot) {
 		m.detail = m.applyDetailViewportCache(newDetailModel())
 		return m, prior
 	}
 	m.detail = m.applyDetailViewportCache(cloneDetailModel(*snapshot))
 	return m, combineCmds(prior, m.refetchRestoredDetail())
+}
+
+func (m Model) canRestoreSearchDetail(snapshot *detailModel) bool {
+	return snapshot != nil && (m.list.filter.Date == "" || snapshot.issue == nil || matchesDate(m.list.cachedIssue(*snapshot.issue), m.list.filter))
+}
+
+// cachedIssue returns the list's current row for iss, or iss when the list
+// no longer holds it, so date checks see a refetch that moved the issue.
+func (lm listModel) cachedIssue(iss Issue) Issue {
+	for _, cached := range lm.issues {
+		if cached.UID == iss.UID {
+			return cached
+		}
+	}
+	return iss
 }
 
 func (m *Model) refetchRestoredDetail() tea.Cmd {
@@ -1968,7 +1990,7 @@ func (m Model) commitInput() (Model, tea.Cmd) {
 	return m, nil
 }
 
-// commitFilterForm reads the four filter axes off the form and
+// commitFilterForm reads the five filter axes off the form and
 // applies them to lm.filter as a single atomic update. Cursor and
 // selectedUID are reset so the next render lands on a fresh row
 // (the prior selection may no longer match the new filter, and a
@@ -1981,13 +2003,24 @@ func (m Model) commitInput() (Model, tea.Cmd) {
 // the filter" intent overrides the implicit "follow the same issue
 // across refetches" intent.
 func (m Model) commitFilterForm(form inputState) (Model, tea.Cmd) {
+	if form.fieldValue(fieldStatus) == "closed" && form.fieldValue(fieldDate) != "any" {
+		form.err = "Today and Scheduled show open issues only"
+		m.input = form
+		return m, nil
+	}
+	prevPID, prevUID, prevHas := highlightedIdentity(m.list)
 	previousSearch := m.list.filter.Search
 	m.list.filter = ListFilter{
 		Status: form.fieldValue(fieldStatus),
 		Owner:  strings.TrimSpace(form.fieldValue(fieldOwner)),
 		Search: strings.TrimSpace(form.fieldValue(fieldSearch)),
 		Labels: normalizeLabels(form.fieldValue(fieldLabels)),
+		Date:   form.fieldValue(fieldDate),
 	}
+	if m.list.filter.Date == "any" {
+		m.list.filter.Date = ""
+	}
+	m.list.filter = m.list.filter.stampDay()
 	// "all" is the surface label for "no Status filter"; the wire
 	// expects an empty string.
 	if m.list.filter.Status == "all" {
@@ -1997,10 +2030,47 @@ func (m Model) commitFilterForm(form inputState) (Model, tea.Cmd) {
 	m.list.selectedUID = ""
 	m.list.status = ""
 	m.input = inputState{}
+	m, cmd := m.reconcileSplitDetailAfterRefetch(prevPID, prevUID, prevHas)
+	cmd = combineCmds(cmd, m.checkDateFilter())
 	if m.list.filter.Search != previousSearch {
-		return m.submitSearch()
+		var searchCmd tea.Cmd
+		m, searchCmd = m.submitSearch()
+		cmd = combineCmds(cmd, searchCmd)
 	}
-	return m, nil
+	return m, cmd
+}
+
+type dateFilterCheckedMsg struct {
+	connGen  uint64
+	checkGen uint64
+	mode     string
+	err      error
+}
+
+func (m Model) isCurrentDateFilterCheck(result dateFilterCheckedMsg) bool {
+	return !m.staleConnMsg(result.connGen) && m.dateFilterCheckGen == result.checkGen && m.list.filter.Date == result.mode
+}
+
+type dateFilterAPI interface {
+	CheckDateFilter(context.Context) error
+}
+
+func (m *Model) checkDateFilter() tea.Cmd {
+	m.dateFilterCheckGen++
+	api, ok := m.api.(dateFilterAPI)
+	if !ok || m.list.filter.Date == "" {
+		return nil
+	}
+	return dateFilterCheckCommand(api, dateFilterCheckedMsg{connGen: m.connGen, checkGen: m.dateFilterCheckGen, mode: m.list.filter.Date})
+}
+
+func dateFilterCheckCommand(api dateFilterAPI, result dateFilterCheckedMsg) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		result.err = api.CheckDateFilter(ctx)
+		return result
+	}
 }
 
 // commitFormInput handles canonical ctrl+o and compatible ctrl+s on a
@@ -2254,32 +2324,26 @@ func dispatchFormEditBody(
 	}
 }
 
-// cancelInput restores any pre-open filter snapshot (bars + filter
-// modal) and closes the input — undoing every live keystroke the
-// user typed. Panel-local prompts and centered forms (other than the
-// filter modal) have no live mirror, so cancel is just close.
-//
-// The filter form's commit ALSO writes lm.filter, so a cancel that
-// arrives BEFORE the commit only needs to clear the open form (no
-// snapshot restore is needed because the filter never moved). The
-// preFilter restore here is a no-op in that case but kept symmetric
-// with the bar path so any future "live preview" mode plugs in
-// without changing this code.
+// cancelInput restores the search bar's pre-open filter and selection
+// and closes the input — undoing every live keystroke the user typed.
+// Panel-local prompts and centered forms, the filter modal included, have
+// no live mirror: the filter form writes lm.filter only on commit, so
+// cancelling it just closes it.
 func (m Model) cancelInput() (Model, tea.Cmd) {
 	searchCanceled := m.input.kind.isCommandBar()
 	restoreSplitDetail := searchCanceled && m.input.restoreSplitDetail
 	preSplitDetail := m.input.preSplitDetail
 	if searchCanceled {
-		m.list.filter = m.input.preFilter
+		// Keep the day applyFetched pinned since the bar opened.
+		pre := m.input.preFilter
+		pre.Day = m.list.filter.Day
+		m.list.filter = pre
 		snapshot := m.input.preListSelection
 		m.list.cursor = snapshot.cursor
 		m.list.windowStart = snapshot.windowStart
 		m.list.selectedUID = snapshot.selectedUID
 		m.list.selectedProjectID = snapshot.selectedProjectID
 		m.list = m.list.restoreCursorToSelection()
-	} else if m.input.kind == inputFilterForm {
-		m.list.filter = m.input.preFilter
-		m.list = m.list.clampCursorToFilter()
 	}
 	m.input = inputState{}
 	m.undoCloseEntryID = 0
@@ -2520,6 +2584,12 @@ func (m Model) routeSSE(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	case refetchTickMsg:
 		next, cmd := m.handleRefetchTick()
 		return next, cmd, true
+	case dayTickMsg:
+		var cmd tea.Cmd
+		if m.list.filter.Date != "" && m.list.filter.Day != renderNow().Format(time.DateOnly) {
+			m, cmd = m.refreshListDay(nil)
+		}
+		return m, combineCmds(cmd, dayTick()), true
 	case toastExpiredMsg:
 		next, cmd := m.handleToastExpired()
 		return next, cmd, true
@@ -2531,6 +2601,18 @@ func (m Model) routeSSE(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return next, cmd, true
 	}
 	return m, nil, false
+}
+
+// refreshListDay applies edit to the list, re-filters relative dates, and
+// keeps selection and split detail on the issue that was highlighted before.
+func (m Model) refreshListDay(edit func(listModel) listModel) (Model, tea.Cmd) {
+	prevPID, prevUID, prevHas := highlightedIdentity(m.list)
+	m.list = m.list.syncSelection(m.list.visibleRows())
+	if edit != nil {
+		m.list = edit(m.list)
+	}
+	m.list = m.list.refreshDay()
+	return m.reconcileSplitDetailAfterRefetch(prevPID, prevUID, prevHas)
 }
 
 func (m Model) staleConnMsg(gen uint64) bool {
@@ -2666,7 +2748,7 @@ func cacheKeysEqual(a, b cacheKey) bool {
 func (m Model) handleEventReceived(msg eventReceivedMsg) (tea.Model, tea.Cmd) {
 	cmds := []tea.Cmd{m.waitForSSE()}
 	if m.eventAffectsView(msg) {
-		if strings.HasPrefix(msg.eventType, "cron.") || msg.eventType == "project.merged" {
+		if strings.HasPrefix(msg.eventType, "cron.") || msg.eventType == "project.merged" || msg.eventType == "project.removed" || msg.eventType == "project.restored" || m.cronParentEvent(msg) {
 			m.cron.events++
 		}
 		m.cache.markStale()
@@ -2948,9 +3030,7 @@ func (msg eventReceivedMsg) parentLinkEndpointUIDs() (fromUID, toUID string, ok 
 }
 
 // handleRefetchTick fires after the debounce window. Clears the
-// pending flag and dispatches a refetch when the cache is stale; if a
-// race cleared the stale flag (e.g., a manual filter change refetched
-// already), the tick is a no-op so we don't spin a redundant request.
+// pending flag and refetches when the cache is stale.
 func (m Model) handleRefetchTick() (tea.Model, tea.Cmd) {
 	m.pendingRefetch = false
 	if !m.cache.isStale() {
@@ -3044,6 +3124,12 @@ const toastResyncedTTL = 2 * time.Second
 // without a default project) sticks around. Slightly longer than the
 // resynced toast because the user has to act on the hint, not just notice.
 const toastNoBindingTTL = 3 * time.Second
+
+// dayTick checks the wall clock within a minute of resuming from suspend.
+// A fixed interval also avoids constructing midnight inside a DST gap.
+func dayTick() tea.Cmd {
+	return tea.Tick(time.Minute, func(time.Time) tea.Msg { return dayTickMsg{} })
+}
 
 // debouncedRefetch returns a tea.Cmd that emits refetchTickMsg after d.
 // The TEA loop receives the message, checks the cache, and dispatches

@@ -4,6 +4,154 @@ import type { UISnapshot } from '../state/snapshot'
 import { normalizeKataUISnapshot } from './projection'
 
 describe('normalizeKataUISnapshot', () => {
+  test.each([
+    ['blocks hub', 4000, 16000],
+    ['hub with back-link', 1000, 8000],
+    ['related hub', 4000, 16000],
+    ['hub fan-in/out', 2000, 8000],
+    ['layered10', 2000, 8000],
+    ['skip4', 2000, 8000],
+  ] as const)(
+    '%s normalization scales with graph size',
+    (shape, smallSize, largeSize) => {
+      const timings = [smallSize, largeSize].map((size) => {
+        const wire = snapshot()
+        const issues = Array.from({ length: size }, (_, index) =>
+          issue(`issue-${index}`, `t${index}`, `Task ${index}`),
+        )
+        const links: NonNullable<UISnapshot['collection_links']> = []
+        const connect = (from: number, to: number) => {
+          links.push(
+            link(
+              `issue-${from}`,
+              `t${from}`,
+              'open',
+              `issue-${to}`,
+              `t${to}`,
+              'open',
+              shape.startsWith('related') ? 'related' : 'blocks',
+            ),
+          )
+        }
+        for (let index = 1; index < size; index++) {
+          if (shape.endsWith('hub') || shape === 'hub with back-link') connect(0, index)
+          else if (shape === 'hub fan-in/out') {
+            if (index < size / 2) connect(index, 0)
+            else connect(0, index)
+          } else if (shape === 'layered10') {
+            const previousLayer = (Math.floor(index / 10) - 1) * 10
+            if (previousLayer >= 0) {
+              for (let peer = previousLayer; peer < previousLayer + 10; peer++) connect(peer, index)
+            }
+          } else {
+            for (let skip = 1; skip <= 4 && skip <= index; skip++) connect(index - skip, index)
+          }
+        }
+        if (shape === 'hub with back-link') connect(1, 0)
+        wire.selected!.issue = issues[0]!
+        wire.graph = { issues, links, edges: [], unresolved_refs: [] }
+        const graph = normalizeKataUISnapshot(wire).selected_graph!
+        expect(graph.nodes).toHaveLength(size)
+        expect(graph.edges.map((edge) => edge.layout)).toEqual(
+          links.map((edge) =>
+            shape === 'skip4'
+              ? Number(edge.to_issue_uid.slice(6)) - Number(edge.from_issue_uid.slice(6)) === 1
+              : true,
+          ),
+        )
+        const samples = Array.from({ length: 3 }, () => {
+          const start = performance.now()
+          normalizeKataUISnapshot(wire)
+          return performance.now() - start
+        })
+        return samples.sort((a, b) => a - b)[1]!
+      })
+      const [small, large] = timings as [number, number]
+      console.info(
+        `${shape}: ${smallSize}=${small.toFixed(2)}ms, ${largeSize}=${large.toFixed(2)}ms`,
+      )
+      // Leave room above linear growth while separating it from quadratic growth.
+      expect(large).toBeLessThan(small * (largeSize / smallSize) ** 1.5)
+    },
+    60_000,
+  )
+
+  test('matches the alternate-path rule on all four-task graphs and seeded cyclic graphs', () => {
+    const check = (uids: string[], pairs: string[]) => {
+      const wire = snapshot()
+      const issues = uids.map((uid, index) => issue(uid, `t${index}`, uid))
+      wire.selected!.issue = issues[0]!
+      wire.graph = {
+        issues,
+        links: [
+          ...pairs.map((pair) =>
+            link(pair[0]!, pair[0]!, 'open', pair[1]!, pair[1]!, 'open', 'blocks'),
+          ),
+          // Keep disconnected blocking components visible without adding blocking paths.
+          ...uids.slice(1).map((uid) => link(uids[0]!, 't0', 'open', uid, uid, 'open', 'related')),
+        ],
+        edges: [],
+        unresolved_refs: [],
+      }
+      const expected = pairs.map((pair) => {
+        const source = pair[0]!
+        const target = pair[1]!
+        const seen = new Set([source])
+        const queue = pairs.filter((edge) => edge[0] === source).map((edge) => edge[1]!)
+        while (queue.length > 0) {
+          const next = queue.shift()!
+          if (next === target || seen.has(next)) continue
+          seen.add(next)
+          for (const edge of pairs) {
+            if (edge[0] !== next) continue
+            if (edge[1] === target) return false
+            if (!seen.has(edge[1]!)) queue.push(edge[1]!)
+          }
+        }
+        return true
+      })
+      const actual = normalizeKataUISnapshot(wire).selected_graph!.edges.filter(
+        (edge) => edge.kind === 'blocks',
+      )
+      expect(
+        actual.map((edge) => edge.layout),
+        pairs.join(','),
+      ).toEqual(expected)
+    }
+    const slots = [...'abcd'].flatMap((from) =>
+      [...'abcd'].filter((to) => to !== from).map((to) => from + to),
+    )
+    for (let mask = 0; mask < 4096; mask++) {
+      check(
+        [...'abcd'],
+        slots.filter((_, index) => (mask & (1 << index)) !== 0),
+      )
+    }
+    let seed = 12345
+    const random = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32
+    for (let trial = 0; trial < 500; trial++) {
+      // The first trial is a DAG with 70 join targets, spanning three bitset words.
+      const uids =
+        trial === 0
+          ? Array.from({ length: 72 }, (_, index) => String.fromCharCode(0x100 + index))
+          : [...'abcdefgh']
+      const pairs: string[] = []
+      for (const [fromIndex, from] of uids.entries()) {
+        for (const [toIndex, to] of uids.entries()) {
+          if (from === to || (trial === 0 && fromIndex >= toIndex)) continue
+          const distance = toIndex - fromIndex
+          if (!(trial === 0 && distance <= 2) && random() >= 0.2) continue
+          pairs.push(from + to)
+        }
+      }
+      for (let index = pairs.length - 1; index > 0; index--) {
+        const other = Math.floor(random() * (index + 1))
+        ;[pairs[index], pairs[other]] = [pairs[other]!, pairs[index]!]
+      }
+      check(uids, pairs)
+    }
+  })
+
   test.each(['verified', 'pending', 'legacy'] as const)(
     'retains %s creation projections in accepted snapshots',
     (verification) => {

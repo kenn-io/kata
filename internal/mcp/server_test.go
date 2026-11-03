@@ -59,7 +59,7 @@ func TestServerPublishesOnlySectionLoadersInitially(t *testing.T) {
 	require.True(t, session.InitializeResult().Capabilities.Tools.ListChanged)
 	result, err := session.ListTools(t.Context(), nil)
 	require.NoError(t, err)
-	require.Equal(t, sectionLoaderNames, toolNames(result.Tools))
+	require.Equal(t, append(append([]string(nil), sectionLoaderNames...), "kata.skills"), toolNames(result.Tools))
 	for _, tool := range result.Tools {
 		require.True(t, tool.Annotations.ReadOnlyHint, tool.Name)
 		require.False(t, *tool.Annotations.DestructiveHint, tool.Name)
@@ -163,7 +163,7 @@ func TestSectionLoaderActivatesOnlyItsTypedToolsAndIsIdempotent(t *testing.T) {
 
 	result, err := session.ListTools(t.Context(), nil)
 	require.NoError(t, err)
-	want := append(append([]string(nil), sectionLoaderNames...), "kata.digest", "kata.events")
+	want := append(append([]string(nil), sectionLoaderNames...), "kata.skills", "kata.digest", "kata.events")
 	sort.Strings(want)
 	require.Equal(t, want, toolNames(result.Tools))
 
@@ -315,6 +315,7 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 		"kata.federation_quarantine",
 		"kata.federation_rebind",
 		"kata.federation_root_key_repin",
+		"kata.federation_spoke_name",
 		"kata.federation_status",
 		"kata.graph",
 		"kata.import_issues",
@@ -368,6 +369,7 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 		"kata.unassign",
 		"kata.wait",
 	}
+	wantNames = append(wantNames, "kata.skills")
 	wantNames = append(wantNames, sectionLoaderNames...)
 	sort.Strings(wantNames)
 	gotNames := make([]string, 0, len(result.Tools))
@@ -398,6 +400,7 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 		"kata.connector_fields":             true,
 		"kata.connectors":                   true,
 		"kata.federation_enrollment_revoke": true,
+		"kata.federation_spoke_name":        true,
 		"kata.federation_leave":             true, "kata.federation_quarantine": true,
 		"kata.federation_rebind": true, "kata.federation_status": true, "kata.import_issues": true,
 		"kata.search": true, "kata.sync_once": true, "kata.sync_status": true, "kata.sync_update": true,
@@ -444,6 +447,7 @@ func TestServerToolAnnotationsMatchMutationRisk(t *testing.T) {
 	readOnly := map[string]bool{
 		"kata.cron_workflows": true, "kata.cron_workflow": true, "kata.cron_runs": true, "kata.cron_run": true,
 		"kata.cron_capabilities": true, "kata.cron_jobs": true, "kata.cron_job": true, "kata.cron_new_uid": true,
+		"kata.skills":                   true,
 		"kata.federation_bridge_status": true,
 		"kata.teams":                    true, "kata.team_show": true, "kata.project_access_show": true,
 		"kata.audit_closes":      true,

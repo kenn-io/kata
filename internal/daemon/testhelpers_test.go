@@ -199,7 +199,7 @@ func openTestDB(t *testing.T) testDBHandle {
 	t.Helper()
 	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := t.Context()
-	d, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
+	d, err := testfix.OpenSQLite(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
 	return testDBHandle{db: d, now: time.Now().UTC()}

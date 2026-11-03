@@ -1,6 +1,5 @@
-// Package testfix collects small filesystem and git fixtures shared across
-// test packages: writing a stock .kata.toml, faking a .git directory, and
-// running real git for tests that need a working repository.
+// Package testfix provides shared filesystem and git fixtures and a
+// schema-ready SQLite template for tests.
 package testfix
 
 import (

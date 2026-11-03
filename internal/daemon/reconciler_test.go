@@ -18,6 +18,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/embedding"
+	"go.kenn.io/kata/internal/testfix"
 	"go.kenn.io/kata/internal/vector"
 	"go.kenn.io/kit/embedclient"
 	kitvec "go.kenn.io/kit/vector"
@@ -32,7 +33,7 @@ func newReconcilerTestStore(t *testing.T) *sqlitestore.Store {
 	// Search fixtures seed a thousand issues; flushing each commit to disk dominated their runtime.
 	t.Setenv("KATA_TEST_FAST_SQLITE", "1")
 	ctx := t.Context()
-	d, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
+	d, err := testfix.OpenSQLite(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

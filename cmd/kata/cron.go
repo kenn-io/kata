@@ -40,9 +40,12 @@ The full contract is in the Cron reference (docs/reference/cron.md).`,
 	}
 	for _, resource := range []string{"job", "workflow"} {
 		group := &cobra.Command{Use: resource, Short: "manage shared " + resource + " definitions"}
-		if resource == "job" {
+		switch resource {
+		case "job":
 			group.Short = "manage recurring issue and adapter job definitions"
 			group.Long = "Manage shared jobs. Enabled notify jobs with a per-run parent issue are delivered by the owning daemon; other jobs require an external adapter."
+		case "workflow":
+			group.Long = "Manage reusable command or prompt steps. For issue stages with human approval, see docs/workflows/gated-workflows.md."
 		}
 		for _, action := range []string{"list", "show", "create", "update", "delete", "restore"} {
 			group.AddCommand(newCronOperationCmd(resource, action))

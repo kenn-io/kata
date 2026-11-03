@@ -86,6 +86,33 @@ jobs:
       - name: Run shared UI and web static checks
         run: make web-check web-test
 
+      - name: Upload vitest kata-ui results
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: vitest-kata-ui-attempt-${{ github.run_attempt }}
+          path: packages/kata-ui/test-results/vitest/kata-ui.json
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload vitest kata-ui-pack results
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: vitest-kata-ui-pack-attempt-${{ github.run_attempt }}
+          path: packages/kata-ui/test-results/vitest/kata-ui-pack.json
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Upload vitest web results
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: vitest-web-attempt-${{ github.run_attempt }}
+          path: web/test-results/vitest/web.json
+          retention-days: 14
+          if-no-files-found: ignore
+
   web-browser:
     needs: changes
     if: &go-frontend-changes ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.all == 'true' || contains(fromJSON(needs.changes.outputs.groups), 'go') || contains(fromJSON(needs.changes.outputs.groups), 'frontend') || contains(fromJSON(needs.changes.outputs.groups), 'embedded-docs')) }}
@@ -162,9 +189,38 @@ jobs:
           KATA_HOME: ${{ runner.temp }}/kata-web-browser/home
           KATA_DB: ${{ runner.temp }}/kata-web-browser/home/kata.db
           KATA_WORKSPACE: ${{ runner.temp }}/kata-web-browser/workspace
+          KATA_PLAYWRIGHT_SUITE: web-e2e
         run: |
           mkdir -p "$KATA_HOME" "$KATA_WORKSPACE"
-          make web-e2e web-e2e-firefox
+          make web-e2e
+
+      - name: Upload playwright web-e2e results
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: playwright-web-e2e-attempt-${{ github.run_attempt }}
+          path: web/test-results/playwright/web-e2e.json
+          retention-days: 14
+          if-no-files-found: ignore
+
+      # Each Playwright run clears web/test-results, so Firefox runs after the upload above.
+      - name: Run isolated Firefox browser tests
+        env:
+          PW_TEST_CONNECT_WS_ENDPOINT: ws://127.0.0.1:3000/
+          KATA_HOME: ${{ runner.temp }}/kata-web-browser/home
+          KATA_DB: ${{ runner.temp }}/kata-web-browser/home/kata.db
+          KATA_WORKSPACE: ${{ runner.temp }}/kata-web-browser/workspace
+          KATA_PLAYWRIGHT_SUITE: web-e2e-firefox
+        run: make web-e2e-firefox
+
+      - name: Upload playwright web-e2e-firefox results
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: playwright-web-e2e-firefox-attempt-${{ github.run_attempt }}
+          path: web/test-results/playwright/web-e2e-firefox.json
+          retention-days: 14
+          if-no-files-found: ignore
 
       - name: Upload browser failure artifacts
         if: failure()
@@ -197,11 +253,24 @@ jobs:
         with:
           persist-credentials: false
 
+      # Go tests is the only writer of the per-commit Linux cache; PostgreSQL jobs restore it.
       - name: Set up Go
+        id: setup-go
         uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
+
+      - name: Restore Linux Go cache
+        id: restore-go-cache
+        uses: actions/cache/restore@v6.1.0
+        with: &linux-go-cache
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: linux-go-${{ runner.os }}-${{ runner.arch }}-go-${{ steps.setup-go.outputs.go-version }}-${{ github.sha }}
+          restore-keys: |
+            linux-go-${{ runner.os }}-${{ runner.arch }}-go-${{ steps.setup-go.outputs.go-version }}-
 
       - name: Set up Node
         uses: actions/setup-node@v7.1.0
@@ -225,14 +294,53 @@ jobs:
           go run "$huma" ./...
 
       - name: Run tests
-        env:
+        env: &go-test-env
           KATA_TEST_FAST_SQLITE: "1"
           KATA_TEST_POSTGRES_AUTO_CONTAINER: "0"
           KATA_SKIP_OPENAPI_CLIENT_CHECK: "1"
-        # e2e runs alone because it rebuilds the embedded web assets other packages compile against.
-        run: |
-          env -u KATA_AUTH_TOKEN go test $(go list ./... | grep -v '/e2e$')
-          env -u KATA_AUTH_TOKEN go test -p 1 ./e2e
+        run: >-
+          env -u KATA_AUTH_TOKEN
+          go tool gotestsum --format pkgname-and-test-fails --format-icons text
+          --jsonfile "gotestsum/go.json" --rerun-fails=2
+          --rerun-fails-report "gotestsum/go-reruns.txt"
+          --packages "$(go list ./... | grep -v '/e2e$')" -- -count=1
+
+      - name: Upload Go test results
+        if: failure() || github.run_attempt > 1 || hashFiles('gotestsum/go-reruns.txt') != ''
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: gotestsum-go-attempt-${{ github.run_attempt }}
+          path: gotestsum/go.json
+          retention-days: 14
+          if-no-files-found: ignore
+
+      # e2e runs alone because it rebuilds the embedded web assets other packages compile against.
+      - name: Run e2e tests
+        env: *go-test-env
+        run: >-
+          env -u KATA_AUTH_TOKEN
+          go tool gotestsum --format pkgname-and-test-fails --format-icons text
+          --jsonfile "gotestsum/go-e2e.json" --rerun-fails=2
+          --rerun-fails-report "gotestsum/go-e2e-reruns.txt"
+          --packages ./e2e -- -count=1 -p 1
+
+      - name: Upload e2e test results
+        if: failure() || github.run_attempt > 1 || hashFiles('gotestsum/go-e2e-reruns.txt') != ''
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: gotestsum-go-e2e-attempt-${{ github.run_attempt }}
+          path: gotestsum/go-e2e.json
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Save Linux Go cache
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore-go-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: linux-go-${{ runner.os }}-${{ runner.arch }}-go-${{ steps.setup-go.outputs.go-version }}-${{ github.sha }}
 
   native-agent-plugins:
     needs: changes
@@ -277,8 +385,20 @@ jobs:
           KATA_PI_TEST_RUNTIME: ${{ runner.temp }}/native-agent-sdk/node_modules/@earendil-works/pi-coding-agent/dist
           KATA_OPENCLAW_TEST_RUNTIME: ${{ runner.temp }}/native-agent-sdk/node_modules/openclaw
         run: >-
-          go test ./cmd/kata -count=1 -v
+          go tool gotestsum --format pkgname-and-test-fails --format-icons text
+          --jsonfile "gotestsum/native-agent-plugins.json" --rerun-fails=2
+          --rerun-fails-report "gotestsum/native-agent-plugins-reruns.txt"
+          --packages ./cmd/kata -- -count=1 -v
           -run '^Test(PiNative(InstalledRunner|RealKataTransport|InstalledRuntimeReplacement)|NativePlugins(Runtime|PublishedDeclarations)|OpenClawPublishedNativeLoader)$'
+
+      - name: Upload native plugin test results
+        if: failure() || github.run_attempt > 1 || hashFiles('gotestsum/native-agent-plugins-reruns.txt') != ''
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: gotestsum-native-agent-plugins-attempt-${{ github.run_attempt }}
+          path: gotestsum/native-agent-plugins.json
+          retention-days: 14
+          if-no-files-found: ignore
 
   api-breaking:
     needs: changes
@@ -368,10 +488,16 @@ jobs:
           persist-credentials: false
 
       - name: Set up Go
+        id: setup-go
         uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
+
+      # Go tests writes this cache.
+      - name: Restore Linux Go cache
+        uses: actions/cache/restore@v6.1.0
+        with: *linux-go-cache
 
       - name: Set up Node
         uses: actions/setup-node@v7.1.0
@@ -402,24 +528,65 @@ jobs:
           -c "SELECT pg_reload_conf()"
 
       - name: Run PostgreSQL backend and operator tests
-        env:
+        env: &postgres-test-env
+          POSTGRES_MATRIX: ${{ matrix.postgres }}
           KATA_TEST_FAST_SQLITE: "1"
           KATA_TEST_POSTGRES_DSN: postgres://kata:kata@127.0.0.1:5432/kata_test?sslmode=disable
           KATA_SKIP_OPENAPI_CLIENT_CHECK: "1"
-        # e2e runs alone because it rebuilds the embedded web assets other packages compile against.
-        run: |
-          env -u KATA_AUTH_TOKEN go test -count=1 -p 4 \
-          . \
-          ./internal/testenv \
-          ./internal/client \
-          ./internal/db/pgstore \
-          ./internal/db/storeopen \
-          ./internal/daemon \
-          ./internal/jsonl \
-          ./internal/vector
-          # cmd/kata PostgreSQL tests carry Postgres in their name.
-          env -u KATA_AUTH_TOKEN go test -count=1 -run Postgres ./cmd/kata
-          env -u KATA_AUTH_TOKEN go test -count=1 -p 1 ./e2e
+        run: >-
+          env -u KATA_AUTH_TOKEN
+          go tool gotestsum --format pkgname-and-test-fails --format-icons text
+          --jsonfile "gotestsum/postgres-$POSTGRES_MATRIX.json" --rerun-fails=2
+          --rerun-fails-report "gotestsum/postgres-$POSTGRES_MATRIX-reruns.txt"
+          --packages ". ./internal/testenv ./internal/client ./internal/db/pgstore
+          ./internal/db/storeopen ./internal/daemon ./internal/jsonl ./internal/vector" -- -count=1 -p 4
+
+      - name: Upload PostgreSQL test results
+        if: failure() || github.run_attempt > 1 || hashFiles(format('gotestsum/postgres-{0}-reruns.txt', matrix.postgres)) != ''
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: gotestsum-postgres-${{ matrix.postgres }}-attempt-${{ github.run_attempt }}
+          path: gotestsum/postgres-${{ matrix.postgres }}.json
+          retention-days: 14
+          if-no-files-found: ignore
+
+      # cmd/kata PostgreSQL tests carry Postgres in their name.
+      - name: Run PostgreSQL CLI tests
+        env: *postgres-test-env
+        run: >-
+          env -u KATA_AUTH_TOKEN
+          go tool gotestsum --format pkgname-and-test-fails --format-icons text
+          --jsonfile "gotestsum/postgres-$POSTGRES_MATRIX-cli.json" --rerun-fails=2
+          --rerun-fails-report "gotestsum/postgres-$POSTGRES_MATRIX-cli-reruns.txt"
+          --packages ./cmd/kata -- -count=1 -run Postgres
+
+      - name: Upload PostgreSQL CLI test results
+        if: failure() || github.run_attempt > 1 || hashFiles(format('gotestsum/postgres-{0}-cli-reruns.txt', matrix.postgres)) != ''
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: gotestsum-postgres-${{ matrix.postgres }}-cli-attempt-${{ github.run_attempt }}
+          path: gotestsum/postgres-${{ matrix.postgres }}-cli.json
+          retention-days: 14
+          if-no-files-found: ignore
+
+      # e2e runs alone because it rebuilds the embedded web assets other packages compile against.
+      - name: Run PostgreSQL e2e tests
+        env: *postgres-test-env
+        run: >-
+          env -u KATA_AUTH_TOKEN
+          go tool gotestsum --format pkgname-and-test-fails --format-icons text
+          --jsonfile "gotestsum/postgres-$POSTGRES_MATRIX-e2e.json" --rerun-fails=2
+          --rerun-fails-report "gotestsum/postgres-$POSTGRES_MATRIX-e2e-reruns.txt"
+          --packages ./e2e -- -count=1 -p 1
+
+      - name: Upload PostgreSQL e2e test results
+        if: failure() || github.run_attempt > 1 || hashFiles(format('gotestsum/postgres-{0}-e2e-reruns.txt', matrix.postgres)) != ''
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: gotestsum-postgres-${{ matrix.postgres }}-e2e-attempt-${{ github.run_attempt }}
+          path: gotestsum/postgres-${{ matrix.postgres }}-e2e.json
+          retention-days: 14
+          if-no-files-found: ignore
 
   windows:
     needs: changes
@@ -487,10 +654,6 @@ jobs:
         if: ${{ !matrix.cli }}
         run: go build ./...
 
-      - name: Vet
-        if: ${{ !matrix.cli }}
-        run: go vet ./...
-
       - name: Run tests
         if: ${{ !matrix.cli }}
         shell: bash
@@ -500,7 +663,19 @@ jobs:
         run: |
           cli_package=$(go list ./cmd/kata)
           packages=$(go list ./... | grep -vx "$cli_package")
-          env -u KATA_AUTH_TOKEN go test -timeout 15m -p 4 -vet=off $packages
+          env -u KATA_AUTH_TOKEN go tool gotestsum --format pkgname-and-test-fails --format-icons text \
+            --jsonfile "gotestsum/windows.json" --rerun-fails=2 \
+            --rerun-fails-report "gotestsum/windows-reruns.txt" \
+            --packages "$packages" -- -timeout 15m -p 4 -vet=off
+
+      - name: Upload Windows test results
+        if: ${{ !matrix.cli && (failure() || github.run_attempt > 1 || hashFiles('gotestsum/windows-reruns.txt') != '') }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: gotestsum-windows-attempt-${{ github.run_attempt }}
+          path: gotestsum/windows.json
+          retention-days: 14
+          if-no-files-found: ignore
 
       - name: Run CLI tests
         if: matrix.cli
@@ -514,7 +689,19 @@ jobs:
           TEST_RUN="$shard_pattern"
           TEST_SKIP=''
           if [[ "$TEST_SHARD" == complement ]]; then TEST_RUN='.'; TEST_SKIP="$shard_pattern"; fi
-          env -u KATA_AUTH_TOKEN go test -timeout 15m -vet=off -run "$TEST_RUN" -skip "$TEST_SKIP" ./cmd/kata
+          env -u KATA_AUTH_TOKEN go tool gotestsum --format pkgname-and-test-fails --format-icons text \
+            --jsonfile "gotestsum/windows-cli-$TEST_SHARD.json" --rerun-fails=2 \
+            --rerun-fails-report "gotestsum/windows-cli-$TEST_SHARD-reruns.txt" \
+            --packages ./cmd/kata -- -timeout 15m -vet=off -run "$TEST_RUN" -skip "$TEST_SKIP"
+
+      - name: Upload Windows CLI test results
+        if: ${{ matrix.cli && (failure() || github.run_attempt > 1 || hashFiles(format('gotestsum/windows-cli-{0}-reruns.txt', matrix.shard)) != '') }}
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: gotestsum-windows-cli-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
+          path: gotestsum/windows-cli-${{ matrix.shard }}.json
+          retention-days: 14
+          if-no-files-found: ignore
 
   lint:
     needs: changes
@@ -537,11 +724,31 @@ jobs:
 
       - uses: kenn-io/kit/.github/actions/kit-retry@v0.47.3
 
+      - name: Locate Go caches
+        run: |
+          echo "GOCACHE=$(go env GOCACHE)" >> "$GITHUB_ENV"
+          echo "GOMODCACHE=$(go env GOMODCACHE)" >> "$GITHUB_ENV"
+
+      # Main writes one entry per push; PRs read the newest matching entry.
+      - name: Restore lint caches
+        id: restore-lint-cache
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: |
+            .cache/golangci-lint
+            ${{ env.GOCACHE }}
+            ${{ env.GOMODCACHE }}
+          key: golangci-lint-${{ runner.os }}-${{ hashFiles('.custom-gcl.yml', 'go.mod') }}-${{ github.sha }}
+          restore-keys: golangci-lint-${{ runner.os }}-${{ hashFiles('.custom-gcl.yml', 'go.mod') }}-
+
       - name: Fetch Go checkers
         run: GOFLAGS="${GOFLAGS:+$GOFLAGS }-n" kit-retry 3 5 make lint-workflow-retries
 
       - name: Build custom Go linter
-        run: kit-retry 3 5 make "$PWD/.cache/golangci-lint/custom-gcl"
+        run: |
+          # The key matches .custom-gcl.yml and go.mod; checkout only made them look newer.
+          touch -c "$PWD/.cache/golangci-lint/custom-gcl"
+          kit-retry 3 5 make "$PWD/.cache/golangci-lint/custom-gcl"
 
       - name: Run golangci-lint
         run: make lint
@@ -550,6 +757,21 @@ jobs:
         env:
           GOOS: windows
         run: make lint
+
+      - name: Vet for Windows
+        env:
+          GOOS: windows
+        run: make vet
+
+      - name: Save lint caches
+        if: github.event_name == 'push' && steps.restore-lint-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: |
+            .cache/golangci-lint
+            ${{ env.GOCACHE }}
+            ${{ env.GOMODCACHE }}
+          key: ${{ steps.restore-lint-cache.outputs.cache-primary-key }}
 
   nilaway:
     needs: changes
@@ -595,6 +817,15 @@ jobs:
       # Cold CLI compilation inside the harness shares Go's package timeout.
       - name: Run federation stress tests
         run: env -u KATA_AUTH_TOKEN make test-stress FEDERATION_STRESS_TIMEOUT=4m
+
+      - name: Upload federation stress test results
+        if: failure() || github.run_attempt > 1 || hashFiles('gotestsum/federation-stress-reruns.txt') != ''
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: gotestsum-federation-stress-attempt-${{ github.run_attempt }}
+          path: gotestsum/federation-stress.json
+          retention-days: 14
+          if-no-files-found: ignore
 
   federation-docker:
     needs: changes

@@ -1,7 +1,7 @@
 ---
 title: Metadata
 description: Reference Kata's issue and project metadata model, reserved keys, scheduling fields, and update rules.
-last_edited: 2026-10-30
+last_edited: 2026-11-02
 ---
 
 # Metadata
@@ -88,8 +88,8 @@ Requests carry no zone. A daemon older than API `0.36.0` omits both fields, so
 a client should treat a missing field as unsupported rather than as an
 absent date.
 
-Kata offers no due-date filter. Select on the dates yourself, for example the
-issues due on or before a day:
+The TUI offers Today and Scheduled date filters. The CLI has no due-date filter.
+Select on the dates yourself, for example the issues due on or before a day:
 
 ```sh
 kata list --all --meta deadline_on --json \

@@ -13,5 +13,6 @@ export interface CreateFederationEnrollmentRequestBody {
   project_id: number | null
   relay?: RelayEnrollmentOptions
   spoke_instance_uid: string
+  spoke_name?: string
   token?: string
 }

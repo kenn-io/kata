@@ -94,10 +94,7 @@ func readRecurringProgress(parent Issue, jobUID string) (cron.RecurringProgress,
 	if !ok {
 		return p, fmt.Errorf("%w: missing recurring progress for job %s", cron.ErrInvalid, jobUID)
 	}
-	if err := json.Unmarshal(raw, &p, json.RejectUnknownMembers(true)); err != nil {
-		return p, fmt.Errorf("%w: corrupt recurring progress: %v", cron.ErrInvalid, err)
-	}
-	return p, p.Validate()
+	return cron.DecodeRecurringProgress(raw)
 }
 func (a CronSQL) checkRecurringPutTx(ctx context.Context, tx *sql.Tx, req cronPutRequest, current cronRow) error {
 	next := req.definition.(cron.JobDefinition)

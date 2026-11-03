@@ -15,6 +15,9 @@ An observation records evidence; its status does not control whether anything ru
 
 Browse jobs, runs, and workflows in `kata tui` with the `2`, `3`, and `4` tabs for the current project. On the Jobs tab, create and edit jobs; see the [`kata tui` keys](cli.md#daemon-and-diagnostics).
 
+For a run organized as dependent issues with human approval, see
+[Gated workflows](../workflows/gated-workflows.md).
+
 ## Vocabulary
 
 | Name | Meaning |
@@ -170,6 +173,9 @@ Schedules follow the trigger timezone's daylight-saving transitions:
 - On transition days in zones that shift by 30 minutes, such as
   `Australia/Lord_Howe`, or that skip local midnight, such as
   `America/Santiago`, a daily schedule can miss that day's occurrence.
+
+The `kata tui` Jobs tab previews these instants with the same schedule code:
+see the `kata tui` notes in the [CLI reference](cli.md#daemon-and-diagnostics).
 
 Kata releases up to 0.19.0 used a parser that rejects `7` in day of week and
 wrapping ranges, accepts steps as large as their span, and reads `5/2` as
@@ -588,6 +594,10 @@ workflow. PostgreSQL runtime roles still cannot perform owner-only migrations.
 
 [Herdr Kata](https://github.com/salmonumbrella/herdr-kata/blob/main/docs/native.md)
 is one adapter that implements this contract; its documentation covers setup.
+[tern-kata](https://github.com/Dangerboi/tern-kata/blob/main/docs/guide/worker.md)
+is another: its worker runs prompt and workflow jobs through
+[omp](https://github.com/can1357/oh-my-pi) on the user's machine; its guide
+covers setup.
 
 ## Storage and backup
 

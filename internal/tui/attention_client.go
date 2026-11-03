@@ -4,12 +4,10 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
-	"fmt"
 	"sort"
 
 	"go.kenn.io/kata/internal/notification"
 	"go.kenn.io/kata/pkg/client/generated"
-	"golang.org/x/mod/semver"
 )
 
 type attentionRequest struct {
@@ -102,16 +100,8 @@ func (c *Client) ClearAttentionRequest(ctx context.Context, projectID int64, ref
 	if err != nil {
 		return &mutationPreflightError{err}
 	}
-	health, err := apiClient.Health(ctx)
-	if err != nil {
-		return &mutationPreflightError{fmt.Errorf("clearing attention requires daemon API 0.13.0 or newer: %w", err)}
-	}
-	reported := ""
-	if health.APISchemaVersion != nil {
-		reported = *health.APISchemaVersion
-	}
-	if !semver.IsValid("v"+reported) || semver.Compare("v"+reported, "v0.13.0") < 0 {
-		return &mutationPreflightError{fmt.Errorf("clearing attention requires daemon API 0.13.0 or newer; upgrade the daemon")}
+	if err := requireAPIVersion(ctx, apiClient, "0.13.0", "clearing attention requires daemon API 0.13.0 or newer"); err != nil {
+		return &mutationPreflightError{err}
 	}
 	encoded, err := json.Marshal(map[string]string{"key": key, "if_value": string(ifValue)})
 	if err != nil {

@@ -134,7 +134,7 @@ func TestInitReportsAppOpenedOncePerLaunch(t *testing.T) {
 
 	batch, ok := m.Init()().(tea.BatchMsg)
 	require.True(t, ok)
-	for _, cmd := range batch[1:] { // batch[0] waits on the SSE channel
+	for _, cmd := range batch[2:] { // SSE and the clock check wait for background events.
 		runCmd(cmd)
 	}
 	assert.Equal(t, int32(1), reports.Load())

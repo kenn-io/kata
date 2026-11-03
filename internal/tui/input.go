@@ -108,6 +108,7 @@ const (
 	fieldOwner
 	fieldParent
 	fieldStatus
+	fieldDate
 	fieldSearch
 	fieldComment
 	fieldPrompt
@@ -298,8 +299,8 @@ func (f *inputField) blur() {
 // reads field values and dispatches the mutation; on actionCancel it
 // discards and restores any pre-open snapshot.
 //
-// preFilter snapshots the filter when a command bar or filter form
-// opens. preListSelection additionally snapshots the highlighted row
+// preFilter snapshots the filter when a command bar opens.
+// preListSelection additionally snapshots the highlighted row
 // for a search bar, so cancel can revert every live-applied search
 // change without leaving cursor and stable identity out of sync.
 // restoreSplitDetail records whether that search has owned a populated split
@@ -648,6 +649,9 @@ func (s inputState) resetFilterFields() inputState {
 	if f := s.field(fieldStatus); f != nil {
 		f.setValue("all")
 	}
+	if f := s.field(fieldDate); f != nil {
+		f.setValue("any")
+	}
 	for _, id := range []fieldID{fieldOwner, fieldSearch, fieldLabels} {
 		if f := s.field(id); f != nil {
 			f.setValue("")
@@ -903,9 +907,14 @@ func newFormTextarea(id fieldID, current string) inputField {
 // the radio reads naturally.
 var filterFormStatusChoices = []string{"all", "open", "closed"}
 
+// filterFormDateChoices are the Date radio's choices. "any" maps to
+// ListFilter.Date="" on commit, like "all" does for Status.
+var filterFormDateChoices = []string{"any", dateToday, dateScheduled}
+
 // newFilterForm constructs the centered multi-axis filter modal opened
 // by `f` on the list view. Plan 8 commit 5a shipped Status/Owner/Search;
-// commit 5b adds the Labels axis (any-of semantics). Four axes:
+// commit 5b adds the Labels axis (any-of semantics), and a trailing Date
+// radio (any/today/scheduled) narrows by the rows' resolved dates. Axes:
 //   - Status: tri-state radio (all/open/closed) — pre-positioned on
 //     current.Status (empty maps to "all"). Omitted in Inbox scope:
 //     the Inbox fetch is already pinned to open issues, so the form
@@ -915,11 +924,8 @@ var filterFormStatusChoices = []string{"all", "open", "closed"}
 //   - Labels: single-line comma-separated textinput, pre-filled from
 //     current.Labels (joined with ", ").
 //
-// preFilter snapshots the at-open ListFilter so esc can restore the
-// previous narrowing without re-typing. The form has no daemon
-// mutation — commit applies the filter and refetches; routing is
-// handled by Model.commitInput's explicit early branch (see the
-// load-bearing comment there).
+// Commit applies the form's fields to the list; Esc discards the draft.
+// Model.commitInput routes this form through commitFilterForm.
 //
 // The Labels field is comma-separated text (mirrors the new-issue
 // form's Labels field). Wiring an autocomplete suggestion menu inside
@@ -962,11 +968,18 @@ func newFilterForm(current ListFilter, sc scope) inputState {
 		inputField{id: fieldSearch, kind: fieldSingleLine, input: search, label: "Search"},
 		inputField{id: fieldLabels, kind: fieldSingleLine, input: labels, label: "Labels"},
 	)
+	date := inputField{
+		id:    fieldDate,
+		label: "Date",
+		kind:  fieldRadio,
+		radio: radioField{choices: filterFormDateChoices},
+	}
+	date.radio.set(current.Date)
+	fields = append(fields, date)
 	return inputState{
-		kind:      inputFilterForm,
-		title:     "filter",
-		fields:    fields,
-		preFilter: current,
+		kind:   inputFilterForm,
+		title:  "filter",
+		fields: fields,
 	}
 }
 

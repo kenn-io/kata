@@ -31,6 +31,7 @@ import type {
   ClaimRequestBody,
   ClaimResponseBody,
   ClaimStatusBody,
+  ClearFederationSpokeNamePathParameters,
   CloseActionRequestBody,
   CloseIssuePathParameters,
   CommentRequestBody,
@@ -108,6 +109,7 @@ import type {
   FederationIngestEventsRequestBody,
   FederationQuarantineSummary,
   FederationRootKeyRepinResult,
+  FederationSpokeNameOut,
   FederationStatusBody,
   ForceReleaseIssueLeasePathParameters,
   GetConnectorStatusPathParameters,
@@ -277,6 +279,8 @@ import type {
   SearchIssuesParams,
   SearchIssuesPathParameters,
   SearchResponseBody,
+  SetFederationSpokeNamePathParameters,
+  SetFederationSpokeNameRequestBody,
   SetIssuePriorityPathParameters,
   SetProjectAccessPathParameters,
   SetProjectAccessRequestBody,
@@ -1042,6 +1046,103 @@ export const rotateFederationEnrollment = async (
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(rotateFederationEnrollmentRequestBody),
   })
+}
+
+export type clearFederationSpokeNameResponse200 = {
+  data: FederationSpokeNameOut
+  status: 200
+}
+
+export type clearFederationSpokeNameResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type clearFederationSpokeNameResponseSuccess = clearFederationSpokeNameResponse200 & {
+  headers: Headers
+}
+export type clearFederationSpokeNameResponseError = clearFederationSpokeNameResponseDefault & {
+  headers: Headers
+}
+
+export type clearFederationSpokeNameResponse =
+  | clearFederationSpokeNameResponseSuccess
+  | clearFederationSpokeNameResponseError
+
+export const getClearFederationSpokeNameUrl = ({
+  spokeInstanceUid,
+}: ClearFederationSpokeNamePathParameters) => {
+  return `/api/v1/federation/enrollments/spokes/${encodeURIComponent(String(spokeInstanceUid))}/name`
+}
+
+/**
+ * @summary Clear an enrolled spoke's hub-local name
+ */
+export const clearFederationSpokeName = async (
+  { spokeInstanceUid }: ClearFederationSpokeNamePathParameters,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<clearFederationSpokeNameResponse> => {
+  return orvalFetch<clearFederationSpokeNameResponse>(
+    getClearFederationSpokeNameUrl({ spokeInstanceUid }),
+    {
+      ...options,
+      method: 'DELETE',
+    },
+  )
+}
+
+export type setFederationSpokeNameResponse200 = {
+  data: FederationSpokeNameOut
+  status: 200
+}
+
+export type setFederationSpokeNameResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type setFederationSpokeNameResponseSuccess = setFederationSpokeNameResponse200 & {
+  headers: Headers
+}
+export type setFederationSpokeNameResponseError = setFederationSpokeNameResponseDefault & {
+  headers: Headers
+}
+
+export type setFederationSpokeNameResponse =
+  | setFederationSpokeNameResponseSuccess
+  | setFederationSpokeNameResponseError
+
+export const getSetFederationSpokeNameUrl = ({
+  spokeInstanceUid,
+}: SetFederationSpokeNamePathParameters) => {
+  return `/api/v1/federation/enrollments/spokes/${encodeURIComponent(String(spokeInstanceUid))}/name`
+}
+
+/**
+ * @summary Set an enrolled spoke's hub-local name
+ */
+export const setFederationSpokeName = async (
+  { spokeInstanceUid }: SetFederationSpokeNamePathParameters,
+  setFederationSpokeNameRequestBody: SetFederationSpokeNameRequestBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<setFederationSpokeNameResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<setFederationSpokeNameResponse>(
+    getSetFederationSpokeNameUrl({ spokeInstanceUid }),
+    {
+      ...options,
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+      body: JSON.stringify(setFederationSpokeNameRequestBody),
+    },
+  )
 }
 
 export type revokeFederationEnrollmentResponse200 = {

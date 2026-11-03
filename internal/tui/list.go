@@ -707,6 +707,9 @@ func (lm listModel) applyFilterKey(msg tea.KeyPressMsg, km keymap) (listModel, t
 			return lm, nil, true
 		}
 		lm.filter.Status = nextStatus(lm.filter.Status)
+		if lm.filter.Date != "" && lm.filter.Status == "closed" {
+			lm.filter.Status = nextStatus(lm.filter.Status)
+		}
 		lm.cursor = 0
 		lm.windowStart = 0
 		lm.selectedUID = ""
@@ -856,6 +859,13 @@ func nextStatus(s string) string {
 // index clamped to the new visible-row count. Empty list clears both
 // cursor and selectedUID.
 func (lm listModel) applyFetched(msg tea.Msg) listModel {
+	if lm.selectedUID == "" {
+		lm = lm.syncSelection(lm.visibleRows())
+	}
+	return lm.storeFetched(msg).refreshDay()
+}
+
+func (lm listModel) storeFetched(msg tea.Msg) listModel {
 	switch m := msg.(type) {
 	case initialFetchMsg:
 		lm.loading = false
@@ -869,6 +879,12 @@ func (lm listModel) applyFetched(msg tea.Msg) listModel {
 			lm.issues, lm.truncated = trimQueueWorkingSet(m.issues)
 		}
 	}
+	return lm
+}
+
+// refreshDay advances relative date filters and keeps selection on the same issue.
+func (lm listModel) refreshDay() listModel {
+	lm.filter = lm.filter.stampDay()
 	lm = lm.expandAncestorsOfSelection()
 	rows := lm.visibleRows()
 	if len(rows) == 0 {
@@ -1031,7 +1047,7 @@ func (lm listModel) refetchCmd(api listAPI, sc scope) tea.Cmd {
 }
 
 // filteredIssues returns the subset of issues that satisfy the
-// client-side filters (Status/Owner/Author/Search/Labels). The fast path
+// client-side filters (Status/Owner/Author/Search/Labels/Date). The fast path
 // returns the input slice unchanged when no client-side filter is set
 // — render runs every keystroke, so this matters.
 //
@@ -1040,7 +1056,7 @@ func (lm listModel) refetchCmd(api listAPI, sc scope) tea.Cmd {
 // len(f.Labels) == 0 check so a label-only filter no longer
 // short-circuits past matchesFilter.
 func filteredIssues(issues []Issue, f ListFilter) []Issue {
-	if f.Status == "" && f.Owner == "" && f.Author == "" && f.Search == "" && len(f.Labels) == 0 {
+	if f.Status == "" && f.Owner == "" && f.Author == "" && f.Search == "" && f.Date == "" && len(f.Labels) == 0 {
 		return issues
 	}
 	out := make([]Issue, 0, len(issues))
@@ -1081,7 +1097,50 @@ func matchesFilter(iss Issue, f ListFilter) bool {
 	if len(f.Labels) > 0 && !labelsAnyOf(iss.Labels, f.Labels) {
 		return false
 	}
+	if f.Date != "" && !matchesDate(iss, f) {
+		return false
+	}
 	return true
+}
+
+// stampDay pins the day the Date filter evaluates against to now, or
+// clears it when no Date filter is active.
+func (f ListFilter) stampDay() ListFilter {
+	f.Day = ""
+	if f.Date != "" {
+		f.Day = renderNow().Format(time.DateOnly)
+	}
+	return f
+}
+
+// Date toggle values for ListFilter.Date.
+const (
+	dateToday     = "today"
+	dateScheduled = "scheduled"
+)
+
+// matchesDate reports whether an open issue's resolved row dates put it
+// in the Today (either date on or before today) or Scheduled (either
+// date after today) bucket. Today's calendar day is read in the zone
+// renderNow reports, which is the local zone in production, and is pinned
+// in f.Day once the filter is stamped. Dates are
+// zero-padded YYYY-MM-DD, so string comparison orders them. A row
+// without a date, including every row from a daemon older than API
+// 0.36.0, never matches.
+func matchesDate(iss Issue, f ListFilter) bool {
+	if iss.Status != "open" {
+		return false
+	}
+	mode, today := f.Date, f.Day
+	for _, d := range [...]string{iss.ScheduledOnDate, iss.DeadlineOnDate} {
+		if d == "" {
+			continue
+		}
+		if (mode == dateToday && d <= today) || (mode == dateScheduled && d > today) {
+			return true
+		}
+	}
+	return false
 }
 
 // matchesSearchTerm runs the `/` filter as case-insensitive contains

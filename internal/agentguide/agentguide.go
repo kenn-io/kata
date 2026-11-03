@@ -11,14 +11,14 @@ digraph kata {
   rankdir=TB; node [shape=box];
 
   arrive   [shape=diamond label="Work arrives"];
-  search   [label="Search first:\nkata search \"<terms>\" --agent\nReuse an open issue, else create one.\nIf create refuses a look-alike, reuse it;\n--force-new only if the work truly differs.\nNo bound workspace: refs are <project>#<id>,\nor pass --project <project>."];
+  search   [label="Search first:\nkata search \"<terms>\" --agent\nSame work: reuse the open issue, else create one.\nRelated work: link each hit with --parent <ref> | --related <ref>.\nIf create refuses a look-alike, reuse it;\n--force-new only if the work truly differs.\nNo bound workspace: refs are <project>#<id>,\nor pass --project <project>."];
   route    [shape=diamond label="Work it, or delegate it?"];
 
   subgraph cluster_work {
     label="";
     claim  [label="Claim and mark it tracked:\nkata claim <ref>\nkata meta set <ref> work.attention ok"];
     branch [label="If the work happens on a dedicated branch, stamp it once:\nkata meta set <ref> work.branch <branch>\nor bind at creation:\nkata create ... --meta work.branch=<branch> --idempotency-key <key>"];
-    live   [label="Keep state current:\nkata meta set <ref> work.attention stuck|needs-human|ok\nkata meta set <ref> work.attention_msg \"<why>\"\nstuck = blocked; needs-human = input/review; ok = unblocked.\nRecord progress:\nkata comment <ref> -m \"<what changed>\"\nRequest attention:\nkata notify <ref> --to <actor>[/<teammate>] --message <reason>"];
+    live   [label="Keep state current:\nkata meta set <ref> work.attention stuck|needs-human|ok\nkata meta set <ref> work.attention_msg \"<why>\"\nstuck = blocked; needs-human = input/review; ok = unblocked.\nRecord progress:\nkata comment <ref> -m \"<what changed>\"\nRespond to a comment:\nkata comment <ref> --reply|--confirm|--refute|--supersede c:<id> -m \"<evidence>\"\nRequest attention:\nkata notify <ref> --to <actor>[/<teammate>] --message <reason>"];
     claim -> branch -> live;
   }
 
@@ -169,6 +169,10 @@ const fragSearchCreateUpdate = `3. Search before creating:
    If create refuses a look-alike, reuse the match. Pass --force-new only
    if the work truly differs.
 
+   A hit that is related but not the same work still matters: create the
+   new issue and link every such hit, --parent <ref> when the new work is a
+   slice of it, --related <ref> for context.
+
 4. If no existing issue fits, create with an idempotency key:
 
    kata create "fix login race" \
@@ -188,6 +192,14 @@ const fragSearchCreateUpdate = `3. Search before creating:
    kata comment abc4 --body "Found another reproduction path." --agent
    kata label add abc4 safari --agent
    kata edit abc4 --blocks d4ex --agent
+
+   Answer a specific comment with a typed reply, using the handle shown
+   by kata show. --confirm and --refute take evidence in the body:
+
+   kata comment abc4 --reply c:xbzxrq -m "This builds on the finding." --agent
+   kata comment abc4 --confirm c:xbzxrq -m "Reproduced with the documented retry steps." --agent
+   kata comment abc4 --refute c:xbzxrq -m "Still fails when the connection drops twice." --agent
+   kata comment abc4 --supersede c:xbzxrq -m "The updated finding replaces this one." --agent
 
 `
 

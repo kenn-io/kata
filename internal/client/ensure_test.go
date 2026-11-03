@@ -18,6 +18,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/daemonruntime"
@@ -173,6 +174,84 @@ func TestEnsureRunningRestartsWhenDaemonVersionDiffers(t *testing.T) {
 	assert.Equal(t, "http://new-daemon", url)
 	assert.Equal(t, 1, restore.stopCalls)
 	assert.Equal(t, 1, restore.startCalls)
+}
+
+func TestEnsureRunningDiscoveryWaitsForStartLockBeforeStoppingDaemon(t *testing.T) {
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	tmp := setupKataEnv(t)
+
+	_, addr := startMockDaemonPing(t, map[string]any{
+		"ok":      true,
+		"service": "kata",
+		"version": "old-version",
+		"pid":     os.Getpid(),
+	})
+
+	require.NoError(t, writeRuntimeRecord(t, tmp, addr))
+	restore := patchEnsureHooks(t, "new-version", "http://new-daemon")
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireStartLock(t.Context())
+	require.NoError(t, err)
+	defer release()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+
+	_, err = EnsureRunning(ctx)
+
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Zero(t, restore.stopCalls, "another restart owns validation; its daemon must keep running")
+}
+
+func TestEnsureRunningDiscoveryWaitsForStartLockWhenDaemonUnreachable(t *testing.T) {
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	tmp := setupKataEnv(t)
+	require.NoError(t, writeRuntimeRecord(t, tmp, "unix://"+filepath.Join(tmp, "missing.sock")))
+	state := patchEnsureHooks(t, "new-version", "http://new-daemon")
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	_, err = discoverForEnsure(t.Context(), ns.DataDir)
+	require.ErrorIs(t, err, ErrLocalDaemonUnreachable)
+	release, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).AcquireStartLock(t.Context())
+	require.NoError(t, err)
+	defer func() {
+		if release != nil {
+			release()
+		}
+	}()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	type result struct {
+		url string
+		err error
+	}
+	results := make(chan result, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		url, err := EnsureRunning(ctx)
+		results <- result{url: url, err: err}
+	}()
+	defer func() { cancel(); <-done }()
+
+	select {
+	case got := <-results:
+		t.Fatalf("discovery returned while restart held the start lock: %v", got.err)
+	case <-time.After(200 * time.Millisecond): //nolint:kennlint // deadlinetest: absence window; discovery must wait while the restart holds the start lock.
+	}
+
+	wantURL, addr := startMockDaemonPing(t, map[string]any{
+		"ok": true, "service": "kata", "version": "new-version", "pid": os.Getpid(),
+	})
+	require.NoError(t, writeRuntimeRecord(t, tmp, addr))
+	release()
+	release = nil
+
+	got := <-results
+	require.NoError(t, got.err)
+	assert.Equal(t, wantURL, got.url)
+	assert.Zero(t, state.stopCalls)
+	assert.Zero(t, state.startCalls)
 }
 
 func TestEnsureRunningRestartsWhenDaemonVersionUnknown(t *testing.T) {
@@ -918,6 +997,33 @@ func TestStopRunningDaemonsRefusesUnverifiableIdentity(t *testing.T) {
 	assert.Zero(t, signals)
 }
 
+func TestEnsureRunningRefusesUnverifiableCapableDaemon(t *testing.T) {
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	home := setupKataEnv(t)
+	stageStorageSchema(t, filepath.Join(home, "kata.db"), db.CurrentSchemaVersion())
+	_, addr := startMockDaemonPing(t, map[string]any{
+		"ok": true, "service": "kata", "version": "v0.1.0", "pid": os.Getpid(),
+	})
+	writeUnverifiableRecord(t, os.Getpid(), addr, map[string]string{
+		daemonruntime.RuntimeRestartExecutableKey: "1",
+	})
+	originalVersion, originalRestart := currentVersionForEnsure, RestartLocalDaemon
+	t.Cleanup(func() {
+		currentVersionForEnsure, RestartLocalDaemon = originalVersion, originalRestart
+	})
+	currentVersionForEnsure = func() string { return "v0.2.0" }
+	requests := 0
+	RestartLocalDaemon = func(context.Context, *daemonruntime.Namespace, kitdaemon.RuntimeRecord) (kitdaemon.RuntimeRecord, error) {
+		requests++
+		return kitdaemon.RuntimeRecord{}, assert.AnError
+	}
+
+	_, err := EnsureRunning(t.Context())
+
+	assert.Zero(t, requests)
+	require.ErrorContains(t, err, "process identity cannot be verified; stop it manually")
+}
+
 // A stale unverifiable record can share an endpoint another daemon now owns;
 // its browser metadata is accepted only when the endpoint reports its PID.
 func TestDiscoverWebRuntimeForUnverifiableRecordRequiresMatchingPID(t *testing.T) {
@@ -1257,4 +1363,48 @@ func patchEnsureHooks(t *testing.T, version, startedURL string) *ensurePatchStat
 		startDaemonForEnsure = origStart
 	})
 	return state
+}
+
+func TestEnsureRunningReplacesCapableDaemonInPlace(t *testing.T) {
+	t.Setenv("KATA_SKIP_DAEMON_VERSION_CHECK", "")
+	home := setupKataEnv(t)
+	stageStorageSchema(t, filepath.Join(home, "kata.db"), db.CurrentSchemaVersion())
+	_, addr := startMockDaemonPing(t, map[string]any{
+		"ok": true, "service": "kata", "version": "v0.1.0", "pid": os.Getpid(),
+	})
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	identity, _ := kitdaemon.ReadProcessIdentity(os.Getpid())
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+		PID: os.Getpid(), Address: addr, StartedAt: time.Now(),
+		ProcessIdentityV2: identity,
+		Metadata:          map[string]string{daemonruntime.RuntimeRestartExecutableKey: "1"},
+	})
+	require.NoError(t, err)
+	state := patchEnsureHooks(t, "v0.2.0", "http://caller-started")
+	original := RestartLocalDaemon
+	t.Cleanup(func() { RestartLocalDaemon = original })
+	requests := 0
+	RestartLocalDaemon = func(_ context.Context, target *daemonruntime.Namespace, previous kitdaemon.RuntimeRecord) (kitdaemon.RuntimeRecord, error) {
+		requests++
+		require.Equal(t, ns.DataDir, target.DataDir)
+		require.Equal(t, os.Getpid(), previous.PID)
+		path, err := (kitdaemon.RuntimeStore{Dir: target.DataDir}).LockPath()
+		require.NoError(t, err)
+		lock := flock.New(path)
+		defer func() { require.NoError(t, lock.Close()) }()
+		acquired, err := lock.TryLock()
+		require.NoError(t, err)
+		require.False(t, acquired, "start lock must remain held through replacement readiness")
+		return kitdaemon.RuntimeRecord{Network: "tcp", Address: "127.0.0.1:27777"}, nil
+	}
+
+	url, err := EnsureRunning(t.Context())
+
+	require.NoError(t, err)
+	assert.Equal(t, 1, requests, "older capable daemon must receive an in-place request")
+	assert.Zero(t, state.stopCalls)
+	assert.Zero(t, state.startCalls)
+	assert.Equal(t, "http://127.0.0.1:27777", url)
 }

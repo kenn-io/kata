@@ -83,14 +83,14 @@ downloads, and build-from-source steps.
 
 ```mermaid
 flowchart TB
-  arrive{"Work arrives"} --> search["Search first:<br/>kata search #34;#60;terms#62;#34; --agent<br/>Reuse an open issue, else create one.<br/>If create refuses a look-alike, reuse it;<br/>--force-new only if the work truly differs.<br/>No bound workspace: refs are #60;project#62;##60;id#62;,<br/>or pass --project #60;project#62;."]
+  arrive{"Work arrives"} --> search["Search first:<br/>kata search #34;#60;terms#62;#34; --agent<br/>Same work: reuse the open issue, else create one.<br/>Related work: link each hit with --parent #60;ref#62; #124; --related #60;ref#62;.<br/>If create refuses a look-alike, reuse it;<br/>--force-new only if the work truly differs.<br/>No bound workspace: refs are #60;project#62;##60;id#62;,<br/>or pass --project #60;project#62;."]
   search --> route{"Work it, or delegate it?"}
 
   subgraph workside[" "]
     direction TB
     claim["Claim and mark it tracked:<br/>kata claim #60;ref#62;<br/>kata meta set #60;ref#62; work.attention ok"]
     branch["If the work happens on a dedicated branch, stamp it once:<br/>kata meta set #60;ref#62; work.branch #60;branch#62;<br/>or bind at creation:<br/>kata create ... --meta work.branch=#60;branch#62; --idempotency-key #60;key#62;"]
-    live["Keep state current:<br/>kata meta set #60;ref#62; work.attention stuck#124;needs-human#124;ok<br/>kata meta set #60;ref#62; work.attention_msg #34;#60;why#62;#34;<br/>stuck = blocked; needs-human = input/review; ok = unblocked.<br/>Record progress:<br/>kata comment #60;ref#62; -m #34;#60;what changed#62;#34;<br/>Request attention:<br/>kata notify #60;ref#62; --to #60;actor#62;[/#60;teammate#62;] --message #60;reason#62;"]
+    live["Keep state current:<br/>kata meta set #60;ref#62; work.attention stuck#124;needs-human#124;ok<br/>kata meta set #60;ref#62; work.attention_msg #34;#60;why#62;#34;<br/>stuck = blocked; needs-human = input/review; ok = unblocked.<br/>Record progress:<br/>kata comment #60;ref#62; -m #34;#60;what changed#62;#34;<br/>Respond to a comment:<br/>kata comment #60;ref#62; --reply#124;--confirm#124;--refute#124;--supersede c:#60;id#62; -m #34;#60;evidence#62;#34;<br/>Request attention:<br/>kata notify #60;ref#62; --to #60;actor#62;[/#60;teammate#62;] --message #60;reason#62;"]
     claim --> branch --> live
   end
 
@@ -226,6 +226,7 @@ The [docs site](docs/) is the definitive reference:
   [Model Context Protocol](docs/reference/mcp.md) ·
   [Configuration](docs/reference/configuration.md)
 - Workflows: [Agent workflows](docs/workflows/agents.md) ·
+  [Gated workflows](docs/workflows/gated-workflows.md) ·
   [Sharing models](docs/workflows/sharing.md)
 - Operations: [GitHub sync](docs/operations/github-sync.md) ·
   [Notion sync](docs/operations/notion-sync.md) ·
