@@ -512,12 +512,13 @@ type CreateInitialLinkBody struct {
 type MutationResponse struct {
 	ProjectNameHeader
 	Body struct {
-		Issue         db.Issue                 `json:"issue"`
-		Event         *db.Event                `json:"event"`
-		OriginalEvent *db.Event                `json:"original_event,omitempty"`
-		Changed       bool                     `json:"changed"`
-		Reused        bool                     `json:"reused,omitzero"`
-		Warnings      []db.VerificationWarning `json:"warnings,omitempty"`
+		Issue                        db.Issue                 `json:"issue"`
+		Event                        *db.Event                `json:"event"`
+		OriginalEvent                *db.Event                `json:"original_event,omitempty"`
+		Changed                      bool                     `json:"changed"`
+		Reused                       bool                     `json:"reused,omitzero"`
+		Warnings                     []db.VerificationWarning `json:"warnings,omitempty"`
+		VerificationEndpointProjects map[string]string        `json:"verification_endpoint_projects,omitempty" doc:"Maps each rendered verification reference to its current owning project UID so clients can enforce fixed project scopes."`
 	}
 }
 

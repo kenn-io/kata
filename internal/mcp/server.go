@@ -63,9 +63,10 @@ func New(options Options) (*sdkmcp.Server, error) {
 		options.Scope = scope
 	}
 
+	startupProjects := options.Scope.projectSnapshot()
 	if options.Scope.Mode() != ScopeAll {
-		refs := make([]string, 0, len(options.Scope.projects))
-		for _, project := range options.Scope.projects {
+		refs := make([]string, 0, len(startupProjects))
+		for _, project := range startupProjects {
 			ref := project.UID
 			if ref == "" {
 				ref = fmt.Sprintf("id:%d", project.ID)
@@ -83,12 +84,9 @@ func New(options Options) (*sdkmcp.Server, error) {
 		}
 	}
 	if options.Scope.Mode() == ScopeBound {
-		projects, err := options.Scope.Projects(context.Background(), nil, false)
-		if err != nil {
-			return nil, err
-		}
-		options.ProjectID = projects[0].ID
-		options.ProjectName = projects[0].Name
+		project := startupProjects[0]
+		options.ProjectID = project.ID
+		options.ProjectName = project.Name
 	}
 	if err := teammate.Validate(options.Teammate); err != nil {
 		return nil, err

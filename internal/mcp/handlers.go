@@ -845,6 +845,17 @@ func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 			headers.IfMatch = &ifMatch
 		}
 	}
+	if h.options.Scope.Mode() != ScopeAll {
+		shown, err := h.options.Client.ShowIssue(ctx, &generated.ShowIssueRequestOptions{
+			PathParams: &generated.ShowIssuePath{ProjectID: project.ID, Ref: ref},
+		})
+		if err != nil {
+			return nil, MutationOutput{}, err
+		}
+		if _, err := h.closeMutationProject(ctx, project, issueFromShow(shown.Issue)); err != nil {
+			return nil, MutationOutput{}, err
+		}
+	}
 	response, err := h.options.Client.CloseIssue(ctx, &generated.CloseIssueRequestOptions{
 		PathParams: &generated.CloseIssuePath{ProjectID: project.ID, Ref: ref},
 		Body: &generated.CloseIssueBody{
@@ -873,16 +884,20 @@ func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
-	out.Warnings, err = h.scopedVerificationWarnings(ctx, response.Warnings, verificationEndpointProjects(event.Payload))
+	endpointProjects := response.VerificationEndpointProjects
+	if len(endpointProjects) == 0 {
+		endpointProjects = verificationEndpointProjects(event.Payload)
+	}
+	out.Warnings, err = h.scopedVerificationWarnings(ctx, response.Warnings, endpointProjects)
 	if err != nil {
 		return nil, MutationOutput{}, err
 	}
 	return result, out, err
 }
 
-// closeMutationProject keeps replayed close receipts inside the immutable MCP
-// startup scope. A retry can return an issue that moved after the original
-// close, so the request project is only valid while its UID still matches.
+// closeMutationProject keeps preflight issues and replayed close receipts
+// inside the currently available MCP scope. A retry can return an issue that
+// moved or whose project was archived after the original close.
 func (h toolHandlers) closeMutationProject(
 	ctx context.Context, requestProject ProjectIdentity, issue generated.Issue,
 ) (ProjectIdentity, error) {
@@ -893,15 +908,20 @@ func (h toolHandlers) closeMutationProject(
 	if projectUID == "" {
 		return ProjectIdentity{}, errors.New("close response did not include the issue project UID")
 	}
-	if requestProject.UID == projectUID || requestProject.UID == "" && requestProject.ID == issue.ProjectID {
-		return requestProject, nil
-	}
 	projects, err := h.options.Scope.Projects(ctx, h.options.Client, false)
 	if err != nil {
 		return ProjectIdentity{}, err
 	}
 	for _, project := range projects {
 		if project.UID == projectUID {
+			return project, nil
+		}
+		if h.options.Scope.Mode() == ScopeBound && requestProject.UID == "" &&
+			project.UID == "" && project.ID == requestProject.ID &&
+			(issue.ProjectID == 0 || issue.ProjectID == project.ID) {
+			// ID-only bound scopes are the legacy MCP compatibility path. The
+			// normal command startup resolves and pins the project UID first.
+			project.UID = projectUID
 			return project, nil
 		}
 	}
@@ -925,6 +945,12 @@ func (h toolHandlers) scopedCloseError(err error) error {
 	var envelope generated.ErrorEnvelope
 	if !errors.As(err, &envelope) {
 		return err
+	}
+	if envelope.ErrorData.Code == "open_refutations" {
+		// The refusal envelope has no endpoint-project provenance. A fixed MCP
+		// scope must not forward author and excerpt text that may belong to a
+		// project outside its startup boundary.
+		return errors.New("open_refutations: close refused because open refutations remain; inspect the issue within the MCP startup scope")
 	}
 	if message, guarded := crossScopeCloseGuardMessages[envelope.ErrorData.Code]; guarded {
 		return fmt.Errorf("%s: %s", envelope.ErrorData.Code, message)

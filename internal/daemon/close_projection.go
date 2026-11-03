@@ -6,7 +6,6 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"slices"
-	"strings"
 
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
@@ -21,6 +20,17 @@ func projectedCloseWarnings(event *db.Event) []db.VerificationWarning {
 	}
 	_ = json.Unmarshal([]byte(event.Payload), &payload)
 	return payload.Warnings
+}
+
+func projectedCloseEndpointProjects(event *db.Event) map[string]string {
+	if event == nil {
+		return nil
+	}
+	var payload struct {
+		EndpointProjects map[string]string `json:"verification_endpoint_projects"`
+	}
+	_ = json.Unmarshal([]byte(event.Payload), &payload)
+	return payload.EndpointProjects
 }
 
 // projectCloseEvent releases retained references only through the reader's
@@ -70,13 +80,6 @@ func projectCloseEvent(ctx context.Context, store db.Storage, event *db.Event) (
 	if len(refs) == 0 {
 		return event, nil
 	}
-	canonical := false
-	for _, ref := range refs {
-		canonical = canonical || len(ref) == 26 && !strings.Contains(ref, ":")
-	}
-	if !canonical {
-		return event, nil
-	} // Already projected by this request's scope pass.
 	subjectProject := event.ProjectUID
 	var subject db.Issue
 	if event.IssueUID != nil {

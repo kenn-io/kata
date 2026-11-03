@@ -825,6 +825,11 @@ func TestToolsUseBoundDaemonProjectAndActor(t *testing.T) {
 				require.Equal(t, http.MethodGet, resolution.Method)
 				require.Equal(t, "/api/v1/projects/42/issues/def2", resolution.Path)
 			}
+			if tt.tool == "kata.close" {
+				preflight := <-requests
+				require.Equal(t, http.MethodGet, preflight.Method)
+				require.Equal(t, "/api/v1/projects/42/issues/abc1", preflight.Path)
+			}
 			request := <-requests
 			require.Equal(t, tt.wantMethod, request.Method)
 			require.Equal(t, tt.wantPath, request.Path)

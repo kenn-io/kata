@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"hegel.dev/go/hegel"
 )
 
 func TestScopedSSERechecksCloseVerificationEndpoints(t *testing.T) {
@@ -42,6 +43,33 @@ func TestScopedSSERechecksCloseVerificationEndpoints(t *testing.T) {
 	visible, err := scopedEventStillVisible(f.ctx, f.store, *projected)
 	require.NoError(t, err)
 	require.False(t, visible, "SSE must withhold the retained excerpt after its source leaves the subtree")
+}
+
+func TestScopedCloseProjectionDropsNoncanonicalReferencesWithoutProvenance(t *testing.T) {
+	f := newLateReplyTargetFixture(t)
+	hegel.Test(t, func(ht *hegel.T) {
+		refutation := "c:" + hegel.Draw(ht, hegel.Text())
+		target := "c:" + hegel.Draw(ht, hegel.Text())
+		payload, err := json.Marshal(map[string]any{
+			"verification_warnings": []db.VerificationWarning{{
+				Code: "open_refutations",
+				Refutations: []db.OpenRefutation{{
+					Refutation: refutation, Target: target,
+					Author: "hidden-reviewer", Summary: "Hidden review excerpt",
+				}},
+			}},
+		})
+		require.NoError(ht, err)
+		event := db.Event{
+			Type: "issue.closed", IssueUID: &f.source.UID,
+			ProjectUID: f.project.UID, Payload: string(payload),
+		}
+		projected, err := projectCloseEvent(f.ctx, f.store, &event)
+		require.NoError(ht, err)
+		require.Empty(ht, projectedCloseWarnings(projected))
+		require.NotContains(ht, projected.Payload, "hidden-reviewer")
+		require.NotContains(ht, projected.Payload, "Hidden review excerpt")
+	}, hegel.WithTestCases(32), hegel.WithDatabase(t.TempDir()))
 }
 
 func TestShowDoesNotReuseEvidenceFromAnOlderClose(t *testing.T) {

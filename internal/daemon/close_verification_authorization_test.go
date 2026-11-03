@@ -50,3 +50,44 @@ func TestCloseVerificationScopedRetryRedactsWarnings(t *testing.T) {
 	require.NotContains(t, string(raw), "hidden-reviewer")
 	require.NotContains(t, string(raw), refute.UID)
 }
+
+func TestCloseDryRunReturnsVerificationEndpointProjectProvenance(t *testing.T) {
+	env, project, source, target, _ := scopedReplyFixture(t, true)
+	claim, _, err := env.DB.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: source.ID, Author: "worker", Body: "The requested result is now correct.",
+	})
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: target.IssueID, Author: "reviewer", Body: "The result still needs review.",
+		ReplyToUID: claim.UID, ReplyKind: "refute",
+	})
+	require.NoError(t, err)
+	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+		PlaintextToken: "owner-close-token", Actor: "worker", AdminActor: db.BootstrapActor,
+	})
+	require.NoError(t, err)
+	path := "/api/v1/projects/" + strconv.FormatInt(project.ID, 10) + "/issues/" + source.ShortID + "/actions/close"
+	body := map[string]any{
+		"reason": "done", "message": "Completed and checked the requested change in the focused suite.",
+		"dry_run": true, "evidence": []map[string]any{{"type": "test", "command": "go test ./example"}},
+	}
+	resp, raw := envDoRaw(t, env, http.MethodPost, path, body, map[string]string{
+		"Authorization": "Bearer owner-close-token",
+	})
+	require.Equal(t, http.StatusOK, resp.StatusCode, string(raw))
+	var response struct {
+		Warnings []struct {
+			Refutations []struct {
+				Refutation string `json:"refutation"`
+				Target     string `json:"target"`
+			} `json:"refutations"`
+		} `json:"warnings"`
+		VerificationEndpointProjects map[string]string `json:"verification_endpoint_projects"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &response))
+	require.Len(t, response.Warnings, 1)
+	require.Len(t, response.Warnings[0].Refutations, 1)
+	refutation := response.Warnings[0].Refutations[0]
+	require.Equal(t, project.UID, response.VerificationEndpointProjects[refutation.Refutation])
+	require.Equal(t, project.UID, response.VerificationEndpointProjects[refutation.Target])
+}

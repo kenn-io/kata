@@ -4396,6 +4396,11 @@ components:
           $ref: "#/components/schemas/Event"
         reused:
           type: boolean
+        verification_endpoint_projects:
+          additionalProperties:
+            type: string
+          description: Maps each rendered verification reference to its current owning project UID so clients can enforce fixed project scopes.
+          type: object
         warnings:
           items:
             $ref: "#/components/schemas/VerificationWarning"

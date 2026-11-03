@@ -178,7 +178,7 @@ func (h toolHandlers) projects(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 		result = append(result, projectSummaryOut(project))
 	}
 	if name != "" && len(result) == 0 {
-		for _, startup := range h.options.Scope.projects {
+		for _, startup := range h.options.Scope.projectSnapshot() {
 			if startup.Name == name {
 				return nil, ProjectsOutput{}, fmt.Errorf("project %q in the MCP startup scope is no longer available", name)
 			}
@@ -210,7 +210,7 @@ func (h toolHandlers) projectShow(ctx context.Context, _ *sdkmcp.CallToolRequest
 }
 
 func (h toolHandlers) projectInFixedScope(project generated.ProjectOut) bool {
-	for _, allowed := range h.options.Scope.projects {
+	for _, allowed := range h.options.Scope.projectSnapshot() {
 		if allowed.UID != "" && allowed.UID == project.UID || allowed.UID == "" && allowed.ID == project.ID {
 			return true
 		}

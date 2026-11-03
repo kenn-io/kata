@@ -603,6 +603,10 @@ func TestScopedCloseGuardErrorsHideForeignIdentities(t *testing.T) {
 			writeJSON(writer, map[string]any{"projects": []any{
 				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
 			}})
+		case request.Method == http.MethodGet && request.URL.Path == "/api/v1/projects/1/issues/par1":
+			issue := issueJSON(1, "spoke-project", "par1")
+			issue["project_uid"] = "01HAAAAAAAAAAAAAAAAAAAAAAA"
+			writeJSON(writer, map[string]any{"issue": issue, "comments": []any{}, "links": []any{}, "labels": []any{}})
 		case strings.HasSuffix(request.URL.Path, "/actions/close"):
 			writer.WriteHeader(http.StatusConflict)
 			writeJSON(writer, map[string]any{

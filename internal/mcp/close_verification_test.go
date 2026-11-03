@@ -29,7 +29,9 @@ func TestMCPVerdictCloseAndWarnings(t *testing.T) {
 	t.Cleanup(httpServer.Close)
 	client, err := kataclient.NewWithHTTPClient(httpServer.URL, httpServer.Client())
 	require.NoError(t, err)
-	session := connectTestServerWithOptions(t, Options{Client: client, ProjectID: project.ID, ProjectName: project.Name, Actor: "worker", Version: "test-version"})
+	scope, err := NewBoundScope(ProjectIdentity{ID: project.ID, UID: project.UID, Name: project.Name})
+	require.NoError(t, err)
+	session := connectTestServerWithOptions(t, Options{Client: client, Scope: scope, Actor: "worker", Version: "test-version"})
 	for _, kind := range []string{"confirmed", "refuted", "warning", "overrule"} {
 		t.Run(kind, func(t *testing.T) {
 			meta := map[string]jsontext.Value{}
@@ -103,6 +105,14 @@ func TestMCPVerdictCloseAndWarnings(t *testing.T) {
 				require.NotContains(t, string(raw), foreign.Name+"#", "audit references obey the same startup scope as replay warnings")
 			} else {
 				require.NotContains(t, output, "warnings")
+				if kind == "confirmed" {
+					audit, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.audit_closes", Arguments: map[string]any{"until": "2100-01-01T00:00:00Z"}})
+					require.NoError(t, err)
+					require.False(t, audit.IsError, audit.Content)
+					raw, err := json.Marshal(audit.StructuredContent)
+					require.NoError(t, err)
+					require.Contains(t, string(raw), "verdict_evidence", "readable retained confirmations must be included")
+				}
 			}
 		})
 	}

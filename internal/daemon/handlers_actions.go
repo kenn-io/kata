@@ -208,6 +208,7 @@ func registerActionsHandlers(humaAPI huma.API, cfg ServerConfig) {
 				return nil, internalAPIError(err)
 			}
 			out.Body.Warnings = projectedCloseWarnings(preview)
+			out.Body.VerificationEndpointProjects = projectedCloseEndpointProjects(preview)
 			return out, nil
 		}
 		var updated db.Issue

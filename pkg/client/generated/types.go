@@ -4609,12 +4609,15 @@ func (m MoveIssueResponseBody) Validate() error {
 }
 
 type MutationResponseBody struct {
-	Changed       bool                  `json:"changed"`
-	Event         Event                 `json:"event"`
-	Issue         Issue                 `json:"issue"`
-	OriginalEvent *Event                `json:"original_event,omitempty"`
-	Reused        *bool                 `json:"reused,omitempty"`
-	Warnings      []VerificationWarning `json:"warnings,omitempty"`
+	Changed       bool   `json:"changed"`
+	Event         Event  `json:"event"`
+	Issue         Issue  `json:"issue"`
+	OriginalEvent *Event `json:"original_event,omitempty"`
+	Reused        *bool  `json:"reused,omitempty"`
+
+	// VerificationEndpointProjects Maps each rendered verification reference to its current owning project UID so clients can enforce fixed project scopes.
+	VerificationEndpointProjects map[string]string     `json:"verification_endpoint_projects,omitempty"`
+	Warnings                     []VerificationWarning `json:"warnings,omitempty"`
 }
 
 func (m MutationResponseBody) Validate() error {

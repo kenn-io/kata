@@ -63,9 +63,13 @@ func pollIssueHistory(ctx context.Context, store db.Storage, afterID int64, rawL
 		for index, event := range rows {
 			out.Body.NextAfterID = event.ID
 			if visible[index] && event.Type != db.ProjectScopeResetEventType {
-				closed, err := projectCloseEvent(ctx, store, &projected[index])
-				if err != nil {
-					return nil, internalAPIError(err)
+				closed := &projected[index]
+				if scope == nil {
+					// Scoped batches already projected close payloads; a second pass cannot resolve their display handles.
+					closed, err = projectCloseEvent(ctx, store, closed)
+					if err != nil {
+						return nil, internalAPIError(err)
+					}
 				}
 				out.Body.Events = append(out.Body.Events, toEnvelopes([]db.Event{*closed})...)
 				if len(out.Body.Events) == limit {

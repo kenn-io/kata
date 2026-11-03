@@ -147,11 +147,12 @@ func (s *Scope) Projects(ctx context.Context, client *kataclient.Client, include
 	if s == nil {
 		return nil, errors.New("MCP project scope is required")
 	}
-	if s.mode == ScopeBound && (client == nil || s.projects[0].UID == "") {
-		return append([]ProjectIdentity(nil), s.projects...), nil
+	startup := s.projectSnapshot()
+	if s.mode == ScopeBound && (client == nil || startup[0].UID == "") {
+		return startup, nil
 	}
 	if client == nil {
-		return append([]ProjectIdentity(nil), s.projects...), nil
+		return startup, nil
 	}
 	catalog, err := loadScopeProjects(ctx, client, includeArchived)
 	if err != nil {
@@ -160,8 +161,8 @@ func (s *Scope) Projects(ctx context.Context, client *kataclient.Client, include
 	if s.mode == ScopeAll {
 		return catalog, nil
 	}
-	allowed := make(map[string]struct{}, len(s.projects))
-	for _, project := range s.projects {
+	allowed := make(map[string]struct{}, len(startup))
+	for _, project := range startup {
 		allowed[project.UID] = struct{}{}
 	}
 	projects := make([]ProjectIdentity, 0, len(allowed))
@@ -191,12 +192,16 @@ func (s *Scope) Project(ctx context.Context, client *kataclient.Client, name str
 			return project, nil
 		}
 	}
-	for _, startup := range s.projects {
+	for _, startup := range s.projectSnapshot() {
 		if startup.Name == name {
 			return ProjectIdentity{}, fmt.Errorf("project %q in the MCP startup scope is no longer available", name)
 		}
 	}
 	return ProjectIdentity{}, fmt.Errorf("project %q is outside the MCP startup scope", name)
+}
+
+func (s *Scope) projectSnapshot() []ProjectIdentity {
+	return append([]ProjectIdentity(nil), s.projects...)
 }
 
 // IssueTarget resolves a qualified issue reference and enforces scope.

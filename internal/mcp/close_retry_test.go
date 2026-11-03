@@ -65,6 +65,10 @@ func TestClosePreservesMutationProjectionError(t *testing.T) {
 		switch {
 		case request.URL.Path == "/api/v1/projects":
 			writeJSON(writer, map[string]any{"projects": []any{projectJSON(1, projectUID, "spoke-project")}})
+		case request.Method == http.MethodGet && request.URL.Path == "/api/v1/projects/1/issues/abc1":
+			issue := issueJSON(1, "spoke-project", "abc1")
+			issue["project_uid"] = projectUID
+			writeJSON(writer, map[string]any{"issue": issue, "comments": []any{}, "links": []any{}, "labels": []any{}})
 		case strings.HasSuffix(request.URL.Path, "/actions/close"):
 			issue := issueJSON(2, "other-project", "abc1")
 			issue["project_uid"] = projectUID
@@ -81,6 +85,109 @@ func TestClosePreservesMutationProjectionError(t *testing.T) {
 		Message: "Reviewed the request and recorded why the work should stop here.",
 	})
 	require.ErrorContains(t, err, "outside the MCP startup scope")
+}
+
+func TestCloseRejectsHistoricalRouteAfterIssueLeavesFixedScope(t *testing.T) {
+	const (
+		allowedProjectUID = "01HAAAAAAAAAAAAAAAAAAAAAAA"
+		foreignProjectUID = "01HBBBBBBBBBBBBBBBBBBBBBBB"
+	)
+	var closeCalls int
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.URL.Path == "/api/v1/projects":
+			writeJSON(writer, map[string]any{"projects": []any{projectJSON(1, allowedProjectUID, "spoke-project")}})
+		case request.Method == http.MethodGet && request.URL.Path == "/api/v1/projects/1/issues/abc1":
+			issue := issueJSON(2, "other-project", "def1")
+			issue["project_uid"] = foreignProjectUID
+			writeJSON(writer, map[string]any{"issue": issue, "comments": []any{}, "links": []any{}, "labels": []any{}})
+		case strings.HasSuffix(request.URL.Path, "/actions/close"):
+			closeCalls++
+			writeJSON(writer, map[string]any{"issue": issueJSON(2, "other-project", "def1"), "changed": false})
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{{ID: 1, UID: allowedProjectUID, Name: "spoke-project"}})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope, Actor: "example-agent"}}
+	_, _, err = handlers.close(t.Context(), nil, CloseInput{
+		Ref: "spoke-project#abc1", Reason: "done",
+		Message: "Reviewed the request and verified the proposed completion carefully.",
+	})
+	require.ErrorContains(t, err, "outside the MCP startup scope")
+	require.Zero(t, closeCalls, "a historical route cannot close an issue after it leaves the fixed scope")
+}
+
+func TestScopedCloseRejectsResponseAfterProjectLeavesActiveScope(t *testing.T) {
+	const projectUID = "01HAAAAAAAAAAAAAAAAAAAAAAA"
+	var projectsRead int
+	var archived bool
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.URL.Path == "/api/v1/projects":
+			projectsRead++
+			projects := []any{}
+			if !archived {
+				projects = append(projects, projectJSON(1, projectUID, "spoke-project"))
+			}
+			writeJSON(writer, map[string]any{"projects": projects})
+		case request.Method == http.MethodGet && request.URL.Path == "/api/v1/projects/1/issues/abc1":
+			issue := issueJSON(1, "spoke-project", "abc1")
+			issue["project_uid"] = projectUID
+			writeJSON(writer, map[string]any{"issue": issue, "comments": []any{}, "links": []any{}, "labels": []any{}})
+		case strings.HasSuffix(request.URL.Path, "/actions/close"):
+			archived = true
+			issue := issueJSON(1, "spoke-project", "abc1")
+			issue["project_uid"] = projectUID
+			writeJSON(writer, map[string]any{"issue": issue, "changed": true, "warnings": []any{}})
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{{ID: 1, UID: projectUID, Name: "spoke-project"}})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope, Actor: "example-agent"}}
+	_, output, err := handlers.close(t.Context(), nil, CloseInput{
+		Ref: "spoke-project#abc1", Reason: "done",
+		Message: "Reviewed the request and verified the proposed completion carefully.",
+	})
+	require.ErrorContains(t, err, "MCP startup scope")
+	require.Empty(t, output)
+	require.Equal(t, 3, projectsRead, "close response visibility must revalidate active project membership")
+}
+
+func TestScopedCloseRedactsOpenRefutationDetailsWithoutEndpointProvenance(t *testing.T) {
+	const projectUID = "01HAAAAAAAAAAAAAAAAAAAAAAA"
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.URL.Path == "/api/v1/projects":
+			writeJSON(writer, map[string]any{"projects": []any{projectJSON(1, projectUID, "spoke-project")}})
+		case request.Method == http.MethodGet && request.URL.Path == "/api/v1/projects/1/issues/abc1":
+			issue := issueJSON(1, "spoke-project", "abc1")
+			issue["project_uid"] = projectUID
+			writeJSON(writer, map[string]any{"issue": issue, "comments": []any{}, "links": []any{}, "labels": []any{}})
+		case strings.HasSuffix(request.URL.Path, "/actions/close"):
+			writer.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(writer).Encode(map[string]any{"status": http.StatusConflict, "error": map[string]any{
+				"code": "open_refutations", "message": "Hidden review excerpt from hidden-reviewer",
+				"hint": "Inspect the hidden verdict comment",
+			}})
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{{ID: 1, UID: projectUID, Name: "spoke-project"}})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope, Actor: "example-agent"}}
+	_, _, err = handlers.close(t.Context(), nil, CloseInput{
+		Ref: "spoke-project#abc1", Reason: "done",
+		Message: "Reviewed the request and verified the proposed completion carefully.",
+	})
+	require.ErrorContains(t, err, "open_refutations")
+	require.NotContains(t, err.Error(), "Hidden review excerpt")
+	require.NotContains(t, err.Error(), "hidden-reviewer")
+	require.NotContains(t, err.Error(), "hidden verdict comment")
 }
 
 func TestAuditClosesRedactsForeignVerdictReferences(t *testing.T) {
@@ -152,12 +259,58 @@ func TestScopedVerificationWarningsUseEndpointProjectUIDs(t *testing.T) {
 	require.Empty(t, filtered, "handles without canonical project provenance must fail closed")
 }
 
+func TestScopedCloseDryRunUsesResponseEndpointProjectUIDs(t *testing.T) {
+	const (
+		allowedProjectUID = "01HAAAAAAAAAAAAAAAAAAAAAAA"
+		foreignProjectUID = "01HBBBBBBBBBBBBBBBBBBBBBBB"
+	)
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.URL.Path == "/api/v1/projects":
+			writeJSON(writer, map[string]any{"projects": []any{projectJSON(1, allowedProjectUID, "spoke-project")}})
+		case request.Method == http.MethodGet && request.URL.Path == "/api/v1/projects/1/issues/abc1":
+			issue := issueJSON(1, "spoke-project", "abc1")
+			issue["project_uid"] = allowedProjectUID
+			writeJSON(writer, map[string]any{"issue": issue, "comments": []any{}, "links": []any{}, "labels": []any{}})
+		case strings.HasSuffix(request.URL.Path, "/actions/close"):
+			issue := issueJSON(1, "spoke-project", "abc1")
+			issue["project_uid"] = allowedProjectUID
+			writeJSON(writer, map[string]any{
+				"issue": issue, "changed": false,
+				"warnings": []any{map[string]any{"code": "open_refutations", "refutations": []any{
+					map[string]any{"refutation": "c:local1", "target": "c:claim1", "author": "reviewer", "summary": "Visible review"},
+					map[string]any{"refutation": "hub-project#other1:c:foreign1", "target": "c:claim1", "author": "foreign-reviewer", "summary": "Hidden review"},
+				}}},
+				"verification_endpoint_projects": map[string]string{
+					"c:local1": allowedProjectUID, "c:claim1": allowedProjectUID,
+					"hub-project#other1:c:foreign1": foreignProjectUID,
+				},
+			})
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{{ID: 1, UID: allowedProjectUID, Name: "spoke-project"}})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope, Actor: "example-agent"}}
+	_, output, err := handlers.close(t.Context(), nil, CloseInput{
+		Ref: "spoke-project#abc1", Reason: "done", DryRun: true,
+		Message: "Reviewed the request and verified the proposed completion carefully.",
+	})
+	require.NoError(t, err)
+	require.Len(t, output.Warnings, 1)
+	require.Len(t, output.Warnings[0].Refutations, 1)
+	require.Equal(t, "c:local1", output.Warnings[0].Refutations[0].Refutation)
+	require.NotNil(t, output.Warnings[0].Refutations[0].Summary)
+	require.NotContains(t, *output.Warnings[0].Refutations[0].Summary, "Hidden review")
+}
+
 func TestVerificationReferenceScopeUsesProjectUIDs(t *testing.T) {
 	// A comment handle's display form cannot establish its owning project.
 	hegel.Test(t, func(ht *hegel.T) {
 		provenance := hegel.Draw(ht, hegel.Booleans())
 		projectMatches := hegel.Draw(ht, hegel.Booleans())
-		suffix := hegel.Draw(ht, hegel.Text().MinSize(1).MaxSize(24))
+		suffix := hegel.Draw(ht, hegel.Text())
 
 		const allowedProjectUID = "01HAAAAAAAAAAAAAAAAAAAAAAA"
 		ownerProjectUID := "01HBBBBBBBBBBBBBBBBBBBBBBB"
@@ -175,7 +328,65 @@ func TestVerificationReferenceScopeUsesProjectUIDs(t *testing.T) {
 			endpointProjects,
 			map[string]bool{allowedProjectUID: true},
 		))
+		require.False(ht, verificationReferenceInScope(
+			reference+":near-miss",
+			endpointProjects,
+			map[string]bool{allowedProjectUID: true},
+		), "similar display handles must not borrow endpoint provenance")
 	}, hegel.WithTestCases(40), hegel.WithDatabase(t.TempDir()))
+}
+
+func TestScopedVerificationWarningsRequireProvenanceForBothEndpoints(t *testing.T) {
+	const (
+		allowedProjectUID = "01HAAAAAAAAAAAAAAAAAAAAAAA"
+		foreignProjectUID = "01HBBBBBBBBBBBBBBBBBBBBBBB"
+	)
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/v1/projects" {
+			writeJSON(writer, map[string]any{"projects": []any{projectJSON(1, allowedProjectUID, "spoke-project")}})
+			return
+		}
+		http.NotFound(writer, request)
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{{ID: 1, UID: allowedProjectUID, Name: "spoke-project"}})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope}}
+	hegel.Test(t, func(ht *hegel.T) {
+		refHasProvenance := hegel.Draw(ht, hegel.Booleans())
+		refMatchesScope := hegel.Draw(ht, hegel.Booleans())
+		targetHasProvenance := hegel.Draw(ht, hegel.Booleans())
+		targetMatchesScope := hegel.Draw(ht, hegel.Booleans())
+		refutationRef, targetRef := "c:refutation", "c:claim"
+		endpointProjects := map[string]string{}
+		if refHasProvenance {
+			endpointProjects[refutationRef] = foreignProjectUID
+			if refMatchesScope {
+				endpointProjects[refutationRef] = allowedProjectUID
+			}
+		}
+		if targetHasProvenance {
+			endpointProjects[targetRef] = foreignProjectUID
+			if targetMatchesScope {
+				endpointProjects[targetRef] = allowedProjectUID
+			}
+		}
+		summary := "Visible only with both endpoint proofs"
+		warnings := []generated.VerificationWarning{{
+			Code: "open_refutations",
+			Refutations: []generated.OpenRefutation{{
+				Refutation: refutationRef, Target: targetRef,
+				Author: "reviewer", Summary: &summary,
+			}},
+		}}
+
+		filtered, err := handlers.scopedVerificationWarnings(t.Context(), warnings, endpointProjects)
+		require.NoError(ht, err)
+		if refHasProvenance && refMatchesScope && targetHasProvenance && targetMatchesScope {
+			require.Equal(ht, warnings, filtered)
+			return
+		}
+		require.Empty(ht, filtered)
+	}, hegel.WithTestCases(32), hegel.WithDatabase(t.TempDir()))
 }
 
 func TestAuditClosesFailsClosedOnUnqualifiedReferencesWithoutProvenance(t *testing.T) {
@@ -215,6 +426,10 @@ func TestCloseRejectsReusedIssueMovedOutsideFixedScope(t *testing.T) {
 				projectJSON(1, allowedProjectUID, "spoke-project"),
 				projectJSON(2, foreignProjectUID, "other-project"),
 			}})
+		case request.Method == http.MethodGet && request.URL.Path == "/api/v1/projects/1/issues/abc1":
+			issue := issueJSON(1, "spoke-project", "abc1")
+			issue["project_uid"] = allowedProjectUID
+			writeJSON(writer, map[string]any{"issue": issue, "comments": []any{}, "links": []any{}, "labels": []any{}})
 		case strings.HasSuffix(request.URL.Path, "/actions/close"):
 			issue := issueJSON(2, "other-project", "def1")
 			issue["project_uid"] = foreignProjectUID
@@ -255,6 +470,10 @@ func TestCloseUsesCurrentProjectForReusedIssueMovedWithinScope(t *testing.T) {
 				projectJSON(1, sourceProjectUID, "source-project"),
 				projectJSON(2, targetProjectUID, "target-project"),
 			}})
+		case request.Method == http.MethodGet && request.URL.Path == "/api/v1/projects/1/issues/abc1":
+			issue := issueJSON(1, "source-project", "abc1")
+			issue["project_uid"] = sourceProjectUID
+			writeJSON(writer, map[string]any{"issue": issue, "comments": []any{}, "links": []any{}, "labels": []any{}})
 		case strings.HasSuffix(request.URL.Path, "/actions/close"):
 			issue := issueJSON(2, "target-project", "def1")
 			issue["project_uid"] = targetProjectUID

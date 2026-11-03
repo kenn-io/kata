@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"hegel.dev/go/hegel"
 
 	kataclient "go.kenn.io/kata/pkg/client"
 )
@@ -49,6 +50,46 @@ func TestResolveBoundScopeRetainsAuthorityByUIDAfterRename(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "renamed-project", project.Name)
 	require.Equal(t, "01HAAAAAAAAAAAAAAAAAAAAAAA", project.UID)
+}
+
+func TestBoundScopeKeepsResolvedUIDWhenProjectIDIsReused(t *testing.T) {
+	const (
+		originalUID    = "01HAAAAAAAAAAAAAAAAAAAAAAA"
+		replacementUID = "01HBBBBBBBBBBBBBBBBBBBBBBB"
+	)
+	initial := projectCatalogClient(t, `{"projects":[{"id":1,"uid":"`+originalUID+`","name":"spoke-project","metadata":{},"revision":1,"created_at":"2026-08-11T00:00:00Z"}]}`)
+	renamedSameUID := projectCatalogClient(t, `{"projects":[{"id":1,"uid":"`+originalUID+`","name":"renamed-project","metadata":{},"revision":2,"created_at":"2026-08-11T00:00:00Z"}]}`)
+	sameNameReplacement := projectCatalogClient(t, `{"projects":[{"id":1,"uid":"`+replacementUID+`","name":"spoke-project","metadata":{},"revision":2,"created_at":"2026-08-11T00:00:00Z"}]}`)
+	renamedReplacement := projectCatalogClient(t, `{"projects":[{"id":1,"uid":"`+replacementUID+`","name":"renamed-project","metadata":{},"revision":2,"created_at":"2026-08-11T00:00:00Z"}]}`)
+	hegel.Test(t, func(ht *hegel.T) {
+		sameUID := hegel.Draw(ht, hegel.Booleans())
+		sameName := hegel.Draw(ht, hegel.Booleans())
+		next := renamedReplacement
+		if sameUID {
+			next = renamedSameUID
+			if sameName {
+				next = initial
+			}
+		} else if sameName {
+			next = sameNameReplacement
+		}
+		scope, err := ResolveBoundScope(t.Context(), initial, ProjectIdentity{ID: 1, Name: "spoke-project"})
+		require.NoError(ht, err)
+		projects, err := scope.Projects(t.Context(), next, false)
+		if !sameUID {
+			require.EqualError(ht, err, "no projects in the MCP startup scope are available")
+			require.Empty(ht, projects)
+			return
+		}
+		require.NoError(ht, err)
+		require.Len(ht, projects, 1)
+		require.Equal(ht, originalUID, projects[0].UID)
+		if sameName {
+			require.Equal(ht, "spoke-project", projects[0].Name)
+		} else {
+			require.Equal(ht, "renamed-project", projects[0].Name)
+		}
+	}, hegel.WithTestCases(32), hegel.WithDatabase(t.TempDir()))
 }
 
 func TestResolveAllowlistScopeSelection(t *testing.T) {
