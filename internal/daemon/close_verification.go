@@ -16,7 +16,11 @@ import (
 // readVerification uses the full authorized project graph. The selected graph
 // only loads immediate neighbors and would omit cross-issue rebuttal chains.
 func readVerification(ctx context.Context, store db.Storage, issue db.Issue) ([]commentref.Record, db.Verification, error) {
-	data, err := store.ReadCommentGraph(ctx, db.CommentGraphQuery{ProjectID: issue.ProjectID, IssueScope: issueScopeFromContext(ctx), VerificationIssueID: issue.ID})
+	query := db.CommentGraphQuery{ProjectID: issue.ProjectID, IssueScope: issueScopeFromContext(ctx), VerificationIssueID: issue.ID}
+	if issue.DeletedAt != nil {
+		query.IncludeDeletedSourceIssueID = issue.ID
+	}
+	data, err := store.ReadCommentGraph(ctx, query)
 	if err != nil {
 		return nil, db.Verification{}, internalAPIError(err)
 	}
@@ -161,6 +165,15 @@ func checkCloseVerification(ctx context.Context, cfg ServerConfig, issue db.Issu
 	}
 	warnings, overruled, err := CheckOpenRefutations(issue, body.Reason, cfg.CloseVerification, body.Overrule, records, v)
 	if err != nil {
+		if refusal, ok := err.(*api.APIError); ok && refusal.Code == "open_refutations" {
+			refutations, ok := refusal.Data["refutations"].([]db.OpenRefutation)
+			if !ok {
+				return nil, nil, api.NewError(500, "internal", "verification references could not be revalidated", "", nil)
+			}
+			if scopeErr := recordVerificationResponseScope(ctx, records, issue.UID, db.Verification{OpenRefutations: refutations}); scopeErr != nil {
+				return nil, nil, scopeErr
+			}
+		}
 		return nil, nil, err
 	}
 	canonical := func(handle string) string {

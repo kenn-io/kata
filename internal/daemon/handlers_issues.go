@@ -1052,7 +1052,7 @@ func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Is
 	v := commentref.Evaluate(records, issue.UID, nil)
 	v.Required = verificationRequired(issue)
 	v.Redacted += data.Redacted
-	if v.Activity && query.SelectedIssueID > 0 && issue.DeletedAt == nil {
+	if v.Activity && query.SelectedIssueID > 0 {
 		verificationRecords, v, err = readVerification(ctx, cfg.DB, issue)
 		if err != nil {
 			return nil, err
