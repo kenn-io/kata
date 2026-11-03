@@ -1438,6 +1438,7 @@ type LinkAttachmentResp struct {
 	Body         []byte
 	StatusCode   int
 	JSON200      *LinkAttachmentResponse
+	JSONDefault  *LinkAttachmentErrorResponse
 }
 
 type AttachmentContentResp struct {
