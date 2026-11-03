@@ -14,6 +14,7 @@ import (
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/mcpdiscovery"
+	"go.kenn.io/kata/internal/mcpicon"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -118,6 +119,7 @@ func serveMCPHTTP(
 	defer func() { _ = listener.Close() }()
 
 	mux := http.NewServeMux()
+	mcpicon.RegisterRoutes(mux)
 	mux.Handle("/mcp", newMCPHTTPHandler(server, token, false))
 	mux.HandleFunc("/healthz", serveMCPHTTPHealth)
 	var handler http.Handler = mux
