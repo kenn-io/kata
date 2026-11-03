@@ -110,11 +110,12 @@ func CommentDisplayEventPayload(comment CommentExport) (jsontext.Value, error) {
 		AttributedTeammate *string `json:"attributed_teammate,omitzero"`
 		Body               string  `json:"body"`
 		CreatedAt          string  `json:"created_at"`
+		EditedAt           string  `json:"edited_at,omitempty"`
 	}{
 		ReplyToUID: comment.ReplyToUID, ReplyKind: comment.ReplyKind,
 		CommentUID: comment.UID, Author: comment.Author, Teammate: comment.Teammate,
 		AttributedTeammate: comment.AttributedTeammate,
-		Body:               comment.Body, CreatedAt: comment.CreatedAt,
+		Body:               comment.Body, CreatedAt: comment.CreatedAt, EditedAt: comment.EditedAt,
 	})
 	return jsontext.Value(payload), err
 }

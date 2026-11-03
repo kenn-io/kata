@@ -474,7 +474,7 @@ func (p *FoldProjection) setComment(commentUID, issueUID, author, teammate, attr
 	comment.AttributedTeammate = attributedTeammate
 	comment.Body = body
 	comment.CreatedAt = createdAt
-	comment.ReplyToUID, comment.ReplyKind, comment.EditedAt = replyTo, replyKind, editedAt
+	comment.ReplyToUID, comment.ReplyKind, comment.EditedAt = CanonicalCommentUID(replyTo), replyKind, editedAt
 	if existing, exists := p.Comments[commentUID]; exists {
 		if existing.CreatedAt == "" {
 			comment.Body, comment.EditedAt, comment.Clock = existing.Body, existing.EditedAt, existing.Clock

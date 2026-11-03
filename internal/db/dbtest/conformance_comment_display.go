@@ -102,11 +102,21 @@ func checkCommentDisplayContribution(t *testing.T, store db.Storage, backend Bac
 	require.NoError(t, err)
 	_, _, err = store.CreateComment(ctx, db.CreateCommentParams{IssueID: replyIssue.ID, Author: "reviewer", Body: "Response", ReplyToUID: comment.UID, ReplyKind: "reply"})
 	require.NoError(t, err)
+	fallbackIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Fallback", Author: "actor"})
+	require.NoError(t, err)
+	fallbackComment, _, err := store.CreateComment(teammate.WithRequest(ctx, "route"), db.CreateCommentParams{
+		IssueID: fallbackIssue.ID, Author: "actor", Teammate: "route", Body: "Legacy display fallback",
+	})
+	require.NoError(t, err)
 	movedProject, err := store.CreateProject(ctx, "moved-project")
 	require.NoError(t, err)
 	current, err := store.IssueByID(ctx, issue.ID)
 	require.NoError(t, err)
 	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: project.ID, ToProjectID: movedProject.ID, IfMatchRev: current.Revision, Actor: "actor"})
+	require.NoError(t, err)
+	fallbackCurrent, err := store.IssueByID(ctx, fallbackIssue.ID)
+	require.NoError(t, err)
+	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: fallbackIssue.ID, FromProjectID: project.ID, ToProjectID: movedProject.ID, IfMatchRev: fallbackCurrent.Revision, Actor: "actor"})
 	require.NoError(t, err)
 	graph, err = store.ReadCommentGraph(ctx, db.CommentGraphQuery{ProjectID: project.ID, SelectedIssueID: replyIssue.ID})
 	require.NoError(t, err)
@@ -142,6 +152,51 @@ func checkCommentDisplayContribution(t *testing.T, store db.Storage, backend Bac
 	require.NoError(t, err)
 	require.Len(t, destinationComments, 1)
 	assertDisplay(destinationComments[0])
+	require.NotNil(t, edited.EditedAt)
+	destinationEvents, err := destinationRestore.EventsAfter(ctx, db.EventsAfterParams{ProjectID: destinationIssue.ProjectID, Limit: 1000})
+	require.NoError(t, err)
+	synthesizedEditedAt := false
+	for _, destinationEvent := range destinationEvents {
+		if destinationEvent.Type != "issue.commented" {
+			continue
+		}
+		var payload struct {
+			CommentUID string `json:"comment_uid"`
+			EditedAt   string `json:"edited_at"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(destinationEvent.Payload), &payload))
+		if payload.CommentUID != comment.UID {
+			continue
+		}
+		require.NotEmpty(t, payload.EditedAt,
+			"destination-only replay must retain an edited comment's timestamp in its synthesized creation event")
+		parsedEditedAt, err := time.Parse(time.RFC3339Nano, payload.EditedAt)
+		require.NoError(t, err)
+		require.True(t, edited.EditedAt.Equal(parsedEditedAt),
+			"destination-only replay must retain an edited comment's timestamp in its synthesized creation event")
+		synthesizedEditedAt = true
+	}
+	require.True(t, synthesizedEditedAt, "destination-only replay should synthesize the moved comment's display event")
+	destinationFallbackIssue, err := destinationRestore.IssueByUID(ctx, fallbackIssue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	destinationFallbackComments, err := destinationRestore.CommentsByIssue(ctx, destinationFallbackIssue.ID)
+	require.NoError(t, err)
+	require.Len(t, destinationFallbackComments, 1)
+	require.NotNil(t, destinationFallbackComments[0].AttributedTeammate)
+	require.Equal(t, "route", *destinationFallbackComments[0].AttributedTeammate)
+	fallbackEvents, err := destinationRestore.EventsAfter(ctx, db.EventsAfterParams{ProjectID: destinationFallbackIssue.ProjectID, Limit: 1000})
+	require.NoError(t, err)
+	for _, fallbackEvent := range fallbackEvents {
+		if fallbackEvent.Type != "issue.commented" {
+			continue
+		}
+		var payload struct {
+			CommentUID string `json:"comment_uid"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(fallbackEvent.Payload), &payload))
+		require.NotEqual(t, fallbackComment.UID, payload.CommentUID,
+			"restoring the routing fallback must not synthesize a new visible comment event")
+	}
 
 	// Existing portable exports carry display in retained events, not new row fields.
 	records, err := CollectImportRecords(ctx, store, db.ExportFilter{IncludeDeleted: true})
@@ -169,9 +224,13 @@ func checkCommentDisplayContribution(t *testing.T, store db.Storage, backend Bac
 	events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: movedProject.ID, Limit: 100})
 	require.NoError(t, err)
 	var retained *db.Event
+	retainedByIssueUID := make(map[string]db.Event)
 	for _, e := range events {
 		if e.Type == "issue.snapshot" && e.IssueUID != nil && *e.IssueUID == issue.UID {
 			retained = &e
+		}
+		if e.Type == "issue.snapshot" && e.IssueUID != nil {
+			retainedByIssueUID[*e.IssueUID] = e
 		}
 	}
 	require.NotNil(t, retained)
@@ -184,6 +243,27 @@ func checkCommentDisplayContribution(t *testing.T, store db.Storage, backend Bac
 		require.Equal(t, "writer", c["attributed_teammate"])
 		require.Equal(t, "route", c["teammate"])
 	}
+	destinationProject, err := destinationRestore.ProjectByUID(ctx, movedProject.UID)
+	require.NoError(t, err)
+	_, err = destinationRestore.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: destinationProject.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: destinationProject.UID, Enabled: true})
+	require.NoError(t, err)
+	for index, issueUID := range []string{issue.UID, fallbackIssue.UID} {
+		snapshot, ok := retainedByIssueUID[issueUID]
+		require.True(t, ok, "federation setup should snapshot each moved issue")
+		uid := issueUID
+		remoteSnapshot := newRemoteEvent(t, destinationProject, &uid, "issue.snapshot", "actor", "01EEEEEEEEEEEEEEEEEEEEEEEE", time.Now().Add(time.Duration(index+1)*time.Hour).UnixMilli(), jsontext.Value(snapshot.Payload))
+		_, err = destinationRestore.InsertRemoteEvent(ctx, destinationProject.ID, remoteSnapshot)
+		require.NoError(t, err)
+	}
+	require.NoError(t, destinationRestore.MaterializeFederatedProject(ctx, destinationProject.ID))
+	destinationIssue, err = destinationRestore.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	destinationComments, err = destinationRestore.CommentsByIssue(ctx, destinationIssue.ID)
+	require.NoError(t, err)
+	require.Len(t, destinationComments, 1)
+	require.NotNil(t, destinationComments[0].EditedAt)
+	require.True(t, edited.EditedAt.Equal(*destinationComments[0].EditedAt),
+		"federation materialization must retain the edited timestamp after destination-only restore")
 
 	// Restore from the snapshot alone, without original creation events or rows.
 	snapshotStore := backend.Open(t)
