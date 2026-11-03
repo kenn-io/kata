@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	"hegel.dev/go/hegel"
@@ -152,6 +153,85 @@ func TestShowDoesNotReuseEvidenceFromAnOlderClose(t *testing.T) {
 	if out.Body.Verification != nil {
 		require.Empty(t, out.Body.Verification.Evidence, "an inaccessible latest close cannot reuse the earlier close's claim")
 	}
+}
+
+func TestShowKeepsNewCloseEvidenceAfterHistoricalReset(t *testing.T) {
+	ctx := t.Context()
+	store, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "fixture.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	p, err := store.CreateProject(ctx, "claim-project")
+	require.NoError(t, err)
+	q, err := store.CreateProject(ctx, "review-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Author: "worker", Title: "Completed task"})
+	require.NoError(t, err)
+	review, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Author: "reviewer", Title: "Review"})
+	require.NoError(t, err)
+	claim, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "The requested behavior is complete."})
+	require.NoError(t, err)
+	refutation, _, err := store.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: review.ID, Author: "reviewer", Body: "This earlier review is outside the current scope.",
+		ReplyToUID: claim.UID, ReplyKind: "refute",
+	})
+	require.NoError(t, err)
+	_, _, _, err = store.CloseIssueGuarded(ctx, db.CloseIssueParams{
+		IssueID: issue.ID, ExpectedProjectID: p.ID, Actor: "worker", Reason: "done",
+		Message:               "Completed the first change and reviewed the retained concern.",
+		Evidence:              []db.Evidence{{Type: "test", Command: "go test ./example"}},
+		VerificationIssueUIDs: []string{issue.UID, review.UID},
+		VerificationWarnings: []db.VerificationWarning{{
+			Code: "open_refutations",
+			Refutations: []db.OpenRefutation{{
+				Refutation: refutation.UID, Target: claim.UID,
+				Author: refutation.Author, Summary: refutation.Body,
+			}},
+		}},
+	})
+	require.NoError(t, err)
+	_, _, _, err = store.ReopenIssue(ctx, issue.ID, "worker")
+	require.NoError(t, err)
+	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: review.ID, FromProjectID: p.ID, ToProjectID: q.ID,
+		IfMatchRev: review.Revision, Actor: "reviewer",
+	})
+	require.NoError(t, err)
+	issue, _, _, err = store.CloseIssueGuarded(ctx, db.CloseIssueParams{
+		IssueID: issue.ID, ExpectedProjectID: p.ID, Actor: "worker", Reason: "done",
+		Message:               "Completed the later change and checked its focused tests.",
+		Evidence:              []db.Evidence{{Type: "confirmed", Comment: claim.UID}},
+		VerificationIssueUIDs: []string{issue.UID},
+	})
+	require.NoError(t, err)
+
+	restricted := db.WithAuthorizedProjects(ctx, []string{p.UID})
+	events, err := store.EventsAfter(restricted, db.EventsAfterParams{
+		IssueUID: issue.UID,
+		Types:    []string{"issue.created", "issue.snapshot", "issue.updated", "issue.closed", "issue.reopened"},
+		Limit:    100,
+	})
+	require.NoError(t, err)
+	var sawReset bool
+	var currentClose *db.Event
+	for index := range events {
+		if events[index].Type == db.ProjectScopeResetEventType {
+			sawReset = true
+		}
+		if events[index].Type == "issue.closed" {
+			currentClose = &events[index]
+		}
+	}
+	require.True(t, sawReset, "the earlier close should be hidden after its review issue moves out of scope")
+	require.NotNil(t, currentClose, "the later explicit close should remain visible")
+
+	out, err := buildShowIssueResponse(restricted, ServerConfig{DB: store}, issue, false)
+	require.NoError(t, err)
+	require.NotNil(t, out.Body.Verification)
+	require.Len(t, out.Body.Verification.Evidence, 1,
+		"a historical reset must not suppress evidence from a later visible close")
+	require.Equal(t, "confirmed", out.Body.Verification.Evidence[0].Type)
+	claimHandle := commentref.Handles([]string{claim.UID})[claim.UID]
+	require.Equal(t, "c:"+claimHandle, out.Body.Verification.Evidence[0].Comment)
 }
 
 func TestDeletedShowUsesFullVerificationGraph(t *testing.T) {

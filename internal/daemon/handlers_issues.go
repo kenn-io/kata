@@ -982,11 +982,12 @@ func buildShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issu
 // effectiveCloseEventForShow returns the explicit close event whose status
 // intent still supplies the issue's current closed state. A later reopen or
 // imported status transition can leave the issue closed without carrying any
-// close receipt. Project-scope reset markers hide event identity and state, so
-// they must clear the historical receipt instead of letting an older close win.
+// close receipt. A project-scope reset invalidates receipts at or before its
+// redacted event clock, while a later visible close can establish a new one.
 func effectiveCloseEventForShow(ctx context.Context, store db.Storage, issue db.Issue) (*db.Event, error) {
 	var foldEvents []db.FoldEvent
 	closeEvents := map[string]db.Event{}
+	var latestReset *db.FoldClock
 	query := db.EventsAfterParams{
 		IssueUID: issue.UID,
 		Types:    []string{"issue.created", "issue.snapshot", "issue.updated", "issue.closed", "issue.reopened"},
@@ -1002,7 +1003,14 @@ func effectiveCloseEventForShow(ctx context.Context, store db.Storage, issue db.
 		}
 		for _, event := range page {
 			if event.Type == db.ProjectScopeResetEventType {
-				return nil, nil
+				if event.EffectiveOrder.EventUID == "" {
+					return nil, nil
+				}
+				if latestReset == nil || foldClockAfter(event.EffectiveOrder, *latestReset) {
+					reset := event.EffectiveOrder
+					latestReset = &reset
+				}
+				continue
 			}
 			foldEvents = append(foldEvents, db.FoldEvent{
 				UID: event.UID, OriginInstanceUID: event.OriginInstanceUID,
@@ -1029,7 +1037,34 @@ func effectiveCloseEventForShow(ctx context.Context, store db.Storage, issue db.
 	if !ok {
 		return nil, nil
 	}
+	if latestReset != nil && !foldClockAfter(eventFoldClock(event), *latestReset) {
+		return nil, nil
+	}
 	return &event, nil
+}
+
+// foldClockAfter matches FoldEvents' deterministic HLC ordering.
+func foldClockAfter(candidate, current db.FoldClock) bool {
+	switch {
+	case candidate.HLCPhysicalMS != current.HLCPhysicalMS:
+		return candidate.HLCPhysicalMS > current.HLCPhysicalMS
+	case candidate.HLCCounter != current.HLCCounter:
+		return candidate.HLCCounter > current.HLCCounter
+	case candidate.OriginInstanceUID != current.OriginInstanceUID:
+		return candidate.OriginInstanceUID > current.OriginInstanceUID
+	default:
+		return candidate.EventUID > current.EventUID
+	}
+}
+
+func eventFoldClock(event db.Event) db.FoldClock {
+	if event.EffectiveOrder.EventUID != "" {
+		return event.EffectiveOrder
+	}
+	return db.FoldClock{
+		HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter,
+		OriginInstanceUID: event.OriginInstanceUID, EventUID: event.UID,
+	}
 }
 
 func hydrateShowIssueResponse(ctx context.Context, cfg ServerConfig, issue db.Issue, includeDeleted bool, selectors ...commentref.Options) (*api.ShowIssueResponse, error) {
