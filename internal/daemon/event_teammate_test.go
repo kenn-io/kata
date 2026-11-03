@@ -27,6 +27,51 @@ func TestScopedEventDisplayContribution(t *testing.T) {
 	}
 }
 
+func TestScopedEventDisplayContributionPreservesSuppression(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		eventType string
+		payload   string
+	}{
+		{
+			name:      "created explicit empty",
+			eventType: "issue.created",
+			payload:   `{"metadata":{"teammate":"route-worker"},"attributed_teammate":""}`,
+		},
+		{
+			name:      "commented explicit empty",
+			eventType: "issue.commented",
+			payload:   `{"teammate":"route-worker","attributed_teammate":""}`,
+		},
+		{
+			name:      "created invalid handle",
+			eventType: "issue.created",
+			payload:   `{"metadata":{"teammate":"route-worker"},"attributed_teammate":"bad/handle"}`,
+		},
+		{
+			name:      "commented invalid value",
+			eventType: "issue.commented",
+			payload:   `{"teammate":"route-worker","attributed_teammate":7}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload, ok := scopedEventPayload(db.Event{Type: tc.eventType, Payload: tc.payload})
+			require.True(t, ok)
+			var got map[string]any
+			require.NoError(t, json.Unmarshal([]byte(payload), &got))
+			require.Contains(t, got, "attributed_teammate")
+			require.Equal(t, "", got["attributed_teammate"])
+			if tc.eventType == "issue.created" {
+				metadata, ok := got["metadata"].(map[string]any)
+				require.True(t, ok)
+				require.Equal(t, "route-worker", metadata["teammate"])
+			} else {
+				require.Equal(t, "route-worker", got["teammate"])
+			}
+		})
+	}
+}
+
 func TestClaimForwardDisplayContribution(t *testing.T) {
 	var requests []string
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
