@@ -142,6 +142,19 @@ func TestSettlePatchPreservesRequestsAndSkipsNotices(t *testing.T) {
 	require.Equal(t, map[string]jsontext.Value{key: jsontext.Value("null")}, patch)
 }
 
+func TestSettlePatchMatchesCanonicalizedCommentUID(t *testing.T) {
+	sender := Identity{Actor: "worker"}
+	key := MetadataKey("worker")
+	request := jsontext.Value(`{"from":"lead","message":"respond","re":"01aaaaaaaaaaaaaaaaaaaaaaaa"}`)
+	link, err := LinkValue(sender, "01BBBBBBBBBBBBBBBBBBBBBBBB", "reply")
+	require.NoError(t, err)
+
+	patch := SettlePatch(map[string]jsontext.Value{key: request}, sender, "01AAAAAAAAAAAAAAAAAAAAAAAA", link)
+	require.Equal(t, map[string]jsontext.Value{
+		key: jsontext.Value("null"), MetadataKey("lead"): link,
+	}, patch)
+}
+
 // Actors are stored as written, but inbox, wait, and notify --to address the
 // normalized recipient. Every derived slot key must use that same form.
 func TestNotificationKeysUseNormalizedRecipients(t *testing.T) {

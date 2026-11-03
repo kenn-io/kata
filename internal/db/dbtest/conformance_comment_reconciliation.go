@@ -322,3 +322,57 @@ func checkFederatedCommentUIDNormalizationPreservesMovedReplies(t *testing.T, st
 	require.Equal(t, targetRecord.ID, target.Record.Comment.ID)
 	return nil
 }
+
+func checkFederatedCommentUIDNormalizationResolvesUntouchedTargets(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	const targetProjectUID = "01EEEEEEEEEEEEEEEEEEEEEEEE"
+	const targetIssueUID = "01FFFFFFFFFFFFFFFFFFFFFFFF"
+	const targetCommentUID = "01AAAAAAAAAAAAAAAAAAAAAAAA"
+	lowerTargetCommentUID := strings.ToLower(targetCommentUID)
+	const createdAt = "2026-10-07T11:00:00.000Z"
+	require.NoError(t, store.ImportReplay(ctx, []db.ImportRecord{
+		&db.ProjectExport{ID: 1, UID: targetProjectUID, Name: "target-project", CreatedAt: createdAt, Metadata: []byte(`{}`), Revision: 1},
+		&db.IssueExport{ID: 1, UID: targetIssueUID, ProjectID: 1, ShortID: "ffff", Title: "Target", Status: "open", Author: "worker", CreatedAt: createdAt, UpdatedAt: createdAt, Metadata: []byte(`{}`), Revision: 1, ContentRevision: 1},
+		&db.CommentExport{ID: 1, UID: lowerTargetCommentUID, IssueID: 1, Author: "finder", Body: "Finding", CreatedAt: createdAt},
+	}, db.ImportOptions{MergeProject: true}))
+	targetProject, err := store.ProjectByUID(ctx, targetProjectUID)
+	require.NoError(t, err)
+
+	replyProject, err := store.CreateProject(ctx, "reply-project")
+	require.NoError(t, err)
+	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{
+		ProjectID: replyProject.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example",
+		HubProjectID: 42, HubProjectUID: replyProject.UID, Enabled: true,
+	})
+	require.NoError(t, err)
+	const replyIssueUID = "01CCCCCCCCCCCCCCCCCCCCCCCC"
+	const replyUID = "01BBBBBBBBBBBBBBBBBBBBBBBB"
+	issueUID := replyIssueUID
+	payload := jsontext.Value(fmt.Sprintf(
+		`{"uid":%q,"title":"Reply source","author":"worker","status":"open","created_at":%q,"comments":[{"comment_uid":%q,"author":"worker","body":"Response","created_at":%q,"reply_to_uid":%q,"reply_kind":"reply"}]}`,
+		replyIssueUID, createdAt, replyUID, createdAt, lowerTargetCommentUID,
+	))
+	event := newRemoteEvent(t, replyProject, &issueUID, "issue.snapshot", "worker", "01DDDDDDDDDDDDDDDDDDDDDDDD", 1, payload)
+	_, err = store.InsertRemoteEvent(ctx, replyProject.ID, event)
+	require.NoError(t, err)
+	require.NoError(t, store.MaterializeFederatedProject(ctx, replyProject.ID))
+
+	replyIssue, err := store.IssueByUID(ctx, replyIssueUID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	replies, err := store.CommentsByIssue(ctx, replyIssue.ID)
+	require.NoError(t, err)
+	require.Len(t, replies, 1)
+	require.Equal(t, targetCommentUID, replies[0].ReplyToUID)
+
+	graph, err := store.ReadCommentGraph(ctx, db.CommentGraphQuery{
+		ProjectID: replyProject.ID, SelectedIssueID: replyIssue.ID,
+	})
+	require.NoError(t, err)
+	target, ok := graph.Targets[targetCommentUID]
+	require.True(t, ok, "a canonical reply target resolves even when its project was not materialized")
+	require.Equal(t, "moved", target.Status)
+	require.NotNil(t, target.Record)
+	require.Equal(t, targetProject.ID, target.Record.ProjectID)
+	require.Equal(t, lowerTargetCommentUID, target.Record.Comment.UID)
+	return nil
+}

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -110,6 +111,57 @@ func TestCommentEndpoint_IdempotencyReplaysCommittedCommentAfterMove(t *testing.
 	comments, err := h.DB().CommentsByIssue(t.Context(), issueID)
 	require.NoError(t, err)
 	require.Len(t, comments, 1)
+}
+
+func TestCommentEndpoint_IdempotencyRetryAfterReplyTargetNormalization(t *testing.T) {
+	h, ts, projectID, sourceIssueID := bootstrapProjectWithIssue(t)
+	targetIssue, _, err := h.DB().CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: projectID, Title: "Target issue", Author: "finder",
+	})
+	require.NoError(t, err)
+	const targetUID = "01AAAAAAAAAAAAAAAAAAAAAAAA"
+	lowerTargetUID := strings.ToLower(targetUID)
+	targetComment, _, err := h.DB().CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: targetIssue.ID, Author: "finder", Body: "Finding",
+	})
+	require.NoError(t, err)
+	_, err = h.DB().ExecContext(t.Context(), `UPDATE comments SET uid=? WHERE id=?`, lowerTargetUID, targetComment.ID)
+	require.NoError(t, err)
+
+	body := map[string]any{
+		"actor": "agent", "body": "Response", "reply_to": lowerTargetUID, "kind": "reply",
+	}
+	headers := map[string]string{"Idempotency-Key": "reply-target-normalized-after-commit"}
+	path := issueURL(projectID, sourceIssueID, "comments")
+	created := postWithHeader(t, ts, path, headers, body)
+	requireOK(t, created)
+	var original struct {
+		Comment struct {
+			UID        string `json:"uid"`
+			ReplyToUID string `json:"reply_to_uid"`
+		} `json:"comment"`
+	}
+	require.NoError(t, json.Unmarshal(created.body, &original))
+	require.Equal(t, lowerTargetUID, original.Comment.ReplyToUID)
+
+	// Federation canonicalizes the stored target after the event has committed;
+	// the immutable issue.commented payload keeps the original target spelling.
+	_, err = h.DB().ExecContext(t.Context(), `UPDATE comments SET reply_to_uid=? WHERE issue_id=? AND uid=?`, targetUID, sourceIssueID, original.Comment.UID)
+	require.NoError(t, err)
+	_, err = h.DB().ExecContext(t.Context(), `UPDATE comments SET uid=? WHERE issue_id=? AND uid=?`, targetUID, targetIssue.ID, lowerTargetUID)
+	require.NoError(t, err)
+
+	retry := postWithHeader(t, ts, path, headers, body)
+	requireOK(t, retry)
+	var reused struct {
+		Comment struct {
+			UID string `json:"uid"`
+		} `json:"comment"`
+		Changed bool `json:"changed"`
+	}
+	require.NoError(t, json.Unmarshal(retry.body, &reused))
+	require.Equal(t, original.Comment.UID, reused.Comment.UID)
+	require.False(t, reused.Changed)
 }
 
 func TestCommentEndpoint_IdempotencyReauthorizesMovedIssue(t *testing.T) {

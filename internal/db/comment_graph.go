@@ -3,11 +3,12 @@ package db
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
+
+	"go.kenn.io/kata/internal/uid"
 )
 
 // SQLiteCommentReplyTargetUIDExpr must match the expression in idx_events_reply_to.
@@ -182,11 +183,12 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(st
 
 	visible := make(map[string]bool, len(data.Comments))
 	for _, record := range data.Comments {
-		visible[record.Comment.UID] = true
+		visible[CanonicalCommentUID(record.Comment.UID)] = true
 	}
+	resolvedTargets := make(map[string]CommentGraphTarget)
 	for index, record := range data.Comments {
 		targetUID := record.Comment.ReplyToUID
-		if targetUID == "" || visible[targetUID] {
+		if targetUID == "" || visible[CanonicalCommentUID(targetUID)] {
 			continue
 		}
 		if query.AllowedIssueIDs != nil {
@@ -197,15 +199,21 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(st
 		if query.SelectedIssueID > 0 && record.Comment.IssueID != query.SelectedIssueID {
 			continue
 		}
-		if _, alreadyResolved := data.Targets[targetUID]; alreadyResolved {
+		identity := CanonicalCommentUID(targetUID)
+		if state, alreadyResolved := resolvedTargets[identity]; alreadyResolved {
+			data.Targets[targetUID] = state
 			continue
 		}
 
-		targetArgs := []any{targetUID}
-		targetWhere := " WHERE c.uid=" + bind(1) + " AND i.deleted_at IS NULL AND p.deleted_at IS NULL AND " + projectPredicate(&targetArgs)
-		target, err := scanCommentGraphRecord(tx.QueryRowContext(ctx,
-			commentGraphSelect+targetWhere, targetArgs...), parseTime)
-		if err == nil {
+		targetArgs := []any{}
+		targetUIDPredicate := commentUIDPredicate("c.uid", targetUID, &targetArgs, bind)
+		targetWhere := " WHERE " + targetUIDPredicate + " AND i.deleted_at IS NULL AND p.deleted_at IS NULL AND " + projectPredicate(&targetArgs)
+		target, err := findCommentGraphRecord(ctx, tx,
+			commentGraphSelect+targetWhere+" ORDER BY c.uid", targetArgs, targetUID, parseTime)
+		if err != nil {
+			return data, err
+		}
+		if target != nil {
 			targetWhere := " WHERE i.project_id=" + bind(1) + " AND i.deleted_at IS NULL AND p.deleted_at IS NULL"
 			targetArgs := []any{target.ProjectID}
 			if _, loaded := data.CommentUIDsByProject[target.ProjectID]; !loaded {
@@ -216,20 +224,19 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(st
 				data.CommentUIDsByProject[target.ProjectID] = uids
 			}
 			RecordExposedIssue(ctx, target.Comment.IssueID)
-			data.Targets[targetUID] = CommentGraphTarget{Status: "moved", Record: &target}
+			state := CommentGraphTarget{Status: "moved", Record: target}
+			data.Targets[targetUID] = state
+			resolvedTargets[identity] = state
 			continue
 		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return data, err
-		}
 
-		var status string
-		var projectID int64
 		statusArgs := []any{}
 		visibleProject := projectPredicate(&statusArgs)
-		statusArgs = append(statusArgs, targetUID)
-		err = tx.QueryRowContext(ctx, `SELECT CASE WHEN p.deleted_at IS NOT NULL OR NOT (`+visibleProject+`) THEN 'hidden' WHEN i.deleted_at IS NOT NULL THEN 'removed' ELSE 'pending' END, i.project_id`+commentGraphFrom+` WHERE c.uid=`+bind(len(statusArgs)), statusArgs...).Scan(&status, &projectID)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		targetUIDPredicate = commentUIDPredicate("c.uid", targetUID, &statusArgs, bind)
+		status, projectID, err := findCommentGraphTargetStatus(ctx, tx,
+			`SELECT CASE WHEN p.deleted_at IS NOT NULL OR NOT (`+visibleProject+`) THEN 'hidden' WHEN i.deleted_at IS NOT NULL THEN 'removed' ELSE 'pending' END, i.project_id,c.uid`+commentGraphFrom+` WHERE `+targetUIDPredicate+" ORDER BY c.uid",
+			statusArgs, targetUID)
+		if err != nil {
 			return data, err
 		}
 		if status == "" {
@@ -248,6 +255,7 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(st
 			state.ProjectID = projectID
 		}
 		data.Targets[targetUID] = state
+		resolvedTargets[identity] = state
 	}
 	comments := make([]*Comment, 0, len(data.Comments)+len(data.Targets))
 	for index := range data.Comments {
@@ -262,6 +270,87 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(st
 		return data, err
 	}
 	return data, nil
+}
+
+func commentUIDPredicate(column, value string, args *[]any, bind func(int) string) string {
+	identity := CanonicalCommentUID(value)
+	if uid.Valid(identity) {
+		*args = append(*args, identity)
+		return "UPPER(" + column + ")=" + bind(len(*args))
+	}
+	*args = append(*args, value)
+	return column + "=" + bind(len(*args))
+}
+
+func findCommentGraphRecord(
+	ctx context.Context,
+	tx *sql.Tx,
+	query string,
+	args []any,
+	targetUID string,
+	parseTime func(string) (time.Time, error),
+) (*CommentGraphRecord, error) {
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	identity := CanonicalCommentUID(targetUID)
+	var match *CommentGraphRecord
+	for rows.Next() {
+		record, err := scanCommentGraphRecord(rows, parseTime)
+		if err != nil {
+			return nil, err
+		}
+		if CanonicalCommentUID(record.Comment.UID) != identity {
+			continue
+		}
+		if record.Comment.UID == targetUID {
+			return &record, nil
+		}
+		if match != nil && match.Comment.UID != record.Comment.UID {
+			return nil, fmt.Errorf("comment UID %q has multiple case variants", targetUID)
+		}
+		copy := record
+		match = &copy
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return match, nil
+}
+
+func findCommentGraphTargetStatus(ctx context.Context, tx *sql.Tx, query string, args []any, targetUID string) (string, int64, error) {
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return "", 0, err
+	}
+	defer func() { _ = rows.Close() }()
+	identity := CanonicalCommentUID(targetUID)
+	var matchUID string
+	var matchStatus string
+	var matchProjectID int64
+	for rows.Next() {
+		var storedUID, status string
+		var projectID int64
+		if err := rows.Scan(&status, &projectID, &storedUID); err != nil {
+			return "", 0, err
+		}
+		if CanonicalCommentUID(storedUID) != identity {
+			continue
+		}
+		if storedUID == targetUID {
+			return status, projectID, nil
+		}
+		if matchUID != "" && matchUID != storedUID {
+			return "", 0, fmt.Errorf("comment UID %q has multiple case variants", targetUID)
+		}
+		matchUID, matchStatus, matchProjectID = storedUID, status, projectID
+	}
+	if err := rows.Err(); err != nil {
+		return "", 0, err
+	}
+	return matchStatus, matchProjectID, nil
 }
 
 func readCommentGraphUIDs(ctx context.Context, tx *sql.Tx, where string, args []any, selectedIssueID int64, bind func(int) string) ([]string, error) {

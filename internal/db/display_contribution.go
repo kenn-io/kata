@@ -14,20 +14,7 @@ import (
 // CanonicalCommentUID normalizes valid ULIDs for case-insensitive comment
 // identity while leaving legacy opaque identifiers unchanged.
 func CanonicalCommentUID(value string) string {
-	if len(value) != 26 {
-		return value
-	}
-	bytes := []byte(value)
-	for i, char := range bytes {
-		if char >= 'a' && char <= 'z' {
-			bytes[i] = char - ('a' - 'A')
-		}
-	}
-	canonical := string(bytes)
-	if uid.Valid(canonical) {
-		return canonical
-	}
-	return value
+	return uid.Canonical(value)
 }
 
 // DisplayContribution reads retained display data, never routing or receipt

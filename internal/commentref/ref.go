@@ -58,7 +58,7 @@ func Parse(input string) (Ref, error) {
 }
 
 func canonicalUID(value string) (string, bool) {
-	canonical := uppercaseASCII(value)
+	canonical := uid.Canonical(value)
 	if !uid.Valid(canonical) {
 		return "", false
 	}
@@ -71,14 +71,11 @@ func equalUID(left, right string) bool {
 	return leftValid && rightValid && canonicalLeft == canonicalRight
 }
 
-func uppercaseASCII(value string) string {
-	bytes := []byte(value)
-	for index, char := range bytes {
-		if char >= 'a' && char <= 'z' {
-			bytes[index] = char - ('a' - 'A')
-		}
+func identityUID(value string) string {
+	if canonical, valid := canonicalUID(value); valid {
+		return canonical
 	}
-	return string(bytes)
+	return value
 }
 
 // Handles finds each UID's shortest unique project suffix. Repeated copies of

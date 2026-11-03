@@ -5,6 +5,8 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"strings"
+
+	"go.kenn.io/kata/internal/uid"
 )
 
 // Identity names one exact actor inbox, optionally narrowed to a teammate.
@@ -112,7 +114,7 @@ func SettlePatch(slots map[string]jsontext.Value, sender Identity, answeredUID s
 	}
 	key := MetadataKey(senderAddress)
 	var request Value
-	if json.Unmarshal(slots[key], &request) != nil || request.Re == "" || request.Re != answeredUID {
+	if json.Unmarshal(slots[key], &request) != nil || request.Re == "" || uid.Canonical(request.Re) != uid.Canonical(answeredUID) {
 		return patch
 	}
 	patch[key] = jsontext.Value("null")

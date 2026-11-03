@@ -66,7 +66,7 @@ func Project(records []Record, states map[string]TargetState) []Record {
 	handles := make(map[string]string, len(records))
 	for i, r := range records {
 		uids[i] = r.UID
-		byUID[r.UID] = i
+		byUID[identityUID(r.UID)] = i
 		if r.Handle != "" {
 			handles[r.UID] = strings.TrimPrefix(r.Handle, "c:")
 		}
@@ -88,7 +88,7 @@ func Project(records []Record, states map[string]TargetState) []Record {
 		if r.ReplyToUID == "" {
 			continue
 		}
-		if targetIndex, ok := byUID[r.ReplyToUID]; ok {
+		if targetIndex, ok := byUID[identityUID(r.ReplyToUID)]; ok {
 			target := records[targetIndex]
 			link := recordLink(target, r.ReplyKind, handles[target.UID], r.IssueUID)
 			link.TargetEdited = target.EditedAt != nil && target.EditedAt.After(r.CreatedAt)
@@ -99,6 +99,9 @@ func Project(records []Record, states map[string]TargetState) []Record {
 			continue
 		}
 		state, ok := states[r.ReplyToUID]
+		if !ok {
+			state, ok = states[identityUID(r.ReplyToUID)]
+		}
 		if state.Status == "hidden" {
 			result[i].ReplyToUID = ""
 			result[i].ReplyKind = ""
@@ -249,14 +252,14 @@ func Select(records []Record, issueUID string, opts Options) (Selection, error) 
 		if err != nil {
 			return Selection{}, err
 		}
-		rootUID = root.UID
+		rootUID = identityUID(root.UID)
 		children := make(map[string][]string)
 		for _, r := range records {
 			if r.ReplyToUID != "" {
-				children[r.ReplyToUID] = append(children[r.ReplyToUID], r.UID)
+				children[identityUID(r.ReplyToUID)] = append(children[identityUID(r.ReplyToUID)], identityUID(r.UID))
 			}
 		}
-		queue := []string{root.UID}
+		queue := []string{identityUID(root.UID)}
 		for len(queue) > 0 {
 			id := queue[0]
 			queue = queue[1:]
@@ -274,24 +277,24 @@ func Select(records []Record, issueUID string, opts Options) (Selection, error) 
 		targets := map[string]bool{}
 		for _, r := range records {
 			if r.IssueUID == issueUID && r.Author == actor && (!hasTM || r.Teammate == tm) {
-				targets[r.UID] = true
+				targets[identityUID(r.UID)] = true
 			}
 		}
 		for _, r := range records {
-			if targets[r.ReplyToUID] {
-				selected[r.UID] = true
+			if targets[identityUID(r.ReplyToUID)] {
+				selected[identityUID(r.UID)] = true
 			}
 		}
 	} else {
 		for _, r := range records {
 			if r.IssueUID == issueUID {
-				selected[r.UID] = true
+				selected[identityUID(r.UID)] = true
 			}
 		}
 	}
 	result := Selection{Comments: []Record{}}
 	for _, r := range records {
-		if !selected[r.UID] || (opts.Kind != "" && r.UID != rootUID && r.ReplyKind != opts.Kind) {
+		if !selected[identityUID(r.UID)] || (opts.Kind != "" && identityUID(r.UID) != rootUID && r.ReplyKind != opts.Kind) {
 			continue
 		}
 		if since != nil && compareRecords(r, *since) <= 0 {
@@ -315,7 +318,7 @@ func Select(records []Record, issueUID string, opts Options) (Selection, error) 
 		// Federation can deliver replies whose timestamps precede the root.
 		// Retain that root when limiting, then restore chronological order.
 		for _, r := range result.Comments[50:] {
-			if r.UID == rootUID {
+			if identityUID(r.UID) == rootUID {
 				result.Comments[49] = r
 				slices.SortFunc(result.Comments[:50], compareRecords)
 				break

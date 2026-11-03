@@ -76,6 +76,96 @@ func TestCommentNotificationTransaction(t *testing.T) {
 	require.Contains(t, slots, notification.MetadataKey("worker/builder"))
 }
 
+func TestCommentNotificationSettlesCaseNormalizedCommentUID(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var store interface {
+				db.Storage
+				ExecContext(context.Context, string, ...any) (sql.Result, error)
+			}
+			setUIDByID := `UPDATE comments SET uid=? WHERE id=?`
+			var err error
+			if backend == "postgres" {
+				if testing.Short() {
+					t.Skip("requires PostgreSQL test database")
+				}
+				dsn := os.Getenv("KATA_TEST_POSTGRES_DSN")
+				if dsn == "" {
+					t.Skip("requires explicit PostgreSQL test service")
+				}
+				id, err := uid.New()
+				require.NoError(t, err)
+				schema := "notify_case_normalized_" + strings.ToLower(id)
+				setUIDByID = `UPDATE comments SET uid=$1 WHERE id=$2`
+				t.Cleanup(func() {
+					admin, cleanupErr := sql.Open("pgx", dsn)
+					require.NoError(t, cleanupErr)
+					defer func() { _ = admin.Close() }()
+					// t.Context() is canceled before cleanup runs.
+					_, cleanupErr = admin.ExecContext(context.WithoutCancel(t.Context()), "DROP SCHEMA IF EXISTS "+schema+" CASCADE")
+					require.NoError(t, cleanupErr)
+				})
+				opened, openErr := pgstore.OpenWithConfig(t.Context(), dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
+				require.NoError(t, openErr)
+				store = opened
+			} else {
+				store, err = sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"))
+			}
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, store.Close()) })
+			checkCommentNotificationSettlesCaseNormalizedCommentUID(t, store, setUIDByID)
+		})
+	}
+}
+
+func checkCommentNotificationSettlesCaseNormalizedCommentUID(
+	t *testing.T,
+	store interface {
+		db.Storage
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	},
+	setUIDByID string,
+) {
+	t.Helper()
+	var err error
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Finding", Author: "worker"})
+	require.NoError(t, err)
+	const targetUID = "01AAAAAAAAAAAAAAAAAAAAAAAA"
+	lowerTargetUID := strings.ToLower(targetUID)
+	target, _, err := store.CreateComment(t.Context(), db.CreateCommentParams{
+		IssueID: issue.ID, Author: "reader", Body: "Finding",
+	})
+	require.NoError(t, err)
+	_, err = store.ExecContext(t.Context(), setUIDByID, lowerTargetUID, target.ID)
+	require.NoError(t, err)
+	request, err := json.Marshal(notification.Value{From: "lead", Message: "Please respond", Re: lowerTargetUID})
+	require.NoError(t, err)
+	_, err = store.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+		IssueID: issue.ID, Actor: "worker",
+		Patch: map[string]jsontext.Value{notification.MetadataKey("worker"): request},
+	})
+	require.NoError(t, err)
+	_, err = store.ExecContext(t.Context(), setUIDByID, targetUID, target.ID)
+	require.NoError(t, err)
+
+	reply, _, err := store.CreateComment(db.WithCommentMetadataHook(t.Context(), commentNotificationHook(), nil), db.CreateCommentParams{
+		IssueID: issue.ID, Author: "worker", Body: "Response to the finding",
+		ReplyToUID: targetUID, ReplyKind: "reply", ValidateReply: true,
+	})
+	require.NoError(t, err)
+	current, err := store.IssueByID(t.Context(), issue.ID)
+	require.NoError(t, err)
+	var slots map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal([]byte(current.Metadata), &slots))
+	require.NotContains(t, slots, notification.MetadataKey("worker"))
+	var notice notification.Value
+	require.NoError(t, json.Unmarshal(slots[notification.MetadataKey("lead")], &notice))
+	require.Equal(t, reply.UID, notice.Re)
+	require.Equal(t, "reply", notice.Kind)
+}
+
 func FuzzCommentNotificationConfirmTimestampInstantOrder(f *testing.F) {
 	f.Add("12", "1")
 	f.Fuzz(func(t *testing.T, newerFraction, olderFraction string) {

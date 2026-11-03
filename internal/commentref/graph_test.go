@@ -3,6 +3,7 @@ package commentref
 import (
 	"encoding/json/v2"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -61,6 +62,36 @@ func TestCommentGraphProjection(t *testing.T) {
 	require.True(t, got[0].Reply.TargetEdited)
 	require.Equal(t, "cd34:000002", got[1].Backlinks[0].Handle)
 	require.Equal(t, "refute", got[1].Backlinks[0].Kind)
+}
+
+func TestCommentGraphProjectionMatchesCanonicalULIDIdentities(t *testing.T) {
+	root := Record{
+		UID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Author: "reviewer", Body: "Finding",
+		CreatedAt: time.Unix(1, 0), IssueUID: "ab12", IssueShortID: "ab12",
+		ProjectUID: "project-uid", ProjectName: "example-project",
+	}
+	reply := Record{
+		UID: "01ARZ3NDEKTSV4RRFFQ69G5FAW", Author: "worker", Body: "Response",
+		CreatedAt: time.Unix(2, 0), ReplyToUID: strings.ToLower(root.UID), ReplyKind: "reply",
+		IssueUID: "cd34", IssueShortID: "cd34", ProjectUID: "project-uid", ProjectName: "example-project",
+	}
+
+	projected := Project([]Record{reply, root}, nil)
+	require.NotNil(t, projected[0].Reply)
+	require.Equal(t, root.UID, projected[0].Reply.UID)
+	require.Len(t, projected[1].Backlinks, 1)
+	require.Equal(t, reply.UID, projected[1].Backlinks[0].UID)
+
+	thread, err := Select(projected, root.IssueUID, Options{Thread: root.UID})
+	require.NoError(t, err)
+	require.Len(t, thread.Comments, 2)
+
+	opaqueRoot := Record{UID: "legacy-comment", IssueUID: "ab12"}
+	opaqueReply := Record{UID: "legacy-reply", ReplyToUID: "LEGACY-COMMENT", IssueUID: "cd34"}
+	opaqueProjection := Project([]Record{opaqueReply, opaqueRoot}, nil)
+	require.Equal(t, "LEGACY-COMMENT", opaqueProjection[0].Reply.UID,
+		"opaque comment IDs keep exact-match semantics")
+	require.Equal(t, "pending", opaqueProjection[0].Reply.Status)
 }
 
 func TestCommentGraphUnavailableTargets(t *testing.T) {

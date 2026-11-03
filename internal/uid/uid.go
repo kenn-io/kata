@@ -56,6 +56,25 @@ func FromStableSeed(seed []byte, t time.Time) (string, error) {
 // Length is the fixed character length of a kata ULID (Crockford base32).
 func Length() int { return encodedLen }
 
+// Canonical returns the uppercase spelling of a valid ULID. Opaque IDs and
+// malformed values retain their exact spelling.
+func Canonical(value string) string {
+	if len(value) != encodedLen {
+		return value
+	}
+	bytes := []byte(value)
+	for i, char := range bytes {
+		if char >= 'a' && char <= 'z' {
+			bytes[i] = char - ('a' - 'A')
+		}
+	}
+	canonical := string(bytes)
+	if Valid(canonical) {
+		return canonical
+	}
+	return value
+}
+
 // Valid reports whether s is a strict 26-character ULID.
 func Valid(s string) bool {
 	_, err := ulid.ParseStrict(s)

@@ -99,9 +99,10 @@ func checkCommentIssueIDsByUIDs(t *testing.T, store db.Storage) error {
 	secondComment, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: second.ID, Author: "worker", Body: "Second comment"})
 	require.NoError(t, err)
 
-	got, err := store.CommentIssueIDsByUIDs(ctx, []string{firstComment.UID, "01ZZZZZZZZZZZZZZZZZZZZZZZZ", secondComment.UID})
+	lowerSecondUID := strings.ToLower(secondComment.UID)
+	got, err := store.CommentIssueIDsByUIDs(ctx, []string{firstComment.UID, "01ZZZZZZZZZZZZZZZZZZZZZZZZ", lowerSecondUID, secondComment.UID})
 	require.NoError(t, err)
-	require.Equal(t, map[string]int64{firstComment.UID: first.ID, secondComment.UID: second.ID}, got)
+	require.Equal(t, map[string]int64{firstComment.UID: first.ID, lowerSecondUID: second.ID, secondComment.UID: second.ID}, got)
 	empty, err := store.CommentIssueIDsByUIDs(ctx, nil)
 	require.NoError(t, err)
 	require.Empty(t, empty)

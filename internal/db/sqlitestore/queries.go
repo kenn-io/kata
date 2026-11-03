@@ -1657,35 +1657,75 @@ func (d *Store) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Commen
 // CommentIssueIDsByUIDs maps existing comment UIDs to their owning issue IDs.
 func (d *Store) CommentIssueIDsByUIDs(ctx context.Context, uids []string) (map[string]int64, error) {
 	out := make(map[string]int64, len(uids))
-	const chunk = 500
-	for i := 0; i < len(uids); i += chunk {
-		end := min(i+chunk, len(uids))
-		slice := uids[i:end]
-		placeholders := make([]string, len(slice))
-		args := make([]any, 0, len(slice))
-		for j, commentUID := range slice {
-			placeholders[j] = "?"
-			args = append(args, commentUID)
-		}
-		rows, err := d.QueryContext(ctx,
-			`SELECT uid, issue_id FROM comments WHERE uid IN (`+strings.Join(placeholders, ",")+")", args...)
-		if err != nil {
-			return nil, fmt.Errorf("comment issue ids by uids: %w", err)
-		}
-		for rows.Next() {
-			var commentUID string
-			var issueID int64
-			if err := rows.Scan(&commentUID, &issueID); err != nil {
-				_ = rows.Close()
-				return nil, fmt.Errorf("scan comment issue id: %w", err)
+	requestedByIdentity := make(map[string][]string, len(uids))
+	canonicalUIDs := make([]string, 0, len(uids))
+	exactUIDs := make([]string, 0, len(uids))
+	seenCanonical := make(map[string]struct{}, len(uids))
+	seenExact := make(map[string]struct{}, len(uids))
+	for _, requestedUID := range uids {
+		identity := db.CanonicalCommentUID(requestedUID)
+		requestedByIdentity[identity] = append(requestedByIdentity[identity], requestedUID)
+		if katauid.Valid(identity) {
+			if _, seen := seenCanonical[identity]; !seen {
+				seenCanonical[identity] = struct{}{}
+				canonicalUIDs = append(canonicalUIDs, identity)
 			}
-			out[commentUID] = issueID
+		} else if _, seen := seenExact[requestedUID]; !seen {
+			seenExact[requestedUID] = struct{}{}
+			exactUIDs = append(exactUIDs, requestedUID)
 		}
-		if err := rows.Err(); err != nil {
+	}
+	matchedStorageUID := make(map[string]string, len(uids))
+	lookup := func(column string, values []string) error {
+		const chunk = 500
+		for i := 0; i < len(values); i += chunk {
+			end := min(i+chunk, len(values))
+			slice := values[i:end]
+			placeholders := make([]string, len(slice))
+			args := make([]any, 0, len(slice))
+			for j, value := range slice {
+				placeholders[j] = "?"
+				args = append(args, value)
+			}
+			rows, err := d.QueryContext(ctx,
+				`SELECT uid, issue_id FROM comments WHERE `+column+` IN (`+strings.Join(placeholders, ",")+")", args...)
+			if err != nil {
+				return fmt.Errorf("comment issue ids by uids: %w", err)
+			}
+			for rows.Next() {
+				var storedUID string
+				var issueID int64
+				if err := rows.Scan(&storedUID, &issueID); err != nil {
+					_ = rows.Close()
+					return fmt.Errorf("scan comment issue id: %w", err)
+				}
+				identity := db.CanonicalCommentUID(storedUID)
+				requestedUIDs, wanted := requestedByIdentity[identity]
+				if !wanted {
+					continue
+				}
+				if prior, exists := matchedStorageUID[identity]; exists && prior != storedUID {
+					_ = rows.Close()
+					return fmt.Errorf("comment issue ids by uids: comment UID %q has multiple case variants", identity)
+				}
+				matchedStorageUID[identity] = storedUID
+				for _, requestedUID := range requestedUIDs {
+					out[requestedUID] = issueID
+				}
+			}
+			if err := rows.Err(); err != nil {
+				_ = rows.Close()
+				return fmt.Errorf("iterate comment issue ids: %w", err)
+			}
 			_ = rows.Close()
-			return nil, fmt.Errorf("iterate comment issue ids: %w", err)
 		}
-		_ = rows.Close()
+		return nil
+	}
+	if err := lookup("uid", exactUIDs); err != nil {
+		return nil, err
+	}
+	if err := lookup("UPPER(uid)", canonicalUIDs); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

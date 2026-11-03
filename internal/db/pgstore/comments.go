@@ -386,24 +386,63 @@ func (s *Store) CommentsByIssue(ctx context.Context, issueID int64) ([]db.Commen
 // CommentIssueIDsByUIDs maps existing comment UIDs to their owning issue IDs.
 func (s *Store) CommentIssueIDsByUIDs(ctx context.Context, uids []string) (map[string]int64, error) {
 	issueIDs := make(map[string]int64, len(uids))
-	if len(uids) == 0 {
-		return issueIDs, nil
-	}
-	rows, err := s.QueryContext(ctx, `SELECT uid, issue_id FROM comments WHERE uid = ANY($1::text[])`, uids)
-	if err != nil {
-		return nil, fmt.Errorf("comment issue ids by uids: %w", mapSQLError(err, nil))
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var commentUID string
-		var issueID int64
-		if err := rows.Scan(&commentUID, &issueID); err != nil {
-			return nil, fmt.Errorf("scan comment issue id: %w", mapSQLError(err, nil))
+	requestedByIdentity := make(map[string][]string, len(uids))
+	canonicalUIDs := make([]string, 0, len(uids))
+	exactUIDs := make([]string, 0, len(uids))
+	seenCanonical := make(map[string]struct{}, len(uids))
+	seenExact := make(map[string]struct{}, len(uids))
+	for _, requestedUID := range uids {
+		identity := db.CanonicalCommentUID(requestedUID)
+		requestedByIdentity[identity] = append(requestedByIdentity[identity], requestedUID)
+		if katauid.Valid(identity) {
+			if _, seen := seenCanonical[identity]; !seen {
+				seenCanonical[identity] = struct{}{}
+				canonicalUIDs = append(canonicalUIDs, identity)
+			}
+		} else if _, seen := seenExact[requestedUID]; !seen {
+			seenExact[requestedUID] = struct{}{}
+			exactUIDs = append(exactUIDs, requestedUID)
 		}
-		issueIDs[commentUID] = issueID
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate comment issue ids: %w", mapSQLError(err, nil))
+	matchedStorageUID := make(map[string]string, len(uids))
+	lookup := func(column string, values []string) error {
+		if len(values) == 0 {
+			return nil
+		}
+		rows, err := s.QueryContext(ctx, `SELECT uid, issue_id FROM comments WHERE `+column+` = ANY($1::text[])`, values)
+		if err != nil {
+			return fmt.Errorf("comment issue ids by uids: %w", mapSQLError(err, nil))
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			var storedUID string
+			var issueID int64
+			if err := rows.Scan(&storedUID, &issueID); err != nil {
+				return fmt.Errorf("scan comment issue id: %w", mapSQLError(err, nil))
+			}
+			identity := db.CanonicalCommentUID(storedUID)
+			requestedUIDs, wanted := requestedByIdentity[identity]
+			if !wanted {
+				continue
+			}
+			if prior, exists := matchedStorageUID[identity]; exists && prior != storedUID {
+				return fmt.Errorf("comment issue ids by uids: comment UID %q has multiple case variants", identity)
+			}
+			matchedStorageUID[identity] = storedUID
+			for _, requestedUID := range requestedUIDs {
+				issueIDs[requestedUID] = issueID
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("iterate comment issue ids: %w", mapSQLError(err, nil))
+		}
+		return nil
+	}
+	if err := lookup("uid", exactUIDs); err != nil {
+		return nil, err
+	}
+	if err := lookup("UPPER(uid)", canonicalUIDs); err != nil {
+		return nil, err
 	}
 	return issueIDs, nil
 }

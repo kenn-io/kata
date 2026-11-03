@@ -291,17 +291,23 @@ func replayComment(
 	if err := authorizeIssueScopedIssue(ctx, cfg.DB, current); err != nil {
 		return nil, err
 	}
-	replyUID, kind := "", ""
+	var creationPayload struct {
+		ReplyToUID string `json:"reply_to_uid"`
+	}
+	if err := json.Unmarshal([]byte(match.Event.Payload), &creationPayload); err != nil {
+		return nil, internalAPIError(err)
+	}
+	replyUID, kind := creationPayload.ReplyToUID, ""
 	if len(links) > 0 {
 		input := links[0]
 		kind = links[1]
 		if input != "" {
 			parsed, parseErr := commentref.Parse(input)
-			same := parseErr == nil && match.Comment.ReplyToUID != ""
+			same := parseErr == nil && creationPayload.ReplyToUID != ""
 			if same && parsed.UID != "" {
-				same = strings.EqualFold(parsed.UID, match.Comment.ReplyToUID)
+				same = db.CanonicalCommentUID(parsed.UID) == db.CanonicalCommentUID(creationPayload.ReplyToUID)
 			} else if same {
-				same = strings.HasSuffix(strings.ToLower(match.Comment.ReplyToUID), parsed.Suffix)
+				same = strings.HasSuffix(strings.ToLower(creationPayload.ReplyToUID), parsed.Suffix)
 				targetIssueUID := match.IssueUID
 				if match.Event.RelatedIssueUID != nil {
 					targetIssueUID = *match.Event.RelatedIssueUID
@@ -318,7 +324,6 @@ func replayComment(
 			if !same {
 				return nil, api.NewError(409, "idempotency_mismatch", "idempotency key matched a different reply target", "use a fresh key", nil)
 			}
-			replyUID = match.Comment.ReplyToUID
 		}
 	}
 	if match.Fingerprint != commentIdempotencyFingerprint(match.IssueUID, actor, body, teammate, replyUID, kind) {

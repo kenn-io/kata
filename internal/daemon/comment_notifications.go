@@ -14,6 +14,7 @@ import (
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/notification"
+	"go.kenn.io/kata/internal/uid"
 )
 
 func commentNotificationHook() db.CommentMetadataHook {
@@ -146,8 +147,12 @@ func commentNotificationHook() db.CommentMetadataHook {
 		// A request that names the answered comment can sit on any issue in
 		// the project. The comment UID filter keeps this scan to the issues
 		// whose metadata mentions it.
+		metadataPredicate := "metadata LIKE $2"
+		if uid.Valid(uid.Canonical(reply.ReplyToUID)) {
+			metadataPredicate = "LOWER(metadata) LIKE LOWER($2)"
+		}
 		rows, err := tx.QueryContext(ctx,
-			`SELECT id,metadata FROM issues WHERE project_id=$1 AND deleted_at IS NULL AND metadata LIKE $2 ORDER BY id`,
+			`SELECT id,metadata FROM issues WHERE project_id=$1 AND deleted_at IS NULL AND `+metadataPredicate+` ORDER BY id`,
 			issue.ProjectID, "%"+reply.ReplyToUID+"%",
 		)
 		if err != nil {

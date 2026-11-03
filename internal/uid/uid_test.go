@@ -2,12 +2,14 @@ package uid_test
 
 import (
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/uid"
+	"hegel.dev/go/hegel"
 )
 
 var fixedTestTime = time.Date(2026, 5, 4, 1, 2, 3, 456_000_000, time.UTC)
@@ -77,4 +79,43 @@ func TestValidAndValidPrefixRejectBadInput(t *testing.T) {
 	assert.False(t, uid.ValidPrefix(valid+"0"))
 	assert.False(t, uid.ValidPrefix("8"))
 	assert.False(t, uid.ValidPrefix(valid[:7]+"I"))
+}
+
+func TestCanonicalNormalizesOnlyValidULIDs(t *testing.T) {
+	const canonical = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+	require.True(t, uid.Valid(canonical))
+
+	assert.Equal(t, canonical, uid.Canonical(strings.ToLower(canonical)))
+	assert.Equal(t, "legacy-Comment", uid.Canonical("legacy-Comment"))
+
+	longS := strings.Replace(canonical, "S", "\u017F", 1)
+	assert.Equal(t, longS, uid.Canonical(longS), "Unicode uppercasing must not alias malformed IDs to a valid ULID")
+}
+
+func TestCanonicalOnlyNormalizesStrictULIDsProperty(t *testing.T) {
+	hegel.Test(t, func(ht *hegel.T) {
+		first := hegel.Draw(ht, hegel.SampledFrom([]string{"0", "1", "2", "3", "4", "5", "6", "7"}))
+		tail := hegel.Draw(ht, hegel.Text().Alphabet("0123456789ABCDEFGHJKMNPQRSTVWXYZ").MinSize(24).MaxSize(24))
+		canonical := first + "S" + tail
+		require.True(ht, uid.Valid(canonical))
+
+		mixedCase := []byte(canonical)
+		lowered := false
+		for i, char := range mixedCase {
+			if char >= 'A' && char <= 'Z' && hegel.Draw(ht, hegel.Booleans()) {
+				mixedCase[i] += 'a' - 'A'
+				lowered = true
+			}
+		}
+		if !lowered {
+			mixedCase[1] += 'a' - 'A'
+		}
+		require.Equal(ht, canonical, uid.Canonical(string(mixedCase)))
+		require.Equal(ht, canonical, uid.Canonical(uid.Canonical(string(mixedCase))))
+
+		malformed := canonical[:1] + "\u017F" + canonical[2:]
+		require.False(ht, uid.Valid(malformed))
+		require.Equal(ht, malformed, uid.Canonical(malformed))
+		require.NotEqual(ht, canonical, uid.Canonical(malformed))
+	}, hegel.WithTestCases(200), hegel.WithDatabase(t.TempDir()))
 }
