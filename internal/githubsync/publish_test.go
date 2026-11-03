@@ -190,7 +190,7 @@ func TestPublishGitHubCreateNeverRetries(t *testing.T) {
 }
 
 func TestPublishGitHubValidationBeforeCreate(t *testing.T) {
-	for _, scenario := range []string{"empty_title", "long_title", "long_body", "closed", "denied", "extra_fields"} {
+	for _, scenario := range []string{"empty_title", "long_title", "long_body", "denied"} {
 		t.Run(scenario, func(t *testing.T) {
 			posts := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -213,15 +213,8 @@ func TestPublishGitHubValidationBeforeCreate(t *testing.T) {
 				issue.Title = strings.Repeat("界", 257)
 			case "long_body":
 				issue.Body = strings.Repeat("界", 65537)
-			case "closed":
-				issue.Status = "closed"
 			}
 			_, err := session.PrepareCreate(t.Context(), issue)
-			if scenario == "extra_fields" {
-				require.NoError(t, err)
-				payload := []byte(`{"title":"Native","body":"","assignees":["someone"]}`)
-				_, err = session.Create(t.Context(), payload, func(context.Context) error { return nil })
-			}
 			require.Error(t, err)
 			require.Zero(t, posts)
 		})

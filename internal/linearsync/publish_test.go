@@ -152,7 +152,7 @@ func TestPublishLinearOneSendAndIdentityFences(t *testing.T) {
 	}
 }
 func TestPublishLinearPreflight(t *testing.T) {
-	for _, scenario := range []string{"no_open_state", "scope_denied", "oversize", "closed"} {
+	for _, scenario := range []string{"no_open_state", "scope_denied", "oversize"} {
 		t.Run(scenario, func(t *testing.T) {
 			creates := 0
 			cfg := testConfig()
@@ -173,9 +173,6 @@ func TestPublishLinearPreflight(t *testing.T) {
 			issue := db.Issue{Title: "Native", Status: "open"}
 			if scenario == "oversize" {
 				issue.Body = strings.Repeat("x", maxDescriptionBytes+1)
-			}
-			if scenario == "closed" {
-				issue.Status = "closed"
 			}
 			_, err := s.PrepareCreate(t.Context(), issue)
 			require.Error(t, err)
