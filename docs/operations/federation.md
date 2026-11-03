@@ -162,6 +162,13 @@ of the project. Remove them on that side and retry; ask an operator there to
 remove links to projects you cannot access. Links that were already removed do
 not count.
 
+Fresh direct-spoke pushes also reject additions, close parents, and
+duplicate or superseded evidence that name a stored sibling issue when either
+project has a relay binding or an active relay enrollment. The whole batch
+returns `400 validation`. Removals and peers that have not arrived remain
+admissible. Already accepted events keep their original delivery order and
+retry identities; retained crossing history uses the existing checkpoint recovery.
+
 The hub runs this check, so preflight reports `hub_links_checked`. It is `false`
 when the hub predates API `0.31.0`; the preview is still ready, and the CLI warns
 that connect fails if the project has links. Connecting to such a hub reports
@@ -2367,9 +2374,9 @@ Federation has expected stale or deferred states:
   pushes a different actor is rejected and records the batch in quarantine.
   Negotiated relays preserve source actors separately from accountable
   attribution; see [Project boundaries and attribution](#project-boundaries-and-attribution).
-- Direct-spoke links may span projects; negotiated relays reject cross-project
-  links. For direct spokes, a missing peer does not quarantine push: the event
-  and cursor advance while the edge remains absent. The edge materializes when
+- Direct-spoke links may span projects when neither project uses a relay;
+  negotiated relays reject cross-project links. For direct spokes, a missing peer
+  does not quarantine push: the event and cursor advance while the edge remains absent. The edge materializes when
   both endpoint projects are enabled through the same hub federation group.
   Pulling clients must enroll both projects and use the same normalized hub URL
   origin to project it locally. Unfederated peers, different hub origins, and

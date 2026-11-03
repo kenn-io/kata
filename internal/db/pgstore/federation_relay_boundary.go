@@ -22,13 +22,85 @@ func ensureRelayLinkBoundaryTx(ctx context.Context, tx *sql.Tx, fromID, toID int
 	if fromProject == toProject {
 		return nil
 	}
-	var relayed bool
-	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id IN($1,$2) AND (b.relay_config IS NOT NULL OR EXISTS(SELECT 1 FROM federation_enrollments e WHERE e.project_id=b.project_id AND e.relay_protocol_version=1 AND e.revoked_at IS NULL)))`, fromProject, toProject).Scan(&relayed)
+	relayed, err := relayProjectsActiveTx(ctx, tx, fromProject, toProject)
 	if err != nil {
 		return err
 	}
 	if relayed {
 		return errors.Join(db.ErrFederatedReadOnly, db.ErrFederationCrossProjectBoundary)
+	}
+	return nil
+}
+
+func relayProjectsActiveTx(ctx context.Context, tx *sql.Tx, fromProject, toProject int64) (bool, error) {
+	var relayed bool
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id IN($1,$2) AND (b.relay_config IS NOT NULL OR EXISTS(SELECT 1 FROM federation_enrollments e WHERE e.project_id=b.project_id AND e.relay_protocol_version=1 AND e.revoked_at IS NULL)))`, fromProject, toProject).Scan(&relayed)
+	return relayed, err
+}
+
+// validateLegacyRelayAdmissionTx checks additions against stored peers. Missing
+// peers remain admissible, and retained duplicates never enter this path.
+func validateLegacyRelayAdmissionTx(ctx context.Context, tx *sql.Tx, projectID int64, event db.RemoteEvent) error {
+	var lookupErr error
+	crossing := false
+	checkProject := func(peerProject int64) {
+		if lookupErr == nil && peerProject != projectID {
+			var restricted bool
+			restricted, lookupErr = relayProjectsActiveTx(ctx, tx, projectID, peerProject)
+			crossing = crossing || restricted
+		}
+	}
+	checkUID := func(peer string) bool {
+		if peer == "" || lookupErr != nil {
+			return false
+		}
+		var peerProject int64
+		lookupErr = tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT project_id FROM issues WHERE uid=$1),$2)`, peer, projectID).Scan(&peerProject)
+		checkProject(peerProject)
+		return false // Inspect additions without rewriting the hashed payload.
+	}
+	payload := db.PayloadMap(event.Payload)
+	switch event.Type {
+	case "issue.linked", "issue.links_changed", "issue.created", "issue.snapshot":
+		fold := db.FoldEvent{UID: event.EventUID, Type: event.Type, Payload: event.Payload}
+		if _, _, err := db.StripCrossProjectLinkAdditions(fold, checkUID); err != nil {
+			return err
+		}
+	}
+	if event.Type == "issue.closed" && lookupErr == nil {
+		if parent, _ := db.StringValue(payload["parent_uid"]); parent != "" {
+			checkUID(parent) // The UID takes precedence over historical short IDs.
+		}
+		var evidence []db.Evidence
+		if raw, ok := payload["evidence"]; ok {
+			if err := json.Unmarshal(raw, &evidence); err != nil {
+				return err
+			}
+		}
+		var projectUID string
+		if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1`, projectID).Scan(&projectUID); err != nil {
+			return err
+		}
+		for _, item := range evidence {
+			if item.Type != "duplicate-of" && item.Type != "superseded-by" {
+				continue
+			}
+			// Membership, rather than caller visibility, decides admission.
+			target, err := eventIssueByRef(db.WithAuthorizedProjects(ctx, nil), tx, projectUID, item.IssueRef)
+			if errors.Is(err, db.ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			checkProject(target.ProjectID)
+		}
+	}
+	if lookupErr != nil {
+		return lookupErr
+	}
+	if crossing {
+		return errors.Join(db.ErrFederationIngestValidation, db.ErrFederationCrossProjectBoundary)
 	}
 	return nil
 }

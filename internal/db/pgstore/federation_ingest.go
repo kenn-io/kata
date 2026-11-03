@@ -209,6 +209,9 @@ func (s *Store) IngestFederationEvents(
 					return err
 				}
 			}
+			if err := validateLegacyRelayAdmissionTx(ctx, tx, params.ProjectID, event); err != nil {
+				return err
+			}
 			if err := db.ValidateFederationBoundActorPayload(ctx, event, db.FederationBoundActorCheck{
 				BoundActor:                      boundActor,
 				AllowSnapshotAuthorPreservation: adoptionState.allowAuthorPreservation,
