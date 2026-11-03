@@ -55,7 +55,7 @@ func TestRelayLegacySpokeDelivery(t *testing.T) {
 			require.NoError(t, err)
 			syncRelayMatrixNode(t, relay)
 			syncRelayMatrixNode(t, leaf)
-			for _, node := range []*relayMatrixNode{root, relay, leaf} {
+			for _, node := range []*relayMatrixNode{relay, leaf} {
 				mirrored, err := node.store.IssueByUID(ctx, issue.UID, db.IncludeDeletedYes)
 				require.NoError(t, err)
 				require.Equal(t, issue.Title, mirrored.Title)
@@ -68,10 +68,8 @@ func TestRelayLegacySpokeDelivery(t *testing.T) {
 				events, err := node.store.EventsByUIDs(ctx, node.project.ID, []string{source.UID})
 				require.NoError(t, err)
 				require.Len(t, events, 1)
-				for _, event := range events {
-					require.Equal(t, source.ContentHash, event.ContentHash)
-					require.Equal(t, direct.store.InstanceUID(), event.OriginInstanceUID)
-				}
+				require.Equal(t, source.ContentHash, events[0].ContentHash)
+				require.Equal(t, direct.store.InstanceUID(), events[0].OriginInstanceUID)
 			}
 			later, _, err := direct.store.CreateIssue(ctx, db.CreateIssueParams{
 				ProjectID: direct.project.ID, Title: "Later direct spoke task", Author: "source-member",

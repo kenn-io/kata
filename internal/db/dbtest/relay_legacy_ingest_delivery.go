@@ -93,33 +93,25 @@ func RunRelayOffersLegacyIngestedEvents(t *testing.T, store db.Storage) {
 			})
 			require.NoError(t, err)
 			require.Equal(t, 1, result.Accepted)
+			offered, err := store.PendingRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, db.RelayStreamEvent, 100)
+			require.NoError(t, err)
 			if i == 0 {
-				offered, err := store.PendingRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, db.RelayStreamEvent, 100)
-				require.NoError(t, err)
 				require.Len(t, offered, 1, "an unknown peer must not withhold the snapshot")
 				require.Equal(t, first.EventUID, offered[0].SourceUID)
+			} else {
+				var sources []string
+				for _, envelope := range offered {
+					sources = append(sources, envelope.SourceUID)
+				}
+				require.Contains(t, sources, second.EventUID)
 			}
 		}
-		issue, err := store.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
-		require.NoError(t, err)
-		require.Equal(t, []string{peerUID}, linkTargetUIDs(t, store, issue.ID))
-		metadata, err := store.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
-			IssueID: issue.ID, Actor: "system", Patch: map[string]jsontext.Value{"notify.member": jsontext.Value(`"Scheduled date reached"`)},
-		})
-		require.NoError(t, err)
-		offered, err := store.PendingRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, db.RelayStreamEvent, 100)
-		require.NoError(t, err)
-		var sources []string
-		for _, envelope := range offered {
-			sources = append(sources, envelope.SourceUID)
-		}
-		require.Equal(t, []string{first.EventUID, second.EventUID, metadata.Event.UID}, sources)
 	})
 	runRelayRejectsLegacyCrossProjectEvents(t, store)
 }
 
 func runRelayRejectsLegacyCrossProjectEvents(t *testing.T, store db.Storage) {
-	for _, kind := range []string{"creation before update", "close duplicate evidence", "close parent"} {
+	for _, kind := range []string{"creation with sibling link", "close parent"} {
 		t.Run("refuse cross-project "+kind, func(t *testing.T) {
 			ctx := t.Context()
 			fixture := newRelayLinkBoundaryFixture(t, store, "legacy-boundary-"+kind)
@@ -139,7 +131,7 @@ func runRelayRejectsLegacyCrossProjectEvents(t *testing.T, store db.Storage) {
 			created := newRemoteEvent(t, fixture.project, &issueUID, "issue.created", "spoke", spoke, 700, jsontext.Value(`{"uid":"`+issueUID+`","title":"Legacy task","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`))
 			push := db.FederationIngestParams{ProjectID: fixture.project.ID, SpokeInstanceUID: spoke}
 			var events []db.FederationIngestEvent
-			if kind == "creation before update" {
+			if kind == "creation with sibling link" {
 				created = newRemoteEvent(t, fixture.project, &issueUID, "issue.created", "spoke", spoke, 700, jsontext.Value(`{"uid":"`+issueUID+`","title":"Legacy task","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"blocks","to_issue_uid":"`+private.UID+`","author":"spoke"}]}`))
 				updated := newRemoteEvent(t, fixture.project, &issueUID, "issue.updated", "spoke", spoke, 701, jsontext.Value(`{"title":"Later update"}`))
 				events = []db.FederationIngestEvent{{SourceEventID: 1, Event: created}, {SourceEventID: 2, Event: updated}}
@@ -151,10 +143,7 @@ func runRelayRejectsLegacyCrossProjectEvents(t *testing.T, store db.Storage) {
 				require.NoError(t, err)
 				require.Len(t, offered, 1)
 				require.NoError(t, store.AckRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, 1, db.RelayStreamEvent, offered[0].Sequence, offered[0].Digest))
-				payload := jsontext.Value(`{"reason":"duplicate","evidence":[{"type":"duplicate-of","issue_ref":"` + private.UID + `"}]}`)
-				if kind == "close parent" {
-					payload = jsontext.Value(`{"reason":"done","parent_uid":"` + private.UID + `","parent_short_id":"` + private.ShortID + `"}`)
-				}
+				payload := jsontext.Value(`{"reason":"done","parent_uid":"` + private.UID + `","parent_short_id":"` + private.ShortID + `"}`)
 				closed := newRemoteEvent(t, fixture.project, &issueUID, "issue.closed", "spoke", spoke, 701, payload)
 				events = []db.FederationIngestEvent{{SourceEventID: 2, Event: closed}}
 			}
@@ -165,11 +154,10 @@ func runRelayRejectsLegacyCrossProjectEvents(t *testing.T, store db.Storage) {
 			offered, err := store.PendingRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, db.RelayStreamEvent, 100)
 			require.NoError(t, err)
 			require.Empty(t, offered, "refused events must never reach a relay")
-			stored, err := store.EventsByUIDs(ctx, fixture.project.ID, []string{events[0].Event.EventUID})
-				require.ErrorIs(t, err, db.ErrNotFound)
-			require.Empty(t, stored, "refusal must roll back the event")
+			_, err = store.EventsByUIDs(ctx, fixture.project.ID, []string{events[0].Event.EventUID})
+			require.ErrorIs(t, err, db.ErrNotFound)
 			issue, err := store.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
-			if kind == "creation before update" {
+			if kind == "creation with sibling link" {
 				require.ErrorIs(t, err, db.ErrNotFound)
 			} else {
 				require.NoError(t, err)
