@@ -654,10 +654,6 @@ jobs:
         if: ${{ !matrix.cli }}
         run: go build ./...
 
-      - name: Vet
-        if: ${{ !matrix.cli }}
-        run: go vet ./...
-
       - name: Run tests
         if: ${{ !matrix.cli }}
         shell: bash
@@ -761,6 +757,11 @@ jobs:
         env:
           GOOS: windows
         run: make lint
+
+      - name: Vet for Windows
+        env:
+          GOOS: windows
+        run: make vet
 
       - name: Save lint caches
         if: github.event_name == 'push' && steps.restore-lint-cache.outputs.cache-hit != 'true'

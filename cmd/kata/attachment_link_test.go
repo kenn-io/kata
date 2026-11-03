@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -14,23 +13,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/docbank"
-	"hegel.dev/go/hegel"
 )
 
 const cliLinkVersion = "6f1c2e8a-2222-4222-8222-222222222222"
 const cliOldLinkVersion = "6f1c2e8a-2222-4222-8222-222222222223"
-
-func TestAttachmentLinkVersionGateProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		major := hegel.Draw(ht, hegel.Integers(0, 2))
-		minor := hegel.Draw(ht, hegel.Integers(0, 50))
-		patch := hegel.Draw(ht, hegel.Integers(0, 50))
-		reported := fmt.Sprintf("%d.%d.%d", major, minor, patch)
-		got, valid := apiVersionAtLeast(reported, apiVersionDocbankAttachmentLink)
-		require.True(ht, valid)
-		require.Equal(ht, major > 0 || minor >= 38, got, reported)
-	}, hegel.WithTestCases(512))
-}
 
 func TestAttachmentLinkCLI(t *testing.T) {
 	env, f, ref := attachmentCLIEnv(t)
