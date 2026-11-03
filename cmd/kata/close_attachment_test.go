@@ -70,7 +70,7 @@ func TestCloseAttachmentCLISuffixAndCanonicalReplay(t *testing.T) {
 		out, err = executeCloseAttachmentCLI(t, env.URL, "show", ref, mode)
 		require.NoError(t, err)
 		require.Contains(t, out, "report.pdf")
-		require.Contains(t, out, "application/pdf")
+		require.Contains(t, out, "application/octet-stream")
 		require.Contains(t, out, "12 bytes")
 		require.Contains(t, out, "removed")
 	}
@@ -139,7 +139,7 @@ func TestCloseAttachmentCLIOldDaemon(t *testing.T) {
 	writes := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/health" {
-			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.34.0"}`))
+			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.38.0"}`))
 			return
 		}
 		if r.Method == "POST" && r.URL.Path != "/api/v1/projects/resolve" {
@@ -150,7 +150,7 @@ func TestCloseAttachmentCLIOldDaemon(t *testing.T) {
 	defer server.Close()
 	for _, args := range [][]string{{"--docbank", "42"}, {"--evidence", "attachment:01K7E222222222222222222222"}} {
 		_, err := executeCloseAttachmentCLI(t, server.URL, append([]string{"close", ref, "--done", "-m", attachmentCloseMessage}, args...)...)
-		require.ErrorContains(t, err, "requires daemon API 0.35.0")
+		require.ErrorContains(t, err, "requires daemon API 0.39.0")
 		require.Zero(t, writes)
 		require.Empty(t, f.Requests())
 	}

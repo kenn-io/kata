@@ -102,6 +102,11 @@ func pollIssueHistory(ctx context.Context, store db.Storage, afterID int64, rawL
 // status transitions, so clients cannot safely re-derive this choice.
 func effectiveIssueCloseEventUID(ctx context.Context, store db.Storage, issue db.Issue) (string, error) {
 	scope := issueScopeFromContext(ctx)
+	projectUIDs, projectRestricted := db.AuthorizedProjects(ctx)
+	visibleProjects := make(map[string]struct{}, len(projectUIDs))
+	for _, projectUID := range projectUIDs {
+		visibleProjects[projectUID] = struct{}{}
+	}
 	var allowed map[int64]struct{}
 	if scope != nil {
 		if err := revalidateIssueScopedPrincipal(ctx, store); err != nil {
@@ -118,8 +123,12 @@ func effectiveIssueCloseEventUID(ctx context.Context, store db.Storage, issue db
 	afterID := int64(0)
 	var foldEvents []db.FoldEvent
 	visibleCloseUIDs := make(map[string]struct{})
+	// Status provenance must include transitions in projects the caller cannot
+	// inspect. Only a selected close event whose project and issue scope are
+	// visible below may be returned to the caller.
+	historyCtx := db.WithAuthorizedProjects(ctx, nil)
 	for {
-		rows, err := store.EventsAfter(ctx, db.EventsAfterParams{
+		rows, err := store.EventsAfter(historyCtx, db.EventsAfterParams{
 			AfterID: afterID, IssueUID: issue.UID, Limit: batchLimit,
 		})
 		if err != nil {
@@ -128,8 +137,11 @@ func effectiveIssueCloseEventUID(ctx context.Context, store db.Storage, issue db
 		rows = attachResolvedIssueID(issue, rows)
 		previousAfterID := afterID
 		for _, event := range rows {
-			visible := scope == nil
-			if scope != nil {
+			visible := !projectRestricted
+			if projectRestricted {
+				_, visible = visibleProjects[event.ProjectUID]
+			}
+			if visible && scope != nil {
 				_, visible = projectIssueScopedEvent(event, allowed, scope.ProjectUID)
 			}
 			foldEvents = append(foldEvents, db.FoldEvent{

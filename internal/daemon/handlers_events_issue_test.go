@@ -196,6 +196,61 @@ func TestPollProjectEventsIssueReturnsEffectiveCloseEvent(t *testing.T) {
 		require.False(t, hasEffectiveClose, string(body))
 		require.NotContains(t, string(body), `"status":"open"`)
 	})
+
+	t.Run("hidden project transitions cannot leave an older visible close selected", func(t *testing.T) {
+		env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+		visible, err := env.DB.CreateProject(t.Context(), "example-project")
+		require.NoError(t, err)
+		hidden, err := env.DB.CreateProject(t.Context(), "restricted-project")
+		require.NoError(t, err)
+		hiddenTeam, _, err := env.DB.CreateTeam(t.Context(), "history-restricted-team", db.BootstrapActor)
+		require.NoError(t, err)
+		_, _, err = env.DB.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{
+			ProjectUID: hidden.UID, Visibility: "teams", TeamUIDs: []string{hiddenTeam.UID},
+		}, db.BootstrapActor)
+		require.NoError(t, err)
+		issue := createScopedHTTPTestIssue(t, env, visible.ID, "Moved close evidence", nil)
+		newScopedTokens(t, env, visible, issue)
+		_, closedEvents, changed, err := env.DB.CloseIssueWithEvents(t.Context(), issue.ID, "done", "tester", "Closed before moving.", nil)
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Len(t, closedEvents, 1)
+
+		current, err := env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		_, err = env.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+			IssueID: current.ID, FromProjectID: visible.ID, ToProjectID: hidden.ID,
+			IfMatchRev: current.Revision, Actor: "tester", Single: true,
+		})
+		require.NoError(t, err)
+
+		origin := "7ZZZZZZZZZZZZZZZZZZZZZZZZZ"
+		createdAt := closedEvents[0].CreatedAt
+		insertRemoteIssueHistoryEvent(t, env, hidden, issue, "00000000000000000000000004", origin, "issue.updated",
+			closedEvents[0].HLCPhysicalMS+100, 0, `{"status":"open"}`, createdAt)
+		const hiddenCloseUID = "00000000000000000000000005"
+		insertRemoteIssueHistoryEvent(t, env, hidden, issue, hiddenCloseUID, origin, "issue.closed",
+			closedEvents[0].HLCPhysicalMS+200, 0,
+			`{"reason":"done","evidence":[{"type":"commit","sha":"0123456789abcdef0123456789abcdef01234567"}]}`,
+			createdAt)
+
+		current, err = env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		_, err = env.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+			IssueID: current.ID, FromProjectID: hidden.ID, ToProjectID: visible.ID,
+			IfMatchRev: current.Revision, Actor: "tester", Single: true,
+		})
+		require.NoError(t, err)
+
+		path := fmt.Sprintf("%s?issue=%s&include_effective_close_event_uid=true", scopedProjectPath(visible.ID, "events"), url.QueryEscape(issue.UID))
+		resp, body := envDoRaw(t, env, http.MethodGet, path, nil, map[string]string{"Authorization": "Bearer worker-token"})
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+		var raw map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(body, &raw))
+		_, hasEffectiveClose := raw["effective_close_event_uid"]
+		require.False(t, hasEffectiveClose, string(body))
+		require.NotContains(t, string(body), hiddenCloseUID)
+	})
 }
 
 func insertRemoteIssueHistoryEvent(

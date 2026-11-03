@@ -12,7 +12,7 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
-const apiVersionAttachmentEvidence = "0.35.0"
+const apiVersionAttachmentEvidence = "0.39.0"
 
 // prepareCloseAttachments validates the entire local request before any link.
 // Full IDs bypass current metadata lookup so saved close receipts can replay.
@@ -28,11 +28,13 @@ func prepareCloseAttachments(cmd *cobra.Command, raw, reason, message string, ev
 		return nil, externalCLIValidation("--docbank requires done and cannot combine with --dry, --if-match or --idempotency-key; link first, then close with attachment:<full-id>")
 	}
 	inputs := make([]generated.LinkAttachmentBody, len(files))
+	reuseExisting := true
 	for i, file := range files {
 		input, err := parseDocbankSelector(file)
 		if err != nil {
 			return nil, err
 		}
+		input.ReuseExisting = &reuseExisting
 		inputs[i] = input
 	}
 	validation := append([]api.Evidence(nil), evidence...)

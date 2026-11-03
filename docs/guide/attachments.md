@@ -68,7 +68,7 @@ kata close abc4 --done -m "Delivered the report and checked its final contents."
 Repeat `--docbank` for several files. Each value accepts a node ID or absolute
 Docbank path and pins its current version. Repeated selectors for the same
 version produce one evidence item. Other done-compatible evidence flags can
-be combined with it. This workflow requires daemon API 0.35.0 or newer.
+be combined with it. This workflow requires daemon API 0.39.0 or newer.
 
 Kata validates all local arguments before linking. If a link fails, the issue
 stays open and the error lists every attachment ID already linked. Retry

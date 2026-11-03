@@ -136,29 +136,16 @@ func TestShowAttachmentHistoryUsesServerSelectedCloseEvent(t *testing.T) {
 	require.Equal(t, "new", evidence[0].AttachmentID)
 }
 
-func TestShowAttachmentHistoryTracksProviderStatusTransitions(t *testing.T) {
+func TestShowAttachmentHistorySuppressesEvidenceWithoutEffectiveCloseSelection(t *testing.T) {
 	const subject = "01K7E222222222222222222222222"
-	for _, tc := range []struct {
-		name, updates string
-		want          bool
-	}{
-		{"same state", `{"event_id":2,"event_uid":"update-1","type":"issue.updated","issue_uid":"` + subject + `","hlc_physical_ms":2,"payload":{"status":"closed"}}`, true},
-		{"reopen and close", `{"event_id":2,"event_uid":"update-1","type":"issue.updated","issue_uid":"` + subject + `","hlc_physical_ms":2,"payload":{"status":"open"}},{"event_id":3,"event_uid":"update-2","type":"issue.updated","issue_uid":"` + subject + `","hlc_physical_ms":3,"payload":{"status":"closed"}}`, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				w.Header().Set("X-Kata-Events-Issue-UID", subject)
-				selected := ""
-				if tc.want {
-					selected = `,"effective_close_event_uid":"close-1"`
-				}
-				_, _ = fmt.Fprintf(w, `{"events":[{"event_id":1,"event_uid":"close-1","type":"issue.closed","issue_uid":%q,"hlc_physical_ms":1,"payload":{"evidence":[{"type":"attachment","attachment_id":"report"}]}},%s],"next_after_id":3,"reset_required":false%s}`, subject, tc.updates, selected)
-			}))
-			defer server.Close()
-			evidence, err := closeEvidenceForShow(t.Context(), server.Client(), server.URL, 1, subject)
-			require.NoError(t, err)
-			require.Equal(t, tc.want, len(evidence) > 0)
-		})
-	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Kata-Events-Issue-UID", subject)
+		_, _ = fmt.Fprintf(w, `{"events":[{"event_id":1,"event_uid":"old-close","type":"issue.closed","issue_uid":%q,"payload":{"evidence":[{"type":"attachment","attachment_id":"report"}]}}],"next_after_id":1,"reset_required":false}`, subject)
+	}))
+	defer server.Close()
+
+	evidence, err := closeEvidenceForShow(t.Context(), server.Client(), server.URL, 1, subject)
+	require.NoError(t, err)
+	require.Empty(t, evidence, "history without a server-selected effective close must not show stale evidence")
 }

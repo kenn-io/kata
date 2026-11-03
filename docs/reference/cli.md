@@ -979,7 +979,7 @@ more than one item, for example a fix that landed in two pull requests.
 `--evidence attachment:<id-or-unique-suffix>` cites a live issue attachment
 as done evidence and freezes its descriptor in history. Repeat `--docbank`
 with a Docbank node ID or absolute path to link current file versions and cite
-them in one close. Both forms require daemon API 0.35.0. `--docbank` is
+them in one close. Both forms require daemon API 0.39.0. `--docbank` is
 done-only and rejects `--dry`, `--if-match` and `--idempotency-key`; link first
 for those workflows. Partial link failures leave the issue open and list the
 IDs already linked. See [document close evidence](../guide/attachments.md#cite-a-document-when-closing-work)
