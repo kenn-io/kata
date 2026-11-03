@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-10-31
+last_edited: 2026-11-03
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -18,6 +18,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
   parent is closed, shows none. An issue-deadline trigger now says how long
   before the deadline it fires. See
   [CLI reference](reference/cli.md#daemon-and-diagnostics).
+- Receive direct legacy spoke creations through relays on SQLite roots before later root updates, preventing "references unknown issue" errors on relays while preserving the original event identity and hash. Thanks to [Rusty Shackleford](https://github.com/salmonumbrella).
+
 - Keep the browser reachable when `kata daemon restart` runs from a sandbox or
   container that sees the daemon's process IDs and executable paths. The daemon
   uses the CLI's installed executable with its own environment and idle policy.
