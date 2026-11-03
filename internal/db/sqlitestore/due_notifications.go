@@ -58,14 +58,20 @@ func (d *Store) ListDueNotificationIssueIDs(ctx context.Context, now time.Time) 
 // metadata event as a manual patch. A newly reached scheduled_on value is also
 // recorded as issue.scheduled_reached, whether or not the inbox slot is free.
 func (d *Store) ReconcileDueNotification(ctx context.Context, in db.ReconcileDueNotificationIn) (db.ReconcileDueNotificationOut, error) {
+	attempt := 0
 	return retryWrite1(ctx, d, func() (db.ReconcileDueNotificationOut, error) {
-		return d.reconcileDueNotification(ctx, in)
+		attempt++
+		return d.reconcileDueNotification(ctx, in, attempt > 1)
 	})
 }
 
-func (d *Store) reconcileDueNotification(ctx context.Context, in db.ReconcileDueNotificationIn) (db.ReconcileDueNotificationOut, error) {
+func (d *Store) reconcileDueNotification(ctx context.Context, in db.ReconcileDueNotificationIn, lockBeforePreparation bool) (db.ReconcileDueNotificationOut, error) {
 	var out db.ReconcileDueNotificationOut
-	tx, err := d.BeginTx(withOptimisticWrite(ctx), nil)
+	txCtx := ctx
+	if !lockBeforePreparation {
+		txCtx = withOptimisticWrite(ctx)
+	}
+	tx, err := d.BeginTx(txCtx, nil)
 	if err != nil {
 		return out, err
 	}
