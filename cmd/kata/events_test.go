@@ -150,7 +150,7 @@ func TestEvents_TailAgentEmitsOneLinePerEvent(t *testing.T) {
 	second := createIssueViaHTTP(t, env, dir, "second")
 
 	out := a.awaitOutput(func(s string) bool {
-		return strings.Count(s, "OK event ") >= 2
+		return completeAgentEventLineCount(s) >= 2
 	}, 2*time.Second)
 
 	lines := []string{}
@@ -166,6 +166,16 @@ func TestEvents_TailAgentEmitsOneLinePerEvent(t *testing.T) {
 	}
 	assert.Contains(t, lines[0], "issue="+first)
 	assert.Contains(t, lines[1], "issue="+second)
+}
+
+func completeAgentEventLineCount(output string) int {
+	count := 0
+	for _, line := range strings.SplitAfter(output, "\n") {
+		if strings.HasPrefix(line, "OK event ") && strings.HasSuffix(line, "\n") {
+			count++
+		}
+	}
+	return count
 }
 
 func TestEvents_TailAgentProgressUsesSSEID(t *testing.T) {
