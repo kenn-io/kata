@@ -2217,6 +2217,45 @@ For a legacy spoke, skipping advances its push cursor past the quarantined event
 does not delete local events and it does not make skipped work appear on the
 hub.
 
+### Withheld creations after a root checkpoint
+
+A root can retain an issue's creation without sharing its original bytes when
+those bytes name an unshared project. Later metadata or assignment events can
+then refer to an issue the relay has never received, and a pull quarantines
+with an error such as `issue.metadata_updated references unknown issue`.
+
+Upgrade the **root daemon** first, to a build that includes the
+retained-checkpoint refresh; 0.20.0 and earlier do not. The root then offers a
+fresh signed checkpoint with the selected project's current issues and keeps
+the private historical endpoints out of shared history. Upgrade relays that
+serve downstream peers to the same build.
+
+For an existing relay pull quarantine, select that relay's daemon and project,
+inspect the error, then retry after the root upgrade:
+
+```sh
+kata --project spoke-project federation quarantine list
+quarantine_id=7 # Replace with the affected entry's ID from the list.
+kata --project spoke-project federation quarantine show "$quarantine_id"
+kata --project spoke-project federation quarantine retry "$quarantine_id" \
+  --confirm "RETRY FEDERATION BATCH $quarantine_id" \
+  --reason "root upgraded for withheld creation recovery"
+kata --project spoke-project federation status
+```
+
+Retry clears the active rejection without advancing delivery cursors. The next
+automatic sync installs the refreshed checkpoint, then resumes delivery.
+Existing issues, metadata, assignments and later creations are kept. If pending
+local or downstream work blocks the reset, resolve the
+[normal reset blockers](#reset-recovery) first. Retrying against an unfixed
+root can quarantine the same batch again. Do not skip relay data or edit a
+database cursor instead.
+
+A live cross-project link is unsupported. The root refuses to sign a checkpoint
+while the link exists and keeps the owner's link and events. Remove the link,
+then retry. A reset never strips the link silently or shares its private
+endpoint.
+
 ## Purge and reset
 
 Hard purge is hub-admin-only for federated projects. A spoke rejects hard purge
