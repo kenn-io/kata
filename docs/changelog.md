@@ -11,6 +11,15 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Load the web UI's issue list and graph on SQLite and PostgreSQL stores with
   tens of thousands of issues without exceeding SQL parameter limits.
+- See when a cron job runs next: the `kata tui` Jobs tab detail lists the next
+  three times in the trigger's timezone, computed with the same schedule code
+  the daemon delivers with, including daylight-saving changes. A native
+  recurring job reads **Next** and steps from its saved progress. An adapter's
+  cron or `once` trigger reads **Triggers**, since the adapter decides when it
+  fires; an adapter interval shows no time. A paused job, or a native job whose
+  parent is closed, shows none. An issue-deadline trigger now says how long
+  before the deadline it fires. See
+  [CLI reference](reference/cli.md#daemon-and-diagnostics).
 - Receive direct legacy spoke creations through relays on SQLite roots before later root updates, preventing "references unknown issue" errors on relays while preserving the original event identity and hash. Thanks to [Rusty Shackleford](https://github.com/salmonumbrella).
 
 - Keep the browser reachable when `kata daemon restart` runs from a sandbox or
