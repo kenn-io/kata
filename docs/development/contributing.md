@@ -145,8 +145,10 @@ The pre-commit hook protects released PostgreSQL migration history. Install
 the configured hooks with `prek install`; see [PostgreSQL
 migrations](postgres-migrations.md) before proposing a schema change.
 
-`make test-stress` runs randomized and failpoint tests. If Rapid prints a
-failing seed, reproduce it with the seed from the failure output:
+`make test-stress` runs randomized and failpoint tests through gotestsum. It
+reruns a failed test up to twice, lists those reruns in its summary, and writes
+the test events to `gotestsum/`. If Rapid prints a failing seed, reproduce it
+with the seed from the failure output:
 
 ```sh
 RAPID_SEED=<seed> go test -tags federation_stress ./e2e \
