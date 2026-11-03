@@ -10,6 +10,7 @@
 *.test
 *.out
 coverage.out
+/gotestsum/
 
 # Local data dir for manual testing
 /.kata/
