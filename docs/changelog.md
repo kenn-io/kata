@@ -9,6 +9,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Load the web UI's issue list and graph on SQLite and PostgreSQL stores with
+  tens of thousands of issues without exceeding SQL parameter limits.
 - See when a cron job runs next: the `kata tui` Jobs tab detail lists the next
   three times in the trigger's timezone, computed with the same schedule code
   the daemon delivers with, including daylight-saving changes. A native
