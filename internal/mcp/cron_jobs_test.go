@@ -113,11 +113,12 @@ func TestCronJobLifecycle(t *testing.T) {
 
 func TestCronJobMutationsUseLongRunningClient(t *testing.T) {
 	f := newCronFixture(t)
-	const responseDelay = 5250 * time.Millisecond
+	const ordinaryTimeout = 100 * time.Millisecond
+	const responseDelay = 3 * ordinaryTimeout
 
 	// Let the daemon commit each write before delaying the response. This
 	// reproduces a healthy forwarded mutation whose response takes longer than
-	// the ordinary five-second MCP client timeout.
+	// the ordinary MCP client timeout.
 	slowServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet || r.Method == http.MethodHead {
 			f.handler.ServeHTTP(w, r)
@@ -142,7 +143,7 @@ func TestCronJobMutationsUseLongRunningClient(t *testing.T) {
 	}))
 	t.Cleanup(slowServer.Close)
 
-	client, err := kataclient.NewWithHTTPClient(slowServer.URL, &http.Client{Timeout: 5 * time.Second})
+	client, err := kataclient.NewWithHTTPClient(slowServer.URL, &http.Client{Timeout: ordinaryTimeout})
 	require.NoError(t, err)
 	longRunningClient, err := kataclient.NewWithHTTPClient(slowServer.URL, &http.Client{})
 	require.NoError(t, err)

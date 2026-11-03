@@ -232,6 +232,8 @@ func TestCronCLIStableCreateAfterAcceptedResponseLoss(t *testing.T) {
 
 func TestCronCLIJobMutationWaitsForForwardingBudget(t *testing.T) {
 	t.Setenv("KATA_AUTHOR", "worker")
+	// Shrink the ordinary request budget so a short delay outlasts it.
+	t.Setenv("KATA_HTTP_TIMEOUT", "100ms")
 	var mutation atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -245,7 +247,7 @@ func TestCronCLIJobMutationWaitsForForwardingBudget(t *testing.T) {
 		}
 		if r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/cron/jobs/") {
 			mutation.Store(true)
-			timer := time.NewTimer(6 * time.Second)
+			timer := time.NewTimer(300 * time.Millisecond)
 			defer timer.Stop()
 			select {
 			case <-timer.C:
