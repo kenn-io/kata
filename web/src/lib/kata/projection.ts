@@ -1,6 +1,7 @@
 import type { UIIssue, UILink } from '../api/generated'
 import type { KataCreationAttributionWire } from '@kenn-io/kata-ui'
 import type { UISnapshot } from '../state/snapshot'
+import { graphDistanceByUID } from '../graph/distance'
 import type {
   KataLinkPeer,
   KataProjectSummary,
@@ -113,7 +114,7 @@ function normalizeGraph(
     return [{ from_uid: edge.from_uid, to_uid: edge.to_uid, kind, layout: edge.layout }]
   })
   const edges = [...materializedEdges, ...unresolvedEdges]
-  const reachable = reachableGraphUIDs(sourceUID, edges)
+  const reachable = graphDistanceByUID(sourceUID, edges, Number.POSITIVE_INFINITY)
   const reachableEdges = edges.filter(
     (edge) => reachable.has(edge.from_uid) && reachable.has(edge.to_uid),
   )
@@ -144,31 +145,6 @@ function normalizeGraph(
     unresolved_refs: unresolvedRefs,
     fetched_at: fetchedAt,
   }
-}
-
-function reachableGraphUIDs(
-  sourceUID: string,
-  edges: readonly KataReachableGraphEdge[],
-): ReadonlySet<string> {
-  const adjacency = new Map<string, string[]>()
-  for (const edge of edges) {
-    const from = adjacency.get(edge.from_uid) ?? []
-    from.push(edge.to_uid)
-    adjacency.set(edge.from_uid, from)
-    const to = adjacency.get(edge.to_uid) ?? []
-    to.push(edge.from_uid)
-    adjacency.set(edge.to_uid, to)
-  }
-  const reached = new Set([sourceUID])
-  const queue = [sourceUID]
-  for (let head = 0; head < queue.length; head++) {
-    for (const adjacent of adjacency.get(queue[head]!) ?? []) {
-      if (!adjacent || reached.has(adjacent)) continue
-      reached.add(adjacent)
-      queue.push(adjacent)
-    }
-  }
-  return reached
 }
 
 function markTransitiveBlockLayout(edges: KataReachableGraphEdge[]): void {
