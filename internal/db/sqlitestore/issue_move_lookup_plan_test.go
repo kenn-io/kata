@@ -14,14 +14,17 @@ import (
 )
 
 type capturedMoveLookup struct {
-	store *sqlitestore.Store
+	store   *sqlitestore.Store
+	queries []capturedMoveLookupQuery
+}
+
+type capturedMoveLookupQuery struct {
 	query string
 	args  []any
 }
 
 func (q *capturedMoveLookup) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
-	q.query = query
-	q.args = append([]any(nil), args...)
+	q.queries = append(q.queries, capturedMoveLookupQuery{query: query, args: append([]any(nil), args...)})
 	return q.store.QueryRowContext(ctx, query, args...)
 }
 
@@ -47,25 +50,40 @@ func TestMovedIssueLookupUsesIssueHistoryIndex(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, issue.UID, found)
 			}
-			rows, err := store.QueryContext(t.Context(), "EXPLAIN QUERY PLAN "+capture.query, capture.args...)
-			require.NoError(t, err)
-			defer func() { require.NoError(t, rows.Close()) }()
-			var plan []string
-			for rows.Next() {
-				var id, parent, unused int
-				var detail string
-				require.NoError(t, rows.Scan(&id, &parent, &unused, &detail))
-				plan = append(plan, detail)
+			var movePlans, resetPlans int
+			for _, captured := range capture.queries {
+				if !strings.Contains(captured.query, "events") {
+					continue
+				}
+				rows, err := store.QueryContext(t.Context(), "EXPLAIN QUERY PLAN "+captured.query, captured.args...)
+				require.NoError(t, err)
+				var plan []string
+				for rows.Next() {
+					var id, parent, unused int
+					var detail string
+					require.NoError(t, rows.Scan(&id, &parent, &unused, &detail))
+					plan = append(plan, detail)
+				}
+				require.NoError(t, rows.Err())
+				require.NoError(t, rows.Close())
+				joined := strings.Join(plan, "\n")
+				// Issue creation checks historical reservations, so neither lookup may scan a table.
+				require.NotContains(t, joined, "SCAN ", "move lookup must not scan a table: %s", joined)
+				if strings.Contains(captured.query, "WHERE e.type='issue.moved'") {
+					movePlans++
+					index := "idx_events_moved_from"
+					if ref == issue.UID {
+						index = "idx_events_issue_uid"
+					}
+					require.Contains(t, joined, "INDEX "+index, "move lookup must search move history by its old reference: %s", joined)
+				}
+				if strings.Contains(captured.query, "sync.reset_required") {
+					resetPlans++
+					require.Contains(t, joined, "INDEX idx_events_issue_uid", "reset references must be found through the moved issue UID: %s", joined)
+				}
 			}
-			require.NoError(t, rows.Err())
-			joined := strings.Join(plan, "\n")
-			// Issue creation runs this check, so neither issues nor events may be scanned.
-			require.NotContains(t, joined, "SCAN ", "move lookup must not scan a table: %s", joined)
-			index := "idx_events_moved_from"
-			if ref == issue.UID {
-				index = "idx_events_issue_uid"
-			}
-			require.Contains(t, joined, "INDEX "+index, "move lookup must search move history by its old reference: %s", joined)
+			require.Positive(t, movePlans, "expected to inspect the move-history lookup plan")
+			require.Positive(t, resetPlans, "expected to inspect the reset-reference lookup plan")
 		})
 	}
 }

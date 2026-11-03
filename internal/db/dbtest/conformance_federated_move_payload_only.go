@@ -61,6 +61,15 @@ func checkFederatedMovePayloadOnlyHistory(t *testing.T, hub db.Storage, backend 
 			})
 			require.NoError(t, err)
 			require.NotNil(t, moved.Event)
+			prepareRehomePull(t, hub, source, target, "pull")
+			cursor, err := hub.MaxEventID(ctx)
+			require.NoError(t, err)
+			require.NoError(t, hub.AdvanceFederationPushCursor(ctx, source.ID, cursor))
+			require.NoError(t, hub.ResetFederatedProject(ctx, source.ID, cursor+1, cursor))
+			retained, err := hub.EventsByUIDs(ctx, source.ID, []string{payloadOnlyEdit.EventUID})
+			require.NoError(t, err)
+			require.Len(t, retained, 1, "source reset must retain payload-only history for the moved issue")
+			require.Equal(t, payloadOnlyEdit.ContentHash, retained[0].ContentHash)
 
 			feed, err := hub.ReadFederation(ctx, db.FederationReadParams{
 				ProjectID: target.ID, IssueUID: issue.UID, Limit: 100,

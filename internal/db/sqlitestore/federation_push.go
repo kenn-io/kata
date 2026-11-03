@@ -295,10 +295,10 @@ func (d *Store) resetFederatedProjectIfNoPendingPush(
 		}
 		return db.ErrFederationResetBlockedByPendingPush
 	}
-	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, d.instanceUID); err != nil {
+	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, d.instanceUID, false); err != nil {
 		return err
 	}
-	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID); err != nil {
+	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID, false); err != nil {
 		return fmt.Errorf("clear federated events: %w", err)
 	}
 	if err := clearFederatedProjection(ctx, tx, projectID); err != nil {

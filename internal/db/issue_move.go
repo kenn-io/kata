@@ -226,18 +226,40 @@ func MovedIssueUID(ctx context.Context, q interface {
 }, projectID int64, shortID string, postgres bool) (string, error) {
 	fromProject := "json_extract(e.payload, '$.from_project_uid')"
 	fromShort := "json_extract(e.payload, '$.from_short_id')"
-	moveEvent := "json_extract(e.payload, '$.move_event_uid')"
+	resetFromProject := "json_extract(reset.payload, '$.from_project_uid')"
+	resetFromShort := "json_extract(reset.payload, '$.from_short_id')"
+	resetMoveEvent := "json_extract(reset.payload, '$.move_event_uid')"
 	if postgres {
 		fromProject = "e.payload::jsonb->>'from_project_uid'"
 		fromShort = "e.payload::jsonb->>'from_short_id'"
-		moveEvent = "e.payload::jsonb->>'move_event_uid'"
+		resetFromProject = "reset.payload::jsonb->>'from_project_uid'"
+		resetFromShort = "reset.payload::jsonb->>'from_short_id'"
+		resetMoveEvent = "reset.payload::jsonb->>'move_event_uid'"
 	}
 	// idx_events_moved_from finds a former short ID directly; a full UID uses
-	// the issue history index. Issue creation runs this reservation check, so
-	// neither form may scan issues or events. Expressions must match the index.
-	match := fromShort + "=$2"
+	// the issue history index. Receiver-local reset references join through the
+	// same issue_uid index. Issue creation runs this check, so neither lookup may
+	// scan event history. Expressions must match the move-history index.
+	moveMatch := fromShort + "=$2"
+	resetMatch := resetFromShort + "=$2"
 	if len(shortID) == shortid.MaxLength {
-		match = "e.issue_uid=upper($2)"
+		moveMatch = "e.issue_uid=upper($2)"
+		resetMatch = "reset.issue_uid=upper($2)"
+	}
+	resetJoin := ` LEFT JOIN events reset ON reset.project_id=$1 AND reset.type='sync.reset_required'
+ AND reset.issue_uid=e.issue_uid AND ` + resetFromProject + `=$3 AND ` + resetMatch + `
+ AND ` + resetMoveEvent + `=e.uid`
+	if postgres {
+		// LATERAL keeps PostgreSQL's reset lookup parameterized by the moved
+		// issue UID, so it uses idx_events_issue_uid instead of scanning the
+		// project's event range for every candidate reference.
+		resetJoin = ` LEFT JOIN LATERAL (
+ SELECT reset.id FROM events reset
+ WHERE reset.project_id=$1 AND reset.type='sync.reset_required'
+ AND reset.issue_uid=e.issue_uid AND ` + resetFromProject + `=$3 AND ` + resetMatch + `
+ AND ` + resetMoveEvent + `=e.uid
+ ORDER BY reset.id DESC LIMIT 1
+) reset ON TRUE`
 	}
 	// Bind the project UID: SQLite cannot search an expression index with a
 	// value produced by a subquery.
@@ -249,35 +271,18 @@ func MovedIssueUID(ctx context.Context, q interface {
 	if err != nil {
 		return "", err
 	}
-	var resetUID string
-	var resetID int64
-	err = q.QueryRowContext(ctx, `SELECT e.issue_uid, e.id FROM events e
- WHERE e.project_id=$1 AND e.type='sync.reset_required' AND `+fromProject+`=$3 AND `+match+`
- AND EXISTS (SELECT 1 FROM events retained_move WHERE retained_move.uid=`+moveEvent+`
- AND retained_move.type='issue.moved' AND retained_move.issue_uid=e.issue_uid)
- AND EXISTS (SELECT 1 FROM issues WHERE uid=e.issue_uid)
- AND NOT EXISTS (SELECT 1 FROM issues WHERE project_id=$1 AND short_id=$2)
- AND NOT EXISTS (SELECT 1 FROM purge_log WHERE project_id=$1 AND short_id=$2)
- ORDER BY e.id DESC LIMIT 1`, projectID, shortID, projectUID).Scan(&resetUID, &resetID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return "", err
-	}
 	var uid string
-	var moveID int64
-	err = q.QueryRowContext(ctx, `SELECT e.issue_uid, e.id FROM events e
- WHERE e.type='issue.moved' AND `+fromProject+`=$3 AND `+match+`
+	err = q.QueryRowContext(ctx, `SELECT e.issue_uid FROM events e`+resetJoin+`
+ WHERE e.type='issue.moved' AND `+fromProject+`=$3 AND `+moveMatch+`
  AND EXISTS (SELECT 1 FROM issues WHERE uid=e.issue_uid)
  AND NOT EXISTS (SELECT 1 FROM issues WHERE project_id=$1 AND short_id=$2)
  AND NOT EXISTS (SELECT 1 FROM purge_log WHERE project_id=$1 AND short_id=$2)
- ORDER BY e.id DESC LIMIT 1`, projectID, shortID, projectUID).Scan(&uid, &moveID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return "", err
-	}
-	if resetID > moveID {
-		return resetUID, nil
-	}
+ ORDER BY CASE WHEN reset.id > e.id THEN reset.id ELSE e.id END DESC LIMIT 1`, projectID, shortID, projectUID).Scan(&uid)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", err
 	}
 	return uid, nil
 }

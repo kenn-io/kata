@@ -116,11 +116,15 @@ func NewFederationMoveSnapshotValidator(tx *sql.Tx) *FederationMoveSnapshotValid
 // checks still run before this transaction commits; edits cannot prove new
 // authors or references, only versions of an already trusted comment identity.
 func (v *FederationMoveSnapshotValidator) ObservePrepared(event RemoteEvent) {
-	if event.Type == "issue.comment_edited" && event.IssueUID != nil {
-		uid := *event.IssueUID
-		v.edits[uid] = append(v.edits[uid], moveSnapshotFoldEvent(event))
-		delete(v.proofs, uid)
+	if event.Type != "issue.comment_edited" {
+		return
 	}
+	folded := moveSnapshotFoldEvent(event)
+	if folded.IssueUID == "" {
+		return
+	}
+	v.edits[folded.IssueUID] = append(v.edits[folded.IssueUID], folded)
+	delete(v.proofs, folded.IssueUID)
 }
 
 func moveSnapshotFoldEvent(event RemoteEvent) FoldEvent {
