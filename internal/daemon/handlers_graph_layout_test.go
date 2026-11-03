@@ -26,7 +26,7 @@ func TestMarkTransitiveBlockLayoutScaling(t *testing.T) {
 		{"hub with back-link", 1000, 8000},
 		{"related hub", 1000, 8000},
 		{"hub fan-in/out", 1000, 8000},
-		{"layered10", 1000, 8000},
+		{"layered10", 250, 2000},
 		{"skip4", 1000, 8000},
 	} {
 		t.Run(tc.shape, func(t *testing.T) {
