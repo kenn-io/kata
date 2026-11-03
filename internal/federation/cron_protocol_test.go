@@ -202,7 +202,7 @@ func TestCronClientRejectsUnknownRequirementsBeforeReset(t *testing.T) {
 	for _, required := range []string{"future_v2", "cron_notify_children_v1"} {
 		t.Run(required, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				require.Equal(t, "cron_v1", r.Header.Get("X-Kata-Event-Features"))
+				require.Equal(t, db.SupportedEventFeatures, r.Header.Get(db.EventFeaturesHeader))
 				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("X-Kata-Required-Event-Features", required)
 				_, _ = w.Write([]byte(`{"reset_required":true,"reset_after_id":90,"next_after_id":90,"events":[]}`))

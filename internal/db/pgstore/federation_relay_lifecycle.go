@@ -155,7 +155,7 @@ func (b relayResetBackend) DisableRelayPush(ctx context.Context, projectID int64
 	_, err := b.tx.ExecContext(ctx, `UPDATE federation_bindings
 SET enabled=1,push_enabled=0,
     updated_at=to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-WHERE project_id=$1 AND role=$2`, projectID, string(db.FederationRoleSpoke))
+WHERE project_id=$1 AND role=$2 AND (enabled<>1 OR push_enabled<>0)`, projectID, string(db.FederationRoleSpoke))
 	if err != nil {
 		return mapSQLError(err, nil)
 	}

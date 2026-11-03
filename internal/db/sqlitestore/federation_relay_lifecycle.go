@@ -147,7 +147,7 @@ func (b relayResetBackend) RejectExternalRootProject(ctx context.Context, projec
 func (b relayResetBackend) DisableRelayPush(ctx context.Context, projectID int64) error {
 	_, err := b.tx.ExecContext(ctx, `UPDATE federation_bindings
 SET enabled=1,push_enabled=0,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
-WHERE project_id=? AND role=?`, projectID, string(db.FederationRoleSpoke))
+WHERE project_id=? AND role=? AND (enabled<>1 OR push_enabled<>0)`, projectID, string(db.FederationRoleSpoke))
 	return err
 }
 

@@ -40,6 +40,12 @@ func (d *Store) MaterializeFederatedEvents(ctx context.Context, projectID int64,
 		if err != nil {
 			return err
 		}
+		if materialization.fullReplay {
+			if err := tx.Rollback(); err != nil {
+				return err
+			}
+			return d.MaterializeFederatedProject(ctx, projectID)
+		}
 		if !locked {
 			if d.federationIngestPrepared != nil {
 				d.federationIngestPrepared()
