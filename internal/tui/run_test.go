@@ -553,7 +553,7 @@ func TestRun_NonFileStdout_ReturnsNotATTY(t *testing.T) {
 }
 
 func TestSSERestartIgnoresStaleGeneration(t *testing.T) {
-	root, cancelRoot := context.WithCancel(context.Background())
+	root, cancelRoot := context.WithCancel(t.Context())
 	t.Cleanup(cancelRoot)
 
 	var cancelled int

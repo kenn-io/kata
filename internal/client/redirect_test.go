@@ -1,7 +1,6 @@
 package client
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -22,7 +21,7 @@ func TestConfigureOriginPinnedRedirectsKeepsStandardRedirectLimit(t *testing.T) 
 	httpClient := server.Client()
 	require.NoError(t, ConfigureOriginPinnedRedirects(httpClient, server.URL))
 	request, err := http.NewRequestWithContext(
-		context.Background(),
+		t.Context(),
 		http.MethodPost,
 		server.URL+"/start",
 		nil,

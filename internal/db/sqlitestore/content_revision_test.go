@@ -21,7 +21,7 @@ func contentRev(ctx context.Context, t *testing.T, d *sqlitestore.Store, issueID
 
 func TestContentRevisionBumpsOnTitleBodyOnly(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openTestDB(t)
 	proj := createProject(ctx, t, d, "spoke-project")
 	iss, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -66,7 +66,7 @@ func TestContentRevisionBumpsOnTitleBodyOnly(t *testing.T) {
 
 func TestContentRevisionBumpsFromEditIssueAtomic(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openTestDB(t)
 	proj := createProject(ctx, t, d, "spoke-project")
 	iss, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
@@ -92,7 +92,7 @@ func TestContentRevisionBumpsFromEditIssueAtomic(t *testing.T) {
 
 func TestContentRevisionBumpsFromImport(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openTestDB(t)
 	proj := createProject(ctx, t, d, "spoke-project")
 
@@ -147,7 +147,7 @@ func TestContentRevisionBumpsFromImport(t *testing.T) {
 
 func TestContentRevisionBumpsFromImportPresentationTitleCorrection(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openTestDB(t)
 	proj := createProject(ctx, t, d, "spoke-project")
 	sourceTime := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)

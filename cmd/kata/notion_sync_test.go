@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -290,7 +289,7 @@ func TestNotionSyncReadOnlyAcceptance(t *testing.T) {
 	sourceTitle.Store([]any{map[string]any{"plain_text": "Tasks"}})
 	// Once also uses the long-running daemon client.
 	require.Contains(t, runCLI(t, env, dir, "sync", "notion", "once"), "created=1")
-	issues, err := env.DB.ListIssues(context.Background(), db.ListIssuesParams{ProjectID: projectID})
+	issues, err := env.DB.ListIssues(t.Context(), db.ListIssuesParams{ProjectID: projectID})
 	require.NoError(t, err)
 	require.Len(t, issues, 1)
 	issue := issues[0]
@@ -307,18 +306,18 @@ func TestNotionSyncReadOnlyAcceptance(t *testing.T) {
 	binding, err = env.DB.IssueSyncBindingByProject(t.Context(), projectID)
 	require.NoError(t, err)
 	require.Equal(t, "Notion data source "+cliNotionSource, binding.DisplayName)
-	closed, err := env.DB.IssueByID(context.Background(), issue.ID)
+	closed, err := env.DB.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)
 	require.Equal(t, "closed", closed.Status)
 	// The short timeout above only tests the sync commands' long-running client.
 	t.Setenv("KATA_HTTP_TIMEOUT", "")
 	before := requests.Load()
 	runCLI(t, env, dir, "reopen", issue.ShortID)
-	reopened, err := env.DB.IssueByID(context.Background(), issue.ID)
+	reopened, err := env.DB.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)
 	require.Equal(t, "open", reopened.Status)
 	runCLI(t, env, dir, "close", issue.ShortID, "--done", "--message", "Completed the imported task and checked its disposable acceptance flow.", "--commit", "deadbeef")
-	closed, err = env.DB.IssueByID(context.Background(), issue.ID)
+	closed, err = env.DB.IssueByID(t.Context(), issue.ID)
 	require.NoError(t, err)
 	require.Equal(t, "closed", closed.Status)
 	require.Equal(t, before, requests.Load(), "local issue changes must not contact Notion")

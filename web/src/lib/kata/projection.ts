@@ -1,6 +1,7 @@
 import type { UIIssue, UILink } from '../api/generated'
 import type { KataCreationAttributionWire } from '@kenn-io/kata-ui'
 import type { UISnapshot } from '../state/snapshot'
+import { graphDistanceByUID } from '../graph/distance'
 import type {
   KataLinkPeer,
   KataProjectSummary,
@@ -113,7 +114,7 @@ function normalizeGraph(
     return [{ from_uid: edge.from_uid, to_uid: edge.to_uid, kind, layout: edge.layout }]
   })
   const edges = [...materializedEdges, ...unresolvedEdges]
-  const reachable = reachableGraphUIDs(sourceUID, edges)
+  const reachable = graphDistanceByUID(sourceUID, edges, Number.POSITIVE_INFINITY)
   const reachableEdges = edges.filter(
     (edge) => reachable.has(edge.from_uid) && reachable.has(edge.to_uid),
   )
@@ -146,56 +147,170 @@ function normalizeGraph(
   }
 }
 
-function reachableGraphUIDs(
-  sourceUID: string,
-  edges: readonly KataReachableGraphEdge[],
-): ReadonlySet<string> {
-  const reached = new Set([sourceUID])
-  const queue = [sourceUID]
-  while (queue.length > 0) {
-    const uid = queue.shift()!
-    for (const edge of edges) {
-      const adjacent =
-        edge.from_uid === uid ? edge.to_uid : edge.to_uid === uid ? edge.from_uid : undefined
-      if (!adjacent || reached.has(adjacent)) continue
-      reached.add(adjacent)
-      queue.push(adjacent)
-    }
-  }
-  return reached
-}
-
 function markTransitiveBlockLayout(edges: KataReachableGraphEdge[]): void {
-  const adjacency = new Map<string, string[]>()
-  for (const edge of edges) {
-    if (edge.kind !== 'blocks') continue
-    adjacency.set(edge.from_uid, [...(adjacency.get(edge.from_uid) ?? []), edge.to_uid])
+  const ids = new Map<string, number>()
+  const idOf = (uid: string): number => {
+    let id = ids.get(uid)
+    if (id === undefined) ids.set(uid, (id = ids.size))
+    return id
   }
-  for (const peers of adjacency.values()) peers.sort()
-  for (const edge of edges) {
-    if (edge.kind === 'blocks' && hasAlternateBlockPath(adjacency, edge.from_uid, edge.to_uid)) {
-      edge.layout = false
-    }
+  const blocks = edges.filter((edge) => edge.kind === 'blocks')
+  const ends = blocks.map((edge) => [idOf(edge.from_uid), idOf(edge.to_uid)] as const)
+  const count = ids.size
+  const targets: number[][] = Array.from({ length: count }, () => [])
+  for (const [from, to] of ends) {
+    targets[from]!.push(to)
   }
-}
 
-function hasAlternateBlockPath(
-  adjacency: ReadonlyMap<string, readonly string[]>,
-  fromUID: string,
-  toUID: string,
-): boolean {
-  const seen = new Set([fromUID])
-  const queue = [...(adjacency.get(fromUID) ?? [])]
-  while (queue.length > 0) {
-    const next = queue.shift()!
-    if (next === toUID || seen.has(next)) continue
-    seen.add(next)
-    for (const peer of adjacency.get(next) ?? []) {
-      if (peer === toUID) return true
-      if (!seen.has(peer)) queue.push(peer)
+  // Iterative Tarjan traversal numbers strongly connected components sinks-first.
+  const componentOf = new Int32Array(count).fill(-1)
+  const order = new Int32Array(count).fill(-1)
+  const low = new Int32Array(count)
+  const cursor = new Int32Array(count)
+  const stack: number[] = []
+  const groups: number[][] = []
+  let visited = 0
+  for (let root = 0; root < count; root++) {
+    if (order[root]! >= 0) continue
+    const path = [root]
+    order[root] = low[root] = visited++
+    stack.push(root)
+    while (path.length > 0) {
+      const node = path[path.length - 1]!
+      if (cursor[node]! < targets[node]!.length) {
+        const child = targets[node]![cursor[node]!]!
+        cursor[node]!++
+        if (order[child]! < 0) {
+          order[child] = low[child] = visited++
+          stack.push(child)
+          path.push(child)
+        } else if (componentOf[child]! < 0) {
+          low[node] = Math.min(low[node]!, order[child]!)
+        }
+        continue
+      }
+      path.pop()
+      if (path.length > 0) {
+        const parent = path[path.length - 1]!
+        low[parent] = Math.min(low[parent]!, low[node]!)
+      }
+      if (low[node] === order[node]) {
+        const group: number[] = []
+        let member: number
+        do {
+          member = stack.pop()!
+          componentOf[member] = groups.length
+          group.push(member)
+        } while (member !== node)
+        groups.push(group)
+      }
     }
   }
-  return false
+
+  // Only components with multiple incoming links can be hidden targets.
+  const incoming = new Int32Array(groups.length)
+  for (let node = 0; node < count; node++) {
+    for (const to of targets[node]!) {
+      if (componentOf[to] !== componentOf[node]) incoming[componentOf[to]!]!++
+    }
+  }
+  const bit = new Int32Array(groups.length).fill(-1)
+  let bits = 0
+  for (let component = 0; component < groups.length; component++) {
+    if (incoming[component]! > 1) bit[component] = bits++
+  }
+  const words = Math.ceil(bits / 32)
+  const reach: Uint32Array[] = []
+  const absorb = (row: Uint32Array, component: number): void => {
+    const slot = bit[component]!
+    if (slot >= 0) row[slot >>> 5]! |= 1 << (slot & 31)
+    for (let word = 0; word < words; word++) row[word]! |= reach[component]![word]!
+  }
+  const hidden = new Set<number>()
+  for (let component = 0; component < groups.length; component++) {
+    const group = groups[component]!
+    const row = (reach[component] = new Uint32Array(words))
+    if (group.length > 1) {
+      for (const member of group) {
+        for (const target of targets[member]!) {
+          if (componentOf[target] !== component) absorb(row, componentOf[target]!)
+        }
+      }
+      continue
+    }
+    // Acyclic sources cannot lie on a path from one target to another.
+    // Read nearest targets first, then hide targets already in the row.
+    const node = group[0]!
+    const near = targets[node]!.slice().sort((a, b) => componentOf[b]! - componentOf[a]!)
+    for (let index = 0; index < near.length; index++) {
+      const target = near[index]!
+      const targetComponent = componentOf[target]!
+      const slot = bit[targetComponent]!
+      if (slot >= 0) {
+        if ((row[slot >>> 5]! & (1 << (slot & 31))) !== 0) hidden.add(node * count + target)
+        if (index > 0 && componentOf[near[index - 1]!] === targetComponent)
+          hidden.add(node * count + near[index - 1]!)
+      }
+      absorb(row, targetComponent)
+    }
+  }
+
+  const seen = new Int32Array(count).fill(-1)
+  const first = new Int32Array(count)
+  const second = new Int32Array(count)
+  const queue = new Int32Array(2 * count)
+  const origins = new Int32Array(2 * count)
+
+  for (const group of groups) {
+    if (group.length === 1) continue
+    // Cyclic sources need paths that never return through the source.
+    // Two distinct starting targets per task suffice to detect alternate paths.
+    for (const source of group) {
+      if (targets[source]!.length < 2) continue
+      const pending = targets[source]!.slice().sort((a, b) => componentOf[a]! - componentOf[b]!)
+      let remaining = pending.length
+      let lowest = 0
+      let floor = componentOf[pending[lowest]!]!
+      let tail = 0
+      for (const target of pending) {
+        seen[target] = source
+        first[target] = target
+        second[target] = -1
+        origins[tail] = target
+        queue[tail++] = target
+      }
+      for (let head = 0; head < tail && remaining > 0; head++) {
+        const current = queue[head]!
+        if (componentOf[current]! < floor) continue
+        for (const target of targets[current]!) {
+          if (target === source || componentOf[target]! < floor) continue
+          const origin = origins[head]!
+          if (seen[target] !== source) {
+            seen[target] = source
+            first[target] = origin
+            second[target] = -1
+          } else if (first[target] === origin || second[target] !== -1) continue
+          else {
+            second[target] = origin
+            if (first[target] === target) {
+              hidden.add(source * count + target)
+              if (--remaining === 0) break
+              // Hidden targets no longer require exploring lower components.
+              while (hidden.has(source * count + pending[lowest]!)) lowest++
+              floor = componentOf[pending[lowest]!]!
+            }
+          }
+          origins[tail] = origin
+          queue[tail++] = target
+        }
+      }
+    }
+  }
+
+  blocks.forEach((edge, index) => {
+    const [from, to] = ends[index]!
+    if (hidden.has(from * count + to)) edge.layout = false
+  })
 }
 
 function normalizeEvent(
@@ -371,27 +486,20 @@ function enrichRelationships(issues: KataTaskSummary[], links: readonly UILink[]
         }
         break
       case 'blocks':
-        if (from) from.blocks = appendPeer(from.blocks, toPeer)
+        if (from) from.blocks!.push(toPeer)
         if (to) {
-          to.blocked_by = appendPeer(to.blocked_by, fromPeer)
+          to.blocked_by!.push(fromPeer)
           if (link.from_status === 'open') {
-            to.open_blocked_by = [
-              ...(to.open_blocked_by ?? []),
-              { ...fromPeer, qualified_id: link.from_qualified_id },
-            ]
+            to.open_blocked_by!.push({ ...fromPeer, qualified_id: link.from_qualified_id })
           }
         }
         break
       case 'related':
-        if (from) from.related = appendPeer(from.related, toPeer)
-        if (to) to.related = appendPeer(to.related, fromPeer)
+        if (from) from.related!.push(toPeer)
+        if (to) to.related!.push(fromPeer)
         break
     }
   }
-}
-
-function appendPeer(peers: KataLinkPeer[] | undefined, peer: KataLinkPeer): KataLinkPeer[] {
-  return [...(peers ?? []), peer]
 }
 
 function linkPeer(uid: string, qualifiedID: string): KataLinkPeer {

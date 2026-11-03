@@ -1,7 +1,6 @@
 package todoistsync
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -14,7 +13,7 @@ import (
 
 // Contract: durable local intent is delivered once; restart/replay cannot echo it.
 func TestRunnerDurableCloseReopenAndReplay(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
 	require.NoError(t, err)
 	defer func() { require.NoError(t, store.Close()) }()
@@ -72,7 +71,7 @@ func TestRunnerDurableCloseReopenAndReplay(t *testing.T) {
 	require.Equal(t, "open", issue.Status)
 }
 func TestAdapterRejectsChangedBindingBeforeReads(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	f := newAPIFixture(t)
 	store, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
 	require.NoError(t, err)
@@ -86,7 +85,7 @@ func TestAdapterRejectsChangedBindingBeforeReads(t *testing.T) {
 
 func newRunnerFixture(t *testing.T, mode string) (*sqlitestore.Store, db.IssueSyncBinding, *apiFixture) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	store, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, store.Close()) })
@@ -109,7 +108,7 @@ func (f *apiFixture) runner(store db.Storage) *issuesync.Runner {
 // Contract: after a successful run, completion history resumes from the saved
 // cursor with the shared two-minute overlap instead of replaying from the floor.
 func TestRunnerHistoryResumesFromLastCursor(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, binding, f := newRunnerFixture(t, "one-way")
 	_, err := f.runner(store).RunOnce(ctx, binding.ID)
 	require.NoError(t, err)
@@ -137,7 +136,7 @@ func TestRunnerHistoryResumesFromLastCursor(t *testing.T) {
 // Contract: once a completion is verified, later sweeps re-read only the task's
 // active state; they neither replay completion history nor rescope per task.
 func TestRunnerSweepOfCompletedTaskSkipsHistoryReplay(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, binding, f := newRunnerFixture(t, "two-way")
 	_, err := f.runner(store).RunOnce(ctx, binding.ID)
 	require.NoError(t, err)
@@ -228,7 +227,7 @@ func TestRunnerArchivedProjectSendsNoStatusWrite(t *testing.T) {
 // Contract: Todoist may report updated_at as null. A reopen in Todoist and a
 // title-prefix change still reach an imported issue that has no local edits.
 func TestRunnerReopensTaskWithUnknownUpdatedAt(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, binding, f := newRunnerFixture(t, "one-way")
 	_, err := f.runner(store).RunOnce(ctx, binding.ID)
 	require.NoError(t, err)

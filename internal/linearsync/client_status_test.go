@@ -136,19 +136,19 @@ func TestStatusWritesOnlyStateAndVerifiesReadback(t *testing.T) {
 		current = closedStateID
 		return dataResponse(map[string]any{"issueUpdate": map[string]any{"success": true, "issue": map[string]any{"id": issueID}}}), nil
 	}, func() map[string]any { i := wireIssue(); i["state"] = map[string]any{"id": current}; return i }))
-	s, err := c.ForRun(context.Background(), statusConfig())
+	s, err := c.ForRun(t.Context(), statusConfig())
 	require.NoError(t, err)
 	status := s.(StatusSession)
-	got, err := status.WriteStatus(context.Background(), statusConfig(), issueID, "closed", func() error { admissions++; return nil })
+	got, err := status.WriteStatus(t.Context(), statusConfig(), issueID, "closed", func() error { admissions++; return nil })
 	require.NoError(t, err)
 	require.Equal(t, "closed", got.Status)
 	require.Equal(t, closedStateID, *got.RawStatus)
 	require.Equal(t, "done", got.ClosedReason)
-	_, err = status.WriteStatus(context.Background(), statusConfig(), issueID, "closed", func() error { admissions++; return nil })
+	_, err = status.WriteStatus(t.Context(), statusConfig(), issueID, "closed", func() error { admissions++; return nil })
 	require.NoError(t, err)
 	require.Equal(t, 1, writes)
 	require.Equal(t, 1, admissions)
-	_, err = status.WriteStatus(context.Background(), testConfig(), issueID, "open", func() error { return nil })
+	_, err = status.WriteStatus(t.Context(), testConfig(), issueID, "open", func() error { return nil })
 	require.Error(t, err)
 	require.Equal(t, 1, writes)
 }
@@ -156,9 +156,9 @@ func TestStatusMutationUnprovenOutcomesAreAmbiguous(t *testing.T) {
 	for _, body := range []string{`{"data":{"issueUpdate":{"success":true,"issue":{"id":"` + issueID + `"}}},"errors":[{"message":"secret body"}]}`, `{"data":{"issueUpdate":{"success":false}}}`, `{"data":{}}`, `{"data":{"issueUpdate":{"success":true,"issue":{"id":"` + teamID + `"}}}}`} {
 		calls := 0
 		c := mockClient(t, statusTransport(t, func(*http.Request, map[string]any) (*http.Response, error) { calls++; return response(200, body), nil }, wireIssue))
-		s, err := c.ForRun(context.Background(), statusConfig())
+		s, err := c.ForRun(t.Context(), statusConfig())
 		require.NoError(t, err)
-		_, err = s.(StatusSession).WriteStatus(context.Background(), statusConfig(), issueID, "closed", func() error { return nil })
+		_, err = s.(StatusSession).WriteStatus(t.Context(), statusConfig(), issueID, "closed", func() error { return nil })
 		var classified *issuesync.StatusError
 		require.ErrorAs(t, err, &classified)
 		require.True(t, classified.Ambiguous)
@@ -174,9 +174,9 @@ func TestStatusWriteRejectionKeepsAuthAndRateLimitCauses(t *testing.T) {
 		c := mockClient(t, statusTransport(t, func(*http.Request, map[string]any) (*http.Response, error) {
 			return response(200, `{"errors":[{"extensions":{"code":"`+tc.code+`"}}]}`), nil
 		}, wireIssue))
-		s, err := c.ForRun(context.Background(), statusConfig())
+		s, err := c.ForRun(t.Context(), statusConfig())
 		require.NoError(t, err)
-		_, err = s.(StatusSession).WriteStatus(context.Background(), statusConfig(), issueID, "closed", func() error { return nil })
+		_, err = s.(StatusSession).WriteStatus(t.Context(), statusConfig(), issueID, "closed", func() error { return nil })
 		var classified *issuesync.StatusError
 		require.ErrorAs(t, err, &classified)
 		require.Equal(t, tc.auth, classified.AuthFailure, tc.code)
@@ -187,17 +187,17 @@ func TestStatusScopeArchiveAndAdmissionGuards(t *testing.T) {
 	for _, change := range []func(map[string]any){func(i map[string]any) { i["team"] = map[string]any{"id": projectID} }, func(i map[string]any) { i["archivedAt"] = "2026-01-03T00:00:00Z" }, func(i map[string]any) { i["updatedAt"] = nil }} {
 		writes := 0
 		c := mockClient(t, statusTransport(t, func(*http.Request, map[string]any) (*http.Response, error) { writes++; return nil, nil }, func() map[string]any { i := wireIssue(); change(i); return i }))
-		s, err := c.ForRun(context.Background(), statusConfig())
+		s, err := c.ForRun(t.Context(), statusConfig())
 		require.NoError(t, err)
-		_, err = s.(StatusSession).WriteStatus(context.Background(), statusConfig(), issueID, "closed", func() error { return nil })
+		_, err = s.(StatusSession).WriteStatus(t.Context(), statusConfig(), issueID, "closed", func() error { return nil })
 		require.Error(t, err)
 		require.Zero(t, writes)
 	}
 	writes := 0
 	c := mockClient(t, statusTransport(t, func(*http.Request, map[string]any) (*http.Response, error) { writes++; return nil, nil }, wireIssue))
-	s, err := c.ForRun(context.Background(), statusConfig())
+	s, err := c.ForRun(t.Context(), statusConfig())
 	require.NoError(t, err)
-	_, err = s.(StatusSession).WriteStatus(context.Background(), statusConfig(), issueID, "closed", func() error { return context.Canceled })
+	_, err = s.(StatusSession).WriteStatus(t.Context(), statusConfig(), issueID, "closed", func() error { return context.Canceled })
 	require.ErrorIs(t, err, context.Canceled)
 	require.Zero(t, writes)
 }
@@ -213,9 +213,9 @@ func TestStatusReadbackScopeChangeRetainsAmbiguity(t *testing.T) {
 		}
 		return i
 	}))
-	s, err := c.ForRun(context.Background(), statusConfig())
+	s, err := c.ForRun(t.Context(), statusConfig())
 	require.NoError(t, err)
-	_, err = s.(StatusSession).WriteStatus(context.Background(), statusConfig(), issueID, "closed", func() error { return nil })
+	_, err = s.(StatusSession).WriteStatus(t.Context(), statusConfig(), issueID, "closed", func() error { return nil })
 	var classified *issuesync.StatusError
 	require.ErrorAs(t, err, &classified)
 	require.True(t, classified.Ambiguous)

@@ -73,5 +73,14 @@ func pollIssueHistory(ctx context.Context, store db.Storage, afterID int64, rawL
 			break
 		}
 	}
+	if len(out.Body.Events) > 0 {
+		names, err := store.ListFederationSpokeNames(ctx)
+		if err != nil {
+			return nil, internalAPIError(err)
+		}
+		for i := range out.Body.Events {
+			out.Body.Events[i].OriginSpokeName = names[out.Body.Events[i].OriginInstanceUID]
+		}
+	}
 	return out, nil
 }

@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 
@@ -18,7 +17,7 @@ import (
 // close-audit assertions.
 func auditRenderStore(t *testing.T) (*sqlitestore.Store, db.Project, db.Project) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	store, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
@@ -35,7 +34,7 @@ func auditRenderStore(t *testing.T) (*sqlitestore.Store, db.Project, db.Project)
 // suffix is ambiguous across projects and does not round-trip as a --parent
 // filter against the audited project.
 func TestDoAuditCloses_ForeignParentRendersQualified(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, alpha, beta := auditRenderStore(t)
 
 	parentBeta, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
@@ -66,7 +65,7 @@ func TestDoAuditCloses_ForeignParentRendersQualified(t *testing.T) {
 // TestDoAuditCloses_SameProjectParentRendersBare: a same-project parent must
 // still render as the bare short_id, with no project qualifier.
 func TestDoAuditCloses_SameProjectParentRendersBare(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store, alpha, _ := auditRenderStore(t)
 
 	parent, _, err := store.CreateIssue(ctx, db.CreateIssueParams{

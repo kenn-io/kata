@@ -13,7 +13,7 @@ import (
 // This exercises the persisted contract, including generic mapping writes that
 // must never transfer provider write authority to a different local issue.
 func checkIssueStatusMappingStorage(t *testing.T, store db.Storage) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	fixture, err := createIssueFixture(ctx, store, "example-project", "Mapped task", "worker", nil)
 	if err != nil {
 		return err

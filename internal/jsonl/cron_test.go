@@ -2,7 +2,6 @@ package jsonl_test
 
 import (
 	"bytes"
-	"context"
 	"strings"
 	"testing"
 
@@ -26,7 +25,7 @@ type nativeJSONLFixture struct {
 
 func buildNativeCronJSONLFixture(t *testing.T) nativeJSONLFixture {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	source := openExportTestDB(t)
 	project, err := source.CreateProject(ctx, "example-cron")
 	require.NoError(t, err)
@@ -82,7 +81,7 @@ func TestNativeCronJSONLRoundTrip(t *testing.T) {
 
 func TestNativeCronJSONLRoundTripAcrossPostgres(t *testing.T) {
 	fixture := buildNativeCronJSONLFixture(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 	t.Cleanup(cleanup)
 	postgres, err := pgstore.Open(ctx, dsn)

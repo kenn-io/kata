@@ -63,7 +63,7 @@ func (*workerEventFetcher) ParentData(context.Context, githubsync.Binding, githu
 // in the standalone daemon, or an already-expired timed assignment survives
 // forever in a mounted service.
 func TestServiceRunExpiresTimedAssignments(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	service, err := newService(ctx, Config{
 		DSN:  filepath.Join(t.TempDir(), "service.db"),
 		Auth: AuthConfig{TrustCallerAuthentication: true},
@@ -135,7 +135,7 @@ func TestServiceRunExpiresTimedAssignments(t *testing.T) {
 // reach the SSE broadcaster *and* the hook sink. The federation pull callback
 // broadcast only, so hook consumers never saw federated events.
 func TestServiceWorkerEventsReachBroadcasterAndHooks(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	updated := time.Date(2026, 6, 23, 12, 0, 0, 0, time.UTC)
 	fetcher := &workerEventFetcher{issues: []githubsync.Issue{{
 		ID: 101, NodeID: "I_example", Number: 1,

@@ -80,7 +80,7 @@ func bringUpSelection(
 		return up.profile(ctx, selection)
 	case selection.Resolved.ConfiguredRemote():
 		if probe && !probeRemote(ctx, selection.Resolved.BaseURL) {
-			return ResolvedDaemon{}, false, remoteUnavailableError(selection.Resolved, workspaceStart)
+			return ResolvedDaemon{}, false, remoteUnavailableError(ctx, selection.Resolved, workspaceStart)
 		}
 		return selection.Resolved, true, nil
 	default:
@@ -94,11 +94,11 @@ func selectsCurrentHomeDefault(selection DaemonSelection) bool {
 	return selection.Resolved.Source == DaemonSourceLocalRuntime && !selection.activeLocalCatalog
 }
 
-func remoteUnavailableError(d ResolvedDaemon, workspaceStart string) error {
+func remoteUnavailableError(ctx context.Context, d ResolvedDaemon, workspaceStart string) error {
 	source := d.Source.String()
 	switch d.Source {
 	case DaemonSourceLocalConfig:
-		if _, path, ok, err := findLocalConfig(workspaceStart); err == nil && ok {
+		if _, path, ok, err := findLocalConfig(ctx, workspaceStart); err == nil && ok {
 			source = path
 		}
 	case DaemonSourceActiveDaemon:

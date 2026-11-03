@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"crypto/ed25519"
 	"encoding/json"
 	"encoding/json/jsontext"
@@ -27,11 +26,11 @@ const claimTestOtherSpokeUID = "01HZNQ7VFPK1XGD8R5MABCD4EY"
 func TestClaimAuthLocalDaemonBearerCanClaimHubProject(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("admin-token"))
 	project, issue := createClaimHubIssue(t, env)
-	team, _, err := env.DB.CreateTeam(context.Background(), "claim-private-team", "admin")
+	team, _, err := env.DB.CreateTeam(t.Context(), "claim-private-team", "admin")
 	require.NoError(t, err)
-	_, err = env.DB.SetTeamMembership(context.Background(), team.UID, "different-member", true, "admin")
+	_, err = env.DB.SetTeamMembership(t.Context(), team.UID, "different-member", true, "admin")
 	require.NoError(t, err)
-	_, _, err = env.DB.SetProjectAccessPolicy(context.Background(), db.ProjectAccessPolicy{
+	_, _, err = env.DB.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{
 		ProjectUID: project.UID, Visibility: "teams", TeamUIDs: []string{team.UID},
 	}, "admin")
 	require.NoError(t, err)
@@ -81,7 +80,7 @@ func TestInsecureReadonlyRejectsLeaseMutation(t *testing.T) {
 func TestClaimRoutesRejectArchivedFederatedProject(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("admin-token"))
 	project, issue := createClaimHubIssue(t, env)
-	_, _, err := env.DB.RemoveProject(context.Background(), db.RemoveProjectParams{
+	_, _, err := env.DB.RemoveProject(t.Context(), db.RemoveProjectParams{
 		ProjectID: project.ID,
 		Actor:     "tester",
 		Force:     true,
@@ -103,7 +102,7 @@ func TestClaimRoutesRejectArchivedFederatedProject(t *testing.T) {
 func TestClaimAuthIdentityTokenCanUseLocalLeaseRoutes(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
 	project, issue := createClaimHubIssue(t, env)
-	_, _, err := env.DB.CreateAPIToken(context.Background(), db.CreateAPITokenParams{
+	_, _, err := env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
 		PlaintextToken: "alice-token",
 		Actor:          "alice",
 		AdminActor:     db.BootstrapActor,
@@ -258,7 +257,7 @@ func TestClaimAuthInsecureReadonlyRejectsUnauthenticatedClaimPost(t *testing.T) 
 func TestClaimAuthInsecureReadonlyRejectsUnauthenticatedClaimStatusRead(t *testing.T) {
 	env := testenv.New(t, testenv.WithInsecureReadonly())
 	project, issue := createClaimHubIssue(t, env)
-	_, err := env.DB.AcquireClaim(context.Background(), db.AcquireClaimParams{
+	_, err := env.DB.AcquireClaim(t.Context(), db.AcquireClaimParams{
 		ProjectID: project.ID,
 		IssueRef:  issue.ShortID,
 		Principal: db.ClaimPrincipal{
@@ -279,7 +278,7 @@ func TestClaimAuthInsecureReadonlyRejectsUnauthenticatedClaimStatusRead(t *testi
 func TestClaimAuthInsecureReadonlyClaimStatusRejectsStaleAuthorizationHeader(t *testing.T) {
 	env := testenv.New(t, testenv.WithInsecureReadonly())
 	project, issue := createClaimHubIssue(t, env)
-	_, err := env.DB.AcquireClaim(context.Background(), db.AcquireClaimParams{
+	_, err := env.DB.AcquireClaim(t.Context(), db.AcquireClaimParams{
 		ProjectID: project.ID,
 		IssueRef:  issue.ShortID,
 		Principal: db.ClaimPrincipal{
@@ -320,7 +319,7 @@ func TestClaimAuthStatusEndpointReturnsLiveClaimAndHubNow(t *testing.T) {
 }
 
 func TestClaimAuthForceReleaseRejectsEnrollmentAndUsesAdminAuth(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	t.Run("local no-token deployment may force release", func(t *testing.T) {
 		env := testenv.New(t)
@@ -503,7 +502,7 @@ func TestClaimActionValidationAndExpiredErrors(t *testing.T) {
 		map[string]any{"holder": "agent-a", "client_kind": "cli", "claim_kind": "timed", "ttl_seconds": int64(59)}, nil)
 	assertAPIError(t, resp.StatusCode, raw, http.StatusBadRequest, "validation")
 
-	_, err := env.DB.AcquireClaim(context.Background(), db.AcquireClaimParams{
+	_, err := env.DB.AcquireClaim(t.Context(), db.AcquireClaimParams{
 		ProjectID: project.ID,
 		IssueRef:  issue.ShortID,
 		Principal: db.ClaimPrincipal{
@@ -527,7 +526,7 @@ func TestClaimActionAcquireBroadcastsOpportunisticExpiryBeforeAcquire(t *testing
 	project, issue := createClaimHubIssue(t, env)
 	sub := env.Broadcaster.Subscribe(daemon.SubFilter{ProjectID: project.ID})
 	defer sub.Unsub()
-	_, err := env.DB.AcquireClaim(context.Background(), db.AcquireClaimParams{
+	_, err := env.DB.AcquireClaim(t.Context(), db.AcquireClaimParams{
 		ProjectID: project.ID,
 		IssueRef:  issue.ShortID,
 		Principal: db.ClaimPrincipal{
@@ -563,7 +562,7 @@ func TestClaimActionBroadcastsOpportunisticExpiryOnExpiredClaimProject(t *testin
 	defer subA.Unsub()
 	subB := env.Broadcaster.Subscribe(daemon.SubFilter{ProjectID: projectB.ID})
 	defer subB.Unsub()
-	_, err := env.DB.AcquireClaim(context.Background(), db.AcquireClaimParams{
+	_, err := env.DB.AcquireClaim(t.Context(), db.AcquireClaimParams{
 		ProjectID: projectB.ID,
 		IssueRef:  issueB.ShortID,
 		Principal: db.ClaimPrincipal{
@@ -600,7 +599,7 @@ func TestClaimActionDoesNotBroadcastRolledBackOpportunisticExpiry(t *testing.T) 
 	defer subA.Unsub()
 	subB := env.Broadcaster.Subscribe(daemon.SubFilter{ProjectID: projectB.ID})
 	defer subB.Unsub()
-	_, err := env.DB.AcquireClaim(context.Background(), db.AcquireClaimParams{
+	_, err := env.DB.AcquireClaim(t.Context(), db.AcquireClaimParams{
 		ProjectID: projectA.ID,
 		IssueRef:  issueA.ShortID,
 		Principal: db.ClaimPrincipal{
@@ -612,7 +611,7 @@ func TestClaimActionDoesNotBroadcastRolledBackOpportunisticExpiry(t *testing.T) 
 		Now:       time.Now(),
 	})
 	require.NoError(t, err)
-	_, err = env.DB.AcquireClaim(context.Background(), db.AcquireClaimParams{
+	_, err = env.DB.AcquireClaim(t.Context(), db.AcquireClaimParams{
 		ProjectID: projectB.ID,
 		IssueRef:  issueB.ShortID,
 		Principal: db.ClaimPrincipal{
@@ -639,7 +638,7 @@ func TestClaimStatusBroadcastsOpportunisticExpiry(t *testing.T) {
 	project, issue := createClaimHubIssue(t, env)
 	sub := env.Broadcaster.Subscribe(daemon.SubFilter{ProjectID: project.ID})
 	defer sub.Unsub()
-	_, err := env.DB.AcquireClaim(context.Background(), db.AcquireClaimParams{
+	_, err := env.DB.AcquireClaim(t.Context(), db.AcquireClaimParams{
 		ProjectID: project.ID,
 		IssueRef:  issue.ShortID,
 		Principal: db.ClaimPrincipal{
@@ -682,7 +681,7 @@ func TestClaimActionForceReleaseDefaultAndExplicitReasons(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			env := testenv.New(t)
 			project, issue := createClaimHubIssue(t, env)
-			_, err := env.DB.AcquireClaim(context.Background(), db.AcquireClaimParams{
+			_, err := env.DB.AcquireClaim(t.Context(), db.AcquireClaimParams{
 				ProjectID: project.ID,
 				IssueRef:  issue.ShortID,
 				Principal: db.ClaimPrincipal{
@@ -754,7 +753,7 @@ func TestClaimActionEmittedEventsBroadcastAndEnqueueHooks(t *testing.T) {
 }
 
 func TestClaimForwardAcquireAndReleaseUpdatesSpokeCache(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub, spoke, hubProject, spokeProject, issue, token := createClaimForwardingPair(t, "claim")
 
 	require.NoError(t, config.WriteFederationCredential(spokeProject.UID, config.FederationCredential{
@@ -796,7 +795,7 @@ func TestClaimForwardAcquireAndReleaseUpdatesSpokeCache(t *testing.T) {
 }
 
 func TestClaimStatusForwardRefreshesSpokeCache(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub, spoke, hubProject, spokeProject, issue, token := createClaimForwardingPair(t, "claim")
 	require.NoError(t, config.WriteFederationCredential(spokeProject.UID, config.FederationCredential{
 		HubURL:       hub.URL,
@@ -832,7 +831,7 @@ func TestClaimStatusForwardRefreshesSpokeCache(t *testing.T) {
 }
 
 func TestClaimStatusForwardDoesNotExpireLocallyStaleLeaseBeforeApplyingRenewal(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	_, spoke, hubProject, spokeProject, issue, token := createClaimForwardingPair(t, "claim")
 	now := time.Now().UTC()
 	claimUID, err := katauid.New()
@@ -1001,7 +1000,7 @@ func TestDeniedClaimAcquirePreservesDownstreamHolder(t *testing.T) {
 }
 
 func TestClaimForwardDeniedAcquireCachesHubHolder(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub, spoke, hubProject, spokeProject, issue, token := createClaimForwardingPair(t, "claim")
 	require.NoError(t, config.WriteFederationCredential(spokeProject.UID, config.FederationCredential{
 		HubURL:       hub.URL,
@@ -1078,7 +1077,7 @@ func TestClaimForwardCrossOriginRedirectDoesNotReachRedirectTarget(t *testing.T)
 }
 
 func TestPendingClaimOfflineAcquireEnqueuesAndReleaseDoesNotClearCache(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub, spoke, hubProject, spokeProject, issue, token := createClaimForwardingPair(t, "claim")
 	offlineHubURL := fastFailClaimHubURL(t)
 	require.NoError(t, config.WriteFederationCredential(spokeProject.UID, config.FederationCredential{
@@ -1132,7 +1131,7 @@ func TestPendingClaimOfflineAcquireEnqueuesAndReleaseDoesNotClearCache(t *testin
 }
 
 func TestPendingClaimOfflineAcquireDuplicateReturnsExistingRequest(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	_, spoke, hubProject, spokeProject, issue, token := createClaimForwardingPair(t, "claim")
 	offlineHubURL := fastFailClaimHubURL(t)
 	require.NoError(t, config.WriteFederationCredential(spokeProject.UID, config.FederationCredential{
@@ -1170,7 +1169,7 @@ func TestPendingClaimOfflineAcquireDuplicateReturnsExistingRequest(t *testing.T)
 }
 
 func TestPendingClaimUnixHubOfflineAcquireEnqueues(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	_, spoke, hubProject, spokeProject, issue, token := createClaimForwardingPair(t, "claim")
 	require.NoError(t, config.WriteFederationCredential(spokeProject.UID, config.FederationCredential{
 		HubURL:       "http://kata.invalid",
@@ -1247,7 +1246,7 @@ func createClaimHubIssue(t *testing.T, env *testenv.Env) (db.Project, db.Issue) 
 
 func createClaimHubIssueNamed(t *testing.T, env *testenv.Env, name string) (db.Project, db.Issue) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project := createFederatedHubProject(t, env, name)
 	issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: project.ID,
@@ -1260,7 +1259,7 @@ func createClaimHubIssueNamed(t *testing.T, env *testenv.Env, name string) (db.P
 
 func createClaimHubIssueInDB(t *testing.T, store *sqlitestore.Store) (db.Project, db.Issue) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "hub")
 	require.NoError(t, err)
 	_, err = store.EnableProjectFederation(ctx, project.ID, "tester")
@@ -1279,7 +1278,7 @@ func createClaimForwardingPair(
 	capabilities string,
 ) (*testenv.Env, *testenv.Env, db.Project, db.Project, db.Issue, string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	hubProject, issue := createClaimHubIssue(t, hub)
 	spoke := testenv.New(t)
@@ -1346,10 +1345,10 @@ func configureClaimRelayBinding(t *testing.T, hub, spoke *testenv.Env, spokeProj
 
 func setClaimBindingHubURL(t *testing.T, spoke *testenv.Env, projectID int64, hubURL string) {
 	t.Helper()
-	binding, err := spoke.DB.FederationBindingByProject(context.Background(), projectID)
+	binding, err := spoke.DB.FederationBindingByProject(t.Context(), projectID)
 	require.NoError(t, err)
 	binding.HubURL = hubURL
-	_, err = spoke.DB.UpsertFederationBinding(context.Background(), binding)
+	_, err = spoke.DB.UpsertFederationBinding(t.Context(), binding)
 	require.NoError(t, err)
 }
 
@@ -1361,7 +1360,7 @@ func createClaimEnrollment(
 	capabilities string,
 ) db.CreatedFederationEnrollment {
 	t.Helper()
-	created, err := env.DB.CreateFederationEnrollment(context.Background(), db.CreateFederationEnrollmentParams{
+	created, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{
 		Token:            spokeUID + "-" + capabilities + "-token",
 		SpokeInstanceUID: spokeUID,
 		ProjectID:        &projectID,

@@ -335,7 +335,7 @@ func runWait(cmd *cobra.Command, args []string, opts waitOptions) error {
 			}
 			return rerr
 		}
-		ctx = c
+		ctx = c //nolint:fatcontext // c derives from cmd.Context(), not from the previous iteration's ctx.
 		baseURL = resolvedURL
 		targets = append(targets, &waitTarget{arg: arg, pid: pid, refForAPI: ref.RefForAPI})
 	}

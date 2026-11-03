@@ -79,3 +79,19 @@ test('task filters stay inside a narrow list pane without overlapping', async ({
   expect(layout).toEqual({ height: expect.any(Number), contained: true, overlaps: false })
   expect(layout.height).toBeGreaterThan(30)
 })
+
+test('the task count sits beside the list title', async ({ page, kata }) => {
+  await page.setViewportSize({ width: 1440, height: 800 })
+  const credentials = await kata.launch(page)
+  await kata.seedIssue(page, credentials, { title: 'Counted example task' })
+  await page.goto(`${kata.origin}/kata?view=all-open`)
+
+  const list = page.getByRole('region', { name: 'Issues' })
+  const title = (await list.getByRole('heading', { name: 'All Open' }).boundingBox())!
+  const count = (await list.getByText(/^\d+ tasks?$/).boundingBox())!
+
+  expect(count.y).toBeLessThan(title.y + title.height)
+  expect(count.y + count.height).toBeGreaterThan(title.y)
+  expect(count.x).toBeGreaterThan(title.x + title.width)
+  expect(count.x - (title.x + title.width)).toBeLessThan(40)
+})

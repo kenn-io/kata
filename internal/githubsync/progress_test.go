@@ -1,7 +1,6 @@
 package githubsync
 
 import (
-	"context"
 	"sync"
 	"testing"
 	"time"
@@ -56,12 +55,12 @@ func TestProgressConcurrentSnapshots(t *testing.T) {
 
 func TestProgressReporterIsContextScoped(t *testing.T) {
 	var completed int
-	ctx := withProgressReporter(context.Background(), func(phase string, count, total int) {
+	ctx := withProgressReporter(t.Context(), func(phase string, count, total int) {
 		assert.Zero(t, total)
 		assert.Equal(t, "issues", phase)
 		completed = count
 	})
 	issuesync.ReportProgress(ctx, "issues", 20, 0)
-	reportProgress(context.Background(), "issues", 999, 0)
+	reportProgress(t.Context(), "issues", 999, 0)
 	assert.Equal(t, 20, completed)
 }

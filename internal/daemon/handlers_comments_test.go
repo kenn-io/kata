@@ -72,7 +72,7 @@ func TestCommentEndpoint_IdempotencyReusesCommittedComment(t *testing.T) {
 	assert.Nil(t, reused.Event)
 	assert.False(t, reused.Changed)
 
-	comments, err := h.DB().CommentsByIssue(context.Background(), issueID)
+	comments, err := h.DB().CommentsByIssue(t.Context(), issueID)
 	require.NoError(t, err)
 	require.Len(t, comments, 1)
 }

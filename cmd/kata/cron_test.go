@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"io"
@@ -46,7 +45,7 @@ func executeCronCLI(t *testing.T, base string, stdin io.Reader, args ...string) 
 	command.SetOut(&out)
 	command.SetErr(&diagnostic)
 	command.SetIn(stdin)
-	command.SetContext(contextWithBaseURL(context.Background(), base))
+	command.SetContext(contextWithBaseURL(t.Context(), base))
 	command.SetArgs(append([]string{"--project", "spoke-project", "--json", "cron"}, args...))
 	err := command.Execute()
 	return out.String(), diagnostic.String(), err

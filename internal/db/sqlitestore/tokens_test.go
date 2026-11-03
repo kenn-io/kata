@@ -16,7 +16,7 @@ func TestAPITokensTableExists(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
 	var n int
-	require.NoError(t, d.QueryRow(`
+	require.NoError(t, d.QueryRowContext(t.Context(), `
 		SELECT COUNT(*) FROM pragma_table_info('api_tokens')
 		WHERE name IN ('id','token_hash','actor','name','scope_kind','scope_project_uid',
 		               'scope_root_issue_uid','expires_at','created_at','last_used_at','revoked_at')
@@ -34,7 +34,7 @@ func TestHashTokenSHA256Hex(t *testing.T) {
 func TestSystemProjectInitializedAndHidden(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	sys, err := d.SystemProject(ctx)
 	require.NoError(t, err)
@@ -51,7 +51,7 @@ func TestSystemProjectInitializedAndHidden(t *testing.T) {
 func TestEnsureSystemProjectRejectsConflictingSentinelUID(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	_, err := d.ExecContext(ctx, `DROP TRIGGER trg_projects_uid_immutable`)
 	require.NoError(t, err)
 	_, err = d.ExecContext(ctx,
@@ -67,7 +67,7 @@ func TestEnsureSystemProjectRejectsConflictingSentinelUID(t *testing.T) {
 func TestBatchProjectStatsHidesSystemProject(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	sys, err := d.SystemProject(ctx)
 	require.NoError(t, err)
 
@@ -79,7 +79,7 @@ func TestBatchProjectStatsHidesSystemProject(t *testing.T) {
 func TestCreateAPITokenStoresHashAndEmitsEvent(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	name := "laptop"
 
 	tok, evt, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
@@ -114,7 +114,7 @@ func TestCreateAPITokenStoresHashAndEmitsEvent(t *testing.T) {
 func TestCreateAPITokenStoresExpiryInSortableUTCFormat(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	expiresAt := time.Date(2026, time.September, 15, 12, 34, 56, 789000000, time.FixedZone("test", 2*60*60))
 
 	tok, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
@@ -139,7 +139,7 @@ func TestCreateAPITokenStoresExpiryInSortableUTCFormat(t *testing.T) {
 func TestRevokeAPITokenSetsRevokedAtAndEmitsEvent(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	name := "laptop"
 	tok, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
 		PlaintextToken: "secret-token",
@@ -165,7 +165,7 @@ func TestRevokeAPITokenSetsRevokedAtAndEmitsEvent(t *testing.T) {
 func TestRevokeAPITokenAlreadyRevokedDoesNotEmitDuplicateEvent(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	tok, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
 		PlaintextToken: "secret-token",
 		Actor:          "wesm",
@@ -187,7 +187,7 @@ func TestRevokeAPITokenAlreadyRevokedDoesNotEmitDuplicateEvent(t *testing.T) {
 func TestResolveAPITokenReturnsActiveToken(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	tok, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
 		PlaintextToken: "secret-token",
 		Actor:          "wesm",
@@ -204,7 +204,7 @@ func TestResolveAPITokenReturnsActiveToken(t *testing.T) {
 func TestResolveAPITokenEnforcesExpiry(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	scope := &db.APITokenScope{
 		Kind:         db.APITokenScopeIssueSubtree,
 		ProjectUID:   "01HZNQ7VFPK1XGD8R5MABCD4EX",
@@ -240,7 +240,7 @@ func TestResolveAPITokenEnforcesExpiry(t *testing.T) {
 func TestResolveAPITokenLazilyUpdatesLastUsedAt(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	tok, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
 		PlaintextToken: "secret-token",
 		Actor:          "wesm",
@@ -268,7 +268,7 @@ func TestResolveAPITokenLazilyUpdatesLastUsedAt(t *testing.T) {
 func TestResolveAPITokenReturnsTokenWhenLastUsedUpdateFails(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	tok, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
 		PlaintextToken: "secret-token",
 		Actor:          "wesm",
@@ -291,7 +291,7 @@ func TestResolveAPITokenReturnsTokenWhenLastUsedUpdateFails(t *testing.T) {
 
 func TestResolveAPITokenDoesNotRetryBestEffortLastUsedUpdate(t *testing.T) { //nolint:paralleltest // asserts a real-time bound of 250ms
 	d, path := openTestDBWithPath(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	d.SetMaxOpenConns(1)
 	d.SetMaxIdleConns(1)
 	_, err := d.ExecContext(ctx, `PRAGMA busy_timeout=1`)
@@ -312,7 +312,8 @@ func TestResolveAPITokenDoesNotRetryBestEffortLastUsedUpdate(t *testing.T) { //n
 	t.Cleanup(func() { _ = conn.Close() })
 	_, err = conn.ExecContext(ctx, "BEGIN IMMEDIATE TRANSACTION")
 	require.NoError(t, err)
-	t.Cleanup(func() { _, _ = conn.ExecContext(context.Background(), "COMMIT") })
+	// t.Context() is already canceled when cleanup runs.
+	t.Cleanup(func() { _, _ = conn.ExecContext(context.WithoutCancel(t.Context()), "COMMIT") })
 
 	deadlineCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -327,7 +328,7 @@ func TestResolveAPITokenDoesNotRetryBestEffortLastUsedUpdate(t *testing.T) { //n
 func TestResolveAPITokenRejectsRevokedToken(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	tok, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
 		PlaintextToken: "secret-token",
 		Actor:          "wesm",
@@ -344,7 +345,7 @@ func TestResolveAPITokenRejectsRevokedToken(t *testing.T) {
 func TestListAPITokensIncludesRevokedAndHidesHash(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	tok, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
 		PlaintextToken: "secret-token",
 		Actor:          "wesm",
@@ -364,7 +365,7 @@ func TestListAPITokensIncludesRevokedAndHidesHash(t *testing.T) {
 func TestCreateAPITokenRejectsReservedBootstrapActorCaseInsensitive(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for _, actor := range []string{"bootstrap", "Bootstrap", " BOOTSTRAP "} {
 		_, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{

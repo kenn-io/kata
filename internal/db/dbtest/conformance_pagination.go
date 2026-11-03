@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"fmt"
 	"slices"
 	"testing"
@@ -14,7 +13,7 @@ import (
 
 // Creation keysets must survive ordinary edits, including timestamp ties.
 func checkListPagination(t *testing.T, store db.Storage) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	other, err := store.CreateProject(ctx, "other-project")
@@ -104,7 +103,7 @@ func checkListPagination(t *testing.T, store db.Storage) error {
 }
 
 func checkSearchPagination(t *testing.T, store db.Storage) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)

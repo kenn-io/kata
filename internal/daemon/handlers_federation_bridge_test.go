@@ -179,7 +179,7 @@ func TestRelayHTTPAuthenticatesBeforeReadingBody(t *testing.T) {
 				if suffix == ":ack" {
 					body.reader = strings.NewReader(`{"stream":"events","epoch":1,"through":1,"digest":"digest"}`)
 				}
-				request := httptest.NewRequest(http.MethodPost, "http://localhost/api/v1/projects/1/federation/relay"+suffix, body)
+				request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://localhost/api/v1/projects/1/federation/relay"+suffix, body)
 				request.Header.Set("Authorization", "Bearer invalid-relay-test-token")
 				request.Header.Set("Content-Type", "application/json")
 				response := httptest.NewRecorder()

@@ -58,7 +58,7 @@ func TestSelfAuthenticatedRouteMatcherMatchesOnlyTransportRoutes(t *testing.T) {
 			"/api/v1/projects/7/issues/abc4/lease/actions/acquire", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			request := httptest.NewRequest(tc.method, tc.path, nil)
+			request := httptest.NewRequestWithContext(t.Context(), tc.method, tc.path, nil)
 			assert.Equal(t, tc.want, matcher.matches(request))
 		})
 	}
@@ -66,7 +66,7 @@ func TestSelfAuthenticatedRouteMatcherMatchesOnlyTransportRoutes(t *testing.T) {
 
 func TestSelfAuthenticatedRouteMatcherZeroValueMatchesNothing(t *testing.T) {
 	var matcher selfAuthenticatedRouteMatcher
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/projects/1/federation/events", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/projects/1/federation/events", nil)
 	assert.False(t, matcher.matches(request))
 }
 
@@ -94,7 +94,7 @@ func TestBearerMiddlewareRequiresExactMethodForSelfAuthenticatedGETRoutes(t *tes
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
-			handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodHead, tc.path, nil))
+			handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodHead, tc.path, nil))
 			assert.Equal(t, http.StatusUnauthorized, recorder.Code)
 		})
 	}
@@ -146,7 +146,7 @@ func TestBearerMiddlewareRequiresTokenForUnusableProjectID(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			recorder := httptest.NewRecorder()
-			handler.ServeHTTP(recorder, httptest.NewRequest(tc.method, tc.path, nil))
+			handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), tc.method, tc.path, nil))
 			assert.Equal(t, tc.want, recorder.Code)
 		})
 	}
@@ -181,7 +181,7 @@ func TestHostAccessRejectsFederationBearerOnForceReleaseOnly(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodPost, tc.path,
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, tc.path,
 				strings.NewReader(`{"holder":"spoke-holder"}`))
 			request.Header.Set("Content-Type", "application/json")
 			request.Header.Set("Authorization", "Bearer enrollment-token")

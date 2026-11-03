@@ -13,7 +13,7 @@ import (
 // A moved issue leaves its close/reopen events in the source project, so the
 // mapping must not keep a pending event or observation from the old binding.
 func checkIssueStatusMove(t *testing.T, store db.Storage) error {
-	ctx := context.Background()
+	ctx := t.Context()
 	sqlStore := store.(interface {
 		QueryRowContext(context.Context, string, ...any) *sql.Row
 		ExecContext(context.Context, string, ...any) (sql.Result, error)

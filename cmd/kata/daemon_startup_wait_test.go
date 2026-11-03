@@ -266,7 +266,7 @@ func TestDetachedStartFixture(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, os.MkdirAll(ns.DataDir, 0o700)) //nolint:gosec // the runtime fixture is under the test's temporary KATA_HOME
 	nsDir := ns.DataDir
-	ctx := context.Background()
+	ctx := t.Context()
 	mode := os.Getenv("KATA_STARTUP_FIXTURE_MODE")
 	if mode == "retry-wrapper" {
 		t.Setenv("KATA_STARTUP_FIXTURE_MODE", "retry-child")
@@ -337,12 +337,14 @@ func TestDetachedStartFixture(t *testing.T) {
 }
 
 func runStartupFixture() {
+	// The detached fixture process is its own root.
+	ctx := context.Background()
 	home := os.Getenv("KATA_HOME")
 	dbPath := filepath.Join(home, "kata.db")
 	if os.Getenv("KATA_STARTUP_FIXTURE_MODE") == "retry-child" {
-		err := jsonl.AutoCutover(context.Background(), dbPath)
+		err := jsonl.AutoCutover(ctx, dbPath)
 		if errors.Is(err, jsonl.ErrCutoverInProgress) {
-			if notifyErr := notifyStartupFixture("retry-exited"); notifyErr != nil {
+			if notifyErr := notifyStartupFixture(ctx, "retry-exited"); notifyErr != nil {
 				_, _ = os.Stderr.WriteString(notifyErr.Error())
 				os.Exit(1)
 			}
@@ -366,14 +368,14 @@ func runStartupFixture() {
 	if os.Getenv("KATA_STARTUP_FIXTURE_MODE") == "owner-drain" {
 		newTelemetryReporter = func(telemetry.Options) telemetry.Client { return &fakeTelemetryReporter{} }
 		// The parent test kills this daemon through cutover-child.pid.
-		if err := runDaemonProcess(context.Background(), "", false, true, newDaemonRestart(os.Stderr)); err != nil {
+		if err := runDaemonProcess(ctx, "", false, true, newDaemonRestart(os.Stderr)); err != nil {
 			_, _ = os.Stderr.WriteString(err.Error())
 			os.Exit(1)
 		}
 		os.Exit(0)
 	}
 	if os.Getenv("KATA_STARTUP_FIXTURE_MODE") == "readiness-timeout" {
-		if err := notifyStartupFixture("release-child"); err != nil {
+		if err := notifyStartupFixture(ctx, "release-child"); err != nil {
 			_, _ = os.Stderr.WriteString(err.Error())
 			os.Exit(1)
 		}
@@ -381,7 +383,7 @@ func runStartupFixture() {
 		timer := time.NewTimer(6 * time.Second)
 		<-timer.C
 	}
-	err := jsonl.AutoCutover(context.Background(), dbPath)
+	err := jsonl.AutoCutover(ctx, dbPath)
 	if err != nil {
 		_, _ = os.Stderr.WriteString(err.Error())
 		os.Exit(1)
@@ -389,7 +391,7 @@ func runStartupFixture() {
 	if err := os.WriteFile(filepath.Join(home, "cutover-complete"), nil, 0o600); err != nil { //nolint:gosec // fixture path under temporary KATA_HOME
 		os.Exit(1)
 	}
-	if err := notifyStartupFixture("cutover-complete"); err != nil {
+	if err := notifyStartupFixture(ctx, "cutover-complete"); err != nil {
 		_, _ = os.Stderr.WriteString(err.Error())
 		os.Exit(1)
 	}
@@ -424,17 +426,23 @@ func stopStartupFixture(t *testing.T, home string) {
 		}
 		return
 	}
-	if err := waitForDaemonProcesses(context.Background(), []int{pid}, 5*time.Second); err != nil {
+	// Runs from t.Cleanup, after t.Context() is canceled.
+	if err := waitForDaemonProcesses(context.WithoutCancel(t.Context()), []int{pid}, 5*time.Second, kitdaemon.ProcessAlive); err != nil {
 		t.Errorf("wait for detached cutover fixture process %d: %v", pid, err)
 	}
 }
 
-func notifyStartupFixture(event string) error {
+func notifyStartupFixture(ctx context.Context, event string) error {
 	baseURL := os.Getenv("KATA_STARTUP_FIXTURE_NOTIFY_URL")
 	if baseURL == "" {
 		return errors.New("startup fixture notification URL is missing")
 	}
-	response, err := http.Post(baseURL+"/"+event, "text/plain", nil) //nolint:gosec // fixture-only loopback URL supplied by the parent test
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/"+event, nil) //nolint:gosec // fixture-only loopback URL supplied by the parent test
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "text/plain")
+	response, err := http.DefaultClient.Do(request) //nolint:gosec // fixture-only loopback URL supplied by the parent test
 	if err != nil {
 		return err
 	}

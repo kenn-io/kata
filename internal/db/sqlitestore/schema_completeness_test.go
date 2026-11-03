@@ -1,7 +1,6 @@
 package sqlitestore_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -37,7 +36,7 @@ func TestAllSchemaTablesExist(t *testing.T) {
 		assertSchemaObject(t, d, name)
 	}
 
-	rows, err := d.QueryContext(context.Background(), `
+	rows, err := d.QueryContext(t.Context(), `
 		SELECT name
 		  FROM sqlite_master
 		 WHERE type = 'table'
@@ -107,7 +106,7 @@ func TestSchemaUIDColumnsIndexesAndTriggers(t *testing.T) {
 
 func assertColumn(t *testing.T, d *sqlitestore.Store, table, column, typ string, notNull bool) {
 	t.Helper()
-	rows, err := d.QueryContext(context.Background(), `PRAGMA table_info(`+table+`)`)
+	rows, err := d.QueryContext(t.Context(), `PRAGMA table_info(`+table+`)`)
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
@@ -133,7 +132,7 @@ func assertColumn(t *testing.T, d *sqlitestore.Store, table, column, typ string,
 func assertSchemaObject(t *testing.T, d *sqlitestore.Store, name string) {
 	t.Helper()
 	var got string
-	err := d.QueryRowContext(context.Background(),
+	err := d.QueryRowContext(t.Context(),
 		`SELECT name FROM sqlite_master WHERE name = ?`, name).Scan(&got)
 	require.NoErrorf(t, err, "schema object %q missing", name)
 	assert.Equal(t, name, got)

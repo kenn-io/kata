@@ -134,7 +134,7 @@ is a local ledger for the work itself. They coexist. See
 -   [__Twenty sync__](operations/twenty-sync.md). Mirror Twenty workspace tasks with optional two-way status.
 -   [__TickTick sync__](operations/ticktick-sync.md). Import a task project and send completion back.
 -   [__Forgejo connector__](operations/forgejo-connector.md). Bind a Forgejo issue to Kata.
--   [__Native cron__](reference/cron.md). Share job definitions and create recurring child issues.
+-   [__Cron__](reference/cron.md). Share job definitions and create recurring child issues.
 -   [__Plane sync__](operations/plane-sync.md). Mirror a Plane project into native issues.
 -   [__Linear sync__](operations/linear-sync.md). Import a selected team and synchronize completion and reopen.
 -   [__Todoist sync__](operations/todoist-sync.md). Mirror a Todoist project and sync task completion.

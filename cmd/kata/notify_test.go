@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"fmt"
@@ -92,7 +91,7 @@ func TestNotifyRealDaemonInterleavedIssueChanges(t *testing.T) {
 					switch kind {
 					case "close":
 						closeURL := fmt.Sprintf("%s/api/v1/projects/%d/issues/%s/actions/close", env.URL, pid, ref)
-						request, requestErr := http.NewRequestWithContext(context.Background(), http.MethodPost,
+						request, requestErr := http.NewRequestWithContext(t.Context(), http.MethodPost,
 							closeURL, strings.NewReader(`{"actor":"agent-b","source":"tui"}`))
 						if requestErr != nil {
 							interleaveErr = requestErr
@@ -115,7 +114,7 @@ func TestNotifyRealDaemonInterleavedIssueChanges(t *testing.T) {
 							interleaveErr = fmt.Errorf("close returned %d: %s", closeResponse.StatusCode, responseBody)
 						}
 					case "other recipient":
-						_, interleaveErr = env.DB.PatchIssueMetadata(context.Background(), db.PatchIssueMetadataIn{
+						_, interleaveErr = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
 							IssueID: issue.ID,
 							Actor:   "agent-b",
 							Patch: map[string]jsontext.Value{
@@ -137,7 +136,7 @@ func TestNotifyRealDaemonInterleavedIssueChanges(t *testing.T) {
 
 			resetFlags(t)
 			cmd := newRootCmd()
-			cmd.SetContext(contextWithBaseURL(context.Background(), server.URL))
+			cmd.SetContext(contextWithBaseURL(t.Context(), server.URL))
 			cmd.SetOut(io.Discard)
 			cmd.SetArgs([]string{"--workspace", dir, "--as", "agent-a",
 				"notify", ref, "--to", "reviewer", "--message", "review it"})

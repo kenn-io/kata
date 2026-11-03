@@ -1,5 +1,5 @@
  Project: kata                                                                                       kata カタ · v0.1.0
- open: 1 · closed: 1 · all: 3                                                                search:"no-match-anywhere"
+ /no-match-anywhere                                                                        open: 1 · closed: 1 · all: 3
     #     prio status    title                                                           kids    owner         updated
   no issues match. press c to clear filters or n to create one.
 
@@ -26,5 +26,5 @@
 
 
  [kata カタ] jobs runs workflows
- ↑↓ move  ▕ ↵ open      ▕ n new        ▕ / search▕ f filter▕ s status▕ v view▕ o order▕ c clear▕ x close▕ ! priority
- D daemons▕ F federation▕ C credentials▕ L layout▕ ? help  ▕ q quit
+ ↑↓ move   ▕ ↵ open   ▕ n new       ▕ / search     ▕ f filter▕ s status▕ v view▕ o order▕ c clear▕ x close▕ d dates
+ ! priority▕ D daemons▕ F federation▕ C credentials▕ L layout▕ ? help  ▕ q quit

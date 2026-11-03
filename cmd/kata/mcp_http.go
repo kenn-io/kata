@@ -14,6 +14,7 @@ import (
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/mcpdiscovery"
+	"go.kenn.io/kata/internal/mcpicon"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -111,13 +112,14 @@ func serveMCPHTTP(
 	server *sdkmcp.Server,
 	discoveryDirectory, backendURL string,
 ) (result error) {
-	listener, err := net.Listen("tcp", strings.TrimSpace(address))
+	listener, err := new(net.ListenConfig).Listen(ctx, "tcp", strings.TrimSpace(address))
 	if err != nil {
 		return fmt.Errorf("listen for MCP HTTP: %w", err)
 	}
 	defer func() { _ = listener.Close() }()
 
 	mux := http.NewServeMux()
+	mcpicon.RegisterRoutes(mux)
 	mux.Handle("/mcp", newMCPHTTPHandler(server, token, false))
 	mux.HandleFunc("/healthz", serveMCPHTTPHealth)
 	var handler http.Handler = mux

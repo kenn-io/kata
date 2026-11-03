@@ -51,7 +51,7 @@ func TestConfigReconcilerRetriesWhenDrainAdmissionReopens(t *testing.T) {
 			return activity.NewLease(func() { close(released) }, nil), true, nil
 		},
 	})
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- reconciler.Run(ctx) }()
 
@@ -611,7 +611,7 @@ func TestReconcileMappingCreatesEnrollsAdoptsPushesAndWakes(t *testing.T) {
 	hub := newFakeHub()
 	wakes := 0
 	hub.onEnrollment = func(request federation.EnrollmentRequest) {
-		project, err := store.ProjectByName(context.Background(), "spoke-project")
+		project, err := store.ProjectByName(t.Context(), "spoke-project")
 		require.NoError(t, err, "local project must exist before hub enrollment")
 		assert.NotEqual(t, hubProjectUID, project.UID)
 		_, ok := credentials.get(project.UID)
@@ -623,15 +623,15 @@ func TestReconcileMappingCreatesEnrollsAdoptsPushesAndWakes(t *testing.T) {
 	}
 
 	err := federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), func() { wakes++ },
 	)
 	require.NoError(t, err)
 
-	project, err := store.ProjectByName(context.Background(), "spoke-project")
+	project, err := store.ProjectByName(t.Context(), "spoke-project")
 	require.NoError(t, err)
 	assert.Equal(t, hubProjectUID, project.UID)
-	binding, err := store.FederationBindingByProject(context.Background(), project.ID)
+	binding, err := store.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, err)
 	assert.Equal(t, db.FederationRoleSpoke, binding.Role)
 	assert.Equal(t, hubProjectUID, binding.HubProjectUID)
@@ -743,7 +743,7 @@ func TestReconcileMappingLeaveDuringConvergenceRevokesTheStampedEnrollment(t *te
 		}
 
 		err := federation.ReconcileMapping(
-			context.Background(), store, credentials, hub,
+			t.Context(), store, credentials, hub,
 			testCatalog(), testMapping(), nil,
 		)
 
@@ -767,7 +767,7 @@ func TestReconcileMappingLeaveDuringConvergenceRevokesTheStampedEnrollment(t *te
 		}
 
 		err := federation.ReconcileMapping(
-			context.Background(), store, credentials, hub,
+			t.Context(), store, credentials, hub,
 			testCatalog(), testMapping(), nil,
 		)
 
@@ -856,7 +856,7 @@ func TestReconcileMappingUnsuppressedLeaveSurfacesFailedRevocation(t *testing.T)
 	}
 
 	err := federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 
@@ -873,10 +873,10 @@ func TestReconcileMappingUnsuppressedReservationChangeSurfacesConvergenceConflic
 ) {
 	store := openReconcileStore(t)
 	project := createMatchingBoundProject(t, store)
-	binding, err := store.FederationBindingByProject(context.Background(), project.ID)
+	binding, err := store.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, err)
 	binding.PushEnabled = false
-	_, err = store.UpsertFederationBinding(context.Background(), binding)
+	_, err = store.UpsertFederationBinding(t.Context(), binding)
 	require.NoError(t, err)
 
 	credentials := newTokenRotatedDuringConvergenceStore()
@@ -890,7 +890,7 @@ func TestReconcileMappingUnsuppressedReservationChangeSurfacesConvergenceConflic
 	hub := newFakeHub()
 
 	err = federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 
@@ -916,7 +916,7 @@ func TestReconcileMappingUnsuppressedReservationChangeAfterEnrollmentSurfacesCon
 	}
 
 	err := federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 
@@ -985,9 +985,9 @@ func TestReconcileMappingManualCredentialMovesLocalUIDToHubUID(t *testing.T) {
 
 func TestReconcileMappingAdoptsExistingStandaloneWorkWithSnapshot(t *testing.T) {
 	store := openReconcileStore(t)
-	project, err := store.CreateProject(context.Background(), "spoke-project")
+	project, err := store.CreateProject(t.Context(), "spoke-project")
 	require.NoError(t, err)
-	_, _, err = store.CreateIssue(context.Background(), db.CreateIssueParams{
+	_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: project.ID, Title: "local issue", Author: "local-author",
 	})
 	require.NoError(t, err)
@@ -996,16 +996,16 @@ func TestReconcileMappingAdoptsExistingStandaloneWorkWithSnapshot(t *testing.T) 
 	wakes := 0
 
 	err = federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), func() { wakes++ },
 	)
 	require.NoError(t, err)
 
-	bound, err := store.ProjectByName(context.Background(), "spoke-project")
+	bound, err := store.ProjectByName(t.Context(), "spoke-project")
 	require.NoError(t, err)
 	assert.Equal(t, project.ID, bound.ID)
 	assert.Equal(t, hubProjectUID, bound.UID)
-	events, err := store.EventsAfter(context.Background(), db.EventsAfterParams{
+	events, err := store.EventsAfter(t.Context(), db.EventsAfterParams{
 		ProjectID: bound.ID, Limit: 20,
 	})
 	require.NoError(t, err)
@@ -1017,7 +1017,7 @@ func TestReconcileMappingAdoptsExistingStandaloneWorkWithSnapshot(t *testing.T) 
 
 func TestReconcileMappingAtomicRekeyFailureLeavesStandaloneStateRetryable(t *testing.T) {
 	store := openReconcileStore(t)
-	project, err := store.CreateProject(context.Background(), "spoke-project")
+	project, err := store.CreateProject(t.Context(), "spoke-project")
 	require.NoError(t, err)
 	credentials := newFakeCredentialStore()
 	manual := managedCredential()
@@ -1031,7 +1031,7 @@ func TestReconcileMappingAtomicRekeyFailureLeavesStandaloneStateRetryable(t *tes
 	wakes := 0
 
 	firstErr := federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), func() { wakes++ },
 	)
 	require.Error(t, firstErr)
@@ -1048,10 +1048,10 @@ func TestReconcileMappingAtomicRekeyFailureLeavesStandaloneStateRetryable(t *tes
 	assert.Empty(t, credentials.deleteCalls)
 	assert.Zero(t, wakes)
 
-	unchanged, err := store.ProjectByName(context.Background(), project.Name)
+	unchanged, err := store.ProjectByName(t.Context(), project.Name)
 	require.NoError(t, err)
 	assert.Equal(t, project, unchanged)
-	_, bindingErr := store.FederationBindingByProject(context.Background(), project.ID)
+	_, bindingErr := store.FederationBindingByProject(t.Context(), project.ID)
 	assert.ErrorIs(t, bindingErr, db.ErrNotFound)
 	localCredential, ok := credentials.get(project.UID)
 	require.True(t, ok)
@@ -1061,7 +1061,7 @@ func TestReconcileMappingAtomicRekeyFailureLeavesStandaloneStateRetryable(t *tes
 
 	credentials.rekeyErr = nil
 	secondErr := federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), func() { wakes++ },
 	)
 	require.NoError(t, secondErr)
@@ -1071,10 +1071,10 @@ func TestReconcileMappingAtomicRekeyFailureLeavesStandaloneStateRetryable(t *tes
 	assert.Empty(t, hub.rotationCalls)
 	assert.Equal(t, 1, wakes)
 
-	adopted, err := store.ProjectByName(context.Background(), project.Name)
+	adopted, err := store.ProjectByName(t.Context(), project.Name)
 	require.NoError(t, err)
 	assert.Equal(t, hubProjectUID, adopted.UID)
-	binding, err := store.FederationBindingByProject(context.Background(), adopted.ID)
+	binding, err := store.FederationBindingByProject(t.Context(), adopted.ID)
 	require.NoError(t, err)
 	assert.True(t, binding.Enabled)
 	assert.True(t, binding.PushEnabled)
@@ -1090,7 +1090,7 @@ func TestReconcileMappingAtomicRekeyFailureLeavesStandaloneStateRetryable(t *tes
 
 func TestReconcileMappingAtomicRekeyCrashBeforeAdoptionReusesHubKeyOnRestart(t *testing.T) {
 	baseStore := openReconcileStore(t)
-	project, err := baseStore.CreateProject(context.Background(), "spoke-project")
+	project, err := baseStore.CreateProject(t.Context(), "spoke-project")
 	require.NoError(t, err)
 	credentials := newFakeCredentialStore()
 	store := &failAdoptionLookupAfterRekeyStore{
@@ -1107,7 +1107,7 @@ func TestReconcileMappingAtomicRekeyCrashBeforeAdoptionReusesHubKeyOnRestart(t *
 	wakes := 0
 
 	firstErr := federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), func() { wakes++ },
 	)
 	require.Error(t, firstErr)
@@ -1119,10 +1119,10 @@ func TestReconcileMappingAtomicRekeyCrashBeforeAdoptionReusesHubKeyOnRestart(t *
 	assert.Empty(t, credentials.deleteCalls)
 	assert.Zero(t, wakes)
 
-	unchanged, err := baseStore.ProjectByName(context.Background(), project.Name)
+	unchanged, err := baseStore.ProjectByName(t.Context(), project.Name)
 	require.NoError(t, err)
 	assert.Equal(t, project, unchanged)
-	_, bindingErr := baseStore.FederationBindingByProject(context.Background(), project.ID)
+	_, bindingErr := baseStore.FederationBindingByProject(t.Context(), project.ID)
 	assert.ErrorIs(t, bindingErr, db.ErrNotFound)
 	_, ok := credentials.get(project.UID)
 	assert.False(t, ok)
@@ -1133,7 +1133,7 @@ func TestReconcileMappingAtomicRekeyCrashBeforeAdoptionReusesHubKeyOnRestart(t *
 	assert.True(t, rekeyed.ManagedByConfig)
 
 	secondErr := federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), func() { wakes++ },
 	)
 	require.NoError(t, secondErr)
@@ -1143,7 +1143,7 @@ func TestReconcileMappingAtomicRekeyCrashBeforeAdoptionReusesHubKeyOnRestart(t *
 	require.Len(t, credentials.rekeyCalls, 1)
 	assert.Equal(t, 1, wakes)
 
-	adopted, err := baseStore.ProjectByName(context.Background(), project.Name)
+	adopted, err := baseStore.ProjectByName(t.Context(), project.Name)
 	require.NoError(t, err)
 	assert.Equal(t, hubProjectUID, adopted.UID)
 	final, ok := credentials.get(hubProjectUID)
@@ -1326,18 +1326,18 @@ func TestReconcileMappingHubReturnedActorWinsCredentialAndBinding(t *testing.T) 
 	hub.enrollment.Actor = "token-bound-user"
 
 	err := federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 	require.NoError(t, err)
 
-	project, err := store.ProjectByName(context.Background(), "spoke-project")
+	project, err := store.ProjectByName(t.Context(), "spoke-project")
 	require.NoError(t, err)
 	credential, ok := credentials.get(project.UID)
 	require.True(t, ok)
 	assert.Equal(t, "token-bound-user", credential.Actor)
 	assert.Equal(t, "user-a", credential.RequestedActor)
-	binding, err := store.FederationBindingByProject(context.Background(), project.ID)
+	binding, err := store.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "token-bound-user", binding.Actor)
 }
@@ -1345,7 +1345,7 @@ func TestReconcileMappingHubReturnedActorWinsCredentialAndBinding(t *testing.T) 
 func TestReconcileMappingRejectsMalformedHubProjectUIDBeforeFederationMutation(t *testing.T) {
 	const malformedUID = "not-a-valid-hub-project-uid"
 	store := openReconcileStore(t)
-	project, err := store.CreateProject(context.Background(), "spoke-project")
+	project, err := store.CreateProject(t.Context(), "spoke-project")
 	require.NoError(t, err)
 	credentials := newFakeCredentialStore()
 	hub := newFakeHub()
@@ -1353,7 +1353,7 @@ func TestReconcileMappingRejectsMalformedHubProjectUIDBeforeFederationMutation(t
 	wakes := 0
 
 	err = federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), func() { wakes++ },
 	)
 	require.Error(t, err)
@@ -1366,10 +1366,10 @@ func TestReconcileMappingRejectsMalformedHubProjectUIDBeforeFederationMutation(t
 	assert.Empty(t, hub.rotationCalls)
 	assert.Zero(t, wakes)
 
-	unchanged, readErr := store.ProjectByName(context.Background(), project.Name)
+	unchanged, readErr := store.ProjectByName(t.Context(), project.Name)
 	require.NoError(t, readErr)
 	assert.Equal(t, project, unchanged)
-	_, bindingErr := store.FederationBindingByProject(context.Background(), project.ID)
+	_, bindingErr := store.FederationBindingByProject(t.Context(), project.ID)
 	assert.ErrorIs(t, bindingErr, db.ErrNotFound)
 }
 
@@ -1386,12 +1386,12 @@ func TestReconcileMappingRejectsInvalidEnrollmentActorWithoutStateOverwrite(t *t
 		t.Run(tt.name, func(t *testing.T) {
 			store := openReconcileStore(t)
 			project := createMatchingBoundProject(t, store)
-			binding, err := store.FederationBindingByProject(context.Background(), project.ID)
+			binding, err := store.FederationBindingByProject(t.Context(), project.ID)
 			require.NoError(t, err)
 			binding.PushEnabled = false
-			_, err = store.UpsertFederationBinding(context.Background(), binding)
+			_, err = store.UpsertFederationBinding(t.Context(), binding)
 			require.NoError(t, err)
-			beforeBinding, err := store.FederationBindingByProject(context.Background(), project.ID)
+			beforeBinding, err := store.FederationBindingByProject(t.Context(), project.ID)
 			require.NoError(t, err)
 
 			credentials := newFakeCredentialStore()
@@ -1403,7 +1403,7 @@ func TestReconcileMappingRejectsInvalidEnrollmentActorWithoutStateOverwrite(t *t
 			wakes := 0
 
 			err = federation.ReconcileMapping(
-				context.Background(), store, credentials, hub,
+				t.Context(), store, credentials, hub,
 				testCatalog(), testMapping(), func() { wakes++ },
 			)
 			require.Error(t, err)
@@ -1417,7 +1417,7 @@ func TestReconcileMappingRejectsInvalidEnrollmentActorWithoutStateOverwrite(t *t
 			assert.Empty(t, hub.enrollmentCalls)
 			assert.Zero(t, wakes)
 
-			afterBinding, readErr := store.FederationBindingByProject(context.Background(), project.ID)
+			afterBinding, readErr := store.FederationBindingByProject(t.Context(), project.ID)
 			require.NoError(t, readErr)
 			assert.Equal(t, beforeBinding, afterBinding)
 			final, ok := credentials.get(project.UID)
@@ -1434,14 +1434,14 @@ func TestReconcileMappingCrashAfterCredentialPersistenceReusesToken(t *testing.T
 	hub.enrollmentErr = errors.New("hub unavailable")
 
 	firstErr := federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 	require.Error(t, firstErr)
 	require.Len(t, hub.enrollmentCalls, 1)
 	firstToken := hub.enrollmentCalls[0].Token
 	assert.NotEmpty(t, firstToken)
-	project, err := store.ProjectByName(context.Background(), "spoke-project")
+	project, err := store.ProjectByName(t.Context(), "spoke-project")
 	require.NoError(t, err)
 	_, ok := credentials.get(project.UID)
 	assert.False(t, ok)
@@ -1451,7 +1451,7 @@ func TestReconcileMappingCrashAfterCredentialPersistenceReusesToken(t *testing.T
 
 	hub.enrollmentErr = nil
 	secondErr := federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 	require.NoError(t, secondErr)
@@ -1471,7 +1471,7 @@ func TestReconcileMappingLostEnrollmentResponseRepeatsExactToken(t *testing.T) {
 	hub.enrollmentErr = errors.New("response lost after enrollment commit")
 
 	firstErr := federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 	require.Error(t, firstErr)
@@ -1480,7 +1480,7 @@ func TestReconcileMappingLostEnrollmentResponseRepeatsExactToken(t *testing.T) {
 
 	hub.enrollmentErr = nil
 	secondErr := federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 	require.NoError(t, secondErr)
@@ -1501,7 +1501,7 @@ func TestReconcileMappingRetriesDurablePendingLeaveRevocation(t *testing.T) {
 	}
 
 	err := federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 
@@ -1516,7 +1516,7 @@ func TestReconcileMappingRetriesDurablePendingLeaveRevocation(t *testing.T) {
 
 	hub.revokeErr = nil
 	require.NoError(t, federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	))
 	assert.Equal(t, []int64{77, 77}, hub.revokeCalls)
@@ -1526,7 +1526,7 @@ func TestReconcileMappingRetriesDurablePendingLeaveRevocation(t *testing.T) {
 	assert.Equal(t, int64(77), cleared.PendingEnrollmentID)
 
 	require.NoError(t, federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	))
 	assert.Equal(t, []int64{77, 77, 77}, hub.revokeCalls)
@@ -1548,7 +1548,7 @@ func TestReconcileMappingPendingLeaveRejectsChangedCatalogOrigin(t *testing.T) {
 			catalog.URL = "https://replacement.example"
 
 			err := federation.ReconcileMapping(
-				context.Background(), store, credentials, hub,
+				t.Context(), store, credentials, hub,
 				catalog, testMapping(), nil,
 			)
 
@@ -1575,7 +1575,7 @@ func TestReconcileMappingRecoversPendingLeaveWithoutEnrollmentID(t *testing.T) {
 			if tc.bound {
 				createMatchingBoundProject(t, store)
 			} else {
-				_, err := store.CreateProject(context.Background(), "spoke-project")
+				_, err := store.CreateProject(t.Context(), "spoke-project")
 				require.NoError(t, err)
 			}
 			credentials := newFakeCredentialStore()
@@ -1586,7 +1586,7 @@ func TestReconcileMappingRecoversPendingLeaveWithoutEnrollmentID(t *testing.T) {
 			hub := newFakeHub()
 
 			require.NoError(t, federation.ReconcileMapping(
-				context.Background(), store, credentials, hub,
+				t.Context(), store, credentials, hub,
 				testCatalog(), testMapping(), nil,
 			))
 
@@ -1599,7 +1599,7 @@ func TestReconcileMappingRecoversPendingLeaveWithoutEnrollmentID(t *testing.T) {
 			assert.Equal(t, hub.enrollment.ID, retained.PendingEnrollmentID)
 
 			require.NoError(t, federation.ReconcileMapping(
-				context.Background(), store, credentials, hub,
+				t.Context(), store, credentials, hub,
 				testCatalog(), testMapping(), nil,
 			))
 			assert.Len(t, hub.enrollmentCalls, tc.wantEnsures)
@@ -1824,7 +1824,7 @@ func TestReconcileMappingMissingCredentialRotatesEnrollment(t *testing.T) {
 	}
 
 	err := federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), func() { wakes++ },
 	)
 	require.NoError(t, err)
@@ -1847,7 +1847,7 @@ func TestReconcileMappingIncompleteReplacementReplaysRotation(t *testing.T) {
 	hub.rotationErr = errors.New("response lost after rotation commit")
 
 	firstErr := federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 	require.Error(t, firstErr)
@@ -1860,7 +1860,7 @@ func TestReconcileMappingIncompleteReplacementReplaysRotation(t *testing.T) {
 
 	hub.rotationErr = nil
 	secondErr := federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 	require.NoError(t, secondErr)
@@ -1880,7 +1880,7 @@ func TestReconcileMappingCredentialFailureInsideReplicaServiceStaysClassified(t 
 	hub := newFakeHub()
 
 	err := federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 	require.Error(t, err)
@@ -1900,7 +1900,7 @@ func TestReconcileMappingMatchingBindingAndCredentialIsImmediatelyConverged(t *t
 	wakes := 0
 
 	err := federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), func() { wakes++ },
 	)
 	require.NoError(t, err)
@@ -1920,7 +1920,7 @@ func TestReconcileMappingRejectsPathOnlyCatalogChange(t *testing.T) {
 	catalog.URL = "https://hub.example/replacement-prefix"
 
 	err := federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		catalog, testMapping(), nil,
 	)
 
@@ -1941,7 +1941,7 @@ func TestReconcileMappingHTTPSAllowInsecureUsesEffectiveFalse(t *testing.T) {
 	catalog.AllowInsecure = true
 
 	err := federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		catalog, testMapping(), nil,
 	)
 
@@ -1952,7 +1952,7 @@ func TestReconcileMappingHTTPSAllowInsecureUsesEffectiveFalse(t *testing.T) {
 	stored, found := credentials.get(project.UID)
 	require.True(t, found)
 	assert.False(t, stored.AllowInsecure)
-	binding, err := store.FederationBindingByProject(context.Background(), project.ID)
+	binding, err := store.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, err)
 	assert.False(t, binding.AllowInsecure)
 }
@@ -1960,10 +1960,10 @@ func TestReconcileMappingHTTPSAllowInsecureUsesEffectiveFalse(t *testing.T) {
 func TestReconcileMappingAcceptsLegacyHTTPSAllowInsecure(t *testing.T) {
 	store := openReconcileStore(t)
 	project := createMatchingBoundProject(t, store)
-	binding, err := store.FederationBindingByProject(context.Background(), project.ID)
+	binding, err := store.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, err)
 	binding.AllowInsecure = true
-	_, err = store.UpsertFederationBinding(context.Background(), binding)
+	_, err = store.UpsertFederationBinding(t.Context(), binding)
 	require.NoError(t, err)
 	credentials := newFakeCredentialStore()
 	legacy := managedCredential()
@@ -1972,7 +1972,7 @@ func TestReconcileMappingAcceptsLegacyHTTPSAllowInsecure(t *testing.T) {
 	hub := newFakeHub()
 
 	err = federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 
@@ -1993,17 +1993,17 @@ func TestReconcileMappingNewHTTPSCredentialStoresEffectiveAllowInsecure(t *testi
 	catalog.AllowInsecure = true
 
 	err := federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		catalog, testMapping(), nil,
 	)
 
 	require.NoError(t, err)
-	project, err := store.ProjectByName(context.Background(), "spoke-project")
+	project, err := store.ProjectByName(t.Context(), "spoke-project")
 	require.NoError(t, err)
 	stored, found := credentials.get(project.UID)
 	require.True(t, found)
 	assert.False(t, stored.AllowInsecure)
-	binding, err := store.FederationBindingByProject(context.Background(), project.ID)
+	binding, err := store.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, err)
 	assert.False(t, binding.AllowInsecure)
 }
@@ -2011,10 +2011,10 @@ func TestReconcileMappingNewHTTPSCredentialStoresEffectiveAllowInsecure(t *testi
 func TestReconcileMappingPushRepairDoesNotRotateEnrollment(t *testing.T) {
 	store := openReconcileStore(t)
 	project := createMatchingBoundProject(t, store)
-	binding, err := store.FederationBindingByProject(context.Background(), project.ID)
+	binding, err := store.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, err)
 	binding.PushEnabled = false
-	_, err = store.UpsertFederationBinding(context.Background(), binding)
+	_, err = store.UpsertFederationBinding(t.Context(), binding)
 	require.NoError(t, err)
 
 	credentials := newFakeCredentialStore()
@@ -2024,14 +2024,14 @@ func TestReconcileMappingPushRepairDoesNotRotateEnrollment(t *testing.T) {
 	wakes := 0
 
 	err = federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), func() { wakes++ },
 	)
 
 	require.NoError(t, err)
 	assert.Empty(t, hub.enrollmentCalls)
 	assert.Empty(t, hub.rotationCalls)
-	repaired, err := store.FederationBindingByProject(context.Background(), project.ID)
+	repaired, err := store.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, err)
 	assert.True(t, repaired.PushEnabled)
 	assert.Equal(t, original.Actor, repaired.Actor)
@@ -2057,11 +2057,11 @@ func TestReconcileMappingIncompleteBindingWithValidCredentialRepairsLocally(t *t
 		t.Run(tt.name, func(t *testing.T) {
 			store := openReconcileStore(t)
 			project := createMatchingBoundProject(t, store)
-			binding, err := store.FederationBindingByProject(context.Background(), project.ID)
+			binding, err := store.FederationBindingByProject(t.Context(), project.ID)
 			require.NoError(t, err)
 			binding.Enabled = tt.enabled
 			binding.PushEnabled = tt.pushEnabled
-			_, err = store.UpsertFederationBinding(context.Background(), binding)
+			_, err = store.UpsertFederationBinding(t.Context(), binding)
 			require.NoError(t, err)
 
 			credentials := newFakeCredentialStore()
@@ -2071,14 +2071,14 @@ func TestReconcileMappingIncompleteBindingWithValidCredentialRepairsLocally(t *t
 			wakes := 0
 
 			err = federation.ReconcileMapping(
-				context.Background(), store, credentials, hub,
+				t.Context(), store, credentials, hub,
 				testCatalog(), testMapping(), func() { wakes++ },
 			)
 			require.NoError(t, err)
 			assert.Empty(t, hub.enrollmentCalls)
 			assert.Empty(t, hub.rotationCalls)
 
-			repaired, err := store.FederationBindingByProject(context.Background(), project.ID)
+			repaired, err := store.FederationBindingByProject(t.Context(), project.ID)
 			require.NoError(t, err)
 			assert.True(t, repaired.Enabled)
 			assert.True(t, repaired.PushEnabled)
@@ -2108,7 +2108,7 @@ func TestReconcileMappingMatchingManualCredentialBecomesManaged(t *testing.T) {
 	wakes := 0
 
 	err := federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), func() { wakes++ },
 	)
 	require.NoError(t, err)
@@ -2139,11 +2139,11 @@ func TestReconcileMappingIncompleteBindingWithManualCredentialAdoptsAndRepairs(t
 		t.Run(tt.name, func(t *testing.T) {
 			store := openReconcileStore(t)
 			project := createMatchingBoundProject(t, store)
-			binding, err := store.FederationBindingByProject(context.Background(), project.ID)
+			binding, err := store.FederationBindingByProject(t.Context(), project.ID)
 			require.NoError(t, err)
 			binding.Enabled = tt.enabled
 			binding.PushEnabled = tt.pushEnabled
-			_, err = store.UpsertFederationBinding(context.Background(), binding)
+			_, err = store.UpsertFederationBinding(t.Context(), binding)
 			require.NoError(t, err)
 
 			credentials := newFakeCredentialStore()
@@ -2159,14 +2159,14 @@ func TestReconcileMappingIncompleteBindingWithManualCredentialAdoptsAndRepairs(t
 			wakes := 0
 
 			err = federation.ReconcileMapping(
-				context.Background(), store, credentials, hub,
+				t.Context(), store, credentials, hub,
 				testCatalog(), testMapping(), func() { wakes++ },
 			)
 			require.NoError(t, err)
 			assert.Empty(t, hub.enrollmentCalls)
 			assert.Empty(t, hub.rotationCalls)
 
-			repaired, err := store.FederationBindingByProject(context.Background(), project.ID)
+			repaired, err := store.FederationBindingByProject(t.Context(), project.ID)
 			require.NoError(t, err)
 			assert.True(t, repaired.Enabled)
 			assert.True(t, repaired.PushEnabled)
@@ -2190,7 +2190,7 @@ func TestReconcileMappingManagedCredentialEmptyBindingActorRepairs(t *testing.T)
 	store := openReconcileStore(t)
 	project := createMatchingBoundProject(t, store)
 	_, err := store.ExecContext(
-		context.Background(),
+		t.Context(),
 		`UPDATE federation_bindings SET bound_actor = '' WHERE project_id = ?`,
 		project.ID,
 	)
@@ -2203,14 +2203,14 @@ func TestReconcileMappingManagedCredentialEmptyBindingActorRepairs(t *testing.T)
 	wakes := 0
 
 	err = federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), func() { wakes++ },
 	)
 	require.NoError(t, err)
 	assert.Empty(t, hub.enrollmentCalls)
 	assert.Empty(t, hub.rotationCalls)
 
-	repaired, err := store.FederationBindingByProject(context.Background(), project.ID)
+	repaired, err := store.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, err)
 	assert.True(t, repaired.Enabled)
 	assert.True(t, repaired.PushEnabled)
@@ -2236,7 +2236,7 @@ func TestReconcileMappingRejectsManagedMetadataMismatchRegardlessOfBindingComple
 			name: "binding disabled",
 			mutate: func(t *testing.T, store *sqlitestore.Store, binding db.FederationBinding) {
 				binding.Enabled = false
-				_, err := store.UpsertFederationBinding(context.Background(), binding)
+				_, err := store.UpsertFederationBinding(t.Context(), binding)
 				require.NoError(t, err)
 			},
 		},
@@ -2244,7 +2244,7 @@ func TestReconcileMappingRejectsManagedMetadataMismatchRegardlessOfBindingComple
 			name: "push disabled",
 			mutate: func(t *testing.T, store *sqlitestore.Store, binding db.FederationBinding) {
 				binding.PushEnabled = false
-				_, err := store.UpsertFederationBinding(context.Background(), binding)
+				_, err := store.UpsertFederationBinding(t.Context(), binding)
 				require.NoError(t, err)
 			},
 		},
@@ -2252,7 +2252,7 @@ func TestReconcileMappingRejectsManagedMetadataMismatchRegardlessOfBindingComple
 			name: "actor missing",
 			mutate: func(t *testing.T, store *sqlitestore.Store, binding db.FederationBinding) {
 				_, err := store.ExecContext(
-					context.Background(),
+					t.Context(),
 					`UPDATE federation_bindings SET bound_actor = '' WHERE project_id = ?`,
 					binding.ProjectID,
 				)
@@ -2265,10 +2265,10 @@ func TestReconcileMappingRejectsManagedMetadataMismatchRegardlessOfBindingComple
 		t.Run(tt.name, func(t *testing.T) {
 			store := openReconcileStore(t)
 			project := createMatchingBoundProject(t, store)
-			binding, err := store.FederationBindingByProject(context.Background(), project.ID)
+			binding, err := store.FederationBindingByProject(t.Context(), project.ID)
 			require.NoError(t, err)
 			tt.mutate(t, store, binding)
-			before, err := store.FederationBindingByProject(context.Background(), project.ID)
+			before, err := store.FederationBindingByProject(t.Context(), project.ID)
 			require.NoError(t, err)
 
 			credentials := newFakeCredentialStore()
@@ -2279,7 +2279,7 @@ func TestReconcileMappingRejectsManagedMetadataMismatchRegardlessOfBindingComple
 			wakes := 0
 
 			err = federation.ReconcileMapping(
-				context.Background(), store, credentials, hub,
+				t.Context(), store, credentials, hub,
 				testCatalog(), testMapping(), func() { wakes++ },
 			)
 			require.Error(t, err)
@@ -2290,7 +2290,7 @@ func TestReconcileMappingRejectsManagedMetadataMismatchRegardlessOfBindingComple
 			assert.Empty(t, hub.rotationCalls)
 			assert.Zero(t, wakes)
 
-			after, readErr := store.FederationBindingByProject(context.Background(), project.ID)
+			after, readErr := store.FederationBindingByProject(t.Context(), project.ID)
 			require.NoError(t, readErr)
 			assert.Equal(t, before, after)
 			final, ok := credentials.get(project.UID)
@@ -2302,7 +2302,7 @@ func TestReconcileMappingRejectsManagedMetadataMismatchRegardlessOfBindingComple
 
 func TestReconcileMappingRejectsNonmatchingManualCredentialWithoutOverwrite(t *testing.T) {
 	store := openReconcileStore(t)
-	project, err := store.CreateProject(context.Background(), "spoke-project")
+	project, err := store.CreateProject(t.Context(), "spoke-project")
 	require.NoError(t, err)
 	credentials := newFakeCredentialStore()
 	manual := managedCredential()
@@ -2313,7 +2313,7 @@ func TestReconcileMappingRejectsNonmatchingManualCredentialWithoutOverwrite(t *t
 	hub := newFakeHub()
 
 	err = federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 	require.Error(t, err)
@@ -2327,13 +2327,13 @@ func TestReconcileMappingRejectsNonmatchingManualCredentialWithoutOverwrite(t *t
 	assert.Empty(t, hub.rotationCalls)
 	assert.Equal(t, 1, hub.resolveCalls)
 	assert.Zero(t, hub.ensureCalls)
-	_, bindingErr := store.FederationBindingByProject(context.Background(), project.ID)
+	_, bindingErr := store.FederationBindingByProject(t.Context(), project.ID)
 	assert.ErrorIs(t, bindingErr, db.ErrNotFound)
 }
 
 func TestReconcileMappingRejectsHubKeyCredentialMismatchBeforeEnable(t *testing.T) {
 	store := openReconcileStore(t)
-	_, err := store.CreateProject(context.Background(), "spoke-project")
+	_, err := store.CreateProject(t.Context(), "spoke-project")
 	require.NoError(t, err)
 	credentials := newFakeCredentialStore()
 	mismatched := managedCredential()
@@ -2342,7 +2342,7 @@ func TestReconcileMappingRejectsHubKeyCredentialMismatchBeforeEnable(t *testing.
 	hub := newFakeHub()
 
 	err = federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 	require.Error(t, err)
@@ -2363,7 +2363,7 @@ func TestReconcileMappingRejectsBindingConflictsWithoutMutation(t *testing.T) {
 		{
 			name: "role",
 			mutate: func(t *testing.T, store *sqlitestore.Store, project db.Project) {
-				_, err := store.EnableProjectFederation(context.Background(), project.ID, "identity-user")
+				_, err := store.EnableProjectFederation(t.Context(), project.ID, "identity-user")
 				require.NoError(t, err)
 			},
 		},
@@ -2385,10 +2385,10 @@ func TestReconcileMappingRejectsBindingConflictsWithoutMutation(t *testing.T) {
 			wantResolveCalls: 1,
 			mutate: func(t *testing.T, store *sqlitestore.Store, project db.Project) {
 				upsertSpokeBinding(t, store, project, "https://hub.example", hubProjectUID)
-				binding, err := store.FederationBindingByProject(context.Background(), project.ID)
+				binding, err := store.FederationBindingByProject(t.Context(), project.ID)
 				require.NoError(t, err)
 				binding.HubProjectID = 99
-				_, err = store.UpsertFederationBinding(context.Background(), binding)
+				_, err = store.UpsertFederationBinding(t.Context(), binding)
 				require.NoError(t, err)
 			},
 		},
@@ -2397,22 +2397,22 @@ func TestReconcileMappingRejectsBindingConflictsWithoutMutation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			store := openReconcileStore(t)
-			project, err := store.CreateProject(context.Background(), "spoke-project")
+			project, err := store.CreateProject(t.Context(), "spoke-project")
 			require.NoError(t, err)
 			tt.mutate(t, store, project)
-			before, err := store.FederationBindingByProject(context.Background(), project.ID)
+			before, err := store.FederationBindingByProject(t.Context(), project.ID)
 			require.NoError(t, err)
 			credentials := newFakeCredentialStore()
 			hub := newFakeHub()
 			wakes := 0
 
 			err = federation.ReconcileMapping(
-				context.Background(), store, credentials, hub,
+				t.Context(), store, credentials, hub,
 				testCatalog(), testMapping(), func() { wakes++ },
 			)
 			require.Error(t, err)
 			assert.ErrorIs(t, err, federation.ErrBindingConflict)
-			after, readErr := store.FederationBindingByProject(context.Background(), project.ID)
+			after, readErr := store.FederationBindingByProject(t.Context(), project.ID)
 			require.NoError(t, readErr)
 			assert.Equal(t, before, after)
 			assert.Empty(t, credentials.storeCalls)
@@ -2429,7 +2429,7 @@ func TestReconcileMappingRejectsBindingConflictsWithoutMutation(t *testing.T) {
 func TestReconcileMappingRecreatedSameNameHubProjectUIDConflicts(t *testing.T) {
 	store := openReconcileStore(t)
 	project := createMatchingBoundProject(t, store)
-	before, err := store.FederationBindingByProject(context.Background(), project.ID)
+	before, err := store.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, err)
 	credentials := newFakeCredentialStore()
 	credentials.credentials[project.UID] = managedCredential()
@@ -2437,12 +2437,12 @@ func TestReconcileMappingRecreatedSameNameHubProjectUIDConflicts(t *testing.T) {
 	hub.project.UID = recreatedProjectUID
 
 	err = federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, federation.ErrBindingConflict)
-	after, readErr := store.FederationBindingByProject(context.Background(), project.ID)
+	after, readErr := store.FederationBindingByProject(t.Context(), project.ID)
 	require.NoError(t, readErr)
 	assert.Equal(t, before, after)
 	assert.Empty(t, credentials.storeCalls)
@@ -2465,7 +2465,7 @@ func TestReconcileMappingBoundProjectMissingOnHubDoesNotCreate(t *testing.T) {
 	}
 
 	err := federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 	require.Error(t, err)
@@ -2503,7 +2503,7 @@ func TestReconcileMappingStaleHubUIDReservationConflicts(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			store := openReconcileStore(t)
-			project, err := store.CreateProject(context.Background(), "spoke-project")
+			project, err := store.CreateProject(t.Context(), "spoke-project")
 			require.NoError(t, err)
 			credentials := newFakeCredentialStore()
 			pending := managedCredential()
@@ -2514,7 +2514,7 @@ func TestReconcileMappingStaleHubUIDReservationConflicts(t *testing.T) {
 			tt.configure(hub)
 
 			err = federation.ReconcileMapping(
-				context.Background(), store, credentials, hub,
+				t.Context(), store, credentials, hub,
 				testCatalog(), testMapping(), nil,
 			)
 
@@ -2524,18 +2524,18 @@ func TestReconcileMappingStaleHubUIDReservationConflicts(t *testing.T) {
 			assert.Empty(t, hub.enrollmentCalls)
 			assert.Empty(t, hub.rotationCalls)
 			assert.Empty(t, credentials.managedReserveCalls)
-			unchanged, readErr := store.ProjectByName(context.Background(), project.Name)
+			unchanged, readErr := store.ProjectByName(t.Context(), project.Name)
 			require.NoError(t, readErr)
 			assert.Equal(t, project.UID, unchanged.UID)
 			_, bindingErr := store.FederationBindingByProject(
-				context.Background(), project.ID,
+				t.Context(), project.ID,
 			)
 			assert.ErrorIs(t, bindingErr, db.ErrNotFound)
 			final, found := credentials.get(hubProjectUID)
 			require.True(t, found)
 			assert.Equal(t, pending, final)
 			_, newFound, readErr := credentials.FederationCredential(
-				context.Background(), recreatedProjectUID,
+				t.Context(), recreatedProjectUID,
 			)
 			require.NoError(t, readErr)
 			assert.False(t, newFound)
@@ -2545,15 +2545,15 @@ func TestReconcileMappingStaleHubUIDReservationConflicts(t *testing.T) {
 
 func TestReconcileMappingHubUIDOwnedByAnotherLocalProjectConflictsBeforeEnable(t *testing.T) {
 	store := openReconcileStore(t)
-	_, err := store.CreateProjectWithUID(context.Background(), "other-project", hubProjectUID)
+	_, err := store.CreateProjectWithUID(t.Context(), "other-project", hubProjectUID)
 	require.NoError(t, err)
-	local, err := store.CreateProject(context.Background(), "spoke-project")
+	local, err := store.CreateProject(t.Context(), "spoke-project")
 	require.NoError(t, err)
 	credentials := newFakeCredentialStore()
 	hub := newFakeHub()
 
 	err = federation.ReconcileMapping(
-		context.Background(), store, credentials, hub,
+		t.Context(), store, credentials, hub,
 		testCatalog(), testMapping(), nil,
 	)
 	require.Error(t, err)
@@ -2563,7 +2563,7 @@ func TestReconcileMappingHubUIDOwnedByAnotherLocalProjectConflictsBeforeEnable(t
 	assert.Empty(t, hub.enrollmentCalls)
 	assert.Empty(t, hub.rotationCalls)
 	assert.Empty(t, credentials.managedReserveCalls)
-	unchanged, readErr := store.ProjectByName(context.Background(), local.Name)
+	unchanged, readErr := store.ProjectByName(t.Context(), local.Name)
 	require.NoError(t, readErr)
 	assert.Equal(t, local.UID, unchanged.UID)
 }
@@ -2582,7 +2582,7 @@ func TestFederationConfigReconcilerProcessesDueMappingsInConfigOrder(t *testing.
 		})
 		reconciler := newTestReconciler(t, clock, factory, ioDiscardLogger(),
 			schedulerTarget("hub-a"), schedulerTarget("hub-b"), schedulerTarget("hub-c"))
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		done := runReconciler(ctx, t, reconciler)
 		defer func() {
 			cancel()
@@ -2640,14 +2640,14 @@ func TestFederationConfigReconcilerDeliversExactCreatedProjectEvent(t *testing.T
 				child, admitted := fork()
 				require.True(t, admitted)
 				child.Release()
-				persisted, err := store.EventsAfter(context.Background(), db.EventsAfterParams{
+				persisted, err := store.EventsAfter(t.Context(), db.EventsAfterParams{
 					ProjectID: event.ProjectID, Limit: 10,
 				})
 				events <- delivery{event: event, persisted: persisted, forked: true, err: err}
 			},
 			Logger: ioDiscardLogger(),
 		})
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		done := runReconciler(ctx, t, reconciler)
 		defer func() {
 			cancel()
@@ -2703,7 +2703,7 @@ func TestFederationConfigReconcilerMaintainsIndependentBackoffAndQuietsSuccess(t
 		})
 		reconciler := newTestReconciler(t, clock, factory, ioDiscardLogger(),
 			schedulerTarget("hub-a"), schedulerTarget("hub-b"))
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		done := runReconciler(ctx, t, reconciler)
 		defer func() {
 			cancel()
@@ -2765,7 +2765,7 @@ func TestFederationConfigReconcilerRecordsSuccessAtCompletion(t *testing.T) {
 			Clock:  clock,
 			Logger: ioDiscardLogger(),
 		})
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		done := runReconciler(ctx, t, reconciler)
 		defer func() {
 			cancel()
@@ -2788,7 +2788,7 @@ func TestFederationConfigReconcilerCapsBackoffAtFiveMinutes(t *testing.T) {
 			"hub-a": repeatError(federation.ErrHubUnavailable, 20),
 		})
 		reconciler := newTestReconciler(t, clock, factory, ioDiscardLogger(), schedulerTarget("hub-a"))
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		done := runReconciler(ctx, t, reconciler)
 		defer func() {
 			cancel()
@@ -2845,7 +2845,7 @@ func TestFederationConfigReconcilerRetriesEveryErrorCategory(t *testing.T) {
 					"hub-a": {tt.err, nil},
 				})
 				reconciler := newTestReconciler(t, clock, factory, ioDiscardLogger(), schedulerTarget("hub-a"))
-				ctx, cancel := context.WithCancel(context.Background())
+				ctx, cancel := context.WithCancel(t.Context())
 				done := runReconciler(ctx, t, reconciler)
 				defer func() {
 					cancel()
@@ -2883,7 +2883,7 @@ func TestClassifyReconciliationErrorUsesInternalForUnknown(t *testing.T) {
 			"hub-a": {errors.New("planted internal failure")},
 		})
 		reconciler := newTestReconciler(t, clock, factory, ioDiscardLogger(), schedulerTarget("hub-a"))
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		done := runReconciler(ctx, t, reconciler)
 		defer func() {
 			cancel()
@@ -2906,7 +2906,7 @@ func TestFederationConfigReconcilerCancellationStopsTimerAndRun(t *testing.T) {
 			"hub-a": {federation.ErrHubUnavailable},
 		})
 		reconciler := newTestReconciler(t, clock, factory, ioDiscardLogger(), schedulerTarget("hub-a"))
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		done := runReconciler(ctx, t, reconciler)
 		defer func() {
 			cancel()
@@ -2952,7 +2952,7 @@ func TestFederationConfigReconcilerLogsOnlySanitizedTransitions(t *testing.T) {
 		target.Catalog.Token = "catalog-secret"
 		target.Mapping.Actor = "sensitive-actor"
 		reconciler := newTestReconciler(t, clock, factory, logger, target)
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		done := runReconciler(ctx, t, reconciler)
 		defer func() {
 			cancel()
@@ -3012,7 +3012,7 @@ func TestReconcilerTransitionLogsIncludeMappingCoordinatesWithoutSecrets(t *test
 		}
 		secondary := schedulerTarget("secondary")
 		reconciler := newTestReconciler(t, clock, factory, logger, primary, secondary)
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		done := runReconciler(ctx, t, reconciler)
 		defer func() {
 			cancel()
@@ -3301,7 +3301,7 @@ func managedCredential() config.FederationCredential {
 
 func createMatchingBoundProject(t *testing.T, store *sqlitestore.Store) db.Project {
 	t.Helper()
-	project, err := store.CreateProjectWithUID(context.Background(), "spoke-project", hubProjectUID)
+	project, err := store.CreateProjectWithUID(t.Context(), "spoke-project", hubProjectUID)
 	require.NoError(t, err)
 	upsertSpokeBinding(t, store, project, "https://HUB.EXAMPLE:443", hubProjectUID)
 	return project
@@ -3311,7 +3311,7 @@ func upsertSpokeBinding(
 	t *testing.T, store *sqlitestore.Store, project db.Project, hubURL, projectUID string,
 ) {
 	t.Helper()
-	_, err := store.UpsertFederationBinding(context.Background(), db.FederationBinding{
+	_, err := store.UpsertFederationBinding(t.Context(), db.FederationBinding{
 		ProjectID: project.ID, Role: db.FederationRoleSpoke,
 		HubURL: hubURL, HubProjectID: 42, HubProjectUID: projectUID,
 		ReplayHorizonEventID: 9, PullCursorEventID: 8,
@@ -3324,7 +3324,7 @@ func openReconcileStore(t *testing.T) *sqlitestore.Store {
 	t.Helper()
 	unsetReconcileAuthToken(t)
 	t.Setenv("KATA_HOME", t.TempDir())
-	store, err := sqlitestore.Open(context.Background(), filepath.Join(t.TempDir(), "kata.db"))
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, store.Close()) })
 	return store

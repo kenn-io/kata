@@ -1,7 +1,6 @@
 package issuesync
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -32,12 +31,12 @@ func TestProgressClaimOwnership(t *testing.T) {
 
 func TestProgressReporterIsContextScoped(t *testing.T) {
 	var completed int
-	ctx := WithProgressReporter(context.Background(), func(phase string, count, total int) {
+	ctx := WithProgressReporter(t.Context(), func(phase string, count, total int) {
 		require.Equal(t, "pages", phase)
 		require.Zero(t, total)
 		completed = count
 	})
 	ReportProgress(ctx, "pages", 20, 0)
-	ReportProgress(context.Background(), "pages", 999, 0)
+	ReportProgress(t.Context(), "pages", 999, 0)
 	require.Equal(t, 20, completed)
 }

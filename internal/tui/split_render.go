@@ -117,9 +117,6 @@ func renderSplitInfoLine(width int, m Model) string {
 // pane's status text or any active toast/SSE hint.
 func splitInfoBody(m Model) string {
 	chrome := m.chrome()
-	if chrome.input.kind.isCommandBar() {
-		return renderInfoBar(chrome.input, titleBarInnerWidth(m.width))
-	}
 	if chrome.input.kind.isPanelPrompt() {
 		return renderInfoPrompt(chrome.input, titleBarInnerWidth(m.width))
 	}

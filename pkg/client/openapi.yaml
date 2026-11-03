@@ -818,6 +818,8 @@ components:
           $ref: "#/components/schemas/RelayEnrollmentOptions"
         spoke_instance_uid:
           type: string
+        spoke_name:
+          type: string
         token:
           type: string
       required:
@@ -1981,6 +1983,8 @@ components:
           type: string
         origin_instance_uid:
           type: string
+        origin_spoke_name:
+          type: string
         payload: {}
         project_id:
           format: int64
@@ -2460,6 +2464,8 @@ components:
           type: string
         spoke_instance_uid:
           type: string
+        spoke_name:
+          type: string
         token:
           type: string
         updated_at:
@@ -2829,6 +2835,15 @@ components:
         - status
         - method
         - active_relay_enrollments
+      type: object
+    FederationSpokeNameOut:
+      properties:
+        spoke_instance_uid:
+          type: string
+        spoke_name:
+          type: string
+      required:
+        - spoke_instance_uid
       type: object
     FederationStatusBody:
       properties:
@@ -4708,6 +4723,9 @@ components:
         baseline_through_event_id:
           format: int64
           type: integer
+        native_cron_writes:
+          description: Supports native recurring job writes using direct project-scoped push enrollments.
+          type: boolean
         project_id:
           format: int64
           type: integer
@@ -6160,6 +6178,16 @@ components:
         - complete
         - truncated
       type: object
+    SetFederationSpokeNameRequestBody:
+      additionalProperties: false
+      properties:
+        name:
+          description: "Lowercase spoke name: a letter, then up to 31 lowercase letters, digits or hyphens."
+          minLength: 1
+          type: string
+      required:
+        - name
+      type: object
     SetProjectAccessRequestBody:
       additionalProperties: false
       properties:
@@ -6986,7 +7014,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.36.0
+  version: 0.37.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -7463,6 +7491,57 @@ paths:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
       summary: Rotate a federation enrollment
+  /api/v1/federation/enrollments/spokes/{spoke_instance_uid}/name:
+    delete:
+      operationId: clearFederationSpokeName
+      parameters:
+        - in: path
+          name: spoke_instance_uid
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationSpokeNameOut"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+      summary: Clear an enrolled spoke's hub-local name
+    put:
+      operationId: setFederationSpokeName
+      parameters:
+        - in: path
+          name: spoke_instance_uid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetFederationSpokeNameRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FederationSpokeNameOut"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+      summary: Set an enrolled spoke's hub-local name
   /api/v1/federation/enrollments/{enrollment_id}/revoke:
     post:
       operationId: revokeFederationEnrollment
@@ -8223,6 +8302,10 @@ paths:
     post:
       operationId: createCronJob
       parameters:
+        - in: header
+          name: Authorization
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true
@@ -8252,6 +8335,10 @@ paths:
     delete:
       operationId: archiveCronJob
       parameters:
+        - in: header
+          name: Authorization
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true
@@ -8312,6 +8399,10 @@ paths:
     put:
       operationId: replaceCronJob
       parameters:
+        - in: header
+          name: Authorization
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true
@@ -8346,6 +8437,10 @@ paths:
     post:
       operationId: restoreCronJob
       parameters:
+        - in: header
+          name: Authorization
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true
@@ -11298,6 +11393,10 @@ paths:
           schema:
             format: int64
             type: integer
+        - in: header
+          name: If-Match
+          schema:
+            type: string
       requestBody:
         content:
           application/json:

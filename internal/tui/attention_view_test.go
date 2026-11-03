@@ -482,6 +482,14 @@ func TestAttentionProjectsOriginInitializesListBeforePaneNavigation(t *testing.T
 			},
 		},
 		{
+			name: "mouse click search",
+			view: viewList,
+			act: func(m Model) (Model, tea.Cmd) {
+				m.opts.Mouse = true
+				return updateModel(m, mouseLeftClick(4, 2))
+			},
+		},
+		{
 			name: "mouse wheel list pane",
 			view: viewDetail,
 			act: func(m Model) (Model, tea.Cmd) {

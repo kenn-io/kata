@@ -98,7 +98,7 @@ func TestListProjectsRetainsInboxDesignation(t *testing.T) {
 		}})
 	})
 
-	projects, err := client.ListProjects(context.Background())
+	projects, err := client.ListProjects(t.Context())
 	require.NoError(t, err)
 	require.Len(t, projects, 3)
 	selected, ok := designatedInboxProject(projects)
@@ -520,7 +520,7 @@ func TestInboxFilterFormOmitsStatusAxis(t *testing.T) {
 	for _, id := range []fieldID{fieldOwner, fieldSearch, fieldLabels} {
 		require.NotNil(t, m.input.field(id), "Inbox filter form must preserve the %v axis", id)
 	}
-	frame := stripANSI(renderCenteredForm(m.input, 120, 30))
+	frame := stripANSI(renderCenteredForm(m.input, 120, 30, time.Time{}))
 	assertNotContains(t, frame, "closed", "Inbox filter form must not offer closed")
 	assertContains(t, frame, "Owner", "Inbox filter form must keep the owner axis")
 	assertContains(t, frame, "Search", "Inbox filter form must keep the search axis")
@@ -903,6 +903,43 @@ func TestInboxPendingEntryCancelledByForegroundKeys(t *testing.T) {
 	require.False(t, m.scope.inbox, "a cancelled entry's late reply must not open the Inbox")
 	require.Nil(t, m.inboxReturn)
 	require.Nil(t, cmd)
+}
+
+func TestMouseSearchCancelsPendingInbox(t *testing.T) {
+	for _, tab := range []rune{'1', '2'} {
+		t.Run(string(tab), func(t *testing.T) {
+			inbox := ProjectSummary{ID: 2, Name: "example-project"}
+			inbox.Metadata.Role = jsontext.Value(`"inbox"`)
+			m := resizeModel(newTestModel(), 80, 24)
+			m.opts.Mouse = true
+			m.api = &inboxTestAPI{projects: []ProjectSummary{inbox}}
+			m.scope = homedScope(7, "spoke-project")
+			m.list.issues = makeTestIssues(2)
+			m.list.filter.Search = "row"
+			m.list.cursor = 1
+			m.list = m.list.syncSelection(m.list.visibleRows())
+			m = sendRune(m, tab)
+			m, lookup := updateModel(m, keyRune('I'))
+			require.NotNil(t, lookup)
+			reply := lookup()
+			row := 1
+			if tab == '2' {
+				row = 2
+			}
+			m, _ = updateModel(m, mouseLeftClick(4, row))
+			m, cmd := updateModel(m, reply)
+			require.Equal(t, int64(7), m.scope.projectID, "a delayed Inbox reply must not change the search project")
+			require.Nil(t, cmd)
+			if tab == '1' {
+				require.Equal(t, inputSearchBar, m.input.kind)
+			} else {
+				require.True(t, m.cron.filtering)
+			}
+			m = sendKey(m, tea.KeyEsc)
+			require.Equal(t, "row", m.list.filter.Search)
+			require.Equal(t, "01TEST-r002", m.list.selectedUID)
+		})
+	}
 }
 
 // Inbox keeps the project chosen on entry. Events still refresh its tasks;

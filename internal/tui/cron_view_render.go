@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattn/go-runewidth"
 	"go.kenn.io/kata/pkg/client/generated"
 	"go.kenn.io/kit/tui/helplayout"
 	"go.kenn.io/kit/tui/termtext"
@@ -360,6 +361,9 @@ func cronKeyRows(m Model) []helplayout.HelpItem {
 	if len(m.cron.stack) == 0 {
 		rows = slices.Insert(rows, 2, helplayout.HelpItem{Key: "/", Description: "filter"})
 	}
+	if m.cronJobsScope() {
+		rows = slices.Insert(rows, 3, helplayout.HelpItem{Key: "n/e", Description: "new/edit"})
+	}
 	return rows
 }
 
@@ -397,19 +401,30 @@ func renderCron(m Model) string {
 		}
 	}
 	query := m.cron.lists[m.cron.tab].query
-	right := ""
-	if query != "" || m.cron.filtering {
-		right = "/" + query
-		if m.cron.filtering {
-			right += "▏"
+	left, right := title, ""
+	if len(m.cron.stack) == 0 {
+		left, right = "/ search", title
+		if query != "" || m.cron.filtering {
+			left = "/" + query
 		}
+		if m.cron.filtering {
+			left += "▏"
+			if overflow := runewidth.StringWidth(left) - titleBarInnerWidth(m.width); overflow > 0 {
+				left = "/" + runewidth.TruncateLeft(left, overflow+1, "")
+			}
+		}
+		if m.cron.out {
+			right += " · loading…"
+		}
+	} else if query != "" {
+		right = "/" + query
 	} else if m.cron.out {
 		right = "loading…"
 	}
 	body := []string{
 		renderTitleBar(m.width, m.scope, kataVersion, m.chrome().daemon),
 		cronTabs(m.cron.tab),
-		statsLineStyle.Render(padLeftRightInside(title, right, titleBarInnerWidth(m.width))),
+		statsLineStyle.Render(padLeftRightInside(left, right, titleBarInnerWidth(m.width))),
 		"",
 	}
 	if header != "" {

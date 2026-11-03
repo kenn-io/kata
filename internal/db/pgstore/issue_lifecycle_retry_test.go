@@ -1,7 +1,6 @@
 package pgstore
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,7 +13,7 @@ func TestCloseIssueRetryClearsRolledBackAttemptOutput(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := OpenWithConfig(ctx, dsn, Config{
@@ -49,7 +48,7 @@ func TestArchivedProjectRejectsIssueMutation(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := OpenWithConfig(ctx, dsn, Config{
@@ -86,7 +85,7 @@ func TestRestoreProjectRetryClearsRolledBackAttemptOutput(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := OpenWithConfig(ctx, dsn, Config{
@@ -119,7 +118,7 @@ func TestEditCommentRetryClearsRolledBackAttemptOutput(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := OpenWithConfig(ctx, dsn, Config{

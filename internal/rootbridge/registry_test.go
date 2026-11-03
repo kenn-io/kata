@@ -695,7 +695,7 @@ func TestRegistryConcurrentFirstRefreshPinsExactlyOneConnectorIdentity(t *testin
 	results := make(chan error, 2)
 	for range 2 {
 		go func() {
-			_, err := registry.Refresh(context.Background(), "notes")
+			_, err := registry.Refresh(t.Context(), "notes")
 			results <- err
 		}()
 	}

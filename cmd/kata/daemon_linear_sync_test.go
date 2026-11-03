@@ -56,27 +56,27 @@ func runtimeLinearBinding(t *testing.T, store db.Storage, id int64) db.IssueSync
 	c := linearsync.Config{WorkspaceID: "44444444-4444-4444-8444-444444444444", TeamID: runtimeLinearProjectID}
 	raw, err := linearsync.EncodeConfig(c)
 	require.NoError(t, err)
-	b, err := store.UpsertIssueSyncBinding(context.Background(), db.UpsertIssueSyncBindingParams{ProjectID: id, Provider: "linear", SourceKey: c.SourceKey(), RemoteID: c.RemoteID(), DisplayName: "Example tasks", Config: raw, IntervalSeconds: 300})
+	b, err := store.UpsertIssueSyncBinding(t.Context(), db.UpsertIssueSyncBindingParams{ProjectID: id, Provider: "linear", SourceKey: c.SourceKey(), RemoteID: c.RemoteID(), DisplayName: "Example tasks", Config: raw, IntervalSeconds: 300})
 	require.NoError(t, err)
 	return b
 }
 func readRuntimeLinearStatus(t *testing.T, h http.Handler, id int64) runtimeNotionStatus {
 	t.Helper()
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, newRuntimeNotionRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issue-sync/linear/status", id), nil))
+	h.ServeHTTP(w, newRuntimeNotionRequest(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issue-sync/linear/status", id), nil))
 	require.Equal(t, 200, w.Code, w.Body.String())
 	var s runtimeNotionStatus
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &s))
 	return s
 }
-func linearRuntimePost(id int64, action string, body io.Reader) *http.Request {
-	r := newRuntimeNotionRequest(http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issue-sync/linear/%s", id, action), body)
+func linearRuntimePost(ctx context.Context, id int64, action string, body io.Reader) *http.Request {
+	r := newRuntimeNotionRequest(ctx, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/issue-sync/linear/%s", id, action), body)
 	r.Header.Set("Content-Type", "application/json")
 	return r
 }
 
 func TestDaemonLinearScheduledProgress(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	store := newRuntimeNotionRecordingStore(openKataTestDB(t, filepath.Join(t.TempDir(), "runtime.db")), make(chan db.IssueSyncStatus, 1))
 	defer func() { require.NoError(t, store.Close()) }()
@@ -90,7 +90,7 @@ func TestDaemonLinearScheduledProgress(t *testing.T) {
 	sub := bcast.Subscribe(daemon.SubFilter{ProjectID: p.ID})
 	defer sub.Unsub()
 	wake := startLinearSyncRunner(ctx, workers, nil, store, f, daemon.NewEventPublisher(bcast, hooks.NewNoop()), nil, tracker)
-	defer func() { cancel(); require.True(t, workers.Wait(context.Background())) }()
+	defer func() { cancel(); require.True(t, workers.Wait(t.Context())) }()
 	server := daemon.NewServer(daemon.ServerConfig{DB: store, LinearSyncFetcher: f, LinearSyncProgress: tracker})
 	defer func() { require.NoError(t, server.Close()) }()
 	waitRuntimeNotion(t, f.started)
@@ -98,7 +98,7 @@ func TestDaemonLinearScheduledProgress(t *testing.T) {
 	require.NotNil(t, status.Status.Progress)
 	require.Equal(t, "issues", status.Status.Progress.Phase)
 	w := httptest.NewRecorder()
-	server.Handler().ServeHTTP(w, linearRuntimePost(p.ID, "once", strings.NewReader(`{}`)))
+	server.Handler().ServeHTTP(w, linearRuntimePost(t.Context(), p.ID, "once", strings.NewReader(`{}`)))
 	require.Equal(t, 409, w.Code, w.Body.String())
 	for range 10000 {
 		wake()
@@ -108,7 +108,7 @@ func TestDaemonLinearScheduledProgress(t *testing.T) {
 	require.NotNil(t, finished.LastSuccessAt)
 	require.Equal(t, 1, finished.LastCreated)
 	cancel()
-	require.True(t, workers.Wait(context.Background()))
+	require.True(t, workers.Wait(t.Context()))
 	require.Nil(t, readRuntimeLinearStatus(t, server.Handler(), p.ID).Status.Progress)
 	select {
 	case msg := <-sub.Ch:

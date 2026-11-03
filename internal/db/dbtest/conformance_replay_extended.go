@@ -32,7 +32,7 @@ const (
 
 func checkSnapshotReplayExtendedState(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	records := extendedReplayRecords()
 	if err := store.ImportReplay(ctx, records, db.ImportOptions{}); err != nil {
 		return fmt.Errorf("import extended replay fixture: %w", err)
@@ -214,7 +214,7 @@ func checkSnapshotReplayExtendedState(t *testing.T, store db.Storage) error {
 // leave a row that can later be resumed.
 func checkSnapshotReplayRejectsInvalidExternalRootFrontiers(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	cases := []struct {
 		name    string
@@ -455,7 +455,7 @@ func checkSnapshotReplayRejectsInvalidExternalRootFrontiers(t *testing.T, store 
 // lookups.
 func checkSnapshotReplayRejectsInvalidBindingMappings(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	cases := []struct {
 		name       string
@@ -536,7 +536,7 @@ func checkSnapshotReplayRejectsInvalidBindingMappings(t *testing.T, store db.Sto
 
 func checkSnapshotReplayRejectsDuplicateFieldMappingIdentities(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	records := extendedReplayRecords()
 	original := *externalRootReplayMapping(records)
 	duplicate := original
@@ -561,7 +561,7 @@ func checkSnapshotReplayPreservesSubmicrosecondFieldMappingIdentities(
 	store db.Storage,
 ) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	records := extendedReplayRecords()
 	original := externalRootReplayMapping(records)
 	adjacent := *original
@@ -860,7 +860,7 @@ func replaySequenceFloors() map[string]int64 {
 
 func checkSnapshotReplayCompatibilityOptions(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	localInstanceUID := store.InstanceUID()
 	created := "2026-07-15T12:00:00.000Z"
 	createdTime := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
@@ -968,7 +968,7 @@ func checkSnapshotReplayCompatibilityOptions(t *testing.T, store db.Storage) err
 
 func checkSnapshotReplayHistoricalProjectName(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	const (
 		currentName    = "renamed-project"
 		historicalName = "original-project"
@@ -1016,7 +1016,7 @@ func checkSnapshotReplayHistoricalProjectName(t *testing.T, store db.Storage) er
 
 func checkSnapshotReplayUnsafeHistoricalProjectName(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	const (
 		unsafeName = "original\nproject"
 		created    = "2026-07-15T12:00:00.000Z"
@@ -1055,7 +1055,7 @@ func checkSnapshotReplayUnsafeHistoricalProjectName(t *testing.T, store db.Stora
 
 func checkSnapshotReplayAtomicRejection(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	localInstanceUID := store.InstanceUID()
 	created := "2026-07-15T12:00:00.000Z"
 	records := []db.ImportRecord{
@@ -1182,7 +1182,7 @@ func checkSnapshotReplayProjectEnvelopes(
 	backend Backend,
 ) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	source := backend.Open(t)
 	t.Cleanup(func() { require.NoError(t, source.Close()) })
 	peerTarget := backend.Open(t)
@@ -1273,7 +1273,7 @@ func checkSnapshotMergeExternalRoots(
 	backend Backend,
 ) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	source := backend.Open(t)
 	t.Cleanup(func() { require.NoError(t, source.Close()) })
 

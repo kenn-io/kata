@@ -1,7 +1,6 @@
 package sqlitestore_test
 
 import (
-	"context"
 	"encoding/json/jsontext"
 	"fmt"
 	"testing"
@@ -56,7 +55,7 @@ func TestPatchIssueMetadata_ArchivedProjectRejected(t *testing.T) {
 	require.NoError(t, err)
 
 	var eventsBefore int
-	require.NoError(t, d.QueryRow(`SELECT COUNT(*) FROM events`).Scan(&eventsBefore))
+	require.NoError(t, d.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM events`).Scan(&eventsBefore))
 
 	_, err = d.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{
 		IssueID: iss.ID, IfMatchRev: new(iss.Revision), Actor: "tester",
@@ -68,12 +67,12 @@ func TestPatchIssueMetadata_ArchivedProjectRejected(t *testing.T) {
 
 	var storedMetadata string
 	var storedRevision int64
-	require.NoError(t, d.QueryRow(`SELECT metadata, revision FROM issues WHERE id = ?`, iss.ID).Scan(&storedMetadata, &storedRevision))
+	require.NoError(t, d.QueryRowContext(t.Context(), `SELECT metadata, revision FROM issues WHERE id = ?`, iss.ID).Scan(&storedMetadata, &storedRevision))
 	assert.JSONEq(t, string(iss.Metadata), storedMetadata)
 	assert.Equal(t, iss.Revision, storedRevision)
 
 	var eventsAfter int
-	require.NoError(t, d.QueryRow(`SELECT COUNT(*) FROM events`).Scan(&eventsAfter))
+	require.NoError(t, d.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM events`).Scan(&eventsAfter))
 	assert.Equal(t, eventsBefore, eventsAfter)
 }
 
@@ -171,7 +170,7 @@ func TestPatchIssueMetadata_EmptyDiffNoEvent(t *testing.T) {
 
 	// Verify no second issue.metadata_updated event in the events table.
 	var n int
-	require.NoError(t, d.QueryRow(`
+	require.NoError(t, d.QueryRowContext(t.Context(), `
 		SELECT COUNT(*) FROM events WHERE type='issue.metadata_updated' AND issue_id = ?
 	`, iss.ID).Scan(&n))
 	assert.Equal(t, 1, n, "no-op patch must not append another event row")
@@ -210,7 +209,7 @@ func TestPatchIssueMetadata_UnknownKeyAccepted(t *testing.T) {
 func TestPatchProjectMetadata_HappyPath(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.CreateProject(ctx, "p")
 	require.NoError(t, err)
 
@@ -231,7 +230,7 @@ func TestPatchProjectMetadata_HappyPath(t *testing.T) {
 func TestPatchProjectMetadata_StaleRevisionReturns409(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, _ := d.CreateProject(ctx, "p")
 	_, err := d.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 		ProjectID: p.ID, IfMatchRev: new(int64(99)), Actor: "tester",
@@ -246,7 +245,7 @@ func TestPatchProjectMetadata_StaleRevisionReturns409(t *testing.T) {
 func TestPatchProjectMetadata_UnknownKeyAccepted(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, _ := d.CreateProject(ctx, "p")
 	res, err := d.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
 		ProjectID: p.ID, IfMatchRev: new(p.Revision), Actor: "tester",
@@ -260,7 +259,7 @@ func TestPatchProjectMetadata_UnknownKeyAccepted(t *testing.T) {
 func TestPatchProjectMetadata_EmptyDiffNoEvent(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, _ := d.CreateProject(ctx, "p")
 
 	res1, err := d.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{
@@ -282,7 +281,7 @@ func TestPatchProjectMetadata_EmptyDiffNoEvent(t *testing.T) {
 func TestDesignateInboxProject_RollsBackWhenAssignmentFails(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	previous, err := d.CreateProject(ctx, "previous-inbox")
 	require.NoError(t, err)
 	target, err := d.CreateProject(ctx, "example-project")

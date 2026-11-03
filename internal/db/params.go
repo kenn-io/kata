@@ -685,7 +685,10 @@ type CreateRecurrenceIn struct {
 // CreateRecurrenceForIssueIn creates a recurrence and attaches an existing
 // issue as its first occurrence in the same transaction.
 type CreateRecurrenceForIssueIn struct {
-	IssueID    int64
+	IssueID int64
+	// IfMatchRev, when set, is the issue revision the caller read; the
+	// attachment fails with RevisionConflictError if the issue moved on.
+	IfMatchRev *int64
 	Recurrence CreateRecurrenceIn
 }
 
@@ -877,6 +880,7 @@ type FederationIngestResult struct {
 // CreateFederationEnrollmentParams carries the plaintext token at creation
 // time only. The database stores only its SHA-256 hash.
 type CreateFederationEnrollmentParams struct {
+	SpokeName                    string // Optional hub-local display name; empty leaves it unchanged.
 	Token                        string
 	SpokeInstanceUID             string
 	ProjectID                    *int64

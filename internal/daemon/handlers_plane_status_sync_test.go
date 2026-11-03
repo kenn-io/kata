@@ -34,7 +34,7 @@ func newStatusLifecyclePlaneFetcher() *statusLifecyclePlaneFetcher {
 
 func TestPlaneEnableStatusModeAndOverridesPreserve(t *testing.T) {
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.db.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	f := newStatusLifecyclePlaneFetcher()
@@ -66,7 +66,7 @@ func TestPlaneEnableStatusValidationLeavesBindingAbsent(t *testing.T) {
 	for _, kind := range []string{"invalid mode", "invalid UUID", "non-string override", "unknown override", "wrong closed group", "wrong open group", "missing completed", "missing unstarted", "read-only session"} {
 		t.Run(kind, func(t *testing.T) {
 			d := openTestDB(t)
-			ctx := context.Background()
+			ctx := t.Context()
 			p, err := d.db.CreateProject(ctx, "example-project")
 			require.NoError(t, err)
 			f := newStatusLifecyclePlaneFetcher()
@@ -112,7 +112,7 @@ func TestPlaneEnableStatusValidationLeavesBindingAbsent(t *testing.T) {
 
 func TestPlaneEnableOneWayDoesNotRequireStatusTargets(t *testing.T) {
 	d := openTestDB(t)
-	p, err := d.db.CreateProject(context.Background(), "example-project")
+	p, err := d.db.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
 	server := startTestServer(t, daemon.ServerConfig{DB: d.db, PlaneSyncFetcher: newLifecyclePlaneFetcher()})
 	resp, raw := postJSON(t, server, issueSyncEndpoint(p.ID, "plane", "enable"), planeEnableBody())
@@ -126,7 +126,7 @@ func TestPlaneEnableOneWayCancelsPendingWithStaleSavedTargets(t *testing.T) {
 	for _, change := range []string{"removed", "moved"} {
 		t.Run(change, func(t *testing.T) {
 			d := openTestDB(t)
-			ctx := context.Background()
+			ctx := t.Context()
 			p, err := d.db.CreateProject(ctx, "example-project")
 			require.NoError(t, err)
 			f := newStatusLifecyclePlaneFetcher()

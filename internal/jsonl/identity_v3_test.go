@@ -2,7 +2,6 @@ package jsonl_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"testing"
 
@@ -21,7 +20,7 @@ import (
 // The reset-cursor reservation is preserved verbatim (a v2-era invariant
 // inherited by v3).
 func TestV2ToV3CutoverFillsIdentity(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openCutoverDB(ctx, t, writeLegacyV2DB)
 
 	localUID := fetchInstanceUID(ctx, t, d)
@@ -101,7 +100,7 @@ func TestV2ToV3CutoverFillsIdentity(t *testing.T) {
 // purge_log UIDs, and origin_instance_uid stamped on every event/purge_log row
 // matching the new local meta.instance_uid.
 func TestV1ToV3CutoverFillsIdentity(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	d := openCutoverDB(ctx, t, writeLegacyV1DB)
 
 	localUID := fetchInstanceUID(ctx, t, d)
@@ -121,7 +120,7 @@ func TestV1ToV3CutoverFillsIdentity(t *testing.T) {
 // origin_instance_uid columns are intentionally non-deterministic across reruns
 // (per §5.3) — those are excluded from the equality check.
 func TestV1ToV3CutoverDeterministicRowUIDs(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	a := openCutoverDB(ctx, t, writeLegacyV1DB)
 	b := openCutoverDB(ctx, t, writeLegacyV1DB)
@@ -144,7 +143,7 @@ func TestV1ToV3CutoverDeterministicRowUIDs(t *testing.T) {
 // default-mode import preserves meta.instance_uid end-to-end and every event's
 // origin_instance_uid still matches the source's identity.
 func TestRoundtripV3PreservesInstanceUID(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	src := openExportTestDB(t)
 	p, err := src.CreateProject(ctx, "kata")
 	require.NoError(t, err)
@@ -173,7 +172,7 @@ func TestRoundtripV3PreservesInstanceUID(t *testing.T) {
 // the pre-import LOCAL_FRESH while meta.instance_uid stored the source's
 // value, and new events on the same handle would stamp the wrong origin.
 func TestImportRefreshesCachedInstanceUID(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	src := openExportTestDB(t)
 	srcUID := src.InstanceUID()
 
@@ -203,7 +202,7 @@ func TestImportRefreshesCachedInstanceUID(t *testing.T) {
 // mode keeps the target's fresh meta.instance_uid (db.Open's value) and
 // preserves the source's origin_instance_uid on every imported event.
 func TestImportNewInstanceRegeneratesIdentity(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	src := openExportTestDB(t)
 	p, err := src.CreateProject(ctx, "kata")
 	require.NoError(t, err)
@@ -232,7 +231,7 @@ func TestImportNewInstanceRegeneratesIdentity(t *testing.T) {
 
 func scanUIDs(t *testing.T, d *sqlitestore.Store, query string) []string {
 	t.Helper()
-	rows, err := d.Query(query)
+	rows, err := d.QueryContext(t.Context(), query)
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()
 	var out []string

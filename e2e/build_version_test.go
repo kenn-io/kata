@@ -109,7 +109,7 @@ func repoRoot(t *testing.T) string {
 
 func commandOutput(t *testing.T, workdir string, name string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command(name, args...) //nolint:gosec // test commands are fixed by call sites.
+	cmd := exec.CommandContext(t.Context(), name, args...) //nolint:gosec // test commands are fixed by call sites.
 	cmd.Dir = workdir
 	out, err := cmd.CombinedOutput()
 	require.NoErrorf(t, err, "%s %s failed:\n%s", name, strings.Join(args, " "), string(out))
@@ -118,7 +118,7 @@ func commandOutput(t *testing.T, workdir string, name string, args ...string) st
 
 func commandOutputEnv(t *testing.T, workdir string, env []string, name string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command(name, args...) //nolint:gosec // test commands are fixed by call sites.
+	cmd := exec.CommandContext(t.Context(), name, args...) //nolint:gosec // test commands are fixed by call sites.
 	cmd.Dir = workdir
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()

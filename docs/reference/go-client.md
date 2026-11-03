@@ -1,7 +1,7 @@
 ---
 title: Go client
 description: Connect Go programs to a Kata daemon with the typed client, CLI-compatible daemon discovery, and an in-process test server.
-last_edited: 2026-10-24
+last_edited: 2026-10-30
 ---
 
 # Go client
@@ -240,7 +240,7 @@ As with any daemon that has no identity tokens, write requests must name an
 To exercise `client.Discover`, set `KATA_SERVER` to `server.Endpoint` and
 `KATA_AUTH_TOKEN` to the token.
 
-## Native cron identities
+## Cron identities
 
 Use `client.NewCronUID()` once for a definition or independent run and
 retain that normalized ULID with its intended request. The helper makes no
@@ -280,4 +280,4 @@ additive fields while request schemas remain strict; where the generated
 response type differs from the request type, marshal and decode the definition
 into its request DTO before submitting it. Native planning dates are available
 through `IssuePlanningDatesWithResponse` using ordinary project and issue read
-policy. See [Native cron](cron.md) for the full contract.
+policy. See [Cron](cron.md) for the full contract.

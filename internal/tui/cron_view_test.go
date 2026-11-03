@@ -616,3 +616,60 @@ func TestCronNoticesFitTerminal(t *testing.T) {
 		})
 	}
 }
+
+func TestCronPersistentSearch(t *testing.T) {
+	for _, tab := range []rune{'2', '3', '4'} {
+		for _, state := range []string{"idle", "empty", "loading", "unavailable"} {
+			m := sendRune(cronFixture(t), tab)
+			m.opts.Mouse = true
+			switch state {
+			case "empty":
+				m = m.cronFilter("absent-query")
+			case "loading":
+				m.cron.out = true
+			case "unavailable":
+				m.cron.data = &cronData{jobsErr: errors.New("offline"), runsErr: errors.New("offline"), workflowsErr: errors.New("offline")}
+			}
+			line := strings.Split(ansi.Strip(renderCron(m)), "\n")[2]
+			want := "/ search"
+			if state == "empty" {
+				want = "/absent-query"
+			}
+			require.True(t, strings.HasPrefix(strings.TrimSpace(line), want), "%c %s: %s", tab, state, line)
+		}
+		for _, prefix := range []string{strings.Repeat("a", 90), strings.Repeat("界", 45)} {
+			m := sendRune(cronFixture(t), tab)
+			m.opts.Mouse = true
+			m = sendRune(m, '/')
+			m, _ = updateModel(m, tea.PasteMsg{Content: prefix + "TAIL"})
+			m = sendRune(m, 'Z')
+			line := strings.Split(ansi.Strip(renderCron(m)), "\n")[2]
+			require.Contains(t, line, "TAILZ▏", "tab %c must show the edited tail and caret", tab)
+			require.LessOrEqual(t, ansi.StringWidth(line), 80)
+		}
+	}
+}
+
+func TestCronSearchClickGuards(t *testing.T) {
+	for _, tab := range []rune{'2', '3', '4'} {
+		m := sendRune(cronFixture(t), tab)
+		m.opts.Mouse = true
+		m, _ = updateModel(m, mouseLeftClick(4, 2))
+		require.True(t, m.cron.filtering, "tab %c", tab)
+	}
+
+	for _, state := range []string{"help", "detail", "projects"} {
+		m := cronFixture(t)
+		m.opts.Mouse = true
+		switch state {
+		case "help":
+			m.cron.help = true
+		case "detail":
+			m = sendKey(m, tea.KeyEnter)
+		case "projects":
+			m.scope = scope{allProjects: true}
+		}
+		m, _ = updateModel(m, mouseLeftClick(4, 2))
+		require.False(t, m.cron.filtering, state)
+	}
+}

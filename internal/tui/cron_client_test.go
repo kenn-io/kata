@@ -81,3 +81,35 @@ func TestCronClientReadsStoredRecords(t *testing.T) {
 	require.Equal(t, "Report ready", deref(runs[0].Summary.Message))
 	require.Equal(t, project.ID, runs[0].ProjectID)
 }
+
+func TestCronClientWriteGuardsEdits(t *testing.T) {
+	env := testenv.New(t)
+	c := NewClient(env.URL, env.HTTP)
+	project, err := c.EnsureProject(t.Context(), "cron-write-example", "alice")
+	require.NoError(t, err)
+	ctx := t.Context()
+	const uid = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+
+	require.NoError(t, c.PutCronJob(ctx, project.ID, uid, api.PutCronJobBody{Name: "Digest", Actor: "alice", Definition: api.CronJobDefinitionFrom(manualExecuteJob(`{}`))}))
+	shown, err := c.ShowCronJob(ctx, project.ID, uid)
+	require.NoError(t, err)
+
+	shown.Definition.Enabled = false
+	err = c.PutCronJob(ctx, project.ID, uid, api.PutCronJobBody{Name: "Digest", Actor: "alice", Definition: api.CronJobDefinitionFrom(shown.Definition), ExpectedEventUID: "01ARZ3NDEKTSV4RRFFQ69G5FB9"})
+	var apiErr *APIError
+	require.ErrorAs(t, err, &apiErr)
+	require.Equal(t, "cron_conflict", apiErr.Code)
+	require.Equal(t, 409, apiErr.Status)
+
+	require.NoError(t, c.PutCronJob(ctx, project.ID, uid, api.PutCronJobBody{Name: "Digest", Actor: "alice", Definition: api.CronJobDefinitionFrom(shown.Definition), ExpectedEventUID: shown.DefinitionEventUID}))
+	updated, err := c.ShowCronJob(ctx, project.ID, uid)
+	require.NoError(t, err)
+	require.False(t, updated.Definition.Enabled)
+}
+
+func TestCronJobRecordRefusesDefinitionsItWouldDrop(t *testing.T) {
+	body := `{"job":{"uid":"01ARZ3NDEKTSV4RRFFQ69G5FAV","name":"Digest","definition_event_uid":"01ARZ3NDEKTSV4RRFFQ69G5FB2","definition":{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"manual"},"action":{"kind":"execute","prompt":"x"},"issue":{"kind":"per-run","title":"t"},"overlap":"forbid","catchup":"latest","options":{"free":1},"newer_member":{"a":1}}}}`
+	_, err := decodeCronJobRecord([]byte(body))
+	require.ErrorContains(t, err, "newer_member")
+	require.ErrorContains(t, err, "newer kata")
+}

@@ -56,7 +56,7 @@ func TestTypedReplyTargetMembershipFence(t *testing.T) {
 		_, _, err = store.CreateComment(r.Context(), db.CreateCommentParams{IssueID: source.ID, Author: "worker", Body: "Answer", ReplyToUID: finding.UID, ReplyKind: "reply", ValidateReply: true})
 		require.Error(t, err)
 	}))
-	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", nil).WithContext(ctx))
+	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil).WithContext(ctx))
 	comments, err := store.CommentsByIssue(t.Context(), source.ID)
 	require.NoError(t, err)
 	require.Empty(t, comments)

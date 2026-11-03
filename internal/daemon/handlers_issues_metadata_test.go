@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"net/http"
@@ -32,7 +31,7 @@ func TestCreateIssue_AcceptsMetadata(t *testing.T) {
 	}, &out)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	got, err := env.DB.IssueByID(context.Background(), out.Issue.ID)
+	got, err := env.DB.IssueByID(t.Context(), out.Issue.ID)
 	require.NoError(t, err)
 	var m map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(got.Metadata), &m))

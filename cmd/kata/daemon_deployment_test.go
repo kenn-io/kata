@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -82,25 +81,6 @@ func TestDeploymentNoAutoTokenStopsCreation(t *testing.T) {
 	require.Error(t, err)
 	_, err = os.Stat(filepath.Join(home, "auth-token"))
 	require.True(t, os.IsNotExist(err))
-}
-
-func TestDeploymentNoAutoTokenFlagReachesStartAndRestart(t *testing.T) {
-	for _, action := range []string{"start", "restart"} {
-		t.Run(action, func(t *testing.T) {
-			resetFlags(t)
-			deploymentHome(t)
-			old := startDetachedDaemon
-			t.Cleanup(func() { startDetachedDaemon = old })
-			var disabled bool
-			startDetachedDaemon = func(_ context.Context, _ string, _ bool, noAutoToken bool) (daemonStartOutput, error) {
-				disabled = noAutoToken
-				return daemonStartOutput{Action: "started"}, nil
-			}
-			_, _, err := executeRootCapture(t, t.Context(), "daemon", action, "--listen", "127.0.0.1:7777", "--no-auto-token")
-			require.NoError(t, err)
-			require.True(t, disabled)
-		})
-	}
 }
 
 // Contract: explicit non-loopback service startup mints one private persisted

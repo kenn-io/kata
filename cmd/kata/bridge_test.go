@@ -66,7 +66,7 @@ func TestBridgeRootHelpRegistersEveryCommand(t *testing.T) {
 
 func TestBridgeBindDefaultsToQuietOutboundComments(t *testing.T) {
 	f := newExternalCLIFixture(t)
-	out, err := runExternalCLI(context.Background(), t, f, "--agent", "--as", "operator", "bridge", "bind", "example-project#abc4", "--connector", "example-connector", "--external", "root-locator")
+	out, err := runExternalCLI(t.Context(), t, f, "--agent", "--as", "operator", "bridge", "bind", "example-project#abc4", "--connector", "example-connector", "--external", "root-locator")
 	require.NoError(t, err)
 	assert.Contains(t, out, "receive_comments=true")
 	assert.Contains(t, out, "publish_comments=false")
@@ -91,7 +91,7 @@ func TestBridgeBindDefaultsToQuietOutboundComments(t *testing.T) {
 		if mode.flag != "" {
 			args = append([]string{mode.flag}, args...)
 		}
-		out, err = runExternalCLI(context.Background(), t, f, args...)
+		out, err = runExternalCLI(t.Context(), t, f, args...)
 		require.NoError(t, err)
 		assert.Contains(t, out, mode.want)
 		requests = f.snapshotRequests()
@@ -130,7 +130,7 @@ func TestBridgeEveryCommandRendersHumanJSONAndAgent(t *testing.T) {
 				if mode.flag != "" {
 					args = append([]string{mode.flag}, args...)
 				}
-				out, err := runExternalCLI(context.Background(), t, f, args...)
+				out, err := runExternalCLI(t.Context(), t, f, args...)
 				require.NoError(t, err)
 				for _, want := range mode.want {
 					assert.Contains(t, out, want)
@@ -180,7 +180,7 @@ func TestBridgeResolveCommentRequiresExactlyOneModeBeforeHTTP(t *testing.T) {
 		{"bridge", "resolve-comment", "example-project#abc4", "--retry", "--skip"},
 		{"bridge", "resolve-comment", "example-project#abc4", "--adopt", "external-1", "--retry"},
 	} {
-		_, _, err := executeRootCapture(t, context.Background(), args...)
+		_, _, err := executeRootCapture(t, t.Context(), args...)
 		require.Error(t, err)
 		var cli *cliError
 		require.ErrorAs(t, err, &cli)
@@ -192,7 +192,7 @@ func TestBridgeResolveCommentRequiresExactlyOneModeBeforeHTTP(t *testing.T) {
 func TestBridgeResolveCommentPreservesOpaqueAdoptID(t *testing.T) {
 	f := newExternalCLIFixture(t)
 	const opaque = "opaque ID/with spaces:%25"
-	_, err := runExternalCLI(context.Background(), t, f, "--as", "operator", "bridge", "resolve-comment", "example-project#abc4", "--adopt", opaque)
+	_, err := runExternalCLI(t.Context(), t, f, "--as", "operator", "bridge", "resolve-comment", "example-project#abc4", "--adopt", opaque)
 	require.NoError(t, err)
 	requests := f.snapshotRequests()
 	require.Len(t, requests, 2)
@@ -200,7 +200,7 @@ func TestBridgeResolveCommentPreservesOpaqueAdoptID(t *testing.T) {
 }
 
 func TestBridgeResolveFieldRejectsInvalidChoiceBeforeHTTP(t *testing.T) {
-	_, _, err := executeRootCapture(t, context.Background(), "bridge", "resolve-field", "example-project#abc4", "scheduled_on", "--use", "newest")
+	_, _, err := executeRootCapture(t, t.Context(), "bridge", "resolve-field", "example-project#abc4", "scheduled_on", "--use", "newest")
 	require.Error(t, err)
 	var cli *cliError
 	require.ErrorAs(t, err, &cli)
@@ -213,7 +213,7 @@ func TestBridgeQualifiedRefUsesConfiguredRemoteDaemon(t *testing.T) {
 	home := setupKataEnv(t)
 	t.Setenv("KATA_SERVER", f.server.URL)
 	t.Setenv("KATA_HOME", home)
-	out, _, err := executeRootCapture(t, context.Background(), "--agent", "bridge", "show", "example-project#abc4")
+	out, _, err := executeRootCapture(t, t.Context(), "--agent", "bridge", "show", "example-project#abc4")
 	require.NoError(t, err)
 	assert.Contains(t, out, "instance=example-connector")
 	requests := f.snapshotRequests()
@@ -229,7 +229,7 @@ func TestBridgeQualifiedRefUsesConfiguredRemoteDaemon(t *testing.T) {
 
 func TestBridgeBareRefUsesExplicitProjectContext(t *testing.T) {
 	f := newExternalCLIFixture(t)
-	out, err := runExternalCLI(context.Background(), t, f, "--agent", "--project", "example-project", "bridge", "show", "abc4")
+	out, err := runExternalCLI(t.Context(), t, f, "--agent", "--project", "example-project", "bridge", "show", "abc4")
 	require.NoError(t, err)
 	assert.Contains(t, out, "instance=example-connector")
 	requests := f.snapshotRequests()
@@ -250,7 +250,7 @@ func TestBridgeExternalCallsUseLongRunningClient(t *testing.T) {
 		{"bridge", "resolve-comment", "example-project#abc4", "--retry"},
 	}
 	for _, args := range tests {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 		_, err := runExternalCLI(ctx, t, f, args...)
 		cancel()
 		require.NoErrorf(t, err, "%v", args)
@@ -260,7 +260,7 @@ func TestBridgeExternalCallsUseLongRunningClient(t *testing.T) {
 func TestBridgeLongRunningClientHonorsCancellation(t *testing.T) {
 	f := newExternalCLIFixture(t)
 	f.delay = true
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond) //nolint:kennlint // deadlinetest: the deadline is the expected result; the delayed fake holds the response until it fires
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Millisecond) //nolint:kennlint // deadlinetest: the deadline is the expected result; the delayed fake holds the response until it fires
 	defer cancel()
 	_, err := runExternalCLI(ctx, t, f, "bridge", "reconcile", "example-project#abc4")
 	require.Error(t, err)
@@ -292,7 +292,7 @@ func TestBridgeCommandsSendExactQualifiedRefRequests(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			f.resetRequests()
 			args := append([]string{"--as", "operator"}, test.args...)
-			_, err := runExternalCLI(context.Background(), t, f, args...)
+			_, err := runExternalCLI(t.Context(), t, f, args...)
 			require.NoError(t, err)
 			requests := f.snapshotRequests()
 			require.Len(t, requests, 2)
@@ -336,7 +336,7 @@ func TestBridgeUnbindResolvesArchivedQualifiedProject(t *testing.T) {
 	}))
 	t.Cleanup(f.server.Close)
 
-	_, err := runExternalCLI(context.Background(), t, f,
+	_, err := runExternalCLI(t.Context(), t, f,
 		"--as", "operator", "bridge", "unbind", "archived-project#abc4")
 	require.NoError(t, err)
 	require.Equal(t, []externalCLIRequest{
@@ -372,7 +372,7 @@ func TestBridgeErrorsKeepStableSafeEnvelopes(t *testing.T) {
 			f.fail(test.method, test.path, test.status, map[string]any{
 				"error": map[string]any{"code": test.code, "message": test.message, "detail": "diagnostic-sentinel"},
 			})
-			_, err := runExternalCLI(context.Background(), t, f, append([]string{"--as", "operator"}, test.args...)...)
+			_, err := runExternalCLI(t.Context(), t, f, append([]string{"--as", "operator"}, test.args...)...)
 			require.Error(t, err)
 			var cli *cliError
 			require.ErrorAs(t, err, &cli)

@@ -1,7 +1,7 @@
 ---
-title: Native cron
+title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-10-30
+last_edited: 2026-10-31
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -13,7 +13,10 @@ observations. External adapters schedule other jobs, resolve checkout and provid
 configuration, create or update ordinary issues, deliver notifications, and launch processes.
 An observation records evidence; its status does not control whether anything runs.
 
-Browse jobs, runs, and workflows in `kata tui` with the `2`, `3`, and `4` tabs for the current project.
+Browse jobs, runs, and workflows in `kata tui` with the `2`, `3`, and `4` tabs for the current project. On the Jobs tab, create and edit jobs; see the [`kata tui` keys](cli.md#daemon-and-diagnostics).
+
+For a run organized as dependent issues with human approval, see
+[Gated workflows](../workflows/gated-workflows.md).
 
 ## Vocabulary
 
@@ -558,7 +561,7 @@ that do not read the key ignore it: Herdr Kata v0.1.0, for example, logs
 `ignored options key: adapter` and still runs the job.
 
 Local transcripts, process IDs, session handles, credentials, and delivery
-buffers are not native run evidence. An adapter may buffer a failed observation
+buffers are not shared run evidence. An adapter may buffer a failed observation
 write and retry it later without blocking its own work.
 
 The adapter must refresh current definitions before starting new scheduled work;
@@ -586,10 +589,14 @@ workflow. PostgreSQL runtime roles still cannot perform owner-only migrations.
 
 [Herdr Kata](https://github.com/salmonumbrella/herdr-kata/blob/main/docs/native.md)
 is one adapter that implements this contract; its documentation covers setup.
+[tern-kata](https://github.com/Dangerboi/tern-kata/blob/main/docs/guide/worker.md)
+is another: its worker runs prompt and workflow jobs through
+[omp](https://github.com/can1357/oh-my-pi) on the user's machine; its guide
+covers setup.
 
 ## Storage and backup
 
-SQLite and PostgreSQL schema 31 store native cron data in `cron_jobs`,
+SQLite and PostgreSQL schema 31 store cron data in `cron_jobs`,
 `cron_workflows`, and `cron_runs`. JSONL export and import retain shared
 definitions, including tombstones, and bounded run evidence. Native recurring
 delivery reuses ordinary issue metadata and parent links; it adds no tables or

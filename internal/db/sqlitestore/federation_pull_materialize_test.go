@@ -20,7 +20,7 @@ func FuzzPulledMaterializationMatchesFullFold(f *testing.F) {
 	f.Add(uint16(100), true)
 	f.Add(uint16(101), true)
 	f.Fuzz(func(t *testing.T, value uint16, payloadOnly bool) {
-		ctx := context.Background()
+		ctx := t.Context()
 		d, p, issue := incrementalTestStore(t)
 		other, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "untouched", Author: "tester", Labels: []string{"retained"}})
 		require.NoError(t, err)
@@ -78,7 +78,7 @@ func FuzzPulledMaterializationMatchesFullFold(f *testing.F) {
 func TestPulledMaterializationRetriesPreparedSnapshot(t *testing.T) {
 	for _, steady := range []bool{false, true} {
 		t.Run(strconv.FormatBool(steady), func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			d, p, issue := incrementalTestStore(t)
 			other, err := d.CreateProject(ctx, "other-project")
 			require.NoError(t, err)
@@ -112,7 +112,7 @@ func TestPulledMaterializationRetriesPreparedSnapshot(t *testing.T) {
 
 // Group links include endpoints outside the page's touched issue scope.
 func TestPulledMaterializationRetainsUntouchedLinkEndpoints(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	d, p, source := incrementalTestStore(t)
 	target, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "target", Author: "tester"})
 	require.NoError(t, err)

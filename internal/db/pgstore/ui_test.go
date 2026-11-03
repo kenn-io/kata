@@ -45,7 +45,7 @@ func TestUISnapshotProjectAuthorityRelationshipsContract(t *testing.T) {
 }
 
 func TestUISnapshotAuthorityReuseSkipsProjectStats(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openUIStore(t)
 	project := createUIProject(t, store, "example-project")
 	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
@@ -66,7 +66,7 @@ func TestUISnapshotAuthorityReuseSkipsProjectStats(t *testing.T) {
 }
 
 func TestUISnapshotReadsProjectStatsInOneBatch(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openUIStore(t)
 	for _, name := range []string{"example-project", "example-workspace", "spoke-project"} {
 		project := createUIProject(t, store, name)
@@ -90,7 +90,7 @@ func TestUISnapshotReadsProjectStatsInOneBatch(t *testing.T) {
 }
 
 func TestUISnapshotReadsCollectionLinkDetailsInOneBatch(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openUIStore(t)
 	project := createUIProject(t, store, "example-project")
 	issues := make([]db.Issue, 4)
@@ -148,7 +148,7 @@ func TestUISnapshotViewScopeContract(t *testing.T) {
 }
 
 func TestReadUILabelsForIssues(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openUIStore(t)
 	project := createUIProject(t, store, "example-project")
 	first, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
@@ -176,7 +176,7 @@ func TestReadUILabelsForIssues(t *testing.T) {
 }
 
 func TestReadUISnapshotConsistent(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openUIStore(t)
 	first := createUIProject(t, store, "example-project")
 	second := createUIProject(t, store, "example-workspace")
@@ -267,7 +267,7 @@ func TestReadUISnapshotConsistent(t *testing.T) {
 }
 
 func TestReadUIReferences(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openUIStore(t)
 	first := createUIProject(t, store, "example-project")
 	createUIProject(t, store, "example-workspace")
@@ -292,7 +292,7 @@ func TestReadUIReferences(t *testing.T) {
 }
 
 func TestReadUIReferencesFiltersIssueUIDs(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openUIStore(t)
 	firstProject := createUIProject(t, store, "alpha-project")
 	secondProject := createUIProject(t, store, "beta-project")
@@ -370,7 +370,7 @@ func TestReadUIReferencesFiltersIssueUIDs(t *testing.T) {
 
 func openUIStore(t *testing.T) *Store {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := OpenWithConfig(ctx, dsn, Config{Schema: "ui_test", SchemaMode: SchemaModeBootstrap})
@@ -381,7 +381,7 @@ func openUIStore(t *testing.T) *Store {
 
 func createUIProject(t *testing.T, store *Store, name string) db.Project {
 	t.Helper()
-	project, err := store.CreateProject(context.Background(), name)
+	project, err := store.CreateProject(t.Context(), name)
 	require.NoError(t, err)
 	return project
 }

@@ -429,9 +429,9 @@ state. A spoke whose pull cursor is below that boundary receives
 push-enabled spoke refuses to reset while it has unaccepted local-origin events
 or an active quarantine. `kata federation status` reports these reset blockers.
 
-## Native Cron Replay And Compatibility
+## Cron Replay And Compatibility
 
-Native jobs and workflows replicate as complete documents, including deletion and
+Cron jobs and workflows replicate as complete documents, including deletion and
 restoration. The existing total HLC order chooses one whole document; concurrent
 edits never combine fields from different versions. Baseline snapshots retain
 the original winning definition event UID and HLC. Enabling federation,
@@ -442,8 +442,8 @@ Upgrade hubs before publishing cron. Federation clients advertise
 `X-Kata-Event-Features: cron_v1`. Successful metadata, event-poll, and
 ingest responses advertise server support in that same header. A project's
 `X-Kata-Required-Event-Features: cron_v1` header instead means that its
-history requires the feature. This requirement latches after the first native
-cron and survives deletion of its definitions. Missing support causes
+history requires the feature. This requirement latches after the first event
+requiring `cron_v1` and survives deletion of its definitions. Missing support causes
 HTTP 409 `unsupported_event_features` before returning events or a reset cursor,
 or accepting a push. An unknown required response feature stops the new client
 before it accepts any response cursor. An empty requirement from an unused old

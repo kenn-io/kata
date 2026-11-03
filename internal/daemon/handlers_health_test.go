@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"net/http"
@@ -313,7 +312,7 @@ func TestHealthSerializesSanitizedEmbeddingRejection(t *testing.T) {
 	defer provider.Close()
 	emb, err := embedding.New(embedding.Config{BaseURL: provider.URL, Model: "m", Dims: 2, Credential: config.EmbeddingCredential{Key: "example-key", Source: "inline"}})
 	require.NoError(t, err)
-	_, err = emb.Embed(context.Background(), []string{"query"})
+	_, err = emb.Embed(t.Context(), []string{"query"})
 	require.Error(t, err)
 	ts := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, Embedder: emb, ReconcilerHealth: func() daemon.ReconcilerHealth {
 		return daemon.ReconcilerHealth{Configured: true}

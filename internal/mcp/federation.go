@@ -64,6 +64,7 @@ type FederationEnrollmentSummary struct {
 	ID               int64  `json:"id"`
 	ProjectID        int64  `json:"project_id,omitempty"`
 	SpokeInstanceUID string `json:"spoke_instance_uid"`
+	SpokeName        string `json:"spoke_name,omitempty"`
 	Capabilities     string `json:"capabilities"`
 	Actor            string `json:"actor"`
 	Revoked          bool   `json:"revoked"`
@@ -84,6 +85,19 @@ type FederationEnrollmentRevokeInput struct {
 type FederationEnrollmentRevokeOutput struct {
 	ID      int64 `json:"id"`
 	Revoked bool  `json:"revoked"`
+}
+
+// FederationSpokeNameInput sets or clears an enrolled instance's hub-local name.
+type FederationSpokeNameInput struct {
+	SpokeInstanceUID string `json:"spoke_instance_uid"`
+	Name             string `json:"name,omitempty" jsonschema:"Lowercase name: a letter, then up to 31 lowercase letters, digits or hyphens. Omit with clear."`
+	Clear            bool   `json:"clear,omitempty" jsonschema:"Remove the name instead of setting one."`
+}
+
+// FederationSpokeNameOutput reports the instance's current hub-local name.
+type FederationSpokeNameOutput struct {
+	SpokeInstanceUID string `json:"spoke_instance_uid"`
+	SpokeName        string `json:"spoke_name,omitempty"`
 }
 
 // FederationRebindInput selects a spoke and configured hub catalog entry.
@@ -154,6 +168,7 @@ func registerFederationTools(server *sdkmcp.Server, handlers toolHandlers) {
 	addTool(server, "kata.federation_bridge_disconnect", "Disconnect project bridge", "Preview or resume narrow-grant revocation and detach while preserving local data. local_only detaches from a hub that is gone without revoking its grant. Requires --all and daemon-owner API authority.", mutating, handlers.federationBridgeDisconnect)
 	addTool(server, "kata.federation_status", "Federation status", "Read in-scope federation, enrollment, replica, and quarantine status without secrets.", read, handlers.federationStatus)
 	addTool(server, "kata.federation_enrollment_revoke", "Revoke enrollment", "Revoke a federation enrollment by ID.", mutating, handlers.federationEnrollmentRevoke)
+	addTool(server, "kata.federation_spoke_name", "Name enrolled spoke", "Set or clear an enrolled instance's hub-local name, shown in enrollment lists and event origins. Names are unique on the hub and shared by every enrollment of that instance. Requires --all and daemon-owner API authority.", mutating, handlers.federationSpokeName)
 	addTool(server, "kata.federation_rebind", "Rebind federation", "Rebind a spoke to a configured hub catalog entry.", mutating, handlers.federationRebind)
 	addTool(server, "kata.federation_leave", "Leave federation", "Run the preflight, prepare, abort, or commit phase of resumable federation leave. Send prepare a random preparation_id, then abort with that preparation_id to release the prepared leave, such as after its hub revoke failed or the prepare response was lost.", mutating, handlers.federationLeave)
 	addTool(server, "kata.federation_root_key_repin", "Repin root signing key", "Preview or pin a hub project rooted on this daemon to its loaded federation-root.key, creating the key when missing. Without previous_key_file, downstream relays that pinned the previous key can no longer sync this project. Requires --all and daemon-owner API authority.", toolHints(false, true, false), handlers.federationRootKeyRepin)
@@ -411,6 +426,35 @@ func (h toolHandlers) federationEnrollmentRevoke(ctx context.Context, _ *sdkmcp.
 	return successResult(), FederationEnrollmentRevokeOutput{ID: response.ID, Revoked: response.Revoked}, nil
 }
 
+func (h toolHandlers) federationSpokeName(ctx context.Context, _ *sdkmcp.CallToolRequest, input FederationSpokeNameInput) (*sdkmcp.CallToolResult, FederationSpokeNameOutput, error) {
+	// A name belongs to the instance across every project.
+	if err := h.requireAllProjectsScope("federation spoke naming"); err != nil {
+		return nil, FederationSpokeNameOutput{}, err
+	}
+	if input.Clear == (input.Name != "") {
+		return nil, FederationSpokeNameOutput{}, errors.New("provide either name or clear")
+	}
+	var out generated.FederationSpokeNameOut
+	if input.Clear {
+		response, err := h.options.Client.ClearFederationSpokeName(ctx, &generated.ClearFederationSpokeNameRequestOptions{PathParams: &generated.ClearFederationSpokeNamePath{SpokeInstanceUID: input.SpokeInstanceUID}})
+		if err != nil {
+			return nil, FederationSpokeNameOutput{}, err
+		}
+		out = *response
+	} else {
+		response, err := h.options.Client.SetFederationSpokeName(ctx, &generated.SetFederationSpokeNameRequestOptions{PathParams: &generated.SetFederationSpokeNamePath{SpokeInstanceUID: input.SpokeInstanceUID}, Body: &generated.SetFederationSpokeNameBody{Name: input.Name}})
+		if err != nil {
+			return nil, FederationSpokeNameOutput{}, err
+		}
+		out = *response
+	}
+	output := FederationSpokeNameOutput{SpokeInstanceUID: out.SpokeInstanceUID}
+	if out.SpokeName != nil {
+		output.SpokeName = *out.SpokeName
+	}
+	return successResult(), output, nil
+}
+
 func (h toolHandlers) federationRebind(ctx context.Context, _ *sdkmcp.CallToolRequest, input FederationRebindInput) (*sdkmcp.CallToolResult, FederationRebindOutput, error) {
 	// Rebinding routes the replica's enrollment bearer token to whichever
 	// configured catalog origin the caller selects, so it stays an
@@ -512,5 +556,9 @@ func (h toolHandlers) federationQuarantine(ctx context.Context, _ *sdkmcp.CallTo
 }
 
 func federationEnrollmentSummary(enrollment generated.FederationEnrollmentOut) FederationEnrollmentSummary {
-	return FederationEnrollmentSummary{ID: enrollment.ID, ProjectID: enrollment.ProjectID, SpokeInstanceUID: enrollment.SpokeInstanceUID, Capabilities: enrollment.Capabilities, Actor: enrollment.Actor, Revoked: enrollment.RevokedAt != nil}
+	summary := FederationEnrollmentSummary{ID: enrollment.ID, ProjectID: enrollment.ProjectID, SpokeInstanceUID: enrollment.SpokeInstanceUID, Capabilities: enrollment.Capabilities, Actor: enrollment.Actor, Revoked: enrollment.RevokedAt != nil}
+	if enrollment.SpokeName != nil {
+		summary.SpokeName = *enrollment.SpokeName
+	}
+	return summary
 }

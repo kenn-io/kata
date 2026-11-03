@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -49,7 +48,7 @@ func TestInit_FreshGitRepoBindsViaRemote(t *testing.T) {
 	resetFlags(t)
 	flags.Mode = outputJSON
 
-	ctx := context.Background()
+	ctx := t.Context()
 	out, err := callInit(ctx, env.URL, dir, callInitOpts{})
 	require.NoError(t, err)
 	assert.Contains(t, out, `"name":"kata"`)
@@ -66,7 +65,7 @@ func TestInit_AddsLocalToGitignoreWhenAbsent(t *testing.T) {
 	flags.Mode = outputJSON
 	t.Cleanup(func() { flags.Mode = "" })
 
-	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{})
+	_, err := callInit(t.Context(), env.URL, dir, callInitOpts{})
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(filepath.Join(dir, ".gitignore")) //nolint:gosec // test fixture under TempDir
@@ -86,7 +85,7 @@ func TestInit_GitignoreIsIdempotent(t *testing.T) {
 	flags.Mode = outputJSON
 	t.Cleanup(func() { flags.Mode = "" })
 
-	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{})
+	_, err := callInit(t.Context(), env.URL, dir, callInitOpts{})
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(filepath.Join(dir, ".gitignore")) //nolint:gosec // test fixture under TempDir
@@ -113,7 +112,7 @@ func TestInit_GitignoreLandsAtWorkspaceRoot(t *testing.T) {
 	flags.Mode = outputJSON
 	t.Cleanup(func() { flags.Mode = "" })
 
-	_, err := callInit(context.Background(), env.URL, sub, callInitOpts{})
+	_, err := callInit(t.Context(), env.URL, sub, callInitOpts{})
 	require.NoError(t, err)
 
 	// .kata.toml is written by the daemon at the git root, not the subdir.
@@ -192,7 +191,7 @@ func TestInit_RemoteClient_SendsNameNotPath(t *testing.T) {
 	flags.Mode = outputJSON
 	t.Cleanup(func() { flags.Mode = "" })
 
-	_, err := callInit(context.Background(), daemonStub.srv.URL, dir, callInitOpts{})
+	_, err := callInit(t.Context(), daemonStub.srv.URL, dir, callInitOpts{})
 	require.NoError(t, err)
 
 	req := daemonStub.request()
@@ -218,7 +217,7 @@ func TestInit_RemoteClient_WritesGitignore(t *testing.T) {
 	flags.Mode = outputJSON
 	t.Cleanup(func() { flags.Mode = "" })
 
-	_, err := callInit(context.Background(), daemonStub.srv.URL, dir, callInitOpts{})
+	_, err := callInit(t.Context(), daemonStub.srv.URL, dir, callInitOpts{})
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(filepath.Join(dir, ".gitignore")) //nolint:gosec // test fixture under TempDir
@@ -242,7 +241,7 @@ func TestInit_RemoteClient_FromSubdir(t *testing.T) {
 	flags.Mode = outputJSON
 	t.Cleanup(func() { flags.Mode = "" })
 
-	_, err := callInit(context.Background(), daemonStub.srv.URL, sub, callInitOpts{})
+	_, err := callInit(t.Context(), daemonStub.srv.URL, sub, callInitOpts{})
 	require.NoError(t, err)
 
 	assert.FileExists(t, filepath.Join(root, ".kata.toml"))
@@ -274,7 +273,7 @@ name     = "kata"
 	flags.Mode = outputJSON
 	t.Cleanup(func() { flags.Mode = "" })
 
-	_, err := callInit(context.Background(), daemonStub.srv.URL, dir,
+	_, err := callInit(t.Context(), daemonStub.srv.URL, dir,
 		callInitOpts{Project: "other"})
 	require.Error(t, err)
 	var ce *cliError
@@ -301,7 +300,7 @@ func TestInit_RemoteClient_SendsAliasInfo(t *testing.T) {
 	flags.Mode = outputJSON
 	t.Cleanup(func() { flags.Mode = "" })
 
-	_, err := callInit(context.Background(), daemonStub.srv.URL, dir, callInitOpts{})
+	_, err := callInit(t.Context(), daemonStub.srv.URL, dir, callInitOpts{})
 	require.NoError(t, err)
 
 	req := daemonStub.request()
@@ -324,7 +323,7 @@ func TestInit_GitignoreAppendsToExisting(t *testing.T) {
 	flags.Mode = outputJSON
 	t.Cleanup(func() { flags.Mode = "" })
 
-	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{})
+	_, err := callInit(t.Context(), env.URL, dir, callInitOpts{})
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(filepath.Join(dir, ".gitignore")) //nolint:gosec // test fixture under TempDir
@@ -341,7 +340,7 @@ func TestInit_AgentOutputReportsProjectWorkspaceAndChanged(t *testing.T) {
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
 	daemonStub := newFakeDaemon(t)
 
-	out, err := callInit(context.Background(), daemonStub.srv.URL, dir, callInitOpts{})
+	out, err := callInit(t.Context(), daemonStub.srv.URL, dir, callInitOpts{})
 
 	require.NoError(t, err)
 	assert.Equal(t, "OK init project=kata workspace="+agentValue(dir)+" changed=true\n", out)
@@ -351,13 +350,13 @@ func TestInit_AgentOutputChangedWhenExistingProjectBindsFreshWorkspace(t *testin
 	resetFlags(t)
 	flags.Mode = outputAgent
 	env := testenv.New(t)
-	_, err := env.DB.CreateProject(context.Background(), "kata")
+	_, err := env.DB.CreateProject(t.Context(), "kata")
 	require.NoError(t, err)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
 
-	out, err := callInit(context.Background(), env.URL, dir, callInitOpts{})
+	out, err := callInit(t.Context(), env.URL, dir, callInitOpts{})
 
 	require.NoError(t, err)
 	assert.Equal(t, "OK init project=kata workspace="+agentValue(dir)+" changed=true\n", out)
@@ -366,13 +365,13 @@ func TestInit_AgentOutputChangedWhenExistingProjectBindsFreshWorkspace(t *testin
 func TestInit_HumanOutputKeepsProjectCreatedSemanticsForFreshWorkspace(t *testing.T) {
 	resetFlags(t)
 	env := testenv.New(t)
-	_, err := env.DB.CreateProject(context.Background(), "kata")
+	_, err := env.DB.CreateProject(t.Context(), "kata")
 	require.NoError(t, err)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
 
-	out, err := callInit(context.Background(), env.URL, dir, callInitOpts{})
+	out, err := callInit(t.Context(), env.URL, dir, callInitOpts{})
 
 	require.NoError(t, err)
 	assert.Equal(t, "bound project kata\n", out)
@@ -382,7 +381,7 @@ func TestInit_AgentOutputChangedWhenOnlyGitignoreUpdated(t *testing.T) {
 	resetFlags(t)
 	flags.Mode = outputAgent
 	env := testenv.New(t)
-	_, err := env.DB.CreateProject(context.Background(), "kata")
+	_, err := env.DB.CreateProject(t.Context(), "kata")
 	require.NoError(t, err)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
@@ -395,7 +394,7 @@ identity = "github.com/wesm/kata"
 name     = "kata"
 `), 0o644))
 
-	out, err := callInit(context.Background(), env.URL, dir, callInitOpts{})
+	out, err := callInit(t.Context(), env.URL, dir, callInitOpts{})
 
 	require.NoError(t, err)
 	assert.Equal(t, "OK init project=kata workspace="+agentValue(dir)+" changed=true\n", out)
@@ -409,7 +408,7 @@ func TestInit_AgentOutputQuotesProjectName(t *testing.T) {
 	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
 	daemonStub := newFakeDaemon(t)
 
-	out, err := callInit(context.Background(), daemonStub.srv.URL, dir, callInitOpts{Project: "two words"})
+	out, err := callInit(t.Context(), daemonStub.srv.URL, dir, callInitOpts{Project: "two words"})
 
 	require.NoError(t, err)
 	assert.Equal(t, "OK init project=\"two words\" workspace="+agentValue(dir)+" changed=true\n", out)
@@ -449,7 +448,7 @@ func TestInit_MachineOutputSuppressesGitignoreWarning(t *testing.T) {
 			var out string
 			var err error
 			stderr := captureProcessStderr(t, func() {
-				out, err = callInit(context.Background(), daemonStub.srv.URL, dir, callInitOpts{})
+				out, err = callInit(t.Context(), daemonStub.srv.URL, dir, callInitOpts{})
 			})
 
 			require.NoError(t, err)
@@ -468,7 +467,7 @@ func TestInit_WithAgents_WritesAgentsFileWhenAbsent(t *testing.T) {
 	flags.Mode = outputJSON
 	t.Cleanup(func() { flags.Mode = "" })
 
-	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	_, err := callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
@@ -487,7 +486,7 @@ func TestInit_WithoutFlag_DoesNotWriteAgents(t *testing.T) {
 	flags.Mode = outputJSON
 	t.Cleanup(func() { flags.Mode = "" })
 
-	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{})
+	_, err := callInit(t.Context(), env.URL, dir, callInitOpts{})
 	require.NoError(t, err)
 
 	assert.NoFileExists(t, filepath.Join(dir, "AGENTS.md"))
@@ -502,9 +501,9 @@ func TestInit_WithAgents_Idempotent(t *testing.T) {
 	flags.Mode = outputJSON
 	t.Cleanup(func() { flags.Mode = "" })
 
-	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	_, err := callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
 	require.NoError(t, err)
-	_, err = callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	_, err = callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
@@ -525,7 +524,7 @@ func TestInit_WithAgents_AppendsToExistingFile(t *testing.T) {
 	flags.Mode = outputJSON
 	t.Cleanup(func() { flags.Mode = "" })
 
-	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	_, err := callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
@@ -546,7 +545,7 @@ func TestInit_WithAgents_AppendsToExistingClaudeFile(t *testing.T) {
 	flags.Mode = outputJSON
 	t.Cleanup(func() { flags.Mode = "" })
 
-	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	_, err := callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md")) //nolint:gosec // test fixture under TempDir
@@ -569,7 +568,7 @@ func TestInit_WithAgents_AppendsToBothAgentFilesWhenBothExist(t *testing.T) {
 	flags.Mode = outputJSON
 	t.Cleanup(func() { flags.Mode = "" })
 
-	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	_, err := callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
 	require.NoError(t, err)
 
 	agents, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
@@ -594,7 +593,7 @@ func TestInit_WithAgents_RefreshesStaleBlock(t *testing.T) {
 	flags.Mode = outputJSON
 	t.Cleanup(func() { flags.Mode = "" })
 
-	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	_, err := callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
@@ -617,7 +616,7 @@ func TestInit_WithAgents_BlockIncludesWorkflowConventions(t *testing.T) {
 	flags.Mode = outputJSON
 	t.Cleanup(func() { flags.Mode = "" })
 
-	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	_, err := callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
@@ -641,7 +640,7 @@ func TestInit_WithAgents_BlockIncludesScheduleDueAndSomedayConventions(t *testin
 	flags.Mode = outputJSON
 	t.Cleanup(func() { flags.Mode = "" })
 
-	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	_, err := callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
@@ -688,7 +687,7 @@ func TestInit_WithAgents_RefreshesPreWorkConventionsBlock(t *testing.T) {
 	flags.Mode = outputJSON
 	t.Cleanup(func() { flags.Mode = "" })
 
-	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	_, err := callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
 	require.NoError(t, err)
 
 	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
@@ -726,7 +725,7 @@ func TestInit_WithAgents_BeadsBlockInAgents_WritesSidecar(t *testing.T) {
 
 	var callErr error
 	stderr := captureProcessStderr(t, func() {
-		_, callErr = callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+		_, callErr = callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
 	})
 	require.NoError(t, callErr)
 
@@ -791,7 +790,7 @@ func TestInit_WithAgents_BeadsBlockInClaude_WritesSidecar(t *testing.T) {
 	claudePath := filepath.Join(dir, "CLAUDE.md")
 	require.NoError(t, os.WriteFile(claudePath, []byte(claude), 0o644)) //nolint:gosec // test fixture under TempDir
 
-	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	_, err := callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
 	require.NoError(t, err)
 
 	// CLAUDE.md itself is untouched.
@@ -824,7 +823,7 @@ func TestInit_WithAgents_ClaudeSymlink_Skipped(t *testing.T) {
 		[]byte("# Agent guidance\n\n"+beadsFixtureBlock), 0o644))
 	require.NoError(t, os.Symlink("AGENTS.md", filepath.Join(dir, "CLAUDE.md")))
 
-	_, err := callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	_, err := callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
 	require.NoError(t, err)
 
 	// No sidecar for the symlink, and the symlink itself is preserved.
@@ -851,7 +850,7 @@ func TestInit_WithAgents_SidecarSymlinkNotFollowed(t *testing.T) {
 	// Attacker pre-plants the sidecar path as a symlink at the victim file.
 	require.NoError(t, os.Symlink(victim, agentsPath+agentsProposalSuffix))
 
-	_, _ = callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	_, _ = callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
 
 	got, err := os.ReadFile(victim) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
@@ -871,7 +870,7 @@ func TestInit_WithAgents_AgentsSymlinkNotFollowed(t *testing.T) {
 	require.NoError(t, os.WriteFile(victim, []byte("precious\n"), 0o644)) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, os.Symlink(victim, filepath.Join(dir, "AGENTS.md")))
 
-	_, _ = callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	_, _ = callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
 
 	got, err := os.ReadFile(victim) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
@@ -895,7 +894,7 @@ func TestInit_WithAgents_AgentsBeadsSymlinkNotMigrated(t *testing.T) {
 	require.NoError(t, os.WriteFile(secret, []byte(body), 0o644)) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, os.Symlink(secret, filepath.Join(dir, "AGENTS.md")))
 
-	_, _ = callInit(context.Background(), env.URL, dir, callInitOpts{WithAgents: true})
+	_, _ = callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
 
 	// kata must not copy the outside file into a sidecar in the repo.
 	assert.NoFileExists(t, filepath.Join(dir, "AGENTS.md"+agentsProposalSuffix))

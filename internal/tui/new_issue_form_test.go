@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
@@ -694,7 +695,7 @@ func TestSnapshot_NewIssueForm_AllFields(t *testing.T) {
 	s.fields[0].blur()
 	s.active = 1
 	_ = s.fields[1].focus()
-	got := renderCenteredForm(s, 120, 30)
+	got := renderCenteredForm(s, 120, 30, time.Time{})
 	assertGolden(t, "new-issue-form-all-fields", got)
 }
 
@@ -703,7 +704,7 @@ func TestSnapshot_NewChildForm(t *testing.T) {
 	s := newNewIssueFormWithParent("42aa")
 	s.fields[0].input.SetValue("follow-up child issue")
 	s.fields[2].input.SetValue("ux")
-	got := renderCenteredForm(s, 120, 30)
+	got := renderCenteredForm(s, 120, 30, time.Time{})
 	assertGolden(t, "new-child-form", got)
 }
 

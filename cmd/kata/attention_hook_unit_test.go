@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"net/http"
@@ -195,7 +194,7 @@ func TestAttentionHookCommand_InvalidInvocationsSilentlySkipDaemonActivity(t *te
 			cmd.SetOut(&output)
 			cmd.SetErr(&output)
 			cmd.SetArgs(append([]string{"attention-hook"}, args...))
-			cmd.SetContext(contextWithBaseURL(context.Background(), server.URL))
+			cmd.SetContext(contextWithBaseURL(t.Context(), server.URL))
 
 			assert.NoError(t, cmd.Execute())
 			assert.Empty(t, output.String())
@@ -255,7 +254,7 @@ func TestLiveAttnDaemon_LookupTreatsNonStringAttentionAsAbsent(t *testing.T) {
 			t.Cleanup(server.Close)
 
 			cmd := newRootCmd()
-			cmd.SetContext(contextWithBaseURL(context.Background(), server.URL))
+			cmd.SetContext(contextWithBaseURL(t.Context(), server.URL))
 			flags.Project = "example-project"
 
 			lookup := (&liveAttnDaemon{cmd: cmd}).lookup("abc4")
@@ -300,7 +299,7 @@ func TestLiveAttnDaemon_ConditionalSetSendsOnlyActorPatchAndIfMatch(t *testing.T
 	t.Cleanup(server.Close)
 
 	cmd := newRootCmd()
-	cmd.SetContext(contextWithBaseURL(context.Background(), server.URL))
+	cmd.SetContext(contextWithBaseURL(t.Context(), server.URL))
 	flags.Project = "example-project"
 	flags.As = "agent-a"
 	d := &liveAttnDaemon{cmd: cmd}

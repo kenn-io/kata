@@ -1,6 +1,7 @@
 package scripts_test
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -39,7 +40,7 @@ func TestDocsScreenshotGeneratorRejectsUnsafeOutputDirectories(t *testing.T) {
 		sentinel := filepath.Join(repo, "must-survive")
 		require.NoError(t, os.WriteFile(sentinel, []byte("keep\n"), 0o600))
 
-		cmd := exec.Command("bash", generator, "--out", "") //nolint:gosec // fixed test-owned script under TempDir
+		cmd := exec.CommandContext(t.Context(), "bash", generator, "--out", "") //nolint:gosec // fixed test-owned script under TempDir
 		cmd.Dir = repo
 		output, err := cmd.CombinedOutput()
 
@@ -58,7 +59,7 @@ func TestDocsScreenshotGeneratorRejectsUnsafeOutputDirectories(t *testing.T) {
 		sentinel := filepath.Join(unowned, "must-survive")
 		require.NoError(t, os.WriteFile(sentinel, []byte("keep\n"), 0o600))
 
-		cmd := exec.Command("bash", generator, "--out", unowned) //nolint:gosec // fixed test-owned script and TempDir output
+		cmd := exec.CommandContext(t.Context(), "bash", generator, "--out", unowned) //nolint:gosec // fixed test-owned script and TempDir output
 		cmd.Dir = repo
 		output, err := cmd.CombinedOutput()
 
@@ -81,7 +82,7 @@ func TestDocsScreenshotGeneratorRejectsUnsafeOutputDirectories(t *testing.T) {
 			t.Skipf("symlinks unavailable: %v", err)
 		}
 
-		cmd := exec.Command("bash", generator, "--out", link) //nolint:gosec // fixed test-owned script and TempDir output
+		cmd := exec.CommandContext(t.Context(), "bash", generator, "--out", link) //nolint:gosec // fixed test-owned script and TempDir output
 		cmd.Dir = repo
 		output, err := cmd.CombinedOutput()
 
@@ -101,7 +102,7 @@ func TestDocsScreenshotGeneratorCreatesAndReplacesOwnedOutput(t *testing.T) {
 	outputDir := filepath.Join(tempDir, "generated")
 
 	for range 2 {
-		cmd := exec.Command("bash", generator, "--out", outputDir) //nolint:gosec // fixed test-owned script and TempDir output
+		cmd := exec.CommandContext(t.Context(), "bash", generator, "--out", outputDir) //nolint:gosec // fixed test-owned script and TempDir output
 		cmd.Dir = repo
 		output, err := cmd.CombinedOutput()
 		require.NoError(t, err, string(output))
@@ -158,7 +159,7 @@ func TestDocsAssetPublisherRejectsInvalidSources(t *testing.T) {
 			tc.mutate(t, source)
 			publisher := installDocsScript(t, repo, "update-assets-branch.sh")
 
-			cmd := exec.Command("bash", publisher, "--source", source) //nolint:gosec // test-owned script and TempDir source
+			cmd := exec.CommandContext(t.Context(), "bash", publisher, "--source", source) //nolint:gosec // test-owned script and TempDir source
 			cmd.Dir = repo
 			output, err := cmd.CombinedOutput()
 
@@ -179,7 +180,7 @@ func TestDocsAssetPublisherCreatesSingleOrphanCommit(t *testing.T) {
 	writeDocsAssets(t, source, "published")
 	publisher := installDocsScript(t, repo, "update-assets-branch.sh")
 
-	cmd := exec.Command("bash", publisher, "--source", source) //nolint:gosec // test-owned script and TempDir source
+	cmd := exec.CommandContext(t.Context(), "bash", publisher, "--source", source) //nolint:gosec // test-owned script and TempDir source
 	cmd.Dir = repo
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
@@ -211,7 +212,7 @@ func TestDocsAssetHydratorForceFetchesAndValidatesRemoteBranch(t *testing.T) {
 	git(t, repo, "fetch", "origin", "docs-assets:refs/remotes/origin/docs-assets")
 	git(t, repo, "branch", "docs-assets", "refs/remotes/origin/docs-assets")
 	hydrator := installDocsScript(t, repo, "hydrate-assets.sh")
-	cmd := exec.Command("bash", hydrator) //nolint:gosec // test-owned script installed under TempDir
+	cmd := exec.CommandContext(t.Context(), "bash", hydrator) //nolint:gosec // test-owned script installed under TempDir
 	cmd.Dir = repo
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
@@ -224,7 +225,7 @@ func TestDocsAssetHydratorForceFetchesAndValidatesRemoteBranch(t *testing.T) {
 	newCommit := commitAssetTree(t, remote, newSource, "new docs assets")
 	gitBare(t, remote, "update-ref", "refs/heads/docs-assets", newCommit)
 
-	cmd = exec.Command("bash", hydrator, "--force") //nolint:gosec // test-owned script installed under TempDir
+	cmd = exec.CommandContext(t.Context(), "bash", hydrator, "--force") //nolint:gosec // test-owned script installed under TempDir
 	cmd.Dir = repo
 	output, err = cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
@@ -257,7 +258,7 @@ func TestDocsAssetHydratorUsesPinnedCommitWithoutRefreshingRemote(t *testing.T) 
 	gitBare(t, remote, "update-ref", "refs/heads/docs-assets", replacementCommit)
 
 	hydrator := installDocsScript(t, repo, "hydrate-assets.sh")
-	cmd := exec.Command("bash", hydrator, "--force") //nolint:gosec // test-owned script installed under TempDir
+	cmd := exec.CommandContext(t.Context(), "bash", hydrator, "--force") //nolint:gosec // test-owned script installed under TempDir
 	cmd.Dir = repo
 	cmd.Env = append(envWithout("KATA_DOCS_ASSETS_COMMIT"), "KATA_DOCS_ASSETS_COMMIT="+pinnedCommit)
 	output, err := cmd.CombinedOutput()
@@ -290,7 +291,7 @@ done
 `), 0o700))
 
 	script := filepath.Join("..", "docs", "screenshots", "generate-web-ui.sh")
-	cmd := exec.Command("bash", script, "--out", outputDir) //nolint:gosec // fixed repository script and TempDir output
+	cmd := exec.CommandContext(t.Context(), "bash", script, "--out", outputDir) //nolint:gosec // fixed repository script and TempDir output
 	cmd.Dir = filepath.Join("..", "web")
 	cmd.Env = append(envWithout("PATH", "KATA_DOCS_SCREENSHOT_DIR", "KATA_FAKE_BUN_ARGS"),
 		"PATH="+fakeBin+":/usr/bin:/bin",
@@ -365,7 +366,7 @@ exit 0
 `), 0o700))
 
 	script := filepath.Join("..", "docs", "screenshots", "generate-federation-tui.sh")
-	cmd := exec.Command("bash", script, "--out", outputDir) //nolint:gosec // fixed repository script and TempDir output
+	cmd := exec.CommandContext(t.Context(), "bash", script, "--out", outputDir) //nolint:gosec // fixed repository script and TempDir output
 	cmd.Dir = filepath.Join("..", "scripts")
 	cmd.Env = append(envWithout("KATA_BIN", "KATA_SERVER", "KATA_AUTH_TOKEN", "KATA_HOME"),
 		"KATA_BIN="+fakeKata,
@@ -497,14 +498,14 @@ func commitAssetTree(t *testing.T, bareRepo, workTree, message string) string {
 
 func assertCommandFails(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...) //nolint:gosec // test-controlled Git arguments from fixed call sites
+	cmd := exec.CommandContext(t.Context(), "git", args...) //nolint:gosec // test-controlled Git arguments from fixed call sites
 	cmd.Dir = dir
 	require.Error(t, cmd.Run())
 }
 
 func git(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...) //nolint:gosec // test-controlled Git arguments from fixed call sites
+	cmd := exec.CommandContext(t.Context(), "git", args...) //nolint:gosec // test-controlled Git arguments from fixed call sites
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	require.NoError(t, err, string(output))
@@ -512,7 +513,7 @@ func git(t *testing.T, dir string, args ...string) {
 
 func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", args...) //nolint:gosec // test-controlled Git arguments from fixed call sites
+	cmd := exec.CommandContext(t.Context(), "git", args...) //nolint:gosec // test-controlled Git arguments from fixed call sites
 	cmd.Dir = dir
 	output, err := cmd.Output()
 	require.NoError(t, err)
@@ -521,37 +522,37 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 
 func gitBare(t *testing.T, bareRepo string, args ...string) {
 	t.Helper()
-	output, err := gitBareCommand(bareRepo, "", nil, args...).CombinedOutput()
+	output, err := gitBareCommand(t.Context(), bareRepo, "", nil, args...).CombinedOutput()
 	require.NoError(t, err, string(output))
 }
 
 func gitBareOutput(t *testing.T, bareRepo string, environment []string, args ...string) string {
 	t.Helper()
-	output, err := gitBareCommand(bareRepo, "", environment, args...).Output()
+	output, err := gitBareCommand(t.Context(), bareRepo, "", environment, args...).Output()
 	require.NoError(t, err)
 	return strings.TrimSpace(string(output))
 }
 
 func gitBareWorkTree(t *testing.T, bareRepo, workTree string, environment []string, args ...string) {
 	t.Helper()
-	output, err := gitBareCommand(bareRepo, workTree, environment, args...).CombinedOutput()
+	output, err := gitBareCommand(t.Context(), bareRepo, workTree, environment, args...).CombinedOutput()
 	require.NoError(t, err, string(output))
 }
 
 func gitBareWorkTreeOutput(t *testing.T, bareRepo, workTree string, environment []string, args ...string) string {
 	t.Helper()
-	output, err := gitBareCommand(bareRepo, workTree, environment, args...).Output()
+	output, err := gitBareCommand(t.Context(), bareRepo, workTree, environment, args...).Output()
 	require.NoError(t, err)
 	return strings.TrimSpace(string(output))
 }
 
-func gitBareCommand(bareRepo, workTree string, environment []string, args ...string) *exec.Cmd {
+func gitBareCommand(ctx context.Context, bareRepo, workTree string, environment []string, args ...string) *exec.Cmd {
 	fullArgs := []string{"--git-dir", bareRepo}
 	if workTree != "" {
 		fullArgs = append(fullArgs, "--work-tree", workTree)
 	}
 	fullArgs = append(fullArgs, args...)
-	cmd := exec.Command("git", fullArgs...) //nolint:gosec // test-controlled Git arguments and TempDir repositories
+	cmd := exec.CommandContext(ctx, "git", fullArgs...) //nolint:gosec // test-controlled Git arguments and TempDir repositories
 	if workTree != "" {
 		cmd.Dir = workTree
 	}

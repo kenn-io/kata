@@ -2,7 +2,6 @@ package kata_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"net/http"
@@ -45,7 +44,9 @@ func TestServiceAccessControllerScopesGlobalAndFilteredReads(t *testing.T) {
 		"/api/v1/audit/closes?project_id=" + strconv.FormatInt(project.Project.ID, 10),
 	}
 	for _, path := range paths {
-		response, err := server.Client().Get(server.URL + path)
+		req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+path, nil)
+		require.NoError(t, reqErr)
+		response, err := server.Client().Do(req)
 		require.NoError(t, err)
 		_ = response.Body.Close()
 		assert.Equal(t, http.StatusNotFound, response.StatusCode)
@@ -78,7 +79,9 @@ func TestServiceAccessControllerScopesStableUIReferenceHydration(t *testing.T) {
 	}
 
 	query := url.Values{"issue_uid": {firstIssue.Issue.UID, secondIssue.Issue.UID}}
-	filtered, err := server.Client().Get(server.URL + "/api/v1/ui/references?" + query.Encode())
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/references?"+query.Encode(), nil)
+	require.NoError(t, reqErr)
+	filtered, err := server.Client().Do(req)
 	require.NoError(t, err)
 	var filteredBody struct {
 		Projects []jsontext.Value `json:"projects"`
@@ -99,7 +102,9 @@ func TestServiceAccessControllerScopesStableUIReferenceHydration(t *testing.T) {
 		filteredBody.Issues[0].UID, filteredBody.Issues[1].UID,
 	})
 
-	global, err := server.Client().Get(server.URL + "/api/v1/ui/references")
+	req, reqErr = http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/ui/references", nil)
+	require.NoError(t, reqErr)
+	global, err := server.Client().Do(req)
 	require.NoError(t, err)
 	_ = global.Body.Close()
 	require.Equal(t, http.StatusNotFound, global.StatusCode)
@@ -133,7 +138,7 @@ func TestServiceAccessControllerScopesFederationEnrollmentBody(t *testing.T) {
 	body := bytes.NewBufferString(`{"spoke_instance_uid":"01HZNQ7VFPK1XGD8R5MABCD4EA","project_id":` +
 		strconv.FormatInt(project.Project.ID, 10) +
 		`,"capabilities":"pull","actor":"ignored"}`)
-	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/federation/enrollments", body)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/api/v1/federation/enrollments", body)
 	require.NoError(t, err)
 	request.Header.Set("Content-Type", "application/json")
 	response, err := server.Client().Do(request)
@@ -160,7 +165,7 @@ func TestServiceAccessControllerScopesInboxDesignationGlobally(t *testing.T) {
 	metadataURL := server.URL + "/api/v1/projects/" +
 		strconv.FormatInt(project.Project.ID, 10) + "/metadata"
 	requestBody := bytes.NewBufferString(`{"actor":"ignored","patch":{"role":"inbox"}}`)
-	httpRequest, err := http.NewRequest(http.MethodPost, metadataURL, requestBody)
+	httpRequest, err := http.NewRequestWithContext(t.Context(), http.MethodPost, metadataURL, requestBody)
 	require.NoError(t, err)
 	httpRequest.Header.Set("Content-Type", "application/json")
 	response, err := server.Client().Do(httpRequest)
@@ -205,7 +210,9 @@ func TestServiceAccessControllerScopesLookupHydrationAndTraversal(t *testing.T) 
 			"/issues/" + source.Issue.ShortID + "/graph",
 	}
 	for _, path := range paths {
-		response, err := server.Client().Get(server.URL + path)
+		req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+path, nil)
+		require.NoError(t, reqErr)
+		response, err := server.Client().Do(req)
 		require.NoError(t, err)
 		_ = response.Body.Close()
 		assert.Equal(t, http.StatusNotFound, response.StatusCode)
@@ -249,7 +256,7 @@ func TestServiceAccessControllerRequiresAllProjectsBeforeUnboundedOperations(t *
 		if requestBody == "" {
 			requestBody = `{}`
 		}
-		request, err := http.NewRequest(tc.method, server.URL+tc.path, bytes.NewBufferString(requestBody))
+		request, err := http.NewRequestWithContext(t.Context(), tc.method, server.URL+tc.path, bytes.NewBufferString(requestBody))
 		require.NoError(t, err)
 		request.Header.Set("Content-Type", "application/json")
 		response, err := server.Client().Do(request)
@@ -306,7 +313,7 @@ func TestServiceAccessControllerDeniesCrossProjectAuthorRewriteBeforeMutation(t 
 		return nil
 	}
 
-	rewriteRequest, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/projects/"+
+	rewriteRequest, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/api/v1/projects/"+
 		strconv.FormatInt(sourceProject.Project.ID, 10)+"/actions/rewrite-author",
 		bytes.NewBufferString(`{"from":"Example User","to":"Replacement User"}`))
 	require.NoError(t, err)
@@ -317,8 +324,10 @@ func TestServiceAccessControllerDeniesCrossProjectAuthorRewriteBeforeMutation(t 
 	require.Equal(t, http.StatusNotFound, rewriteResponse.StatusCode)
 
 	controller.authorize = nil
-	showResponse, err := server.Client().Get(server.URL + "/api/v1/projects/" +
-		strconv.FormatInt(sourceProject.Project.ID, 10) + "/issues/" + source.Issue.ShortID)
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/projects/"+
+		strconv.FormatInt(sourceProject.Project.ID, 10)+"/issues/"+source.Issue.ShortID, nil)
+	require.NoError(t, reqErr)
+	showResponse, err := server.Client().Do(req)
 	require.NoError(t, err)
 	defer func() { _ = showResponse.Body.Close() }()
 	var shown struct {
@@ -333,7 +342,7 @@ func TestServiceAccessControllerDeniesCrossProjectAuthorRewriteBeforeMutation(t 
 
 func TestServiceAccessControllerDerivesLeaseHolderFromSubject(t *testing.T) {
 	controller := &recordingAccessController{}
-	service, err := kata.New(context.Background(), kata.Config{
+	service, err := kata.New(t.Context(), kata.Config{
 		DSN: filepath.Join(t.TempDir(), "service.db"), Access: controller,
 	})
 	require.NoError(t, err)
@@ -369,7 +378,7 @@ func TestServiceAccessControllerDerivesLeaseHolderFromSubject(t *testing.T) {
 	assert.NotEmpty(t, acquired.Holder.Holder)
 	assert.NotEqual(t, "caller-selected", acquired.Holder.Holder)
 	issuePath := server.URL + "/api/v1/projects/" + projectID + "/issues/" + issue.Issue.ShortID
-	ownerEdit, err := http.NewRequest(http.MethodPatch, issuePath,
+	ownerEdit, err := http.NewRequestWithContext(t.Context(), http.MethodPatch, issuePath,
 		bytes.NewBufferString(`{"actor":"ignored","title":"owner edit"}`))
 	require.NoError(t, err)
 	ownerEdit.Header.Set("Content-Type", "application/json")
@@ -381,7 +390,7 @@ func TestServiceAccessControllerDerivesLeaseHolderFromSubject(t *testing.T) {
 	_ = ownerEditResponse.Body.Close()
 	assert.Equal(t, http.StatusOK, ownerEditResponse.StatusCode)
 
-	otherEdit, err := http.NewRequest(http.MethodPatch, issuePath,
+	otherEdit, err := http.NewRequestWithContext(t.Context(), http.MethodPatch, issuePath,
 		bytes.NewBufferString(`{"actor":"ignored","title":"other edit"}`))
 	require.NoError(t, err)
 	otherEdit.Header.Set("Content-Type", "application/json")
@@ -392,7 +401,7 @@ func TestServiceAccessControllerDerivesLeaseHolderFromSubject(t *testing.T) {
 	_ = otherEditResponse.Body.Close()
 	assert.Equal(t, http.StatusConflict, otherEditResponse.StatusCode)
 
-	impersonation, err := http.NewRequest(http.MethodPost, leasePath+"release",
+	impersonation, err := http.NewRequestWithContext(t.Context(), http.MethodPost, leasePath+"release",
 		bytes.NewBufferString(`{"holder":"`+acquired.Holder.Holder+`","client_kind":"cli"}`))
 	require.NoError(t, err)
 	impersonation.Header.Set("Content-Type", "application/json")
@@ -402,7 +411,7 @@ func TestServiceAccessControllerDerivesLeaseHolderFromSubject(t *testing.T) {
 	_ = impersonationResponse.Body.Close()
 	assert.Equal(t, http.StatusConflict, impersonationResponse.StatusCode)
 
-	ownerRelease, err := http.NewRequest(http.MethodPost, leasePath+"release",
+	ownerRelease, err := http.NewRequestWithContext(t.Context(), http.MethodPost, leasePath+"release",
 		bytes.NewBufferString(`{"holder":"another-caller-value","client_kind":"cli"}`))
 	require.NoError(t, err)
 	ownerRelease.Header.Set("Content-Type", "application/json")
@@ -415,7 +424,7 @@ func TestServiceAccessControllerDerivesLeaseHolderFromSubject(t *testing.T) {
 
 func TestServiceAccessControllerRejectsMalformedHostPrincipalBeforeBearerFallback(t *testing.T) {
 	controller := &recordingAccessController{}
-	service, err := kata.New(context.Background(), kata.Config{
+	service, err := kata.New(t.Context(), kata.Config{
 		DSN: filepath.Join(t.TempDir(), "service.db"), Access: controller,
 	})
 	require.NoError(t, err)
@@ -446,7 +455,7 @@ func TestServiceAccessControllerRejectsMalformedHostPrincipalBeforeBearerFallbac
 	}
 	before := len(controller.snapshot())
 	for _, tc := range requests {
-		request, err := http.NewRequest(tc.method, tc.path, bytes.NewBufferString(tc.body))
+		request, err := http.NewRequestWithContext(t.Context(), tc.method, tc.path, bytes.NewBufferString(tc.body))
 		require.NoError(t, err)
 		request.Header.Set("Content-Type", "application/json")
 		request.Header.Set("Authorization", "Bearer invalid-token")
@@ -469,7 +478,7 @@ func TestServiceAccessControllerConcealsUnauthorizedLinkTargetState(t *testing.T
 	active := createAccessIssue(t, server, activeProject.Project.ID, "active target")
 	archived := createAccessIssue(t, server, archivedProject.Project.ID, "archived target")
 
-	archiveRequest, err := http.NewRequest(http.MethodDelete, server.URL+"/api/v1/projects/"+
+	archiveRequest, err := http.NewRequestWithContext(t.Context(), http.MethodDelete, server.URL+"/api/v1/projects/"+
 		strconv.FormatInt(archivedProject.Project.ID, 10)+"?actor=ignored&force=true", nil)
 	require.NoError(t, err)
 	archiveResponse, err := server.Client().Do(archiveRequest)
@@ -488,7 +497,7 @@ func TestServiceAccessControllerConcealsUnauthorizedLinkTargetState(t *testing.T
 	linkPath := server.URL + "/api/v1/projects/" +
 		strconv.FormatInt(sourceProject.Project.ID, 10) + "/issues/" + source.Issue.ShortID + "/links"
 	for _, target := range []string{active.Issue.UID, archived.Issue.UID, "01HZNQ7VFPK1XGD8R5MABCD4EZ"} {
-		request, err := http.NewRequest(http.MethodPost, linkPath, bytes.NewBufferString(
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, linkPath, bytes.NewBufferString(
 			`{"actor":"ignored","type":"related","to_ref":"`+target+`"}`))
 		require.NoError(t, err)
 		request.Header.Set("Content-Type", "application/json")
@@ -522,7 +531,7 @@ func TestServiceAccessControllerRequiresAllProjectsForParentMutations(t *testing
 	basePath := server.URL + "/api/v1/projects/" + strconv.FormatInt(project.Project.ID, 10) +
 		"/issues/" + child.Issue.ShortID
 
-	createRequest, err := http.NewRequest(http.MethodPost, basePath+"/links",
+	createRequest, err := http.NewRequestWithContext(t.Context(), http.MethodPost, basePath+"/links",
 		bytes.NewBufferString(`{"actor":"ignored","type":"parent","to_ref":"`+parent.Issue.UID+`"}`))
 	require.NoError(t, err)
 	createRequest.Header.Set("Content-Type", "application/json")
@@ -531,7 +540,7 @@ func TestServiceAccessControllerRequiresAllProjectsForParentMutations(t *testing
 	_ = createResponse.Body.Close()
 	assert.Equal(t, http.StatusNotFound, createResponse.StatusCode)
 
-	editRequest, err := http.NewRequest(http.MethodPatch, basePath,
+	editRequest, err := http.NewRequestWithContext(t.Context(), http.MethodPatch, basePath,
 		bytes.NewBufferString(`{"actor":"ignored","links_delta":{"set_parent":"`+parent.Issue.UID+`"}}`))
 	require.NoError(t, err)
 	editRequest.Header.Set("Content-Type", "application/json")
@@ -577,7 +586,7 @@ func TestServiceAccessControllerConcealsLinkDeltaTargetsBeforeValidation(t *test
 		"/issues/" + source.Issue.ShortID
 	for _, tc := range requests {
 		t.Run(tc.name, func(t *testing.T) {
-			request, err := http.NewRequest(http.MethodPatch, issuePath,
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodPatch, issuePath,
 				bytes.NewBufferString(`{"actor":"ignored","links_delta":`+tc.delta+`}`))
 			require.NoError(t, err)
 			request.Header.Set("Content-Type", "application/json")
@@ -606,7 +615,7 @@ func TestServiceAccessControllerAuthorizesDeletedGraphPeerBeforeHidingIt(t *test
 	postJSON(t, server.Client(), server.URL+"/api/v1/projects/"+
 		strconv.FormatInt(sourceProject.Project.ID, 10)+"/issues/"+source.Issue.ShortID+"/links",
 		`{"actor":"ignored","type":"related","to_ref":"`+target.Issue.UID+`"}`, nil)
-	deleteRequest, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/projects/"+
+	deleteRequest, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/api/v1/projects/"+
 		strconv.FormatInt(targetProject.Project.ID, 10)+"/issues/"+target.Issue.ShortID+"/actions/delete",
 		bytes.NewBufferString(`{"actor":"ignored"}`))
 	require.NoError(t, err)
@@ -624,8 +633,10 @@ func TestServiceAccessControllerAuthorizesDeletedGraphPeerBeforeHidingIt(t *test
 		return nil
 	}
 
-	response, err := server.Client().Get(server.URL + "/api/v1/projects/" +
-		strconv.FormatInt(sourceProject.Project.ID, 10) + "/issues/" + source.Issue.ShortID + "/graph")
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/projects/"+
+		strconv.FormatInt(sourceProject.Project.ID, 10)+"/issues/"+source.Issue.ShortID+"/graph", nil)
+	require.NoError(t, reqErr)
+	response, err := server.Client().Do(req)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 	assert.Equal(t, http.StatusNotFound, response.StatusCode)
@@ -641,7 +652,7 @@ func TestServiceAccessControllerConcealsForeignRecurrenceIdentity(t *testing.T) 
 			UID string `json:"uid"`
 		} `json:"recurrence"`
 	}
-	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/projects/"+
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/api/v1/projects/"+
 		strconv.FormatInt(targetProject.Project.ID, 10)+"/recurrences",
 		bytes.NewBufferString(`{"actor":"ignored","rrule":"FREQ=WEEKLY","dtstart":"2026-05-15","timezone":"UTC","template":{"title":"weekly review"}}`))
 	require.NoError(t, err)
@@ -656,7 +667,9 @@ func TestServiceAccessControllerConcealsForeignRecurrenceIdentity(t *testing.T) 
 	basePath := server.URL + "/api/v1/projects/" + strconv.FormatInt(sourceProject.Project.ID, 10) +
 		"/recurrences/"
 	for _, uid := range []string{created.Recurrence.UID, "01HZNQ7VFPK1XGD8R5MABCD4EA"} {
-		response, err := server.Client().Get(basePath + uid)
+		req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, basePath+uid, nil)
+		require.NoError(t, reqErr)
+		response, err := server.Client().Do(req)
 		require.NoError(t, err)
 		var body map[string]any
 		require.NoError(t, json.NewDecoder(response.Body).Decode(&body))
@@ -680,7 +693,7 @@ func TestServiceAccessControllerSuppliesFederationReplicaActor(t *testing.T) {
 		"replay_horizon_event_id":1,
 		"actor":"forged actor"
 	}`)
-	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/federation/replicas", body)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/api/v1/federation/replicas", body)
 	require.NoError(t, err)
 	request.Header.Set("Content-Type", "application/json")
 	response, err := server.Client().Do(request)
@@ -717,8 +730,10 @@ func TestServiceAccessControllerAuthorizesProjectsContributingChildCounts(t *tes
 		return nil
 	}
 
-	response, err := server.Client().Get(server.URL + "/api/v1/projects/" +
-		strconv.FormatInt(parentProject.Project.ID, 10) + "/issues")
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/api/v1/projects/"+
+		strconv.FormatInt(parentProject.Project.ID, 10)+"/issues", nil)
+	require.NoError(t, reqErr)
+	response, err := server.Client().Do(req)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 	assert.Equal(t, http.StatusNotFound, response.StatusCode)
@@ -745,7 +760,7 @@ func TestServiceAccessControllerDenialLeavesCrossProjectLinksUnchangedOnPurge(t 
 
 	issuePath := server.URL + "/api/v1/projects/" +
 		strconv.FormatInt(sourceProject.Project.ID, 10) + "/issues/" + source.Issue.ShortID
-	deleteRequest, err := http.NewRequest(http.MethodPost, issuePath+"/actions/delete",
+	deleteRequest, err := http.NewRequestWithContext(t.Context(), http.MethodPost, issuePath+"/actions/delete",
 		bytes.NewBufferString(`{"actor":"ignored"}`))
 	require.NoError(t, err)
 	deleteRequest.Header.Set("Content-Type", "application/json")
@@ -761,7 +776,7 @@ func TestServiceAccessControllerDenialLeavesCrossProjectLinksUnchangedOnPurge(t 
 		}
 		return nil
 	}
-	purgeRequest, err := http.NewRequest(http.MethodPost, issuePath+"/actions/purge",
+	purgeRequest, err := http.NewRequestWithContext(t.Context(), http.MethodPost, issuePath+"/actions/purge",
 		bytes.NewBufferString(`{"actor":"ignored"}`))
 	require.NoError(t, err)
 	purgeRequest.Header.Set("Content-Type", "application/json")
@@ -771,7 +786,9 @@ func TestServiceAccessControllerDenialLeavesCrossProjectLinksUnchangedOnPurge(t 
 	_ = purgeResponse.Body.Close()
 	assert.Equal(t, http.StatusNotFound, purgeResponse.StatusCode)
 
-	showResponse, err := server.Client().Get(issuePath + "?include_deleted=true")
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, issuePath+"?include_deleted=true", nil)
+	require.NoError(t, reqErr)
+	showResponse, err := server.Client().Do(req)
 	require.NoError(t, err)
 	defer func() { _ = showResponse.Body.Close() }()
 	require.Equal(t, http.StatusOK, showResponse.StatusCode)
@@ -804,7 +821,7 @@ func TestServiceAccessControllerScopesCrossProjectLinkMutation(t *testing.T) {
 
 	body := bytes.NewBufferString(`{"actor":"ignored","type":"related","to_ref":"` +
 		target.Issue.UID + `"}`)
-	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/projects/"+
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/api/v1/projects/"+
 		strconv.FormatInt(sourceProject.Project.ID, 10)+"/issues/"+source.Issue.ShortID+"/links", body)
 	require.NoError(t, err)
 	request.Header.Set("Content-Type", "application/json")
@@ -819,7 +836,7 @@ func newAccessTestServer(
 	controller *recordingAccessController,
 ) (*kata.Service, *httptest.Server) {
 	t.Helper()
-	service, err := kata.New(context.Background(), kata.Config{
+	service, err := kata.New(t.Context(), kata.Config{
 		DSN: filepath.Join(t.TempDir(), "service.db"), Access: controller,
 	})
 	require.NoError(t, err)
@@ -837,8 +854,11 @@ func createAccessIssue(t *testing.T, server *httptest.Server, projectID int64, t
 	t.Helper()
 	body, err := json.Marshal(map[string]string{"actor": "ignored", "title": title})
 	require.NoError(t, err)
-	response, err := http.Post(server.URL+"/api/v1/projects/"+strconv.FormatInt(projectID, 10)+
-		"/issues", "application/json", bytes.NewReader(body))
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+"/api/v1/projects/"+strconv.FormatInt(projectID, 10)+
+		"/issues", bytes.NewReader(body))
+	require.NoError(t, reqErr)
+	req.Header.Set("Content-Type", "application/json")
+	response, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = response.Body.Close() }()
 	require.Equal(t, http.StatusOK, response.StatusCode)

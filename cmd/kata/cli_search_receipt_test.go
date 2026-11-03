@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -67,7 +66,7 @@ func TestCLIEmptySearchRetriesFailedReceipt(t *testing.T) {
 		}
 		return &http.Response{StatusCode: 202, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"status":"queued"}`)), Request: r}, nil
 	})
-	cmd.SetContext(context.Background())
+	cmd.SetContext(t.Context())
 	reportCLIEmptySearch(cmd, "missing")
 	reportCLIEmptySearch(cmd, "missing")
 	require.Equal(t, 2, requests, "a failed send leaves the query eligible")

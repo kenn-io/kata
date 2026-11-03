@@ -81,7 +81,7 @@ func TestOpenAPIClientArtifactUpToDate(t *testing.T) {
 		t.Fatalf("write generated spec: %v", err)
 	}
 
-	cmd := exec.Command("go", "run", "github.com/doordash-oss/oapi-codegen-dd/v3/cmd/oapi-codegen@v3.76.5", "-config", "config.yaml", "../openapi.yaml")
+	cmd := exec.CommandContext(t.Context(), "go", "run", "github.com/doordash-oss/oapi-codegen-dd/v3/cmd/oapi-codegen@v3.76.5", "-config", "config.yaml", "../openapi.yaml")
 	cmd.Dir = tmpGenerated
 	cmd.Env = append(os.Environ(), "GOWORK=off")
 	out, err := cmd.CombinedOutput()

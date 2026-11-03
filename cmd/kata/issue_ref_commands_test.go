@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -17,7 +16,7 @@ func TestIssueRefCommandsAcceptUIDsAndShortIDs(t *testing.T) {
 	issue := func(title string) db.Issue {
 		t.Helper()
 		created := createIssueViaHTTPFull(t, env, dir, title)
-		iss, err := env.DB.IssueByShortID(context.Background(), pid, created.ShortID, db.IncludeDeletedNo)
+		iss, err := env.DB.IssueByShortID(t.Context(), pid, created.ShortID, db.IncludeDeletedNo)
 		require.NoError(t, err)
 		return iss
 	}

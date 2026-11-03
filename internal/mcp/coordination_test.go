@@ -39,7 +39,7 @@ func TestNewSectionLoadersRegisterOnlyTheirTools(t *testing.T) {
 
 			listed, err := session.ListTools(t.Context(), nil)
 			require.NoError(t, err)
-			want := append(append([]string(nil), sectionLoaderNames...), test.tools...)
+			want := append(append([]string(nil), sectionLoaderNames...), append([]string{"kata.skills"}, test.tools...)...)
 			sort.Strings(want)
 			require.Equal(t, want, toolNames(listed.Tools))
 		})

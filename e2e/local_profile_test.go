@@ -75,7 +75,8 @@ func TestLocalProfileTwoHomeRecovery(t *testing.T) {
 	}
 	run := func(home, dir string, extraEnv []string, args ...string) (string, int) {
 		t.Helper()
-		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+		// t.Cleanup also calls run, after t.Context() is canceled.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(t.Context()), 40*time.Second)
 		defer cancel()
 		command := exec.CommandContext(ctx, bin, args...) //nolint:gosec // test-built executable and test-owned arguments
 		command.Dir = dir
@@ -133,7 +134,7 @@ func TestLocalProfileTwoHomeRecovery(t *testing.T) {
 	// alongside their own binding, as existing URL workspace discovery requires.
 	repository := t.TempDir()
 	git := func(dir string, args ...string) {
-		command := exec.Command("git", args...) //nolint:gosec // Fixed fixture commands initialize temporary repositories.
+		command := exec.CommandContext(t.Context(), "git", args...) //nolint:gosec // Fixed fixture commands initialize temporary repositories.
 		command.Dir = dir
 		command.Env = append(env(personalHome),
 			"GIT_CONFIG_GLOBAL="+filepath.Join(t.TempDir(), "gitconfig"), "GIT_CONFIG_NOSYSTEM=1")

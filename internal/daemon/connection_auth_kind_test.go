@@ -37,7 +37,7 @@ func TestActorlessConnectionsReportDistinctAuthKind(t *testing.T) {
 			server := daemon.NewServer(tc.config)
 			t.Cleanup(func() { require.NoError(t, server.Close()) })
 			for _, path := range []string{"/api/v1/instance", "/api/v1/ui/snapshot?view=all"} {
-				request := httptest.NewRequest(http.MethodGet, path, nil)
+				request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 				request.RemoteAddr = "192.168.1.10:43210"
 				request = request.WithContext(context.WithValue(request.Context(), http.LocalAddrContextKey, &net.TCPAddr{IP: net.ParseIP("192.168.1.20"), Port: 7777}))
 				if tc.bearer != "" {

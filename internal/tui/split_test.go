@@ -3,10 +3,12 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kit/tui/splitlayout"
 )
@@ -2399,5 +2401,44 @@ func TestSplit_CursorFollow_RetargetsOnSameShortIDDifferentProject(t *testing.T)
 	if m.nextDetailFollowGen <= startGen {
 		t.Errorf("nextDetailFollowGen did not advance; debounce tick not scheduled "+
 			"(gen=%d, start=%d)", m.nextDetailFollowGen, startGen)
+	}
+}
+
+func TestSearchRenderedRowsMatchPagingAndClicks(t *testing.T) {
+	defer snapshotInit(t)()
+	for _, size := range [][2]int{{80, 1}, {80, 2}, {80, 3}, {80, 4}, {80, 9}, {160, 40}} {
+		m := resizeModel(newTestModel(), size[0], size[1])
+		m.authCapabilitiesRequired, m.authCapabilitiesReady = true, true
+		m.activeAuth = AuthInfo{Kind: "none"}
+		m.opts.Mouse = true
+		m.list.issues = makeTestIssues(60)
+		m = m.applyListViewportCache()
+		lines := strings.Split(stripANSI(m.viewContent()), "\n")
+		if len(lines) > size[1] {
+			t.Fatalf("%v: frame has %d rows", size, len(lines))
+		}
+		count := 0
+		for y, line := range lines {
+			if m.layout == splitlayout.Split {
+				line = ansi.Truncate(line, splitConfig.ListWidth(m.width), "")
+			}
+			for i, issue := range m.list.issues {
+				ref := fmt.Sprintf("r%03d", i+1)
+				if !strings.Contains(line, ref) {
+					continue
+				}
+				clicked, _ := updateModel(m, mouseLeftClick(4, y))
+				if clicked.list.selectedUID != issue.UID {
+					t.Errorf("%v row %d shows %s but selected %s", size, y, ref, clicked.list.selectedUID)
+				}
+				count++
+			}
+		}
+		if m.list.pageRows != count {
+			t.Errorf("%v: page rows=%d rendered=%d", size, m.list.pageRows, count)
+		}
+		if size[0] == 80 && count != max(0, size[1]-3) {
+			t.Errorf("%v: compact rows=%d", size, count)
+		}
 	}
 }

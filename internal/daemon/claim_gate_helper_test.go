@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -18,11 +17,12 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/testfix"
 	katauid "go.kenn.io/kata/internal/uid"
 )
 
 func TestClaimGateHelperBypassesProjectsWithoutEnabledFederation(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openClaimGateHelperDB(t)
 	project, issue := createClaimGateHelperIssue(t, store)
 
@@ -32,7 +32,7 @@ func TestClaimGateHelperBypassesProjectsWithoutEnabledFederation(t *testing.T) {
 }
 
 func TestClaimGateHelperHubAllowsUnclaimedIssue(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openClaimGateHelperDB(t)
 	project, issue := createClaimGateHelperIssue(t, store)
 	enableClaimGateHelperHub(t, store, project.ID)
@@ -42,7 +42,7 @@ func TestClaimGateHelperHubAllowsUnclaimedIssue(t *testing.T) {
 }
 
 func TestClaimGateHelperHubDeniesOtherLiveClaimHolder(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openClaimGateHelperDB(t)
 	project, issue := createClaimGateHelperIssue(t, store)
 	enableClaimGateHelperHub(t, store, project.ID)
@@ -65,7 +65,7 @@ func TestClaimGateHelperHubDeniesOtherLiveClaimHolder(t *testing.T) {
 }
 
 func TestClaimGateHelperPendingClaimDoesNotBlockUnclaimedIssue(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openClaimGateHelperDB(t)
 	project, issue := createClaimGateHelperIssue(t, store)
 	enableClaimGateHelperHub(t, store, project.ID)
@@ -88,7 +88,7 @@ func TestClaimGateHelperPendingClaimDoesNotBlockUnclaimedIssue(t *testing.T) {
 }
 
 func TestClaimGateHelperSpokeRefreshesHubStatusBeforeCheckingCache(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openClaimGateHelperDB(t)
 	project, issue := createClaimGateHelperIssue(t, store)
 	claimUID := newClaimGateHelperUID(t)
@@ -132,7 +132,7 @@ func TestClaimGateHelperSpokeRefreshesHubStatusBeforeCheckingCache(t *testing.T)
 }
 
 func TestClaimGateHelperSpokeTransportFailureFallsBackToCachedClaim(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openClaimGateHelperDB(t)
 	project, issue := createClaimGateHelperIssue(t, store)
 	enableClaimGateHelperSpoke(t, store, project, "http://127.0.0.1:1", 99)
@@ -163,7 +163,7 @@ func TestClaimGateHelperSpokeTransportFailureFallsBackToCachedClaim(t *testing.T
 }
 
 func TestClaimGateHelperRelayOfflineResponseFallsBackToCachedClaim(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openClaimGateHelperDB(t)
 	project, issue := createClaimGateHelperIssue(t, store)
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -219,7 +219,7 @@ func TestClaimGateHelperTwoRelaysPreserveOfflineFallbackAndErrors(t *testing.T) 
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			leafStore := openClaimGateHelperDB(t)
 			leafProject, issue := createClaimGateHelperIssue(t, leafStore)
 			relay2Store := openClaimGateHelperDB(t)
@@ -304,7 +304,7 @@ func newClaimGateHelperStatusServer(t *testing.T, store *sqlitestore.Store, proj
 }
 
 func TestClaimGateHelperSpokeHubNotFoundFallsBackForPendingPushIssue(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openClaimGateHelperDB(t)
 	project, issue := createClaimGateHelperIssue(t, store)
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -327,7 +327,7 @@ func TestClaimGateHelperSpokeHubNotFoundFallsBackForPendingPushIssue(t *testing.
 }
 
 func TestClaimGateHelperSpokeHubNotFoundStillFailsAfterIssuePushed(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openClaimGateHelperDB(t)
 	project, issue := createClaimGateHelperIssue(t, store)
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -354,7 +354,7 @@ func TestClaimGateHelperSpokeHubNotFoundStillFailsAfterIssuePushed(t *testing.T)
 }
 
 func TestClaimGateHelperSpokeHubProjectNotFoundStillFailsForPendingPushIssue(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openClaimGateHelperDB(t)
 	project, issue := createClaimGateHelperIssue(t, store)
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -377,7 +377,7 @@ func TestClaimGateHelperSpokeHubProjectNotFoundStillFailsForPendingPushIssue(t *
 }
 
 func TestClaimGateHelperPushSpokeUsesBoundActorForGate(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openClaimGateHelperDB(t)
 	project, issue := createClaimGateHelperIssue(t, store)
 	enableClaimGateHelperSpoke(t, store, project, "http://127.0.0.1:1", 99)
@@ -408,7 +408,7 @@ func TestClaimGateHelperPushSpokeUsesBoundActorForGate(t *testing.T) {
 }
 
 func TestClaimGateHelperPullOnlySpokeRejectsEvenWithCachedClaim(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := openClaimGateHelperDB(t)
 	project, issue := createClaimGateHelperIssue(t, store)
 	enableClaimGateHelperSpokeWithPush(t, store, project, "http://127.0.0.1:1", 99, false)
@@ -442,8 +442,8 @@ func openClaimGateHelperDB(t *testing.T) *sqlitestore.Store {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("KATA_HOME", home)
-	ctx := context.Background()
-	store, err := sqlitestore.Open(ctx, filepath.Join(home, "kata.db"))
+	ctx := t.Context()
+	store, err := testfix.OpenSQLite(ctx, filepath.Join(home, "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 	return store
@@ -451,9 +451,9 @@ func openClaimGateHelperDB(t *testing.T) *sqlitestore.Store {
 
 func createClaimGateHelperIssue(t *testing.T, store *sqlitestore.Store) (db.Project, db.Issue) {
 	t.Helper()
-	project, err := store.CreateProject(context.Background(), "claim-helper")
+	project, err := store.CreateProject(t.Context(), "claim-helper")
 	require.NoError(t, err)
-	issue, _, err := store.CreateIssue(context.Background(), db.CreateIssueParams{
+	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: project.ID,
 		Title:     "claim helper",
 		Author:    "tester",
@@ -464,7 +464,7 @@ func createClaimGateHelperIssue(t *testing.T, store *sqlitestore.Store) (db.Proj
 
 func enableClaimGateHelperHub(t *testing.T, store *sqlitestore.Store, projectID int64) {
 	t.Helper()
-	_, err := store.EnableProjectFederation(context.Background(), projectID, "tester")
+	_, err := store.EnableProjectFederation(t.Context(), projectID, "tester")
 	require.NoError(t, err)
 }
 
@@ -475,7 +475,7 @@ func enableClaimGateHelperSpoke(t *testing.T, store *sqlitestore.Store, project 
 
 func enableClaimGateHelperSpokeWithPush(t *testing.T, store *sqlitestore.Store, project db.Project, hubURL string, hubProjectID int64, pushEnabled bool) {
 	t.Helper()
-	_, err := store.UpsertFederationBinding(context.Background(), db.FederationBinding{
+	_, err := store.UpsertFederationBinding(t.Context(), db.FederationBinding{
 		ProjectID:     project.ID,
 		Role:          db.FederationRoleSpoke,
 		HubURL:        hubURL,

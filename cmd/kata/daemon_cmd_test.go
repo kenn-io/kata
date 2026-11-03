@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -22,6 +23,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -213,7 +215,7 @@ func TestDaemonLocate_JSONReportsLocalUnixConfigAddress(t *testing.T) {
 	socketDir := filepath.Join(t.TempDir(), "socket dir")
 	require.NoError(t, os.Mkdir(socketDir, 0o700))
 	socketPath := filepath.Join(socketDir, "kata.sock")
-	listener, err := net.Listen("unix", socketPath)
+	listener, err := new(net.ListenConfig).Listen(t.Context(), "unix", socketPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = listener.Close() })
 	mux := http.NewServeMux()
@@ -547,7 +549,7 @@ func TestDaemonServesHealthFromPostgres(t *testing.T) {
 	setupKataEnv(t)
 	t.Setenv("PORT", "")
 	t.Setenv(daemonruntime.AutoStartMarkerEnv, "1")
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	t.Setenv("KATA_DSN", dsn)
@@ -586,7 +588,9 @@ func TestDaemonServesHealthFromPostgres(t *testing.T) {
 	}, 5*time.Second, 20*time.Millisecond)
 
 	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get("http://" + runtimeRecord.Address + "/api/v1/health") //nolint:noctx // bounded test client
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+runtimeRecord.Address+"/api/v1/health", nil)
+	require.NoError(t, reqErr)
+	resp, err := client.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -684,7 +688,7 @@ func TestAutostartDaemonPublishesRuntimeThenExitsAfterIdleTimeout(t *testing.T) 
 	}
 	t.Cleanup(func() { newTelemetryReporter = orig })
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	exited := make(chan struct{})
 	go func() {
@@ -748,7 +752,7 @@ model = "example-model"
 	}
 	t.Cleanup(func() { openEmbeddingVectorIndex = originalOpen })
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	exited := make(chan struct{})
 	go func() {
@@ -807,7 +811,7 @@ func readRuntimeRecordFromStartedDaemon(t *testing.T, listen string) (*daemonrun
 	}
 	t.Cleanup(func() { newTelemetryReporter = orig })
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
 		done <- runDaemonWithListen(ctx, listen, false, false)
@@ -854,7 +858,7 @@ func TestDaemonStart_RejectsAgentOutputBeforeStartup(t *testing.T) {
 		resetFlags(t)
 		setupKataEnv(t)
 
-		stdout, stderr, err := executeRootCapture(t, context.Background(), args...)
+		stdout, stderr, err := executeRootCapture(t, t.Context(), args...)
 
 		require.Error(t, err, "args %v", args)
 		ce := requireCLIError(t, err, ExitUsage)
@@ -872,10 +876,11 @@ func TestDaemonStart_DetachesByDefaultAfterStartup(t *testing.T) {
 	oldStart := startDetachedDaemon
 	t.Cleanup(func() { startDetachedDaemon = oldStart })
 	var gotListen string
-	var gotInsecureReadonly bool
-	startDetachedDaemon = func(_ context.Context, listen string, insecureReadonly, _ bool) (daemonStartOutput, error) {
+	var gotInsecureReadonly, gotNoAutoToken bool
+	startDetachedDaemon = func(_ context.Context, listen string, insecureReadonly, noAutoToken bool) (daemonStartOutput, error) {
 		gotListen = listen
 		gotInsecureReadonly = insecureReadonly
+		gotNoAutoToken = noAutoToken
 		return daemonStartOutput{
 			Action:  "started",
 			PID:     1234,
@@ -884,12 +889,13 @@ func TestDaemonStart_DetachesByDefaultAfterStartup(t *testing.T) {
 		}, nil
 	}
 
-	stdout, stderr, err := executeRootCapture(t, context.Background(),
-		"daemon", "start", "--listen", "127.0.0.1:7777", "--insecure-readonly")
+	stdout, stderr, err := executeRootCapture(t, t.Context(),
+		"daemon", "start", "--listen", "127.0.0.1:7777", "--insecure-readonly", "--no-auto-token")
 
 	require.NoError(t, err)
 	assert.Equal(t, "127.0.0.1:7777", gotListen)
 	assert.True(t, gotInsecureReadonly)
+	assert.True(t, gotNoAutoToken)
 	assert.Equal(t, "started pid=1234 address=127.0.0.1:7777\n"+
 		"  web UI:  http://127.0.0.1:28888\n", stdout)
 	assert.Empty(t, stderr)
@@ -951,36 +957,22 @@ func writeRuntimeRecordFor(t *testing.T, home, addr string, pid int) {
 }
 
 func TestDaemonStart_ReplacesIdleAutostartDaemon(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the test helper does not install the Windows daemon stop event watcher")
-	}
 	resetFlags(t)
 	home := setupKataEnv(t)
 	child := startSleepProcess(t)
-	exited := make(chan struct{})
-	go func() {
-		_ = child.Wait()
-		close(exited)
-	}()
-	t.Cleanup(func() {
-		_ = child.Process.Kill()
-		<-exited
-	})
 	server := writeIdleDaemonHealthServer(t, true)
 	writeRuntimeRecordFor(t, home, strings.TrimPrefix(server.URL, "http://"), child.Process.Pid)
 
 	orig := launchDetachedDaemon
 	t.Cleanup(func() { launchDetachedDaemon = orig })
 	launchDetachedDaemon = func(context.Context, string, string, bool, bool) (daemonStartOutput, error) {
-		select {
-		case <-exited:
-			return daemonStartOutput{Action: "started", PID: 4243, Address: "127.0.0.1:7777"}, nil
-		default:
+		if kitdaemon.ProcessAlive(child.Process.Pid) {
 			return daemonStartOutput{}, errors.New("replacement started before the idle daemon stopped")
 		}
+		return daemonStartOutput{Action: "started", PID: 4243, Address: "127.0.0.1:7777"}, nil
 	}
 
-	out, err := defaultStartDetachedDaemon(context.Background(), "", false, false)
+	out, err := defaultStartDetachedDaemon(t.Context(), "", false, false)
 
 	require.NoError(t, err)
 	assert.Equal(t, "replaced", out.Action)
@@ -989,17 +981,9 @@ func TestDaemonStart_ReplacesIdleAutostartDaemon(t *testing.T) {
 }
 
 func TestDaemonStart_ReplacesIdleDaemonDiscoveredAfterCutover(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the test helper does not install the Windows daemon stop event watcher")
-	}
 	resetFlags(t)
 	home := setupKataEnv(t)
 	child := startSleepProcess(t)
-	exited := make(chan struct{})
-	go func() {
-		_ = child.Wait()
-		close(exited)
-	}()
 	server := writeIdleDaemonHealthServer(t, true)
 	address := strings.TrimPrefix(server.URL, "http://")
 	launches := 0
@@ -1011,15 +995,13 @@ func TestDaemonStart_ReplacesIdleDaemonDiscoveredAfterCutover(t *testing.T) {
 			writeRuntimeRecordFor(t, home, address, child.Process.Pid)
 			return daemonStartOutput{Action: "already_running", PID: child.Process.Pid, Address: address}, nil
 		}
-		select {
-		case <-exited:
-			return daemonStartOutput{Action: "started", PID: 4243, Address: address}, nil
-		default:
+		if kitdaemon.ProcessAlive(child.Process.Pid) {
 			return daemonStartOutput{}, errors.New("replacement started before the idle daemon stopped")
 		}
+		return daemonStartOutput{Action: "started", PID: 4243, Address: address}, nil
 	}
 
-	out, err := defaultStartDetachedDaemon(context.Background(), address, false, false)
+	out, err := defaultStartDetachedDaemon(t.Context(), address, false, false)
 
 	require.NoError(t, err)
 	assert.Equal(t, "replaced", out.Action)
@@ -1041,7 +1023,7 @@ func TestDaemonStart_KeepsResidentDaemonWithoutIdleShutdown(t *testing.T) {
 		return daemonStartOutput{}, errors.New("resident daemon must not be replaced")
 	}
 
-	out, err := defaultStartDetachedDaemon(context.Background(), "", false, false)
+	out, err := defaultStartDetachedDaemon(t.Context(), "", false, false)
 
 	require.NoError(t, err)
 	assert.Equal(t, "already_running", out.Action)
@@ -1060,7 +1042,7 @@ func TestDaemonStart_ReportsReplacedDaemon(t *testing.T) {
 		}, nil
 	}
 
-	stdout, stderr, err := executeRootCapture(t, context.Background(), "daemon", "start")
+	stdout, stderr, err := executeRootCapture(t, t.Context(), "daemon", "start")
 
 	require.NoError(t, err)
 	assert.Equal(t, "replaced auto-started daemon pid=1111; started pid=1234 address=127.0.0.1:7777\n", stdout)
@@ -1072,7 +1054,7 @@ func TestDaemonStart_ListenConflictWithExistingDaemon(t *testing.T) {
 	home := setupKataEnv(t)
 	require.NoError(t, writeRuntimeFor(home, "127.0.0.1:7777"))
 
-	out, err := defaultStartDetachedDaemon(context.Background(), "100.64.0.5:7777", false, false)
+	out, err := defaultStartDetachedDaemon(t.Context(), "100.64.0.5:7777", false, false)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "daemon already running")
@@ -1086,7 +1068,7 @@ func TestDaemonStart_ListenMatchesExistingDaemon(t *testing.T) {
 	home := setupKataEnv(t)
 	require.NoError(t, writeRuntimeFor(home, "100.64.0.5:7777"))
 
-	out, err := defaultStartDetachedDaemon(context.Background(), "100.64.0.5:7777", false, false)
+	out, err := defaultStartDetachedDaemon(t.Context(), "100.64.0.5:7777", false, false)
 
 	require.NoError(t, err)
 	assert.Equal(t, "already_running", out.Action)
@@ -1100,7 +1082,7 @@ func TestDaemonStart_ExplicitListenMatchIgnoresMalformedConfig(t *testing.T) {
 	require.NoError(t, writeRuntimeFor(home, "100.64.0.5:7777"))
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("listen =\n"), 0o600))
 
-	out, err := defaultStartDetachedDaemon(context.Background(), "100.64.0.5:7777", false, false)
+	out, err := defaultStartDetachedDaemon(t.Context(), "100.64.0.5:7777", false, false)
 
 	require.NoError(t, err)
 	assert.Equal(t, "already_running", out.Action)
@@ -1115,7 +1097,7 @@ func TestDaemonStart_ConfigListenConflictWithExistingDaemon(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"),
 		[]byte(`listen = "100.64.0.5:7777"`+"\n"), 0o600))
 
-	out, err := defaultStartDetachedDaemon(context.Background(), "", false, false)
+	out, err := defaultStartDetachedDaemon(t.Context(), "", false, false)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "daemon already running")
@@ -1130,7 +1112,7 @@ func TestDaemonStart_PortListenConflictWithExistingDaemon(t *testing.T) {
 	t.Setenv("PORT", "8080")
 	require.NoError(t, writeRuntimeFor(home, "127.0.0.1:7777"))
 
-	out, err := defaultStartDetachedDaemon(context.Background(), "", false, false)
+	out, err := defaultStartDetachedDaemon(t.Context(), "", false, false)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "daemon already running")
@@ -1161,7 +1143,7 @@ func TestDaemonStart_ForegroundKeepsCurrentProcess(t *testing.T) {
 		return nil
 	}
 
-	stdout, stderr, err := executeRootCapture(t, context.Background(),
+	stdout, stderr, err := executeRootCapture(t, t.Context(),
 		"daemon", "start", "--foreground", "--listen", "127.0.0.1:7777", "--insecure-readonly")
 
 	require.NoError(t, err)
@@ -1288,7 +1270,10 @@ func TestDaemonRestart_StartsWhenNoDaemonIsRunning(t *testing.T) {
 
 	orig := startDetachedDaemon
 	t.Cleanup(func() { startDetachedDaemon = orig })
-	startDetachedDaemon = func(context.Context, string, bool, bool) (daemonStartOutput, error) {
+	startDetachedDaemon = func(_ context.Context, listen string, insecureReadonly, noAutoToken bool) (daemonStartOutput, error) {
+		assert.Equal(t, "100.64.0.5:7777", listen)
+		assert.True(t, insecureReadonly)
+		assert.True(t, noAutoToken)
 		return daemonStartOutput{
 			Action:  "started",
 			PID:     4242,
@@ -1297,99 +1282,10 @@ func TestDaemonRestart_StartsWhenNoDaemonIsRunning(t *testing.T) {
 		}, nil
 	}
 
-	out := executeRoot(t, newRootCmd(), "daemon", "restart")
+	out := executeRoot(t, newRootCmd(), "daemon", "restart", "--listen", "100.64.0.5:7777", "--insecure-readonly", "--no-auto-token")
 
 	assert.Equal(t, "started pid=4242 address=127.0.0.1:7777 (was not running)\n"+
 		"  web UI:  http://127.0.0.1:28888\n", string(out))
-}
-
-func TestDaemonRestart_StopsRunningDaemonBeforeStarting(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the test helper does not install the Windows daemon stop event watcher")
-	}
-	resetFlags(t)
-	tmp := setupKataEnv(t)
-
-	child := exec.Command(os.Args[0], "-test.run=TestDaemonCommandSleepHelperProcess", "--") //nolint:gosec // test helper starts this test binary
-	child.Env = append(os.Environ(), "KATA_DAEMON_CMD_SLEEP_HELPER=1")
-	stdin, err := child.StdinPipe()
-	require.NoError(t, err)
-	require.NoError(t, child.Start())
-	exited := make(chan struct{})
-	go func() {
-		_ = child.Wait()
-		close(exited)
-	}()
-	t.Cleanup(func() {
-		_ = stdin.Close()
-		_ = child.Process.Kill()
-		<-exited
-	})
-	writeRuntimePID(t, tmp, child.Process.Pid)
-
-	orig := startDetachedDaemon
-	t.Cleanup(func() { startDetachedDaemon = orig })
-	startDetachedDaemon = func(context.Context, string, bool, bool) (daemonStartOutput, error) {
-		select {
-		case <-exited:
-			return daemonStartOutput{
-				Action: "started", PID: 4243, Address: "127.0.0.1:7777",
-				WebURL: "http://127.0.0.1:28888",
-			}, nil
-		default:
-			return daemonStartOutput{}, errors.New("new daemon started before old daemon stopped")
-		}
-	}
-
-	out := executeRoot(t, newRootCmd(), "daemon", "restart")
-
-	assert.Equal(t, "restarted pid=4243 address=127.0.0.1:7777\n"+
-		"  web UI:  http://127.0.0.1:28888\n", string(out))
-}
-
-func TestDaemonRestart_AllowsFullGracefulShutdownBudget(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the test helper does not install the Windows daemon stop event watcher")
-	}
-	resetFlags(t)
-	tmp := setupKataEnv(t)
-	readyPath := filepath.Join(tmp, "shutdown-delay-ready")
-
-	child := exec.Command(os.Args[0], "-test.run=TestDaemonCommandSleepHelperProcess", "--") //nolint:gosec // test helper starts this test binary
-	child.Env = append(os.Environ(),
-		"KATA_DAEMON_CMD_SLEEP_HELPER=1",
-		"KATA_DAEMON_CMD_SHUTDOWN_DELAY=4s",
-		"KATA_DAEMON_CMD_READY_PATH="+readyPath,
-	)
-	require.NoError(t, child.Start())
-	exited := make(chan struct{})
-	go func() {
-		_ = child.Wait()
-		close(exited)
-	}()
-	t.Cleanup(func() {
-		_ = child.Process.Kill()
-		<-exited
-	})
-	require.Eventually(t, func() bool {
-		_, err := os.Stat(readyPath)
-		return err == nil
-	}, 10*time.Second, 10*time.Millisecond)
-	writeRuntimePID(t, tmp, child.Process.Pid)
-
-	orig := startDetachedDaemon
-	t.Cleanup(func() { startDetachedDaemon = orig })
-	startDetachedDaemon = func(context.Context, string, bool, bool) (daemonStartOutput, error) {
-		return daemonStartOutput{Action: "started", PID: 4244, Address: "127.0.0.1:7777"}, nil
-	}
-
-	out := executeRoot(t, newRootCmd(), "daemon", "restart")
-
-	assert.Equal(t, "restarted pid=4244 address=127.0.0.1:7777\n", string(out))
-}
-
-func TestDaemonRestartReservesProcessExitMarginBeyondDrainBudget(t *testing.T) {
-	require.Equal(t, 5*time.Second, daemonRestartProcessWaitTimeout-daemonShutdownDrainTimeout)
 }
 
 func TestDaemonRestart_JSONReportsStartedDaemon(t *testing.T) {
@@ -1445,30 +1341,31 @@ func TestDaemonRestart_AgentReportsStartedDaemon(t *testing.T) {
 		"web_url=http://127.0.0.1:28888\n", string(out))
 }
 
-func TestDaemonRestart_PassesStartupOverrides(t *testing.T) {
+func TestDaemonRestart_ExplainsDaemonWithoutInstalledExecutable(t *testing.T) {
 	resetFlags(t)
 	setupKataEnv(t)
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	require.NoError(t, ns.EnsureDirs())
+	identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
+	require.True(t, ok)
+	// A current daemon that could not resolve its executable at startup.
+	var unavailable *daemonRestart
+	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{
+		ProcessIdentityV2: identity, PID: os.Getpid(), Network: "tcp", Address: "127.0.0.1:7777",
+		StartedAt: time.Now(), Metadata: unavailable.metadata(),
+	})
+	require.NoError(t, err)
 
-	orig := startDetachedDaemon
-	t.Cleanup(func() { startDetachedDaemon = orig })
-	var gotListen string
-	var gotInsecureReadonly bool
-	startDetachedDaemon = func(_ context.Context, listen string, insecureReadonly, _ bool) (daemonStartOutput, error) {
-		gotListen = listen
-		gotInsecureReadonly = insecureReadonly
-		return daemonStartOutput{Action: "started", PID: 4242, Address: listen}, nil
-	}
+	_, _, err = executeRootCapture(t, t.Context(), "daemon", "restart")
 
-	executeRoot(t, newRootCmd(), "daemon", "restart", "--listen", "100.64.0.5:7777", "--insecure-readonly")
-
-	assert.Equal(t, "100.64.0.5:7777", gotListen)
-	assert.True(t, gotInsecureReadonly)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "could not identify its installed executable at startup")
+	assert.Contains(t, err.Error(), "run 'kata daemon stop', then 'kata daemon start'")
+	assert.NotContains(t, err.Error(), "older kata release")
 }
 
-func TestDaemonRestart_ValidatesReplacementBeforeStopping(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("the test helper does not install the Windows daemon stop event watcher")
-	}
+func TestDaemonRestart_ValidatesStoppedDaemonStartup(t *testing.T) {
 	tests := []struct {
 		name    string
 		setup   func(*testing.T, string)
@@ -1493,7 +1390,7 @@ func TestDaemonRestart_ValidatesReplacementBeforeStopping(t *testing.T) {
 			name: "hooks config",
 			setup: func(t *testing.T, tmp string) {
 				require.NoError(t, os.WriteFile(filepath.Join(tmp, "hooks.toml"),
-					[]byte("[[hook]\nevent =\n"), 0o600))
+					[]byte("[[hook]]\nevent =\n"), 0o600))
 			},
 			wantErr: "parse hooks config",
 		},
@@ -1515,8 +1412,6 @@ model = "example-model"
 			resetFlags(t)
 			tmp := setupKataEnv(t)
 
-			child := startSleepProcess(t)
-			writeRuntimePID(t, tmp, child.Process.Pid)
 			tt.setup(t, tmp)
 
 			orig := startDetachedDaemon
@@ -1527,12 +1422,11 @@ model = "example-model"
 				return daemonStartOutput{}, errors.New("replacement startup attempted")
 			}
 
-			_, _, err := executeRootCapture(t, context.Background(), "daemon", "restart")
+			_, _, err := executeRootCapture(t, t.Context(), "daemon", "restart")
 
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantErr)
 			assert.False(t, startCalled)
-			assert.True(t, kitdaemon.ProcessAlive(child.Process.Pid), "invalid replacement config must leave the daemon running")
 		})
 	}
 }
@@ -1596,7 +1490,9 @@ func TestDaemonFederationConfigUnavailableHubDoesNotDelayReadiness(t *testing.T)
 	}
 
 	client := &http.Client{Timeout: time.Second}
-	resp, err := client.Get(baseURL + "/api/v1/ping") //nolint:noctx // bounded loopback test request
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, baseURL+"/api/v1/ping", nil)
+	require.NoError(t, reqErr)
+	resp, err := client.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -1636,7 +1532,7 @@ func TestDaemonFederationConfigRetriesWhenHubAppearsAndConverges(t *testing.T) {
 	}, 3*time.Second, 20*time.Millisecond)
 
 	var catalogRequests atomic.Int32
-	listener, err := net.Listen("tcp", address)
+	listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", address)
 	require.NoError(t, err)
 	lateServer = &http.Server{ //nolint:gosec // loopback-only test server
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1719,7 +1615,9 @@ func TestDaemonFederationConfigNoMappingsSkipsReconcilerFactory(t *testing.T) {
 
 	baseURL := startDaemonWithFederationConfig(t, "")
 	client := &http.Client{Timeout: time.Second}
-	resp, err := client.Get(baseURL + "/api/v1/ping") //nolint:noctx // bounded loopback test request
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, baseURL+"/api/v1/ping", nil)
+	require.NoError(t, reqErr)
+	resp, err := client.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
@@ -1734,7 +1632,7 @@ url = "https://hub.example"
 `)
 	// Project authorization rejects unknown IDs before catalog resolution.
 	// Use a real local project so this test reaches the configured catalog.
-	createRequest, err := http.NewRequestWithContext(context.Background(), http.MethodPost,
+	createRequest, err := http.NewRequestWithContext(t.Context(), http.MethodPost,
 		baseURL+"/api/v1/projects", strings.NewReader(`{"name":"spoke-project","actor":"operator"}`))
 	require.NoError(t, err)
 	createRequest.Header.Set("Content-Type", "application/json")
@@ -1751,7 +1649,7 @@ url = "https://hub.example"
 	require.Positive(t, project.Project.ID)
 	requestBody := strings.NewReader(`{"hub_catalog":"primary-hub"}`)
 	request, err := http.NewRequestWithContext(
-		context.Background(), http.MethodPost,
+		t.Context(), http.MethodPost,
 		fmt.Sprintf("%s/api/v1/federation/replicas/%d/actions/rebind", baseURL, project.Project.ID), requestBody,
 	)
 	require.NoError(t, err)
@@ -1793,7 +1691,7 @@ func startDaemonWithFederationConfig(t *testing.T, configBody string) string {
 	}
 	t.Cleanup(func() { newTelemetryReporter = originalTelemetry })
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
 		done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false)
@@ -1825,7 +1723,9 @@ func startDaemonWithFederationConfig(t *testing.T, configBody string) string {
 func readDaemonFederationHealth(t *testing.T, baseURL string) daemonFederationHealth {
 	t.Helper()
 	client := &http.Client{Timeout: time.Second}
-	resp, err := client.Get(baseURL + "/api/v1/health") //nolint:noctx // bounded loopback test request
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, baseURL+"/api/v1/health", nil)
+	require.NoError(t, reqErr)
+	resp, err := client.Do(req)
 	require.NoError(t, err)
 	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -1854,7 +1754,7 @@ actor = "user-a"
 
 func unusedLoopbackAddress(t *testing.T) string {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	address := listener.Addr().String()
 	require.NoError(t, listener.Close())
@@ -1895,7 +1795,7 @@ func TestHealth_AgentReportsOK(t *testing.T) {
 	resetFlags(t)
 	env := testenv.New(t)
 	cmd := newRootCmd()
-	cmd.SetContext(contextWithBaseURL(context.Background(), env.URL))
+	cmd.SetContext(contextWithBaseURL(t.Context(), env.URL))
 
 	out := executeRoot(t, cmd, "--agent", "health")
 	assert.Equal(t, "OK health ok=true daemon=running\n", string(out))
@@ -1912,7 +1812,7 @@ func TestDaemonStart_ListenFlagRejectsPublicAddress(t *testing.T) {
 	cmd.SetErr(&buf)
 	cmd.SetArgs([]string{"daemon", "start", "--foreground", "--listen", "8.8.8.8:7777"})
 
-	err := cmd.ExecuteContext(context.Background())
+	err := cmd.ExecuteContext(t.Context())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "non-public")
 }
@@ -1928,7 +1828,7 @@ func TestDaemonStart_ListenFlagRejectsMalformed(t *testing.T) {
 	cmd.SetErr(&buf)
 	cmd.SetArgs([]string{"daemon", "start", "--foreground", "--listen", "not-a-host-port"})
 
-	err := cmd.ExecuteContext(context.Background())
+	err := cmd.ExecuteContext(t.Context())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "--listen")
 }
@@ -2036,7 +1936,7 @@ func TestDaemonStart_PortEnvBindsWildcard(t *testing.T) {
 	cmd.SetErr(&buf)
 	cmd.SetArgs([]string{"daemon", "start", "--foreground"})
 
-	err := cmd.ExecuteContext(context.Background())
+	err := cmd.ExecuteContext(t.Context())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "0.0.0.0:8081")
 }
@@ -2060,7 +1960,7 @@ func TestDaemonStart_ConfigFileListenIsHonored(t *testing.T) {
 	cmd.SetErr(&buf)
 	cmd.SetArgs([]string{"daemon", "start", "--foreground"})
 
-	err := cmd.ExecuteContext(context.Background())
+	err := cmd.ExecuteContext(t.Context())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "non-public",
 		"config.toml listen value must reach the validator")
@@ -2084,7 +1984,7 @@ func TestDaemonStart_FlagWinsOverConfigFile(t *testing.T) {
 	cmd.SetErr(&buf)
 	cmd.SetArgs([]string{"daemon", "start", "--foreground", "--listen", "8.8.8.8:7777"})
 
-	err := cmd.ExecuteContext(context.Background())
+	err := cmd.ExecuteContext(t.Context())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "8.8.8.8")
 	assert.NotContains(t, err.Error(), "1.1.1.1",
@@ -2175,7 +2075,7 @@ func TestDaemonTelemetryProducersIncludeProjectCount(t *testing.T) {
 		workers := newDaemonWorkerGroup()
 		defer func() {
 			cancel()
-			require.True(t, workers.Wait(context.Background()))
+			require.True(t, workers.Wait(t.Context()))
 		}()
 		reporter := &fakeTelemetryReporter{}
 		captureDaemonStartedTelemetry(ctx, store, reporter)
@@ -2320,7 +2220,7 @@ func TestDaemonGitHubSyncHTTPFetcherUsesCredentialConfig(t *testing.T) {
 
 	resolver, ok := captured.CredentialResolver.(*githubsync.CredentialResolver)
 	require.True(t, ok)
-	appKind, err := resolver.ResolveKind(context.Background(), githubsync.Binding{
+	appKind, err := resolver.ResolveKind(t.Context(), githubsync.Binding{
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
@@ -2329,7 +2229,7 @@ func TestDaemonGitHubSyncHTTPFetcherUsesCredentialConfig(t *testing.T) {
 	assert.Equal(t, githubsync.CredentialKindApp, appKind)
 
 	t.Setenv(tokenEnv, "env-token")
-	envKind, err := resolver.ResolveKind(context.Background(), githubsync.Binding{
+	envKind, err := resolver.ResolveKind(t.Context(), githubsync.Binding{
 		Host:  "github.com",
 		Owner: "other-owner",
 		Repo:  "example-repo",
@@ -2371,7 +2271,7 @@ private_key_path = "/secure/example.pem"
 	}
 	t.Cleanup(func() { newGitHubSyncHTTPFetcher = origFetcher })
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() {
 		done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false)
@@ -2396,7 +2296,7 @@ private_key_path = "/secure/example.pem"
 	}
 	resolver, ok := cfg.CredentialResolver.(*githubsync.CredentialResolver)
 	require.True(t, ok)
-	kind, err := resolver.ResolveKind(context.Background(), githubsync.Binding{
+	kind, err := resolver.ResolveKind(t.Context(), githubsync.Binding{
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
@@ -2405,7 +2305,7 @@ private_key_path = "/secure/example.pem"
 	assert.Equal(t, githubsync.CredentialKindApp, kind)
 
 	t.Setenv("EXAMPLE_GITHUB_TOKEN", "env-token")
-	envKind, err := resolver.ResolveKind(context.Background(), githubsync.Binding{
+	envKind, err := resolver.ResolveKind(t.Context(), githubsync.Binding{
 		Host:  "github.com",
 		Owner: "other-owner",
 		Repo:  "example-repo",
@@ -2435,7 +2335,7 @@ func TestDaemonStartGitHubSyncRunnerCreatesOneRunnerWithDaemonDBAndFetcher(t *te
 		wake := startGitHubSyncRunner(ctx, workers, nil, store, fetcher, daemon.NewEventPublisher(bcast, hooks.NewNoop()), log.New(io.Discard, "", 0), nil)
 		defer func() {
 			cancel()
-			require.True(t, workers.Wait(context.Background()))
+			require.True(t, workers.Wait(t.Context()))
 		}()
 
 		synctest.Wait()
@@ -2471,7 +2371,7 @@ func TestDaemonStartGitHubSyncRunnerNilFetcherUsesHTTPFetcher(t *testing.T) {
 		startGitHubSyncRunner(ctx, workers, nil, store, nil, daemon.NewEventPublisher(daemon.NewEventBroadcaster(), hooks.NewNoop()), log.New(io.Discard, "", 0), nil)
 		defer func() {
 			cancel()
-			require.True(t, workers.Wait(context.Background()))
+			require.True(t, workers.Wait(t.Context()))
 		}()
 
 		synctest.Wait()
@@ -2494,7 +2394,7 @@ func TestDaemonGitHubSyncRunnerTickerSyncsDueBindingWithoutManualOnce(t *testing
 		startGitHubSyncRunner(ctx, workers, nil, store, fetcher, daemon.NewEventPublisher(bcast, hooks.NewNoop()), log.New(io.Discard, "", 0), nil)
 		defer func() {
 			cancel()
-			require.True(t, workers.Wait(context.Background()))
+			require.True(t, workers.Wait(t.Context()))
 		}()
 
 		synctest.Wait()
@@ -2524,7 +2424,7 @@ func TestDaemonGitHubSyncRunnerBroadcastsNativeImportEvents(t *testing.T) {
 		startGitHubSyncRunner(ctx, workers, nil, store, fetcher, daemon.NewEventPublisher(bcast, hookSink), log.New(io.Discard, "", 0), nil)
 		defer func() {
 			cancel()
-			require.True(t, workers.Wait(context.Background()))
+			require.True(t, workers.Wait(t.Context()))
 		}()
 
 		synctest.Wait()
@@ -2563,7 +2463,7 @@ func TestDaemonGitHubSyncRunnerDoesNotOverlapWakeWhileBindingIsInFlight(t *testi
 		wake := startGitHubSyncRunner(ctx, workers, nil, store, fetcher, daemon.NewEventPublisher(daemon.NewEventBroadcaster(), hooks.NewNoop()), log.New(io.Discard, "", 0), nil)
 		defer func() {
 			cancel()
-			require.True(t, workers.Wait(context.Background()))
+			require.True(t, workers.Wait(t.Context()))
 		}()
 
 		synctest.Wait()
@@ -2616,7 +2516,7 @@ listen = "127.0.0.1:27123"
 public_origin = "https://daemon.example"
 `), 0o600))
 
-	startup, err := preflightDaemonStartup(context.Background(), "", false, false)
+	startup, err := preflightDaemonStartup(t.Context(), "", false, false)
 	require.NoError(t, err)
 	assert.Equal(t, config.WebConfig{
 		Listen:       "127.0.0.1:27123",
@@ -2636,7 +2536,7 @@ func TestDaemonRuntimeWebMetadata(t *testing.T) {
 	}
 	t.Cleanup(func() { newTelemetryReporter = originalTelemetry })
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false) }()
 
@@ -2684,7 +2584,7 @@ func TestDaemonRuntimeWebMetadata_TokenProtectedReadonlyAllowsLoopbackSession(t 
 	}
 	t.Cleanup(func() { newTelemetryReporter = originalTelemetry })
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", true, false) }()
 
@@ -2828,7 +2728,7 @@ func TestEnsureDaemon_ReturnsExistingURL(t *testing.T) {
 	t.Cleanup(cleanup)
 	require.NoError(t, writeRuntimeFor(tmp, addr))
 
-	url, err := ensureDaemon(context.Background())
+	url, err := ensureDaemon(t.Context())
 	require.NoError(t, err)
 	assert.True(t, strings.HasPrefix(url, "http://"))
 }
@@ -2860,7 +2760,7 @@ func newDaemonGitHubSyncStore(t *testing.T) (*sqlitestore.Store, db.Project, db.
 	t.Helper()
 	store := openKataTestDB(t, filepath.Join(t.TempDir(), "kata.db"))
 	t.Cleanup(func() { _ = store.Close() })
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
 	binding, err := store.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
@@ -2975,15 +2875,18 @@ func (s *recordingDaemonHookSink) eventIDs() []int64 {
 
 func startSleepProcess(t *testing.T) *exec.Cmd {
 	t.Helper()
-	cmd := exec.Command(os.Args[0], "-test.run=TestDaemonCommandSleepHelperProcess", "--") //nolint:gosec // test helper starts this test binary
+	// t.Cleanup owns this process; t.Context() would kill it before that runs.
+	cmd := exec.CommandContext(context.WithoutCancel(t.Context()), os.Args[0], "-test.run=TestDaemonCommandSleepHelperProcess", "--") //nolint:gosec // test helper starts this test binary
 	cmd.Env = append(os.Environ(), "KATA_DAEMON_CMD_SLEEP_HELPER=1")
 	stdin, err := cmd.StdinPipe()
 	require.NoError(t, err)
+	stdout, err := cmd.StdoutPipe()
+	require.NoError(t, err)
 	require.NoError(t, cmd.Start())
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
 	t.Cleanup(func() {
 		_ = stdin.Close()
-		done := make(chan error, 1)
-		go func() { done <- cmd.Wait() }()
 		select {
 		case <-done:
 		case <-time.After(2 * time.Second):
@@ -2991,30 +2894,29 @@ func startSleepProcess(t *testing.T) *exec.Cmd {
 			<-done
 		}
 	})
+	_, err = bufio.NewReader(stdout).ReadString('\n')
+	require.NoError(t, err, "sleep helper did not install its stop watcher")
 	return cmd
 }
 
-func TestDaemonCommandSleepHelperProcess(_ *testing.T) {
+func TestDaemonCommandSleepHelperProcess(t *testing.T) {
 	if os.Getenv("KATA_DAEMON_CMD_SLEEP_HELPER") != "1" {
 		return
 	}
-	if rawDelay := os.Getenv("KATA_DAEMON_CMD_SHUTDOWN_DELAY"); rawDelay != "" {
-		delay, err := time.ParseDuration(rawDelay)
-		if err != nil {
-			os.Exit(2)
-		}
-		shutdown := make(chan os.Signal, 1)
-		signal.Notify(shutdown)
-		if readyPath := os.Getenv("KATA_DAEMON_CMD_READY_PATH"); readyPath != "" {
-			if err := os.WriteFile(readyPath, nil, 0o600); err != nil { //nolint:gosec // test-controlled path under t.TempDir
-				os.Exit(3)
-			}
-		}
-		<-shutdown
-		time.Sleep(delay)
-		os.Exit(0)
+	ns, err := daemonruntime.NewNamespace()
+	require.NoError(t, err)
+	ctx, cancel := signal.NotifyContext(t.Context(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	cleanup := installStopWatcher(ns.DBHash, cancel)
+	fmt.Println("ready")
+	go func() { _, _ = io.Copy(io.Discard, os.Stdin); cancel() }()
+	<-ctx.Done()
+	require.True(t, cleanup(t.Context()))
+	if os.Getenv("KATA_DAEMON_CMD_REMOVE_RECORD") != "" {
+		path, err := (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Path(os.Getpid())
+		require.NoError(t, err)
+		require.NoError(t, os.Remove(path))
 	}
-	_, _ = io.Copy(io.Discard, os.Stdin)
 	os.Exit(0)
 }
 
@@ -3092,7 +2994,8 @@ func TestExternalRootEventWakeUsesActualNativeEventsAndSkipsProjectionLoops(t *t
 	workers := newDaemonWorkerGroup()
 	t.Cleanup(func() {
 		cancel()
-		waitCtx, waitCancel := context.WithTimeout(context.Background(), time.Second)
+		// t.Context() is already canceled when cleanup runs.
+		waitCtx, waitCancel := context.WithTimeout(context.WithoutCancel(t.Context()), time.Second)
 		defer waitCancel()
 		require.True(t, workers.Wait(waitCtx))
 	})
@@ -3160,7 +3063,7 @@ func TestExternalRootEventWakeReconnectsAfterBroadcasterOverflow(t *testing.T) {
 		defer func() {
 			cancel()
 			synctest.Wait()
-			require.True(t, workers.Wait(context.Background()))
+			require.True(t, workers.Wait(t.Context()))
 		}()
 		startExternalRootEventWake(ctx, workers, store, broadcaster, func(id int64) {
 			if id != binding.ID {
@@ -3224,7 +3127,7 @@ func TestExternalRootEventWakeReconnectsAndDiscardsQueuedEventsAfterReset(t *tes
 		defer func() {
 			cancel()
 			synctest.Wait()
-			require.True(t, workers.Wait(context.Background()))
+			require.True(t, workers.Wait(t.Context()))
 		}()
 		startExternalRootEventWake(ctx, workers, store, broadcaster, func(id int64) {
 			if id != binding.ID {
@@ -3270,7 +3173,7 @@ func TestDaemonStartupFailureStopsExternalRootRunnerBeforeReturning(t *testing.T
 	resetFlags(t)
 	setupKataEnv(t)
 	t.Setenv("PORT", "")
-	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	occupied, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, occupied.Close()) })
 	originalTelemetry := newTelemetryReporter
@@ -3278,7 +3181,7 @@ func TestDaemonStartupFailureStopsExternalRootRunnerBeforeReturning(t *testing.T
 	t.Cleanup(func() { newTelemetryReporter = originalTelemetry })
 
 	started := time.Now()
-	err = runDaemonWithListen(context.Background(), occupied.Addr().String(), false, false)
+	err = runDaemonWithListen(t.Context(), occupied.Addr().String(), false, false)
 	require.Error(t, err)
 	assert.Less(t, time.Since(started), 3*time.Second,
 		"runner shutdown must cancel before waiting when startup returns with a live parent context")
@@ -3303,7 +3206,7 @@ func TestDaemonAutoStartWiresExternalRootRunnerDrainAdmission(t *testing.T) {
 	}
 	t.Cleanup(func() { runExternalRootRunner = originalRun })
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false) }()
 
@@ -3352,7 +3255,7 @@ func TestDaemonWithoutConnectorsStartsExternalRootRunnerForDurableBindings(t *te
 	require.NoError(t, err)
 	require.NoError(t, seed.Close())
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false) }()
 	t.Cleanup(func() {
@@ -3403,7 +3306,7 @@ command = %q
 	newTelemetryReporter = func(telemetry.Options) telemetry.Client { return &fakeTelemetryReporter{} }
 	t.Cleanup(func() { newTelemetryReporter = originalTelemetry })
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- runDaemonWithListen(ctx, "127.0.0.1:0", false, false) }()
 	t.Cleanup(func() {
@@ -3464,7 +3367,7 @@ func TestDaemonGitHubSyncProgressTrackerReachesScheduledRunner(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		workers := newDaemonWorkerGroup()
 		wake := startGitHubSyncRunner(ctx, workers, nil, store, fetcher, daemon.NewEventPublisher(nil, hooks.NewNoop()), log.New(io.Discard, "", 0), progress)
-		defer func() { cancel(); require.True(t, workers.Wait(context.Background())) }()
+		defer func() { cancel(); require.True(t, workers.Wait(t.Context())) }()
 
 		synctest.Wait()
 		require.True(t, runner.wasRun())
@@ -3482,7 +3385,7 @@ func TestDaemonGitHubSyncProgressTrackerReachesScheduledRunner(t *testing.T) {
 }
 
 func TestDaemonNotionScheduledProgress(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	store := newRuntimeNotionRecordingStore(openKataTestDB(t, filepath.Join(t.TempDir(), "runtime.db")), make(chan db.IssueSyncStatus, 1))
 	defer func() { require.NoError(t, store.Close()) }()
@@ -3507,12 +3410,12 @@ func TestDaemonNotionScheduledProgress(t *testing.T) {
 	workers := newDaemonWorkerGroup()
 	startGitHubSyncRunner(ctx, workers, nil, store, githubFetcher, daemon.NewEventPublisher(bcast, hooks.NewNoop()), log.New(io.Discard, "", 0), githubTracker)
 	wake := startNotionSyncRunner(ctx, workers, nil, store, fetcher, daemon.NewEventPublisher(bcast, hooks.NewNoop()), log.New(io.Discard, "", 0), tracker)
-	defer func() { cancel(); require.True(t, workers.Wait(context.Background())) }()
+	defer func() { cancel(); require.True(t, workers.Wait(t.Context())) }()
 	server := daemon.NewServer(daemon.ServerConfig{DB: store, NotionSyncFetcher: fetcher, NotionSyncProgress: tracker, GitHubSyncProgress: githubTracker, GitHubSyncFetcher: githubFetcher})
 	waitRuntimeNotion(t, fetcher.sourceStarted)
 	waitRuntimeNotion(t, githubFetcher.blockRepository)
 	githubResponse := httptest.NewRecorder()
-	server.Handler().ServeHTTP(githubResponse, newRuntimeNotionRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issue-sync/github/status", gitHubProject.ID), nil))
+	server.Handler().ServeHTTP(githubResponse, newRuntimeNotionRequest(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issue-sync/github/status", gitHubProject.ID), nil))
 	require.Equal(t, http.StatusOK, githubResponse.Code)
 	var githubStatus runtimeNotionStatus
 	require.NoError(t, json.Unmarshal(githubResponse.Body.Bytes(), &githubStatus))
@@ -3532,7 +3435,7 @@ func TestDaemonNotionScheduledProgress(t *testing.T) {
 	require.NotNil(t, durable.SyncStartedAt)
 	require.Equal(t, *durable.SyncStartedAt, status.Status.Progress.StartedAt)
 	once := httptest.NewRecorder()
-	server.Handler().ServeHTTP(once, newRuntimeNotionPost(fmt.Sprintf("/api/v1/projects/%d/issue-sync/notion/once", project.ID), strings.NewReader(`{}`)))
+	server.Handler().ServeHTTP(once, newRuntimeNotionPost(t.Context(), fmt.Sprintf("/api/v1/projects/%d/issue-sync/notion/once", project.ID), strings.NewReader(`{}`)))
 	require.Equal(t, 409, once.Code, once.Body.String())
 	require.Equal(t, status.Status.Progress, readRuntimeNotionStatus(t, server.Handler(), project.ID).Status.Progress)
 	// Many wakeups coalesce and return while the active content read is blocked.
@@ -3549,7 +3452,7 @@ func TestDaemonNotionScheduledProgress(t *testing.T) {
 	require.NotNil(t, committed.LastSuccessAt)
 	// Drain after the committed success so Finish has removed live progress.
 	cancel()
-	require.True(t, workers.Wait(context.Background()))
+	require.True(t, workers.Wait(t.Context()))
 	status = readRuntimeNotionStatus(t, server.Handler(), project.ID)
 	require.Nil(t, status.Status.Progress)
 	require.Equal(t, 1, status.Status.LastCreated)
@@ -3572,11 +3475,11 @@ func TestDaemonNotionScheduledFactorySharesDependencies(t *testing.T) {
 	original := newNotionSyncDaemonRunner
 	newNotionSyncDaemonRunner = func(cfg notionsync.RunnerConfig) issueSyncDaemonRunner { captured = cfg; return runner }
 	defer func() { newNotionSyncDaemonRunner = original }()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	workers := newDaemonWorkerGroup()
 	admission := activity.WaitableAdmission(func() (*activity.Lease, bool, <-chan struct{}) { return nil, false, nil })
 	wake := startNotionSyncRunner(ctx, workers, admission, store, fetcher, daemon.NewEventPublisher(nil, hooks.NewNoop()), nil, tracker)
-	defer func() { cancel(); require.True(t, workers.Wait(context.Background())) }()
+	defer func() { cancel(); require.True(t, workers.Wait(t.Context())) }()
 	require.Same(t, tracker, captured.Progress)
 	require.Same(t, fetcher, captured.Fetcher)
 	require.Same(t, store, captured.Store)
@@ -3640,7 +3543,7 @@ func runtimeNotionBinding(t *testing.T, store db.Storage, projectID int64) db.Is
 	t.Helper()
 	raw, err := notionsync.EncodeConfig(notionsync.Config{DataSourceID: runtimeNotionSourceID, DatabaseID: runtimeNotionDatabaseID, TitlePropertyID: "title", StatusPropertyID: "status", AssigneePropertyID: "people", DoneStatusIDs: []string{"done"}})
 	require.NoError(t, err)
-	binding, err := store.UpsertIssueSyncBinding(context.Background(), db.UpsertIssueSyncBindingParams{ProjectID: projectID, Provider: "notion", SourceKey: "notion:" + runtimeNotionSourceID, RemoteID: runtimeNotionSourceID, DisplayName: "Tasks", Config: raw, IntervalSeconds: 300})
+	binding, err := store.UpsertIssueSyncBinding(t.Context(), db.UpsertIssueSyncBindingParams{ProjectID: projectID, Provider: "notion", SourceKey: "notion:" + runtimeNotionSourceID, RemoteID: runtimeNotionSourceID, DisplayName: "Tasks", Config: raw, IntervalSeconds: 300})
 	require.NoError(t, err)
 	return binding
 }
@@ -3660,7 +3563,7 @@ type runtimeNotionStatus struct {
 func readRuntimeNotionStatus(t *testing.T, handler http.Handler, projectID int64) runtimeNotionStatus {
 	t.Helper()
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, newRuntimeNotionRequest(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issue-sync/notion/status", projectID), nil))
+	handler.ServeHTTP(response, newRuntimeNotionRequest(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/issue-sync/notion/status", projectID), nil))
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	var status runtimeNotionStatus
 	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &status))
@@ -3682,7 +3585,7 @@ func TestNotionWorkerDrainAndShutdown(t *testing.T) {
 			defer func() { require.NoError(t, store.Close()) }()
 			ctx, cancel := context.WithCancel(t.Context())
 			workers := newDaemonWorkerGroup()
-			defer func() { cancel(); require.True(t, workers.Wait(context.Background())) }()
+			defer func() { cancel(); require.True(t, workers.Wait(t.Context())) }()
 			project, err := store.CreateProject(ctx, "example-project")
 			require.NoError(t, err)
 			runtimeNotionBinding(t, store, project.ID)
@@ -3729,11 +3632,12 @@ func TestNotionWorkerDrainAndShutdown(t *testing.T) {
 	t.Run("Retry-After canceled by shutdown", func(t *testing.T) {
 		store := openKataTestDB(t, filepath.Join(t.TempDir(), "runtime.db"))
 		defer func() { require.NoError(t, store.Close()) }()
-		ctx, cancel := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(t.Context())
 		workers := newDaemonWorkerGroup()
 		t.Cleanup(func() {
 			cancel()
-			stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			// t.Context() is already canceled when cleanup runs.
+			stopCtx, stopCancel := context.WithTimeout(context.WithoutCancel(t.Context()), 5*time.Second)
 			defer stopCancel()
 			require.True(t, workers.Wait(stopCtx))
 		})
@@ -3757,7 +3661,7 @@ func TestNotionWorkerDrainAndShutdown(t *testing.T) {
 		startNotionSyncRunner(ctx, workers, nil, store, fetcher, daemon.NewEventPublisher(nil, hooks.NewNoop()), nil, issuesync.NewProgressTracker())
 		waitRuntimeNotion(t, waiting)
 		cancel()
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		stopCtx, stopCancel := context.WithTimeout(t.Context(), 5*time.Second)
 		defer stopCancel()
 		require.True(t, workers.Wait(stopCtx))
 	})
@@ -3778,14 +3682,14 @@ func (s *runtimeNotionForkSink) EnqueueFrom(_ db.Event, acquire hooks.AcquireAct
 }
 
 // Direct handler fixtures model a request accepted on the owner-local listener.
-func newRuntimeNotionRequest(method, path string, body io.Reader) *http.Request {
-	request := httptest.NewRequest(method, path, body)
+func newRuntimeNotionRequest(ctx context.Context, method, path string, body io.Reader) *http.Request {
+	request := httptest.NewRequestWithContext(ctx, method, path, body)
 	request.RemoteAddr = "127.0.0.1:12345"
 	return request.WithContext(context.WithValue(request.Context(), http.LocalAddrContextKey, &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 7777}))
 }
 
-func newRuntimeNotionPost(path string, body io.Reader) *http.Request {
-	request := newRuntimeNotionRequest(http.MethodPost, path, body)
+func newRuntimeNotionPost(ctx context.Context, path string, body io.Reader) *http.Request {
+	request := newRuntimeNotionRequest(ctx, http.MethodPost, path, body)
 	request.Header.Set("Content-Type", "application/json")
 	return request
 }
@@ -3867,14 +3771,16 @@ func TestDaemonNotionConfigFileClientSharedByEnableAndScheduling(t *testing.T) {
 	require.NotZero(t, created.Project.ID)
 	post(fmt.Sprintf("/api/v1/projects/%d/issue-sync/notion/enable", created.Project.ID), `{"config":{"data_source_id":"11111111-1111-1111-1111-111111111111","done_statuses":["Delivered"]}}`)
 	waitRuntimeNotion(t, scheduledSourceStarted)
-	statusResponse, err := httpClient.Get(fmt.Sprintf("%s/api/v1/projects/%d/issue-sync/notion/status", base, created.Project.ID))
+	req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d/issue-sync/notion/status", base, created.Project.ID), nil)
+	require.NoError(t, reqErr)
+	statusResponse, err := httpClient.Do(req)
 	require.NoError(t, err)
 	var live runtimeNotionStatus
 	require.NoError(t, json.NewDecoder(statusResponse.Body).Decode(&live))
 	require.NoError(t, statusResponse.Body.Close())
 	require.NotNil(t, live.Status.Progress)
 	require.Equal(t, "source", live.Status.Progress.Phase)
-	binding, err := cfg.Store.IssueSyncBindingByProject(context.Background(), created.Project.ID)
+	binding, err := cfg.Store.IssueSyncBindingByProject(t.Context(), created.Project.ID)
 	require.NoError(t, err)
 	require.Equal(t, "source", cfg.Progress.Snapshot(binding.ID, live.Status.Progress.StartedAt).Phase)
 	close(releaseScheduledSource)
@@ -4029,7 +3935,7 @@ func TestDaemonControlsSkipUnknownRecord(t *testing.T) {
 			var err error
 			if action == "update" {
 				var buf bytes.Buffer
-				err = restartDaemonAfterUpdate(t.Context(), &buf)
+				err = restartDaemonAfterUpdate(t.Context(), &buf, "", "v0.2.0")
 				stderr = buf.String()
 			} else {
 				stdout, stderr, err = executeRootCapture(t, t.Context(), "--agent", "daemon", action)

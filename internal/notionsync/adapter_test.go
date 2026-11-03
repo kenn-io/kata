@@ -67,27 +67,27 @@ func newAdapterSession(pages ...PageContent) *adapterSession {
 func adapterStore(t *testing.T) *sqlitestore.Store {
 	t.Helper()
 	t.Setenv("KATA_HOME", t.TempDir())
-	s, err := sqlitestore.Open(context.Background(), filepath.Join(t.TempDir(), "test.db"))
+	s, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, s.Close()) })
 	return s
 }
 func adapterBinding(t *testing.T, s db.Storage, c Config) db.IssueSyncBinding {
 	t.Helper()
-	p, err := s.CreateProject(context.Background(), "example-project")
+	p, err := s.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
 	raw, err := EncodeConfig(c)
 	require.NoError(t, err)
-	b, err := s.UpsertIssueSyncBinding(context.Background(), db.UpsertIssueSyncBindingParams{ProjectID: p.ID, Provider: "notion", SourceKey: "notion:" + sourceID, RemoteID: sourceID, DisplayName: "Example tasks", Config: raw, IntervalSeconds: 300})
+	b, err := s.UpsertIssueSyncBinding(t.Context(), db.UpsertIssueSyncBindingParams{ProjectID: p.ID, Provider: "notion", SourceKey: "notion:" + sourceID, RemoteID: sourceID, DisplayName: "Example tasks", Config: raw, IntervalSeconds: 300})
 	require.NoError(t, err)
 	return b
 }
 func importedIssue(t *testing.T, s db.Storage, b db.IssueSyncBinding, id string) db.Issue {
 	t.Helper()
-	m, err := s.ImportMappingBySource(context.Background(), b.ProjectID, b.SourceKey, "issue", "page:"+id)
+	m, err := s.ImportMappingBySource(t.Context(), b.ProjectID, b.SourceKey, "issue", "page:"+id)
 	require.NoError(t, err)
 	require.NotNil(t, m.IssueID)
-	i, err := s.IssueByID(context.Background(), *m.IssueID)
+	i, err := s.IssueByID(t.Context(), *m.IssueID)
 	require.NoError(t, err)
 	return i
 }
@@ -96,10 +96,10 @@ func adapterRunner(s db.Storage, f Fetcher, at *time.Time) *issuesync.Runner {
 }
 func seedCursor(t *testing.T, s db.Storage, b db.IssueSyncBinding, at time.Time) {
 	t.Helper()
-	_, ok, err := s.ClaimIssueSyncBinding(context.Background(), b.ID, b.Provider, at, at.Add(-time.Hour))
+	_, ok, err := s.ClaimIssueSyncBinding(t.Context(), b.ID, b.Provider, at, at.Add(-time.Hour))
 	require.NoError(t, err)
 	require.True(t, ok)
-	_, err = s.RecordIssueSyncSuccess(context.Background(), db.IssueSyncSuccessParams{BindingID: b.ID, StartedAt: at, At: at, CursorAt: at})
+	_, err = s.RecordIssueSyncSuccess(t.Context(), db.IssueSyncSuccessParams{BindingID: b.ID, StartedAt: at, At: at, CursorAt: at})
 	require.NoError(t, err)
 }
 
@@ -128,7 +128,7 @@ func TestNotionRunImportsAndReplays(t *testing.T) {
 	f := newAdapterSession(p)
 	at := p.Page.UpdatedAt.Add(time.Hour)
 	r := adapterRunner(s, f, &at)
-	first, err := r.RunOnce(context.Background(), b.ID)
+	first, err := r.RunOnce(t.Context(), b.ID)
 	require.NoError(t, err)
 	require.Equal(t, 1, first.Import.Created)
 	require.Equal(t, 0, first.Status.LastComments)
@@ -136,10 +136,10 @@ func TestNotionRunImportsAndReplays(t *testing.T) {
 	require.Equal(t, "[Notion] Example task", i.Title)
 	localTitle := "Local task"
 	priority := int64(2)
-	_, err = s.EditIssueAtomic(context.Background(), db.EditIssueAtomicParams{IssueID: i.ID, Actor: "editor", Title: &localTitle, SetPriority: &priority})
+	_, err = s.EditIssueAtomic(t.Context(), db.EditIssueAtomicParams{IssueID: i.ID, Actor: "editor", Title: &localTitle, SetPriority: &priority})
 	require.NoError(t, err)
 	at = at.Add(time.Hour)
-	replay, err := r.RunOnce(context.Background(), b.ID)
+	replay, err := r.RunOnce(t.Context(), b.ID)
 	require.NoError(t, err)
 	require.Equal(t, 1, replay.Import.Unchanged)
 	i = importedIssue(t, s, b, p.Page.ID)
@@ -149,7 +149,7 @@ func TestNotionRunImportsAndReplays(t *testing.T) {
 	p.Page.StatusID = new("complete-b")
 	f.pages = []Page{p.Page}
 	f.content[p.Page.ID] = p
-	_, err = r.RunOnce(context.Background(), b.ID)
+	_, err = r.RunOnce(t.Context(), b.ID)
 	require.NoError(t, err)
 	i = importedIssue(t, s, b, p.Page.ID)
 	require.Equal(t, "closed", i.Status)
@@ -158,23 +158,23 @@ func TestNotionRunImportsAndReplays(t *testing.T) {
 	p.Page.StatusID = new("active")
 	f.pages = []Page{p.Page}
 	f.content[p.Page.ID] = p
-	_, err = r.RunOnce(context.Background(), b.ID)
+	_, err = r.RunOnce(t.Context(), b.ID)
 	require.NoError(t, err)
 	i = importedIssue(t, s, b, p.Page.ID)
 	require.Equal(t, "open", i.Status)
 	require.Nil(t, i.ClosedAt)
 	require.Nil(t, i.ClosedReason)
 	// Local closure survives an older replay; Session exposes no upstream mutation.
-	i, _, _, err = s.CloseIssue(context.Background(), i.ID, "done", "editor", "", nil)
+	i, _, _, err = s.CloseIssue(t.Context(), i.ID, "done", "editor", "", nil)
 	require.NoError(t, err)
 	p.Page.UpdatedAt = i.UpdatedAt.Add(-time.Second)
 	f.pages = []Page{p.Page}
 	f.content[p.Page.ID] = p
-	_, err = r.RunOnce(context.Background(), b.ID)
+	_, err = r.RunOnce(t.Context(), b.ID)
 	require.NoError(t, err)
 	require.Equal(t, "closed", importedIssue(t, s, b, p.Page.ID).Status)
 	f.pages = nil
-	_, err = r.RunOnce(context.Background(), b.ID)
+	_, err = r.RunOnce(t.Context(), b.ID)
 	require.NoError(t, err)
 	require.Equal(t, "closed", importedIssue(t, s, b, p.Page.ID).Status)
 }
@@ -228,14 +228,14 @@ func TestNotionCursorAndFailure(t *testing.T) {
 			return nil
 		}
 		r := adapterRunner(s, f, &at)
-		res, err := r.RunOnce(context.Background(), b.ID)
+		res, err := r.RunOnce(t.Context(), b.ID)
 		require.NoError(t, err)
 		require.Equal(t, started, *res.Binding.LastCursorAt)
 		f.onPages = func(_ context.Context, since *time.Time) error {
 			require.Equal(t, started.Add(-2*time.Minute), *since)
 			return nil
 		}
-		_, err = r.RunOnce(context.Background(), b.ID)
+		_, err = r.RunOnce(t.Context(), b.ID)
 		require.NoError(t, err)
 	})
 	t.Run("explicit exclusive cutoff before content", func(t *testing.T) {
@@ -255,7 +255,7 @@ func TestNotionCursorAndFailure(t *testing.T) {
 			return nil
 		}
 		f.onContent = func(_ context.Context, page Page) error { require.Equal(t, next.Page.ID, page.ID); return nil }
-		res, err := adapterRunner(s, f, &at).RunOnce(context.Background(), b.ID)
+		res, err := adapterRunner(s, f, &at).RunOnce(t.Context(), b.ID)
 		require.NoError(t, err)
 		require.Equal(t, 1, res.Import.Created)
 	})
@@ -268,11 +268,11 @@ func TestNotionCursorAndFailure(t *testing.T) {
 			seedCursor(t, s, b, previous)
 			wrapped := &adapterFaultStore{Storage: s}
 			f := newAdapterSession(pageFixture())
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			var callerDeadline time.Time
 			if mode == "deadline" {
-				ctx, cancel = context.WithTimeout(context.Background(), 50*time.Millisecond) //nolint:kennlint // deadlinetest: the deadline is the expected result; onContent waits on ctx.Done until it fires
+				ctx, cancel = context.WithTimeout(t.Context(), 50*time.Millisecond) //nolint:kennlint // deadlinetest: the deadline is the expected result; onContent waits on ctx.Done until it fires
 				callerDeadline, _ = ctx.Deadline()
 				defer cancel()
 			}
@@ -341,7 +341,7 @@ func TestNotionCursorAndFailure(t *testing.T) {
 			if mode == "deadline" {
 				require.ErrorIs(t, err, context.DeadlineExceeded)
 			}
-			after, readErr := s.IssueSyncBindingByID(context.Background(), b.ID)
+			after, readErr := s.IssueSyncBindingByID(t.Context(), b.ID)
 			require.NoError(t, readErr)
 			require.Equal(t, previous, *after.LastCursorAt)
 			switch mode {
@@ -352,7 +352,7 @@ func TestNotionCursorAndFailure(t *testing.T) {
 			case "claim theft":
 				require.Equal(t, 1, wrapped.calls)
 				require.Zero(t, res.Import.Created)
-				_, lookupErr := s.ImportMappingBySource(context.Background(), b.ProjectID, b.SourceKey, "issue", "page:"+pageFixture().Page.ID)
+				_, lookupErr := s.ImportMappingBySource(t.Context(), b.ProjectID, b.SourceKey, "issue", "page:"+pageFixture().Page.ID)
 				require.ErrorIs(t, lookupErr, db.ErrNotFound)
 			default:
 				require.Zero(t, wrapped.calls)
@@ -362,7 +362,7 @@ func TestNotionCursorAndFailure(t *testing.T) {
 				require.Equal(t, 64, completed, "serialized item metadata makes 64 one-MiB bodies exceed the aggregate bound")
 			}
 			if mode == "claim theft" {
-				status, readErr := s.IssueSyncStatusByProject(context.Background(), b.ProjectID)
+				status, readErr := s.IssueSyncStatusByProject(t.Context(), b.ProjectID)
 				require.NoError(t, readErr)
 				require.Equal(t, at.Add(31*time.Minute), *status.SyncStartedAt)
 			}
@@ -399,7 +399,7 @@ func TestNotionSchemaDrift(t *testing.T) {
 			f.pages = []Page{p.Page}
 			f.content[p.Page.ID] = p
 			at := p.Page.UpdatedAt.Add(time.Hour)
-			res, err := adapterRunner(s, f, &at).RunOnce(context.Background(), b.ID)
+			res, err := adapterRunner(s, f, &at).RunOnce(t.Context(), b.ID)
 			if mode == "property removed" || mode == "option removed" || mode == "unknown status" {
 				require.Error(t, err)
 				require.Zero(t, res.Import.Created)
@@ -434,7 +434,7 @@ func TestNotionRunSkipsUnavailablePages(t *testing.T) {
 	f := newAdapterSession(pages...)
 	f.onContent = func(_ context.Context, p Page) error { require.Equal(t, pages[3].Page.ID, p.ID); return nil }
 	at := pageFixture().Page.UpdatedAt.Add(time.Hour)
-	res, err := adapterRunner(s, f, &at).RunOnce(context.Background(), b.ID)
+	res, err := adapterRunner(s, f, &at).RunOnce(t.Context(), b.ID)
 	require.NoError(t, err)
 	require.Equal(t, 1, res.Import.Created)
 }
@@ -457,7 +457,7 @@ func TestNotionProgressPhases(t *testing.T) {
 	f.onContent = func(context.Context, Page) error { assertPhase("content", 0, 1); return nil }
 	wrapped := &adapterFaultStore{Storage: s, beforeImport: func(db.ImportBatchParams) error { assertPhase("importing", 0, 1); return nil }, beforeSuccess: func() error { assertPhase("finalizing", 0, 0); return nil }}
 	r := NewRunner(RunnerConfig{Store: wrapped, Fetcher: f, Clock: func() time.Time { return at }, Progress: tracker})
-	_, err := r.RunOnce(context.Background(), b.ID)
+	_, err := r.RunOnce(t.Context(), b.ID)
 	require.NoError(t, err)
 	require.Nil(t, tracker.Snapshot(b.ID, at))
 }
@@ -488,7 +488,7 @@ func TestNotionEventsAfterCommit(t *testing.T) {
 		deliveries++
 		return errors.New("sink unavailable")
 	}})
-	res, err := r.RunOnce(context.Background(), b.ID)
+	res, err := r.RunOnce(t.Context(), b.ID)
 	require.NoError(t, err)
 	require.Equal(t, 5001, res.Import.Created)
 	require.Equal(t, 2, deliveries)
@@ -507,11 +507,11 @@ func TestNotionProgressPagesBeforeCutoff(t *testing.T) {
 	next.Page.UpdatedAt = next.Page.UpdatedAt.Add(time.Second)
 	f := newAdapterSession(p, next)
 	at := p.Page.UpdatedAt.Add(time.Hour)
-	_, ok, err := s.ClaimIssueSyncBinding(context.Background(), b.ID, "notion", at, at.Add(-time.Hour))
+	_, ok, err := s.ClaimIssueSyncBinding(t.Context(), b.ID, "notion", at, at.Add(-time.Hour))
 	require.NoError(t, err)
 	require.True(t, ok)
 	pagesCompleted := -1
-	ctx := issuesync.WithProgressReporter(context.Background(), func(phase string, completed, total int) {
+	ctx := issuesync.WithProgressReporter(t.Context(), func(phase string, completed, total int) {
 		if phase == "pages" {
 			pagesCompleted = completed
 			require.Zero(t, total)
@@ -544,7 +544,7 @@ func TestNotionRunValidatesBindingBeforeReads(t *testing.T) {
 			case "store":
 				a = NewAdapter(nil, f)
 			}
-			_, err := a.Prepare(context.Background(), b, time.Now())
+			_, err := a.Prepare(t.Context(), b, time.Now())
 			require.Error(t, err)
 			require.NotContains(t, err.Error(), "secret-marker")
 		})
@@ -556,7 +556,7 @@ func TestNotionRunValidatesCompleteBatch(t *testing.T) {
 	b := adapterBinding(t, s, configFixture(t))
 	f := newAdapterSession(pageFixture(), pageFixture())
 	at := pageFixture().Page.UpdatedAt.Add(time.Hour)
-	res, err := adapterRunner(s, f, &at).RunOnce(context.Background(), b.ID)
+	res, err := adapterRunner(s, f, &at).RunOnce(t.Context(), b.ID)
 	require.Error(t, err)
 	require.Zero(t, res.Import.Created)
 	require.Nil(t, res.Binding.LastCursorAt)
@@ -582,7 +582,7 @@ func TestNotionSchemaSourceAndParentIdentity(t *testing.T) {
 			}
 			at := p.Page.UpdatedAt.Add(time.Hour)
 			wrapped := &adapterFaultStore{Storage: s}
-			res, err := adapterRunner(wrapped, f, &at).RunOnce(context.Background(), b.ID)
+			res, err := adapterRunner(wrapped, f, &at).RunOnce(t.Context(), b.ID)
 			require.Error(t, err)
 			require.Zero(t, wrapped.calls)
 			if mode == "content status" {
@@ -598,23 +598,23 @@ func TestNotionRunStaleClaimHorizon(t *testing.T) {
 	s := adapterStore(t)
 	b := adapterBinding(t, s, configFixture(t))
 	started := pageFixture().Page.UpdatedAt.Add(time.Hour)
-	_, ok, err := s.ClaimIssueSyncBinding(context.Background(), b.ID, "notion", started, started.Add(-time.Hour))
+	_, ok, err := s.ClaimIssueSyncBinding(t.Context(), b.ID, "notion", started, started.Add(-time.Hour))
 	require.NoError(t, err)
 	require.True(t, ok)
 	at := started.Add(29 * time.Minute)
 	f := newAdapterSession(pageFixture())
 	r := adapterRunner(s, f, &at)
-	_, err = r.RunOnce(context.Background(), b.ID)
+	_, err = r.RunOnce(t.Context(), b.ID)
 	require.ErrorIs(t, err, db.ErrIssueSyncAlreadyRunning)
 	at = started.Add(31 * time.Minute)
-	res, err := r.RunOnce(context.Background(), b.ID)
+	res, err := r.RunOnce(t.Context(), b.ID)
 	require.NoError(t, err)
 	require.Equal(t, 1, res.Import.Created)
 	require.Equal(t, at, *res.Binding.LastCursorAt)
 }
 
 func TestNotionRunTitlePrefixPresentation(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := adapterStore(t)
 	config := configFixture(t)
 	binding := adapterBinding(t, store, config)

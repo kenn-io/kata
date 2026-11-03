@@ -42,6 +42,7 @@ func (o *OptionalInt) OnParamSet(isSet bool, _ any) {
 // joins from the live issues table at response time (so old events render
 // correctly across cutovers and federation merges).
 type EventEnvelope struct {
+	OriginSpokeName     string  `json:"origin_spoke_name,omitempty"`
 	EventID             int64   `json:"event_id"`
 	EventUID            string  `json:"event_uid"`
 	OriginInstanceUID   string  `json:"origin_instance_uid"`

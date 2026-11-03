@@ -9,6 +9,11 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/stretchr/testify/require"
+
 	"go.kenn.io/kit/tui/splitlayout"
 )
 
@@ -314,7 +319,7 @@ func TestSnapshot_NewIssueDiscardConfirmModal(t *testing.T) {
 }
 
 // TestSnapshot_List_SearchBarActive covers the inline command bar
-// in place of the chip strip when chrome.input.kind == inputSearchBar.
+// above the table when chrome.input.kind == inputSearchBar.
 // The footer help row swaps to the bar's enter/esc/ctrl+u keys.
 func TestSnapshot_List_SearchBarActive(t *testing.T) {
 	defer snapshotInit(t)()
@@ -810,4 +815,97 @@ func snapLabelPromptModel() Model {
 		projectID: 7, issueShortID: dm.issue.ShortID, detailGen: dm.gen,
 	})
 	return m
+}
+
+// Search stays above the records even with no matches or a narrow split pane.
+func TestListPersistentSearch(t *testing.T) {
+	defer snapshotInit(t)()
+	for _, size := range [][2]int{{80, 9}, {80, 10}, {160, 40}} {
+		for _, state := range []string{"ready", "loading", "error"} {
+			for _, query := range []string{"", "no-match-anywhere"} {
+				for _, editing := range []bool{false, true} {
+					m := resizeModel(newTestModel(), size[0], size[1])
+					m.authCapabilitiesRequired, m.authCapabilitiesReady = true, true
+					m.activeAuth = AuthInfo{Kind: "none"}
+					m.list.issues = makeTestIssues(30)
+					m.list.filter.Search = query
+					m.list.loading = state == "loading"
+					if state == "error" {
+						m.list.err = fmt.Errorf("unavailable")
+					}
+					if editing {
+						next, open := updateModel(m, keyRune('/'))
+						if open == nil {
+							t.Fatal("search did not open")
+						}
+						m, _ = updateModel(next, open())
+						m = sendRune(m, 'z')
+					}
+					lines := strings.Split(stripANSI(m.viewContent()), "\n")
+					row := 1
+					if m.layout == splitlayout.Split {
+						row = 2
+					}
+					want := "/" + query
+					if editing {
+						want += "z"
+					} else if query == "" {
+						want = "/ search"
+					}
+					if len(lines) <= row || !strings.Contains(lines[row], want) {
+						t.Errorf("%v %s editing=%v: search %q absent from final frame", size, state, editing, want)
+						continue
+					}
+					if !strings.Contains(lines[row], "open:") {
+						t.Errorf("%v %s: short search hides counts", size, state)
+					}
+					if lipgloss.Width(lines[row]) > size[0] {
+						t.Errorf("search overflow: %q", lines[row])
+					}
+					if state != "ready" && !strings.Contains(strings.Join(lines[row+1:], "\n"), map[string]string{"loading": "loading…", "error": "unavailable"}[state]) {
+						t.Errorf("%v: missing %s body", size, state)
+					}
+				}
+			}
+		}
+	}
+
+	for _, initialSize := range [][2]int{{80, 9}, {160, 40}} {
+		m := resizeModel(newTestModel(), initialSize[0], initialSize[1])
+		m.authCapabilitiesRequired, m.authCapabilitiesReady = true, true
+		m.activeAuth = AuthInfo{Kind: "none"}
+		m.list.filter.Search = strings.Repeat("a", 70) + "TAIL"
+		m, cmd := updateModel(m, keyRune('/'))
+		require.NotNil(t, cmd)
+		m, _ = updateModel(m, cmd())
+		require.Equal(t, inputSearchBar, m.input.kind)
+		check := func(want string) {
+			t.Helper()
+			row := 1
+			if m.layout == splitlayout.Split {
+				row = 2
+			}
+			raw := strings.Split(m.viewContent(), "\n")[row]
+			width := m.width
+			if m.layout == splitlayout.Split {
+				width = splitConfig.ListWidth(m.width)
+			}
+			left := ansi.Truncate(raw, width, "")
+			require.Contains(t, stripANSI(left), want)
+			require.Regexp(t, `\x1b\[(?:[0-9]+;)*7(?:;[0-9]+)*m`, left, "final frame must preserve the input caret styling")
+		}
+		check("TAIL ")
+		m = sendKey(m, tea.KeyEnd)
+		m = sendRune(m, 'Z')
+		check("TAILZ ")
+		for range 3 {
+			m = sendKey(m, tea.KeyLeft)
+		}
+		m = sendRune(m, 'X')
+		check("TAXI")
+		for _, size := range [][2]int{{80, 9}, {80, 4}, {80, 40}, {240, 40}, {160, 40}} {
+			m = resizeModel(m, size[0], size[1])
+			check("TAXI")
+		}
+	}
 }

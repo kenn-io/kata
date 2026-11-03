@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -69,7 +68,7 @@ func TestComment_RelationshipFlagSuggestsEditCommentComposition(t *testing.T) {
 	resetRunEEntered(t)
 	resetFlags(t)
 
-	_, stderr, err := executeRootCapture(t, context.Background(),
+	_, stderr, err := executeRootCapture(t, t.Context(),
 		"comment", "abc4", "--blocks", "d4ex")
 
 	require.Error(t, err)

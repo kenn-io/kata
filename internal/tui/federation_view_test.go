@@ -852,7 +852,7 @@ func TestFederationEnroll_MissingSpokeInstanceBlocksBeforeHubMutation(t *testing
 	})
 
 	result, err := runFederationEnrollment(
-		context.Background(),
+		t.Context(),
 		m.federation.draft,
 		"",
 		m.activeDaemon,

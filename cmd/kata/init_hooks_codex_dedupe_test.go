@@ -28,13 +28,13 @@ func userCodexContractFixture(t *testing.T) string {
 func TestApplyCodexHooks_DeduplicatesUserContract(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CODEX_HOME", t.TempDir())
-	_, _, err := applyCodexHooks(dir)
+	_, _, err := applyCodexHooks(t.Context(), dir)
 	require.NoError(t, err)
 	userPath := userCodexContractFixture(t)
 	userBefore, err := os.ReadFile(userPath) //nolint:gosec // test-owned config under TempDir
 	require.NoError(t, err)
 
-	changed, notes, err := applyCodexHooks(dir)
+	changed, notes, err := applyCodexHooks(t.Context(), dir)
 	require.NoError(t, err)
 	assert.True(t, changed)
 	assert.Equal(t, []string{"removed workspace contract hook: " + userPath + " already injects it"}, notes)
@@ -61,7 +61,7 @@ func TestApplyCodexHooks_UserContractWithShortTimeoutKeepsWorkspaceDefault(t *te
 	userBefore, err := os.ReadFile(userPath) //nolint:gosec // test-owned config under TempDir
 	require.NoError(t, err)
 
-	changed, notes, err := applyCodexHooks(dir)
+	changed, notes, err := applyCodexHooks(t.Context(), dir)
 	require.NoError(t, err)
 	assert.True(t, changed)
 	assert.Empty(t, notes)
@@ -87,7 +87,7 @@ func TestApplyCodexHooks_KeepsTrackedWorkspace(t *testing.T) {
 			writeCodexFixture(t, path, tc.data)
 			runGit(t, dir, "add", "--", ".codex/hooks.json")
 			userPath := userCodexContractFixture(t)
-			changed, notes, err := applyCodexHooks(dir)
+			changed, notes, err := applyCodexHooks(t.Context(), dir)
 			require.NoError(t, err)
 			assert.True(t, changed)
 			want := expectedCodexSessionStartGroups()
@@ -110,7 +110,7 @@ func TestApplyCodexHooks_TrackedWorkspaceWarnsOnTomlHooks(t *testing.T) {
 	writeCodexFixture(t, tomlPath, "[hooks]\n")
 	userPath := userCodexContractFixture(t)
 
-	changed, notes, err := applyCodexHooks(dir)
+	changed, notes, err := applyCodexHooks(t.Context(), dir)
 	require.NoError(t, err)
 	assert.True(t, changed)
 	assert.Equal(t, expectedCodexSessionStartGroups(), readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"])
@@ -142,7 +142,7 @@ func TestApplyCodexHooks_UserContractDetection(t *testing.T) {
 				writeCodexFixture(t, path, tc.data)
 			}
 			dir := t.TempDir()
-			_, notes, err := applyCodexHooks(dir)
+			_, notes, err := applyCodexHooks(t.Context(), dir)
 			require.NoError(t, err)
 			assert.Empty(t, notes, "fresh workspace has no duplicate to remove")
 			groups := readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"].([]any)
@@ -166,7 +166,7 @@ func TestApplyCodexHooks_UserConfigError(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("CODEX_HOME", home)
 			writeCodexFixture(t, filepath.Join(home, "hooks.json"), data)
-			_, _, err := applyCodexHooks(dir)
+			_, _, err := applyCodexHooks(t.Context(), dir)
 			require.Error(t, err)
 			after, err := os.ReadFile(path) //nolint:gosec // test-owned config under TempDir
 			require.NoError(t, err)
@@ -183,7 +183,7 @@ func TestApplyCodexHooks_InstallsWorkspaceWithoutUserHome(t *testing.T) {
 		require.NoError(t, os.Unsetenv(key))
 	}
 
-	changed, notes, err := applyCodexHooks(dir)
+	changed, notes, err := applyCodexHooks(t.Context(), dir)
 	require.NoError(t, err)
 	assert.True(t, changed)
 	assert.Empty(t, notes)
@@ -198,7 +198,7 @@ func TestApplyCodexHooks_SameConfigIsNotDuplicate(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			dir := t.TempDir()
 			t.Setenv("CODEX_HOME", t.TempDir())
-			_, _, err := applyCodexHooks(dir)
+			_, _, err := applyCodexHooks(t.Context(), dir)
 			require.NoError(t, err)
 			workspacePath := filepath.Join(dir, ".codex", "hooks.json")
 			userHome := filepath.Join(dir, ".codex")
@@ -213,7 +213,7 @@ func TestApplyCodexHooks_SameConfigIsNotDuplicate(t *testing.T) {
 			t.Setenv("CODEX_HOME", userHome)
 			before, err := os.ReadFile(workspacePath) //nolint:gosec // test-owned config under TempDir
 			require.NoError(t, err)
-			_, notes, err := applyCodexHooks(dir)
+			_, notes, err := applyCodexHooks(t.Context(), dir)
 			require.NoError(t, err)
 			assert.Empty(t, notes)
 			after, err := os.ReadFile(workspacePath) //nolint:gosec // test-owned config under TempDir
@@ -228,7 +228,7 @@ func TestApplyCodexHooks_SelectedHomeOnly(t *testing.T) {
 	other := userCodexContractFixture(t)
 	t.Setenv("CODEX_HOME", t.TempDir())
 	dir := t.TempDir()
-	_, _, err := applyCodexHooks(dir)
+	_, _, err := applyCodexHooks(t.Context(), dir)
 	require.NoError(t, err)
 	assert.Len(t, readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"], 2)
 	var user map[string]any
@@ -256,7 +256,7 @@ func TestApplyCodexHooks_KeepsTrackedNestedAndLinkedWorkspace(t *testing.T) {
 				runGit(t, repo, "worktree", "add", "--quiet", "-b", "example-branch", dir)
 			}
 			userPath := userCodexContractFixture(t)
-			changed, notes, err := applyCodexHooks(dir)
+			changed, notes, err := applyCodexHooks(t.Context(), dir)
 			require.NoError(t, err)
 			assert.True(t, changed)
 			assert.Equal(t, expectedCodexSessionStartGroups(), readCodexHooks(t, dir)["hooks"].(map[string]any)["SessionStart"])
@@ -280,7 +280,7 @@ func TestApplyCodexHooks_UserContractMatcherCoverage(t *testing.T) {
 		t.Run(tc.matcher, func(t *testing.T) {
 			dir := t.TempDir()
 			t.Setenv("CODEX_HOME", t.TempDir())
-			_, _, err := applyCodexHooks(dir)
+			_, _, err := applyCodexHooks(t.Context(), dir)
 			require.NoError(t, err)
 			userPath := userCodexContractFixture(t)
 			data, err := json.Marshal(map[string]any{"hooks": map[string]any{"SessionStart": []any{
@@ -289,7 +289,7 @@ func TestApplyCodexHooks_UserContractMatcherCoverage(t *testing.T) {
 			require.NoError(t, err)
 			writeCodexFixture(t, userPath, string(data))
 
-			_, notes, err := applyCodexHooks(dir)
+			_, notes, err := applyCodexHooks(t.Context(), dir)
 			require.NoError(t, err)
 			want := expectedCodexSessionStartGroups()
 			if tc.dedupe {

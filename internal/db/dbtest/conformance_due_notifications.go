@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -17,7 +16,7 @@ import (
 
 func checkDueNotificationTimezones(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "planning-timezone-project")
 	require.NoError(t, err)
 	for _, test := range []struct {
@@ -78,7 +77,7 @@ func checkDueNotificationTimezones(t *testing.T, store db.Storage) error {
 
 func checkDueNotificationFederatedClear(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	hub, err := store.CreateProject(ctx, "hub-project")
 	require.NoError(t, err)
 	_, err = store.EnableProjectFederation(ctx, hub.ID, "operator")
@@ -125,7 +124,7 @@ func checkDueNotificationFederatedClear(t *testing.T, store db.Storage) error {
 
 func checkDueNotifications(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "due-notification-project")
 	if err != nil {
 		return fmt.Errorf("create due notification project: %w", err)
@@ -218,7 +217,7 @@ func checkDueNotifications(t *testing.T, store db.Storage) error {
 
 func checkScheduledReached(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "scheduled-reached-project")
 	require.NoError(t, err)
 	owner := "worker-a"
@@ -310,7 +309,7 @@ func checkScheduledReached(t *testing.T, store db.Storage) error {
 // Floors are taken from stored event times, so no wall-clock ordering is assumed.
 func checkScheduledReachedFloor(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "scheduled-floor-project")
 	require.NoError(t, err)
 	reconcile := func(issueID int64, now time.Time, floor *time.Time) db.ReconcileDueNotificationOut {

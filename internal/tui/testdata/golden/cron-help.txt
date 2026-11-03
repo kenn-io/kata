@@ -11,6 +11,7 @@ Cron keys
 j/k    move
 ↵/l    open
 /      filter
+n/e    new/edit
 h/esc  kata
 r      refresh
 1-4    tabs

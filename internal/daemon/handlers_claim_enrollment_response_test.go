@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"net/http"
@@ -42,7 +41,7 @@ func createPrivateEnrollmentIssue(
 	projectID int64,
 ) db.Issue {
 	t.Helper()
-	issue, _, err := env.DB.CreateIssue(context.Background(), db.CreateIssueParams{
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
 		ProjectID: projectID,
 		Title:     enrollmentSecretTitle,
 		Body:      enrollmentSecretBody,
@@ -66,9 +65,9 @@ var enrollmentAssignmentSafeEventTypes = map[string]bool{
 
 func createPrivateContentHubProject(t *testing.T, env *testenv.Env, name string) db.Project {
 	t.Helper()
-	project, err := env.DB.CreateProject(context.Background(), name)
+	project, err := env.DB.CreateProject(t.Context(), name)
 	require.NoError(t, err)
-	_, err = env.DB.EnableProjectFederation(context.Background(), project.ID, "tester")
+	_, err = env.DB.EnableProjectFederation(t.Context(), project.ID, "tester")
 	require.NoError(t, err)
 	return project
 }
@@ -118,7 +117,7 @@ func TestClaim_EnrollmentRenewalReplayCarriesOnlyAssignmentEvents(t *testing.T) 
 
 	// An existing timed assignment turns the enrollment claim into a renewal,
 	// which is the path that attaches assignment replay events.
-	_, err = hub.DB.ClaimOwner(context.Background(), db.ClaimOwnerParams{
+	_, err = hub.DB.ClaimOwner(t.Context(), db.ClaimOwnerParams{
 		IssueID: issue.ID, Actor: "tester", TTL: time.Hour,
 	})
 	require.NoError(t, err)
@@ -127,7 +126,7 @@ func TestClaim_EnrollmentRenewalReplayCarriesOnlyAssignmentEvents(t *testing.T) 
 	// crossed the enrollment boundary.
 	editedTitle := enrollmentSecretEditTitle
 	editedBody := enrollmentSecretEditBody
-	_, _, changed, err := hub.DB.EditIssue(context.Background(), db.EditIssueParams{
+	_, _, changed, err := hub.DB.EditIssue(t.Context(), db.EditIssueParams{
 		IssueID: issue.ID, Title: &editedTitle, Body: &editedBody, Actor: "editor",
 	})
 	require.NoError(t, err)
@@ -172,18 +171,18 @@ func TestClaim_TimedAssignmentForwardingSpokeRepairsWithoutIssueContent(t *testi
 	// spoke must repair assignment state without the claim response carrying
 	// any of it across. The content edit lands after the hub assignment so it
 	// sits inside the renewal replay window a claim-only credential receives.
-	_, err := hub.DB.ClaimOwner(context.Background(), db.ClaimOwnerParams{
+	_, err := hub.DB.ClaimOwner(t.Context(), db.ClaimOwnerParams{
 		IssueID: issue.ID, Actor: "tester", TTL: time.Hour,
 	})
 	require.NoError(t, err)
 	editedTitle := enrollmentSecretEditTitle
 	editedBody := enrollmentSecretEditBody
-	_, _, changed, err := hub.DB.EditIssue(context.Background(), db.EditIssueParams{
+	_, _, changed, err := hub.DB.EditIssue(t.Context(), db.EditIssueParams{
 		IssueID: issue.ID, Title: &editedTitle, Body: &editedBody, Actor: "editor",
 	})
 	require.NoError(t, err)
 	require.True(t, changed)
-	_, err = hub.DB.PatchIssueMetadata(context.Background(), db.PatchIssueMetadataIn{
+	_, err = hub.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
 		IssueID: issue.ID,
 		Actor:   "editor",
 		Patch: map[string]jsontext.Value{
@@ -219,11 +218,11 @@ func TestClaim_TimedAssignmentForwardingSpokeRepairsWithoutIssueContent(t *testi
 		"spoke response carried non-assignment event %q", out.Events[0].Type)
 
 	// The spoke applied the assignment events and repaired its own replica.
-	stored, err := spoke.DB.IssueByUID(context.Background(), issue.UID, db.IncludeDeletedNo)
+	stored, err := spoke.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.NotNil(t, stored.Owner)
 	assert.Equal(t, "tester", *stored.Owner)
-	authoritative, err := hub.DB.IssueByUID(context.Background(), issue.UID, db.IncludeDeletedNo)
+	authoritative, err := hub.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	assert.Equal(t, authoritative.AssignmentExpiresOn, stored.AssignmentExpiresOn)
 	assert.Equal(t, out.Issue.AssignmentExpiresOn, stored.AssignmentExpiresOn)

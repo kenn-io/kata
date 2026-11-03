@@ -146,7 +146,7 @@ func TestCreateCanceledClassificationAtCommandBoundary(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	ctx, cancel := context.WithCancel(contextWithBaseURL(context.Background(), server.URL))
+	ctx, cancel := context.WithCancel(contextWithBaseURL(t.Context(), server.URL))
 	t.Cleanup(cancel)
 	go func() {
 		<-createHit
@@ -237,7 +237,7 @@ func TestCreateResponseBodyCutClassificationAtCommandBoundary(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	ctx := contextWithBaseURL(context.Background(), server.URL)
+	ctx := contextWithBaseURL(t.Context(), server.URL)
 	_, _, err := executeRootCapture(t, ctx, "--workspace", t.TempDir(),
 		"create", "example issue")
 	cliErr := requireCLIError(t, err, ExitDaemonUnavail)
@@ -520,7 +520,7 @@ func TestResolveProjectID_PropagatesParseError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	_, err := resolveProjectID(context.Background(), srv.URL, dir)
+	_, err := resolveProjectID(t.Context(), srv.URL, dir)
 	require.Error(t, err)
 	assert.Zero(t, called.Load(), "client must reject parse errors before reaching the daemon")
 }
@@ -542,7 +542,7 @@ func TestResolveProjectID_FallsBackOnMissingConfig(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	id, err := resolveProjectID(context.Background(), srv.URL, dir)
+	id, err := resolveProjectID(t.Context(), srv.URL, dir)
 	require.NoError(t, err)
 	assert.EqualValues(t, 42, id)
 	assert.Equal(t, dir, got["start_path"])
@@ -571,7 +571,7 @@ func TestResolveProjectID_SendsNameAndAliasForWorkspaceConfig(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	id, err := resolveProjectID(context.Background(), srv.URL, dir)
+	id, err := resolveProjectID(t.Context(), srv.URL, dir)
 	require.NoError(t, err)
 	assert.EqualValues(t, 42, id)
 	assert.Equal(t, "project-name", got["name"], "name from .kata.toml must be sent")
@@ -601,7 +601,7 @@ func TestResolveProjectID_SendsAliasOnlyForGitWorkspaceWithoutKataToml(t *testin
 	}))
 	t.Cleanup(srv.Close)
 
-	_, err := resolveProjectID(context.Background(), srv.URL, dir)
+	_, err := resolveProjectID(t.Context(), srv.URL, dir)
 	require.NoError(t, err)
 	alias, ok := got["alias"].(map[string]any)
 	require.True(t, ok, "git workspace must yield an alias even without .kata.toml")
@@ -632,7 +632,7 @@ func TestResolveProjectID_ExplicitProjectFlagSendsNameOnly(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	_, err := resolveProjectID(context.Background(), srv.URL, dir)
+	_, err := resolveProjectID(t.Context(), srv.URL, dir)
 	require.NoError(t, err)
 	assert.Equal(t, "explicit", got["name"])
 	_, hasAlias := got["alias"]
@@ -704,7 +704,7 @@ func TestResolveProjectID_RewritesStaleKataToml(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	_, err := resolveProjectID(context.Background(), srv.URL, dir)
+	_, err := resolveProjectID(t.Context(), srv.URL, dir)
 	require.NoError(t, err)
 
 	cfg, _, err := config.FindProjectConfig(dir)

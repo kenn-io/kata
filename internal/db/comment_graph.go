@@ -10,6 +10,9 @@ import (
 	"time"
 )
 
+// SQLiteCommentReplyTargetUIDExpr must match the expression in idx_events_reply_to.
+const SQLiteCommentReplyTargetUIDExpr = `json_extract(e.payload,'$.reply_to_uid')`
+
 // CommentGraphQuery scopes a coherent comment read to one active project.
 type CommentGraphQuery struct {
 	ProjectID                   int64
@@ -52,6 +55,9 @@ type CommentGraphTarget struct {
 
 // CommentGraphData is captured wholly inside one backend read transaction.
 type CommentGraphData struct {
+	// CommentUIDsByProject holds each project's UIDs sharing a six-character
+	// suffix with the selected issue's comments, their reply targets, or their
+	// incoming replies, enough to derive the same handles as the full project.
 	CommentUIDsByProject map[int64][]string
 	Comments             []CommentGraphRecord
 	Targets              map[string]CommentGraphTarget
@@ -133,18 +139,19 @@ func ReadCommentGraphTx(
 		return data, rows.Err()
 	}
 	statement := commentGraphSelect + where // #nosec G202 -- Only backend placeholders and static predicates are concatenated.
+	statementArgs := args
 	if query.SelectedIssueID > 0 {
-		args = append(args, query.SelectedIssueID)
+		statementArgs = append(slices.Clone(args), query.SelectedIssueID)
 		// #nosec G202 -- Only backend placeholders and static predicates are concatenated.
 		statement = `WITH visible AS (SELECT c.uid,c.issue_id,c.reply_to_uid` + commentGraphFrom + where + `),
-selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(args)) + `)
+selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(statementArgs)) + `)
 ` + commentGraphSelect + ` WHERE c.uid IN (
  SELECT uid FROM selected
- UNION SELECT v.uid FROM visible v JOIN selected s ON v.reply_to_uid=s.uid
+ UNION SELECT v.uid FROM selected s CROSS JOIN visible v WHERE v.reply_to_uid=s.uid
  UNION SELECT v.uid FROM visible v JOIN selected s ON v.uid=s.reply_to_uid
 )`
 	}
-	rows, err := tx.QueryContext(ctx, statement, args...)
+	rows, err := tx.QueryContext(ctx, statement, statementArgs...)
 	if err != nil {
 		return data, err
 	}
@@ -163,9 +170,7 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(ar
 		return data, err
 	}
 	if query.SelectedIssueID > 0 && len(data.Comments) > 0 {
-		// Handle uniqueness still spans the authorized project, but unrelated
-		// bodies and unavailable endpoints never need to leave the database.
-		uids, err := readCommentGraphUIDs(ctx, tx, where, args[:len(args)-1]...)
+		uids, err := readCommentGraphUIDs(ctx, tx, where, args, query.SelectedIssueID, bind)
 		if err != nil {
 			return data, err
 		}
@@ -198,8 +203,10 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(ar
 		target, err := scanCommentGraphRecord(tx.QueryRowContext(ctx,
 			commentGraphSelect+targetWhere, targetArgs...), parseTime)
 		if err == nil {
+			targetWhere := " WHERE i.project_id=" + bind(1) + " AND i.deleted_at IS NULL AND p.deleted_at IS NULL"
+			targetArgs := []any{target.ProjectID}
 			if _, loaded := data.CommentUIDsByProject[target.ProjectID]; !loaded {
-				uids, err := readCommentGraphUIDs(ctx, tx, " WHERE i.project_id="+bind(1)+" AND i.deleted_at IS NULL AND p.deleted_at IS NULL", target.ProjectID)
+				uids, err := readCommentGraphUIDs(ctx, tx, targetWhere, targetArgs, query.SelectedIssueID, bind)
 				if err != nil {
 					return data, err
 				}
@@ -242,8 +249,19 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(ar
 	return data, nil
 }
 
-func readCommentGraphUIDs(ctx context.Context, tx *sql.Tx, where string, args ...any) ([]string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT c.uid`+commentGraphFrom+where, args...) // #nosec G202 -- Callers supply static predicates and bind every value.
+func readCommentGraphUIDs(ctx context.Context, tx *sql.Tx, where string, args []any, selectedIssueID int64, bind func(int) string) ([]string, error) {
+	from := commentGraphFrom
+	if selectedIssueID > 0 {
+		args = append(slices.Clone(args), selectedIssueID, selectedIssueID, selectedIssueID)
+		n := len(args)
+		// CROSS JOIN keeps SQLite on the suffix index without planner statistics.
+		from = ` FROM comments c CROSS JOIN issues i CROSS JOIN projects p`
+		where += ` AND i.id=c.issue_id AND p.id=i.project_id AND lower(substr(c.uid,21)) IN (
+ SELECT lower(substr(uid,21)) FROM comments WHERE issue_id=` + bind(n-2) + `
+ UNION SELECT lower(substr(reply_to_uid,21)) FROM comments WHERE issue_id=` + bind(n-1) + ` AND reply_to_uid IS NOT NULL
+ UNION SELECT lower(substr(r.uid,21)) FROM comments s JOIN comments r ON r.reply_to_uid=s.uid WHERE s.issue_id=` + bind(n) + `)`
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT c.uid`+from+where, args...) // #nosec G202 -- Callers supply static predicates and bind every value.
 	if err != nil {
 		return nil, err
 	}
@@ -259,6 +277,11 @@ func readCommentGraphUIDs(ctx context.Context, tx *sql.Tx, where string, args ..
 	return uids, rows.Err()
 }
 
+// commentGraphPurgedTargetEvidenceSQL builds the indexed missing-target probe.
+func commentGraphPurgedTargetEvidenceSQL(bind func(int) string, replyTargetUIDExpr string) string {
+	return `SELECT EXISTS(SELECT 1 FROM events e JOIN purge_log p ON p.issue_uid=e.related_issue_uid WHERE e.type='issue.commented' AND ` + replyTargetUIDExpr + "=" + bind(1) + ")"
+}
+
 func commentGraphPurgedTargetEvidence(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -268,7 +291,7 @@ func commentGraphPurgedTargetEvidence(
 ) (bool, error) {
 	var removed bool
 	err := tx.QueryRowContext(ctx,
-		`SELECT EXISTS(SELECT 1 FROM events e JOIN purge_log p ON p.issue_uid=e.related_issue_uid WHERE e.type='issue.commented' AND `+replyTargetUIDExpr+"="+bind(1)+")",
+		commentGraphPurgedTargetEvidenceSQL(bind, replyTargetUIDExpr),
 		targetCommentUID,
 	).Scan(&removed)
 	return removed, err

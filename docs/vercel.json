@@ -216,6 +216,16 @@
       "permanent": true
     },
     {
+      "source": "/workflows/gated-workflows/",
+      "destination": "/docs/workflows/gated-workflows/",
+      "permanent": true
+    },
+    {
+      "source": "/workflows/gated-workflows.md",
+      "destination": "/docs/workflows/gated-workflows.md",
+      "permanent": true
+    },
+    {
       "source": "/workflows/sharing/",
       "destination": "/docs/workflows/sharing/",
       "permanent": true

@@ -68,23 +68,23 @@ func TestClientReadOnlyAndCapturedOriginCredential(t *testing.T) {
 	c := testConfig()
 	c.APIOrigin = server.URL
 	client := NewClient(ClientConfig{Daemon: config.PlaneSyncConfig{APIOrigin: server.URL}, LookupEnv: func(name string) (string, bool) { require.Equal(t, "KATA_PLANE_TOKEN", name); return token, true }, Wait: func(context.Context, time.Duration) error { return nil }})
-	session, err := client.ForRun(context.Background(), c)
+	session, err := client.ForRun(t.Context(), c)
 	require.NoError(t, err)
 	token = "rotated-key"
-	p, err := session.Project(context.Background(), c)
+	p, err := session.Project(t.Context(), c)
 	require.NoError(t, err)
 	require.Equal(t, testProjectID, p.ID)
-	states, err := session.States(context.Background(), c)
+	states, err := session.States(t.Context(), c)
 	require.NoError(t, err)
 	require.Equal(t, []State{{ID: testStateID, Group: "started"}}, states)
-	items, err := session.WorkItems(context.Background(), c)
+	items, err := session.WorkItems(t.Context(), c)
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 	require.Equal(t, "<p>Complete content</p>", items[0].DescriptionHTML)
 	c.APIOrigin = "https://different.example"
-	_, err = session.Project(context.Background(), c)
+	_, err = session.Project(t.Context(), c)
 	require.Error(t, err)
-	_, err = client.ForRun(context.Background(), c)
+	_, err = client.ForRun(t.Context(), c)
 	require.Error(t, err)
 	require.Equal(t, int32(3), requests.Load())
 }
@@ -103,9 +103,9 @@ func TestClientNeverFollowsRedirectsOrLeaksErrors(t *testing.T) {
 			defer server.Close()
 			c := testConfig()
 			c.APIOrigin = server.URL
-			s, err := planeTestClient(server.URL).ForRun(context.Background(), c)
+			s, err := planeTestClient(server.URL).ForRun(t.Context(), c)
 			require.NoError(t, err)
-			_, err = s.Project(context.Background(), c)
+			_, err = s.Project(t.Context(), c)
 			require.Error(t, err)
 			require.NotContains(t, err.Error(), "example-api-key")
 			require.NotContains(t, err.Error(), "private-response")
@@ -156,12 +156,12 @@ func TestClientRejectsIncompletePaginationAndWireData(t *testing.T) {
 			defer server.Close()
 			c := testConfig()
 			c.APIOrigin = server.URL
-			s, err := planeTestClient(server.URL).ForRun(context.Background(), c)
+			s, err := planeTestClient(server.URL).ForRun(t.Context(), c)
 			require.NoError(t, err)
 			if kind == "unknown group" {
-				_, err = s.States(context.Background(), c)
+				_, err = s.States(t.Context(), c)
 			} else {
-				_, err = s.WorkItems(context.Background(), c)
+				_, err = s.WorkItems(t.Context(), c)
 			}
 			require.Error(t, err)
 		})
@@ -188,12 +188,12 @@ func TestClientPaginationAndStateArrays(t *testing.T) {
 	defer server.Close()
 	c := testConfig()
 	c.APIOrigin = server.URL
-	s, err := planeTestClient(server.URL).ForRun(context.Background(), c)
+	s, err := planeTestClient(server.URL).ForRun(t.Context(), c)
 	require.NoError(t, err)
-	states, err := s.States(context.Background(), c)
+	states, err := s.States(t.Context(), c)
 	require.NoError(t, err)
 	require.Len(t, states, 1)
-	items, err := s.WorkItems(context.Background(), c)
+	items, err := s.WorkItems(t.Context(), c)
 	require.NoError(t, err)
 	require.Len(t, items, 2)
 	require.Equal(t, int32(2), requests.Load())
@@ -262,9 +262,9 @@ func TestClientSharesPacingBetweenConcurrentSessions(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 3 {
 		wg.Go(func() {
-			s, err := client.ForRun(context.Background(), c)
+			s, err := client.ForRun(t.Context(), c)
 			if err == nil {
-				_, err = s.Project(context.Background(), c)
+				_, err = s.Project(t.Context(), c)
 			}
 			if err != nil {
 				t.Error(err)
@@ -294,26 +294,26 @@ func TestClientRetryAndCancellation(t *testing.T) {
 	c.APIOrigin = server.URL
 	now := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
 	client := NewClient(ClientConfig{Daemon: config.PlaneSyncConfig{APIOrigin: server.URL}, LookupEnv: func(string) (string, bool) { return "example-api-key", true }, Now: func() time.Time { return now }, Wait: func(_ context.Context, d time.Duration) error { waits = append(waits, d); now = now.Add(d); return nil }})
-	s, err := client.ForRun(context.Background(), c)
+	s, err := client.ForRun(t.Context(), c)
 	require.NoError(t, err)
-	_, err = s.Project(context.Background(), c)
+	_, err = s.Project(t.Context(), c)
 	require.NoError(t, err)
 	require.Equal(t, int32(2), requests.Load())
 	require.Contains(t, waits, 2*time.Second)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	_, err = s.Project(ctx, c)
 	require.ErrorIs(t, err, context.Canceled)
 	require.Equal(t, int32(2), requests.Load())
 	bad := NewClient(ClientConfig{Daemon: config.PlaneSyncConfig{APIOrigin: server.URL}, LookupEnv: func(string) (string, bool) { return "", false }})
-	_, err = bad.ForRun(context.Background(), c)
+	_, err = bad.ForRun(t.Context(), c)
 	require.Error(t, err)
 	transport := NewClient(ClientConfig{Daemon: config.PlaneSyncConfig{APIOrigin: server.URL}, LookupEnv: func(string) (string, bool) { return "example-api-key", true }, Transport: planeRoundTrip(func(*http.Request) (*http.Response, error) {
 		return nil, errors.New("example-api-key private-transport")
 	})})
-	s, err = transport.ForRun(context.Background(), c)
+	s, err = transport.ForRun(t.Context(), c)
 	require.NoError(t, err)
-	_, err = s.Project(context.Background(), c)
+	_, err = s.Project(t.Context(), c)
 	require.Error(t, err)
 	require.NotContains(t, err.Error(), "example-api-key")
 }
@@ -327,10 +327,10 @@ func TestClientPreservesDeadlineFromRequestExecution(t *testing.T) {
 			return nil, context.DeadlineExceeded
 		}),
 	})
-	s, err := client.ForRun(context.Background(), c)
+	s, err := client.ForRun(t.Context(), c)
 	require.NoError(t, err)
 
-	_, err = s.Project(context.Background(), c)
+	_, err = s.Project(t.Context(), c)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 }
 
@@ -347,10 +347,10 @@ func TestClientPreservesDeadlineFromResponseBodyRead(t *testing.T) {
 			}, nil
 		}),
 	})
-	s, err := client.ForRun(context.Background(), c)
+	s, err := client.ForRun(t.Context(), c)
 	require.NoError(t, err)
 
-	_, err = s.Project(context.Background(), c)
+	_, err = s.Project(t.Context(), c)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 }
 
@@ -369,9 +369,9 @@ func TestClientCollectionBounds(t *testing.T) {
 			defer server.Close()
 			c := testConfig()
 			c.APIOrigin = server.URL
-			s, err := planeTestClient(server.URL).ForRun(context.Background(), c)
+			s, err := planeTestClient(server.URL).ForRun(t.Context(), c)
 			require.NoError(t, err)
-			_, err = s.WorkItems(context.Background(), c)
+			_, err = s.WorkItems(t.Context(), c)
 			require.Error(t, err)
 			if kind == "pages" {
 				require.Equal(t, int32(1000), requests.Load())
@@ -392,9 +392,9 @@ func TestClientBoundsAggregateCollectionMemory(t *testing.T) {
 		body := strings.Repeat(" ", (8<<20)-1024) + string(raw)
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
 	})})
-	s, err := client.ForRun(context.Background(), c)
+	s, err := client.ForRun(t.Context(), c)
 	require.NoError(t, err)
-	_, err = s.WorkItems(context.Background(), c)
+	_, err = s.WorkItems(t.Context(), c)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "128 MiB")
 	require.Equal(t, 17, calls)
@@ -421,9 +421,9 @@ func TestClientAdmissionCancellationWhileAnotherCallerWaits(t *testing.T) {
 	}})
 	c.next = time.Now().Add(time.Hour)
 	done := make(chan error, 1)
-	go func() { done <- c.admit(context.Background()) }()
+	go func() { done <- c.admit(t.Context()) }()
 	<-entered
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond) //nolint:kennlint // deadlinetest: the deadline is the expected result; release holds the first caller's wait until it fires
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond) //nolint:kennlint // deadlinetest: the deadline is the expected result; release holds the first caller's wait until it fires
 	defer cancel()
 	canceled := make(chan error, 1)
 	go func() { canceled <- c.admit(ctx) }()

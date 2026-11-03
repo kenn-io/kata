@@ -65,7 +65,7 @@ func TestWriteMethods_RetryTransientSQLiteBusy(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			d, path, run := tt.run(ctx, t)
 			useFastSQLiteBusyTimeout(ctx, t, d)
 			lockConn := holdSQLiteWriteLock(ctx, t, path)
@@ -102,7 +102,8 @@ func releaseSQLiteWriteLockAfter(ctx context.Context, t *testing.T, conn *sql.Co
 	var releaseOnce sync.Once
 	release := func() {
 		releaseOnce.Do(func() {
-			_, _ = conn.ExecContext(ctx, "COMMIT")
+			// The cleanup below may call release after ctx is canceled.
+			_, _ = conn.ExecContext(context.WithoutCancel(ctx), "COMMIT")
 		})
 	}
 	timer := time.AfterFunc(delay, release)

@@ -41,6 +41,8 @@ for machine readers.
 - [Web UI](https://katatracker.com/docs/guide/web-ui.md): the browser workspace
 - [Semantic search](https://katatracker.com/docs/guide/semantic-search.md):
   opt-in embeddings
+- [Gated workflows](https://katatracker.com/docs/workflows/gated-workflows.md):
+  ordered issue stages, human approval, evidence, and attention.
 - [Sharing models](https://katatracker.com/docs/workflows/sharing.md): local,
   private network, federation, hosted
 - [Share projects between hubs](https://katatracker.com/docs/guide/project-relays.md):
@@ -57,7 +59,7 @@ for machine readers.
   mirror one task data source with daemon polling and optional two-way status sync
 - [Configuration](https://katatracker.com/docs/reference/configuration.md):
   config.toml reference
-- [Native cron](https://katatracker.com/docs/reference/cron.md):
+- [Cron](https://katatracker.com/docs/reference/cron.md):
   shared job definitions, run evidence, and recurring child issues
 - [Diagnosing setup](https://katatracker.com/docs/operations/doctor.md):
   read-only configuration, daemon, project and hook diagnostics with `kata doctor`

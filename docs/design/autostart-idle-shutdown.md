@@ -33,7 +33,7 @@ Because the marker is read once at process start, residency cannot change
 under a running process. `kata daemon start` therefore inspects the live
 daemon's health: when it advertises `idle_shutdown`, the command stops that
 process and starts an explicit replacement rather than reporting it as already
-running. `kata daemon restart` always produces an explicit daemon. An idle exit
+running. `kata daemon restart` preserves the running daemon's idle policy. An idle exit
 writes one line to the daemon log so the disappearance is diagnosable.
 
 The auto-start marker is removed from hook subprocess environments. This keeps

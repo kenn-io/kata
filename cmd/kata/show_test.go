@@ -113,7 +113,7 @@ func TestRenderShowFieldsScopesRendererToBodyAndComments(t *testing.T) {
     }`), &response))
 	renderer := &recordingShowMarkdownRenderer{}
 
-	_, err := renderShowFields(context.Background(), response, renderer, 80)
+	_, err := renderShowFields(t.Context(), response, renderer, 80)
 	require.NoError(t, err)
 	require.Len(t, renderer.calls, 3)
 	assert.Equal(t, markdownDescription, renderer.calls[0].kind)
@@ -176,7 +176,7 @@ func TestRenderAndPrintShowHumanDoesNotPrintPartialRecord(t *testing.T) {
 	var out bytes.Buffer
 
 	err := renderAndPrintShowHuman(
-		context.Background(), &out, response, "example-workspace", renderer, 80,
+		t.Context(), &out, response, "example-workspace", renderer, 80,
 	)
 	require.Error(t, err)
 	assert.Empty(t, out.String())
@@ -195,7 +195,7 @@ func TestShowRenderBuiltinFormatsMarkdownFields(t *testing.T) {
 	cmd.SetOut(output)
 	cmd.SetErr(output)
 	cmd.SetArgs([]string{"--workspace", dir, "show", ref, "--render"})
-	cmd.SetContext(contextWithBaseURL(context.Background(), env.URL))
+	cmd.SetContext(contextWithBaseURL(t.Context(), env.URL))
 	require.NoError(t, cmd.Execute())
 	require.NoError(t, output.Sync())
 	_, err = output.Seek(0, io.SeekStart)
@@ -346,7 +346,7 @@ func TestShow_PendingClaimsRenderPendingNewestFirst(t *testing.T) {
 }
 
 func TestShow_UnreachableHubRendersCachedTimedClaimAndPending(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	env, dir, pid := setupCLIWorkspace(t)
 	created := createIssueViaHTTPFull(t, env, dir, "cached claim")
 	enableSpokeClaims(t, env, pid)
@@ -444,7 +444,7 @@ func TestShow_JSONIncludesClaimFields(t *testing.T) {
 
 func TestShow_ClaimViolationsRenderForFederatedIssueAndJSONCount(t *testing.T) {
 	env, dir, pid, ref := setupFederatedHubIssue(t, "violated issue")
-	ctx := context.Background()
+	ctx := t.Context()
 	issue, err := env.DB.IssueByShortID(ctx, pid, ref, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	_, err = env.DB.AcquireClaim(ctx, db.AcquireClaimParams{
@@ -578,7 +578,7 @@ func enqueueCLIPendingClaim(
 	at time.Time,
 ) db.PendingClaimRequest {
 	t.Helper()
-	pending, err := store.EnqueuePendingClaim(context.Background(), db.PendingClaimParams{
+	pending, err := store.EnqueuePendingClaim(t.Context(), db.PendingClaimParams{
 		ProjectID: projectID,
 		IssueRef:  ref,
 		Principal: db.ClaimPrincipal{

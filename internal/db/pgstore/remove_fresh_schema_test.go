@@ -1,7 +1,6 @@
 package pgstore_test
 
 import (
-	"context"
 	"database/sql"
 	"testing"
 	"time"
@@ -17,7 +16,7 @@ func TestRemoveFreshSchemaWaitsForServingLease(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	serving, err := pgstore.Open(ctx, dsn, db.Serving())
@@ -61,7 +60,7 @@ func TestRemoveFreshSchemaRefusesChangedIdentityOrDomainState(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(ctx, dsn)
@@ -88,7 +87,7 @@ func TestRemoveFreshSchemaRefusesExternalDependents(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(ctx, dsn)
@@ -127,7 +126,7 @@ func TestRemoveFreshSchemaRefusesExternalFunctionDependents(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
 	store, err := pgstore.Open(ctx, dsn)

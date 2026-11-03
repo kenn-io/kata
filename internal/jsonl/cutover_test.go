@@ -34,7 +34,7 @@ func TestAutoCutoverNoopsAtCurrentSchema(t *testing.T) {
 func TestAutoCutoverPreservesIssueContentRevision(t *testing.T) {
 	for _, version := range []int{22, 26, db.CurrentSchemaVersion() - 1} {
 		t.Run(fmt.Sprintf("schema_version=%d", version), func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			path := filepath.Join(t.TempDir(), "kata.db")
 			source := openCutoverTargetDB(t, ctx, path)
 			project, err := source.CreateProject(ctx, "source-project")
@@ -103,7 +103,7 @@ func TestAutoCutoverWithoutSourceContentRevisionColumn(t *testing.T) {
 		{name: "schema_version=22", version: 22},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			path := filepath.Join(t.TempDir(), "kata.db")
 			source := openCutoverTargetDB(t, ctx, path)
 			project, err := source.CreateProject(ctx, "source-project")
@@ -143,7 +143,7 @@ func collectIssueExports(ctx context.Context, t *testing.T, d *sqlitestore.Store
 }
 
 func TestAutoCutoverPreservesMovedIssueHistory(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	source := openCutoverTargetDB(t, ctx, path)
 	from, err := source.CreateProject(ctx, "source-project")
@@ -224,7 +224,7 @@ func TestAutoCutoverRefusesExistingTempFiles(t *testing.T) {
 }
 
 func TestAutoCutoverPreservesUIDOnlyHistory(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	source := openCutoverTargetDB(t, ctx, path)
 	project, err := source.CreateProject(ctx, "source-project")
@@ -273,7 +273,7 @@ func TestAutoCutoverPreservesUIDOnlyHistory(t *testing.T) {
 }
 
 func TestAutoCutoverFailureLeavesSourceAndRemovesTemps(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	writeVersionZeroDB(t, path)
 	before, err := os.ReadFile(path) //nolint:gosec // test fixture under TempDir
@@ -293,7 +293,7 @@ func TestAutoCutoverFailureLeavesSourceAndRemovesTemps(t *testing.T) {
 // The upgraded database must open and keep those writes, and the backup must
 // hold them too.
 func TestAutoCutoverFoldsUncheckpointedWAL(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	live := filepath.Join(t.TempDir(), "kata.db")
 	source := openCutoverTargetDB(t, ctx, live)
 	_, err := source.ExecContext(ctx,
@@ -334,7 +334,7 @@ func TestAutoCutoverFoldsUncheckpointedWAL(t *testing.T) {
 // transaction keeps WAL pages from reaching the main file. Cutover must stop
 // before the swap instead of leaving those pages behind.
 func TestAutoCutoverRefusesDatabaseInUse(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	source := openCutoverTargetDB(t, ctx, path)
 	_, err := source.ExecContext(ctx,
@@ -371,7 +371,7 @@ func copyTestFile(t *testing.T, src, dst string) {
 }
 
 func TestAutoCutoverUpgradesLegacyV1DB(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	writeLegacyV1DB(t, path)
 
@@ -382,9 +382,9 @@ func TestAutoCutoverUpgradesLegacyV1DB(t *testing.T) {
 	t.Cleanup(func() { _ = d.Close() })
 	assertCurrentSchemaVersion(t, path)
 	var projectUID, issueUID, eventIssueUID string
-	require.NoError(t, d.QueryRow(`SELECT uid FROM projects WHERE id = 1`).Scan(&projectUID))
-	require.NoError(t, d.QueryRow(`SELECT uid FROM issues WHERE id = 1`).Scan(&issueUID))
-	require.NoError(t, d.QueryRow(`SELECT issue_uid FROM events WHERE id = 1`).Scan(&eventIssueUID))
+	require.NoError(t, d.QueryRowContext(t.Context(), `SELECT uid FROM projects WHERE id = 1`).Scan(&projectUID))
+	require.NoError(t, d.QueryRowContext(t.Context(), `SELECT uid FROM issues WHERE id = 1`).Scan(&issueUID))
+	require.NoError(t, d.QueryRowContext(t.Context(), `SELECT issue_uid FROM events WHERE id = 1`).Scan(&eventIssueUID))
 	assert.True(t, uid.Valid(projectUID))
 	assert.True(t, uid.Valid(issueUID))
 	assert.Equal(t, issueUID, eventIssueUID)
@@ -392,7 +392,7 @@ func TestAutoCutoverUpgradesLegacyV1DB(t *testing.T) {
 }
 
 func TestAutoCutoverUpgradesLegacyV11DB(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 
 	d := openCutoverTargetDB(t, ctx, path)
@@ -438,7 +438,7 @@ func TestAutoCutoverUpgradesLegacyV11DB(t *testing.T) {
 // table on the v19 source and land the upgraded DB at the current schema with
 // an empty project_purge_log.
 func TestAutoCutoverUpgradesLegacyV19DB(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	d := openCutoverTargetDB(t, ctx, path)
 	_, err := d.CreateProject(ctx, "spoke-project")
@@ -460,7 +460,7 @@ func TestAutoCutoverUpgradesLegacyV19DB(t *testing.T) {
 }
 
 func TestAutoCutoverUpgradesLegacyV17GitHubStatus(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	writeLegacyV17GitHubStatusDB(t, path)
 
@@ -486,7 +486,7 @@ func TestAutoCutoverUpgradesLegacyV17GitHubStatus(t *testing.T) {
 }
 
 func TestAutoCutover_ReconstructsAPITokensFromEvents(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	d := openCutoverTargetDB(t, ctx, path)
 	active, _, err := d.CreateAPIToken(ctx, db.CreateAPITokenParams{
@@ -541,7 +541,7 @@ func TestPeekSchemaVersion(t *testing.T) {
 }
 
 func TestClaimCutover_PreFederationImportLeavesClaimTablesEmpty(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	dst := openImportTargetDB(t)
 	body := buildJSONL(
 		`{"kind":"meta","data":{"key":"export_version","value":"11"}}`,
@@ -563,7 +563,7 @@ func TestClaimCutover_PreFederationImportLeavesClaimTablesEmpty(t *testing.T) {
 // timestamp intact, so kata-instance backups don't silently un-archive
 // projects on restore.
 func TestRoundtripV4PreservesDeletedAt(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	src := openExportTestDB(t)
 	p, err := src.CreateProject(ctx, "archived")
 	require.NoError(t, err)
@@ -588,7 +588,7 @@ func TestRoundtripV4PreservesDeletedAt(t *testing.T) {
 func writeVersionZeroDB(t *testing.T, path string) {
 	t.Helper()
 	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := context.Background()
+	ctx := t.Context()
 	d, err := sqlitestore.Open(ctx, path)
 	require.NoError(t, err)
 	_, err = d.ExecContext(ctx, `UPDATE meta SET value='0' WHERE key='schema_version'`)
@@ -610,7 +610,7 @@ func assertNoCutoverTemps(t *testing.T, path string) {
 // cutover and reports actionable detail. The source DB is left
 // untouched and no temp files remain.
 func TestAutoCutover_HaltsOnUnknownFKClass(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	seedV3DBWithOrphans(t, path, orphanSpec{OrphanProjectAlias: true})
 
@@ -635,7 +635,7 @@ func TestAutoCutover_HaltsOnUnknownFKClass(t *testing.T) {
 // only nonzero classes in the fixed order events / comments /
 // links / issue_labels. NULL-scrubbed events are NOT counted.
 func TestAutoCutover_PrintsOrphanSummary(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	seedV3DBWithOrphans(t, path, orphanSpec{
 		OrphanComments:     2,
@@ -661,7 +661,7 @@ func TestAutoCutover_PrintsOrphanSummary(t *testing.T) {
 // source DB has zero orphans, so existing operators upgrading a
 // clean DB see no behavior change.
 func TestAutoCutover_NoSummaryWhenClean(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	seedV3DBWithOrphans(t, path, orphanSpec{}) // baseline only
 
@@ -678,7 +678,7 @@ func TestAutoCutover_NoSummaryWhenClean(t *testing.T) {
 // rendered detail uses the literal "NULL" rather than "0" or a
 // formatting artifact.
 func TestAutoCutover_HaltErrorRendersNullRowid(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	seedV3DBWithOrphans(t, path, orphanSpec{})
 	addWithoutRowidOrphan(t, path)
@@ -700,7 +700,7 @@ func TestAutoCutover_HaltErrorRendersNullRowid(t *testing.T) {
 // orphan lives in import_mappings, not the four child tables the v3
 // test exercises.
 func TestAutoCutover_V8HaltsOnOrphanImportMapping(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	seedV8DBWithOrphans(t, path, orphanSpec{OrphanImportMappingLink: 1})
 
@@ -727,7 +727,7 @@ func TestAutoCutover_V8HaltsOnOrphanImportMapping(t *testing.T) {
 // the test that gives confidence the fix handles a v6/v7/v8 → v9
 // cutover with orphans across the known classes.
 func TestAutoCutover_V8DropsAllKnownOrphanClasses(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	seedV8DBWithOrphans(t, path, orphanSpec{
 		OrphanComments:     2,
@@ -777,7 +777,7 @@ func TestAutoCutover_V8DropsAllKnownOrphanClasses(t *testing.T) {
 // Confirms the fix is transparent to operators upgrading a clean v8
 // DB to v9.
 func TestAutoCutover_V8Clean(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	seedV8DBWithOrphans(t, path, orphanSpec{})
 
@@ -796,7 +796,7 @@ func TestAutoCutover_V8Clean(t *testing.T) {
 // dropped; events with valid issue_id but orphan related_issue_id
 // are preserved with NULL related fields.
 func TestAutoCutover_DropsAllKnownOrphanClasses(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	seedV3DBWithOrphans(t, path, orphanSpec{
 		OrphanComments:     2,
@@ -850,7 +850,7 @@ func TestAutoCutover_DropsAllKnownOrphanClasses(t *testing.T) {
 // aggregated event whose related_issue_id points at a missing issue must
 // survive with both related columns NULL, not be dropped and not dangle.
 func TestAutoCutover_V2ScrubsOrphanRelatedEvent(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	seedV2DBWithOrphanRelatedEvent(t, path)
 
@@ -883,7 +883,7 @@ func TestAutoCutover_V2ScrubsOrphanRelatedEvent(t *testing.T) {
 // related_issue_uid column, so the scrub rule must NULL related_issue_id
 // alone without referencing a column that does not exist.
 func TestAutoCutover_V1ScrubsOrphanRelatedEvent(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	seedV1DBWithOrphanRelatedEvent(t, path)
 
@@ -917,7 +917,7 @@ func TestAutoCutover_V1ScrubsOrphanRelatedEvent(t *testing.T) {
 func TestV3ToV4CutoverPreservesProjects(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.db")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	writeLegacyV3DB(t, path)
 	assertSchemaVersion(t, path, 3)
@@ -962,7 +962,7 @@ func twoV7Issues() []v7Issue {
 // verifies the post-cutover payload shape.
 func importEventPayload(t *testing.T, issues []v7Issue, ev v7Event) map[string]any {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openImportTargetDB(t)
 	require.NoError(t, jsonl.Import(ctx,
 		strings.NewReader(buildV7FixtureWith(t, issues, []v7Event{ev})), target))
@@ -979,7 +979,7 @@ func importEventPayload(t *testing.T, issues []v7Issue, ev v7Event) map[string]a
 // ULID-ascending order; the lexically-earlier ULID wins length-4 and the
 // later one extends to length 5.
 func TestCutoverV7_AssignsShortIDsInULIDOrder(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openImportTargetDB(t)
 
 	// UIDs share the same last 4 chars ("d4ex"). The lexically-earlier UID
@@ -1010,7 +1010,7 @@ func TestCutoverV7_AssignsShortIDsInULIDOrder(t *testing.T) {
 // contain '#' after cutover. The cutover must fail before any inserts with an
 // error that names the offending project.
 func TestCutoverV7_RejectsProjectNameWithHash(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openImportTargetDB(t)
 
 	jsonlInput := buildV7Fixture(t, []v7Issue{
@@ -1094,7 +1094,7 @@ func TestCutoverV7_RewritesLinksChangedPayload(t *testing.T) {
 // database preserves stored short_ids byte-for-byte. The current-version
 // import path must honor the source's short_id rather than re-deriving it.
 func TestCutover_PreservesStoredShortIDs(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	src := openExportTestDB(t)
 	p, err := src.CreateProject(ctx, "demo")
@@ -1131,7 +1131,7 @@ func TestCutover_PreservesStoredShortIDs(t *testing.T) {
 // --- v9 → v10 ---
 
 func TestAutoCutoverV9SchemaDB(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
 	seedV9SchemaDB(t, path)
 
@@ -1168,7 +1168,7 @@ func TestAutoCutoverV9SchemaDB(t *testing.T) {
 // json.Unmarshal into db.LinkExport → importLink INSERT) end-to-end with a
 // hand-crafted JSONL line that contains "project_id":1.
 func TestImport_LinkWithStrayProjectIDKeyIsIgnored(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	target := openImportTargetDB(t)
 
 	// Minimal envelope: meta export_version + one project + two issues + one
@@ -1203,7 +1203,7 @@ func TestImport_LinkWithStrayProjectIDKeyIsIgnored(t *testing.T) {
 
 func trimCurrentDBToV11Shape(t *testing.T, path string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	raw, err := sql.Open("sqlite", path)
 	require.NoError(t, err)
 	defer func() { _ = raw.Close() }()
@@ -1299,7 +1299,7 @@ func trimCurrentDBToV11Shape(t *testing.T, path string) {
 // A v19 DB has no project_purge_log table, so the cutover export must skip it.
 func trimCurrentDBToV19Shape(t *testing.T, path string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	raw, err := sql.Open("sqlite", path)
 	require.NoError(t, err)
 	defer func() { _ = raw.Close() }()
@@ -1319,7 +1319,7 @@ func trimCurrentDBToV19Shape(t *testing.T, path string) {
 // A symlinked database path keeps working after an upgrade: cutover swaps the
 // new database in at the link's target instead of replacing the link.
 func TestAutoCutoverKeepsDatabaseSymlink(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	target := filepath.Join(t.TempDir(), "kata.db")
 	writeLegacyV1DB(t, target)
 	linkDir := t.TempDir()
@@ -1355,7 +1355,7 @@ func mustEvalSymlinks(t *testing.T, path string) string {
 // lives in, even when the configured path reaches it through a directory
 // symlink, so ".." must not be collapsed against the configured parent.
 func TestAutoCutoverFollowsRelativeLinkBehindSymlinkedDirectory(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	physical := t.TempDir()
 	require.NoError(t, os.Mkdir(filepath.Join(physical, "links"), 0o700))
 	require.NoError(t, os.Mkdir(filepath.Join(physical, "data"), 0o700))
@@ -1379,7 +1379,7 @@ func TestAutoCutoverFollowsRelativeLinkBehindSymlinkedDirectory(t *testing.T) {
 // The OS follows a directory symlink inside a relative link target before it
 // applies a later "..", so cutover must not collapse "alias/.." as text.
 func TestAutoCutoverFollowsDirectorySymlinkInsideRelativeTarget(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	storage := t.TempDir()
 	require.NoError(t, os.Mkdir(filepath.Join(storage, "nested"), 0o700))
 	target := filepath.Join(storage, "kata.db")
@@ -1400,7 +1400,7 @@ func TestAutoCutoverFollowsDirectorySymlinkInsideRelativeTarget(t *testing.T) {
 // A configured path can apply ".." after a directory symlink; the OS opens the
 // file beside the link's target, so cutover and recovery must look there.
 func TestAutoCutoverResolvesDotDotAfterDirectorySymlinkInConfiguredPath(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	storage := t.TempDir()
 	require.NoError(t, os.Mkdir(filepath.Join(storage, "nested"), 0o700))
 	target := filepath.Join(storage, "kata.db")
@@ -1422,7 +1422,7 @@ func TestAutoCutoverResolvesDotDotAfterDirectorySymlinkInConfiguredPath(t *testi
 // A cutover through a link and one through its target share the target's temp
 // files, so the target's cutover lock must also be held.
 func TestAutoCutoverThroughSymlinkHoldsTargetCutoverLock(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	target := filepath.Join(t.TempDir(), "kata.db")
 	writeLegacyV1DB(t, target)
 	link := filepath.Join(t.TempDir(), "linked.db")

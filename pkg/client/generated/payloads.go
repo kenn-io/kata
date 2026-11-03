@@ -18,6 +18,8 @@ type CreateFederationEnrollmentBody = CreateFederationEnrollmentRequestBody
 
 type RotateFederationEnrollmentBody = RotateFederationEnrollmentRequestBody
 
+type SetFederationSpokeNameBody = SetFederationSpokeNameRequestBody
+
 type CreateFederationReplicaBody = CreateFederationReplicaRequestBody
 
 type LeaveFederationReplicaBody = LeaveFederationReplicaRequestBody

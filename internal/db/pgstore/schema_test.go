@@ -1,7 +1,6 @@
 package pgstore_test
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"sort"
@@ -22,7 +21,7 @@ func TestSchemaBootstrapRejectsExtensionsOutsidePublic(t *testing.T) {
 
 	for _, extension := range []string{"unaccent", "vector"} {
 		t.Run(extension, func(t *testing.T) {
-			ctx := context.Background()
+			ctx := t.Context()
 			dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 			t.Cleanup(cleanup)
 
@@ -152,7 +151,7 @@ func TestSchema_BaselineMatchesExpectedSurface(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires postgres testcontainer")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
 	t.Cleanup(cleanup)
 
@@ -277,7 +276,7 @@ func TestSchema_BaselineMatchesExpectedSurface(t *testing.T) {
 // test on error.
 func queryStrings(t *testing.T, s *pgstore.Store, q string) []string {
 	t.Helper()
-	rows, err := s.QueryContext(context.Background(), q)
+	rows, err := s.QueryContext(t.Context(), q)
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()
 	var out []string

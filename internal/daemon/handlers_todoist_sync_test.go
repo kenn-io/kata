@@ -37,7 +37,7 @@ func (f *lifecycleTodoist) WriteStatus(context.Context, todoistsync.Config, todo
 }
 func TestTodoistSyncLifecycle(t *testing.T) {
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p, err := d.db.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	f := &lifecycleTodoist{}

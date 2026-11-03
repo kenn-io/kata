@@ -18,7 +18,42 @@ const (
 // the type switch itself — release and motion messages fall through
 // untouched.
 func (m Model) routeMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
-	if !m.opts.Mouse || !m.canQuit() {
+	if !m.opts.Mouse {
+		return m, nil
+	}
+	if click, ok := msg.(tea.MouseClickMsg); ok && click.Button == tea.MouseLeft &&
+		m.modal == modalNone && (m.input.kind == inputNone || m.input.kind == inputSearchBar) &&
+		m.width >= 80 {
+		mouse := click.Mouse()
+		if m.view == viewCron && !m.cron.help && m.cron.form == nil && len(m.cron.stack) == 0 &&
+			m.scope.projectID != 0 && mouse.Y == 2 {
+			m.inboxPending = false
+			m.cron.filtering = true
+			return m, nil
+		}
+		row := 1
+		if m.layout == splitlayout.Split {
+			row = 2
+		}
+		if (m.view == viewList || m.view == viewDetail && m.layout == splitlayout.Split) &&
+			mouse.Y == row && (m.layout != splitlayout.Split || mouse.X < splitConfig.ListWidth(m.width)) {
+			m.inboxPending = false
+			if m.list.pendingPriority {
+				m.list.pendingPriority = false
+				m.list.status = ""
+			}
+			m.focus = focusList
+			if m.input.kind == inputSearchBar {
+				m.input.searchFocus, m.input.searchSubmitted = searchFocusQuery, false
+				return m, nil
+			}
+			m, fetch := m.prepareAttentionListNavigation()
+			m.view = viewList
+			m, open := m.openInput(inputSearchBar)
+			return m, tea.Batch(fetch, open)
+		}
+	}
+	if !m.canQuit() {
 		return m, nil
 	}
 	if !m.mouseVisibleViewAcceptsInput() {
@@ -118,13 +153,16 @@ func (m Model) mouseLeftClick(x, y int) (Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.view == viewList {
+		if m.height < listMinHeight {
+			return m.mouseListClick(y - 3) // Title, search and table header precede compact rows.
+		}
 		return m.mouseListClick(y - stackedListDataRowY)
 	}
 	return m, nil
 }
 
 func splitListRowY(y int) int {
-	// Title, pane top border, table header, separator, then first data row.
+	// Title, pane top border, search/stats line, table header, then first data row.
 	return y - splitListDataRowY
 }
 
@@ -154,6 +192,9 @@ func (m Model) listDataBudget() int {
 	if m.layout == splitlayout.Split {
 		innerH := max(m.splitGeometry().ListInnerH, 2)
 		return innerH - 2
+	}
+	if m.height < listMinHeight {
+		return m.listRenderedDataRows()
 	}
 	footerLines := helpLines(listHelpRows(m.list, m.chrome()), m.width)
 	bodyRows := max(m.height-2-1-footerLines, listBodyFloor)

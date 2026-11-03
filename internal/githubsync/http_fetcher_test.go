@@ -33,7 +33,7 @@ func TestHTTPFetcherRepositoryUsesRESTBaseAndDecodesRepository(t *testing.T) {
 		RESTBaseURLOverride: server.URL,
 	})
 
-	repo, err := fetcher.Repository(context.Background(), "github.com", "example-owner", "example-repo")
+	repo, err := fetcher.Repository(t.Context(), "github.com", "example-owner", "example-repo")
 	require.NoError(t, err)
 
 	assert.Equal(t, Repository{
@@ -56,12 +56,12 @@ func TestRESTPageProgressSurvivesResourceLabelChange(t *testing.T) {
 		RESTBaseURLOverride: server.URL,
 	})
 	binding := Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}
-	session, err := fetcher.ForBinding(context.Background(), binding)
+	session, err := fetcher.ForBinding(t.Context(), binding)
 	require.NoError(t, err)
 	requestURL, err := fetcher.restEndpointURL(binding, issuesEndpoint(binding, nil))
 	require.NoError(t, err)
 	var counts []int
-	ctx := withProgressReporter(context.Background(), func(phase string, count, total int) {
+	ctx := withProgressReporter(t.Context(), func(phase string, count, total int) {
 		assert.Equal(t, "issues", phase)
 		assert.Zero(t, total)
 		counts = append(counts, count)
@@ -76,7 +76,7 @@ func TestHTTPFetcherIssuesPaginatesAndEncodesSince(t *testing.T) {
 	var server *httptest.Server
 	var seenPages []string
 	var counts []int
-	ctx := withProgressReporter(context.Background(), func(phase string, count, total int) {
+	ctx := withProgressReporter(t.Context(), func(phase string, count, total int) {
 		assert.Zero(t, total)
 		assert.Equal(t, "issues", phase)
 		counts = append(counts, count)
@@ -163,7 +163,7 @@ func TestHTTPFetcherIssuesPaginationUsesOriginGuardWithCanonicalCase(t *testing.
 		CredentialResolver: NewCredentialResolver(config.GitHubSyncConfig{TokenEnv: tokenEnv}, &fakeCommandRunner{}),
 	})
 
-	issues, err := fetcher.Issues(context.Background(), Binding{
+	issues, err := fetcher.Issues(t.Context(), Binding{
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
@@ -209,7 +209,7 @@ func TestHTTPFetcherIssuesPaginationRewritesNumericRepositoryURLs(t *testing.T) 
 		CredentialResolver: NewCredentialResolver(config.GitHubSyncConfig{TokenEnv: tokenEnv}, &fakeCommandRunner{}),
 	})
 
-	issues, err := fetcher.Issues(context.Background(), Binding{
+	issues, err := fetcher.Issues(t.Context(), Binding{
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
@@ -293,7 +293,7 @@ func TestHTTPFetcherCommentsPaginates(t *testing.T) {
 		RESTBaseURLOverride: server.URL,
 	})
 
-	comments, err := fetcher.Comments(context.Background(), Binding{
+	comments, err := fetcher.Comments(t.Context(), Binding{
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
@@ -330,7 +330,7 @@ func TestHTTPFetcherIssuesRetriesRetryableRESTStatus(t *testing.T) {
 		RESTBaseURLOverride: server.URL,
 	})
 
-	issues, err := fetcher.Issues(context.Background(), Binding{
+	issues, err := fetcher.Issues(t.Context(), Binding{
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
@@ -392,7 +392,7 @@ func TestHTTPFetcherRESTRetryTotalBudgetSpansPages(t *testing.T) {
 		return nil
 	}
 
-	_, err := fetcher.Issues(context.Background(), Binding{
+	_, err := fetcher.Issues(t.Context(), Binding{
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
@@ -427,7 +427,7 @@ func TestHTTPFetcherEnterpriseURLDerivation(t *testing.T) {
 		CredentialResolver: newStaticHTTPFetcherTestResolver("test-token"),
 	})
 
-	repo, err := fetcher.Repository(context.Background(), "github.example", "example-owner", "example-repo")
+	repo, err := fetcher.Repository(t.Context(), "github.example", "example-owner", "example-repo")
 	require.NoError(t, err)
 
 	assert.Equal(t, "R_enterprise", repo.NodeID)
@@ -458,7 +458,7 @@ func TestHTTPFetcherAuthorizationDoesNotReachRedirectHost(t *testing.T) {
 		RESTBaseURLOverride: origin.URL,
 	})
 
-	_, err := fetcher.Repository(context.Background(), "github.com", "example-owner", "example-repo")
+	_, err := fetcher.Repository(t.Context(), "github.com", "example-owner", "example-repo")
 	require.Error(t, err)
 
 	assert.Contains(t, err.Error(), "GitHub repository")
@@ -481,7 +481,7 @@ func TestHTTPFetcherNon2xxErrorIncludesStatusAndRedactedBody(t *testing.T) {
 		RESTBaseURLOverride: server.URL,
 	})
 
-	_, err := fetcher.Repository(context.Background(), "github.com", "example-owner", "example-repo")
+	_, err := fetcher.Repository(t.Context(), "github.com", "example-owner", "example-repo")
 	require.Error(t, err)
 
 	assert.Contains(t, err.Error(), "403 Forbidden")
@@ -502,7 +502,7 @@ func TestHTTPFetcherDecodeErrorNamesGitHubResource(t *testing.T) {
 		RESTBaseURLOverride: server.URL,
 	})
 
-	_, err := fetcher.Repository(context.Background(), "github.com", "example-owner", "example-repo")
+	_, err := fetcher.Repository(t.Context(), "github.com", "example-owner", "example-repo")
 	require.Error(t, err)
 
 	assert.Contains(t, err.Error(), "decode GitHub repository")
@@ -545,20 +545,20 @@ func TestHTTPFetcherBindingSessionReusesCredentialTransport(t *testing.T) {
 		RESTBaseURLOverride: server.URL,
 		GraphQLURLOverride:  server.URL + "/graphql",
 	})
-	session, err := fetcher.ForBinding(context.Background(), Binding{
+	session, err := fetcher.ForBinding(t.Context(), Binding{
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",
 	})
 	require.NoError(t, err)
 
-	_, err = session.Repository(context.Background(), "github.com", "example-owner", "example-repo")
+	_, err = session.Repository(t.Context(), "github.com", "example-owner", "example-repo")
 	require.NoError(t, err)
-	_, err = session.Issues(context.Background(), Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}, nil)
+	_, err = session.Issues(t.Context(), Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}, nil)
 	require.NoError(t, err)
-	_, err = session.Comments(context.Background(), Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}, 1)
+	_, err = session.Comments(t.Context(), Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}, 1)
 	require.NoError(t, err)
-	_, err = session.ParentData(context.Background(), Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}, ParentRequest{})
+	_, err = session.ParentData(t.Context(), Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}, ParentRequest{})
 	require.NoError(t, err)
 
 	assert.Equal(t, 1, resolver.calls)
@@ -603,13 +603,13 @@ func TestHTTPFetcherUnboundReadsResolveCredentialsOncePerCall(t *testing.T) {
 	})
 	binding := Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}
 
-	_, err := fetcher.Repository(context.Background(), "github.com", "example-owner", "example-repo")
+	_, err := fetcher.Repository(t.Context(), "github.com", "example-owner", "example-repo")
 	require.NoError(t, err)
-	_, err = fetcher.Issues(context.Background(), binding, nil)
+	_, err = fetcher.Issues(t.Context(), binding, nil)
 	require.NoError(t, err)
-	_, err = fetcher.Comments(context.Background(), binding, 1)
+	_, err = fetcher.Comments(t.Context(), binding, 1)
 	require.NoError(t, err)
-	data, err := fetcher.ParentData(context.Background(), binding, ParentRequest{})
+	data, err := fetcher.ParentData(t.Context(), binding, ParentRequest{})
 	require.NoError(t, err)
 
 	assert.Equal(t, ParentScanComplete, data.Scan)
@@ -624,7 +624,7 @@ func TestHTTPFetcherCommentsRejectsNonPositiveIssueNumberWithoutResolvingCredent
 		RESTBaseURLOverride: "https://api.github.example",
 	})
 
-	_, err := fetcher.Comments(context.Background(), Binding{
+	_, err := fetcher.Comments(t.Context(), Binding{
 		Host:  "github.com",
 		Owner: "example-owner",
 		Repo:  "example-repo",

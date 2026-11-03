@@ -1,7 +1,6 @@
 package dbtest
 
 import (
-	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -61,7 +60,7 @@ func collectExport[T any](sequence iter.Seq2[T, error]) ([]T, error) {
 
 func checkAPITokensAndSystemProject(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	systemProject, err := store.SystemProject(ctx)
 	if err != nil {
 		return fmt.Errorf("system project: %w", err)
@@ -284,7 +283,7 @@ func checkAPITokensAndSystemProject(t *testing.T, store db.Storage) error {
 
 func checkRecurrences(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "recurrence-project")
 	if err != nil {
 		return fmt.Errorf("create recurrence project: %w", err)
@@ -299,8 +298,36 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return fmt.Errorf("create initial recurrence issue: %w", err)
 	}
+	staleRev := initialIssue.Revision + 1
+	_, err = store.CreateRecurrenceForIssue(ctx, db.CreateRecurrenceForIssueIn{
+		IssueID: initialIssue.ID, IfMatchRev: &staleRev,
+		Recurrence: db.CreateRecurrenceIn{
+			ProjectID: attachmentProject.ID, Actor: "scheduler", Rule: "FREQ=WEEKLY",
+			DTStart: "2026-08-03", Timezone: "UTC",
+			Template: db.RecurrenceTemplate{Title: "Initial review"},
+		},
+	})
+	var staleConflict *db.RevisionConflictError
+	if !errors.As(err, &staleConflict) || staleConflict == nil {
+		return fmt.Errorf("a stale issue revision must refuse the attachment with a revision conflict, got %v", err)
+	}
+	assert.Equal(t, initialIssue.Revision, staleConflict.CurrentRevision)
+	untouched, err := store.IssueByID(ctx, initialIssue.ID)
+	if err != nil {
+		return fmt.Errorf("load issue after a refused attachment: %w", err)
+	}
+	assert.Nil(t, untouched.RecurrenceID)
+	assert.Equal(t, initialIssue.Revision, untouched.Revision)
+	assert.Equal(t, initialIssue.Metadata, untouched.Metadata)
+	refused, err := store.ListRecurrencesByProject(ctx, attachmentProject.ID)
+	if err != nil {
+		return fmt.Errorf("list recurrences after a refused attachment: %w", err)
+	}
+	assert.Empty(t, refused)
+
+	matchingRev := initialIssue.Revision
 	attached, err := store.CreateRecurrenceForIssue(ctx, db.CreateRecurrenceForIssueIn{
-		IssueID: initialIssue.ID,
+		IssueID: initialIssue.ID, IfMatchRev: &matchingRev,
 		Recurrence: db.CreateRecurrenceIn{
 			ProjectID: attachmentProject.ID, Actor: "scheduler", Rule: "FREQ=WEEKLY",
 			DTStart: "2026-08-03", Timezone: "UTC",
@@ -688,7 +715,7 @@ func checkRecurrences(t *testing.T, store db.Storage) error {
 
 func checkCloseAuditQueries(t *testing.T, store db.Storage) error {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	primary, err := store.CreateProject(ctx, "close-audit-primary")
 	if err != nil {
 		return fmt.Errorf("create close audit project: %w", err)

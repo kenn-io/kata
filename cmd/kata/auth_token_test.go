@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -27,7 +26,7 @@ func TestCLIInjectsAuthTokenAgainstProtectedDaemon(t *testing.T) {
 	// auth-aware test helpers (postJSON et al. issue raw http.Post calls
 	// without auth headers; auth_token plumbing is what this test exercises,
 	// not those helpers).
-	_, err := env.DB.CreateProject(context.Background(), "alpha")
+	_, err := env.DB.CreateProject(t.Context(), "alpha")
 	require.NoError(t, err)
 
 	out, err := runCmdOutput(t, env, "projects", "list")

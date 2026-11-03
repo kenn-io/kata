@@ -1,7 +1,6 @@
 package sqlitestore_test
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -41,7 +40,7 @@ func TestCreateIssue_AllocatesShortIDAndEmitsEvent(t *testing.T) {
 func TestCreateIssue_RetriesTransientSQLiteBusy(t *testing.T) {
 	t.Parallel()
 	d, path := openTestDBWithPath(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p := createProject(ctx, t, d, "busy-create")
 	useFastSQLiteBusyTimeout(ctx, t, d)
 
@@ -128,7 +127,7 @@ func TestCreateIssue_ShortIDOverrideRejectsInvalidSyntax(t *testing.T) {
 func TestIssueByShortID_ReturnsLiveIssue(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p := createProject(ctx, t, d, "demo")
 	created, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: p.ID,
@@ -148,7 +147,7 @@ func TestIssueByShortID_ReturnsLiveIssue(t *testing.T) {
 func TestIssueByShortID_NotFoundForUnknownShortID(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p := createProject(ctx, t, d, "demo")
 	_, err := d.IssueByShortID(ctx, p.ID, "zzzz", db.IncludeDeletedNo)
 	assert.ErrorIs(t, err, db.ErrNotFound)
@@ -160,7 +159,7 @@ func TestIssueByShortID_NotFoundForUnknownShortID(t *testing.T) {
 func TestIssueByShortID_DefaultExcludesSoftDeleted(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p := createProject(ctx, t, d, "demo")
 	created, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: p.ID,
@@ -182,7 +181,7 @@ func TestIssueByShortID_DefaultExcludesSoftDeleted(t *testing.T) {
 func TestIssueByShortID_IncludeDeletedYesResolvesSoftDeleted(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p := createProject(ctx, t, d, "demo")
 	created, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: p.ID,
@@ -206,7 +205,7 @@ func TestIssueByShortID_IncludeDeletedYesResolvesSoftDeleted(t *testing.T) {
 func TestIssueUIDPrefixMatch_DefaultExcludesSoftDeleted(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p := createProject(ctx, t, d, "demo")
 	created, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: p.ID,
@@ -230,7 +229,7 @@ func TestIssueUIDPrefixMatch_DefaultExcludesSoftDeleted(t *testing.T) {
 func TestIssueUIDPrefixMatch_IncludeDeletedYesResolvesSoftDeleted(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	p := createProject(ctx, t, d, "demo")
 	created, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
 		ProjectID: p.ID,
@@ -590,7 +589,7 @@ func TestCloseIssue_RefusesParentWithOpenChildren(t *testing.T) {
 func TestCloseIssue_AllowsParentWhenOnlyChildInArchivedProject(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	pa := createProject(ctx, t, d, "alpha")
 	pb := createProject(ctx, t, d, "beta")
 	parent := makeIssue(t, ctx, d, pa.ID, "parent", "tester")
@@ -635,7 +634,7 @@ func TestCloseIssue_PersistsMessageAndEvidence(t *testing.T) {
 func TestCommentsByIssue(t *testing.T) {
 	t.Parallel()
 	d := openTestDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	proj, err := d.CreateProject(ctx, "proj")
 	require.NoError(t, err)

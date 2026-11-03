@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"net/http"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/stretchr/testify/require"
 	"go.kenn.io/kit/tui/splitlayout"
 )
 
@@ -120,5 +122,91 @@ func TestMouseClickSelectsProjectsRow(t *testing.T) {
 	}
 	if nm.projectsCursor != 1 {
 		t.Fatalf("projectsCursor=%d, want first concrete project row", nm.projectsCursor)
+	}
+}
+
+func TestMousePersistentSearch(t *testing.T) {
+	for _, size := range [][2]int{{80, 2}, {80, 3}, {80, 4}, {80, 9}, {80, 40}, {160, 40}} {
+		m := resizeModel(newTestModel(), size[0], size[1])
+		m.opts.Mouse = true
+		m.list.issues = makeTestIssues(5)
+		m.list.cursor = 2
+		m.list = m.list.syncSelection(m.list.visibleRows())
+		original := m.list.selectedUID
+		row := 1
+		if m.layout == splitlayout.Split {
+			row = 2
+		}
+		m, _ = updateModel(m, mouseLeftClick(0, row))
+		if m.input.kind != inputSearchBar {
+			t.Fatalf("%v: click did not open search", size)
+		}
+		m = sendRune(m, 'r')
+		m = sendKey(m, tea.KeyDown)
+		m, _ = updateModel(m, mouseLeftClick(4, row))
+		if m.input.searchFocus != searchFocusQuery {
+			t.Fatal("click did not refocus query")
+		}
+		m = sendKey(m, tea.KeyEscape)
+		if m.list.selectedUID != original || m.list.filter.Search != "" || m.input.kind != inputNone {
+			t.Fatalf("click recaptured search snapshot: selected=%s filter=%q", m.list.selectedUID, m.list.filter.Search)
+		}
+	}
+}
+
+func TestMouseSearchCancelsPendingPriority(t *testing.T) {
+	m := resizeModel(newTestModel(), 80, 24)
+	m.opts.Mouse = true
+	m.api = newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			respondJSON(t, w, map[string]any{"jobs": []any{}, "workflows": []any{}, "runs": []any{}})
+			return
+		}
+		t.Errorf("tab navigation made an unexpected daemon request: %s %s", r.Method, r.URL.Path)
+		http.Error(w, "unexpected request", http.StatusBadRequest)
+	})
+	m.authCapabilitiesRequired, m.authCapabilitiesReady = true, true
+	m.activeAuth = AuthInfo{Kind: "none"}
+	m.list.issues = makeTestIssues(2)
+	m.list.issues[1].Title = "second"
+	m.list = m.list.syncSelection(m.list.visibleRows())
+	m = sendRune(m, '!')
+	require.True(t, m.list.pendingPriority)
+
+	m, _ = updateModel(m, mouseLeftClick(4, 1))
+	if m.list.status != "" {
+		t.Error("opening search kept the priority prompt")
+	}
+	m, _ = updateModel(m, tea.PasteMsg{Content: "second"})
+	m = sendKey(m, tea.KeyEnter)
+	m = sendKey(m, tea.KeyEnter)
+	require.Equal(t, "01TEST-r002", m.list.selectedUID)
+	require.Equal(t, inputNone, m.input.kind)
+
+	m, cmd := updateModel(m, keyRune('2'))
+	runCmd(cmd)
+	require.Equal(t, viewCron, m.view, "2 must open Jobs instead of changing priority")
+}
+
+func TestMouseSearchVisibilityGuards(t *testing.T) {
+	for _, state := range []string{"narrow", "modal", "input", "detail"} {
+		t.Run(state, func(t *testing.T) {
+			m := resizeModel(newTestModel(), 80, 24)
+			m.opts.Mouse = true
+			switch state {
+			case "narrow":
+				m = resizeModel(m, 79, 24)
+			case "modal":
+				m.modal = modalQuitConfirm
+			case "input":
+				m, _ = m.openInput(inputFilterForm)
+			case "detail":
+				m.view = viewDetail
+			}
+			next, _ := updateModel(m, mouseLeftClick(4, 1))
+			if next.input.kind == inputSearchBar {
+				t.Fatal("invisible or blocked search accepted click")
+			}
+		})
 	}
 }

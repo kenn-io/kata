@@ -1,7 +1,6 @@
 package federation
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -80,9 +79,9 @@ func TestFederationClientAcquireClaimPostsRequestAndParsesTimedHubFields(t *test
 	}))
 	t.Cleanup(srv.Close)
 
-	client, err := NewClient(context.Background(), srv.URL, "claim-token", clientpkg.Opts{})
+	client, err := NewClient(t.Context(), srv.URL, "claim-token", clientpkg.Opts{})
 	require.NoError(t, err)
-	got, err := client.AcquireClaim(context.Background(), 42, "abc4", ClaimRequest{
+	got, err := client.AcquireClaim(t.Context(), 42, "abc4", ClaimRequest{
 		Holder:     "agent-a",
 		ClientKind: "cli",
 		ClaimKind:  "timed",
@@ -113,11 +112,11 @@ func TestFederationClientClaimActionsUseExpectedPaths(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client, err := NewClient(context.Background(), srv.URL, "claim-token", clientpkg.Opts{})
+	client, err := NewClient(t.Context(), srv.URL, "claim-token", clientpkg.Opts{})
 	require.NoError(t, err)
-	_, err = client.RenewClaim(context.Background(), 42, "abc4", ClaimRequest{Holder: "agent-a", TTLSeconds: 300})
+	_, err = client.RenewClaim(t.Context(), 42, "abc4", ClaimRequest{Holder: "agent-a", TTLSeconds: 300})
 	require.NoError(t, err)
-	_, err = client.ReleaseClaim(context.Background(), 42, "abc4", ClaimRequest{Holder: "agent-a", Reason: "done"})
+	_, err = client.ReleaseClaim(t.Context(), 42, "abc4", ClaimRequest{Holder: "agent-a", Reason: "done"})
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{
@@ -153,9 +152,9 @@ func TestFederationClientAcquireClaimParsesDeniedHolderResponse(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client, err := NewClient(context.Background(), srv.URL, "claim-token", clientpkg.Opts{})
+	client, err := NewClient(t.Context(), srv.URL, "claim-token", clientpkg.Opts{})
 	require.NoError(t, err)
-	got, err := client.AcquireClaim(context.Background(), 42, "abc4", ClaimRequest{
+	got, err := client.AcquireClaim(t.Context(), 42, "abc4", ClaimRequest{
 		Holder:     "requester",
 		ClientKind: "cli",
 		ClaimKind:  "hard",
@@ -170,7 +169,7 @@ func TestFederationClientAcquireClaimParsesDeniedHolderResponse(t *testing.T) {
 }
 
 func TestFederationClientAcquireClaimAgainstRealHubParsesDeniedHolderResponse(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	hub := testenv.New(t)
 	hubProject := createFederatedHubForPush(t, hub)
 	issue, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{
@@ -232,9 +231,9 @@ func TestFederationClientClaimStatusParsesDeniedHolderAndHubNow(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client, err := NewClient(context.Background(), srv.URL, "claim-token", clientpkg.Opts{})
+	client, err := NewClient(t.Context(), srv.URL, "claim-token", clientpkg.Opts{})
 	require.NoError(t, err)
-	got, err := client.ClaimStatus(context.Background(), 42, "abc4")
+	got, err := client.ClaimStatus(t.Context(), 42, "abc4")
 	require.NoError(t, err)
 
 	assert.True(t, got.Held)

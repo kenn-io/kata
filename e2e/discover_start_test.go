@@ -46,7 +46,8 @@ func TestDiscoverStartWithRealKata(t *testing.T) {
 		workHome, workUID, lostHome, workUID), 0o600))
 	for _, daemonHome := range []string{home, workHome} {
 		t.Cleanup(func() {
-			stop := exec.Command(bin, "daemon", "stop") //nolint:gosec // G204: bin is buildKataBinary's output
+			// t.Context() is already canceled when cleanup runs.
+			stop := exec.CommandContext(context.WithoutCancel(t.Context()), bin, "daemon", "stop") //nolint:gosec // G204: bin is buildKataBinary's output
 			stop.Env = append(os.Environ(), "KATA_HOME="+daemonHome)
 			_ = stop.Run()
 		})

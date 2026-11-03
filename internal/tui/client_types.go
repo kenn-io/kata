@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"strings"
 	"time"
@@ -23,32 +24,55 @@ import (
 // (api.IssueOut.QualifiedID).
 type Issue struct {
 	db.AttributionView
-	ID                  int64        `json:"id"`
-	UID                 string       `json:"uid,omitempty"`
-	ProjectID           int64        `json:"project_id"`
-	ProjectUID          string       `json:"project_uid,omitempty"`
-	ShortID             string       `json:"short_id"`
-	QualifiedID         string       `json:"qualified_id,omitempty"`
-	Title               string       `json:"title"`
-	Body                string       `json:"body"`
-	Status              string       `json:"status"`
-	ClosedReason        *string      `json:"closed_reason,omitempty"`
-	Owner               *string      `json:"owner,omitempty"`
-	AssignmentExpiresOn *time.Time   `json:"assignment_expires_on,omitempty"`
-	Author              string       `json:"author"`
-	CreatedAt           time.Time    `json:"created_at"`
-	UpdatedAt           time.Time    `json:"updated_at"`
-	ClosedAt            *time.Time   `json:"closed_at,omitempty"`
-	DeletedAt           *time.Time   `json:"deleted_at,omitempty"`
-	Labels              []string     `json:"labels,omitempty"`
-	Parent              *LinkPeer    `json:"parent,omitempty"`
-	ChildCounts         *ChildCounts `json:"child_counts,omitempty"`
-	Blocks              []LinkPeer   `json:"blocks,omitempty"`
-	BlockedBy           []LinkPeer   `json:"blocked_by,omitempty"`
-	Related             []LinkPeer   `json:"related,omitempty"`
-	Priority            *int64       `json:"priority,omitempty"`
-	Revision            int64        `json:"revision"`
-	RecurrenceID        *int64       `json:"recurrence_id,omitempty"`
+	ID                  int64         `json:"id"`
+	UID                 string        `json:"uid,omitempty"`
+	ProjectID           int64         `json:"project_id"`
+	ProjectUID          string        `json:"project_uid,omitempty"`
+	ShortID             string        `json:"short_id"`
+	QualifiedID         string        `json:"qualified_id,omitempty"`
+	Title               string        `json:"title"`
+	Body                string        `json:"body"`
+	Status              string        `json:"status"`
+	ClosedReason        *string       `json:"closed_reason,omitempty"`
+	Owner               *string       `json:"owner,omitempty"`
+	AssignmentExpiresOn *time.Time    `json:"assignment_expires_on,omitempty"`
+	Author              string        `json:"author"`
+	CreatedAt           time.Time     `json:"created_at"`
+	UpdatedAt           time.Time     `json:"updated_at"`
+	ClosedAt            *time.Time    `json:"closed_at,omitempty"`
+	DeletedAt           *time.Time    `json:"deleted_at,omitempty"`
+	Labels              []string      `json:"labels,omitempty"`
+	Parent              *LinkPeer     `json:"parent,omitempty"`
+	ChildCounts         *ChildCounts  `json:"child_counts,omitempty"`
+	Blocks              []LinkPeer    `json:"blocks,omitempty"`
+	BlockedBy           []LinkPeer    `json:"blocked_by,omitempty"`
+	Related             []LinkPeer    `json:"related,omitempty"`
+	Priority            *int64        `json:"priority,omitempty"`
+	Revision            int64         `json:"revision"`
+	RecurrenceID        *int64        `json:"recurrence_id,omitempty"`
+	Metadata            issueMetadata `json:"metadata,omitzero"`
+	// Resolved YYYY-MM-DD planning dates from the daemon.
+	ScheduledOnDate string `json:"scheduled_on_date,omitempty"`
+	DeadlineOnDate  string `json:"deadline_on_date,omitempty"`
+}
+
+// issueMetadata keeps the two planning-date keys of an issue's metadata as
+// the daemon stores them. Other keys are not read by the TUI.
+type issueMetadata struct {
+	ScheduledOn jsontext.Value `json:"scheduled_on,omitzero"`
+	DeadlineOn  jsontext.Value `json:"deadline_on,omitzero"`
+}
+
+// scheduledOn and deadlineOn are the raw stored dates, "" when absent.
+func (i Issue) scheduledOn() string { return rawDate(i.Metadata.ScheduledOn) }
+func (i Issue) deadlineOn() string  { return rawDate(i.Metadata.DeadlineOn) }
+
+func rawDate(v jsontext.Value) string {
+	var s string
+	if len(v) == 0 || json.Unmarshal(v, &s) != nil {
+		return ""
+	}
+	return s
 }
 
 // LinkPeer mirrors api.LinkPeer: UID, short_id, project, and qualified_id
@@ -89,8 +113,14 @@ type IssueRef struct {
 // daemon work and is deferred to a future task.
 type ListFilter struct {
 	Status, Owner, Author, Search string
-	Labels                        []string
-	Limit                         int
+	// Date is "" (off), dateToday, or dateScheduled; see matchesDate.
+	Date string
+	// Day is the calendar day the Date filter evaluates against. It is
+	// stamped when the filter is committed and on each fetch, so rows do
+	// not change membership between fetches when midnight passes.
+	Day    string
+	Labels []string
+	Limit  int
 }
 
 // CreateInitialLinkBody requests a link created atomically with a new
@@ -331,6 +361,7 @@ type APIError struct {
 	Code         string
 	Message      string
 	Hint         string
+	Data         jsontext.Value
 }
 
 // Error returns "code: message[: hint: ...]" when the daemon supplied a

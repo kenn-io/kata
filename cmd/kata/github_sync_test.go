@@ -32,7 +32,7 @@ func TestGitHubSyncEnableExplicitRepoForwardsHostRepoAndInterval(t *testing.T) {
 		owner: "example-owner",
 		repo:  "example-repo",
 	}}, f.fetcher.calls)
-	binding, err := f.env.DB.IssueSyncBindingByProject(context.Background(), f.projectID)
+	binding, err := f.env.DB.IssueSyncBindingByProject(t.Context(), f.projectID)
 	require.NoError(t, err)
 	assert.True(t, binding.Enabled)
 	assert.Equal(t, "github", binding.Provider)
@@ -58,7 +58,7 @@ func TestGitHubSyncEnableDefaultsHostForExplicitRepo(t *testing.T) {
 func TestGitHubSyncEnableResolvesRepoFromProjectGitAlias(t *testing.T) {
 	t.Setenv("KATA_GITHUB_SYNC_ALLOWED_HOSTS", "github.example")
 	f := newGitHubSyncCLIFixture(t)
-	_, err := f.env.DB.AttachAlias(context.Background(), f.projectID, "github.example/example-owner/example-repo", "git")
+	_, err := f.env.DB.AttachAlias(t.Context(), f.projectID, "github.example/example-owner/example-repo", "git")
 	require.NoError(t, err)
 
 	out := runCLI(t, f.env, f.dir, "sync", "github", "enable")
@@ -74,9 +74,9 @@ func TestGitHubSyncEnableResolvesRepoFromProjectGitAlias(t *testing.T) {
 func TestGitHubSyncEnableFiltersInferredRepoByHost(t *testing.T) {
 	t.Setenv("KATA_GITHUB_SYNC_ALLOWED_HOSTS", "github.example")
 	f := newGitHubSyncCLIFixture(t)
-	_, err := f.env.DB.AttachAlias(context.Background(), f.projectID, "github.com/example-owner/public-repo", "git")
+	_, err := f.env.DB.AttachAlias(t.Context(), f.projectID, "github.com/example-owner/public-repo", "git")
 	require.NoError(t, err)
-	_, err = f.env.DB.AttachAlias(context.Background(), f.projectID, "github.example/example-owner/enterprise-repo", "git")
+	_, err = f.env.DB.AttachAlias(t.Context(), f.projectID, "github.example/example-owner/enterprise-repo", "git")
 	require.NoError(t, err)
 
 	out := runCLI(t, f.env, f.dir, "sync", "github", "enable", "--host", "github.example")
@@ -103,9 +103,9 @@ func TestGitHubSyncEnableRejectsMissingAndAmbiguousInferredRepo(t *testing.T) {
 	t.Run("ambiguous", func(t *testing.T) {
 		t.Setenv("KATA_GITHUB_SYNC_ALLOWED_HOSTS", "github.example")
 		f := newGitHubSyncCLIFixture(t)
-		_, err := f.env.DB.AttachAlias(context.Background(), f.projectID, "github.com/example-owner/one", "git")
+		_, err := f.env.DB.AttachAlias(t.Context(), f.projectID, "github.com/example-owner/one", "git")
 		require.NoError(t, err)
-		_, err = f.env.DB.AttachAlias(context.Background(), f.projectID, "github.example/example-owner/two", "git")
+		_, err = f.env.DB.AttachAlias(t.Context(), f.projectID, "github.example/example-owner/two", "git")
 		require.NoError(t, err)
 
 		_, stderr, err := runCLIWithErr(t, f.env, f.dir, "sync", "github", "enable")
@@ -119,13 +119,13 @@ func TestGitHubSyncEnableRejectsMissingAndAmbiguousInferredRepo(t *testing.T) {
 func TestIssueSyncStatusDisableAndOnceUseDaemonEndpointsAndOutputModes(t *testing.T) {
 	f := newGitHubSyncCLIFixture(t)
 	runCLI(t, f.env, f.dir, "sync", "github", "enable", "--repo", "example-owner/example-repo")
-	binding, err := f.env.DB.IssueSyncBindingByProject(context.Background(), f.projectID)
+	binding, err := f.env.DB.IssueSyncBindingByProject(t.Context(), f.projectID)
 	require.NoError(t, err)
 	now := time.Now().UTC()
-	_, claimed, err := f.env.DB.ClaimIssueSyncBinding(context.Background(), binding.ID, "github", now.Add(-time.Minute), now.Add(-time.Hour))
+	_, claimed, err := f.env.DB.ClaimIssueSyncBinding(t.Context(), binding.ID, "github", now.Add(-time.Minute), now.Add(-time.Hour))
 	require.NoError(t, err)
 	require.True(t, claimed)
-	_, err = f.env.DB.RecordIssueSyncError(context.Background(), db.IssueSyncErrorParams{
+	_, err = f.env.DB.RecordIssueSyncError(t.Context(), db.IssueSyncErrorParams{
 		BindingID: binding.ID,
 		StartedAt: now.Add(-time.Minute),
 		At:        now,
@@ -168,7 +168,7 @@ func TestIssueSyncStatusDisableAndOnceUseDaemonEndpointsAndOutputModes(t *testin
 
 	disableOut := runCLI(t, f.env, f.dir, "sync", "github", "disable")
 	assert.Contains(t, disableOut, "GitHub sync disabled")
-	disabled, err := f.env.DB.IssueSyncBindingByProject(context.Background(), f.projectID)
+	disabled, err := f.env.DB.IssueSyncBindingByProject(t.Context(), f.projectID)
 	require.NoError(t, err)
 	assert.False(t, disabled.Enabled)
 }
@@ -312,20 +312,20 @@ func mustCmdGitHubSyncConfig(t testing.TB, host, owner, repo string, repoID int6
 func TestGitHubSyncSinceEnableAndValidation(t *testing.T) {
 	f := newGitHubSyncCLIFixture(t)
 	runCLI(t, f.env, f.dir, "sync", "github", "enable", "--repo", "example-owner/example-repo", "--since", "2026-01-01")
-	binding, err := f.env.DB.IssueSyncBindingByProject(context.Background(), f.projectID)
+	binding, err := f.env.DB.IssueSyncBindingByProject(t.Context(), f.projectID)
 	require.NoError(t, err)
 	assert.Contains(t, string(binding.Config), `"since":"2026-01-01T00:00:00Z"`)
 	_, _, err = runCLIWithErr(t, f.env, f.dir, "sync", "github", "enable", "--repo", "example-owner/example-repo", "--since", "bad")
 	_ = requireCLIError(t, err, ExitValidation)
 	assert.Len(t, f.fetcher.calls, 1, "invalid cutoff must reject before repository lookup")
 	runCLI(t, f.env, f.dir, "sync", "github", "enable", "--repo", "example-owner/example-repo", "--interval", "10m")
-	binding, err = f.env.DB.IssueSyncBindingByProject(context.Background(), f.projectID)
+	binding, err = f.env.DB.IssueSyncBindingByProject(t.Context(), f.projectID)
 	require.NoError(t, err)
 	assert.Contains(t, string(binding.Config), `"since":"2026-01-01T00:00:00Z"`)
 	assert.Equal(t, 600, binding.IntervalSeconds)
 
 	runCLI(t, f.env, f.dir, "sync", "github", "enable", "--repo", "example-owner/example-repo", "--since=")
-	binding, err = f.env.DB.IssueSyncBindingByProject(context.Background(), f.projectID)
+	binding, err = f.env.DB.IssueSyncBindingByProject(t.Context(), f.projectID)
 	require.NoError(t, err)
 	assert.NotContains(t, string(binding.Config), `"since"`)
 }
@@ -333,10 +333,10 @@ func TestGitHubSyncSinceEnableAndValidation(t *testing.T) {
 func TestGitHubSyncProgressDetailedStatusAllModes(t *testing.T) {
 	f := newGitHubSyncCLIFixture(t)
 	runCLI(t, f.env, f.dir, "sync", "github", "enable", "--repo", "example-owner/example-repo", "--since", "2026-01-01")
-	binding, err := f.env.DB.IssueSyncBindingByProject(context.Background(), f.projectID)
+	binding, err := f.env.DB.IssueSyncBindingByProject(t.Context(), f.projectID)
 	require.NoError(t, err)
 	at := time.Now().UTC().Truncate(time.Millisecond)
-	_, claimed, err := f.env.DB.ClaimIssueSyncBinding(context.Background(), binding.ID, "github", at, at.Add(-time.Hour))
+	_, claimed, err := f.env.DB.ClaimIssueSyncBinding(t.Context(), binding.ID, "github", at, at.Add(-time.Hour))
 	require.NoError(t, err)
 	require.True(t, claimed)
 	f.progress.Begin(binding.ID, at)
@@ -372,17 +372,17 @@ func TestGitHubSyncProgressDetailedStatusAllModes(t *testing.T) {
 func TestGitHubSyncDetailedStatusLabelsPreviousSuccessAfterFailure(t *testing.T) {
 	f := newGitHubSyncCLIFixture(t)
 	runCLI(t, f.env, f.dir, "sync", "github", "enable", "--repo", "example-owner/example-repo")
-	binding, err := f.env.DB.IssueSyncBindingByProject(context.Background(), f.projectID)
+	binding, err := f.env.DB.IssueSyncBindingByProject(t.Context(), f.projectID)
 	require.NoError(t, err)
 	at := time.Now().UTC().Truncate(time.Millisecond)
-	_, _, err = f.env.DB.ClaimIssueSyncBinding(context.Background(), binding.ID, "github", at, at.Add(-time.Hour))
+	_, _, err = f.env.DB.ClaimIssueSyncBinding(t.Context(), binding.ID, "github", at, at.Add(-time.Hour))
 	require.NoError(t, err)
-	_, err = f.env.DB.RecordIssueSyncSuccess(context.Background(), db.IssueSyncSuccessParams{BindingID: binding.ID, StartedAt: at, At: at, CursorAt: at, LastCreated: 12, LastComments: 34})
+	_, err = f.env.DB.RecordIssueSyncSuccess(t.Context(), db.IssueSyncSuccessParams{BindingID: binding.ID, StartedAt: at, At: at, CursorAt: at, LastCreated: 12, LastComments: 34})
 	require.NoError(t, err)
 	later := at.Add(time.Minute)
-	_, _, err = f.env.DB.ClaimIssueSyncBinding(context.Background(), binding.ID, "github", later, at.Add(-time.Hour))
+	_, _, err = f.env.DB.ClaimIssueSyncBinding(t.Context(), binding.ID, "github", later, at.Add(-time.Hour))
 	require.NoError(t, err)
-	_, err = f.env.DB.RecordIssueSyncError(context.Background(), db.IssueSyncErrorParams{BindingID: binding.ID, StartedAt: later, At: later, Error: "upstream failed"})
+	_, err = f.env.DB.RecordIssueSyncError(t.Context(), db.IssueSyncErrorParams{BindingID: binding.ID, StartedAt: later, At: later, Error: "upstream failed"})
 	require.NoError(t, err)
 	human := runCLI(t, f.env, f.dir, "sync", "github", "status")
 	assert.Contains(t, human, "Last successful run:")
@@ -404,7 +404,7 @@ func TestGitHubTitlePrefixReenablePresence(t *testing.T) {
 		{nil, true}, {[]string{"--title-prefix=false"}, false}, {nil, false}, {[]string{"--title-prefix=true"}, true},
 	} {
 		runCLI(t, f.env, f.dir, append([]string{"sync", "github", "enable", "--repo", "example-owner/example-repo"}, tc.args...)...)
-		b, err := f.env.DB.IssueSyncBindingByProject(context.Background(), f.projectID)
+		b, err := f.env.DB.IssueSyncBindingByProject(t.Context(), f.projectID)
 		require.NoError(t, err)
 		c, err := githubsync.DecodeConfig(b.Config)
 		require.NoError(t, err)
@@ -419,14 +419,14 @@ func TestGitHubTitlePrefixStatus(t *testing.T) {
 				f := newGitHubSyncCLIFixture(t)
 				runCLI(t, f.env, f.dir, "sync", "github", "enable", "--repo", "example-owner/example-repo", "--title-prefix="+fmt.Sprint(choice != "false"))
 				if choice == "legacy" {
-					binding, err := f.env.DB.IssueSyncBindingByProject(context.Background(), f.projectID)
+					binding, err := f.env.DB.IssueSyncBindingByProject(t.Context(), f.projectID)
 					require.NoError(t, err)
 					var fields map[string]any
 					require.NoError(t, json.Unmarshal(binding.Config, &fields))
 					delete(fields, "title_prefix")
 					raw, err := json.Marshal(fields)
 					require.NoError(t, err)
-					_, err = f.env.DB.UpsertIssueSyncBinding(context.Background(), db.UpsertIssueSyncBindingParams{ProjectID: binding.ProjectID, Provider: binding.Provider, SourceKey: binding.SourceKey, RemoteID: binding.RemoteID, DisplayName: binding.DisplayName, Config: raw, IntervalSeconds: binding.IntervalSeconds})
+					_, err = f.env.DB.UpsertIssueSyncBinding(t.Context(), db.UpsertIssueSyncBindingParams{ProjectID: binding.ProjectID, Provider: binding.Provider, SourceKey: binding.SourceKey, RemoteID: binding.RemoteID, DisplayName: binding.DisplayName, Config: raw, IntervalSeconds: binding.IntervalSeconds})
 					require.NoError(t, err)
 				}
 				args := []string{"sync", "github", "status"}

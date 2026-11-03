@@ -59,7 +59,7 @@ func TestExternalRootSectionPublishesTypedTools(t *testing.T) {
 
 	result, err := session.ListTools(t.Context(), nil)
 	require.NoError(t, err)
-	want := append(append([]string(nil), sectionLoaderNames...), externalRootToolNames...)
+	want := append(append([]string(nil), sectionLoaderNames...), append([]string{"kata.skills"}, externalRootToolNames...)...)
 	require.ElementsMatch(t, want, toolNames(result.Tools))
 }
 
@@ -329,6 +329,32 @@ func TestBridgeBindRequiresAllProjectsScopeBeforeUsingConnectorCredentials(t *te
 		Ref: "abc4", Connector: "example-connector", External: "root-locator",
 	})
 	require.ErrorContains(t, err, "requires the --all daemon-wide scope")
+	require.Zero(t, requests.Load())
+}
+
+// A spoke name belongs to the instance across every project, so a scoped
+// server must not rename it, and must refuse before contacting the daemon.
+func TestFederationSpokeNameRequiresAllProjectsScope(t *testing.T) {
+	var requests atomic.Int64
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		writeExternalRootJSON(t, w, map[string]any{"spoke_instance_uid": "01HZNQ7VFPK1XGD8R5MABCD4EA"})
+	}))
+	t.Cleanup(httpServer.Close)
+
+	client, err := kataclient.NewWithHTTPClient(httpServer.URL, httpServer.Client())
+	require.NoError(t, err)
+	bound, err := NewBoundScope(ProjectIdentity{ID: 42, Name: "spoke-project"})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: bound, Actor: "example-agent"}}
+	for _, input := range []FederationSpokeNameInput{
+		{SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA", Name: "laptop"},
+		{SpokeInstanceUID: "01HZNQ7VFPK1XGD8R5MABCD4EA", Clear: true},
+	} {
+		_, _, err = handlers.federationSpokeName(t.Context(), nil, input)
+		require.ErrorContains(t, err, "requires the --all daemon-wide scope")
+	}
 	require.Zero(t, requests.Load())
 }
 

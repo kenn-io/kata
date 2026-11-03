@@ -1,7 +1,6 @@
 package pgstore
 
 import (
-	"context"
 	"database/sql"
 	"testing"
 
@@ -15,7 +14,7 @@ func TestExportExternalFieldStatesReturnsPortableMappingIdentity(t *testing.T) {
 	store := openPortableExportQueryTestStore(t)
 	raw := store.DB
 
-	_, err := raw.ExecContext(context.Background(), `
+	_, err := raw.ExecContext(t.Context(), `
 INSERT INTO issues(id) VALUES (1);
 INSERT INTO external_root_bindings(id, uid, issue_id, project_id, connector_instance)
 VALUES (1, 'binding-uid', 1, 1, 'notes');
@@ -43,7 +42,7 @@ INSERT INTO external_field_states(
 func TestExportExternalFieldMappingsIncludesActiveMappingsBeforeStateExists(t *testing.T) {
 	store := openPortableExportQueryTestStore(t)
 	raw := store.DB
-	_, err := raw.ExecContext(context.Background(), `
+	_, err := raw.ExecContext(t.Context(), `
 INSERT INTO issues(id) VALUES (1);
 INSERT INTO external_root_bindings(id, uid, issue_id, project_id, connector_instance)
 VALUES (1, 'binding-uid', 1, 7, 'notes');
@@ -80,7 +79,7 @@ func openPortableExportQueryTestStore(t *testing.T) *Store {
 	raw.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = raw.Close() })
 
-	_, err = raw.ExecContext(context.Background(), `
+	_, err = raw.ExecContext(t.Context(), `
 CREATE TABLE issues (id INTEGER PRIMARY KEY, deleted_at TEXT);
 CREATE TABLE external_root_bindings (
     id INTEGER PRIMARY KEY, uid TEXT NOT NULL, issue_id INTEGER NOT NULL,

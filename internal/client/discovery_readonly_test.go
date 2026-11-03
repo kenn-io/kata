@@ -1,7 +1,6 @@
 package client
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -18,7 +17,7 @@ import (
 
 func TestReadOnlyDiscoveryDoesNotCreateRuntimeDirectory(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing")
-	_, found, err := DiscoverResolvedReadOnly(context.Background(), path)
+	_, found, err := DiscoverResolvedReadOnly(t.Context(), path)
 	require.NoError(t, err)
 	require.False(t, found)
 	_, err = os.Stat(path)
@@ -41,7 +40,7 @@ func TestDiscoveryRepairsExistingRuntimeDirectoryPrivacyWithoutChangingReadOnlyS
 	require.Error(t, err, "the read-only reader must reject a runtime directory with unsafe permissions")
 	assertUnchanged()
 
-	_, found, err := Discover(context.Background(), dir)
+	_, found, err := Discover(t.Context(), dir)
 	require.NoError(t, err, "normal discovery must preserve RuntimeStore.List's permission repair")
 	require.False(t, found)
 	require.NoError(t, safefileio.ValidatePrivateDir(dir), "normal discovery must repair the runtime directory")
