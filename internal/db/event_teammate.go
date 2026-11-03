@@ -9,15 +9,33 @@ import (
 	"go.kenn.io/kata/internal/teammate"
 )
 
+type eventTeammateSuppressionKey struct{}
+
+// WithoutEventTeammate suppresses display attribution for writes derived from
+// imported or provider-owned history while preserving request cancellation.
+func WithoutEventTeammate(ctx context.Context) context.Context {
+	return context.WithValue(teammate.WithRequest(ctx, ""), eventTeammateSuppressionKey{}, true)
+}
+
 // StampEventTeammate appends the display field before native event hashing.
 // Existing payload spelling is retained; imported events never call this helper.
 func StampEventTeammate(ctx context.Context, kind, actor, payload string) (string, error) {
 	handle, _ := teammate.FromRequest(ctx)
-	if handle == "" || actor == "system" || ctx.Value(recurringWriteKey{}) == true || !contributorEvent(kind) {
+	if actor == "system" || ctx.Value(recurringWriteKey{}) == true ||
+		ctx.Value(eventTeammateSuppressionKey{}) == true || !contributorEvent(kind) {
 		return payload, nil
 	}
-	if err := teammate.Validate(handle); err != nil {
-		return payload, err
+	// These two legacy event shapes have a display fallback to their routing
+	// teammate. New native writes must retain an explicit empty contributor so
+	// routing is not shown as authorship when the request selected no teammate.
+	emptyDisplay := handle == "" && (kind == "issue.created" || kind == "issue.commented")
+	if handle == "" && !emptyDisplay {
+		return payload, nil
+	}
+	if handle != "" {
+		if err := teammate.Validate(handle); err != nil {
+			return payload, err
+		}
 	}
 	var fields map[string]jsontext.Value
 	if err := json.Unmarshal([]byte(payload), &fields); err != nil {
