@@ -5277,21 +5277,12 @@ func (c *Client) LinkAttachmentWithResponse(ctx context.Context, options *LinkAt
 			}
 		}
 		return out, nil
-	case 500:
-		if len(resp.Content) > 0 {
-			envelope := new(LinkAttachmentErrorResponse)
-			if json.Unmarshal(resp.Content, envelope) == nil {
-				if errTarget, ok := any(*envelope).(error); ok {
-					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
-				}
-			}
-		}
-		return out, runtime.NewClientAPIError(fmt.Errorf("API error (status %d)", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
 	default:
 		if len(resp.Content) > 0 {
-			envelope := new(LinkAttachmentErrorResponse)
-			if json.Unmarshal(resp.Content, envelope) == nil {
-				if errTarget, ok := any(*envelope).(error); ok {
+			body := new(LinkAttachmentErrorResponse)
+			if json.Unmarshal(resp.Content, body) == nil {
+				out.JSONDefault = body
+				if errTarget, ok := any(*body).(error); ok {
 					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
 				}
 			}
