@@ -2,15 +2,20 @@ package daemon_test
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 	"uuid"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/docbank"
 	"go.kenn.io/kata/internal/docbank/docbanktest"
 	"go.kenn.io/kata/internal/testenv"
@@ -63,6 +68,198 @@ func TestAttachmentLinkPinsExistingVersion(t *testing.T) {
 	for _, request := range f.Requests() {
 		require.True(t, strings.HasPrefix(request, "GET "), request)
 	}
+}
+
+func TestAttachmentLinkCanReuseAnExistingVersion(t *testing.T) {
+	env, f := attachmentEnv(t)
+	p, iss := seedProjectAndIssue(t, env)
+	seedLinkFile(f)
+	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments/links", p.ID, iss.ShortID)
+	code, raw, err := postAttachmentLink(t, env, endpoint, `{"path":"/reports/report.pdf","actor":"operator"}`)
+	require.NoError(t, err)
+	require.Equal(t, 200, code, string(raw))
+	var first api.AddAttachmentResponseBody
+	require.NoError(t, json.Unmarshal(raw, &first))
+	afterFirst, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+
+	code, raw, err = postAttachmentLink(t, env, endpoint, `{"node_id":42,"reuse_existing":true,"actor":"operator"}`)
+	require.NoError(t, err)
+	require.Equal(t, 200, code, string(raw))
+	var second api.AddAttachmentResponseBody
+	require.NoError(t, json.Unmarshal(raw, &second))
+	require.Equal(t, first.ID, second.ID)
+	afterSecond, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, afterFirst, afterSecond, "relinking the same version must not add a metadata event")
+
+	code, raw, err = postAttachmentLink(t, env, endpoint, `{"node_id":42,"actor":"operator"}`)
+	require.NoError(t, err)
+	require.Equal(t, 200, code, string(raw))
+	var third api.AddAttachmentResponseBody
+	require.NoError(t, json.Unmarshal(raw, &third))
+	require.NotEqual(t, first.ID, third.ID, "standalone linking continues to create a new reference")
+	afterThird, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	require.Greater(t, afterThird, afterSecond)
+}
+
+func TestAttachmentLinkReuseChoosesSmallestExistingID(t *testing.T) {
+	env, f := attachmentEnv(t)
+	p, iss := seedProjectAndIssue(t, env)
+	seedLinkFile(f)
+	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments/links", p.ID, iss.ShortID)
+
+	code, raw, err := postAttachmentLink(t, env, endpoint, `{"node_id":42,"actor":"operator"}`)
+	require.NoError(t, err)
+	require.Equal(t, 200, code, string(raw))
+	var first api.AddAttachmentResponseBody
+	require.NoError(t, json.Unmarshal(raw, &first))
+
+	code, raw, err = postAttachmentLink(t, env, endpoint, `{"node_id":42,"actor":"operator"}`)
+	require.NoError(t, err)
+	require.Equal(t, 200, code, string(raw))
+	var second api.AddAttachmentResponseBody
+	require.NoError(t, json.Unmarshal(raw, &second))
+	wantID := min(first.ID, second.ID)
+
+	code, raw, err = postAttachmentLink(t, env, endpoint, `{"node_id":42,"reuse_existing":true,"actor":"operator"}`)
+	require.NoError(t, err)
+	require.Equal(t, 200, code, string(raw))
+	var reused api.AddAttachmentResponseBody
+	require.NoError(t, json.Unmarshal(raw, &reused))
+	require.Equal(t, wantID, reused.ID)
+}
+
+func TestAttachmentLinkReuseHandlesConcurrentRequests(t *testing.T) {
+	env, f := attachmentEnv(t)
+	p, iss := seedProjectAndIssue(t, env)
+	seedLinkFile(f)
+	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments/links", p.ID, iss.ShortID)
+	before, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+
+	bothResolved := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	var requests atomic.Int32
+	f.BeforeResponse = func(method, path string) {
+		if method != http.MethodGet || path != "/api/v1/nodes/42" {
+			return
+		}
+		if requests.Add(1) == 2 {
+			close(bothResolved)
+		}
+		<-release
+	}
+	defer releaseOnce.Do(func() { close(release) })
+
+	type response struct {
+		status int
+		body   []byte
+		err    error
+	}
+	responses := make(chan response, 2)
+	for range 2 {
+		go func() {
+			status, body, err := postAttachmentLink(t, env, endpoint, `{"node_id":42,"reuse_existing":true,"actor":"operator"}`)
+			responses <- response{status: status, body: body, err: err}
+		}()
+	}
+	select {
+	case <-bothResolved:
+		releaseOnce.Do(func() { close(release) })
+	case <-time.After(5 * time.Second):
+		t.Fatal("both requests did not reach the Docbank lookup")
+	}
+
+	var ids []string
+	for range 2 {
+		got := <-responses
+		require.NoError(t, got.err)
+		require.Equal(t, http.StatusOK, got.status, string(got.body))
+		var result api.AddAttachmentResponseBody
+		require.NoError(t, json.Unmarshal(got.body, &result))
+		ids = append(ids, result.ID)
+	}
+	require.Equal(t, ids[0], ids[1], "concurrent retries must reuse one attachment reference")
+	after, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, before+1, after, "concurrent reuse must emit one metadata event total")
+}
+
+func TestAttachmentLinkReuseRefreshesReferenceAfterConcurrentRemoval(t *testing.T) {
+	env, f := attachmentEnv(t)
+	p, iss := seedProjectAndIssue(t, env)
+	seedLinkFile(f)
+	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments/links", p.ID, iss.ShortID)
+
+	code, raw, err := postAttachmentLink(t, env, endpoint, `{"node_id":42,"actor":"operator"}`)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, code, string(raw))
+	var first api.AddAttachmentResponseBody
+	require.NoError(t, json.Unmarshal(raw, &first))
+
+	lookupStarted := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	f.BeforeResponse = func(method, path string) {
+		if method == http.MethodGet && path == "/api/v1/nodes/42" {
+			close(lookupStarted)
+			<-release
+		}
+	}
+	defer releaseOnce.Do(func() { close(release) })
+
+	type response struct {
+		status int
+		body   []byte
+		err    error
+	}
+	responses := make(chan response, 1)
+	go func() {
+		status, body, err := postAttachmentLink(t, env, endpoint, `{"node_id":42,"reuse_existing":true,"actor":"operator"}`)
+		responses <- response{status: status, body: body, err: err}
+	}()
+	select {
+	case <-lookupStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("reuse request did not reach the Docbank lookup")
+	}
+
+	_, err = env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+		IssueID: iss.ID, Actor: "operator",
+		Patch: map[string]jsontext.Value{"attachment." + first.ID: jsontext.Value(`null`)},
+	})
+	require.NoError(t, err)
+	releaseOnce.Do(func() { close(release) })
+
+	got := <-responses
+	require.NoError(t, got.err)
+	require.Equal(t, http.StatusOK, got.status, string(got.body))
+	var reused api.AddAttachmentResponseBody
+	require.NoError(t, json.Unmarshal(got.body, &reused))
+	require.NotEqual(t, first.ID, reused.ID, "reuse must observe a concurrent reference removal")
+
+	current, err := env.DB.IssueByUID(t.Context(), iss.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	var attachments map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal([]byte(current.Metadata), &attachments))
+	require.NotContains(t, attachments, "attachment."+first.ID)
+	require.Contains(t, attachments, "attachment."+reused.ID)
+}
+
+func TestAttachmentLinkUsesFileNameMediaType(t *testing.T) {
+	env, f := attachmentEnv(t)
+	p, iss := seedProjectAndIssue(t, env)
+	f.Seed("/images/picture.png", docbank.Node{ID: 43, Name: "picture.png", Kind: "file", CurrentVersionID: uuid.MustParse(linkVersion)}, map[uuid.UUID][]byte{uuid.MustParse(linkVersion): []byte("image bytes")})
+	endpoint := fmt.Sprintf("/api/v1/projects/%d/issues/%s/attachments/links", p.ID, iss.ShortID)
+	code, raw, err := postAttachmentLink(t, env, endpoint, `{"path":"/images/picture.png","actor":"operator"}`)
+	require.NoError(t, err)
+	require.Equal(t, 200, code, string(raw))
+	var out api.AddAttachmentResponseBody
+	require.NoError(t, json.Unmarshal(raw, &out))
+	require.Equal(t, "image/png", out.Attachment.MediaType)
 }
 
 func postAttachmentLink(t *testing.T, env *testenv.Env, endpoint, body string) (int, []byte, error) {
