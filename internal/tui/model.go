@@ -3565,7 +3565,15 @@ func (m Model) viewContent() string {
 		case viewCredentials:
 			body = renderCredentials(m)
 		default:
-			body = renderTooNarrow(m.width, m.height)
+			if m.modal == modalReopenBacklog {
+				rows := modalHelpRows(m.modal)
+				body = joinNonEmpty([]string{
+					renderTooNarrow(m.width, max(1, m.height-helpLines(rows, m.width))),
+					renderFooterHelpTable(rows, m.width),
+				})
+			} else {
+				body = renderTooNarrow(m.width, m.height)
+			}
 		}
 		body = m.withActiveConnectionHeader(m.appendNonListDetailExtras(body))
 		return m.overlayInputAndModal(body)

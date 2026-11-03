@@ -775,3 +775,17 @@ func TestReopenBacklogAnswerAfterDaemonSwitchIsDropped(t *testing.T) {
 	_, cmd = updateModel(m, runeKey('r'))
 	require.NotNil(t, cmd, "the dropped answer releases reopen ownership")
 }
+
+func TestReopenBacklogActionsSurviveNarrowResize(t *testing.T) {
+	m := newTestModel()
+	m.modal = modalReopenBacklog
+	m.reopenPrompt = &reopenPrompt{ref: "#abcd", count: 3}
+	for _, width := range []int{100, 60, 100} {
+		m = resizeModel(m, width, 24)
+		view := stripANSI(m.viewContent())
+		require.Contains(t, view, "Reopen #abcd?")
+		require.Contains(t, view, "reopen")
+		require.Contains(t, view, "n/esc")
+		require.Contains(t, view, "cancel")
+	}
+}
