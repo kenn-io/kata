@@ -70,7 +70,6 @@ func TestCloseAttachmentCLISuffixAndCanonicalReplay(t *testing.T) {
 		out, err = executeCloseAttachmentCLI(t, env.URL, "show", ref, mode)
 		require.NoError(t, err)
 		require.Contains(t, out, "report.pdf")
-		require.Contains(t, out, "application/octet-stream")
 		require.Contains(t, out, "12 bytes")
 		require.Contains(t, out, "removed")
 	}

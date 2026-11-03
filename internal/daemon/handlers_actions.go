@@ -518,7 +518,17 @@ func newProjectScopeEventIssueLookup(ctx context.Context, store db.Storage) *db.
 			if err != nil {
 				return db.Issue{}, err
 			}
-			return store.IssueByShortID(ctx, project.ID, parsed.ShortID, db.IncludeDeletedYes)
+			issue, err := store.IssueByShortID(ctx, project.ID, parsed.ShortID, db.IncludeDeletedYes)
+			if err != nil {
+				return db.Issue{}, err
+			}
+			// Event projection uses direct reference lookup. IssueByShortID can
+			// follow historical moved aliases, so reject a result that is not the
+			// current row for this exact project-local reference.
+			if issue.ProjectID != project.ID || issue.ShortID != parsed.ShortID {
+				return db.Issue{}, db.ErrNotFound
+			}
+			return issue, nil
 		},
 	)
 }

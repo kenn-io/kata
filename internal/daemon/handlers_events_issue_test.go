@@ -294,6 +294,41 @@ func TestPollProjectEventsIssueHidesEffectiveCloseWithPrivateReference(t *testin
 	})
 }
 
+func TestPollProjectEventsIssueOmitsCloseWhenEvidenceReferenceMovesBetweenAuthorizedProjects(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		target, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+			ProjectID: f.public.ID, Title: "Evidence target", Author: "member",
+		})
+		require.NoError(t, err)
+		_, closeEvents, changed, err := store.CloseIssueWithEvents(t.Context(), f.visible.ID, "duplicate", "member",
+			"Closed with a historical short reference to its duplicate.", []db.Evidence{{
+				Type: "duplicate-of", IssueRef: target.ShortID,
+			}})
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Len(t, closeEvents, 1)
+
+		_, err = store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+			IssueID: target.ID, FromProjectID: f.public.ID, ToProjectID: f.private.ID,
+			IfMatchRev: target.Revision, Actor: "member", Single: true,
+		})
+		require.NoError(t, err)
+
+		path := fmt.Sprintf("%s?issue=%s&include_effective_close_event_uid=true",
+			scopedProjectPath(f.public.ID, "events"), url.QueryEscape(f.visible.UID))
+		status, _, body := f.request(t, http.MethodGet, path, "member", nil, nil)
+		require.Equal(t, http.StatusOK, status, string(body))
+		var page api.PollEventsBody
+		require.NoError(t, json.Unmarshal(body, &page))
+		require.Empty(t, page.EffectiveCloseEventUID, string(body))
+		for _, event := range page.Events {
+			require.NotEqual(t, "issue.closed", event.Type,
+				"a close replaced by a reference reset must not be advertised as the effective close")
+		}
+	})
+}
+
 func insertRemoteIssueHistoryEvent(
 	t *testing.T,
 	env *testenv.Env,

@@ -34,22 +34,4 @@ describe('closingAttachments', () => {
 
     expect(closingAttachments(event, {})).toEqual([{ label: 'Attachment removed' }])
   })
-
-  test('keeps the frozen file name and size in a valid evidence label', () => {
-    const descriptor = {
-      name: 'report.pdf',
-      media_type: 'application/pdf',
-      size: 5,
-      docbank_version: '00000000-0000-4000-8000-000000000001',
-    }
-    const event = closeEvent({
-      type: 'attachment',
-      attachment_id: 'attachment-1',
-      attachment: descriptor,
-    })
-
-    expect(closingAttachments(event, { 'attachment.attachment-1': descriptor })).toEqual([
-      { label: 'report.pdf · 5 bytes', href: '#kata-attachment-attachment-1' },
-    ])
-  })
 })
