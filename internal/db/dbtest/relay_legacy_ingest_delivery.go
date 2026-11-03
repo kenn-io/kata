@@ -216,3 +216,50 @@ func runRelayRejectsLegacyCrossProjectEvents(t *testing.T, store db.Storage) {
 		})
 	}
 }
+
+// RunRelayAcceptsLegacyCrossProjectRemovals covers cleanup a legacy spoke
+// pushes after relay enrollment. Removing a sibling edge cannot add a boundary
+// crossing, so the owner accepts it while keeping the historical endpoint local.
+func RunRelayAcceptsLegacyCrossProjectRemovals(t *testing.T, store db.Storage) {
+	for _, kind := range []string{"unlink", "removal-only links_changed"} {
+		t.Run("legacy "+kind+" of sibling", func(t *testing.T) {
+			ctx := t.Context()
+			fixture := newRelayLinkBoundaryFixture(t, store, "legacy-removal-"+kind)
+			private, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.sibling.ID, Title: "Sibling endpoint", Author: "member"})
+			require.NoError(t, err)
+			peer, err := uid.New()
+			require.NoError(t, err)
+			grant, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{
+				ProjectID: fixture.project.ID, ParentTokenID: fixture.parentTokenID,
+				SpokeInstanceUID: peer, ProtocolVersion: db.RelayProtocolVersion,
+			})
+			require.NoError(t, err)
+			spoke, err := uid.New()
+			require.NoError(t, err)
+			issueUID, err := uid.New()
+			require.NoError(t, err)
+			created := newRemoteEvent(t, fixture.project, &issueUID, "issue.created", "spoke", spoke, 700, jsontext.Value(`{"uid":"`+issueUID+`","title":"Legacy task","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`))
+			push := db.FederationIngestParams{ProjectID: fixture.project.ID, SpokeInstanceUID: spoke, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: created}}}
+			_, err = store.IngestFederationEvents(ctx, push)
+			require.NoError(t, err)
+			offered, err := store.PendingRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, db.RelayStreamEvent, 100)
+			require.NoError(t, err)
+			require.Len(t, offered, 1)
+			require.NoError(t, store.AckRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, 1, db.RelayStreamEvent, offered[0].Sequence, offered[0].Digest))
+			removal := newRemoteEvent(t, fixture.project, &issueUID, "issue.unlinked", "spoke", spoke, 701, jsontext.Value(`{"type":"related","from_uid":"`+issueUID+`","to_uid":"`+private.UID+`"}`))
+			if kind == "removal-only links_changed" {
+				removal = newRemoteEvent(t, fixture.project, &issueUID, "issue.links_changed", "spoke", spoke, 701, jsontext.Value(`{"related_removed_uids":["`+private.UID+`"]}`))
+			}
+			push.Events = []db.FederationIngestEvent{{SourceEventID: 2, Event: removal}}
+			result, err := store.IngestFederationEvents(ctx, push)
+			require.NoError(t, err, "removing a sibling edge must stay admissible after relay enrollment")
+			require.Equal(t, 1, result.Accepted)
+			retained, err := store.EventsByUIDs(ctx, fixture.project.ID, []string{removal.EventUID})
+			require.NoError(t, err)
+			require.Len(t, retained, 1)
+			offered, err = store.PendingRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, db.RelayStreamEvent, 100)
+			require.NoError(t, err)
+			require.Empty(t, offered, "a removal naming a sibling endpoint must stay owner-local")
+		})
+	}
+}

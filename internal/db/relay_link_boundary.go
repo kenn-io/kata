@@ -36,6 +36,25 @@ func StripCrossProjectLinkAdditions(event FoldEvent, crossProject func(peerUID s
 	return event, true, nil
 }
 
+// RelayEventOnlyRemovesLinks reports whether a link event can only take edges
+// away. Such an event cannot add a boundary crossing, so an owner accepts it
+// even when its historical payload names an endpoint in another project.
+func RelayEventOnlyRemovesLinks(event RemoteEvent) bool {
+	if event.Type != "issue.links_changed" {
+		return event.Type == "issue.unlinked"
+	}
+	payload := PayloadMap(event.Payload)
+	if _, ok := payload["parent_set_uid"]; ok {
+		return false
+	}
+	for _, key := range []string{"blocks_added_uids", "blocked_by_added_uids", "related_added_uids"} {
+		if len(StringSlice(payload[key])) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
 func stripCreationLinks(event FoldEvent, crossProject func(string) bool) (FoldEvent, bool, error) {
 	payload := PayloadMap(event.Payload)
 	raw, ok := payload["links"]

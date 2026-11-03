@@ -811,18 +811,27 @@ func (s *Store) queueLegacyRelayEventsTx(ctx context.Context, tx *sql.Tx, projec
 		return err
 	}
 	for _, event := range events {
-		if relayed {
-			crossing, err := relayEventCrossesProjectTx(ctx, tx, projectID, db.RemoteEventFromStored(event), true)
-			if err != nil {
-				return err
-			}
-			if crossing {
-				return errors.Join(db.ErrFederationIngestValidation, db.ErrFederationCrossProjectBoundary)
-			}
-		}
-		if err := s.queueRelaySourceTx(ctx, tx, event); err != nil {
+		if err := s.queueLegacyRelayEventTx(ctx, tx, projectID, event, relayed); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// Crossing removals stay owner-local; only crossing additions are refused.
+func (s *Store) queueLegacyRelayEventTx(ctx context.Context, tx *sql.Tx, projectID int64, event db.Event, relayed bool) error {
+	if !relayed {
+		return s.queueRelaySourceTx(ctx, tx, event)
+	}
+	remote := db.RemoteEventFromStored(event)
+	crossing, err := relayEventCrossesProjectTx(ctx, tx, projectID, remote, true)
+	switch {
+	case err != nil:
+		return err
+	case !crossing:
+		return s.queueRelaySourceTx(ctx, tx, event)
+	case db.RelayEventOnlyRemovesLinks(remote):
+		return nil
+	}
+	return errors.Join(db.ErrFederationIngestValidation, db.ErrFederationCrossProjectBoundary)
 }
