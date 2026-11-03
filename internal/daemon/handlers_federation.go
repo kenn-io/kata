@@ -434,9 +434,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		out := federationEnrollmentToOut(created.Enrollment, created.Token)
-		if out.SpokeName, err = federationSpokeName(ctx, cfg.DB, created.Enrollment.SpokeInstanceUID); err != nil {
-			return nil, err
-		}
+		out.SpokeName = federationSpokeNameForCredentialResponse(ctx, cfg.DB, created.Enrollment.SpokeInstanceUID)
 		if join != nil {
 			join.Token, join.Actor, join.Capabilities = created.Token, created.Enrollment.Actor, created.Enrollment.Capabilities
 			join.PushEnabled = slices.Contains(strings.Split(created.Enrollment.Capabilities, ","), "push")
@@ -496,9 +494,7 @@ func registerFederationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, internalAPIError(err)
 		}
 		out := federationEnrollmentToOut(created.Enrollment, created.Token)
-		if out.SpokeName, err = federationSpokeName(ctx, cfg.DB, created.Enrollment.SpokeInstanceUID); err != nil {
-			return nil, err
-		}
+		out.SpokeName = federationSpokeNameForCredentialResponse(ctx, cfg.DB, created.Enrollment.SpokeInstanceUID)
 		return &api.RotateFederationEnrollmentResponse{Body: out}, nil
 	})
 
@@ -1318,6 +1314,16 @@ func federationSpokeName(ctx context.Context, store db.Storage, uid string) (str
 		return "", internalAPIError(err)
 	}
 	return names[uid], nil
+}
+
+// federationSpokeNameForCredentialResponse keeps optional metadata lookup
+// failures from hiding a token after the enrollment or rotation has committed.
+func federationSpokeNameForCredentialResponse(ctx context.Context, store db.Storage, uid string) string {
+	name, err := federationSpokeName(ctx, store, uid)
+	if err != nil {
+		return ""
+	}
+	return name
 }
 
 func federationEnrollmentToOut(enrollment db.FederationEnrollment, token string) api.FederationEnrollmentOut {

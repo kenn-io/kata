@@ -4358,23 +4358,54 @@ func TestFederationEnrollmentWildcardOmitsJoinInstructions(t *testing.T) {
 	assert.False(t, hasJoin)
 }
 
-// Fail the response metadata read while retaining the real enrollment store.
+// Fail the post-commit spoke-name read while retaining the real enrollment store.
 type enrollmentMetadataFailureStore struct{ db.Storage }
 
-func (s enrollmentMetadataFailureStore) MaxFederationBaselineEventID(context.Context, int64, int64) (int64, error) {
-	return 0, errors.New("metadata unavailable")
+func (s enrollmentMetadataFailureStore) ListFederationSpokeNames(context.Context) (map[string]string, error) {
+	return nil, errors.New("metadata unavailable")
 }
 
-func TestFederationEnrollmentMetadataFailureDoesNotStrandGrant(t *testing.T) {
+func TestFederationEnrollmentSpokeNameFailureReturnsCreatedGrant(t *testing.T) {
 	env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.DB = enrollmentMetadataFailureStore{cfg.DB} })
 	project := createFederatedHubProject(t, env, "hub-project")
 	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments", map[string]any{
 		"spoke_instance_uid": federationTestSpokeUID, "project_id": project.ID, "capabilities": "pull", "actor": "tester",
 	}, nil)
-	assert.Equal(t, http.StatusInternalServerError, resp.StatusCode, "%s", raw)
+	if assert.Equal(t, http.StatusOK, resp.StatusCode, "%s", raw) {
+		var out api.FederationEnrollmentOut
+		require.NoError(t, json.Unmarshal(raw, &out))
+		assert.NotEmpty(t, out.Token, "the response must return the token for the committed enrollment")
+	}
 	grants, err := env.DB.ListFederationEnrollments(t.Context())
 	require.NoError(t, err)
-	assert.Empty(t, grants)
+	assert.Len(t, grants, 1, "the enrollment transaction committed before optional response metadata failed")
+}
+
+func TestFederationEnrollmentRotationSpokeNameFailureReturnsCreatedGrant(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("rotation-admin-token"), func(cfg *daemon.ServerConfig) {
+		cfg.DB = enrollmentMetadataFailureStore{cfg.DB}
+	})
+	project := createFederatedHubProject(t, env, "hub-project")
+	_, err := env.DB.CreateFederationEnrollment(t.Context(), db.CreateFederationEnrollmentParams{ //nolint:gosec // test-only bearer token
+		Token: "old-enrollment-token", SpokeInstanceUID: federationTestSpokeUID,
+		ProjectID: &project.ID, Capabilities: "pull", Actor: "tester",
+	})
+	require.NoError(t, err)
+	const replacementToken = "replacement-enrollment-token" //nolint:gosec // test-only bearer token
+	resp, raw := envDoRaw(t, env, http.MethodPost, "/api/v1/federation/enrollments/actions/rotate", map[string]any{
+		"spoke_instance_uid": federationTestSpokeUID,
+		"project_id":         project.ID,
+		"capabilities":       "pull",
+		"token":              replacementToken,
+		"actor":              "tester",
+	}, bearer("rotation-admin-token"))
+	require.Equal(t, http.StatusOK, resp.StatusCode, "%s", raw)
+	var out api.FederationEnrollmentOut
+	require.NoError(t, json.Unmarshal(raw, &out))
+	assert.Equal(t, replacementToken, out.Token)
+	active, err := env.DB.AuthorizeFederationToken(t.Context(), out.Token, project.ID, "pull")
+	require.NoError(t, err)
+	assert.Equal(t, out.ID, active.ID)
 }
 
 func TestFederationMetadataRequiresEnabledHub(t *testing.T) {
