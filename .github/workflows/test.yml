@@ -253,15 +253,23 @@ jobs:
         with:
           persist-credentials: false
 
-      # Go tests is the only writer of this key; shorter Linux jobs sharing the default key finished first and saved a near-empty cache.
+      # Go tests is the only writer of the per-commit Linux cache; PostgreSQL jobs restore it.
       - name: Set up Go
+        id: setup-go
         uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
-          cache: true
-          cache-dependency-path: |
-            go.mod
-            go.sum
+          cache: false
+
+      - name: Restore and save Linux Go cache
+        uses: actions/cache@v6.1.0
+        with: &linux-go-cache
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: linux-go-${{ runner.os }}-${{ runner.arch }}-go-${{ steps.setup-go.outputs.go-version }}-${{ github.sha }}
+          restore-keys: |
+            linux-go-${{ runner.os }}-${{ runner.arch }}-go-${{ steps.setup-go.outputs.go-version }}-
 
       - name: Set up Node
         uses: actions/setup-node@v7.1.0
@@ -470,10 +478,16 @@ jobs:
           persist-credentials: false
 
       - name: Set up Go
+        id: setup-go
         uses: actions/setup-go@v7.0.0
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
+
+      # Go tests writes this cache.
+      - name: Restore Linux Go cache
+        uses: actions/cache/restore@v6.1.0
+        with: *linux-go-cache
 
       - name: Set up Node
         uses: actions/setup-node@v7.1.0
