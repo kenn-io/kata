@@ -22,7 +22,8 @@ func ensureRelayLinkBoundaryTx(ctx context.Context, tx *sql.Tx, fromID, toID int
 	if fromProject == toProject {
 		return nil
 	}
-	relayed, err := relayProjectsActiveTx(ctx, tx, fromProject, toProject)
+	var relayed bool
+	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id IN($1,$2) AND (b.relay_config IS NOT NULL OR EXISTS(SELECT 1 FROM federation_enrollments e WHERE e.project_id=b.project_id AND e.relay_protocol_version=1 AND e.revoked_at IS NULL)))`, fromProject, toProject).Scan(&relayed)
 	if err != nil {
 		return err
 	}
@@ -30,12 +31,6 @@ func ensureRelayLinkBoundaryTx(ctx context.Context, tx *sql.Tx, fromID, toID int
 		return errors.Join(db.ErrFederatedReadOnly, db.ErrFederationCrossProjectBoundary)
 	}
 	return nil
-}
-
-func relayProjectsActiveTx(ctx context.Context, tx *sql.Tx, fromProject, toProject int64) (bool, error) {
-	var relayed bool
-	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id IN($1,$2) AND (b.relay_config IS NOT NULL OR EXISTS(SELECT 1 FROM federation_enrollments e WHERE e.project_id=b.project_id AND e.relay_protocol_version=1 AND e.revoked_at IS NULL)))`, fromProject, toProject).Scan(&relayed)
-	return relayed, err
 }
 
 // CheckRelayProjectLinks uses the same native boundary check as enrollment.
@@ -71,10 +66,10 @@ func rejectRelayProjectLinksTx(ctx context.Context, tx *sql.Tx, projectID int64)
 // Original cross-project event bytes remain on the owner store. Initial relay
 // sync uses a signed current-state checkpoint rather than rewriting or sharing
 // those historical private endpoints.
-func relayEventCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID int64, event db.RemoteEvent, unresolvedOK bool) (bool, error) {
+func relayEventCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID int64, event db.RemoteEvent) (bool, error) {
 	payload := db.PayloadMap(event.Payload)
 	if event.Type == "issue.closed" {
-		crossing, err := relayCloseParentCrossesProjectTx(ctx, tx, projectID, payload, unresolvedOK)
+		crossing, err := relayCloseParentCrossesProjectTx(ctx, tx, projectID, payload)
 		if err != nil || crossing {
 			return crossing, err
 		}
@@ -95,7 +90,7 @@ func relayEventCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID int64
 			continue
 		}
 		var own bool
-		if err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT project_id=$1 FROM issues WHERE uid=$2),$3)`, projectID, ref, unresolvedOK).Scan(&own); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM issues WHERE uid=$1 AND project_id=$2)`, ref, projectID).Scan(&own); err != nil {
 			return false, err
 		}
 		if !own {
@@ -147,7 +142,12 @@ func relayCloseEvidenceCrossesProjectTx(
 	return false, nil
 }
 
-func relayCloseParentCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID int64, payload map[string]jsontext.Value, unresolvedOK bool) (bool, error) {
+func relayCloseParentCrossesProjectTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	payload map[string]jsontext.Value,
+) (bool, error) {
 	parentUID, uidPresent := db.StringValue(payload["parent_uid"])
 	parentShortID, shortIDPresent := db.StringValue(payload["parent_short_id"])
 	if _, exists := payload["parent_uid"]; exists && !uidPresent {
@@ -161,9 +161,14 @@ func relayCloseParentCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID
 	}
 	var own bool
 	if parentUID != "" {
-		if err := tx.QueryRowContext(ctx,
-			`SELECT COALESCE((SELECT project_id=$1 FROM issues WHERE uid=$2),$3)`, projectID, parentUID, unresolvedOK,
-		).Scan(&own); err != nil {
+		query := `SELECT EXISTS(SELECT 1 FROM issues WHERE uid=$1 AND project_id=$2`
+		args := []any{parentUID, projectID}
+		if parentShortID != "" {
+			query += ` AND short_id=$3`
+			args = append(args, parentShortID)
+		}
+		query += `)`
+		if err := tx.QueryRowContext(ctx, query, args...).Scan(&own); err != nil {
 			return false, mapSQLError(err, nil)
 		}
 		return !own, nil
@@ -175,7 +180,7 @@ func relayCloseParentCrossesProjectTx(ctx context.Context, tx *sql.Tx, projectID
 	).Scan(&matches, &resolvedProjectID); err != nil {
 		return false, mapSQLError(err, nil)
 	}
-	return (matches != 0 || !unresolvedOK) && (matches != 1 || resolvedProjectID != projectID), nil
+	return matches != 1 || resolvedProjectID != projectID, nil
 }
 
 func relayHistoryHasBoundaryTx(ctx context.Context, tx *sql.Tx, projectID int64) (bool, error) {
@@ -227,7 +232,7 @@ func relayHistoryHasBoundaryAfterTx(ctx context.Context, tx *sql.Tx, projectID, 
 			if err != nil {
 				return false, err
 			}
-			crossing, err := relayEventCrossesProjectTx(ctx, tx, projectID, db.RemoteEventFromStored(event), false)
+			crossing, err := relayEventCrossesProjectTx(ctx, tx, projectID, db.RemoteEventFromStored(event))
 			if err != nil || crossing {
 				return crossing, err
 			}

@@ -2211,9 +2211,7 @@ hub.
 
 ### Missing creations from direct legacy spokes
 
-Events accepted from a direct legacy spoke reach negotiated relays with their original identity and hash. SQLite and PostgreSQL roots queue accepted events in ingest order after materialization. References to peers that haven't arrived yet can travel through relays.
-
-On relayed projects, ingest refuses events that reference an issue stored in another project, matching native writes. The root returns HTTP 400 and rolls back the push. The refused event is append-only, so removing the reference creates another event and retries re-push the refused event unchanged. To resume, run `kata federation quarantine skip <id> --confirm "SKIP FEDERATION BATCH <id>" --reason "operator accepted the skipped outbound batch"`. This advances the spoke's push cursor past the entire quarantined event range, dropping that batch from federation delivery. Local events remain, and skipped work does not appear on the hub.
+Events accepted by a SQLite root from a direct legacy spoke reach negotiated relays with their original identity and hash. SQLite roots queue accepted events in ingest order after materialization. References to peers that haven't arrived yet can travel through relays.
 
 ## Purge and reset
 

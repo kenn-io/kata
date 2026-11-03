@@ -282,8 +282,10 @@ func (d *Store) ingestFederationEventsOnce(
 	if err != nil {
 		return db.FederationIngestResult{}, err
 	}
-	if err := d.queueLegacyRelayEventsTx(ctx, tx, p.ProjectID, result.Events); err != nil {
-		return db.FederationIngestResult{}, err
+	for _, event := range result.Events {
+		if err := d.queueRelaySourceTx(ctx, tx, event); err != nil {
+			return db.FederationIngestResult{}, err
+		}
 	}
 	if err := federationFailpoint("before_federation_ingest_commit"); err != nil {
 		return db.FederationIngestResult{}, err
@@ -1325,36 +1327,4 @@ func rememberIngestIssueUIDs(ev db.RemoteEvent, known map[string]struct{}) {
 			known[uid] = struct{}{}
 		}
 	}
-}
-
-// Route only after materialization, when known sibling endpoints can be refused.
-func (d *Store) queueLegacyRelayEventsTx(ctx context.Context, tx *sql.Tx, projectID int64, events []db.Event) error {
-	relayed, err := relayProjectsActiveTx(ctx, tx, projectID, projectID)
-	if err != nil {
-		return err
-	}
-	for _, event := range events {
-		if err := d.queueLegacyRelayEventTx(ctx, tx, projectID, event, relayed); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// Crossing removals stay owner-local; only crossing additions are refused.
-func (d *Store) queueLegacyRelayEventTx(ctx context.Context, tx *sql.Tx, projectID int64, event db.Event, relayed bool) error {
-	if !relayed {
-		return d.queueRelaySourceTx(ctx, tx, event)
-	}
-	remote := db.RemoteEventFromStored(event)
-	crossing, err := relayEventCrossesProjectTx(ctx, tx, projectID, remote, true)
-	switch {
-	case err != nil:
-		return err
-	case !crossing:
-		return d.queueRelaySourceTx(ctx, tx, event)
-	case db.RelayEventOnlyRemovesLinks(remote):
-		return nil
-	}
-	return errors.Join(db.ErrFederationIngestValidation, db.ErrFederationCrossProjectBoundary)
 }

@@ -9,7 +9,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
-- Receive direct legacy spoke creations through relays before later root updates, preserving the original event identity and hash. On relayed projects, SQLite and PostgreSQL roots refuse events that reference stored issues in another project, matching native writes. Thanks to [Rusty Shackleford](https://github.com/salmonumbrella).
+- Receive direct legacy spoke creations through relays on SQLite roots before later root updates, preserving the original event identity and hash. Thanks to [Rusty Shackleford](https://github.com/salmonumbrella).
 
 - Keep the browser reachable when `kata daemon restart` runs from a sandbox or
   container that sees the daemon's process IDs and executable paths. The daemon

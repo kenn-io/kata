@@ -113,7 +113,7 @@ func (d *Store) relayCheckpointIssuesTx(ctx context.Context, tx *sql.Tx, project
 func (d *Store) relayCheckpointRecordsTx(ctx context.Context, tx *sql.Tx, project db.Project, boundaryID int64) (db.RelayCheckpointRecords, error) {
 	var records db.RelayCheckpointRecords
 	crosses := func(event db.RemoteEvent) (bool, error) {
-		return relayEventCrossesProjectTx(ctx, tx, project.ID, event, false)
+		return relayEventCrossesProjectTx(ctx, tx, project.ID, event)
 	}
 	for after := int64(0); ; {
 		events, err := relayCheckpointEventPageTx(ctx, tx, project.ID, after)

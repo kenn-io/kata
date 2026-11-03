@@ -125,10 +125,6 @@ var storageScenarios = []scenario{
 		RunRelayOffersLegacyIngestedEvents(t, store)
 		return nil
 	}},
-	{name: "relay accepts legacy cross-project removals", methods: []string{"AckRelayDeliveries", "EventsByUIDs", "IngestFederationEvents", "PendingRelayDeliveries"}, run: func(t *testing.T, store db.Storage) error {
-		RunRelayAcceptsLegacyCrossProjectRemovals(t, store)
-		return nil
-	}},
 	{name: "relay delivery", methods: []string{"PendingRelayDeliveries", "AckRelayDeliveries", "ExportRelayState"}, run: func(t *testing.T, store db.Storage) error {
 		RunRelayOutboxAtomicity(t, store)
 		seen := 0
