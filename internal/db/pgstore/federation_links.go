@@ -305,10 +305,14 @@ func federationFoldEventsOfTypes(
 ) ([]db.FoldEvent, error) {
 	query := `SELECT e.uid,e.origin_instance_uid,p.uid,e.issue_uid,
 e.related_issue_uid,e.type,e.actor,e.payload,e.hlc_physical_ms,e.hlc_counter,e.created_at
-FROM events e JOIN projects p ON p.id=e.project_id WHERE (e.project_id=$1 OR (e.issue_uid IN (
- SELECT issue_uid FROM events WHERE project_id=$1
- UNION SELECT uid FROM issues WHERE project_id=$1)
- AND EXISTS(SELECT 1 FROM events m WHERE m.type='issue.moved' AND m.issue_uid=e.issue_uid)))`
+FROM events e JOIN projects p ON p.id=e.project_id WHERE (e.project_id=$1 OR (
+ COALESCE(NULLIF(e.issue_uid,''),e.payload::jsonb->>'issue_uid',e.payload::jsonb->>'uid') IN (
+   SELECT COALESCE(NULLIF(h.issue_uid,''),h.payload::jsonb->>'issue_uid',h.payload::jsonb->>'uid')
+     FROM events h WHERE h.project_id=$1
+   UNION SELECT uid FROM issues WHERE project_id=$1)
+ AND EXISTS(SELECT 1 FROM events m WHERE m.type='issue.moved' AND
+   COALESCE(NULLIF(m.issue_uid,''),m.payload::jsonb->>'issue_uid',m.payload::jsonb->>'uid') =
+   COALESCE(NULLIF(e.issue_uid,''),e.payload::jsonb->>'issue_uid',e.payload::jsonb->>'uid'))))`
 	args := []any{projectID}
 	if len(eventTypes) > 0 {
 		placeholders := make([]string, 0, len(eventTypes))

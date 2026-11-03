@@ -396,7 +396,7 @@ func forwardTimedAssignmentClaim(
 		return nil, true, assignmentClaimForwardError(err)
 	}
 	if forwarded.Issue.ProjectUID != "" && forwarded.Issue.ProjectUID != binding.HubProjectUID {
-		if err := syncForwardedAssignmentDestination(ctx, cfg, binding, forwarded.Issue.ProjectUID); err != nil {
+		if err := syncForwardedAssignmentDestination(ctx, cfg, binding, issue.UID, forwarded.Issue.ProjectUID); err != nil {
 			return nil, true, err
 		}
 	}
@@ -411,6 +411,7 @@ func syncForwardedAssignmentDestination(
 	ctx context.Context,
 	cfg ServerConfig,
 	sourceBinding db.FederationBinding,
+	issueUID string,
 	destinationUID string,
 ) error {
 	ctx, err := authorizeHostProjectScope(ctx, nil, []string{destinationUID}, false)
@@ -462,12 +463,50 @@ func syncForwardedAssignmentDestination(
 	credential = config.FederationTransportCredential(
 		binding.HubURL, binding.HubProjectID, binding.AllowInsecure, credential,
 	)
-	binding.PushEnabled = false
-	if err := cfg.FederationPullOnce(ctx, binding, credential); err != nil {
-		return api.NewError(http.StatusBadGateway, "federation_pull_failed",
-			"could not synchronize the moved issue's destination project", "retry the claim after federation sync succeeds", nil)
+	for {
+		current, err := cfg.DB.IssueByUID(ctx, issueUID, db.IncludeDeletedNo)
+		if err == nil {
+			if current.ProjectID == destination.ID {
+				return nil
+			}
+			if current.ProjectID != sourceBinding.ProjectID {
+				return api.NewError(http.StatusConflict, "federation_project_moved",
+					"the issue moved again while claim recovery was running", "retry the claim against its current project", nil)
+			}
+		} else if !errors.Is(err, db.ErrNotFound) {
+			return internalAPIError(err)
+		}
+
+		currentBinding, err := cfg.DB.FederationBindingByProject(ctx, destination.ID)
+		if err != nil {
+			return internalAPIError(err)
+		}
+		previousCursor := currentBinding.PullCursorEventID
+		currentBinding.PushEnabled = false
+		if err := cfg.FederationPullOnce(ctx, currentBinding, credential); err != nil {
+			return api.NewError(http.StatusBadGateway, "federation_pull_failed",
+				"could not synchronize the moved issue's destination project", "retry the claim after federation sync succeeds", nil)
+		}
+		current, err = cfg.DB.IssueByUID(ctx, issueUID, db.IncludeDeletedNo)
+		if err == nil && current.ProjectID == destination.ID {
+			return nil
+		}
+		if err != nil && !errors.Is(err, db.ErrNotFound) {
+			return internalAPIError(err)
+		}
+		if err == nil && current.ProjectID != sourceBinding.ProjectID {
+			return api.NewError(http.StatusConflict, "federation_project_moved",
+				"the issue moved again while claim recovery was running", "retry the claim against its current project", nil)
+		}
+		afterBinding, err := cfg.DB.FederationBindingByProject(ctx, destination.ID)
+		if err != nil {
+			return internalAPIError(err)
+		}
+		if afterBinding.PullCursorEventID <= previousCursor {
+			return api.NewError(http.StatusBadGateway, "federation_pull_failed",
+				"destination federation sync made no progress before materializing the moved issue", "retry the claim after federation sync succeeds", nil)
+		}
 	}
-	return nil
 }
 
 func assignmentClaimForwardError(err error) error {

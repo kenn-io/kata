@@ -303,6 +303,13 @@ func TestApplyForwardedAssignmentClaimFollowsMovedIssueProject(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NotNil(t, moved.Event)
+	inserted, err := spoke.InsertRemoteEvent(ctx, localTarget.ID, remoteEventFromStoredEvent(*moved.Event))
+	require.NoError(t, err)
+	require.True(t, inserted)
+	require.NoError(t, spoke.MaterializeFederatedProject(ctx, localTarget.ID))
+	movedIssue, err := spoke.IssueByUID(ctx, issueUID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, localTarget.ID, movedIssue.ProjectID)
 	assigned := forwardedHubWireEvent(t, hubTarget, issueUID, "issue.assigned", "worker", hub.InstanceUID(),
 		moved.Event.HLCPhysicalMS+1,
 		`{"owner":"worker","assignment_expires_on":"2026-11-03T04:00:00.000Z","updated_at":"2026-11-03T03:00:00.000Z"}`)
@@ -312,18 +319,16 @@ func TestApplyForwardedAssignmentClaimFollowsMovedIssueProject(t *testing.T) {
 
 	response, err := applyForwardedAssignmentClaim(ctx, ServerConfig{DB: spoke, Broadcaster: broadcaster},
 		localSource.ID, issueUID, api.ClaimResponseBody{
-			Changed: true, ReplayEvents: []db.Event{*moved.Event}, Events: []db.Event{assigned},
+			Changed: true, Events: []db.Event{assigned},
 		})
 	require.NoError(t, err)
 	require.Equal(t, localTarget.ID, response.Body.Issue.ProjectID,
-		"the moved issue's current project must be materialized before returning the claim")
+		"forwarded assignment routing must use the moved issue's current project")
 	require.Len(t, response.Body.Events, 1)
 	assert.Equal(t, assigned.UID, response.Body.Events[0].UID)
-	for _, want := range []db.Event{*moved.Event, assigned} {
-		got := receiveInternalMsg(t, targetEvents.Ch, "current project event broadcast")
-		require.NotNil(t, got.Event)
-		assert.Equal(t, want.UID, got.Event.UID)
-	}
+	got := receiveInternalMsg(t, targetEvents.Ch, "current project assignment broadcast")
+	require.NotNil(t, got.Event)
+	assert.Equal(t, assigned.UID, got.Event.UID)
 }
 
 // forwardedHubWireEvent builds a hub-side event as the claim response would

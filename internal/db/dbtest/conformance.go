@@ -277,6 +277,7 @@ var storageScenarios = []scenario{
 	{name: "federated move purge former streams", methods: []string{"PurgeIssue", "ReadFederation"}, run: checkFederatedMovePurgeFormerStreams},
 	{name: "federated move replay access revision", methods: []string{"IngestFederationEvents", "InsertRemoteEvents", "MaterializeFederatedProject"}, run: checkFederatedMoveReplayAccessRevision},
 	{name: "federated move replay embedding artifacts", methods: []string{"IngestFederationEvents", "InsertRemoteEvents", "MaterializeFederatedProject"}, run: checkFederatedMoveReplayEmbeddingArtifacts},
+	{name: "federated move payload-only history identity", methods: []string{"CreateProject", "CreateIssue", "EditIssue", "MoveIssueProject", "InsertRemoteEvents", "MaterializeFederatedProject", "UpsertFederationBinding", "IssueByUID"}, runWithBackend: checkFederatedMovePayloadOnlyHistory},
 	{name: "federated move authoring gates", methods: []string{"MoveIssueProject", "SetRelayBindingConfig", "CreateRelayEnrollment", "InsertRemoteEvents"}, runWithBackend: checkFederatedMoveAuthoringGates},
 	{name: "federated issue move", methods: []string{"MoveIssueProject", "IngestFederationEvents", "InsertRemoteEvents", "ReadFederation", "MaterializeFederatedProject"}, runWithBackend: checkFederatedIssueMove},
 	{name: "same hub move gates", methods: []string{"MoveIssueProject"}, run: checkSameHubMoveGates},

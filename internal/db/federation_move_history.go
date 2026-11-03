@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json/jsontext"
 	"fmt"
 	"slices"
 	"strings"
@@ -12,15 +13,13 @@ type federationHistoryQuery interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
-// ReadFederationMoveHistory fills a page after excluding local move history
-// covered by a retained federation baseline. Each move waits for its first
-// later covering snapshot, including a move that carried its own snapshot:
-// that move may have crossed an enrollment boundary and must not leak its old
-// source identity into a new baseline. Refreshes without another move cannot
-// hide later deltas, and an uncovered trailing move remains visible. Cutoffs
-// are computed once per issue in this read transaction, using bounded
-// UID-indexed lookups rather than scanning the same subject history for every
-// event.
+// ReadFederationMoveHistory fills a page after excluding move history covered
+// by a retained federation baseline. A snapshot can retire a move only after
+// its source hub enrollment ends; ordinary destination refreshes must preserve
+// active move lineage. An uncovered retired move remains visible until a later
+// snapshot covers it. Cutoffs are computed once per issue in this read
+// transaction, using bounded UID-indexed lookups rather than scanning the same
+// subject history for every event.
 func ReadFederationMoveHistory(ctx context.Context, tx *sql.Tx, afterID int64, limit int, readPage func(int64, int) ([]Event, error)) ([]Event, error) {
 	events := []Event{}
 	cutoffs := map[string]int64{}
@@ -68,27 +67,40 @@ func loadFederationMoveHistoryCutoffs(ctx context.Context, tx federationHistoryQ
 		}
 		// Only generated placeholders and fixed backend JSON expressions enter the SQL; UIDs are bound parameters.
 		//nolint:gosec // G202: the concatenated SQL fragments contain no user data.
-		rows, err := tx.QueryContext(ctx, `SELECT m.issue_uid,m.id,m.type FROM events m
+		rows, err := tx.QueryContext(ctx, `SELECT m.issue_uid,m.id,m.type,m.payload FROM events m
  WHERE m.issue_uid IN (`+strings.Join(slots, ",")+`)
  AND (m.type='issue.snapshot' OR m.type='issue.moved')
  ORDER BY m.id`, args...)
 		if err != nil {
 			return err
 		}
-		uncovered := map[string]bool{}
+		type historyEvent struct {
+			issueUID         string
+			eventID          int64
+			eventType        string
+			sourceProjectUID string
+		}
+		history := make([]historyEvent, 0)
+		sourceProjectUIDs := make([]string, 0)
+		sourceProjectUIDSet := make(map[string]struct{})
 		for rows.Next() {
-			var uid, eventType string
+			var uid, eventType, payload string
 			var eventID int64
-			if err := rows.Scan(&uid, &eventID, &eventType); err != nil {
+			if err := rows.Scan(&uid, &eventID, &eventType, &payload); err != nil {
 				_ = rows.Close()
 				return err
 			}
+			entry := historyEvent{issueUID: uid, eventID: eventID, eventType: eventType}
 			if eventType == "issue.moved" {
-				uncovered[uid] = true
-			} else if uncovered[uid] {
-				cutoffs[uid] = eventID
-				uncovered[uid] = false
+				entry.sourceProjectUID, _ = StringValue(PayloadMap(jsontext.Value(payload))["from_project_uid"])
+				if entry.sourceProjectUID != "" {
+					if _, exists := sourceProjectUIDSet[entry.sourceProjectUID]; !exists {
+						sourceProjectUIDSet[entry.sourceProjectUID] = struct{}{}
+						sourceProjectUIDs = append(sourceProjectUIDs, entry.sourceProjectUID)
+					}
+				}
 			}
+			history = append(history, entry)
 		}
 		readErr, closeErr := rows.Err(), rows.Close()
 		if readErr != nil {
@@ -97,6 +109,57 @@ func loadFederationMoveHistoryCutoffs(ctx context.Context, tx federationHistoryQ
 		if closeErr != nil {
 			return closeErr
 		}
+		activeSources, err := activeFederationHubProjectUIDs(ctx, tx, sourceProjectUIDs)
+		if err != nil {
+			return err
+		}
+		uncovered := map[string]bool{}
+		for _, event := range history {
+			if event.eventType == "issue.moved" {
+				// A later baseline can retire move history only when the move's
+				// source federation enrollment has ended. While the source hub is
+				// active, ordinary destination refreshes must not hide its move.
+				uncovered[event.issueUID] = event.sourceProjectUID == "" || !activeSources[event.sourceProjectUID]
+			} else if uncovered[event.issueUID] {
+				cutoffs[event.issueUID] = event.eventID
+				uncovered[event.issueUID] = false
+			}
+		}
 	}
 	return nil
+}
+
+func activeFederationHubProjectUIDs(ctx context.Context, tx federationHistoryQuery, projectUIDs []string) (map[string]bool, error) {
+	active := make(map[string]bool, len(projectUIDs))
+	for chunk := range slices.Chunk(projectUIDs, 500) {
+		slots, args := make([]string, len(chunk)), make([]any, len(chunk))
+		for i, uid := range chunk {
+			slots[i], args[i] = fmt.Sprintf("$%d", i+1), uid
+		}
+		// Placeholders are generated locally; project UIDs stay bound as values.
+		//nolint:gosec // G202: the concatenated SQL fragments contain no user data.
+		rows, err := tx.QueryContext(ctx, `SELECT p.uid FROM projects p
+ JOIN federation_bindings b ON b.project_id=p.id
+ WHERE p.uid IN (`+strings.Join(slots, ",")+`)
+   AND p.deleted_at IS NULL AND b.role='hub' AND b.enabled=1`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var uid string
+			if err := rows.Scan(&uid); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			active[uid] = true
+		}
+		readErr, closeErr := rows.Err(), rows.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		if closeErr != nil {
+			return nil, closeErr
+		}
+	}
+	return active, nil
 }

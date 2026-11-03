@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -235,16 +236,43 @@ func TestClaim_TimedAssignmentPullsUnseenMoveWithDestinationCredential(t *testin
 	hub := testenv.New(t)
 	source := createPrivateContentHubProject(t, hub, "example-source")
 	target := createPrivateContentHubProject(t, hub, "example-target")
+	for i := range 1001 {
+		_, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: target.ID, Title: fmt.Sprintf("unrelated pending issue %d", i), Author: "tester",
+		})
+		require.NoError(t, err)
+	}
+	hubTargetBinding, err := hub.DB.FederationBindingByProject(ctx, target.ID)
+	require.NoError(t, err)
+	pendingTargetEvents, err := hub.DB.EventsAfter(ctx, db.EventsAfterParams{
+		ProjectID: target.ID, AfterID: hubTargetBinding.ReplayHorizonEventID - 1, Limit: 1100,
+	})
+	require.NoError(t, err)
+	require.Len(t, pendingTargetEvents, 1002)
 	issue := createPrivateEnrollmentIssue(t, hub, source.ID)
 	var spokeStore db.Storage
+	var pullCalls int
+	var localTarget db.Project
+	var firstPullCursor int64
 	spoke := testenv.New(t, testenv.WithFederationPullOnce(func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
+		pullCalls++
 		binding.PushEnabled = false
-		return federation.SyncFederationOnce(ctx, spokeStore, binding, credential, config.DefaultFederationCredentialStore())
+		if err := federation.SyncFederationOnce(ctx, spokeStore, binding, credential, config.DefaultFederationCredentialStore()); err != nil {
+			return err
+		}
+		pulled, err := spokeStore.FederationBindingByProject(ctx, localTarget.ID)
+		if err != nil {
+			return err
+		}
+		if pullCalls == 1 {
+			firstPullCursor = pulled.PullCursorEventID
+		}
+		return nil
 	}))
 	spokeStore = spoke.DB
 	localSource, err := spoke.DB.CreateProjectWithUID(ctx, source.Name, source.UID)
 	require.NoError(t, err)
-	localTarget, err := spoke.DB.CreateProjectWithUID(ctx, target.Name, target.UID)
+	localTarget, err = spoke.DB.CreateProjectWithUID(ctx, target.Name, target.UID)
 	require.NoError(t, err)
 	for _, pair := range []struct {
 		local       db.Project
@@ -302,6 +330,8 @@ func TestClaim_TimedAssignmentPullsUnseenMoveWithDestinationCredential(t *testin
 	})
 	require.NoError(t, err)
 	require.NotNil(t, moved.Event)
+	require.Greater(t, moved.Event.ID, pendingTargetEvents[len(pendingTargetEvents)-1].ID,
+		"the move must follow more events than the destination pull page can return")
 
 	// The all-project claim-only credential can make the move destination's
 	// assignment without seeing the issue snapshot in its response.
@@ -329,10 +359,14 @@ func TestClaim_TimedAssignmentPullsUnseenMoveWithDestinationCredential(t *testin
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", raw)
 	var spokeClaim api.ClaimResponseBody
 	require.NoError(t, json.Unmarshal(raw, &spokeClaim))
+	require.Less(t, firstPullCursor, moved.Event.ID,
+		"the first destination pull page must stop before the move event")
 	current, err := spoke.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, localTarget.ID, current.ProjectID)
 	require.NotNil(t, current.Owner)
 	assert.Equal(t, "tester", *current.Owner)
 	assert.Equal(t, target.UID, spokeClaim.Issue.ProjectUID)
+	require.GreaterOrEqual(t, pullCalls, 2,
+		"destination recovery must continue across pages until it materializes the moved issue")
 }

@@ -82,6 +82,54 @@ func checkFederatedMoveDetachedDestination(t *testing.T, store db.Storage) error
 
 func checkFederatedMovePurgeFormerStreams(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
+	t.Run("unrelated destination purge preserves source move", func(t *testing.T) {
+		source, target, issue, _ := federatedRehomeFixture(t, store, "unrelated-destination-purge")
+		beforeMove, err := store.MaxEventID(ctx)
+		require.NoError(t, err)
+		moved, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+			IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID,
+			IfMatchRev: issue.Revision, Actor: "worker",
+		})
+		require.NoError(t, err)
+		require.NotNil(t, moved.Event)
+		unrelated, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: target.ID, Title: "unrelated destination issue", Author: "worker",
+		})
+		require.NoError(t, err)
+		_, _, _, err = store.SoftDeleteIssue(ctx, unrelated.ID, "worker")
+		require.NoError(t, err)
+		_, err = store.PurgeIssue(ctx, unrelated.ID, "worker", nil)
+		require.NoError(t, err)
+
+		reset, err := store.ReadFederation(ctx, db.FederationReadParams{
+			ProjectID: target.ID, AfterID: beforeMove, Limit: 100,
+			Features: db.SupportedEventFeatures,
+		})
+		require.NoError(t, err)
+		require.Greater(t, reset.ResetAfterID, beforeMove,
+			"the unrelated destination purge should force an ordinary baseline refresh")
+		metadata, err := store.ReadFederation(ctx, db.FederationReadParams{
+			ProjectID: target.ID, Metadata: true, Features: db.SupportedEventFeatures,
+		})
+		require.NoError(t, err)
+		require.Greater(t, metadata.Binding.ReplayHorizonEventID, moved.Event.ID)
+
+		sourcePage, err := store.ReadFederation(ctx, db.FederationReadParams{
+			ProjectID: source.ID, AfterID: beforeMove, Limit: 100,
+			Features: db.SupportedEventFeatures,
+		})
+		require.NoError(t, err)
+		foundMove := false
+		for _, event := range sourcePage.Events {
+			if event.UID == moved.Event.UID {
+				foundMove = true
+				break
+			}
+		}
+		require.True(t, foundMove,
+			"ordinary destination refreshes must not cut active move history from the stale source feed")
+	})
+
 	source, target, issue, _ := federatedRehomeFixture(t, store, "purge-streams")
 	before, err := store.MaxEventID(ctx)
 	require.NoError(t, err)
