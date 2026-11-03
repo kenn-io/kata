@@ -2,6 +2,7 @@ package jsonl_test
 
 import (
 	"bytes"
+	"encoding/json/v2"
 	"path/filepath"
 	"testing"
 
@@ -85,6 +86,53 @@ func TestCronClaimsProjectImportCannotBecomeAuthority(t *testing.T) {
 					require.ErrorIs(t, err, db.ErrCronClaimPending, "copy must not grant original namespace")
 				})
 			}
+		})
+	}
+}
+
+func TestCronClaimsProjectMergeDerivesCopyAuthority(t *testing.T) {
+	for _, mode := range []string{"legacy", "foreign_metadata"} {
+		t.Run(mode, func(t *testing.T) {
+			source, in := claimBackupFixture(t)
+			project, err := source.ProjectByID(t.Context(), in.ProjectID)
+			require.NoError(t, err)
+			var snapshot bytes.Buffer
+			require.NoError(t, jsonl.Export(t.Context(), source, &snapshot, jsonl.ExportOptions{ProjectID: in.ProjectID, IncludeDeleted: true}))
+			// The source can begin claiming after producing its project snapshot.
+			_, err = source.ClaimCronOccurrence(t.Context(), in)
+			require.NoError(t, err)
+			target, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "target.db"))
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = target.Close() })
+			existing, err := target.CreateProject(t.Context(), "existing-project")
+			require.NoError(t, err)
+			var data bytes.Buffer
+			for line := range bytes.SplitSeq(bytes.TrimSpace(snapshot.Bytes()), []byte("\n")) {
+				if mode == "legacy" && bytes.Contains(line, []byte(db.CronClaimAuthorityPrefix)) {
+					continue
+				}
+				if mode == "legacy" {
+					line = bytes.ReplaceAll(line, []byte(`"value":"36"`), []byte(`"value":"35"`))
+				}
+				data.Write(line)
+				data.WriteByte('\n')
+				if mode == "foreign_metadata" && bytes.Contains(line, []byte(`"key":"export_version"`)) {
+					extra, err := json.Marshal(map[string]any{"kind": "meta", "data": db.MetaKV{Key: db.CronClaimAuthorityPrefix + existing.UID, Value: "copy"}})
+					require.NoError(t, err)
+					data.Write(extra)
+					data.WriteByte('\n')
+				}
+			}
+			require.NoError(t, jsonl.ImportWithOptions(t.Context(), &data, target, jsonl.ImportOptions{MergeProject: true}))
+			authority, err := target.CronClaimAuthority(t.Context(), existing.ID)
+			require.NoError(t, err, "project merge cannot change another project's authority")
+			require.Equal(t, target.InstanceUID(), authority)
+			copied, err := target.ProjectByUID(t.Context(), project.UID)
+			require.NoError(t, err)
+			in.ProjectID = copied.ID
+			in.HolderInstanceUID = target.InstanceUID()
+			_, err = target.ClaimCronOccurrence(t.Context(), in)
+			require.ErrorIs(t, err, db.ErrCronClaimPending, "every imported project copy lacks authority, including schema 35")
 		})
 	}
 }

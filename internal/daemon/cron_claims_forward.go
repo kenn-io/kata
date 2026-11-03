@@ -150,7 +150,7 @@ func cronClaimOrigin(cfg ServerConfig, principal claimPrincipal, provided *api.C
 }
 
 func forwardCronClaim(ctx context.Context, cfg ServerConfig, b db.FederationBinding, principal claimPrincipal, origin api.CronClaimOrigin, job string, body api.CronClaimBody, hops int) (*api.CronClaimResponse, error) {
-	if b.RelayConfig == nil && principal.Enrollment {
+	if principal.Enrollment && (b.RelayConfig == nil || !b.RelayConfig.ServeDownstream) {
 		return nil, cronClaimPending()
 	}
 	remote, project, caps, err := forwardCronCapabilities(ctx, cfg, b, hops)
@@ -167,7 +167,7 @@ func forwardCronClaim(ctx context.Context, cfg ServerConfig, b db.FederationBind
 	}
 	expectedHolder := cfg.DB.InstanceUID()
 	expectedActor := b.Actor
-	if b.RelayConfig != nil {
+	if b.RelayConfig != nil && b.RelayConfig.ServeDownstream {
 		path := slices.Clone(origin.Path)
 		if path[len(path)-1] != cfg.DB.InstanceUID() {
 			if slices.Contains(path, cfg.DB.InstanceUID()) {

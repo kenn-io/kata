@@ -79,4 +79,9 @@ func TestCronClaimClientRetainsDecisionOnReplay(t *testing.T) {
 	require.NotNil(t, replay.JSON200)
 	require.True(t, replay.JSON200.Replayed)
 	require.Equal(t, run, replay.JSON200.Claim.RunUID)
+	// The simple client must recover the same retained grant too.
+	retained, err := c.ClaimCronOccurrence(t.Context(), opts)
+	require.NoError(t, err)
+	require.True(t, retained.Replayed)
+	require.Equal(t, run, retained.Claim.RunUID)
 }

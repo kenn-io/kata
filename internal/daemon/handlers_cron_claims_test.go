@@ -136,6 +136,24 @@ func TestCronOccurrenceClaimAuthBoundaries(t *testing.T) {
 	require.NotContains(t, string(raw), "executor-a")
 }
 
+func TestCronOccurrenceClaimStaticBearerReadsRestrictedProject(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("owner-test-token"))
+	p, err := env.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	j := cronClaimJob(t, env, p)
+	_, _, err = env.DB.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{ProjectUID: p.UID, Visibility: "teams"}, "admin")
+	require.NoError(t, err)
+	headers := bearer("owner-test-token")
+	headers["X-Forwarded-For"] = "100.64.0.10"
+	run := "00000000000000000000000003"
+	resp, raw := envDoRaw(t, env, http.MethodPost, cronClaimPath(p.ID, j.UID), cronClaimBody(j, run), headers)
+	require.Equal(t, 201, resp.StatusCode, string(raw))
+	for _, suffix := range []string{"capabilities", "claims/" + run} {
+		resp, raw = envDoRaw(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/%s", p.ID, suffix), nil, headers)
+		require.Equal(t, 200, resp.StatusCode, string(raw))
+	}
+}
+
 func TestCronOccurrenceClaimReadonlyCannotGrant(t *testing.T) {
 	env := testenv.New(t, testenv.WithInsecureReadonly())
 	p, err := env.DB.CreateProject(t.Context(), "example-project")

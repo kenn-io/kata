@@ -3811,6 +3811,24 @@ func (c *Client) ClaimCronOccurrence(ctx context.Context, options *ClaimCronOccu
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}
+	// A retained reservation replays as HTTP 200 with the same success schema.
+	// The generator's primary parser otherwise accepts only the create status.
+	if resp.StatusCode == http.StatusOK {
+		target := new(ClaimCronOccurrenceResponseJSON)
+		if len(resp.Content) > 0 {
+			if err = json.Unmarshal(resp.Content, target); err != nil {
+				return nil, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(resp.Content),
+					TargetType:    "ClaimCronOccurrenceResponseJSON",
+					Body:          resp.Content,
+					Err:           err,
+				}
+			}
+		}
+		return target, nil
+	}
 	return responseParser(ctx, resp)
 }
 

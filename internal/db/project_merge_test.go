@@ -26,8 +26,9 @@ func TestPrepareProjectMergeRecordsPreservesEventIdentityAndPayload(t *testing.T
 		TargetProjectID: 20, Link: 200, Event: 300,
 	}, nil)
 	require.NoError(t, err)
-	require.Len(t, prepared, 2)
+	require.Len(t, prepared, 3)
 
+	assert.Equal(t, &MetaKV{Key: CronClaimAuthorityPrefix + "01H00000000000000000000000", Value: "copy"}, prepared[2])
 	assert.Equal(t, event.UID, recordPayloadAs[EventExport](t, prepared[1]).UID)
 	assert.Equal(t, event.ContentHash, recordPayloadAs[EventExport](t, prepared[1]).ContentHash)
 	assert.JSONEq(t, string(payload), string(recordPayloadAs[EventExport](t, prepared[1]).Payload))
@@ -48,7 +49,7 @@ func TestPrepareProjectMergeRecordsDropsSequenceFloors(t *testing.T) {
 		TargetProjectID: 4, Issue: 200, Event: 100,
 	}, nil)
 	require.NoError(t, err)
-	require.Len(t, prepared, 1)
+	require.Len(t, prepared, 2)
 	assert.Equal(t, int64(4), recordPayloadAs[ProjectExport](t, prepared[0]).ID)
 	assert.Equal(t, int64(9), recordPayloadAs[SequenceExport](t, records[1]).Seq, "source sequence must not be mutated")
 }
@@ -67,7 +68,7 @@ func TestPrepareProjectMergeRecordsDerivesSequenceFloorsFromPurgeTombstone(t *te
 		TargetProjectID: 4, Issue: 100, Event: 200, PurgeLog: 300,
 	}, nil)
 	require.NoError(t, err)
-	require.Len(t, prepared, 4)
+	require.Len(t, prepared, 5)
 	assert.Equal(t, int64(103), recordPayloadAs[PurgeLogExport](t, prepared[1]).PurgedIssueID)
 	require.NotNil(t, recordPayloadAs[PurgeLogExport](t, prepared[1]).PurgeResetAfterEventID)
 	assert.Equal(t, int64(250), *recordPayloadAs[PurgeLogExport](t, prepared[1]).PurgeResetAfterEventID)
@@ -165,7 +166,7 @@ func TestPrepareProjectMergeRecordsRemapsIDs(t *testing.T) {
 		TargetProjectID: 20, Issue: 100, Link: 200,
 	}, nil)
 	require.NoError(t, err)
-	require.Len(t, prepared, 4)
+	require.Len(t, prepared, 5)
 	assert.Equal(t, int64(20), recordPayloadAs[ProjectExport](t, prepared[0]).ID)
 	assert.Equal(t, int64(105), recordPayloadAs[IssueExport](t, prepared[1]).ID)
 	assert.Equal(t, int64(20), recordPayloadAs[IssueExport](t, prepared[1]).ProjectID)
@@ -271,7 +272,7 @@ func TestPrepareProjectMergeRecordsDoesNotResolveExternalLinkPeer(t *testing.T) 
 		return 77, true, nil
 	})
 	require.NoError(t, err)
-	require.Len(t, prepared, 3)
+	require.Len(t, prepared, 4)
 	assert.Equal(t, int64(15), recordPayloadAs[LinkExport](t, prepared[2]).FromIssueID)
 	assert.Zero(t, recordPayloadAs[LinkExport](t, prepared[2]).ToIssueID)
 	assert.False(t, lookupCalled)
@@ -292,7 +293,7 @@ func TestPrepareProjectMergeRecordsClearsUnresolvedEventRelatedIssueID(t *testin
 		TargetProjectID: 4, Event: 20,
 	}, func(string) (int64, bool, error) { return 0, false, nil })
 	require.NoError(t, err)
-	require.Len(t, prepared, 2)
+	require.Len(t, prepared, 3)
 	assert.Nil(t, recordPayloadAs[EventExport](t, prepared[1]).RelatedIssueID)
 	require.NotNil(t, recordPayloadAs[EventExport](t, prepared[1]).RelatedIssueUID)
 	assert.Equal(t, relatedIssueUID, *recordPayloadAs[EventExport](t, prepared[1]).RelatedIssueUID)
@@ -341,7 +342,7 @@ func TestPrepareProjectMergeRecordsDropsFederationState(t *testing.T) {
 		TargetProjectID: 4, Event: 100, Quarantine: 200,
 	}, nil)
 	require.NoError(t, err)
-	require.Len(t, prepared, 1)
+	require.Len(t, prepared, 2)
 	assert.NotNil(t, recordPayloadAs[ProjectExport](t, prepared[0]))
 	assert.True(t, recordPayloadAs[FederationBindingExport](t, records[1]).Enabled, "source binding must not be mutated")
 }
@@ -369,7 +370,7 @@ func TestPrepareProjectMergeRecordsDropsWildcardFederationEnrollment(t *testing.
 		TargetProjectID: 4, Enrollment: 10,
 	}, nil)
 	require.NoError(t, err)
-	require.Len(t, prepared, 1)
+	require.Len(t, prepared, 2)
 	assert.NotNil(t, recordPayloadAs[ProjectExport](t, prepared[0]))
 }
 
@@ -458,7 +459,7 @@ func TestPrepareProjectMergeRecordsPreservesExternalRootRecords(t *testing.T) {
 		TargetProjectID: 4, Issue: 10,
 	}, nil)
 	require.NoError(t, err)
-	require.Len(t, prepared, len(records))
+	require.Len(t, prepared, len(records)+1)
 	assert.Equal(t, recordPayloadAs[ExternalFieldMappingExport](t, records[2]),
 		recordPayloadAs[ExternalFieldMappingExport](t, prepared[2]))
 	assert.Equal(t, recordPayloadAs[ExternalRootBindingExport](t, records[3]),

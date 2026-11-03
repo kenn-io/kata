@@ -261,6 +261,9 @@ func TestCronOccurrenceClaimsRelayPreservesOrigin(t *testing.T) {
 	leafGrant, err = relay.DB.CreateRelayEnrollment(t.Context(), db.CreateRelayEnrollmentParams{ProjectID: rp.ID, ParentTokenID: leafParent.ID, SpokeInstanceUID: leaf.DB.InstanceUID(), ProtocolVersion: db.RelayProtocolVersion})
 	require.NoError(t, err)
 	require.NoError(t, leafCreds.StoreFederationCredential(t.Context(), lp.UID, config.FederationCredential{HubURL: relay.URL, HubProjectID: rp.ID, Token: leafGrant.Token, Actor: "leaf-member", Capabilities: "claim,pull,push", AllowInsecure: true}))
+	require.NoError(t, leaf.DB.PinRootAuthority(t.Context(), pin))
+	_, err = leaf.DB.SetRelayBindingConfig(t.Context(), lp.ID, db.RelayBindingConfig{ProtocolVersion: db.RelayProtocolVersion, BindingUID: leafGrant.Enrollment.RelayBindingUID, UpstreamInstanceUID: relay.DB.InstanceUID(), AuthorityUID: root.DB.InstanceUID(), HubPath: []string{root.DB.InstanceUID(), relay.DB.InstanceUID(), leaf.DB.InstanceUID()}, LocalActor: "leaf-member", ServeDownstream: false, ResetEpoch: 1})
+	require.NoError(t, err)
 	for _, peer := range []*testenv.Env{root, relay, leaf} {
 		resp, raw := envDoRaw(t, peer, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/capabilities", p.ID), nil, nil)
 		require.Equal(t, 200, resp.StatusCode, string(raw))

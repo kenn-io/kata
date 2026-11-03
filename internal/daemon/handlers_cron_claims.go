@@ -114,6 +114,9 @@ func authorizeCronClaimRead(ctx context.Context, cfg ServerConfig, p int64, auth
 	if cfg.Auth.Token != "" && !validLocalBearer(cfg.Auth.Token, authz) {
 		return ctx, localAuthError(cfg, authz)
 	}
+	if validLocalBearer(cfg.Auth.Token, authz) {
+		return claimRequestContext(ctx, claimPrincipal{OwnerAuthority: true}), nil
+	}
 	return ctx, nil
 }
 

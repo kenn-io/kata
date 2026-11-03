@@ -4,7 +4,6 @@ import (
 	"encoding/json/jsontext"
 	"fmt"
 	"math"
-	"strings"
 	"time"
 )
 
@@ -141,13 +140,7 @@ func PrepareProjectMergeRecords(
 	var issueSequenceFloor, eventSequenceFloor int64
 	for _, rec := range recs {
 
-		if meta, ok := rec.(*MetaKV); ok {
-			if strings.HasPrefix(meta.Key, CronClaimAuthorityPrefix) {
-				// This owner marker follows the unchanged project UID; ordinary metadata
-				// remains excluded. A merged project copy still cannot arbitrate claims.
-				marker := *meta
-				out = append(out, &marker)
-			}
+		if _, ok := rec.(*MetaKV); ok {
 			continue
 		}
 		if _, ok := rec.(*CronClaimExport); ok {
@@ -375,6 +368,10 @@ func PrepareProjectMergeRecords(
 			Seq:  eventSequenceFloor,
 		})
 	}
+	// A project merge always copies an unchanged namespace, including snapshots
+	// from before claims existed. Derive its marker locally; incoming metadata
+	// must not confer authority or change another project's authority pin.
+	out = append(out, &MetaKV{Key: CronClaimAuthorityPrefix + project.UID, Value: "copy"})
 	return out, nil
 }
 
