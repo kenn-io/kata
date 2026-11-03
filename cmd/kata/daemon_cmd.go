@@ -1390,9 +1390,13 @@ func runDaemonProcess(
 	}
 	var acquireHookDrain hooks.AcquireActivity
 	var waitableDrainAdmission activity.WaitableAdmission
+	var idleHealth func() daemon.IdleSnapshot
+	var idleAdmission daemon.IdleForegroundAdmission
 	if idleController != nil {
 		acquireHookDrain = idleController.DrainAdmission()
 		waitableDrainAdmission = idleController.WaitableDrainAdmission()
+		idleHealth = idleController.Snapshot
+		idleAdmission = idleController
 	}
 
 	disp, daemonLog, err := setupHooks(
@@ -1502,7 +1506,7 @@ func runDaemonProcess(
 		var restartSignals <-chan os.Signal
 		restartSignals, restartCleanup = installRestartSource(ctx, ns.DBHash)
 		workers.Go(func() {
-			restart.watch(ctx, restartSignals, func() error { return restart.accept(ctx, ns.DataDir, rec) }, daemonLog, shutdownTrigger.Call)
+			restart.watch(ctx, restartSignals, idleAdmission, func() error { return restart.accept(ctx, ns.DataDir, rec) }, daemonLog, shutdownTrigger.Call)
 		})
 	}
 	syncOutcome := daemon.NewSyncOutcomeObserver(telemetryReporter)
@@ -1603,12 +1607,6 @@ func runDaemonProcess(
 		}
 	})
 	startExternalRootEventWake(ctx, workers, store, broadcaster, externalRootWake)
-	var idleHealth func() daemon.IdleSnapshot
-	var idleAdmission daemon.IdleForegroundAdmission
-	if idleController != nil {
-		idleHealth = idleController.Snapshot
-		idleAdmission = idleController
-	}
 
 	var signingVerifier *federationsigning.Verifier
 	if dcfg.Federation.Signing.ExternalURL != "" {

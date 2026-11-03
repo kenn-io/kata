@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/client"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/daemonruntime"
 
 	"go.kenn.io/kit/atomicfile"
@@ -96,21 +97,38 @@ func newDaemonRestart(stderr io.Writer) *daemonRestart {
 }
 
 // watch validates each restart request before triggering daemon shutdown.
-func (r *daemonRestart) watch(ctx context.Context, sigs <-chan os.Signal, validate func() error, logger *log.Logger, trigger func()) {
+// A non-nil idle admission is held from the signal until the restart is
+// recorded, so an idle deadline cannot cancel validation and stop the daemon
+// without a replacement.
+func (r *daemonRestart) watch(ctx context.Context, sigs <-chan os.Signal, idle daemon.IdleForegroundAdmission, validate func() error, logger *log.Logger, trigger func()) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-sigs:
-			if err := validate(); err != nil {
-				logger.Printf("restart: request refused: %v", err)
-				continue
+			if r.handle(idle, validate, logger, trigger) {
+				return
 			}
-			r.requested.Store(true)
-			trigger()
-			return
 		}
 	}
+}
+
+func (r *daemonRestart) handle(idle daemon.IdleForegroundAdmission, validate func() error, logger *log.Logger, trigger func()) bool {
+	if idle != nil {
+		lease, admitted := idle.TryForeground()
+		if !admitted {
+			logger.Printf("restart: request refused: daemon is shutting down")
+			return false
+		}
+		defer lease.Release()
+	}
+	if err := validate(); err != nil {
+		logger.Printf("restart: request refused: %v", err)
+		return false
+	}
+	r.requested.Store(true)
+	trigger()
+	return true
 }
 
 // exec replaces the daemon once the current process has shut down. On Unix

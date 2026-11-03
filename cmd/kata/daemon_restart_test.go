@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -15,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/client"
+	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/daemonruntime"
 	kitdaemon "go.kenn.io/kit/daemon"
 )
@@ -227,4 +230,72 @@ func TestDaemonRestart_RemovesAbandonedRestartFiles(t *testing.T) {
 		assert.NoFileExists(t, filepath.Join(dir, name), "the caller holds the start lock, so earlier restart files are abandoned")
 	}
 	assert.FileExists(t, log)
+}
+
+func TestDaemonRestartWatch_IdleDeadlineDuringValidationKeepsRestart(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		idleExpired := make(chan struct{})
+		idle := daemon.NewIdleController(time.Second, func() { close(idleExpired) })
+		idle.Start()
+		sigs := make(chan os.Signal, 1)
+		sigs <- os.Interrupt
+		triggered := false
+		validate := func() error {
+			time.Sleep(5 * time.Second)
+			select {
+			case <-idleExpired:
+				return errors.New("idle shutdown canceled the replacement check")
+			default:
+				return nil
+			}
+		}
+		restart := &daemonRestart{}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			// Daemon shutdown stops idle admission, as the trigger does here.
+			restart.watch(ctx, sigs, idle, validate, log.New(io.Discard, "", 0), func() {
+				triggered = true
+				idle.Stop()
+			})
+		}()
+		time.Sleep(10 * time.Second)
+		cancel()
+		<-done
+
+		assert.True(t, triggered, "accepted restart must trigger shutdown")
+		assert.True(t, restart.requested.Load(), "accepted restart must be recorded")
+		select {
+		case <-idleExpired:
+			t.Fatal("idle shutdown fired while the restart was being validated")
+		default:
+		}
+	})
+}
+
+func TestDaemonRestartWatch_RefusalReleasesIdleHold(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		idleExpired := make(chan struct{})
+		idle := daemon.NewIdleController(time.Second, func() { close(idleExpired) })
+		idle.Start()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		sigs := make(chan os.Signal, 1)
+		sigs <- os.Interrupt
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			(&daemonRestart{}).watch(ctx, sigs, idle, func() error { return errors.New("refused") }, log.New(io.Discard, "", 0), func() {})
+		}()
+
+		time.Sleep(2 * time.Second)
+		select {
+		case <-idleExpired:
+		default:
+			t.Fatal("a refused restart must not keep the daemon from idling")
+		}
+		cancel()
+		<-done
+	})
 }
