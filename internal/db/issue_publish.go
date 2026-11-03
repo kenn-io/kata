@@ -121,5 +121,5 @@ func (e *IssuePublicationPendingError) Error() string {
 	if issueRef == "" {
 		issueRef = e.IssueUID
 	}
-	return fmt.Sprintf("unresolved publication %s (%s); recover with kata sync %s publish %s --adopt <remote-id> or --resolve-not-created --attempt %s --message '<inspection evidence>'", e.AttemptUID, e.Phase, e.Provider, issueRef, e.AttemptUID)
+	return fmt.Sprintf("unresolved publication (%s); recover with kata sync %s publish %s --adopt <remote-id> or --resolve-not-created --attempt %s --message '<inspection evidence>'", e.Phase, e.Provider, issueRef, e.AttemptUID)
 }
