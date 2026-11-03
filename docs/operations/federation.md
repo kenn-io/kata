@@ -2183,10 +2183,11 @@ those bytes name an unshared project. Later metadata or assignment events can
 then refer to an issue the relay has never received, and a pull quarantines
 with an error such as `issue.metadata_updated references unknown issue`.
 
-Upgrade the **root daemon** first. The root then offers a fresh signed
-checkpoint with the selected project's current issues and keeps the private
-historical endpoints out of shared history. Upgrade relays that serve
-downstream peers to the same release.
+Upgrade the **root daemon** first, to a build that includes the
+retained-checkpoint refresh; 0.20.0 and earlier do not. The root then offers a
+fresh signed checkpoint with the selected project's current issues and keeps
+the private historical endpoints out of shared history. Upgrade relays that
+serve downstream peers to the same build.
 
 For an existing relay pull quarantine, select that relay's daemon and project,
 inspect the error, then retry after the root upgrade:
