@@ -91,9 +91,9 @@ func checkFederatedMovePayloadOnlyHistory(t *testing.T, hub db.Storage, backend 
 				})
 				require.NoError(t, err)
 			}
-			_, err = replica.InsertRemoteEvents(ctx, localSource.ID, []db.RemoteEvent{
-				remoteEventFromStored(created), payloadOnlyEdit,
-			})
+			_, err = replica.InsertRemoteEvent(ctx, localSource.ID, remoteEventFromStored(created))
+			require.NoError(t, err)
+			_, err = replica.InsertRemoteEvent(ctx, localTarget.ID, payloadOnlyEdit)
 			require.NoError(t, err)
 			_, err = replica.InsertRemoteEvent(ctx, localTarget.ID, remoteEventFromStored(*moved.Event))
 			require.NoError(t, err)
