@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
@@ -301,6 +302,7 @@ func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, manage
 	// hub revocation; the earlier read-only preflight cannot close this race.
 	// Providers and relay hops retain their existing drain/teardown protocol.
 	nativeFenced := false
+	var nativeFence *federationReplicaNativeFence
 	if project.ID > 0 && (!found || match.Credential.Provider == nil) {
 		binding, bindingErr := store.FederationBindingByProject(ctx, project.ID)
 		if bindingErr != nil && !errors.Is(bindingErr, db.ErrNotFound) {
@@ -318,6 +320,10 @@ func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, manage
 				return PrepareFederationReplicaLeaveResult{}, err
 			}
 			nativeFenced = true
+			nativeFence = &federationReplicaNativeFence{
+				instanceUID: store.InstanceUID(), projectID: project.ID,
+				enabled: binding.Enabled, pushEnabled: binding.PushEnabled,
+			}
 		}
 	}
 	if found && !match.Credential.LeavePending {
@@ -343,7 +349,7 @@ func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, manage
 	// concurrent reconciler record success for a leave that then fails to
 	// prepare, and rolling the publish back would erase a completed leave's
 	// suppression when a retried prepare fails.
-	federationReplicaTransitions.markLeavePending(key, preparation)
+	federationReplicaTransitions.markLeavePending(key, preparation, nativeFence)
 	ensureFederationReplicaMu.Unlock()
 
 	// A prepare call that fails from here on never answers its client. Drop
@@ -353,6 +359,24 @@ func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, manage
 	fail := func(err error) (PrepareFederationReplicaLeaveResult, error) {
 		if !durablyMarked {
 			ensureFederationReplicaMu.Lock()
+			fence, final := federationReplicaTransitions.nativeFenceForFinalRelease(preparation, key, true)
+			if final && fence != nil {
+				restoreCtx := ctx
+				restoreCancel := func() {}
+				if ctx.Err() != nil {
+					// Restore the pre-leave write state even when cancellation caused
+					// preparation to fail; this is cleanup after caller cancellation.
+					restoreCtx, restoreCancel = context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				}
+				restoreErr := restoreNativeFederationBinding(restoreCtx, store, project.ID, fence)
+				restoreCancel()
+				if restoreErr != nil {
+					ensureFederationReplicaMu.Unlock()
+					return PrepareFederationReplicaLeaveResult{}, errors.Join(err,
+						fmt.Errorf("restore native federation binding after failed leave preparation: %w", restoreErr))
+				}
+				federationReplicaTransitions.clearNativeFenceForProject(store.InstanceUID(), project.ID)
+			}
 			federationReplicaTransitions.releaseFailedPrepare(key, preparation)
 			ensureFederationReplicaMu.Unlock()
 		}
@@ -462,10 +486,46 @@ func AbortFederationReplicaLeave(
 	if binding.Role != db.FederationRoleSpoke {
 		return db.ErrFederationNotSpoke
 	}
+	fence, final := federationReplicaTransitions.nativeFenceForFinalRelease(preparation, "", false)
+	if final && fence != nil {
+		if err := restoreNativeFederationBinding(ctx, store, project.ID, fence); err != nil {
+			return fmt.Errorf("restore native federation binding after leave abort: %w", err)
+		}
+	}
 	for _, key := range keys {
 		federationReplicaTransitions.releasePreparedLeave(key, preparation)
 	}
+	if final && fence != nil {
+		federationReplicaTransitions.clearNativeFenceForProject(store.InstanceUID(), project.ID)
+	}
 	return nil
+}
+
+// restoreNativeFederationBinding releases only the enabled/push fence. The
+// rebind coordinator prevents cursor writes from racing the read-modify-write,
+// so a failed leave never rewinds federation progress.
+func restoreNativeFederationBinding(
+	ctx context.Context,
+	store db.Storage,
+	projectID int64,
+	fence *federationReplicaNativeFence,
+) error {
+	finish, err := federationcoord.BeginRebind(ctx, federationcoord.Key(store.InstanceUID(), projectID), store, projectID)
+	if err != nil {
+		return err
+	}
+	defer finish()
+	binding, err := store.FederationBindingByProject(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	if binding.Role != db.FederationRoleSpoke || binding.RelayConfig != nil {
+		return db.ErrFederationRebindConflict
+	}
+	binding.Enabled = fence.enabled
+	binding.PushEnabled = fence.pushEnabled
+	_, err = store.UpsertFederationBinding(ctx, binding)
+	return err
 }
 
 // LeavePending blocks attachment first. Drain the existing project transport

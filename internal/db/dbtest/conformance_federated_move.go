@@ -394,8 +394,10 @@ func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 					_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: project.ID, HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true})
 					require.NoError(t, err)
 				}
-				issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "pending move", Author: "worker"})
+				issue, created, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "pending move", Author: "worker"})
 				require.NoError(t, err)
+				require.NoError(t, store.AdvanceFederationPushCursor(ctx, source.ID, created.ID),
+					"the issue creation was already accepted before its later move")
 				move, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID, IfMatchRev: issue.Revision, Actor: "worker"})
 				require.NoError(t, err)
 				lifecycle := store.(db.RelayLifecycleStore)
@@ -438,6 +440,107 @@ func checkFederatedMoveGuards(t *testing.T, store db.Storage) error {
 				}
 			})
 		}
+	})
+	t.Run("source leave waits for pending former issue events", func(t *testing.T) {
+		source, err := store.CreateProject(ctx, "pending-former-source")
+		require.NoError(t, err)
+		target, err := store.CreateProject(ctx, "pending-former-target")
+		require.NoError(t, err)
+		for _, project := range []db.Project{source, target} {
+			_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{
+				ProjectID: project.ID, Role: db.FederationRoleSpoke,
+				HubURL: "https://hub.example", HubProjectID: project.ID,
+				HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true,
+			})
+			require.NoError(t, err)
+		}
+		issue, created, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: source.ID, Title: "moved issue with pending source changes", Author: "worker",
+		})
+		require.NoError(t, err)
+		require.NoError(t, store.AdvanceFederationPushCursor(ctx, source.ID, created.ID),
+			"the issue creation was already accepted before its later source events")
+		title := "updated while still in the source project"
+		updated, editEvent, changed, err := store.EditIssue(ctx, db.EditIssueParams{
+			IssueID: issue.ID, Actor: "worker", Title: &title,
+		})
+		require.NoError(t, err)
+		require.True(t, changed)
+		_, comment, err := store.CreateComment(ctx, db.CreateCommentParams{
+			IssueID: issue.ID, Author: "worker", Body: "source discussion awaiting hub acceptance",
+		})
+		require.NoError(t, err)
+		require.Greater(t, comment.ID, editEvent.ID, "the comment cursor covers the earlier source edit")
+		moved, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+			IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID,
+			IfMatchRev: updated.Revision, Actor: "worker",
+		})
+		require.NoError(t, err)
+		require.NoError(t, store.AdvanceFederationPushCursor(ctx, target.ID, moved.EventID),
+			"the destination move was already accepted by the hub")
+
+		_, err = store.LeaveFederationReplica(ctx, source.ID)
+		require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush,
+			"the source binding must remain until its pending comment is accepted")
+		require.NoError(t, store.AdvanceFederationPushCursor(ctx, source.ID, comment.ID))
+		_, err = store.LeaveFederationReplica(ctx, source.ID)
+		require.NoError(t, err, "acknowledging the source history releases the credential dependency")
+	})
+	t.Run("source leave waits for quarantined former issue events", func(t *testing.T) {
+		source, err := store.CreateProject(ctx, "quarantined-former-source")
+		require.NoError(t, err)
+		target, err := store.CreateProject(ctx, "quarantined-former-target")
+		require.NoError(t, err)
+		for _, project := range []db.Project{source, target} {
+			_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{
+				ProjectID: project.ID, Role: db.FederationRoleSpoke,
+				HubURL: "https://hub.example", HubProjectID: project.ID,
+				HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true,
+			})
+			require.NoError(t, err)
+		}
+		issue, created, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: source.ID, Title: "moved issue with quarantined source changes", Author: "worker",
+		})
+		require.NoError(t, err)
+		require.NoError(t, store.AdvanceFederationPushCursor(ctx, source.ID, created.ID))
+		title := "updated while still in the source project"
+		updated, editEvent, changed, err := store.EditIssue(ctx, db.EditIssueParams{
+			IssueID: issue.ID, Actor: "worker", Title: &title,
+		})
+		require.NoError(t, err)
+		require.True(t, changed)
+		_, comment, err := store.CreateComment(ctx, db.CreateCommentParams{
+			IssueID: issue.ID, Author: "worker", Body: "source discussion requiring review",
+		})
+		require.NoError(t, err)
+		moved, err := store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+			IssueID: issue.ID, FromProjectID: source.ID, ToProjectID: target.ID,
+			IfMatchRev: updated.Revision, Actor: "worker",
+		})
+		require.NoError(t, err)
+		require.NoError(t, store.AdvanceFederationPushCursor(ctx, target.ID, moved.EventID))
+		// The source cursor can pass a quarantined batch, so teardown must also
+		// inspect active quarantine UIDs for issues that now belong elsewhere.
+		require.NoError(t, store.AdvanceFederationPushCursor(ctx, source.ID, comment.ID))
+		quarantine, err := store.RecordFederationQuarantine(ctx, db.RecordFederationQuarantineParams{
+			ProjectID: source.ID, Direction: db.FederationQuarantineDirectionPush,
+			FirstEventID: editEvent.ID, LastEventID: comment.ID, EventUIDs: []string{editEvent.UID, comment.UID},
+			Error: "source history requires review", CreatedAt: time.Now().UTC(),
+		})
+		require.NoError(t, err)
+		require.NotZero(t, quarantine.ID)
+
+		_, err = store.LeaveFederationReplica(ctx, source.ID)
+		require.ErrorIs(t, err, db.ErrFederationResetBlockedByPendingPush,
+			"the source binding must remain while an active quarantine references moved issue history")
+		_, err = store.SkipFederationQuarantine(ctx, db.SkipFederationQuarantineParams{
+			ID: quarantine.ID, ProjectID: source.ID, Actor: "operator",
+			Reason: "resolved source history", Now: time.Now().UTC(),
+		})
+		require.NoError(t, err)
+		_, err = store.LeaveFederationReplica(ctx, source.ID)
+		require.NoError(t, err, "resolving the quarantine releases the credential dependency")
 	})
 	t.Run("hub moves do not wait for native push", func(t *testing.T) {
 		source, err := store.CreateProject(ctx, "hub-lifecycle-source")

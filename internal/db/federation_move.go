@@ -52,7 +52,100 @@ func CheckFederationMoveSourceLifecycle(ctx context.Context, tx *sql.Tx, project
 			return fmt.Errorf("%w: sync pending issue moves in destination projects, then retry source leave or archive", ErrFederationResetBlockedByPendingPush)
 		}
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	pending, err := federationMoveSourceHasPendingEvents(ctx, tx, projectID, originInstanceUID)
+	if err != nil {
+		return err
+	}
+	if pending {
+		return fmt.Errorf("%w: sync pending events for moved issues before source leave or archive", ErrFederationResetBlockedByPendingPush)
+	}
+	return nil
+}
+
+// federationMoveSourceHasPendingEvents protects history that remains in a
+// former project stream after the issue itself has moved. The destination's
+// acknowledgement of issue.moved cannot acknowledge earlier source updates
+// or comments in that separate stream.
+func federationMoveSourceHasPendingEvents(
+	ctx context.Context,
+	tx *sql.Tx,
+	projectID int64,
+	originInstanceUID string,
+) (bool, error) {
+	const movedIssueEvents = `SELECT EXISTS(SELECT 1 FROM events e
+ JOIN federation_bindings b ON b.project_id=e.project_id
+ JOIN issues i ON i.uid=e.issue_uid AND i.project_id<>e.project_id
+ WHERE e.project_id=$1 AND e.origin_instance_uid=$2`
+	var pending bool
+	if err := tx.QueryRowContext(ctx, movedIssueEvents+` AND e.id>b.push_cursor_event_id
+ AND e.type IN (`+FederationPushEventTypesSQL()+`))`,
+		projectID, originInstanceUID).Scan(&pending); err != nil {
+		return false, err
+	}
+	if pending {
+		return true, nil
+	}
+
+	rows, err := tx.QueryContext(ctx, `SELECT event_uids FROM federation_quarantine
+ WHERE project_id=$1 AND direction='push' AND skipped_at IS NULL`, projectID)
+	if err != nil {
+		return false, err
+	}
+	quarantined := map[string]struct{}{}
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			_ = rows.Close()
+			return false, err
+		}
+		var eventUIDs []string
+		if err := json.Unmarshal([]byte(raw), &eventUIDs); err != nil {
+			_ = rows.Close()
+			return false, err
+		}
+		for _, eventUID := range eventUIDs {
+			quarantined[eventUID] = struct{}{}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return false, err
+	}
+	if err := rows.Close(); err != nil {
+		return false, err
+	}
+	if len(quarantined) == 0 {
+		return false, nil
+	}
+
+	eventUIDs := make([]string, 0, len(quarantined))
+	for eventUID := range quarantined {
+		eventUIDs = append(eventUIDs, eventUID)
+	}
+	for start := 0; start < len(eventUIDs); start += 500 {
+		end := min(start+500, len(eventUIDs))
+		args := []any{projectID, originInstanceUID}
+		placeholders := make([]string, 0, end-start)
+		for _, eventUID := range eventUIDs[start:end] {
+			args = append(args, eventUID)
+			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)))
+		}
+		query := movedIssueEvents + ` AND e.type IN (` + FederationPushEventTypesSQL() + `)
+ AND e.uid IN (` + strings.Join(placeholders, ",") + `))`
+		if err := tx.QueryRowContext(ctx, query, args...).Scan(&pending); err != nil {
+			return false, err
+		}
+		if pending {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // CheckFederatedIssueMove allows local projects, or two active bindings in one

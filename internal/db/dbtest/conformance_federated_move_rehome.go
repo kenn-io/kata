@@ -46,6 +46,13 @@ func prepareRehomePull(t *testing.T, store db.Storage, source, target db.Project
 	}
 }
 
+func acknowledgeFederatedRehomeSourceEvents(t *testing.T, store db.Storage, source db.Project) {
+	t.Helper()
+	cursor, err := store.MaxEventID(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, store.AdvanceFederationPushCursor(t.Context(), source.ID, cursor))
+}
+
 func replayFederatedRehome(t *testing.T, store db.Storage, target db.Project, event db.RemoteEvent, mode string) {
 	t.Helper()
 	if mode == "push" {

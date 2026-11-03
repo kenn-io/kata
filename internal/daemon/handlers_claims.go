@@ -1008,34 +1008,82 @@ func applyForwardedAssignmentClaim(
 	for _, event := range forwarded.Events {
 		allUIDs = append(allUIDs, event.UID)
 	}
-	insertedUIDs := make([]string, 0, len(receivedEvents))
+	type eventGroup struct {
+		projectID    int64
+		eventUIDs    []string
+		insertedUIDs map[string]struct{}
+		seenUIDs     map[string]struct{}
+	}
+	groupsByProject := make(map[int64]*eventGroup)
+	groups := make([]*eventGroup, 0, len(receivedEvents))
+	projectIDsByUID := make(map[string]int64)
 	for _, event := range receivedEvents {
-		inserted, err := cfg.DB.InsertRemoteEvent(ctx, projectID, remoteEventFromStoredEvent(event))
+		eventProjectID := projectID
+		if event.ProjectUID != "" {
+			var known bool
+			eventProjectID, known = projectIDsByUID[event.ProjectUID]
+			if !known {
+				project, err := cfg.DB.ProjectByUID(ctx, event.ProjectUID)
+				if err != nil {
+					return nil, err
+				}
+				eventProjectID = project.ID
+				projectIDsByUID[event.ProjectUID] = eventProjectID
+			}
+		}
+		group := groupsByProject[eventProjectID]
+		if group == nil {
+			group = &eventGroup{
+				projectID: eventProjectID, insertedUIDs: make(map[string]struct{}),
+				seenUIDs: make(map[string]struct{}),
+			}
+			groupsByProject[eventProjectID] = group
+			groups = append(groups, group)
+		}
+		if _, seen := group.seenUIDs[event.UID]; !seen {
+			group.eventUIDs = append(group.eventUIDs, event.UID)
+			group.seenUIDs[event.UID] = struct{}{}
+		}
+		inserted, err := cfg.DB.InsertRemoteEvent(ctx, eventProjectID, remoteEventFromStoredEvent(event))
 		if err != nil {
 			return nil, err
 		}
 		if inserted {
-			insertedUIDs = append(insertedUIDs, event.UID)
+			group.insertedUIDs[event.UID] = struct{}{}
 		}
 	}
-	if len(receivedEvents) > 0 {
-		if err := cfg.DB.MaterializeFederatedProject(ctx, projectID); err != nil {
+	for _, group := range groups {
+		if err := cfg.DB.MaterializeFederatedProject(ctx, group.projectID); err != nil {
 			return nil, err
+		}
+	}
+	storedByUID := make(map[string]db.Event, len(receivedEvents))
+	for _, group := range groups {
+		stored, err := cfg.DB.EventsByUIDs(ctx, group.projectID, group.eventUIDs)
+		if err != nil {
+			return nil, err
+		}
+		insertedEvents := make([]db.Event, 0, len(group.insertedUIDs))
+		for _, event := range stored {
+			storedByUID[event.UID] = event
+			if _, inserted := group.insertedUIDs[event.UID]; inserted {
+				insertedEvents = append(insertedEvents, event)
+			}
+		}
+		// Publish each committed event under its envelope project before any
+		// response-only issue or projection read can fail.
+		cfg.Publish().Events(group.projectID, insertedEvents)
+	}
+	events := make([]db.Event, 0, len(allUIDs))
+	for _, uid := range allUIDs {
+		if event, ok := storedByUID[uid]; ok {
+			events = append(events, event)
 		}
 	}
 	issue, err := cfg.DB.IssueByUID(ctx, issueUID, db.IncludeDeletedNo)
 	if err != nil {
 		return nil, err
 	}
-	events, err := cfg.DB.EventsByUIDs(ctx, projectID, allUIDs)
-	if err != nil {
-		return nil, err
-	}
-	insertedEvents, err := cfg.DB.EventsByUIDs(ctx, projectID, insertedUIDs)
-	if err != nil {
-		return nil, err
-	}
-	cfg.Publish().Events(projectID, insertedEvents)
 	// Response events follow the scoped projection contract shared by every
 	// mutation response; publishing above stays raw so mirror subscribers and
 	// hooks keep the durable form. Remote event rows carry no local issue_id
