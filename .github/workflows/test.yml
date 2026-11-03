@@ -231,8 +231,8 @@ jobs:
           KATA_SKIP_OPENAPI_CLIENT_CHECK: "1"
         # e2e runs alone because it rebuilds the embedded web assets other packages compile against.
         run: |
-          env -u KATA_AUTH_TOKEN go test $(go list ./... | grep -v '/e2e$')
-          env -u KATA_AUTH_TOKEN go test -p 1 ./e2e
+          env -u KATA_AUTH_TOKEN go test -v $(go list ./... | grep -v '/e2e$')
+          env -u KATA_AUTH_TOKEN go test -v -p 1 ./e2e
 
   native-agent-plugins:
     needs: changes
@@ -408,7 +408,7 @@ jobs:
           KATA_SKIP_OPENAPI_CLIENT_CHECK: "1"
         # e2e runs alone because it rebuilds the embedded web assets other packages compile against.
         run: |
-          env -u KATA_AUTH_TOKEN go test -count=1 -p 4 \
+          env -u KATA_AUTH_TOKEN go test -v -count=1 -p 4 \
           . \
           ./internal/testenv \
           ./internal/client \
@@ -418,8 +418,8 @@ jobs:
           ./internal/jsonl \
           ./internal/vector
           # cmd/kata PostgreSQL tests carry Postgres in their name.
-          env -u KATA_AUTH_TOKEN go test -count=1 -run Postgres ./cmd/kata
-          env -u KATA_AUTH_TOKEN go test -count=1 -p 1 ./e2e
+          env -u KATA_AUTH_TOKEN go test -v -count=1 -run Postgres ./cmd/kata
+          env -u KATA_AUTH_TOKEN go test -v -count=1 -p 1 ./e2e
 
   windows:
     needs: changes
@@ -500,7 +500,7 @@ jobs:
         run: |
           cli_package=$(go list ./cmd/kata)
           packages=$(go list ./... | grep -vx "$cli_package")
-          env -u KATA_AUTH_TOKEN go test -timeout 15m -p 4 -vet=off $packages
+          env -u KATA_AUTH_TOKEN go test -v -timeout 15m -p 4 -vet=off $packages
 
       - name: Run CLI tests
         if: matrix.cli
@@ -514,7 +514,7 @@ jobs:
           TEST_RUN="$shard_pattern"
           TEST_SKIP=''
           if [[ "$TEST_SHARD" == complement ]]; then TEST_RUN='.'; TEST_SKIP="$shard_pattern"; fi
-          env -u KATA_AUTH_TOKEN go test -timeout 15m -vet=off -run "$TEST_RUN" -skip "$TEST_SKIP" ./cmd/kata
+          env -u KATA_AUTH_TOKEN go test -v -timeout 15m -vet=off -run "$TEST_RUN" -skip "$TEST_SKIP" ./cmd/kata
 
   lint:
     needs: changes

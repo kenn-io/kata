@@ -5,6 +5,9 @@ const origin = `http://127.0.0.1:${port}`
 
 export default defineConfig({
   testDir: './tests',
+  // Playwright's CI default, dot, does not name passing tests. The list
+  // reporter does, so a rerun's log can confirm a flaky test.
+  reporter: 'list',
   globalSetup: './tests/global-setup.ts',
   timeout: 30_000,
   expect: { timeout: 10_000 },

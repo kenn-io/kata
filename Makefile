@@ -114,7 +114,7 @@ test-short:
 	env -u KATA_AUTH_TOKEN -u KATA_TRUST_PRIVATE_NETWORK go test -short $(GOFLAGS_TEST) ./...
 
 test-stress:
-	go test -tags federation_stress ./e2e -run 'TestFederationStress|TestFederationFailpoint' -rapid.checks=5 -count=1 -timeout $(FEDERATION_STRESS_TIMEOUT)
+	go test -v -tags federation_stress ./e2e -run 'TestFederationStress|TestFederationFailpoint' -rapid.checks=5 -count=1 -timeout $(FEDERATION_STRESS_TIMEOUT)
 
 test-federation-docker:
 	./scripts/test-federation-docker.sh
