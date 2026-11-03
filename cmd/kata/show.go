@@ -339,7 +339,7 @@ func compactJSON(raw jsontext.Value) string {
 // federation lease fields are zero when the issue is not federated.
 type showResponseForCLI struct {
 	CloseEvidence []db.Evidence `json:"-"`
-	Issue struct {
+	Issue         struct {
 		ProjectID int64  `json:"project_id"`
 		ShortID   string `json:"short_id"`
 		UID       string `json:"uid"`
