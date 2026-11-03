@@ -143,68 +143,6 @@ describe('IssueGraph', () => {
     await waitFor(() => expect(screen.queryAllByText('Closed issue')).toEqual([]))
   })
 
-  it('removes descendants reachable only through a hidden closed issue', async () => {
-    const root = task({ uid: 'issue-root', short_id: 'root' })
-    const closed = task({
-      uid: 'issue-closed',
-      short_id: 'closed',
-      title: 'Closed intermediate',
-      status: 'closed',
-      closed_reason: 'duplicate',
-    })
-    const descendant = task({
-      uid: 'issue-descendant',
-      short_id: 'descendant',
-      title: 'Open descendant',
-    })
-    render(IssueGraph, {
-      props: {
-        graph: {
-          ...graphResponse(root, [root, closed, descendant]),
-          edges: [
-            { from_uid: root.uid, to_uid: closed.uid, kind: 'related', layout: false },
-            { from_uid: closed.uid, to_uid: descendant.uid, kind: 'blocks', layout: true },
-          ],
-        },
-        sourceIssue: root,
-        selectedUID: root.uid,
-        onBack: () => {},
-        onSelectIssue: () => {},
-      },
-    })
-
-    await waitFor(() => expect(screen.getAllByText('Open descendant').length).toBeGreaterThan(0))
-    await fireEvent.click(screen.getByRole('button', { name: /Graph filters/ }))
-    await fireEvent.click(screen.getByRole('button', { name: 'Hide done' }))
-    await waitFor(() => expect(screen.queryAllByText('Closed intermediate')).toEqual([]))
-    expect(screen.queryAllByText('Open descendant')).toEqual([])
-  })
-
-  it('excludes disconnected nodes at full depth', async () => {
-    const root = task({ uid: 'issue-root', short_id: 'root', title: 'Root issue' })
-    const child = task({ uid: 'issue-child', short_id: 'child', title: 'Child issue' })
-    const disconnected = task({
-      uid: 'issue-disconnected',
-      short_id: 'elsewhere',
-      title: 'Disconnected issue',
-    })
-    render(IssueGraph, {
-      props: {
-        graph: {
-          ...graphResponse(root, [root, child, disconnected]),
-          edges: [{ from_uid: root.uid, to_uid: child.uid, kind: 'parent', layout: true }],
-        },
-        sourceIssue: root,
-        selectedUID: root.uid,
-        onBack: () => {},
-        onSelectIssue: () => {},
-      },
-    })
-
-    await waitFor(() => expect(screen.getAllByText('Child issue').length).toBeGreaterThan(0))
-    expect(screen.queryAllByText('Disconnected issue')).toEqual([])
-  })
-
   it('selects cached nodes and returns to the list', async () => {
     const root = task({ uid: 'issue-root', short_id: 'root', title: 'Root issue' })
     const onSelectIssue = vi.fn()

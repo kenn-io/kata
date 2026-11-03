@@ -45,7 +45,72 @@ describe('buildKataReachableGraph', () => {
       ['a', { x: 640, y: -54 }],
       ['z', { x: 640, y: 54 }],
     ])
+
+    const wider = buildKataReachableGraph({
+      sourceUID: 'root',
+      selectedUID: null,
+      graph: graph({
+        source_uid: 'root',
+        nodes: ['root', 'a', 'b', 'c', 'd', 'e', 'f', 'x', 'y', 'z'].map((uid) =>
+          task({ uid, short_id: uid, title: uid }),
+        ),
+        edges: [
+          { from_uid: 'root', to_uid: 'b', kind: 'blocks', layout: true },
+          { from_uid: 'root', to_uid: 'c', kind: 'blocks', layout: true },
+          { from_uid: 'root', to_uid: 'd', kind: 'blocks', layout: true },
+          { from_uid: 'root', to_uid: 'e', kind: 'blocks', layout: true },
+          { from_uid: 'root', to_uid: 'f', kind: 'blocks', layout: true },
+          { from_uid: 'b', to_uid: 'z', kind: 'blocks', layout: true },
+          { from_uid: 'c', to_uid: 'a', kind: 'blocks', layout: true },
+          { from_uid: 'e', to_uid: 'y', kind: 'blocks', layout: true },
+          { from_uid: 'f', to_uid: 'x', kind: 'blocks', layout: true },
+        ],
+      }),
+    })
+    expect(
+      wider.nodes
+        .filter((node) => ['a', 'x', 'y', 'z'].includes(node.id))
+        .map((node) => [node.id, node.position]),
+    ).toEqual([
+      ['a', { x: 640, y: -162 }],
+      ['x', { x: 640, y: -54 }],
+      ['y', { x: 640, y: 54 }],
+      ['z', { x: 640, y: 162 }],
+    ])
   })
+
+  it('scales with the number of edges', () => {
+    const timings = [1000, 8000].map((size) => {
+      const input = {
+        sourceUID: 'root',
+        selectedUID: 'root',
+        contextDepth: '1' as const,
+        graph: graph({
+          source_uid: 'root',
+          nodes: [
+            task({ uid: 'root' }),
+            ...Array.from({ length: size }, (_, index) => task({ uid: `issue-${index}` })),
+          ],
+          edges: Array.from({ length: size }, (_, index) => ({
+            from_uid: 'root',
+            to_uid: `issue-${index}`,
+            kind: 'related' as const,
+            layout: true,
+          })),
+        }),
+      }
+      const built = buildKataReachableGraph(input)
+      expect(built.nodes).toHaveLength(size + 1)
+      expect(built.edges).toHaveLength(size)
+      const samples = Array.from({ length: 3 }, () => {
+        const start = performance.now()
+        buildKataReachableGraph(input)
+        return performance.now() - start
+      })
+      return samples.sort((a, b) => a - b)[1]!
+    })
+    expect(timings[1]!).toBeLessThan(timings[0]! * 8 ** 1.5)
+  }, 120_000)
 
   it('uses the native graph node and edge set directly', () => {
     const root = task({ uid: 'issue-root', short_id: 'root', title: 'Root' })
