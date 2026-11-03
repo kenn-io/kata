@@ -262,6 +262,7 @@ jobs:
           cache: false
 
       - name: Restore Linux Go cache
+        id: restore-go-cache
         uses: actions/cache/restore@v6.1.0
         with: &linux-go-cache
           path: |
@@ -333,7 +334,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Save Linux Go cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.restore-go-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6.1.0
         with:
           path: |
