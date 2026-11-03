@@ -57,6 +57,56 @@ func TestCloseForwardsRetryGuardsAndReturnsOriginalReceipt(t *testing.T) {
 	require.Equal(t, "01HCCCCCCCCCCCCCCCCCCCCCCC", output.Event.UID)
 }
 
+func TestScopedCloseRetryIncludesSoftDeletedIssueInPreflight(t *testing.T) {
+	const projectUID = "01HAAAAAAAAAAAAAAAAAAAAAAA"
+	var showCalls, closeCalls int
+	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.URL.Path == "/api/v1/projects":
+			writeJSON(writer, map[string]any{"projects": []any{projectJSON(1, projectUID, "spoke-project")}})
+		case request.Method == http.MethodGet && request.URL.Path == "/api/v1/projects/1/issues/abc1":
+			showCalls++
+			if request.URL.Query().Get("include_deleted") != "true" {
+				writer.WriteHeader(http.StatusNotFound)
+				writeJSON(writer, map[string]any{"status": http.StatusNotFound, "error": map[string]any{
+					"code": "issue_not_found", "message": "issue not found",
+				}})
+				return
+			}
+			issue := issueJSON(1, "spoke-project", "abc1")
+			issue["project_uid"] = projectUID
+			issue["status"] = "closed"
+			issue["deleted_at"] = "2026-11-03T08:00:00Z"
+			writeJSON(writer, map[string]any{"issue": issue, "comments": []any{}, "links": []any{}, "labels": []any{}})
+		case strings.HasSuffix(request.URL.Path, "/actions/close"):
+			closeCalls++
+			require.Equal(t, "close-request-1", request.Header.Get("Idempotency-Key"))
+			issue := issueJSON(1, "spoke-project", "abc1")
+			issue["project_uid"] = projectUID
+			issue["status"] = "closed"
+			writeJSON(writer, map[string]any{
+				"issue": issue, "event": nil, "original_event": closeRetryEventJSON(),
+				"changed": false, "reused": true,
+			})
+		default:
+			http.NotFound(writer, request)
+		}
+	})
+	scope, err := NewAllowlistScope([]ProjectIdentity{{ID: 1, UID: projectUID, Name: "spoke-project"}})
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: scope, Actor: "example-agent"}}
+	_, output, err := handlers.close(t.Context(), nil, CloseInput{
+		Ref: "spoke-project#abc1", Reason: "done",
+		Message:        "Completed the requested work and replayed its original close receipt.",
+		IdempotencyKey: "close-request-1",
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, showCalls)
+	require.Equal(t, 1, closeCalls, "a scoped retry must reach CloseIssue for receipt replay")
+	require.NotNil(t, output.Reused)
+	require.True(t, *output.Reused)
+}
+
 // A close receipt must fail closed when its returned issue cannot be projected
 // into the MCP startup scope. Warning projection must not erase that error.
 func TestClosePreservesMutationProjectionError(t *testing.T) {

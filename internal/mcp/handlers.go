@@ -848,6 +848,7 @@ func (h toolHandlers) close(ctx context.Context, _ *sdkmcp.CallToolRequest, inpu
 	if h.options.Scope.Mode() != ScopeAll {
 		shown, err := h.options.Client.ShowIssue(ctx, &generated.ShowIssueRequestOptions{
 			PathParams: &generated.ShowIssuePath{ProjectID: project.ID, Ref: ref},
+			Query:      &generated.ShowIssueQuery{IncludeDeleted: optionalTrue(input.IdempotencyKey != "")},
 		})
 		if err != nil {
 			return nil, MutationOutput{}, err
