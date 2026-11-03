@@ -9,7 +9,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
-	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -96,21 +95,5 @@ func enrollLegacyRelaySpoke(t *testing.T, root, direct *relayMatrixNode) {
 	var grant api.FederationEnrollmentOut
 	require.NoError(t, json.Unmarshal(raw, &grant))
 	require.Nil(t, grant.Relay)
-	project, err := direct.store.CreateProject(t.Context(), "direct-project")
-	require.NoError(t, err)
-	adopted, err := direct.store.AdoptProjectIntoFederation(t.Context(), db.AdoptProjectIntoFederationParams{
-		ProjectID: project.ID, HubURL: root.http.URL, HubProjectID: root.project.ID,
-		HubProjectUID: root.project.UID, Actor: grant.Actor, EmptyOnly: true,
-	})
-	require.NoError(t, err)
-	direct.project = adopted.Project
-	binding := adopted.Binding
-	binding.Enabled, binding.PushEnabled = true, true
-	_, err = direct.store.UpsertFederationBinding(t.Context(), binding)
-	require.NoError(t, err)
-	direct.credential = config.FederationCredential{
-		HubURL: root.http.URL, HubProjectID: root.project.ID, Token: grant.Token,
-		Actor: grant.Actor, Capabilities: grant.Capabilities,
-	}
-	require.NoError(t, direct.credentials.StoreFederationCredential(t.Context(), direct.project.UID, direct.credential))
+	adoptRelayMatrixReplica(t, root, direct, "direct-project", grant)
 }

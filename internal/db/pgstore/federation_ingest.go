@@ -240,18 +240,8 @@ func (s *Store) IngestFederationEvents(
 		if err != nil {
 			return err
 		}
-		// Route after materialization so stored sibling-project references stay local.
-		for _, event := range result.Events {
-			crossing, err := relayEventReferencesOtherProjectTx(ctx, tx, event.ProjectID, db.RemoteEventFromStored(event))
-			if err != nil {
-				return err
-			}
-			if crossing {
-				continue
-			}
-			if err := s.queueRelaySourceTx(ctx, tx, event); err != nil {
-				return err
-			}
+		if err := s.queueLegacyRelayEventsTx(ctx, tx, params.ProjectID, result.Events); err != nil {
+			return err
 		}
 		return nil
 	})
@@ -812,4 +802,27 @@ func rememberIngestIssueUIDs(event db.RemoteEvent, known map[string]struct{}) {
 	if event.Type == "issue.created" || event.Type == "issue.snapshot" {
 		known[issueUID] = struct{}{}
 	}
+}
+
+// Route only after materialization, when known sibling endpoints can be refused.
+func (s *Store) queueLegacyRelayEventsTx(ctx context.Context, tx *sql.Tx, projectID int64, events []db.Event) error {
+	relayed, err := relayProjectsActiveTx(ctx, tx, projectID, projectID)
+	if err != nil {
+		return err
+	}
+	for _, event := range events {
+		if relayed {
+			crossing, err := relayEventCrossesProjectTx(ctx, tx, projectID, db.RemoteEventFromStored(event), true)
+			if err != nil {
+				return err
+			}
+			if crossing {
+				return errors.Join(db.ErrFederationIngestValidation, db.ErrFederationCrossProjectBoundary)
+			}
+		}
+		if err := s.queueRelaySourceTx(ctx, tx, event); err != nil {
+			return err
+		}
+	}
+	return nil
 }

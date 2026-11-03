@@ -2211,9 +2211,9 @@ hub.
 
 ### Missing creations from direct legacy spokes
 
-Events accepted from a direct legacy spoke reach negotiated relays with their original identity and hash. SQLite and PostgreSQL roots queue accepted events in ingest order after materialization. Events that reference an issue already stored in another project remain owner-local. References to peers that haven't arrived yet can travel through relays.
+Events accepted from a direct legacy spoke reach negotiated relays with their original identity and hash. SQLite and PostgreSQL roots queue accepted events in ingest order after materialization. References to peers that haven't arrived yet can travel through relays.
 
-After upgrading the root, relays that quarantined because an older SQLite root omitted a creation need a fresh checkpoint. Reconnect the affected bridge with `kata --project spoke-project federation bridge disconnect --as member`, then `kata --project spoke-project federation bridge connect --hub-daemon root-hub --hub-project hub-project --serve-downstream --as member`. Reconnecting also recovers a withheld creation. Follow the existing [bridge disconnect and reconnect procedure](../guide/project-relays.md) to resolve pending deliveries and downstream enrollments first.
+On relayed projects, ingest refuses events that reference an issue stored in another project, matching native writes. The root returns HTTP 400 and rolls back the push. Remove the cross-project link or reference on the spoke before retrying; retries receive the same refusal until then.
 
 ## Purge and reset
 

@@ -146,7 +146,7 @@ func (d *Store) seedRelayLocalEventsTx(ctx context.Context, tx *sql.Tx, grant db
 			if err != nil {
 				return err
 			}
-			crossing, err := relayEventCrossesProjectTx(ctx, tx, projectID, db.RemoteEventFromStored(event))
+			crossing, err := relayEventCrossesProjectTx(ctx, tx, projectID, db.RemoteEventFromStored(event), false)
 			if err != nil {
 				return err
 			}

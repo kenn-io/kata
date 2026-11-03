@@ -115,46 +115,66 @@ func RunRelayOffersLegacyIngestedEvents(t *testing.T, store db.Storage) {
 		}
 		require.Equal(t, []string{first.EventUID, second.EventUID, metadata.Event.UID}, sources)
 	})
-	t.Run("stored sibling endpoint stays private", func(t *testing.T) {
-		ctx := t.Context()
-		fixture := newRelayLinkBoundaryFixture(t, store, "private-legacy-ingest")
-		private, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.sibling.ID, Title: "Private endpoint", Author: "member"})
-		require.NoError(t, err)
-		peer, err := uid.New()
-		require.NoError(t, err)
-		grant, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{
-			ProjectID: fixture.project.ID, ParentTokenID: fixture.parentTokenID,
-			SpokeInstanceUID: peer, ProtocolVersion: db.RelayProtocolVersion,
+	runRelayRejectsLegacyCrossProjectEvents(t, store)
+}
+
+func runRelayRejectsLegacyCrossProjectEvents(t *testing.T, store db.Storage) {
+	for _, kind := range []string{"creation before update", "close duplicate evidence", "close parent"} {
+		t.Run("refuse cross-project "+kind, func(t *testing.T) {
+			ctx := t.Context()
+			fixture := newRelayLinkBoundaryFixture(t, store, "legacy-boundary-"+kind)
+			private, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.sibling.ID, Title: "Sibling endpoint", Author: "member"})
+			require.NoError(t, err)
+			peer, err := uid.New()
+			require.NoError(t, err)
+			grant, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{
+				ProjectID: fixture.project.ID, ParentTokenID: fixture.parentTokenID,
+				SpokeInstanceUID: peer, ProtocolVersion: db.RelayProtocolVersion,
+			})
+			require.NoError(t, err)
+			spoke, err := uid.New()
+			require.NoError(t, err)
+			issueUID, err := uid.New()
+			require.NoError(t, err)
+			created := newRemoteEvent(t, fixture.project, &issueUID, "issue.created", "spoke", spoke, 700, jsontext.Value(`{"uid":"`+issueUID+`","title":"Legacy task","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`))
+			push := db.FederationIngestParams{ProjectID: fixture.project.ID, SpokeInstanceUID: spoke}
+			var events []db.FederationIngestEvent
+			if kind == "creation before update" {
+				created = newRemoteEvent(t, fixture.project, &issueUID, "issue.created", "spoke", spoke, 700, jsontext.Value(`{"uid":"`+issueUID+`","title":"Legacy task","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"blocks","to_issue_uid":"`+private.UID+`","author":"spoke"}]}`))
+				updated := newRemoteEvent(t, fixture.project, &issueUID, "issue.updated", "spoke", spoke, 701, jsontext.Value(`{"title":"Later update"}`))
+				events = []db.FederationIngestEvent{{SourceEventID: 1, Event: created}, {SourceEventID: 2, Event: updated}}
+			} else {
+				push.Events = []db.FederationIngestEvent{{SourceEventID: 1, Event: created}}
+				_, err = store.IngestFederationEvents(ctx, push)
+				require.NoError(t, err)
+				offered, err := store.PendingRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, db.RelayStreamEvent, 100)
+				require.NoError(t, err)
+				require.Len(t, offered, 1)
+				require.NoError(t, store.AckRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, 1, db.RelayStreamEvent, offered[0].Sequence, offered[0].Digest))
+				payload := jsontext.Value(`{"reason":"duplicate","evidence":[{"type":"duplicate-of","issue_ref":"` + private.UID + `"}]}`)
+				if kind == "close parent" {
+					payload = jsontext.Value(`{"reason":"done","parent_uid":"` + private.UID + `","parent_short_id":"` + private.ShortID + `"}`)
+				}
+				closed := newRemoteEvent(t, fixture.project, &issueUID, "issue.closed", "spoke", spoke, 701, payload)
+				events = []db.FederationIngestEvent{{SourceEventID: 2, Event: closed}}
+			}
+			push.Events = events
+			_, err = store.IngestFederationEvents(ctx, push)
+			require.ErrorIs(t, err, db.ErrFederationIngestValidation)
+			require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary)
+			offered, err := store.PendingRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, db.RelayStreamEvent, 100)
+			require.NoError(t, err)
+			require.Empty(t, offered, "refused events must never reach a relay")
+			stored, err := store.EventsByUIDs(ctx, fixture.project.ID, []string{events[0].Event.EventUID})
+				require.ErrorIs(t, err, db.ErrNotFound)
+			require.Empty(t, stored, "refusal must roll back the event")
+			issue, err := store.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
+			if kind == "creation before update" {
+				require.ErrorIs(t, err, db.ErrNotFound)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, "open", issue.Status)
+			}
 		})
-		require.NoError(t, err)
-		spoke, err := uid.New()
-		require.NoError(t, err)
-		issueUID, err := uid.New()
-		require.NoError(t, err)
-		created := newRemoteEvent(t, fixture.project, &issueUID, "issue.created", "spoke", spoke, 700, jsontext.Value(`{"uid":"`+issueUID+`","title":"Private legacy boundary","body":"","author":"spoke","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"blocks","to_issue_uid":"`+private.UID+`","author":"spoke"}]}`))
-		_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{
-			ProjectID: fixture.project.ID, SpokeInstanceUID: spoke,
-			Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: created}},
-		})
-		require.NoError(t, err)
-		issue, err := store.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
-		require.NoError(t, err)
-		require.Equal(t, []string{private.UID}, linkTargetUIDs(t, store, issue.ID))
-		events, err := store.EventsByUIDs(ctx, fixture.project.ID, []string{created.EventUID})
-		require.NoError(t, err)
-		require.Len(t, events, 1)
-		for _, event := range events {
-			require.Equal(t, created.ContentHash, event.ContentHash)
-			require.Contains(t, event.Payload, private.UID)
-		}
-		offered, err := store.PendingRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, db.RelayStreamEvent, 100)
-		require.NoError(t, err)
-		require.Empty(t, offered, "the original cross-project event stays owner-local")
-		_, localCreated, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.project.ID, Title: "Unrelated local issue", Author: "member"})
-		require.NoError(t, err)
-		offered, err = store.PendingRelayDeliveries(ctx, grant.Enrollment.RelayBindingUID, db.RelayStreamEvent, 100)
-		require.NoError(t, err)
-		require.Len(t, offered, 1, "withholding a private source must still offer unrelated local work")
-		require.Equal(t, localCreated.UID, offered[0].SourceUID)
-	})
+	}
 }
