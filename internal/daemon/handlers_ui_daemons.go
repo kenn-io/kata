@@ -772,6 +772,10 @@ func restrictWebDaemonCapabilities(response *http.Response, policy webDaemonSour
 	if err := json.Unmarshal(envelope["capabilities"], &capabilities); err != nil {
 		return fmt.Errorf("decode daemon capabilities: %w", err)
 	}
+	if capabilities.Writable && policy.writable &&
+		capabilities.ActorPolicy == "identity" && policy.actorPolicy == "request" {
+		capabilities.ReadOnlyReason = api.UIReadOnlyReasonHubAccountBound
+	}
 	capabilities.Writable = capabilities.Writable && policy.writable &&
 		capabilities.ActorPolicy == policy.actorPolicy
 	capabilities.Updates = "poll"

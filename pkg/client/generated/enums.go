@@ -748,6 +748,23 @@ func (t TokenScopeOutKind) Validate() error {
 	}
 }
 
+// UICapabilitiesReadOnlyReason Why the daemon switcher serves this connection read-only when the target itself would allow writes.
+type UICapabilitiesReadOnlyReason string
+
+const (
+	HubAccountBound UICapabilitiesReadOnlyReason = "hub_account_bound"
+)
+
+// Validate checks if the UICapabilitiesReadOnlyReason value is valid
+func (u UICapabilitiesReadOnlyReason) Validate() error {
+	switch u {
+	case HubAccountBound:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid UICapabilitiesReadOnlyReason value, got: %v", u))
+	}
+}
+
 type UICapabilitiesUpdates string
 
 const (

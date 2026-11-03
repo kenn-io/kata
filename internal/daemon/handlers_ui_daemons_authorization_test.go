@@ -196,6 +196,58 @@ func TestWebDaemonGatewayPreservesIdentitySourceAttribution(t *testing.T) {
 	assert.Equal(t, 0, mutationCalls)
 }
 
+// A hub token bound to an account cannot carry the browser's request actor, so
+// the gateway serves it read-only and names why for the connection summary.
+func TestWebDaemonGatewayExplainsAccountBoundTargetReadOnly(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		target       api.UICapabilities
+		wantWritable bool
+		wantReason   string
+	}{
+		{
+			name:       "account bound target",
+			target:     api.UICapabilities{Writable: true, Updates: "sse", ActorPolicy: "identity"},
+			wantReason: api.UIReadOnlyReasonHubAccountBound,
+		},
+		{
+			name:         "request actor target",
+			target:       api.UICapabilities{Writable: true, Updates: "sse", ActorPolicy: "request"},
+			wantWritable: true,
+		},
+		{
+			name:   "read only account bound target",
+			target: api.UICapabilities{Writable: false, Updates: "sse", ActorPolicy: "identity"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(api.UISnapshotResponseBody{
+					ContractVersion: api.UISnapshotContractVersion,
+					Cursor:          7,
+					Capabilities:    test.target,
+				})
+			}))
+			t.Cleanup(upstream.Close)
+
+			handler, manager := newAuthorizedWebDaemonGateway(t, false, true, config.CatalogDaemonConfig{
+				Name: "example-remote", URL: upstream.URL, Token: "target-token", AllowInsecure: true,
+			})
+			issued, err := manager.IssueSession(Principal{Kind: PrincipalWebLocal}, "/kata")
+			require.NoError(t, err)
+
+			response := authorizedGatewayRequest(t, handler, manager, issued, http.MethodGet,
+				"/api/v1/ui/snapshot", nil, "")
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			var snapshot api.UISnapshotResponseBody
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &snapshot))
+			assert.Equal(t, test.wantWritable, snapshot.Capabilities.Writable)
+			assert.Equal(t, test.wantReason, snapshot.Capabilities.ReadOnlyReason)
+		})
+	}
+}
+
 // The lower gateway layer also preserves identity policy when a trusted host
 // supplies an otherwise admitted source; a target never upgrades it to writes.
 func TestDelegatedWebDaemonPolicyPreservesIdentitySourceAttribution(t *testing.T) {

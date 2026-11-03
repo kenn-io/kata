@@ -6930,19 +6930,29 @@ type UICapabilities struct {
 	Attachments    *bool    `json:"attachments,omitempty"`
 
 	// AuthKind How this request authenticated; matches the instance auth kind. Never contains credentials.
-	AuthKind              *string               `json:"auth_kind,omitempty"`
-	CloseRequiresEvidence *bool                 `json:"close_requires_evidence,omitempty"`
-	ExpiresAt             *time.Time            `json:"expires_at,omitempty"`
-	Scope                 *TokenScopeOut        `json:"scope,omitempty"`
-	TokenAuditRead        *bool                 `json:"token_audit_read,omitempty"`
-	Updates               UICapabilitiesUpdates `json:"updates" validate:"required"`
-	Writable              bool                  `json:"writable"`
+	AuthKind              *string    `json:"auth_kind,omitempty"`
+	CloseRequiresEvidence *bool      `json:"close_requires_evidence,omitempty"`
+	ExpiresAt             *time.Time `json:"expires_at,omitempty"`
+
+	// ReadOnlyReason Why the daemon switcher serves this connection read-only when the target itself would allow writes.
+	ReadOnlyReason *UICapabilitiesReadOnlyReason `json:"read_only_reason,omitempty"`
+	Scope          *TokenScopeOut                `json:"scope,omitempty"`
+	TokenAuditRead *bool                         `json:"token_audit_read,omitempty"`
+	Updates        UICapabilitiesUpdates         `json:"updates" validate:"required"`
+	Writable       bool                          `json:"writable"`
 }
 
 func (u UICapabilities) Validate() error {
 	var errors runtime.ValidationErrors
 	if err := typesValidator.Var(u.ActorPolicy, "required"); err != nil {
 		errors = errors.Append("ActorPolicy", err)
+	}
+	if u.ReadOnlyReason != nil {
+		if v, ok := any(u.ReadOnlyReason).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("ReadOnlyReason", err)
+			}
+		}
 	}
 	if u.Scope != nil {
 		if v, ok := any(u.Scope).(runtime.Validator); ok {

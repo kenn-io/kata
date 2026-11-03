@@ -6619,6 +6619,11 @@ components:
         expires_at:
           format: date-time
           type: string
+        read_only_reason:
+          description: Why the daemon switcher serves this connection read-only when the target itself would allow writes.
+          enum:
+            - hub_account_bound
+          type: string
         scope:
           $ref: "#/components/schemas/TokenScopeOut"
         token_audit_read:

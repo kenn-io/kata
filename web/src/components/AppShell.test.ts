@@ -286,6 +286,66 @@ describe('AppShell', () => {
     expect(summary.textContent).toContain(`Account: ${label}`)
   })
 
+  test('explains a hub served read-only because its token belongs to an account', () => {
+    const current = snapshot()
+    current.capabilities.writable = false
+    Object.assign(current.capabilities, { read_only_reason: 'hub_account_bound' })
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'all-open',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: current,
+        loading: false,
+        ...mutationProps({ canMutate: false }),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+        daemons: [
+          {
+            id: 'hub-one',
+            url: 'https://daemon.example',
+            default: true,
+            auth: 'token' as const,
+            health: 'connected' as const,
+          },
+        ],
+        activeDaemonID: 'hub-one',
+      },
+    })
+    const summary = screen.getByRole('status', { name: 'Active connection' })
+    expect(summary.textContent).toContain('Credential: Read-only')
+    expect(summary.textContent).toContain(
+      "This hub's token belongs to an account, so this page can only read it. Make changes with kata --daemon hub-one.",
+    )
+  })
+
+  test('says a hub that predates account reporting did not report one', () => {
+    const current = snapshot()
+    current.capabilities.writable = false
+    delete current.capabilities.auth_kind
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'all-open',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: current,
+        loading: false,
+        ...mutationProps({ canMutate: false }),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    const summary = screen.getByRole('status', { name: 'Active connection' })
+    expect(summary.textContent).toContain('Account: Not reported by hub')
+    expect(summary.textContent).not.toContain('No account')
+  })
+
   test('shows only the active hub account and clears identity while switching', async () => {
     const current = snapshot()
     Object.assign(current.capabilities, { account: 'member-one', token_audit_read: false })
