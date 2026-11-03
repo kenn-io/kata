@@ -1,5 +1,25 @@
 # PostgreSQL migrations
 
+## Schema 40: cron occurrence reservations
+
+The 39→40 migration adds `cron_occurrence_claims`. Its primary key is
+`(project_id, job_uid, occurrence_key)`, with a unique `run_uid` and a project
+foreign key. The table retains root-local execution reservations and starts
+empty. It adds no CHECK constraints and changes no existing table or constraint.
+Go validates identities, paired workflow references, and the 1,024-byte UTF-8
+occurrence-key limit before native writes or owner-backup ingest.
+
+Stop serving daemons and imports, take a full owner backup, and run
+`kata storage postgres migrate` with schema-owner credentials. Reapply runtime
+table grants for the new table before starting the matching binary. There is no
+new sequence. Runtime credentials cannot migrate. Older binaries cannot open
+schema 40; rollback requires the pre-upgrade backup and matching older binary.
+SQLite uses its version-aware JSONL cutover with backup and swap protections.
+
+The claims table is local to the project root. Job edits and tombstones do not
+release reservations. Do not promote a copied project or detached replica into
+another claim authority for the same project identity.
+
 Kata installs a new PostgreSQL database from the current canonical schema. The
 first release with PostgreSQL support is the migration floor, so the initial
 release contains no historical migration SQL. A forward migration is required

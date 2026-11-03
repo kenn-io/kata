@@ -164,6 +164,9 @@ func (s *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 		if binding.Role != db.FederationRoleSpoke {
 			return db.ErrFederationNotSpoke
 		}
+		if err := db.MarkCronReplica(ctx, tx, project.UID); err != nil {
+			return err
+		}
 		if discardRelay {
 			err = s.discardRelayHopStateTx(ctx, tx, projectID, binding.RelayConfig)
 		} else {

@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	canonicalColumnFingerprint     = "e39313e493aca5629098c150076ee7e1aa04a8d747d8704001e741401fe3df50"
-	canonicalConstraintFingerprint = "ec4c05a641252558d8b52b92ed9ff97c9310064e5f8ad2ab8c636fba65344a17"
-	canonicalIndexFingerprint      = "c3057366dc5aee347095bf78e57fc5de9ae5e87fbc0f3b8f346ee53eb2f256e4"
+	canonicalColumnFingerprint     = "149178f2d94c65c520b50417c1e2859fdb52021e202f901364f7cf7ba3ab97e6"
+	canonicalConstraintFingerprint = "ed8007c6681e2530ded20619bfe30b94374a102718e8937e5835035603594522"
+	canonicalIndexFingerprint      = "21933347e0dd9fa729915654811dbdea9b7e759efdac655477ab651cb0ff56e8"
 	vectorColumnFingerprint        = "b8c7cb5e43f3c17502fc3e1deba77a772c3e9a486be623a96729de8866381c31"
 	vectorConstraintFingerprint    = "3a39a82331175295586fb3399dff2221fe511171f21e31a88410dd091c3a3cf4"
 	vectorIndexFingerprint         = "7868c4a815ebee6451cef203509dcedcd21401c76f49fb666e9facaad2f7aef3"
@@ -24,6 +24,7 @@ const (
 
 //nolint:gosec // This manifest lists canonical schema columns, including credential column names, not secret values.
 var canonicalTableColumns = map[string]string{
+	"cron_occurrence_claims":         "project_id,job_uid,occurrence_key,run_uid,holder_instance_uid,actor,teammate,executor_label,definition_event_uid,workflow_uid,workflow_definition_event_uid,authority_instance_uid,created_at",
 	"cron_runs":                      "id,uid,project_id,job_uid,definition_event_uid,workflow_uid,workflow_definition_event_uid,occurrence_key,issue_uid,actor,teammate,executor_label,status,summary_json,revision,created_at,started_at,ended_at,updated_at",
 	"cron_workflows":                 "id,uid,project_id,name,definition_json,definition_event_uid,definition_hlc_json,author,revision,created_at,updated_at,deleted_at",
 	"cron_jobs":                      "id,uid,project_id,name,definition_json,definition_event_uid,definition_hlc_json,author,revision,created_at,updated_at,deleted_at",

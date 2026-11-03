@@ -939,3 +939,20 @@ CREATE TABLE federation_embedding_artifacts (
 );
 CREATE INDEX idx_embedding_artifacts_input ON federation_embedding_artifacts(project_uid,issue_uid,input_hash,recipe_fingerprint);
 CREATE INDEX idx_embedding_artifacts_staging ON federation_embedding_artifacts(project_uid,staging_expires_at) WHERE staging_expires_at IS NOT NULL;
+
+CREATE TABLE cron_occurrence_claims (
+ project_id INTEGER NOT NULL REFERENCES projects(id),
+ job_uid TEXT NOT NULL,
+ occurrence_key TEXT NOT NULL,
+ run_uid TEXT NOT NULL UNIQUE,
+ holder_instance_uid TEXT NOT NULL,
+ actor TEXT NOT NULL,
+ teammate TEXT,
+ executor_label TEXT,
+ definition_event_uid TEXT NOT NULL,
+ workflow_uid TEXT,
+ workflow_definition_event_uid TEXT,
+ authority_instance_uid TEXT NOT NULL,
+ created_at TEXT NOT NULL,
+ PRIMARY KEY(project_id,job_uid,occurrence_key)
+);

@@ -17,7 +17,9 @@ import (
 func dropEventMoveHistoryIndex(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
 	dropEventReplyTargetIndex(ctx, t, admin, schema)
-	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %s.idx_events_moved_from`, schema)) // #nosec G201 -- fixed test schema.
+	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP TABLE IF EXISTS %s.cron_occurrence_claims`, schema))
+	require.NoError(t, err)
+	_, err = admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %s.idx_events_moved_from`, schema)) // #nosec G201 -- fixed test schema.
 	require.NoError(t, err)
 }
 

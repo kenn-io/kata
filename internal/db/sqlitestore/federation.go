@@ -511,7 +511,13 @@ func (d *Store) upsertFederationBinding(ctx context.Context, b db.FederationBind
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if err := db.LockCronProject(ctx, tx, b.ProjectID); err != nil {
+		return db.FederationBinding{}, err
+	}
 	if b.Role == db.FederationRoleSpoke {
+		if err := db.CheckCronClaimReplicaTransition(ctx, tx, b.ProjectID); err != nil {
+			return db.FederationBinding{}, err
+		}
 		if err := rejectIssueSyncedFederationProject(ctx, tx, b.ProjectID); err != nil {
 			return db.FederationBinding{}, err
 		}
@@ -631,6 +637,9 @@ func (d *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 	}
 	if binding.Role != db.FederationRoleSpoke {
 		return db.LeaveFederationResult{}, db.ErrFederationNotSpoke
+	}
+	if err := db.MarkCronReplica(ctx, tx, uid); err != nil {
+		return db.LeaveFederationResult{}, err
 	}
 	if discardRelay {
 		err = d.discardRelayHopStateTx(ctx, tx, projectID, binding.RelayConfig)
