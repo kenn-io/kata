@@ -142,7 +142,23 @@ func doPollEvents(
 	return out, nil
 }
 
-func readVisibleEvents(
+// Resolve hub-local labels once per visible response batch, including SSE.
+func readVisibleEvents(ctx context.Context, store db.Storage, afterID, projectID, throughID int64, limit int) ([]db.Event, int64, int64, error) {
+	rows, next, reset, err := readVisibleEventsWithoutNames(ctx, store, afterID, projectID, throughID, limit)
+	if err != nil || len(rows) == 0 {
+		return rows, next, reset, err
+	}
+	names, err := store.ListFederationSpokeNames(ctx)
+	if err != nil {
+		return nil, afterID, 0, internalAPIError(err)
+	}
+	for i := range rows {
+		rows[i].OriginSpokeName = names[rows[i].OriginInstanceUID]
+	}
+	return rows, next, reset, nil
+}
+
+func readVisibleEventsWithoutNames(
 	ctx context.Context, store db.Storage, afterID, projectID, throughID int64, limit int,
 ) ([]db.Event, int64, int64, error) {
 	scope := issueScopeFromContext(ctx)
@@ -584,6 +600,7 @@ func eventToEnvelope(e db.Event) api.EventEnvelope {
 		EventID:           e.ID,
 		EventUID:          e.UID,
 		OriginInstanceUID: e.OriginInstanceUID,
+		OriginSpokeName:   e.OriginSpokeName,
 		Type:              e.Type,
 		ProjectID:         e.ProjectID,
 		ProjectUID:        e.ProjectUID,

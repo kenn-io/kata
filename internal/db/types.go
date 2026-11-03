@@ -445,6 +445,7 @@ type Comment struct {
 // merge, federation merge) — UIDs remain canonical, short_ids are display
 // snapshots resolved on every read.
 type Event struct {
+	OriginSpokeName     string    `json:"-"` // Hub-local response label; never persisted or replicated.
 	ID                  int64     `json:"id"`
 	UID                 string    `json:"uid"`
 	OriginInstanceUID   string    `json:"origin_instance_uid"`

@@ -64,6 +64,22 @@ func (d DisconnectFederationBridgePath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(d))
 }
 
+type ClearFederationSpokeNamePath struct {
+	SpokeInstanceUID string `json:"spoke_instance_uid" validate:"required"`
+}
+
+func (c ClearFederationSpokeNamePath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+}
+
+type SetFederationSpokeNamePath struct {
+	SpokeInstanceUID string `json:"spoke_instance_uid" validate:"required"`
+}
+
+func (s SetFederationSpokeNamePath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(s))
+}
+
 type RevokeFederationEnrollmentPath struct {
 	EnrollmentID int64 `json:"enrollment_id"`
 }

@@ -14,6 +14,7 @@ export interface EventEnvelope {
   issue_short_id?: string
   issue_uid?: string
   origin_instance_uid: string
+  origin_spoke_name?: string
   payload?: unknown
   project_id: number
   project_name: string
