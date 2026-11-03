@@ -3,6 +3,7 @@ import { describe, expect, test } from 'vitest'
 import type { KataReachableGraphResponse } from '../kata/types'
 import { task } from '../kata/test-helpers'
 import { graphDistanceByUID } from './distance'
+import { buildKataReachableGraph } from './layout'
 import { filterSnapshotGraph } from './snapshot'
 
 describe('filterSnapshotGraph', () => {
@@ -110,6 +111,80 @@ describe('filterSnapshotGraph', () => {
     expect(result.edges).toEqual(snapshot.edges.slice(0, 2))
   })
 
+  test('matches an edge-scan traversal on seeded graphs', () => {
+    let seed = 0x5928a17
+    const random = (limit: number) => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
+      return Math.floor((seed / 2 ** 32) * limit)
+    }
+    for (let sample = 0; sample < 50; sample++) {
+      const count = 3 + random(10)
+      const uids = Array.from({ length: count }, (_, index) => `issue-${index}`)
+      const snapshot: KataReachableGraphResponse = {
+        source_uid: uids[0]!,
+        depth: 'full',
+        hide_done: false,
+        nodes: uids.map((uid) => task({ uid, status: random(3) === 0 ? 'closed' : 'open' })),
+        edges: Array.from({ length: random(count * 3) }, () => ({
+          from_uid: uids[random(count)]!,
+          to_uid: uids[random(count)]!,
+          kind: 'related',
+          layout: false,
+        })),
+        unresolved_refs: uids.map((uid) => ({
+          uid: `missing-${uid}`,
+          other_uid: uid,
+          side: 'to',
+          kind: 'related',
+        })),
+        fetched_at: '2026-08-01T12:00:00Z',
+      }
+      for (const hideDone of [false, true]) {
+        const hidden = new Set(
+          snapshot.nodes
+            .filter(
+              (node) => hideDone && node.uid !== snapshot.source_uid && node.status === 'closed',
+            )
+            .map((node) => node.uid),
+        )
+        const edges = snapshot.edges.filter(
+          (edge) => !hidden.has(edge.from_uid) && !hidden.has(edge.to_uid),
+        )
+        const distances = new Map([[snapshot.source_uid, 0]])
+        const queue = [snapshot.source_uid]
+        while (queue.length > 0) {
+          const uid = queue.shift()!
+          const distance = distances.get(uid)!
+          for (const edge of edges) {
+            const adjacent =
+              edge.from_uid === uid ? edge.to_uid : edge.to_uid === uid ? edge.from_uid : null
+            if (!adjacent || distances.has(adjacent)) continue
+            distances.set(adjacent, distance + 1)
+            queue.push(adjacent)
+          }
+        }
+        for (const depth of ['1', '2', '3', 'full'] as const) {
+          const maxDepth = depth === 'full' ? Infinity : Number(depth)
+          const nodes = snapshot.nodes.filter(
+            (node) =>
+              !hidden.has(node.uid) &&
+              (distances.get(node.uid) ?? Infinity) <= maxDepth &&
+              distances.has(node.uid),
+          )
+          const visible = new Set(nodes.map((node) => node.uid))
+          expect(filterSnapshotGraph(snapshot, snapshot.source_uid, depth, hideDone)).toEqual({
+            ...snapshot,
+            depth,
+            hide_done: hideDone,
+            nodes,
+            edges: edges.filter((edge) => visible.has(edge.from_uid) && visible.has(edge.to_uid)),
+            unresolved_refs: snapshot.unresolved_refs.filter((ref) => visible.has(ref.other_uid)),
+          })
+        }
+      }
+    }
+  })
+
   test('scales with the number of edges', () => {
     const timings = [1000, 4000, 16000].map((size) => {
       const snapshot: KataReachableGraphResponse = {
@@ -124,22 +199,31 @@ describe('filterSnapshotGraph', () => {
           from_uid: 'root',
           to_uid: `issue-${index}`,
           kind: 'related',
-          layout: false,
+          layout: true,
         })),
         unresolved_refs: [],
         fetched_at: '2026-08-01T12:00:00Z',
       }
-      expect(filterSnapshotGraph(snapshot, 'root', 'full', false).nodes).toHaveLength(size + 1)
+      const filterAndBuild = () =>
+        buildKataReachableGraph({
+          sourceUID: 'root',
+          selectedUID: 'root',
+          graph: filterSnapshotGraph(snapshot, 'root', 'full', false),
+          contextDepth: '1',
+        })
+      const graph = filterAndBuild()
+      expect(graph.nodes).toHaveLength(size + 1)
+      expect(graph.edges).toHaveLength(size)
       const samples = Array.from({ length: 3 }, () => {
         const start = performance.now()
-        filterSnapshotGraph(snapshot, 'root', 'full', false)
+        filterAndBuild()
         return performance.now() - start
       })
       const median = samples.sort((a, b) => a - b)[1]!
       console.info(`${size} edges: ${median.toFixed(2)}ms`)
       return median
     })
-    // Allow noise above linear growth, while rejecting a full edge scan per node.
+    // Allow noise above linear growth while separating it from quadratic growth.
     expect(timings[2]!).toBeLessThan(timings[1]! * 4 ** 1.5)
-  }, 60_000)
+  }, 120_000)
 })

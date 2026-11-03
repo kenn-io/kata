@@ -17,6 +17,36 @@ function graph(overrides: Partial<KataReachableGraphResponse> = {}): KataReachab
 }
 
 describe('buildKataReachableGraph', () => {
+  it('keeps stable layer ordering when new nodes become ready', () => {
+    const nodes = ['root', 'a', 'b', 'c', 'd', 'z'].map((uid) =>
+      task({ uid, short_id: uid, title: uid }),
+    )
+    const built = buildKataReachableGraph({
+      sourceUID: 'root',
+      selectedUID: null,
+      graph: graph({
+        source_uid: 'root',
+        nodes,
+        edges: [
+          { from_uid: 'root', to_uid: 'b', kind: 'blocks', layout: true },
+          { from_uid: 'root', to_uid: 'c', kind: 'blocks', layout: true },
+          { from_uid: 'root', to_uid: 'd', kind: 'blocks', layout: true },
+          { from_uid: 'b', to_uid: 'z', kind: 'blocks', layout: true },
+          { from_uid: 'c', to_uid: 'a', kind: 'blocks', layout: true },
+        ],
+      }),
+    })
+
+    expect(
+      built.nodes
+        .filter((node) => node.id === 'a' || node.id === 'z')
+        .map((node) => [node.id, node.position]),
+    ).toEqual([
+      ['a', { x: 640, y: -54 }],
+      ['z', { x: 640, y: 54 }],
+    ])
+  })
+
   it('uses the native graph node and edge set directly', () => {
     const root = task({ uid: 'issue-root', short_id: 'root', title: 'Root' })
     const child = task({ uid: 'issue-child', short_id: 'child', title: 'Child' })
