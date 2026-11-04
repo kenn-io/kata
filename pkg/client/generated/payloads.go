@@ -42,6 +42,8 @@ type PurgeProjectBody = ProjectPurgeRequestBody
 
 type RewriteAuthorIdentityBody = RewriteAuthorIdentityRequestBody
 
+type SetCronAccessBody = SetCronAccessRequestBody
+
 type CreateCronJobBody = PutCronJobBody
 
 type ArchiveCronJobBody = CronDefinitionActionBody

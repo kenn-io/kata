@@ -171,6 +171,14 @@ type DetachProjectAliasResponse = DetachProjectAliasResponseBody
 
 type DetachProjectAliasErrorResponse = ErrorEnvelope
 
+type GetCronAccessResponse = CronAccessResponseBody
+
+type GetCronAccessErrorResponse = ErrorEnvelope
+
+type SetCronAccessResponse = CronAccessResponseBody
+
+type SetCronAccessErrorResponse = ErrorEnvelope
+
 type GetCronCapabilitiesResponse = CronCapabilitiesResponseBody
 
 type GetCronCapabilitiesErrorResponse = ErrorEnvelope
@@ -930,6 +938,22 @@ type DetachProjectAliasResp struct {
 	StatusCode   int
 	JSON200      *DetachProjectAliasResponse
 	JSONDefault  *DetachProjectAliasErrorResponse
+}
+
+type GetCronAccessResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *GetCronAccessResponse
+	JSONDefault  *GetCronAccessErrorResponse
+}
+
+type SetCronAccessResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *SetCronAccessResponse
+	JSONDefault  *SetCronAccessErrorResponse
 }
 
 type GetCronCapabilitiesResp200Headers struct {

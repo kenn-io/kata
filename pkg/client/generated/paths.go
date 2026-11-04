@@ -149,6 +149,14 @@ type DetachProjectAliasPath struct {
 	AliasID   int64 `json:"alias_id"`
 }
 
+type GetCronAccessPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
+type SetCronAccessPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
 type GetCronCapabilitiesPath struct {
 	ProjectID int64 `json:"project_id"`
 }

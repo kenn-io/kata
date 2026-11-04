@@ -1298,13 +1298,59 @@ func (c CreateTokenResponseBody) Validate() error {
 	return errors
 }
 
+type CronAccess struct {
+	Define  bool `json:"define"`
+	Observe bool `json:"observe"`
+}
+
+type CronAccessResponseBody struct {
+	Event  *Event                  `json:"event,omitempty"`
+	Policy ProjectCronAccessPolicy `json:"policy"`
+}
+
+func (c CronAccessResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if c.Event != nil {
+		if v, ok := any(c.Event).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Event", err)
+			}
+		}
+	}
+	if v, ok := any(c.Policy).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Policy", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type CronCapabilitiesResponseBody struct {
-	EventFeatures []string `json:"event_features" validate:"required"`
-	ProjectUID    string   `json:"project_uid" validate:"required"`
+	Access        CronAccess `json:"access"`
+	EventFeatures []string   `json:"event_features" validate:"required"`
+	ProjectUID    string     `json:"project_uid" validate:"required"`
 }
 
 func (c CronCapabilitiesResponseBody) Validate() error {
-	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+	var errors runtime.ValidationErrors
+	if v, ok := any(c.Access).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Access", err)
+		}
+	}
+	if err := typesValidator.Var(c.EventFeatures, "required"); err != nil {
+		errors = errors.Append("EventFeatures", err)
+	}
+	if err := typesValidator.Var(c.ProjectUID, "required"); err != nil {
+		errors = errors.Append("ProjectUID", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type CronDefinitionActionBody struct {
@@ -1313,6 +1359,24 @@ type CronDefinitionActionBody struct {
 }
 
 func (c CronDefinitionActionBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+}
+
+type CronGrant struct {
+	Mode     string   `json:"mode" validate:"required"`
+	TeamUids []string `json:"team_uids" validate:"required"`
+}
+
+func (c CronGrant) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+}
+
+type CronGrantResponse struct {
+	Mode     string   `json:"mode" validate:"required"`
+	TeamUids []string `json:"team_uids" validate:"required"`
+}
+
+func (c CronGrantResponse) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(c))
 }
 
@@ -5004,6 +5068,34 @@ func (p ProjectAlias) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(p))
 }
 
+type ProjectCronAccessPolicy struct {
+	Define     CronGrantResponse `json:"define"`
+	Observe    CronGrantResponse `json:"observe"`
+	ProjectUID string            `json:"project_uid" validate:"required"`
+	Revision   int64             `json:"revision"`
+}
+
+func (p ProjectCronAccessPolicy) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(p.Define).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Define", err)
+		}
+	}
+	if v, ok := any(p.Observe).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Observe", err)
+		}
+	}
+	if err := typesValidator.Var(p.ProjectUID, "required"); err != nil {
+		errors = errors.Append("ProjectUID", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type ProjectEmbeddingProducer struct {
 	ProducerInstanceUID string           `json:"producer_instance_uid" validate:"required"`
 	Recipe              ArtifactIdentity `json:"recipe"`
@@ -6434,6 +6526,33 @@ func (s SearchResponseBody) Validate() error {
 				errors = errors.Append(fmt.Sprintf("Results[%d]", i), err)
 			}
 		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type SetCronAccessRequestBody struct {
+	Define   CronGrant `json:"define"`
+	Observe  CronGrant `json:"observe"`
+	Revision int64     `json:"revision" validate:"gte=0"`
+}
+
+func (s SetCronAccessRequestBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(s.Define).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Define", err)
+		}
+	}
+	if v, ok := any(s.Observe).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Observe", err)
+		}
+	}
+	if err := typesValidator.Var(s.Revision, "gte=0"); err != nil {
+		errors = errors.Append("Revision", err)
 	}
 	if len(errors) == 0 {
 		return nil
