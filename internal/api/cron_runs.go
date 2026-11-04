@@ -22,8 +22,10 @@ type CronProjectRequest struct {
 type CronCapabilitiesResponse struct {
 	EventFeatures string `header:"X-Kata-Event-Features"`
 	Body          struct {
-		ProjectUID    string   `json:"project_uid"`
-		EventFeatures []string `json:"event_features"`
+		ProjectUID    string            `json:"project_uid"`
+		EventFeatures []string          `json:"event_features"`
+		ProjectPause  *CronProjectPause `json:"project_pause"`
+		Controls      []string          `json:"controls"`
 	}
 }
 

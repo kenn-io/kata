@@ -32,6 +32,8 @@ type cronList struct {
 	query  string
 }
 type cronData struct {
+	project             cronProjectState
+	projectErr          error
 	conn, scope, events uint64
 	jobs                []generated.CronJob
 	workflows           []generated.CronWorkflow
@@ -92,6 +94,7 @@ func (m Model) fetchCron() tea.Cmd {
 	reader, id := m.api, m.scope.projectID
 	data := cronData{conn: m.connGen, scope: m.scopeGen, events: m.cron.events}
 	return func() tea.Msg {
+		data.project, data.projectErr = cronRead(reader.readCronProjectState, id)
 		data.jobs, data.jobsErr = cronRead(reader.ListCronJobs, id)
 		data.workflows, data.workflowsErr = cronRead(reader.ListCronWorkflows, id)
 		data.runs, data.runsErr = cronRead(reader.ListCronRuns, id)
@@ -136,6 +139,9 @@ func (m Model) cronLoaded(msg cronLoadedMsg) Model {
 	}
 	data := cronData(msg)
 	if previous := m.cron.data; previous != nil {
+		if data.projectErr != nil {
+			data.project = previous.project
+		}
 		if data.jobsErr != nil {
 			data.jobs = previous.jobs
 		}

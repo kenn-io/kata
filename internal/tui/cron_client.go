@@ -17,6 +17,7 @@ import (
 )
 
 type cronAPI interface {
+	readCronProjectState(context.Context, int64) (cronProjectState, error)
 	CronJobEnabled(ctx context.Context, projectID int64, uid, expected, actor string, enabled bool) (db.CronJob, error)
 	ListCronJobs(context.Context, int64) ([]generated.CronJob, error)
 	ShowCronJob(ctx context.Context, projectID int64, uid string) (db.CronJob, error)
@@ -221,4 +222,30 @@ func (c *Client) CronJobEnabled(ctx context.Context, projectID int64, uid, expec
 		return db.CronJob{}, err
 	}
 	return decodeCronJobRecord(wire.Body)
+}
+
+// cronProjectState is optional on older daemons. Keep it separate from the
+// strictly decoded inner job records.
+type cronProjectState struct {
+	pause    *db.CronProjectPause
+	controls []string
+}
+
+func (c *Client) readCronProjectState(ctx context.Context, projectID int64) (cronProjectState, error) {
+	client, err := c.generatedClient()
+	if err != nil {
+		return cronProjectState{}, err
+	}
+	wire, callErr := client.GetCronCapabilitiesWithResponse(ctx, &generated.GetCronCapabilitiesRequestOptions{PathParams: &generated.GetCronCapabilitiesPath{ProjectID: projectID}})
+	if wire == nil {
+		return cronProjectState{}, callErr
+	}
+	var response struct {
+		ProjectPause *db.CronProjectPause `json:"project_pause"`
+		Controls     []string             `json:"controls"`
+	}
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &response); err != nil {
+		return cronProjectState{}, err
+	}
+	return cronProjectState{pause: response.ProjectPause, controls: response.Controls}, nil
 }

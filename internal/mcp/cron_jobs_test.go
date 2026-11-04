@@ -365,3 +365,21 @@ func TestCronJobEnabledTools(t *testing.T) {
 	require.Equal(t, paused, retry["job"])
 	require.True(t, cronCall(t, f.session, "cron_job_delete", map[string]any{"uid": id}).IsError, "archive still requires revision")
 }
+
+func TestCronProjectPauseTools(t *testing.T) {
+	f := newCronFixture(t)
+	paused := cronOK(t, f.session, "cron_project_pause", map[string]any{"reason": "Maintenance"})
+	require.Equal(t, true, paused["changed"])
+	state := paused["project_pause"].(map[string]any)
+	require.Equal(t, "example-agent", state["paused_by"])
+	require.Equal(t, "Maintenance", state["reason"])
+	retry := cronOK(t, f.session, "cron_project_pause", map[string]any{"reason": "Retry"})
+	require.Equal(t, false, retry["changed"])
+	require.Equal(t, state, retry["project_pause"])
+	caps := cronOK(t, f.session, "cron_capabilities", map[string]any{})
+	require.Equal(t, state, caps["project_pause"])
+	resumed := cronOK(t, f.session, "cron_project_resume", map[string]any{})
+	require.Equal(t, true, resumed["changed"])
+	require.Nil(t, resumed["project_pause"])
+	require.True(t, cronCall(t, f.session, "cron_project_pause", map[string]any{"reason": strings.Repeat("x", 257)}).IsError)
+}

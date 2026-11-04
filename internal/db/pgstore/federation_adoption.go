@@ -69,6 +69,9 @@ func (s *Store) AdoptProjectIntoFederation(
 		if err := rejectFederationSpokeProjectConflicts(ctx, tx, params.ProjectID); err != nil {
 			return err
 		}
+		if err := db.CheckCronProjectPauseAdoption(project); err != nil {
+			return err
+		}
 		if params.EmptyOnly {
 			var metadata map[string]jsontext.Value
 			if len(project.Metadata) > 0 {
@@ -86,11 +89,11 @@ func (s *Store) AdoptProjectIntoFederation(
 				return db.ErrFederationProjectNotEmpty
 			}
 		}
-
 		cron, err := db.PrepareCronAdoption(ctx, tx, project, params.HubProjectUID, params.EmptyOnly)
 		if err != nil {
 			return err
 		}
+
 		formerProjects, err := db.AdoptionFormerProjects(ctx, tx, project)
 		if err != nil {
 			return err

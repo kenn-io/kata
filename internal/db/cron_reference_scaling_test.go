@@ -82,7 +82,7 @@ func referenceWorkFixture(t *testing.T, history int) (*sql.Tx, *referenceWork, R
 	pool.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = pool.Close() })
 	for _, q := range []string{
-		`CREATE TABLE projects(id INTEGER PRIMARY KEY,uid TEXT,name TEXT,deleted_at TEXT)`,
+		`CREATE TABLE projects(id INTEGER PRIMARY KEY,uid TEXT,name TEXT,deleted_at TEXT,metadata TEXT,revision INTEGER,created_at TEXT)`,
 		`CREATE TABLE cron_jobs(project_id INTEGER,uid TEXT PRIMARY KEY,definition_event_uid TEXT)`,
 		`CREATE TABLE cron_workflows(project_id INTEGER,uid TEXT PRIMARY KEY,definition_event_uid TEXT)`,
 		`CREATE TABLE events(project_id INTEGER,uid TEXT PRIMARY KEY,type TEXT,origin_instance_uid TEXT,hlc_physical_ms INTEGER,hlc_counter INTEGER,payload TEXT)`,
@@ -92,7 +92,7 @@ func referenceWorkFixture(t *testing.T, history int) (*sql.Tx, *referenceWork, R
 		require.NoError(t, err)
 	}
 	job, version, workflow, workflowVersion, project := "01M40000000000000000000001", "01M40000000000000000000002", "01M40000000000000000000007", "01M40000000000000000000008", "01M40000000000000000000003"
-	_, err := pool.ExecContext(t.Context(), `INSERT INTO projects VALUES(1,$1,'example-project',NULL)`, project)
+	_, err := pool.ExecContext(t.Context(), `INSERT INTO projects VALUES(1,$1,'example-project',NULL,'{}',1,'2026-01-02T03:04:05Z')`, project)
 	require.NoError(t, err)
 	_, err = pool.ExecContext(t.Context(), `INSERT INTO cron_jobs VALUES(1,$1,$2)`, job, version)
 	require.NoError(t, err)

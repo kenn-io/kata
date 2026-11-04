@@ -2882,6 +2882,9 @@ func (d *Store) adoptProjectIntoFederation(
 	if err := rejectExternalRootFederationProject(ctx, tx, p.ProjectID); err != nil {
 		return db.AdoptProjectIntoFederationResult{}, err
 	}
+	if err := db.CheckCronProjectPauseAdoption(project); err != nil {
+		return db.AdoptProjectIntoFederationResult{}, err
+	}
 	if p.EmptyOnly {
 		var metadata map[string]jsontext.Value
 		if len(project.Metadata) > 0 {
@@ -2899,11 +2902,11 @@ func (d *Store) adoptProjectIntoFederation(
 			return db.AdoptProjectIntoFederationResult{}, db.ErrFederationProjectNotEmpty
 		}
 	}
-
 	cron, err := db.PrepareCronAdoption(ctx, tx, project, p.HubProjectUID, p.EmptyOnly)
 	if err != nil {
 		return db.AdoptProjectIntoFederationResult{}, err
 	}
+
 	formerProjects, err := db.AdoptionFormerProjects(ctx, tx, project)
 	if err != nil {
 		return db.AdoptProjectIntoFederationResult{}, err

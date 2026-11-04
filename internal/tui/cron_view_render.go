@@ -419,6 +419,7 @@ func renderCron(m Model) string {
 			name string
 			err  error
 		}{
+			{"project policy", m.cron.data.projectErr},
 			{"jobs", m.cron.data.jobsErr},
 			{"workflows", m.cron.data.workflowsErr},
 			{"runs", m.cron.data.runsErr},
@@ -452,9 +453,14 @@ func renderCron(m Model) string {
 	body := []string{
 		renderTitleBar(m.width, m.scope, kataVersion, m.chrome().daemon),
 		cronTabs(m.cron.tab),
+	}
+	if banner := cronProjectBanner(m); banner != "" {
+		body = append(body, banner)
+	}
+	body = append(body,
 		statsLineStyle.Render(padLeftRightInside(left, right, titleBarInnerWidth(m.width))),
 		"",
-	}
+	)
 	if header != "" {
 		body = append(body, tableHeaderStyle.Render("  "+header))
 	}
@@ -520,4 +526,21 @@ func cronHelp(m Model) string {
 	}
 	body = append(body, renderHelpGroup([]helpSection{{title: "Cron keys", rows: cronKeyRows(m)}}))
 	return strings.Join(body, "\n")
+}
+
+func cronProjectBanner(m Model) string {
+	if m.cron.data == nil || m.cron.data.project.pause == nil {
+		return ""
+	}
+	pause := m.cron.data.project.pause
+	text := "Project cron paused"
+	if pause.Invalid {
+		text += " · invalid policy; use kata cron resume to clear"
+	} else {
+		text += " · " + pause.PausedBy
+		if pause.Reason != "" {
+			text += " · " + pause.Reason
+		}
+	}
+	return errorStyle.Render(truncate(sanitizeForLine(text), m.width))
 }

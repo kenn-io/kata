@@ -9,6 +9,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Stop native cron delivery for a whole project with `kata cron pause` and
+  resume with each job's flags and catch-up policy preserved. Adapters can read
+  the shared pause, and all TUI cron tabs show it. Upgrade the owning hub first;
+  external adapters must honor the policy. See [Project cron pause](reference/cron.md#pause-cron-for-a-whole-project).
+
 - Pause or resume a cron job with one CLI command, MCP call, or the TUI Jobs
   tab's `p` key. Each action preserves the rest of the definition and guards
   concurrent edits. The TUI confirms missed native children before resuming.

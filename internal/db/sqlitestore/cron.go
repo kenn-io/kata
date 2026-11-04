@@ -73,3 +73,8 @@ func (d *Store) ListRecurringCronJobs(ctx context.Context, after string, limit i
 func (d *Store) DispatchRecurringCron(ctx context.Context, in db.DispatchRecurringCronIn) (db.DispatchRecurringCronOut, error) {
 	return d.cronSQL().DispatchRecurring(ctx, in)
 }
+
+// SetCronProjectPause changes root-owned policy in the cron project transaction.
+func (s *Store) SetCronProjectPause(ctx context.Context, in db.SetCronProjectPauseIn) (db.PatchProjectMetadataOut, error) {
+	return s.cronSQL().SetProjectPause(ctx, in)
+}

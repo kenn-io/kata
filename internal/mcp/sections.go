@@ -91,7 +91,7 @@ func toolSections(storageAvailable, tokenAdminAvailable bool) []toolSection {
 		{
 			loader: "kata.load_cron", section: "cron", title: "Load cron tools",
 			description: "Load native recurring notification jobs and external-adapter execution definitions. Run evidence does not launch work. Distinct from RRULE recurrence tools; refresh the MCP tool list.",
-			tools:       []string{"kata.cron_capabilities", "kata.cron_new_uid", "kata.cron_jobs", "kata.cron_job", "kata.cron_job_create", "kata.cron_job_update", "kata.cron_job_delete", "kata.cron_job_restore", "kata.cron_job_pause", "kata.cron_job_resume", "kata.cron_workflows", "kata.cron_workflow", "kata.cron_workflow_create", "kata.cron_workflow_update", "kata.cron_workflow_delete", "kata.cron_workflow_restore", "kata.cron_runs", "kata.cron_run", "kata.cron_run_observe"},
+			tools:       []string{"kata.cron_capabilities", "kata.cron_project_pause", "kata.cron_project_resume", "kata.cron_new_uid", "kata.cron_jobs", "kata.cron_job", "kata.cron_job_create", "kata.cron_job_update", "kata.cron_job_delete", "kata.cron_job_restore", "kata.cron_job_pause", "kata.cron_job_resume", "kata.cron_workflows", "kata.cron_workflow", "kata.cron_workflow_create", "kata.cron_workflow_update", "kata.cron_workflow_delete", "kata.cron_workflow_restore", "kata.cron_runs", "kata.cron_run", "kata.cron_run_observe"},
 			available:   true, register: registerCronTools,
 		},
 		{
