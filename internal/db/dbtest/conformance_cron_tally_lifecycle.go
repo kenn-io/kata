@@ -156,16 +156,9 @@ func checkCronTallyLiveMerge(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	for _, mode := range []string{"disjoint", "equal", "conflict", "issue-sync conflict", "kind collision", "pull-only target"} {
 		source, target := newCronTallyFixture(ctx, t, store), newCronTallyFixture(ctx, t, store)
-		if mode == "pull-only target" {
-			_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: target.project.ID, Role: db.FederationRoleSpoke, HubURL: "https://daemon.example", HubProjectID: 42, HubProjectUID: target.project.UID, Enabled: true, Actor: "operator"})
-			require.NoError(t, err)
-			_, err = store.MergeProjects(ctx, db.MergeProjectsParams{SourceProjectID: source.project.ID, TargetProjectID: target.project.ID, Actor: "operator"})
-			require.ErrorIs(t, err, db.ErrProjectMergeFederationBinding)
-			continue
-		}
 		a, b := tallyLifecycleEntry(source, 9007199254740993), tallyLifecycleEntry(target, 17)
 		switch mode {
-		case "equal", "conflict", "issue-sync conflict":
+		case "equal", "conflict", "issue-sync conflict", "pull-only target":
 			b = a
 			if mode != "equal" {
 				b.Counts.Succeeded++
@@ -176,6 +169,12 @@ func checkCronTallyLiveMerge(t *testing.T, store db.Storage) error {
 		}
 		source.seed(ctx, t, a)
 		target.seed(ctx, t, b)
+		if mode == "pull-only target" {
+			// Conflicting tallies would fail first if merge read them before
+			// rejecting the target's federation binding.
+			_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: target.project.ID, Role: db.FederationRoleSpoke, HubURL: "https://daemon.example", HubProjectID: 42, HubProjectUID: target.project.UID, Enabled: true, Actor: "operator"})
+			require.NoError(t, err)
+		}
 		if mode == "issue-sync conflict" {
 			// Both backends name the binding before reading tally evidence.
 			_, err := store.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{ProjectID: target.project.ID, Provider: "github", SourceKey: "github:merge/target", RemoteID: "merge/target", DisplayName: "merge/target", Config: jsontext.Value(`{}`), IntervalSeconds: 60})
@@ -186,8 +185,8 @@ func checkCronTallyLiveMerge(t *testing.T, store db.Storage) error {
 		beforeTarget, err := store.ProjectByID(ctx, target.project.ID)
 		require.NoError(t, err)
 		result, err := store.MergeProjects(ctx, db.MergeProjectsParams{SourceProjectID: source.project.ID, TargetProjectID: target.project.ID, Actor: "operator"})
-		if mode == "conflict" || mode == "issue-sync conflict" {
-			require.ErrorIs(t, err, map[string]error{"conflict": db.ErrCronTallyConflict, "issue-sync conflict": db.ErrProjectMergeIssueSyncBinding}[mode])
+		if mode == "conflict" || mode == "issue-sync conflict" || mode == "pull-only target" {
+			require.ErrorIs(t, err, map[string]error{"conflict": db.ErrCronTallyConflict, "issue-sync conflict": db.ErrProjectMergeIssueSyncBinding, "pull-only target": db.ErrProjectMergeFederationBinding}[mode])
 			got, e := store.ProjectByID(ctx, source.project.ID)
 			require.NoError(t, e)
 			require.Equal(t, beforeSource, got)
@@ -436,24 +435,15 @@ func checkCronTallyEqualSubsetReplay(t *testing.T, store db.Storage) error {
 			replay, err := db.DecodeCronTallies(db.JSONBlob(projection.ProjectMetadata[f.project.UID]))
 			require.NoError(t, err)
 			require.Equal(t, current, replay, "root-approved pull history must reproduce current authoritative tally union")
-			// The unchanged issue-metadata fold is the exact recursive fold used
-			// for project metadata before tally support. Replay real store output.
-			legacyEvents := []db.FoldEvent{}
-			for _, e := range foldEvents {
-				e.IssueUID = "legacy-peer"
-				switch e.Type {
-				case "project.metadata_updated":
-					e.Type = "issue.metadata_updated"
-				case "project.federation_enabled":
-					e.Type = "issue.snapshot"
-					e.Payload, err = json.Marshal(map[string]any{"uid": e.IssueUID, "metadata": db.PayloadMap(e.Payload)["metadata"]})
-					require.NoError(t, err)
-				default:
-					continue
-				}
-				legacyEvents = append(legacyEvents, e)
+			// Replay the real store output with an independent pre-tally
+			// oracle so changes to today's fold cannot mask compatibility loss.
+			legacyEvents := make([]db.RemoteEvent, 0, len(read.Events))
+			for _, e := range read.Events {
+				legacyEvents = append(legacyEvents, db.RemoteEvent{EventUID: e.UID, OriginInstanceUID: e.OriginInstanceUID, HLCPhysicalMS: e.HLCPhysicalMS, HLCCounter: e.HLCCounter, Type: e.Type, Payload: jsontext.Value(e.Payload)})
 			}
-			require.JSONEq(t, string(project.Metadata), string(db.FoldEvents(legacyEvents).IssueMetadata["legacy-peer"]), "pre-tally peers must recover the complete root tally")
+			legacy, err := json.Marshal(oldPeerMetadata(t, legacyEvents))
+			require.NoError(t, err)
+			require.JSONEq(t, string(project.Metadata), string(legacy), "pre-tally peers must recover the complete root tally")
 			correctionCount := 0
 			for _, emitted := range result.Events {
 				if emitted.OriginInstanceUID == store.InstanceUID() && emitted.Type == "project.metadata_updated" {
