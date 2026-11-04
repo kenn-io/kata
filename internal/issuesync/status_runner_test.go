@@ -467,3 +467,43 @@ func TestStatusRunnerSuccessCannotAdvanceCursorAfterOperatorEdit(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, current.LastCursorAt, "old pass cannot advance a reset cursor for the edited configuration")
 }
+
+type prefetchStatusTestRun struct {
+	*statusTestRun
+	mappings []db.IssueStatusMapping
+}
+
+func (r *prefetchStatusTestRun) PrefetchStatuses(_ context.Context, mappings []db.IssueStatusMapping) {
+	r.mappings = mappings
+}
+
+type prefetchStatusTestAdapter struct {
+	*statusTestAdapter
+	run *prefetchStatusTestRun
+}
+
+func (a *prefetchStatusTestAdapter) OpenStatus(context.Context, db.IssueSyncBinding, time.Time) (StatusRun, error) {
+	return a.run, nil
+}
+
+func TestStatusRunnerPrefetchExcludesPendingMappings(t *testing.T) {
+	s, b, ms, at := statusFixture(t, 2)
+	_, _, _, err := s.CloseIssue(t.Context(), *ms[0].Mapping.IssueID, "done", "worker", "Completed task", nil)
+	require.NoError(t, err)
+	run := &prefetchStatusTestRun{statusTestRun: &statusTestRun{}}
+	run.write = func(_ context.Context, _ db.IssueStatusMapping, desired string, admit func() error) (StatusObservation, error) {
+		require.Empty(t, run.mappings)
+		require.NoError(t, admit())
+		return observed(desired, at), nil
+	}
+	run.read = func(_ context.Context, m db.IssueStatusMapping) (StatusObservation, error) {
+		require.Len(t, run.mappings, 1)
+		require.Equal(t, ms[1].Mapping.ID, run.mappings[0].Mapping.ID)
+		require.Equal(t, ms[1].Mapping.ID, m.Mapping.ID)
+		return observed("open", at), nil
+	}
+	a := &prefetchStatusTestAdapter{statusTestAdapter: statusAdapter(b, run.statusTestRun), run: run}
+	_, err = NewRunner(RunnerConfig{Store: s, Adapter: a, Clock: func() time.Time { return at }}).RunOnce(t.Context(), b.ID)
+	require.NoError(t, err)
+	require.Len(t, run.mappings, 1)
+}

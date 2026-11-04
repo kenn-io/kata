@@ -1,7 +1,7 @@
 ---
 title: GitHub sync
 description: Configure GitHub issue synchronization, optional two-way status, credentials, mappings, and operational recovery.
-last_edited: 2026-09-29
+last_edited: 2026-11-04
 ---
 
 # GitHub sync
@@ -114,6 +114,8 @@ the same number cannot replace the saved GitHub issue identity. A genuine
 upstream closure retains its GitHub close time and maps `not_planned` to
 `wontfix`. Same-state observations and delivery acknowledgements preserve
 Kata’s existing close reason, evidence, and close time.
+
+Each run reads up to 100 mapped issues' statuses in one GraphQL request; if the batch request fails or the server lacks the required fields, status reads fall back to REST.
 
 `disable` pauses both imports and status writes while retaining pending intent.
 Explicit local close/reopen actions while paused still update that intent.

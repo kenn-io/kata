@@ -145,16 +145,21 @@ func (s *httpFetcherBindingSession) statusRequest(ctx context.Context, method, e
 }
 
 func (s *httpFetcherBindingSession) statusRequestWithHeaders(ctx context.Context, method, endpoint string, body any, out any, admission func() error, headers *http.Header) error {
+	requestURL, err := s.fetcher.restEndpointURL(s.binding, endpoint)
+	if err != nil {
+		return fmt.Errorf("invalid GitHub status endpoint")
+	}
+	return s.statusRequestURL(ctx, method, requestURL, body, out, admission, headers)
+}
+
+func (s *httpFetcherBindingSession) statusRequestURL(ctx context.Context, method, requestURL string, body any, out any, admission func() error, headers *http.Header) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if err := s.fetcher.statusCooldownError(s.binding); err != nil {
 		return err
 	}
-	requestURL, err := s.fetcher.restEndpointURL(s.binding, endpoint)
-	if err != nil {
-		return fmt.Errorf("invalid GitHub status endpoint")
-	}
+	var err error
 	var encoded []byte
 	if body != nil {
 		encoded, err = json.Marshal(body)
@@ -245,4 +250,94 @@ func (f *HTTPFetcher) statusCooldownError(binding Binding) error {
 		return &issuesync.StatusError{Message: "GitHub status requests are cooling down", RetryAfter: wait}
 	}
 	return nil
+}
+
+// StatusTarget identifies an issue by its global identity and trusted locator.
+type StatusTarget struct {
+	ExternalID string
+	Number     int
+}
+
+// StatusResult keeps per-issue failures final within a successful batch.
+type StatusResult struct {
+	Observation issuesync.StatusObservation
+	Err         error
+}
+
+// StatusBatchSession reads at most one bounded sweep page.
+type StatusBatchSession interface {
+	ReadStatuses(context.Context, Config, []StatusTarget) map[string]StatusResult
+}
+
+func (s *httpFetcherBindingSession) ReadStatuses(ctx context.Context, cfg Config, targets []StatusTarget) map[string]StatusResult {
+	if len(targets) == 0 || len(targets) > parentQueryBatchSize {
+		return nil
+	}
+	numbers := make([]int, len(targets))
+	ids := make([]int64, len(targets))
+	for i, target := range targets {
+		id, err := s.statusConfig(cfg, target.ExternalID, target.Number)
+		if err != nil {
+			return nil
+		}
+		ids[i], numbers[i] = id, target.Number
+	}
+	if err := s.verifyStatusRepository(ctx, cfg); err != nil {
+		return nil
+	}
+	requestURL, err := s.fetcher.graphQLEndpointURL(s.binding)
+	if err != nil {
+		return nil
+	}
+	var response parentGraphQLResponse
+	var headers http.Header
+	body := parentGraphQLRequest{Query: targetedStatusGraphQLQuery(numbers), Variables: map[string]any{"owner": s.binding.Owner, "repo": s.binding.Repo}}
+	if err := s.statusRequestURL(ctx, http.MethodPost, requestURL, body, &response, nil, &headers); err != nil {
+		return nil
+	}
+	if graphQLErrorsRateLimited(response.Errors) {
+		s.fetcher.deferStatusRequests(s.binding, max(retryWait(headers, s.fetcher.now()), time.Second))
+		return nil
+	}
+	remaining, missing := parentErrorsWithoutMissingChildren(response.Errors, response.Data, len(targets))
+	if len(remaining) > 0 || response.Data == nil {
+		return nil
+	}
+	results := make(map[string]StatusResult, len(targets))
+	for i, target := range targets {
+		var node struct {
+			FullDatabaseID graphQLBigInt `json:"fullDatabaseId"`
+			Number         int           `json:"number"`
+			State          string        `json:"state"`
+			StateReason    *string       `json:"stateReason"`
+			ClosedAt       *time.Time    `json:"closedAt"`
+			UpdatedAt      *time.Time    `json:"updatedAt"`
+			Repository     struct {
+				DatabaseID int64 `json:"databaseId"`
+			} `json:"repository"`
+		}
+		raw, present := response.Data.Repository[fmt.Sprintf("i%d", i)]
+		result := StatusResult{}
+		switch {
+		case missing[i] || !present || bytes.Equal(bytes.TrimSpace(raw), []byte("null")):
+			result.Err = &issuesync.StatusError{Message: "GitHub status issue not found", Blocked: true}
+		case json.Unmarshal(raw, &node) != nil:
+			result.Err = fmt.Errorf("GitHub status observation has invalid state or version")
+		case int64(node.FullDatabaseID) != ids[i] || node.Number != target.Number:
+			result.Err = fmt.Errorf("GitHub status issue identity changed or is a pull request")
+		case node.Repository.DatabaseID != cfg.RepoID:
+			result.Err = fmt.Errorf("GitHub status issue is outside the bound repository")
+		case node.State != "OPEN" && node.State != "CLOSED" || node.UpdatedAt == nil || node.UpdatedAt.IsZero():
+			result.Err = fmt.Errorf("GitHub status observation has invalid state or version")
+		default:
+			state := strings.ToLower(node.State)
+			result.Observation = issuesync.StatusObservation{RawStatus: &state, Status: state, Version: node.UpdatedAt.UTC(), Locator: strconv.Itoa(node.Number)}
+			if state == "closed" {
+				result.Observation.ClosedReason = issueClosedReason(Issue{StateReason: node.StateReason})
+				result.Observation.ClosedAt = node.ClosedAt
+			}
+		}
+		results[target.ExternalID] = result
+	}
+	return results
 }
