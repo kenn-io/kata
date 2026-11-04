@@ -126,53 +126,33 @@ func (m Model) finishDelete(target formTarget, mut mutationDoneMsg) (Model, tea.
 	if mut.resp != nil && mut.resp.Issue != nil && mut.resp.Issue.UID != "" {
 		uid = mut.resp.Issue.UID
 	}
-	priorDetail := m.detail
+	m, leave := m.leaveDeletedDetail(uid)
 	m, follow := m.refreshListDay(func(lm listModel) listModel { return lm.withoutIssue(uid) })
 	if m.cache != nil {
 		m.cache.markStale()
 	}
-	m, leave := m.leaveDeletedDetail(priorDetail, uid)
 	message := "deleted " + qualified
-	if last := len(m.undoHistory.entries) - 1; last >= 0 && m.undoHistory.entries[last].kind == "delete" && m.undoHistory.entries[last].uid == uid {
-		m.undoHistory.entries[last].before.QualifiedID = qualified
+	if last := len(m.undoHistory.entries) - 1; (m.view == viewList || m.view == viewDetail) && last >= 0 && m.undoHistory.entries[last].kind == "delete" && m.undoHistory.entries[last].uid == uid {
 		message += "; press u to undo"
 	}
 	m, notice := m.undoNotice(message, toastInfo)
 	return m, combineCmds(follow, combineCmds(leave, combineCmds(notice, withConnGen(m.list.refetchCmd(m.api, m.scope), m.connGen))))
 }
 
-// leaveDeletedDetail steps a detail showing the deleted issue back through
-// its history, or pops it when it has none, and keeps Attention's saved
-// return detail from reopening the issue.
-func (m Model) leaveDeletedDetail(prior detailModel, uid string) (Model, tea.Cmd) {
-	m = m.leaveDeletedAttentionReturn(uid)
-	if prior.issue == nil || prior.issue.UID != uid {
+// leaveDeletedDetail goes Back when the live detail shows the deleted issue.
+func (m Model) leaveDeletedDetail(uid string) (Model, tea.Cmd) {
+	if m.detail.issue == nil || m.detail.issue.UID != uid {
 		return m, nil
 	}
-	restored := prior.backPastDeleted(uid)
-	if restored.issue != nil {
-		m.detail = restored
-		cmd := m.detail.refetch(m.api)
+	if len(m.detail.navStack) > 0 {
+		var cmd tea.Cmd
+		m.detail, cmd = m.detail.handleBack(m.api)
 		return m, cmd
 	}
-	if m.detail.issue != nil && m.detail.issue.UID == uid {
-		m.detail = restored
-	}
+	m.detail.cancelReads()
+	m.detail = newDetailModel()
 	next, cmd, _ := m.routeTopLevel(popDetailMsg{})
 	return next.(Model), cmd
-}
-
-// backPastDeleted removes every visit to the deleted issue before going back.
-func (dm detailModel) backPastDeleted(uid string) detailModel {
-	dm.cancelReads()
-	dm.navStack = slices.DeleteFunc(slices.Clone(dm.navStack), func(prior detailModel) bool {
-		return prior.issue != nil && prior.issue.UID == uid
-	})
-	if len(dm.navStack) == 0 {
-		return newDetailModel()
-	}
-	restored, _ := dm.handleBack(nil)
-	return restored
 }
 
 // withoutIssue drops a deleted issue from the list and selects the row after

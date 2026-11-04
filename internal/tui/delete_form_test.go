@@ -86,6 +86,28 @@ func (h *deleteHarness) finish(cmd tea.Cmd) {
 	h.m = out.(Model)
 }
 
+// drain follows fetch results and their Back commands until navigation settles.
+func (h *deleteHarness) drain(cmd tea.Cmd) Model {
+	h.t.Helper()
+	if cmd == nil {
+		return h.m
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, work := range batch {
+			h.m = h.drain(work)
+		}
+		return h.m
+	}
+	next, follow := h.m.Update(msg)
+	h.m = next.(Model)
+	switch msg.(type) {
+	case detailFetchedMsg, commentsFetchedMsg, eventsFetchedMsg, linksFetchedMsg, openDetailMsg, jumpDetailMsg, popDetailMsg, mutationDoneMsg, undoDoneMsg:
+		return h.drain(follow)
+	}
+	return h.m
+}
+
 func (h *deleteHarness) isDeleted(uid string) bool {
 	h.t.Helper()
 	_, err := h.env.DB.IssueByUID(h.t.Context(), uid, db.IncludeDeletedNo)
@@ -182,6 +204,7 @@ func TestUndoOfADelete(t *testing.T) {
 			h.finish(h.enter())
 			require.True(t, h.isDeleted(target.UID))
 			require.Len(t, h.m.undoHistory.entries, 1)
+			assert.Equal(t, h.qualified(target), h.m.undoHistory.entries[0].before.QualifiedID)
 			if tc.restoredElsewhere {
 				_, _, changed, err := h.env.DB.RestoreIssue(t.Context(), target.ID, "bob")
 				require.NoError(t, err)
@@ -288,7 +311,7 @@ func TestDeleteLeavesTheDetailTheWayBackDoes(t *testing.T) {
 
 			h.key(runeKey('X'))
 			h.typeText("DELETE " + h.project.Name + "#" + target.ShortID)
-			h.finish(h.enter())
+			h.m = h.drain(h.enter())
 			require.True(t, h.isDeleted(target.UID))
 
 			current, ok := h.m.list.targetRow()
@@ -363,25 +386,27 @@ func TestDeleteSkipsRepeatedIssueInDetailHistory(t *testing.T) {
 				require.NoError(t, err)
 				var cmd tea.Cmd
 				h.m, cmd = h.m.transitionToAttention()
-				h.m = drainInboxCmds(h.m, cmd)
+				h.m = h.drain(cmd)
 				next, cmd := h.m.Update(h.enter()())
-				h.m = drainInboxCmds(next.(Model), cmd)
+				h.m = next.(Model)
+				h.m = h.drain(cmd)
 			}
 			h.key(runeKey('X'))
 			h.typeText("DELETE " + h.qualified(target))
 			next, cmd := h.m.Update(h.enter()())
-			h.m = drainInboxCmds(next.(Model), cmd)
+			h.m = next.(Model)
+			h.m = h.drain(cmd)
 			require.True(t, h.isDeleted(target.UID))
 			if source == "Attention" {
 				require.Equal(t, viewAttention, h.m.view)
 				cmd = h.key(tea.KeyPressMsg{Code: tea.KeyEscape})
-				h.m = drainInboxCmds(h.m, cmd)
+				h.m = h.drain(cmd)
 			}
 			require.Equal(t, viewDetail, h.m.view)
 			require.NotNil(t, h.m.detail.issue)
 			assert.Equal(t, other.UID, h.m.detail.issue.UID, "delete skips consecutive visits to the deleted issue")
 			cmd = h.key(tea.KeyPressMsg{Code: tea.KeyEscape})
-			h.m = drainInboxCmds(h.m, cmd)
+			h.m = h.drain(cmd)
 			assert.Equal(t, viewList, h.m.view, "Back skips the earlier visit to the deleted issue")
 			assert.True(t, h.m.detail.issue == nil || h.m.detail.issue.UID != target.UID)
 		})
@@ -398,27 +423,24 @@ func TestDeleteChildRefetchesParent(t *testing.T) {
 	require.NoError(t, err)
 	var cmd tea.Cmd
 	h.m, cmd = h.m.dispatchLabelFetch(h.project.ID)
-	h.m = drainInboxCmds(h.m, cmd)
+	h.m = h.drain(cmd)
 	require.Equal(t, []LabelCount{{Label: "bug", Count: 1}}, h.m.projectLabels.byProject[h.project.ID].labels)
 	h.selectIssue(parent.UID)
 	h.m.detail.gen = 1
 	h.m.nextGen = 1
 	cmd = h.m.detail.refetch(h.m.api)
-	h.m = drainInboxCmds(h.m, cmd)
+	h.m = h.drain(cmd)
 	require.Len(t, h.m.detail.children, 1)
 	h.m.detail.detailFocus = focusChildren
-	next, cmd := h.m.Update(h.enter()())
-	h.m = drainInboxCmds(next.(Model), cmd)
+	h.m = h.drain(h.enter())
 	require.Equal(t, child.UID, h.m.detail.issue.UID)
 	h.key(runeKey('X'))
 	h.typeText("DELETE " + h.qualified(child))
-	next, cmd = h.m.Update(h.enter()())
-	h.m = drainInboxCmds(next.(Model), cmd)
+	h.m = h.drain(h.enter())
 	require.Equal(t, parent.UID, h.m.detail.issue.UID)
 	assert.Empty(t, h.m.detail.children, "the restored parent drops its deleted child")
 	assert.Empty(t, h.m.projectLabels.byProject[h.project.ID].labels)
-	next, cmd = h.m.Update(h.key(runeKey('u'))())
-	h.m = drainInboxCmds(next.(Model), cmd)
+	h.m = h.drain(h.key(runeKey('u')))
 	require.False(t, h.isDeleted(child.UID))
 	require.Equal(t, parent.UID, h.m.detail.issue.UID)
 	require.Len(t, h.m.detail.children, 1, "undo shows the restored child in the open parent")
@@ -426,69 +448,105 @@ func TestDeleteChildRefetchesParent(t *testing.T) {
 	assert.Equal(t, []LabelCount{{Label: "bug", Count: 1}}, h.m.projectLabels.byProject[h.project.ID].labels)
 }
 
-func TestUndoDeleteReloadsAttention(t *testing.T) {
-	for _, action := range []string{"escape", "undo"} {
-		t.Run(action, func(t *testing.T) {
-			t.Setenv("KATA_INBOX_USER", "alice")
+func TestBackLeavesDeletedSavedDetail(t *testing.T) {
+	for _, source := range []string{"history", "Attention", "Inbox"} {
+		t.Run(source, func(t *testing.T) {
 			h := newDeleteHarness(t, viewDetail)
-			target := h.issues[0]
+			h.m.layout = splitlayout.Stacked
+			target, other := h.issues[0], h.issues[1]
 			h.selectIssue(target.UID)
-			_, err := h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
-				IssueID: target.ID, Actor: "alice", IfMatchRev: new(target.Revision),
-				Patch: map[string]jsontext.Value{notification.MetadataKey("alice"): jsontext.Value(`{"from":"bob","message":"Review this"}`)},
-			})
-			require.NoError(t, err)
+			h.m.detail.gen, h.m.nextGen = 1, 1
 			var cmd tea.Cmd
-			h.m, cmd = h.m.transitionToAttention()
-			h.m = drainInboxCmds(h.m, cmd)
-			require.Len(t, h.m.attention.rows, 1)
-			next, cmd := h.m.Update(h.enter()())
-			h.m = drainInboxCmds(next.(Model), cmd)
-			require.Equal(t, target.UID, h.m.detail.issue.UID)
-			h.key(runeKey('X'))
-			h.typeText("DELETE " + h.qualified(target))
-			next, cmd = h.m.Update(h.enter()())
-			h.m = drainInboxCmds(next.(Model), cmd)
+			switch source {
+			case "history":
+				prior := cloneDetailModel(h.m.detail)
+				h.selectIssue(other.UID)
+				h.m.detail.gen, h.m.nextGen = 2, 2
+				h.m.detail.navStack = []detailModel{prior}
+			case "Attention":
+				t.Setenv("KATA_INBOX_USER", "alice")
+				h.m, cmd = h.m.transitionToAttention()
+				h.m = h.drain(cmd)
+			case "Inbox":
+				inbox, err := h.env.DB.CreateProject(t.Context(), "inbox-project")
+				require.NoError(t, err)
+				h.m.inboxPending = true
+				h.m, cmd = h.m.handleInboxProjectLoaded(inboxProjectLoadedMsg{
+					project: ProjectSummary{ID: inbox.ID, Name: inbox.Name}, found: true,
+				})
+				h.m = h.drain(cmd)
+			}
+			_, err := NewClient(h.env.URL, h.env.HTTP).DeleteIssue(t.Context(), h.project.ID, target.UID, h.qualified(target), "alice")
+			require.NoError(t, err)
 			require.True(t, h.isDeleted(target.UID))
-			require.Equal(t, viewAttention, h.m.view)
-			if action == "escape" {
-				cmd = h.key(tea.KeyPressMsg{Code: tea.KeyEscape})
-				h.m = drainInboxCmds(h.m, cmd)
-				assert.Equal(t, viewList, h.m.view, "leaving Attention returns to the list after deleting its saved detail")
-				assert.True(t, h.m.detail.issue == nil || h.m.detail.issue.UID != target.UID, "leaving Attention must leave the deleted detail")
-				return
-			}
-			require.Empty(t, h.m.attention.rows)
-			next, cmd = h.m.Update(h.key(runeKey('u'))())
-			h.m = drainInboxCmds(next.(Model), cmd)
-			require.Len(t, h.m.attention.rows, 1, "undo reloads Attention without waiting for an event")
-			assert.Equal(t, target.UID, h.m.attention.rows[0].issue.UID)
 
-			next, cmd = h.m.Update(h.enter()())
-			h.m = drainInboxCmds(next.(Model), cmd)
-			require.Equal(t, viewDetail, h.m.view)
-			edited, err := h.client.EditBody(t.Context(), h.project.ID, target.UID, "Updated body", "alice")
-			require.NoError(t, err)
-			next, cmd = h.m.Update(mutationDoneMsg{kind: "body.edit", resp: edited})
-			h.m = drainInboxCmds(next.(Model), cmd)
-			require.Len(t, h.m.undoHistory.entries, 1)
-			require.Equal(t, "body.edit", h.m.undoHistory.entries[0].kind)
-			h.m, cmd = h.m.transitionToAttention()
-			h.m = drainInboxCmds(h.m, cmd)
-			require.Equal(t, viewAttention, h.m.view)
+			cmd = h.key(tea.KeyPressMsg{Code: tea.KeyEscape})
+			h.m = h.drain(cmd)
 
-			cmd = h.key(runeKey('u'))
-			if cmd != nil {
-				next, follow := h.m.Update(cmd())
-				h.m = drainInboxCmds(next.(Model), follow)
-			}
-			current, err := h.env.DB.IssueByUID(t.Context(), target.UID, db.IncludeDeletedNo)
-			require.NoError(t, err)
-			assert.Equal(t, "Updated body", current.Body, "Attention must leave ordinary edits unchanged")
-			assert.Nil(t, cmd, "Attention ignores undo when the latest entry is an edit")
-			assert.Len(t, h.m.undoHistory.entries, 1)
+			assert.Equal(t, viewList, h.m.view, "Back leaves a saved issue that no longer exists")
+			assert.True(t, h.m.detail.issue == nil || h.m.detail.issue.UID != target.UID, "the deleted snapshot is cleared")
 		})
 	}
+}
+
+func TestDeleteReturnsToAttentionWithoutUndoHint(t *testing.T) {
+	t.Setenv("KATA_INBOX_USER", "alice")
+	h := newDeleteHarness(t, viewDetail)
+	h.m.layout = splitlayout.Stacked
+	target := h.issues[0]
+	h.selectIssue(target.UID)
+	_, err := h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+		IssueID: target.ID, Actor: "alice", IfMatchRev: new(target.Revision),
+		Patch: map[string]jsontext.Value{notification.MetadataKey("alice"): jsontext.Value(`{"from":"bob","message":"Review this"}`)},
+	})
+	require.NoError(t, err)
+	var cmd tea.Cmd
+	h.m, cmd = h.m.transitionToAttention()
+	h.m = h.drain(cmd)
+	h.m = h.drain(h.enter())
+	h.key(runeKey('X'))
+	h.typeText("DELETE " + h.qualified(target))
+	h.finish(h.enter())
+	require.Equal(t, viewAttention, h.m.view)
+	require.NotNil(t, h.m.toast)
+	assert.Equal(t, "deleted "+h.qualified(target), h.m.toast.text)
+	assert.Nil(t, h.key(runeKey('u')), "undo is offered in list and detail")
+	assert.True(t, h.isDeleted(target.UID))
+}
+
+func TestDetailFetchErrorsOnlyLeaveMissingCurrentIssue(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		gen  int64
+		seq  uint64
+		code string
+	}{
+		{"old navigation", 1, 0, "issue_not_found"},
+		{"old request", 2, 4, "issue_not_found"},
+		{"other error", 2, 6, "forbidden"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := initialModel(Options{})
+			m.view = viewDetail
+			m.layout = splitlayout.Stacked
+			m.detail.issue = &Issue{UID: "current-issue"}
+			m.detail.gen = 2
+			m.detail.fetchSeq.issue = 5
+			m, _ = updateModel(m, detailFetchedMsg{gen: tc.gen, requestSeq: tc.seq, err: &APIError{Code: tc.code}})
+			assert.Equal(t, viewDetail, m.view)
+			require.NotNil(t, m.detail.issue)
+			assert.Equal(t, "current-issue", m.detail.issue.UID)
+		})
+	}
+}
+
+func TestDeleteUndoEntryKeepsQualifiedReference(t *testing.T) {
+	h := newDeleteHarness(t, viewList)
+	target := h.issues[0]
+	resp, err := h.client.DeleteIssue(t.Context(), h.project.ID, target.UID, h.qualified(target), "alice")
+	require.NoError(t, err)
+	require.NotNil(t, resp.undo.entry)
+	assert.Equal(t, h.qualified(target), resp.undo.entry.before.QualifiedID)
 }
 
 func TestDeleteConfirmationResolvesDetailProject(t *testing.T) {

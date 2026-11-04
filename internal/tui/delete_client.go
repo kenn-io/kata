@@ -64,9 +64,13 @@ func (c *undoClient) DeleteIssue(ctx context.Context, projectID int64, ref, qual
 	if !ok {
 		return nil, errors.New("connected client cannot delete issues")
 	}
-	return c.edit(ctx, projectID, ref, actor, "delete", func(uid string) (*MutationResp, error) {
+	resp, err := c.edit(ctx, projectID, ref, actor, "delete", func(uid string) (*MutationResp, error) {
 		return writer.DeleteIssue(ctx, projectID, uid, qualifiedID, actor)
 	})
+	if resp != nil && resp.undo != nil && resp.undo.entry != nil {
+		resp.undo.entry.before.QualifiedID = qualifiedID
+	}
+	return resp, err
 }
 
 func (c *undoClient) RestoreIssue(ctx context.Context, projectID int64, ref, actor string) (*MutationResp, error) {

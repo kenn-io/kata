@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -767,8 +768,13 @@ func (m Model) routeMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 	return next, withConnGen(cmd, m.connGen)
 }
 
-// mutAffectsLabelCounts reports whether a successful mutation could change
-// label counts. batchLabelRefresh refreshes only projects with a cached entry.
+// mutAffectsLabelCounts reports whether a successful mutation could
+// have changed the project's label aggregate. Label add/remove and
+// create (which since Plan 8 commit 4 may carry labels via the
+// multi-field new-issue form) all qualify; the cache refresh is gated
+// against the per-project entry's existence so a plain-title create
+// against a project that never had a label menu opened remains a
+// zero-cost no-op.
 func mutAffectsLabelCounts(mut mutationDoneMsg) bool {
 	if mut.err != nil {
 		return false
@@ -924,8 +930,7 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 			}
 			return next, cmd, true
 		}
-		if m.keymap.Undo.matches(msg) && (m.view == viewList || m.view == viewDetail ||
-			(m.view == viewAttention && len(m.undoHistory.entries) > 0 && m.undoHistory.entries[len(m.undoHistory.entries)-1].kind == "delete")) {
+		if m.keymap.Undo.matches(msg) && (m.view == viewList || m.view == viewDetail) {
 			next, cmd := m.startUndo()
 			return next, cmd, true
 		}
@@ -2792,7 +2797,7 @@ func (m Model) handleEventReceived(msg eventReceivedMsg) (tea.Model, tea.Cmd) {
 // label event names a project we have a cached entry for. The
 // suggestion menu reads the cache on render, so a fresh dispatch
 // keeps the `+` autocomplete in sync with the daemon's authoritative
-// counts. No-op for other events, when the cache has no
+// counts. No-op when the event isn't a label event, the cache has no
 // entry for the project, or projectLabels was never initialized
 // (defensive — the field is set by initialModel).
 func (m Model) maybeRefetchLabels(msg eventReceivedMsg) (Model, tea.Cmd) {
@@ -3413,10 +3418,23 @@ func (m Model) dispatchToView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// a retained pane. Generation checks inside detailModel reject obsolete
 	// responses, so route them independently of the active layout/view.
 	if isDetailFetchMsg(msg) {
-		var cmd tea.Cmd
-		m.detail, cmd = m.detail.Update(msg, m.keymap, m.api)
+		var applied bool
+		m.detail, applied = m.detail.applyFetchedIfFresh(msg)
 		m = m.syncAttentionReturnDetail(msg)
-		return m, withConnGen(cmd, m.connGen)
+		if fetched, ok := msg.(detailFetchedMsg); ok && applied {
+			if apiErr, ok := errors.AsType[*APIError](fetched.err); ok && apiErr.Code == "issue_not_found" {
+				if len(m.detail.navStack) == 0 {
+					m.detail.cancelReads()
+					m.detail = newDetailModel()
+					next, cmd, _ := m.routeTopLevel(popDetailMsg{})
+					return next, cmd
+				}
+				var cmd tea.Cmd
+				m.detail, cmd = m.detail.handleBack(m.api)
+				return m, withConnGen(cmd, m.connGen)
+			}
+		}
+		return m, nil
 	}
 	if _, isKey := msg.(tea.KeyPressMsg); isKey && m.view != viewList && m.view != viewDetail {
 		return m, nil
