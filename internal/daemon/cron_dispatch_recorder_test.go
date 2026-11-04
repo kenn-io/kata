@@ -150,23 +150,21 @@ func TestCronRecorderLastNonIdleSurvivesIdle(t *testing.T) {
 }
 
 func TestCronRecorderLogFailureRecovery(t *testing.T) {
-	t.Run("changed decision", func(t *testing.T) {
-		blocked := filepath.Join(t.TempDir(), "blocked")
-		require.NoError(t, os.WriteFile(blocked, []byte("file"), 0o600))
-		r := daemon.NewCronDispatchRecorder(filepath.Join(blocked, "dispatch.jsonl"))
-		t.Cleanup(func() { require.NoError(t, r.Close()) })
-		c := db.RecurringCronCandidate{ProjectID: 1, JobUID: "job"}
-		_, err := r.Record(t.Context(), c, db.DispatchRecurringCronOut{Reason: cron.DispatchDisabled}, nil, time.Now())
-		require.Error(t, err)
-		r.FinishCycle(time.Now(), 0, true, false)
-		require.True(t, r.Health().LogErrorPresent)
-		require.EqualValues(t, 1, r.Health().LogErrorsSinceStart)
-		require.NoError(t, os.Remove(blocked))
-		_, err = r.Record(t.Context(), c, db.DispatchRecurringCronOut{Reason: cron.DispatchDelivered, Delivered: 1}, nil, time.Now())
-		require.NoError(t, err)
-		require.False(t, r.Health().LogErrorPresent)
-		require.EqualValues(t, 1, r.Health().LogErrorsSinceStart)
-	})
+	blocked := filepath.Join(t.TempDir(), "blocked")
+	require.NoError(t, os.WriteFile(blocked, []byte("file"), 0o600))
+	r := daemon.NewCronDispatchRecorder(filepath.Join(blocked, "dispatch.jsonl"))
+	t.Cleanup(func() { require.NoError(t, r.Close()) })
+	c := db.RecurringCronCandidate{ProjectID: 1, JobUID: "job"}
+	_, err := r.Record(t.Context(), c, db.DispatchRecurringCronOut{Reason: cron.DispatchDisabled}, nil, time.Now())
+	require.Error(t, err)
+	r.FinishCycle(time.Now(), 0, true, false)
+	require.True(t, r.Health().LogErrorPresent)
+	require.EqualValues(t, 1, r.Health().LogErrorsSinceStart)
+	require.NoError(t, os.Remove(blocked))
+	_, err = r.Record(t.Context(), c, db.DispatchRecurringCronOut{Reason: cron.DispatchDelivered, Delivered: 1}, nil, time.Now())
+	require.NoError(t, err)
+	require.False(t, r.Health().LogErrorPresent)
+	require.EqualValues(t, 1, r.Health().LogErrorsSinceStart)
 }
 
 func TestCronRecorderEnumerationFreshnessAndLowerBound(t *testing.T) {

@@ -25,7 +25,7 @@ func TestLogRecordsPartialHandoff(t *testing.T) {
 	path := filepath.Join(dir, base)
 	require.NoError(t, os.WriteFile(path, []byte(`{"version":1,"job_uid":"JOB"`), 0o600))
 	var out, warnings bytes.Buffer
-	mark, err := runDaemonLogOnce(t.Context(), logSource{dir, base}, &out, &warnings, 10, &cronLogFilter{})
+	mark, err := readDaemonLogSnapshot(t.Context(), logSource{dir, base}, &out, &warnings, 10, &cronLogFilter{}, true)
 	require.NoError(t, err)
 	require.Empty(t, out.String())
 	require.Empty(t, warnings.String())
@@ -34,7 +34,7 @@ func TestLogRecordsPartialHandoff(t *testing.T) {
 	_, err = file.WriteString("}\n")
 	require.NoError(t, err)
 	require.NoError(t, file.Close())
-	state := &followState{prevInfo: mark.info, prevSize: mark.size}
+	state := &followState{prevInfo: mark.info, prevSize: mark.size, prevFile: mark.file}
 	t.Cleanup(state.close)
 	require.NoError(t, tailTick(t.Context(), path, &out, &warnings, state, &cronLogFilter{}))
 	require.Contains(t, out.String(), `"job_uid":"JOB"`)
@@ -48,7 +48,7 @@ func TestLogRecordsRotation(t *testing.T) {
 			path := filepath.Join(dir, "dispatch.jsonl")
 			require.NoError(t, os.WriteFile(path, []byte("{\"n\":1}\n"), 0o600))
 			var out, warnings bytes.Buffer
-			mark, err := runDaemonLogOnce(t.Context(), logSource{dir, "dispatch.jsonl"}, &out, &warnings, 10, &cronLogFilter{})
+			mark, err := readDaemonLogSnapshot(t.Context(), logSource{dir, "dispatch.jsonl"}, &out, &warnings, 10, &cronLogFilter{}, true)
 			require.NoError(t, err)
 			require.NoError(t, os.WriteFile(path, []byte("{\"n\":1}\n{\"n\":2}\n"), 0o600))
 			require.NoError(t, os.Rename(path, path+".1"))
@@ -57,7 +57,7 @@ func TestLogRecordsRotation(t *testing.T) {
 				require.NoError(t, os.WriteFile(path+".1", []byte("{\"n\":3}\n"), 0o600))
 			}
 			require.NoError(t, os.WriteFile(path, []byte("{\"n\":4}\n"), 0o600))
-			state := &followState{prevInfo: mark.info, prevSize: mark.size}
+			state := &followState{prevInfo: mark.info, prevSize: mark.size, prevFile: mark.file}
 			t.Cleanup(state.close)
 			require.NoError(t, tailTick(t.Context(), path, &out, &warnings, state, &cronLogFilter{}))
 			require.Contains(t, out.String(), `"n":4`)
@@ -76,7 +76,7 @@ func TestLogRecordsRotation(t *testing.T) {
 			path := filepath.Join(dir, "runs.jsonl")
 			require.NoError(t, os.WriteFile(path, []byte("{\"n\":1}\n"), 0o600))
 			var out, warnings bytes.Buffer
-			mark, err := runDaemonLogOnce(t.Context(), logSource{dir, "runs.jsonl"}, &out, &warnings, 10, &hookLogFilter{hookIndex: -1})
+			mark, err := readDaemonLogSnapshot(t.Context(), logSource{dir, "runs.jsonl"}, &out, &warnings, 10, &hookLogFilter{hookIndex: -1}, true)
 			require.NoError(t, err)
 			require.NoError(t, os.WriteFile(path, []byte("{\"n\":1}\n{\"n\":2}\n"), 0o600))
 			require.NoError(t, os.Rename(path, path+".1"))

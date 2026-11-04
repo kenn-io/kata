@@ -12,6 +12,17 @@ import (
 // A finalized catch-up window partitions its scheduled instants into children
 // and discarded occurrences. Pending scans cannot establish that partition.
 func TestRecurringSkipConservation(t *testing.T) {
+	// Preserve the deterministic long-window case alongside generated cases.
+	j := nativeJob(t)
+	j.Trigger = Trigger{Kind: "interval", IntervalSeconds: 60}
+	j.Catchup, j.GraceSeconds = "skip", 1
+	anchor := at(t, "2026-01-01T00:00:00Z")
+	b, err := PlanRecurring(j, definitionUID, RecurringProgress{Version: 1, Anchor: anchor, Through: anchor}, anchor.Add(72*time.Hour+2*time.Second))
+	require.NoError(t, err)
+	require.Equal(t, 4320, b.Skipped.Count)
+	require.False(t, b.Skipped.Capped)
+	require.Empty(t, b.Due)
+
 	hegel.Test(t, func(ht *hegel.T) {
 		n := hegel.Draw(ht, hegel.Integers(0, 2500))
 		grace := hegel.Draw(ht, hegel.Integers(1, 3600))
@@ -64,7 +75,7 @@ func TestRecurringSkipConservation(t *testing.T) {
 			ht.Fatalf("delivered=%d want=%d", delivered, wantDelivered)
 		}
 		wantSkipped := n - wantDelivered
-		if (!capped && skipped != wantSkipped) || (capped && (skipped > wantSkipped || skipped < 1000)) {
+		if (!calendar && capped) || (!capped && skipped != wantSkipped) || (capped && (skipped > wantSkipped || skipped < 1000)) {
 			ht.Fatalf("skipped=%d capped=%v want=%d", skipped, capped, wantSkipped)
 		}
 	}, hegel.WithTestCases(1000))
@@ -116,18 +127,4 @@ func TestRecurringLatestSkipFinalization(t *testing.T) {
 	require.NoError(t, e)
 	require.True(t, revision.More)
 	require.Zero(t, revision.Skipped.Count)
-}
-
-// This deterministic 4,320-occurrence window exceeds the property's 2,500
-// maximum and catches accidental caps on longer interval backlogs.
-func TestRecurringSkipIntervalCountIsExact(t *testing.T) {
-	j := nativeJob(t)
-	j.Trigger = Trigger{Kind: "interval", IntervalSeconds: 60}
-	j.Catchup, j.GraceSeconds = "skip", 1
-	anchor := at(t, "2026-01-01T00:00:00Z")
-	b, err := PlanRecurring(j, definitionUID, RecurringProgress{Version: 1, Anchor: anchor, Through: anchor}, anchor.Add(72*time.Hour+2*time.Second))
-	require.NoError(t, err)
-	require.Equal(t, 4320, b.Skipped.Count)
-	require.False(t, b.Skipped.Capped)
-	require.Empty(t, b.Due)
 }

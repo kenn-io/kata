@@ -22,18 +22,22 @@ func checkRecurringDispatchDecisions(t *testing.T, s db.Storage) error {
 		t.Helper()
 		// Revision races have no explain equivalent. Every live gate is read
 		// immediately before dispatch on the identical project, job and clock.
+		var explanation db.RecurringExplanation
 		if want != "definition_changed" {
-			explanation, err := s.ExplainRecurringCron(ctx, in.ProjectID, in.JobUID, in.Now)
+			var err error
+			explanation, err = s.ExplainRecurringCron(ctx, in.ProjectID, in.JobUID, in.Now)
 			require.NoError(t, err)
-			expected := cron.DispatchReason(want)
-			if want == "delivered" {
-				expected = cron.DispatchDue
-			}
-			require.Equal(t, expected, explanation.Reason)
 		}
 		out, e := s.DispatchRecurringCron(ctx, in)
 		require.NoError(t, e)
 		require.Equal(t, want, string(out.Reason))
+		if want != "definition_changed" {
+			expected := out.Reason
+			if expected == cron.DispatchDelivered {
+				expected = cron.DispatchDue
+			}
+			require.Equal(t, expected, explanation.Reason)
+		}
 		require.Equal(t, delivered, out.Delivered)
 		return out
 	}
@@ -67,10 +71,10 @@ func checkRecurringDispatchDecisions(t *testing.T, s db.Storage) error {
 	})
 	// Corrupt restore fixtures exercise fail-closed stage classification. None of
 	// these diagnostic failures may commit tentative progress or children.
-	_, e = q.ExecContext(ctx, `UPDATE cron_jobs SET deleted_at=NULL WHERE uid=$1`, job.UID)
+	job.Definition.Enabled = true
+	job, _, e = s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "Corrupt-state review", Definition: job.Definition, Actor: "operator"})
 	require.NoError(t, e)
-	_, e = q.ExecContext(ctx, `UPDATE cron_jobs SET definition_json=$1 WHERE uid=$2`, string(mustRecurringEnabled(t, job)), job.UID)
-	require.NoError(t, e)
+	in.JobUID, in.ExpectedEventUID = job.UID, job.DefinitionEventUID
 	parent, e = s.IssueByID(ctx, parent.ID)
 	require.NoError(t, e)
 	metadata := parent.Metadata
@@ -92,6 +96,11 @@ func checkRecurringDispatchDecisions(t *testing.T, s db.Storage) error {
 		require.NoError(t, err)
 		require.Equal(t, before, after)
 	}
+	_, e = q.ExecContext(ctx, `UPDATE cron_jobs SET definition_json=$1 WHERE uid=$2`, `{"version":1,"local-sensitive-detail":true}`, job.UID)
+	require.NoError(t, e)
+	fail("schedule_invalid")
+	_, e = q.ExecContext(ctx, `UPDATE cron_jobs SET definition_json=$1 WHERE uid=$2`, string(mustRecurringEnabled(t, job)), job.UID)
+	require.NoError(t, e)
 	_, e = q.ExecContext(ctx, `UPDATE issues SET metadata='{}' WHERE id=$1`, parent.ID)
 	require.NoError(t, e)
 	fail("progress_invalid")
