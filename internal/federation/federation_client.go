@@ -124,7 +124,7 @@ func (c *Client) IngestProjectEventsWithOptions(
 		}
 		schemaVersion = max(schemaVersion, version)
 		if required != "" {
-			requiredFeatures = required
+			requiredFeatures = db.MergeEventFeatures(requiredFeatures, required)
 		}
 	}
 	if requiredFeatures != "" {
@@ -215,6 +215,25 @@ func (c *Client) OfferRelayDeliveries(ctx context.Context, projectID int64, stre
 
 // AcceptRelayDeliveries submits an authenticated hop batch and returns its accepted prefix.
 func (c *Client) AcceptRelayDeliveries(ctx context.Context, projectID int64, batch db.RelayBatch) (db.RelayAcceptance, error) {
+	// Only v2 introduces a new relay compatibility requirement. Preserve opaque
+	// transport behavior for all other bodies; receivers own their validation.
+	for _, envelope := range batch.Envelopes {
+		required, err := db.RelayEnvelopeRequiredFeatures(envelope)
+		if err != nil {
+			return db.RelayAcceptance{}, err
+		}
+		if db.RequireEventFeatures(db.CronEventFeature, required) == nil {
+			continue
+		}
+		_, supported, err := c.projectFederationFeatures(ctx, projectID)
+		if err != nil {
+			return db.RelayAcceptance{}, err
+		}
+		if err := db.RequireEventFeatures(supported, required); err != nil {
+			return db.RelayAcceptance{}, err
+		}
+		break
+	}
 	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(replicationDoer{c.client}))
 	if err != nil {
 		return db.RelayAcceptance{}, err

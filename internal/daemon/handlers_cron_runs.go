@@ -11,6 +11,9 @@ import (
 )
 
 func cronRunAPIError(ctx context.Context, cfg ServerConfig, err error, projectID int64, id string) error {
+	if errors.Is(err, db.ErrUnsupportedEventFeatures) {
+		return cronSummaryUnsupported()
+	}
 	if errors.Is(err, db.ErrCronConflict) {
 		data := map[string]any{}
 		if current, readErr := cfg.DB.CronRun(ctx, projectID, id); readErr == nil {
@@ -29,7 +32,7 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 		}
 		out := &api.CronCapabilitiesResponse{EventFeatures: db.SupportedEventFeatures}
 		out.Body.ProjectUID = project.UID
-		out.Body.EventFeatures = []string{db.CronEventFeature}
+		out.Body.EventFeatures = []string{db.CronRunSummaryV2Feature, db.CronEventFeature}
 		return out, nil
 	})
 	huma.Register(h, huma.Operation{OperationID: "observeCronRun", Method: http.MethodPut, Path: base + "/runs/{run_uid}", MaxBodyBytes: db.CronObservationLimit}, func(ctx context.Context, in *api.ObserveCronRunRequest) (*api.ObserveCronRunResponse, error) {
@@ -39,6 +42,14 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 		}
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
+		}
+		if in.Body.Summary.UsesV2() {
+			var release func()
+			ctx, release, err = admitCronSummary(ctx, cfg, in.ProjectID)
+			if err != nil {
+				return nil, err
+			}
+			defer release()
 		}
 		result, err := cfg.DB.ObserveCronRun(ctx, in.Body.Native(in.ProjectID, in.RunUID, actor))
 		if err != nil {

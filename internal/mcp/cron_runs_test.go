@@ -144,3 +144,36 @@ func TestCronRunProjectSelectionAndInvalidEvidence(t *testing.T) {
 	}
 	require.Empty(t, cronOK(t, f.session, "cron_runs", map[string]any{})["runs"])
 }
+
+func TestCronRunSummaryRoundTrip(t *testing.T) {
+	f := newCronFixture(t)
+	job := cronTestJob(t, f)
+	for _, summary := range []map[string]any{
+		{"version": float64(1), "steps": []any{}},
+		{"version": float64(1), "reason": "agent_quota", "usage": map[string]any{"model": "model-large", "cost_micros": float64(0), "currency": "USD"}, "steps": []any{map[string]any{"key": "review", "status": "failed", "exit_code": float64(0), "started_at": "2026-11-03T01:00:00-08:00"}}, "log_ref": "urn:example:run"},
+	} {
+		args := cronObservation(cronNewUID(t, f.session), job)
+		args["summary"] = summary
+		first := cronOK(t, f.session, "cron_run_observe", args)
+		require.Equal(t, summary, first["run"].(map[string]any)["summary"])
+		again := cronOK(t, f.session, "cron_run_observe", args)
+		require.Equal(t, true, again["replayed"])
+		require.Equal(t, first["run"], again["run"])
+	}
+}
+
+func TestCronRunSummaryRejectsNullMembers(t *testing.T) {
+	f := newCronFixture(t)
+	job := cronTestJob(t, f)
+	for _, member := range []string{"reason", "usage", "steps", "log_ref"} {
+		t.Run(member, func(t *testing.T) {
+			id := cronNewUID(t, f.session)
+			args := cronObservation(id, job)
+			args["summary"] = map[string]any{"version": 1, member: nil}
+			result := cronCall(t, f.session, "cron_run_observe", args)
+			require.True(t, result.IsError, "%s", mustJSON(t, result))
+			_, err := f.store.CronRun(t.Context(), f.project.ID, id)
+			require.ErrorIs(t, err, db.ErrNotFound)
+		})
+	}
+}

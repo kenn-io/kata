@@ -10,13 +10,18 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"go.kenn.io/kata/internal/cron"
 )
 
 // CronEventFeature identifies support for all cron definitions, runs and native delivery state.
 const CronEventFeature = "cron_v1"
 
+// CronRunSummaryV2Feature gates additive structured fields in version 1 summaries.
+const CronRunSummaryV2Feature = "cron_run_summary_v2"
+
 // SupportedEventFeatures is the complete event format advertisement.
-const SupportedEventFeatures = CronEventFeature
+const SupportedEventFeatures = CronRunSummaryV2Feature + "," + CronEventFeature
 
 // Native cron job projections are immutable and retained as tombstones, so a
 // positive job result remains valid for that project UID's lifetime.
@@ -44,6 +49,23 @@ func MergeEventFeatures(values ...string) string {
 // PayloadRequiredFeatures supplements type classification with native delivery state.
 func PayloadRequiredFeatures(kind, payload string) (string, error) {
 	required := EventRequiredFeatures(kind)
+	if kind == "cron.run.observed" || kind == "cron.run.snapshot" {
+		var body struct {
+			Summary jsontext.Value `json:"summary"`
+		}
+		if err := json.Unmarshal([]byte(payload), &body); err != nil {
+			return "", err
+		}
+		if len(body.Summary) > 0 {
+			summary, err := cron.ParseSummary(body.Summary)
+			if err != nil {
+				return "", err
+			}
+			if summary.UsesV2() {
+				required = MergeEventFeatures(required, CronRunSummaryV2Feature)
+			}
+		}
+	}
 	native, err := payloadHasNativeRecurringState(kind, payload)
 	if err != nil {
 		return "", err
@@ -171,8 +193,15 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 	required := ""
 	if cronPresent {
 		required = CronEventFeature
+		structured, err := projectSummaryRequired(ctx, q, projectUID)
+		if err != nil {
+			return "", err
+		}
+		if structured {
+			required = MergeEventFeatures(required, CronRunSummaryV2Feature)
+		}
 		if _, cached := nativeProjectFeatureCache.Load(projectUID); cached {
-			return MergeEventFeatures(required, SupportedEventFeatures), nil
+			return required, nil
 		}
 	}
 	if !cronPresent && !issueMoved {
@@ -190,7 +219,7 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 		}
 		if native {
 			nativeProjectFeatureCache.Store(projectUID, struct{}{})
-			return MergeEventFeatures(required, SupportedEventFeatures), nil
+			return MergeEventFeatures(required, CronEventFeature), nil
 		}
 	}
 	if issueMoved {
@@ -199,7 +228,7 @@ func ProjectRequiredEventFeatures(ctx context.Context, q interface {
 			return "", err
 		}
 		if native {
-			return MergeEventFeatures(required, SupportedEventFeatures), nil
+			return MergeEventFeatures(required, CronEventFeature), nil
 		}
 	}
 	return required, nil

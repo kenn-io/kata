@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"time"
@@ -36,6 +37,22 @@ type CronRunObserveInput struct {
 	Summary                    generated.Summary                  `json:"summary"`
 	StartedAt                  *time.Time                         `json:"started_at,omitempty"`
 	EndedAt                    *time.Time                         `json:"ended_at,omitempty"`
+}
+
+// Validate the original summary before generated optional fields can erase
+// explicit null members during decoding and re-encoding.
+func (in *CronRunObserveInput) UnmarshalJSON(raw []byte) error {
+	var document struct {
+		Summary jsontext.Value `json:"summary"`
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		return err
+	}
+	if _, err := cron.ParseSummary(document.Summary); err != nil {
+		return err
+	}
+	type plain CronRunObserveInput
+	return json.Unmarshal(raw, (*plain)(in))
 }
 
 func registerCronRunTools(server *sdkmcp.Server, h toolHandlers) {

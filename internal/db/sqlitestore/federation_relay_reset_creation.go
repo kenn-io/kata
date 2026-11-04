@@ -14,6 +14,17 @@ func (d *Store) CreateRelayReset(ctx context.Context, bindingUID string, signer 
 	var result db.RelayResetCheckpoint
 	err := d.relayTx(ctx, func(tx *sql.Tx) error {
 		var err error
+		grant, err := d.relayGrantTx(ctx, tx, bindingUID, "pull")
+		if err != nil {
+			return err
+		}
+		var projectUID string
+		if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1`, *grant.ProjectID).Scan(&projectUID); err != nil {
+			return err
+		}
+		if err := db.RequireProjectEventFeatures(ctx, tx, projectUID); err != nil {
+			return err
+		}
 		result, err = d.relayReset(tx).CreateReset(ctx, bindingUID, signer)
 		return err
 	})

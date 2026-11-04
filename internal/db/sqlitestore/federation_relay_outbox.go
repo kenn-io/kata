@@ -32,6 +32,9 @@ func (d *Store) PendingRelayDeliveries(ctx context.Context, bindingUID, stream s
 		if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=?`, *grant.ProjectID).Scan(&projectUID); err != nil {
 			return err
 		}
+		if err := db.RequireProjectEventFeatures(ctx, tx, projectUID); err != nil {
+			return err
+		}
 		// Event and artifact rows a forwarded root reset superseded stay as
 		// history and are not offered again; the checkpoint carries their state.
 		superseded, _, err := d.relayReset(tx).SupersededDeliveries(ctx, projectUID, bindingUID)
@@ -57,6 +60,9 @@ func (d *Store) PendingRelayDeliveries(ctx context.Context, bindingUID, stream s
 			}
 			var e db.RelayEnvelope
 			if err = json.Unmarshal([]byte(raw), &e); err != nil {
+				break
+			}
+			if err = db.RequireRelayEnvelopeFeatures(ctx, e); err != nil {
 				break
 			}
 			if total+len(e.Body) > manifestLimit {
