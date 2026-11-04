@@ -97,10 +97,7 @@ func (h toolHandlers) cronJobValidate(ctx context.Context, _ *sdkmcp.CallToolReq
 		if err != nil {
 			return nil, nil, err
 		}
-		definition, ok := in.Definition.(map[string]any)
-		if !ok {
-			return nil, nil, errors.New("parent_ref requires definition.issue")
-		}
+		definition, _ := in.Definition.(map[string]any)
 		issue, ok := definition["issue"].(map[string]any)
 		if !ok {
 			return nil, nil, errors.New("parent_ref requires definition.issue")

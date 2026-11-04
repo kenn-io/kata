@@ -73,8 +73,6 @@ type CronList struct {
 
 // CronDefinitions is the dormant shared configuration storage API.
 type CronDefinitions interface {
-	ValidateCronJob(context.Context, CronValidationInput) (CronValidation, error)
-	ValidateCronWorkflow(context.Context, CronValidationInput) (CronValidation, error)
 	PutCronJob(context.Context, PutCronJob) (CronJob, []Event, error)
 	PutCronWorkflow(context.Context, PutCronWorkflow) (CronWorkflow, Event, error)
 	CronJob(context.Context, int64, string) (CronJob, error)

@@ -485,6 +485,8 @@ func (o *cronCLIOptions) decodeRequest(raw []byte) (map[string]jsontext.Value, e
 func (o *cronCLIOptions) requestShape() (any, error) {
 	replace := o.action == "create" || o.action == "update"
 	switch {
+	case o.action == "validate":
+		return &generated.CronValidationBody{}, nil
 	case o.resource == "job" && replace:
 		return &api.PutCronJobBody{}, nil
 	case o.resource == "workflow" && replace:

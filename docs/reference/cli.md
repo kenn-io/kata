@@ -2240,7 +2240,8 @@ to inject its value into the consuming process. Revoke the token during teardown
 
 `kata cron` stores shared jobs, workflows and independent attributed run evidence.
 Commands return JSON; external adapters schedule and launch their own work.
-See [Cron](cron.md) for bounded documents and retry semantics.
+See [Cron](cron.md) for bounded documents and retry semantics, and
+[Validate before saving](cron.md#validate-before-saving) for validation.
 
 ```sh
 kata cron job create --uid <job-uid> --file job.json --json
@@ -2259,11 +2260,6 @@ kata cron run list [--limit 100] [--before-uid <uid>] [--job-uid <job-uid>] --js
 kata cron run show <run-uid> --json
 kata show <issue-ref> --planning-dates --json
 ```
-
-Validate prints normalized definitions, staged errors, warnings, and hypothetical
-next fires without saving. It returns exit 3 for an invalid definition, including
-with `--quiet`. See [Validate before saving](cron.md#validate-before-saving)
-for preview limits and daemon version requirements.
 
 Recurring job create/update also accept `--parent <issue-ref>`; see
 [recurring child issues](cron.md#recurring-child-issues) for the request format.

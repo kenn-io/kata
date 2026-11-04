@@ -41,35 +41,31 @@ func OpenAPIDocument() *huma.OpenAPI {
 func openAPIClientDocument() *huma.OpenAPI {
 	doc := baseOpenAPIDocument()
 	clearResponseAdditionalProperties(doc)
-	allowEmptyRequiredClientStrings(doc)
+	allowEmptyFederationJoinClientStrings(doc)
 	return doc
 }
 
 // Required JSON properties specify presence, not a nonempty string. These
-// fields may be empty in join instructions or request-stage cron errors.
-// Override inferred nonzero-value validation without making them optional.
-func allowEmptyRequiredClientStrings(doc *huma.OpenAPI) {
+// fields are intentionally empty when no origin is configured or a grant
+// cannot support a runnable join. Override the Go generator's inferred
+// nonzero-value validation without making the wire properties optional.
+func allowEmptyFederationJoinClientStrings(doc *huma.OpenAPI) {
 	if doc == nil || doc.Components == nil || doc.Components.Schemas == nil {
 		return
 	}
-	for schemaName, names := range map[string][]string{
-		"FederationJoinInstructions": {"hub_url", "join_command"},
-		"CronValidationResult":       {"name"},
-	} {
-		schema := doc.Components.Schemas.Map()[schemaName]
-		if schema == nil {
+	join := doc.Components.Schemas.Map()["FederationJoinInstructions"]
+	if join == nil {
+		return
+	}
+	for _, name := range []string{"hub_url", "join_command"} {
+		property := join.Properties[name]
+		if property == nil {
 			continue
 		}
-		for _, name := range names {
-			property := schema.Properties[name]
-			if property == nil {
-				continue
-			}
-			if property.Extensions == nil {
-				property.Extensions = map[string]any{}
-			}
-			property.Extensions["x-oapi-codegen-extra-tags"] = map[string]any{"validate": "omitempty"}
+		if property.Extensions == nil {
+			property.Extensions = map[string]any{}
 		}
+		property.Extensions["x-oapi-codegen-extra-tags"] = map[string]any{"validate": "omitempty"}
 	}
 }
 

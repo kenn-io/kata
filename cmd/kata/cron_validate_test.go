@@ -69,8 +69,8 @@ func TestCronCLIValidateOldDaemonAndMalformedResponse(t *testing.T) {
 	for _, tc := range []struct{ name, version, response, want string }{
 		{"old", "0.38.0", `{}`, "upgrade the daemon"},
 		{"missing-valid", "0.41.0", `{"name":"Inspect","definition":{},"errors":[],"warnings":[]}`, "validation response"},
-		{"wrong-valid", "0.41.0", `{"valid":"true"}`, "validation response"},
-		{"invalid-json", "0.41.0", `{`, "validation response"},
+		{"wrong-valid", "0.41.0", `{"valid":"true"}`, ""},
+		{"invalid-json", "0.41.0", `{`, ""},
 		{"null-definition", "0.41.0", `{"valid":true,"name":"Inspect","definition":null,"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
 		{"scalar-definition", "0.41.0", `{"valid":true,"name":"Inspect","definition":42,"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
 		{"missing-schedule", "0.41.0", `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[]}`, "validation response"},
@@ -90,8 +90,12 @@ func TestCronCLIValidateOldDaemonAndMalformedResponse(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			_, _, err := executeCronCLI(t, server.URL, nil, "job", "validate", "--file", cronCLIFile(t, cronCLIJob(t)))
-			require.ErrorContains(t, err, tc.want)
+			out, _, err := executeCronCLI(t, server.URL, nil, "job", "validate", "--file", cronCLIFile(t, cronCLIJob(t)))
+			require.Error(t, err)
+			require.Empty(t, out, "malformed daemon success must not be printed")
+			if tc.want != "" {
+				require.ErrorContains(t, err, tc.want)
+			}
 			if tc.name == "old" {
 				require.Zero(t, calls)
 			}

@@ -9,7 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/cron"
-	"go.kenn.io/kata/internal/db"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -19,21 +18,9 @@ func (o *cronCLIOptions) validationRequestBody(cmd *cobra.Command) ([]byte, erro
 	if err != nil {
 		return nil, err
 	}
-	var fields map[string]jsontext.Value
-	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
-		return nil, cronCLIValidation("cron request must be a JSON object")
-	}
-	// Validate only the envelope; opaque document values stay raw for the daemon.
-	for key := range fields {
-		switch key {
-		case "definition":
-		case "name", "uid", "expected_event_uid", "actor":
-			if _, err := cronStringField(fields, key); err != nil {
-				return nil, err
-			}
-		default:
-			return nil, cronCLIValidation("unknown cron request member: " + key)
-		}
+	fields, err := o.decodeRequest(raw)
+	if err != nil {
+		return nil, err
 	}
 	bodyUID, err := cronStringField(fields, "uid")
 	if err != nil {
@@ -70,36 +57,28 @@ func (o cronCLIOptions) callValidate(a daemonAPI, c *kataclient.Client, projectI
 	if err := json.Unmarshal(raw, &body); err != nil {
 		return nil, err
 	}
-	var status int
-	var result []byte
-	var callErr error
 	if o.resource == "job" {
 		count := strconv.Itoa(o.count)
 		response, err := c.ValidateCronJobWithResponse(a.ctx, &generated.ValidateCronJobRequestOptions{PathParams: &generated.ValidateCronJobPath{ProjectID: projectID}, Query: &generated.ValidateCronJobQuery{Count: &count, From: &o.from}, Body: &body})
 		if response == nil {
 			return nil, externalCLITransportError(response, err)
 		}
-		status, result, callErr = response.StatusCode, response.Body, err
-	} else {
-		response, err := c.ValidateCronWorkflowWithResponse(a.ctx, &generated.ValidateCronWorkflowRequestOptions{PathParams: &generated.ValidateCronWorkflowPath{ProjectID: projectID}, Body: &body})
-		if response == nil {
-			return nil, externalCLITransportError(response, err)
-		}
-		status, result, callErr = response.StatusCode, response.Body, err
+		return cronCLIResponse(response.StatusCode, response.Body, err)
 	}
-	if status >= 200 && status < 300 && callErr != nil {
-		return nil, fmt.Errorf("decode cron validation response: %w", callErr)
+	response, err := c.ValidateCronWorkflowWithResponse(a.ctx, &generated.ValidateCronWorkflowRequestOptions{PathParams: &generated.ValidateCronWorkflowPath{ProjectID: projectID}, Body: &body})
+	if response == nil {
+		return nil, externalCLITransportError(response, err)
 	}
-	return cronCLIResponse(status, result, callErr)
+	return cronCLIResponse(response.StatusCode, response.Body, err)
 }
 
 func emitCronValidation(cmd *cobra.Command, raw []byte, job bool) error {
 	var out struct {
-		Valid      *bool                       `json:"valid"`
-		Name       *string                     `json:"name"`
-		Definition jsontext.Value              `json:"definition"`
-		Errors     *[]db.CronValidationError   `json:"errors"`
-		Warnings   *[]db.CronValidationWarning `json:"warnings"`
+		Valid      *bool                              `json:"valid"`
+		Name       *string                            `json:"name"`
+		Definition jsontext.Value                     `json:"definition"`
+		Errors     *[]generated.CronValidationError   `json:"errors"`
+		Warnings   *[]generated.CronValidationWarning `json:"warnings"`
 		Schedule   *struct {
 			Delivery *string              `json:"delivery"`
 			Basis    *string              `json:"basis"`

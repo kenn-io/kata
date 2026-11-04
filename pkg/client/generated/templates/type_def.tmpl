@@ -125,46 +125,33 @@
     {{ if and (not $td.IsAlias) (not $td.Schema.UnionElements) (not $td.Schema.IsAnyType) $td.Schema.NeedsValidation }}
     func ({{$alias}} {{$td.Name}}) Validate() error {
         {{ if eq $td.Name "CronValidationResult" }}
-        // Required name may be empty in request-stage errors. The generator's
-        // complex validator ignores the field's extra-tags override.
-
-	var errors runtime.ValidationErrors
-	if v, ok := any({{$alias}}.Definition).(runtime.Validator); ok && v != nil {
-		if err := v.Validate(); err != nil {
-			errors = errors.Append("Definition", err)
-		}
-	}
-	if err := typesValidator.Var({{$alias}}.Errors, "required"); err != nil {
-		errors = errors.Append("Errors", err)
-	}
-	for i, item := range {{$alias}}.Errors {
-		if v, ok := any(item).(runtime.Validator); ok {
-			if err := v.Validate(); err != nil {
-				errors = errors.Append(fmt.Sprintf("Errors[%d]", i), err)
-			}
-		}
-	}
-	if {{$alias}}.Schedule != nil {
-		if v, ok := any({{$alias}}.Schedule).(runtime.Validator); ok {
-			if err := v.Validate(); err != nil {
-				errors = errors.Append("Schedule", err)
-			}
-		}
-	}
-	if err := typesValidator.Var({{$alias}}.Warnings, "required"); err != nil {
-		errors = errors.Append("Warnings", err)
-	}
-	for i, item := range {{$alias}}.Warnings {
-		if v, ok := any(item).(runtime.Validator); ok {
-			if err := v.Validate(); err != nil {
-				errors = errors.Append(fmt.Sprintf("Warnings[%d]", i), err)
-			}
-		}
-	}
-	if len(errors) == 0 {
-		return nil
-	}
-	return errors
+        // Request-stage errors allow an empty name; nested values still validate.
+        var errors runtime.ValidationErrors
+        if err := typesValidator.Var({{$alias}}.Errors, "required"); err != nil {
+            errors = errors.Append("Errors", err)
+        }
+        for i, item := range {{$alias}}.Errors {
+            if err := item.Validate(); err != nil {
+                errors = errors.Append(fmt.Sprintf("Errors[%d]", i), err)
+            }
+        }
+        if {{$alias}}.Schedule != nil {
+            if err := {{$alias}}.Schedule.Validate(); err != nil {
+                errors = errors.Append("Schedule", err)
+            }
+        }
+        if err := typesValidator.Var({{$alias}}.Warnings, "required"); err != nil {
+            errors = errors.Append("Warnings", err)
+        }
+        for i, item := range {{$alias}}.Warnings {
+            if err := item.Validate(); err != nil {
+                errors = errors.Append(fmt.Sprintf("Warnings[%d]", i), err)
+            }
+        }
+        if len(errors) == 0 {
+            return nil
+        }
+        return errors
         {{ else }}{{ $td.Schema.ValidateDeclWithOptions $alias $validatorVar $forceSimple }}{{ end }}
     }
     {{ end }}

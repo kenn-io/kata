@@ -33,3 +33,16 @@ func TestCronValidationSDKEmptyName(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(`{"valid":false,"name":"","definition":null,"errors":[{"stage":"request","code":"validation","message":"name required"}],"warnings":[]}`), &result))
 	require.NoError(t, result.Validate())
 }
+
+// SDK result validation must reject malformed nested diagnostics and fires.
+func TestCronValidationSDKNestedResponses(t *testing.T) {
+	for _, raw := range []string{
+		`{"name":"Inspect","definition":null,"errors":[{}],"warnings":[]}`,
+		`{"name":"Inspect","definition":null,"errors":[],"warnings":[{}]}`,
+		`{"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"basis":"adapter_trigger","delivery":"adapter","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[{"at":"2026-11-04T00:00:00Z"}]}}`,
+	} {
+		var result generated.CronValidationResult
+		require.NoError(t, json.Unmarshal([]byte(raw), &result))
+		require.Error(t, result.Validate(), raw)
+	}
+}
