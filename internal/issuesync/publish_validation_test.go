@@ -27,11 +27,30 @@ func TestPublishValidationServiceError(t *testing.T) {
 			require.NotContains(t, err.Error(), "private-context")
 			require.Contains(t, err.Error(), tc.want)
 			if tc.want == string(PublicationNotionOpenTargetRequired) {
-				require.Contains(t, err.Error(), "Notion publication requires an open status target.")
+				require.Contains(t, err.Error(), "Choose an open Notion status.")
 				require.Contains(t, err.Error(), "--todo-group")
 			} else {
 				require.EqualError(t, err, tc.want)
 			}
+		})
+	}
+}
+
+func TestPublicationValidationDetailsUseUserFacingMessages(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		code    PublicationValidation
+		message string
+	}{
+		{"binding", PublicationBindingInvalid, "Invalid sync settings."},
+		{"notion open status", PublicationNotionOpenTargetRequired, "Choose an open Notion status."},
+		{"open status", PublicationOpenTargetRequired, "No valid open status is configured."},
+		{"destination schema", PublicationSchemaInvalid, "The destination’s fields or statuses don’t match your sync settings."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			message, _, ok := publicationValidationDetails(string(tc.code))
+			require.True(t, ok)
+			require.Equal(t, tc.message, message)
 		})
 	}
 }

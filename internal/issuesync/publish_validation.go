@@ -54,9 +54,9 @@ func (e *publicationValidationError) Error() string {
 func publicationValidationDetails(code string) (message, hint string, ok bool) {
 	switch PublicationValidation(code) {
 	case PublicationBindingInvalid:
-		return "The publication binding configuration is invalid.", "Check the daemon provider origin and credential account, then run sync enable with valid source and status settings and publish again.", true
+		return "Invalid sync settings.", "Check the daemon provider origin and credential account, then run sync enable with valid source and status settings and publish again.", true
 	case PublicationNotionOpenTargetRequired:
-		return "Notion publication requires an open status target.", "Re-enable Notion sync with workflow groups and --todo-group; use --open-status to select the initial status when needed.", true
+		return "Choose an open Notion status.", "Re-enable Notion sync with workflow groups and --todo-group; use --open-status to select the initial status when needed.", true
 	case PublicationTwentyRequiredField:
 		return "Twenty requires an additional task field before publication.", "Make the additional required task field optional or give it a default in Twenty, then publish again.", true
 	case PublicationGitHubContentInvalid:
@@ -74,9 +74,9 @@ func publicationValidationDetails(code string) (message, hint string, ok bool) {
 	case PublicationWritePermissionRequired:
 		return "The publication destination requires write permission.", "Grant the daemon credential create/write access to the selected project, then publish again.", true
 	case PublicationOpenTargetRequired:
-		return "The publication destination has no valid open status target.", "Add an open status to the destination workflow or update the binding's open status selection, then publish again.", true
+		return "No valid open status is configured.", "Add an open status to the destination workflow or update the binding's open status selection, then publish again.", true
 	case PublicationSchemaInvalid:
-		return "The publication destination schema does not support the configured fields or statuses.", "Restore the destination's required fields and statuses or re-enable sync with current field and status mappings, then publish again.", true
+		return "The destination’s fields or statuses don’t match your sync settings.", "Restore the destination's required fields and statuses or re-enable sync with current field and status mappings, then publish again.", true
 	case PublicationOpenIssueRequired:
 		return "Publication requires an open native issue.", "Reopen the native issue before publishing it.", true
 

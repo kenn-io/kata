@@ -117,6 +117,50 @@ func checkIssuePublishTickTickRecoveryStatus(t *testing.T, store db.Storage, _ B
 		require.NoError(t, err)
 		require.Equal(t, "closed", current.Status, "first ordinary import applies completion observed during recovery")
 	}
+
+	// Publication prepared while the native issue is open, then a local close
+	// before attachment must not let TickTick's original open status reopen it.
+	f, err := createIssueFixture(ctx, store, "local-close", "Native", "worker", nil)
+	require.NoError(t, err)
+	b, err := store.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
+		ProjectID: f.Project.ID, Provider: "ticktick", SourceKey: "ticktick:" + f.Project.UID,
+		RemoteID: "example", DisplayName: "Example", Config: []byte(`{"status_sync":"one-way"}`), IntervalSeconds: 60,
+	})
+	require.NoError(t, err)
+	p := store.(db.IssuePublicationStore)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	claim, err := p.ClaimIssuePublication(ctx, f.Project.ID, f.Issue.ID, "ticktick", now, now.Add(-time.Hour), false)
+	require.NoError(t, err)
+	attempt, err := p.BeginIssuePublication(ctx, db.IssuePublicationBegin{
+		Guard:       claim.Guard,
+		Publication: db.IssuePublication{AttemptUID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Actor: "worker", Revision: f.Issue.Revision, Payload: []byte(`{}`)},
+	})
+	require.NoError(t, err)
+	require.NoError(t, p.DispatchIssuePublication(ctx, claim.Guard, attempt.AttemptUID))
+	_, _, _, err = store.CloseIssue(ctx, f.Issue.ID, "done", "worker", "Completed locally during publication", nil)
+	require.NoError(t, err)
+	observed := now.Add(time.Minute)
+	remote := db.IssuePublicationRemote{ExternalID: "task:remote", Status: "open", RawStatus: new("0"), Version: observed}
+	mapping, _, err := p.AttachIssuePublication(ctx, db.IssuePublicationAttach{Guard: claim.Guard, AttemptUID: attempt.AttemptUID, Remote: remote})
+	require.NoError(t, err)
+	guard := db.IssueSyncImportGuard{BindingID: b.ID, Provider: "ticktick", StartedAt: now}
+	state, err := store.(db.IssueStatusReader).IssueStatusMappingByID(ctx, guard, mapping.ID)
+	require.NoError(t, err)
+	require.NotNil(t, state.State.Observed, "attachment must record TickTick's original open observation")
+	require.NotNil(t, state.State.Observed.Raw)
+	require.Equal(t, "0", *state.State.Observed.Raw)
+	require.Equal(t, observed, state.State.Observed.Version)
+
+	batch := db.ImportBatchParams{
+		ProjectID: f.Project.ID, Source: b.SourceKey, Actor: "ticktick-sync",
+		ImportStatusObservations: map[string]db.IssueStatusObservation{remote.ExternalID: {Raw: remote.RawStatus, Version: observed}},
+		Items:                    []db.ImportItem{{ExternalID: remote.ExternalID, Title: "Native", Author: "worker", Status: "open", CreatedAt: now.Add(-time.Hour), UpdatedAt: observed}},
+	}
+	_, _, err = store.ImportBatch(ctx, batch)
+	require.NoError(t, err)
+	current, err := store.IssueByID(ctx, f.Issue.ID)
+	require.NoError(t, err)
+	require.Equal(t, "closed", current.Status, "the first unchanged import must preserve a later local close")
 	return nil
 }
 

@@ -193,11 +193,16 @@ func (p *Publisher) Publish(ctx context.Context, r PublishRequest) (PublishResul
 	var remote db.IssuePublicationRemote
 	if pending != nil || r.Adopt != "" {
 		identity := db.IssuePublicationRemote{ExternalID: r.Adopt}
-		if r.Adopt == "" {
+		if pending != nil && r.Adopt == "" {
 			identity = *pending.Remote
+		} else if pending != nil && pending.Remote != nil {
+			// The operator supplies the provider-native identity, which may differ
+			// from the saved canonical ID. Keep the attempt's content baseline for
+			// the verified read either way.
+			identity.ContentBaseline = pending.Remote.ContentBaseline
 		}
 		if pending != nil {
-			if recovery, ok := session.(PreparedPublishRecoverySession); ok {
+			if recovery, ok := session.(PreparedPublishRecoverySession); ok && len(pending.Payload) > 0 {
 				remote, err = recovery.ReadCreatedWithPrepared(ctx, identity, pending.Payload)
 			} else {
 				remote, err = session.ReadCreated(ctx, identity)

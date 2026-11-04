@@ -417,10 +417,13 @@ func (s *Store) AttachIssuePublication(ctx context.Context, params db.IssuePubli
 			pendingEvent = p.PendingEventUID
 		}
 		// TickTick imports use repeated raw observations to preserve local state.
-		// Do not acknowledge a remote transition that attachment has not applied,
-		// unless an intervening two-way intent owns the next status delivery.
+		// Keep the initial open observation if the native issue was closed after
+		// publication began, so the first import cannot reopen it. A recovered
+		// remote completion stays unobserved so the first import can apply it.
 		if b.Provider == "ticktick" && remote.Status != issue.Status && pendingEvent == nil {
-			rawStatus, observedAt = nil, nil
+			if issue.Status != "closed" || remote.Status != "open" {
+				rawStatus, observedAt = nil, nil
+			}
 		}
 		if _, err = tx.ExecContext(ctx, `UPDATE import_mappings SET observed_status=$1,observed_status_at=$2,remote_locator=NULLIF($3,''),pending_event_uid=$4 WHERE id=$5`, rawStatus, observedAt, remote.Locator, pendingEvent, mapping.ID); err != nil {
 			return err

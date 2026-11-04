@@ -135,6 +135,10 @@ func TestPublishTickTickOneSendAndProjectPolicy(t *testing.T) {
 			if scenario == "incomplete" || scenario == "closed_task" {
 				require.Equal(t, "task:task-1", remote.ExternalID)
 			}
+			if scenario == "incomplete" {
+				require.NotNil(t, remote.ContentBaseline, "a partial create observation must retain its prepared content baseline")
+				require.True(t, validPublicationContentBaseline(*remote.ContentBaseline))
+			}
 		})
 	}
 }
@@ -355,4 +359,69 @@ func TestPublishTickTickRecoversCompletionBeforeFirstImport(t *testing.T) {
 	reopened := mappedIssue(t, store, b, task.ID)
 	require.Equal(t, issue.UID, reopened.UID)
 	require.Equal(t, "open", reopened.Status, "TickTick's reopen must follow the recorded completion")
+}
+
+func TestPublishTickTickIncompleteCreateObservationPreservesLocalEdits(t *testing.T) {
+	store, binding := adapterDB(t)
+	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: binding.ProjectID, Title: "Native", Body: "Published body", Author: "worker",
+	})
+	require.NoError(t, err)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	created := Task{ID: "task-1", ProjectID: "project-1", Title: issue.Title, Content: issue.Body, Status: new(0), Kind: "TEXT", Items: []ChecklistItem{}}
+	partial := Task{ID: "task-1", ProjectID: "project-1", Kind: "TEXT"}
+	createRequests := 0
+	client, _ := testClient(t, func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/open/v1/project/project-1":
+			return reply(200, `{"id":"project-1","kind":"TASK","permission":"write"}`), nil
+		case "/open/v1/task":
+			createRequests++
+			raw, marshalErr := json.Marshal(partial)
+			require.NoError(t, marshalErr)
+			return reply(200, string(raw)), nil
+		case "/open/v1/project/project-1/task/task-1":
+			raw, marshalErr := json.Marshal(created)
+			require.NoError(t, marshalErr)
+			return reply(200, string(raw)), nil
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			return reply(404, `{}`), nil
+		}
+	})
+	adapter := NewAdapter(store, client)
+	publisher := issuesync.NewPublisher(issuesync.PublisherConfig{Store: store, Adapter: adapter, Clock: func() time.Time { return now }})
+	request := issuesync.PublishRequest{ProjectID: binding.ProjectID, IssueID: issue.ID, Provider: "ticktick", Actor: "worker"}
+	_, err = publisher.Publish(t.Context(), request)
+	require.Error(t, err, "the incomplete create observation must retain its confirmed identity for recovery")
+	require.Equal(t, 1, createRequests)
+	pending, err := store.PendingIssuePublication(t.Context(), binding.ProjectID)
+	require.NoError(t, err)
+	require.NotNil(t, pending)
+	require.NotNil(t, pending.Remote)
+	require.NotNil(t, pending.Remote.ContentBaseline, "recovery metadata must survive request compaction")
+	require.Equal(t, issue.UpdatedAt.UTC().Truncate(time.Millisecond), pending.Remote.ContentBaseline.At)
+
+	localTitle, localBody := "Local title after publication", "Local body after publication"
+	local, _, _, err := store.EditIssue(t.Context(), db.EditIssueParams{IssueID: issue.ID, Title: &localTitle, Body: &localBody, Actor: "worker"})
+	require.NoError(t, err)
+	now = now.Add(31 * time.Minute)
+	result, err := publisher.Publish(t.Context(), request)
+	require.NoError(t, err)
+	require.Equal(t, "recovered", result.Result)
+	require.Equal(t, 1, createRequests, "recovery must not send a second create")
+
+	now = now.Add(time.Minute)
+	source := sourceData()
+	source.data.Tasks = []Task{created}
+	runner := NewRunner(RunnerConfig{Store: store, Fetcher: source, Clock: func() time.Time { return now }})
+	imported, err := runner.RunOnce(t.Context(), binding.ID)
+	require.NoError(t, err)
+	require.Zero(t, imported.Import.Created)
+	after := mappedIssue(t, store, binding, "task-1")
+	require.Equal(t, local.Title, after.Title, "an unchanged first poll must preserve a local title edit")
+	require.Equal(t, local.Body, after.Body, "an unchanged first poll must preserve a local body edit")
+	checkpoint, err := DecodeCheckpoint(imported.Binding.Config)
+	require.NoError(t, err)
+	require.Equal(t, issue.UpdatedAt.UTC().Truncate(time.Millisecond), checkpoint.Versions["task-1"].Version)
 }

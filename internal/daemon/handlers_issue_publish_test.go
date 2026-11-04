@@ -55,6 +55,25 @@ func TestIssuePublishRejectsInvalidRecoveryRequest(t *testing.T) {
 	}
 }
 
+func TestIssuePublishRestoreAdoptionExplainsDisabledSync(t *testing.T) {
+	h := newGitHubSyncHandlerHarness(t)
+	issue, _, err := h.store.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: h.project.ID, Title: "Native issue", Author: "worker",
+	})
+	require.NoError(t, err)
+	_, err = h.store.UpsertIssueSyncBinding(t.Context(), db.UpsertIssueSyncBindingParams{
+		ProjectID: h.project.ID, Provider: "github", SourceKey: "github:source", RemoteID: "source",
+		DisplayName: "Example source", Config: []byte(`{}`), IntervalSeconds: 300,
+	})
+	require.NoError(t, err)
+	resp, body := postJSON(t, h.server, issueSyncEndpoint(h.project.ID, "github", "publish"), map[string]any{
+		"issue_ref": issue.ShortID, "actor": "worker", "adopt": "issue-id:example",
+	})
+	require.Equal(t, http.StatusConflict, resp.StatusCode, string(body))
+	require.Contains(t, string(body), "restore_adoption_requires_disabled_binding")
+	require.Contains(t, string(body), "Disable sync before using --adopt.")
+}
+
 func TestIssuePublishStatusAndLifecycleExposeOnlyRecoveryIdentity(t *testing.T) {
 	h := newGitHubSyncHandlerHarness(t)
 	i, _, err := h.store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: h.project.ID, Title: "Private title", Body: "Private body", Author: "worker"})

@@ -160,10 +160,6 @@ func (s *ticktickPublishSession) Create(ctx context.Context, raw jsontext.Value,
 		return zero, fmt.Errorf("invalid or out-of-project TickTick creation response")
 	}
 	remote := db.IssuePublicationRemote{ExternalID: "task:" + task.ID}
-	observed, err := s.observation(task)
-	if err != nil {
-		return remote, err
-	}
 	if task.Title == "" {
 		task.Title = p.Title
 	}
@@ -182,6 +178,11 @@ func (s *ticktickPublishSession) Create(ctx context.Context, raw jsontext.Value,
 		return remote, fmt.Errorf("invalid TickTick publication content baseline")
 	}
 	baselineCopy := *baseline
+	remote.ContentBaseline = &baselineCopy
+	observed, err := s.observation(task)
+	if err != nil {
+		return remote, err
+	}
 	observed.ContentBaseline = &baselineCopy
 	if observed.Status != "open" {
 		return remote, fmt.Errorf("TickTick created task is not open")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -72,6 +73,39 @@ func TestPublishCreateAndMappedReplay(t *testing.T) {
 	pending, err := s.PendingIssuePublication(t.Context(), b.ProjectID)
 	require.NoError(t, err)
 	require.Nil(t, pending)
+}
+
+func TestPublishAdoptionRetainsPendingRemoteMetadata(t *testing.T) {
+	s := testStore(t)
+	b := testBinding(t, s, "example-project", "notion")
+	i, _, err := s.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: b.ProjectID, Title: "Native", Author: "worker"})
+	require.NoError(t, err)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	baseline := db.IssuePublicationContentBaseline{Hash: strings.Repeat("a", 64), At: now}
+	f := &publishFake{create: func(ctx context.Context, admit func(context.Context) error) (db.IssuePublicationRemote, error) {
+		require.NoError(t, admit(ctx))
+		return db.IssuePublicationRemote{
+			ExternalID: "page:remote", Status: "open", Version: now, ContentBaseline: &baseline,
+		}, errors.New("confirmed create could not attach")
+	}}
+	p := NewPublisher(PublisherConfig{Store: s, Adapter: f, Clock: func() time.Time { return now }})
+	req := PublishRequest{ProjectID: b.ProjectID, IssueID: i.ID, Provider: "notion", Actor: "worker"}
+	_, err = p.Publish(t.Context(), req)
+	require.Error(t, err)
+	pending, err := s.PendingIssuePublication(t.Context(), b.ProjectID)
+	require.NoError(t, err)
+	require.NotNil(t, pending)
+	require.NotNil(t, pending.Remote)
+	require.NotNil(t, pending.Remote.ContentBaseline)
+	require.Equal(t, baseline, *pending.Remote.ContentBaseline)
+
+	now = now.Add(time.Hour)
+	req.Adopt = "page:remote"
+	result, err := p.Publish(t.Context(), req)
+	require.NoError(t, err)
+	require.Equal(t, "recovered", result.Result)
+	require.NotNil(t, f.lastRead.ContentBaseline, "explicit adoption must preserve the retained publication baseline")
+	require.Equal(t, baseline, *f.lastRead.ContentBaseline)
 }
 
 func TestPublishAmbiguousNeverRetriesAndAdopts(t *testing.T) {
