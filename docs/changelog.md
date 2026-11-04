@@ -102,7 +102,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - CLI crashes now exit 1 with an internal error and bug-report hint in the selected human, JSON, or agent format, instead of exit 2 with a raw panic trace. Foreground daemon crashes keep their trace. See [CLI reference](reference/cli.md). Thanks to [Rusty Shackleford](https://github.com/salmonumbrella).
 - Create and edit workflows in the `kata tui` Workflows tab with `n` and `e`. Edit the JSON definition with `Ctrl+e` and save with `Ctrl+o`. The form keeps your draft after errors and shows the current definition after concurrent changes. See [CLI reference](reference/cli.md#daemon-and-diagnostics).
 - Start, change, or stop an issue's recurrence in `kata tui` with `O` only while the detail is focused.
-  The form takes the RRULE as written, a start date, and an IANA zone, and
+  The form takes an RRULE (outer spaces trimmed), a start date, and an IANA zone, and
   shows the daemon's error with your input kept. Saves are revision-guarded;
   after a conflict, press `Esc`, then `O` once the detail refreshes.
   An issue that parents a recurring cron job is refused on save, as in
