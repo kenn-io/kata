@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-04
+last_edited: 2026-11-03
 ---
 
 # CLI reference
@@ -2010,13 +2010,13 @@ Creating an issue or comment, making a timed assignment or owner edit involving
 an expiry, changing the status of a recurring issue, closing an issue with a
 live federation lease, or reopening an issue closed for a reason other than
 `done` clears the undo history. Switching daemons also clears it.
-Except when restoring a deletion, undo reads the affected issue or exact link and refuses
-an observed conflicting change. It skips that history entry without changing
-the issue, so pressing `u` again reaches earlier edits. The revision check also
-rejects intervening status or owner changes, including changes away and back
-to the same value. These checks are not atomic: another client can edit the
-same field between the read and the undo write. A failed write with an
-uncertain outcome clears history rather than risking a second change.
+Except when restoring a deletion, undo reads the affected issue or exact link
+and refuses an observed conflicting change. It skips that history entry without
+changing the issue, so pressing `u` again reaches earlier edits. The revision
+check also rejects intervening status or owner changes, including changes away
+and back to the same value. These checks are not atomic: another client can
+edit the same field between the read and the undo write. A failed write with
+an uncertain outcome clears history rather than risking a second change.
 
 Press `C` to open the read-only credential ledger when the selected daemon
 advertises `token_audit_read`. It lists live, expired, and revoked credentials

@@ -221,7 +221,7 @@ func (m Model) refreshAfterUndo(entry undoEntry, resp *MutationResp) (Model, tea
 		m, cmd = m.reloadAttention()
 		cmds = append(cmds, cmd)
 	}
-	if m.detail.issue != nil && (m.detail.issue.UID == entry.uid ||
+	if m.detail.issue != nil && (entry.kind == "delete" || m.detail.issue.UID == entry.uid ||
 		(entry.link != nil && (m.detail.issue.UID == entry.link.From.UID || m.detail.issue.UID == entry.link.To.UID))) {
 		if m.detail.issue.UID == entry.uid && resp != nil && resp.Issue != nil {
 			m.detail.issue = mergeUndoIssue(m.detail.issue, resp.Issue, entry)
@@ -233,9 +233,8 @@ func (m Model) refreshAfterUndo(entry undoEntry, resp *MutationResp) (Model, tea
 		m.detail.fetchSeq.links = max(m.detail.fetchSeq.links, floor)
 		cmds = append(cmds, m.detail.refetch(m.api))
 	}
-	mut := mutationDoneMsg{kind: entry.kind, resp: &MutationResp{Issue: &Issue{ProjectID: entry.projectID}}}
-	if mutAffectsLabelCounts(mut) {
-		next, cmd := batchLabelRefresh(m, tea.Batch(cmds...), mut)
+	if entry.kind == "delete" || entry.kind == "label.add" || entry.kind == "label.remove" {
+		next, cmd := batchLabelRefresh(m, tea.Batch(cmds...), mutationDoneMsg{resp: &MutationResp{Issue: &Issue{ProjectID: entry.projectID}}})
 		return next.(Model), cmd
 	}
 	return m, tea.Batch(cmds...)

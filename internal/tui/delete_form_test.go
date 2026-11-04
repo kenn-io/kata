@@ -371,10 +371,16 @@ func TestDeleteChildRefetchesParent(t *testing.T) {
 	base := NewClient(h.env.URL, h.env.HTTP)
 	_, err := base.AddLink(t.Context(), h.project.ID, child.UID, LinkBody{Type: "parent", ToRef: parent.UID}, "alice")
 	require.NoError(t, err)
+	_, err = base.AddLabel(t.Context(), h.project.ID, child.UID, "bug", "alice")
+	require.NoError(t, err)
+	var cmd tea.Cmd
+	h.m, cmd = h.m.dispatchLabelFetch(h.project.ID)
+	h.m = drainInboxCmds(h.m, cmd)
+	require.Equal(t, []LabelCount{{Label: "bug", Count: 1}}, h.m.projectLabels.byProject[h.project.ID].labels)
 	h.selectIssue(parent.UID)
 	h.m.detail.gen = 1
 	h.m.nextGen = 1
-	cmd := h.m.detail.refetch(h.m.api)
+	cmd = h.m.detail.refetch(h.m.api)
 	h.m = drainInboxCmds(h.m, cmd)
 	require.Len(t, h.m.detail.children, 1)
 	h.m.detail.detailFocus = focusChildren
@@ -387,6 +393,43 @@ func TestDeleteChildRefetchesParent(t *testing.T) {
 	h.m = drainInboxCmds(next.(Model), cmd)
 	require.Equal(t, parent.UID, h.m.detail.issue.UID)
 	assert.Empty(t, h.m.detail.children, "the restored parent drops its deleted child")
+	assert.Empty(t, h.m.projectLabels.byProject[h.project.ID].labels)
+	next, cmd = h.m.Update(h.key(runeKey('u'))())
+	h.m = drainInboxCmds(next.(Model), cmd)
+	require.False(t, h.isDeleted(child.UID))
+	require.Equal(t, parent.UID, h.m.detail.issue.UID)
+	require.Len(t, h.m.detail.children, 1, "undo shows the restored child in the open parent")
+	assert.Equal(t, child.UID, h.m.detail.children[0].UID)
+	assert.Equal(t, []LabelCount{{Label: "bug", Count: 1}}, h.m.projectLabels.byProject[h.project.ID].labels)
+}
+
+func TestDeleteAttentionDoesNotReopenDeletedReturnDetail(t *testing.T) {
+	t.Setenv("KATA_INBOX_USER", "alice")
+	h := newDeleteHarness(t, viewDetail)
+	target := h.issues[0]
+	h.selectIssue(target.UID)
+	_, err := h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+		IssueID: target.ID, Actor: "alice", IfMatchRev: new(target.Revision),
+		Patch: map[string]jsontext.Value{notification.MetadataKey("alice"): jsontext.Value(`{"from":"bob","message":"Review this"}`)},
+	})
+	require.NoError(t, err)
+	var cmd tea.Cmd
+	h.m, cmd = h.m.transitionToAttention()
+	h.m = drainInboxCmds(h.m, cmd)
+	require.Len(t, h.m.attention.rows, 1)
+	next, cmd := h.m.Update(h.enter()())
+	h.m = drainInboxCmds(next.(Model), cmd)
+	require.Equal(t, target.UID, h.m.detail.issue.UID)
+	h.key(runeKey('X'))
+	h.typeText("DELETE " + h.qualified(target))
+	next, cmd = h.m.Update(h.enter()())
+	h.m = drainInboxCmds(next.(Model), cmd)
+	require.True(t, h.isDeleted(target.UID))
+	require.Equal(t, viewAttention, h.m.view)
+	cmd = h.key(tea.KeyPressMsg{Code: tea.KeyEscape})
+	h.m = drainInboxCmds(h.m, cmd)
+	assert.Equal(t, viewList, h.m.view, "leaving Attention returns to the list after deleting its saved detail")
+	assert.True(t, h.m.detail.issue == nil || h.m.detail.issue.UID != target.UID, "leaving Attention must leave the deleted detail")
 }
 
 func TestUndoDeleteReloadsAttention(t *testing.T) {
