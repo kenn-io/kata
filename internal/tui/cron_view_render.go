@@ -4,6 +4,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -16,6 +17,9 @@ import (
 )
 
 var cronTabNames = [...]string{"kata カタ", "jobs", "runs", "workflows"}
+
+// A nonzero digit past nanoseconds would be lost by time.Parse.
+var cronStepSubnanosecond = regexp.MustCompile(`\.[0-9]{9}[0-9]*[1-9][0-9]*(Z|[+-])`)
 
 type cronLineKind uint8
 
@@ -375,6 +379,7 @@ func cronSummaryPreview(s generated.SummaryResponse) string {
 	}
 	return deref(s.Message)
 }
+
 func cronSummaryDetails(d *cronDoc, s generated.SummaryResponse) {
 	if s.Usage != nil || s.InputTokens != nil || s.OutputTokens != nil {
 		d.section("Usage")
@@ -412,7 +417,7 @@ func cronSummaryDetails(d *cronDoc, s generated.SummaryResponse) {
 			start, startErr := time.Parse(time.RFC3339Nano, deref(step.StartedAt))
 			end, endErr := time.Parse(time.RFC3339Nano, deref(step.EndedAt))
 			duration := end.Sub(start)
-			if startErr == nil && endErr == nil && start.Add(duration).Equal(end) {
+			if startErr == nil && endErr == nil && !cronStepSubnanosecond.MatchString(deref(step.StartedAt)) && !cronStepSubnanosecond.MatchString(deref(step.EndedAt)) && start.Add(duration).Equal(end) {
 				fields.field("Duration", duration.String())
 			} else {
 				fields.field("Started", deref(step.StartedAt))

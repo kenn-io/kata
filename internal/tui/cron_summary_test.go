@@ -222,7 +222,7 @@ func TestCronSummaryExactCostDisplay(t *testing.T) {
 }
 
 func TestCronSummaryStepTimeEvidence(t *testing.T) {
-	for _, tc := range []struct{ start, end string }{{"2026-05-01T09:00:00Z", ""}, {"", "2026-05-01T09:00:00Z"}, {"0001-01-01T00:00:00Z", "9999-12-31T23:59:59Z"}} {
+	for _, tc := range []struct{ start, end string }{{"2026-05-01T09:00:00.0000000001Z", "2026-05-01T09:00:00.0000000002Z"}, {"2026-05-01T09:00:00.123456789Z", "2026-05-01T09:00:00.1234567891Z"}, {"2026-05-01T09:00:00Z", ""}, {"", "2026-05-01T09:00:00Z"}, {"0001-01-01T00:00:00Z", "9999-12-31T23:59:59Z"}} {
 		m := cronSummaryFixture(t)
 		m.width = 180
 		m.cron.data.runs[0].Summary.Steps = []generated.SummaryStepResponse{{Key: "review", Status: "running", StartedAt: optionalSummaryTime(tc.start), EndedAt: optionalSummaryTime(tc.end)}}
@@ -359,4 +359,20 @@ func TestCronSummaryStepHeadingHierarchy(t *testing.T) {
 		}
 	}
 	require.Equal(t, key+"·running", strings.ReplaceAll(heading.String(), " ", ""))
+}
+
+func TestCronSummaryExactStepDuration(t *testing.T) {
+	for _, start := range []string{"2026-05-01T09:00:00Z", "2026-05-01T09:00:00.0000000000Z", "2026-05-01T10:00:00.000000000000+01:00"} {
+		t.Run(start, func(t *testing.T) {
+			d := cronDoc{width: 180, labelWidth: 11}
+			cronSummaryDetails(&d, generated.SummaryResponse{Steps: []generated.SummaryStepResponse{{Key: "review", Status: "succeeded", StartedAt: &start, EndedAt: new("2026-05-01T09:00:02Z")}}})
+			var text strings.Builder
+			for _, line := range d.lines {
+				text.WriteString(line.text + "\n")
+			}
+			require.Contains(t, text.String(), "Duration:   2s")
+			require.NotContains(t, text.String(), "Started:")
+			require.NotContains(t, text.String(), "Ended:")
+		})
+	}
 }

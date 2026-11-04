@@ -88,9 +88,7 @@ func FederationEventWireVersion(kind string) (int, string, error) {
 // reference and would quarantine the push instead of refusing it as skew.
 const commentReplyWireVersion = 32
 
-// FederationEventPayloadWireVersion is FederationEventWireVersion raised to
-// commentReplyWireVersion when a comment or issue document carries a reply
-// link, so hubs that predate replies refuse the push as schema skew.
+// FederationEventPayloadWireVersion returns type/payload features, reply wire versions, or a payload error.
 func FederationEventPayloadWireVersion(kind string, payload jsontext.Value) (int, string, error) {
 	version, feature, err := FederationEventWireVersion(kind)
 	if err != nil {

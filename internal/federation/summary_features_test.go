@@ -2,7 +2,6 @@ package federation
 
 import (
 	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -70,8 +69,7 @@ func TestSummaryRelayOutboundFeatureGate(t *testing.T) {
 			t.Cleanup(hub.Close)
 			client, err := NewClient(t.Context(), hub.URL, "fixture-token", clientpkg.Opts{})
 			require.NoError(t, err)
-			body, err := json.Marshal(map[string]any{"event": map[string]any{"type": "cron.run.observed"}, "payload": []byte(`{"summary":{"version":1,"steps":[]}}`)})
-			require.NoError(t, err)
+			body := summaryRelaySource(t, `{"summary":{"version":1,"steps":[]}}`)
 			_, err = client.AcceptRelayDeliveries(t.Context(), 1, db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: []db.RelayEnvelope{{Stream: db.RelayStreamEvent, Body: body}}})
 			if support == "cron_v1" {
 				require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
@@ -102,11 +100,21 @@ func TestSummaryRelayValidatesWholeBatch(t *testing.T) {
 	require.NoError(t, err)
 	var envelopes []db.RelayEnvelope
 	for _, summary := range []string{`{"version":1,"steps":[]}`, `{"version":1,"reason":"INVALID"}`} {
-		body, err := json.Marshal(map[string]any{"event": map[string]any{"type": "cron.run.observed"}, "payload": []byte(`{"summary":` + summary + `}`)})
-		require.NoError(t, err)
+		body := summaryRelaySource(t, `{"summary":`+summary+`}`)
 		envelopes = append(envelopes, db.RelayEnvelope{Stream: db.RelayStreamEvent, Body: body})
 	}
 	_, err = client.AcceptRelayDeliveries(t.Context(), 1, db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: envelopes})
 	require.Error(t, err)
 	require.Zero(t, posts)
+}
+
+func summaryRelaySource(t *testing.T, payload string) []byte {
+	t.Helper()
+	event := db.RemoteEvent{Type: "cron.run.observed", Payload: jsontext.Value(payload)}
+	var err error
+	event.ContentHash, err = db.RemoteEventContentHash(event)
+	require.NoError(t, err)
+	body, err := db.EncodeRelaySourceEvent(event)
+	require.NoError(t, err)
+	return body
 }

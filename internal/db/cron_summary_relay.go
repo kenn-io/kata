@@ -6,25 +6,19 @@ import (
 )
 
 // RelayEnvelopeRequiredFeatures classifies structured run evidence in the
-// original source bytes. Other bodies remain opaque to this compatibility gate;
-// the receiver owns their full validation.
+// original source bytes, verified by the owning relay source codec.
 func RelayEnvelopeRequiredFeatures(envelope RelayEnvelope) (string, error) {
 	if envelope.Stream != RelayStreamEvent {
 		return "", nil
 	}
-	var source struct {
-		Event struct {
-			Type string `json:"type"`
-		} `json:"event"`
-		Payload []byte `json:"payload"`
+	source, err := DecodeRelaySourceEvent(envelope.Body)
+	if err != nil {
+		return "", err
 	}
-	if json.Unmarshal(envelope.Body, &source) != nil {
+	if source.Type != "cron.run.observed" && source.Type != "cron.run.snapshot" {
 		return "", nil
 	}
-	if source.Event.Type != "cron.run.observed" && source.Event.Type != "cron.run.snapshot" {
-		return "", nil
-	}
-	return PayloadRequiredFeatures(source.Event.Type, string(source.Payload))
+	return PayloadRequiredFeatures(source.Type, string(source.Payload))
 }
 
 // RequireRelayEnvelopeFeatures checks retained delivery bytes before emission.
