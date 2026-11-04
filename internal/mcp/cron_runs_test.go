@@ -150,6 +150,7 @@ func TestCronRunSummaryRoundTrip(t *testing.T) {
 	job := cronTestJob(t, f)
 	for _, summary := range []map[string]any{
 		{"version": float64(1), "steps": []any{}},
+		{"version": float64(1), "trigger": "request"},
 		{"version": float64(1), "reason": "agent_quota", "usage": map[string]any{"model": "model-large", "cost_micros": float64(0), "currency": "USD"}, "steps": []any{map[string]any{"key": "review", "status": "failed", "exit_code": float64(0), "started_at": "2026-11-03T01:00:00-08:00"}}, "log_ref": "urn:example:run"},
 	} {
 		args := cronObservation(cronNewUID(t, f.session), job)
@@ -165,7 +166,7 @@ func TestCronRunSummaryRoundTrip(t *testing.T) {
 func TestCronRunSummaryRejectsNullMembers(t *testing.T) {
 	f := newCronFixture(t)
 	job := cronTestJob(t, f)
-	for _, member := range []string{"reason", "usage", "steps", "log_ref"} {
+	for _, member := range []string{"reason", "usage", "steps", "log_ref", "trigger"} {
 		t.Run(member, func(t *testing.T) {
 			id := cronNewUID(t, f.session)
 			args := cronObservation(id, job)

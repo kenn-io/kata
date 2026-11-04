@@ -35,7 +35,7 @@ func TestCronSummaryCapabilitiesAndAPI(t *testing.T) {
 	require.Equal(t, []string{"cron_run_summary_v2", "cron_v1"}, caps.EventFeatures)
 	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Actor: "operator", Name: "Review", Definition: cronHTTPDefinition(t)})
 	require.NoError(t, err)
-	summary := map[string]any{"version": 1, "reason": "agent_quota", "usage": map[string]any{"model": "model-large", "cost_micros": 0, "currency": "USD"}, "steps": []any{map[string]any{"key": "review", "status": "failed", "exit_code": 0}}, "log_ref": "urn:example:run"}
+	summary := map[string]any{"version": 1, "reason": "agent_quota", "trigger": "request", "usage": map[string]any{"model": "model-large", "cost_micros": 0, "currency": "USD"}, "steps": []any{map[string]any{"key": "review", "status": "failed", "exit_code": 0}}, "log_ref": "urn:example:run"}
 	path := fmt.Sprintf("/api/v1/projects/%d/cron/runs/%s", project.ID, cronHTTPUID(t))
 	body := map[string]any{"actor": "operator", "job_uid": job.UID, "definition_event_uid": job.DefinitionEventUID, "status": "failed", "summary": summary, "expected_revision": 0}
 	status, raw = cronHTTP(t, env, http.MethodPut, path, body)
@@ -43,6 +43,7 @@ func TestCronSummaryCapabilitiesAndAPI(t *testing.T) {
 	var observed api.ObserveCronRunResponse
 	require.NoError(t, json.Unmarshal(raw, &observed.Body))
 	require.Equal(t, "agent_quota", observed.Body.Run.Summary.Reason)
+	require.Equal(t, "request", observed.Body.Run.Summary.Trigger)
 	require.NotNil(t, observed.Body.Run.Summary.Usage.CostMicros)
 	status, raw = cronHTTP(t, env, http.MethodPut, path, body)
 	require.Equal(t, 200, status, string(raw))
@@ -53,10 +54,16 @@ func TestCronSummaryCapabilitiesAndAPI(t *testing.T) {
 		status, raw = cronHTTP(t, env, http.MethodPut, path, body)
 		require.Equal(t, 400, status, string(raw))
 	}
+	delete(summary, "reason")
+	for _, invalid := range []any{nil, "", "Scheduled", "unknown"} {
+		summary["trigger"] = invalid
+		status, raw = cronHTTP(t, env, http.MethodPut, path, body)
+		require.Equal(t, 400, status, string(raw))
+	}
 }
 
 func TestCronSummarySpokeAdmission(t *testing.T) {
-	for _, mode := range []string{"supports", "old", "offline", "redirect", "credential-mismatch", "rejoin", "v1"} {
+	for _, mode := range []string{"supports", "old", "trigger-old", "offline", "redirect", "credential-mismatch", "rejoin", "v1"} {
 		t.Run(mode, func(t *testing.T) {
 			calls := 0
 			f := newCronForwardFixture(t, func(f *cronForwardFixture, cfg *daemon.ServerConfig) {
@@ -75,7 +82,7 @@ func TestCronSummarySpokeAdmission(t *testing.T) {
 						require.True(t, strings.HasSuffix(r.URL.Path, "/federation/metadata"))
 						status := 200
 						h := http.Header{db.EventFeaturesHeader: []string{"cron_run_summary_v2,cron_v1"}}
-						if mode == "old" {
+						if mode == "old" || mode == "trigger-old" {
 							h.Set(db.EventFeaturesHeader, "cron_v1")
 						}
 						if mode == "redirect" {
@@ -96,6 +103,9 @@ func TestCronSummarySpokeAdmission(t *testing.T) {
 			job, _, err := f.spoke.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: f.sp.ID, Actor: "tester", Name: "Review", Definition: cronHTTPDefinition(t)})
 			require.NoError(t, err)
 			summary := map[string]any{"version": 1, "reason": "failed"}
+			if mode == "trigger-old" {
+				summary = map[string]any{"version": 1, "trigger": "request"}
+			}
 			if mode == "v1" {
 				delete(summary, "reason")
 			}

@@ -522,6 +522,7 @@ summary document's `version` remains `1`.
 {
   "version": 1,
   "reason": "agent_quota",
+  "trigger": "scheduled",
   "message": "Weekly limit reached during review",
   "input_tokens": 1200,
   "output_tokens": 340,
@@ -544,6 +545,7 @@ summary document's `version` remains `1`.
 | Field | Contract |
 | --- | --- |
 | `reason` | Optional code matching `[a-z0-9_.-]{1,64}`. |
+| `trigger` | Optional `scheduled`, `catchup`, or `request`. |
 | `usage` | Optional object with a required `model` of 1–128 UTF-8 bytes without control characters. Cache counts are nonnegative integers and default to zero. |
 | `usage.cost_micros`, `usage.currency` | Optional pair: a nonnegative integer in millionths of the named currency and a three-letter uppercase currency code. Zero is a known cost; omission means unknown. |
 | `steps` | Optional ordered array of at most 64 steps. An explicit empty array still requires v2 support. |
@@ -558,7 +560,7 @@ the same grammar, a UTF-8 `message` of at most 4096 bytes, and RFC3339
 match the current workflow definition: evidence may describe an older or ad-hoc
 workflow.
 
-The new top-level members reject `null`; an explicitly empty `reason` or
+The new top-level members reject `null`; an explicitly empty `reason`, `trigger`, or
 `log_ref` is invalid. Unknown members are rejected, including inside usage
 and steps. Existing summary byte limits still apply.
 
@@ -574,7 +576,7 @@ An enabled spoke confirms its upstream's support for each v2 observation. If
 the hub is offline, lacks the feature, or the binding changes during admission,
 the write returns 409 `unsupported_event_features` without saving the run.
 Retry the same run UID and expected revision with a v1 summary: remove
-`reason`, `usage`, `steps`, and `log_ref`, and put the reason in the legacy
+`reason`, `trigger`, `usage`, `steps`, and `log_ref`, and put the reason in the legacy
 message line below. V1 observations require no capability request. This checks
 the current binding; operators still need to preserve compatibility when
 downgrading a hub or rebinding a project that already contains v2 evidence.
@@ -600,6 +602,37 @@ Use these shared names when their meaning fits:
 | `unsupported` | The runtime does not support the requested work. |
 | `needs-human` | Execution needs human input. |
 | `failed` | Execution failed without a more specific shared cause. |
+| `overlap_skipped` | The occurrence was not launched after exceeding the adapter's overlap deferral bound under `forbid`. |
+| `catchup_missed` | The occurrence was not launched because it fell outside the job's catch-up policy (`skip`, `latest`, or a count/age cap). |
+| `paused_passed_over` | The occurrence was not launched: it came due while paused, and resume discarded it. |
+
+Drop codes describe evidence independently of run status. The adapter chooses
+that status and whether a run groups several dropped occurrences. They work in
+both `summary.reason` and the legacy first message line.
+
+### Run trigger
+
+Adapters should set `summary.trigger` when the hub advertises
+`cron_run_summary_v2`. It records `scheduled`, `catchup`, or `request`, and an
+explicit value takes precedence over the occurrence key. It does not replace
+`occurrence_key` or prove that work launched. Answered run requests use
+`request:<uid>` keys.
+
+When the field is absent, readers derive a display hint:
+
+| Occurrence key | Derived trigger |
+| --- | --- |
+| `request:<nonempty value>` | `request` |
+| `manual:<nonempty value>` (legacy local request) | `request` |
+| RFC3339 instant, with `started_at` more than 120 seconds later | `catchup` |
+| RFC3339 instant, with `started_at` at most 120 seconds later | `scheduled` |
+| Anything else, or an instant without `started_at` | Unknown; no trigger shown. |
+
+Exactly 120 seconds is scheduled. A start before the occurrence is also
+scheduled. The fixed threshold is a display heuristic; it does not read the
+pinned definition's grace or tolerance and does not decide execution
+eligibility. A run allowed by the adapter can still show derived catchup.
+When retrying with v1, omit `trigger`; the key remains available for derivation.
 
 ## Native issue planning dates
 

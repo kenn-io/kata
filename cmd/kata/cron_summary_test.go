@@ -21,6 +21,7 @@ func TestCronCLISummaryRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	for _, summary := range []cron.Summary{
 		{Version: 1},
+		{Version: 1, Trigger: "request"},
 		{Version: 1, Steps: []cron.SummaryStep{}},
 		{Version: 1, Reason: "agent_quota", Usage: &cron.SummaryUsage{Model: "model-large", CostMicros: new(int64(0)), Currency: "USD"}, Steps: []cron.SummaryStep{{Key: "review", Status: "failed", ExitCode: new(int32(0)), StartedAt: "2026-11-03T01:00:00-08:00"}}, LogRef: "urn:example:run"},
 	} {

@@ -46,7 +46,7 @@ func checkCronSummaryFeatures(t *testing.T, store db.Storage, backend Backend) e
 	read(store, project.ID, "cron_v1")
 	runUID, err := uid.New()
 	require.NoError(t, err)
-	in := db.ObserveCronRun{ProjectID: project.ID, UID: runUID, Actor: "operator", JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Status: "failed", Summary: cron.Summary{Version: 1, Reason: "agent_quota", Steps: []cron.SummaryStep{}}}
+	in := db.ObserveCronRun{ProjectID: project.ID, UID: runUID, Actor: "operator", JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Status: "failed", Summary: cron.Summary{Version: 1, Reason: "agent_quota", Trigger: "catchup", Steps: []cron.SummaryStep{}}}
 	result, err := store.ObserveCronRun(ctx, in)
 	require.NoError(t, err)
 	replayed, err := store.ObserveCronRun(ctx, in)

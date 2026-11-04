@@ -12,7 +12,7 @@ import (
 
 func TestSummaryPayloadFeatures(t *testing.T) {
 	for _, kind := range []string{"cron.run.observed", "cron.run.snapshot"} {
-		for _, field := range []string{`"reason":"failed"`, `"usage":{"model":"m"}`, `"steps":[]`, `"log_ref":"urn:example:run"`} {
+		for _, field := range []string{`"trigger":"catchup"`, `"reason":"failed"`, `"usage":{"model":"m"}`, `"steps":[]`, `"log_ref":"urn:example:run"`} {
 			payload := `{"summary":{"version":1,` + field + `}}`
 			features, err := db.PayloadRequiredFeatures(kind, payload)
 			require.NoError(t, err)

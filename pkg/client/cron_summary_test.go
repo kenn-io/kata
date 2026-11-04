@@ -13,7 +13,7 @@ import (
 // Explicit empty steps are v2 evidence; typed clients must preserve that
 // presence on writes and on response re-encoding without adding it to v1.
 func TestCronSummaryClientPreservesEmptySteps(t *testing.T) {
-	for _, raw := range []string{`{"version":1}`, `{"version":1,"steps":[]}`} {
+	for _, raw := range []string{`{"version":1}`, `{"version":1,"steps":[]}`, `{"version":1,"trigger":"request","steps":[]}`} {
 		for _, response := range []bool{false, true} {
 			var value any = &generated.Summary{}
 			if response {

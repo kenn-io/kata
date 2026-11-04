@@ -120,6 +120,9 @@ func TestSummaryRoundTripProperty(t *testing.T) {
 			s.Reason = summaryPropertyReason(ht)
 		}
 		if hegel.Draw(ht, hegel.Booleans()) {
+			s.Trigger = []string{"scheduled", "catchup", "request"}[hegel.Draw(ht, hegel.Integers[int](0, 2))]
+		}
+		if hegel.Draw(ht, hegel.Booleans()) {
 			model := strings.Map(func(r rune) rune {
 				if unicode.IsControl(r) {
 					return 'm'

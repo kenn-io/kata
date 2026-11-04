@@ -30,6 +30,7 @@ func (h HLC) Validate() error {
 type Summary struct {
 	Version      int           `json:"version"`
 	Reason       string        `json:"reason,omitempty"`
+	Trigger      string        `json:"trigger,omitempty"`
 	Message      string        `json:"message,omitempty"`
 	InputTokens  int64         `json:"input_tokens,omitzero"`
 	OutputTokens int64         `json:"output_tokens,omitzero"`
@@ -62,7 +63,7 @@ type SummaryStep struct {
 
 // UsesV2 identifies the optional structured capability, not a document version.
 func (s Summary) UsesV2() bool {
-	return s.Reason != "" || s.Usage != nil || s.Steps != nil || s.LogRef != ""
+	return s.Trigger != "" || s.Reason != "" || s.Usage != nil || s.Steps != nil || s.LogRef != ""
 }
 
 // ValidReason accepts adapter-defined codes and the reserved kata.* namespace.
@@ -100,8 +101,8 @@ func (s *Summary) UnmarshalJSON(input []byte) error {
 	if err := json.Unmarshal(input, &fields); err != nil {
 		return invalid("invalid run summary")
 	}
-	for _, key := range []string{"reason", "usage", "steps", "log_ref"} {
-		if raw, exists := fields[key]; exists && (string(raw) == "null" || (key == "reason" && value.Reason == "") || (key == "log_ref" && value.LogRef == "")) {
+	for _, key := range []string{"reason", "trigger", "usage", "steps", "log_ref"} {
+		if raw, exists := fields[key]; exists && (string(raw) == "null" || (key == "reason" && value.Reason == "") || (key == "trigger" && value.Trigger == "") || (key == "log_ref" && value.LogRef == "")) {
 			return invalid("structured summary fields must be non-null and nonempty")
 		}
 	}
@@ -128,6 +129,11 @@ func (s Summary) validate() error {
 	}
 	if s.Reason != "" && !ValidReason(s.Reason) {
 		return invalid("invalid summary reason")
+	}
+	switch s.Trigger {
+	case "", "scheduled", "catchup", "request":
+	default:
+		return invalid("invalid summary trigger")
 	}
 	if u := s.Usage; u != nil {
 		if len(u.Model) == 0 || len(u.Model) > 128 || !utf8.ValidString(u.Model) || strings.ContainsFunc(u.Model, unicode.IsControl) || u.CacheReadTokens < 0 || u.CacheWriteTokens < 0 {
@@ -189,4 +195,47 @@ func validLogRef(value string) bool {
 		return false
 	}
 	return !(strings.EqualFold(u.Scheme, "http") || strings.EqualFold(u.Scheme, "https")) || u.Hostname() != ""
+}
+
+// Shared drop reasons describe an occurrence that was not launched. The adapter
+// chooses the run status and whether one observation groups several drops.
+const (
+	ReasonOverlapSkipped   = "overlap_skipped"
+	ReasonCatchupMissed    = "catchup_missed"
+	ReasonPausedPassedOver = "paused_passed_over"
+)
+
+// DropReason reports exact membership in the shared drop reason registry.
+func DropReason(code string) bool {
+	switch code {
+	case ReasonOverlapSkipped, ReasonCatchupMissed, ReasonPausedPassedOver:
+		return true
+	default:
+		return false
+	}
+}
+
+// RunTrigger prefers explicit evidence. Derived values are display hints, not
+// schedule eligibility: lateness beyond two minutes is shown as catchup.
+func RunTrigger(s Summary, occurrenceKey *string, startedAt *time.Time) (trigger string, derived bool) {
+	if s.Trigger != "" {
+		return s.Trigger, false
+	}
+	if occurrenceKey == nil {
+		return "", false
+	}
+	for _, prefix := range []string{"request:", "manual:"} {
+		if rest, ok := strings.CutPrefix(*occurrenceKey, prefix); ok && rest != "" {
+			return "request", true
+		}
+	}
+	if startedAt != nil {
+		if at, err := time.Parse(time.RFC3339Nano, *occurrenceKey); err == nil {
+			if startedAt.Sub(at) > 120*time.Second {
+				return "catchup", true
+			}
+			return "scheduled", true
+		}
+	}
+	return "", false
 }
