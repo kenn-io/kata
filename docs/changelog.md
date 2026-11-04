@@ -9,6 +9,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Review unseen failed or unknown Cron runs with `u`, clear loaded failures with `U`, and receive grouped notices for published observations in the selected project. Seen state stays in the local Kata home.
+
 - Spot failing, overdue and missed cron jobs in `kata tui`, with exact last-run
   evidence, a project health roll-up, and a reason in each job's detail.
   Page through each job's run history or load older project observations.

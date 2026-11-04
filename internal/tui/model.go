@@ -48,6 +48,11 @@ const (
 // toastNow is a clock injection point: production uses time.Now, tests
 // replace it to drive deterministic toast expiry.
 type Model struct {
+	cronStartedAt  time.Time
+	cronNotices    cronNoticeState
+	nextCronNotice uint64
+	cronSeen       cronSeenState
+
 	nextCronRequest     uint64
 	lifetime            *cronReadScope
 	telemetry           *telemetryGate
@@ -244,6 +249,7 @@ func initialModel(opts Options) Model {
 		sseStatus:             sseConnected,
 		cache:                 newIssueCache(),
 		toastNow:              time.Now,
+		cronStartedAt:         time.Now(),
 		projectLabels:         newLabelCache(),
 		authCapabilitiesReady: true,
 		projectsByID:          map[int64]string{},
@@ -285,7 +291,7 @@ func (m Model) Init() tea.Cmd {
 	// through the event loop — the v2 replacement for the v1-era
 	// blocking OSC probe at boot. Update restyles when the
 	// tea.BackgroundColorMsg answer lands.
-	cmds := []tea.Cmd{m.waitForSSE(), dayTick()}
+	cmds := []tea.Cmd{m.waitForSSE(), dayTick(), m.cronSeenCommand(false)}
 	if m.api != nil {
 		// Init runs once per launch; daemon switches and reconnects never reach it.
 		cmds = append(cmds, m.fetchAuthCapabilities(), m.reportAppOpened())
@@ -439,6 +445,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmd = combineCmds(cmd, m.finishDetailRefresh())
 	var cronCmd tea.Cmd
 	m, cronCmd = m.cronSync()
+	cmd = combineCmds(cmd, cronCmd)
+	m = m.cronNoticeSync()
+	m, cronCmd = m.cronSeenSync()
 	cmd = combineCmds(cmd, cronCmd)
 	screenCmd := m.screenViewCommand(visit)
 	return m, tea.Batch(cmd, screenCmd)
@@ -848,6 +857,12 @@ func projectIDFromMutation(m Model, mut mutationDoneMsg) int64 {
 // open/key. ok=true means the message was handled here.
 func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
+	case cronNoticeTickMsg:
+		next, cmd := m.cronNoticeFlush(msg)
+		return next, cmd, true
+	case cronSeenResultMsg:
+		next, cmd := m.cronSeenResult(msg)
+		return next, cmd, true
 	case cronPageMsg:
 		return m.cronPageLoaded(msg), nil, true
 	case cronLoadedMsg:
@@ -2750,7 +2765,9 @@ func cacheKeysEqual(a, b cacheKey) bool {
 // project gets a fresh dispatch. This is a SECOND, additional cmd —
 // it doesn't replace or short-circuit the list/detail refetch above.
 func (m Model) handleEventReceived(msg eventReceivedMsg) (tea.Model, tea.Cmd) {
-	cmds := []tea.Cmd{m.waitForSSE()}
+	var noticeCmd tea.Cmd
+	m, noticeCmd = m.cronNoticeEvent(msg)
+	cmds := []tea.Cmd{m.waitForSSE(), noticeCmd}
 	if m.eventAffectsView(msg) {
 		if strings.HasPrefix(msg.eventType, "cron.") || msg.eventType == "project.merged" || msg.eventType == "project.removed" || msg.eventType == "project.restored" || m.cronParentEvent(msg) {
 			m.cron.events++
@@ -3707,7 +3724,7 @@ func (m Model) appendNonListDetailExtras(body string) string {
 		if s := renderSSEStatus(m.sseStatus); s != "" {
 			extras = append(extras, s)
 		}
-		if s := renderToast(m.toast); s != "" {
+		if s := renderToast(m.cronToast()); s != "" {
 			extras = append(extras, s)
 		}
 		if len(extras) > 0 {
@@ -3834,7 +3851,7 @@ func (m Model) chrome() viewChrome {
 		scope:         m.scope,
 		sseStatus:     m.sseStatus,
 		pending:       m.pendingRefetch,
-		toast:         m.toast,
+		toast:         m.cronToast(),
 		version:       kataVersion,
 		input:         m.input,
 		projectsByID:  m.projectsByID,

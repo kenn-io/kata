@@ -195,6 +195,7 @@ type editorReturnedMsg struct {
 // the old or new parent's pane would stay stale until a manual
 // refresh after a parent replace.
 type eventReceivedMsg struct {
+	cronRun         *cronRunEvent
 	gen             uint64
 	eventType       string
 	projectID       int64
@@ -375,9 +376,10 @@ type toastExpiredMsg struct{}
 // view. Task 11 uses it for the 'resynced' notice; Task 12 will own
 // stacked toasts for mutation feedback.
 type toast struct {
-	text      string
-	level     toastLevel
-	expiresAt time.Time
+	cronFailure bool
+	text        string
+	level       toastLevel
+	expiresAt   time.Time
 }
 
 // toastLevel discriminates toast styling.

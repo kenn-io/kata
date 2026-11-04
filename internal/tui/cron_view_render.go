@@ -181,7 +181,15 @@ func cronScreen(m Model) (string, string, []cronLine) {
 			}
 		case cronRuns:
 			for _, r := range runs {
-				add(r.UID, []string{r.Status, cronDefinitionName(*p, deref(r.JobUID), false), deref(r.OccurrenceKey), cronTime(r.StartedAt), cronTime(r.EndedAt), deref(r.Summary.Message)})
+				unseen := m.cronRunUnseen(m.cronProjectUID(), r)
+				if m.cron.unseenOnly && !unseen {
+					continue
+				}
+				status := r.Status
+				if unseen {
+					status = "• " + status
+				}
+				add(r.UID, []string{status, cronDefinitionName(*p, deref(r.JobUID), false), deref(r.OccurrenceKey), cronTime(r.StartedAt), cronTime(r.EndedAt), deref(r.Summary.Message)})
 			}
 		case cronWorkflows:
 			for _, w := range p.workflows {
@@ -204,6 +212,9 @@ func cronScreen(m Model) (string, string, []cronLine) {
 	}
 	if m.cron.tab == cronRuns {
 		title = cronCount(len(lines), "loaded run")
+		if m.cron.unseenOnly {
+			title += " · unseen only"
+		}
 		if !m.cron.runPage.older {
 			title += " · newest 100"
 		}
@@ -420,6 +431,7 @@ func cronKeyRows(m Model) []helplayout.HelpItem {
 		{Key: "↵/l", Description: open},
 		{Key: "h/esc", Description: back},
 		{Key: "r", Description: "refresh"},
+		{Key: "u/U", Description: "unseen/clear"},
 		{Key: "1-4", Description: "tabs"},
 		{Key: "?", Description: "help"},
 		{Key: "q", Description: "quit"},
@@ -466,6 +478,9 @@ func renderCron(m Model) string {
 			}
 		}
 	}
+	if m.cronSeen.err != nil {
+		errors = append(errors, errorStyle.Render(truncate(sanitizeForLine("seen state unavailable: "+m.cronSeen.err.Error()), m.width)))
+	}
 	query := m.cron.lists[m.cron.tab].query
 	left, right := title, ""
 	if len(m.cron.stack) == 0 {
@@ -486,6 +501,9 @@ func renderCron(m Model) string {
 		right = "/" + query
 	} else if m.cron.out {
 		right = "loading…"
+	}
+	if count := m.cronUnseenCount(); count > 0 {
+		right += errorStyle.Render(fmt.Sprintf(" · %d unseen failed", count))
 	}
 	body := []string{
 		renderTitleBar(m.width, m.scope, kataVersion, m.chrome().daemon),

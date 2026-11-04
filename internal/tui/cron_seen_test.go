@@ -1,0 +1,291 @@
+package tui
+
+import (
+	"context"
+	"encoding/json/v2"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/pkg/client/generated"
+	"hegel.dev/go/hegel"
+)
+
+// Contract: the bounded cache merge is a deterministic capped union and max,
+// preserving all projects. Only explicit capacity eviction can lose membership.
+func TestCronSeenMergeAlgebra(t *testing.T) {
+	hegel.Test(t, func(ht *hegel.T) {
+		draw := func() cronSeenStore {
+			ids := hegel.Draw(ht, hegel.Lists(hegel.Integers[uint64](0, ^uint64(0))).MaxSize(40))
+			runs := make([]string, len(ids))
+			for i, id := range ids {
+				runs[i] = fmt.Sprintf("%016x", id)
+			}
+			stamp := snapshotFixedNow.Add(time.Duration(hegel.Draw(ht, hegel.Integers[uint32](0, ^uint32(0)))))
+			return cronSeenStore{Version: 1, Projects: map[string]cronSeenProject{"project": {ClearedThrough: stamp, Runs: runs}}}
+		}
+		a, b, c := draw(), draw(), draw()
+		require.Equal(t, cronSeenMerge(a, b), cronSeenMerge(b, a))
+		require.Equal(t, cronSeenMerge(cronSeenMerge(a, b), c), cronSeenMerge(a, cronSeenMerge(b, c)))
+		canonical := cronSeenMerge(a, cronSeenStore{})
+		require.Equal(t, canonical, cronSeenMerge(canonical, canonical))
+		for _, id := range canonical.Projects["project"].Runs {
+			require.Contains(t, cronSeenMerge(a, b).Projects["project"].Runs, id)
+		}
+	}, hegel.WithTestCases(300))
+}
+
+func TestCronSeenDecodeTotalAndRoundTrip(t *testing.T) {
+	hegel.Test(t, func(ht *hegel.T) {
+		raw := hegel.Draw(ht, hegel.Lists(hegel.Integers[byte](0, 255)).MaxSize(1024))
+		_, _ = cronSeenDecode(raw)
+		ids := hegel.Draw(ht, hegel.Lists(hegel.Text().MaxSize(30)).MaxSize(25))
+		s := cronSeenMerge(cronSeenStore{Projects: map[string]cronSeenProject{"project": {Runs: ids, ClearedThrough: snapshotFixedNow.Add(123 * time.Nanosecond)}}}, cronSeenStore{})
+		wire, err := json.Marshal(s)
+		require.NoError(t, err)
+		got, err := cronSeenDecode(wire)
+		require.NoError(t, err)
+		require.Equal(t, s, got)
+	}, hegel.WithTestCases(300))
+	for _, raw := range []string{`null`, `{}`, `{"version":2}`, `{"version":1,"projects":{"p":{"cleared_through":"bad"}}}`} {
+		_, err := cronSeenDecode([]byte(raw))
+		require.Error(t, err)
+	}
+}
+
+func TestCronSeenCapAndUnseen(t *testing.T) {
+	ids := make([]string, 1100)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("%04d", i)
+	}
+	s := cronSeenMerge(cronSeenStore{Projects: map[string]cronSeenProject{"p": {Runs: ids}}}, cronSeenStore{})
+	require.Len(t, s.Projects["p"].Runs, 1000)
+	require.NotContains(t, s.Projects["p"].Runs, "0000")
+	require.Contains(t, s.Projects["p"].Runs, "1099")
+	hegel.Test(t, func(ht *hegel.T) {
+		statuses := []string{"running", "succeeded", "cancelled", "failed", "unknown"}
+		status := statuses[hegel.Draw(ht, hegel.Integers[uint64](0, ^uint64(0)))%uint64(len(statuses))]
+		at := snapshotFixedNow.Add(123 * time.Nanosecond)
+		r := generated.CronRun{UID: "run", Status: status, UpdatedAt: at}
+		before := cronSeenProject{ClearedThrough: snapshotFixedNow}
+		want := status == "failed" || status == "unknown"
+		require.Equal(t, want, before.unseen(r))
+		before.Runs = []string{"run"}
+		require.False(t, before.unseen(r))
+		before.Runs = nil
+		before.ClearedThrough = at
+		require.False(t, before.unseen(r))
+	}, hegel.WithTestCases(200))
+}
+
+func TestCronSeenFiles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tui", "cron-seen.json")
+	empty, err := cronSeenLoad(t.Context(), path)
+	require.NoError(t, err)
+	require.Empty(t, empty.Projects)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = cronSeenLoad(ctx, path)
+	require.ErrorIs(t, err, context.Canceled)
+	// Simultaneous processes may begin from different stale snapshots. The lock
+	// protects reread/merge/replace, including unrelated project entries.
+	var wg sync.WaitGroup
+	errs := make(chan error, 20)
+	for i := range 20 {
+		wg.Go(func() {
+			_, err := cronSeenSave(t.Context(), path, cronSeenStore{Projects: map[string]cronSeenProject{fmt.Sprint(i % 2): {Runs: []string{fmt.Sprint(i)}}}})
+			errs <- err
+		})
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	got, err := cronSeenLoad(t.Context(), path)
+	require.NoError(t, err)
+	require.Len(t, got.Projects["0"].Runs, 10)
+	require.Len(t, got.Projects["1"].Runs, 10)
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0600), info.Mode().Perm())
+	info, err = os.Stat(filepath.Dir(path))
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0700), info.Mode().Perm())
+	require.NoError(t, os.WriteFile(path, []byte("corrupt"), 0600))
+	_, err = cronSeenSave(t.Context(), path, empty)
+	require.Error(t, err)
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Equal(t, "corrupt", string(raw))
+	require.True(t, slices.IsSorted(got.Projects["0"].Runs))
+}
+
+func cronSeenFixture(t *testing.T) Model {
+	t.Helper()
+	m := cronFixture(t)
+	m.projectUIDByID = map[int64]string{7: "project-example"}
+	m.cronSeen = cronSeenState{ready: true, data: cronSeenMerge(cronSeenStore{}, cronSeenStore{})}
+	return m
+}
+func TestCronSeenLoadedCountAndKeys(t *testing.T) {
+	m := cronSeenFixture(t)
+	r := m.cron.data.runs[0]
+	r.Status = "failed"
+	r.UID = "failed"
+	r.EndedAt = new(snapshotFixedNow.Add(17 * time.Nanosecond))
+	unknown := r
+	unknown.UID = "unknown"
+	unknown.Status = "unknown"
+	unknown.EndedAt = nil
+	unknown.UpdatedAt = snapshotFixedNow.Add(23 * time.Nanosecond)
+	success := r
+	success.UID = "success"
+	success.Status = "succeeded"
+	m.cron.data.runs = []generated.CronRun{r, success}
+	m.cron.data.lastRuns = map[string]generated.CronRun{"job": r}
+	m.cron.jobPage.runs = []generated.CronRun{unknown, r}
+	m.cron.runPage.runs = []generated.CronRun{r, unknown}
+	m.cron.runPage.ready = true
+	require.Equal(t, 2, m.cronUnseenCount())
+	m.width = 160
+	for _, tab := range []int{cronJobs, cronRuns, cronWorkflows} {
+		m.cron.tab = tab
+		require.Contains(t, stripANSI(renderCron(m)), "2 unseen failed")
+	}
+	m = sendRune(m, 'u')
+	require.Equal(t, cronRuns, m.cron.tab)
+	require.True(t, m.cron.unseenOnly)
+	title, _, lines := cronScreen(m)
+	require.Contains(t, title, "unseen only")
+	require.Len(t, lines, 2)
+	require.Contains(t, stripANSI(lines[0].text), "• failed")
+	m = m.cronFilter("no match")
+	_, _, lines = cronScreen(m)
+	require.Empty(t, lines, "unseen-only ANDs with the existing query")
+	m = m.cronFilter("")
+	m, cmd := m.routeCronKey(keyRune('l'))
+	require.Nil(t, cmd)
+	require.Equal(t, 1, m.cronUnseenCount(), "opening any followable run marks it")
+	m = sendRune(m, 'U')
+	require.Zero(t, m.cronUnseenCount())
+	require.Equal(t, unknown.UpdatedAt, m.cronSeen.data.Projects["project-example"].ClearedThrough)
+	wire, err := json.Marshal(m.cronSeen.data)
+	require.NoError(t, err)
+	m.cronSeen.data, err = cronSeenDecode(wire)
+	require.NoError(t, err)
+	require.Zero(t, m.cronUnseenCount())
+	// A different project on the same local numeric id has separate state.
+	m.projectUIDByID[7] = "other-project"
+	require.Equal(t, 2, m.cronUnseenCount())
+}
+func TestCronSeenAsyncMergesAndDisablesWrites(t *testing.T) {
+	m := cronSeenFixture(t)
+	r := m.cron.data.runs[0]
+	r.Status = "failed"
+	m.cron.data.runs = []generated.CronRun{r}
+	m = m.cronMarkSeen(r.UID)
+	m, _ = m.cronSeenResult(cronSeenResultMsg{data: cronSeenStore{Version: 1, Projects: map[string]cronSeenProject{"other": {Runs: []string{"elsewhere"}}}}, write: true})
+	require.Zero(t, m.cronUnseenCount())
+	require.Contains(t, m.cronSeen.data.Projects, "other")
+	m, _ = m.cronSeenResult(cronSeenResultMsg{err: fmt.Errorf("corrupt\nstate")})
+	require.Error(t, m.cronSeen.err)
+	require.Contains(t, stripANSI(renderCron(m)), "seen state unavailable: corrupt\\nstate")
+	_, cmd := m.cronSeenSync()
+	require.Nil(t, cmd, "failed load/write disables writes for the session")
+	// Loading the file after an early in-memory mark never discards that mark.
+	m = cronSeenFixture(t)
+	m.cronSeen.ready = false
+	m.cron.data.runs = []generated.CronRun{r}
+	m = m.cronMarkSeen(r.UID)
+	m, _ = m.cronSeenResult(cronSeenResultMsg{data: cronSeenStore{Version: 1, Projects: map[string]cronSeenProject{}}})
+	require.Zero(t, m.cronUnseenCount())
+}
+func TestCronSeenOpeningOldRunAtCapacityIsSeenForSession(t *testing.T) {
+	m := cronSeenFixture(t)
+	r := m.cron.data.runs[0]
+	r.UID = "0000"
+	r.Status = "failed"
+	m.cron.data.runs = []generated.CronRun{r}
+	ids := make([]string, 1000)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("%04d", i+1)
+	}
+	m.cronSeen.data.Projects["project-example"] = cronSeenProject{Runs: ids}
+	m = m.cronMarkSeen(r.UID)
+	require.Zero(t, m.cronUnseenCount(), "an immediately evicted old mark remains seen until restart")
+	require.NotContains(t, m.cronSeen.data.Projects["project-example"].Runs, r.UID)
+}
+
+func TestCronSeenUpdateSchedulesPersistence(t *testing.T) {
+	m := cronSeenFixture(t)
+	r := m.cron.data.runs[0]
+	r.Status = "failed"
+	m.cron.data.runs = []generated.CronRun{r}
+	m.cronSeen.path = filepath.Join(t.TempDir(), "seen.json")
+	next, _ := updateModel(m, keyRune('U'))
+	require.True(t, next.cronSeen.writing, "the Update loop must dispatch the durable write after the clear action")
+}
+
+func TestSnapshot_CronUnseen(t *testing.T) {
+	defer snapshotInit(t)()
+	m := cronSeenFixture(t)
+	m.width = 120
+	r := m.cron.data.runs[0]
+	r.Status = "failed"
+	m.cron.data.runs = []generated.CronRun{r}
+	m.cron.data.lastRuns = map[string]generated.CronRun{*r.JobUID: r}
+	m.cron.runPage.runs = []generated.CronRun{r}
+	m = sendRune(m, 'u')
+	assertGolden(t, "cron-runs-unseen", m.viewBody())
+}
+
+// The catalog can arrive after the run view; acknowledgement waits for its
+// canonical project identity and must never follow a later scope switch.
+func TestCronSeenDeferredProjectIdentity(t *testing.T) {
+	for _, clear := range []bool{false, true} {
+		for _, switched := range []bool{false, true} {
+			m := cronSeenFixture(t)
+			r := m.cron.data.runs[0]
+			r.Status = "failed"
+			m.cron.data.runs = []generated.CronRun{r}
+			m.projectUIDByID = nil
+			if clear {
+				m = m.cronClearSeen()
+			} else {
+				m = m.cronMarkSeen(r.UID)
+			}
+			require.Empty(t, m.cronSeen.data.Projects)
+			if switched {
+				m.scopeGen++
+			}
+			m.projectUIDByID = map[int64]string{7: "project-example"}
+			m, _ = m.cronSeenSync()
+			if switched {
+				require.Empty(t, m.cronSeen.data.Projects)
+			} else {
+				require.Zero(t, m.cronUnseenCount(), "the deferred acknowledgement applies once identity resolves")
+			}
+		}
+	}
+}
+
+func TestCronSeenLoadsOnlyAtInitialization(t *testing.T) {
+	// Models built without Init must not inject filesystem commands into an
+	// unrelated update. The real TUI schedules its single startup read in Init.
+	_, cmd := (Model{}).cronSeenSync()
+	require.Nil(t, cmd)
+	m := initialModel(Options{})
+	m.cronSeen.path = filepath.Join(t.TempDir(), "seen.json")
+	m, cmd = m.cronSeenSync()
+	require.Nil(t, cmd)
+	msg := m.cronSeenCommand(false)().(cronSeenResultMsg)
+	require.NoError(t, msg.err)
+	m, _ = m.cronSeenResult(msg)
+	require.True(t, m.cronSeen.ready)
+}
