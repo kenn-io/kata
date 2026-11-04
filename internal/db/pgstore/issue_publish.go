@@ -684,12 +684,11 @@ func ensurePublicationMoveAllowedTx(ctx context.Context, tx *sql.Tx, issueID, so
 	if sourceErr != nil && !errors.Is(sourceErr, db.ErrNotFound) {
 		return sourceErr
 	}
-	targetBinding, targetErr := scanIssueSyncBinding(tx.QueryRowContext(ctx, issueSyncBindingSelect+` WHERE b.project_id=$1`, targetProjectID))
+	_, targetErr := scanIssueSyncBinding(tx.QueryRowContext(ctx, issueSyncBindingSelect+` WHERE b.project_id=$1`, targetProjectID))
 	if targetErr != nil && !errors.Is(targetErr, db.ErrNotFound) {
 		return targetErr
 	}
-	matchingTickTickBinding := sourceErr == nil && targetErr == nil &&
-		sourceBinding.Provider == "ticktick" && targetBinding.Provider == "ticktick"
+	sourceHasTickTickBinding := sourceErr == nil && sourceBinding.Provider == "ticktick"
 
 	rows, err := tx.QueryContext(ctx, `SELECT source, external_id FROM import_mappings WHERE issue_id=$1 AND project_id=$2 AND object_type='issue'`, issueID, sourceProjectID)
 	if err != nil {
@@ -711,7 +710,7 @@ func ensurePublicationMoveAllowedTx(ctx context.Context, tx *sql.Tx, issueID, so
 		return err
 	}
 	for _, m := range mappings {
-		if matchingTickTickBinding && targetBinding.SourceKey == m.Source {
+		if sourceHasTickTickBinding && sourceBinding.SourceKey == m.Source {
 			hasBaseline, err := db.HasIssueSyncPublicationContentBaseline(sourceBinding.Config, m.ExternalID)
 			if err != nil {
 				return err

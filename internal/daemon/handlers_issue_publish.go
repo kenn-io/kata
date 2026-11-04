@@ -101,5 +101,5 @@ func issuePublishError(err error, provider string) error {
 	return issueSyncStorageError(err, provider)
 }
 func issuePublicationPendingError(p *db.IssuePublicationPendingError) error {
-	return api.NewError(http.StatusConflict, "issue_publication_pending", p.Error(), "Inspect the provider before choosing adoption or resolving not created.", map[string]any{"attempt_uid": p.AttemptUID, "provider": p.Provider, "issue_uid": p.IssueUID, "phase": p.Phase})
+	return api.NewError(http.StatusConflict, "issue_publication_pending", p.Error(), "Inspect the provider first.", map[string]any{"attempt_uid": p.AttemptUID, "provider": p.Provider, "issue_uid": p.IssueUID, "phase": p.Phase})
 }

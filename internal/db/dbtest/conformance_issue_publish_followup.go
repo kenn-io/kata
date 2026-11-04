@@ -194,46 +194,62 @@ func checkIssuePublishMoveDestination(t *testing.T, store db.Storage, _ Backend)
 // from the binding that owns the baseline before its first import.
 func checkIssuePublishMovePendingBaseline(t *testing.T, store db.Storage, _ Backend) error {
 	ctx := t.Context()
-	source, err := createIssueFixture(ctx, store, "source-project", "Native", "worker", nil)
-	require.NoError(t, err)
-	target, err := store.CreateProject(ctx, "target-project")
-	require.NoError(t, err)
-	sourceKey := "ticktick:remote-project"
-	for _, projectID := range []int64{source.Project.ID, target.ID} {
-		_, err = store.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
-			ProjectID: projectID, Provider: "ticktick", SourceKey: sourceKey, RemoteID: "remote-project",
-			DisplayName: "Example", Config: []byte(`{"status_sync":"one-way"}`), IntervalSeconds: 60,
-		})
-		require.NoError(t, err)
-	}
-	p := store.(db.IssuePublicationStore)
-	now := time.Now().UTC().Truncate(time.Millisecond)
-	claim, err := p.ClaimIssuePublication(ctx, source.Project.ID, source.Issue.ID, "ticktick", now, now.Add(-time.Hour), false)
-	require.NoError(t, err)
-	attempt, err := p.BeginIssuePublication(ctx, db.IssuePublicationBegin{
-		Guard: claim.Guard,
-		Publication: db.IssuePublication{
-			AttemptUID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Actor: "worker", Revision: source.Issue.Revision, Payload: []byte(`{}`),
-		},
-	})
-	require.NoError(t, err)
-	require.NoError(t, p.DispatchIssuePublication(ctx, claim.Guard, attempt.AttemptUID))
-	baseline := &db.IssuePublicationContentBaseline{Hash: strings.Repeat("a", 64), At: now}
-	_, _, err = p.AttachIssuePublication(ctx, db.IssuePublicationAttach{
-		Guard: claim.Guard, AttemptUID: attempt.AttemptUID,
-		Remote: db.IssuePublicationRemote{ExternalID: "task:remote-task", Status: "open", Version: now, ContentBaseline: baseline},
-	})
-	require.NoError(t, err)
+	for _, tc := range []struct {
+		name        string
+		targetBound bool
+		attemptUID  string
+	}{
+		{name: "matching target binding", targetBound: true, attemptUID: "01ARZ3NDEKTSV4RRFFQ69G5FAV"},
+		{name: "unbound target", targetBound: false, attemptUID: "01ARZ3NDEKTSV4RRFFQ69G5FAW"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source, err := createIssueFixture(ctx, store, "source-project-"+strings.ReplaceAll(tc.name, " ", "-"), "Native", "worker", nil)
+			require.NoError(t, err)
+			target, err := store.CreateProject(ctx, "target-project-"+strings.ReplaceAll(tc.name, " ", "-"))
+			require.NoError(t, err)
+			sourceKey := "ticktick:remote-project-" + strings.ReplaceAll(tc.name, " ", "-")
+			_, err = store.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
+				ProjectID: source.Project.ID, Provider: "ticktick", SourceKey: sourceKey, RemoteID: "remote-project",
+				DisplayName: "Example", Config: []byte(`{"status_sync":"one-way"}`), IntervalSeconds: 60,
+			})
+			require.NoError(t, err)
+			if tc.targetBound {
+				_, err = store.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{
+					ProjectID: target.ID, Provider: "ticktick", SourceKey: sourceKey, RemoteID: "remote-project",
+					DisplayName: "Example", Config: []byte(`{"status_sync":"one-way"}`), IntervalSeconds: 60,
+				})
+				require.NoError(t, err)
+			}
+			p := store.(db.IssuePublicationStore)
+			now := time.Now().UTC().Truncate(time.Millisecond)
+			claim, err := p.ClaimIssuePublication(ctx, source.Project.ID, source.Issue.ID, "ticktick", now, now.Add(-time.Hour), false)
+			require.NoError(t, err)
+			attempt, err := p.BeginIssuePublication(ctx, db.IssuePublicationBegin{
+				Guard: claim.Guard,
+				Publication: db.IssuePublication{
+					AttemptUID: tc.attemptUID, Actor: "worker", Revision: source.Issue.Revision, Payload: []byte(`{}`),
+				},
+			})
+			require.NoError(t, err)
+			require.NoError(t, p.DispatchIssuePublication(ctx, claim.Guard, attempt.AttemptUID))
+			baseline := &db.IssuePublicationContentBaseline{Hash: strings.Repeat("a", 64), At: now}
+			_, _, err = p.AttachIssuePublication(ctx, db.IssuePublicationAttach{
+				Guard: claim.Guard, AttemptUID: attempt.AttemptUID,
+				Remote: db.IssuePublicationRemote{ExternalID: "task:remote-task", Status: "open", Version: now, ContentBaseline: baseline},
+			})
+			require.NoError(t, err)
 
-	for _, dryRun := range []bool{true, false} {
-		_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
-			IssueID: source.Issue.ID, FromProjectID: source.Project.ID, ToProjectID: target.ID,
-			IfMatchRev: source.Issue.Revision, Actor: "worker", DryRun: dryRun,
+			for _, dryRun := range []bool{true, false} {
+				_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+					IssueID: source.Issue.ID, FromProjectID: source.Project.ID, ToProjectID: target.ID,
+					IfMatchRev: source.Issue.Revision, Actor: "worker", DryRun: dryRun,
+				})
+				require.ErrorIs(t, err, db.ErrImportValidation)
+			}
+			current, err := store.IssueByID(ctx, source.Issue.ID)
+			require.NoError(t, err)
+			require.Equal(t, source.Project.ID, current.ProjectID)
 		})
-		require.ErrorIs(t, err, db.ErrImportValidation)
 	}
-	current, err := store.IssueByID(ctx, source.Issue.ID)
-	require.NoError(t, err)
-	require.Equal(t, source.Project.ID, current.ProjectID)
 	return nil
 }

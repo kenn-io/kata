@@ -200,10 +200,35 @@ func TestPublishTickTickPreservesCheckpointAndImportsSameIssue(t *testing.T) {
 		IssueID: issue.ID, Title: &localTitle, Body: &localBody, Actor: "worker",
 	})
 	require.NoError(t, err)
+	target, err := store.CreateProject(t.Context(), "target-project")
+	require.NoError(t, err)
+	_, err = store.UpsertIssueSyncBinding(t.Context(), db.UpsertIssueSyncBindingParams{
+		ProjectID: target.ID, Provider: "ticktick", SourceKey: b.SourceKey, RemoteID: b.RemoteID,
+		DisplayName: b.DisplayName, Config: b.Config, IntervalSeconds: 300,
+	})
+	require.NoError(t, err)
 	source := sourceData()
 	source.data.Tasks = []Task{task}
 	now := time.Now().UTC().Add(time.Minute)
-	runner := NewRunner(RunnerConfig{Store: store, Fetcher: source, Clock: func() time.Time { return now }})
+	wrapped := &failOnceImportStore{Store: store, failNext: true}
+	runner := NewRunner(RunnerConfig{Store: wrapped, Fetcher: source, Clock: func() time.Time { return now }})
+	_, err = runner.RunOnce(t.Context(), b.ID)
+	require.ErrorContains(t, err, "injected final content import failure")
+	stagedBinding, err := store.IssueSyncBindingByID(t.Context(), b.ID)
+	require.NoError(t, err)
+	stagedCheckpoint, err := DecodeCheckpoint(stagedBinding.Config)
+	require.NoError(t, err)
+	require.Contains(t, stagedCheckpoint.PublicationContentBaselines, "task:task-1", "a failed first import must retain its publication baseline")
+	for _, dryRun := range []bool{true, false} {
+		_, err = store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+			IssueID: issue.ID, FromProjectID: b.ProjectID, ToProjectID: target.ID,
+			IfMatchRev: local.Revision, Actor: "worker", DryRun: dryRun,
+		})
+		require.ErrorIs(t, err, db.ErrImportValidation, "an unconsumed TickTick publication baseline must fence a move")
+	}
+	stillLocal := mappedIssue(t, store, b, "task-1")
+	require.Equal(t, local.Title, stillLocal.Title)
+	require.Equal(t, local.Body, stillLocal.Body)
 	result, err := runner.RunOnce(t.Context(), b.ID)
 	require.NoError(t, err)
 	require.Zero(t, result.Import.Created)

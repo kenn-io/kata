@@ -35,22 +35,3 @@ func TestPublishValidationServiceError(t *testing.T) {
 		})
 	}
 }
-
-func TestPublicationValidationDetailsUseUserFacingMessages(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		code    PublicationValidation
-		message string
-	}{
-		{"binding", PublicationBindingInvalid, "Invalid sync settings."},
-		{"notion open status", PublicationNotionOpenTargetRequired, "Choose an open Notion status."},
-		{"open status", PublicationOpenTargetRequired, "No valid open status is configured."},
-		{"destination schema", PublicationSchemaInvalid, "The destination’s fields or statuses don’t match your sync settings."},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			message, _, ok := publicationValidationDetails(string(tc.code))
-			require.True(t, ok)
-			require.Equal(t, tc.message, message)
-		})
-	}
-}

@@ -83,7 +83,8 @@ func (a *Adapter) Prepare(ctx context.Context, b db.IssueSyncBinding, started ti
 	if err != nil {
 		return p, err
 	}
-	if err = a.seedReturningTasks(ctx, b, data, &cp); err != nil {
+	consumedBaselines, err := a.seedReturningTasks(ctx, b, data, &cp)
+	if err != nil {
 		return p, err
 	}
 	batch, next, err := BuildImportBatch(c, data, cp, observedAt)
@@ -91,6 +92,11 @@ func (a *Adapter) Prepare(ctx context.Context, b db.IssueSyncBinding, started ti
 		return p, err
 	}
 	staged := stagedCheckpoint(cp, next, recovered)
+	if len(consumedBaselines) > 0 && staged.PublicationContentBaselines == nil {
+		staged.PublicationContentBaselines = map[string]db.IssuePublicationContentBaseline{}
+	}
+	// A failed import must leave its publication baseline available for retry.
+	maps.Copy(staged.PublicationContentBaselines, consumedBaselines)
 	stagedRaw, err := WithCheckpoint(b.Config, staged)
 	if err != nil {
 		return p, err
@@ -116,7 +122,7 @@ func (a *Adapter) Prepare(ctx context.Context, b db.IssueSyncBinding, started ti
 		p.Binding = b
 	}
 	p.Batch = batch
-	if len(recovered) > 0 {
+	if len(recovered) > 0 || len(consumedBaselines) > 0 {
 		finalizeBinding := b
 		p.Finalize = func(finalizeCtx context.Context) (db.IssueSyncBinding, error) {
 			return a.store.RefreshIssueSyncBinding(finalizeCtx, db.IssueSyncBindingUpdateParams{
@@ -226,7 +232,9 @@ func stagedCheckpoint(cp, next Checkpoint, recovered map[string]bool) Checkpoint
 
 // seedReturningTasks restores saved source versions and converts a publication
 // content baseline into the first checkpoint without inventing a source clock.
-func (a *Adapter) seedReturningTasks(ctx context.Context, b db.IssueSyncBinding, data ProjectData, cp *Checkpoint) error {
+// It returns consumed baselines so Prepare can retain them until import commits.
+func (a *Adapter) seedReturningTasks(ctx context.Context, b db.IssueSyncBinding, data ProjectData, cp *Checkpoint) (map[string]db.IssuePublicationContentBaseline, error) {
+	consumedBaselines := map[string]db.IssuePublicationContentBaseline{}
 	visible := map[string]Task{}
 	for _, t := range data.Tasks {
 		if t.Status == nil || *t.Status == -1 || t.Kind == "NOTE" {
@@ -235,11 +243,11 @@ func (a *Adapter) seedReturningTasks(ctx context.Context, b db.IssueSyncBinding,
 		visible[t.ID] = t
 	}
 	if len(visible) == 0 {
-		return nil
+		return consumedBaselines, nil
 	}
 	mappings, err := a.store.ImportMappingsByProjectSource(ctx, b.ProjectID, b.SourceKey)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for _, m := range mappings {
 		if m.ObjectType != "issue" {
@@ -247,7 +255,7 @@ func (a *Adapter) seedReturningTasks(ctx context.Context, b db.IssueSyncBinding,
 		}
 		id, err := mappingTaskID(m.ExternalID)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		task, ok := visible[id]
 		if !ok {
@@ -255,13 +263,13 @@ func (a *Adapter) seedReturningTasks(ctx context.Context, b db.IssueSyncBinding,
 		}
 		hash, err := taskContentHash(task)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if m.SourceUpdatedAt == nil {
 			if baseline, hasBaseline := cp.PublicationContentBaselines[m.ExternalID]; hasBaseline {
 				baselineHash, err := publicationContentHash(task)
 				if err != nil {
-					return err
+					return nil, err
 				}
 				if baselineHash == baseline.Hash {
 					at := baseline.At.UTC().Truncate(time.Millisecond)
@@ -275,10 +283,14 @@ func (a *Adapter) seedReturningTasks(ctx context.Context, b db.IssueSyncBinding,
 					delete(cp.Versions, id)
 				}
 				delete(cp.PublicationContentBaselines, m.ExternalID)
+				consumedBaselines[m.ExternalID] = baseline
 			}
 			continue
 		}
 		if _, tracked := cp.Versions[id]; tracked {
+			if baseline, hasBaseline := cp.PublicationContentBaselines[m.ExternalID]; hasBaseline {
+				consumedBaselines[m.ExternalID] = baseline
+			}
 			delete(cp.PublicationContentBaselines, m.ExternalID)
 			continue
 		}
@@ -288,7 +300,7 @@ func (a *Adapter) seedReturningTasks(ctx context.Context, b db.IssueSyncBinding,
 	if len(cp.PublicationContentBaselines) == 0 {
 		cp.PublicationContentBaselines = nil
 	}
-	return nil
+	return consumedBaselines, nil
 }
 
 // unimportedMissingTasks lists checkpointed tasks absent from the current
