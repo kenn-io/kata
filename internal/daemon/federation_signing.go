@@ -18,6 +18,7 @@ import (
 // These operation IDs are the explicit restricted-ingress allowlist. Paths
 // come from native registration so ingress cannot drift from actual routes.
 var signingCapabilities = map[string][]string{
+	"beatCronRuntime":               {"push"},
 	"createCronJob":                 {"push"},
 	"replaceCronJob":                {"push"},
 	"archiveCronJob":                {"push"},
@@ -94,7 +95,7 @@ func (s *Server) withFederationSigning(next http.Handler, ingress bool) http.Han
 			}
 			// Owner/identity lease and cron writes remain ordinary daemon operations.
 			// Ingress never takes this local-authority path.
-			if slices.Contains(route.capabilities, "claim") || isCronJobWriteOperation(route.operation) {
+			if slices.Contains(route.capabilities, "claim") || isCronJobWriteOperation(route.operation) || route.operation == "beatCronRuntime" {
 				if _, ok := PrincipalFromContext(r.Context()); ok || validLocalBearer(s.cfg.Auth.Token, r.Header.Get("Authorization")) || !hasBearerHeader(r.Header.Get("Authorization")) {
 					next.ServeHTTP(w, r)
 					return

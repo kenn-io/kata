@@ -437,11 +437,33 @@ daemon major/minor releases, ignoring missing, unparseable and prerelease/dev
 versions. Warning ordering is deterministic. Runtime entries are bounded;
 job-specific warnings grow with the project's existing job list.
 
-This first inventory slice records beats locally, including on spokes and
-relays. Its beat response uses `reported_via: direct` and
-`forwarded: not_applicable`. A hub does not yet aggregate advertisements sent
-only to a spoke. Point adapters directly at the desired inventory daemon until
-the forwarding slice lands.
+Beats always record locally first. An enabled direct spoke with push enabled
+then forwards to its owning hub, using only the configured project enrollment
+credential. Relays and push-disabled bindings keep local inventory only.
+The root's list aggregates advertisements sent directly or forwarded to it;
+a spoke's list shows its own accepted advertisements.
+
+The beat response separates local success from `forwarded`:
+
+| Value | Meaning |
+| --- | --- |
+| `recorded` | The owning hub acknowledged this runtime UID. |
+| `unavailable` | Transport, credentials, binding, authorization or the three-second deadline prevented acknowledgement. |
+| `unsupported` | The hub's federation metadata does not advertise `cron_runtime_beats`. |
+| `not_applicable` | Private/root project, relay, disabled binding or push disabled. |
+
+A forwarding failure never rolls back local evidence. Keep sending normal beats;
+there is no persistent forwarding queue. Forwarding neither flushes pending events
+nor waits for the federation sync lock. It pins the credential and destination to
+one snapshot, rejects redirects, and rechecks binding and credential state before
+dispatch. An already-dispatched beat may still reach the old root during rebind
+and expire there normally.
+
+Enrollment-authenticated beats at the root have `reported_via: forwarded` and
+`forwarder_actor` from that enrollment; their `actor` is the same authenticated
+account. Ordinary direct writes have `reported_via: direct`. Body fields cannot
+assert forwarded provenance. Signed federation deployments require signed beats
+on both transport listeners. See [federation enrollment authority](../operations/federation.md).
 
 Advertisements are self-reported evidence. They do not activate an installation,
 select jobs, authorize execution, reserve an occurrence, or change run status.

@@ -14,12 +14,10 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/api"
-	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationcoord"
 	"go.kenn.io/kata/internal/federationsigning"
-	"go.kenn.io/kata/internal/httpurl"
 )
 
 func cronForwardUnavailable(message string) error {
@@ -72,24 +70,13 @@ func forwardCronJob(ctx context.Context, cfg ServerConfig, projectID int64, uid,
 	if err != nil {
 		return nil, true, err
 	}
-	cred, found, err := cfg.federationCredentialStore().FederationCredential(ctx, project.UID)
-	if err != nil || !found || cred.Token == "" || cred.RelayEnrollmentPending || cred.LeavePending {
-		return nil, true, cronForwardUnavailable("federation push credentials are unavailable")
+	cred, client, bindingOrigin, err := cronForwardTransport(ctx, cfg, project, binding)
+	if err != nil {
+		return nil, true, err
 	}
-	credentialOrigin, e1 := httpurl.CanonicalHTTPBaseURL(cred.HubURL)
-	bindingOrigin, e2 := httpurl.CanonicalHTTPBaseURL(binding.HubURL)
-	if e1 != nil || e2 != nil || credentialOrigin != bindingOrigin || cred.HubProjectID != binding.HubProjectID {
-		return nil, true, cronForwardUnavailable("federation credential target differs from the binding; reconnect before retrying")
-	}
-	cred = config.FederationTransportCredential(binding.HubURL, binding.HubProjectID, binding.AllowInsecure, cred)
-	if cfg.FederationHubClient == nil || cfg.FederationPushPending == nil {
+	if cfg.FederationPushPending == nil {
 		return nil, true, cronForwardUnavailable("federation push transport is unavailable")
 	}
-	client, err := cfg.FederationHubClient(ctx, cred)
-	if err != nil {
-		return nil, true, cronForwardUnavailable("federation transport is unavailable")
-	}
-	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	path := fmt.Sprintf("%s/api/v1/projects/%d", bindingOrigin, binding.HubProjectID)
 	var meta api.ProjectFederationBody
 	if err := cronHubRequest(ctx, client, http.MethodGet, path+"/federation/metadata", nil, &meta, projectID); err != nil {

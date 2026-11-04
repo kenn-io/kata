@@ -45,15 +45,19 @@ func (r *CronRuntimeRegistry) prune(now time.Time) {
 
 // Beat records an already-authorized identity. Capacity never evicts retained evidence.
 func (r *CronRuntimeRegistry) Beat(projectID int64, id, actor string, b cron.RuntimeBeat) (cron.Runtime, error) {
+	return r.beat(projectID, id, actor, b, "")
+}
+
+func (r *CronRuntimeRegistry) beat(projectID int64, id, actor string, b cron.RuntimeBeat, forwarder string) (cron.Runtime, error) {
 	b, err := cron.NormalizeRuntimeBeat(b)
 	if err != nil {
 		return cron.Runtime{}, err
 	}
-	return r.beatNormalized(projectID, id, actor, b)
+	return r.beatNormalized(projectID, id, actor, b, forwarder)
 }
 
 // beatNormalized takes ownership of a beat validated by NormalizeRuntimeBeat.
-func (r *CronRuntimeRegistry) beatNormalized(projectID int64, id, actor string, b cron.RuntimeBeat) (cron.Runtime, error) {
+func (r *CronRuntimeRegistry) beatNormalized(projectID int64, id, actor string, b cron.RuntimeBeat, forwarder string) (cron.Runtime, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.clock().UTC()
@@ -76,6 +80,10 @@ func (r *CronRuntimeRegistry) beatNormalized(projectID int64, id, actor string, 
 		first = now
 	}
 	v := cron.Runtime{RuntimeBeat: b, UID: id, Actor: actor, FirstSeenAt: first, LastSeenAt: now, ExpiresAt: now.Add(time.Duration(b.IntervalSeconds) * 3 * time.Second), ReportedVia: "direct"}
+	if forwarder != "" {
+		v.ReportedVia = "forwarded"
+		v.ForwarderActor = forwarder
+	}
 	if b.State == "stopping" {
 		v.ExpiresAt = now
 	}

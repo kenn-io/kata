@@ -17,8 +17,9 @@ type CronRuntimeRequest struct {
 // BeatCronRuntimeRequest replaces the current advertisement for one runtime.
 type BeatCronRuntimeRequest struct {
 	CronRuntimeRequest
-	Body    BeatCronRuntimeBody
-	RawBody []byte
+	Body          BeatCronRuntimeBody
+	RawBody       []byte
+	Authorization string `header:"Authorization"`
 }
 
 // BeatCronRuntimeResponse reports local admission and best-effort forwarding separately.
