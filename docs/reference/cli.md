@@ -2244,20 +2244,6 @@ current expected event UID, from `--expected-event-uid` or the request body. Ind
 same-write retry idempotency, and ordinary revision CAS for changed evidence.
 The planning-date read returns native resolved dates without changing readiness.
 
-On newer main builds, `cron run prune` previews one batch by default. `--force`
-requires the exact confirmation; interactive terminals prompt when it is
-omitted. `--older-than` accepts a Go duration or whole days (`90d`), with a
-24-hour minimum. Pruning keeps each job or workflow's newest evidence and
-resets replicas after a nonempty deletion. See [Run retention](cron.md#run-retention)
-for selection rules, ranges, export guidance, and replay limits.
-
-
-`cron run counts` reads retained evidence and recorded pruning from one
-snapshot. Its workflow filter selects only the workflow's own group, while
-prune's workflow filter also includes member job runs. See
-[Retained and pruned counts](cron.md#retained-and-pruned-counts) for coverage,
-replay semantics, and exact integer output.
-
 ## Federation
 
 Account-token bridges and root-key recovery require Kata 0.19.0 or later.

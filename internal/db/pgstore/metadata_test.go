@@ -53,7 +53,7 @@ func TestMetadataRetryClearsRolledBackAttemptOutput(t *testing.T) {
 			`UPDATE projects SET metadata = $1, revision = revision + 1 WHERE id = $2`,
 			`{"area":"runtime"}`, project.ID)
 		require.NoError(t, updateErr)
-	}))
+	}), false)
 	require.NoError(t, err)
 	assert.False(t, projectOut.Changed)
 	assert.Zero(t, projectOut.Event.ID)

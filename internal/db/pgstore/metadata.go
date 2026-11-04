@@ -110,19 +110,11 @@ func (s *Store) PatchProjectMetadata(ctx context.Context, input db.PatchProjectM
 	if err := db.RejectCronTallyPatch(input.Patch); err != nil {
 		return db.PatchProjectMetadataOut{}, err
 	}
-	return s.patchProjectMetadata(ctx, input, s.withSerializableTx)
-}
-
-func (s *Store) patchProjectMetadata(
-	ctx context.Context,
-	input db.PatchProjectMetadataIn,
-	run metadataTxRunner,
-) (db.PatchProjectMetadataOut, error) {
-	return s.patchProjectMetadataReassert(ctx, input, run, false)
+	return s.patchProjectMetadata(ctx, input, s.withSerializableTx, false)
 }
 
 // Adoption may need a replay correction although the root row is unchanged.
-func (s *Store) patchProjectMetadataReassert(ctx context.Context, input db.PatchProjectMetadataIn, run metadataTxRunner, reassertTallies bool) (db.PatchProjectMetadataOut, error) {
+func (s *Store) patchProjectMetadata(ctx context.Context, input db.PatchProjectMetadataIn, run metadataTxRunner, reassertTallies bool) (db.PatchProjectMetadataOut, error) {
 	var output db.PatchProjectMetadataOut
 	for key, raw := range input.Patch {
 		if err := metadata.Validate(metadata.ProjectRegistry, key, raw); err != nil {

@@ -98,22 +98,16 @@ func checkCronPruneEventModel(t *testing.T, s db.Storage) error {
 		got := pruneEvents(t.Context(), ht, s, p)
 		metadataEvent, ok := got[result.MetadataEvent.UID]
 		require.True(ht, ok, "prune metadata event is exported")
-		require.Equal(ht, result.MetadataEvent.ID, metadataEvent.ID)
-		require.Equal(ht, result.MetadataEvent.OriginInstanceUID, metadataEvent.OriginInstanceUID)
-		require.Equal(ht, result.MetadataEvent.ProjectID, metadataEvent.ProjectID)
-		require.Equal(ht, result.MetadataEvent.Type, metadataEvent.Type)
-		require.Equal(ht, result.MetadataEvent.ProjectUID, metadataEvent.ProjectUID)
-		require.Equal(ht, result.MetadataEvent.ProjectName, metadataEvent.ProjectName)
-		require.Equal(ht, result.MetadataEvent.IssueID, metadataEvent.IssueID)
-		require.Equal(ht, result.MetadataEvent.IssueUID, metadataEvent.IssueUID)
-		require.Equal(ht, result.MetadataEvent.RelatedIssueID, metadataEvent.RelatedIssueID)
-		require.Equal(ht, result.MetadataEvent.RelatedIssueUID, metadataEvent.RelatedIssueUID)
-		require.Equal(ht, result.MetadataEvent.Actor, metadataEvent.Actor)
-		require.JSONEq(ht, result.MetadataEvent.Payload, string(metadataEvent.Payload))
-		require.Equal(ht, result.MetadataEvent.HLCPhysicalMS, metadataEvent.HLCPhysicalMS)
-		require.Equal(ht, result.MetadataEvent.HLCCounter, metadataEvent.HLCCounter)
-		require.Equal(ht, result.MetadataEvent.ContentHash, metadataEvent.ContentHash)
-		require.Equal(ht, result.MetadataEvent.CreatedAt.UTC().Format(db.EventTimestampFormat), metadataEvent.CreatedAt)
+		e := result.MetadataEvent
+		require.JSONEq(ht, e.Payload, string(metadataEvent.Payload))
+		require.Equal(ht, db.EventExport{
+			ID: e.ID, UID: e.UID, OriginInstanceUID: e.OriginInstanceUID,
+			ProjectID: e.ProjectID, ProjectUID: e.ProjectUID, ProjectName: e.ProjectName,
+			IssueID: e.IssueID, IssueUID: e.IssueUID, RelatedIssueID: e.RelatedIssueID, RelatedIssueUID: e.RelatedIssueUID,
+			Type: e.Type, Actor: e.Actor, Payload: metadataEvent.Payload,
+			HLCPhysicalMS: e.HLCPhysicalMS, HLCCounter: e.HLCCounter, ContentHash: e.ContentHash,
+			CreatedAt: e.CreatedAt.UTC().Format(db.EventTimestampFormat),
+		}, metadataEvent)
 		delete(got, result.MetadataEvent.UID)
 		require.Equal(ht, want, got)
 	}, hegel.WithTestCases(30))

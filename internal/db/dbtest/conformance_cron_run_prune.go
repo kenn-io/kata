@@ -19,17 +19,9 @@ import (
 // newest set; previews and empty retries change neither events nor reset state.
 func checkCronRunPrune(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
-	project, err := store.CreateProject(ctx, "example-project")
-	require.NoError(t, err)
-	def, err := cron.ParseJob([]byte(`{"version":1,"kind":"job","trigger":{"kind":"manual"},"action":{"kind":"execute","prompt":"Review"},"issue":{"kind":"per-run","title":"Review"},"overlap":"forbid","catchup":"skip"}`))
-	require.NoError(t, err)
-	job, _, err := store.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "Review", Actor: "operator", Definition: def})
-	require.NoError(t, err)
-	workflow, _, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{UID: job.UID, ProjectID: project.ID, Name: "Workflow", Actor: "operator", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "review", Kind: "command", Command: "true"}}}})
-	require.NoError(t, err)
-	q := store.(interface {
-		ExecContext(context.Context, string, ...any) (sql.Result, error)
-	})
+	f := newCronTallyFixture(ctx, t, store)
+	project, job, workflow, q := f.project, f.job, f.workflow, f.q
+	var err error
 	cutoff := time.Date(2026, 8, 1, 0, 0, 0, 123000000, time.UTC)
 	add := func(status string, created, updated time.Time, workflowOnly bool) db.CronRun {
 		id, err := uid.New()

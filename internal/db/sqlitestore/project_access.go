@@ -443,10 +443,7 @@ func (d *Store) projectAccessCheck(actor string, projectUIDs []string, lockPolic
 				return db.ErrNotFound
 			}
 			if err != nil {
-				if lockPolicy {
-					return fmt.Errorf("project access fence: %w", err)
-				}
-				return fmt.Errorf("project access snapshot: %w", err)
+				return fmt.Errorf("project access check: %w", err)
 			}
 		}
 		return nil
