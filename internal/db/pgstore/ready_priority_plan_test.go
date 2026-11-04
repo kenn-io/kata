@@ -24,31 +24,77 @@ func TestReadyPriorityUsesOrderedIndexes(t *testing.T) {
 	require.NoError(t, err)
 	other, err := store.CreateProject(ctx, "hub-project")
 	require.NoError(t, err)
-	_, err = store.ExecContext(ctx, `INSERT INTO issues(uid, project_id, short_id, title, author, priority)
- SELECT lpad(n::text, 26, '0'), CASE WHEN n % 10 = 0 THEN $1::bigint ELSE $2::bigint END, lpad(n::text, 6, '0'), 'Ready issue', 'author', n % 5 FROM generate_series(1, 10000) n`, project.ID, other.ID)
+	_, err = store.ExecContext(ctx, `INSERT INTO issues(uid, project_id, short_id, title, author, priority, owner)
+ SELECT lpad(n::text, 26, '0'), CASE WHEN n % 5 = 0 THEN $1::bigint ELSE $2::bigint END, lpad(n::text, 6, '0'), 'Ready issue', 'author', n % 5, CASE WHEN n % 3 = 0 THEN NULL ELSE 'worker' END FROM generate_series(1, 10000) n`, project.ID, other.ID)
 	require.NoError(t, err)
-	_, err = store.ExecContext(ctx, "ANALYZE issues")
+	_, err = store.ExecContext(ctx, `INSERT INTO issue_labels(issue_id, label, author)
+ SELECT id, label, 'author' FROM issues CROSS JOIN (VALUES ('bug'), ('ready')) labels(label) WHERE id % 2 = 0`)
 	require.NoError(t, err)
-	for _, global := range []bool{false, true} {
-		query, args := buildReadyIssuesQuery(ctx, project.ID, db.ReadyIssuesFilter{PriorityFirst: true}, time.Now())
-		index := "idx_issues_project_ready_priority"
-		if global {
-			query, args = buildReadyIssuesGlobalQuery(ctx, db.ReadyIssuesFilter{PriorityFirst: true}, time.Now())
-			index = "idx_issues_ready_priority"
-		}
-		rows, err := store.QueryContext(ctx, "EXPLAIN (COSTS OFF) "+query+" LIMIT 1", args...)
-		require.NoError(t, err)
-		var details []string
-		for rows.Next() {
-			var detail string
-			require.NoError(t, rows.Scan(&detail))
-			details = append(details, detail)
-		}
-		require.NoError(t, rows.Err())
-		require.NoError(t, rows.Close())
-		plan := strings.Join(details, "\n")
-		t.Log(plan)
-		require.Contains(t, plan, index)
-		require.NotContains(t, plan, "Sort")
+	_, err = store.ExecContext(ctx, "ANALYZE issues; ANALYZE issue_labels")
+	require.NoError(t, err)
+	_, err = store.ExecContext(ctx, `INSERT INTO issue_labels(issue_id, label, author)
+ VALUES (10000, 'blocked', 'author'), (9990, 'later', 'author')`)
+	require.NoError(t, err)
+	for _, scope := range []string{"project", "global"} {
+		t.Run(scope, func(t *testing.T) {
+			for _, tc := range []struct {
+				name   string
+				filter db.ReadyIssuesFilter
+				wantID int64
+			}{
+				{name: "all", filter: db.ReadyIssuesFilter{PriorityFirst: true}, wantID: 10000},
+				{name: "absent-owner", filter: db.ReadyIssuesFilter{PriorityFirst: true, Owner: "nobody"}, wantID: 0},
+				{name: "absent-label", filter: db.ReadyIssuesFilter{PriorityFirst: true, Labels: []string{"absent"}}, wantID: 0},
+				{name: "owner", filter: db.ReadyIssuesFilter{PriorityFirst: true, Owner: "worker"}, wantID: 10000},
+				{name: "unowned", filter: db.ReadyIssuesFilter{PriorityFirst: true, Unowned: true}, wantID: 9990},
+				{name: "labels", filter: db.ReadyIssuesFilter{PriorityFirst: true, Labels: []string{"bug", "ready"}}, wantID: 10000},
+				{name: "exclude-labels", filter: db.ReadyIssuesFilter{PriorityFirst: true, ExcludeLabels: []string{"blocked", "later"}}, wantID: 9995},
+				{name: "combined", filter: db.ReadyIssuesFilter{PriorityFirst: true, Owner: "worker", Labels: []string{"bug"}, ExcludeLabels: []string{"blocked"}}, wantID: 9980},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					query, args := buildReadyIssuesQuery(ctx, project.ID, tc.filter, time.Now())
+					index := "idx_issues_project_ready_priority"
+					if scope == "global" {
+						query, args = buildReadyIssuesGlobalQuery(ctx, tc.filter, time.Now())
+						index = "idx_issues_ready_priority"
+					}
+					rows, err := store.QueryContext(ctx, "EXPLAIN (COSTS OFF) "+query+" LIMIT 1", args...)
+					require.NoError(t, err)
+					var details []string
+					for rows.Next() {
+						var detail string
+						require.NoError(t, rows.Scan(&detail))
+						details = append(details, detail)
+					}
+					require.NoError(t, rows.Err())
+					require.NoError(t, rows.Close())
+					plan := strings.Join(details, "\n")
+					t.Log(plan)
+					require.Contains(t, plan, index)
+					require.NotContains(t, plan, "Sort")
+					var issue db.Issue
+					if scope == "global" {
+						issues, err := store.ReadyIssuesGlobal(ctx, 1, tc.filter)
+						require.NoError(t, err)
+						if tc.wantID == 0 {
+							require.Empty(t, issues)
+							return
+						}
+						require.Len(t, issues, 1)
+						issue = issues[0].Issue
+					} else {
+						issues, err := store.ReadyIssues(ctx, project.ID, 1, tc.filter)
+						require.NoError(t, err)
+						if tc.wantID == 0 {
+							require.Empty(t, issues)
+							return
+						}
+						require.Len(t, issues, 1)
+						issue = issues[0]
+					}
+					require.Equal(t, tc.wantID, issue.ID)
+				})
+			}
+		})
 	}
 }

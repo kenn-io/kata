@@ -40,6 +40,11 @@ func buildReadyIssuesQuery(ctx context.Context, projectID int64, filter db.Ready
 	query.WriteString(" AND " + authorizedIssuePredicate(ctx, "i.project_id", &args))
 	appendIssueScopePostgres(&query, &args, filter.IssueScope)
 	query.WriteString(` AND COALESCE((i.metadata::jsonb ->> 'someday')::boolean, false) = false`)
+	filterAfterPriority := filter.PriorityFirst && (filter.Unowned || filter.Owner != "" || len(filter.Labels) > 0 || len(filter.ExcludeLabels) > 0)
+	if filterAfterPriority {
+		// Evaluate optional filters per issue so selective filters keep the ordered walk.
+		query.WriteString(" AND (SELECT true")
+	}
 	if filter.Unowned {
 		query.WriteString(` AND (i.owner IS NULL OR i.assignment_expires_on <= ` + addArg(formatStoredTime(at)) + `)`)
 	} else if filter.Owner != "" {
@@ -54,6 +59,9 @@ func buildReadyIssuesQuery(ctx context.Context, projectID int64, filter db.Ready
 		query.WriteString(` AND NOT EXISTS (
           SELECT 1 FROM issue_labels il
            WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`)
+	}
+	if filterAfterPriority {
+		query.WriteString(" OFFSET 0)")
 	}
 	if filter.PriorityFirst {
 		query.WriteString(readyPriorityOrderBy)
@@ -131,6 +139,11 @@ func buildReadyIssuesGlobalQuery(ctx context.Context, filter db.ReadyIssuesFilte
 	query.WriteString(" AND " + authorizedIssuePredicate(ctx, "i.project_id", &args))
 	appendIssueScopePostgres(&query, &args, filter.IssueScope)
 	query.WriteString(` AND COALESCE((i.metadata::jsonb ->> 'someday')::boolean, false) = false`)
+	filterAfterPriority := filter.PriorityFirst && (filter.Unowned || filter.Owner != "" || len(filter.Labels) > 0 || len(filter.ExcludeLabels) > 0)
+	if filterAfterPriority {
+		// Evaluate optional filters per issue so selective filters keep the ordered walk.
+		query.WriteString(" AND (SELECT true")
+	}
 	if filter.Unowned {
 		query.WriteString(` AND (i.owner IS NULL OR i.assignment_expires_on <= ` + addArg(formatStoredTime(at)) + `)`)
 	} else if filter.Owner != "" {
@@ -145,6 +158,9 @@ func buildReadyIssuesGlobalQuery(ctx context.Context, filter db.ReadyIssuesFilte
 		query.WriteString(` AND NOT EXISTS (
           SELECT 1 FROM issue_labels il
            WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`)
+	}
+	if filterAfterPriority {
+		query.WriteString(" OFFSET 0)")
 	}
 	if filter.PriorityFirst {
 		query.WriteString(readyPriorityOrderBy)
