@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io/fs"
 	"maps"
 	"net/http"
@@ -760,4 +761,114 @@ func TestOpenAPIDocumentShowIssueCarriesLabelStrings(t *testing.T) {
 	require.Contains(t, issue.Properties, "short_id")
 
 	require.NotContains(t, schemas["Issue"].Properties, "labels")
+}
+
+// TestCronDocsRouteTableMatchesOpenAPI catches routes added or renamed without
+// updating the operator reference. CLI/MCP mappings are reviewed separately.
+func TestCronDocsRouteTableMatchesOpenAPI(t *testing.T) {
+	source, err := os.ReadFile("../../docs/reference/cron.md")
+	require.NoError(t, err)
+	want := map[string]string{}
+	for path, item := range OpenAPIDocument().Paths {
+		if !strings.Contains(path, "/cron/") {
+			continue
+		}
+		for method, op := range map[string]*huma.Operation{
+			"GET": item.Get, "POST": item.Post, "PUT": item.Put,
+			"DELETE": item.Delete, "PATCH": item.Patch, "HEAD": item.Head,
+			"OPTIONS": item.Options, "TRACE": item.Trace,
+		} {
+			if op != nil {
+				want[method+" "+path] = op.OperationID
+			}
+		}
+	}
+	require.NotEmpty(t, want)
+	require.NoError(t, checkCronDocsRoutes(source, want))
+}
+
+func checkCronDocsRoutes(source []byte, want map[string]string) error {
+	// The reference uses a five-column pipe table with literal code spans.
+	// Parse that table with the standard library so this docs guard adds no
+	// direct module dependency. Ignore fenced examples and other tables.
+	got := map[string]string{}
+	state := 0 // scanning, delimiter, rows
+	fenced := false
+	for line := range strings.SplitSeq(string(source), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "```") {
+			fenced = !fenced
+			state = 0
+			continue
+		}
+		if fenced {
+			continue
+		}
+		if !strings.HasPrefix(line, "|") || !strings.HasSuffix(line, "|") {
+			state = 0
+			continue
+		}
+		values := strings.Split(strings.TrimSuffix(strings.TrimPrefix(line, "|"), "|"), "|")
+		for i := range values {
+			values[i] = strings.Trim(strings.TrimSpace(values[i]), "`")
+		}
+		if state == 0 {
+			if slices.Equal(values, []string{"Method", "Path", "Operation ID", "CLI", "MCP tool"}) {
+				state = 1
+			}
+			continue
+		}
+		if len(values) != 5 {
+			return fmt.Errorf("cron route row has %d cells, want 5", len(values))
+		}
+		if state == 1 {
+			for _, value := range values {
+				delimiter := strings.Trim(value, ":")
+				if len(delimiter) < 3 || strings.Trim(delimiter, "-") != "" {
+					return fmt.Errorf("invalid cron route table delimiter %q", value)
+				}
+			}
+			state = 2
+			continue
+		}
+		route := values[0] + " " + values[1]
+		if _, duplicate := got[route]; duplicate {
+			return fmt.Errorf("duplicate cron route %s", route)
+		}
+		got[route] = values[2]
+	}
+	var differences []string
+	for route, operation := range want {
+		if got[route] != operation {
+			differences = append(differences, fmt.Sprintf("%s: documented %q, want %q", route, got[route], operation))
+		}
+	}
+	for route := range got {
+		if _, exists := want[route]; !exists {
+			differences = append(differences, "extra cron route "+route)
+		}
+	}
+	slices.Sort(differences)
+	if len(differences) > 0 {
+		return fmt.Errorf("cron route documentation differs:\n%s", strings.Join(differences, "\n"))
+	}
+	return nil
+}
+
+func TestCronDocsRouteTableRejectsDrift(t *testing.T) {
+	const header = "| Method | Path | Operation ID | CLI | MCP tool |\n| --- | --- | --- | --- | --- |\n"
+	const row = "| GET | `/cron/runs` | `listCronRuns` | run list | cron_runs |\n"
+	want := map[string]string{"GET /cron/runs": "listCronRuns"}
+	require.NoError(t, checkCronDocsRoutes([]byte(header+row), want))
+	for name, table := range map[string]string{
+		"missing":    header,
+		"misspelled": header + strings.ReplaceAll(row, "listCronRuns", "listCronRun"),
+		"extra":      header + row + "| POST | `/cron/runs` | `createCronRun` | — | — |\n",
+		"duplicate":  header + row + row,
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := checkCronDocsRoutes([]byte(table), want)
+			require.ErrorContains(t, err, "/cron/runs")
+		})
+	}
 }

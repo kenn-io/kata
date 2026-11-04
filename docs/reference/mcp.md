@@ -432,7 +432,8 @@ preserved. Typed definitions and opaque option objects retain exact JSON numbers
 
 `kata.cron_runs` defaults to 20 records, accepts `limit` from 1 through 100,
 and returns `next_before_uid`; pass it as `before_uid` to continue. `job_uid`
-filters history. `kata.cron_run_observe` requires a caller-retained run UID,
+filters history. See [Run list page size](cron.md#run-list-page-size) for
+the HTTP, CLI and TUI defaults. `kata.cron_run_observe` requires a caller-retained run UID,
 `expected_revision` (`0` for new evidence), a job or workflow reference with its
 definition event UID, status, and a versioned summary. Identical retries return
 `replayed: true`; distinct run UIDs for one scheduled occurrence remain separate
