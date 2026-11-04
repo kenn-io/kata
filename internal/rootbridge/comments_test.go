@@ -17,7 +17,7 @@ import (
 
 func TestPublicationOperationIDIsStableForBindingAndComment(t *testing.T) {
 	binding := db.ExternalRootBinding{UID: "01JEXAMPLEBINDING000000000"}
-	comment := db.Comment{UID: "01JEXAMPLECOMMENT000000000"}
+	comment := db.Comment{UID: "01M40000000000000000000004"}
 
 	first := publicationOperationID(binding, comment)
 	second := publicationOperationID(binding, comment)
@@ -30,6 +30,9 @@ func TestPublicationOperationIDIsStableForBindingAndComment(t *testing.T) {
 	assert.NotEqual(t, first, publicationOperationID(
 		binding, db.Comment{UID: "01JOTHERCOMMENT0000000000"},
 	))
+	assert.Equal(t, first, publicationOperationID(
+		binding, db.Comment{UID: "01m40000000000000000000004"},
+	), "case variants of a valid ULID retain publication identity across federation normalization")
 }
 
 func TestReconcileQuietModeDoesNotPublishLocalComments(t *testing.T) {

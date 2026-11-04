@@ -314,6 +314,6 @@ func skippedCommentMapping(
 }
 
 func publicationOperationID(binding db.ExternalRootBinding, comment db.Comment) string {
-	digest := sha256.Sum256([]byte("kata.external-comment.v1\x00" + binding.UID + "\x00" + comment.UID))
+	digest := sha256.Sum256([]byte("kata.external-comment.v1\x00" + binding.UID + "\x00" + db.CanonicalCommentUID(comment.UID)))
 	return hex.EncodeToString(digest[:])
 }
