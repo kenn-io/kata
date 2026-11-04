@@ -382,65 +382,226 @@ func TestCronHistoryRefreshPreservesEventPages(t *testing.T) {
 	}
 }
 
+// Contract: creation-ordered arrivals stay reachable across event head merges,
+// without losing retained rows, selection, or valid in-flight older results.
+func cronGapFixture(t *testing.T, jobPage bool, count int) (Model, *cronReadTestAPI, string) {
+	t.Helper()
+	m := cronFixture(t)
+	m.cron.tab = cronRuns
+	base := m.cron.data.runs[0]
+	runs := make([]generated.CronRun, count)
+	for i := range count {
+		runs[i] = base
+		runs[i].UID = fmt.Sprintf("run-%04d", i)
+		runs[i].CreatedAt = snapshotFixedNow.Add(time.Duration(i) * time.Minute)
+	}
+	a := &cronReadTestAPI{data: *m.cron.data}
+	a.data.runs = runs
+	m.api = a
+	m.cron.data.runs = nil
+	m.cron.runPage = cronHistoryPage{ready: true}
+	job := ""
+	if jobPage {
+		job = *base.JobUID
+		m.cron.stack = []cronFrame{{ref: cronRef{cronJobs, job}}}
+		m.cron.jobPage = cronHistoryPage{job: job, ready: true}
+	}
+	return m, a, job
+}
+
+func cronGapPage(m *Model, job string) *cronHistoryPage {
+	if job != "" {
+		return &m.cron.jobPage
+	}
+	return &m.cron.runPage
+}
+
+func cronGapEvent(t *testing.T, m Model) Model {
+	t.Helper()
+	model, _ := m.handleEventReceived(eventReceivedMsg{eventType: "cron.run.observed", projectID: 7})
+	m = model.(Model)
+	// Deliver the debounce tick directly; no wall-clock wait is needed.
+	model, _ = m.handleRefetchTick()
+	m = model.(Model)
+	m, fetch := m.cronSync()
+	require.NotNil(t, fetch)
+	m = m.cronLoaded(fetch().(cronLoadedMsg))
+	m, head := m.cronSync()
+	if head != nil {
+		m = m.cronPageLoaded(head().(cronPageMsg))
+	}
+	return m
+}
+
+func cronGapOlder(t *testing.T, m Model, job string) Model {
+	t.Helper()
+	_, _, lines := cronScreen(m)
+	selected := slices.IndexFunc(lines, func(l cronLine) bool { return l.target.kind == cronOlder })
+	require.GreaterOrEqual(t, selected, 0)
+	if job == "" {
+		m.cron.lists[cronRuns].cursor = selected
+	} else {
+		m.cron.stack[0].cursor = selected
+	}
+	m, request := m.routeCronKey(keyRune('l'))
+	require.NotNil(t, request)
+	msg := request().(cronPageMsg)
+	require.NoError(t, msg.err)
+	return m.cronPageLoaded(msg)
+}
+
+func TestCronHistoryEventHeadGapStaysReachable(t *testing.T) {
+	for _, jobPage := range []bool{false, true} {
+		limit := 100
+		if jobPage {
+			limit = 20
+		}
+		for _, arrivals := range []int{limit, 150} {
+			for _, state := range []string{"deep", "exhausted", "empty"} {
+				for _, selectOlder := range []bool{false, true} {
+					t.Run(fmt.Sprintf("job=%v/arrivals=%d/%s/link=%v", jobPage, arrivals, state, selectOlder), func(t *testing.T) {
+						m, a, job := cronGapFixture(t, jobPage, arrivals+2)
+						p := cronGapPage(&m, job)
+						if state != "empty" {
+							p.runs = slices.Clone(a.data.runs[1:2])
+						}
+						if state == "deep" || selectOlder {
+							p.next = a.data.runs[1].UID
+						}
+						_, _, lines := cronScreen(m)
+						wanted := cronRef{cronRuns, a.data.runs[1].UID}
+						if selectOlder {
+							wanted = cronRef{kind: cronOlder, uid: job}
+							if job == "" {
+								wanted.uid = "project"
+							}
+						}
+						selected := slices.IndexFunc(lines, func(l cronLine) bool { return l.target == wanted })
+						if state != "empty" || selectOlder {
+							require.GreaterOrEqual(t, selected, 0)
+						}
+						if selected >= 0 {
+							if jobPage {
+								m.cron.stack[0].cursor = selected
+							} else {
+								m.cron.lists[cronRuns].cursor = selected
+							}
+						}
+						m = cronGapEvent(t, m)
+						p = cronGapPage(&m, job)
+						require.Equal(t, a.data.runs[len(a.data.runs)-limit].UID, p.next)
+						if selected >= 0 {
+							_, _, lines = cronScreen(m)
+							cursor := m.cron.lists[cronRuns].cursor
+							if jobPage {
+								cursor = m.cron.stack[0].cursor
+							}
+							require.Equal(t, wanted, lines[cursor].target)
+						}
+						m = cronGapOlder(t, m, job)
+						p = cronGapPage(&m, job)
+						require.True(t, slices.ContainsFunc(p.runs, func(r generated.CronRun) bool { return r.UID == a.data.runs[len(a.data.runs)-limit-1].UID }))
+						if state != "empty" {
+							require.Contains(t, p.runs, a.data.runs[1])
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
 func TestCronHistoryEventKeepsInflightOlderPage(t *testing.T) {
 	for _, jobPage := range []bool{false, true} {
-		for _, olderFirst := range []bool{false, true} {
-			t.Run(fmt.Sprintf("job=%v/older-first=%v", jobPage, olderFirst), func(t *testing.T) {
-				m := cronFixture(t)
-				m.cron.tab = cronRuns
-				old := m.cron.data.runs[0]
-				old.UID = "loaded-old"
-				old.CreatedAt = snapshotFixedNow.Add(-time.Hour)
-				oldest := old
-				oldest.UID = "requested-older"
-				oldest.CreatedAt = old.CreatedAt.Add(-time.Hour)
-				fresh := *m.cron.data
-				fresh.runs = []generated.CronRun{old, oldest}
-				for i := range 150 {
-					r := old
-					r.UID = fmt.Sprintf("head-%03d", i)
-					r.CreatedAt = snapshotFixedNow.Add(time.Duration(i) * time.Minute)
-					fresh.runs = append(fresh.runs, r)
-				}
-				m.cron.runPage = cronHistoryPage{runs: []generated.CronRun{old}, next: old.UID, ready: true}
-				job := ""
-				if jobPage {
-					job = *old.JobUID
-					m.cron.stack = []cronFrame{{ref: cronRef{cronJobs, job}}}
-					m.cron.jobPage = cronHistoryPage{job: job, runs: []generated.CronRun{old}, next: old.UID, ready: true}
-				}
-				m.api = &cronReadTestAPI{data: fresh}
-				m, request := m.cronRequestPage(job, false)
-				late := request().(cronPageMsg)
-				model, _ := m.handleEventReceived(eventReceivedMsg{eventType: "cron.run.observed", projectID: 7})
-				m = model.(Model)
-				m, fetch := m.cronSync()
-				require.NotNil(t, fetch)
-				if olderFirst {
-					m = m.cronPageLoaded(late)
-				}
-				headMsg := fetch().(cronLoadedMsg)
-				require.Len(t, headMsg.runs, 100)
-				require.False(t, slices.ContainsFunc(headMsg.runs, func(r generated.CronRun) bool { return r.UID == oldest.UID }))
-				m = m.cronLoaded(headMsg)
-				if !olderFirst {
-					m = m.cronPageLoaded(late)
-				}
-				m, head := m.cronSync()
-				if head != nil {
-					msg, ok := head().(cronPageMsg)
-					require.True(t, ok)
-					m = m.cronPageLoaded(msg)
-				}
-				page := m.cron.runPage
-				if jobPage {
-					page = m.cron.jobPage
-				}
-				require.True(t, slices.ContainsFunc(page.runs, func(r generated.CronRun) bool { return r.UID == oldest.UID }), "event must accept the valid older response in either arrival order")
-				require.False(t, page.out)
-				require.Empty(t, page.next, "the accepted terminal older page owns continuation")
-			})
+		limit := 100
+		if jobPage {
+			limit = 20
 		}
+		for _, olderFirst := range []bool{false, true} {
+			for _, terminal := range []bool{false, true} {
+				for _, overlaps := range []bool{false, true} {
+					t.Run(fmt.Sprintf("job=%v/older-first=%v/terminal=%v/overlap=%v", jobPage, olderFirst, terminal, overlaps), func(t *testing.T) {
+						m, a, job := cronGapFixture(t, jobPage, 350)
+						index := 101
+						if terminal {
+							index = 1
+						}
+						if overlaps {
+							index = 340
+						}
+						p := cronGapPage(&m, job)
+						p.runs, p.next = slices.Clone(a.data.runs[index:index+1]), a.data.runs[index].UID
+						m, request := m.cronRequestPage(job, false)
+						late := request().(cronPageMsg)
+						require.NoError(t, late.err)
+						gen, cursor := cronGapPage(&m, job).gen, cronGapPage(&m, job).cursor
+						if olderFirst {
+							m = m.cronPageLoaded(late)
+						}
+						m = cronGapEvent(t, m)
+						if !olderFirst {
+							p = cronGapPage(&m, job)
+							require.True(t, p.out)
+							require.Equal(t, gen, p.gen)
+							require.Equal(t, cursor, p.cursor)
+							m = m.cronPageLoaded(late)
+							// Job head reloads intentionally wait for older results.
+							next, head := m.cronSync()
+							m = next
+							if head != nil {
+								m = m.cronPageLoaded(head().(cronPageMsg))
+							}
+						}
+						p = cronGapPage(&m, job)
+						require.Contains(t, p.runs, a.data.runs[index])
+						for _, r := range late.runs {
+							require.Contains(t, p.runs, r)
+						}
+						require.False(t, p.out)
+						want := a.data.runs[350-limit].UID
+						if overlaps {
+							want = late.next
+						}
+						require.Equal(t, want, p.next)
+						m = cronGapOlder(t, m, job)
+						require.Contains(t, cronGapPage(&m, job).runs, a.data.runs[350-limit-1])
+					})
+				}
+			}
+		}
+	}
+}
+
+func TestCronHistorySuccessiveHeadGapsDrainToExhaustion(t *testing.T) {
+	for _, jobPage := range []bool{false, true} {
+		t.Run(fmt.Sprintf("job=%v", jobPage), func(t *testing.T) {
+			limit := 100
+			if jobPage {
+				limit = 20
+			}
+			m, a, job := cronGapFixture(t, jobPage, 6*limit)
+			all := slices.Clone(a.data.runs)
+			p := cronGapPage(&m, job)
+			p.runs, p.next = slices.Clone(all[:limit]), all[0].UID
+			a.data.runs = all[:4*limit]
+			m = cronGapEvent(t, m)
+			m = cronGapOlder(t, m, job) // Fill only part of the first gap.
+			a.data.runs = all
+			m = cronGapEvent(t, m)
+			presses := 0
+			for cronGapPage(&m, job).next != "" {
+				require.Less(t, presses, 10, "continuation must terminate")
+				m = cronGapOlder(t, m, job)
+				presses++
+			}
+			// The full final page advertises a cursor; the final empty reply clears it.
+			require.Equal(t, 6, presses)
+			got := cronGapPage(&m, job).runs
+			require.Len(t, got, len(all))
+			for i, r := range got {
+				require.Equal(t, all[len(all)-1-i].UID, r.UID)
+			}
+		})
 	}
 }
 

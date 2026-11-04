@@ -141,7 +141,7 @@ func TestCronSeenFiles(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, []byte("corrupt"), 0600))
 	_, err = cronSeenSave(t.Context(), path, empty)
 	require.Error(t, err)
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: test-controlled path under t.TempDir()
 	require.NoError(t, err)
 	require.Equal(t, "corrupt", string(raw))
 	require.True(t, slices.IsSorted(got.Projects["0"].Runs))

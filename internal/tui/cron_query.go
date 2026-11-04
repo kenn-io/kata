@@ -12,7 +12,7 @@ type cronSearch struct {
 func cronQuery(query string, tab int) cronSearch {
 	parsed := cronSearch{text: query, tokens: map[string][]string{}}
 	free := []string{}
-	for _, word := range strings.Fields(query) {
+	for word := range strings.FieldsSeq(query) {
 		key, value, ok := strings.Cut(word, ":")
 		key = strings.ToLower(key)
 		known := false

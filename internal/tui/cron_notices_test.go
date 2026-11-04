@@ -49,8 +49,8 @@ func TestCronNoticeDecodeObservedOnly(t *testing.T) {
 func TestCronNoticeWindowPermutation(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
 		m := cronNoticeFixture(t)
-		n := int(hegel.Draw(ht, hegel.Integers[uint64](0, ^uint64(0)))%8) + 1
-		offset := int(hegel.Draw(ht, hegel.Integers[uint64](0, ^uint64(0))) % uint64(n))
+		n := hegel.Draw(ht, hegel.Integers[int](1, 8))
+		offset := hegel.Draw(ht, hegel.Integers[int](0, n-1))
 		for i := range n * 2 {
 			next, cmd := m.cronNoticeEvent(cronNoticeEvent(fmt.Sprint((i+offset)%n), "job", snapshotFixedNow))
 			m = next
@@ -288,8 +288,9 @@ func TestCronNoticeRenderedFailure(t *testing.T) {
 	t.Run("severity", func(t *testing.T) {
 		want := attentionTerminalCells(errorStyle.Render("x"))[0].foreground
 		plain := stripANSI(lines[notice])
-		x := strings.Index(plain, "cron:")
-		cell := attentionTerminalCells(lines[notice])[ansi.StringWidth(plain[:x])]
+		before, _, ok := strings.Cut(plain, "cron:")
+		require.True(t, ok)
+		cell := attentionTerminalCells(lines[notice])[ansi.StringWidth(before)]
 		require.Equal(t, want, cell.foreground, "failure notice must use the error foreground")
 	})
 	t.Run("footer", func(t *testing.T) {
@@ -308,10 +309,10 @@ func TestCronNoticeProjectsFailureSeverity(t *testing.T) {
 	m.view = viewProjects
 	m, _ = updateModel(m, cronNoticeEvent("failure", "job", snapshotFixedNow))
 	m, _ = updateModel(m, cronNoticeTickFor(m))
-	for _, line := range strings.Split(m.viewContent(), "\n") {
+	for line := range strings.SplitSeq(m.viewContent(), "\n") {
 		plain := stripANSI(line)
-		if x := strings.Index(plain, "cron: 1 run failed:"); x >= 0 {
-			cell := attentionTerminalCells(line)[ansi.StringWidth(plain[:x])]
+		if before, _, ok := strings.Cut(plain, "cron: 1 run failed:"); ok {
+			cell := attentionTerminalCells(line)[ansi.StringWidth(before)]
 			want := attentionTerminalCells(errorStyle.Render("x"))[0].foreground
 			require.Equal(t, want, cell.foreground, "Projects failure notice must use the error foreground")
 			return

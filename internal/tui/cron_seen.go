@@ -74,7 +74,7 @@ func cronSeenLoad(ctx context.Context, path string) (cronSeenStore, error) {
 	if err := ctx.Err(); err != nil {
 		return cronSeenStore{}, err
 	}
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: path is the per-user seen-state file under KATA_HOME
 	if errors.Is(err, os.ErrNotExist) {
 		return cronSeenMerge(cronSeenStore{}, cronSeenStore{}), nil
 	}

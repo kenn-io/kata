@@ -113,8 +113,12 @@ func (m Model) cronPageLoaded(msg cronPageMsg) Model {
 	} else if msg.cursor != "" {
 		page.older = true
 	}
+	if msg.merge && msg.next != "" && !cronRunsOverlap(page.runs, msg.runs) {
+		page.next = msg.next
+	}
 	page.runs = cronMergeRuns(page.runs, msg.runs)
-	if !msg.merge {
+	// An event may have moved continuation while this older read was in flight.
+	if !msg.merge && (msg.cursor == "" || page.next == msg.cursor) {
 		page.next = msg.next
 		if len(msg.runs) == 0 || msg.next == msg.cursor {
 			page.next = ""
@@ -123,6 +127,13 @@ func (m Model) cronPageLoaded(msg cronPageMsg) Model {
 	page.ready = true
 	m = m.cronRemember(page.runs)
 	return m.cronKeepSelection(previous)
+}
+
+// A head that shares no loaded row may sit above unloaded runs.
+func cronRunsOverlap(loaded, head []generated.CronRun) bool {
+	return slices.ContainsFunc(head, func(r generated.CronRun) bool {
+		return slices.ContainsFunc(loaded, func(l generated.CronRun) bool { return l.UID == r.UID })
+	})
 }
 
 // Page overlap must not duplicate a row or downgrade an observation revision.
@@ -153,17 +164,17 @@ func cronMergeRuns(before, after []generated.CronRun) []generated.CronRun {
 
 // Preserve link selection when refreshed heads or error rows shift a document.
 func (m Model) cronKeepSelection(before Model) Model {
-	keep := func(old, new []cronLine, cursor int) int {
+	keep := func(old, fresh []cronLine, cursor int) int {
 		if len(old) == 0 {
 			return cursor
 		}
 		target := old[min(max(cursor, 0), len(old)-1)].target
 		if target.uid != "" {
-			if i := slices.IndexFunc(new, func(l cronLine) bool { return l.target == target }); i >= 0 {
+			if i := slices.IndexFunc(fresh, func(l cronLine) bool { return l.target == target }); i >= 0 {
 				return i
 			}
 		}
-		return min(max(cursor, 0), max(len(new)-1, 0))
+		return min(max(cursor, 0), max(len(fresh)-1, 0))
 	}
 	for tab := cronJobs; tab <= cronWorkflows; tab++ {
 		m.cron.lists[tab].cursor = keep(cronListLines(before, tab), cronListLines(m, tab), before.cron.lists[tab].cursor)

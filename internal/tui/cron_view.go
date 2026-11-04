@@ -196,6 +196,9 @@ func (m Model) cronLoaded(msg cronLoadedMsg) Model {
 		if data.resetPages || !m.cron.runPage.ready {
 			m.cron.runPage = cronHistoryPage{runs: data.runs, next: data.nextBefore, ready: true, gen: m.cronGeneration()}
 		} else {
+			if data.nextBefore != "" && !cronRunsOverlap(m.cron.runPage.runs, data.runs) {
+				m.cron.runPage.next = data.nextBefore
+			}
 			m.cron.runPage.runs = cronMergeRuns(m.cron.runPage.runs, data.runs)
 			m.cron.runPage.err = nil
 		}
