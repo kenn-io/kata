@@ -3764,7 +3764,7 @@ func (m Model) appendNonListDetailExtras(body string) string {
 		if s := renderSSEStatus(m.sseStatus); s != "" {
 			extras = append(extras, s)
 		}
-		if s := renderToast(m.cronToast()); s != "" {
+		if s := renderToast(m.cronToast()); s != "" && m.cronStatusNotice() == nil {
 			extras = append(extras, s)
 		}
 		if len(extras) > 0 {

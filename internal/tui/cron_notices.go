@@ -191,3 +191,13 @@ func (m Model) cronToast() *toast {
 	out.text += " · " + hint
 	return &out
 }
+
+// The Cron list shows its failure notice in the error row above help, so the
+// shared toast line below the screen skips it there.
+func (m Model) cronStatusNotice() *toast {
+	if t := m.cronToast(); t != nil && t.cronFailure && m.view == viewCron && !m.cron.help && m.cron.form == nil &&
+		m.width >= 80 && !m.scope.allProjects && m.scope.projectID != 0 {
+		return t
+	}
+	return nil
+}

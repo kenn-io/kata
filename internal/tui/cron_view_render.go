@@ -497,21 +497,17 @@ func renderCron(m Model) string {
 	help := cronHelpRows(m)
 	errors := []string{}
 	if m.cron.data != nil {
-		for _, read := range []struct {
-			name string
-			err  error
-		}{
-			{"jobs", m.cron.data.jobsErr},
-			{"workflows", m.cron.data.workflowsErr},
-			{"runs", m.cron.data.runsErr},
-		} {
-			if read.err != nil {
-				errors = append(errors, errorStyle.Render(truncate(sanitizeForLine(read.name+": "+read.err.Error()), m.width)))
+		for _, tab := range []int{cronJobs, cronWorkflows, cronRuns} {
+			if err := m.cron.data.readError(tab); err != nil {
+				errors = append(errors, errorStyle.Render(truncate(sanitizeForLine(cronTabNames[tab]+": "+err.Error()), m.width)))
 			}
 		}
 	}
 	if m.cronSeen.err != nil {
 		errors = append(errors, errorStyle.Render(truncate(sanitizeForLine("seen state unavailable: "+m.cronSeen.err.Error()), m.width)))
+	}
+	if t := m.cronStatusNotice(); t != nil {
+		errors = append(errors, errorStyle.Render(truncate(t.text, m.width)))
 	}
 	query := m.cron.lists[m.cron.tab].query
 	left, right := title, ""
@@ -570,7 +566,7 @@ func renderCron(m Model) string {
 	for i := start; i < end; i++ {
 		line := lines[i]
 		prefix := "  "
-		style := normalRowStyle
+		style, alert := normalRowStyle, errorStyle
 		if i%2 == 1 {
 			style = altRowStyle
 		}
@@ -580,6 +576,8 @@ func renderCron(m Model) string {
 		if i == cursor {
 			prefix = "▶ "
 			style = cursorRowStyle
+			// Dark-theme red is too dim on the selection; use the title text color.
+			alert = errorStyle.Foreground(titleBarStyle.GetForeground())
 		}
 		text := padToWidth(prefix+line.text, m.width)
 		rendered := style.Render(text)
@@ -587,7 +585,7 @@ func renderCron(m Model) string {
 			// Render each segment with the row background. A cell's SGR reset must
 			// not clear the stripe or selection on the remainder of the row.
 			from, to := line.errorFrom+2, line.errorTo+2
-			rendered = style.Render(ansi.Cut(text, 0, from)) + errorStyle.Inherit(style).Render(ansi.Cut(text, from, to)) + style.Render(ansi.Cut(text, to, m.width))
+			rendered = style.Render(ansi.Cut(text, 0, from)) + alert.Inherit(style).Render(ansi.Cut(text, from, to)) + style.Render(ansi.Cut(text, to, m.width))
 		}
 		body = append(body, rendered)
 		budget--
