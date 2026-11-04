@@ -9,6 +9,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Make semantic search pick up new issues sooner in large stores by skipping unchanged issue text during mirror refreshes.
 - Keep issue writes responsive during due-date sweeps. Sweeps skip date values
   more than 24h past UTC now, including every issue 36h or more out in any zone.
   Other checks take SQLite's writer only for due notifications or cleanup.
