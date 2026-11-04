@@ -1316,6 +1316,26 @@ func (c CronDefinitionActionBody) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(c))
 }
 
+type CronHealth struct {
+	ByReason                    map[string]int64 `json:"by_reason"`
+	DeliveredSinceStart         int64            `json:"delivered_since_start"`
+	EnumerationErrorsSinceStart int64            `json:"enumeration_errors_since_start"`
+	ErrorsSinceStart            int64            `json:"errors_since_start"`
+	Jobs                        int64            `json:"jobs"`
+	LastEnumerationAt           *time.Time       `json:"last_enumeration_at,omitempty"`
+	LastSweepAt                 time.Time        `json:"last_sweep_at" validate:"required"`
+	LastSweepMs                 int64            `json:"last_sweep_ms"`
+	LogErrorPresent             bool             `json:"log_error_present"`
+	LogErrorsSinceStart         int64            `json:"log_errors_since_start"`
+	LogPath                     string           `json:"log_path" validate:"required"`
+	SkippedCountIsLowerBound    bool             `json:"skipped_count_is_lower_bound"`
+	SkippedSinceStart           int64            `json:"skipped_since_start"`
+}
+
+func (c CronHealth) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+}
+
 type CronJob struct {
 	Author             string                    `json:"author" validate:"required"`
 	CreatedAt          time.Time                 `json:"created_at" validate:"required"`
@@ -3058,6 +3078,7 @@ func (h HLC) Validate() error {
 
 type HealthResponseBody struct {
 	APISchemaVersion *string                 `json:"api_schema_version,omitempty"`
+	Cron             *CronHealth             `json:"cron,omitempty"`
 	DBPath           *string                 `json:"db_path,omitempty"`
 	Embeddings       *EmbeddingsHealth       `json:"embeddings,omitempty"`
 	FederationConfig *FederationConfigHealth `json:"federation_config,omitempty"`
@@ -3072,6 +3093,13 @@ type HealthResponseBody struct {
 
 func (h HealthResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if h.Cron != nil {
+		if v, ok := any(h.Cron).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Cron", err)
+			}
+		}
+	}
 	if h.Embeddings != nil {
 		if v, ok := any(h.Embeddings).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {

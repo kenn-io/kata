@@ -1060,6 +1060,60 @@ components:
       required:
         - expected_event_uid
       type: object
+    CronHealth:
+      properties:
+        by_reason:
+          additionalProperties:
+            format: int64
+            type: integer
+          type: object
+        delivered_since_start:
+          format: int64
+          type: integer
+        enumeration_errors_since_start:
+          format: int64
+          type: integer
+        errors_since_start:
+          format: int64
+          type: integer
+        jobs:
+          format: int64
+          type: integer
+        last_enumeration_at:
+          format: date-time
+          type: string
+        last_sweep_at:
+          format: date-time
+          type: string
+        last_sweep_ms:
+          format: int64
+          type: integer
+        log_error_present:
+          type: boolean
+        log_errors_since_start:
+          format: int64
+          type: integer
+        log_path:
+          type: string
+        skipped_count_is_lower_bound:
+          type: boolean
+        skipped_since_start:
+          format: int64
+          type: integer
+      required:
+        - last_sweep_at
+        - last_sweep_ms
+        - jobs
+        - by_reason
+        - delivered_since_start
+        - skipped_since_start
+        - skipped_count_is_lower_bound
+        - errors_since_start
+        - enumeration_errors_since_start
+        - log_path
+        - log_error_present
+        - log_errors_since_start
+      type: object
     CronJob:
       properties:
         author:
@@ -2938,6 +2992,8 @@ components:
       properties:
         api_schema_version:
           type: string
+        cron:
+          $ref: "#/components/schemas/CronHealth"
         db_path:
           type: string
         embeddings:
@@ -7028,7 +7084,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.38.0
+  version: 0.39.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
