@@ -351,20 +351,20 @@ func renderRecurrenceForm(s inputState, innerW, height int, now time.Time) strin
 	}
 	parts = append(parts, renderRecurrenceFooter(s, innerW))
 	box := modalBoxStyle.Width(innerW+4).Padding(0, 1)
-	rendered := box.Render(strings.Join(parts, "\n"))
-	if lipgloss.Height(rendered) <= height {
+	if rendered := box.Render(strings.Join(parts, "\n")); lipgloss.Height(rendered) <= height {
 		return rendered
 	}
-	// Put each label beside its input to leave room for recovery and controls.
 	part := 1
 	for idx := range s.fields {
 		label, _, _ := strings.Cut(parts[part], "\n")
-		field := renderNewIssueField(s, idx, innerW-lipgloss.Width(label)-1)
-		parts[part] = strings.Replace(field, "\n", " ", 1)
+		parts[part] = strings.Replace(renderNewIssueField(s, idx, innerW-lipgloss.Width(label)-1), "\n", " ", 1)
 		part++
 		if s.fields[idx].id == fieldStart {
 			part++ // date preview
 		}
+	}
+	if s.err != "" && lipgloss.Height(box.Render(strings.Join(parts, "\n"))) > height {
+		parts[len(parts)-2] = truncate(renderFormStatus(s), innerW)
 	}
 	return box.Render(strings.Join(parts, "\n"))
 }
@@ -379,7 +379,7 @@ func renderRecurrenceFooter(s inputState, innerW int) string {
 	}
 	keys := strings.Join(controls, " · ")
 	if len(keys) > innerW {
-		return subtleStyle.Render("ctrl+o save · esc cancel")
+		return subtleStyle.Render(map[bool]string{false: "ctrl+o save · esc cancel", true: "ctrl+o save · esc · ctrl+x stop"}[s.recurrence.rec != nil])
 	}
 	return subtleStyle.Render(keys)
 }
