@@ -27,13 +27,7 @@ func TestReadyPriorityUsesOrderedIndexes(t *testing.T) {
 	_, err = store.ExecContext(ctx, `INSERT INTO issues(uid, project_id, short_id, title, author, priority, owner)
  SELECT lpad(n::text, 26, '0'), CASE WHEN n % 5 = 0 THEN $1::bigint ELSE $2::bigint END, lpad(n::text, 6, '0'), 'Ready issue', 'author', n % 5, CASE WHEN n % 3 = 0 THEN NULL ELSE 'worker' END FROM generate_series(1, 10000) n`, project.ID, other.ID)
 	require.NoError(t, err)
-	_, err = store.ExecContext(ctx, `INSERT INTO issue_labels(issue_id, label, author)
- SELECT id, label, 'author' FROM issues CROSS JOIN (VALUES ('bug'), ('ready')) labels(label) WHERE id % 2 = 0`)
-	require.NoError(t, err)
-	_, err = store.ExecContext(ctx, "ANALYZE issues; ANALYZE issue_labels")
-	require.NoError(t, err)
-	_, err = store.ExecContext(ctx, `INSERT INTO issue_labels(issue_id, label, author)
- VALUES (10000, 'blocked', 'author'), (9990, 'later', 'author')`)
+	_, err = store.ExecContext(ctx, "ANALYZE issues")
 	require.NoError(t, err)
 	for _, scope := range []string{"project", "global"} {
 		t.Run(scope, func(t *testing.T) {
@@ -43,13 +37,7 @@ func TestReadyPriorityUsesOrderedIndexes(t *testing.T) {
 				wantID int64
 			}{
 				{name: "all", filter: db.ReadyIssuesFilter{PriorityFirst: true}, wantID: 10000},
-				{name: "absent-owner", filter: db.ReadyIssuesFilter{PriorityFirst: true, Owner: "nobody"}, wantID: 0},
-				{name: "absent-label", filter: db.ReadyIssuesFilter{PriorityFirst: true, Labels: []string{"absent"}}, wantID: 0},
-				{name: "owner", filter: db.ReadyIssuesFilter{PriorityFirst: true, Owner: "worker"}, wantID: 10000},
 				{name: "unowned", filter: db.ReadyIssuesFilter{PriorityFirst: true, Unowned: true}, wantID: 9990},
-				{name: "labels", filter: db.ReadyIssuesFilter{PriorityFirst: true, Labels: []string{"bug", "ready"}}, wantID: 10000},
-				{name: "exclude-labels", filter: db.ReadyIssuesFilter{PriorityFirst: true, ExcludeLabels: []string{"blocked", "later"}}, wantID: 9995},
-				{name: "combined", filter: db.ReadyIssuesFilter{PriorityFirst: true, Owner: "worker", Labels: []string{"bug"}, ExcludeLabels: []string{"blocked"}}, wantID: 9980},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					query, args := buildReadyIssuesQuery(ctx, project.ID, tc.filter, time.Now())

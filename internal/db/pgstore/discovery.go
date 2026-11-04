@@ -40,10 +40,6 @@ func buildReadyIssuesQuery(ctx context.Context, projectID int64, filter db.Ready
 	query.WriteString(" AND " + authorizedIssuePredicate(ctx, "i.project_id", &args))
 	appendIssueScopePostgres(&query, &args, filter.IssueScope)
 	query.WriteString(` AND COALESCE((i.metadata::jsonb ->> 'someday')::boolean, false) = false`)
-	if filter.PriorityFirst {
-		// Evaluate optional filters per issue so selective filters keep the ordered walk.
-		query.WriteString(" AND (SELECT true")
-	}
 	if filter.Unowned {
 		query.WriteString(` AND (i.owner IS NULL OR i.assignment_expires_on <= ` + addArg(formatStoredTime(at)) + `)`)
 	} else if filter.Owner != "" {
@@ -60,7 +56,7 @@ func buildReadyIssuesQuery(ctx context.Context, projectID int64, filter db.Ready
            WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`)
 	}
 	if filter.PriorityFirst {
-		query.WriteString(" OFFSET 0)" + readyPriorityOrderBy)
+		query.WriteString(readyPriorityOrderBy)
 	} else {
 		query.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
 	}
@@ -135,10 +131,6 @@ func buildReadyIssuesGlobalQuery(ctx context.Context, filter db.ReadyIssuesFilte
 	query.WriteString(" AND " + authorizedIssuePredicate(ctx, "i.project_id", &args))
 	appendIssueScopePostgres(&query, &args, filter.IssueScope)
 	query.WriteString(` AND COALESCE((i.metadata::jsonb ->> 'someday')::boolean, false) = false`)
-	if filter.PriorityFirst {
-		// Evaluate optional filters per issue so selective filters keep the ordered walk.
-		query.WriteString(" AND (SELECT true")
-	}
 	if filter.Unowned {
 		query.WriteString(` AND (i.owner IS NULL OR i.assignment_expires_on <= ` + addArg(formatStoredTime(at)) + `)`)
 	} else if filter.Owner != "" {
@@ -155,7 +147,7 @@ func buildReadyIssuesGlobalQuery(ctx context.Context, filter db.ReadyIssuesFilte
            WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`)
 	}
 	if filter.PriorityFirst {
-		query.WriteString(" OFFSET 0)" + readyPriorityOrderBy)
+		query.WriteString(readyPriorityOrderBy)
 	} else {
 		query.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
 	}

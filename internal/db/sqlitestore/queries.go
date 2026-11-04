@@ -2586,12 +2586,7 @@ func buildReadyIssuesGlobalQuery(ctx context.Context, filter db.ReadyIssuesFilte
 		q.WriteString(` AND (i.owner IS NULL OR i.assignment_expires_on <= ?)`)
 		args = append(args, at.UTC().Format(sqliteTimeFormat))
 	} else if filter.Owner != "" {
-		// Keep priority picks on the ordered index even without ANALYZE statistics.
-		ownerColumn := "i.owner"
-		if filter.PriorityFirst {
-			ownerColumn = "+i.owner"
-		}
-		q.WriteString(` AND ` + ownerColumn + ` = ? AND (i.assignment_expires_on IS NULL OR i.assignment_expires_on > ?)`)
+		q.WriteString(` AND i.owner = ? AND (i.assignment_expires_on IS NULL OR i.assignment_expires_on > ?)`)
 		args = append(args, filter.Owner, at.UTC().Format(sqliteTimeFormat))
 	}
 
