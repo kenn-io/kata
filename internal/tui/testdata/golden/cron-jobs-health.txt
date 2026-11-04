@@ -1,0 +1,26 @@
+ Project: example-project                                                                                                                       kata カタ · dev
+kata カタ [jobs] runs workflows
+ / search                                      9 jobs · 1 paused · 1 unavailable · 1 parent closed · 1 overdue · 1 running · 1 failing · 1 missed · 1 never ran
+
+  Job                                                                                      Health        Trigger           Action             Last run
+▶ job-ok                                                                                   ok            manual            workflow Summary … succeeded 1h ago
+  job-failing                                                                              failing       manual            workflow Summary … failed 1h ago
+  job-overdue                                                                              overdue       manual            workflow Summary … running 1h ago
+  job-running                                                                              running       manual            workflow Summary … running 1h ago
+  job-missed                                                                               missed        once 2026-05-01 … workflow Summary … —
+  job-never-ran                                                                            never ran     manual            workflow Summary … —
+  job-paused                                                                               paused        manual            workflow Summary … —
+  job-unavailable                                                                          unavailable   manual            workflow Summary … —
+  job-parent-closed                                                                        parent closed every 1h0m0s      notify             —
+
+
+
+
+
+
+
+
+
+
+
+ j/k move▕ ↵/l open▕ / filter▕ n/e new/edit▕ h/esc kata▕ r refresh▕ 1-4 tabs▕ ? help▕ q quit
