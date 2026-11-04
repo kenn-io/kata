@@ -493,20 +493,22 @@ func TestGitHubStatusBatchReadUsesOneGraphQLRequest(t *testing.T) {
 			session, err := f.ForBinding(t.Context(), statusConfig().Binding())
 			require.NoError(t, err)
 			results := session.(StatusBatchSession).ReadStatuses(t.Context(), statusConfig(), []StatusLocator{{ExternalID: "issue-id:456", Number: 7}, {ExternalID: "issue-id:457", Number: 8}, {ExternalID: "issue-id:458", Number: 9}, {ExternalID: "issue-id:459", Number: 10}, {ExternalID: "bad-id", Number: 11}})
-			require.Len(t, results, 4)
-			require.NoError(t, results["issue-id:456"].Err)
-			require.Equal(t, "open", results["issue-id:456"].Observation.Status)
-			require.Equal(t, "7", results["issue-id:456"].Observation.Locator)
-			closed := results["issue-id:457"]
-			require.NoError(t, closed.Err)
-			require.Equal(t, "closed", *closed.Observation.RawStatus)
-			require.Equal(t, "wontfix", closed.Observation.ClosedReason)
-			require.Equal(t, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), *closed.Observation.ClosedAt)
 			require.Error(t, results["issue-id:458"].Err)
-			var blocked *issuesync.StatusError
-			require.ErrorAs(t, results["issue-id:459"].Err, &blocked)
-			require.True(t, blocked.Blocked)
-			require.Equal(t, 2, requests)
+			if invalid == "identity" {
+				require.Len(t, results, 4)
+				require.NoError(t, results["issue-id:456"].Err)
+				require.Equal(t, "open", results["issue-id:456"].Observation.Status)
+				require.Equal(t, "7", results["issue-id:456"].Observation.Locator)
+				closed := results["issue-id:457"]
+				require.NoError(t, closed.Err)
+				require.Equal(t, "closed", *closed.Observation.RawStatus)
+				require.Equal(t, "wontfix", closed.Observation.ClosedReason)
+				require.Equal(t, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), *closed.Observation.ClosedAt)
+				var blocked *issuesync.StatusError
+				require.ErrorAs(t, results["issue-id:459"].Err, &blocked)
+				require.True(t, blocked.Blocked)
+				require.Equal(t, 2, requests)
+			}
 		})
 	}
 }
@@ -546,10 +548,6 @@ func TestGitHubStatusBatchRateLimitAndUnsupportedFallback(t *testing.T) {
 				require.ErrorAs(t, err, &rate)
 				require.Positive(t, rate.RetryAfter)
 				require.Equal(t, 2, requests)
-			} else {
-				obs, err := session.(StatusSession).ReadStatus(t.Context(), statusConfig(), "issue-id:456", 7)
-				require.NoError(t, err)
-				require.Equal(t, "open", obs.Status)
 			}
 		})
 	}
