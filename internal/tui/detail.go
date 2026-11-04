@@ -106,6 +106,7 @@ type detailModel struct {
 	parent             *IssueRef
 	children           []Issue
 	recurrence         *recurrenceclient.View
+	recurrenceErr      error
 	detailFocus        detailFocus
 	loading            bool
 	err                error
@@ -354,6 +355,7 @@ func (dm detailModel) applyFetchedIfFresh(msg tea.Msg) (detailModel, bool) {
 		dm.parent = m.parent
 		dm.children = m.children
 		dm.recurrence = m.recurrence
+		dm.recurrenceErr = m.recurrenceErr
 		dm = dm.clampChildFocus()
 		dm.err = mergeErr(dm.err, m.err)
 	case commentsFetchedMsg:

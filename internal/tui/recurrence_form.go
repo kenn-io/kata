@@ -82,6 +82,13 @@ func (m Model) routeRecurrenceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if !m.detailPaneVisible() || m.detail.issue == nil {
 		return m, nil, false
 	}
+	if m.detail.recurrenceErr != nil {
+		m.toast = &toast{
+			text:  "Could not read the repeat: " + m.detail.recurrenceErr.Error(),
+			level: toastInfo, expiresAt: m.toastNow().Add(toastNoBindingTTL),
+		}
+		return m, toastExpireCmd(toastNoBindingTTL), true
+	}
 	if m.detail.issue.RecurrenceID != nil && m.detail.recurrence == nil {
 		m.toast = &toast{
 			text:  "Can't read this issue's repeat; it may have been stopped",
@@ -111,9 +118,6 @@ func (m Model) commitRecurrenceForm() (Model, tea.Cmd) {
 	if _, dateErr := time.Parse(time.DateOnly, start); err != nil || dateErr != nil {
 		m.input.err = "Start must be YYYY-MM-DD, today, tomorrow, +Nd or +Nw."
 		return m, nil
-	}
-	if state.rec != nil && rule == state.rec.RRule && start == state.rec.DTStart && zone == state.rec.Timezone {
-		return m.cancelInput()
 	}
 	return m.saveRecurrence(RecurrenceInput{
 		Rule: rule, Start: start, Zone: zone, Actor: m.list.actor,

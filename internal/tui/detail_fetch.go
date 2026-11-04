@@ -33,15 +33,17 @@ func fetchIssue(api detailAPI, projectID int64, ref string, gen int64, parents .
 		var parent *IssueRef
 		var children []Issue
 		var rec *recurrenceclient.View
+		var recErr error
 		if detail != nil {
 			issue = detail.Issue
 			parent = detail.Parent
 			children = detail.Children
 			rec = detail.Recurrence
+			recErr = detail.RecurrenceErr
 		}
 		return detailFetchedMsg{
 			gen: gen, requestSeq: requestSeq,
-			issue: issue, parent: parent, children: children, recurrence: rec, err: err,
+			issue: issue, parent: parent, children: children, recurrence: rec, recurrenceErr: recErr, err: err,
 		}
 	}
 }

@@ -263,7 +263,7 @@ func (c *Client) GetIssueDetail(ctx context.Context, projectID int64, ref string
 	if err != nil {
 		return nil, err
 	}
-	detail.Recurrence = c.recurrenceOrNil(ctx, detail.Issue.ProjectID, detail.Issue.RecurrenceID)
+	detail.Recurrence, detail.RecurrenceErr = c.readRecurrence(ctx, detail.Issue.ProjectID, detail.Issue.RecurrenceID)
 	return detail, nil
 }
 
@@ -286,22 +286,23 @@ func (c *Client) readIssue(ctx context.Context, projectID int64, ref string) (*I
 	}, nil
 }
 
-// recurrenceOrNil reads the live recurrence an issue belongs to. It is best
-// effort, as it is in kata show: a token that may not list recurrences still
-// reads the issue, which then shows no recurrence.
-func (c *Client) recurrenceOrNil(ctx context.Context, projectID int64, id *int64) *recurrenceclient.View {
+// readRecurrence reads the live recurrence while preserving a daemon refusal.
+func (c *Client) readRecurrence(ctx context.Context, projectID int64, id *int64) (*recurrenceclient.View, error) {
 	if id == nil {
-		return nil
+		return nil, nil
 	}
 	apiClient, err := c.generatedClient()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	rec, err := recurrenceclient.Active(ctx, apiClient, projectID, id)
 	if err != nil {
-		return nil
+		if status, ok := errors.AsType[*recurrenceclient.StatusError](err); ok {
+			return nil, decodeError(status.Body, status.Status, status.Method, status.URI)
+		}
+		return nil, err
 	}
-	return rec
+	return rec, nil
 }
 
 // CreateIssue posts a new issue. body.IdempotencyKey rides the
