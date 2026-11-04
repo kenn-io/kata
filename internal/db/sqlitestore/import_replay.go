@@ -100,6 +100,9 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 				return fmt.Errorf("clear replacement metadata: %w", err)
 			}
 		}
+		if err := db.DeleteAllCronAccessPoliciesTx(ctx, tx); err != nil {
+			return err
+		}
 		// Labels describe the restored enrollment inventory, so target-only
 		// labels must not survive a replacement restore.
 		if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE substr(key,1,?)=?`, len(db.FederationSpokeNamePrefix), db.FederationSpokeNamePrefix); err != nil {
@@ -473,6 +476,8 @@ func importRecord(ctx context.Context, tx *sql.Tx, r db.ImportRecord, opts db.Im
 	case *db.TeamMembership:
 		_, err := tx.ExecContext(ctx, `INSERT INTO team_memberships(team_uid,actor) VALUES(?,?)`, rec.TeamUID, rec.Actor)
 		return linkSkipNone, err
+	case *db.ProjectCronAccessPolicy:
+		return linkSkipNone, db.ImportCronAccessPolicyTx(ctx, tx, *rec)
 	case *db.ProjectAccessPolicy:
 		if _, err := tx.ExecContext(ctx, `INSERT INTO project_access_policies(project_uid,visibility,revision) VALUES(?,?,?)`, rec.ProjectUID, rec.Visibility, rec.Revision); err != nil {
 			return linkSkipNone, err

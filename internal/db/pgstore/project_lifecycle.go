@@ -418,6 +418,9 @@ func (s *Store) hardDeleteProject(ctx context.Context, projectID int64) (int64, 
 		if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id = $1`, project.ID); err != nil {
 			return mapSQLError(err, nil)
 		}
+		if err := db.DeleteCronAccessPolicyTx(ctx, tx, project.UID); err != nil {
+			return err
+		}
 		if err := deleteProjectRelayMetadataTx(ctx, tx, project.UID); err != nil {
 			return err
 		}
@@ -471,6 +474,9 @@ func countProjectPurgeTx(ctx context.Context, tx *sql.Tx, projectID int64) (proj
 }
 
 func deleteProjectScopedTx(ctx context.Context, tx *sql.Tx, project db.Project) error {
+	if err := db.DeleteCronAccessPolicyTx(ctx, tx, project.UID); err != nil {
+		return err
+	}
 	if err := deleteProjectRelayMetadataTx(ctx, tx, project.UID); err != nil {
 		return err
 	}

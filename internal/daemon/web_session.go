@@ -346,7 +346,8 @@ func browserAccessAdministrationRequest(r *http.Request) bool {
 			(len(parts) == 4 && r.Method == http.MethodDelete) ||
 			(len(parts) == 6 && parts[4] == "members" && (r.Method == http.MethodPut || r.Method == http.MethodDelete))
 	}
-	return len(parts) == 5 && parts[2] == "projects" && parts[4] == "access" && r.Method == http.MethodPut
+	return r.Method == http.MethodPut && parts[2] == "projects" &&
+		((len(parts) == 5 && parts[4] == "access") || (len(parts) == 6 && parts[4] == "cron" && parts[5] == "access"))
 }
 
 // escapedPathSegments splits the escaped path before unescaping each segment,

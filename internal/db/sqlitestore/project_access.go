@@ -206,6 +206,9 @@ func (d *Store) DeleteTeam(ctx context.Context, teamUID, adminActor string) (db.
 		if _, err := scanTeam(tx.QueryRowContext(ctx, `SELECT uid,name,revision FROM teams WHERE uid=?`, teamUID)); err != nil {
 			return err
 		}
+		if err := db.RemoveCronAccessTeamTx(ctx, tx, teamUID); err != nil {
+			return err
+		}
 		// Deleting the last team must retain the teams visibility, and invalidate
 		// readers that admitted the previous policy revision.
 		if _, err := tx.ExecContext(ctx, `UPDATE project_access_policies SET revision=revision+1 WHERE project_uid IN (SELECT project_uid FROM project_access_teams WHERE team_uid=?)`, teamUID); err != nil {
@@ -508,6 +511,11 @@ func (d *Store) ExportProjectAccess(ctx context.Context) iter.Seq2[db.ImportReco
 				return
 			}
 			if policy != nil && !yield(policy, nil) {
+				return
+			}
+		}
+		for record, err := range db.ExportCronAccessPolicies(ctx, d.readQ) {
+			if !yield(record, err) || err != nil {
 				return
 			}
 		}

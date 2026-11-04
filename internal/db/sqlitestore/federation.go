@@ -3168,6 +3168,9 @@ func replaceProjectUIDTx(ctx context.Context, tx *sql.Tx, projectID int64, uid s
 	if err != nil {
 		return err
 	}
+	if err := db.RetargetCronAccessPolicyTx(ctx, tx, oldUID, uid); err != nil {
+		return err
+	}
 	if err := retireProjectFederationUIDStateTx(ctx, tx, oldUID); err != nil {
 		return err
 	}

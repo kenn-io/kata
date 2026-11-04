@@ -113,7 +113,7 @@ func invalidJSONErr(entity string, id int64, field string) error {
 // ExportMeta streams every meta row ordered by key.
 func (d *Store) ExportMeta(ctx context.Context) iter.Seq2[db.MetaKV, error] {
 	return streamRows(ctx, d.readQ, "meta",
-		`SELECT key, value FROM meta ORDER BY key ASC`, nil,
+		`SELECT key, value FROM meta WHERE substr(key,1,$1)<>$2 ORDER BY key ASC`, []any{len(db.CronAccessPolicyPrefix), db.CronAccessPolicyPrefix},
 		func(rows *sql.Rows) (db.MetaKV, error) {
 			var rec db.MetaKV
 			if err := rows.Scan(&rec.Key, &rec.Value); err != nil {

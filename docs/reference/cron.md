@@ -416,6 +416,59 @@ kata cron job create --uid <job-uid> --file command.json --json
 The external adapter schedules the job and runs its workflow in the configured
 checkout. Kata stores the definitions and run evidence.
 
+## Permissions
+
+The daemon owner can choose separate teams for changing execution definitions
+and reporting run evidence. These grants are available on main after the latest
+release. Existing projects allow both operations until the owner sets a policy.
+
+| Grant | Required for |
+| --- | --- |
+| `define` | Creating, editing, deleting or restoring an `execute` job, including a disabled job; every workflow mutation. |
+| `observe` | Every run observation, including starting, continuing and replaying a run. |
+
+A job change that only sets `enabled` from `true` to `false` remains available
+to ordinary project writers. Changing its name, lifecycle or any other field
+requires `define`. Notification jobs use ordinary project write authority.
+
+Each grant uses `any`, which permits ordinary project writers, or `teams`,
+which permits members of any listed team. `teams` with no teams denies that
+operation. Grants do not bypass project visibility, token validity, enrollment
+scope, host policy or existing route restrictions. The credential's actor is
+checked; request attribution and historical event authors do not grant access.
+Owner-local authority bypasses the use grants. Identity-mode bootstrap can
+administer policy but cannot perform attributed cron writes.
+
+```sh
+kata cron access show example-project --agent
+kata cron access set example-project --define teams --define-team authors --agent
+kata cron access set example-project --observe teams --observe-team runtimes --agent
+kata cron access set example-project --define any --agent
+```
+
+Team flags accept names or UIDs and may be repeated. A team flag without a
+mode selects `teams`. A grant omitted from `set` keeps its current value.
+Use `--define teams` or `--observe teams` without team flags to clear that
+grant's team list. `--json` returns the policy and the write's audit event;
+`--agent` returns an `OK cron-access` line.
+
+Owner-only `GET` and `PUT /api/v1/projects/{project_id}/cron/access` read or
+replace both grants. A PUT requires `define`, `observe` and the current
+`revision`, including revision zero for a missing policy. Each grant has
+`mode: "any"|"teams"` and `team_uids`, a list of at most 64 distinct canonical
+team UIDs. Concurrent edits return `409 revision_conflict`; reload the policy
+before retrying. Successful writes publish the exact daemon-local
+`project.cron_access_changed` audit event.
+
+Ordinary cron API refusals return `403 cron_permission_denied` and name the
+missing grant in the hint. Fresh downstream federation events use the receiving
+hub's policy and the authenticated hop enrollment's actor. A refusal is a
+validation-class `400 cron_permission_denied` so legacy spokes quarantine it.
+Grant the intended team access, then use the normal
+[federation quarantine recovery](../operations/federation.md#quarantine).
+Trusted upstream history, approved adoption baselines and retained transport
+duplicates keep their replication semantics.
+
 ## Capabilities
 
 `kata cron capabilities --json` reads the project's UID and advertised
@@ -424,7 +477,12 @@ checkout. Kata stores the definitions and run evidence.
 `X-Kata-Event-Features` header advertises only `cron_v1`, covering portable
 definitions, run observations, and native recurring child delivery. Missing,
 unknown, or failed advertisements remain distinct outcomes. This is an ordinary project
-read and creates no permissions. Ordinary authentication, project isolation,
+read and creates no permissions. Its `access` object reports effective `define`
+and `observe` booleans within the caller's current write authority; anonymous
+read-only, identity-bootstrap, and pull-only spoke callers receive `false` for
+both. Hosted service callers also receive conservative `false` values: the host
+authorization interface does not expose write-capability discovery. These hosted
+values do not prove that a mutation will be denied. Ordinary authentication, project isolation,
 and issue-scoped route restrictions apply.
 
 ### Upgrade limits
@@ -639,6 +697,22 @@ federation reset, adoption, or project merge; those operations keep their
 ordinary identity, revision and credential guards. See
 [PostgreSQL migrations](../development/postgres-migrations.md) for owner-only
 migration, backup, runtime grants, and rollback requirements.
+
+Cron policies remain local to each daemon in reserved
+`cron_access_policy.<project_uid>` metadata. Only a missing key means
+unrestricted access; malformed or unreadable policy fails closed. Returning to
+`any` retains the policy revision. Archival, upstream resets and adoption retain
+local policy. Deleting a team removes its UID and advances affected revisions
+without changing `teams` to `any`. Hard project removal retires its policy;
+a merge is refused if the target would broaden either source grant.
+
+Complete owner backups preserve policies as typed
+`project_cron_access_policy` records with their revisions and team references.
+Raw metadata and project-only exports exclude them; raw reserved-key imports
+are rejected. Federation baselines and checkpoints never transfer this policy.
+Older binaries cannot enforce these grants, so there is no safe downgrade while
+relying on restricted policies. Keep a supporting daemon and complete owner
+backup for recovery.
 
 ## Routes, events, and records
 

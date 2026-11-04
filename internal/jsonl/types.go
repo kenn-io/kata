@@ -11,46 +11,47 @@ type Kind string
 
 // JSONL record kinds. Order matches the export sequence enforced by kindOrder.
 const (
-	KindEmbeddingArtifact    Kind = "federation_embedding_artifact"
-	KindRelayOutbox          Kind = "federation_relay_outbox"
-	KindRelayInbox           Kind = "federation_relay_inbox"
-	KindRelayCursors         Kind = "federation_relay_cursors"
-	KindRootKey              Kind = "federation_root_key"
-	KindEventProvenance      Kind = "federation_event_provenance"
-	KindEntityProvenance     Kind = "federation_entity_provenance"
-	KindTeam                 Kind = "team"
-	KindTeamMembership       Kind = "team_membership"
-	KindProjectAccessPolicy  Kind = "project_access_policy"
-	KindMeta                 Kind = "meta"
-	KindProject              Kind = "project"
-	KindProjectAlias         Kind = "project_alias"
-	KindIssueSyncBinding     Kind = "issue_sync_binding"
-	KindIssueSyncStatus      Kind = "issue_sync_status"
-	KindGitHubSyncBinding    Kind = "github_sync_binding"
-	KindGitHubSyncStatus     Kind = "github_sync_status"
-	KindRecurrence           Kind = "recurrence"
-	KindIssue                Kind = "issue"
-	KindIssueEmbedding       Kind = "issue_embedding"
-	KindComment              Kind = "comment"
-	KindIssueLabel           Kind = "issue_label"
-	KindLink                 Kind = "link"
-	KindImportMapping        Kind = "import_mapping"
-	KindExternalFieldMapping Kind = "external_field_mapping"
-	KindExternalRootBinding  Kind = "external_root_binding"
-	KindExternalFieldState   Kind = "external_field_state"
-	KindFederationBinding    Kind = "federation_binding"
-	KindFederationSyncStatus Kind = "federation_sync_status"
-	KindFederationQuarantine Kind = "federation_quarantine"
-	KindFederationEnrollment Kind = "federation_enrollment"
-	KindIssueClaim           Kind = "issue_claim"
-	KindPendingClaimRequest  Kind = "pending_claim_request"
-	KindCronJob              Kind = "cron_job"
-	KindCronWorkflow         Kind = "cron_workflow"
-	KindCronRun              Kind = "cron_run"
-	KindEvent                Kind = "event"
-	KindPurgeLog             Kind = "purge_log"
-	KindProjectPurgeLog      Kind = "project_purge_log"
-	KindSQLiteSequence       Kind = "sqlite_sequence"
+	KindEmbeddingArtifact       Kind = "federation_embedding_artifact"
+	KindRelayOutbox             Kind = "federation_relay_outbox"
+	KindRelayInbox              Kind = "federation_relay_inbox"
+	KindRelayCursors            Kind = "federation_relay_cursors"
+	KindRootKey                 Kind = "federation_root_key"
+	KindEventProvenance         Kind = "federation_event_provenance"
+	KindEntityProvenance        Kind = "federation_entity_provenance"
+	KindTeam                    Kind = "team"
+	KindTeamMembership          Kind = "team_membership"
+	KindProjectCronAccessPolicy Kind = "project_cron_access_policy"
+	KindProjectAccessPolicy     Kind = "project_access_policy"
+	KindMeta                    Kind = "meta"
+	KindProject                 Kind = "project"
+	KindProjectAlias            Kind = "project_alias"
+	KindIssueSyncBinding        Kind = "issue_sync_binding"
+	KindIssueSyncStatus         Kind = "issue_sync_status"
+	KindGitHubSyncBinding       Kind = "github_sync_binding"
+	KindGitHubSyncStatus        Kind = "github_sync_status"
+	KindRecurrence              Kind = "recurrence"
+	KindIssue                   Kind = "issue"
+	KindIssueEmbedding          Kind = "issue_embedding"
+	KindComment                 Kind = "comment"
+	KindIssueLabel              Kind = "issue_label"
+	KindLink                    Kind = "link"
+	KindImportMapping           Kind = "import_mapping"
+	KindExternalFieldMapping    Kind = "external_field_mapping"
+	KindExternalRootBinding     Kind = "external_root_binding"
+	KindExternalFieldState      Kind = "external_field_state"
+	KindFederationBinding       Kind = "federation_binding"
+	KindFederationSyncStatus    Kind = "federation_sync_status"
+	KindFederationQuarantine    Kind = "federation_quarantine"
+	KindFederationEnrollment    Kind = "federation_enrollment"
+	KindIssueClaim              Kind = "issue_claim"
+	KindPendingClaimRequest     Kind = "pending_claim_request"
+	KindCronJob                 Kind = "cron_job"
+	KindCronWorkflow            Kind = "cron_workflow"
+	KindCronRun                 Kind = "cron_run"
+	KindEvent                   Kind = "event"
+	KindPurgeLog                Kind = "purge_log"
+	KindProjectPurgeLog         Kind = "project_purge_log"
+	KindSQLiteSequence          Kind = "sqlite_sequence"
 )
 
 // Sentinel errors returned by the decoder for malformed or out-of-order envelopes.
@@ -62,9 +63,9 @@ var (
 
 var kindOrder = map[Kind]int{
 	KindTeam: 28, KindTeamMembership: 29, KindProjectAccessPolicy: 30,
-	KindRootKey: 31, KindEventProvenance: 32, KindEntityProvenance: 33,
-	KindRelayOutbox: 34, KindRelayInbox: 35, KindRelayCursors: 36,
-	KindEmbeddingArtifact:    37,
+	KindProjectCronAccessPolicy: 31, KindRootKey: 32, KindEventProvenance: 33, KindEntityProvenance: 34,
+	KindRelayOutbox: 35, KindRelayInbox: 36, KindRelayCursors: 37,
+	KindEmbeddingArtifact:    38,
 	KindMeta:                 0,
 	KindProject:              1,
 	KindProjectAlias:         2,

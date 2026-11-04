@@ -248,6 +248,8 @@ func checkNativeCronAdoptionAuthor(t *testing.T, spoke db.Storage, backend Backe
 	for _, event := range events {
 		batch = append(batch, db.FederationIngestEvent{SourceEventID: event.ID, Event: portableNativeEvent(event)})
 	}
+	// An approved baseline installs history despite restrictive local use grants.
+	localPolicy := cronAccessRestricted(t, hub, target)
 	params := db.FederationIngestParams{EventFeatures: db.CronEventFeature, ProjectID: target.ID, FederationEnrollmentID: enrollment.Enrollment.ID, SpokeInstanceUID: spoke.InstanceUID(), BoundActor: "operator", AllowSnapshotAuthorPreservation: true, AdoptionBaseline: db.FederationAdoptionBaselineOpen, AdoptionBaselineEndSourceEventID: events[len(events)-1].ID, Events: batch[:1]}
 	_, err = hub.IngestFederationEvents(ctx, params)
 	require.NoError(t, err)
@@ -271,6 +273,10 @@ func checkNativeCronAdoptionAuthor(t *testing.T, spoke db.Storage, backend Backe
 	actual, err := hub.CronWorkflow(ctx, target.ID, workflow.UID)
 	require.NoError(t, err)
 	require.Equal(t, "operator", actual.Author)
+	localPolicy.Define = db.CronGrant{Mode: "any"}
+	localPolicy.Observe = db.CronGrant{Mode: "any"}
+	_, _, err = hub.SetCronAccessPolicy(ctx, localPolicy, "owner")
+	require.NoError(t, err)
 	job, jobEvents, err := spoke.PutCronJob(ctx, db.PutCronJob{
 		ProjectID: project.ID, UID: job.UID, Name: "Edited review",
 		Definition: job.Definition, ExpectedEventUID: job.DefinitionEventUID, Actor: "editor",

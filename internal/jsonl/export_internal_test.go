@@ -262,3 +262,42 @@ func TestProjectAccessLegacyCutoverPreservesPolicy(t *testing.T) {
 		assert.NotContains(t, scoped.String(), kind)
 	}
 }
+
+// Both exporters keep local authority only as typed complete-owner records.
+func TestCronAccessOwnerBackupAndProjectTransfer(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		t.Run(fmt.Sprint(legacy), func(t *testing.T) {
+			ctx := t.Context()
+			source, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "source.db"))
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = source.Close() })
+			project, err := source.CreateProject(ctx, "example-project")
+			require.NoError(t, err)
+			team, _, err := source.CreateTeam(ctx, "operators", "owner")
+			require.NoError(t, err)
+			before, _, err := source.SetCronAccessPolicy(ctx, db.ProjectCronAccessPolicy{ProjectUID: project.UID, Define: db.CronGrant{Mode: "teams", TeamUIDs: []string{team.UID}}, Observe: db.CronGrant{Mode: "teams"}}, "owner")
+			require.NoError(t, err)
+			export := func(out *bytes.Buffer, opts ExportOptions) error {
+				if legacy {
+					return exportForCutover(ctx, source, out, opts)
+				}
+				return Export(ctx, source, out, opts)
+			}
+			var backup bytes.Buffer
+			require.NoError(t, export(&backup, ExportOptions{IncludeDeleted: true}))
+			require.NotContains(t, backup.String(), db.CronAccessPolicyPrefix)
+			require.Contains(t, backup.String(), `"kind":"project_cron_access_policy"`)
+			target, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "target.db"))
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = target.Close() })
+			require.NoError(t, Import(ctx, bytes.NewReader(backup.Bytes()), target))
+			after, err := target.CronAccessPolicy(ctx, project.UID)
+			require.NoError(t, err)
+			require.Equal(t, before, after)
+			var scoped bytes.Buffer
+			require.NoError(t, export(&scoped, ExportOptions{ProjectID: project.ID}))
+			require.NotContains(t, scoped.String(), "project_cron_access_policy")
+			require.NotContains(t, scoped.String(), db.CronAccessPolicyPrefix)
+		})
+	}
+}

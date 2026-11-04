@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-02
+last_edited: 2026-11-04
 ---
 
 # CLI reference
@@ -2214,7 +2214,8 @@ to inject its value into the consuming process. Revoke the token during teardown
 
 `kata cron` stores shared jobs, workflows and independent attributed run evidence.
 Commands return JSON; external adapters schedule and launch their own work.
-See [Cron](cron.md) for bounded documents and retry semantics.
+See [Cron](cron.md) for bounded documents and retry semantics, and
+[cron permissions](cron.md#permissions) for owner-managed define and observe grants.
 
 ```sh
 kata cron job create --uid <job-uid> --file job.json --json
@@ -2224,6 +2225,8 @@ kata cron job update <job-uid> --expected-event-uid <event-uid> --file replaceme
 kata cron job delete <job-uid> --expected-event-uid <event-uid> --json
 kata cron job restore <job-uid> --expected-event-uid <event-uid> --json
 kata cron capabilities --json
+kata cron access show example-project --agent
+kata cron access set example-project --define teams --define-team authors --agent
 kata cron run observe <run-uid> --json-input observation.json --json
 kata cron run list [--limit 100] [--before-uid <uid>] [--job-uid <job-uid>] --json
 kata cron run show <run-uid> --json

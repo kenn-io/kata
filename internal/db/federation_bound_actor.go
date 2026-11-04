@@ -22,6 +22,8 @@ type FederationAttribution interface {
 
 // FederationBoundActorCheck carries one ingest batch's attribution policy.
 type FederationBoundActorCheck struct {
+	// CronAccess checks fresh downstream cron authority within the ingest transaction.
+	CronAccess func(context.Context, RemoteEvent) error
 	BoundActor string
 	// AllowSnapshotAuthorPreservation is the approved adoption grant: baseline
 	// snapshots keep their historical authors.
@@ -41,6 +43,11 @@ func ValidateFederationBoundActorPayload(ctx context.Context, ev RemoteEvent, ch
 	boundActor := strings.TrimSpace(check.BoundActor)
 	if boundActor == "" {
 		return nil
+	}
+	if check.CronAccess != nil && !(check.AdoptionBaseline && strings.HasSuffix(ev.Type, ".snapshot")) {
+		if err := check.CronAccess(ctx, ev); err != nil {
+			return err
+		}
 	}
 	switch {
 	case ev.Type == "cron.run.snapshot" && check.AdoptionBaseline:

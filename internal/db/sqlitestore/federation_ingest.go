@@ -180,6 +180,12 @@ func (d *Store) ingestFederationEventsOnce(
 			}
 		}
 		if err := db.ValidateFederationBoundActorPayload(ctx, ev, db.FederationBoundActorCheck{
+			CronAccess: func(ctx context.Context, event db.RemoteEvent) error {
+				if err := lockProjectAccess(ctx, tx); err != nil {
+					return err
+				}
+				return db.RequireFederationCronGrant(ctx, tx, p.ProjectID, projectUID, boundActor, event)
+			},
 			BoundActor:                      boundActor,
 			AllowSnapshotAuthorPreservation: adoptionSnapshotAuthorState.allowAuthorPreservation,
 			AdoptionBaseline:                adoptionSnapshotAuthorState.allowAuthorPreservation || adoptionSnapshotAuthorState.overrideSnapshotAuthors,

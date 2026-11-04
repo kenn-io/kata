@@ -247,6 +247,8 @@ func (s *Store) importReplayRecord(
 	case *db.TeamMembership:
 		_, err := tx.ExecContext(ctx, `INSERT INTO team_memberships(team_uid,actor) VALUES($1,$2)`, rec.TeamUID, rec.Actor)
 		return replayLinkInserted, err
+	case *db.ProjectCronAccessPolicy:
+		return replayLinkInserted, db.ImportCronAccessPolicyTx(ctx, tx, *rec)
 	case *db.ProjectAccessPolicy:
 		if _, err := tx.ExecContext(ctx, `INSERT INTO project_access_policies(project_uid,visibility,revision) VALUES($1,$2,$3)`, rec.ProjectUID, rec.Visibility, rec.Revision); err != nil {
 			return replayLinkInserted, err

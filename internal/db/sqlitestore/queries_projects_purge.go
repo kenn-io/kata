@@ -141,6 +141,9 @@ func deleteProjectScoped(ctx context.Context, c connExec, projectID int64) error
 	if err := c.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id = ?`, projectID).Scan(&projectUID); err != nil {
 		return fmt.Errorf("load purged project UID: %w", err)
 	}
+	if err := db.DeleteCronAccessPolicyTx(ctx, c, projectUID); err != nil {
+		return fmt.Errorf("delete project relay metadata: %w", err)
+	}
 	if err := deleteProjectRelayMetadata(ctx, c, projectUID); err != nil {
 		return fmt.Errorf("delete project relay metadata: %w", err)
 	}
@@ -320,6 +323,9 @@ func (d *Store) hardDeleteProject(ctx context.Context, projectID int64) (int64, 
 	}
 	if _, err := conn.ExecContext(ctx, `DELETE FROM events WHERE project_id = ?`, project.ID); err != nil {
 		return 0, fmt.Errorf("delete orphan project events: %w", err)
+	}
+	if err := db.DeleteCronAccessPolicyTx(ctx, conn, project.UID); err != nil {
+		return 0, fmt.Errorf("delete orphan project relay metadata: %w", err)
 	}
 	if err := deleteProjectRelayMetadata(ctx, conn, project.UID); err != nil {
 		return 0, fmt.Errorf("delete orphan project relay metadata: %w", err)

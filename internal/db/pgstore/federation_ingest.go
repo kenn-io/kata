@@ -149,6 +149,12 @@ func (s *Store) IngestFederationEvents(
 				}
 			}
 			if err := db.ValidateFederationBoundActorPayload(ctx, event, db.FederationBoundActorCheck{
+				CronAccess: func(ctx context.Context, event db.RemoteEvent) error {
+					if err := lockProjectAccess(ctx, tx); err != nil {
+						return err
+					}
+					return db.RequireFederationCronGrant(ctx, tx, params.ProjectID, projectUID, boundActor, event)
+				},
 				BoundActor:                      boundActor,
 				AllowSnapshotAuthorPreservation: adoptionState.allowAuthorPreservation,
 				AdoptionBaseline:                adoptionState.allowAuthorPreservation || adoptionState.overrideSnapshotAuthors,

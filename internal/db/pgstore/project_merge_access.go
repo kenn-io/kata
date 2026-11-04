@@ -13,6 +13,9 @@ import (
 // show a team-restricted source's issues outside its exact team set. The
 // caller already holds the project access lock for the merge transaction.
 func rejectProjectMergeAccessWideningTx(ctx context.Context, tx *sql.Tx, sourceUID, targetUID string) error {
+	if err := db.CheckCronMergeAccessTx(ctx, tx, sourceUID, targetUID); err != nil {
+		return err
+	}
 	source, err := readProjectAccessPolicy(ctx, tx, sourceUID)
 	if err != nil {
 		return fmt.Errorf("read source access policy for merge: %w", err)

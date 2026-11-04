@@ -169,6 +169,9 @@ func (a CronSQL) observeRunTx(ctx context.Context, tx *sql.Tx, in ObserveCronRun
 	if err != nil {
 		return result, err
 	}
+	if err := a.checkCronGrant(ctx, tx, project.UID, in.Access, "observe"); err != nil {
+		return result, err
+	}
 	effectiveActor, err := a.effectiveMutationActor(ctx, tx, in.ProjectID, value.Actor)
 	if err != nil {
 		return result, err

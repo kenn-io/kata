@@ -59,7 +59,7 @@ The full contract is in the Cron reference (docs/reference/cron.md).`,
 	capabilities := newCronOperationCmd("capabilities", "show")
 	capabilities.Use = "capabilities"
 	capabilities.Short = "discover local protocol support without creating cron state"
-	command.AddCommand(runs, capabilities)
+	command.AddCommand(runs, capabilities, cronAccessCmd())
 	return command
 }
 
