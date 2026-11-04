@@ -343,7 +343,7 @@ func renderRecurrenceForm(s inputState, innerW, height int, now time.Time) strin
 			parts = append(parts, subtleStyle.Render(sanitizeForDisplay(datePreview(s.fields[idx].value(), now))))
 		}
 	}
-	if s.recurrence.currentAfterRefusal != "" {
+	if !s.recurrence.stopped && s.recurrence.currentAfterRefusal != "" {
 		parts = append(parts, subtleStyle.Render(truncate(sanitizeForDisplay(s.recurrence.currentAfterRefusal), innerW)))
 	}
 	if status := renderFormStatus(s); status != "" {

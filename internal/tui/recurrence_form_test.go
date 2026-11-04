@@ -621,6 +621,7 @@ func TestRecurrenceFormReloadsAfterAnotherClientStops(t *testing.T) {
 			assert.Nil(t, h.m.input.recurrence.rec)
 			assert.Contains(t, h.m.input.err, "This issue's recurrence was stopped; a stopped series can't start again")
 			assert.Contains(t, h.page(), "This issue's recurrence was stopped;")
+			assert.NotContains(t, h.page(), "now: no recurrence")
 			assert.NotContains(t, h.page(), "save again to write your input over it")
 			cmd := h.key(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 			assert.Empty(t, msgsOfType[mutationDoneMsg](cmd), "saving cannot restart a stopped series")
