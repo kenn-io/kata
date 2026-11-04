@@ -18,12 +18,13 @@ type cronRunEvent struct {
 	JobUID     string     `json:"job_uid"`
 	ProjectUID string     `json:"project_uid"`
 	Status     string     `json:"status"`
+	Revision   int64      `json:"revision"`
 	EndedAt    *time.Time `json:"ended_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 func (r cronRunEvent) run() generated.CronRun {
-	return generated.CronRun{UID: r.UID, Status: r.Status, EndedAt: r.EndedAt, UpdatedAt: r.UpdatedAt}
+	return generated.CronRun{UID: r.UID, Status: r.Status, Revision: r.Revision, EndedAt: r.EndedAt, UpdatedAt: r.UpdatedAt}
 }
 
 type cronNoticeState struct {
@@ -46,12 +47,23 @@ func (m Model) cronNoticeSuppressed(r cronRunEvent) bool {
 	}
 	if r.JobUID != "" {
 		for _, old := range m.cronNotices.announced {
-			if old.ProjectUID == r.ProjectUID && old.JobUID == r.JobUID && m.cronRunUnseen(old.ProjectUID, old.run()) {
+			if old.ProjectUID == r.ProjectUID && old.JobUID == r.JobUID && m.cronRunUnseen(old.ProjectUID, m.cronNoticeNewest(old)) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// A higher loaded revision, such as a correction missed across an SSE reset,
+// supersedes the announced payload.
+func (m Model) cronNoticeNewest(r cronRunEvent) generated.CronRun {
+	if m.cron.data != nil {
+		if known, ok := m.cron.data.run(r.UID); ok && known.Revision > r.Revision {
+			return known
+		}
+	}
+	return r.run()
 }
 func (m Model) cronNoticeEvent(msg eventReceivedMsg) (Model, tea.Cmd) {
 	m = m.cronNoticeSync()
