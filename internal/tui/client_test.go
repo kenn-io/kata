@@ -1557,7 +1557,8 @@ func TestRecurrenceHistoricalRefUsesCurrentProject(t *testing.T) {
 	assert.NotNil(t, detail.Recurrence, "historical references show the destination's recurrence")
 	h.assertHistoricalRecurrenceSnapshot(oldProject, oldRef)
 	stopped, err := h.client.SaveRecurrence(t.Context(), oldProject, oldRef, RecurrenceInput{
-		Stop: true, Recurrence: new(h.rows()[0]), Actor: "alice",
+		Terms: recurrenceclient.Terms{Actor: "alice"},
+		Stop:  true, Recurrence: new(h.rows()[0]),
 	})
 	require.NoError(t, err)
 	assert.True(t, stopped.Changed)
