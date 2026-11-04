@@ -99,3 +99,16 @@ func cronRequestExamples(resource, action string) string {
 		cronWorkflowRequestExample + "  kata cron workflow create --uid 01J00000000000000000000010 --file workflow.json --json\n\n" +
 		cronCommandRequestExample + cmd + " --file command.json --json"
 }
+
+// cronRuntimeHelp keeps copyable advertisement examples beside other cron bodies.
+func cronRuntimeHelp(action string) (string, string) {
+	if action == "list" {
+		return "List this daemon's retained runtime advertisements and advisory warnings. Unknown inventory never proves that no eligible runtime exists.", "  kata cron runtime list --json"
+	}
+	return `Refresh one installation's advertisement from --json-input (or - for stdin).
+Persist the runtime ULID and repeat beats at interval_seconds (10–3600, default
+60), including while idle. A runtime expires after three intervals; stopping
+expires immediately. Advertisements do not activate or reserve work.`, `  kata cron runtime beat 01ARZ3NDEKTSV4RRFFQ69G5FAV --json-input - --json <<'JSON'
+  {"label":"example-worker","adapter":"example","features":["cron_v1"],"interval_seconds":60,"state":"active"}
+JSON`
+}
