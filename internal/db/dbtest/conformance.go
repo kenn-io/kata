@@ -123,12 +123,16 @@ var storageScenarios = []scenario{
 		RunRelayCheckpointAdmissionMatchesReset(t, backend)
 		return nil
 	}},
-	{name: "relay enrollment history validation cache", methods: []string{"CreateAPIToken", "CreateIssue", "CreateProject", "CreateRelayEnrollment", "CreateComment", "ProjectAccessTransactionFence", "RemoveProject", "PurgeProject", "PinRootAuthority", "RevokeFederationEnrollment", "UpsertFederationBinding"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+	{name: "relay enrollment history validation cache", methods: []string{"InsertRemoteEvents", "CreateAPIToken", "CreateIssue", "CreateProject", "CreateRelayEnrollment", "CreateComment", "ProjectAccessTransactionFence", "RemoveProject", "PurgeProject", "PinRootAuthority", "RevokeFederationEnrollment", "UpsertFederationBinding"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
 		RunRelayEnrollmentHistoryValidationCache(t, store, backend)
 		return nil
 	}},
-	{name: "relay checkpoint history validation cache", methods: []string{"CreateAPIToken", "CreateIssue", "CreateProject", "CreateRelayEnrollment", "CreateComment", "PendingRelayDeliveries", "RemoveProject", "PurgeProject", "PinRootAuthority", "RevokeFederationEnrollment", "UpsertFederationBinding"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+	{name: "relay checkpoint history validation cache", methods: []string{"InsertRemoteEvents", "CreateAPIToken", "CreateIssue", "CreateProject", "CreateRelayEnrollment", "CreateComment", "PendingRelayDeliveries", "RemoveProject", "PurgeProject", "PinRootAuthority", "RevokeFederationEnrollment", "UpsertFederationBinding"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
 		RunRelayCheckpointHistoryValidationCache(t, store, backend)
+		return nil
+	}},
+	{name: "relay forwarded checkpoint avoids history scan", methods: []string{"CreateAPIToken", "CreateProject", "CreateRelayEnrollment", "PinRootAuthority", "SetRelayBindingConfig", "UpsertFederationBinding"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunRelayForwardedCheckpointAvoidsHistoryScan(t, store, backend)
 		return nil
 	}},
 	{name: "relay ingest returns local issue ids", methods: []string{"AcceptRelayDeliveries", "CreateAPIToken", "CreateProject", "CreateRelayEnrollment", "IssueByUID", "PinRootAuthority", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {
