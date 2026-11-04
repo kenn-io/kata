@@ -183,7 +183,7 @@ func recoverMissingTasks(ctx context.Context, session Session, now func() time.T
 		issuesync.ReportProgress(ctx, "missing-tasks", n+1, len(missing))
 		t, err := session.Task(ctx, id)
 		if se, ok := errors.AsType[*issuesync.StatusError](err); ok && se.HTTPStatus == 404 || errors.Is(err, errTaskOutsideProject) {
-			delete(cp.Versions, id)
+			retireTaskCheckpoint(cp, id)
 			continue
 		}
 		if err != nil {
@@ -193,7 +193,7 @@ func recoverMissingTasks(ctx context.Context, session Session, now func() time.T
 			return nil, blocked("TickTick task status is missing")
 		}
 		if *t.Status == -1 || t.Kind == "NOTE" {
-			delete(cp.Versions, id)
+			retireTaskCheckpoint(cp, id)
 			continue
 		}
 		if closedCandidates[id] && *t.Status != 2 && !cp.Versions[id].PendingRecovery {
@@ -205,6 +205,15 @@ func recoverMissingTasks(ctx context.Context, session Session, now func() time.T
 		recovered[id] = true
 	}
 	return recovered, nil
+}
+
+// retireTaskCheckpoint forgets source state that can no longer be imported.
+func retireTaskCheckpoint(cp *Checkpoint, id string) {
+	delete(cp.Versions, id)
+	delete(cp.PublicationContentBaselines, "task:"+id)
+	if len(cp.PublicationContentBaselines) == 0 {
+		cp.PublicationContentBaselines = nil
+	}
 }
 
 // stagedCheckpoint is the checkpoint saved before import. Recovered tasks stay
@@ -237,12 +246,19 @@ func (a *Adapter) seedReturningTasks(ctx context.Context, b db.IssueSyncBinding,
 	consumedBaselines := map[string]db.IssuePublicationContentBaseline{}
 	visible := map[string]Task{}
 	for _, t := range data.Tasks {
-		if t.Status == nil || *t.Status == -1 || t.Kind == "NOTE" {
+		if t.Status == nil {
+			continue
+		}
+		if *t.Status == -1 || t.Kind == "NOTE" {
+			retireTaskCheckpoint(cp, t.ID)
 			continue
 		}
 		visible[t.ID] = t
 	}
 	if len(visible) == 0 {
+		if len(cp.PublicationContentBaselines) == 0 {
+			cp.PublicationContentBaselines = nil
+		}
 		return consumedBaselines, nil
 	}
 	mappings, err := a.store.ImportMappingsByProjectSource(ctx, b.ProjectID, b.SourceKey)

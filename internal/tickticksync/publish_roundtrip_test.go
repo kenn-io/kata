@@ -82,3 +82,78 @@ func TestPublishRoundTrip(t *testing.T) {
 		})
 	}
 }
+
+func TestPublishThenSyncRetiresUnavailableTaskBaselines(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		listed   *Task
+		readback *Task
+		moved    bool
+	}{
+		{name: "deleted"},
+		{name: "moved to another project", moved: true},
+		{name: "abandoned on readback", readback: &Task{ID: "task-1", ProjectID: "project-1", Title: "Abandoned", Status: new(-1), Kind: "TEXT"}},
+		{name: "note on readback", readback: &Task{ID: "task-1", ProjectID: "project-1", Title: "Note", Status: new(0), Kind: "NOTE"}},
+		{name: "listed abandoned task", listed: &Task{ID: "task-1", ProjectID: "project-1", Title: "Abandoned", Status: new(-1), Kind: "TEXT"}},
+		{name: "listed note", listed: &Task{ID: "task-1", ProjectID: "project-1", Title: "Note", Status: new(0), Kind: "NOTE"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, b := adapterDB(t)
+			task := Task{ID: "task-1", ProjectID: "project-1", Title: "Native", Content: "Body", Status: new(0), Kind: "TEXT"}
+			client, _ := testClient(t, func(r *http.Request) (*http.Response, error) {
+				if r.URL.Path == "/open/v1/project/project-1" {
+					return reply(200, `{"id":"project-1","kind":"TASK","permission":"write"}`), nil
+				}
+				if r.Method == http.MethodPost {
+					require.Equal(t, "/open/v1/task", r.URL.Path)
+				} else {
+					require.Equal(t, "/open/v1/project/project-1/task/task-1", r.URL.Path)
+				}
+				raw, err := json.Marshal(task)
+				require.NoError(t, err)
+				return reply(200, string(raw)), nil
+			})
+			native, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: b.ProjectID, Title: "Native", Body: "Body", Author: "worker"})
+			require.NoError(t, err)
+			publisher := issuesync.NewPublisher(issuesync.PublisherConfig{Store: store, Adapter: NewAdapter(store, client), Clock: func() time.Time { return native.UpdatedAt }})
+			_, err = publisher.Publish(t.Context(), issuesync.PublishRequest{ProjectID: b.ProjectID, IssueID: native.ID, Provider: "ticktick", Actor: "worker"})
+			require.NoError(t, err)
+
+			saved, err := store.IssueSyncBindingByID(t.Context(), b.ID)
+			require.NoError(t, err)
+			checkpoint, err := DecodeCheckpoint(saved.Config)
+			require.NoError(t, err)
+			require.Contains(t, checkpoint.PublicationContentBaselines, "task:task-1")
+
+			source := sourceData()
+			source.data.Tasks = nil
+			if tc.listed != nil {
+				source.data.Tasks = []Task{*tc.listed}
+			}
+			if tc.moved {
+				source.missing["task-1"] = Task{ID: "task-1", ProjectID: "other-project", Title: "Moved", Status: new(0), Kind: "TEXT"}
+			} else if tc.readback != nil {
+				source.missing["task-1"] = *tc.readback
+			}
+			_, err = NewRunner(RunnerConfig{Store: store, Fetcher: source}).RunOnce(t.Context(), b.ID)
+			require.NoError(t, err)
+
+			saved, err = store.IssueSyncBindingByID(t.Context(), b.ID)
+			require.NoError(t, err)
+			checkpoint, err = DecodeCheckpoint(saved.Config)
+			require.NoError(t, err)
+			require.NotContains(t, checkpoint.PublicationContentBaselines, "task:task-1", "a task that can no longer be imported must not retain its publication baseline")
+			require.NotContains(t, checkpoint.Versions, "task-1", "a task that can no longer be imported must not retain its source version")
+
+			destination, err := store.CreateProject(t.Context(), "destination-project")
+			require.NoError(t, err)
+			current, err := store.IssueByID(t.Context(), native.ID)
+			require.NoError(t, err)
+			_, err = store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+				IssueID: current.ID, FromProjectID: current.ProjectID, ToProjectID: destination.ID,
+				IfMatchRev: current.Revision, Actor: "worker",
+			})
+			require.NoError(t, err, "clearing the retired baseline must allow the native issue to move")
+		})
+	}
+}
