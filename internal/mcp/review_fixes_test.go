@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"go.kenn.io/kata/internal/daemon"
@@ -1696,8 +1697,8 @@ func TestNextExaminesAllReadyIssuesOnOlderDaemon(t *testing.T) {
 		case "/api/v1/projects":
 			writeJSON(writer, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
 		case "/api/v1/ready":
-			require.Empty(t, request.URL.Query().Get("sort"))
-			require.False(t, request.URL.Query().Has("limit"))
+			assert.Empty(t, request.URL.Query().Get("sort"))
+			assert.False(t, request.URL.Query().Has("limit"))
 			const count = 101
 			issues := make([]any, 0, count)
 			for index := 0; index < count; index++ {

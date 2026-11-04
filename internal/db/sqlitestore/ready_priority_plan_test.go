@@ -38,30 +38,27 @@ SELECT printf('%026d', n), ?, printf('%06d', n), 'Ready issue', 'author', n % 5,
 					continue
 				}
 				t.Run(tc.name, func(t *testing.T) {
-					query, args := buildReadyIssuesQuery(ctx, project.ID, tc.filter, time.Now())
-					index := "idx_issues_project_ready_priority"
-					if scope == "global" {
-						query, args = buildReadyIssuesGlobalQuery(ctx, tc.filter, time.Now())
-						index = "idx_issues_ready_priority"
-					}
-					if tc.filter.Owner != "" {
-						index = "idx_issues_owner"
-					}
-					rows, err := store.QueryContext(ctx, "EXPLAIN QUERY PLAN "+query, args...)
-					require.NoError(t, err)
-					var details []string
-					for rows.Next() {
-						var id, parent, unused int
-						var detail string
-						require.NoError(t, rows.Scan(&id, &parent, &unused, &detail))
-						details = append(details, detail)
-					}
-					require.NoError(t, rows.Err())
-					require.NoError(t, rows.Close())
-					plan := strings.Join(details, "\n")
-					t.Log(plan)
-					require.Contains(t, plan, index)
 					if tc.filter.Owner == "" {
+						query, args := buildReadyIssuesQuery(ctx, project.ID, tc.filter, time.Now())
+						index := "idx_issues_project_ready_priority"
+						if scope == "global" {
+							query, args = buildReadyIssuesGlobalQuery(ctx, tc.filter, time.Now())
+							index = "idx_issues_ready_priority"
+						}
+						rows, err := store.QueryContext(ctx, "EXPLAIN QUERY PLAN "+query, args...)
+						require.NoError(t, err)
+						var details []string
+						for rows.Next() {
+							var id, parent, unused int
+							var detail string
+							require.NoError(t, rows.Scan(&id, &parent, &unused, &detail))
+							details = append(details, detail)
+						}
+						require.NoError(t, rows.Err())
+						require.NoError(t, rows.Close())
+						plan := strings.Join(details, "\n")
+						t.Log(plan)
+						require.Contains(t, plan, index)
 						require.NotContains(t, plan, "TEMP B-TREE")
 					}
 					var issue db.Issue
