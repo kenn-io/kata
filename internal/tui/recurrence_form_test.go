@@ -579,6 +579,22 @@ func TestRecurrenceFormDropsLoadAfterNavigation(t *testing.T) {
 	}
 }
 
+func TestRecurrenceFormDropsLoadAfterOpeningHelpInSplitLayout(t *testing.T) {
+	h := newRecurrenceHarness(t, viewList)
+	h.m.layout = splitlayout.Split
+	h.m.focus = focusList
+	loaded := msgOfType[recurrenceFormLoadedMsg](t, h.key(runeKey('O')))
+
+	h.key(runeKey('?'))
+	require.Equal(t, viewHelp, h.m.view)
+
+	out, _ := h.m.Update(loaded)
+	h.m = out.(Model)
+	require.Equal(t, inputNone, h.m.input.kind, "the late recurrence read must leave Help in control of keys")
+	h.key(runeKey('?'))
+	assert.Equal(t, viewList, h.m.view, "? returns from Help to the list")
+}
+
 func TestRecurrenceFormRequiresGuardedStartAPI(t *testing.T) {
 	h := newRecurrenceHarness(t, viewDetail)
 	posts := 0
