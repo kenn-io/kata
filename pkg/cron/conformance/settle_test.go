@@ -129,7 +129,7 @@ func TestStopPolicyValidatesOnlyConsumedOffers(t *testing.T) {
 	}
 	// Checked contract: every genuine terminal at the earliest instant retains its result,
 	// including cancellation/deadline terminals for an independent unstarted step.
-	for _, kind := range []string{"failure", "cancelled", "deadline"} {
+	for _, kind := range []string{"failure", "mixed-duration-failure", "cancelled", "deadline"} {
 		for _, reversed := range []bool{false, true} {
 			t.Run(fmt.Sprintf("terminal-ties/%s/reversed=%v", kind, reversed), func(t *testing.T) {
 				steps := []WorkflowStep{{Key: "a"}, {Key: "x"}}
@@ -142,7 +142,11 @@ func TestStopPolicyValidatesOnlyConsumedOffers(t *testing.T) {
 						"x": {{StartedAt: start, EndedAt: start, Status: "failed"}},
 					}}
 				wantCounts, wantStatus := map[string]int{"a": 1, "x": 1}, "failed"
-				if kind != "failure" {
+				if kind == "mixed-duration-failure" {
+					in.Outcomes["a"][0].EndedAt = start.Add(time.Second)
+					in.Outcomes["x"][0].StartedAt = start.Add(time.Second)
+					in.Outcomes["x"][0].EndedAt = start.Add(time.Second)
+				} else if kind != "failure" {
 					in.Outcomes = map[string][]Attempt{"a": {{StartedAt: start, Status: "running"}}}
 					wantCounts["x"] = 0
 					in.TimeoutSeconds = 2
