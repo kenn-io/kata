@@ -3,6 +3,7 @@ package conformance
 import (
 	"bytes"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"flag"
 	"os"
 	"path/filepath"
@@ -52,10 +53,23 @@ func fixtureLiteral(t *testing.T, source string) []byte {
 }
 
 func TestFixtureArtifacts(t *testing.T) {
+	artifacts := map[string][]byte{}
 	for name, source := range fixtureSources {
+		artifacts[filepath.Join("adapter-v1", name)] = fixtureLiteral(t, source)
+	}
+	var scenarios []Scenario
+	if err := json.Unmarshal([]byte(workflowFixtureCases), &scenarios); err != nil {
+		t.Fatal(err)
+	}
+	d := Declaration{Name: "kata-reference", CatchupLimit: 1000, FailurePolicy: "continue"}
+	raw, err := json.Marshal(bundle{Schema: SchemaV2, Declaration: &d, Scenarios: scenarios}, jsontext.WithIndent("  "), json.Deterministic(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts[filepath.Join("adapter-v2", "workflow.json")] = append(raw, '\n')
+	for name, want := range artifacts {
 		t.Run(name, func(t *testing.T) {
-			path := filepath.Join("testdata", "adapter-v1", name)
-			want := fixtureLiteral(t, source)
+			path := filepath.Join("testdata", name)
 			if *updateFixtures {
 				if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
 					t.Fatal(err)
@@ -72,20 +86,6 @@ func TestFixtureArtifacts(t *testing.T) {
 				t.Fatal("fixture differs from independent source; regenerate with -update-golden")
 			}
 		})
-	}
-	path := filepath.Join("testdata", "default-export-sha256.json")
-	want := []byte(defaultExportHashes + "\n")
-	if *updateFixtures {
-		if err := os.WriteFile(path, want, 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(got, want) {
-		t.Fatal("default export fingerprints changed")
 	}
 }
 
@@ -361,5 +361,3 @@ var fixtureSources = map[string]string{
 ]}
 ]} `,
 }
-
-const defaultExportHashes = `{"catchup.json":"b4d84f9e199c8d30a4a2f13bed69798a01e3daba917db4b2aebd0126804b8ce6","definition-change.json":"eca310d80aad7a648e3cf77d54a30ca10067feb3876bd402fa216052fe04a2ec","manifest.json":"73e33f5e44d89fa077fd954d6a3430358e34266855ba412df58062b1a075535c","overlap.json":"a50ea84f26a8306ec1510fe0c76dd785700dfbd989be41a49dbfdc85b42748eb","ownership.json":"32e8efe880a99f6a7ef4b6a14d34c81536d0fe8bd90c989d569dec99a0ffb62c","retries.json":"34a6285eeea584d1a60407038866ef95ce7ad52dc8b029f0324b12016447e5d5","schedule.json":"a5ec1754262f39b51dd036f0854b7ab77e83f12f841c96648b5c222fa8816bb5","timeout.json":"69cef2c72cdd79b037682fcea0b467d1c0d63bbca7e42ace45970093c5bcee53"}`

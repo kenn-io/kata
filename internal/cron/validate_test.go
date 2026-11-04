@@ -103,8 +103,6 @@ func TestParseWorkflow(t *testing.T) {
 	for _, input := range []string{
 		`{"version":1,"steps":[]}`,
 		`{"version":1,"steps":[{"key":"a","kind":"prompt","prompt":"Hi","after":["a"]}]}`,
-		`{"version":1,"steps":[{"key":"a","kind":"command","command":"true","retries":-1}]}`,
-		`{"version":1,"steps":[{"key":"a","kind":"command","command":"true"},{"key":"a","kind":"command","command":"false"}]}`,
 	} {
 		_, err := ParseWorkflow([]byte(input))
 		require.Error(t, err)

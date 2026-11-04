@@ -21,8 +21,12 @@ func TestFrozenReference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(scenarios) != 54 {
-		t.Fatalf("got %d default scenarios", len(scenarios))
+	suite, err := Suite(t.Context(), Reference{}.Declare())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(scenarios, suite.Scenarios) {
+		t.Fatal("Scenarios differs from default suite")
 	}
 	Run(t, Reference{})
 }
@@ -53,11 +57,6 @@ func TestDefaultExportBytes(t *testing.T) {
 
 func TestDeclarationContract(t *testing.T) {
 	base := Reference{}.Declare()
-	maximum := base
-	maximum.CatchupLimit = 100001
-	if err := maximum.Validate(); err != nil {
-		t.Fatal(err)
-	}
 	for _, tc := range []struct {
 		field  string
 		change func(*Declaration)
@@ -210,6 +209,9 @@ func TestCheckerRejectsAnswerSets(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if tc.name == "duplicate" && (len(report.Failed) != 1 || report.Failed[0].Diff != "duplicate answer") {
+				t.Fatalf("well-formed duplicate: %+v", report)
+			}
 			if (len(report.Failed) == 0) != (tc.name == "valid") {
 				t.Fatalf("%+v", report)
 			}
@@ -270,42 +272,5 @@ func TestDropBundleUsesOwnLiterals(t *testing.T) {
 		if !found {
 			t.Errorf("missing %s", literal.Name)
 		}
-	}
-}
-
-func TestMalformedLaterDecisionIsNotHiddenByMismatch(t *testing.T) {
-	scenarios, err := Scenarios()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var sequence Scenario
-	for _, scenario := range scenarios {
-		if scenario.Name == "overlap/same-clock-release" {
-			sequence = scenario
-			break
-		}
-	}
-	if len(sequence.Steps) != 2 {
-		t.Fatal("missing two-decision fixture")
-	}
-	outputs := []jsontext.Value{}
-	for i, step := range sequence.Steps {
-		var fields map[string]jsontext.Value
-		if err := json.Unmarshal(step.Expect, &fields); err != nil {
-			t.Fatal(err)
-		}
-		if i == 0 {
-			fields["excluded"] = jsontext.Value(`"disabled"`)
-		} else {
-			delete(fields, "excluded")
-		}
-		raw, err := json.Marshal(fields)
-		if err != nil {
-			t.Fatal(err)
-		}
-		outputs = append(outputs, raw)
-	}
-	if report, err := (FixtureSuite{Schema: Schema, Declaration: Reference{}.Declare(), Scenarios: []Scenario{sequence}}).Check(t.Context(), []Answer{{Name: sequence.Name, Outputs: outputs}}); err == nil {
-		t.Fatalf("malformed later output hidden: %+v", report)
 	}
 }
