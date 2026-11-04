@@ -151,6 +151,13 @@ func (a CronSQL) Validate(ctx context.Context, in CronValidationInput, job bool)
 		if err != nil {
 			return err
 		}
+		if schedule.Basis == "stored_progress" || schedule.Basis == "fresh_anchor" || schedule.Basis == "adapter_trigger" {
+			collisions, err := a.validateCollisions(ctx, tx, in, definition, progress)
+			if err != nil {
+				return err
+			}
+			schedule.Collisions = &collisions
+		}
 		out.Valid, out.Schedule = true, &schedule
 		return nil
 	})

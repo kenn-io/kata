@@ -21,3 +21,9 @@ actions:
   - target: '$.components.schemas.SchedulePreview.properties.from'
     update:
       x-kata-require-presence: true
+  - target: '$.components.schemas.CollisionItem.properties.at'
+    update:
+      x-kata-require-presence: true
+  - target: '$.components.schemas.ValidationCollisions.properties.until'
+    update:
+      x-kata-require-presence: true

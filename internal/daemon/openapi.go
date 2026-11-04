@@ -54,6 +54,7 @@ func configureClientPresence(doc *huma.OpenAPI) {
 	for schemaName, names := range map[string][]string{
 		"FederationJoinInstructions": {"hub_url", "join_command"},
 		"CronValidationResult":       {"name"}, "SchedulePreview": {"from"}, "ScheduleFire": {"at"},
+		"CollisionItem": {"at"}, "ValidationCollisions": {"until"},
 	} {
 		schema := doc.Components.Schemas.Map()[schemaName]
 		if schema == nil {

@@ -436,7 +436,11 @@ an edit. Invalid documents and revision conflicts return `valid:false` with
 staged errors. Both tools are read-only and save nothing. Job validation also
 accepts `parent_ref`, `count` (1–100, default 5), and RFC3339 `from`, and returns
 hypothetical next fires. See [Validate before saving](cron.md#validate-before-saving)
-for stages, warnings, preview bases, and limits.
+for stages, warnings, preview bases, and limits. Previewable jobs also return
+`schedule.collisions`, the same seven-day peer-set report exposed by HTTP and
+CLI. An absent report means it was not computed; empty `items` means no
+coincidences were found. `skipped` and `truncated` describe incomplete work;
+collisions do not change validity or tool success.
 
 `kata.cron_runs` defaults to 20 records, accepts `limit` from 1 through 100,
 and returns `next_before_uid`; pass it as `before_uid` to continue. `job_uid`

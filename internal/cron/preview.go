@@ -32,11 +32,12 @@ type ScheduleFire struct {
 
 // SchedulePreview describes hypothetical trigger times, not dispatch promises.
 type SchedulePreview struct {
-	Delivery string         `json:"delivery"`
-	Basis    string         `json:"basis"`
-	Zone     string         `json:"zone"`
-	From     time.Time      `json:"from"`
-	Next     []ScheduleFire `json:"next"`
+	Delivery   string                `json:"delivery"`
+	Basis      string                `json:"basis"`
+	Zone       string                `json:"zone"`
+	From       time.Time             `json:"from"`
+	Next       []ScheduleFire        `json:"next"`
+	Collisions *ValidationCollisions `json:"collisions,omitempty"`
 }
 
 // PreviewSchedule uses native progress when supplied, otherwise models creation

@@ -304,47 +304,84 @@ func RecurringOccurrences(j JobDefinition, progress RecurringProgress, after tim
 // Callers validate definitions and retained progress. A fresh preview anchor is
 // hypothetical, so it may be the zero instant reserved by stored checkpoints.
 func recurringOccurrences(j JobDefinition, progress RecurringProgress, after time.Time, n int) ([]time.Time, error) {
+	times, _, err := walkOccurrences(j, progress, after, nil, n, nil)
+	return times, err
+}
+
+// walkOccurrences shares trigger stepping across count and horizon previews.
+// A finite budget counts every Next call, including the terminal probe.
+func walkOccurrences(j JobDefinition, progress RecurringProgress, after time.Time, until *time.Time, n int, budget *int) ([]time.Time, bool, error) {
 	if !j.Enabled || n <= 0 {
-		return nil, nil
+		return nil, false, nil
 	}
 	after = after.UTC()
 	var next func(time.Time) time.Time
+	var once *time.Time
 	switch {
 	case IsRecurringIssueJob(j):
 		after = laterOf(after, progress.Through)
 		step, err := recurringNext(j.Trigger, progress.Anchor)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		next = step
 	case j.Trigger.Kind == "cron":
 		schedule, err := adapterCronSchedule(j.Trigger)
 		if err != nil || schedule == nil {
-			return nil, err
+			return nil, false, err
 		}
 		next = schedule.Next
 	case j.Trigger.Kind == "once":
 		at, err := time.Parse(time.RFC3339, j.Trigger.At)
 		if err != nil {
-			return nil, invalid("once requires an RFC3339 instant")
+			return nil, false, invalid("once requires an RFC3339 instant")
 		}
-		if at = at.UTC(); at.After(after) {
-			return []time.Time{at}, nil
+		at = at.UTC()
+		once = &at
+		next = func(cursor time.Time) time.Time {
+			if at.After(cursor) {
+				return at
+			}
+			return time.Time{}
 		}
-		return nil, nil
 	default:
-		return nil, nil
+		return nil, false, nil
 	}
 	var out []time.Time
-	for cursor := after; len(out) < n; {
+	for cursor := after; ; {
+		if until == nil && len(out) == n {
+			return out, false, nil
+		}
+		if budget != nil {
+			if *budget <= 0 {
+				return out, true, nil
+			}
+			*budget--
+		}
 		due := next(cursor)
-		if due.IsZero() || !due.After(cursor) || due.Year() > 9999 {
-			break
+		if (once != nil && !once.After(cursor)) || !due.After(cursor) || due.UTC().Year() > 9999 || (until != nil && !due.Before(*until)) {
+			return out, false, nil
+		}
+		if due.IsZero() && j.Trigger.Kind == "cron" {
+			// The cron parser also uses Go's zero instant as its exhausted
+			// sentinel. A cron that actually fires on that January boundary
+			// has a later fire; an impossible calendar expression has none.
+			if budget != nil {
+				if *budget <= 0 {
+					return out, true, nil
+				}
+				*budget--
+			}
+			if next(due).IsZero() {
+				return out, false, nil
+			}
+		}
+		if len(out) == n {
+			return out, true, nil
 		}
 		out = append(out, due.UTC())
 		cursor = due
 	}
-	return out, nil
 }
 
 func laterOf(a, b time.Time) time.Time {

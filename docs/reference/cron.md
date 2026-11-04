@@ -113,6 +113,32 @@ The `basis` explains how those instants were calculated:
 | `adapter_defined` | Adapter interval or `@every`; Kata defines no instant, so `next` is empty. |
 | `none` | Manual or issue-date trigger; `next` is empty. |
 
+For `stored_progress`, `fresh_anchor`, and `adapter_trigger`,
+`schedule.collisions` compares the candidate with enabled jobs in the same
+project and delivery kind. The window includes `from` and excludes seven
+days later, independently of `--count`. A paused candidate is modeled as enabled.
+An update excludes its own stored row; native peers need a live open parent
+and valid retained progress. Different nonempty string `options.adapter` or
+`options.executor` pins exclude adapter pairs. Missing, empty, or non-string
+pins match anything; adapters decide whether to honor those conventions.
+
+Each collision item identifies the first shared `at` and candidate-zone `local`
+instant for a complete peer set, its `occurrences` in the window, `peer_count`,
+and up to ten `peers` with `uid` and `name`, ordered by binary name then UID.
+The report includes `until`, `items`, `skipped`, and `truncated`. Empty `items`
+means no collisions were found; an absent report means it was not computed.
+`skipped` counts inspected peers without usable instants or native progress.
+
+Limits are 20 groups, 10,080 instants per walk, 200,000 stepping calls
+including completion probes, 1,024 live peer rows, and 8 MiB of peer
+definition/name/UID and parent-metadata bytes. Peers are inspected in binary
+name/UID order. `truncated` marks omitted work or displayed peer names;
+reported sets and counts are only the known coincidences in that case.
+An overflowing horizon clips to RFC3339's final instant; unrepresentable
+UTC/local instants are omitted, also marking truncation. Collisions change no
+validity, warnings, or exit status. An empty result cannot guarantee runner
+separation when adapters ignore pins. Older daemons omit the report.
+
 These are hypothetical trigger instants. A paused job shows what enabling it
 would produce (`paused` warning). A closed native parent shows what reopening
 it would produce (`parent_closed`). The preview does not promise dispatch or

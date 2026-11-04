@@ -20,13 +20,21 @@ func TestCronValidateDoesNotLockParent(t *testing.T) {
 	require.NoError(t, err)
 	parent, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Periodic review", Author: "operator"})
 	require.NoError(t, err)
-	definition := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 60}, Action: cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}, Issue: &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Review"}, Overlap: "allow", Catchup: "latest"}
+	definition := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "cron", Cron: "0 * * * *"}, Action: cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}, Issue: &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Review"}, Overlap: "allow", Catchup: "latest"}
 	job, _, err := store.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Review", Actor: "operator", Definition: definition})
+	require.NoError(t, err)
+	peerParent, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Peer parent", Author: "operator"})
+	require.NoError(t, err)
+	peerDefinition := definition
+	peerIssue := *definition.Issue
+	peerIssue.ParentUID = peerParent.UID
+	peerDefinition.Issue = &peerIssue
+	peer, _, err := store.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Peer", Actor: "operator", Definition: peerDefinition})
 	require.NoError(t, err)
 	holder, err := store.BeginTx(t.Context(), nil)
 	require.NoError(t, err)
 	defer func() { _ = holder.Rollback() }()
-	_, err = holder.ExecContext(t.Context(), `SELECT id FROM issues WHERE id=$1 FOR UPDATE`, parent.ID)
+	_, err = holder.ExecContext(t.Context(), `SELECT id FROM issues WHERE id IN ($1,$2) FOR UPDATE`, parent.ID, peerParent.ID)
 	require.NoError(t, err)
 	require.NoError(t, db.LockCronProject(t.Context(), holder, project.ID))
 	raw, err := json.Marshal(definition)
@@ -37,6 +45,8 @@ func TestCronValidateDoesNotLockParent(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, out.Valid)
 	require.Equal(t, "stored_progress", out.Schedule.Basis)
+	require.Len(t, out.Schedule.Collisions.Items, 1)
+	require.Equal(t, peer.UID, out.Schedule.Collisions.Items[0].Peers[0].UID)
 	// Maintenance can hold an exclusive table lock. The ownership read must
 	// return its deadline error through fail(), without turning it into a result.
 	_, err = holder.ExecContext(t.Context(), `LOCK TABLE issues IN ACCESS EXCLUSIVE MODE`)

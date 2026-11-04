@@ -49,6 +49,39 @@ func CheckCronValidateSnapshot(t *testing.T, reader db.CronSQL, writer db.Storag
 	require.NoError(t, err)
 	require.False(t, out.Valid)
 	require.Equal(t, "dependencies", out.Errors[0].Stage)
+	// Peer definitions belong to the same established snapshot as admission.
+	job.Enabled = true
+	job.Trigger = cron.Trigger{Kind: "cron", Cron: "0 9 * * *"}
+	job.Action = cron.Action{Kind: "execute", Prompt: "Review"}
+	peer, _, err := writer.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "Daily peer", Definition: job, Actor: "operator"})
+	require.NoError(t, err)
+	in.Raw, err = json.Marshal(job)
+	require.NoError(t, err)
+	in.From = time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)
+	reader.ReadTransact = func(ctx context.Context, run func(*sql.Tx) error) error {
+		return readTransaction(ctx, func(tx *sql.Tx) error {
+			var id int64
+			if err := tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE id=$1`, project.ID).Scan(&id); err != nil {
+				return err
+			}
+			changed := job
+			changed.Trigger.Cron = "0 10 * * *"
+			_, _, err := writer.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, UID: peer.UID, ExpectedEventUID: peer.DefinitionEventUID, Name: "Later peer", Definition: changed, Actor: "operator"})
+			if err != nil {
+				return err
+			}
+			return run(tx)
+		})
+	}
+	out, err = reader.Validate(ctx, in, true)
+	require.NoError(t, err)
+	require.True(t, out.Valid)
+	require.Len(t, out.Schedule.Collisions.Items, 1)
+	require.Equal(t, []cron.CollisionPeer{{UID: peer.UID, Name: peer.Name}}, out.Schedule.Collisions.Items[0].Peers)
+	out, err = writer.ValidateCronJob(ctx, in)
+	require.NoError(t, err)
+	require.True(t, out.Valid)
+	require.Empty(t, out.Schedule.Collisions.Items)
 	// Enter a real transaction before cancelling. This exercises an operational
 	// read error inside the callback, rather than BeginTx rejecting the context.
 	cancelled, cancelRead := context.WithCancel(ctx)
