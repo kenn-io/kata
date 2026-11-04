@@ -858,7 +858,8 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		next, cmd := m.cronSaved(msg)
 		return next, cmd, true
 	case recurrenceFormLoadedMsg:
-		return m.openRecurrenceForm(msg), nil, true
+		next, cmd := m.openRecurrenceForm(msg)
+		return next, cmd, true
 	case tea.BackgroundColorMsg:
 		// The terminal answered Init's in-loop background query. Only
 		// colorAuto consults the answer — explicit KATA_COLOR_MODE

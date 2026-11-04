@@ -135,27 +135,27 @@ func readRecurrenceForm(api detailAPI, target formTarget, formGen int64, connGen
 
 // openRecurrenceForm opens the form on what O read, unless the user has moved
 // on since: another key press, another issue, another daemon.
-func (m Model) openRecurrenceForm(msg recurrenceFormLoadedMsg) Model {
+func (m Model) openRecurrenceForm(msg recurrenceFormLoadedMsg) (Model, tea.Cmd) {
 	if m.staleConnMsg(msg.connGen) || msg.formGen != m.nextFormGen || m.input.kind != inputNone || m.modal != modalNone {
-		return m
+		return m, nil
 	}
 	if target, issue, ok := m.activeIssueTarget(); !ok || issue.ProjectID != msg.target.projectID || issue.UID != msg.target.issueUID || target.origin != msg.target.origin || target.detailGen != msg.target.detailGen {
-		return m
+		return m, nil
 	}
 	if msg.refused != "" {
 		m.toast = &toast{text: msg.refused, level: toastError, expiresAt: m.toastNow().Add(3 * time.Second)}
-		return m
+		return m, toastExpireCmd(3 * time.Second)
 	}
 	if msg.err != nil {
 		m.toast = &toast{
 			text:  "Could not read the recurrence: " + msg.err.Error(),
 			level: toastError, expiresAt: m.toastNow().Add(3 * time.Second),
 		}
-		return m
+		return m, toastExpireCmd(3 * time.Second)
 	}
 	m.input = newRecurrenceForm(msg.target, msg.issue, msg.recurrence)
 	m.input.formGen = msg.formGen
-	return m
+	return m, nil
 }
 
 // routeRecurrenceFormKey handles ctrl+x, the stop key, which asks first.
