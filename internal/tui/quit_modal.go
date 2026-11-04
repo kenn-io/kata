@@ -21,7 +21,6 @@ const (
 	modalDiscardNewIssue
 	modalDiscardCronJob
 	modalReopenBacklog
-	modalStopRecurrence
 )
 
 // renderQuitConfirmModal returns the centered "Are you sure?" panel.
@@ -35,17 +34,6 @@ func renderQuitConfirmModal() string {
 		"Are you sure you want to quit?",
 		"",
 		"[Y] Yes    [N] No",
-	}, "\n")
-	return modalBoxStyle.Render(body)
-}
-
-func renderStopRecurrenceModal() string {
-	body := strings.Join([]string{
-		"Stop repeating?",
-		"",
-		"No new occurrences will be created. Existing ones stay.",
-		"",
-		"[Y] Stop repeating    [N] Keep",
 	}, "\n")
 	return modalBoxStyle.Render(body)
 }
@@ -73,8 +61,6 @@ func renderConfirmModal(kind modalKind, reopen *reopenPrompt) string {
 	switch kind {
 	case modalReopenBacklog:
 		return renderReopenBacklogModal(reopen)
-	case modalStopRecurrence:
-		return renderStopRecurrenceModal()
 	case modalQuitConfirm:
 		return renderQuitConfirmModal()
 	case modalDiscardComment:

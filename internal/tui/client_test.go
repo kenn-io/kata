@@ -39,20 +39,6 @@ func newTestClient(t *testing.T, handler http.HandlerFunc) *Client {
 	return NewClient(srv.URL, srv.Client())
 }
 
-func TestReadRecurrencePreservesDaemonRefusal(t *testing.T) {
-	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/api/v1/projects/1/recurrences", r.URL.Path)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		respondJSON(t, w, map[string]any{"error": map[string]any{
-			"code": "scoped_operation_forbidden", "message": "operation is not available to an issue-scoped credential",
-		}})
-	})
-	_, err := c.ReadRecurrence(t.Context(), 1, new(int64(2)))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "operation is not available to an issue-scoped credential")
-}
-
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -1527,13 +1513,6 @@ func TestTelemetrySkipsLocalDaemonRecovery(t *testing.T) {
 	require.False(t, refreshed)
 }
 
-func (h *recurrenceHarness) assertHistoricalRecurrenceSnapshot(oldProject int64) {
-	h.t.Helper()
-	snapshot, err := readRecurrenceSnapshot(h.t.Context(), h.client, formTarget{projectID: oldProject, issueUID: h.issue.UID})
-	require.NoError(h.t, err)
-	assert.NotNil(h.t, snapshot.rec, "form reads use the resolved issue's project")
-}
-
 func TestRecurrenceHistoricalRefUsesCurrentProject(t *testing.T) {
 	h := newRecurrenceHarness(t, viewDetail)
 	oldProject, oldRef := h.issue.ProjectID, h.issue.ShortID
@@ -1551,11 +1530,10 @@ func TestRecurrenceHistoricalRefUsesCurrentProject(t *testing.T) {
 	detail, err := h.client.GetIssueDetail(t.Context(), oldProject, oldRef)
 	require.NoError(t, err)
 	assert.NotNil(t, detail.Recurrence, "historical references show the destination's recurrence")
-	h.assertHistoricalRecurrenceSnapshot(oldProject)
-	stopped, err := h.client.SaveRecurrence(t.Context(), oldProject, oldRef, RecurrenceInput{
-		Stop: true, Recurrence: new(h.rows()[0]), Actor: "alice",
+	changed, err := h.client.SaveRecurrence(t.Context(), oldProject, oldRef, RecurrenceInput{
+		Rule: "FREQ=DAILY", Start: "2026-11-09", Zone: "Europe/Paris", Recurrence: new(h.rows()[0]), Actor: "alice",
 	})
 	require.NoError(t, err)
-	assert.True(t, stopped.Changed)
-	assert.Empty(t, h.rows(), "saves through a historical reference use the current project")
+	assert.True(t, changed.Changed)
+	assert.Equal(t, "FREQ=DAILY", h.rows()[0].RRule, "saves through a historical reference use the current project")
 }

@@ -186,7 +186,6 @@ var successTemplates = map[string]string{
 	"dates":             "updated dates of #%s",
 	"recurrence.start":  "started repeat of #%s",
 	"recurrence.change": "changed repeat of #%s",
-	"recurrence.stop":   "stopped repeat of #%s",
 }
 
 // mutationSuccessText is the per-kind toast for a successful mutation.

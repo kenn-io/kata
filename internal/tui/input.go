@@ -37,7 +37,7 @@ const (
 	inputCloseForm           // list/detail `x` — authenticated close message + evidence
 	inputDatesForm           // list/detail `d` — Scheduled and Deadline dates
 	inputDeleteForm          // list or detail `X` — typed <project>#<id> confirmation
-	inputRecurrenceForm      // list/detail `O` — Rule, Start and Zone of a recurrence
+	inputRecurrenceForm      // detail `O` — Rule, Start and Zone of a recurrence
 )
 
 type searchFocus int
