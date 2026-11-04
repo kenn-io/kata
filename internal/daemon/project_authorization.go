@@ -251,36 +251,23 @@ func withProjectAuthorization(store db.Storage, hosted, trustedCaller bool, tran
 			}
 			return err
 		})
-		ctx = db.WithProjectAccessTransactionCheck(ctx, func(
-			checkCtx context.Context, tx db.Transaction, projectUID string,
-		) error {
-			if decision.fixedUIDs != nil && !slices.Contains(decision.fixedUIDs, projectUID) {
-				return projectAccessDenied()
+		projectCheck := func(fence func(string, []string) db.TransactionFence) func(context.Context, db.Transaction, string) error {
+			return func(checkCtx context.Context, tx db.Transaction, projectUID string) error {
+				if decision.fixedUIDs != nil && !slices.Contains(decision.fixedUIDs, projectUID) {
+					return projectAccessDenied()
+				}
+				if decision.owner {
+					return nil
+				}
+				err := fence(decision.Actor, []string{projectUID})(checkCtx, tx)
+				if errors.Is(err, db.ErrNotFound) {
+					return projectAccessDenied()
+				}
+				return err
 			}
-			if decision.owner {
-				return nil
-			}
-			err := store.ProjectAccessTransactionFence(decision.Actor, []string{projectUID})(checkCtx, tx)
-			if errors.Is(err, db.ErrNotFound) {
-				return projectAccessDenied()
-			}
-			return err
-		})
-		ctx = db.WithProjectAccessSnapshotCheck(ctx, func(
-			checkCtx context.Context, tx db.Transaction, projectUID string,
-		) error {
-			if decision.fixedUIDs != nil && !slices.Contains(decision.fixedUIDs, projectUID) {
-				return projectAccessDenied()
-			}
-			if decision.owner {
-				return nil
-			}
-			err := store.ProjectAccessSnapshotCheck(decision.Actor, []string{projectUID})(checkCtx, tx)
-			if errors.Is(err, db.ErrNotFound) {
-				return projectAccessDenied()
-			}
-			return err
-		})
+		}
+		ctx = db.WithProjectAccessTransactionCheck(ctx, projectCheck(store.ProjectAccessTransactionFence))
+		ctx = db.WithProjectAccessSnapshotCheck(ctx, projectCheck(store.ProjectAccessSnapshotCheck))
 		r = r.WithContext(ctx)
 		if eventStream {
 			// The stream revalidates authority before every frame itself and

@@ -321,7 +321,7 @@ func (s *Store) IngestFederationEvents(
 				if err != nil {
 					return err
 				}
-				changed, err := s.patchProjectMetadataReassert(ctx, db.PatchProjectMetadataIn{ProjectID: params.ProjectID, Actor: params.BoundActor, Patch: tallyPatch}, func(_ context.Context, run transactionFunc) error { return run(tx) }, true)
+				changed, err := s.patchProjectMetadata(ctx, db.PatchProjectMetadataIn{ProjectID: params.ProjectID, Actor: params.BoundActor, Patch: tallyPatch}, func(_ context.Context, run transactionFunc) error { return run(tx) }, true)
 				if err != nil {
 					return err
 				}

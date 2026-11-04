@@ -9,7 +9,7 @@ import (
 
 func (s *Store) cronSQL() db.CronSQL {
 	return db.CronSQL{PatchProjectMetadataTx: func(ctx context.Context, tx *sql.Tx, in db.PatchProjectMetadataIn) (db.PatchProjectMetadataOut, error) {
-		return s.patchProjectMetadata(ctx, in, func(_ context.Context, run transactionFunc) error { return run(tx) })
+		return s.patchProjectMetadata(ctx, in, func(_ context.Context, run transactionFunc) error { return run(tx) }, false)
 	}, PruneGate: func(ctx context.Context, tx *sql.Tx, project db.Project) error {
 		if err := ensureFederatedSpokeUnsupportedTx(ctx, tx, project.ID); err != nil {
 			return err
