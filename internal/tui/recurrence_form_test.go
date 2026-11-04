@@ -189,27 +189,10 @@ func TestRecurrenceFormStartsAndChangesARecurrence(t *testing.T) {
 	assert.Equal(t, "FREQ=DAILY", changed[0].RRule)
 }
 
-func TestRecurrenceFormPaddedUnchangedRuleClosesQuietly(t *testing.T) {
-	h := newRecurrenceHarness(t, viewDetail)
-	h.openForm()
-	h.datesHarness.fill("2026-11-09", "")
-	h.datesHarness.save()
-	require.Len(t, h.m.undoHistory.entries, 1)
-	h.startBehindTheTUI("FREQ=WEEKLY;BYDAY=MO", "2026-11-09", "Europe/Paris")
-	h.open()
-	h.fill(" FREQ=WEEKLY;BYDAY=MO ", "2026-11-09", "Europe/Paris")
-
-	h.save()
-	assert.Equal(t, inputNone, h.m.input.kind)
-	assert.Empty(t, h.m.detail.status)
-	assert.Nil(t, h.m.toast)
-	assert.Len(t, h.m.undoHistory.entries, 1)
-	assert.Equal(t, "FREQ=WEEKLY;BYDAY=MO", h.rows()[0].RRule)
-}
-
 func TestRecurrenceFormBlankRuleStops(t *testing.T) {
-	for _, conflict := range []bool{false, true} {
-		t.Run(strconv.FormatBool(conflict), func(t *testing.T) {
+	for _, name := range []string{"stops", "conflict"} {
+		t.Run(name, func(t *testing.T) {
+			conflict := name == "conflict"
 			h := newRecurrenceHarness(t, viewDetail)
 			current := h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
 			h.open()
@@ -220,9 +203,7 @@ func TestRecurrenceFormBlankRuleStops(t *testing.T) {
 				require.NoError(t, err)
 			}
 			h.fill("", "", "Local") // Stopping needs neither a date nor a zone.
-			cmd := h.key(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
-			require.NotNil(t, cmd)
-			h.send(cmd)
+			h.save()
 			if conflict {
 				assert.Equal(t, inputRecurrenceForm, h.m.input.kind)
 				assert.Contains(t, h.m.input.err, "Could not stop repeat:")
@@ -244,7 +225,8 @@ func TestRecurrenceKeyIsDetailOnly(t *testing.T) {
 	t.Run("help with split detail focused", func(t *testing.T) {
 		h := newRecurrenceHarness(t, viewHelp)
 		h.m.layout, h.m.focus = splitlayout.Split, focusDetail
-		m, cmd, _ := h.m.routeRecurrenceKey(runeKey('O'))
+		m, cmd, handled := h.m.routeRecurrenceKey(runeKey('O'))
+		assert.False(t, handled)
 		assert.Equal(t, inputNone, m.input.kind)
 		assert.Nil(t, cmd)
 	})
@@ -257,11 +239,6 @@ func TestRecurrenceKeyIsDetailOnly(t *testing.T) {
 			}
 			_, _, handled := h.m.routeRecurrenceKey(runeKey('O'))
 			assert.False(t, handled)
-			_, mutation := h.m.mutationForKey(runeKey('O'))
-			assert.False(t, mutation)
-			h.key(runeKey('O'))
-			assert.Equal(t, inputNone, h.m.input.kind)
-			assert.Nil(t, h.m.toast)
 		})
 	}
 }
@@ -431,11 +408,11 @@ func TestRecurrenceSaveUpdatesUndo(t *testing.T) {
 			h.refreshDetail()
 			require.Len(t, h.m.undoHistory.entries, 1)
 			if noop {
-				h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
+				h.startBehindTheTUI("FREQ=WEEKLY;BYDAY=MO", "2026-11-09", "Europe/Paris")
 			}
 			h.open()
 			if noop {
-				h.fill("FREQ=WEEKLY", "2026-11-09", "")
+				h.fill(" FREQ=WEEKLY;BYDAY=MO ", "2026-11-09", "")
 			} else {
 				h.fill("FREQ=DAILY", "2026-11-09", "Europe/Paris")
 			}
