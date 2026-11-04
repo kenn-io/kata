@@ -186,16 +186,15 @@ func policyBoundaryScenarios(d Declaration) []Scenario {
 	start := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
 	// These are already-enumerated pending values, so caps are tested without
 	// depending on the reference's bounded scan or on a native batch limit.
-	pendingCase := func(name, catchup string, created, now, through time.Time, pending []time.Time) {
-		definition := fmt.Appendf(nil, `{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"interval","interval_seconds":1},"action":{"kind":"execute","prompt":"Inspect"},"issue":{"kind":"per-run","title":"Inspection"},"overlap":"allow","catchup":%q,"grace_seconds":172800}`, catchup)
+	pendingCase := func(name, catchup string, grace int64, created, now, through time.Time, pending []time.Time) {
+		definition := fmt.Appendf(nil, `{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"interval","interval_seconds":1},"action":{"kind":"execute","prompt":"Inspect"},"issue":{"kind":"per-run","title":"Inspection"},"overlap":"allow","catchup":%q,"grace_seconds":%d}`, catchup, grace)
 		in := PlanInput{Adapter: "example-adapter", Job: Job{CreatedAt: created, DefinitionEventUID: "01ARZ3NDEKTSV4RRFFQ69G5FAB", Definition: definition}, InstalledAt: created, Now: now, Checkpoint: &Checkpoint{Through: through, DefinitionEventUID: "01ARZ3NDEKTSV4RRFFQ69G5FAB", Pending: pending}}
 		scenarios = append(scenarios, Scenario{Name: name, Steps: []Decision{{Plan: &in}}})
 	}
 	if d.ToleranceSeconds > 0 {
 		now := start.AddDate(0, 0, 1)
 		boundary := now.Add(-time.Duration(1+d.ToleranceSeconds) * time.Second)
-		pendingCase("schedule/policy-tolerance-boundary", "skip", start, now, now, []time.Time{boundary.Add(-time.Second), boundary})
-		scenarios[len(scenarios)-1].Steps[0].Plan.Job.Definition = jsontext.Value(`{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"interval","interval_seconds":1},"action":{"kind":"execute","prompt":"Inspect"},"issue":{"kind":"per-run","title":"Inspection"},"overlap":"allow","catchup":"skip","grace_seconds":1}`)
+		pendingCase("schedule/policy-tolerance-boundary", "skip", 1, start, now, now, []time.Time{boundary.Add(-time.Second), boundary})
 	}
 	if d.CatchupLimit > 0 {
 		now := start.AddDate(0, 0, 1)
@@ -203,12 +202,12 @@ func policyBoundaryScenarios(d Declaration) []Scenario {
 		for i := range pending {
 			pending[i] = now.Add(time.Duration(i+1) * time.Second)
 		}
-		pendingCase("catchup/policy-count-boundary", "skip", now.Add(-time.Second), now, pending[len(pending)-1], pending)
+		pendingCase("catchup/policy-count-boundary", "skip", 172800, now.Add(-time.Second), now, pending[len(pending)-1], pending)
 	}
 	if d.CatchupWindowSeconds > 0 {
 		now := start.AddDate(0, 0, 2)
 		boundary := now.Add(-time.Duration(d.CatchupWindowSeconds) * time.Second)
-		pendingCase("catchup/policy-age-window-boundary", "all", boundary.Add(-2*time.Second), now, now, []time.Time{boundary.Add(-time.Second), boundary})
+		pendingCase("catchup/policy-age-window-boundary", "all", 172800, boundary.Add(-2*time.Second), now, now, []time.Time{boundary.Add(-time.Second), boundary})
 	}
 	if d.FailurePolicy == "stop" {
 		offers := map[string][]Attempt{"a": {{StartedAt: start, EndedAt: start, Status: "succeeded"}}, "b": {{StartedAt: start, EndedAt: start, Status: "failed"}}}

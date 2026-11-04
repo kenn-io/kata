@@ -667,7 +667,8 @@ attempts, never unknown or successful ones. All attempts share one run UID.
 Dependencies MUST succeed before a dependent starts. The declared
 `failure_policy` selects the branch behavior:
 `continue` permits independent branches after terminal failure; `stop` skips
-not-yet-started independent work. Already-started independent branches and
+not-yet-started independent work, including starts exactly at the terminal failure
+instant. Already-started independent branches, the triggering failure and
 completed prerequisites retain their results, including equal-time successful
 prerequisites. A failure still eligible for retry is not terminal.
 
