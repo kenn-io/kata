@@ -10,4 +10,12 @@ export type ListCronRunsParams = {
    */
   limit?: number
   before_uid?: string
+  status?: string[]
+  issue_uid?: string
+  executor_label?: string
+  teammate?: string
+  /**
+   * Inclusive recording time (created_at), as an RFC 3339 instant
+   */
+  since?: string
 }

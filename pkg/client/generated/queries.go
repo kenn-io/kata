@@ -24,6 +24,29 @@ type AuditClosesQuery struct {
 	NoEvidence *bool   `json:"no_evidence,omitempty"`
 }
 
+type ListAllCronJobsQuery struct {
+	ProjectIds     []int64 `json:"project_ids,omitempty"`
+	IncludeDeleted *bool   `json:"include_deleted,omitempty"`
+}
+
+type ListAllCronRunsQuery struct {
+	ProjectIds    []int64  `json:"project_ids,omitempty"`
+	JobUID        *string  `json:"job_uid,omitempty"`
+	Limit         *int64   `json:"limit,omitempty" validate:"omitempty,gte=0,lte=100"`
+	BeforeUID     *string  `json:"before_uid,omitempty"`
+	Status        []string `json:"status,omitempty"`
+	IssueUID      *string  `json:"issue_uid,omitempty"`
+	ExecutorLabel *string  `json:"executor_label,omitempty"`
+	Teammate      *string  `json:"teammate,omitempty"`
+
+	// Since Inclusive recording time (created_at), as an RFC 3339 instant
+	Since *string `json:"since,omitempty"`
+}
+
+func (l ListAllCronRunsQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(l))
+}
+
 type DigestGlobalQuery struct {
 	Since string   `json:"since" validate:"required"`
 	Until *string  `json:"until,omitempty"`
@@ -151,9 +174,16 @@ type ListCronJobsQuery struct {
 }
 
 type ListCronRunsQuery struct {
-	JobUID    *string `json:"job_uid,omitempty"`
-	Limit     *int64  `json:"limit,omitempty" validate:"omitempty,gte=0,lte=100"`
-	BeforeUID *string `json:"before_uid,omitempty"`
+	JobUID        *string  `json:"job_uid,omitempty"`
+	Limit         *int64   `json:"limit,omitempty" validate:"omitempty,gte=0,lte=100"`
+	BeforeUID     *string  `json:"before_uid,omitempty"`
+	Status        []string `json:"status,omitempty"`
+	IssueUID      *string  `json:"issue_uid,omitempty"`
+	ExecutorLabel *string  `json:"executor_label,omitempty"`
+	Teammate      *string  `json:"teammate,omitempty"`
+
+	// Since Inclusive recording time (created_at), as an RFC 3339 instant
+	Since *string `json:"since,omitempty"`
 }
 
 func (l ListCronRunsQuery) Validate() error {

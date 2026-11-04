@@ -117,6 +117,38 @@ components:
         - identity
         - kind
       type: object
+    AllCronJobsResponseBody:
+      properties:
+        jobs:
+          items:
+            $ref: "#/components/schemas/CronJob"
+          type: array
+        projects:
+          items:
+            $ref: "#/components/schemas/CronFleetProject"
+          type: array
+      required:
+        - jobs
+        - projects
+      type: object
+    AllCronRunsResponseBody:
+      properties:
+        filters:
+          $ref: "#/components/schemas/CronRunFilters"
+        next_before_uid:
+          type: string
+        projects:
+          items:
+            $ref: "#/components/schemas/CronFleetProject"
+          type: array
+        runs:
+          items:
+            $ref: "#/components/schemas/CronRun"
+          type: array
+      required:
+        - runs
+        - projects
+      type: object
     ArtifactIdentity:
       properties:
         dimensions:
@@ -1060,6 +1092,20 @@ components:
       required:
         - expected_event_uid
       type: object
+    CronFleetProject:
+      properties:
+        id:
+          format: int64
+          type: integer
+        name:
+          type: string
+        uid:
+          type: string
+      required:
+        - id
+        - uid
+        - name
+      type: object
     CronJob:
       properties:
         author:
@@ -1261,6 +1307,24 @@ components:
         - created_at
         - updated_at
       type: object
+    CronRunFilters:
+      properties:
+        executor_label:
+          type: string
+        issue_uid:
+          type: string
+        job_uid:
+          type: string
+        since:
+          format: date-time
+          type: string
+        status:
+          items:
+            type: string
+          type: array
+        teammate:
+          type: string
+      type: object
     CronRunResponseBody:
       properties:
         run:
@@ -1270,6 +1334,8 @@ components:
       type: object
     CronRunsResponseBody:
       properties:
+        filters:
+          $ref: "#/components/schemas/CronRunFilters"
         next_before_uid:
           type: string
         runs:
@@ -7028,7 +7094,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.38.0
+  version: 0.39.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -7231,6 +7297,108 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ExternalFieldMappingOut"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/cron/jobs:
+    get:
+      operationId: listAllCronJobs
+      parameters:
+        - explode: true
+          in: query
+          name: project_ids
+          schema:
+            items:
+              format: int64
+              type: integer
+            type: array
+        - explode: false
+          in: query
+          name: include_deleted
+          schema:
+            type: boolean
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AllCronJobsResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/cron/runs:
+    get:
+      operationId: listAllCronRuns
+      parameters:
+        - explode: true
+          in: query
+          name: project_ids
+          schema:
+            items:
+              format: int64
+              type: integer
+            type: array
+        - explode: false
+          in: query
+          name: job_uid
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            format: int64
+            maximum: 100
+            minimum: 0
+            type: integer
+        - explode: false
+          in: query
+          name: before_uid
+          schema:
+            type: string
+        - explode: true
+          in: query
+          name: status
+          schema:
+            items:
+              type: string
+            type: array
+        - explode: false
+          in: query
+          name: issue_uid
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: executor_label
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: teammate
+          schema:
+            type: string
+        - description: Inclusive recording time (created_at), as an RFC 3339 instant
+          explode: false
+          in: query
+          name: since
+          schema:
+            description: Inclusive recording time (created_at), as an RFC 3339 instant
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AllCronRunsResponseBody"
           description: OK
         default:
           content:
@@ -8512,6 +8680,35 @@ paths:
           in: query
           name: before_uid
           schema:
+            type: string
+        - explode: true
+          in: query
+          name: status
+          schema:
+            items:
+              type: string
+            type: array
+        - explode: false
+          in: query
+          name: issue_uid
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: executor_label
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: teammate
+          schema:
+            type: string
+        - description: Inclusive recording time (created_at), as an RFC 3339 instant
+          explode: false
+          in: query
+          name: since
+          schema:
+            description: Inclusive recording time (created_at), as an RFC 3339 instant
             type: string
       responses:
         "200":
