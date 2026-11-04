@@ -18,11 +18,11 @@ var ErrInvalid = errors.New("invalid cron document")
 
 func invalid(message string) error { return fmt.Errorf("%w: %s", ErrInvalid, message) }
 
-func decode(input []byte, out any, limit int, options ...json.Options) error {
+func decode(input []byte, out any, limit int) error {
 	if len(input) > limit {
 		return invalid("document exceeds size limit")
 	}
-	if err := json.Unmarshal(input, out, json.JoinOptions(options...), json.RejectUnknownMembers(true)); err != nil {
+	if err := json.Unmarshal(input, out, json.RejectUnknownMembers(true)); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
 	return nil
@@ -39,8 +39,8 @@ func ParseJob(input []byte) (JobDefinition, error) {
 
 // ParseWorkflow strictly decodes and validates one bounded workflow document.
 func ParseWorkflow(input []byte) (WorkflowDefinition, error) {
-	workflow, err := DecodeWorkflowForWrite(input)
-	if err != nil {
+	var workflow WorkflowDefinition
+	if err := decode(input, &workflow, DefinitionLimit); err != nil {
 		return workflow, err
 	}
 	return workflow, workflow.Validate()

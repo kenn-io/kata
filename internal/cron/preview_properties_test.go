@@ -61,7 +61,7 @@ func normalizationCandidate(ht *hegel.T, workflow bool) []byte {
 
 func TestCronValidationParserAgreement(t *testing.T) {
 	for _, raw := range []string{`null`, `[]`, `1`, `{"unknown":1}`, `{`} {
-		_, normalized, err := Normalize([]byte(raw), DecodeJobForWrite)
+		_, normalized, err := Normalize([]byte(raw), DecodeJob)
 		require.Error(t, err)
 		require.Empty(t, normalized)
 	}
@@ -72,10 +72,10 @@ func TestCronValidationParserAgreement(t *testing.T) {
 			var want, got error
 			if workflow {
 				_, want = ParseWorkflow(raw)
-				_, _, got = Normalize(raw, DecodeWorkflowForWrite)
+				_, _, got = Normalize(raw, DecodeWorkflow)
 			} else {
 				_, want = ParseJob(raw)
-				_, _, got = Normalize(raw, DecodeJobForWrite)
+				_, _, got = Normalize(raw, DecodeJob)
 			}
 			require.Equal(ht, want == nil, got == nil, "workflow=%t raw=%s", workflow, raw)
 		}
@@ -87,7 +87,7 @@ func TestCronValidationPreservesInput(t *testing.T) {
 		job := drawPreviewJob(ht)
 		raw, err := json.Marshal(job)
 		require.NoError(ht, err)
-		_, normalized, err := Normalize(raw, DecodeJobForWrite)
+		_, normalized, err := Normalize(raw, DecodeJob)
 		require.NoError(ht, err)
 		parsed, err := ParseJob(normalized)
 		require.NoError(ht, err)
@@ -124,7 +124,7 @@ func TestCronValidationOpaqueNumberSpelling(t *testing.T) {
 		require.NoError(ht, err)
 		// Decoded documents retain normalized fields even if a value fails
 		// validation (native options or an overflowing option number).
-		_, normalized, _ := Normalize(raw, DecodeJobForWrite)
+		_, normalized, _ := Normalize(raw, DecodeJob)
 		require.NotEmpty(ht, normalized)
 		var fields map[string]jsontext.Value
 		require.NoError(ht, json.Unmarshal(normalized, &fields))

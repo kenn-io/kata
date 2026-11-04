@@ -71,26 +71,6 @@ func TestCronValidateOpaqueNumbers(t *testing.T) {
 			require.Contains(t, raw, literal)
 		}
 	}
-	for _, enabled := range []string{"missing", "null", "false", "true"} {
-		definition := cronDefinition()
-		delete(definition, "enabled")
-		switch enabled {
-		case "null":
-			definition["enabled"] = nil
-		case "false":
-			definition["enabled"] = false
-		case "true":
-			definition["enabled"] = true
-		}
-		result := cronOK(t, f.session, "cron_job_validate", map[string]any{"name": "Inspect", "definition": definition})
-		savable := enabled == "false" || enabled == "true"
-		require.Equal(t, savable, result["valid"])
-		if !savable {
-			failure := result["errors"].([]any)[0].(map[string]any)
-			require.Equal(t, "document", failure["stage"])
-			require.Contains(t, failure["message"], "enabled")
-		}
-	}
 
 	after, err := f.store.MaxEventID(t.Context())
 	require.NoError(t, err)
