@@ -216,6 +216,13 @@ func TestDeleteReachesEverySavedView(t *testing.T) {
 			h.m = typeString(h.m, "DELETE "+h.qualified(target))
 			refresh := h.finish(h.enter())
 			assertNoDeletedView(t, h.m, target.UID)
+			if context == "split detail" {
+				assert.Equal(t, focusList, h.m.focus, "delete returns focus to the list before refresh")
+				selected, ok := h.m.list.targetRow()
+				require.True(t, ok)
+				require.NotNil(t, h.m.detail.issue, "delete starts loading the neighbouring row before refresh")
+				assert.Equal(t, selected.UID, h.m.detail.issue.UID)
+			}
 			if context == "Attention detail" {
 				require.Len(t, h.m.attention.rows, 2)
 				h.m = h.drain(h.enter())
@@ -235,7 +242,6 @@ func TestDeleteReachesEverySavedView(t *testing.T) {
 				assert.Equal(t, viewAttention, h.m.view)
 				assertHelpItemPresent(t, flattenHelpRows(attentionHelpRows(h.m)), helplayout.HelpItem{Key: "u", Description: "undo"})
 			case "split detail":
-				assert.Equal(t, focusList, h.m.focus)
 				selected, ok := h.m.list.targetRow()
 				require.True(t, ok)
 				require.NotNil(t, h.m.detail.issue)
@@ -253,12 +259,6 @@ func TestDeleteReachesEverySavedView(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestDeleteHintWaitsForLoadedDetail(t *testing.T) {
-	m := initialModel(Options{})
-	m.view = viewDetail
-	assertHelpItemAbsent(t, flattenHelpRows(m.helpRows()), helplayout.HelpItem{Key: "X", Description: "delete"})
 }
 
 // Returning after a delete must refetch the saved parent and reject older reads.
@@ -291,9 +291,12 @@ func TestDeleteInvalidatesSavedRelations(t *testing.T) {
 			h.key(runeKey('X'))
 			require.Equal(t, inputDeleteForm, h.m.input.kind)
 			h.m = typeString(h.m, "DELETE "+h.qualified(child))
-			refresh := h.finish(h.enter())
+			deleted := h.finish(h.enter())
 			assertNoDeletedView(t, h.m, child.UID)
+			var refresh tea.Cmd
 			switch route {
+			case "Back":
+				refresh = deleted
 			case "Inbox list", "Inbox detail":
 				refresh = h.key(runeKey('I'))
 			case "Attention list", "Attention detail":
@@ -305,7 +308,11 @@ func TestDeleteInvalidatesSavedRelations(t *testing.T) {
 			assertNoDeletedView(t, h.m, child.UID)
 			assert.NotContains(t, stripANSI(h.m.detail.View(120, 40, h.m.chrome())), "Second")
 			h.m = h.drain(refresh)
-			if h.m.view == viewDetail {
+			switch route {
+			case "Inbox list", "Attention list":
+				require.Equal(t, viewList, h.m.view)
+			case "Back", "Inbox detail", "Attention detail":
+				require.Equal(t, viewDetail, h.m.view)
 				require.NotNil(t, h.m.detail.issue)
 				assert.Equal(t, parent.UID, h.m.detail.issue.UID)
 				assert.Empty(t, h.m.detail.children)
@@ -500,45 +507,35 @@ func TestUndoOfADelete(t *testing.T) {
 
 func TestDeleteKeyIsOfferedOnlyToCredentialsThatCanDelete(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		view    viewID
-		scoped  bool
-		context string
+		name     string
+		view     viewID
+		scoped   bool
+		unloaded bool
 	}{
 		{name: "unscoped list", view: viewList},
 		{name: "unscoped detail", view: viewDetail},
 		{name: "scoped list", view: viewList, scoped: true},
 		{name: "scoped detail", view: viewDetail, scoped: true},
-		{name: "Inbox", view: viewList, context: "Inbox"},
-		{name: "Attention", view: viewList, context: "Attention"},
+		{name: "detail with no issue loaded", view: viewDetail, unloaded: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newDeleteHarness(t, tc.view)
 			target := h.issues[0]
-			switch tc.context {
-			case "Inbox":
-				h.openInbox()
-				require.True(t, h.m.scope.inbox)
-				require.NotNil(t, h.m.inboxReturn)
-			case "Attention":
-				h.m.attention.returnContext = &attentionReturnContext{detail: h.m.detail}
-			}
 			h.selectIssue(target.UID)
 			if tc.view == viewDetail {
 				h.m.focus = focusDetail
 				require.NotNil(t, h.m.detail.issue)
+				if tc.unloaded {
+					h.m.detail = newDetailModel()
+				}
 			}
 			h.m.authCapabilitiesRequired, h.m.authCapabilitiesReady = true, true
 			h.m.issueScoped, h.m.scopedWritable = tc.scoped, tc.scoped
 
-			hidden := tc.scoped
 			hint := helplayout.HelpItem{Key: "X", Description: "delete"}
-			if hidden {
+			if tc.scoped || tc.unloaded {
 				assertHelpItemAbsent(t, flattenHelpRows(h.m.helpRows()), hint)
-			}
-			if hidden {
 				assertHelpItemAbsent(t, flattenHelpRows(h.m.splitHelpRows()), hint)
-				assertHelpItemAbsent(t, flattenHelpRows(listHelpRows(h.m.list, h.m.chrome())), hint)
 			}
 			for _, section := range helpSections(h.m.helpKeymap()) {
 				for _, item := range section.rows {
@@ -548,16 +545,17 @@ func TestDeleteKeyIsOfferedOnlyToCredentialsThatCanDelete(t *testing.T) {
 			helpModel := h.m
 			helpModel.view, helpModel.width = viewHelp, 120
 			helpText := stripANSI(helpModel.viewBody())
-			if hidden {
+			if tc.scoped {
+				assertHelpItemAbsent(t, flattenHelpRows(listHelpRows(h.m.list, h.m.chrome())), hint)
 				assert.NotContains(t, helpText, "delete issue")
 			} else {
 				assert.Contains(t, helpText, "delete issue")
 			}
 
 			cmd := h.key(runeKey('X'))
-			if hidden {
+			if tc.scoped || tc.unloaded {
 				assert.Nil(t, cmd)
-				assert.Equal(t, inputNone, h.m.input.kind, "X requires credentials that can delete")
+				assert.Equal(t, inputNone, h.m.input.kind, "X requires delete credentials and a loaded issue")
 				assert.Equal(t, tc.view, h.m.view)
 				assert.Equal(t, target.UID, h.m.list.selectedUID)
 				assert.False(t, h.isDeleted(target.UID))
@@ -583,23 +581,21 @@ func TestDeleteSavingEscKeepsResult(t *testing.T) {
 }
 
 func TestDeleteFromSplitListReplacesRetainedDetail(t *testing.T) {
-	t.Run("delete result replaces retained detail", func(t *testing.T) {
-		h := newDeleteHarness(t, viewDetail)
-		parent, child := h.issues[0], h.issues[1]
-		h.focusChild(parent, child)
-		require.Len(t, h.m.detail.children, 1)
-		h.m.view = viewList
-		h.m, _ = updateModel(h.m, tea.WindowSizeMsg{Width: 180, Height: 40})
-		require.Equal(t, splitlayout.Split, h.m.layout)
-		h.m.focus = focusList
-		h.selectIssue(child.UID)
+	h := newDeleteHarness(t, viewDetail)
+	parent, child := h.issues[0], h.issues[1]
+	h.focusChild(parent, child)
+	require.Len(t, h.m.detail.children, 1)
+	h.m.view = viewList
+	h.m, _ = updateModel(h.m, tea.WindowSizeMsg{Width: 180, Height: 40})
+	require.Equal(t, splitlayout.Split, h.m.layout)
+	h.m.focus = focusList
+	h.selectIssue(child.UID)
 
-		h.key(runeKey('X'))
-		h.m = typeString(h.m, "DELETE "+h.qualified(child))
-		h.m = h.drain(h.enter())
+	h.key(runeKey('X'))
+	h.m = typeString(h.m, "DELETE "+h.qualified(child))
+	h.m = h.drain(h.enter())
 
-		require.NotNil(t, h.m.detail.issue)
-		assert.Equal(t, parent.UID, h.m.detail.issue.UID)
-		assert.Empty(t, h.m.detail.children, "the neighbouring parent loads without the deleted child")
-	})
+	require.NotNil(t, h.m.detail.issue)
+	assert.Equal(t, parent.UID, h.m.detail.issue.UID)
+	assert.Empty(t, h.m.detail.children, "the neighbouring parent loads without the deleted child")
 }
