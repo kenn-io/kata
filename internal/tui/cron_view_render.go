@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/mattn/go-runewidth"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/pkg/client/generated"
 	"go.kenn.io/kit/tui/helplayout"
 	"go.kenn.io/kit/tui/termtext"
@@ -16,7 +17,16 @@ import (
 
 var cronTabNames = [...]string{"kata カタ", "jobs", "runs", "workflows"}
 
+type cronLineKind uint8
+
+const (
+	cronFieldLine cronLineKind = iota
+	cronWrapLine
+	cronHeadingLine
+)
+
 type cronLine struct {
+	kind   cronLineKind
 	text   string
 	target cronRef
 }
@@ -154,7 +164,7 @@ func cronScreen(m Model) (string, string, []cronLine) {
 	lines := []cronLine{}
 	add := func(uid string, cells []string) {
 		if cronMatches(sanitizeForLine(strings.Join(cells, " ")), m.cron.lists[m.cron.tab].query) {
-			lines = append(lines, cronLine{format(cells), cronRef{m.cron.tab, uid}})
+			lines = append(lines, cronLine{text: format(cells), target: cronRef{m.cron.tab, uid}})
 		}
 	}
 	if p := m.cron.data; p != nil {
@@ -166,7 +176,7 @@ func cronScreen(m Model) (string, string, []cronLine) {
 			}
 		case cronRuns:
 			for _, r := range runs {
-				add(r.UID, []string{r.Status, cronDefinitionName(*p, deref(r.JobUID), false), deref(r.OccurrenceKey), cronTime(r.StartedAt), cronTime(r.EndedAt), deref(r.Summary.Message)})
+				add(r.UID, []string{r.Status, cronDefinitionName(*p, deref(r.JobUID), false), deref(r.OccurrenceKey), cronTime(r.StartedAt), cronTime(r.EndedAt), cronSummaryPreview(r.Summary)})
 			}
 		case cronWorkflows:
 			for _, w := range p.workflows {
@@ -191,17 +201,35 @@ type cronDoc struct {
 }
 
 func (d *cronDoc) text(value string, target cronRef) {
-	for _, line := range termtext.Wrap(sanitizeForDisplay(value), max(d.width, 1)) {
+	// Lip Gloss expands tabs to four spaces. Do it before measuring and wrapping.
+	value = strings.ReplaceAll(sanitizeForDisplay(value), "\t", "    ")
+	value = strings.Join(termtext.Wrap(value, max(d.width, 1)), "\n")
+	for line := range strings.SplitSeq(runewidth.Wrap(value, max(d.width, 1)), "\n") {
 		d.lines = append(d.lines, cronLine{text: line, target: target})
 	}
 }
 func (d *cronDoc) field(label, value string) {
 	if value != "" {
-		d.text(fmt.Sprintf("%-*s %s", d.labelWidth, label+":", value), cronRef{})
+		pad := fmt.Sprintf("%-*s ", d.labelWidth, label+":")
+		v := cronDoc{width: d.width - len(pad)}
+		v.text(value, cronRef{})
+		kind := cronFieldLine
+		for _, line := range v.lines {
+			d.lines = append(d.lines, cronLine{text: pad + line.text, kind: kind})
+			pad, kind = strings.Repeat(" ", len(pad)), cronWrapLine
+		}
+	}
+}
+func (d *cronDoc) heading(label string) {
+	start := len(d.lines)
+	d.text(label, cronRef{})
+	for i := start; i < len(d.lines); i++ {
+		d.lines[i].kind = cronHeadingLine
 	}
 }
 func (d *cronDoc) section(label string) {
-	d.text("\n"+label, cronRef{})
+	d.text("", cronRef{})
+	d.heading(label)
 }
 func (d *cronDoc) json(value any) {
 	b, err := json.Marshal(value, jsontext.WithIndent("  "))
@@ -257,7 +285,19 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			}
 			name = r.UID
 			d.field("Status", r.Status)
+			if reason, ok := cronSummaryReason(r.Summary); ok {
+				if cron.DropReason(reason) {
+					reason += " (not launched)"
+				}
+				d.field("Reason", reason)
+			}
 			d.field("Occurrence", deref(r.OccurrenceKey))
+			if trigger, derived := cron.RunTrigger(cron.Summary{Trigger: deref(r.Summary.Trigger)}, r.OccurrenceKey, r.StartedAt); trigger != "" {
+				if derived {
+					trigger += " (derived)"
+				}
+				d.field("Trigger", trigger)
+			}
 			d.field("Started", cronTime(r.StartedAt))
 			d.field("Ended", cronTime(r.EndedAt))
 			d.field("Recorded", r.CreatedAt.Format(time.RFC3339))
@@ -265,11 +305,10 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			d.field("Executor", ownerText(r.ExecutorLabel))
 			d.field("Teammate", ownerText(r.Teammate))
 			d.field("Issue", deref(r.IssueUID))
-			if r.Summary.InputTokens != nil || r.Summary.OutputTokens != nil {
-				d.field("Tokens", fmt.Sprintf("%d input, %d output", deref(r.Summary.InputTokens), deref(r.Summary.OutputTokens)))
-			}
+			d.field("Log ref", deref(r.Summary.LogRef))
+			cronSummaryDetails(&d, r.Summary)
 			d.section("Message")
-			d.text(deref(r.Summary.Message), cronRef{})
+			d.text(cronSummaryMessage(r.Summary), cronRef{})
 			d.section("Recorded with")
 			cronDefinitionLink(&d, p, deref(r.JobUID), deref(r.DefinitionEventUID), false)
 			cronDefinitionLink(&d, p, deref(r.WorkflowUID), deref(r.WorkflowDefinitionEventUID), true)
@@ -313,6 +352,81 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 	}
 	return cronTabNames[ref.kind] + " / " + sanitizeForLine(name), "", d.lines
 }
+func cronSummaryReason(s generated.SummaryResponse) (string, bool) {
+	return cron.RunReason(cron.Summary{Reason: deref(s.Reason), Message: deref(s.Message)})
+}
+
+// Hide a legacy reason line only when redundant; conflicting evidence remains visible.
+func cronSummaryMessage(s generated.SummaryResponse) string {
+	message := deref(s.Message)
+	line, rest, _ := strings.Cut(message, "\n")
+	if reason, ok := cronSummaryReason(s); ok && line == "reason: "+reason {
+		return rest
+	}
+	return message
+}
+func cronSummaryPreview(s generated.SummaryResponse) string {
+	if reason := deref(s.Reason); reason != "" {
+		message := cronSummaryMessage(s)
+		if message == "" {
+			return reason
+		}
+		return reason + " · " + message
+	}
+	return deref(s.Message)
+}
+func cronSummaryDetails(d *cronDoc, s generated.SummaryResponse) {
+	if s.Usage != nil || s.InputTokens != nil || s.OutputTokens != nil {
+		d.section("Usage")
+		if s.InputTokens != nil || s.OutputTokens != nil {
+			d.field("Tokens", fmt.Sprintf("%d input, %d output", deref(s.InputTokens), deref(s.OutputTokens)))
+		}
+	}
+	if u := s.Usage; u != nil {
+		d.field("Model", u.Model)
+		if u.CacheReadTokens != nil || u.CacheWriteTokens != nil {
+			d.field("Cache", fmt.Sprintf("%d read, %d write", deref(u.CacheReadTokens), deref(u.CacheWriteTokens)))
+		}
+		if u.CostMicros != nil {
+			cost := *u.CostMicros
+			fraction := strings.TrimRight(fmt.Sprintf("%06d", cost%1000000), "0")
+			fraction += strings.Repeat("0", max(2-len(fraction), 0))
+			d.field("Cost", fmt.Sprintf("%d.%s %s", cost/1000000, fraction, deref(u.Currency)))
+		}
+	}
+	if s.Steps != nil {
+		d.section(fmt.Sprintf("Steps (%d)", len(s.Steps)))
+		for i, step := range s.Steps {
+			if i > 0 {
+				d.text("", cronRef{})
+			}
+			d.heading(step.Key + " · " + step.Status)
+			fields := cronDoc{width: max(d.width-2, 1), labelWidth: d.labelWidth}
+			if deref(step.Attempts) > 0 {
+				fields.field("Attempts", fmt.Sprint(deref(step.Attempts)))
+			}
+			if step.ExitCode != nil {
+				fields.field("Exit", fmt.Sprint(*step.ExitCode))
+			}
+			fields.field("Reason", deref(step.Reason))
+			start, startErr := time.Parse(time.RFC3339Nano, deref(step.StartedAt))
+			end, endErr := time.Parse(time.RFC3339Nano, deref(step.EndedAt))
+			duration := end.Sub(start)
+			if startErr == nil && endErr == nil && start.Add(duration).Equal(end) {
+				fields.field("Duration", duration.String())
+			} else {
+				fields.field("Started", deref(step.StartedAt))
+				fields.field("Ended", deref(step.EndedAt))
+			}
+			fields.field("Message", deref(step.Message))
+			for _, line := range fields.lines {
+				line.text = "  " + line.text
+				d.lines = append(d.lines, line)
+			}
+		}
+	}
+}
+
 func cronDefinitionLink(d *cronDoc, p cronData, uid, revision string, workflow bool) {
 	if uid == "" {
 		return
@@ -364,7 +478,7 @@ func cronHistory(d *cronDoc, p cronData, ref cronRef) {
 		d.text("no loaded runs", cronRef{})
 	}
 	for _, r := range runs {
-		d.text(r.Status+" · "+r.CreatedAt.Format(time.RFC3339)+" · "+deref(r.Summary.Message), cronRef{cronRuns, r.UID})
+		d.text(r.Status+" · "+r.CreatedAt.Format(time.RFC3339)+" · "+cronSummaryPreview(r.Summary), cronRef{cronRuns, r.UID})
 	}
 }
 
@@ -474,12 +588,20 @@ func renderCron(m Model) string {
 		body = append(body, empty)
 		budget--
 	}
+	stripe := true
+	for _, line := range lines[:start] {
+		stripe = stripe != (line.kind == cronFieldLine)
+	}
 	for i := start; i < end; i++ {
 		line := lines[i]
+		stripe = stripe != (line.kind == cronFieldLine)
 		prefix := "  "
 		style := normalRowStyle
-		if i%2 == 1 {
+		if stripe && strings.TrimSpace(line.text) != "" {
 			style = altRowStyle
+		}
+		if line.kind == cronHeadingLine {
+			style = detailSectionHeaderStyle
 		}
 		if line.target.uid != "" && len(m.cron.stack) > 0 {
 			style = helpKeyStyle
