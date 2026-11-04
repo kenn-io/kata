@@ -3,6 +3,7 @@ package dbtest
 import (
 	"context"
 	"database/sql"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -410,5 +411,23 @@ func checkCronRunTallyConcurrent(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	require.Equal(t, db.CronTallyCounts{Succeeded: 4}, counts.Groups[0].PrunedSinceTracking)
 	require.Equal(t, db.CronRunRetainedCounts{Running: 1}, counts.Groups[0].Retained)
+	return nil
+}
+
+// Contract: a key main allowed under the reserved prefix before tallies
+// existed stays opaque to ordinary project metadata writes.
+func checkCronTallyLegacyMetadataPatch(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	f := newCronTallyFixture(ctx, t, store)
+	_, err := f.q.ExecContext(ctx, `UPDATE projects SET metadata=$1 WHERE id=$2`, `{"cron.tally.external":3}`, f.project.ID)
+	require.NoError(t, err)
+	out, err := store.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{ProjectID: f.project.ID, Actor: "operator", Patch: map[string]jsontext.Value{"area": jsontext.Value(`"ops"`)}})
+	require.NoError(t, err)
+	require.True(t, out.Changed)
+	project, err := store.ProjectByID(ctx, f.project.ID)
+	require.NoError(t, err)
+	var raw map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal([]byte(project.Metadata), &raw))
+	require.Equal(t, map[string]jsontext.Value{"area": jsontext.Value(`"ops"`), "cron.tally.external": jsontext.Value(`3`)}, raw)
 	return nil
 }

@@ -189,12 +189,29 @@ func decodeCronTallyEntry(kind, groupUID string, raw jsontext.Value) (CronTallyE
 // RejectCronTallyPatch fences public metadata APIs, including no-op/deletion
 // patches and malformed suffixes. Internal transaction writers do not call it.
 func RejectCronTallyPatch(patch map[string]jsontext.Value) error {
-	for key := range patch {
-		if strings.HasPrefix(key, CronTallyPrefix) {
-			return cronTallyError("%q is reserved for internal pruning/lifecycle writes", key)
-		}
+	if key, ok := cronTallyPatchKey(patch); ok {
+		return cronTallyError("%q is reserved for internal pruning/lifecycle writes", key)
 	}
 	return nil
+}
+
+// ValidateCronTallyPatch decodes the patched document only when the patch
+// writes the reserved prefix, so ordinary writes keep legacy keys opaque.
+func ValidateCronTallyPatch(patch map[string]jsontext.Value, document JSONBlob) error {
+	if _, ok := cronTallyPatchKey(patch); !ok {
+		return nil
+	}
+	_, err := DecodeCronTallies(document)
+	return err
+}
+
+func cronTallyPatchKey(patch map[string]jsontext.Value) (string, bool) {
+	for key := range patch {
+		if strings.HasPrefix(key, CronTallyPrefix) {
+			return key, true
+		}
+	}
+	return "", false
 }
 
 // ValidateCronTallyEvent validates data only. Direction/grant checks belong at

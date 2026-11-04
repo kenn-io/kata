@@ -293,7 +293,7 @@ func (d *Store) patchProjectMetadataTxReassert(ctx context.Context, tx *sql.Tx, 
 		return out, fmt.Errorf("apply patch: %w", err)
 	}
 
-	if _, err := db.DecodeCronTallies(db.JSONBlob(newBlob)); err != nil {
+	if err := db.ValidateCronTallyPatch(in.Patch, db.JSONBlob(newBlob)); err != nil {
 		return out, err
 	}
 	if _, changed := in.Patch[db.ProjectEmbeddingMetadataKey]; changed {

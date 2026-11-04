@@ -148,7 +148,7 @@ func (s *Store) patchProjectMetadata(ctx context.Context, input db.PatchProjectM
 		if err != nil {
 			return err
 		}
-		if _, err := db.DecodeCronTallies(db.JSONBlob(updated)); err != nil {
+		if err := db.ValidateCronTallyPatch(input.Patch, db.JSONBlob(updated)); err != nil {
 			return err
 		}
 		if _, changed := input.Patch[db.ProjectEmbeddingMetadataKey]; changed {
