@@ -168,7 +168,12 @@ func RunLegacyRelayAdmission(t *testing.T, store db.Storage) {
 					valid := newRemoteEvent(t, fixture.project, &precedingUID, "issue.created", "member", spoke, 899, jsontext.Value(`{"uid":"`+precedingUID+`","title":"Earlier valid creation","author":"member","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z"}`))
 					push.Events = []db.FederationIngestEvent{{SourceEventID: 1, Event: valid}, {SourceEventID: 2, Event: event}}
 				}
-				result, err := store.IngestFederationEvents(db.WithAuthorizedProjects(ctx, []string{fixture.project.UID}), push)
+				authorizedProjects := []string{fixture.project.UID}
+				if mode == "revoked" || mode == "retained" || kind == "unlink" || kind == "composite cleanup" || kind == "parent replacement" {
+					// Accepted cross-project writes still need authority over both endpoints.
+					authorizedProjects = append(authorizedProjects, peerProject.UID)
+				}
+				result, err := store.IngestFederationEvents(db.WithAuthorizedProjects(ctx, authorizedProjects), push)
 				if kind == "malformed evidence" {
 					require.ErrorIs(t, err, db.ErrFederationIngestValidation)
 					return
