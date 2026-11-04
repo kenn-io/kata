@@ -63,3 +63,14 @@ func TestCronTallyConflictHTTP(t *testing.T) {
 		})
 	}
 }
+
+func TestMergeProjectPullOnlyTargetReturnsConflict(t *testing.T) {
+	env := testenv.New(t)
+	source := seedProject(t, env, "source-project")
+	target := seedProject(t, env, "target-project")
+	_, err := env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: target.ID, Role: db.FederationRoleSpoke, HubURL: "https://daemon.example", HubProjectID: 42, HubProjectUID: target.UID, Enabled: true, PushEnabled: false, Actor: "operator"})
+	require.NoError(t, err)
+	response, raw := envDoRaw(t, env, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/merge", target.ID), map[string]any{"source_project_id": source.ID, "actor": "operator"}, nil)
+	require.Equal(t, http.StatusConflict, response.StatusCode, string(raw))
+	require.Contains(t, string(raw), "project_merge_federation_binding")
+}

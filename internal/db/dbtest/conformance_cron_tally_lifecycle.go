@@ -142,8 +142,15 @@ func checkCronTallyImportAndEnable(t *testing.T, store db.Storage, backend Backe
 // potentially overlapping pruning histories or loses source evidence.
 func checkCronTallyLiveMerge(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
-	for _, mode := range []string{"disjoint", "equal", "conflict", "kind collision"} {
+	for _, mode := range []string{"disjoint", "equal", "conflict", "kind collision", "pull-only target"} {
 		source, target := newCronTallyFixture(ctx, t, store), newCronTallyFixture(ctx, t, store)
+		if mode == "pull-only target" {
+			_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: target.project.ID, Role: db.FederationRoleSpoke, HubURL: "https://daemon.example", HubProjectID: 42, HubProjectUID: target.project.UID, Enabled: true, Actor: "operator"})
+			require.NoError(t, err)
+			_, err = store.MergeProjects(ctx, db.MergeProjectsParams{SourceProjectID: source.project.ID, TargetProjectID: target.project.ID, Actor: "operator"})
+			require.ErrorIs(t, err, db.ErrProjectMergeFederationBinding)
+			continue
+		}
 		a, b := tallyLifecycleEntry(source, 9007199254740993), tallyLifecycleEntry(target, 17)
 		switch mode {
 		case "equal", "conflict":
