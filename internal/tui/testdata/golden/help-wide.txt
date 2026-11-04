@@ -32,6 +32,7 @@ o           toggle graph order
 x           close
 r           reopen
 d           set dates
+X           delete issue
 u           undo last issue action
 
 press ? to return

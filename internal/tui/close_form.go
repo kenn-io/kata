@@ -112,7 +112,7 @@ func (m Model) inputMutationAllowed() bool {
 		return true
 	case inputNewIssueForm:
 		return m.mutationAllowed(strings.TrimSpace(m.input.fieldValue(fieldParent)) != "")
-	case inputParentPrompt:
+	case inputParentPrompt, inputDeleteForm:
 		return m.mutationAllowed(false)
 	default:
 		return m.mutationAllowed(true)
