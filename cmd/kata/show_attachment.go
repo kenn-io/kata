@@ -61,7 +61,7 @@ func closeEvidenceForShow(ctx context.Context, hc *http.Client, base string, pid
 			return nil, err
 		}
 		if page.ResetRequired {
-			return nil, fmt.Errorf("issue history requires a reset")
+			return nil, errors.New("could not load issue history; retry")
 		}
 		if after == 0 {
 			if page.EffectiveCloseEventUID != nil {
@@ -135,7 +135,7 @@ func printShowAttachmentEvidence(out io.Writer, b showResponseForCLI) error {
 				}
 				label = fmt.Sprintf("attachment %s: %s · %d bytes%s", e.AttachmentID, frozen.Name, frozen.Size, state)
 			} else {
-				label = "attachment " + e.AttachmentID + " (invalid snapshot)"
+				label = "Invalid attachment details: " + e.AttachmentID
 			}
 		}
 		if _, err := fmt.Fprintln(out, "Evidence: "+textsafe.Line(label)); err != nil {

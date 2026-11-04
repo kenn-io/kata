@@ -27,6 +27,17 @@ func TestPrintShowAttachmentEvidenceOmitsMediaType(t *testing.T) {
 	require.Equal(t, "Evidence: attachment attachment-1: report.pdf · 5 bytes\n", output.String())
 }
 
+func TestPrintShowAttachmentEvidenceInvalidDetails(t *testing.T) {
+	var response showResponseForCLI
+	response.CloseEvidence = []db.Evidence{{
+		Type: "attachment", AttachmentID: "attachment-1",
+		Attachment: &metadata.Attachment{Name: "invalid/name"},
+	}}
+	var output bytes.Buffer
+	require.NoError(t, printShowAttachmentEvidence(&output, response))
+	require.Equal(t, "Evidence: Invalid attachment details: attachment-1\n", output.String())
+}
+
 func TestShowAttachmentHistoryRequiresSubjectAcknowledgement(t *testing.T) {
 	const subject = "01K7E222222222222222222222"
 	for _, ack := range []string{"", "01K7E333333333333333333333"} {
@@ -48,7 +59,7 @@ func TestShowAttachmentHistoryRequiresSubjectAcknowledgement(t *testing.T) {
 func TestShowAttachmentHistoryRejectsResetAndForeignClose(t *testing.T) {
 	const subject = "01K7E222222222222222222222"
 	for _, tc := range []struct{ body, message string }{
-		{`{"events":[],"next_after_id":0,"reset_required":true}`, "issue history requires a reset"},
+		{`{"events":[],"next_after_id":0,"reset_required":true}`, "could not load issue history; retry"},
 		{`{"events":[{"event_id":1,"event_uid":"foreign-close","type":"issue.closed","issue_uid":"01K7E333333333333333333333","payload":{"evidence":[]}}],"next_after_id":1,"reset_required":false,"effective_close_event_uid":"foreign-close"}`, "history includes another issue's events"},
 	} {
 		t.Run(tc.message, func(t *testing.T) {
