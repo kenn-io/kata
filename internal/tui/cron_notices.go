@@ -36,8 +36,17 @@ type cronNoticeTickMsg struct{ conn, scope, gen uint64 }
 
 func (m Model) cronNoticeSync() Model {
 	if m.cronNotices.conn != m.connGen || m.cronNotices.scope != m.scopeGen {
-		m.nextCronNotice++
-		m.cronNotices = cronNoticeState{conn: m.connGen, scope: m.scopeGen, gen: m.nextCronNotice}
+		m = m.cronNoticeReset()
+	}
+	return m
+}
+
+// A failure notice belongs to the scope and connection that observed it.
+func (m Model) cronNoticeReset() Model {
+	m.nextCronNotice++
+	m.cronNotices = cronNoticeState{conn: m.connGen, scope: m.scopeGen, gen: m.nextCronNotice}
+	if m.toast != nil && m.toast.cronFailure {
+		m.toast = nil
 	}
 	return m
 }
@@ -147,11 +156,8 @@ func (m Model) cronNoticeFlush(msg cronNoticeTickMsg) (Model, tea.Cmd) {
 		if r.JobUID != "" {
 			label = "job " + truncate(r.JobUID, 12)
 			if m.cron.data != nil {
-				for _, j := range m.cron.data.jobs {
-					if j.UID == r.JobUID {
-						label = j.Name
-						break
-					}
+				if j := m.cron.data.job(r.JobUID); j != nil {
+					label = j.Name
 				}
 			}
 		}
@@ -190,6 +196,18 @@ func (m Model) cronToast() *toast {
 	}
 	out.text += " · " + hint
 	return &out
+}
+
+// Below other views a failure notice keeps the error severity of the Cron row.
+func (m Model) cronToastLine() string {
+	t := m.cronToast()
+	switch {
+	case t == nil || !t.cronFailure:
+		return renderToast(t)
+	case m.cronStatusNotice() != nil:
+		return ""
+	}
+	return errorStyle.Render(t.text)
 }
 
 // The Cron list shows its failure notice in the error row above help, so the

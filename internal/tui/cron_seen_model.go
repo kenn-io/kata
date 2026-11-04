@@ -64,15 +64,9 @@ func (m Model) cronSeenSync() (Model, tea.Cmd) {
 			m.cronSeen.pending = nil
 		}
 	}
-	if m.cronSeen.err != nil {
-		return m, nil
-	}
-	if !m.cronSeen.ready {
-		// Init owns the single startup read. Update only persists changes once
-		// that read resolves, and cannot accidentally start a second load.
-		return m, nil
-	}
-	if !m.cronSeen.dirty || m.cronSeen.writing {
+	// Init owns the single startup read. Update only persists changes once
+	// that read resolves, and cannot accidentally start a second load.
+	if m.cronSeen.err != nil || !m.cronSeen.ready || !m.cronSeen.dirty || m.cronSeen.writing {
 		return m, nil
 	}
 	m.cronSeen.dirty = false
