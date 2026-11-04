@@ -288,6 +288,94 @@ func (o *MapConnectorFieldRequestOptions) GetHeader() (map[string]string, error)
 	return nil, nil
 }
 
+// ListAllCronJobsRequestOptions is the options needed to make a request to ListAllCronJobs.
+type ListAllCronJobsRequestOptions struct {
+	Query *ListAllCronJobsQuery
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *ListAllCronJobsRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *ListAllCronJobsRequestOptions) GetPathParams() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetQuery returns the query params as a map.
+func (o *ListAllCronJobsRequestOptions) GetQuery() (map[string]any, error) {
+	return runtime.AsMap[any](o.Query)
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *ListAllCronJobsRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *ListAllCronJobsRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
+// ListAllCronRunsRequestOptions is the options needed to make a request to ListAllCronRuns.
+type ListAllCronRunsRequestOptions struct {
+	Query *ListAllCronRunsQuery
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *ListAllCronRunsRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *ListAllCronRunsRequestOptions) GetPathParams() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetQuery returns the query params as a map.
+func (o *ListAllCronRunsRequestOptions) GetQuery() (map[string]any, error) {
+	return runtime.AsMap[any](o.Query)
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *ListAllCronRunsRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *ListAllCronRunsRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
 // DigestGlobalRequestOptions is the options needed to make a request to DigestGlobal.
 type DigestGlobalRequestOptions struct {
 	Query *DigestGlobalQuery

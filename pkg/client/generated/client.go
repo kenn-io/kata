@@ -146,6 +146,12 @@ type ClientInterface interface {
 	MapConnectorField(ctx context.Context, options *MapConnectorFieldRequestOptions, reqEditors ...runtime.RequestEditorFn) (*MapConnectorFieldResponse, error)
 	MapConnectorFieldWithResponse(ctx context.Context, options *MapConnectorFieldRequestOptions, reqEditors ...runtime.RequestEditorFn) (*MapConnectorFieldResp, error)
 
+	ListAllCronJobs(ctx context.Context, options *ListAllCronJobsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListAllCronJobsResponse, error)
+	ListAllCronJobsWithResponse(ctx context.Context, options *ListAllCronJobsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListAllCronJobsResp, error)
+
+	ListAllCronRuns(ctx context.Context, options *ListAllCronRunsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListAllCronRunsResponse, error)
+	ListAllCronRunsWithResponse(ctx context.Context, options *ListAllCronRunsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListAllCronRunsResp, error)
+
 	DigestGlobal(ctx context.Context, options *DigestGlobalRequestOptions, reqEditors ...runtime.RequestEditorFn) (*DigestGlobalResponse, error)
 	DigestGlobalWithResponse(ctx context.Context, options *DigestGlobalRequestOptions, reqEditors ...runtime.RequestEditorFn) (*DigestGlobalResp, error)
 
@@ -1016,6 +1022,146 @@ func (c *Client) MapConnectorField(ctx context.Context, options *MapConnectorFie
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/connectors/{instance}/fields/{kata_field}")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) ListAllCronJobs(ctx context.Context, options *ListAllCronJobsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListAllCronJobsResponse, error) {
+	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"include_deleted": {Style: "form", Explode: &[]bool{false}[0]},
+	}
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/cron/jobs",
+		Method:        "GET",
+		Options:       options,
+		QueryEncoding: queryEncoding,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*ListAllCronJobsResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(ListAllCronJobsErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "ListAllCronJobsErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(ListAllCronJobsResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "ListAllCronJobsResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/cron/jobs")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) ListAllCronRuns(ctx context.Context, options *ListAllCronRunsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListAllCronRunsResponse, error) {
+	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"before_uid":     {Style: "form", Explode: &[]bool{false}[0]},
+		"executor_label": {Style: "form", Explode: &[]bool{false}[0]},
+		"issue_uid":      {Style: "form", Explode: &[]bool{false}[0]},
+		"job_uid":        {Style: "form", Explode: &[]bool{false}[0]},
+		"limit":          {Style: "form", Explode: &[]bool{false}[0]},
+		"since":          {Style: "form", Explode: &[]bool{false}[0]},
+		"teammate":       {Style: "form", Explode: &[]bool{false}[0]},
+	}
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/cron/runs",
+		Method:        "GET",
+		Options:       options,
+		QueryEncoding: queryEncoding,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*ListAllCronRunsResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(ListAllCronRunsErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "ListAllCronRunsErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(ListAllCronRunsResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "ListAllCronRunsResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/cron/runs")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}
@@ -3687,9 +3833,13 @@ func (c *Client) ListCronRuns(ctx context.Context, options *ListCronRunsRequestO
 	var err error
 
 	queryEncoding := map[string]runtime.QueryEncoding{
-		"before_uid": {Style: "form", Explode: &[]bool{false}[0]},
-		"job_uid":    {Style: "form", Explode: &[]bool{false}[0]},
-		"limit":      {Style: "form", Explode: &[]bool{false}[0]},
+		"before_uid":     {Style: "form", Explode: &[]bool{false}[0]},
+		"executor_label": {Style: "form", Explode: &[]bool{false}[0]},
+		"issue_uid":      {Style: "form", Explode: &[]bool{false}[0]},
+		"job_uid":        {Style: "form", Explode: &[]bool{false}[0]},
+		"limit":          {Style: "form", Explode: &[]bool{false}[0]},
+		"since":          {Style: "form", Explode: &[]bool{false}[0]},
+		"teammate":       {Style: "form", Explode: &[]bool{false}[0]},
 	}
 	reqParams := runtime.RequestOptionsParameters{
 		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/runs",

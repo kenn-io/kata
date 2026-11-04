@@ -78,5 +78,6 @@ type CronDefinitions interface {
 	CronJob(context.Context, int64, string) (CronJob, error)
 	CronWorkflow(context.Context, int64, string) (CronWorkflow, error)
 	ListCronJobs(context.Context, CronList) ([]CronJob, error)
+	ListAllCronJobs(context.Context, CronAllList) ([]CronJob, error)
 	ListCronWorkflows(context.Context, CronList) ([]CronWorkflow, error)
 }

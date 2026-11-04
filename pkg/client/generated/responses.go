@@ -32,6 +32,14 @@ type MapConnectorFieldResponse = ExternalFieldMappingOut
 
 type MapConnectorFieldErrorResponse = ErrorEnvelope
 
+type ListAllCronJobsResponse = AllCronJobsResponseBody
+
+type ListAllCronJobsErrorResponse = ErrorEnvelope
+
+type ListAllCronRunsResponse = AllCronRunsResponseBody
+
+type ListAllCronRunsErrorResponse = ErrorEnvelope
+
 type DigestGlobalResponse = DigestResponseBody
 
 type DigestGlobalErrorResponse = ErrorEnvelope
@@ -645,6 +653,22 @@ type MapConnectorFieldResp struct {
 	StatusCode   int
 	JSON200      *MapConnectorFieldResponse
 	JSONDefault  *MapConnectorFieldErrorResponse
+}
+
+type ListAllCronJobsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ListAllCronJobsResponse
+	JSONDefault  *ListAllCronJobsErrorResponse
+}
+
+type ListAllCronRunsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ListAllCronRunsResponse
+	JSONDefault  *ListAllCronRunsErrorResponse
 }
 
 type DigestGlobalResp struct {

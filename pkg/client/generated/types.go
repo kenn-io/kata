@@ -167,6 +167,81 @@ func (a AliasInput) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(a))
 }
 
+type AllCronJobsResponseBody struct {
+	Jobs     []CronJob          `json:"jobs" validate:"required"`
+	Projects []CronFleetProject `json:"projects" validate:"required"`
+}
+
+func (a AllCronJobsResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(a.Jobs, "required"); err != nil {
+		errors = errors.Append("Jobs", err)
+	}
+	for i, item := range a.Jobs {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Jobs[%d]", i), err)
+			}
+		}
+	}
+	if err := typesValidator.Var(a.Projects, "required"); err != nil {
+		errors = errors.Append("Projects", err)
+	}
+	for i, item := range a.Projects {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Projects[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type AllCronRunsResponseBody struct {
+	Filters       *CronRunFilters    `json:"filters,omitempty"`
+	NextBeforeUID *string            `json:"next_before_uid,omitempty"`
+	Projects      []CronFleetProject `json:"projects" validate:"required"`
+	Runs          []CronRun          `json:"runs" validate:"required"`
+}
+
+func (a AllCronRunsResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if a.Filters != nil {
+		if v, ok := any(a.Filters).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Filters", err)
+			}
+		}
+	}
+	if err := typesValidator.Var(a.Projects, "required"); err != nil {
+		errors = errors.Append("Projects", err)
+	}
+	for i, item := range a.Projects {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Projects[%d]", i), err)
+			}
+		}
+	}
+	if err := typesValidator.Var(a.Runs, "required"); err != nil {
+		errors = errors.Append("Runs", err)
+	}
+	for i, item := range a.Runs {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Runs[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type ArtifactIdentity struct {
 	Dimensions          int64   `json:"dimensions"`
 	Encoding            string  `json:"encoding" validate:"required"`
@@ -1316,6 +1391,16 @@ func (c CronDefinitionActionBody) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(c))
 }
 
+type CronFleetProject struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name" validate:"required"`
+	UID  string `json:"uid" validate:"required"`
+}
+
+func (c CronFleetProject) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+}
+
 type CronJob struct {
 	Author             string                    `json:"author" validate:"required"`
 	CreatedAt          time.Time                 `json:"created_at" validate:"required"`
@@ -1556,6 +1641,15 @@ func (c CronRun) Validate() error {
 	return errors
 }
 
+type CronRunFilters struct {
+	ExecutorLabel *string    `json:"executor_label,omitempty"`
+	IssueUID      *string    `json:"issue_uid,omitempty"`
+	JobUID        *string    `json:"job_uid,omitempty"`
+	Since         *time.Time `json:"since,omitempty"`
+	Status        []string   `json:"status,omitempty"`
+	Teammate      *string    `json:"teammate,omitempty"`
+}
+
 type CronRunResponseBody struct {
 	Run CronRun `json:"run"`
 }
@@ -1574,12 +1668,20 @@ func (c CronRunResponseBody) Validate() error {
 }
 
 type CronRunsResponseBody struct {
-	NextBeforeUID *string   `json:"next_before_uid,omitempty"`
-	Runs          []CronRun `json:"runs" validate:"required"`
+	Filters       *CronRunFilters `json:"filters,omitempty"`
+	NextBeforeUID *string         `json:"next_before_uid,omitempty"`
+	Runs          []CronRun       `json:"runs" validate:"required"`
 }
 
 func (c CronRunsResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if c.Filters != nil {
+		if v, ok := any(c.Filters).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Filters", err)
+			}
+		}
+	}
 	if err := typesValidator.Var(c.Runs, "required"); err != nil {
 		errors = errors.Append("Runs", err)
 	}

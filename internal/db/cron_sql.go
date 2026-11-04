@@ -139,7 +139,11 @@ func (a CronSQL) list(ctx context.Context, in CronList, job bool) ([]cronRow, er
 		query += " AND deleted_at IS NULL"
 	}
 	query += " ORDER BY name,uid"
-	rows, err := a.Query.QueryContext(ctx, query, in.ProjectID)
+	return a.readCronRows(ctx, query, in.ProjectID)
+}
+
+func (a CronSQL) readCronRows(ctx context.Context, query string, args ...any) ([]cronRow, error) {
+	rows, err := a.Query.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

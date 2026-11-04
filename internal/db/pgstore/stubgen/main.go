@@ -60,6 +60,7 @@ var alreadyImplemented = map[string]bool{
 	"PutCronWorkflow":     true,
 	"CronJob":             true,
 	"CronWorkflow":        true,
+	"ListAllCronJobs":     true,
 	"ListCronJobs":        true,
 	"ListCronWorkflows":   true,
 	"ExportCronJobs":      true,

@@ -21,6 +21,7 @@ func cronRunAPIError(ctx context.Context, cfg ServerConfig, err error, projectID
 	return cronAPIError(ctx, cfg, err, projectID, "", true)
 }
 func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
+	registerCronFleetHandlers(h, cfg)
 	base := "/api/v1/projects/{project_id}/cron"
 	huma.Register(h, huma.Operation{OperationID: "getCronCapabilities", Method: http.MethodGet, Path: base + "/capabilities"}, func(ctx context.Context, in *api.CronProjectRequest) (*api.CronCapabilitiesResponse, error) {
 		project, err := activeProjectByID(ctx, cfg.DB, in.ProjectID)
@@ -67,11 +68,17 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
-		runs, err := cfg.DB.ListCronRuns(ctx, db.CronRunList{ProjectID: in.ProjectID, JobUID: in.JobUID, Limit: in.Limit, BeforeUID: in.BeforeUID})
+		query, err := in.Native(in.ProjectID, nil, false)
+		if err != nil {
+			return nil, err
+		}
+		runs, err := cfg.DB.ListCronRuns(ctx, query)
 		if err != nil {
 			return nil, cronRunAPIError(ctx, cfg, err, in.ProjectID, "")
 		}
 		out := &api.CronRunsResponse{}
+		filters := query.Filters()
+		out.Body.Filters = &filters
 		out.Body.Runs = []api.CronRun{}
 		for _, run := range runs {
 			out.Body.Runs = append(out.Body.Runs, api.CronRunFrom(run))
