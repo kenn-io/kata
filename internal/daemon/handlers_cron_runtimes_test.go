@@ -43,6 +43,7 @@ func TestCronRuntimeHTTP(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &response.Body))
 	require.Equal(t, "live", response.Body.Runtime.Status)
 	require.Equal(t, "not_applicable", response.Body.Forwarded)
+	require.Equal(t, "direct", response.Body.Runtime.ReportedVia)
 	status, raw = runtimeHTTPRequest(t, env, http.MethodGet, path, nil)
 	require.Equal(t, 200, status)
 	require.Contains(t, string(raw), id)

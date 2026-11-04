@@ -107,7 +107,7 @@ func TestRuntimeChoicesOracle(t *testing.T) {
 				}
 				inv := EvaluateRuntimes(entries, []RuntimeJob{{UID: "job", Definition: def}}, now, "dev", start)
 				values, known := want[key]
-				expected := ready && len(entries) > 0 && enabled && execute && known && !slices.Contains(values, "missing")
+				expected := ready && enabled && execute && known && !slices.Contains(values, "missing")
 				actual := false
 				for _, w := range inv.Warnings {
 					if w.Code == "choice_unknown" {
