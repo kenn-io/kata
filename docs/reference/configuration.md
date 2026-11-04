@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-02
+last_edited: 2026-11-04
 ---
 
 # Configuration
@@ -1469,3 +1469,32 @@ resolved on each request.
 
 `KATA_DOCBANK_URL`, `KATA_DOCBANK_API_KEY_FILE`, and `KATA_DOCBANK_FOLDER`
 override their corresponding file settings.
+
+## Replica cron execution
+
+On unreleased main, choose which company execute jobs and workflows local
+adapters may run on a spoke or relay. Set these daemon-local keys in
+`<KATA_HOME>/config.toml`, then run `kata daemon restart`:
+
+```toml
+[cron]
+replica_execute = "none"
+
+[[cron.project]]
+name = "company-project"
+execute = "owned"
+```
+
+`replica_execute` defaults to `none`; both mode fields accept `none`, `owned`
+or `all`. Each override needs a unique, valid local project name and an explicit
+`execute` mode. Names match exactly as stored, including leading or trailing
+spaces. Unknown names warn at startup and may match a later join. Overrides
+follow current names, including rename and name reuse. Local/hub projects
+always use `all` and warn about ineffective overrides. Neither the policy nor
+its capability advertisement replicates.
+
+Embedded hosts supply `kata.Config.CronExecution` using
+`kata.CronExecutionConfig` and `kata.CronExecutionProjectConfig`, rather than
+reading process config files. The zero value selects the same replica default.
+See the [cron adapter contract](cron.md#adapter-responsibilities) for exact
+ownership, admission, and upgrade behavior.

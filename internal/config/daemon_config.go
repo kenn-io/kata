@@ -46,6 +46,8 @@ type DaemonConfig struct {
 	Daemons []CatalogDaemonConfig `toml:"daemon"`
 	// Federation declares project mappings managed by daemon startup.
 	Federation FederationConfig `toml:"federation"`
+	// Cron controls local adapter execution on replicated projects.
+	Cron CronConfig `toml:"cron"`
 	// TUI carries client-side interactive UI defaults. Unlike remote
 	// daemon overrides, these are user preferences and belong in
 	// <KATA_HOME>/config.toml.
@@ -470,6 +472,7 @@ func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
 		trimSearchEmbeddings(&cfg)
 		trimDaemonCatalog(&cfg)
 		trimFederationConfig(&cfg)
+		trimCronConfig(&cfg.Cron)
 		trimGitHubSync(&cfg)
 	case errors.Is(err, os.ErrNotExist):
 		// Absent file: fall through with zero-value cfg. Env merge and
@@ -563,6 +566,9 @@ func readDaemonConfig(path string, mergeEnv bool) (*DaemonConfig, error) {
 		return nil, err
 	}
 	if err := normalizeFederationSigning(&cfg, filepath.Dir(path)); err != nil {
+		return nil, err
+	}
+	if err := cfg.Cron.Validate(); err != nil {
 		return nil, err
 	}
 	if err := validateFederationConfig(&cfg); err != nil {

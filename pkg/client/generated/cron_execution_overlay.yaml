@@ -1,0 +1,17 @@
+overlay: 1.0.0
+info:
+  title: Keep existing client enum symbols when adding execution policy
+  version: 1.0.0
+actions:
+  - target: '$.components.schemas.CronExecutionPolicy.properties.mode'
+    update:
+      x-enum-names:
+        - CronExecutionModeNone
+        - CronExecutionModeOwned
+        - CronExecutionModeAll
+  - target: '$.components.schemas.CronExecutionPolicy.properties.source'
+    update:
+      x-enum-names:
+        - CronExecutionSourceLocal
+        - CronExecutionSourceReplicaDefault
+        - CronExecutionSourceProject

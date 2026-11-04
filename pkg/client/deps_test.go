@@ -19,6 +19,7 @@ var (
 	allowedKataPackages = []string{
 		"go.kenn.io/kata/internal/client",
 		"go.kenn.io/kata/internal/config",
+		"go.kenn.io/kata/internal/cronpolicy",
 		"go.kenn.io/kata/internal/daemonruntime",
 		"go.kenn.io/kata/internal/federationsigning/signingpolicy",
 		"go.kenn.io/kata/internal/httpurl",

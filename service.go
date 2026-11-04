@@ -146,6 +146,8 @@ type Config struct {
 	TodoistSync  TodoistSyncConfig
 	TickTickSync TickTickSyncConfig
 	Docbank      DocbankConfig
+	// CronExecution is explicit local policy; services never read config.toml.
+	CronExecution CronExecutionConfig
 	// WebHandler optionally serves public, data-free browser assets alongside
 	// the API. Non-API paths bypass Kata's bearer check. Nil keeps the service
 	// API-only. Import go.kenn.io/kata/webui to opt into the bundled application.
@@ -244,6 +246,10 @@ func New(ctx context.Context, cfg Config) (*Service, error) {
 }
 
 func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, error) {
+	cronExecution := cfg.CronExecution.internal()
+	if err := cronExecution.Validate(); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(cfg.DSN) == "" {
 		return nil, errors.New("kata: storage DSN is required")
 	}
@@ -454,6 +460,7 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		DocbankFolder:             docbankConfig.Folder,
 		WebHandler:                cfg.WebHandler,
 		DefaultTimezone:           cfg.DefaultTimezone,
+		CronExecution:             cronExecution,
 		StartedAt:                 startedAt,
 		Broadcaster:               broadcaster,
 		FederationWake:            wakeFederation,

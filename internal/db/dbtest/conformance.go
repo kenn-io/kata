@@ -210,6 +210,7 @@ var storageScenarios = []scenario{
 	{name: "native cron federation", methods: []string{"ReadFederation"}, runWithBackend: checkNativeCronFederation},
 	{name: "native cron push", methods: []string{}, runWithBackend: checkNativeCronPush},
 	{name: "native cron definitions", methods: []string{"PutCronJob", "PutCronWorkflow", "CronJob", "CronWorkflow", "ListCronJobs", "ListCronWorkflows"}, run: checkNativeCronDefinitions},
+	{name: "cron job snapshot payload lookup", methods: []string{"CreateProject", "CreateIssue", "PutCronJob", "InsertRemoteEvents", "CronJobSnapshotPayload"}, run: checkCronJobSnapshotPayloadLookup},
 	{name: "native cron constraints", methods: []string{}, run: checkNativeCronConstraints},
 	{name: "native cron dormant storage", methods: []string{}, run: checkNativeCronDormancy},
 	{name: "cron project merge restore", methods: []string{"CreateProject", "PutCronJob", "PutCronWorkflow", "ObserveCronRun", "MergeProjects", "ImportReplay"}, runWithBackend: checkCronProjectMergeRestore},
