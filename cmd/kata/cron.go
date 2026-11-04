@@ -47,7 +47,7 @@ The full contract is in the Cron reference (docs/reference/cron.md).`,
 		case "workflow":
 			group.Long = "Manage reusable command or prompt steps. For issue stages with human approval, see docs/workflows/gated-workflows.md."
 		}
-		for _, action := range []string{"list", "show", "create", "update", "edit", "delete", "restore"} {
+		for _, action := range []string{"list", "show", "create", "update", "edit", "delete", "restore", "validate"} {
 			group.AddCommand(newCronOperationCmd(resource, action))
 		}
 		command.AddCommand(group)
@@ -67,18 +67,20 @@ type cronCLIOptions struct {
 	resource, action                 string
 	file, identity, expectedEventUID string
 	parent                           string
+	count                            int
+	from                             string
 	includeDeleted                   bool
 	limit                            int64
 	beforeUID, jobUID                string
 }
 
 func (o cronCLIOptions) mutation() bool {
-	return o.action != "list" && o.action != "show" && o.action != "edit"
+	return o.action != "list" && o.action != "show" && o.action != "edit" && o.action != "validate"
 }
 func (o cronCLIOptions) definition() bool { return o.resource == "job" || o.resource == "workflow" }
 func newCronOperationCmd(resource, action string) *cobra.Command {
 	options := cronCLIOptions{resource: resource, action: action, limit: 100}
-	takesUID := (resource == "job" || resource == "workflow" || resource == "run") && action != "list" && action != "create"
+	takesUID := (resource == "job" || resource == "workflow" || resource == "run") && action != "list" && action != "create" && action != "validate"
 	command := &cobra.Command{Use: action, Short: action + " " + resource, Args: cobra.NoArgs}
 	command.Long, command.Example = cronOperationHelp(resource, action)
 	if resource == "job" {
@@ -112,6 +114,16 @@ func newCronOperationCmd(resource, action string) *cobra.Command {
 		}
 		if resource == "job" && (action == "create" || action == "update") {
 			command.Flags().StringVar(&options.parent, "parent", "", "parent issue ref for a per-run job (stores the full UID)")
+		}
+	}
+	if action == "validate" {
+		command.Flags().StringVar(&options.file, "file", "", "JSON request body file, or - for stdin")
+		command.Flags().StringVar(&options.identity, "uid", "", "optional retained definition ULID to preflight a replacement")
+		command.Flags().StringVar(&options.expectedEventUID, "expected-event-uid", "", "current definition event UID; must match the request body if present")
+		if resource == "job" {
+			command.Flags().StringVar(&options.parent, "parent", "", "parent issue ref for a per-run job (stores the full UID)")
+			command.Flags().IntVar(&options.count, "count", 5, "number of next fires (1-100)")
+			command.Flags().StringVar(&options.from, "from", "", "RFC3339 preview start (defaults to daemon now)")
 		}
 	}
 	if action == "list" && options.definition() {
@@ -148,6 +160,12 @@ never changes an issue's owner, dates, lease, or status.`,
 			"  " + cmd + " <run-uid> --json-input observation.json --json"
 	}
 	switch action {
+	case "validate":
+		example := cronPromptRequestExample + "  kata cron job validate --file prompt.json --count 5"
+		if resource == "workflow" {
+			example = cronWorkflowRequestExample + "  kata cron workflow validate --file workflow.json"
+		}
+		return "Validate an unsaved " + resource + " without saving. Prints normalized definition, errors and warnings as JSON; invalid definitions exit 3. Jobs include hypothetical next fires. Use --uid and --expected-event-uid to check an edit.\n\n" + cronRequestHelp(resource), example
 	case "list":
 		return "List the project's " + resource + ` definitions. --include-deleted also lists
 deleted (tombstoned) ones.`, "  " + cmd + " --json\n  " + cmd + " --include-deleted --json"
@@ -232,7 +250,7 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 		return cronCLIValidation("limit must be between 1 and 100")
 	}
 	var body []byte
-	if o.mutation() {
+	if o.mutation() || o.action == "validate" {
 		var err error
 		body, err = o.requestBody(cmd)
 		if err != nil {
@@ -285,6 +303,9 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 	raw, err := o.call(daemon, client, project.ID, body)
 	if err != nil {
 		return err
+	}
+	if o.action == "validate" {
+		return emitCronValidation(cmd, raw, o.resource == "job")
 	}
 	if flags.Quiet && currentOutputMode() != outputJSON {
 		return nil
@@ -380,6 +401,9 @@ func (o *cronCLIOptions) applyParent(cmd *cobra.Command, daemon daemonAPI, raw [
 const cronDefinitionRequestLimit = 1 << 20
 
 func (o *cronCLIOptions) requestBody(cmd *cobra.Command) ([]byte, error) {
+	if o.action == "validate" {
+		return o.validationRequestBody(cmd)
+	}
 	raw, err := o.readRequest(cmd)
 	if err != nil {
 		return nil, err
@@ -406,7 +430,7 @@ func (o *cronCLIOptions) requestBody(cmd *cobra.Command) ([]byte, error) {
 // may omit it and send an empty object; every other mutation requires it.
 func (o *cronCLIOptions) readRequest(cmd *cobra.Command) ([]byte, error) {
 	if o.file == "" {
-		if o.definition() && o.action != "create" && o.action != "update" {
+		if o.definition() && o.action != "create" && o.action != "update" && o.action != "validate" {
 			return []byte(`{}`), nil
 		}
 		if o.resource == "run" {
@@ -581,7 +605,7 @@ func (o *cronCLIOptions) applyExpectedEventUID(fields map[string]jsontext.Value)
 // checkExpectedEventUID requires a definition create to be unconditional and
 // every other definition mutation to name the event it replaces.
 func (o *cronCLIOptions) checkExpectedEventUID() error {
-	if !o.definition() {
+	if !o.definition() || o.action == "validate" {
 		return nil
 	}
 	if o.action == "create" && o.expectedEventUID != "" {
@@ -607,6 +631,8 @@ func cronCLIResponse(status int, raw []byte, err error) ([]byte, error) {
 
 func (o cronCLIOptions) call(a daemonAPI, c *kataclient.Client, projectID int64, raw []byte) ([]byte, error) {
 	switch {
+	case o.action == "validate":
+		return o.callValidate(a, c, projectID, raw)
 	case o.resource == "capabilities":
 		return o.callCapabilities(a, c, projectID)
 	case o.action == "list" || o.action == "show":

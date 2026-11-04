@@ -2244,6 +2244,8 @@ See [Cron](cron.md) for bounded documents and retry semantics.
 
 ```sh
 kata cron job create --uid <job-uid> --file job.json --json
+kata cron job validate --file job.json [--uid <job-uid>] [--expected-event-uid <event-uid>] [--parent <issue-ref>] [--count 5] [--from <RFC3339>]
+kata cron workflow validate --file workflow.json [--uid <workflow-uid>] [--expected-event-uid <event-uid>]
 kata cron job list [--include-deleted] --json
 kata cron job show <job-uid> --json
 kata cron job edit <job-uid>
@@ -2257,6 +2259,11 @@ kata cron run list [--limit 100] [--before-uid <uid>] [--job-uid <job-uid>] --js
 kata cron run show <run-uid> --json
 kata show <issue-ref> --planning-dates --json
 ```
+
+Validate prints normalized definitions, staged errors, warnings, and hypothetical
+next fires without saving. It returns exit 3 for an invalid definition, including
+with `--quiet`. See [Validate before saving](cron.md#validate-before-saving)
+for preview limits and daemon version requirements.
 
 Recurring job create/update also accept `--parent <issue-ref>`; see
 [recurring child issues](cron.md#recurring-child-issues) for the request format.

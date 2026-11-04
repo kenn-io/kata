@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -37,7 +37,7 @@ issue. Recording a run changes neither ownership nor leases. See
 ## Definitions
 
 `kata cron job` and `kata cron workflow` support `create`, `list`, `show`,
-`update`, `edit`, `delete`, and `restore`. Commands return JSON. Creation retains a ULID:
+`update`, `edit`, `delete`, `restore`, and `validate`. Commands return JSON. Creation retains a ULID:
 
 ```sh
 kata cron job create --uid <job-uid> --file job.json --json
@@ -65,6 +65,59 @@ process inside Kata.
 Secret references are names, and checkout keys are portable names. Credentials,
 host paths, and runtime handles are not part of this shared contract. Opaque
 option objects retain exact JSON numbers.
+
+### Validate before saving
+
+Check the same request file before creating a definition:
+
+```sh
+kata cron job validate --file job.json --count 5 --from 2026-11-03T00:00:00Z
+kata cron workflow validate --file workflow.json
+```
+
+Use `--file -` for stdin. To check a replacement, add `--uid <job-uid>`
+and `--expected-event-uid <event-uid>`; workflows accept those flags too.
+Jobs also accept `--parent <issue-ref>`, with the same project and parent
+matching rules as create. Validation never allocates a UID, requires an actor,
+saves a definition, initializes progress, advances a clock, or emits an event.
+
+The result always prints as JSON, including under `--quiet`. Exit status is
+0 for `valid:true` and 3 for `valid:false`, including revision conflicts.
+The daemon must support API 0.41.0 or later; older daemons produce an upgrade
+message. A successful preflight checks current state. A later save can still
+fail if state or authorization changes.
+
+The result includes the trimmed `name`, normalized `definition`, `errors`,
+and `warnings`. The definition is null when decoding fails. Errors stop at
+the first failing stage: `request` (name), `document` (portable rules),
+`revision` (UID and expected event), `ownership` (native parent and progress),
+or `dependencies` (referenced workflow or issue). A revision error includes
+`definition_event_uid` only for a definition in the authorized project.
+
+Jobs also return `schedule`, with `delivery` (`daemon` or `adapter`), `zone`,
+`from`, and up to `--count` future instants in `next`. Count defaults to 5
+and accepts 1–100. `--from` is RFC3339 and defaults to the daemon's current
+time. It must normalize to a UTC year from 0000 through 9999. Each instant
+has UTC `at` and trigger-zone `local` representations. Only instants that
+fit RFC3339 in both zones appear. Use `at` for exact instants; `local` uses
+RFC3339's minute precision for UTC offsets, including historical zones.
+The `basis` explains how those instants were calculated:
+
+| Basis | Meaning |
+| --- | --- |
+| `stored_progress` | Existing native job, including a tombstone; uses retained anchor and through time. |
+| `fresh_anchor` | New native job or adapter conversion; models creation at `from`. |
+| `adapter_trigger` | Adapter cron or once trigger's own future instants. |
+| `adapter_defined` | Adapter interval or `@every`; Kata defines no instant, so `next` is empty. |
+| `none` | Manual or issue-date trigger; `next` is empty. |
+
+These are hypothetical trigger instants. A paused job shows what enabling it
+would produce (`paused` warning). A closed native parent shows what reopening
+it would produce (`parent_closed`). The preview does not promise dispatch or
+backlog delivery. A spoke validates its local replica without forwarding and
+warns `hub_owned` for native jobs; the owning hub remains the write authority.
+Workflows return no schedule. Enrollment bearer credentials cannot call these
+routes.
 
 ### Edit in place
 
@@ -208,7 +261,7 @@ Schedules follow the trigger timezone's daylight-saving transitions:
   `Australia/Lord_Howe`, or that skip local midnight, such as
   `America/Santiago`, a daily schedule can miss that day's occurrence.
 
-The `kata tui` Jobs tab previews these instants with the same schedule code:
+The `kata tui` Jobs tab and `kata cron job validate` preview these instants with the same schedule code:
 see the `kata tui` notes in the [CLI reference](cli.md#daemon-and-diagnostics).
 
 Kata releases up to 0.19.0 used a parser that rejects `7` in day of week and
@@ -668,6 +721,15 @@ ordinary identity, revision and credential guards. See
 migration, backup, runtime grants, and rollback requirements.
 
 ## Routes, events, and records
+
+Read-only preflight routes are `POST /api/v1/projects/{project_id}/cron/jobs/validate`
+and `POST /api/v1/projects/{project_id}/cron/workflows/validate`. They accept
+the create/update envelope plus optional `uid`; `actor` is ignored. Jobs accept
+`count` and `from` queries. A well-formed request returns 200 with `valid:true`
+or `valid:false`. Malformed envelopes, unknown members, wrong envelope types,
+invalid UIDs, and bad queries return 400; bodies above 1 MiB return 413.
+Missing or invalid definitions are document-stage results. Unknown or archived
+projects return 404. These routes need read capability and never forward.
 
 Workflow routes are `/api/v1/projects/{project_id}/cron/workflows` and
 `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}`. Responses use

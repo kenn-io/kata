@@ -44,6 +44,7 @@ type CronUIDOutput struct {
 }
 
 func registerCronTools(server *sdkmcp.Server, h toolHandlers) {
+	registerCronValidationTools(server, h)
 	registerCronWorkflowTools(server, h)
 	registerCronRunTools(server, h)
 	read := toolHints(true, false, false)
@@ -88,7 +89,7 @@ func cronExpected(value string) (string, error) {
 // addCronTool retains original JSON bytes across validation. The SDK's generic
 // typed adapter re-marshals a float64 validation copy and rounds opaque options
 // and exact int64 evidence. Validate separately, then decode the original.
-func addCronTool[In, Out any](server *sdkmcp.Server, name, title, description string, hints *sdkmcp.ToolAnnotations, handler sdkmcp.ToolHandlerFor[In, Out]) {
+func addCronTool[In, Out any](server *sdkmcp.Server, name, title, description string, hints *sdkmcp.ToolAnnotations, handler sdkmcp.ToolHandlerFor[In, Out], rawProperties ...string) {
 	inputSchema, outputSchema := inputSchemaFor[In](name), schemaFor[Out]()
 	resolved, err := inputSchema.Resolve(nil)
 	if err != nil {
@@ -102,8 +103,27 @@ func addCronTool[In, Out any](server *sdkmcp.Server, name, title, description st
 		if len(raw) == 0 {
 			raw = jsontext.Value(`{}`)
 		}
+		validationRaw := raw
+		if len(rawProperties) > 0 {
+			// Unrestricted document fields are validated by the daemon. Exclude
+			// them from the float64 schema copy so even 1e1000 reaches preflight.
+			var fields map[string]jsontext.Value
+			if err := json.Unmarshal(raw, &fields); err != nil {
+				return failure(err)
+			}
+			for _, property := range rawProperties {
+				if _, exists := fields[property]; exists {
+					fields[property] = jsontext.Value(`null`)
+				}
+			}
+			var err error
+			validationRaw, err = json.Marshal(fields)
+			if err != nil {
+				return failure(err)
+			}
+		}
 		var validation any
-		if err := json.Unmarshal(raw, &validation); err != nil {
+		if err := json.Unmarshal(validationRaw, &validation); err != nil {
 			return failure(err)
 		}
 		if err := resolved.Validate(validation); err != nil {

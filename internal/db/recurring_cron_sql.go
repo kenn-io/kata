@@ -70,10 +70,10 @@ func recurringAuthority(ctx context.Context, tx *sql.Tx, projectID int64) (bool,
 }
 
 // recurringParent reads the bound parent and whether it is soft-deleted.
-func (a CronSQL) recurringParent(ctx context.Context, tx *sql.Tx, projectID int64, parentUID string) (Issue, bool, error) {
+func (a CronSQL) recurringParent(ctx context.Context, tx *sql.Tx, projectID int64, parentUID string, lock bool) (Issue, bool, error) {
 	// Parent lock precedes reading owner/status/progress, sharing normal mutation serialization.
 	query := `SELECT id,uid,status,owner,author,metadata,revision,deleted_at IS NOT NULL FROM issues WHERE uid=$1 AND project_id=$2`
-	if a.Postgres {
+	if a.Postgres && lock {
 		query += " FOR UPDATE"
 	}
 	var p Issue
@@ -120,19 +120,44 @@ func (a CronSQL) checkRecurringPutTx(ctx context.Context, tx *sql.Tx, req cronPu
 		}
 		return errors.Join(ErrFederatedReadOnly, ErrFederatedSpokeUnsupported)
 	}
-	if oldNative && (!newNative || old.Issue.ParentUID != next.Issue.ParentUID) {
-		return fmt.Errorf("%w: native parent binding and ownership are immutable", cron.ErrInvalid)
+	_, _, err = a.recurringOwnership(ctx, tx, req, old, true)
+	return err
+}
+
+// recurringOwnership shares the immutable binding and retained progress checks.
+// A validation snapshot passes lock=false; mutation callers lock the parent.
+func (a CronSQL) recurringOwnership(ctx context.Context, tx *sql.Tx, req cronPutRequest, old cron.JobDefinition, lock bool) (*cron.RecurringProgress, Issue, error) {
+	next := req.definition.(cron.JobDefinition)
+	if !cron.IsRecurringIssueJob(old) {
+		return nil, Issue{}, nil
 	}
-	if oldNative && !req.deleted {
-		parent, _, err := a.recurringParent(ctx, tx, req.projectID, old.Issue.ParentUID)
-		if err != nil {
-			return err
-		}
-		_, err = readRecurringProgress(parent, req.id)
+	if !cron.IsRecurringIssueJob(next) || old.Issue.ParentUID != next.Issue.ParentUID {
+		return nil, Issue{}, fmt.Errorf("%w: native parent binding and ownership are immutable", cron.ErrInvalid)
+	}
+	if req.deleted {
+		return nil, Issue{}, nil
+	}
+	parent, _, err := a.recurringParent(ctx, tx, req.projectID, old.Issue.ParentUID, lock)
+	if err != nil {
+		return nil, Issue{}, err
+	}
+	progress, err := readRecurringProgress(parent, req.id)
+	return &progress, parent, err
+}
+
+func checkRecurringInitialization(parent Issue, jobUID string) error {
+	var values map[string]jsontext.Value
+	if err := json.Unmarshal([]byte(parent.Metadata), &values); err != nil {
 		return err
+	}
+	if jobUID != "" {
+		if _, exists := values["cron.progress."+jobUID]; exists {
+			return fmt.Errorf("%w: recurring progress already exists", cron.ErrInvalid)
+		}
 	}
 	return nil
 }
+
 func (a CronSQL) initializeRecurringTx(ctx context.Context, tx *sql.Tx, req cronPutRequest, current cronRow, event Event) ([]Event, error) {
 	next := req.definition.(cron.JobDefinition)
 	if req.deleted || !cron.IsRecurringIssueJob(next) {
@@ -147,18 +172,14 @@ func (a CronSQL) initializeRecurringTx(ctx context.Context, tx *sql.Tx, req cron
 			return nil, nil
 		}
 	}
-	parent, _, err := a.recurringParent(ctx, tx, req.projectID, next.Issue.ParentUID)
+	parent, _, err := a.recurringParent(ctx, tx, req.projectID, next.Issue.ParentUID, true)
 	if err != nil {
 		return nil, err
 	}
-	var values map[string]jsontext.Value
-	if err := json.Unmarshal([]byte(parent.Metadata), &values); err != nil {
+	if err := checkRecurringInitialization(parent, req.id); err != nil {
 		return nil, err
 	}
 	key := "cron.progress." + req.id
-	if _, exists := values[key]; exists {
-		return nil, fmt.Errorf("%w: recurring progress already exists", cron.ErrInvalid)
-	}
 	anchor := time.Now().UTC()
 	raw, err := json.Marshal(cron.RecurringProgress{Version: 1, Anchor: anchor, Through: anchor})
 	if err != nil {
@@ -243,7 +264,7 @@ func (a CronSQL) DispatchRecurring(ctx context.Context, in DispatchRecurringCron
 		if !cron.IsRecurringIssueJob(job.Definition) || !job.Definition.Enabled {
 			return nil
 		}
-		parent, deleted, err := a.recurringParent(ctx, tx, project.ID, job.Definition.Issue.ParentUID)
+		parent, deleted, err := a.recurringParent(ctx, tx, project.ID, job.Definition.Issue.ParentUID, true)
 		if errors.Is(err, ErrNotFound) {
 			return nil
 		}

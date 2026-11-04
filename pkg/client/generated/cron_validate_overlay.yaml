@@ -1,0 +1,15 @@
+overlay: 1.0.0
+info:
+  title: Preserve unsaved cron documents without client coercion
+  version: 1.0.0
+actions:
+  - target: '$.components.schemas.CronValidationBody.properties.definition'
+    update:
+      x-go-type: json.RawMessage
+      x-go-type-import:
+        path: encoding/json
+  - target: '$.components.schemas.CronValidationResult.properties.definition'
+    update:
+      x-go-type: json.RawMessage
+      x-go-type-import:
+        path: encoding/json

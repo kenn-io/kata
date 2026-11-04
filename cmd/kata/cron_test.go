@@ -38,6 +38,12 @@ func cronCLIFile(t *testing.T, value any) string {
 	return file
 }
 func executeCronCLI(t *testing.T, base string, stdin io.Reader, args ...string) (string, string, error) {
+	return executeCronCLIMode(t, base, stdin, true, args...)
+}
+func executeCronCLIWithoutJSON(t *testing.T, base string, stdin io.Reader, args ...string) (string, string, error) {
+	return executeCronCLIMode(t, base, stdin, false, args...)
+}
+func executeCronCLIMode(t *testing.T, base string, stdin io.Reader, jsonOutput bool, args ...string) (string, string, error) {
 	t.Helper()
 	resetFlags(t)
 	command := newRootCmd()
@@ -46,7 +52,11 @@ func executeCronCLI(t *testing.T, base string, stdin io.Reader, args ...string) 
 	command.SetErr(&diagnostic)
 	command.SetIn(stdin)
 	command.SetContext(contextWithBaseURL(t.Context(), base))
-	command.SetArgs(append([]string{"--project", "spoke-project", "--json", "cron"}, args...))
+	rootArgs := []string{"--project", "spoke-project"}
+	if jsonOutput {
+		rootArgs = append(rootArgs, "--json")
+	}
+	command.SetArgs(append(append(rootArgs, "cron"), args...))
 	err := command.Execute()
 	return out.String(), diagnostic.String(), err
 }
