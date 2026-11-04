@@ -26,35 +26,42 @@ import (
 	kitvec "go.kenn.io/kit/vector"
 )
 
+func openVectorBackend(t *testing.T, backend string) (db.Storage, *vector.Index) {
+	t.Helper()
+	ctx := t.Context()
+	var store db.Storage
+	var idx *vector.Index
+	if backend == "sqlite" {
+		s, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "canonical.db"))
+		require.NoError(t, err)
+		store = s
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+		idx, err = vector.Open(ctx, filepath.Join(t.TempDir(), "vectors.db"))
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, idx.Close()) })
+	} else {
+		dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, ctx)
+		t.Cleanup(cleanup)
+		s, err := pgstore.Open(ctx, dsn)
+		require.NoError(t, err)
+		store = s
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+		idx, err = vector.OpenPostgres(ctx, s.DB)
+		require.NoError(t, err)
+		release, err := idx.AcquireReconcilerLease(ctx)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, release()) })
+	}
+	return store, idx
+}
+
 // The project boundary belongs before distance ranking and its candidate limit:
 // arbitrarily closer private chunks must never crowd out an authorized result.
 func TestProjectAccessVectorCandidatesBeforeLimit(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			ctx := t.Context()
-			var store db.Storage
-			var idx *vector.Index
-			if backend == "sqlite" {
-				s, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "canonical.db"))
-				require.NoError(t, err)
-				store = s
-				t.Cleanup(func() { require.NoError(t, s.Close()) })
-				idx, err = vector.Open(ctx, filepath.Join(t.TempDir(), "vectors.db"))
-				require.NoError(t, err)
-				t.Cleanup(func() { require.NoError(t, idx.Close()) })
-			} else {
-				dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, ctx)
-				t.Cleanup(cleanup)
-				s, err := pgstore.Open(ctx, dsn)
-				require.NoError(t, err)
-				store = s
-				t.Cleanup(func() { require.NoError(t, s.Close()) })
-				idx, err = vector.OpenPostgres(ctx, s.DB)
-				require.NoError(t, err)
-				release, err := idx.AcquireReconcilerLease(ctx)
-				require.NoError(t, err)
-				t.Cleanup(func() { require.NoError(t, release()) })
-			}
+			store, idx := openVectorBackend(t, backend)
 			allowed, err := store.CreateProject(ctx, "allowed-project")
 			require.NoError(t, err)
 			private, err := store.CreateProject(ctx, "private-project")
@@ -142,29 +149,7 @@ func TestEmbeddingArtifactImportSemanticRetrieval(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			ctx := t.Context()
-			var store db.Storage
-			var idx *vector.Index
-			if backend == "sqlite" {
-				s, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "canonical.db"))
-				require.NoError(t, err)
-				store = s
-				t.Cleanup(func() { require.NoError(t, s.Close()) })
-				idx, err = vector.Open(ctx, filepath.Join(t.TempDir(), "vectors.db"))
-				require.NoError(t, err)
-				t.Cleanup(func() { require.NoError(t, idx.Close()) })
-			} else {
-				dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, ctx)
-				t.Cleanup(cleanup)
-				s, err := pgstore.Open(ctx, dsn)
-				require.NoError(t, err)
-				store = s
-				t.Cleanup(func() { require.NoError(t, s.Close()) })
-				idx, err = vector.OpenPostgres(ctx, s.DB)
-				require.NoError(t, err)
-				release, err := idx.AcquireReconcilerLease(ctx)
-				require.NoError(t, err)
-				t.Cleanup(func() { require.NoError(t, release()) })
-			}
+			store, idx := openVectorBackend(t, backend)
 			project, err := store.CreateProject(ctx, "received-vector-project")
 			require.NoError(t, err)
 			issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Received complete vectors", Body: strings.Repeat("界", 2500), Author: "member"})

@@ -2,6 +2,7 @@ package vector
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"go.kenn.io/kata/internal/db"
@@ -22,25 +23,9 @@ func (ix *Index) RefreshMirror(ctx context.Context, store db.Storage) (int, erro
 	if ix.pg != nil {
 		return ix.pg.refreshMirror(ctx, store)
 	}
-	rows, err := ix.db.QueryContext(ctx, `SELECT issue_uid, content_revision, project_uid FROM issue_mirror`)
+	known, err := loadMirrorKeys(ctx, ix.db, `SELECT issue_uid, content_revision, project_uid FROM issue_mirror`)
 	if err != nil {
 		return 0, fmt.Errorf("vector: scan mirror keys: %w", err)
-	}
-	known := make(map[string]mirrorKey)
-	for rows.Next() {
-		var uid string
-		var key mirrorKey
-		if err := rows.Scan(&uid, &key.revision, &key.projectUID); err != nil {
-			_ = rows.Close()
-			return 0, fmt.Errorf("vector: scan mirror key: %w", err)
-		}
-		known[uid] = key
-	}
-	if err := rows.Close(); err != nil {
-		return 0, err
-	}
-	if err := rows.Err(); err != nil {
-		return 0, err
 	}
 	changed, stale, err := syncMirror(ctx, store, known, func(ic db.IssueContent) (int, error) {
 		res, err := ix.db.ExecContext(ctx, `
@@ -49,9 +34,7 @@ func (ix *Index) RefreshMirror(ctx context.Context, store db.Storage) (int, erro
 			ON CONFLICT(issue_uid) DO UPDATE SET
 			  project_uid = excluded.project_uid,
 			  content = excluded.content,
-			  content_revision = excluded.content_revision
-			WHERE issue_mirror.content_revision != excluded.content_revision
-			   OR issue_mirror.project_uid != excluded.project_uid`,
+			  content_revision = excluded.content_revision`,
 			ic.UID, ic.ProjectUID, embedding.EmbedText(ic.Title, ic.Body), ic.ContentRevision)
 		if err != nil {
 			return 0, fmt.Errorf("vector: upsert mirror row %s: %w", ic.UID, err)
@@ -80,6 +63,35 @@ func (ix *Index) RefreshMirror(ctx context.Context, store db.Storage) (int, erro
 type mirrorKey struct {
 	revision   int64
 	projectUID string
+}
+
+type mirrorQuerier interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+// loadMirrorKeys closes the read before either backend starts writing.
+func loadMirrorKeys(ctx context.Context, queryer mirrorQuerier, query string) (map[string]mirrorKey, error) {
+	rows, err := queryer.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	known := make(map[string]mirrorKey)
+	for rows.Next() {
+		var uid string
+		var key mirrorKey
+		if err := rows.Scan(&uid, &key.revision, &key.projectUID); err != nil {
+			return nil, fmt.Errorf("scan mirror key: %w", err)
+		}
+		known[uid] = key
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close mirror keys: %w", err)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate mirror keys: %w", err)
+	}
+	return known, nil
 }
 
 // syncMirror consumes known as it pages the live feed. Leftovers are safe to

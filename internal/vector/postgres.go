@@ -404,25 +404,9 @@ func (p *postgresIndex) refreshMirror(ctx context.Context, store db.Storage) (in
 	if err != nil {
 		return 0, fmt.Errorf("vector: refresh postgres mirror: %w", err)
 	}
-	rows, err := executor.QueryContext(ctx, `SELECT issue_uid, content_revision, project_uid FROM issue_vector_mirror`)
+	known, err := loadMirrorKeys(ctx, executor, `SELECT issue_uid, content_revision, project_uid FROM issue_vector_mirror`)
 	if err != nil {
 		return 0, fmt.Errorf("vector: scan postgres mirror keys: %w", err)
-	}
-	known := make(map[string]mirrorKey)
-	for rows.Next() {
-		var uid string
-		var key mirrorKey
-		if err := rows.Scan(&uid, &key.revision, &key.projectUID); err != nil {
-			_ = rows.Close()
-			return 0, fmt.Errorf("vector: scan postgres mirror key: %w", err)
-		}
-		known[uid] = key
-	}
-	if err := rows.Close(); err != nil {
-		return 0, err
-	}
-	if err := rows.Err(); err != nil {
-		return 0, err
 	}
 	changed, stale, err := syncMirror(ctx, store, known, func(issue db.IssueContent) (int, error) {
 		result, err := executor.ExecContext(ctx, `
@@ -431,9 +415,7 @@ func (p *postgresIndex) refreshMirror(ctx context.Context, store db.Storage) (in
 			ON CONFLICT(issue_uid) DO UPDATE SET
 			  project_uid = EXCLUDED.project_uid,
 			  content = EXCLUDED.content,
-			  content_revision = EXCLUDED.content_revision
-			WHERE issue_vector_mirror.content_revision <> EXCLUDED.content_revision
-			   OR issue_vector_mirror.project_uid <> EXCLUDED.project_uid`,
+			  content_revision = EXCLUDED.content_revision`,
 			issue.UID, issue.ProjectUID, embedding.EmbedText(issue.Title, issue.Body), issue.ContentRevision)
 		if err != nil {
 			return 0, fmt.Errorf("vector: upsert postgres mirror row %s: %w", issue.UID, err)

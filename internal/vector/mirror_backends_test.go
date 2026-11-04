@@ -3,15 +3,11 @@ package vector_test
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/db/pgstore"
-	"go.kenn.io/kata/internal/db/sqlitestore"
 	"go.kenn.io/kata/internal/embedding"
-	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/internal/vector"
 	kitvec "go.kenn.io/kit/vector"
 )
@@ -22,29 +18,7 @@ func TestRefreshMirrorMatchesLiveFeedAcrossBackends(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			ctx := t.Context()
-			var store db.Storage
-			var idx *vector.Index
-			if backend == "sqlite" {
-				s, err := sqlitestore.Open(ctx, filepath.Join(t.TempDir(), "canonical.db"))
-				require.NoError(t, err)
-				store = s
-				t.Cleanup(func() { require.NoError(t, s.Close()) })
-				idx, err = vector.Open(ctx, filepath.Join(t.TempDir(), "vectors.db"))
-				require.NoError(t, err)
-				t.Cleanup(func() { require.NoError(t, idx.Close()) })
-			} else {
-				dsn, cleanup := testenv.NewPostgresWithPgvectorContainer(t, ctx)
-				t.Cleanup(cleanup)
-				s, err := pgstore.Open(ctx, dsn)
-				require.NoError(t, err)
-				store = s
-				t.Cleanup(func() { require.NoError(t, s.Close()) })
-				idx, err = vector.OpenPostgres(ctx, s.DB)
-				require.NoError(t, err)
-				release, err := idx.AcquireReconcilerLease(ctx)
-				require.NoError(t, err)
-				t.Cleanup(func() { require.NoError(t, release()) })
-			}
+			store, idx := openVectorBackend(t, backend)
 			project, err := store.CreateProject(ctx, "source-project")
 			require.NoError(t, err)
 			target, err := store.CreateProject(ctx, "target-project")
