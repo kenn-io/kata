@@ -169,3 +169,40 @@ func TestCronJobEnabledCommands(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, resumed.Body.Job.Definition.Enabled)
 }
+
+// Project controls are finite JSON commands, accept no request file, and retain
+// the original pause reason on retries.
+func TestCronProjectPauseCommands(t *testing.T) {
+	t.Setenv("KATA_AUTHOR", "operator")
+	env := testenv.New(t)
+	_, err := env.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	for _, step := range []struct {
+		args            []string
+		changed, paused bool
+	}{
+		{[]string{"pause", "--reason", "Maintenance"}, true, true},
+		{[]string{"pause", "--reason", "Retry"}, false, true},
+		{[]string{"resume"}, true, false},
+	} {
+		resetFlags(t)
+		root := newRootCmd()
+		var out, diagnostics bytes.Buffer
+		root.SetOut(&out)
+		root.SetErr(&diagnostics)
+		root.SetContext(contextWithBaseURL(t.Context(), env.URL))
+		root.SetArgs(append([]string{"--project", "example-project", "--json", "cron"}, step.args...))
+		require.NoError(t, root.Execute(), diagnostics.String())
+		var response struct {
+			Pause   *db.CronProjectPause `json:"project_pause"`
+			Changed bool                 `json:"changed"`
+		}
+		require.NoError(t, json.Unmarshal(out.Bytes(), &response))
+		require.Equal(t, step.changed, response.Changed)
+		require.Equal(t, step.paused, response.Pause != nil)
+		if response.Pause != nil {
+			require.Equal(t, "operator", response.Pause.PausedBy)
+			require.Equal(t, "Maintenance", response.Pause.Reason)
+		}
+	}
+}

@@ -15,6 +15,7 @@ import (
 func registerCronDefinitionHandlers(h huma.API, cfg ServerConfig) {
 	registerCronJobHandlers(h, cfg)
 	registerCronWorkflowHandlers(h, cfg)
+	registerCronControlHandlers(h, cfg)
 }
 
 func cronAPIError(ctx context.Context, cfg ServerConfig, err error, projectID int64, uid string, job bool) error {
@@ -192,7 +193,8 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 		return out, nil
 	})
 	huma.Register(h, huma.Operation{OperationID: "listCronJobs", Method: http.MethodGet, Path: path}, func(ctx context.Context, in *api.ListCronDefinitionsRequest) (*api.ListCronJobsResponse, error) {
-		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
+		project, err := activeProjectByID(ctx, cfg.DB, in.ProjectID)
+		if err != nil {
 			return nil, err
 		}
 		values, err := cfg.DB.ListCronJobs(ctx, db.CronList{ProjectID: in.ProjectID, IncludeDeleted: in.IncludeDeleted})
@@ -200,6 +202,8 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, "", true)
 		}
 		out := &api.ListCronJobsResponse{}
+		out.Body.ProjectPause = api.CronProjectPauseFromMetadata(project.Metadata)
+		out.Body.Controls = cronControls()
 		out.Body.Jobs = []api.CronJob{}
 		for _, value := range values {
 			out.Body.Jobs = append(out.Body.Jobs, api.CronJobFrom(value))

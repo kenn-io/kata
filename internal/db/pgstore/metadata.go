@@ -116,6 +116,9 @@ func (s *Store) patchProjectMetadata(
 	run metadataTxRunner,
 ) (db.PatchProjectMetadataOut, error) {
 	var output db.PatchProjectMetadataOut
+	if err := db.CheckCronProjectMetadataWrite(input.Patch); err != nil {
+		return output, err
+	}
 	for key, raw := range input.Patch {
 		if err := metadata.Validate(metadata.ProjectRegistry, key, raw); err != nil {
 			return output, fmt.Errorf("validate %q: %w", key, err)

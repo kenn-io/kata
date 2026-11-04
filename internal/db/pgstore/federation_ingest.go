@@ -119,6 +119,9 @@ func (s *Store) IngestFederationEvents(
 			); err != nil {
 				return err
 			}
+			if err := db.ValidateCronControlEvent(event, ""); err != nil {
+				return err
+			}
 			if err := db.ValidateEmbeddingProducerEvent(event, ""); err != nil {
 				return err
 			}

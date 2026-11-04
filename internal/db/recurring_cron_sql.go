@@ -218,6 +218,9 @@ func (a CronSQL) DispatchRecurring(ctx context.Context, in DispatchRecurringCron
 		if err != nil {
 			return err
 		}
+		if CronProjectPauseFromMetadata(project.Metadata) != nil {
+			return nil
+		}
 		row, err := scanCron(tx.QueryRowContext(ctx, `SELECT `+cronDefinitionColumns+` FROM cron_jobs WHERE project_id=$1 AND uid=$2`, in.ProjectID, in.JobUID))
 		if errors.Is(err, ErrNotFound) {
 			return nil

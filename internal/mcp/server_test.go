@@ -295,6 +295,8 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 		"kata.cron_job_update",
 		"kata.cron_jobs",
 		"kata.cron_new_uid",
+		"kata.cron_project_pause",
+		"kata.cron_project_resume",
 		"kata.cron_workflows",
 		"kata.cron_workflow",
 		"kata.cron_workflow_create",
@@ -376,6 +378,7 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 	sort.Strings(wantNames)
 	gotNames := make([]string, 0, len(result.Tools))
 	projectSelectors := map[string]bool{
+		"kata.cron_project_pause": true, "kata.cron_project_resume": true,
 		"kata.cron_workflows": true, "kata.cron_workflow": true, "kata.cron_workflow_create": true, "kata.cron_workflow_update": true, "kata.cron_workflow_delete": true, "kata.cron_workflow_restore": true, "kata.cron_runs": true, "kata.cron_run": true, "kata.cron_run_observe": true,
 		"kata.cron_new_uid": true, "kata.cron_capabilities": true, "kata.cron_jobs": true, "kata.cron_job": true, "kata.cron_job_create": true, "kata.cron_job_update": true, "kata.cron_job_delete": true, "kata.cron_job_pause": true, "kata.cron_job_restore": true, "kata.cron_job_resume": true,
 		"kata.federation_bridge_connect": true, "kata.federation_bridge_disconnect": true, "kata.federation_bridge_status": true,
@@ -485,6 +488,7 @@ func TestServerToolAnnotationsMatchMutationRisk(t *testing.T) {
 	// Mixed-mode tools with any overwriting or removing input (forced
 	// claims, lease release, recurrence patch) advertise destructive.
 	additive := map[string]bool{
+		"kata.cron_project_pause": true, "kata.cron_project_resume": true,
 		"kata.cron_workflow_create": true, "kata.cron_workflow_restore": true,
 		"kata.cron_job_create": true, "kata.cron_job_pause": true, "kata.cron_job_restore": true, "kata.cron_job_resume": true,
 		"kata.team_create": true,

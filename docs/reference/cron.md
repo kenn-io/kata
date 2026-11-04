@@ -136,6 +136,41 @@ native writes but lack the pause and resume routes.
 
 Adapter jobs stay local, and the adapter must honor the enabled flag itself.
 
+### Pause cron for a whole project
+
+Run `kata cron pause --reason "Maintenance" --json` at the project's owning
+hub to stop native cron delivery across the project. Run `kata cron resume
+--json` to resume. Both commands preserve every job's enabled flag and catch-up
+policy. Repeating pause retains the first actor, timestamp, and reason; repeating
+resume changes nothing. Reasons can be empty and are limited to 256 bytes.
+
+Only the root can change this policy. A spoke returns a conflict with an
+owning-hub hint, even when federation is disabled. Any ordinary project writer
+at the root may act. MCP exposes `kata.cron_project_pause` with an optional
+`reason` and `kata.cron_project_resume`. REST uses PUT and DELETE
+`/api/v1/projects/{project_id}/cron/pause`, with optional `actor` and `reason`.
+Responses return `project_pause` and `changed`.
+
+Capabilities and job lists expose `project_pause` as an object or `null`, plus
+`controls: ["job_pause", "project_pause"]`. A present pause contains
+`paused_by`, `paused_at`, and `reason`. Malformed legacy state reads as
+`invalid: true` and still stops delivery; resume clears it. The TUI shows the
+project policy on Jobs, Runs, and Workflows. Use CLI or MCP to change it.
+
+Native delivery leaves its saved position untouched while paused. Resuming
+follows each job's catch-up policy; `all` can create a backlog of child issues.
+Already running work may finish and report evidence. The policy does not stop
+RRULE issue recurrence.
+
+Adapters must read the current policy and start no new scheduled work while
+`project_pause` is present. Enforcement by external adapters is advisory;
+Kata does not terminate their processes. Upgrade the root first: older daemons
+carry `cron.pause` as opaque project metadata but do not enforce it. Missing
+`controls` means unsupported. The generic metadata API rejects `cron.pause`
+and the reserved `cron.request.` prefix; use typed cron routes for control
+state. These controls replicate through existing project metadata events,
+without a new federation feature requirement.
+
 ### Request files
 
 The `--file` body for `create` and `update` requires both `name` and
@@ -387,7 +422,8 @@ Create, update, delete, and restore retain ordinary authorization and expected
 revision checks. Once bound, a job's parent cannot change and the job cannot
 become an adapter job. Edits preserve committed progress and the original
 interval anchor; an unfinished latest scan restarts against the new definition.
-Disable the job or close its parent to pause delivery. An archived project or a
+Use the [project cron pause](#pause-cron-for-a-whole-project), disable the job,
+or close its parent to pause delivery. An archived project or a
 deleted parent also pauses it. Re-enabling, reopening, or restoring resumes the
 configured catch-up policy. A pause does not skip occurrences: with
 `catchup: "all"`, resuming creates every child missed while paused. This
@@ -482,7 +518,7 @@ checkout. Kata stores the definitions and run evidence.
 ## Capabilities
 
 `kata cron capabilities --json` reads the project's UID and advertised
-`event_features` without changing state. The corresponding GET is
+`event_features`, `controls`, and `project_pause` without changing state. The corresponding GET is
 `/api/v1/projects/{project_id}/cron/capabilities`; the
 `X-Kata-Event-Features` header advertises only `cron_v1`, covering portable
 definitions, run observations, and native recurring child delivery. Missing,
@@ -660,7 +696,8 @@ Local transcripts, process IDs, session handles, credentials, and delivery
 buffers are not shared run evidence. An adapter may buffer a failed observation
 write and retry it later without blocking its own work.
 
-The adapter must refresh current definitions before starting new scheduled work;
+The adapter must read the [project cron pause](#pause-cron-for-a-whole-project)
+and refresh current definitions before starting new scheduled work;
 offline cached data is for labeled reads. Portable `cron` triggers use the
 configured trigger timezone. Issue-date triggers use the planning-date instant
 above: issue timezone, recurrence fallback, daemon default and UTC remain

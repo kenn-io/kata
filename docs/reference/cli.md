@@ -1921,7 +1921,7 @@ such as `kata tui abc4`, to open that issue's detail view directly. The ref
 accepts the same bare short ID, qualified short ID, and full UID forms as
 `kata show`.
 
-**Cron tabs.** Press `1` for Kata, `2` for Jobs, `3` for Runs, or `4` for Workflows. Runs and Workflows are read-only; Jobs can create and change jobs (below). Cron tabs show the current project. In All projects, press `P` to pick one. Each tab keeps its filter and position when you switch tabs. Returning to Kata preserves the issue you were browsing.
+**Cron tabs.** A paused project shows its policy on all three cron tabs; change it with [`kata cron pause` or `resume`](cron.md#pause-cron-for-a-whole-project). Press `1` for Kata, `2` for Jobs, `3` for Runs, or `4` for Workflows. Runs and Workflows are read-only; Jobs can create and change jobs (below). Cron tabs show the current project. In All projects, press `P` to pick one. Each tab keeps its filter and position when you switch tabs. Returning to Kata preserves the issue you were browsing.
 
 Press `p` in the Jobs list or job detail to [pause or resume the job](cron.md#pause-and-resume-a-job).
 
@@ -2255,6 +2255,8 @@ kata cron job restore <job-uid> --expected-event-uid <event-uid> --json
 kata cron job pause <job-uid> [--expected-event-uid <event-uid>] --json
 kata cron job resume <job-uid> [--expected-event-uid <event-uid>] --json
 kata cron capabilities --json
+kata cron pause [--reason <reason>] --json
+kata cron resume --json
 kata cron run observe <run-uid> --json-input observation.json --json
 kata cron run list [--limit 100] [--before-uid <uid>] [--job-uid <job-uid>] --json
 kata cron run show <run-uid> --json

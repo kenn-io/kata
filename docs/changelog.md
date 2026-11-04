@@ -34,6 +34,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   that predate these actions. Pausing no longer fails on soft-deleted
   dependencies in the same project, and a native job with a deleted parent can
   be resumed. See [Pause and resume a job](reference/cron.md#pause-and-resume-a-job).
+- Stop native cron delivery for a whole project with `kata cron pause` and
+  resume with each job's flags and catch-up policy preserved. Adapters can read
+  the shared pause, and all TUI cron tabs show it. Upgrade the owning hub first;
+  external adapters must honor the policy. See [Project cron pause](reference/cron.md#pause-cron-for-a-whole-project).
 
 - Load the web UI's issue list and graph on SQLite and PostgreSQL stores with
   tens of thousands of issues without exceeding SQL parameter limits.

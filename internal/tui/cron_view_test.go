@@ -675,3 +675,10 @@ func TestCronSearchClickGuards(t *testing.T) {
 		require.False(t, m.cron.filtering, state)
 	}
 }
+
+func (a *cronReadTestAPI) readCronProjectState(_ context.Context, id int64) (cronProjectState, error) {
+	if id != 7 {
+		return cronProjectState{}, fmt.Errorf("unexpected project %d", id)
+	}
+	return a.data.project, a.data.projectErr
+}
