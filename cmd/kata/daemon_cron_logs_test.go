@@ -77,7 +77,7 @@ func TestCronLogSnapshotRetainsPartialRecord(t *testing.T) {
 	f := &cronLogFilter{}
 	mark, err := runDaemonLogOnce(t.Context(), path, &out, io.Discard, 100, f)
 	require.NoError(t, err)
-	fh, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	fh, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // G304: test-controlled temp path
 	require.NoError(t, err)
 	_, err = fh.WriteString("}\n")
 	require.NoError(t, err)
@@ -123,6 +123,23 @@ func TestCronLogDrainStopsAtPinnedReplacement(t *testing.T) {
 	var out bytes.Buffer
 	require.NoError(t, drainRotatedLog(t.Context(), path, &out, io.Discard, &followState{prevInfo: old}, pinned, &cronLogFilter{}))
 	require.Equal(t, "{\"n\":1}\n", out.String())
+}
+
+func TestCronLogDrainResumesFromOldestRetainedAfterCursorEviction(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dispatch.jsonl")
+	evicted := path + ".4"
+	require.NoError(t, os.WriteFile(evicted, []byte("{\"n\":0}\n"), 0o600))
+	old, err := os.Stat(evicted)
+	require.NoError(t, err)
+	require.NoError(t, os.Remove(evicted))
+	for name, n := range map[string]int{path + ".3": 1, path + ".2": 2, path + ".1": 3, path: 4} {
+		require.NoError(t, os.WriteFile(name, []byte(fmt.Sprintf("{\"n\":%d}\n", n)), 0o600))
+	}
+	pinned, err := os.Stat(path)
+	require.NoError(t, err)
+	var out bytes.Buffer
+	require.NoError(t, drainRotatedLog(t.Context(), path, &out, io.Discard, &followState{prevInfo: old}, pinned, &cronLogFilter{}))
+	require.Equal(t, "{\"n\":1}\n{\"n\":2}\n{\"n\":3}\n", out.String())
 }
 
 type cronRotationWriter struct {

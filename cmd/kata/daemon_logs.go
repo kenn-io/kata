@@ -357,6 +357,9 @@ func followActive(ctx context.Context, stdout, stderr io.Writer, active string, 
 		case <-time.After(200 * time.Millisecond):
 		}
 		if err := tailTick(ctx, active, stdout, stderr, st, f); err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
 			return err
 		}
 	}
@@ -366,7 +369,7 @@ func followActive(ctx context.Context, stdout, stderr io.Writer, active string, 
 // rotation via SameFile change or size shrink, and emits any newly
 // appended lines.
 func tailTick(ctx context.Context, active string, stdout, stderr io.Writer, st *followState, f daemonLogFilter) error {
-	fh, err := os.Open(active) //nolint:gosec // daemon-controlled log path
+	fh, err := openLogFileForTail(ctx, active)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
@@ -406,23 +409,26 @@ func drainRotatedLog(ctx context.Context, active string, stdout, stderr io.Write
 		return err
 	}
 	defer closePinnedLogs(files)
-	found := false
-	for _, file := range files {
+	start, end := 0, len(files)
+	from := int64(0)
+	for i, file := range files {
 		info, err := file.Stat()
 		if err != nil {
 			return err
 		}
 		if os.SameFile(info, stop) {
+			end = i
 			break
 		}
-		from := int64(0)
-		if !found {
-			if !os.SameFile(st.prevInfo, info) {
-				continue
-			}
-			found, from = true, st.prevSize
+		if st.prevInfo != nil && os.SameFile(st.prevInfo, info) {
+			start, from = i, st.prevSize
 		}
-		if _, err := emitLogLines(ctx, file, file.Name(), from, stdout, stderr, f); err != nil {
+	}
+	for i := start; i < end; i++ {
+		if i != start {
+			from = 0
+		}
+		if _, err := emitLogLines(ctx, files[i], files[i].Name(), from, stdout, stderr, f); err != nil {
 			return err
 		}
 	}
@@ -452,7 +458,7 @@ func pinRotatedLogs(ctx context.Context, active string) ([]*os.File, error) {
 		if path == active {
 			break
 		}
-		file, err := os.Open(path) //nolint:gosec // daemon-controlled rotation paths
+		file, err := openLogFileForTail(ctx, path)
 		if errors.Is(err, fs.ErrNotExist) {
 			changed = true
 			break

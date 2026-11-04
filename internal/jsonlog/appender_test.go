@@ -48,7 +48,7 @@ func TestAppenderConcurrentLines(t *testing.T) {
 		wg.Go(func() { require.NoError(t, a.Append(t.Context(), "line")) })
 	}
 	wg.Wait()
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: test-controlled path under t.TempDir()
 	require.NoError(t, err)
 	require.Equal(t, 30*len("\"line\"\n"), len(raw))
 }
@@ -61,7 +61,7 @@ func TestAppenderRecoversUnterminatedRecord(t *testing.T) {
 	a := New(path, 0, 0)
 	t.Cleanup(func() { require.NoError(t, a.Close()) })
 	require.NoError(t, a.Append(t.Context(), map[string]int{"version": 1}))
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: test-controlled path under t.TempDir()
 	require.NoError(t, err)
 	require.Equal(t, "{\"version\":\n{\"version\":1}\n", string(raw))
 }
