@@ -48,6 +48,10 @@ func (f *undoTestAPI) GetIssueDetail(_ context.Context, _ int64, _ string) (*Iss
 	return &IssueDetail{Issue: &issue}, nil
 }
 
+func (f *undoTestAPI) readIssue(ctx context.Context, projectID int64, ref string) (*IssueDetail, error) {
+	return f.GetIssueDetail(ctx, projectID, ref)
+}
+
 func (f *undoTestAPI) completeResponse(resp *MutationResp) *MutationResp {
 	if resp != nil && resp.Issue != nil {
 		if resp.Issue.UID == "" {

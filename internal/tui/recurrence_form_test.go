@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -263,6 +264,58 @@ func TestRecurrenceKeyIsDetailOnly(t *testing.T) {
 			assert.Nil(t, h.m.toast)
 		})
 	}
+}
+
+func TestRecurrenceKeyWaitsForDetail(t *testing.T) {
+	h := newRecurrenceHarness(t, viewList)
+	h.startBehindTheTUI("FREQ=DAILY", "2026-11-09", "Europe/Paris")
+	h.m = h.m.seedOpenDetail(h.m.list.issues[0])
+	_ = h.m.fetchOpenDetail()
+	t.Cleanup(h.m.detail.cancelReads)
+	require.NotZero(t, h.m.detail.reads.remaining&1)
+
+	h.key(runeKey('O'))
+
+	assert.Equal(t, inputNone, h.m.input.kind)
+	assert.Nil(t, h.m.toast, "loading must not report a stopped recurrence")
+	h.refreshDetail()
+	h.m.detail.loading = true
+	h.key(runeKey('O'))
+	assert.Equal(t, inputNone, h.m.input.kind)
+	assert.Nil(t, h.m.toast)
+	h.m.detail.loading = false
+	h.open()
+	rule, _, _ := h.values()
+	assert.Equal(t, "FREQ=DAILY", rule)
+}
+
+func TestRecurrenceUndoBodyEditIgnoresScheduleList(t *testing.T) {
+	h := newRecurrenceHarness(t, viewDetail)
+	h.startBehindTheTUI("FREQ=DAILY", "2026-11-09", "Europe/Paris")
+	base := h.client.KataAPI.(*Client)
+	base.setHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(r.URL.Path, "/recurrences") {
+			<-r.Context().Done()
+			return nil, r.Context().Err()
+		}
+		return h.env.HTTP.Do(r)
+	})})
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	resp, err := h.client.EditBody(ctx, h.issue.ProjectID, h.issue.UID, "revised body", "alice")
+	require.NoError(t, err)
+	require.NotNil(t, resp.undo.entry)
+	resp.undo.complete()
+	current, err := h.env.DB.IssueByUID(t.Context(), h.issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "revised body", current.Body)
+
+	out := h.client.undo(ctx, *resp.undo.entry, undoOptions{})
+	require.NoError(t, out.err)
+	out.attempt.complete()
+	current, err = h.env.DB.IssueByUID(t.Context(), h.issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, "body", current.Body)
 }
 
 func TestRecurrenceKeyRefusesMissingRecurrence(t *testing.T) {
