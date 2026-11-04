@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -47,6 +47,13 @@ kata cron workflow list --json
 kata cron job update <job-uid> --expected-event-uid <event-uid> --file replacement.json --json
 kata cron job delete <job-uid> --expected-event-uid <event-uid> --json
 ```
+
+Job and workflow responses include `author`, the original creator, and
+`updated_by`, the recorded actor of the winning definition event. Creating,
+editing, deleting, or restoring a definition updates its editor. `updated_by`
+is `null` when that event is not held locally, such as after a federation
+baseline replaces the original history. These fields are available in API
+responses and CLI JSON and agent output.
 
 Creation requires no expected event UID. Updates, deletion, and restoration
 require the current `definition_event_uid` returned by `show`, passed as

@@ -44,11 +44,13 @@ func checkCronBackupTombstoneRoundTrip(t *testing.T, source db.Storage, backend 
 	require.NotNil(t, restoredJob.DeletedAt, "a deleted job stays deleted after restore")
 	require.True(t, deletedJob.DeletedAt.Equal(*restoredJob.DeletedAt))
 	require.Equal(t, deletedJob.DefinitionEventUID, restoredJob.DefinitionEventUID)
+	require.Equal(t, new("worker"), restoredJob.UpdatedBy)
 	restoredWorkflow, err := restored.CronWorkflow(ctx, target.ID, workflow.UID)
 	require.NoError(t, err)
 	require.NotNil(t, restoredWorkflow.DeletedAt, "a deleted workflow stays deleted after restore")
 	require.True(t, deletedWorkflow.DeletedAt.Equal(*restoredWorkflow.DeletedAt))
 	require.Equal(t, deletedWorkflow.DefinitionEventUID, restoredWorkflow.DefinitionEventUID)
+	require.Equal(t, new("worker"), restoredWorkflow.UpdatedBy)
 
 	liveJobs, err := restored.ListCronJobs(ctx, db.CronList{ProjectID: target.ID})
 	require.NoError(t, err)

@@ -28,6 +28,9 @@ type CronDefinition struct {
 	CreatedAt          time.Time         `json:"created_at"`
 	UpdatedAt          time.Time         `json:"updated_at"`
 	DeletedAt          *time.Time        `json:"deleted_at,omitempty"`
+
+	// UpdatedBy is derived from the winning event and is not a portable record field.
+	UpdatedBy *string `json:"-"`
 }
 
 // CronJob combines durable document provenance with a portable job.
