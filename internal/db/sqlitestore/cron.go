@@ -75,6 +75,6 @@ func (d *Store) DispatchRecurringCron(ctx context.Context, in db.DispatchRecurri
 }
 
 // SetCronProjectPause changes root-owned policy in the cron project transaction.
-func (s *Store) SetCronProjectPause(ctx context.Context, in db.SetCronProjectPauseIn) (db.PatchProjectMetadataOut, error) {
-	return s.cronSQL().SetProjectPause(ctx, in)
+func (d *Store) SetCronProjectPause(ctx context.Context, in db.SetCronProjectPauseIn) (db.PatchProjectMetadataOut, error) {
+	return d.cronSQL().SetProjectPause(ctx, in)
 }
