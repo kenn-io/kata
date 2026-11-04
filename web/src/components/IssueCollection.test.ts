@@ -662,27 +662,40 @@ describe('IssueCollection', () => {
       title: 'Child task',
       parent_short_id: parent.short_id,
     })
-    render(IssueCollection, {
-      props: {
-        currentView: viewWithIssues([parent, child]),
-        issueCatalog: [parent, child],
-        selectedIssueUID: null,
-        loading: false,
-        onSelect: () => {},
-      },
-    })
+    for (const view of [
+      viewWithIssues([parent, child]),
+      {
+        name: 'logbook',
+        fetched_at: currentView.fetched_at,
+        groups: [
+          { id: '2026-05-16', title: 'May 16', issues: [parent] },
+          { id: '2026-05-15', title: 'May 15', issues: [child] },
+        ],
+      } satisfies KataCurrentView,
+    ]) {
+      const { unmount } = render(IssueCollection, {
+        props: {
+          currentView: view,
+          issueCatalog: [parent, child],
+          selectedIssueUID: null,
+          loading: false,
+          onSelect: () => {},
+        },
+      })
 
-    expect(screen.queryByRole('button', { name: /Child task/ })).toBeNull()
+      expect(screen.queryByRole('button', { name: /Child task/ })).toBeNull()
 
-    const parentRow = screen.getByRole('button', { name: /Parent task/ })
-    await fireEvent.keyDown(parentRow, { key: 'ArrowRight' })
+      const parentRow = screen.getByRole('button', { name: /Parent task/ })
+      await fireEvent.keyDown(parentRow, { key: 'ArrowRight' })
 
-    await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: /Child task/ })).toHaveLength(1)
-    })
-    expect(
-      screen.getByRole('button', { name: /Child task/ }).classList.contains('row--child'),
-    ).toBe(true)
+      await waitFor(() => {
+        expect(screen.getAllByRole('button', { name: /Child task/ })).toHaveLength(1)
+      })
+      expect(
+        screen.getByRole('button', { name: /Child task/ }).classList.contains('row--child'),
+      ).toBe(true)
+      unmount()
+    }
   })
 
   it('bounds identity reads as Logbook date groups increase', () => {
@@ -729,54 +742,8 @@ describe('IssueCollection', () => {
       unmount()
     }
 
-    expect(readsByGroupCount[0]).toBeGreaterThan(0)
     // Sixteen times as many groups should stay within a generous constant factor.
     expect(readsByGroupCount[1]).toBeLessThan(readsByGroupCount[0]! * 3)
-  })
-
-  it('nests a child under its parent across date groups', async () => {
-    const parent = task({
-      uid: 'issue-parent',
-      short_id: 'parent',
-      qualified_id: 'example-project#parent',
-      title: 'Parent task',
-      child_counts: { open: 1, total: 1 },
-    })
-    const child = task({
-      uid: 'issue-child',
-      short_id: 'child',
-      qualified_id: 'example-project#child',
-      title: 'Child task',
-      parent_short_id: parent.short_id,
-    })
-    render(IssueCollection, {
-      props: {
-        currentView: {
-          name: 'logbook',
-          fetched_at: currentView.fetched_at,
-          groups: [
-            { id: '2026-05-16', title: 'May 16', issues: [parent] },
-            { id: '2026-05-15', title: 'May 15', issues: [child] },
-          ],
-        },
-        issueCatalog: [parent, child],
-        selectedIssueUID: null,
-        loading: false,
-        onSelect: () => {},
-      },
-    })
-
-    expect(screen.queryByRole('button', { name: /Child task/ })).toBeNull()
-
-    const parentRow = screen.getByRole('button', { name: /Parent task/ })
-    await fireEvent.keyDown(parentRow, { key: 'ArrowRight' })
-
-    await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: /Child task/ })).toHaveLength(1)
-    })
-    expect(
-      screen.getByRole('button', { name: /Child task/ }).classList.contains('row--child'),
-    ).toBe(true)
   })
 
   it('uses the actual parent identity for cross-project hierarchy', async () => {
