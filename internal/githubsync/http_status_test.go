@@ -492,7 +492,8 @@ func TestGitHubStatusBatchReadUsesOneGraphQLRequest(t *testing.T) {
 			f := NewHTTPFetcher(HTTPFetcherConfig{Client: server.Client(), CredentialResolver: newStaticHTTPFetcherTestResolver("test-token"), RESTBaseURLOverride: server.URL, GraphQLURLOverride: server.URL + "/graphql"})
 			session, err := f.ForBinding(t.Context(), statusConfig().Binding())
 			require.NoError(t, err)
-			results := session.(StatusBatchSession).ReadStatuses(t.Context(), statusConfig(), []StatusLocator{{ExternalID: "issue-id:456", Number: 7}, {ExternalID: "issue-id:457", Number: 8}, {ExternalID: "issue-id:458", Number: 9}, {ExternalID: "issue-id:459", Number: 10}})
+			results, err := session.(StatusBatchSession).ReadStatuses(t.Context(), statusConfig(), []StatusLocator{{ExternalID: "issue-id:456", Number: 7}, {ExternalID: "issue-id:457", Number: 8}, {ExternalID: "issue-id:458", Number: 9}, {ExternalID: "issue-id:459", Number: 10}})
+			require.NoError(t, err)
 			require.Len(t, results, 4)
 			require.NoError(t, results["issue-id:456"].Err)
 			require.Equal(t, "open", results["issue-id:456"].Observation.Status)
@@ -538,15 +539,22 @@ func TestGitHubStatusBatchRateLimitAndUnsupportedFallback(t *testing.T) {
 			f := NewHTTPFetcher(HTTPFetcherConfig{Client: server.Client(), CredentialResolver: newStaticHTTPFetcherTestResolver("test-token"), RESTBaseURLOverride: server.URL, GraphQLURLOverride: server.URL + "/graphql"})
 			session, err := f.ForBinding(t.Context(), statusConfig().Binding())
 			require.NoError(t, err)
-			require.Nil(t, session.(StatusBatchSession).ReadStatuses(t.Context(), statusConfig(), []StatusLocator{{ExternalID: "issue-id:456", Number: 7}}))
-			obs, err := session.(StatusSession).ReadStatus(t.Context(), statusConfig(), "issue-id:456", 7)
-			require.NoError(t, err)
-			require.Equal(t, "open", obs.Status)
-			require.Equal(t, 3, requests)
+			results, err := session.(StatusBatchSession).ReadStatuses(t.Context(), statusConfig(), []StatusLocator{{ExternalID: "issue-id:456", Number: 7}})
+			require.Nil(t, results)
+			if limited {
+				var rate *issuesync.StatusError
+				require.ErrorAs(t, err, &rate)
+				require.Equal(t, 7*time.Second, rate.RetryAfter)
+				require.Equal(t, 2, requests)
+			} else {
+				require.NoError(t, err)
+				obs, err := session.(StatusSession).ReadStatus(t.Context(), statusConfig(), "issue-id:456", 7)
+				require.NoError(t, err)
+				require.Equal(t, "open", obs.Status)
+			}
 			repo, err := session.Repository(t.Context(), "github.com", "example-owner", "example-repo")
 			require.NoError(t, err)
 			require.Equal(t, int64(123), repo.ID)
-			require.Equal(t, 4, requests)
 		})
 	}
 }
@@ -573,7 +581,8 @@ func TestGitHubStatusBatchReadSkipsInvalidTargets(t *testing.T) {
 	f := NewHTTPFetcher(HTTPFetcherConfig{Client: server.Client(), CredentialResolver: newStaticHTTPFetcherTestResolver("test-token"), RESTBaseURLOverride: server.URL, GraphQLURLOverride: server.URL + "/graphql"})
 	session, err := f.ForBinding(t.Context(), statusConfig().Binding())
 	require.NoError(t, err)
-	results := session.(StatusBatchSession).ReadStatuses(t.Context(), statusConfig(), []StatusLocator{{ExternalID: "issue-id:456", Number: 7}, {ExternalID: "bad-id", Number: 9}, {ExternalID: "issue-id:457", Number: 8}})
+	results, err := session.(StatusBatchSession).ReadStatuses(t.Context(), statusConfig(), []StatusLocator{{ExternalID: "issue-id:456", Number: 7}, {ExternalID: "bad-id", Number: 9}, {ExternalID: "issue-id:457", Number: 8}})
+	require.NoError(t, err)
 	require.Len(t, results, 3)
 	require.ErrorContains(t, results["bad-id"].Err, "canonical global issue identity")
 	require.NoError(t, results["issue-id:456"].Err)
@@ -581,4 +590,32 @@ func TestGitHubStatusBatchReadSkipsInvalidTargets(t *testing.T) {
 	require.NoError(t, results["issue-id:457"].Err)
 	require.Equal(t, "closed", results["issue-id:457"].Observation.Status)
 	require.Equal(t, 2, requests)
+	_, err = session.(StatusBatchSession).ReadStatuses(t.Context(), statusConfig(), make([]StatusLocator, 101))
+	require.Error(t, err)
+	require.Equal(t, 2, requests)
+}
+
+func TestGitHubStatusBatchUnsupportedStateReasonFallsBack(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			_, err := io.WriteString(w, `{"errors":[{"type":"GRAPHQL_VALIDATION_FAILED","extensions":{"fieldName":"stateReason"}}]}`)
+			require.NoError(t, err)
+			return
+		}
+		if r.URL.Path == "/repos/example-owner/example-repo" {
+			require.NoError(t, json.MarshalWrite(w, map[string]any{"id": 123, "full_name": "example-owner/example-repo"}))
+			return
+		}
+		require.NoError(t, json.MarshalWrite(w, statusIssueWire("open")))
+	}))
+	defer server.Close()
+	f := NewHTTPFetcher(HTTPFetcherConfig{Client: server.Client(), CredentialResolver: newStaticHTTPFetcherTestResolver("test-token"), RESTBaseURLOverride: server.URL, GraphQLURLOverride: server.URL + "/graphql"})
+	session, err := f.ForBinding(t.Context(), statusConfig().Binding())
+	require.NoError(t, err)
+	results, err := session.(StatusBatchSession).ReadStatuses(t.Context(), statusConfig(), []StatusLocator{{ExternalID: "issue-id:456", Number: 7}})
+	require.NoError(t, err)
+	require.Nil(t, results)
+	obs, err := session.(StatusSession).ReadStatus(t.Context(), statusConfig(), "issue-id:456", 7)
+	require.NoError(t, err)
+	require.Equal(t, "open", obs.Status)
 }

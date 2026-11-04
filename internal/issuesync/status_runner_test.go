@@ -14,7 +14,7 @@ import (
 
 type statusTestAdapter struct {
 	*testAdapter
-	run *statusTestRun
+	run StatusRun
 }
 
 func (*statusTestAdapter) Provider() string { return "notion" }
@@ -58,7 +58,7 @@ func statusProviderFixture(t *testing.T, n int, provider string) (*sqlitestore.S
 	}
 	return s, b, mappings, at
 }
-func statusAdapter(_ db.IssueSyncBinding, run *statusTestRun) *statusTestAdapter {
+func statusAdapter(_ db.IssueSyncBinding, run StatusRun) *statusTestAdapter {
 	return &statusTestAdapter{run: run, testAdapter: &testAdapter{prepare: func(_ context.Context, binding db.IssueSyncBinding, _ time.Time) (Prepared, error) {
 		return Prepared{Binding: binding, Batch: db.ImportBatchParams{Actor: "notion-sync"}}, nil
 	}}}
@@ -470,20 +470,13 @@ func TestStatusRunnerSuccessCannotAdvanceCursorAfterOperatorEdit(t *testing.T) {
 
 type prefetchStatusTestRun struct {
 	*statusTestRun
-	mappings []db.IssueStatusMapping
+	mappings    []db.IssueStatusMapping
+	prefetchErr error
 }
 
-func (r *prefetchStatusTestRun) PrefetchStatuses(_ context.Context, mappings []db.IssueStatusMapping) {
+func (r *prefetchStatusTestRun) PrefetchStatuses(_ context.Context, mappings []db.IssueStatusMapping) error {
 	r.mappings = mappings
-}
-
-type prefetchStatusTestAdapter struct {
-	*statusTestAdapter
-	run *prefetchStatusTestRun
-}
-
-func (a *prefetchStatusTestAdapter) OpenStatus(context.Context, db.IssueSyncBinding, time.Time) (StatusRun, error) {
-	return a.run, nil
+	return r.prefetchErr
 }
 
 func TestStatusRunnerPrefetchExcludesPendingMappings(t *testing.T) {
@@ -502,8 +495,44 @@ func TestStatusRunnerPrefetchExcludesPendingMappings(t *testing.T) {
 		require.Equal(t, ms[1].Mapping.ID, m.Mapping.ID)
 		return observed("open", at), nil
 	}
-	a := &prefetchStatusTestAdapter{statusTestAdapter: statusAdapter(b, run.statusTestRun), run: run}
+	a := statusAdapter(b, run)
 	_, err = NewRunner(RunnerConfig{Store: s, Adapter: a, Clock: func() time.Time { return at }}).RunOnce(t.Context(), b.ID)
 	require.NoError(t, err)
 	require.Len(t, run.mappings, 1)
+}
+
+func TestStatusRunnerPrefetchFailureKeepsCursor(t *testing.T) {
+	s, b, ms, at := statusFixture(t, 101)
+	failed := errors.New("batch unavailable")
+	run := &prefetchStatusTestRun{statusTestRun: &statusTestRun{}}
+	reads := 0
+	run.read = func(context.Context, db.IssueStatusMapping) (StatusObservation, error) {
+		reads++
+		return observed("open", at), nil
+	}
+	a := statusAdapter(b, run)
+	content := 0
+	a.prepare = func(_ context.Context, b db.IssueSyncBinding, _ time.Time) (Prepared, error) {
+		content++
+		return Prepared{Binding: b, Batch: db.ImportBatchParams{Actor: "notion-sync"}}, nil
+	}
+	runner := NewRunner(RunnerConfig{Store: s, Adapter: a, Clock: func() time.Time { return at }})
+	_, err := runner.RunOnce(t.Context(), b.ID)
+	require.NoError(t, err)
+	require.Equal(t, 100, reads)
+	b, err = s.IssueSyncBindingByID(t.Context(), b.ID)
+	require.NoError(t, err)
+	before, err := db.DecodeIssueStatusScan(b.Config)
+	require.NoError(t, err)
+	require.Equal(t, ms[99].Mapping.ID, before.Sweep.After)
+	run.prefetchErr = failed
+	_, err = runner.RunOnce(t.Context(), b.ID)
+	require.ErrorIs(t, err, failed)
+	require.Equal(t, 100, reads)
+	require.Equal(t, 2, content)
+	b, err = s.IssueSyncBindingByID(t.Context(), b.ID)
+	require.NoError(t, err)
+	after, err := db.DecodeIssueStatusScan(b.Config)
+	require.NoError(t, err)
+	require.Equal(t, before.Sweep, after.Sweep)
 }

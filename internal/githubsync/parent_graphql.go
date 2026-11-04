@@ -522,7 +522,7 @@ func (e parentGraphQLError) referencesUnsupportedField() bool {
 
 func isUnsupportedParentGraphQLField(field string) bool {
 	switch normalizeGraphQLErrorClass(field) {
-	case "parent", "databaseid", "fulldatabaseid":
+	case "parent", "databaseid", "fulldatabaseid", "statereason":
 		return true
 	default:
 		return false
@@ -534,7 +534,7 @@ func graphQLMessageIsUnsupportedFieldValidation(message string) bool {
 	if message == "" {
 		return false
 	}
-	for _, field := range []string{"parent", "databaseid", "fulldatabaseid"} {
+	for _, field := range []string{"parent", "databaseid", "fulldatabaseid", "statereason"} {
 		if strings.Contains(message, "field '"+field+"' doesn't exist") ||
 			strings.Contains(message, `field "`+field+`" doesn't exist`) ||
 			strings.Contains(message, "cannot query field '"+field+"' on type 'issue'") ||

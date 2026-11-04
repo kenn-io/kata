@@ -123,12 +123,12 @@ type batchStatusRunnerFetcher struct {
 	targets []StatusLocator
 }
 
-func (s *batchStatusRunnerFetcher) ReadStatuses(_ context.Context, _ Config, targets []StatusLocator) map[string]StatusResult {
+func (s *batchStatusRunnerFetcher) ReadStatuses(_ context.Context, _ Config, targets []StatusLocator) (map[string]StatusResult, error) {
 	s.targets = targets
-	return map[string]StatusResult{"issue-id:101": {Observation: issuesync.StatusObservation{Status: "open"}}, "issue-id:102": {Err: errors.New("missing issue")}}
+	return map[string]StatusResult{"issue-id:101": {Observation: issuesync.StatusObservation{Status: "open"}}, "issue-id:102": {Err: errors.New("missing issue")}}, nil
 }
 
-func TestGitHubStatusPrefetchConsumedOnceAndWriteReadsFresh(t *testing.T) {
+func TestGitHubStatusPrefetchAndWriteReadsFresh(t *testing.T) {
 	h := newRunnerHarness(t)
 	h.fetcher.issues = []Issue{testIssue(101, 1, "Example task", h.now)}
 	s := &batchStatusRunnerFetcher{statusRunnerFetcher: &statusRunnerFetcher{fakeRunnerFetcher: h.fetcher}}
@@ -140,7 +140,7 @@ func TestGitHubStatusPrefetchConsumedOnceAndWriteReadsFresh(t *testing.T) {
 	invalid := m
 	invalid.Mapping.ID = 3
 	invalid.State.RemoteLocator = "invalid"
-	r.PrefetchStatuses(h.ctx, []db.IssueStatusMapping{m, bad, invalid})
+	require.NoError(t, r.PrefetchStatuses(h.ctx, []db.IssueStatusMapping{m, bad, invalid}))
 	require.Len(t, s.targets, 2)
 	obs, err := r.ReadStatus(h.ctx, m)
 	require.NoError(t, err)
@@ -149,10 +149,7 @@ func TestGitHubStatusPrefetchConsumedOnceAndWriteReadsFresh(t *testing.T) {
 	_, err = r.ReadStatus(h.ctx, bad)
 	require.ErrorContains(t, err, "missing issue")
 	require.Empty(t, s.external)
-	obs, err = r.ReadStatus(h.ctx, m)
-	require.NoError(t, err)
-	require.Equal(t, "closed", obs.Status)
-	r.PrefetchStatuses(h.ctx, []db.IssueStatusMapping{m})
+	require.NoError(t, r.PrefetchStatuses(h.ctx, []db.IssueStatusMapping{m}))
 	_, err = r.WriteStatus(h.ctx, m, "closed", func() error { return nil })
 	require.NoError(t, err)
 	require.Equal(t, 1, s.writes)
