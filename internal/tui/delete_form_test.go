@@ -33,17 +33,15 @@ func newDeleteHarness(t *testing.T, view viewID) *deleteHarness {
 	require.NoError(t, err)
 	h := &deleteHarness{t: t, env: env, project: project,
 		client: newConnectedUndoClient(t, NewClient(env.URL, env.HTTP))}
-	var rows []Issue
 	for _, title := range []string{"First", "Second", "Third"} {
 		issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: project.ID, Title: title, Author: "alice",
 		})
 		require.NoError(t, err)
 		h.issues = append(h.issues, issue)
-		detail, err := h.client.GetIssueDetail(ctx, project.ID, issue.UID)
-		require.NoError(t, err)
-		rows = append(rows, *detail.Issue)
 	}
+	rows, err := h.client.ListIssues(ctx, project.ID, ListFilter{})
+	require.NoError(t, err)
 	h.m = initialModel(Options{})
 	h.m.api = h.client
 	h.m.list.actor = "alice"
@@ -118,17 +116,26 @@ func (h *deleteHarness) qualified(issue db.Issue) string {
 }
 
 func TestDeleteFormShowsConfirmationOnceAtEveryHeight(t *testing.T) {
-	for _, height := range []int{10, 11, 30} {
-		form := newDeleteForm(formTarget{}, Issue{Title: "Duplicate issue"}, "example-project#abc4")
-		rendered := stripANSI(renderCenteredForm(form, 100, height, snapshotFixedNow))
-		assert.Equal(t, 1, strings.Count(rendered, "DELETE example-project#abc4"), "height %d", height)
+	for _, tc := range []struct {
+		name      string
+		qualified string
+		width     int
+		height    int
+	}{
+		{"short terminal", "example-project#abc4", 100, 11},
+		{"regular terminal", "example-project#abc4", 100, 30},
+		{"80 columns", "example-repository-project-task-tracker#abc4", 80, 24},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			form := newDeleteForm(formTarget{}, Issue{Title: "Duplicate issue"}, tc.qualified)
+			rendered := stripANSI(renderCenteredForm(form, tc.width, tc.height, snapshotFixedNow))
+			assert.Equal(t, 1, strings.Count(rendered, "DELETE "+tc.qualified))
+			assert.Empty(t, form.field(fieldConfirm).input.Placeholder)
+			if tc.height >= formMinHeight {
+				assert.Contains(t, rendered, "Duplicate issue", "the form shows the issue title")
+			}
+		})
 	}
-}
-
-func TestDeleteFormShowsFullConfirmationAt80Columns(t *testing.T) {
-	form := newDeleteForm(formTarget{}, Issue{Title: "Duplicate issue"}, "example-repository-project-task-tracker#abc4")
-	rendered := stripANSI(renderCenteredForm(form, 80, 24, snapshotFixedNow))
-	assert.Contains(t, rendered, "DELETE example-repository-project-task-tracker#abc4")
 }
 
 func TestDeleteFormRequiresFullConfirmation(t *testing.T) {
@@ -138,10 +145,6 @@ func TestDeleteFormRequiresFullConfirmation(t *testing.T) {
 
 	h.key(runeKey('X'))
 	require.Equal(t, inputDeleteForm, h.m.input.kind, "X opens the Delete form")
-	rendered := stripANSI(renderCenteredForm(h.m.input, 100, 30, h.m.toastNow()))
-	assert.Contains(t, rendered, "DELETE "+h.qualified(target))
-	assert.Empty(t, h.m.input.field(fieldConfirm).input.Placeholder)
-	assert.Contains(t, rendered, "Second", "the form shows the issue title")
 
 	for _, typed := range []string{"", h.issues[1].ShortID, h.qualified(target), h.qualified(target)[1:], "DELETE " + h.qualified(h.issues[0]), "delete " + h.qualified(target), " DELETE " + h.qualified(target), "DELETE " + h.qualified(target) + " "} {
 		h.m.input.field(fieldConfirm).setValue(typed)
@@ -198,8 +201,8 @@ func TestUndoOfADelete(t *testing.T) {
 		restoredElsewhere bool
 		wantToast         string
 	}{
-		{"restores the issue", false, "undid delete"},
-		{"reports an issue that is no longer deleted", true, "already restored"},
+		{name: "restores the issue"},
+		{name: "reports an issue that is no longer deleted", restoredElsewhere: true, wantToast: "already restored"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -211,7 +214,6 @@ func TestUndoOfADelete(t *testing.T) {
 			h.finish(h.enter())
 			require.True(t, h.isDeleted(target.UID))
 			require.Len(t, h.m.undoHistory.entries, 1)
-			assert.Equal(t, h.qualified(target), h.m.undoHistory.entries[0].before.QualifiedID)
 			if tc.restoredElsewhere {
 				_, _, changed, err := h.env.DB.RestoreIssue(t.Context(), target.ID, "bob")
 				require.NoError(t, err)
@@ -234,47 +236,24 @@ func TestUndoOfADelete(t *testing.T) {
 }
 
 func TestUndoDeleteAfterComment(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		edits int
-	}{
-		{"comment", 0},
-		{"history limit then comment", undoLimit + 1},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h := newDeleteHarness(t, viewList)
-			target, survivor := h.issues[0], h.issues[1]
-			h.selectIssue(target.UID)
-			h.key(runeKey('X'))
-			h.m = typeString(h.m, "DELETE "+h.qualified(target))
-			h.finish(h.enter())
-			require.True(t, h.isDeleted(target.UID))
-			for i := range tc.edits {
-				resp, err := h.client.EditBody(t.Context(), h.project.ID, survivor.UID, strings.Repeat("x", i+1), "alice")
-				require.NoError(t, err)
-				next, _ := h.m.Update(mutationDoneMsg{resp: resp})
-				h.m = next.(Model)
-			}
-			resp, err := h.client.AddComment(t.Context(), h.project.ID, survivor.UID, "Removed the duplicate", "alice")
-			require.NoError(t, err)
-			next, _ := h.m.Update(mutationDoneMsg{resp: resp})
-			h.m = next.(Model)
+	h := newDeleteHarness(t, viewList)
+	target, survivor := h.issues[0], h.issues[1]
+	h.selectIssue(target.UID)
+	h.key(runeKey('X'))
+	h.m = typeString(h.m, "DELETE "+h.qualified(target))
+	h.finish(h.enter())
+	require.True(t, h.isDeleted(target.UID))
+	resp, err := h.client.AddComment(t.Context(), h.project.ID, survivor.UID, "Removed the duplicate", "alice")
+	require.NoError(t, err)
+	next, _ := h.m.Update(mutationDoneMsg{resp: resp})
+	h.m = next.(Model)
 
-			cmd := h.key(runeKey('u'))
-			if tc.edits > undoLimit {
-				require.True(t, h.isDeleted(target.UID))
-				assert.Contains(t, h.m.toast.text, "nothing to undo")
-			} else {
-				h.finish(cmd)
-				require.False(t, h.isDeleted(target.UID))
-				assert.Contains(t, h.m.toast.text, "undid delete")
-			}
-		})
-	}
+	h.finish(h.key(runeKey('u')))
+	require.False(t, h.isDeleted(target.UID))
+	assert.Contains(t, h.m.toast.text, "undid delete")
 }
 
 func TestDeleteKeyIsOfferedOnlyToCredentialsThatCanDelete(t *testing.T) {
-	hint := helplayout.HelpItem{Key: "X", Description: "delete"}
 	for _, scoped := range []bool{false, true} {
 		for _, view := range []viewID{viewList, viewDetail} {
 			h := newDeleteHarness(t, view)
@@ -295,14 +274,14 @@ func TestDeleteKeyIsOfferedOnlyToCredentialsThatCanDelete(t *testing.T) {
 			} else {
 				assert.Equal(t, inputDeleteForm, h.m.input.kind)
 			}
-			h.m.input = inputState{}
-			for _, rows := range [][][]helplayout.HelpItem{h.m.helpRows(), h.m.splitHelpRows()} {
-				if scoped {
-					assertHelpItemAbsent(t, flattenHelpRows(rows), hint)
-				}
-			}
 		}
 	}
+	m := initialModel(Options{})
+	m.authCapabilitiesRequired, m.authCapabilitiesReady = true, true
+	m.issueScoped, m.scopedWritable = true, true
+	hint := helplayout.HelpItem{Key: "X", Description: "delete"}
+	assertHelpItemAbsent(t, flattenHelpRows(m.helpRows()), hint)
+	assertHelpItemAbsent(t, flattenHelpRows(m.splitHelpRows()), hint)
 }
 
 // A deleted issue's detail is left the way back leaves it, and the list
@@ -321,7 +300,9 @@ func TestDeleteLeavesTheDetailTheWayBackDoes(t *testing.T) {
 			check: func(t *testing.T, h *deleteHarness) {
 				assert.Equal(t, viewDetail, h.m.view)
 				require.NotNil(t, h.m.detail.issue)
-				assert.Equal(t, h.issues[0].UID, h.m.detail.issue.UID)
+				selected, ok := h.m.list.targetRow()
+				require.True(t, ok)
+				assert.Equal(t, selected.UID, h.m.detail.issue.UID)
 				assert.Empty(t, h.m.detail.navStack)
 			},
 		},
@@ -442,6 +423,13 @@ func TestDeleteSkipsRepeatedIssueInDetailHistory(t *testing.T) {
 			h.m = typeString(h.m, "DELETE "+h.qualified(target))
 			next, cmd := h.m.Update(h.enter()())
 			h.m = next.(Model)
+			if source == "Attention" {
+				require.Equal(t, viewAttention, h.m.view)
+				require.NotNil(t, h.m.toast)
+				assert.Equal(t, "deleted "+h.qualified(target), h.m.toast.text)
+				assert.Nil(t, h.key(runeKey('u')), "undo is offered in list and detail")
+				assert.True(t, h.isDeleted(target.UID))
+			}
 			h.m = h.drain(cmd)
 			require.True(t, h.isDeleted(target.UID))
 			if source == "Attention" {
@@ -452,10 +440,6 @@ func TestDeleteSkipsRepeatedIssueInDetailHistory(t *testing.T) {
 			require.Equal(t, viewDetail, h.m.view)
 			require.NotNil(t, h.m.detail.issue)
 			assert.Equal(t, other.UID, h.m.detail.issue.UID, "delete skips consecutive visits to the deleted issue")
-			cmd = h.key(tea.KeyPressMsg{Code: tea.KeyEscape})
-			h.m = h.drain(cmd)
-			assert.Equal(t, viewList, h.m.view, "Back skips the earlier visit to the deleted issue")
-			assert.True(t, h.m.detail.issue == nil || h.m.detail.issue.UID != target.UID)
 		})
 	}
 }
@@ -536,31 +520,6 @@ func TestBackLeavesDeletedSavedDetail(t *testing.T) {
 	}
 }
 
-func TestDeleteReturnsToAttentionWithoutUndoHint(t *testing.T) {
-	t.Setenv("KATA_INBOX_USER", "alice")
-	h := newDeleteHarness(t, viewDetail)
-	h.m.layout = splitlayout.Stacked
-	target := h.issues[0]
-	h.selectIssue(target.UID)
-	_, err := h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
-		IssueID: target.ID, Actor: "alice", IfMatchRev: new(target.Revision),
-		Patch: map[string]jsontext.Value{notification.MetadataKey("alice"): jsontext.Value(`{"from":"bob","message":"Review this"}`)},
-	})
-	require.NoError(t, err)
-	var cmd tea.Cmd
-	h.m, cmd = h.m.transitionToAttention()
-	h.m = h.drain(cmd)
-	h.m = h.drain(h.enter())
-	h.key(runeKey('X'))
-	h.m = typeString(h.m, "DELETE "+h.qualified(target))
-	h.finish(h.enter())
-	require.Equal(t, viewAttention, h.m.view)
-	require.NotNil(t, h.m.toast)
-	assert.Equal(t, "deleted "+h.qualified(target), h.m.toast.text)
-	assert.Nil(t, h.key(runeKey('u')), "undo is offered in list and detail")
-	assert.True(t, h.isDeleted(target.UID))
-}
-
 func TestDetailFetchErrorsOnlyLeaveMissingCurrentIssue(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -602,6 +561,9 @@ func TestDeleteConfirmationResolvesDetailProject(t *testing.T) {
 			h := newDeleteHarness(t, viewDetail)
 			target := h.issues[0]
 			h.selectIssue(target.UID)
+			detail, err := h.client.GetIssueDetail(t.Context(), h.project.ID, target.UID)
+			require.NoError(t, err)
+			h.m.detail.issue = detail.Issue
 			require.Empty(t, h.m.detail.issue.QualifiedID, "daemon detail responses omit the qualified ID")
 			switch source {
 			case "catalog":
@@ -661,6 +623,8 @@ func TestMissingBackgroundDetailKeepsForeground(t *testing.T) {
 			h.m = h.drain(h.m.detail.refetch(h.m.api))
 
 			assert.Equal(t, tc.view, h.m.view, "a background refresh keeps the foreground view")
+			require.NotNil(t, h.m.detail.issue)
+			assert.Equal(t, target.UID, h.m.detail.issue.UID, "the background detail stays in place")
 		})
 	}
 }

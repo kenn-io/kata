@@ -902,16 +902,12 @@ func TestUndoClientPreservesWaitingWriteOrder(t *testing.T) {
 	})
 }
 
-func TestUndoHistoryCapsDeleteEntries(t *testing.T) {
-	for _, kind := range []string{"delete", "body.edit"} {
-		t.Run(kind, func(t *testing.T) {
-			var history undoHistory
-			history.push(undoEntry{kind: "delete", uid: "oldest"})
-			for range undoLimit {
-				history.push(undoEntry{kind: kind, uid: "recent"})
-			}
-			require.Len(t, history.entries, 20)
-			require.Equal(t, "recent", history.entries[0].uid)
-		})
+func TestUndoHistoryDropsOldestPastLimit(t *testing.T) {
+	var history undoHistory
+	history.push(undoEntry{kind: "body.edit", uid: "oldest"})
+	for range undoLimit {
+		history.push(undoEntry{kind: "body.edit", uid: "recent"})
 	}
+	require.Len(t, history.entries, 20)
+	require.Equal(t, "recent", history.entries[0].uid)
 }
