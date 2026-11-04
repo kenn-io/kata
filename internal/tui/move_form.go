@@ -514,7 +514,7 @@ func renderMoveModal(s moveState, width, height int) string {
 		titleText = sanitizeForLine(fmt.Sprintf("Move #%s to %s", s.target.issueShortID, s.chosen.Name))
 		if preview := s.preview; preview != nil {
 			if len(preview.descendants) == 0 {
-				outcome = []string{fmt.Sprintf("#%s has no descendants, so it moves alone.", sanitizeForLine(s.target.issueShortID))}
+				outcome = []string{"This issue has no descendants, so it moves alone."}
 			} else {
 				noun := "descendants"
 				if len(preview.descendants) == 1 {
@@ -536,7 +536,7 @@ func renderMoveModal(s moveState, width, height int) string {
 					return rows
 				}
 			}
-			optional = wrap("Nothing has moved yet. Each issue gets a new id in " + sanitizeForLine(s.chosen.Name) + ".")
+			optional = wrap("Nothing has moved yet.")
 		}
 	} else {
 		s.filter.SetWidth(moveFilterWidth(width, height))
@@ -570,7 +570,7 @@ func renderMoveModal(s moveState, width, height int) string {
 		}
 		errEnd := len(tail) - prompt
 		cut := min(over, max(len(strings.Split(errorStyle.Width(max(innerW, 1)).Render(s.err), "\n"))-1, 0))
-		tail = append(tail[:errEnd-cut], tail[errEnd:]...)
+		tail = slices.Delete(tail, errEnd-cut, errEnd)
 	}
 
 	parts := append(append(append([]string{}, titleLines...), outLines...), extra...)
