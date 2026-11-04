@@ -16,11 +16,10 @@ import (
 // the recurrence's. Zone is the zone as typed; blank takes the recurrence's
 // zone, then the issue's, then the caller's own, as kata schedule does.
 type RecurrenceInput struct {
-	Actor             string
-	Stop              bool
-	Rule, Start, Zone string
-	IssueRevision     int64
-	Recurrence        *recurrence.View
+	recurrence.Terms
+	Stop          bool
+	IssueRevision int64
+	Recurrence    *recurrence.View
 }
 
 type recurrenceAPI interface {
@@ -56,7 +55,7 @@ func (c *Client) SaveRecurrence(ctx context.Context, projectID int64, ref string
 	}
 	issue := wire.JSON200.Issue
 	if recurrence.ParentsCronJob(issue.Metadata) {
-		return nil, &mutationPreflightError{fmt.Errorf("%s (%s)", recurrence.CronParentRefusal, recurrence.CronParentHint)}
+		return nil, &mutationPreflightError{errCronParent()}
 	}
 	if in.Stop {
 		if in.Recurrence == nil {
@@ -72,11 +71,12 @@ func (c *Client) SaveRecurrence(ctx context.Context, projectID int64, ref string
 		case zoneErr != nil:
 			return nil, &mutationPreflightError{errors.New("no timezone known for this recurrence; enter an IANA zone like Europe/Paris")}
 		}
-		terms := recurrence.Terms{Rule: in.Rule, Start: in.Start, Zone: zone, Actor: in.Actor}
+		terms := in.Terms
+		terms.Zone = zone
 		if in.Recurrence != nil {
 			err = recurrence.Change(ctx, apiClient, projectID, *in.Recurrence, terms)
 		} else {
-			err = startRecurrence(ctx, apiClient, projectID, ref, wire.JSON200, in, terms)
+			err = startRecurrence(ctx, apiClient, projectID, ref, wire, in, terms)
 		}
 	}
 	if err != nil {
@@ -92,10 +92,15 @@ func (c *Client) SaveRecurrence(ctx context.Context, projectID int64, ref string
 	return resp, nil
 }
 
+// errCronParent is the refusal for an issue that parents a native cron job.
+func errCronParent() error {
+	return fmt.Errorf("%s (%s)", recurrence.CronParentRefusal, recurrence.CronParentHint)
+}
+
 // startRecurrence builds the template from the issue as read, minus owner and
 // metadata, and creates the recurrence guarded on the revision the form read.
-func startRecurrence(ctx context.Context, apiClient *generated.Client, projectID int64, ref string, shown *generated.ShowIssueResponse, in RecurrenceInput, terms recurrence.Terms) error {
-	issue := shown.Issue
+func startRecurrence(ctx context.Context, apiClient *generated.Client, projectID int64, ref string, shown *generated.ShowIssueResp, in RecurrenceInput, terms recurrence.Terms) error {
+	issue := shown.JSON200.Issue
 	if issue.Revision != in.IssueRevision {
 		return &APIError{
 			Method: http.MethodPost, Path: fmt.Sprintf("/api/v1/projects/%d/recurrences", projectID),
@@ -103,11 +108,10 @@ func startRecurrence(ctx context.Context, apiClient *generated.Client, projectID
 			Message: "the issue changed since the form read it",
 		}
 	}
-	labels := make([]string, 0, len(shown.Labels))
-	for _, label := range shown.Labels {
-		labels = append(labels, label.Label)
+	tpl, err := recurrence.TemplateFromShow(shown.Body)
+	if err != nil {
+		return err
 	}
 	tag := recurrence.ETag(in.IssueRevision)
-	tpl := recurrence.Template{Title: issue.Title, Body: issue.Body, Priority: issue.Priority, Labels: labels}
 	return recurrence.Start(ctx, apiClient, projectID, ref, tpl, terms, &tag)
 }

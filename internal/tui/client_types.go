@@ -63,15 +63,30 @@ type issueMetadata struct {
 	ScheduledOn jsontext.Value `json:"scheduled_on,omitzero"`
 	DeadlineOn  jsontext.Value `json:"deadline_on,omitzero"`
 	Timezone    jsontext.Value `json:"timezone,omitzero"`
+	// cronParent is set while decoding when any key marks the issue as the
+	// parent of a native recurring cron job.
+	cronParent bool
+}
+
+func (m *issueMetadata) UnmarshalJSON(data []byte) error {
+	var keys map[string]jsontext.Value
+	if err := json.Unmarshal(data, &keys); err != nil {
+		return err
+	}
+	*m = issueMetadata{
+		ScheduledOn: keys["scheduled_on"], DeadlineOn: keys["deadline_on"], Timezone: keys["timezone"],
+		cronParent: recurrence.ParentsCronJob(keys),
+	}
+	return nil
 }
 
 // scheduledOn, deadlineOn and timezone are the raw stored values, "" when
 // absent.
-func (i Issue) scheduledOn() string { return rawDate(i.Metadata.ScheduledOn) }
-func (i Issue) deadlineOn() string  { return rawDate(i.Metadata.DeadlineOn) }
-func (i Issue) timezone() string    { return rawDate(i.Metadata.Timezone) }
+func (i Issue) scheduledOn() string { return rawString(i.Metadata.ScheduledOn) }
+func (i Issue) deadlineOn() string  { return rawString(i.Metadata.DeadlineOn) }
+func (i Issue) timezone() string    { return rawString(i.Metadata.Timezone) }
 
-func rawDate(v jsontext.Value) string {
+func rawString(v jsontext.Value) string {
 	var s string
 	if len(v) == 0 || json.Unmarshal(v, &s) != nil {
 		return ""

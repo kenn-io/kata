@@ -38,6 +38,8 @@ type recurrenceFormLoadedMsg struct {
 	issue      Issue
 	recurrence *recurrence.View
 	err        error
+	// refused is why the issue cannot repeat at all; no form opens for it.
+	refused error
 }
 
 func newRecurrenceForm(target formTarget, issue Issue, rec *recurrence.View) inputState {
@@ -115,6 +117,10 @@ func readRecurrenceForm(api detailAPI, target formTarget, formGen int64, connGen
 			msg.err = cmp.Or(err, errors.New("the daemon returned no issue"))
 			return msg
 		}
+		if detail.Issue.Metadata.cronParent {
+			msg.refused = errCronParent()
+			return msg
+		}
 		msg.issue, msg.recurrence = *detail.Issue, detail.Recurrence
 		if reader, ok := api.(recurrenceReadAPI); ok && detail.Issue.RecurrenceID != nil {
 			msg.recurrence, msg.err = reader.ReadRecurrence(ctx, target.projectID, detail.Issue.RecurrenceID)
@@ -130,6 +136,10 @@ func (m Model) openRecurrenceForm(msg recurrenceFormLoadedMsg) Model {
 		return m
 	}
 	if target, _, ok := m.activeIssueTarget(); !ok || target.issueShortID != msg.target.issueShortID {
+		return m
+	}
+	if msg.refused != nil {
+		m.toast = &toast{text: msg.refused.Error(), level: toastError, expiresAt: m.toastNow().Add(3 * time.Second)}
 		return m
 	}
 	if msg.err != nil {
@@ -169,7 +179,7 @@ func (m Model) commitRecurrenceForm() (Model, tea.Cmd) {
 		return m.cancelInput()
 	}
 	return m.saveRecurrence(RecurrenceInput{
-		Actor: m.list.actor, Rule: rule, Start: start, Zone: zone,
+		Rule: rule, Start: start, Zone: zone, Actor: m.list.actor,
 		IssueRevision: state.issueRevision, Recurrence: state.rec,
 	})
 }

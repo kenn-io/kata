@@ -116,9 +116,9 @@ func runScheduleRepeat(cmd *cobra.Command, args []string, opts scheduleRepeatOpt
 	guardStart := !stop && strings.TrimSpace(opts.IfMatch) != ""
 	actor, _ := resolveActor(ctx, flags.As, nil)
 
-	current, err := activeRecurrenceOf(ctx, api, pid, issue.RecurrenceID)
+	current, err := recurrence.Active(ctx, api.Client, pid, issue.RecurrenceID)
 	if err != nil {
-		return err
+		return recurrenceCLIError(err)
 	}
 	var terms recurrence.Terms
 	if !stop {
@@ -156,11 +156,11 @@ func runScheduleRepeat(cmd *cobra.Command, args []string, opts scheduleRepeatOpt
 			tag := recurrence.ETag(issue.Revision)
 			ifMatch = &tag
 		}
-		labels, err := showLabels(showBody)
+		tpl, err := recurrence.TemplateFromShow(showBody)
 		if err != nil {
 			return err
 		}
-		if err := startRecurrence(ctx, api, pid, ref.RefForAPI, issue, labels, terms, ifMatch); err != nil {
+		if err := startRecurrence(ctx, api, pid, ref.RefForAPI, tpl, terms, ifMatch); err != nil {
 			return err
 		}
 	}
@@ -181,7 +181,7 @@ func runScheduleRepeat(cmd *cobra.Command, args []string, opts scheduleRepeatOpt
 	}
 	result.Timezone = metadataString(after.Metadata, "timezone")
 	if !stop {
-		result.Recurrence, _ = activeRecurrenceOf(ctx, api, pid, after.RecurrenceID)
+		result.Recurrence, _ = recurrence.Active(ctx, api.Client, pid, after.RecurrenceID)
 	}
 	return printScheduleRepeat(cmd, result)
 }
@@ -247,32 +247,7 @@ func recurrenceStatus(err error) int {
 	return 0
 }
 
-// activeRecurrenceOf finds the live recurrence the issue is an occurrence of.
-func activeRecurrenceOf(ctx context.Context, api *kataclient.Client, pid int64, id *int64) (*recurrenceView, error) {
-	rec, err := recurrence.Active(ctx, api.Client, pid, id)
-	return rec, recurrenceCLIError(err)
-}
-
-// showLabels reads the top-level labels array of a show response. Every daemon
-// version returns it; issue.labels only exists from API 0.24.0.
-func showLabels(showBody []byte) ([]string, error) {
-	var shown struct {
-		Labels []struct {
-			Label string `json:"label"`
-		} `json:"labels"`
-	}
-	if err := json.Unmarshal(showBody, &shown); err != nil {
-		return nil, err
-	}
-	labels := make([]string, 0, len(shown.Labels))
-	for _, l := range shown.Labels {
-		labels = append(labels, l.Label)
-	}
-	return labels, nil
-}
-
-func startRecurrence(ctx context.Context, api *kataclient.Client, pid int64, ref string, issue metaIssueWire, labels []string, terms recurrence.Terms, ifMatch *string) error {
-	tpl := recurrence.Template{Title: issue.Title, Body: issue.Body, Priority: issue.Priority, Labels: labels}
+func startRecurrence(ctx context.Context, api *kataclient.Client, pid int64, ref string, tpl recurrence.Template, terms recurrence.Terms, ifMatch *string) error {
 	err := recurrence.Start(ctx, api.Client, pid, ref, tpl, terms, ifMatch)
 	if recurrenceStatus(err) == http.StatusPreconditionFailed {
 		return errRevisionConflict("revision conflict: the issue changed since it was read; nothing was written")
@@ -383,7 +358,7 @@ func showRecurrenceFor(ctx context.Context, api *kataclient.Client, showBody []b
 	if json.Unmarshal(showBody, &shown) != nil {
 		return nil
 	}
-	rec, err := activeRecurrenceOf(ctx, api, shown.Issue.ProjectID, shown.Issue.RecurrenceID)
+	rec, err := recurrence.Active(ctx, api.Client, shown.Issue.ProjectID, shown.Issue.RecurrenceID)
 	if err != nil {
 		return nil
 	}

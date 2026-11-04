@@ -16,8 +16,8 @@ import (
 
 // This file is what every client of the daemon's recurrence routes shares:
 // `kata schedule --repeat` and the TUI's recurrence form build the template
-// from the issue, pick the zone, refuse a cron parent and guard writes the
-// same way. The daemon is the only validator of a rule.
+// from the issue (TemplateFromShow), pick the zone, refuse a cron parent and
+// guard writes the same way. The daemon is the only validator of a rule.
 
 // CronProgressPrefix starts the metadata keys a native cron job writes on the
 // issue it parents.
@@ -74,6 +74,30 @@ type Template struct {
 	Body     string
 	Priority *int64
 	Labels   []string
+}
+
+// TemplateFromShow builds the template from a `show` response body: the
+// issue's title, body and priority and the top-level labels array. Every
+// daemon version returns that array; issue.labels only exists from API 0.24.0.
+func TemplateFromShow(showBody []byte) (Template, error) {
+	var shown struct {
+		Issue struct {
+			Title    string `json:"title"`
+			Body     string `json:"body"`
+			Priority *int64 `json:"priority"`
+		} `json:"issue"`
+		Labels []struct {
+			Label string `json:"label"`
+		} `json:"labels"`
+	}
+	if err := json.Unmarshal(showBody, &shown); err != nil {
+		return Template{}, err
+	}
+	labels := make([]string, 0, len(shown.Labels))
+	for _, l := range shown.Labels {
+		labels = append(labels, l.Label)
+	}
+	return Template{Title: shown.Issue.Title, Body: shown.Issue.Body, Priority: shown.Issue.Priority, Labels: labels}, nil
 }
 
 // ETag is the If-Match value for a revision.
@@ -173,9 +197,9 @@ func noResponse(callErr error) error {
 	return ErrNoResponse
 }
 
-// answer turns a response into an error: a *StatusError for a refusal, the
+// statusErr turns a response into an error: a *StatusError for a refusal, the
 // call's own error (a decode failure) otherwise, nil for a success.
-func answer(status int, body []byte, httpResp *http.Response, callErr error) error {
+func statusErr(status int, body []byte, httpResp *http.Response, callErr error) error {
 	if status < http.StatusBadRequest {
 		return callErr
 	}
@@ -194,7 +218,7 @@ func List(ctx context.Context, api *generated.Client, projectID int64) ([]View, 
 	if response == nil {
 		return nil, noResponse(callErr)
 	}
-	if err := answer(response.StatusCode, response.Body, response.HTTPResponse, callErr); err != nil {
+	if err := statusErr(response.StatusCode, response.Body, response.HTTPResponse, callErr); err != nil {
 		return nil, err
 	}
 	var body struct {
@@ -243,7 +267,7 @@ func Start(ctx context.Context, api *generated.Client, projectID int64, ref stri
 	if response == nil {
 		return noResponse(callErr)
 	}
-	return answer(response.StatusCode, response.Body, response.HTTPResponse, callErr)
+	return statusErr(response.StatusCode, response.Body, response.HTTPResponse, callErr)
 }
 
 // Change rewrites the rule, start and zone of current, guarded on the
@@ -258,7 +282,7 @@ func Change(ctx context.Context, api *generated.Client, projectID int64, current
 	if response == nil {
 		return noResponse(callErr)
 	}
-	return answer(response.StatusCode, response.Body, response.HTTPResponse, callErr)
+	return statusErr(response.StatusCode, response.Body, response.HTTPResponse, callErr)
 }
 
 // Stop ends current, guarded on the revision current carries. Occurrences
@@ -272,5 +296,5 @@ func Stop(ctx context.Context, api *generated.Client, projectID int64, current V
 	if response == nil {
 		return noResponse(callErr)
 	}
-	return answer(response.StatusCode, response.Body, response.HTTPResponse, callErr)
+	return statusErr(response.StatusCode, response.Body, response.HTTPResponse, callErr)
 }
