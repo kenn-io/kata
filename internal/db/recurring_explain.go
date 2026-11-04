@@ -2,7 +2,6 @@ package db
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -35,24 +34,6 @@ func (a CronSQL) ExplainRecurring(ctx context.Context, projectID int64, jobUID s
 	defer func() { _ = tx.Rollback() }()
 	in := DispatchRecurringCronIn{ProjectID: projectID, JobUID: jobUID, Now: now}
 	in.JobUID = strings.ToUpper(strings.TrimSpace(in.JobUID))
-	// Establish membership in this same snapshot even when authority gates stop
-	// evaluation early. A separate handler read can race a move or deletion.
-	var exists bool
-	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM cron_jobs WHERE project_id=$1 AND uid=$2)`, projectID, in.JobUID).Scan(&exists); err != nil {
-		return out, err
-	}
-	_, err = a.cronProjectRow(ctx, tx, projectID)
-	if errors.Is(err, ErrNotFound) {
-		out.Reason = cron.DispatchProjectUnavailable
-		return out, nil
-	}
-	if err != nil {
-		return out, err
-	}
-	if !exists {
-		out.Reason = cron.DispatchJobMissing
-		return out, nil
-	}
 	g, err := a.recurringGateTx(ctx, tx, in, false)
 	out.Reason = g.reason
 	if err != nil || g.reason != "" {

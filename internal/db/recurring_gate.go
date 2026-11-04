@@ -19,11 +19,21 @@ type recurringGate struct {
 // An empty reason means planning can proceed under the existing write locks.
 func (a CronSQL) recurringGateTx(ctx context.Context, tx *sql.Tx, in DispatchRecurringCronIn, dispatch bool) (recurringGate, error) {
 	g := recurringGate{}
+	var row cronRow
+	var err error
 	if dispatch {
 		if err := LockCronProject(ctx, tx, in.ProjectID); errors.Is(err, ErrNotFound) {
 			g.reason = cron.DispatchProjectUnavailable
 			return g, nil
 		} else if err != nil {
+			return g, err
+		}
+	}
+	// Explanation establishes membership in the same read snapshot before
+	// authority can hide the job. Keep those rows for the remaining gates.
+	if !dispatch {
+		g, row, err = a.recurringGateRows(ctx, tx, in, false)
+		if err != nil || g.reason != "" {
 			return g, err
 		}
 	}
@@ -40,24 +50,10 @@ func (a CronSQL) recurringGateTx(ctx context.Context, tx *sql.Tx, in DispatchRec
 	}
 
 	if dispatch {
-		g.project, err = a.openCronProject(ctx, tx, in.ProjectID)
-	} else {
-		g.project, err = a.cronProjectRow(ctx, tx, in.ProjectID)
-	}
-	if errors.Is(err, ErrNotFound) {
-		g.reason = cron.DispatchProjectUnavailable
-		return g, nil
-	}
-	if err != nil {
-		return g, err
-	}
-	row, err := scanCron(tx.QueryRowContext(ctx, `SELECT `+cronDefinitionColumns+` FROM cron_jobs WHERE project_id=$1 AND uid=$2`, in.ProjectID, in.JobUID))
-	if errors.Is(err, ErrNotFound) {
-		g.reason = cron.DispatchJobMissing
-		return g, nil
-	}
-	if err != nil {
-		return g, err
+		g, row, err = a.recurringGateRows(ctx, tx, in, true)
+		if err != nil || g.reason != "" {
+			return g, err
+		}
 	}
 	if row.DeletedAt != nil {
 		g.reason = cron.DispatchDeleted
@@ -95,4 +91,29 @@ func (a CronSQL) recurringGateTx(ctx context.Context, tx *sql.Tx, in DispatchRec
 		g.reason = cron.DispatchParentClosed
 	}
 	return g, nil
+}
+
+// recurringGateRows loads each project and scoped definition only once.
+func (a CronSQL) recurringGateRows(ctx context.Context, tx *sql.Tx, in DispatchRecurringCronIn, dispatch bool) (g recurringGate, row cronRow, err error) {
+	if dispatch {
+		g.project, err = a.openCronProject(ctx, tx, in.ProjectID)
+	} else {
+		g.project, err = a.cronProjectRow(ctx, tx, in.ProjectID)
+	}
+	if errors.Is(err, ErrNotFound) {
+		g.reason = cron.DispatchProjectUnavailable
+		return g, row, nil
+	}
+	if err != nil {
+		return g, row, err
+	}
+	row, err = scanCron(tx.QueryRowContext(ctx, `SELECT `+cronDefinitionColumns+` FROM cron_jobs WHERE project_id=$1 AND uid=$2`, in.ProjectID, in.JobUID))
+	if errors.Is(err, ErrNotFound) {
+		g.reason = cron.DispatchJobMissing
+		return g, row, nil
+	}
+	if err != nil {
+		return g, row, err
+	}
+	return g, row, nil
 }
