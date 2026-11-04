@@ -46,6 +46,42 @@ func (a ActionRequestBodySource) Validate() error {
 	}
 }
 
+type BeatCronRuntimeBodyState string
+
+const (
+	CronRuntimeBeatActive   BeatCronRuntimeBodyState = "active"
+	CronRuntimeBeatStopping BeatCronRuntimeBodyState = "stopping"
+)
+
+// Validate checks if the BeatCronRuntimeBodyState value is valid
+func (b BeatCronRuntimeBodyState) Validate() error {
+	switch b {
+	case CronRuntimeBeatActive, CronRuntimeBeatStopping:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid BeatCronRuntimeBodyState value, got: %v", b))
+	}
+}
+
+type BeatCronRuntimeResponseBodyForwarded string
+
+const (
+	CronRuntimeForwardNotApplicable BeatCronRuntimeResponseBodyForwarded = "not_applicable"
+	CronRuntimeForwardRecorded      BeatCronRuntimeResponseBodyForwarded = "recorded"
+	CronRuntimeForwardUnavailable   BeatCronRuntimeResponseBodyForwarded = "unavailable"
+	CronRuntimeForwardUnsupported   BeatCronRuntimeResponseBodyForwarded = "unsupported"
+)
+
+// Validate checks if the BeatCronRuntimeResponseBodyForwarded value is valid
+func (b BeatCronRuntimeResponseBodyForwarded) Validate() error {
+	switch b {
+	case CronRuntimeForwardNotApplicable, CronRuntimeForwardRecorded, CronRuntimeForwardUnavailable, CronRuntimeForwardUnsupported:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid BeatCronRuntimeResponseBodyForwarded value, got: %v", b))
+	}
+}
+
 type CaptureTelemetryEventResponseBodyStatus string
 
 const (
@@ -660,6 +696,75 @@ func (r RelayAckRequestBodyStream) Validate() error {
 		return nil
 	default:
 		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid RelayAckRequestBodyStream value, got: %v", r))
+	}
+}
+
+type RuntimeReportedVia string
+
+const (
+	CronRuntimeDirect    RuntimeReportedVia = "direct"
+	CronRuntimeForwarded RuntimeReportedVia = "forwarded"
+)
+
+// Validate checks if the RuntimeReportedVia value is valid
+func (r RuntimeReportedVia) Validate() error {
+	switch r {
+	case CronRuntimeDirect, CronRuntimeForwarded:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid RuntimeReportedVia value, got: %v", r))
+	}
+}
+
+type RuntimeState string
+
+const (
+	CronRuntimeActive   RuntimeState = "active"
+	CronRuntimeStopping RuntimeState = "stopping"
+)
+
+// Validate checks if the RuntimeState value is valid
+func (r RuntimeState) Validate() error {
+	switch r {
+	case CronRuntimeActive, CronRuntimeStopping:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid RuntimeState value, got: %v", r))
+	}
+}
+
+type RuntimeStatus string
+
+const (
+	CronRuntimeExpired RuntimeStatus = "expired"
+	CronRuntimeLive    RuntimeStatus = "live"
+)
+
+// Validate checks if the RuntimeStatus value is valid
+func (r RuntimeStatus) Validate() error {
+	switch r {
+	case CronRuntimeExpired, CronRuntimeLive:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid RuntimeStatus value, got: %v", r))
+	}
+}
+
+type RuntimeInventoryStateState string
+
+const (
+	CronRuntimeInventoryReady   RuntimeInventoryStateState = "ready"
+	CronRuntimeInventoryUnknown RuntimeInventoryStateState = "unknown"
+	CronRuntimeInventoryWarming RuntimeInventoryStateState = "warming"
+)
+
+// Validate checks if the RuntimeInventoryStateState value is valid
+func (r RuntimeInventoryStateState) Validate() error {
+	switch r {
+	case CronRuntimeInventoryReady, CronRuntimeInventoryUnknown, CronRuntimeInventoryWarming:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid RuntimeInventoryStateState value, got: %v", r))
 	}
 }
 

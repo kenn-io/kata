@@ -290,6 +290,12 @@ type ClientInterface interface {
 	ObserveCronRun(ctx context.Context, options *ObserveCronRunRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ObserveCronRunResponse, error)
 	ObserveCronRunWithResponse(ctx context.Context, options *ObserveCronRunRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ObserveCronRunResp, error)
 
+	ListCronRuntimes(ctx context.Context, options *ListCronRuntimesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListCronRuntimesResponse, error)
+	ListCronRuntimesWithResponse(ctx context.Context, options *ListCronRuntimesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListCronRuntimesResp, error)
+
+	BeatCronRuntime(ctx context.Context, options *BeatCronRuntimeRequestOptions, reqEditors ...runtime.RequestEditorFn) (*BeatCronRuntimeResponse, error)
+	BeatCronRuntimeWithResponse(ctx context.Context, options *BeatCronRuntimeRequestOptions, reqEditors ...runtime.RequestEditorFn) (*BeatCronRuntimeResp, error)
+
 	ListCronWorkflows(ctx context.Context, options *ListCronWorkflowsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListCronWorkflowsResponse, error)
 	ListCronWorkflowsWithResponse(ctx context.Context, options *ListCronWorkflowsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListCronWorkflowsResp, error)
 
@@ -3871,6 +3877,131 @@ func (c *Client) ObserveCronRun(ctx context.Context, options *ObserveCronRunRequ
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/runs/{run_uid}")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) ListCronRuntimes(ctx context.Context, options *ListCronRuntimesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListCronRuntimesResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/runtimes",
+		Method:     "GET",
+		Options:    options,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*ListCronRuntimesResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(ListCronRuntimesErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "ListCronRuntimesErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(ListCronRuntimesResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "ListCronRuntimesResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/runtimes")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) BeatCronRuntime(ctx context.Context, options *BeatCronRuntimeRequestOptions, reqEditors ...runtime.RequestEditorFn) (*BeatCronRuntimeResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/runtimes/{runtime_uid}",
+		Method:      "PUT",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*BeatCronRuntimeResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(BeatCronRuntimeErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "BeatCronRuntimeErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(BeatCronRuntimeResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "BeatCronRuntimeResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/runtimes/{runtime_uid}")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}

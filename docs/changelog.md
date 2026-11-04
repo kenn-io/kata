@@ -9,6 +9,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- See which cron runtimes are alive with `kata cron runtime list` and report
+  liveness with `kata cron runtime beat`. Spokes forward this ephemeral evidence
+  to their hub. CLI notices and the TUI banner flag missing advertisements;
+  advertised agent, model and checkout choices guide TUI edits without deciding
+  whether a job can run.
+
 - Keep local writes responsive on relay hubs. Creating an issue or receiving an
   unrelated snapshot leaves downstream sync incremental unless it can change the
   reset decision. Handshakes and reset downloads check history without holding

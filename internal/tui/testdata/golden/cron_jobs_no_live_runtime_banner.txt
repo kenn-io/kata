@@ -1,0 +1,24 @@
+ Project: example-project                                       kata カタ · dev
+kata カタ [jobs] runs workflows
+ / search                                                                 1 job
+No live runtime advertised to this daemon; 1 enabled execute job.
+
+  Job            State   Trigger           Action             Last loaded run
+▶ Daily summary  enabled 0 7 * * *         workflow Summary … succeeded 1h ago
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ j/k move▕ ↵/l open▕ / filter▕ n/e new/edit▕ h/esc kata▕ r refresh▕ 1-4 tabs
+ ? help  ▕ q quit

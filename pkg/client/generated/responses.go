@@ -211,6 +211,14 @@ type ObserveCronRunResponse = ObserveCronRunResponseBody
 
 type ObserveCronRunErrorResponse = ErrorEnvelope
 
+type ListCronRuntimesResponse = RuntimeInventory
+
+type ListCronRuntimesErrorResponse = ErrorEnvelope
+
+type BeatCronRuntimeResponse = BeatCronRuntimeResponseBody
+
+type BeatCronRuntimeErrorResponse = ErrorEnvelope
+
 type ListCronWorkflowsResponse = ListCronWorkflowsResponseBody
 
 type ListCronWorkflowsErrorResponse = ErrorEnvelope
@@ -1015,6 +1023,22 @@ type ObserveCronRunResp struct {
 	StatusCode   int
 	JSON200      *ObserveCronRunResponse
 	JSONDefault  *ObserveCronRunErrorResponse
+}
+
+type ListCronRuntimesResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ListCronRuntimesResponse
+	JSONDefault  *ListCronRuntimesErrorResponse
+}
+
+type BeatCronRuntimeResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *BeatCronRuntimeResponse
+	JSONDefault  *BeatCronRuntimeErrorResponse
 }
 
 type ListCronWorkflowsResp struct {

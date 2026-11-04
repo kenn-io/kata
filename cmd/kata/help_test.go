@@ -60,6 +60,7 @@ func TestValidateHelpCommandRejectsStaleExamples(t *testing.T) {
 	for _, line := range []string{
 		`kata close abc4 --done -m "a message with  # and > inside"  # note`,
 		`kata openapi --format yaml > openapi.yaml`,
+		`kata cron runtime beat 01ARZ3NDEKTSV4RRFFQ69G5FAV --json-input - --json <<'JSON'`,
 	} {
 		if err := validateHelpCommand(line); err != nil {
 			t.Errorf("rejected valid example %s: %v", line, err)
@@ -161,7 +162,7 @@ func validateHelpCommand(line string) error {
 }
 
 // splitHelpWords splits the shell notation used in help: single and double
-// quotes, with an unquoted "#", ">", or "|" after a space ending the command.
+// quotes, with an unquoted "#", "<<", ">", or "|" after a space ending the command.
 // Help text does not use backslash escapes inside a line.
 func splitHelpWords(line string) ([]string, error) {
 	var words []string
@@ -176,7 +177,7 @@ func splitHelpWords(line string) ([]string, error) {
 			word.WriteRune(ch)
 		case ch == '\'' || ch == '"':
 			quote, started = ch, true
-		case strings.ContainsRune("#>|", ch) && i > 0 && line[i-1] == ' ':
+		case (strings.ContainsRune("#>|", ch) || strings.HasPrefix(line[i:], "<<")) && i > 0 && line[i-1] == ' ':
 			return words, nil
 		case ch == ' ' || ch == '\t':
 			if started {

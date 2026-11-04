@@ -5,6 +5,10 @@ import type { RelayHandshake } from './relayHandshake.ts'
 
 export interface ProjectFederationBody {
   baseline_through_event_id: number
+  /** Supports direct push-enrollment runtime advertisements. */
+  cron_runtime_beats?: boolean
+  /** Optional federation protocol features. */
+  features?: string[]
   /** Supports native recurring job writes using direct project-scoped push enrollments. */
   native_cron_writes?: boolean
   project_id: number

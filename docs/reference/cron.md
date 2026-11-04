@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -408,6 +408,165 @@ kata cron job create --uid <job-uid> --file command.json --json
 
 The external adapter schedules the job and runs its workflow in the configured
 checkout. Kata stores the definitions and run evidence.
+
+## Runtime heartbeats
+
+On main after the latest release, adapters can advertise their liveness with
+`kata cron runtime beat`. Generate one runtime ULID per installation, persist
+it, and reuse it for every beat. Report at the advertised interval, including
+while no jobs run. Send a final `stopping` beat on clean shutdown when possible.
+
+```sh
+kata cron runtime beat <runtime-uid> --json-input - --json <<'JSON'
+{"label":"example-worker","adapter":"example-adapter","adapter_version":"1.0.0","kata_version":"0.31.0","features":["cron_v1"],"interval_seconds":60,"state":"active"}
+JSON
+kata cron runtime list --json
+```
+
+The HTTP routes are `PUT /api/v1/projects/{project_id}/cron/runtimes/{runtime_uid}`
+and `GET /api/v1/projects/{project_id}/cron/runtimes`. Capabilities advertise
+`features: ["cron_runtimes_v1", "cron_runtime_choices_v1"]`; `event_features` continues to describe only
+replicated event families. Ordinary attributed write authority is required to
+beat. Identity-bound daemon credentials override a supplied body actor. An
+enrollment uses its bound account and rejects a different nonblank
+body actor. Inventory reads use ordinary project read authority, including
+anonymous read-only deployments.
+
+A beat accepts only `actor`, `label`, `adapter`, `adapter_version`, `kata_version`,
+`features`, `choices`, `interval_seconds`, and `state`. The complete body is limited to
+8 KiB. Runtime identity must be a canonical uppercase ULID. Labels are nonblank
+valid UTF-8, at most 256 bytes, and match executor pins exactly, including case.
+Adapter and feature identifiers match `[a-z0-9_.-]{1,64}`. Versions are optional
+printable ASCII strings of at most 64 bytes. Features contain at most 32 unique
+identifiers. An omitted interval defaults to 60 seconds; explicit values must
+be 10–3600. An omitted state defaults to `active`; `stopping` is the only other
+state. Explicit nulls for state or interval, unknown fields and duplicate
+features are rejected.
+
+Server timestamps describe the first and latest accepted beat. A runtime is
+`live` strictly before `expires_at`, three advertised intervals after its latest
+beat. A `stopping` beat expires immediately. Expired observations remain for
+24 hours after expiry, then reads or writes reclaim them. The daemon retains
+at most 256 runtimes per project and 4096 total. It returns
+`429 cron_runtime_limit` for a new runtime when retained entries fill either
+limit; existing retained identities may refresh. Capacity never evicts evidence
+earlier than its retention deadline.
+
+The inventory lives in memory. Restart clears it; backups and event replication
+do not contain it. The response's `inventory.state` is:
+
+| State | Meaning |
+| --- | --- |
+| `unknown` | No retained observation history, including after the last entry is evicted. |
+| `warming` | At least one retained advertisement, within three hours of daemon startup. |
+| `ready` | Retained advertisements after the three-hour startup grace. |
+
+`daemon_started_at` and `warming_until` show those exact boundaries. The grace
+covers three maximum-length heartbeat intervals, so fast reporters cannot
+prematurely exclude slow reporters after restart. Even `ready` covers only
+advertisements observed by this daemon. Older adapters, unavailable forwarders
+and other unobserved installations remain unknown. An empty live set never
+proves an empty set of eligible executors.
+
+Inventory includes advisory warnings for enabled, undeleted execute jobs:
+`pin_unmatched`, `adapter_unmatched`, and `no_live_runtime` appear only when
+ready. They match string-valued `options.executor` and `options.adapter` against
+live labels and adapter identifiers; blank and non-string options are ignored.
+`adapter_version_skew` lists sorted distinct reported versions per adapter;
+missing versions do not cause skew. `kata_version_skew` compares reported and
+daemon major/minor releases, ignoring missing, unparseable and prerelease/dev
+versions. Warning ordering is deterministic. Runtime entries are bounded;
+job-specific warnings grow with the project's existing job list.
+
+Beats always record locally first. An enabled direct spoke with push enabled
+then forwards to its owning hub, using only the configured project enrollment
+credential. Relays and push-disabled bindings keep local inventory only.
+The root's list aggregates advertisements sent directly or forwarded to it;
+a spoke's list shows its own accepted advertisements.
+
+The beat response separates local success from `forwarded`:
+
+| Value | Meaning |
+| --- | --- |
+| `recorded` | The owning hub acknowledged this runtime UID. |
+| `unavailable` | Transport, credentials, binding, authorization or the three-second deadline prevented acknowledgement. |
+| `unsupported` | The hub's federation metadata does not advertise `cron_runtime_beats`. |
+| `not_applicable` | Private/root project, relay, disabled binding or push disabled. |
+
+Forwarding preserves admitted beats up to the full 8 KiB limit. The root applies
+omitted defaults and derives attribution from its enrollment credential.
+A forwarding failure never rolls back local evidence. Keep sending normal beats;
+there is no persistent forwarding queue. Forwarding neither flushes pending events
+nor waits for the federation sync lock. It pins the credential and destination to
+one snapshot, rejects redirects, and rechecks binding and credential state before
+dispatch. An already-dispatched beat may still reach the old root during rebind
+and expire there normally.
+
+Enrollment-authenticated beats at the root have `reported_via: forwarded` and
+`forwarder_actor` from that enrollment; their `actor` is the same authenticated
+account. Ordinary direct writes have `reported_via: direct`. Body fields cannot
+assert forwarded provenance. Signed federation deployments require signed beats
+on both transport listeners. See [federation enrollment authority](../operations/federation.md).
+
+The TUI cron view shows an advisory banner for ready inventories with no live
+advertisements or unmatched job selectors. Job detail shows only job-specific
+messages; the aggregate no-live advisory appears once in the banner. The view refreshes only runtime evidence every 60 seconds; changing
+view, project or daemon invalidates pending reads. Unknown, warming and unavailable
+inventories stay silent. The banner covers only this daemon's advertisements.
+A spoke whose adapters beat elsewhere may show `unknown`, which is no alarm.
+
+`kata cron job list/create/update/restore` prints relevant ready-inventory warnings
+to stderr after its normal result. Stdout JSON and exit codes stay unchanged.
+`--quiet` skips the optional lookup. Diagnostic reads have a three-second budget;
+unavailable and older daemons stay silent. Neither the banner nor a warning
+proves that a job will or will not run.
+
+Advertisements are self-reported evidence. They do not activate an installation,
+select jobs, authorize execution, reserve an occurrence, or change run status.
+Adapters remain responsible for scheduling and execution policy.
+
+### Runtime option choices
+
+Adapters can advertise suggestions for `checkout_key`, `options.agent` and
+`options.model` in the optional beat `choices` object. Send this member only when
+cron capabilities include `cron_runtime_choices_v1`; older daemons reject it.
+Advertise profile names, checkout keys and models from the adapter's own config.
+
+```json
+{
+  "label": "example-worker",
+  "adapter": "example",
+  "choices": {
+    "checkout_key": ["example-project"],
+    "options.agent": ["default", "review"],
+    "options.model": ["model-a"]
+  }
+}
+```
+
+Each key accepts at most 32 unique values. Values are exact, nonblank UTF-8
+strings of 1–128 bytes without control characters. Checkout keys also use the
+portable key rules: Unicode letters and digits, `-`, `_` and `.`, except `.` or
+`..` alone. Unknown keys and null objects or arrays are rejected. An omitted key
+means unknown; an empty array advertises the key with no suggestions. Every beat
+replaces choices, so omitting `choices` or sending `{}` clears older values.
+The whole beat remains limited to 8 KiB.
+
+The TUI execute-job form offers the sorted union from matching live runtimes.
+Agent and Model appear only when advertised, while Checkout key stays free text
+without an advertisement. Select `other…` for free text for the rest of the form
+session. Existing values remain available with a `(not advertised)` note. Raw
+Options stays authoritative; changing one picker preserves other option values,
+and an untouched form preserves the original Options bytes. Non-string agent or
+model values remain editable through Options.
+
+A ready inventory reports `choice_unknown` when a configured string value is
+absent from the matching live runtimes' advertised values for that key. An
+unadvertised key produces no warning. Job detail shows these notes, and job
+create/update print them to stderr. These are suggestions, never enforcement or
+routing rules: an unadvertised value does not block saving or execution. A spoke
+strips choices when forwarding to a root without the feature, while keeping its
+local advertisement intact.
 
 ## Capabilities
 

@@ -1,15 +1,19 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/uid"
 	kataclient "go.kenn.io/kata/pkg/client"
@@ -59,7 +63,9 @@ The full contract is in the Cron reference (docs/reference/cron.md).`,
 	capabilities := newCronOperationCmd("capabilities", "show")
 	capabilities.Use = "capabilities"
 	capabilities.Short = "discover local protocol support without creating cron state"
-	command.AddCommand(runs, capabilities)
+	runtimes := &cobra.Command{Use: "runtime", Short: "report and check adapter status"}
+	runtimes.AddCommand(newCronOperationCmd("runtime", "list"), newCronOperationCmd("runtime", "beat"))
+	command.AddCommand(runs, runtimes, capabilities)
 	return command
 }
 
@@ -76,9 +82,12 @@ func (o cronCLIOptions) mutation() bool   { return o.action != "list" && o.actio
 func (o cronCLIOptions) definition() bool { return o.resource == "job" || o.resource == "workflow" }
 func newCronOperationCmd(resource, action string) *cobra.Command {
 	options := cronCLIOptions{resource: resource, action: action, limit: 100}
-	takesUID := (resource == "job" || resource == "workflow" || resource == "run") && action != "list" && action != "create"
+	takesUID := (resource == "job" || resource == "workflow" || resource == "run" || resource == "runtime") && action != "list" && action != "create"
 	command := &cobra.Command{Use: action, Short: action + " " + resource, Args: cobra.NoArgs}
 	command.Long, command.Example = cronOperationHelp(resource, action)
+	if options.runtimeNotices() {
+		command.Long += "\n" + cronRuntimeWarningHelp
+	}
 	if resource == "job" {
 		command.Long += "\nEnabled recurring issue jobs create independent children and inbox requests on the owning hub. Other jobs use external adapters."
 		if options.mutation() {
@@ -96,8 +105,8 @@ func newCronOperationCmd(resource, action string) *cobra.Command {
 		return options.execute(cmd)
 	}
 	if options.mutation() {
-		if resource == "run" {
-			command.Flags().StringVar(&options.file, "json-input", "", "observation JSON file, or - for stdin")
+		if resource == "run" || resource == "runtime" {
+			command.Flags().StringVar(&options.file, "json-input", "", "JSON request file, or - for stdin")
 		} else {
 			command.Flags().StringVar(&options.file, "file", "", "JSON request body file, or - for stdin")
 		}
@@ -126,10 +135,14 @@ func newCronOperationCmd(resource, action string) *cobra.Command {
 // cronOperationHelp returns Long and Example text for one generated command.
 func cronOperationHelp(resource, action string) (string, string) {
 	cmd := "kata cron " + resource + " " + action
+	if resource == "runtime" {
+		return cronRuntimeHelp(action)
+	}
 	switch resource + " " + action {
 	case "capabilities show":
 		return `Show whether the daemon supports shared cron and recurring child issues for
-this project (cron_v1 covers all cron features). Reads only; creates no cron state.`, "  kata cron capabilities --json"
+this project. event_features describes replication; features describes non-event
+protocols such as cron_runtimes_v1. Reads only; creates no cron state.`, "  kata cron capabilities --json"
 	case "run list":
 		return `List the project's recorded runs, newest first. --job-uid lists one job's runs.
 For the next page, pass the response's next_before_uid as --before-uid.`,
@@ -270,7 +283,11 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 	if flags.Quiet && currentOutputMode() != outputJSON {
 		return nil
 	}
-	return emitJSON(cmd.OutOrStdout(), jsontext.Value(raw))
+	if err := emitJSON(cmd.OutOrStdout(), jsontext.Value(raw)); err != nil {
+		return err
+	}
+	o.warnRuntimes(cmd.Context(), cmd, client, project.ID, raw)
+	return nil
 }
 
 // applyParent resolves the CLI ref while leaving the API and stored definition
@@ -380,7 +397,14 @@ func (o *cronCLIOptions) requestBody(cmd *cobra.Command) ([]byte, error) {
 	if err := o.applyExpectedEventUID(fields); err != nil {
 		return nil, err
 	}
-	return json.Marshal(fields)
+	body, err := json.Marshal(fields)
+	if err != nil {
+		return nil, err
+	}
+	if o.resource == "runtime" && len(body) > cron.RuntimeBeatLimit {
+		return nil, cronCLIValidation("cron request exceeds its byte limit")
+	}
+	return body, nil
 }
 
 // readRequest returns the bounded request file. Definition delete and restore
@@ -390,7 +414,7 @@ func (o *cronCLIOptions) readRequest(cmd *cobra.Command) ([]byte, error) {
 		if o.definition() && o.action != "create" && o.action != "update" {
 			return []byte(`{}`), nil
 		}
-		if o.resource == "run" {
+		if o.resource == "run" || o.resource == "runtime" {
 			return nil, cronCLIValidation("--json-input is required; use --json-input - for stdin")
 		}
 		return nil, cronCLIValidation("--file is required; use --file - for stdin")
@@ -407,6 +431,9 @@ func (o *cronCLIOptions) readRequest(cmd *cobra.Command) ([]byte, error) {
 	limit := int64(cronDefinitionRequestLimit)
 	if o.resource == "run" {
 		limit = db.CronObservationLimit
+	}
+	if o.resource == "runtime" {
+		limit = cron.RuntimeBeatLimit
 	}
 	raw, err := io.ReadAll(io.LimitReader(reader, limit+1))
 	if err != nil {
@@ -436,6 +463,23 @@ func (o *cronCLIOptions) decodeRequest(raw []byte) (map[string]jsontext.Value, e
 	if err := json.Unmarshal(raw, shape, json.RejectUnknownMembers(true)); err != nil {
 		return nil, cronCLIValidation("invalid cron request: " + err.Error())
 	}
+	if o.resource == "runtime" {
+		for _, key := range []string{"features", "choices"} {
+			if value, ok := fields[key]; ok && strings.TrimSpace(string(value)) == "null" {
+				return nil, cronCLIValidation("invalid runtime " + key + ": cannot be null")
+			}
+		}
+		beat := shape.(*api.BeatCronRuntimeBody)
+		if value, ok := fields["interval_seconds"]; ok && (strings.TrimSpace(string(value)) == "null" || beat.IntervalSeconds == 0) {
+			return nil, cronCLIValidation("invalid runtime interval_seconds")
+		}
+		if value, ok := fields["state"]; ok && (strings.TrimSpace(string(value)) == "null" || beat.State == "") {
+			return nil, cronCLIValidation("invalid runtime state")
+		}
+		if _, err := cron.NormalizeRuntimeBeat(beat.RuntimeBeat); err != nil {
+			return nil, cronCLIValidation(err.Error())
+		}
+	}
 	return fields, nil
 }
 
@@ -448,6 +492,8 @@ func (o *cronCLIOptions) requestShape() (any, error) {
 		return &api.PutCronWorkflowBody{}, nil
 	case o.resource == "run" && o.action == "observe":
 		return &api.ObserveCronRunBody{}, nil
+	case o.resource == "runtime" && o.action == "beat":
+		return &api.BeatCronRuntimeBody{}, nil
 	case o.definition():
 		return &api.CronDefinitionActionBody{}, nil
 	default:
@@ -600,6 +646,13 @@ func (o cronCLIOptions) call(a daemonAPI, c *kataclient.Client, projectID int64,
 }
 
 func (o cronCLIOptions) callRead(a daemonAPI, c *kataclient.Client, projectID int64) ([]byte, error) {
+	if o.resource == "runtime" {
+		response, err := c.ListCronRuntimesWithResponse(a.ctx, &generated.ListCronRuntimesRequestOptions{PathParams: &generated.ListCronRuntimesPath{ProjectID: projectID}})
+		if response == nil {
+			return nil, externalCLITransportError(response, err)
+		}
+		return cronCLIResponse(response.StatusCode, response.Body, err)
+	}
 	switch {
 	case o.resource == "job" && o.action == "list":
 		response, err := c.ListCronJobsWithResponse(a.ctx, &generated.ListCronJobsRequestOptions{PathParams: &generated.ListCronJobsPath{ProjectID: projectID}, Query: &generated.ListCronJobsQuery{IncludeDeleted: &o.includeDeleted}})
@@ -658,6 +711,25 @@ func (o cronCLIOptions) callCapabilities(a daemonAPI, c *kataclient.Client, proj
 }
 
 func (o cronCLIOptions) callWrite(a daemonAPI, c *kataclient.Client, projectID int64, raw []byte) ([]byte, error) {
+	if o.resource == "runtime" {
+		// The attributed JSONv2 body already passed validation. Keep its bytes:
+		// the SDK's HTML escaping can expand an admitted beat beyond 8 KiB.
+		response, err := c.BeatCronRuntimeWithResponse(a.ctx, &generated.BeatCronRuntimeRequestOptions{PathParams: &generated.BeatCronRuntimePath{ProjectID: projectID, RuntimeUID: o.identity}}, func(_ context.Context, request *http.Request) error {
+			if request.Body != nil {
+				_ = request.Body.Close()
+			}
+			request.Body = io.NopCloser(bytes.NewReader(raw))
+			request.ContentLength = int64(len(raw))
+			request.GetBody = func() (io.ReadCloser, error) {
+				return io.NopCloser(bytes.NewReader(raw)), nil
+			}
+			return nil
+		})
+		if response == nil {
+			return nil, externalCLITransportError(response, err)
+		}
+		return cronCLIResponse(response.StatusCode, response.Body, err)
+	}
 	if o.resource == "run" && o.action == "observe" {
 		var body generated.ObserveCronRunBody
 		if err := decodeCronCLIRequest(raw, &body); err != nil {

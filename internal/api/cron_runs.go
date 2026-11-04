@@ -24,6 +24,7 @@ type CronCapabilitiesResponse struct {
 	Body          struct {
 		ProjectUID    string   `json:"project_uid"`
 		EventFeatures []string `json:"event_features"`
+		Features      []string `json:"features,omitempty"`
 	}
 }
 
