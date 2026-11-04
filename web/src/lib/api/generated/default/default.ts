@@ -61,6 +61,7 @@ import type {
   CreateTokenResponseBody,
   CronCapabilitiesResponseBody,
   CronDefinitionActionBody,
+  CronJobEnabledActionBody,
   CronJobResponseBody,
   CronRunResponseBody,
   CronRunsResponseBody,
@@ -194,6 +195,7 @@ import type {
   PatchRecurrencePathParameters,
   PatchRecurrenceRequestBody,
   PatchRecurrenceResponseBody,
+  PauseCronJobPathParameters,
   PauseExternalRootBridgePathParameters,
   PingResponseBody,
   PollEventsBody,
@@ -264,6 +266,7 @@ import type {
   RestoreProjectPathParameters,
   RestoreProjectResponseBody,
   RestoreRequestBody,
+  ResumeCronJobPathParameters,
   ResumeExternalRootBridgePathParameters,
   RetryFederationQuarantinePathParameters,
   RetryFederationQuarantineRequestBody,
@@ -2401,6 +2404,50 @@ export const replaceCronJob = async (
   })
 }
 
+export type pauseCronJobResponse200 = {
+  data: CronJobResponseBody
+  status: 200
+}
+
+export type pauseCronJobResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type pauseCronJobResponseSuccess = pauseCronJobResponse200 & {
+  headers: Headers
+}
+export type pauseCronJobResponseError = pauseCronJobResponseDefault & {
+  headers: Headers
+}
+
+export type pauseCronJobResponse = pauseCronJobResponseSuccess | pauseCronJobResponseError
+
+export const getPauseCronJobUrl = ({ projectId, cronUid }: PauseCronJobPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/jobs/${encodeURIComponent(String(cronUid))}/pause`
+}
+
+export const pauseCronJob = async (
+  { projectId, cronUid }: PauseCronJobPathParameters,
+  cronJobEnabledActionBody?: CronJobEnabledActionBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<pauseCronJobResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<pauseCronJobResponse>(getPauseCronJobUrl({ projectId, cronUid }), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(cronJobEnabledActionBody),
+  })
+}
+
 export type restoreCronJobResponse200 = {
   data: CronJobResponseBody
   status: 200
@@ -2442,6 +2489,50 @@ export const restoreCronJob = async (
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(cronDefinitionActionBody),
+  })
+}
+
+export type resumeCronJobResponse200 = {
+  data: CronJobResponseBody
+  status: 200
+}
+
+export type resumeCronJobResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type resumeCronJobResponseSuccess = resumeCronJobResponse200 & {
+  headers: Headers
+}
+export type resumeCronJobResponseError = resumeCronJobResponseDefault & {
+  headers: Headers
+}
+
+export type resumeCronJobResponse = resumeCronJobResponseSuccess | resumeCronJobResponseError
+
+export const getResumeCronJobUrl = ({ projectId, cronUid }: ResumeCronJobPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/jobs/${encodeURIComponent(String(cronUid))}/resume`
+}
+
+export const resumeCronJob = async (
+  { projectId, cronUid }: ResumeCronJobPathParameters,
+  cronJobEnabledActionBody?: CronJobEnabledActionBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<resumeCronJobResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<resumeCronJobResponse>(getResumeCronJobUrl({ projectId, cronUid }), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(cronJobEnabledActionBody),
   })
 }
 

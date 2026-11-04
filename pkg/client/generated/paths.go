@@ -188,12 +188,30 @@ func (r ReplaceCronJobPath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(r))
 }
 
+type PauseCronJobPath struct {
+	ProjectID int64  `json:"project_id"`
+	CronUID   string `json:"cron_uid" validate:"required"`
+}
+
+func (p PauseCronJobPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(p))
+}
+
 type RestoreCronJobPath struct {
 	ProjectID int64  `json:"project_id"`
 	CronUID   string `json:"cron_uid" validate:"required"`
 }
 
 func (r RestoreCronJobPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
+type ResumeCronJobPath struct {
+	ProjectID int64  `json:"project_id"`
+	CronUID   string `json:"cron_uid" validate:"required"`
+}
+
+func (r ResumeCronJobPath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(r))
 }
 

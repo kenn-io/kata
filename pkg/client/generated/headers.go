@@ -31,7 +31,15 @@ type ReplaceCronJobHeaders struct {
 	Authorization *string `json:"Authorization,omitempty"`
 }
 
+type PauseCronJobHeaders struct {
+	Authorization *string `json:"Authorization,omitempty"`
+}
+
 type RestoreCronJobHeaders struct {
+	Authorization *string `json:"Authorization,omitempty"`
+}
+
+type ResumeCronJobHeaders struct {
 	Authorization *string `json:"Authorization,omitempty"`
 }
 
