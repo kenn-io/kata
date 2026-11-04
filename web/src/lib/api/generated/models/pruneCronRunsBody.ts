@@ -6,6 +6,10 @@ export interface PruneCronRunsBody {
   actor?: string
   before: string
   dry_run: boolean
+  /**
+   * @minLength 26
+   * @maxLength 26
+   */
   job_uid?: string
   /**
    * @minimum 1
@@ -17,5 +21,9 @@ export interface PruneCronRunsBody {
    * @maximum 20000
    */
   limit?: number
+  /**
+   * @minLength 26
+   * @maxLength 26
+   */
   workflow_uid?: string
 }
