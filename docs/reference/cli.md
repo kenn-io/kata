@@ -2048,7 +2048,8 @@ dates once either is set, and `u` writes the previous dates back under the
 same revision check.
 
 In the issue list, press `X` to soft-delete the selected issue. In split
-layout, focus the list first. The form shows the issue's title and the header
+layout, focus the list first. In Inbox and while browsing from Attention, use
+`kata delete` instead. The form shows the issue's title and the header
 `DELETE <project>#<id>`, the string `kata delete --confirm` takes. Type
 `DELETE <project>#<id>` and press `Enter`. `Enter` does nothing until the text
 matches. `Esc` cancels before the request starts. The selection then moves to

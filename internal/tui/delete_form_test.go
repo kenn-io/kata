@@ -348,22 +348,29 @@ func TestDeleteFromSplitListReplacesRetainedDetail(t *testing.T) {
 	assert.Empty(t, h.m.detail.navStack, "the replacement detail starts fresh")
 }
 
-func TestDeleteInInboxDoesNotRestoreDeletedDetail(t *testing.T) {
-	h := newDeleteHarness(t, viewDetail)
-	_, err := h.env.DB.DesignateInboxProject(t.Context(), db.DesignateInboxProjectIn{ProjectID: h.project.ID, Actor: "alice"})
-	require.NoError(t, err)
-	target := h.issues[0]
-	h.selectIssue(target.UID)
-	h.m = h.drain(h.finish(h.key(runeKey('I'))))
-	require.True(t, h.m.scope.inbox)
-	h.selectIssue(target.UID)
-	h.key(runeKey('X'))
-	h.m = typeString(h.m, "DELETE "+h.qualified(target))
-	h.m = h.drain(h.enter())
-	require.True(t, h.isDeleted(target.UID))
-	h.m = h.drain(h.key(runeKey('I')))
-	require.False(t, h.m.scope.inbox)
-	assert.NotContains(t, stripANSI(h.m.View().Content), "issue_not_found")
-	assert.Equal(t, viewList, h.m.view)
-	assert.Nil(t, h.m.detail.issue)
+func TestDeleteKeyDoesNothingWithSavedReturnContext(t *testing.T) {
+	for _, context := range []string{"Inbox", "Attention"} {
+		t.Run(context, func(t *testing.T) {
+			h := newDeleteHarness(t, viewList)
+			target := h.issues[0]
+			if context == "Inbox" {
+				_, err := h.env.DB.DesignateInboxProject(t.Context(), db.DesignateInboxProjectIn{ProjectID: h.project.ID, Actor: "alice"})
+				require.NoError(t, err)
+				h.m = h.drain(h.finish(h.key(runeKey('I'))))
+				require.True(t, h.m.scope.inbox)
+				require.NotNil(t, h.m.inboxReturn)
+			} else {
+				h.m.attention.returnContext = &attentionReturnContext{detail: h.m.detail}
+			}
+			h.selectIssue(target.UID)
+
+			cmd := h.key(runeKey('X'))
+
+			assert.Nil(t, cmd)
+			assert.Equal(t, inputNone, h.m.input.kind, "X leaves the delete form closed")
+			assert.Equal(t, viewList, h.m.view)
+			assert.Equal(t, target.UID, h.m.list.selectedUID)
+			assert.False(t, h.isDeleted(target.UID))
+		})
+	}
 }

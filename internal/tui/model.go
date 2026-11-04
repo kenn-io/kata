@@ -1864,7 +1864,7 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 	target := m.input.target
 	formKind := m.input.kind
 	if formKind == inputDeleteForm {
-		next, cmd := m.finishDelete(target, mut)
+		next, cmd := m.finishDelete(target)
 		if mutAffectsLabelCounts(mut) {
 			refreshed, cmd := batchLabelRefresh(next, cmd, mut)
 			return refreshed, withConnGen(cmd, m.connGen)
