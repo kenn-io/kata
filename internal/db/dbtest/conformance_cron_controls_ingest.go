@@ -16,6 +16,9 @@ import (
 func checkCronProjectPauseIngress(t *testing.T, store db.Storage) error {
 	return checkCronControlIngressValue(t, store, "cron.pause", `{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":"maintenance"}`)
 }
+func checkCronPassoverIngress(t *testing.T, store db.Storage) error {
+	return checkCronControlIngressValue(t, store, "cron.passover", `{"version":1,"through":"2026-01-02T03:04:05Z","by":"operator"}`)
+}
 
 func checkCronControlIngressValue(t *testing.T, store db.Storage, key, pause string) error {
 	readValue := func(t *testing.T, p db.Project) jsontext.Value {
@@ -89,6 +92,10 @@ func checkCronControlIngressValue(t *testing.T, store db.Storage, key, pause str
 			current, err := store.ProjectByID(ctx, p.ID)
 			require.NoError(t, err)
 			require.JSONEq(t, pause, string(readValue(t, current)))
+			if key != "cron.pause" {
+				require.ErrorIs(t, deliver(2, `null`), db.ErrFederationIngestValidation)
+				return
+			}
 			require.NoError(t, deliver(2, `null`))
 			current, err = store.ProjectByID(ctx, p.ID)
 			require.NoError(t, err)

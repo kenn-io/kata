@@ -81,8 +81,10 @@ func DecodeRootResetPayload(pin RootKeyPin, snapshot RootResetSnapshot) ([]Remot
 			if err := ValidateFederationEntries(event.Type, event.EventUID, event.Payload); err != nil {
 				return nil, provenance, err
 			}
-			if err := validateCronControlEvent(event, pin.AuthorityUID, false); err != nil {
-				return nil, provenance, err
+			if section == 1 {
+				if err := validateCronControlEvent(event, pin.AuthorityUID, false); err != nil {
+					return nil, provenance, err
+				}
 			}
 			if _, exists := byUID[event.EventUID]; exists {
 				return nil, provenance, errors.New("duplicate reset event")
@@ -90,6 +92,9 @@ func DecodeRootResetPayload(pin RootKeyPin, snapshot RootResetSnapshot) ([]Remot
 			byUID[event.EventUID] = event
 			events = append(events, event)
 		}
+	}
+	if err := validateCronResetHistory(events[:len(sources)], events[len(sources):], pin.AuthorityUID); err != nil {
+		return nil, provenance, err
 	}
 	receipts := map[string]AttributionReceipt{}
 	sequences := map[string]bool{}

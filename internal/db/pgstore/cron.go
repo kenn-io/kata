@@ -82,3 +82,18 @@ func (s *Store) ListCronRequestProjects(ctx context.Context) ([]int64, error) {
 func (s *Store) SweepCronRequests(ctx context.Context, id int64, now time.Time) (*db.Event, error) {
 	return s.cronSQL().SweepRequests(ctx, id, now)
 }
+
+// ResumeCronJob enables a job with an optional retained delivery cutoff.
+func (s *Store) ResumeCronJob(ctx context.Context, in db.ResumeCronJobIn) (db.ResumeCronJobOut, error) {
+	return s.cronSQL().ResumeJob(ctx, in)
+}
+
+// CronJobControlRead returns definition and effective cutoff in one snapshot.
+func (s *Store) CronJobControlRead(ctx context.Context, pid int64, id string) (db.CronJobControlRead, error) {
+	return s.cronSQL().JobControlRead(ctx, pid, id)
+}
+
+// ListCronJobControlReads returns consistent definition/cutoff pairs.
+func (s *Store) ListCronJobControlReads(ctx context.Context, pid int64, includeDeleted bool) ([]db.CronJobControlRead, error) {
+	return s.cronSQL().JobControlReads(ctx, pid, includeDeleted)
+}

@@ -21,6 +21,9 @@ type Storage interface {
 	SweepCronRequests(context.Context, int64, time.Time) (*Event, error)
 	RequestCron(context.Context, RequestCronIn) (RequestCronOut, error)
 	SetCronProjectPause(context.Context, SetCronProjectPauseIn) (PatchProjectMetadataOut, error)
+	ResumeCronJob(context.Context, ResumeCronJobIn) (ResumeCronJobOut, error)
+	CronJobControlRead(context.Context, int64, string) (CronJobControlRead, error)
+	ListCronJobControlReads(context.Context, int64, bool) ([]CronJobControlRead, error)
 	// Shared definitions, native recurring delivery and independently attributed execution evidence.
 	ObserveCronRun(context.Context, ObserveCronRun) (CronRunObservationResult, error)
 	CronRun(context.Context, int64, string) (CronRun, error)

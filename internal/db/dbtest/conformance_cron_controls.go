@@ -54,7 +54,7 @@ func checkCronProjectPause(t *testing.T, s db.Storage, b Backend) error {
 	t.Run("reserved metadata", func(t *testing.T) {
 		p, e := s.CreateProject(ctx, "reserved-project")
 		require.NoError(t, e)
-		for _, key := range []string{"cron.pause", "cron.request.01ARZ3NDEKTSV4RRFFQ69G5FAV"} {
+		for _, key := range []string{"cron.pause", "cron.request.01ARZ3NDEKTSV4RRFFQ69G5FAV", "cron.passover", "cron.passover.01ARZ3NDEKTSV4RRFFQ69G5FAV", "cron.passover.bad"} {
 			for _, value := range []string{`true`, `null`} {
 				_, e = s.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{ProjectID: p.ID, Actor: "operator", Patch: map[string]jsontext.Value{key: []byte(value)}})
 				require.Error(t, e, key)

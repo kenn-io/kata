@@ -693,3 +693,8 @@ func (a *cronReadTestAPI) ShowCronRun(context.Context, int64, string) (db.CronRu
 func (a *cronReadTestAPI) RequestCron(context.Context, int64, string, string, string, string) (db.RequestCronOut, error) {
 	return db.RequestCronOut{}, errors.New("request write unavailable")
 }
+
+func (a *cronReadTestAPI) readCronJobs(ctx context.Context, id int64) (cronJobsRead, error) {
+	jobs, err := a.ListCronJobs(ctx, id)
+	return cronJobsRead{jobs, a.data.passovers}, err
+}

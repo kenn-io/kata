@@ -138,6 +138,20 @@ type CronJobEnabledActionRequest struct {
 	Body *CronJobEnabledActionBody
 }
 
+// CronJobResumeBody optionally discards scheduled backlog under retained CAS.
+type CronJobResumeBody struct {
+	Actor            string `json:"actor,omitempty"`
+	ExpectedEventUID string `json:"expected_event_uid,omitempty"`
+	DiscardMissed    bool   `json:"discard_missed,omitempty"`
+}
+
+// CronJobResumeRequest addresses an attributed resume with optional discard.
+type CronJobResumeRequest struct {
+	Authorization string `header:"Authorization"`
+	CronDefinitionRequest
+	Body *CronJobResumeBody `required:"false"`
+}
+
 // PutCronJobBody carries a job definition and optional replacement precondition.
 type PutCronJobBody struct {
 	Actor            string            `json:"actor,omitempty"`
@@ -182,8 +196,9 @@ type ReplaceCronWorkflowRequest struct {
 // CronJobResponse returns the job and events committed by its mutation.
 type CronJobResponse struct {
 	Body struct {
-		Job    CronJob    `json:"job"`
-		Events []db.Event `json:"events,omitempty"`
+		Job      CronJob       `json:"job"`
+		Passover *CronPassover `json:"passover"`
+		Events   []db.Event    `json:"events,omitempty"`
 	}
 }
 
@@ -198,9 +213,10 @@ type CronWorkflowResponse struct {
 // ListCronJobsResponse returns the selected portable jobs.
 type ListCronJobsResponse struct {
 	Body struct {
-		Jobs         []CronJob         `json:"jobs"`
-		ProjectPause *CronProjectPause `json:"project_pause"`
-		Controls     []string          `json:"controls"`
+		Jobs         []CronJob                `json:"jobs"`
+		Passovers    map[string]*CronPassover `json:"passovers"`
+		ProjectPause *CronProjectPause        `json:"project_pause"`
+		Controls     []string                 `json:"controls"`
 	}
 }
 

@@ -33,6 +33,27 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	jobDefinition := cron.JobDefinition{Version: 1, Kind: "job", Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Review open work"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "skip"}
 	job, _, err := root.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "Nightly review", Definition: jobDefinition, Actor: "worker"})
 	require.NoError(t, err)
+
+	// Restore history from before these keys were reserved, then repair both
+	// scopes through the guarded API. The immutable old event must survive reset.
+	legacyPayload := jsontext.Value(`{"diff":{"cron.passover":{"from":null,"to":false},"cron.passover.` + job.UID + `":{"from":null,"to":false}}}`)
+	legacy := newRemoteEvent(t, project, nil, "project.metadata_updated", "worker", root.InstanceUID(), time.Now().Add(-time.Second).UnixMilli(), legacyPayload)
+	inserted, err := root.InsertRemoteEvent(ctx, project.ID, legacy)
+	require.NoError(t, err)
+	require.True(t, inserted)
+	seedPassover(t, root, project.ID, map[string]jsontext.Value{"cron.passover": jsontext.Value(`false`), "cron.passover." + job.UID: jsontext.Value(`false`)})
+	revision, err := root.ProjectByID(ctx, project.ID)
+	require.NoError(t, err)
+	_, err = root.SetCronProjectPause(db.WithRootAttribution(ctx, signer, "worker"), db.SetCronProjectPauseIn{ProjectID: project.ID, Actor: "worker", ExpectedRevision: &revision.Revision, DiscardMissed: true})
+	require.NoError(t, err)
+	resumed, err := root.ResumeCronJob(db.WithRootAttribution(ctx, signer, "worker"), db.ResumeCronJobIn{ProjectID: project.ID, UID: job.UID, Actor: "worker", DiscardMissed: true, ExpectedEventUID: job.DefinitionEventUID})
+	require.NoError(t, err)
+	job = resumed.Job
+	jobDefinition = job.Definition
+	policy, err := root.ProjectByID(ctx, project.ID)
+	require.NoError(t, err)
+	retainedPassover := db.CronPassoverFromMetadata(policy.Metadata, job.UID)
+	require.NotNil(t, retainedPassover)
 	workflowDefinition := cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "inspect", Kind: "command", Command: "git status"}}}
 	workflow, _, err := root.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, Name: "Release checks", Definition: workflowDefinition, Actor: "worker"})
 	require.NoError(t, err)
@@ -63,6 +84,16 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	require.NoError(t, db.VerifyRootResetManifest(pin, checkpoint.Manifest, checkpoint.Snapshot))
 	decoded, _, err := db.DecodeRootResetPayload(pin, checkpoint.Snapshot)
 	require.NoError(t, err)
+
+	foundLegacy := false
+	for _, event := range decoded {
+		if event.EventUID == legacy.EventUID {
+			foundLegacy = true
+			require.Equal(t, legacy.Payload, event.Payload)
+			require.Equal(t, legacy.ContentHash, event.ContentHash)
+		}
+	}
+	require.True(t, foundLegacy, "recovery retains immutable superseded legacy history")
 	kinds := map[string]int{}
 	for _, event := range decoded {
 		kinds[event.Type]++
@@ -103,8 +134,63 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	require.Equal(t, beforeInvalid, afterInvalid, "invalid request checkpoint cannot partially replace the replica")
 	_, err = downstream.CronJob(ctx, replica.ID, job.UID)
 	require.ErrorIs(t, err, db.ErrNotFound)
+	// A correctly signed malformed cutoff must fail atomically in either
+	// retained source history or synthesized entity state.
+	for _, entitySection := range []bool{false, true} {
+		broken := checkpoint.Snapshot
+		bodies := broken.Events
+		if entitySection {
+			bodies = broken.Entities
+		}
+		var sources [][]byte
+		require.NoError(t, json.Unmarshal(bodies, &sources))
+		changed := false
+		for i, body := range sources {
+			event, err := db.DecodeRelaySourceEvent(body)
+			require.NoError(t, err)
+			if event.Type != "project.metadata_updated" {
+				continue
+			}
+			var payload map[string]jsontext.Value
+			require.NoError(t, json.Unmarshal(event.Payload, &payload))
+			var diff map[string]map[string]jsontext.Value
+			require.NoError(t, json.Unmarshal(payload["diff"], &diff))
+			key := "cron.passover." + job.UID
+			if _, ok := diff[key]; !ok {
+				continue
+			}
+			diff[key]["to"] = jsontext.Value(`false`)
+			payload["diff"], err = json.Marshal(diff)
+			require.NoError(t, err)
+			event.Payload, err = json.Marshal(payload)
+			require.NoError(t, err)
+			resignNativeEvent(t, &event)
+			sources[i], err = db.EncodeRelaySourceEvent(event)
+			require.NoError(t, err)
+			changed = true
+		}
+		require.True(t, changed, "checkpoint must contain passover in both sections")
+		raw, err := json.Marshal(sources)
+		require.NoError(t, err)
+		if entitySection {
+			broken.Entities = raw
+		} else {
+			broken.Events = raw
+		}
+		manifest, err := db.SignRootResetManifest(checkpoint.Manifest, broken, private)
+		require.NoError(t, err)
+		require.NoError(t, db.VerifyRootResetManifest(pin, manifest, broken))
+		translation := checkpoint.Translation
+		translation.SnapshotDigest = manifest.SnapshotDigest
+		require.ErrorContains(t, installer.InstallRelayReset(ctx, bindingUID, manifest, broken, translation), "invalid cron passover")
+		_, err = downstream.CronJob(ctx, replica.ID, job.UID)
+		require.ErrorIs(t, err, db.ErrNotFound)
+	}
 	require.NoError(t, installer.InstallRelayReset(ctx, bindingUID, checkpoint.Manifest, checkpoint.Snapshot, checkpoint.Translation))
 
+	installedProject, err := downstream.ProjectByID(ctx, replica.ID)
+	require.NoError(t, err)
+	require.Equal(t, retainedPassover, db.CronPassoverFromMetadata(installedProject.Metadata, job.UID))
 	installedJob, err := downstream.CronJob(ctx, replica.ID, job.UID)
 	require.NoError(t, err)
 	require.Equal(t, "Nightly review", installedJob.Name)

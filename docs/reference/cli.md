@@ -1923,9 +1923,9 @@ accepts the same bare short ID, qualified short ID, and full UID forms as
 
 **Cron tabs.** A paused project shows its policy on all three cron tabs; change it with [`kata cron pause` or `resume`](cron.md#pause-cron-for-a-whole-project). Press `1` for Kata, `2` for Jobs, `3` for Runs, or `4` for Workflows. Jobs can create and change jobs; Runs can request cancellation; Workflows are read-only. Cron tabs show the current project. In All projects, press `P` to pick one. Each tab keeps its filter and position when you switch tabs. Returning to Kata preserves the issue you were browsing.
 
-Press `p` in the Jobs list or job detail to [pause or resume the job](cron.md#pause-and-resume-a-job). Press `R` there to request an adapter run, or `X` in Runs to request cancellation. Both use a `y`/`n` confirmation; requests ask optional runtimes to act. See [Runtime requests](cron.md#ask-a-runtime-to-run-or-cancel) for eligibility, expiry, and retry behavior.
+Press `p` in the Jobs list or job detail to [pause or resume the job](cron.md#pause-and-resume-a-job). Press `R` there to request an adapter run, or `X` in Runs to request cancellation. Both use a `y`/`n` confirmation; requests ask optional runtimes to act. See [Runtime requests](cron.md#ask-a-runtime-to-run-or-cancel) for eligibility, expiry, and retry behavior. A supported native backlog dialog offers `y` to resume and `d` to [discard all undelivered scheduled occurrences through the resume cutoff](cron.md#resume-and-discard-scheduled-backlog). The displayed count is a preview; the cutoff is selected when the transaction runs.
 
-A job's detail lists its next three run times in the trigger's timezone, with the zone abbreviation so daylight-saving changes read clearly. A native recurring job shows them as **Next**, stepping from the progress the daemon saved on its parent issue. An adapter job shows its cron and `once` trigger times as **Triggers**; they are when the adapter's trigger fires, because Kata holds no anchor or catch-up for an adapter, and an adapter interval shows no time. A paused job shows none, as does a native job whose parent issue is closed or deleted, because the daemon delivers only while the parent is open. A native job whose parent or progress cannot be read shows **unavailable**. An adapter cron expression is read in its own `TZ=` or `CRON_TZ=` zone when it has one, and an `@every` expression shows no time.
+A job's detail lists its next three run times in the trigger's timezone, with the zone abbreviation so daylight-saving changes read clearly. A native recurring job shows them as **Next**, stepping from the progress the daemon saved on its parent issue. An adapter job shows its cron and `once` trigger times as **Triggers**; they are when the adapter's trigger fires, because Kata holds no anchor or catch-up for an adapter, and an adapter interval shows no time. A paused job shows none, as does a native job whose parent issue is closed or deleted, because the daemon delivers only while the parent is open. A native job whose parent or progress cannot be read shows **unavailable**. Previews exclude retained discard cutoffs; invalid applicable cutoff state shows **unavailable**. An adapter cron expression is read in its own `TZ=` or `CRON_TZ=` zone when it has one, and an `@every` expression shows no time.
 
 | Key | Cron lists and details |
 | --- | --- |
@@ -2254,10 +2254,10 @@ kata cron job update <job-uid> --expected-event-uid <event-uid> --file replaceme
 kata cron job delete <job-uid> --expected-event-uid <event-uid> --json
 kata cron job restore <job-uid> --expected-event-uid <event-uid> --json
 kata cron job pause <job-uid> [--expected-event-uid <event-uid>] --json
-kata cron job resume <job-uid> [--expected-event-uid <event-uid>] --json
+kata cron job resume <job-uid> [--expected-event-uid <event-uid>] [--discard-missed] --json
 kata cron capabilities --json
 kata cron pause [--reason <reason>] --json
-kata cron resume --json
+kata cron resume [--discard-missed] --json
 kata cron run observe <run-uid> --json-input observation.json --json
 kata cron run list [--limit 100] [--before-uid <uid>] [--job-uid <job-uid>] --json
 kata cron run show <run-uid> --json
@@ -2266,6 +2266,11 @@ kata cron run request-cancel <run-uid> --request-uid <fresh-request-ulid> [--ttl
 kata cron request list [--state pending|answered|expired] --json
 kata show <issue-ref> --planning-dates --json
 ```
+
+`--discard-missed` requires owning-hub support and sends one retained revision
+guard. It never falls back to ordinary resume or retries with a new guard. See
+[Resume and discard scheduled backlog](cron.md#resume-and-discard-scheduled-backlog)
+for retry, upgrade, repair, and project-merge limits.
 
 Recurring job create/update also accept `--parent <issue-ref>`; see
 [recurring child issues](cron.md#recurring-child-issues) for the request format.

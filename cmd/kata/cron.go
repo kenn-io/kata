@@ -75,6 +75,7 @@ type cronCLIOptions struct {
 	file, identity, expectedEventUID string
 	parent                           string
 	includeDeleted                   bool
+	discardMissed                    bool
 	limit                            int64
 	beforeUID, jobUID                string
 }
@@ -118,6 +119,9 @@ func newCronOperationCmd(resource, action string) *cobra.Command {
 		if resource == "job" && (action == "create" || action == "update") {
 			command.Flags().StringVar(&options.parent, "parent", "", "parent issue ref for a per-run job (stores the full UID)")
 		}
+	}
+	if resource == "job" && action == "resume" {
+		command.Flags().BoolVar(&options.discardMissed, "discard-missed", false, "discard all undelivered scheduled occurrences through the resume cutoff (root only)")
 	}
 	if action == "list" && options.definition() {
 		command.Flags().BoolVar(&options.includeDeleted, "include-deleted", false, "include tombstoned definitions")
@@ -279,6 +283,32 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
+	if o.discardMissed {
+		if _, err = cronDiscardCapabilities(cmd.Context(), client, project.ID, false); err != nil {
+			return err
+		}
+		if o.expectedEventUID == "" {
+			shown, showErr := client.ShowCronJob(cmd.Context(), &generated.ShowCronJobRequestOptions{PathParams: &generated.ShowCronJobPath{ProjectID: project.ID, CronUID: o.identity}})
+			if showErr != nil {
+				return showErr
+			}
+			o.expectedEventUID, err = normalizedCronCLIUID(shown.Job.DefinitionEventUID)
+			if err != nil {
+				return err
+			}
+		}
+		var fields map[string]jsontext.Value
+		if err = json.Unmarshal(body, &fields); err != nil {
+			return err
+		}
+		if err = setCronStringField(fields, "expected_event_uid", o.expectedEventUID); err != nil {
+			return err
+		}
+		body, err = json.Marshal(fields)
+		if err != nil {
+			return err
+		}
+	}
 	raw, err := o.call(daemon, client, project.ID, body)
 	if err != nil {
 		return err
@@ -396,6 +426,18 @@ func (o *cronCLIOptions) requestBody(cmd *cobra.Command) ([]byte, error) {
 	if err := o.applyExpectedEventUID(fields); err != nil {
 		return nil, err
 	}
+	if o.resource == "job" && o.action == "resume" {
+		var supplied bool
+		if raw, ok := fields["discard_missed"]; ok {
+			if err := json.Unmarshal(raw, &supplied); err != nil {
+				return nil, err
+			}
+		}
+		o.discardMissed = o.discardMissed || supplied
+		if o.discardMissed {
+			fields["discard_missed"] = jsontext.Value("true")
+		}
+	}
 	return json.Marshal(fields)
 }
 
@@ -464,7 +506,9 @@ func (o *cronCLIOptions) requestShape() (any, error) {
 		return &api.PutCronWorkflowBody{}, nil
 	case o.resource == "run" && o.action == "observe":
 		return &api.ObserveCronRunBody{}, nil
-	case o.resource == "job" && (o.action == "pause" || o.action == "resume"):
+	case o.resource == "job" && o.action == "resume":
+		return &api.CronJobResumeBody{}, nil
+	case o.resource == "job" && o.action == "pause":
 		return &api.CronJobEnabledActionBody{}, nil
 	case o.definition():
 		return &api.CronDefinitionActionBody{}, nil
@@ -714,12 +758,12 @@ func (o cronCLIOptions) callWrite(a daemonAPI, c *kataclient.Client, projectID i
 
 func (o cronCLIOptions) callLifecycle(a daemonAPI, c *kataclient.Client, projectID int64, raw []byte) ([]byte, error) {
 	if o.resource == "job" && (o.action == "pause" || o.action == "resume") {
-		var body generated.CronJobEnabledActionBody
+		var body generated.CronJobResumeBody
 		if err := decodeCronCLIRequest(raw, &body); err != nil {
 			return nil, err
 		}
 		if o.action == "pause" {
-			response, err := c.PauseCronJobWithResponse(a.ctx, &generated.PauseCronJobRequestOptions{PathParams: &generated.PauseCronJobPath{ProjectID: projectID, CronUID: o.identity}, Body: &body})
+			response, err := c.PauseCronJobWithResponse(a.ctx, &generated.PauseCronJobRequestOptions{PathParams: &generated.PauseCronJobPath{ProjectID: projectID, CronUID: o.identity}, Body: &generated.CronJobEnabledActionBody{Actor: body.Actor, ExpectedEventUID: body.ExpectedEventUID}})
 			if response == nil {
 				return nil, externalCLITransportError(response, err)
 			}

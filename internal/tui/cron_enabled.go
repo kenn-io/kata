@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ type cronEnabledRequest struct {
 	uid, expected, name, parent string
 	enabled, invalidated        bool
 	count                       int
+	allowDiscard, discard bool
 }
 type cronEnabledReadyMsg struct {
 	request cronEnabledRequest
@@ -51,7 +53,11 @@ func (m Model) routeCronEnabledKey(lines []cronLine, cursor int) (Model, tea.Cmd
 		// Bubble Tea commands own their request lifetime; the framework supplies no context.
 		ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
 		defer cancel()
-		current, err := api.ShowCronJob(ctx, pid, request.uid)
+		read, err := api.readCronJob(ctx, pid, request.uid)
+		current := read.Job
+		if err == nil && request.enabled && read.Passover != nil && read.Passover.Invalid {
+			err = errors.New("passover state is invalid; repair it with an explicit discard resume")
+		}
 		if err == nil && (current.DeletedAt != nil || current.DefinitionEventUID != request.expected) {
 			err = &APIError{Status: http.StatusConflict, Code: "cron_conflict", Message: "The job changed; refresh before retrying"}
 		}
@@ -63,6 +69,12 @@ func (m Model) routeCronEnabledKey(lines []cronLine, cursor int) (Model, tea.Cmd
 				if !ok {
 					err = errors.New("cannot count missed runs; refresh the job before resuming")
 				} else {
+					if read.Passover != nil {
+						progress, err = cron.ApplyPassover(progress, read.Passover.Through)
+						if err != nil {
+							return cronEnabledReadyMsg{request, err}
+						}
+					}
 					definition := current.Definition
 					definition.Enabled = true
 					request.count, err = cron.RecurringBacklog(ctx, definition, request.expected, progress, time.Now().UTC())
@@ -108,6 +120,7 @@ func (m Model) cronEnabledReady(msg cronEnabledReadyMsg) (Model, tea.Cmd) {
 		return m.undoNotice("Could not change the job: "+msg.err.Error(), toastError)
 	}
 	request := msg.request
+	request.allowDiscard = m.cron.data.projectErr == nil && slices.Contains(m.cron.data.project.controls, "resume_discard_missed")
 	m.cron.enabled = &request
 	if request.count > 0 {
 		m.modal = modalCronResume
@@ -121,7 +134,12 @@ func (m Model) cronEnabledWrite(request cronEnabledRequest) tea.Cmd {
 		// Bubble Tea supplies no context; bound the independent command lifetime.
 		ctx, cancel := context.WithTimeout(context.Background(), cronEnabledTimeout)
 		defer cancel()
-		_, err := api.CronJobEnabled(ctx, pid, request.uid, request.expected, actor, request.enabled)
+		var err error
+		if request.discard {
+			_, err = api.ResumeCronJobDiscard(ctx, pid, request.uid, request.expected, actor)
+		} else {
+			_, err = api.CronJobEnabled(ctx, pid, request.uid, request.expected, actor, request.enabled)
+		}
 		return cronEnabledDoneMsg{request, err}
 	}
 }
@@ -168,6 +186,16 @@ func renderCronResumeModal(request *cronEnabledRequest) string {
 	issues := "issues"
 	if request.count == 1 {
 		issues = "issue"
+	}
+	if request.allowDiscard {
+		return modalBoxStyle.Render(strings.Join([]string{
+			"Resume " + sanitizeForLine(request.name) + "?", "",
+			fmt.Sprintf("Backlog at last check: %d recurring child", request.count),
+			issues + " that came due while it was paused.", "",
+			"y resumes with the existing catch-up policy.",
+			"d resumes and discards all missed occurrences",
+			"through the commit-time cutoff, including older backlog.",
+		}, "\n"))
 	}
 	return modalBoxStyle.Render(strings.Join([]string{
 		"Resume " + sanitizeForLine(request.name) + "?", "",

@@ -62,11 +62,12 @@ type cronRow struct {
 	document []byte
 }
 
-func scanCron(row interface{ Scan(...any) error }) (cronRow, error) {
+func scanCron(row interface{ Scan(...any) error }, extra ...any) (cronRow, error) {
 	var result cronRow
 	var definition, clock, created, updated string
 	var deleted sql.NullString
 	fields := []any{&result.ID, &result.UID, &result.ProjectID, &result.Name, &definition, &result.DefinitionEventUID, &clock, &result.Author, &result.Revision, &created, &updated, &deleted}
+	fields = append(fields, extra...)
 	if err := row.Scan(fields...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return result, ErrNotFound

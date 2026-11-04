@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -58,7 +57,16 @@ func (c *Client) ReopenBacklog(ctx context.Context, projectID int64, ref string)
 		if err != nil {
 			continue
 		}
-		count, err := cron.RecurringBacklog(ctx, job.Definition.Native(), job.DefinitionEventUID, progress, now)
+		if job.Passover != nil {
+			if job.Passover.Invalid {
+				return 0, errors.New("passover state is invalid")
+			}
+			progress, err = cron.ApplyPassover(progress, job.Passover.Through)
+			if err != nil {
+				return 0, err
+			}
+		}
+		count, err := cron.RecurringBacklog(ctx, job.Job.Definition, job.Job.DefinitionEventUID, progress, now)
 		if ctx.Err() != nil {
 			// An unfinished count is not a count; let the caller treat it as a failed lookup.
 			return 0, ctx.Err()
@@ -71,21 +79,23 @@ func (c *Client) ReopenBacklog(ctx context.Context, projectID int64, ref string)
 	return total, nil
 }
 
-func recurringJob(ctx context.Context, apiClient *generated.Client, projectID int64, uid string) (api.CronJob, error) {
+func recurringJob(ctx context.Context, apiClient *generated.Client, projectID int64, uid string) (cronJobRead, error) {
 	wire, callErr := apiClient.ShowCronJobWithResponse(ctx, &generated.ShowCronJobRequestOptions{
 		PathParams: &generated.ShowCronJobPath{ProjectID: projectID, CronUID: uid},
 	})
 	if wire == nil {
-		return api.CronJob{}, callErr
+		return cronJobRead{}, callErr
 	}
-	var body struct {
-		Job api.CronJob `json:"job"`
+	var raw jsontext.Value
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &raw); err != nil {
+		return cronJobRead{}, err
 	}
-	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &body); err != nil {
-		return api.CronJob{}, err
+	body, err := decodeCronJobRead(raw)
+	if err != nil {
+		return cronJobRead{}, err
 	}
 	if body.Job.DeletedAt != nil {
-		return api.CronJob{}, errors.New("cron job is deleted")
+		return cronJobRead{}, errors.New("cron job is deleted")
 	}
-	return body.Job, nil
+	return body, nil
 }

@@ -47,6 +47,9 @@ var alreadyImplemented = map[string]bool{
 	"ListCronRequestProjects": true,
 	"SweepCronRequests":       true,
 	"RequestCron":             true, // cron.go
+	"CronJobControlRead":      true,
+	"ListCronJobControlReads": true,
+	"ResumeCronJob":           true,
 	"DispatchRecurringCron":   true, // cron.go
 	"ListRecurringCronJobs":   true, // cron.go
 	"SetCronProjectPause":     true, // cron.go

@@ -39,6 +39,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
   safe while the request remains; requests expire and show their current run
   evidence. Submit at the owning hub with a fresh UID. Runtimes choose whether
   to act. See [Runtime requests](reference/cron.md#ask-a-runtime-to-run-or-cancel).
+- Resume cron while discarding all undelivered scheduled occurrences through a
+  retained cutoff with `--discard-missed`, MCP, or the TUI's supported backlog
+  dialog. Counts and previews respect the cutoff. Upgrade every scheduling
+  replica and adapter before relying on it; source cutoffs not yet saved into
+  native progress can be lost on project merge. See
+  [Resume and discard scheduled backlog](reference/cron.md#resume-and-discard-scheduled-backlog).
 
 - Stop native cron delivery for a whole project with `kata cron pause` and
   resume with each job's flags and catch-up policy preserved. Adapters can read

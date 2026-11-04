@@ -32,7 +32,9 @@ type CronProjectPauseBody struct {
 // CronProjectPauseRequest permits an empty body for attributed principals.
 type CronProjectPauseRequest struct {
 	CronProjectRequest
-	Body *CronProjectPauseBody `required:"false"`
+	Body          *CronProjectPauseBody `required:"false"`
+	DiscardMissed bool                  `query:"discard_missed"`
+	IfMatch       string                `header:"If-Match"`
 }
 
 // CronProjectPauseResponse returns retained policy and whether an event committed.
@@ -42,3 +44,16 @@ type CronProjectPauseResponse struct {
 		Changed      bool              `json:"changed"`
 	}
 }
+
+// CronPassover supplies a nullable envelope-level derived state schema.
+type CronPassover db.CronPassoverState
+
+// Schema implements huma.SchemaProvider for optional derived state.
+func (CronPassover) Schema(r huma.Registry) *huma.Schema {
+	schema := huma.SchemaFromType(r, reflect.TypeFor[db.CronPassoverState]())
+	schema.Nullable = true
+	return schema
+}
+
+// CronPassoverFrom preserves absent derived state as JSON null.
+func CronPassoverFrom(value *db.CronPassoverState) *CronPassover { return (*CronPassover)(value) }

@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -11,7 +12,7 @@ import (
 )
 
 func cronControls() []string {
-	return []string{"job_pause", "project_pause", "run_request", "cancel_request"}
+	return []string{"job_pause", "project_pause", "run_request", "cancel_request", "resume_discard_missed"}
 }
 
 func registerCronControlHandlers(h huma.API, cfg ServerConfig) {
@@ -33,8 +34,15 @@ func registerCronControlHandlers(h huma.API, cfg ServerConfig) {
 			if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 				return nil, err
 			}
-			result, err := cfg.DB.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: in.ProjectID, Actor: actor, Reason: body.Reason, Paused: action.paused})
+			revision, err := parseOptionalIfMatchRevision(in.IfMatch)
 			if err != nil {
+				return nil, err
+			}
+			result, err := cfg.DB.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: in.ProjectID, Actor: actor, Reason: body.Reason, Paused: action.paused, DiscardMissed: in.DiscardMissed, ExpectedRevision: revision})
+			if err != nil {
+				if conflict, ok := errors.AsType[*db.RevisionConflictError](err); ok {
+					return nil, api.NewError(409, "revision_conflict", fmt.Sprintf("project revision is %d", conflict.CurrentRevision), "Read the project and retry deliberately.", nil)
+				}
 				if errors.Is(err, db.ErrFederatedSpokeUnsupported) {
 					return nil, api.NewError(409, "federated_read_only", "project cron policy belongs to the owning hub", "Run the same command against the project's owning hub, for example with --daemon <hub-name>.", nil)
 				}

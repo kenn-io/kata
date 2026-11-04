@@ -39,6 +39,7 @@ type cronData struct {
 	projectErr          error
 	conn, scope, events uint64
 	jobs                []generated.CronJob
+	passovers           map[string]*db.CronPassoverState
 	workflows           []generated.CronWorkflow
 	runs                []generated.CronRun
 	progress            map[string]cron.RecurringProgress
@@ -103,7 +104,8 @@ func (m Model) fetchCron() tea.Cmd {
 		if slices.Contains(data.project.controls, "run_request") || slices.Contains(data.project.controls, "cancel_request") {
 			data.requests, data.requestsErr = cronRead(reader.ListCronRequests, id)
 		}
-		data.jobs, data.jobsErr = cronRead(reader.ListCronJobs, id)
+		jobs, err := cronRead(reader.readCronJobs, id)
+		data.jobs, data.passovers, data.jobsErr = jobs.Jobs, jobs.Passovers, err
 		data.workflows, data.workflowsErr = cronRead(reader.ListCronWorkflows, id)
 		data.runs, data.runsErr = cronRead(reader.ListCronRuns, id)
 		data.progress, data.parentOpen = cronReadParents(reader, id, data.jobs)

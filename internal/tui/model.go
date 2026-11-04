@@ -3235,6 +3235,12 @@ func (m Model) routeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		}
 	case modalCronResume:
 		switch msg.String() {
+		case "d", "D":
+			if m.cron.enabled == nil || !m.cron.enabled.allowDiscard {
+				return m, nil
+			}
+			m.cron.enabled.discard = true
+			return m.confirmCronResume()
 		case "y", "Y":
 			return m.confirmCronResume()
 		case "n", "N", "esc":
@@ -3698,7 +3704,7 @@ func (m Model) viewContent() string {
 			body = renderCredentials(m)
 		default:
 			if m.modal == modalReopenBacklog || m.modal == modalCronResume || m.modal == modalCronRequest {
-				footer := renderFooterHelpTable(modalHelpRows(m.modal), m.width)
+				footer := renderFooterHelpTable(m.activeModalHelpRows(), m.width)
 				bodyHeight := max(0, m.height-lipgloss.Height(footer))
 				body = renderTooNarrow(m.width, bodyHeight)
 				body = m.withActiveConnectionHeader(m.appendNonListDetailExtras(body))

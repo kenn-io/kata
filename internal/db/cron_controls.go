@@ -71,8 +71,8 @@ func CronProjectPauseFromMetadata(blob JSONBlob) *CronProjectPause {
 }
 
 // CheckCronProjectPauseAdoption prevents root-owned policy from being
-// published in a spoke-origin metadata baseline. Resume first so the local
-// root can clear the policy under its authority.
+// published in a spoke-origin metadata baseline. A pause can be resumed first;
+// a retained passover has no authority-preserving adoption path.
 func CheckCronProjectPauseAdoption(project Project) error {
 	if len(project.Metadata) == 0 {
 		return nil
@@ -84,6 +84,11 @@ func CheckCronProjectPauseAdoption(project Project) error {
 	if _, retained := values[CronProjectPauseMetadataKey]; retained {
 		return fmt.Errorf("%w: resume the project cron pause before federation adoption", ErrFederatedSpokeUnsupported)
 	}
+	for key := range values {
+		if cronPassoverKey(key) {
+			return fmt.Errorf("%w: a project with retained cron passover cannot be adopted into another hub", ErrFederatedSpokeUnsupported)
+		}
+	}
 	return nil
 }
 
@@ -91,7 +96,7 @@ func CheckCronProjectPauseAdoption(project Project) error {
 // cron-prefixed project metadata remains ordinary user metadata.
 func CheckCronProjectMetadataWrite(values map[string]jsontext.Value) error {
 	for key := range values {
-		if key == CronProjectPauseMetadataKey || strings.HasPrefix(key, "cron.request.") {
+		if key == CronProjectPauseMetadataKey || strings.HasPrefix(key, "cron.request.") || cronPassoverKey(key) {
 			return fmt.Errorf("%w: %s requires the typed cron control API", metadata.ErrInvalidValue, key)
 		}
 	}
@@ -105,8 +110,7 @@ func ValidateCronControlEvent(event RemoteEvent, authorityUID string) error {
 	return validateCronControlEvent(event, authorityUID, true)
 }
 
-// Historical checkpoints may retain malformed legacy pause policy for typed
-// recovery. Request values have no legacy format and always validate strictly.
+// Reset history retains legacy pause recovery; requests and cutoffs validate strictly.
 func validateCronControlEvent(event RemoteEvent, authorityUID string, validatePause bool) error {
 	if event.Type != "project.metadata_updated" {
 		return nil
@@ -122,11 +126,18 @@ func validateCronControlEvent(event RemoteEvent, authorityUID string, validatePa
 	}
 	for key, change := range payload.Diff {
 		request := strings.HasPrefix(key, CronRequestMetadataPrefix)
-		if !request && (!validatePause || key != CronProjectPauseMetadataKey) {
+		passover := cronPassoverKey(key)
+		if !request && !passover && (!validatePause || key != CronProjectPauseMetadataKey) {
 			continue
 		}
 		if authorityUID == "" || event.OriginInstanceUID != authorityUID {
 			return fmt.Errorf("%w: cron controls require root origin", ErrFederationIngestValidation)
+		}
+		if passover {
+			if err := ValidateCronPassoverChange(key, change.From, change.To); err != nil {
+				return fmt.Errorf("%w: %v", ErrFederationIngestValidation, err)
+			}
+			continue
 		}
 		if request {
 			if err := validateCronRequestEventChange(strings.TrimPrefix(key, CronRequestMetadataPrefix), change.From, change.To); err != nil {
@@ -146,7 +157,9 @@ func validateCronControlEvent(event RemoteEvent, authorityUID string, validatePa
 
 // SetCronProjectPauseIn changes only the project's cron admission switch.
 type SetCronProjectPauseIn struct {
-	ProjectID     int64
-	Actor, Reason string
-	Paused        bool
+	ProjectID        int64
+	Actor, Reason    string
+	Paused           bool
+	DiscardMissed    bool
+	ExpectedRevision *int64
 }

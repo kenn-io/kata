@@ -152,7 +152,7 @@ at the root may act. MCP exposes `kata.cron_project_pause` with an optional
 Responses return `project_pause` and `changed`.
 
 Capabilities and job lists expose `project_pause` as an object or `null`, plus
-`controls: ["job_pause", "project_pause", "run_request", "cancel_request"]`. A present pause contains
+`controls: ["job_pause", "project_pause", "run_request", "cancel_request", "resume_discard_missed"]`. A present pause contains
 `paused_by`, `paused_at`, and `reason`. Malformed legacy state reads as
 `invalid: true` and still stops delivery; resume clears it. The TUI shows the
 project policy on Jobs, Runs, and Workflows. Use CLI or MCP to change it.
@@ -167,7 +167,8 @@ Adapters must read the current policy and start no new scheduled work while
 Kata does not terminate their processes. Upgrade the root first: older daemons
 carry `cron.pause` as opaque project metadata but do not enforce it. Missing
 `controls` means unsupported. The generic metadata API rejects `cron.pause`
-and the reserved `cron.request.` prefix; use typed cron routes for control
+and the reserved `cron.request.` and `cron.passover.` prefixes, plus the exact
+`cron.passover` key; use typed cron routes for control
 state. These controls replicate through existing project metadata events,
 without a new federation feature requirement.
 
@@ -233,6 +234,87 @@ can change back if its target is reported running again. Reads search all run
 evidence, including observations outside the newest 100 displayed by the TUI.
 Expired keys disappear after collection. These states describe evidence; they
 do not guarantee a runtime executed or cancelled anything.
+
+### Resume and discard scheduled backlog
+
+At the owning hub, use `kata cron job resume <job-uid> --discard-missed --json`
+or `kata cron resume --discard-missed --json` to resume and discard every
+undelivered scheduled occurrence through the cutoff chosen inside the resume
+transaction. This includes backlog from before the pause. Ordinary resume keeps
+the existing catch-up policy. Discard preserves the job definition's other fields;
+project discard also preserves all job enabled flags.
+
+Discard requires root support and a retained revision. CLI and MCP first check
+for `resume_discard_missed` in capabilities. A failed read or absent capability
+stops before mutation; neither client falls back to ordinary resume. Direct-spoke
+discard is unsupported, including when its owning hub supports it. Use the owning
+hub directly. This capability reports support, not permission to write.
+
+For a job, CLI and MCP read the selected `definition_event_uid` once unless you
+supply `expected_event_uid` (`--expected-event-uid` in CLI). For a project, they
+read `project_revision` once from capabilities. Each invocation sends its retained
+precondition in its one write and does not refresh it after a conflict or an
+uncertain response. A stale guard returns 409, including for an already-resumed
+object. Inspect current state before choosing a new action. To retry a job after
+an uncertain outcome, retain its original `--expected-event-uid`; do not read a
+new revision and automatically resubmit discard. A new command invocation is a
+newly selected action.
+
+REST uses POST `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}/resume` with
+`discard_missed: true` and `expected_event_uid`, or DELETE
+`/api/v1/projects/{project_id}/cron/pause?discard_missed=true` with
+`If-Match: rev-<project_revision>`. Both accept an attributed `actor`. Missing
+preconditions are rejected. An already-enabled job or unpaused project is an
+event-free no-op after its guard is checked, except for explicit repair of
+malformed state.
+
+The TUI's native positive-backlog confirmation offers `y` to resume with the
+existing catch-up policy and `d` to discard when support is known. Its count is
+a preview at lookup time; discard uses the later transaction cutoff. Both choices
+use the counted job revision and reject changed selections or connections.
+Zero-backlog and closed-parent paths use ordinary resume. Use CLI or MCP for
+explicit discard there.
+
+The retained cutoff lives in `cron.passover` for the project or
+`cron.passover.<job-uid>` for a job. The later applicable cutoff wins, with job
+scope winning a tie. Show and action responses expose it as envelope-level
+`passover`; job lists expose `passovers` keyed by UID. The inner `job` and portable
+definition stay unchanged. Valid state contains `through` and `scope`; malformed
+applicable state reads as `invalid: true` and blocks scheduled delivery. An
+explicit guarded discard repairs its selected scope, including when already
+resumed. Repair malformed project state with project resume/discard; a job action
+does not repair project-wide state. A signed reset can retain a malformed historical
+value only when a later root repair names that exact old value and the current
+root baseline contains a valid value for that key. New changes and current reset
+state always require complete valid values.
+
+A project with any retained passover cannot be adopted as a spoke of another
+hub. Adoption rejects it before changing identity, history, or binding. Ordinary
+resume keeps passover, so resuming again does not remove this limitation.
+
+Native delivery, TUI backlog counts, issue-reopen counts, and occurrence previews
+exclude instants at or before the cutoff. Delivery applies it lazily and saves the
+updated progress before the next eligible delivery. There is no time bound:
+disabled jobs and closed or deleted parents can postpone persistence indefinitely.
+Retained metadata still enforces the cutoff when delivery becomes eligible.
+
+Project merge retains the target's metadata and drops the source's. **A source
+cutoff that has not reached saved native progress can be lost on merge and its
+old backlog can replay on the target.** This exception has no time bound; an
+indefinitely disabled job or closed parent may never have saved the cutoff.
+A cutoff already saved into native progress survives the move.
+
+Upgrade the root, every replica used for scheduling, and each adapter before
+relying on discard. Older peers carry the metadata but do not enforce it or
+expose derived cutoff state. An upgraded adapter starts no scheduled cron,
+interval, once, or issue-date occurrence at or before `passover.through`, advances
+its own cursor, and visibly blocks launches for invalid state. In-flight work is
+unaffected. Kata does not implement or terminate adapter processes.
+
+An adapter may record at most one advisory run observation per job/cutoff with
+status `cancelled`, `occurrence_key: "passover:<through>"`, and a v1 summary
+starting `reason: paused_passed_over` followed by `<n> occurrences`. This is an
+adapter convention, not native delivery evidence or a new v2 reason registry.
 
 ### Request files
 
@@ -488,10 +570,10 @@ interval anchor; an unfinished latest scan restarts against the new definition.
 Use the [project cron pause](#pause-cron-for-a-whole-project), disable the job,
 or close its parent to pause delivery. An archived project or a
 deleted parent also pauses it. Re-enabling, reopening, or restoring resumes the
-configured catch-up policy. A pause does not skip occurrences: with
+configured catch-up policy. Ordinary pause and resume do not skip occurrences: with
 `catchup: "all"`, resuming creates every child missed while paused. This
 includes the time since creation for a job created disabled. Use `latest` or
-`skip` when a pause must not backfill. The TUI's [reopen
+`skip`, or [resume and discard](#resume-and-discard-scheduled-backlog), when a pause must not backfill. The TUI's [reopen
 prompt](cli.md) counts every missed occurrence, not just the
 1000 that one sweep delivers. Deleting the job stops delivery until
 restoration.
@@ -581,7 +663,7 @@ checkout. Kata stores the definitions and run evidence.
 ## Capabilities
 
 `kata cron capabilities --json` reads the project's UID and advertised
-`event_features`, `controls`, and `project_pause` without changing state. The corresponding GET is
+`event_features`, `controls`, `project_pause`, and `project_revision` without changing state. The corresponding GET is
 `/api/v1/projects/{project_id}/cron/capabilities`; the
 `X-Kata-Event-Features` header advertises only `cron_v1`, covering portable
 definitions, run observations, and native recurring child delivery. Missing,
