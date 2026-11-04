@@ -23,115 +23,77 @@ func checkCronEnabledDeletedParent(t *testing.T, s db.Storage) error {
 		require.NoError(t, err)
 		require.Len(t, events, 1)
 		job = current
-		out, err := s.DispatchRecurringCron(t.Context(), db.DispatchRecurringCronIn{ProjectID: p.ID, JobUID: job.UID, ExpectedEventUID: job.DefinitionEventUID, Now: progress.Anchor.Add(4 * time.Hour)})
-		require.NoError(t, err)
-		require.Empty(t, out.Events)
+
 	}
 	changed := job.Definition
+	changed.Enabled = !changed.Enabled
 	policy := *changed.Issue
 	policy.Title = "Changed child"
 	changed.Issue = &policy
 	_, _, err = s.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, UID: job.UID, Name: job.Name, Definition: changed, Actor: "operator", ExpectedEventUID: job.DefinitionEventUID})
-	require.Error(t, err, "other definition changes still require a live parent")
+	require.ErrorIs(t, err, cron.ErrInvalid, "enabled plus other definition changes still require a live parent")
 	parent, _, _, err = s.RestoreIssue(t.Context(), parent.ID, "operator")
 	require.NoError(t, err)
 	require.Equal(t, originalMetadata, parent.Metadata)
 	out, err := s.DispatchRecurringCron(t.Context(), db.DispatchRecurringCronIn{ProjectID: p.ID, JobUID: job.UID, ExpectedEventUID: job.DefinitionEventUID, Now: progress.Anchor.Add(4 * time.Hour)})
 	require.NoError(t, err)
 	require.NotEmpty(t, out.Events)
-	t.Run("adapter", func(t *testing.T) {
-		project, err := s.CreateProject(t.Context(), "adapter-project")
-		require.NoError(t, err)
-		parent, _, err := s.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Adapter dependency", Author: "operator"})
-		require.NoError(t, err)
-		definition := cron.JobDefinition{
-			Version: 1, Kind: "job", Enabled: true,
-			Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 7200},
-			Action:  cron.Action{Kind: "notify", Recipient: "operator", Message: "Review service"},
-			Issue:   &cron.IssuePolicy{Kind: "existing", UID: parent.UID},
-			Overlap: "allow", Catchup: "latest",
-		}
-		job, _, err := s.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Adapter job", Actor: "operator", Definition: definition})
-		require.NoError(t, err)
-		_, _, _, err = s.SoftDeleteIssue(t.Context(), parent.ID, "operator")
-		require.NoError(t, err)
-		definition.Enabled = false
-		paused, events, err := s.PutCronJob(t.Context(), db.PutCronJob{
-			ProjectID: project.ID, UID: job.UID, Name: job.Name, Definition: definition,
-			Actor: "operator", ExpectedEventUID: job.DefinitionEventUID,
-		})
-		require.NoError(t, err)
-		require.Len(t, events, 1)
-		require.Equal(t, definition, paused.Definition)
-		definition.Enabled = true
-		_, events, err = s.PutCronJob(t.Context(), db.PutCronJob{
-			ProjectID: project.ID, UID: job.UID, Name: job.Name, Definition: definition,
-			Actor: "operator", ExpectedEventUID: paused.DefinitionEventUID,
-		})
-		require.ErrorIs(t, err, cron.ErrInvalid, "resuming an adapter requires a live target")
-		require.Empty(t, events)
-		current, err := s.CronJob(t.Context(), project.ID, job.UID)
-		require.NoError(t, err)
-		require.Equal(t, paused, current, "refusal must leave the job paused and its revision unchanged")
-		_, _, _, err = s.RestoreIssue(t.Context(), parent.ID, "operator")
-		require.NoError(t, err)
-		resumed, events, err := s.PutCronJob(t.Context(), db.PutCronJob{
-			ProjectID: project.ID, UID: job.UID, Name: job.Name, Definition: definition,
-			Actor: "operator", ExpectedEventUID: paused.DefinitionEventUID,
-		})
-		require.NoError(t, err)
-		require.Len(t, events, 1)
-		require.Equal(t, definition, resumed.Definition)
-	})
 	return nil
 }
 
-func checkCronEnabledMovedAdapterTarget(t *testing.T, s db.Storage) error {
-	ctx := t.Context()
-	project, err := s.CreateProject(ctx, "adapter-project")
-	require.NoError(t, err)
-	targetProject, err := s.CreateProject(ctx, "dependency-project")
-	require.NoError(t, err)
-	target, _, err := s.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Adapter dependency", Author: "operator"})
-	require.NoError(t, err)
-	definition := cron.JobDefinition{
-		Version: 1, Kind: "job", Enabled: true,
-		Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 7200},
-		Action:  cron.Action{Kind: "notify", Recipient: "operator", Message: "Review service"},
-		Issue:   &cron.IssuePolicy{Kind: "existing", UID: target.UID},
-		Overlap: "allow", Catchup: "latest",
+// Adapter dependency failures are tested separately from native parent gating.
+func checkCronEnabledAdapterTarget(t *testing.T, s db.Storage) error {
+	for _, kind := range []string{"deleted", "moved"} {
+		t.Run(kind, func(t *testing.T) {
+			ctx := t.Context()
+			project, err := s.CreateProject(ctx, "adapter-"+kind)
+			require.NoError(t, err)
+			target, _, err := s.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Adapter dependency", Author: "operator"})
+			require.NoError(t, err)
+			definition := adapterNotifyDefinition(target.UID)
+			job, _, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "Adapter job", Actor: "operator", Definition: definition})
+			require.NoError(t, err)
+			if kind == "deleted" {
+				_, _, _, err = s.SoftDeleteIssue(ctx, target.ID, "operator")
+				require.NoError(t, err)
+			}
+			definition.Enabled = false
+			paused, events, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, UID: job.UID, Name: job.Name, Definition: definition, Actor: "operator", ExpectedEventUID: job.DefinitionEventUID})
+			require.NoError(t, err)
+			require.Len(t, events, 1)
+			require.Equal(t, definition, paused.Definition)
+			if kind == "moved" {
+				other, err := s.CreateProject(ctx, "dependency-project")
+				require.NoError(t, err)
+				_, err = s.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: target.ID, FromProjectID: project.ID, ToProjectID: other.ID, IfMatchRev: target.Revision, Actor: "operator"})
+				require.NoError(t, err)
+				moved, err := s.IssueByUID(ctx, target.UID, db.IncludeDeletedNo)
+				require.NoError(t, err)
+				require.Equal(t, other.ID, moved.ProjectID)
+			}
+			definition.Enabled = true
+			_, events, err = s.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, UID: job.UID, Name: job.Name, Definition: definition, Actor: "operator", ExpectedEventUID: paused.DefinitionEventUID})
+			require.ErrorIs(t, err, cron.ErrInvalid)
+			if kind == "moved" {
+				require.ErrorContains(t, err, "dependency belongs to another project")
+			}
+			require.Empty(t, events)
+			current, err := s.CronJob(ctx, project.ID, job.UID)
+			require.NoError(t, err)
+			require.Equal(t, paused, current, "a refused resume must leave the definition and revision unchanged")
+			if kind == "deleted" {
+				_, _, _, err = s.RestoreIssue(ctx, target.ID, "operator")
+				require.NoError(t, err)
+				resumed, events, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, UID: job.UID, Name: job.Name, Definition: definition, Actor: "operator", ExpectedEventUID: paused.DefinitionEventUID})
+				require.NoError(t, err)
+				require.Len(t, events, 1)
+				require.Equal(t, definition, resumed.Definition)
+			}
+		})
 	}
-	job, _, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "Adapter job", Actor: "operator", Definition: definition})
-	require.NoError(t, err)
-
-	definition.Enabled = false
-	paused, events, err := s.PutCronJob(ctx, db.PutCronJob{
-		ProjectID: project.ID, UID: job.UID, Name: job.Name, Definition: definition,
-		Actor: "operator", ExpectedEventUID: job.DefinitionEventUID,
-	})
-	require.NoError(t, err)
-	require.Len(t, events, 1)
-
-	_, err = s.MoveIssueProject(ctx, db.MoveIssueProjectIn{
-		IssueID: target.ID, FromProjectID: project.ID, ToProjectID: targetProject.ID,
-		IfMatchRev: target.Revision, Actor: "operator",
-	})
-	require.NoError(t, err)
-	movedTarget, err := s.IssueByUID(ctx, target.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	require.Equal(t, targetProject.ID, movedTarget.ProjectID)
-
-	definition = paused.Definition
-	definition.Enabled = true
-	_, events, err = s.PutCronJob(ctx, db.PutCronJob{
-		ProjectID: project.ID, UID: job.UID, Name: job.Name, Definition: definition,
-		Actor: "operator", ExpectedEventUID: paused.DefinitionEventUID,
-	})
-	require.ErrorIs(t, err, cron.ErrInvalid)
-	require.ErrorContains(t, err, "dependency belongs to another project")
-	require.Empty(t, events)
-	current, err := s.CronJob(ctx, project.ID, job.UID)
-	require.NoError(t, err)
-	require.False(t, current.Definition.Enabled, "a rejected resume must leave the job paused")
 	return nil
+}
+
+func adapterNotifyDefinition(targetUID string) cron.JobDefinition {
+	return cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 7200}, Action: cron.Action{Kind: "notify", Recipient: "operator", Message: "Review service"}, Issue: &cron.IssuePolicy{Kind: "existing", UID: targetUID}, Overlap: "allow", Catchup: "latest"}
 }

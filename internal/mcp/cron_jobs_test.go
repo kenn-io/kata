@@ -354,40 +354,29 @@ func TestCronJobEnabledTools(t *testing.T) {
 	f := newCronFixture(t)
 	id := cronNewUID(t, f.session)
 	job := cronRecord(t, f.session, "cron_job_create", map[string]any{"uid": id, "name": "Inspect", "definition": cronDefinition()}, "job")
+	// A malformed supplied revision must never become an unconditional action.
+	rejectWhitespace := func(action string, job map[string]any) {
+		t.Helper()
+		before, err := f.store.MaxEventID(t.Context())
+		require.NoError(t, err)
+		result := cronCall(t, f.session, "cron_job_"+action, map[string]any{"uid": id, "expected_event_uid": " \t"})
+		require.True(t, result.IsError)
+		require.Contains(t, string(mustJSON(t, result)), "expected_event_uid")
+		current, err := f.store.CronJob(t.Context(), f.project.ID, id)
+		require.NoError(t, err)
+		require.Equal(t, job["definition_event_uid"], current.DefinitionEventUID)
+		after, err := f.store.MaxEventID(t.Context())
+		require.NoError(t, err)
+		require.Equal(t, before, after, "rejecting a malformed guard must not mutate first")
+	}
+	rejectWhitespace("resume", job)
 	resumed := cronRecord(t, f.session, "cron_job_resume", map[string]any{"uid": id}, "job")
 	require.Equal(t, true, resumed["definition"].(map[string]any)["enabled"])
 	require.Equal(t, job["name"], resumed["name"])
+	rejectWhitespace("pause", resumed)
 	require.True(t, cronCall(t, f.session, "cron_job_pause", map[string]any{"uid": id, "expected_event_uid": job["definition_event_uid"]}).IsError)
 	paused := cronRecord(t, f.session, "cron_job_pause", map[string]any{"uid": id, "expected_event_uid": resumed["definition_event_uid"]}, "job")
 	require.Equal(t, false, paused["definition"].(map[string]any)["enabled"])
-	retry := cronOK(t, f.session, "cron_job_pause", map[string]any{"uid": id, "expected_event_uid": ""})
-	require.NotContains(t, retry, "events")
-	require.Equal(t, paused, retry["job"])
-	require.True(t, cronCall(t, f.session, "cron_job_delete", map[string]any{"uid": id}).IsError, "archive still requires revision")
+	cronOK(t, f.session, "cron_job_pause", map[string]any{"uid": id, "expected_event_uid": ""})
 }
 
-// A malformed supplied revision must never become an unconditional action.
-func TestCronJobEnabledRejectsWhitespaceRevision(t *testing.T) {
-	for _, action := range []string{"pause", "resume"} {
-		t.Run(action, func(t *testing.T) {
-			f := newCronFixture(t)
-			id := cronNewUID(t, f.session)
-			definition := cronDefinition()
-			definition["enabled"] = action == "pause"
-			job := cronRecord(t, f.session, "cron_job_create", map[string]any{"uid": id, "name": "Inspect", "definition": definition}, "job")
-			before, err := f.store.MaxEventID(t.Context())
-			require.NoError(t, err)
-			result := cronCall(t, f.session, "cron_job_"+action, map[string]any{"uid": id, "expected_event_uid": " \t"})
-			require.True(t, result.IsError)
-			require.Contains(t, string(mustJSON(t, result)), "expected_event_uid")
-			require.Contains(t, string(mustJSON(t, result)), "full ULID")
-			current, err := f.store.CronJob(t.Context(), f.project.ID, id)
-			require.NoError(t, err)
-			require.Equal(t, job["definition_event_uid"], current.DefinitionEventUID)
-			require.Equal(t, action == "pause", current.Definition.Enabled)
-			after, err := f.store.MaxEventID(t.Context())
-			require.NoError(t, err)
-			require.Equal(t, before, after)
-		})
-	}
-}

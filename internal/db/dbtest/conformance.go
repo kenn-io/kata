@@ -53,7 +53,7 @@ type scenario struct {
 var storageScenarios = []scenario{
 	{name: "search tokenizer words", methods: []string{"CreateProject", "CreateIssue", "SearchFTS", "SearchFTSAny"}, runWithBackend: checkSearchTokenizerWords},
 	{name: "cron enabled deleted parent", run: checkCronEnabledDeletedParent},
-	{name: "cron enabled moved adapter target", methods: []string{"CreateIssue", "CreateProject", "CronJob", "MoveIssueProject", "PutCronJob"}, run: checkCronEnabledMovedAdapterTarget},
+	{name: "cron enabled adapter target", methods: []string{"CreateIssue", "CreateProject", "CronJob", "MoveIssueProject", "PutCronJob"}, run: checkCronEnabledAdapterTarget},
 	{name: "setup finished delivery", methods: []string{"PrepareSetupFinished", "CompleteSetupFinished", "SystemProject", "CloseIssue", "SoftDeleteIssue", "RemoveProject"}, runWithBackend: checkSetupFinishedDelivery},
 	{name: "comment graph project access", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "MoveIssueProject", "ReadCommentGraph"}, run: checkCommentGraphProjectAccess},
 	{name: "recurring adoption snapshots", run: checkRecurringAdoptionSnapshots},

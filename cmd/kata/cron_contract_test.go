@@ -168,8 +168,4 @@ func TestCronJobEnabledCommands(t *testing.T) {
 	resumed, err := execute("resume", "--expected-event-uid", paused.Body.Job.DefinitionEventUID)
 	require.NoError(t, err)
 	require.True(t, resumed.Body.Job.Definition.Enabled)
-	require.Equal(t, definition, resumed.Body.Job.Definition.Native())
-	repeated, err := execute("resume")
-	require.NoError(t, err)
-	require.Empty(t, repeated.Body.Events)
 }

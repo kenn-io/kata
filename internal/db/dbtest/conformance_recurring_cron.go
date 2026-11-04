@@ -655,7 +655,7 @@ func checkRecurringFeatureProbeCandidates(t *testing.T, s db.Storage) error {
 	require.NoError(t, err)
 	parent, _, err := s.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "Ongoing review", Author: "operator", Metadata: map[string]jsontext.Value{"note": []byte(`"future"`)}})
 	require.NoError(t, err)
-	definition := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 7200}, Action: cron.Action{Kind: "notify", Recipient: "operator", Message: "Review service"}, Issue: &cron.IssuePolicy{Kind: "existing", UID: parent.UID}, Overlap: "allow", Catchup: "latest"}
+	definition := adapterNotifyDefinition(parent.UID)
 	_, _, err = s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "Adapter review", Actor: "operator", Definition: definition})
 	require.NoError(t, err)
 	probe := &recurringCountingProbe{recurringProbeQuerier: s.(recurringProbeQuerier)}
