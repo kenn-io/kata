@@ -1400,3 +1400,45 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	}
 	return nil
 }
+
+func checkSearchTokenizerWords(t *testing.T, store db.Storage, backend Backend) error {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	tagged, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "login 🧪", Author: "tester"})
+	require.NoError(t, err)
+	plain, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "login", Author: "tester"})
+	require.NoError(t, err)
+	var emojiIDs []int64
+	mixedIDs := []int64{tagged.ID, plain.ID}
+	if backend.SearchIndexesEmoji {
+		emojiIDs = []int64{tagged.ID}
+		mixedIDs = emojiIDs
+	}
+	for name, search := range map[string]func(context.Context, db.SearchFTSParams) ([]db.SearchCandidate, error){
+		"all": store.SearchFTS, "any": store.SearchFTSAny,
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, tc := range []struct {
+				query    string
+				all, any []int64
+			}{
+				{"🧪", emojiIDs, emojiIDs},
+				{"!!!", nil, nil},
+				{"login !!!", []int64{tagged.ID, plain.ID}, []int64{tagged.ID, plain.ID}},
+				{"login 🧪 !!!", mixedIDs, []int64{tagged.ID, plain.ID}},
+			} {
+				t.Run(tc.query, func(t *testing.T) {
+					want := tc.all
+					if name == "any" {
+						want = tc.any
+					}
+					hits, err := search(ctx, db.SearchFTSParams{ProjectID: project.ID, Query: tc.query})
+					require.NoError(t, err)
+					assert.ElementsMatch(t, want, searchCandidateIDs(hits))
+				})
+			}
+		})
+	}
+	return nil
+}

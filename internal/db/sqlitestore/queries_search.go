@@ -248,17 +248,25 @@ func searchablePhrases(ctx context.Context, query string) ([]string, error) {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO query_fts(rowid,text) SELECT CAST(key AS INTEGER)+1,value FROM json_each(?)`, string(input)); err != nil {
 		return nil, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT doc FROM query_vocab ORDER BY doc`)
+	rows, err := tx.QueryContext(ctx, `SELECT doc, group_concat(term, ' ')
+ FROM (SELECT doc, term FROM query_vocab ORDER BY doc, offset)
+ GROUP BY doc ORDER BY doc`)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	var searchable []string
+	clear(seen)
 	for rows.Next() {
 		var doc int
-		if err := rows.Scan(&doc); err != nil {
+		var normalized string
+		if err := rows.Scan(&doc, &normalized); err != nil {
 			return nil, err
 		}
+		if seen[normalized] {
+			continue
+		}
+		seen[normalized] = true
 		searchable = append(searchable, phrases[doc-1])
 	}
 	return searchable, rows.Err()

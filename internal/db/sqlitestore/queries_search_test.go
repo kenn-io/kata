@@ -9,36 +9,29 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func TestSearchFTS_TokenizerWords(t *testing.T) {
+func TestSearchFTS_NormalizedDuplicateScores(t *testing.T) {
 	t.Parallel()
 	d, ctx, p := setupTestProject(t)
-	tagged := createTesterIssueWithBody(ctx, t, d, p.ID, "login 🧪", "")
-	plain := createTesterIssueWithBody(ctx, t, d, p.ID, "login", "")
+	issue := createTesterIssueWithBody(ctx, t, d, p.ID, "login cafe pull request", "")
 	for name, search := range map[string]func(context.Context, db.SearchFTSParams) ([]db.SearchCandidate, error){
 		"all": d.SearchFTS, "any": d.SearchFTSAny,
 	} {
 		t.Run(name, func(t *testing.T) {
-			for _, tc := range []struct {
-				query string
-				want  []int64
-			}{
-				{"🧪", []int64{tagged.ID}},
-				{"!!!", nil},
-				{"login !!!", []int64{tagged.ID, plain.ID}},
-				{"login 🧪 !!!", []int64{tagged.ID}},
+			for _, tc := range []struct{ query, repeated string }{
+				{"login", "Login login"},
+				{"cafe", "café cafe"},
+				{"login", "login, login"},
+				{"pull-request", "pull-request pull.request"},
 			} {
-				t.Run(tc.query, func(t *testing.T) {
-					want := tc.want
-					if name == "any" && tc.query == "login 🧪 !!!" {
-						want = []int64{tagged.ID, plain.ID}
-					}
-					hits, err := search(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: tc.query})
+				t.Run(tc.repeated, func(t *testing.T) {
+					base, err := search(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: tc.query})
 					require.NoError(t, err)
-					var ids []int64
-					for _, hit := range hits {
-						ids = append(ids, hit.Issue.ID)
-					}
-					assert.ElementsMatch(t, want, ids)
+					require.Len(t, base, 1)
+					hits, err := search(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: tc.repeated})
+					require.NoError(t, err)
+					require.Len(t, hits, 1)
+					assert.Equal(t, issue.ID, hits[0].Issue.ID)
+					assert.Equal(t, base[0].Score, hits[0].Score, "normalized duplicates must contribute one score")
 				})
 			}
 		})

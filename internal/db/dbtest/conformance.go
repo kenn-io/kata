@@ -20,6 +20,7 @@ import (
 // fails the suite until the stale entry is removed.
 type Backend struct {
 	Name                                string
+	SearchIndexesEmoji                  bool
 	Open                                func(t *testing.T) db.Storage
 	OpenSame                            func(t *testing.T, store db.Storage) db.Storage
 	InstallExternalRootClock            func(db.Storage, func() time.Time) func()
@@ -50,6 +51,7 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "search tokenizer words", methods: []string{"CreateProject", "CreateIssue", "SearchFTS", "SearchFTSAny"}, runWithBackend: checkSearchTokenizerWords},
 	{name: "setup finished delivery", methods: []string{"PrepareSetupFinished", "CompleteSetupFinished", "SystemProject", "CloseIssue", "SoftDeleteIssue", "RemoveProject"}, runWithBackend: checkSetupFinishedDelivery},
 	{name: "comment graph project access", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "MoveIssueProject", "ReadCommentGraph"}, run: checkCommentGraphProjectAccess},
 	{name: "recurring adoption snapshots", run: checkRecurringAdoptionSnapshots},
