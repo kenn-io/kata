@@ -191,7 +191,7 @@ func (m Model) commitRecurrenceForm() (Model, tea.Cmd) {
 		return m.cancelInput()
 	}
 	return m.saveRecurrence(RecurrenceInput{
-		Terms:         recurrenceclient.Terms{Rule: rule, Start: start, Zone: zone, Actor: m.list.actor},
+		Rule: rule, Start: start, Zone: zone, Actor: m.list.actor,
 		IssueRevision: state.issueRevision, Recurrence: state.rec,
 	})
 }
@@ -205,8 +205,7 @@ func (m Model) confirmStopRecurrence() (Model, tea.Cmd) {
 		return m, nil
 	}
 	return m.saveRecurrence(RecurrenceInput{
-		Terms: recurrenceclient.Terms{Actor: m.list.actor},
-		Stop:  true, IssueRevision: state.issueRevision, Recurrence: state.rec,
+		Actor: m.list.actor, Stop: true, IssueRevision: state.issueRevision, Recurrence: state.rec,
 	})
 }
 
