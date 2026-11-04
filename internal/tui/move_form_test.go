@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
@@ -689,4 +690,68 @@ func TestMoveFooterNamesWhatEnterDoesAtEachStep(t *testing.T) {
 	m, cmd := enter(m)
 	m, _ = deliver(t, m, cmd)
 	require.Equal(t, "move", enterAction(m), "in the preview enter moves")
+}
+
+// TestMoveFormRendersCompletelyAtEveryTerminalSize follows the Delete form's
+// rule: the modal fits the terminal, with a long destination name, and the
+// outcome and the enter/esc prompt stay visible.
+func TestMoveFormRendersCompletelyAtEveryTerminalSize(t *testing.T) {
+	defer snapshotInit(t)()
+	longName := strings.Repeat("example-destination-", 5) + "project"
+	kids := []Issue{
+		{UID: "kid-1", ShortID: "k001", Title: "Child one", ProjectID: 7},
+		{UID: "kid-2", ShortID: "k002", Title: "Child two", ProjectID: 7},
+		{UID: "kid-3", ShortID: "k003", Title: "Child three", ProjectID: 7},
+		{UID: "kid-4", ShortID: "k004", Title: "Child four", ProjectID: 7},
+	}
+	api := &moveTestAPI{
+		projects: []ProjectSummary{moveProject(2, longName, "", "")},
+		preview: func(int, MoveInput) (*MutationResp, error) {
+			return &MutationResp{
+				Issues:   append([]Issue{{UID: "issue-b", ShortID: "bbbb", Title: "Second", ProjectID: 7}}, kids...),
+				Revision: 4,
+			}, nil
+		},
+	}
+	picker := openMove(t, moveModel(t, api))
+	previewing, cmd := enter(picker)
+	previewing, _ = deliver(t, previewing, cmd)
+	refused := previewing
+	refused.move.err = "move failed: project_not_found: project not found"
+
+	for _, size := range []struct {
+		name          string
+		width, height int
+	}{
+		{"80x24", 80, 24}, {"80x12", 80, 12}, {"100x8", 100, 8}, {"split 140x40", 140, 40}, {"split 140x10", 140, 10},
+	} {
+		for _, step := range []struct {
+			name  string
+			state Model
+			want  []string
+		}{
+			{"picker", picker, []string{"Project:", "▸ " + longName[:20], "enter preview · esc cancel"}},
+			{"preview", previewing, []string{"Subtree move", "enter move · esc back"}},
+			{"refusal", refused, []string{"Subtree move", "project_not_found", "enter move · esc back"}},
+		} {
+			t.Run(size.name+" "+step.name, func(t *testing.T) {
+				rendered := stripANSI(renderMoveModal(step.state.move, size.width, size.height))
+				var content strings.Builder
+				for line := range strings.SplitSeq(rendered, "\n") {
+					require.LessOrEqual(t, ansi.StringWidth(line), size.width, "each line fits the terminal:\n%s", rendered)
+					content.WriteString(strings.Trim(line, " │╭╮╰╯─"))
+					content.WriteString(" ")
+				}
+				require.LessOrEqual(t, strings.Count(rendered, "\n")+1, size.height, "the whole modal fits:\n%s", rendered)
+				flat := strings.Join(strings.Fields(content.String()), " ")
+				for _, want := range step.want {
+					require.Contains(t, flat, want, "%s\n%s", size.name, rendered)
+				}
+				if step.name != "picker" {
+					require.Equal(t, 1, strings.Count(strings.Join(strings.Fields(content.String()), ""), "to"+longName),
+						"the full destination name shows once, wrapped if need be:\n%s", rendered)
+				}
+			})
+		}
+	}
 }

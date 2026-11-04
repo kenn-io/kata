@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"go.kenn.io/kit/tui/termtext"
 )
 
 // moveAPI moves an issue and its descendants to another project, or previews
@@ -425,48 +426,98 @@ func (m Model) finishMove(mut mutationDoneMsg) (Model, tea.Cmd) {
 }
 
 // renderMoveModal draws the project picker, or the daemon's preview once a
-// project is chosen.
+// project is chosen. Like the Delete form it always fits the terminal: below
+// formMinHeight it drops the border and padding, and the rows that can be cut
+// (descendants, the picker's list, an explanatory sentence) give way before
+// the title, the outcome, a refusal and the enter/esc prompt do.
 func renderMoveModal(s moveState, width, height int) string {
+	boxed := height >= formMinHeight
 	innerW := max(min(width*7/10, 80), min(width-8, 30))
-	wrap := func(text string) string { return lipgloss.NewStyle().Width(innerW).Render(text) }
-	var parts []string
-	if s.preview != nil || (s.sending && s.chosen.UID != "") {
-		parts = append(parts, titleStyle.Render(sanitizeForLine(fmt.Sprintf("Move #%s to %s", s.target.issueShortID, s.chosen.Name))), "")
+	budget := height
+	if boxed {
+		budget -= 4 // border and padding
+	} else {
+		innerW = max(width, 1)
+	}
+	wrap := func(text string) []string { return termtext.Wrap(text, max(innerW, 1)) }
+	title := func(text string) []string {
+		lines := wrap(sanitizeForLine(text))
+		for i := range lines {
+			lines[i] = titleStyle.Render(lines[i])
+		}
+		return lines
+	}
+	var head, tail, optional []string
+	var list func(room int) []string
+	previewing := s.preview != nil || (s.sending && s.chosen.UID != "")
+	if previewing {
+		head = title(fmt.Sprintf("Move #%s to %s", s.target.issueShortID, s.chosen.Name))
 		if preview := s.preview; preview != nil {
 			if len(preview.descendants) == 0 {
-				parts = append(parts, wrap(fmt.Sprintf("#%s has no descendants, so it moves alone.", sanitizeForLine(s.target.issueShortID))))
+				head = append(head, wrap(fmt.Sprintf("#%s has no descendants, so it moves alone.", sanitizeForLine(s.target.issueShortID)))...)
 			} else {
 				noun := "descendants"
 				if len(preview.descendants) == 1 {
 					noun = "descendant"
 				}
-				parts = append(parts, wrap(fmt.Sprintf("Subtree move: #%s and its %d %s move together.",
-					sanitizeForLine(s.target.issueShortID), len(preview.descendants), noun)))
-				shown := min(len(preview.descendants), max(height-16, 3))
-				for _, line := range preview.descendants[:shown] {
-					parts = append(parts, "  "+truncate(line, innerW-2))
-				}
-				if more := len(preview.descendants) - shown; more > 0 {
-					parts = append(parts, subtleStyle.Render(fmt.Sprintf("  … and %d more", more)))
+				head = append(head, wrap(fmt.Sprintf("Subtree move: #%s and its %d %s move together.",
+					sanitizeForLine(s.target.issueShortID), len(preview.descendants), noun))...)
+				list = func(room int) []string {
+					shown := len(preview.descendants)
+					if shown > room {
+						shown = max(room-1, 0)
+					}
+					var rows []string
+					for _, line := range preview.descendants[:shown] {
+						rows = append(rows, "  "+truncate(line, max(innerW-2, 1)))
+					}
+					if more := len(preview.descendants) - shown; more > 0 && room > 0 {
+						rows = append(rows, subtleStyle.Render(fmt.Sprintf("  … and %d more", more)))
+					}
+					return rows
 				}
 			}
-			parts = append(parts, "", wrap("Nothing has moved yet. Each issue gets a new id in "+sanitizeForLine(s.chosen.Name)+"."))
+			optional = wrap("Nothing has moved yet. Each issue gets a new id in " + sanitizeForLine(s.chosen.Name) + ".")
 		}
 	} else {
-		parts = append(parts, titleStyle.Render(sanitizeForLine(fmt.Sprintf("Move #%s to another project", s.target.issueShortID))))
-		parts = append(parts, "Project: "+s.filter.View(), "")
-		parts = append(parts, renderMoveChoices(s, innerW, max(min(height-12, 10), 3))...)
+		head = append(title(fmt.Sprintf("Move #%s to another project", s.target.issueShortID)), "Project: "+s.filter.View())
+		list = func(room int) []string { return renderMoveChoices(s, innerW, min(max(room, 1), 10)) }
 	}
 	if s.note != "" {
-		parts = append(parts, "", wrap(s.note))
+		tail = append(tail, wrap(s.note)...)
 	}
 	if s.err != "" {
-		parts = append(parts, "", errorStyle.Width(innerW).Render(s.err))
+		tail = append(tail, strings.Split(errorStyle.Width(max(innerW, 1)).Render(s.err), "\n")...)
 	}
-	if s.sending {
-		parts = append(parts, "", statusStyle.Render("working…"))
+	switch {
+	case s.sending:
+		tail = append(tail, statusStyle.Render("working…"))
+	case previewing:
+		tail = append(tail, subtleStyle.Render("enter move · esc back"))
+	default:
+		tail = append(tail, subtleStyle.Render("enter preview · esc cancel"))
 	}
-	return modalBoxStyle.Render(strings.Join(parts, "\n"))
+	// Spend what is left on the optional sentence first (it is one block), then
+	// the list. Blank separators are dropped when they do not fit.
+	room := budget - len(head) - len(tail)
+	var parts []string
+	parts = append(parts, head...)
+	if len(optional) > 0 && room >= len(optional)+2 {
+		parts = append(parts, "")
+		parts = append(parts, optional...)
+		room -= len(optional) + 1
+	}
+	if list != nil && room > 0 {
+		parts = append(parts, list(room)...)
+	}
+	parts = append(parts, tail...)
+	body := strings.Join(parts, "\n")
+	if !boxed {
+		// With no border the lines would let the list show between them, so each
+		// one clears its terminal row.
+		return lipgloss.NewStyle().Width(max(width, 1)).Render(body)
+	}
+	return modalBoxStyle.Render(body)
 }
 
 func renderMoveChoices(s moveState, innerW, visible int) []string {
