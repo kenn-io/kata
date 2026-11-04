@@ -6,7 +6,7 @@ kata カタ [jobs] runs workflows
 ▶ job-ok                                                                                   ok            manual            workflow Summary … succeeded 1h ago
   job-failing                                                                              failing       manual            workflow Summary … failed 1h ago
   job-overdue                                                                              overdue       manual            workflow Summary … running 1h ago
-  job-running                                                                              running       manual            workflow Summary … running 1h ago
+  job-running                                                                              running       manual            workflow Summary … 1h ago
   job-missed                                                                               missed        once 2026-05-01 … workflow Summary … —
   job-never-ran                                                                            never ran     manual            workflow Summary … —
   job-paused                                                                               paused        manual            workflow Summary … —

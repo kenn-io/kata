@@ -2,8 +2,7 @@
 kata カタ jobs [runs] workflows
  jobs / Daily summary
 
-▶ State:    enabled
-  Health:   ok
+▶ Health:   ok
   Reason:   last run status is succeeded
   Schedule: 0 7 * * *
   Triggers: 2026-05-02 07:00 UTC
@@ -36,6 +35,7 @@ kata カタ jobs [runs] workflows
   Runs (1)
   succeeded · 2026-05-01T11:00:00Z · Report ready
   load 20 older runs
+
 
 
 

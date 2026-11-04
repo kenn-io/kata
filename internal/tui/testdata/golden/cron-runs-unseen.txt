@@ -2,8 +2,8 @@
 kata カタ jobs [runs] workflows
  / search                                                     1 loaded run · unseen only · newest 100 · 1 unseen failed
 
-  Status     Job                                Occurrence   Started     Ended       Summary
-▶ • failed   Daily summary                                   05-01 10:00 05-01 11:00 Report ready
+  Status            Job                             Occurrence   Started     Ended       Summary
+▶ • failed          Daily summary                                05-01 10:00 05-01 11:00 Report ready
 
 
 
