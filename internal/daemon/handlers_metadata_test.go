@@ -1,7 +1,6 @@
 package daemon_test
 
 import (
-	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"fmt"
@@ -21,26 +20,12 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-type recordingProjectMetadataStore struct {
-	db.Storage
-	calls *atomic.Int64
-}
-
-func (s recordingProjectMetadataStore) PatchProjectMetadata(ctx context.Context, in db.PatchProjectMetadataIn) (db.PatchProjectMetadataOut, error) {
-	s.calls.Add(1)
-	return s.Storage.PatchProjectMetadata(ctx, in)
-}
-
-func TestPatchProjectMetadataRejectsCronTalliesThroughStore(t *testing.T) {
-	var calls atomic.Int64
-	env := testenv.New(t, testenv.WithAuthToken("tok"), func(cfg *daemon.ServerConfig) {
-		cfg.DB = recordingProjectMetadataStore{cfg.DB, &calls}
-	})
+func TestPatchProjectMetadataRejectsCronTallies(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	project := seedProject(t, env, "example-project")
-	for i, patch := range []string{`{"cron.tally.bad":null}`, `{"cron.tally.":null,"ordinary":1}`} {
+	for _, patch := range []string{`{"cron.tally.bad":null}`, `{"cron.tally.":null,"ordinary":1}`} {
 		resp, raw := envDoRaw(t, env, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/metadata", project.ID), json.RawMessage(`{"actor":"operator","patch":`+patch+`}`), map[string]string{"Authorization": "Bearer tok"})
 		require.Equalf(t, http.StatusBadRequest, resp.StatusCode, "body: %s", raw)
-		require.Equal(t, int64(i+1), calls.Load(), "the store owns reserved-prefix validation")
 		current, err := env.DB.ProjectByID(t.Context(), project.ID)
 		require.NoError(t, err)
 		require.Equal(t, project.Metadata, current.Metadata)

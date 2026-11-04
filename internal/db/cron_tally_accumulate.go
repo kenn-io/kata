@@ -7,46 +7,40 @@ import (
 	"time"
 )
 
-func accumulateCronTallies(values map[string]CronTallyValue, selected []pruneRun, now time.Time) (map[string]jsontext.Value, error) {
+func accumulateCronTallies(values map[string]CronTallyValue, groups []CronRunPruneGroup, now time.Time) (map[string]jsontext.Value, error) {
 	changed := map[string]bool{}
-	for _, run := range selected {
-		value, found := values[run.group]
+	for _, group := range groups {
+		kind, groupUID := "job", group.JobUID
+		if groupUID == nil {
+			kind, groupUID = "workflow", group.WorkflowUID
+		}
+		value, found := values[*groupUID]
 		if !found {
 			value = CronTallyValue{Version: 1, Groups: map[string]CronTallyEntry{}}
 		}
-		entry, found := value.Groups[run.kind]
+		entry, found := value.Groups[kind]
 		if !found {
-			entry = CronTallyEntry{Kind: run.kind, UID: run.group, CoverageStartedAt: now, LastPrunedAt: now, OldestCreatedAt: run.created, NewestCreatedAt: run.created}
+			entry = CronTallyEntry{Kind: kind, UID: *groupUID, CoverageStartedAt: now, LastPrunedAt: now, OldestCreatedAt: group.OldestCreatedAt, NewestCreatedAt: group.NewestCreatedAt}
 		}
-		var count *int64
-		switch run.status {
-		case "succeeded":
-			count = &entry.Counts.Succeeded
-		case "failed":
-			count = &entry.Counts.Failed
-		case "cancelled":
-			count = &entry.Counts.Cancelled
-		case "unknown":
-			count = &entry.Counts.Unknown
-		default:
-			return nil, cronTallyError("cannot prune status %q", run.status)
+		for status, count := range map[string]*int64{"succeeded": &entry.Counts.Succeeded, "failed": &entry.Counts.Failed, "cancelled": &entry.Counts.Cancelled, "unknown": &entry.Counts.Unknown} {
+			n := int64(group.Counts[status])
+			if n > math.MaxInt64-*count {
+				return nil, cronTallyError("%s count overflow for %s %s", status, kind, *groupUID)
+			}
+			*count += n
 		}
-		if *count == math.MaxInt64 {
-			return nil, cronTallyError("%s count overflow for %s %s", run.status, run.kind, run.group)
-		}
-		*count++
 		if now.After(entry.LastPrunedAt) {
 			entry.LastPrunedAt = now
 		}
-		if run.created.Before(entry.OldestCreatedAt) {
-			entry.OldestCreatedAt = run.created
+		if group.OldestCreatedAt.Before(entry.OldestCreatedAt) {
+			entry.OldestCreatedAt = group.OldestCreatedAt
 		}
-		if run.created.After(entry.NewestCreatedAt) {
-			entry.NewestCreatedAt = run.created
+		if group.NewestCreatedAt.After(entry.NewestCreatedAt) {
+			entry.NewestCreatedAt = group.NewestCreatedAt
 		}
-		value.Groups[run.kind] = entry
-		values[run.group] = value
-		changed[run.group] = true
+		value.Groups[kind] = entry
+		values[*groupUID] = value
+		changed[*groupUID] = true
 	}
 	patch := make(map[string]jsontext.Value, len(changed))
 	for groupUID := range changed {

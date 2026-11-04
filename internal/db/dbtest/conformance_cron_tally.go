@@ -140,7 +140,7 @@ func checkCronRunTally(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	require.True(t, counts.Groups[0].LastPrunedAt.Equal(entry.LastPrunedAt))
 	require.True(t, counts.Groups[0].CoverageStartedAt.Equal(entry.CoverageStartedAt))
-	// Overflow occurs after event deletion/selection but must roll it all back.
+	// Preview and execution reject overflow without committing any changes.
 	entry.Counts.Failed = math.MaxInt64
 	f.seed(ctx, t, entry)
 	overflowRun := f.add(ctx, t, "job", "failed", old, "")
@@ -150,6 +150,10 @@ func checkCronRunTally(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	resetBefore, err := store.PurgeResetCheck(ctx, 0, f.project.ID)
 	require.NoError(t, err)
+	overflowPreview := in
+	overflowPreview.DryRun = true
+	_, err = store.PruneCronRuns(ctx, overflowPreview)
+	require.Error(t, err, "preview must reject tally overflow just like execution")
 	_, err = store.PruneCronRuns(ctx, in)
 	require.Error(t, err)
 	project, err = store.ProjectByID(ctx, f.project.ID)
@@ -414,10 +418,8 @@ func checkCronRunTallyConcurrent(t *testing.T, store db.Storage) error {
 	return nil
 }
 
-// Contract: ordinary project patches leave all stored tally state opaque,
-// including legacy custom keys and corrupt UID-shaped values. Tally consumers
-// (counts, prune, enable, replay and import) still validate that state; accepting
-// an unrelated patch does not make malformed tally state usable by them.
+// Contract: an ordinary project patch changes area and leaves a stored legacy
+// custom tally key byte-identical.
 func checkCronTallyLegacyMetadataPatch(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	id, err := uid.New()

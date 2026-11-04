@@ -443,7 +443,7 @@ func checkCronTallyEqualSubsetReplay(t *testing.T, store db.Storage) error {
 			}
 			legacy, err := json.Marshal(oldPeerMetadata(t, legacyEvents))
 			require.NoError(t, err)
-			require.JSONEq(t, string(project.Metadata), string(legacy), "pre-tally peers must recover the complete root tally")
+			require.Equal(t, losslessMetadataJSON(t, []byte(project.Metadata)), losslessMetadataJSON(t, legacy), "pre-tally peers must recover the complete root tally")
 			correctionCount := 0
 			for _, emitted := range result.Events {
 				if emitted.OriginInstanceUID == store.InstanceUID() && emitted.Type == "project.metadata_updated" {

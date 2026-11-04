@@ -92,9 +92,6 @@ func (a CronSQL) PruneRuns(ctx context.Context, in PruneCronRuns) (CronRunPruneR
 		if err := a.PruneGate(ctx, tx, project); err != nil {
 			return err
 		}
-		if err := a.WriteGate(ctx, tx, in.ProjectID); err != nil {
-			return err
-		}
 		actor, err := a.effectiveMutationActor(ctx, tx, in.ProjectID, in.Actor)
 		if err != nil {
 			return err
@@ -148,24 +145,18 @@ func (a CronSQL) PruneRuns(ctx context.Context, in PruneCronRuns) (CronRunPruneR
 		if err != nil {
 			return err
 		}
+		patch, err := accumulateCronTallies(tallies, result.Groups, time.Now().UTC())
+		if err != nil {
+			return err
+		}
 		if in.DryRun {
 			return nil
 		}
-		for start := 0; start < len(selected); start += 500 {
-			end := min(start+500, len(selected))
-			args := []any{in.ProjectID}
-			slots := []string{}
-			for _, r := range selected[start:end] {
-				args = append(args, r.uid)
-				slots = append(slots, fmt.Sprintf("$%d", len(args)))
-			}
-			statement := `DELETE FROM cron_runs WHERE project_id=$1 AND uid IN (` + strings.Join(slots, ",") + `)` // #nosec G202 -- only generated placeholders are interpolated; run UIDs stay bound values.
-			if _, err := tx.ExecContext(ctx, statement, args...); err != nil {
-				return err
-			}
+		values := make([]any, 0, len(selected))
+		for _, run := range selected {
+			values = append(values, run.uid)
 		}
-		patch, err := accumulateCronTallies(tallies, selected, time.Now().UTC())
-		if err != nil {
+		if err := deleteProjectRows(ctx, tx, "cron_runs", "uid", in.ProjectID, values); err != nil {
 			return err
 		}
 		// This event is below the mandatory reset boundary. Keep its event and
@@ -237,7 +228,7 @@ func pruneRunEvents(ctx context.Context, tx *sql.Tx, projectID int64, ids map[st
 		if err != nil {
 			return 0, err
 		}
-		var matches []int64
+		var matches []any
 		n := 0
 		for rows.Next() {
 			var id int64
@@ -266,15 +257,8 @@ func pruneRunEvents(ctx context.Context, tx *sql.Tx, projectID int64, ids map[st
 			return 0, readErr
 		}
 		count += len(matches)
-		if !dry && len(matches) > 0 {
-			args := []any{projectID}
-			slots := []string{}
-			for _, id := range matches {
-				args = append(args, id)
-				slots = append(slots, fmt.Sprintf("$%d", len(args)))
-			}
-			statement := `DELETE FROM events WHERE project_id=$1 AND id IN (` + strings.Join(slots, ",") + `)` // #nosec G202 -- only generated placeholders are interpolated; event IDs stay bound values.
-			if _, err := tx.ExecContext(ctx, statement, args...); err != nil {
+		if !dry {
+			if err := deleteProjectRows(ctx, tx, "events", "id", projectID, matches); err != nil {
 				return 0, err
 			}
 		}
@@ -282,4 +266,20 @@ func pruneRunEvents(ctx context.Context, tx *sql.Tx, projectID int64, ids map[st
 			return count, nil
 		}
 	}
+}
+
+func deleteProjectRows(ctx context.Context, tx *sql.Tx, table, column string, projectID int64, values []any) error {
+	for start := 0; start < len(values); start += 500 {
+		args := []any{projectID}
+		slots := []string{}
+		for _, value := range values[start:min(start+500, len(values))] {
+			args = append(args, value)
+			slots = append(slots, fmt.Sprintf("$%d", len(args)))
+		}
+		statement := `DELETE FROM ` + table + ` WHERE project_id=$1 AND ` + column + ` IN (` + strings.Join(slots, ",") + `)` // #nosec G202 -- table/column are internal literals; values stay bound parameters.
+		if _, err := tx.ExecContext(ctx, statement, args...); err != nil {
+			return err
+		}
+	}
+	return nil
 }
