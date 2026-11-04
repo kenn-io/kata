@@ -471,6 +471,9 @@ func issueSyncBindingByProjectProvider(ctx context.Context, store db.Storage, pr
 }
 
 func issueSyncStorageError(err error, provider string) error {
+	if pending, ok := errors.AsType[*db.IssuePublicationPendingError](err); ok {
+		return issuePublicationPendingError(pending)
+	}
 	if errors.Is(err, db.ErrIssueSyncBindingChanged) {
 		return api.NewError(http.StatusConflict, "issue_sync_binding_changed", "issue sync binding changed during validation; retry enable", "", nil)
 	}
@@ -596,6 +599,15 @@ func issueSyncStatusSummary(ctx context.Context, store db.Storage, binding db.Is
 		return internalAPIError(err)
 	}
 	status.StatusSync = mode
+	if reader, ok := store.(db.IssuePublicationStore); ok {
+		pending, readErr := reader.PendingIssuePublication(ctx, binding.ProjectID)
+		if readErr != nil {
+			return issueSyncStorageError(readErr, binding.Provider)
+		}
+		if pending != nil {
+			status.PendingPublication = &api.PendingIssuePublicationOut{AttemptUID: pending.AttemptUID, Provider: pending.Provider, IssueUID: pending.IssueUID, Phase: pending.Phase}
+		}
+	}
 	if reader, ok := store.(db.IssueStatusSummaryReader); ok {
 		status.PendingCount, err = reader.CountPendingIssueStatuses(ctx, binding.ID)
 		if err != nil {

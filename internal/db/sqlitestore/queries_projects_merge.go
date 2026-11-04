@@ -48,6 +48,11 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 	if err != nil {
 		return db.ProjectMergeResult{}, fmt.Errorf("load target project: %w", err)
 	}
+	for _, projectID := range []int64{source.ID, target.ID} {
+		if err := ensureNoPendingIssuePublicationTx(ctx, tx, projectID, 0); err != nil {
+			return db.ProjectMergeResult{}, err
+		}
+	}
 	if isSystemProject(source) || isSystemProject(target) {
 		return db.ProjectMergeResult{}, db.ErrNotFound
 	}

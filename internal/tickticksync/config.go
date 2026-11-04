@@ -1,6 +1,7 @@
 package tickticksync
 
 import (
+	"encoding/hex"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -65,7 +66,10 @@ func DecodeCheckpoint(raw jsontext.Value) (Checkpoint, error) {
 	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
 		return Checkpoint{}, fmt.Errorf("invalid TickTick checkpoint container")
 	}
-	cp := Checkpoint{Versions: map[string]TaskVersion{}}
+	cp := Checkpoint{
+		Versions:                    map[string]TaskVersion{},
+		PublicationContentBaselines: map[string]db.IssuePublicationContentBaseline{},
+	}
 	if value, ok := fields[checkpointKey]; ok {
 		if len(value) > maxCheckpointBytes || !strings.HasPrefix(strings.TrimSpace(string(value)), "{") || json.Unmarshal(value, &cp, json.RejectUnknownMembers(true)) != nil {
 			return cp, fmt.Errorf("invalid TickTick checkpoint")
@@ -74,8 +78,14 @@ func DecodeCheckpoint(raw jsontext.Value) (Checkpoint, error) {
 	if cp.Versions == nil {
 		cp.Versions = map[string]TaskVersion{}
 	}
+	if cp.PublicationContentBaselines == nil {
+		cp.PublicationContentBaselines = map[string]db.IssuePublicationContentBaseline{}
+	}
 	if len(cp.Versions) > maxTasks {
 		return cp, fmt.Errorf("TickTick checkpoint exceeds 10000 tasks")
+	}
+	if len(cp.PublicationContentBaselines) > maxTasks {
+		return cp, fmt.Errorf("TickTick checkpoint exceeds 10000 publication baselines")
 	}
 	if cp.MissingAfter != "" {
 		if err := ValidateID(cp.MissingAfter); err != nil {
@@ -86,6 +96,13 @@ func DecodeCheckpoint(raw jsontext.Value) (Checkpoint, error) {
 		if ValidateID(id) != nil || len(v.Hash) != 64 || !validTime(v.FirstSeen) || !validTime(v.Version) || v.Version.Before(v.FirstSeen) ||
 			(v.Status != 0 && v.Status != 2 && v.Status != -1) || !utf8.ValidString(v.CompletedTime) || strings.ContainsRune(v.CompletedTime, 0) {
 			return cp, fmt.Errorf("invalid TickTick task version")
+		}
+	}
+	for externalID, baseline := range cp.PublicationContentBaselines {
+		taskID, found := strings.CutPrefix(externalID, "task:")
+		hash, hashErr := hex.DecodeString(baseline.Hash)
+		if !found || ValidateID(taskID) != nil || hashErr != nil || len(hash) != 32 || !validTime(baseline.At) {
+			return cp, fmt.Errorf("invalid TickTick publication content baseline")
 		}
 	}
 	return cp, nil

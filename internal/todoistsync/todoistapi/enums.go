@@ -8,6 +8,23 @@ import (
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 )
 
+type Body37565102DurationUnitAnyOf string
+
+const (
+	Day    Body37565102DurationUnitAnyOf = "day"
+	Minute Body37565102DurationUnitAnyOf = "minute"
+)
+
+// Validate checks if the Body37565102DurationUnitAnyOf value is valid
+func (b Body37565102DurationUnitAnyOf) Validate() error {
+	switch b {
+	case Day, Minute:
+		return nil
+	default:
+		return runtime.NewValidationErrorsFromString("Enum", fmt.Sprintf("must be a valid Body37565102DurationUnitAnyOf value, got: %v", b))
+	}
+}
+
 // ProjectStatus Project status.
 //
 // At the moment, this is for workspace projects only.

@@ -83,6 +83,9 @@ func (d *Store) importReplay(ctx context.Context, recs []db.ImportRecord, opts d
 		if _, err := tx.ExecContext(ctx, `UPDATE meta SET value=value WHERE 0`); err != nil {
 			return fmt.Errorf("reserve restore writer: %w", err)
 		}
+		if err := ensurePublicationReplayAllowedTx(ctx, tx); err != nil {
+			return err
+		}
 		if err := clearReplayTarget(ctx, tx, opts.RequireFreshTarget, d.instanceUID); err != nil {
 			return err
 		}
@@ -544,6 +547,9 @@ func importRecord(ctx context.Context, tx *sql.Tx, r db.ImportRecord, opts db.Im
 }
 
 func importMeta(ctx context.Context, tx *sql.Tx, m *db.MetaKV, opts db.ImportOptions) error {
+	if strings.HasPrefix(m.Key, db.IssuePublicationMetaPrefix) {
+		return nil
+	}
 	// Always ignore the source's export_version/schema_version; ImportReplay
 	// stamps the current schema_version after the loop (recordImportSchemaVersion).
 	if m.Key == "export_version" || m.Key == "schema_version" {
@@ -624,7 +630,7 @@ func importIssueSyncBinding(ctx context.Context, tx *sql.Tx, b *db.IssueSyncBind
 	config := b.Config
 	if !preserveEnabled {
 		var err error
-		config, err = db.PublicIssueSyncConfig(config)
+		config, err = db.IssueSyncConfigForRestore(config)
 		if err != nil {
 			return err
 		}

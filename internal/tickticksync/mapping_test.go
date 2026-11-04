@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"hegel.dev/go/hegel"
 )
 
 // Contract: a scoped task has one stable identity; unchanged observations reuse
@@ -85,6 +86,41 @@ func TestTickTickRejectsUnscopedAndInvalidObservations(t *testing.T) {
 	data.Project.Closed = true
 	_, _, err = BuildImportBatch(c, data, Checkpoint{}, at)
 	require.Error(t, err)
+}
+
+func TestPublicationContentHashMatchesPreparedSnapshotProperty(t *testing.T) {
+	hegel.Test(t, func(ht *hegel.T) {
+		prepared := Task{
+			ProjectID: "project-1",
+			Title:     hegel.Draw(ht, hegel.Text().MaxSize(64)),
+			Content:   hegel.Draw(ht, hegel.Text().MaxSize(256)),
+			Kind:      "TEXT",
+			Items:     []ChecklistItem{},
+		}
+		remote := prepared
+		remote.ID = hegel.Draw(ht, hegel.Text().MaxSize(32))
+		if hegel.Draw(ht, hegel.Booleans()) {
+			remote.Kind = ""
+		}
+		status := hegel.Draw(ht, hegel.Integers(0, 2))
+		remote.Status = &status
+		remote.CompletedTime = hegel.Draw(ht, hegel.Text().MaxSize(64))
+		if hegel.Draw(ht, hegel.Booleans()) {
+			remote.Items = nil
+		}
+
+		want, err := publicationContentHash(prepared)
+		require.NoError(ht, err)
+		got, err := publicationContentHash(remote)
+		require.NoError(ht, err)
+		require.Equal(ht, want, got)
+
+		changed := remote
+		changed.Content += "\x00changed"
+		changedHash, err := publicationContentHash(changed)
+		require.NoError(ht, err)
+		require.NotEqual(ht, want, changedHash)
+	}, hegel.WithTestCases(64))
 }
 
 // A status-direction change leaves unchanged content at its saved version.

@@ -58,23 +58,24 @@ type githubSyncBindingOut struct {
 }
 
 type githubSyncStatusOut struct {
-	StatusSync    string                 `json:"status_sync"`
-	PendingCount  int                    `json:"pending_count"`
-	Progress      *githubSyncProgressOut `json:"progress,omitempty"`
-	SyncStartedAt *time.Time             `json:"sync_started_at,omitempty"`
-	LastAttemptAt *time.Time             `json:"last_attempt_at,omitempty"`
-	LastSuccessAt *time.Time             `json:"last_success_at,omitempty"`
-	LastErrorAt   *time.Time             `json:"last_error_at,omitempty"`
-	BindingID     int64                  `json:"binding_id"`
-	ProjectID     int64                  `json:"project_id"`
-	Provider      string                 `json:"provider"`
-	Enabled       bool                   `json:"enabled"`
-	State         string                 `json:"state"`
-	LastError     string                 `json:"last_error"`
-	LastCreated   int                    `json:"last_created"`
-	LastUpdated   int                    `json:"last_updated"`
-	LastUnchanged int                    `json:"last_unchanged"`
-	LastComments  int                    `json:"last_comments"`
+	PendingPublication *generated.PendingIssuePublicationOut `json:"pending_publication,omitempty"`
+	StatusSync         string                                `json:"status_sync"`
+	PendingCount       int                                   `json:"pending_count"`
+	Progress           *githubSyncProgressOut                `json:"progress,omitempty"`
+	SyncStartedAt      *time.Time                            `json:"sync_started_at,omitempty"`
+	LastAttemptAt      *time.Time                            `json:"last_attempt_at,omitempty"`
+	LastSuccessAt      *time.Time                            `json:"last_success_at,omitempty"`
+	LastErrorAt        *time.Time                            `json:"last_error_at,omitempty"`
+	BindingID          int64                                 `json:"binding_id"`
+	ProjectID          int64                                 `json:"project_id"`
+	Provider           string                                `json:"provider"`
+	Enabled            bool                                  `json:"enabled"`
+	State              string                                `json:"state"`
+	LastError          string                                `json:"last_error"`
+	LastCreated        int                                   `json:"last_created"`
+	LastUpdated        int                                   `json:"last_updated"`
+	LastUnchanged      int                                   `json:"last_unchanged"`
+	LastComments       int                                   `json:"last_comments"`
 }
 
 func newSyncCmd() *cobra.Command {
@@ -95,7 +96,7 @@ func newGitHubSyncCmd() *cobra.Command {
 		newGitHubSyncEnableCmd(),
 		newIssueSyncDisableCmd("github"),
 		newIssueSyncStatusCmd("github"),
-		newIssueSyncOnceCmd("github"),
+		newIssueSyncOnceCmd("github"), newIssuePublishCmd("github"),
 	)
 	return cmd
 }

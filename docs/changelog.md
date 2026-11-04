@@ -54,6 +54,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
   use the daemon scheduler; recording a run never starts work or changes who
   owns an issue. See [MCP](reference/mcp.md#native-cron-through-mcp). Thanks to
   [Rusty Shackleford](https://github.com/salmonumbrella).
+- Publish an open native issue to GitHub, Notion, Linear, Plane, TickTick,
+  Todoist, or Twenty with `kata sync <provider> publish <issue-ref>`. The
+  initial title and body become an upstream object attached to the same Kata
+  issue; ordinary imports then maintain it. Recover uncertain creates with
+  explicit adoption or inspected attempt resolution. See
+  [publishing and recovery](reference/cli.md#publish-a-native-issue) and
+  [restore reconciliation](operations/backup-restore.md#restore-with-published-issues).
 
 - Set, change or clear an issue's Scheduled and Deadline dates in `kata tui`
   with `d`, from the list or the detail. Fields take the same values as

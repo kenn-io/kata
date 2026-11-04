@@ -50,6 +50,9 @@ func (s *Store) ImportBatch(
 		if err := ensureProjectWritableTx(ctx, tx, attemptParams.ProjectID); err != nil {
 			return err
 		}
+		if err := ensurePublicationImportAllowedTx(ctx, tx, project.UID, attemptParams.Source); err != nil {
+			return err
+		}
 		if err := validateIssueSyncImportGuardTx(ctx, tx, attemptParams); err != nil {
 			return err
 		}

@@ -83,7 +83,8 @@ func (a *Adapter) Prepare(ctx context.Context, b db.IssueSyncBinding, started ti
 	if err != nil {
 		return p, err
 	}
-	if err = a.seedReturningTasks(ctx, b, data, &cp); err != nil {
+	consumedBaselines, err := a.seedReturningTasks(ctx, b, data, &cp)
+	if err != nil {
 		return p, err
 	}
 	batch, next, err := BuildImportBatch(c, data, cp, observedAt)
@@ -91,6 +92,11 @@ func (a *Adapter) Prepare(ctx context.Context, b db.IssueSyncBinding, started ti
 		return p, err
 	}
 	staged := stagedCheckpoint(cp, next, recovered)
+	if len(consumedBaselines) > 0 && staged.PublicationContentBaselines == nil {
+		staged.PublicationContentBaselines = map[string]db.IssuePublicationContentBaseline{}
+	}
+	// A failed import must leave its publication baseline available for retry.
+	maps.Copy(staged.PublicationContentBaselines, consumedBaselines)
 	stagedRaw, err := WithCheckpoint(b.Config, staged)
 	if err != nil {
 		return p, err
@@ -116,7 +122,7 @@ func (a *Adapter) Prepare(ctx context.Context, b db.IssueSyncBinding, started ti
 		p.Binding = b
 	}
 	p.Batch = batch
-	if len(recovered) > 0 {
+	if len(recovered) > 0 || len(consumedBaselines) > 0 {
 		finalizeBinding := b
 		p.Finalize = func(finalizeCtx context.Context) (db.IssueSyncBinding, error) {
 			return a.store.RefreshIssueSyncBinding(finalizeCtx, db.IssueSyncBindingUpdateParams{
@@ -177,7 +183,7 @@ func recoverMissingTasks(ctx context.Context, session Session, now func() time.T
 		issuesync.ReportProgress(ctx, "missing-tasks", n+1, len(missing))
 		t, err := session.Task(ctx, id)
 		if se, ok := errors.AsType[*issuesync.StatusError](err); ok && se.HTTPStatus == 404 || errors.Is(err, errTaskOutsideProject) {
-			delete(cp.Versions, id)
+			retireTaskCheckpoint(cp, id)
 			continue
 		}
 		if err != nil {
@@ -187,7 +193,7 @@ func recoverMissingTasks(ctx context.Context, session Session, now func() time.T
 			return nil, blocked("TickTick task status is missing")
 		}
 		if *t.Status == -1 || t.Kind == "NOTE" {
-			delete(cp.Versions, id)
+			retireTaskCheckpoint(cp, id)
 			continue
 		}
 		if closedCandidates[id] && *t.Status != 2 && !cp.Versions[id].PendingRecovery {
@@ -201,11 +207,24 @@ func recoverMissingTasks(ctx context.Context, session Session, now func() time.T
 	return recovered, nil
 }
 
+// retireTaskCheckpoint forgets source state that can no longer be imported.
+func retireTaskCheckpoint(cp *Checkpoint, id string) {
+	delete(cp.Versions, id)
+	delete(cp.PublicationContentBaselines, "task:"+id)
+	if len(cp.PublicationContentBaselines) == 0 {
+		cp.PublicationContentBaselines = nil
+	}
+}
+
 // stagedCheckpoint is the checkpoint saved before import. Recovered tasks stay
 // marked pending until Finalize saves next after the import commits, so a
 // failed import reads them again.
 func stagedCheckpoint(cp, next Checkpoint, recovered map[string]bool) Checkpoint {
-	staged := Checkpoint{Versions: maps.Clone(next.Versions), MissingAfter: next.MissingAfter}
+	staged := Checkpoint{
+		Versions:                    maps.Clone(next.Versions),
+		PublicationContentBaselines: maps.Clone(next.PublicationContentBaselines),
+		MissingAfter:                next.MissingAfter,
+	}
 	for id := range recovered {
 		observed, ok := staged.Versions[id]
 		if !ok {
@@ -220,44 +239,84 @@ func stagedCheckpoint(cp, next Checkpoint, recovered map[string]bool) Checkpoint
 	return staged
 }
 
-// seedReturningTasks gives a mapped task with no checkpoint entry, such as one
-// that sync stopped tracking, its saved source version as a baseline. Unchanged
-// content then cannot replace newer local edits.
-func (a *Adapter) seedReturningTasks(ctx context.Context, b db.IssueSyncBinding, data ProjectData, cp *Checkpoint) error {
-	returning := map[string]Task{}
+// seedReturningTasks restores saved source versions and converts a publication
+// content baseline into the first checkpoint without inventing a source clock.
+// It returns consumed baselines so Prepare can retain them until import commits.
+func (a *Adapter) seedReturningTasks(ctx context.Context, b db.IssueSyncBinding, data ProjectData, cp *Checkpoint) (map[string]db.IssuePublicationContentBaseline, error) {
+	consumedBaselines := map[string]db.IssuePublicationContentBaseline{}
+	visible := map[string]Task{}
 	for _, t := range data.Tasks {
-		if _, tracked := cp.Versions[t.ID]; tracked || t.Status == nil || *t.Status == -1 || t.Kind == "NOTE" {
+		if t.Status == nil {
 			continue
 		}
-		returning[t.ID] = t
+		if *t.Status == -1 || t.Kind == "NOTE" {
+			retireTaskCheckpoint(cp, t.ID)
+			continue
+		}
+		visible[t.ID] = t
 	}
-	if len(returning) == 0 {
-		return nil
+	if len(visible) == 0 {
+		if len(cp.PublicationContentBaselines) == 0 {
+			cp.PublicationContentBaselines = nil
+		}
+		return consumedBaselines, nil
 	}
 	mappings, err := a.store.ImportMappingsByProjectSource(ctx, b.ProjectID, b.SourceKey)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for _, m := range mappings {
-		if m.ObjectType != "issue" || m.SourceUpdatedAt == nil {
+		if m.ObjectType != "issue" {
 			continue
 		}
 		id, err := mappingTaskID(m.ExternalID)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		task, ok := returning[id]
+		task, ok := visible[id]
 		if !ok {
 			continue
 		}
 		hash, err := taskContentHash(task)
 		if err != nil {
-			return err
+			return nil, err
+		}
+		if m.SourceUpdatedAt == nil {
+			if baseline, hasBaseline := cp.PublicationContentBaselines[m.ExternalID]; hasBaseline {
+				baselineHash, err := publicationContentHash(task)
+				if err != nil {
+					return nil, err
+				}
+				if baselineHash == baseline.Hash {
+					at := baseline.At.UTC().Truncate(time.Millisecond)
+					cp.Versions[id] = TaskVersion{
+						Hash: hash, Status: *task.Status, CompletedTime: task.CompletedTime,
+						FirstSeen: at, Version: at,
+					}
+				} else {
+					// A checkpoint staged by a failed pre-attachment sync is not an
+					// imported source version. Re-read changed content as the first import.
+					delete(cp.Versions, id)
+				}
+				delete(cp.PublicationContentBaselines, m.ExternalID)
+				consumedBaselines[m.ExternalID] = baseline
+			}
+			continue
+		}
+		if _, tracked := cp.Versions[id]; tracked {
+			if baseline, hasBaseline := cp.PublicationContentBaselines[m.ExternalID]; hasBaseline {
+				consumedBaselines[m.ExternalID] = baseline
+			}
+			delete(cp.PublicationContentBaselines, m.ExternalID)
+			continue
 		}
 		saved := m.SourceUpdatedAt.UTC().Truncate(time.Millisecond)
 		cp.Versions[id] = TaskVersion{Hash: hash, FirstSeen: saved, Version: saved}
 	}
-	return nil
+	if len(cp.PublicationContentBaselines) == 0 {
+		cp.PublicationContentBaselines = nil
+	}
+	return consumedBaselines, nil
 }
 
 // unimportedMissingTasks lists checkpointed tasks absent from the current
@@ -334,10 +393,10 @@ func (a *Adapter) openMissingTasks(ctx context.Context, b db.IssueSyncBinding, v
 	return missing, nil
 }
 
-// closedMissingTaskCandidates keeps locally closed tasks that TickTick last
-// showed open eligible for bounded reads. The read records the completion
-// before sync stops tracking the task, so a later TickTick reopen is a real
-// status change, and it imports the task's final content.
+// closedMissingTaskCandidates keeps locally closed tasks eligible for their
+// first import or while TickTick last showed them open. The bounded read records
+// completion before sync stops tracking the task, so a later TickTick reopen is
+// a real status change, and it imports the task's final content.
 func (a *Adapter) closedMissingTaskCandidates(ctx context.Context, b db.IssueSyncBinding, visible map[string]bool, checkpoint Checkpoint) (map[string]bool, error) {
 	mappings, err := a.store.ImportMappingsByProjectSource(ctx, b.ProjectID, b.SourceKey)
 	if err != nil {
@@ -357,10 +416,12 @@ func (a *Adapter) closedMissingTaskCandidates(ctx context.Context, b db.IssueSyn
 			continue
 		}
 		version, ok := checkpoint.Versions[id]
-		if !ok {
+		// Publication has no content checkpoint or source timestamp until the
+		// first ordinary import, even if the native issue has already closed.
+		if !ok && mapping.SourceUpdatedAt != nil {
 			continue
 		}
-		if !version.PendingRecovery && version.Status != 0 {
+		if ok && !version.PendingRecovery && version.Status != 0 {
 			continue
 		}
 		taskByIssue[*mapping.IssueID] = id

@@ -95,7 +95,7 @@ func (c *Client) ForRun(ctx context.Context, input Config) (Session, error) {
 		return nil, err
 	}
 	if input.APIOrigin != c.cfg.Daemon.APIOrigin {
-		return nil, fmt.Errorf("twenty binding origin differs from daemon twenty_sync.api_origin")
+		return nil, fmt.Errorf("twenty binding origin differs from daemon twenty_sync.api_origin: %w", issuesync.NewPublicationValidationError(issuesync.PublicationBindingInvalid))
 	}
 	token, ok := c.cfg.LookupEnv(c.cfg.Daemon.TokenEnv)
 	token = strings.TrimSpace(token)

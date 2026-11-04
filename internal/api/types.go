@@ -148,6 +148,7 @@ type InstanceResponse struct {
 		EmbeddingArtifactProtocolVersion int            `json:"embedding_artifact_protocol_version,omitempty"`
 		WebUIContractVersion             string         `json:"web_ui_contract_version,omitempty"`
 		WebUICapabilities                UICapabilities `json:"web_ui_capabilities"`
+		IssuePublish                     bool           `json:"issue_publish"`
 		IssueStatusSync                  bool           `json:"issue_status_sync"`
 		IssueSubtreeTokens               bool           `json:"issue_subtree_tokens"`
 		FederationSigningRequired        bool           `json:"federation_signing_required,omitempty" doc:"True when this daemon requires request signatures on its federation transport routes, so a bridge needs a signing source."`

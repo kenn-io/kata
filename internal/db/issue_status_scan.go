@@ -104,6 +104,64 @@ func PublicIssueSyncConfig(config jsontext.Value) (jsontext.Value, error) {
 	return json.Marshal(fields, json.Deterministic(true))
 }
 
+// IssueSyncConfigForRestore strips live daemon progress while retaining the
+// validated content baseline needed to safely import a published task later.
+func IssueSyncConfigForRestore(config jsontext.Value) (jsontext.Value, error) {
+	public, err := PublicIssueSyncConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	var fields map[string]jsontext.Value
+	if err := json.Unmarshal(config, &fields); err != nil || fields == nil {
+		return nil, invalidIssueStatusState()
+	}
+	rawCheckpoint, present := fields[IssueSyncProviderCheckpointKey]
+	if !present || len(rawCheckpoint) > 2<<20 {
+		return public, nil
+	}
+	var checkpoint map[string]jsontext.Value
+	if err := json.Unmarshal(rawCheckpoint, &checkpoint); err != nil || checkpoint == nil {
+		return public, nil
+	}
+	rawBaselines, present := checkpoint[IssueSyncPublicationContentBaselinesKey]
+	if !present {
+		return public, nil
+	}
+	if len(rawBaselines) > 2<<20 {
+		return nil, fmt.Errorf("%w: invalid issue publication content baseline", ErrImportValidation)
+	}
+	var baselines map[string]IssuePublicationContentBaseline
+	if err := json.Unmarshal(rawBaselines, &baselines, json.RejectUnknownMembers(true)); err != nil || baselines == nil {
+		return nil, fmt.Errorf("%w: invalid issue publication content baseline", ErrImportValidation)
+	}
+	if len(baselines) == 0 {
+		return public, nil
+	}
+	for externalID, baseline := range baselines {
+		if !validIssueSyncPublicationContentBaseline(externalID, baseline) {
+			return nil, fmt.Errorf("%w: invalid issue publication content baseline", ErrImportValidation)
+		}
+		baseline.At = baseline.At.UTC().Truncate(time.Millisecond)
+		baselines[externalID] = baseline
+	}
+	baselineJSON, err := json.Marshal(baselines, json.Deterministic(true))
+	if err != nil {
+		return nil, err
+	}
+	checkpointJSON, err := json.Marshal(map[string]jsontext.Value{
+		IssueSyncPublicationContentBaselinesKey: baselineJSON,
+	}, json.Deterministic(true))
+	if err != nil {
+		return nil, err
+	}
+	var restored map[string]jsontext.Value
+	if err := json.Unmarshal(public, &restored); err != nil || restored == nil {
+		return nil, invalidIssueStatusState()
+	}
+	restored[IssueSyncProviderCheckpointKey] = checkpointJSON
+	return json.Marshal(restored, json.Deterministic(true))
+}
+
 // IssueSyncConfigMatches compares user-selected fields without allowing daemon
 // scan progress or top-level object ordering to invalidate an operator snapshot.
 func IssueSyncConfigMatches(left, right jsontext.Value) (bool, error) {
@@ -188,6 +246,99 @@ func IssueStatusMode(config jsontext.Value) (string, error) {
 // IssueSyncProviderCheckpointKey holds an adapter's private checkpoint inside
 // binding config. Exports and operator edits never supply or expose it.
 const IssueSyncProviderCheckpointKey = "_provider_checkpoint"
+
+// IssueSyncPublicationContentBaselinesKey stores verified publication content
+// snapshots inside the private provider checkpoint.
+const IssueSyncPublicationContentBaselinesKey = "publication_content_baselines"
+
+// HasIssueSyncPublicationContentBaseline reports whether the private provider
+// checkpoint holds a publication baseline for externalID. Moves use this to
+// keep a baseline with the project binding that can consume it.
+func HasIssueSyncPublicationContentBaseline(config jsontext.Value, externalID string) (bool, error) {
+	invalid := fmt.Errorf("%w: invalid issue sync publication checkpoint", ErrImportValidation)
+	if externalID == "" {
+		return false, invalid
+	}
+	var fields map[string]jsontext.Value
+	if err := json.Unmarshal(config, &fields); err != nil || fields == nil {
+		return false, invalid
+	}
+	rawCheckpoint, ok := fields[IssueSyncProviderCheckpointKey]
+	if !ok {
+		return false, nil
+	}
+	if len(rawCheckpoint) > 2<<20 {
+		return false, invalid
+	}
+	var checkpoint map[string]jsontext.Value
+	if err := json.Unmarshal(rawCheckpoint, &checkpoint); err != nil || checkpoint == nil {
+		return false, invalid
+	}
+	rawBaselines, ok := checkpoint[IssueSyncPublicationContentBaselinesKey]
+	if !ok {
+		return false, nil
+	}
+	if len(rawBaselines) > 2<<20 {
+		return false, invalid
+	}
+	var baselines map[string]jsontext.Value
+	if err := json.Unmarshal(rawBaselines, &baselines); err != nil || baselines == nil {
+		return false, invalid
+	}
+	_, ok = baselines[externalID]
+	return ok, nil
+}
+
+// WithIssueSyncPublicationContentBaseline records the exact published content
+// snapshot without treating it as a provider modification timestamp.
+func WithIssueSyncPublicationContentBaseline(
+	config jsontext.Value,
+	externalID string,
+	baseline IssuePublicationContentBaseline,
+) (jsontext.Value, error) {
+	invalid := fmt.Errorf("%w: invalid issue publication content baseline", ErrImportValidation)
+	if !validIssueSyncPublicationContentBaseline(externalID, baseline) {
+		return nil, invalid
+	}
+	baseline.At = baseline.At.UTC().Truncate(time.Millisecond)
+
+	var fields map[string]jsontext.Value
+	if err := json.Unmarshal(config, &fields); err != nil || fields == nil {
+		return nil, invalid
+	}
+	checkpoint := map[string]jsontext.Value{}
+	if raw, ok := fields[IssueSyncProviderCheckpointKey]; ok {
+		if len(raw) > 2<<20 || json.Unmarshal(raw, &checkpoint) != nil || checkpoint == nil {
+			return nil, invalid
+		}
+	}
+	baselines := map[string]IssuePublicationContentBaseline{}
+	if raw, ok := checkpoint[IssueSyncPublicationContentBaselinesKey]; ok {
+		if json.Unmarshal(raw, &baselines) != nil || baselines == nil {
+			return nil, invalid
+		}
+	}
+	baselines[externalID] = baseline
+	baselineJSON, err := json.Marshal(baselines, json.Deterministic(true))
+	if err != nil {
+		return nil, err
+	}
+	checkpoint[IssueSyncPublicationContentBaselinesKey] = baselineJSON
+	checkpointJSON, err := json.Marshal(checkpoint, json.Deterministic(true))
+	if err != nil {
+		return nil, err
+	}
+	if len(checkpointJSON) > 2<<20 {
+		return nil, invalid
+	}
+	fields[IssueSyncProviderCheckpointKey] = checkpointJSON
+	return json.Marshal(fields, json.Deterministic(true))
+}
+
+func validIssueSyncPublicationContentBaseline(externalID string, baseline IssuePublicationContentBaseline) bool {
+	return externalID != "" && len(externalID) <= 512 && baseline.Hash != "" && len(baseline.Hash) <= 256 &&
+		!baseline.At.IsZero() && baseline.At.Year() >= 1 && baseline.At.Year() <= 9999
+}
 
 // RefreshIssueSyncConfig stages a provider checkpoint only under a worker claim.
 // Normal metadata refresh and enable preserve private state rather than accept it.

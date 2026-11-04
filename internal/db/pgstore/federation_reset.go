@@ -126,6 +126,9 @@ func clearFederatedProjectTx(ctx context.Context, tx *sql.Tx, projectID int64) e
 }
 
 func clearFederatedProjectionTx(ctx context.Context, tx *sql.Tx, projectID int64) error {
+	if err := ensureNoPendingIssuePublicationTx(ctx, tx, projectID, 0); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM cron_runs WHERE project_id=$1`, projectID); err != nil {
 		return err
 	}

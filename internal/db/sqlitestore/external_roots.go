@@ -296,6 +296,9 @@ func (d *Store) CreateExternalRootBinding(
 		if issue.ProjectID != params.ProjectID {
 			return db.ExternalRootBinding{}, db.Event{}, fmt.Errorf("%w: issue is not in project", db.ErrExternalRootValidation)
 		}
+		if err := ensureNoPendingIssuePublicationTx(ctx, tx, params.ProjectID, issue.ID); err != nil {
+			return db.ExternalRootBinding{}, db.Event{}, err
+		}
 		if err := rejectIssueSyncManagedExternalRootTx(ctx, tx, params.ProjectID, issue.ID); err != nil {
 			return db.ExternalRootBinding{}, db.Event{}, err
 		}

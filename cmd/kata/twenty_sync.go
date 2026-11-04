@@ -11,7 +11,7 @@ import (
 
 func newTwentySyncCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "twenty", Short: "mirror Twenty tasks into this project"}
-	cmd.AddCommand(newTwentySyncEnableCmd(), newIssueSyncDisableCmd("twenty"), newIssueSyncStatusCmd("twenty"), newIssueSyncOnceCmd("twenty"))
+	cmd.AddCommand(newTwentySyncEnableCmd(), newIssueSyncDisableCmd("twenty"), newIssueSyncStatusCmd("twenty"), newIssueSyncOnceCmd("twenty"), newIssuePublishCmd("twenty"))
 	return cmd
 }
 

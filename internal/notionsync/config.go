@@ -378,7 +378,8 @@ func ValidateReenable(previous, next Config) error {
 		return fmt.Errorf("notion source and selected mapping IDs cannot change on re-enable")
 	}
 	if previous.CompleteGroupID != "" {
-		initialTodo := previous.TodoGroupID == "" && next.StatusSync == "two-way"
+		// Publication needs an initial open target even when status sync remains one-way.
+		initialTodo := previous.TodoGroupID == ""
 		if previous.CompleteGroupID != next.CompleteGroupID || (previous.TodoGroupID != next.TodoGroupID && !initialTodo) {
 			return fmt.Errorf("notion selected workflow group IDs cannot change on re-enable")
 		}

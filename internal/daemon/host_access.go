@@ -398,6 +398,9 @@ func internalAPIError(err error) error {
 	if apiErr, ok := errors.AsType[*api.APIError](err); ok {
 		return apiErr
 	}
+	if pending, ok := errors.AsType[*db.IssuePublicationPendingError](err); ok {
+		return issuePublicationPendingError(pending)
+	}
 	if apiErr := externalRootConflictError(err); apiErr != nil {
 		return apiErr
 	}

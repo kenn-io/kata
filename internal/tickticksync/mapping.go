@@ -82,8 +82,13 @@ func BuildImportBatch(c Config, data ProjectData, old Checkpoint, at time.Time) 
 		return db.ImportBatchParams{}, old, fmt.Errorf("TickTick observations exceed the collection and recovery limits")
 	}
 	at = at.UTC().Truncate(time.Millisecond)
-	cp := Checkpoint{Versions: map[string]TaskVersion{}, MissingAfter: old.MissingAfter}
+	cp := Checkpoint{
+		Versions:                    map[string]TaskVersion{},
+		PublicationContentBaselines: map[string]db.IssuePublicationContentBaseline{},
+		MissingAfter:                old.MissingAfter,
+	}
 	maps.Copy(cp.Versions, old.Versions)
+	maps.Copy(cp.PublicationContentBaselines, old.PublicationContentBaselines)
 	batch := db.ImportBatchParams{Source: c.SourceKey(), Actor: "ticktick-sync", Items: []db.ImportItem{}, ReconcileLabelsForUnchanged: map[string][]string{}, ReconcileStatusForUnchanged: true, ImportStatusObservations: map[string]db.IssueStatusObservation{}}
 	seen := map[string]string{}
 	total := 0
@@ -231,4 +236,19 @@ func taskContentHash(task Task) (string, error) {
 	}
 	hash := sha256.Sum256(encoded)
 	return hex.EncodeToString(hash[:]), nil
+}
+
+// publicationContentHash uses the prepared task content before TickTick assigns
+// its remote task ID. Empty checklists use one stable representation.
+func publicationContentHash(task Task) (string, error) {
+	task.ID = ""
+	// TickTick may omit kind when it reads back a text task. Treat that default
+	// the same as the explicit kind used to prepare the publication baseline.
+	if task.Kind == "" && len(task.Items) == 0 {
+		task.Kind = "TEXT"
+	}
+	if task.Items == nil {
+		task.Items = []ChecklistItem{}
+	}
+	return taskContentHash(task)
 }

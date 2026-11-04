@@ -17,3 +17,4 @@ filter:
       - tasks_completed_by_completion_date_api_v1_tasks_completed_by_completion_date_get
       - close_task_api_v1_tasks__task_id__close_post
       - reopen_task_api_v1_tasks__task_id__reopen_post
+      - create_task_api_v1_tasks_post

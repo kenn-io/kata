@@ -14,6 +14,9 @@ import (
 )
 
 func pgReplayMeta(ctx context.Context, tx *sql.Tx, meta *db.MetaKV, opts db.ImportOptions) error {
+	if strings.HasPrefix(meta.Key, db.IssuePublicationMetaPrefix) {
+		return nil
+	}
 	if meta.Key == "export_version" || meta.Key == "schema_version" {
 		return nil
 	}
@@ -106,7 +109,7 @@ func pgReplayIssueSyncBinding(
 	}
 	if !preserveEnabled {
 		var err error
-		configJSON, err = db.PublicIssueSyncConfig(configJSON)
+		configJSON, err = db.IssueSyncConfigForRestore(configJSON)
 		if err != nil {
 			return err
 		}
