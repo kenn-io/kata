@@ -548,6 +548,44 @@ loaded deadlines keep aging as the view redraws. CLI and MCP reads return the
 server's verdict at request time. Older daemons omit `staleness`, which means
 it was not evaluated. Completed runs omit the field too.
 
+### Reap abandoned evidence
+
+Preview stale running runs before recording an operator decision:
+
+```sh
+kata cron run reap --json
+kata cron run reap --job-uid <job-uid> --scan-limit 1000 --json
+kata cron run reap <run-uid> --apply --message "Runtime stopped" --json
+```
+
+Without `--apply`, reap writes nothing. Named UIDs are read directly and
+deduplicated. Otherwise, the command scans at most 1000 history records, newest
+first, in pages of at most 100; `--scan-limit` changes that bound. The bound
+counts all scanned statuses, so older running runs can remain outside it.
+`scan_limit_reached` indicates that more history may remain. `--job-uid` filters
+both scanned and named runs. Use `--force` to include running runs before their
+deadline; it does not bypass revision checks or write authorization.
+
+Reap records `unknown` using each run's read revision. It preserves the starter,
+identity, token counts and existing start/end evidence; it does not invent an
+end time or stop a process. Its ordinary `cron.run.observed` event names the
+operator. The summary adds an audit message, the optional operator note, then
+previous message text, truncated to the existing encoded summary limit. Operator
+notes are at most 1024 bytes; new operator actor/note input cannot contain U+0000,
+which PostgreSQL JSONB cannot represent.
+
+The result reports each candidate's `run_uid`, read `revision`, `staleness` and
+`action`. Revision, status or age conflicts become `skipped: changed`,
+`not_running` or `not_stale`; the command never retries them. Unexpected API or
+transport failures stop further writes, return nonzero and retain completed
+results. Rerun after inspecting the result. An old daemon's unevaluated running
+run or missing reap route produces an upgrade hint; a missing resource remains
+a resource error.
+
+Prefer the project's hub, where observations converge. Reap and adapter evidence
+written on different replicas still fold by the ordinary event clock. A late
+adapter can report the true outcome after refreshing the run's revision.
+
 ### Advisory run state machine
 
 Adapters should follow these transitions. Kata stores evidence without
@@ -558,6 +596,7 @@ starting processes or enforcing this protocol.
 | New run | `running` | Adapter at launch |
 | `running` | `running` with changed evidence | Adapter progress; advances `updated_at` |
 | `running` | `succeeded`, `failed`, `cancelled`, or `unknown` | Adapter after execution |
+| `running` | `unknown` | Operator through `reap` |
 | `unknown` | `succeeded`, `failed`, or `cancelled` | Adapter with late evidence and the current revision |
 | Terminal outcome | Any supported status | Store permits it; adapters should preserve a known outcome |
 
@@ -691,3 +730,13 @@ Workflow routes are `/api/v1/projects/{project_id}/cron/workflows` and
 `workflow` or `workflows`; job actions and run observations use `workflow_uid`,
 and run observations pair it with `workflow_definition_event_uid`. Events use
 `cron.workflow.*`, and JSONL workflow records use `cron_workflow`.
+
+
+Run reads use `GET /api/v1/projects/{project_id}/cron/runs` (`listCronRuns`) and
+`GET .../cron/runs/{run_uid}` (`showCronRun`). Operator reap uses
+`POST .../cron/runs/{run_uid}/reap` (`reapCronRun`) with
+`expected_revision`, optional request `actor`, optional `message`, and `force`.
+It uses ordinary project write authorization; authenticated identity overrides
+the request actor. A stale revision returns `409 cron_conflict` with `current`;
+a terminal run returns `409 cron_run_not_running`, and a fresh run returns
+`409 cron_run_not_stale` with `stale_at`. Missing runs return `404 not_found`.

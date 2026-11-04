@@ -11,6 +11,11 @@ func (s *Store) ObserveCronRun(ctx context.Context, in db.ObserveCronRun) (db.Cr
 	return s.cronSQL().ObserveRun(ctx, in)
 }
 
+// ReapCronRun records an attributed operator decision with current-run CAS.
+func (s *Store) ReapCronRun(ctx context.Context, in db.ReapCronRun) (db.CronRunObservationResult, error) {
+	return s.cronSQL().ReapRun(ctx, in)
+}
+
 // CronRun reads one project-scoped independent observation.
 func (s *Store) CronRun(ctx context.Context, p int64, id string) (db.CronRun, error) {
 	return s.cronSQL().Run(ctx, p, id)

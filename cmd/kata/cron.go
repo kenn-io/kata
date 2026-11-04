@@ -56,6 +56,7 @@ The full contract is in the Cron reference (docs/reference/cron.md).`,
 	for _, action := range []string{"list", "show", "observe"} {
 		runs.AddCommand(newCronOperationCmd("run", action))
 	}
+	runs.AddCommand(newCronReapCmd())
 	capabilities := newCronOperationCmd("capabilities", "show")
 	capabilities.Use = "capabilities"
 	capabilities.Short = "discover local protocol support without creating cron state"
@@ -136,6 +137,10 @@ For the next page, pass the response's next_before_uid as --before-uid.`,
 			"  " + cmd + " --limit 20 --json\n  " + cmd + " --job-uid <job-uid> --before-uid <run-uid> --json"
 	case "run show":
 		return "Show one recorded run.", "  " + cmd + " <run-uid> --json"
+	case "run reap":
+		return `Preview stale running runs, or record unknown outcomes with --apply.
+Reap does not stop a process. --job-uid filters scanned and named runs.`, `  kata cron run reap --json
+  kata cron run reap <run-uid> --apply --message "Runtime stopped" --json`
 	case "run observe":
 		return `Record or update the observation for one run from a JSON file (--json-input,
 or - for stdin). The adapter creates the run UID once and reuses it across
