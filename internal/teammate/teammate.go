@@ -4,17 +4,13 @@ package teammate
 import (
 	"errors"
 	"maps"
-	"regexp"
-)
 
-var handlePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+	"go.kenn.io/kata/internal/teammate/selection"
+)
 
 // Validate accepts an absent teammate or one portable teammate handle.
 func Validate(value string) error {
-	if value == "" || handlePattern.MatchString(value) {
-		return nil
-	}
-	return errors.New("teammate must be 1-64 ASCII letters, digits, dots, underscores or hyphens, starting with a letter or digit")
+	return selection.Validate(value)
 }
 
 // Resolve selects an explicit override when present, otherwise fallback.

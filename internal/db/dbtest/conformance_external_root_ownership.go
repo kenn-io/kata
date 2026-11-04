@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/teammate"
 )
 
 func checkExternalRootContentOwnership(t *testing.T, store db.Storage, backend Backend) error {
@@ -137,7 +138,7 @@ func checkExternalRootContentOwnership(t *testing.T, store db.Storage, backend B
 
 	t.Run("generic imports cannot update a bridge-owned root mapping", func(t *testing.T) {
 		fixture := newExternalRootSafetyFixture(t, store, "root-mapping-frontier")
-		projected, _, changed, err := store.ApplyExternalRootProjection(ctx, db.ExternalRootProjectionParams{
+		projected, rootEvent, changed, err := store.ApplyExternalRootProjection(teammate.WithRequest(ctx, "worker-1"), db.ExternalRootProjectionParams{
 			BindingID: fixture.binding.ID, ClaimToken: fixture.token,
 			Title: "Projected root", Body: "Projected body", ExternalRevision: "revision-one",
 			ExternalActorID: "provider-actor", ExternalActorName: "Contributor",
@@ -146,6 +147,8 @@ func checkExternalRootContentOwnership(t *testing.T, store db.Storage, backend B
 		})
 		require.NoError(t, err)
 		require.True(t, changed)
+		require.NotNil(t, rootEvent)
+		require.NotContains(t, rootEvent.Payload, "attributed_teammate", "inbound root projections are imported history")
 		before, err := store.ImportMappingBySource(
 			ctx, fixture.project.ID, "connector:notes", "issue", fixture.binding.ExternalRootKey,
 		)
@@ -228,20 +231,22 @@ func checkExternalRootContentOwnership(t *testing.T, store db.Storage, backend B
 		assert.Equal(t, owner, *allowed.Owner)
 		assert.Equal(t, before.Title, allowed.Title)
 
-		_, _, err = store.PauseExternalRootBinding(ctx, db.ExternalRootActionParams{
+		_, pauseEvent, err := store.PauseExternalRootBinding(teammate.WithRequest(ctx, "worker-1"), db.ExternalRootActionParams{
 			BindingID: fixture.binding.ID, ClaimToken: fixture.token,
 			Actor: "tester", Reason: "operator_pause",
 		})
 		require.NoError(t, err)
+		assert.Contains(t, pauseEvent.Payload, `"attributed_teammate":"worker-1"`, "explicit bridge administration keeps request attribution")
 		_, _, _, err = store.EditIssue(ctx, db.EditIssueParams{
 			IssueID: fixture.issue.ID, Title: &title, Actor: "tester",
 		})
 		assert.ErrorIs(t, err, db.ErrExternalRootContentOwned)
 
-		_, _, err = store.UnbindExternalRootBinding(ctx, db.ExternalRootActionParams{
+		_, unbindEvent, err := store.UnbindExternalRootBinding(teammate.WithRequest(ctx, "worker-1"), db.ExternalRootActionParams{
 			BindingID: fixture.binding.ID, Actor: "tester",
 		})
 		require.NoError(t, err)
+		assert.Contains(t, unbindEvent.Payload, `"attributed_teammate":"worker-1"`, "explicit bridge administration keeps request attribution")
 		unbound, _, changed, err := store.EditIssue(ctx, db.EditIssueParams{
 			IssueID: fixture.issue.ID, Title: &title, Actor: "tester",
 		})
@@ -260,10 +265,11 @@ func checkExternalRootContentOwnership(t *testing.T, store db.Storage, backend B
 			ExternalActorName: "Contributor", ExternalCreatedAt: providerAt,
 			ExternalUpdatedAt: providerAt, IntegrationActor: "connector:notes",
 		}
-		comment, event, changed, err := store.UpsertExternalCommentProjection(ctx, projection)
+		comment, event, changed, err := store.UpsertExternalCommentProjection(teammate.WithRequest(ctx, "worker-1"), projection)
 		require.NoError(t, err)
 		assert.True(t, changed)
 		require.NotNil(t, event)
+		assert.NotContains(t, event.Payload, "attributed_teammate", "inbound bridge comments are imported history")
 		beforeEventID, err := store.MaxEventID(ctx)
 		require.NoError(t, err)
 

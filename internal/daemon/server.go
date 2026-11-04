@@ -399,7 +399,7 @@ func NewServer(cfg ServerConfig) *Server {
 		noProjectDataRoutes(humaAPI.OpenAPI()))
 	s.authPolicy = policy
 
-	s.baseHandler = mux
+	s.baseHandler = withEventTeammate(mux, policy.SelfAuthenticatedRoutes)
 	s.handler, _ = s.HandlerFor(ListenerPolicy{Kind: ListenerSocket})
 	return s
 }

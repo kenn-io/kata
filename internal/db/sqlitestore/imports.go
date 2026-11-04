@@ -29,6 +29,9 @@ type importIssueState struct {
 // reconciled for newer or newly created rows. Providers may explicitly allow
 // presentation labels to refresh at the latest observed source version.
 func (d *Store) ImportBatch(ctx context.Context, p db.ImportBatchParams) (db.ImportBatchResult, []db.Event, error) {
+	// Imported provider history belongs to its source, not the request that
+	// triggered a foreground sync. The derived context retains cancellation.
+	ctx = db.WithoutEventTeammate(ctx)
 	return retryWrite2(ctx, d, func() (db.ImportBatchResult, []db.Event, error) {
 		return d.importBatch(ctx, p)
 	})

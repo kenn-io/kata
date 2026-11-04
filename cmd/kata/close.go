@@ -365,6 +365,21 @@ func runActionWithHeaders(
 		}
 		commentProjectID = response.Body.Issue.ProjectID
 		commentIssueRef = response.Body.Issue.UID
+		original := response.Body.OriginalEvent
+		if original == nil {
+			original = response.Body.Event
+		}
+		if original != nil {
+			var contribution struct {
+				Teammate string `json:"attributed_teammate"`
+			}
+			if err := json.Unmarshal([]byte(original.Payload), &contribution); err != nil {
+				return fmt.Errorf("decode close event contribution: %w", err)
+			}
+			// A retry inherits the committed display value, including its absence.
+			// The explicit comment identity above remains independent.
+			ctx = kataclient.WithTeammate(ctx, contribution.Teammate)
+		}
 	}
 	if err := postFollowupCommentWithKey(
 		ctx, client, baseURL, commentProjectID, commentIssueRef, actor, comment, handle, commentKey,

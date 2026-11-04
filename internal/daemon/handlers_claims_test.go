@@ -1417,3 +1417,54 @@ func fastFailClaimHubURL(t *testing.T) string {
 func claimStatusPath(projectID int64, ref string) string {
 	return issuePathRef(projectID, ref, "lease")
 }
+
+func TestClaimContributionAuthenticatesBeforeValidation(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("admin-token"))
+	project, issue := createClaimHubIssue(t, env)
+	path := issuePathRef(project.ID, issue.ShortID, "lease/actions/acquire")
+	body := map[string]any{"holder": "coordinator", "client_kind": "cli", "claim_kind": "hard"}
+	for _, token := range []string{"", "invalid-token", "admin-token"} {
+		t.Run("token="+token, func(t *testing.T) {
+			headers := bearer(token)
+			if token == "" {
+				delete(headers, "Authorization")
+			}
+			baseline, _ := envDoRaw(t, env, http.MethodPost, path, body, headers)
+			headers["X-Kata-Teammate"] = "bad/handle"
+			before, err := env.DB.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: project.ID, Limit: 100})
+			require.NoError(t, err)
+			response, raw := envDoRaw(t, env, http.MethodPost, path, body, headers)
+			if token == "admin-token" {
+				require.Equal(t, http.StatusOK, baseline.StatusCode)
+				require.Equal(t, http.StatusBadRequest, response.StatusCode, string(raw))
+				require.Contains(t, string(raw), "invalid_teammate")
+				after, err := env.DB.EventsAfter(t.Context(), db.EventsAfterParams{ProjectID: project.ID, Limit: 100})
+				require.NoError(t, err)
+				require.Equal(t, before, after, "invalid contribution must not mutate the issue")
+			} else {
+				require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, baseline.StatusCode)
+				require.Equal(t, baseline.StatusCode, response.StatusCode, string(raw))
+			}
+		})
+	}
+}
+
+func TestClaimContributionValidAndEmpty(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("admin-token"))
+	project, issue := createClaimHubIssue(t, env)
+	for _, tc := range []struct{ action, handle string }{{"acquire", "worker-1"}, {"release", ""}} {
+		headers := bearer("admin-token")
+		headers["X-Kata-Teammate"] = tc.handle
+		response, raw := envDoRaw(t, env, http.MethodPost, issuePathRef(project.ID, issue.ShortID, "lease/actions/"+tc.action),
+			map[string]any{"holder": "coordinator", "client_kind": "cli", "claim_kind": "hard"}, headers)
+		require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
+		var result api.ClaimActionResponseBody
+		require.NoError(t, json.Unmarshal(raw, &result))
+		require.NotNil(t, result.Event)
+		if tc.handle == "" {
+			require.NotContains(t, result.Event.Payload, "attributed_teammate")
+		} else {
+			require.Contains(t, result.Event.Payload, `"attributed_teammate":"worker-1"`)
+		}
+	}
+}

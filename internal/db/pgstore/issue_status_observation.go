@@ -15,6 +15,9 @@ var _ db.IssueStatusWriter = (*Store)(nil)
 // ObserveIssueStatus commits the independent provider checkpoint, inward event,
 // and exact-event acknowledgement under the existing binding claim fence.
 func (s *Store) ObserveIssueStatus(ctx context.Context, p db.IssueStatusObservationParams) (bool, []db.Event, error) {
+	// Provider status is imported history, not a contribution by the request
+	// that happened to observe it. The derived context preserves cancellation.
+	ctx = db.WithoutEventTeammate(ctx)
 	var changed bool
 	var events []db.Event
 	err := s.withSerializableTx(ctx, func(tx *sql.Tx) error {

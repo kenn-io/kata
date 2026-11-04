@@ -26,6 +26,7 @@ import (
 	"go.kenn.io/kata/internal/federationcoord"
 	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
+	"go.kenn.io/kata/internal/teammate"
 )
 
 // projectScopedClaimActionEvent rewrites the lease action response's event
@@ -957,6 +958,9 @@ func (c *claimHubClient) ClaimIssue(
 		return api.ClaimResponseBody{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if err := teammate.EditRequest(ctx, req, c.baseURL); err != nil {
+		return api.ClaimResponseBody{}, err
+	}
 	resp, err := c.client.Do(req) //nolint:gosec // the binding's canonical hub origin configures this client and pins its bearer token.
 	if err != nil {
 		return api.ClaimResponseBody{}, err
@@ -1090,7 +1094,7 @@ func (c *claimHubClient) ClaimStatus(ctx context.Context, hubProjectID int64, re
 	if c.transportErr != nil {
 		return api.ClaimStatusBody{}, c.transportErr
 	}
-	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(claimHubDoer{c.client}))
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(claimHubDoer{c.client, c.baseURL}))
 	if err != nil {
 		return api.ClaimStatusBody{}, err
 	}
@@ -1116,7 +1120,7 @@ func (c *claimHubClient) claimAction(
 	if c.transportErr != nil {
 		return api.ClaimActionResponseBody{}, c.transportErr
 	}
-	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(claimHubDoer{c.client}))
+	apiClient, err := generated.NewDefaultClient(c.baseURL, runtime.WithHTTPClient(claimHubDoer{c.client, c.baseURL}))
 	if err != nil {
 		return api.ClaimActionResponseBody{}, err
 	}
@@ -1172,9 +1176,16 @@ func normalizeForwardedClaimStatus(body *api.ClaimStatusBody) {
 }
 
 // claimHubDoer keeps error bodies bounded while generated operations own requests.
-type claimHubDoer struct{ client *http.Client }
+type claimHubDoer struct {
+	client *http.Client
+	origin string
+}
 
 func (d claimHubDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
+	req = req.Clone(ctx)
+	if err := teammate.EditRequest(ctx, req, d.origin); err != nil {
+		return nil, err
+	}
 	resp, err := d.client.Do(req.WithContext(ctx)) //nolint:gosec // G704: generated lease routes use the operator-configured federation hub and its origin-pinned transport.
 	if err != nil {
 		return nil, err

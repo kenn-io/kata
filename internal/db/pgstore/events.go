@@ -352,6 +352,14 @@ func (s *Store) RecentSameMessageClose(
 }
 
 func (s *Store) insertEventTx(ctx context.Context, tx *sql.Tx, input eventInsert) (db.Event, error) {
+	// Explicit event identity belongs to replay/ingest; never rewrite its bytes.
+	if input.UID == "" && input.OriginInstanceUID == "" && input.ContentHash == "" {
+		payload, err := db.StampEventTeammate(ctx, input.Type, input.Actor, input.Payload)
+		if err != nil {
+			return db.Event{}, err
+		}
+		input.Payload = payload
+	}
 	eventUID := input.UID
 	var err error
 	if eventUID == "" {

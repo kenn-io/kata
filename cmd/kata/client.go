@@ -20,6 +20,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/client"
+	"go.kenn.io/kata/internal/teammate"
 )
 
 // defaultHTTPTimeout is the per-request budget for non-streaming CLI calls.
@@ -413,7 +414,7 @@ func markDaemonHTTPClient(baseURL string, hc *http.Client) (*http.Client, error)
 	}
 	timeout := hc.Timeout
 	hc.Timeout = 0
-	hc.Transport = daemonErrorTransport{RoundTripper: transport, origin: origin, timeout: timeout}
+	hc.Transport = teammate.WrapTransport(baseURL, daemonErrorTransport{RoundTripper: transport, origin: origin, timeout: timeout})
 	checkRedirect := hc.CheckRedirect
 	hc.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		var err error
