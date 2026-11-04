@@ -78,7 +78,7 @@ func (d *Store) relayCheckpointSizeTx(ctx context.Context, tx *sql.Tx, project d
 	if err != nil {
 		return db.RelayCheckpointSize{}, err
 	}
-	baseline, err := db.RelayCheckpointBaselineRecords(project, d.instanceUID, actor, issues, cron)
+	baseline, err := db.RelayCheckpointBaselineRecords(project, d.instanceUID, actor, issues, cron, records)
 	if err != nil {
 		return db.RelayCheckpointSize{}, err
 	}

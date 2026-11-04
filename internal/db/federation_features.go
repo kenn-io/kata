@@ -318,6 +318,11 @@ func ReadFederationTransaction(ctx context.Context, tx *sql.Tx, in FederationRea
 	if err != nil {
 		return out, err
 	}
+	streamReset, err := ProjectStreamResetAfter(ctx, tx, after, project.ID)
+	if err != nil {
+		return out, err
+	}
+	reset.Int64 = max(reset.Int64, streamReset)
 	if in.Metadata {
 		if binding.Role != FederationRoleHub || !binding.Enabled {
 			return out, ErrFederationNotEnabled

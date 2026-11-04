@@ -55,6 +55,8 @@ var alreadyImplemented = map[string]bool{
 	"IssuePlanningDates":  true,
 	"CronRun":             true,
 	"ListCronRuns":        true,
+	"PruneCronRuns":       true, // cron_runs.go
+	"CronRunCounts":       true,
 	"ReadFederation":      true, // federation_read.go
 	"PutCronJob":          true,
 	"PutCronWorkflow":     true,
@@ -96,6 +98,7 @@ var alreadyImplemented = map[string]bool{
 	"AnonymousAccessibleProjectUIDs":       true, // project_access.go
 	"ProjectAccessRevision":                true, // project_access.go
 	"ProjectAccessTransactionFence":        true, // project_access.go
+	"ProjectAccessSnapshotCheck":           true, // project_access.go
 	"ExportProjectAccess":                  true, // project_access.go
 	"ApplyExternalFieldProjection":         true, // external_roots.go
 	"ActiveFederationQuarantine":           true, // federation_quarantine.go

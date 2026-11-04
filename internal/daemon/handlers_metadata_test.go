@@ -1,6 +1,7 @@
 package daemon_test
 
 import (
+	"context"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"fmt"
@@ -19,6 +20,24 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
+
+type permissiveProjectMetadataStore struct{ db.Storage }
+
+func (s permissiveProjectMetadataStore) PatchProjectMetadata(ctx context.Context, in db.PatchProjectMetadataIn) (db.PatchProjectMetadataOut, error) {
+	project, err := s.ProjectByID(ctx, in.ProjectID)
+	return db.PatchProjectMetadataOut{Project: project, NewRevision: project.Revision}, err
+}
+
+func TestPatchProjectMetadataRejectsCronTalliesBeforeStore(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"), func(cfg *daemon.ServerConfig) {
+		cfg.DB = permissiveProjectMetadataStore{cfg.DB}
+	})
+	project := seedProject(t, env, "example-project")
+	for _, patch := range []string{`{"cron.tally.bad":null}`, `{"cron.tally.":null,"ordinary":1}`} {
+		resp, raw := envDoRaw(t, env, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/metadata", project.ID), json.RawMessage(`{"actor":"operator","patch":`+patch+`}`), map[string]string{"Authorization": "Bearer tok"})
+		require.Equalf(t, http.StatusBadRequest, resp.StatusCode, "body: %s", raw)
+	}
+}
 
 func seedProjectAndIssue(t *testing.T, env *testenv.Env) (db.Project, db.Issue) {
 	t.Helper()

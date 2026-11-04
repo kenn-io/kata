@@ -364,6 +364,8 @@ func maxUIEventID(ctx context.Context, queryer uiQueryer) (int64, error) {
 			SELECT COALESCE(MAX(purge_reset_after_event_id), 0) FROM project_purge_log
 			UNION ALL
 			SELECT COALESCE(MAX(CAST(value AS BIGINT)), 0) FROM meta WHERE substr(key,1,length('attribution_ui_reset.'))='attribution_ui_reset.'
+            UNION ALL
+            SELECT COALESCE(MAX(CASE WHEN substr(key,1,length('project_stream_reset.'))='project_stream_reset.' THEN CAST(value AS BIGINT) END),0) FROM meta
 		)`).Scan(&cursor); err != nil {
 		return 0, fmt.Errorf("read UI event cursor: %w", err)
 	}

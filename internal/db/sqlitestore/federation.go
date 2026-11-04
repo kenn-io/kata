@@ -977,6 +977,10 @@ func (d *Store) enableProjectFederationTx(
 		return db.FederationBinding{}, err
 	}
 
+	if _, err := db.DecodeCronTallies(project.Metadata); err != nil {
+		return db.FederationBinding{}, err
+	}
+
 	existing, err := scanFederationBinding(tx.QueryRowContext(ctx,
 		federationBindingSelect+` WHERE project_id = ?`, projectID))
 	if err == nil {
@@ -1101,6 +1105,10 @@ func (d *Store) insertFederationBaselineEventsTx(
 	project db.Project,
 	actor string,
 ) (db.Event, error) {
+	if _, err := db.DecodeCronTallies(project.Metadata); err != nil {
+		return db.Event{}, err
+	}
+
 	enablePayload, err := json.Marshal(struct {
 		ProjectUID  string      `json:"project_uid"`
 		ProjectName string      `json:"project_name"`
@@ -1362,10 +1370,15 @@ func (d *Store) materializeFederatedProjectTxScoped(
 	if err := pruneFederatedIssues(ctx, tx, projectID, issueIDs); err != nil {
 		return err
 	}
-	return updateFederatedProjectMetadataTx(ctx, tx, projectID, projection.ProjectMetadata[binding.HubProjectUID])
+	return updateFederatedProjectMetadataTx(ctx, tx, projectID, binding.Role, projection.ProjectMetadata[binding.HubProjectUID])
 }
 
-func updateFederatedProjectMetadataTx(ctx context.Context, tx *sql.Tx, projectID int64, raw jsontext.Value) error {
+func updateFederatedProjectMetadataTx(ctx context.Context, tx *sql.Tx, projectID int64, role db.FederationRole, raw jsontext.Value) error {
+	var err error
+	raw, err = db.ProjectedCronTallyMetadata(ctx, tx, projectID, role, raw)
+	if err != nil {
+		return err
+	}
 	if len(raw) == 0 {
 		return nil
 	}
