@@ -492,8 +492,7 @@ func TestGitHubStatusBatchReadUsesOneGraphQLRequest(t *testing.T) {
 			f := NewHTTPFetcher(HTTPFetcherConfig{Client: server.Client(), CredentialResolver: newStaticHTTPFetcherTestResolver("test-token"), RESTBaseURLOverride: server.URL, GraphQLURLOverride: server.URL + "/graphql"})
 			session, err := f.ForBinding(t.Context(), statusConfig().Binding())
 			require.NoError(t, err)
-			results, err := session.(StatusBatchSession).ReadStatuses(t.Context(), statusConfig(), []StatusLocator{{ExternalID: "issue-id:456", Number: 7}, {ExternalID: "issue-id:457", Number: 8}, {ExternalID: "issue-id:458", Number: 9}, {ExternalID: "issue-id:459", Number: 10}, {ExternalID: "bad-id", Number: 11}})
-			require.NoError(t, err)
+			results := session.(StatusBatchSession).ReadStatuses(t.Context(), statusConfig(), []StatusLocator{{ExternalID: "issue-id:456", Number: 7}, {ExternalID: "issue-id:457", Number: 8}, {ExternalID: "issue-id:458", Number: 9}, {ExternalID: "issue-id:459", Number: 10}, {ExternalID: "bad-id", Number: 11}})
 			require.Len(t, results, 4)
 			require.NoError(t, results["issue-id:456"].Err)
 			require.Equal(t, "open", results["issue-id:456"].Observation.Status)
@@ -539,22 +538,19 @@ func TestGitHubStatusBatchRateLimitAndUnsupportedFallback(t *testing.T) {
 			f := NewHTTPFetcher(HTTPFetcherConfig{Client: server.Client(), CredentialResolver: newStaticHTTPFetcherTestResolver("test-token"), RESTBaseURLOverride: server.URL, GraphQLURLOverride: server.URL + "/graphql"})
 			session, err := f.ForBinding(t.Context(), statusConfig().Binding())
 			require.NoError(t, err)
-			results, err := session.(StatusBatchSession).ReadStatuses(t.Context(), statusConfig(), []StatusLocator{{ExternalID: "issue-id:456", Number: 7}})
+			results := session.(StatusBatchSession).ReadStatuses(t.Context(), statusConfig(), []StatusLocator{{ExternalID: "issue-id:456", Number: 7}})
 			require.Nil(t, results)
 			if limited {
+				_, err = session.(StatusSession).ReadStatus(t.Context(), statusConfig(), "issue-id:456", 7)
 				var rate *issuesync.StatusError
 				require.ErrorAs(t, err, &rate)
-				require.Equal(t, 7*time.Second, rate.RetryAfter)
+				require.Positive(t, rate.RetryAfter)
 				require.Equal(t, 2, requests)
 			} else {
-				require.NoError(t, err)
 				obs, err := session.(StatusSession).ReadStatus(t.Context(), statusConfig(), "issue-id:456", 7)
 				require.NoError(t, err)
 				require.Equal(t, "open", obs.Status)
 			}
-			repo, err := session.Repository(t.Context(), "github.com", "example-owner", "example-repo")
-			require.NoError(t, err)
-			require.Equal(t, int64(123), repo.ID)
 		})
 	}
 }

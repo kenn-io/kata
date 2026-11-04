@@ -264,10 +264,10 @@ type StatusResult struct {
 
 // StatusBatchSession reads at most one bounded sweep page.
 type StatusBatchSession interface {
-	ReadStatuses(context.Context, Config, []StatusLocator) (map[string]StatusResult, error)
+	ReadStatuses(context.Context, Config, []StatusLocator) map[string]StatusResult
 }
 
-func (s *httpFetcherBindingSession) ReadStatuses(ctx context.Context, cfg Config, targets []StatusLocator) (map[string]StatusResult, error) {
+func (s *httpFetcherBindingSession) ReadStatuses(ctx context.Context, cfg Config, targets []StatusLocator) map[string]StatusResult {
 	valid := make([]StatusLocator, 0, len(targets))
 	numbers := make([]int, 0, len(targets))
 	ids := make([]int64, 0, len(targets))
@@ -280,33 +280,31 @@ func (s *httpFetcherBindingSession) ReadStatuses(ctx context.Context, cfg Config
 		}
 	}
 	if len(valid) == 0 {
-		return nil, nil
+		return nil
 	}
 	if err := s.verifyStatusRepository(ctx, cfg); err != nil {
-		return nil, err
+		return nil
 	}
 	requestURL, err := s.fetcher.graphQLEndpointURL(s.binding)
 	if err != nil {
-		return nil, err
+		return nil
 	}
 	var response parentGraphQLResponse
 	var headers http.Header
 	body := parentGraphQLRequest{Query: targetedStatusGraphQLQuery(numbers), Variables: map[string]any{"owner": s.binding.Owner, "repo": s.binding.Repo}}
 	if err := s.statusRequestURL(ctx, http.MethodPost, requestURL, body, &response, nil, &headers); err != nil {
-		return nil, err
+		return nil
 	}
 	if graphQLErrorsRateLimited(response.Errors) {
-		return nil, &issuesync.StatusError{Message: "GitHub status GraphQL rate limit", RateLimited: true, RetryAfter: retryWait(headers, s.fetcher.now())}
-	}
-	if graphQLErrorsFeatureUnsupported(response.Errors) {
-		return nil, nil
+		s.fetcher.deferStatusRequests(s.binding, retryWait(headers, s.fetcher.now()))
+		return nil
 	}
 	remaining, missing := parentErrorsWithoutMissingChildren(response.Errors, response.Data, len(valid))
 	if len(remaining) > 0 {
-		return nil, graphQLErrorsError(remaining)
+		return nil
 	}
 	if response.Data == nil || response.Data.Repository == nil {
-		return nil, fmt.Errorf("invalid GitHub status GraphQL response")
+		return nil
 	}
 	results := make(map[string]StatusResult, len(valid))
 	for i, target := range valid {
@@ -339,5 +337,5 @@ func (s *httpFetcherBindingSession) ReadStatuses(ctx context.Context, cfg Config
 		}
 		results[target.ExternalID] = result
 	}
-	return results, nil
+	return results
 }

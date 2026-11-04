@@ -26,7 +26,7 @@ type StatusRun interface {
 
 // StatusPrefetchRun optionally batches the reads for one sweep page.
 type StatusPrefetchRun interface {
-	PrefetchStatuses(context.Context, []db.IssueStatusMapping) error
+	PrefetchStatuses(context.Context, []db.IssueStatusMapping)
 }
 
 const statusPageSize = 100
@@ -197,9 +197,14 @@ func (p *statusPass) lap(pending bool, attempted map[int64]bool, failures *[]err
 	}
 	cursor.Through = page.HighWaterID
 	if prefetch, ok := p.run.(StatusPrefetchRun); ok && !pending {
-		if err := prefetch.PrefetchStatuses(p.statusCtx, page.Mappings); err != nil {
-			*failures = append(*failures, err)
-			return true, nil
+		eligible := make([]db.IssueStatusMapping, 0, len(page.Mappings))
+		for _, m := range page.Mappings {
+			if !attempted[m.Mapping.ID] && m.State.PendingEventUID == "" && m.LoadError == nil {
+				eligible = append(eligible, m)
+			}
+		}
+		if len(eligible) > 0 {
+			prefetch.PrefetchStatuses(p.statusCtx, eligible)
 		}
 	}
 	for _, m := range page.Mappings {

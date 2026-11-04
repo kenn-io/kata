@@ -117,3 +117,11 @@ func TestGitHubMetadataRefreshIgnoresPrivateScanProgress(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, b.UpdatedAt, refreshed.UpdatedAt, "scan progress alone must not refresh provider metadata")
 }
+
+func TestGitHubStatusReadUsesPrefetchedResultBeforeLocator(t *testing.T) {
+	run := &githubStatusRun{prefetched: map[string]StatusResult{"issue-id:101": {Observation: issuesync.StatusObservation{Status: "closed"}}}}
+	m := db.IssueStatusMapping{Mapping: db.ImportMapping{ExternalID: "issue-id:101"}}
+	obs, err := run.ReadStatus(t.Context(), m)
+	require.NoError(t, err)
+	require.Equal(t, "closed", obs.Status)
+}

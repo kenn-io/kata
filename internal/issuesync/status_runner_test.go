@@ -470,45 +470,28 @@ func TestStatusRunnerSuccessCannotAdvanceCursorAfterOperatorEdit(t *testing.T) {
 
 type prefetchStatusTestRun struct {
 	*statusTestRun
-	prefetchErr error
+	mappings []db.IssueStatusMapping
 }
 
-func (r *prefetchStatusTestRun) PrefetchStatuses(context.Context, []db.IssueStatusMapping) error {
-	return r.prefetchErr
+func (r *prefetchStatusTestRun) PrefetchStatuses(_ context.Context, mappings []db.IssueStatusMapping) {
+	r.mappings = mappings
 }
 
-func TestStatusRunnerPrefetchFailureKeepsCursor(t *testing.T) {
-	s, b, ms, at := statusFixture(t, 101)
-	failed := errors.New("batch unavailable")
+func TestStatusRunnerPrefetchExcludesPendingMappings(t *testing.T) {
+	s, b, ms, at := statusFixture(t, 2)
+	_, _, _, err := s.CloseIssue(t.Context(), *ms[0].Mapping.IssueID, "done", "worker", "Completed task", nil)
+	require.NoError(t, err)
 	run := &prefetchStatusTestRun{statusTestRun: &statusTestRun{}}
-	reads := 0
-	run.read = func(context.Context, db.IssueStatusMapping) (StatusObservation, error) {
-		reads++
+	run.write = func(_ context.Context, _ db.IssueStatusMapping, desired string, admit func() error) (StatusObservation, error) {
+		require.NoError(t, admit())
+		return observed(desired, at), nil
+	}
+	run.read = func(_ context.Context, m db.IssueStatusMapping) (StatusObservation, error) {
+		require.Len(t, run.mappings, 1)
+		require.Equal(t, ms[1].Mapping.ID, run.mappings[0].Mapping.ID)
+		require.Equal(t, ms[1].Mapping.ID, m.Mapping.ID)
 		return observed("open", at), nil
 	}
-	a := statusAdapter(b, run)
-	content := 0
-	a.prepare = func(_ context.Context, b db.IssueSyncBinding, _ time.Time) (Prepared, error) {
-		content++
-		return Prepared{Binding: b, Batch: db.ImportBatchParams{Actor: "notion-sync"}}, nil
-	}
-	runner := NewRunner(RunnerConfig{Store: s, Adapter: a, Clock: func() time.Time { return at }})
-	_, err := runner.RunOnce(t.Context(), b.ID)
+	_, err = NewRunner(RunnerConfig{Store: s, Adapter: statusAdapter(b, run), Clock: func() time.Time { return at }}).RunOnce(t.Context(), b.ID)
 	require.NoError(t, err)
-	require.Equal(t, 100, reads)
-	b, err = s.IssueSyncBindingByID(t.Context(), b.ID)
-	require.NoError(t, err)
-	before, err := db.DecodeIssueStatusScan(b.Config)
-	require.NoError(t, err)
-	require.Equal(t, ms[99].Mapping.ID, before.Sweep.After)
-	run.prefetchErr = failed
-	_, err = runner.RunOnce(t.Context(), b.ID)
-	require.ErrorIs(t, err, failed)
-	require.Equal(t, 100, reads)
-	require.Equal(t, 2, content)
-	b, err = s.IssueSyncBindingByID(t.Context(), b.ID)
-	require.NoError(t, err)
-	after, err := db.DecodeIssueStatusScan(b.Config)
-	require.NoError(t, err)
-	require.Equal(t, before.Sweep, after.Sweep)
 }
