@@ -78,11 +78,13 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
 	if request.params.StableOrder {
 		order = "i.created_at ASC, i.id ASC"
 	}
+	// Quote normalized lexemes directly so punctuation and URLs survive without
+	// a second parse through the text-search dictionary.
 	query := fmt.Sprintf(`WITH words AS (
- SELECT DISTINCT value AS word, plainto_tsquery('kata_simple_unaccent', value) AS q
+ SELECT DISTINCT unnest(tsvector_to_array(to_tsvector('kata_simple_unaccent', value))) AS word
  FROM jsonb_array_elements_text($1::jsonb)
 ), terms AS (
- SELECT word, q FROM words WHERE numnode(q) > 0
+ SELECT word, quote_literal(word)::tsquery AS q FROM words
 ), scoped AS MATERIALIZED (
  SELECT i.id FROM issues i WHERE %s
 ), hits AS (

@@ -116,28 +116,24 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 	if r.mode == searchAll {
 		minimum = len(phrases)
 	}
-	// Materialize scores in the MATCH scan, where FTS5 permits bm25. Start
-	// with scoped issues so excluded documents never reach scoring.
-	// Bound one comment-index scan per issue by its comment IDs. Keep the
-	// issue join because other issues' comments can fall within that range.
+	// Drive each term from its posting list. Membership filters discard other
+	// projects' hits before document lookups and bm25 scoring. Unary plus keeps
+	// SQLite from turning rowid membership into a MATCH lookup per document.
 	query := fmt.Sprintf(`WITH terms AS (
   SELECT value AS word FROM json_each(?)
  ), scoped AS MATERIALIZED (
-  SELECT i.id,
-   (SELECT min(id) FROM comments WHERE issue_id = i.id) AS first_comment,
-   (SELECT max(id) FROM comments WHERE issue_id = i.id) AS last_comment
-  FROM issues i WHERE i.project_id = ? %s
+  SELECT i.id FROM issues i WHERE i.project_id = ? %s
  ), hits AS MATERIALIZED (
-  SELECT i.id AS issue_id, terms.word, -bm25(issues_fts) AS score, 0 AS in_comments
-  FROM terms CROSS JOIN scoped i CROSS JOIN issues_fts
-  WHERE issues_fts.rowid = i.id AND issues_fts MATCH terms.word
+  SELECT issues_fts.rowid AS issue_id, terms.word, -bm25(issues_fts) AS score, 0 AS in_comments
+  FROM terms CROSS JOIN issues_fts
+  WHERE issues_fts MATCH terms.word AND +issues_fts.rowid IN (SELECT id FROM scoped)
   UNION ALL
-  SELECT i.id, terms.word, -bm25(comments_fts), 1
-  FROM terms CROSS JOIN scoped i CROSS JOIN comments_fts
-  CROSS JOIN comments c ON c.id = comments_fts.rowid AND c.issue_id = i.id
-  WHERE i.first_comment IS NOT NULL AND comments_fts MATCH terms.word
-   AND comments_fts.rowid >= i.first_comment
-   AND comments_fts.rowid <= i.last_comment
+  SELECT c.issue_id, terms.word, -bm25(comments_fts), 1
+  FROM terms CROSS JOIN comments_fts
+  CROSS JOIN comments c ON c.id = comments_fts.rowid
+  WHERE comments_fts MATCH terms.word AND +comments_fts.rowid IN (
+   SELECT c.id FROM scoped i JOIN comments c ON c.issue_id = i.id
+  )
  ), word_hits AS (
   SELECT issue_id, word, max(score) AS score, max(in_comments) AS in_comments
   FROM hits GROUP BY issue_id, word

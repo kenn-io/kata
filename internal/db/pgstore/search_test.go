@@ -132,3 +132,40 @@ func TestSearchKitBuildersPreserveFieldsScopeAndOrdering(t *testing.T) {
 		})
 	}
 }
+
+func TestSearchFTS_PunctuationLexemes(t *testing.T) {
+	ctx := t.Context()
+	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
+	t.Cleanup(cleanup)
+	store, err := pgstore.Open(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	project, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "login", Body: "browser", Author: "tester"})
+	require.NoError(t, err)
+	_, _, err = store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "tester", Body: "timeout"})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name, query string
+		any         bool
+		fields      []string
+	}{
+		{"all_across_documents", "login,timeout", false, []string{"title", "comments"}},
+		{"any_lexeme", "login,absent", true, []string{"title"}},
+		{"field_flags", "login,browser", false, []string{"title", "body"}},
+		{"distinct_lexemes", "login,login timeout", false, []string{"title", "comments"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			search := store.SearchFTS
+			if tc.any {
+				search = store.SearchFTSAny
+			}
+			hits, err := search(ctx, db.SearchFTSParams{ProjectID: project.ID, Query: tc.query})
+			require.NoError(t, err)
+			require.Len(t, hits, 1)
+			require.Equal(t, issue.ID, hits[0].Issue.ID)
+			require.Equal(t, tc.fields, hits[0].MatchedIn)
+		})
+	}
+}
