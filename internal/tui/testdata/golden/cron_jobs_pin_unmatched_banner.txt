@@ -1,7 +1,7 @@
  Project: example-project                                       kata カタ · dev
 kata カタ [jobs] runs workflows
  / search                                                                 1 job
-1 enabled execute jobs have no matching live advertisement here. See kata cron …
+1 enabled execute job has no matching live advertisement here. See kata cron ru…
 
   Job            State   Trigger           Action             Last loaded run
 ▶ Daily summary  enabled 0 7 * * *         workflow Summary … succeeded 1h ago
