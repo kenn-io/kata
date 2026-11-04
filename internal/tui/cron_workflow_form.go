@@ -28,8 +28,8 @@ func newWorkflowForm() (*cronForm, error) {
 		return nil, err
 	}
 	f, err := workflowFormFor(db.CronWorkflow{
-		CronDefinition: db.CronDefinition{UID: minted},
-		Definition:     cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "step", Kind: "prompt", Prompt: "Describe the task"}}},
+		UID:        minted,
+		Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "step", Kind: "prompt", Prompt: "Describe the task"}}},
 	})
 	if err != nil {
 		return nil, err

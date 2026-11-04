@@ -16,8 +16,10 @@ import (
 
 func workflowRecord() db.CronWorkflow {
 	return db.CronWorkflow{
-		CronDefinition: db.CronDefinition{UID: "01ARZ3NDEKTSV4RRFFQ69G5FAW", Name: "Deploy", DefinitionEventUID: "01ARZ3NDEKTSV4RRFFQ69G5FB3"},
-		Definition:     cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "ship", Kind: "prompt", Prompt: "Ship it"}}},
+		UID:                "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+		Name:               "Deploy",
+		DefinitionEventUID: "01ARZ3NDEKTSV4RRFFQ69G5FB3",
+		Definition:         cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "ship", Kind: "prompt", Prompt: "Ship it"}}},
 	}
 }
 
