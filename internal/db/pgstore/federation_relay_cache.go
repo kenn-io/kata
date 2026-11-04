@@ -53,7 +53,7 @@ func (s *Store) invalidateRelayHistoryValidationCache() {
 // relayHistoryNeedsResetCachedTx validates unchanged history once, then checks
 // only new source events. Retained checkpoints have independent grant/boundary
 // entries. Moves, merges, renames, and purges invalidate results when retained
-// references can resolve differently. Creations and unrelated snapshots
+// references can resolve differently. Creations, baselines, and unrelated snapshots
 // revalidate only short-parent references or reset results.
 func (s *Store) relayHistoryNeedsResetCachedTx(
 	ctx context.Context,
@@ -98,8 +98,8 @@ func (s *Store) relayHistoryNeedsResetCachedTx(
 		var created bool
 		if !invalidated && eventCursor > cache.eventCursor {
 			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events
-				WHERE id>$1 AND type IN ('issue.moved','project.merged','project.renamed','project.federation_enabled')),
-				EXISTS(SELECT 1 FROM events WHERE id>$1 AND type IN ('issue.created','issue.snapshot'))`,
+				WHERE id>$1 AND type IN ('issue.moved','project.merged','project.renamed')),
+				EXISTS(SELECT 1 FROM events WHERE id>$1 AND type IN ('issue.created','issue.snapshot','project.federation_enabled'))`,
 				cache.eventCursor,
 			).Scan(&invalidated, &created); err != nil {
 				cache.mu.Unlock()
