@@ -251,17 +251,16 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	mutationClient := daemon.client
-	if o.mutation() {
-		// A forwarded job write can spend the daemon's full 15-second
-		// preflight-and-write budget. The default CLI request budget would cancel
-		// a healthy forwarded mutation and turn its outcome uncertain.
-		mutationClient, err = longRunningClientForResolved(cmd.Context(), daemon.resolved)
+	requestClient := daemon.client
+	if o.mutation() || o.resource == "capabilities" {
+		// Mutations and capability discovery can synchronously call the root.
+		// Let the daemon's forwarding budget and command context bound them.
+		requestClient, err = longRunningClientForResolved(cmd.Context(), daemon.resolved)
 		if err != nil {
 			return err
 		}
 	}
-	client, err := kataclient.NewWithHTTPClient(daemon.baseURL, mutationClient)
+	client, err := kataclient.NewWithHTTPClient(daemon.baseURL, requestClient)
 	if err != nil {
 		return err
 	}

@@ -830,3 +830,55 @@ func TestCronClaimCommand(t *testing.T) {
 	_, _, err = executeCronCLI(t, env.URL, nil, "run", "claim", cronCLIUID(t), "--job-uid", j.UID, "--occurrence-key", "another")
 	require.Error(t, err)
 }
+
+// Claim, recovery and capability requests can outlast the ordinary CLI budget
+// while the daemon synchronously discovers and calls the federation root.
+func TestCronCLIClaimsWaitForForwardingBudget(t *testing.T) {
+	const runUID = "01J00000000000000000000001"
+	const jobUID = "01J00000000000000000000002"
+	const eventUID = "01J00000000000000000000003"
+	for _, tc := range []struct {
+		name, method, path, body, want string
+		args                           []string
+	}{
+		{"claim", http.MethodPost, "/api/v1/projects/7/cron/jobs/" + jobUID + "/claims", `{"claimed":true,"claim":{"run_uid":"` + runUID + `"}}`, `"claimed":true`, []string{"run", "claim", runUID, "--job-uid", jobUID, "--definition-event-uid", eventUID, "--occurrence-key", "manual:" + runUID}},
+		{"show", http.MethodGet, "/api/v1/projects/7/cron/claims/" + runUID, `{"claimed":true,"claim":{"run_uid":"` + runUID + `"}}`, runUID, []string{"run", "claim", "show", runUID}},
+		{"capabilities", http.MethodGet, "/api/v1/projects/7/cron/capabilities", `{"project_uid":"` + jobUID + `","capabilities":["cron_occurrence_claims_v1"]}`, "cron_occurrence_claims_v1", []string{"capabilities"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("KATA_AUTHOR", "worker")
+			t.Setenv("KATA_HTTP_TIMEOUT", "100ms")
+			var reached atomic.Bool
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/api/v1/projects":
+					_, _ = io.WriteString(w, `{"projects":[{"id":7,"name":"spoke-project"}]}`)
+					return
+				case "/api/v1/projects/7":
+					_, _ = io.WriteString(w, `{"project":{"id":7,"name":"spoke-project"}}`)
+					return
+				}
+				if r.Method != tc.method || r.URL.Path != tc.path {
+					t.Errorf("unexpected cron CLI request %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				reached.Store(true)
+				timer := time.NewTimer(300 * time.Millisecond) //nolint:kennlint // deadlinetest: absence window; valid root responses outlast the 100ms ordinary request budget
+				defer timer.Stop()
+				select {
+				case <-timer.C:
+				case <-r.Context().Done():
+					return
+				}
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			t.Cleanup(server.Close)
+			out, _, err := executeCronCLI(t, server.URL, nil, tc.args...)
+			require.NoError(t, err)
+			require.True(t, reached.Load(), "operation must reach the daemon")
+			require.Contains(t, out, tc.want)
+		})
+	}
+}

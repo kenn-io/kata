@@ -74,7 +74,13 @@ never launch without a grant. Reservations have no expiry or takeover.`}
 		if err != nil {
 			return err
 		}
-		client, err := kataclient.NewWithHTTPClient(daemon.baseURL, daemon.client)
+		// Claim and recovery both synchronously discover and call the root, so
+		// let the daemon's forwarding budget and command context bound them.
+		claimClient, err := longRunningClientForResolved(cmd.Context(), daemon.resolved)
+		if err != nil {
+			return err
+		}
+		client, err := kataclient.NewWithHTTPClient(daemon.baseURL, claimClient)
 		if err != nil {
 			return err
 		}
