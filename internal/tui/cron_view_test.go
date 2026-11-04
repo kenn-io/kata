@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -681,4 +682,14 @@ func (a *cronReadTestAPI) readCronProjectState(_ context.Context, id int64) (cro
 		return cronProjectState{}, fmt.Errorf("unexpected project %d", id)
 	}
 	return a.data.project, a.data.projectErr
+}
+
+func (a *cronReadTestAPI) ListCronRequests(context.Context, int64) ([]db.CronRequest, error) {
+	return a.data.requests, a.data.requestsErr
+}
+func (a *cronReadTestAPI) ShowCronRun(context.Context, int64, string) (db.CronRun, error) {
+	return db.CronRun{}, errors.New("run read unavailable")
+}
+func (a *cronReadTestAPI) RequestCron(context.Context, int64, string, string, string, string) (db.RequestCronOut, error) {
+	return db.RequestCronOut{}, errors.New("request write unavailable")
 }

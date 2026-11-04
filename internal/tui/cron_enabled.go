@@ -28,7 +28,7 @@ type cronEnabledDoneMsg struct {
 }
 
 func (m Model) routeCronEnabledKey(lines []cronLine, cursor int) (Model, tea.Cmd) {
-	if !m.cronJobsScope() || m.cron.data == nil || m.cron.enabled != nil || m.cron.data.jobsErr != nil || m.cron.data.events != m.cron.events {
+	if !m.cronJobsScope() || m.cron.data == nil || m.cron.enabled != nil || m.cron.request != nil || m.cron.data.jobsErr != nil || m.cron.data.events != m.cron.events {
 		return m, nil
 	}
 	if next, cmd, blocked := m.blockMutation(false); blocked {

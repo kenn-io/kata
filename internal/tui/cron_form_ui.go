@@ -45,7 +45,7 @@ func (m Model) routeCronJobKey(key string, lines []cronLine, cursor int) (Model,
 	if !m.cronJobsScope() || m.cron.data == nil {
 		return m, nil, false
 	}
-	if m.cron.enabled != nil {
+	if m.cron.enabled != nil || m.cron.request != nil {
 		return m, nil, true
 	}
 	if next, cmd, blocked := m.blockMutation(false); blocked {

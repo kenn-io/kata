@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"go.kenn.io/kata/internal/db"
 )
@@ -77,4 +78,24 @@ func (d *Store) DispatchRecurringCron(ctx context.Context, in db.DispatchRecurri
 // SetCronProjectPause changes root-owned policy in the cron project transaction.
 func (d *Store) SetCronProjectPause(ctx context.Context, in db.SetCronProjectPauseIn) (db.PatchProjectMetadataOut, error) {
 	return d.cronSQL().SetProjectPause(ctx, in)
+}
+
+// RequestCron admits a root request or returns an immutable exact replay.
+func (d *Store) RequestCron(ctx context.Context, in db.RequestCronIn) (db.RequestCronOut, error) {
+	return d.cronSQL().Request(ctx, in)
+}
+
+// ListCronRequests derives state from the local consistent evidence snapshot.
+func (d *Store) ListCronRequests(ctx context.Context, in db.CronRequestList) ([]db.CronRequest, error) {
+	return d.cronSQL().Requests(ctx, in)
+}
+
+// ListCronRequestProjects lists expiry candidates for per-project cleanup.
+func (d *Store) ListCronRequestProjects(ctx context.Context) ([]int64, error) {
+	return d.cronSQL().RequestProjects(ctx)
+}
+
+// SweepCronRequests returns the exact committed event, including on partial cleanup.
+func (d *Store) SweepCronRequests(ctx context.Context, id int64, now time.Time) (*db.Event, error) {
+	return d.cronSQL().SweepRequests(ctx, id, now)
 }

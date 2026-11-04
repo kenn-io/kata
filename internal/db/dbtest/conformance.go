@@ -50,6 +50,10 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "cron request reads", methods: []string{"ListCronRequests"}, run: checkCronRequestReads},
+	{name: "cron request sweep", methods: []string{"ListCronRequestProjects", "SweepCronRequests"}, run: checkCronRequestSweep},
+	{name: "cron request ingress", run: checkCronRequestsIngress},
+	{name: "cron requests", methods: []string{"RequestCron"}, runWithBackend: checkCronRequests},
 	{name: "cron enabled deleted parent", run: checkCronEnabledDeletedParent},
 	{name: "cron enabled moved adapter target", methods: []string{"CreateIssue", "CreateProject", "CronJob", "MoveIssueProject", "PutCronJob"}, run: checkCronEnabledMovedAdapterTarget},
 	{name: "cron project pause", methods: []string{"SetCronProjectPause"}, runWithBackend: checkCronProjectPause},

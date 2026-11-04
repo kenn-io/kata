@@ -111,7 +111,7 @@ at the root may act. MCP exposes `kata.cron_project_pause` with an optional
 Responses return `project_pause` and `changed`.
 
 Capabilities and job lists expose `project_pause` as an object or `null`, plus
-`controls: ["job_pause", "project_pause"]`. A present pause contains
+`controls: ["job_pause", "project_pause", "run_request", "cancel_request"]`. A present pause contains
 `paused_by`, `paused_at`, and `reason`. Malformed legacy state reads as
 `invalid: true` and still stops delivery; resume clears it. The TUI shows the
 project policy on Jobs, Runs, and Workflows. Use CLI or MCP to change it.
@@ -129,6 +129,69 @@ carry `cron.pause` as opaque project metadata but do not enforce it. Missing
 and the reserved `cron.request.` prefix; use typed cron routes for control
 state. These controls replicate through existing project metadata events,
 without a new federation feature requirement.
+
+### Ask a runtime to run or cancel
+
+Submit a run request for an enabled adapter execution job, or a cancellation
+request for a currently running run, at the project's owning hub:
+
+```sh
+kata cron job request-run <job-uid> --request-uid <fresh-request-ulid> --ttl 600 --json
+kata cron run request-cancel <run-uid> --request-uid <fresh-request-ulid> --ttl 600 --json
+kata cron request list --state pending --json
+```
+
+These requests ask an optional runtime to act. Kata starts and terminates no
+process. A new run request requires an active, enabled `execute` job and an
+unpaused project; native and other notification jobs are refused. Cancellation
+remains available while the job or project is paused. It also supports a
+workflow-only run. Spokes refuse admission with an owning-hub hint, even when
+federation is disabled; they can read locally replicated requests.
+
+Generate the request ULID just before first submission and retain it, the
+target, actor, and TTL after an uncertain response. The UID's millisecond time
+becomes `requested_at`. New admission accepts a UID at most 30 seconds old or
+5 seconds in the future. Keep client and hub clocks aligned. `--ttl` defaults
+to 600 seconds and accepts 60 through 86400; `expires_at` is that lifetime after
+`requested_at`. At most 100 unexpired requests of either kind may exist in a
+project, including answered requests.
+
+An exact retry returns the original request with `replayed: true` and no new
+event while its key remains. This holds after expiry, project pause, a job edit,
+or a run status change. Reusing the UID with a different target, actor, or TTL
+returns 409 `request_conflict`. The root collects expired requests; afterward,
+the old UID returns 410 `request_expired` and cannot recreate the request.
+Check the known outcome before choosing a new UID, since a new request may
+cause another execution.
+
+In the TUI, press `R` on an eligible Jobs row or detail, or `X` on a running
+Runs row or detail. Confirm with `y`; `n` or Esc cancels the dialog. The TUI
+generates the UID just before submission and retains it for an explicit retry
+after an uncertain response. Job and run details list retained requests.
+
+REST uses POST `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}/requests`
+and POST `/api/v1/projects/{project_id}/cron/runs/{run_uid}/cancel-request`.
+Both accept exactly `{uid, actor?, ttl_seconds?}`. The response contains
+`request`, `replayed`, and the committed `event` when changed. GET
+`/api/v1/projects/{project_id}/cron/requests` accepts an optional `state`
+query (`pending`, `answered`, or `expired`). MCP exposes
+`kata.cron_job_request_run`, `kata.cron_run_request_cancel`, and
+`kata.cron_request_list`; the write tools require `request_uid`.
+
+A retained request has one of these states, derived from current run evidence:
+
+| State | Meaning |
+| --- | --- |
+| `answered` | A run request has a run with the exact project, job, pinned definition event, and `occurrence_key: "request:<request-uid>"`; a cancel request's target currently has a non-running status. |
+| `expired` | No answer matches, and `expires_at` has been reached. |
+| `pending` | No answer matches, and the request has not expired. |
+
+Any matching observation answers a run request, regardless of status. Answered
+requests stay answered past expiry until collection. A cancellation's state
+can change back if its target is reported running again. Reads search all run
+evidence, including observations outside the newest 100 displayed by the TUI.
+Expired keys disappear after collection. These states describe evidence; they
+do not guarantee a runtime executed or cancelled anything.
 
 ### Request files
 
@@ -641,6 +704,20 @@ adapter owns its local activation, scheduler, overlap and catchup handling,
 checkout and secret mappings, process lifecycle, and conversation recovery.
 A second adapter may independently execute the same occurrence. Each execution
 keeps a separate run UID; no shared observation reserves the issue or occurrence.
+
+To honor a [runtime request](#ask-a-runtime-to-run-or-cancel), read its pinned
+`definition_event_uid` and decide whether the installation can act. Refresh
+project pause before launching; launch no new work while paused, but continue
+to accept cancellation and report evidence. Overlap, capacity, installation
+selection, and whether to honor a request remain runtime decisions.
+
+Record a run-request outcome with a new run UID, the request's job and pinned
+definition event, and `occurrence_key: "request:<request-uid>"`. Several runtimes
+may answer the same request; it reserves no occurrence. A runtime may record a
+refusal as `cancelled`, using the existing version 1 `summary.message` reason
+line described under [run observations](#independent-run-evidence). For cancellation,
+update the targeted run's evidence. Occurrence claims, runtime heartbeats, and
+structured reason-code protocols remain separate work.
 
 A job may name its adapter in `options.adapter`. An adapter neither schedules
 nor manually runs a job whose key names another adapter, and says why in its own

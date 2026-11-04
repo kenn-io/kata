@@ -308,6 +308,9 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			cronHistory(&d, p, ref)
 		}
 	}
+	if name != "" && (ref.kind == cronJobs || ref.kind == cronRuns) {
+		cronRequestDetails(&d, p, ref)
+	}
 	if name == "" {
 		d.text("this "+[]string{"", "job", "run", "workflow"}[ref.kind]+" is no longer in the loaded data", cronRef{})
 	}
@@ -391,6 +394,14 @@ func cronKeyRows(m Model) []helplayout.HelpItem {
 	}
 	if m.cronJobsScope() {
 		rows = slices.Insert(rows, 3, helplayout.HelpItem{Key: "n/e", Description: "new/edit"}, helplayout.HelpItem{Key: "p", Description: "pause/resume"})
+	}
+	if m.cron.data != nil {
+		if m.cronJobsScope() && slices.Contains(m.cron.data.project.controls, "run_request") {
+			rows = append(rows, helplayout.HelpItem{Key: "R", Description: "request run"})
+		}
+		if slices.Contains(m.cron.data.project.controls, "cancel_request") && (m.cron.tab == cronRuns || len(m.cron.stack) > 0 && m.cron.stack[len(m.cron.stack)-1].ref.kind == cronRuns) {
+			rows = append(rows, helplayout.HelpItem{Key: "X", Description: "request cancel"})
+		}
 	}
 	return rows
 }

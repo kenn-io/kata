@@ -1,0 +1,24 @@
+ Project: example-project                                       kata カタ · dev
+kata カタ [jobs] runs workflows
+ / search                                                                 1 job
+
+  Job            State   Trigger           Action             Last loaded run
+▶ Digest         enabled manual            prompt             succeeded 1h ago
+
+
+              ╭──────────────────────────────────────────────────╮
+              │                                                  │
+              │  Request run for Digest?                         │
+              │                                                  │
+              │  An optional runtime may run this job now.       │
+              │  The request itself changes no running process.  │
+              │                                                  │
+              ╰──────────────────────────────────────────────────╯
+
+
+
+
+
+
+
+ y send/retry▕ n/esc cancel

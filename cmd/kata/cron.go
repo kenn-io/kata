@@ -51,7 +51,7 @@ The full contract is in the Cron reference (docs/reference/cron.md).`,
 			group.AddCommand(newCronOperationCmd(resource, action))
 		}
 		if resource == "job" {
-			group.AddCommand(newCronOperationCmd(resource, "pause"), newCronOperationCmd(resource, "resume"))
+			group.AddCommand(newCronRequestWriteCmd(false), newCronOperationCmd(resource, "pause"), newCronOperationCmd(resource, "resume"))
 		}
 		command.AddCommand(group)
 	}
@@ -59,6 +59,10 @@ The full contract is in the Cron reference (docs/reference/cron.md).`,
 	for _, action := range []string{"list", "show", "observe"} {
 		runs.AddCommand(newCronOperationCmd("run", action))
 	}
+	runs.AddCommand(newCronRequestWriteCmd(true))
+	requests := &cobra.Command{Use: "request", Short: "inspect advisory runtime requests"}
+	requests.AddCommand(newCronRequestListCmd())
+	command.AddCommand(requests)
 	capabilities := newCronOperationCmd("capabilities", "show")
 	capabilities.Use = "capabilities"
 	capabilities.Short = "discover local protocol support without creating cron state"

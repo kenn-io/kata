@@ -10,7 +10,9 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func cronControls() []string { return []string{"job_pause", "project_pause"} }
+func cronControls() []string {
+	return []string{"job_pause", "project_pause", "run_request", "cancel_request"}
+}
 
 func registerCronControlHandlers(h huma.API, cfg ServerConfig) {
 	for _, action := range []struct {

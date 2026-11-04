@@ -16,6 +16,10 @@ import (
 // Production entry points hold a db.Storage; backend selection happens
 // through the storeopen DSN dispatcher.
 type Storage interface {
+	ListCronRequests(context.Context, CronRequestList) ([]CronRequest, error)
+	ListCronRequestProjects(context.Context) ([]int64, error)
+	SweepCronRequests(context.Context, int64, time.Time) (*Event, error)
+	RequestCron(context.Context, RequestCronIn) (RequestCronOut, error)
 	SetCronProjectPause(context.Context, SetCronProjectPauseIn) (PatchProjectMetadataOut, error)
 	// Shared definitions, native recurring delivery and independently attributed execution evidence.
 	ObserveCronRun(context.Context, ObserveCronRun) (CronRunObservationResult, error)

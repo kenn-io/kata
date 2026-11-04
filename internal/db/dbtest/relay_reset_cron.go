@@ -2,7 +2,10 @@ package dbtest
 
 import (
 	"crypto/ed25519"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/cron"
@@ -38,6 +41,15 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	occurrence := "manual:2026-10-06"
 	observed, err := root.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, OccurrenceKey: &occurrence, Actor: "worker", Status: "running", Summary: cron.Summary{Version: 1}})
 	require.NoError(t, err)
+	requestID, err := uid.New()
+	require.NoError(t, err)
+	request, err := root.RequestCron(ctx, db.RequestCronIn{ProjectID: project.ID, UID: requestID, Kind: "cancel", TargetUID: runUID, Actor: "worker", Now: time.Now().UTC()})
+	require.NoError(t, err)
+	require.NotNil(t, request.Event)
+	rootProject, err := root.ProjectByID(ctx, project.ID)
+	require.NoError(t, err)
+	var rootMetadata map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal([]byte(rootProject.Metadata), &rootMetadata))
 	//nolint:gosec // This is a deterministic fixture credential, never an operational secret.
 	parent, _, err := root.CreateAPIToken(ctx, db.CreateAPITokenParams{PlaintextToken: "cron-reset-parent-test-token", Actor: "company-member", AdminActor: "admin"})
 	require.NoError(t, err)
@@ -68,6 +80,29 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	require.NoError(t, err)
 	_, err = downstream.SetRelayBindingConfig(ctx, replica.ID, db.RelayBindingConfig{ProtocolVersion: db.RelayProtocolVersion, BindingUID: bindingUID, AuthorityUID: root.InstanceUID(), UpstreamInstanceUID: root.InstanceUID(), HubPath: []string{root.InstanceUID(), downstream.InstanceUID()}, LocalActor: "company-member", ResetEpoch: 1})
 	require.NoError(t, err)
+	// A correctly signed checkpoint still has to satisfy the request-value
+	// contract before any project state is replaced.
+	beforeInvalid, err := downstream.ProjectByID(ctx, replica.ID)
+	require.NoError(t, err)
+	badSnapshot := checkpoint.Snapshot
+	var entityBodies [][]byte
+	require.NoError(t, json.Unmarshal(badSnapshot.Entities, &entityBodies))
+	badEvent := newRemoteEvent(t, project, nil, "project.metadata_updated", "operator", root.InstanceUID(), time.Now().UnixMilli(), jsontext.Value(`{"project_uid":"`+project.UID+`","diff":{"cron.request.`+requestID+`":{"from":null,"to":{"kind":"run"}}}}`))
+	badBody, err := db.EncodeRelaySourceEvent(badEvent)
+	require.NoError(t, err)
+	badSnapshot.Entities, err = json.Marshal(append(entityBodies, badBody))
+	require.NoError(t, err)
+	badManifest, err := db.SignRootResetManifest(checkpoint.Manifest, badSnapshot, private)
+	require.NoError(t, err)
+	badTranslation := checkpoint.Translation
+	badTranslation.SnapshotDigest = badManifest.SnapshotDigest
+	require.NoError(t, db.VerifyRootResetManifest(pin, badManifest, badSnapshot))
+	require.ErrorIs(t, installer.InstallRelayReset(ctx, bindingUID, badManifest, badSnapshot, badTranslation), db.ErrFederationIngestValidation)
+	afterInvalid, err := downstream.ProjectByID(ctx, replica.ID)
+	require.NoError(t, err)
+	require.Equal(t, beforeInvalid, afterInvalid, "invalid request checkpoint cannot partially replace the replica")
+	_, err = downstream.CronJob(ctx, replica.ID, job.UID)
+	require.ErrorIs(t, err, db.ErrNotFound)
 	require.NoError(t, installer.InstallRelayReset(ctx, bindingUID, checkpoint.Manifest, checkpoint.Snapshot, checkpoint.Translation))
 
 	installedJob, err := downstream.CronJob(ctx, replica.ID, job.UID)
@@ -87,5 +122,10 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	runs, err := downstream.ListCronRuns(ctx, db.CronRunList{ProjectID: replica.ID})
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
+	installedProject, err := downstream.ProjectByID(ctx, replica.ID)
+	require.NoError(t, err)
+	var installedMetadata map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal([]byte(installedProject.Metadata), &installedMetadata))
+	require.JSONEq(t, string(rootMetadata["cron.request."+requestID]), string(installedMetadata["cron.request."+requestID]), "signed reset preserves the exact retained request")
 	require.NoError(t, installer.InstallRelayReset(ctx, bindingUID, checkpoint.Manifest, checkpoint.Snapshot, checkpoint.Translation), "lost commit response retries the exact retained checkpoint")
 }
