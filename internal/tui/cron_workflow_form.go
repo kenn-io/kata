@@ -49,7 +49,7 @@ func workflowFormFor(rec db.CronWorkflow) (*cronForm, error) {
 	}
 	f := &cronForm{wf: true, uid: rec.UID, expected: rec.DefinitionEventUID, openedName: rec.Name}
 	f.val[cfName], f.val[cfDefinition] = rec.Name, string(raw)
-	f.finish()
+	f.snapshot, f.snapKind, f.snapTrig = f.val, f.kind, f.trigger
 	f.focusField(cfDefinition)
 	return f, nil
 }

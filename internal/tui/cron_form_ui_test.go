@@ -300,6 +300,7 @@ func TestCronEscAsksBeforeDiscardingADirtyDraft(t *testing.T) {
 	require.NotNil(t, m.cron.form)
 	require.Equal(t, modalDiscardCronJob, m.modal)
 	require.Contains(t, stripANSI(m.View().Content), "Discard draft?")
+	require.Contains(t, stripANSI(m.View().Content), "Your unsaved changes will be lost.")
 	m, _ = updateModel(m, keyRune('n'))
 	require.NotNil(t, m.cron.form, "n keeps editing")
 	require.Equal(t, modalNone, m.modal)
