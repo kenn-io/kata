@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-02
+last_edited: 2026-11-04
 ---
 
 # CLI reference
@@ -2220,6 +2220,8 @@ See [Cron](cron.md) for bounded documents and retry semantics.
 kata cron job create --uid <job-uid> --file job.json --json
 kata cron job list [--include-deleted] --json
 kata cron job show <job-uid> --json
+kata cron job history <job-uid> [--diff] [--limit 20] [--before-event-uid <event-uid>] --json
+kata cron workflow history <workflow-uid> [--diff] [--limit 20] [--before-event-uid <event-uid>] --json
 kata cron job update <job-uid> --expected-event-uid <event-uid> --file replacement.json --json
 kata cron job delete <job-uid> --expected-event-uid <event-uid> --json
 kata cron job restore <job-uid> --expected-event-uid <event-uid> --json

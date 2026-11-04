@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -37,7 +37,7 @@ issue. Recording a run changes neither ownership nor leases. See
 ## Definitions
 
 `kata cron job` and `kata cron workflow` support `create`, `list`, `show`,
-`update`, `delete`, and `restore`. Commands return JSON. Creation retains a ULID:
+`update`, `delete`, `restore`, and `history`. Commands return JSON. Creation retains a ULID:
 
 ```sh
 kata cron job create --uid <job-uid> --file job.json --json
@@ -65,6 +65,55 @@ process inside Kata.
 Secret references are names, and checkout keys are portable names. Credentials,
 host paths, and runtime handles are not part of this shared contract. Opaque
 option objects retain exact JSON numbers.
+
+### Definition history
+
+Inspect who changed a job or workflow and compare the fields in adjacent
+versions:
+
+```sh
+kata cron job history <job-uid> --diff --json
+kata cron workflow history <workflow-uid> --limit 20 --json
+kata cron job history <job-uid> --before-event-uid <event-uid> --diff --json
+```
+
+History returns locally retained, decodable definition versions, newest first
+by the definition's hybrid logical clock (HLC), the same clock used to select
+the current document. Each version includes `event_uid`, `operation`, `actor`,
+`definition_hlc`, `name`, `definition`, `updated_at`, optional `deleted_at`,
+and `current`. Deleting and restoring a definition also create versions;
+tombstones remain readable. Only the winning version has `current: true`.
+
+A federation snapshot names an existing version, so it does not add another
+edit. History chooses the same document as the fold: the highest definition clock,
+then the earliest event envelope on a tie. An original edit normally remains
+that representative. When a snapshot represents the version, it has
+`operation: "baseline"` and `actor: null`: the snapshot's actor is not
+necessarily the editor.
+Replicas show the baselines and later edits they hold. A hub may retain more
+history; select it with `--daemon <hub-name>`. History can be incomplete even
+on a hub because adoption replaces earlier events with current-state baselines.
+
+`--diff` adds `changes` against the next older available version, comparing
+`name`, `definition`, and deletion state. It excludes clocks, actors and other
+provenance fields. Each change has `op` (`add`, `remove`, or `replace`), an
+RFC 6901 JSON Pointer `path`, and the applicable `before` and `after` values.
+Missing sides are omitted; literal JSON nulls are retained. No differences
+returns `[]`; the oldest available version has `changes: null`.
+Arrays compare by index, with tail removals ordered from the highest index.
+Numeric literals are preserved and compared textually, so `1`, `1.0`, and
+`1e0` count as different. Concurrent edits may not be based on one another;
+these diffs compare stored versions rather than reconstructing an actor's patch.
+
+Pages default to 20 versions and allow 1–100 with `--limit`. Pass
+`next_before_event_uid` as `--before-event-uid` for the next page. Terminal
+pages omit the cursor. Paging is live across requests; late federated events
+can enter an already visited range. For a diff at a page boundary, the CLI
+reads one additional older version and fails without partial output if that
+read fails. Unreadable matching events are omitted and reported in
+`skipped_event_uids` (the first 20 envelope UIDs in lexical order). A skipped
+winner does not make another version current. No decodable history returns
+`versions: []`.
 
 ### Request files
 
@@ -640,3 +689,18 @@ Workflow routes are `/api/v1/projects/{project_id}/cron/workflows` and
 `workflow` or `workflows`; job actions and run observations use `workflow_uid`,
 and run observations pair it with `workflow_definition_event_uid`. Events use
 `cron.workflow.*`, and JSONL workflow records use `cron_workflow`.
+
+Job and workflow version routes are read-only:
+
+| Method | Route | Result |
+| --- | --- | --- |
+| `GET` | `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}/versions` | Locally retained job versions. |
+| `GET` | `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}/versions` | Locally retained workflow versions. |
+
+Both accept `limit` (0 or omitted means 20; maximum 100) and
+`before_event_uid`. Responses contain `versions`, optional
+`next_before_event_uid`, and optional `skipped_event_uids`. Unknown cursors
+return 400 `validation`. Missing definitions return 404 `not_found`; missing
+or archived projects return 404 `project_not_found`. Reads use the same project authority as definition show,
+and do not forward to another daemon. Older daemons lack these routes;
+the CLI reports that definition history requires a daemon upgrade.
