@@ -630,3 +630,46 @@ func TestMovePickerNeverOffersArchivedProjectAgainstDaemon(t *testing.T) {
 	m = openMove(t, m)
 	require.Equal(t, []string{"spoke-project"}, moveLabels(m))
 }
+
+func TestMoveIsRefusedWhenTheIssueChangedAfterThePreviewAgainstDaemon(t *testing.T) {
+	ctx := t.Context()
+	env := testenv.New(t)
+	base := NewClient(env.URL, env.HTTP)
+	source, err := env.DB.CreateProject(ctx, "example-workspace")
+	require.NoError(t, err)
+	dest, err := env.DB.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Guarded", Author: "alice"})
+	require.NoError(t, err)
+
+	client := newConnectedUndoClient(t, base)
+	m := initialModel(Options{})
+	m.api = client
+	m.view = viewList
+	m.list.actor = "alice"
+	m.scope = scope{projectID: source.ID}
+	detail, err := client.GetIssueDetail(ctx, source.ID, issue.UID)
+	require.NoError(t, err)
+	m.list.issues = []Issue{*detail.Issue}
+	m = selectListUID(t, m, issue.UID)
+
+	m = openMove(t, m)
+	m, cmd := enter(m)
+	m, _ = deliver(t, m, cmd)
+	// Only metadata edits (dates, claims) advance the revision a move is guarded on.
+	_, err = base.SetDates(ctx, source.ID, issue.UID, DatesInput{
+		Actor: "alice", IfMatchRevision: issue.Revision, Set: map[string]*string{"scheduled": new("2030-01-01")},
+	})
+	require.NoError(t, err)
+	m, cmd = enter(m)
+	m, cmd = deliver(t, m, cmd)
+	m, _ = deliver(t, m, cmd)
+
+	stored, err := env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, source.ID, stored.ProjectID, "a stale preview moves nothing")
+	require.NotEqual(t, dest.ID, stored.ProjectID)
+	require.Equal(t, modalMoveIssue, m.modal, "the form stays open on a fresh preview")
+	require.NotNil(t, m.move.preview, "and shows the preview at the current revision")
+	require.Contains(t, m.move.note, "changed since the preview")
+}
