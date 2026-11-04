@@ -45,7 +45,7 @@ func newCronRunPruneCmd() *cobra.Command {
 to delete it. Each job or workflow keeps its newest --keep runs across all statuses;
 running runs and recently updated runs are always retained. Export history first.
 Each nonempty deletion resets browser streams and federation replicas.
-Counts describe this batch. If more is true, run another preview before deleting again.`,
+Counts describe this batch. Preview each batch before deleting it.`,
 		Example: "  kata cron run prune --older-than 30d --keep 10\n  kata cron run prune --older-than 30d --force --confirm 'PRUNE example-project cron runs' --json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
