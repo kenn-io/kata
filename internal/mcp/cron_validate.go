@@ -97,6 +97,7 @@ func (h toolHandlers) cronJobValidate(ctx context.Context, _ *sdkmcp.CallToolReq
 	if err != nil {
 		return nil, nil, err
 	}
+	parentIncompatible := false
 	if strings.TrimSpace(in.ParentRef) != "" {
 		parent, err := h.cronParent(ctx, project, in.ParentRef)
 		if err != nil {
@@ -104,6 +105,7 @@ func (h toolHandlers) cronJobValidate(ctx context.Context, _ *sdkmcp.CallToolReq
 		}
 		definition, _ := in.Definition.(map[string]any)
 		issue, ok := definition["issue"].(map[string]any)
+		parentIncompatible = !ok
 		if ok {
 			if err := checkCronParentUID(issue["parent_uid"], parent); err != nil {
 				return nil, nil, err
@@ -119,7 +121,12 @@ func (h toolHandlers) cronJobValidate(ctx context.Context, _ *sdkmcp.CallToolReq
 	if in.Count != nil {
 		count = int64(*in.Count)
 	}
-	return cronValidationResult(h.options.Client.ValidateCronJob(ctx, &generated.ValidateCronJobRequestOptions{PathParams: &generated.ValidateCronJobPath{ProjectID: project.ID}, Query: &generated.ValidateCronJobQuery{Count: &count, From: &in.From}, Body: body}))
+	result, value, err := cronValidationResult(h.options.Client.ValidateCronJob(ctx, &generated.ValidateCronJobRequestOptions{PathParams: &generated.ValidateCronJobPath{ProjectID: project.ID}, Query: &generated.ValidateCronJobQuery{Count: &count, From: &in.From}, Body: body}))
+	if err == nil && parentIncompatible && value.Valid {
+		value.Valid, value.Schedule = false, nil
+		value.Errors = []generated.CronValidationError{{Stage: "request", Code: "validation", Message: cronParentIssueRequired}}
+	}
+	return result, value, err
 }
 
 func (h toolHandlers) cronWorkflowValidate(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronValidationInput) (*sdkmcp.CallToolResult, *CronValidationOutput, error) {

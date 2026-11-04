@@ -13,6 +13,8 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
+const cronParentIssueRequired = "parent_ref requires definition.issue"
+
 // CronJobCreateInput creates one caller-identified definition.
 type CronJobCreateInput struct {
 	CronIdentityInput
@@ -71,7 +73,7 @@ func (h toolHandlers) cronPutJob(ctx context.Context, in CronJobCreateInput, exp
 			return nil, nil, err
 		}
 		if in.Definition.Issue == nil {
-			return nil, nil, errors.New("parent_ref requires definition.issue")
+			return nil, nil, errors.New(cronParentIssueRequired)
 		}
 		if err := checkCronParentUID(in.Definition.Issue.ParentUID, parent); err != nil {
 			return nil, nil, err
