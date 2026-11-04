@@ -370,6 +370,97 @@ func TestRecurrenceNoopKeepsUndoHistory(t *testing.T) {
 	assert.Len(t, h.m.undoHistory.entries, 1, "a daemon no-op preserves undo")
 }
 
+func TestRecurrenceBlankZoneNoopClosesQuietly(t *testing.T) {
+	h := newRecurrenceHarness(t, viewDetail)
+	before := h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
+	h.open()
+	h.fill("FREQ=WEEKLY", "2026-11-09", "")
+	h.save()
+
+	assert.Equal(t, inputNone, h.m.input.kind)
+	assert.Empty(t, h.m.detail.status, "the daemon reported no change")
+	assert.Equal(t, before.Revision, h.rows()[0].Revision)
+}
+
+func TestRecurrencePreflightFailurePreservesUndo(t *testing.T) {
+	for _, failure := range []string{"server", "transport", "decode", "write transport"} {
+		t.Run(failure, func(t *testing.T) {
+			h := newRecurrenceHarness(t, viewDetail)
+			h.openForm()
+			h.datesHarness.fill("2026-11-09", "")
+			h.datesHarness.save()
+			require.Len(t, h.m.undoHistory.entries, 1)
+			h.open()
+			h.fill("FREQ=DAILY", "2026-11-09", "Europe/Paris")
+			writes := 0
+			base := h.client.KataAPI.(*Client)
+			base.setHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				if r.Method != http.MethodGet {
+					writes++
+					return nil, errors.New("write transport failed")
+				}
+				if strings.Contains(r.URL.Path, "/issues/") && failure != "write transport" {
+					if failure == "transport" {
+						return nil, errors.New("preflight transport failed")
+					}
+					status, body := http.StatusInternalServerError, `{"error":{"code":"internal","message":"preflight failed"}}`
+					if failure == "decode" {
+						status, body = http.StatusOK, `{`
+					}
+					return &http.Response{StatusCode: status, Request: r, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
+				}
+				return h.env.HTTP.Do(r)
+			})})
+			h.save()
+			assert.Equal(t, inputRecurrenceForm, h.m.input.kind)
+			assert.NotEmpty(t, h.m.input.err)
+			if failure == "write transport" {
+				assert.Equal(t, 1, writes)
+				assert.Empty(t, h.m.undoHistory.entries, "a sent write still has an uncertain outcome")
+			} else {
+				assert.Zero(t, writes)
+				assert.Len(t, h.m.undoHistory.entries, 1, "a failed read preserves the earlier edit")
+			}
+		})
+	}
+}
+
+func TestRecurrenceHistoricalRefUsesCurrentProject(t *testing.T) {
+	h := newRecurrenceHarness(t, viewDetail)
+	oldProject, oldRef := h.issue.ProjectID, h.issue.ShortID
+	destination, err := h.env.DB.CreateProject(t.Context(), "destination-project")
+	require.NoError(t, err)
+	moved, err := h.api.MoveIssueWithResponse(t.Context(), &generated.MoveIssueRequestOptions{
+		PathParams: &generated.MoveIssuePath{ProjectID: oldProject, Ref: oldRef},
+		Body:       &generated.MoveIssueBody{ToProjectUID: destination.UID, Actor: new("alice")},
+		Header:     &generated.MoveIssueHeaders{IfMatch: new(recurrenceclient.ETag(h.issue.Revision))},
+	})
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, moved.HTTPResponse.StatusCode, string(moved.Body))
+	h.issue.ProjectID = destination.ID
+	h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
+	detail, err := h.client.GetIssueDetail(t.Context(), oldProject, oldRef)
+	require.NoError(t, err)
+	assert.NotNil(t, detail.Recurrence, "historical references show the destination's recurrence")
+	snapshot, err := readRecurrenceSnapshot(t.Context(), h.client, formTarget{projectID: oldProject, issueUID: oldRef})
+	require.NoError(t, err)
+	assert.NotNil(t, snapshot.rec, "form reads use the resolved issue's project")
+	h.m.detail = detailModel{scopePID: oldProject, readRef: oldRef, issue: detail.Issue, recurrence: detail.Recurrence}
+	assert.Contains(t, h.page(), "repeats: FREQ=WEEKLY")
+	h.open()
+	assert.Equal(t, destination.ID, h.m.input.target.projectID)
+	h.fill("FREQ=DAILY", "2026-11-09", "Europe/Paris")
+	h.save()
+	assert.Equal(t, inputNone, h.m.input.kind)
+	assert.Equal(t, "FREQ=DAILY", h.rows()[0].RRule)
+	stopped, err := h.client.SaveRecurrence(t.Context(), oldProject, oldRef, RecurrenceInput{
+		Stop: true, Recurrence: new(h.rows()[0]), Actor: "alice",
+	})
+	require.NoError(t, err)
+	assert.True(t, stopped.Changed)
+	assert.Empty(t, h.rows(), "saves through a historical reference use the current project")
+}
+
 func TestRecurrenceFormRefusesStoppedSeries(t *testing.T) {
 	h := newRecurrenceHarness(t, viewDetail)
 	current := h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")

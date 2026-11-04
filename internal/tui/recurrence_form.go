@@ -82,7 +82,7 @@ func (s inputState) loadRecurrence(issue Issue, rec *recurrenceclient.View) inpu
 		state.start = cmp.Or(issue.ScheduledOnDate, issue.scheduledOn())
 		state.zone, _ = recurrenceclient.ResolveZone("", "", issue.timezone(), localZone)
 	}
-	s.recurrence = state
+	s.recurrence, s.target.projectID = state, issue.ProjectID
 	for i := range s.fields {
 		switch s.fields[i].id {
 		case fieldRule:
@@ -105,7 +105,7 @@ func (m Model) routeRecurrenceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 	m.nextFormGen++
-	target.issueUID = issue.UID
+	target.issueUID, target.projectID = issue.UID, issue.ProjectID
 	return m, readRecurrenceForm(m.api, target, m.nextFormGen, m.connGen), true
 }
 
@@ -139,7 +139,7 @@ func (m Model) openRecurrenceForm(msg recurrenceFormLoadedMsg) Model {
 	if m.staleConnMsg(msg.connGen) || msg.formGen != m.nextFormGen || m.input.kind != inputNone || m.modal != modalNone {
 		return m
 	}
-	if target, issue, ok := m.activeIssueTarget(); !ok || target.projectID != msg.target.projectID || issue.UID != msg.target.issueUID || target.origin != msg.target.origin || target.detailGen != msg.target.detailGen {
+	if target, issue, ok := m.activeIssueTarget(); !ok || issue.ProjectID != msg.target.projectID || issue.UID != msg.target.issueUID || target.origin != msg.target.origin || target.detailGen != msg.target.detailGen {
 		return m
 	}
 	if msg.refused != "" {
@@ -283,7 +283,7 @@ func readRecurrenceSnapshot(ctx context.Context, api detailAPI, target formTarge
 	}
 	rec := detail.Recurrence
 	if reader, ok := api.(recurrenceReadAPI); ok && detail.Issue.RecurrenceID != nil {
-		rec, err = reader.ReadRecurrence(ctx, target.projectID, detail.Issue.RecurrenceID)
+		rec, err = reader.ReadRecurrence(ctx, detail.Issue.ProjectID, detail.Issue.RecurrenceID)
 	}
 	return recurrenceSnapshot{issue: *detail.Issue, rec: rec}, err
 }

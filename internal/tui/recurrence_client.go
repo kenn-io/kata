@@ -45,16 +45,16 @@ type recurrenceSnapshot struct {
 func (c *Client) SaveRecurrence(ctx context.Context, projectID int64, ref string, in RecurrenceInput) (*MutationResp, error) {
 	apiClient, err := c.generatedClient()
 	if err != nil {
-		return nil, err
+		return nil, &mutationPreflightError{err}
 	}
 	wire, callErr := apiClient.ShowIssueWithResponse(ctx, &generated.ShowIssueRequestOptions{
 		PathParams: &generated.ShowIssuePath{ProjectID: projectID, Ref: ref},
 	})
 	if wire == nil {
-		return nil, callErr
+		return nil, &mutationPreflightError{callErr}
 	}
 	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil); err != nil {
-		return nil, err
+		return nil, &mutationPreflightError{err}
 	}
 	issue := wire.JSON200.Issue
 	if recurrenceclient.ParentsCronJob(issue.Metadata) {
@@ -65,7 +65,7 @@ func (c *Client) SaveRecurrence(ctx context.Context, projectID int64, ref string
 		if in.Recurrence == nil {
 			return nil, &mutationPreflightError{errors.New("issue has no active recurrence; nothing was written")}
 		}
-		err = recurrenceclient.Stop(ctx, apiClient, projectID, *in.Recurrence, in.Actor)
+		err = recurrenceclient.Stop(ctx, apiClient, issue.ProjectID, *in.Recurrence, in.Actor)
 	} else {
 		issueZone, _ := issue.Metadata["timezone"].(string)
 		zone, zoneErr := recurrenceclient.ResolveZone(in.Zone, in.Recurrence.Zone(), issueZone, localZone)
@@ -78,9 +78,9 @@ func (c *Client) SaveRecurrence(ctx context.Context, projectID int64, ref string
 		terms := in.Terms
 		terms.Zone = zone
 		if in.Recurrence != nil {
-			changed, err = recurrenceclient.Change(ctx, apiClient, projectID, *in.Recurrence, terms)
+			changed, err = recurrenceclient.Change(ctx, apiClient, issue.ProjectID, *in.Recurrence, terms)
 		} else {
-			err = startRecurrence(ctx, apiClient, projectID, ref, wire, in, terms)
+			err = startRecurrence(ctx, apiClient, issue.ProjectID, issue.UID, wire, in, terms)
 		}
 	}
 	if err != nil {
@@ -90,7 +90,7 @@ func (c *Client) SaveRecurrence(ctx context.Context, projectID int64, ref string
 		return nil, err
 	}
 	resp := &MutationResp{Changed: changed}
-	if after, err := c.ReadIssue(ctx, projectID, ref); err == nil {
+	if after, err := c.ReadIssue(ctx, issue.ProjectID, issue.UID); err == nil {
 		resp.Issue = after.Issue
 	}
 	return resp, nil
@@ -109,7 +109,7 @@ func startRecurrence(ctx context.Context, apiClient *generated.Client, projectID
 	}
 	tpl, err := recurrenceclient.TemplateFromShow(shown.Body)
 	if err != nil {
-		return err
+		return &mutationPreflightError{err}
 	}
 	tag := recurrenceclient.ETag(in.IssueRevision)
 	return recurrenceclient.Start(ctx, apiClient, projectID, ref, tpl, terms, &tag)

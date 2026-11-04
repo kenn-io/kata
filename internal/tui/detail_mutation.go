@@ -202,7 +202,7 @@ func mutationSuccessText(m mutationDoneMsg, iss *Issue) string {
 	if m.resp != nil && m.resp.Issue != nil && m.resp.Issue.ShortID != "" {
 		ref = m.resp.Issue.ShortID
 	}
-	if tpl, ok := successTemplates[m.kind]; ok {
+	if tpl, ok := successTemplates[m.kind]; ok && (m.resp == nil || m.resp.Changed || !strings.HasPrefix(m.kind, "recurrence.")) {
 		return fmt.Sprintf(tpl, ref)
 	}
 	return ""
