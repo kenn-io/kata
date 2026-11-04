@@ -148,6 +148,10 @@ CREATE INDEX idx_issues_project_status_updated
   ON issues(project_id, status, updated_at DESC) WHERE deleted_at IS NULL;
 CREATE INDEX idx_issues_project_updated
   ON issues(project_id, updated_at DESC) WHERE deleted_at IS NULL;
+CREATE INDEX idx_issues_project_created
+  ON issues(project_id, created_at, id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_issues_created
+  ON issues(created_at, id) WHERE deleted_at IS NULL;
 CREATE INDEX idx_issues_owner
   ON issues(owner) WHERE owner IS NOT NULL AND deleted_at IS NULL;
 CREATE INDEX idx_issues_assignment_expires_on

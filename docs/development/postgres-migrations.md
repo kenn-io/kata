@@ -281,3 +281,23 @@ Comment search cost follows the number of matching comments.
 On SQLite, a phrase must fit within one document; words split between two
 comments no longer form a phrase. Older binaries cannot open schema 41.
 Rollback requires the pre-upgrade backup and its matching binary.
+
+## Schema 42: issue creation-order indexes
+
+Creation-order issue pages can read indexes within one project or across all
+projects. The 41→42 migration adds `idx_issues_project_created` on
+`issues(project_id, created_at, id)` and `idx_issues_created` on
+`issues(created_at, id)`, both restricted to rows where `deleted_at IS NULL`.
+It then runs `ANALYZE issues`. Fresh PostgreSQL and SQLite databases include
+these indexes; SQLite indexes normalized creation instants.
+
+Stop serving daemons and imports, back up the database, and run
+`kata storage postgres migrate` with schema-owner credentials. Building the
+indexes reads `issues` and blocks issue writes; allow an offline window that
+fits the table's size. Existing table grants remain sufficient. Validation-only
+runtime credentials cannot migrate. Versions 25–41 follow the existing
+immutable migration chain first. SQLite uses its normal JSONL cutover.
+
+Start the matching schema 42 binary after migration. Older binaries cannot open
+schema 42. Rollback requires the pre-upgrade backup and matching older binary;
+there is no down migration.

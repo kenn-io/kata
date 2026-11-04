@@ -46,7 +46,7 @@ func TestEventMoveHistoryIndexMigrationUpgradesVersion34(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
 	dropEventMoveHistoryIndex(ctx, t, admin, schema)
-	dropCommentUIDHandleIndex(ctx, t, admin, schema)
+	dropLaterMigrationIndexes(ctx, t, admin, schema)
 	_, err = admin.ExecContext(ctx, `UPDATE move_history_upgrade.meta SET value='34' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	var owner string

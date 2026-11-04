@@ -1155,9 +1155,10 @@ func buildListIssuesQuery(ctx context.Context, p db.ListIssuesParams, count bool
 			op = ">"
 		}
 		key := creationKeySQL("i")
-		fmt.Fprintf(&q, " AND (%s %s ? OR (%s = ? AND i.id %s ?))", key, op, key, op)
+		// The inclusive bound lets SQLite seek while the OR preserves ties.
+		fmt.Fprintf(&q, " AND %s %s= ? AND (%s %s ? OR (%s = ? AND i.id %s ?))", key, op, key, op, key, op)
 		stamp := p.After.CreatedAt.UTC().Format(creationCursorTimeFormat)
-		args = append(args, stamp, stamp, p.After.ID)
+		args = append(args, stamp, stamp, stamp, p.After.ID)
 	}
 
 	if p.OldestFirst {
@@ -1278,9 +1279,10 @@ func buildListAllIssuesQuery(ctx context.Context, p db.ListAllIssuesParams, coun
 			op = ">"
 		}
 		key := creationKeySQL("i")
-		fmt.Fprintf(&q, " AND (%s %s ? OR (%s = ? AND i.id %s ?))", key, op, key, op)
+		// The inclusive bound lets SQLite seek while the OR preserves ties.
+		fmt.Fprintf(&q, " AND %s %s= ? AND (%s %s ? OR (%s = ? AND i.id %s ?))", key, op, key, op, key, op)
 		stamp := p.After.CreatedAt.UTC().Format(creationCursorTimeFormat)
-		args = append(args, stamp, stamp, p.After.ID)
+		args = append(args, stamp, stamp, stamp, p.After.ID)
 	}
 
 	if p.OldestFirst {

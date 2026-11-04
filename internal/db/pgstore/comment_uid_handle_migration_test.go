@@ -13,9 +13,16 @@ import (
 )
 
 // Older-version fixtures start from the current schema and remove later indexes.
-func dropCommentUIDHandleIndex(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
+func dropLaterMigrationIndexes(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
 	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %s.idx_comments_uid_handle`, schema)) // #nosec G201 -- Fixed test schema.
+	require.NoError(t, err)
+	dropIssueCreatedOrderIndexes(ctx, t, admin, schema)
+}
+
+func dropIssueCreatedOrderIndexes(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
+	t.Helper()
+	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %s.idx_issues_project_created; DROP INDEX IF EXISTS %s.idx_issues_created`, schema, schema)) // #nosec G201 -- Fixed test schema.
 	require.NoError(t, err)
 }
 
@@ -33,7 +40,7 @@ func TestCommentUIDHandleIndexMigrationUpgradesVersion38(t *testing.T) {
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
-	dropCommentUIDHandleIndex(ctx, t, admin, schema)
+	dropLaterMigrationIndexes(ctx, t, admin, schema)
 	_, err = admin.ExecContext(ctx, `UPDATE comment_handle_upgrade.meta SET value='38' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	upgraded, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
