@@ -27,12 +27,14 @@ All notable changes to kata, grouped by release. Versioned releases start with
   search cost follows the number of matching comments.
   Existing stores upgrade to schema 41 through SQLite's JSONL cutover or the
   [offline PostgreSQL migration](development/postgres-migrations.md#schema-41-separate-comment-search-documents).
-- Move an issue to another project from `kata tui` with `M`, in the list or the
-  detail. Pick a project (same-named ones show their area), read the daemon's
-  preview of the subtree that would move, or its refusal, then press `Enter`
-  again to move it. The move is guarded on the previewed revision, previews
-  again if the issue changed, and shows the new `project#id`. Daemon API
-  `0.35.0` or newer is required. See the
+- Move an issue to another project from `kata tui` with `M` on the selected row
+  of the issue list. In split layout, focus the list first; Inbox, Attention and
+  the detail view do not offer the key. Pick a project (same-named ones show
+  their area), read the daemon's preview of the subtree that would move, or its
+  refusal, then press `Enter` again to move it. The move is guarded on the
+  previewed revision, previews again if the issue changed, clears the undo
+  history, and shows the new `project#id`. Issue-scoped credentials cannot move.
+  Daemon API `0.35.0` or newer is required. See the
   [CLI reference](reference/cli.md#daemon-and-diagnostics).
 
 - Load the web UI's issue list and graph on SQLite and PostgreSQL stores with

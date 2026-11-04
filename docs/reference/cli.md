@@ -2060,8 +2060,11 @@ current dates so you can edit them again. The detail properties show both
 dates once either is set, and `u` writes the previous dates back under the
 same revision check.
 
-In the issue list or detail, press `M` to move the selected issue to another
-project:
+In the issue list, press `M` to move the selected issue to another project. In
+split layout, focus the list first. In Inbox and while browsing from Attention,
+use `kata move` instead; the detail view does not offer the key, because a
+detail, its Back history and those return contexts keep their own copies of the
+issue:
 
 1. A picker lists the daemon's projects except the issue's own, the Inbox
    project, and archived ones. Typing filters by name or by the text beside it.
@@ -2078,13 +2081,18 @@ project:
    read, like `kata move`. If the preview carries no revision, nothing is sent.
    If the issue changed since the preview, nothing is moved and the form
    previews again at the current revision.
-4. After a move the selection goes to the neighboring row, an open detail
-   closes, and a notice names the issue's new `project#id`.
+4. After a move the moved issue and its descendants leave the list (the next
+   refresh lists them again where the scope shows their new project), the
+   selection goes to the next row (the previous one after the last), and a
+   notice names the issue's new `project#id`. A split detail pane resets only
+   when it shows a moved issue, a child of one, or has one in its Back history;
+   a pane on another issue keeps it and its Back history. Label counts of both
+   projects refresh.
 
 A preview needs daemon API 0.35.0 or newer, because older daemons move only the
 selected issue; the form says so instead of previewing. A move changes the short
-id, so it clears the undo history. The key follows the same permission check as
-the other edits.
+id, so it clears the undo history. Issue-scoped credentials cannot move, so `M`
+is not offered to them and does nothing.
 
 In the issue list, press `X` to soft-delete the selected issue. In split
 layout, focus the list first. In Inbox and while browsing from Attention, use
