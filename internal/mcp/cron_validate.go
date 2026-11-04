@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json/v2"
 	"errors"
-	"strconv"
 	"strings"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -117,12 +116,11 @@ func (h toolHandlers) cronJobValidate(ctx context.Context, _ *sdkmcp.CallToolReq
 	if err != nil {
 		return nil, nil, err
 	}
-	count := 5
+	count := int64(5)
 	if in.Count != nil {
-		count = *in.Count
+		count = int64(*in.Count)
 	}
-	countText := strconv.Itoa(count)
-	return cronValidationResult(h.options.Client.ValidateCronJob(ctx, &generated.ValidateCronJobRequestOptions{PathParams: &generated.ValidateCronJobPath{ProjectID: project.ID}, Query: &generated.ValidateCronJobQuery{Count: &countText, From: &in.From}, Body: body}))
+	return cronValidationResult(h.options.Client.ValidateCronJob(ctx, &generated.ValidateCronJobRequestOptions{PathParams: &generated.ValidateCronJobPath{ProjectID: project.ID}, Query: &generated.ValidateCronJobQuery{Count: &count, From: &in.From}, Body: body}))
 }
 
 func (h toolHandlers) cronWorkflowValidate(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronValidationInput) (*sdkmcp.CallToolResult, *CronValidationOutput, error) {

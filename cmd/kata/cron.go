@@ -320,17 +320,10 @@ func (o *cronCLIOptions) applyParent(cmd *cobra.Command, daemon daemonAPI, raw [
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return projectRef{}, nil, err
 	}
-	if fields == nil {
-		return projectRef{}, nil, cronCLIValidation("--parent requires definition.issue of kind per-run")
-	}
-	if err := json.Unmarshal(fields["definition"], &definition); err != nil || definition == nil {
-		return projectRef{}, nil, cronCLIValidation("--parent requires definition.issue of kind per-run")
-	}
-	if err := json.Unmarshal(definition["issue"], &issue); err != nil || issue == nil {
-		return projectRef{}, nil, cronCLIValidation("--parent requires definition.issue of kind per-run")
-	}
-	kind, err := cronStringField(issue, "kind")
-	if err != nil || kind != "per-run" {
+	parentable := fields != nil && json.Unmarshal(fields["definition"], &definition) == nil && definition != nil && json.Unmarshal(definition["issue"], &issue) == nil && issue != nil
+	kind, kindErr := cronStringField(issue, "kind")
+	parentable = parentable && kindErr == nil && kind == "per-run"
+	if !parentable && o.action != "validate" {
 		return projectRef{}, nil, cronCLIValidation("--parent requires definition.issue of kind per-run")
 	}
 	ctx, baseURL, pid, ref, err := resolveIssueRefForCommand(cmd, o.parent)
@@ -355,6 +348,11 @@ func (o *cronCLIOptions) applyParent(cmd *cobra.Command, daemon daemonAPI, raw [
 		if selected.ID != project.ID {
 			return projectRef{}, nil, cronCLIValidation(fmt.Sprintf("job project %q and parent project %q must match", selected.Name, project.Name))
 		}
+	}
+	// Validation forwards incomplete or incompatible documents unchanged so
+	// their failures remain staged results. Parent patching applies to per-run jobs.
+	if !parentable {
+		return project, raw, nil
 	}
 	client, err := kataclient.NewWithHTTPClient(baseURL, daemon.client)
 	if err != nil {

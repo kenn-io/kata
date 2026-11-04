@@ -4,7 +4,6 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
-	"strconv"
 
 	"github.com/spf13/cobra"
 	"go.kenn.io/kata/internal/api"
@@ -39,7 +38,7 @@ func (o cronCLIOptions) callValidate(a daemonAPI, c *kataclient.Client, projectI
 		return nil, err
 	}
 	if o.resource == "job" {
-		count := strconv.Itoa(o.count)
+		count := int64(o.count)
 		response, err := c.ValidateCronJobWithResponse(a.ctx, &generated.ValidateCronJobRequestOptions{PathParams: &generated.ValidateCronJobPath{ProjectID: projectID}, Query: &generated.ValidateCronJobQuery{Count: &count, From: &o.from}, Body: &body})
 		if response == nil {
 			return nil, externalCLITransportError(response, err)

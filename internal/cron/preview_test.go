@@ -18,7 +18,7 @@ func previewJob(t testing.TB) JobDefinition {
 // A document that fails strict decoding has no normalized document.
 func TestCronValidationDecodeShapes(t *testing.T) {
 	for _, raw := range []string{`null`, `[]`, `1`, `{"unknown":1}`, `{`} {
-		_, normalized, err := Normalize([]byte(raw), DecodeJob)
+		_, normalized, err := Normalize([]byte(raw), DecodeJobForWrite)
 		require.Error(t, err)
 		require.Empty(t, normalized)
 	}

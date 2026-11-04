@@ -69,7 +69,7 @@ func TestCronValidationParserAgreement(t *testing.T) {
 				_, _, got = Normalize(raw, DecodeWorkflow)
 			} else {
 				_, want = ParseJob(raw)
-				_, _, got = Normalize(raw, DecodeJob)
+				_, _, got = Normalize(raw, DecodeJobForWrite)
 			}
 			require.Equal(ht, want == nil, got == nil, "workflow=%t raw=%s", workflow, raw)
 		}
@@ -81,7 +81,7 @@ func TestCronValidationPreservesInput(t *testing.T) {
 		job := drawPreviewJob(ht)
 		raw, err := json.Marshal(job)
 		require.NoError(ht, err)
-		_, normalized, err := Normalize(raw, DecodeJob)
+		_, normalized, err := Normalize(raw, DecodeJobForWrite)
 		require.NoError(ht, err)
 		parsed, err := ParseJob(normalized)
 		require.NoError(ht, err)
@@ -118,7 +118,7 @@ func TestCronValidationOpaqueNumberSpelling(t *testing.T) {
 		require.NoError(ht, err)
 		// Decoded documents retain normalized fields even if a value fails
 		// validation (native options or an overflowing option number).
-		_, normalized, _ := Normalize(raw, DecodeJob)
+		_, normalized, _ := Normalize(raw, DecodeJobForWrite)
 		require.NotEmpty(ht, normalized)
 		var fields map[string]jsontext.Value
 		require.NoError(ht, json.Unmarshal(normalized, &fields))

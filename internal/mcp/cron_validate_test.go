@@ -106,11 +106,11 @@ func TestCronValidateParentScopeAndQuery(t *testing.T) {
 	args["count"] = 0
 	failure := cronCall(t, session, "cron_job_validate", args)
 	require.True(t, failure.IsError)
-	require.Contains(t, string(mustJSON(t, failure)), "count must be between 1 and 100")
+	require.Contains(t, failure.Content[0].(*sdkmcp.TextContent).Text, "count: expected number >= 1")
 	args["count"], args["from"] = 2, "bad"
 	failure = cronCall(t, session, "cron_job_validate", args)
 	require.True(t, failure.IsError)
-	require.Contains(t, string(mustJSON(t, failure)), "from must be RFC3339")
+	require.Contains(t, failure.Content[0].(*sdkmcp.TextContent).Text, "from must be RFC3339")
 	args["from"], args["project"] = "2026-11-03T00:00:00Z", "other-project"
 	require.True(t, cronCall(t, session, "cron_job_validate", args).IsError)
 	delete(args, "project")
@@ -121,7 +121,7 @@ func TestCronValidateParentScopeAndQuery(t *testing.T) {
 		definition["issue"].(map[string]any)["parent_uid"] = parentUID
 		failure = cronCall(t, session, "cron_job_validate", args)
 		require.True(t, failure.IsError)
-		require.Contains(t, string(mustJSON(t, failure)), "parent_ref disagrees with definition.issue.parent_uid")
+		require.Contains(t, failure.Content[0].(*sdkmcp.TextContent).Text, "parent_ref disagrees with definition.issue.parent_uid")
 	}
 
 }

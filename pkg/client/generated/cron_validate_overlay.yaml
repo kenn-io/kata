@@ -15,3 +15,9 @@ actions:
       x-go-type: json.RawMessage
       x-go-type-import:
         path: encoding/json
+  - target: '$.components.schemas.CronValidationResult.properties.name'
+    update:
+      x-kata-require-presence: true
+  - target: '$.components.schemas.SchedulePreview.properties.from'
+    update:
+      x-kata-require-presence: true

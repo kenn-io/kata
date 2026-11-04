@@ -18,10 +18,21 @@ type CronValidationBody struct {
 	Actor            string `json:"actor,omitempty" doc:"Accepted for create/update file compatibility; ignored."`
 }
 
+// CronValidationEnvelope contains validated strings and an unrestricted document.
+type CronValidationEnvelope map[string]jsontext.Value
+
+// String reads an optional string already checked by DecodeCronValidationEnvelope.
+func (fields CronValidationEnvelope) String(key string) string {
+	var value string
+	// Absence means empty; present values have already passed string decoding.
+	_ = json.Unmarshal(fields[key], &value)
+	return value
+}
+
 // DecodeCronValidationEnvelope validates envelope types before any typed coercion.
 // The definition remains raw, including malformed documents and exact numbers.
-func DecodeCronValidationEnvelope(raw []byte) (map[string]jsontext.Value, error) {
-	var fields map[string]jsontext.Value
+func DecodeCronValidationEnvelope(raw []byte) (CronValidationEnvelope, error) {
+	var fields CronValidationEnvelope
 	if jsontext.Value(raw).Kind() != '{' {
 		return nil, fmt.Errorf("request body must be a JSON object")
 	}
@@ -52,7 +63,7 @@ type ValidateCronWorkflowRequest struct {
 // ValidateCronJobRequest also selects the bounded number of future instants.
 type ValidateCronJobRequest struct {
 	ValidateCronWorkflowRequest
-	Count string `query:"count" doc:"Number of next fires, from 1 through 100; defaults to 5."`
+	Count int `query:"count" default:"5" minimum:"1" maximum:"100" doc:"Number of next fires, from 1 through 100; defaults to 5."`
 }
 
 // CronValidationResult describes a hypothetical write and trigger preview.

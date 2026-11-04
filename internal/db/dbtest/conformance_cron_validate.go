@@ -176,6 +176,14 @@ func checkCronValidateNative(t *testing.T, s db.Storage) error {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	})
 	// Fixture corruption exercises the existing put contract, not a conjectured failure.
+	// Database JSON-object checks permit duplicate keys, but the strict progress
+	// reader rejects them. This reaches fail() with an operational decoding error.
+	_, err = q.ExecContext(ctx, `UPDATE issues SET metadata='{"duplicate":0,"duplicate":1}' WHERE id=$1`, parent.ID)
+	require.NoError(t, err)
+	out, err = s.ValidateCronJob(ctx, in)
+	var syntax *jsontext.SyntacticError
+	require.ErrorAs(t, err, &syntax)
+	require.Empty(t, out.Errors)
 	_, err = q.ExecContext(ctx, `UPDATE issues SET metadata='{}' WHERE id=$1`, parent.ID)
 	require.NoError(t, err)
 	out, err = s.ValidateCronJob(ctx, in)

@@ -77,7 +77,7 @@ func (a CronSQL) Validate(ctx context.Context, in CronValidationInput, job bool)
 		var err error
 		var definition cron.JobDefinition
 		if job {
-			definition, out.Definition, err = cron.Normalize(in.Raw, cron.DecodeJob)
+			definition, out.Definition, err = cron.Normalize(in.Raw, cron.DecodeJobForWrite)
 			req.definition = definition
 		} else {
 			var workflow cron.WorkflowDefinition

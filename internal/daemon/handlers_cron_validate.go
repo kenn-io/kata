@@ -2,11 +2,8 @@ package daemon
 
 import (
 	"context"
-	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"net/http"
 	"reflect"
-	"strconv"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -29,7 +26,7 @@ func registerCronValidationHandlers(h huma.API, cfg ServerConfig) {
 			})
 		} else {
 			huma.Register(h, op, func(ctx context.Context, in *api.ValidateCronWorkflowRequest) (*api.CronValidationResponse, error) {
-				return validateCronDefinition(ctx, cfg, in.ProjectID, in.RawBody, in.From, "", false)
+				return validateCronDefinition(ctx, cfg, in.ProjectID, in.RawBody, in.From, 5, false)
 			})
 		}
 		// RawBody avoids framework coercion/422s. Publish the envelope schema while
@@ -38,18 +35,10 @@ func registerCronValidationHandlers(h huma.API, cfg ServerConfig) {
 	}
 }
 
-func validateCronDefinition(ctx context.Context, cfg ServerConfig, projectID int64, raw []byte, fromText, countText string, job bool) (*api.CronValidationResponse, error) {
+func validateCronDefinition(ctx context.Context, cfg ServerConfig, projectID int64, raw []byte, fromText string, count int, job bool) (*api.CronValidationResponse, error) {
 	invalid := func(message string) error { return api.NewError(400, "validation", message, "", nil) }
-	if _, err := api.DecodeCronValidationEnvelope(raw); err != nil {
-		return nil, invalid(err.Error())
-	}
-	var body struct {
-		Name             string         `json:"name"`
-		Definition       jsontext.Value `json:"definition"`
-		UID              string         `json:"uid,omitempty"`
-		ExpectedEventUID string         `json:"expected_event_uid,omitempty"`
-	}
-	if err := json.Unmarshal(raw, &body); err != nil {
+	fields, err := api.DecodeCronValidationEnvelope(raw)
+	if err != nil {
 		return nil, invalid(err.Error())
 	}
 	from := time.Now().UTC()
@@ -63,24 +52,15 @@ func validateCronDefinition(ctx context.Context, cfg ServerConfig, projectID int
 		}
 		from = parsed
 	}
-	count := 5
-	if countText != "" {
-		parsed, err := strconv.Atoi(countText)
-		if err != nil || parsed < 1 || parsed > 100 {
-			return nil, invalid("count must be between 1 and 100")
-		}
-		count = parsed
-	}
-	input := db.CronValidationInput{ProjectID: projectID, UID: body.UID, ExpectedEventUID: body.ExpectedEventUID, Name: body.Name, Raw: body.Definition, From: from, Count: count}
+	input := db.CronValidationInput{ProjectID: projectID, UID: fields.String("uid"), ExpectedEventUID: fields.String("expected_event_uid"), Name: fields.String("name"), Raw: fields["definition"], From: from, Count: count}
 	var result db.CronValidation
-	var err error
 	if job {
 		result, err = cfg.DB.ValidateCronJob(ctx, input)
 	} else {
 		result, err = cfg.DB.ValidateCronWorkflow(ctx, input)
 	}
 	if err != nil {
-		return nil, cronAPIError(ctx, cfg, err, projectID, body.UID, job)
+		return nil, cronAPIError(ctx, cfg, err, projectID, input.UID, job)
 	}
 	return &api.CronValidationResponse{Body: api.CronValidationResult{Valid: result.Valid, Name: result.Name, Definition: api.JSONNullableRawObject(result.Definition), Errors: result.Errors, Warnings: result.Warnings, Schedule: result.Schedule}}, nil
 }

@@ -124,11 +124,10 @@
     {{ if $shouldValidate }}
     {{ if and (not $td.IsAlias) (not $td.Schema.UnionElements) (not $td.Schema.IsAnyType) $td.Schema.NeedsValidation }}
     func ({{$alias}} {{$td.Name}}) Validate() error {
-        {{ if or (eq $td.Name "CronValidationResult") (eq $td.Name "SchedulePreview") }}// The generator's complex validators skip nil pointers; enforce presence first.
-        if err := typesValidator.Struct({{$alias}}); err != nil {
-            return runtime.ConvertValidatorError(err)
+        {{ range $td.Schema.Properties }}{{ if index .Extensions "x-kata-require-presence" }}if {{$alias}}.{{.GoName}} == nil {
+            return runtime.NewValidationErrorsFromString("{{.GoName}}", "is required")
         }
-        {{ end }}{{ $td.Schema.ValidateDeclWithOptions $alias $validatorVar $forceSimple }}
+        {{ end }}{{ end }}{{ $td.Schema.ValidateDeclWithOptions $alias $validatorVar $forceSimple }}
     }
     {{ end }}
     {{ end -}}
