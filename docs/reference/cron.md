@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -65,6 +65,51 @@ process inside Kata.
 Secret references are names, and checkout keys are portable names. Credentials,
 host paths, and runtime handles are not part of this shared contract. Opaque
 option objects retain exact JSON numbers.
+
+### Export definitions
+
+Use `kata cron export` to inspect or archive a project's live job and workflow
+definitions. A selected job includes its referenced workflow. Repeat selectors
+to include several definitions; `--all` exports every live definition in the
+selected project. `--all` cannot be combined with selectors.
+
+```sh
+kata cron export --job <job-uid> --workflow <workflow-uid>
+kata cron export --all --output cron-bundle.json
+kata --daemon source-hub --project source-project cron export --all
+```
+
+Output defaults to JSON on stdout (`--output -`). File output replaces the file
+atomically after collecting and validating the whole bundle. Repeated selectors
+and shared workflow dependencies appear once. Explicitly selecting a deleted
+definition, or a job with a missing or deleted workflow, fails the export.
+
+The `kata.cron.bundle` version 1 format contains:
+
+| Field | Content |
+| --- | --- |
+| `format`, `version` | `"kata.cron.bundle"`, `1` |
+| `source` | `project_uid`, `project_name`, RFC 3339 `exported_at` |
+| `workflows`, `jobs` | Arrays of `uid`, `definition_event_uid`, `name`, `definition` |
+
+UIDs and definition event UIDs describe the source. The bundle contains no runs,
+authors, revisions, deleted definitions or delivery checkpoints. Definition
+options retain exact numeric tokens. Secret references remain names; inspect
+prompts and opaque options before sharing a file, since these are operator
+provided content.
+
+Bundles are limited to 16 MiB of encoded JSON, 1000 jobs and workflows combined,
+and 256 KiB per definition. Both catalog arrays are required; empty arrays are valid. Structural fields are strict:
+unknown or duplicate JSON members, trailing input, noncanonical ULIDs, duplicate
+identities within one kind, and missing workflow dependencies are rejected.
+Names must trim to 1–256 bytes. A job and workflow may share a UID.
+
+Definitions are sorted by source UID within their kind. Output is deterministic
+apart from `exported_at`. Export accepts structurally readable historical
+definitions even when today's create rules would reject them. It archives the
+API representation; original stored JSON member presence is not preserved.
+The daemon's current serialization rules and the bundle limits apply. Export performs
+ordinary reads; concurrent edits can change which versions are collected.
 
 ### Request files
 
