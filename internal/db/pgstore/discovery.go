@@ -40,8 +40,7 @@ func buildReadyIssuesQuery(ctx context.Context, projectID int64, filter db.Ready
 	query.WriteString(" AND " + authorizedIssuePredicate(ctx, "i.project_id", &args))
 	appendIssueScopePostgres(&query, &args, filter.IssueScope)
 	query.WriteString(` AND COALESCE((i.metadata::jsonb ->> 'someday')::boolean, false) = false`)
-	filterAfterPriority := filter.PriorityFirst && (filter.Unowned || filter.Owner != "" || len(filter.Labels) > 0 || len(filter.ExcludeLabels) > 0)
-	if filterAfterPriority {
+	if filter.PriorityFirst {
 		// Evaluate optional filters per issue so selective filters keep the ordered walk.
 		query.WriteString(" AND (SELECT true")
 	}
@@ -60,11 +59,8 @@ func buildReadyIssuesQuery(ctx context.Context, projectID int64, filter db.Ready
           SELECT 1 FROM issue_labels il
            WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`)
 	}
-	if filterAfterPriority {
-		query.WriteString(" OFFSET 0)")
-	}
 	if filter.PriorityFirst {
-		query.WriteString(readyPriorityOrderBy)
+		query.WriteString(" OFFSET 0)" + readyPriorityOrderBy)
 	} else {
 		query.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
 	}
@@ -87,25 +83,25 @@ func (s *Store) ReadyIssues(
 		at = time.Now()
 	}
 	query, args := buildReadyIssuesQuery(ctx, projectID, filter, at)
-	return readReadyBatches(ctx, s, query, args, limit, func(rows *sql.Rows) (db.Issue, bool, error) {
+	return readReadyBatches(ctx, s, query, args, limit, func(rows *sql.Rows) (*db.Issue, error) {
 		issue, recurrenceTimezone, err := scanScheduledIssue(ctx, rows)
 		if err != nil {
-			return db.Issue{}, false, err
+			return nil, err
 		}
 		due, err := metadata.ScheduledOnDue(
 			string(issue.Metadata), at, scheduleDefaultTimezone(recurrenceTimezone, filter.DefaultTimezone),
 		)
 		if err != nil {
-			return db.Issue{}, false, fmt.Errorf("ready issue %s schedule: %w", issue.UID, err)
+			return nil, fmt.Errorf("ready issue %s schedule: %w", issue.UID, err)
 		}
 		if !due {
-			return db.Issue{}, false, nil
+			return nil, nil
 		}
 		if issue.AssignmentExpiresOn != nil && !issue.AssignmentExpiresOn.After(at) {
 			issue.Owner = nil
 			issue.AssignmentExpiresOn = nil
 		}
-		return issue, true, nil
+		return &issue, nil
 	})
 }
 
@@ -139,8 +135,7 @@ func buildReadyIssuesGlobalQuery(ctx context.Context, filter db.ReadyIssuesFilte
 	query.WriteString(" AND " + authorizedIssuePredicate(ctx, "i.project_id", &args))
 	appendIssueScopePostgres(&query, &args, filter.IssueScope)
 	query.WriteString(` AND COALESCE((i.metadata::jsonb ->> 'someday')::boolean, false) = false`)
-	filterAfterPriority := filter.PriorityFirst && (filter.Unowned || filter.Owner != "" || len(filter.Labels) > 0 || len(filter.ExcludeLabels) > 0)
-	if filterAfterPriority {
+	if filter.PriorityFirst {
 		// Evaluate optional filters per issue so selective filters keep the ordered walk.
 		query.WriteString(" AND (SELECT true")
 	}
@@ -159,11 +154,8 @@ func buildReadyIssuesGlobalQuery(ctx context.Context, filter db.ReadyIssuesFilte
           SELECT 1 FROM issue_labels il
            WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`)
 	}
-	if filterAfterPriority {
-		query.WriteString(" OFFSET 0)")
-	}
 	if filter.PriorityFirst {
-		query.WriteString(readyPriorityOrderBy)
+		query.WriteString(" OFFSET 0)" + readyPriorityOrderBy)
 	} else {
 		query.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
 	}
@@ -179,14 +171,14 @@ func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 		at = time.Now()
 	}
 	query, args := buildReadyIssuesGlobalQuery(ctx, filter, at)
-	return readReadyBatches(ctx, s, query, args, limit, func(rows *sql.Rows) (db.ReadyGlobalIssue, bool, error) {
+	return readReadyBatches(ctx, s, query, args, limit, func(rows *sql.Rows) (*db.ReadyGlobalIssue, error) {
 		var issue db.Issue
 		var assignmentExpiresOn, closedAt, deletedAt storedNullTime
 		var projectName string
 		var recurrenceTimezone sql.NullString
 		destinations := append(issueDestinations(&issue, &assignmentExpiresOn, &closedAt, &deletedAt), &projectName, &recurrenceTimezone)
 		if err := rows.Scan(destinations...); err != nil {
-			return db.ReadyGlobalIssue{}, false, fmt.Errorf("scan ready global issue: %w", mapSQLError(err, nil))
+			return nil, fmt.Errorf("scan ready global issue: %w", mapSQLError(err, nil))
 		}
 		issue.AssignmentExpiresOn = assignmentExpiresOn.Time
 		issue.ClosedAt = closedAt.Time
@@ -199,16 +191,16 @@ func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 			scheduleDefaultTimezone(recurrenceTimezone.String, filter.DefaultTimezone),
 		)
 		if err != nil {
-			return db.ReadyGlobalIssue{}, false, fmt.Errorf("ready global issue %s schedule: %w", issue.UID, err)
+			return nil, fmt.Errorf("ready global issue %s schedule: %w", issue.UID, err)
 		}
 		if !due {
-			return db.ReadyGlobalIssue{}, false, nil
+			return nil, nil
 		}
 		if issue.AssignmentExpiresOn != nil && !issue.AssignmentExpiresOn.After(at) {
 			issue.Owner = nil
 			issue.AssignmentExpiresOn = nil
 		}
-		return db.ReadyGlobalIssue{Issue: issue, ProjectName: projectName}, true, nil
+		return &db.ReadyGlobalIssue{Issue: issue, ProjectName: projectName}, nil
 	})
 }
 
@@ -286,8 +278,8 @@ func (s *Store) ListIssueContent(ctx context.Context, afterID int64, limit int) 
 
 // Schedules are evaluated in Go. Grow the SQL prefix when parked rows fill
 // a batch, while keeping ordinary limited reads bounded on the wire.
-func readReadyBatches[T any](ctx context.Context, s *Store, query string, args []any, limit int, scan func(*sql.Rows) (T, bool, error)) ([]T, error) {
-	for batch := limit; ; {
+func readReadyBatches[T any](ctx context.Context, s *Store, query string, args []any, limit int, scan func(*sql.Rows) (*T, error)) ([]T, error) {
+	for batch := limit; ; batch *= 2 {
 		bounded := query
 		if batch > 0 {
 			bounded += fmt.Sprintf(" LIMIT %d", batch)
@@ -300,33 +292,25 @@ func readReadyBatches[T any](ctx context.Context, s *Store, query string, args [
 		count := 0
 		for rows.Next() {
 			count++
-			issue, due, err := scan(rows)
+			issue, err := scan(rows)
 			if err != nil {
 				_ = rows.Close()
 				return nil, err
 			}
-			if due {
-				issues = append(issues, issue)
+			if issue != nil {
+				issues = append(issues, *issue)
 			}
 			if limit > 0 && len(issues) == limit {
 				break
 			}
 		}
 		err = rows.Err()
-		closeErr := rows.Close()
+		_ = rows.Close()
 		if err != nil {
 			return nil, fmt.Errorf("iterate ready issues: %w", mapSQLError(err, nil))
 		}
-		if closeErr != nil {
-			return nil, closeErr
-		}
 		if limit <= 0 || len(issues) == limit || count < batch {
 			return issues, nil
-		}
-		if batch > int(^uint(0)>>1)/2 {
-			batch = 0
-		} else {
-			batch *= 2
 		}
 	}
 }

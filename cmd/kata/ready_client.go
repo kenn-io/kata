@@ -23,13 +23,14 @@ type readyIssueForCLI struct {
 }
 
 type readyOptions struct {
+	Limit    int
+	All      bool
+	Unowned  bool
+	Owner    string
+	Labels   []string
+	NoLabels []string
+
 	PriorityFirst bool
-	Limit         int
-	All           bool
-	Unowned       bool
-	Owner         string
-	Labels        []string
-	NoLabels      []string
 }
 
 type readyResultForCLI struct {
