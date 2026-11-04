@@ -1,0 +1,599 @@
+{
+  "schema": "kata.cron.adapter-conformance/v1",
+  "scenarios": [
+    {
+      "name": "schedule/interval-no-creation-run",
+      "steps": [
+        {
+          "plan": {
+            "adapter": "example-adapter",
+            "job": {
+              "created_at": "2030-01-01T00:00:00Z",
+              "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              "deleted": false,
+              "definition": {
+                "version": 1,
+                "kind": "job",
+                "enabled": true,
+                "trigger": {
+                  "kind": "interval",
+                  "interval_seconds": 3600
+                },
+                "action": {
+                  "kind": "execute",
+                  "prompt": "Inspect"
+                },
+                "issue": {
+                  "kind": "per-run",
+                  "title": "Inspection"
+                },
+                "overlap": "allow",
+                "catchup": "all"
+              }
+            },
+            "installed_at": "2029-12-31T00:00:00Z",
+            "now": "2030-01-01T00:00:00Z",
+            "checkpoint": null,
+            "active_runs": 0
+          },
+          "expect": {
+            "launch": [],
+            "checkpoint": {
+              "through": "2030-01-01T00:00:00Z",
+              "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              "pending": []
+            },
+            "excluded": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "schedule/interval-first-after-anchor",
+      "steps": [
+        {
+          "plan": {
+            "adapter": "example-adapter",
+            "job": {
+              "created_at": "2030-01-01T00:00:00Z",
+              "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              "deleted": false,
+              "definition": {
+                "version": 1,
+                "kind": "job",
+                "enabled": true,
+                "trigger": {
+                  "kind": "interval",
+                  "interval_seconds": 3600
+                },
+                "action": {
+                  "kind": "execute",
+                  "prompt": "Inspect"
+                },
+                "issue": {
+                  "kind": "per-run",
+                  "title": "Inspection"
+                },
+                "overlap": "allow",
+                "catchup": "all"
+              }
+            },
+            "installed_at": "2029-12-31T00:00:00Z",
+            "now": "2030-01-01T01:00:00Z",
+            "checkpoint": null,
+            "active_runs": 0
+          },
+          "expect": {
+            "launch": [
+              "2030-01-01T01:00:00Z"
+            ],
+            "checkpoint": {
+              "through": "2030-01-01T01:00:00Z",
+              "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              "pending": []
+            },
+            "excluded": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "schedule/interval-grid",
+      "steps": [
+        {
+          "plan": {
+            "adapter": "example-adapter",
+            "job": {
+              "created_at": "2030-01-01T00:00:00Z",
+              "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              "deleted": false,
+              "definition": {
+                "version": 1,
+                "kind": "job",
+                "enabled": true,
+                "trigger": {
+                  "kind": "interval",
+                  "interval_seconds": 3600
+                },
+                "action": {
+                  "kind": "execute",
+                  "prompt": "Inspect"
+                },
+                "issue": {
+                  "kind": "per-run",
+                  "title": "Inspection"
+                },
+                "overlap": "allow",
+                "catchup": "all"
+              }
+            },
+            "installed_at": "2029-12-31T00:00:00Z",
+            "now": "2030-01-01T03:00:00Z",
+            "checkpoint": null,
+            "active_runs": 0
+          },
+          "expect": {
+            "launch": [
+              "2030-01-01T01:00:00Z",
+              "2030-01-01T02:00:00Z",
+              "2030-01-01T03:00:00Z"
+            ],
+            "checkpoint": {
+              "through": "2030-01-01T03:00:00Z",
+              "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              "pending": []
+            },
+            "excluded": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "schedule/installation-no-backfill",
+      "steps": [
+        {
+          "plan": {
+            "adapter": "example-adapter",
+            "job": {
+              "created_at": "2030-01-01T00:00:00Z",
+              "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              "deleted": false,
+              "definition": {
+                "version": 1,
+                "kind": "job",
+                "enabled": true,
+                "trigger": {
+                  "kind": "interval",
+                  "interval_seconds": 3600
+                },
+                "action": {
+                  "kind": "execute",
+                  "prompt": "Inspect"
+                },
+                "issue": {
+                  "kind": "per-run",
+                  "title": "Inspection"
+                },
+                "overlap": "allow",
+                "catchup": "all"
+              }
+            },
+            "installed_at": "2030-01-01T01:30:00Z",
+            "now": "2030-01-01T03:00:00Z",
+            "checkpoint": null,
+            "active_runs": 0
+          },
+          "expect": {
+            "launch": [
+              "2030-01-01T02:00:00Z",
+              "2030-01-01T03:00:00Z"
+            ],
+            "checkpoint": {
+              "through": "2030-01-01T03:00:00Z",
+              "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              "pending": []
+            },
+            "excluded": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "schedule/checkpoint-exclusive-now-inclusive",
+      "steps": [
+        {
+          "plan": {
+            "adapter": "example-adapter",
+            "job": {
+              "created_at": "2030-01-01T00:00:00Z",
+              "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              "deleted": false,
+              "definition": {
+                "version": 1,
+                "kind": "job",
+                "enabled": true,
+                "trigger": {
+                  "kind": "interval",
+                  "interval_seconds": 3600
+                },
+                "action": {
+                  "kind": "execute",
+                  "prompt": "Inspect"
+                },
+                "issue": {
+                  "kind": "per-run",
+                  "title": "Inspection"
+                },
+                "overlap": "allow",
+                "catchup": "all"
+              }
+            },
+            "installed_at": "2029-12-31T00:00:00Z",
+            "now": "2030-01-01T03:00:00Z",
+            "checkpoint": {
+              "through": "2030-01-01T02:00:00Z",
+              "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              "pending": []
+            },
+            "active_runs": 0
+          },
+          "expect": {
+            "launch": [
+              "2030-01-01T03:00:00Z"
+            ],
+            "checkpoint": {
+              "through": "2030-01-01T03:00:00Z",
+              "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              "pending": []
+            },
+            "excluded": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "schedule/before-first",
+      "steps": [
+        {
+          "plan": {
+            "adapter": "example-adapter",
+            "job": {
+              "created_at": "2030-01-01T00:00:00Z",
+              "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              "deleted": false,
+              "definition": {
+                "version": 1,
+                "kind": "job",
+                "enabled": true,
+                "trigger": {
+                  "kind": "interval",
+                  "interval_seconds": 3600
+                },
+                "action": {
+                  "kind": "execute",
+                  "prompt": "Inspect"
+                },
+                "issue": {
+                  "kind": "per-run",
+                  "title": "Inspection"
+                },
+                "overlap": "allow",
+                "catchup": "all"
+              }
+            },
+            "installed_at": "2029-12-31T00:00:00Z",
+            "now": "2030-01-01T00:58:20Z",
+            "checkpoint": null,
+            "active_runs": 0
+          },
+          "expect": {
+            "launch": [],
+            "checkpoint": {
+              "through": "2030-01-01T00:58:20Z",
+              "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              "pending": []
+            },
+            "excluded": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "schedule/every-anchored",
+      "steps": [
+        {
+          "plan": {
+            "adapter": "example-adapter",
+            "job": {
+              "created_at": "2030-01-01T00:00:00Z",
+              "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              "deleted": false,
+              "definition": {
+                "version": 1,
+                "kind": "job",
+                "enabled": true,
+                "trigger": {
+                  "kind": "cron",
+                  "cron": "@every 90m"
+                },
+                "action": {
+                  "kind": "execute",
+                  "prompt": "Inspect"
+                },
+                "issue": {
+                  "kind": "per-run",
+                  "title": "Inspection"
+                },
+                "overlap": "allow",
+                "catchup": "all"
+              }
+            },
+            "installed_at": "2029-12-31T00:00:00Z",
+            "now": "2030-01-01T03:00:00Z",
+            "checkpoint": null,
+            "active_runs": 0
+          },
+          "expect": {
+            "launch": [
+              "2030-01-01T01:30:00Z",
+              "2030-01-01T03:00:00Z"
+            ],
+            "checkpoint": {
+              "through": "2030-01-01T03:00:00Z",
+              "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              "pending": []
+            },
+            "excluded": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "schedule/once",
+      "steps": [
+        {
+          "plan": {
+            "adapter": "example-adapter",
+            "job": {
+              "created_at": "2030-01-01T00:00:00Z",
+              "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              "deleted": false,
+              "definition": {
+                "version": 1,
+                "kind": "job",
+                "enabled": true,
+                "trigger": {
+                  "kind": "once",
+                  "at": "2030-01-01T02:00:00Z"
+                },
+                "action": {
+                  "kind": "execute",
+                  "prompt": "Inspect"
+                },
+                "issue": {
+                  "kind": "per-run",
+                  "title": "Inspection"
+                },
+                "overlap": "allow",
+                "catchup": "all"
+              }
+            },
+            "installed_at": "2029-12-31T00:00:00Z",
+            "now": "2030-01-01T03:00:00Z",
+            "checkpoint": null,
+            "active_runs": 0
+          },
+          "expect": {
+            "launch": [
+              "2030-01-01T02:00:00Z"
+            ],
+            "checkpoint": {
+              "through": "2030-01-01T03:00:00Z",
+              "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              "pending": []
+            },
+            "excluded": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "schedule/once-at-creation",
+      "steps": [
+        {
+          "plan": {
+            "adapter": "example-adapter",
+            "job": {
+              "created_at": "2030-01-01T00:00:00Z",
+              "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              "deleted": false,
+              "definition": {
+                "version": 1,
+                "kind": "job",
+                "enabled": true,
+                "trigger": {
+                  "kind": "once",
+                  "at": "2030-01-01T00:00:00Z"
+                },
+                "action": {
+                  "kind": "execute",
+                  "prompt": "Inspect"
+                },
+                "issue": {
+                  "kind": "per-run",
+                  "title": "Inspection"
+                },
+                "overlap": "allow",
+                "catchup": "all"
+              }
+            },
+            "installed_at": "2029-12-31T00:00:00Z",
+            "now": "2030-01-01T03:00:00Z",
+            "checkpoint": null,
+            "active_runs": 0
+          },
+          "expect": {
+            "launch": [],
+            "checkpoint": {
+              "through": "2030-01-01T00:00:00Z",
+              "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              "pending": []
+            },
+            "excluded": "once_past"
+          }
+        }
+      ]
+    },
+    {
+      "name": "schedule/directive-precedence",
+      "steps": [
+        {
+          "plan": {
+            "adapter": "example-adapter",
+            "job": {
+              "created_at": "2030-01-01T00:00:00Z",
+              "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              "deleted": false,
+              "definition": {
+                "version": 1,
+                "kind": "job",
+                "enabled": true,
+                "trigger": {
+                  "kind": "cron",
+                  "cron": "TZ=UTC 0 2 * * *",
+                  "timezone": "America/New_York"
+                },
+                "action": {
+                  "kind": "execute",
+                  "prompt": "Inspect"
+                },
+                "issue": {
+                  "kind": "per-run",
+                  "title": "Inspection"
+                },
+                "overlap": "allow",
+                "catchup": "all"
+              }
+            },
+            "installed_at": "2029-12-31T00:00:00Z",
+            "now": "2030-01-01T03:00:00Z",
+            "checkpoint": null,
+            "active_runs": 0
+          },
+          "expect": {
+            "launch": [
+              "2030-01-01T02:00:00Z"
+            ],
+            "checkpoint": {
+              "through": "2030-01-01T03:00:00Z",
+              "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              "pending": []
+            },
+            "excluded": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "schedule/dst-gap",
+      "steps": [
+        {
+          "plan": {
+            "adapter": "example-adapter",
+            "job": {
+              "created_at": "2026-03-08T00:00:00Z",
+              "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              "deleted": false,
+              "definition": {
+                "version": 1,
+                "kind": "job",
+                "enabled": true,
+                "trigger": {
+                  "kind": "cron",
+                  "cron": "30 2 * * *",
+                  "timezone": "America/New_York"
+                },
+                "action": {
+                  "kind": "execute",
+                  "prompt": "Inspect"
+                },
+                "issue": {
+                  "kind": "per-run",
+                  "title": "Inspection"
+                },
+                "overlap": "allow",
+                "catchup": "all"
+              }
+            },
+            "installed_at": "2026-03-08T00:00:00Z",
+            "now": "2026-03-08T08:00:00Z",
+            "checkpoint": null,
+            "active_runs": 0
+          },
+          "expect": {
+            "launch": [
+              "2026-03-08T07:30:00Z"
+            ],
+            "checkpoint": {
+              "through": "2026-03-08T08:00:00Z",
+              "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              "pending": []
+            },
+            "excluded": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "schedule/dst-repeat",
+      "steps": [
+        {
+          "plan": {
+            "adapter": "example-adapter",
+            "job": {
+              "created_at": "2026-11-01T00:00:00Z",
+              "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              "deleted": false,
+              "definition": {
+                "version": 1,
+                "kind": "job",
+                "enabled": true,
+                "trigger": {
+                  "kind": "cron",
+                  "cron": "30 1 * * *",
+                  "timezone": "America/New_York"
+                },
+                "action": {
+                  "kind": "execute",
+                  "prompt": "Inspect"
+                },
+                "issue": {
+                  "kind": "per-run",
+                  "title": "Inspection"
+                },
+                "overlap": "allow",
+                "catchup": "all"
+              }
+            },
+            "installed_at": "2026-11-01T00:00:00Z",
+            "now": "2026-11-01T07:00:00Z",
+            "checkpoint": null,
+            "active_runs": 0
+          },
+          "expect": {
+            "launch": [
+              "2026-11-01T05:30:00Z",
+              "2026-11-01T06:30:00Z"
+            ],
+            "checkpoint": {
+              "through": "2026-11-01T07:00:00Z",
+              "definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+              "pending": []
+            },
+            "excluded": ""
+          }
+        }
+      ]
+    }
+  ]
+}

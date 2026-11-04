@@ -1,0 +1,331 @@
+{
+  "schema": "kata.cron.adapter-conformance/v2",
+  "declaration": {
+    "name": "kata-reference",
+    "tolerance_seconds": 0,
+    "catchup_limit": 1000,
+    "catchup_window_seconds": 0,
+    "failure_policy": "continue"
+  },
+  "scenarios": [
+    {
+      "name": "workflow/successful-dependency",
+      "steps": [
+        {
+          "settle": {
+            "steps": [
+              {
+                "key": "a",
+                "after": [],
+                "retries": 0
+              },
+              {
+                "key": "b",
+                "after": [
+                  "a"
+                ],
+                "retries": 0
+              }
+            ],
+            "outcomes": {
+              "a": [
+                {
+                  "started_at": "2030-01-01T00:00:00Z",
+                  "ended_at": "2030-01-01T00:00:01Z",
+                  "status": "succeeded"
+                }
+              ],
+              "b": [
+                {
+                  "started_at": "2030-01-01T00:00:01Z",
+                  "ended_at": "2030-01-01T00:00:02Z",
+                  "status": "succeeded"
+                }
+              ]
+            },
+            "started_at": "2030-01-01T00:00:00Z",
+            "now": "2030-01-01T00:00:04Z",
+            "timeout_seconds": 0,
+            "cancelled_at": null,
+            "stopped_with_certainty": true
+          },
+          "use_checkpoint": false,
+          "use_occupancy": false,
+          "expect": {
+            "attempts": {
+              "a": 1,
+              "b": 1
+            },
+            "skipped": [],
+            "status": "succeeded",
+            "occupied": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "workflow/waiting-dependency",
+      "steps": [
+        {
+          "settle": {
+            "steps": [
+              {
+                "key": "a",
+                "after": [],
+                "retries": 0
+              },
+              {
+                "key": "b",
+                "after": [
+                  "a"
+                ],
+                "retries": 0
+              }
+            ],
+            "outcomes": {
+              "a": [
+                {
+                  "started_at": "2030-01-01T00:00:00Z",
+                  "ended_at": "0001-01-01T00:00:00Z",
+                  "status": "running"
+                }
+              ],
+              "b": [
+                {
+                  "started_at": "2030-01-01T00:00:01Z",
+                  "ended_at": "2030-01-01T00:00:02Z",
+                  "status": "succeeded"
+                }
+              ]
+            },
+            "started_at": "2030-01-01T00:00:00Z",
+            "now": "2030-01-01T00:00:04Z",
+            "timeout_seconds": 0,
+            "cancelled_at": null,
+            "stopped_with_certainty": false
+          },
+          "use_checkpoint": false,
+          "use_occupancy": false,
+          "expect": {
+            "attempts": {
+              "a": 1,
+              "b": 0
+            },
+            "skipped": [],
+            "status": "running",
+            "occupied": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "workflow/multiple-successful-parents",
+      "steps": [
+        {
+          "settle": {
+            "steps": [
+              {
+                "key": "a",
+                "after": [],
+                "retries": 0
+              },
+              {
+                "key": "b",
+                "after": [],
+                "retries": 0
+              },
+              {
+                "key": "c",
+                "after": [
+                  "a",
+                  "b"
+                ],
+                "retries": 0
+              }
+            ],
+            "outcomes": {
+              "a": [
+                {
+                  "started_at": "2030-01-01T00:00:00Z",
+                  "ended_at": "2030-01-01T00:00:01Z",
+                  "status": "succeeded"
+                }
+              ],
+              "b": [
+                {
+                  "started_at": "2030-01-01T00:00:00Z",
+                  "ended_at": "2030-01-01T00:00:02Z",
+                  "status": "succeeded"
+                }
+              ],
+              "c": [
+                {
+                  "started_at": "2030-01-01T00:00:02Z",
+                  "ended_at": "2030-01-01T00:00:03Z",
+                  "status": "succeeded"
+                }
+              ]
+            },
+            "started_at": "2030-01-01T00:00:00Z",
+            "now": "2030-01-01T00:00:04Z",
+            "timeout_seconds": 0,
+            "cancelled_at": null,
+            "stopped_with_certainty": true
+          },
+          "use_checkpoint": false,
+          "use_occupancy": false,
+          "expect": {
+            "attempts": {
+              "a": 1,
+              "b": 1,
+              "c": 1
+            },
+            "skipped": [],
+            "status": "succeeded",
+            "occupied": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "workflow/blocked-parent",
+      "steps": [
+        {
+          "settle": {
+            "steps": [
+              {
+                "key": "a",
+                "after": [],
+                "retries": 0
+              },
+              {
+                "key": "b",
+                "after": [],
+                "retries": 0
+              },
+              {
+                "key": "c",
+                "after": [
+                  "a",
+                  "b"
+                ],
+                "retries": 0
+              }
+            ],
+            "outcomes": {
+              "a": [
+                {
+                  "started_at": "2030-01-01T00:00:00Z",
+                  "ended_at": "2030-01-01T00:00:01Z",
+                  "status": "failed"
+                }
+              ],
+              "b": [
+                {
+                  "started_at": "2030-01-01T00:00:00Z",
+                  "ended_at": "2030-01-01T00:00:02Z",
+                  "status": "succeeded"
+                }
+              ],
+              "c": [
+                {
+                  "started_at": "2030-01-01T00:00:02Z",
+                  "ended_at": "2030-01-01T00:00:03Z",
+                  "status": "succeeded"
+                }
+              ]
+            },
+            "started_at": "2030-01-01T00:00:00Z",
+            "now": "2030-01-01T00:00:04Z",
+            "timeout_seconds": 0,
+            "cancelled_at": null,
+            "stopped_with_certainty": true
+          },
+          "use_checkpoint": false,
+          "use_occupancy": false,
+          "expect": {
+            "attempts": {
+              "a": 1,
+              "b": 1,
+              "c": 0
+            },
+            "skipped": [
+              "c"
+            ],
+            "status": "failed",
+            "occupied": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "workflow/waiting-parent",
+      "steps": [
+        {
+          "settle": {
+            "steps": [
+              {
+                "key": "a",
+                "after": [],
+                "retries": 0
+              },
+              {
+                "key": "b",
+                "after": [],
+                "retries": 0
+              },
+              {
+                "key": "c",
+                "after": [
+                  "a",
+                  "b"
+                ],
+                "retries": 0
+              }
+            ],
+            "outcomes": {
+              "a": [
+                {
+                  "started_at": "2030-01-01T00:00:00Z",
+                  "ended_at": "2030-01-01T00:00:01Z",
+                  "status": "succeeded"
+                }
+              ],
+              "b": [
+                {
+                  "started_at": "2030-01-01T00:00:00Z",
+                  "ended_at": "0001-01-01T00:00:00Z",
+                  "status": "running"
+                }
+              ],
+              "c": [
+                {
+                  "started_at": "2030-01-01T00:00:02Z",
+                  "ended_at": "2030-01-01T00:00:03Z",
+                  "status": "succeeded"
+                }
+              ]
+            },
+            "started_at": "2030-01-01T00:00:00Z",
+            "now": "2030-01-01T00:00:04Z",
+            "timeout_seconds": 0,
+            "cancelled_at": null,
+            "stopped_with_certainty": false
+          },
+          "use_checkpoint": false,
+          "use_occupancy": false,
+          "expect": {
+            "attempts": {
+              "a": 1,
+              "b": 1,
+              "c": 0
+            },
+            "skipped": [],
+            "status": "running",
+            "occupied": true
+          }
+        }
+      ]
+    }
+  ]
+}
