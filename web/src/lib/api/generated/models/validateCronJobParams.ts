@@ -9,6 +9,8 @@ export type ValidateCronJobParams = {
   from?: string
   /**
    * Number of next fires, from 1 through 100; defaults to 5.
+   * @minimum 1
+   * @maximum 100
    */
-  count?: string
+  count?: number
 }

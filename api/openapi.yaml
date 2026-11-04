@@ -8693,8 +8693,12 @@ paths:
           in: query
           name: count
           schema:
+            default: 5
             description: Number of next fires, from 1 through 100; defaults to 5.
-            type: string
+            format: int64
+            maximum: 100
+            minimum: 1
+            type: integer
       requestBody:
         content:
           application/json:

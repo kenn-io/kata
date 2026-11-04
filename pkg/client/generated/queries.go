@@ -155,7 +155,11 @@ type ValidateCronJobQuery struct {
 	From *string `json:"from,omitempty"`
 
 	// Count Number of next fires, from 1 through 100; defaults to 5.
-	Count *string `json:"count,omitempty"`
+	Count *int64 `json:"count,omitempty" validate:"omitempty,gte=1,lte=100"`
+}
+
+func (v ValidateCronJobQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(v))
 }
 
 type ListCronRunsQuery struct {

@@ -1645,9 +1645,8 @@ type CronValidationResult struct {
 }
 
 func (c CronValidationResult) Validate() error {
-	// The generator's complex validators skip nil pointers; enforce presence first.
-	if err := typesValidator.Struct(c); err != nil {
-		return runtime.ConvertValidatorError(err)
+	if c.Name == nil {
+		return runtime.NewValidationErrorsFromString("Name", "is required")
 	}
 	var errors runtime.ValidationErrors
 	if v, ok := any(c.Definition).(runtime.Validator); ok && v != nil {
@@ -6496,9 +6495,8 @@ type SchedulePreview struct {
 }
 
 func (s SchedulePreview) Validate() error {
-	// The generator's complex validators skip nil pointers; enforce presence first.
-	if err := typesValidator.Struct(s); err != nil {
-		return runtime.ConvertValidatorError(err)
+	if s.From == nil {
+		return runtime.NewValidationErrorsFromString("From", "is required")
 	}
 	var errors runtime.ValidationErrors
 	if err := typesValidator.Var(s.Basis, "required"); err != nil {
