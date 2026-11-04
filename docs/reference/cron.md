@@ -692,6 +692,104 @@ steps yield `succeeded`. Work still in progress before a cutoff is `running`.
 Use the existing [reason-line convention](#independent-run-evidence) when a
 machine-readable cause is available.
 
+### Optional drop records
+
+An adapter declaring `drop_records: true` MUST make discarded occurrences
+visible as run evidence. A candidate is a retained pending instant, after
+revision filtering, or a newly enumerated instant. Catchup removal happens
+first; optional occupied-gate removal happens second. Their sets are disjoint.
+
+For each committed decision and nonempty reason group, record one observation:
+
+- Allocate a fresh run UID, paired with the job UID and frozen definition-event
+  UID. Use initial `expected_revision: 0`.
+- Set `status: "cancelled"`, omit `started_at`, and set `ended_at` to the original
+  decision clock. Nothing executed; the reason distinguishes the disposition.
+- Use the newest dropped instant's stable occurrence key as the representative
+  key for the group. Preserve fractional seconds in keys and range endpoints.
+- Set `summary.version: 1`. Start `summary.message` with `reason: <code>`, then
+  a second line `<count> occurrences <oldest>..<newest>`, with UTC RFC 3339
+  instants. A negotiated summary version supporting a structured reason may use
+  that member instead of the v1 reason line.
+
+| Reason | Meaning |
+| --- | --- |
+| `catchup_missed` | Removed by `latest`, expired `skip` grace, or a declared count/age cap. |
+| `overlap_skipped` | Removed by the optional occupied-gate grace rule below. |
+| `paused_passed_over` | Reserved for explicitly discarded pause windows; do not emit it until pause controls define that operation. |
+
+These are shared adapter reason names under the existing reason-line convention.
+They do not add a Kata observation status or make Kata parse that line.
+
+Atomically persist checkpoint progress and the complete observation intents
+before delivery. Retain each UID and its entire original payload: definition
+references, occurrence key, attribution, summary and decision timestamp. Retry
+that payload unchanged so an acknowledged write replays instead of becoming a
+second observation. A retry must not recompute `ended_at` from its retry clock.
+Remove an intent only after acknowledgement. This is an adapter-local durability
+requirement; the decision kit cannot prove persistence or delivery.
+
+Discarding old pending work after a revision change is not itself a drop record.
+New candidates after the preserved horizon can still incur `catchup_missed`
+under the replacement definition. Deletion and excluded calls produce no drops.
+Retained pending work is not a drop, and empty groups produce no observation.
+
+### Optional overlap deferral
+
+Declare `forbid_deferral: "queue"` or `"drop_after_grace"`. Omission means
+`queue`, preserving the original profile's pending-work behavior. Adapters
+SHOULD prefer `drop_after_grace` and declare drop recording when adopting it.
+
+Under `drop_after_grace`, after catchup selection, a `forbid` call whose local
+gate is still occupied MUST remove selected instants older than `grace_seconds`
+plus declared tolerance. Record them as `overlap_skipped` when recording is
+declared. Keep an instant exactly on the bound. An unresolved unknown still
+occupies the gate. `allow` never produces `overlap_skipped`.
+
+This rule samples occupancy at the current decision. When the gate is free,
+launch behavior remains unchanged, including an overdue oldest occurrence.
+For example, a zero-grace occurrence retained exactly at its instant while
+occupied may launch on a later call if the gate is then free. Enforcing
+historical occupancy would require additional state outside this extension.
+The `queue` choice can also launch late and remains conformant in profile v1.
+
+Recording and deferral are independent options:
+
+| `drop_records` | Effective deferral | Behavior |
+| --- | --- | --- |
+| Omitted/false | `queue` | Original decisions and output shape. |
+| Omitted/false | `drop_after_grace` | Occupied-gate expiry, without a record guarantee. |
+| true | `queue` | Catchup records; pending overlap still queues. |
+| true | `drop_after_grace` | Catchup and occupied-gate records. |
+
+Known adoption differences: [herdr-kata v0.3.0 trims catchup pending without
+recording drops](https://github.com/salmonumbrella/herdr-kata/blob/v0.3.0/internal/worker/worker.go#L169)
+and [keeps pending work while capacity is unavailable](https://github.com/salmonumbrella/herdr-kata/blob/v0.3.0/internal/worker/worker.go#L416).
+Adopting these options requires explicit changes in that runtime.
+
+### Recommended failure alerts
+
+For scheduled runs, adapters SHOULD use this best-effort policy. Manual runs
+report to their caller. Kata does not deliver these adapter failure alerts;
+the adapter chooses its notification carrier.
+
+| Observation | Alert | Dedupe key |
+| --- | --- | --- |
+| First `failed` or `unknown` | Once, immediately. | One shared adverse-observation key per run UID. |
+| `cancelled` with `catchup_missed` | Grouped, with the total count. | Job identity plus stable local sweep/batch identity. |
+| `cancelled` with `overlap_skipped` or `paused_passed_over` | None; retained run evidence remains visible. | None. |
+| Operator `cancelled`, `succeeded`, or `running` | None. | None. |
+
+Send the alert to the job's `author`, which remains its creator across updates.
+Recipient selection is separate from the observation's authenticated actor.
+An unknown outcome later resolved as failed or succeeded neither repeats nor
+retracts the first alert. Retain dedupe and sweep identity across replay and
+restart so a retried observation does not generate another alert.
+
+Log an alert-sink error once and drop that delivery attempt. It MUST NOT block
+or roll back run evidence. Log-and-drop delivery cannot guarantee receipt;
+operators must still be able to inspect recorded outcomes.
+
 These decisions do not prove that an executor actually stopped a process or
 reported all work. Issue-date triggers retain the [existing readiness and
 notification rules](#adapter-responsibilities); readiness-dependent scenarios
