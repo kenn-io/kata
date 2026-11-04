@@ -35,10 +35,10 @@ func newDeleteForm(target formTarget, issue Issue, expected string) inputState {
 	return s
 }
 
-// deleteHidden reports whether the delete key is not on offer: the connected
-// credentials cannot delete. Footer, help overlay and chrome all read it.
+// deleteHidden reports whether credentials or a saved browsing context prevent
+// deletion. Footer, help overlay, chrome, and key routing all read it.
 func (m Model) deleteHidden() bool {
-	return !m.mutationAllowed(false)
+	return !m.mutationAllowed(false) || m.inboxReturn != nil || m.attention.returnContext != nil
 }
 
 // helpKeymap is the keymap the help overlay lists: without the delete key
@@ -55,7 +55,7 @@ func (m Model) routeDeleteKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if !m.keymap.Delete.matches(msg) {
 		return m, nil, false
 	}
-	if (m.view != viewList && m.view != viewDetail) || !m.listIsActive() || m.inboxReturn != nil || m.attention.returnContext != nil {
+	if (m.view != viewList && m.view != viewDetail) || !m.listIsActive() || m.deleteHidden() {
 		return m, nil, true
 	}
 	target, issue, ok := m.activeIssueTarget()

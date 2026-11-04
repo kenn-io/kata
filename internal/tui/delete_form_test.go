@@ -364,6 +364,12 @@ func TestDeleteKeyDoesNothingWithSavedReturnContext(t *testing.T) {
 			}
 			h.selectIssue(target.UID)
 
+			hint := helplayout.HelpItem{Key: "X", Description: "delete"}
+			assertHelpItemAbsent(t, flattenHelpRows(h.m.helpRows()), hint)
+			assertHelpItemAbsent(t, flattenHelpRows(h.m.splitHelpRows()), hint)
+			assertHelpItemAbsent(t, flattenHelpRows(listHelpRows(h.m.list, h.m.chrome())), hint)
+			assert.NotContains(t, stripANSI(renderHelp(h.m.helpKeymap(), 120, ListFilter{})), "delete issue")
+
 			cmd := h.key(runeKey('X'))
 
 			assert.Nil(t, cmd)
