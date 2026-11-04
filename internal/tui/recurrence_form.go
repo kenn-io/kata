@@ -30,7 +30,7 @@ type recurrenceFormState struct {
 	currentAfterRefusal string
 }
 
-const recurrenceChangedMessage = "The issue changed since the form opened; nothing was written. The current recurrence is shown below; save again to write your input over it."
+const recurrenceChangedMessage = "Issue changed; nothing written. Save again to overwrite."
 const recurrenceStoppedMessage = "This issue's recurrence was stopped; a stopped series can't start again"
 
 // recurrenceFormLoadedMsg is the issue and recurrence the Repeat form opens
@@ -350,7 +350,7 @@ func renderRecurrenceForm(s inputState, innerW, height int, now time.Time) strin
 		parts = append(parts, status)
 	}
 	parts = append(parts, renderRecurrenceFooter(s, innerW))
-	box := modalBoxStyle.Width(innerW+2).Padding(0, 1)
+	box := modalBoxStyle.Width(innerW+4).Padding(0, 1)
 	rendered := box.Render(strings.Join(parts, "\n"))
 	if lipgloss.Height(rendered) <= height {
 		return rendered
