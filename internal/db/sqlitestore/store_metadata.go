@@ -211,27 +211,51 @@ func (d *Store) PatchProjectMetadata(ctx context.Context, in db.PatchProjectMeta
 }
 
 func (d *Store) patchProjectMetadata(ctx context.Context, in db.PatchProjectMetadataIn) (db.PatchProjectMetadataOut, error) {
-	var out db.PatchProjectMetadataOut
+	if err := db.RejectCronTallyPatch(in.Patch); err != nil {
+		return db.PatchProjectMetadataOut{}, err
+	}
+	// Preserve public preflight validation before opening a transaction. The
+	// internal helper also validates patches supplied by lifecycle writers.
+	for key, raw := range in.Patch {
+		if err := metadata.Validate(metadata.ProjectRegistry, key, raw); err != nil {
+			return db.PatchProjectMetadataOut{}, fmt.Errorf("validate %q: %w", key, err)
+		}
+	}
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return db.PatchProjectMetadataOut{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	out, err := d.patchProjectMetadataTx(ctx, tx, in)
+	if err != nil {
+		return db.PatchProjectMetadataOut{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return db.PatchProjectMetadataOut{}, err
+	}
+	return out, nil
+}
 
-	// Validate all patch keys before opening a tx. A bad key/value never starts a tx.
+// patchProjectMetadataTx is an internal lifecycle writer. Public callers must
+// pass through PatchProjectMetadata's reserved-namespace guard.
+func (d *Store) patchProjectMetadataTx(ctx context.Context, tx *sql.Tx, in db.PatchProjectMetadataIn) (db.PatchProjectMetadataOut, error) {
+	return d.patchProjectMetadataTxReassert(ctx, tx, in, false)
+}
+
+// Adoption may need a replay correction although the root row is unchanged.
+func (d *Store) patchProjectMetadataTxReassert(ctx context.Context, tx *sql.Tx, in db.PatchProjectMetadataIn, reassertTallies bool) (db.PatchProjectMetadataOut, error) {
+	var out db.PatchProjectMetadataOut
 	for key, raw := range in.Patch {
 		if err := metadata.Validate(metadata.ProjectRegistry, key, raw); err != nil {
 			return out, fmt.Errorf("validate %q: %w", key, err)
 		}
 	}
-
-	tx, err := d.BeginTx(ctx, nil)
-	if err != nil {
-		return out, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
 	var (
 		curMetadata string
 		curRevision int64
 		projectName string
 	)
-	err = tx.QueryRowContext(ctx, `
+	err := tx.QueryRowContext(ctx, `
 		SELECT metadata, revision, name
 		  FROM projects
 		 WHERE id = ? AND deleted_at IS NULL`,
@@ -269,6 +293,9 @@ func (d *Store) patchProjectMetadata(ctx context.Context, in db.PatchProjectMeta
 		return out, fmt.Errorf("apply patch: %w", err)
 	}
 
+	if _, err := db.DecodeCronTallies(db.JSONBlob(newBlob)); err != nil {
+		return out, err
+	}
 	if _, changed := in.Patch[db.ProjectEmbeddingMetadataKey]; changed {
 		if _, err := db.ProjectEmbeddingProducerFromMetadata(db.JSONBlob(string(newBlob))); err != nil {
 			return out, fmt.Errorf("%w: invalid embedding producer configuration", metadata.ErrInvalidValue)
@@ -280,13 +307,17 @@ func (d *Store) patchProjectMetadata(ctx context.Context, in db.PatchProjectMeta
 		return out, fmt.Errorf("compute diff: %w", err)
 	}
 
+	if reassertTallies {
+		for key, value := range in.Patch {
+			if _, changed := diff[key]; !changed {
+				diff[key] = metadata.KeyDiff{From: value, To: value}
+			}
+		}
+	}
 	if len(diff) == 0 {
 		// No-op: commit (no writes) and return Changed=false. Revision unchanged.
 		project, err := projectByIDTx(ctx, tx, in.ProjectID)
 		if err != nil {
-			return out, err
-		}
-		if err := tx.Commit(); err != nil {
 			return out, err
 		}
 		out.Project = project
@@ -336,9 +367,6 @@ func (d *Store) patchProjectMetadata(ctx context.Context, in db.PatchProjectMeta
 
 	project, err := projectByIDTx(ctx, tx, in.ProjectID)
 	if err != nil {
-		return out, err
-	}
-	if err := tx.Commit(); err != nil {
 		return out, err
 	}
 	out.Project = project

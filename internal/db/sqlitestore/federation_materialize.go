@@ -169,7 +169,7 @@ func (m *federationMaterialization) apply(ctx context.Context, tx *sql.Tx, proje
 	if err := deleteUnreferencedFederatedIssues(ctx, tx, m.staleIssues); err != nil {
 		return err
 	}
-	return updateFederatedProjectMetadataTx(ctx, tx, projectID, m.projection.ProjectMetadata[m.binding.HubProjectUID])
+	return updateFederatedProjectMetadataTx(ctx, tx, projectID, m.binding.Role, m.projection.ProjectMetadata[m.binding.HubProjectUID])
 }
 
 // prepareRows compares against persisted values, rather than a previous fold:

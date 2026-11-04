@@ -14,7 +14,7 @@ func TestRefreshFederationBaselineAfterPurgeIgnoresCanceledRequestContext(t *tes
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	err := refreshFederationBaselineAfterPurge(ctx, ServerConfig{DB: store}, project.ID, "agent")
+	err := refreshFederationBaselineAfterReset(ctx, ServerConfig{DB: store}, project.ID, "agent")
 
 	require.NoError(t, err)
 }

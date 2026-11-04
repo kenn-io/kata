@@ -56,6 +56,7 @@ The full contract is in the Cron reference (docs/reference/cron.md).`,
 	for _, action := range []string{"list", "show", "observe"} {
 		runs.AddCommand(newCronOperationCmd("run", action))
 	}
+	runs.AddCommand(newCronRunPruneCmd(), newCronRunCountsCmd())
 	capabilities := newCronOperationCmd("capabilities", "show")
 	capabilities.Use = "capabilities"
 	capabilities.Short = "discover local protocol support without creating cron state"
