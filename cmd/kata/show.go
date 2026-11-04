@@ -606,7 +606,7 @@ func printShowAgent(w io.Writer, b showResponseForCLI, subjectProject, operation
 				fields = append(fields, agentRowField("edited_at", c.EditedAt))
 			}
 			if c.AttributedTeammate != nil {
-				fields = append(fields, agentOptionalRowField("attributed_teammate", new(db.LegacyDisplayContribution(*c.AttributedTeammate))))
+				fields = append(fields, agentRowField("attributed_teammate", db.LegacyDisplayContribution(*c.AttributedTeammate)))
 			}
 			if c.Teammate != "" {
 				fields = append(fields, agentRowField("teammate", c.Teammate))

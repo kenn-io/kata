@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
+	"hegel.dev/go/hegel"
 )
 
 func TestEventsDisplayContribution(t *testing.T) {
@@ -52,4 +53,42 @@ func TestShowDisplayContribution(t *testing.T) {
 		// #nosec G703 -- The developer explicitly selects the local test-artifact path and phase.
 		require.NoError(t, os.WriteFile(filepath.Join(root, "cli-"+phase+"-events.ansi"), events.Bytes(), 0600))
 	}
+}
+
+func TestShowAgentRetainsPresentCommentAttributionProperty(t *testing.T) {
+	hegel.Test(t, func(ht *hegel.T) {
+		display := hegel.Draw(ht, hegel.SampledFrom([]string{"writer-1", "reviewer-2"}))
+		empty := ""
+		for _, testCase := range []struct {
+			name        string
+			value       *string
+			wantPresent bool
+		}{
+			{name: "absent"},
+			{name: "empty", value: &empty, wantPresent: true},
+			{name: "nonempty", value: &display, wantPresent: true},
+		} {
+			response := showResponseForCLI{
+				Comments: []cliShowComment{{
+					UID: "comment-1", Author: "coordinator", CreatedAt: "2026-11-04T12:00:00Z",
+					AttributedTeammate: testCase.value,
+					Teammate:           "route-worker",
+				}},
+			}
+			var agent bytes.Buffer
+			if err := printShowAgent(&agent, response, "example-project", "show"); err != nil {
+				ht.Fatalf("print agent show: %v", err)
+			}
+			present := bytes.Contains(agent.Bytes(), []byte("attributed_teammate="))
+			if present != testCase.wantPresent {
+				ht.Fatalf("agent show attributed_teammate presence for %s = %t, want %t: %s", testCase.name, present, testCase.wantPresent, agent.String())
+			}
+			if testCase.value != nil && !bytes.Contains(agent.Bytes(), []byte("attributed_teammate="+*testCase.value)) {
+				ht.Fatalf("agent show omitted present display value %q: %s", *testCase.value, agent.String())
+			}
+			if !bytes.Contains(agent.Bytes(), []byte("teammate=route-worker")) {
+				ht.Fatalf("agent show omitted routing teammate: %s", agent.String())
+			}
+		}
+	}, hegel.WithTestCases(50), hegel.WithDatabase(t.TempDir()))
 }
