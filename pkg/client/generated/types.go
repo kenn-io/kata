@@ -296,6 +296,7 @@ type BeatCronRuntimeBody struct {
 	Actor           *string                   `json:"actor,omitempty"`
 	Adapter         string                    `json:"adapter" validate:"required"`
 	AdapterVersion  *string                   `json:"adapter_version,omitempty"`
+	Choices         map[string][]string       `json:"choices,omitempty"`
 	Features        []string                  `json:"features,omitempty"`
 	IntervalSeconds *int64                    `json:"interval_seconds,omitempty" validate:"omitempty,gte=10,lte=3600"`
 	KataVersion     *string                   `json:"kata_version,omitempty"`
@@ -5076,6 +5077,9 @@ type ProjectFederationBody struct {
 	// CronRuntimeBeats Supports direct push-enrollment runtime advertisements.
 	CronRuntimeBeats *bool `json:"cron_runtime_beats,omitempty"`
 
+	// Features Optional federation protocol features.
+	Features []string `json:"features,omitempty"`
+
 	// NativeCronWrites Supports native recurring job writes using direct project-scoped push enrollments.
 	NativeCronWrites *bool           `json:"native_cron_writes,omitempty"`
 	ProjectID        int64           `json:"project_id"`
@@ -6429,21 +6433,22 @@ func (r RunIssueSyncOnceResponseBody) Validate() error {
 }
 
 type Runtime struct {
-	Actor           string             `json:"actor" validate:"required"`
-	Adapter         string             `json:"adapter" validate:"required"`
-	AdapterVersion  *string            `json:"adapter_version,omitempty"`
-	ExpiresAt       time.Time          `json:"expires_at" validate:"required"`
-	Features        []string           `json:"features,omitempty"`
-	FirstSeenAt     time.Time          `json:"first_seen_at" validate:"required"`
-	ForwarderActor  *string            `json:"forwarder_actor,omitempty"`
-	IntervalSeconds *int64             `json:"interval_seconds,omitempty" validate:"omitempty,gte=10,lte=3600"`
-	KataVersion     *string            `json:"kata_version,omitempty"`
-	Label           string             `json:"label" validate:"required"`
-	LastSeenAt      time.Time          `json:"last_seen_at" validate:"required"`
-	ReportedVia     RuntimeReportedVia `json:"reported_via" validate:"required"`
-	RuntimeUID      string             `json:"runtime_uid" validate:"required"`
-	State           *RuntimeState      `json:"state,omitempty"`
-	Status          RuntimeStatus      `json:"status" validate:"required"`
+	Actor           string              `json:"actor" validate:"required"`
+	Adapter         string              `json:"adapter" validate:"required"`
+	AdapterVersion  *string             `json:"adapter_version,omitempty"`
+	Choices         map[string][]string `json:"choices,omitempty"`
+	ExpiresAt       time.Time           `json:"expires_at" validate:"required"`
+	Features        []string            `json:"features,omitempty"`
+	FirstSeenAt     time.Time           `json:"first_seen_at" validate:"required"`
+	ForwarderActor  *string             `json:"forwarder_actor,omitempty"`
+	IntervalSeconds *int64              `json:"interval_seconds,omitempty" validate:"omitempty,gte=10,lte=3600"`
+	KataVersion     *string             `json:"kata_version,omitempty"`
+	Label           string              `json:"label" validate:"required"`
+	LastSeenAt      time.Time           `json:"last_seen_at" validate:"required"`
+	ReportedVia     RuntimeReportedVia  `json:"reported_via" validate:"required"`
+	RuntimeUID      string              `json:"runtime_uid" validate:"required"`
+	State           *RuntimeState       `json:"state,omitempty"`
+	Status          RuntimeStatus       `json:"status" validate:"required"`
 }
 
 func (r Runtime) Validate() error {
@@ -6563,10 +6568,12 @@ func (r RuntimeInventoryState) Validate() error {
 
 type RuntimeWarning struct {
 	Adapter    *string  `json:"adapter,omitempty"`
+	Choice     *string  `json:"choice,omitempty"`
 	Code       string   `json:"code" validate:"required"`
 	JobUID     *string  `json:"job_uid,omitempty"`
 	Message    string   `json:"message" validate:"required"`
 	RuntimeUID *string  `json:"runtime_uid,omitempty"`
+	Value      *string  `json:"value,omitempty"`
 	Versions   []string `json:"versions,omitempty"`
 }
 
