@@ -61,6 +61,7 @@ import type {
   CreateTokenResponseBody,
   CronCapabilitiesResponseBody,
   CronDefinitionActionBody,
+  CronDispatchExplanation,
   CronJobResponseBody,
   CronRunResponseBody,
   CronRunsResponseBody,
@@ -97,6 +98,7 @@ import type {
   EnableProjectFederationPathParameters,
   EnableProjectFederationRequestBody,
   ErrorEnvelope,
+  ExplainCronJobDispatchPathParameters,
   ExternalFieldMappingOut,
   ExternalRootActionRequestBody,
   ExternalRootBridgeOut,
@@ -2399,6 +2401,47 @@ export const replaceCronJob = async (
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(putCronJobBody),
   })
+}
+
+export type explainCronJobDispatchResponse200 = {
+  data: CronDispatchExplanation
+  status: 200
+}
+
+export type explainCronJobDispatchResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type explainCronJobDispatchResponseSuccess = explainCronJobDispatchResponse200 & {
+  headers: Headers
+}
+export type explainCronJobDispatchResponseError = explainCronJobDispatchResponseDefault & {
+  headers: Headers
+}
+
+export type explainCronJobDispatchResponse =
+  | explainCronJobDispatchResponseSuccess
+  | explainCronJobDispatchResponseError
+
+export const getExplainCronJobDispatchUrl = ({
+  projectId,
+  cronUid,
+}: ExplainCronJobDispatchPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/jobs/${encodeURIComponent(String(cronUid))}/dispatch`
+}
+
+export const explainCronJobDispatch = async (
+  { projectId, cronUid }: ExplainCronJobDispatchPathParameters,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<explainCronJobDispatchResponse> => {
+  return orvalFetch<explainCronJobDispatchResponse>(
+    getExplainCronJobDispatchUrl({ projectId, cronUid }),
+    {
+      ...options,
+      method: 'GET',
+    },
+  )
 }
 
 export type restoreCronJobResponse200 = {
