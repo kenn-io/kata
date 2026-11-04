@@ -355,7 +355,7 @@ func checkCronTallyAdoptionChunk(t *testing.T, store db.Storage) error {
 
 func checkCronTallyEqualSubsetReplay(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
-	for _, mode := range []string{"subset", "deletion", "whole-equal"} {
+	for _, mode := range []string{"subset", "deletion", "changed-union", "whole-equal"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newCronTallyFixture(ctx, t, store)
 			job := tallyLifecycleEntry(f, 7)
@@ -363,6 +363,9 @@ func checkCronTallyEqualSubsetReplay(t *testing.T, store db.Storage) error {
 			workflow.Kind = "workflow"
 			workflow.Counts.Succeeded = 11
 			full := db.CronTallyValue{Version: 1, Groups: map[string]db.CronTallyEntry{"job": job, "workflow": workflow}}
+			if mode == "changed-union" {
+				delete(full.Groups, "workflow")
+			}
 			raw, err := json.Marshal(map[string]db.CronTallyValue{db.CronTallyPrefix + job.UID: full}, json.Deterministic(true))
 			require.NoError(t, err)
 			_, err = f.q.ExecContext(ctx, `UPDATE projects SET metadata=$1 WHERE id=$2`, string(raw), f.project.ID)
@@ -380,6 +383,10 @@ func checkCronTallyEqualSubsetReplay(t *testing.T, store db.Storage) error {
 			switch mode {
 			case "deletion":
 				payload = fmt.Sprintf(`{"diff":{%q:{"from":%s,"to":null}}}`, db.CronTallyPrefix+job.UID, subset)
+			case "changed-union":
+				incoming, encodeErr := json.Marshal(db.CronTallyValue{Version: 1, Groups: map[string]db.CronTallyEntry{"workflow": workflow}})
+				require.NoError(t, encodeErr)
+				payload = fmt.Sprintf(`{"diff":{%q:{"from":%s,"to":%s}}}`, db.CronTallyPrefix+job.UID, subset, incoming)
 			case "whole-equal":
 				fullValue, encodeErr := json.Marshal(full)
 				require.NoError(t, encodeErr)
@@ -405,6 +412,24 @@ func checkCronTallyEqualSubsetReplay(t *testing.T, store db.Storage) error {
 			replay, err := db.DecodeCronTallies(db.JSONBlob(projection.ProjectMetadata[f.project.UID]))
 			require.NoError(t, err)
 			require.Equal(t, current, replay, "root-approved pull history must reproduce current authoritative tally union")
+			// The unchanged issue-metadata fold is the exact recursive fold used
+			// for project metadata before tally support. Replay real store output.
+			legacyEvents := []db.FoldEvent{}
+			for _, e := range foldEvents {
+				e.IssueUID = "legacy-peer"
+				switch e.Type {
+				case "project.metadata_updated":
+					e.Type = "issue.metadata_updated"
+				case "project.federation_enabled":
+					e.Type = "issue.snapshot"
+					e.Payload, err = json.Marshal(map[string]any{"uid": e.IssueUID, "metadata": db.PayloadMap(e.Payload)["metadata"]})
+					require.NoError(t, err)
+				default:
+					continue
+				}
+				legacyEvents = append(legacyEvents, e)
+			}
+			require.JSONEq(t, string(project.Metadata), string(db.FoldEvents(legacyEvents).IssueMetadata["legacy-peer"]), "pre-tally peers must recover the complete root tally")
 			correctionCount := 0
 			for _, emitted := range result.Events {
 				if emitted.OriginInstanceUID == store.InstanceUID() && emitted.Type == "project.metadata_updated" {
