@@ -273,13 +273,14 @@ func TestDeleteKeyIsOfferedOnlyToCredentialsThatCanDelete(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newDeleteHarness(t, tc.view)
 			target := h.issues[0]
-			if tc.context == "Inbox" {
+			switch tc.context {
+			case "Inbox":
 				_, err := h.env.DB.DesignateInboxProject(t.Context(), db.DesignateInboxProjectIn{ProjectID: h.project.ID, Actor: "alice"})
 				require.NoError(t, err)
 				h.m = h.drain(h.finish(h.key(runeKey('I'))))
 				require.True(t, h.m.scope.inbox)
 				require.NotNil(t, h.m.inboxReturn)
-			} else if tc.context == "Attention" {
+			case "Attention":
 				h.m.attention.returnContext = &attentionReturnContext{detail: h.m.detail}
 			}
 			h.selectIssue(target.UID)
