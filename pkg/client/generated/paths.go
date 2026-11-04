@@ -201,6 +201,10 @@ type ListCronRunsPath struct {
 	ProjectID int64 `json:"project_id"`
 }
 
+type PruneCronRunsPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
 type ShowCronRunPath struct {
 	ProjectID int64  `json:"project_id"`
 	RunUID    string `json:"run_uid" validate:"required"`

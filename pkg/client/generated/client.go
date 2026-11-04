@@ -284,6 +284,9 @@ type ClientInterface interface {
 	ListCronRuns(ctx context.Context, options *ListCronRunsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListCronRunsResponse, error)
 	ListCronRunsWithResponse(ctx context.Context, options *ListCronRunsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListCronRunsResp, error)
 
+	PruneCronRuns(ctx context.Context, options *PruneCronRunsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*PruneCronRunsResponse, error)
+	PruneCronRunsWithResponse(ctx context.Context, options *PruneCronRunsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*PruneCronRunsResp, error)
+
 	ShowCronRun(ctx context.Context, options *ShowCronRunRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ShowCronRunResponse, error)
 	ShowCronRunWithResponse(ctx context.Context, options *ShowCronRunRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ShowCronRunResp, error)
 
@@ -3746,6 +3749,69 @@ func (c *Client) ListCronRuns(ctx context.Context, options *ListCronRunsRequestO
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/runs")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) PruneCronRuns(ctx context.Context, options *PruneCronRunsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*PruneCronRunsResponse, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/runs/actions/prune",
+		Method:      "POST",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*PruneCronRunsResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(PruneCronRunsErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "PruneCronRunsErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(PruneCronRunsResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "PruneCronRunsResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/runs/actions/prune")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}

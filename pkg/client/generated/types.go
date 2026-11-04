@@ -1556,6 +1556,51 @@ func (c CronRun) Validate() error {
 	return errors
 }
 
+type CronRunPruneGroup struct {
+	Counts          map[string]int64 `json:"counts"`
+	JobUID          *string          `json:"job_uid,omitempty"`
+	Name            *string          `json:"name,omitempty"`
+	NewestCreatedAt time.Time        `json:"newest_created_at" validate:"required"`
+	OldestCreatedAt time.Time        `json:"oldest_created_at" validate:"required"`
+	WorkflowUID     *string          `json:"workflow_uid,omitempty"`
+}
+
+func (c CronRunPruneGroup) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+}
+
+type CronRunPruneResult struct {
+	Before            time.Time           `json:"before" validate:"required"`
+	DryRun            bool                `json:"dry_run"`
+	EventsDeleted     int64               `json:"events_deleted"`
+	Groups            []CronRunPruneGroup `json:"groups" validate:"required"`
+	Keep              int64               `json:"keep"`
+	More              bool                `json:"more"`
+	Pruned            int64               `json:"pruned"`
+	ResetAfterEventID *int64              `json:"reset_after_event_id,omitempty"`
+}
+
+func (c CronRunPruneResult) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(c.Before, "required"); err != nil {
+		errors = errors.Append("Before", err)
+	}
+	if err := typesValidator.Var(c.Groups, "required"); err != nil {
+		errors = errors.Append("Groups", err)
+	}
+	for i, item := range c.Groups {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Groups[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type CronRunResponseBody struct {
 	Run CronRun `json:"run"`
 }
@@ -5175,6 +5220,20 @@ type ProjectStatsOut struct {
 }
 
 func (p ProjectStatsOut) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(p))
+}
+
+type PruneCronRunsBody struct {
+	Actor       *string   `json:"actor,omitempty"`
+	Before      time.Time `json:"before" validate:"required"`
+	DryRun      bool      `json:"dry_run"`
+	JobUID      *string   `json:"job_uid,omitempty"`
+	Keep        *int64    `json:"keep,omitempty" validate:"omitempty,gte=1,lte=1000"`
+	Limit       *int64    `json:"limit,omitempty" validate:"omitempty,gte=1,lte=20000"`
+	WorkflowUID *string   `json:"workflow_uid,omitempty"`
+}
+
+func (p PruneCronRunsBody) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(p))
 }
 
