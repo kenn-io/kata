@@ -433,7 +433,7 @@ func (m Model) finishMove(mut mutationDoneMsg) (Model, tea.Cmd) {
 func renderMoveModal(s moveState, width, height int) string {
 	boxed := height >= formMinHeight
 	innerW := max(min(width*7/10, 80), min(width-8, 30))
-	budget := height
+	budget := height - 1 // the footer keeps its row
 	if boxed {
 		budget -= 4 // border and padding
 	} else {

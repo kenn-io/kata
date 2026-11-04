@@ -742,7 +742,7 @@ func TestMoveFormRendersCompletelyAtEveryTerminalSize(t *testing.T) {
 					content.WriteString(strings.Trim(line, " │╭╮╰╯─"))
 					content.WriteString(" ")
 				}
-				require.LessOrEqual(t, strings.Count(rendered, "\n")+1, size.height, "the whole modal fits:\n%s", rendered)
+				require.LessOrEqual(t, strings.Count(rendered, "\n")+1, size.height-1, "the whole modal fits above the footer row:\n%s", rendered)
 				flat := strings.Join(strings.Fields(content.String()), " ")
 				for _, want := range step.want {
 					require.Contains(t, flat, want, "%s\n%s", size.name, rendered)
