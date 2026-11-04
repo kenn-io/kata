@@ -45,7 +45,6 @@ func statusMappingNumber(m db.IssueStatusMapping) (int, error) {
 	return number, nil
 }
 func (r *githubStatusRun) PrefetchStatuses(ctx context.Context, mappings []db.IssueStatusMapping) error {
-	r.prefetched = nil
 	batch, ok := r.session.(StatusBatchSession)
 	if !ok {
 		return nil

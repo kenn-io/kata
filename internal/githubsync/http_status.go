@@ -268,31 +268,19 @@ type StatusBatchSession interface {
 }
 
 func (s *httpFetcherBindingSession) ReadStatuses(ctx context.Context, cfg Config, targets []StatusLocator) (map[string]StatusResult, error) {
-	if len(targets) == 0 {
-		return nil, nil
-	}
-	if len(targets) > parentQueryBatchSize {
-		return nil, fmt.Errorf("GitHub status batch exceeds the page limit")
-	}
-	var results map[string]StatusResult
 	valid := make([]StatusLocator, 0, len(targets))
 	numbers := make([]int, 0, len(targets))
 	ids := make([]int64, 0, len(targets))
 	for _, target := range targets {
-		id, err := s.statusConfig(cfg, target.ExternalID, target.Number)
-		if err != nil {
-			if results == nil {
-				results = make(map[string]StatusResult)
-			}
-			results[target.ExternalID] = StatusResult{Err: err}
-			continue
+		// Invalid targets stay out of the batch; their per-item read reports the error.
+		if id, err := s.statusConfig(cfg, target.ExternalID, target.Number); err == nil {
+			valid = append(valid, target)
+			ids = append(ids, id)
+			numbers = append(numbers, target.Number)
 		}
-		valid = append(valid, target)
-		ids = append(ids, id)
-		numbers = append(numbers, target.Number)
 	}
 	if len(valid) == 0 {
-		return results, nil
+		return nil, nil
 	}
 	if err := s.verifyStatusRepository(ctx, cfg); err != nil {
 		return nil, err
@@ -320,9 +308,7 @@ func (s *httpFetcherBindingSession) ReadStatuses(ctx context.Context, cfg Config
 	if response.Data == nil || response.Data.Repository == nil {
 		return nil, fmt.Errorf("invalid GitHub status GraphQL response")
 	}
-	if results == nil {
-		results = make(map[string]StatusResult, len(targets))
-	}
+	results := make(map[string]StatusResult, len(valid))
 	for i, target := range valid {
 		var node struct {
 			FullDatabaseID graphQLBigInt `json:"fullDatabaseId"`

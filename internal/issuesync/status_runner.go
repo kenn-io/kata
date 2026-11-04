@@ -197,13 +197,7 @@ func (p *statusPass) lap(pending bool, attempted map[int64]bool, failures *[]err
 	}
 	cursor.Through = page.HighWaterID
 	if prefetch, ok := p.run.(StatusPrefetchRun); ok && !pending {
-		eligible := make([]db.IssueStatusMapping, 0, len(page.Mappings))
-		for _, m := range page.Mappings {
-			if !attempted[m.Mapping.ID] && m.State.PendingEventUID == "" && m.LoadError == nil {
-				eligible = append(eligible, m)
-			}
-		}
-		if err := prefetch.PrefetchStatuses(p.statusCtx, eligible); err != nil {
+		if err := prefetch.PrefetchStatuses(p.statusCtx, page.Mappings); err != nil {
 			*failures = append(*failures, err)
 			return true, nil
 		}
