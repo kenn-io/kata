@@ -50,7 +50,7 @@ func decodeCronProjectPause(raw jsontext.Value) (CronProjectPause, error) {
 }
 
 // CronProjectPauseFromMetadata treats malformed present state as paused. Only
-// absence means unpaused; callers must never silently ignore old bad state.
+// absence or null means unpaused; other malformed values stay blocked.
 func CronProjectPauseFromMetadata(blob JSONBlob) *CronProjectPause {
 	if blob == "" {
 		return nil
@@ -60,7 +60,7 @@ func CronProjectPauseFromMetadata(blob JSONBlob) *CronProjectPause {
 		return &CronProjectPause{Invalid: true}
 	}
 	raw, exists := values[CronProjectPauseMetadataKey]
-	if !exists {
+	if !exists || raw.Kind() == jsontext.KindNull {
 		return nil
 	}
 	value, err := decodeCronProjectPause(raw)
@@ -70,24 +70,30 @@ func CronProjectPauseFromMetadata(blob JSONBlob) *CronProjectPause {
 	return &value
 }
 
-// CheckCronProjectPauseAdoption prevents root-owned policy from being
-// published in a spoke-origin metadata baseline. A pause can be resumed first;
-// a retained passover has no authority-preserving adoption path.
-func CheckCronProjectPauseAdoption(project Project) error {
-	if len(project.Metadata) == 0 {
-		return nil
-	}
+// cronControlKey identifies metadata reserved for root-owned cron controls.
+func cronControlKey(key string) bool {
+	return key == CronProjectPauseMetadataKey || strings.HasPrefix(key, CronRequestMetadataPrefix) || cronPassoverKey(key)
+}
+
+// CheckCronControlAdoption prevents retained root policy from becoming a
+// spoke-origin baseline. Null controls are absent under metadata semantics.
+func CheckCronControlAdoption(project Project) error {
 	var values map[string]jsontext.Value
-	if err := json.Unmarshal([]byte(project.Metadata), &values); err != nil {
-		return nil // The existing adoption metadata validation reports corrupt JSON.
+	if len(project.Metadata) == 0 || json.Unmarshal([]byte(project.Metadata), &values) != nil {
+		return nil // Existing adoption validation reports corrupt metadata.
 	}
-	if _, retained := values[CronProjectPauseMetadataKey]; retained {
-		return fmt.Errorf("%w: resume the project cron pause before federation adoption", ErrFederatedSpokeUnsupported)
-	}
-	for key := range values {
-		if cronPassoverKey(key) {
-			return fmt.Errorf("%w: a project with retained cron passover cannot be adopted into another hub", ErrFederatedSpokeUnsupported)
+	for key, value := range values {
+		if !cronControlKey(key) || value.Kind() == jsontext.KindNull {
+			continue
 		}
+		instruction := "a project with retained cron passover cannot be adopted into another hub"
+		if key == CronProjectPauseMetadataKey {
+			instruction = "resume the project cron pause before federation adoption"
+		}
+		if strings.HasPrefix(key, CronRequestMetadataPrefix) {
+			instruction = "wait until retained requests expire and the root collects them before federation adoption"
+		}
+		return fmt.Errorf("%w: %s", ErrFederatedSpokeUnsupported, instruction)
 	}
 	return nil
 }
@@ -96,7 +102,7 @@ func CheckCronProjectPauseAdoption(project Project) error {
 // cron-prefixed project metadata remains ordinary user metadata.
 func CheckCronProjectMetadataWrite(values map[string]jsontext.Value) error {
 	for key := range values {
-		if key == CronProjectPauseMetadataKey || strings.HasPrefix(key, "cron.request.") || cronPassoverKey(key) {
+		if cronControlKey(key) {
 			return fmt.Errorf("%w: %s requires the typed cron control API", metadata.ErrInvalidValue, key)
 		}
 	}
@@ -107,11 +113,6 @@ func CheckCronProjectMetadataWrite(values map[string]jsontext.Value) error {
 // asserted origin. authorityUID is the pinned root; untrusted ingress uses "".
 // Deletion accepts malformed old values so a root can recover legacy state.
 func ValidateCronControlEvent(event RemoteEvent, authorityUID string) error {
-	return validateCronControlEvent(event, authorityUID, true)
-}
-
-// Reset history retains legacy pause recovery; requests and cutoffs validate strictly.
-func validateCronControlEvent(event RemoteEvent, authorityUID string, validatePause bool) error {
 	if event.Type != "project.metadata_updated" {
 		return nil
 	}
@@ -125,32 +126,32 @@ func validateCronControlEvent(event RemoteEvent, authorityUID string, validatePa
 		return fmt.Errorf("%w: invalid cron control diff", ErrFederationIngestValidation)
 	}
 	for key, change := range payload.Diff {
-		request := strings.HasPrefix(key, CronRequestMetadataPrefix)
-		passover := cronPassoverKey(key)
-		if !request && !passover && (!validatePause || key != CronProjectPauseMetadataKey) {
+		if !cronControlKey(key) {
 			continue
 		}
 		if authorityUID == "" || event.OriginInstanceUID != authorityUID {
 			return fmt.Errorf("%w: cron controls require root origin", ErrFederationIngestValidation)
 		}
-		if passover {
-			if err := ValidateCronPassoverChange(key, change.From, change.To); err != nil {
-				return fmt.Errorf("%w: %v", ErrFederationIngestValidation, err)
-			}
-			continue
+		if err := validateCronControlChange(key, change.From, change.To); err != nil {
+			return err
 		}
-		if request {
-			if err := validateCronRequestEventChange(strings.TrimPrefix(key, CronRequestMetadataPrefix), change.From, change.To); err != nil {
-				return fmt.Errorf("%w: %v", ErrFederationIngestValidation, err)
-			}
-			continue
-		}
-		if change.To.Kind() == jsontext.KindNull {
-			continue
-		}
-		if _, err := decodeCronProjectPause(change.To); err != nil {
-			return fmt.Errorf("%w: %v", ErrFederationIngestValidation, err)
-		}
+	}
+	return nil
+}
+
+// validateCronControlChange checks a control value after root authentication.
+func validateCronControlChange(key string, from, to jsontext.Value) error {
+	var err error
+	switch {
+	case cronPassoverKey(key):
+		err = ValidateCronPassoverChange(key, from, to)
+	case strings.HasPrefix(key, CronRequestMetadataPrefix):
+		err = validateCronRequestEventChange(strings.TrimPrefix(key, CronRequestMetadataPrefix), from, to)
+	case key == CronProjectPauseMetadataKey && to.Kind() != jsontext.KindNull:
+		_, err = decodeCronProjectPause(to)
+	}
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrFederationIngestValidation, err)
 	}
 	return nil
 }

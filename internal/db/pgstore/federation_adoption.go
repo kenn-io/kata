@@ -69,7 +69,7 @@ func (s *Store) AdoptProjectIntoFederation(
 		if err := rejectFederationSpokeProjectConflicts(ctx, tx, params.ProjectID); err != nil {
 			return err
 		}
-		if err := db.CheckCronProjectPauseAdoption(project); err != nil {
+		if err := db.CheckCronControlAdoption(project); err != nil {
 			return err
 		}
 		if params.EmptyOnly {

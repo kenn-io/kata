@@ -128,19 +128,6 @@ func (a CronSQL) writeCronProjectMetadataTx(ctx context.Context, tx *sql.Tx, pro
 	if err != nil {
 		return out, err
 	}
-	// Ordinary metadata treats null and absence as equivalent. Cron controls
-	// fail closed on a present null, so deleting one must emit a real diff.
-	var previous map[string]jsontext.Value
-	if project.Metadata != "" {
-		if err := json.Unmarshal([]byte(project.Metadata), &previous); err != nil {
-			return out, err
-		}
-	}
-	for key, value := range patch {
-		if old, present := previous[key]; present && old.Kind() == jsontext.KindNull && value.Kind() == jsontext.KindNull {
-			diff[key] = metadata.KeyDiff{From: old}
-		}
-	}
 	out.Project = project
 	out.NewRevision = project.Revision
 	if len(diff) == 0 {

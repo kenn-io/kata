@@ -55,7 +55,7 @@ func TestCronPassoverDecode(t *testing.T) {
 		require.Equal(t, tc.scope, got.Scope)
 		require.Equal(t, tc.at, got.Through)
 	}
-	for _, bad := range []string{`null`, `true`, `{}`, `{"version":1,"through":"2026-01-02T03:04:05Z","by":null}`, `{"version":2,"through":"2026-01-02T03:04:05Z","by":"operator"}`, `{"version":1,"through":"2026-01-02T04:04:05+01:00","by":"operator"}`, `{"version":1,"through":"2026-01-02T03:04:05Z","by":" "}`, `{"version":1,"through":"2026-01-02T03:04:05Z","by":"operator","paused_at":null}`, `{"version":1,"through":"2026-01-02T03:04:05Z","by":"operator","extra":true}`} {
+	for _, bad := range []string{`true`, `{}`, `{"version":1,"through":"2026-01-02T03:04:05Z","by":null}`, `{"version":2,"through":"2026-01-02T03:04:05Z","by":"operator"}`, `{"version":1,"through":"2026-01-02T04:04:05+01:00","by":"operator"}`, `{"version":1,"through":"2026-01-02T03:04:05Z","by":" "}`, `{"version":1,"through":"2026-01-02T03:04:05Z","by":"operator","paused_at":null}`, `{"version":1,"through":"2026-01-02T03:04:05Z","by":"operator","extra":true}`} {
 		require.True(t, CronPassoverFromMetadata(metadata(jsontext.Value(bad), b), passoverJobUID).Invalid, bad)
 		require.True(t, CronPassoverFromMetadata(metadata(a, jsontext.Value(bad)), passoverJobUID).Invalid, bad)
 	}
@@ -209,17 +209,17 @@ func TestCronPassoverScopeMatrixProperty(t *testing.T) {
 		raw, err := json.Marshal(values)
 		require.NoError(ht, err)
 		got := CronPassoverFromMetadata(JSONBlob(raw), passoverJobUID)
-		invalid := (pKind == 1 || pKind == 2 || jKind == 1 || jKind == 2)
+		invalid := (pKind == 2 || jKind == 2)
 		if invalid {
 			require.Equal(ht, &CronPassoverState{Invalid: true}, got)
 			return
 		}
-		if pKind == 0 && jKind == 0 {
+		if pKind < 2 && jKind < 2 {
 			require.Nil(ht, got)
 			return
 		}
 		want := &CronPassoverState{Through: pAt, Scope: "project"}
-		if pKind == 0 || (jKind == 3 && !jAt.Before(pAt)) {
+		if pKind < 2 || (jKind == 3 && !jAt.Before(pAt)) {
 			want = &CronPassoverState{Through: jAt, Scope: "job"}
 		}
 		require.Equal(ht, want, got, fmt.Sprint(pKind, jKind))

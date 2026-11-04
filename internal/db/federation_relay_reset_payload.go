@@ -82,7 +82,7 @@ func DecodeRootResetPayload(pin RootKeyPin, snapshot RootResetSnapshot) ([]Remot
 				return nil, provenance, err
 			}
 			if section == 1 {
-				if err := validateCronControlEvent(event, pin.AuthorityUID, false); err != nil {
+				if err := ValidateCronControlEvent(event, pin.AuthorityUID); err != nil {
 					return nil, provenance, err
 				}
 			}

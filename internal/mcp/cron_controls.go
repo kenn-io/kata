@@ -18,7 +18,7 @@ type CronProjectPauseInput struct {
 
 func registerCronProjectControlTools(server *sdkmcp.Server, h toolHandlers) {
 	addCronTool(server, "kata.cron_project_pause", "Pause project cron", "Stop native cron delivery and ask adapters to launch no new work. Root-only; running work may finish. Repeating retains the original pause reason and timestamp.", toolHints(false, false, false), h.cronProjectPause)
-	addCronTool(server, "kata.cron_project_resume", "Resume project cron", "Resume project cron policy at its owning hub. Preserves per-job flags; missed native children follow each job's catch-up policy.", toolHints(false, false, false), h.cronProjectResume)
+	addCronTool(server, "kata.cron_project_resume", "Resume project cron", "Resume project cron policy at its owning hub. Preserves per-job flags; missed native children follow each job's catch-up policy.", toolHints(false, true, false), h.cronProjectResume)
 }
 func (h toolHandlers) cronProjectPause(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronProjectPauseInput) (*sdkmcp.CallToolResult, *generated.PauseCronProjectResponse, error) {
 	project, err := h.createTarget(ctx, in.Project)

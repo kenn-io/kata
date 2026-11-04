@@ -492,9 +492,9 @@ func TestServerToolAnnotationsMatchMutationRisk(t *testing.T) {
 	// claims, lease release, recurrence patch) advertise destructive.
 	additive := map[string]bool{
 		"kata.cron_job_request_run": true, "kata.cron_run_request_cancel": true,
-		"kata.cron_project_pause": true, "kata.cron_project_resume": true,
+		"kata.cron_project_pause":   true,
 		"kata.cron_workflow_create": true, "kata.cron_workflow_restore": true,
-		"kata.cron_job_create": true, "kata.cron_job_pause": true, "kata.cron_job_restore": true, "kata.cron_job_resume": true,
+		"kata.cron_job_create": true, "kata.cron_job_pause": true, "kata.cron_job_restore": true,
 		"kata.team_create": true,
 		"kata.comment":     true, "kata.create": true,
 		"kata.project_create": true, "kata.project_restore": true,

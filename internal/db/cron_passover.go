@@ -76,7 +76,7 @@ func CronPassoverFromMetadata(blob JSONBlob, jobUID string) *CronPassoverState {
 	var state *CronPassoverState
 	for _, item := range []struct{ key, scope string }{{CronPassoverMetadataKey, "project"}, {CronPassoverMetadataPrefix + jobUID, "job"}} {
 		raw, ok := values[item.key]
-		if !ok {
+		if !ok || raw.Kind() == jsontext.KindNull {
 			continue
 		}
 		v, e := decodeCronPassover(raw)
@@ -149,7 +149,8 @@ func applyCronProjectMetadataDiff(current, diff jsontext.Value) jsontext.Value {
 			if len(change.To) == 0 || change.To.Kind() == jsontext.KindNull {
 				value = before[key]
 				if len(value) == 0 {
-					value = jsontext.Value("null")
+					delete(after, key)
+					continue
 				}
 			} else {
 				value = canonicalJSON(change.To)

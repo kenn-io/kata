@@ -46,11 +46,9 @@ func (a CronSQL) Request(ctx context.Context, in RequestCronIn) (RequestCronOut,
 		if err != nil {
 			return err
 		}
-		var values map[string]jsontext.Value
-		if project.Metadata != "" {
-			if err := json.Unmarshal([]byte(project.Metadata), &values); err != nil {
-				return err
-			}
+		values, err := cronRequestMetadataValues(string(project.Metadata))
+		if err != nil {
+			return err
 		}
 		key := CronRequestMetadataPrefix + in.UID
 		if raw, exists := values[key]; exists {
@@ -207,6 +205,11 @@ func cronRequestMetadataValues(raw string) (map[string]jsontext.Value, error) {
 	if raw != "" {
 		if err := json.Unmarshal([]byte(raw), &values); err != nil {
 			return nil, err
+		}
+	}
+	for key, value := range values {
+		if strings.HasPrefix(key, CronRequestMetadataPrefix) && value.Kind() == jsontext.KindNull {
+			delete(values, key)
 		}
 	}
 	return values, nil

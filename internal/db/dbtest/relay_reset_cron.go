@@ -153,7 +153,7 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 			}
 			var payload map[string]jsontext.Value
 			require.NoError(t, json.Unmarshal(event.Payload, &payload))
-			var diff map[string]map[string]jsontext.Value
+			diff := make(map[string]map[string]jsontext.Value)
 			require.NoError(t, json.Unmarshal(payload["diff"], &diff))
 			key := "cron.passover." + job.UID
 			if _, ok := diff[key]; !ok {
@@ -208,7 +208,7 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	runs, err := downstream.ListCronRuns(ctx, db.CronRunList{ProjectID: replica.ID})
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
-	installedProject, err := downstream.ProjectByID(ctx, replica.ID)
+	installedProject, err = downstream.ProjectByID(ctx, replica.ID)
 	require.NoError(t, err)
 	var installedMetadata map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(installedProject.Metadata), &installedMetadata))

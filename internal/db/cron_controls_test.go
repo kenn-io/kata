@@ -22,7 +22,7 @@ func TestCronProjectPauseDecode(t *testing.T) {
 	require.Equal(t, "operator", p.PausedBy)
 	require.Equal(t, "maintenance", p.Reason)
 	require.Equal(t, time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC), p.PausedAt)
-	for _, raw := range []string{`null`, `true`, `[]`, `{}`, `{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":null}`, `{"paused_by":"operator"}`, `{"paused_by":" ","paused_at":"2026-01-02T03:04:05Z","reason":""}`, `{"paused_by":"operator","paused_at":"bad","reason":""}`, `{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":"","extra":true}`, `{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":"` + strings.Repeat("x", 257) + `"}`} {
+	for _, raw := range []string{`true`, `[]`, `{}`, `{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":null}`, `{"paused_by":"operator"}`, `{"paused_by":" ","paused_at":"2026-01-02T03:04:05Z","reason":""}`, `{"paused_by":"operator","paused_at":"bad","reason":""}`, `{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":"","extra":true}`, `{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":"` + strings.Repeat("x", 257) + `"}`} {
 		p := CronProjectPauseFromMetadata(JSONBlob(`{"cron.pause":` + raw + `}`))
 		require.NotNil(t, p, raw)
 		require.True(t, p.Invalid, raw)

@@ -27,6 +27,9 @@ func ProjectMetadataAdoptionPayload(metadata JSONBlob) (string, error) {
 	}
 	diff := make(map[string]diffEntry, len(current))
 	for key, value := range current {
+		if cronControlKey(key) && value.Kind() == jsontext.KindNull {
+			continue
+		}
 		diff[key] = diffEntry{From: nil, To: value}
 	}
 	payload, err := json.Marshal(struct {

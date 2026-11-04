@@ -151,20 +151,20 @@ func checkCronProjectPause(t *testing.T, s db.Storage, b Backend) error {
 		})
 		_, err = q.ExecContext(ctx, `UPDATE projects SET metadata=$1 WHERE id=$2`, `{"cron.pause":null,"keep":9007199254740993}`, p.ID)
 		require.NoError(t, err)
+		unpaused, err := s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator"})
+		require.NoError(t, err)
+		require.False(t, unpaused.Changed, "null is already unpaused")
+		require.Nil(t, db.CronProjectPauseFromMetadata(unpaused.Project.Metadata))
 		paused, err := s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", Paused: true})
 		require.NoError(t, err)
-		require.False(t, paused.Changed)
-		require.True(t, db.CronProjectPauseFromMetadata(paused.Project.Metadata).Invalid)
+		require.True(t, paused.Changed)
+		require.False(t, db.CronProjectPauseFromMetadata(paused.Project.Metadata).Invalid)
 		out, err := s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator"})
 		require.NoError(t, err)
-		require.True(t, out.Changed, "resume must delete a retained null policy")
+		require.True(t, out.Changed)
 		require.Nil(t, db.CronProjectPauseFromMetadata(out.Project.Metadata))
-		require.Equal(t, p.Revision+1, out.NewRevision)
-		require.Contains(t, string(out.Event.Payload), `"cron.pause":{"from":null,"to":null}`)
+		require.Equal(t, p.Revision+2, out.NewRevision)
 		require.Contains(t, string(out.Project.Metadata), "9007199254740993")
-		repeat, err := s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator"})
-		require.NoError(t, err)
-		require.False(t, repeat.Changed)
 	})
 	t.Run("spoke denied even disabled", func(t *testing.T) {
 		p, e := s.CreateProject(ctx, "spoke-project")
@@ -176,35 +176,39 @@ func checkCronProjectPause(t *testing.T, s db.Storage, b Backend) error {
 			require.ErrorIs(t, e, db.ErrFederatedSpokeUnsupported)
 		}
 	})
-	t.Run("adoption refuses retained project pause", func(t *testing.T) {
-		for _, emptyOnly := range []bool{false, true} {
-			t.Run(fmt.Sprintf("empty_only_%t", emptyOnly), func(t *testing.T) {
-				p, e := s.CreateProject(ctx, fmt.Sprintf("paused-adoption-%t", emptyOnly))
-				require.NoError(t, e)
-				paused, e := s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", Paused: true, Reason: "maintenance"})
-				require.NoError(t, e)
-				beforeEventID, e := s.MaxEventID(ctx)
-				require.NoError(t, e)
-				hubUID, e := uid.New()
-				require.NoError(t, e)
-
-				_, e = s.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{
-					ProjectID: p.ID, HubURL: "https://daemon.example", HubProjectID: 42,
-					HubProjectUID: hubUID, ReplayHorizonEventID: 1, Actor: "operator", EmptyOnly: emptyOnly,
+	t.Run("adoption refuses retained cron controls", func(t *testing.T) {
+		for _, key := range []string{"cron.pause", "cron.request.01ARZ3NDEKTSV4RRFFQ69G5FAV", "cron.passover", "cron.passover.01ARZ3NDEKTSV4RRFFQ69G5FAV"} {
+			for _, emptyOnly := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/empty_only_%t", key, emptyOnly), func(t *testing.T) {
+					p, e := s.CreateProject(ctx, fmt.Sprintf("control-adoption-%s-%t", strings.ReplaceAll(key, ".", "-"), emptyOnly))
+					require.NoError(t, e)
+					seedPassover(t, s, p.ID, map[string]jsontext.Value{key: jsontext.Value(`false`)})
+					before, e := s.ProjectByID(ctx, p.ID)
+					require.NoError(t, e)
+					beforeEventID, e := s.MaxEventID(ctx)
+					require.NoError(t, e)
+					hubUID, e := uid.New()
+					require.NoError(t, e)
+					_, e = s.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: p.ID, HubURL: "https://daemon.example", HubProjectID: 42, HubProjectUID: hubUID, ReplayHorizonEventID: 1, Actor: "operator", EmptyOnly: emptyOnly})
+					require.ErrorIs(t, e, db.ErrFederatedSpokeUnsupported)
+					switch key {
+					case "cron.pause":
+						require.Contains(t, e.Error(), "resume")
+					case "cron.request.01ARZ3NDEKTSV4RRFFQ69G5FAV":
+						require.Contains(t, e.Error(), "expire")
+					default:
+						require.Contains(t, e.Error(), "passover")
+					}
+					after, e := s.ProjectByID(ctx, p.ID)
+					require.NoError(t, e)
+					require.Equal(t, before, after)
+					afterEventID, e := s.MaxEventID(ctx)
+					require.NoError(t, e)
+					require.Equal(t, beforeEventID, afterEventID)
+					_, e = s.FederationBindingByProject(ctx, p.ID)
+					require.ErrorIs(t, e, db.ErrNotFound)
 				})
-				require.ErrorIs(t, e, db.ErrFederatedSpokeUnsupported)
-				require.Contains(t, e.Error(), "resume")
-
-				after, e := s.ProjectByID(ctx, p.ID)
-				require.NoError(t, e)
-				require.Equal(t, p.UID, after.UID, "rejected adoption must keep the local project identity")
-				require.Equal(t, paused.Project.Metadata, after.Metadata, "rejected adoption must keep the pause metadata")
-				afterEventID, e := s.MaxEventID(ctx)
-				require.NoError(t, e)
-				require.Equal(t, beforeEventID, afterEventID, "rejected adoption must preserve event history")
-				_, e = s.FederationBindingByProject(ctx, p.ID)
-				require.ErrorIs(t, e, db.ErrNotFound, "rejected adoption must not create a federation binding")
-			})
+			}
 		}
 	})
 	t.Run("root disabled binding", func(t *testing.T) {

@@ -60,12 +60,17 @@ func validateCronResetHistory(history, entities []RemoteEvent, authority string)
 		}
 	}
 	for _, event := range history {
-		if err := validateCronControlEvent(event, authority, false); err != nil {
+		if err := ValidateCronControlEvent(event, authority); err != nil {
 			changes := cronResetChanges(event)
 			if changes == nil || event.OriginInstanceUID != authority {
 				return err
 			}
 			for key, change := range changes {
+				if cronControlKey(key) && !cronPassoverKey(key) {
+					if controlErr := validateCronControlChange(key, change.From, change.To); controlErr != nil {
+						return controlErr
+					}
+				}
 				if !cronPassoverKey(key) || ValidateCronPassoverChange(key, change.From, change.To) == nil {
 					continue
 				}

@@ -2966,7 +2966,7 @@ func (d *Store) adoptProjectIntoFederation(
 	if err := rejectExternalRootFederationProject(ctx, tx, p.ProjectID); err != nil {
 		return db.AdoptProjectIntoFederationResult{}, err
 	}
-	if err := db.CheckCronProjectPauseAdoption(project); err != nil {
+	if err := db.CheckCronControlAdoption(project); err != nil {
 		return db.AdoptProjectIntoFederationResult{}, err
 	}
 	if p.EmptyOnly {
