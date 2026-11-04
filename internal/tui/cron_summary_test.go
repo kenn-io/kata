@@ -198,7 +198,7 @@ func TestCronSummaryGroupedEvidence(t *testing.T) {
 	require.Contains(t, text, "  Reason:     agent_quota")
 	require.Contains(t, text, "  Message:    Quota exhausted")
 	require.NotContains(t, text, "Attempts:   0")
-	require.Contains(t, text, "\n\npublish · skipped")
+	require.Contains(t, text, "\n\n  publish · skipped")
 }
 
 func TestCronSummaryExactCostDisplay(t *testing.T) {
@@ -344,4 +344,19 @@ func TestCronSummaryWrappedFieldStripeStableAfterScroll(t *testing.T) {
 	m.height = 16
 	m.cron.stack[0].cursor = 10
 	assertRows(m.viewBody())
+}
+
+func TestCronSummaryStepHeadingHierarchy(t *testing.T) {
+	d := cronDoc{width: 20, labelWidth: 11}
+	key := strings.Repeat("review", 6)
+	cronSummaryDetails(&d, generated.SummaryResponse{Version: 1, Steps: []generated.SummaryStepResponse{{Key: key, Status: "running"}}})
+	var heading strings.Builder
+	for _, line := range d.lines {
+		if line.kind == cronHeadingLine && line.text != "Steps (1)" {
+			require.True(t, strings.HasPrefix(line.text, "  "), line.text)
+			require.LessOrEqual(t, ansi.StringWidth(line.text), d.width)
+			heading.WriteString(strings.TrimSpace(line.text))
+		}
+	}
+	require.Equal(t, key+"·running", strings.ReplaceAll(heading.String(), " ", ""))
 }

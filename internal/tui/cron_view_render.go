@@ -400,8 +400,8 @@ func cronSummaryDetails(d *cronDoc, s generated.SummaryResponse) {
 			if i > 0 {
 				d.text("", cronRef{})
 			}
-			d.heading(step.Key + " · " + step.Status)
 			fields := cronDoc{width: max(d.width-2, 1), labelWidth: d.labelWidth}
+			fields.heading(step.Key + " · " + step.Status)
 			if deref(step.Attempts) > 0 {
 				fields.field("Attempts", fmt.Sprint(deref(step.Attempts)))
 			}

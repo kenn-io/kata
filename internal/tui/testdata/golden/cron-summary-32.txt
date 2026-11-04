@@ -23,7 +23,7 @@ kata カタ jobs [runs] workflows
   Cost:       0.00 USD
 
   Steps (2)
-  review · failed
+    review · failed
     Attempts:   2
     Exit:       0
     Reason:     agent_quota
@@ -31,7 +31,7 @@ kata カタ jobs [runs] workflows
     Message:    Quota exhausted
                 text
 
-  publish · skipped
+    publish · skipped
     Started:    2026-05-
                 01T10:00:00Z
 
