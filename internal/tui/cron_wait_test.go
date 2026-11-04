@@ -7,8 +7,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/notification"
 	"go.kenn.io/kata/pkg/client/generated"
 	"hegel.dev/go/hegel"
@@ -34,7 +36,7 @@ func TestCronWaitOnlyExactNormalizedActorCounts(t *testing.T) {
 
 func TestCronWaitUnavailableOrMalformedNeverBlocks(t *testing.T) {
 	r := generated.CronRun{Status: "running", Actor: "operator", IssueUID: new("issue-example")}
-	p := cronData{waits: map[string]cronParent{"issue-example": {open: true, metadata: map[string]any{"work.attention": "stuck"}}}, waitErr: map[string]error{"issue-example": errors.New("offline")}}
+	p := cronData{waitErr: map[string]error{"issue-example": errors.New("offline")}}
 	require.Equal(t, "running", cronRunHealth(p, r).state)
 	require.Contains(t, cronRunHealth(p, r).reason, "attention unavailable")
 	require.Contains(t, cronRunHealth(cronData{}, r).reason, "attention unavailable")
@@ -91,7 +93,9 @@ func TestCronWaitBlockedIffRunningOpenAndSignalled(t *testing.T) {
 		want := status == "running" && open && (request || attention == "needs-human" || attention == "stuck")
 		got := cronRunHealth(p, r)
 		if request {
-			require.Contains(t, metadata, notification.MetadataKey("operator"), "reading attention must not consume requests")
+			if _, ok := metadata[notification.MetadataKey("operator")]; !ok {
+				ht.Fatal("reading attention must not consume requests")
+			}
 		}
 		if (got.state == "blocked") != want {
 			ht.Fatalf("status=%q open=%v attention=%q request=%v: got %v want blocked=%v", status, open, attention, request, got, want)
@@ -112,4 +116,23 @@ func TestCronWaitBlockedIffRunningOpenAndSignalled(t *testing.T) {
 		w.open = false
 		require.Equal(t, "running", cronRunWaitForActor(w, "operator").state)
 	})
+}
+
+func TestCronHealthOverdueWinsAndNativeIgnoresWait(t *testing.T) {
+	j := cronFixture(t).cron.data.jobs[0]
+	j.Definition.Trigger = generated.TriggerResponse{Kind: "manual"}
+	j.Definition.TimeoutSeconds = new(int64(60))
+	r := generated.CronRun{Status: "running", Actor: "operator", IssueUID: new("issue-example"), JobUID: new(j.UID), CreatedAt: snapshotFixedNow.Add(-time.Hour)}
+	p := cronData{jobs: []generated.CronJob{j}, lastRuns: map[string]generated.CronRun{j.UID: r}, lastErr: map[string]error{}, waits: map[string]cronParent{"issue-example": {open: true, metadata: map[string]any{"work.attention": "stuck"}}}}
+	got := cronHealth(p, j, snapshotFixedNow)
+	require.Equal(t, "overdue", got.state)
+	require.Contains(t, got.reason, "Stuck")
+	j.Definition.TimeoutSeconds = nil
+	require.Equal(t, "blocked", cronHealth(p, j, snapshotFixedNow).state)
+	nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&j.Definition)
+	p.jobs = []generated.CronJob{j}
+	p.parentOpen = map[string]bool{nextParentUID: true}
+	p.progress = map[string]cron.RecurringProgress{j.UID: {Version: 1, Anchor: snapshotFixedNow, Through: snapshotFixedNow}}
+	require.Equal(t, "ok", cronHealth(p, j, snapshotFixedNow).state)
+	require.NotEqual(t, "blocked", cronRunHealth(p, r).state)
 }

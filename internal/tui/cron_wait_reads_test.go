@@ -60,7 +60,7 @@ func TestCronWaitReadFillAndHistoryRevisions(t *testing.T) {
 	require.Empty(t, p.waits)
 }
 
-func TestCronWaitReadsShareWorkersAndDeadline(t *testing.T) {
+func TestCronWaitReadsBoundedWithDeadlineAndCancellation(t *testing.T) {
 	j := cronFixture(t).cron.data.jobs[0]
 	p := cronData{}
 	for i := range 8 {
@@ -112,6 +112,7 @@ func TestCronWaitReadsShareWorkersAndDeadline(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("enrichment did not cancel")
 	}
+	// Fills precede waits; this bounds each stage, not overlapping pools.
 	require.LessOrEqual(t, a.peak, 4)
 	require.NotEmpty(t, a.waitCalls)
 	for uid := range a.waitCalls {
@@ -143,7 +144,7 @@ func (a *cronWaitFetchAPI) readCronParent(ctx context.Context, id int64, uid str
 
 // A fresh unavailable read cannot reuse a preceding successful wait snapshot.
 
-func TestCronWaitRefreshUnavailableProperty(t *testing.T) {
+func TestCronWaitRefreshUnavailable(t *testing.T) {
 	uid := "issue-example"
 	r := generated.CronRun{UID: "run-example", Status: "running", Actor: "operator", IssueUID: new(uid)}
 	metadata := map[string]any{"work.attention": "stuck", notification.MetadataKey("operator"): map[string]any{"from": "worker", "message": "review"}}

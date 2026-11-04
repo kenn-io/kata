@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strconv"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -23,58 +23,58 @@ import (
 func TestCronHealthStates(t *testing.T) {
 	now := snapshotFixedNow
 	for _, tc := range []struct {
-		name, status, want string
-		edit               func(*generated.CronJob)
-		unreadable         bool
-		runDefinition      *string
+		name, status, want, reason string
+		edit                       func(*generated.CronJob)
+		unreadable                 bool
+		runDefinition              *string
 	}{
-		{name: "success", status: "succeeded", want: "ok"},
-		{name: "cancelled", status: "cancelled", want: "ok"},
-		{name: "failed", status: "failed", want: "failing"},
-		{name: "unknown", status: "unknown", want: "failing"},
-		{name: "running", status: "running", want: "running"},
-		{name: "overdue", status: "running", want: "overdue", edit: func(j *generated.CronJob) { j.Definition.TimeoutSeconds = new(int64(60)) }},
-		{name: "timeout equality", status: "running", want: "running", edit: func(j *generated.CronJob) { j.Definition.TimeoutSeconds = new(int64(3600)) }},
-		{name: "never", want: "never ran"},
-		{name: "unavailable", want: "unavailable", unreadable: true},
-		{name: "paused", status: "failed", want: "paused", unreadable: true, edit: func(j *generated.CronJob) { j.Definition.Enabled = false }},
-		{name: "missed", want: "missed", edit: func(j *generated.CronJob) {
+		{name: "success", reason: "last run status is succeeded", status: "succeeded", want: "ok"},
+		{name: "cancelled", reason: "last run status is cancelled", status: "cancelled", want: "ok"},
+		{name: "failed", reason: "last run status is failed", status: "failed", want: "failing"},
+		{name: "unknown", reason: "last run status is unknown", status: "unknown", want: "failing"},
+		{name: "running", reason: "", status: "running", want: "running"},
+		{name: "overdue", reason: "running past timeout_seconds 60 (started 2026-05-01T11:00:00Z)", status: "running", want: "overdue", edit: func(j *generated.CronJob) { j.Definition.TimeoutSeconds = new(int64(60)) }},
+		{name: "timeout equality", reason: "", status: "running", want: "running", edit: func(j *generated.CronJob) { j.Definition.TimeoutSeconds = new(int64(3600)) }},
+		{name: "never", reason: "No scheduled run is past its grace period", want: "never ran"},
+		{name: "unavailable", reason: "last run: read failed", want: "unavailable", unreadable: true},
+		{name: "paused", reason: "", status: "failed", want: "paused", unreadable: true, edit: func(j *generated.CronJob) { j.Definition.Enabled = false }},
+		{name: "missed", reason: "Expected 2026-05-01T07:00:00Z; over 15m0s late (estimate)", want: "missed", edit: func(j *generated.CronJob) {
 			j.CreatedAt = now.Add(-25 * time.Hour)
 			j.Definition.Trigger = generated.TriggerResponse{Kind: "cron", Cron: new("0 7 * * *")}
 		}},
-		{name: "once before registration", want: "missed", edit: func(j *generated.CronJob) {
+		{name: "once before registration", reason: "Expected 2026-05-01T11:00:00Z; over 15m0s late (estimate)", want: "missed", edit: func(j *generated.CronJob) {
 			j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(now.Add(-time.Hour).Format(time.RFC3339))}
 		}},
-		{name: "once equal registration", want: "missed", edit: func(j *generated.CronJob) {
+		{name: "once equal registration", reason: "Expected 2026-05-01T11:00:00Z; over 15m0s late (estimate)", want: "missed", edit: func(j *generated.CronJob) {
 			j.CreatedAt = now.Add(-time.Hour)
 			j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(j.CreatedAt.Format(time.RFC3339))}
 		}},
-		{name: "once future", want: "never ran", edit: func(j *generated.CronJob) {
+		{name: "once future", reason: "No scheduled run is past its grace period", want: "never ran", edit: func(j *generated.CronJob) {
 			j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(now.Add(time.Hour).Format(time.RFC3339))}
 		}},
-		{name: "once observed", status: "succeeded", want: "ok", edit: func(j *generated.CronJob) {
+		{name: "once observed", reason: "One-time job has run", status: "succeeded", want: "ok", edit: func(j *generated.CronJob) {
 			j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(now.Add(-2 * time.Hour).Format(time.RFC3339))}
 		}},
 
-		{name: "rescheduled once under older definition", status: "succeeded", want: "missed", runDefinition: new("01ARZ3NDEKTSV4RRFFQ69G5FB1"), edit: func(j *generated.CronJob) {
+		{name: "rescheduled once under older definition", reason: "Expected 2026-05-01T11:30:00Z; over 15m0s late (estimate)", status: "succeeded", want: "missed", runDefinition: new("01ARZ3NDEKTSV4RRFFQ69G5FB1"), edit: func(j *generated.CronJob) {
 			j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(now.Add(-30 * time.Minute).Format(time.RFC3339))}
 		}},
-		{name: "rescheduled once without identity", status: "succeeded", want: "missed", edit: func(j *generated.CronJob) {
+		{name: "rescheduled once without identity", reason: "Expected 2026-05-01T11:30:00Z; over 15m0s late (estimate)", status: "succeeded", want: "missed", edit: func(j *generated.CronJob) {
 			j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(now.Add(-30 * time.Minute).Format(time.RFC3339))}
 		}},
-		{name: "once manual success under current definition", status: "succeeded", want: "ok", runDefinition: new("01ARZ3NDEKTSV4RRFFQ69G5FB2"), edit: func(j *generated.CronJob) {
+		{name: "once manual success under current definition", reason: "One-time job has run under its current definition", status: "succeeded", want: "ok", runDefinition: new("01ARZ3NDEKTSV4RRFFQ69G5FB2"), edit: func(j *generated.CronJob) {
 			j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(now.Add(-30 * time.Minute).Format(time.RFC3339))}
 		}},
-		{name: "once manual cancellation under current definition", status: "cancelled", want: "ok", runDefinition: new("01ARZ3NDEKTSV4RRFFQ69G5FB2"), edit: func(j *generated.CronJob) {
+		{name: "once manual cancellation under current definition", reason: "One-time job has run under its current definition", status: "cancelled", want: "ok", runDefinition: new("01ARZ3NDEKTSV4RRFFQ69G5FB2"), edit: func(j *generated.CronJob) {
 			j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(now.Add(-30 * time.Minute).Format(time.RFC3339))}
 		}},
-		{name: "once old definition after instant", status: "succeeded", want: "ok", runDefinition: new("01ARZ3NDEKTSV4RRFFQ69G5FB1"), edit: func(j *generated.CronJob) {
+		{name: "once old definition after instant", reason: "One-time job has run", status: "succeeded", want: "ok", runDefinition: new("01ARZ3NDEKTSV4RRFFQ69G5FB1"), edit: func(j *generated.CronJob) {
 			j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(now.Add(-2 * time.Hour).Format(time.RFC3339))}
 		}},
-		{name: "grace equality", want: "never ran", edit: func(j *generated.CronJob) {
+		{name: "grace equality", reason: "No scheduled run is past its grace period", want: "never ran", edit: func(j *generated.CronJob) {
 			j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(now.Add(-15 * time.Minute).Format(time.RFC3339))}
 		}},
-		{name: "invalid trigger", want: "unavailable", edit: func(j *generated.CronJob) {
+		{name: "invalid trigger", reason: "invalid definition: invalid cron document: invalid cron expression", want: "unavailable", edit: func(j *generated.CronJob) {
 			j.Definition.Trigger = generated.TriggerResponse{Kind: "cron", Cron: new("invalid")}
 		}},
 	} {
@@ -93,12 +93,7 @@ func TestCronHealthStates(t *testing.T) {
 			}
 			got := cronHealth(p, j, now)
 			require.Equal(t, tc.want, got.state)
-			if got.state != "paused" && got.state != "running" {
-				require.NotEmpty(t, got.reason)
-			}
-			if tc.name == "overdue" {
-				require.Equal(t, "running past timeout_seconds 60 (started 2026-05-01T11:00:00Z)", got.reason)
-			}
+			require.Equal(t, tc.reason, got.reason)
 		})
 	}
 }
@@ -120,6 +115,19 @@ func TestCronHealthNativeDelivery(t *testing.T) {
 	p.parentOpen[nextParentUID] = true
 	p.progress[j.UID] = cron.RecurringProgress{Version: 9, Anchor: now, Through: now}
 	require.Equal(t, "unavailable", cronHealth(p, j, now).state, "corrupt progress cannot establish delivery health")
+
+	t.Run("observations do not affect delivery", func(t *testing.T) {
+		j := cronFixture(t).cron.data.jobs[0]
+		nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&j.Definition)
+		p := cronData{parentOpen: map[string]bool{nextParentUID: true}, progress: map[string]cron.RecurringProgress{j.UID: {Version: 1, Anchor: snapshotFixedNow, Through: snapshotFixedNow}}}
+		hegel.Test(t, func(ht *hegel.T) {
+			p.lastRuns = map[string]generated.CronRun{j.UID: {Status: hegel.Draw(ht, hegel.Text()), CreatedAt: hegel.Draw(ht, hegel.Datetimes())}}
+			p.lastErr = map[string]error{j.UID: errors.New("unreadable")}
+			if got := cronHealth(p, j, snapshotFixedNow); got.state != "ok" {
+				ht.Fatalf("observation affected native health: %v", got)
+			}
+		}, hegel.WithTestCases(2000))
+	})
 }
 
 func TestCronHealthDisabledAlwaysPaused(t *testing.T) {
@@ -153,21 +161,6 @@ func TestCronHealthFailedNeverOK(t *testing.T) {
 	}, hegel.WithTestCases(2000))
 }
 
-func TestCronHealthNativeIgnoresObservations(t *testing.T) {
-	j := cronFixture(t).cron.data.jobs[0]
-	nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&j.Definition)
-	p := cronData{parentOpen: map[string]bool{nextParentUID: true}, progress: map[string]cron.RecurringProgress{j.UID: {Version: 1, Anchor: snapshotFixedNow, Through: snapshotFixedNow}}}
-	hegel.Test(t, func(ht *hegel.T) {
-		p.lastRuns = map[string]generated.CronRun{j.UID: {Status: hegel.Draw(ht, hegel.Text()), CreatedAt: hegel.Draw(ht, hegel.Datetimes())}}
-		p.lastErr = map[string]error{j.UID: errors.New("unreadable")}
-		if got := cronHealth(p, j, snapshotFixedNow); got.state != "ok" {
-			ht.Fatalf("observation affected native health: %v", got)
-		}
-	}, hegel.WithTestCases(2000))
-}
-
-// Daily UTC schedules admit an independent calendar oracle, including the
-// supported year boundary. Datetimes spans years 1..9999; no DST is involved.
 func TestCronHealthDailyScheduleAndGrace(t *testing.T) {
 	j := cronFixture(t).cron.data.jobs[0]
 	hegel.Test(t, func(ht *hegel.T) {
@@ -276,6 +269,8 @@ func cronLinesText(lines []cronLine) string {
 	return text
 }
 
+// Health text retains readable contrast (at least 4.5:1) against its
+// painted background in both themes, through both rendering entry points.
 func TestCronHealthCellsKeepRowBand(t *testing.T) {
 	defer snapshotInit(t)()
 	for _, mode := range []colorMode{colorDark, colorLight} {
@@ -284,80 +279,44 @@ func TestCronHealthCellsKeepRowBand(t *testing.T) {
 			m.width = 120
 			m.cron.lists[cronJobs].cursor = cursor
 			applyColorMode(mode, mode == colorDark)
-			lines := strings.Split(renderCron(m), "\n")
-			row := slices.IndexFunc(lines, func(line string) bool { return strings.Contains(stripANSI(line), "job-failing") })
-			require.NotEqual(t, -1, row)
-			style := altRowStyle
-			if cursor == 1 {
-				style = cursorRowStyle
-			}
-			expected := attentionTerminalCells(style.Render("x"))[0]
-			cells := attentionTerminalCells(lines[row])
-			require.Len(t, cells, m.width)
-			for x, cell := range cells {
-				require.Equal(t, expected.background, cell.background, "mode %v cursor %d column %d", mode, cursor, x)
+			for _, rendered := range []string{renderCron(m), m.viewContent()} {
+				lines := strings.Split(rendered, "\n")
+				row := slices.IndexFunc(lines, func(line string) bool { return strings.Contains(stripANSI(line), "job-failing") })
+				require.NotEqual(t, -1, row)
+				style := altRowStyle
+				if cursor == 1 {
+					style = cursorRowStyle
+				}
+				expected := attentionTerminalCells(style.Render("x"))[0]
+				cells := attentionTerminalCells(lines[row])
+				require.Len(t, cells, m.width)
+				for x, cell := range cells {
+					require.Equal(t, expected.background, cell.background, "mode %v cursor %d column %d", mode, cursor, x)
+				}
+				if cursor == 1 {
+					plain := stripANSI(lines[row])
+					x := strings.LastIndex(plain, "failing")
+					require.Greater(t, x, 0)
+					cell := attentionTerminalCells(lines[row])[ansi.StringWidth(plain[:x])]
+					luminance := func(index string) float64 {
+						n, err := strconv.ParseUint(index, 10, 8)
+						require.NoError(t, err, "health must have an explicit color")
+						r, g, b, _ := ansi.IndexedColor(n).RGBA()
+						linear := func(v uint32) float64 {
+							c := float64(v) / 65535
+							if c <= 0.04045 {
+								return c / 12.92
+							}
+							return math.Pow((c+0.055)/1.055, 2.4)
+						}
+						return 0.2126*linear(r) + 0.7152*linear(g) + 0.0722*linear(b)
+					}
+					a, b := luminance(cell.foreground), luminance(cell.background)
+					ratio := (max(a, b) + 0.05) / (min(a, b) + 0.05)
+					t.Logf("selected health foreground=%s background=%s contrast=%.2f:1", cell.foreground, cell.background, ratio)
+					require.GreaterOrEqual(t, ratio, 4.5)
+				}
 			}
 		}
-	}
-}
-
-func TestCronHealthOverdueWinsAndNativeIgnoresWait(t *testing.T) {
-	j := cronFixture(t).cron.data.jobs[0]
-	j.Definition.Trigger = generated.TriggerResponse{Kind: "manual"}
-	j.Definition.TimeoutSeconds = new(int64(60))
-	r := generated.CronRun{Status: "running", Actor: "operator", IssueUID: new("issue-example"), JobUID: new(j.UID), CreatedAt: snapshotFixedNow.Add(-time.Hour)}
-	p := cronData{jobs: []generated.CronJob{j}, lastRuns: map[string]generated.CronRun{j.UID: r}, lastErr: map[string]error{}, waits: map[string]cronParent{"issue-example": {open: true, metadata: map[string]any{"work.attention": "stuck"}}}}
-	got := cronHealth(p, j, snapshotFixedNow)
-	require.Equal(t, "overdue", got.state)
-	require.Contains(t, got.reason, "Stuck")
-	j.Definition.TimeoutSeconds = nil
-	require.Equal(t, "blocked", cronHealth(p, j, snapshotFixedNow).state)
-	nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&j.Definition)
-	p.jobs = []generated.CronJob{j}
-	p.parentOpen = map[string]bool{nextParentUID: true}
-	p.progress = map[string]cron.RecurringProgress{j.UID: {Version: 1, Anchor: snapshotFixedNow, Through: snapshotFixedNow}}
-	require.Equal(t, "ok", cronHealth(p, j, snapshotFixedNow).state)
-	require.NotEqual(t, "blocked", cronRunHealth(p, r).state)
-}
-
-// Selected health text must retain readable contrast (at least 4.5:1 for text)
-// against its actual painted background in both shipped color themes.
-func TestCronHealthSelectedContrast(t *testing.T) {
-	defer snapshotInit(t)()
-	for _, mode := range []colorMode{colorDark, colorLight} {
-		t.Run(fmt.Sprint(mode), func(t *testing.T) {
-			m := cronHealthFixture(t)
-			applyColorMode(mode, mode == colorDark)
-			m.width = 120
-			m.cron.lists[cronJobs].cursor = 1
-			for _, row := range strings.Split(m.viewContent(), "\n") {
-				plain := stripANSI(row)
-				if !strings.Contains(plain, "job-failing") {
-					continue
-				}
-				x := strings.LastIndex(plain, "failing")
-				require.Greater(t, x, 0)
-				cell := attentionTerminalCells(row)[ansi.StringWidth(plain[:x])]
-				luminance := func(index string) float64 {
-					n, err := strconv.ParseUint(index, 10, 8)
-					require.NoError(t, err, "health must have an explicit color")
-					r, g, b, _ := ansi.IndexedColor(n).RGBA()
-					linear := func(v uint32) float64 {
-						c := float64(v) / 65535
-						if c <= 0.04045 {
-							return c / 12.92
-						}
-						return math.Pow((c+0.055)/1.055, 2.4)
-					}
-					return 0.2126*linear(r) + 0.7152*linear(g) + 0.0722*linear(b)
-				}
-				a, b := luminance(cell.foreground), luminance(cell.background)
-				ratio := (max(a, b) + 0.05) / (min(a, b) + 0.05)
-				t.Logf("selected health foreground=%s background=%s contrast=%.2f:1", cell.foreground, cell.background, ratio)
-				require.GreaterOrEqual(t, ratio, 4.5)
-				return
-			}
-			t.Fatal("selected failing job missing")
-		})
 	}
 }

@@ -105,7 +105,7 @@ func TestCronEnrichmentExactAndIsolated(t *testing.T) {
 	require.NoError(t, p.lastErr["head"])
 }
 
-func TestCronEnrichmentCapsAndSharedWorkers(t *testing.T) {
+func TestCronEnrichmentAdmissionAndWorkerCaps(t *testing.T) {
 	j := cronFixture(t).cron.data.jobs[0]
 	p := cronData{}
 	for i := range 205 {
@@ -137,6 +137,7 @@ func TestCronEnrichmentCapsAndSharedWorkers(t *testing.T) {
 	<-done
 	require.Equal(t, 200, a.calls)
 	require.Equal(t, 200, a.parents)
+	// Fills block together; parent reads run later. This checks per-stage caps.
 	require.LessOrEqual(t, a.peak, 4)
 	require.Greater(t, a.peak, 1)
 	require.ErrorContains(t, p.lastErr["204"], "200 jobs per refresh")

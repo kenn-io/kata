@@ -58,6 +58,17 @@ func TestCronSeenMergeAlgebra(t *testing.T) {
 			}
 		}
 	}, hegel.WithTestCases(300))
+
+	t.Run("capacity", func(t *testing.T) {
+		ids := make([]string, 1100)
+		for i := range ids {
+			ids[i] = fmt.Sprintf("%04d", i)
+		}
+		s := cronSeenMerge(cronSeenStore{Projects: map[string]cronSeenProject{"p": {Runs: ids}}}, cronSeenStore{})
+		require.Len(t, s.Projects["p"].Runs, 1000)
+		require.NotContains(t, s.Projects["p"].Runs, "0000")
+		require.Contains(t, s.Projects["p"].Runs, "1099")
+	})
 }
 
 func TestCronSeenDecodeRejectsInvalid(t *testing.T) {
@@ -68,15 +79,7 @@ func TestCronSeenDecodeRejectsInvalid(t *testing.T) {
 	}
 }
 
-func TestCronSeenCapAndUnseen(t *testing.T) {
-	ids := make([]string, 1100)
-	for i := range ids {
-		ids[i] = fmt.Sprintf("%04d", i)
-	}
-	s := cronSeenMerge(cronSeenStore{Projects: map[string]cronSeenProject{"p": {Runs: ids}}}, cronSeenStore{})
-	require.Len(t, s.Projects["p"].Runs, 1000)
-	require.NotContains(t, s.Projects["p"].Runs, "0000")
-	require.Contains(t, s.Projects["p"].Runs, "1099")
+func TestCronSeenUnseen(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
 		statuses := []string{"running", "succeeded", "cancelled", "failed", "unknown"}
 		status := statuses[hegel.Draw(ht, hegel.Integers[uint64](0, ^uint64(0)))%uint64(len(statuses))]
@@ -216,6 +219,56 @@ func TestCronSeenLoadedCountAndKeys(t *testing.T) {
 		m = sendRune(m, 'u')
 		assertGolden(t, "cron-runs-unseen", m.viewBody())
 	}
+
+	t.Run("filter preserves run order", func(t *testing.T) {
+		m := cronSeenFixture(t)
+		old := m.cron.data.runs[0]
+		old.UID, old.Status = "01ARZ3NDEKTSV4RRFFQ69G5FAA", "failed"
+		old.CreatedAt = snapshotFixedNow.Add(-time.Hour)
+		old.EndedAt = new(old.CreatedAt)
+		newest := old
+		newest.UID = "01ARZ3NDEKTSV4RRFFQ69G5FAB"
+		newest.CreatedAt = snapshotFixedNow
+		newest.EndedAt = new(newest.CreatedAt)
+		rows := []generated.CronRun{newest, old}
+		m.cron.tab = cronRuns
+		m.cron.data.runs = rows
+		m.cron.data.lastRuns = nil
+		m.cron.data.lookup = nil
+		m.cron.runPage = cronHistoryPage{runs: rows, ready: true}
+		_, _, before := cronScreen(m)
+		m.cron.unseenOnly = true
+		_, _, after := cronScreen(m)
+		require.Equal(t, before[0].target, after[0].target, "enabling a filter must retain the newest-first run order")
+	})
+
+	t.Run("fresh failure after notice", func(t *testing.T) {
+		defer snapshotInit(t)()
+		m := cronNoticeFixture(t)
+		m.width, m.height = 120, 26
+		event := cronNoticeEvent("new-failure", m.cron.data.jobs[0].UID, snapshotFixedNow)
+		m, cmd := updateModel(m, event)
+		require.NotNil(t, cmd)
+		require.True(t, m.pendingRefetch)
+		m, _ = updateModel(m, cronNoticeTickFor(m))
+		require.NotNil(t, m.toast)
+
+		// The old success can remain visible while the asynchronous read is pending.
+		// Deliver its fresh result: no extra event-projection mechanism is needed.
+		m, _ = updateModel(m, refetchTickMsg{})
+		data := *m.cron.data
+		data.events, data.generation = m.cron.events, m.cron.readGen
+		run := data.runs[0]
+		run.UID, run.Status, run.Revision = "new-failure", "failed", 1
+		run.CreatedAt, run.UpdatedAt, run.EndedAt = snapshotFixedNow, snapshotFixedNow, new(snapshotFixedNow)
+		data.runs = []generated.CronRun{run}
+		data.lastRuns = map[string]generated.CronRun{*run.JobUID: run}
+		m, _ = updateModel(m, cronLoadedMsg(data))
+		out := stripANSI(m.viewContent())
+		require.Contains(t, out, "1 unseen failed")
+		require.Contains(t, out, "failing")
+		require.Contains(t, out, "failed 0s ago")
+	})
 }
 
 func TestCronSeenOpeningOldRunAtCapacityIsSeenForSession(t *testing.T) {
@@ -352,28 +405,6 @@ func TestCronSeenRetainedFailureMarker(t *testing.T) {
 	_, _, lines := cronScreen(m)
 	require.Len(t, lines, 1)
 	require.NotContains(t, lines[0].text, "•", "zero unseen count must not show an unseen failure marker")
-}
-
-func TestCronSeenFilterPreservesRunOrder(t *testing.T) {
-	m := cronSeenFixture(t)
-	old := m.cron.data.runs[0]
-	old.UID, old.Status = "01ARZ3NDEKTSV4RRFFQ69G5FAA", "failed"
-	old.CreatedAt = snapshotFixedNow.Add(-time.Hour)
-	old.EndedAt = new(old.CreatedAt)
-	newest := old
-	newest.UID = "01ARZ3NDEKTSV4RRFFQ69G5FAB"
-	newest.CreatedAt = snapshotFixedNow
-	newest.EndedAt = new(newest.CreatedAt)
-	rows := []generated.CronRun{newest, old}
-	m.cron.tab = cronRuns
-	m.cron.data.runs = rows
-	m.cron.data.lastRuns = nil
-	m.cron.data.lookup = nil
-	m.cron.runPage = cronHistoryPage{runs: rows, ready: true}
-	_, _, before := cronScreen(m)
-	m.cron.unseenOnly = true
-	_, _, after := cronScreen(m)
-	require.Equal(t, before[0].target, after[0].target, "enabling a filter must retain the newest-first run order")
 }
 
 func TestCronSeenAsyncMergesAndDisablesWrites(t *testing.T) {

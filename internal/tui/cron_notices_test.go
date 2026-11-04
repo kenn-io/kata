@@ -108,10 +108,6 @@ func TestCronNoticeStartupScopeAndCutoff(t *testing.T) {
 	require.Nil(t, m.toast)
 	m, cmd = m.cronSeenResult(cronSeenResultMsg{data: cronSeenStore{Version: 1}})
 	require.NotNil(t, cmd, "an event before first Cron entry arms after startup load")
-	tick := cronNoticeTickFor(m)
-	m.connGen++
-	m, _ = m.cronNoticeFlush(tick)
-	require.Nil(t, m.toast)
 	m = cronNoticeFixture(t)
 	m.cronSeen.ready = false
 	m, _ = m.cronNoticeEvent(cronNoticeEvent("early", "job", snapshotFixedNow))
@@ -151,6 +147,26 @@ func TestCronNoticeStartupScopeAndCutoff(t *testing.T) {
 	require.NotNil(t, cmd)
 }
 func TestCronNoticeStaleWindowAndHints(t *testing.T) {
+	for _, fence := range []string{"connection", "scope", "generation"} {
+		t.Run(fence, func(t *testing.T) {
+			m := cronNoticeFixture(t)
+			m.cronSeen.ready = false
+			m, _ = m.cronNoticeEvent(cronNoticeEvent("early", "job", snapshotFixedNow))
+			m, _ = m.cronSeenResult(cronSeenResultMsg{data: cronSeenStore{Version: 1}})
+			tick := cronNoticeTickFor(m)
+			switch fence {
+			case "connection":
+				m.connGen++
+			case "scope":
+				m.scopeGen++
+			case "generation":
+				m.cronNotices.gen++
+			}
+			m, _ = m.cronNoticeFlush(tick)
+			require.Nil(t, m.toast, "stale tick must not emit a notice")
+		})
+	}
+
 	m := cronNoticeFixture(t)
 	m, _ = m.cronNoticeEvent(cronNoticeEvent("a", "job", snapshotFixedNow))
 	old := cronNoticeTickFor(m)
@@ -271,8 +287,9 @@ func TestCronNoticeRenderedFailure(t *testing.T) {
 	require.NotEqual(t, -1, notice)
 	t.Run("severity", func(t *testing.T) {
 		want := attentionTerminalCells(errorStyle.Render("x"))[0].foreground
-		x := strings.Index(stripANSI(lines[notice]), "cron:")
-		cell := attentionTerminalCells(lines[notice])[x]
+		plain := stripANSI(lines[notice])
+		x := strings.Index(plain, "cron:")
+		cell := attentionTerminalCells(lines[notice])[ansi.StringWidth(plain[:x])]
 		require.Equal(t, want, cell.foreground, "failure notice must use the error foreground")
 	})
 	t.Run("footer", func(t *testing.T) {
@@ -280,21 +297,6 @@ func TestCronNoticeRenderedFailure(t *testing.T) {
 		require.Less(t, notice, len(lines)-1)
 	})
 
-	// The old success can remain visible while the asynchronous read is pending.
-	// Deliver its fresh result: no extra event-projection mechanism is needed.
-	m, _ = updateModel(m, refetchTickMsg{})
-	data := *m.cron.data
-	data.events, data.generation = m.cron.events, m.cron.readGen
-	run := data.runs[0]
-	run.UID, run.Status, run.Revision = "new-failure", "failed", 1
-	run.CreatedAt, run.UpdatedAt, run.EndedAt = snapshotFixedNow, snapshotFixedNow, new(snapshotFixedNow)
-	data.runs = []generated.CronRun{run}
-	data.lastRuns = map[string]generated.CronRun{*run.JobUID: run}
-	m, _ = updateModel(m, cronLoadedMsg(data))
-	out := stripANSI(m.viewContent())
-	require.Contains(t, out, "1 unseen failed")
-	require.Contains(t, out, "failing")
-	require.Contains(t, out, "failed 0s ago")
 }
 
 // Failure severity applies to the shared notice row outside the Cron list.
@@ -333,7 +335,7 @@ func TestCronNoticeClearsOnSwitch(t *testing.T) {
 				m, _ = updateModel(m, cronNoticeTickFor(m))
 			case "daemon":
 				m, _ = updateModel(m, daemonSwitchResultMsg{conn: daemonConnection{
-					api: NewClient("http://daemon.example", nil),
+					api:  NewClient("http://daemon.example", nil),
 					init: bootInit{view: viewList, scope: homedScope(8, "other-project")},
 				}})
 			}

@@ -45,7 +45,6 @@ func TestCronReplicaChip(t *testing.T) {
 	}
 
 	{
-		defer snapshotInit(t)()
 		m := cronFixture(t)
 		m.width = 120
 		m.cron.data.replica = cronReplica{role: "spoke", pulledAt: new(snapshotFixedNow.Add(-3 * time.Minute))}

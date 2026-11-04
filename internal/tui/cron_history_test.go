@@ -194,7 +194,7 @@ func TestCronHistoryBackToJobRestartsHistory(t *testing.T) {
 	}
 }
 
-func TestCronHistoryRetainedRunRevision(t *testing.T) {
+func TestCronHistoryRetainedRuns(t *testing.T) {
 	for _, jobHistory := range []bool{false, true} {
 		t.Run(map[bool]string{false: "project", true: "job"}[jobHistory], func(t *testing.T) {
 			m := cronSeenFixture(t)
@@ -260,6 +260,49 @@ func TestCronHistoryRetainedRunRevision(t *testing.T) {
 		}
 		require.Contains(t, text, "run refresh offline")
 	})
+
+	t.Run("retained row opens and is acknowledged", func(t *testing.T) {
+		m := cronSeenFixture(t)
+		head := m.cron.data.runs[0]
+		old := head
+		old.UID, old.Status = "retained-failure", "failed"
+		old.CreatedAt = snapshotFixedNow.Add(-24 * time.Hour)
+		old.EndedAt = new(old.CreatedAt)
+		m.cron.data.runs = []generated.CronRun{head}
+		m.cron.data.lastRuns = map[string]generated.CronRun{*head.JobUID: head}
+		m.cron.data.lookup = map[string]generated.CronRun{old.UID: old}
+		m.cron.runPage = cronHistoryPage{runs: []generated.CronRun{head, old}, ready: true, older: true}
+		m.cron.tab = cronRuns
+		m.api = &cronReadTestAPI{data: *m.cron.data}
+		m.cron.events++
+		m = m.cronLoaded(m.fetchCron()().(cronLoadedMsg))
+		_, _, lines := cronScreen(m)
+		i := slices.IndexFunc(lines, func(l cronLine) bool { return l.target.uid == old.UID })
+		require.NotEqual(t, -1, i, "event retains the older row")
+		m.cron.lists[cronRuns].cursor = i
+		m, _ = m.routeCronKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+		require.Zero(t, m.cronUnseenCount(), "opening the retained row acknowledges it")
+		_, _, detail := cronScreen(m)
+		require.NotContains(t, cronLinesText(detail), "no longer in the loaded data", "an acknowledged run must still be readable")
+		require.Contains(t, cronLinesText(detail), "failed")
+	})
+
+	t.Run("project lookup survives failed refresh", func(t *testing.T) {
+		m := cronFixture(t)
+		r := m.cron.data.runs[0]
+		r.UID = "old-page"
+		a := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: []generated.CronRun{r}}
+		m.api = a
+		m.cron.runPage.next = "cursor"
+		m, cmd := m.cronRequestPage("", false)
+		m = m.cronPageLoaded(cmd().(cronPageMsg))
+		data := *m.cron.data
+		data.runsErr = errors.New("offline")
+		m = m.cronLoaded(cronLoadedMsg(data))
+		m.cron.stack = []cronFrame{{ref: cronRef{cronRuns, r.UID}}}
+		_, _, lines := cronScreen(m)
+		require.Contains(t, cronLinesText(lines), "Report ready")
+	})
 }
 
 type cronRunRefreshAPI struct {
@@ -276,32 +319,6 @@ func (a *cronRunRefreshAPI) readCronRun(ctx context.Context, _ int64, uid string
 		return generated.CronRun{}, errors.New("wrong run UID")
 	}
 	return a.run, a.err
-}
-
-func TestCronHistoryRetainedRunLink(t *testing.T) {
-	m := cronSeenFixture(t)
-	head := m.cron.data.runs[0]
-	old := head
-	old.UID, old.Status = "retained-failure", "failed"
-	old.CreatedAt = snapshotFixedNow.Add(-24 * time.Hour)
-	old.EndedAt = new(old.CreatedAt)
-	m.cron.data.runs = []generated.CronRun{head}
-	m.cron.data.lastRuns = map[string]generated.CronRun{*head.JobUID: head}
-	m.cron.data.lookup = map[string]generated.CronRun{old.UID: old}
-	m.cron.runPage = cronHistoryPage{runs: []generated.CronRun{head, old}, ready: true, older: true}
-	m.cron.tab = cronRuns
-	m.api = &cronReadTestAPI{data: *m.cron.data}
-	m.cron.events++
-	m = m.cronLoaded(m.fetchCron()().(cronLoadedMsg))
-	_, _, lines := cronScreen(m)
-	i := slices.IndexFunc(lines, func(l cronLine) bool { return l.target.uid == old.UID })
-	require.NotEqual(t, -1, i, "event retains the older row")
-	m.cron.lists[cronRuns].cursor = i
-	m, _ = m.routeCronKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-	require.Zero(t, m.cronUnseenCount(), "opening the retained row acknowledges it")
-	_, _, detail := cronScreen(m)
-	require.NotContains(t, cronLinesText(detail), "no longer in the loaded data", "an acknowledged run must still be readable")
-	require.Contains(t, cronLinesText(detail), "failed")
 }
 
 func TestCronHistoryRefreshPreservesEventPages(t *testing.T) {
@@ -468,20 +485,4 @@ func TestCronHistoryJobPagesAndLookup(t *testing.T) {
 	_, _, lines = cronScreen(m)
 	require.False(t, slices.ContainsFunc(lines, func(l cronLine) bool { return l.target.uid == old.UID }))
 
-	t.Run("project lookup survives failed refresh", func(t *testing.T) {
-		m := cronFixture(t)
-		r := m.cron.data.runs[0]
-		r.UID = "old-page"
-		a := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: []generated.CronRun{r}}
-		m.api = a
-		m.cron.runPage.next = "cursor"
-		m, cmd := m.cronRequestPage("", false)
-		m = m.cronPageLoaded(cmd().(cronPageMsg))
-		data := *m.cron.data
-		data.runsErr = errors.New("offline")
-		m = m.cronLoaded(cronLoadedMsg(data))
-		m.cron.stack = []cronFrame{{ref: cronRef{cronRuns, r.UID}}}
-		_, _, lines := cronScreen(m)
-		require.Contains(t, cronLinesText(lines), "Report ready")
-	})
 }
