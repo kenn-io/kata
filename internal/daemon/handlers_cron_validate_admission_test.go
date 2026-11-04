@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -50,20 +49,4 @@ func TestCronValidateJobAdmission(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestCronValidateCountSchema(t *testing.T) {
-	operation := daemon.OpenAPIDocument().Paths["/api/v1/projects/{project_id}/cron/jobs/validate"].Post
-	for _, parameter := range operation.Parameters {
-		if parameter.Name != "count" {
-			continue
-		}
-		require.Equal(t, "integer", parameter.Schema.Type)
-		require.NotNil(t, parameter.Schema.Minimum)
-		require.Equal(t, float64(1), *parameter.Schema.Minimum)
-		require.NotNil(t, parameter.Schema.Maximum)
-		require.Equal(t, float64(100), *parameter.Schema.Maximum)
-		return
-	}
-	t.Fatal("count query parameter missing")
 }

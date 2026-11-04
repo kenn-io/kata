@@ -58,7 +58,7 @@ func TestCronCapabilitiesProjectScopedHostRead(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, server.Close()) })
 	for _, op := range []struct{ method, path, body, id string }{
 		{http.MethodGet, "/api/v1/projects/%d/cron/capabilities", "", "getCronCapabilities"},
-		{http.MethodPost, "/api/v1/projects/%d/cron/jobs/validate", `{"name":"Inspect","definition":{"version":1,"kind":"job","trigger":{"kind":"manual"},"action":{"kind":"execute","prompt":"Review"},"issue":{"kind":"per-run","title":"Review"},"overlap":"forbid","catchup":"latest"}}`, "validateCronJob"},
+		{http.MethodPost, "/api/v1/projects/%d/cron/jobs/validate", `{"name":"Inspect","definition":{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"manual"},"action":{"kind":"execute","prompt":"Review"},"issue":{"kind":"per-run","title":"Review"},"overlap":"forbid","catchup":"latest"}}`, "validateCronJob"},
 	} {
 		for _, tc := range []struct {
 			id   int64

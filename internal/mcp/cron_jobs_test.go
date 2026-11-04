@@ -226,13 +226,24 @@ func TestCronParentScopeAndMismatch(t *testing.T) {
 	created := cronRecord(t, f.session, "cron_job_create", args, "job")
 	require.Equal(t, parent.UID, created["definition"].(map[string]any)["issue"].(map[string]any)["parent_uid"])
 	args["uid"] = cronNewUID(t, f.session)
-	args["parent_ref"] = "other-project#" + foreign.ShortID
-	require.True(t, cronCall(t, f.session, "cron_job_create", args).IsError)
-	args["parent_ref"] = parent.UID
-	definition["issue"].(map[string]any)["parent_uid"] = foreign.UID
-	require.True(t, cronCall(t, f.session, "cron_job_create", args).IsError)
-	args["parent_ref"] = ""
-	require.True(t, cronCall(t, f.session, "cron_job_create", args).IsError, "daemon rejects a cross-project parent UID")
+	for _, operation := range []string{"cron_job_create", "cron_job_validate"} {
+		args["project"] = "other-project"
+		require.True(t, cronCall(t, f.session, operation, args).IsError)
+		delete(args, "project")
+		args["parent_ref"] = "other-project#" + foreign.ShortID
+		require.True(t, cronCall(t, f.session, operation, args).IsError)
+		args["parent_ref"] = parent.UID
+		definition["issue"].(map[string]any)["parent_uid"] = foreign.UID
+		require.True(t, cronCall(t, f.session, operation, args).IsError)
+		args["parent_ref"] = ""
+		if operation == "cron_job_validate" {
+			result := cronOK(t, f.session, operation, args)
+			require.Equal(t, false, result["valid"])
+			require.Equal(t, "dependencies", result["errors"].([]any)[0].(map[string]any)["stage"])
+		} else {
+			require.True(t, cronCall(t, f.session, operation, args).IsError, "daemon rejects a cross-project parent UID")
+		}
+	}
 }
 func TestCronDefinitionOpaqueNumbers(t *testing.T) {
 	f := newCronFixture(t)
@@ -305,8 +316,38 @@ func TestCronInvalidDefinitionsAndUIDs(t *testing.T) {
 	definition["secret_refs"] = map[string]any{"TOKEN": "env:TOKEN"}
 	require.True(t, cronCall(t, f.session, "cron_job_create", map[string]any{"uid": cronNewUID(t, f.session), "name": "Invalid secret", "definition": definition}).IsError)
 	require.Empty(t, cronOK(t, f.session, "cron_jobs", map[string]any{})["jobs"])
-}
+	for _, tc := range []struct {
+		field   string
+		value   any
+		message string
+	}{
+		{"count", 0, "count: expected number >= 1"}, {"from", "bad", "from must be RFC3339"},
+	} {
+		args := map[string]any{"name": "Inspect", "definition": cronDefinition(), tc.field: tc.value}
+		failure := cronCall(t, f.session, "cron_job_validate", args)
+		require.True(t, failure.IsError)
+		require.Contains(t, failure.Content[0].(*sdkmcp.TextContent).Text, tc.message)
+	}
 
+	for _, enabled := range []string{"missing", "null", "false", "true"} {
+		definition := cronDefinition()
+		delete(definition, "enabled")
+		switch enabled {
+		case "null":
+			definition["enabled"] = nil
+		case "false":
+			definition["enabled"] = false
+		case "true":
+			definition["enabled"] = true
+		}
+		created := cronCall(t, f.session, "cron_job_create", map[string]any{"uid": cronNewUID(t, f.session), "name": "Inspect", "definition": definition})
+		savable := enabled == "false" || enabled == "true"
+		require.Equal(t, !savable, created.IsError)
+		if !savable {
+			require.Contains(t, created.Content[0].(*sdkmcp.TextContent).Text, "enabled")
+		}
+	}
+}
 func TestCronReadonlyAndIssueScopedCredentials(t *testing.T) {
 	f := newCronFixture(t)
 	readonly := daemon.NewServer(daemon.ServerConfig{DB: f.store, InsecureReadonly: true})

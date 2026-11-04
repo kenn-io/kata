@@ -60,6 +60,12 @@ func normalizationCandidate(ht *hegel.T, workflow bool) []byte {
 }
 
 func TestCronValidationParserAgreement(t *testing.T) {
+	for _, raw := range []string{`null`, `[]`, `1`, `{"unknown":1}`, `{`} {
+		_, normalized, err := Normalize([]byte(raw), DecodeJobForWrite)
+		require.Error(t, err)
+		require.Empty(t, normalized)
+	}
+
 	hegel.Test(t, func(ht *hegel.T) {
 		for _, workflow := range []bool{false, true} {
 			raw := normalizationCandidate(ht, workflow)

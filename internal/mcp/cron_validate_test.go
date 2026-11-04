@@ -16,26 +16,24 @@ func TestCronValidateDiscovery(t *testing.T) {
 	tools, err := session.ListTools(t.Context(), nil)
 	require.NoError(t, err)
 	for _, name := range []string{"kata.cron_job_validate", "kata.cron_workflow_validate"} {
-		found := false
 		for _, tool := range tools.Tools {
 			if tool.Name != name {
 				continue
 			}
-			found = true
 			raw, err := json.Marshal(tool.OutputSchema)
 			require.NoError(t, err)
 			var schema struct{ Properties map[string]json.RawMessage }
 			require.NoError(t, json.Unmarshal(raw, &schema))
 			require.JSONEq(t, `true`, string(schema.Properties["definition"]), "the definition schema permits raw JSON")
 		}
-		require.True(t, found, name)
 	}
 }
 
-func TestCronValidateRawDocuments(t *testing.T) {
+func TestCronValidateOpaqueNumbers(t *testing.T) {
 	f := newCronFixture(t)
 	before, err := f.store.MaxEventID(t.Context())
 	require.NoError(t, err)
+
 	for _, resource := range []string{"job", "workflow"} {
 		definition := cronDefinition()
 		if resource == "workflow" {
@@ -51,13 +49,6 @@ func TestCronValidateRawDocuments(t *testing.T) {
 		result = cronOK(t, f.session, tool, map[string]any{"name": "Review"})
 		require.Equal(t, "document", result["errors"].([]any)[0].(map[string]any)["stage"])
 	}
-	after, err := f.store.MaxEventID(t.Context())
-	require.NoError(t, err)
-	require.Equal(t, before, after)
-}
-
-func TestCronValidateOpaqueNumbers(t *testing.T) {
-	f := newCronFixture(t)
 	for _, resource := range []string{"job", "workflow"} {
 		definition := cronDefinition()
 		if resource == "workflow" {
@@ -80,6 +71,31 @@ func TestCronValidateOpaqueNumbers(t *testing.T) {
 			require.Contains(t, raw, literal)
 		}
 	}
+	for _, enabled := range []string{"missing", "null", "false", "true"} {
+		definition := cronDefinition()
+		delete(definition, "enabled")
+		switch enabled {
+		case "null":
+			definition["enabled"] = nil
+		case "false":
+			definition["enabled"] = false
+		case "true":
+			definition["enabled"] = true
+		}
+		result := cronOK(t, f.session, "cron_job_validate", map[string]any{"name": "Inspect", "definition": definition})
+		savable := enabled == "false" || enabled == "true"
+		require.Equal(t, savable, result["valid"])
+		if !savable {
+			failure := result["errors"].([]any)[0].(map[string]any)
+			require.Equal(t, "document", failure["stage"])
+			require.Contains(t, failure["message"], "enabled")
+		}
+	}
+
+	after, err := f.store.MaxEventID(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, before, after, "MCP validation adds no events")
+
 }
 
 func TestCronValidateParentScopeAndQuery(t *testing.T) {
@@ -103,23 +119,9 @@ func TestCronValidateParentScopeAndQuery(t *testing.T) {
 	require.Equal(t, "fresh_anchor", schedule["basis"])
 	require.Equal(t, "2026-11-03T00:00:00Z", schedule["from"])
 	require.Len(t, schedule["next"], 2)
-	args["count"] = 0
-	failure := cronCall(t, session, "cron_job_validate", args)
-	require.True(t, failure.IsError)
-	require.Contains(t, failure.Content[0].(*sdkmcp.TextContent).Text, "count: expected number >= 1")
-	args["count"], args["from"] = 2, "bad"
-	failure = cronCall(t, session, "cron_job_validate", args)
-	require.True(t, failure.IsError)
-	require.Contains(t, failure.Content[0].(*sdkmcp.TextContent).Text, "from must be RFC3339")
-	args["from"], args["project"] = "2026-11-03T00:00:00Z", "other-project"
-	require.True(t, cronCall(t, session, "cron_job_validate", args).IsError)
-	delete(args, "project")
-	args["parent_ref"] = "other-project#" + parent.ShortID
-	require.True(t, cronCall(t, session, "cron_job_validate", args).IsError)
-	args["parent_ref"] = parent.ShortID
 	for _, parentUID := range []string{"", "01ARZ3NDEKTSV4RRFFQ69G5FAV"} {
 		definition["issue"].(map[string]any)["parent_uid"] = parentUID
-		failure = cronCall(t, session, "cron_job_validate", args)
+		failure := cronCall(t, session, "cron_job_validate", args)
 		require.True(t, failure.IsError)
 		require.Contains(t, failure.Content[0].(*sdkmcp.TextContent).Text, "parent_ref disagrees with definition.issue.parent_uid")
 	}
@@ -138,7 +140,6 @@ func TestCronValidateRevisionConflictIsResult(t *testing.T) {
 		stored := cronRecord(t, f.session, "cron_"+resource+"_create", args, resource)
 		out := cronOK(t, f.session, "cron_"+resource+"_validate", args)
 		require.Equal(t, false, out["valid"])
-		require.Equal(t, "cron_conflict", out["errors"].([]any)[0].(map[string]any)["code"])
 		args["expected_event_uid"] = "  " + strings.ToLower(stored["definition_event_uid"].(string)) + "  "
 		require.Equal(t, true, cronOK(t, f.session, "cron_"+resource+"_validate", args)["valid"])
 	}

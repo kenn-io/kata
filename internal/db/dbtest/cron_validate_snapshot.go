@@ -68,6 +68,5 @@ func CheckCronValidateSnapshot(t *testing.T, reader db.CronSQL, writer db.Storag
 	out, err = reader.Validate(cancelled, in, true)
 	require.True(t, entered)
 	require.ErrorIs(t, err, context.Canceled)
-	require.Empty(t, out.Errors, "operational errors must escape rather than become staged errors")
-
+	require.Empty(t, out.Errors, "cancellation during the first snapshot read returns context.Canceled")
 }

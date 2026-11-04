@@ -211,6 +211,20 @@ func TestOpenAPIDocumentShape(t *testing.T) {
 	if len(doc.Paths) == 0 {
 		t.Error("no paths registered in document")
 	}
+	operation := doc.Paths["/api/v1/projects/{project_id}/cron/jobs/validate"].Post
+	for _, parameter := range operation.Parameters {
+		if parameter.Name != "count" {
+			continue
+		}
+		require.Equal(t, "integer", parameter.Schema.Type)
+		require.NotNil(t, parameter.Schema.Minimum)
+		require.Equal(t, float64(1), *parameter.Schema.Minimum)
+		require.NotNil(t, parameter.Schema.Maximum)
+		require.Equal(t, float64(100), *parameter.Schema.Maximum)
+		return
+	}
+	t.Fatal("count query parameter missing")
+
 }
 
 func TestOpenAPISearchDocumentsEveryReachableError(t *testing.T) {

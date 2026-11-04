@@ -37,4 +37,15 @@ func TestCronValidateDoesNotLockParent(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, out.Valid)
 	require.Equal(t, "stored_progress", out.Schedule.Basis)
+	// Maintenance can hold an exclusive table lock. The ownership read must
+	// return its deadline error through fail(), without turning it into a result.
+	_, err = holder.ExecContext(t.Context(), `LOCK TABLE issues IN ACCESS EXCLUSIVE MODE`)
+	require.NoError(t, err)
+	blocked, stop := context.WithTimeout(t.Context(), time.Second)
+	defer stop()
+	out, err = store.ValidateCronJob(blocked, db.CronValidationInput{ProjectID: project.ID, UID: job.UID, ExpectedEventUID: job.DefinitionEventUID, Name: job.Name, Raw: raw, From: time.Now(), Count: 5})
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.NotEmpty(t, out.Definition, "project and document stages completed before the locked ownership read")
+	require.Empty(t, out.Errors)
+
 }

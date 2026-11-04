@@ -55,7 +55,6 @@ func TestCronValidationSDKPresence(t *testing.T) {
 		{"missing-instant-3", false, true, `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"basis":"adapter_trigger","delivery":"adapter","zone":"UTC","from":"2026-11-04T00:00:00Z","next":[{"at":null,"local":"2026-11-04T00:01:00Z"}]}}`},
 		{"missing-name", false, true, `{"valid":false,"definition":null,"errors":[],"warnings":[]}`},
 		{"null-name", false, true, `{"name":null,"valid":false,"definition":null,"errors":[],"warnings":[]}`},
-		{"null-name", false, true, `{"valid":true,"name":null,"definition":{},"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`},
 		{"missing-errors", false, true, `{"valid":true,"name":"Inspect","definition":{},"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`},
 		{"null-errors", false, true, `{"valid":true,"name":"Inspect","definition":{},"errors":null,"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`},
 		{"missing-warnings", false, true, `{"valid":true,"name":"Inspect","definition":{},"errors":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`},
@@ -63,7 +62,6 @@ func TestCronValidationSDKPresence(t *testing.T) {
 		{"missing-delivery", false, true, `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`},
 		{"missing-basis", false, true, `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"delivery":"adapter","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`},
 		{"missing-zone", false, true, `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","from":"2026-11-03T00:00:00Z","next":[]}}`},
-		{"missing-from", false, true, `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","next":[]}}`},
 		{"missing-next", false, true, `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z"}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

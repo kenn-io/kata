@@ -1,9 +1,6 @@
 package dbtest
 
 import (
-	"context"
-	"database/sql"
-	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"strings"
 	"testing"
@@ -50,6 +47,12 @@ func checkCronValidate(t *testing.T, s db.Storage) error {
 		require.Equal(t, beforeEvent, afterEvent, "validation emits no events or HLC ticks")
 		return out
 	}
+	for _, count := range []int{0, 101} {
+		bad := in
+		bad.Count = count
+		_, err := s.ValidateCronJob(ctx, bad)
+		require.ErrorContains(t, err, "count must be between 1 and 100")
+	}
 	out := validate(in, false)
 	require.True(t, out.Valid)
 	require.Equal(t, "Review", out.Name)
@@ -69,6 +72,7 @@ func checkCronValidate(t *testing.T, s db.Storage) error {
 		require.Equal(t, tc.stage == "", out.Valid)
 		if tc.stage != "" {
 			require.Equal(t, tc.stage, out.Errors[0].Stage)
+			require.Equal(t, "cron_conflict", out.Errors[0].Code)
 			require.Nil(t, out.Schedule)
 		}
 		if tc.id == foreign.UID {
@@ -76,23 +80,21 @@ func checkCronValidate(t *testing.T, s db.Storage) error {
 		}
 	}
 	for _, tc := range []struct{ name, raw, stage string }{
-		{"", `{}`, "request"}, {strings.Repeat("x", 257), `{}`, "request"}, {"Review", `null`, "document"}, {"Review", `[]`, "document"}, {"Review", `1`, "document"}, {"Review", `"text"`, "document"}, {"Review", `{}`, "document"}, {"Review", `{"unknown":true}`, "document"},
+		{"", `{}`, "request"}, {strings.Repeat("x", 257), `{}`, "request"}, {"Review", `[]`, "document"}, {"Review", `{"enabled":false}`, "document"},
 	} {
 		candidate := in
 		candidate.Name, candidate.Raw = tc.name, []byte(tc.raw)
 		out = validate(candidate, false)
 		require.False(t, out.Valid)
 		require.Equal(t, tc.stage, out.Errors[0].Stage)
+		if tc.stage == "document" {
+			if tc.raw == `[]` {
+				require.Empty(t, out.Definition)
+			} else {
+				require.NotEmpty(t, out.Definition, "decoded invalid documents retain normalization")
+			}
+		}
 	}
-	// A job UID must not resolve as a workflow dependency.
-	job.Action = cron.Action{Kind: "execute", WorkflowUID: stored.UID}
-	in.Raw, err = json.Marshal(job)
-	require.NoError(t, err)
-	out = validate(in, false)
-	require.False(t, out.Valid)
-	require.Equal(t, "dependencies", out.Errors[0].Stage)
-	_, _, err = s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: in.Name, Definition: job, Actor: "operator"})
-	require.EqualError(t, err, out.Errors[0].Message)
 
 	workflow := cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "review", Kind: "prompt", Prompt: "Review"}}}
 	in.Raw, err = json.Marshal(workflow)
@@ -171,48 +173,57 @@ func checkCronValidateNative(t *testing.T, s db.Storage) error {
 	out, err = s.ValidateCronJob(ctx, in)
 	require.NoError(t, err)
 	require.Equal(t, "ownership", out.Errors[0].Stage)
+	_, _, err = s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, UID: stored.UID, ExpectedEventUID: deleted.DefinitionEventUID, Name: stored.Name, Definition: changed, Actor: "operator"})
+	require.EqualError(t, err, out.Errors[0].Message)
 	in.Raw = raw
-	q := s.(interface {
-		ExecContext(context.Context, string, ...any) (sql.Result, error)
-	})
-	// Fixture corruption exercises the existing put contract, not a conjectured failure.
-	// Database JSON-object checks permit duplicate keys, but the strict progress
-	// reader rejects them. This reaches fail() with an operational decoding error.
-	_, err = q.ExecContext(ctx, `UPDATE issues SET metadata='{"duplicate":0,"duplicate":1}' WHERE id=$1`, parent.ID)
+	// ImportReplay accepts issue snapshots with ordinary empty metadata. A
+	// restored native definition without its checkpoint must keep the save guard.
+	snapshot, err := CollectImportRecords(ctx, s, db.ExportFilter{ProjectID: &p.ID, IncludeDeleted: true})
 	require.NoError(t, err)
-	out, err = s.ValidateCronJob(ctx, in)
-	var syntax *jsontext.SyntacticError
-	require.ErrorAs(t, err, &syntax)
-	require.Empty(t, out.Errors)
-	_, err = q.ExecContext(ctx, `UPDATE issues SET metadata='{}' WHERE id=$1`, parent.ID)
-	require.NoError(t, err)
+	missing := append([]db.ImportRecord(nil), snapshot...)
+	for i, record := range missing {
+		if issue, ok := record.(*db.IssueExport); ok && issue.UID == parent.UID {
+			edited := *issue
+			edited.Metadata = []byte(`{}`)
+			missing[i] = &edited
+		}
+	}
+	require.NoError(t, s.ImportReplay(ctx, missing, db.ImportOptions{}))
 	out, err = s.ValidateCronJob(ctx, in)
 	require.NoError(t, err)
 	require.Equal(t, "ownership", out.Errors[0].Stage)
 	require.Nil(t, out.Schedule)
-	newUID, err := uid.New()
+	_, _, err = s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, UID: stored.UID, ExpectedEventUID: deleted.DefinitionEventUID, Name: stored.Name, Definition: stored.Definition, Actor: "operator"})
+	require.EqualError(t, err, out.Errors[0].Message)
+	require.NoError(t, s.ImportReplay(ctx, snapshot, db.ImportOptions{}))
+	// A normal live-only backup omits the tombstoned job, while preserving
+	// the parent's delivery history. Restoring it produces orphan progress.
+	records, err := CollectImportRecords(ctx, s, db.ExportFilter{ProjectID: &p.ID})
 	require.NoError(t, err)
-	metadata, err := json.Marshal(map[string]jsontext.Value{"cron.progress." + newUID: []byte(`{"version":1,"anchor":"2026-01-01T00:00:00Z","through":"2026-01-01T00:00:00Z"}`)})
+	require.NoError(t, s.ImportReplay(ctx, records, db.ImportOptions{}))
+	_, err = s.CronJob(ctx, p.ID, stored.UID)
+	require.ErrorIs(t, err, db.ErrNotFound)
+	retained, err := s.IssueByID(ctx, parent.ID)
 	require.NoError(t, err)
-	_, err = q.ExecContext(ctx, `UPDATE issues SET metadata=$1 WHERE id=$2`, string(metadata), parent.ID)
-	require.NoError(t, err)
-	in.UID, in.ExpectedEventUID = newUID, ""
+	require.Contains(t, retained.Metadata, "cron.progress."+stored.UID)
+	in.UID, in.ExpectedEventUID = stored.UID, ""
 	out, err = s.ValidateCronJob(ctx, in)
 	require.NoError(t, err)
 	require.Equal(t, "ownership", out.Errors[0].Stage)
-	_, _, err = s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, UID: newUID, Name: stored.Name, Definition: stored.Definition, Actor: "operator"})
+	require.Nil(t, out.Schedule)
+	_, _, err = s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, UID: stored.UID, Name: stored.Name, Definition: stored.Definition, Actor: "operator"})
 	require.EqualError(t, err, out.Errors[0].Message)
 	adapter := stored.Definition
 	adapter.Action = cron.Action{Kind: "execute", Prompt: "Review"}
 	adapter.Issue = &cron.IssuePolicy{Kind: "per-run", Title: "Review"}
 	adapter.Overlap = "forbid"
-	converted, _, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, UID: newUID, Name: stored.Name, Definition: adapter, Actor: "operator"})
+	converted, _, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, UID: stored.UID, Name: stored.Name, Definition: adapter, Actor: "operator"})
 	require.NoError(t, err)
 	in.ExpectedEventUID = converted.DefinitionEventUID
 	out, err = s.ValidateCronJob(ctx, in)
 	require.NoError(t, err)
 	require.Equal(t, "ownership", out.Errors[0].Stage, "adapter-to-native conversion shares the initialization guard")
-	_, _, err = s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, UID: newUID, ExpectedEventUID: converted.DefinitionEventUID, Name: stored.Name, Definition: stored.Definition, Actor: "operator"})
+	_, _, err = s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, UID: stored.UID, ExpectedEventUID: converted.DefinitionEventUID, Name: stored.Name, Definition: stored.Definition, Actor: "operator"})
 	require.EqualError(t, err, out.Errors[0].Message)
 	in.UID = ""
 	in.ExpectedEventUID = ""
@@ -254,6 +265,8 @@ func checkCronValidateDependencies(t *testing.T, s db.Storage) error {
 	require.NoError(t, err)
 	_, _, _, err = s.SoftDeleteIssue(ctx, deletedIssue.ID, "operator")
 	require.NoError(t, err)
+	wrongKind, _, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "Adapter", Actor: "operator", Definition: cron.JobDefinition{Version: 1, Kind: "job", Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Review"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "latest"}})
+	require.NoError(t, err)
 	missing, err := uid.New()
 	require.NoError(t, err)
 	for _, kind := range []string{"workflow", "issue", "parent"} {
@@ -263,7 +276,7 @@ func checkCronValidateDependencies(t *testing.T, s db.Storage) error {
 		}
 		endpoints := []endpoint{{missing, false}}
 		if kind == "workflow" {
-			endpoints = append(endpoints, endpoint{liveWorkflow.UID, true}, endpoint{foreignWorkflow.UID, false}, endpoint{deletedWorkflow.UID, false})
+			endpoints = append(endpoints, endpoint{liveWorkflow.UID, true}, endpoint{foreignWorkflow.UID, false}, endpoint{deletedWorkflow.UID, false}, endpoint{wrongKind.UID, false})
 		} else {
 			endpoints = append(endpoints, endpoint{liveIssue.UID, true}, endpoint{foreignIssue.UID, false}, endpoint{deletedIssue.UID, false})
 		}
