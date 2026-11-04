@@ -380,6 +380,7 @@ func cronHelpRows(m Model) [][]helplayout.HelpItem {
 
 func cronKeyRows(m Model) []helplayout.HelpItem {
 	open, back := "open", "kata"
+	jobScope := m.cronJobsScope() || (m.cron.help && !m.scope.allProjects && m.scope.projectID != 0)
 	if len(m.cron.stack) > 0 {
 		open, back = "follow", "back"
 	}
@@ -395,14 +396,14 @@ func cronKeyRows(m Model) []helplayout.HelpItem {
 	if len(m.cron.stack) == 0 {
 		rows = slices.Insert(rows, 2, helplayout.HelpItem{Key: "/", Description: "filter"})
 	}
-	if m.cronJobsScope() {
+	if jobScope {
 		rows = slices.Insert(rows, 3, helplayout.HelpItem{Key: "n/e", Description: "new/edit"}, helplayout.HelpItem{Key: "p", Description: "pause/resume"})
 	}
 	if m.cron.data != nil {
-		if m.cronJobsScope() && slices.Contains(m.cron.data.project.controls, "run_request") {
+		if jobScope && slices.Contains(m.cron.data.project.controls, "run_request") {
 			rows = append(rows, helplayout.HelpItem{Key: "R", Description: "request run"})
 		}
-		if slices.Contains(m.cron.data.project.controls, "cancel_request") && (m.cron.tab == cronRuns || len(m.cron.stack) > 0 && m.cron.stack[len(m.cron.stack)-1].ref.kind == cronRuns) {
+		if slices.Contains(m.cron.data.project.controls, "cancel_request") && (m.cron.help || m.cron.tab == cronRuns || len(m.cron.stack) > 0 && m.cron.stack[len(m.cron.stack)-1].ref.kind == cronRuns) {
 			rows = append(rows, helplayout.HelpItem{Key: "X", Description: "request cancel"})
 		}
 	}

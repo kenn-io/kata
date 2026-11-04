@@ -18,3 +18,5 @@ r      refresh
 1-4    tabs
 ?      help
 q      quit
+R      request run
+X      request cancel

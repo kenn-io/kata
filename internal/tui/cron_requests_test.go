@@ -308,3 +308,14 @@ func TestSnapshot_CronRuntimeRequests(t *testing.T) {
 		}
 	}
 }
+
+// Full cron help teaches both runtime keys; ordinary footers remain scoped to
+// the current tab. The family plan requires p, R and X together in help.
+func TestCronHelpListsAllControlKeys(t *testing.T) {
+	m, _ := runtimeFixture(t, false)
+	m.cron.help = true
+	view := stripANSI(m.viewBody())
+	require.Contains(t, view, "pause/resume")
+	require.Contains(t, view, "request run")
+	require.Contains(t, view, "request cancel")
+}

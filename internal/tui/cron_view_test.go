@@ -554,6 +554,7 @@ func TestSnapshot_Cron(t *testing.T) {
 				m = sendRune(m, '4')
 				m = sendKey(m, tea.KeyEnter)
 			case "help":
+				m.cron.data.project.controls = []string{"job_pause", "run_request", "cancel_request"}
 				m = sendRune(m, '?')
 			case "all-projects":
 				m.scope.allProjects = true
