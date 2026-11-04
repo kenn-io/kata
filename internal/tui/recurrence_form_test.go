@@ -123,14 +123,43 @@ func TestRecurrenceFormConflictAtMinimumHeight(t *testing.T) {
 	s.err = recurrenceChangedMessage
 	s.recurrence.currentAfterRefusal = "now: FREQ=DAILY from 2026-11-09 in Europe/Paris"
 
-	modal := renderCenteredForm(s, 80, 12, snapshotFixedNow)
-	assert.LessOrEqual(t, lipgloss.Height(modal), 12, "conflict recovery must fit the supported terminal height")
-	got := stripANSI(overlayModal(strings.Repeat(blankLine(80)+"\n", 11)+blankLine(80), modal, 80, 12))
-	assertLineCount(t, got, 12)
-	assertLinesFitWidth(t, got, 80)
-	for _, want := range []string{"Rule", "Start", "Zone", "now: FREQ=DAILY", "again to write your input over it.", "ctrl+o save", "esc cancel"} {
-		assert.Contains(t, got, want)
+	for _, width := range []int{40, 60, 80} {
+		t.Run(strconv.Itoa(width)+"x12", func(t *testing.T) {
+			modal := renderCenteredForm(s, width, 12, snapshotFixedNow)
+			assert.LessOrEqual(t, lipgloss.Height(modal), 12, "conflict recovery must fit the supported terminal height")
+			assert.LessOrEqual(t, lipgloss.Width(modal), width)
+			got := stripANSI(overlayModal(strings.Repeat(blankLine(width)+"\n", 11)+blankLine(width), modal, width, 12))
+			assertLineCount(t, got, 12)
+			assertLinesFitWidth(t, got, width)
+			for _, want := range []string{"Rule", "Start", "Zone", "now: FREQ=DAILY", "ctrl+o save", "esc cancel"} {
+				assert.Contains(t, got, want)
+			}
+			text := strings.ReplaceAll(got, "│", " ")
+			assert.Contains(t, strings.Join(strings.Fields(text), " "), "Save again to overwrite.")
+		})
 	}
+}
+
+func TestRecurrenceSuccessKeepsTargetAfterReadFailure(t *testing.T) {
+	h := newRecurrenceHarness(t, viewList)
+	h.open()
+	h.fill("FREQ=DAILY", "2026-11-09", "Europe/Paris")
+	reads := 0
+	base := h.client.KataAPI.(*Client)
+	base.setHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/issues/"+h.issue.UID) {
+			reads++
+			if reads == 2 {
+				return nil, errors.New("issue read unavailable")
+			}
+		}
+		return h.env.HTTP.Do(r)
+	})})
+	h.save()
+	assert.Equal(t, 2, reads, "the preflight succeeds and the follow-up read fails")
+	require.Len(t, h.rows(), 1, "the recurrence was saved")
+	assert.Equal(t, inputNone, h.m.input.kind)
+	assert.Equal(t, "started repeat of #"+h.issue.ShortID, h.m.list.status)
 }
 
 func TestRecurrenceDetailScheduleFieldsAt80Columns(t *testing.T) {

@@ -97,7 +97,7 @@ func renderCenteredForm(s inputState, width, height int, now time.Time) string {
 	case inputDeleteForm:
 		return renderDeleteForm(s, innerW)
 	case inputRecurrenceForm:
-		return renderRecurrenceForm(s, innerW, height, now)
+		return renderRecurrenceForm(s, min(innerW, width-4), height, now)
 	}
 	return renderSingleFieldForm(s, innerW, innerH)
 }
