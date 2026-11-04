@@ -1,0 +1,271 @@
+package tui
+
+import (
+	"context"
+	"encoding/json/v2"
+	"errors"
+	"slices"
+	"strings"
+	"testing"
+	"testing/synctest"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/pkg/client/generated"
+	"hegel.dev/go/hegel"
+)
+
+// Contract: only ready availability diagnostics produce a banner; input order
+// cannot change its priority or distinct-job count. Suggestions are not eligibility.
+func drawCronRuntimeInventory(h *hegel.T) *cron.RuntimeInventory {
+	state := hegel.Draw(h, hegel.SampledFrom([]string{"unknown", "warming", "ready"}))
+	codes := hegel.Draw(h, hegel.Lists(hegel.SampledFrom([]string{"no_live_runtime", "pin_unmatched", "adapter_unmatched", "choice_unknown", "kata_version_skew"})))
+	if len(codes) > 100 {
+		codes = codes[:100]
+	}
+	inventory := &cron.RuntimeInventory{Inventory: cron.RuntimeInventoryState{State: state}}
+	for i, code := range codes {
+		id := "job-a"
+		if i%2 == 0 {
+			id = "job-b"
+		}
+		if code == "no_live_runtime" {
+			id = ""
+		}
+		inventory.Warnings = append(inventory.Warnings, cron.RuntimeWarning{Code: code, JobUID: id, Message: code + id})
+	}
+	return inventory
+}
+func TestCronRuntimeBannerProperties(t *testing.T) {
+	hegel.Test(t, func(h *hegel.T) {
+		inventory := drawCronRuntimeInventory(h)
+		want := false
+		for _, w := range inventory.Warnings {
+			if w.Code == "no_live_runtime" || w.Code == "pin_unmatched" || w.Code == "adapter_unmatched" {
+				want = true
+			}
+		}
+		_, show := cronRuntimeBanner(inventory, nil, false)
+		if show != (inventory.Inventory.State == "ready" && want) {
+			h.Fatal("banner violated readiness/code contract")
+		}
+	}, hegel.WithTestCases(2000), hegel.WithDatabase(t.TempDir()))
+}
+func TestCronRuntimeBannerPriority(t *testing.T) {
+	hegel.Test(t, func(h *hegel.T) {
+		inventory := drawCronRuntimeInventory(h)
+		inventory.Inventory.State = "ready"
+		inventory.Warnings = append(inventory.Warnings, cron.RuntimeWarning{Code: "no_live_runtime"})
+		text, show := cronRuntimeBanner(inventory, nil, false)
+		if !show || !strings.HasPrefix(text, "No live runtime advertised") {
+			h.Fatal("no-live warning lost priority")
+		}
+	}, hegel.WithTestCases(2000), hegel.WithDatabase(t.TempDir()))
+}
+func TestCronRuntimeBannerPermutation(t *testing.T) {
+	hegel.Test(t, func(h *hegel.T) {
+		inventory := drawCronRuntimeInventory(h)
+		one, show := cronRuntimeBanner(inventory, nil, false)
+		slices.Reverse(inventory.Warnings)
+		two, showTwo := cronRuntimeBanner(inventory, nil, false)
+		if one != two || show != showTwo {
+			h.Fatal("warning order changed banner")
+		}
+	}, hegel.WithTestCases(2000), hegel.WithDatabase(t.TempDir()))
+}
+func TestCronRuntimeMessagesProperty(t *testing.T) {
+	hegel.Test(t, func(h *hegel.T) {
+		inventory := drawCronRuntimeInventory(h)
+		enabled := hegel.Draw(h, hegel.Booleans())
+		expected := []string{}
+		if inventory.Inventory.State == "ready" {
+			for _, w := range inventory.Warnings {
+				if w.JobUID == "job-a" || w.Code == "no_live_runtime" && enabled {
+					expected = append(expected, w.Message)
+				}
+			}
+		}
+		slices.Sort(expected)
+		expected = slices.Compact(expected)
+		got := cronRuntimeJobMessages(inventory, "job-a", enabled)
+		if !slices.Equal(expected, got) {
+			h.Fatalf("job messages %v want %v", got, expected)
+		}
+	}, hegel.WithTestCases(2000), hegel.WithDatabase(t.TempDir()))
+}
+func TestCronRuntimeHelpersPreserveInputs(t *testing.T) {
+	hegel.Test(t, func(h *hegel.T) {
+		inventory := drawCronRuntimeInventory(h)
+		jobs := []generated.CronJob{{Definition: generated.CronJobDefinitionResponse{Enabled: hegel.Draw(h, hegel.Booleans()), Action: generated.ActionResponse{Kind: hegel.Draw(h, hegel.SampledFrom([]string{"execute", "notify"}))}}}}
+		before, _ := json.Marshal([]any{inventory, jobs})
+		cronRuntimeBanner(inventory, jobs, true)
+		cronRuntimeJobMessages(inventory, "job-a", true)
+		after, _ := json.Marshal([]any{inventory, jobs})
+		if string(before) != string(after) {
+			h.Fatal("runtime display mutated inputs")
+		}
+	}, hegel.WithTestCases(1000), hegel.WithDatabase(t.TempDir()))
+}
+func TestCronRuntimeBannerCounts(t *testing.T) {
+	inventory := &cron.RuntimeInventory{Inventory: cron.RuntimeInventoryState{State: "ready"}, Warnings: []cron.RuntimeWarning{{Code: "no_live_runtime"}}}
+	jobs := []generated.CronJob{{Definition: generated.CronJobDefinitionResponse{Enabled: true, Action: generated.ActionResponse{Kind: "execute"}}}, {Definition: generated.CronJobDefinitionResponse{Enabled: false, Action: generated.ActionResponse{Kind: "execute"}}}, {Definition: generated.CronJobDefinitionResponse{Enabled: true, Action: generated.ActionResponse{Kind: "notify"}}}}
+	text, show := cronRuntimeBanner(inventory, jobs, true)
+	require.True(t, show)
+	require.Contains(t, text, "1 enabled execute jobs")
+	require.NotContains(t, text, "will not run")
+	text, _ = cronRuntimeBanner(inventory, jobs, false)
+	require.NotContains(t, text, "1 enabled")
+	inventory.Warnings = []cron.RuntimeWarning{{Code: "pin_unmatched", JobUID: "a"}, {Code: "adapter_unmatched", JobUID: "a"}, {Code: "pin_unmatched", JobUID: "b"}}
+	text, _ = cronRuntimeBanner(inventory, jobs, true)
+	require.Contains(t, text, "2 enabled execute jobs")
+	text, _ = cronRuntimeBanner(inventory, jobs, false)
+	require.NotContains(t, text, "2 enabled execute jobs")
+	require.Contains(t, text, "matching live advertisement")
+}
+func TestCronRuntimeGoldens(t *testing.T) {
+	for _, tc := range []struct {
+		name, state, code string
+		detail            bool
+	}{{"cron_jobs_no_live_runtime_banner", "ready", "no_live_runtime", false}, {"cron_jobs_pin_unmatched_banner", "ready", "pin_unmatched", false}, {"cron_jobs_warming_no_banner", "warming", "no_live_runtime", false}, {"cron_job_detail_runtime_field", "ready", "pin_unmatched", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer snapshotInit(t)()
+			m := cronFixture(t)
+			id := m.cron.data.jobs[0].UID
+			m.cron.runtimes = &cron.RuntimeInventory{Inventory: cron.RuntimeInventoryState{State: tc.state}, Warnings: []cron.RuntimeWarning{{Code: tc.code, JobUID: id, Message: "no matching live advertisement for executor example-worker"}}}
+			if tc.detail {
+				m = sendKey(m, tea.KeyEnter)
+			}
+			rendered := renderCron(m)
+			require.Equal(t, m.height, len(strings.Split(rendered, "\n")))
+			assertGolden(t, tc.name, rendered)
+			if tc.state == "ready" {
+				for _, tab := range []rune{'2', '3', '4'} {
+					m = sendRune(m, tab)
+					if tc.code == "no_live_runtime" {
+						require.Contains(t, renderCron(m), "No live runtime advertised")
+					} else {
+						require.Contains(t, renderCron(m), "live advertisement")
+					}
+				}
+			}
+		})
+	}
+}
+
+type cronRuntimeTestAPI struct {
+	KataAPI
+	inventory *cron.RuntimeInventory
+	err       error
+	calls     int
+}
+
+func (a *cronRuntimeTestAPI) ListCronRuntimes(ctx context.Context, _ int64) (*cron.RuntimeInventory, error) {
+	a.calls++
+	if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) > 3*time.Second {
+		return nil, errors.New("missing short read budget")
+	}
+	return a.inventory, a.err
+}
+func runtimePollFixture(t *testing.T) (Model, *cronRuntimeTestAPI) {
+	t.Helper()
+	m := cronFixture(t)
+	a := &cronRuntimeTestAPI{KataAPI: &cronReadTestAPI{KataAPI: &inboxTestAPI{}, data: *m.cron.data}, inventory: &cron.RuntimeInventory{Inventory: cron.RuntimeInventoryState{State: "ready"}}}
+	m.api = a
+	m.cron.runtimePoll = cronRuntimePoll{active: true, epoch: 7, seq: 3, out: true}
+	return m, a
+}
+func TestCronRuntimeReadOrdering(t *testing.T) {
+	m, _ := runtimePollFixture(t)
+	ready := &cron.RuntimeInventory{Inventory: cron.RuntimeInventoryState{State: "ready"}}
+	msg := cronRuntimeLoadedMsg{conn: m.connGen, scope: m.scopeGen, epoch: 7, seq: 3, inventory: ready}
+	m, _ = updateModel(m, msg)
+	require.Same(t, ready, m.cron.runtimes)
+	m, _ = updateModel(m, cronLoadedMsg(*m.cron.data))
+	require.Same(t, ready, m.cron.runtimes, "ordinary cron refresh overwrote inventory")
+	stale := msg
+	stale.seq = 2
+	stale.inventory = nil
+	m, _ = updateModel(m, stale)
+	require.Same(t, ready, m.cron.runtimes)
+	m.cron.runtimePoll.seq = 4
+	m.cron.runtimePoll.out = true
+	failed := msg
+	failed.seq = 4
+	failed.err = errors.New("older daemon")
+	m, _ = updateModel(m, failed)
+	require.Nil(t, m.cron.runtimes)
+	m.scopeGen++
+	m, _ = updateModel(m, msg)
+	require.Nil(t, m.cron.runtimes, "stale scope restored runtime evidence")
+}
+func TestCronRuntimePollViewLifetime(t *testing.T) {
+	m, a := runtimePollFixture(t)
+	oldEpoch := m.cron.runtimePoll.epoch
+	m.cron.runtimes = a.inventory
+	m, _ = updateModel(m, keyRune('1'))
+	require.False(t, m.cron.runtimePoll.active)
+	m, cmd := updateModel(m, keyRune('2'))
+	require.Nil(t, m.cron.runtimes)
+	require.Greater(t, m.cron.runtimePoll.epoch, oldEpoch)
+	messages := runCmdTree(cmd)
+	require.Equal(t, 1, a.calls)
+	for _, msg := range messages {
+		m, _ = updateModel(m, msg)
+	}
+	seq := m.cron.runtimePoll.seq
+	m, _ = updateModel(m, cronRuntimeTickMsg{conn: m.connGen, scope: m.scopeGen, epoch: oldEpoch})
+	require.Equal(t, seq, m.cron.runtimePoll.seq)
+	require.Equal(t, 1, a.calls)
+	current := m.cron.runtimes
+	m, _ = updateModel(m, cronRuntimeLoadedMsg{conn: m.connGen, scope: m.scopeGen, epoch: oldEpoch, seq: 3, err: errors.New("stale")})
+	require.Same(t, current, m.cron.runtimes)
+	require.True(t, m.cron.runtimePoll.scheduled)
+	require.False(t, m.cron.runtimePoll.out)
+}
+func TestCronRuntimePollAfterMinute(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m, a := runtimePollFixture(t)
+		m.cron.runtimePoll.out = false
+		m.cron.runtimePoll.scheduled = true
+		cmd := m.scheduleCronRuntimeRefresh()
+		ch := make(chan tea.Msg, 1)
+		go func() { ch <- cmd() }()
+		synctest.Wait()
+		require.Zero(t, a.calls)
+		time.Sleep(time.Minute)
+		m, cmd = updateModel(m, <-ch)
+		messages := runCmdTree(cmd)
+		require.Equal(t, 1, a.calls)
+		for _, msg := range messages {
+			m, _ = updateModel(m, msg)
+		}
+		require.True(t, m.cron.runtimePoll.scheduled)
+		require.False(t, m.cron.runtimePoll.out)
+	})
+}
+
+// Optional evidence may finish before the ordinary jobs request. Its aggregate
+// warning remains useful without inventing an execute-job count.
+func TestCronRuntimeBannerBeforeJobs(t *testing.T) {
+	m := cronFixture(t)
+	m.cron.data = nil
+	m.cron.runtimes = &cron.RuntimeInventory{Inventory: cron.RuntimeInventoryState{State: "ready"}, Warnings: []cron.RuntimeWarning{{Code: "no_live_runtime"}}}
+	rendered := renderCron(m)
+	require.Contains(t, rendered, "No live runtime advertised")
+	require.NotContains(t, rendered, "0 enabled execute jobs")
+}
+
+func TestCronRuntimeNarrowRender(t *testing.T) {
+	defer snapshotInit(t)()
+	for _, width := range []int{40, 80, 120} {
+		m := cronFixture(t)
+		m.width = width
+		m.cron.runtimes = &cron.RuntimeInventory{Inventory: cron.RuntimeInventoryState{State: "ready"}, Warnings: []cron.RuntimeWarning{{Code: "no_live_runtime"}}}
+		rendered := renderCron(m)
+		lines := strings.Split(rendered, "\n")
+		require.Len(t, lines, m.height)
+		require.Contains(t, stripANSI(lines[3]), "No live runtime advertised")
+	}
+}

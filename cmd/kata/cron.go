@@ -82,6 +82,9 @@ func newCronOperationCmd(resource, action string) *cobra.Command {
 	takesUID := (resource == "job" || resource == "workflow" || resource == "run" || resource == "runtime") && action != "list" && action != "create"
 	command := &cobra.Command{Use: action, Short: action + " " + resource, Args: cobra.NoArgs}
 	command.Long, command.Example = cronOperationHelp(resource, action)
+	if options.runtimeNotices() {
+		command.Long += "\n" + cronRuntimeWarningHelp
+	}
 	if resource == "job" {
 		command.Long += "\nEnabled recurring issue jobs create independent children and inbox requests on the owning hub. Other jobs use external adapters."
 		if options.mutation() {
@@ -277,7 +280,11 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 	if flags.Quiet && currentOutputMode() != outputJSON {
 		return nil
 	}
-	return emitJSON(cmd.OutOrStdout(), jsontext.Value(raw))
+	if err := emitJSON(cmd.OutOrStdout(), jsontext.Value(raw)); err != nil {
+		return err
+	}
+	o.warnRuntimes(cmd.Context(), cmd, client, project.ID, raw)
+	return nil
 }
 
 // applyParent resolves the CLI ref while leaving the API and stored definition

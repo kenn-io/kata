@@ -848,6 +848,12 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case cronLoadedMsg:
 		return m.cronLoaded(msg), nil, true
+	case cronRuntimeLoadedMsg:
+		next, cmd := m.cronRuntimeLoaded(msg)
+		return next, cmd, true
+	case cronRuntimeTickMsg:
+		next, cmd := m.cronRuntimeTick(msg)
+		return next, cmd, true
 	case cronEditOpenedMsg:
 		next, cmd := m.cronEditOpened(msg)
 		return next, cmd, true

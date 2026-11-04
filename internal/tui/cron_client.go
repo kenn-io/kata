@@ -14,6 +14,7 @@ import (
 )
 
 type cronAPI interface {
+	ListCronRuntimes(context.Context, int64) (*cron.RuntimeInventory, error)
 	ListCronJobs(context.Context, int64) ([]generated.CronJob, error)
 	ShowCronJob(ctx context.Context, projectID int64, uid string) (db.CronJob, error)
 	PutCronJob(ctx context.Context, projectID int64, uid string, write kataapi.PutCronJobBody) error

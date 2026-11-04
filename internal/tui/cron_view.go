@@ -57,6 +57,8 @@ func (p cronData) readError(kind int) error {
 }
 
 type cronState struct {
+	runtimes        *cron.RuntimeInventory
+	runtimePoll     cronRuntimePoll
 	tab             int
 	lists           [4]cronList
 	filtering, help bool
@@ -77,14 +79,14 @@ func (m Model) cronSync() (Model, tea.Cmd) {
 		}
 		m.cron = cronState{tab: m.cron.tab, conn: m.connGen, scope: m.scopeGen}
 	}
-	if m.view != viewCron || m.scope.allProjects || m.scope.projectID == 0 || m.cron.out {
-		return m, nil
+	refresh := m.view == viewCron && !m.scope.allProjects && m.scope.projectID != 0 && !m.cron.out && (m.cron.data == nil || m.cron.data.events != m.cron.events)
+	var command tea.Cmd
+	if refresh {
+		m.cron.out = true
+		command = m.fetchCron()
 	}
-	if m.cron.data != nil && m.cron.data.events == m.cron.events {
-		return m, nil
-	}
-	m.cron.out = true
-	return m, m.fetchCron()
+	m, runtimes := m.cronRuntimeSync(refresh)
+	return m, tea.Batch(command, runtimes)
 }
 func (m Model) fetchCron() tea.Cmd {
 	reader, id := m.api, m.scope.projectID

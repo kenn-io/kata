@@ -465,6 +465,19 @@ account. Ordinary direct writes have `reported_via: direct`. Body fields cannot
 assert forwarded provenance. Signed federation deployments require signed beats
 on both transport listeners. See [federation enrollment authority](../operations/federation.md).
 
+The TUI cron view shows an advisory banner for ready inventories with no live
+advertisements or unmatched job selectors. Job detail shows the applicable
+messages. The view refreshes only runtime evidence every 60 seconds; changing
+view, project or daemon invalidates pending reads. Unknown, warming and unavailable
+inventories stay silent. The banner covers only this daemon's advertisements.
+A spoke whose adapters beat elsewhere may show `unknown`, which is no alarm.
+
+`kata cron job list/create/update/restore` prints relevant ready-inventory warnings
+to stderr after its normal result. Stdout JSON and exit codes stay unchanged.
+`--quiet` skips the optional lookup. Diagnostic reads have a three-second budget;
+unavailable and older daemons stay silent. Neither the banner nor a warning
+proves that a job will or will not run.
+
 Advertisements are self-reported evidence. They do not activate an installation,
 select jobs, authorize execution, reserve an occurrence, or change run status.
 Adapters remain responsible for scheduling and execution policy.

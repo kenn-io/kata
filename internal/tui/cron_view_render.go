@@ -232,6 +232,9 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 				}
 			}
 			d.field("Action", cronAction(p, *j))
+			if messages := cronRuntimeJobMessages(m.cron.runtimes, j.UID, j.Definition.Enabled && j.Definition.Action.Kind == "execute"); len(messages) > 0 {
+				d.field("Runtime", strings.Join(messages, "; "))
+			}
 			if uid := deref(j.Definition.Action.WorkflowUID); uid != "" {
 				cronDefinitionLink(&d, p, uid, "", true)
 			}
@@ -454,6 +457,15 @@ func renderCron(m Model) string {
 		cronTabs(m.cron.tab),
 		statsLineStyle.Render(padLeftRightInside(left, right, titleBarInnerWidth(m.width))),
 		"",
+	}
+	var runtimeJobs []generated.CronJob
+	jobsAvailable := false
+	if m.cron.data != nil {
+		runtimeJobs = m.cron.data.jobs
+		jobsAvailable = m.cron.data.jobsErr == nil
+	}
+	if banner, show := cronRuntimeBanner(m.cron.runtimes, runtimeJobs, jobsAvailable); show {
+		body = append(body[:len(body)-1], errorStyle.Render(truncate(sanitizeForLine(banner), m.width)), "")
 	}
 	if header != "" {
 		body = append(body, tableHeaderStyle.Render("  "+header))
