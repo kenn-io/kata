@@ -145,20 +145,24 @@ func (m Model) finishDelete(target formTarget) (Model, tea.Cmd) {
 // forgetDeletedIssue invalidates the snapshots that navigation can restore.
 func (m Model) forgetDeletedIssue(uid string) (Model, tea.Cmd) {
 	deleted := func(dm detailModel) bool { return dm.issue != nil && dm.issue.UID == uid }
-	forgetBack := func(dm detailModel) detailModel {
+	forgetDetail := func(dm detailModel, pop func(detailModel) (detailModel, tea.Cmd)) (detailModel, tea.Cmd, bool) {
 		dm.navStack = slices.DeleteFunc(slices.Clone(dm.navStack), deleted)
 		for i := range dm.navStack {
 			dm.navStack[i] = dm.navStack[i].invalidated()
 		}
-		return dm
+		if !deleted(dm) {
+			return dm, nil, false
+		}
+		if len(dm.navStack) > 0 {
+			next, cmd := pop(dm)
+			return next, cmd, false
+		}
+		dm.cancelReads()
+		return newDetailModel(), nil, true
 	}
 	forget := func(dm detailModel, focus *focusPane, views ...*viewID) detailModel {
-		dm = forgetBack(dm)
-		if deleted(dm) && len(dm.navStack) > 0 {
-			dm, _ = dm.handleBack()
-		} else if deleted(dm) {
-			dm.cancelReads()
-			dm = newDetailModel()
+		dm, _, reset := forgetDetail(dm, detailModel.handleBack)
+		if reset {
 			*focus = focusList
 			for _, view := range views {
 				if *view == viewDetail {
@@ -180,16 +184,17 @@ func (m Model) forgetDeletedIssue(uid string) (Model, tea.Cmd) {
 		m.attention.returnContext = &previous
 	}
 	m.attention.setRows(slices.DeleteFunc(slices.Clone(m.attention.rows), func(row attentionRequest) bool { return row.issue.UID == uid }))
-	m.detail = forgetBack(m.detail)
-	if deleted(m.detail) {
-		if len(m.detail.navStack) > 0 {
-			var cmd tea.Cmd
-			m.detail, cmd, _ = m.detail.handleNavKey(tea.KeyPressMsg{Code: tea.KeyEscape}, m.keymap, m.api)
-			return m, withConnGen(cmd, m.connGen)
-		}
-		m.detail.cancelReads()
-		m.detail = newDetailModel()
+	wasDeleted := deleted(m.detail)
+	detail, cmd, reset := forgetDetail(m.detail, func(dm detailModel) (detailModel, tea.Cmd) {
+		next, cmd, _ := dm.handleNavKey(tea.KeyPressMsg{Code: tea.KeyEscape}, m.keymap, m.api)
+		return next, cmd
+	})
+	m.detail = detail
+	if reset {
 		return m.leaveDetail()
+	}
+	if wasDeleted {
+		return m, withConnGen(cmd, m.connGen)
 	}
 	if slices.ContainsFunc(m.detail.children, func(child Issue) bool { return child.UID == uid }) {
 		return m, withConnGen(m.detail.refetch(m.api), m.connGen)
