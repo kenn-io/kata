@@ -272,14 +272,14 @@ func (c *Client) GetIssueDetail(ctx context.Context, projectID int64, ref string
 		Parent:     body.Parent,
 		Children:   body.Children,
 		Lease:      lease,
-		Recurrence: c.readRecurrence(ctx, projectID, body.Issue.RecurrenceID),
+		Recurrence: c.recurrenceOrNil(ctx, projectID, body.Issue.RecurrenceID),
 	}, nil
 }
 
-// readRecurrence reads the live recurrence an issue belongs to. It is best
+// recurrenceOrNil reads the live recurrence an issue belongs to. It is best
 // effort, as it is in kata show: a token that may not list recurrences still
 // reads the issue, which then shows no recurrence.
-func (c *Client) readRecurrence(ctx context.Context, projectID int64, id *int64) *recurrence.View {
+func (c *Client) recurrenceOrNil(ctx context.Context, projectID int64, id *int64) *recurrence.View {
 	rec, err := c.ReadRecurrence(ctx, projectID, id)
 	if err != nil {
 		return nil

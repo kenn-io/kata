@@ -302,15 +302,15 @@ func TestRecurrenceFormRefusesAndKeepsTheInput(t *testing.T) {
 	}{
 		{"the daemon's refusal is shown as is", nil, "every other tuesday", "Europe/Paris", []string{"every other tuesday"}},
 		{"Local is never sent as a zone", nil, "FREQ=DAILY", "Local", []string{"Local"}},
-		{"the parent of a cron job is refused", cronParent, "FREQ=DAILY", "Europe/Paris",
+		{"an issue that became a cron parent after the form opened is refused", cronParent, "FREQ=DAILY", "Europe/Paris",
 			[]string{recurrence.CronParentRefusal, "kata cron job create --parent"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newRecurrenceHarness(t, viewDetail)
+			h.open()
 			if tc.setup != nil {
 				tc.setup(h)
 			}
-			h.open()
 			h.fill(tc.rule, "2026-11-09", tc.zone)
 
 			h.save()
@@ -325,6 +325,22 @@ func TestRecurrenceFormRefusesAndKeepsTheInput(t *testing.T) {
 			assert.Empty(t, h.rows())
 		})
 	}
+}
+
+func TestRecurrenceKeyRefusesTheParentOfACronJobBeforeOpeningTheForm(t *testing.T) {
+	h := newRecurrenceHarness(t, viewDetail)
+	_, err := h.env.DB.ExecContext(t.Context(),
+		`UPDATE issues SET metadata='{"cron.progress.01ARZ3NDEKTSV4RRFFQ69G5FAV":{}}' WHERE id=?`, h.issue.ID)
+	require.NoError(t, err)
+
+	cmd := h.key(runeKey('O'))
+	out, _ := h.m.Update(msgOfType[recurrenceFormLoadedMsg](t, cmd))
+	h.m = out.(Model)
+
+	assert.Equal(t, inputNone, h.m.input.kind, "no form opens for a cron parent")
+	require.NotNil(t, h.m.toast)
+	assert.Contains(t, h.m.toast.text, recurrence.CronParentRefusal)
+	assert.Contains(t, h.m.toast.text, "kata cron job create --parent")
 }
 
 func TestRecurrenceFormConflictKeepsInputAndShowsTheCurrentRecurrence(t *testing.T) {

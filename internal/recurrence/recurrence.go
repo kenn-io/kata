@@ -1,6 +1,10 @@
-// Package recurrence wraps github.com/teambition/rrule-go behind a small,
-// date-string-oriented API. Rules are RFC-5545 RRULE strings; DTSTART
-// and "after" are YYYY-MM-DD dates interpreted in the rule's IANA timezone.
+// Package recurrence holds what clients of recurring issues share. It wraps
+// github.com/teambition/rrule-go behind a small, date-string-oriented API:
+// rules are RFC-5545 RRULE strings; DTSTART and "after" are YYYY-MM-DD dates
+// interpreted in the rule's IANA timezone. It also holds the calls to the
+// daemon's recurrence routes (List, Active, Start, Change, Stop), the
+// template built from a shown issue, the zone rules and the refusal for the
+// parent of a cron job, so `kata schedule --repeat` and the TUI behave alike.
 package recurrence
 
 import (
