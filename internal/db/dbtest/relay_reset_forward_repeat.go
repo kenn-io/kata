@@ -14,7 +14,7 @@ import (
 // forward queued for that epoch must not outlive the second checkpoint: an
 // issue accepted after the first capture and purged before the second would
 // otherwise reach the downstream once it activates.
-func RunRelayResetRepeatedBeforeDownstreamActivation(t *testing.T, store db.Storage) {
+func RunRelayResetRepeatedBeforeDownstreamActivation(t *testing.T, store db.Storage, installObserver func(db.Storage, func()) func()) {
 	ctx := t.Context()
 	installer, ok := store.(db.RelayResetStore)
 	require.True(t, ok, "native relay reset installation is required")
@@ -62,10 +62,19 @@ func RunRelayResetRepeatedBeforeDownstreamActivation(t *testing.T, store db.Stor
 	_, err = store.IssueByUID(ctx, late.entity.EntityUID, db.IncludeDeletedYes)
 	require.ErrorIs(t, err, db.ErrNotFound)
 
+	fullScans := 0
+	t.Cleanup(installObserver(store, func() { fullScans++ }))
 	forwarded, err := installer.CreateRelayReset(ctx, deviceBinding, db.RootAttributionSigner{})
 	require.NoError(t, err)
 	require.Equal(t, manifest, forwarded.Manifest, "the downstream receives the latest root checkpoint")
 	require.Equal(t, device.Enrollment.RelayResetEpoch+1, forwarded.Translation.Authority.Epoch)
+	retry, err := installer.CreateRelayReset(ctx, deviceBinding, db.RootAttributionSigner{})
+	require.NoError(t, err)
+	require.Equal(t, forwarded, retry)
 	activated := db.WithRelayRequestedEpoch(ctx, forwarded.Translation.Authority.Epoch)
 	require.Empty(t, pendingSourceUIDs(activated, t, store, deviceBinding, db.RelayStreamEvent), "the first forward's rows for the purged issue must not survive the second checkpoint")
+	required, err := store.(db.RelayResetBootstrapStore).RelayEnrollmentNeedsReset(ctx, deviceBinding)
+	require.NoError(t, err)
+	require.False(t, required)
+	require.Zero(t, fullScans, "first and retained forwards use upstream snapshot identities")
 }

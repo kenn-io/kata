@@ -52,9 +52,9 @@ func (s *Store) invalidateRelayHistoryValidationCache() {
 
 // relayHistoryNeedsResetCachedTx validates unchanged history once, then checks
 // only new source events. Retained checkpoints have independent grant/boundary
-// entries. Moves, merges and purges invalidate cached results because they can
-// change how retained event references resolve. Creations and unrelated
-// snapshots revalidate only short-parent references or reset results.
+// entries. Moves, merges, renames, and purges invalidate results when retained
+// references can resolve differently. Creations and unrelated snapshots
+// revalidate only short-parent references or reset results.
 func (s *Store) relayHistoryNeedsResetCachedTx(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -98,7 +98,7 @@ func (s *Store) relayHistoryNeedsResetCachedTx(
 		var created bool
 		if !invalidated && eventCursor > cache.eventCursor {
 			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events
-				WHERE id>$1 AND type IN ('issue.moved','project.merged','project.federation_enabled')),
+				WHERE id>$1 AND type IN ('issue.moved','project.merged','project.renamed','project.federation_enabled')),
 				EXISTS(SELECT 1 FROM events WHERE id>$1 AND type IN ('issue.created','issue.snapshot'))`,
 				cache.eventCursor,
 			).Scan(&invalidated, &created); err != nil {
@@ -172,7 +172,8 @@ func (s *Store) relayHistoryNeedsResetCachedTx(
 
 // relayHistoryResolvesShortParentAfterTx detects the only references whose
 // project scope can become ambiguous after an issue is created elsewhere.
-// Evidence references are project-scoped; UID references match exactly.
+// Bare evidence references use the event's project; qualified names can change
+// on rename, which invalidates all entries above. UID references match exactly.
 func relayHistoryResolvesShortParentAfterTx(ctx context.Context, tx *sql.Tx, projectID, after int64) (bool, error) {
 	var found bool
 	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE project_id=$1 AND id>$2 AND type='issue.closed' AND COALESCE(payload::jsonb->>'parent_uid','')='' AND COALESCE(payload::jsonb->>'parent_short_id','')<>'')`, projectID, after).Scan(&found)

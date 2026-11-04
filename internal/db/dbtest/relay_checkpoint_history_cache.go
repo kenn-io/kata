@@ -2,7 +2,6 @@ package dbtest
 
 import (
 	"context"
-	"crypto/ed25519"
 	"encoding/json/jsontext"
 	"testing"
 	"time"
@@ -85,60 +84,17 @@ func RunRelayCheckpointHistoryValidationCache(t *testing.T, store db.Storage, ba
 	_, err = store.InsertRemoteEvents(ctx, fixture.project.ID, []db.RemoteEvent{snapshot})
 	require.NoError(t, err)
 	bootstrap := store.(db.RelayResetBootstrapStore)
-	requireWriteDuringRelayScan(t, store, backend, fixture.sibling.ID, func() error {
+	_, _, err = requireWriteDuringRelayScan(t, store, backend, fixture.sibling.ID, func() (bool, error) {
 		_, err := store.(db.RelayResetStore).CreateRelayReset(ctx, grants[1].RelayBindingUID, fixture.signer)
-		return err
+		return false, err
 	}, func() {
 		otherKeyCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
 		_, err := bootstrap.RelayEnrollmentNeedsReset(otherKeyCtx, grants[0].RelayBindingUID)
 		require.NoError(t, err, "another cache key must progress during the scan")
 	})
+	require.NoError(t, err)
 	require.NoError(t, store.RevokeFederationEnrollment(ctx, grants[0].ID))
 	_, err = store.(db.RelayResetBootstrapStore).RelayEnrollmentNeedsReset(ctx, grants[0].RelayBindingUID)
 	require.ErrorIs(t, err, db.ErrNotFound, "cached validation cannot bypass revocation")
-}
-
-// RunRelayForwardedCheckpointAvoidsHistoryScan checks that an intermediate
-// relay compares upstream checkpoint identities without validating local history.
-func RunRelayForwardedCheckpointAvoidsHistoryScan(t *testing.T, store db.Storage, backend Backend) {
-	ctx := t.Context()
-	project, err := store.CreateProject(ctx, "relay-project")
-	require.NoError(t, err)
-	rootUID := "00000000000000000000000002"
-	public, private, err := ed25519.GenerateKey(nil)
-	require.NoError(t, err)
-	pin := db.RootKeyPin{ProjectUID: project.UID, AuthorityUID: rootUID, KeyID: db.RootPublicKeyID(public), PublicKey: public}
-	require.NoError(t, store.PinRootAuthority(ctx, pin))
-	_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://hub.example", HubProjectID: 42, HubProjectUID: project.UID, Actor: "relay-member", Enabled: true, PushEnabled: true})
-	require.NoError(t, err)
-	upstream, err := uid.New()
-	require.NoError(t, err)
-	_, err = store.SetRelayBindingConfig(ctx, project.ID, db.RelayBindingConfig{ProtocolVersion: db.RelayProtocolVersion, BindingUID: upstream, AuthorityUID: rootUID, UpstreamInstanceUID: rootUID, HubPath: []string{rootUID, store.InstanceUID()}, LocalActor: "relay-member", ServeDownstream: true, ResetEpoch: 1})
-	require.NoError(t, err)
-	root := &rootResetFixture{t: t, project: project, pin: pin, private: private, rootUID: rootUID, relayUID: store.InstanceUID(), binding: upstream}
-	manifest, snapshot, translation := root.checkpoint(2, 2, root.created("Kept issue", 300, 1))
-	installer := store.(db.RelayResetStore)
-	require.NoError(t, installer.InstallRelayReset(ctx, upstream, manifest, snapshot, translation))
-	parentToken, err := db.NewFederationToken()
-	require.NoError(t, err)
-	parent, _, err := store.CreateAPIToken(ctx, db.CreateAPITokenParams{Actor: "relay-member", AdminActor: "admin", PlaintextToken: parentToken})
-	require.NoError(t, err)
-	child, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: project.ID, ParentTokenID: parent.ID, SpokeInstanceUID: "00000000000000000000000008", ProtocolVersion: db.RelayProtocolVersion})
-	require.NoError(t, err)
-	fullScans := 0
-	t.Cleanup(backend.InstallRelayHistoryFullScanObserver(store, func() { fullScans++ }))
-	forwarded, err := installer.CreateRelayReset(ctx, child.Enrollment.RelayBindingUID, db.RootAttributionSigner{})
-	require.NoError(t, err)
-	require.Equal(t, manifest, forwarded.Manifest)
-	_, err = store.PendingRelayDeliveries(db.WithRelayRequestedEpoch(ctx, forwarded.Translation.Authority.Epoch), child.Enrollment.RelayBindingUID, db.RelayStreamEvent, 100)
-	require.NoError(t, err)
-	// No scan has filled the cache, so the retained checkpoint is checked cold.
-	required, err := store.(db.RelayResetBootstrapStore).RelayEnrollmentNeedsReset(ctx, child.Enrollment.RelayBindingUID)
-	require.NoError(t, err)
-	require.False(t, required)
-	retry, err := installer.CreateRelayReset(ctx, child.Enrollment.RelayBindingUID, db.RootAttributionSigner{})
-	require.NoError(t, err)
-	require.Equal(t, forwarded, retry)
-	require.Zero(t, fullScans, "first and retained forwards use upstream snapshot identities")
 }

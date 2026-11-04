@@ -57,11 +57,11 @@ func RunRelayEnrollmentHistoryValidationCache(t *testing.T, store db.Storage, ba
 	// A cold handshake must release the writer before scanning history.
 	cold := backend.OpenSame(t, store)
 	bootstrap := cold.(db.RelayResetBootstrapStore)
-	requireWriteDuringRelayScan(t, cold, backend, project.ID, func() error {
-		required, err := bootstrap.RelayEnrollmentNeedsReset(ctx, grant.Enrollment.RelayBindingUID)
-		require.False(t, required)
-		return err
+	_, required, err := requireWriteDuringRelayScan(t, cold, backend, project.ID, func() (bool, error) {
+		return bootstrap.RelayEnrollmentNeedsReset(ctx, grant.Enrollment.RelayBindingUID)
 	}, nil)
+	require.NoError(t, err)
+	require.False(t, required)
 	// Measure the original handle independently of the cold scan.
 	fullScans := 0
 	require.NotNil(t, backend.InstallRelayHistoryFullScanObserver)
@@ -79,7 +79,7 @@ func RunRelayEnrollmentHistoryValidationCache(t *testing.T, store db.Storage, ba
 		IssueID: issue.ID, Author: "example-assistant", Body: "New relay event",
 	})
 	require.NoError(t, err)
-	required, err := bootstrap.RelayEnrollmentNeedsReset(ctx, grant.Enrollment.RelayBindingUID)
+	required, err = bootstrap.RelayEnrollmentNeedsReset(ctx, grant.Enrollment.RelayBindingUID)
 	require.NoError(t, err)
 	require.False(t, required)
 	require.Equal(t, 1, fullScans, "new events should be inspected after the cached history cursor")
@@ -154,28 +154,27 @@ func RunRelayEnrollmentHistoryValidationCache(t *testing.T, store db.Storage, ba
 
 	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: collision.ID, Title: "Another endpoint", Author: "member"})
 	require.NoError(t, err)
-	scans := requireWriteDuringRelayScan(t, store, backend, collision.ID, func() error {
-		required, err := bootstrap.RelayEnrollmentNeedsReset(ctx, grant.Enrollment.RelayBindingUID)
-		require.True(t, required)
-		return err
+	scans, required, err := requireWriteDuringRelayScan(t, store, backend, collision.ID, func() (bool, error) {
+		return bootstrap.RelayEnrollmentNeedsReset(ctx, grant.Enrollment.RelayBindingUID)
 	}, nil)
+	require.NoError(t, err)
+	require.True(t, required)
 	require.Equal(t, int64(2), scans, "a creation during the fill causes one final fenced scan")
 
 	// The cold handle's entry predates the purge, so its next check fills.
-	requireWriteDuringRelayScan(t, cold, backend, collision.ID, func() error {
-		_, err := cold.(db.RelayResetBootstrapStore).RelayEnrollmentNeedsReset(ctx, grant.Enrollment.RelayBindingUID)
-		require.ErrorIs(t, err, db.ErrNotFound, "revocation during fill is checked by the second fenced attempt")
-		return nil
+	_, _, err = requireWriteDuringRelayScan(t, cold, backend, collision.ID, func() (bool, error) {
+		return cold.(db.RelayResetBootstrapStore).RelayEnrollmentNeedsReset(ctx, grant.Enrollment.RelayBindingUID)
 	}, func() {
 		require.NoError(t, store.RevokeFederationEnrollment(ctx, grant.Enrollment.ID))
 	})
+	require.ErrorIs(t, err, db.ErrNotFound, "revocation during fill is checked by the second fenced attempt")
 	_, err = bootstrap.RelayEnrollmentNeedsReset(ctx, grant.Enrollment.RelayBindingUID)
 	require.ErrorIs(t, err, db.ErrNotFound, "live enrollment authority is checked even when history is cached")
 }
 
 // requireWriteDuringRelayScan blocks the first full history scan started by
 // scan, runs during, and requires a local issue write to commit meanwhile.
-func requireWriteDuringRelayScan(t *testing.T, store db.Storage, backend Backend, projectID int64, scan func() error, during func()) int64 {
+func requireWriteDuringRelayScan(t *testing.T, store db.Storage, backend Backend, projectID int64, scan func() (bool, error), during func()) (int64, bool, error) {
 	t.Helper()
 	entered, release := make(chan struct{}), make(chan struct{})
 	unblock := sync.OnceFunc(func() { close(release) })
@@ -187,8 +186,15 @@ func requireWriteDuringRelayScan(t *testing.T, store db.Storage, backend Backend
 			<-release
 		}
 	})()
-	scanDone, writeDone := make(chan error, 1), make(chan error, 1)
-	go func() { scanDone <- scan() }()
+	type result struct {
+		required bool
+		err      error
+	}
+	scanDone, writeDone := make(chan result, 1), make(chan error, 1)
+	go func() {
+		required, err := scan()
+		scanDone <- result{required, err}
+	}()
 	select {
 	case <-entered:
 	case <-time.After(5 * time.Second):
@@ -210,6 +216,6 @@ func requireWriteDuringRelayScan(t *testing.T, store db.Storage, backend Backend
 		require.NoError(t, <-writeDone)
 	}
 	unblock()
-	require.NoError(t, <-scanDone)
-	return scans.Load()
+	scanned := <-scanDone
+	return scans.Load(), scanned.required, scanned.err
 }

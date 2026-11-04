@@ -131,8 +131,12 @@ var storageScenarios = []scenario{
 		RunRelayCheckpointHistoryValidationCache(t, store, backend)
 		return nil
 	}},
+	{name: "relay named evidence cache", methods: []string{"CreateAPIToken", "CreateIssue", "CreateProject", "CreateRelayEnrollment", "InsertRemoteEvents", "PinRootAuthority", "RenameProject", "UpsertFederationBinding"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunRelayNamedEvidenceCache(t, store, backend)
+		return nil
+	}},
 	{name: "relay forwarded checkpoint avoids history scan", methods: []string{"CreateAPIToken", "CreateProject", "CreateRelayEnrollment", "PinRootAuthority", "SetRelayBindingConfig", "UpsertFederationBinding"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
-		RunRelayForwardedCheckpointAvoidsHistoryScan(t, store, backend)
+		RunRelayResetRepeatedBeforeDownstreamActivation(t, store, backend.InstallRelayHistoryFullScanObserver)
 		return nil
 	}},
 	{name: "relay ingest returns local issue ids", methods: []string{"AcceptRelayDeliveries", "CreateAPIToken", "CreateProject", "CreateRelayEnrollment", "IssueByUID", "PinRootAuthority", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {
