@@ -199,6 +199,10 @@ type PauseCronJobResponse = CronJobResponseBody
 
 type PauseCronJobErrorResponse = ErrorEnvelope
 
+type RequestCronJobRunResponse = CronRequestResponseBody
+
+type RequestCronJobRunErrorResponse = ErrorEnvelope
+
 type RestoreCronJobResponse = CronJobResponseBody
 
 type RestoreCronJobErrorResponse = ErrorEnvelope
@@ -215,6 +219,10 @@ type PauseCronProjectResponse = CronProjectPauseResponseBody
 
 type PauseCronProjectErrorResponse = ErrorEnvelope
 
+type ListCronRequestsResponse = CronRequestListResponseBody
+
+type ListCronRequestsErrorResponse = ErrorEnvelope
+
 type ListCronRunsResponse = CronRunsResponseBody
 
 type ListCronRunsErrorResponse = ErrorEnvelope
@@ -226,6 +234,10 @@ type ShowCronRunErrorResponse = ErrorEnvelope
 type ObserveCronRunResponse = ObserveCronRunResponseBody
 
 type ObserveCronRunErrorResponse = ErrorEnvelope
+
+type RequestCronRunCancelResponse = CronRequestResponseBody
+
+type RequestCronRunCancelErrorResponse = ErrorEnvelope
 
 type ListCronWorkflowsResponse = ListCronWorkflowsResponseBody
 
@@ -1009,6 +1021,14 @@ type PauseCronJobResp struct {
 	JSONDefault  *PauseCronJobErrorResponse
 }
 
+type RequestCronJobRunResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *RequestCronJobRunResponse
+	JSONDefault  *RequestCronJobRunErrorResponse
+}
+
 type RestoreCronJobResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
@@ -1041,6 +1061,14 @@ type PauseCronProjectResp struct {
 	JSONDefault  *PauseCronProjectErrorResponse
 }
 
+type ListCronRequestsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ListCronRequestsResponse
+	JSONDefault  *ListCronRequestsErrorResponse
+}
+
 type ListCronRunsResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
@@ -1063,6 +1091,14 @@ type ObserveCronRunResp struct {
 	StatusCode   int
 	JSON200      *ObserveCronRunResponse
 	JSONDefault  *ObserveCronRunErrorResponse
+}
+
+type RequestCronRunCancelResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *RequestCronRunCancelResponse
+	JSONDefault  *RequestCronRunCancelErrorResponse
 }
 
 type ListCronWorkflowsResp struct {

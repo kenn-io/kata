@@ -1580,6 +1580,80 @@ func (c CronProjectPauseResponseBody_ProjectPause) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(c))
 }
 
+type CronRequest struct {
+	DefinitionEventUID *string   `json:"definition_event_uid,omitempty"`
+	ExpiresAt          time.Time `json:"expires_at" validate:"required"`
+	JobUID             *string   `json:"job_uid,omitempty"`
+	Kind               string    `json:"kind" validate:"required"`
+	RequestedAt        time.Time `json:"requested_at" validate:"required"`
+	RequestedBy        string    `json:"requested_by" validate:"required"`
+	RunUID             *string   `json:"run_uid,omitempty"`
+	State              *string   `json:"state,omitempty"`
+	UID                string    `json:"uid" validate:"required"`
+}
+
+func (c CronRequest) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+}
+
+type CronRequestBody struct {
+	Actor      *string `json:"actor,omitempty"`
+	TTLSeconds *int64  `json:"ttl_seconds,omitempty" validate:"omitempty,gte=60,lte=86400"`
+	UID        string  `json:"uid" validate:"required,max=26,min=26"`
+}
+
+func (c CronRequestBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+}
+
+type CronRequestListResponseBody struct {
+	Requests []CronRequest `json:"requests" validate:"required"`
+}
+
+func (c CronRequestListResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(c.Requests, "required"); err != nil {
+		errors = errors.Append("Requests", err)
+	}
+	for i, item := range c.Requests {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Requests[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type CronRequestResponseBody struct {
+	Event    *Event      `json:"event,omitempty"`
+	Replayed bool        `json:"replayed"`
+	Request  CronRequest `json:"request"`
+}
+
+func (c CronRequestResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if c.Event != nil {
+		if v, ok := any(c.Event).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Event", err)
+			}
+		}
+	}
+	if v, ok := any(c.Request).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Request", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type CronRun struct {
 	Actor                      string          `json:"actor" validate:"required"`
 	CreatedAt                  time.Time       `json:"created_at" validate:"required"`

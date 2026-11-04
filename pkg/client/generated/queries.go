@@ -150,6 +150,25 @@ type ListCronJobsQuery struct {
 	IncludeDeleted *bool `json:"include_deleted,omitempty"`
 }
 
+type ListCronRequestsQuery struct {
+	State *ListCronRequestsQueryState `json:"state,omitempty"`
+}
+
+func (l ListCronRequestsQuery) Validate() error {
+	var errors runtime.ValidationErrors
+	if l.State != nil {
+		if v, ok := any(l.State).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("State", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type ListCronRunsQuery struct {
 	JobUID    *string `json:"job_uid,omitempty"`
 	Limit     *int64  `json:"limit,omitempty" validate:"omitempty,gte=0,lte=100"`
