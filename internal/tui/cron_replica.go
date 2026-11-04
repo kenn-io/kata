@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"go.kenn.io/kata/pkg/client/generated"
@@ -51,4 +52,12 @@ func cronReplicaChip(p cronReplica) string {
 		return "replica · never pulled"
 	}
 	return "replica · pulled " + humanizeRelative(*p.pulledAt)
+}
+
+func (c *undoClient) readCronReplica(ctx context.Context, projectID int64) (cronReplica, error) {
+	reader, ok := c.KataAPI.(cronReplicaAPI)
+	if !ok {
+		return cronReplica{}, errors.New("replica status unavailable")
+	}
+	return reader.readCronReplica(ctx, projectID)
 }

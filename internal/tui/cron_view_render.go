@@ -175,10 +175,18 @@ func cronScreen(m Model) (string, string, []cronLine) {
 		if m.cron.tab == cronRuns && m.cron.runPage.ready {
 			runs = m.cron.runPage.runs
 		}
+		if m.cron.tab == cronRuns && m.cron.unseenOnly {
+			runs = m.cronLoadedRuns()
+		}
 		switch m.cron.tab {
 		case cronJobs:
 			for _, j := range p.jobs {
-				add(j.UID, []string{j.Name, cronHealth(*p, j, renderNow()).state, cronSchedule(j.Definition.Trigger), cronAction(*p, j), cronJobLast(*p, j.UID)}, map[string]string{"health": cronHealth(*p, j, renderNow()).state, "status": p.lastRuns[j.UID].Status, "action": j.Definition.Action.Kind + " " + cronAction(*p, j), "trigger": j.Definition.Trigger.Kind})
+				health := cronHealth(*p, j, renderNow()).state
+				last := cronJobLast(*p, j.UID)
+				if health == "running" {
+					last = humanizeRelative(p.lastRuns[j.UID].CreatedAt)
+				}
+				add(j.UID, []string{j.Name, health, cronSchedule(j.Definition.Trigger), cronAction(*p, j), last}, map[string]string{"health": health, "status": p.lastRuns[j.UID].Status, "action": j.Definition.Action.Kind + " " + cronAction(*p, j), "trigger": j.Definition.Trigger.Kind})
 			}
 		case cronRuns:
 			for _, r := range runs {
@@ -222,7 +230,7 @@ func cronScreen(m Model) (string, string, []cronLine) {
 		if m.cron.runPage.next != "" {
 			lines = append(lines, cronLine{text: "load 100 older runs", target: cronRef{cronOlder, "project"}})
 		}
-		if m.cron.runPage.err != nil {
+		if m.cron.runPage.err != nil && (m.cron.data == nil || m.cron.runPage.err != m.cron.data.runsErr) {
 			lines = append(lines, cronLine{text: "unavailable: " + sanitizeForLine(m.cron.runPage.err.Error())})
 		}
 		if m.cron.runPage.out {
@@ -276,7 +284,6 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 	case cronJobs:
 		if j := p.job(ref.uid); j != nil {
 			name = j.Name
-			d.field("State", cronJobState(*j))
 			health := cronHealth(p, *j, renderNow())
 			label := health.state
 			if label == "blocked" {
@@ -313,10 +320,15 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 	case cronRuns:
 		if r, ok := p.run(ref.uid); ok {
 			name = r.UID
+			if err := p.runErr[r.UID]; err != nil {
+				d.field("Refresh", "unavailable: "+err.Error())
+			}
 			d.field("Status", r.Status)
 			if r.Status == "running" {
 				health := cronRunHealth(p, r)
-				d.field("Health", cronRunStatus(p, r))
+				if health.state == "blocked" {
+					d.field("Health", "blocked")
+				}
 				d.field("Reason", health.reason)
 			}
 			d.field("Occurrence", deref(r.OccurrenceKey))

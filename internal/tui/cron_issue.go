@@ -20,7 +20,7 @@ func (m Model) cronOpenIssue(uid string) (Model, tea.Cmd) {
 	m.pendingDetailFollow = false
 	m.nextDetailFollowGen++
 	m = m.seedOpenDetail(Issue{UID: uid, ProjectID: m.scope.projectID})
-	return m, m.fetchOpenDetail()
+	return m, m.detail.fetchDetail(m.api, uid)
 }
 
 func (m Model) returnFromCronDetail() (Model, tea.Cmd) {

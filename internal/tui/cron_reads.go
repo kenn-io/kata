@@ -52,12 +52,12 @@ func cronFetch(ctx context.Context, reader cronAPI, id int64, data *cronData) {
 }
 
 type cronEnrichment struct {
-	uid          string
-	parent, wait bool
-	runs         []generated.CronRun
-	value        cronParent
-	attention    cronRunWait
-	err          error
+	uid               string
+	parent, wait, run bool
+	runs              []generated.CronRun
+	value             cronParent
+	attention         cronRunWait
+	err               error
 }
 
 // cronEnrich establishes fresh last-run provenance independently of the display
@@ -69,11 +69,10 @@ func cronEnrich(ctx context.Context, reader cronAPI, id int64, p *cronData) {
 	p.lastErr = map[string]error{}
 	p.progress = map[string]cron.RecurringProgress{}
 	p.parentOpen = map[string]bool{}
+	p.runErr = map[string]error{}
+	p.lookup = map[string]generated.CronRun{}
 	p.waits = map[string]cronRunWait{}
 	p.waitErr = map[string]error{}
-	if p.jobsErr != nil {
-		return
-	}
 	if p.runsErr == nil {
 		for _, r := range p.runs {
 			if uid := deref(r.JobUID); uid != "" {
@@ -88,26 +87,38 @@ func cronEnrich(ctx context.Context, reader cronAPI, id int64, p *cronData) {
 	fills := 0
 	for _, j := range p.jobs {
 		if parent := cronNativeParent(j); parent != "" {
-			if !j.Definition.Enabled || parents[parent] {
-				continue
+			if j.Definition.Enabled && !parents[parent] {
+				parents[parent] = true
+				if len(parents) <= 200 {
+					tasks = append(tasks, cronEnrichment{uid: parent, parent: true})
+				}
 			}
-			parents[parent] = true
-			if len(parents) <= 200 {
-				tasks = append(tasks, cronEnrichment{uid: parent, parent: true})
-			}
-			continue
 		}
 		if _, known := p.lastRuns[j.UID]; known {
 			continue
 		}
 		fills++
 		if fills > 200 {
-			p.lastErr[j.UID] = errors.New("too many jobs (200 fill reads per refresh)")
+			p.lastErr[j.UID] = errors.New("last-run lookup limit reached (200 jobs per refresh)")
 			continue
 		}
 		tasks = append(tasks, cronEnrichment{uid: j.UID})
 	}
 
+	runReader, supportsRun := reader.(cronRunAPI)
+	for _, r := range p.inspectedRuns {
+		p.lookup[r.UID] = r
+		fresh, known := p.lastRuns[deref(r.JobUID)]
+		if known && fresh.UID == r.UID {
+			p.lookup[r.UID] = fresh
+			continue
+		}
+		if !supportsRun {
+			p.runErr[r.UID] = errors.New("run refresh unavailable")
+			continue
+		}
+		tasks = append(tasks, cronEnrichment{uid: r.UID, run: true})
+	}
 	waitReader, supportsWait := reader.(cronWaitAPI)
 	issues := map[string]bool{}
 	waitTasks := func(runs []generated.CronRun) []cronEnrichment {
@@ -146,6 +157,13 @@ func cronEnrich(ctx context.Context, reader cronAPI, id int64, p *cronData) {
 			for task := range queue {
 				if task.err = ctx.Err(); task.err == nil {
 					switch {
+					case task.run:
+						var r generated.CronRun
+						r, task.err = runReader.readCronRun(ctx, id, task.uid)
+						if task.err == nil && r.UID != task.uid {
+							task.err = errors.New("received a different run")
+						}
+						task.runs = []generated.CronRun{r}
 					case task.wait:
 						task.attention, task.err = waitReader.readCronRunWait(ctx, id, task.uid)
 					case task.parent:
@@ -165,6 +183,11 @@ func cronEnrich(ctx context.Context, reader cronAPI, id int64, p *cronData) {
 		result := <-results
 		pending--
 		switch {
+		case result.run:
+			p.runErr[result.uid] = result.err
+			if result.err == nil {
+				p.lookup[result.uid] = result.runs[0]
+			}
 		case result.wait:
 			p.waitErr[result.uid] = result.err
 			if result.err == nil {
@@ -193,7 +216,7 @@ func cronEnrich(ctx context.Context, reader cronAPI, id int64, p *cronData) {
 func cronValidateJobPage(runs []generated.CronRun, job string) error {
 	for _, r := range runs {
 		if deref(r.JobUID) != job {
-			return errors.New("run page does not match requested job")
+			return errors.New("received runs for a different job")
 		}
 	}
 	return nil

@@ -16,7 +16,7 @@ type cronHealthState struct{ state, reason string }
 func cronHealth(p cronData, j generated.CronJob, now time.Time) cronHealthState {
 	state := func(label, reason string) cronHealthState { return cronHealthState{label, reason} }
 	if !j.Definition.Enabled {
-		return state("paused", "job is disabled")
+		return state("paused", "")
 	}
 	if p.jobsErr != nil {
 		return state("unavailable", "job definitions could not be refreshed")
@@ -77,9 +77,6 @@ func cronHealth(p cronData, j generated.CronJob, now time.Time) cronHealthState 
 			case "failed", "unknown":
 				return state("failing", "last run status is "+last.Status)
 			}
-			if def.Trigger.Kind == "once" {
-				return state("ok", "one-time trigger has an observation")
-			}
 		} else if def.Trigger.Kind == "once" {
 			base = time.Time{}
 		}
@@ -93,13 +90,16 @@ func cronHealth(p cronData, j generated.CronJob, now time.Time) cronHealthState 
 		grace = time.Duration(def.GraceSeconds) * time.Second
 	}
 	if len(instants) > 0 && instants[0].Add(grace).Before(now) {
-		return state("missed", "expected "+instants[0].Format(time.RFC3339)+" beyond display tolerance "+grace.String())
+		return state("missed", "Expected "+instants[0].Format(time.RFC3339)+"; over "+grace.String()+" late (estimate)")
 	}
 	if !native && !hasRun {
-		return state("never ran", "no recorded run; no expected instant beyond display tolerance")
+		return state("never ran", "No scheduled run is past its grace period")
 	}
 	if native {
-		return state("ok", "delivery progress has no expected instant beyond display tolerance")
+		return state("ok", "No delivery is past its grace period")
+	}
+	if def.Trigger.Kind == "once" && len(instants) == 0 {
+		return state("ok", "One-time job has run")
 	}
 	return state("ok", "last run status is "+last.Status)
 }

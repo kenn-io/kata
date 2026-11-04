@@ -59,10 +59,17 @@ func (m Model) cronNoticeEvent(msg eventReceivedMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 	r := *msg.cronRun
-	if r.UID == "" || r.ProjectUID == "" || r.ProjectUID != msg.projectUID || (r.Status != "failed" && r.Status != "unknown") {
+	if r.UID == "" || r.ProjectUID == "" || r.ProjectUID != msg.projectUID {
 		return m, nil
 	}
 	if selected := m.cronProjectUID(); selected != "" && selected != r.ProjectUID {
+		return m, nil
+	}
+	if r.Status != "failed" && r.Status != "unknown" {
+		m.cronNotices.pending = maps.Clone(m.cronNotices.pending)
+		m.cronNotices.announced = maps.Clone(m.cronNotices.announced)
+		delete(m.cronNotices.pending, r.UID)
+		delete(m.cronNotices.announced, r.UID)
 		return m, nil
 	}
 	at := cronFailureTime(r.run())

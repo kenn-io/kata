@@ -49,12 +49,15 @@ func (c *Client) readCronRunWait(ctx context.Context, projectID int64, issueUID 
 }
 
 func cronRunWaitForActor(wait cronRunWait, actor string) cronHealthState {
-	out := cronHealthState{"running", "executor recorded a running observation"}
+	out := cronHealthState{"running", ""}
 	if !wait.open {
 		return out
 	}
 	if attention, _ := wait.metadata["work.attention"].(string); attention == "needs-human" || attention == "stuck" {
-		out = cronHealthState{"blocked", "work.attention " + attention}
+		out = cronHealthState{"blocked", "Needs human attention"}
+		if attention == "stuck" {
+			out.reason = "Stuck"
+		}
 	}
 	recipient, err := notification.NormalizeRecipient(actor)
 	if err != nil {

@@ -47,6 +47,8 @@ type cronData struct {
 	waits               map[string]cronRunWait
 	waitErr             map[string]error
 	historyRuns         []generated.CronRun
+	inspectedRuns       []generated.CronRun
+	runErr              map[string]error
 	jobsErr             error
 	workflowsErr        error
 	runsErr             error
@@ -147,6 +149,17 @@ func (m Model) fetchCron() tea.Cmd {
 	reader, id := m.api, m.scope.projectID
 	data := cronData{conn: m.connGen, scope: m.scopeGen, events: m.cron.events, generation: m.cron.readGen}
 	data.historyRuns = m.cronWaitLoadedRuns()
+	if m.cron.data != nil {
+		seen := map[string]bool{}
+		for _, frame := range m.cron.stack {
+			if frame.ref.kind == cronRuns && !seen[frame.ref.uid] {
+				if r, ok := m.cron.data.run(frame.ref.uid); ok {
+					data.inspectedRuns = append(data.inspectedRuns, r)
+					seen[r.UID] = true
+				}
+			}
+		}
+	}
 	return func() tea.Msg {
 		// Bubble Tea command callbacks supply no context in isolated model tests.
 		root := context.Background()
@@ -189,12 +202,17 @@ func (m Model) cronLoaded(msg cronLoadedMsg) Model {
 	}
 	// Keep records that the navigation stack still references; paged records are
 	// lookup evidence only and never establish fresh last-run health.
-	data.lookup = map[string]generated.CronRun{}
+	data.lookup = maps.Clone(data.lookup)
+	if data.lookup == nil {
+		data.lookup = map[string]generated.CronRun{}
+	}
 	if previous := m.cron.data; previous != nil {
 		for _, frame := range m.cron.stack {
 			if frame.ref.kind == cronRuns {
 				if r, ok := previous.run(frame.ref.uid); ok {
-					data.lookup[r.UID] = r
+					if fresh, ok := data.lookup[r.UID]; !ok || r.Revision > fresh.Revision {
+						data.lookup[r.UID] = r
+					}
 				}
 			}
 		}

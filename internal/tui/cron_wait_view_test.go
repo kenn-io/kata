@@ -46,8 +46,8 @@ func TestCronWaitRendering(t *testing.T) {
 	r := m.cron.data.runs[0]
 	m.cron.stack = []cronFrame{{ref: cronRef{cronRuns, r.UID}}}
 	text := cronScreenText(m)
-	require.Contains(t, text, "Health:     running · blocked")
-	require.Contains(t, text, "work.attention needs-human")
+	require.Contains(t, text, "Health:     blocked")
+	require.Contains(t, text, "Needs human attention")
 	m.cron.data.waits = nil
 	require.Contains(t, cronScreenText(m), "attention unavailable")
 	m.cron.data.waits = map[string]cronRunWait{"issue-example": {open: true, metadata: map[string]any{"work.attention": "stuck"}}}

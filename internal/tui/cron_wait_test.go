@@ -92,7 +92,7 @@ func TestCronWaitOverdueWinsAndNativeIgnoresWait(t *testing.T) {
 	p := cronData{jobs: []generated.CronJob{j}, lastRuns: map[string]generated.CronRun{j.UID: r}, lastErr: map[string]error{}, waits: map[string]cronRunWait{"issue-example": {open: true, metadata: map[string]any{"work.attention": "stuck"}}}}
 	got := cronHealth(p, j, snapshotFixedNow)
 	require.Equal(t, "overdue", got.state)
-	require.Contains(t, got.reason, "stuck")
+	require.Contains(t, got.reason, "Stuck")
 	j.Definition.TimeoutSeconds = nil
 	require.Equal(t, "blocked", cronHealth(p, j, snapshotFixedNow).state)
 	nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&j.Definition)

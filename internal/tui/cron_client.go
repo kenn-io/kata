@@ -200,3 +200,30 @@ func (c *Client) PutCronJob(ctx context.Context, projectID int64, uid string, wr
 	}
 	return decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil)
 }
+
+// Inspected observations may age out of every list page; refresh their exact UID.
+type cronRunAPI interface {
+	readCronRun(context.Context, int64, string) (generated.CronRun, error)
+}
+
+func (c *undoClient) readCronRun(ctx context.Context, projectID int64, uid string) (generated.CronRun, error) {
+	reader, ok := c.KataAPI.(cronRunAPI)
+	if !ok {
+		return generated.CronRun{}, fmt.Errorf("run refresh unavailable")
+	}
+	return reader.readCronRun(ctx, projectID, uid)
+}
+func (c *Client) readCronRun(ctx context.Context, projectID int64, uid string) (generated.CronRun, error) {
+	client, err := c.generatedClient()
+	if err != nil {
+		return generated.CronRun{}, err
+	}
+	wire, callErr := client.ShowCronRunWithResponse(ctx, &generated.ShowCronRunRequestOptions{PathParams: &generated.ShowCronRunPath{ProjectID: projectID, RunUID: uid}})
+	if wire == nil {
+		return generated.CronRun{}, callErr
+	}
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil); err != nil {
+		return generated.CronRun{}, err
+	}
+	return wire.JSON200.Run, nil
+}

@@ -177,7 +177,11 @@ func cronJobHistory(d *cronDoc, m Model, job string) {
 		d.section("Runs · loading…")
 		return
 	}
-	d.section(fmt.Sprintf("Runs (%d)", len(p.runs)))
+	if p.ready && len(p.runs) == 0 {
+		d.section("Runs")
+	} else {
+		d.section(fmt.Sprintf("Runs (%d)", len(p.runs)))
+	}
 	if p.out {
 		d.text("loading…", cronRef{})
 	}

@@ -137,7 +137,7 @@ func TestCronEnrichmentCapsAndSharedWorkers(t *testing.T) {
 	require.Equal(t, 200, a.parents)
 	require.LessOrEqual(t, a.peak, 4)
 	require.Greater(t, a.peak, 1)
-	require.ErrorContains(t, p.lastErr["204"], "too many jobs")
+	require.ErrorContains(t, p.lastErr["204"], "200 jobs per refresh")
 	require.NotContains(t, p.parentOpen, "parent-204")
 }
 

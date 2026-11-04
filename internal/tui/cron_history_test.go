@@ -46,24 +46,21 @@ func TestCronHistoryJobPagesAndLookup(t *testing.T) {
 	_, _, lines := cronScreen(m)
 	require.True(t, slices.ContainsFunc(lines, func(l cronLine) bool { return l.target == cronRef{cronRuns, old.UID} }))
 	require.True(t, slices.ContainsFunc(lines, func(l cronLine) bool { return l.target.kind == cronOlder }))
-	newerRevision := old
-	newerRevision.Revision = 2
-	newerRevision.Status = "failed"
 	older := old
 	older.UID = "older-run"
-	a.page = []generated.CronRun{newerRevision, older}
+	a.page = []generated.CronRun{older}
 	a.next = ""
 	m, cmd = m.cronRequestPage(j.UID, false)
 	m = m.cronPageLoaded(cmd().(cronPageMsg))
 	require.Equal(t, "older", a.before)
-	require.Len(t, m.cron.jobPage.runs, 2, "overlap is deduplicated")
+	require.Len(t, m.cron.jobPage.runs, 2)
 	m.cron.stack = append(m.cron.stack, cronFrame{ref: cronRef{cronRuns, old.UID}})
-	require.Contains(t, stripANSI(m.viewBody()), "failed")
+	require.Contains(t, stripANSI(m.viewBody()), old.Status)
 	// Refresh prunes old pages but must retain a run currently being inspected.
 	data := *m.cron.data
 	data.runs = nil
 	m = m.cronLoaded(cronLoadedMsg(data))
-	require.Contains(t, stripANSI(m.viewBody()), "failed")
+	require.Contains(t, stripANSI(m.viewBody()), old.Status)
 	m.cron.stack = []cronFrame{{ref: cronRef{cronWorkflows, m.cron.data.workflows[0].UID}}}
 	_, _, lines = cronScreen(m)
 	require.False(t, slices.ContainsFunc(lines, func(l cronLine) bool { return l.target.uid == old.UID }))

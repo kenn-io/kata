@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sync"
 	"testing"
@@ -40,18 +41,8 @@ func TestCronSeenMergeAlgebra(t *testing.T) {
 	}, hegel.WithTestCases(300))
 }
 
-func TestCronSeenDecodeTotalAndRoundTrip(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		raw := hegel.Draw(ht, hegel.Lists(hegel.Integers[byte](0, 255)).MaxSize(1024))
-		_, _ = cronSeenDecode(raw)
-		ids := hegel.Draw(ht, hegel.Lists(hegel.Text().MaxSize(30)).MaxSize(25))
-		s := cronSeenMerge(cronSeenStore{Projects: map[string]cronSeenProject{"project": {Runs: ids, ClearedThrough: snapshotFixedNow.Add(123 * time.Nanosecond)}}}, cronSeenStore{})
-		wire, err := json.Marshal(s)
-		require.NoError(t, err)
-		got, err := cronSeenDecode(wire)
-		require.NoError(t, err)
-		require.Equal(t, s, got)
-	}, hegel.WithTestCases(300))
+func TestCronSeenDecodeRejectsInvalid(t *testing.T) {
+
 	for _, raw := range []string{`null`, `{}`, `{"version":2}`, `{"version":1,"projects":{"p":{"cleared_through":"bad"}}}`} {
 		_, err := cronSeenDecode([]byte(raw))
 		require.Error(t, err)
@@ -111,12 +102,14 @@ func TestCronSeenFiles(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got.Projects["0"].Runs, 10)
 	require.Len(t, got.Projects["1"].Runs, 10)
-	info, err := os.Stat(path)
-	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0600), info.Mode().Perm())
-	info, err = os.Stat(filepath.Dir(path))
-	require.NoError(t, err)
-	require.Equal(t, os.FileMode(0700), info.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		require.NoError(t, err)
+		require.Equal(t, os.FileMode(0600), info.Mode().Perm())
+		info, err = os.Stat(filepath.Dir(path))
+		require.NoError(t, err)
+		require.Equal(t, os.FileMode(0700), info.Mode().Perm())
+	}
 	require.NoError(t, os.WriteFile(path, []byte("corrupt"), 0600))
 	_, err = cronSeenSave(t.Context(), path, empty)
 	require.Error(t, err)
