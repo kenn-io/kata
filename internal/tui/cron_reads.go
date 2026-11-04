@@ -52,11 +52,12 @@ func cronFetch(ctx context.Context, reader cronAPI, id int64, data *cronData) {
 }
 
 type cronEnrichment struct {
-	uid    string
-	parent bool
-	runs   []generated.CronRun
-	value  cronParent
-	err    error
+	uid          string
+	parent, wait bool
+	runs         []generated.CronRun
+	value        cronParent
+	attention    cronRunWait
+	err          error
 }
 
 // cronEnrich establishes fresh last-run provenance independently of the display
@@ -68,6 +69,8 @@ func cronEnrich(ctx context.Context, reader cronAPI, id int64, p *cronData) {
 	p.lastErr = map[string]error{}
 	p.progress = map[string]cron.RecurringProgress{}
 	p.parentOpen = map[string]bool{}
+	p.waits = map[string]cronRunWait{}
+	p.waitErr = map[string]error{}
 	if p.jobsErr != nil {
 		return
 	}
@@ -104,20 +107,50 @@ func cronEnrich(ctx context.Context, reader cronAPI, id int64, p *cronData) {
 		}
 		tasks = append(tasks, cronEnrichment{uid: j.UID})
 	}
-	queue := make(chan cronEnrichment, len(tasks))
-	results := make(chan cronEnrichment, len(tasks))
+
+	waitReader, supportsWait := reader.(cronWaitAPI)
+	issues := map[string]bool{}
+	waitTasks := func(runs []generated.CronRun) []cronEnrichment {
+		var added []cronEnrichment
+		if !supportsWait {
+			return added
+		}
+		for _, r := range runs {
+			uid := deref(r.IssueUID)
+			if r.Status != "running" || uid == "" || issues[uid] {
+				continue
+			}
+			if j := p.job(deref(r.JobUID)); j != nil && cronNativeParent(*j) != "" {
+				continue
+			}
+			issues[uid] = true
+			if len(issues) > 20 {
+				p.waitErr[uid] = errors.New("too many running issues (20 attention reads per refresh)")
+				continue
+			}
+			added = append(added, cronEnrichment{uid: uid, wait: true})
+		}
+		return added
+	}
+	tasks = append(tasks, waitTasks(cronMergeRuns(p.historyRuns, p.runs))...)
+	// Fill reads may discover running observations. The coordinator admits those
+	// reads into this same pool before closing it; no new deadline is created.
+	queue := make(chan cronEnrichment, len(tasks)+20)
+	results := make(chan cronEnrichment, len(tasks)+20)
 	for _, task := range tasks {
 		queue <- task
 	}
-	close(queue)
 	var wg sync.WaitGroup
 	for range min(4, len(tasks)) {
 		wg.Go(func() {
 			for task := range queue {
 				if task.err = ctx.Err(); task.err == nil {
-					if task.parent {
+					switch {
+					case task.wait:
+						task.attention, task.err = waitReader.readCronRunWait(ctx, id, task.uid)
+					case task.parent:
 						task.value, task.err = reader.readCronParent(ctx, id, task.uid)
-					} else {
+					default:
 						task.runs, _, task.err = reader.ListCronJobRuns(ctx, id, task.uid, "", 1)
 						if task.err == nil {
 							task.err = cronValidateJobPage(task.runs, task.uid)
@@ -128,21 +161,33 @@ func cronEnrich(ctx context.Context, reader cronAPI, id int64, p *cronData) {
 			}
 		})
 	}
-	wg.Wait()
-	close(results)
-	for result := range results {
-		if result.parent {
+	for pending := len(tasks); pending > 0; {
+		result := <-results
+		pending--
+		switch {
+		case result.wait:
+			p.waitErr[result.uid] = result.err
+			if result.err == nil {
+				p.waits[result.uid] = result.attention
+			}
+		case result.parent:
 			if result.err == nil {
 				p.parentOpen[result.uid] = result.value.open
 				maps.Copy(p.progress, result.value.progress)
 			}
-		} else {
+		default:
 			p.lastErr[result.uid] = result.err
 			if result.err == nil && len(result.runs) > 0 {
 				p.lastRuns[result.uid] = result.runs[0]
+				for _, task := range waitTasks(result.runs) {
+					queue <- task
+					pending++
+				}
 			}
 		}
 	}
+	close(queue)
+	wg.Wait()
 }
 
 func cronValidateJobPage(runs []generated.CronRun, job string) error {

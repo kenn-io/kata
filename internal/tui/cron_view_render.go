@@ -133,7 +133,7 @@ func cronScreen(m Model) (string, string, []cronLine) {
 	widths := [][]int{
 		nil,
 		{0, 13, 17, 18, 18},
-		{10, 0, 12, 11, 11, 0},
+		{17, 0, 12, 11, 11, 0},
 		{0, 5, 7, 18, 11},
 	}[m.cron.tab]
 	if m.cron.tab == cronJobs && m.width < 100 {
@@ -186,7 +186,7 @@ func cronScreen(m Model) (string, string, []cronLine) {
 				if m.cron.unseenOnly && !unseen {
 					continue
 				}
-				status := r.Status
+				status := cronRunStatus(*p, r)
 				if unseen {
 					status = "• " + status
 				}
@@ -205,7 +205,7 @@ func cronScreen(m Model) (string, string, []cronLine) {
 		for _, j := range m.cron.data.jobs {
 			counts[cronHealth(*m.cron.data, j, renderNow()).state]++
 		}
-		for _, state := range []string{"paused", "unavailable", "parent closed", "overdue", "running", "failing", "missed", "never ran"} {
+		for _, state := range []string{"paused", "unavailable", "parent closed", "overdue", "blocked", "running", "failing", "missed", "never ran"} {
 			if count := counts[state]; count > 0 {
 				title += fmt.Sprintf(" · %d %s", count, state)
 			}
@@ -278,7 +278,11 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			name = j.Name
 			d.field("State", cronJobState(*j))
 			health := cronHealth(p, *j, renderNow())
-			d.field("Health", health.state)
+			label := health.state
+			if label == "blocked" {
+				label = "running · blocked"
+			}
+			d.field("Health", label)
 			d.field("Reason", health.reason)
 			d.field("Schedule", cronSchedule(j.Definition.Trigger))
 			if label, times := cronNextRuns(p, *j, renderNow()); len(times) > 0 {
@@ -310,6 +314,11 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 		if r, ok := p.run(ref.uid); ok {
 			name = r.UID
 			d.field("Status", r.Status)
+			if r.Status == "running" {
+				health := cronRunHealth(p, r)
+				d.field("Health", cronRunStatus(p, r))
+				d.field("Reason", health.reason)
+			}
 			d.field("Occurrence", deref(r.OccurrenceKey))
 			d.field("Started", cronTime(r.StartedAt))
 			d.field("Ended", cronTime(r.EndedAt))

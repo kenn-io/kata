@@ -180,7 +180,9 @@ func TestCronFreshness(t *testing.T) {
 			}
 			if strings.HasPrefix(tc.name, "project merged") {
 				require.Contains(t, stripANSI(sendRune(m, '4').viewBody()), "New workflow")
-				require.Contains(t, stripANSI(sendRune(m, '3').viewBody()), "New run result")
+				runs := sendRune(m, '3')
+				runs.width = 100 // The wider status column leaves less summary space at 80.
+				require.Contains(t, stripANSI(runs.viewBody()), "New run result")
 			}
 		})
 	}
@@ -490,6 +492,7 @@ func TestCronIndependentFailuresAndRetainedRows(t *testing.T) {
 	m = sendRune(m, '4')
 	require.Contains(t, stripANSI(m.viewBody()), "Summary flow")
 	m = sendRune(m, '3')
+	m.width = 100 // Inspect the full retained summary after checking the 80-cell layout.
 	require.Contains(t, stripANSI(m.viewBody()), "Report ready")
 	m = sendKey(m, tea.KeyEnter)
 	_, _, lines := cronScreen(m)

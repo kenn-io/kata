@@ -61,14 +61,19 @@ func cronHealth(p cronData, j generated.CronJob, now time.Time) cronHealthState 
 			base = last.CreatedAt
 			switch last.Status {
 			case "running":
+				wait := cronRunHealth(p, last)
 				started := last.CreatedAt
 				if last.StartedAt != nil {
 					started = *last.StartedAt
 				}
 				if def.TimeoutSeconds > 0 && started.Add(time.Duration(def.TimeoutSeconds)*time.Second).Before(now) {
-					return state("overdue", fmt.Sprintf("running past timeout_seconds %d (started %s)", def.TimeoutSeconds, started.Format(time.RFC3339)))
+					reason := fmt.Sprintf("running past timeout_seconds %d (started %s)", def.TimeoutSeconds, started.Format(time.RFC3339))
+					if wait.state == "blocked" {
+						reason += "; " + wait.reason
+					}
+					return state("overdue", reason)
 				}
-				return state("running", "executor recorded a running observation")
+				return wait
 			case "failed", "unknown":
 				return state("failing", "last run status is "+last.Status)
 			}
