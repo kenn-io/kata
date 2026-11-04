@@ -8,7 +8,8 @@ import (
 )
 
 // Read ownership is separate from mutation and navigation identity. Snapshots
-// keep presentation state; only a live detail pane retains a batch.
+// copy presentation state and the canceled flag into a fresh batch; only a live
+// detail pane owns in-flight reads.
 type detailReadBatch struct {
 	cancel    context.CancelFunc
 	floor     uint64

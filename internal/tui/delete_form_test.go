@@ -116,7 +116,7 @@ func (h *deleteHarness) openInbox() {
 	h.t.Helper()
 	_, err := h.env.DB.DesignateInboxProject(h.t.Context(), db.DesignateInboxProjectIn{ProjectID: h.project.ID, Actor: "alice"})
 	require.NoError(h.t, err)
-	h.m = h.drain(h.finish(h.key(runeKey('I'))))
+	h.m = enterInboxForTest(h.t, h.m)
 }
 
 // openAttentionDetail opens the issue's detail from Attention.
@@ -517,9 +517,7 @@ func TestDeleteKeyIsOfferedOnlyToCredentialsThatCanDelete(t *testing.T) {
 			target := h.issues[0]
 			switch tc.context {
 			case "Inbox":
-				_, err := h.env.DB.DesignateInboxProject(t.Context(), db.DesignateInboxProjectIn{ProjectID: h.project.ID, Actor: "alice"})
-				require.NoError(t, err)
-				h.m = h.drain(h.finish(h.key(runeKey('I'))))
+				h.openInbox()
 				require.True(t, h.m.scope.inbox)
 				require.NotNil(t, h.m.inboxReturn)
 			case "Attention":
