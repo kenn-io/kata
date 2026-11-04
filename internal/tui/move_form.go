@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"encoding/json/v2"
 	"fmt"
 	"slices"
 	"strings"
@@ -112,21 +111,6 @@ type movePreviewMsg struct {
 	seq     int
 	resp    *MutationResp
 	err     error
-}
-
-// jsonString reads a metadata value that holds a string; anything else is "".
-func jsonString(raw []byte) string {
-	var s string
-	if len(raw) == 0 || json.Unmarshal(raw, &s) != nil {
-		return ""
-	}
-	return s
-}
-
-// isInboxProject reports whether the project's role metadata designates it as
-// the Inbox, the way the Inbox lookup reads it.
-func isInboxProject(p ProjectSummary) bool {
-	return jsonString(p.Metadata.Role) == "inbox"
 }
 
 func (m Model) routeMoveKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
