@@ -415,6 +415,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	previousConn, previousScope := m.connGen, m.scopeGen
 	next, cmd := m.update(msg)
 	m = next.(Model)
+	// Leaving issue navigation discards its Cron return authority; Help is a
+	// temporary overlay and preserves the round trip.
+	if m.cron.returnToCron && ((m.view != viewDetail && m.view != viewHelp) || (m.view == viewDetail && m.layout == splitlayout.Split && m.focus == focusList)) {
+		m.cron.returnToCron = false
+	}
 	query := strings.TrimSpace(m.list.filter.Search)
 	if query != m.searchQuery {
 		m.searchQuery = ""
@@ -422,7 +427,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if query != m.searchCounted {
 		m.searchCounted = ""
 	}
-	if m.pendingDetailFollow && m.input.kind == inputNone && m.layout == splitlayout.Split {
+	if !m.cron.returnToCron && m.pendingDetailFollow && m.input.kind == inputNone && m.layout == splitlayout.Split {
 		m.pendingDetailFollow = false
 		if len(m.detail.navStack) == 0 {
 			m, cmd = m.followSearchResultIfNeeded(cmd)
@@ -437,6 +442,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		previousReads.stop()
 	}
 	cmd = combineCmds(cmd, m.finishDetailRefresh())
+	var issueCmd tea.Cmd
+	m, issueCmd = m.cronIssueFeedback(msg)
+	cmd = combineCmds(cmd, issueCmd)
 	var cronCmd tea.Cmd
 	m, cronCmd = m.cronSync()
 	cmd = combineCmds(cmd, cronCmd)
@@ -642,7 +650,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) reconcileSplitDetailAfterRefetch(
 	prevPID int64, prevUID string, prevHas bool,
 ) (Model, tea.Cmd) {
-	if m.attention.returnToAttention || m.layout != splitlayout.Split || len(m.detail.navStack) > 0 ||
+	if m.attention.returnToAttention || m.cron.returnToCron || m.layout != splitlayout.Split || len(m.detail.navStack) > 0 ||
 		(m.input.kind == inputSearchBar && m.input.searchFocus != searchFocusResults) {
 		return m, nil
 	}
@@ -1005,6 +1013,10 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		}
 		if m.layout != splitlayout.Split {
 			m.detail.cancelReads()
+		}
+		if m.cron.returnToCron {
+			next, cmd := m.returnFromCronDetail()
+			return next, cmd, true
 		}
 		if m.attention.returnToAttention {
 			next, cmd := m.returnFromAttentionDetail()
@@ -1565,7 +1577,7 @@ func (m Model) markSearchSplitDetailOwned() Model {
 }
 
 func (m Model) followHighlightedIssueIfNeeded(prior tea.Cmd) (Model, tea.Cmd) {
-	if m.attention.returnToAttention {
+	if m.attention.returnToAttention || m.cron.returnToCron {
 		return m, prior
 	}
 	iss, ok := pickHighlightedIssue(m.list)
@@ -2536,6 +2548,11 @@ func (m Model) routeLayoutFocusKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		m.focus = focusDetail
 		return m, nil, true
 	}
+	if m.focus == focusDetail && msg.String() == "tab" && m.cron.returnToCron {
+		m.cron.returnToCron = false
+		m.focus, m.view = focusList, viewList
+		return m, nil, true
+	}
 	if m.focus == focusDetail && msg.String() == "tab" && m.attention.returnToAttention {
 		m, cmd := m.prepareAttentionListNavigation()
 		m.focus = focusList
@@ -2545,6 +2562,10 @@ func (m Model) routeLayoutFocusKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if m.focus == focusDetail && msg.String() == "esc" {
 		if len(m.detail.navStack) > 0 {
 			return m, nil, false
+		}
+		if m.cron.returnToCron {
+			next, cmd := m.returnFromCronDetail()
+			return next, cmd, true
 		}
 		if m.attention.returnToAttention {
 			next, cmd := m.returnFromAttentionDetail()
@@ -3555,7 +3576,7 @@ func isDetailFetchMsg(msg tea.Msg) bool {
 // observe the detail pane following the cursor without standing up
 // an http server.
 func (m Model) scheduleDetailFollow() (Model, tea.Cmd) {
-	if m.attention.returnToAttention {
+	if m.attention.returnToAttention || m.cron.returnToCron {
 		return m, nil
 	}
 	m.detail.cancelReads()
@@ -3605,7 +3626,7 @@ const detailFollowDebounce = 75 * time.Millisecond
 // cursor change can drop this one's response too via applyFetched's
 // gen check.
 func (m Model) handleDetailFollowTick(msg detailFollowTickMsg) (Model, tea.Cmd) {
-	if m.attention.returnToAttention || msg.gen != m.nextDetailFollowGen {
+	if m.attention.returnToAttention || m.cron.returnToCron || msg.gen != m.nextDetailFollowGen {
 		return m, nil
 	}
 	if m.api == nil || m.detail.issue == nil {

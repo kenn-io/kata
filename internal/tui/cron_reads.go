@@ -40,6 +40,13 @@ func cronFetch(ctx context.Context, reader cronAPI, id int64, data *cronData) {
 		defer cancel()
 		data.runs, data.nextBefore, data.runsErr = reader.ListCronJobRuns(readCtx, id, "", "", 100)
 	})
+	if optional, ok := reader.(cronReplicaAPI); ok {
+		wg.Go(func() {
+			if replica, err := cronRead(ctx, optional.readCronReplica, id); err == nil {
+				data.replica = replica
+			}
+		})
+	}
 	wg.Wait()
 	cronEnrich(ctx, reader, id, data)
 }

@@ -306,7 +306,9 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			d.field("Actor", r.Actor)
 			d.field("Executor", ownerText(r.ExecutorLabel))
 			d.field("Teammate", ownerText(r.Teammate))
-			d.field("Issue", deref(r.IssueUID))
+			if uid := deref(r.IssueUID); uid != "" {
+				d.text(fmt.Sprintf("%-*s %s", d.labelWidth, "Issue:", uid), cronRef{cronIssue, uid})
+			}
 			if r.Summary.InputTokens != nil || r.Summary.OutputTokens != nil {
 				d.field("Tokens", fmt.Sprintf("%d input, %d output", deref(r.Summary.InputTokens), deref(r.Summary.OutputTokens)))
 			}
@@ -491,6 +493,11 @@ func renderCron(m Model) string {
 	} else if m.cron.out {
 		right = "loading…"
 	}
+	if m.cron.data != nil {
+		if chip := cronReplicaChip(m.cron.data.replica); chip != "" {
+			right += " · " + chip
+		}
+	}
 	body := []string{
 		renderTitleBar(m.width, m.scope, kataVersion, m.chrome().daemon),
 		cronTabs(m.cron.tab),
@@ -553,10 +560,13 @@ func cronHelp(m Model) string {
 		"Runs filters: status: job: actor: executor: teammate: issue: (UID prefix or none).",
 		"Use health:never-ran or health:parent-closed. Filters cover loaded rows only.",
 		"Repeated keys OR; different keys and free text AND. Workflows use plain text.",
+		"Follow a run’s Issue line to open it; back returns here.",
+		"Replica age is the last successful pull; pushes do not freshen it.",
 	}
 	for i, s := range intro {
 		intro[i] = strings.Join(termtext.Wrap(s, max(m.width, 1)), "\n")
 	}
+
 	body := []string{
 		renderTitleBar(m.width, m.scope, kataVersion, m.chrome().daemon),
 		cronTabs(m.cron.tab),
