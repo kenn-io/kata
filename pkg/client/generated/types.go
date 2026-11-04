@@ -1556,6 +1556,64 @@ func (c CronRun) Validate() error {
 	return errors
 }
 
+type CronRunCountGroup struct {
+	CoverageStartedAt   *time.Time            `json:"coverage_started_at,omitempty"`
+	Kind                string                `json:"kind" validate:"required"`
+	LastPrunedAt        *time.Time            `json:"last_pruned_at,omitempty"`
+	Name                *string               `json:"name,omitempty"`
+	NewestCreatedAt     *time.Time            `json:"newest_created_at,omitempty"`
+	OldestCreatedAt     *time.Time            `json:"oldest_created_at,omitempty"`
+	PrunedSinceTracking CronTallyCounts       `json:"pruned_since_tracking"`
+	Retained            CronRunRetainedCounts `json:"retained"`
+	UID                 string                `json:"uid" validate:"required"`
+}
+
+func (c CronRunCountGroup) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(c.Kind, "required"); err != nil {
+		errors = errors.Append("Kind", err)
+	}
+	if v, ok := any(c.PrunedSinceTracking).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("PrunedSinceTracking", err)
+		}
+	}
+	if v, ok := any(c.Retained).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Retained", err)
+		}
+	}
+	if err := typesValidator.Var(c.UID, "required"); err != nil {
+		errors = errors.Append("UID", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type CronRunCountsResult struct {
+	Groups []CronRunCountGroup `json:"groups" validate:"required"`
+}
+
+func (c CronRunCountsResult) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(c.Groups, "required"); err != nil {
+		errors = errors.Append("Groups", err)
+	}
+	for i, item := range c.Groups {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Groups[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type CronRunPruneGroup struct {
 	Counts          map[string]int64 `json:"counts"`
 	JobUID          *string          `json:"job_uid,omitempty"`
@@ -1618,6 +1676,14 @@ func (c CronRunResponseBody) Validate() error {
 	return errors
 }
 
+type CronRunRetainedCounts struct {
+	Cancelled int64 `json:"cancelled"`
+	Failed    int64 `json:"failed"`
+	Running   int64 `json:"running"`
+	Succeeded int64 `json:"succeeded"`
+	Unknown   int64 `json:"unknown"`
+}
+
 type CronRunsResponseBody struct {
 	NextBeforeUID *string   `json:"next_before_uid,omitempty"`
 	Runs          []CronRun `json:"runs" validate:"required"`
@@ -1639,6 +1705,13 @@ func (c CronRunsResponseBody) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type CronTallyCounts struct {
+	Cancelled int64 `json:"cancelled"`
+	Failed    int64 `json:"failed"`
+	Succeeded int64 `json:"succeeded"`
+	Unknown   int64 `json:"unknown"`
 }
 
 type CronWorkflow struct {

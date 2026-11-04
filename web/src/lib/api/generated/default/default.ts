@@ -62,6 +62,7 @@ import type {
   CronCapabilitiesResponseBody,
   CronDefinitionActionBody,
   CronJobResponseBody,
+  CronRunCountsResult,
   CronRunPruneResult,
   CronRunResponseBody,
   CronRunsResponseBody,
@@ -115,6 +116,8 @@ import type {
   ForceReleaseIssueLeasePathParameters,
   GetConnectorStatusPathParameters,
   GetCronCapabilitiesPathParameters,
+  GetCronRunCountsParams,
+  GetCronRunCountsPathParameters,
   GetExternalRootBridgeParams,
   GetExternalRootBridgePathParameters,
   GetFederationBridgeStatusPathParameters,
@@ -2538,6 +2541,57 @@ export const pruneCronRuns = async (
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(pruneCronRunsBody),
+  })
+}
+
+export type getCronRunCountsResponse200 = {
+  data: CronRunCountsResult
+  status: 200
+}
+
+export type getCronRunCountsResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type getCronRunCountsResponseSuccess = getCronRunCountsResponse200 & {
+  headers: Headers
+}
+export type getCronRunCountsResponseError = getCronRunCountsResponseDefault & {
+  headers: Headers
+}
+
+export type getCronRunCountsResponse =
+  | getCronRunCountsResponseSuccess
+  | getCronRunCountsResponseError
+
+export const getGetCronRunCountsUrl = (
+  { projectId }: GetCronRunCountsPathParameters,
+  params?: GetCronRunCountsParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/runs/counts?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/runs/counts`
+}
+
+export const getCronRunCounts = async (
+  { projectId }: GetCronRunCountsPathParameters,
+  params?: GetCronRunCountsParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<getCronRunCountsResponse> => {
+  return orvalFetch<getCronRunCountsResponse>(getGetCronRunCountsUrl({ projectId }, params), {
+    ...options,
+    method: 'GET',
   })
 }
 

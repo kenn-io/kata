@@ -1295,6 +1295,47 @@ components:
         - created_at
         - updated_at
       type: object
+    CronRunCountGroup:
+      additionalProperties: true
+      properties:
+        coverage_started_at:
+          format: date-time
+          type: string
+        kind:
+          type: string
+        last_pruned_at:
+          format: date-time
+          type: string
+        name:
+          type: string
+        newest_created_at:
+          format: date-time
+          type: string
+        oldest_created_at:
+          format: date-time
+          type: string
+        pruned_since_tracking:
+          $ref: "#/components/schemas/CronTallyCounts"
+        retained:
+          $ref: "#/components/schemas/CronRunRetainedCounts"
+        uid:
+          type: string
+      required:
+        - kind
+        - uid
+        - retained
+        - pruned_since_tracking
+      type: object
+    CronRunCountsResult:
+      additionalProperties: true
+      properties:
+        groups:
+          items:
+            $ref: "#/components/schemas/CronRunCountGroup"
+          type: array
+      required:
+        - groups
+      type: object
     CronRunPruneGroup:
       additionalProperties: true
       properties:
@@ -1363,6 +1404,31 @@ components:
       required:
         - run
       type: object
+    CronRunRetainedCounts:
+      additionalProperties: true
+      properties:
+        cancelled:
+          format: int64
+          type: integer
+        failed:
+          format: int64
+          type: integer
+        running:
+          format: int64
+          type: integer
+        succeeded:
+          format: int64
+          type: integer
+        unknown:
+          format: int64
+          type: integer
+      required:
+        - running
+        - succeeded
+        - failed
+        - cancelled
+        - unknown
+      type: object
     CronRunsResponseBody:
       additionalProperties: true
       properties:
@@ -1374,6 +1440,27 @@ components:
           type: array
       required:
         - runs
+      type: object
+    CronTallyCounts:
+      additionalProperties: true
+      properties:
+        cancelled:
+          format: int64
+          type: integer
+        failed:
+          format: int64
+          type: integer
+        succeeded:
+          format: int64
+          type: integer
+        unknown:
+          format: int64
+          type: integer
+      required:
+        - succeeded
+        - failed
+        - cancelled
+        - unknown
       type: object
     CronWorkflow:
       additionalProperties: true
@@ -8849,6 +8936,39 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CronRunPruneResult"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/cron/runs/counts:
+    get:
+      operationId: getCronRunCounts
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - explode: false
+          in: query
+          name: job_uid
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: workflow_uid
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CronRunCountsResult"
           description: OK
         default:
           content:
