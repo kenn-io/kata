@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-10-31
+last_edited: 2026-11-03
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -282,11 +282,32 @@ binding time, without historical backfill.
 
 The existing daemon sweep runs at startup and every 30 seconds by default. Keep the authoritative hub running
 for unattended delivery. Local projects deliver locally; federated projects
-deliver only on their enabled owning hub. Spokes never deliver, even with push
-writes enabled, and cannot create, edit, delete, or restore native recurring
-definitions. Run the same command against the project's owning hub, for example
-with `--daemon <hub-name>`. An old
-peer that lacks `cron_v1` cannot receive a project containing cron state,
+deliver only on their enabled owning hub. Spokes never deliver.
+
+Direct spokes with push enabled can create, update, delete, and restore native
+recurring jobs through their existing enrollment. Each request checks hub
+support, pushes pending local events (including a newly created parent), and
+forwards the write synchronously. The hub validates the job, preserves its
+progress anchor, and attributes the write to the enrollment's bound actor.
+The complete preflight and write have a 15-second limit; no offline write is queued.
+Relay, disabled, and push-disabled bindings retain the refusal. If forwarding is
+unavailable, run the same command against the project's owning hub, for example
+with `--daemon <hub-name>`. An older hub must be upgraded to advertise native
+cron authoring; `cron_v1` alone does not advertise that capability.
+
+The returned `definition_event_uid` can immediately authorize the next update
+or lifecycle action, even before pull. One exception: when the hub converted an
+adapter job to native and the spoke has not pulled that change yet, the spoke
+still routes delete and restore for that job locally and reports a conflict.
+Wait for the next pull, or run the action against the hub. Local `show` and `list` catch up through
+normal replication. Forwarded jobs report the local project ID and zero job
+`id` and `revision` until a local projection exists; response events are omitted.
+A lost write response means the outcome may be unknown. Inspect the job on the
+hub or retry creation with the same `--uid`; an already-created UID returns a
+conflict containing the hub's current job. HTTP callers should prefer stable-UID
+PUT creation because POST allocates a UID that may be lost with the response.
+
+An old peer that lacks `cron_v1` cannot receive a project containing cron state,
 including native recurring metadata on ordinary issue events. Capability refusal
 happens before a baseline or cursor change. Projects with native recurring delivery history cannot be adopted into
 a different hub through spoke snapshots; the refusal preserves their existing
