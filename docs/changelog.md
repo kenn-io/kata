@@ -9,6 +9,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- See running cron jobs that wait for attention in `kata tui`. The blocked
+  health and run details use the issue's attention state and the run actor's
+  pending notification, with overdue taking precedence.
+
 - Spot failing, overdue and missed cron jobs in `kata tui`, with exact last-run
   evidence, a project health roll-up, and a reason in each job's detail.
   Page through each job's run history or load older project observations.

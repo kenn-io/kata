@@ -43,6 +43,9 @@ type cronData struct {
 	lookup              map[string]generated.CronRun
 	progress            map[string]cron.RecurringProgress
 	parentOpen          map[string]bool
+	waits               map[string]cronRunWait
+	waitErr             map[string]error
+	historyRuns         []generated.CronRun
 	jobsErr             error
 	workflowsErr        error
 	runsErr             error
@@ -139,6 +142,7 @@ func (m Model) cronSync() (Model, tea.Cmd) {
 func (m Model) fetchCron() tea.Cmd {
 	reader, id := m.api, m.scope.projectID
 	data := cronData{conn: m.connGen, scope: m.scopeGen, events: m.cron.events, generation: m.cron.readGen}
+	data.historyRuns = m.cronWaitLoadedRuns()
 	return func() tea.Msg {
 		// Bubble Tea command callbacks supply no context in isolated model tests.
 		root := context.Background()
