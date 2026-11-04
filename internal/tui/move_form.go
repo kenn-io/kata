@@ -131,8 +131,7 @@ func (m Model) routeMoveKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	}
 	// Like any key after `!`, this one cancels the priority prompt, which
 	// names the issue the selection is about to leave.
-	m.list.pendingPriority = false
-	m.list.status = ""
+	m.list = m.list.cancelPriorityPrompt()
 	target.issueUID = issue.UID
 	m.nextFormGen++
 	filter := textinput.New()
@@ -468,7 +467,7 @@ func renderMoveModal(s moveState, width, height int) string {
 	boxed := height >= formMinHeight
 	// The footer states what the keys do wherever it is drawn; without one the
 	// modal says it itself.
-	footerShown := height >= listMinHeight
+	footerShown := footerDrawn(width, height)
 	innerW := moveInnerWidth(width, height)
 	budget := height
 	if footerShown {

@@ -103,6 +103,17 @@ func (lm listModel) ViewBody(width, bodyRows int, chrome viewChrome) string {
 // Below this we keep the title and search but omit the footer.
 const listMinHeight = 10
 
+// tooNarrowWidth is the width below which the TUI draws only its too-narrow
+// screen.
+const tooNarrowWidth = 80
+
+// footerDrawn reports whether the footer key table is on screen: the
+// too-narrow screen has none, and the list drops it in short terminals. Forms
+// that would otherwise rely on the footer to name their keys ask it.
+func footerDrawn(width, height int) bool {
+	return width >= tooNarrowWidth && height >= listMinHeight
+}
+
 // listBodyFloor is the smallest row count the table body will ever
 // render. Keeps a usable list visible even when the chrome math is
 // tight on a small terminal.

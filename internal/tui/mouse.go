@@ -38,10 +38,7 @@ func (m Model) routeMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 		if (m.view == viewList || m.view == viewDetail && m.layout == splitlayout.Split) &&
 			mouse.Y == row && (m.layout != splitlayout.Split || mouse.X < splitConfig.ListWidth(m.width)) {
 			m.inboxPending = false
-			if m.list.pendingPriority {
-				m.list.pendingPriority = false
-				m.list.status = ""
-			}
+			m.list = m.list.cancelPriorityPrompt()
 			m.focus = focusList
 			if m.input.kind == inputSearchBar {
 				m.input.searchFocus, m.input.searchSubmitted = searchFocusQuery, false

@@ -3675,7 +3675,7 @@ func (m Model) viewContent() string {
 	// after a resize below threshold (roborev #250). Without this the
 	// modal would silently disappear and the user would be stuck —
 	// pressing q again would only re-trigger the (invisible) modal.
-	if m.width > 0 && m.width < 80 {
+	if m.width > 0 && m.width < tooNarrowWidth {
 		// Auxiliary inventory views render their own narrow-friendly body; every other
 		// view falls back to the "too narrow" hint. Either way an active
 		// modal/form must layer on top — without that, a quit-confirm

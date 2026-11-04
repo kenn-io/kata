@@ -535,7 +535,7 @@ func TestMoveFormRendersCompletelyAtEveryTerminalSize(t *testing.T) {
 		name          string
 		width, height int
 	}{
-		{"80x24", 80, 24}, {"80x12", 80, 12}, {"100x8", 100, 8}, {"split 140x40", 140, 40}, {"split 140x10", 140, 10},
+		{"80x24", 80, 24}, {"80x12", 80, 12}, {"70x24", 70, 24}, {"100x8", 100, 8}, {"split 140x40", 140, 40}, {"split 140x10", 140, 10},
 	} {
 		sized := picker
 		sized.width, sized.height = size.width, size.height
@@ -561,7 +561,8 @@ func TestMoveFormRendersCompletelyAtEveryTerminalSize(t *testing.T) {
 					content.WriteString(strings.Trim(line, " │╭╮╰╯─"))
 					content.WriteString(" ")
 				}
-				footerShown := size.height >= listMinHeight
+				// Below 80 columns the too-narrow screen draws no footer at all.
+				footerShown := size.width >= 80 && size.height >= 10
 				limit := size.height
 				if footerShown {
 					limit-- // the footer keeps its row
@@ -647,4 +648,11 @@ func TestMoveCancelsAnArmedPriorityPrompt(t *testing.T) {
 	m = openMove(t, m)
 	require.False(t, m.list.pendingPriority, "a digit after the move must not set a priority on the neighbour")
 	require.Empty(t, m.list.status, "the hint naming the issue is gone")
+}
+
+func TestMoveKeepsAnUnrelatedListStatusWhenNoPriorityPromptIsArmed(t *testing.T) {
+	m := moveModel(t, &moveTestAPI{projects: []ProjectSummary{moveProject(2, "hub-project", "", "")}})
+	m.list.status = "filter: 3 of 9"
+	m = openMove(t, m)
+	require.Equal(t, "filter: 3 of 9", m.list.status)
 }
