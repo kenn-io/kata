@@ -304,7 +304,8 @@ func TestCronResumeRefreshRequiresRecount(t *testing.T) {
 			require.Equal(t, modalNone, m.modal)
 			require.Empty(t, api.enabledCalls)
 			require.NotNil(t, m.toast)
-			require.Contains(t, m.toast.text, "press p again")
+			require.Equal(t, toastError, m.toast.level)
+			require.Equal(t, "Job data changed; press p after refresh", m.toast.text)
 		})
 	}
 }

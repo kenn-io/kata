@@ -14,7 +14,6 @@ import (
 
 func registerCronDefinitionHandlers(h huma.API, cfg ServerConfig) {
 	registerCronJobHandlers(h, cfg)
-	registerCronJobEnabledHandlers(h, cfg)
 	registerCronWorkflowHandlers(h, cfg)
 }
 
@@ -235,6 +234,7 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 			return put(ctx, in.ProjectID, in.UID, api.PutCronJobBody{Actor: actor, Name: value.Name, Definition: api.CronJobDefinitionFrom(value.Definition), ExpectedEventUID: in.Body.ExpectedEventUID}, action.deleted, enrollment)
 		})
 	}
+	registerCronJobEnabledHandlers(h, cfg, put)
 }
 
 func registerCronWorkflowHandlers(h huma.API, cfg ServerConfig) {

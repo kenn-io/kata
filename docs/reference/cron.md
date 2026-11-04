@@ -95,8 +95,11 @@ Direct spokes forward native job actions as conditional full-definition PUTs.
 This works with older hubs that support native writes but lack these action
 routes. The spoke needs a current local revision: stale state conflicts, and
 an older hub may emit an update for an already matching enabled flag. Pull
-before retrying a stale revision or use the owning hub directly. Adapter jobs
-remain local, and an adapter must honor the enabled flag itself.
+before retrying a stale revision or use the owning hub directly. After a
+forwarded action succeeds, the spoke list can still show the old enabled flag
+and revision until federation sync applies the hub update. Sync and refresh
+the spoke list before retrying or choosing another action. Adapter jobs remain
+local, and an adapter must honor the enabled flag itself.
 
 Resuming a native job follows its [catch-up policy](#recurring-child-issues).
 With `catchup: "all"`, it backfills missed children when its parent and project

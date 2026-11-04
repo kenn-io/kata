@@ -141,37 +141,33 @@ func (h toolHandlers) cronJobRestore(ctx context.Context, _ *sdkmcp.CallToolRequ
 	return cronResult(h.options.Client.RestoreCronJob(ctx, &generated.RestoreCronJobRequestOptions{PathParams: &generated.RestoreCronJobPath{ProjectID: p.ID, CronUID: id}, Body: &generated.RestoreCronJobBody{Actor: &h.options.Actor, ExpectedEventUID: expected}}))
 }
 
-func (h toolHandlers) cronJobPause(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronEnabledActionInput) (*sdkmcp.CallToolResult, *generated.PauseCronJobResponse, error) {
-	h = h.withLongRunningClient()
+func (h toolHandlers) cronEnabledTarget(ctx context.Context, in CronEnabledActionInput) (int64, string, *string, error) {
 	id, err := cronUID(in.UID)
 	if err != nil {
-		return nil, nil, err
+		return 0, "", nil, err
 	}
 	expected, err := cronOptionalExpected(in.ExpectedEventUID)
 	if err != nil {
-		return nil, nil, err
+		return 0, "", nil, err
 	}
 	p, err := h.createTarget(ctx, in.Project)
+	return p.ID, id, expected, err
+}
+func (h toolHandlers) cronJobPause(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronEnabledActionInput) (*sdkmcp.CallToolResult, *generated.PauseCronJobResponse, error) {
+	h = h.withLongRunningClient()
+	projectID, id, expected, err := h.cronEnabledTarget(ctx, in)
 	if err != nil {
 		return nil, nil, err
 	}
-	return cronResult(h.options.Client.PauseCronJob(ctx, &generated.PauseCronJobRequestOptions{PathParams: &generated.PauseCronJobPath{ProjectID: p.ID, CronUID: id}, Body: &generated.PauseCronJobBody{Actor: &h.options.Actor, ExpectedEventUID: expected}}))
+	return cronResult(h.options.Client.PauseCronJob(ctx, &generated.PauseCronJobRequestOptions{PathParams: &generated.PauseCronJobPath{ProjectID: projectID, CronUID: id}, Body: &generated.PauseCronJobBody{Actor: &h.options.Actor, ExpectedEventUID: expected}}))
 }
 func (h toolHandlers) cronJobResume(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronEnabledActionInput) (*sdkmcp.CallToolResult, *generated.ResumeCronJobResponse, error) {
 	h = h.withLongRunningClient()
-	id, err := cronUID(in.UID)
+	projectID, id, expected, err := h.cronEnabledTarget(ctx, in)
 	if err != nil {
 		return nil, nil, err
 	}
-	expected, err := cronOptionalExpected(in.ExpectedEventUID)
-	if err != nil {
-		return nil, nil, err
-	}
-	p, err := h.createTarget(ctx, in.Project)
-	if err != nil {
-		return nil, nil, err
-	}
-	return cronResult(h.options.Client.ResumeCronJob(ctx, &generated.ResumeCronJobRequestOptions{PathParams: &generated.ResumeCronJobPath{ProjectID: p.ID, CronUID: id}, Body: &generated.ResumeCronJobBody{Actor: &h.options.Actor, ExpectedEventUID: expected}}))
+	return cronResult(h.options.Client.ResumeCronJob(ctx, &generated.ResumeCronJobRequestOptions{PathParams: &generated.ResumeCronJobPath{ProjectID: projectID, CronUID: id}, Body: &generated.ResumeCronJobBody{Actor: &h.options.Actor, ExpectedEventUID: expected}}))
 }
 func cronOptionalExpected(value string) (*string, error) {
 	if value == "" {

@@ -10,7 +10,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func registerCronJobEnabledHandlers(h huma.API, cfg ServerConfig) {
+func registerCronJobEnabledHandlers(h huma.API, cfg ServerConfig, put func(context.Context, int64, string, api.PutCronJobBody, bool, bool) (*api.CronJobResponse, error)) {
 	for _, action := range []struct {
 		name    string
 		enabled bool
@@ -45,18 +45,12 @@ func registerCronJobEnabledHandlers(h huma.API, cfg ServerConfig) {
 			if out, handled, err := forwardCronJob(ctx, cfg, in.ProjectID, in.UID, http.MethodPut, "", &write, nil, enrollment); handled {
 				return out, err
 			}
-			out := &api.CronJobResponse{}
 			if current.Definition.Enabled == action.enabled {
+				out := &api.CronJobResponse{}
 				out.Body.Job = api.CronJobFrom(current)
 				return out, nil
 			}
-			value, events, err := cfg.DB.PutCronJob(ctx, db.PutCronJob{ProjectID: in.ProjectID, UID: in.UID, ExpectedEventUID: current.DefinitionEventUID, Name: current.Name, Definition: definition, Actor: actor})
-			if err != nil {
-				return nil, cronAPIError(ctx, cfg, err, in.ProjectID, in.UID, true)
-			}
-			cfg.Publish().Events(in.ProjectID, events)
-			out.Body.Job, out.Body.Events = api.CronJobFrom(value), events
-			return out, nil
+			return put(ctx, in.ProjectID, in.UID, write, false, enrollment)
 		})
 	}
 }

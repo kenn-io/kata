@@ -92,7 +92,7 @@ func (m Model) cronEnabledReady(msg cronEnabledReadyMsg) (Model, tea.Cmd) {
 	}
 	if m.modal == modalNone && m.cron.data != nil && m.cron.data.events != m.cron.events {
 		m.cron.enabled = nil
-		return m.undoNotice("Job data changed; press p again to retry", toastInfo)
+		return m.undoNotice("Job data changed; press p after refresh", toastError)
 	}
 	if !m.cronEnabledSelection(msg.request) || m.modal != modalNone {
 		m.cron.enabled = nil
@@ -133,7 +133,7 @@ func (m Model) confirmCronResume() (Model, tea.Cmd) {
 	}
 	if m.sameCronEnabledRequest(*pending) && m.cron.data != nil && m.cron.data.events != m.cron.events {
 		m.cron.enabled = nil
-		return m.undoNotice("Job data changed; press p again to retry", toastInfo)
+		return m.undoNotice("Job data changed; press p after refresh", toastError)
 	}
 	if !m.sameCronEnabledRequest(*pending) || !m.cronEnabledSelection(*pending) {
 		m.cron.enabled = nil
