@@ -596,6 +596,11 @@ message line below. V1 observations require no capability request. This checks
 the current binding; operators still need to preserve compatibility when
 downgrading a hub or rebinding a project that already contains v2 evidence.
 
+The TUI Runs list prefixes messages with the selected reason code. Run details
+show usage, ordered steps, known-zero cost and exit values, and the log
+reference as plain text. A missing step timestamp leaves duration blank. Log
+references are never opened or fetched.
+
 ### Reason codes
 
 Use `summary.reason` for a machine-readable outcome. Any status may carry one.

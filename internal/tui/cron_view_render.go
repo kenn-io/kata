@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/mattn/go-runewidth"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/pkg/client/generated"
 	"go.kenn.io/kit/tui/helplayout"
 	"go.kenn.io/kit/tui/termtext"
@@ -166,7 +167,7 @@ func cronScreen(m Model) (string, string, []cronLine) {
 			}
 		case cronRuns:
 			for _, r := range runs {
-				add(r.UID, []string{r.Status, cronDefinitionName(*p, deref(r.JobUID), false), deref(r.OccurrenceKey), cronTime(r.StartedAt), cronTime(r.EndedAt), deref(r.Summary.Message)})
+				add(r.UID, []string{r.Status, cronDefinitionName(*p, deref(r.JobUID), false), deref(r.OccurrenceKey), cronTime(r.StartedAt), cronTime(r.EndedAt), cronSummaryPreview(r.Summary)})
 			}
 		case cronWorkflows:
 			for _, w := range p.workflows {
@@ -191,7 +192,9 @@ type cronDoc struct {
 }
 
 func (d *cronDoc) text(value string, target cronRef) {
-	for _, line := range termtext.Wrap(sanitizeForDisplay(value), max(d.width, 1)) {
+	// Lip Gloss expands tabs to four spaces. Do it before measuring and wrapping.
+	value = strings.ReplaceAll(sanitizeForDisplay(value), "\t", "    ")
+	for _, line := range termtext.Wrap(value, max(d.width, 1)) {
 		d.lines = append(d.lines, cronLine{text: line, target: target})
 	}
 }
@@ -257,6 +260,9 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			}
 			name = r.UID
 			d.field("Status", r.Status)
+			if reason, ok := cronSummaryReason(r.Summary); ok {
+				d.field("Reason", reason)
+			}
 			d.field("Occurrence", deref(r.OccurrenceKey))
 			d.field("Started", cronTime(r.StartedAt))
 			d.field("Ended", cronTime(r.EndedAt))
@@ -268,6 +274,7 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			if r.Summary.InputTokens != nil || r.Summary.OutputTokens != nil {
 				d.field("Tokens", fmt.Sprintf("%d input, %d output", deref(r.Summary.InputTokens), deref(r.Summary.OutputTokens)))
 			}
+			cronSummaryDetails(&d, r.Summary)
 			d.section("Message")
 			d.text(deref(r.Summary.Message), cronRef{})
 			d.section("Recorded with")
@@ -313,6 +320,51 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 	}
 	return cronTabNames[ref.kind] + " / " + sanitizeForLine(name), "", d.lines
 }
+func cronSummaryReason(s generated.SummaryResponse) (string, bool) {
+	return cron.RunReason(cron.Summary{Reason: deref(s.Reason), Message: deref(s.Message)})
+}
+func cronSummaryPreview(s generated.SummaryResponse) string {
+	message := deref(s.Message)
+	if reason, ok := cronSummaryReason(s); ok {
+		return reason + " · " + message
+	}
+	return message
+}
+func cronSummaryDetails(d *cronDoc, s generated.SummaryResponse) {
+	if u := s.Usage; u != nil {
+		d.section("Usage")
+		d.field("Model", u.Model)
+		if u.CacheReadTokens != nil {
+			d.field("Cache read", fmt.Sprint(*u.CacheReadTokens))
+		}
+		if u.CacheWriteTokens != nil {
+			d.field("Cache write", fmt.Sprint(*u.CacheWriteTokens))
+		}
+		if u.CostMicros != nil {
+			cost := *u.CostMicros
+			d.field("Cost", fmt.Sprintf("%d.%06d %s", cost/1000000, cost%1000000, deref(u.Currency)))
+		}
+	}
+	if s.Steps != nil {
+		d.section(fmt.Sprintf("Steps (%d)", len(s.Steps)))
+		for _, step := range s.Steps {
+			d.text(step.Key+" · "+step.Status, cronRef{})
+			d.field("Attempts", fmt.Sprint(deref(step.Attempts)))
+			if step.ExitCode != nil {
+				d.field("Exit", fmt.Sprint(*step.ExitCode))
+			}
+			d.field("Reason", deref(step.Reason))
+			if start, err := time.Parse(time.RFC3339Nano, deref(step.StartedAt)); err == nil {
+				if end, err := time.Parse(time.RFC3339Nano, deref(step.EndedAt)); err == nil {
+					d.field("Duration", end.Sub(start).String())
+				}
+			}
+			d.text(deref(step.Message), cronRef{})
+		}
+	}
+	d.field("Log ref", deref(s.LogRef))
+}
+
 func cronDefinitionLink(d *cronDoc, p cronData, uid, revision string, workflow bool) {
 	if uid == "" {
 		return
@@ -364,7 +416,7 @@ func cronHistory(d *cronDoc, p cronData, ref cronRef) {
 		d.text("no loaded runs", cronRef{})
 	}
 	for _, r := range runs {
-		d.text(r.Status+" · "+r.CreatedAt.Format(time.RFC3339)+" · "+deref(r.Summary.Message), cronRef{cronRuns, r.UID})
+		d.text(r.Status+" · "+r.CreatedAt.Format(time.RFC3339)+" · "+cronSummaryPreview(r.Summary), cronRef{cronRuns, r.UID})
 	}
 }
 
