@@ -1481,6 +1481,11 @@ func (c CronJobDefinitionResponse) Validate() error {
 	return errors
 }
 
+type CronJobEnabledActionBody struct {
+	Actor            *string `json:"actor,omitempty"`
+	ExpectedEventUID *string `json:"expected_event_uid,omitempty"`
+}
+
 type CronJobResponseBody struct {
 	Events []Event `json:"events,omitempty"`
 	Job    CronJob `json:"job"`

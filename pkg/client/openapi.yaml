@@ -1192,6 +1192,14 @@ components:
         - overlap
         - catchup
       type: object
+    CronJobEnabledActionBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        expected_event_uid:
+          type: string
+      type: object
     CronJobResponseBody:
       properties:
         events:
@@ -8452,6 +8460,43 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
+  /api/v1/projects/{project_id}/cron/jobs/{cron_uid}/pause:
+    post:
+      operationId: pauseCronJob
+      parameters:
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: cron_uid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CronJobEnabledActionBody"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CronJobResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
   /api/v1/projects/{project_id}/cron/jobs/{cron_uid}/restore:
     post:
       operationId: restoreCronJob
@@ -8477,6 +8522,43 @@ paths:
             schema:
               $ref: "#/components/schemas/CronDefinitionActionBody"
         required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CronJobResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/cron/jobs/{cron_uid}/resume:
+    post:
+      operationId: resumeCronJob
+      parameters:
+        - in: header
+          name: Authorization
+          schema:
+            type: string
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: cron_uid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CronJobEnabledActionBody"
       responses:
         "200":
           content:
