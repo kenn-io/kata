@@ -5,6 +5,12 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -130,4 +136,65 @@ func TestCronRecurringChildrenContract(t *testing.T) {
 	parent, e = env.DB.IssueByID(t.Context(), parent.ID)
 	require.NoError(t, e)
 	require.Equal(t, "open", parent.Status)
+}
+
+// Execute the displayed heredoc body and command, including its retained sample UID.
+func TestCronRuntimeHelpExampleExecutes(t *testing.T) {
+	t.Setenv("KATA_AUTHOR", "operator")
+	env := testenv.New(t)
+	_, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	help := string(executeRoot(t, newRootCmd(), "cron", "runtime", "beat", "--help"))
+	_, examples, ok := strings.Cut(help, "\nExamples:\n")
+	require.True(t, ok, "rendered help must include examples")
+	lines := strings.Split(examples, "\n")
+	start := slices.IndexFunc(lines, func(line string) bool {
+		return strings.HasPrefix(strings.TrimSpace(line), "kata cron runtime beat ")
+	})
+	require.NotEqual(t, -1, start, "rendered help must include the beat command")
+	lines = lines[start:]
+	args := strings.Fields(lines[0])
+	last := args[len(args)-1]
+	require.True(t, strings.HasPrefix(last, "<<'"))
+	delimiter := strings.TrimSuffix(strings.TrimPrefix(last, "<<'"), "'")
+	end := 1
+	for end < len(lines) && strings.TrimSpace(lines[end]) != delimiter {
+		end++
+	}
+	require.Less(t, end, len(lines), "unterminated heredoc in runtime help")
+	body := strings.Join(lines[1:end], "\n")
+	target, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	// Observe the wire body without asserting a forwarded client identity.
+	proxy := &httputil.ReverseProxy{Rewrite: func(request *httputil.ProxyRequest) {
+		request.SetURL(target)
+	}}
+	wire := make(chan []byte, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/cron/runtimes/") {
+			raw, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Error(err)
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			_ = r.Body.Close()
+			r.Body = io.NopCloser(bytes.NewReader(raw))
+			wire <- raw
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	defer server.Close()
+	out, _, err := executeCronCLI(t, server.URL, strings.NewReader(body), args[2:len(args)-1]...)
+	require.NoError(t, err)
+	require.Contains(t, out, `"status":"live"`)
+	select {
+	case raw := <-wire:
+		require.JSONEq(t, `{"actor":"operator","label":"example-worker","adapter":"example","features":["cron_v1"],"interval_seconds":60,"state":"active"}`, string(raw))
+	default:
+		t.Fatal("help example did not send a runtime beat")
+	}
+	out, _, err = executeCronCLI(t, env.URL, nil, "runtime", "list")
+	require.NoError(t, err)
+	require.Contains(t, string(out), "example-worker")
 }

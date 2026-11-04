@@ -146,6 +146,11 @@ func TestCronCLIRejectsInvalidInputBeforeNetwork(t *testing.T) {
 		{[]string{"run", "list", "--limit", "101"}, ``, "limit"},
 		{[]string{"run", "list", "--before-uid", "bad"}, ``, "ULID"},
 		{[]string{"job", "create", "--uid", "bad", "--file", "-"}, `{}`, "ULID"},
+		{[]string{"runtime", "beat", cronCLIUID(t), "--json-input", "-"}, `{"label":"worker","adapter":"example","features":null}`, "features"},
+		{[]string{"runtime", "beat", cronCLIUID(t), "--json-input", "-"}, `{"label":"worker","adapter":"example","interval_seconds":0}`, "interval_seconds"},
+		{[]string{"runtime", "beat", cronCLIUID(t), "--json-input", "-"}, `{"label":"worker","adapter":"example","interval_seconds":null}`, "interval_seconds"},
+		{[]string{"runtime", "beat", cronCLIUID(t), "--json-input", "-"}, `{"label":"worker","adapter":"example","state":""}`, "state"},
+		{[]string{"runtime", "beat", cronCLIUID(t), "--json-input", "-"}, `{"label":"worker","adapter":"example","state":null}`, "state"},
 	} {
 		t.Run(tc.want+strings.Join(tc.args, "-"), func(t *testing.T) {
 			_, _, err := executeCronCLI(t, "http://127.0.0.1:1", strings.NewReader(tc.body), tc.args...)

@@ -46,6 +46,8 @@ import (
 // through). Hooks is optional and defaults to hooks.NewNoop() when nil so
 // mutation handlers can fan out events unconditionally.
 type ServerConfig struct {
+	// CronRuntimes owns ephemeral advertisements for this server lifetime.
+	CronRuntimes              *CronRuntimeRegistry
 	FederationSigning         *federationsigning.Verifier
 	FederationSigningRequired bool
 	DB                        db.Storage
@@ -288,6 +290,9 @@ type ListenerBinding struct {
 // NewServer wires routes onto a fresh http.ServeMux. The returned handler is
 // safe to mount in tests via httptest.NewServer.
 func NewServer(cfg ServerConfig) *Server {
+	if cfg.CronRuntimes == nil {
+		cfg.CronRuntimes = NewCronRuntimeRegistry(cfg.StartedAt, nil)
+	}
 	if cfg.TwentySyncProgress == nil {
 		cfg.TwentySyncProgress = issuesync.NewProgressTracker()
 	}
@@ -818,6 +823,7 @@ func registerRecurrences(humaAPI huma.API, cfg ServerConfig) {
 	registerRecurrencesHandlers(humaAPI, cfg)
 	registerCronDefinitionHandlers(humaAPI, cfg)
 	registerCronRunHandlers(humaAPI, cfg)
+	registerCronRuntimeHandlers(humaAPI, cfg)
 }
 
 // registerMetadata registers metadata patch routes.

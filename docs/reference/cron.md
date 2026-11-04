@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -370,7 +370,84 @@ options). Each step has these fields:
 }
 ```
 
-### Adapter command jobs
+### Runtime heartbeats
+
+On main after the latest release, adapters can advertise their liveness with
+`kata cron runtime beat`. Generate one runtime ULID per installation, persist
+it, and reuse it for every beat. Report at the advertised interval, including
+while no jobs run. Send a final `stopping` beat on clean shutdown when possible.
+
+```sh
+kata cron runtime beat <runtime-uid> --json-input - --json <<'JSON'
+{"label":"example-worker","adapter":"example-adapter","adapter_version":"1.0.0","kata_version":"0.31.0","features":["cron_v1"],"interval_seconds":60,"state":"active"}
+JSON
+kata cron runtime list --json
+```
+
+The HTTP routes are `PUT /api/v1/projects/{project_id}/cron/runtimes/{runtime_uid}`
+and `GET /api/v1/projects/{project_id}/cron/runtimes`. Capabilities advertise
+`features: ["cron_runtimes_v1"]`; `event_features` continues to describe only
+replicated event families. Ordinary attributed write authority is required to
+beat. Authenticated actors override a supplied body actor. Inventory reads use
+ordinary project read authority, including anonymous read-only deployments.
+
+A beat accepts only `actor`, `label`, `adapter`, `adapter_version`, `kata_version`,
+`features`, `interval_seconds`, and `state`. The complete body is limited to
+8 KiB. Runtime identity must be a canonical uppercase ULID. Labels are nonblank
+valid UTF-8, at most 256 bytes, and match executor pins exactly, including case.
+Adapter and feature identifiers match `[a-z0-9_.-]{1,64}`. Versions are optional
+printable ASCII strings of at most 64 bytes. Features contain at most 32 unique
+identifiers. An omitted interval defaults to 60 seconds; explicit values must
+be 10–3600. An omitted state defaults to `active`; `stopping` is the only other
+state. Explicit nulls for state or interval, unknown fields and duplicate
+features are rejected.
+
+Server timestamps describe the first and latest accepted beat. A runtime is
+`live` strictly before `expires_at`, three advertised intervals after its latest
+beat. A `stopping` beat expires immediately. Expired observations remain for
+24 hours after expiry, then reads or writes reclaim them. The daemon retains
+at most 256 runtimes per project and 4096 total. It returns
+`429 cron_runtime_limit` for a new runtime when retained entries fill either
+limit; existing retained identities may refresh. Capacity never evicts evidence
+earlier than its retention deadline.
+
+The inventory lives in memory. Restart clears it; backups and event replication
+do not contain it. The response's `inventory.state` is:
+
+| State | Meaning |
+| --- | --- |
+| `unknown` | No retained observation history, including after the last entry is evicted. |
+| `warming` | At least one retained advertisement, within three hours of daemon startup. |
+| `ready` | Retained advertisements after the three-hour startup grace. |
+
+`daemon_started_at` and `warming_until` show those exact boundaries. The grace
+covers three maximum-length heartbeat intervals, so fast reporters cannot
+prematurely exclude slow reporters after restart. Even `ready` covers only
+advertisements observed by this daemon. Older adapters, unavailable forwarders
+and other unobserved installations remain unknown. An empty live set never
+proves an empty set of eligible executors.
+
+Inventory includes advisory warnings for enabled, undeleted execute jobs:
+`pin_unmatched`, `adapter_unmatched`, and `no_live_runtime` appear only when
+ready. They match string-valued `options.executor` and `options.adapter` against
+live labels and adapter identifiers; blank and non-string options are ignored.
+`adapter_version_skew` lists sorted distinct reported versions per adapter;
+missing versions do not cause skew. `kata_version_skew` compares reported and
+daemon major/minor releases, ignoring missing, unparseable and prerelease/dev
+versions. Warning ordering is deterministic. Runtime entries are bounded;
+job-specific warnings grow with the project's existing job list.
+
+This first inventory slice records beats locally, including on spokes and
+relays. Its beat response uses `reported_via: direct` and
+`forwarded: not_applicable`. A hub does not yet aggregate advertisements sent
+only to a spoke. Point adapters directly at the desired inventory daemon until
+the forwarding slice lands.
+
+Advertisements are self-reported evidence. They do not activate an installation,
+select jobs, authorize execution, reserve an occurrence, or change run status.
+Adapters remain responsible for scheduling and execution policy.
+
+## Adapter command jobs
 
 A job runs commands by referencing a workflow. `action.kind` remains
 `execute`; use `workflow_uid` instead of `prompt`, and put each command in a

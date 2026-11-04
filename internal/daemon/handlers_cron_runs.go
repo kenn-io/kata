@@ -30,6 +30,7 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 		out := &api.CronCapabilitiesResponse{EventFeatures: db.SupportedEventFeatures}
 		out.Body.ProjectUID = project.UID
 		out.Body.EventFeatures = []string{db.CronEventFeature}
+		out.Body.Features = []string{"cron_runtimes_v1"}
 		return out, nil
 	})
 	huma.Register(h, huma.Operation{OperationID: "observeCronRun", Method: http.MethodPut, Path: base + "/runs/{run_uid}", MaxBodyBytes: db.CronObservationLimit}, func(ctx context.Context, in *api.ObserveCronRunRequest) (*api.ObserveCronRunResponse, error) {

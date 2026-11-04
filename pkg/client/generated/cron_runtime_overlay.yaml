@@ -1,0 +1,23 @@
+overlay: 1.0.0
+info:
+  title: Keep runtime enum additions source compatible
+  version: 1.0.0
+actions:
+  - target: $.components.schemas.BeatCronRuntimeBody.properties.state
+    update:
+      x-enum-names: [CronRuntimeBeatActive, CronRuntimeBeatStopping]
+  - target: $.components.schemas.BeatCronRuntimeResponseBody.properties.forwarded
+    update:
+      x-enum-names: [CronRuntimeForwardRecorded, CronRuntimeForwardUnavailable, CronRuntimeForwardUnsupported, CronRuntimeForwardNotApplicable]
+  - target: $.components.schemas.Runtime.properties.state
+    update:
+      x-enum-names: [CronRuntimeActive, CronRuntimeStopping]
+  - target: $.components.schemas.Runtime.properties.status
+    update:
+      x-enum-names: [CronRuntimeLive, CronRuntimeExpired]
+  - target: $.components.schemas.Runtime.properties.reported_via
+    update:
+      x-enum-names: [CronRuntimeDirect, CronRuntimeForwarded]
+  - target: $.components.schemas.RuntimeInventoryState.properties.state
+    update:
+      x-enum-names: [CronRuntimeInventoryUnknown, CronRuntimeInventoryWarming, CronRuntimeInventoryReady]
