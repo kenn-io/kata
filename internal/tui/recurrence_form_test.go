@@ -162,24 +162,35 @@ func TestRecurrenceFormOpensPrefilledFromDetail(t *testing.T) {
 
 func TestRecurrenceFormStartsAndChangesARecurrence(t *testing.T) {
 	h := newRecurrenceHarness(t, viewDetail)
+	reads := 0
+	base := h.client.KataAPI.(*Client)
+	base.setHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/issues/") {
+			reads++
+		}
+		return h.env.HTTP.Do(r)
+	})})
 
 	h.open()
-	h.fill("FREQ=WEEKLY;BYDAY=MO", "2026-11-09", "Europe/Paris")
+	h.fill(" FREQ=WEEKLY;BYDAY=MO ", "2026-11-09", "Europe/Paris")
 	h.save()
+	assert.Equal(t, 1, reads, "saving reads the issue once before writing; completion owns the refresh")
 	assert.Equal(t, "started repeat of #"+h.issue.ShortID, h.m.detail.status)
 
 	require.Equal(t, inputNone, h.m.input.kind, "a saved form closes")
 	recs := h.rows()
 	require.Len(t, recs, 1)
-	assert.Equal(t, "FREQ=WEEKLY;BYDAY=MO", recs[0].RRule, "the rule is sent as written")
+	assert.Equal(t, "FREQ=WEEKLY;BYDAY=MO", recs[0].RRule, "surrounding spaces are trimmed")
 	assert.Equal(t, "2026-11-09", recs[0].DTStart)
 	assert.Equal(t, "Europe/Paris", recs[0].Timezone)
 	h.refreshDetail()
 	assert.Contains(t, h.page(), "repeats:")
 
 	h.open()
-	h.fill("FREQ=DAILY", "2026-11-09", "Europe/Paris")
+	reads = 0
+	h.fill(" FREQ=DAILY ", "2026-11-09", "Europe/Paris")
 	h.save()
+	assert.Equal(t, 1, reads)
 	assert.Equal(t, "changed repeat of #"+h.issue.ShortID, h.m.detail.status)
 
 	changed := h.rows()
@@ -188,6 +199,19 @@ func TestRecurrenceFormStartsAndChangesARecurrence(t *testing.T) {
 	assert.Equal(t, "FREQ=DAILY", changed[0].RRule)
 	h.refreshDetail()
 	assert.Contains(t, h.page(), "repeats:")
+}
+
+func TestRecurrenceFormPaddedUnchangedRuleSkipsSave(t *testing.T) {
+	h := newRecurrenceHarness(t, viewDetail)
+	h.startBehindTheTUI("FREQ=WEEKLY;BYDAY=MO", "2026-11-09", "Europe/Paris")
+	h.open()
+	h.fill(" FREQ=WEEKLY;BYDAY=MO ", "2026-11-09", "Europe/Paris")
+
+	cmd := h.key(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+
+	assert.Empty(t, msgsOfType[mutationDoneMsg](cmd), "an equivalent rule closes without sending a save")
+	assert.Equal(t, inputNone, h.m.input.kind)
+	assert.Equal(t, "FREQ=WEEKLY;BYDAY=MO", h.rows()[0].RRule)
 }
 
 func TestRecurrenceFormBlankRuleStops(t *testing.T) {
