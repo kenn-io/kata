@@ -263,7 +263,7 @@ func (c *Client) GetIssueDetail(ctx context.Context, projectID int64, ref string
 	if err != nil {
 		return nil, err
 	}
-	detail.Recurrence = c.recurrenceOrNil(ctx, projectID, detail.Issue.RecurrenceID)
+	detail.Recurrence = c.recurrenceOrNil(ctx, detail.Issue.ProjectID, detail.Issue.RecurrenceID)
 	return detail, nil
 }
 
