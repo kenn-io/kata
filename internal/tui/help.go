@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -20,14 +21,14 @@ func helpSections(km keymap) []helpSection {
 	r := func(k key) helplayout.HelpItem {
 		return helplayout.HelpItem{Key: keyDisplay(k), Description: k.Help}
 	}
-	return []helpSection{
+	sections := []helpSection{
 		{"Global", []helplayout.HelpItem{r(km.Help), r(km.Quit), r(km.Tabs), r(km.Projects), r(km.Inbox), r(km.Daemons), r(km.Federation), r(km.Credentials), r(km.Attention), r(km.ToggleLayout)}},
 		{"Graph", []helplayout.HelpItem{
 			r(km.Up), r(km.Down), r(km.ScrollUp), r(km.ScrollDown),
 			r(km.PageUp), r(km.PageDown), r(km.Home),
 			r(km.End), r(km.Open), r(km.ExpandCollapse),
 			r(km.Expand), r(km.Collapse), r(km.ExpandAll), r(km.NewIssue),
-			r(km.ToggleIssueView), r(km.SortChildren), r(km.Close), r(km.Reopen), r(km.SetDates), r(km.Undo),
+			r(km.ToggleIssueView), r(km.SortChildren), r(km.Close), r(km.Reopen), r(km.SetDates), r(km.Delete), r(km.Undo),
 		}},
 		{"Detail", []helplayout.HelpItem{
 			r(km.NextTab), r(km.PrevTab), r(km.JumpRef), r(km.Back),
@@ -54,6 +55,12 @@ func helpSections(km keymap) []helpSection {
 			{Key: "ctrl+r", Description: "reset filter form"},
 		}},
 	}
+	// An unbound key (Model.helpKeymap clears Delete when it is not on offer)
+	// is not listed.
+	for i := range sections {
+		sections[i].rows = slices.DeleteFunc(sections[i].rows, func(item helplayout.HelpItem) bool { return item.Key == "" })
+	}
+	return sections
 }
 
 // keyDisplay joins multi-key bindings with '/' (e.g. "q/ctrl+c").

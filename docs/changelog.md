@@ -39,6 +39,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
   parent is closed, shows none. An issue-deadline trigger now says how long
   before the deadline it fires. See
   [CLI reference](reference/cli.md#daemon-and-diagnostics).
+- Delete an issue from `kata tui` with `X` from the list. Type
+  `DELETE <project>#<id>` to confirm; the selection moves to the
+  neighbouring row and `u` restores the issue, the way `kata restore` does.
+  Issue-scoped credentials cannot delete, so they are not offered the key. See
+  the [CLI reference](reference/cli.md#daemon-and-diagnostics).
 - Receive direct legacy spoke creations through relays on SQLite roots before later root updates, preventing "references unknown issue" errors on relays while preserving the original event identity and hash. Thanks to [Rusty Shackleford](https://github.com/salmonumbrella).
 
 - Keep the browser reachable when `kata daemon restart` runs from a sandbox or
