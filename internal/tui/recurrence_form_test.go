@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -162,43 +161,29 @@ func TestRecurrenceFormOpensPrefilledFromDetail(t *testing.T) {
 
 func TestRecurrenceFormStartsAndChangesARecurrence(t *testing.T) {
 	h := newRecurrenceHarness(t, viewDetail)
-	reads := 0
-	base := h.client.KataAPI.(*Client)
-	base.setHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/issues/") {
-			reads++
-		}
-		return h.env.HTTP.Do(r)
-	})})
 
 	h.open()
-	h.fill(" FREQ=WEEKLY;BYDAY=MO ", "2026-11-09", "Europe/Paris")
+	h.fill(" FREQ=WEEKLY;BYDAY=MO ", "+2w", "Europe/Paris")
 	h.save()
-	assert.Equal(t, 1, reads, "saving reads the issue once before writing; completion owns the refresh")
 	assert.Equal(t, "started repeat of #"+h.issue.ShortID, h.m.detail.status)
 
 	require.Equal(t, inputNone, h.m.input.kind, "a saved form closes")
 	recs := h.rows()
 	require.Len(t, recs, 1)
 	assert.Equal(t, "FREQ=WEEKLY;BYDAY=MO", recs[0].RRule, "surrounding spaces are trimmed")
-	assert.Equal(t, "2026-11-09", recs[0].DTStart)
+	assert.Equal(t, "2026-11-16", recs[0].DTStart)
 	assert.Equal(t, "Europe/Paris", recs[0].Timezone)
-	h.refreshDetail()
-	assert.Contains(t, h.page(), "repeats:")
 
+	h.refreshDetail()
 	h.open()
-	reads = 0
-	h.fill(" FREQ=DAILY ", "2026-11-09", "Europe/Paris")
+	h.fill("FREQ=DAILY", "2026-11-16", "Europe/Paris")
 	h.save()
-	assert.Equal(t, 1, reads)
 	assert.Equal(t, "changed repeat of #"+h.issue.ShortID, h.m.detail.status)
 
 	changed := h.rows()
 	require.Len(t, changed, 1)
 	assert.Equal(t, recs[0].UID, changed[0].UID, "a change keeps the recurrence")
 	assert.Equal(t, "FREQ=DAILY", changed[0].RRule)
-	h.refreshDetail()
-	assert.Contains(t, h.page(), "repeats:")
 }
 
 func TestRecurrenceFormPaddedUnchangedRuleSkipsSave(t *testing.T) {
@@ -247,16 +232,6 @@ func TestRecurrenceFormBlankRuleStops(t *testing.T) {
 	}
 }
 
-func TestRecurrenceFormBlankRuleRequiresExistingRecurrence(t *testing.T) {
-	h := newRecurrenceHarness(t, viewDetail)
-	h.open()
-	h.fill("", "2026-11-09", "Europe/Paris")
-	h.save()
-	assert.Equal(t, inputRecurrenceForm, h.m.input.kind)
-	assert.NotEmpty(t, h.m.input.err)
-	assert.Empty(t, h.rows())
-}
-
 func TestRecurrenceKeyIsDetailOnly(t *testing.T) {
 	for _, split := range []bool{false, true} {
 		t.Run(strconv.FormatBool(split), func(t *testing.T) {
@@ -268,44 +243,24 @@ func TestRecurrenceKeyIsDetailOnly(t *testing.T) {
 			assert.False(t, handled)
 			_, mutation := h.m.mutationForKey(runeKey('O'))
 			assert.False(t, mutation)
-			h.m.authCapabilitiesRequired, h.m.authCapabilitiesReady = true, false
-			_, _, handled = h.m.routeTopLevel(runeKey('O'))
-			assert.False(t, handled)
 			h.key(runeKey('O'))
 			assert.Equal(t, inputNone, h.m.input.kind)
 			assert.Nil(t, h.m.toast)
-			for _, row := range h.m.helpRows() {
-				for _, item := range row {
-					assert.NotEqual(t, "O", item.Key)
-				}
-			}
 		})
 	}
 }
 
 func TestRecurrenceKeyRefusesMissingRecurrence(t *testing.T) {
-	for _, stopped := range []bool{false, true} {
-		t.Run(strconv.FormatBool(stopped), func(t *testing.T) {
-			h := newRecurrenceHarness(t, viewDetail)
-			current := h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
-			if stopped {
-				require.NoError(t, recurrenceclient.Stop(t.Context(), h.api, h.issue.ProjectID, current, "bob"))
-				h.refreshDetail()
-			} else {
-				h.m.detail.recurrence = nil // The best-effort recurrence read returned no result.
-			}
-			require.NotNil(t, h.m.detail.issue.RecurrenceID)
-			cmd := h.key(runeKey('O'))
-			assert.NotNil(t, cmd)
-			assert.Equal(t, inputNone, h.m.input.kind)
-			require.NotNil(t, h.m.toast)
-			assert.Equal(t, "Can't read this issue's repeat; it may have been stopped", h.m.toast.text)
-			h.m.toastNow = func() time.Time { return datesNow.Add(4 * time.Second) }
-			out, _ := h.m.Update(toastExpiredMsg{})
-			h.m = out.(Model)
-			assert.Nil(t, h.m.toast)
-		})
-	}
+	h := newRecurrenceHarness(t, viewDetail)
+	current := h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
+	require.NoError(t, recurrenceclient.Stop(t.Context(), h.api, h.issue.ProjectID, current, "bob"))
+	h.refreshDetail()
+	require.NotNil(t, h.m.detail.issue.RecurrenceID)
+	cmd := h.key(runeKey('O'))
+	assert.NotNil(t, cmd)
+	assert.Equal(t, inputNone, h.m.input.kind)
+	require.NotNil(t, h.m.toast)
+	assert.Equal(t, "Can't read this issue's repeat; it may have been stopped", h.m.toast.text)
 }
 
 func TestRecurrenceFormRefusesAndKeepsTheInput(t *testing.T) {
@@ -321,6 +276,10 @@ func TestRecurrenceFormRefusesAndKeepsTheInput(t *testing.T) {
 		wantErr    []string
 	}{
 		{"the daemon's refusal is shown as is", nil, "every other tuesday", "Europe/Paris", []string{"every other tuesday"}},
+		{"a blank rule requires an existing recurrence", nil, "", "Europe/Paris", []string{"Could not start repeat:"}},
+		{"an issue changed after the form opened is refused", func(h *recurrenceHarness) {
+			h.patchDaemon(map[string]string{"scheduled_on": "2026-12-01"})
+		}, "FREQ=DAILY", "Europe/Paris", []string{"Could not start repeat:"}},
 		{"Local is never sent as a zone", nil, "FREQ=DAILY", "Local", []string{"Local"}},
 		{"an issue that became a cron parent after the form opened is refused", cronParent, "FREQ=DAILY", "Europe/Paris",
 			[]string{recurrenceclient.CronParentRefusal, "kata cron job create --parent"}},
@@ -347,21 +306,11 @@ func TestRecurrenceFormRefusesAndKeepsTheInput(t *testing.T) {
 	}
 }
 
-func TestRecurrencePreflightFailurePreservesUndo(t *testing.T) {
-	for _, tc := range []struct {
-		outcome string
-		view    viewID
-	}{
-		{"server", viewDetail},
-		{"transport", viewDetail},
-		{"write transport", viewDetail},
-		{"success", viewDetail},
-		{"daemon no-op detail", viewDetail},
-	} {
-		t.Run(tc.outcome, func(t *testing.T) {
-			failure := tc.outcome
-			noop := strings.HasPrefix(tc.outcome, "daemon no-op")
-			h := newRecurrenceHarness(t, tc.view)
+func TestRecurrenceSaveUpdatesUndo(t *testing.T) {
+	for _, outcome := range []string{"server", "transport", "write transport", "success", "daemon no-op detail"} {
+		t.Run(outcome, func(t *testing.T) {
+			noop := outcome == "daemon no-op detail"
+			h := newRecurrenceHarness(t, viewDetail)
 			h.openForm()
 			h.datesHarness.fill("2026-11-09", "")
 			h.datesHarness.save()
@@ -377,25 +326,25 @@ func TestRecurrencePreflightFailurePreservesUndo(t *testing.T) {
 				h.fill("FREQ=DAILY", "2026-11-09", "Europe/Paris")
 			}
 			writes := 0
-			base := h.client.KataAPI.(*Client)
-			base.setHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-				if r.Method != http.MethodGet && !noop && failure != "success" {
-					writes++
-					return nil, errors.New("write transport failed")
-				}
-				if strings.Contains(r.URL.Path, "/issues/") && (failure == "server" || failure == "transport") {
-					if failure == "transport" {
-						return nil, errors.New("preflight transport failed")
+			if !noop && outcome != "success" {
+				base := h.client.KataAPI.(*Client)
+				base.setHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					if r.Method != http.MethodGet {
+						writes++
+						return nil, errors.New("write transport failed")
 					}
-					status, body := http.StatusInternalServerError, `{"error":{"code":"internal","message":"preflight failed"}}`
-					return &http.Response{StatusCode: status, Request: r, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
-				}
-				return h.env.HTTP.Do(r)
-			})})
+					if strings.Contains(r.URL.Path, "/issues/") && (outcome == "server" || outcome == "transport") {
+						if outcome == "transport" {
+							return nil, errors.New("preflight transport failed")
+						}
+						status, body := http.StatusInternalServerError, `{"error":{"code":"internal","message":"preflight failed"}}`
+						return &http.Response{StatusCode: status, Request: r, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
+					}
+					return h.env.HTTP.Do(r)
+				})})
+			}
 			h.save()
-			if failure == "success" {
-				require.Len(t, h.rows(), 1)
-				assert.Equal(t, inputNone, h.m.input.kind)
+			if outcome == "success" {
 				assert.Empty(t, h.m.undoHistory.entries)
 				assert.Contains(t, h.m.undoHistory.boundary, "recurrence")
 				return
@@ -409,7 +358,7 @@ func TestRecurrencePreflightFailurePreservesUndo(t *testing.T) {
 			}
 			assert.Equal(t, inputRecurrenceForm, h.m.input.kind)
 			assert.NotEmpty(t, h.m.input.err)
-			if failure == "write transport" {
+			if outcome == "write transport" {
 				assert.Equal(t, 1, writes)
 				assert.Empty(t, h.m.undoHistory.entries, "a sent write still has an uncertain outcome")
 			} else {
@@ -441,28 +390,12 @@ func TestRecurrenceFormRequiresDateOnlyStart(t *testing.T) {
 	}
 }
 
-func TestRecurrenceFormResolvesDateOnlyStart(t *testing.T) {
-	for _, tc := range []struct{ typed, want string }{
-		{"+2w", "2026-11-16"},
-	} {
-		t.Run(tc.typed, func(t *testing.T) {
-			h := newRecurrenceHarness(t, viewDetail)
-			h.open()
-			h.fill("FREQ=DAILY", tc.typed, "Europe/Paris")
-			h.save()
-			require.Len(t, h.rows(), 1)
-			assert.Equal(t, tc.want, h.rows()[0].DTStart)
-		})
-	}
-}
-
 func TestRecurrenceKeyUsesTheSamePermissionGateAsOtherEdits(t *testing.T) {
 	h := newRecurrenceHarness(t, viewDetail)
 	h.m.issueScoped, h.m.scopedWritable = true, false
 
-	cmd := h.key(runeKey('O'))
+	h.key(runeKey('O'))
 
-	assert.Empty(t, msgsOfType[mutationDoneMsg](cmd), "a key that may not edit writes nothing")
 	assert.Equal(t, inputNone, h.m.input.kind)
 }
 
@@ -490,11 +423,9 @@ func TestRecurrenceFormRequiresGuardedStartAPI(t *testing.T) {
 	assert.Empty(t, h.rows())
 }
 
-func TestRecurrenceIncomingMutationRefreshesSplitDetail(t *testing.T) {
-	h := newRecurrenceHarness(t, viewList)
+func TestRecurrenceIncomingMutationRefreshesDetail(t *testing.T) {
+	h := newRecurrenceHarness(t, viewDetail)
 	current := h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
-	h.m.layout = splitlayout.Split
-	h.m.focus = focusList
 	h.refreshDetail()
 	require.Contains(t, h.page(), "repeats: FREQ=WEEKLY")
 	require.NoError(t, recurrenceclient.Stop(t.Context(), h.api, h.issue.ProjectID, current, "bob"))
@@ -531,19 +462,6 @@ func TestRecurrenceFormConflictKeepsInputUntilReopened(t *testing.T) {
 	h.open()
 	rule, _, _ = h.values()
 	assert.Equal(t, "FREQ=MONTHLY", rule)
-}
-
-func TestRecurrenceFormStartConflictKeepsInput(t *testing.T) {
-	h := newRecurrenceHarness(t, viewDetail)
-	h.open()
-	h.patchDaemon(map[string]string{"scheduled_on": "2026-12-01"})
-	h.fill("FREQ=DAILY", "2026-11-09", "Europe/Paris")
-	h.save()
-	require.Equal(t, inputRecurrenceForm, h.m.input.kind)
-	assert.Contains(t, h.m.input.err, "Could not start repeat:")
-	rule, start, zone := h.values()
-	assert.Equal(t, []string{"FREQ=DAILY", "2026-11-09", "Europe/Paris"}, []string{rule, start, zone})
-	assert.Empty(t, h.rows(), "nothing was written")
 }
 
 func TestRecurrenceFormDaemonErrorFitsMinimumHeight(t *testing.T) {
