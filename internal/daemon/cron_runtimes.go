@@ -42,15 +42,6 @@ func (r *CronRuntimeRegistry) prune(now time.Time) {
 	}
 }
 
-// Beat records an already-authorized identity. Capacity never evicts retained evidence.
-func (r *CronRuntimeRegistry) Beat(projectID int64, id, actor string, b cron.RuntimeBeat) (cron.Runtime, error) {
-	b, err := cron.NormalizeRuntimeBeat(b)
-	if err != nil {
-		return cron.Runtime{}, err
-	}
-	return r.beatNormalized(projectID, id, actor, b, "")
-}
-
 // beatNormalized takes ownership of a beat validated by NormalizeRuntimeBeat.
 func (r *CronRuntimeRegistry) beatNormalized(projectID int64, id, actor string, b cron.RuntimeBeat, forwarder string) (cron.Runtime, error) {
 	r.mu.Lock()

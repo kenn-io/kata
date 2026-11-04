@@ -12,6 +12,16 @@ import (
 	"hegel.dev/go/hegel"
 )
 
+// Beat is test-only admission for registry fixtures. Production normalizes and
+// authorizes requests in the HTTP handler before calling beatNormalized.
+func (r *CronRuntimeRegistry) Beat(projectID int64, id, actor string, b cron.RuntimeBeat) (cron.Runtime, error) {
+	b, err := cron.NormalizeRuntimeBeat(b)
+	if err != nil {
+		return cron.Runtime{}, err
+	}
+	return r.beatNormalized(projectID, id, actor, b, "")
+}
+
 func TestCronRuntimeRegistryRetentionAndIsolation(t *testing.T) {
 	now := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
 	start := now
