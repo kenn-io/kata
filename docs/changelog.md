@@ -9,6 +9,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Keep issue writes responsive during due-date sweeps. Sweeps skip date values
+  more than 24h past UTC now, including every issue 36h or more out in any zone.
+  Other checks take SQLite's writer only for due notifications or cleanup.
 - Add, edit, and delete comments, or edit issue titles and bodies, without
   reindexing every comment on the issue. Search still finds words spread across
   an issue and its comments; scores now sum each word's best document score,

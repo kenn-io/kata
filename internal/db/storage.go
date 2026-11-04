@@ -162,7 +162,9 @@ type Storage interface {
 	UnassignOwner(ctx context.Context, issueID int64, actor string, expectedOwner *string) (Issue, *Event, bool, error)
 	UpdatePriority(ctx context.Context, issueID int64, newPriority *int64, actor string) (Issue, *Event, bool, error)
 	PatchIssueMetadata(ctx context.Context, in PatchIssueMetadataIn) (PatchIssueMetadataOut, error)
-	ListDueNotificationIssueIDs(ctx context.Context) ([]int64, error)
+	// ListDueNotificationIssueIDs returns live open issues that may be due at now,
+	// or hold an automatic inbox entry that may need cleanup.
+	ListDueNotificationIssueIDs(ctx context.Context, now time.Time) ([]int64, error)
 	ReconcileDueNotification(ctx context.Context, in ReconcileDueNotificationIn) (ReconcileDueNotificationOut, error)
 	// EnsureScheduledReachedFloor stores at as the reached-schedule floor on the
 	// first call and returns the stored floor on every call.
