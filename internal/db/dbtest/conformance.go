@@ -51,6 +51,7 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "attachment close evidence", methods: []string{"CloseIssueGuarded", "PatchIssueMetadata", "EventsByUIDs"}, run: checkAttachmentCloseEvidence},
 	{name: "search tokenizer words", methods: []string{"CreateProject", "CreateIssue", "SearchFTS", "SearchFTSAny"}, runWithBackend: checkSearchTokenizerWords},
 	{name: "cron enabled deleted parent", run: checkCronEnabledDeletedParent},
 	{name: "cron enabled adapter target", methods: []string{"CreateIssue", "CreateProject", "CronJob", "MoveIssueProject", "PutCronJob"}, run: checkCronEnabledAdapterTarget},

@@ -68,7 +68,7 @@ func (s *Store) EventsAfter(ctx context.Context, params db.EventsAfterParams) ([
 	}
 	if params.IssueUID != "" {
 		args = append(args, params.IssueUID)
-		conditions = append(conditions, fmt.Sprintf("e.issue_uid = $%d", len(args)))
+		conditions = append(conditions, fmt.Sprintf("%s = $%d", db.FederationReadIssueUIDExpr(true), len(args)))
 	}
 	if len(params.Types) > 0 {
 		positions := make([]string, 0, len(params.Types))

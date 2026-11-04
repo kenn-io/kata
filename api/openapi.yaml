@@ -2083,6 +2083,8 @@ components:
       properties:
         account:
           type: string
+        attachment_id:
+          type: string
         command:
           type: string
         issue_ref:
@@ -4009,6 +4011,9 @@ components:
           type: integer
         path:
           type: string
+        reuse_existing:
+          description: When true, return the smallest existing attachment ID for this resolved Docbank version, or create a reference if none exists.
+          type: boolean
         version_id:
           format: uuid
           type: string
@@ -4761,6 +4766,8 @@ components:
     PollEventsBody:
       additionalProperties: true
       properties:
+        effective_close_event_uid:
+          type: string
         events:
           items:
             $ref: "#/components/schemas/EventEnvelope"
@@ -7248,7 +7255,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.38.0
+  version: 0.40.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:
@@ -9135,6 +9142,13 @@ paths:
           schema:
             format: int64
             type: integer
+        - description: Include the effective native close event UID in issue history when available.
+          explode: false
+          in: query
+          name: include_effective_close_event_uid
+          schema:
+            description: Include the effective native close event UID in issue history when available.
+            type: boolean
       responses:
         "200":
           content:

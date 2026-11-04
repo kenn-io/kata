@@ -84,6 +84,7 @@ func TestSchemaUIDColumnsIndexesAndTriggers(t *testing.T) {
 		"idx_links_from_uid",
 		"idx_links_to_uid",
 		"idx_events_issue_uid",
+		"idx_events_resolved_issue_uid",
 		"idx_events_related_issue_uid",
 		"idx_events_origin_instance",
 		"idx_purge_log_issue_uid",
