@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -70,31 +71,24 @@ func (h *deleteHarness) selectIssue(uid string) {
 func (h *deleteHarness) enter() tea.Cmd { return h.key(tea.KeyPressMsg{Code: tea.KeyEnter}) }
 
 // finish feeds the daemon's answer to a command back into the model.
-func (h *deleteHarness) finish(cmd tea.Cmd) {
+func (h *deleteHarness) finish(cmd tea.Cmd) tea.Cmd {
 	h.t.Helper()
 	require.NotNil(h.t, cmd)
-	out, _ := h.m.Update(cmd())
+	out, follow := h.m.Update(cmd())
 	h.m = out.(Model)
+	return follow
 }
 
 // drain follows fetch results and their Back commands until navigation settles.
 func (h *deleteHarness) drain(cmd tea.Cmd) Model {
 	h.t.Helper()
-	if cmd == nil {
-		return h.m
-	}
-	msg := cmd()
-	if batch, ok := msg.(tea.BatchMsg); ok {
-		for _, work := range batch {
-			h.m = h.drain(work)
+	for _, msg := range runCmdTree(cmd) {
+		next, follow := updateModel(h.m, msg)
+		h.m = next
+		switch msg.(type) {
+		case detailFollowTickMsg, detailFetchedMsg, commentsFetchedMsg, eventsFetchedMsg, linksFetchedMsg, openDetailMsg, jumpDetailMsg, popDetailMsg, mutationDoneMsg, undoDoneMsg:
+			h.m = h.drain(follow)
 		}
-		return h.m
-	}
-	next, follow := h.m.Update(msg)
-	h.m = next.(Model)
-	switch msg.(type) {
-	case detailFetchedMsg, commentsFetchedMsg, eventsFetchedMsg, linksFetchedMsg, openDetailMsg, jumpDetailMsg, popDetailMsg, mutationDoneMsg, undoDoneMsg:
-		return h.drain(follow)
 	}
 	return h.m
 }
@@ -145,6 +139,18 @@ func TestDeleteFormShowsConfirmationOnceAtEveryHeight(t *testing.T) {
 	}
 }
 
+func TestDeleteFormLongTypedConfirmationFitsShortTerminal(t *testing.T) {
+	defer snapshotInit(t)()
+	qualified := strings.Repeat("example-project-", 9) + "#abc4"
+	form := newDeleteForm(formTarget{}, Issue{Title: "Duplicate issue"}, qualified)
+	form.field(fieldConfirm).setValue("DELETE " + qualified)
+	rendered := renderCenteredForm(form, 80, 11, snapshotFixedNow)
+	for line := range strings.SplitSeq(rendered, "\n") {
+		assert.LessOrEqual(t, ansi.StringWidth(line), 80, "the typed confirmation fits the terminal")
+	}
+	assert.Equal(t, 2, strings.Count(strings.ReplaceAll(stripANSI(rendered), "\n", ""), "DELETE "+qualified), "both the title and typed value remain complete")
+}
+
 func TestDeleteKeyRefusesHiddenSplitListInHelp(t *testing.T) {
 	h := newDeleteHarness(t, viewList)
 	h.selectIssue(h.issues[0].UID)
@@ -173,7 +179,7 @@ func TestDeleteFormRequiresFullConfirmation(t *testing.T) {
 	h.key(runeKey('X'))
 	require.Equal(t, inputDeleteForm, h.m.input.kind, "X opens the Delete form")
 
-	for _, typed := range []string{"", h.issues[1].ShortID, h.qualified(target), h.qualified(target)[1:], "DELETE " + h.qualified(h.issues[0]), "delete " + h.qualified(target), " DELETE " + h.qualified(target), "DELETE " + h.qualified(target) + " "} {
+	for _, typed := range []string{"", h.issues[1].ShortID, h.qualified(target), h.qualified(target)[1:], "DELETE " + h.qualified(h.issues[0]), "delete " + h.qualified(target)} {
 		h.m.input.field(fieldConfirm).setValue(typed)
 		cmd := h.enter()
 		assert.Nil(t, cmd, "enter does nothing for %q", typed)
@@ -186,6 +192,17 @@ func TestDeleteFormRequiresFullConfirmation(t *testing.T) {
 	h.finish(h.enter())
 	assert.Equal(t, inputNone, h.m.input.kind, "a delete closes the form: "+h.m.input.err)
 	assert.True(t, h.isDeleted(target.UID))
+}
+
+func TestDeleteFormTrimsConfirmation(t *testing.T) {
+	h := newDeleteHarness(t, viewList)
+	target := h.issues[0]
+	h.selectIssue(target.UID)
+	h.key(runeKey('X'))
+	h.m = typeString(h.m, "  DELETE "+h.qualified(target)+"  ")
+	h.finish(h.enter())
+	assert.True(t, h.isDeleted(target.UID))
+	assert.Equal(t, inputNone, h.m.input.kind)
 }
 
 func TestDeleteSelectsTheNeighbouringRowAndNamesUndo(t *testing.T) {
@@ -234,6 +251,8 @@ func TestUndoOfADelete(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newDeleteHarness(t, viewList)
 			target := h.issues[0]
+			_, err := NewClient(h.env.URL, h.env.HTTP).AddLabel(t.Context(), h.project.ID, target.UID, "urgent", "alice")
+			require.NoError(t, err)
 			detail, err := h.client.GetIssueDetail(t.Context(), h.project.ID, target.UID)
 			require.NoError(t, err)
 			require.Empty(t, detail.Issue.QualifiedID, "the undo preflight needs the list's qualified reference")
@@ -249,7 +268,9 @@ func TestUndoOfADelete(t *testing.T) {
 				require.True(t, changed)
 			}
 
-			h.finish(h.key(runeKey('u')))
+			h.m.projectLabels = newLabelCache()
+			h.m.projectLabels.byProject[h.project.ID] = labelCacheEntry{pid: h.project.ID}
+			refresh := h.finish(h.key(runeKey('u')))
 
 			assert.False(t, h.isDeleted(target.UID))
 			assert.Empty(t, h.m.undoHistory.entries, "the spent entry is dropped")
@@ -260,6 +281,8 @@ func TestUndoOfADelete(t *testing.T) {
 			} else {
 				assert.Equal(t, "undid delete on "+h.qualified(target), h.m.toast.text)
 			}
+			h.m = h.drain(refresh)
+			assert.Equal(t, []LabelCount{{Label: "urgent", Count: 1}}, h.m.projectLabels.byProject[h.project.ID].labels, "undo refreshes the restored issue's project labels")
 		})
 	}
 }
@@ -332,6 +355,9 @@ func TestDeleteFromSplitListReplacesRetainedDetail(t *testing.T) {
 	require.True(t, h.isDeleted(child.UID))
 	require.NotNil(t, h.m.detail.issue)
 	assert.Equal(t, parent.UID, h.m.detail.issue.UID)
+	assert.False(t, h.m.detail.loading, "the neighbouring parent's detail read completes")
+	assert.Equal(t, parent.Title, h.m.detail.issue.Title)
+	assert.NotEmpty(t, h.m.detail.events, "the neighbouring parent's activity loads")
 	assert.Empty(t, h.m.detail.children, "the neighbouring parent loads without the deleted child")
 	assert.Empty(t, h.m.detail.navStack, "the replacement detail starts fresh")
 

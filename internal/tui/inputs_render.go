@@ -338,7 +338,7 @@ func renderTinyFormFallback(s inputState, width int) string {
 	if f == nil {
 		return ""
 	}
-	return strings.Join(termtext.Wrap(sanitizeForLine(s.title), max(width, 1)), "\n") + "\n" + f.value()
+	return strings.Join(termtext.Wrap(sanitizeForLine(s.title), max(width, 1)), "\n") + "\n" + strings.Join(termtext.Wrap(f.value(), max(width, 1)), "\n")
 }
 
 // formInnerWidth picks the centered form's interior width. ~70% of

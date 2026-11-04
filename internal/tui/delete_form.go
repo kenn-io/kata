@@ -63,10 +63,6 @@ func (m Model) routeDeleteKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 	expected := issue.QualifiedID
-	if expected == "" {
-		next, cmd := m.undoNotice("cannot delete: the issue's project is unknown", toastError)
-		return next, cmd, true
-	}
 	target.issueUID = issue.UID
 	m.nextFormGen++
 	m.input = newDeleteForm(target, issue, expected)
@@ -77,7 +73,7 @@ func (m Model) routeDeleteKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 // commitDeleteForm sends the delete once the typed text is the issue's
 // "DELETE <project>#<id>"; until then enter does nothing.
 func (m Model) commitDeleteForm() (Model, tea.Cmd) {
-	if m.input.fieldValue(fieldConfirm) != "DELETE "+m.input.del.expected {
+	if strings.TrimSpace(m.input.fieldValue(fieldConfirm)) != "DELETE "+m.input.del.expected {
 		return m, nil
 	}
 	m.input.saving = true
