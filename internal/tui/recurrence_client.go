@@ -76,11 +76,7 @@ func (c *Client) SaveRecurrence(ctx context.Context, projectID int64, ref string
 		}
 		return nil, err
 	}
-	resp := &MutationResp{Changed: changed, Issue: &Issue{UID: issue.UID, ShortID: issue.ShortID, ProjectID: issue.ProjectID}}
-	if after, err := c.readIssue(ctx, issue.ProjectID, issue.UID); err == nil {
-		resp.Issue = after.Issue
-	}
-	return resp, nil
+	return &MutationResp{Changed: changed, Issue: &Issue{UID: issue.UID, ShortID: issue.ShortID, ProjectID: issue.ProjectID}}, nil
 }
 
 // errCronParent is the refusal for an issue that parents a native cron job.

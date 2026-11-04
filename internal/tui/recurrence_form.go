@@ -89,10 +89,7 @@ func (m Model) routeRecurrenceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		}
 		return m, toastExpireCmd(toastNoBindingTTL), true
 	}
-	target, _, ok := m.activeIssueTarget()
-	if !ok {
-		return m, nil, true
-	}
+	target, _, _ := m.activeIssueTarget()
 	m.nextFormGen++
 	target.issueUID = m.detail.issue.UID
 	m.input = newRecurrenceForm(target, *m.detail.issue, m.detail.recurrence)
@@ -102,8 +99,8 @@ func (m Model) routeRecurrenceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 
 func (m Model) commitRecurrenceForm() (Model, tea.Cmd) {
 	state := m.input.recurrence
-	rule, zone := m.input.fieldValue(fieldRule), m.input.fieldValue(fieldZone)
-	if state.rec != nil && strings.TrimSpace(rule) == "" {
+	rule, zone := strings.TrimSpace(m.input.fieldValue(fieldRule)), m.input.fieldValue(fieldZone)
+	if state.rec != nil && rule == "" {
 		return m.saveRecurrence(RecurrenceInput{Stop: true, Recurrence: state.rec, Actor: m.list.actor})
 	}
 	start, err := resolveDateInput(m.input.fieldValue(fieldStart), m.toastNow())
