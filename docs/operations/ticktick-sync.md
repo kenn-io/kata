@@ -1,7 +1,7 @@
 ---
 title: TickTick sync
 description: Import a scoped TickTick task project into Kata and send ordinary task completion back through the public API.
-last_edited: 2026-10-19
+last_edited: 2026-11-04
 ---
 
 # TickTick sync
@@ -29,6 +29,9 @@ body are sent. TickTick then owns the imported content: the next ordinary sync
 updates the same Kata issue UID, with the existing source formatting and
 source-newer rules. Later local content edits stay local. Publishing preserves
 the binding's one-way or two-way status setting and adds no second binding.
+Let one ordinary sync complete before moving the issue to another project bound
+to the same TickTick source. Kata blocks that move until the first import has
+consumed the publication baseline.
 
 The daemon token needs write access to the bound TASK project. NOTE projects, closed projects, and read-only or comment-only projects cannot receive publications.
 
