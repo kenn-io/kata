@@ -40,10 +40,14 @@ func (m Model) routeCronEnabledKey(lines []cronLine, cursor int) (Model, tea.Cmd
 		return m, nil
 	}
 	m.cron.enabledSeq++
+	m.cron.editSeq++
 	request := cronEnabledRequest{conn: m.connGen, scope: m.scopeGen, seq: m.cron.enabledSeq, uid: id, expected: job.DefinitionEventUID, name: job.Name, enabled: !job.Definition.Enabled}
 	m.cron.enabled = &request
 	api, pid := m.api, m.scope.projectID
 	return m, func() tea.Msg {
+		if !request.enabled {
+			return cronEnabledReadyMsg{request: request}
+		}
 		// Bubble Tea commands own their request lifetime; the framework supplies no context.
 		ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
 		defer cancel()
@@ -51,7 +55,7 @@ func (m Model) routeCronEnabledKey(lines []cronLine, cursor int) (Model, tea.Cmd
 		if err == nil && (current.DeletedAt != nil || current.DefinitionEventUID != request.expected) {
 			err = &APIError{Status: http.StatusConflict, Code: "cron_conflict", Message: "The job changed; refresh before retrying"}
 		}
-		if err == nil && request.enabled && cron.IsRecurringIssueJob(current.Definition) {
+		if err == nil && cron.IsRecurringIssueJob(current.Definition) {
 			parent, readErr := api.readCronParent(ctx, pid, current.Definition.Issue.ParentUID)
 			err = readErr
 			if err == nil && parent.open {
@@ -85,6 +89,10 @@ func (m Model) cronEnabledSelection(request cronEnabledRequest) bool {
 func (m Model) cronEnabledReady(msg cronEnabledReadyMsg) (Model, tea.Cmd) {
 	if !m.sameCronEnabledRequest(msg.request) {
 		return m, nil
+	}
+	if m.modal == modalNone && m.cron.data != nil && m.cron.data.events != m.cron.events {
+		m.cron.enabled = nil
+		return m.undoNotice("Job data changed; press p again to retry", toastInfo)
 	}
 	if !m.cronEnabledSelection(msg.request) || m.modal != modalNone {
 		m.cron.enabled = nil
@@ -123,6 +131,10 @@ func (m Model) confirmCronResume() (Model, tea.Cmd) {
 	if pending == nil {
 		return m, nil
 	}
+	if m.sameCronEnabledRequest(*pending) && m.cron.data != nil && m.cron.data.events != m.cron.events {
+		m.cron.enabled = nil
+		return m.undoNotice("Job data changed; press p again to retry", toastInfo)
+	}
 	if !m.sameCronEnabledRequest(*pending) || !m.cronEnabledSelection(*pending) {
 		m.cron.enabled = nil
 		return m, nil
@@ -153,10 +165,14 @@ func renderCronResumeModal(request *cronEnabledRequest) string {
 	if request == nil {
 		return ""
 	}
+	issues := "issues"
+	if request.count == 1 {
+		issues = "issue"
+	}
 	return modalBoxStyle.Render(strings.Join([]string{
 		"Resume " + sanitizeForLine(request.name) + "?", "",
 		fmt.Sprintf("Resuming delivers %d recurring child", request.count),
-		"issues that came due while it was paused.", "",
+		issues + " that came due while it was paused.", "",
 		"To change how missed runs are handled,",
 		"use `kata cron job update`.",
 	}, "\n"))

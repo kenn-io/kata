@@ -225,7 +225,7 @@ func TestCronResumeConflictRefreshes(t *testing.T) {
 }
 
 func TestCronResumeConfirmationFences(t *testing.T) {
-	for _, kind := range []string{"cancel", "revision", "permissions", "scope", "connection", "refresh"} {
+	for _, kind := range []string{"cancel", "revision", "permissions", "scope", "connection"} {
 		t.Run(kind, func(t *testing.T) {
 			m, api := enabledFixture(t, pausedNative())
 			withEnabledBacklog(api)
@@ -247,8 +247,6 @@ func TestCronResumeConfirmationFences(t *testing.T) {
 				m.scopeGen++
 			case "connection":
 				m.connGen++
-			case "refresh":
-				m.cron.events++
 			}
 			_, cmd := m.routeModalKey(keyRune('y'))
 			require.Nil(t, cmd)
@@ -265,5 +263,87 @@ func TestSnapshot_CronResumeBacklog(t *testing.T) {
 		m.modal = modalCronResume
 		m.cron.enabled = &cronEnabledRequest{name: "Weekly report", count: 5}
 		assertGolden(t, fmt.Sprintf("cron-resume-backlog-%d", width), m.View().Content)
+	}
+}
+
+// An edit response already in flight must not open a competing form during a pause.
+func TestCronEditLookupCannotBypassEnabledPending(t *testing.T) {
+	m, api := enabledFixture(t, executeRecord(`{}`))
+	m, editLookup := press(m, keyRune('e'))
+	require.NotNil(t, editLookup)
+	editReply := editLookup()
+	m, pauseLookup := press(m, keyRune('p'))
+	m, pauseWrite := deliverEnabled(t, m, pauseLookup)
+	require.NotNil(t, pauseWrite)
+	next, _, handled := m.routeTopLevel(editReply)
+	require.True(t, handled)
+	m = next.(Model)
+	require.Nil(t, m.cron.form)
+	require.Empty(t, api.puts)
+	_, _ = deliverEnabled(t, m, pauseWrite)
+	require.Len(t, api.enabledCalls, 1)
+}
+
+// Refreshing data invalidates a count, but must tell the operator to retry.
+func TestCronResumeRefreshRequiresRecount(t *testing.T) {
+	for _, stage := range []string{"lookup", "confirmation"} {
+		t.Run(stage, func(t *testing.T) {
+			m, api := enabledFixture(t, pausedNative())
+			withEnabledBacklog(api)
+			m, lookup := press(m, keyRune('p'))
+			if stage == "confirmation" {
+				m, _ = deliverEnabled(t, m, lookup)
+			}
+			m.cron.events++
+			if stage == "lookup" {
+				m, _ = deliverEnabled(t, m, lookup)
+			} else {
+				m, _ = m.routeModalKey(keyRune('y'))
+			}
+			require.Nil(t, m.cron.enabled)
+			require.Equal(t, modalNone, m.modal)
+			require.Empty(t, api.enabledCalls)
+			require.NotNil(t, m.toast)
+			require.Contains(t, m.toast.text, "press p again")
+		})
+	}
+}
+
+func TestCronResumeModalCountGrammar(t *testing.T) {
+	for _, count := range []int{1, 2} {
+		view := stripANSI(renderCronResumeModal(&cronEnabledRequest{name: "Weekly report", count: count}))
+		word := "issues"
+		if count == 1 {
+			word = "issue"
+		}
+		require.Contains(t, view, word+" that came due")
+	}
+}
+
+// Pause uses the selected revision without a redundant definition lookup.
+func TestCronPauseUsesSelectedRevision(t *testing.T) {
+	for _, staleSelection := range []bool{false, true} {
+		t.Run(fmt.Sprint(staleSelection), func(t *testing.T) {
+			m, api := enabledFixture(t, executeRecord(`{}`))
+			api.showErr = errors.New("unexpected job lookup")
+			m, ready := press(m, keyRune('p'))
+			if staleSelection {
+				m.cron.data.jobs[0].UID = cronTestIssue
+			}
+			require.NotNil(t, ready)
+			reply, ok := ready().(cronEnabledReadyMsg)
+			require.True(t, ok)
+			require.NoError(t, reply.err, "pause must not read the job before submitting the selected revision")
+			m, write := m.cronEnabledReady(reply)
+			if staleSelection {
+				require.Nil(t, write)
+				require.Empty(t, api.enabledCalls)
+				return
+			}
+			require.Nil(t, m.toast)
+			require.NotNil(t, write)
+			_, _ = deliverEnabled(t, m, write)
+			require.Equal(t, []enabledCall{{uid: api.shown.UID, expected: api.shown.DefinitionEventUID, actor: "operator", enabled: false}}, api.enabledCalls)
+		})
 	}
 }
