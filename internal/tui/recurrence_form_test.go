@@ -580,10 +580,10 @@ func TestRecurrenceFormConflictKeepsInputUntilReopened(t *testing.T) {
 
 func TestRecurrenceFormDaemonErrorFitsMinimumHeight(t *testing.T) {
 	defer snapshotInit(t)()
-	s := newRecurrenceForm(formTarget{issueShortID: "42aa"}, Issue{}, nil)
-	s.err = "Could not start repeat: the daemon refused the recurrence rule FREQ=WEEKLY;INTERVAL=2;BYDAY=MON,TUE,WED,THU,FRI. Enter a supported rule and save again."
 	for _, width := range []int{40, 60, 80} {
-		t.Run(strconv.Itoa(width)+"x12", func(t *testing.T) {
+		for _, rec := range []*recurrenceclient.View{nil, {RRule: "FREQ=YEARLY;INTERVAL=2;BYMONTH=1,2,3,4,5,6,7,8,9,10,11,12;BYDAY=MO,TU,WE,TH,FR;BYHOUR=0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23;BYMINUTE=0,15,30,45;BYSECOND=0;WKST=MO", DTStart: "2026-11-09", Timezone: "Europe/Paris"}} {
+			s := newRecurrenceForm(formTarget{issueShortID: "42aa"}, Issue{}, rec)
+			s.err = "Could not start repeat: the daemon refused the recurrence rule FREQ=WEEKLY;INTERVAL=2;BYDAY=MON,TUE,WED,THU,FRI. Enter a supported rule and save again."
 			modal := renderCenteredForm(s, width, 12, snapshotFixedNow)
 			assert.LessOrEqual(t, lipgloss.Height(modal), 12)
 			assert.LessOrEqual(t, lipgloss.Width(modal), width)
@@ -591,6 +591,6 @@ func TestRecurrenceFormDaemonErrorFitsMinimumHeight(t *testing.T) {
 			for _, want := range []string{"Rule", "Start", "Zone", "Could not start repeat", "ctrl+o save", "esc"} {
 				assert.Contains(t, got, want)
 			}
-		})
+		}
 	}
 }
