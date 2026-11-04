@@ -2,8 +2,6 @@ package mcpserver
 
 import (
 	"encoding/json"
-	"github.com/stretchr/testify/assert"
-	kataclient "go.kenn.io/kata/pkg/client"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -13,8 +11,10 @@ import (
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	kataclient "go.kenn.io/kata/pkg/client"
 )
 
 func cronObservation(id string, job map[string]any) map[string]any {
