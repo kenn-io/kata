@@ -549,7 +549,8 @@ Run filters intersect before the page limit:
 | `since` | Inclusive recording time (`created_at`), as an RFC 3339 instant. |
 
 Runs page across projects by `created_at DESC, uid DESC`; `limit` defaults to
-100; HTTP accepts values from 0 (the default) through 100 and rejects larger values. Use the returned `next_before_uid` for the next page.
+100. HTTP accepts values from 0 (the default) through 100 and rejects larger
+values. Use the returned `next_before_uid` for the next page.
 The anchor must belong to the same active authorized project selection, but
 need not still match mutable filters. Missing and inaccessible global anchors
 return the same `400 validation` error. Unchanged data traverses without gaps or
@@ -565,6 +566,38 @@ unknown query parameters. Unknown future echo fields can be ignored.
 Fleet reads use local data as replicated. A personal hub shows its replicas at
 their last sync; selecting a company hub reads that hub's view. These reads do
 not forward requests or launch execution.
+
+### CLI and MCP fleet reads
+
+```sh
+kata cron job list --all --json
+kata cron run list --all --status failed --status unknown --since 24h --json
+kata cron run list --all --executor-label executor-a --teammate runner --json
+kata cron run list --all --issue example-project#abc4 --json
+```
+
+`--all` ignores the workspace's project binding and rejects an explicit
+`--project`. Without it, lists keep their project scope. Run filters also work
+on project lists. `--since` accepts an RFC 3339 instant or a positive Go
+duration, resolved against the client clock. `--issue` accepts a full UID
+without fetching the issue; short refs with `--all` must be project-qualified.
+An explicit `--teammate` filters evidence; `KATA_TEAMMATE` supplies write
+attribution and does not filter reads. CLI history defaults to 100 rows.
+
+MCP `kata.cron_jobs` and `kata.cron_runs` read the configured startup scope when
+`project` is omitted: one bound project, the fixed allowlist, or all active
+projects. An explicit `project` narrows that scope. Unavailable fixed scopes
+fail closed. `kata.cron_runs` accepts `status` (an array), `issue_uid`,
+`executor_label`, `teammate`, RFC 3339 `since`, and its existing job/cursor/limit
+fields. Its default remains 20 rows. Read filters never inherit the MCP
+attribution default. Explicit blank or null MCP selectors and new filters are
+validation errors; an explicit empty status array is rejected.
+
+Global CLI and MCP reads require HTTP API `0.39.0`. New run filters require a
+matching filter echo on every fetched page; older daemons that ignore them
+produce an upgrade error. Unfiltered and job-only project reads remain
+compatible with older daemons. Authorization errors retain their normal
+meaning.
 
 ## Native issue planning dates
 

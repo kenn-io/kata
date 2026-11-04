@@ -17,7 +17,7 @@ import (
 
 // CronProjectInput selects one project inside the MCP startup scope.
 type CronProjectInput struct {
-	Project string `json:"project,omitempty" jsonschema:"Project name; required outside a single bound project"`
+	Project string `json:"project,omitempty" jsonschema:"Project name; job/run lists read the startup scope when omitted; other operations require a project outside a bound scope"`
 }
 
 // CronListInput includes reversible tombstones when requested.
@@ -49,7 +49,7 @@ func registerCronTools(server *sdkmcp.Server, h toolHandlers) {
 	read := toolHints(true, false, false)
 	addCronTool(server, "kata.cron_new_uid", "Generate cron UID", "Generate and retain a UID before the first create or observe call. Creates and reserves nothing; the UID is unbound until creation. Reuse it after a lost response.", nonIdempotent(toolHints(true, false, false)), h.cronNewUID)
 	addCronTool(server, "kata.cron_capabilities", "Read cron capabilities", "Read the selected project's live cron capabilities under the configured daemon authority.", read, h.cronCapabilities)
-	addCronTool(server, "kata.cron_jobs", "List cron jobs", "List native notification and adapter execution definitions. Execution jobs need an external adapter; listing launches no work.", read, h.cronJobs)
+	addCronTool(server, "kata.cron_jobs", "List cron jobs", "List native notification and adapter execution definitions; omit project to read across the startup scope. Execution jobs need an external adapter; listing launches no work.", read, h.cronJobs)
 	addCronTool(server, "kata.cron_job", "Read cron job", "Read one retained job UID, including its current definition_event_uid and reversible tombstone.", read, h.cronJob)
 	addCronTool(server, "kata.cron_job_create", "Create cron job", "Create a typed job with a caller-retained UID from kata.cron_new_uid. Native notification jobs use daemon delivery; execution jobs require an external adapter. Retry retains UID and daemon conflicts.", toolHints(false, false, false), h.cronJobCreate)
 	addCronTool(server, "kata.cron_job_update", "Replace cron job", "Replace a complete definition using its current expected_event_uid. Native parent bindings cannot change. Never launches an execution adapter.", toolHints(false, true, false), h.cronJobUpdate)

@@ -8,6 +8,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/internal/cronread"
 	"go.kenn.io/kata/internal/teammate"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -15,9 +16,14 @@ import (
 // CronRunsInput requests a bounded project history page.
 type CronRunsInput struct {
 	CronProjectInput
-	Limit     *int64 `json:"limit,omitempty" jsonschema:"Results from 1 through 100; omit for 20"`
-	BeforeUID string `json:"before_uid,omitempty" jsonschema:"next_before_uid from the preceding page"`
-	JobUID    string `json:"job_uid,omitempty"`
+	Limit         *int64   `json:"limit,omitempty" jsonschema:"Results from 1 through 100; omit for 20"`
+	BeforeUID     string   `json:"before_uid,omitempty" jsonschema:"next_before_uid from the preceding page"`
+	JobUID        string   `json:"job_uid,omitempty"`
+	Status        []string `json:"status,omitempty" jsonschema:"Run statuses to include; predicates intersect before pagination"`
+	IssueUID      string   `json:"issue_uid,omitempty"`
+	ExecutorLabel string   `json:"executor_label,omitempty"`
+	Teammate      string   `json:"teammate,omitempty" jsonschema:"Exact read filter; never inherits the attribution default"`
+	Since         string   `json:"since,omitempty" jsonschema:"Inclusive recording time (created_at), as an RFC3339 instant"`
 }
 
 // CronRunObserveInput reports evidence, without process execution authority.
@@ -40,37 +46,56 @@ type CronRunObserveInput struct {
 
 func registerCronRunTools(server *sdkmcp.Server, h toolHandlers) {
 	read := toolHints(true, false, false)
-	addCronTool(server, "kata.cron_runs", "List cron run evidence", "Read bounded run observations with job filtering and next_before_uid pagination. Evidence does not prove or launch execution.", read, h.cronRuns)
+	addCronTool(server, "kata.cron_runs", "List cron run evidence", "Read bounded run observations with status, issue, runtime, teammate and recording-time filters and next_before_uid pagination. Omit project to read the startup scope across projects. Evidence does not prove or launch execution.", read, h.cronRuns)
 	addCronTool(server, "kata.cron_run", "Read cron run evidence", "Read one independently attributed run observation; never launches work or claims issue ownership.", read, h.cronRun)
 	addCronTool(server, "kata.cron_run_observe", "Record cron run evidence", "Record evidence using a retained run UID and expected_revision (0 for new). Identical retries are replayed. Does not launch work, claim ownership, or change linked issue status.", toolHints(false, true, false), h.cronRunObserve)
 }
-func (h toolHandlers) cronRuns(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronRunsInput) (*sdkmcp.CallToolResult, *generated.ListCronRunsResponse, error) {
-	limit := int64(defaultResultLimit)
-	if in.Limit != nil {
-		limit = *in.Limit
+func (h toolHandlers) cronRuns(ctx context.Context, request *sdkmcp.CallToolRequest, in CronRunsInput) (*sdkmcp.CallToolResult, *CronRunsOutput, error) {
+	if err := validateCronReadArguments(request, true); err != nil {
+		return nil, nil, err
 	}
-	if limit < 1 || limit > maximumResultLimit {
-		return nil, nil, errors.New("limit must be from 1 through 100")
-	}
-	var err error
-	if in.BeforeUID != "" {
-		in.BeforeUID, err = cronUID(in.BeforeUID)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-	if in.JobUID != "" {
-		in.JobUID, err = cronUID(in.JobUID)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-	p, err := h.createTarget(ctx, in.Project)
+	query, err := cronRunQuery(in)
 	if err != nil {
 		return nil, nil, err
 	}
-	return cronResult(h.options.Client.ListCronRuns(ctx, &generated.ListCronRunsRequestOptions{PathParams: &generated.ListCronRunsPath{ProjectID: p.ID}, Query: &generated.ListCronRunsQuery{Limit: &limit, JobUID: optionalString(in.JobUID), BeforeUID: optionalString(in.BeforeUID)}}))
+	projects, ids, global, err := h.cronReadScope(ctx, in.Project)
+	if err != nil {
+		return nil, nil, err
+	}
+	out := &CronRunsOutput{Runs: []generated.CronRun{}}
+	if len(projects) == 0 {
+		if query.BeforeUID != "" {
+			return nil, nil, errors.New("cursor not in scope")
+		}
+		return cronResult(out, nil)
+	}
+	if global {
+		response, err := h.options.Client.ListAllCronRuns(ctx, &generated.ListAllCronRunsRequestOptions{Query: cronread.FleetQuery(query, ids)})
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := verifyCronFilters(response, query.Filters()); err != nil {
+			return nil, nil, err
+		}
+		out.Runs = response.Runs
+		out.Filters = response.Filters
+		out.NextBeforeUID = response.NextBeforeUID
+		out.Projects = response.Projects
+	} else {
+		response, err := h.options.Client.ListCronRuns(ctx, &generated.ListCronRunsRequestOptions{PathParams: &generated.ListCronRunsPath{ProjectID: projects[0].ID}, Query: cronread.ProjectQuery(query)})
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := verifyCronFilters(response, query.Filters()); err != nil {
+			return nil, nil, err
+		}
+		out.Runs = response.Runs
+		out.Filters = response.Filters
+		out.NextBeforeUID = response.NextBeforeUID
+	}
+	return cronResult(out, nil)
 }
+
 func (h toolHandlers) cronRun(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronIdentityInput) (*sdkmcp.CallToolResult, *generated.ShowCronRunResponse, error) {
 	id, err := cronUID(in.UID)
 	if err != nil {

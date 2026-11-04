@@ -125,8 +125,12 @@ func TestCronRunExactNumbersAndTimes(t *testing.T) {
 func TestCronRunProjectSelectionAndInvalidEvidence(t *testing.T) {
 	f := newCronFixture(t)
 	session := connectTestServerWithOptions(t, Options{Client: f.client, Scope: NewAllScope(), Actor: "example-agent", Version: "test"})
-	for _, name := range []string{"cron_capabilities", "cron_jobs", "cron_workflows", "cron_runs"} {
+	for _, name := range []string{"cron_capabilities", "cron_workflows"} {
 		require.True(t, cronCall(t, session, name, map[string]any{}).IsError, "%s cannot silently select a project", name)
+		cronOK(t, session, name, map[string]any{"project": f.project.Name})
+	}
+	for _, name := range []string{"cron_jobs", "cron_runs"} {
+		cronOK(t, session, name, map[string]any{})
 		cronOK(t, session, name, map[string]any{"project": f.project.Name})
 	}
 	job := cronTestJob(t, f)

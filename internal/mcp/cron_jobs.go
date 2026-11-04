@@ -27,13 +27,35 @@ type CronJobUpdateInput struct {
 	ExpectedEventUID string `json:"expected_event_uid"`
 }
 
-func (h toolHandlers) cronJobs(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronListInput) (*sdkmcp.CallToolResult, *generated.ListCronJobsResponse, error) {
-	p, err := h.createTarget(ctx, in.Project)
+func (h toolHandlers) cronJobs(ctx context.Context, request *sdkmcp.CallToolRequest, in CronListInput) (*sdkmcp.CallToolResult, *CronJobsOutput, error) {
+	if err := validateCronReadArguments(request, false); err != nil {
+		return nil, nil, err
+	}
+	projects, ids, global, err := h.cronReadScope(ctx, in.Project)
 	if err != nil {
 		return nil, nil, err
 	}
-	return cronResult(h.options.Client.ListCronJobs(ctx, &generated.ListCronJobsRequestOptions{PathParams: &generated.ListCronJobsPath{ProjectID: p.ID}, Query: &generated.ListCronJobsQuery{IncludeDeleted: &in.IncludeDeleted}}))
+	out := &CronJobsOutput{Jobs: []generated.CronJob{}}
+	if len(projects) == 0 {
+		return cronResult(out, nil)
+	}
+	if global {
+		response, err := h.options.Client.ListAllCronJobs(ctx, &generated.ListAllCronJobsRequestOptions{Query: &generated.ListAllCronJobsQuery{ProjectIds: ids, IncludeDeleted: &in.IncludeDeleted}})
+		if err != nil {
+			return nil, nil, err
+		}
+		out.Jobs = response.Jobs
+		out.Projects = response.Projects
+	} else {
+		response, err := h.options.Client.ListCronJobs(ctx, &generated.ListCronJobsRequestOptions{PathParams: &generated.ListCronJobsPath{ProjectID: projects[0].ID}, Query: &generated.ListCronJobsQuery{IncludeDeleted: &in.IncludeDeleted}})
+		if err != nil {
+			return nil, nil, err
+		}
+		out.Jobs = response.Jobs
+	}
+	return cronResult(out, nil)
 }
+
 func (h toolHandlers) cronJob(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronIdentityInput) (*sdkmcp.CallToolResult, *generated.ShowCronJobResponse, error) {
 	id, err := cronUID(in.UID)
 	if err != nil {
