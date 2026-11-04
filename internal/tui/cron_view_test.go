@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"slices"
@@ -560,6 +561,38 @@ func TestSnapshot_Cron(t *testing.T) {
 	}
 }
 
+// The server deadline keeps aging even when no event or refresh replaces the
+// cached run. Older daemons omit it; those records stay unevaluated.
+func TestCronStaleRunRendering(t *testing.T) {
+	defer snapshotInit(t)()
+	m := cronFixture(t)
+	r := &m.cron.data.runs[0]
+	r.Status, r.EndedAt = "running", nil
+	deadline := snapshotFixedNow.Add(time.Minute)
+	raw := fmt.Sprintf(`{"staleness":{"stale":false,"stale_at":%q,"basis":"default"}}`, deadline.Format(time.RFC3339))
+	require.NoError(t, json.Unmarshal([]byte(raw), r))
+	m = sendRune(m, '3')
+	require.NotContains(t, m.viewBody(), "· stale")
+	renderNow = func() time.Time { return deadline }
+	for _, tab := range []rune{'2', '4'} {
+		view := sendRune(m, tab)
+		require.Contains(t, view.viewBody(), "running · stale", "last loaded run uses the same verdict")
+		view = sendKey(view, tea.KeyEnter)
+		_, _, lines := cronScreen(view)
+		var history strings.Builder
+		for _, line := range lines {
+			history.WriteString(line.text)
+		}
+		require.Contains(t, history.String(), "running · stale", "definition history uses the same verdict below the fold")
+	}
+	require.Contains(t, m.viewBody(), "running · stale")
+	assertGolden(t, "cron-stale-runs", m.viewBody())
+	m = sendKey(m, tea.KeyEnter)
+	require.Contains(t, m.viewBody(), "running · stale")
+	require.Contains(t, m.viewBody(), "Stale at:")
+	assertGolden(t, "cron-stale-run-detail", m.viewBody())
+}
+
 func TestCronRefreshKeepsSelectedRecord(t *testing.T) {
 	for _, tab := range []rune{'2', '3', '4'} {
 		t.Run(string(tab), func(t *testing.T) {
@@ -671,5 +704,22 @@ func TestCronSearchClickGuards(t *testing.T) {
 		}
 		m, _ = updateModel(m, mouseLeftClick(4, 2))
 		require.False(t, m.cron.filtering, state)
+	}
+}
+
+func TestCronRunStatusUsesEvaluatedEvidence(t *testing.T) {
+	defer snapshotInit(t)()
+	for _, tc := range []struct {
+		status  string
+		verdict *generated.RunStaleness
+		want    string
+	}{
+		{"running", nil, "running"},
+		{"running", &generated.RunStaleness{StaleAt: snapshotFixedNow.Add(time.Hour)}, "running"},
+		{"running", &generated.RunStaleness{Stale: true, StaleAt: snapshotFixedNow.Add(time.Hour)}, "running · stale"},
+		{"succeeded", &generated.RunStaleness{Stale: true}, "succeeded"},
+		{"unknown", nil, "unknown"},
+	} {
+		require.Equal(t, tc.want, cronRunStatus(generated.CronRun{Status: tc.status, Staleness: tc.verdict}))
 	}
 }

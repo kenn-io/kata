@@ -94,10 +94,17 @@ func cronLast(runs []generated.CronRun, uid string, workflow bool) string {
 			ref = r.WorkflowUID
 		}
 		if deref(ref) == uid {
-			return r.Status + " " + humanizeRelative(r.CreatedAt)
+			return cronRunStatus(r) + " " + humanizeRelative(r.CreatedAt)
 		}
 	}
 	return "—"
+}
+
+func cronRunStatus(r generated.CronRun) string {
+	if r.Status == "running" && r.Staleness != nil && (r.Staleness.Stale || !renderNow().Before(r.Staleness.StaleAt)) {
+		return "running · stale"
+	}
+	return r.Status
 }
 func cronCount(n int, noun string) string {
 	if n != 1 {
@@ -130,6 +137,12 @@ func cronScreen(m Model) (string, string, []cronLine) {
 		{10, 0, 12, 11, 11, 0},
 		{0, 5, 7, 18, 11},
 	}[m.cron.tab]
+	if m.cron.tab == cronRuns && m.cron.data != nil && slices.ContainsFunc(m.cron.data.runs, func(r generated.CronRun) bool {
+		return cronRunStatus(r) != r.Status
+	}) {
+		// Reserve the marker only when shown, preserving summary space otherwise.
+		widths[0] = 15
+	}
 	fixed := 2 + len(widths) - 1
 	flex := 0
 	for _, w := range widths {
@@ -166,7 +179,7 @@ func cronScreen(m Model) (string, string, []cronLine) {
 			}
 		case cronRuns:
 			for _, r := range runs {
-				add(r.UID, []string{r.Status, cronDefinitionName(*p, deref(r.JobUID), false), deref(r.OccurrenceKey), cronTime(r.StartedAt), cronTime(r.EndedAt), deref(r.Summary.Message)})
+				add(r.UID, []string{cronRunStatus(r), cronDefinitionName(*p, deref(r.JobUID), false), deref(r.OccurrenceKey), cronTime(r.StartedAt), cronTime(r.EndedAt), deref(r.Summary.Message)})
 			}
 		case cronWorkflows:
 			for _, w := range p.workflows {
@@ -256,7 +269,10 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 				continue
 			}
 			name = r.UID
-			d.field("Status", r.Status)
+			d.field("Status", cronRunStatus(r))
+			if r.Status == "running" && r.Staleness != nil {
+				d.field("Stale at", r.Staleness.StaleAt.Format(time.RFC3339Nano))
+			}
 			d.field("Occurrence", deref(r.OccurrenceKey))
 			d.field("Started", cronTime(r.StartedAt))
 			d.field("Ended", cronTime(r.EndedAt))
@@ -364,7 +380,7 @@ func cronHistory(d *cronDoc, p cronData, ref cronRef) {
 		d.text("no loaded runs", cronRef{})
 	}
 	for _, r := range runs {
-		d.text(r.Status+" · "+r.CreatedAt.Format(time.RFC3339)+" · "+deref(r.Summary.Message), cronRef{cronRuns, r.UID})
+		d.text(cronRunStatus(r)+" · "+r.CreatedAt.Format(time.RFC3339)+" · "+deref(r.Summary.Message), cronRef{cronRuns, r.UID})
 	}
 }
 

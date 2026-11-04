@@ -8,10 +8,13 @@ import (
 )
 
 // CronRun is flat, bounded, independently attributed public evidence.
-type CronRun db.CronRun
+type CronRun struct {
+	db.CronRun `json:",inline"`
+	Staleness  *cron.RunStaleness `json:"staleness,omitempty"`
+}
 
 // CronRunFrom maps a persisted observation to its public representation.
-func CronRunFrom(value db.CronRun) CronRun { return CronRun(value) }
+func CronRunFrom(value db.CronRun) CronRun { return CronRun{CronRun: value} }
 
 // CronProjectRequest scopes a cron operation to one project.
 type CronProjectRequest struct {
