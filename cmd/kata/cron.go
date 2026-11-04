@@ -47,7 +47,7 @@ The full contract is in the Cron reference (docs/reference/cron.md).`,
 		case "workflow":
 			group.Long = "Manage reusable command or prompt steps. For issue stages with human approval, see docs/workflows/gated-workflows.md."
 		}
-		for _, action := range []string{"list", "show", "create", "update", "delete", "restore"} {
+		for _, action := range []string{"list", "show", "create", "update", "delete", "restore", "history"} {
 			group.AddCommand(newCronOperationCmd(resource, action))
 		}
 		command.AddCommand(group)
@@ -70,9 +70,13 @@ type cronCLIOptions struct {
 	includeDeleted                   bool
 	limit                            int64
 	beforeUID, jobUID                string
+	beforeEventUID                   string
+	diff                             bool
 }
 
-func (o cronCLIOptions) mutation() bool   { return o.action != "list" && o.action != "show" }
+func (o cronCLIOptions) mutation() bool {
+	return o.action != "list" && o.action != "show" && o.action != "history"
+}
 func (o cronCLIOptions) definition() bool { return o.resource == "job" || o.resource == "workflow" }
 func newCronOperationCmd(resource, action string) *cobra.Command {
 	options := cronCLIOptions{resource: resource, action: action, limit: 100}
@@ -115,6 +119,11 @@ func newCronOperationCmd(resource, action string) *cobra.Command {
 	if action == "list" && options.definition() {
 		command.Flags().BoolVar(&options.includeDeleted, "include-deleted", false, "include tombstoned definitions")
 	}
+	if action == "history" {
+		command.Flags().Int64Var(&options.limit, "limit", 20, "maximum versions in one page (1-100)")
+		command.Flags().StringVar(&options.beforeEventUID, "before-event-uid", "", "next_before_event_uid for the next live page")
+		command.Flags().BoolVar(&options.diff, "diff", false, "compare name, definition and deletion state against the next older available version")
+	}
 	if resource == "run" && action == "list" {
 		command.Flags().Int64Var(&options.limit, "limit", 100, "maximum results in one page (1-100)")
 		command.Flags().StringVar(&options.beforeUID, "before-uid", "", "run UID cursor from next_before_uid")
@@ -146,6 +155,9 @@ never changes an issue's owner, dates, lease, or status.`,
 			"  " + cmd + " <run-uid> --json-input observation.json --json"
 	}
 	switch action {
+	case "history":
+		return "List locally retained " + resource + ` versions, newest first, with actor and time.
+A baseline has no known editor; history can be incomplete.`, "  " + cmd + " <" + resource + "-uid> --diff --json\n  " + cmd + " <" + resource + "-uid> --limit 20 --before-event-uid <event-uid> --json"
 	case "list":
 		return "List the project's " + resource + ` definitions. --include-deleted also lists
 deleted (tombstoned) ones.`, "  " + cmd + " --json\n  " + cmd + " --include-deleted --json"
@@ -203,7 +215,7 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 	if cmd.Flags().Changed("parent") && strings.TrimSpace(o.parent) == "" {
 		return cronCLIValidation("--parent must not be empty")
 	}
-	for _, value := range []*string{&o.identity, &o.beforeUID, &o.jobUID} {
+	for _, value := range []*string{&o.identity, &o.beforeUID, &o.jobUID, &o.beforeEventUID} {
 		if *value != "" {
 			normalized, err := normalizedCronCLIUID(*value)
 			if err != nil {
@@ -590,6 +602,8 @@ func (o cronCLIOptions) call(a daemonAPI, c *kataclient.Client, projectID int64,
 	switch {
 	case o.resource == "capabilities":
 		return o.callCapabilities(a, c, projectID)
+	case o.action == "history":
+		return o.callHistory(a.ctx, c, projectID)
 	case o.action == "list" || o.action == "show":
 		return o.callRead(a, c, projectID)
 	case o.action == "delete" || o.action == "restore":

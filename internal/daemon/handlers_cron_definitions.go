@@ -15,6 +15,7 @@ import (
 func registerCronDefinitionHandlers(h huma.API, cfg ServerConfig) {
 	registerCronJobHandlers(h, cfg)
 	registerCronWorkflowHandlers(h, cfg)
+	registerCronVersionHandlers(h, cfg)
 }
 
 func cronAPIError(ctx context.Context, cfg ServerConfig, err error, projectID int64, uid string, job bool) error {

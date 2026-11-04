@@ -150,6 +150,15 @@ type ListCronJobsQuery struct {
 	IncludeDeleted *bool `json:"include_deleted,omitempty"`
 }
 
+type ListCronJobVersionsQuery struct {
+	Limit          *int64  `json:"limit,omitempty" validate:"omitempty,gte=0,lte=100"`
+	BeforeEventUID *string `json:"before_event_uid,omitempty"`
+}
+
+func (l ListCronJobVersionsQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(l))
+}
+
 type ListCronRunsQuery struct {
 	JobUID    *string `json:"job_uid,omitempty"`
 	Limit     *int64  `json:"limit,omitempty" validate:"omitempty,gte=0,lte=100"`
@@ -162,6 +171,15 @@ func (l ListCronRunsQuery) Validate() error {
 
 type ListCronWorkflowsQuery struct {
 	IncludeDeleted *bool `json:"include_deleted,omitempty"`
+}
+
+type ListCronWorkflowVersionsQuery struct {
+	Limit          *int64  `json:"limit,omitempty" validate:"omitempty,gte=0,lte=100"`
+	BeforeEventUID *string `json:"before_event_uid,omitempty"`
+}
+
+func (l ListCronWorkflowVersionsQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(l))
 }
 
 type DigestProjectQuery struct {

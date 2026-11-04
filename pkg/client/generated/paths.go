@@ -197,6 +197,15 @@ func (r RestoreCronJobPath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(r))
 }
 
+type ListCronJobVersionsPath struct {
+	ProjectID int64  `json:"project_id"`
+	CronUID   string `json:"cron_uid" validate:"required"`
+}
+
+func (l ListCronJobVersionsPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(l))
+}
+
 type ListCronRunsPath struct {
 	ProjectID int64 `json:"project_id"`
 }
@@ -261,6 +270,15 @@ type RestoreCronWorkflowPath struct {
 
 func (r RestoreCronWorkflowPath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
+type ListCronWorkflowVersionsPath struct {
+	ProjectID int64  `json:"project_id"`
+	CronUID   string `json:"cron_uid" validate:"required"`
+}
+
+func (l ListCronWorkflowVersionsPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(l))
 }
 
 type DigestProjectPath struct {

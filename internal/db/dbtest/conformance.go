@@ -50,6 +50,9 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "cron definition versions", methods: []string{"ListCronJobVersions", "ListCronWorkflowVersions"}, run: checkCronDefinitionVersions},
+	{name: "cron definition versions snapshots", run: checkCronDefinitionVersionsSnapshots},
+	{name: "cron definition versions corruption merge", run: checkCronDefinitionVersionsCorruptionMerge},
 	{name: "setup finished delivery", methods: []string{"PrepareSetupFinished", "CompleteSetupFinished", "SystemProject", "CloseIssue", "SoftDeleteIssue", "RemoveProject"}, runWithBackend: checkSetupFinishedDelivery},
 	{name: "comment graph project access", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "MoveIssueProject", "ReadCommentGraph"}, run: checkCommentGraphProjectAccess},
 	{name: "recurring adoption snapshots", run: checkRecurringAdoptionSnapshots},

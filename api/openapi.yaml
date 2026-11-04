@@ -1090,6 +1090,42 @@ components:
       required:
         - expected_event_uid
       type: object
+    CronDefinitionVersion:
+      additionalProperties: true
+      properties:
+        actor:
+          type:
+            - string
+            - "null"
+        current:
+          type: boolean
+        definition:
+          additionalProperties: true
+          type: object
+        definition_hlc:
+          $ref: "#/components/schemas/HLC"
+        deleted_at:
+          format: date-time
+          type: string
+        event_uid:
+          type: string
+        name:
+          type: string
+        operation:
+          type: string
+        updated_at:
+          format: date-time
+          type: string
+      required:
+        - event_uid
+        - operation
+        - actor
+        - definition_hlc
+        - name
+        - definition
+        - updated_at
+        - current
+      type: object
     CronJob:
       additionalProperties: true
       properties:
@@ -4143,6 +4179,22 @@ components:
           type: array
       required:
         - jobs
+      type: object
+    ListCronVersionsResponseBody:
+      additionalProperties: true
+      properties:
+        next_before_event_uid:
+          type: string
+        skipped_event_uids:
+          items:
+            type: string
+          type: array
+        versions:
+          items:
+            $ref: "#/components/schemas/CronDefinitionVersion"
+          type: array
+      required:
+        - versions
       type: object
     ListCronWorkflowsResponseBody:
       additionalProperties: true
@@ -8692,6 +8744,48 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
+  /api/v1/projects/{project_id}/cron/jobs/{cron_uid}/versions:
+    get:
+      operationId: listCronJobVersions
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: cron_uid
+          required: true
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            default: 20
+            format: int64
+            maximum: 100
+            minimum: 0
+            type: integer
+        - explode: false
+          in: query
+          name: before_event_uid
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListCronVersionsResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
   /api/v1/projects/{project_id}/cron/runs:
     get:
       operationId: listCronRuns
@@ -8971,6 +9065,48 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CronWorkflowResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/cron/workflows/{cron_uid}/versions:
+    get:
+      operationId: listCronWorkflowVersions
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: cron_uid
+          required: true
+          schema:
+            type: string
+        - explode: false
+          in: query
+          name: limit
+          schema:
+            default: 20
+            format: int64
+            maximum: 100
+            minimum: 0
+            type: integer
+        - explode: false
+          in: query
+          name: before_event_uid
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListCronVersionsResponseBody"
           description: OK
         default:
           content:
