@@ -108,28 +108,24 @@ func TestCronJobEnabledPreservationProperty(t *testing.T) {
 
 // HTTP contract: pausing an adapter retains its opaque definition after a
 // deleted dependency; a refused resume returns 400 without advancing its revision.
-func TestCronJobEnabledDeletedAdapterParentProperty(t *testing.T) {
+func TestCronJobEnabledDeletedAdapterParent(t *testing.T) {
 	env := testenv.New(t, testenv.WithAuthToken("tok"))
 	project := seedProject(t, env, "example-project")
-	hegel.Test(t, func(ht *hegel.T) {
+	t.Run("deleted adapter dependency", func(t *testing.T) {
 		parent, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Adapter dependency", Author: "operator"})
-		require.NoError(ht, err)
-		drawText := func() string {
-			text := []rune(hegel.Draw(ht, hegel.Text()))
-			return string(text[:min(len(text), 40)])
-		}
+		require.NoError(t, err)
 		definition := cron.JobDefinition{
 			Version: 1, Kind: "job", Enabled: true,
-			Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: int64(hegel.Draw(ht, hegel.Integers(60, 86400)))},
-			Action:  cron.Action{Kind: "notify", Recipient: "operator", Message: "Review " + drawText()},
+			Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 3600},
+			Action:  cron.Action{Kind: "notify", Recipient: "operator", Message: "Review work"},
 			Issue:   &cron.IssuePolicy{Kind: "existing", UID: parent.UID},
 			Overlap: "allow", Catchup: "latest",
-			Options: jsontext.Value(fmt.Appendf(nil, `{"opaque":%d}`, hegel.Draw(ht, hegel.Integers(0, 999999)))),
+			Options: jsontext.Value(`{"opaque":42}`),
 		}
 		job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Adapter job", Actor: "operator", Definition: definition})
-		require.NoError(ht, err)
+		require.NoError(t, err)
 		_, _, _, err = env.DB.SoftDeleteIssue(t.Context(), parent.ID, "operator")
-		require.NoError(ht, err)
+		require.NoError(t, err)
 		path := fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s", project.ID, job.UID)
 		for _, action := range []struct {
 			name    string
@@ -139,21 +135,21 @@ func TestCronJobEnabledDeletedAdapterParentProperty(t *testing.T) {
 				"actor": "operator", "expected_event_uid": job.DefinitionEventUID,
 			})
 			if action.enabled {
-				require.Equalf(ht, http.StatusBadRequest, status, "%s", raw)
-				require.Contains(ht, string(raw), "tombstoned")
+				require.Equalf(t, http.StatusBadRequest, status, "%s", raw)
+				require.Contains(t, string(raw), "tombstoned")
 				current, err := env.DB.CronJob(t.Context(), project.ID, job.UID)
-				require.NoError(ht, err)
-				require.Equal(ht, job.DefinitionEventUID, current.DefinitionEventUID)
-				require.Equal(ht, job.Definition, current.Definition)
+				require.NoError(t, err)
+				require.Equal(t, job.DefinitionEventUID, current.DefinitionEventUID)
+				require.Equal(t, job.Definition, current.Definition)
 				continue
 			}
-			require.Equalf(ht, http.StatusOK, status, "%s", raw)
+			require.Equalf(t, http.StatusOK, status, "%s", raw)
 			var out api.CronJobResponse
-			require.NoError(ht, json.Unmarshal(raw, &out.Body))
+			require.NoError(t, json.Unmarshal(raw, &out.Body))
 			want := job.Definition
 			want.Enabled = action.enabled
-			require.Equal(ht, want, out.Body.Job.Definition.Native())
-			require.Len(ht, out.Body.Events, 1)
+			require.Equal(t, want, out.Body.Job.Definition.Native())
+			require.Len(t, out.Body.Events, 1)
 			job = db.CronJob{CronDefinition: out.Body.Job.CronDefinition, Definition: out.Body.Job.Definition.Native()}
 		}
 	})

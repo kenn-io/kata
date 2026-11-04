@@ -56,7 +56,11 @@ func TestCronProjectPauseBanner(t *testing.T) {
 		for _, tab := range []rune{'2', '3', '4'} {
 			t.Run(fmt.Sprintf("invalid=%t/tab=%c", invalid, tab), func(t *testing.T) {
 				m := cronFixture(t)
-				m.cron.data.project = cronProjectState{pause: &db.CronProjectPause{PausedBy: "operator", Reason: "Maintenance\nwindow", Invalid: invalid}}
+				metadata := db.JSONBlob(`{"cron.pause":{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":"Maintenance\nwindow"}}`)
+				if invalid {
+					metadata = `{"cron.pause":false}`
+				}
+				m.cron.data.project = cronProjectState{pause: db.CronProjectPauseFromMetadata(metadata)}
 				m = sendRune(m, tab)
 				rendered := ansi.Strip(renderCron(m))
 				require.Contains(t, rendered, "Project cron paused")

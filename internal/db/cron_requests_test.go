@@ -51,6 +51,18 @@ func TestCronRequestValue(t *testing.T) {
 	value["kind"] = "run"
 	_, err = decodeCronRequest(id, marshal())
 	require.ErrorIs(t, err, cron.ErrInvalid)
+	t.Run("workflow-only cancellation", func(t *testing.T) {
+		now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+		id, e := uid.FromTime(now)
+		require.NoError(t, e)
+		raw := mustJSONForCronRequestTest(t, map[string]any{"kind": "cancel", "run_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAX", "requested_by": "operator", "requested_at": now, "expires_at": now.Add(time.Minute)})
+		got, e := decodeCronRequest(id, raw)
+		require.NoError(t, e)
+		require.Empty(t, got.JobUID)
+		require.Empty(t, got.DefinitionEventUID)
+		require.NotNil(t, got.RunUID)
+
+	})
 }
 
 func mustJSONForCronRequestTest(t *testing.T, v any) jsontext.Value {
@@ -58,19 +70,6 @@ func mustJSONForCronRequestTest(t *testing.T, v any) jsontext.Value {
 	raw, e := json.Marshal(v)
 	require.NoError(t, e)
 	return raw
-}
-
-// Standalone workflow runs have no job identity but remain cancellable.
-func TestCronRequestCancelWorkflowOnlyValue(t *testing.T) {
-	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	id, e := uid.FromTime(now)
-	require.NoError(t, e)
-	raw := mustJSONForCronRequestTest(t, map[string]any{"kind": "cancel", "run_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAX", "requested_by": "operator", "requested_at": now, "expires_at": now.Add(time.Minute)})
-	got, e := decodeCronRequest(id, raw)
-	require.NoError(t, e)
-	require.Empty(t, got.JobUID)
-	require.Empty(t, got.DefinitionEventUID)
-	require.NotNil(t, got.RunUID)
 }
 
 func TestCronRequestFreshness(t *testing.T) {

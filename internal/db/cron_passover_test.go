@@ -61,10 +61,6 @@ func TestCronPassoverDecode(t *testing.T) {
 	}
 	unrelated := JSONBlob(`{"cron.passover.01ARZ3NDEKTSV4RRFFQ69G5FAW":null}`)
 	require.Nil(t, CronPassoverFromMetadata(unrelated, passoverJobUID))
-	for _, key := range []string{"cron.passover", "cron.passover." + passoverJobUID, "cron.passover.bad", "cron.passover."} {
-		require.Error(t, CheckCronProjectMetadataWrite(map[string]jsontext.Value{key: a}))
-	}
-	require.NoError(t, CheckCronProjectMetadataWrite(map[string]jsontext.Value{"cron.passovers": a}))
 	require.ErrorIs(t, ValidateCronPassoverChange("cron.passover.bad", nil, a), cron.ErrInvalid)
 	require.ErrorIs(t, ValidateCronPassoverChange("cron.passover", a, jsontext.Value(`null`)), cron.ErrInvalid)
 	require.ErrorIs(t, ValidateCronPassoverChange("cron.passover", b, a), cron.ErrInvalid)
@@ -155,6 +151,30 @@ func TestCronPassoverProjection(t *testing.T) {
 // The complete-value codec accepts the portable UTC domain and rejects nearby
 // malformed representations rather than merely agreeing with its own encoder.
 func TestCronPassoverCodecBoundaryProperty(t *testing.T) {
+	for _, suffix := range []string{"Z", "+00:00"} {
+		for _, paused := range []bool{false, true} {
+			fields := map[string]any{"version": 1, "through": "2026-01-02T03:04:05" + suffix, "by": "operator"}
+			if paused {
+				fields["paused_at"] = "2026-01-02T02:04:05" + suffix
+			}
+			raw, err := json.Marshal(fields)
+			require.NoError(t, err)
+			_, err = decodeCronPassover(raw)
+			require.NoError(t, err, suffix)
+			event := controlRecoveryEvent(t, "cron.passover", jsontext.Value("null"), raw, "root", 1)
+			require.NoError(t, ValidateCronControlEvent(event, "root"))
+			metadata, err := json.Marshal(map[string]jsontext.Value{"cron.passover": raw})
+			require.NoError(t, err)
+			state := CronPassoverFromMetadata(JSONBlob(metadata), passoverJobUID)
+			require.NotNil(t, state)
+			require.False(t, state.Invalid)
+			anchor := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+			_, err = cron.ApplyPassover(cron.RecurringProgress{Version: 1, Anchor: anchor, Through: anchor}, state.Through)
+			require.NoError(t, err, "zero-offset wire timestamps must work in native planning")
+		}
+	}
+	require.True(t, validCronPassoverTime(time.Date(2026, 1, 2, 3, 4, 5, 0, time.FixedZone("zero", 0))))
+
 	hegel.Test(t, func(ht *hegel.T) {
 		instant := time.Unix(hegel.Draw(ht, hegel.Integers[int64](-62135596799, 253402300799)), int64(hegel.Draw(ht, hegel.Integers(0, 999999999)))).UTC()
 		actor := strings.Repeat("é", hegel.Draw(ht, hegel.Integers(1, 128)))

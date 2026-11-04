@@ -29,7 +29,7 @@ func TestCronProjectPauseDecode(t *testing.T) {
 	}
 }
 
-// Contract: all valid Unicode reasons through the exact 256-byte boundary roundtrip.
+// Reasons vary with a fixed valid actor so actor rejection cannot mask them.
 func TestCronProjectPauseReasonProperty(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
 		reason := hegel.Draw(ht, hegel.Text())
@@ -133,10 +133,16 @@ func TestCronProjectPauseReplacementProperty(t *testing.T) {
 
 // Contract: only the exact pause key and request-dot prefix are reserved.
 func TestCronProjectPauseReservationProperty(t *testing.T) {
+	a := jsontext.Value(`{"version":1,"through":"2026-01-02T03:04:05Z","by":"operator"}`)
+	for _, key := range []string{"cron.passover", "cron.passover." + passoverJobUID, "cron.passover.bad", "cron.passover."} {
+		require.Error(t, CheckCronProjectMetadataWrite(map[string]jsontext.Value{key: a}))
+	}
+	require.NoError(t, CheckCronProjectMetadataWrite(map[string]jsontext.Value{"cron.passovers": a}))
+
 	hegel.Test(t, func(ht *hegel.T) {
 		suffix := hegel.Draw(ht, hegel.Text())
-		key := hegel.Draw(ht, hegel.SampledFrom([]string{suffix, "cron.pause", "cron.pause" + suffix, "cron.request." + suffix, "cron.request" + suffix}))
+		key := hegel.Draw(ht, hegel.SampledFrom([]string{suffix, "cron.pause", "cron.pause" + suffix, "cron.request." + suffix, "cron.request" + suffix, "cron.passover", "cron.passover." + suffix, "cron.passover" + suffix}))
 		err := CheckCronProjectMetadataWrite(map[string]jsontext.Value{key: jsontext.Value("null")})
-		require.Equal(ht, key == "cron.pause" || strings.HasPrefix(key, "cron.request."), err != nil)
+		require.Equal(ht, key == "cron.pause" || strings.HasPrefix(key, "cron.request.") || key == "cron.passover" || strings.HasPrefix(key, "cron.passover."), err != nil)
 	}, hegel.WithTestCases(1000))
 }

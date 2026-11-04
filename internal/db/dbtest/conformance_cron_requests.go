@@ -55,7 +55,14 @@ func checkCronRequests(t *testing.T, s db.Storage, b Backend) error {
 		require.Contains(t, string(first.Event.Payload), "cron.request."+in.UID)
 		original := first.Request
 		job.Definition.Enabled = false
-		_, _, e = s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, UID: job.UID, Name: job.Name, Definition: job.Definition, ExpectedEventUID: job.DefinitionEventUID, Actor: "operator"})
+		job, _, e = s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, UID: job.UID, Name: job.Name, Definition: job.Definition, ExpectedEventUID: job.DefinitionEventUID, Actor: "operator"})
+		require.NoError(t, e)
+		fresh := in
+		fresh.UID = requestUIDAt(t, now)
+		_, e = s.RequestCron(ctx, fresh)
+		require.ErrorIs(t, e, db.ErrCronRequestUnavailable, "disabled job alone refuses admission")
+		job.Definition.Enabled = true
+		job, _, e = s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, UID: job.UID, Name: job.Name, Definition: job.Definition, ExpectedEventUID: job.DefinitionEventUID, Actor: "operator"})
 		require.NoError(t, e)
 		_, e = s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", Paused: true})
 		require.NoError(t, e)
@@ -76,10 +83,16 @@ func checkCronRequests(t *testing.T, s db.Storage, b Backend) error {
 			_, e = s.RequestCron(ctx, changed)
 			require.ErrorIs(t, e, db.ErrCronRequestConflict)
 		}
-		fresh := in
+		fresh.Now = in.Now
 		fresh.UID = requestUIDAt(t, in.Now)
 		_, e = s.RequestCron(ctx, fresh)
-		require.ErrorIs(t, e, db.ErrCronRequestUnavailable)
+		require.ErrorIs(t, e, db.ErrCronRequestUnavailable, "project pause alone refuses admission")
+		_, e = s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator"})
+		require.NoError(t, e)
+		_, _, e = s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, UID: job.UID, Name: job.Name, Definition: job.Definition, ExpectedEventUID: job.DefinitionEventUID, Actor: "operator", Deleted: true})
+		require.NoError(t, e)
+		_, e = s.RequestCron(ctx, fresh)
+		require.ErrorIs(t, e, db.ErrCronRequestUnavailable, "tombstoned job alone refuses admission")
 		// Model expiry collection by removing the retained key. An old identity
 		// must never be recreated even though the exact replay previously worked.
 		q := s.(interface {

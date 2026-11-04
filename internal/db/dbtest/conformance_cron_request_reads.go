@@ -82,15 +82,19 @@ func checkCronRequestReads(t *testing.T, s db.Storage) error {
 		require.NoError(t, e)
 		rows, e = s.ListCronRequests(ctx, db.CronRequestList{ProjectID: p.ID, Now: now})
 		require.NoError(t, e)
-		for _, row := range rows {
-			if row.UID == cancelID {
-				want := "pending"
-				if status != "running" {
-					want = "answered"
-				}
-				require.Equal(t, want, row.State)
+		var cancel *db.CronRequest
+		for i := range rows {
+			if rows[i].UID == cancelID {
+				cancel = &rows[i]
+				break
 			}
 		}
+		require.NotNil(t, cancel, "the cancellation request must be returned")
+		want := "pending"
+		if status != "running" {
+			want = "answered"
+		}
+		require.Equal(t, want, cancel.State)
 	}
 	// Replicas read their local retained values, even while federation is disabled.
 	_, e = s.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: p.ID, Role: db.FederationRoleSpoke, HubURL: "https://daemon.example", HubProjectID: 1, HubProjectUID: p.UID, Actor: "operator", Enabled: false})

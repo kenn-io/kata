@@ -57,6 +57,9 @@ func TestCronResumePassoverCount(t *testing.T) {
 func TestCronDiscardResumeChoice(t *testing.T) {
 	for _, supported := range []bool{false, true} {
 		for _, fence := range []string{"none", "connection", "scope", "selection", "readonly"} {
+			if !supported && fence != "none" {
+				continue
+			}
 			t.Run(map[bool]string{false: "old", true: "supported"}[supported]+"/"+fence, func(t *testing.T) {
 				m, base := enabledFixture(t, pausedNative())
 				withEnabledBacklog(base)

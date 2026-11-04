@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"errors"
 	"fmt"
 	"testing"
 
@@ -28,7 +27,7 @@ func TestCronRuntimeRequestSurvivesUnrelatedRefresh(t *testing.T) {
 					if completed {
 						data := *m.cron.data
 						data.events = m.cron.events
-						m.cron.data = &data
+						m = m.cronLoaded(cronLoadedMsg(data))
 					}
 					if stage == "admission" {
 						m = runtimeDialog(t, m, key)
@@ -42,27 +41,4 @@ func TestCronRuntimeRequestSurvivesUnrelatedRefresh(t *testing.T) {
 			}
 		}
 	}
-}
-
-// A lost cancellation response must remain replayable after the run disappears.
-func TestCronRuntimeRetryAfterRefreshRemovesRun(t *testing.T) {
-	m, api := runtimeFixture(t, true)
-	m = runtimeDialog(t, m, 'X')
-	api.errs = []error{errors.New("response lost")}
-	m, cmd := m.routeModalKey(keyRune('y'))
-	m = runtimeDone(t, m, cmd)
-	require.Len(t, api.calls, 1)
-	first := api.calls[0]
-	next, _ := m.handleEventReceived(eventReceivedMsg{eventType: "cron.run.observed", projectID: m.scope.projectID})
-	m = next.(Model)
-	data := *m.cron.data
-	data.runs = nil
-	data.events = m.cron.events
-	m.cron.data = &data
-	m, cmd = m.routeModalKey(keyRune('y'))
-	require.NotNil(t, cmd, "retry must retain identity when refresh removes the run")
-	m = runtimeDone(t, m, cmd)
-	require.Len(t, api.calls, 2)
-	require.Equal(t, first, api.calls[1])
-	require.Nil(t, m.cron.request)
 }

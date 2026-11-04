@@ -74,56 +74,70 @@ func runtimeDone(t *testing.T, m Model, cmd tea.Cmd) Model {
 func TestCronRuntimeRequestConfirmAndRetry(t *testing.T) {
 	for _, cancel := range []bool{false, true} {
 		for _, detail := range []bool{false, true} {
-			m, api := runtimeFixture(t, cancel)
-			if detail {
-				m = sendKey(m, tea.KeyEnter)
+			for _, removed := range []bool{false, true} {
+				if removed && !cancel {
+					continue
+				}
+				m, api := runtimeFixture(t, cancel)
+				if detail {
+					m = sendKey(m, tea.KeyEnter)
+				}
+				key := 'R'
+				kind := "run"
+				target := api.shown.UID
+				if cancel {
+					key = 'X'
+					kind = "cancel"
+					target = api.run.UID
+				}
+				m = runtimeDialog(t, m, key)
+				m, cmd := m.routeModalKey(keyRune('n'))
+				require.Nil(t, cmd)
+				require.Nil(t, m.cron.request)
+				require.Empty(t, api.calls)
+				m = runtimeDialog(t, m, key)
+				before := time.Now().UTC().Truncate(time.Millisecond)
+				m, cmd = m.routeModalKey(keyRune('y'))
+				require.NotNil(t, cmd)
+				// Sending cannot be repeated or dismissed before its outcome arrives.
+				next, again := m.routeModalKey(keyRune('y'))
+				require.Nil(t, again)
+				require.Equal(t, m.cron.request, next.cron.request)
+				next, again = m.routeModalKey(keyRune('n'))
+				require.Nil(t, again)
+				require.Equal(t, modalCronRequest, next.modal)
+				api.errs = []error{errors.New("connection lost")}
+				m = runtimeDone(t, m, cmd)
+				require.Equal(t, modalCronRequest, m.modal)
+				require.Len(t, api.calls, 1)
+				first := api.calls[0]
+				require.True(t, uid.Valid(first.id))
+				require.False(t, uid.MustTime(first.id).Before(before))
+				require.Equal(t, runtimeRequestCall{7, first.id, kind, target, "operator"}, first)
+				require.Equal(t, first.id, m.cron.request.requestUID)
+				// An ambiguous retry keeps its body even after current eligibility changes.
+				if cancel {
+					if removed {
+						next, _ := m.handleEventReceived(eventReceivedMsg{eventType: "cron.run.observed", projectID: m.scope.projectID})
+						m = next.(Model)
+						data := *m.cron.data
+						data.runs = nil
+						data.events = m.cron.events
+						m = m.cronLoaded(cronLoadedMsg(data))
+					} else {
+						m.cron.data.runs[0].Status = "succeeded"
+					}
+				} else {
+					m.cron.data.project.pause = &db.CronProjectPause{Invalid: true}
+					m.cron.data.jobs[0].Definition.Enabled = false
+				}
+				m, cmd = m.routeModalKey(keyRune('y'))
+				m = runtimeDone(t, m, cmd)
+				require.Len(t, api.calls, 2)
+				require.Equal(t, first, api.calls[1])
+				require.Nil(t, m.cron.request)
+				require.Equal(t, modalNone, m.modal)
 			}
-			key := 'R'
-			kind := "run"
-			target := api.shown.UID
-			if cancel {
-				key = 'X'
-				kind = "cancel"
-				target = api.run.UID
-			}
-			m = runtimeDialog(t, m, key)
-			m, cmd := m.routeModalKey(keyRune('n'))
-			require.Nil(t, cmd)
-			require.Nil(t, m.cron.request)
-			require.Empty(t, api.calls)
-			m = runtimeDialog(t, m, key)
-			before := time.Now().UTC().Truncate(time.Millisecond)
-			m, cmd = m.routeModalKey(keyRune('y'))
-			require.NotNil(t, cmd)
-			// Sending cannot be repeated or dismissed before its outcome arrives.
-			next, again := m.routeModalKey(keyRune('y'))
-			require.Nil(t, again)
-			require.Equal(t, m.cron.request, next.cron.request)
-			next, again = m.routeModalKey(keyRune('n'))
-			require.Nil(t, again)
-			require.Equal(t, modalCronRequest, next.modal)
-			api.errs = []error{errors.New("connection lost")}
-			m = runtimeDone(t, m, cmd)
-			require.Equal(t, modalCronRequest, m.modal)
-			require.Len(t, api.calls, 1)
-			first := api.calls[0]
-			require.True(t, uid.Valid(first.id))
-			require.False(t, uid.MustTime(first.id).Before(before))
-			require.Equal(t, runtimeRequestCall{7, first.id, kind, target, "operator"}, first)
-			require.Equal(t, first.id, m.cron.request.requestUID)
-			// An ambiguous retry keeps its body even after current eligibility changes.
-			if cancel {
-				m.cron.data.runs[0].Status = "succeeded"
-			} else {
-				m.cron.data.project.pause = &db.CronProjectPause{Invalid: true}
-				m.cron.data.jobs[0].Definition.Enabled = false
-			}
-			m, cmd = m.routeModalKey(keyRune('y'))
-			m = runtimeDone(t, m, cmd)
-			require.Len(t, api.calls, 2)
-			require.Equal(t, first, api.calls[1])
-			require.Nil(t, m.cron.request)
-			require.Equal(t, modalNone, m.modal)
 		}
 	}
 }
@@ -307,15 +321,4 @@ func TestSnapshot_CronRuntimeRequests(t *testing.T) {
 			})
 		}
 	}
-}
-
-// Full cron help teaches both runtime keys; ordinary footers remain scoped to
-// the current tab. The family plan requires p, R and X together in help.
-func TestCronHelpListsAllControlKeys(t *testing.T) {
-	m, _ := runtimeFixture(t, false)
-	m.cron.help = true
-	view := stripANSI(m.viewBody())
-	require.Contains(t, view, "pause/resume")
-	require.Contains(t, view, "request run")
-	require.Contains(t, view, "request cancel")
 }

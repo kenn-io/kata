@@ -275,19 +275,33 @@ func checkCronProjectPause(t *testing.T, s db.Storage, b Backend) error {
 		other := b.OpenSame(t, store)
 		t.Cleanup(func() { require.NoError(t, other.Close()) })
 		var wg sync.WaitGroup
+		var raced db.DispatchRecurringCronOut
 		errs := make(chan error, 2)
 		wg.Go(func() {
 			_, e := store.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", Paused: true})
 			errs <- e
 		})
 		wg.Go(func() {
-			_, e := other.DispatchRecurringCron(ctx, db.DispatchRecurringCronIn{ProjectID: p.ID, JobUID: job.UID, ExpectedEventUID: job.DefinitionEventUID, Now: progress.Anchor.Add(6 * time.Hour)})
+			var e error
+			raced, e = other.DispatchRecurringCron(ctx, db.DispatchRecurringCronIn{ProjectID: p.ID, JobUID: job.UID, ExpectedEventUID: job.DefinitionEventUID, Now: progress.Anchor.Add(6 * time.Hour)})
 			errs <- e
 		})
 		wg.Wait()
 		close(errs)
 		for e := range errs {
 			require.NoError(t, e)
+		}
+		children, e := store.ChildrenOfIssue(ctx, parent.ID)
+		require.NoError(t, e)
+		current := fixtureProgress(t, store, parent.ID, job.UID)
+		if len(raced.Events) == 0 {
+			require.Empty(t, children, "pause won: no child may commit")
+			require.Equal(t, progress, current, "pause won: no progress may commit")
+		} else {
+			require.Len(t, children, 3, "dispatch won: all due children commit")
+			require.Len(t, raced.Events, len(children)+1, "children and checkpoint commit together")
+			require.Equal(t, progress.Anchor.Add(6*time.Hour), current.Through)
+			require.Equal(t, progress.Anchor, current.Anchor)
 		}
 		// Either serial order is valid. Once pause commits, no further progress occurs.
 		before, e := store.IssueByID(ctx, parent.ID)

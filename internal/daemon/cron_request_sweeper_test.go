@@ -19,13 +19,15 @@ type requestSweepStore struct {
 	events    []db.Event
 	published *captureHookSink
 	calls     int
+	clocks    []time.Time
 }
 
 func (s *requestSweepStore) ListCronRequestProjects(context.Context) ([]int64, error) {
 	return []int64{101, 102, 103}, nil
 }
-func (s *requestSweepStore) SweepCronRequests(_ context.Context, pid int64, _ time.Time) (*db.Event, error) {
+func (s *requestSweepStore) SweepCronRequests(_ context.Context, pid int64, now time.Time) (*db.Event, error) {
 	s.calls++
+	s.clocks = append(s.clocks, now)
 	if pid == 102 {
 		requirePublished := len(s.published.events) == 1
 		if !requirePublished {
@@ -50,12 +52,14 @@ func TestCronRequestSweepPublishesBeforeNextProject(t *testing.T) {
 	sub := broadcaster.Subscribe(daemon.SubFilter{ProjectID: 101})
 	defer sub.Unsub()
 	sweeper := daemon.NewDueNotificationSweeper(store, daemon.NewEventPublisher(broadcaster, sink), "UTC")
-	err := sweeper.RunOnce(t.Context(), time.Now().UTC())
+	now := time.Now().UTC()
+	err := sweeper.RunOnce(t.Context(), now)
 	require.Error(t, err)
 	require.NotContains(t, err.Error(), "not published")
 	require.Contains(t, err.Error(), "malformed key")
 	require.Contains(t, err.Error(), "project failed")
 	require.Equal(t, 3, store.calls)
+	require.Equal(t, []time.Time{now, now, now}, store.clocks)
 	require.Equal(t, []db.Event{event}, sink.events)
 	msg := receiveMsg(t, sub.Ch, time.Second, "request expiry broadcast")
 	require.Equal(t, event.ID, msg.Event.ID)
@@ -81,8 +85,9 @@ func TestCronRequestSweepPublishesCommittedMetadata(t *testing.T) {
 	require.NoError(t, sweeper.RunOnce(ctx, now.Add(time.Minute)))
 	msg := receiveMsg(t, sub.Ch, time.Second, "expiry metadata broadcast")
 	require.NotNil(t, msg.Event)
-	require.Equal(t, "project.metadata_updated", msg.Event.Type)
-	require.Equal(t, "system", msg.Event.Actor)
+	durable, err := env.DB.EventsAfter(ctx, db.EventsAfterParams{ProjectID: p.ID, AfterID: msg.Event.ID - 1, Limit: 1})
+	require.NoError(t, err)
+	require.Equal(t, []db.Event{*msg.Event}, durable, "publish the exact committed event")
 	require.Len(t, sink.events, 1)
 	require.Equal(t, msg.Event.UID, sink.events[0].UID)
 	p, err = env.DB.ProjectByID(ctx, p.ID)

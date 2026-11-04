@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/uid"
 )
 
@@ -77,30 +76,4 @@ func TestCronRootDeletesMalformedRequestKey(t *testing.T) {
 	require.ErrorIs(t, ValidateCronControlEvent(deletion, "root"), ErrFederationIngestValidation)
 	creation := controlRecoveryEvent(t, key, jsontext.Value("null"), jsontext.Value(`{"note":"legacy"}`), "root", 1)
 	require.ErrorIs(t, ValidateCronControlEvent(creation, "root"), ErrFederationIngestValidation)
-}
-
-func TestCronPassoverZeroOffsetTimes(t *testing.T) {
-	for _, suffix := range []string{"Z", "+00:00"} {
-		for _, paused := range []bool{false, true} {
-			fields := map[string]any{"version": 1, "through": "2026-01-02T03:04:05" + suffix, "by": "operator"}
-			if paused {
-				fields["paused_at"] = "2026-01-02T02:04:05" + suffix
-			}
-			raw, err := json.Marshal(fields)
-			require.NoError(t, err)
-			_, err = decodeCronPassover(raw)
-			require.NoError(t, err, suffix)
-			event := controlRecoveryEvent(t, "cron.passover", jsontext.Value("null"), raw, "root", 1)
-			require.NoError(t, ValidateCronControlEvent(event, "root"))
-			metadata, err := json.Marshal(map[string]jsontext.Value{"cron.passover": raw})
-			require.NoError(t, err)
-			state := CronPassoverFromMetadata(JSONBlob(metadata), passoverJobUID)
-			require.NotNil(t, state)
-			require.False(t, state.Invalid)
-			anchor := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
-			_, err = cron.ApplyPassover(cron.RecurringProgress{Version: 1, Anchor: anchor, Through: anchor}, state.Through)
-			require.NoError(t, err, "zero-offset wire timestamps must work in native planning")
-		}
-	}
-	require.True(t, validCronPassoverTime(time.Date(2026, 1, 2, 3, 4, 5, 0, time.FixedZone("zero", 0))))
 }
