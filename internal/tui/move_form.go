@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -31,9 +32,7 @@ type moveChoice struct {
 type movePreview struct {
 	revision int64
 	uids     []string
-	// projects are the ones the previewed issues leave, whose label counts
-	// change when they go.
-	projects    []int64
+
 	descendants []string
 }
 
@@ -348,12 +347,9 @@ func (m Model) handleMovePreview(msg movePreviewMsg) Model {
 		m.move = s
 		return m
 	}
-	preview := &movePreview{revision: msg.resp.Revision, projects: []int64{s.target.projectID}}
+	preview := &movePreview{revision: msg.resp.Revision}
 	for _, issue := range msg.resp.Issues {
 		preview.uids = append(preview.uids, issue.UID)
-		if issue.ProjectID != 0 && !slices.Contains(preview.projects, issue.ProjectID) {
-			preview.projects = append(preview.projects, issue.ProjectID)
-		}
 		if issue.UID == s.target.issueUID {
 			continue
 		}
@@ -436,8 +432,13 @@ func (m Model) finishMove(mut mutationDoneMsg) (Model, tea.Cmd) {
 	}
 	m = m.closeMoveForm()
 	m, cmd := m.dropIssues(uid, gone)
-	// Labels travel with the issues, so the cached counts of both ends are stale.
-	m, labels := m.refreshCachedLabels(append(slices.Clone(s.preview.projects), s.chosen.ID)...)
+	// Labels travel with the issues, from projects the preview may not have
+	// named, so every cached project's counts are stale.
+	var cached []int64
+	if m.projectLabels != nil {
+		cached = slices.Collect(maps.Keys(m.projectLabels.byProject))
+	}
+	m, labels := m.refreshCachedLabels(cached...)
 	m, notice := m.undoNotice(sanitizeForLine(fmt.Sprintf("moved #%s to %s", s.target.issueShortID, newRef)), toastSuccess)
 	return m, combineCmds(cmd, combineCmds(labels, notice))
 }
@@ -536,7 +537,9 @@ func renderMoveModal(s moveState, width, height int) string {
 					return rows
 				}
 			}
-			optional = wrap("Nothing has moved yet.")
+			if s.note == "" { // a conflict note already says nothing moved
+				optional = wrap("Nothing has moved yet.")
+			}
 		}
 	} else {
 		s.filter.SetWidth(moveFilterWidth(width, height))
@@ -549,15 +552,21 @@ func renderMoveModal(s moveState, width, height int) string {
 		outcomeLines = append(outcomeLines, wrap(line)...)
 	}
 
-	// The richest title and outcome that leave room for what must stay.
+	// The richest title and outcome that leave room for what must stay. Under a
+	// refusal even the picker's filter line gives way.
 	titleLines, outLines := styled(wrap(titleText)), outcomeLines
-	for _, try := range []struct{ title, outcome []string }{
-		{titleLines, outcomeLines},
-		{titleLines, firstOrNil(outcome, oneLine)},
-		{styled(oneLine(titleText)), firstOrNil(outcome, oneLine)},
-		{styled(oneLine(titleText)), nil},
-	} {
-		titleLines, outLines = try.title, try.outcome
+	shortTitle := styled(oneLine(titleText))
+	tries := []struct{ title, outcome, extra []string }{
+		{titleLines, outcomeLines, extra},
+		{titleLines, firstOrNil(outcome, oneLine), extra},
+		{shortTitle, firstOrNil(outcome, oneLine), extra},
+		{shortTitle, nil, extra},
+	}
+	if len(tail) > 1 {
+		tries = append(tries, struct{ title, outcome, extra []string }{shortTitle, nil, nil})
+	}
+	for _, try := range tries {
+		titleLines, outLines, extra = try.title, try.outcome, try.extra
 		if len(titleLines)+len(outLines)+len(extra)+len(tail) <= budget {
 			break
 		}

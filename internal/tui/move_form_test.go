@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/json/jsontext"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -323,27 +324,6 @@ func TestMoveSelectsNeighbourRowAndNamesNewRef(t *testing.T) {
 	}
 }
 
-// moveThroughFamily is moveThrough with a descendant of the moved issue in the
-// preview.
-func moveThroughFamily(t *testing.T, m Model, kids ...Issue) (Model, tea.Cmd) {
-	t.Helper()
-	api := &moveTestAPI{
-		projects: []ProjectSummary{moveProject(2, "hub-project", "", "")},
-		preview: func(int, MoveInput) (*MutationResp, error) {
-			return &MutationResp{
-				Issues:   append([]Issue{{UID: "issue-b", ProjectID: 7}}, kids...),
-				Revision: 5,
-			}, nil
-		},
-	}
-	m.api = newUndoClient(api)
-	m = openMove(t, m)
-	m, cmd := enter(m)
-	m, _ = deliver(t, m, cmd)
-	m, cmd = enter(m)
-	return deliver(t, m, cmd)
-}
-
 // moveThrough previews and performs a move of the selected issue to
 // hub-project, answering with a preview that lists the given uids.
 func moveThrough(t *testing.T, m Model, previewed ...string) (Model, tea.Cmd) {
@@ -525,11 +505,47 @@ func TestMoveFormRendersCompletelyAtEveryTerminalSize(t *testing.T) {
 	previewing, _ = deliver(t, previewing, cmd)
 	refused := previewing
 	refused.move.err = "move failed: project_not_found: project not found"
-	// The mandatory text of a refused, re-previewed move: a conflict note and a
-	// daemon error of several lines, under a long name.
-	crowded := previewing
-	crowded.move.note = "The issue's revision changed since the preview; nothing was moved. Showing the current preview."
-	crowded.move.err = "move failed: descendant example-destination#abcd: issue_move_descendant_archived\nrestore its project or remove its parent link\nbefore moving the subtree"
+	// The mandatory text of a failed re-preview after a conflict: the note and a
+	// daemon error of several lines, with no preview, under a long name.
+	crowdedAPI := &moveTestAPI{
+		projects: api.projects,
+		preview: func(call int, in MoveInput) (*MutationResp, error) {
+			if call > 2 {
+				return nil, errors.New("descendant example-destination#abcd: issue_move_descendant_archived\nrestore its project or remove its parent link\nbefore moving the subtree")
+			}
+			return api.preview(call, in)
+		},
+		move: func(int, MoveInput) (*MutationResp, error) {
+			return nil, &APIError{Status: http.StatusPreconditionFailed, Code: "revision_conflict", Message: "issue revision is 9"}
+		},
+	}
+	crowded := openMove(t, moveModel(t, crowdedAPI))
+	crowded, cmd = enter(crowded)
+	crowded, _ = deliver(t, crowded, cmd)
+	crowded, cmd = enter(crowded)
+	crowded, cmd = deliver(t, crowded, cmd) // the 412 asks for a fresh preview
+	crowded, _ = deliver(t, crowded, cmd)   // which fails
+	require.Nil(t, crowded.move.preview)
+	require.NotEmpty(t, crowded.move.note)
+	conflicted := openMove(t, moveModel(t, &moveTestAPI{
+		projects: api.projects, preview: api.preview,
+		move: func(call int, _ MoveInput) (*MutationResp, error) {
+			if call == 2 {
+				return nil, &APIError{Status: http.StatusPreconditionFailed, Code: "revision_conflict", Message: "issue revision is 9"}
+			}
+			return &MutationResp{}, nil
+		},
+	}))
+	conflicted, cmd = enter(conflicted)
+	conflicted, _ = deliver(t, conflicted, cmd)
+	conflicted, cmd = enter(conflicted)
+	conflicted, cmd = deliver(t, conflicted, cmd)
+	conflicted, _ = deliver(t, conflicted, cmd) // a fresh preview after the conflict
+	require.NotNil(t, conflicted.move.preview)
+	require.Contains(t, flattenModal(stripANSI(renderMoveModal(previewing.move, 100, 40))), "Nothing has moved yet.", "an ordinary preview says so")
+	conflictView := flattenModal(stripANSI(renderMoveModal(conflicted.move, 100, 40)))
+	require.Contains(t, conflictView, "nothing was moved", "the note says it")
+	require.NotContains(t, conflictView, "Nothing has moved yet.", "so the preview does not say it again")
 
 	for _, size := range []struct {
 		name          string
@@ -551,7 +567,7 @@ func TestMoveFormRendersCompletelyAtEveryTerminalSize(t *testing.T) {
 			{"picker with a long pasted filter", pasted, []string{"Project:", "no project matches"}, "enter preview · esc cancel"},
 			{"preview", previewing, []string{"This issue and its 4 descendants move together."}, "enter move · esc back"},
 			{"refusal", refused, []string{"project_not_found"}, "enter move · esc back"},
-			{"conflict note and a multiline error", crowded, []string{"revision changed since the preview", "issue_move_descendant_archived", "remove its parent link", "before moving the subtree"}, "enter move · esc back"},
+			{"conflict note and a multiline error after a failed re-preview", crowded, []string{"revision changed since the preview", "issue_move_descendant_archived", "remove its parent link", "before moving the subtree"}, "enter preview · esc cancel"},
 		} {
 			t.Run(size.name+" "+step.name, func(t *testing.T) {
 				rendered := stripANSI(renderMoveModal(step.state.move, size.width, size.height))
@@ -577,7 +593,7 @@ func TestMoveFormRendersCompletelyAtEveryTerminalSize(t *testing.T) {
 				} else {
 					require.Contains(t, flat, step.prompt, "no footer, so the modal says it:\n%s", rendered)
 				}
-				if step.state.move.preview != nil && step.name != "conflict note and a multiline error" {
+				if step.state.move.preview != nil && step.name != "conflict note and a multiline error after a failed re-preview" {
 					require.Equal(t, 1, strings.Count(strings.Join(strings.Fields(content.String()), ""), "to"+longName),
 						"the full destination name shows once, wrapped if need be:\n%s", rendered)
 				}
@@ -627,18 +643,33 @@ func TestMoveFormClosesWhenCredentialsNoLongerAllowAWholeProjectWrite(t *testing
 	require.Equal(t, modalNone, m.modal)
 }
 
-func TestMoveRefreshesTheLabelCountsOfEveryAffectedProject(t *testing.T) {
-	api := &moveTestAPI{projects: []ProjectSummary{moveProject(2, "hub-project", "", "")}}
+func TestMoveRefreshesEveryCachedProjectsLabelCounts(t *testing.T) {
+	// A labeled child from project 9 joined the subtree after the preview, so the
+	// preview never named project 9.
+	api := &moveTestAPI{
+		projects: []ProjectSummary{moveProject(2, "hub-project", "", "")},
+		move: func(int, MoveInput) (*MutationResp, error) {
+			return &MutationResp{
+				Issues:     []Issue{{UID: "issue-b", ProjectID: 2}, {UID: "late-kid", ProjectID: 2}},
+				NewShortID: "new1", Changed: true,
+			}, nil
+		},
+	}
 	m := moveModel(t, api)
 	m.projectLabels = newLabelCache()
 	for _, pid := range []int64{7, 9, 2} {
 		m.projectLabels.byProject[pid] = labelCacheEntry{pid: pid}
 	}
-	// issue-b has a descendant that lives in project 9.
-	m, _ = moveThroughFamily(t, m, Issue{UID: "kid-9", ShortID: "k009", Title: "Kid", ProjectID: 9})
+	m = openMove(t, m)
+	m, cmd := enter(m)
+	m, _ = deliver(t, m, cmd)
+	m, cmd = enter(m)
+	m, _ = deliver(t, m, cmd)
 	for _, pid := range []int64{7, 9, 2} {
-		require.True(t, m.projectLabels.byProject[pid].fetching, "project %d's label counts are fetched again", pid)
+		require.True(t, m.projectLabels.byProject[pid].fetching, "project %d has a label cache, so its counts are fetched again", pid)
 	}
+	_, fetched := m.projectLabels.byProject[11]
+	require.False(t, fetched, "a project without a cache is not fetched")
 }
 
 func TestMoveCancelsAnArmedPriorityPrompt(t *testing.T) {
