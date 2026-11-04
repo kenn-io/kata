@@ -958,16 +958,16 @@ func readUIGraphLinks(ctx context.Context, tx *sql.Tx, issues []db.UIIssue) ([]d
 	if len(issues) == 0 {
 		return []db.UILink{}, nil
 	}
-	ids := make([]any, 0, len(issues))
-	placeholders := make([]string, len(issues))
-	for idx, issue := range issues {
+	ids := make([]int64, 0, len(issues))
+	for _, issue := range issues {
 		ids = append(ids, issue.ID)
-		placeholders[idx] = "?"
 	}
-	args := append(append([]any{}, ids...), ids...)
-	rows, err := tx.QueryContext(ctx, linkSelect+` WHERE from_issue_id IN (`+
-		strings.Join(placeholders, ",")+`) AND to_issue_id IN (`+
-		strings.Join(placeholders, ",")+`) ORDER BY id`, args...)
+	fromSet, fromSetArgs := uiSQLiteIssueAllowlist("from_issue_id", ids)
+	// Use the destination as a filter so SQLite doesn't probe the composite
+	// index for every pair of issue IDs. Both operands remain integers.
+	toSet, toSetArgs := uiSQLiteIssueAllowlist("+to_issue_id", ids)
+	args := append(fromSetArgs, toSetArgs...)
+	rows, err := tx.QueryContext(ctx, linkSelect+` WHERE `+fromSet+` AND `+toSet+` ORDER BY id`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read UI graph links: %w", err)
 	}
@@ -988,17 +988,15 @@ func readUIGraphUnresolved(
 		return []db.UIGraphEdge{}, []db.UIGraphUnresolvedRef{}, nil
 	}
 	visible := make(map[int64]struct{}, len(issues))
-	args := make([]any, 0, len(issues)*2)
-	placeholders := make([]string, len(issues))
-	for idx, issue := range issues {
+	ids := make([]int64, 0, len(issues))
+	for _, issue := range issues {
 		visible[issue.ID] = struct{}{}
-		args = append(args, issue.ID)
-		placeholders[idx] = "?"
+		ids = append(ids, issue.ID)
 	}
-	args = append(args, args...)
-	rows, err := tx.QueryContext(ctx, linkSelect+` WHERE from_issue_id IN (`+
-		strings.Join(placeholders, ",")+`) OR to_issue_id IN (`+
-		strings.Join(placeholders, ",")+`) ORDER BY id`, args...)
+	fromSet, fromSetArgs := uiSQLiteIssueAllowlist("from_issue_id", ids)
+	toSet, toSetArgs := uiSQLiteIssueAllowlist("to_issue_id", ids)
+	args := append(fromSetArgs, toSetArgs...)
+	rows, err := tx.QueryContext(ctx, linkSelect+` WHERE `+fromSet+` OR `+toSet+` ORDER BY id`, args...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read unresolved UI graph links: %w", err)
 	}
@@ -1047,18 +1045,16 @@ func readUICollectionLinks(
 	if len(issues) == 0 {
 		return []db.UILink{}, nil
 	}
-	ids := make([]any, 0, len(issues))
-	placeholders := make([]string, len(issues))
-	for idx, issue := range issues {
+	ids := make([]int64, 0, len(issues))
+	for _, issue := range issues {
 		ids = append(ids, issue.ID)
-		placeholders[idx] = "?"
 	}
-	args := append(append([]any{}, ids...), ids...)
-	statement := uiLinkSelect + ` WHERE (l.from_issue_id IN (` +
-		strings.Join(placeholders, ",") + `) OR l.to_issue_id IN (` +
-		strings.Join(placeholders, ",") + `))
+	fromSet, fromSetArgs := uiSQLiteIssueAllowlist("l.from_issue_id", ids)
+	toSet, toSetArgs := uiSQLiteIssueAllowlist("l.to_issue_id", ids)
+	args := append(fromSetArgs, toSetArgs...)
+	statement := uiLinkSelect + ` WHERE (` + fromSet + ` OR ` + toSet + `)
 		AND fi.deleted_at IS NULL AND fp.deleted_at IS NULL
-		AND ti.deleted_at IS NULL AND tp.deleted_at IS NULL` // #nosec G202 -- the dynamic fragments contain only count-derived ? placeholders; issue IDs stay bound.
+		AND ti.deleted_at IS NULL AND tp.deleted_at IS NULL` // #nosec G202 -- endpoint predicates use fixed column names and bound issue ID sets.
 	fromPredicate, fromArgs := uiSQLiteIssueAllowlist(`l.from_issue_id`, allowedIssueIDs)
 	if fromPredicate != "" {
 		statement += ` AND ` + fromPredicate

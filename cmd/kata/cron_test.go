@@ -51,19 +51,13 @@ func executeCronCLI(t *testing.T, base string, stdin io.Reader, args ...string) 
 	return out.String(), diagnostic.String(), err
 }
 
-func TestCronCLIJobMutationHelpNamesHub(t *testing.T) {
-	for _, resource := range []string{"job", "workflow"} {
-		for _, operation := range []string{"create", "update", "delete", "restore"} {
-			t.Run(resource+"/"+operation, func(t *testing.T) {
-				out, _, err := executeCronCLI(t, "http://daemon.example", nil, resource, operation, "--help")
-				require.NoError(t, err)
-				if resource == "job" {
-					require.Contains(t, out, "Native recurring jobs must be created, edited, deleted, and restored on the project's owning hub; run the same command there with --daemon <hub-name>.")
-				} else {
-					require.NotContains(t, out, "--daemon <hub-name>")
-				}
-			})
-		}
+func TestCronCLIWorkflowMutationHelpOmitsHubFallback(t *testing.T) {
+	for _, operation := range []string{"create", "update", "delete", "restore"} {
+		t.Run(operation, func(t *testing.T) {
+			out, _, err := executeCronCLI(t, "http://daemon.example", nil, "workflow", operation, "--help")
+			require.NoError(t, err)
+			require.NotContains(t, out, "--daemon <hub-name>")
+		})
 	}
 }
 func cronCLIJob(_ *testing.T) api.PutCronJobBody {
@@ -234,6 +228,43 @@ func TestCronCLIStableCreateAfterAcceptedResponseLoss(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal([]byte(out), &readback))
 	require.NotNil(t, readback.Job.DeletedAt)
+}
+
+func TestCronCLIJobMutationWaitsForForwardingBudget(t *testing.T) {
+	t.Setenv("KATA_AUTHOR", "worker")
+	// Shrink the ordinary request budget so a short delay outlasts it.
+	t.Setenv("KATA_HTTP_TIMEOUT", "100ms")
+	var mutation atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/projects" {
+			_, _ = io.WriteString(w, `{"projects":[{"id":7,"name":"spoke-project"}]}`)
+			return
+		}
+		if r.URL.Path == "/api/v1/projects/7" {
+			_, _ = io.WriteString(w, `{"project":{"id":7,"name":"spoke-project"}}`)
+			return
+		}
+		if r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/cron/jobs/") {
+			mutation.Store(true)
+			timer := time.NewTimer(300 * time.Millisecond) //nolint:kennlint // deadlinetest: absence window; the fake holds the response past the 100ms KATA_HTTP_TIMEOUT, so only the long-running mutation client waits for it
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+			case <-r.Context().Done():
+				return
+			}
+			_, _ = io.WriteString(w, `{"job":{"uid":"01J00000000000000000000001","definition_event_uid":"01J00000000000000000000002"}}`)
+			return
+		}
+		t.Errorf("unexpected cron CLI request %s %s", r.Method, r.URL.Path)
+	}))
+	t.Cleanup(server.Close)
+
+	file := cronCLIFile(t, cronCLIJob(t))
+	_, _, err := executeCronCLI(t, server.URL, nil, "job", "create", "--uid", strings.ToLower(cronCLIUID(t)), "--file", file)
+	require.NoError(t, err)
+	require.True(t, mutation.Load(), "job mutation must reach the daemon")
 }
 
 func TestCronCLICapabilitiesEmptyProject(t *testing.T) {

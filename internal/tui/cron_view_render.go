@@ -44,12 +44,34 @@ func cronSchedule(t generated.TriggerResponse) string {
 			}
 			value = "once " + at.In(zone).Format("2006-01-02 15:04")
 		}
+	case "issue-deadline":
+		if lead := deref(t.LeadSeconds); lead > 0 {
+			value += ", " + cronLead(lead) + " before"
+		}
 	}
 	if deref(t.Timezone) != "" && deref(t.Timezone) != "UTC" {
 		value += " (" + deref(t.Timezone) + ")"
 	}
 	return value
 }
+
+func cronLead(seconds int64) string {
+	for _, unit := range []struct {
+		seconds int64
+		name    string
+	}{{86400, "day"}, {3600, "hour"}, {60, "minute"}, {1, "second"}} {
+		if seconds%unit.seconds == 0 {
+			count := seconds / unit.seconds
+			name := unit.name
+			if count != 1 {
+				name += "s"
+			}
+			return fmt.Sprintf("%d %s", count, name)
+		}
+	}
+	return ""
+}
+
 func cronAction(p cronData, j generated.CronJob) string {
 	if j.Definition.Action.Kind == "notify" {
 		return "notify"
@@ -203,6 +225,12 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			name = j.Name
 			d.field("State", cronJobState(*j))
 			d.field("Schedule", cronSchedule(j.Definition.Trigger))
+			if label, times := cronNextRuns(p, *j, renderNow()); len(times) > 0 {
+				d.field(label, times[0])
+				for _, t := range times[1:] {
+					d.text(strings.Repeat(" ", d.labelWidth+1)+t, cronRef{})
+				}
+			}
 			d.field("Action", cronAction(p, *j))
 			if uid := deref(j.Definition.Action.WorkflowUID); uid != "" {
 				cronDefinitionLink(&d, p, uid, "", true)

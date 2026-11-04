@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-10-30
+last_edited: 2026-11-03
 ---
 
 # HTTP API schema
@@ -40,6 +40,22 @@ code to branch in scripts, rather than matching the message or hint.
 
 ```json
 {"error":{"code":"project_not_initialized","message":"no .kata.toml ancestor and no git ancestor","hint":"run \"kata init --project <name>\" in the workspace root, or pass --project <name>"}}
+```
+
+`project_not_initialized` puts the name it looked up in `data`, only when the
+message names it:
+
+| Request | `data` |
+| --- | --- |
+| An alias that points at an archived project | `alias` |
+| Only an alias, not registered (the CLI in a git workspace without `.kata.toml`) | `alias` |
+| A project name that is not registered, from `--project`, `.kata.toml`, or a `name:` project selector, with or without an alias | `project` |
+| A `start_path` whose `.kata.toml` names an unregistered project | `project` |
+| A `start_path` in a git workspace whose alias is not registered | none |
+| No `.kata.toml` and no git ancestor | none |
+
+```json
+{"error":{"code":"project_not_initialized","message":"alias github.com/example/spoke-project is not registered","hint":"run \"kata init\" in this workspace","data":{"alias":"github.com/example/spoke-project"}}}
 ```
 
 The CLI preserves the hint in human, agent, and JSON errors. See
@@ -226,6 +242,7 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 | Version | Change |
 | --- | --- |
+| `0.38.0` | Publishes `POST /projects/{project_id}/issues/{ref}/attachments/links`, which saves a reference to an existing Docbank file version without uploading its bytes. `kata docbank attachments link` refuses older daemons. |
 | `0.37.0` | `POST /projects/{project_id}/recurrences` accepts `If-Match: "rev-N"` with `initial_issue_ref`; a different issue revision returns 412 `revision_conflict` and writes nothing. An empty `If-Match` returns 400. Older daemons ignore the header. |
 | `0.36.0` | Issue list rows, show output and ready rows carry `scheduled_on_date` and `deadline_on_date`, the `scheduled_on` and `deadline_on` metadata as `YYYY-MM-DD` calendar dates, each omitted when its key is absent or its value cannot be read. Older daemons omit both fields. |
 | `0.35.0` | Moves include the issue subtree by default; `single` keeps the move to one issue. `X-Kata-Project-Scope` narrows requests to fixed projects and is enforced in the transaction, including historical issue references. Older daemons do not enforce this header. |
@@ -889,8 +906,7 @@ federated event log.
 uploads the raw request body as `application/octet-stream` to Docbank and
 returns the new `attachment_id` with its stored reference. `GET
 /api/v1/projects/{project_id}/issues/{ref}/attachments/{attachment_id}/content`
-streams the file back. Both return `docbank_not_configured` when the daemon has
-no Docbank. See [Issue attachments](../guide/attachments.md).
+streams the file back. `POST /api/v1/projects/{project_id}/issues/{ref}/attachments/links` saves a reference to an existing Docbank file version. Its JSON body takes exactly one of `node_id` or `path`, an optional `version_id`, and `actor`. All three routes return `docbank_not_configured` when the daemon has no Docbank. See [Issue attachments](../guide/attachments.md).
 
 ## Project Hygiene Endpoints
 

@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -12,6 +12,25 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Keep issue writes responsive during due-date sweeps. Sweeps skip date values
   more than 24h past UTC now, including every issue 36h or more out in any zone.
   Other checks take SQLite's writer only for due notifications or cleanup.
+- Add, edit, and delete comments, or edit issue titles and bodies, without
+  reindexing every comment on the issue. Search still finds words spread across
+  an issue and its comments; scores now sum each word's best document score,
+  so ranking can shift. SQLite phrases must fit within one document. Comment
+  search cost follows the number of matching comments.
+  Existing stores upgrade to schema 41 through SQLite's JSONL cutover or the
+  [offline PostgreSQL migration](development/postgres-migrations.md#schema-41-separate-comment-search-documents).
+
+- Load the web UI's issue list and graph on SQLite and PostgreSQL stores with
+  tens of thousands of issues without exceeding SQL parameter limits.
+- See when a cron job runs next: the `kata tui` Jobs tab detail lists the next
+  three times in the trigger's timezone, computed with the same schedule code
+  the daemon delivers with, including daylight-saving changes. A native
+  recurring job reads **Next** and steps from its saved progress. An adapter's
+  cron or `once` trigger reads **Triggers**, since the adapter decides when it
+  fires; an adapter interval shows no time. A paused job, or a native job whose
+  parent is closed, shows none. An issue-deadline trigger now says how long
+  before the deadline it fires. See
+  [CLI reference](reference/cli.md#daemon-and-diagnostics).
 - Receive direct legacy spoke creations through relays on SQLite roots before later root updates, preventing "references unknown issue" errors on relays while preserving the original event identity and hash. Thanks to [Rusty Shackleford](https://github.com/salmonumbrella).
 
 - Keep the browser reachable when `kata daemon restart` runs from a sandbox or
@@ -24,6 +43,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Wait up to 90 seconds for the replacement's startup check, daemon shutdown,
   and replacement readiness during restart, extending the wait while an SQLite
   migration runs.
+- Read which alias or project Kata looked up from `error.data` when a command
+  fails with `project_not_initialized`, instead of parsing the message. `data`
+  holds `alias` or `project` when the message names that alias or project. See
+  the [HTTP API errors table](reference/http-api.md#errors) for exceptions.
+  The message, hint, and exit code are unchanged. Thanks to
+  [Dangerboi](https://github.com/Dangerboi).
 - Manage cron jobs, workflows and run evidence from MCP: load `kata.load_cron`
   for 17 tools over the daemon's existing cron API. Native notification jobs
   use the daemon scheduler; recording a run never starts work or changes who
@@ -70,6 +95,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
   again inside the transaction that starts the recurrence (daemon API 0.37.0),
   and an issue moved to another project is repeated in its current project.
 
+- Reopening a parent in the TUI now shows how many recurring children it will
+  deliver. Press `r` in the list or detail view, or `u` to undo a close, on a
+  parent whose `catchup: "all"` job missed several occurrences, and the TUI
+  asks you to reopen or cancel with the exact count. It names
+  `kata cron job update` for changing catch-up. One or zero due children reopen
+  without a prompt. See the [CLI reference](reference/cli.md).
 - Get an immediate error when a daemon in another PID namespace, such as one in
   a sandbox or container sharing your `KATA_HOME`, already owns the store.
   `kata` commands, `kata daemon start`, and foreground startup previously

@@ -72,7 +72,11 @@ func TestWebDaemonGatewayAppliesWebLocalProjectPolicyBeforeForwarding(t *testing
 			assert.Equal(t, test.want, response.Code, response.Body.String())
 		})
 	}
-	assert.Equal(t, 1, calls)
+	linkResponse := authorizedGatewayRequest(t, handler, manager, issued, http.MethodPost,
+		"/api/v1/projects/7/issues/abc4/attachments/links",
+		strings.NewReader(`{"node_id":42,"actor":"user-a"}`), "")
+	assert.Equal(t, http.StatusNoContent, linkResponse.Code, linkResponse.Body.String())
+	assert.Equal(t, 2, calls)
 }
 
 func TestWebDaemonRestrictedRosterFallsBackToLocalMux(t *testing.T) {

@@ -136,7 +136,7 @@ to a fixed cap, so long issues get full semantic coverage rather than losing
 everything past the old ~8k-character cutoff. Comments are deliberately not
 embedded:
 
-- A new comment is findable immediately through the FTS comments column; it
+- A new comment is findable immediately through the per-comment full-text index; it
   never creates embedding staleness or an embedding API call.
 - The named gap: comment-only *conceptual* matches (paraphrase that lives
   solely in comments) will not vector-match. Lexical comment matches still

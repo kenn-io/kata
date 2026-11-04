@@ -100,6 +100,8 @@ func TestWebLocalSessionIsLimitedToSPAOperations(t *testing.T) {
 		{name: "attachment bytes", method: http.MethodGet, path: "/api/v1/projects/7/issues/abc4/attachments/id/content", want: http.StatusNoContent},
 		{name: "attachment upload", method: http.MethodPost, path: "/api/v1/projects/7/issues/abc4/attachments", want: http.StatusNoContent},
 		{name: "proxied attachment upload", method: http.MethodPost, path: "/api/v1/ui/proxy/api/v1/projects/7/issues/abc4/attachments", want: http.StatusNoContent},
+		{name: "attachment link", method: http.MethodPost, path: "/api/v1/projects/7/issues/abc4/attachments/links", want: http.StatusNoContent},
+		{name: "proxied attachment link", method: http.MethodPost, path: "/api/v1/ui/proxy/api/v1/projects/7/issues/abc4/attachments/links", want: http.StatusNoContent},
 		{name: "issue edit", method: http.MethodPatch, path: "/api/v1/projects/7/issues/abc4", want: http.StatusNoContent},
 		{name: "recurrence deletion", method: http.MethodDelete, path: "/api/v1/projects/7/recurrences/01J00000000000000000000001", want: http.StatusNoContent},
 		{name: "federation", method: http.MethodPost, path: "/api/v1/federation/replicas", want: http.StatusForbidden},

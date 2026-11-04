@@ -203,6 +203,10 @@ func relayHistoryHasBoundaryAfterTx(ctx context.Context, tx *sql.Tx, projectID, 
 	if outOfOrder {
 		return true, nil
 	}
+	return relayHistoryCrossesProjectAfterTx(ctx, tx, projectID, after)
+}
+
+func relayHistoryCrossesProjectAfterTx(ctx context.Context, tx *sql.Tx, projectID, after int64) (bool, error) {
 	for {
 		//nolint:gosec // Only fixed event-type SQL is concatenated; values use placeholders.
 		rows, err := tx.QueryContext(ctx, `SELECT e.id FROM events e WHERE e.project_id=? AND e.id>? AND `+federationPushEventTypeCondition("e.type")+` ORDER BY e.id LIMIT 100`, projectID, after)

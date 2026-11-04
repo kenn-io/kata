@@ -240,6 +240,8 @@ type Storage interface {
 
 	// search
 	SearchFTS(ctx context.Context, p SearchFTSParams) ([]SearchCandidate, error)
+	// SearchFTSAny finds at least one query term in title and body documents only
+	// for look-alike checks. Comments don't contribute candidates, scores, or MatchedIn flags.
 	SearchFTSAny(ctx context.Context, p SearchFTSParams) ([]SearchCandidate, error)
 
 	// embeddings (semantic search)

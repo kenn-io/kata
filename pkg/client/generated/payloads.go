@@ -106,6 +106,8 @@ type UnassignIssueBody = UnassignRequestBody
 
 type AddAttachmentBody = runtime.File
 
+type LinkAttachmentBody = LinkAttachmentInput
+
 type BindExternalRootBody = BindExternalRootRequestBody
 
 type PauseExternalRootBridgeBody = ExternalRootActionRequestBody

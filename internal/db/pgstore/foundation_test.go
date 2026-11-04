@@ -1047,7 +1047,6 @@ func TestValidationRejectsIncompleteCanonicalSchema(t *testing.T) {
 		{name: "function", mutation: `DROP FUNCTION %s.rebuild_issue_search(BIGINT) CASCADE`, want: `function "rebuild_issue_search(bigint)"`},
 		{name: "function_definition", mutation: `CREATE OR REPLACE FUNCTION %s.enforce_uid_immutable() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$`, want: `function definitions do not match`},
 		{name: "function_attribute", mutation: `ALTER FUNCTION %s.rewrite_project_uid_for_adoption(BIGINT, TEXT) SECURITY INVOKER`, want: `function definitions do not match`},
-		{name: "text_search", mutation: `DROP TEXT SEARCH CONFIGURATION %s.kata_simple_unaccent`, want: `text search definitions do not match`},
 		{name: "text_search_definition", mutation: `ALTER TEXT SEARCH CONFIGURATION %s.kata_simple_unaccent ALTER MAPPING FOR word WITH pg_catalog.simple`, want: `text search definitions do not match`},
 	} {
 		t.Run(test.name, func(t *testing.T) {

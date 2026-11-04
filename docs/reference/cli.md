@@ -56,6 +56,9 @@ Errors go to stderr in the selected output mode.
 | 7 | Daemon unavailable. |
 | 8 | Wait timeout. |
 
+With `--json`, a `project_not_initialized` error names the alias or project Kata
+looked up in `error.data`; see [HTTP API errors](http-api.md#errors).
+
 ## Workspace initialization
 
 ```sh
@@ -1908,6 +1911,8 @@ accepts the same bare short ID, qualified short ID, and full UID forms as
 
 **Cron tabs.** Press `1` for Kata, `2` for Jobs, `3` for Runs, or `4` for Workflows. Runs and Workflows are read-only; Jobs can create and change jobs (below). Cron tabs show the current project. In All projects, press `P` to pick one. Each tab keeps its filter and position when you switch tabs. Returning to Kata preserves the issue you were browsing.
 
+A job's detail lists its next three run times in the trigger's timezone, with the zone abbreviation so daylight-saving changes read clearly. A native recurring job shows them as **Next**, stepping from the progress the daemon saved on its parent issue. An adapter job shows its cron and `once` trigger times as **Triggers**; they are when the adapter's trigger fires, because Kata holds no anchor or catch-up for an adapter, and an adapter interval shows no time. A paused job shows none, as does a native job whose parent issue is closed or deleted, because the daemon delivers only while the parent is open. A native job whose parent or progress cannot be read shows **unavailable**. An adapter cron expression is read in its own `TZ=` or `CRON_TZ=` zone when it has one, and an `@every` expression shows no time.
+
 | Key | Cron lists and details |
 | --- | --- |
 | `j` / `k` | Move through records or every line of a detail. |
@@ -1980,6 +1985,15 @@ Esc or Backspace returns to the same request and message scroll
 position; `c` clears the selected request
 (daemon API `0.13.0` or newer, guarded against a concurrent replacement);
 `r` refreshes. Press `T` or Esc to return to the previous view.
+
+Press `r` in the issue list or detail view to reopen an issue. When the issue
+is the parent of native recurring jobs, the TUI first counts the children that
+reopening would deliver, summed across its jobs from their stored progress. If
+more than one child is due, it shows the exact count and asks you to reopen or
+cancel; zero or one due child reopens without a prompt. The prompt names
+[`kata cron job update`](cron.md) for changing a job's catch-up and does not
+choose a policy for you. Undoing a close asks the same way. If the TUI cannot
+read the jobs, it reopens without a prompt.
 
 Press `u` in the issue list or detail view to undo the latest eligible issue
 edit from this TUI session. Repeated presses walk back through up to 20 edits,
@@ -2435,6 +2449,7 @@ On main after 0.20.0, attach files to an issue with Docbank, then list, download
 
 ```sh
 kata docbank attachments add <issue> <file>...
+kata docbank attachments link <issue> <node-id|/path> [--version UUID]
 kata docbank attachments ls <issue>
 kata docbank attachments get <issue> <attachment> [-o PATH] [--force]
 kata docbank attachments rm <issue> <attachment>
