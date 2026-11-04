@@ -131,7 +131,7 @@ func cronOperationHelp(resource, action string) (string, string) {
 	switch resource + " " + action {
 	case "capabilities show":
 		return `Show whether the daemon supports shared cron and recurring child issues for
-this project (cron_v1 covers all cron features). Reads only; creates no cron state.`, "  kata cron capabilities --json"
+this project, including structured run summaries. Reads only; creates no cron state.`, "  kata cron capabilities --json"
 	case "run list":
 		return `List the project's recorded runs, newest first. --job-uid lists one job's runs.
 For the next page, pass the response's next_before_uid as --before-uid.`,
