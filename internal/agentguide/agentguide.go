@@ -238,6 +238,23 @@ const fragScheduling = `7. Use native planning dates deliberately:
    kata meta set <ref> someday true --json-value
    kata meta unset <ref> someday
 
+   # Waiting on a person: keep yourself as owner, label, ask, and schedule together.
+   kata label add <ref> waiting
+   kata notify <ref> --to alex --message "Please decide" --follow-up <date-or-time>
+   kata list --all --label waiting
+   kata inbox --for alex --all
+   kata ready --no-label waiting
+   # Delivered: clear the request, label, and shared date separately.
+   kata notify <ref> --to alex --clear
+   kata label rm <ref> waiting
+   kata schedule <ref> -
+
+   Outside handles are supported Kata inbox addresses, not email delivery.
+   Follow-up replaces the issue's shared schedule; clearing an ask keeps the date.
+   The current owner (author when unowned) gets the due reminder, after any
+   occupied inbox request is cleared. Do not park waits behind a permanent blocker.
+   Full recipe: https://katatracker.com/docs/workflows/agents/#waiting-on-a-person
+
    Date and time values accept YYYY-MM-DD, local YYYY-MM-DDTHH:MM[:SS],
    or an RFC 3339 UTC instant ending in Z.
 

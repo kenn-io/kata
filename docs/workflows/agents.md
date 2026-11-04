@@ -1,5 +1,5 @@
 ---
-last_edited: 2026-10-30
+last_edited: 2026-11-04
 ---
 
 # Agent workflows
@@ -409,6 +409,53 @@ kata meta unset <ref> someday
 Once a schedule or deadline is reached, the daemon writes the same `notify.*`
 request used by `kata notify` for the current owner, or the author when unowned.
 The recipient clears it with `kata notify <ref> --to <recipient> --clear`.
+
+### Waiting on a person
+
+Keep the issue assigned to the person waiting for an answer. Label it `waiting`,
+address the ask to the other person, and set when to follow up in one command:
+
+```sh
+kata label add abc4 waiting
+kata notify abc4 --to alex --message "Please decide on the proposed host names" --follow-up 2026-11-10
+
+# All waiting work, all asks addressed to alex, and an agent queue without waits.
+kata list --all --label waiting
+kata inbox --for alex --all
+kata ready --no-label waiting
+
+# Nudge and replace the issue's follow-up date.
+kata notify abc4 --to alex --message "Following up" --follow-up 2026-11-24
+
+# Delivered: clear the ask, label, and date.
+kata notify abc4 --to alex --clear
+kata label rm abc4 waiting
+kata schedule abc4 -
+```
+
+`alex` may be an outside person's handle; it need not name a Kata actor.
+This creates a request in that exact Kata inbox. It does not contact the person
+through email or another service.
+
+`--follow-up` uses the same dates and timezone rules as `kata schedule`, including
+past dates. A future date parks the issue. On that date, the schedule gate opens
+and the daemon reminds the current owner, or the author when unowned. Other
+gates such as `someday` or an open blocker still apply; `--no-label waiting`
+continues excluding the issue while it has that label.
+
+The reminder uses the owner's ordinary inbox slot and waits if another request
+occupies it. Clear a handled reminder with `kata notify abc4 --to <owner> --clear`;
+clearing alex's request is separate. A reminder already delivered and cleared
+for the same recipient and date is not sent again. On federated projects, the
+hub generates reminders and replication delivers them; a disconnected spoke does
+not generate its own reminders.
+
+Every follow-up replaces the issue's single shared schedule, while requests to
+other people remain. Clearing or answering an ask leaves the date in place, so
+clear it explicitly when the wait ends. Keep a separate promise issue only for a
+real deliverable: assigning it to the other person sends its due reminder to
+them. A permanent umbrella blocker keeps work blocked after its date arrives;
+use a schedule on the waiting issue instead.
 
 Guidance files produce tendency, not contract: an agent can still end a session
 without updating its issue. For Claude Code workspaces,
