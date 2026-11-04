@@ -1768,7 +1768,10 @@ kata tui [issue-ref]
 `kata daemon logs --tail` follows complete records across retained rotations. If
 the previous file has been evicted, it resumes from the oldest retained file.
 History already evicted by retention cannot be recovered; run without `--tail`
-to read all retained history. See [Cron diagnostics](cron.md)
+to read all retained history. This also applies to `--hooks`: when only rotated
+files exist at startup, tail retains the newest snapshot position and follows
+the active file when it appears, without replaying that snapshot. Hook writer
+behavior is unchanged. See [Cron diagnostics](cron.md)
 for decision filters, local history limits and `job show --why`.
 
 Search stays visible above the issue list and the Jobs, Runs, and Workflows
