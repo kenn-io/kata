@@ -18,13 +18,14 @@ type RecurrenceInput struct {
 	recurrenceclient.Terms
 	IssueRevision int64
 	Recurrence    *recurrenceclient.View
+	Stop          bool
 }
 
 type recurrenceAPI interface {
 	SaveRecurrence(ctx context.Context, projectID int64, ref string, in RecurrenceInput) (*MutationResp, error)
 }
 
-// SaveRecurrence starts or changes the recurrence of an issue through
+// SaveRecurrence starts, changes, or stops the recurrence of an issue through
 // the same shared logic as kata schedule --repeat. The daemon validates the
 // rule; its refusal comes back as the error.
 func (c *Client) SaveRecurrence(ctx context.Context, projectID int64, ref string, in RecurrenceInput) (*MutationResp, error) {
@@ -46,20 +47,27 @@ func (c *Client) SaveRecurrence(ctx context.Context, projectID int64, ref string
 		return nil, &mutationPreflightError{errCronParent()}
 	}
 	changed := true
-	issueZone, _ := issue.Metadata["timezone"].(string)
-	zone, zoneErr := recurrenceclient.ResolveZone(in.Zone, in.Recurrence.Zone(), issueZone, localZone)
-	switch {
-	case errors.Is(zoneErr, recurrenceclient.ErrLocalZone):
-		return nil, &mutationPreflightError{errors.New(`"Local" is not an IANA zone; enter a name like Europe/Paris`)}
-	case zoneErr != nil:
-		return nil, &mutationPreflightError{errors.New("no timezone known for this recurrence; enter an IANA zone like Europe/Paris")}
-	}
-	terms := in.Terms
-	terms.Zone = zone
-	if in.Recurrence != nil {
-		changed, err = recurrenceclient.Change(ctx, apiClient, issue.ProjectID, *in.Recurrence, terms)
+	if in.Stop {
+		if in.Recurrence == nil {
+			return nil, &mutationPreflightError{errors.New("no active recurrence to stop")}
+		}
+		err = recurrenceclient.Stop(ctx, apiClient, issue.ProjectID, *in.Recurrence, in.Actor)
 	} else {
-		err = startRecurrence(ctx, apiClient, issue.ProjectID, issue.UID, wire, in, terms)
+		issueZone, _ := issue.Metadata["timezone"].(string)
+		zone, zoneErr := recurrenceclient.ResolveZone(in.Zone, in.Recurrence.Zone(), issueZone, localZone)
+		switch {
+		case errors.Is(zoneErr, recurrenceclient.ErrLocalZone):
+			return nil, &mutationPreflightError{errors.New(`"Local" is not an IANA zone; enter a name like Europe/Paris`)}
+		case zoneErr != nil:
+			return nil, &mutationPreflightError{errors.New("no timezone known for this recurrence; enter an IANA zone like Europe/Paris")}
+		}
+		terms := in.Terms
+		terms.Zone = zone
+		if in.Recurrence != nil {
+			changed, err = recurrenceclient.Change(ctx, apiClient, issue.ProjectID, *in.Recurrence, terms)
+		} else {
+			err = startRecurrence(ctx, apiClient, issue.ProjectID, issue.UID, wire, in, terms)
+		}
 	}
 
 	if err != nil {

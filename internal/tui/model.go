@@ -1076,10 +1076,12 @@ func (m Model) mutationForKey(msg tea.KeyPressMsg) (withinSubtree, mutation bool
 	case m.keymap.Delete.matches(msg):
 		// Issue-scoped credentials cannot delete, whatever else they may edit.
 		return false, true
-	case m.keymap.Close.matches(msg), m.keymap.Reopen.matches(msg), m.keymap.SetDates.matches(msg), m.keymap.SetRecurrence.matches(msg):
+	case m.keymap.Close.matches(msg), m.keymap.Reopen.matches(msg), m.keymap.SetDates.matches(msg):
 		return true, true
 	case !m.detailIsActive():
 		return false, false
+	case m.keymap.SetRecurrence.matches(msg):
+		return true, true
 	case m.keymap.SetParent.matches(msg):
 		return false, true
 	default:
@@ -1853,7 +1855,7 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 		m.input.saving = false
 		m.input.err = mut.kind + " failed: " + mut.err.Error()
 		if m.input.kind == inputRecurrenceForm {
-			action := map[string]string{"recurrence.start": "start", "recurrence.change": "change"}[mut.kind]
+			action := map[string]string{"recurrence.start": "start", "recurrence.change": "change", "recurrence.stop": "stop"}[mut.kind]
 			m.input.err = "Could not " + action + " repeat: " + mut.err.Error()
 		}
 		return m, m.reportShownError(mut.kind)
