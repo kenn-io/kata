@@ -67,9 +67,12 @@ func (m Model) cronNoticeSuppressed(r cronRunEvent) bool {
 
 // A local revision newer than the snapshot at announcement supersedes it.
 // Source peer revisions are incomparable with these store-local CAS tokens.
+// The store folds a run's concurrent observations by an HLC the client never
+// sees, so a read issued after the event, which settles its change mark, is
+// that resolution, even when the event lost the fold at an equal revision.
 func (m Model) cronNoticeNewest(r cronRunEvent) generated.CronRun {
 	if m.cron.data != nil {
-		if known, ok := m.cron.data.run(r.UID); ok && known.Revision > r.localRevision {
+		if known, ok := m.cron.data.run(r.UID); ok && (known.Revision > r.localRevision || m.cron.changed[r.UID].at == 0) {
 			return known
 		}
 	}
@@ -119,7 +122,7 @@ func (m Model) cronNoticeArm() (Model, tea.Cmd) {
 	}
 	m.cronNotices.pending = maps.Clone(m.cronNotices.pending)
 	for uid, r := range m.cronNotices.pending {
-		if !m.cronRunUnseen(r.ProjectUID, r.run()) || m.cronNoticeSuppressed(r) {
+		if !m.cronRunUnseen(r.ProjectUID, m.cronNoticeNewest(r)) || m.cronNoticeSuppressed(r) {
 			delete(m.cronNotices.pending, uid)
 		}
 	}
@@ -144,7 +147,7 @@ func (m Model) cronNoticeFlush(msg cronNoticeTickMsg) (Model, tea.Cmd) {
 	}
 	eligible := []cronRunEvent{}
 	for _, r := range pending {
-		if m.cronRunUnseen(r.ProjectUID, r.run()) && !m.cronNoticeSuppressed(r) {
+		if m.cronRunUnseen(r.ProjectUID, m.cronNoticeNewest(r)) && !m.cronNoticeSuppressed(r) {
 			eligible = append(eligible, r)
 		}
 	}

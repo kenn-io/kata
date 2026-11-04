@@ -2803,9 +2803,7 @@ func cacheKeysEqual(a, b cacheKey) bool {
 // project gets a fresh dispatch. This is a SECOND, additional cmd —
 // it doesn't replace or short-circuit the list/detail refetch above.
 func (m Model) handleEventReceived(msg eventReceivedMsg) (tea.Model, tea.Cmd) {
-	var noticeCmd tea.Cmd
-	m, noticeCmd = m.cronNoticeEvent(msg)
-	cmds := []tea.Cmd{m.waitForSSE(), noticeCmd}
+	cmds := []tea.Cmd{m.waitForSSE()}
 	if m.eventAffectsView(msg) {
 		if strings.HasPrefix(msg.eventType, "cron.") || msg.eventType == "project.merged" || msg.eventType == "project.removed" || msg.eventType == "project.restored" || m.cronParentEvent(msg) {
 			m.cron.events++
@@ -2832,7 +2830,9 @@ func (m Model) handleEventReceived(msg eventReceivedMsg) (tea.Model, tea.Cmd) {
 		m = next
 		cmds = append(cmds, cmd)
 	}
-	return m, tea.Batch(cmds...)
+	// Notices run after the change mark, which a later read settles.
+	m, noticeCmd := m.cronNoticeEvent(msg)
+	return m, tea.Batch(append(cmds, noticeCmd)...)
 }
 
 // maybeRefetchLabels invalidates the project-label cache when an SSE
