@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -3418,23 +3417,10 @@ func (m Model) dispatchToView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// a retained pane. Generation checks inside detailModel reject obsolete
 	// responses, so route them independently of the active layout/view.
 	if isDetailFetchMsg(msg) {
-		var applied bool
-		m.detail, applied = m.detail.applyFetchedIfFresh(msg)
+		var cmd tea.Cmd
+		m.detail, cmd = m.detail.Update(msg, m.keymap, m.api)
 		m = m.syncAttentionReturnDetail(msg)
-		if fetched, ok := msg.(detailFetchedMsg); ok && applied && (m.view == viewDetail || (m.view == viewList && m.layout == splitlayout.Split)) {
-			if apiErr, ok := errors.AsType[*APIError](fetched.err); ok && apiErr.Code == "issue_not_found" {
-				if len(m.detail.navStack) == 0 {
-					m.detail.cancelReads()
-					m.detail = newDetailModel()
-					next, cmd, _ := m.routeTopLevel(popDetailMsg{})
-					return next, cmd
-				}
-				var cmd tea.Cmd
-				m.detail, cmd = m.detail.handleBack(m.api)
-				return m, withConnGen(cmd, m.connGen)
-			}
-		}
-		return m, nil
+		return m, withConnGen(cmd, m.connGen)
 	}
 	if _, isKey := msg.(tea.KeyPressMsg); isKey && m.view != viewList && m.view != viewDetail {
 		return m, nil

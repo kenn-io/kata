@@ -2009,16 +2009,14 @@ run one at a time; quick successive edits wait for the current edit to finish.
 Creating an issue or comment, making a timed assignment or owner edit involving
 an expiry, changing the status of a recurring issue, closing an issue with a
 live federation lease, or reopening an issue closed for a reason other than
-`done` clears the undo history except deletions. Switching daemons clears all
-history.
+`done` clears the undo history. Switching daemons also clears it.
 Except when restoring a deletion, undo reads the affected issue or exact link
 and refuses an observed conflicting change. It skips that history entry without
 changing the issue, so pressing `u` again reaches earlier edits. The revision
 check also rejects intervening status or owner changes, including changes away
 and back to the same value. These checks are not atomic: another client can
 edit the same field between the read and the undo write. A failed write with
-an uncertain outcome clears history except deletions to avoid repeating a
-change.
+an uncertain outcome clears history to avoid repeating a change.
 
 Press `C` to open the read-only credential ledger when the selected daemon
 advertises `token_audit_read`. It lists live, expired, and revoked credentials
@@ -2049,18 +2047,18 @@ current dates so you can edit them again. The detail properties show both
 dates once either is set, and `u` writes the previous dates back under the
 same revision check.
 
-In the issue list or detail, press `X` to soft-delete the selected issue. The
-form shows the issue's title and the header `DELETE <project>#<id>`, the string
-`kata delete --confirm` takes. Type `DELETE <project>#<id>` and press `Enter`.
-`Enter` does nothing until the text matches. `Esc` cancels before the request
-starts. The selection then moves to the next row (the previous one after the
-last). A detail showing the issue returns as it does on `Esc`, and a notice
-names `u`. `u` restores the issue the way `kata restore` does; if the issue was
-restored elsewhere in the meantime, the TUI says so and
-changes nothing. Deletions survive writes that can't be undone and share the
-20-entry undo limit. Use
-`kata restore` after leaving the session. Issue-scoped credentials cannot delete or restore, so `X` is
-not offered to them and does nothing.
+In the issue list, press `X` to soft-delete the selected issue. In split
+layout, focus the list first. The form shows the issue's title and the header
+`DELETE <project>#<id>`, the string `kata delete --confirm` takes. Type
+`DELETE <project>#<id>` and press `Enter`. `Enter` does nothing until the text
+matches. `Esc` cancels before the request starts. The selection then moves to
+the next row (the previous one after the last), and a notice names `u`.
+`u` restores the issue the way `kata restore` does; if the issue was restored
+elsewhere in the meantime, the TUI says so and changes nothing. Deletions share
+the 20-entry undo limit and the history-clearing boundaries above. Use
+`kata restore` after the undo history clears or the session ends. Issue-scoped
+credentials cannot delete or restore, so `X` is not offered to them and does
+nothing.
 
 In the issue list, `v` toggles between nested and flat views: nested groups
 children under parents, while flat shows matching issues as peers in list

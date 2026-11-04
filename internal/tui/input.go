@@ -36,7 +36,7 @@ const (
 	inputFilterForm          // list `f` — multi-axis filter modal: Status/Owner/Search
 	inputCloseForm           // list/detail `x` — authenticated close message + evidence
 	inputDatesForm           // list/detail `d` — Scheduled and Deadline dates
-	inputDeleteForm          // list/detail `X` — typed <project>#<id> confirmation
+	inputDeleteForm          // list `X` — typed <project>#<id> confirmation
 )
 
 type searchFocus int

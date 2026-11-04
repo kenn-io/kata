@@ -35,22 +35,6 @@ func newDeleteForm(target formTarget, issue Issue, expected string) inputState {
 	return s
 }
 
-// deleteConfirmation uses the daemon's qualified list reference or resolves
-// the project for a detail response, which carries only the short ID.
-func (m Model) deleteConfirmation(issue Issue) string {
-	if issue.QualifiedID != "" {
-		return issue.QualifiedID
-	}
-	project := m.projectsByID[issue.ProjectID]
-	if project == "" && issue.ProjectID == m.scope.projectID {
-		project = m.scope.projectName
-	}
-	if project == "" {
-		return ""
-	}
-	return project + "#" + issue.ShortID
-}
-
 // deleteHidden reports whether the delete key is not on offer: the connected
 // credentials cannot delete. Footer, help overlay and chrome all read it.
 func (m Model) deleteHidden() bool {
@@ -71,11 +55,14 @@ func (m Model) routeDeleteKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if !m.keymap.Delete.matches(msg) {
 		return m, nil, false
 	}
+	if m.detailIsActive() {
+		return m, nil, true
+	}
 	target, issue, ok := m.activeIssueTarget()
 	if !ok {
 		return m, nil, true
 	}
-	expected := m.deleteConfirmation(issue)
+	expected := issue.QualifiedID
 	if expected == "" {
 		next, cmd := m.undoNotice("cannot delete: the issue's project is unknown", toastError)
 		return next, cmd, true
@@ -118,8 +105,8 @@ func dispatchFormDelete(apiClient any, target formTarget, qualifiedID, actor str
 }
 
 // finishDelete closes the form after the daemon deleted the issue: the row
-// leaves the list, the selection moves to its neighbour, a detail showing it
-// is left, and a notice says how to take the delete back.
+// leaves the list, the selection moves to its neighbour, and a notice says
+// how to take the delete back.
 func (m Model) finishDelete(target formTarget, mut mutationDoneMsg) (Model, tea.Cmd) {
 	qualified := m.input.del.expected
 	m.input = inputState{}
@@ -127,13 +114,10 @@ func (m Model) finishDelete(target formTarget, mut mutationDoneMsg) (Model, tea.
 	if mut.resp != nil && mut.resp.Issue != nil && mut.resp.Issue.UID != "" {
 		uid = mut.resp.Issue.UID
 	}
-	var leave tea.Cmd
-	if m.detail.issue != nil && m.detail.issue.UID != uid {
-		leave = m.refetchOpenDetail()
-	} else {
-		m, leave = m.leaveDeletedDetail(uid)
-	}
+	m.detail.cancelReads()
+	m.detail = newDetailModel()
 	m, follow := m.refreshListDay(func(lm listModel) listModel { return lm.withoutIssue(uid) })
+	m, detailCmd := m.maybeBootstrapSplitDetail()
 	if m.cache != nil {
 		m.cache.markStale()
 	}
@@ -142,23 +126,7 @@ func (m Model) finishDelete(target formTarget, mut mutationDoneMsg) (Model, tea.
 		message += "; press u to undo"
 	}
 	m, notice := m.undoNotice(message, toastInfo)
-	return m, combineCmds(follow, combineCmds(leave, combineCmds(notice, withConnGen(m.list.refetchCmd(m.api, m.scope), m.connGen))))
-}
-
-// leaveDeletedDetail goes Back when the live detail shows the deleted issue.
-func (m Model) leaveDeletedDetail(uid string) (Model, tea.Cmd) {
-	if m.detail.issue == nil || m.detail.issue.UID != uid {
-		return m, nil
-	}
-	if len(m.detail.navStack) > 0 {
-		var cmd tea.Cmd
-		m.detail, cmd = m.detail.handleBack(m.api)
-		return m, cmd
-	}
-	m.detail.cancelReads()
-	m.detail = newDetailModel()
-	next, cmd, _ := m.routeTopLevel(popDetailMsg{})
-	return next.(Model), cmd
+	return m, combineCmds(follow, combineCmds(detailCmd, combineCmds(notice, withConnGen(m.list.refetchCmd(m.api, m.scope), m.connGen))))
 }
 
 // withoutIssue drops a deleted issue from the list and selects the row after

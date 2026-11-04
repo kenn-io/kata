@@ -22,7 +22,7 @@ func (m Model) helpRows() [][]helplayout.HelpItem {
 	}
 	switch m.view {
 	case viewDetail:
-		return m.detail.detailHelpRows(m.deleteHidden())
+		return m.detail.detailHelpRows()
 	case viewList:
 		return m.list.queueHelpRows(m.deleteHidden())
 	case viewCredentials:
@@ -48,7 +48,7 @@ func (m Model) detailHelpRows() [][]helplayout.HelpItem {
 	if m.input.kind != inputNone {
 		return inputHelpRows(m.input)
 	}
-	return m.detail.detailHelpRows(m.deleteHidden())
+	return m.detail.detailHelpRows()
 }
 
 func (m Model) splitHelpRows() [][]helplayout.HelpItem {
@@ -59,7 +59,7 @@ func (m Model) splitHelpRows() [][]helplayout.HelpItem {
 		return inputHelpRows(m.input)
 	}
 	if m.focus == focusDetail {
-		return m.detail.detailHelpRows(m.deleteHidden())
+		return m.detail.detailHelpRows()
 	}
 	return m.list.queueHelpRows(m.deleteHidden())
 }
@@ -81,7 +81,7 @@ func detailHelpRows(dm detailModel, chrome viewChrome) [][]helplayout.HelpItem {
 	if chrome.input.kind != inputNone {
 		return inputHelpRows(chrome.input)
 	}
-	return appendUndoHint(dm.detailHelpRows(chrome.deleteHidden), chrome.undoAvailable)
+	return appendUndoHint(dm.detailHelpRows(), chrome.undoAvailable)
 }
 
 func appendUndoHint(rows [][]helplayout.HelpItem, available bool) [][]helplayout.HelpItem {
@@ -219,7 +219,7 @@ func (lm listModel) queueHelpRows(hideDelete bool) [][]helplayout.HelpItem {
 // child / N new child / p parent) but keeps the same action surface
 // because the same mutations apply to the parent issue regardless
 // of which section the cursor is on.
-func (dm detailModel) detailHelpRows(hideDelete bool) [][]helplayout.HelpItem {
+func (dm detailModel) detailHelpRows() [][]helplayout.HelpItem {
 	actions := []helplayout.HelpItem{
 		{Key: "e", Description: "edit"},
 		{Key: "c", Description: "comment"},
@@ -231,24 +231,19 @@ func (dm detailModel) detailHelpRows(hideDelete bool) [][]helplayout.HelpItem {
 		{Key: "x", Description: "close"},
 		{Key: "r", Description: "reopen"},
 		{Key: "d", Description: "dates"},
+		{Key: "p", Description: "parent"},
+		{Key: "b", Description: "block"},
+		{Key: "l", Description: "related"},
+		{Key: "!", Description: "priority"},
+		{Key: "D", Description: "daemons"},
+		{Key: "F", Description: "federation"},
+		{Key: "C", Description: "credentials"},
+		{Key: "N", Description: "child"},
+		{Key: "L", Description: "layout"},
+		{Key: "esc", Description: "back"},
+		{Key: "?", Description: "help"},
+		{Key: "q", Description: "quit"},
 	}
-	if !hideDelete {
-		actions = append(actions, helplayout.HelpItem{Key: "X", Description: "delete"})
-	}
-	actions = append(actions,
-		helplayout.HelpItem{Key: "p", Description: "parent"},
-		helplayout.HelpItem{Key: "b", Description: "block"},
-		helplayout.HelpItem{Key: "l", Description: "related"},
-		helplayout.HelpItem{Key: "!", Description: "priority"},
-		helplayout.HelpItem{Key: "D", Description: "daemons"},
-		helplayout.HelpItem{Key: "F", Description: "federation"},
-		helplayout.HelpItem{Key: "C", Description: "credentials"},
-		helplayout.HelpItem{Key: "N", Description: "child"},
-		helplayout.HelpItem{Key: "L", Description: "layout"},
-		helplayout.HelpItem{Key: "esc", Description: "back"},
-		helplayout.HelpItem{Key: "?", Description: "help"},
-		helplayout.HelpItem{Key: "q", Description: "quit"},
-	)
 	if dm.detailFocus == focusChildren && len(dm.children) > 0 {
 		nav := []helplayout.HelpItem{
 			{Key: "↑↓", Description: "scroll"},
