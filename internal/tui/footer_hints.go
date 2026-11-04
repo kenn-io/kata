@@ -134,14 +134,12 @@ func inputHelpRows(input inputState) [][]helplayout.HelpItem {
 			{Key: "enter", Description: "delete"},
 			{Key: "esc", Description: "cancel"},
 		}}
-	case kind == inputDatesForm:
+	case kind == inputDatesForm || kind == inputRecurrenceForm:
 		return [][]helplayout.HelpItem{{
 			{Key: "ctrl+o", Description: "save"},
 			{Key: "esc", Description: "cancel"},
 			{Key: "tab", Description: "field"},
 		}}
-	case kind == inputRecurrenceForm:
-		return [][]helplayout.HelpItem{recurrenceFormControls()}
 	case kind == inputNewIssueForm:
 		return [][]helplayout.HelpItem{{
 			{Key: "ctrl+o", Description: "create"},
