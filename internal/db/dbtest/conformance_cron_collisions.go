@@ -22,7 +22,7 @@ func checkCronValidateCollisions(t *testing.T, s db.Storage) error {
 	require.NoError(t, err)
 	other, err := s.CreateProject(ctx, "other-project")
 	require.NoError(t, err)
-	job := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "cron", Cron: "0 9 * * *"}, Action: cron.Action{Kind: "execute", Prompt: "Review"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "latest"}
+	job := cronValidationJob()
 	put := func(projectID int64, name string, def cron.JobDefinition) db.CronJob {
 		t.Helper()
 		j, _, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: projectID, Name: name, Definition: def, Actor: "operator"})
@@ -151,7 +151,7 @@ func checkCronValidateCollisionReadBounds(t *testing.T, s db.Storage) error {
 	ctx := t.Context()
 	project, err := s.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
-	job := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "cron", Cron: "0 9 * * *"}, Action: cron.Action{Kind: "execute", Prompt: "Review"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "latest"}
+	job := cronValidationJob()
 	seed, _, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "Seed", Definition: job, Actor: "operator"})
 	require.NoError(t, err)
 	q := s.(interface {

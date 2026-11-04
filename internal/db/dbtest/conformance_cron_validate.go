@@ -20,8 +20,7 @@ func checkCronValidate(t *testing.T, s db.Storage) error {
 	require.NoError(t, err)
 	other, err := s.CreateProject(ctx, "other-project")
 	require.NoError(t, err)
-	job := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "cron", Cron: "0 9 * * *"},
-		Action: cron.Action{Kind: "execute", Prompt: "Review"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "latest"}
+	job := cronValidationJob()
 	raw, err := json.Marshal(job)
 	require.NoError(t, err)
 	from := time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC)
@@ -311,4 +310,9 @@ func checkCronValidateDependencies(t *testing.T, s db.Storage) error {
 		}
 	}
 	return nil
+}
+
+func cronValidationJob() cron.JobDefinition {
+	return cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "cron", Cron: "0 9 * * *"},
+		Action: cron.Action{Kind: "execute", Prompt: "Review"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "latest"}
 }
