@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"encoding/json/v2"
 	"fmt"
 	"slices"
 	"strings"
@@ -56,9 +55,9 @@ type moveState struct {
 	filter   textinput.Model
 	projects []ProjectSummary
 	cursor   int
-	// disambiguators maps a project UID to the area or UID shown beside a
+	// nameContext maps a project UID to the area or UID shown beside a
 	// name another project shares.
-	disambiguators map[string]string
+	nameContext map[string]string
 	// projectNames maps every project id to its name, for naming where a
 	// previewed descendant lives.
 	projectNames map[int64]string
@@ -162,18 +161,9 @@ func (m Model) handleMoveProjects(msg moveProjectsMsg) Model {
 		}
 		return strings.Compare(a.UID, b.UID)
 	})
-	s.disambiguators = moveDestinationContexts(s.projects)
+	s.nameContext = moveDestinationContexts(s.projects)
 	m.move = s
 	return m
-}
-
-// jsonString reads a metadata value that holds a string; anything else is "".
-func jsonString(raw []byte) string {
-	var s string
-	if len(raw) == 0 || json.Unmarshal(raw, &s) != nil {
-		return ""
-	}
-	return strings.TrimSpace(s)
 }
 
 // moveDestinationContexts names what tells same-named projects apart, as the
@@ -185,7 +175,7 @@ func moveDestinationContexts(projects []ProjectSummary) map[string]string {
 		key := strings.ToLower(strings.TrimSpace(p.Name))
 		groups[key] = append(groups[key], p)
 	}
-	contexts := map[string]string{}
+	nameContext := map[string]string{}
 	for _, group := range groups {
 		if len(group) < 2 {
 			continue
@@ -198,13 +188,13 @@ func moveDestinationContexts(projects []ProjectSummary) map[string]string {
 		}
 		for _, p := range group {
 			if area := jsonString(p.Metadata.Area); area != "" && areaCount[area] == 1 {
-				contexts[p.UID] = area
+				nameContext[p.UID] = area
 			} else {
-				contexts[p.UID] = p.UID
+				nameContext[p.UID] = p.UID
 			}
 		}
 	}
-	return contexts
+	return nameContext
 }
 
 // choices are the projects whose name or context contains the filter text,
@@ -213,7 +203,7 @@ func (s moveState) choices() []moveChoice {
 	query := strings.ToLower(strings.TrimSpace(s.filter.Value()))
 	var out []moveChoice
 	for _, p := range s.projects {
-		extra := s.disambiguators[p.UID]
+		extra := s.nameContext[p.UID]
 		if query != "" && !strings.Contains(strings.ToLower(p.Name), query) &&
 			!strings.Contains(strings.ToLower(extra), query) {
 			continue
@@ -246,7 +236,7 @@ func (m Model) routeMoveModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	}
 	switch key {
 	case "esc":
-		m.move, m.modal = moveState{}, modalNone
+		return m.closeMoveForm(), nil
 	case "up", "ctrl+p":
 		s.cursor = max(s.cursor-1, 0)
 		m.move = s
@@ -298,14 +288,23 @@ func (m Model) dispatchMovePreview() (Model, tea.Cmd) {
 	s.seq++
 	s.sending, s.err = true, ""
 	m.move = s
-	mover, target := s.mover, s.target
 	in := MoveInput{Actor: m.moveActor(), ToProjectUID: s.chosen.UID, DryRun: true}
 	connGen, formGen, seq := m.connGen, s.formGen, s.seq
+	request := m.moveRequest(in)
 	return m, func() tea.Msg {
+		resp, err := request()
+		return movePreviewMsg{connGen: connGen, formGen: formGen, seq: seq, resp: resp, err: err}
+	}
+}
+
+// moveRequest is the daemon call for the open form's issue, shared by the
+// preview and the move itself.
+func (m Model) moveRequest(in MoveInput) func() (*MutationResp, error) {
+	mover, target := m.move.mover, m.move.target
+	return func() (*MutationResp, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		resp, err := mover.MoveIssue(ctx, target.projectID, target.issueShortID, in)
-		return movePreviewMsg{connGen: connGen, formGen: formGen, seq: seq, resp: resp, err: err}
+		return mover.MoveIssue(ctx, target.projectID, target.issueShortID, in)
 	}
 }
 
@@ -362,13 +361,11 @@ func (m Model) dispatchMove() (Model, tea.Cmd) {
 	}
 	s.sending, s.err, s.note = true, "", ""
 	m.move = s
-	mover, target := s.mover, s.target
 	in := MoveInput{Actor: m.moveActor(), ToProjectUID: s.chosen.UID, IfMatchRevision: s.preview.revision}
 	formGen := s.formGen
+	request := m.moveRequest(in)
 	return m, withConnGen(func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		resp, err := mover.MoveIssue(ctx, target.projectID, target.issueShortID, in)
+		resp, err := request()
 		return mutationDoneMsg{origin: "move", kind: "move", formGen: formGen, resp: resp, err: err}
 	}, m.connGen)
 }
@@ -408,7 +405,7 @@ func (m Model) finishMove(mut mutationDoneMsg) (Model, tea.Cmd) {
 	if mut.resp != nil && mut.resp.NewShortID != "" {
 		newRef += "#" + mut.resp.NewShortID
 	}
-	m.move, m.modal = moveState{}, modalNone
+	m = m.closeMoveForm()
 	m.list = m.list.selectBeside(s.target.issueUID, moved)
 	m.toast = &toast{
 		text:  sanitizeForLine(fmt.Sprintf("moved #%s to %s", s.target.issueShortID, newRef)),

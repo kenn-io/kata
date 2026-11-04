@@ -191,7 +191,7 @@ func TestMovePreviewNamesTheMoveAndListsDescendants(t *testing.T) {
 		want    []string
 		notWant string
 	}{
-		{"lone issue", nil, []string{"has no descendants, so it moves alone"}, "Single move"},
+		{"lone issue", nil, []string{"has no descendants, so it moves alone"}, "Subtree move"},
 		{"one descendant", family(Issue{UID: "kid-1", ShortID: "k001", Title: "Child one", ProjectID: 7}),
 			[]string{"Subtree move", "its 1 descendant move", "#k001 Child one"}, "1 descendants"},
 		{"several descendants", family(

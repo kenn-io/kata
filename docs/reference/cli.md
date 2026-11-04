@@ -2054,10 +2054,11 @@ project:
 1. A picker lists the daemon's projects except the issue's own, the Inbox
    project, and archived ones. Typing filters by name or by the text beside it.
    Projects that share a name are told apart by their area, or by their UID when
-   another of them has the same area.
+   another of them has the same area or they have none.
 2. `Enter` on a project sends a dry run, so nothing is written, and shows what
-   kata would do: the issue and its active descendants, listed one per line, or
-   a note that the issue has no descendants and moves alone. If the daemon
+   kata would do: the issue's active descendants, listed one per line (a long
+   list is cut off with "… and N more"), or a note that the issue has no
+   descendants and moves alone. If the daemon
    refuses, such as for a recurrence-pinned issue or an archived or federated
    project, the form shows its refusal in its own words. `Esc` returns to the
    picker.
