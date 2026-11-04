@@ -50,10 +50,10 @@ func (r *githubStatusRun) PrefetchStatuses(ctx context.Context, mappings []db.Is
 	if !ok {
 		return
 	}
-	targets := make([]StatusTarget, 0, len(mappings))
+	targets := make([]StatusLocator, 0, len(mappings))
 	for _, m := range mappings {
 		if number, err := statusMappingNumber(m); err == nil {
-			targets = append(targets, StatusTarget{ExternalID: m.Mapping.ExternalID, Number: number})
+			targets = append(targets, StatusLocator{ExternalID: m.Mapping.ExternalID, Number: number})
 		}
 	}
 	results := batch.ReadStatuses(ctx, r.config, targets)

@@ -115,7 +115,7 @@ upstream closure retains its GitHub close time and maps `not_planned` to
 `wontfix`. Same-state observations and delivery acknowledgements preserve
 Kata’s existing close reason, evidence, and close time.
 
-Each run reads up to 100 mapped issues' statuses in one GraphQL request; if the batch request fails or the server lacks the required fields, status reads fall back to REST.
+Each run reads up to 100 mapped issues' statuses in one GraphQL request; if the batch request fails or the server lacks the required fields, status reads fall back to REST, subject to any shared request cooldown.
 
 `disable` pauses both imports and status writes while retaining pending intent.
 Explicit local close/reopen actions while paused still update that intent.

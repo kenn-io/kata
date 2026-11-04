@@ -23,20 +23,18 @@ const (
 var parentIssueAlias = regexp.MustCompile(`i[0-9]+:issue\(number:([0-9]+)\)`)
 
 func targetedParentGraphQLQuery(numbers []int) string {
-	var query strings.Builder
-	query.WriteString("query($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) {")
-	for i, number := range numbers {
-		_, _ = fmt.Fprintf(&query, " i%d: issue(number: %d) { number fullDatabaseId parent { number fullDatabaseId } }", i, number)
-	}
-	query.WriteString(" } }")
-	return query.String()
+	return targetedIssueGraphQLQuery(numbers, "number fullDatabaseId parent { number fullDatabaseId }")
 }
 
 func targetedStatusGraphQLQuery(numbers []int) string {
+	return targetedIssueGraphQLQuery(numbers, "fullDatabaseId number state stateReason closedAt updatedAt repository { databaseId }")
+}
+
+func targetedIssueGraphQLQuery(numbers []int, fields string) string {
 	var query strings.Builder
 	query.WriteString("query($owner: String!, $repo: String!) { repository(owner: $owner, name: $repo) {")
 	for i, number := range numbers {
-		_, _ = fmt.Fprintf(&query, " i%d: issue(number: %d) { fullDatabaseId number state stateReason closedAt updatedAt repository { databaseId } }", i, number)
+		_, _ = fmt.Fprintf(&query, " i%d: issue(number: %d) { %s }", i, number, fields)
 	}
 	query.WriteString(" } }")
 	return query.String()

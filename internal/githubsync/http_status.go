@@ -64,13 +64,17 @@ func (s *httpFetcherBindingSession) ReadStatus(ctx context.Context, cfg Config, 
 	if err := s.validateStatusIssue(wire, id, number); err != nil {
 		return zero, err
 	}
-	raw := wire.State
-	obs := issuesync.StatusObservation{RawStatus: &raw, Status: raw, Version: wire.UpdatedAt.UTC(), Locator: strconv.Itoa(number)}
+	return statusObservation(wire.Issue), nil
+}
+
+func statusObservation(issue Issue) issuesync.StatusObservation {
+	raw := issue.State
+	obs := issuesync.StatusObservation{RawStatus: &raw, Status: raw, Version: issue.UpdatedAt.UTC(), Locator: strconv.Itoa(issue.Number)}
 	if raw == "closed" {
-		obs.ClosedReason = issueClosedReason(wire.Issue)
-		obs.ClosedAt = wire.ClosedAt
+		obs.ClosedReason = issueClosedReason(issue)
+		obs.ClosedAt = issue.ClosedAt
 	}
-	return obs, nil
+	return obs
 }
 
 // verifyStatusRepository checks the bound repository identity once per session,
@@ -252,12 +256,6 @@ func (f *HTTPFetcher) statusCooldownError(binding Binding) error {
 	return nil
 }
 
-// StatusTarget identifies an issue by its global identity and trusted locator.
-type StatusTarget struct {
-	ExternalID string
-	Number     int
-}
-
 // StatusResult keeps per-issue failures final within a successful batch.
 type StatusResult struct {
 	Observation issuesync.StatusObservation
@@ -266,45 +264,56 @@ type StatusResult struct {
 
 // StatusBatchSession reads at most one bounded sweep page.
 type StatusBatchSession interface {
-	ReadStatuses(context.Context, Config, []StatusTarget) map[string]StatusResult
+	ReadStatuses(context.Context, Config, []StatusLocator) map[string]StatusResult
 }
 
-func (s *httpFetcherBindingSession) ReadStatuses(ctx context.Context, cfg Config, targets []StatusTarget) map[string]StatusResult {
+func (s *httpFetcherBindingSession) ReadStatuses(ctx context.Context, cfg Config, targets []StatusLocator) map[string]StatusResult {
 	if len(targets) == 0 || len(targets) > parentQueryBatchSize {
 		return nil
 	}
-	numbers := make([]int, len(targets))
-	ids := make([]int64, len(targets))
-	for i, target := range targets {
+	var results map[string]StatusResult
+	valid := make([]StatusLocator, 0, len(targets))
+	numbers := make([]int, 0, len(targets))
+	ids := make([]int64, 0, len(targets))
+	for _, target := range targets {
 		id, err := s.statusConfig(cfg, target.ExternalID, target.Number)
 		if err != nil {
-			return nil
+			if results == nil {
+				results = make(map[string]StatusResult)
+			}
+			results[target.ExternalID] = StatusResult{Err: err}
+			continue
 		}
-		ids[i], numbers[i] = id, target.Number
+		valid = append(valid, target)
+		ids = append(ids, id)
+		numbers = append(numbers, target.Number)
+	}
+	if len(valid) == 0 {
+		return results
 	}
 	if err := s.verifyStatusRepository(ctx, cfg); err != nil {
-		return nil
+		return results
 	}
 	requestURL, err := s.fetcher.graphQLEndpointURL(s.binding)
 	if err != nil {
-		return nil
+		return results
 	}
 	var response parentGraphQLResponse
-	var headers http.Header
 	body := parentGraphQLRequest{Query: targetedStatusGraphQLQuery(numbers), Variables: map[string]any{"owner": s.binding.Owner, "repo": s.binding.Repo}}
-	if err := s.statusRequestURL(ctx, http.MethodPost, requestURL, body, &response, nil, &headers); err != nil {
-		return nil
+	if err := s.statusRequestURL(ctx, http.MethodPost, requestURL, body, &response, nil, nil); err != nil {
+		return results
 	}
 	if graphQLErrorsRateLimited(response.Errors) {
-		s.fetcher.deferStatusRequests(s.binding, max(retryWait(headers, s.fetcher.now()), time.Second))
 		return nil
 	}
-	remaining, missing := parentErrorsWithoutMissingChildren(response.Errors, response.Data, len(targets))
+	remaining, missing := parentErrorsWithoutMissingChildren(response.Errors, response.Data, len(valid))
 	if len(remaining) > 0 || response.Data == nil {
-		return nil
+		return results
 	}
-	results := make(map[string]StatusResult, len(targets))
-	for i, target := range targets {
+	if results == nil {
+		results = make(map[string]StatusResult, len(targets))
+	}
+	for i, target := range valid {
 		var node struct {
 			FullDatabaseID graphQLBigInt `json:"fullDatabaseId"`
 			Number         int           `json:"number"`
@@ -330,12 +339,7 @@ func (s *httpFetcherBindingSession) ReadStatuses(ctx context.Context, cfg Config
 		case node.State != "OPEN" && node.State != "CLOSED" || node.UpdatedAt == nil || node.UpdatedAt.IsZero():
 			result.Err = fmt.Errorf("GitHub status observation has invalid state or version")
 		default:
-			state := strings.ToLower(node.State)
-			result.Observation = issuesync.StatusObservation{RawStatus: &state, Status: state, Version: node.UpdatedAt.UTC(), Locator: strconv.Itoa(node.Number)}
-			if state == "closed" {
-				result.Observation.ClosedReason = issueClosedReason(Issue{StateReason: node.StateReason})
-				result.Observation.ClosedAt = node.ClosedAt
-			}
+			result.Observation = statusObservation(Issue{Number: node.Number, State: strings.ToLower(node.State), StateReason: node.StateReason, ClosedAt: node.ClosedAt, UpdatedAt: node.UpdatedAt})
 		}
 		results[target.ExternalID] = result
 	}

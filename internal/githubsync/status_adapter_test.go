@@ -120,10 +120,10 @@ func TestGitHubMetadataRefreshIgnoresPrivateScanProgress(t *testing.T) {
 
 type batchStatusRunnerFetcher struct {
 	*statusRunnerFetcher
-	targets []StatusTarget
+	targets []StatusLocator
 }
 
-func (s *batchStatusRunnerFetcher) ReadStatuses(_ context.Context, _ Config, targets []StatusTarget) map[string]StatusResult {
+func (s *batchStatusRunnerFetcher) ReadStatuses(_ context.Context, _ Config, targets []StatusLocator) map[string]StatusResult {
 	s.targets = targets
 	return map[string]StatusResult{"issue-id:101": {Observation: issuesync.StatusObservation{Status: "open"}}, "issue-id:102": {Err: errors.New("missing issue")}}
 }
