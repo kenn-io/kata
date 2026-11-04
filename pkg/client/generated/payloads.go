@@ -44,6 +44,8 @@ type RewriteAuthorIdentityBody = RewriteAuthorIdentityRequestBody
 
 type CreateCronJobBody = PutCronJobBody
 
+type ValidateCronJobBody = CronValidationBody
+
 type ArchiveCronJobBody = CronDefinitionActionBody
 
 type ReplaceCronJobBody = PutCronJobBody
@@ -51,6 +53,8 @@ type ReplaceCronJobBody = PutCronJobBody
 type RestoreCronJobBody = CronDefinitionActionBody
 
 type CreateCronWorkflowBody = PutCronWorkflowBody
+
+type ValidateCronWorkflowBody = CronValidationBody
 
 type ArchiveCronWorkflowBody = CronDefinitionActionBody
 

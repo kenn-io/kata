@@ -183,6 +183,18 @@ type CreateCronJobResponse = CronJobResponseBody
 
 type CreateCronJobErrorResponse = ErrorEnvelope
 
+type ValidateCronJobResponse = CronValidationResult
+
+type ValidateCronJobErrorResponse = ErrorEnvelope
+
+type ValidateCronJobErrorResponseJSON = ErrorEnvelope
+
+type ValidateCronJobErrorResponseJSON413 = ErrorEnvelope
+
+type ValidateCronJobErrorResponseJSON422 = ErrorEnvelope
+
+type ValidateCronJobErrorResponseJSON500 = ErrorEnvelope
+
 type ArchiveCronJobResponse = CronJobResponseBody
 
 type ArchiveCronJobErrorResponse = ErrorEnvelope
@@ -218,6 +230,18 @@ type ListCronWorkflowsErrorResponse = ErrorEnvelope
 type CreateCronWorkflowResponse = CronWorkflowResponseBody
 
 type CreateCronWorkflowErrorResponse = ErrorEnvelope
+
+type ValidateCronWorkflowResponse = CronValidationResult
+
+type ValidateCronWorkflowErrorResponse = ErrorEnvelope
+
+type ValidateCronWorkflowErrorResponseJSON = ErrorEnvelope
+
+type ValidateCronWorkflowErrorResponseJSON413 = ErrorEnvelope
+
+type ValidateCronWorkflowErrorResponseJSON422 = ErrorEnvelope
+
+type ValidateCronWorkflowErrorResponseJSON500 = ErrorEnvelope
 
 type ArchiveCronWorkflowResponse = CronWorkflowResponseBody
 
@@ -961,6 +985,18 @@ type CreateCronJobResp struct {
 	JSONDefault  *CreateCronJobErrorResponse
 }
 
+type ValidateCronJobResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ValidateCronJobResponse
+	JSON400      *ValidateCronJobErrorResponse
+	JSON404      *ValidateCronJobErrorResponseJSON
+	JSON413      *ValidateCronJobErrorResponseJSON413
+	JSON422      *ValidateCronJobErrorResponseJSON422
+	JSON500      *ValidateCronJobErrorResponseJSON500
+}
+
 type ArchiveCronJobResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
@@ -1031,6 +1067,18 @@ type CreateCronWorkflowResp struct {
 	StatusCode   int
 	JSON201      *CreateCronWorkflowResponse
 	JSONDefault  *CreateCronWorkflowErrorResponse
+}
+
+type ValidateCronWorkflowResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ValidateCronWorkflowResponse
+	JSON400      *ValidateCronWorkflowErrorResponse
+	JSON404      *ValidateCronWorkflowErrorResponseJSON
+	JSON413      *ValidateCronWorkflowErrorResponseJSON413
+	JSON422      *ValidateCronWorkflowErrorResponseJSON422
+	JSON500      *ValidateCronWorkflowErrorResponseJSON500
 }
 
 type ArchiveCronWorkflowResp struct {
