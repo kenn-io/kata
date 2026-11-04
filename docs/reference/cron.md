@@ -76,6 +76,13 @@ the current revision and guards the write with it. An already matching state
 at the root returns the job without emitting an event. Archived jobs must be
 restored before either action.
 
+Pause may retain soft-deleted dependencies that still exist in the same project.
+Native resume may retain its deleted parent, but adapter resume requires live
+dependencies. These rules also apply to conditional full-definition PUTs.
+Changes to other fields in `definition` still require live dependencies.
+A native job with a deleted parent can be enabled, but delivers no children
+until its parent is restored and open.
+
 The REST actions are POST `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}/pause`
 and `/resume`, with `{actor?, expected_event_uid?}`. MCP exposes
 `kata.cron_job_pause` and `kata.cron_job_resume` with the same optional revision.

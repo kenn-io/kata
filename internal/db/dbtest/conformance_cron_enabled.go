@@ -63,6 +63,25 @@ func checkCronEnabledDeletedParent(t *testing.T, s db.Storage) error {
 		require.NoError(t, err)
 		require.Len(t, events, 1)
 		require.Equal(t, definition, paused.Definition)
+		definition.Enabled = true
+		_, events, err = s.PutCronJob(t.Context(), db.PutCronJob{
+			ProjectID: project.ID, UID: job.UID, Name: job.Name, Definition: definition,
+			Actor: "operator", ExpectedEventUID: paused.DefinitionEventUID,
+		})
+		require.ErrorIs(t, err, cron.ErrInvalid, "resuming an adapter requires a live target")
+		require.Empty(t, events)
+		current, err := s.CronJob(t.Context(), project.ID, job.UID)
+		require.NoError(t, err)
+		require.Equal(t, paused, current, "refusal must leave the job paused and its revision unchanged")
+		_, _, _, err = s.RestoreIssue(t.Context(), parent.ID, "operator")
+		require.NoError(t, err)
+		resumed, events, err := s.PutCronJob(t.Context(), db.PutCronJob{
+			ProjectID: project.ID, UID: job.UID, Name: job.Name, Definition: definition,
+			Actor: "operator", ExpectedEventUID: paused.DefinitionEventUID,
+		})
+		require.NoError(t, err)
+		require.Len(t, events, 1)
+		require.Equal(t, definition, resumed.Definition)
 	})
 	return nil
 }

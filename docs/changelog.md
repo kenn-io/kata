@@ -27,6 +27,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
   tab's `p` key. Each action preserves the rest of the definition and guards
   concurrent edits. The TUI confirms missed native children before resuming.
   Direct spokes forward native actions to hubs that support native writes.
+  Pause can retain soft-deleted dependencies in the same project. Native resume
+  can retain its deleted parent; delivery still waits until the parent is open.
   See [Pause and resume a job](reference/cron.md#pause-and-resume-a-job).
 
 - Load the web UI's issue list and graph on SQLite and PostgreSQL stores with

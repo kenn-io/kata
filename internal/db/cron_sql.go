@@ -357,24 +357,28 @@ func checkCronPutState(req cronPutRequest, current cronRow, fresh bool) error {
 }
 
 func (a CronSQL) checkCronPutDependencies(ctx context.Context, tx *sql.Tx, req cronPutRequest, current cronRow) error {
+	var old cron.JobDefinition
 	if req.job {
-		if err := a.checkRecurringPutTx(ctx, tx, req, current); err != nil {
+		if len(current.document) > 0 {
+			var err error
+			old, err = cron.DecodeJob(current.document)
+			if err != nil && !req.deleted {
+				return err
+			}
+		}
+		if err := a.checkRecurringPutTx(ctx, tx, req, old); err != nil {
 			return err
 		}
 	}
 	if req.job && !req.deleted {
-		// Existing native progress and ownership were checked above. An
-		// enabled-only edit retains dependencies even while they are
-		// soft-deleted, so operators can pause before restoring them.
+		// Existing native progress and ownership were checked above. Pausing
+		// retains same-project tombstones; native resume retains its gated
+		// parent, while adapter resume requires live dependencies.
 		if current.DeletedAt == nil && len(current.document) > 0 {
-			old, err := cron.DecodeJob(current.document)
-			if err != nil {
-				return err
-			}
 			definition := req.definition.(cron.JobDefinition)
 			enabledChanged := old.Enabled != definition.Enabled
 			old.Enabled = definition.Enabled
-			if enabledChanged && reflect.DeepEqual(old, definition) {
+			if enabledChanged && (!definition.Enabled || cron.IsRecurringIssueJob(definition)) && reflect.DeepEqual(old, definition) {
 				return checkCronDependenciesForEnabledChange(ctx, tx, req.projectID, definition)
 			}
 		}

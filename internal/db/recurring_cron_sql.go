@@ -96,16 +96,8 @@ func readRecurringProgress(parent Issue, jobUID string) (cron.RecurringProgress,
 	}
 	return cron.DecodeRecurringProgress(raw)
 }
-func (a CronSQL) checkRecurringPutTx(ctx context.Context, tx *sql.Tx, req cronPutRequest, current cronRow) error {
+func (a CronSQL) checkRecurringPutTx(ctx context.Context, tx *sql.Tx, req cronPutRequest, old cron.JobDefinition) error {
 	next := req.definition.(cron.JobDefinition)
-	var old cron.JobDefinition
-	if len(current.document) > 0 {
-		var err error
-		old, err = cron.DecodeJob(current.document)
-		if err != nil && !req.deleted {
-			return err
-		}
-	}
 	oldNative, newNative := cron.IsRecurringIssueJob(old), cron.IsRecurringIssueJob(next)
 	if !oldNative && !newNative {
 		return nil

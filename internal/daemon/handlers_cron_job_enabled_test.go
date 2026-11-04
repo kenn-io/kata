@@ -143,6 +143,15 @@ func TestCronJobEnabledDeletedAdapterParentProperty(t *testing.T) {
 			status, raw := cronHTTP(t, env, http.MethodPost, path+"/"+action.name, map[string]any{
 				"actor": "operator", "expected_event_uid": job.DefinitionEventUID,
 			})
+			if action.enabled {
+				require.Equalf(ht, http.StatusBadRequest, status, "%s", raw)
+				require.Contains(ht, string(raw), "tombstoned")
+				current, err := env.DB.CronJob(t.Context(), project.ID, job.UID)
+				require.NoError(ht, err)
+				require.Equal(ht, job.DefinitionEventUID, current.DefinitionEventUID)
+				require.Equal(ht, job.Definition, current.Definition)
+				continue
+			}
 			require.Equalf(ht, http.StatusOK, status, "%s", raw)
 			var out api.CronJobResponse
 			require.NoError(ht, json.Unmarshal(raw, &out.Body))
