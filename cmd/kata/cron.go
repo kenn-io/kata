@@ -63,10 +63,13 @@ The full contract is in the Cron reference (docs/reference/cron.md).`,
 	return command
 }
 
+const cronParentIssueRequired = "--parent requires definition.issue of kind per-run"
+
 type cronCLIOptions struct {
 	resource, action                 string
 	file, identity, expectedEventUID string
 	parent                           string
+	parentIncompatible               bool
 	count                            int
 	from                             string
 	includeDeleted                   bool
@@ -305,7 +308,7 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 		return err
 	}
 	if o.action == "validate" {
-		return emitCronValidation(cmd, raw, o.resource == "job")
+		return emitCronValidation(cmd, raw, o.resource == "job", o.parentIncompatible)
 	}
 	if flags.Quiet && currentOutputMode() != outputJSON {
 		return nil
@@ -320,11 +323,11 @@ func (o *cronCLIOptions) applyParent(cmd *cobra.Command, daemon daemonAPI, raw [
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return projectRef{}, nil, err
 	}
-	parentable := fields != nil && json.Unmarshal(fields["definition"], &definition) == nil && definition != nil && json.Unmarshal(definition["issue"], &issue) == nil && issue != nil
+	o.parentIncompatible = fields == nil || json.Unmarshal(fields["definition"], &definition) != nil || definition == nil || json.Unmarshal(definition["issue"], &issue) != nil || issue == nil
 	kind, kindErr := cronStringField(issue, "kind")
-	parentable = parentable && kindErr == nil && kind == "per-run"
-	if !parentable && o.action != "validate" {
-		return projectRef{}, nil, cronCLIValidation("--parent requires definition.issue of kind per-run")
+	o.parentIncompatible = o.parentIncompatible || kindErr != nil || kind != "per-run"
+	if o.parentIncompatible && o.action != "validate" {
+		return projectRef{}, nil, cronCLIValidation(cronParentIssueRequired)
 	}
 	ctx, baseURL, pid, ref, err := resolveIssueRefForCommand(cmd, o.parent)
 	if err != nil {
@@ -351,7 +354,7 @@ func (o *cronCLIOptions) applyParent(cmd *cobra.Command, daemon daemonAPI, raw [
 	}
 	// Validation forwards incomplete or incompatible documents unchanged so
 	// their failures remain staged results. Parent patching applies to per-run jobs.
-	if !parentable {
+	if o.parentIncompatible {
 		return project, raw, nil
 	}
 	client, err := kataclient.NewWithHTTPClient(baseURL, daemon.client)

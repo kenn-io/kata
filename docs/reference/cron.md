@@ -91,7 +91,7 @@ can also invalidate a save.
 
 The result includes the trimmed `name`, normalized `definition`, `errors`,
 and `warnings`. The definition is null when decoding fails. Errors stop at
-the first failing stage: `request` (name), `document` (portable rules),
+the first failing stage: `request` (name or CLI parent option), `document` (portable rules),
 `revision` (UID and expected event), `ownership` (native parent and progress),
 or `dependencies` (referenced workflow or issue). A revision error includes
 `definition_event_uid` only for a definition in the authorized project.

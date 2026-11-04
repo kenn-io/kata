@@ -166,6 +166,6 @@ func TestCronCLIValidateConflictAndIdentity(t *testing.T) {
 func TestCronCLIValidateOutputFailure(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.SetOut(extraFailWriter{})
-	err := emitCronValidation(cmd, []byte(`{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[]}`), false)
+	err := emitCronValidation(cmd, []byte(`{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[]}`), false, false)
 	require.ErrorIs(t, err, io.ErrClosedPipe)
 }

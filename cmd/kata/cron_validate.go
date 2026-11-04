@@ -52,17 +52,16 @@ func (o cronCLIOptions) callValidate(a daemonAPI, c *kataclient.Client, projectI
 	return cronCLIResponse(response.StatusCode, response.Body, err)
 }
 
-func emitCronValidation(cmd *cobra.Command, raw []byte, job bool) error {
+func emitCronValidation(cmd *cobra.Command, raw []byte, job, parentIncompatible bool) error {
 	var out struct {
 		Valid      *bool          `json:"valid"`
 		Definition jsontext.Value `json:"definition"`
 	}
 	var result generated.CronValidationResult
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return fmt.Errorf("decode cron validation response: %w", err)
-	}
-	if err := json.Unmarshal(raw, &result); err != nil {
-		return fmt.Errorf("decode cron validation response: %w", err)
+	for _, destination := range []any{&out, &result} {
+		if err := json.Unmarshal(raw, destination); err != nil {
+			return fmt.Errorf("decode cron validation response: %w", err)
+		}
 	}
 	if out.Valid == nil || len(out.Definition) == 0 || (*out.Valid && len(result.Errors) > 0) || (!*out.Valid && len(result.Errors) == 0) {
 		return fmt.Errorf("incomplete cron validation response")
@@ -70,11 +69,11 @@ func emitCronValidation(cmd *cobra.Command, raw []byte, job bool) error {
 	if err := result.Validate(); err != nil {
 		return fmt.Errorf("invalid cron validation response: %w", err)
 	}
-	if *out.Valid && out.Definition.Kind() != '{' {
-		return fmt.Errorf("invalid definition in cron validation response")
+	if *out.Valid && (out.Definition.Kind() != '{' || (job && result.Schedule == nil)) {
+		return fmt.Errorf("incomplete cron validation response")
 	}
-	if *out.Valid && job && result.Schedule == nil {
-		return fmt.Errorf("incomplete schedule in cron validation response")
+	if *out.Valid && parentIncompatible {
+		return emitCronParentValidationError(cmd, result)
 	}
 	if err := emitJSON(cmd.OutOrStdout(), jsontext.Value(raw)); err != nil {
 		return err
@@ -83,4 +82,17 @@ func emitCronValidation(cmd *cobra.Command, raw []byte, job bool) error {
 		return cronCLIValidation("cron definition is invalid")
 	}
 	return nil
+}
+
+func emitCronParentValidationError(cmd *cobra.Command, result generated.CronValidationResult) error {
+	result.Valid, result.Schedule = false, nil
+	result.Errors = []generated.CronValidationError{{Stage: "request", Code: "validation", Message: cronParentIssueRequired}}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+	if err := emitJSON(cmd.OutOrStdout(), jsontext.Value(raw)); err != nil {
+		return err
+	}
+	return cronCLIValidation(cronParentIssueRequired)
 }
