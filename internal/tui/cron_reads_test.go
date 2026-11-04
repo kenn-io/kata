@@ -119,6 +119,13 @@ func TestCronEnrichmentAdmissionAndWorkerCaps(t *testing.T) {
 		p.jobs = append(p.jobs, j)
 	}
 	entered, release := make(chan struct{}, 200), make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	})
 	a := &cronEnrichAPI{read: func(ctx context.Context, _ string) ([]generated.CronRun, error) {
 		entered <- struct{}{}
 		select {
@@ -131,10 +138,18 @@ func TestCronEnrichmentAdmissionAndWorkerCaps(t *testing.T) {
 	done := make(chan struct{})
 	go func() { cronEnrich(t.Context(), a, 7, &p); close(done) }()
 	for range 4 {
-		<-entered
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			t.Fatal("enrichment worker did not start")
+		}
 	}
 	close(release)
-	<-done
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("enrichment did not finish")
+	}
 	require.Equal(t, 200, a.calls)
 	require.Equal(t, 200, a.parents)
 	// Fills block together; parent reads run later. This checks per-stage caps.
@@ -147,6 +162,7 @@ func TestCronEnrichmentAdmissionAndWorkerCaps(t *testing.T) {
 func TestCronEnrichmentCancellation(t *testing.T) {
 	j := cronFixture(t).cron.data.jobs[0]
 	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
 	entered := make(chan struct{})
 	a := &cronEnrichAPI{read: func(ctx context.Context, _ string) ([]generated.CronRun, error) {
 		close(entered)
@@ -156,7 +172,11 @@ func TestCronEnrichmentCancellation(t *testing.T) {
 	p := cronData{jobs: []generated.CronJob{j}}
 	done := make(chan struct{})
 	go func() { cronEnrich(ctx, a, 7, &p); close(done) }()
-	<-entered
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("enrichment read did not start")
+	}
 	cancel()
 	select {
 	case <-done:

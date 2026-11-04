@@ -18,18 +18,21 @@ import (
 
 func TestCronWaitOnlyExactNormalizedActorCounts(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
-		actor := hegel.Draw(ht, hegel.Text().MaxSize(180))
-		normalized, err := notification.NormalizeRecipient(actor)
-		metadata := map[string]any{notification.MetadataKey("other-recipient"): map[string]any{"from": "worker", "message": "unrelated"}}
-		if err == nil {
-			metadata[notification.MetadataKey(normalized)] = map[string]any{"from": "worker", "message": "review\nnow"}
-		}
-		got := cronRunWaitForActor(cronParent{open: true, metadata: metadata}, actor)
-		if (got.state == "blocked") != (err == nil) {
-			ht.Fatalf("actor %q: %v, normalization error %v", actor, got, err)
-		}
-		if strings.ContainsAny(got.reason, "\r\n\x1b") {
-			ht.Fatalf("wait reason is not a sanitized line: %q", got.reason)
+		arbitrary := hegel.Draw(ht, hegel.Text().MaxSize(180))
+		valid := hegel.Draw(ht, hegel.SampledFrom([]string{"operator", " operator ", "operator/reader", "Équipe"}))
+		for _, actor := range []string{valid, arbitrary, arbitrary + "\x00"} {
+			normalized, err := notification.NormalizeRecipient(actor)
+			metadata := map[string]any{notification.MetadataKey("other-recipient"): map[string]any{"from": "worker", "message": "unrelated"}}
+			if err == nil {
+				metadata[notification.MetadataKey(normalized)] = map[string]any{"from": "worker", "message": "review\nnow"}
+			}
+			got := cronRunWaitForActor(cronParent{open: true, metadata: metadata}, actor)
+			if (got.state == "blocked") != (err == nil) {
+				ht.Fatalf("actor %q: %v, normalization error %v", actor, got, err)
+			}
+			if strings.ContainsAny(got.reason, "\r\n\x1b") {
+				ht.Fatalf("wait reason is not a sanitized line: %q", got.reason)
+			}
 		}
 	}, hegel.WithTestCases(300))
 }
@@ -80,8 +83,8 @@ func TestCronWaitBlockedIffRunningOpenAndSignalled(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
 		statuses := []string{"running", "failed", "unknown", "succeeded", "cancelled"}
 		attentions := []string{"needs-human", "stuck", "ok", "", "unrecognized"}
-		status := statuses[hegel.Draw(ht, hegel.Integers[uint64](0, ^uint64(0)))%uint64(len(statuses))]
-		attention := attentions[hegel.Draw(ht, hegel.Integers[uint64](0, ^uint64(0)))%uint64(len(attentions))]
+		status := hegel.Draw(ht, hegel.SampledFrom(statuses))
+		attention := hegel.Draw(ht, hegel.SampledFrom(attentions))
 		open := hegel.Draw(ht, hegel.Booleans())
 		request := hegel.Draw(ht, hegel.Booleans())
 		r := generated.CronRun{Status: status, Actor: " operator ", IssueUID: new("issue-example")}

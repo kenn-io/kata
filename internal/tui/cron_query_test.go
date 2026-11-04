@@ -38,12 +38,15 @@ func TestCronQueryExamples(t *testing.T) {
 	require.False(t, cronQuery("issue:none", cronRuns).match(map[string]string{"issue": "none-prefix"}, ""))
 }
 
-func TestCronQueryLiteralMatchesOldSubstring(t *testing.T) {
+func TestCronQueryArbitraryInputTotal(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
 		query, text := hegel.Draw(ht, hegel.Text()), hegel.Draw(ht, hegel.Text())
-		// All tabs preserve literal bytes when no recognized token is present.
+		fields := map[string]string{"status": "failed", "health": "never ran", "actor": "Operator", "issue": "01ABC"}
 		for _, tab := range []int{cronJobs, cronRuns, cronWorkflows} {
 			parsed := cronQuery(query, tab)
+			if got, want := parsed.match(fields, "Report actor:"), cronQuery(strings.ToLower(query), tab).match(fields, "Report actor:"); got != want {
+				ht.Fatalf("case-fold changed arbitrary query %q in tab %d", query, tab)
+			}
 			if tab != cronWorkflows && len(parsed.tokens) != 0 {
 				continue // Token semantics have their own contract properties.
 			}
@@ -51,18 +54,6 @@ func TestCronQueryLiteralMatchesOldSubstring(t *testing.T) {
 				if got, want := parsed.match(nil, candidate), cronMatches(candidate, query); got != want {
 					ht.Fatalf("literal query changed: %q in %q (tab %d)", query, candidate, tab)
 				}
-			}
-		}
-	}, hegel.WithTestCases(2000))
-}
-
-func TestCronQueryArbitraryInputTotal(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		query := hegel.Draw(ht, hegel.Text())
-		fields := map[string]string{"status": "failed", "health": "never ran", "actor": "Operator", "issue": "01ABC"}
-		for _, tab := range []int{cronJobs, cronRuns, cronWorkflows} {
-			if got, want := cronQuery(query, tab).match(fields, "Report actor:"), cronQuery(strings.ToLower(query), tab).match(fields, "Report actor:"); got != want {
-				ht.Fatalf("case-fold changed arbitrary query %q in tab %d", query, tab)
 			}
 		}
 	}, hegel.WithTestCases(2000))

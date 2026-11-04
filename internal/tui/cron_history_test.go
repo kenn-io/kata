@@ -27,10 +27,24 @@ func (a *cronPagingAPI) ListCronJobRuns(_ context.Context, _ int64, job, before 
 	return slices.Clone(a.page), a.next, a.err
 }
 
+// A cursor-bearing server page is full; rows are newest first.
+func cronHistoryRows(base generated.CronRun, count int) []generated.CronRun {
+	rows := make([]generated.CronRun, count)
+	for i := range rows {
+		rows[i] = base
+		if i > 0 {
+			rows[i].UID = fmt.Sprintf("%s-%03d", base.UID, i)
+			rows[i].CreatedAt = base.CreatedAt.Add(-time.Duration(i) * time.Minute)
+		}
+	}
+	return rows
+}
+
 func TestCronHistoryFencesAndSingleFlight(t *testing.T) {
 	m := cronFixture(t)
 	j := m.cron.data.jobs[0].UID
-	a := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: m.cron.data.runs, next: "next"}
+	a := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: cronHistoryRows(m.cron.data.runs[0], 20)}
+	a.next = a.page[len(a.page)-1].UID
 	m.api = a
 	m, cmd := m.cronRequestPage(j, true)
 	stale := cmd().(cronPageMsg)
@@ -53,7 +67,7 @@ func TestCronHistoryFencesAndSingleFlight(t *testing.T) {
 	}
 	m = m.cronPageLoaded(fresh)
 	require.False(t, m.cron.jobPage.out)
-	require.Equal(t, "next", m.cron.jobPage.next)
+	require.Equal(t, a.next, m.cron.jobPage.next)
 	for _, event := range []tea.Msg{keyRune('r'), resetRequiredMsg{}} {
 		base := m
 		base, cmd = base.cronRequestPage(j, false)
@@ -73,15 +87,17 @@ func TestCronHistoryFailureRetryAndForeignJob(t *testing.T) {
 	m := cronFixture(t)
 	j := m.cron.data.jobs[0].UID
 	r := m.cron.data.runs[0]
-	a := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: []generated.CronRun{r}, next: "next"}
+	a := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: cronHistoryRows(r, 20)}
+	a.next = a.page[len(a.page)-1].UID
+	cursor := a.next
 	m.api = a
 	m, cmd := m.cronRequestPage(j, true)
 	m = m.cronPageLoaded(cmd().(cronPageMsg))
 	a.err = errors.New("offline")
 	m, cmd = m.cronRequestPage(j, false)
 	m = m.cronPageLoaded(cmd().(cronPageMsg))
-	require.Len(t, m.cron.jobPage.runs, 1)
-	require.Equal(t, "next", m.cron.jobPage.next)
+	require.Len(t, m.cron.jobPage.runs, 20)
+	require.Equal(t, cursor, m.cron.jobPage.next)
 	require.ErrorContains(t, m.cron.jobPage.err, "offline")
 	a.err = nil
 	a.page = []generated.CronRun{{UID: "foreign", JobUID: new("other")}}
@@ -89,8 +105,8 @@ func TestCronHistoryFailureRetryAndForeignJob(t *testing.T) {
 	m = m.cronPageLoaded(cmd().(cronPageMsg))
 	require.ErrorContains(t, m.cron.jobPage.err, "job")
 	require.Equal(t, r.UID, m.cron.jobPage.runs[0].UID, "foreign pages cannot replace retained evidence")
-	require.Equal(t, "next", m.cron.jobPage.next)
-	require.Len(t, m.cron.jobPage.runs, 1)
+	require.Equal(t, cursor, m.cron.jobPage.next)
+	require.Len(t, m.cron.jobPage.runs, 20)
 	a.page = nil
 	a.next = ""
 	m, cmd = m.cronRequestPage(j, false)
@@ -128,8 +144,10 @@ func TestCronHistoryFailureRetryAndForeignJob(t *testing.T) {
 
 func TestCronRunsLoadOlderByKey(t *testing.T) {
 	m := sendRune(cronFixture(t), '3')
-	m.cron.data.nextBefore = "next"
-	m.cron.runPage = cronHistoryPage{runs: m.cron.data.runs, next: "next", ready: true}
+	m.cron.data.runs = cronHistoryRows(m.cron.data.runs[0], 100)
+	cursor := m.cron.data.runs[len(m.cron.data.runs)-1].UID
+	m.cron.data.nextBefore = cursor
+	m.cron.runPage = cronHistoryPage{runs: m.cron.data.runs, next: cursor, ready: true}
 	a := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: []generated.CronRun{{UID: "old", Status: "failed"}}}
 	m.api = a
 	_, _, lines := cronScreen(m)
@@ -138,30 +156,34 @@ func TestCronRunsLoadOlderByKey(t *testing.T) {
 	require.NotNil(t, cmd)
 	m = m.cronPageLoaded(cmd().(cronPageMsg))
 	require.Empty(t, a.job)
-	require.Equal(t, "next", a.before)
+	require.Equal(t, cursor, a.before)
 	require.Equal(t, int64(100), a.limit)
 	title, _, _ := cronScreen(m)
-	require.Contains(t, title, "2 loaded runs")
+	require.Contains(t, title, "101 loaded runs")
 	require.NotContains(t, title, "newest 100")
 }
 
 func TestSnapshot_CronHistory(t *testing.T) {
 	defer snapshotInit(t)()
 	m := cronFixture(t)
-	m.cron.runPage.next = "next"
+	m.cron.runPage.runs = cronHistoryRows(m.cron.data.runs[0], 100)
+	m.cron.runPage.next = m.cron.runPage.runs[len(m.cron.runPage.runs)-1].UID
 	m = sendRune(m, '3')
+	_, _, lines := cronScreen(m)
+	m.cron.lists[cronRuns].cursor = len(lines) - 1 // Keep the continuation visible.
 	assertGolden(t, "cron-runs-paging", m.viewBody())
-	m.height = 58
+	m.height = 60 // A full job page and its continuation must fit below the definition.
 	j := m.cron.data.jobs[0].UID
 	m.cron.stack = []cronFrame{{ref: cronRef{cronJobs, j}}}
-	m.cron.jobPage = cronHistoryPage{job: j, runs: m.cron.data.runs, next: "next", ready: true}
+	rows := cronHistoryRows(m.cron.data.runs[0], 20)
+	m.cron.jobPage = cronHistoryPage{job: j, runs: rows, next: rows[len(rows)-1].UID, ready: true}
 	assertGolden(t, "cron-job-history", m.viewBody())
 }
 
 // A -> workflow -> B -> back to A must start A's
 // history again; a single cached page cannot leave the visible job loading.
 func TestCronHistoryBackToJobRestartsHistory(t *testing.T) {
-	{
+	t.Run("round trip", func(t *testing.T) {
 		m := cronFixture(t)
 		job := m.cron.data.jobs[0].UID
 		other := "other-job"
@@ -191,7 +213,7 @@ func TestCronHistoryBackToJobRestartsHistory(t *testing.T) {
 		if m.cron.jobPage.job != job || !m.cron.jobPage.ready || a.job != job {
 			t.Fatalf("visible job %q left without its own history: page=%+v read=%q", job, m.cron.jobPage, a.job)
 		}
-	}
+	})
 }
 
 func TestCronHistoryRetainedRuns(t *testing.T) {
@@ -293,7 +315,8 @@ func TestCronHistoryRetainedRuns(t *testing.T) {
 		r.UID = "old-page"
 		a := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: []generated.CronRun{r}}
 		m.api = a
-		m.cron.runPage.next = "cursor"
+		m.cron.runPage.runs = cronHistoryRows(m.cron.data.runs[0], 100)
+		m.cron.runPage.next = m.cron.runPage.runs[len(m.cron.runPage.runs)-1].UID
 		m, cmd := m.cronRequestPage("", false)
 		m = m.cronPageLoaded(cmd().(cronPageMsg))
 		data := *m.cron.data
@@ -332,8 +355,11 @@ func TestCronHistoryRefreshPreservesEventPages(t *testing.T) {
 			old.Status = "failed"
 			m.cron.data.runs = []generated.CronRun{old}
 			m.cron.data.lastRuns = map[string]generated.CronRun{*old.JobUID: old}
-			m.cron.runPage = cronHistoryPage{runs: []generated.CronRun{old}, next: old.UID, ready: true, older: true}
-			m.cron.jobPage = cronHistoryPage{job: *old.JobUID, runs: []generated.CronRun{old}, next: old.UID, ready: true, older: true}
+			m.cron.runPage = cronHistoryPage{runs: cronHistoryRows(old, 100), next: old.UID, ready: true, older: true}
+			m.cron.jobPage = cronHistoryPage{job: *old.JobUID, runs: cronHistoryRows(old, 20), next: old.UID, ready: true, older: true}
+			m.cron.runPage.next = m.cron.runPage.runs[len(m.cron.runPage.runs)-1].UID
+			m.cron.jobPage.next = m.cron.jobPage.runs[len(m.cron.jobPage.runs)-1].UID
+			projectCursor, jobCursor := m.cron.runPage.next, m.cron.jobPage.next
 			m.cron.stack = []cronFrame{{ref: cronRef{cronJobs, *old.JobUID}}}
 			_, _, lines := cronScreen(m)
 			m.cron.stack[0].cursor = slices.IndexFunc(lines, func(l cronLine) bool { return l.target.uid == old.UID })
@@ -370,8 +396,8 @@ func TestCronHistoryRefreshPreservesEventPages(t *testing.T) {
 			}
 			require.True(t, hasOld(m.cron.runPage.runs), "event must retain project history")
 			require.True(t, hasOld(m.cron.jobPage.runs), "event must retain job history")
-			require.Equal(t, old.UID, m.cron.runPage.next)
-			require.Equal(t, old.UID, m.cron.jobPage.next)
+			require.Equal(t, projectCursor, m.cron.runPage.next)
+			require.Equal(t, jobCursor, m.cron.jobPage.next)
 			_, _, lines = cronScreen(m)
 			require.Equal(t, old.UID, lines[m.cron.stack[0].cursor].target.uid, "event keeps the selected run even when the head grows")
 			if kind == "failed event" {
@@ -382,8 +408,6 @@ func TestCronHistoryRefreshPreservesEventPages(t *testing.T) {
 	}
 }
 
-// Contract: creation-ordered arrivals stay reachable across event head merges,
-// without losing retained rows, selection, or valid in-flight older results.
 func cronGapFixture(t *testing.T, jobPage bool, count int) (Model, *cronReadTestAPI, string) {
 	t.Helper()
 	m := cronFixture(t)
@@ -450,6 +474,8 @@ func cronGapOlder(t *testing.T, m Model, job string) Model {
 	return m.cronPageLoaded(msg)
 }
 
+// Creation-ordered arrivals stay reachable across event head merges without
+// losing retained rows or selection.
 func TestCronHistoryEventHeadGapStaysReachable(t *testing.T) {
 	for _, jobPage := range []bool{false, true} {
 		limit := 100
@@ -459,13 +485,19 @@ func TestCronHistoryEventHeadGapStaysReachable(t *testing.T) {
 		for _, arrivals := range []int{limit, 150} {
 			for _, state := range []string{"deep", "exhausted", "empty"} {
 				for _, selectOlder := range []bool{false, true} {
+					if state == "exhausted" && selectOlder {
+						continue // Identical to deep/link=true.
+					}
 					t.Run(fmt.Sprintf("job=%v/arrivals=%d/%s/link=%v", jobPage, arrivals, state, selectOlder), func(t *testing.T) {
-						m, a, job := cronGapFixture(t, jobPage, arrivals+2)
+						m, a, job := cronGapFixture(t, jobPage, arrivals+limit+1)
 						p := cronGapPage(&m, job)
 						if state != "empty" {
-							p.runs = slices.Clone(a.data.runs[1:2])
+							p.runs = slices.Clone(a.data.runs[1 : limit+1])
+							slices.Reverse(p.runs)
 						}
 						if state == "deep" || selectOlder {
+							p.runs = slices.Clone(a.data.runs[1 : limit+1])
+							slices.Reverse(p.runs)
 							p.next = a.data.runs[1].UID
 						}
 						_, _, lines := cronScreen(m)
@@ -520,6 +552,9 @@ func TestCronHistoryEventKeepsInflightOlderPage(t *testing.T) {
 		for _, olderFirst := range []bool{false, true} {
 			for _, terminal := range []bool{false, true} {
 				for _, overlaps := range []bool{false, true} {
+					if terminal && overlaps {
+						continue // overlaps overrides terminal: identical to terminal=false.
+					}
 					t.Run(fmt.Sprintf("job=%v/older-first=%v/terminal=%v/overlap=%v", jobPage, olderFirst, terminal, overlaps), func(t *testing.T) {
 						m, a, job := cronGapFixture(t, jobPage, 350)
 						index := 101
@@ -530,7 +565,13 @@ func TestCronHistoryEventKeepsInflightOlderPage(t *testing.T) {
 							index = 340
 						}
 						p := cronGapPage(&m, job)
-						p.runs, p.next = slices.Clone(a.data.runs[index:index+1]), a.data.runs[index].UID
+						start, end := index, index+limit
+						if overlaps {
+							// Retain a full page ending at the original overlapping row.
+							start, end = index-limit+1, index+1
+						}
+						p.runs, p.next = slices.Clone(a.data.runs[start:end]), a.data.runs[start].UID
+						slices.Reverse(p.runs)
 						m, request := m.cronRequestPage(job, false)
 						late := request().(cronPageMsg)
 						require.NoError(t, late.err)
@@ -583,6 +624,7 @@ func TestCronHistorySuccessiveHeadGapsDrainToExhaustion(t *testing.T) {
 			all := slices.Clone(a.data.runs)
 			p := cronGapPage(&m, job)
 			p.runs, p.next = slices.Clone(all[:limit]), all[0].UID
+			slices.Reverse(p.runs)
 			a.data.runs = all[:4*limit]
 			m = cronGapEvent(t, m)
 			m = cronGapOlder(t, m, job) // Fill only part of the first gap.
@@ -605,15 +647,17 @@ func TestCronHistorySuccessiveHeadGapsDrainToExhaustion(t *testing.T) {
 	}
 }
 
-// Contract: job details have independent server-filtered history; older project
-// pages never enlarge the workflow's documented newest-100 history.
+// Job details have independent server-filtered history; job pages and lookup
+// never enlarge the workflow's documented newest-100 history.
 func TestCronHistoryJobPagesAndLookup(t *testing.T) {
 	m := cronFixture(t)
 	j := m.cron.data.jobs[0]
 	old := m.cron.data.runs[0]
 	old.UID = "old-run"
 	old.Revision = 1
-	a := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: []generated.CronRun{old}, next: "older"}
+	a := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: cronHistoryRows(old, 20)}
+	a.next = a.page[len(a.page)-1].UID
+	cursor := a.next
 	m.api = a
 	m, cmd := m.cronRequestPage(j.UID, true)
 	m = m.cronPageLoaded(cmd().(cronPageMsg))
@@ -631,8 +675,8 @@ func TestCronHistoryJobPagesAndLookup(t *testing.T) {
 	a.next = ""
 	m, cmd = m.cronRequestPage(j.UID, false)
 	m = m.cronPageLoaded(cmd().(cronPageMsg))
-	require.Equal(t, "older", a.before)
-	require.Len(t, m.cron.jobPage.runs, 2)
+	require.Equal(t, cursor, a.before)
+	require.Len(t, m.cron.jobPage.runs, 21)
 	m.cron.stack = append(m.cron.stack, cronFrame{ref: cronRef{cronRuns, old.UID}})
 	require.Contains(t, stripANSI(m.viewBody()), old.Status)
 	require.Contains(t, stripANSI(m.viewBody()), "runs / "+old.UID)

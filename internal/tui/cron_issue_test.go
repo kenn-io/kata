@@ -13,8 +13,6 @@ import (
 	"go.kenn.io/kit/tui/splitlayout"
 )
 
-// Contract: a real run issue link opens the issue synchronously and back returns
-// to the exact Cron frame, even when the hidden split list selects another issue.
 func cronIssueFixture(t *testing.T, width int) Model {
 	t.Helper()
 	m := cronFixture(t)
@@ -38,6 +36,8 @@ func cronIssueFixture(t *testing.T, width int) Model {
 	return m
 }
 
+// Contract: a real run issue link opens the issue synchronously and back returns
+// to the exact Cron frame, even when the hidden split list selects another issue.
 func TestCronIssueRoundTrip(t *testing.T) {
 	for _, width := range []int{80, 160} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {

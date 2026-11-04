@@ -198,8 +198,8 @@ func TestCronWaitSharedIssueThroughUndoClient(t *testing.T) {
 // actor evaluated independently and excess/missing evidence explicitly unknown.
 func TestCronWaitUniqueAdmissionProperty(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
-		count := int(hegel.Draw(ht, hegel.Integers[uint64](0, ^uint64(0))) % 61)
-		pool := 1 + int(hegel.Draw(ht, hegel.Integers[uint64](0, ^uint64(0)))%31)
+		count := hegel.Draw(ht, hegel.Integers(0, 60))
+		pool := hegel.Draw(ht, hegel.Integers(1, 31))
 		p := cronData{}
 		nativeCount := hegel.Draw(ht, hegel.Integers[int](0, pool))
 		for i := range nativeCount {

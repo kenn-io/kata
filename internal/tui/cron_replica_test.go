@@ -44,7 +44,7 @@ func TestCronReplicaChip(t *testing.T) {
 		})
 	}
 
-	{
+	t.Run("title goldens", func(t *testing.T) {
 		m := cronFixture(t)
 		m.width = 120
 		m.cron.data.replica = cronReplica{role: "spoke", pulledAt: new(snapshotFixedNow.Add(-3 * time.Minute))}
@@ -52,7 +52,7 @@ func TestCronReplicaChip(t *testing.T) {
 		m.cron.data.replica.errorAt = new(snapshotFixedNow.Add(-2 * time.Minute))
 		m.cron.data.replica.lastError = "sync failed"
 		assertGolden(t, "cron-jobs-replica-error", m.viewBody())
-	}
+	})
 }
 
 type cronReplicaTestAPI struct {
@@ -87,10 +87,10 @@ func TestCronReplicaRefresh(t *testing.T) {
 	m = m.cronLoaded(cronLoadedMsg(p))
 	require.Empty(t, m.cron.data.replica)
 
-	{
+	t.Run("role without pull timestamp", func(t *testing.T) {
 		a := &cronReplicaTestAPI{cronReadTestAPI: &cronReadTestAPI{data: *cronFixture(t).cron.data}, replica: cronReplica{role: "spoke"}}
 		p := cronData{}
 		cronFetch(t.Context(), newUndoClient(a), 7, &p)
 		require.Equal(t, "spoke", p.replica.role)
-	}
+	})
 }

@@ -98,8 +98,8 @@ func TestCronEventRefreshReadsLoadedRuns(t *testing.T) {
 			require.Empty(t, m.cron.data.waits)
 		})
 	}
-	t.Run("evicted previous head and failed current head", func(t *testing.T) {
-		for _, failed := range []bool{false, true} {
+	for _, failed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("evicted previous head/failed=%v", failed), func(t *testing.T) {
 			m, a := cronRefreshFixture(t, 1)
 			m.cron.data.runs = slices.Clone(m.cron.runPage.runs)
 			if failed {
@@ -110,8 +110,8 @@ func TestCronEventRefreshReadsLoadedRuns(t *testing.T) {
 			require.Contains(t, a.reads, "o-000")
 			r, _ := m.cron.data.run("o-000")
 			require.Equal(t, "failed", r.Status)
-		}
-	})
+		})
+	}
 }
 
 func TestCronNamedBurstDrains(t *testing.T) {
@@ -265,24 +265,6 @@ func TestCronResetDropsUnreadHistory(t *testing.T) {
 	}
 }
 
-func TestCronNoticeCrossPeerCorrection(t *testing.T) {
-	// A high source revision was announced. A later winning peer correction has
-	// become local revision 3. A new failure for the job must be announced.
-	m := cronNoticeFixture(t)
-	m.cron.data.lookup = map[string]generated.CronRun{"old": {UID: "old", Status: "failed", Revision: 2, UpdatedAt: snapshotFixedNow}}
-	first := cronNoticeEvent("old", "job", snapshotFixedNow)
-	first.cronRun.Revision = 9
-	m, _ = m.cronNoticeEvent(first)
-	m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
-	require.NotNil(t, m.toast)
-	m.cron.data.lookup = map[string]generated.CronRun{"old": {UID: "old", Status: "succeeded", Revision: 3, UpdatedAt: snapshotFixedNow}}
-	m, cmd := m.cronNoticeEvent(cronNoticeEvent("next", "job", snapshotFixedNow))
-	require.NotNil(t, cmd, "a corrected announcement must stop suppressing this job")
-	m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
-	require.Contains(t, m.toast.text, "1 run")
-	require.Contains(t, m.cronNotices.announced, "next")
-}
-
 func TestCronSharedParentEvidence(t *testing.T) {
 	for _, parentFirst := range []bool{false, true} {
 		t.Run(fmt.Sprint(parentFirst), func(t *testing.T) {
@@ -298,7 +280,11 @@ func TestCronSharedParentEvidence(t *testing.T) {
 			parentDone, fillDone := make(chan struct{}), make(chan struct{})
 			a := waitReadAPI(func(context.Context, string) ([]generated.CronRun, error) {
 				if parentFirst {
-					<-parentDone
+					select {
+					case <-parentDone:
+					case <-time.After(time.Second):
+						return nil, errors.New("parent read did not finish")
+					}
 				}
 				close(fillDone)
 				return []generated.CronRun{{UID: "fill", JobUID: new(adapter.UID), Status: "running", Actor: "operator", IssueUID: new(nextParentUID)}}, nil
@@ -306,7 +292,11 @@ func TestCronSharedParentEvidence(t *testing.T) {
 			a.wait = func(_ context.Context, uid string) (cronParent, error) {
 				if uid == nextParentUID {
 					if !parentFirst {
-						<-fillDone
+						select {
+						case <-fillDone:
+						case <-time.After(time.Second):
+							return cronParent{}, errors.New("fill read did not finish")
+						}
 					}
 					close(parentDone)
 				}
@@ -499,35 +489,33 @@ func TestCronRefreshQueueAttentionBound(t *testing.T) {
 							for range 16 {
 								release <- struct{}{}
 							}
-							<-done
+							select {
+							case <-done:
+							case <-time.After(time.Second):
+								t.Fatal("refresh did not finish")
+							}
 							t.Fatal("more than eight exact reads overtook attention")
 						}
 						release <- struct{}{}
 					case <-done:
 						t.Fatal("refresh ended without attention")
+					case <-time.After(time.Second):
+						t.Fatal("attention read did not start")
 					}
 				}
 			}
 			for range 16 {
 				release <- struct{}{}
 			}
-			<-done
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("refresh did not finish")
+			}
 			require.Len(t, a.reads, 16)
 			require.Len(t, p.lookup, 16)
 		})
 	}
-}
-
-func TestCronNoticeKeepsNewerEventOverLoadedSnapshot(t *testing.T) {
-	m := cronNoticeFixture(t)
-	m.cron.data.lookup = map[string]generated.CronRun{"old": {UID: "old", Status: "succeeded", Revision: 50, UpdatedAt: snapshotFixedNow}}
-	first := cronNoticeEvent("old", "job", snapshotFixedNow)
-	first.cronRun.Revision = 1
-	m, _ = m.cronNoticeEvent(first)
-	m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
-	m, cmd := m.cronNoticeEvent(cronNoticeEvent("next", "job", snapshotFixedNow))
-	require.Nil(t, cmd, "the pre-event local snapshot cannot supersede the announcement")
-	require.NotContains(t, m.cronNotices.pending, "next")
 }
 
 func TestCronSuccessfulHeadClearsMarkWithoutExactRead(t *testing.T) {

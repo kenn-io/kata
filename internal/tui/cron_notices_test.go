@@ -26,6 +26,37 @@ func cronNoticeEvent(uid, job string, at time.Time) eventReceivedMsg {
 func cronNoticeTickFor(m Model) cronNoticeTickMsg {
 	return cronNoticeTickMsg{conn: m.connGen, scope: m.scopeGen, gen: m.cronNotices.gen}
 }
+func TestCronNoticeLocalRevisionSupersession(t *testing.T) {
+	t.Run("winning correction", func(t *testing.T) {
+		// A high source revision was announced. A later winning peer correction has
+		// become local revision 3. A new failure for the job must be announced.
+		m := cronNoticeFixture(t)
+		m.cron.data.lookup = map[string]generated.CronRun{"old": {UID: "old", Status: "failed", Revision: 2, UpdatedAt: snapshotFixedNow}}
+		first := cronNoticeEvent("old", "job", snapshotFixedNow)
+		first.cronRun.Revision = 9
+		m, _ = m.cronNoticeEvent(first)
+		m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+		require.NotNil(t, m.toast)
+		m.cron.data.lookup = map[string]generated.CronRun{"old": {UID: "old", Status: "succeeded", Revision: 3, UpdatedAt: snapshotFixedNow}}
+		m, cmd := m.cronNoticeEvent(cronNoticeEvent("next", "job", snapshotFixedNow))
+		require.NotNil(t, cmd, "a corrected announcement must stop suppressing this job")
+		m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+		require.Contains(t, m.toast.text, "1 run")
+		require.Contains(t, m.cronNotices.announced, "next")
+	})
+	t.Run("snapshot at arrival", func(t *testing.T) {
+		m := cronNoticeFixture(t)
+		m.cron.data.lookup = map[string]generated.CronRun{"old": {UID: "old", Status: "succeeded", Revision: 50, UpdatedAt: snapshotFixedNow}}
+		first := cronNoticeEvent("old", "job", snapshotFixedNow)
+		first.cronRun.Revision = 1
+		m, _ = m.cronNoticeEvent(first)
+		m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+		m, cmd := m.cronNoticeEvent(cronNoticeEvent("next", "job", snapshotFixedNow))
+		require.Nil(t, cmd, "the pre-event local snapshot cannot supersede the announcement")
+		require.NotContains(t, m.cronNotices.pending, "next")
+	})
+}
+
 func TestCronNoticeDecodeObservedOnly(t *testing.T) {
 	payload := map[string]any{"uid": "run", "project_uid": "project-example", "status": "unknown", "job_uid": "job", "updated_at": snapshotFixedNow}
 	for _, kind := range []string{"cron.run.observed", "cron.run.snapshot", "issue.updated"} {
@@ -298,27 +329,54 @@ func TestCronNoticeRenderedFailure(t *testing.T) {
 		require.Less(t, notice, len(lines)-1)
 	})
 
-}
-
-// Failure severity applies to the shared notice row outside the Cron list.
-func TestCronNoticeProjectsFailureSeverity(t *testing.T) {
-	defer snapshotInit(t)()
-	m := cronNoticeFixture(t)
-	applyColorMode(colorDark, true)
-	m.width, m.height = 120, 26
-	m.view = viewProjects
-	m, _ = updateModel(m, cronNoticeEvent("failure", "job", snapshotFixedNow))
-	m, _ = updateModel(m, cronNoticeTickFor(m))
-	for line := range strings.SplitSeq(m.viewContent(), "\n") {
-		plain := stripANSI(line)
-		if before, _, ok := strings.Cut(plain, "cron: 1 run failed:"); ok {
-			cell := attentionTerminalCells(line)[ansi.StringWidth(before)]
-			want := attentionTerminalCells(errorStyle.Render("x"))[0].foreground
-			require.Equal(t, want, cell.foreground, "Projects failure notice must use the error foreground")
-			return
+	t.Run("projects", func(t *testing.T) {
+		defer snapshotInit(t)()
+		m := cronNoticeFixture(t)
+		applyColorMode(colorDark, true)
+		m.width, m.height = 120, 26
+		m.view = viewProjects
+		m, _ = updateModel(m, cronNoticeEvent("failure", "job", snapshotFixedNow))
+		m, _ = updateModel(m, cronNoticeTickFor(m))
+		for line := range strings.SplitSeq(m.viewContent(), "\n") {
+			plain := stripANSI(line)
+			if before, _, ok := strings.Cut(plain, "cron: 1 run failed:"); ok {
+				cell := attentionTerminalCells(line)[ansi.StringWidth(before)]
+				want := attentionTerminalCells(errorStyle.Render("x"))[0].foreground
+				require.Equal(t, want, cell.foreground, "Projects failure notice must use the error foreground")
+				return
+			}
 		}
-	}
-	t.Fatal("failure notice missing from Projects")
+		t.Fatal("failure notice missing from Projects")
+	})
+
+	t.Run("fresh failure after notice", func(t *testing.T) {
+		defer snapshotInit(t)()
+		m := cronNoticeFixture(t)
+		m.width, m.height = 120, 26
+		event := cronNoticeEvent("new-failure", m.cron.data.jobs[0].UID, snapshotFixedNow)
+		m, cmd := updateModel(m, event)
+		require.NotNil(t, cmd)
+		require.True(t, m.pendingRefetch)
+		m, _ = updateModel(m, cronNoticeTickFor(m))
+		require.NotNil(t, m.toast)
+
+		// The old success can remain visible while the asynchronous read is pending.
+		// Deliver its fresh result: no extra event-projection mechanism is needed.
+		m, _ = updateModel(m, refetchTickMsg{})
+		data := *m.cron.data
+		data.events, data.generation = m.cron.events, m.cron.readGen
+		run := data.runs[0]
+		run.UID, run.Status, run.Revision = "new-failure", "failed", 1
+		run.CreatedAt, run.UpdatedAt, run.EndedAt = snapshotFixedNow, snapshotFixedNow, new(snapshotFixedNow)
+		data.runs = []generated.CronRun{run}
+		data.lastRuns = map[string]generated.CronRun{*run.JobUID: run}
+		m, _ = updateModel(m, cronLoadedMsg(data))
+		out := stripANSI(m.viewContent())
+		require.Contains(t, out, "1 unseen failed")
+		require.Contains(t, out, "failing")
+		require.Contains(t, out, "failed 0s ago")
+	})
+
 }
 
 // An emitted failure belongs to the scope and connection that observed it.

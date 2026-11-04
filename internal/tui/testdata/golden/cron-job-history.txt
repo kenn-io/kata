@@ -32,26 +32,28 @@ kata カタ jobs [runs] workflows
     "version": 1
   }
 
-  Runs (1)
+  Runs (20)
   succeeded · 2026-05-01T11:00:00Z · Report ready
+  succeeded · 2026-05-01T10:59:00Z · Report ready
+  succeeded · 2026-05-01T10:58:00Z · Report ready
+  succeeded · 2026-05-01T10:57:00Z · Report ready
+  succeeded · 2026-05-01T10:56:00Z · Report ready
+  succeeded · 2026-05-01T10:55:00Z · Report ready
+  succeeded · 2026-05-01T10:54:00Z · Report ready
+  succeeded · 2026-05-01T10:53:00Z · Report ready
+  succeeded · 2026-05-01T10:52:00Z · Report ready
+  succeeded · 2026-05-01T10:51:00Z · Report ready
+  succeeded · 2026-05-01T10:50:00Z · Report ready
+  succeeded · 2026-05-01T10:49:00Z · Report ready
+  succeeded · 2026-05-01T10:48:00Z · Report ready
+  succeeded · 2026-05-01T10:47:00Z · Report ready
+  succeeded · 2026-05-01T10:46:00Z · Report ready
+  succeeded · 2026-05-01T10:45:00Z · Report ready
+  succeeded · 2026-05-01T10:44:00Z · Report ready
+  succeeded · 2026-05-01T10:43:00Z · Report ready
+  succeeded · 2026-05-01T10:42:00Z · Report ready
+  succeeded · 2026-05-01T10:41:00Z · Report ready
   load 20 older runs
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
  j/k move▕ ↵/l follow▕ h/esc back▕ n/e new/edit▕ r refresh▕ u/U unseen/clear
