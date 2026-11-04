@@ -36,16 +36,19 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 
 	// Restore history from before these keys were reserved, then repair both
 	// scopes through the guarded API. The immutable old event must survive reset.
-	legacyPayload := jsontext.Value(`{"diff":{"cron.passover":{"from":null,"to":false},"cron.passover.` + job.UID + `":{"from":null,"to":false}}}`)
+	legacyPayload := jsontext.Value(`{"diff":{"cron.pause":{"from":null,"to":false},"cron.request.legacy":{"from":null,"to":{"note":"legacy"}},"cron.passover":{"from":null,"to":false},"cron.passover.` + job.UID + `":{"from":null,"to":false}}}`)
 	legacy := newRemoteEvent(t, project, nil, "project.metadata_updated", "worker", root.InstanceUID(), time.Now().Add(-time.Second).UnixMilli(), legacyPayload)
 	inserted, err := root.InsertRemoteEvent(ctx, project.ID, legacy)
 	require.NoError(t, err)
 	require.True(t, inserted)
-	seedPassover(t, root, project.ID, map[string]jsontext.Value{"cron.passover": jsontext.Value(`false`), "cron.passover." + job.UID: jsontext.Value(`false`)})
+	seedPassover(t, root, project.ID, map[string]jsontext.Value{"cron.pause": jsontext.Value(`false`), "cron.request.legacy": jsontext.Value(`{"note":"legacy"}`), "cron.passover": jsontext.Value(`false`), "cron.passover." + job.UID: jsontext.Value(`false`)})
 	revision, err := root.ProjectByID(ctx, project.ID)
 	require.NoError(t, err)
 	_, err = root.SetCronProjectPause(db.WithRootAttribution(ctx, signer, "worker"), db.SetCronProjectPauseIn{ProjectID: project.ID, Actor: "worker", ExpectedRevision: &revision.Revision, DiscardMissed: true})
 	require.NoError(t, err)
+	cleanup, cleanupErr := root.SweepCronRequests(db.WithRootAttribution(ctx, signer, "worker"), project.ID, time.Now().UTC())
+	require.Error(t, cleanupErr, "legacy request is reported once")
+	require.NotNil(t, cleanup, "legacy request deletion must be retained for signed reset")
 	resumed, err := root.ResumeCronJob(db.WithRootAttribution(ctx, signer, "worker"), db.ResumeCronJobIn{ProjectID: project.ID, UID: job.UID, Actor: "worker", DiscardMissed: true, ExpectedEventUID: job.DefinitionEventUID})
 	require.NoError(t, err)
 	job = resumed.Job

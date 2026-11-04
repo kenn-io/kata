@@ -22,11 +22,8 @@ func (r cronEnabledRequest) invalidatedBy(msg eventReceivedMsg) bool {
 	case "sync.reset_required", "project.merged", "project.removed", "project.restored":
 		return true
 	}
-	if strings.HasPrefix(msg.eventType, "cron.job.") {
-		var payload struct {
-			UID string `json:"uid"`
-		}
-		return json.Unmarshal(msg.cronPayload, &payload) != nil || payload.UID == "" || payload.UID == r.uid
+	if strings.HasPrefix(msg.eventType, "cron.job.") || msg.eventType == "project.metadata_updated" {
+		return r.cronEventInvalidates(msg)
 	}
 	if r.parent == "" || msg.issueUID != r.parent {
 		return false
@@ -55,4 +52,27 @@ func (r cronEnabledRequest) invalidatedBy(msg eventReceivedMsg) bool {
 		return changed
 	}
 	return false
+}
+
+// cronEventInvalidates covers job definitions and the applicable cutoffs a
+// counted resume depends on. Other project metadata leaves the action intact.
+func (r cronEnabledRequest) cronEventInvalidates(msg eventReceivedMsg) bool {
+	if msg.eventType == "project.metadata_updated" {
+		var payload struct {
+			Diff map[string]jsontext.Value `json:"diff"`
+		}
+		if !r.enabled {
+			return false
+		}
+		if json.Unmarshal(msg.cronPayload, &payload) != nil || payload.Diff == nil {
+			return true
+		}
+		_, project := payload.Diff["cron.passover"]
+		_, job := payload.Diff["cron.passover."+r.uid]
+		return project || job
+	}
+	var payload struct {
+		UID string `json:"uid"`
+	}
+	return json.Unmarshal(msg.cronPayload, &payload) != nil || payload.UID == "" || payload.UID == r.uid
 }

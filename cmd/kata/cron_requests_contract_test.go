@@ -31,10 +31,15 @@ func TestCronRequestCommands(t *testing.T) {
 		e := root.Execute()
 		return out.Bytes(), e
 	}
-	id, err := uid.New()
+	raw, err := execute("new-uid")
 	require.NoError(t, err)
+	var generated struct {
+		UID string `json:"uid"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &generated))
+	id := generated.UID
 	args := []string{"job", "request-run", job.UID, "--request-uid", id, "--ttl", "60"}
-	raw, err := execute(args...)
+	raw, err = execute(args...)
 	require.NoError(t, err, string(raw))
 	var first db.RequestCronOut
 	require.NoError(t, json.Unmarshal(raw, &first))
@@ -54,8 +59,10 @@ func TestCronRequestCommands(t *testing.T) {
 	require.NoError(t, err)
 	_, err = env.DB.ObserveCronRun(t.Context(), db.ObserveCronRun{ProjectID: p.ID, UID: runID, Actor: "operator", JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Status: "running", Summary: cron.Summary{Version: 1}})
 	require.NoError(t, err)
-	cancelID, err := uid.New()
+	raw, err = execute("new-uid")
 	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(raw, &generated))
+	cancelID := generated.UID
 	raw, err = execute("run", "request-cancel", runID, "--request-uid", cancelID)
 	require.NoError(t, err, string(raw))
 	var cancel db.RequestCronOut

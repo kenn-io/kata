@@ -139,11 +139,11 @@ func validateCronRequestFreshness(id string, now time.Time) error {
 }
 
 func validateCronRequestEventChange(id string, from, to jsontext.Value) error {
-	if !cronUID(id) {
-		return fmt.Errorf("%w: invalid cron request key", cron.ErrInvalid)
-	}
 	if to.Kind() == jsontext.KindNull {
 		return nil
+	}
+	if !cronUID(id) {
+		return fmt.Errorf("%w: invalid cron request key", cron.ErrInvalid)
 	}
 	next, err := decodeCronRequest(id, to)
 	if err != nil {

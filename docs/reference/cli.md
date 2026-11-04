@@ -2247,6 +2247,7 @@ Commands return JSON; external adapters schedule and launch their own work.
 See [Cron](cron.md) for bounded documents and retry semantics.
 
 ```sh
+kata cron new-uid --json
 kata cron job create --uid <job-uid> --file job.json --json
 kata cron job list [--include-deleted] --json
 kata cron job show <job-uid> --json
@@ -2280,8 +2281,9 @@ assuming a create conflict is successful. Mutable definitions require the
 current expected event UID, from `--expected-event-uid` or the request body. Independent runs use a retained run UID, exact
 same-write retry idempotency, and ordinary revision CAS for changed evidence.
 The planning-date read returns native resolved dates without changing readiness.
-Run and cancellation requests require a fresh, caller-retained request ULID;
-reuse the target, actor, and TTL on retry. They are admitted only at the owning
+Run `kata cron new-uid --json` locally to generate a request ULID without a
+daemon, project, or workspace. Supply its `uid` immediately for a run or
+cancellation request; retain that UID, target, actor, and TTL on retry. They are admitted only at the owning
 hub and never launch or terminate a process themselves. See
 [Runtime requests](cron.md#ask-a-runtime-to-run-or-cancel) for clock, lifetime,
 capacity, and answer rules.

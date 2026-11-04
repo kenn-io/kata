@@ -197,6 +197,7 @@ Submit a run request for an enabled adapter execution job, or a cancellation
 request for a currently running run, at the project's owning hub:
 
 ```sh
+kata cron new-uid --json
 kata cron job request-run <job-uid> --request-uid <fresh-request-ulid> --ttl 600 --json
 kata cron run request-cancel <run-uid> --request-uid <fresh-request-ulid> --ttl 600 --json
 kata cron request list --state pending --json
@@ -209,8 +210,10 @@ remains available while the job or project is paused. It also supports a
 workflow-only run. Spokes refuse admission with an owning-hub hint, even when
 federation is disabled; they can read locally replicated requests.
 
-Generate the request ULID just before first submission and retain it, the
-target, actor, and TTL after an uncertain response. The UID's millisecond time
+Run `kata cron new-uid --json` locally and use its `uid` field just before first
+submission. It needs no daemon, project, or workspace. Retain that UID, the
+target, actor, and TTL after an uncertain response; never generate another UID
+for the same uncertain action. The UID's millisecond time
 becomes `requested_at`. New admission accepts a UID at most 30 seconds old or
 5 seconds in the future. Keep client and hub clocks aligned. `--ttl` defaults
 to 600 seconds and accepts 60 through 86400; `expires_at` is that lifetime after
@@ -224,6 +227,18 @@ returns 409 `request_conflict`. The root collects expired requests; afterward,
 the old UID returns 410 `request_expired` and cannot recreate the request.
 Check the known outcome before choosing a new UID, since a new request may
 cause another execution.
+
+The root also collects malformed legacy values under `cron.request.` and reports
+them with the cleanup event. Until cleanup, those values block request reads and
+admission. Valid retained requests and unrelated metadata stay intact. Replicas
+never perform this repair, and the generic metadata route remains reserved.
+Collection uses the existing 30-second due-notification sweep; candidate discovery
+scans active projects' metadata rather than maintaining a request index.
+
+Signed resets may retain superseded malformed pause or request history only
+with an exact later root deletion and an absent current key. Wrong origins,
+unrepaired history, request-body mutations and malformed current state remain
+rejected. The source event bytes and hashes stay unchanged.
 
 In the TUI, press `R` on an eligible Jobs row or detail, or `X` on a running
 Runs row or detail. Confirm with `y`; `n` or Esc cancels the dialog. The TUI
@@ -310,6 +325,11 @@ state always require complete valid values.
 A project with any retained passover cannot be adopted as a spoke of another
 hub. Adoption rejects it before changing identity, history, or binding. Ordinary
 resume keeps passover, so resuming again does not remove this limitation.
+
+A job cutoff remains through job archive and restore so discarded backlog cannot
+replay after restoration. Storage grows with the number of distinct jobs that
+have used discard; subsequent discards replace the same key. Project purge
+removes the project's metadata.
 
 Native delivery, TUI backlog counts, issue-reopen counts, and occurrence previews
 exclude instants at or before the cutoff. Delivery applies it lazily and saves the

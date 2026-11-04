@@ -234,8 +234,8 @@ func (a CronSQL) RequestProjects(ctx context.Context) ([]int64, error) {
 	return ids, rows.Err()
 }
 
-// SweepRequests expires one root project's valid requests. Malformed values are
-// retained and reported alongside the exact committed event, if any. Callers
+// SweepRequests expires valid requests and deletes malformed legacy values.
+// Malformed values are reported with their exact cleanup event. Callers
 // publish that event before handling the error or starting another project.
 func (a CronSQL) SweepRequests(ctx context.Context, projectID int64, now time.Time) (*Event, error) {
 	if now.IsZero() {
@@ -275,11 +275,10 @@ func (a CronSQL) SweepRequests(ctx context.Context, projectID int64, now time.Ti
 			request, err := decodeCronRequest(strings.TrimPrefix(key, CronRequestMetadataPrefix), raw)
 			if err != nil {
 				malformed = append(malformed, fmt.Errorf("request %s: %w", key, err))
+			} else if now.Before(request.ExpiresAt) {
 				continue
 			}
-			if !now.Before(request.ExpiresAt) {
-				patch[key] = jsontext.Value("null")
-			}
+			patch[key] = jsontext.Value("null")
 		}
 		if len(patch) == 0 {
 			return nil

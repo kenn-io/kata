@@ -37,7 +37,13 @@ func cronPassoverKey(key string) bool {
 	return key == CronPassoverMetadataKey || strings.HasPrefix(key, CronPassoverMetadataPrefix)
 }
 func validCronPassoverTime(t time.Time) bool {
-	return !t.IsZero() && t.Location() == time.UTC && t.Year() >= 1 && t.Year() <= 9999
+	return !t.IsZero() && cronUTCOffset(t) == 0 && t.Year() >= 1 && t.Year() <= 9999
+}
+
+// cronUTCOffset lets RFC3339 "+00:00" name UTC like "Z"; other offsets fail.
+func cronUTCOffset(t time.Time) int {
+	_, offset := t.Zone()
+	return offset
 }
 func decodeCronPassover(raw jsontext.Value) (CronPassover, error) {
 	invalid := func() (CronPassover, error) {
@@ -84,7 +90,7 @@ func CronPassoverFromMetadata(blob JSONBlob, jobUID string) *CronPassoverState {
 			return &CronPassoverState{Invalid: true}
 		}
 		if state == nil || !v.Through.Before(state.Through) {
-			state = &CronPassoverState{Through: v.Through, Scope: item.scope}
+			state = &CronPassoverState{Through: v.Through.UTC(), Scope: item.scope}
 		}
 	}
 	return state

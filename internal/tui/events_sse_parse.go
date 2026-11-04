@@ -149,7 +149,7 @@ func decodeEventReceived(f frame) eventReceivedMsg {
 		issueUID:        p.IssueUID,
 		relatedIssueUID: p.RelatedIssueUID,
 	}
-	if strings.HasPrefix(p.Type, "cron.job.") || p.Type == "issue.updated" || p.Type == "issue.metadata_updated" {
+	if strings.HasPrefix(p.Type, "cron.job.") || p.Type == "issue.updated" || p.Type == "issue.metadata_updated" || p.Type == "project.metadata_updated" {
 		out.cronPayload = p.Payload
 	}
 	if p.IssueShortID != nil {
