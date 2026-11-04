@@ -151,14 +151,22 @@ func TestMovePickerShowsAreaToTellSameNamedProjectsApart(t *testing.T) {
 		moveProject(3, "docs", "", "home"),
 		moveProject(4, "docs", "", "home"),
 		moveProject(6, "solo", "", "work"),
+		moveProject(11, "notes", "", "work "),
+		moveProject(12, "notes", "", "work"),
+		moveProject(13, "wiki", "", " home "),
+		moveProject(14, "wiki", "", "play"),
 	}}
 	m := openMove(t, moveModel(t, api))
 	require.Equal(t, []string{
 		"docs · work",
 		"docs · uid-3",
 		"docs · uid-4",
+		"notes · uid-11",
+		"notes · uid-12",
 		"solo",
-	}, moveLabels(m), "an area names a project only when no same-named project shares it; otherwise the UID does")
+		"wiki · home",
+		"wiki · play",
+	}, moveLabels(m), "an area names a project only when no same-named project shares it, ignoring surrounding spaces; otherwise the UID does")
 
 	m = typeText(m, "WORK")
 	require.Equal(t, []string{"docs · work"}, moveLabels(m), "the filter matches the area shown beside a name, case-insensitively")
