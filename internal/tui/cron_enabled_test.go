@@ -205,7 +205,7 @@ func TestCronResumeMissingProgressUsesUserFacingMessage(t *testing.T) {
 	m, write := deliverEnabled(t, m, lookup)
 	require.NotNil(t, write)
 	require.NotNil(t, m.toast)
-	require.Contains(t, m.toast.text, "Cannot count missed runs")
+	require.Contains(t, m.toast.text, "cannot count missed runs")
 	require.NotContains(t, m.toast.text, "recurring progress")
 	require.Empty(t, api.enabledCalls)
 }
