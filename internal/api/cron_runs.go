@@ -3,6 +3,8 @@ package api
 import (
 	"time"
 
+	"github.com/danielgtaylor/huma/v2"
+
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 )
@@ -81,15 +83,17 @@ type ObserveCronRunResponse struct {
 // CronRunsRequest selects a bounded project-scoped history page.
 type CronRunsRequest struct {
 	CronProjectRequest
-	JobUID    string `query:"job_uid"`
-	Limit     int    `query:"limit" minimum:"0" maximum:"100"`
-	BeforeUID string `query:"before_uid"`
+	CronRunQuery
 }
+
+// Resolve preserves repeated filter values.
+func (in *CronRunsRequest) Resolve(ctx huma.Context) []error { return in.resolve(ctx) }
 
 // CronRunsResponse returns evidence and an optional ordinary page cursor.
 type CronRunsResponse struct {
 	Body struct {
-		Runs          []CronRun `json:"runs"`
-		NextBeforeUID string    `json:"next_before_uid,omitempty"`
+		Runs          []CronRun          `json:"runs"`
+		Filters       *db.CronRunFilters `json:"filters,omitempty"`
+		NextBeforeUID string             `json:"next_before_uid,omitempty"`
 	}
 }

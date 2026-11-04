@@ -95,37 +95,59 @@ const CronRunCreatedAtFormat = "2006-01-02T15:04:05.000000000Z"
 
 // Runs reads a bounded creation-time and UID-ordered project history page.
 func (a CronSQL) Runs(ctx context.Context, in CronRunList) ([]CronRun, error) {
-	if in.Limit < 0 {
-		return nil, fmt.Errorf("%w: negative limit", cron.ErrInvalid)
+	var err error
+	in, err = NormalizeCronRunList(in)
+	if err != nil {
+		return nil, err
 	}
-	if in.Limit == 0 || in.Limit > 100 {
-		in.Limit = 100
+	args := []any{}
+	scope := ""
+	if in.AllProjects {
+		scope = cronProjectPredicate(ctx, in.ProjectIDs, &args)
+	} else {
+		args = append(args, in.ProjectID)
+		scope = "project_id=$1"
 	}
-	in.JobUID = strings.ToUpper(in.JobUID)
-	in.BeforeUID = strings.ToUpper(in.BeforeUID)
-	query := "SELECT " + cronRunColumns + " FROM cron_runs WHERE project_id=$1"
-	args := []any{in.ProjectID}
-	if in.JobUID != "" {
-		if !cronUID(in.JobUID) {
-			return nil, fmt.Errorf("%w: invalid job UID", cron.ErrInvalid)
-		}
-		args = append(args, in.JobUID)
-		query += fmt.Sprintf(" AND job_uid=$%d", len(args))
-	}
+	var query strings.Builder
+	query.WriteString("SELECT " + cronRunColumns + " FROM cron_runs WHERE " + scope)
 	if in.BeforeUID != "" {
-		if !cronUID(in.BeforeUID) {
-			return nil, fmt.Errorf("%w: invalid cursor", cron.ErrInvalid)
+		// Cursor scope is independent of mutable filters (for example status).
+		cursorArgs := append([]any(nil), args...)
+		cursorArgs = append(cursorArgs, in.BeforeUID)
+		before, readErr := scanCronRunRow(a.Query.QueryRowContext(ctx, "SELECT "+cronRunColumns+" FROM cron_runs WHERE "+scope+fmt.Sprintf(" AND uid=$%d", len(cursorArgs)), cursorArgs...))
+		if errors.Is(readErr, sql.ErrNoRows) {
+			if in.AllProjects {
+				return nil, fmt.Errorf("%w: cursor not in scope", cron.ErrInvalid)
+			}
+			return nil, ErrNotFound
 		}
-		before, err := a.Run(ctx, in.ProjectID, in.BeforeUID)
-		if err != nil {
-			return nil, err
+		if readErr != nil {
+			return nil, readErr
 		}
 		args = append(args, before.CreatedAt.UTC().Format(CronRunCreatedAtFormat), before.UID)
-		query += fmt.Sprintf(" AND (created_at<$%d OR (created_at=$%d AND uid<$%d))", len(args)-1, len(args)-1, len(args))
+		fmt.Fprintf(&query, " AND (created_at<$%d OR (created_at=$%d AND uid<$%d))", len(args)-1, len(args)-1, len(args))
+	}
+	if len(in.Statuses) > 0 {
+		places := make([]string, len(in.Statuses))
+		for i, status := range in.Statuses {
+			args = append(args, status)
+			places[i] = fmt.Sprintf("$%d", len(args))
+		}
+		query.WriteString(" AND status IN (" + strings.Join(places, ",") + ")")
+	}
+	for _, filter := range []struct{ column, value string }{{"job_uid", in.JobUID}, {"issue_uid", in.IssueUID}, {"executor_label", in.ExecutorLabel}, {"teammate", in.Teammate}} {
+		if filter.value != "" {
+			args = append(args, filter.value)
+			fmt.Fprintf(&query, " AND %s=$%d", filter.column, len(args))
+		}
+	}
+	if !in.Since.IsZero() {
+		args = append(args, in.Since.Format(CronRunCreatedAtFormat))
+		fmt.Fprintf(&query, " AND created_at>=$%d", len(args))
 	}
 	args = append(args, in.Limit)
-	query += fmt.Sprintf(" ORDER BY created_at DESC,uid DESC LIMIT $%d", len(args))
-	rows, err := a.Query.QueryContext(ctx, query, args...)
+	fmt.Fprintf(&query, " ORDER BY created_at DESC,uid DESC LIMIT $%d", len(args))
+	rows, err := a.Query.QueryContext(ctx, query.String(), args...)
 	if err != nil {
 		return nil, err
 	}

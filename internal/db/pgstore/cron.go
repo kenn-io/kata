@@ -56,3 +56,8 @@ func (s *Store) ListRecurringCronJobs(ctx context.Context, after string, limit i
 func (s *Store) DispatchRecurringCron(ctx context.Context, in db.DispatchRecurringCronIn) (db.DispatchRecurringCronOut, error) {
 	return s.cronSQL().DispatchRecurring(ctx, in)
 }
+
+// ListAllCronJobs lists jobs across active authorized projects.
+func (s *Store) ListAllCronJobs(ctx context.Context, in db.CronAllList) ([]db.CronJob, error) {
+	return s.cronSQL().AllJobs(ctx, in)
+}
