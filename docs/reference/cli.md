@@ -2265,7 +2265,8 @@ current expected event UID, from `--expected-event-uid` or the request body. Ind
 same-write retry idempotency, and ordinary revision CAS for changed evidence.
 Use `run list --reason <code>` to filter by a structured reason or an exact
 legacy `reason: <code>` first line before pagination. Structured reasons take
-precedence. See [run summaries](cron.md#structured-run-summaries) for the reason grammar.
+precedence. Reason filtering requires daemon API `0.42.0` or newer; the CLI
+refuses older daemons with an upgrade message. See [run summaries](cron.md#structured-run-summaries) for the reason grammar.
 The planning-date read returns native resolved dates without changing readiness.
 
 ## Federation

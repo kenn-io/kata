@@ -434,7 +434,8 @@ preserved. Typed definitions and opaque option objects retain exact JSON numbers
 and returns `next_before_uid`; pass it as `before_uid` to continue. `job_uid`
 filters history. The optional `reason` input filters by structured reason, or
 an exact legacy `reason: <code>` first line, before pagination; structured
-reasons take precedence. `kata.cron_run_observe` requires a caller-retained run UID,
+reasons take precedence. Each reason-filtered call requires daemon API `0.42.0`
+or newer and refuses an older daemon before listing runs. `kata.cron_run_observe` requires a caller-retained run UID,
 `expected_revision` (`0` for new evidence), a job or workflow reference with its
 definition event UID, status, and a versioned summary. Identical retries return
 `replayed: true`; distinct run UIDs for one scheduled occurrence remain separate

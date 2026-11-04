@@ -16,7 +16,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Make semantic search pick up new issues sooner in large stores by skipping unchanged issue text during mirror refreshes.
 - Record structured cron run reasons, triggers, steps, usage and log references,
   inspect them in the TUI, and filter history by reason through the CLI, API
-  and MCP. Existing v1 summaries remain supported. Upgrade every project peer
+  and MCP. Reason filtering requires daemon API `0.42.0` or newer; the CLI
+  and MCP refuse older daemons. Existing v1 summaries remain supported. Upgrade every project peer
   before enabling adapter v2 writes; older Kata versions cannot read stored v2
   summaries after a downgrade. See [run summaries](reference/cron.md#structured-run-summaries).
 

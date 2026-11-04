@@ -518,7 +518,8 @@ baselines and backup. Run identity conflicts fail rather than replacing a run.
 `kata cron run list --reason agent_quota --limit 20 --json` selects one reason
 code. The REST query is `reason=agent_quota`; MCP `kata.cron_runs` accepts the
 same `reason` input. Codes must match `[a-z0-9_.-]{1,64}`. Invalid codes return
-400 `validation` from the daemon.
+400 `validation` from the daemon. The CLI and MCP require daemon API `0.42.0`
+or newer for reason filtering and refuse older daemons before listing runs.
 
 The structured `summary.reason` takes precedence. When it is absent, a run
 matches only if the first message line is exactly `reason: <code>`, terminated
@@ -565,7 +566,11 @@ summary document's `version` remains `1`.
 | `usage` | Optional object with a required `model` of 1–128 UTF-8 bytes without control characters. Cache counts are nonnegative integers and default to zero. |
 | `usage.cost_micros`, `usage.currency` | Optional pair: a nonnegative integer in millionths of the named currency and a three-letter uppercase currency code. Zero is a known cost; omission means unknown. |
 | `steps` | Optional ordered array of at most 64 steps. An explicit empty array still requires v2 support. |
-| `log_ref` | Optional absolute URI, at most 512 UTF-8 bytes. No `file` scheme, credentials, whitespace, controls, backslashes, or drive-prefixed local paths. HTTP(S) requires a hostname. Kata stores the reference without opening it. |
+| `log_ref` | Optional absolute URI, at most 512 UTF-8 bytes. No `file` scheme, URI userinfo, whitespace, controls, backslashes, or drive-prefixed local paths. HTTP(S) requires a hostname. Kata stores the reference without opening it. |
+
+Kata rejects URI userinfo but cannot recognise credentials in a path or query.
+Adapters must leave credentials out of `log_ref`: the reference replicates to
+every project peer.
 
 Each step requires a unique workflow-style `key` and a `status` of `running`,
 `succeeded`, `failed`, `cancelled`, `unknown`, or `skipped`. `attempts` defaults
