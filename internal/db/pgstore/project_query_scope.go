@@ -20,6 +20,12 @@ func eventIssueLookup(ctx context.Context, query eventQueryRower) *db.EventIssue
 		func(projectUID, ref string) (db.Issue, error) {
 			return eventIssueByRef(ctx, query, projectUID, ref)
 		},
+		func(uid string) (db.Issue, error) {
+			args := []any{uid}
+			return scanIssue(ctx, query.QueryRowContext(ctx,
+				issueSelect+` WHERE i.id=(SELECT issue_id FROM comments WHERE uid=$1) AND `+
+					authorizedIssuePredicate(ctx, "i.project_id", &args), args...))
+		},
 	)
 }
 

@@ -15,6 +15,7 @@ import (
 // takes the project lock before preparing once optimistic attempts run out.
 // Request fences still run first and may themselves acquire the writer lock.
 type federationMaterialization struct {
+	fullReplay   bool
 	projection   db.FoldProjection
 	cronAffected bool
 	status       []federatedStatusIntentUpdate
@@ -71,6 +72,11 @@ func prepareFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID
 	}
 	if !alreadyStored {
 		events = append(events, fresh...)
+	}
+	for _, event := range events {
+		if event.Type == "issue.moved" {
+			return federationMaterialization{fullReplay: true}, nil
+		}
 	}
 	for _, event := range events {
 		if err := db.ValidateFederationEntries(event.Type, event.UID, event.Payload); err != nil {

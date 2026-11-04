@@ -49,7 +49,7 @@ func TestRecurringFeaturesCachePositiveProject(t *testing.T) {
 	for range 2 {
 		features, err := db.ProjectRequiredEventFeatures(t.Context(), database, projectUID)
 		require.NoError(t, err)
-		require.Equal(t, db.MergeEventFeatures(db.SupportedEventFeatures), features)
+		require.Equal(t, db.CronEventFeature, features)
 	}
 	require.Equal(t, 1, state.probeQueries, "a retained native projection is scanned once per process")
 }

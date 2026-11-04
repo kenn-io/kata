@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -207,14 +208,34 @@ func (d *Store) moveIssueProjectTx(ctx context.Context, tx *sql.Tx, in db.MoveIs
 		return out, fmt.Errorf("rehome external root bindings: %w", err)
 	}
 
-	payload, _ := json.Marshal(map[string]string{
+	payloadFields := map[string]any{
 		"issue_uid":        issueUID,
 		"from_project_uid": fromProjectUID,
 		"from_short_id":    curShortID,
 		"to_project_uid":   toProjectUID,
 		"to_short_id":      newShortID,
 		"updated_at":       ts,
-	})
+	}
+	var federated bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings WHERE project_id=$1)`, in.FromProjectID).Scan(&federated); err != nil {
+		return out, err
+	}
+	if federated {
+		movedIssue, err := issueByIDTx(ctx, tx, in.IssueID)
+		if err != nil {
+			return out, err
+		}
+		snapshot, err := d.federationIssueSnapshotPayload(ctx, tx, movedIssue)
+		if err != nil {
+			return out, err
+		}
+		payloadFields["snapshot"] = jsontext.Value(snapshot)
+	}
+	payload, err := json.Marshal(payloadFields)
+	if err != nil {
+		return out, err
+	}
+
 	ev, err := d.insertEventTx(ctx, tx, eventInsert{
 		ProjectID:   in.ToProjectID,
 		ProjectName: toProjectName,
