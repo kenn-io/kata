@@ -2049,11 +2049,12 @@ same revision check.
 
 In the issue list or detail, press `X` to soft-delete the selected issue. The
 form shows the issue's title and the header `DELETE <project>#<id>`, the string
-`kata delete --confirm` takes. Type `<project>#<id>` and press `Enter`; `Enter`
-does nothing until the text matches, and `Esc` cancels. The selection then moves
-to the next row (the previous one after the last), a detail showing the issue
-closes, and a notice names `u`. `u` restores the issue the way `kata restore`
-does; if the issue was restored elsewhere in the meantime, the TUI says so and
+`kata delete --confirm` takes. Type `DELETE <project>#<id>` and press `Enter`.
+`Enter` does nothing until the text matches. `Esc` cancels before the request
+starts. The selection then moves to the next row (the previous one after the
+last). A detail showing the issue returns as it does on `Esc`, and a notice
+names `u`. `u` restores the issue the way `kata restore` does; if the issue was
+restored elsewhere in the meantime, the TUI says so and
 changes nothing. There is no restore prompt for older deletions: use
 `kata restore`. Issue-scoped credentials cannot delete or restore, so `X` is
 not offered to them and does nothing.

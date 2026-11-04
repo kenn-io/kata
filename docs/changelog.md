@@ -21,7 +21,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   before the deadline it fires. See
   [CLI reference](reference/cli.md#daemon-and-diagnostics).
 - Delete an issue from `kata tui` with `X`, from the list or the detail. Type
-  the issue's `<project>#<id>` to confirm; the selection moves to the
+  `DELETE <project>#<id>` to confirm; the selection moves to the
   neighbouring row and `u` restores the issue, the way `kata restore` does.
   Issue-scoped credentials cannot delete, so they are not offered the key. See
   the [CLI reference](reference/cli.md#daemon-and-diagnostics).

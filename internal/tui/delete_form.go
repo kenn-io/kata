@@ -10,11 +10,10 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"go.kenn.io/kit/tui/splitlayout"
 )
 
 // deleteFormState is what a Delete form needs beyond its field: the
-// "<project>#<id>" the user must type, and the title of the issue it is for.
+// qualified reference to confirm, and the title of the issue it is for.
 type deleteFormState struct {
 	expected   string
 	issueTitle string
@@ -23,7 +22,6 @@ type deleteFormState struct {
 func newDeleteForm(target formTarget, issue Issue, expected string) inputState {
 	input := textinput.New()
 	input.Prompt = ""
-	input.Placeholder = expected
 	input.Blur()
 	s := inputState{
 		kind:   inputDeleteForm,
@@ -36,17 +34,17 @@ func newDeleteForm(target formTarget, issue Issue, expected string) inputState {
 	return s
 }
 
-// deleteConfirmation is the "<project>#<id>" the daemon expects after
-// "DELETE " for issue. It is empty when the issue's project is not known.
+// deleteConfirmation uses the daemon's qualified list reference or resolves
+// the project for a detail response, which carries only the short ID.
 func (m Model) deleteConfirmation(issue Issue) string {
-	if strings.Contains(issue.QualifiedID, "#") {
+	if issue.QualifiedID != "" {
 		return issue.QualifiedID
 	}
 	project := m.projectsByID[issue.ProjectID]
-	if project == "" && (issue.ProjectID == 0 || issue.ProjectID == m.scope.projectID) {
+	if project == "" && issue.ProjectID == m.scope.projectID {
 		project = m.scope.projectName
 	}
-	if project == "" || issue.ShortID == "" {
+	if project == "" {
 		return ""
 	}
 	return project + "#" + issue.ShortID
@@ -89,9 +87,9 @@ func (m Model) routeDeleteKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 }
 
 // commitDeleteForm sends the delete once the typed text is the issue's
-// "<project>#<id>"; until then enter does nothing.
+// "DELETE <project>#<id>"; until then enter does nothing.
 func (m Model) commitDeleteForm() (Model, tea.Cmd) {
-	if strings.TrimSpace(m.input.fieldValue(fieldConfirm)) != m.input.del.expected {
+	if m.input.fieldValue(fieldConfirm) != "DELETE "+m.input.del.expected {
 		return m, nil
 	}
 	m.input.saving = true
@@ -128,23 +126,20 @@ func (m Model) finishDelete(target formTarget, mut mutationDoneMsg) (Model, tea.
 	if mut.resp != nil && mut.resp.Issue != nil && mut.resp.Issue.UID != "" {
 		uid = mut.resp.Issue.UID
 	}
+	deletedDetail := m.detail.issue != nil && m.detail.issue.UID == uid
+	priorDetail := m.detail
 	m, follow := m.refreshListDay(func(lm listModel) listModel { return lm.withoutIssue(uid) })
 	if m.cache != nil {
 		m.cache.markStale()
 	}
 	var leave tea.Cmd
-	if m.detail.issue != nil && m.detail.issue.UID == uid {
-		m.detail.cancelReads()
-		switch {
-		case m.attention.returnToAttention:
-			m, leave = m.returnFromAttentionDetail()
-		case m.layout == splitlayout.Split:
-			m.detail = newDetailModel()
-			m.view, m.focus = viewList, focusList
-			m, leave = m.scheduleDetailFollow()
-		default:
-			m.detail = m.applyDetailViewportCache(newDetailModel())
-			m.view, m.focus = viewList, focusList
+	if deletedDetail {
+		priorDetail, leave = priorDetail.handleBack()
+		if leave == nil {
+			m.detail = priorDetail
+		} else {
+			next, cmd, _ := m.routeTopLevel(leave())
+			m, leave = next.(Model), cmd
 		}
 	}
 	message := "deleted " + qualified
@@ -180,7 +175,7 @@ func renderDeleteForm(s inputState, innerW int) string {
 	parts := []string{
 		titleStyle.Render(truncate(sanitizeForLine(s.title), innerW)),
 		subtleStyle.Render(truncate(sanitizeForLine(s.del.issueTitle), innerW)),
-		subtleStyle.Render(truncate(fmt.Sprintf("Type %s to confirm.", s.del.expected), innerW)),
+		subtleStyle.Render(truncate(fmt.Sprintf("Type DELETE %s to confirm.", s.del.expected), innerW)),
 		renderNewIssueField(s, 0, innerW),
 	}
 	if status := renderFormStatus(s); status != "" {

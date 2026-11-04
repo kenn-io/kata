@@ -7,13 +7,10 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
-// deleteAPI and restoreAPI soft-delete an issue and restore one, through the
+// deleteAPI soft-deletes and restores issues through the
 // same daemon calls as `kata delete` and `kata restore`.
 type deleteAPI interface {
 	DeleteIssue(ctx context.Context, projectID int64, ref, qualifiedID, actor string) (*MutationResp, error)
-}
-
-type restoreAPI interface {
 	RestoreIssue(ctx context.Context, projectID int64, ref, actor string) (*MutationResp, error)
 }
 
@@ -72,16 +69,19 @@ func (c *undoClient) DeleteIssue(ctx context.Context, projectID int64, ref, qual
 	})
 }
 
+func (c *undoClient) RestoreIssue(ctx context.Context, projectID int64, ref, actor string) (*MutationResp, error) {
+	restorer, ok := c.KataAPI.(deleteAPI)
+	if !ok {
+		return nil, errors.New("connected client cannot restore issues")
+	}
+	return restorer.RestoreIssue(ctx, projectID, ref, actor)
+}
+
 // undoDelete restores a deleted issue by UID. A deleted issue cannot be read
 // back, so the restore is the check: the daemon answers changed=false when the
 // issue is no longer deleted, which undo reports as already restored.
 func (c *undoClient) undoDelete(ctx context.Context, entry undoEntry, out undoOutcome) undoOutcome {
-	restorer, ok := c.KataAPI.(restoreAPI)
-	if !ok {
-		out.err = errors.New("connected client cannot restore issues")
-		return out
-	}
-	out.resp, out.err = restorer.RestoreIssue(ctx, entry.projectID, entry.uid, entry.actor)
+	out.resp, out.err = c.RestoreIssue(ctx, entry.projectID, entry.uid, entry.actor)
 	if out.err != nil {
 		out.attempt.unknown = ambiguousWriteError(out.err)
 		return out

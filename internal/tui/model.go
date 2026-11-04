@@ -929,7 +929,7 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 			}
 			return next, cmd, true
 		}
-		if m.keymap.Undo.matches(msg) && (m.view == viewList || m.view == viewDetail) {
+		if m.keymap.Undo.matches(msg) && (m.view == viewList || m.view == viewDetail || m.view == viewAttention) {
 			next, cmd := m.startUndo()
 			return next, cmd, true
 		}
@@ -2380,7 +2380,7 @@ func snapshotListSelection(lm listModel) listSelectionSnapshot {
 
 func (m Model) requestInputCancel() (Model, tea.Cmd) {
 	if m.input.saving &&
-		(m.input.kind == inputCommentForm || m.input.kind == inputNewIssueForm) {
+		(m.input.kind == inputCommentForm || m.input.kind == inputNewIssueForm || m.input.kind == inputDeleteForm) {
 		return m, nil
 	}
 	switch {
@@ -2788,14 +2788,15 @@ func (m Model) handleEventReceived(msg eventReceivedMsg) (tea.Model, tea.Cmd) {
 }
 
 // maybeRefetchLabels invalidates the project-label cache when an SSE
-// label event names a project we have a cached entry for. The
+// label or delete/restore event names a project we have a cached entry for. The
 // suggestion menu reads the cache on render, so a fresh dispatch
 // keeps the `+` autocomplete in sync with the daemon's authoritative
-// counts. No-op when the event isn't a label event, the cache has no
+// counts. No-op for other events, when the cache has no
 // entry for the project, or projectLabels was never initialized
 // (defensive — the field is set by initialModel).
 func (m Model) maybeRefetchLabels(msg eventReceivedMsg) (Model, tea.Cmd) {
-	if msg.eventType != "issue.labeled" && msg.eventType != "issue.unlabeled" {
+	if msg.eventType != "issue.labeled" && msg.eventType != "issue.unlabeled" &&
+		msg.eventType != "issue.soft_deleted" && msg.eventType != "issue.restored" {
 		return m, nil
 	}
 	if m.projectLabels == nil {
