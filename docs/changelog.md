@@ -1,13 +1,18 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Adapter authors can adopt the [adapter conformance profile v1](reference/cron.md#adapter-conformance)
+  for consistent interval anchors, catchup limits, local overlap, retries and
+  timeout outcomes. Adoption is explicit; Kata continues to store definitions
+  and evidence without executing adapter work.
 
 - Load the web UI's issue list and graph on SQLite and PostgreSQL stores with
   tens of thousands of issues without exceeding SQL parameter limits.
