@@ -1316,6 +1316,71 @@ func (c CronDefinitionActionBody) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(c))
 }
 
+type CronDispatchExplanation struct {
+	EvaluatedAt time.Time                     `json:"evaluated_at" validate:"required"`
+	Gate        RecurringExplanation          `json:"gate"`
+	JobUID      string                        `json:"job_uid" validate:"required"`
+	Last        *CronDispatchExplanation_Last `json:"last"`
+}
+
+func (c CronDispatchExplanation) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(c.EvaluatedAt, "required"); err != nil {
+		errors = errors.Append("EvaluatedAt", err)
+	}
+	if v, ok := any(c.Gate).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Gate", err)
+		}
+	}
+	if err := typesValidator.Var(c.JobUID, "required"); err != nil {
+		errors = errors.Append("JobUID", err)
+	}
+	if c.Last != nil {
+		if v, ok := any(c.Last).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Last", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type CronDispatchExplanation_Last struct {
+	At                 time.Time     `json:"at" validate:"required"`
+	DefinitionEventUID string        `json:"definition_event_uid" validate:"required"`
+	Delivered          int64         `json:"delivered"`
+	Detail             *string       `json:"detail,omitempty"`
+	More               bool          `json:"more"`
+	Reason             string        `json:"reason" validate:"required"`
+	Skipped            RecurringSkip `json:"skipped"`
+}
+
+func (c CronDispatchExplanation_Last) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(c.At, "required"); err != nil {
+		errors = errors.Append("At", err)
+	}
+	if err := typesValidator.Var(c.DefinitionEventUID, "required"); err != nil {
+		errors = errors.Append("DefinitionEventUID", err)
+	}
+	if err := typesValidator.Var(c.Reason, "required"); err != nil {
+		errors = errors.Append("Reason", err)
+	}
+	if v, ok := any(c.Skipped).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Skipped", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type CronHealth struct {
 	ByReason                    map[string]int64 `json:"by_reason"`
 	DeliveredSinceStart         int64            `json:"delivered_since_start"`
@@ -5743,6 +5808,23 @@ type RecurrenceTemplateUpdateInput struct {
 	Owner         *string         `json:"owner,omitempty"`
 	Priority      *int64          `json:"priority,omitempty"`
 	Title         *string         `json:"title,omitempty"`
+}
+
+type RecurringExplanation struct {
+	Detail    *string    `json:"detail,omitempty"`
+	NextDueAt *time.Time `json:"next_due_at,omitempty"`
+	Reason    string     `json:"reason" validate:"required"`
+}
+
+func (r RecurringExplanation) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
+type RecurringSkip struct {
+	After  *time.Time `json:"after,omitempty"`
+	Before *time.Time `json:"before,omitempty"`
+	Capped bool       `json:"capped"`
+	Count  int64      `json:"count"`
 }
 
 type RelayAcceptance struct {
