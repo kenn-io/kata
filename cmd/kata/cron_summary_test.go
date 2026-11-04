@@ -72,7 +72,7 @@ func TestCronCLIReasonFilter(t *testing.T) {
 	require.Len(t, result.Runs, 1)
 	require.Equal(t, wanted, result.Runs[0].UID)
 	var requests atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		requests.Add(1)
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
