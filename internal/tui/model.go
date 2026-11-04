@@ -2754,6 +2754,7 @@ func cacheKeysEqual(a, b cacheKey) bool {
 func (m Model) handleEventReceived(msg eventReceivedMsg) (tea.Model, tea.Cmd) {
 	cmds := []tea.Cmd{m.waitForSSE()}
 	if m.eventAffectsView(msg) {
+		m = m.invalidateCronEnabled(msg)
 		if strings.HasPrefix(msg.eventType, "cron.") || msg.eventType == "project.merged" || msg.eventType == "project.removed" || msg.eventType == "project.restored" || m.cronParentEvent(msg) {
 			m.cron.events++
 		}
@@ -3056,6 +3057,7 @@ func (m Model) handleRefetchTick() (tea.Model, tea.Cmd) {
 // makes the SSE id: line on this frame the authoritative resume
 // cursor, so resetRequiredMsg deliberately carries no payload.
 func (m Model) handleResetRequired(_ resetRequiredMsg) (tea.Model, tea.Cmd) {
+	m = m.invalidateCronEnabled(eventReceivedMsg{eventType: "sync.reset_required"})
 	m.cron.events++
 	m.cache.drop()
 	m.pendingRefetch = false

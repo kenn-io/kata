@@ -88,8 +88,13 @@ and `/resume`, with `{actor?, expected_event_uid?}`. MCP exposes
 `kata.cron_job_pause` and `kata.cron_job_resume` with the same optional revision.
 In the TUI Jobs list or job detail, press `p`. Resuming a native job asks for
 confirmation when its catch-up policy would deliver any missed children.
-The confirmation uses the counted revision; a concurrent change requires a
-refresh and another attempt. Failed backlog reads leave the job paused.
+The confirmation shows the backlog at lookup time, using the selected job
+and its catch-up policy. More occurrences may become due before delivery;
+with `skip`, occurrences may expire outside the grace window. The count is
+not a guarantee of the final delivered total. A change to the selected job or
+its parent checkpoint or eligibility requires a refresh and another attempt.
+Unrelated job activity does not cancel a confirmation. Failed backlog reads
+leave the job paused.
 
 Direct spokes forward native job actions as conditional full-definition PUTs.
 This works with older hubs that support native writes but lack these action

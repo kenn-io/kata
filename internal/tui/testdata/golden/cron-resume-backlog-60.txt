@@ -8,7 +8,7 @@
       │                                             │
       │  Resume Weekly report?                      │
       │                                             │
-      │  Resuming delivers 5 recurring child        │
+      │  Backlog at last check: 5 recurring child   │
       │  issues that came due while it was paused.  │
       │                                             │
       │  To change how missed runs are handled,     │

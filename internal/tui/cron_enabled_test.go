@@ -277,7 +277,7 @@ func TestCronEditLookupCannotBypassEnabledPending(t *testing.T) {
 	require.Len(t, api.enabledCalls, 1)
 }
 
-// Refreshing data invalidates a count, but must tell the operator to retry.
+// A relevant parent event invalidates a count and tells the operator to retry.
 func TestCronResumeRefreshRequiresRecount(t *testing.T) {
 	for _, stage := range []string{"lookup", "confirmation"} {
 		t.Run(stage, func(t *testing.T) {
@@ -287,7 +287,7 @@ func TestCronResumeRefreshRequiresRecount(t *testing.T) {
 			if stage == "confirmation" {
 				m, _ = deliverEnabled(t, m, lookup)
 			}
-			m.cron.events++
+			m = cronEnabledEvent(t, m, "issue.reopened", api.shown.Definition.Issue.ParentUID, nil)
 			if stage == "lookup" {
 				m, _ = deliverEnabled(t, m, lookup)
 			} else {

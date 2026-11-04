@@ -195,6 +195,7 @@ type editorReturnedMsg struct {
 // the old or new parent's pane would stay stale until a manual
 // refresh after a parent replace.
 type eventReceivedMsg struct {
+	cronPayload     []byte
 	gen             uint64
 	eventType       string
 	projectID       int64

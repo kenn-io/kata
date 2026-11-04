@@ -13,10 +13,10 @@ import (
 )
 
 type cronEnabledRequest struct {
-	conn, scope, seq, events uint64
-	uid, expected, name      string
-	enabled                  bool
-	count                    int
+	conn, scope, seq            uint64
+	uid, expected, name, parent string
+	enabled, invalidated        bool
+	count                       int
 }
 type cronEnabledReadyMsg struct {
 	request cronEnabledRequest
@@ -28,7 +28,7 @@ type cronEnabledDoneMsg struct {
 }
 
 func (m Model) routeCronEnabledKey(lines []cronLine, cursor int) (Model, tea.Cmd) {
-	if !m.cronJobsScope() || m.cron.data == nil || m.cron.enabled != nil || m.cron.data.jobsErr != nil || m.cron.data.events != m.cron.events {
+	if !m.cronJobsScope() || m.cron.data == nil || m.cron.enabled != nil || m.cron.data.jobsErr != nil {
 		return m, nil
 	}
 	if next, cmd, blocked := m.blockMutation(false); blocked {
@@ -41,7 +41,7 @@ func (m Model) routeCronEnabledKey(lines []cronLine, cursor int) (Model, tea.Cmd
 	}
 	m.cron.enabledSeq++
 	m.cron.editSeq++
-	request := cronEnabledRequest{conn: m.connGen, scope: m.scopeGen, seq: m.cron.enabledSeq, events: m.cron.events, uid: id, expected: job.DefinitionEventUID, name: job.Name, enabled: !job.Definition.Enabled}
+	request := cronEnabledRequest{conn: m.connGen, scope: m.scopeGen, seq: m.cron.enabledSeq, parent: cronNativeParent(*job), uid: id, expected: job.DefinitionEventUID, name: job.Name, enabled: !job.Definition.Enabled}
 	m.cron.enabled = &request
 	api, pid := m.api, m.scope.projectID
 	return m, func() tea.Msg {
@@ -78,7 +78,7 @@ func (m Model) sameCronEnabledRequest(request cronEnabledRequest) bool {
 	return pending != nil && request.conn == m.connGen && request.scope == m.scopeGen && pending.seq == request.seq && pending.uid == request.uid && pending.expected == request.expected
 }
 func (m Model) cronEnabledSelection(request cronEnabledRequest) bool {
-	if m.view != viewCron || m.cron.help || m.cron.filtering || !m.cronJobsScope() || m.cron.data == nil || m.cron.form != nil || m.cron.data.jobsErr != nil || m.cron.data.events != m.cron.events {
+	if m.view != viewCron || m.cron.help || m.cron.filtering || !m.cronJobsScope() || m.cron.data == nil || m.cron.form != nil || m.cron.data.jobsErr != nil {
 		return false
 	}
 	_, _, lines := cronScreen(m)
@@ -90,7 +90,7 @@ func (m Model) cronEnabledReady(msg cronEnabledReadyMsg) (Model, tea.Cmd) {
 	if !m.sameCronEnabledRequest(msg.request) {
 		return m, nil
 	}
-	if m.modal == modalNone && msg.request.events != m.cron.events {
+	if m.modal == modalNone && m.cron.enabled.invalidated {
 		m.cron.enabled = nil
 		return m.undoNotice("Job data changed; press p after refresh", toastError)
 	}
@@ -131,7 +131,7 @@ func (m Model) confirmCronResume() (Model, tea.Cmd) {
 	if pending == nil {
 		return m, nil
 	}
-	if m.sameCronEnabledRequest(*pending) && pending.events != m.cron.events {
+	if m.sameCronEnabledRequest(*pending) && pending.invalidated {
 		m.cron.enabled = nil
 		return m.undoNotice("Job data changed; press p after refresh", toastError)
 	}
@@ -171,7 +171,7 @@ func renderCronResumeModal(request *cronEnabledRequest) string {
 	}
 	return modalBoxStyle.Render(strings.Join([]string{
 		"Resume " + sanitizeForLine(request.name) + "?", "",
-		fmt.Sprintf("Resuming delivers %d recurring child", request.count),
+		fmt.Sprintf("Backlog at last check: %d recurring child", request.count),
 		issues + " that came due while it was paused.", "",
 		"To change how missed runs are handled,",
 		"use `kata cron job update`.",
