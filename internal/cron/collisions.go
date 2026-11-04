@@ -47,14 +47,10 @@ type ValidationCollisions struct {
 	Truncated bool            `json:"truncated"`
 }
 
+// Retained progress has already been validated by the storage decoder.
 func occurrencesWithin(j JobDefinition, p *RecurringProgress, from, until time.Time, limit int, budget *int) ([]time.Time, bool, error) {
 	if err := j.Validate(); err != nil {
 		return nil, false, err
-	}
-	if p != nil && j.Enabled && limit > 0 && IsRecurringIssueJob(j) {
-		if err := p.Validate(); err != nil {
-			return nil, false, err
-		}
 	}
 	after := from.UTC().Add(-time.Nanosecond)
 	progress := RecurringProgress{Version: 1, Anchor: from.UTC(), Through: after}
