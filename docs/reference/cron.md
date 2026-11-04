@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -666,6 +666,96 @@ federation reset, adoption, or project merge; those operations keep their
 ordinary identity, revision and credential guards. See
 [PostgreSQL migrations](../development/postgres-migrations.md) for owner-only
 migration, backup, runtime grants, and rollback requirements.
+
+### Run retention
+
+On newer main builds, the owning hub operator can preview and prune old
+terminal run evidence. Retention is manual; Kata does not prune automatically.
+Export history first if you need an archive:
+
+```sh
+kata export --project example-project --output history.jsonl
+kata cron run prune --older-than 90d --keep 10 --limit 5000
+kata cron run prune --older-than 90d --keep 10 --limit 5000 \
+  --force --confirm "PRUNE example-project cron runs" --json
+```
+
+Without `--force`, the command previews one batch. `--older-than` accepts Go
+durations such as `2160h` and whole days such as `90d`. The daemon requires an
+absolute cutoff at least 24 hours old. Both `created_at` and `updated_at` must
+be strictly before it. Only `succeeded`, `failed`, `cancelled`, and `unknown`
+runs are eligible; running runs stay.
+
+Each job or workflow keeps its newest `--keep` runs across all statuses,
+ordered by creation time and then UID. Job-backed runs group by job; runs
+with only a workflow group by workflow. The default is 10, with a range of
+1–1000. `--job <uid>` or `--workflow <uid>` narrows selection after that
+ranking. `--limit` selects the oldest eligible batch, default 5000 and range
+1–20000. Per-group status counts and date windows describe that batch, not
+historical totals. If `more` is true, preview the next batch before deleting
+again. A preview can change before the real call if another writer updates
+history.
+
+Deletion removes selected run rows and their `cron.run.observed` and
+`cron.run.snapshot` event bodies. Definitions, issues, occurrence claims,
+receipts, provenance, delivery bodies, and snapshots for kept runs remain.
+Each nonempty batch resets event streams and makes direct spokes and relay
+descendants rebuild their project state. Prefer infrequent, larger batches
+within the command limit to reduce repeated rebuilds. Pending relay deliveries or a
+prepared reset awaiting activation block pruning. Run it on an unbound
+project or its authoritative hub; spokes and upstream-bound relays refuse
+both preview and deletion. JSON and agent modes return the same batch
+response. Human output shows one row per job or workflow.
+
+A pruned run returns 404, and a pruned `--before-uid` pagination cursor also
+returns 404; restart pagination from the first page. Re-observing a pruned
+UID with `expected_revision > 0` conflicts. Pruning retains no tombstone:
+a delayed federation observation can restore a run, even when the hub
+accepted that event earlier but its response was lost. Such a retry can
+restore running or terminal evidence because its deduplication event was
+removed. A later prune selects it only if the current rules allow it.
+Pruning therefore reduces retained evidence without promising bounded total
+database growth or distinct lifetime counts.
+
+
+### Retained and pruned counts
+
+On newer main builds, read current run counts and recorded pruning separately:
+
+```sh
+kata cron run counts
+kata cron run counts --job <job-uid> --json
+kata cron run counts --workflow <workflow-uid> --agent
+```
+
+Each group reports `retained` counts for all five statuses and
+`pruned_since_tracking` counts for the four terminal statuses. Groups come
+from retained runs or pruning records, including groups whose definition was
+deleted or whose last run is gone. Definitions with neither are omitted.
+Names appear when available. Results are ordered by kind, then UID.
+
+The first contributing prune starts `coverage_started_at` for that group;
+previous deletions are unknown. `last_pruned_at`, `oldest_created_at`, and
+`newest_created_at` describe the recorded pruning window. A group with no
+recorded prune has zero pruning counts and no coverage timestamps. A restored
+or replayed run that is pruned again contributes again. These are pruning
+actions, not distinct lifetime runs.
+
+`--job` and `--workflow` select one aggregate identity and are mutually
+exclusive. Counts `--workflow` selects only runs without a job. Prune
+`--workflow` also selects job runs belonging to that workflow. An unmatched
+counts filter returns an empty `groups` list.
+
+Each response reads project access, metadata, retained rows and names from
+one consistent database snapshot. JSON and agent output preserve exact int64
+integers, including values above 2^53. Consumers must use an integer-capable
+JSON decoder.
+
+The owning hub stores absolute tallies in reserved `cron.tally.<group_uid>`
+project metadata. Generic metadata PATCH requests cannot change or delete
+that prefix. Backup, project export/import, and federation preserve validated
+tallies. Live project merge combines disjoint groups and identical histories;
+conflicting histories for the same kind and UID reject the whole merge.
 
 ## Routes, events, and records
 

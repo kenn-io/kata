@@ -13,6 +13,7 @@ import (
 // RelayCheckpointStateEvent is one current-state record checkpoint creation
 // writes into the project's history at the capture boundary's clock.
 type RelayCheckpointStateEvent struct {
+	UID       string
 	Project   Project
 	Type      string
 	Actor     string
@@ -174,18 +175,48 @@ func (p RelayResetProtocol) captureRootCheckpoint(ctx context.Context, create re
 	if err != nil {
 		return RelayResetCheckpoint{}, err
 	}
+	// Inspect retained history before writing the replacement pair. A second
+	// read afterward includes the pair and its exact provenance receipts.
+	records, err := p.Backend.RelayCheckpointRecords(ctx, project, boundary.ID)
+	if err != nil {
+		return RelayResetCheckpoint{}, err
+	}
+	clearPayload, err := CronTallyResetClearPayload(project, records)
+	if err != nil {
+		return RelayResetCheckpoint{}, err
+	}
 	payload, err := ProjectMetadataAdoptionPayload(project.Metadata)
 	if err != nil {
 		return RelayResetCheckpoint{}, err
 	}
 	clock := EventHLCTimestamp{PhysicalMS: boundary.HLCPhysicalMS, Counter: boundary.HLCCounter}
 	state := RelayCheckpointStateEvent{Project: project, Type: "project.metadata_updated", Actor: grant.Actor, Payload: payload, Clock: clock, CreatedAt: boundary.CreatedAt}
+	if clearPayload != "" {
+		first, err := uid.New()
+		if err != nil {
+			return RelayResetCheckpoint{}, err
+		}
+		second, err := uid.New()
+		if err != nil {
+			return RelayResetCheckpoint{}, err
+		}
+		// Explicitly order the pair at the same durable boundary clock, including
+		// if the OS clock moves backward between UID generation calls.
+		if first > second {
+			first, second = second, first
+		}
+		state.UID = first
+		state.Payload = clearPayload
+		if err := p.Backend.InsertRelayCheckpointStateEvent(capture, state); err != nil {
+			return RelayResetCheckpoint{}, err
+		}
+		state.UID = second
+		state.Payload = payload
+	}
 	if err := p.Backend.InsertRelayCheckpointStateEvent(capture, state); err != nil {
 		return RelayResetCheckpoint{}, err
 	}
-	// Read the existing portable history once. The new baseline's current entity
-	// records are committed separately from immutable source history.
-	records, err := p.Backend.RelayCheckpointRecords(ctx, project, boundary.ID)
+	records, err = p.Backend.RelayCheckpointRecords(ctx, project, boundary.ID)
 	if err != nil {
 		return RelayResetCheckpoint{}, err
 	}

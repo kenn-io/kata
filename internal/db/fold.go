@@ -5,6 +5,7 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // FoldEvents applies events in deterministic HLC order and returns the resulting
@@ -114,7 +115,7 @@ func (p *FoldProjection) apply(e FoldEvent) {
 		}
 	case "project.metadata_updated":
 		if e.ProjectUID != "" {
-			p.ProjectMetadata[e.ProjectUID] = applyMetadataDiff(p.ProjectMetadata[e.ProjectUID], payload["diff"])
+			p.ProjectMetadata[e.ProjectUID] = applyProjectMetadataDiff(p.ProjectMetadata[e.ProjectUID], payload["diff"])
 		}
 	case "project.author_rewritten":
 		p.applyAuthorRewritten(e, payload)
@@ -846,6 +847,14 @@ func StringSlice(raw jsontext.Value) []string {
 func stringSlice(raw jsontext.Value) []string { return StringSlice(raw) }
 
 func applyMetadataDiff(current jsontext.Value, diffRaw jsontext.Value) jsontext.Value {
+	return applyMetadataDiffWithTallies(current, diffRaw, false)
+}
+
+func applyProjectMetadataDiff(current jsontext.Value, diffRaw jsontext.Value) jsontext.Value {
+	return applyMetadataDiffWithTallies(current, diffRaw, true)
+}
+
+func applyMetadataDiffWithTallies(current jsontext.Value, diffRaw jsontext.Value, project bool) jsontext.Value {
 	var currentMap map[string]jsontext.Value
 	if len(current) > 0 && string(current) != "null" {
 		_ = json.Unmarshal(current, &currentMap)
@@ -863,7 +872,14 @@ func applyMetadataDiff(current jsontext.Value, diffRaw jsontext.Value) jsontext.
 			delete(currentMap, key)
 			continue
 		}
-		currentMap[key] = applyMetadataValueDiff(currentMap[key], d.From, d.To)
+		if project && strings.HasPrefix(key, CronTallyPrefix) {
+			// Ingress validates each complete value. Recorded pruning actions are
+			// absolute state, so recursive merging could invent a partial entry
+			// or retain an obsolete kind after a reset.
+			currentMap[key] = canonicalJSON(d.To)
+		} else {
+			currentMap[key] = applyMetadataValueDiff(currentMap[key], d.From, d.To)
+		}
 	}
 	out, err := json.Marshal(currentMap, json.Deterministic(true))
 	if err != nil {
