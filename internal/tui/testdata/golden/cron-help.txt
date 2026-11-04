@@ -11,6 +11,8 @@ Runs filters: status: job: actor: executor: teammate: issue: (UID prefix or
 none).
 Use health:never-ran or health:parent-closed. Filters cover loaded rows only.
 Repeated keys OR; different keys and free text AND. Workflows use plain text.
+Follow a run’s Issue line to open it; back returns here.
+Replica age is the last successful pull; pushes do not freshen it.
 
 Cron keys
 j/k    move
