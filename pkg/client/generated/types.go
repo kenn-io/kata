@@ -5308,10 +5308,10 @@ type PruneCronRunsBody struct {
 	Actor       *string   `json:"actor,omitempty"`
 	Before      time.Time `json:"before" validate:"required"`
 	DryRun      bool      `json:"dry_run"`
-	JobUID      *string   `json:"job_uid,omitempty"`
+	JobUID      *string   `json:"job_uid,omitempty" validate:"omitempty,max=26,min=26"`
 	Keep        *int64    `json:"keep,omitempty" validate:"omitempty,gte=1,lte=1000"`
 	Limit       *int64    `json:"limit,omitempty" validate:"omitempty,gte=1,lte=20000"`
-	WorkflowUID *string   `json:"workflow_uid,omitempty"`
+	WorkflowUID *string   `json:"workflow_uid,omitempty" validate:"omitempty,max=26,min=26"`
 }
 
 func (p PruneCronRunsBody) Validate() error {

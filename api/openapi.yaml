@@ -5247,6 +5247,8 @@ components:
         dry_run:
           type: boolean
         job_uid:
+          maxLength: 26
+          minLength: 26
           type: string
         keep:
           default: 10
@@ -5261,6 +5263,8 @@ components:
           minimum: 1
           type: integer
         workflow_uid:
+          maxLength: 26
+          minLength: 26
           type: string
       required:
         - before
