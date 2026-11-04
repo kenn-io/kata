@@ -17,6 +17,8 @@ import (
 // Each backend supplies its own retry/isolation, authorization fence, and event
 // writer. SQL uses numbered placeholders supported by SQLite and PostgreSQL.
 type CronSQL struct {
+	PruneGate            func(context.Context, *sql.Tx, Project) error
+	ReserveResetCursor   func(context.Context, *sql.Tx) (int64, error)
 	CreateIssueTx        func(context.Context, *sql.Tx, CreateIssueParams) (Issue, Event, error)
 	PatchIssueMetadataTx func(context.Context, *sql.Tx, PatchIssueMetadataIn) (PatchIssueMetadataOut, error)
 	InstanceUID          string

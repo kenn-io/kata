@@ -250,12 +250,8 @@ func (d *Store) purgeIssue(ctx context.Context, issueID int64, actor string, rea
 	// A live peer's emitted manifest must remain downloadable. Permanent
 	// deletion waits for its current namespace to drain; retired epochs and
 	// explicitly revoked enrollments retain history without blocking cleanup.
-	var pendingRelay bool
-	if err := conn.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_relay_outbox o JOIN federation_enrollments e ON e.relay_binding_uid=o.binding_uid AND e.relay_reset_epoch=o.reset_epoch WHERE o.project_uid=? AND o.acknowledged=0 AND e.revoked_at IS NULL) OR EXISTS(SELECT 1 FROM federation_enrollments e JOIN meta m ON m.key=? || e.relay_binding_uid WHERE e.project_id=? AND e.revoked_at IS NULL AND json_extract(m.value,'$.translation.authority.epoch')>e.relay_reset_epoch)`, issue.ProjectUID, db.RelayResetMetadataPrefix+issue.ProjectUID+".", issue.ProjectID).Scan(&pendingRelay); err != nil {
+	if err := rejectPendingRelayResetTx(ctx, conn, db.Project{ID: issue.ProjectID, UID: issue.ProjectUID}); err != nil {
 		return db.PurgeLog{}, err
-	}
-	if pendingRelay {
-		return db.PurgeLog{}, db.ErrFederationResetBlockedByPendingPush
 	}
 
 	purgeLogID, err := purgeCascade(ctx, conn, issue, projectName, actor, reason, d.instanceUID)

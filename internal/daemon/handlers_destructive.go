@@ -157,7 +157,7 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 			for _, projectID := range projects {
 				cfg.Publish().Reset(projectID, *pl.PurgeResetAfterEventID)
 			}
-			if err := refreshFederationBaselineAfterPurge(ctx, cfg, pl.ProjectID, actor); err != nil {
+			if err := refreshFederationBaselineAfterReset(ctx, cfg, pl.ProjectID, actor); err != nil {
 				return nil, internalAPIError(err)
 			}
 		}
@@ -167,7 +167,8 @@ func registerDestructiveHandlers(humaAPI huma.API, cfg ServerConfig) {
 	})
 }
 
-func refreshFederationBaselineAfterPurge(ctx context.Context, cfg ServerConfig, projectID int64, actor string) error {
+func refreshFederationBaselineAfterReset(ctx context.Context, cfg ServerConfig, projectID int64, actor string) error {
+	// Finalize the committed reset even if the caller disconnects.
 	refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	_, _, err := cfg.DB.RefreshProjectFederationBaseline(refreshCtx, projectID, actor)

@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 # HTTP API schema
@@ -14,6 +14,24 @@ Use [`kata daemon locate`](daemon-discovery.md) to discover the endpoint and
 transport for those requests with the same selection rules as the CLI. Go
 programs can use the generated [Go client](go-client.md), which includes
 discovery. [Cron](cron.md) documents job and workflow resources.
+
+## Prune cron run evidence
+
+Newer main builds expose
+`POST /api/v1/projects/{project_id}/cron/runs/actions/prune` to ordinary
+purge-authorized daemon clients. It accepts `actor`, `before` (RFC 3339),
+`keep` (default 10), `limit` (default 5000), optional `job_uid` or
+`workflow_uid`, and `dry_run`. Set `dry_run: true` to preview. A real request
+requires `X-Kata-Confirm: PRUNE <project-name> cron runs`. The route is outside
+the owner-local browser SPA and issue-scoped token allowlists, and has no MCP
+tool. It does not accept federation enrollment credentials.
+
+The response reports `dry_run`, `before`, `keep`, `pruned`, `events_deleted`,
+`more`, per-group `groups`, and `reset_after_event_id` for a committed
+nonempty deletion. Missing or incorrect confirmation returns 412. An enabled
+spoke returns `409 federated_admin_required`; pending relay delivery returns
+`409 federation_pending_delivery`. The cutoff must be at least 24 hours old.
+See [Run retention](cron.md#run-retention) for selection and replica semantics.
 
 ## Getting the schema
 

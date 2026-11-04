@@ -55,6 +55,7 @@ var alreadyImplemented = map[string]bool{
 	"IssuePlanningDates":  true,
 	"CronRun":             true,
 	"ListCronRuns":        true,
+	"PruneCronRuns":       true, // cron_runs.go
 	"ReadFederation":      true, // federation_read.go
 	"PutCronJob":          true,
 	"PutCronWorkflow":     true,

@@ -199,6 +199,13 @@ func (d *Store) RelayEnrollmentNeedsReset(ctx context.Context, bindingUID string
 		if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
+		// This boundary can advance while MAX(events.id) stays unchanged. Read it
+		// outside the history cache, including enrollments without a checkpoint.
+		cursor, err := db.ProjectStreamResetAfter(ctx, tx, 0, *grant.ProjectID)
+		if err != nil || cursor > 0 {
+			required = cursor > 0
+			return err
+		}
 		required, err = d.relayHistoryNeedsResetCachedTx(ctx, tx, *grant.ProjectID, projectUID, nil)
 		return err
 	})
@@ -234,7 +241,8 @@ func (d *Store) relayCheckpointNeedsRefreshTx(ctx context.Context, tx *sql.Tx, p
 		var latest int64
 		err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(cursor),0) FROM (
    SELECT MAX(purge_reset_after_event_id) AS cursor FROM purge_log WHERE project_uid=$1
-   UNION ALL SELECT MAX(purge_reset_after_event_id) AS cursor FROM project_purge_log WHERE project_uid=$1) AS boundaries`, projectUID).Scan(&latest)
+   UNION ALL SELECT MAX(purge_reset_after_event_id) AS cursor FROM project_purge_log WHERE project_uid=$1
+ UNION ALL SELECT CASE WHEN key=$2 THEN CAST(value AS BIGINT) END AS cursor FROM meta WHERE key=$2) AS boundaries`, projectUID, db.ProjectStreamResetMetadataPrefix+projectUID).Scan(&latest)
 		if err != nil || latest > checkpoint.Manifest.HistoryEventID {
 			return latest > checkpoint.Manifest.HistoryEventID, err
 		}

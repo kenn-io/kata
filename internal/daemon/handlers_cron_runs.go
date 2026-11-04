@@ -21,6 +21,7 @@ func cronRunAPIError(ctx context.Context, cfg ServerConfig, err error, projectID
 	return cronAPIError(ctx, cfg, err, projectID, "", true)
 }
 func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
+	registerCronRunPruneHandler(h, cfg)
 	base := "/api/v1/projects/{project_id}/cron"
 	huma.Register(h, huma.Operation{OperationID: "getCronCapabilities", Method: http.MethodGet, Path: base + "/capabilities"}, func(ctx context.Context, in *api.CronProjectRequest) (*api.CronCapabilitiesResponse, error) {
 		project, err := activeProjectByID(ctx, cfg.DB, in.ProjectID)

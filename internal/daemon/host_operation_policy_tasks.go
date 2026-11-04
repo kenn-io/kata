@@ -28,5 +28,5 @@ func registerTaskOperationPolicies(policies map[string]HostOperationPolicy) {
 
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationTaskAdministration, Capability: hostCapabilityManage, Mutation: true,
-	}, "purgeIssue", "forceReleaseIssueLease", "rewriteAuthorIdentity")
+	}, "purgeIssue", "pruneCronRuns", "forceReleaseIssueLease", "rewriteAuthorIdentity")
 }

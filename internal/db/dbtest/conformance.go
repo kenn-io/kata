@@ -50,6 +50,12 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "cron prune event model", run: checkCronPruneEventModel},
+	{name: "cron prune rollback", run: checkCronPruneRollback},
+	{name: "cron prune accepted replay", run: checkCronPruneAcceptedReplay},
+	{name: "cron prune relay reset", runWithBackend: checkCronPruneRelayReset},
+	{name: "cron run prune model", run: checkCronRunPruneModel},
+	{name: "cron run prune", methods: []string{"PruneCronRuns"}, run: checkCronRunPrune},
 	{name: "setup finished delivery", methods: []string{"PrepareSetupFinished", "CompleteSetupFinished", "SystemProject", "CloseIssue", "SoftDeleteIssue", "RemoveProject"}, runWithBackend: checkSetupFinishedDelivery},
 	{name: "comment graph project access", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "MoveIssueProject", "ReadCommentGraph"}, run: checkCommentGraphProjectAccess},
 	{name: "recurring adoption snapshots", run: checkRecurringAdoptionSnapshots},

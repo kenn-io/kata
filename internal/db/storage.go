@@ -20,6 +20,7 @@ type Storage interface {
 	ObserveCronRun(context.Context, ObserveCronRun) (CronRunObservationResult, error)
 	CronRun(context.Context, int64, string) (CronRun, error)
 	ListCronRuns(context.Context, CronRunList) ([]CronRun, error)
+	PruneCronRuns(context.Context, PruneCronRuns) (CronRunPruneResult, error)
 	PutCronJob(context.Context, PutCronJob) (CronJob, []Event, error)
 	PutCronWorkflow(context.Context, PutCronWorkflow) (CronWorkflow, Event, error)
 	CronJob(context.Context, int64, string) (CronJob, error)

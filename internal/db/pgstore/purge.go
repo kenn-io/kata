@@ -42,12 +42,8 @@ func (s *Store) PurgeIssue(ctx context.Context, issueID int64, actor string, rea
 		}
 		// Keep manifests downloadable until the current live peer namespace
 		// drains. Retired epochs and revoked enrollments remain history.
-		var pendingRelay bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_relay_outbox o JOIN federation_enrollments e ON e.relay_binding_uid=o.binding_uid AND e.relay_reset_epoch=o.reset_epoch WHERE o.project_uid=$1 AND o.acknowledged=0 AND e.revoked_at IS NULL) OR EXISTS(SELECT 1 FROM federation_enrollments e JOIN meta m ON m.key=$2 || e.relay_binding_uid WHERE e.project_id=$3 AND e.revoked_at IS NULL AND (m.value::jsonb->'translation'->'authority'->>'epoch')::bigint>e.relay_reset_epoch)`, issue.ProjectUID, db.RelayResetMetadataPrefix+issue.ProjectUID+".", issue.ProjectID).Scan(&pendingRelay); err != nil {
+		if err := rejectPendingRelayResetTx(ctx, tx, db.Project{ID: issue.ProjectID, UID: issue.ProjectUID}); err != nil {
 			return err
-		}
-		if pendingRelay {
-			return db.ErrFederationResetBlockedByPendingPush
 		}
 
 		var minEventID, maxEventID sql.NullInt64

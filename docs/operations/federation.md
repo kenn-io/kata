@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 # Federation
@@ -929,6 +929,16 @@ daemon-local catalog history such as project renames and alias removals has no r
 stays in place. New enrollments also use this path when a purge boundary or missing creation
 history makes ordinary replay incomplete. Uncompacted enrollment keeps the existing small-batch
 replay.
+
+Manual [cron run pruning](../reference/cron.md#run-retention) on newer main
+builds uses the same durable project reset boundary. Each nonempty batch
+forces direct spokes and relay descendants to rebuild without the removed
+runs. Relay checkpoint validation checks that boundary even if the daemon
+stops after pruning and before refreshing its baseline. Pending deliveries
+and prepared resets awaiting activation block pruning; sync them or
+explicitly revoke the affected enrollment first. Relays bound upstream cannot
+prune their local replica. Delayed direct-spoke retries may restore a removed
+run because pruning keeps no run tombstone.
 
 The signed snapshot includes complete ordered manifests for retained artifacts that
 match each issue's current content, without vector bytes. Reset installation preserves validated

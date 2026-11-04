@@ -20,3 +20,8 @@ func (s *Store) CronRun(ctx context.Context, p int64, id string) (db.CronRun, er
 func (s *Store) ListCronRuns(ctx context.Context, in db.CronRunList) ([]db.CronRun, error) {
 	return s.cronSQL().Runs(ctx, in)
 }
+
+// PruneCronRuns removes eligible evidence at the project's authority.
+func (s *Store) PruneCronRuns(ctx context.Context, in db.PruneCronRuns) (db.CronRunPruneResult, error) {
+	return s.cronSQL().PruneRuns(ctx, in)
+}
