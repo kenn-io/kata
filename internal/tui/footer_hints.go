@@ -141,15 +141,7 @@ func inputHelpRows(input inputState) [][]helplayout.HelpItem {
 			{Key: "tab", Description: "field"},
 		}}
 	case kind == inputRecurrenceForm:
-		items := []helplayout.HelpItem{
-			{Key: "ctrl+o", Description: "save"},
-			{Key: "esc", Description: "cancel"},
-			{Key: "tab", Description: "field"},
-		}
-		if input.recurrence.rec != nil {
-			items = append(items, helplayout.HelpItem{Key: "ctrl+x", Description: "stop repeating"})
-		}
-		return [][]helplayout.HelpItem{items}
+		return [][]helplayout.HelpItem{recurrenceFormControls(input)}
 	case kind == inputNewIssueForm:
 		return [][]helplayout.HelpItem{{
 			{Key: "ctrl+o", Description: "create"},

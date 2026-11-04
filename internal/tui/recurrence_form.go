@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
+	"go.kenn.io/kit/tui/helplayout"
 )
 
 // recurrenceFormState is what a Repeat form needs beyond its fields: the
@@ -18,9 +19,10 @@ import (
 // opened with (a form left alone writes nothing).
 type recurrenceFormState struct {
 	issueRevision int64
-	// rec is the recurrence the form read; nil when the issue has none, which
-	// makes a save start one.
-	rec *recurrenceclient.View
+	// rec is the active recurrence the form read. A nil rec permits a start
+	// unless the issue belongs to a stopped series.
+	rec     *recurrenceclient.View
+	stopped bool
 	// rule, start and zone are the values the form was opened with.
 	rule, start, zone string
 	// currentAfterRefusal describes the recurrence that beat a refused save.
@@ -28,6 +30,7 @@ type recurrenceFormState struct {
 }
 
 const recurrenceChangedMessage = "The issue changed since the form opened; nothing was written. The current recurrence is shown below; save again to write your input over it."
+const recurrenceStoppedMessage = "This issue's recurrence was stopped; a stopped series can't start again"
 
 // recurrenceFormLoadedMsg is the issue and recurrence the Repeat form opens
 // on, read when O was pressed. formGen ties it to that key press.
@@ -39,7 +42,7 @@ type recurrenceFormLoadedMsg struct {
 	recurrence *recurrenceclient.View
 	err        error
 	// refused is why the issue cannot repeat at all; no form opens for it.
-	refused error
+	refused string
 }
 
 func newRecurrenceForm(target formTarget, issue Issue, rec *recurrenceclient.View) inputState {
@@ -72,7 +75,7 @@ func newRecurrenceForm(target formTarget, issue Issue, rec *recurrenceclient.Vie
 // has none: the issue's date and the zone kata schedule would pick. The
 // revisions a save is guarded on are the ones just read.
 func (s inputState) loadRecurrence(issue Issue, rec *recurrenceclient.View) inputState {
-	state := recurrenceFormState{issueRevision: issue.Revision, rec: rec}
+	state := recurrenceFormState{issueRevision: issue.Revision, rec: rec, stopped: issue.RecurrenceID != nil && rec == nil}
 	if rec != nil {
 		state.rule, state.start, state.zone = rec.RRule, rec.DTStart, rec.Timezone
 	} else {
@@ -113,22 +116,18 @@ func readRecurrenceForm(api detailAPI, target formTarget, formGen int64, connGen
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		msg := recurrenceFormLoadedMsg{connGen: connGen, formGen: formGen, target: target}
-		read := api.GetIssueDetail
-		if reader, ok := api.(issueReadAPI); ok {
-			read = reader.ReadIssue
-		}
-		detail, err := read(ctx, target.projectID, target.issueUID)
-		if err != nil || detail == nil || detail.Issue == nil {
-			msg.err = cmp.Or(err, errors.New("the daemon returned no issue"))
+		current, err := readRecurrenceSnapshot(ctx, api, target)
+		if err != nil {
+			msg.err = err
 			return msg
 		}
-		if detail.Issue.Metadata.cronParent {
-			msg.refused = errCronParent()
+		if current.issue.Metadata.cronParent {
+			msg.refused = errCronParent().Error()
 			return msg
 		}
-		msg.issue, msg.recurrence = *detail.Issue, detail.Recurrence
-		if reader, ok := api.(recurrenceReadAPI); ok && detail.Issue.RecurrenceID != nil {
-			msg.recurrence, msg.err = reader.ReadRecurrence(ctx, target.projectID, detail.Issue.RecurrenceID)
+		msg.issue, msg.recurrence = current.issue, current.rec
+		if current.issue.RecurrenceID != nil && current.rec == nil {
+			msg.refused = recurrenceStoppedMessage
 		}
 		return msg
 	}
@@ -143,8 +142,8 @@ func (m Model) openRecurrenceForm(msg recurrenceFormLoadedMsg) Model {
 	if target, issue, ok := m.activeIssueTarget(); !ok || target.projectID != msg.target.projectID || issue.UID != msg.target.issueUID || target.origin != msg.target.origin || target.detailGen != msg.target.detailGen {
 		return m
 	}
-	if msg.refused != nil {
-		m.toast = &toast{text: msg.refused.Error(), level: toastError, expiresAt: m.toastNow().Add(3 * time.Second)}
+	if msg.refused != "" {
+		m.toast = &toast{text: msg.refused, level: toastError, expiresAt: m.toastNow().Add(3 * time.Second)}
 		return m
 	}
 	if msg.err != nil {
@@ -173,9 +172,17 @@ func (m Model) routeRecurrenceFormKey(msg tea.KeyPressMsg) (Model, bool) {
 }
 
 func (m Model) commitRecurrenceForm() (Model, tea.Cmd) {
+	if m.input.recurrence.stopped {
+		m.input.err = recurrenceStoppedMessage
+		return m, nil
+	}
 	start, err := resolveDateInput(m.input.fieldValue(fieldStart), m.toastNow())
-	if err != nil {
-		m.input.err = "Start " + err.Error() + "."
+	if err == nil && start == "" {
+		m.input.err = "Start is required."
+		return m, nil
+	}
+	if _, dateErr := time.Parse(time.DateOnly, start); err != nil || dateErr != nil {
+		m.input.err = "Start must be YYYY-MM-DD, today, tomorrow, +Nd or +Nw."
 		return m, nil
 	}
 	state := m.input.recurrence
@@ -254,25 +261,31 @@ func withCurrentRecurrence(ctx context.Context, apiClient any, target formTarget
 	if !ok {
 		return resp
 	}
-	read := reader.GetIssueDetail
-	if strict, ok := apiClient.(issueReadAPI); ok {
-		read = strict.ReadIssue
-	}
-	detail, err := read(ctx, target.projectID, target.issueUID)
-	if err != nil || detail == nil || detail.Issue == nil {
+	current, err := readRecurrenceSnapshot(ctx, reader, target)
+	if err != nil {
 		return resp
-	}
-	rec := detail.Recurrence
-	if recReader, ok := apiClient.(recurrenceReadAPI); ok && detail.Issue.RecurrenceID != nil {
-		if rec, err = recReader.ReadRecurrence(ctx, target.projectID, detail.Issue.RecurrenceID); err != nil {
-			return resp
-		}
 	}
 	if resp == nil {
 		resp = &MutationResp{}
 	}
-	resp.current = &recurrenceSnapshot{issue: *detail.Issue, rec: rec}
+	resp.current = &current
 	return resp
+}
+
+func readRecurrenceSnapshot(ctx context.Context, api detailAPI, target formTarget) (recurrenceSnapshot, error) {
+	read := api.GetIssueDetail
+	if reader, ok := api.(issueReadAPI); ok {
+		read = reader.ReadIssue
+	}
+	detail, err := read(ctx, target.projectID, target.issueUID)
+	if err != nil || detail == nil || detail.Issue == nil {
+		return recurrenceSnapshot{}, cmp.Or(err, errors.New("the daemon returned no issue"))
+	}
+	rec := detail.Recurrence
+	if reader, ok := api.(recurrenceReadAPI); ok && detail.Issue.RecurrenceID != nil {
+		rec, err = reader.ReadRecurrence(ctx, target.projectID, detail.Issue.RecurrenceID)
+	}
+	return recurrenceSnapshot{issue: *detail.Issue, rec: rec}, err
 }
 
 // reloadRecurrenceForm is the answer to a refused save: the form keeps what
@@ -289,6 +302,9 @@ func (m Model) reloadRecurrenceForm(current recurrenceSnapshot) Model {
 	}
 	m.input.saving = false
 	m.input.err = recurrenceChangedMessage
+	if m.input.recurrence.stopped {
+		m.input.err = recurrenceStoppedMessage
+	}
 	if m.detail.issue != nil && m.detail.issue.UID == current.issue.UID {
 		*m.detail.issue = current.issue
 		m.detail.recurrence = current.rec
@@ -340,12 +356,25 @@ func renderRecurrenceFooter(s inputState, innerW int) string {
 	if s.saving {
 		return statusStyle.Render("saving…")
 	}
-	keys := "ctrl+o save · esc cancel · tab next"
-	if s.recurrence.rec != nil {
-		keys += " · ctrl+x stop repeating"
+	var controls []string
+	for _, item := range recurrenceFormControls(s) {
+		controls = append(controls, item.Key+" "+item.Description)
 	}
+	keys := strings.Join(controls, " · ")
 	if len(keys) > innerW {
 		return subtleStyle.Render("ctrl+o save · esc cancel")
 	}
 	return subtleStyle.Render(keys)
+}
+
+func recurrenceFormControls(s inputState) []helplayout.HelpItem {
+	items := []helplayout.HelpItem{
+		{Key: "ctrl+o", Description: "save"},
+		{Key: "esc", Description: "cancel"},
+		{Key: "tab", Description: "field"},
+	}
+	if s.recurrence.rec != nil {
+		items = append(items, helplayout.HelpItem{Key: "ctrl+x", Description: "stop repeating"})
+	}
+	return items
 }

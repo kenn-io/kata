@@ -2160,8 +2160,8 @@ In the issue list or detail, press `O` to start, change or stop the selected
 issue's recurrence, the same one `kata schedule <ref> <date> --repeat` manages.
 The form has three fields. **Rule** is the RRULE text, sent as written: the
 daemon is the only validator, and its error appears in the form with your input
-kept. **Start** takes the dates `kata schedule` takes, plus `today`, `tomorrow`,
-`+Nd` and `+Nw`. **Zone** starts as the recurrence's zone, else the issue's
+kept. **Start** requires a date: `YYYY-MM-DD`, `today`, `tomorrow`, `+Nd`, or
+`+Nw`. **Zone** starts as the recurrence's zone, else the issue's
 `timezone` metadata, else your own IANA zone (`TZ`, then the `/etc/localtime`
 link); it is never `Local`. Starting a recurrence rewrites the issue's
 `scheduled_on` to the first occurrence. `Ctrl+o` saves and `Esc` cancels. A

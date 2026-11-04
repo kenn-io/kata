@@ -37,6 +37,20 @@ func newTestClient(t *testing.T, handler http.HandlerFunc) *Client {
 	return NewClient(srv.URL, srv.Client())
 }
 
+func TestReadRecurrencePreservesDaemonRefusal(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/projects/1/recurrences", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		respondJSON(t, w, map[string]any{"error": map[string]any{
+			"code": "scoped_operation_forbidden", "message": "operation is not available to an issue-scoped credential",
+		}})
+	})
+	_, err := c.ReadRecurrence(t.Context(), 1, new(int64(2)))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "operation is not available to an issue-scoped credential")
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {

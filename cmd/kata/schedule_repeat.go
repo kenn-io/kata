@@ -150,7 +150,7 @@ func runScheduleRepeat(cmd *cobra.Command, args []string, opts scheduleRepeatOpt
 		// competing write. A change uses the recurrence's own guarded PATCH.
 		var ifMatch *string
 		if guardStart {
-			if err := requireDaemonAPIVersion(ctx, httpClient, baseURL, apiVersionRecurrenceIfMatch, "--if-match when starting a recurrence"); err != nil {
+			if err := requireDaemonAPIVersion(ctx, httpClient, baseURL, recurrenceclient.APIVersionIfMatch, "--if-match when starting a recurrence"); err != nil {
 				return err
 			}
 			tag := recurrenceclient.ETag(issue.Revision)
@@ -253,7 +253,7 @@ func startRecurrence(ctx context.Context, api *kataclient.Client, pid int64, ref
 }
 
 func changeRecurrence(ctx context.Context, api *kataclient.Client, pid int64, current recurrenceView, terms recurrenceclient.Terms) error {
-	err := recurrenceclient.Change(ctx, api.Client, pid, current, terms)
+	_, err := recurrenceclient.Change(ctx, api.Client, pid, current, terms)
 	if recurrenceStatus(err) == http.StatusPreconditionFailed {
 		return recurrenceConflict(ctx, api, pid, current.UID)
 	}
