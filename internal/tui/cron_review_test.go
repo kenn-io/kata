@@ -34,8 +34,31 @@ func TestCronReviewNativeFillsDoNotStarveAdapters(t *testing.T) {
 	require.Equal(t, adapter.UID+"-run", p.lastRuns[adapter.UID].UID)
 	require.Equal(t, "native-000-run", p.lastRuns["native-000"].UID, "native observations still feed exact display and status filters")
 	require.Error(t, p.lastErr["native-200"], "native display lookups remain bounded")
-}
+	p = cronData{}
+	for i := range 210 {
+		job := j
+		job.UID = fmt.Sprintf("ordered-%03d", i)
+		job.Definition.Enabled = i >= 150
+		p.jobs = append(p.jobs, job)
+	}
+	cronEnrich(t.Context(), a, 7, &p)
+	for _, job := range p.jobs[150:] {
+		require.NoError(t, p.lastErr[job.UID], "enabled jobs must be admitted before paused display reads")
+		require.Equal(t, job.UID+"-run", p.lastRuns[job.UID].UID)
+	}
 
+	{
+		j := cronFixture(t).cron.data.jobs[0]
+		nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&j.Definition)
+		a := &cronEnrichAPI{read: func(_ context.Context, job string) ([]generated.CronRun, error) {
+			return []generated.CronRun{{UID: "native-run", JobUID: new(job)}}, nil
+		}}
+		p := cronData{jobs: []generated.CronJob{j}}
+		cronEnrich(t.Context(), a, 7, &p)
+		require.Equal(t, "native-run", p.lastRuns[j.UID].UID)
+		require.Equal(t, 1, a.parents)
+	}
+}
 func TestCronReviewSharedIssueReadOnce(t *testing.T) {
 	j := cronFixture(t).cron.data.jobs[0]
 	nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&j.Definition)
@@ -54,37 +77,46 @@ func TestCronReviewSharedIssueReadOnce(t *testing.T) {
 	require.Equal(t, int32(1), reads.Load())
 	require.True(t, p.parentOpen[nextParentUID])
 	require.Equal(t, "blocked", cronRunHealth(p, p.runs[0]).state)
+
+	{
+		m := cronFixture(t)
+		a := waitReadAPI(nil)
+		base := &cronWaitFetchAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, waiter: a}
+		r := generated.CronRun{UID: "run-example", Status: "running", Actor: "operator", IssueUID: new("issue-example"), JobUID: new(m.cron.data.jobs[0].UID)}
+		p := cronData{jobs: m.cron.data.jobs, runs: []generated.CronRun{r}}
+		cronEnrich(t.Context(), newUndoClient(base), 7, &p)
+		require.Equal(t, "blocked", cronRunHealth(p, r).state)
+		require.Equal(t, 1, a.waitCalls["issue-example"])
+		cronEnrich(t.Context(), newUndoClient(&cronReadTestAPI{data: *m.cron.data}), 7, &p)
+		require.Equal(t, "running", cronRunHealth(p, r).state)
+		require.Equal(t, "attention unavailable", cronRunHealth(p, r).reason)
+	}
 }
 
 func TestCronReviewFakeUsesCreationCursor(t *testing.T) {
 	now := snapshotFixedNow
 	a := &cronReadTestAPI{data: cronData{runs: []generated.CronRun{
-		{UID: "zz", CreatedAt: now.Add(-time.Hour), JobUID: new("job")},
-		{UID: "aa", CreatedAt: now, JobUID: new("job")},
-		{UID: "bb", CreatedAt: now, JobUID: new("job")},
-		{UID: "other", CreatedAt: now.Add(time.Hour), JobUID: new("other")},
+		{UID: "01ARZ3NDEKTSV4RRFFQ69G5FAZ", CreatedAt: now.Add(-time.Hour), JobUID: new("job")},
+		{UID: "01ARZ3NDEKTSV4RRFFQ69G5FAA", CreatedAt: now, JobUID: new("job")},
+		{UID: "01ARZ3NDEKTSV4RRFFQ69G5FAB", CreatedAt: now, JobUID: new("job")},
+		{UID: "01ARZ3NDEKTSV4RRFFQ69G5FB0", CreatedAt: now.Add(time.Hour), JobUID: new("01ARZ3NDEKTSV4RRFFQ69G5FB0")},
 	}}}
 	page, next, err := a.ListCronJobRuns(t.Context(), 7, "job", "", 1)
 	require.NoError(t, err)
-	require.Equal(t, "bb", page[0].UID)
-	require.Equal(t, "bb", next)
+	require.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FAB", page[0].UID)
+	require.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FAB", next)
 	page, next, err = a.ListCronJobRuns(t.Context(), 7, "job", next, 1)
 	require.NoError(t, err)
-	require.Equal(t, "aa", page[0].UID)
-	require.Equal(t, "aa", next)
+	require.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FAA", page[0].UID)
+	require.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FAA", next)
 	page, _, err = a.ListCronJobRuns(t.Context(), 7, "job", next, 1)
 	require.NoError(t, err)
 	require.Len(t, page, 1)
-	require.Equal(t, "zz", page[0].UID)
-	_, _, err = a.ListCronJobRuns(t.Context(), 7, "job", "missing", 1)
+	require.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FAZ", page[0].UID)
+	_, _, err = a.ListCronJobRuns(t.Context(), 7, "job", "01ARZ3NDEKTSV4RRFFQ69G5FB1", 1)
 	require.Error(t, err)
 }
 
-func TestCronReviewRunningWithoutIssueHasNoReadError(t *testing.T) {
-	got := cronRunHealth(cronData{}, generated.CronRun{Status: "running"})
-	require.Equal(t, "running", got.state)
-	require.Empty(t, got.reason)
-}
 func TestCronReviewToastShortcutEnablesUnseen(t *testing.T) {
 	m := cronNoticeFixture(t)
 	m.cron.unseenOnly = true

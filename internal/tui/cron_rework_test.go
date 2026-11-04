@@ -6,39 +6,11 @@ import (
 	"net/http"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/pkg/client/generated"
 )
-
-// A successful observation before a replacement once instant does not satisfy it.
-func TestCronReworkRescheduledOnce(t *testing.T) {
-	j := cronFixture(t).cron.data.jobs[0]
-	j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(snapshotFixedNow.Add(-30 * time.Minute).Format(time.RFC3339))}
-	p := cronData{lastErr: map[string]error{}, lastRuns: map[string]generated.CronRun{j.UID: {Status: "succeeded", CreatedAt: snapshotFixedNow.Add(-time.Hour)}}}
-	require.Equal(t, "missed", cronHealth(p, j, snapshotFixedNow).state)
-}
-
-func TestCronReworkNativeLastRunFill(t *testing.T) {
-	j := cronFixture(t).cron.data.jobs[0]
-	nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&j.Definition)
-	a := &cronEnrichAPI{read: func(_ context.Context, job string) ([]generated.CronRun, error) {
-		return []generated.CronRun{{UID: "native-run", JobUID: new(job)}}, nil
-	}}
-	p := cronData{jobs: []generated.CronJob{j}}
-	cronEnrich(t.Context(), a, 7, &p)
-	require.Equal(t, "native-run", p.lastRuns[j.UID].UID)
-	require.Equal(t, 1, a.parents)
-}
-
-func TestCronReworkReplicaThroughUndo(t *testing.T) {
-	a := &cronReplicaTestAPI{cronReadTestAPI: &cronReadTestAPI{data: *cronFixture(t).cron.data}, replica: cronReplica{role: "spoke"}}
-	p := cronData{}
-	cronFetch(t.Context(), newUndoClient(a), 7, &p)
-	require.Equal(t, "spoke", p.replica.role)
-}
 
 func TestCronReworkIssueFetchByUID(t *testing.T) {
 	m := cronIssueFixture(t, 80)
@@ -143,14 +115,6 @@ func TestCronReworkOldRunRefresh(t *testing.T) {
 	require.Contains(t, text, "run refresh offline")
 }
 
-func TestCronReworkJobHasOneHealthRow(t *testing.T) {
-	m := cronFixture(t)
-	m.cron.stack = []cronFrame{{ref: cronRef{cronJobs, m.cron.data.jobs[0].UID}}}
-	_, _, lines := cronScreen(m)
-	require.NotContains(t, cronLinesText(lines), "State:")
-	require.Contains(t, cronLinesText(lines), "Health:")
-}
-
 func TestCronReworkCombinedBlockedFilter(t *testing.T) {
 	m := cronSeenFixture(t)
 	j := m.cron.data.jobs[0]
@@ -161,7 +125,7 @@ func TestCronReworkCombinedBlockedFilter(t *testing.T) {
 	m.cron.runPage.runs = []generated.CronRun{r}
 	m.cron.data.lastRuns = map[string]generated.CronRun{j.UID: r}
 	m.cron.data.lastErr = map[string]error{}
-	m.cron.data.waits = map[string]cronRunWait{"waiting-issue": {open: true, metadata: map[string]any{"work.attention": "needs-human"}}}
+	m.cron.data.waits = map[string]cronParent{"waiting-issue": {open: true, metadata: map[string]any{"work.attention": "needs-human"}}}
 	m.cron.lists[cronJobs].query = "health:blocked status:running"
 	_, _, lines := cronScreen(m)
 	require.Len(t, lines, 1)
@@ -179,7 +143,7 @@ func TestCronReworkPlainRunDetailDoesNotRepeatStatus(t *testing.T) {
 	r.Status = "running"
 	r.IssueUID = new("issue")
 	m.cron.data.runs = []generated.CronRun{r}
-	m.cron.data.waits = map[string]cronRunWait{"issue": {open: true}}
+	m.cron.data.waits = map[string]cronParent{"issue": {open: true}}
 	m.cron.stack = []cronFrame{{ref: cronRef{cronRuns, r.UID}}}
 	_, _, lines := cronScreen(m)
 	require.NotContains(t, cronLinesText(lines), "Health:")

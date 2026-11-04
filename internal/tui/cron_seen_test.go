@@ -1,11 +1,14 @@
 package tui
 
 import (
+	tea "charm.land/bubbletea/v2"
 	"context"
 	"encoding/json/v2"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"sync"
@@ -31,12 +34,28 @@ func TestCronSeenMergeAlgebra(t *testing.T) {
 			return cronSeenStore{Version: 1, Projects: map[string]cronSeenProject{"project": {ClearedThrough: stamp, Runs: runs}}}
 		}
 		a, b, c := draw(), draw(), draw()
-		require.Equal(t, cronSeenMerge(a, b), cronSeenMerge(b, a))
-		require.Equal(t, cronSeenMerge(cronSeenMerge(a, b), c), cronSeenMerge(a, cronSeenMerge(b, c)))
+		ab := cronSeenMerge(a, b)
+		if !reflect.DeepEqual(ab, cronSeenMerge(b, a)) {
+			ht.Fatal("merge is not commutative")
+		}
+		if !reflect.DeepEqual(cronSeenMerge(ab, c), cronSeenMerge(a, cronSeenMerge(b, c))) {
+			ht.Fatal("merge is not associative")
+		}
 		canonical := cronSeenMerge(a, cronSeenStore{})
-		require.Equal(t, canonical, cronSeenMerge(canonical, canonical))
+		if !reflect.DeepEqual(canonical, cronSeenMerge(canonical, canonical)) {
+			ht.Fatal("merge is not idempotent")
+		}
+		latest := a.Projects["project"].ClearedThrough
+		if other := b.Projects["project"].ClearedThrough; other.After(latest) {
+			latest = other
+		}
+		if !ab.Projects["project"].ClearedThrough.Equal(latest) {
+			ht.Fatal("merge must retain the maximum clear watermark")
+		}
 		for _, id := range canonical.Projects["project"].Runs {
-			require.Contains(t, cronSeenMerge(a, b).Projects["project"].Runs, id)
+			if !slices.Contains(ab.Projects["project"].Runs, id) {
+				ht.Fatalf("merge lost %q", id)
+			}
 		}
 	}, hegel.WithTestCases(300))
 }
@@ -65,12 +84,18 @@ func TestCronSeenCapAndUnseen(t *testing.T) {
 		r := generated.CronRun{UID: "run", Status: status, UpdatedAt: at}
 		before := cronSeenProject{ClearedThrough: snapshotFixedNow}
 		want := status == "failed" || status == "unknown"
-		require.Equal(t, want, before.unseen(r))
+		if before.unseen(r) != want {
+			ht.Fatalf("unexpected unseen for %q", status)
+		}
 		before.Runs = []string{"run"}
-		require.False(t, before.unseen(r))
+		if before.unseen(r) {
+			ht.Fatal("acknowledged failure remains unseen")
+		}
 		before.Runs = nil
 		before.ClearedThrough = at
-		require.False(t, before.unseen(r))
+		if before.unseen(r) {
+			ht.Fatal("acknowledged failure remains unseen")
+		}
 	}, hegel.WithTestCases(200))
 }
 
@@ -157,7 +182,9 @@ func TestCronSeenLoadedCountAndKeys(t *testing.T) {
 	title, _, lines := cronScreen(m)
 	require.Contains(t, title, "unseen only")
 	require.Len(t, lines, 2)
-	require.Contains(t, stripANSI(lines[0].text), "• failed")
+	failed := slices.IndexFunc(lines, func(l cronLine) bool { return l.target.uid == "failed" })
+	require.NotEqual(t, -1, failed)
+	require.Contains(t, stripANSI(lines[failed].text), "• failed")
 	m = m.cronFilter("no match")
 	_, _, lines = cronScreen(m)
 	require.Empty(t, lines, "unseen-only ANDs with the existing query")
@@ -176,6 +203,19 @@ func TestCronSeenLoadedCountAndKeys(t *testing.T) {
 	// A different project on the same local numeric id has separate state.
 	m.projectUIDByID[7] = "other-project"
 	require.Equal(t, 2, m.cronUnseenCount())
+
+	{
+		defer snapshotInit(t)()
+		m := cronSeenFixture(t)
+		m.width = 120
+		r := m.cron.data.runs[0]
+		r.Status = "failed"
+		m.cron.data.runs = []generated.CronRun{r}
+		m.cron.data.lastRuns = map[string]generated.CronRun{*r.JobUID: r}
+		m.cron.runPage.runs = []generated.CronRun{r}
+		m = sendRune(m, 'u')
+		assertGolden(t, "cron-runs-unseen", m.viewBody())
+	}
 }
 func TestCronSeenAsyncMergesAndDisablesWrites(t *testing.T) {
 	m := cronSeenFixture(t)
@@ -221,21 +261,18 @@ func TestCronSeenUpdateSchedulesPersistence(t *testing.T) {
 	r.Status = "failed"
 	m.cron.data.runs = []generated.CronRun{r}
 	m.cronSeen.path = filepath.Join(t.TempDir(), "seen.json")
-	next, _ := updateModel(m, keyRune('U'))
+	next, cmd := updateModel(m, keyRune('U'))
+	require.NotNil(t, cmd)
+	wrote := false
+	for _, msg := range runCmdTree(cmd) {
+		if result, ok := msg.(cronSeenResultMsg); ok {
+			require.True(t, result.write)
+			require.NoError(t, result.err)
+			wrote = true
+		}
+	}
+	require.True(t, wrote, "Update must return the actual persistence command")
 	require.True(t, next.cronSeen.writing, "the Update loop must dispatch the durable write after the clear action")
-}
-
-func TestSnapshot_CronUnseen(t *testing.T) {
-	defer snapshotInit(t)()
-	m := cronSeenFixture(t)
-	m.width = 120
-	r := m.cron.data.runs[0]
-	r.Status = "failed"
-	m.cron.data.runs = []generated.CronRun{r}
-	m.cron.data.lastRuns = map[string]generated.CronRun{*r.JobUID: r}
-	m.cron.runPage.runs = []generated.CronRun{r}
-	m = sendRune(m, 'u')
-	assertGolden(t, "cron-runs-unseen", m.viewBody())
 }
 
 // The catalog can arrive after the run view; acknowledgement waits for its
@@ -277,7 +314,24 @@ func TestCronSeenLoadsOnlyAtInitialization(t *testing.T) {
 	m.cronSeen.path = filepath.Join(t.TempDir(), "seen.json")
 	m, cmd = m.cronSeenSync()
 	require.Nil(t, cmd)
-	msg := m.cronSeenCommand(false)().(cronSeenResultMsg)
+	priorMode, priorDark := activeColorMode, activeHasDarkBackground
+	t.Setenv("KATA_COLOR_MODE", "none")
+	applyDefaultColorMode()
+	defer applyColorMode(priorMode, priorDark)
+	ctx, cancel := context.WithTimeout(t.Context(), defaultHTTPTimeout)
+	defer cancel()
+	var loaded *cronSeenResultMsg
+	program := tea.NewProgram(m, tea.WithContext(ctx), tea.WithInput(nil), tea.WithOutput(io.Discard), tea.WithoutRenderer(), tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg {
+		if result, ok := msg.(cronSeenResultMsg); ok {
+			loaded = &result
+			return tea.Quit()
+		}
+		return msg
+	}))
+	_, err := program.Run()
+	require.NoError(t, err)
+	require.NotNil(t, loaded, "Init must dispatch its startup read")
+	msg := *loaded
 	require.NoError(t, msg.err)
 	m, _ = m.cronSeenResult(msg)
 	require.True(t, m.cronSeen.ready)

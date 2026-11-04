@@ -31,7 +31,7 @@ func TestCronWaitBlockedIffRunningOpenAndSignalled(t *testing.T) {
 		if request {
 			metadata[notification.MetadataKey("operator")] = map[string]any{"from": "worker", "message": "please review"}
 		}
-		p := cronData{waits: map[string]cronRunWait{"issue-example": {open: open, metadata: metadata}}}
+		p := cronData{waits: map[string]cronParent{"issue-example": {open: open, metadata: metadata}}}
 		want := status == "running" && open && (request || attention == "needs-human" || attention == "stuck")
 		got := cronRunHealth(p, r)
 		if (got.state == "blocked") != want {
@@ -48,7 +48,7 @@ func TestCronWaitOnlyExactNormalizedActorCounts(t *testing.T) {
 		if err == nil {
 			metadata[notification.MetadataKey(normalized)] = map[string]any{"from": "worker", "message": "review\nnow"}
 		}
-		got := cronRunWaitForActor(cronRunWait{open: true, metadata: metadata}, actor)
+		got := cronRunWaitForActor(cronParent{open: true, metadata: metadata}, actor)
 		if (got.state == "blocked") != (err == nil) {
 			ht.Fatalf("actor %q: %v, normalization error %v", actor, got, err)
 		}
@@ -60,20 +60,27 @@ func TestCronWaitOnlyExactNormalizedActorCounts(t *testing.T) {
 
 func TestCronWaitUnavailableOrMalformedNeverBlocks(t *testing.T) {
 	r := generated.CronRun{Status: "running", Actor: "operator", IssueUID: new("issue-example")}
-	p := cronData{waits: map[string]cronRunWait{"issue-example": {open: true, metadata: map[string]any{"work.attention": "stuck"}}}, waitErr: map[string]error{"issue-example": errors.New("offline")}}
+	p := cronData{waits: map[string]cronParent{"issue-example": {open: true, metadata: map[string]any{"work.attention": "stuck"}}}, waitErr: map[string]error{"issue-example": errors.New("offline")}}
 	require.Equal(t, "running", cronRunHealth(p, r).state)
 	require.Contains(t, cronRunHealth(p, r).reason, "attention unavailable")
 	require.Contains(t, cronRunHealth(cronData{}, r).reason, "attention unavailable")
 	for _, value := range []any{nil, "invalid", map[string]any{"from": "worker"}, map[string]any{"message": "review"}, map[string]any{"from": "worker", "message": " "}} {
-		got := cronRunWaitForActor(cronRunWait{open: true, metadata: map[string]any{notification.MetadataKey("operator"): value}}, r.Actor)
+		got := cronRunWaitForActor(cronParent{open: true, metadata: map[string]any{notification.MetadataKey("operator"): value}}, r.Actor)
 		require.NotEqual(t, "blocked", got.state)
+	}
+
+	{
+		got := cronRunHealth(cronData{}, generated.CronRun{Status: "running"})
+		require.Equal(t, "running", got.state)
+		require.Empty(t, got.reason)
 	}
 }
 
 func TestCronWaitBothSignalsMustClear(t *testing.T) {
 	key := notification.MetadataKey("operator")
-	w := cronRunWait{open: true, metadata: map[string]any{"work.attention": "needs-human", key: map[string]any{"from": "worker", "message": "review"}}}
+	w := cronParent{open: true, metadata: map[string]any{"work.attention": "needs-human", key: map[string]any{"from": "worker", "message": "review"}}}
 	require.Equal(t, "blocked", cronRunWaitForActor(w, "operator").state)
+	require.Contains(t, w.metadata, key, "reading attention must not consume the request")
 	delete(w.metadata, key)
 	require.Equal(t, "blocked", cronRunWaitForActor(w, "operator").state)
 	w.metadata["work.attention"] = "ok"
@@ -89,7 +96,7 @@ func TestCronWaitOverdueWinsAndNativeIgnoresWait(t *testing.T) {
 	j.Definition.Trigger = generated.TriggerResponse{Kind: "manual"}
 	j.Definition.TimeoutSeconds = new(int64(60))
 	r := generated.CronRun{Status: "running", Actor: "operator", IssueUID: new("issue-example"), JobUID: new(j.UID), CreatedAt: snapshotFixedNow.Add(-time.Hour)}
-	p := cronData{jobs: []generated.CronJob{j}, lastRuns: map[string]generated.CronRun{j.UID: r}, lastErr: map[string]error{}, waits: map[string]cronRunWait{"issue-example": {open: true, metadata: map[string]any{"work.attention": "stuck"}}}}
+	p := cronData{jobs: []generated.CronJob{j}, lastRuns: map[string]generated.CronRun{j.UID: r}, lastErr: map[string]error{}, waits: map[string]cronParent{"issue-example": {open: true, metadata: map[string]any{"work.attention": "stuck"}}}}
 	got := cronHealth(p, j, snapshotFixedNow)
 	require.Equal(t, "overdue", got.state)
 	require.Contains(t, got.reason, "Stuck")

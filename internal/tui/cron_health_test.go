@@ -23,6 +23,7 @@ func TestCronHealthStates(t *testing.T) {
 		name, status, want string
 		edit               func(*generated.CronJob)
 		unreadable         bool
+		runDefinition      *string
 	}{
 		{name: "success", status: "succeeded", want: "ok"},
 		{name: "cancelled", status: "cancelled", want: "ok"},
@@ -51,6 +52,22 @@ func TestCronHealthStates(t *testing.T) {
 		{name: "once observed", status: "succeeded", want: "ok", edit: func(j *generated.CronJob) {
 			j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(now.Add(-2 * time.Hour).Format(time.RFC3339))}
 		}},
+
+		{name: "rescheduled once under older definition", status: "succeeded", want: "missed", runDefinition: new("01ARZ3NDEKTSV4RRFFQ69G5FB1"), edit: func(j *generated.CronJob) {
+			j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(now.Add(-30 * time.Minute).Format(time.RFC3339))}
+		}},
+		{name: "rescheduled once without identity", status: "succeeded", want: "missed", edit: func(j *generated.CronJob) {
+			j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(now.Add(-30 * time.Minute).Format(time.RFC3339))}
+		}},
+		{name: "once manual success under current definition", status: "succeeded", want: "ok", runDefinition: new("01ARZ3NDEKTSV4RRFFQ69G5FB2"), edit: func(j *generated.CronJob) {
+			j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(now.Add(-30 * time.Minute).Format(time.RFC3339))}
+		}},
+		{name: "once manual cancellation under current definition", status: "cancelled", want: "ok", runDefinition: new("01ARZ3NDEKTSV4RRFFQ69G5FB2"), edit: func(j *generated.CronJob) {
+			j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(now.Add(-30 * time.Minute).Format(time.RFC3339))}
+		}},
+		{name: "once old definition after instant", status: "succeeded", want: "ok", runDefinition: new("01ARZ3NDEKTSV4RRFFQ69G5FB1"), edit: func(j *generated.CronJob) {
+			j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(now.Add(-2 * time.Hour).Format(time.RFC3339))}
+		}},
 		{name: "grace equality", want: "never ran", edit: func(j *generated.CronJob) {
 			j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(now.Add(-15 * time.Minute).Format(time.RFC3339))}
 		}},
@@ -66,7 +83,7 @@ func TestCronHealthStates(t *testing.T) {
 			}
 			p := cronData{lastRuns: map[string]generated.CronRun{}, lastErr: map[string]error{}}
 			if tc.status != "" {
-				p.lastRuns[j.UID] = generated.CronRun{Status: tc.status, CreatedAt: now.Add(-time.Hour)}
+				p.lastRuns[j.UID] = generated.CronRun{JobUID: new(j.UID), Status: tc.status, CreatedAt: now.Add(-time.Hour), DefinitionEventUID: tc.runDefinition}
 			}
 			if tc.unreadable {
 				p.lastErr[j.UID] = errors.New("read failed")
@@ -101,9 +118,9 @@ func TestCronHealthNativeDelivery(t *testing.T) {
 
 func TestCronHealthDisabledAlwaysPaused(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
-		j := generated.CronJob{Definition: generated.CronJobDefinitionResponse{Enabled: false, Trigger: generated.TriggerResponse{Kind: hegel.Draw(ht, hegel.Text())}}}
+		j := generated.CronJob{Definition: generated.CronJobDefinitionResponse{Enabled: false, Trigger: generated.TriggerResponse{Kind: hegel.Draw(ht, hegel.SampledFrom([]string{"manual", "cron", "interval", "once", "issue-deadline"}))}}}
 		got := cronHealth(cronData{jobsErr: errors.New("offline")}, j, hegel.Draw(ht, hegel.Datetimes()))
-		if got.state != "paused" && got.state != "running" {
+		if got.state != "paused" {
 			ht.Fatalf("disabled health: %s", got.state)
 		}
 	}, hegel.WithTestCases(2000))
@@ -124,8 +141,8 @@ func TestCronHealthFailedNeverOK(t *testing.T) {
 	j := cronFixture(t).cron.data.jobs[0]
 	hegel.Test(t, func(ht *hegel.T) {
 		p := cronData{lastRuns: map[string]generated.CronRun{j.UID: {Status: "failed", CreatedAt: hegel.Draw(ht, hegel.Datetimes())}}, lastErr: map[string]error{}}
-		if got := cronHealth(p, j, hegel.Draw(ht, hegel.Datetimes())); got.state == "ok" {
-			ht.Fatal("failed run is healthy")
+		if got := cronHealth(p, j, hegel.Draw(ht, hegel.Datetimes())); got.state != "failing" {
+			ht.Fatalf("failed run must be failing: %v", got)
 		}
 	}, hegel.WithTestCases(2000))
 }
@@ -153,10 +170,16 @@ func TestCronHealthMissedAgreesWithSchedule(t *testing.T) {
 		now := base.Add(time.Duration(hegel.Draw(ht, hegel.Integers[int64](0, 7*86400))) * time.Second)
 		var def cron.JobDefinition
 		raw, err := json.Marshal(j.Definition)
-		require.NoError(t, err)
-		require.NoError(t, json.Unmarshal(raw, &def))
+		if err != nil {
+			ht.Fatal(err)
+		}
+		if err := json.Unmarshal(raw, &def); err != nil {
+			ht.Fatal(err)
+		}
 		due, err := cron.RecurringOccurrences(def, cron.RecurringProgress{}, base, 1)
-		require.NoError(t, err)
+		if err != nil {
+			ht.Fatal(err)
+		}
 		grace := 15 * time.Minute
 		if def.GraceSeconds > 0 {
 			grace = time.Duration(def.GraceSeconds) * time.Second
@@ -231,6 +254,19 @@ func TestCronHealthColumnRollupAndReason(t *testing.T) {
 	document := cronLinesText(lines)
 	require.Contains(t, document, "Health:")
 	require.Contains(t, document, "running past timeout_seconds 60")
+
+	{
+		m := cronFixture(t)
+		m.cron.stack = []cronFrame{{ref: cronRef{cronJobs, m.cron.data.jobs[0].UID}}}
+		_, _, lines := cronScreen(m)
+		require.NotContains(t, cronLinesText(lines), "State:")
+		require.Contains(t, cronLinesText(lines), "Health:")
+	}
+
+	{
+		defer snapshotInit(t)()
+		assertGolden(t, "cron-jobs-health", cronHealthFixture(t).viewBody())
+	}
 }
 
 func cronLinesText(lines []cronLine) string {
@@ -239,9 +275,4 @@ func cronLinesText(lines []cronLine) string {
 		text += line.text + "\n"
 	}
 	return text
-}
-
-func TestSnapshot_CronHealth(t *testing.T) {
-	defer snapshotInit(t)()
-	assertGolden(t, "cron-jobs-health", cronHealthFixture(t).viewBody())
 }

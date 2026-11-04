@@ -69,6 +69,9 @@ func cronHealth(p cronData, j generated.CronJob, now time.Time) cronHealthState 
 			case "failed", "unknown":
 				return state("failing", "last run status is "+last.Status)
 			}
+			if def.Trigger.Kind == "once" && (last.Status == "succeeded" || last.Status == "cancelled") && j.DefinitionEventUID != "" && last.DefinitionEventUID != nil && *last.DefinitionEventUID == j.DefinitionEventUID {
+				return state("ok", "One-time job has run under its current definition")
+			}
 		} else if def.Trigger.Kind == "once" {
 			base = time.Time{}
 		}

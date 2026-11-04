@@ -111,7 +111,10 @@ func TestCronReviewEventKeepsInflightOlderPage(t *testing.T) {
 				if olderFirst {
 					m = m.cronPageLoaded(late)
 				}
-				m = m.cronLoaded(fetch().(cronLoadedMsg))
+				headMsg := fetch().(cronLoadedMsg)
+				require.Len(t, headMsg.runs, 100)
+				require.False(t, slices.ContainsFunc(headMsg.runs, func(r generated.CronRun) bool { return r.UID == oldest.UID }))
+				m = m.cronLoaded(headMsg)
 				if !olderFirst {
 					m = m.cronPageLoaded(late)
 				}

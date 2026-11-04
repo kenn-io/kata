@@ -18,7 +18,6 @@ type cronAPI interface {
 	ShowCronJob(ctx context.Context, projectID int64, uid string) (db.CronJob, error)
 	PutCronJob(ctx context.Context, projectID int64, uid string, write kataapi.PutCronJobBody) error
 	ListCronWorkflows(context.Context, int64) ([]generated.CronWorkflow, error)
-	ListCronRuns(context.Context, int64) ([]generated.CronRun, error)
 	ListCronJobRuns(ctx context.Context, projectID int64, jobUID, beforeUID string, limit int64) ([]generated.CronRun, string, error)
 	readCronParent(ctx context.Context, projectID int64, parentUID string) (cronParent, error)
 }
@@ -57,12 +56,6 @@ func (c *Client) ListCronWorkflows(ctx context.Context, projectID int64) ([]gene
 		return nil, err
 	}
 	return wire.JSON200.Workflows, nil
-}
-
-// ListCronRuns reads the newest 100 observations.
-func (c *Client) ListCronRuns(ctx context.Context, projectID int64) ([]generated.CronRun, error) {
-	runs, _, err := c.ListCronJobRuns(ctx, projectID, "", "", 100)
-	return runs, err
 }
 
 // ListCronJobRuns reads one page. Empty jobUID selects project-wide history.

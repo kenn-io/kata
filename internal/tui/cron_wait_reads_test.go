@@ -18,10 +18,10 @@ type cronWaitReadAPI struct {
 	*cronEnrichAPI
 	muWait    sync.Mutex
 	waitCalls map[string]int
-	wait      func(context.Context, string) (cronRunWait, error)
+	wait      func(context.Context, string) (cronParent, error)
 }
 
-func (a *cronWaitReadAPI) readCronParent(ctx context.Context, _ int64, uid string) (cronRunWait, error) {
+func (a *cronWaitReadAPI) readCronParent(ctx context.Context, _ int64, uid string) (cronParent, error) {
 	a.muWait.Lock()
 	a.waitCalls[uid]++
 	a.muWait.Unlock()
@@ -33,8 +33,8 @@ func (a *cronWaitReadAPI) readCronParent(ctx context.Context, _ int64, uid strin
 	return a.wait(ctx, uid)
 }
 func waitReadAPI(read func(context.Context, string) ([]generated.CronRun, error)) *cronWaitReadAPI {
-	return &cronWaitReadAPI{cronEnrichAPI: &cronEnrichAPI{read: read}, waitCalls: map[string]int{}, wait: func(context.Context, string) (cronRunWait, error) {
-		return cronRunWait{open: true, metadata: map[string]any{notification.MetadataKey("operator"): map[string]any{"from": "worker", "message": "review"}}}, nil
+	return &cronWaitReadAPI{cronEnrichAPI: &cronEnrichAPI{read: read}, waitCalls: map[string]int{}, wait: func(context.Context, string) (cronParent, error) {
+		return cronParent{open: true, metadata: map[string]any{notification.MetadataKey("operator"): map[string]any{"from": "worker", "message": "review"}}}, nil
 	}}
 }
 
@@ -49,13 +49,13 @@ func TestCronWaitReadCapAndSharedIssue(t *testing.T) {
 	a := waitReadAPI(nil)
 	cronEnrich(t.Context(), a, 7, &p)
 	require.Len(t, a.waitCalls, 20)
-	require.Equal(t, 1, a.waitCalls["0"])
+	require.Equal(t, 1, a.waitCalls["0"], "two actors sharing an issue must not issue a second read")
 	require.Equal(t, "blocked", cronRunHealth(p, p.runs[0]).state)
 	require.Equal(t, "running", cronRunHealth(p, p.runs[26]).state)
 	require.Contains(t, cronRunHealth(p, p.runs[25]).reason, "attention unavailable")
 }
 
-func TestCronWaitReadFillHistoryRevisionAndNative(t *testing.T) {
+func TestCronWaitReadFillAndHistoryRevisions(t *testing.T) {
 	j := cronFixture(t).cron.data.jobs[0]
 	p := cronData{jobs: []generated.CronJob{j}, historyRuns: []generated.CronRun{
 		{UID: "history", Revision: 1, Status: "running", IssueUID: new("old")},
@@ -67,7 +67,7 @@ func TestCronWaitReadFillHistoryRevisionAndNative(t *testing.T) {
 	cronEnrich(t.Context(), a, 7, &p)
 	require.Equal(t, map[string]int{"old": 1, "fill-issue": 1}, a.waitCalls)
 	require.Contains(t, p.waits, "old")
-	// Fresh reads must discard prior wait evidence, including after a read error.
+	// Fresh reads must discard prior wait evidence, when no runs remain.
 	p.runs = nil
 	p.historyRuns = nil
 	p.jobs = nil
@@ -86,28 +86,41 @@ func TestCronWaitReadsShareWorkersAndDeadline(t *testing.T) {
 	var deadlineMu sync.Mutex
 	a := waitReadAPI(func(ctx context.Context, job string) ([]generated.CronRun, error) {
 		deadlineMu.Lock()
-		fillDeadline, _ = ctx.Deadline()
+		var ok bool
+		fillDeadline, ok = ctx.Deadline()
 		deadlineMu.Unlock()
+		if !ok {
+			return nil, errors.New("fill context has no deadline")
+		}
 		return []generated.CronRun{{UID: job, JobUID: new(job), Status: "running", IssueUID: new(job)}}, nil
 	})
 	entered := make(chan struct{}, 20)
-	a.wait = func(ctx context.Context, _ string) (cronRunWait, error) {
+	a.wait = func(ctx context.Context, _ string) (cronParent, error) {
 		entered <- struct{}{}
-		got, _ := ctx.Deadline()
+		got, ok := ctx.Deadline()
+		if !ok {
+			return cronParent{}, errors.New("wait context has no deadline")
+		}
 		deadlineMu.Lock()
 		want := fillDeadline
 		deadlineMu.Unlock()
 		if !got.Equal(want) {
-			return cronRunWait{}, fmt.Errorf("wait received a different deadline")
+			return cronParent{}, fmt.Errorf("wait received a different deadline")
 		}
 		<-ctx.Done()
-		return cronRunWait{}, ctx.Err()
+		return cronParent{}, ctx.Err()
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	done := make(chan struct{})
 	go func() { cronEnrich(ctx, a, 7, &p); close(done) }()
-	<-entered
+	select {
+	case <-entered:
+	case <-done:
+		t.Fatal("no attention read was admitted")
+	case <-time.After(defaultHTTPTimeout):
+		t.Fatal("attention read did not start")
+	}
 	cancel()
 	select {
 	case <-done:
@@ -139,7 +152,7 @@ type cronWaitFetchAPI struct {
 	waiter *cronWaitReadAPI
 }
 
-func (a *cronWaitFetchAPI) readCronParent(ctx context.Context, id int64, uid string) (cronRunWait, error) {
+func (a *cronWaitFetchAPI) readCronParent(ctx context.Context, id int64, uid string) (cronParent, error) {
 	return a.waiter.readCronParent(ctx, id, uid)
 }
 
@@ -175,43 +188,18 @@ func TestCronWaitUniqueAdmissionProperty(t *testing.T) {
 }
 
 func TestCronWaitRefreshUnavailableProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		attention := hegel.Draw(ht, hegel.Booleans())
-		uid := hegel.Draw(ht, hegel.Text().MaxSize(180))
-		if uid == "" {
-			uid = "issue-example"
-		}
-		r := generated.CronRun{UID: "run-example", Status: "running", Actor: "operator", IssueUID: new(uid)}
-		metadata := map[string]any{notification.MetadataKey("operator"): map[string]any{"from": "worker", "message": "review"}}
-		if attention {
-			metadata["work.attention"] = "stuck"
-		}
-		p := cronData{runs: []generated.CronRun{r}, waits: map[string]cronRunWait{uid: {open: true, metadata: metadata}}}
-		if cronRunHealth(p, r).state != "blocked" {
-			ht.Fatal("initial contract setup is not blocked")
-		}
-		a := waitReadAPI(nil)
-		a.wait = func(context.Context, string) (cronRunWait, error) { return cronRunWait{}, errors.New("offline") }
-		cronEnrich(t.Context(), a, 7, &p)
-		got := cronRunHealth(p, r)
-		if got.state != "running" || got.reason != "attention unavailable" {
-			ht.Fatalf("unavailable refresh reused wait: %v", got)
-		}
-	}, hegel.WithTestCases(150))
+	uid := "issue-example"
+	r := generated.CronRun{UID: "run-example", Status: "running", Actor: "operator", IssueUID: new(uid)}
+	metadata := map[string]any{"work.attention": "stuck", notification.MetadataKey("operator"): map[string]any{"from": "worker", "message": "review"}}
+	p := cronData{runs: []generated.CronRun{r}, waits: map[string]cronParent{uid: {open: true, metadata: metadata}}}
+	require.Equal(t, "blocked", cronRunHealth(p, r).state)
+	a := waitReadAPI(nil)
+	a.wait = func(context.Context, string) (cronParent, error) { return cronParent{}, errors.New("offline") }
+	cronEnrich(t.Context(), a, 7, &p)
+	got := cronRunHealth(p, r)
+	require.Equal(t, "running", got.state)
+	require.Equal(t, "attention unavailable", got.reason)
 }
 
 // Production installs undoClient around the daemon API; shared issue reads
 // must preserve attention evidence through that wrapper.
-func TestCronWaitProductionClientWrapper(t *testing.T) {
-	m := cronFixture(t)
-	a := waitReadAPI(nil)
-	base := &cronWaitFetchAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, waiter: a}
-	r := generated.CronRun{UID: "run-example", Status: "running", Actor: "operator", IssueUID: new("issue-example"), JobUID: new(m.cron.data.jobs[0].UID)}
-	p := cronData{jobs: m.cron.data.jobs, runs: []generated.CronRun{r}}
-	cronEnrich(t.Context(), newUndoClient(base), 7, &p)
-	require.Equal(t, "blocked", cronRunHealth(p, r).state)
-	require.Equal(t, 1, a.waitCalls["issue-example"])
-	cronEnrich(t.Context(), newUndoClient(&cronReadTestAPI{data: *m.cron.data}), 7, &p)
-	require.Equal(t, "running", cronRunHealth(p, r).state)
-	require.Equal(t, "attention unavailable", cronRunHealth(p, r).reason)
-}

@@ -78,7 +78,7 @@ func cronEnrich(ctx context.Context, reader cronAPI, id int64, p *cronData) {
 	p.parentOpen = map[string]bool{}
 	p.runErr = map[string]error{}
 	p.lookup = map[string]generated.CronRun{}
-	p.waits = map[string]cronRunWait{}
+	p.waits = map[string]cronParent{}
 	p.waitErr = map[string]error{}
 	if p.runsErr == nil {
 		for _, r := range p.runs {
@@ -93,34 +93,35 @@ func cronEnrich(ctx context.Context, reader cronAPI, id int64, p *cronData) {
 	parents := map[string]bool{}
 	fills := 0
 	issueReads := map[string]bool{}
-	// Adapter health requires these reads; native lookups use the remaining
-	// shared capacity for display, while parent progress has its own cap.
-	for _, native := range []bool{false, true} {
-		for _, j := range p.jobs {
-			parent := cronNativeParent(j)
-			if (parent != "") != native {
-				continue
-			}
-			if parent != "" {
-				if j.Definition.Enabled && !parents[parent] {
-					parents[parent] = true
-					if len(parents) <= 200 {
-						tasks = append(tasks, cronEnrichment{uid: parent, parent: true})
-						issueReads[parent] = true
+	// Enabled health reads take priority over paused display reads. Within each
+	// group, adapters precede native display lookups; parents have their own cap.
+	for _, enabled := range []bool{true, false} {
+		for _, native := range []bool{false, true} {
+			for _, j := range p.jobs {
+				parent := cronNativeParent(j)
+				if (parent != "") != native || j.Definition.Enabled != enabled {
+					continue
+				}
+				if parent != "" {
+					if j.Definition.Enabled && !parents[parent] {
+						parents[parent] = true
+						if len(parents) <= 200 {
+							tasks = append(tasks, cronEnrichment{uid: parent, parent: true})
+							issueReads[parent] = true
+						}
 					}
 				}
+				if _, known := p.lastRuns[j.UID]; known {
+					continue
+				}
+				fills++
+				if fills > 200 {
+					p.lastErr[j.UID] = errors.New("last-run lookup limit reached (200 jobs per refresh)")
+					continue
+				}
+				tasks = append(tasks, cronEnrichment{uid: j.UID})
 			}
-			if _, known := p.lastRuns[j.UID]; known {
-				continue
-			}
-			fills++
-			if fills > 200 {
-				p.lastErr[j.UID] = errors.New("last-run lookup limit reached (200 jobs per refresh)")
-				continue
-			}
-			tasks = append(tasks, cronEnrichment{uid: j.UID})
 		}
-
 	}
 	runReader, supportsRun := reader.(cronRunAPI)
 	for _, r := range p.inspectedRuns {

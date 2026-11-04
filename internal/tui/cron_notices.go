@@ -90,6 +90,15 @@ func (m Model) cronNoticeArm() (Model, tea.Cmd) {
 	if !m.cronSeen.ready || m.cronNotices.window || len(m.cronNotices.pending) == 0 {
 		return m, nil
 	}
+	m.cronNotices.pending = maps.Clone(m.cronNotices.pending)
+	for uid, r := range m.cronNotices.pending {
+		if !m.cronRunUnseen(r.ProjectUID, r.run()) || m.cronNoticeSuppressed(r) {
+			delete(m.cronNotices.pending, uid)
+		}
+	}
+	if len(m.cronNotices.pending) == 0 {
+		return m, nil
+	}
 	m.nextCronNotice++
 	m.cronNotices.gen = m.nextCronNotice
 	m.cronNotices.window = true

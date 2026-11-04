@@ -45,7 +45,7 @@ type cronData struct {
 	lookup              map[string]generated.CronRun
 	progress            map[string]cron.RecurringProgress
 	parentOpen          map[string]bool
-	waits               map[string]cronRunWait
+	waits               map[string]cronParent
 	waitErr             map[string]error
 	historyRuns         []generated.CronRun
 	inspectedRuns       []generated.CronRun
@@ -224,13 +224,22 @@ func (m Model) cronLoaded(msg cronLoadedMsg) Model {
 		}
 	} else {
 		m.cron.runPage.err = data.runsErr
-		m = m.cronRemember(m.cron.runPage.runs)
 	}
 	if m.cron.jobPage.job != "" {
 		m.cron.jobPage.reload = true
 		m.cron.jobPage.merge = !data.resetPages
-		m = m.cronRemember(m.cron.jobPage.runs)
 	}
+	// Retained pages keep the highest observation already known for each UID,
+	// even after its detail frame has been closed.
+	retained := cronMergeRuns(m.cron.runPage.runs, m.cron.jobPage.runs)
+	for i, r := range retained {
+		if old.cron.data != nil {
+			if known, ok := old.cron.data.run(r.UID); ok && known.Revision > r.Revision {
+				retained[i] = known
+			}
+		}
+	}
+	m = m.cronRemember(retained)
 	return m.cronKeepSelection(old)
 }
 

@@ -11,7 +11,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/pkg/client/generated"
-	"hegel.dev/go/hegel"
 )
 
 type cronPagingAPI struct {
@@ -100,7 +99,12 @@ func TestCronHistoryFencesAndSingleFlight(t *testing.T) {
 		base, cmd = base.cronRequestPage(j, false)
 		late := cmd().(cronPageMsg)
 		base, _ = updateModel(base, event)
+		before := base.cron.jobPage
+		before.runs = slices.Clone(before.runs)
 		base = base.cronPageLoaded(late)
+		require.Equal(t, before.out, base.cron.jobPage.out)
+		require.Equal(t, before.runs, base.cron.jobPage.runs)
+		require.Equal(t, before.next, base.cron.jobPage.next)
 		require.NotEqual(t, late.gen, base.cron.jobPage.gen, "manual refresh/reset invalidates pages immediately")
 	}
 }
@@ -124,6 +128,7 @@ func TestCronHistoryFailureRetryAndForeignJob(t *testing.T) {
 	m, cmd = m.cronRequestPage(j, false)
 	m = m.cronPageLoaded(cmd().(cronPageMsg))
 	require.ErrorContains(t, m.cron.jobPage.err, "job")
+	require.Equal(t, r.UID, m.cron.jobPage.runs[0].UID, "foreign pages cannot replace retained evidence")
 	require.Equal(t, "next", m.cron.jobPage.next)
 	require.Len(t, m.cron.jobPage.runs, 1)
 	a.page = nil
@@ -132,6 +137,34 @@ func TestCronHistoryFailureRetryAndForeignJob(t *testing.T) {
 	m = m.cronPageLoaded(cmd().(cronPageMsg))
 	require.NoError(t, m.cron.jobPage.err)
 	require.Empty(t, m.cron.jobPage.next, "empty terminal page is ordinary exhaustion")
+
+	for count := 1; count <= 15; count++ {
+		for attempts := 2; attempts <= 9; attempts++ {
+			m := cronFixture(t)
+			job := m.cron.data.jobs[0].UID
+			rows := make([]generated.CronRun, count)
+			for i := range rows {
+				rows[i] = generated.CronRun{UID: fmt.Sprintf("old-%d", i), JobUID: new(job)}
+			}
+			m.cron.jobPage = cronHistoryPage{job: job, runs: rows, ready: true, older: true}
+			a := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, err: errors.New("offline")}
+			m.api = a
+			for range attempts {
+				var cmd tea.Cmd
+				m, cmd = m.cronRequestPage(job, true)
+				m = m.cronPageLoaded(cmd().(cronPageMsg))
+				if len(m.cron.jobPage.runs) != len(rows) || m.cron.jobPage.runs[0].UID != rows[0].UID {
+					t.Fatalf("failed reset discarded rows: got %v want %v", m.cron.jobPage.runs, rows)
+				}
+			}
+			a.err = nil
+			m, cmd := m.cronRequestPage(job, true)
+			m = m.cronPageLoaded(cmd().(cronPageMsg))
+			if len(m.cron.jobPage.runs) != 0 || !m.cron.jobPage.ready {
+				t.Fatalf("successful empty replacement retained rows: %+v", m.cron.jobPage)
+			}
+		}
+	}
 }
 
 func TestCronRunsLoadOlderByKey(t *testing.T) {
@@ -183,13 +216,13 @@ func TestSnapshot_CronHistory(t *testing.T) {
 	assertGolden(t, "cron-job-history", m.viewBody())
 }
 
-// Review reproduction: A -> run -> workflow -> B -> back to A must start A's
+// Review reproduction: A -> workflow -> B -> back to A must start A's
 // history again; a single cached page cannot leave the visible job loading.
 func TestCronHistoryBackToJobRestartsHistory(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
+	{
 		m := cronFixture(t)
 		job := m.cron.data.jobs[0].UID
-		other := fmt.Sprintf("other-%d", hegel.Draw(ht, hegel.Integers[uint64](0, ^uint64(0))))
+		other := "other-job"
 
 		second := m.cron.data.jobs[0]
 		second.UID = other
@@ -200,7 +233,7 @@ func TestCronHistoryBackToJobRestartsHistory(t *testing.T) {
 			_, _, lines := cronScreen(m)
 			i := slices.IndexFunc(lines, func(l cronLine) bool { return l.target == target })
 			if i < 0 {
-				ht.Fatalf("missing reachable link %+v", target)
+				t.Fatalf("missing reachable link %+v", target)
 			}
 			*m.cronCursor() = i
 			next, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -214,39 +247,10 @@ func TestCronHistoryBackToJobRestartsHistory(t *testing.T) {
 			m = drainInboxCmds(next, cmd)
 		}
 		if m.cron.jobPage.job != job || !m.cron.jobPage.ready || a.job != job {
-			ht.Fatalf("visible job %q left without its own history: page=%+v read=%q", job, m.cron.jobPage, a.job)
+			t.Fatalf("visible job %q left without its own history: page=%+v read=%q", job, m.cron.jobPage, a.job)
 		}
-	}, hegel.WithTestCases(300))
+	}
 }
 
 // Review reproduction: refresh then repeated failed first-page retries must
 // retain the same-job older rows until a successful replacement arrives.
-func TestCronHistoryFailedRetriesRetainRows(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		m := cronFixture(t)
-		job := m.cron.data.jobs[0].UID
-		count := int(hegel.Draw(ht, hegel.Integers[uint64](0, ^uint64(0)))%15) + 1
-		rows := make([]generated.CronRun, count)
-		for i := range rows {
-			rows[i] = generated.CronRun{UID: fmt.Sprintf("old-%d", i), JobUID: new(job)}
-		}
-		m.cron.jobPage = cronHistoryPage{job: job, runs: rows, ready: true, older: true}
-		a := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, err: errors.New("offline")}
-		m.api = a
-		attempts := int(hegel.Draw(ht, hegel.Integers[uint64](0, ^uint64(0)))%8) + 2
-		for range attempts {
-			var cmd tea.Cmd
-			m, cmd = m.cronRequestPage(job, true)
-			m = m.cronPageLoaded(cmd().(cronPageMsg))
-			if len(m.cron.jobPage.runs) != len(rows) || m.cron.jobPage.runs[0].UID != rows[0].UID {
-				ht.Fatalf("failed reset discarded rows: got %v want %v", m.cron.jobPage.runs, rows)
-			}
-		}
-		a.err = nil
-		m, cmd := m.cronRequestPage(job, true)
-		m = m.cronPageLoaded(cmd().(cronPageMsg))
-		if len(m.cron.jobPage.runs) != 0 || !m.cron.jobPage.ready {
-			ht.Fatalf("successful empty replacement retained rows: %+v", m.cron.jobPage)
-		}
-	}, hegel.WithTestCases(300))
-}

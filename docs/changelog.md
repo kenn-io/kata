@@ -21,6 +21,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
   duplicate retries, missing peers, and cleanup keep their existing behavior.
   See [quarantine recovery](operations/federation.md#quarantine) before skipping
   a refused batch.
+- Spot failing, overdue and missed cron jobs in `kata tui`, with exact last-run
+  evidence, a project health roll-up, and a reason in each job's detail.
+  Page through each job's run history or load older project observations.
+  Native delivery health comes from parent progress; missed is a local display
+  heuristic. See [CLI reference](reference/cli.md#daemon-and-diagnostics).
 - Filter loaded cron jobs and runs with field tokens such as
   `health:missed`, `status:failed`, `actor:operator`, or `issue:none`.
   Combine fields with free text, or repeat a field to match either value.
@@ -32,12 +37,6 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - See running cron jobs that wait for attention in `kata tui`. The blocked
   health and run details use the issue's attention state and the run actor's
   pending notification, with overdue taking precedence.
-
-- Spot failing, overdue and missed cron jobs in `kata tui`, with exact last-run
-  evidence, a project health roll-up, and a reason in each job's detail.
-  Page through each job's run history or load older project observations.
-  Native delivery health comes from parent progress; missed is a local display
-  heuristic. See [CLI reference](reference/cli.md#daemon-and-diagnostics).
 - Delete an issue from `kata tui` with `X` from the list. Type
   `DELETE <project>#<id>` to confirm; the selection moves to the
   neighbouring row and `u` restores the issue, the way `kata restore` does.

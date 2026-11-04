@@ -22,6 +22,7 @@ func TestCronReplicaClient(t *testing.T) {
 	require.Equal(t, "spoke", status.role)
 	require.Equal(t, snapshotFixedNow.Add(-time.Hour), *status.pulledAt)
 	require.Equal(t, "pull failed", status.lastError)
+	require.Equal(t, snapshotFixedNow.Add(-30*time.Minute), *status.errorAt)
 }
 
 func TestCronReplicaChip(t *testing.T) {
@@ -41,6 +42,17 @@ func TestCronReplicaChip(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, tc.want, stripANSI(cronReplicaChip(tc.value)))
 		})
+	}
+
+	{
+		defer snapshotInit(t)()
+		m := cronFixture(t)
+		m.width = 120
+		m.cron.data.replica = cronReplica{role: "spoke", pulledAt: new(snapshotFixedNow.Add(-3 * time.Minute))}
+		assertGolden(t, "cron-jobs-replica", m.viewBody())
+		m.cron.data.replica.errorAt = new(snapshotFixedNow.Add(-2 * time.Minute))
+		m.cron.data.replica.lastError = "sync failed"
+		assertGolden(t, "cron-jobs-replica-error", m.viewBody())
 	}
 }
 
@@ -62,12 +74,12 @@ func TestCronReplicaRefresh(t *testing.T) {
 	m := cronFixture(t)
 	a := &cronReplicaTestAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, replica: cronReplica{role: "spoke", pulledAt: new(snapshotFixedNow.Add(-time.Hour))}}
 	p := cronData{}
-	cronFetch(t.Context(), a, 7, &p)
+	cronFetch(t.Context(), newUndoClient(a), 7, &p)
 	require.Equal(t, int64(7), a.project)
 	require.Equal(t, a.replica, p.replica)
 	a.err = errors.New("older daemon")
 	p = cronData{}
-	cronFetch(t.Context(), a, 7, &p)
+	cronFetch(t.Context(), newUndoClient(a), 7, &p)
 	require.Empty(t, p.replica)
 	require.NotEmpty(t, p.jobs)
 	require.NoError(t, p.jobsErr)
@@ -75,14 +87,11 @@ func TestCronReplicaRefresh(t *testing.T) {
 	m.cron.data.replica = a.replica
 	m = m.cronLoaded(cronLoadedMsg(p))
 	require.Empty(t, m.cron.data.replica)
-}
-func TestSnapshot_CronReplica(t *testing.T) {
-	defer snapshotInit(t)()
-	m := cronFixture(t)
-	m.width = 120
-	m.cron.data.replica = cronReplica{role: "spoke", pulledAt: new(snapshotFixedNow.Add(-3 * time.Minute))}
-	assertGolden(t, "cron-jobs-replica", m.viewBody())
-	m.cron.data.replica.errorAt = new(snapshotFixedNow.Add(-2 * time.Minute))
-	m.cron.data.replica.lastError = "sync failed"
-	assertGolden(t, "cron-jobs-replica-error", m.viewBody())
+
+	{
+		a := &cronReplicaTestAPI{cronReadTestAPI: &cronReadTestAPI{data: *cronFixture(t).cron.data}, replica: cronReplica{role: "spoke"}}
+		p := cronData{}
+		cronFetch(t.Context(), newUndoClient(a), 7, &p)
+		require.Equal(t, "spoke", p.replica.role)
+	}
 }

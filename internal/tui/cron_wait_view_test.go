@@ -19,7 +19,7 @@ func cronBlockedFixture(t *testing.T) Model {
 	m.cron.data.runs = []generated.CronRun{r}
 	m.cron.runPage.runs = []generated.CronRun{r}
 	m.cron.data.lastRuns = map[string]generated.CronRun{deref(r.JobUID): r}
-	m.cron.data.waits = map[string]cronRunWait{"issue-example": {open: true, metadata: map[string]any{"work.attention": "needs-human"}}}
+	m.cron.data.waits = map[string]cronParent{"issue-example": {open: true, metadata: map[string]any{"work.attention": "needs-human"}}}
 	return m
 }
 func cronScreenText(m Model) string {
@@ -50,7 +50,7 @@ func TestCronWaitRendering(t *testing.T) {
 	require.Contains(t, text, "Needs human attention")
 	m.cron.data.waits = nil
 	require.Contains(t, cronScreenText(m), "attention unavailable")
-	m.cron.data.waits = map[string]cronRunWait{"issue-example": {open: true, metadata: map[string]any{"work.attention": "stuck"}}}
+	m.cron.data.waits = map[string]cronParent{"issue-example": {open: true, metadata: map[string]any{"work.attention": "stuck"}}}
 	m.cron.stack = []cronFrame{{ref: cronRef{cronJobs, deref(r.JobUID)}}}
 	require.Contains(t, cronScreenText(m), "running · blocked")
 	m.cron.data.jobs[0].Definition.TimeoutSeconds = new(int64(1))
@@ -59,6 +59,15 @@ func TestCronWaitRendering(t *testing.T) {
 	title, _, _ = cronScreen(m)
 	require.Contains(t, title, "1 overdue")
 	require.NotContains(t, title, "1 blocked")
+
+	{
+		defer snapshotInit(t)()
+		m := cronBlockedFixture(t)
+		assertGolden(t, "cron-jobs-blocked", m.viewBody())
+		m.cron.tab = cronRuns
+		m.cron.stack = []cronFrame{{ref: cronRef{cronRuns, m.cron.data.runs[0].UID}}}
+		assertGolden(t, "cron-run-detail-blocked", m.viewBody())
+	}
 }
 
 func TestCronWaitMetadataEventsRefreshAllLoadedRuns(t *testing.T) {
@@ -71,15 +80,6 @@ func TestCronWaitMetadataEventsRefreshAllLoadedRuns(t *testing.T) {
 	m.cron.data.lookup["historical"] = generated.CronRun{UID: "historical", Status: "failed", IssueUID: new("history-issue")}
 	require.False(t, m.cronParentEvent(eventReceivedMsg{eventType: "issue.metadata_updated", issueUID: "history-issue"}))
 	require.False(t, m.cronParentEvent(eventReceivedMsg{eventType: "issue.metadata_updated", issueUID: "other-issue"}))
-}
-
-func TestSnapshot_CronBlocked(t *testing.T) {
-	defer snapshotInit(t)()
-	m := cronBlockedFixture(t)
-	assertGolden(t, "cron-jobs-blocked", m.viewBody())
-	m.cron.tab = cronRuns
-	m.cron.stack = []cronFrame{{ref: cronRef{cronRuns, m.cron.data.runs[0].UID}}}
-	assertGolden(t, "cron-run-detail-blocked", m.viewBody())
 }
 
 func TestCronWaitNativeRunDoesNotAddAttentionRead(t *testing.T) {

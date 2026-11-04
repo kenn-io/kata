@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/pkg/client/generated"
 	"hegel.dev/go/hegel"
 )
 
@@ -54,8 +55,8 @@ func TestCronQueryNewKeyCannotAddRows(t *testing.T) {
 		fields := map[string]string{"status": status, "actor": actor}
 		base := cronQuery("status:failed status:running", cronRuns)
 		added := cronQuery("status:failed status:running actor:operator", cronRuns)
-		if added.match(fields, "") && !base.match(fields, "") {
-			ht.Fatal("new key expanded results")
+		if got, want := added.match(fields, ""), base.match(fields, "") && strings.Contains(strings.ToLower(actor), "operator"); got != want {
+			ht.Fatal("new key must intersect the actor match")
 		}
 	}, hegel.WithTestCases(2000))
 }
@@ -67,17 +68,23 @@ func TestCronQuerySameKeyCannotRemoveRows(t *testing.T) {
 		if cronQuery("status:failed", cronRuns).match(fields, "") && !cronQuery("status:failed status:running", cronRuns).match(fields, "") {
 			ht.Fatal("OR expansion removed a row")
 		}
+		if got, want := cronQuery("status:failed status:running", cronRuns).match(fields, ""), status == "failed" || status == "running"; got != want {
+			ht.Fatal("fixed OR query must match exactly either status")
+		}
 	}, hegel.WithTestCases(2000))
 }
 
 func TestCronQueryArbitraryInputTotal(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
 		query := hegel.Draw(ht, hegel.Text())
+		fields := map[string]string{"status": "failed", "health": "never ran", "actor": "Operator", "issue": "01ABC"}
 		for _, tab := range []int{cronJobs, cronRuns, cronWorkflows} {
 			parsed := cronQuery(query, tab)
-			// This pins the empty field/text meaning even for malformed Unicode.
 			if parsed.match(nil, "") && strings.TrimSpace(query) != "" && len(parsed.tokens) == 0 && query != "" {
 				ht.Fatalf("nonempty literal matches empty text: %q", query)
+			}
+			if got, want := cronQuery(query, tab).match(fields, "Report actor:"), cronQuery(strings.ToLower(query), tab).match(fields, "Report actor:"); got != want {
+				ht.Fatalf("case-fold changed arbitrary query %q in tab %d", query, tab)
 			}
 		}
 	}, hegel.WithTestCases(2000))
@@ -95,11 +102,13 @@ func TestCronQueryUsesUntruncatedFields(t *testing.T) {
 	r := &m.cron.runPage.runs[0]
 	r.Teammate = new("reader")
 	r.IssueUID = new("01ABC123")
+	r.Revision++
+	m = m.cronRemember([]generated.CronRun{*r})
 	m = m.cronFilter("status:succeeded executor:executor-a teammate:reader issue:01abc")
 	title, _, lines = cronScreen(m)
 	require.Len(t, lines, 1)
 	require.Contains(t, title, "filtered")
-	require.Contains(t, cronHelp(m), "status:")
+	require.Equal(t, m.cron.data.runs[0].UID, lines[0].target.uid, "the matching full-value row is reachable")
 	assertGolden(t, "cron-runs-filter-tokens", m.viewBody())
 }
 

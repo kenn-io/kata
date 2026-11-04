@@ -196,6 +196,9 @@ func cronScreen(m Model) (string, string, []cronLine) {
 			}
 		case cronRuns:
 			for _, r := range runs {
+				if current, ok := p.run(r.UID); ok {
+					r = current
+				}
 				unseen := m.cronRunUnseen(m.cronProjectUID(), r)
 				if m.cron.unseenOnly && !unseen {
 					continue

@@ -103,41 +103,14 @@ func (m Model) cronLoadedRuns() []generated.CronRun {
 	if m.cron.data == nil {
 		return nil
 	}
-	runs := map[string]generated.CronRun{}
-	add := func(r generated.CronRun) {
-		if old, ok := runs[r.UID]; r.UID != "" && (!ok || r.Revision > old.Revision) {
-			runs[r.UID] = r
-		}
+	var runs []generated.CronRun
+	// Apply earlier sources last to retain their equal-revision preference.
+	for _, source := range [][]generated.CronRun{m.cron.runPage.runs, m.cron.jobPage.runs, slices.Collect(maps.Values(m.cron.data.lookup)), slices.Collect(maps.Values(m.cron.data.lastRuns)), m.cron.data.runs} {
+		runs = cronMergeRuns(runs, source)
 	}
-	for _, r := range m.cron.data.runs {
-		add(r)
-	}
-	for _, r := range m.cron.data.lastRuns {
-		add(r)
-	}
-	for _, r := range m.cron.data.lookup {
-		add(r)
-	}
-	for _, page := range []cronHistoryPage{m.cron.jobPage, m.cron.runPage} {
-		for _, r := range page.runs {
-			add(r)
-		}
-	}
-	out := make([]generated.CronRun, 0, len(runs))
-	for _, r := range runs {
-		out = append(out, r)
-	}
-	slices.SortFunc(out, func(a, b generated.CronRun) int {
-		if a.UID < b.UID {
-			return -1
-		}
-		if a.UID > b.UID {
-			return 1
-		}
-		return 0
-	})
-	return out
+	return slices.DeleteFunc(runs, func(r generated.CronRun) bool { return r.UID == "" })
 }
+
 func (m Model) cronRunUnseen(project string, r generated.CronRun) bool {
 	if !m.cronSeen.ready || project == "" || m.cronSeen.session[project][r.UID] {
 		return false

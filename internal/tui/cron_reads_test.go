@@ -96,6 +96,7 @@ func TestCronEnrichmentExactAndIsolated(t *testing.T) {
 	require.NoError(t, p.lastErr["empty"])
 	require.ErrorContains(t, p.lastErr["failed"], "offline")
 	require.ErrorContains(t, p.lastErr["foreign"], "job")
+	require.NotContains(t, p.lastRuns, "foreign", "a mismatched reply cannot replace job evidence")
 	// A failed shared read cannot prevent a successful job-specific read.
 	p = cronData{jobs: jobs[:1], runsErr: errors.New("head unavailable")}
 	cronEnrich(t.Context(), a, 7, &p)

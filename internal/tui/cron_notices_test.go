@@ -50,27 +50,27 @@ func TestCronNoticeWindowPermutation(t *testing.T) {
 		n := int(hegel.Draw(ht, hegel.Integers[uint64](0, ^uint64(0)))%8) + 1
 		offset := int(hegel.Draw(ht, hegel.Integers[uint64](0, ^uint64(0))) % uint64(n))
 		for i := range n * 2 {
-			idx := (i + offset) % n
-			var cmd any
-			m2, c := m.cronNoticeEvent(cronNoticeEvent(fmt.Sprint(idx), "job", snapshotFixedNow))
-			m = m2
-			cmd = c
-			if i == 0 {
-				require.NotNil(t, cmd)
-			} else {
-				require.Nil(t, cmd)
+			next, cmd := m.cronNoticeEvent(cronNoticeEvent(fmt.Sprint((i+offset)%n), "job", snapshotFixedNow))
+			m = next
+			if (cmd != nil) != (i == 0) {
+				ht.Fatalf("event %d armed an unexpected window", i)
 			}
 		}
 		m, cmd := m.cronNoticeFlush(cronNoticeTickFor(m))
-		require.NotNil(t, cmd)
-		require.NotNil(t, m.toast)
-		require.Contains(t, m.toast.text, fmt.Sprintf("%d run", n))
-		require.Equal(t, 1, strings.Count(m.toast.text, "job job"))
-		require.Equal(t, snapshotFixedNow.Add(10*time.Second), m.toast.expiresAt)
+		if cmd == nil || m.toast == nil {
+			ht.Fatal("eligible window must emit a toast")
+		}
+		if !strings.Contains(m.toast.text, fmt.Sprintf("%d run", n)) || strings.Count(m.toast.text, "job job") != 1 {
+			ht.Fatalf("wrong grouped notice: %q", m.toast.text)
+		}
+		if !m.toast.expiresAt.Equal(snapshotFixedNow.Add(10 * time.Second)) {
+			ht.Fatal("wrong notice lifetime")
+		}
 		before := m.toast
 		m, cmd = m.cronNoticeEvent(cronNoticeEvent("next", "job", snapshotFixedNow))
-		require.Nil(t, cmd)
-		require.Same(t, before, m.toast, "an unseen previous announcement suppresses another window")
+		if cmd != nil || m.toast != before {
+			ht.Fatal("an unseen announcement must suppress a later window")
+		}
 	}, hegel.WithTestCases(200))
 }
 func TestCronNoticeSeenBeforeFlushAndJobRelease(t *testing.T) {
@@ -114,9 +114,8 @@ func TestCronNoticeStartupScopeAndCutoff(t *testing.T) {
 	m.cronSeen.ready = false
 	m, _ = m.cronNoticeEvent(cronNoticeEvent("early", "job", snapshotFixedNow))
 	m, cmd = m.cronSeenResult(cronSeenResultMsg{data: cronSeenStore{Version: 1, Projects: map[string]cronSeenProject{"project-example": {Runs: []string{"early"}}}}})
-	if cmd != nil {
-		m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
-	}
+	require.Nil(t, cmd, "persisted acknowledgement must not arm a notice window")
+	require.False(t, m.cronRunUnseen("project-example", cronNoticeEvent("early", "job", snapshotFixedNow).cronRun.run()))
 	require.Nil(t, m.toast, "persisted seen state wins over buffered event")
 	for _, tc := range []struct {
 		name string
@@ -176,15 +175,15 @@ func TestCronNoticeStaleWindowAndHints(t *testing.T) {
 	next, _ := m.handleEventReceived(cronNoticeEvent("r", "job", snapshotFixedNow))
 	m = next.(Model)
 	require.Len(t, m.cronNotices.pending, 1)
-}
 
-func TestSnapshot_CronNotice(t *testing.T) {
-	defer snapshotInit(t)()
-	m := cronNoticeFixture(t)
-	m.width = 120
-	m, _ = m.cronNoticeEvent(cronNoticeEvent("run-a", m.cron.data.jobs[0].UID, snapshotFixedNow))
-	m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
-	assertGolden(t, "cron-notice", m.viewContent())
-	m.view = viewList
-	assertGolden(t, "cron-notice-list", m.viewContent())
+	{
+		defer snapshotInit(t)()
+		m := cronNoticeFixture(t)
+		m.width = 120
+		m, _ = m.cronNoticeEvent(cronNoticeEvent("run-a", m.cron.data.jobs[0].UID, snapshotFixedNow))
+		m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+		assertGolden(t, "cron-notice", m.viewContent())
+		m.view = viewList
+		assertGolden(t, "cron-notice-list", m.viewContent())
+	}
 }

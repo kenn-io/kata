@@ -40,6 +40,7 @@ func TestCronIssueRoundTrip(t *testing.T) {
 	for _, width := range []int{80, 160} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
 			m := cronIssueFixture(t, width)
+			// cron.lists is a [4]cronList value array (int/string fields), so this is an independent copy.
 			stack, lists := slices.Clone(m.cron.stack), m.cron.lists
 			previousGen := m.nextGen
 			previousView := m.prevView
@@ -112,6 +113,7 @@ func TestCronIssueUnreadableStillReturns(t *testing.T) {
 	// The ordinary show-error path leaves a readable error and the Cron return.
 	m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, err: errors.New("issue not found")})
 	require.ErrorContains(t, m.detail.err, "issue not found")
+	require.True(t, m.cron.returnToCron, "the unreadable link keeps the Cron return route")
 	require.NotNil(t, m.toast)
 	require.Contains(t, m.toast.text, "issue not found")
 	m, cmd := updateModel(m, popDetailMsg{})

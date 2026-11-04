@@ -16,9 +16,9 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
-// Contract: the daemon's real pull callback publishes the observation payload to
-// its SSE broadcaster. Baseline snapshots and repeat pulls are not new failures.
-func TestCronPulledObservationReachesStream(t *testing.T) {
+// Contract: federation's pulled-event callback can publish the observation
+// payload through the daemon event publisher. Baseline snapshots and repeat pulls are not new failures.
+func TestCronPullCallbackPublishesObservation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	hub := nativeStore(t, "sqlite")
@@ -40,7 +40,7 @@ func TestCronPulledObservationReachesStream(t *testing.T) {
 	runUID, err := uid.New()
 	require.NoError(t, err)
 	ended := time.Now().UTC()
-	_, err = hub.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Actor: "operator", Status: "failed", EndedAt: &ended, Summary: cron.Summary{Version: 1}})
+	observed, err := hub.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Actor: "operator", Status: "failed", EndedAt: &ended, Summary: cron.Summary{Version: 1}})
 	require.NoError(t, err)
 	broadcaster := daemon.NewEventBroadcaster()
 	publisher := daemon.NewEventPublisher(broadcaster, nil)
@@ -57,14 +57,18 @@ func TestCronPulledObservationReachesStream(t *testing.T) {
 		require.NotNil(t, msg.Event)
 		require.Equal(t, "cron.run.observed", msg.Event.Type)
 		var payload struct {
-			UID        string `json:"uid"`
-			Status     string `json:"status"`
-			ProjectUID string `json:"project_uid"`
+			UID        string    `json:"uid"`
+			JobUID     string    `json:"job_uid"`
+			UpdatedAt  time.Time `json:"updated_at"`
+			Status     string    `json:"status"`
+			ProjectUID string    `json:"project_uid"`
 		}
 		require.NoError(t, json.Unmarshal([]byte(msg.Event.Payload), &payload))
 		require.Equal(t, runUID, payload.UID)
 		require.Equal(t, "failed", payload.Status)
 		require.Equal(t, project.UID, payload.ProjectUID)
+		require.Equal(t, job.UID, payload.JobUID)
+		require.Equal(t, observed.Run.UpdatedAt, payload.UpdatedAt)
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}

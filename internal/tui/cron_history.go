@@ -241,6 +241,9 @@ func cronJobHistory(d *cronDoc, m Model, job string) {
 		d.text("no runs", cronRef{})
 	}
 	for _, r := range p.runs {
+		if current, ok := m.cron.data.run(r.UID); ok {
+			r = current
+		}
 		d.text(cronRunStatus(*m.cron.data, r)+" · "+r.CreatedAt.Format("2006-01-02T15:04:05Z07:00")+" · "+deref(r.Summary.Message), cronRef{cronRuns, r.UID})
 	}
 	if p.next != "" {

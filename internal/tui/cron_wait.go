@@ -7,10 +7,7 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
-// Wait and native delivery evidence share the same issue envelope.
-type cronRunWait = cronParent
-
-func cronRunWaitForActor(wait cronRunWait, actor string) cronHealthState {
+func cronRunWaitForActor(wait cronParent, actor string) cronHealthState {
 	out := cronHealthState{"running", ""}
 	if !wait.open {
 		return out

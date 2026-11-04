@@ -75,7 +75,7 @@ func TestCronClientReadsStoredRecords(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, workflows, 1)
 	require.Equal(t, "Summary flow", workflows[0].Name)
-	runs, err := c.ListCronRuns(ctx, project.ID)
+	runs, _, err := c.ListCronJobRuns(ctx, project.ID, "", "", 100)
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
 	require.Equal(t, "Report ready", deref(runs[0].Summary.Message))
