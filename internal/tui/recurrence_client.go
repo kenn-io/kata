@@ -48,9 +48,6 @@ func (c *Client) SaveRecurrence(ctx context.Context, projectID int64, ref string
 	}
 	changed := true
 	if in.Stop {
-		if in.Recurrence == nil {
-			return nil, &mutationPreflightError{errors.New("no active recurrence to stop")}
-		}
 		err = recurrenceclient.Stop(ctx, apiClient, issue.ProjectID, *in.Recurrence, in.Actor)
 	} else {
 		issueZone, _ := issue.Metadata["timezone"].(string)

@@ -290,17 +290,16 @@ func renderNewIssueField(s inputState, idx, innerW int) string {
 	} else {
 		label = subtleStyle.Render(label)
 	}
-	var view string
 	switch f.kind {
 	case fieldMultiLine:
-		view = f.area.View()
+		return label + "\n" + f.area.View()
 	case fieldRadio:
-		view = renderRadio(f.radio, idx == s.active)
+		return label + "\n" + renderRadio(f.radio, idx == s.active)
 	default:
 		f.input.SetWidth(innerW - 2)
-		view = f.input.View()
+		f.input.SetCursor(f.input.Position())
+		return label + "\n" + f.input.View()
 	}
-	return label + "\n" + view
 }
 
 // renderFormFooter is the footer-hint row inside the panel. While
