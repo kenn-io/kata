@@ -148,6 +148,9 @@ func (d *Store) AcceptRelayDeliveries(ctx context.Context, bindingUID string, ba
 					// source identity it asserts in a forwarded path.
 					producerAuthorityUID = ""
 				}
+				if err := db.ValidateCronControlEvent(source, producerAuthorityUID); err != nil {
+					return err
+				}
 				if err := db.ValidateEmbeddingProducerEvent(source, producerAuthorityUID); err != nil {
 					return err
 				}

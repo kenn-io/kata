@@ -198,7 +198,9 @@ type CronWorkflowResponse struct {
 // ListCronJobsResponse returns the selected portable jobs.
 type ListCronJobsResponse struct {
 	Body struct {
-		Jobs []CronJob `json:"jobs"`
+		Jobs         []CronJob         `json:"jobs"`
+		ProjectPause *CronProjectPause `json:"project_pause"`
+		Controls     []string          `json:"controls"`
 	}
 }
 

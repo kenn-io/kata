@@ -331,10 +331,15 @@ func (a CronSQL) openCronProject(ctx context.Context, tx *sql.Tx, projectID int6
 		return Project{}, err
 	}
 	project := Project{ID: projectID}
-	err := tx.QueryRowContext(ctx, `SELECT uid,name FROM projects WHERE id=$1 AND deleted_at IS NULL AND name<>$2`, projectID, SystemProjectName).Scan(&project.UID, &project.Name)
+	var created string
+	err := tx.QueryRowContext(ctx, `SELECT uid,name,metadata,revision,created_at FROM projects WHERE id=$1 AND deleted_at IS NULL AND name<>$2`, projectID, SystemProjectName).Scan(&project.UID, &project.Name, &project.Metadata, &project.Revision, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Project{}, ErrNotFound
 	}
+	if err != nil {
+		return Project{}, err
+	}
+	project.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
 	if err != nil {
 		return Project{}, err
 	}

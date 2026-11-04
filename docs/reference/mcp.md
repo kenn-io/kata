@@ -290,7 +290,7 @@ model context at startup.
 | `kata.load_issue_discovery` | `kata.search`, `kata.list`, `kata.show`, `kata.ready`, `kata.next`, `kata.labels`, `kata.graph` |
 | `kata.load_issue_mutation` | `kata.create`, `kata.edit`, `kata.comment`, `kata.edit_comment`, `kata.claim`, `kata.set_label`, `kata.set_metadata`, `kata.set_schedule`, `kata.set_deadline`, `kata.move` |
 | `kata.load_coordination` | `kata.assign`, `kata.unassign`, `kata.inbox`, `kata.status` |
-| `kata.load_cron` | `kata.cron_capabilities`, `kata.cron_new_uid`, `kata.cron_jobs`, `kata.cron_job`, `kata.cron_job_create`, `kata.cron_job_update`, `kata.cron_job_delete`, `kata.cron_job_restore`, `kata.cron_job_pause`, `kata.cron_job_resume`, `kata.cron_workflows`, `kata.cron_workflow`, `kata.cron_workflow_create`, `kata.cron_workflow_update`, `kata.cron_workflow_delete`, `kata.cron_workflow_restore`, `kata.cron_runs`, `kata.cron_run`, `kata.cron_run_observe` |
+| `kata.load_cron` | `kata.cron_capabilities`, `kata.cron_new_uid`, `kata.cron_project_pause`, `kata.cron_project_resume`, `kata.cron_jobs`, `kata.cron_job`, `kata.cron_job_create`, `kata.cron_job_update`, `kata.cron_job_delete`, `kata.cron_job_restore`, `kata.cron_job_pause`, `kata.cron_job_resume`, `kata.cron_workflows`, `kata.cron_workflow`, `kata.cron_workflow_create`, `kata.cron_workflow_update`, `kata.cron_workflow_delete`, `kata.cron_workflow_restore`, `kata.cron_runs`, `kata.cron_run`, `kata.cron_run_observe` |
 | `kata.load_issue_lifecycle` | `kata.close`, `kata.reopen`, `kata.delete`, `kata.restore`, `kata.purge`, `kata.wait`, `kata.audit_closes` |
 | `kata.load_leases` | `kata.lease_status`, `kata.lease`, `kata.lease_force_release`, `kata.lease_steal` |
 | `kata.load_projects` | `kata.projects`, `kata.project_show`, `kata.project_create`, `kata.project_update`, `kata.project_merge`, `kata.project_remove`, `kata.project_restore`, `kata.project_purge` |
@@ -408,9 +408,15 @@ the separate `kata.load_recurrence` tools manage RRULE issue templates.
 | Purpose | Tools |
 | --- | --- |
 | Discovery and identity | `kata.cron_capabilities`, `kata.cron_new_uid` |
+| Project policy | `kata.cron_project_pause`, `kata.cron_project_resume` |
 | Jobs | `kata.cron_jobs`, `kata.cron_job`, `kata.cron_job_create`, `kata.cron_job_update`, `kata.cron_job_delete`, `kata.cron_job_restore`, `kata.cron_job_pause`, `kata.cron_job_resume` |
 | Workflows | `kata.cron_workflows`, `kata.cron_workflow`, `kata.cron_workflow_create`, `kata.cron_workflow_update`, `kata.cron_workflow_delete`, `kata.cron_workflow_restore` |
 | Run evidence | `kata.cron_runs`, `kata.cron_run`, `kata.cron_run_observe` |
+
+`kata.cron_project_pause` accepts an optional `reason` of up to 256 bytes.
+`kata.cron_project_resume` preserves job flags and catch-up policies. Both act
+only at the owning hub. See [Project cron pause](cron.md#pause-cron-for-a-whole-project)
+for adapter behavior and upgrade requirements.
 
 Every operation uses the MCP server's configured daemon credentials, project
 scope, and accountable actor. Select `project` explicitly in multi-project modes.
