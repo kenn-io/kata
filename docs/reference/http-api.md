@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 # HTTP API schema
@@ -242,6 +242,7 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 | Version | Change |
 | --- | --- |
+| `0.39.0` | Adds cross-project cron job/run reads and run status, issue, runtime, teammate and recording-time filters. Run responses echo applied filters; fleet responses label referenced projects. See [cron fleet reads](cron.md#read-cron-across-projects). |
 | `0.38.0` | Publishes `POST /projects/{project_id}/issues/{ref}/attachments/links`, which saves a reference to an existing Docbank file version without uploading its bytes. `kata docbank attachments link` refuses older daemons. |
 | `0.37.0` | `POST /projects/{project_id}/recurrences` accepts `If-Match: "rev-N"` with `initial_issue_ref`; a different issue revision returns 412 `revision_conflict` and writes nothing. An empty `If-Match` returns 400. Older daemons ignore the header. |
 | `0.36.0` | Issue list rows, show output and ready rows carry `scheduled_on_date` and `deadline_on_date`, the `scheduled_on` and `deadline_on` metadata as `YYYY-MM-DD` calendar dates, each omitted when its key is absent or its value cannot be read. Older daemons omit both fields. |

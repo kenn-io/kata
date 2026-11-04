@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 # Model Context Protocol server
@@ -413,7 +413,8 @@ the separate `kata.load_recurrence` tools manage RRULE issue templates.
 | Run evidence | `kata.cron_runs`, `kata.cron_run`, `kata.cron_run_observe` |
 
 Every operation uses the MCP server's configured daemon credentials, project
-scope, and accountable actor. Select `project` explicitly in multi-project modes.
+scope, and accountable actor. Job/run lists use the startup scope when `project`
+is omitted; other operations require an explicit `project` in multi-project modes.
 Run observations accept the usual per-call `teammate` override; an empty value
 suppresses the startup default without changing the actor. Issue-scoped tokens
 do not gain project-level cron authority.
@@ -431,8 +432,12 @@ tombstone operation. Workflow-in-use checks and native parent bindings are
 preserved. Typed definitions and opaque option objects retain exact JSON numbers.
 
 `kata.cron_runs` defaults to 20 records, accepts `limit` from 1 through 100,
-and returns `next_before_uid`; pass it as `before_uid` to continue. `job_uid`
-filters history. `kata.cron_run_observe` requires a caller-retained run UID,
+and returns `next_before_uid`; pass it as `before_uid` to continue. Filters are
+`job_uid`, `status` (array), `issue_uid`, `executor_label`, `teammate` and
+RFC 3339 `since` on recording time. Read filtering never inherits the startup
+teammate default. Explicit blank/null selectors or new filters and empty status
+arrays are rejected. Global reads require HTTP API `0.39.0`; new filters require a
+matching daemon echo. See [fleet reads](cron.md#cli-and-mcp-fleet-reads). `kata.cron_run_observe` requires a caller-retained run UID,
 `expected_revision` (`0` for new evidence), a job or workflow reference with its
 definition event UID, status, and a versioned summary. Identical retries return
 `replayed: true`; distinct run UIDs for one scheduled occurrence remain separate

@@ -60,10 +60,17 @@ type CronRunObservationResult struct {
 
 // CronRunList bounds and scopes ordinary run-history pagination.
 type CronRunList struct {
-	ProjectID int64
-	JobUID    string
-	Limit     int
-	BeforeUID string
+	ProjectIDs    []int64
+	AllProjects   bool
+	Statuses      []string
+	IssueUID      string
+	ExecutorLabel string
+	Teammate      string
+	Since         time.Time
+	ProjectID     int64
+	JobUID        string
+	Limit         int
+	BeforeUID     string
 }
 
 // CronJobExport is the portable backup representation of a job row.

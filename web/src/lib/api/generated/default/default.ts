@@ -14,6 +14,8 @@ import type {
   AddLabelRequestBody,
   AddLabelResponseBody,
   AddTeamMemberPathParameters,
+  AllCronJobsResponseBody,
+  AllCronRunsResponseBody,
   ArchiveCronJobPathParameters,
   ArchiveCronWorkflowPathParameters,
   AssignIssuePathParameters,
@@ -146,6 +148,8 @@ import type {
   LeaveFederationReplicaResultBody,
   LinkAttachmentInput,
   LinkAttachmentPathParameters,
+  ListAllCronJobsParams,
+  ListAllCronRunsParams,
   ListAllIssuesParams,
   ListAllIssuesResponseBody,
   ListConnectorFieldsPathParameters,
@@ -643,6 +647,114 @@ export const mapConnectorField = async (
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(mapConnectorFieldRequestBody),
+  })
+}
+
+export type listAllCronJobsResponse200 = {
+  data: AllCronJobsResponseBody
+  status: 200
+}
+
+export type listAllCronJobsResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type listAllCronJobsResponseSuccess = listAllCronJobsResponse200 & {
+  headers: Headers
+}
+export type listAllCronJobsResponseError = listAllCronJobsResponseDefault & {
+  headers: Headers
+}
+
+export type listAllCronJobsResponse = listAllCronJobsResponseSuccess | listAllCronJobsResponseError
+
+export const getListAllCronJobsUrl = (params?: ListAllCronJobsParams) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    const explodeParameters = ['project_ids']
+
+    if (Array.isArray(value) && explodeParameters.includes(key)) {
+      value.forEach((v) => {
+        normalizedParams.append(key, v === null ? 'null' : String(v))
+      })
+      return
+    }
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/cron/jobs?${stringifiedParams}`
+    : `/api/v1/cron/jobs`
+}
+
+export const listAllCronJobs = async (
+  params?: ListAllCronJobsParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<listAllCronJobsResponse> => {
+  return orvalFetch<listAllCronJobsResponse>(getListAllCronJobsUrl(params), {
+    ...options,
+    method: 'GET',
+  })
+}
+
+export type listAllCronRunsResponse200 = {
+  data: AllCronRunsResponseBody
+  status: 200
+}
+
+export type listAllCronRunsResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type listAllCronRunsResponseSuccess = listAllCronRunsResponse200 & {
+  headers: Headers
+}
+export type listAllCronRunsResponseError = listAllCronRunsResponseDefault & {
+  headers: Headers
+}
+
+export type listAllCronRunsResponse = listAllCronRunsResponseSuccess | listAllCronRunsResponseError
+
+export const getListAllCronRunsUrl = (params?: ListAllCronRunsParams) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    const explodeParameters = ['project_ids', 'status']
+
+    if (Array.isArray(value) && explodeParameters.includes(key)) {
+      value.forEach((v) => {
+        normalizedParams.append(key, v === null ? 'null' : String(v))
+      })
+      return
+    }
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/cron/runs?${stringifiedParams}`
+    : `/api/v1/cron/runs`
+}
+
+export const listAllCronRuns = async (
+  params?: ListAllCronRunsParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<listAllCronRunsResponse> => {
+  return orvalFetch<listAllCronRunsResponse>(getListAllCronRunsUrl(params), {
+    ...options,
+    method: 'GET',
   })
 }
 
@@ -2471,6 +2583,15 @@ export const getListCronRunsUrl = (
   const normalizedParams = new URLSearchParams()
 
   Object.entries(params || {}).forEach(([key, value]) => {
+    const explodeParameters = ['status']
+
+    if (Array.isArray(value) && explodeParameters.includes(key)) {
+      value.forEach((v) => {
+        normalizedParams.append(key, v === null ? 'null' : String(v))
+      })
+      return
+    }
+
     if (value !== undefined) {
       normalizedParams.append(key, value === null ? 'null' : String(value))
     }

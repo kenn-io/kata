@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -504,9 +504,9 @@ revocation is rechecked in the write transaction. Logging does not change an
 issue's owner, dates, lease, status, or readiness.
 
 Responses contain `run`, the exact committed `events`, and `replayed`. Run
-listing is project-scoped, accepts `--job-uid` to list one job's runs, and
-orders by creation time and UID descending. Use `next_before_uid` with `--before-uid` for another
-page. Ordinary federation publishes observations from spokes, folds evidence
+history orders by recording time (`created_at`) and UID descending. Use
+`next_before_uid` as `before_uid` for another page. Ordinary federation
+publishes observations from spokes, folds evidence
 by original event provenance per run UID, and preserves independent runs in
 baselines and backup. Run identity conflicts fail rather than replacing a run.
 
@@ -519,6 +519,85 @@ the code and filter on it client-side. Each adapter defines and documents its
 own codes; where two adapters mean the same thing they share the name, as
 `agent_quota`, `agent_login`, and `launch_unproven` do. The `reason: ` marker
 keeps short messages such as `admitted` from reading as codes.
+
+## Read cron across projects
+
+HTTP API `0.39.0` adds fleet reads on the selected daemon:
+
+| Route | Scope and parameters |
+| --- | --- |
+| `GET /api/v1/cron/jobs` | Active authorized projects; repeated `project_ids` narrows the set. `include_deleted=true` includes job tombstones. |
+| `GET /api/v1/cron/runs` | Active authorized projects; repeated `project_ids`, run filters below, `limit` and `before_uid`. |
+| `GET /api/v1/projects/{project_id}/cron/runs` | One active authorized project; the same run filters and paging. |
+
+Fleet responses include `projects`, an array of `{id, uid, name}` for projects
+referenced by their rows. Archived projects are excluded even with
+`include_deleted`. Job tombstones do not hide retained run history. Ordinary
+project read authority applies; issue-subtree credentials cannot read cron.
+Omitting `project_ids` selects the authorized active set. Explicit empty,
+nonpositive or malformed project IDs are rejected.
+
+Run filters intersect before the page limit:
+
+| Parameter | Match |
+| --- | --- |
+| `status` (repeatable) | Any selected status: `running`, `succeeded`, `failed`, `cancelled`, `unknown`. |
+| `job_uid` | Exact job UID. |
+| `issue_uid` | Exact issue UID, including retained evidence for a removed issue. |
+| `executor_label` | Exact runtime label, 1–256 bytes of nonblank UTF-8. |
+| `teammate` | Exact teammate handle. |
+| `since` | Inclusive recording time (`created_at`), as an RFC 3339 instant. |
+
+Runs page across projects by `created_at DESC, uid DESC`; `limit` defaults to
+100. HTTP accepts values from 0 (the default) through 100 and rejects larger
+values. Use the returned `next_before_uid` for the next page.
+The anchor must belong to the same active authorized project selection, but
+need not still match mutable filters. Missing and inaccessible global anchors
+return the same `400 validation` error. Unchanged data traverses without gaps or
+duplicates; paging does not freeze concurrent updates.
+
+Run responses include an optional `filters` object containing the applied
+`status`, `job_uid`, `issue_uid`, `executor_label`, `teammate` and `since` values.
+Empty predicates are omitted; statuses are sorted and deduplicated, UIDs are
+uppercase and instants are UTC. Clients using new filters must check this echo
+and refuse missing or different predicates, because older daemons can ignore
+unknown query parameters. Unknown future echo fields can be ignored.
+
+Fleet reads use local data as replicated. A personal hub shows its replicas at
+their last sync; selecting a company hub reads that hub's view. These reads do
+not forward requests or launch execution.
+
+### CLI and MCP fleet reads
+
+```sh
+kata cron job list --all --json
+kata cron run list --all --status failed --status unknown --since 24h --json
+kata cron run list --all --executor-label executor-a --teammate runner --json
+kata cron run list --all --issue example-project#abc4 --json
+```
+
+`--all` ignores the workspace's project binding and rejects an explicit
+`--project`. Without it, lists keep their project scope. Run filters also work
+on project lists. `--since` accepts an RFC 3339 instant or a positive Go
+duration, resolved against the client clock. `--issue` accepts a full UID
+without fetching the issue; short refs with `--all` must be project-qualified.
+An explicit `--teammate` filters evidence; `KATA_TEAMMATE` supplies write
+attribution and does not filter reads. CLI history defaults to 100 rows.
+
+MCP `kata.cron_jobs` and `kata.cron_runs` read the configured startup scope when
+`project` is omitted: one bound project, the fixed allowlist, or all active
+projects. An explicit `project` narrows that scope. Unavailable fixed scopes
+fail closed. `kata.cron_runs` accepts `status` (an array), `issue_uid`,
+`executor_label`, `teammate`, RFC 3339 `since`, and its existing job/cursor/limit
+fields. Its default remains 20 rows. Read filters never inherit the MCP
+attribution default. Explicit blank or null MCP selectors and new filters are
+validation errors; an explicit empty status array is rejected.
+
+Global CLI and MCP reads require HTTP API `0.39.0`. New run filters require a
+matching filter echo on every fetched page; older daemons that ignore them
+produce an upgrade error. Unfiltered and job-only project reads remain
+compatible with older daemons. Authorization errors retain their normal
+meaning.
 
 ## Native issue planning dates
 

@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-02
+last_edited: 2026-11-04
 ---
 
 # CLI reference
@@ -2218,17 +2218,24 @@ See [Cron](cron.md) for bounded documents and retry semantics.
 
 ```sh
 kata cron job create --uid <job-uid> --file job.json --json
-kata cron job list [--include-deleted] --json
+kata cron job list [--all] [--include-deleted] --json
 kata cron job show <job-uid> --json
 kata cron job update <job-uid> --expected-event-uid <event-uid> --file replacement.json --json
 kata cron job delete <job-uid> --expected-event-uid <event-uid> --json
 kata cron job restore <job-uid> --expected-event-uid <event-uid> --json
 kata cron capabilities --json
 kata cron run observe <run-uid> --json-input observation.json --json
-kata cron run list [--limit 100] [--before-uid <uid>] [--job-uid <job-uid>] --json
+kata cron run list [--all] [--limit 100] [--before-uid <uid>] [--job-uid <job-uid>] --json
+kata cron run list --all --status failed --since 24h --executor-label executor-a --json
 kata cron run show <run-uid> --json
 kata show <issue-ref> --planning-dates --json
 ```
+
+`--all` reads active authorized projects on the selected daemon; it ignores the
+workspace project binding and rejects `--project`. Run lists also accept
+repeatable `--status`, `--issue`, `--executor-label`, explicit `--teammate`, and
+`--since` (RFC 3339 or a positive Go duration). See
+[fleet reads](cron.md#cli-and-mcp-fleet-reads) for scope, paging and daemon compatibility.
 
 Recurring job create/update also accept `--parent <issue-ref>`; see
 [recurring child issues](cron.md#recurring-child-issues) for the request format.

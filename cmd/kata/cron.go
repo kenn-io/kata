@@ -70,6 +70,10 @@ type cronCLIOptions struct {
 	includeDeleted                   bool
 	limit                            int64
 	beforeUID, jobUID                string
+	allProjects                      bool
+	statuses                         []string
+	issue, executorLabel, since      string
+	runQuery                         db.CronRunList
 }
 
 func (o cronCLIOptions) mutation() bool   { return o.action != "list" && o.action != "show" }
@@ -115,7 +119,16 @@ func newCronOperationCmd(resource, action string) *cobra.Command {
 	if action == "list" && options.definition() {
 		command.Flags().BoolVar(&options.includeDeleted, "include-deleted", false, "include tombstoned definitions")
 	}
+	if action == "list" && (resource == "run" || resource == "job") {
+		command.Flags().BoolVar(&options.allProjects, "all", false, "list across all non-archived projects")
+	}
 	if resource == "run" && action == "list" {
+		command.Flags().StringArrayVar(&options.statuses, "status", nil, "run status (repeatable: running, succeeded, failed, cancelled, unknown)")
+		command.Flags().StringVar(&options.issue, "issue", "", "issue ref or UID; use a qualified ref or full UID with --all")
+		command.Flags().StringVar(&options.executorLabel, "executor-label", "", "exact runtime label")
+		command.Flags().StringVar(&options.since, "since", "", "inclusive recording time: RFC3339 instant or positive Go duration, such as 24h")
+		command.Long += "\nAll filters apply before paging. Explicit --teammate filters runs; KATA_TEAMMATE does not. --all ignores the workspace project."
+
 		command.Flags().Int64Var(&options.limit, "limit", 100, "maximum results in one page (1-100)")
 		command.Flags().StringVar(&options.beforeUID, "before-uid", "", "run UID cursor from next_before_uid")
 		command.Flags().StringVar(&options.jobUID, "job-uid", "", "list only runs of this job")
@@ -215,6 +228,9 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 	if o.limit < 1 || o.limit > 100 {
 		return cronCLIValidation("limit must be between 1 and 100")
 	}
+	if err := o.prepareFleetFilters(cmd); err != nil {
+		return err
+	}
 	var body []byte
 	if o.mutation() {
 		var err error
@@ -238,16 +254,28 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
+	if o.allProjects {
+		if err := requireDaemonAPIVersion(daemon.ctx, daemon.client, daemon.baseURL, "0.39.0", "cross-project cron reads"); err != nil {
+			return err
+		}
+	}
 	var project projectRef
-	if o.parent != "" {
-		project, body, err = o.applyParent(cmd, daemon, body)
-	} else if strings.TrimSpace(flags.Project) != "" {
-		project, err = resolveProjectSelectorIncludingArchived(daemon, flags.Project)
-	} else {
-		project, err = resolveProjectArgFlagOrWorkspace(daemon, nil)
+	if !o.allProjects {
+		if o.parent != "" {
+			project, body, err = o.applyParent(cmd, daemon, body)
+		} else if strings.TrimSpace(flags.Project) != "" {
+			project, err = resolveProjectSelectorIncludingArchived(daemon, flags.Project)
+		} else {
+			project, err = resolveProjectArgFlagOrWorkspace(daemon, nil)
+		}
 	}
 	if err != nil {
 		return err
+	}
+	if o.resource == "run" && o.action == "list" {
+		if err := o.resolveFleetIssue(daemon.ctx, cmd, daemon, project); err != nil {
+			return err
+		}
 	}
 	mutationClient := daemon.client
 	if o.mutation() {
@@ -602,6 +630,13 @@ func (o cronCLIOptions) call(a daemonAPI, c *kataclient.Client, projectID int64,
 func (o cronCLIOptions) callRead(a daemonAPI, c *kataclient.Client, projectID int64) ([]byte, error) {
 	switch {
 	case o.resource == "job" && o.action == "list":
+		if o.allProjects {
+			response, err := c.ListAllCronJobsWithResponse(a.ctx, &generated.ListAllCronJobsRequestOptions{Query: &generated.ListAllCronJobsQuery{IncludeDeleted: &o.includeDeleted}})
+			if response == nil {
+				return nil, externalCLITransportError(response, err)
+			}
+			return cronCLIResponse(response.StatusCode, response.Body, err)
+		}
 		response, err := c.ListCronJobsWithResponse(a.ctx, &generated.ListCronJobsRequestOptions{PathParams: &generated.ListCronJobsPath{ProjectID: projectID}, Query: &generated.ListCronJobsQuery{IncludeDeleted: &o.includeDeleted}})
 		if response == nil {
 			return nil, externalCLITransportError(response, err)
@@ -626,11 +661,7 @@ func (o cronCLIOptions) callRead(a daemonAPI, c *kataclient.Client, projectID in
 		}
 		return cronCLIResponse(response.StatusCode, response.Body, err)
 	case o.resource == "run" && o.action == "list":
-		response, err := c.ListCronRunsWithResponse(a.ctx, &generated.ListCronRunsRequestOptions{PathParams: &generated.ListCronRunsPath{ProjectID: projectID}, Query: &generated.ListCronRunsQuery{Limit: &o.limit, BeforeUID: &o.beforeUID, JobUID: &o.jobUID}})
-		if response == nil {
-			return nil, externalCLITransportError(response, err)
-		}
-		return cronCLIResponse(response.StatusCode, response.Body, err)
+		return o.callRunList(a.ctx, c, projectID)
 	case o.resource == "run" && o.action == "show":
 		response, err := c.ShowCronRunWithResponse(a.ctx, &generated.ShowCronRunRequestOptions{PathParams: &generated.ShowCronRunPath{ProjectID: projectID, RunUID: o.identity}})
 		if response == nil {
