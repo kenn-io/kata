@@ -213,14 +213,14 @@ func (d *cronDoc) text(value string, target cronRef) {
 	}
 }
 func (d *cronDoc) field(label, value string) {
-	if value != "" {
-		pad := fmt.Sprintf("%-*s ", d.labelWidth, label+":")
+	if pad := fmt.Sprintf("%-*s ", d.labelWidth, label+":"); value != "" {
+		if len(pad) >= d.width { // No cell remains beside the label column: flow the label with the value.
+			pad, value = "", label+": "+value
+		}
 		v := cronDoc{width: d.width - len(pad)}
 		v.text(value, cronRef{})
-		kind := cronFieldLine
-		for _, line := range v.lines {
-			d.lines = append(d.lines, cronLine{text: pad + line.text, kind: kind})
-			pad, kind = strings.Repeat(" ", len(pad)), cronWrapLine
+		for i, kind := 0, cronFieldLine; i < len(v.lines); i, kind, pad = i+1, cronWrapLine, strings.Repeat(" ", len(pad)) {
+			d.lines = append(d.lines, cronLine{text: pad + v.lines[i].text, kind: kind})
 		}
 	}
 }
