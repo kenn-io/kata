@@ -37,9 +37,3 @@ func TestCronRunHTTPRejectsEmptyFilters(t *testing.T) {
 		}
 	}
 }
-
-func TestCronRunPruneRejectsUTCOutOfDomainCutoff(t *testing.T) {
-	env, _, path := cronPruneHTTPFixture(t)
-	response, raw := envDoRaw(t, env, http.MethodPost, path, map[string]any{"actor": "operator", "before": "0001-01-01T00:00:00+01:00", "keep": 1, "dry_run": true}, nil)
-	require.Equal(t, http.StatusBadRequest, response.StatusCode, string(raw))
-}

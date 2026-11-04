@@ -23,8 +23,20 @@ func checkCronTallyRootRefold(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	f := newCronTallyFixture(ctx, t, store)
 	f.seed(ctx, t, tallyLifecycleEntry(f, 3))
+	// Every generic store patch refuses the prefix even for no-op/null/mixed
+	// writes. Reserved tally state has dedicated product writers.
+	for _, patch := range []map[string]jsontext.Value{
+		{db.CronTallyPrefix + f.job.UID: []byte("null")},
+		{db.CronTallyPrefix + "bad": []byte("null"), "ordinary": []byte("2")},
+		{db.CronTallyPrefix: []byte("{}")},
+	} {
+		_, err := store.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{ProjectID: f.project.ID, Actor: "system", Patch: patch})
+		require.Error(t, err)
+	}
 	_, err := store.EnableProjectFederation(ctx, f.project.ID, "operator")
 	require.NoError(t, err)
+	// SQL deliberately isolates the projection overlay from event folding;
+	// otherwise a matching event could restore the tally and mask a lost overlay.
 	// Current root authority can differ from its retained baseline after an
 	// import/adoption/prune transaction. A baseline refresh is not a precondition
 	// for preserving it during either full or incremental materialization.

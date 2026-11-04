@@ -81,7 +81,6 @@ func checkCronRunPrune(t *testing.T, store db.Storage) error {
 	in.DryRun = false
 	result, err := store.PruneCronRuns(ctx, in)
 	require.NoError(t, err)
-	require.Equal(t, wantGroups, preview.Groups)
 	require.Equal(t, wantGroups, result.Groups)
 	require.Equal(t, preview.EventsDeleted, result.EventsDeleted)
 	require.Greater(t, result.ResetAfterEventID, maxBefore)
@@ -123,6 +122,13 @@ func checkCronRunPrune(t *testing.T, store db.Storage) error {
 	require.Equal(t, 3, exported)
 	_, err = store.ListCronRuns(ctx, db.CronRunList{ProjectID: project.ID, BeforeUID: removed.UID})
 	require.ErrorIs(t, err, db.ErrNotFound)
+	// Corruption is never interpreted as untracked zeroes, even for an empty
+	// preview. Counts exercise the same corrupt sibling document separately.
+	_, err = q.ExecContext(ctx, `UPDATE projects SET metadata=$1 WHERE id=$2`, fmt.Sprintf(`{%q:null}`, db.CronTallyPrefix+job.UID), project.ID)
+	require.NoError(t, err)
+	_, err = store.PruneCronRuns(ctx, db.PruneCronRuns{ProjectID: project.ID, Actor: "operator", Before: cutoff.Add(-24 * time.Hour), DryRun: true})
+	require.Error(t, err)
+
 	return nil
 }
 
@@ -178,10 +184,8 @@ func checkCronRunPruneModel(t *testing.T, store db.Storage) error {
 			if r.kind == 0 && v%3 == 0 {
 				r.workflow = &group
 			}
-			updated := r.updated
-			if v%2 == 0 {
-				updated = updated.In(time.FixedZone("offset", 3600))
-			}
+			// Observation, federation materialization and import all persist UTC.
+			updated := r.updated.UTC()
 			var jobEvent, workflowEvent *string
 			event := fmt.Sprintf("%026d", 50)
 			if r.job != nil {

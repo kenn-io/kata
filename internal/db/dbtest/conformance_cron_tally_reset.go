@@ -70,6 +70,8 @@ func oldPeerMetadata(t *testing.T, events []db.RemoteEvent) map[string]jsontext.
 
 // Contract: a root reset replaces the complete reserved namespace even on a
 // peer whose ordinary metadata fold still recursively merges object values.
+// SQL deliberately supplies divergent retained history and current inventory:
+// a matching update event could mask a missing authoritative reset overlay.
 func checkCronTallyResetInventory(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	for i, mode := range []string{"removed kind", "removed key", "empty inventory"} {
