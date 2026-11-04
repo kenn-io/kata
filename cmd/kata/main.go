@@ -194,11 +194,8 @@ func main() {
 				ExitCode: ExitInternal,
 			}
 			mode, _ := resolvedOutputModeForError(cmd, os.Args[1:])
-			if mode == outputAgent {
-				emitAgentError(os.Stderr, commandNameForError(cmd, os.Args[1:], runEEntered), err)
-			} else {
-				emitErrorForMode(os.Stderr, err, mode, runEEntered)
-			}
+			errorCommandName = commandNameForError(cmd, os.Args[1:], runEEntered)
+			emitErrorForMode(os.Stderr, err, mode, runEEntered)
 			os.Exit(ExitInternal)
 		}
 	}()
