@@ -6429,11 +6429,21 @@ components:
         input_tokens:
           format: int64
           type: integer
+        log_ref:
+          type: string
         message:
           type: string
         output_tokens:
           format: int64
           type: integer
+        reason:
+          type: string
+        steps:
+          items:
+            $ref: "#/components/schemas/SummaryStep"
+          type: array
+        usage:
+          $ref: "#/components/schemas/SummaryUsage"
         version:
           format: int64
           type: integer
@@ -6445,16 +6455,112 @@ components:
         input_tokens:
           format: int64
           type: integer
+        log_ref:
+          type: string
         message:
           type: string
         output_tokens:
           format: int64
           type: integer
+        reason:
+          type: string
+        steps:
+          items:
+            $ref: "#/components/schemas/SummaryStepResponse"
+          type: array
+        usage:
+          $ref: "#/components/schemas/SummaryUsageResponse"
         version:
           format: int64
           type: integer
       required:
         - version
+      type: object
+    SummaryStep:
+      additionalProperties: false
+      properties:
+        attempts:
+          format: int64
+          type: integer
+        ended_at:
+          type: string
+        exit_code:
+          format: int32
+          type: integer
+        key:
+          type: string
+        message:
+          type: string
+        reason:
+          type: string
+        started_at:
+          type: string
+        status:
+          type: string
+      required:
+        - key
+        - status
+      type: object
+    SummaryStepResponse:
+      properties:
+        attempts:
+          format: int64
+          type: integer
+        ended_at:
+          type: string
+        exit_code:
+          format: int32
+          type: integer
+        key:
+          type: string
+        message:
+          type: string
+        reason:
+          type: string
+        started_at:
+          type: string
+        status:
+          type: string
+      required:
+        - key
+        - status
+      type: object
+    SummaryUsage:
+      additionalProperties: false
+      properties:
+        cache_read_tokens:
+          format: int64
+          type: integer
+        cache_write_tokens:
+          format: int64
+          type: integer
+        cost_micros:
+          format: int64
+          type: integer
+        currency:
+          type: string
+        model:
+          type: string
+      required:
+        - model
+      type: object
+    SummaryUsageResponse:
+      properties:
+        cache_read_tokens:
+          format: int64
+          type: integer
+        cache_write_tokens:
+          format: int64
+          type: integer
+        cost_micros:
+          format: int64
+          type: integer
+        currency:
+          type: string
+        model:
+          type: string
+      required:
+        - model
       type: object
     Team:
       properties:
@@ -9159,6 +9265,10 @@ paths:
     get:
       operationId: offerRelayDeliveries
       parameters:
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true
@@ -9219,6 +9329,10 @@ paths:
     get:
       operationId: getRelayReset
       parameters:
+        - in: header
+          name: X-Kata-Event-Features
+          schema:
+            type: string
         - in: path
           name: project_id
           required: true

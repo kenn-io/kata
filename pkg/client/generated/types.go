@@ -6740,17 +6740,123 @@ func (s SkipFederationQuarantineRequestBody) Validate() error {
 }
 
 type Summary struct {
-	InputTokens  *int64  `json:"input_tokens,omitempty"`
-	Message      *string `json:"message,omitempty"`
-	OutputTokens *int64  `json:"output_tokens,omitempty"`
-	Version      int64   `json:"version"`
+	InputTokens  *int64        `json:"input_tokens,omitempty"`
+	LogRef       *string       `json:"log_ref,omitempty"`
+	Message      *string       `json:"message,omitempty"`
+	OutputTokens *int64        `json:"output_tokens,omitempty"`
+	Reason       *string       `json:"reason,omitempty"`
+	Steps        []SummaryStep `json:"steps,omitzero"`
+	Usage        *SummaryUsage `json:"usage,omitempty"`
+	Version      int64         `json:"version"`
+}
+
+func (s Summary) Validate() error {
+	var errors runtime.ValidationErrors
+	for i, item := range s.Steps {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Steps[%d]", i), err)
+			}
+		}
+	}
+	if s.Usage != nil {
+		if v, ok := any(s.Usage).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Usage", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
 
 type SummaryResponse struct {
-	InputTokens  *int64  `json:"input_tokens,omitempty"`
-	Message      *string `json:"message,omitempty"`
-	OutputTokens *int64  `json:"output_tokens,omitempty"`
-	Version      int64   `json:"version"`
+	InputTokens  *int64                `json:"input_tokens,omitempty"`
+	LogRef       *string               `json:"log_ref,omitempty"`
+	Message      *string               `json:"message,omitempty"`
+	OutputTokens *int64                `json:"output_tokens,omitempty"`
+	Reason       *string               `json:"reason,omitempty"`
+	Steps        []SummaryStepResponse `json:"steps,omitzero"`
+	Usage        *SummaryUsageResponse `json:"usage,omitempty"`
+	Version      int64                 `json:"version"`
+}
+
+func (s SummaryResponse) Validate() error {
+	var errors runtime.ValidationErrors
+	for i, item := range s.Steps {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Steps[%d]", i), err)
+			}
+		}
+	}
+	if s.Usage != nil {
+		if v, ok := any(s.Usage).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Usage", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type SummaryStep struct {
+	Attempts  *int64  `json:"attempts,omitempty"`
+	EndedAt   *string `json:"ended_at,omitempty"`
+	ExitCode  *int32  `json:"exit_code,omitempty"`
+	Key       string  `json:"key" validate:"required"`
+	Message   *string `json:"message,omitempty"`
+	Reason    *string `json:"reason,omitempty"`
+	StartedAt *string `json:"started_at,omitempty"`
+	Status    string  `json:"status" validate:"required"`
+}
+
+func (s SummaryStep) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(s))
+}
+
+type SummaryStepResponse struct {
+	Attempts  *int64  `json:"attempts,omitempty"`
+	EndedAt   *string `json:"ended_at,omitempty"`
+	ExitCode  *int32  `json:"exit_code,omitempty"`
+	Key       string  `json:"key" validate:"required"`
+	Message   *string `json:"message,omitempty"`
+	Reason    *string `json:"reason,omitempty"`
+	StartedAt *string `json:"started_at,omitempty"`
+	Status    string  `json:"status" validate:"required"`
+}
+
+func (s SummaryStepResponse) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(s))
+}
+
+type SummaryUsage struct {
+	CacheReadTokens  *int64  `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens *int64  `json:"cache_write_tokens,omitempty"`
+	CostMicros       *int64  `json:"cost_micros,omitempty"`
+	Currency         *string `json:"currency,omitempty"`
+	Model            string  `json:"model" validate:"required"`
+}
+
+func (s SummaryUsage) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(s))
+}
+
+type SummaryUsageResponse struct {
+	CacheReadTokens  *int64  `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens *int64  `json:"cache_write_tokens,omitempty"`
+	CostMicros       *int64  `json:"cost_micros,omitempty"`
+	Currency         *string `json:"currency,omitempty"`
+	Model            string  `json:"model" validate:"required"`
+}
+
+func (s SummaryUsageResponse) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(s))
 }
 
 type Team struct {
