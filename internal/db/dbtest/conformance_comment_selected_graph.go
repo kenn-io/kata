@@ -108,9 +108,7 @@ func checkSelectedCommentGraph(t *testing.T, store db.Storage) error {
 	}
 	originalTargetEvents := countTargetCommentEvents()
 	require.Equal(t, 1, originalTargetEvents)
-	var restoredUID string
 	for index, persistedUID := range []string{strings.ToLower(target.UID), strings.ToLower(target.UID[:13]) + target.UID[13:]} {
-		restoredUID = persistedUID
 		for _, record := range records {
 			if comment, ok := record.(*db.CommentExport); ok && comment.ID == target.ID {
 				comment.UID = persistedUID
@@ -156,38 +154,6 @@ func checkSelectedCommentGraph(t *testing.T, store db.Storage) error {
 		require.Equal(t, persistedUID, edited.UID)
 		require.Equal(t, "Updated imported finding", edited.Body)
 	}
-	_, err = store.EnableProjectFederation(ctx, project.ID, "worker")
-	require.NoError(t, err)
-	events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID, Limit: 1000})
-	require.NoError(t, err)
-	var federationSnapshot *db.Event
-	for i := range events {
-		if events[i].Type == "issue.snapshot" && events[i].IssueUID != nil && *events[i].IssueUID == other.UID {
-			federationSnapshot = &events[i]
-			break
-		}
-	}
-	require.NotNil(t, federationSnapshot)
-	var snapshotComments struct {
-		Comments []struct {
-			CommentUID         string  `json:"comment_uid"`
-			Teammate           string  `json:"teammate"`
-			AttributedTeammate *string `json:"attributed_teammate"`
-		} `json:"comments"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(federationSnapshot.Payload), &snapshotComments))
-	var foundSnapshotComment bool
-	for _, snapshotComment := range snapshotComments.Comments {
-		if !strings.EqualFold(snapshotComment.CommentUID, restoredUID) {
-			continue
-		}
-		foundSnapshotComment = true
-		require.Equal(t, "route", snapshotComment.Teammate)
-		require.NotNil(t, snapshotComment.AttributedTeammate)
-		require.Equal(t, "writer", *snapshotComment.AttributedTeammate)
-		break
-	}
-	require.True(t, foundSnapshotComment)
 	collider, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: other.ID, Author: "finder", Body: "Collision"})
 	require.NoError(t, err)
 	records, err = CollectImportRecords(ctx, store, db.ExportFilter{ProjectID: &project.ID, IncludeDeleted: true})
@@ -213,6 +179,38 @@ func checkSelectedCommentGraph(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: other.ID, FromProjectID: project.ID, ToProjectID: destination.ID, IfMatchRev: current.Revision, Actor: "worker"})
 	require.NoError(t, err)
+	_, err = store.EnableProjectFederation(ctx, destination.ID, "worker")
+	require.NoError(t, err)
+	events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: destination.ID, Limit: 1000})
+	require.NoError(t, err)
+	var federationSnapshot *db.Event
+	for i := range events {
+		if events[i].Type == "issue.snapshot" && events[i].IssueUID != nil && *events[i].IssueUID == other.UID {
+			federationSnapshot = &events[i]
+			break
+		}
+	}
+	require.NotNil(t, federationSnapshot)
+	var snapshotComments struct {
+		Comments []struct {
+			CommentUID         string  `json:"comment_uid"`
+			Teammate           string  `json:"teammate"`
+			AttributedTeammate *string `json:"attributed_teammate"`
+		} `json:"comments"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(federationSnapshot.Payload), &snapshotComments))
+	var foundSnapshotComment bool
+	for _, snapshotComment := range snapshotComments.Comments {
+		if !strings.EqualFold(snapshotComment.CommentUID, findingUID) {
+			continue
+		}
+		foundSnapshotComment = true
+		require.Equal(t, "route", snapshotComment.Teammate)
+		require.NotNil(t, snapshotComment.AttributedTeammate)
+		require.Equal(t, "writer", *snapshotComment.AttributedTeammate)
+		break
+	}
+	require.True(t, foundSnapshotComment)
 	graph, err = store.ReadCommentGraph(ctx, db.CommentGraphQuery{ProjectID: project.ID, SelectedIssueID: root.ID})
 	require.NoError(t, err)
 	require.Equal(t, "moved", graph.Targets[findingUID].Status)

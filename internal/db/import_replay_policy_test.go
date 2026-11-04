@@ -1,6 +1,7 @@
 package db_test
 
 import (
+	"encoding/json/jsontext"
 	"strings"
 	"testing"
 	"time"
@@ -59,6 +60,20 @@ func TestValidateImportRecordsRejectsMalformed(t *testing.T) {
 				"the error must name the slice ordinal")
 		})
 	}
+}
+
+func TestValidateImportRecordsAcceptsLegacyCommentEventPayload(t *testing.T) {
+	payload := jsontext.Value(`{"comment_id":42}`)
+	contentHash := strings.Repeat("a", 64)
+	record := &db.EventExport{
+		UID:         "legacy-event",
+		Type:        "issue.commented",
+		Payload:     payload,
+		ContentHash: contentHash,
+	}
+	require.NoError(t, db.ValidateImportRecords([]db.ImportRecord{record}))
+	require.Equal(t, payload, record.Payload, "import validation must not rewrite the historical event payload")
+	require.Equal(t, contentHash, record.ContentHash, "import validation must leave the historical content hash untouched")
 }
 
 func TestValidateImportRecordsAcceptsEveryPayloadType(t *testing.T) {

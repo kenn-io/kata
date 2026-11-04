@@ -151,10 +151,12 @@ func TestFederationCommentUIDRequired(t *testing.T) {
 		payload string
 	}{
 		{kind: "issue.commented", payload: `{"body":"orphan comment"}`},
+		{kind: "issue.commented", payload: `{"comment_id":42}`},
 		{kind: "issue.commented", payload: `{"comment_uid":"","body":"orphan comment"}`},
 		{kind: "issue.comment_edited", payload: `{"body":"orphan edit"}`},
 		{kind: "issue.comment_edited", payload: `{"comment_uid":"","body":"orphan edit"}`},
 		{kind: "issue.created", payload: `{"uid":"issue-1","comments":[{"body":"orphan comment"}]}`},
+		{kind: "issue.snapshot", payload: `{"uid":"issue-1","comments":[{"comment_id":42}]}`},
 		{kind: "issue.snapshot", payload: `{"uid":"issue-1","comments":[{"comment_uid":"","body":"orphan comment"}]}`},
 	} {
 		t.Run(test.kind+test.payload, func(t *testing.T) {

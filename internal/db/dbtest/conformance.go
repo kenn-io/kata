@@ -83,6 +83,7 @@ var storageScenarios = []scenario{
 	{name: "comment graph deleted source", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "IssueByID", "MoveIssueProject", "ReadCommentGraph", "SoftDeleteIssue"}, run: checkCommentGraphDeletedSource},
 	{name: "selected comment graph", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "EditComment", "ImportReplay", "IssueByID", "MoveIssueProject", "ReadCommentGraph", "SoftDeleteIssue"}, run: checkSelectedCommentGraph},
 	{name: "selected comment graph canonical identity", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "ReadCommentGraph"}, runWithBackend: checkSelectedCommentGraphCanonicalIdentity},
+	{name: "case variant backlink handle collision", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "ReadCommentGraph"}, runWithBackend: checkCaseVariantBacklinkHandleCollision},
 	{name: "duplicate reply canonical identity", methods: []string{"CreateComment", "CreateIssue", "CreateProject"}, runWithBackend: checkCanonicalDuplicateReplyAfterNormalization},
 	{name: "comment edit canonical identity", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "EditComment"}, runWithBackend: checkCommentEditCanonicalIdentity},
 	{name: "comment idempotency canonical identity", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "LookupCommentIdempotency"}, runWithBackend: checkCanonicalCommentIdempotencyAfterNormalization},

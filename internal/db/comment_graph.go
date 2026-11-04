@@ -175,7 +175,7 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(st
 		return data, err
 	}
 	if query.SelectedIssueID > 0 && len(data.Comments) > 0 {
-		uids, err := readCommentGraphUIDs(ctx, tx, where, args, query.SelectedIssueID, bind)
+		uids, err := readCommentGraphUIDs(ctx, tx, where, args, query.SelectedIssueID, bind, displayDialect)
 		if err != nil {
 			return data, err
 		}
@@ -218,7 +218,7 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(st
 			targetWhere := " WHERE i.project_id=" + bind(1) + " AND i.deleted_at IS NULL AND p.deleted_at IS NULL"
 			targetArgs := []any{target.ProjectID}
 			if _, loaded := data.CommentUIDsByProject[target.ProjectID]; !loaded {
-				uids, err := readCommentGraphUIDs(ctx, tx, targetWhere, targetArgs, query.SelectedIssueID, bind)
+				uids, err := readCommentGraphUIDs(ctx, tx, targetWhere, targetArgs, query.SelectedIssueID, bind, displayDialect)
 				if err != nil {
 					return data, err
 				}
@@ -376,7 +376,7 @@ func findCommentGraphTargetStatus(ctx context.Context, tx *sql.Tx, query string,
 	return matchStatus, matchProjectID, nil
 }
 
-func readCommentGraphUIDs(ctx context.Context, tx *sql.Tx, where string, args []any, selectedIssueID int64, bind func(int) string) ([]string, error) {
+func readCommentGraphUIDs(ctx context.Context, tx *sql.Tx, where string, args []any, selectedIssueID int64, bind func(int) string, displayDialect CommentDisplaySQLDialect) ([]string, error) {
 	from := commentGraphFrom
 	if selectedIssueID > 0 {
 		args = append(slices.Clone(args), selectedIssueID, selectedIssueID, selectedIssueID)
@@ -386,7 +386,7 @@ func readCommentGraphUIDs(ctx context.Context, tx *sql.Tx, where string, args []
 		where += ` AND i.id=c.issue_id AND p.id=i.project_id AND lower(substr(c.uid,21)) IN (
  SELECT lower(substr(uid,21)) FROM comments WHERE issue_id=` + bind(n-2) + `
  UNION SELECT lower(substr(reply_to_uid,21)) FROM comments WHERE issue_id=` + bind(n-1) + ` AND reply_to_uid IS NOT NULL
- UNION SELECT lower(substr(r.uid,21)) FROM comments s JOIN comments r ON r.reply_to_uid=s.uid WHERE s.issue_id=` + bind(n) + `)`
+ UNION SELECT lower(substr(r.uid,21)) FROM comments s JOIN comments r ON ` + CommentUIDEqualSQL("r.reply_to_uid", "s.uid", displayDialect) + ` WHERE s.issue_id=` + bind(n) + `)`
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT c.uid`+from+where, args...) // #nosec G202 -- Callers supply static predicates and bind every value.
 	if err != nil {

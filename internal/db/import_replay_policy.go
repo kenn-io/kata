@@ -2,6 +2,7 @@ package db
 
 import (
 	"encoding/hex"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -428,6 +429,13 @@ func validateImportRecord(record ImportRecord) error {
 				return err
 			}
 		}
+		legacyComment, err := validateLegacyImportCommentEvent(rec)
+		if err != nil {
+			return err
+		}
+		if legacyComment {
+			return nil
+		}
 		return ValidateFederationEntries(rec.Type, rec.UID, rec.Payload)
 	case *PurgeLogExport:
 		return requireImportPayload(rec, ImportKindPurgeLog)
@@ -438,6 +446,38 @@ func validateImportRecord(record ImportRecord) error {
 	default:
 		return fmt.Errorf("unknown record type %T", record)
 	}
+}
+
+// validateLegacyImportCommentEvent preserves the version-2 event shape used
+// by SQLite cutovers. Federation ingest still requires modern comment UIDs.
+func validateLegacyImportCommentEvent(event *EventExport) (bool, error) {
+	if event.Type != "issue.commented" {
+		return false, nil
+	}
+	var payload map[string]jsontext.Value
+	if err := json.Unmarshal(event.Payload, &payload); err != nil || payload == nil {
+		return false, nil
+	}
+	if _, modernIdentity := payload["comment_uid"]; modernIdentity {
+		return false, nil
+	}
+	rawID, hasLegacyID := payload["comment_id"]
+	if !hasLegacyID {
+		return false, nil
+	}
+	var commentID int64
+	if err := json.Unmarshal(rawID, &commentID); err != nil || commentID <= 0 {
+		return false, nil
+	}
+	for _, modernField := range []string{"reply_to_uid", "reply_kind", "edited_at"} {
+		if _, present := payload[modernField]; present {
+			return false, nil
+		}
+	}
+	if err := validateFederationTeammate(payload["teammate"], event.UID, event.Type); err != nil {
+		return true, err
+	}
+	return true, nil
 }
 
 // requireImportPayload rejects a typed-nil payload pointer, which satisfies

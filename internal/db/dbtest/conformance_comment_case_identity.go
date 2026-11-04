@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/teammate"
 	"hegel.dev/go/hegel"
@@ -138,6 +139,86 @@ func checkSelectedCommentGraphCanonicalIdentity(t *testing.T, store db.Storage, 
 		require.Contains(ht, byUID, canonical, "valid ULID case variants retain direct graph neighbors")
 		require.Equal(ht, caseVariant, byUID[reply.UID].ReplyToUID)
 	}, hegel.WithTestCases(64), hegel.WithDatabase(t.TempDir()))
+	return nil
+}
+
+func checkCaseVariantBacklinkHandleCollision(t *testing.T, store db.Storage, backend Backend) error {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	selected, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Selected issue", Author: "worker"})
+	require.NoError(t, err)
+	other, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Other issue", Author: "worker"})
+	require.NoError(t, err)
+	target, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: selected.ID, Author: "worker", Body: "Finding"})
+	require.NoError(t, err)
+	incoming, _, err := store.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: other.ID, Author: "reviewer", Body: "Reply", ReplyToUID: target.UID, ReplyKind: "reply",
+	})
+	require.NoError(t, err)
+	collision, _, err := store.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: other.ID, Author: "worker", Body: "Unrelated comment with a colliding suffix",
+	})
+	require.NoError(t, err)
+
+	targetUID := strings.Repeat("0", 20) + "BBBBBS"
+	incomingUID := strings.Repeat("1", 20) + "AAAAAA"
+	collisionUID := strings.Repeat("2", 20) + "AAAAAA"
+	updateCommentIdentityForTest(ctx, t, store, backend, "uid", targetUID, target.ID)
+	updateCommentIdentityForTest(ctx, t, store, backend, "uid", incomingUID, incoming.ID)
+	updateCommentIdentityForTest(ctx, t, store, backend, "uid", collisionUID, collision.ID)
+	updateCommentIdentityForTest(ctx, t, store, backend, "reply_to_uid", strings.ToLower(targetUID), incoming.ID)
+
+	graph, err := store.ReadCommentGraph(ctx, db.CommentGraphQuery{
+		ProjectID: project.ID, SelectedIssueID: selected.ID,
+	})
+	require.NoError(t, err)
+	handles := commentref.Handles(graph.CommentUIDsByProject[project.ID])
+	require.Contains(t, graph.CommentUIDsByProject[project.ID], incomingUID,
+		"the case-variant incoming reply contributes its suffix to project handle discovery")
+	require.Contains(t, graph.CommentUIDsByProject[project.ID], collisionUID,
+		"the unrelated colliding suffix must extend the advertised backlink")
+
+	records := make([]commentref.Record, 0, len(graph.Comments))
+	for _, row := range graph.Comments {
+		record := commentref.Record{
+			Comment: row.Comment, IssueUID: row.IssueUID, IssueShortID: row.IssueShortID,
+			ProjectUID: row.ProjectUID, ProjectID: row.ProjectID, ProjectName: row.ProjectName,
+		}
+		if suffix := handles[record.UID]; suffix != "" {
+			record.Handle = "c:" + suffix
+		}
+		records = append(records, record)
+	}
+	projected := commentref.Project(records, nil)
+	var backlink commentref.Link
+	for _, record := range projected {
+		if record.UID == targetUID {
+			require.Len(t, record.Backlinks, 1)
+			backlink = record.Backlinks[0]
+		}
+	}
+	require.NotEmpty(t, backlink.Handle)
+	ref, err := commentref.Parse(backlink.Handle)
+	require.NoError(t, err)
+	require.Greater(t, len(ref.Suffix), commentref.MinLength,
+		"the backlink suffix must exclude the unrelated comment sharing its first six characters")
+
+	lookup, err := store.ReadCommentGraph(ctx, db.CommentGraphQuery{
+		ProjectID: project.ID,
+		Reference: &db.CommentGraphReference{Suffix: ref.Suffix, IssueShortID: other.ShortID},
+	})
+	require.NoError(t, err)
+	lookupRecords := make([]commentref.Record, 0, len(lookup.Comments))
+	for _, row := range lookup.Comments {
+		lookupRecords = append(lookupRecords, commentref.Record{
+			Comment: row.Comment, IssueUID: row.IssueUID, IssueShortID: row.IssueShortID,
+			ProjectUID: row.ProjectUID, ProjectID: row.ProjectID, ProjectName: row.ProjectName,
+		})
+	}
+	resolved, err := commentref.Resolve(lookupRecords, selected.UID, backlink.Handle, project.Name)
+	require.NoError(t, err, "the advertised backlink must resolve without an ambiguous_comment error")
+	require.Equal(t, incomingUID, resolved.UID)
 	return nil
 }
 

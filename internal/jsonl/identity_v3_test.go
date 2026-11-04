@@ -63,6 +63,8 @@ func TestV2ToV3CutoverFillsIdentity(t *testing.T) {
 				"issue.commented payload not valid JSON after cutover: %s", payload)
 			assert.Equal(t, int64(42), p.CommentID,
 				"issue.commented comment_id did not survive cutover")
+			assert.Equal(t, `{"comment_id":42}`, payload,
+				"cutover must preserve the original historical event payload bytes")
 			seenComment = true
 		}
 		eventCount++
