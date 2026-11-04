@@ -14,10 +14,7 @@ func (d *Store) CreateRelayReset(ctx context.Context, bindingUID string, signer 
 	var result db.RelayResetCheckpoint
 	err := d.relayTxFilled(ctx, func(tx *sql.Tx, scan bool) error {
 		var err error
-		protocol := db.RelayResetProtocol{
-			Backend:     relayResetBackend{d: d, tx: tx, scanRelayHistory: scan},
-			InstanceUID: d.instanceUID,
-		}
+		protocol := db.RelayResetProtocol{Backend: relayResetBackend{d: d, tx: tx, scanRelayHistory: scan}, InstanceUID: d.instanceUID}
 		result, err = protocol.CreateReset(ctx, bindingUID, signer)
 		return err
 	})

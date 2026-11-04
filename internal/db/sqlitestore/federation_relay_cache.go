@@ -133,57 +133,36 @@ func (d *Store) relayHistoryNeedsResetCachedTx(
 			return false, err
 		}
 	}
-	if snapshot || !cached || entry.projectUID != projectUID || entry.after != after || entry.generation != generation || projectCursor < entry.cursor || entry.creations != creations && (entry.reset || entry.shortParents) {
-		if !scan {
-			return false, &relayHistoryCacheMiss{projectID: projectID, projectUID: projectUID, checkpoint: checkpoint}
-		}
-		if d.relayHistoryFullScanObserver != nil {
-			d.relayHistoryFullScanObserver()
-		}
-		var reset bool
-		var err error
-		if checkpoint == nil {
-			reset, err = relayHistoryNeedsResetTx(ctx, tx, projectID, projectUID)
-		} else {
-			reset, err = validateAfter(ctx, tx, projectID, after)
-		}
-		if err != nil {
-			return false, err
-		}
-		shortParents, err := relayHistoryResolvesShortParentAfterTx(ctx, tx, projectID, after)
-		if err != nil {
-			return false, err
-		}
-		cache.mu.Lock()
-		cache.entries[key] = relayHistoryValidationEntry{
-			projectUID:   projectUID,
-			generation:   generation,
-			creations:    creations,
-			shortParents: shortParents,
-			after:        after,
-			cursor:       projectCursor,
-			reset:        reset,
-		}
-		cache.mu.Unlock()
-		return reset, nil
-	}
-	if projectCursor == entry.cursor {
+	full := snapshot || !cached || entry.projectUID != projectUID || entry.after != after || entry.generation != generation || projectCursor < entry.cursor || entry.creations != creations && (entry.reset || entry.shortParents)
+	if !full && projectCursor == entry.cursor {
 		return entry.reset, nil
 	}
 	if !scan {
 		return false, &relayHistoryCacheMiss{projectID: projectID, projectUID: projectUID, checkpoint: checkpoint}
 	}
-	reset, err := validateAfter(ctx, tx, projectID, entry.cursor)
+	from := entry.cursor
+	if full {
+		if d.relayHistoryFullScanObserver != nil {
+			d.relayHistoryFullScanObserver()
+		}
+		entry, from = relayHistoryValidationEntry{projectUID: projectUID, after: after}, after
+	}
+	var reset bool
+	var err error
+	if full && checkpoint == nil {
+		reset, err = relayHistoryNeedsResetTx(ctx, tx, projectID, projectUID)
+	} else {
+		reset, err = validateAfter(ctx, tx, projectID, from)
+	}
 	if err != nil {
 		return false, err
 	}
-	shortParents, err := relayHistoryResolvesShortParentAfterTx(ctx, tx, projectID, entry.cursor)
+	shortParents, err := relayHistoryResolvesShortParentAfterTx(ctx, tx, projectID, from)
 	if err != nil {
 		return false, err
 	}
-	entry.creations = creations
+	entry.generation, entry.creations, entry.cursor = generation, creations, projectCursor
 	entry.shortParents = entry.shortParents || shortParents
-	entry.cursor = projectCursor
 	entry.reset = entry.reset || reset
 	cache.mu.Lock()
 	cache.entries[key] = entry

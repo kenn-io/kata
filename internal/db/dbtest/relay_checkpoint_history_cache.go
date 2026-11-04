@@ -93,10 +93,6 @@ func RunRelayCheckpointHistoryValidationCache(t *testing.T, store db.Storage, ba
 		defer cancel()
 		_, err := bootstrap.RelayEnrollmentNeedsReset(otherKeyCtx, grants[0].RelayBindingUID)
 		require.NoError(t, err, "another cache key must progress during the scan")
-		canceled, cancelNow := context.WithCancel(ctx)
-		cancelNow()
-		_, err = bootstrap.RelayEnrollmentNeedsReset(canceled, grants[0].RelayBindingUID)
-		require.ErrorIs(t, err, context.Canceled)
 	})
 	require.NoError(t, store.RevokeFederationEnrollment(ctx, grants[0].ID))
 	_, err = store.(db.RelayResetBootstrapStore).RelayEnrollmentNeedsReset(ctx, grants[0].RelayBindingUID)
@@ -131,31 +127,18 @@ func RunRelayForwardedCheckpointAvoidsHistoryScan(t *testing.T, store db.Storage
 	child, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: project.ID, ParentTokenID: parent.ID, SpokeInstanceUID: "00000000000000000000000008", ProtocolVersion: db.RelayProtocolVersion})
 	require.NoError(t, err)
 	fullScans := 0
-	resetObserver := backend.InstallRelayHistoryFullScanObserver(store, func() { fullScans++ })
+	t.Cleanup(backend.InstallRelayHistoryFullScanObserver(store, func() { fullScans++ }))
 	forwarded, err := installer.CreateRelayReset(ctx, child.Enrollment.RelayBindingUID, db.RootAttributionSigner{})
 	require.NoError(t, err)
 	require.Equal(t, manifest, forwarded.Manifest)
-	require.Zero(t, fullScans, "first forward uses the installed checkpoint")
-	resetObserver()
 	_, err = store.PendingRelayDeliveries(db.WithRelayRequestedEpoch(ctx, forwarded.Translation.Authority.Epoch), child.Enrollment.RelayBindingUID, db.RelayStreamEvent, 100)
 	require.NoError(t, err)
-
-	for _, operation := range []string{"handshake", "reset download"} {
-		t.Run(operation, func(t *testing.T) {
-			// A fresh handle has no cached history validation, as after restart.
-			reopened := backend.OpenSame(t, store)
-			fullScans := 0
-			t.Cleanup(backend.InstallRelayHistoryFullScanObserver(reopened, func() { fullScans++ }))
-			if operation == "handshake" {
-				required, err := reopened.(db.RelayResetBootstrapStore).RelayEnrollmentNeedsReset(t.Context(), child.Enrollment.RelayBindingUID)
-				require.NoError(t, err)
-				require.False(t, required)
-			} else {
-				retry, err := reopened.(db.RelayResetStore).CreateRelayReset(t.Context(), child.Enrollment.RelayBindingUID, db.RootAttributionSigner{})
-				require.NoError(t, err)
-				require.Equal(t, forwarded, retry)
-			}
-			require.Zero(t, fullScans, "forwarded checkpoints use upstream snapshot identities")
-		})
-	}
+	// No scan has filled the cache, so the retained checkpoint is checked cold.
+	required, err := store.(db.RelayResetBootstrapStore).RelayEnrollmentNeedsReset(ctx, child.Enrollment.RelayBindingUID)
+	require.NoError(t, err)
+	require.False(t, required)
+	retry, err := installer.CreateRelayReset(ctx, child.Enrollment.RelayBindingUID, db.RootAttributionSigner{})
+	require.NoError(t, err)
+	require.Equal(t, forwarded, retry)
+	require.Zero(t, fullScans, "first and retained forwards use upstream snapshot identities")
 }

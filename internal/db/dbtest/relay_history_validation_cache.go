@@ -161,9 +161,9 @@ func RunRelayEnrollmentHistoryValidationCache(t *testing.T, store db.Storage, ba
 	}, nil)
 	require.Equal(t, int64(2), scans, "a creation during the fill causes one final fenced scan")
 
-	reopened := backend.OpenSame(t, store)
-	requireWriteDuringRelayScan(t, reopened, backend, collision.ID, func() error {
-		_, err := reopened.(db.RelayResetBootstrapStore).RelayEnrollmentNeedsReset(ctx, grant.Enrollment.RelayBindingUID)
+	// The cold handle's entry predates the purge, so its next check fills.
+	requireWriteDuringRelayScan(t, cold, backend, collision.ID, func() error {
+		_, err := cold.(db.RelayResetBootstrapStore).RelayEnrollmentNeedsReset(ctx, grant.Enrollment.RelayBindingUID)
 		require.ErrorIs(t, err, db.ErrNotFound, "revocation during fill is checked by the second fenced attempt")
 		return nil
 	}, func() {
