@@ -130,6 +130,60 @@ func TestPollProjectEventsIssueScopedHistory(t *testing.T) {
 	require.NotContains(t, string(body), hidden.UID)
 }
 
+func TestPollProjectEventsIssuePayloadOnlyClose(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		for index, identityField := range []string{"issue_uid", "uid"} {
+			t.Run(identityField, func(t *testing.T) {
+				f := newProjectAccessFixture(t, store, identityField)
+				issue := f.visible
+				expiresAt := time.Now().UTC().Add(time.Hour)
+				_, _, err := store.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+					PlaintextToken: "history-token-" + identityField, Actor: "member", AdminActor: db.BootstrapActor,
+					Scope: &db.APITokenScope{
+						Kind: db.APITokenScopeIssueSubtree, ProjectUID: f.public.UID, RootIssueUID: issue.UID,
+					}, ExpiresAt: &expiresAt,
+				})
+				require.NoError(t, err)
+				_, closed, changed, err := store.CloseIssueWithEvents(t.Context(), issue.ID, "done", "member", "Closed before newer federated evidence.", nil)
+				require.NoError(t, err)
+				require.True(t, changed)
+				require.Len(t, closed, 1)
+				remote := db.RemoteEvent{
+					EventUID: fmt.Sprintf("%026d", index+1), OriginInstanceUID: "7ZZZZZZZZZZZZZZZZZZZZZZZZZ",
+					ProjectUID: f.public.UID, ProjectName: f.public.Name,
+					Type: "issue.closed", Actor: "member", HLCPhysicalMS: closed[0].HLCPhysicalMS + 1,
+					Payload:   jsontext.Value(fmt.Sprintf(`{"%s":%q,"reason":"done","evidence":[{"type":"commit","sha":"0123456789abcdef0123456789abcdef01234567"}]}`, identityField, issue.UID)),
+					CreatedAt: closed[0].CreatedAt,
+				}
+				remote.ContentHash, err = db.RemoteEventContentHash(remote)
+				require.NoError(t, err)
+				inserted, err := store.InsertRemoteEvent(t.Context(), f.public.ID, remote)
+				require.NoError(t, err)
+				require.True(t, inserted)
+
+				path := fmt.Sprintf("%s?issue=%s&include_effective_close_event_uid=true", scopedProjectPath(f.public.ID, "events"), issue.UID)
+				for _, token := range []string{"member-" + identityField + "-test-token", "history-token-" + identityField} {
+					status, _, body := f.request(t, http.MethodGet, path, "", nil, map[string]string{"Authorization": "Bearer " + token})
+					require.Equal(t, http.StatusOK, status, string(body))
+					var page api.PollEventsBody
+					require.NoError(t, json.Unmarshal(body, &page))
+					require.Equal(t, remote.EventUID, page.EffectiveCloseEventUID, string(body))
+					var selected *api.EventEnvelope
+					for i := range page.Events {
+						if page.Events[i].EventUID == remote.EventUID {
+							selected = &page.Events[i]
+						}
+					}
+					require.NotNil(t, selected, "the selected close must be returned in issue history")
+					require.NotNil(t, selected.IssueUID)
+					require.Equal(t, issue.UID, *selected.IssueUID)
+					require.Contains(t, string(selected.Payload), "0123456789abcdef0123456789abcdef01234567")
+				}
+			})
+		}
+	})
+}
+
 func TestPollProjectEventsIssueReturnsEffectiveCloseEvent(t *testing.T) {
 	t.Run("federated tie keeps origin identity private", func(t *testing.T) {
 		env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
