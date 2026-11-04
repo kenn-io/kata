@@ -635,7 +635,7 @@ migration, backup, runtime grants, and rollback requirements.
 
 ### Run retention
 
-On newer main builds, the owning hub operator can preview and prune old
+The owning hub operator can preview and prune old
 terminal run evidence. Retention is manual; Kata does not prune automatically.
 Export history first if you need an archive:
 
@@ -686,7 +686,7 @@ database growth or distinct lifetime counts.
 
 ### Retained and pruned counts
 
-On newer main builds, read current run counts and recorded pruning separately:
+Read current run counts and recorded pruning separately:
 
 ```sh
 kata cron run counts
