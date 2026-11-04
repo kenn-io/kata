@@ -924,7 +924,8 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 			}
 			return next, cmd, true
 		}
-		if m.keymap.Undo.matches(msg) && (m.view == viewList || m.view == viewDetail || m.view == viewAttention) {
+		if m.keymap.Undo.matches(msg) && (m.view == viewList || m.view == viewDetail ||
+			(m.view == viewAttention && len(m.undoHistory.entries) > 0 && m.undoHistory.entries[len(m.undoHistory.entries)-1].kind == "delete")) {
 			next, cmd := m.startUndo()
 			return next, cmd, true
 		}

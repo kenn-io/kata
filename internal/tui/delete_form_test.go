@@ -415,6 +415,30 @@ func TestUndoDeleteReloadsAttention(t *testing.T) {
 	h.m = drainInboxCmds(next.(Model), cmd)
 	require.Len(t, h.m.attention.rows, 1, "undo reloads Attention without waiting for an event")
 	assert.Equal(t, target.UID, h.m.attention.rows[0].issue.UID)
+
+	next, cmd = h.m.Update(h.enter()())
+	h.m = drainInboxCmds(next.(Model), cmd)
+	require.Equal(t, viewDetail, h.m.view)
+	edited, err := h.client.EditBody(t.Context(), h.project.ID, target.UID, "Updated body", "alice")
+	require.NoError(t, err)
+	next, cmd = h.m.Update(mutationDoneMsg{kind: "body.edit", resp: edited})
+	h.m = drainInboxCmds(next.(Model), cmd)
+	require.Len(t, h.m.undoHistory.entries, 1)
+	require.Equal(t, "body.edit", h.m.undoHistory.entries[0].kind)
+	h.m, cmd = h.m.transitionToAttention()
+	h.m = drainInboxCmds(h.m, cmd)
+	require.Equal(t, viewAttention, h.m.view)
+
+	cmd = h.key(runeKey('u'))
+	if cmd != nil {
+		next, follow := h.m.Update(cmd())
+		h.m = drainInboxCmds(next.(Model), follow)
+	}
+	current, err := h.env.DB.IssueByUID(t.Context(), target.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	assert.Equal(t, "Updated body", current.Body, "Attention must leave ordinary edits unchanged")
+	assert.Nil(t, cmd, "Attention ignores undo when the latest entry is an edit")
+	assert.Len(t, h.m.undoHistory.entries, 1)
 }
 
 func TestDeleteConfirmationResolvesDetailProject(t *testing.T) {
