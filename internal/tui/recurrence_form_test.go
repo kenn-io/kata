@@ -7,11 +7,13 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 	"go.kenn.io/kata/pkg/client/generated"
 	"go.kenn.io/kit/tui/splitlayout"
@@ -186,6 +188,100 @@ func TestRecurrenceFormStartsAndChangesARecurrence(t *testing.T) {
 	assert.Equal(t, "FREQ=DAILY", changed[0].RRule)
 	h.refreshDetail()
 	assert.Contains(t, h.page(), "repeats:")
+}
+
+func TestRecurrenceFormBlankRuleStops(t *testing.T) {
+	for _, conflict := range []bool{false, true} {
+		t.Run(strconv.FormatBool(conflict), func(t *testing.T) {
+			h := newRecurrenceHarness(t, viewDetail)
+			current := h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
+			h.open()
+			assert.Contains(t, h.page(), "blank rule stops repeating")
+			if conflict {
+				_, err := recurrenceclient.Change(t.Context(), h.api, h.issue.ProjectID, current,
+					recurrenceclient.Terms{Rule: "FREQ=DAILY", Start: "2026-11-09", Zone: "Europe/Paris", Actor: "bob"})
+				require.NoError(t, err)
+			}
+			h.fill("", "", "Local") // Stopping needs neither a date nor a zone.
+			cmd := h.key(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+			require.NotNil(t, cmd)
+			h.send(cmd)
+			if conflict {
+				assert.Equal(t, inputRecurrenceForm, h.m.input.kind)
+				assert.Contains(t, h.m.input.err, "Could not stop repeat:")
+				assert.Len(t, h.rows(), 1)
+				return
+			}
+			assert.Equal(t, inputNone, h.m.input.kind)
+			assert.Equal(t, "stopped repeat of #"+h.issue.ShortID, h.m.detail.status)
+			assert.Empty(t, h.rows())
+			issue, err := h.env.DB.IssueByUID(t.Context(), h.issue.UID, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			assert.Equal(t, h.issue.Title, issue.Title, "the existing occurrence stays")
+			assert.NotNil(t, issue.RecurrenceID)
+		})
+	}
+}
+
+func TestRecurrenceFormBlankRuleRequiresExistingRecurrence(t *testing.T) {
+	h := newRecurrenceHarness(t, viewDetail)
+	h.open()
+	h.fill("", "2026-11-09", "Europe/Paris")
+	h.save()
+	assert.Equal(t, inputRecurrenceForm, h.m.input.kind)
+	assert.NotEmpty(t, h.m.input.err)
+	assert.Empty(t, h.rows())
+}
+
+func TestRecurrenceKeyIsDetailOnly(t *testing.T) {
+	for _, split := range []bool{false, true} {
+		t.Run(strconv.FormatBool(split), func(t *testing.T) {
+			h := newRecurrenceHarness(t, viewList)
+			if split {
+				h.m.layout, h.m.focus = splitlayout.Split, focusList
+			}
+			_, _, handled := h.m.routeRecurrenceKey(runeKey('O'))
+			assert.False(t, handled)
+			_, mutation := h.m.mutationForKey(runeKey('O'))
+			assert.False(t, mutation)
+			h.m.authCapabilitiesRequired, h.m.authCapabilitiesReady = true, false
+			_, _, handled = h.m.routeTopLevel(runeKey('O'))
+			assert.False(t, handled)
+			h.key(runeKey('O'))
+			assert.Equal(t, inputNone, h.m.input.kind)
+			assert.Nil(t, h.m.toast)
+			for _, row := range h.m.helpRows() {
+				for _, item := range row {
+					assert.NotEqual(t, "O", item.Key)
+				}
+			}
+		})
+	}
+}
+
+func TestRecurrenceKeyRefusesMissingRecurrence(t *testing.T) {
+	for _, stopped := range []bool{false, true} {
+		t.Run(strconv.FormatBool(stopped), func(t *testing.T) {
+			h := newRecurrenceHarness(t, viewDetail)
+			current := h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
+			if stopped {
+				require.NoError(t, recurrenceclient.Stop(t.Context(), h.api, h.issue.ProjectID, current, "bob"))
+				h.refreshDetail()
+			} else {
+				h.m.detail.recurrence = nil // The best-effort recurrence read returned no result.
+			}
+			require.NotNil(t, h.m.detail.issue.RecurrenceID)
+			cmd := h.key(runeKey('O'))
+			assert.NotNil(t, cmd)
+			assert.Equal(t, inputNone, h.m.input.kind)
+			require.NotNil(t, h.m.toast)
+			assert.Equal(t, "Can't read this issue's repeat; it may have been stopped", h.m.toast.text)
+			h.m.toastNow = func() time.Time { return datesNow.Add(4 * time.Second) }
+			out, _ := h.m.Update(toastExpiredMsg{})
+			h.m = out.(Model)
+			assert.Nil(t, h.m.toast)
+		})
+	}
 }
 
 func TestRecurrenceFormRefusesAndKeepsTheInput(t *testing.T) {

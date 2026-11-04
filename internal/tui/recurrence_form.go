@@ -17,13 +17,10 @@ import (
 )
 
 // recurrenceFormState is what a Repeat form needs beyond its fields: the
-// revision of the issue and the recurrence it read, and the values it was
-// opened with (a form left alone writes nothing).
+// revision of the issue and the recurrence it read.
 type recurrenceFormState struct {
 	issueRevision int64
 	rec           *recurrenceclient.View
-	// rule, start and zone are the values the form was opened with.
-	rule, start, zone string
 }
 
 func newRecurrenceForm(target formTarget, issue Issue, rec *recurrenceclient.View) inputState {
@@ -57,21 +54,22 @@ func newRecurrenceForm(target formTarget, issue Issue, rec *recurrenceclient.Vie
 // revisions a save is guarded on are the ones just read.
 func (s inputState) loadRecurrence(issue Issue, rec *recurrenceclient.View) inputState {
 	state := recurrenceFormState{issueRevision: issue.Revision, rec: rec}
+	var rule, start, zone string
 	if rec != nil {
-		state.rule, state.start, state.zone = rec.RRule, rec.DTStart, rec.Timezone
+		rule, start, zone = rec.RRule, rec.DTStart, rec.Timezone
 	} else {
-		state.start = cmp.Or(issue.ScheduledOnDate, issue.scheduledOn())
-		state.zone, _ = recurrenceclient.ResolveZone("", "", issue.timezone(), localZone)
+		start = cmp.Or(issue.ScheduledOnDate, issue.scheduledOn())
+		zone, _ = recurrenceclient.ResolveZone("", "", issue.timezone(), localZone)
 	}
 	s.recurrence, s.target.projectID = state, issue.ProjectID
 	for i := range s.fields {
 		switch s.fields[i].id {
 		case fieldRule:
-			s.fields[i].setValue(state.rule)
+			s.fields[i].setValue(rule)
 		case fieldStart:
-			s.fields[i].setValue(state.start)
+			s.fields[i].setValue(start)
 		case fieldZone:
-			s.fields[i].setValue(state.zone)
+			s.fields[i].setValue(zone)
 		}
 	}
 	return s
@@ -82,7 +80,14 @@ func (m Model) routeRecurrenceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 	if !m.detailIsActive() || m.detail.issue == nil {
-		return m, nil, true
+		return m, nil, false
+	}
+	if m.detail.issue.RecurrenceID != nil && m.detail.recurrence == nil {
+		m.toast = &toast{
+			text:  "Can't read this issue's repeat; it may have been stopped",
+			level: toastInfo, expiresAt: m.toastNow().Add(toastNoBindingTTL),
+		}
+		return m, toastExpireCmd(toastNoBindingTTL), true
 	}
 	target, _, ok := m.activeIssueTarget()
 	if !ok {
@@ -96,6 +101,11 @@ func (m Model) routeRecurrenceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 }
 
 func (m Model) commitRecurrenceForm() (Model, tea.Cmd) {
+	state := m.input.recurrence
+	rule, zone := m.input.fieldValue(fieldRule), m.input.fieldValue(fieldZone)
+	if state.rec != nil && strings.TrimSpace(rule) == "" {
+		return m.saveRecurrence(RecurrenceInput{Stop: true, Recurrence: state.rec, Actor: m.list.actor})
+	}
 	start, err := resolveDateInput(m.input.fieldValue(fieldStart), m.toastNow())
 	if err == nil && start == "" {
 		m.input.err = "Start is required."
@@ -105,9 +115,7 @@ func (m Model) commitRecurrenceForm() (Model, tea.Cmd) {
 		m.input.err = "Start must be YYYY-MM-DD, today, tomorrow, +Nd or +Nw."
 		return m, nil
 	}
-	state := m.input.recurrence
-	rule, zone := m.input.fieldValue(fieldRule), m.input.fieldValue(fieldZone)
-	if state.rec != nil && rule == state.rule && start == state.start && zone == state.zone {
+	if state.rec != nil && rule == state.rec.RRule && start == state.rec.DTStart && zone == state.rec.Timezone {
 		return m.cancelInput()
 	}
 	return m.saveRecurrence(RecurrenceInput{
@@ -126,6 +134,8 @@ func dispatchFormSaveRecurrence(apiClient any, target formTarget, in RecurrenceI
 	kind := "recurrence.change"
 	if in.Recurrence == nil {
 		kind = "recurrence.start"
+	} else if in.Stop {
+		kind = "recurrence.stop"
 	}
 	return func() tea.Msg {
 		writer, ok := apiClient.(recurrenceAPI)
@@ -165,6 +175,9 @@ func renderRecurrenceForm(s inputState, innerW, height int, now time.Time) strin
 		label := s.fields[idx].label
 		field := renderNewIssueField(s, idx, innerW-lipgloss.Width(label)-1)
 		parts = append(parts, strings.Replace(field, "\n", " ", 1))
+		if s.fields[idx].id == fieldRule && s.recurrence.rec != nil {
+			parts = append(parts, subtleStyle.Render("blank rule stops repeating"))
+		}
 		if s.fields[idx].id == fieldStart {
 			parts = append(parts, subtleStyle.Render(sanitizeForDisplay(datePreview(s.fields[idx].value(), now))))
 		}
