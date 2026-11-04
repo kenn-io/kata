@@ -293,9 +293,6 @@ func (d *Store) patchProjectMetadataTxReassert(ctx context.Context, tx *sql.Tx, 
 		return out, fmt.Errorf("apply patch: %w", err)
 	}
 
-	if err := db.ValidateCronTallyPatch(in.Patch, db.JSONBlob(newBlob)); err != nil {
-		return out, err
-	}
 	if _, changed := in.Patch[db.ProjectEmbeddingMetadataKey]; changed {
 		if _, err := db.ProjectEmbeddingProducerFromMetadata(db.JSONBlob(string(newBlob))); err != nil {
 			return out, fmt.Errorf("%w: invalid embedding producer configuration", metadata.ErrInvalidValue)

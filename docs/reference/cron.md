@@ -707,6 +707,16 @@ project or its authoritative hub; spokes and upstream-bound relays refuse
 both preview and deletion. JSON and agent modes return the same batch
 response. Human output shows one row per job or workflow.
 
+If the daemon returns HTTP 500 while refreshing the federation baseline,
+run deletion, tally accumulation, and the stream reset have already committed.
+Check `kata cron run counts` and preview the same prune window before retrying;
+a retry can delete another eligible batch. An empty retry does not refresh
+the baseline. Subsequent federation metadata reads refresh it lazily.
+
+The batch limit bounds deleted runs, not query work. Preview and deletion may
+scan all project runs and run events within a 30-second transaction deadline.
+A timeout rolls back the batch; reducing `--limit` may not avoid that scan.
+
 A pruned run returns 404, and a pruned `--before-uid` pagination cursor also
 returns 404; restart pagination from the first page. Re-observing a pruned
 UID with `expected_revision > 0` conflicts. Pruning retains no tombstone:

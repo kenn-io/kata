@@ -414,17 +414,25 @@ func checkCronRunTallyConcurrent(t *testing.T, store db.Storage) error {
 	return nil
 }
 
-// Contract: a key main allowed under the reserved prefix before tallies
-// existed stays opaque to ordinary project metadata writes.
+// Contract: ordinary project patches leave all stored tally state opaque,
+// including legacy custom keys and corrupt UID-shaped values. Tally consumers
+// (counts, prune, enable, replay and import) still validate that state; accepting
+// an unrelated patch does not make malformed tally state usable by them.
 func checkCronTallyLegacyMetadataPatch(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
-	f := newCronTallyFixture(ctx, t, store)
-	_, err := f.q.ExecContext(ctx, `UPDATE projects SET metadata=$1 WHERE id=$2`, `{"cron.tally.external":3}`, f.project.ID)
+	id, err := uid.New()
 	require.NoError(t, err)
-	out, err := store.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{ProjectID: f.project.ID, Actor: "operator", Patch: map[string]jsontext.Value{"area": jsontext.Value(`"ops"`)}})
+	project, err := store.CreateProject(ctx, "legacy-tally-"+id)
+	require.NoError(t, err)
+	q := store.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	})
+	_, err = q.ExecContext(ctx, `UPDATE projects SET metadata=$1 WHERE id=$2`, `{"cron.tally.external":3}`, project.ID)
+	require.NoError(t, err)
+	out, err := store.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{ProjectID: project.ID, Actor: "operator", Patch: map[string]jsontext.Value{"area": jsontext.Value(`"ops"`)}})
 	require.NoError(t, err)
 	require.True(t, out.Changed)
-	project, err := store.ProjectByID(ctx, f.project.ID)
+	project, err = store.ProjectByID(ctx, project.ID)
 	require.NoError(t, err)
 	var raw map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(project.Metadata), &raw))

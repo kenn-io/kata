@@ -73,7 +73,7 @@ var storageScenarios = []scenario{
 	{name: "cron tally live merge", run: checkCronTallyLiveMerge},
 	{name: "cron tally root refold", run: checkCronTallyRootRefold},
 	{name: "cron tally import and enable", runWithBackend: checkCronTallyImportAndEnable},
-	{name: "cron tally legacy metadata patch", methods: []string{"PatchProjectMetadata"}, run: checkCronTallyLegacyMetadataPatch},
+	{name: "cron tally legacy metadata patch", methods: []string{"CreateProject", "PatchProjectMetadata", "ProjectByID"}, run: checkCronTallyLegacyMetadataPatch},
 	{name: "setup finished delivery", methods: []string{"PrepareSetupFinished", "CompleteSetupFinished", "SystemProject", "CloseIssue", "SoftDeleteIssue", "RemoveProject"}, runWithBackend: checkSetupFinishedDelivery},
 	{name: "comment graph project access", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "MoveIssueProject", "ReadCommentGraph"}, run: checkCommentGraphProjectAccess},
 	{name: "recurring adoption snapshots", run: checkRecurringAdoptionSnapshots},

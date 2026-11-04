@@ -1,13 +1,11 @@
 package dbtest
 
 import (
-	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
-	"slices"
 	"testing"
 	"time"
 
@@ -16,64 +14,32 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
-// oldPeerMetadata deliberately models the pre-tally recursive object fold.
-// It does not call Kata's current fold/merge helpers: nested omitted members
-// survive unless an ordinary whole-key deletion precedes the replacement.
+// oldPeerMetadata reuses the ordinary metadata fold, which retains the
+// pre-tally project's recursive from/to semantics. Map project events to issue
+// metadata events so reserved tally keys receive no absolute-value override.
+// Values and clocks remain intact, including integer counts above 2^53.
 func oldPeerMetadata(t *testing.T, events []db.RemoteEvent) map[string]jsontext.Value {
 	t.Helper()
-	slices.SortFunc(events, func(a, b db.RemoteEvent) int {
-		for _, v := range []int{cmp.Compare(a.HLCPhysicalMS, b.HLCPhysicalMS), cmp.Compare(a.HLCCounter, b.HLCCounter), cmp.Compare(a.OriginInstanceUID, b.OriginInstanceUID), cmp.Compare(a.EventUID, b.EventUID)} {
-			if v != 0 {
-				return v
-			}
+	legacy := []db.FoldEvent{}
+	for _, event := range remoteEventsToFold(events) {
+		event.IssueUID = "legacy-project"
+		switch event.Type {
+		case "project.federation_enabled":
+			// Only metadata belongs in the synthetic issue baseline.
+			payload, err := json.Marshal(map[string]jsontext.Value{"metadata": db.PayloadMap(event.Payload)["metadata"]})
+			require.NoError(t, err)
+			event.Type, event.Payload = "issue.snapshot", payload
+		case "project.metadata_updated":
+			event.Type = "issue.metadata_updated"
+		default:
+			continue
 		}
-		return 0
-	})
-	current := map[string]jsontext.Value{}
-	var merge func(jsontext.Value, jsontext.Value) jsontext.Value
-	merge = func(previous, next jsontext.Value) jsontext.Value {
-		a, b := map[string]jsontext.Value{}, map[string]jsontext.Value{}
-		if json.Unmarshal(previous, &a) != nil || json.Unmarshal(next, &b) != nil || a == nil || b == nil {
-			return next
-		}
-		for k, v := range b {
-			if string(v) == "null" {
-				delete(a, k)
-			} else {
-				a[k] = merge(a[k], v)
-			}
-		}
-		raw, err := json.Marshal(a)
-		require.NoError(t, err)
-		return raw
+		legacy = append(legacy, event)
 	}
-	for _, event := range events {
-		if event.Type == "project.federation_enabled" {
-			var baseline struct {
-				Metadata map[string]jsontext.Value `json:"metadata"`
-			}
-			require.NoError(t, json.Unmarshal(event.Payload, &baseline))
-			if baseline.Metadata != nil {
-				current = baseline.Metadata
-			}
-			continue
-		}
-		if event.Type != "project.metadata_updated" {
-			continue
-		}
-		var payload struct {
-			Diff map[string]struct {
-				To jsontext.Value `json:"to"`
-			} `json:"diff"`
-		}
-		require.NoError(t, json.Unmarshal(event.Payload, &payload))
-		for key, change := range payload.Diff {
-			if string(change.To) == "null" {
-				delete(current, key)
-			} else {
-				current[key] = merge(current[key], change.To)
-			}
-		}
+	folded := db.FoldEvents(legacy)
+	current := map[string]jsontext.Value{}
+	if raw := folded.IssueMetadata["legacy-project"]; len(raw) > 0 {
+		require.NoError(t, json.Unmarshal(raw, &current))
 	}
 	return current
 }
@@ -83,6 +49,17 @@ func oldPeerMetadata(t *testing.T, events []db.RemoteEvent) map[string]jsontext.
 // SQL deliberately supplies divergent retained history and current inventory:
 // a matching update event could mask a missing authoritative reset overlay.
 func checkCronTallyResetInventory(t *testing.T, store db.Storage) error {
+	// The legacy fold applies from/to changes rather than overwriting unchanged
+	// nested fields. Compare the oracle with the ordinary metadata fold first.
+	ordinary := []db.RemoteEvent{
+		{ProjectUID: "example-project", Type: "project.federation_enabled", HLCPhysicalMS: 1, Payload: []byte(`{"metadata":{"profile":{"label":"root","count":1,"removed":true}}}`)},
+		{ProjectUID: "example-project", Type: "project.metadata_updated", HLCPhysicalMS: 2, Payload: []byte(`{"diff":{"profile":{"from":{"label":"old","count":1,"removed":true},"to":{"label":"old","count":2}}}}`)},
+	}
+	folded := db.FoldEvents(remoteEventsToFold(ordinary))
+	legacy, err := json.Marshal(oldPeerMetadata(t, ordinary))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"profile":{"label":"root","count":2}}`, string(folded.ProjectMetadata["example-project"]))
+	require.JSONEq(t, string(folded.ProjectMetadata["example-project"]), string(legacy))
 	ctx := t.Context()
 	for i, mode := range []string{"removed kind", "removed key", "empty inventory"} {
 		fixture := newRelayLinkBoundaryFixture(t, store, fmt.Sprintf("tally-reset-%d", i))

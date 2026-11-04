@@ -174,9 +174,6 @@ func parseMetadataPatchGuard(
 
 func patchProjectMetadataHandler(cfg ServerConfig) func(context.Context, *api.PatchProjectMetadataRequest) (*api.PatchProjectMetadataResponse, error) {
 	return func(ctx context.Context, in *api.PatchProjectMetadataRequest) (*api.PatchProjectMetadataResponse, error) {
-		if err := db.RejectCronTallyPatch(in.Body.Patch); err != nil {
-			return nil, api.NewError(http.StatusBadRequest, "invalid_metadata_value", err.Error(), "", nil)
-		}
 		actor, err := attributedActor(ctx, in.Body.Actor)
 		if err != nil {
 			return nil, err

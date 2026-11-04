@@ -31,16 +31,20 @@ func (s recordingProjectMetadataStore) PatchProjectMetadata(ctx context.Context,
 	return s.Storage.PatchProjectMetadata(ctx, in)
 }
 
-func TestPatchProjectMetadataRejectsCronTalliesBeforeStore(t *testing.T) {
+func TestPatchProjectMetadataRejectsCronTalliesThroughStore(t *testing.T) {
 	var calls atomic.Int64
 	env := testenv.New(t, testenv.WithAuthToken("tok"), func(cfg *daemon.ServerConfig) {
 		cfg.DB = recordingProjectMetadataStore{cfg.DB, &calls}
 	})
 	project := seedProject(t, env, "example-project")
-	for _, patch := range []string{`{"cron.tally.bad":null}`, `{"cron.tally.":null,"ordinary":1}`} {
+	for i, patch := range []string{`{"cron.tally.bad":null}`, `{"cron.tally.":null,"ordinary":1}`} {
 		resp, raw := envDoRaw(t, env, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/metadata", project.ID), json.RawMessage(`{"actor":"operator","patch":`+patch+`}`), map[string]string{"Authorization": "Bearer tok"})
 		require.Equalf(t, http.StatusBadRequest, resp.StatusCode, "body: %s", raw)
-		require.Zero(t, calls.Load(), "reserved patches must be rejected before the store call")
+		require.Equal(t, int64(i+1), calls.Load(), "the store owns reserved-prefix validation")
+		current, err := env.DB.ProjectByID(t.Context(), project.ID)
+		require.NoError(t, err)
+		require.Equal(t, project.Metadata, current.Metadata)
+		require.Equal(t, project.Revision, current.Revision)
 	}
 }
 
