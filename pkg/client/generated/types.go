@@ -4628,9 +4628,12 @@ type NotifyIssueRequestBody struct {
 	Broadcast *bool   `json:"broadcast,omitempty"`
 	Message   string  `json:"message" validate:"required"`
 	Re        *string `json:"re,omitempty"`
-	Teammate  *string `json:"teammate,omitempty"`
-	Teammates *bool   `json:"teammates,omitempty"`
-	To        *string `json:"to,omitempty"`
+
+	// ScheduledOn Set the issue schedule atomically with the request; accepts the same dates as kata schedule.
+	ScheduledOn *string `json:"scheduled_on,omitempty"`
+	Teammate    *string `json:"teammate,omitempty"`
+	Teammates   *bool   `json:"teammates,omitempty"`
+	To          *string `json:"to,omitempty"`
 }
 
 func (n NotifyIssueRequestBody) Validate() error {
@@ -4638,10 +4641,11 @@ func (n NotifyIssueRequestBody) Validate() error {
 }
 
 type NotifyIssueResponseBody struct {
-	Changed    bool     `json:"changed"`
-	Event      *Event   `json:"event,omitempty"`
-	Issue      Issue    `json:"issue"`
-	Recipients []string `json:"recipients" validate:"required"`
+	Changed     bool     `json:"changed"`
+	Event       *Event   `json:"event,omitempty"`
+	Issue       Issue    `json:"issue"`
+	Recipients  []string `json:"recipients" validate:"required"`
+	ScheduledOn *string  `json:"scheduled_on,omitempty"`
 }
 
 func (n NotifyIssueResponseBody) Validate() error {
