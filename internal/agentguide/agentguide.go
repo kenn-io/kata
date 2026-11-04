@@ -5,7 +5,8 @@ import "strings"
 
 // Contract is the marker-free agent workflow contract.
 const Contract = "Kata is the system of record for intent.\n\n" +
-	"- Never `kata delete` or `kata purge` without explicit user authorization.\n\n" +
+	"- Never `kata delete` or `kata purge` without explicit user authorization.\n" +
+	"- Never run `kata cron run prune --force` without explicit user authorization.\n\n" +
 	`~~~dot
 digraph kata {
   rankdir=TB; node [shape=box];
@@ -325,7 +326,8 @@ const fragMutationComments = `10. To leave context alongside a mutation, pass --
 `
 
 const fragDestructive = `11. Do not run delete or purge unless the user explicitly asks for that exact
-   destructive action and issue ref.
+   destructive action and issue ref. Never run kata cron run prune --force
+   without explicit user authorization for the project.
 
 `
 

@@ -1,7 +1,7 @@
 ---
 title: Metadata
 description: Reference Kata's issue and project metadata model, reserved keys, scheduling fields, and update rules.
-last_edited: 2026-11-02
+last_edited: 2026-11-04
 ---
 
 # Metadata
@@ -54,6 +54,11 @@ rejected. Everything else is stored verbatim.
 | `checklist` | Issue | Checklist structure |
 | `timezone` | Issue | IANA timezone name |
 | `area` | Project | String |
+| `cron.tally.<group_uid>` | Project | Version-1 absolute run-pruning tally |
+
+`cron.tally.` is reserved for daemon-managed pruning totals. Generic project
+metadata PATCH requests cannot set or remove these keys. Read recorded totals
+with `kata cron run counts`; see [Retained and pruned counts](cron.md#retained-and-pruned-counts).
 
 A date-only `scheduled_on` value becomes ready on that calendar day. A local
 date-time (`YYYY-MM-DDTHH:MM` or `YYYY-MM-DDTHH:MM:SS`) becomes ready at that

@@ -12,8 +12,8 @@ type PruneCronRunsBody struct {
 	Before      time.Time `json:"before"`
 	Keep        int       `json:"keep,omitempty" default:"10" minimum:"1" maximum:"1000"`
 	Limit       int       `json:"limit,omitempty" default:"5000" minimum:"1" maximum:"20000"`
-	JobUID      string    `json:"job_uid,omitempty"`
-	WorkflowUID string    `json:"workflow_uid,omitempty"`
+	JobUID      string    `json:"job_uid,omitempty" minLength:"26" maxLength:"26"`
+	WorkflowUID string    `json:"workflow_uid,omitempty" minLength:"26" maxLength:"26"`
 	DryRun      bool      `json:"dry_run"`
 }
 
