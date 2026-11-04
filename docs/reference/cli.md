@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 # CLI reference
@@ -2251,7 +2251,7 @@ kata cron job delete <job-uid> --expected-event-uid <event-uid> --json
 kata cron job restore <job-uid> --expected-event-uid <event-uid> --json
 kata cron capabilities --json
 kata cron run observe <run-uid> --json-input observation.json --json
-kata cron run list [--limit 100] [--before-uid <uid>] [--job-uid <job-uid>] --json
+kata cron run list [--limit 100] [--before-uid <uid>] [--job-uid <job-uid>] [--reason <code>] --json
 kata cron run show <run-uid> --json
 kata show <issue-ref> --planning-dates --json
 ```
@@ -2263,6 +2263,9 @@ generated or explicit definition UID after a lost create response; inspect it ra
 assuming a create conflict is successful. Mutable definitions require the
 current expected event UID, from `--expected-event-uid` or the request body. Independent runs use a retained run UID, exact
 same-write retry idempotency, and ordinary revision CAS for changed evidence.
+Use `run list --reason <code>` to filter by a structured reason or an exact
+legacy `reason: <code>` first line before pagination. Structured reasons take
+precedence. See [run summaries](cron.md#structured-run-summaries) for the reason grammar.
 The planning-date read returns native resolved dates without changing readiness.
 
 ## Federation

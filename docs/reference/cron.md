@@ -615,8 +615,8 @@ messages keep their existing display. A matching legacy first line is hidden
 when a structured reason is prefixed, and in run details after the Reason
 field. Conflicting first lines stay visible. Run details show usage, ordered steps, known-zero cost and exit values, and the log
 reference as plain text. Step blocks retain each step's own reason. A single
-step timestamp, or a span too large for a duration, shows the available start
-and end instants. Costs retain exact micros with insignificant trailing zeros
+step timestamp, a span too large for a duration, or subnanosecond precision
+that a duration would discard shows the original start and end instants. Costs retain exact micros with insignificant trailing zeros
 trimmed to at least two decimals; zero attempts are omitted. Log
 references are never opened or fetched. Run details show Trigger after the
 occurrence key, with `(derived)` on values inferred from older run evidence.
