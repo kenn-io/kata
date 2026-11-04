@@ -3,9 +3,8 @@ package main
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
-	"io"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -59,7 +58,7 @@ The full contract is in the Cron reference (docs/reference/cron.md).`,
 	capabilities := newCronOperationCmd("capabilities", "show")
 	capabilities.Use = "capabilities"
 	capabilities.Short = "discover local protocol support without creating cron state"
-	command.AddCommand(runs, capabilities)
+	command.AddCommand(runs, capabilities, newCronConformanceCmd())
 	return command
 }
 
@@ -395,25 +394,16 @@ func (o *cronCLIOptions) readRequest(cmd *cobra.Command) ([]byte, error) {
 		}
 		return nil, cronCLIValidation("--file is required; use --file - for stdin")
 	}
-	reader := cmd.InOrStdin()
-	if o.file != "-" {
-		file, err := os.Open(o.file)
-		if err != nil {
-			return nil, err
-		}
-		defer func() { _ = file.Close() }()
-		reader = file
-	}
 	limit := int64(cronDefinitionRequestLimit)
 	if o.resource == "run" {
 		limit = db.CronObservationLimit
 	}
-	raw, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	raw, err := readCronInput(cmd.Context(), cmd.InOrStdin(), o.file, limit)
+	if errors.Is(err, errCronInputTooLarge) {
+		return nil, cronCLIValidation("cron request exceeds its byte limit")
+	}
 	if err != nil {
 		return nil, err
-	}
-	if int64(len(raw)) > limit {
-		return nil, cronCLIValidation("cron request exceeds its byte limit")
 	}
 	return raw, nil
 }

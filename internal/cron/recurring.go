@@ -367,13 +367,10 @@ func splitCronDirective(expression string) (zone, rest string, has, bare bool) {
 // trigger timezone applies only when the expression has no directive of its
 // own, and an @every descriptor is an interval with no preview instant.
 func adapterCronSchedule(t Trigger) (cronparser.Schedule, error) {
-	_, rest, has, _ := splitCronDirective(t.Cron)
+	expression := adapterCronExpression(t, "")
+	_, rest, _, _ := splitCronDirective(expression)
 	if strings.HasPrefix(rest, "@every") {
 		return nil, nil
-	}
-	expression := strings.TrimSpace(t.Cron)
-	if !has && t.Timezone != "" {
-		expression = "CRON_TZ=" + t.Timezone + " " + expression
 	}
 	schedule, err := ParseCron(expression)
 	if err != nil {

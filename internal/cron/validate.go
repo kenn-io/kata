@@ -62,6 +62,26 @@ func portableKey(value string) bool {
 	return true
 }
 
+// ValidateWorkflowStepReferences checks portable keys, retry bounds and ordered dependencies.
+func ValidateWorkflowStepReferences(steps []WorkflowStep) error {
+	seen := make(map[string]bool, len(steps))
+	for _, step := range steps {
+		if !portableKey(step.Key) || seen[step.Key] {
+			return invalid("step keys must be unique portable names")
+		}
+		if step.Retries < 0 || step.Retries > 100 {
+			return invalid("retry count must be between 0 and 100")
+		}
+		for _, previous := range step.After {
+			if !seen[previous] {
+				return invalid("dependencies must name earlier steps")
+			}
+		}
+		seen[step.Key] = true
+	}
+	return nil
+}
+
 // Validate checks the portable job contract without granting execution.
 func (j JobDefinition) Validate() error {
 	if j.Version != 1 {
@@ -194,19 +214,10 @@ func (f WorkflowDefinition) Validate() error {
 	if len(f.Steps) == 0 {
 		return invalid("workflow requires steps")
 	}
-	seen := map[string]bool{}
+	if err := ValidateWorkflowStepReferences(f.Steps); err != nil {
+		return err
+	}
 	for _, step := range f.Steps {
-		if !portableKey(step.Key) || seen[step.Key] {
-			return invalid("step keys must be unique portable names")
-		}
-		if step.Retries < 0 || step.Retries > 100 {
-			return invalid("retry count must be between 0 and 100")
-		}
-		for _, previous := range step.After {
-			if !seen[previous] {
-				return invalid("dependencies must name earlier steps")
-			}
-		}
 		switch step.Kind {
 		case "command":
 			if strings.TrimSpace(step.Command) == "" || step.Prompt != "" {
@@ -222,7 +233,6 @@ func (f WorkflowDefinition) Validate() error {
 		if err := validateOptions(step.Options); err != nil {
 			return err
 		}
-		seen[step.Key] = true
 	}
 	if err := validateOptions(f.Options); err != nil {
 		return err
