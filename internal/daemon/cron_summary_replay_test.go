@@ -187,3 +187,60 @@ func TestCronSummaryFinalizationFailureDoesNotAdmit(t *testing.T) {
 	require.Contains(t, string(raw), "access_unavailable")
 	require.Zero(t, calls)
 }
+
+type summaryBindingReadFailureStore struct {
+	db.Storage
+	reads   int
+	failure error
+}
+
+func (s *summaryBindingReadFailureStore) FederationBindingByProject(ctx context.Context, projectID int64) (db.FederationBinding, error) {
+	s.reads++
+	if s.reads == 2 {
+		return db.FederationBinding{}, s.failure
+	}
+	return s.Storage.FederationBindingByProject(ctx, projectID)
+}
+func TestCronSummaryAdmissionBindingReadFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		failure error
+		status  int
+		code    string
+	}{
+		{"database", errors.New("fixture binding read failed"), http.StatusInternalServerError, "internal"},
+		{"removed binding", db.ErrNotFound, http.StatusConflict, "unsupported_event_features"},
+		{"finalization", db.ErrTransactionFinalizationFailed, http.StatusServiceUnavailable, "access_unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			var wrapped *summaryBindingReadFailureStore
+			f := newCronForwardFixture(t, func(_ *cronForwardFixture, cfg *daemon.ServerConfig) {
+				wrapped = &summaryBindingReadFailureStore{Storage: cfg.DB, failure: tc.failure}
+				cfg.DB = wrapped
+				cfg.FederationHubClient = func(context.Context, config.FederationCredential) (*http.Client, error) {
+					calls++
+					return nil, errors.New("must not probe")
+				}
+			})
+			job, _, err := f.spoke.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: f.sp.ID, Actor: "tester", Name: "Review", Definition: cronHTTPDefinition(t)})
+			require.NoError(t, err)
+			uid := cronHTTPUID(t)
+			before, err := f.spoke.DB.MaxEventID(t.Context())
+			require.NoError(t, err)
+			status, raw := cronHTTP(t, f.target, http.MethodPut, fmt.Sprintf("/api/v1/projects/%d/cron/runs/%s", f.sp.ID, uid), map[string]any{"actor": "tester", "job_uid": job.UID, "definition_event_uid": job.DefinitionEventUID, "status": "failed", "summary": map[string]any{"version": 1, "reason": "failed"}, "expected_revision": 0})
+			require.Equal(t, tc.status, status, string(raw))
+			require.Contains(t, string(raw), `"code":"`+tc.code+`"`)
+			require.Equal(t, 2, wrapped.reads)
+			require.Zero(t, calls)
+			_, err = f.spoke.DB.CronRun(t.Context(), f.sp.ID, uid)
+			require.ErrorIs(t, err, db.ErrNotFound)
+			after, err := f.spoke.DB.MaxEventID(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, before, after)
+			release, err := federationcoord.BeginRebind(t.Context(), federationcoord.Key(f.spoke.DB.InstanceUID(), f.sp.ID), f.spoke.DB, f.sp.ID)
+			require.NoError(t, err)
+			release()
+		})
+	}
+}

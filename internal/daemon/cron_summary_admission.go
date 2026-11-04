@@ -42,38 +42,37 @@ func admitCronSummary(ctx context.Context, cfg ServerConfig, projectID int64) (c
 		return ctx, func() {}, internalAPIError(err)
 	}
 	cleanup := func() { release(); cancel() }
-	fail := func() (context.Context, func(), error) { cleanup(); return ctx, func() {}, cronSummaryUnsupported() }
+	fail := func(err error) (context.Context, func(), error) { cleanup(); return ctx, func() {}, err }
 	binding, err = cfg.DB.FederationBindingByProject(ctx, projectID)
-	if err != nil || !binding.Enabled || !binding.PushEnabled || binding.Role != db.FederationRoleSpoke {
-		return fail()
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		return fail(internalAPIError(err))
+	}
+	if !binding.Enabled || !binding.PushEnabled || binding.Role != db.FederationRoleSpoke {
+		return fail(cronSummaryUnsupported())
 	}
 	project, err := activeProjectByID(ctx, cfg.DB, projectID)
 	if err != nil {
-		cleanup()
-		return ctx, func() {}, err
+		return fail(err)
 	}
 	client, _, origin, err := resolveCronHubTransport(ctx, cfg, project.UID, binding)
 	if err != nil {
-		return fail()
+		return fail(cronSummaryUnsupported())
 	}
 	apiClient, err := generated.NewDefaultClient(origin, runtime.WithHTTPClient(boundedProbeDoer{
 		client: client,
 		limit:  federationsigning.MaxBodyBytes + 1,
 	}))
 	if err != nil {
-		return fail()
+		return fail(cronSummaryUnsupported())
 	}
 	features := db.SupportedEventFeatures
 	response, err := apiClient.GetFederationProjectMetadataWithResponse(ctx, &generated.GetFederationProjectMetadataRequestOptions{
 		PathParams: &generated.GetFederationProjectMetadataPath{ProjectID: binding.HubProjectID},
 		Header:     &generated.GetFederationProjectMetadataHeaders{XKataEventFeatures: &features},
-	}, func(_ context.Context, req *http.Request) error {
-		req.Header.Set("Content-Type", "application/json")
-		return nil
 	})
 	if err != nil || response == nil || response.HTTPResponse == nil || response.StatusCode != http.StatusOK || len(response.Body) == 0 || len(response.Body) > federationsigning.MaxBodyBytes ||
 		db.RequireEventFeatures(response.HTTPResponse.Header.Get(db.EventFeaturesHeader), db.CronRunSummaryV2Feature) != nil {
-		return fail()
+		return fail(cronSummaryUnsupported())
 	}
 	return db.WithCronSummaryBinding(ctx, &binding), cleanup, nil
 }
