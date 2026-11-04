@@ -29,7 +29,7 @@ func validateRecurring(j JobDefinition) error {
 	}
 	if len(j.Options) > 0 {
 		var options map[string]any
-		if err := json.Unmarshal(j.Options, &options); err != nil || options == nil || len(options) != 0 {
+		if err := json.Unmarshal(j.Options, &options); err != nil || len(options) != 0 {
 			return invalid("native recurring issues cannot carry adapter options")
 		}
 	}

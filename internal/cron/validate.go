@@ -248,7 +248,7 @@ func validateOptions(input []byte) error {
 		return nil
 	}
 	var object map[string]any
-	if err := json.Unmarshal(input, &object); err != nil || object == nil {
+	if err := json.Unmarshal(input, &object); err != nil {
 		return invalid("options must be an object")
 	}
 	var walk func(any) error

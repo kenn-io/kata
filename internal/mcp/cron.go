@@ -2,7 +2,6 @@ package mcpserver
 
 import (
 	"context"
-	stdjson "encoding/json"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -95,7 +94,7 @@ func cronExpected(value string) (string, error) {
 func addCronTool[In, Out any](server *sdkmcp.Server, name, title, description string, hints *sdkmcp.ToolAnnotations, handler sdkmcp.ToolHandlerFor[In, Out], rawProperties ...string) {
 	inputSchema := inputSchemaFor[In](name)
 	outputSchema := schemaFor[Out](&jsonschema.ForOptions{
-		TypeSchemas: map[reflect.Type]*jsonschema.Schema{reflect.TypeFor[stdjson.RawMessage](): {}},
+		TypeSchemas: map[reflect.Type]*jsonschema.Schema{reflect.TypeOf(generated.CronValidationResult{}.Definition): {}},
 	})
 	resolved, err := inputSchema.Resolve(nil)
 	if err != nil {
