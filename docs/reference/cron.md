@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -14,6 +14,48 @@ configuration, create or update ordinary issues, deliver notifications, and laun
 An observation records evidence; its status does not control whether anything runs.
 
 Browse jobs, runs, and workflows in `kata tui` with the `2`, `3`, and `4` tabs for the current project. On the Jobs tab, create and edit jobs; see the [`kata tui` keys](cli.md#daemon-and-diagnostics).
+
+### Actor and runtime visibility
+
+The Jobs and Workflows lists show **Author**, **Actor**, and **Runtime**.
+Author is the definition's creator, preserved when someone edits it. Actor is
+the responsible execution actor; it reads `unknown` because definitions do not
+assign an execution actor. Runtime is `unknown` for adapter jobs and workflows.
+Native recurring issue jobs show `owning daemon`, which identifies the delivery
+mechanism without claiming that a particular host is healthy or running.
+
+Open a definition to see its full author and any **Adapter preference** or
+**Executor preference** from string-valued `options.adapter` and
+`options.executor`. These are adapter configuration, not proof of an active
+runtime installation. Workflow preferences describe that workflow's document;
+they do not override or inherit a job's preferences.
+
+The Runs list, run details, and definition run history show the reported actor
+and runtime. Runtime comes from the run's `executor_label`; missing or blank
+labels read `unreported`. Labels are self-reported evidence. Past runs do not
+assign future work. The teammate is separately available in run details.
+
+CLI `job`, `workflow`, and `run` **list/show** output includes a derived
+`responsibility` object in every record, with the same JSON shape in `--json`
+and `--agent` mode:
+
+| Field | Meaning |
+| --- | --- |
+| `actor` | `null` for definitions; the reported actor for runs. The existing definition `author` remains separate. |
+| `runtime` | `null` when unknown or unreported; `owning daemon` for native jobs; the reported executor label for labeled runs. |
+| `runtime_status` | `unknown`, `daemon`, `reported`, or `unreported`, respectively. |
+| `adapter` | Nonblank string from definition `options.adapter`, otherwise `null`. |
+| `executor` | Nonblank string from definition `options.executor`, otherwise `null`. |
+
+This object is a CLI presentation field. REST responses, stored definitions,
+and mutation output retain their existing shape. Empty lists remain empty;
+pagination and filtering retain their existing scope.
+
+Kata has no registry of active adapter installations. `unknown` means no runtime
+assignment is known, not that no runtime exists. Federation enrollment proves
+replication/access, not execution eligibility. Detecting a known empty set of
+eligible runtimes requires a future registration mechanism; see
+[the runtime eligibility design note](https://github.com/kenn-io/kata/issues/824).
 
 For a run organized as dependent issues with human approval, see
 [Gated workflows](../workflows/gated-workflows.md).

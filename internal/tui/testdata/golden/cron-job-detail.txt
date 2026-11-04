@@ -2,7 +2,10 @@
 kata カタ [jobs] runs workflows
  jobs / Daily summary
 
-▶ State:    enabled
+▶ Author:   worker (creator)
+  Actor:    unknown (execution responsibility)
+  Runtime:  unknown
+  State:    enabled
   Schedule: 0 7 * * *
   Triggers: 2026-05-02 07:00 UTC
             2026-05-03 07:00 UTC
@@ -16,9 +19,6 @@ kata カタ [jobs] runs workflows
       "kind": "execute",
       "workflow_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAW"
     },
-    "catchup": "skip",
-    "enabled": true,
-    "issue": {
 
  j/k move▕ ↵/l follow▕ h/esc back▕ n/e new/edit▕ r refresh▕ 1-4 tabs▕ ? help
  q quit

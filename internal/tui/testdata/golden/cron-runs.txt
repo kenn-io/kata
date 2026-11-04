@@ -2,8 +2,8 @@
 kata カタ jobs [runs] workflows
  / search                                             1 loaded run · newest 100
 
-  Status     Job            Occurrence   Started     Ended       Summary
-▶ succeeded  Daily summary               05-01 10:00 05-01 11:00 Report ready
+  Status     Job                 Actor        Runtime       Summary
+▶ succeeded  Daily summary       worker       executor-a    Report ready
 
 
 

@@ -28,6 +28,9 @@ requests. External adapters schedule other jobs, launch processes, and report
 each run with kata cron run observe. A recorded run status never controls
 whether anything runs.
 Results are JSON.
+List/show records include responsibility: unknown execution assignment for
+definitions, owning-daemon delivery for native jobs, or reported run attribution.
+Definition authors and adapter/executor preferences do not assign future work.
 A job is configured work: its trigger, action, and execution settings.
 A workflow is reusable command or prompt steps with dependencies.
 A run is one execution and its reported status and results.
@@ -269,6 +272,12 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 	}
 	if flags.Quiet && currentOutputMode() != outputJSON {
 		return nil
+	}
+	if !o.mutation() && (o.definition() || o.resource == "run") {
+		raw, err = cronResponsibilityResponse(raw, o.resource, o.action == "list")
+		if err != nil {
+			return err
+		}
 	}
 	return emitJSON(cmd.OutOrStdout(), jsontext.Value(raw))
 }

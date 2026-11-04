@@ -7,7 +7,7 @@ kata カタ jobs [runs] workflows
   Ended:      05-01 11:00
   Recorded:   2026-05-01T11:00:00Z
   Actor:      worker
-  Executor:   executor-a
+  Runtime:    executor-a
   Tokens:     30 input, 10 output
 
   Message
