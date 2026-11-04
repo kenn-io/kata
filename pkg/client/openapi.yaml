@@ -8599,6 +8599,13 @@ paths:
     get:
       operationId: listCronRuns
       parameters:
+        - description: Structured reason code, or an exact legacy reason first line
+          explode: false
+          in: query
+          name: reason
+          schema:
+            description: Structured reason code, or an exact legacy reason first line
+            type: string
         - in: path
           name: project_id
           required: true
