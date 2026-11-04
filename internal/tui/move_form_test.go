@@ -673,3 +673,20 @@ func TestMoveIsRefusedWhenTheIssueChangedAfterThePreviewAgainstDaemon(t *testing
 	require.NotNil(t, m.move.preview, "and shows the preview at the current revision")
 	require.Contains(t, m.move.note, "changed since the preview")
 }
+
+func TestMoveFooterNamesWhatEnterDoesAtEachStep(t *testing.T) {
+	api := &moveTestAPI{projects: []ProjectSummary{moveProject(2, "hub-project", "", "")}}
+	enterAction := func(m Model) string {
+		for _, item := range flattenHelpRows(m.helpRows()) {
+			if item.Key == "enter" {
+				return item.Description
+			}
+		}
+		return ""
+	}
+	m := openMove(t, moveModel(t, api))
+	require.Equal(t, "preview", enterAction(m), "in the picker enter sends a dry run")
+	m, cmd := enter(m)
+	m, _ = deliver(t, m, cmd)
+	require.Equal(t, "move", enterAction(m), "in the preview enter moves")
+}

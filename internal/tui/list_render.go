@@ -32,18 +32,19 @@ import (
 // detail header's assignment row). Detail rendering ignores narrow
 // (the detail pane in split mode flexes the same as in stacked).
 type viewChrome struct {
-	scope         scope            // project / counts / version go in the title bar
-	sseStatus     sseConnState     // surfaces only as a flash when not connected
-	pending       bool             // pendingRefetch — surfaces as a flash when set
-	toast         *toast           // optional flash message (e.g. "resynced")
-	version       string           // build-time version string for the title bar; "" hides
-	input         inputState       // active input shell (M3a bar; M3b prompt; M4 form)
-	narrow        bool             // M6 split mode list pane: drop owner column
-	projectsByID  map[int64]string // for all-projects mode: pid → display name (empty otherwise)
-	daemon        string           // active daemon display label
-	modal         modalKind        // active confirmation; takes footer precedence
-	undoAvailable bool             // session history has an eligible action
-	listOpsHidden bool             // delete and move are not on offer (credentials or saved context)
+	scope          scope            // project / counts / version go in the title bar
+	sseStatus      sseConnState     // surfaces only as a flash when not connected
+	pending        bool             // pendingRefetch — surfaces as a flash when set
+	toast          *toast           // optional flash message (e.g. "resynced")
+	version        string           // build-time version string for the title bar; "" hides
+	input          inputState       // active input shell (M3a bar; M3b prompt; M4 form)
+	narrow         bool             // M6 split mode list pane: drop owner column
+	projectsByID   map[int64]string // for all-projects mode: pid → display name (empty otherwise)
+	daemon         string           // active daemon display label
+	modal          modalKind        // active confirmation; takes footer precedence
+	undoAvailable  bool             // session history has an eligible action
+	movePreviewing bool             // the Move form shows its preview
+	listOpsHidden  bool             // delete and move are not on offer (credentials or saved context)
 }
 
 // View renders the list under the M3.5 chrome layer:

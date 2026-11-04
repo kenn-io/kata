@@ -3688,7 +3688,7 @@ func (m Model) viewContent() string {
 			body = renderCredentials(m)
 		default:
 			if m.modal == modalReopenBacklog {
-				footer := renderFooterHelpTable(modalHelpRows(m.modal), m.width)
+				footer := renderFooterHelpTable(modalHelpRows(m.modal, m.move.preview != nil), m.width)
 				bodyHeight := max(0, m.height-lipgloss.Height(footer))
 				body = renderTooNarrow(m.width, bodyHeight)
 				body = m.withActiveConnectionHeader(m.appendNonListDetailExtras(body))
@@ -3865,17 +3865,18 @@ func (m Model) viewBody() string {
 // this keeps the sub-views free of Model coupling.
 func (m Model) chrome() viewChrome {
 	return viewChrome{
-		scope:         m.scope,
-		sseStatus:     m.sseStatus,
-		pending:       m.pendingRefetch,
-		toast:         m.toast,
-		version:       kataVersion,
-		input:         m.input,
-		projectsByID:  m.projectsByID,
-		daemon:        activeDaemonDisplay(m.activeDaemon),
-		modal:         m.modal,
-		undoAvailable: len(m.undoHistory.entries) > 0,
-		listOpsHidden: m.listIssueOpsHidden(),
+		scope:          m.scope,
+		sseStatus:      m.sseStatus,
+		pending:        m.pendingRefetch,
+		toast:          m.toast,
+		version:        kataVersion,
+		input:          m.input,
+		projectsByID:   m.projectsByID,
+		daemon:         activeDaemonDisplay(m.activeDaemon),
+		modal:          m.modal,
+		undoAvailable:  len(m.undoHistory.entries) > 0,
+		listOpsHidden:  m.listIssueOpsHidden(),
+		movePreviewing: m.move.preview != nil,
 	}
 }
 
