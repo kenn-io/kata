@@ -692,6 +692,41 @@ steps yield `succeeded`. Work still in progress before a cutoff is `running`.
 Use the existing [reason-line convention](#independent-run-evidence) when a
 machine-readable cause is available.
 
+### Check a Go adapter
+
+Import `go.kenn.io/kata/pkg/cron/conformance` and implement its `Adapter`
+interface around your runtime's scheduling and settlement decisions. `Declare`
+returns your implementation name, tolerance, count/age limits and independent
+branch policy. `Plan` and `Settle` receive public DTOs and a context. The full
+job definition crosses this boundary as JSON; no internal Kata types are needed.
+
+```go
+func TestAdapterProfile(t *testing.T) {
+    conformance.Run(t, adapterDecisionBridge{})
+}
+```
+
+Replace `adapterDecisionBridge` with your implementation. The harness runs the
+versioned scenarios using your declared policy. Its sequential cases pass your
+actual checkpoint or occupancy into the next decision. `Execute` is available
+for a custom driver, and `Check` compares one answer per scenario. `Reference`
+is Kata's deterministic model, useful for exploring the decision API; running
+only `Reference` does not test your runtime.
+
+The kit embeds scheduling, catchup, ownership, overlap, definition-change,
+retry and timeout vectors under schema `kata.cron.adapter-conformance/v1`.
+`Scenarios` returns the frozen default-policy vectors; `Suite(ctx, declaration)`
+materializes expectations for declared policy choices. Default policy uses zero
+tolerance, a 1000-occurrence limit, unlimited age, and `continue`. Alternative
+policy expectations use the reference model. The model bounds enumeration at
+100,000 instants and returns an error when a horizon exceeds that reference
+budget; it never silently discards an unexamined backlog.
+
+A conformance claim names the fixture schema version. Changing frozen expected
+outputs requires a new version. Keep job/installation identity, run UIDs,
+occurrence keys and process reconciliation stable in the production adapter;
+the decision kit does not inspect those I/O paths.
+
 These decisions do not prove that an executor actually stopped a process or
 reported all work. Issue-date triggers retain the [existing readiness and
 notification rules](#adapter-responsibilities); readiness-dependent scenarios

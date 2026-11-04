@@ -1,0 +1,364 @@
+{
+  "schema": "kata.cron.adapter-conformance/v1",
+  "scenarios": [
+    {
+      "name": "retries/success",
+      "steps": [
+        {
+          "settle": {
+            "steps": [
+              {
+                "key": "a",
+                "after": [],
+                "retries": 0
+              }
+            ],
+            "outcomes": {
+              "a": [
+                {
+                  "started_at": "2030-01-01T00:00:00Z",
+                  "ended_at": "2030-01-01T00:00:01Z",
+                  "status": "succeeded"
+                }
+              ]
+            },
+            "started_at": "2030-01-01T00:00:00Z",
+            "now": "2030-01-01T00:00:20Z",
+            "timeout_seconds": 0,
+            "cancelled_at": null,
+            "stopped_with_certainty": true
+          },
+          "expect": {
+            "attempts": {
+              "a": 1
+            },
+            "skipped": [],
+            "status": "succeeded",
+            "occupied": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "retries/certain-failure-retry",
+      "steps": [
+        {
+          "settle": {
+            "steps": [
+              {
+                "key": "a",
+                "after": [],
+                "retries": 1
+              }
+            ],
+            "outcomes": {
+              "a": [
+                {
+                  "started_at": "2030-01-01T00:00:00Z",
+                  "ended_at": "2030-01-01T00:00:01Z",
+                  "status": "failed"
+                },
+                {
+                  "started_at": "2030-01-01T00:00:02Z",
+                  "ended_at": "2030-01-01T00:00:03Z",
+                  "status": "succeeded"
+                }
+              ]
+            },
+            "started_at": "2030-01-01T00:00:00Z",
+            "now": "2030-01-01T00:00:20Z",
+            "timeout_seconds": 0,
+            "cancelled_at": null,
+            "stopped_with_certainty": true
+          },
+          "expect": {
+            "attempts": {
+              "a": 2
+            },
+            "skipped": [],
+            "status": "succeeded",
+            "occupied": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "retries/budget-exhausted",
+      "steps": [
+        {
+          "settle": {
+            "steps": [
+              {
+                "key": "a",
+                "after": [],
+                "retries": 1
+              }
+            ],
+            "outcomes": {
+              "a": [
+                {
+                  "started_at": "2030-01-01T00:00:00Z",
+                  "ended_at": "2030-01-01T00:00:01Z",
+                  "status": "failed"
+                },
+                {
+                  "started_at": "2030-01-01T00:00:02Z",
+                  "ended_at": "2030-01-01T00:00:03Z",
+                  "status": "failed"
+                },
+                {
+                  "started_at": "2030-01-01T00:00:04Z",
+                  "ended_at": "2030-01-01T00:00:05Z",
+                  "status": "succeeded"
+                }
+              ]
+            },
+            "started_at": "2030-01-01T00:00:00Z",
+            "now": "2030-01-01T00:00:20Z",
+            "timeout_seconds": 0,
+            "cancelled_at": null,
+            "stopped_with_certainty": true
+          },
+          "expect": {
+            "attempts": {
+              "a": 2
+            },
+            "skipped": [],
+            "status": "failed",
+            "occupied": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "retries/unknown-not-retried",
+      "steps": [
+        {
+          "settle": {
+            "steps": [
+              {
+                "key": "a",
+                "after": [],
+                "retries": 2
+              }
+            ],
+            "outcomes": {
+              "a": [
+                {
+                  "started_at": "2030-01-01T00:00:00Z",
+                  "ended_at": "2030-01-01T00:00:01Z",
+                  "status": "unknown"
+                },
+                {
+                  "started_at": "2030-01-01T00:00:02Z",
+                  "ended_at": "2030-01-01T00:00:03Z",
+                  "status": "succeeded"
+                }
+              ]
+            },
+            "started_at": "2030-01-01T00:00:00Z",
+            "now": "2030-01-01T00:00:20Z",
+            "timeout_seconds": 0,
+            "cancelled_at": null,
+            "stopped_with_certainty": false
+          },
+          "expect": {
+            "attempts": {
+              "a": 1
+            },
+            "skipped": [],
+            "status": "unknown",
+            "occupied": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "retries/success-not-retried",
+      "steps": [
+        {
+          "settle": {
+            "steps": [
+              {
+                "key": "a",
+                "after": [],
+                "retries": 2
+              }
+            ],
+            "outcomes": {
+              "a": [
+                {
+                  "started_at": "2030-01-01T00:00:00Z",
+                  "ended_at": "2030-01-01T00:00:01Z",
+                  "status": "succeeded"
+                },
+                {
+                  "started_at": "2030-01-01T00:00:02Z",
+                  "ended_at": "2030-01-01T00:00:03Z",
+                  "status": "failed"
+                }
+              ]
+            },
+            "started_at": "2030-01-01T00:00:00Z",
+            "now": "2030-01-01T00:00:20Z",
+            "timeout_seconds": 0,
+            "cancelled_at": null,
+            "stopped_with_certainty": true
+          },
+          "expect": {
+            "attempts": {
+              "a": 1
+            },
+            "skipped": [],
+            "status": "succeeded",
+            "occupied": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "retries/failed-dependency",
+      "steps": [
+        {
+          "settle": {
+            "steps": [
+              {
+                "key": "a",
+                "after": [],
+                "retries": 0
+              },
+              {
+                "key": "b",
+                "after": [
+                  "a"
+                ],
+                "retries": 0
+              }
+            ],
+            "outcomes": {
+              "a": [
+                {
+                  "started_at": "2030-01-01T00:00:00Z",
+                  "ended_at": "2030-01-01T00:00:01Z",
+                  "status": "failed"
+                }
+              ],
+              "b": [
+                {
+                  "started_at": "2030-01-01T00:00:02Z",
+                  "ended_at": "2030-01-01T00:00:03Z",
+                  "status": "succeeded"
+                }
+              ]
+            },
+            "started_at": "2030-01-01T00:00:00Z",
+            "now": "2030-01-01T00:00:20Z",
+            "timeout_seconds": 0,
+            "cancelled_at": null,
+            "stopped_with_certainty": true
+          },
+          "expect": {
+            "attempts": {
+              "a": 1,
+              "b": 0
+            },
+            "skipped": [
+              "b"
+            ],
+            "status": "failed",
+            "occupied": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "retries/independent-continue",
+      "steps": [
+        {
+          "settle": {
+            "steps": [
+              {
+                "key": "a",
+                "after": [],
+                "retries": 0
+              },
+              {
+                "key": "b",
+                "after": [],
+                "retries": 0
+              }
+            ],
+            "outcomes": {
+              "a": [
+                {
+                  "started_at": "2030-01-01T00:00:00Z",
+                  "ended_at": "2030-01-01T00:00:01Z",
+                  "status": "failed"
+                }
+              ],
+              "b": [
+                {
+                  "started_at": "2030-01-01T00:00:02Z",
+                  "ended_at": "2030-01-01T00:00:03Z",
+                  "status": "succeeded"
+                }
+              ]
+            },
+            "started_at": "2030-01-01T00:00:00Z",
+            "now": "2030-01-01T00:00:20Z",
+            "timeout_seconds": 0,
+            "cancelled_at": null,
+            "stopped_with_certainty": true
+          },
+          "expect": {
+            "attempts": {
+              "a": 1,
+              "b": 1
+            },
+            "skipped": [],
+            "status": "failed",
+            "occupied": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "retries/incomplete-is-running",
+      "steps": [
+        {
+          "settle": {
+            "steps": [
+              {
+                "key": "a",
+                "after": [],
+                "retries": 0
+              }
+            ],
+            "outcomes": {
+              "a": [
+                {
+                  "started_at": "2030-01-01T00:00:00Z",
+                  "ended_at": "0001-01-01T00:00:00Z",
+                  "status": "running"
+                }
+              ]
+            },
+            "started_at": "2030-01-01T00:00:00Z",
+            "now": "2030-01-01T00:00:20Z",
+            "timeout_seconds": 0,
+            "cancelled_at": null,
+            "stopped_with_certainty": true
+          },
+          "expect": {
+            "attempts": {
+              "a": 1
+            },
+            "skipped": [],
+            "status": "running",
+            "occupied": true
+          }
+        }
+      ]
+    }
+  ]
+}
