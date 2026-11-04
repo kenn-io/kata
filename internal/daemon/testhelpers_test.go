@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kit/stacktest"
 
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
@@ -174,16 +175,13 @@ var currentHandleForIssueURL *httptestServerHandle
 // assertAPIError asserts the response carries the standard error envelope
 // shape with the given HTTP status and error.code. The raw body is surfaced
 // in failure messages so debugging doesn't require rerunning with -v.
-func assertAPIError(t *testing.T, status int, body []byte, wantStatus int, wantCode string) {
+func assertAPIError(t *testing.T, status int, body []byte, wantStatus int, wantCode string) api.ErrorEnvelope {
 	t.Helper()
 	require.Equalf(t, wantStatus, status, "status: got %d, body: %s", status, string(body))
-	var envelope struct {
-		Error struct {
-			Code string `json:"code"`
-		} `json:"error"`
-	}
+	var envelope api.ErrorEnvelope
 	require.NoError(t, json.Unmarshal(body, &envelope), string(body))
 	assert.Equal(t, wantCode, envelope.Error.Code, string(body))
+	return envelope
 }
 
 // testDBHandle bundles a fresh *sqlitestore.Store and a started-at timestamp for daemon

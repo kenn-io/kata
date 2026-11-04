@@ -194,6 +194,11 @@ labels:
 | `--insecure-readonly` anonymous reader | **Anonymous (read-only)** |
 | Tokenless private-network writes | **Unauthenticated private network** |
 | Trusted proxy request without an asserted actor | **Proxy without account** |
+| Daemon too old to report how it authenticated | **Not reported by hub** |
+
+When a configured target's `[[daemon]]` token belongs to an account, changes
+you make through the switcher are recorded as that account, the same as
+`kata --daemon <name>`.
 
 Switching daemons or losing current authority clears the previous account
 while reconnection is pending. Finite credentials show **Credential expired**

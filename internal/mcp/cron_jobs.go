@@ -56,6 +56,7 @@ func (h toolHandlers) cronJobUpdate(ctx context.Context, _ *sdkmcp.CallToolReque
 	return h.cronPutJob(ctx, in.CronJobCreateInput, &expected)
 }
 func (h toolHandlers) cronPutJob(ctx context.Context, in CronJobCreateInput, expected *string) (*sdkmcp.CallToolResult, *generated.ReplaceCronJobResponse, error) {
+	h = h.withLongRunningClient()
 	id, err := cronUID(in.UID)
 	if err != nil {
 		return nil, nil, err
@@ -108,6 +109,7 @@ func (h toolHandlers) cronParent(ctx context.Context, p ProjectIdentity, raw str
 	return shown.Issue.UID, nil
 }
 func (h toolHandlers) cronJobDelete(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronActionInput) (*sdkmcp.CallToolResult, *generated.ArchiveCronJobResponse, error) {
+	h = h.withLongRunningClient()
 	id, err := cronUID(in.UID)
 	if err != nil {
 		return nil, nil, err
@@ -123,6 +125,7 @@ func (h toolHandlers) cronJobDelete(ctx context.Context, _ *sdkmcp.CallToolReque
 	return cronResult(h.options.Client.ArchiveCronJob(ctx, &generated.ArchiveCronJobRequestOptions{PathParams: &generated.ArchiveCronJobPath{ProjectID: p.ID, CronUID: id}, Body: &generated.ArchiveCronJobBody{Actor: &h.options.Actor, ExpectedEventUID: expected}}))
 }
 func (h toolHandlers) cronJobRestore(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronActionInput) (*sdkmcp.CallToolResult, *generated.RestoreCronJobResponse, error) {
+	h = h.withLongRunningClient()
 	id, err := cronUID(in.UID)
 	if err != nil {
 		return nil, nil, err

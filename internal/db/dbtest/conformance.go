@@ -20,6 +20,7 @@ import (
 // fails the suite until the stale entry is removed.
 type Backend struct {
 	Name                                string
+	SearchIndexesEmoji                  bool
 	Open                                func(t *testing.T) db.Storage
 	OpenSame                            func(t *testing.T, store db.Storage) db.Storage
 	InstallExternalRootClock            func(db.Storage, func() time.Time) func()
@@ -51,6 +52,7 @@ type scenario struct {
 
 var storageScenarios = []scenario{
 	{name: "attachment close evidence", methods: []string{"CloseIssueGuarded", "PatchIssueMetadata", "EventsByUIDs"}, run: checkAttachmentCloseEvidence},
+	{name: "search tokenizer words", methods: []string{"CreateProject", "CreateIssue", "SearchFTS", "SearchFTSAny"}, runWithBackend: checkSearchTokenizerWords},
 	{name: "setup finished delivery", methods: []string{"PrepareSetupFinished", "CompleteSetupFinished", "SystemProject", "CloseIssue", "SoftDeleteIssue", "RemoveProject"}, runWithBackend: checkSetupFinishedDelivery},
 	{name: "comment graph project access", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "MoveIssueProject", "ReadCommentGraph"}, run: checkCommentGraphProjectAccess},
 	{name: "recurring adoption snapshots", run: checkRecurringAdoptionSnapshots},
@@ -69,6 +71,7 @@ var storageScenarios = []scenario{
 	{name: "recurring lifecycle", run: checkRecurringLifecycle},
 	{name: "recurring metadata protection", run: checkRecurringMetadataProtection},
 	{name: "recurring project metadata keys", run: checkRecurringProjectMetadataKeys},
+	{name: "recurring backlog matches delivery", methods: []string{"CloseIssue", "ReopenIssue", "DispatchRecurringCron"}, run: checkRecurringBacklogMatchesDelivery},
 	{name: "recurring cron", methods: []string{"ListRecurringCronJobs", "DispatchRecurringCron"}, runWithBackend: checkRecurringCron},
 	{name: "close transcript", run: checkCloseTranscript},
 	{name: "comment notifications", methods: []string{"CreateComment", "PatchIssueMetadata"}, run: checkCommentNotifications},
@@ -118,8 +121,16 @@ var storageScenarios = []scenario{
 		RunRelayEnrollmentHistoryValidationCache(t, store, backend)
 		return nil
 	}},
+	{name: "relay checkpoint history validation cache", methods: []string{"CreateAPIToken", "CreateIssue", "CreateProject", "CreateRelayEnrollment", "CreateComment", "PendingRelayDeliveries", "RemoveProject", "PurgeProject", "PinRootAuthority", "RevokeFederationEnrollment", "UpsertFederationBinding"}, runWithBackend: func(t *testing.T, store db.Storage, backend Backend) error {
+		RunRelayCheckpointHistoryValidationCache(t, store, backend)
+		return nil
+	}},
 	{name: "relay ingest returns local issue ids", methods: []string{"AcceptRelayDeliveries", "CreateAPIToken", "CreateProject", "CreateRelayEnrollment", "IssueByUID", "PinRootAuthority", "UpsertFederationBinding"}, run: func(t *testing.T, store db.Storage) error {
 		RunRelayIngestReturnsLocalIssueIDs(t, store)
+		return nil
+	}},
+	{name: "relay offers legacy ingested events", methods: []string{"IngestFederationEvents", "PendingRelayDeliveries", "PatchIssueMetadata"}, run: func(t *testing.T, store db.Storage) error {
+		RunRelayOffersLegacyIngestedEvents(t, store)
 		return nil
 	}},
 	{name: "relay delivery", methods: []string{"PendingRelayDeliveries", "AckRelayDeliveries", "ExportRelayState"}, run: func(t *testing.T, store db.Storage) error {
@@ -286,6 +297,7 @@ var storageScenarios = []scenario{
 		run:     checkIssueRevisionAuthorRewrite,
 	},
 	{name: "search status", methods: []string{"SearchFTS", "SearchFTSAny"}, run: checkSearchStatus},
+	{name: "duplicate survives higher word count distractors", methods: []string{"CreateProject", "CreateIssue", "SearchFTSAny"}, run: checkDuplicateSurvivesHigherWordCountDistractors},
 	{name: "restricted search reads", methods: []string{"AddLabel", "CreateComment", "CreateIssue", "CreateProject", "SearchFTS", "SearchFTSAny"}, run: checkRestrictedSearchReads},
 	{
 		name:    "search assignment expiry",
@@ -688,6 +700,10 @@ var storageScenarios = []scenario{
 			"CreateIssue", "CreateProject", "IssueByID", "ListDueNotificationIssueIDs", "ReconcileDueNotification",
 		},
 		run: checkDueNotifications,
+	},
+	{
+		name: "due notification candidates",
+		run:  checkDueNotificationCandidates,
 	},
 	{
 		name: "scheduled reached",

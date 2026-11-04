@@ -163,6 +163,9 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		in.Body.Actor = actor
+		if out, handled, err := forwardCronJob(ctx, cfg, in.ProjectID, "", http.MethodPost, "", &in.Body, nil, enrollment); handled {
+			return out, err
+		}
 		return put(ctx, in.ProjectID, "", in.Body, false, enrollment)
 	})
 	huma.Register(h, huma.Operation{OperationID: "replaceCronJob", Method: http.MethodPut, Path: path + "/{cron_uid}"}, func(ctx context.Context, in *api.ReplaceCronJobRequest) (*api.CronJobResponse, error) {
@@ -171,6 +174,9 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		in.Body.Actor = actor
+		if out, handled, err := forwardCronJob(ctx, cfg, in.ProjectID, in.UID, http.MethodPut, "", &in.Body, nil, enrollment); handled {
+			return out, err
+		}
 		return put(ctx, in.ProjectID, in.UID, in.Body, false, enrollment)
 	})
 	huma.Register(h, huma.Operation{OperationID: "showCronJob", Method: http.MethodGet, Path: path + "/{cron_uid}"}, func(ctx context.Context, in *api.CronDefinitionRequest) (*api.CronJobResponse, error) {
@@ -208,6 +214,9 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 			ctx, actor, enrollment, err := cronJobWriteContext(ctx, cfg, in.ProjectID, in.Authorization, in.Body.Actor, action.name+"CronJob")
 			if err != nil {
 				return nil, err
+			}
+			if out, handled, err := forwardCronJob(ctx, cfg, in.ProjectID, in.UID, action.method, action.suffix, nil, &in.Body, enrollment); handled {
+				return out, err
 			}
 			if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 				return nil, err

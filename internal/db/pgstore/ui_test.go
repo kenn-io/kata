@@ -20,6 +20,42 @@ func TestUISnapshotMutationCursorContract(t *testing.T) {
 	})
 }
 
+func TestReadUISnapshotPastPostgresParameterLimit(t *testing.T) {
+	ctx := t.Context()
+	store := openUIStore(t)
+	project := createUIProject(t, store, "example-project")
+	source, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Source issue", Author: "user-a",
+	})
+	require.NoError(t, err)
+	neighbor, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Neighbor issue", Author: "user-a",
+	})
+	require.NoError(t, err)
+	_, err = store.CreateLink(ctx, db.CreateLinkParams{
+		FromIssueID: source.ID, ToIssueID: neighbor.ID, Type: "blocks", Author: "user-a",
+	})
+	require.NoError(t, err)
+	_, err = store.ExecContext(ctx, `
+		INSERT INTO issues (uid, project_id, short_id, title, author)
+		SELECT lpad(n::text, 26, '0'), $1, lpad(n::text, 8, '0'), 'Filler issue', 'user-a'
+		FROM generate_series(1, 32768) AS filler(n)`, project.ID)
+	require.NoError(t, err)
+
+	snapshot, err := store.ReadUISnapshot(ctx, db.UISnapshotQuery{
+		View: "all-open", IncludeGraph: true, SelectedIssueUID: source.UID,
+	})
+	require.NoError(t, err)
+	require.Len(t, snapshot.Issues, 32770)
+	require.Len(t, snapshot.GraphIssues, 32770)
+	for _, links := range [][]db.UILink{snapshot.CollectionLinks, snapshot.GraphLinks} {
+		require.Len(t, links, 1)
+		require.Equal(t, source.UID, links[0].FromIssueUID)
+		require.Equal(t, neighbor.UID, links[0].ToIssueUID)
+		require.Equal(t, "blocks", links[0].Type)
+	}
+}
+
 func TestUISnapshotCompletenessContract(t *testing.T) {
 	dbtest.RunUISnapshotCompletenessContract(t, func(t *testing.T) db.Storage {
 		return openUIStore(t)

@@ -168,16 +168,14 @@ func syncFederationOnceWithFence(
 }
 
 // syncDirectSpoke pushes and pulls one ordinary spoke binding to completion.
-func syncDirectSpoke(
+func pushDirectSpoke(
 	ctx context.Context,
 	store db.Storage,
-	binding db.FederationBinding,
+	binding *db.FederationBinding,
 	hubProjectID int64,
 	client *Client,
-	onPulledEvents func(projectID int64, events []db.Event),
 	validateLease func(context.Context) error,
 ) error {
-	runStartBinding := binding
 	if binding.PushEnabled {
 		for {
 			if q, err := store.ActiveFederationQuarantine(ctx, binding.ProjectID, db.FederationQuarantineDirectionPush); err == nil {
@@ -255,6 +253,52 @@ func syncDirectSpoke(
 		if err := store.RecordFederationSyncPushSuccess(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// PushDirectSpoke drains pending direct-spoke events without requiring pull authority.
+// The caller holds shared federation coordination for the complete operation.
+func PushDirectSpoke(ctx context.Context, store db.Storage, binding db.FederationBinding, hubProjectID int64, client *Client) error {
+	return pushDirectSpoke(ctx, store, &binding, hubProjectID, client, nil)
+}
+
+// CredentialHTTPClient builds a bearer-pinned, signing-aware HTTP client for
+// the hub a stored credential targets.
+func CredentialHTTPClient(ctx context.Context, credential config.FederationCredential) (*http.Client, error) {
+	client, err := NewClient(ctx, credential.HubURL, credential.Token, clientpkg.Opts{AllowInsecure: credential.AllowInsecure, FederationSigning: credential.Signing})
+	if err != nil {
+		return nil, err
+	}
+	return client.client, nil
+}
+
+// DirectSpokePushPending returns the daemon hook that drains a direct spoke's
+// pending events to its hub with the stored credential.
+func DirectSpokePushPending(store db.Storage) func(context.Context, db.FederationBinding, config.FederationCredential) error {
+	return func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
+		client, err := NewClient(ctx, credential.HubURL, credential.Token, clientpkg.Opts{AllowInsecure: credential.AllowInsecure, FederationSigning: credential.Signing})
+		if err != nil {
+			return err
+		}
+		return PushDirectSpoke(ctx, store, binding, credential.HubProjectID, client)
+	}
+}
+
+func syncDirectSpoke(
+	ctx context.Context,
+	store db.Storage,
+	binding db.FederationBinding,
+	hubProjectID int64,
+	client *Client,
+	onPulledEvents func(projectID int64, events []db.Event),
+	validateLease func(context.Context) error,
+) error {
+	runStartBinding := binding
+	if err := pushDirectSpoke(ctx, store, &binding, hubProjectID, client, validateLease); err != nil {
+		return err
+	}
+	if binding.PushEnabled {
 		if err := store.RecordFederationSyncPullStarted(ctx, binding.ProjectID, time.Now().UTC()); err != nil {
 			return err
 		}

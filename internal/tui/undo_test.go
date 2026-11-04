@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -30,6 +31,7 @@ type undoTestAPI struct {
 	reopenErr     error
 	links         []LinkEntry
 	removedLinkID int64
+	writes        []string
 }
 
 func (f *undoTestAPI) GetInstance(_ context.Context) (InstanceInfo, error) {
@@ -84,7 +86,8 @@ func (f *undoTestAPI) Reopen(_ context.Context, _ int64, _, _ string) (*Mutation
 	return f.completeResponse(f.writeResp), f.reopenErr
 }
 
-func (f *undoTestAPI) Assign(_ context.Context, _ int64, _, _, _ string) (*MutationResp, error) {
+func (f *undoTestAPI) Assign(_ context.Context, _ int64, _, owner, _ string) (*MutationResp, error) {
+	f.writes = append(f.writes, "assign "+owner)
 	return f.completeResponse(f.writeResp), nil
 }
 
@@ -94,18 +97,26 @@ func (f *undoTestAPI) ClaimTimedAssignment(_ context.Context, _ int64, _, _ stri
 
 func (f *undoTestAPI) SetPriority(_ context.Context, _ int64, _ string, priority *int64, _ string) (*MutationResp, error) {
 	f.priorities = append(f.priorities, priority)
+	if priority == nil {
+		f.writes = append(f.writes, "priority clear")
+	} else {
+		f.writes = append(f.writes, fmt.Sprintf("priority %d", *priority))
+	}
 	return f.completeResponse(f.writeResp), nil
 }
 
-func (f *undoTestAPI) AddLabel(_ context.Context, _ int64, _, _, _ string) (*MutationResp, error) {
+func (f *undoTestAPI) AddLabel(_ context.Context, _ int64, _, label, _ string) (*MutationResp, error) {
+	f.writes = append(f.writes, "label add "+label)
 	return f.completeResponse(f.writeResp), nil
 }
 
-func (f *undoTestAPI) RemoveLabel(_ context.Context, _ int64, _, _, _ string) (*MutationResp, error) {
+func (f *undoTestAPI) RemoveLabel(_ context.Context, _ int64, _, label, _ string) (*MutationResp, error) {
+	f.writes = append(f.writes, "label remove "+label)
 	return f.completeResponse(f.writeResp), nil
 }
 
-func (f *undoTestAPI) EditBody(_ context.Context, _ int64, _, _, _ string) (*MutationResp, error) {
+func (f *undoTestAPI) EditBody(_ context.Context, _ int64, _, body, _ string) (*MutationResp, error) {
+	f.writes = append(f.writes, "body "+body)
 	return f.completeResponse(f.writeResp), nil
 }
 
@@ -370,7 +381,7 @@ func TestUndoClientReopensRecordedCloseAfterFreshStateCheck(t *testing.T) {
 	require.Equal(t, "instance-1", entry.instanceUID)
 	resp.undo.complete()
 	f.issue = *f.closeResp.Issue
-	outcome := c.undo(t.Context(), entry, false, nil)
+	outcome := c.undo(t.Context(), entry, undoOptions{})
 	require.NoError(t, outcome.err)
 	require.True(t, outcome.changed)
 	require.Equal(t, 1, f.reopenCalls)
@@ -386,14 +397,14 @@ func TestUndoClientRefusesChangedIssueAndChangedDaemon(t *testing.T) {
 	other := "wontfix"
 	f.issue.ClosedReason = &other
 	f.issue.Revision = 8
-	outcome := c.undo(t.Context(), entry, false, nil)
+	outcome := c.undo(t.Context(), entry, undoOptions{})
 	require.False(t, outcome.changed)
 	require.NotEmpty(t, outcome.conflict)
 	require.Equal(t, 0, f.reopenCalls)
 	outcome.attempt.complete()
 	f.issue = entry.after
 	f.instanceUID = "instance-2"
-	outcome = c.undo(t.Context(), entry, false, nil)
+	outcome = c.undo(t.Context(), entry, undoOptions{})
 	require.False(t, outcome.changed)
 	require.NotEmpty(t, outcome.conflict)
 	require.Equal(t, 0, f.reopenCalls)
@@ -406,12 +417,13 @@ func TestUndoClientRestoresFieldEdits(t *testing.T) {
 		name    string
 		entry   undoEntry
 		current Issue
+		want    string
 	}{
-		{"owner", undoEntry{kind: "owner.assign", before: Issue{}, after: Issue{Owner: &owner}}, Issue{Owner: &owner}},
-		{"priority zero", undoEntry{kind: "priority.set", before: Issue{}, after: Issue{Priority: &priority}}, Issue{Priority: &priority}},
-		{"body", undoEntry{kind: "body.edit", before: Issue{Body: "before"}, after: Issue{Body: "after"}}, Issue{Body: "after"}},
-		{"label add", undoEntry{kind: "label.add", label: "urgent", before: Issue{}, after: Issue{}}, Issue{Labels: []string{"urgent"}}},
-		{"label remove", undoEntry{kind: "label.remove", label: "urgent", before: Issue{Labels: []string{"urgent"}}, after: Issue{}}, Issue{}},
+		{"owner", undoEntry{kind: "owner.assign", before: Issue{}, after: Issue{Owner: &owner}}, Issue{Owner: &owner}, "assign "},
+		{"priority zero", undoEntry{kind: "priority.set", before: Issue{}, after: Issue{Priority: &priority}}, Issue{Priority: &priority}, "priority clear"},
+		{"body", undoEntry{kind: "body.edit", before: Issue{Body: "before"}, after: Issue{Body: "after"}}, Issue{Body: "after"}, "body before"},
+		{"label add", undoEntry{kind: "label.add", label: "urgent", before: Issue{}, after: Issue{}}, Issue{Labels: []string{"urgent"}}, "label remove urgent"},
+		{"label remove", undoEntry{kind: "label.remove", label: "urgent", before: Issue{Labels: []string{"urgent"}}, after: Issue{}}, Issue{}, "label add urgent"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			uid := "01JZ0000000000000000000001"
@@ -419,9 +431,10 @@ func TestUndoClientRestoresFieldEdits(t *testing.T) {
 			tc.entry.uid, tc.entry.projectID, tc.entry.revision = uid, 7, 4
 			tc.entry.instanceUID, tc.entry.actor = "instance-1", "bob"
 			f := &undoTestAPI{issue: tc.current, writeResp: &MutationResp{Issue: &Issue{Revision: 4}, Changed: true}}
-			outcome := newConnectedUndoClient(t, f).undo(t.Context(), tc.entry, false, nil)
+			outcome := newConnectedUndoClient(t, f).undo(t.Context(), tc.entry, undoOptions{})
 			require.NoError(t, outcome.err)
 			require.True(t, outcome.changed)
+			require.Equal(t, []string{tc.want}, f.writes)
 		})
 	}
 }
@@ -431,7 +444,7 @@ func TestUndoClientRemovesOnlyExactRecordedLink(t *testing.T) {
 	f := &undoTestAPI{issue: Issue{UID: link.From.UID, ProjectID: 7, Revision: 4}, links: []LinkEntry{link},
 		writeResp: &MutationResp{Issue: &Issue{Revision: 4}, Changed: true}}
 	entry := undoEntry{kind: "link.add", uid: link.From.UID, projectID: 7, instanceUID: "instance-1", actor: "bob", revision: 4, link: &link}
-	outcome := newConnectedUndoClient(t, f).undo(t.Context(), entry, false, nil)
+	outcome := newConnectedUndoClient(t, f).undo(t.Context(), entry, undoOptions{})
 	require.NoError(t, outcome.err)
 	require.True(t, outcome.changed)
 	require.Equal(t, int64(42), f.removedLinkID)
@@ -594,7 +607,7 @@ func TestUndoClientRefusesChangedPrincipal(t *testing.T) {
 	resp.undo.complete()
 	f.issue = *f.closeResp.Issue
 	f.authActor = "mallory"
-	out := c.undo(t.Context(), entry, false, nil)
+	out := c.undo(t.Context(), entry, undoOptions{})
 	require.Contains(t, out.conflict, "principal")
 	require.Equal(t, 0, f.reopenCalls)
 }
@@ -630,7 +643,7 @@ func TestUndoClientNoopInverseReadbackConsumesRestoredEntry(t *testing.T) {
 		writeResp:   &MutationResp{Changed: false}}
 	entry := undoEntry{kind: "close", uid: uid, projectID: 7, instanceUID: "instance-1", actor: "bob",
 		before: Issue{Status: "open", Revision: 3}, after: f.issue, revision: 4}
-	out := newConnectedUndoClient(t, f).undo(t.Context(), entry, false, nil)
+	out := newConnectedUndoClient(t, f).undo(t.Context(), entry, undoOptions{})
 	require.NoError(t, out.err)
 	require.True(t, out.already)
 	require.False(t, out.changed)

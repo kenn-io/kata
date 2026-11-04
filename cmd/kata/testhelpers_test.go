@@ -525,11 +525,12 @@ func rootSubcommands() map[string]*cobra.Command {
 // care about decode to their zero value.
 type errorEnvelopeForTest struct {
 	Error struct {
-		Kind     string `json:"kind"`
-		Code     string `json:"code"`
-		Message  string `json:"message"`
-		Hint     string `json:"hint"`
-		ExitCode int    `json:"exit_code"`
+		Kind     string          `json:"kind"`
+		Code     string          `json:"code"`
+		Message  string          `json:"message"`
+		Hint     string          `json:"hint"`
+		ExitCode int             `json:"exit_code"`
+		Data     json.RawMessage `json:"data"`
 	} `json:"error"`
 }
 

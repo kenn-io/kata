@@ -219,8 +219,9 @@
     daemonSwitching || stale || reconnecting || loading || daemonError || credentialExpired
       ? '—'
       : snapshot.capabilities.account ||
-          actorlessConnectionLabels[snapshot.capabilities.auth_kind ?? ''] ||
-          'No account',
+          (snapshot.capabilities.auth_kind === undefined
+            ? 'Not reported by hub'
+            : actorlessConnectionLabels[snapshot.capabilities.auth_kind] || 'No account'),
   )
 
   let captureOpen = $state(false)
@@ -971,6 +972,9 @@
     min-width: 0;
     flex: 1;
     overflow: auto;
+    /* Reserve the scrollbar's width so controls do not shift when a search
+       changes whether the credential table overflows. */
+    scrollbar-gutter: stable;
   }
 
   .access-administration {

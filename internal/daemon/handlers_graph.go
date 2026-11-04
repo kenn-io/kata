@@ -346,48 +346,210 @@ func appendUnresolvedRef(
 	})
 }
 
+// markTransitiveBlockLayout expects edges deduplicated by kind and endpoints,
+// as edgesAndUnresolved provides. Keep in sync with markTransitiveBlockLayout
+// in web/src/lib/kata/projection.ts.
 func markTransitiveBlockLayout(edges []api.ReachableGraphEdge) {
-	blockAdj := map[string][]string{}
-	for _, edge := range edges {
-		if edge.Kind != "blocks" {
-			continue
+	ids := map[string]int{}
+	idOf := func(uid string) int {
+		if id, ok := ids[uid]; ok {
+			return id
 		}
-		blockAdj[edge.FromUID] = append(blockAdj[edge.FromUID], edge.ToUID)
+		id := len(ids)
+		ids[uid] = id
+		return id
 	}
-	for uid := range blockAdj {
-		slices.Sort(blockAdj[uid])
-	}
-	for i := range edges {
-		if edges[i].Kind != "blocks" {
-			continue
+	blocks := []int{}
+	var ends [][2]int
+	for i, edge := range edges {
+		if edge.Kind == "blocks" {
+			blocks = append(blocks, i)
+			ends = append(ends, [2]int{idOf(edge.FromUID), idOf(edge.ToUID)})
 		}
-		if hasAlternateBlockPath(blockAdj, edges[i].FromUID, edges[i].ToUID) {
-			edges[i].Layout = false
-		}
 	}
-}
+	count := len(ids)
+	targets := make([][]int, count)
+	for _, end := range ends {
+		targets[end[0]] = append(targets[end[0]], end[1])
+	}
 
-func hasAlternateBlockPath(adj map[string][]string, from, to string) bool {
-	seen := map[string]struct{}{from: {}}
-	queue := append([]string(nil), adj[from]...)
-	for len(queue) > 0 {
-		next := queue[0]
-		queue = queue[1:]
-		if next == to {
+	// Iterative Tarjan traversal numbers strongly connected components sinks-first.
+	componentOf, order := make([]int, count), make([]int, count)
+	low, cursor := make([]int, count), make([]int, count)
+	for node := range count {
+		componentOf[node], order[node] = -1, -1
+	}
+	var stack []int
+	var groups [][]int
+	visited := 0
+	for root := range targets {
+		if order[root] >= 0 {
 			continue
 		}
-		if _, ok := seen[next]; ok {
-			continue
-		}
-		seen[next] = struct{}{}
-		for _, peer := range adj[next] {
-			if peer == to {
-				return true
+		path := []int{root}
+		order[root], low[root] = visited, visited
+		visited++
+		stack = append(stack, root)
+		for len(path) > 0 {
+			node := path[len(path)-1]
+			if cursor[node] < len(targets[node]) {
+				child := targets[node][cursor[node]]
+				cursor[node]++
+				if order[child] < 0 {
+					order[child], low[child] = visited, visited
+					visited++
+					stack = append(stack, child)
+					path = append(path, child)
+				} else if componentOf[child] < 0 {
+					low[node] = min(low[node], order[child])
+				}
+				continue
 			}
-			if _, ok := seen[peer]; !ok {
-				queue = append(queue, peer)
+			path = path[:len(path)-1]
+			if len(path) > 0 {
+				parent := path[len(path)-1]
+				low[parent] = min(low[parent], low[node])
+			}
+			if low[node] == order[node] {
+				var group []int
+				for {
+					member := stack[len(stack)-1]
+					stack = stack[:len(stack)-1]
+					componentOf[member] = len(groups)
+					group = append(group, member)
+					if member == node {
+						break
+					}
+				}
+				groups = append(groups, group)
 			}
 		}
 	}
-	return false
+
+	// Only components with multiple incoming links can be hidden targets.
+	incoming := make([]int, len(groups))
+	for node := range count {
+		for _, to := range targets[node] {
+			if componentOf[to] != componentOf[node] {
+				incoming[componentOf[to]]++
+			}
+		}
+	}
+	bit := make([]int, len(groups))
+	bits := 0
+	for component := range groups {
+		bit[component] = -1
+		if incoming[component] > 1 {
+			bit[component] = bits
+			bits++
+		}
+	}
+	words := (bits + 63) / 64
+	reach := make([][]uint64, len(groups))
+	absorb := func(row []uint64, component int) {
+		if slot := bit[component]; slot >= 0 {
+			row[slot>>6] |= uint64(1) << (slot & 63)
+		}
+		for word := range words {
+			row[word] |= reach[component][word]
+		}
+	}
+	hidden := map[int]bool{}
+	for component, group := range groups {
+		row := make([]uint64, words)
+		reach[component] = row
+		if len(group) > 1 {
+			for _, member := range group {
+				for _, target := range targets[member] {
+					if componentOf[target] != component {
+						absorb(row, componentOf[target])
+					}
+				}
+			}
+			continue
+		}
+		// Acyclic sources cannot lie on a path from one target to another.
+		// Read nearest targets first, then hide targets already in the row.
+		node := group[0]
+		near := slices.Clone(targets[node])
+		slices.SortFunc(near, func(a, b int) int { return componentOf[b] - componentOf[a] })
+		for index, target := range near {
+			targetComponent := componentOf[target]
+			if slot := bit[targetComponent]; slot >= 0 {
+				if row[slot>>6]&(uint64(1)<<(slot&63)) != 0 {
+					hidden[node*count+target] = true
+				}
+				if index > 0 && componentOf[near[index-1]] == targetComponent {
+					hidden[node*count+near[index-1]] = true
+				}
+			}
+			absorb(row, targetComponent)
+		}
+	}
+
+	seen, first, second := make([]int, count), make([]int, count), make([]int, count)
+	queue, origins := make([]int, 2*count), make([]int, 2*count)
+	for node := range count {
+		seen[node] = -1
+	}
+	for _, group := range groups {
+		if len(group) == 1 {
+			continue
+		}
+		// Cyclic sources need paths that never return through the source.
+		// Two distinct starting targets per task suffice to detect alternate paths.
+		for _, source := range group {
+			if len(targets[source]) < 2 {
+				continue
+			}
+			pending := slices.Clone(targets[source])
+			slices.SortFunc(pending, func(a, b int) int { return componentOf[a] - componentOf[b] })
+			remaining, lowest := len(pending), 0
+			floor := componentOf[pending[lowest]]
+			tail := 0
+			for _, target := range pending {
+				seen[target], first[target], second[target] = source, target, -1
+				origins[tail], queue[tail] = target, target
+				tail++
+			}
+			for head := 0; head < tail && remaining > 0; head++ {
+				current := queue[head]
+				if componentOf[current] < floor {
+					continue
+				}
+				for _, target := range targets[current] {
+					if target == source || componentOf[target] < floor {
+						continue
+					}
+					origin := origins[head]
+					if seen[target] != source {
+						seen[target], first[target], second[target] = source, origin, -1
+					} else if first[target] == origin || second[target] != -1 {
+						continue
+					} else {
+						second[target] = origin
+						if first[target] == target {
+							hidden[source*count+target] = true
+							remaining--
+							if remaining == 0 {
+								break
+							}
+							// Hidden targets no longer require exploring lower components.
+							for hidden[source*count+pending[lowest]] {
+								lowest++
+							}
+							floor = componentOf[pending[lowest]]
+						}
+					}
+					origins[tail], queue[tail] = origin, target
+					tail++
+				}
+			}
+		}
+	}
+	for index, end := range ends {
+		if hidden[end[0]*count+end[1]] {
+			edges[blocks[index]].Layout = false
+		}
+	}
 }

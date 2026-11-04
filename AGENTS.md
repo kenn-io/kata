@@ -305,8 +305,10 @@ authorization service. Review browser changes against these boundaries:
   assertions never reach a target. Targets are canonical root HTTP(S) origins,
   bearer credentials are pinned to that origin, and redirects are rejected.
   Identity-bound browser principals remain read-only across a remote gateway
-  hop because Kata has no delegated-identity protocol; request-actor sources
-  remain writable only when the target advertises the same actor policy. Before
+  hop because Kata has no delegated-identity protocol. Request-actor sources
+  remain writable when the target advertises the same actor policy or binds
+  its credential to an account; an account-bound target records every write
+  as that account, as it does for the CLI with the same catalog token. Before
   every remote mutation, the gateway rechecks the exact target origin and
   credential's live writable and actor-policy capabilities without projection
   reads.

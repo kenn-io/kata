@@ -211,6 +211,8 @@ type Model struct {
 	undoHistory              undoHistory
 	undoInFlight             bool
 	undoCloseEntryID         uint64
+	reopenPrompt             *reopenPrompt
+	reopenLookupPending      bool
 	mutationEpoch            uint64
 }
 
@@ -487,6 +489,9 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if done, ok := msg.(undoDoneMsg); ok {
 		return m.handleUndoDone(done)
+	}
+	if backlog, ok := msg.(reopenBacklogMsg); ok {
+		return m.handleReopenBacklog(backlog)
 	}
 	// Editor returns from a centered form's ctrl+e handoff land here
 	// before dispatchToView so the writeback can hit m.input. formGen=0
@@ -961,6 +966,9 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 			return next, cmd, true
 		}
 		if next, cmd, ok := m.routeDatesKey(msg); ok {
+			return next, cmd, true
+		}
+		if next, cmd, ok := m.routeReopenKey(msg); ok {
 			return next, cmd, true
 		}
 		// Detail-view `e` and `c` open M4 centered forms instead of
@@ -2740,7 +2748,7 @@ func cacheKeysEqual(a, b cacheKey) bool {
 func (m Model) handleEventReceived(msg eventReceivedMsg) (tea.Model, tea.Cmd) {
 	cmds := []tea.Cmd{m.waitForSSE()}
 	if m.eventAffectsView(msg) {
-		if strings.HasPrefix(msg.eventType, "cron.") || msg.eventType == "project.merged" {
+		if strings.HasPrefix(msg.eventType, "cron.") || msg.eventType == "project.merged" || msg.eventType == "project.removed" || msg.eventType == "project.restored" || m.cronParentEvent(msg) {
 			m.cron.events++
 		}
 		m.cache.markStale()
@@ -3186,6 +3194,13 @@ func (m Model) routeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		case "n", "N", "esc":
 			m.modal = modalNone
 			return m, nil
+		}
+	case modalReopenBacklog:
+		switch msg.String() {
+		case "y", "Y":
+			return m.confirmReopenBacklog()
+		case "n", "N", "esc":
+			return m.cancelReopenBacklog(), nil
 		}
 	case modalDiscardComment, modalDiscardNewIssue:
 		switch msg.String() {
@@ -3636,6 +3651,15 @@ func (m Model) viewContent() string {
 		case viewCredentials:
 			body = renderCredentials(m)
 		default:
+			if m.modal == modalReopenBacklog {
+				footer := renderFooterHelpTable(modalHelpRows(m.modal), m.width)
+				bodyHeight := max(0, m.height-lipgloss.Height(footer))
+				body = renderTooNarrow(m.width, bodyHeight)
+				body = m.withActiveConnectionHeader(m.appendNonListDetailExtras(body))
+				body = overlayModal(body, renderConfirmModal(m.modal, m.reopenPrompt), m.width, bodyHeight)
+				lines := strings.Split(body, "\n")
+				return joinNonEmpty([]string{strings.Join(lines[:min(bodyHeight, len(lines))], "\n"), footer})
+			}
 			body = renderTooNarrow(m.width, m.height)
 		}
 		body = m.withActiveConnectionHeader(m.appendNonListDetailExtras(body))
@@ -3668,7 +3692,7 @@ func (m Model) overlayInputAndModal(body string) string {
 		body = overlayModal(body, form, m.width, m.height)
 	}
 	if m.modal != modalNone {
-		body = overlayModal(body, renderConfirmModal(m.modal), m.width, m.height)
+		body = overlayModal(body, renderConfirmModal(m.modal, m.reopenPrompt), m.width, m.height)
 	}
 	return body
 }

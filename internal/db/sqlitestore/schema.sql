@@ -66,6 +66,10 @@ CREATE INDEX idx_issues_project_status_updated
   ON issues(project_id, status, updated_at DESC) WHERE deleted_at IS NULL;
 CREATE INDEX idx_issues_project_updated
   ON issues(project_id, updated_at DESC) WHERE deleted_at IS NULL;
+CREATE INDEX idx_issues_project_created
+  ON issues(project_id, (strftime('%Y-%m-%dT%H:%M:%S', substr((CASE WHEN max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -')) > 0 THEN replace(substr(replace(created_at, ' +0000 UTC', 'Z'), 1, max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))-1), ' ', 'T') || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+1, 3) || ':' || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+4, 2) ELSE replace(created_at, ' +0000 UTC', 'Z') END),1,19) || (CASE WHEN substr(CASE WHEN max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -')) > 0 THEN replace(substr(replace(created_at, ' +0000 UTC', 'Z'), 1, max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))-1), ' ', 'T') || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+1, 3) || ':' || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+4, 2) ELSE replace(created_at, ' +0000 UTC', 'Z') END,-1)='Z' THEN 'Z' WHEN substr(CASE WHEN max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -')) > 0 THEN replace(substr(replace(created_at, ' +0000 UTC', 'Z'), 1, max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))-1), ' ', 'T') || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+1, 3) || ':' || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+4, 2) ELSE replace(created_at, ' +0000 UTC', 'Z') END,-6,1) IN ('+','-') THEN substr(CASE WHEN max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -')) > 0 THEN replace(substr(replace(created_at, ' +0000 UTC', 'Z'), 1, max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))-1), ' ', 'T') || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+1, 3) || ':' || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+4, 2) ELSE replace(created_at, ' +0000 UTC', 'Z') END,-6) ELSE '' END)) || '.' || CASE WHEN substr((CASE WHEN max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -')) > 0 THEN replace(substr(replace(created_at, ' +0000 UTC', 'Z'), 1, max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))-1), ' ', 'T') || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+1, 3) || ':' || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+4, 2) ELSE replace(created_at, ' +0000 UTC', 'Z') END),20,1)='.' THEN substr(substr((CASE WHEN max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -')) > 0 THEN replace(substr(replace(created_at, ' +0000 UTC', 'Z'), 1, max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))-1), ' ', 'T') || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+1, 3) || ':' || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+4, 2) ELSE replace(created_at, ' +0000 UTC', 'Z') END),21,length((CASE WHEN max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -')) > 0 THEN replace(substr(replace(created_at, ' +0000 UTC', 'Z'), 1, max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))-1), ' ', 'T') || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+1, 3) || ':' || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+4, 2) ELSE replace(created_at, ' +0000 UTC', 'Z') END))-20-length(CASE WHEN substr(CASE WHEN max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -')) > 0 THEN replace(substr(replace(created_at, ' +0000 UTC', 'Z'), 1, max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))-1), ' ', 'T') || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+1, 3) || ':' || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+4, 2) ELSE replace(created_at, ' +0000 UTC', 'Z') END,-1)='Z' THEN 'Z' WHEN substr(CASE WHEN max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -')) > 0 THEN replace(substr(replace(created_at, ' +0000 UTC', 'Z'), 1, max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))-1), ' ', 'T') || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+1, 3) || ':' || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+4, 2) ELSE replace(created_at, ' +0000 UTC', 'Z') END,-6,1) IN ('+','-') THEN substr(CASE WHEN max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -')) > 0 THEN replace(substr(replace(created_at, ' +0000 UTC', 'Z'), 1, max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))-1), ' ', 'T') || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+1, 3) || ':' || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+4, 2) ELSE replace(created_at, ' +0000 UTC', 'Z') END,-6) ELSE '' END)) || '000000000',1,9) ELSE '000000000' END), id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_issues_created
+  ON issues((strftime('%Y-%m-%dT%H:%M:%S', substr((CASE WHEN max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -')) > 0 THEN replace(substr(replace(created_at, ' +0000 UTC', 'Z'), 1, max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))-1), ' ', 'T') || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+1, 3) || ':' || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+4, 2) ELSE replace(created_at, ' +0000 UTC', 'Z') END),1,19) || (CASE WHEN substr(CASE WHEN max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -')) > 0 THEN replace(substr(replace(created_at, ' +0000 UTC', 'Z'), 1, max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))-1), ' ', 'T') || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+1, 3) || ':' || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+4, 2) ELSE replace(created_at, ' +0000 UTC', 'Z') END,-1)='Z' THEN 'Z' WHEN substr(CASE WHEN max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -')) > 0 THEN replace(substr(replace(created_at, ' +0000 UTC', 'Z'), 1, max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))-1), ' ', 'T') || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+1, 3) || ':' || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+4, 2) ELSE replace(created_at, ' +0000 UTC', 'Z') END,-6,1) IN ('+','-') THEN substr(CASE WHEN max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -')) > 0 THEN replace(substr(replace(created_at, ' +0000 UTC', 'Z'), 1, max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))-1), ' ', 'T') || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+1, 3) || ':' || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+4, 2) ELSE replace(created_at, ' +0000 UTC', 'Z') END,-6) ELSE '' END)) || '.' || CASE WHEN substr((CASE WHEN max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -')) > 0 THEN replace(substr(replace(created_at, ' +0000 UTC', 'Z'), 1, max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))-1), ' ', 'T') || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+1, 3) || ':' || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+4, 2) ELSE replace(created_at, ' +0000 UTC', 'Z') END),20,1)='.' THEN substr(substr((CASE WHEN max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -')) > 0 THEN replace(substr(replace(created_at, ' +0000 UTC', 'Z'), 1, max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))-1), ' ', 'T') || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+1, 3) || ':' || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+4, 2) ELSE replace(created_at, ' +0000 UTC', 'Z') END),21,length((CASE WHEN max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -')) > 0 THEN replace(substr(replace(created_at, ' +0000 UTC', 'Z'), 1, max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))-1), ' ', 'T') || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+1, 3) || ':' || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+4, 2) ELSE replace(created_at, ' +0000 UTC', 'Z') END))-20-length(CASE WHEN substr(CASE WHEN max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -')) > 0 THEN replace(substr(replace(created_at, ' +0000 UTC', 'Z'), 1, max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))-1), ' ', 'T') || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+1, 3) || ':' || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+4, 2) ELSE replace(created_at, ' +0000 UTC', 'Z') END,-1)='Z' THEN 'Z' WHEN substr(CASE WHEN max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -')) > 0 THEN replace(substr(replace(created_at, ' +0000 UTC', 'Z'), 1, max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))-1), ' ', 'T') || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+1, 3) || ':' || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+4, 2) ELSE replace(created_at, ' +0000 UTC', 'Z') END,-6,1) IN ('+','-') THEN substr(CASE WHEN max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -')) > 0 THEN replace(substr(replace(created_at, ' +0000 UTC', 'Z'), 1, max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))-1), ' ', 'T') || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+1, 3) || ':' || substr(replace(created_at, ' +0000 UTC', 'Z'), max(instr(replace(created_at, ' +0000 UTC', 'Z'), ' +'), instr(replace(created_at, ' +0000 UTC', 'Z'), ' -'))+4, 2) ELSE replace(created_at, ' +0000 UTC', 'Z') END,-6) ELSE '' END)) || '000000000',1,9) ELSE '000000000' END), id) WHERE deleted_at IS NULL;
 CREATE INDEX idx_issues_owner
   ON issues(owner) WHERE owner IS NOT NULL AND deleted_at IS NULL;
 CREATE INDEX idx_issues_assignment_expires_on
@@ -532,133 +536,37 @@ CREATE TABLE meta (
 );
 INSERT INTO meta(key, value) VALUES ('created_by_version', '0.1.0');
 
--- FTS5 virtual table over issue title+body+comments, kept in sync via triggers below.
+-- Index each issue and comment independently so writes only touch their document.
 CREATE VIRTUAL TABLE issues_fts USING fts5(
-  title, body, comments,
+  title, body,
+  content='', tokenize='unicode61 remove_diacritics 2'
+);
+CREATE VIRTUAL TABLE comments_fts USING fts5(
+  body,
   content='', tokenize='unicode61 remove_diacritics 2'
 );
 
--- FTS5 sync triggers. The issues_fts table uses content='' so each delete must
--- provide the previously indexed column values; we stay in sync by routing every
--- title/body/comments mutation through one of the six triggers below. comments
--- is stored as a single space-separated aggregate built from the comments table
--- at trigger time.
---
--- Soft-delete (issues.deleted_at IS NOT NULL) does NOT remove rows from FTS --
--- look-alike checks and search filter deleted rows at query time so soft-deleted
--- issues remain reachable for `kata search --include-deleted` later.
-
+-- Contentless FTS5 deletes require the previously indexed values.
+-- Soft-deleted issues remain indexed for include-deleted searches.
 CREATE TRIGGER issues_ai_fts AFTER INSERT ON issues BEGIN
-  INSERT INTO issues_fts(rowid, title, body, comments)
-  VALUES (NEW.id, NEW.title, NEW.body, '');
+  INSERT INTO issues_fts(rowid, title, body) VALUES (NEW.id, NEW.title, NEW.body);
 END;
-
--- All GROUP_CONCAT operations below wrap their source in a subquery with
--- ORDER BY id so the aggregate is deterministic. SQLite does not guarantee
--- input order to GROUP_CONCAT without ORDER BY, and the FTS5 'delete' command
--- on a contentless table requires the exact bytes that were last inserted —
--- any drift between the insert form and the delete form leaves stale tokens
--- in the index.
-
 CREATE TRIGGER issues_au_fts AFTER UPDATE OF title, body ON issues BEGIN
-  INSERT INTO issues_fts(issues_fts, rowid, title, body, comments) VALUES (
-    'delete', OLD.id, OLD.title, OLD.body,
-    COALESCE((SELECT GROUP_CONCAT(body, ' ') FROM (
-      SELECT body FROM comments WHERE issue_id = OLD.id ORDER BY id
-    )), '')
-  );
-  INSERT INTO issues_fts(rowid, title, body, comments) VALUES (
-    NEW.id, NEW.title, NEW.body,
-    COALESCE((SELECT GROUP_CONCAT(body, ' ') FROM (
-      SELECT body FROM comments WHERE issue_id = NEW.id ORDER BY id
-    )), '')
-  );
+  INSERT INTO issues_fts(issues_fts, rowid, title, body) VALUES ('delete', OLD.id, OLD.title, OLD.body);
+  INSERT INTO issues_fts(rowid, title, body) VALUES (NEW.id, NEW.title, NEW.body);
 END;
-
 CREATE TRIGGER issues_ad_fts AFTER DELETE ON issues BEGIN
-  -- Purge cascade deletes comments before issues, so the GROUP_CONCAT here is
-  -- always '' at trigger time. We still pass it explicitly so the FTS delete
-  -- command sees the same column shape we last inserted.
-  INSERT INTO issues_fts(issues_fts, rowid, title, body, comments) VALUES (
-    'delete', OLD.id, OLD.title, OLD.body,
-    COALESCE((SELECT GROUP_CONCAT(body, ' ') FROM (
-      SELECT body FROM comments WHERE issue_id = OLD.id ORDER BY id
-    )), '')
-  );
+  INSERT INTO issues_fts(issues_fts, rowid, title, body) VALUES ('delete', OLD.id, OLD.title, OLD.body);
 END;
-
 CREATE TRIGGER comments_ai_fts AFTER INSERT ON comments BEGIN
-  -- Pre-insert state (what FTS currently holds) excludes the just-inserted row.
-  INSERT INTO issues_fts(issues_fts, rowid, title, body, comments) VALUES (
-    'delete',
-    NEW.issue_id,
-    (SELECT title FROM issues WHERE id = NEW.issue_id),
-    (SELECT body  FROM issues WHERE id = NEW.issue_id),
-    COALESCE((SELECT GROUP_CONCAT(body, ' ') FROM (
-      SELECT body FROM comments WHERE issue_id = NEW.issue_id AND id <> NEW.id ORDER BY id
-    )), '')
-  );
-  -- Post-insert state (what FTS should hold) includes it.
-  INSERT INTO issues_fts(rowid, title, body, comments) VALUES (
-    NEW.issue_id,
-    (SELECT title FROM issues WHERE id = NEW.issue_id),
-    (SELECT body  FROM issues WHERE id = NEW.issue_id),
-    COALESCE((SELECT GROUP_CONCAT(body, ' ') FROM (
-      SELECT body FROM comments WHERE issue_id = NEW.issue_id ORDER BY id
-    )), '')
-  );
+  INSERT INTO comments_fts(rowid, body) VALUES (NEW.id, NEW.body);
 END;
-
 CREATE TRIGGER comments_au_fts AFTER UPDATE OF body ON comments BEGIN
-  -- Pre-update state (what FTS currently holds) contained OLD.body at OLD.id.
-  INSERT INTO issues_fts(issues_fts, rowid, title, body, comments) VALUES (
-    'delete',
-    OLD.issue_id,
-    (SELECT title FROM issues WHERE id = OLD.issue_id),
-    (SELECT body  FROM issues WHERE id = OLD.issue_id),
-    COALESCE((SELECT GROUP_CONCAT(body, ' ') FROM (
-      SELECT id, body FROM comments WHERE issue_id = OLD.issue_id AND id <> OLD.id
-      UNION ALL
-      SELECT OLD.id, OLD.body
-      ORDER BY id
-    )), '')
-  );
-  -- Post-update state (what FTS should hold) includes NEW.body.
-  INSERT INTO issues_fts(rowid, title, body, comments) VALUES (
-    NEW.issue_id,
-    (SELECT title FROM issues WHERE id = NEW.issue_id),
-    (SELECT body  FROM issues WHERE id = NEW.issue_id),
-    COALESCE((SELECT GROUP_CONCAT(body, ' ') FROM (
-      SELECT body FROM comments WHERE issue_id = NEW.issue_id ORDER BY id
-    )), '')
-  );
+  INSERT INTO comments_fts(comments_fts, rowid, body) VALUES ('delete', OLD.id, OLD.body);
+  INSERT INTO comments_fts(rowid, body) VALUES (NEW.id, NEW.body);
 END;
-
 CREATE TRIGGER comments_ad_fts AFTER DELETE ON comments BEGIN
-  -- Pre-delete state (what FTS currently holds) included the deleted row at
-  -- its id-ordered position. Reconstruct by unioning OLD back in with its id
-  -- and ORDER BY id so the aggregate matches the form last inserted into FTS.
-  INSERT INTO issues_fts(issues_fts, rowid, title, body, comments) VALUES (
-    'delete',
-    OLD.issue_id,
-    (SELECT title FROM issues WHERE id = OLD.issue_id),
-    (SELECT body  FROM issues WHERE id = OLD.issue_id),
-    COALESCE((SELECT GROUP_CONCAT(body, ' ') FROM (
-      SELECT id, body FROM comments WHERE issue_id = OLD.issue_id
-      UNION ALL
-      SELECT OLD.id, OLD.body
-      ORDER BY id
-    )), '')
-  );
-  -- Post-delete state (what FTS should hold) excludes it.
-  INSERT INTO issues_fts(rowid, title, body, comments) VALUES (
-    OLD.issue_id,
-    (SELECT title FROM issues WHERE id = OLD.issue_id),
-    (SELECT body  FROM issues WHERE id = OLD.issue_id),
-    COALESCE((SELECT GROUP_CONCAT(body, ' ') FROM (
-      SELECT body FROM comments WHERE issue_id = OLD.issue_id ORDER BY id
-    )), '')
-  );
+  INSERT INTO comments_fts(comments_fts, rowid, body) VALUES ('delete', OLD.id, OLD.body);
 END;
 
 CREATE TABLE import_mappings (

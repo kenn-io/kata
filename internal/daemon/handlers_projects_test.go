@@ -24,7 +24,8 @@ func TestResolve_FailsOutsideKataTomlAndWithoutAlias(t *testing.T) {
 	resp, bs := postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
 		"start_path": t.TempDir(),
 	})
-	assertAPIError(t, resp.StatusCode, bs, 404, "project_not_initialized")
+	envelope := assertAPIError(t, resp.StatusCode, bs, 404, "project_not_initialized")
+	assert.Empty(t, envelope.Error.Data, string(bs))
 }
 
 func TestInit_FromGitRemoteCreatesProject(t *testing.T) {
@@ -258,9 +259,8 @@ func TestResolve_ByProjectName_NotRegistered(t *testing.T) {
 	resp, bs := postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
 		"name": "never-registered",
 	})
-	assert.Equal(t, http.StatusNotFound, resp.StatusCode, string(bs))
-	assert.Contains(t, string(bs), "project_not_initialized")
-	assert.Contains(t, string(bs), "never-registered")
+	envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
+	assert.Equal(t, map[string]any{"project": "never-registered"}, map[string]any(envelope.Error.Data), string(bs))
 }
 
 // TestResolve_NeitherFieldSet rejects a request that supplies neither
@@ -316,7 +316,34 @@ func TestResolve_ByAliasInput_NotRegistered(t *testing.T) {
 			"kind":     "git",
 		},
 	})
-	assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
+	envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
+	assert.Equal(t, map[string]any{"alias": "github.com/wesm/never-seen"}, map[string]any(envelope.Error.Data), string(bs))
+
+	resp, bs = postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
+		"alias": map[string]any{
+			"identity": "github.com/wesm/never-seen",
+			"kind":     "git",
+		},
+		"name": "ghost-project",
+	})
+	envelope = assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
+	assert.Equal(t, map[string]any{"project": "ghost-project"}, map[string]any(envelope.Error.Data), string(bs))
+}
+
+// TestResolve_ByStartPath_KataTomlNamesUnregisteredProject reports the
+// bound project name in error.data when .kata.toml names a project the
+// daemon does not know.
+func TestResolve_ByStartPath_KataTomlNamesUnregisteredProject(t *testing.T) {
+	ts := newTestServer(t)
+	dir := t.TempDir()
+	testfix.RunGit(t, dir, "init", "--quiet")
+	testfix.WriteKataToml(t, dir, "ghost-project")
+
+	resp, bs := postJSON(t, ts, "/api/v1/projects/resolve", map[string]any{
+		"start_path": dir,
+	})
+	envelope := assertAPIError(t, resp.StatusCode, bs, http.StatusNotFound, "project_not_initialized")
+	assert.Equal(t, map[string]any{"project": "ghost-project"}, map[string]any(envelope.Error.Data), string(bs))
 }
 
 func TestListProjects_IncludeArchived(t *testing.T) {
@@ -513,7 +540,8 @@ func TestResolve_ByAliasInput_RejectsArchivedProject(t *testing.T) {
 			"kind":     "git",
 		},
 	})
-	assertAPIError(t, resp2.StatusCode, bs2, http.StatusNotFound, "project_not_initialized")
+	envelope := assertAPIError(t, resp2.StatusCode, bs2, http.StatusNotFound, "project_not_initialized")
+	assert.Equal(t, map[string]any{"alias": "github.com/wesm/kata"}, map[string]any(envelope.Error.Data), string(bs2))
 	assert.Contains(t, string(bs2), "archived")
 }
 

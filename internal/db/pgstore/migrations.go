@@ -47,6 +47,12 @@ var eventReplyTargetIndexMigrationSQL string
 //go:embed migrations/000039_comment_uid_handle_index.up.sql
 var commentUIDHandleIndexMigrationSQL string
 
+//go:embed migrations/000041_comment_search.up.sql
+var commentSearchMigrationSQL string
+
+//go:embed migrations/000042_issue_created_order_index.up.sql
+var issueCreatedOrderIndexMigrationSQL string
+
 // Migration is one immutable Postgres schema transition. Assets form an exact
 // version chain; callers applying them externally must stamp ToVersion only
 // after SQL succeeds in the same transaction.
@@ -98,6 +104,8 @@ var migrationAssets = []Migration{
 	{FromVersion: 34, ToVersion: 35, Name: "000035_event_move_history_index.up.sql", SQL: eventMoveHistoryIndexMigrationSQL},
 	{FromVersion: 35, ToVersion: 38, Name: "000038_event_reply_target_index.up.sql", SQL: eventReplyTargetIndexMigrationSQL},
 	{FromVersion: 38, ToVersion: 39, Name: "000039_comment_uid_handle_index.up.sql", SQL: commentUIDHandleIndexMigrationSQL},
+	{FromVersion: 39, ToVersion: 41, Name: "000041_comment_search.up.sql", SQL: commentSearchMigrationSQL},
+	{FromVersion: 41, ToVersion: 42, Name: "000042_issue_created_order_index.up.sql", SQL: issueCreatedOrderIndexMigrationSQL},
 }
 
 // Migrations returns forward migrations from previously released Postgres

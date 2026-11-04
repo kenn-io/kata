@@ -66,6 +66,11 @@ type ServerConfig struct {
 	Endpoint        *kitdaemon.Endpoint
 	Broadcaster     *EventBroadcaster
 	FederationWake  func()
+	// FederationPushPending drains existing direct push replication under caller-held coordination.
+	FederationPushPending func(context.Context, db.FederationBinding, config.FederationCredential) error
+	// FederationHubClient builds the bearer-pinned hub client for a stored
+	// credential. It is injected so the daemon does not import the client package.
+	FederationHubClient func(context.Context, config.FederationCredential) (*http.Client, error)
 	// EmbeddingWake notifies the existing local worker after artifact commit.
 	EmbeddingWake                 func()
 	FederationCredentials         config.FederationCredentialStore
