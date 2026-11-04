@@ -145,6 +145,10 @@ func TestCronCreateResendKeepsUID(t *testing.T) {
 	api.putErrs = []error{errors.New("connection reset"), nil}
 
 	m, cmd := press(m, ctrlKey('o'))
+	require.True(t, m.cron.form.saving)
+	m, ignored := press(m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	require.Nil(t, ignored)
+	require.NotNil(t, m.cron.form)
 	m = settle(t, m, cmd)
 	require.NotNil(t, m.cron.form, "a failed save keeps the draft")
 	require.Contains(t, m.cron.form.general, "connection reset")
@@ -260,14 +264,17 @@ func TestCronConflictRefusesFutureVersion(t *testing.T) {
 }
 
 func TestCronJobKeysRespectMutationAuthority(t *testing.T) {
-	for _, key := range []rune{'n', 'e'} {
-		for _, pending := range []bool{false, true} {
-			m, _ := cronWriteFixture(t)
-			m.issueScoped, m.scopedWritable = !pending, true
-			m.authCapabilitiesRequired, m.authCapabilitiesReady = pending, false
-			m, cmd := updateModel(m, keyRune(key))
-			require.Nil(t, m.cron.form, "key=%c pending=%v", key, pending)
-			require.Equal(t, pending, cmd != nil, "key=%c pending=%v: only pending discovery is retried", key, pending)
+	for _, tab := range []rune{'2', '4'} {
+		for _, key := range []rune{'n', 'e'} {
+			for _, pending := range []bool{false, true} {
+				m, _ := cronWriteFixture(t)
+				m = sendRune(m, tab)
+				m.issueScoped, m.scopedWritable = !pending, true
+				m.authCapabilitiesRequired, m.authCapabilitiesReady = pending, false
+				m, cmd := updateModel(m, keyRune(key))
+				require.Nil(t, m.cron.form, "key=%c pending=%v", key, pending)
+				require.Equal(t, pending, cmd != nil, "key=%c pending=%v: only pending discovery is retried", key, pending)
+			}
 		}
 	}
 }
@@ -353,8 +360,11 @@ func TestCronEditRefusesAnArchivedRecord(t *testing.T) {
 
 func TestCronEditResponseNeedsItsContext(t *testing.T) {
 	for name, away := range map[string]func(Model) Model{
-		"help":      func(m Model) Model { m, _ = updateModel(m, keyRune('?')); return m },
-		"other tab": func(m Model) Model { return sendRune(m, '3') },
+		"help":          func(m Model) Model { m, _ = updateModel(m, keyRune('?')); return m },
+		"other tab":     func(m Model) Model { return sendRune(m, '3') },
+		"connection":    func(m Model) Model { m.connGen++; return m },
+		"scope":         func(m Model) Model { m.scopeGen++; return m },
+		"edit sequence": func(m Model) Model { m.cron.editSeq++; return m },
 		"filtering": func(m Model) Model {
 			m, _ = press(m, keyRune('/'))
 			require.True(t, m.cron.filtering)

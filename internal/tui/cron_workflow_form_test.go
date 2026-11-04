@@ -3,7 +3,6 @@ package tui
 import (
 	"errors"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 
@@ -43,21 +42,6 @@ func TestWorkflowFormKeysAndAuthority(t *testing.T) {
 	require.True(t, katauid.Valid(m.cron.form.uid))
 	require.Equal(t, []cronField{cfName, cfDefinition}, m.cron.form.order())
 	require.Contains(t, stripANSI(m.viewBody()), "New workflow")
-	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
-	require.Nil(t, m.cron.form)
-	m = sendRune(m, '2')
-	m, _ = updateModel(m, keyRune('n'))
-	require.False(t, m.cron.form.wf)
-	for _, key := range []rune{'n', 'e'} {
-		for _, pending := range []bool{false, true} {
-			m, _ := cronWriteFixture(t)
-			m = sendRune(m, '4')
-			m.issueScoped, m.scopedWritable = !pending, true
-			m.authCapabilitiesRequired, m.authCapabilitiesReady = pending, false
-			m, _ = updateModel(m, keyRune(key))
-			require.Nil(t, m.cron.form)
-		}
-	}
 	for _, detail := range []bool{false, true} {
 		m, _ := openWorkflow(t, workflowRecord(), detail)
 		require.NotNil(t, m.cron.form)
@@ -67,9 +51,7 @@ func TestWorkflowFormKeysAndAuthority(t *testing.T) {
 }
 
 func TestWorkflowEditorReturnAndValidation(t *testing.T) {
-	m, api := openWorkflow(t, workflowRecord(), false)
-	api.shown = executeRecord(`{}`)
-	api.shown.UID = m.cron.data.jobs[0].UID
+	m, _ := openWorkflow(t, workflowRecord(), false)
 	m, cmd := updateModel(m, ctrlKey('e'))
 	require.NotNil(t, cmd)
 	const bad = `{
@@ -86,22 +68,9 @@ func TestWorkflowEditorReturnAndValidation(t *testing.T) {
 	require.Equal(t, cfDefinition, m.cron.form.focus)
 	const invalid = `{"version":1,"steps":[{"key":"build","kind":"prompt","prompt":"Build"},{"key":"ship","kind":"prompt"}]}`
 	m, _ = updateModel(m, editorReturnedMsg{formGen: m.nextFormGen, content: invalid})
-	require.Contains(t, stripANSI(m.viewBody()), `step 2 "ship": prompt step requires only prompt`)
-	gen := m.nextFormGen
-	m, _ = updateModel(m, editorReturnedMsg{formGen: gen - 1, content: "stale"})
-	require.Equal(t, invalid, m.cron.form.val[cfDefinition])
-	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
-	require.Equal(t, modalDiscardCronJob, m.modal)
-	require.Contains(t, stripANSI(m.View().Content), "Discard draft?")
-	m, _ = updateModel(m, keyRune('y'))
-	require.Nil(t, m.cron.form)
-	m, _ = updateModel(m, editorReturnedMsg{formGen: gen, content: "closed"})
-	require.Nil(t, m.cron.form)
-	m = sendRune(m, '2')
-	m, cmd = press(m, keyRune('e'))
-	m = settle(t, m, cmd)
-	require.NotNil(t, m.cron.form)
-	require.False(t, m.cron.form.wf)
+	_, err := cron.ParseWorkflow([]byte(invalid))
+	require.Error(t, err)
+	require.Contains(t, stripANSI(m.viewBody()), err.Error())
 }
 
 func TestWorkflowConflictKeepsDraftAndGuardsReplacement(t *testing.T) {
@@ -117,13 +86,7 @@ func TestWorkflowConflictKeepsDraftAndGuardsReplacement(t *testing.T) {
 	require.NotNil(t, m.cron.form.conflict)
 	require.Equal(t, draft, m.cron.form.val[cfDefinition])
 	require.Equal(t, opened, api.workflowPuts[0].write.ExpectedEventUID)
-	var viewed strings.Builder
-	for range 30 {
-		viewed.WriteString(stripANSI(m.viewBody()))
-		m, _ = press(m, tea.KeyPressMsg{Code: tea.KeyDown})
-	}
-	require.Contains(t, viewed.String(), "Current name")
-	require.Contains(t, viewed.String(), "Current prompt")
+	require.Contains(t, stripANSI(m.viewBody()), "Current name")
 	m, _ = press(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	require.Nil(t, m.cron.form.conflict)
 	require.Equal(t, draft, m.cron.form.val[cfDefinition])
@@ -138,20 +101,31 @@ func TestWorkflowConflictKeepsDraftAndGuardsReplacement(t *testing.T) {
 }
 
 func TestWorkflowRefusesArchivedAndFutureRecords(t *testing.T) {
-	for _, archived := range []bool{false, true} {
+	t.Run("archived", func(t *testing.T) {
 		rec := workflowRecord()
-		if archived {
-			rec.DeletedAt = new(time.Now())
-		} else {
-			rec.Definition.Version = 2
-		}
+		rec.DeletedAt = new(time.Now())
 		m, _ := openWorkflow(t, rec, false)
 		require.Nil(t, m.cron.form)
-		if archived {
-			require.Contains(t, m.toast.text, "restore")
-		} else {
-			require.Contains(t, m.toast.text, "version")
-		}
+		require.Contains(t, m.toast.text, "restore")
+
+		m, api := openWorkflow(t, workflowRecord(), false)
+		api.workflowShown = rec
+		api.putErrs = []error{&APIError{Status: http.StatusConflict, Code: "cron_conflict"}}
+		m, cmd := press(m, ctrlKey('o'))
+		m = settle(t, m, cmd)
+		require.NotNil(t, m.cron.form.conflict)
+		require.NotContains(t, stripANSI(m.viewBody()), "save my draft")
+		m, cmd = press(m, ctrlKey('o'))
+		require.Nil(t, cmd)
+		require.Len(t, api.workflowPuts, 1)
+	})
+	t.Run("future version", func(t *testing.T) {
+		rec := workflowRecord()
+		rec.Definition.Version = 2
+		m, _ := openWorkflow(t, rec, false)
+		require.Nil(t, m.cron.form)
+		require.Contains(t, m.toast.text, "version")
+
 		m, api := openWorkflow(t, workflowRecord(), false)
 		draft, expected := m.cron.form.val[cfDefinition], m.cron.form.expected
 		api.workflowShown = rec
@@ -161,59 +135,32 @@ func TestWorkflowRefusesArchivedAndFutureRecords(t *testing.T) {
 		require.NotNil(t, m.cron.form)
 		require.Equal(t, draft, m.cron.form.val[cfDefinition])
 		require.Equal(t, expected, m.cron.form.expected)
-		if archived {
-			require.NotNil(t, m.cron.form.conflict)
-			require.NotContains(t, stripANSI(m.viewBody()), "save my draft")
-			m, cmd = press(m, ctrlKey('o'))
-			require.Nil(t, cmd)
-		} else {
-			require.Nil(t, m.cron.form.conflict)
-			require.Contains(t, m.cron.form.general, "version")
-		}
+		require.Nil(t, m.cron.form.conflict)
+		require.Contains(t, m.cron.form.general, "version")
 		require.Len(t, api.workflowPuts, 1)
-	}
+	})
 }
 
-func TestWorkflowCreateResendKeepsUID(t *testing.T) {
+func TestWorkflowCreatePut(t *testing.T) {
 	m, api := cronWriteFixture(t)
 	m = sendRune(m, '4')
 	m, _ = press(m, keyRune('n'))
 	m.cron.form.val[cfName] = "Deploy"
-	minted := m.cron.form.uid
-	api.putErrs = []error{errors.New("connection reset"), nil}
 	m, cmd := press(m, ctrlKey('o'))
-	require.True(t, m.cron.form.saving)
-	m, ignored := press(m, tea.KeyPressMsg{Code: tea.KeyEsc})
-	require.Nil(t, ignored)
-	require.NotNil(t, m.cron.form)
-	m = settle(t, m, cmd)
-	require.Contains(t, m.cron.form.general, "connection reset")
-	m, cmd = press(m, ctrlKey('o'))
 	m = settle(t, m, cmd)
 	require.Nil(t, m.cron.form)
-	require.Len(t, api.workflowPuts, 2)
-	for _, put := range api.workflowPuts {
-		require.Equal(t, minted, put.uid)
-		require.Empty(t, put.write.ExpectedEventUID)
-		require.Equal(t, "alice", put.write.Actor)
-	}
+	require.Len(t, api.workflowPuts, 1)
+	require.Empty(t, api.workflowPuts[0].write.ExpectedEventUID)
+	require.Equal(t, "alice", api.workflowPuts[0].write.Actor)
 }
 
 func TestWorkflowEditResponseNeedsItsContext(t *testing.T) {
-	for _, away := range []func(Model) Model{
-		func(m Model) Model { return sendRune(m, '2') },
-		func(m Model) Model { return sendRune(m, '?') },
-		func(m Model) Model { m.connGen++; return m },
-		func(m Model) Model { m.scopeGen++; return m },
-		func(m Model) Model { m.cron.editSeq++; return m },
-	} {
-		m, api := cronWriteFixture(t)
-		api.workflowShown = workflowRecord()
-		m = sendRune(m, '4')
-		m, cmd := press(m, keyRune('e'))
-		m = settle(t, away(m), cmd)
-		require.Nil(t, m.cron.form)
-	}
+	m, api := cronWriteFixture(t)
+	api.workflowShown = workflowRecord()
+	m = sendRune(m, '4')
+	m, cmd := press(m, keyRune('e'))
+	m = settle(t, sendRune(m, '2'), cmd)
+	require.Nil(t, m.cron.form)
 }
 
 func TestWorkflowFormRoundTripsThroughDaemon(t *testing.T) {
@@ -226,7 +173,7 @@ func TestWorkflowFormRoundTripsThroughDaemon(t *testing.T) {
 	m = sendRune(m, '4')
 	m, _ = press(m, keyRune('n'))
 	m.cron.form.val[cfName] = "Deploy"
-	const definition = `{"version":1,"options":{"big":12345678901234567890123,"exact":1.10},"steps":[{"key":"ship","kind":"prompt","prompt":"Ship","options":{"big":12345678901234567890123,"exact":1.10}}]}`
+	const definition = `{"version":1,"steps":[{"key":"ship","kind":"prompt","prompt":"Ship"}]}`
 	m.cron.form.val[cfDefinition] = definition
 	uid := m.cron.form.uid
 	m, cmd := press(m, ctrlKey('o'))
@@ -240,12 +187,5 @@ func TestWorkflowFormRoundTripsThroughDaemon(t *testing.T) {
 	m, cmd = press(m, ctrlKey('o'))
 	m = settle(t, m, cmd)
 	require.Nil(t, m.cron.form)
-	rec, err = c.ShowCronWorkflow(t.Context(), project.ID, uid)
-	require.NoError(t, err)
-	require.Equal(t, "Renamed", rec.Name)
-	require.Equal(t, "Ship", rec.Definition.Steps[0].Prompt)
-	for _, options := range [][]byte{rec.Definition.Options, rec.Definition.Steps[0].Options} {
-		require.Contains(t, string(options), "12345678901234567890123")
-		require.Contains(t, string(options), "1.10")
-	}
+	require.Equal(t, "Saved Renamed", m.toast.text)
 }

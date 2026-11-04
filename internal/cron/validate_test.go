@@ -100,14 +100,24 @@ func TestParseWorkflow(t *testing.T) {
 	workflow, err := ParseWorkflow([]byte(`{"version":1,"steps":[{"key":"inspect","kind":"command","command":"git status"},{"key":"review","kind":"prompt","prompt":"Review","after":["inspect"],"retries":2}]}`))
 	require.NoError(t, err)
 	require.Len(t, workflow.Steps, 2)
-	for _, input := range []string{
-		`{"version":1,"steps":[]}`,
-		`{"version":1,"steps":[{"key":"a","kind":"prompt","prompt":"Hi","after":["a"]}]}`,
-		`{"version":1,"steps":[{"key":"a","kind":"command","command":"true","retries":-1}]}`,
-		`{"version":1,"steps":[{"key":"a","kind":"command","command":"true"},{"key":"a","kind":"command","command":"false"}]}`,
+	_, err = ParseWorkflow([]byte(`{"version":1,"steps":[]}`))
+	require.Error(t, err)
+	for _, tc := range []struct{ step, message string }{
+		{`{"key":"build","kind":"command","command":"make"}`, `step 2 "build": step keys must be unique portable names`},
+		{`{"key":"ship","kind":"command","command":"make","retries":-1}`, `step 2 "ship": retry count must be between 0 and 100`},
+		{`{"key":"ship","kind":"command","command":"make","retries":101}`, `step 2 "ship": retry count must be between 0 and 100`},
+		{`{"key":"ship","kind":"command","command":"make","after":["ship"]}`, `step 2 "ship": dependencies must name earlier steps`},
+		{`{"key":"ship","kind":"command","command":"make","after":["later"]}`, `step 2 "ship": dependencies must name earlier steps`},
+		{`{"key":"ship","kind":"command"}`, `step 2 "ship": command step requires only command`},
+		{`{"key":"ship","kind":"prompt"}`, `step 2 "ship": prompt step requires only prompt`},
+		{`{"key":"ship","kind":"bogus"}`, `step 2 "ship": unknown step kind`},
+		{`{"key":"ship","kind":"command","command":"make","options":{"token":"secret"}}`, `step 2 "ship":`},
 	} {
-		_, err := ParseWorkflow([]byte(input))
-		require.Error(t, err)
+		t.Run(tc.message, func(t *testing.T) {
+			_, err := ParseWorkflow([]byte(`{"version":1,"steps":[{"key":"build","kind":"command","command":"make"},` + tc.step + `]}`))
+			require.ErrorIs(t, err, ErrInvalid)
+			require.Contains(t, err.Error(), tc.message)
+		})
 	}
 }
 
@@ -295,23 +305,5 @@ func TestDurationSecondsAdmission(t *testing.T) {
 				require.ErrorIs(t, err, ErrInvalid)
 			})
 		}
-	}
-}
-
-func TestWorkflowValidationNamesStep(t *testing.T) {
-	for _, tc := range []struct{ step, message string }{
-		{`{"key":"build","kind":"command","command":"make"}`, `step 2 "build": step keys must be unique portable names`},
-		{`{"key":"ship","kind":"command","command":"make","retries":101}`, `step 2 "ship": retry count must be between 0 and 100`},
-		{`{"key":"ship","kind":"command","command":"make","after":["later"]}`, `step 2 "ship": dependencies must name earlier steps`},
-		{`{"key":"ship","kind":"command"}`, `step 2 "ship": command step requires only command`},
-		{`{"key":"ship","kind":"prompt"}`, `step 2 "ship": prompt step requires only prompt`},
-		{`{"key":"ship","kind":"bogus"}`, `step 2 "ship": unknown step kind`},
-		{`{"key":"ship","kind":"command","command":"make","options":{"token":"secret"}}`, `step 2 "ship":`},
-	} {
-		t.Run(tc.message, func(t *testing.T) {
-			_, err := ParseWorkflow([]byte(`{"version":1,"steps":[{"key":"build","kind":"command","command":"make"},` + tc.step + `]}`))
-			require.ErrorIs(t, err, ErrInvalid)
-			require.Contains(t, err.Error(), tc.message)
-		})
 	}
 }
