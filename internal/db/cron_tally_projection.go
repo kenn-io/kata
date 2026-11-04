@@ -16,11 +16,9 @@ func ProjectedCronTallyMetadata(ctx context.Context, tx Transaction, projectID i
 	if err := tx.QueryRowContext(ctx, `SELECT metadata FROM projects WHERE id=$1`, projectID).Scan(&current); err != nil {
 		return nil, err
 	}
-	if _, err := DecodeCronTallies(current); err != nil {
-		return nil, err
-	}
 	if len(folded) == 0 {
-		return nil, nil
+		_, err := DecodeCronTallies(current)
+		return nil, err
 	}
 	preserved, err := PreserveCronTallies(current, JSONBlob(folded))
 	return jsontext.Value(preserved), err

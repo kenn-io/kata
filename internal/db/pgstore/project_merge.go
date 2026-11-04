@@ -70,7 +70,7 @@ func (s *Store) MergeProjects(ctx context.Context, params db.MergeProjectsParams
 		if err != nil {
 			return err
 		}
-		tallyResult, err := s.patchProjectMetadata(ctx, db.PatchProjectMetadataIn{ProjectID: target.ID, Actor: params.Actor, Patch: tallyPatch}, func(_ context.Context, run transactionFunc) error { return run(tx) })
+		tallyResult, err := s.patchProjectMetadata(ctx, db.PatchProjectMetadataIn{ProjectID: target.ID, Actor: params.Actor, Patch: tallyPatch}, func(_ context.Context, run transactionFunc) error { return run(tx) }, false)
 		if err != nil {
 			return err
 		}

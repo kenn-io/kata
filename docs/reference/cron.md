@@ -725,6 +725,25 @@ conflicting histories for the same kind and UID reject the whole merge.
 
 ## Routes, events, and records
 
+Run retention uses `POST /api/v1/projects/{project_id}/cron/runs/actions/prune`
+with `actor`, RFC 3339 `before`, `keep`, `limit`, optional `job_uid` or
+`workflow_uid`, and `dry_run`. Ordinary purge-authorized clients may call it;
+owner-local browser sessions, issue-scoped tokens, and federation enrollment
+credentials cannot. The route has no MCP tool. A real deletion requires
+`X-Kata-Confirm: PRUNE <project-name> cron runs`; a missing or incorrect value
+returns 412. Enabled spokes return `409 federated_admin_required`, and pending
+relay delivery returns `409 federation_pending_delivery`. Responses contain
+`dry_run`, `before`, `keep`, `pruned`, `events_deleted`, `more`, per-group
+`groups`, and `reset_after_event_id` for committed nonempty deletion.
+
+Counts use `GET /api/v1/projects/{project_id}/cron/runs/counts` with ordinary
+project read authority and optional `job_uid` or `workflow_uid`. Invalid or
+combined filters return 400; unauthorized project access returns 404.
+Tracked groups include `coverage_started_at`, `last_pruned_at`,
+`oldest_created_at`, and `newest_created_at`, alongside the counts described
+above. Generic metadata PATCH writes to `cron.tally.` reject changes,
+deletions, and no-ops.
+
 Workflow routes are `/api/v1/projects/{project_id}/cron/workflows` and
 `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}`. Responses use
 `workflow` or `workflows`; job actions and run observations use `workflow_uid`,
