@@ -687,8 +687,8 @@ An operator cancellation has an effective instant. No new attempt starts at
 or after it. Work completed before cancellation retains its result. For work
 interrupted by cancellation, report `cancelled` if termination is certain,
 otherwise `unknown`. An unknown outcome takes precedence over cancellation or
-failure; otherwise a terminal failure yields `failed`, and all successful
-steps yield `succeeded`. Work still in progress before a cutoff is `running`.
+failure; otherwise certain cancellation takes precedence over terminal failure,
+a terminal failure yields `failed`, and all successful steps yield `succeeded`. Work still in progress before a cutoff is `running`.
 Use the existing [reason-line convention](#independent-run-evidence) when a
 machine-readable cause is available.
 
@@ -726,6 +726,47 @@ A conformance claim names the fixture schema version. Changing frozen expected
 outputs requires a new version. Keep job/installation identity, run UIDs,
 occurrence keys and process reconciliation stable in the production adapter;
 the decision kit does not inspect those I/O paths.
+
+### Check another runtime offline
+
+Export the same decision suite for a runtime written in any language:
+
+```sh
+kata cron conformance export --dir ./adapter-vectors
+kata cron conformance check --answers ./answers.jsonl
+```
+
+Both commands work without a project or daemon and perform no network requests.
+Export creates seven scenario bundles and `manifest.json`; it refuses to replace
+existing files. The manifest declares the schema, policy and bundle filenames.
+For a different policy, provide a complete declaration JSON file with
+`export --dir ./adapter-vectors --declaration ./declaration.json`.
+
+Have your decision bridge read each scenario's inputs and write JSONL answers.
+For sequential decisions, `use_checkpoint` consumes the most recent actual plan
+checkpoint, and `use_occupancy` consumes the most recent actual settlement's
+occupied flag. Preserve both across intervening decisions. Do not substitute
+expected outputs for your runtime's decisions.
+
+The first answer line is a header such as:
+
+```json
+{"schema":"kata.cron.adapter-conformance/v1","declaration":{"name":"example-adapter","tolerance_seconds":0,"catchup_limit":1000,"catchup_window_seconds":0,"failure_policy":"continue"}}
+```
+
+Each subsequent line contains a scenario `name` and an `outputs` array, with one
+output per ordered decision. Include every scenario exactly once. The checker
+uses the header declaration to materialize the same suite as the Go harness.
+Equivalent RFC 3339 offsets identify the same output instants; counts must be
+integers and output members are checked strictly.
+
+Check prints a JSON object with `schema`, `passed` and `failed`; every failure
+includes `name` and `diff`. Comparison failures exit 1. Malformed JSONL,
+unsupported schemas and invalid declarations are validation errors (exit 3).
+Missing, duplicate and unknown scenario answers fail comparison. Inputs are
+bounded to 16 MiB. Use `--answers -` or `--declaration -` to read standard input.
+Exported expected outputs are decision examples, not proof of production
+execution or successful process termination.
 
 These decisions do not prove that an executor actually stopped a process or
 reported all work. Issue-date triggers retain the [existing readiness and
