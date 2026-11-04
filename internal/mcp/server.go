@@ -227,12 +227,12 @@ func addTool[In, Out any](
 		Description:  description,
 		Annotations:  annotations,
 		InputSchema:  inputSchemaFor[In](name),
-		OutputSchema: schemaFor[Out](),
+		OutputSchema: schemaFor[Out](nil),
 	}, handler)
 }
 
-func schemaFor[T any]() *jsonschema.Schema {
-	schema, err := jsonschema.ForType(reflect.TypeFor[T](), &jsonschema.ForOptions{})
+func schemaFor[T any](options *jsonschema.ForOptions) *jsonschema.Schema {
+	schema, err := jsonschema.ForType(reflect.TypeFor[T](), options)
 	if err != nil {
 		panic(fmt.Errorf("infer MCP schema for %T: %w", *new(T), err))
 	}
@@ -241,7 +241,7 @@ func schemaFor[T any]() *jsonschema.Schema {
 }
 
 func inputSchemaFor[T any](toolName string) *jsonschema.Schema {
-	schema := schemaFor[T]()
+	schema := schemaFor[T](nil)
 	property := func(name string) *jsonschema.Schema {
 		return schema.Properties[name]
 	}
