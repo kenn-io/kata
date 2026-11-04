@@ -94,6 +94,65 @@ func TestIssuePublishCLI(t *testing.T) {
 		}
 	}
 }
+
+func TestIssuePublishCLIReadableOutcomes(t *testing.T) {
+	for _, tc := range []struct {
+		result, human, externalID, url string
+	}{
+		{"created", "created", "native:42", "https://tracker.example/task/42"},
+		{"already_published", "already published", "native:42", "https://tracker.example/task/42"},
+		{"recovered", "recovered", "native:42", "https://tracker.example/task/42"},
+		{"resolved_not_created", "confirmed not created", "", ""},
+	} {
+		for _, mode := range []string{"human", "json", "agent"} {
+			t.Run(tc.result+"/"+mode, func(t *testing.T) {
+				env, dir := publishCLIHTTP(t, true, func(w http.ResponseWriter, r *http.Request) {
+					require.Equal(t, http.MethodPost, r.Method)
+					require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+						"provider": "notion", "issue_uid": "example-uid", "issue_ref": "abc4",
+						"source_key": "notion:source", "external_id": tc.externalID,
+						"result": tc.result, "url": tc.url,
+					}))
+				})
+				args := []string{"sync", "notion", "publish", "abc4"}
+				if mode != "human" {
+					args = append(args, "--"+mode)
+				}
+				out := runCLI(t, env, dir, args...)
+				switch mode {
+				case "human":
+					require.Contains(t, out, "abc4: "+tc.human)
+					if tc.result != tc.human {
+						require.NotContains(t, out, tc.result)
+					}
+					if tc.externalID == "" {
+						require.NotContains(t, out, "()")
+					} else {
+						require.Contains(t, out, "("+tc.externalID+")")
+					}
+					if tc.url != "" {
+						require.Contains(t, out, tc.url)
+					}
+				case "json":
+					var result map[string]any
+					require.NoError(t, json.Unmarshal([]byte(out), &result))
+					require.Equal(t, tc.result, result["result"])
+					require.Equal(t, tc.externalID, result["external_id"])
+				default:
+					fields := map[string]string{}
+					for field := range strings.FieldsSeq(out) {
+						name, value, ok := strings.Cut(field, "=")
+						require.True(t, ok, "agent output must contain key-value fields: %q", out)
+						fields[name] = value
+					}
+					require.Equal(t, tc.result, fields["result"])
+					require.Equal(t, agentValue(tc.externalID), fields["external_id"])
+				}
+			})
+		}
+	}
+}
+
 func TestIssuePublishCLIAbsentCapability(t *testing.T) {
 	env, dir := publishCLIHTTP(t, false, func(http.ResponseWriter, *http.Request) { t.Error("unsupported publish reached daemon") })
 	_, _, err := runCLIWithErr(t, env, dir, "sync", "notion", "publish", "abc4")

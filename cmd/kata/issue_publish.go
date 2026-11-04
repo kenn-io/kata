@@ -64,7 +64,14 @@ func newIssuePublishCmd(provider string) *cobra.Command {
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "provider=%s issue_ref=%s external_id=%s result=%s url=%s\n", agentValue(result.Provider), agentValue(result.IssueRef), agentValue(result.ExternalID), agentValue(result.Result), agentValue(result.URL))
 			return err
 		}
-		_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s: %s (%s) %s\n", textsafe.Line(result.IssueRef), textsafe.Line(result.Result), textsafe.Line(result.ExternalID), textsafe.Line(result.URL))
+		line := fmt.Sprintf("%s: %s", textsafe.Line(result.IssueRef), textsafe.Line(issuePublishHumanOutcome(result.Result)))
+		if result.ExternalID != "" {
+			line += " (" + textsafe.Line(result.ExternalID) + ")"
+		}
+		if result.URL != "" {
+			line += " " + textsafe.Line(result.URL)
+		}
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), line)
 		return err
 	}}
 	cmd.Flags().StringVar(&adopt, "adopt", "", "adopt a verified remote identity without creating")
@@ -74,6 +81,22 @@ func newIssuePublishCmd(provider string) *cobra.Command {
 	cmd.MarkFlagsMutuallyExclusive("adopt", "resolve-not-created")
 	return cmd
 }
+
+func issuePublishHumanOutcome(result string) string {
+	switch result {
+	case "created":
+		return "created"
+	case "already_published":
+		return "already published"
+	case "recovered":
+		return "recovered"
+	case "resolved_not_created":
+		return "confirmed not created"
+	default:
+		return result
+	}
+}
+
 func requireIssuePublish(a daemonAPI) error {
 	client, err := kataclient.NewWithHTTPClient(a.baseURL, a.client)
 	if err != nil {
