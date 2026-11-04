@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/recurrence"
+	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -85,19 +85,19 @@ func (h *recurrenceHarness) patchMetadata(values map[string]string) {
 }
 
 // rows lists the project's live recurrences as the daemon holds them.
-func (h *recurrenceHarness) rows() []recurrence.View {
+func (h *recurrenceHarness) rows() []recurrenceclient.View {
 	h.t.Helper()
-	recs, err := recurrence.List(h.t.Context(), h.api, h.issue.ProjectID)
+	recs, err := recurrenceclient.List(h.t.Context(), h.api, h.issue.ProjectID)
 	require.NoError(h.t, err)
 	return recs
 }
 
 // startBehindTheTUI starts a recurrence from the issue as another client would.
-func (h *recurrenceHarness) startBehindTheTUI(rule, start, zone string) recurrence.View {
+func (h *recurrenceHarness) startBehindTheTUI(rule, start, zone string) recurrenceclient.View {
 	h.t.Helper()
-	terms := recurrence.Terms{Rule: rule, Start: start, Zone: zone, Actor: "bob"}
-	require.NoError(h.t, recurrence.Start(h.t.Context(), h.api, h.issue.ProjectID, h.issue.UID,
-		recurrence.Template{Title: "Example", Body: "body"}, terms, nil))
+	terms := recurrenceclient.Terms{Rule: rule, Start: start, Zone: zone, Actor: "bob"}
+	require.NoError(h.t, recurrenceclient.Start(h.t.Context(), h.api, h.issue.ProjectID, h.issue.UID,
+		recurrenceclient.Template{Title: "Example", Body: "body"}, terms, nil))
 	h.reload()
 	return h.rows()[0]
 }
@@ -303,7 +303,7 @@ func TestRecurrenceFormRefusesAndKeepsTheInput(t *testing.T) {
 		{"the daemon's refusal is shown as is", nil, "every other tuesday", "Europe/Paris", []string{"every other tuesday"}},
 		{"Local is never sent as a zone", nil, "FREQ=DAILY", "Local", []string{"Local"}},
 		{"an issue that became a cron parent after the form opened is refused", cronParent, "FREQ=DAILY", "Europe/Paris",
-			[]string{recurrence.CronParentRefusal, "kata cron job create --parent"}},
+			[]string{recurrenceclient.CronParentRefusal, "kata cron job create --parent"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newRecurrenceHarness(t, viewDetail)
@@ -339,7 +339,7 @@ func TestRecurrenceKeyRefusesTheParentOfACronJobBeforeOpeningTheForm(t *testing.
 
 	assert.Equal(t, inputNone, h.m.input.kind, "no form opens for a cron parent")
 	require.NotNil(t, h.m.toast)
-	assert.Contains(t, h.m.toast.text, recurrence.CronParentRefusal)
+	assert.Contains(t, h.m.toast.text, recurrenceclient.CronParentRefusal)
 	assert.Contains(t, h.m.toast.text, "kata cron job create --parent")
 }
 
@@ -348,8 +348,8 @@ func TestRecurrenceFormConflictKeepsInputAndShowsTheCurrentRecurrence(t *testing
 		h := newRecurrenceHarness(t, viewDetail)
 		current := h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
 		h.open()
-		require.NoError(t, recurrence.Change(t.Context(), h.api, h.issue.ProjectID, current,
-			recurrence.Terms{Rule: "FREQ=MONTHLY", Start: "2026-11-09", Zone: "Europe/Paris", Actor: "bob"}))
+		require.NoError(t, recurrenceclient.Change(t.Context(), h.api, h.issue.ProjectID, current,
+			recurrenceclient.Terms{Rule: "FREQ=MONTHLY", Start: "2026-11-09", Zone: "Europe/Paris", Actor: "bob"}))
 		h.fill("FREQ=DAILY", "2026-11-09", "Europe/Paris")
 
 		h.save()

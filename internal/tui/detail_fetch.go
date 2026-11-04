@@ -6,7 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"go.kenn.io/kata/internal/recurrence"
+	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 )
 
 // nextDetailFetchRequestSeq orders detail requests independently of the
@@ -32,7 +32,7 @@ func fetchIssue(api detailAPI, projectID int64, ref string, gen int64, parents .
 		var issue *Issue
 		var parent *IssueRef
 		var children []Issue
-		var rec *recurrence.View
+		var rec *recurrenceclient.View
 		if detail != nil {
 			issue = detail.Issue
 			parent = detail.Parent

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/commentref"
-	"go.kenn.io/kata/internal/recurrence"
+	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -105,7 +105,7 @@ type detailModel struct {
 	issue              *Issue
 	parent             *IssueRef
 	children           []Issue
-	recurrence         *recurrence.View
+	recurrence         *recurrenceclient.View
 	detailFocus        detailFocus
 	loading            bool
 	err                error

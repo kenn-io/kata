@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"go.kenn.io/kata/internal/recurrence"
+	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 )
 
 // undoAttempt travels on a mutation response, even when the write failed.
@@ -288,7 +288,15 @@ func (c *undoClient) SaveRecurrence(ctx context.Context, projectID int64, ref st
 	})
 }
 
-func (c *undoClient) ReadRecurrence(ctx context.Context, projectID int64, id *int64) (*recurrence.View, error) {
+func (c *undoClient) ReadIssue(ctx context.Context, projectID int64, ref string) (*IssueDetail, error) {
+	reader, ok := c.KataAPI.(issueReadAPI)
+	if !ok {
+		return nil, errors.New("connected client cannot read issues without recurrences")
+	}
+	return reader.ReadIssue(ctx, projectID, ref)
+}
+
+func (c *undoClient) ReadRecurrence(ctx context.Context, projectID int64, id *int64) (*recurrenceclient.View, error) {
 	reader, ok := c.KataAPI.(recurrenceReadAPI)
 	if !ok {
 		return nil, errors.New("connected client cannot read recurrences")

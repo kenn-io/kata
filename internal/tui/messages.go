@@ -3,7 +3,7 @@ package tui
 import (
 	"time"
 
-	"go.kenn.io/kata/internal/recurrence"
+	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 )
 
 // initialFetchMsg is delivered after the first ListIssues call returns.
@@ -47,7 +47,7 @@ type detailFetchedMsg struct {
 	children   []Issue
 	// recurrence is the live recurrence of the issue; nil when it has none or
 	// the read failed, so a stale one never outlives its read.
-	recurrence *recurrence.View
+	recurrence *recurrenceclient.View
 	err        error
 }
 

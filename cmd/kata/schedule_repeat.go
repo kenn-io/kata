@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"go.kenn.io/kata/internal/recurrence"
+	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 	"go.kenn.io/kata/internal/textsafe"
 	kataclient "go.kenn.io/kata/pkg/client"
 )
@@ -27,7 +27,7 @@ const (
 
 // recurrenceView is a daemon recurrence row as the CLI reads it, and the
 // block `kata show --json` adds under "recurrence".
-type recurrenceView = recurrence.View
+type recurrenceView = recurrenceclient.View
 
 func recurrenceLine(r *recurrenceView) string {
 	next := "none"
@@ -98,10 +98,10 @@ func runScheduleRepeat(cmd *cobra.Command, args []string, opts scheduleRepeatOpt
 	if err != nil {
 		return err
 	}
-	if recurrence.ParentsCronJob(issue.Metadata) {
+	if recurrenceclient.ParentsCronJob(issue.Metadata) {
 		return &cliError{
-			Message: recurrence.CronParentRefusal,
-			Hint:    recurrence.CronParentHint,
+			Message: recurrenceclient.CronParentRefusal,
+			Hint:    recurrenceclient.CronParentHint,
 			Kind:    kindValidation, ExitCode: ExitValidation,
 		}
 	}
@@ -116,17 +116,17 @@ func runScheduleRepeat(cmd *cobra.Command, args []string, opts scheduleRepeatOpt
 	guardStart := !stop && strings.TrimSpace(opts.IfMatch) != ""
 	actor, _ := resolveActor(ctx, flags.As, nil)
 
-	current, err := recurrence.Active(ctx, api.Client, pid, issue.RecurrenceID)
+	current, err := recurrenceclient.Active(ctx, api.Client, pid, issue.RecurrenceID)
 	if err != nil {
 		return recurrenceCLIError(err)
 	}
-	var terms recurrence.Terms
+	var terms recurrenceclient.Terms
 	if !stop {
 		zone, err := repeatZone(opts.Timezone, current.Zone(), issue.Metadata)
 		if err != nil {
 			return err
 		}
-		terms = recurrence.Terms{Rule: opts.Rule, Start: args[1], Zone: zone, Actor: actor}
+		terms = recurrenceclient.Terms{Rule: opts.Rule, Start: args[1], Zone: zone, Actor: actor}
 	}
 	action := repeatStarted
 	switch {
@@ -153,10 +153,10 @@ func runScheduleRepeat(cmd *cobra.Command, args []string, opts scheduleRepeatOpt
 			if err := requireDaemonAPIVersion(ctx, httpClient, baseURL, apiVersionRecurrenceIfMatch, "--if-match when starting a recurrence"); err != nil {
 				return err
 			}
-			tag := recurrence.ETag(issue.Revision)
+			tag := recurrenceclient.ETag(issue.Revision)
 			ifMatch = &tag
 		}
-		tpl, err := recurrence.TemplateFromShow(showBody)
+		tpl, err := recurrenceclient.TemplateFromShow(showBody)
 		if err != nil {
 			return err
 		}
@@ -181,7 +181,7 @@ func runScheduleRepeat(cmd *cobra.Command, args []string, opts scheduleRepeatOpt
 	}
 	result.Timezone = metadataString(after.Metadata, "timezone")
 	if !stop {
-		result.Recurrence, _ = recurrence.Active(ctx, api.Client, pid, after.RecurrenceID)
+		result.Recurrence, _ = recurrenceclient.Active(ctx, api.Client, pid, after.RecurrenceID)
 	}
 	return printScheduleRepeat(cmd, result)
 }
@@ -204,7 +204,7 @@ func checkIssueIfMatch(raw string, revision int64) error {
 	if err != nil {
 		return err
 	}
-	if etag != recurrence.ETag(revision) {
+	if etag != recurrenceclient.ETag(revision) {
 		return errRevisionConflict(fmt.Sprintf("revision conflict: issue revision is %d, not %s; nothing was written", revision, strings.Trim(etag, `"`)))
 	}
 	return nil
@@ -214,11 +214,11 @@ func checkIssueIfMatch(raw string, revision int64) error {
 // recurrence already has, then the issue's timezone metadata, then the
 // caller's own zone.
 func repeatZone(flagZone, recurrenceZone string, metadata map[string]jsontext.Value) (string, error) {
-	zone, err := recurrence.ResolveZone(flagZone, recurrenceZone, metadataString(metadata, "timezone"), localTimeZoneName)
+	zone, err := recurrenceclient.ResolveZone(flagZone, recurrenceZone, metadataString(metadata, "timezone"), localTimeZoneName)
 	switch {
-	case errors.Is(err, recurrence.ErrLocalZone):
+	case errors.Is(err, recurrenceclient.ErrLocalZone):
 		return "", &cliError{Message: `"Local" is not an IANA zone; pass --timezone with a name like Europe/Paris`, Kind: kindValidation, ExitCode: ExitValidation}
-	case errors.Is(err, recurrence.ErrNoZone):
+	case errors.Is(err, recurrenceclient.ErrNoZone):
 		return "", &cliError{
 			Message: "no timezone known for this recurrence; pass --timezone with an IANA name like Europe/Paris",
 			Kind:    kindValidation, ExitCode: ExitValidation,
@@ -230,10 +230,10 @@ func repeatZone(flagZone, recurrenceZone string, metadata map[string]jsontext.Va
 // recurrenceCLIError maps what the shared recurrence calls return to the
 // errors the CLI prints for a daemon answer.
 func recurrenceCLIError(err error) error {
-	if status, ok := errors.AsType[*recurrence.StatusError](err); ok {
+	if status, ok := errors.AsType[*recurrenceclient.StatusError](err); ok {
 		return externalCLIResponseError(status.Status, status.Body, nil)
 	}
-	if errors.Is(err, recurrence.ErrNoResponse) {
+	if errors.Is(err, recurrenceclient.ErrNoResponse) {
 		return externalCLITransportError[struct{}](nil, nil)
 	}
 	return err
@@ -241,22 +241,22 @@ func recurrenceCLIError(err error) error {
 
 // recurrenceStatus is the daemon status of err when it is a refusal, else 0.
 func recurrenceStatus(err error) int {
-	if status, ok := errors.AsType[*recurrence.StatusError](err); ok {
+	if status, ok := errors.AsType[*recurrenceclient.StatusError](err); ok {
 		return status.Status
 	}
 	return 0
 }
 
-func startRecurrence(ctx context.Context, api *kataclient.Client, pid int64, ref string, tpl recurrence.Template, terms recurrence.Terms, ifMatch *string) error {
-	err := recurrence.Start(ctx, api.Client, pid, ref, tpl, terms, ifMatch)
+func startRecurrence(ctx context.Context, api *kataclient.Client, pid int64, ref string, tpl recurrenceclient.Template, terms recurrenceclient.Terms, ifMatch *string) error {
+	err := recurrenceclient.Start(ctx, api.Client, pid, ref, tpl, terms, ifMatch)
 	if recurrenceStatus(err) == http.StatusPreconditionFailed {
 		return errRevisionConflict("revision conflict: the issue changed since it was read; nothing was written")
 	}
 	return recurrenceCLIError(err)
 }
 
-func changeRecurrence(ctx context.Context, api *kataclient.Client, pid int64, current recurrenceView, terms recurrence.Terms) error {
-	err := recurrence.Change(ctx, api.Client, pid, current, terms)
+func changeRecurrence(ctx context.Context, api *kataclient.Client, pid int64, current recurrenceView, terms recurrenceclient.Terms) error {
+	err := recurrenceclient.Change(ctx, api.Client, pid, current, terms)
 	if recurrenceStatus(err) == http.StatusPreconditionFailed {
 		return recurrenceConflict(ctx, api, pid, current.UID)
 	}
@@ -264,7 +264,7 @@ func changeRecurrence(ctx context.Context, api *kataclient.Client, pid int64, cu
 }
 
 func stopRecurrence(ctx context.Context, api *kataclient.Client, pid int64, current recurrenceView, actor string) error {
-	err := recurrence.Stop(ctx, api.Client, pid, current, actor)
+	err := recurrenceclient.Stop(ctx, api.Client, pid, current, actor)
 	switch recurrenceStatus(err) {
 	case http.StatusPreconditionFailed:
 		return recurrenceConflict(ctx, api, pid, current.UID)
@@ -278,7 +278,7 @@ func stopRecurrence(ctx context.Context, api *kataclient.Client, pid int64, curr
 // recurrence as it stands now so the caller can decide again.
 func recurrenceConflict(ctx context.Context, api *kataclient.Client, pid int64, uid string) error {
 	message := "revision conflict: the recurrence changed since it was read; nothing was written"
-	recs, err := recurrence.List(ctx, api.Client, pid)
+	recs, err := recurrenceclient.List(ctx, api.Client, pid)
 	if err != nil {
 		return errRevisionConflict(message)
 	}
@@ -358,7 +358,7 @@ func showRecurrenceFor(ctx context.Context, api *kataclient.Client, showBody []b
 	if json.Unmarshal(showBody, &shown) != nil {
 		return nil
 	}
-	rec, err := recurrence.Active(ctx, api.Client, shown.Issue.ProjectID, shown.Issue.RecurrenceID)
+	rec, err := recurrenceclient.Active(ctx, api.Client, shown.Issue.ProjectID, shown.Issue.RecurrenceID)
 	if err != nil {
 		return nil
 	}
