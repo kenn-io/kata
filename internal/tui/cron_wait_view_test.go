@@ -82,12 +82,12 @@ func TestSnapshot_CronBlocked(t *testing.T) {
 	assertGolden(t, "cron-run-detail-blocked", m.viewBody())
 }
 
-func TestCronWaitNativeReadsNeverAdmitted(t *testing.T) {
+func TestCronWaitNativeRunDoesNotAddAttentionRead(t *testing.T) {
 	m := cronBlockedFixture(t)
 	j := m.cron.data.jobs[0]
 	nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(time.Hour / time.Second))})(&j.Definition)
 	m.cron.data.jobs = []generated.CronJob{j}
 	a := waitReadAPI(nil)
 	cronEnrich(t.Context(), a, 7, m.cron.data)
-	require.Empty(t, a.waitCalls)
+	require.Equal(t, map[string]int{nextParentUID: 1}, a.waitCalls, "only the shared native parent read is needed")
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/require"
@@ -48,6 +49,7 @@ func TestCronHistoryJobPagesAndLookup(t *testing.T) {
 	require.True(t, slices.ContainsFunc(lines, func(l cronLine) bool { return l.target.kind == cronOlder }))
 	older := old
 	older.UID = "older-run"
+	older.CreatedAt = old.CreatedAt.Add(-time.Hour)
 	a.page = []generated.CronRun{older}
 	a.next = ""
 	m, cmd = m.cronRequestPage(j.UID, false)
@@ -84,7 +86,6 @@ func TestCronHistoryFencesAndSingleFlight(t *testing.T) {
 	for _, edit := range []func(*cronPageMsg){
 		func(p *cronPageMsg) { p.conn++ }, func(p *cronPageMsg) { p.scope++ },
 		func(p *cronPageMsg) { p.cursor = "wrong" }, func(p *cronPageMsg) { p.job = "wrong" },
-		func(p *cronPageMsg) { p.events++ },
 	} {
 		bad := fresh
 		edit(&bad)
@@ -94,13 +95,13 @@ func TestCronHistoryFencesAndSingleFlight(t *testing.T) {
 	m = m.cronPageLoaded(fresh)
 	require.False(t, m.cron.jobPage.out)
 	require.Equal(t, "next", m.cron.jobPage.next)
-	for _, event := range []tea.Msg{keyRune('r'), resetRequiredMsg{}, eventReceivedMsg{eventType: "cron.run.observed", projectID: 7}} {
+	for _, event := range []tea.Msg{keyRune('r'), resetRequiredMsg{}} {
 		base := m
 		base, cmd = base.cronRequestPage(j, false)
 		late := cmd().(cronPageMsg)
 		base, _ = updateModel(base, event)
 		base = base.cronPageLoaded(late)
-		require.NotEqual(t, late.gen, base.cron.jobPage.gen, "refresh/event/reset invalidates pages immediately")
+		require.NotEqual(t, late.gen, base.cron.jobPage.gen, "manual refresh/reset invalidates pages immediately")
 	}
 }
 

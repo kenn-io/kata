@@ -363,16 +363,46 @@ func (a *cronReadTestAPI) ListCronRuns(_ context.Context, id int64) ([]generated
 // The fake honors the same filtering and paging contract as the existing route.
 func (a *cronReadTestAPI) ListCronJobRuns(ctx context.Context, id int64, job, before string, limit int64) ([]generated.CronRun, string, error) {
 	runs, err := a.ListCronRuns(ctx, id)
+	if err != nil {
+		return nil, "", err
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	var cursor generated.CronRun
+	if before != "" {
+		index := slices.IndexFunc(runs, func(r generated.CronRun) bool { return r.UID == before })
+		if index < 0 {
+			return nil, "", fmt.Errorf("unknown cursor %q", before)
+		}
+		cursor = runs[index]
+	}
 	filtered := []generated.CronRun{}
 	for _, r := range runs {
-		if (job == "" || deref(r.JobUID) == job) && (before == "" || r.UID < before) {
-			filtered = append(filtered, r)
+		if job != "" && deref(r.JobUID) != job {
+			continue
 		}
+		if before != "" && (r.CreatedAt.After(cursor.CreatedAt) || r.CreatedAt.Equal(cursor.CreatedAt) && r.UID >= cursor.UID) {
+			continue
+		}
+		filtered = append(filtered, r)
 	}
-	if int64(len(filtered)) > limit {
-		filtered = filtered[:limit]
+	slices.SortFunc(filtered, func(a, b generated.CronRun) int {
+		if c := b.CreatedAt.Compare(a.CreatedAt); c != 0 {
+			return c
+		}
+		return strings.Compare(b.UID, a.UID)
+	})
+	filtered = filtered[:min(int64(len(filtered)), limit)]
+	next := ""
+	if int64(len(filtered)) == limit {
+		next = filtered[len(filtered)-1].UID
 	}
-	return filtered, "", err
+	return filtered, next, nil
+}
+
+func (a *cronReadTestAPI) readCronParent(context.Context, int64, string) (cronParent, error) {
+	return cronParent{}, errors.New("issue read unavailable in this fixture")
 }
 
 func TestCronReturnToKata(t *testing.T) {

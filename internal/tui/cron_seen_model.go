@@ -38,10 +38,7 @@ func (m Model) cronSeenCommand(write bool) tea.Cmd {
 	snapshot, path := m.cronSeen.data, m.cronSeen.path
 	return func() tea.Msg {
 		// Bubble Tea supplies no command context; use the owned TUI lifetime.
-		root := context.Background()
-		if m.lifetime != nil {
-			root = m.lifetime.ctx
-		}
+		root := m.cronContext(context.Background())
 		ctx, cancel := context.WithTimeout(root, defaultHTTPTimeout)
 		defer cancel()
 		msg := cronSeenResultMsg{path: path, write: write}

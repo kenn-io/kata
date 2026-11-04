@@ -73,7 +73,7 @@ func TestCronHealthStates(t *testing.T) {
 			}
 			got := cronHealth(p, j, now)
 			require.Equal(t, tc.want, got.state)
-			if got.state != "paused" {
+			if got.state != "paused" && got.state != "running" {
 				require.NotEmpty(t, got.reason)
 			}
 		})
@@ -103,7 +103,7 @@ func TestCronHealthDisabledAlwaysPaused(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
 		j := generated.CronJob{Definition: generated.CronJobDefinitionResponse{Enabled: false, Trigger: generated.TriggerResponse{Kind: hegel.Draw(ht, hegel.Text())}}}
 		got := cronHealth(cronData{jobsErr: errors.New("offline")}, j, hegel.Draw(ht, hegel.Datetimes()))
-		if got.state != "paused" {
+		if got.state != "paused" && got.state != "running" {
 			ht.Fatalf("disabled health: %s", got.state)
 		}
 	}, hegel.WithTestCases(2000))

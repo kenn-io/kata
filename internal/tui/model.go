@@ -3109,6 +3109,8 @@ func (m Model) handleRefetchTick() (tea.Model, tea.Cmd) {
 // makes the SSE id: line on this frame the authoritative resume
 // cursor, so resetRequiredMsg deliberately carries no payload.
 func (m Model) handleResetRequired(_ resetRequiredMsg) (tea.Model, tea.Cmd) {
+	m.cron.resetPages = true
+	m.cronInvalidatePages()
 	m.cron.events++
 	m.cache.drop()
 	m.pendingRefetch = false

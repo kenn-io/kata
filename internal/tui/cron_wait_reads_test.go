@@ -21,7 +21,7 @@ type cronWaitReadAPI struct {
 	wait      func(context.Context, string) (cronRunWait, error)
 }
 
-func (a *cronWaitReadAPI) readCronRunWait(ctx context.Context, _ int64, uid string) (cronRunWait, error) {
+func (a *cronWaitReadAPI) readCronParent(ctx context.Context, _ int64, uid string) (cronRunWait, error) {
 	a.muWait.Lock()
 	a.waitCalls[uid]++
 	a.muWait.Unlock()
@@ -43,7 +43,7 @@ func waitReadAPI(read func(context.Context, string) ([]generated.CronRun, error)
 func TestCronWaitReadCapAndSharedIssue(t *testing.T) {
 	p := cronData{}
 	for i := range 26 {
-		p.runs = append(p.runs, generated.CronRun{UID: fmt.Sprint(i), Status: "running", Actor: "operator", IssueUID: new(fmt.Sprint(i))})
+		p.runs = append(p.runs, generated.CronRun{UID: fmt.Sprint(i), Status: "running", Actor: "operator", IssueUID: new(fmt.Sprint(i)), CreatedAt: snapshotFixedNow.Add(-time.Duration(i) * time.Minute)})
 	}
 	p.runs = append(p.runs, generated.CronRun{UID: "other-actor", Status: "running", Actor: "other", IssueUID: new("0")})
 	a := waitReadAPI(nil)
@@ -139,8 +139,8 @@ type cronWaitFetchAPI struct {
 	waiter *cronWaitReadAPI
 }
 
-func (a *cronWaitFetchAPI) readCronRunWait(ctx context.Context, id int64, uid string) (cronRunWait, error) {
-	return a.waiter.readCronRunWait(ctx, id, uid)
+func (a *cronWaitFetchAPI) readCronParent(ctx context.Context, id int64, uid string) (cronRunWait, error) {
+	return a.waiter.readCronParent(ctx, id, uid)
 }
 
 // Contract: head and retained rows share a unique-issue admission cap, and a
@@ -200,8 +200,8 @@ func TestCronWaitRefreshUnavailableProperty(t *testing.T) {
 	}, hegel.WithTestCases(150))
 }
 
-// Production installs undoClient around the daemon API; optional read surfaces
-// must survive that wrapper just like the mandatory Cron reads do.
+// Production installs undoClient around the daemon API; shared issue reads
+// must preserve attention evidence through that wrapper.
 func TestCronWaitProductionClientWrapper(t *testing.T) {
 	m := cronFixture(t)
 	a := waitReadAPI(nil)

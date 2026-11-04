@@ -95,6 +95,7 @@ func (c *Client) ListCronJobRuns(ctx context.Context, projectID int64, jobUID, b
 type cronParent struct {
 	open     bool
 	progress map[string]cron.RecurringProgress
+	metadata map[string]any
 }
 
 // readCronParent reads a parent issue's status and the delivery checkpoints its
@@ -115,7 +116,7 @@ func (c *Client) readCronParent(ctx context.Context, projectID int64, parentUID 
 		return cronParent{}, err
 	}
 	issue := wire.JSON200.Issue
-	return cronParent{open: issue.Status == "open" && issue.DeletedAt == nil, progress: cronProgressFromMetadata(issue.Metadata)}, nil
+	return cronParent{open: issue.Status == "open" && issue.DeletedAt == nil, progress: cronProgressFromMetadata(issue.Metadata), metadata: issue.Metadata}, nil
 }
 
 // cronProgressFromMetadata decodes each cron.progress.<job-uid> value. An entry
@@ -226,4 +227,17 @@ func (c *Client) readCronRun(ctx context.Context, projectID int64, uid string) (
 		return generated.CronRun{}, err
 	}
 	return wire.JSON200.Run, nil
+}
+
+// Both health and schedule previews interpret the same validated definition.
+func cronJobDefinition(j generated.CronJob) (cron.JobDefinition, error) {
+	var def cron.JobDefinition
+	raw, err := json.Marshal(j.Definition)
+	if err == nil {
+		err = json.Unmarshal(raw, &def)
+	}
+	if err == nil {
+		err = def.Validate()
+	}
+	return def, err
 }

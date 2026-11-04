@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"encoding/json/v2"
 	"fmt"
 	"time"
 
@@ -21,14 +20,7 @@ func cronHealth(p cronData, j generated.CronJob, now time.Time) cronHealthState 
 	if p.jobsErr != nil {
 		return state("unavailable", "job definitions could not be refreshed")
 	}
-	var def cron.JobDefinition
-	raw, err := json.Marshal(j.Definition)
-	if err != nil {
-		return state("unavailable", "job definition could not be read")
-	}
-	if err = json.Unmarshal(raw, &def); err == nil {
-		err = def.Validate()
-	}
+	def, err := cronJobDefinition(j)
 	if err != nil {
 		return state("unavailable", "invalid definition: "+err.Error())
 	}

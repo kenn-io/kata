@@ -117,7 +117,7 @@ func TestCronWaitClientReadsOpenAndDeletedMetadata(t *testing.T) {
 				_, _ = w.Write([]byte(`{"issue":{"status":"open","deleted_at":` + deletedAt + `,"metadata":{"work.attention":"needs-human"}}}`))
 			}))
 			defer srv.Close()
-			got, err := NewClient(srv.URL, srv.Client()).readCronRunWait(t.Context(), 7, "issue-example")
+			got, err := NewClient(srv.URL, srv.Client()).readCronParent(t.Context(), 7, "issue-example")
 			require.NoError(t, err)
 			require.Equal(t, !deleted, got.open)
 			require.Equal(t, "needs-human", got.metadata["work.attention"])

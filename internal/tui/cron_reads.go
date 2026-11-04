@@ -17,6 +17,14 @@ type cronReadScope struct {
 	cancel context.CancelFunc
 }
 
+// Bubble Tea callbacks supply the fallback; the TUI lifetime owns live work.
+func (m Model) cronContext(ctx context.Context) context.Context {
+	if m.lifetime != nil {
+		return m.lifetime.ctx
+	}
+	return ctx
+}
+
 func (s *cronReadScope) stop() {
 	if s != nil {
 		s.cancel()
@@ -52,12 +60,11 @@ func cronFetch(ctx context.Context, reader cronAPI, id int64, data *cronData) {
 }
 
 type cronEnrichment struct {
-	uid               string
-	parent, wait, run bool
-	runs              []generated.CronRun
-	value             cronParent
-	attention         cronRunWait
-	err               error
+	uid         string
+	parent, run bool
+	runs        []generated.CronRun
+	value       cronParent
+	err         error
 }
 
 // cronEnrich establishes fresh last-run provenance independently of the display
@@ -85,26 +92,36 @@ func cronEnrich(ctx context.Context, reader cronAPI, id int64, p *cronData) {
 	tasks := []cronEnrichment{}
 	parents := map[string]bool{}
 	fills := 0
-	for _, j := range p.jobs {
-		if parent := cronNativeParent(j); parent != "" {
-			if j.Definition.Enabled && !parents[parent] {
-				parents[parent] = true
-				if len(parents) <= 200 {
-					tasks = append(tasks, cronEnrichment{uid: parent, parent: true})
+	issueReads := map[string]bool{}
+	// Adapter health requires these reads; native lookups use the remaining
+	// shared capacity for display, while parent progress has its own cap.
+	for _, native := range []bool{false, true} {
+		for _, j := range p.jobs {
+			parent := cronNativeParent(j)
+			if (parent != "") != native {
+				continue
+			}
+			if parent != "" {
+				if j.Definition.Enabled && !parents[parent] {
+					parents[parent] = true
+					if len(parents) <= 200 {
+						tasks = append(tasks, cronEnrichment{uid: parent, parent: true})
+						issueReads[parent] = true
+					}
 				}
 			}
+			if _, known := p.lastRuns[j.UID]; known {
+				continue
+			}
+			fills++
+			if fills > 200 {
+				p.lastErr[j.UID] = errors.New("last-run lookup limit reached (200 jobs per refresh)")
+				continue
+			}
+			tasks = append(tasks, cronEnrichment{uid: j.UID})
 		}
-		if _, known := p.lastRuns[j.UID]; known {
-			continue
-		}
-		fills++
-		if fills > 200 {
-			p.lastErr[j.UID] = errors.New("last-run lookup limit reached (200 jobs per refresh)")
-			continue
-		}
-		tasks = append(tasks, cronEnrichment{uid: j.UID})
-	}
 
+	}
 	runReader, supportsRun := reader.(cronRunAPI)
 	for _, r := range p.inspectedRuns {
 		p.lookup[r.UID] = r
@@ -119,13 +136,9 @@ func cronEnrich(ctx context.Context, reader cronAPI, id int64, p *cronData) {
 		}
 		tasks = append(tasks, cronEnrichment{uid: r.UID, run: true})
 	}
-	waitReader, supportsWait := reader.(cronWaitAPI)
 	issues := map[string]bool{}
 	waitTasks := func(runs []generated.CronRun) []cronEnrichment {
 		var added []cronEnrichment
-		if !supportsWait {
-			return added
-		}
 		for _, r := range runs {
 			uid := deref(r.IssueUID)
 			if r.Status != "running" || uid == "" || issues[uid] {
@@ -139,7 +152,10 @@ func cronEnrich(ctx context.Context, reader cronAPI, id int64, p *cronData) {
 				p.waitErr[uid] = errors.New("too many running issues (20 attention reads per refresh)")
 				continue
 			}
-			added = append(added, cronEnrichment{uid: uid, wait: true})
+			if !issueReads[uid] {
+				issueReads[uid] = true
+				added = append(added, cronEnrichment{uid: uid, parent: true})
+			}
 		}
 		return added
 	}
@@ -164,8 +180,6 @@ func cronEnrich(ctx context.Context, reader cronAPI, id int64, p *cronData) {
 							task.err = errors.New("received a different run")
 						}
 						task.runs = []generated.CronRun{r}
-					case task.wait:
-						task.attention, task.err = waitReader.readCronRunWait(ctx, id, task.uid)
 					case task.parent:
 						task.value, task.err = reader.readCronParent(ctx, id, task.uid)
 					default:
@@ -188,12 +202,13 @@ func cronEnrich(ctx context.Context, reader cronAPI, id int64, p *cronData) {
 			if result.err == nil {
 				p.lookup[result.uid] = result.runs[0]
 			}
-		case result.wait:
-			p.waitErr[result.uid] = result.err
-			if result.err == nil {
-				p.waits[result.uid] = result.attention
-			}
 		case result.parent:
+			if p.waitErr[result.uid] == nil {
+				p.waitErr[result.uid] = result.err
+				if result.err == nil {
+					p.waits[result.uid] = result.value
+				}
+			}
 			if result.err == nil {
 				p.parentOpen[result.uid] = result.value.open
 				maps.Copy(p.progress, result.value.progress)

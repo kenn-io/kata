@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"encoding/json/v2"
 	"time"
 
 	"go.kenn.io/kata/internal/cron"
@@ -36,9 +35,8 @@ func cronNextRuns(p cronData, j generated.CronJob, now time.Time) (label string,
 	if kind := j.Definition.Trigger.Kind; !native && kind != "cron" && kind != "once" || native && kind != "cron" && kind != "interval" {
 		return "", nil
 	}
-	var def cron.JobDefinition
-	raw, err := json.Marshal(j.Definition)
-	if err != nil || json.Unmarshal(raw, &def) != nil || def.Validate() != nil {
+	def, err := cronJobDefinition(j)
+	if err != nil {
 		return label, []string{"unavailable"}
 	}
 	if !def.Enabled {
@@ -85,7 +83,7 @@ func (m Model) cronParentEvent(msg eventReceivedMsg) bool {
 			return true
 		}
 	}
-	for _, r := range m.cronWaitLoadedRuns() {
+	for _, r := range m.cronLoadedRuns() {
 		if r.Status == "running" && deref(r.IssueUID) == msg.issueUID {
 			return true
 		}

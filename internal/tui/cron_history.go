@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -17,19 +18,21 @@ type cronHistoryPage struct {
 	gen                       uint64
 	runs                      []generated.CronRun
 	out, ready, older, reload bool
+	merge                     bool
 	err                       error
 }
 
 type cronPageMsg struct {
-	conn, scope, events, gen uint64
-	job, cursor, next        string
-	runs                     []generated.CronRun
-	err                      error
+	conn, scope, gen  uint64
+	job, cursor, next string
+	merge             bool
+	runs              []generated.CronRun
+	err               error
 }
 
 func (m *Model) cronGeneration() uint64 { m.nextCronRequest++; return m.nextCronRequest }
 
-// Invalidate at event/refresh time, before an old page can arrive. The monotonic
+// Invalidate at explicit refresh/reset or navigation, before an old page can arrive. The monotonic
 // counter lives outside cronState so scope changes and A/B/A opens cannot reuse it.
 func (m *Model) cronInvalidatePages() {
 	m.cron.jobPage.gen = m.cronGeneration()
@@ -40,6 +43,7 @@ func (m *Model) cronInvalidatePages() {
 }
 
 func (m Model) cronRequestPage(job string, reset bool) (Model, tea.Cmd) {
+	before := m
 	page := &m.cron.runPage
 	limit := int64(100)
 	if job != "" {
@@ -49,7 +53,9 @@ func (m Model) cronRequestPage(job string, reset bool) (Model, tea.Cmd) {
 	if !reset && (page.out || page.next == "") {
 		return m, nil
 	}
+	merge := reset && page.merge && page.ready && page.job == job
 	if reset {
+		previous := *page
 		runs := page.runs
 		if page.job != job {
 			runs = nil
@@ -61,19 +67,24 @@ func (m Model) cronRequestPage(job string, reset bool) (Model, tea.Cmd) {
 				}
 			}
 		}
-		*page = cronHistoryPage{job: job, runs: runs}
+		*page = cronHistoryPage{job: job, runs: runs, ready: previous.ready && previous.job == job}
+		if previous.job == job {
+			page.next = previous.next
+			page.older = previous.older
+		}
 	}
 	page.gen = m.cronGeneration()
 	page.cursor = page.next
+	if reset {
+		page.cursor = ""
+	}
 	page.out, page.reload = true, false
-	msg := cronPageMsg{conn: m.connGen, scope: m.scopeGen, events: m.cron.events, gen: page.gen, job: job, cursor: page.cursor}
+	msg := cronPageMsg{conn: m.connGen, scope: m.scopeGen, gen: page.gen, job: job, cursor: page.cursor, merge: merge}
 	reader, id := m.api, m.scope.projectID
+	m = m.cronKeepSelection(before)
 	return m, func() tea.Msg {
 		// Bubble Tea commands supply no context; production uses the TUI lifetime.
-		root := context.Background()
-		if m.lifetime != nil {
-			root = m.lifetime.ctx
-		}
+		root := m.cronContext(context.Background())
 		if m.cron.reads != nil {
 			root = m.cron.reads.ctx
 		}
@@ -88,7 +99,7 @@ func (m Model) cronRequestPage(job string, reset bool) (Model, tea.Cmd) {
 }
 
 func (m Model) cronPageLoaded(msg cronPageMsg) Model {
-	if msg.conn != m.connGen || msg.scope != m.scopeGen || msg.events != m.cron.events {
+	if msg.conn != m.connGen || msg.scope != m.scopeGen {
 		return m
 	}
 	page := &m.cron.runPage
@@ -98,29 +109,29 @@ func (m Model) cronPageLoaded(msg cronPageMsg) Model {
 	if !page.out || msg.gen != page.gen || msg.job != page.job || msg.cursor != page.cursor {
 		return m
 	}
+	previous := m
 	page.out, page.err = false, msg.err
 	if msg.err != nil {
-		return m
+		return m.cronKeepSelection(previous)
 	}
-	if msg.job != "" {
-		if err := cronValidateJobPage(msg.runs, msg.job); err != nil {
-			page.err = err
-			return m
-		}
-	}
-	if msg.cursor == "" {
+	if msg.cursor == "" && msg.merge {
+		page.runs = cronMergeRuns(page.runs, msg.runs)
+	} else if msg.cursor == "" {
 		page.runs = cronMergeRuns(nil, msg.runs)
+		page.older = false
 	} else {
 		page.runs = cronMergeRuns(page.runs, msg.runs)
 		page.older = true
 	}
-	page.next = msg.next
-	if len(msg.runs) == 0 || msg.next == msg.cursor {
-		page.next = ""
+	if !msg.merge {
+		page.next = msg.next
+		if len(msg.runs) == 0 || msg.next == msg.cursor {
+			page.next = ""
+		}
 	}
 	page.ready = true
 	m = m.cronRemember(page.runs)
-	return m
+	return m.cronKeepSelection(previous)
 }
 
 // Page overlap must not duplicate a row or downgrade an observation revision.
@@ -140,7 +151,45 @@ func cronMergeRuns(before, after []generated.CronRun) []generated.CronRun {
 			out = append(out, r)
 		}
 	}
+	slices.SortFunc(out, func(a, b generated.CronRun) int {
+		if c := b.CreatedAt.Compare(a.CreatedAt); c != 0 {
+			return c
+		}
+		return strings.Compare(b.UID, a.UID)
+	})
 	return out
+}
+
+// Preserve link selection when refreshed heads or error rows shift a document.
+func (m Model) cronKeepSelection(before Model) Model {
+	keep := func(old, new []cronLine, cursor int) int {
+		if len(old) == 0 {
+			return cursor
+		}
+		target := old[min(max(cursor, 0), len(old)-1)].target
+		if target.uid != "" {
+			if i := slices.IndexFunc(new, func(l cronLine) bool { return l.target == target }); i >= 0 {
+				return i
+			}
+		}
+		return min(max(cursor, 0), max(len(new)-1, 0))
+	}
+	for tab := cronJobs; tab <= cronWorkflows; tab++ {
+		m.cron.lists[tab].cursor = keep(cronListLines(before, tab), cronListLines(m, tab), before.cron.lists[tab].cursor)
+	}
+	m.cron.stack = slices.Clone(m.cron.stack)
+	for i := range m.cron.stack {
+		if i >= len(before.cron.stack) || before.cron.stack[i].ref != m.cron.stack[i].ref {
+			continue
+		}
+		a, b := before, m
+		a.cron.stack = a.cron.stack[:i+1]
+		b.cron.stack = b.cron.stack[:i+1]
+		_, _, old := cronScreen(a)
+		_, _, fresh := cronScreen(b)
+		m.cron.stack[i].cursor = keep(old, fresh, before.cron.stack[i].cursor)
+	}
+	return m
 }
 
 func (m Model) cronRemember(runs []generated.CronRun) Model {

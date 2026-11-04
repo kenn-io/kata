@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 	"go.kenn.io/kata/pkg/client/generated"
 	"go.kenn.io/kit/tui/helplayout"
@@ -17,8 +18,9 @@ import (
 var cronTabNames = [...]string{"kata カタ", "jobs", "runs", "workflows"}
 
 type cronLine struct {
-	text   string
-	target cronRef
+	text               string
+	target             cronRef
+	errorFrom, errorTo int
 }
 
 func cronTabs(tab int) string {
@@ -157,9 +159,6 @@ func cronScreen(m Model) (string, string, []cronLine) {
 		out := make([]string, len(cells))
 		for i, c := range cells {
 			out[i] = padToWidth(truncate(sanitizeForLine(c), widths[i]), widths[i])
-			if m.cron.tab == cronJobs && i == 1 && (c == "failing" || c == "overdue" || c == "missed") {
-				out[i] = errorStyle.Render(out[i])
-			}
 		}
 		return strings.Join(out, " ")
 	}
@@ -167,9 +166,15 @@ func cronScreen(m Model) (string, string, []cronLine) {
 	query := cronQuery(m.cron.lists[m.cron.tab].query, m.cron.tab)
 	add := func(uid string, cells []string, fields map[string]string) {
 		if query.match(fields, sanitizeForLine(strings.Join(cells, " "))) {
-			lines = append(lines, cronLine{format(cells), cronRef{m.cron.tab, uid}})
+			line := cronLine{text: format(cells), target: cronRef{m.cron.tab, uid}}
+			if m.cron.tab == cronJobs && (cells[1] == "failing" || cells[1] == "overdue" || cells[1] == "missed") {
+				line.errorFrom = widths[0] + 1
+				line.errorTo = line.errorFrom + widths[1]
+			}
+			lines = append(lines, line)
 		}
 	}
+	healthCounts := map[string]int{}
 	if p := m.cron.data; p != nil {
 		runs := p.runs
 		if m.cron.tab == cronRuns && m.cron.runPage.ready {
@@ -182,6 +187,7 @@ func cronScreen(m Model) (string, string, []cronLine) {
 		case cronJobs:
 			for _, j := range p.jobs {
 				health := cronHealth(*p, j, renderNow()).state
+				healthCounts[health]++
 				last := cronJobLast(*p, j.UID)
 				if health == "running" {
 					last = humanizeRelative(p.lastRuns[j.UID].CreatedAt)
@@ -209,12 +215,8 @@ func cronScreen(m Model) (string, string, []cronLine) {
 	noun := []string{"", "job", "run", "workflow"}[m.cron.tab]
 	title := cronCount(len(lines), noun)
 	if m.cron.tab == cronJobs && m.cron.data != nil {
-		counts := map[string]int{}
-		for _, j := range m.cron.data.jobs {
-			counts[cronHealth(*m.cron.data, j, renderNow()).state]++
-		}
 		for _, state := range []string{"paused", "unavailable", "parent closed", "overdue", "blocked", "running", "failing", "missed", "never ran"} {
-			if count := counts[state]; count > 0 {
+			if count := healthCounts[state]; count > 0 {
 				title += fmt.Sprintf(" · %d %s", count, state)
 			}
 		}
@@ -576,7 +578,15 @@ func renderCron(m Model) string {
 			prefix = "▶ "
 			style = cursorRowStyle
 		}
-		body = append(body, style.Render(padToWidth(prefix+line.text, m.width)))
+		text := padToWidth(prefix+line.text, m.width)
+		rendered := style.Render(text)
+		if line.errorTo > line.errorFrom {
+			// Render each segment with the row background. A cell's SGR reset must
+			// not clear the stripe or selection on the remainder of the row.
+			from, to := line.errorFrom+2, line.errorTo+2
+			rendered = style.Render(ansi.Cut(text, 0, from)) + errorStyle.Inherit(style).Render(ansi.Cut(text, from, to)) + style.Render(ansi.Cut(text, to, m.width))
+		}
+		body = append(body, rendered)
 		budget--
 	}
 	for range max(budget, 0) {
