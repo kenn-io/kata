@@ -105,6 +105,7 @@ func TestCronResumeBacklogConfirmation(t *testing.T) {
 	require.Nil(t, cmd)
 	require.NotEqual(t, modalNone, m.modal)
 	require.Empty(t, api.enabledCalls)
+	require.Equal(t, 5, m.cron.enabled.count, "confirm only the selected job's missed children")
 	view := stripANSI(m.overlayInputAndModal(m.viewBody()))
 	require.Contains(t, view, "Resume")
 	require.Contains(t, view, "recurring child")
