@@ -235,14 +235,14 @@ func cronHealthFixture(t *testing.T) Model {
 func TestCronHealthColumnRollupAndReason(t *testing.T) {
 	defer snapshotInit(t)()
 	m := cronHealthFixture(t)
-	title, header, lines := cronScreen(m)
+	title, header, _ := cronScreen(m)
 	require.Contains(t, header, "Health")
 	require.Contains(t, header, "Last run")
 	for _, state := range []string{"paused", "unavailable", "parent closed", "overdue", "running", "failing", "missed", "never ran"} {
 		require.Contains(t, title, "1 "+state)
 	}
 	m = m.cronFilter("job-ok")
-	title, _, lines = cronScreen(m)
+	title, _, lines := cronScreen(m)
 	require.Len(t, lines, 1)
 	require.Contains(t, title, "1 failing", "roll-up is independent of the filter")
 	m.cron.stack = []cronFrame{{ref: cronRef{cronJobs, "overdue"}}}
