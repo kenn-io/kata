@@ -1329,6 +1329,9 @@ type CronJob struct {
 	Revision           int64                     `json:"revision"`
 	UID                string                    `json:"uid" validate:"required"`
 	UpdatedAt          time.Time                 `json:"updated_at" validate:"required"`
+
+	// UpdatedBy Actor of the winning definition event, or null when that event is not held locally.
+	UpdatedBy *string `json:"updated_by" validate:"required"`
 }
 
 func (c CronJob) Validate() error {
@@ -1360,6 +1363,11 @@ func (c CronJob) Validate() error {
 	}
 	if err := typesValidator.Var(c.UpdatedAt, "required"); err != nil {
 		errors = errors.Append("UpdatedAt", err)
+	}
+	if c.UpdatedBy != nil {
+		if err := typesValidator.Var(c.UpdatedBy, "required"); err != nil {
+			errors = errors.Append("UpdatedBy", err)
+		}
 	}
 	if len(errors) == 0 {
 		return nil
@@ -1609,6 +1617,9 @@ type CronWorkflow struct {
 	Revision           int64                          `json:"revision"`
 	UID                string                         `json:"uid" validate:"required"`
 	UpdatedAt          time.Time                      `json:"updated_at" validate:"required"`
+
+	// UpdatedBy Actor of the winning definition event, or null when that event is not held locally.
+	UpdatedBy *string `json:"updated_by" validate:"required"`
 }
 
 func (c CronWorkflow) Validate() error {
@@ -1640,6 +1651,11 @@ func (c CronWorkflow) Validate() error {
 	}
 	if err := typesValidator.Var(c.UpdatedAt, "required"); err != nil {
 		errors = errors.Append("UpdatedAt", err)
+	}
+	if c.UpdatedBy != nil {
+		if err := typesValidator.Var(c.UpdatedBy, "required"); err != nil {
+			errors = errors.Append("UpdatedBy", err)
+		}
 	}
 	if len(errors) == 0 {
 		return nil
