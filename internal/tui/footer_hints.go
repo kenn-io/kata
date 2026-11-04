@@ -245,7 +245,8 @@ func (dm detailModel) detailHelpRows(hideDelete bool) [][]helplayout.HelpItem {
 		{Key: "q", Description: "quit"},
 	}
 	if !hideDelete && dm.issue != nil {
-		actions = slices.Insert(actions, 10, helplayout.HelpItem{Key: "X", Description: "delete"}) // after d dates
+		dates := slices.IndexFunc(actions, func(item helplayout.HelpItem) bool { return item.Key == "d" })
+		actions = slices.Insert(actions, dates+1, helplayout.HelpItem{Key: "X", Description: "delete"})
 	}
 	if dm.detailFocus == focusChildren && len(dm.children) > 0 {
 		nav := []helplayout.HelpItem{

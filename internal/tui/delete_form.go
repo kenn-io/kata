@@ -129,7 +129,14 @@ func (m Model) finishDelete(target formTarget) (Model, tea.Cmd) {
 	m.input = inputState{}
 	uid := target.issueUID
 	m, forgotten := m.forgetDeletedIssue(uid)
-	m, follow := m.refreshListDay(func(lm listModel) listModel { return lm.withoutIssue(uid) })
+	prevPID, prevUID, prevHas := highlightedIdentity(m.list)
+	m.list = m.list.syncSelection(m.list.visibleRows()).withoutIssue(uid).refreshDay()
+	var follow tea.Cmd
+	// Pruning the deleted Back entry can leave an independently opened detail
+	// with an empty stack. Keep it open as the list selects its neighbour.
+	if m.detail.issue == nil || (m.detail.issue.UID == prevUID && detailProjectID(*m.detail.issue, m.scope) == prevPID) {
+		m, follow = m.reconcileSplitDetailAfterRefetch(prevPID, prevUID, prevHas)
+	}
 	m, detailCmd := m.maybeBootstrapSplitDetail()
 	if m.cache != nil {
 		m.cache.markStale()
@@ -145,23 +152,23 @@ func (m Model) finishDelete(target formTarget) (Model, tea.Cmd) {
 // forgetDeletedIssue invalidates the snapshots that navigation can restore.
 func (m Model) forgetDeletedIssue(uid string) (Model, tea.Cmd) {
 	deleted := func(dm detailModel) bool { return dm.issue != nil && dm.issue.UID == uid }
-	forgetDetail := func(dm detailModel, pop func(detailModel) (detailModel, tea.Cmd)) (detailModel, tea.Cmd, bool) {
+	forgetDetail := func(dm detailModel) (detailModel, bool) {
 		dm.navStack = slices.DeleteFunc(slices.Clone(dm.navStack), deleted)
 		for i := range dm.navStack {
 			dm.navStack[i] = dm.navStack[i].invalidated()
 		}
 		if !deleted(dm) {
-			return dm, nil, false
+			return dm, false
 		}
 		if len(dm.navStack) > 0 {
-			next, cmd := pop(dm)
-			return next, cmd, false
+			next, _ := dm.handleBack()
+			return next, false
 		}
 		dm.cancelReads()
-		return newDetailModel(), nil, true
+		return newDetailModel(), true
 	}
 	forget := func(dm detailModel, focus *focusPane, views ...*viewID) detailModel {
-		dm, _, reset := forgetDetail(dm, detailModel.handleBack)
+		dm, reset := forgetDetail(dm)
 		if reset {
 			*focus = focusList
 			for _, view := range views {
@@ -185,16 +192,17 @@ func (m Model) forgetDeletedIssue(uid string) (Model, tea.Cmd) {
 	}
 	m.attention.setRows(slices.DeleteFunc(slices.Clone(m.attention.rows), func(row attentionRequest) bool { return row.issue.UID == uid }))
 	wasDeleted := deleted(m.detail)
-	detail, cmd, reset := forgetDetail(m.detail, func(dm detailModel) (detailModel, tea.Cmd) {
-		next, cmd, _ := dm.handleNavKey(tea.KeyPressMsg{Code: tea.KeyEscape}, m.keymap, m.api)
-		return next, cmd
-	})
+	previousGen := m.detail.gen
+	detail, reset := forgetDetail(m.detail)
 	m.detail = detail
 	if reset {
 		return m.leaveDetail()
 	}
 	if wasDeleted {
-		return m, withConnGen(cmd, m.connGen)
+		if m.detail.gen != previousGen && m.api != nil {
+			return m, withConnGen(m.detail.refetch(m.api), m.connGen)
+		}
+		return m, nil
 	}
 	if slices.ContainsFunc(m.detail.children, func(child Issue) bool { return child.UID == uid }) {
 		return m, withConnGen(m.detail.refetch(m.api), m.connGen)
