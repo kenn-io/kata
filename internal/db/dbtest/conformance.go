@@ -677,6 +677,11 @@ var storageScenarios = []scenario{
 		run: checkReadyQueuesAndDiscovery,
 	},
 	{
+		name:    "ready priority ordering",
+		methods: []string{"CreateProject", "CreateIssue", "EditIssue", "ReadyIssues", "ReadyIssuesGlobal"},
+		run:     checkReadyPriorityOrder,
+	},
+	{
 		name: "api tokens and system project",
 		methods: []string{
 			"CreateAPIToken", "CreateComment", "CreateIssue", "CreateProject", "EnsureSystemProject",

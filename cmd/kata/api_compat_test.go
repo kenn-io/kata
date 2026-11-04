@@ -229,6 +229,55 @@ func TestListSortDaemonCompatibility(t *testing.T) {
 	}
 }
 
+func TestNextPriorityDaemonCompatibility(t *testing.T) {
+	for _, version := range []string{"0.41.0", "0.40.0", "", "development"} {
+		for _, all := range []bool{false, true} {
+			t.Run(version+map[bool]string{false: "/project", true: "/all"}[all], func(t *testing.T) {
+				var readyCalls, healthCalls atomic.Int32
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					switch r.URL.Path {
+					case "/api/v1/health":
+						healthCalls.Add(1)
+						_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "api_schema_version": version})
+					case "/api/v1/projects/resolve":
+						_, _ = w.Write([]byte(`{"project":{"id":1,"name":"example-project","uid":"01TESTPROJECTAAAAAAAAAAAAAA"}}`))
+					case "/api/v1/projects/1/ready", "/api/v1/ready":
+						readyCalls.Add(1)
+						if all {
+							assert.Equal(t, "/api/v1/ready", r.URL.Path)
+						} else {
+							assert.Equal(t, "/api/v1/projects/1/ready", r.URL.Path)
+						}
+						if version == "0.41.0" {
+							assert.Equal(t, "1", r.URL.Query().Get("limit"))
+							assert.Equal(t, "priority", r.URL.Query().Get("sort"))
+							_, _ = w.Write([]byte(`{"issues":[{"short_id":"best","title":"priority pick","priority":1,"project_name":"example-project"}]}`))
+						} else {
+							assert.Empty(t, r.URL.Query().Get("limit"))
+							assert.Empty(t, r.URL.Query().Get("sort"))
+							_, _ = w.Write([]byte(`{"issues":[{"short_id":"newer","title":"unprioritized"},{"short_id":"best","title":"priority pick","priority":1,"project_name":"example-project"}]}`))
+						}
+					default:
+						http.NotFound(w, r)
+					}
+				}))
+				t.Cleanup(server.Close)
+				args := []string{"--agent", "next"}
+				if all {
+					args = append(args, "--all")
+				} else {
+					args = append(args, "--project", "example-project")
+				}
+				out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), args...)
+				require.NoError(t, err)
+				assert.Contains(t, out, `best priority=1 title="priority pick"`)
+				assert.Equal(t, int32(1), readyCalls.Load())
+				assert.Equal(t, int32(1), healthCalls.Load())
+			})
+		}
+	}
+}
+
 func TestAPIVersionAtLeast(t *testing.T) {
 	tests := []struct {
 		reported string

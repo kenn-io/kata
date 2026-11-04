@@ -243,6 +243,15 @@ func (h toolHandlers) allReadyIssues(ctx context.Context, input NextInput) ([]Is
 	if input.Unowned && strings.TrimSpace(input.Owner) != "" {
 		return nil, errors.New("owner and unowned are mutually exclusive")
 	}
+	health, err := h.options.Client.Health(ctx)
+	if err != nil {
+		return nil, err
+	}
+	version := ""
+	if health.APISchemaVersion != nil {
+		version = strings.TrimSpace(*health.APISchemaVersion)
+	}
+	priorityFirst := semver.IsValid("v"+version) && semver.Compare("v"+version, "v0.41.0") >= 0
 	projects, err := h.readProjects(ctx, input.Project)
 	if err != nil {
 		return nil, err
@@ -251,6 +260,10 @@ func (h toolHandlers) allReadyIssues(ctx context.Context, input NextInput) ([]Is
 	query := generated.ReadyIssuesQuery{
 		Unowned: optionalTrue(input.Unowned), Owner: optionalString(input.Owner),
 		Label: compactStrings(input.Labels), ExcludeLabel: compactStrings(input.ExcludeLabels),
+	}
+	if priorityFirst {
+		query.Sort = new(generated.Priority)
+		query.Limit = new(int64(1))
 	}
 	if h.options.Scope.Mode() == ScopeAllowlist && strings.TrimSpace(input.Project) == "" {
 		for _, project := range projects {
@@ -281,6 +294,7 @@ func (h toolHandlers) allReadyIssues(ctx context.Context, input NextInput) ([]Is
 	}
 	response, err := h.options.Client.ReadyIssuesGlobal(ctx, &generated.ReadyIssuesGlobalRequestOptions{
 		Query: &generated.ReadyIssuesGlobalQuery{
+			Sort: (*generated.ReadyIssuesGlobalQuerySort)(query.Sort), Limit: query.Limit,
 			Unowned: query.Unowned, Owner: query.Owner, Label: query.Label, ExcludeLabel: query.ExcludeLabel,
 		},
 	})

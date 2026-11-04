@@ -57,6 +57,26 @@ func TestReady_RespectsLimit(t *testing.T) {
 	assert.Len(t, out.Issues, 2)
 }
 
+func TestReady_PrioritySort(t *testing.T) {
+	env := testenv.New(t)
+	pid := initLocalWorkspace(t, env, "example-project")
+	best, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: pid, Title: "priority pick", Author: "author", Priority: new(int64(1)),
+	})
+	require.NoError(t, err)
+	createIssueViaHTTP(t, env, pid, "newer unprioritized")
+	for _, path := range []string{projectPath(pid) + "/ready", "/api/v1/ready"} {
+		t.Run(path, func(t *testing.T) {
+			var out readyResp
+			envGetJSON(t, env, path+"?sort=priority&limit=1", &out)
+			require.Len(t, out.Issues, 1)
+			assert.Equal(t, best.ShortID, out.Issues[0].ShortID)
+			status, _ := env.Get(t, path+"?sort=newest")
+			assert.Equal(t, 400, status)
+		})
+	}
+}
+
 func TestReady_UnownedAndOwnerMutuallyExclusive(t *testing.T) {
 	env := testenv.New(t)
 	pid := initLocalWorkspace(t, env, "kata")

@@ -67,7 +67,11 @@ func (s *Store) ReadyIssues(
           SELECT 1 FROM issue_labels il
            WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`)
 	}
-	query.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
+	if filter.PriorityFirst {
+		query.WriteString(` ORDER BY i.priority ASC NULLS LAST, i.updated_at DESC, i.id DESC`)
+	} else {
+		query.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
+	}
 	rows, err := s.QueryContext(ctx, query.String(), args...)
 	if err != nil {
 		return nil, fmt.Errorf("ready issues: %w", mapSQLError(err, nil))
@@ -155,7 +159,11 @@ func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
           SELECT 1 FROM issue_labels il
            WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`)
 	}
-	query.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
+	if filter.PriorityFirst {
+		query.WriteString(` ORDER BY i.priority ASC NULLS LAST, i.updated_at DESC, i.id DESC`)
+	} else {
+		query.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
+	}
 	rows, err := s.QueryContext(ctx, query.String(), args...)
 	if err != nil {
 		return nil, fmt.Errorf("ready issues global: %w", mapSQLError(err, nil))

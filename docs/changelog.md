@@ -21,6 +21,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   in every database locale while keeping case-sensitive matching. Existing
   stores upgrade to schema 45 through SQLite's JSONL cutover or the
   [offline PostgreSQL index build](development/postgres-migrations.md#schema-45-issue-uid-prefix-index).
+- Fetch the highest-priority ready issue with less data transfer using `kata next` and MCP `kata.next`. Daemons with API `0.41.0` or newer return one priority-ordered row per request; older daemons keep the existing selection behavior.
 - Search references faster in the web UI on large stores; a `q` search now returns only issue references.
 - Spend 2 REST requests and 1 GraphQL request per 100-issue GitHub status sweep, down from 102 REST requests, while continuing to import upstream closes and reopens. Hosts without the required GraphQL fields keep using REST status reads.
 - Sync GitHub comment history with fewer requests by reading repository-wide comment pages and fetching only recent comments on later polls.

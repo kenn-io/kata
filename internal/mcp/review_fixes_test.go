@@ -1690,12 +1690,14 @@ func TestAllowlistListAndReadyApplyLimitAfterScopedFanout(t *testing.T) {
 	}
 }
 
-func TestNextExaminesAllReadyIssues(t *testing.T) {
+func TestNextExaminesAllReadyIssuesOnOlderDaemon(t *testing.T) {
 	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/api/v1/projects":
 			writeJSON(writer, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
 		case "/api/v1/ready":
+			require.Empty(t, request.URL.Query().Get("sort"))
+			require.Empty(t, request.URL.Query().Get("limit"))
 			count := 101
 			if request.URL.Query().Has("limit") {
 				count = 100
@@ -1711,6 +1713,8 @@ func TestNextExaminesAllReadyIssues(t *testing.T) {
 				issues = append(issues, issue)
 			}
 			writeJSON(writer, map[string]any{"issues": issues})
+		case "/api/v1/health":
+			writeJSON(writer, map[string]any{"ok": true, "api_schema_version": "0.40.0"})
 		default:
 			http.NotFound(writer, request)
 		}
@@ -1726,6 +1730,8 @@ func TestNextExaminesAllReadyIssues(t *testing.T) {
 func TestAllowlistNextPreservesMergedReadyOrderingForEqualPriority(t *testing.T) {
 	client := reviewClient(t, func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
+		case "/api/v1/health":
+			writeJSON(writer, map[string]any{"ok": true, "api_schema_version": "0.41.0"})
 		case "/api/v1/projects":
 			writeJSON(writer, map[string]any{"projects": []any{
 				projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),

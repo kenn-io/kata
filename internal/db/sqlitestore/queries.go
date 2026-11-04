@@ -2514,7 +2514,11 @@ func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, fil
 		args = append(args, strings.ToLower(label))
 	}
 
-	q.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
+	if filter.PriorityFirst {
+		q.WriteString(` ORDER BY i.priority IS NULL, i.priority, i.updated_at DESC, i.id DESC`)
+	} else {
+		q.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
+	}
 	rows, err := d.QueryContext(ctx, q.String(), args...)
 	if err != nil {
 		return nil, fmt.Errorf("ready issues: %w", err)
@@ -2604,7 +2608,11 @@ func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 		args = append(args, strings.ToLower(label))
 	}
 
-	q.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
+	if filter.PriorityFirst {
+		q.WriteString(` ORDER BY i.priority IS NULL, i.priority, i.updated_at DESC, i.id DESC`)
+	} else {
+		q.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
+	}
 	rows, err := d.QueryContext(ctx, q.String(), args...)
 	if err != nil {
 		return nil, fmt.Errorf("ready issues global: %w", err)
