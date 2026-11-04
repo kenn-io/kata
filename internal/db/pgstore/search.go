@@ -74,7 +74,7 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
 		minimum = "1"
 	}
 
-	order := "candidates.score DESC, i.id DESC"
+	order := "candidates.matched_words DESC, candidates.score DESC, i.id DESC"
 	if request.params.StableOrder {
 		order = "i.created_at ASC, i.id ASC"
 	}
@@ -97,7 +97,7 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
  SELECT issue_id, word, max(score) AS score, bool_or(in_comments) AS in_comments
  FROM hits GROUP BY issue_id, word
 ), candidates AS (
- SELECT issue_id AS doc_key, sum(score) AS score, bool_or(in_comments) AS in_comments
+ SELECT issue_id AS doc_key, count(*) AS matched_words, sum(score) AS score, bool_or(in_comments) AS in_comments
  FROM word_hits GROUP BY issue_id HAVING count(*) >= %s
 )
 SELECT `+issueColumns+`,
