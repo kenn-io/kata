@@ -394,7 +394,7 @@ func TestMoveClearsUndoHistory(t *testing.T) {
 	require.Len(t, m.undoHistory.entries, 1, "a preview is not a boundary")
 	m, cmd = enter(m)
 	m, _ = deliver(t, m, cmd)
-	require.Empty(t, m.undoHistory.entries, "a move changes the short id, so earlier edits can no longer be undone")
+	require.Empty(t, m.undoHistory.entries, "a move changes the issue's qualified reference, so earlier edits can no longer be undone")
 }
 
 func TestMoveIssueNeedsDaemonWithSubtreeMoves(t *testing.T) {

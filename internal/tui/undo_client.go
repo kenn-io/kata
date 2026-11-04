@@ -277,8 +277,8 @@ func (c *undoClient) SetDates(ctx context.Context, projectID int64, ref string, 
 }
 
 // MoveIssue previews through to the daemon untouched; a real move is a
-// boundary, because the issue's short id changes and earlier edits can no
-// longer be written back to it.
+// boundary, because the issue's project-qualified reference changes (and its
+// short id can too) and earlier edits can no longer be written back to it.
 func (c *undoClient) MoveIssue(ctx context.Context, projectID int64, ref string, in MoveInput) (*MutationResp, error) {
 	mover, ok := c.KataAPI.(moveAPI)
 	if !ok {

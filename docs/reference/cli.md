@@ -2089,8 +2089,9 @@ issue:
    a pane on another issue keeps it and its Back history.
 
 A preview needs daemon API 0.35.0 or newer, because older daemons move only the
-selected issue; the form says so instead of previewing. A move changes the short
-id, so it clears the undo history. Issue-scoped credentials cannot move, so `M`
+selected issue; the form says so instead of previewing. A move clears the undo
+history, because the issue's project-qualified reference changes and its short
+id can too. Issue-scoped credentials cannot move, so `M`
 is not offered to them and does nothing.
 
 In the issue list, press `X` to soft-delete the selected issue. In split

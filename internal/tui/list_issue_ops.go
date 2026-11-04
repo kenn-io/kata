@@ -29,12 +29,14 @@ func (m Model) listIssueTarget() (formTarget, Issue, bool) {
 // reopen lookup owns the issue until it answers, and a reopen lookup that
 // answers opens its own confirmation over an open Move form.
 func (m Model) moveHidden() bool {
-	return m.listIssueOpsHidden() || m.undoInFlight || m.reopenLookupPending
+	return m.listIssueOpsHidden() || m.moveWaiting()
 }
+
+func (m Model) moveWaiting() bool { return m.undoInFlight || m.reopenLookupPending }
 
 // moveTarget is listIssueTarget for M, held back by the same wait.
 func (m Model) moveTarget() (formTarget, Issue, bool) {
-	if m.undoInFlight || m.reopenLookupPending {
+	if m.moveWaiting() {
 		return formTarget{}, Issue{}, false
 	}
 	return m.listIssueTarget()
