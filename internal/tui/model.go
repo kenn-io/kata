@@ -846,6 +846,9 @@ func projectIDFromMutation(m Model, mut mutationDoneMsg) int64 {
 // open/key. ok=true means the message was handled here.
 func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
+	case cronRuntimeDoneMsg:
+		next, cmd := m.cronRuntimeDone(msg)
+		return next, cmd, true
 	case cronEnabledReadyMsg:
 		next, cmd := m.cronEnabledReady(msg)
 		return next, cmd, true
@@ -3220,6 +3223,16 @@ func (m Model) routeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			m.modal = modalNone
 			return m, nil
 		}
+	case modalCronRequest:
+		switch msg.String() {
+		case "y", "Y":
+			return m.confirmCronRuntimeRequest()
+		case "n", "N", "esc":
+			if m.cron.request == nil || !m.cron.request.inflight {
+				m.modal, m.cron.request = modalNone, nil
+			}
+			return m, nil
+		}
 	case modalCronResume:
 		switch msg.String() {
 		case "y", "Y":
@@ -3684,7 +3697,7 @@ func (m Model) viewContent() string {
 		case viewCredentials:
 			body = renderCredentials(m)
 		default:
-			if m.modal == modalReopenBacklog || m.modal == modalCronResume {
+			if m.modal == modalReopenBacklog || m.modal == modalCronResume || m.modal == modalCronRequest {
 				footer := renderFooterHelpTable(modalHelpRows(m.modal), m.width)
 				bodyHeight := max(0, m.height-lipgloss.Height(footer))
 				body = renderTooNarrow(m.width, bodyHeight)

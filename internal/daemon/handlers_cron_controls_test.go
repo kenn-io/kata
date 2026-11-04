@@ -78,7 +78,7 @@ func TestCronProjectPauseHTTP(t *testing.T) {
 			}
 			require.NoError(t, json.Unmarshal(raw, &read))
 			require.Equal(t, out.Pause, read.Pause)
-			require.Equal(t, []string{"job_pause", "project_pause"}, read.Controls)
+			require.Equal(t, []string{"job_pause", "project_pause", "run_request", "cancel_request"}, read.Controls)
 			require.Contains(t, string(raw), `"project_pause":`)
 		}
 	}

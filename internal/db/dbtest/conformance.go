@@ -53,6 +53,10 @@ type scenario struct {
 var storageScenarios = []scenario{
 	{name: "attachment close evidence", methods: []string{"CloseIssueGuarded", "PatchIssueMetadata", "EventsByUIDs"}, run: checkAttachmentCloseEvidence},
 	{name: "search tokenizer words", methods: []string{"CreateProject", "CreateIssue", "SearchFTS", "SearchFTSAny"}, runWithBackend: checkSearchTokenizerWords},
+	{name: "cron request reads", methods: []string{"ListCronRequests"}, run: checkCronRequestReads},
+	{name: "cron request sweep", methods: []string{"ListCronRequestProjects", "SweepCronRequests"}, run: checkCronRequestSweep},
+	{name: "cron request ingress", run: checkCronRequestsIngress},
+	{name: "cron requests", methods: []string{"RequestCron"}, runWithBackend: checkCronRequests},
 	{name: "cron enabled deleted parent", run: checkCronEnabledDeletedParent},
 	{name: "cron enabled adapter target", methods: []string{"CreateIssue", "CreateProject", "CronJob", "MoveIssueProject", "PutCronJob"}, run: checkCronEnabledAdapterTarget},
 	{name: "cron project pause", methods: []string{"SetCronProjectPause"}, runWithBackend: checkCronProjectPause},

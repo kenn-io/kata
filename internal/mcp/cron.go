@@ -53,6 +53,7 @@ func registerCronTools(server *sdkmcp.Server, h toolHandlers) {
 	registerCronWorkflowTools(server, h)
 	registerCronProjectControlTools(server, h)
 	registerCronRunTools(server, h)
+	registerCronRequestTools(server, h)
 	read := toolHints(true, false, false)
 	addCronTool(server, "kata.cron_new_uid", "Generate cron UID", "Generate and retain a UID before the first create or observe call. Creates and reserves nothing; the UID is unbound until creation. Reuse it after a lost response.", nonIdempotent(toolHints(true, false, false)), h.cronNewUID)
 	addCronTool(server, "kata.cron_capabilities", "Read cron capabilities", "Read the selected project's live cron capabilities under the configured daemon authority.", read, h.cronCapabilities)

@@ -102,29 +102,44 @@ func CheckCronProjectMetadataWrite(values map[string]jsontext.Value) error {
 // asserted origin. authorityUID is the pinned root; untrusted ingress uses "".
 // Deletion accepts malformed old values so a root can recover legacy state.
 func ValidateCronControlEvent(event RemoteEvent, authorityUID string) error {
+	return validateCronControlEvent(event, authorityUID, true)
+}
+
+// Historical checkpoints may retain malformed legacy pause policy for typed
+// recovery. Request values have no legacy format and always validate strictly.
+func validateCronControlEvent(event RemoteEvent, authorityUID string, validatePause bool) error {
 	if event.Type != "project.metadata_updated" {
 		return nil
 	}
 	var payload struct {
 		Diff map[string]struct {
-			To jsontext.Value `json:"to"`
+			From jsontext.Value `json:"from"`
+			To   jsontext.Value `json:"to"`
 		} `json:"diff"`
 	}
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		return fmt.Errorf("%w: invalid cron control diff", ErrFederationIngestValidation)
 	}
-	change, ok := payload.Diff[CronProjectPauseMetadataKey]
-	if !ok {
-		return nil
-	}
-	if authorityUID == "" || event.OriginInstanceUID != authorityUID {
-		return fmt.Errorf("%w: cron controls require root origin", ErrFederationIngestValidation)
-	}
-	if string(change.To) == "null" {
-		return nil
-	}
-	if _, err := decodeCronProjectPause(change.To); err != nil {
-		return fmt.Errorf("%w: %v", ErrFederationIngestValidation, err)
+	for key, change := range payload.Diff {
+		request := strings.HasPrefix(key, CronRequestMetadataPrefix)
+		if !(request || (validatePause && key == CronProjectPauseMetadataKey)) {
+			continue
+		}
+		if authorityUID == "" || event.OriginInstanceUID != authorityUID {
+			return fmt.Errorf("%w: cron controls require root origin", ErrFederationIngestValidation)
+		}
+		if request {
+			if err := validateCronRequestEventChange(strings.TrimPrefix(key, CronRequestMetadataPrefix), change.From, change.To); err != nil {
+				return fmt.Errorf("%w: %v", ErrFederationIngestValidation, err)
+			}
+			continue
+		}
+		if change.To.Kind() == jsontext.KindNull {
+			continue
+		}
+		if _, err := decodeCronProjectPause(change.To); err != nil {
+			return fmt.Errorf("%w: %v", ErrFederationIngestValidation, err)
+		}
 	}
 	return nil
 }

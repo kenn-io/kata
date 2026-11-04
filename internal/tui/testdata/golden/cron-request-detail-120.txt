@@ -1,0 +1,24 @@
+ Project: example-project                                                                               kata カタ · dev
+kata カタ [jobs] runs workflows
+ jobs / Digest
+
+      "scheduled_offset_seconds": 3600,
+      "title": "Digest"
+    },
+    "kind": "job",
+    "overlap": "forbid",
+    "trigger": {
+      "kind": "manual"
+    },
+    "version": 1
+  }
+
+  Loaded runs (1) · newest 100
+  succeeded · 2026-05-01T11:00:00Z · Report ready
+
+  Requests (1)
+  run · pending · 01ARZ3NDEKTSV4RRFFQ69G5FB9
+  Requested: operator · 2026-05-01 12:00:00Z
+▶ Expires:  2026-05-01 12:10:00Z
+
+ j/k move▕ ↵/l follow▕ h/esc back▕ n/e new/edit▕ p pause/resume▕ r refresh▕ 1-4 tabs▕ ? help▕ q quit▕ R request run

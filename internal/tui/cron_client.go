@@ -17,6 +17,9 @@ import (
 )
 
 type cronAPI interface {
+	ListCronRequests(context.Context, int64) ([]db.CronRequest, error)
+	ShowCronRun(context.Context, int64, string) (db.CronRun, error)
+	RequestCron(context.Context, int64, string, string, string, string) (db.RequestCronOut, error)
 	readCronProjectState(context.Context, int64) (cronProjectState, error)
 	CronJobEnabled(ctx context.Context, projectID int64, uid, expected, actor string, enabled bool) (db.CronJob, error)
 	ListCronJobs(context.Context, int64) ([]generated.CronJob, error)
@@ -248,4 +251,62 @@ func (c *Client) readCronProjectState(ctx context.Context, projectID int64) (cro
 		return cronProjectState{}, err
 	}
 	return cronProjectState{pause: response.ProjectPause, controls: response.Controls}, nil
+}
+
+// ShowCronRun reads the live observation used to confirm cancellation eligibility.
+func (c *Client) ShowCronRun(ctx context.Context, pid int64, id string) (db.CronRun, error) {
+	client, err := c.generatedClient()
+	if err != nil {
+		return db.CronRun{}, err
+	}
+	wire, callErr := client.ShowCronRunWithResponse(ctx, &generated.ShowCronRunRequestOptions{PathParams: &generated.ShowCronRunPath{ProjectID: pid, RunUID: id}})
+	if wire == nil {
+		return db.CronRun{}, callErr
+	}
+	var response struct {
+		Run db.CronRun `json:"run"`
+	}
+	err = decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &response)
+	return response.Run, err
+}
+
+// ListCronRequests reads retained identities and their current derived state.
+func (c *Client) ListCronRequests(ctx context.Context, pid int64) ([]db.CronRequest, error) {
+	client, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	wire, callErr := client.ListCronRequestsWithResponse(ctx, &generated.ListCronRequestsRequestOptions{PathParams: &generated.ListCronRequestsPath{ProjectID: pid}})
+	if wire == nil {
+		return nil, callErr
+	}
+	var response struct {
+		Requests []db.CronRequest `json:"requests"`
+	}
+	err = decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &response)
+	return response.Requests, err
+}
+
+// RequestCron submits one caller-retained identity without implicit new retries.
+func (c *Client) RequestCron(ctx context.Context, pid int64, id, kind, target, actor string) (db.RequestCronOut, error) {
+	client, err := c.generatedClient()
+	if err != nil {
+		return db.RequestCronOut{}, err
+	}
+	body := generated.CronRequestBody{UID: id, Actor: &actor}
+	var out db.RequestCronOut
+	if kind == db.CronRequestKindRun {
+		wire, callErr := client.RequestCronJobRunWithResponse(ctx, &generated.RequestCronJobRunRequestOptions{PathParams: &generated.RequestCronJobRunPath{ProjectID: pid, CronUID: target}, Body: &body})
+		if wire == nil {
+			return out, callErr
+		}
+		err = decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &out)
+	} else {
+		wire, callErr := client.RequestCronRunCancelWithResponse(ctx, &generated.RequestCronRunCancelRequestOptions{PathParams: &generated.RequestCronRunCancelPath{ProjectID: pid, RunUID: target}, Body: &body})
+		if wire == nil {
+			return out, callErr
+		}
+		err = decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &out)
+	}
+	return out, err
 }
