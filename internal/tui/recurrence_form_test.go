@@ -233,6 +233,14 @@ func TestRecurrenceFormBlankRuleStops(t *testing.T) {
 }
 
 func TestRecurrenceKeyIsDetailOnly(t *testing.T) {
+	t.Run("help with split detail focused", func(t *testing.T) {
+		h := newRecurrenceHarness(t, viewHelp)
+		h.m.layout, h.m.focus = splitlayout.Split, focusDetail
+		m, cmd, _ := h.m.routeRecurrenceKey(runeKey('O'))
+		assert.Equal(t, inputNone, m.input.kind)
+		assert.Nil(t, cmd)
+	})
+
 	for _, split := range []bool{false, true} {
 		t.Run(strconv.FormatBool(split), func(t *testing.T) {
 			h := newRecurrenceHarness(t, viewList)
