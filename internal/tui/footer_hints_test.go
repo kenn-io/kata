@@ -72,6 +72,9 @@ func TestDetailHelpRows_Contexts(t *testing.T) {
 		helplayout.HelpItem{Key: "?", Description: "help"},
 		helplayout.HelpItem{Key: "q", Description: "quit"})
 
+	assertHelpItemAbsent(t, flattenHelpRows(activity.detailHelpRows()),
+		helplayout.HelpItem{Key: "X", Description: "delete"})
+
 	children := Model{detail: hierarchyDetailModel(focusChildren)}
 	assertHelpItemsPresent(t, children.detailHelpRows(),
 		helplayout.HelpItem{Key: "↑↓", Description: "scroll"},
@@ -82,6 +85,8 @@ func TestDetailHelpRows_Contexts(t *testing.T) {
 		helplayout.HelpItem{Key: "x", Description: "close"},
 		helplayout.HelpItem{Key: "?", Description: "help"},
 		helplayout.HelpItem{Key: "q", Description: "quit"})
+	assertHelpItemAbsent(t, flattenHelpRows(children.detailHelpRows()),
+		helplayout.HelpItem{Key: "X", Description: "delete"})
 }
 
 func TestHelpRows_InputAndModalContexts(t *testing.T) {

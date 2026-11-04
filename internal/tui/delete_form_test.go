@@ -278,6 +278,17 @@ func TestDeleteKeyIsOfferedOnlyToCredentialsThatCanDelete(t *testing.T) {
 			h.m.authCapabilitiesRequired, h.m.authCapabilitiesReady = true, true
 			h.m.issueScoped, h.m.scopedWritable = scoped, scoped
 
+			if view != viewHelp {
+				hint := helplayout.HelpItem{Key: "X", Description: "delete"}
+				if scoped || view == viewDetail {
+					assertHelpItemAbsent(t, flattenHelpRows(h.m.helpRows()), hint)
+					assertHelpItemAbsent(t, flattenHelpRows(h.m.splitHelpRows()), hint)
+				} else {
+					assertHelpItemPresent(t, flattenHelpRows(h.m.helpRows()), hint)
+					assertHelpItemPresent(t, flattenHelpRows(h.m.splitHelpRows()), hint)
+				}
+			}
+
 			cmd := h.key(runeKey('X'))
 			helpText := stripANSI(renderHelp(h.m.helpKeymap(), 120, ListFilter{}))
 			if scoped || view != viewList {
@@ -293,12 +304,6 @@ func TestDeleteKeyIsOfferedOnlyToCredentialsThatCanDelete(t *testing.T) {
 			}
 		}
 	}
-	m := initialModel(Options{})
-	m.authCapabilitiesRequired, m.authCapabilitiesReady = true, true
-	m.issueScoped, m.scopedWritable = true, true
-	hint := helplayout.HelpItem{Key: "X", Description: "delete"}
-	assertHelpItemAbsent(t, flattenHelpRows(m.helpRows()), hint)
-	assertHelpItemAbsent(t, flattenHelpRows(m.splitHelpRows()), hint)
 }
 
 func TestDeleteSavingEscKeepsResult(t *testing.T) {
