@@ -3,12 +3,15 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"math"
+	"strconv"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 	_ "time/tzdata"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -315,4 +318,46 @@ func TestCronHealthOverdueWinsAndNativeIgnoresWait(t *testing.T) {
 	p.progress = map[string]cron.RecurringProgress{j.UID: {Version: 1, Anchor: snapshotFixedNow, Through: snapshotFixedNow}}
 	require.Equal(t, "ok", cronHealth(p, j, snapshotFixedNow).state)
 	require.NotEqual(t, "blocked", cronRunHealth(p, r).state)
+}
+
+// Selected health text must retain readable contrast (at least 4.5:1 for text)
+// against its actual painted background in both shipped color themes.
+func TestCronHealthSelectedContrast(t *testing.T) {
+	defer snapshotInit(t)()
+	for _, mode := range []colorMode{colorDark, colorLight} {
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
+			m := cronHealthFixture(t)
+			applyColorMode(mode, mode == colorDark)
+			m.width = 120
+			m.cron.lists[cronJobs].cursor = 1
+			for _, row := range strings.Split(m.viewContent(), "\n") {
+				plain := stripANSI(row)
+				if !strings.Contains(plain, "job-failing") {
+					continue
+				}
+				x := strings.LastIndex(plain, "failing")
+				require.Greater(t, x, 0)
+				cell := attentionTerminalCells(row)[ansi.StringWidth(plain[:x])]
+				luminance := func(index string) float64 {
+					n, err := strconv.ParseUint(index, 10, 8)
+					require.NoError(t, err, "health must have an explicit color")
+					r, g, b, _ := ansi.IndexedColor(n).RGBA()
+					linear := func(v uint32) float64 {
+						c := float64(v) / 65535
+						if c <= 0.04045 {
+							return c / 12.92
+						}
+						return math.Pow((c+0.055)/1.055, 2.4)
+					}
+					return 0.2126*linear(r) + 0.7152*linear(g) + 0.0722*linear(b)
+				}
+				a, b := luminance(cell.foreground), luminance(cell.background)
+				ratio := (max(a, b) + 0.05) / (min(a, b) + 0.05)
+				t.Logf("selected health foreground=%s background=%s contrast=%.2f:1", cell.foreground, cell.background, ratio)
+				require.GreaterOrEqual(t, ratio, 4.5)
+				return
+			}
+			t.Fatal("selected failing job missing")
+		})
+	}
 }
