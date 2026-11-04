@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json/jsontext"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -222,6 +223,41 @@ func TestUndoOfADelete(t *testing.T) {
 			} else {
 				assert.Equal(t, "undid delete on "+h.qualified(target), h.m.toast.text)
 			}
+		})
+	}
+}
+
+func TestUndoDeleteAfterComment(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		edits int
+	}{
+		{"comment", 0},
+		{"history limit then comment", undoLimit + 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newDeleteHarness(t, viewList)
+			target, survivor := h.issues[0], h.issues[1]
+			h.selectIssue(target.UID)
+			h.key(runeKey('X'))
+			h.typeText("DELETE " + h.qualified(target))
+			h.finish(h.enter())
+			require.True(t, h.isDeleted(target.UID))
+			for i := range tc.edits {
+				resp, err := h.client.EditBody(t.Context(), h.project.ID, survivor.UID, strings.Repeat("x", i+1), "alice")
+				require.NoError(t, err)
+				next, _ := h.m.Update(mutationDoneMsg{resp: resp})
+				h.m = next.(Model)
+			}
+			resp, err := h.client.AddComment(t.Context(), h.project.ID, survivor.UID, "Removed the duplicate", "alice")
+			require.NoError(t, err)
+			next, _ := h.m.Update(mutationDoneMsg{resp: resp})
+			h.m = next.(Model)
+
+			h.finish(h.key(runeKey('u')))
+
+			require.False(t, h.isDeleted(target.UID))
+			assert.Contains(t, h.m.toast.text, "undid delete")
 		})
 	}
 }

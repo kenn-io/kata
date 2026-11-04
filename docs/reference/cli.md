@@ -1996,7 +1996,7 @@ choose a policy for you. Undoing a close asks the same way. If the TUI cannot
 read the jobs, it reopens without a prompt.
 
 Press `u` in the issue list or detail view to undo the latest eligible issue
-edit from this TUI session. Repeated presses walk back through up to 20 edits,
+edit from this TUI session. Repeated presses walk back through up to 20 recent edits and all deletions,
 including close, reopen, owner, priority, label, body, dates, delete, and newly
 added parent, blocker, or related links. Undo follows the recorded issue across
 navigation and projects; it does not target whichever row is currently
@@ -2009,14 +2009,14 @@ run one at a time; quick successive edits wait for the current edit to finish.
 Creating an issue or comment, making a timed assignment or owner edit involving
 an expiry, changing the status of a recurring issue, closing an issue with a
 live federation lease, or reopening an issue closed for a reason other than
-`done` clears the undo history. Switching daemons also clears it.
+`done` clears the undo history except deletions. Switching daemons clears all history.
 Except when restoring a deletion, undo reads the affected issue or exact link
 and refuses an observed conflicting change. It skips that history entry without
 changing the issue, so pressing `u` again reaches earlier edits. The revision
 check also rejects intervening status or owner changes, including changes away
 and back to the same value. These checks are not atomic: another client can
 edit the same field between the read and the undo write. A failed write with
-an uncertain outcome clears history rather than risking a second change.
+an uncertain outcome clears history except deletions rather than risking a second change.
 
 Press `C` to open the read-only credential ledger when the selected daemon
 advertises `token_audit_read`. It lists live, expired, and revoked credentials
@@ -2055,8 +2055,9 @@ starts. The selection then moves to the next row (the previous one after the
 last). A detail showing the issue returns as it does on `Esc`, and a notice
 names `u`. `u` restores the issue the way `kata restore` does; if the issue was
 restored elsewhere in the meantime, the TUI says so and
-changes nothing. There is no restore prompt for older deletions: use
-`kata restore`. Issue-scoped credentials cannot delete or restore, so `X` is
+changes nothing. Older deletions remain available through `u` for the connected
+TUI session, including after comments and the 20-edit history limit. Use
+`kata restore` after leaving the session. Issue-scoped credentials cannot delete or restore, so `X` is
 not offered to them and does nothing.
 
 In the issue list, `v` toggles between nested and flat views: nested groups

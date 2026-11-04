@@ -24,12 +24,13 @@ func (h *undoHistory) push(entry undoEntry) {
 	entry.id = h.nextID
 	h.entries = append(h.entries, entry)
 	if len(h.entries) > undoLimit {
-		h.entries = h.entries[len(h.entries)-undoLimit:]
+		cutoff := len(h.entries) - undoLimit
+		h.entries = append(slices.DeleteFunc(h.entries[:cutoff], func(e undoEntry) bool { return e.kind != "delete" }), h.entries[cutoff:]...)
 	}
 }
 
 func (h *undoHistory) clear(reason string) {
-	h.entries = nil
+	h.entries = slices.DeleteFunc(h.entries, func(e undoEntry) bool { return e.kind != "delete" })
 	h.boundary = reason
 }
 
