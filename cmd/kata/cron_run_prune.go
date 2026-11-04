@@ -56,8 +56,8 @@ Counts describe this batch. If more is true, run another preview before deleting
 			if keep < 1 || keep > 1000 || limit < 1 || limit > 20000 {
 				return cronCLIValidation("--keep must be 1..1000 and --limit must be 1..20000")
 			}
-			for _, value := range []*string{&job, &workflow} {
-				if *value != "" {
+			for name, value := range map[string]*string{"job": &job, "workflow": &workflow} {
+				if cmd.Flags().Changed(name) || *value != "" {
 					*value, err = normalizedCronCLIUID(*value)
 					if err != nil {
 						return err
