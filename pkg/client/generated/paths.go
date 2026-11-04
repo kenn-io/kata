@@ -215,6 +215,14 @@ func (r ResumeCronJobPath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(r))
 }
 
+type ResumeCronProjectPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
+type PauseCronProjectPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
 type ListCronRunsPath struct {
 	ProjectID int64 `json:"project_id"`
 }

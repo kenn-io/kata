@@ -1070,15 +1070,38 @@ components:
     CronCapabilitiesResponseBody:
       additionalProperties: true
       properties:
+        controls:
+          items:
+            type: string
+          type: array
         event_features:
           items:
             type: string
           type: array
+        project_pause:
+          additionalProperties: true
+          properties:
+            invalid:
+              type: boolean
+            paused_at:
+              format: date-time
+              type: string
+            paused_by:
+              type: string
+            reason:
+              type: string
+          required:
+            - reason
+          type:
+            - object
+            - "null"
         project_uid:
           type: string
       required:
         - project_uid
         - event_features
+        - project_pause
+        - controls
       type: object
     CronDefinitionActionBody:
       additionalProperties: false
@@ -1243,6 +1266,40 @@ components:
           $ref: "#/components/schemas/CronJob"
       required:
         - job
+      type: object
+    CronProjectPauseBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        reason:
+          type: string
+      type: object
+    CronProjectPauseResponseBody:
+      additionalProperties: true
+      properties:
+        changed:
+          type: boolean
+        project_pause:
+          additionalProperties: true
+          properties:
+            invalid:
+              type: boolean
+            paused_at:
+              format: date-time
+              type: string
+            paused_by:
+              type: string
+            reason:
+              type: string
+          required:
+            - reason
+          type:
+            - object
+            - "null"
+      required:
+        - project_pause
+        - changed
       type: object
     CronRun:
       additionalProperties: true
@@ -4155,12 +4212,35 @@ components:
     ListCronJobsResponseBody:
       additionalProperties: true
       properties:
+        controls:
+          items:
+            type: string
+          type: array
         jobs:
           items:
             $ref: "#/components/schemas/CronJob"
           type: array
+        project_pause:
+          additionalProperties: true
+          properties:
+            invalid:
+              type: boolean
+            paused_at:
+              format: date-time
+              type: string
+            paused_by:
+              type: string
+            reason:
+              type: string
+          required:
+            - reason
+          type:
+            - object
+            - "null"
       required:
         - jobs
+        - project_pause
+        - controls
       type: object
     ListCronWorkflowsResponseBody:
       additionalProperties: true
@@ -8779,6 +8859,61 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/CronJobResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/cron/pause:
+    delete:
+      operationId: resumeCronProject
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CronProjectPauseBody"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CronProjectPauseResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+    put:
+      operationId: pauseCronProject
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CronProjectPauseBody"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CronProjectPauseResponseBody"
           description: OK
         default:
           content:

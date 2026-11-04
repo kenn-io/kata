@@ -1299,11 +1299,44 @@ func (c CreateTokenResponseBody) Validate() error {
 }
 
 type CronCapabilitiesResponseBody struct {
-	EventFeatures []string `json:"event_features" validate:"required"`
-	ProjectUID    string   `json:"project_uid" validate:"required"`
+	Controls      []string                                   `json:"controls" validate:"required"`
+	EventFeatures []string                                   `json:"event_features" validate:"required"`
+	ProjectPause  *CronCapabilitiesResponseBody_ProjectPause `json:"project_pause"`
+	ProjectUID    string                                     `json:"project_uid" validate:"required"`
 }
 
 func (c CronCapabilitiesResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(c.Controls, "required"); err != nil {
+		errors = errors.Append("Controls", err)
+	}
+	if err := typesValidator.Var(c.EventFeatures, "required"); err != nil {
+		errors = errors.Append("EventFeatures", err)
+	}
+	if c.ProjectPause != nil {
+		if v, ok := any(c.ProjectPause).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("ProjectPause", err)
+			}
+		}
+	}
+	if err := typesValidator.Var(c.ProjectUID, "required"); err != nil {
+		errors = errors.Append("ProjectUID", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type CronCapabilitiesResponseBody_ProjectPause struct {
+	Invalid  *bool      `json:"invalid,omitempty"`
+	PausedAt *time.Time `json:"paused_at,omitempty"`
+	PausedBy *string    `json:"paused_by,omitempty"`
+	Reason   string     `json:"reason" validate:"required"`
+}
+
+func (c CronCapabilitiesResponseBody_ProjectPause) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(c))
 }
 
@@ -1509,6 +1542,42 @@ func (c CronJobResponseBody) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type CronProjectPauseBody struct {
+	Actor  *string `json:"actor,omitempty"`
+	Reason *string `json:"reason,omitempty"`
+}
+
+type CronProjectPauseResponseBody struct {
+	Changed      bool                                       `json:"changed"`
+	ProjectPause *CronProjectPauseResponseBody_ProjectPause `json:"project_pause"`
+}
+
+func (c CronProjectPauseResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if c.ProjectPause != nil {
+		if v, ok := any(c.ProjectPause).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("ProjectPause", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type CronProjectPauseResponseBody_ProjectPause struct {
+	Invalid  *bool      `json:"invalid,omitempty"`
+	PausedAt *time.Time `json:"paused_at,omitempty"`
+	PausedBy *string    `json:"paused_by,omitempty"`
+	Reason   string     `json:"reason" validate:"required"`
+}
+
+func (c CronProjectPauseResponseBody_ProjectPause) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
 }
 
 type CronRun struct {
@@ -4157,11 +4226,16 @@ func (l ListAllIssuesResponseBody) Validate() error {
 }
 
 type ListCronJobsResponseBody struct {
-	Jobs []CronJob `json:"jobs" validate:"required"`
+	Controls     []string                               `json:"controls" validate:"required"`
+	Jobs         []CronJob                              `json:"jobs" validate:"required"`
+	ProjectPause *ListCronJobsResponseBody_ProjectPause `json:"project_pause"`
 }
 
 func (l ListCronJobsResponseBody) Validate() error {
 	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(l.Controls, "required"); err != nil {
+		errors = errors.Append("Controls", err)
+	}
 	if err := typesValidator.Var(l.Jobs, "required"); err != nil {
 		errors = errors.Append("Jobs", err)
 	}
@@ -4172,10 +4246,28 @@ func (l ListCronJobsResponseBody) Validate() error {
 			}
 		}
 	}
+	if l.ProjectPause != nil {
+		if v, ok := any(l.ProjectPause).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("ProjectPause", err)
+			}
+		}
+	}
 	if len(errors) == 0 {
 		return nil
 	}
 	return errors
+}
+
+type ListCronJobsResponseBody_ProjectPause struct {
+	Invalid  *bool      `json:"invalid,omitempty"`
+	PausedAt *time.Time `json:"paused_at,omitempty"`
+	PausedBy *string    `json:"paused_by,omitempty"`
+	Reason   string     `json:"reason" validate:"required"`
+}
+
+func (l ListCronJobsResponseBody_ProjectPause) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(l))
 }
 
 type ListCronWorkflowsResponseBody struct {
