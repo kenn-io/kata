@@ -18,6 +18,9 @@ Browse jobs, runs, and workflows in `kata tui` with the `2`, `3`, and `4` tabs f
 For a run organized as dependent issues with human approval, see
 [Gated workflows](../workflows/gated-workflows.md).
 
+Before authoring a job, read [Author cron jobs with an agent](../guide/cron-authoring.md)
+or run `kata cron guide` for decision rules matched to your CLI.
+
 ## Vocabulary
 
 | Name | Meaning |

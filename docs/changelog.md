@@ -14,6 +14,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
   configuration. The example now maps `PI_SESSION_ID`, which oh-my-pi sets, to
   `omp`. The old `OMP_SESSION_ID` example never matched, and copying it whole
   recorded oh-my-pi closes as pi sessions.
+- Author cron jobs with version-matched decision rules from `kata cron guide`
+  or `kata.skills {"name":"cron"}`. The shared guide covers job kinds, known
+  identifiers, agent and model selection, staggered schedules, delivery checks
+  and reporting the next occurrence. See the
+  [authoring guide](guide/cron-authoring.md).
 - Let autostarted local-profile daemons use `KATA_HTTP_TIMEOUT` for federation
   requests, so operators can raise the 60-second budget for a slow hub.
 - Find every cron HTTP operation, its CLI command and MCP tool in the

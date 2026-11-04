@@ -2321,8 +2321,13 @@ to inject its value into the consuming process. Revoke the token during teardown
 
 ## Cron
 
+`kata cron guide` prints the embedded [authoring guide](../guide/cron-authoring.md)
+as Markdown without contacting a daemon. It is matched to the installed CLI
+version and covers job choices, adapter options, schedules and delivery checks.
+
 `kata cron` stores shared jobs, workflows and independent attributed run evidence.
-Commands return JSON; external adapters schedule and launch their own work.
+Definition and evidence commands return JSON; external adapters schedule and
+launch their own work.
 See [Cron](cron.md) for bounded documents and retry semantics.
 
 ```sh

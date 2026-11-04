@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
 
+	katadocs "go.kenn.io/kata/docs"
 	"go.kenn.io/kata/internal/agentguide"
 	"go.kenn.io/kata/internal/storageadmin"
 )
@@ -48,7 +49,7 @@ func TestSkillsLookupOutcomes(t *testing.T) {
 	previousChecks := flag.Lookup("rapid.checks").Value.String()
 	require.NoError(t, flag.Set("rapid.checks", "1000"))
 	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
-	names := []string{"workflow", "issues", "claiming", "closing", "teammates", "scheduling", "events"}
+	names := []string{"workflow", "issues", "claiming", "closing", "teammates", "scheduling", "events", "cron"}
 	gen := rapid.OneOf(rapid.String(), rapid.SampledFrom(names), mutatedNameGen(names), rapid.SampledFrom([]string{"", "\t\n\u2003", "/tmp/guide.md", "..", "workflow\x00"}))
 	rapid.Check(t, func(rt *rapid.T) {
 		raw := gen.Draw(rt, "name")
@@ -77,6 +78,33 @@ func TestSkillsLookupOutcomes(t *testing.T) {
 			require.Equal(rt, md, text)
 		}
 	})
+}
+
+func TestSkillsExportedLookupsUseExactNames(t *testing.T) {
+	// Keep the property-test budget consistent with the former Hegel check.
+	previousChecks := flag.Lookup("rapid.checks").Value.String()
+	require.NoError(t, flag.Set("rapid.checks", "1000"))
+	defer func() { require.NoError(t, flag.Set("rapid.checks", previousChecks)) }()
+	names := []string{"workflow", "issues", "claiming", "closing", "teammates", "scheduling", "events", "cron"}
+	gen := rapid.OneOf(rapid.String(), rapid.SampledFrom(names), mutatedNameGen(names))
+	for _, tc := range []struct {
+		name   string
+		lookup func(string) (string, bool)
+	}{
+		{"source", SkillSource},
+		{"markdown", SkillMarkdown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rapid.Check(t, func(rt *rapid.T) {
+				name := gen.Draw(rt, "name")
+				body, ok := tc.lookup(name)
+				require.Equal(rt, slices.Contains(names, name), ok)
+				if !ok {
+					require.Empty(rt, body)
+				}
+			})
+		})
+	}
 }
 
 func TestSkillsSchemaBoundary(t *testing.T) {
@@ -180,6 +208,12 @@ func TestSkillGuidesIncludeTheirFragmentsVerbatim(t *testing.T) {
 			}
 			require.True(t, found, id)
 		}
+		if guide.name == "cron" {
+			page, err := katadocs.Page("guide/cron-authoring.md")
+			require.NoError(t, err)
+			require.Contains(t, md, page)
+			source.WriteString(page)
+		}
 		if guide.name == "workflow" {
 			require.Contains(t, md, agentguide.Contract)
 			require.Contains(t, md, "## MCP differences")
@@ -208,7 +242,7 @@ func TestSkillGuidesStayBounded(t *testing.T) {
 }
 
 func TestSkillCatalogOrder(t *testing.T) {
-	want := []string{"workflow", "issues", "claiming", "closing", "teammates", "scheduling", "events"}
+	want := []string{"workflow", "issues", "claiming", "closing", "teammates", "scheduling", "events", "cron"}
 	require.Equal(t, want, SkillGuides())
 	returned := SkillGuides()
 	returned[0] = "changed"
@@ -223,6 +257,9 @@ func TestSkillCommandToolsAreRegistered(t *testing.T) {
 	for _, row := range SkillCommands() {
 		for _, tool := range row.Tools {
 			require.Contains(t, names, tool, row.CLI)
+			if tool == "kata.skills" {
+				continue // Core guides are always registered and have no section loader.
+			}
 			loader, ok := sectionLoaderForTool(tool)
 			require.True(t, ok, tool)
 			require.Contains(t, names, loader)
@@ -257,6 +294,16 @@ func TestSkillTableEscapesCells(t *testing.T) {
 	require.Equal(t, "| `kata notify` | none | — | CLI only |", renderCommandRow(SkillCommand{CLI: "kata notify", Note: "CLI only"}, ""))
 }
 
+func TestSkillGuideCommandCopiesAreIndependent(t *testing.T) {
+	for _, name := range SkillGuides() {
+		want := slices.Clone(SkillGuideCommands(name))
+		returned := SkillGuideCommands(name)
+		require.NotEmpty(t, returned, name)
+		returned[0] = "changed"
+		require.Equal(t, want, SkillGuideCommands(name), name)
+	}
+}
+
 func TestSkillGuidesRenderTheirRows(t *testing.T) {
 	for _, name := range SkillGuides() {
 		md, _ := SkillMarkdown(name)
@@ -272,4 +319,9 @@ func TestSkillGuidesRenderTheirRows(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestSkillTableCoreToolHasNoLoader(t *testing.T) {
+	row := renderCommandRow(SkillCommand{CLI: "kata cron guide", Tools: []string{"kata.skills"}}, "")
+	require.Equal(t, "| `kata cron guide` | `kata.skills` | — |  |", row)
 }
