@@ -979,7 +979,7 @@ func listMutationSuccessText(m mutationDoneMsg) string {
 	case "dates":
 		return fmt.Sprintf("updated dates of #%s", ref)
 	case "recurrence.start", "recurrence.change", "recurrence.stop":
-		return fmt.Sprintf(successTemplates[m.kind], ref)
+		return mutationSuccessText(m, nil)
 	}
 	return ""
 }

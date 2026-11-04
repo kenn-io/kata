@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
@@ -374,6 +376,58 @@ func TestRecurrenceBlankZoneNoopClosesQuietly(t *testing.T) {
 	assert.Empty(t, h.m.detail.status, "the daemon reported no change")
 	assert.Nil(t, h.m.toast)
 	assert.Len(t, h.m.undoHistory.entries, 1, "a daemon no-op preserves undo")
+}
+
+func TestRecurrenceListBlankZoneNoopClosesQuietly(t *testing.T) {
+	h := newRecurrenceHarness(t, viewList)
+	before := h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
+	h.open()
+	h.m.input.field(fieldZone).setValue("")
+	h.save()
+
+	assert.Equal(t, inputNone, h.m.input.kind)
+	assert.Equal(t, before.Revision, h.rows()[0].Revision)
+	assert.Empty(t, h.m.list.status, "the daemon reported no change")
+	assert.NotContains(t, h.page(), "changed repeat")
+}
+
+func TestRecurrenceFormRefusalExpires(t *testing.T) {
+	for _, refusal := range []string{"stopped series", "cron parent", "failed read"} {
+		t.Run(refusal, func(t *testing.T) {
+			h := newRecurrenceHarness(t, viewDetail)
+			var want string
+			switch refusal {
+			case "stopped series":
+				current := h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
+				require.NoError(t, recurrenceclient.Stop(t.Context(), h.api, h.issue.ProjectID, current, "bob"))
+				want = recurrenceStoppedMessage
+			case "cron parent":
+				_, err := h.env.DB.ExecContext(t.Context(),
+					`UPDATE issues SET metadata='{"cron.progress.01ARZ3NDEKTSV4RRFFQ69G5FAV":{}}' WHERE id=?`, h.issue.ID)
+				require.NoError(t, err)
+				want = recurrenceclient.CronParentRefusal
+			case "failed read":
+				h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
+				h.m.api = newConnectedUndoClient(t, NewClient(h.env.URL, &http.Client{Transport: failingRecurrenceList{inner: h.env.HTTP}}))
+				want = "Could not read the recurrence:"
+			}
+			loaded := msgOfType[recurrenceFormLoadedMsg](t, h.key(runeKey('O')))
+			synctest.Test(t, func(t *testing.T) {
+				h.m.toastNow = time.Now
+				out, expiry := h.m.Update(loaded)
+				h.m = out.(Model)
+				require.Equal(t, inputNone, h.m.input.kind)
+				require.Contains(t, h.page(), want)
+				require.NotNil(t, expiry, "the refusal schedules its own expiry")
+
+				msg := msgOfType[toastExpiredMsg](t, expiry)
+				out, _ = h.m.Update(msg)
+				h.m = out.(Model)
+				assert.NotContains(t, h.page(), want)
+				assert.Nil(t, h.m.toast)
+			})
+		})
+	}
 }
 
 func TestRecurrencePreflightFailurePreservesUndo(t *testing.T) {
