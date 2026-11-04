@@ -369,7 +369,7 @@ func (m Model) handleMovePreview(msg movePreviewMsg) Model {
 func (m Model) dispatchMove() (Model, tea.Cmd) {
 	s := m.move
 	if s.preview.revision <= 0 {
-		s.err = "the daemon's preview did not report the issue's revision, so the move was not sent; press esc and choose the project again"
+		s.err = "The preview is incomplete, so the move was not sent. Press Esc and choose the project again."
 		m.move = s
 		return m, nil
 	}
