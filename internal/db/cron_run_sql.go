@@ -112,6 +112,7 @@ func (a CronSQL) Runs(ctx context.Context, in CronRunList) ([]CronRun, error) {
 		args = append(args, in.JobUID)
 		query += fmt.Sprintf(" AND job_uid=$%d", len(args))
 	}
+
 	if in.BeforeUID != "" {
 		if !cronUID(in.BeforeUID) {
 			return nil, fmt.Errorf("%w: invalid cursor", cron.ErrInvalid)
@@ -194,6 +195,11 @@ func (a CronSQL) observeRunTx(ctx context.Context, tx *sql.Tx, in ObserveCronRun
 		replayed, err := continueCronRun(&value, current, in, requestedActor, effectiveActor)
 		if err != nil || replayed {
 			result.Run, result.Replayed = current, replayed
+			return result, err
+		}
+	}
+	if value.Summary.UsesV2() {
+		if err := checkCronSummaryBinding(ctx, tx, in.ProjectID); err != nil {
 			return result, err
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"strings"
 	"time"
 
@@ -253,5 +254,42 @@ func checkCronSummaryProbeCandidates(t *testing.T, store db.Storage) error {
 	features, err = db.ProjectRequiredEventFeatures(ctx, store.(recurringProbeQuerier), project.UID)
 	require.NoError(t, err)
 	require.Equal(t, db.SupportedEventFeatures, features, "main's issue-move requirement unions with v2 and cron")
+	return nil
+}
+
+func checkCronSummaryAdmission(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "admission-project")
+	require.NoError(t, err)
+	job, _ := nativeFederationDefinitions(t, store, project)
+	id, err := uid.New()
+	require.NoError(t, err)
+	in := db.ObserveCronRun{ProjectID: project.ID, UID: id, Actor: "worker", JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Status: "failed", Summary: cron.Summary{Version: 1, Reason: "failed"}}
+	initial, err := store.ObserveCronRun(ctx, in)
+	require.NoError(t, err)
+	revoked := errors.New("fixture authority revoked")
+	_, err = store.ObserveCronRun(db.WithTransactionFence(ctx, func(context.Context, db.Transaction) error { return revoked }), in)
+	require.ErrorIs(t, err, revoked)
+	binding, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://daemon.example", HubProjectID: 1, HubProjectUID: project.UID, Actor: "worker", Enabled: true, PushEnabled: true})
+	require.NoError(t, err)
+	before, err := store.MaxEventID(ctx)
+	require.NoError(t, err)
+	replay, err := store.ObserveCronRun(ctx, in)
+	require.NoError(t, err)
+	require.True(t, replay.Replayed)
+	require.Equal(t, initial.Run, replay.Run)
+	in.ExpectedRevision = initial.Run.Revision
+	in.Summary.Message = "new evidence"
+	_, err = store.ObserveCronRun(ctx, in)
+	require.ErrorIs(t, err, db.ErrCronSummaryAdmissionRequired)
+	changed := binding
+	changed.HubProjectID++
+	_, err = store.UpsertFederationBinding(ctx, changed)
+	require.NoError(t, err)
+	_, err = store.ObserveCronRun(db.WithCronSummaryBinding(ctx, &binding), in)
+	require.ErrorIs(t, err, db.ErrUnsupportedEventFeatures)
+	after, err := store.MaxEventID(ctx)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
 	return nil
 }

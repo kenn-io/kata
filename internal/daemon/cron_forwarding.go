@@ -72,24 +72,13 @@ func forwardCronJob(ctx context.Context, cfg ServerConfig, projectID int64, uid,
 	if err != nil {
 		return nil, true, err
 	}
-	cred, found, err := cfg.federationCredentialStore().FederationCredential(ctx, project.UID)
-	if err != nil || !found || cred.Token == "" || cred.RelayEnrollmentPending || cred.LeavePending {
-		return nil, true, cronForwardUnavailable("federation push credentials are unavailable")
-	}
-	credentialOrigin, e1 := httpurl.CanonicalHTTPBaseURL(cred.HubURL)
-	bindingOrigin, e2 := httpurl.CanonicalHTTPBaseURL(binding.HubURL)
-	if e1 != nil || e2 != nil || credentialOrigin != bindingOrigin || cred.HubProjectID != binding.HubProjectID {
-		return nil, true, cronForwardUnavailable("federation credential target differs from the binding; reconnect before retrying")
-	}
-	cred = config.FederationTransportCredential(binding.HubURL, binding.HubProjectID, binding.AllowInsecure, cred)
-	if cfg.FederationHubClient == nil || cfg.FederationPushPending == nil {
+	if cfg.FederationPushPending == nil {
 		return nil, true, cronForwardUnavailable("federation push transport is unavailable")
 	}
-	client, err := cfg.FederationHubClient(ctx, cred)
+	client, cred, bindingOrigin, err := resolveCronHubTransport(ctx, cfg, project.UID, binding)
 	if err != nil {
-		return nil, true, cronForwardUnavailable("federation transport is unavailable")
+		return nil, true, err
 	}
-	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	path := fmt.Sprintf("%s/api/v1/projects/%d", bindingOrigin, binding.HubProjectID)
 	var meta api.ProjectFederationBody
 	if err := cronHubRequest(ctx, client, http.MethodGet, path+"/federation/metadata", nil, &meta, projectID); err != nil {
@@ -138,6 +127,30 @@ func forwardCronJob(ctx context.Context, cfg ServerConfig, projectID int64, uid,
 		cfg.FederationWake()
 	}
 	return out, true, nil
+}
+
+// resolveCronHubTransport pins credentials to the binding and keeps shared clients immutable.
+func resolveCronHubTransport(ctx context.Context, cfg ServerConfig, projectUID string, binding db.FederationBinding) (*http.Client, config.FederationCredential, string, error) {
+	cred, found, err := cfg.federationCredentialStore().FederationCredential(ctx, projectUID)
+	if err != nil || !found || cred.Token == "" || cred.RelayEnrollmentPending || cred.LeavePending {
+		return nil, cred, "", cronForwardUnavailable("federation push credentials are unavailable")
+	}
+	credentialOrigin, e1 := httpurl.CanonicalHTTPBaseURL(cred.HubURL)
+	bindingOrigin, e2 := httpurl.CanonicalHTTPBaseURL(binding.HubURL)
+	if e1 != nil || e2 != nil || credentialOrigin != bindingOrigin || cred.HubProjectID != binding.HubProjectID {
+		return nil, cred, "", cronForwardUnavailable("federation credential target differs from the binding; reconnect before retrying")
+	}
+	cred = config.FederationTransportCredential(binding.HubURL, binding.HubProjectID, binding.AllowInsecure, cred)
+	if cfg.FederationHubClient == nil {
+		return nil, cred, "", cronForwardUnavailable("federation push transport is unavailable")
+	}
+	client, err := cfg.FederationHubClient(ctx, cred)
+	if err != nil || client == nil {
+		return nil, cred, "", cronForwardUnavailable("federation transport is unavailable")
+	}
+	local := *client
+	local.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &local, cred, bindingOrigin, nil
 }
 
 func cronForwardAdmission(ctx context.Context, store db.Storage, projectID int64, projectUID string) error {
