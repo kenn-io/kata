@@ -233,3 +233,65 @@ func TestSelectedCommentGraphUsesLookupIndexes(t *testing.T) {
 		})
 	}
 }
+
+func TestMovedCommentGraphTargetUsesHandleIndex(t *testing.T) {
+	ctx := t.Context()
+	work := &referenceWork{}
+	pool := sql.OpenDB(referenceConnector{work})
+	pool.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = pool.Close() })
+	schema, err := os.ReadFile("sqlitestore/schema.sql")
+	require.NoError(t, err)
+	_, err = pool.ExecContext(ctx, string(schema))
+	require.NoError(t, err)
+	const movedUID = "01m40000000000000000000007"
+	for _, statement := range []string{
+		`INSERT INTO projects(id,uid,name) VALUES(1,'01M40000000000000000000001','source'),(2,'01M40000000000000000000008','destination')`,
+		`INSERT INTO issues(id,uid,short_id,project_id,title,author) VALUES(1,'01M40000000000000000000002','0002',1,'Source','worker'),(2,'01M40000000000000000000009','0009',2,'Destination','worker')`,
+		`INSERT INTO comments(uid,issue_id,author,body,created_at,reply_to_uid,reply_kind) VALUES('01M40000000000000000000004',1,'worker','Reply','2026-01-01T00:00:00Z','` + movedUID + `','reply')`,
+		`INSERT INTO comments(uid,issue_id,author,body,created_at) VALUES('01M40000000000000000000007',2,'worker','Moved target','2026-01-01T00:00:00Z')`,
+	} {
+		_, err = pool.ExecContext(ctx, statement)
+		require.NoError(t, err)
+	}
+	var targetQuery string
+	var targetArgs []any
+	work.capture = func(statement string, args []driver.NamedValue) {
+		if !strings.HasPrefix(statement, "SELECT c.id,c.uid") || !strings.Contains(statement, "ORDER BY c.uid") {
+			return
+		}
+		targetQuery = statement
+		targetArgs = make([]any, len(args))
+		for index, arg := range args {
+			targetArgs[index] = arg.Value
+		}
+	}
+	tx, err := pool.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback() })
+	graph, err := ReadCommentGraphTx(ctx, tx, CommentGraphQuery{ProjectID: 1, SelectedIssueID: 1},
+		func(int) string { return "?" },
+		func(value string) (time.Time, error) { return time.Parse(time.RFC3339Nano, value) },
+		`json_extract(e.payload,'$.reply_to_uid')`, "NULL", CommentDisplaySQLite)
+	require.NoError(t, err)
+	target := graph.Targets[movedUID]
+	require.Equal(t, "moved", target.Status)
+	require.NotNil(t, target.Record)
+	require.Equal(t, strings.ToUpper(movedUID), target.Record.Comment.UID)
+	require.NotEmpty(t, targetQuery, "the moved-target lookup must run")
+	require.NoError(t, tx.Rollback())
+
+	rows, err := pool.QueryContext(ctx, "EXPLAIN QUERY PLAN "+targetQuery, targetArgs...)
+	require.NoError(t, err)
+	defer func() { _ = rows.Close() }()
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		require.NoError(t, rows.Scan(&id, &parent, &unused, &detail))
+		plan = append(plan, detail)
+	}
+	require.NoError(t, rows.Err())
+	require.Contains(t, strings.Join(plan, "\n"), "idx_comments_uid_handle",
+		"canonical moved-target lookups must constrain candidates through the existing suffix index")
+}

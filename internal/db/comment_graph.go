@@ -111,10 +111,7 @@ func ReadCommentGraphTx(
 	if query.Reference != nil {
 		ref := query.Reference
 		if ref.UID != "" {
-			where += " AND " + CommentUIDLookupPredicate("c.uid", ref.UID, &args, bind, displayDialect)
-			// The suffix equality enables the handle index; the identity predicate enforces ASCII-only case folding.
-			args = append(args, strings.ToUpper(ref.UID))
-			where += " AND lower(substr(c.uid,21))=lower(substr(" + bind(len(args)) + ",21))"
+			where += " AND " + commentUIDHandleLookupPredicate("c.uid", ref.UID, &args, bind, displayDialect)
 		} else {
 			args = append(args, "%"+ref.Suffix)
 			where += " AND LOWER(c.uid) LIKE " + bind(len(args))
@@ -207,7 +204,7 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(st
 		}
 
 		targetArgs := []any{}
-		targetUIDPredicate := CommentUIDLookupPredicate("c.uid", targetUID, &targetArgs, bind, displayDialect)
+		targetUIDPredicate := commentUIDHandleLookupPredicate("c.uid", targetUID, &targetArgs, bind, displayDialect)
 		targetWhere := " WHERE " + targetUIDPredicate + " AND i.deleted_at IS NULL AND p.deleted_at IS NULL AND " + projectPredicate(&targetArgs)
 		target, err := findCommentGraphRecord(ctx, tx,
 			commentGraphSelect+targetWhere+" ORDER BY c.uid", targetArgs, targetUID, parseTime)
@@ -233,7 +230,7 @@ selected AS (SELECT uid,reply_to_uid FROM visible WHERE issue_id=` + bind(len(st
 
 		statusArgs := []any{}
 		visibleProject := projectPredicate(&statusArgs)
-		targetUIDPredicate = CommentUIDLookupPredicate("c.uid", targetUID, &statusArgs, bind, displayDialect)
+		targetUIDPredicate = commentUIDHandleLookupPredicate("c.uid", targetUID, &statusArgs, bind, displayDialect)
 		status, projectID, err := findCommentGraphTargetStatus(ctx, tx,
 			`SELECT CASE WHEN p.deleted_at IS NOT NULL OR NOT (`+visibleProject+`) THEN 'hidden' WHEN i.deleted_at IS NOT NULL THEN 'removed' ELSE 'pending' END, i.project_id,c.uid`+commentGraphFrom+` WHERE `+targetUIDPredicate+" ORDER BY c.uid",
 			statusArgs, targetUID)
@@ -286,6 +283,18 @@ func CommentUIDLookupPredicate(column, value string, args *[]any, bind func(int)
 	}
 	*args = append(*args, value)
 	return column + "=" + bind(len(*args))
+}
+
+// commentUIDHandleLookupPredicate constrains valid ULID identity checks to
+// candidates with the same six-character handle before applying full equality.
+func commentUIDHandleLookupPredicate(column, value string, args *[]any, bind func(int) string, dialect CommentDisplaySQLDialect) string {
+	predicate := CommentUIDLookupPredicate(column, value, args, bind, dialect)
+	if !uid.Valid(CanonicalCommentUID(value)) {
+		return predicate
+	}
+	*args = append(*args, value)
+	handle := bind(len(*args))
+	return "(" + predicate + " AND lower(substr(" + column + ",21))=lower(substr(" + handle + ",21)))"
 }
 
 // CommentUIDEqualSQL compares two comment identity expressions. Column
