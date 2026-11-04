@@ -582,6 +582,10 @@ jobs with `issue.kind: "per-run"`, and jobs naming another adapter in
 rules. A `manual` trigger MUST run only on an adapter-local request, never as
 scheduled work. Local activation is still required.
 
+The conformance kit's `PlanOutput.excluded` is empty when a job is schedulable.
+Otherwise it is `deleted`, `disabled`, `notify`, `manual`, `other_adapter`, or
+`once_past` when a one-shot trigger is at or before job creation.
+
 Calendar triggers MUST follow [Kata's cron grammar and DST rules](#cron-expressions).
 An expression's own `TZ=` or `CRON_TZ=` directive takes precedence over the
 trigger timezone for adapter jobs; otherwise use that timezone, then UTC.
@@ -607,6 +611,11 @@ the scheduler MUST combine retained pending instants with newly enumerated
 instants in `(through, now]`, sort them, and remove duplicates. Pending work may
 be older than `through`; the horizon does not mean that work ran. The horizon
 MUST NOT move backward when the clock does.
+
+Retained pending instants remain candidates after a backward clock adjustment.
+`latest` selects the newest candidate even when it is later than `now`; that
+instant remains pending until it becomes due, while older candidates are
+discarded.
 
 Apply `catchup` to the combined candidates at the current clock:
 
@@ -687,10 +696,49 @@ An operator cancellation has an effective instant. No new attempt starts at
 or after it. Work completed before cancellation retains its result. For work
 interrupted by cancellation, report `cancelled` if termination is certain,
 otherwise `unknown`. An unknown outcome takes precedence over cancellation or
-failure; otherwise a terminal failure yields `failed`, and all successful
-steps yield `succeeded`. Work still in progress before a cutoff is `running`.
+failure. Otherwise, work still in progress before a cutoff is `running`; once
+work is complete, certain cancellation yields `cancelled` even when another
+step failed, then any terminal failure yields `failed`, and all successful
+steps yield `succeeded`.
 Use the existing [reason-line convention](#independent-run-evidence) when a
 machine-readable cause is available.
+
+### Check a Go adapter
+
+Import `go.kenn.io/kata/pkg/cron/conformance` and implement its `Adapter`
+interface around your runtime's scheduling and settlement decisions. `Declare`
+returns your implementation name, tolerance, count/age limits and independent
+branch policy. `Plan` and `Settle` receive public DTOs and a context. The full
+job definition crosses this boundary as JSON; no internal Kata types are needed.
+
+```go
+func TestAdapterProfile(t *testing.T) {
+    conformance.Run(t, adapterDecisionBridge{})
+}
+```
+
+Replace `adapterDecisionBridge` with your implementation. The harness runs the
+versioned scenarios using your declared policy. Its sequential cases pass your
+actual checkpoint or occupancy into the next decision. `Execute` is available
+for a custom driver, and `Check` compares one answer per scenario. `Reference`
+is Kata's deterministic model, useful for exploring the decision API; running
+only `Reference` does not test your runtime.
+
+The kit embeds scheduling, catchup, ownership, overlap, definition-change,
+retry and timeout vectors under schema `kata.cron.adapter-conformance/v1`.
+`Scenarios` returns the frozen default-policy vectors; `Suite(ctx, declaration)`
+materializes expectations for declared policy choices. Default policy uses zero
+tolerance, a 1000-occurrence limit, unlimited age, and `continue`. Alternative
+policy expectations use the reference model. The model bounds enumeration at
+100,000 instants and returns an error when a horizon exceeds that reference
+budget; it never silently discards an unexamined backlog. After acknowledging
+that gap, rebuild the checkpoint at `now` with the current definition event UID
+and no pending instants before resuming; do not reset it silently.
+
+A conformance claim names the fixture schema version. Changing frozen expected
+outputs requires a new version. Keep job/installation identity, run UIDs,
+occurrence keys and process reconciliation stable in the production adapter;
+the decision kit does not inspect those I/O paths.
 
 These decisions do not prove that an executor actually stopped a process or
 reported all work. Issue-date triggers retain the [existing readiness and
