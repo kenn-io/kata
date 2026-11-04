@@ -1,0 +1,24 @@
+ Project: example-project                                       kata カタ · dev
+kata カタ jobs [runs] workflows
+ /status:succeeded executor:executor-a teammate:reader issue:01abc 1 loaded ru…
+
+  Status     Job            Occurrence   Started     Ended       Summary
+▶ succeeded  aaaaaaaaaaaaa…              05-01 10:00 05-01 11:00 Report ready
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ j/k move▕ ↵/l open▕ / filter▕ h/esc kata▕ r refresh▕ 1-4 tabs▕ ? help▕ q quit

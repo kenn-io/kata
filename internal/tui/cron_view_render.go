@@ -164,8 +164,9 @@ func cronScreen(m Model) (string, string, []cronLine) {
 		return strings.Join(out, " ")
 	}
 	lines := []cronLine{}
-	add := func(uid string, cells []string) {
-		if cronMatches(sanitizeForLine(strings.Join(cells, " ")), m.cron.lists[m.cron.tab].query) {
+	query := cronQuery(m.cron.lists[m.cron.tab].query, m.cron.tab)
+	add := func(uid string, cells []string, fields map[string]string) {
+		if query.match(fields, sanitizeForLine(strings.Join(cells, " "))) {
 			lines = append(lines, cronLine{format(cells), cronRef{m.cron.tab, uid}})
 		}
 	}
@@ -177,15 +178,15 @@ func cronScreen(m Model) (string, string, []cronLine) {
 		switch m.cron.tab {
 		case cronJobs:
 			for _, j := range p.jobs {
-				add(j.UID, []string{j.Name, cronHealth(*p, j, renderNow()).state, cronSchedule(j.Definition.Trigger), cronAction(*p, j), cronJobLast(*p, j.UID)})
+				add(j.UID, []string{j.Name, cronHealth(*p, j, renderNow()).state, cronSchedule(j.Definition.Trigger), cronAction(*p, j), cronJobLast(*p, j.UID)}, map[string]string{"health": cronHealth(*p, j, renderNow()).state, "status": p.lastRuns[j.UID].Status, "action": j.Definition.Action.Kind + " " + cronAction(*p, j), "trigger": j.Definition.Trigger.Kind})
 			}
 		case cronRuns:
 			for _, r := range runs {
-				add(r.UID, []string{r.Status, cronDefinitionName(*p, deref(r.JobUID), false), deref(r.OccurrenceKey), cronTime(r.StartedAt), cronTime(r.EndedAt), deref(r.Summary.Message)})
+				add(r.UID, []string{r.Status, cronDefinitionName(*p, deref(r.JobUID), false), deref(r.OccurrenceKey), cronTime(r.StartedAt), cronTime(r.EndedAt), deref(r.Summary.Message)}, map[string]string{"status": r.Status, "job": cronDefinitionName(*p, deref(r.JobUID), false) + " " + deref(r.JobUID), "actor": r.Actor, "executor": deref(r.ExecutorLabel), "teammate": deref(r.Teammate), "issue": deref(r.IssueUID)})
 			}
 		case cronWorkflows:
 			for _, w := range p.workflows {
-				add(w.UID, []string{w.Name, fmt.Sprint(len(w.Definition.Steps)), cronWorkflowUsage(*p, w.UID), cronLast(runs, w.UID, true), cronTime(&w.UpdatedAt)})
+				add(w.UID, []string{w.Name, fmt.Sprint(len(w.Definition.Steps)), cronWorkflowUsage(*p, w.UID), cronLast(runs, w.UID, true), cronTime(&w.UpdatedAt)}, nil)
 			}
 		}
 	}
@@ -216,6 +217,9 @@ func cronScreen(m Model) (string, string, []cronLine) {
 		if m.cron.runPage.out {
 			lines = append(lines, cronLine{text: "loading…"})
 		}
+	}
+	if len(query.tokens) > 0 {
+		title += " · filtered"
 	}
 	return title, format(headers), lines
 }
@@ -545,6 +549,10 @@ func cronHelp(m Model) string {
 		"A workflow is a named list of steps jobs can run.",
 		"A run is what an executor recorded; runs remember the definition revision they used.",
 		"kata cron --help shows creation examples.",
+		"Jobs filters: health: status: action: trigger:.",
+		"Runs filters: status: job: actor: executor: teammate: issue: (UID prefix or none).",
+		"Use health:never-ran or health:parent-closed. Filters cover loaded rows only.",
+		"Repeated keys OR; different keys and free text AND. Workflows use plain text.",
 	}
 	for i, s := range intro {
 		intro[i] = strings.Join(termtext.Wrap(s, max(m.width, 1)), "\n")

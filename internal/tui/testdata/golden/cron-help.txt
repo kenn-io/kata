@@ -6,6 +6,11 @@ A workflow is a named list of steps jobs can run.
 A run is what an executor recorded; runs remember the definition revision they
 used.
 kata cron --help shows creation examples.
+Jobs filters: health: status: action: trigger:.
+Runs filters: status: job: actor: executor: teammate: issue: (UID prefix or
+none).
+Use health:never-ran or health:parent-closed. Filters cover loaded rows only.
+Repeated keys OR; different keys and free text AND. Workflows use plain text.
 
 Cron keys
 j/k    move
