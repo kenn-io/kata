@@ -51,6 +51,12 @@ func checkRecurringDispatchDecisions(t *testing.T, s db.Storage) error {
 	out := check("delivered", 2)
 	require.Len(t, out.Events, 3)
 	require.Zero(t, out.Skipped.Count)
+	job.Definition.Catchup, job.Definition.GraceSeconds = "skip", 1
+	job, _, e = s.PutCronJob(ctx, db.PutCronJob{UID: job.UID, ProjectID: p.ID, Name: job.Name, Definition: job.Definition, ExpectedEventUID: job.DefinitionEventUID, Actor: "operator"})
+	require.NoError(t, e)
+	in.ExpectedEventUID = job.DefinitionEventUID
+	in.Now = progress.Anchor.Add(6*time.Hour + time.Minute)
+	require.Positive(t, check("skipped", 0).Skipped.Count)
 	in.ExpectedEventUID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 	check("definition_changed", 0)
 	in.ExpectedEventUID = job.DefinitionEventUID

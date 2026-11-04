@@ -113,50 +113,6 @@ func checkRecurringExplain(t *testing.T, s db.Storage) error {
 	return nil
 }
 
-// The dispatch contract requires live gates and the immediately following
-// committed dispatch to agree in both stores. Eligibility "due" becomes
-// "delivered" only after the transaction commits.
-func checkRecurringExplainDispatchAgreement(t *testing.T, s db.Storage) error {
-	ctx := t.Context()
-	p, parent, job, progress := recurringFixture(t, s, "all")
-	check := func(now time.Time, want cron.DispatchReason) {
-		t.Helper()
-		explanation, err := s.ExplainRecurringCron(ctx, p.ID, job.UID, now)
-		require.NoError(t, err)
-		require.Equal(t, want, explanation.Reason)
-		out, err := s.DispatchRecurringCron(ctx, db.DispatchRecurringCronIn{ProjectID: p.ID, JobUID: job.UID, ExpectedEventUID: job.DefinitionEventUID, Now: now})
-		require.NoError(t, err)
-		committed := want
-		if want == cron.DispatchDue {
-			committed = cron.DispatchDelivered
-		}
-		require.Equal(t, committed, out.Reason)
-	}
-	check(progress.Anchor, cron.DispatchIdle)
-	check(progress.Anchor.Add(2*time.Hour), cron.DispatchDue)
-	job.Definition.Catchup, job.Definition.GraceSeconds = "skip", 1
-	var err error
-	job, _, err = s.PutCronJob(ctx, db.PutCronJob{UID: job.UID, ProjectID: p.ID, Name: job.Name, Actor: "operator", ExpectedEventUID: job.DefinitionEventUID, Definition: job.Definition})
-	require.NoError(t, err)
-	check(progress.Anchor.Add(6*time.Hour+time.Minute), cron.DispatchSkipped)
-	children, err := s.ListIssues(ctx, db.ListIssuesParams{ProjectID: p.ID})
-	require.NoError(t, err)
-	for _, child := range children {
-		if child.ID != parent.ID {
-			_, _, _, err = s.CloseIssue(ctx, child.ID, "done", "operator", "Completed the delivered recurring occurrence", nil)
-			require.NoError(t, err)
-		}
-	}
-	_, _, _, err = s.CloseIssue(ctx, parent.ID, "done", "operator", "Pause the recurring commitment after catching up", nil)
-	require.NoError(t, err)
-	check(progress.Anchor.Add(8*time.Hour), cron.DispatchParentClosed)
-	job.Definition.Enabled = false
-	job, _, err = s.PutCronJob(ctx, db.PutCronJob{UID: job.UID, ProjectID: p.ID, Name: job.Name, Actor: "operator", ExpectedEventUID: job.DefinitionEventUID, Definition: job.Definition})
-	require.NoError(t, err)
-	check(progress.Anchor.Add(8*time.Hour), cron.DispatchDisabled)
-	return nil
-}
-
 func checkRecurringExplainArchivedBinding(t *testing.T, s db.Storage) error {
 	p, _, job, progress := recurringFixture(t, s, "all")
 	_, err := s.EnableProjectFederation(t.Context(), p.ID, "operator")

@@ -146,6 +146,10 @@ func PlanRecurring(j JobDefinition, definitionEventUID string, p RecurringProgre
 	if !j.Enabled || !now.After(p.Through) {
 		return out, nil
 	}
+	if p.Scan != nil && (p.Scan.DefinitionEventUID != definitionEventUID || j.Catchup != "latest") {
+		p.Scan = nil
+		out.Progress = p
+	}
 	next, err := recurringNext(j.Trigger, p.Anchor)
 	if err != nil {
 		return out, err
@@ -167,10 +171,6 @@ func PlanRecurring(j JobDefinition, definitionEventUID string, p RecurringProgre
 			out.Skipped = countRecurringSkips(j.Trigger, next, previousThrough, before)
 		}
 	}()
-	if p.Scan != nil && (p.Scan.DefinitionEventUID != definitionEventUID || j.Catchup != "latest") {
-		p.Scan = nil
-		out.Progress = p
-	}
 	if j.Trigger.Kind == "interval" {
 		step := time.Duration(j.Trigger.IntervalSeconds) * time.Second
 		if j.Catchup == "latest" {
