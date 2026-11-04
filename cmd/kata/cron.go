@@ -178,8 +178,15 @@ the flag, so their JSON bodies also work for create.`
 			long += "\nUse --parent <ref> to set definition.issue.parent_uid; an existing native parent binding cannot change."
 		}
 		return long + "\n\n" + cronRequestHelp(resource), cronRequestExamples(resource, action)
-	case "pause", "resume":
-		return "Change only the job's enabled flag. --expected-event-uid is optional; a stale revision conflicts. Resuming a native job with catchup all backfills missed children.", "  " + cmd + " <job-uid> --json"
+	case "pause":
+		return `Pause a job without changing the rest of its definition. Without
+--expected-event-uid, the write is guarded by the job's current revision; with
+it, a stale revision fails with a conflict.`, "  " + cmd + " <job-uid> --json"
+	case "resume":
+		return `Resume a job without changing the rest of its definition. Without
+--expected-event-uid, the write is guarded by the job's current revision; with
+it, a stale revision fails with a conflict. A native job with catchup "all"
+backfills the children missed while it was paused.`, "  " + cmd + " <job-uid> --json"
 	case "delete":
 		long := "Delete a " + resource + ` definition. Requires the current --expected-event-uid.
 The definition stays readable and kata cron ` + resource + ` restore brings it back.`

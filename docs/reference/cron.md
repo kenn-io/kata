@@ -68,47 +68,73 @@ option objects retain exact JSON numbers.
 
 ### Pause and resume a job
 
-Use `kata cron job pause <job-uid>` to stop future work or
-`kata cron job resume <job-uid>` to re-enable it. Both preserve every other
-field. Add `--expected-event-uid <event-uid>` to guard a known revision; a
-stale revision returns 409 with the current job. Without the flag, Kata reads
-the current revision and guards the write with it. An already matching state
-at the root returns the job without emitting an event. Archived jobs must be
-restored before either action.
+Pause a job to stop its future work, and resume it to start again. Neither
+action changes any other field of the definition.
 
-Pause may retain soft-deleted dependencies that still exist in the same project.
-Native resume may retain its deleted parent, but adapter resume requires live
-dependencies. These rules also apply to conditional full-definition PUTs.
-Changes to other fields in `definition` still require live dependencies.
-A native job with a deleted parent can be enabled, but delivers no children
-until its parent is restored and open.
+```sh
+kata cron job pause <job-uid> --json
+kata cron job resume <job-uid> --json
+```
 
-The REST actions are POST `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}/pause`
-and `/resume`, with `{actor?, expected_event_uid?}`. MCP exposes
-`kata.cron_job_pause` and `kata.cron_job_resume` with the same optional revision.
-In the TUI Jobs list or job detail, press `p`. Resuming a native job asks for
-confirmation when its catch-up policy would deliver any missed children.
-The confirmation shows the backlog at lookup time, using the selected job
-and its catch-up policy. More occurrences may become due before delivery;
-with `skip`, occurrences may expire outside the grace window. The count is
-not a guarantee of the final delivered total. A change to the selected job or
-its parent checkpoint or eligibility requires a refresh and another attempt.
-Unrelated job activity does not cancel a confirmation. Failed backlog reads
-leave the job paused.
+- Without `--expected-event-uid`, Kata guards the write with the job's current
+  revision. Pass `--expected-event-uid <event-uid>` to guard a revision you
+  already read; a stale value returns 409 with the current job.
+- On the owning daemon, pausing a paused job or resuming an enabled one
+  returns the job without emitting an event.
+- Restore an archived job before you pause or resume it.
+- Resuming a native job follows its [catch-up policy](#recurring-child-issues).
+  With `catchup: "all"`, it backfills the children missed while paused, once
+  its parent and project are active.
+- Pause and resume never launch a process inside Kata.
 
-Direct spokes forward native job actions as conditional full-definition PUTs.
-This works with older hubs that support native writes but lack these action
-routes. The spoke needs a current local revision: stale state conflicts, and
-an older hub may emit an update for an already matching enabled flag. Pull
-before retrying a stale revision or use the owning hub directly. After a
-forwarded action succeeds, the spoke list can still show the old enabled flag
-and revision until federation sync applies the hub update. Sync and refresh
-the spoke list before retrying or choosing another action. Adapter jobs remain
-local, and an adapter must honor the enabled flag itself.
+Other clients use the same actions:
 
-Resuming a native job follows its [catch-up policy](#recurring-child-issues).
-With `catchup: "all"`, it backfills missed children when its parent and project
-are active. Pause and resume never launch processes inside Kata.
+- REST: POST `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}/pause` or
+  `/resume`, with an optional `{actor, expected_event_uid}` body.
+- MCP: `kata.cron_job_pause` and `kata.cron_job_resume`, with the same
+  optional revision.
+- TUI: press `p` in the Jobs list or a job's detail.
+
+#### Resume confirmation in the TUI
+
+When resuming a native job would deliver missed children, the TUI shows how
+many came due and asks for `y`. The count is a snapshot from when you pressed
+`p`. More occurrences can come due before delivery, and with `catchup: "skip"`
+some can expire outside the grace window, so the count is not the final
+delivered total.
+
+The job stays paused, and the TUI asks you to press `p` again after refresh,
+when the selected job or its parent's progress or status changes before you
+confirm. Activity on other jobs does not cancel the confirmation. If the TUI
+cannot read the backlog, the job stays paused.
+
+#### Deleted dependencies
+
+A write that changes only `enabled` relaxes the live-dependency check. This
+covers pause, resume, and a conditional full-definition `update` that changes
+nothing else:
+
+- Pause keeps soft-deleted dependencies that are still in the same project.
+- Resuming a native job keeps a deleted parent. The job delivers no children
+  until its parent is restored and open.
+- Resuming an adapter job requires live dependencies.
+
+A change to any other `definition` field requires live dependencies.
+
+#### Federation
+
+A direct spoke forwards a native job's pause or resume to its hub as a
+conditional full-definition `PUT`. This works with older hubs that support
+native writes but lack the pause and resume routes.
+
+- The spoke's local revision must be current; a stale one conflicts. Pull, then
+  retry, or run the command against the owning hub.
+- An older hub may emit an update even when the enabled flag already matched.
+- After a forwarded action succeeds, the spoke list shows the old enabled flag
+  and revision until federation sync applies the hub's update. Sync before you
+  retry or choose another action.
+
+Adapter jobs stay local, and the adapter must honor the enabled flag itself.
 
 ### Request files
 

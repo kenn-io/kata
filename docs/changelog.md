@@ -23,13 +23,13 @@ All notable changes to kata, grouped by release. Versioned releases start with
   search cost follows the number of matching comments.
   Existing stores upgrade to schema 41 through SQLite's JSONL cutover or the
   [offline PostgreSQL migration](development/postgres-migrations.md#schema-41-separate-comment-search-documents).
-- Pause or resume a cron job with one CLI command, MCP call, or the TUI Jobs
-  tab's `p` key. Each action preserves the rest of the definition and guards
-  concurrent edits. The TUI confirms missed native children before resuming.
-  Direct spokes forward native actions to hubs that support native writes.
-  Pause can retain soft-deleted dependencies in the same project. Native resume
-  can retain its deleted parent; delivery still waits until the parent is open.
-  See [Pause and resume a job](reference/cron.md#pause-and-resume-a-job).
+- Pause or resume a cron job without resending its definition: run
+  `kata cron job pause` or `kata cron job resume`, call the matching MCP tool,
+  or press `p` on the TUI Jobs tab. The TUI asks before a resume that would
+  deliver missed native children. Direct spokes can pause native jobs on hubs
+  that predate these actions. Pausing no longer fails on soft-deleted
+  dependencies in the same project, and a native job with a deleted parent can
+  be resumed. See [Pause and resume a job](reference/cron.md#pause-and-resume-a-job).
 
 - Load the web UI's issue list and graph on SQLite and PostgreSQL stores with
   tens of thousands of issues without exceeding SQL parameter limits.
