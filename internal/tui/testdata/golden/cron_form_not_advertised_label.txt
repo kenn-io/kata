@@ -1,0 +1,34 @@
+ Project: example-project                                       kata カタ · dev
+kata カタ [jobs] runs workflows
+ Edit job · Digest                                   01ARZ3NDEKTSV4RRFFQ69G5FAV
+
+  Kind:              ‹ agent prompt ›
+  Name:              Digest
+  Trigger:           ‹ manual ›
+  Enabled:           ‹ yes ›
+  Issue policy:      ‹ new issue per run ›
+  Issue title:       Digest
+  Issue body:
+  Prompt:            Line one ⏎ Line two
+  Scheduled offset:  3600
+  Deadline offset:
+  Overlap:           ‹ forbid overlapping runs ›
+  Timeout:
+  Checkout key:      ‹ (unset) ›
+▶ Agent:             ‹ missing (not advertised) ›
+  Model:             ‹ (unset) ›
+  Secrets:
+  Options:           {"agent":"missing"}
+
+
+
+
+
+
+
+
+
+
+
+ tab/shift+tab field▕ ←/→ choose▕ ctrl+o save▕ ctrl+e edit text in $EDITOR
+ esc cancel

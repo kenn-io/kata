@@ -4,10 +4,12 @@
 
 export interface RuntimeWarning {
   adapter?: string
+  choice?: string
   code: string
   job_uid?: string
   message: string
   runtime_uid?: string
+  value?: string
   versions?: string[]
   [key: string]: unknown
 }

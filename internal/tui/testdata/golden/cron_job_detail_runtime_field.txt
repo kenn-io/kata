@@ -1,0 +1,24 @@
+ Project: example-project                                       kata カタ · dev
+kata カタ [jobs] runs workflows
+ jobs / Daily summary
+1 enabled execute jobs have no matching live advertisement here. See kata cron …
+
+▶ State:    enabled
+  Schedule: 0 7 * * *
+  Triggers: 2026-05-02 07:00 UTC
+            2026-05-03 07:00 UTC
+            2026-05-04 07:00 UTC
+  Action:   workflow Summary flow
+  Runtime:  no matching live advertisement for executor example-worker
+  Workflow: Summary flow
+
+  Definition
+  {
+    "action": {
+      "kind": "execute",
+      "workflow_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAW"
+    },
+    "catchup": "skip",
+
+ j/k move▕ ↵/l follow▕ h/esc back▕ n/e new/edit▕ r refresh▕ 1-4 tabs▕ ? help
+ q quit

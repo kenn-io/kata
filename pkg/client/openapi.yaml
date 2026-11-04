@@ -270,6 +270,12 @@ components:
           type: string
         adapter_version:
           type: string
+        choices:
+          additionalProperties:
+            items:
+              type: string
+            type: array
+          type: object
         features:
           items:
             type: string
@@ -4801,6 +4807,14 @@ components:
         baseline_through_event_id:
           format: int64
           type: integer
+        cron_runtime_beats:
+          description: Supports direct push-enrollment runtime advertisements.
+          type: boolean
+        features:
+          description: Optional federation protocol features.
+          items:
+            type: string
+          type: array
         native_cron_writes:
           description: Supports native recurring job writes using direct project-scoped push enrollments.
           type: boolean
@@ -6215,6 +6229,12 @@ components:
           type: string
         adapter_version:
           type: string
+        choices:
+          additionalProperties:
+            items:
+              type: string
+            type: array
+          type: object
         expires_at:
           format: date-time
           type: string
@@ -6309,6 +6329,8 @@ components:
       properties:
         adapter:
           type: string
+        choice:
+          type: string
         code:
           type: string
         job_uid:
@@ -6316,6 +6338,8 @@ components:
         message:
           type: string
         runtime_uid:
+          type: string
+        value:
           type: string
         versions:
           items:
@@ -8805,6 +8829,10 @@ paths:
         - in: path
           name: runtime_uid
           required: true
+          schema:
+            type: string
+        - in: header
+          name: Authorization
           schema:
             type: string
       requestBody:
