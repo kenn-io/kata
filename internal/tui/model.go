@@ -449,7 +449,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	cmd = combineCmds(cmd, m.finishDetailRefresh())
 	var issueCmd tea.Cmd
-	m, issueCmd = m.cronIssueFeedback(msg)
+	m, issueCmd = m.cronIssueAdopt(msg).cronIssueFeedback(msg)
 	cmd = combineCmds(cmd, issueCmd)
 	var cronCmd tea.Cmd
 	m, cronCmd = m.cronSync()

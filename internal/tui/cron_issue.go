@@ -14,12 +14,13 @@ type cronIssueReturn struct {
 }
 
 // Cron links enter synchronously: ordinary detail jumps reject the hidden pane.
+// Until the read returns, the detail has no issue, so its actions stay inert.
 func (m Model) cronOpenIssue(uid string) (Model, tea.Cmd) {
 	m.cron.issueReturn = &cronIssueReturn{previous: m.prevView, detail: cloneDetailModel(m.detail)}
-	m.cron.returnToCron = true
-	m.pendingDetailFollow = false
+	m.cron.returnToCron, m.pendingDetailFollow = true, false
 	m.nextDetailFollowGen++
 	m = m.seedOpenDetail(Issue{UID: uid, ProjectID: m.scope.projectID})
+	m.detail.issue, m.detail.loading = nil, true
 	return m, m.detail.fetchDetail(m.api, uid)
 }
 
@@ -37,6 +38,16 @@ func (m Model) returnFromCronDetail() (Model, tea.Cmd) {
 		m.cron.issueReturn = nil
 	}
 	return m, m.restoredDetailRefetch()
+}
+
+// The UID read resolves a moved issue through its source project's history.
+// Later short-ID reads and actions use the project the issue now belongs to.
+func (m Model) cronIssueAdopt(msg tea.Msg) Model {
+	fetched, ok := msg.(detailFetchedMsg)
+	if ok && m.cron.returnToCron && fetched.gen == m.detail.gen && fetched.err == nil && m.detail.issue != nil && m.detail.issue.ProjectID != 0 {
+		m.detail.scopePID = m.detail.issue.ProjectID
+	}
+	return m
 }
 
 // A missing linked issue keeps ordinary detail error state and a visible notice.

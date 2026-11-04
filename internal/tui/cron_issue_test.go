@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -50,7 +52,7 @@ func TestCronIssueRoundTrip(t *testing.T) {
 			m = sendKey(m, tea.KeyEnter)
 			require.Equal(t, viewDetail, m.view)
 			require.True(t, m.cron.returnToCron)
-			require.Equal(t, "issue-example", m.detail.issue.UID)
+			m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, issue: &Issue{UID: "issue-example", ShortID: "abcd", ProjectID: 7}})
 			require.Equal(t, int64(7), m.detail.scopePID)
 			require.Equal(t, "operator", m.detail.actor)
 			require.Greater(t, m.detail.gen, previousGen)
@@ -149,4 +151,65 @@ func TestCronIssueFetchByUID(t *testing.T) {
 	}
 	require.True(t, fetched.Load(), "opening a UID link must fetch the issue, even before its short ID is known")
 	require.Equal(t, "Linked issue", m.detail.issue.Title)
+}
+
+// A linked issue moved after the run named it. The UID read resolves through
+// the source project's history; later short-ID actions must follow the issue
+// to its destination, even when the source reuses that short ID.
+func TestCronIssueMovedIssueTargetsDestination(t *testing.T) {
+	m := cronIssueFixture(t, 80)
+	var mu sync.Mutex
+	var closes []string
+	m.api = newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/projects/7/issues/issue-example":
+			respondJSON(t, w, map[string]any{"issue": map[string]any{"uid": "issue-example", "project_id": 9, "short_id": "wxyz", "title": "Moved issue", "status": "open"}})
+		case "/api/v1/projects/7/issues/wxyz/actions/close", "/api/v1/projects/9/issues/wxyz/actions/close":
+			mu.Lock()
+			closes = append(closes, r.URL.Path)
+			mu.Unlock()
+			uid, pid := "issue-example", 9
+			if strings.Contains(r.URL.Path, "/projects/7/") {
+				uid, pid = "colliding-issue", 7
+			}
+			respondJSON(t, w, map[string]any{"issue": map[string]any{"uid": uid, "project_id": pid, "short_id": "wxyz", "status": "closed"}, "changed": true})
+		default:
+			http.Error(w, "fixture not found", http.StatusNotFound)
+		}
+	})
+	m, cmd := m.cronOpenIssue("issue-example")
+	for _, msg := range runCmdTree(cmd) {
+		m, _ = updateModel(m, msg)
+	}
+	require.Equal(t, "wxyz", m.detail.issue.ShortID)
+	require.False(t, m.closeRequiresEvidence)
+	m, cmd = updateModel(m, keyRune('x'))
+	require.NotNil(t, cmd)
+	cmd()
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, []string{"/api/v1/projects/9/issues/wxyz/actions/close"}, closes, "the close must reach the moved issue, not the source project's colliding short ID")
+}
+
+// Before the linked issue's read returns, the detail has no identity: actions
+// that need one, such as a new child, wait instead of using an empty parent.
+func TestCronIssueActionsWaitForIssue(t *testing.T) {
+	m := cronIssueFixture(t, 80)
+	m, _ = m.cronOpenIssue("issue-example")
+	require.True(t, m.detail.loading)
+	require.Equal(t, "issue-example", m.detail.readRef)
+	m, cmd := updateModel(m, keyRune('N'))
+	require.False(t, slices.ContainsFunc(runCmdTree(cmd), func(msg tea.Msg) bool { _, ok := msg.(openInputMsg); return ok }), "N before the issue loads must not open a parentless form")
+	require.Equal(t, inputNone, m.input.kind)
+	m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, issue: &Issue{UID: "issue-example", ShortID: "abcd", ProjectID: 7}})
+	m, cmd = updateModel(m, keyRune('N'))
+	var opened *openInputMsg
+	for _, msg := range runCmdTree(cmd) {
+		if o, ok := msg.(openInputMsg); ok {
+			opened = &o
+		}
+	}
+	require.NotNil(t, opened)
+	require.NotNil(t, opened.parentShortID)
+	require.Equal(t, "abcd", *opened.parentShortID)
 }
