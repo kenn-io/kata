@@ -6,6 +6,9 @@ import (
 	"encoding/json/jsontext"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"testing"
 	"time"
 
@@ -256,7 +259,21 @@ func runTimedAssignmentPullsUnseenMove(t *testing.T, pendingDestinationWork bool
 		require.NoError(t, err)
 		require.True(t, refreshed)
 	}
-	for i := range 1001 {
+	// Keep real hub pagination and replay, with small pages so recovery does
+	// not rebuild thousands of unrelated issues within the HTTP timeout.
+	upstream, err := url.Parse(hub.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(upstream)
+	hubEndpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == fmt.Sprintf("/api/v1/projects/%d/federation/events", target.ID) {
+			query := r.URL.Query()
+			query.Set("limit", "2")
+			r.URL.RawQuery = query.Encode()
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(hubEndpoint.Close)
+	for i := range 3 {
 		_, _, err := hub.DB.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: target.ID, Title: fmt.Sprintf("unrelated pending issue %d", i), Author: "tester",
 		})
@@ -265,10 +282,10 @@ func runTimedAssignmentPullsUnseenMove(t *testing.T, pendingDestinationWork bool
 	hubTargetBinding, err := hub.DB.FederationBindingByProject(ctx, target.ID)
 	require.NoError(t, err)
 	pendingTargetEvents, err := hub.DB.EventsAfter(ctx, db.EventsAfterParams{
-		ProjectID: target.ID, AfterID: hubTargetBinding.ReplayHorizonEventID - 1, Limit: 1100,
+		ProjectID: target.ID, AfterID: hubTargetBinding.ReplayHorizonEventID - 1, Limit: 10,
 	})
 	require.NoError(t, err)
-	require.Len(t, pendingTargetEvents, 1002)
+	require.Len(t, pendingTargetEvents, 4)
 	issue := createPrivateEnrollmentIssue(t, hub, source.ID)
 	var spokeStore db.Storage
 	var pullCalls int
@@ -304,7 +321,7 @@ func runTimedAssignmentPullsUnseenMove(t *testing.T, pendingDestinationWork bool
 	}{{localSource, source, true}, {localTarget, target, pendingDestinationWork}} {
 		_, err := spoke.DB.UpsertFederationBinding(ctx, db.FederationBinding{
 			ProjectID: pair.local.ID, Role: db.FederationRoleSpoke,
-			HubURL: hub.URL, HubProjectID: pair.hub.ID, HubProjectUID: pair.hub.UID,
+			HubURL: hubEndpoint.URL, HubProjectID: pair.hub.ID, HubProjectUID: pair.hub.UID,
 			ReplayHorizonEventID: 1, Actor: "tester", Enabled: true, PushEnabled: pair.pushEnabled,
 		})
 		require.NoError(t, err)
@@ -353,17 +370,17 @@ func runTimedAssignmentPullsUnseenMove(t *testing.T, pendingDestinationWork bool
 	})
 	require.NoError(t, err)
 	require.NoError(t, config.WriteFederationCredential(localSource.UID, config.FederationCredential{
-		HubURL: hub.URL, HubProjectID: source.ID, Token: claimEnrollment.Token,
+		HubURL: hubEndpoint.URL, HubProjectID: source.ID, Token: claimEnrollment.Token,
 		Capabilities: "claim", Actor: "tester",
 	}))
 	require.NoError(t, config.WriteFederationCredential(localTarget.UID, config.FederationCredential{
-		HubURL: hub.URL, HubProjectID: target.ID, Token: pullEnrollment.Token,
+		HubURL: hubEndpoint.URL, HubProjectID: target.ID, Token: pullEnrollment.Token,
 		Capabilities: "pull", Actor: "tester",
 	}))
 	if pendingDestinationWork {
 		localBinding, err := spoke.DB.FederationBindingByProject(ctx, localTarget.ID)
 		require.NoError(t, err)
-		pullClient, err := federation.NewClient(ctx, hub.URL, pullEnrollment.Token, clientpkg.Opts{})
+		pullClient, err := federation.NewClient(ctx, hubEndpoint.URL, pullEnrollment.Token, clientpkg.Opts{})
 		require.NoError(t, err)
 		page, err := pullClient.PollProjectEvents(ctx, target.ID, localBinding.PullCursorEventID, 1000)
 		require.NoError(t, err)
