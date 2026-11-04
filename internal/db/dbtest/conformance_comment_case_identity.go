@@ -171,6 +171,30 @@ func checkCanonicalDuplicateReplyAfterNormalization(t *testing.T, store db.Stora
 	return nil
 }
 
+func checkCommentEditCanonicalIdentity(t *testing.T, store db.Storage, _ Backend) error {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Task", Author: "worker"})
+	require.NoError(t, err)
+	comment, _, err := store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "worker", Body: "Finding"})
+	require.NoError(t, err)
+
+	updated, event, changed, err := store.EditComment(ctx, db.EditCommentParams{
+		IssueID: issue.ID, CommentUID: strings.ToLower(comment.UID), Actor: "worker", Body: "Revised finding",
+	})
+	require.NoError(t, err, "a case variant of a valid comment ULID must select the same identity")
+	require.True(t, changed)
+	require.Equal(t, comment.UID, updated.UID)
+	require.NotNil(t, event)
+	var payload struct {
+		CommentUID string `json:"comment_uid"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(event.Payload), &payload))
+	require.Equal(t, comment.UID, payload.CommentUID)
+	return nil
+}
+
 func checkCanonicalCommentIdempotencyAfterNormalization(t *testing.T, store db.Storage, backend Backend) error {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "example-project")

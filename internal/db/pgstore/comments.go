@@ -178,8 +178,12 @@ func (s *Store) editComment(
 		if err != nil {
 			return err
 		}
+		commentArgs := []any{issue.ID}
+		commentUIDPredicate := db.CommentUIDLookupPredicate(
+			"uid", params.CommentUID, &commentArgs, dollarPlaceholder, db.CommentDisplayPostgres,
+		)
 		comment, err = scanComment(tx.QueryRowContext(ctx,
-			commentSelect+` WHERE issue_id = $1 AND uid = $2 FOR UPDATE`, issue.ID, params.CommentUID))
+			commentSelect+` WHERE issue_id = $1 AND `+commentUIDPredicate+` FOR UPDATE`, commentArgs...))
 		if err != nil {
 			return err
 		}

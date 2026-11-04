@@ -1325,9 +1325,13 @@ func (d *Store) CountAllIssues(ctx context.Context, p db.ListAllIssuesParams) (i
 }
 
 func commentByUIDForIssueTx(ctx context.Context, tx *sql.Tx, issueID int64, commentUID string) (db.Comment, error) {
+	args := []any{issueID}
+	commentUIDPredicate := db.CommentUIDLookupPredicate(
+		"uid", commentUID, &args, func(int) string { return "?" }, db.CommentDisplaySQLite,
+	)
 	c, err := scanComment(tx.QueryRowContext(ctx,
-		`SELECT `+commentColumns+` FROM comments WHERE issue_id = ? AND uid = ?`,
-		issueID, commentUID))
+		`SELECT `+commentColumns+` FROM comments WHERE issue_id = ? AND `+commentUIDPredicate,
+		args...))
 	if errors.Is(err, sql.ErrNoRows) {
 		return db.Comment{}, db.ErrNotFound
 	}
