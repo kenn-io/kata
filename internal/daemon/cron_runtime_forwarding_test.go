@@ -313,3 +313,55 @@ func TestCronRuntimeSignedIngress(t *testing.T) {
 		require.Equal(t, 403, owner.Code, owner.Body.String())
 	})
 }
+
+func TestCronRuntimeChoicesForwarding(t *testing.T) {
+	for _, mode := range []string{"absent", "empty", "unrelated", "lookalike", "supported"} {
+		capable := mode == "supported"
+		t.Run(mode, func(t *testing.T) {
+			var sent api.BeatCronRuntimeBody
+			f := newRuntimeForwardFixture(t, func(f *runtimeForwardFixture, cfg *daemon.ServerConfig) {
+				cfg.FederationHubClient = func(context.Context, config.FederationCredential) (*http.Client, error) {
+					return &http.Client{Transport: runtimeRoundTrip(func(r *http.Request) (*http.Response, error) {
+						var value any
+						if r.Method == http.MethodGet {
+							meta := api.ProjectFederationBody{ProjectUID: f.sp.UID, CronRuntimeBeats: true}
+							switch mode {
+							case "empty":
+								meta.Features = []string{}
+							case "unrelated":
+								meta.Features = []string{"another_feature"}
+							case "lookalike":
+								meta.Features = []string{"cron_runtime_choices_v1_extra"}
+							case "supported":
+								meta.Features = []string{"cron_runtime_choices_v1"}
+							}
+							value = meta
+						} else {
+							require.NoError(t, json.UnmarshalRead(r.Body, &sent))
+							out := api.BeatCronRuntimeResponse{}
+							out.Body.Runtime.UID = strings.TrimPrefix(r.URL.Path, fmt.Sprintf("/api/v1/projects/%d/cron/runtimes/", f.hp.ID))
+							value = out.Body
+						}
+						raw, err := json.Marshal(value)
+						require.NoError(t, err)
+						return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(raw))}, nil
+					})}, nil
+				}
+			})
+			body := runtimeHTTPBody()
+			body["choices"] = map[string][]string{"options.agent": {"review"}}
+			status, raw := runtimeHTTPRequest(t, f.target, http.MethodPut, fmt.Sprintf("/api/v1/projects/%d/cron/runtimes/%s", f.sp.ID, cronHTTPUID(t)), body)
+			require.Equalf(t, 200, status, "%s", raw)
+			require.Contains(t, string(raw), `"forwarded":"recorded"`)
+			require.Contains(t, string(raw), `"choices"`)
+			if capable {
+				require.Equal(t, []string{"review"}, sent.Choices["options.agent"])
+			} else {
+				require.Nil(t, sent.Choices)
+			}
+			status, raw = runtimeHTTPRequest(t, f.target, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/runtimes", f.sp.ID), nil)
+			require.Equal(t, 200, status)
+			require.Contains(t, string(raw), `"options.agent":["review"]`)
+		})
+	}
+}

@@ -198,3 +198,16 @@ func TestCronRuntimeHelpExampleExecutes(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(out), "example-worker")
 }
+
+func TestCronRuntimeChoicesCLIContract(t *testing.T) {
+	t.Setenv("KATA_AUTHOR", "operator")
+	env := testenv.New(t)
+	_, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	out, _, err := executeCronCLI(t, env.URL, strings.NewReader(`{"label":"worker","adapter":"example","choices":{"options.agent":["review"]}}`), "runtime", "beat", cronCLIUID(t), "--json-input", "-")
+	require.NoError(t, err)
+	require.Contains(t, out, `"options.agent"`)
+	_, _, err = executeCronCLI(t, env.URL, strings.NewReader(`{"label":"worker","adapter":"example","choices":null}`), "runtime", "beat", cronCLIUID(t), "--json-input", "-")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "choices")
+}

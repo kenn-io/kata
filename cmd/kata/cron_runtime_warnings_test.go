@@ -184,3 +184,23 @@ func TestCronRuntimeWarningsIgnoreStderrFailure(t *testing.T) {
 	require.Equal(t, 1, runtimeReads)
 	require.Equal(t, 1, writer.calls, "the warning should still be attempted on stderr")
 }
+
+func TestCronRuntimeChoiceWarningsActions(t *testing.T) {
+	resetFlags(t)
+	client, err := kataclient.NewWithHTTPClient("http://daemon.example", &http.Client{Transport: runtimeNoticeTransport(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"inventory":{"state":"ready"},"runtimes":[],"warnings":[{"code":"choice_unknown","job_uid":"written","message":"unadvertised value"},{"code":"choice_unknown","job_uid":"other","message":"other value"}]}`)), Request: r}, nil
+	})})
+	require.NoError(t, err)
+	for _, action := range []string{"list", "create", "update", "restore"} {
+		cmd := newRootCmd()
+		var out bytes.Buffer
+		cmd.SetErr(&out)
+		(cronCLIOptions{resource: "job", action: action}).warnRuntimes(t.Context(), cmd, client, 7, []byte(`{"job":{"uid":"written"}}`))
+		if action == "create" || action == "update" {
+			require.Contains(t, out.String(), "unadvertised value")
+		} else {
+			require.Empty(t, out.String())
+		}
+		require.NotContains(t, out.String(), "other value")
+	}
+}

@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"slices"
 	"time"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/httpurl"
 )
@@ -101,10 +103,21 @@ func forwardCronRuntime(ctx context.Context, cfg ServerConfig, projectID int64, 
 	if cronForwardAdmission(ctx, cfg.DB, project.ID, project.UID) != nil {
 		return "unavailable"
 	}
+	body.RuntimeBeat = cron.CloneRuntimeBeat(body.RuntimeBeat)
+	if !slices.Contains(metadata.Features, cron.RuntimeChoicesFeature) {
+		body.Choices = nil
+	}
 	body.Actor = cred.Actor
 	var out api.BeatCronRuntimeResponse
 	if cronHubRequest(ctx, client, http.MethodPut, base+"/cron/runtimes/"+url.PathEscape(id), body, &out.Body, projectID) != nil || out.Body.Runtime.UID != id {
 		return "unavailable"
 	}
 	return "recorded"
+}
+
+func cronRuntimeMetadataFeatures(binding db.FederationBinding) []string {
+	if binding.Role == db.FederationRoleHub && binding.Enabled {
+		return []string{cron.RuntimeChoicesFeature}
+	}
+	return nil
 }

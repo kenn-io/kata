@@ -386,13 +386,13 @@ kata cron runtime list --json
 
 The HTTP routes are `PUT /api/v1/projects/{project_id}/cron/runtimes/{runtime_uid}`
 and `GET /api/v1/projects/{project_id}/cron/runtimes`. Capabilities advertise
-`features: ["cron_runtimes_v1"]`; `event_features` continues to describe only
+`features: ["cron_runtimes_v1", "cron_runtime_choices_v1"]`; `event_features` continues to describe only
 replicated event families. Ordinary attributed write authority is required to
 beat. Authenticated actors override a supplied body actor. Inventory reads use
 ordinary project read authority, including anonymous read-only deployments.
 
 A beat accepts only `actor`, `label`, `adapter`, `adapter_version`, `kata_version`,
-`features`, `interval_seconds`, and `state`. The complete body is limited to
+`features`, `choices`, `interval_seconds`, and `state`. The complete body is limited to
 8 KiB. Runtime identity must be a canonical uppercase ULID. Labels are nonblank
 valid UTF-8, at most 256 bytes, and match executor pins exactly, including case.
 Adapter and feature identifiers match `[a-z0-9_.-]{1,64}`. Versions are optional
@@ -752,3 +752,46 @@ Workflow routes are `/api/v1/projects/{project_id}/cron/workflows` and
 `workflow` or `workflows`; job actions and run observations use `workflow_uid`,
 and run observations pair it with `workflow_definition_event_uid`. Events use
 `cron.workflow.*`, and JSONL workflow records use `cron_workflow`.
+
+### Runtime option choices
+
+Adapters can advertise suggestions for `checkout_key`, `options.agent` and
+`options.model` in the optional beat `choices` object. Send this member only when
+cron capabilities include `cron_runtime_choices_v1`; older daemons reject it.
+Advertise profile names, checkout keys and models from the adapter's own config.
+
+```json
+{
+  "label": "example-worker",
+  "adapter": "example",
+  "choices": {
+    "checkout_key": ["example-project"],
+    "options.agent": ["default", "review"],
+    "options.model": ["model-a"]
+  }
+}
+```
+
+Each key accepts at most 32 unique values. Values are exact, nonblank UTF-8
+strings of 1–128 bytes without control characters. Checkout keys also use the
+portable key rules: Unicode letters and digits, `-`, `_` and `.`, except `.` or
+`..` alone. Unknown keys and null objects or arrays are rejected. An omitted key
+means unknown; an empty array advertises the key with no suggestions. Every beat
+replaces choices, so omitting `choices` or sending `{}` clears older values.
+The whole beat remains limited to 8 KiB.
+
+The TUI execute-job form offers the sorted union from matching live runtimes.
+Agent and Model appear only when advertised, while Checkout key stays free text
+without an advertisement. Select `other…` for free text for the rest of the form
+session. Existing values remain available with a `(not advertised)` note. Raw
+Options stays authoritative; changing one picker preserves other option values,
+and an untouched form preserves the original Options bytes. Non-string agent or
+model values remain editable through Options.
+
+A ready inventory reports `choice_unknown` when a configured string value is
+absent from the matching live runtimes' advertised values for that key. An
+unadvertised key produces no warning. Job detail shows these notes, and job
+create/update print them to stderr. These are suggestions, never enforcement or
+routing rules: an unadvertised value does not block saving or execution. A spoke
+strips choices when forwarding to a root without the feature, while keeping its
+local advertisement intact.

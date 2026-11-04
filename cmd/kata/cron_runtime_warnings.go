@@ -46,7 +46,7 @@ func (o cronCLIOptions) warnRuntimes(ctx context.Context, cmd *cobra.Command, cl
 		id = written.Job.UID
 	}
 	for _, warning := range inventory.Warnings {
-		if warning.Code != "no_live_runtime" && warning.Code != "pin_unmatched" && warning.Code != "adapter_unmatched" {
+		if warning.Code != "no_live_runtime" && warning.Code != "pin_unmatched" && warning.Code != "adapter_unmatched" && (warning.Code != "choice_unknown" || o.action != "create" && o.action != "update") {
 			continue
 		}
 		if o.action != "list" && warning.Code != "no_live_runtime" && (warning.JobUID == "" || warning.JobUID != id) {

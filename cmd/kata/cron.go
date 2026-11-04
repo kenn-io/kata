@@ -454,8 +454,10 @@ func (o *cronCLIOptions) decodeRequest(raw []byte) (map[string]jsontext.Value, e
 		return nil, cronCLIValidation("invalid cron request: " + err.Error())
 	}
 	if o.resource == "runtime" {
-		if value, ok := fields["features"]; ok && strings.TrimSpace(string(value)) == "null" {
-			return nil, cronCLIValidation("invalid runtime features: cannot be null")
+		for _, key := range []string{"features", "choices"} {
+			if value, ok := fields[key]; ok && strings.TrimSpace(string(value)) == "null" {
+				return nil, cronCLIValidation("invalid runtime " + key + ": cannot be null")
+			}
 		}
 		beat := shape.(*api.BeatCronRuntimeBody)
 		if value, ok := fields["interval_seconds"]; ok && (string(value) == "null" || beat.IntervalSeconds < 10 || beat.IntervalSeconds > 3600) {

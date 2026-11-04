@@ -57,6 +57,7 @@ func (m Model) routeCronJobKey(key string, lines []cronLine, cursor int) (Model,
 		}
 		m.nextFormGen++
 		f.formGen = m.nextFormGen
+		f.setRuntimeInventory(m.cron.runtimes)
 		m.cron.form = f
 		return m, nil, true
 	case "e":
@@ -131,6 +132,7 @@ func (m Model) cronEditOpened(msg cronEditOpenedMsg) (Model, tea.Cmd) {
 	}
 	m.nextFormGen++
 	f.formGen = m.nextFormGen
+	f.setRuntimeInventory(m.cron.runtimes)
 	m.cron.form = f
 	return m, nil
 }
@@ -396,7 +398,7 @@ func cronFormLines(m Model, f *cronForm) (lines []string, cursor int) {
 		var value string
 		switch {
 		case f.isChoice(field):
-			value = "‹ " + f.display(field) + " ›"
+			value = "‹ " + sanitizeForLine(f.display(field)) + " ›"
 		case field == f.focus && !f.locked(field) && !f.externalText(field) && f.ed.activeField() != nil:
 			ed := f.ed.activeField()
 			width := max(m.width-labelWidth-5, 1)
@@ -404,7 +406,10 @@ func cronFormLines(m Model, f *cronForm) (lines []string, cursor int) {
 			ed.input.SetCursor(ed.input.Position())
 			value = ed.input.View()
 		default:
-			value = sanitizeForLine(strings.ReplaceAll(f.val[field], "\n", " ⏎ "))
+			value = sanitizeForLine(strings.ReplaceAll(f.current(field), "\n", " ⏎ "))
+		}
+		if cronRuntimeFieldKey(field) != "" && !f.isChoice(field) {
+			value += f.runtimeNote(field)
 		}
 		if f.externalText(field) && field == f.focus {
 			value = "ctrl+e  " + value

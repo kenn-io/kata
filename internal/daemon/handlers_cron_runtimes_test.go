@@ -217,3 +217,49 @@ func runtimeHTTPRaw(t *testing.T, env *testenv.Env, method, path string, body an
 	require.NoError(t, err)
 	return response, data
 }
+
+// Contract: optional choices replace the old advertisement and reject ambiguous nulls.
+func TestCronRuntimeChoicesHTTP(t *testing.T) {
+	env := testenv.New(t)
+	p := seedProject(t, env, "example-project")
+	path := fmt.Sprintf("/api/v1/projects/%d/cron/runtimes/%s", p.ID, cronHTTPUID(t))
+	body := runtimeHTTPBody()
+	body["choices"] = map[string][]string{"options.agent": {"review", "default"}, "checkout_key": {}}
+	status, raw := runtimeHTTPRequest(t, env, http.MethodPut, path, body)
+	require.Equalf(t, 200, status, "%s", raw)
+	require.Contains(t, string(raw), `"options.agent":["default","review"]`)
+	for _, bad := range []any{nil, map[string]any{"options.agent": nil}, map[string][]string{"unknown": {}}, map[string][]string{"options.agent": {"a", "a"}}, map[string][]string{"options.agent": make([]string, 33)}} {
+		body["choices"] = bad
+		status, raw = runtimeHTTPRequest(t, env, http.MethodPut, path, body)
+		require.Equalf(t, 400, status, "%s", raw)
+	}
+	delete(body, "choices")
+	status, raw = runtimeHTTPRequest(t, env, http.MethodPut, path, body)
+	require.Equalf(t, 200, status, "%s", raw)
+	require.NotContains(t, string(raw), "options.agent")
+	status, raw = runtimeHTTPRequest(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/capabilities", p.ID), nil)
+	require.Equal(t, 200, status)
+	require.Contains(t, string(raw), "cron_runtime_choices_v1")
+}
+func TestCronRuntimeChoicesRegistryOwnership(t *testing.T) {
+	now := time.Now()
+	registry := daemon.NewCronRuntimeRegistry(now, func() time.Time { return now })
+	b := api.BeatCronRuntimeBody{}.RuntimeBeat
+	b.Label = "worker"
+	b.Adapter = "example"
+	b.Choices = map[string][]string{"options.agent": {"a", "z"}, "checkout_key": {}}
+	out, err := registry.Beat(1, "id", "operator", b)
+	require.NoError(t, err)
+	b.Choices["options.agent"][0] = "input"
+	out.Choices["options.agent"][0] = "output"
+	delete(out.Choices, "checkout_key")
+	list := registry.List(1, nil, "dev")
+	require.Equal(t, []string{"a", "z"}, list.Runtimes[0].Choices["options.agent"])
+	require.Contains(t, list.Runtimes[0].Choices, "checkout_key")
+	list.Runtimes[0].Choices["options.agent"][0] = "list"
+	require.Equal(t, []string{"a", "z"}, registry.List(1, nil, "dev").Runtimes[0].Choices["options.agent"])
+	b.Choices = nil
+	_, err = registry.Beat(1, "id", "operator", b)
+	require.NoError(t, err)
+	require.Empty(t, registry.List(1, nil, "dev").Runtimes[0].Choices)
+}

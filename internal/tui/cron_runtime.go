@@ -80,6 +80,9 @@ func (m Model) cronRuntimeLoaded(msg cronRuntimeLoadedMsg) (Model, tea.Cmd) {
 	if msg.err != nil {
 		m.cron.runtimes = nil
 	}
+	if m.cron.form != nil {
+		m.cron.form.setRuntimeInventory(m.cron.runtimes)
+	}
 	if m.cron.runtimePoll.scheduled {
 		return m, nil
 	}

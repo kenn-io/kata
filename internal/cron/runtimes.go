@@ -23,13 +23,14 @@ const (
 
 // RuntimeBeat is self-reported evidence, never activation or execution authority.
 type RuntimeBeat struct {
-	Label           string   `json:"label"`
-	Adapter         string   `json:"adapter"`
-	AdapterVersion  string   `json:"adapter_version,omitempty"`
-	KataVersion     string   `json:"kata_version,omitempty"`
-	Features        []string `json:"features,omitempty"`
-	IntervalSeconds int      `json:"interval_seconds,omitempty" default:"60" minimum:"10" maximum:"3600"`
-	State           string   `json:"state,omitempty" default:"active" enum:"active,stopping"`
+	Label           string              `json:"label"`
+	Adapter         string              `json:"adapter"`
+	AdapterVersion  string              `json:"adapter_version,omitempty"`
+	KataVersion     string              `json:"kata_version,omitempty"`
+	Features        []string            `json:"features,omitempty"`
+	Choices         map[string][]string `json:"choices,omitempty"`
+	IntervalSeconds int                 `json:"interval_seconds,omitempty" default:"60" minimum:"10" maximum:"3600"`
+	State           string              `json:"state,omitempty" default:"active" enum:"active,stopping"`
 }
 
 // Runtime adds server-owned attribution and observation times to a beat.
@@ -58,6 +59,8 @@ type RuntimeWarning struct {
 	RuntimeUID string   `json:"runtime_uid,omitempty"`
 	Adapter    string   `json:"adapter,omitempty"`
 	Versions   []string `json:"versions,omitempty"`
+	Choice     string   `json:"choice,omitempty"`
+	Value      string   `json:"value,omitempty"`
 	Message    string   `json:"message"`
 }
 
@@ -102,7 +105,7 @@ func NormalizeRuntimeBeat(b RuntimeBeat) (RuntimeBeat, error) {
 	if len(b.Features) > 32 {
 		return invalid("features")
 	}
-	b.Features = slices.Clone(b.Features)
+	b = CloneRuntimeBeat(b)
 	if b.Features == nil {
 		b.Features = []string{}
 	}
@@ -111,6 +114,9 @@ func NormalizeRuntimeBeat(b RuntimeBeat) (RuntimeBeat, error) {
 		if !runtimeToken.MatchString(f) || i > 0 && b.Features[i-1] == f {
 			return invalid("features")
 		}
+	}
+	if err := normalizeRuntimeChoices(b.Choices); err != nil {
+		return invalid("choices: " + err.Error())
 	}
 	if b.IntervalSeconds == 0 {
 		b.IntervalSeconds = 60
@@ -147,7 +153,7 @@ func EvaluateRuntimes(entries []Runtime, jobs []RuntimeJob, now time.Time, daemo
 	}
 	live := []Runtime{}
 	for _, r := range entries {
-		r.Features = slices.Clone(r.Features)
+		r.RuntimeBeat = CloneRuntimeBeat(r.RuntimeBeat)
 		r.Status = RuntimeStatus(r, now)
 		out.Runtimes = append(out.Runtimes, r)
 		if r.Status == "live" {
@@ -186,7 +192,7 @@ func EvaluateRuntimes(entries []Runtime, jobs []RuntimeJob, now time.Time, daemo
 			pin, adapter := runtimeSelectors(job.Definition.Options)
 			matched := false
 			for _, r := range live {
-				if (pin == "" || r.Label == pin) && (adapter == "" || r.Adapter == adapter) {
+				if RuntimeMatches(r, pin, adapter) {
 					matched = true
 					break
 				}
@@ -196,13 +202,14 @@ func EvaluateRuntimes(entries []Runtime, jobs []RuntimeJob, now time.Time, daemo
 			} else if pin == "" && adapter != "" && !matched {
 				out.Warnings = append(out.Warnings, RuntimeWarning{Code: "adapter_unmatched", JobUID: job.UID, Adapter: adapter, Message: fmt.Sprintf("no matching live advertisement for adapter %q in this daemon's inventory", adapter)})
 			}
+			out.Warnings = append(out.Warnings, runtimeChoiceWarnings(live, job)...)
 		}
 		if execute && len(live) == 0 {
 			out.Warnings = append(out.Warnings, RuntimeWarning{Code: "no_live_runtime", Message: "no live runtime advertisement in this daemon's inventory"})
 		}
 	}
 	slices.SortFunc(out.Warnings, func(a, b RuntimeWarning) int {
-		for _, pair := range [][2]string{{a.Code, b.Code}, {a.JobUID, b.JobUID}, {a.RuntimeUID, b.RuntimeUID}, {a.Adapter, b.Adapter}, {a.Message, b.Message}} {
+		for _, pair := range [][2]string{{a.Code, b.Code}, {a.JobUID, b.JobUID}, {a.RuntimeUID, b.RuntimeUID}, {a.Adapter, b.Adapter}, {a.Choice, b.Choice}, {a.Value, b.Value}, {a.Message, b.Message}} {
 			if n := cmp.Compare(pair[0], pair[1]); n != 0 {
 				return n
 			}

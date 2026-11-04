@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"errors"
-	"slices"
 	"sync"
 	"time"
 
@@ -89,7 +88,7 @@ func (r *CronRuntimeRegistry) beatNormalized(projectID int64, id, actor string, 
 	}
 	v.Status = cron.RuntimeStatus(v, now)
 	r.entries[key] = v
-	v.Features = slices.Clone(v.Features)
+	v.RuntimeBeat = cron.CloneRuntimeBeat(v.RuntimeBeat)
 	return v, nil
 }
 

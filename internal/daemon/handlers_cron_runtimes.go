@@ -34,7 +34,7 @@ func registerCronRuntimeHandlers(h huma.API, cfg ServerConfig) {
 		if err := json.Unmarshal(in.RawBody, &fields); err != nil {
 			return nil, api.NewError(400, "validation", "invalid runtime JSON", "", nil)
 		}
-		for _, key := range []string{"state", "interval_seconds"} {
+		for _, key := range []string{"state", "interval_seconds", "choices"} {
 			if strings.TrimSpace(string(fields[key])) == "null" {
 				return nil, api.NewError(400, "validation", "runtime "+key+" cannot be null", "", nil)
 			}
