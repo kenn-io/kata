@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -565,6 +565,130 @@ planning-date object above: `field`, raw `value`, resolved `timezone`, and UTC
 `kata events --tail` and hooks subscribed to the event type, `issue.*`, or `*`
 receive it.
 
+## Adapter conformance
+
+Adapter authors can adopt **adapter conformance profile v1** to give portable
+jobs consistent scheduling and outcome semantics. MUST, SHOULD and MAY below
+apply only to adapters claiming this profile. Reading `cron_v1` documents alone
+does not imply conformance. Kata stores definitions and independent evidence;
+it does not launch adapter work or enforce this execution contract.
+
+### Eligibility and schedule instants
+
+A conforming scheduler MUST exclude deleted and disabled jobs and jobs naming
+another adapter in `options.adapter`. It MUST follow the existing
+[native-job exclusion](#adapter-responsibilities). A `manual` trigger runs only
+on an adapter-local request, never as scheduled work. Other adapter
+notifications retain their delivery rules. Local activation is still required.
+
+`issue-scheduled` and `issue-deadline` retain the existing
+[issue-date readiness and delivery rules](#adapter-responsibilities). This
+profile adds no date-dependent scheduling rules for those triggers.
+
+Calendar instants MUST use [Kata's grammar and DST rules](#cron-expressions).
+An embedded `TZ=` or `CRON_TZ=` directive takes precedence over the trigger's
+`timezone`; otherwise use that timezone, then UTC. An interval's anchor MUST be
+replicated job `created_at`. Its first instant is one interval after creation:
+`created_at + k * interval_seconds`, for integers `k >= 1`. A cron `@every` uses
+that anchor and the parser's effective duration, truncated to whole seconds.
+The shared grammar rejects durations below one second. A `once` instant at or
+before creation MUST NOT fire.
+
+Without a checkpoint, initialize the horizon to the later of creation and
+installation or project enrollment, even when the job is first seen disabled.
+Freeze it while ineligible; enumerate strictly after it when eligible. Keep
+installation time stable across restarts; do not backfill earlier work. Native
+recurring issues use their first-binding anchor; this profile does not change it.
+
+### Checkpoints, catchup and overlap
+
+A checkpoint contains an inclusive enumeration horizon `through`, opaque
+`definition_event_uid`, and pending instants. On every decision, combine retained
+pending UNION new instants in `(through, now]`, sort and deduplicate them.
+`through` says what was enumerated, not what ran. It MUST NOT regress when the
+clock does. Retained pending can be later than `now` after a clock adjustment;
+selected future instants remain pending until due.
+
+Apply catchup to the combined set on every call, even when a gate opens at the
+same clock:
+
+| Policy | Selection |
+| --- | --- |
+| `all` | All candidates in ascending order, subject to declared limits. |
+| `latest` | Newest candidate only, including a future pending candidate. |
+| `skip` | Age at most `grace_seconds` plus declared tolerance, including equality. |
+
+The adapter MUST publish in its own documentation its scheduler tolerance
+from 0 to 120 seconds, exact count limit and age window, and `failure_policy`.
+
+After **every** catchup policy, apply the age window inclusively, then retain
+the newest count up to the declared limit. Drop oldest first. Zero means
+unlimited; a nonzero count is at least 100 and a nonzero window is at least
+86,400 seconds. These limits preserve the newest 100 selected candidates
+within the preceding 24 hours, including retained pending work. Other retention schemes are outside v1.
+
+With `overlap: "forbid"`, local prepared, running or held work occupies the gate.
+Uncertain termination also occupies it, including an `unknown` report. These
+are local states, not new Kata statuses. While occupied, retain selected work
+as pending. With a free gate, launch the oldest due selected instant and retain
+the rest. With `allow`,
+launch all due selected instants. Unknown work releases occupancy only after
+reconciliation establishes termination.
+
+The gate covers one runtime. Multiple adapters may execute the same occurrence;
+observations reserve nothing. Each execution keeps its own run UID. Occurrence
+keys MUST be stable across restarts and observation retries; canonical UTC
+RFC3339Nano instants are recommended.
+
+### Definition changes and pauses
+
+Before launching scheduled work, refresh the definition. Any different
+`definition_event_uid` replaces it; do not infer ordering from opaque UIDs.
+Discard old pending, preserve `through`, and store the new identity. Already
+launched runs retain frozen definition references and local holds.
+
+Disabled, other-adapter, native and manual calls freeze the horizon and retain
+pending unless the revision changes. Apply revision replacement even while
+ineligible; deletion also clears pending. Re-enable, restore and reassignment
+apply catchup after the preserved horizon, subject to the declared count and
+age limits. Unlike this profile, [native `all`](#recurring-child-issues) retains
+missed occurrences without an age window and drains them within its per-sweep
+budget. Pending instants discarded on an adapter revision change are not
+reconstructed. Adopters SHOULD describe changes to their earlier interval
+anchors or checkpoint behavior.
+
+### Attempts, deadlines and outcomes
+
+A step allows at most `1 + retries` attempts. Retry only certainly failed
+attempts, never unknown or successful ones. All attempts share one run UID.
+Dependencies MUST succeed before a dependent starts. The declared
+`failure_policy` selects the branch behavior:
+`continue` permits independent branches after terminal failure; `stop` skips
+not-yet-started independent work. Already-started independent branches and
+completed prerequisites retain their results, including equal-time successful
+prerequisites. A failure still eligible for retry is not terminal.
+
+A positive `timeout_seconds` sets one deadline from run start for every attempt.
+Zero means no Kata deadline; document adapter defaults separately. Cancellation
+has an effective instant. The cutoff is the earlier of that instant and the
+run-wide deadline, when either exists; cancellation governs equal instants.
+No new attempt starts at or after the cutoff. An attempt completed strictly
+before it retains its result even when evaluated later; equality is subject to
+the cutoff. A run completed before cancellation keeps its final outcome.
+At the cutoff, stop attempts and retain the local hold while termination
+remains uncertain.
+
+While no cutoff has been reached, incomplete work is `running` unless an
+outcome is unknown. Terminal run outcomes have this precedence:
+
+1. `unknown` when an outcome or termination remains uncertain.
+2. `cancelled` when operator cancellation interrupted work and termination is certain.
+3. `failed` for a terminal step failure or a timeout with certain termination.
+4. `succeeded` when all steps succeeded.
+
+Use the existing [reason-line convention](#independent-run-evidence) for causes.
+This profile adds no shared reason codes or observation state machine.
+
 ## Adapter responsibilities
 
 Adapters must exclude `notify` jobs with `issue.kind: "per-run"` from their
@@ -572,8 +696,10 @@ schedulers; those jobs belong to the native hub. Existing strict decoders reject
 the new `parent_uid` shape instead of scheduling it.
 
 Shared `enabled` configuration does not activate an adapter installation. Each
-adapter owns its local activation, scheduler, overlap and catchup handling,
-checkout and secret mappings, process lifecycle, and conversation recovery.
+adapter owns its local activation, checkout and secret mappings, process
+lifecycle, and conversation recovery. Adapters claiming the
+[conformance profile](#adapter-conformance) follow its scheduling, overlap,
+catchup and outcome rules.
 A second adapter may independently execute the same occurrence. Each execution
 keeps a separate run UID; no shared observation reserves the issue or occurrence.
 
@@ -591,9 +717,9 @@ buffers are not shared run evidence. An adapter may buffer a failed observation
 write and retry it later without blocking its own work.
 
 The adapter must refresh current definitions before starting new scheduled work;
-offline cached data is for labeled reads. Portable `cron` triggers use the
-configured trigger timezone. Issue-date triggers use the planning-date instant
-above: issue timezone, recurrence fallback, daemon default and UTC remain
+offline cached data is for labeled reads. Portable `cron` triggers follow the
+[profile timezone precedence](#eligibility-and-schedule-instants). Issue-date
+triggers use the planning-date instant above: issue timezone, recurrence fallback, daemon default and UTC remain
 authoritative. Future `scheduled_on` and `someday` defer ordinary execute
 readiness; `deadline_on` never does. Deadline actions are notification-only.
 

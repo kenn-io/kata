@@ -178,6 +178,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
   events, such as an assignment, were kept. Before, the device couldn't apply
   the assignment, and sync stalled.
 
+- Adapter authors can use the written [adapter conformance profile v1](reference/cron.md#adapter-conformance)
+  as a contract for scheduling, catchup, local overlap, retries and run outcomes.
+  Adoption is explicit; Kata continues to store definitions and evidence
+  without executing adapter work.
+
 ## 0.20.0
 <small>2026-10-23</small>
 
