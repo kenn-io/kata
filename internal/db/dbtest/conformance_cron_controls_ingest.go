@@ -3,6 +3,7 @@ package dbtest
 import (
 	"crypto/ed25519"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -13,7 +14,12 @@ import (
 // A downstream enrollment cannot author root policy, even if it asserts the
 // pinned root in its source event. Upstream baseline and recovery still work.
 func checkCronProjectPauseIngress(t *testing.T, store db.Storage) error {
-	const pause = `{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":"maintenance"}`
+	return checkCronControlIngressValue(t, store, "cron.pause", `{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":"maintenance"}`)
+}
+func checkCronPassoverIngress(t *testing.T, store db.Storage) error {
+	return checkCronControlIngressValue(t, store, "cron.passover", `{"version":1,"through":"2026-01-02T03:04:05Z","by":"operator"}`)
+}
+func checkCronControlIngressValue(t *testing.T, store db.Storage, key, pause string) error {
 	t.Run("legacy enrollment", func(t *testing.T) {
 		ctx := t.Context()
 		p, err := store.CreateProject(ctx, "pause-ingress-project")
@@ -21,7 +27,7 @@ func checkCronProjectPauseIngress(t *testing.T, store db.Storage) error {
 		_, err = store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: p.ID, Role: db.FederationRoleHub, HubProjectID: p.ID, HubProjectUID: p.UID, Enabled: true})
 		require.NoError(t, err)
 		peer := "00000000000000000000000006"
-		source := newRemoteEvent(t, p, nil, "project.metadata_updated", "member", peer, 300, jsontext.Value(`{"project_uid":"`+p.UID+`","diff":{"cron.pause":{"from":null,"to":`+pause+`}}}`))
+		source := newRemoteEvent(t, p, nil, "project.metadata_updated", "member", peer, 300, jsontext.Value(`{"project_uid":"`+p.UID+`","diff":{"`+key+`":{"from":null,"to":`+pause+`}}}`))
 		_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: p.ID, SpokeInstanceUID: peer, BoundActor: "member", Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: source}}})
 		require.ErrorIs(t, err, db.ErrFederationIngestValidation)
 		current, err := store.ProjectByID(ctx, p.ID)
@@ -59,7 +65,7 @@ func checkCronProjectPauseIngress(t *testing.T, store db.Storage) error {
 				path = []string{root, sender}
 			}
 			deliver := func(sequence int64, raw string) error {
-				source := newRemoteEvent(t, p, nil, "project.metadata_updated", "operator", root, 300+sequence, jsontext.Value(`{"project_uid":"`+p.UID+`","diff":{"cron.pause":{"from":null,"to":`+raw+`}}}`))
+				source := newRemoteEvent(t, p, nil, "project.metadata_updated", "operator", root, 300+sequence, jsontext.Value(`{"project_uid":"`+p.UID+`","diff":{"`+key+`":{"from":null,"to":`+raw+`}}}`))
 				body, e := db.EncodeRelaySourceEvent(source)
 				require.NoError(t, e)
 				envelope, e := db.SealRelayEnvelope(db.RelayEnvelope{Version: db.RelayProtocolVersion, BindingUID: binding, ProjectUID: p.UID, AuthorityUID: root, SenderInstanceUID: sender, ReceiverInstanceUID: store.InstanceUID(), Epoch: 1, Sequence: sequence, Stream: db.RelayStreamEvent, Path: path, SourceUID: source.EventUID, SourceHash: source.ContentHash, Body: body})
@@ -78,10 +84,13 @@ func checkCronProjectPauseIngress(t *testing.T, store db.Storage) error {
 			require.NoError(t, deliver(1, pause), "root from-empty baseline must remain accepted")
 			current, err := store.ProjectByID(ctx, p.ID)
 			require.NoError(t, err)
-			got := db.CronProjectPauseFromMetadata(current.Metadata)
-			require.NotNil(t, got)
-			require.False(t, got.Invalid)
-			require.Equal(t, "maintenance", got.Reason)
+			var values map[string]jsontext.Value
+			require.NoError(t, json.Unmarshal([]byte(current.Metadata), &values))
+			require.JSONEq(t, pause, string(values[key]))
+			if key != "cron.pause" {
+				require.ErrorIs(t, deliver(2, `null`), db.ErrFederationIngestValidation)
+				return
+			}
 			require.NoError(t, deliver(2, `null`))
 			current, err = store.ProjectByID(ctx, p.ID)
 			require.NoError(t, err)

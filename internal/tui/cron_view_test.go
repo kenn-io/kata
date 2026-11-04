@@ -682,3 +682,8 @@ func (a *cronReadTestAPI) readCronProjectState(_ context.Context, id int64) (cro
 	}
 	return a.data.project, a.data.projectErr
 }
+
+func (a *cronReadTestAPI) readCronJobs(ctx context.Context, id int64) (cronJobsRead, error) {
+	jobs, err := a.ListCronJobs(ctx, id)
+	return cronJobsRead{jobs, a.data.passovers}, err
+}

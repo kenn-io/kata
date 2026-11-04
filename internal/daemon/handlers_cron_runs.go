@@ -29,6 +29,7 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 		}
 		out := &api.CronCapabilitiesResponse{EventFeatures: db.SupportedEventFeatures}
 		out.Body.ProjectUID = project.UID
+		out.Body.ProjectRevision = project.Revision
 		out.Body.EventFeatures = []string{db.CronEventFeature}
 		out.Body.ProjectPause = api.CronProjectPauseFromMetadata(project.Metadata)
 		out.Body.Controls = cronControls()

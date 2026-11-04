@@ -418,6 +418,13 @@ the separate `kata.load_recurrence` tools manage RRULE issue templates.
 only at the owning hub. See [Project cron pause](cron.md#pause-cron-for-a-whole-project)
 for adapter behavior and upgrade requirements.
 
+`kata.cron_job_resume` and `kata.cron_project_resume` accept optional
+`discard_missed: true`. They require advertised `resume_discard_missed` support,
+retain the selected revision for one guarded write, and never silently drop the
+flag or refresh a failed guard. Supply `expected_event_uid` to retain a job guard
+across an uncertain retry. See [Resume and discard scheduled backlog](cron.md#resume-and-discard-scheduled-backlog)
+for cutoff, root-only behavior, repair, upgrade, and merge limits.
+
 Every operation uses the MCP server's configured daemon credentials, project
 scope, and accountable actor. Select `project` explicitly in multi-project modes.
 Run observations accept the usual per-call `teammate` override; an empty value

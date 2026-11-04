@@ -260,6 +260,16 @@ func (a CronSQL) DispatchRecurring(ctx context.Context, in DispatchRecurringCron
 		if err != nil {
 			return err
 		}
+		original := progress
+		if passover := CronPassoverFromMetadata(project.Metadata, job.UID); passover != nil {
+			if passover.Invalid {
+				return fmt.Errorf("%w: invalid applicable cron passover", cron.ErrInvalid)
+			}
+			progress, err = cron.ApplyPassover(progress, passover.Through)
+			if err != nil {
+				return err
+			}
+		}
 		batch, err := cron.PlanRecurring(job.Definition, job.DefinitionEventUID, progress, in.Now)
 		if err != nil {
 			return err
@@ -304,7 +314,7 @@ func (a CronSQL) DispatchRecurring(ctx context.Context, in DispatchRecurringCron
 			}
 			out.Events = append(out.Events, event)
 		}
-		before, err := json.Marshal(progress)
+		before, err := json.Marshal(original)
 		if err != nil {
 			return err
 		}

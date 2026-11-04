@@ -43,9 +43,12 @@ const (
 // *sql.DB. Each method that lands a real query gets added here, and
 // the generator's output for that method disappears on the next regenerate.
 var alreadyImplemented = map[string]bool{
-	"DispatchRecurringCron": true, // cron.go
-	"ListRecurringCronJobs": true, // cron.go
-	"SetCronProjectPause":   true, // cron.go
+	"CronJobControlRead":      true,
+	"ListCronJobControlReads": true,
+	"ResumeCronJob":           true,
+	"DispatchRecurringCron":   true, // cron.go
+	"ListRecurringCronJobs":   true, // cron.go
+	"SetCronProjectPause":     true, // cron.go
 
 	"PrepareSetupFinished":  true, // setup_finished.go
 	"CompleteSetupFinished": true, // setup_finished.go

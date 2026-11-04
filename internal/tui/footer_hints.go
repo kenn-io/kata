@@ -12,7 +12,7 @@ import (
 
 func (m Model) helpRows() [][]helplayout.HelpItem {
 	if m.modal != modalNone {
-		return modalHelpRows(m.modal)
+		return m.activeModalHelpRows()
 	}
 	if m.input.kind != inputNone {
 		return inputHelpRows(m.input)
@@ -33,7 +33,7 @@ func (m Model) helpRows() [][]helplayout.HelpItem {
 
 func (m Model) queueHelpRows() [][]helplayout.HelpItem {
 	if m.modal != modalNone {
-		return modalHelpRows(m.modal)
+		return m.activeModalHelpRows()
 	}
 	if m.input.kind != inputNone {
 		return inputHelpRows(m.input)
@@ -43,7 +43,7 @@ func (m Model) queueHelpRows() [][]helplayout.HelpItem {
 
 func (m Model) detailHelpRows() [][]helplayout.HelpItem {
 	if m.modal != modalNone {
-		return modalHelpRows(m.modal)
+		return m.activeModalHelpRows()
 	}
 	if m.input.kind != inputNone {
 		return inputHelpRows(m.input)
@@ -53,7 +53,7 @@ func (m Model) detailHelpRows() [][]helplayout.HelpItem {
 
 func (m Model) splitHelpRows() [][]helplayout.HelpItem {
 	if m.modal != modalNone {
-		return modalHelpRows(m.modal)
+		return m.activeModalHelpRows()
 	}
 	if m.input.kind != inputNone {
 		return inputHelpRows(m.input)
@@ -330,4 +330,12 @@ func convertAndReflowHelpRows(
 	width int,
 ) [][]helplayout.HelpItem {
 	return helplayout.ReflowRows(rows, width, helprender.ColumnGap)
+}
+
+func (m Model) activeModalHelpRows() [][]helplayout.HelpItem {
+	rows := modalHelpRows(m.modal)
+	if m.modal == modalCronResume && m.cron.enabled != nil && m.cron.enabled.allowDiscard {
+		return [][]helplayout.HelpItem{{{Key: "y", Description: "resume"}, {Key: "d", Description: "discard missed"}, {Key: "n/esc", Description: "cancel"}}}
+	}
+	return rows
 }

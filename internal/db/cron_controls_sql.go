@@ -37,7 +37,47 @@ func (a CronSQL) SetProjectPause(ctx context.Context, in SetCronProjectPauseIn) 
 		if err != nil {
 			return err
 		}
+		if in.DiscardMissed && (in.Paused || in.ExpectedRevision == nil) {
+			return fmt.Errorf("%w: discard requires resume and retained project revision", cron.ErrInvalid)
+		}
+		if in.ExpectedRevision != nil && *in.ExpectedRevision != project.Revision {
+			return &RevisionConflictError{CurrentRevision: project.Revision}
+		}
 		pause := CronProjectPauseFromMetadata(project.Metadata)
+		if in.DiscardMissed {
+			var pausedAt *time.Time
+			if pause != nil && !pause.Invalid {
+				at := pause.PausedAt.UTC()
+				pausedAt = &at
+			}
+			// An unpaused project is a selected-revision no-op, except that a
+			// malformed present cutoff can be repaired without a retained pause.
+			var values map[string]jsontext.Value
+			if project.Metadata != "" {
+				if err := json.Unmarshal([]byte(project.Metadata), &values); err != nil {
+					return err
+				}
+			}
+			_, validErr := decodeCronPassover(values[CronPassoverMetadataKey])
+			_, present := values[CronPassoverMetadataKey]
+			if pause == nil && (!present || validErr == nil) {
+				out.Project = project
+				out.NewRevision = project.Revision
+				return nil
+			}
+			patch, err := cronPassoverPatch(project, CronPassoverMetadataKey, actor, time.Now().UTC(), pausedAt)
+			if err != nil {
+				return err
+			}
+			if patch == nil {
+				patch = map[string]jsontext.Value{}
+			}
+			if pause != nil {
+				patch[CronProjectPauseMetadataKey] = jsontext.Value("null")
+			}
+			out, err = a.writeCronProjectMetadataTx(ctx, tx, project, actor, patch)
+			return err
+		}
 		if (pause != nil) == in.Paused {
 			out.Project = project
 			out.NewRevision = project.Revision

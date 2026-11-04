@@ -535,3 +535,8 @@ func TestCronEditorReturnKeepsDraftOnErrorAndIgnoresClosedForm(t *testing.T) {
 	m, _ = updateModel(m, editorReturnedMsg{formGen: gen, content: "stale text"})
 	require.Empty(t, m.cron.form.val[cfBody])
 }
+
+func (a *cronWriteTestAPI) readCronJob(ctx context.Context, pid int64, id string) (cronJobRead, error) {
+	job, err := a.ShowCronJob(ctx, pid, id)
+	return cronJobRead{Job: job}, err
+}

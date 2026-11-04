@@ -49,6 +49,20 @@ func cronAPIError(ctx context.Context, cfg ServerConfig, err error, projectID in
 	}
 }
 
+// cronJobControlResponse reads the current definition and cutoff together.
+// Callers publish their exact transaction events before this fallible read.
+func cronJobControlResponse(ctx context.Context, cfg ServerConfig, projectID int64, id string, events []db.Event) (*api.CronJobResponse, error) {
+	read, err := cfg.DB.CronJobControlRead(ctx, projectID, id)
+	if err != nil {
+		return nil, cronAPIError(ctx, cfg, err, projectID, id, true)
+	}
+	out := &api.CronJobResponse{}
+	out.Body.Job = api.CronJobFrom(read.Job)
+	out.Body.Passover = api.CronPassoverFrom(read.Passover)
+	out.Body.Events = events
+	return out, nil
+}
+
 // checkCronLifecycleState refuses deleting a deleted definition or restoring
 // a live one, either of which would otherwise emit a spurious event. The write
 // that follows is a compare-and-swap on expected, so requiring the definition
@@ -154,10 +168,7 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 		}
 
 		cfg.Publish().Events(projectID, events)
-		out := &api.CronJobResponse{}
-		out.Body.Job = api.CronJobFrom(value)
-		out.Body.Events = events
-		return out, nil
+		return cronJobControlResponse(ctx, cfg, projectID, value.UID, events)
 	}
 	huma.Register(h, huma.Operation{OperationID: "createCronJob", Method: http.MethodPost, Path: path, DefaultStatus: 201}, func(ctx context.Context, in *api.CreateCronJobRequest) (*api.CronJobResponse, error) {
 		ctx, actor, enrollment, err := cronJobWriteContext(ctx, cfg, in.ProjectID, in.Authorization, in.Body.Actor, "createCronJob")
@@ -185,20 +196,14 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
-		value, err := cfg.DB.CronJob(ctx, in.ProjectID, in.UID)
-		if err != nil {
-			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, in.UID, true)
-		}
-		out := &api.CronJobResponse{}
-		out.Body.Job = api.CronJobFrom(value)
-		return out, nil
+		return cronJobControlResponse(ctx, cfg, in.ProjectID, in.UID, nil)
 	})
 	huma.Register(h, huma.Operation{OperationID: "listCronJobs", Method: http.MethodGet, Path: path}, func(ctx context.Context, in *api.ListCronDefinitionsRequest) (*api.ListCronJobsResponse, error) {
 		project, err := activeProjectByID(ctx, cfg.DB, in.ProjectID)
 		if err != nil {
 			return nil, err
 		}
-		values, err := cfg.DB.ListCronJobs(ctx, db.CronList{ProjectID: in.ProjectID, IncludeDeleted: in.IncludeDeleted})
+		values, err := cfg.DB.ListCronJobControlReads(ctx, in.ProjectID, in.IncludeDeleted)
 		if err != nil {
 			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, "", true)
 		}
@@ -206,8 +211,12 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 		out.Body.ProjectPause = api.CronProjectPauseFromMetadata(project.Metadata)
 		out.Body.Controls = cronControls()
 		out.Body.Jobs = []api.CronJob{}
+		out.Body.Passovers = map[string]*api.CronPassover{}
 		for _, value := range values {
-			out.Body.Jobs = append(out.Body.Jobs, api.CronJobFrom(value))
+			out.Body.Jobs = append(out.Body.Jobs, api.CronJobFrom(value.Job))
+			if value.Passover != nil {
+				out.Body.Passovers[value.Job.UID] = api.CronPassoverFrom(value.Passover)
+			}
 		}
 		return out, nil
 	})

@@ -1,0 +1,24 @@
+ Project: example-project                                       kata カタ · dev
+kata カタ [jobs] runs workflows
+ / search                                                                 1 job
+
+  Job            State   Trigger           Action             Last loaded run
+▶ Weekly report  paused  every 1m0s        notify             succeeded 1h ago
+
+         ╭────────────────────────────────────────────────────────────╮
+         │                                                            │
+         │  Resume Weekly report?                                     │
+         │                                                            │
+         │  Backlog preview: 5 recurring children.                    │
+         │  y resumes with the existing catch-up policy.              │
+         │  d resumes and discards all missed occurrences             │
+         │  through the commit-time cutoff, including older backlog.  │
+         │                                                            │
+         ╰────────────────────────────────────────────────────────────╯
+
+
+
+
+
+
+ y resume▕ d discard missed▕ n/esc cancel

@@ -71,8 +71,8 @@ func CronProjectPauseFromMetadata(blob JSONBlob) *CronProjectPause {
 }
 
 // CheckCronProjectPauseAdoption prevents root-owned policy from being
-// published in a spoke-origin metadata baseline. Resume first so the local
-// root can clear the policy under its authority.
+// published in a spoke-origin metadata baseline. A pause can be resumed first;
+// a retained passover has no authority-preserving adoption path.
 func CheckCronProjectPauseAdoption(project Project) error {
 	if len(project.Metadata) == 0 {
 		return nil
@@ -84,6 +84,11 @@ func CheckCronProjectPauseAdoption(project Project) error {
 	if _, retained := values[CronProjectPauseMetadataKey]; retained {
 		return fmt.Errorf("%w: resume the project cron pause before federation adoption", ErrFederatedSpokeUnsupported)
 	}
+	for key := range values {
+		if cronPassoverKey(key) {
+			return fmt.Errorf("%w: a project with retained cron passover cannot be adopted into another hub", ErrFederatedSpokeUnsupported)
+		}
+	}
 	return nil
 }
 
@@ -91,7 +96,7 @@ func CheckCronProjectPauseAdoption(project Project) error {
 // cron-prefixed project metadata remains ordinary user metadata.
 func CheckCronProjectMetadataWrite(values map[string]jsontext.Value) error {
 	for key := range values {
-		if key == CronProjectPauseMetadataKey || strings.HasPrefix(key, "cron.request.") {
+		if key == CronProjectPauseMetadataKey || strings.HasPrefix(key, "cron.request.") || cronPassoverKey(key) {
 			return fmt.Errorf("%w: %s requires the typed cron control API", metadata.ErrInvalidValue, key)
 		}
 	}
@@ -102,36 +107,53 @@ func CheckCronProjectMetadataWrite(values map[string]jsontext.Value) error {
 // asserted origin. authorityUID is the pinned root; untrusted ingress uses "".
 // Deletion accepts malformed old values so a root can recover legacy state.
 func ValidateCronControlEvent(event RemoteEvent, authorityUID string) error {
+	return validateCronControlEvent(event, authorityUID, true)
+}
+
+// Historical pause values keep their established fail-closed recovery path;
+// passover has no legacy format and validates even in signed reset records.
+func validateCronControlEvent(event RemoteEvent, authorityUID string, validatePause bool) error {
 	if event.Type != "project.metadata_updated" {
 		return nil
 	}
 	var payload struct {
 		Diff map[string]struct {
-			To jsontext.Value `json:"to"`
+			From jsontext.Value `json:"from"`
+			To   jsontext.Value `json:"to"`
 		} `json:"diff"`
 	}
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		return fmt.Errorf("%w: invalid cron control diff", ErrFederationIngestValidation)
 	}
-	change, ok := payload.Diff[CronProjectPauseMetadataKey]
-	if !ok {
-		return nil
-	}
-	if authorityUID == "" || event.OriginInstanceUID != authorityUID {
-		return fmt.Errorf("%w: cron controls require root origin", ErrFederationIngestValidation)
-	}
-	if string(change.To) == "null" {
-		return nil
-	}
-	if _, err := decodeCronProjectPause(change.To); err != nil {
-		return fmt.Errorf("%w: %v", ErrFederationIngestValidation, err)
+	for key, change := range payload.Diff {
+		passover := cronPassoverKey(key)
+		if (!validatePause || key != CronProjectPauseMetadataKey) && !passover {
+			continue
+		}
+		if authorityUID == "" || event.OriginInstanceUID != authorityUID {
+			return fmt.Errorf("%w: cron controls require root origin", ErrFederationIngestValidation)
+		}
+		if passover {
+			if err := ValidateCronPassoverChange(key, change.From, change.To); err != nil {
+				return fmt.Errorf("%w: %v", ErrFederationIngestValidation, err)
+			}
+			continue
+		}
+		if string(change.To) == "null" {
+			continue
+		}
+		if _, err := decodeCronProjectPause(change.To); err != nil {
+			return fmt.Errorf("%w: %v", ErrFederationIngestValidation, err)
+		}
 	}
 	return nil
 }
 
 // SetCronProjectPauseIn changes only the project's cron admission switch.
 type SetCronProjectPauseIn struct {
-	ProjectID     int64
-	Actor, Reason string
-	Paused        bool
+	ProjectID        int64
+	Actor, Reason    string
+	Paused           bool
+	DiscardMissed    bool
+	ExpectedRevision *int64
 }

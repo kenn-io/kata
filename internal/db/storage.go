@@ -17,6 +17,9 @@ import (
 // through the storeopen DSN dispatcher.
 type Storage interface {
 	SetCronProjectPause(context.Context, SetCronProjectPauseIn) (PatchProjectMetadataOut, error)
+	ResumeCronJob(context.Context, ResumeCronJobIn) (ResumeCronJobOut, error)
+	CronJobControlRead(context.Context, int64, string) (CronJobControlRead, error)
+	ListCronJobControlReads(context.Context, int64, bool) ([]CronJobControlRead, error)
 	// Shared definitions, native recurring delivery and independently attributed execution evidence.
 	ObserveCronRun(context.Context, ObserveCronRun) (CronRunObservationResult, error)
 	CronRun(context.Context, int64, string) (CronRun, error)

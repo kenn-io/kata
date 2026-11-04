@@ -369,7 +369,10 @@ func cronHistory(d *cronDoc, p cronData, ref cronRef) {
 }
 
 func cronHelpRows(m Model) [][]helplayout.HelpItem {
-	return modalFirstHelpRows(m.modal, [][]helplayout.HelpItem{cronKeyRows(m)})
+	if m.modal != modalNone {
+		return m.activeModalHelpRows()
+	}
+	return [][]helplayout.HelpItem{cronKeyRows(m)}
 }
 
 func cronKeyRows(m Model) []helplayout.HelpItem {

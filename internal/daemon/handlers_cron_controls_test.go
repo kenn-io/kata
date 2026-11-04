@@ -2,6 +2,7 @@ package daemon_test
 
 import (
 	"bytes"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
@@ -67,7 +69,12 @@ func TestCronProjectPauseHTTP(t *testing.T) {
 			require.Equal(t, "operator", events[0].Actor)
 		} else {
 			require.Equal(t, before, after)
-			assertNoReceive(t, sub.Ch, 20*time.Millisecond, "no-op pause") //nolint:kennlint // deadlinetest: bounded absence check for the no-op pause broadcast contract
+			// Publication completes synchronously before the HTTP response.
+			select {
+			case <-sub.Ch:
+				t.Fatal("no-op pause published an event")
+			default:
+			}
 		}
 		for _, route := range []string{"/capabilities", "/jobs"} {
 			status, raw = cronHTTP(t, env, http.MethodGet, path+route, nil)
@@ -78,7 +85,7 @@ func TestCronProjectPauseHTTP(t *testing.T) {
 			}
 			require.NoError(t, json.Unmarshal(raw, &read))
 			require.Equal(t, out.Pause, read.Pause)
-			require.Equal(t, []string{"job_pause", "project_pause"}, read.Controls)
+			require.Equal(t, []string{"job_pause", "project_pause", "resume_discard_missed"}, read.Controls)
 			require.Contains(t, string(raw), `"project_pause":`)
 		}
 	}
@@ -141,5 +148,125 @@ func TestCronProjectPauseSpokeHint(t *testing.T) {
 		status, raw := cronHTTP(t, env, method, fmt.Sprintf("/api/v1/projects/%d/cron/pause", project.ID), map[string]any{"actor": "operator"})
 		require.Equalf(t, 409, status, "%s", raw)
 		require.Contains(t, string(raw), "owning hub")
+	}
+}
+
+// Contract: discard is a separate supported action requiring retained CAS;
+// committed policy events reach subscribers before the enabled definition.
+func TestCronDiscardResumeHTTP(t *testing.T) {
+	sink := &recordingSink{}
+	env := testenv.New(t, testenv.WithAuthToken("tok"), func(c *daemon.ServerConfig) { c.Hooks = sink })
+	p := seedProject(t, env, "discard-project")
+	definition := cronHTTPDefinition(t)
+	definition.Enabled = false
+	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Name: "Inspect", Actor: "operator", Definition: definition})
+	require.NoError(t, err)
+	path := fmt.Sprintf("/api/v1/projects/%d/cron", p.ID)
+	sub := env.Broadcaster.Subscribe(daemon.SubFilter{})
+	defer sub.Unsub()
+	status, raw := cronHTTP(t, env, http.MethodPost, path+"/jobs/"+job.UID+"/resume", map[string]any{"actor": "operator", "discard_missed": true})
+	require.Equalf(t, 400, status, "%s", raw)
+	status, raw = cronHTTP(t, env, http.MethodPost, path+"/jobs/"+job.UID+"/resume", map[string]any{"actor": "operator", "discard_missed": true, "expected_event_uid": job.DefinitionEventUID})
+	require.Equalf(t, 200, status, "%s", raw)
+	first := receiveMsg(t, sub.Ch, time.Second, "passover")
+	second := receiveMsg(t, sub.Ch, time.Second, "enable")
+	require.Equal(t, "project.metadata_updated", first.Event.Type)
+	require.Equal(t, "cron.job.updated", second.Event.Type)
+	hooks := sink.snapshot()
+	require.Equal(t, *first.Event, hooks[len(hooks)-2])
+	require.Equal(t, *second.Event, hooks[len(hooks)-1])
+	status, raw = cronHTTP(t, env, http.MethodGet, path+"/capabilities", nil)
+	require.Equal(t, 200, status)
+	var caps struct {
+		Controls []string `json:"controls"`
+		Revision int64    `json:"project_revision"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &caps))
+	require.Contains(t, caps.Controls, "resume_discard_missed")
+	require.Positive(t, caps.Revision)
+	for _, guard := range []bool{false, true} {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodDelete, env.URL+path+"/pause?discard_missed=true", strings.NewReader(`{"actor":"operator"}`))
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer tok")
+		req.Header.Set("Content-Type", "application/json")
+		if guard {
+			req.Header.Set("If-Match", fmt.Sprintf(`"rev-%d"`, caps.Revision))
+		}
+		response, err := env.HTTP.Do(req)
+		require.NoError(t, err)
+		body := readClose(t, response)
+		want := 400
+		if guard {
+			want = 200
+		}
+		require.Equalf(t, want, response.StatusCode, "%s", body)
+	}
+}
+
+func TestCronDiscardEnrollmentBoundary(t *testing.T) {
+	env, p, _, definition := nativeCronEnrollmentFixture(t, testenv.WithAuthToken("tok"))
+	definition.Enabled = false
+	native, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Name: "Recurring review", Actor: "tester", Definition: definition})
+	require.NoError(t, err)
+	adapter, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Name: "Adapter review", Actor: "tester", Definition: cronHTTPDefinition(t)})
+	require.NoError(t, err)
+	enrollment := createClaimEnrollment(t, env, p.ID, cronHTTPUID(t), "push")
+	for _, job := range []db.CronJob{native, adapter} {
+		raw := map[string]any{"discard_missed": true, "expected_event_uid": job.DefinitionEventUID}
+		response, body := envDoRaw(t, env, http.MethodPost, fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s/resume", p.ID, job.UID), raw, map[string]string{"Authorization": "Bearer " + enrollment.Token})
+		want := 200
+		if job.UID == adapter.UID {
+			want = 403
+		}
+		require.Equalf(t, want, response.StatusCode, "%s", body)
+	}
+}
+
+// Contract: cutoff state lives beside the strict inner job, preserving clients
+// that reject unknown members in the portable job record.
+func TestCronPassoverReadEnvelopes(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	p := seedProject(t, env, "control-read-project")
+	definition := cronHTTPDefinition(t)
+	definition.Enabled = false
+	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Name: "Inspect", Actor: "operator", Definition: definition})
+	require.NoError(t, err)
+	path := fmt.Sprintf("/api/v1/projects/%d/cron/jobs", p.ID)
+	status, raw := cronHTTP(t, env, http.MethodPost, path+"/"+job.UID+"/resume", map[string]any{"actor": "operator", "discard_missed": true, "expected_event_uid": job.DefinitionEventUID})
+	require.Equalf(t, 200, status, "%s", raw)
+	var expected *db.CronPassoverState
+	for _, route := range []string{"action", "show", "list"} {
+		if route == "show" {
+			status, raw = cronHTTP(t, env, http.MethodGet, path+"/"+job.UID, nil)
+		}
+		if route == "list" {
+			status, raw = cronHTTP(t, env, http.MethodGet, path, nil)
+		}
+		require.Equal(t, 200, status)
+		var wire struct {
+			Job       jsontext.Value                   `json:"job"`
+			Jobs      []jsontext.Value                 `json:"jobs"`
+			Passover  *db.CronPassoverState            `json:"passover"`
+			Passovers map[string]*db.CronPassoverState `json:"passovers"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &wire))
+		state := wire.Passover
+		inner := wire.Job
+		if route == "list" {
+			state = wire.Passovers[job.UID]
+			require.Len(t, wire.Jobs, 1)
+			inner = wire.Jobs[0]
+		}
+		require.NotNil(t, state, route)
+		require.False(t, state.Invalid)
+		require.Equal(t, "job", state.Scope)
+		if expected == nil {
+			expected = state
+		} else {
+			require.Equal(t, expected, state)
+		}
+		var strict api.CronJob
+		require.NoError(t, json.Unmarshal(inner, &strict, json.RejectUnknownMembers(true)))
+		require.True(t, strict.Definition.Enabled)
 	}
 }

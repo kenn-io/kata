@@ -78,3 +78,18 @@ func (d *Store) DispatchRecurringCron(ctx context.Context, in db.DispatchRecurri
 func (d *Store) SetCronProjectPause(ctx context.Context, in db.SetCronProjectPauseIn) (db.PatchProjectMetadataOut, error) {
 	return d.cronSQL().SetProjectPause(ctx, in)
 }
+
+// ResumeCronJob enables a job with an optional retained delivery cutoff.
+func (d *Store) ResumeCronJob(ctx context.Context, in db.ResumeCronJobIn) (db.ResumeCronJobOut, error) {
+	return d.cronSQL().ResumeJob(ctx, in)
+}
+
+// CronJobControlRead returns definition and effective cutoff in one snapshot.
+func (d *Store) CronJobControlRead(ctx context.Context, pid int64, id string) (db.CronJobControlRead, error) {
+	return d.cronSQL().JobControlRead(ctx, pid, id)
+}
+
+// ListCronJobControlReads returns consistent definition/cutoff pairs.
+func (d *Store) ListCronJobControlReads(ctx context.Context, pid int64, includeDeleted bool) ([]db.CronJobControlRead, error) {
+	return d.cronSQL().JobControlReads(ctx, pid, includeDeleted)
+}

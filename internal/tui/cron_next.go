@@ -44,6 +44,10 @@ func cronNextRuns(p cronData, j generated.CronJob, now time.Time) (label string,
 	if !def.Enabled {
 		return label, []string{"none while paused"}
 	}
+	passover := p.passovers[j.UID]
+	if passover != nil && passover.Invalid {
+		return label, []string{"unavailable"}
+	}
 	progress := cron.RecurringProgress{}
 	if native {
 		// The daemon delivers only while the parent issue is open.
@@ -54,6 +58,16 @@ func cronNextRuns(p cronData, j generated.CronJob, now time.Time) (label string,
 		}
 		if !open {
 			return label, []string{"none while the parent is closed"}
+		}
+	}
+	if passover != nil {
+		if native {
+			progress, err = cron.ApplyPassover(progress, passover.Through)
+			if err != nil {
+				return label, []string{"unavailable"}
+			}
+		} else if passover.Through.After(now) {
+			now = passover.Through
 		}
 	}
 	times, err := cron.RecurringOccurrences(def, progress, now, cronNextCount)

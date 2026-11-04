@@ -790,3 +790,26 @@ func TestReopenBacklogActionsSurviveNarrowResize(t *testing.T) {
 		require.Contains(t, view, "cancel")
 	}
 }
+
+func TestReopenBacklogPassover(t *testing.T) {
+	for _, invalid := range []bool{false, true} {
+		t.Run(fmt.Sprint(invalid), func(t *testing.T) {
+			job := backlogJob{uid: backlogParentUID, catchup: "all", missed: 5}
+			cutoff := time.Now().UTC().Add(time.Hour)
+			client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/metadata") {
+					respondJSON(t, w, map[string]any{"issue": map[string]any{"metadata": map[string]any{cronProgressPrefix + job.uid: job.progress()}}})
+					return
+				}
+				respondJSON(t, w, map[string]any{"job": job.definition(), "passover": db.CronPassoverState{Through: cutoff, Invalid: invalid}})
+			})
+			count, err := client.ReopenBacklog(t.Context(), 7, "abcd")
+			require.Zero(t, count)
+			if invalid {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
