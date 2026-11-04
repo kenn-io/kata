@@ -618,7 +618,6 @@ func cronHelp(m Model) string {
 	for i, s := range intro {
 		intro[i] = strings.Join(termtext.Wrap(s, max(m.width, 1)), "\n")
 	}
-
 	body := []string{
 		renderTitleBar(m.width, m.scope, kataVersion, m.chrome().daemon),
 		cronTabs(m.cron.tab),

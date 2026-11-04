@@ -77,7 +77,7 @@ type cronState struct {
 	unseenOnly       bool
 	stack            []cronFrame
 	data             *cronData
-	events           uint64
+	events, fence    uint64
 	out              bool
 	conn, scope      uint64
 	form             *cronForm
@@ -88,7 +88,7 @@ type cronState struct {
 	jobPage, runPage cronHistoryPage
 }
 
-// Synchronize after every update and retain visible records during refresh.
+// Synchronize after every update; events past fence wait for their debounce.
 func (m Model) cronSync() (Model, tea.Cmd) {
 	if m.cron.conn != m.connGen || m.cron.scope != m.scopeGen {
 		m.cron.reads.stop()
@@ -116,7 +116,7 @@ func (m Model) cronSync() (Model, tea.Cmd) {
 		ctx, cancel := context.WithCancel(root)
 		m.cron.reads = &cronReadScope{ctx: ctx, cancel: cancel}
 	}
-	if m.cron.data != nil && m.cron.data.events == m.cron.events {
+	if m.cron.data != nil && (m.cron.data.events == m.cron.events || m.pendingRefetch && m.cron.data.events >= m.cron.fence) {
 		// Returning through another job can leave the sole page cache on that
 		// job. Start a matching request as soon as this job becomes visible.
 		if n := len(m.cron.stack); n > 0 {
@@ -125,7 +125,6 @@ func (m Model) cronSync() (Model, tea.Cmd) {
 				return m.cronRequestPage(frame.ref.uid, true)
 			}
 		}
-
 		if m.cron.jobPage.reload && !m.cron.jobPage.out {
 			for _, frame := range m.cron.stack {
 				if frame.ref.kind == cronJobs && frame.ref.uid == m.cron.jobPage.job {
@@ -146,12 +145,10 @@ func (m Model) fetchCron() tea.Cmd {
 	data.historyRuns = m.cronLoadedRuns()
 	data.resetPages = m.cron.resetPages
 	if m.cron.data != nil {
-		seen := map[string]bool{}
 		for _, frame := range m.cron.stack {
-			if frame.ref.kind == cronRuns && !seen[frame.ref.uid] {
+			if frame.ref.kind == cronRuns {
 				if r, ok := m.cron.data.run(frame.ref.uid); ok {
 					data.inspectedRuns = append(data.inspectedRuns, r)
-					seen[r.UID] = true
 				}
 			}
 		}
@@ -179,7 +176,7 @@ func (m Model) cronLoaded(msg cronLoadedMsg) Model {
 			data.jobs = previous.jobs
 		}
 		for uid, run := range previous.lastRuns {
-			if data.jobsErr != nil || data.lastErr[uid] != nil {
+			if _, fresh := data.lastRuns[uid]; !fresh && (data.jobsErr != nil || data.lastErr[uid] != nil) {
 				if data.lastRuns == nil {
 					data.lastRuns = map[string]generated.CronRun{}
 				}
@@ -370,7 +367,7 @@ func (m Model) routeCronKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case key == "U":
 		m = m.cronClearSeen()
 	case key == "r":
-		m.cron.resetPages = true
+		m.cron.resetPages, m.cron.fence = true, m.cron.events+1
 		m.cronInvalidatePages()
 		m.cron.events++
 	}

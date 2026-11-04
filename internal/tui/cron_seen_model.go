@@ -112,7 +112,7 @@ func (m Model) cronLoadedRuns() []generated.CronRun {
 }
 
 func (m Model) cronRunUnseen(project string, r generated.CronRun) bool {
-	if !m.cronSeen.ready || project == "" || m.cronSeen.session[project][r.UID] {
+	if !m.cronSeen.ready || m.cronSeen.err != nil || project == "" || m.cronSeen.session[project][r.UID] {
 		return false
 	}
 	return m.cronSeen.data.Projects[project].unseen(r)

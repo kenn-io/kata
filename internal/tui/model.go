@@ -2812,7 +2812,7 @@ func (m Model) handleEventReceived(msg eventReceivedMsg) (tea.Model, tea.Cmd) {
 		}
 		m.cache.markStale()
 		if !m.pendingRefetch {
-			m.pendingRefetch = true
+			m.pendingRefetch, m.cron.fence = true, m.cron.events
 			cmds = append(cmds, debouncedRefetch(refetchDebounce))
 		}
 	}
