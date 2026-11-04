@@ -5073,6 +5073,9 @@ func (p ProjectEmbeddingProducer) Validate() error {
 type ProjectFederationBody struct {
 	BaselineThroughEventID int64 `json:"baseline_through_event_id"`
 
+	// CronRuntimeBeats Supports direct push-enrollment runtime advertisements.
+	CronRuntimeBeats *bool `json:"cron_runtime_beats,omitempty"`
+
 	// NativeCronWrites Supports native recurring job writes using direct project-scoped push enrollments.
 	NativeCronWrites *bool           `json:"native_cron_writes,omitempty"`
 	ProjectID        int64           `json:"project_id"`

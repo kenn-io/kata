@@ -4790,6 +4790,9 @@ components:
         baseline_through_event_id:
           format: int64
           type: integer
+        cron_runtime_beats:
+          description: Supports direct push-enrollment runtime advertisements.
+          type: boolean
         native_cron_writes:
           description: Supports native recurring job writes using direct project-scoped push enrollments.
           type: boolean
@@ -8794,6 +8797,10 @@ paths:
         - in: path
           name: runtime_uid
           required: true
+          schema:
+            type: string
+        - in: header
+          name: Authorization
           schema:
             type: string
       requestBody:
