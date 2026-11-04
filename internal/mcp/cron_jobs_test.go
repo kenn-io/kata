@@ -379,4 +379,3 @@ func TestCronJobEnabledTools(t *testing.T) {
 	require.Equal(t, false, paused["definition"].(map[string]any)["enabled"])
 	cronOK(t, f.session, "cron_job_pause", map[string]any{"uid": id, "expected_event_uid": ""})
 }
-
