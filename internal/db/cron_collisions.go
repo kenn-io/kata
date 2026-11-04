@@ -19,7 +19,7 @@ func (a CronSQL) validateCollisions(ctx context.Context, tx *sql.Tx, in CronVali
 	if err != nil {
 		return cron.ValidationCollisions{}, err
 	}
-	out, err := cron.PreviewCollisionsContext(ctx, candidate, peers, in.From, cron.CollisionStepBudget)
+	out, err := cron.PreviewCollisions(ctx, candidate, peers, in.From, cron.CollisionStepBudget)
 	out.Skipped += skipped
 	out.Truncated = out.Truncated || limited
 	return out, err

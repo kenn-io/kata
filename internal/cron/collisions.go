@@ -47,12 +47,6 @@ type ValidationCollisions struct {
 	Truncated bool            `json:"truncated"`
 }
 
-// OccurrencesWithin includes from and excludes until. A nil progress models a
-// fresh anchor; only retained progress carries an exclusive delivered watermark.
-func OccurrencesWithin(j JobDefinition, p *RecurringProgress, from, until time.Time, limit int) ([]time.Time, bool, error) {
-	return occurrencesWithin(j, p, from, until, limit, nil)
-}
-
 func occurrencesWithin(j JobDefinition, p *RecurringProgress, from, until time.Time, limit int, budget *int) ([]time.Time, bool, error) {
 	if err := j.Validate(); err != nil {
 		return nil, false, err
@@ -70,27 +64,16 @@ func occurrencesWithin(j JobDefinition, p *RecurringProgress, from, until time.T
 	return walkOccurrences(j, progress, after, &until, limit, budget)
 }
 
-// PreviewCollisions is deterministic and leaves both the fleet and candidate intact.
-func PreviewCollisions(candidate CollisionJob, peers []CollisionJob, from time.Time, budget int) ValidationCollisions {
-	out, _ := previewCollisions(candidate, peers, from, budget, nil)
-	return out
-}
-
-// PreviewCollisionsContext also observes request cancellation between peer walks.
-func PreviewCollisionsContext(ctx context.Context, candidate CollisionJob, peers []CollisionJob, from time.Time, budget int) (ValidationCollisions, error) {
-	return previewCollisions(candidate, peers, from, budget, ctx.Err)
-}
-
-func previewCollisions(candidate CollisionJob, peers []CollisionJob, from time.Time, budget int, canceled func() error) (ValidationCollisions, error) {
+// PreviewCollisions is deterministic, observes cancellation between peer walks,
+// and leaves both the fleet and candidate intact.
+func PreviewCollisions(ctx context.Context, candidate CollisionJob, peers []CollisionJob, from time.Time, budget int) (ValidationCollisions, error) {
 	out := ValidationCollisions{Until: from.UTC().Add(7 * 24 * time.Hour), Items: []CollisionItem{}}
 	if out.Until.Year() > 9999 {
 		out.Until = time.Date(9999, 12, 31, 23, 59, 59, 999999999, time.UTC)
 		out.Truncated = true
 	}
-	if canceled != nil {
-		if err := canceled(); err != nil {
-			return out, err
-		}
+	if err := ctx.Err(); err != nil {
+		return out, err
 	}
 	candidate.Def.Enabled = true
 	times, limited, err := occurrencesWithin(candidate.Def, candidate.Progress, from, out.Until, collisionWalkLimit, &budget)
@@ -121,10 +104,8 @@ func previewCollisions(candidate CollisionJob, peers []CollisionJob, from time.T
 		return peers[i].UID < peers[j].UID
 	})
 	for _, peer := range peers {
-		if canceled != nil {
-			if err := canceled(); err != nil {
-				return out, err
-			}
+		if err := ctx.Err(); err != nil {
+			return out, err
 		}
 		if peer.UID == candidate.UID || !peer.Def.Enabled || IsRecurringIssueJob(peer.Def) != IsRecurringIssueJob(candidate.Def) {
 			continue
@@ -181,10 +162,8 @@ func previewCollisions(candidate CollisionJob, peers []CollisionJob, from time.T
 		out.Items = out.Items[:20]
 		out.Truncated = true
 	}
-	if canceled != nil {
-		if err := canceled(); err != nil {
-			return out, err
-		}
+	if err := ctx.Err(); err != nil {
+		return out, err
 	}
 	return out, nil
 }

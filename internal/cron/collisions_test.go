@@ -27,29 +27,29 @@ func TestCronCollisionsWindow(t *testing.T) {
 	from := time.Date(2026, 11, 3, 9, 0, 0, 0, time.UTC)
 	candidate := collisionJob("candidate", "0 9 * * *")
 	peer := collisionJob("peer", "0 9 * * *")
-	got := PreviewCollisions(candidate, []CollisionJob{peer}, from, CollisionStepBudget)
+	got := collisionReport(t, candidate, []CollisionJob{peer}, from, CollisionStepBudget)
 	require.False(t, got.Truncated)
 	require.Equal(t, from.Add(7*24*time.Hour), got.Until)
 	require.Len(t, got.Items, 1)
 	require.Equal(t, from, got.Items[0].At)
 	require.Equal(t, 7, got.Items[0].Occurrences)
 	candidate.Def.Trigger = Trigger{Kind: "once", At: from.Format(time.RFC3339)}
-	got = PreviewCollisions(candidate, []CollisionJob{peer}, from, CollisionStepBudget)
+	got = collisionReport(t, candidate, []CollisionJob{peer}, from, CollisionStepBudget)
 	require.Equal(t, 1, got.Items[0].Occurrences)
 	peer.Def.Trigger = Trigger{Kind: "once", At: got.Until.Format(time.RFC3339)}
-	require.Empty(t, PreviewCollisions(candidate, []CollisionJob{peer}, from, CollisionStepBudget).Items)
+	require.Empty(t, collisionReport(t, candidate, []CollisionJob{peer}, from, CollisionStepBudget).Items)
 	candidate.Def = nativeCollisionDefinition(candidate.Def)
 	candidate.Def.Trigger = Trigger{Kind: "cron", Cron: "0 9 * * *"}
 	peer.Def = candidate.Def
 	peer.Progress = &RecurringProgress{Version: 1, Anchor: from.Add(-24 * time.Hour), Through: from.Add(-time.Hour)}
-	got = PreviewCollisions(candidate, []CollisionJob{peer}, from, CollisionStepBudget)
+	got = collisionReport(t, candidate, []CollisionJob{peer}, from, CollisionStepBudget)
 	require.Equal(t, from, got.Items[0].At, "fresh cron has no delivered watermark")
 	candidate.Progress = &RecurringProgress{Version: 1, Anchor: from.Add(-24 * time.Hour), Through: from}
-	got = PreviewCollisions(candidate, []CollisionJob{peer}, from, CollisionStepBudget)
+	got = collisionReport(t, candidate, []CollisionJob{peer}, from, CollisionStepBudget)
 	require.Equal(t, from.Add(24*time.Hour), got.Items[0].At)
 	candidate.Progress = nil
 	candidate.Def.Trigger = Trigger{Kind: "interval", IntervalSeconds: 60}
-	fires, truncated, err := OccurrencesWithin(candidate.Def, nil, from, from.Add(2*time.Minute), 10080)
+	fires, truncated, err := occurrencesWithin(candidate.Def, nil, from, from.Add(2*time.Minute), 10080, nil)
 	require.NoError(t, err)
 	require.False(t, truncated)
 	require.Equal(t, []time.Time{from.Add(time.Minute)}, fires)
@@ -78,7 +78,7 @@ func TestCronCollisionsEligibilityAndPins(t *testing.T) {
 	native := collisionJob("native", "0 9 * * *")
 	native.Def = nativeCollisionDefinition(native.Def)
 	peers = append(peers, disabled, native)
-	got := PreviewCollisions(candidate, peers, from, CollisionStepBudget)
+	got := collisionReport(t, candidate, peers, from, CollisionStepBudget)
 	require.Len(t, got.Items, 1)
 	require.Equal(t, 3, got.Items[0].PeerCount)
 	require.Equal(t, []CollisionPeer{{UID: "0", Name: "0"}, {UID: "1", Name: "1"}, {UID: "2", Name: "2"}}, got.Items[0].Peers)
@@ -88,10 +88,10 @@ func TestCronCollisionsEligibilityAndPins(t *testing.T) {
 	missingProgress := collisionJob("missing-progress", "0 9 * * *")
 	missingProgress.Def = nativeCollisionDefinition(missingProgress.Def)
 	candidate.Def = nativeCollisionDefinition(candidate.Def)
-	got = PreviewCollisions(candidate, []CollisionJob{missingProgress}, from, CollisionStepBudget)
+	got = collisionReport(t, candidate, []CollisionJob{missingProgress}, from, CollisionStepBudget)
 	require.Equal(t, 1, got.Skipped)
 	candidate.Def = previewJob(t)
-	got = PreviewCollisions(candidate, []CollisionJob{peer}, from, CollisionStepBudget)
+	got = collisionReport(t, candidate, []CollisionJob{peer}, from, CollisionStepBudget)
 	require.Equal(t, 1, got.Skipped)
 }
 
@@ -101,7 +101,7 @@ func TestCronCollisionsBoundsAndPartialPeers(t *testing.T) {
 	b, c := collisionJob("b", "0 * * * *"), collisionJob("c", "0 * * * *")
 	// Candidate and b each take 169 calls including their terminal probe;
 	// c then contributes two known occurrences before its walk is cut short.
-	partial := PreviewCollisions(candidate, []CollisionJob{b, c}, from, 340)
+	partial := collisionReport(t, candidate, []CollisionJob{b, c}, from, 340)
 	require.True(t, partial.Truncated)
 	require.Len(t, partial.Items, 2)
 	require.Equal(t, 2, partial.Items[0].PeerCount)
@@ -114,21 +114,21 @@ func TestCronCollisionsBoundsAndPartialPeers(t *testing.T) {
 		peer.Def.Trigger = Trigger{Kind: "once", At: from.Add(time.Duration(i) * time.Hour).Format(time.RFC3339)}
 		peers = append(peers, peer)
 	}
-	got := PreviewCollisions(candidate, peers, from, CollisionStepBudget)
+	got := collisionReport(t, candidate, peers, from, CollisionStepBudget)
 	require.Len(t, got.Items, 20)
 	require.True(t, got.Truncated)
 	for i := range peers {
 		peers[i].Def = b.Def
 	}
-	got = PreviewCollisions(candidate, peers, from, CollisionStepBudget)
+	got = collisionReport(t, candidate, peers, from, CollisionStepBudget)
 	require.Len(t, got.Items, 1)
 	require.Equal(t, 25, got.Items[0].PeerCount)
 	require.Len(t, got.Items[0].Peers, 10)
 	require.True(t, got.Truncated)
-	_, truncated, err := OccurrencesWithin(b.Def, nil, from, from.Add(time.Hour), 1)
+	_, truncated, err := occurrencesWithin(b.Def, nil, from, from.Add(time.Hour), 1, nil)
 	require.NoError(t, err)
 	require.False(t, truncated, "an exactly full output is complete after its terminal probe")
-	_, truncated, err = OccurrencesWithin(b.Def, nil, from, from.Add(2*time.Hour), 1)
+	_, truncated, err = occurrencesWithin(b.Def, nil, from, from.Add(2*time.Hour), 1, nil)
 	require.NoError(t, err)
 	require.True(t, truncated)
 }
@@ -140,7 +140,7 @@ func TestCronCollisionsWireBoundaries(t *testing.T) {
 		peer := candidate
 		peer.UID = "peer"
 		peer.Progress = &RecurringProgress{Version: 1, Anchor: from.Add(-time.Hour), Through: from.Add(-time.Minute)}
-		got := PreviewCollisions(candidate, []CollisionJob{peer}, from, CollisionStepBudget)
+		got := collisionReport(t, candidate, []CollisionJob{peer}, from, CollisionStepBudget)
 		_, err := json.Marshal(got)
 		require.NoError(t, err)
 		require.Equal(t, from.Year() == 9999, got.Truncated)
@@ -149,7 +149,7 @@ func TestCronCollisionsWireBoundaries(t *testing.T) {
 	candidate.Def.Trigger = Trigger{Kind: "once", At: "9999-12-31T23:30:00Z", Timezone: "Pacific/Kiritimati"}
 	peer := candidate
 	peer.UID = "peer"
-	got := PreviewCollisions(candidate, []CollisionJob{peer}, time.Date(9999, 12, 31, 0, 0, 0, 0, time.UTC), CollisionStepBudget)
+	got := collisionReport(t, candidate, []CollisionJob{peer}, time.Date(9999, 12, 31, 0, 0, 0, 0, time.UTC), CollisionStepBudget)
 	require.Empty(t, got.Items)
 	require.True(t, got.Truncated)
 }
@@ -301,7 +301,7 @@ func drawCollisionFleet(ht *hegel.T) (CollisionJob, []CollisionJob, time.Time) {
 func TestCronCollisionsReferenceProperty(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
 		candidate, peers, from := drawCollisionFleet(ht)
-		got := PreviewCollisions(candidate, peers, from, CollisionStepBudget)
+		got := collisionReport(t, candidate, peers, from, CollisionStepBudget)
 		want := referenceCollisions(ht, candidate, slices.Clone(peers), from)
 		limited := len(want) > 20 || from.Add(7*24*time.Hour).Year() > 9999
 		for _, at := range referenceCollisionTimes(ht, candidate, from) {
@@ -327,18 +327,18 @@ func TestCronCollisionsOrderProperty(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
 		candidate, peers, from := drawCollisionFleet(ht)
 		budget := hegel.Draw(ht, hegel.Integers(0, 200000))
-		want := PreviewCollisions(candidate, peers, from, budget)
+		want := collisionReport(t, candidate, peers, from, budget)
 		slices.Reverse(peers)
-		require.Equal(ht, want, PreviewCollisions(candidate, peers, from, budget))
+		require.Equal(ht, want, collisionReport(t, candidate, peers, from, budget))
 	}, hegel.WithTestCases(60), hegel.WithDatabase(t.TempDir()))
 }
 
 func TestCronCollisionsPausedProperty(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
 		candidate, peers, from := drawCollisionFleet(ht)
-		want := PreviewCollisions(candidate, peers, from, CollisionStepBudget)
+		want := collisionReport(t, candidate, peers, from, CollisionStepBudget)
 		candidate.Def.Enabled = false
-		require.Equal(ht, want, PreviewCollisions(candidate, peers, from, CollisionStepBudget))
+		require.Equal(ht, want, collisionReport(t, candidate, peers, from, CollisionStepBudget))
 	}, hegel.WithTestCases(60), hegel.WithDatabase(t.TempDir()))
 }
 
@@ -349,8 +349,8 @@ func TestCronCollisionsSymmetryProperty(t *testing.T) {
 		b.UID = "other"
 		a.Def.Enabled = true
 		b.Def.Enabled = true
-		ab := PreviewCollisions(a, []CollisionJob{b}, from, CollisionStepBudget)
-		ba := PreviewCollisions(b, []CollisionJob{a}, from, CollisionStepBudget)
+		ab := collisionReport(t, a, []CollisionJob{b}, from, CollisionStepBudget)
+		ba := collisionReport(t, b, []CollisionJob{a}, from, CollisionStepBudget)
 		// Clipping can omit different local instants for the two candidates.
 		if ab.Truncated || ba.Truncated {
 			return
@@ -370,14 +370,14 @@ func TestCronCollisionsZeroInstant(t *testing.T) {
 		candidate.Def.Trigger = trigger
 		peer := candidate
 		peer.UID = "peer"
-		got := PreviewCollisions(candidate, []CollisionJob{peer}, from, CollisionStepBudget)
+		got := collisionReport(t, candidate, []CollisionJob{peer}, from, CollisionStepBudget)
 		require.NotEmpty(t, got.Items)
 		require.Equal(t, from, got.Items[0].At)
 	}
 	impossible := collisionJob("candidate", "0 0 31 2 *")
 	peer := impossible
 	peer.UID = "peer"
-	got := PreviewCollisions(impossible, []CollisionJob{peer}, from, CollisionStepBudget)
+	got := collisionReport(t, impossible, []CollisionJob{peer}, from, CollisionStepBudget)
 	require.Empty(t, got.Items, "a scheduler zero sentinel is not a real occurrence")
 }
 
@@ -387,14 +387,14 @@ func TestCronCollisionsSentinelBoundaries(t *testing.T) {
 		candidate.Def.Trigger = Trigger{Kind: "once", At: "0000-12-29T00:00:00Z"}
 		peer := candidate
 		peer.UID = "peer"
-		got := PreviewCollisions(candidate, []CollisionJob{peer}, time.Time{}.Add(-48*time.Hour), CollisionStepBudget)
+		got := collisionReport(t, candidate, []CollisionJob{peer}, time.Time{}.Add(-48*time.Hour), CollisionStepBudget)
 		require.Empty(t, got.Items)
 	})
 	t.Run("zero horizon is finite", func(t *testing.T) {
 		candidate := collisionJob("candidate", "0 * * * *")
 		peer := candidate
 		peer.UID = "peer"
-		got := PreviewCollisions(candidate, []CollisionJob{peer}, time.Time{}.Add(-7*24*time.Hour), CollisionStepBudget)
+		got := collisionReport(t, candidate, []CollisionJob{peer}, time.Time{}.Add(-7*24*time.Hour), CollisionStepBudget)
 		require.False(t, got.Truncated)
 		require.Equal(t, 168, got.Items[0].Occurrences)
 	})
@@ -404,7 +404,7 @@ func TestCronCollisionsBoundsProperty(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
 		candidate, peers, from := drawCollisionFleet(ht)
 		budget := hegel.Draw(ht, hegel.Integers(0, CollisionStepBudget))
-		got := PreviewCollisions(candidate, peers, from, budget)
+		got := collisionReport(t, candidate, peers, from, budget)
 		require.LessOrEqual(ht, len(got.Items), 20)
 		total := 0
 		for _, item := range got.Items {
@@ -423,7 +423,7 @@ func TestCronCollisionsBoundsProperty(t *testing.T) {
 func TestCronCollisionsSoundnessProperty(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
 		candidate, peers, from := drawCollisionFleet(ht)
-		got := PreviewCollisions(candidate, peers, from, hegel.Draw(ht, hegel.Integers(0, CollisionStepBudget)))
+		got := collisionReport(t, candidate, peers, from, hegel.Draw(ht, hegel.Integers(0, CollisionStepBudget)))
 		candidateTimes := referenceCollisionTimes(ht, candidate, from)
 		for _, item := range got.Items {
 			require.False(ht, item.At.Before(from))
@@ -450,7 +450,7 @@ func TestCronCollisionsLocalPrecision(t *testing.T) {
 	candidate.Progress = &RecurringProgress{Version: 1, Anchor: from.Add(-time.Hour), Through: from.Add(-time.Minute)}
 	peer := candidate
 	peer.UID = "peer"
-	got := PreviewCollisions(candidate, []CollisionJob{peer}, from, CollisionStepBudget)
+	got := collisionReport(t, candidate, []CollisionJob{peer}, from, CollisionStepBudget)
 	require.Equal(t, from, got.Items[0].At)
 	require.Equal(t, from.Format(time.RFC3339Nano), got.Items[0].Local)
 }
@@ -458,7 +458,7 @@ func TestCronCollisionsLocalPrecision(t *testing.T) {
 func TestCronCollisionsCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, err := PreviewCollisionsContext(ctx, collisionJob("candidate", "0 * * * *"), nil, time.Now().UTC(), CollisionStepBudget)
+	_, err := PreviewCollisions(ctx, collisionJob("candidate", "0 * * * *"), nil, time.Now().UTC(), CollisionStepBudget)
 	require.ErrorIs(t, err, context.Canceled)
 }
 
@@ -475,11 +475,11 @@ func TestCronCollisionsDormantDescriptors(t *testing.T) {
 					peer.Progress = &RecurringProgress{Version: 1, Anchor: from.Add(-time.Hour), Through: from.Add(-time.Minute)}
 				}
 				require.NoError(t, peer.Def.Validate())
-				got := PreviewCollisions(candidate, []CollisionJob{peer}, from, CollisionStepBudget)
+				got := collisionReport(t, candidate, []CollisionJob{peer}, from, CollisionStepBudget)
 				require.Equal(t, 1, got.Skipped)
 				require.Empty(t, got.Items)
 				peer.Def.Trigger = Trigger{Kind: "cron", Cron: "0 0 1 1 *"}
-				require.Zero(t, PreviewCollisions(candidate, []CollisionJob{peer}, from, CollisionStepBudget).Skipped,
+				require.Zero(t, collisionReport(t, candidate, []CollisionJob{peer}, from, CollisionStepBudget).Skipped,
 					"a calendar schedule outside the window is still previewable")
 			})
 		}
@@ -498,7 +498,7 @@ func TestCronCollisionsFullSetsSurviveDisplayClipping(t *testing.T) {
 		peer.Def.Trigger = Trigger{Kind: "once", At: from.Add(time.Duration(i) * time.Hour).Format(time.RFC3339)}
 		peers = append(peers, peer)
 	}
-	got := PreviewCollisions(candidate, peers, from, CollisionStepBudget)
+	got := collisionReport(t, candidate, peers, from, CollisionStepBudget)
 	require.True(t, got.Truncated)
 	require.Len(t, got.Items, 3)
 	require.Equal(t, got.Items[0].Peers, got.Items[1].Peers, "displayed prefixes match")
@@ -522,4 +522,11 @@ func TestCronCollisionsOnceTerminalBudget(t *testing.T) {
 		require.Equal(t, initial < 2, limited, "completion needs the terminal probe")
 		require.Zero(t, budget)
 	}
+}
+
+func collisionReport(t testing.TB, candidate CollisionJob, peers []CollisionJob, from time.Time, budget int) ValidationCollisions {
+	t.Helper()
+	out, err := PreviewCollisions(t.Context(), candidate, peers, from, budget)
+	require.NoError(t, err)
+	return out
 }
