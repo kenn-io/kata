@@ -321,6 +321,7 @@ migration chain first. SQLite uses its normal JSONL cutover.
 Start the matching schema 43 binary after migration. Older binaries cannot open
 schema 43. Rollback requires the pre-upgrade backup and matching older binary;
 there is no down migration.
+
 ## Schema 44: reset reference lookup index
 
 The 43→44 migration adds the partial `idx_events_reset_from` index on `events`
