@@ -4,12 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
+	"go.kenn.io/kata/internal/teammate"
 	"go.kenn.io/kata/internal/uid"
+	"modernc.org/sqlite"
 )
 
 func TestCommentDisplayContributionsUsesEventIndexes(t *testing.T) {
@@ -114,4 +119,45 @@ func TestCommentDisplayContributionsUsesEventIndexes(t *testing.T) {
 	require.Contains(t, joined, "idx_events_project", "legacy envelope history must be scoped by project: %s", joined)
 	require.NotContains(t, joined, "SCAN e", "comment display history must not scan all events: %s", joined)
 	require.NotContains(t, joined, "SCAN moved", "move history must be looked up by issue UID: %s", joined)
+}
+
+func TestCreateCommentUsesItsCreationEventWithoutReadingThreadHistory(t *testing.T) {
+	ctx := t.Context()
+	tempDir := t.TempDir()
+	databasePath := filepath.Join(tempDir, "kata.db")
+	dsnMarker := filepath.Base(tempDir)
+	var eventPayloadReads atomic.Int64
+	sqlite.RegisterConnectionHook(func(conn sqlite.ExecQuerierContext, dsn string) error {
+		if !strings.Contains(dsn, dsnMarker) {
+			return nil
+		}
+		registerer, ok := conn.(sqlite.AuthorizerRegisterer)
+		if !ok {
+			return fmt.Errorf("SQLite connection %T does not support authorizers", conn)
+		}
+		return registerer.RegisterAuthorizer(func(action sqlite.AuthorizerActionCode, table, column, _, _ string) sqlite.AuthorizerReturnCode {
+			if action == sqlite.AuthRead && table == "events" && column == "payload" {
+				eventPayloadReads.Add(1)
+			}
+			return sqlite.AuthorizerOK
+		})
+	})
+	store, err := sqlitestore.Open(ctx, databasePath)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = store.Close() })
+	project := createProject(ctx, t, store, "comment-create-project")
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "New comment attribution", Author: "writer",
+	})
+	require.NoError(t, err)
+
+	eventPayloadReads.Store(0)
+
+	comment, event, err := store.CreateComment(teammate.WithRequest(ctx, "writer"), db.CreateCommentParams{
+		IssueID: issue.ID, Author: "writer", Teammate: "route", Body: "New comment",
+	})
+	require.NoError(t, err)
+	require.LessOrEqual(t, eventPayloadReads.Load(), int64(1), "comment creation must not replay thread history")
+	require.NotNil(t, comment.AttributedTeammate)
+	require.Equal(t, db.DisplayContribution(event.Type, []byte(event.Payload)), *comment.AttributedTeammate)
 }

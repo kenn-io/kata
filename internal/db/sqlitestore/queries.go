@@ -1345,6 +1345,17 @@ func commentByUIDForIssueTx(ctx context.Context, tx *sql.Tx, issueID int64, comm
 }
 
 func commentByIDTx(ctx context.Context, tx *sql.Tx, commentID int64) (db.Comment, error) {
+	c, err := commentByIDRowTx(ctx, tx, commentID)
+	if err != nil {
+		return db.Comment{}, err
+	}
+	if err := db.HydrateCommentDisplayTx(ctx, tx, []*db.Comment{&c}, func(int) string { return "?" }, db.CommentDisplaySQLite); err != nil {
+		return db.Comment{}, err
+	}
+	return c, nil
+}
+
+func commentByIDRowTx(ctx context.Context, tx *sql.Tx, commentID int64) (db.Comment, error) {
 	c, err := scanComment(tx.QueryRowContext(ctx,
 		`SELECT `+commentColumns+` FROM comments WHERE id = ?`,
 		commentID))
@@ -1353,9 +1364,6 @@ func commentByIDTx(ctx context.Context, tx *sql.Tx, commentID int64) (db.Comment
 	}
 	if err != nil {
 		return db.Comment{}, fmt.Errorf("read comment: %w", err)
-	}
-	if err := db.HydrateCommentDisplayTx(ctx, tx, []*db.Comment{&c}, func(int) string { return "?" }, db.CommentDisplaySQLite); err != nil {
-		return db.Comment{}, err
 	}
 	return c, nil
 }
@@ -1484,10 +1492,12 @@ func (d *Store) createComment(ctx context.Context, p db.CreateCommentParams) (db
 		return db.Comment{}, db.Event{}, err
 	}
 
-	comment, err := commentByIDTx(ctx, tx, commentID)
+	comment, err := commentByIDRowTx(ctx, tx, commentID)
 	if err != nil {
 		return db.Comment{}, db.Event{}, err
 	}
+	displayContribution := db.DisplayContribution(evt.Type, []byte(evt.Payload))
+	comment.AttributedTeammate = &displayContribution
 	committedEvents := []db.Event{evt}
 	if hook := db.CommentMetadataPolicy(ctx); hook != nil {
 		updates, err := hook(ctx, tx, issue, comment)

@@ -119,9 +119,8 @@ func (s *Store) CreateComment(ctx context.Context, params db.CreateCommentParams
 		if err != nil {
 			return err
 		}
-		if err := db.HydrateCommentDisplayTx(ctx, tx, []*db.Comment{&comment}, dollarPlaceholder, db.CommentDisplayPostgres); err != nil {
-			return err
-		}
+		displayContribution := db.DisplayContribution(event.Type, []byte(event.Payload))
+		comment.AttributedTeammate = &displayContribution
 		committedEvents = []db.Event{event}
 		if hook := db.CommentMetadataPolicy(ctx); hook != nil {
 			updates, err := hook(ctx, tx, issue, comment)
