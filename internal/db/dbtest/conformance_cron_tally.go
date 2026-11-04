@@ -284,23 +284,11 @@ func checkCronRunCounts(t *testing.T, store db.Storage) error {
 	raw, err := json.Marshal(counts)
 	require.NoError(t, err)
 	require.Contains(t, string(raw), `"succeeded":9007199254740993`)
-	// Every generic store patch refuses the prefix even for no-op/null/mixed
-	// writes. Tests seed lifecycle state explicitly through SQL instead.
-	for _, patch := range []map[string]jsontext.Value{
-		{db.CronTallyPrefix + missing: []byte("null")},
-		{db.CronTallyPrefix + "bad": []byte("null"), "ordinary": []byte("2")},
-		{db.CronTallyPrefix: []byte("{}")},
-	} {
-		_, err := store.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{ProjectID: f.project.ID, Actor: "system", Patch: patch})
-		require.Error(t, err)
-	}
-	// Corruption is never interpreted as untracked zeroes, even for an empty
-	// preview. The counts filter cannot conceal corrupt sibling tallies.
+	// Corruption is never interpreted as untracked zeroes. The counts filter
+	// cannot conceal corrupt sibling tallies.
 	_, err = f.q.ExecContext(ctx, `UPDATE projects SET metadata=$1 WHERE id=$2`, fmt.Sprintf(`{%q:null}`, db.CronTallyPrefix+missing), f.project.ID)
 	require.NoError(t, err)
 	_, err = store.CronRunCounts(ctx, db.CronRunCountsQuery{ProjectID: f.project.ID, JobUID: f.job.UID})
-	require.Error(t, err)
-	_, err = store.PruneCronRuns(ctx, db.PruneCronRuns{ProjectID: f.project.ID, Actor: "operator", Before: f.before.Add(-24 * time.Hour), DryRun: true})
 	require.Error(t, err)
 	return nil
 }

@@ -26,7 +26,7 @@ func cronPruneHTTPFixture(t *testing.T, opts ...testenv.Option) (*testenv.Env, d
 		_, err := env.DB.ObserveCronRun(t.Context(), db.ObserveCronRun{ProjectID: project.ID, UID: id, Actor: "operator", JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Status: "succeeded", Summary: cron.Summary{Version: 1}})
 		require.NoError(t, err)
 		old := time.Now().Add(-72*time.Hour + time.Duration(i)*time.Second)
-		_, err = env.DB.ExecContext(t.Context(), `UPDATE cron_runs SET created_at=$1,updated_at=$1 WHERE uid=$2`, old.UTC().Format(db.CronRunCreatedAtFormat), id)
+		_, err = env.DB.ExecContext(t.Context(), `UPDATE cron_runs SET created_at=$1,updated_at=$2 WHERE uid=$3`, old.UTC().Format(db.CronRunCreatedAtFormat), old.UTC().Format(time.RFC3339Nano), id)
 		require.NoError(t, err)
 	}
 	return env, project, fmt.Sprintf("/api/v1/projects/%d/cron/runs/actions/prune", project.ID)
@@ -133,7 +133,10 @@ func TestCronRunPruneSpokeRefusal(t *testing.T) {
 
 func TestCronRunPruneInvalidBounds(t *testing.T) {
 	env, _, path := cronPruneHTTPFixture(t)
-	response, raw := envDoRaw(t, env, http.MethodPost, path, map[string]any{"actor": "operator", "before": time.Now().Add(-23 * time.Hour), "keep": 1, "dry_run": true}, nil)
+	// Huma accepts the offset timestamp; the store rejects its UTC year zero.
+	response, raw := envDoRaw(t, env, http.MethodPost, path, map[string]any{"actor": "operator", "before": "0001-01-01T00:00:00+01:00", "keep": 1, "dry_run": true}, nil)
+	require.Equal(t, http.StatusBadRequest, response.StatusCode, string(raw))
+	response, raw = envDoRaw(t, env, http.MethodPost, path, map[string]any{"actor": "operator", "before": time.Now().Add(-23 * time.Hour), "keep": 1, "dry_run": true}, nil)
 	require.Equal(t, 400, response.StatusCode, string(raw))
 	for _, field := range []string{"keep", "limit"} {
 		for _, value := range []int{-1, 0, 20001} {

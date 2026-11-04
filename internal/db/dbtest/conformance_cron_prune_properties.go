@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strings"
 	"testing"
 	"time"
 
@@ -45,10 +44,10 @@ func seedPruneEventRows(ctx context.Context, t require.TestingT, q pruneFixtureS
 	require.NoError(t, err)
 	_, err = q.ExecContext(ctx, `DELETE FROM cron_runs WHERE project_id=$1`, p.ID)
 	require.NoError(t, err)
-	_, err = q.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1 AND type LIKE 'cron.%'`, p.ID)
+	_, err = q.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1 AND type IN ('cron.run.observed','cron.run.snapshot','cron.job.snapshot')`, p.ID)
 	require.NoError(t, err)
 	for i := range 2 {
-		_, err = q.ExecContext(ctx, `INSERT INTO cron_runs(uid,project_id,job_uid,definition_event_uid,actor,status,created_at,updated_at) VALUES($1,$2,$3,$4,'operator','succeeded',$5,$5)`, fmt.Sprintf("%026d", i+100), p.ID, job.UID, job.DefinitionEventUID, time.Date(2026, 1, i+1, 0, 0, 0, 0, time.UTC).Format(db.CronRunCreatedAtFormat))
+		_, err = q.ExecContext(ctx, `INSERT INTO cron_runs(uid,project_id,job_uid,definition_event_uid,actor,status,created_at,updated_at) VALUES($1,$2,$3,$4,'operator','succeeded',$5,$6)`, fmt.Sprintf("%026d", i+100), p.ID, job.UID, job.DefinitionEventUID, time.Date(2026, 1, i+1, 0, 0, 0, 0, time.UTC).Format(db.CronRunCreatedAtFormat), time.Date(2026, 1, i+1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339Nano))
 		require.NoError(t, err)
 	}
 	tx, err := q.BeginTx(ctx, nil)
@@ -60,12 +59,22 @@ func seedPruneEventRows(ctx context.Context, t require.TestingT, q pruneFixtureS
 		if i%4 == 3 {
 			id = 101
 		}
-		payload := fmt.Sprintf(`{"uid":"%026d","other":"%026d"}`, id, 100)
+		at := time.Date(2026, 1, id-99, 0, 0, 0, 0, time.UTC)
+		observation := db.CronRunObservation{ProjectUID: p.UID, UID: fmt.Sprintf("%026d", id), JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Actor: "operator", Status: "succeeded", Summary: cron.Summary{Version: 1}, Revision: 1, CreatedAt: at, UpdatedAt: at}
+		if kind == "cron.run.snapshot" {
+			observation.ObservationEventUID = observation.UID
+			observation.ObservationHLC = &db.CronDefinitionHLC{Version: 1, PhysicalMS: at.UnixMilli(), OriginInstanceUID: q.(db.Storage).InstanceUID()}
+		}
+		payload, err := json.Marshal(observation)
+		require.NoError(t, err)
 		if kind == "cron.job.snapshot" {
 			// Job and run UIDs occupy separate tables and may coincide.
-			payload = string(jobSnapshot)
+			payload = jobSnapshot
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash,created_at) VALUES($1,$2,$3,$4,$5,'operator',$6,1,0,$7,$8)`, fmt.Sprintf("%026d", i+1000), fmt.Sprintf("%026d", 3), p.ID, p.Name, kind, payload, strings.Repeat("0", 64), "2026-01-01T00:00:00.000Z")
+		event := db.RemoteEvent{EventUID: fmt.Sprintf("%026d", i+1000), OriginInstanceUID: q.(db.Storage).InstanceUID(), ProjectUID: p.UID, ProjectName: p.Name, Type: kind, Actor: "operator", Payload: payload, HLCPhysicalMS: at.UnixMilli(), CreatedAt: at}
+		event.ContentHash, err = db.RemoteEventContentHash(event)
+		require.NoError(t, err)
+		_, err = tx.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash,created_at) VALUES($1,$2,$3,$4,$5,'operator',$6,$7,0,$8,$9)`, event.EventUID, event.OriginInstanceUID, p.ID, p.Name, kind, string(payload), event.HLCPhysicalMS, event.ContentHash, at.Format(db.EventTimestampFormat))
 		require.NoError(t, err)
 	}
 	require.NoError(t, tx.Commit())

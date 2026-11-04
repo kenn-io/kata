@@ -176,7 +176,7 @@ func ObserveAgedCronRun(t *testing.T, store db.Storage, project db.Project, job 
 	q := store.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	})
-	_, err = q.ExecContext(t.Context(), `UPDATE cron_runs SET created_at=$1,updated_at=$1 WHERE uid=$2`, at.UTC().Format(db.CronRunCreatedAtFormat), id)
+	_, err = q.ExecContext(t.Context(), `UPDATE cron_runs SET created_at=$1,updated_at=$2 WHERE uid=$3`, at.UTC().Format(db.CronRunCreatedAtFormat), at.UTC().Format(time.RFC3339Nano), id)
 	require.NoError(t, err)
 	for _, event := range observed.Events {
 		if event.Type != "cron.run.observed" {
