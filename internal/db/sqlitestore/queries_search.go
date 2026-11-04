@@ -2,9 +2,9 @@ package sqlitestore
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
-	"unicode"
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kit/search/lexical"
@@ -57,20 +57,9 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		limit = 200
 	}
 
-	analyzer := lexical.Literal()
-	phrases := make([]string, 0)
-	for word := range strings.FieldsSeq(q) {
-		// unicode61 indexes letters, numbers, and private-use characters.
-		if !strings.ContainsFunc(word, func(r rune) bool {
-			return unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.Is(unicode.Co, r)
-		}) {
-			continue
-		}
-		term, err := analyzer.PrepareLiteral(word)
-		if err != nil {
-			return nil, fmt.Errorf("search fts: %w", err)
-		}
-		phrases = append(phrases, term.Match)
+	phrases, err := searchablePhrases(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("search fts: %w", err)
 	}
 	if len(phrases) == 0 {
 		return nil, nil
@@ -208,4 +197,40 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		return nil, err
 	}
 	return out, nil
+}
+
+// searchablePhrases drops words that the index tokenizer leaves empty.
+// unicode61 uses Unicode 6.1 categories, which differ from Go's Unicode tables.
+// An isolated in-memory index lets the tokenizer decide without writing to the
+// store, including when the store is open read-only.
+func searchablePhrases(ctx context.Context, query string) ([]string, error) {
+	probe, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = probe.Close() }()
+	probe.SetMaxOpenConns(1)
+	if _, err := probe.ExecContext(ctx, `CREATE VIRTUAL TABLE query_fts USING fts5(text, tokenize='unicode61 remove_diacritics 2')`); err != nil {
+		return nil, err
+	}
+	if _, err := probe.ExecContext(ctx, `INSERT INTO query_fts(text) VALUES (?)`, query); err != nil {
+		return nil, err
+	}
+	analyzer := lexical.Literal()
+	var phrases []string
+	for word := range strings.FieldsSeq(query) {
+		term, err := analyzer.PrepareLiteral(word)
+		if err != nil {
+			return nil, err
+		}
+		// Every searchable word must match itself in the indexed query.
+		var searchable bool
+		if err := probe.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM query_fts WHERE query_fts MATCH ?)`, term.Match).Scan(&searchable); err != nil {
+			return nil, err
+		}
+		if searchable {
+			phrases = append(phrases, term.Match)
+		}
+	}
+	return phrases, nil
 }
