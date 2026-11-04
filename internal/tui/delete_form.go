@@ -199,12 +199,13 @@ func (m Model) forgetDeletedIssue(uid string) (Model, tea.Cmd) {
 		return m.leaveDetail()
 	}
 	if wasDeleted {
-		if m.detail.gen != previousGen && m.api != nil {
+		if m.detail.gen != previousGen {
 			return m, withConnGen(m.detail.refetch(m.api), m.connGen)
 		}
 		return m, nil
 	}
 	if slices.ContainsFunc(m.detail.children, func(child Issue) bool { return child.UID == uid }) {
+		m.detail.children = slices.DeleteFunc(slices.Clone(m.detail.children), func(child Issue) bool { return child.UID == uid })
 		return m, withConnGen(m.detail.refetch(m.api), m.connGen)
 	}
 	return m, nil

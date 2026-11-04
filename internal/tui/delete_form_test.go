@@ -625,10 +625,20 @@ func TestDeleteFromSplitListReplacesRetainedDetail(t *testing.T) {
 	require.Equal(t, splitlayout.Split, h.m.layout)
 	h.m.focus = focusList
 	h.selectIssue(child.UID)
+	late := runCmdTree(h.m.detail.refetch(h.m.api))
 
 	h.key(runeKey('X'))
 	h.m = typeString(h.m, "DELETE "+h.qualified(child))
-	h.m = h.drain(h.enter())
+	refresh := h.finish(h.enter())
+
+	require.True(t, h.isDeleted(child.UID))
+	require.Empty(t, h.m.detail.children, "the deleted child disappears before refresh")
+	assert.NotContains(t, stripANSI(h.m.detail.View(120, 40, h.m.chrome())), "Second")
+	for _, msg := range late {
+		h.m, _ = updateModel(h.m, msg)
+	}
+	require.Empty(t, h.m.detail.children, "earlier reads cannot restore the deleted child")
+	h.m = h.drain(refresh)
 
 	require.NotNil(t, h.m.detail.issue)
 	assert.Equal(t, parent.UID, h.m.detail.issue.UID)

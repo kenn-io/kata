@@ -2065,8 +2065,8 @@ shows the issue's title and the header `DELETE <project>#<id>`, the string
 `kata delete --confirm` takes. Type `DELETE <project>#<id>` and press `Enter`.
 `Enter` does nothing until the text matches. `Esc` cancels before the request
 starts. The selection then moves to the next row (the previous one after the
-last). A deleted detail returns to the previous issue in its Back history,
-or to the list when none remain. A detail opened from Attention returns there.
+last). A deleted detail returns to the previous issue in its Back history.
+When none remain, it returns to Attention if opened there, or to the list.
 Saved views also drop the deleted issue, and a notice names `u`. In Attention,
 `u` is available when the latest undo entry is a deletion.
 `u` restores the issue the way `kata restore` does; if the issue was restored
