@@ -10,6 +10,7 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
+// RunRelayNamedEvidenceCache verifies cached history validation follows project name resolution changes.
 func RunRelayNamedEvidenceCache(t *testing.T, store db.Storage, backend Backend) {
 	ctx := t.Context()
 	fixture := newRelayLinkBoundaryFixture(t, store, "named-evidence")

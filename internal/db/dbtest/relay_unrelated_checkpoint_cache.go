@@ -8,6 +8,7 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
+// RunRelayUnrelatedCheckpointCache verifies checkpoint capture in another project preserves cached history validation.
 func RunRelayUnrelatedCheckpointCache(t *testing.T, backend Backend) {
 	for _, retained := range []bool{false, true} {
 		name := "initial history"
