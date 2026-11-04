@@ -526,6 +526,21 @@ func TestOpenWithConfigIsolatesAndValidatesSchema(t *testing.T) {
 	require.True(t, errors.As(err, &pgErr))
 	assert.Equal(t, "42501", pgErr.Code)
 	require.NoError(t, runtimeStore.Close())
+	t.Run("missing comment search insert privilege", func(t *testing.T) {
+		_, err := admin.ExecContext(ctx, fmt.Sprintf(`REVOKE INSERT ON isolated_store.comment_search FROM %s`, runtimeRole)) // #nosec G201 -- role name uses a fixed prefix and process ID.
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, err := admin.ExecContext(context.WithoutCancel(t.Context()), fmt.Sprintf(`GRANT INSERT ON isolated_store.comment_search TO %s`, runtimeRole)) // #nosec G201 -- role name uses a fixed prefix and process ID.
+			require.NoError(t, err)
+		})
+		candidate, err := pgstore.OpenWithConfig(ctx, postgresDSNWithUser(t, dsn, runtimeRole, "runtime-password"), pgstore.Config{
+			Schema: "isolated_store", SchemaMode: pgstore.SchemaModeValidate, SchemaOwner: schemaOwner,
+		})
+		if candidate != nil {
+			require.NoError(t, candidate.Close())
+		}
+		require.ErrorContains(t, err, `runtime role lacks INSERT privilege on table "isolated_store.comment_search"`)
+	})
 	readOnlyStore, err := pgstore.OpenWithConfig(
 		ctx,
 		postgresDSNWithUser(t, dsn, runtimeRole, "runtime-password"),

@@ -36,12 +36,9 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
 	}
 	anyQuery := `(SELECT CASE WHEN count(*) = 0 THEN NULL
 		ELSE to_tsquery('kata_simple_unaccent', string_agg(quote_literal(term), ' | ')) END
-		FROM unnest(tsvector_to_array(to_tsvector('kata_simple_unaccent', $1))) AS term)`
+		FROM terms)`
 	predicateArgs := []any{queryText}
-	bind := func(value any) string {
-		predicateArgs = append(predicateArgs, value)
-		return fmt.Sprintf("$%d", len(predicateArgs))
-	}
+	bind := numberedArg(&predicateArgs)
 	var rowFilter strings.Builder
 	rowFilter.WriteString("i.project_id = " + bind(request.params.ProjectID))
 	if !request.params.IncludeDeleted {

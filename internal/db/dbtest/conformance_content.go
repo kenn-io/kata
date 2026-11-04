@@ -5,6 +5,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -1176,6 +1177,37 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	require.Len(t, splitMatches, 1)
 	assert.Equal(t, primary.Issue.ID, splitMatches[0].Issue.ID)
 	assert.Equal(t, []string{"title", "comments"}, splitMatches[0].MatchedIn)
+	// Punctuation contributes no searchable terms; long inputs must remain executable.
+	for _, query := range []string{"login - watermelon", "login ?", "- ?", strings.Repeat("login ", 500) + "watermelon"} {
+		t.Run(query[:min(len(query), 40)], func(t *testing.T) {
+			for _, search := range []func(context.Context, db.SearchFTSParams) ([]db.SearchCandidate, error){store.SearchFTS, store.SearchFTSAny} {
+				hits, err := search(ctx, db.SearchFTSParams{ProjectID: primary.Project.ID, Query: query})
+				require.NoError(t, err)
+				if query == "- ?" {
+					require.Empty(t, hits)
+				} else {
+					require.Contains(t, searchCandidateIDs(hits), primary.Issue.ID)
+				}
+			}
+		})
+	}
+	var distinctTerms []string
+	for n := range 500 {
+		distinctTerms = append(distinctTerms, fmt.Sprintf("searchterm%d", n))
+	}
+	distinctQuery := strings.Join(distinctTerms, " ")
+	distinctIssue, err := createFixtureIssue(ctx, store, primary.Project.ID, distinctQuery, "discovery-author", nil)
+	if err != nil {
+		return err
+	}
+	t.Run("long distinct terms", func(t *testing.T) {
+		hits, err := store.SearchFTS(ctx, db.SearchFTSParams{ProjectID: primary.Project.ID, Query: distinctQuery})
+		require.NoError(t, err)
+		require.Equal(t, []int64{distinctIssue.ID}, searchCandidateIDs(hits))
+		hits, err = store.SearchFTS(ctx, db.SearchFTSParams{ProjectID: primary.Project.ID, Query: distinctQuery + " absenttoken"})
+		require.NoError(t, err)
+		require.Empty(t, hits)
+	})
 	anyMatches, err := store.SearchFTSAny(ctx, db.SearchFTSParams{
 		ProjectID: primary.Project.ID, Query: "login absenttoken", Limit: 20,
 	})

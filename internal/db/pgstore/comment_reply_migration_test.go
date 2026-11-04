@@ -15,7 +15,6 @@ import (
 func dropCommentReplySchema(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
 	dropEventMoveHistoryIndex(ctx, t, admin, schema)
-	restoreCommentSearch39(ctx, t, admin, schema)
 	dropCommentUIDHandleIndex(ctx, t, admin, schema)
 	_, err := admin.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s.comments DROP COLUMN reply_to_uid, DROP COLUMN reply_kind, DROP COLUMN edited_at`, schema)) // #nosec G201 -- fixed test schema.
 	require.NoError(t, err)

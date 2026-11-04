@@ -3,8 +3,8 @@ package pgstore_test
 import (
 	"context"
 	"database/sql"
-	_ "embed"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -13,12 +13,13 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-//go:embed testdata/comment_search_v39.sql
-var commentSearchSchema39 string
-
 // Prior-version migration fixtures restore the aggregate search triggers.
 func restoreCommentSearch39(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
+	start := strings.Index(projectHubRelaySchema32, "CREATE OR REPLACE FUNCTION rebuild_issue_search")
+	require.NotEqual(t, -1, start)
+	searchSQL, _, found := strings.Cut(projectHubRelaySchema32[start:], "\n-- ---")
+	require.True(t, found)
 	tx, err := admin.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
@@ -32,7 +33,7 @@ func restoreCommentSearch39(ctx context.Context, t *testing.T, admin *sql.DB, sc
  DROP TRIGGER IF EXISTS issues_search_after_comment_insert ON comments;
  DROP TRIGGER IF EXISTS issues_search_after_comment_update ON comments;
  DROP TRIGGER IF EXISTS issues_search_after_comment_delete ON comments;
- `, schema)+commentSearchSchema39+`SELECT rebuild_issue_search(id) FROM issues;`) // #nosec G201 -- Fixed test schema.
+ `, schema)+searchSQL+`SELECT rebuild_issue_search(id) FROM issues;`) // #nosec G201 -- Fixed test schema.
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit())
 }

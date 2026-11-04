@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kit/search/lexical"
@@ -59,11 +60,20 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 	analyzer := lexical.Literal()
 	phrases := make([]string, 0)
 	for word := range strings.FieldsSeq(q) {
+		// unicode61 indexes letters, numbers, and private-use characters.
+		if !strings.ContainsFunc(word, func(r rune) bool {
+			return unicode.IsLetter(r) || unicode.IsNumber(r) || unicode.Is(unicode.Co, r)
+		}) {
+			continue
+		}
 		term, err := analyzer.PrepareLiteral(word)
 		if err != nil {
 			return nil, fmt.Errorf("search fts: %w", err)
 		}
 		phrases = append(phrases, term.Match)
+	}
+	if len(phrases) == 0 {
+		return nil, nil
 	}
 	colPhrase := strings.Join(phrases, " OR ")
 
@@ -102,13 +112,24 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		filterArgs = append(filterArgs, stamp, stamp, r.params.After.ID)
 	}
 
-	// Each term can occur in the issue or any one of its comments.
-	if r.mode == searchAll {
+	// Match terms as rows so query depth stays fixed as the input grows.
+	var termsCTE string
+	var args []any
+	if r.mode == searchAll && len(phrases) > 1 {
+		termsCTE = "terms(phrase) AS (VALUES " + strings.TrimSuffix(strings.Repeat("(?),", len(phrases)), ",") + "), "
 		for _, phrase := range phrases {
-			rowFilter += ` AND (i.id IN (SELECT rowid FROM issues_fts WHERE issues_fts MATCH ?)
-			 OR i.id IN (SELECT c.issue_id FROM comments_fts JOIN comments c ON c.id = comments_fts.rowid WHERE comments_fts MATCH ?))`
-			filterArgs = append(filterArgs, phrase, phrase)
+			args = append(args, phrase)
 		}
+		rowFilter += ` AND i.id IN (
+		 SELECT issue_id FROM (
+		  SELECT terms.phrase, issues_fts.rowid AS issue_id
+		  FROM terms CROSS JOIN issues_fts WHERE issues_fts MATCH terms.phrase
+		  UNION
+		  SELECT terms.phrase, c.issue_id
+		  FROM terms CROSS JOIN comments_fts JOIN comments c ON c.id = comments_fts.rowid
+		  WHERE comments_fts MATCH terms.phrase
+		 ) GROUP BY issue_id HAVING count(*) = (SELECT count(DISTINCT phrase) FROM terms)
+		)`
 	}
 	order := "candidates.score DESC, i.id ASC"
 	if r.params.StableOrder {
@@ -116,7 +137,7 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 	}
 	// Materialize document scores before grouping: FTS5's bm25 must run in
 	// the MATCH scan, outside aggregate evaluation.
-	query := fmt.Sprintf(`WITH issue_hits AS MATERIALIZED (
+	query := fmt.Sprintf(`WITH %sissue_hits AS MATERIALIZED (
 		SELECT rowid AS issue_id, -bm25(issues_fts) AS score FROM issues_fts WHERE issues_fts MATCH ?
 	), comment_scores AS MATERIALIZED (
 		SELECT c.issue_id, -bm25(comments_fts) AS score
@@ -139,8 +160,8 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		FROM candidates
 		JOIN issues i ON i.id = candidates.doc_key
 		JOIN projects p ON p.id = i.project_id
-		ORDER BY %s LIMIT ?`, rowFilter, order)
-	args := []any{colPhrase, colPhrase, r.params.ProjectID}
+		ORDER BY %s LIMIT ?`, termsCTE, rowFilter, order)
+	args = append(args, colPhrase, colPhrase, r.params.ProjectID)
 	args = append(args, filterArgs...)
 	args = append(args, colPhrase, colPhrase, limit)
 
