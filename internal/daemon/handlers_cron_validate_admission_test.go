@@ -50,3 +50,37 @@ func TestCronValidateJobAdmission(t *testing.T) {
 		})
 	}
 }
+
+func TestCronValidateWorkflowAdmission(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	project := seedProject(t, env, "example-project")
+	path := fmt.Sprintf("/api/v1/projects/%d/cron/workflows", project.ID)
+	for _, after := range []string{"missing", "null", "[]", `["prepare"]`} {
+		t.Run(after, func(t *testing.T) {
+			step := map[string]any{"key": "review", "kind": "prompt", "prompt": "Review"}
+			if after != "missing" {
+				step["after"] = jsontext.Value(after)
+			}
+			body := map[string]any{"name": "Inspect", "actor": "operator", "definition": map[string]any{
+				"version": 1, "steps": []any{map[string]any{"key": "prepare", "kind": "prompt", "prompt": "Prepare"}, step},
+			}}
+			savable := after != "null"
+			status, raw := cronHTTP(t, env, http.MethodPut, path+"/"+cronHTTPUID(t), body)
+			wantStatus := http.StatusOK
+			if !savable {
+				wantStatus = http.StatusBadRequest
+			}
+			require.Equal(t, wantStatus, status, string(raw))
+			status, raw = cronHTTP(t, env, http.MethodPost, path+"/validate", body)
+			require.Equal(t, http.StatusOK, status, string(raw))
+			var out db.CronValidation
+			require.NoError(t, json.Unmarshal(raw, &out))
+			require.Equal(t, savable, out.Valid, string(raw))
+			if !savable {
+				require.Len(t, out.Errors, 1)
+				require.Equal(t, "document", out.Errors[0].Stage)
+				require.Contains(t, out.Errors[0].Message, "after")
+			}
+		})
+	}
+}

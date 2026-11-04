@@ -81,7 +81,7 @@ func (a CronSQL) Validate(ctx context.Context, in CronValidationInput, job bool)
 			req.definition = definition
 		} else {
 			var workflow cron.WorkflowDefinition
-			workflow, out.Definition, err = cron.Normalize(in.Raw, cron.DecodeWorkflow)
+			workflow, out.Definition, err = cron.Normalize(in.Raw, cron.DecodeWorkflowForWrite)
 			req.definition = workflow
 		}
 		if err != nil {

@@ -72,7 +72,7 @@ func TestCronValidationParserAgreement(t *testing.T) {
 			var want, got error
 			if workflow {
 				_, want = ParseWorkflow(raw)
-				_, _, got = Normalize(raw, DecodeWorkflow)
+				_, _, got = Normalize(raw, DecodeWorkflowForWrite)
 			} else {
 				_, want = ParseJob(raw)
 				_, _, got = Normalize(raw, DecodeJobForWrite)

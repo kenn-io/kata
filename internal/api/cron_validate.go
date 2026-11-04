@@ -4,6 +4,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 )
@@ -31,8 +32,9 @@ func (fields CronValidationEnvelope) String(key string) string {
 
 // DecodeCronValidationEnvelope validates envelope types before any typed coercion.
 // The definition remains raw, including malformed documents and exact numbers.
+// On success the envelope is non-nil and callers may add checked fields.
 func DecodeCronValidationEnvelope(raw []byte) (CronValidationEnvelope, error) {
-	var fields CronValidationEnvelope
+	fields := make(CronValidationEnvelope)
 	if jsontext.Value(raw).Kind() != '{' {
 		return nil, fmt.Errorf("request body must be a JSON object")
 	}

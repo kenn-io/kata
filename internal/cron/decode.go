@@ -1,5 +1,10 @@
 package cron
 
+import (
+	"encoding/json/jsontext"
+	"encoding/json/v2"
+)
+
 // DecodeJob strictly decodes a stored job document without applying the
 // current validation rules. Stored rows and accepted events were validated
 // when written; re-validating them on read would make one row that a later
@@ -32,4 +37,17 @@ func DecodeJobForWrite(input []byte) (JobDefinition, error) {
 	}
 	value.JobDefinition.Enabled = *value.Enabled
 	return value.JobDefinition, nil
+}
+
+// DecodeWorkflowForWrite preserves save admission for explicit null arrays.
+// Stored workflows continue to use the tolerant DecodeWorkflow reader.
+func DecodeWorkflowForWrite(input []byte) (WorkflowDefinition, error) {
+	var workflow WorkflowDefinition
+	err := decode(input, &workflow, DefinitionLimit, json.WithUnmarshalers(json.UnmarshalFunc(func(raw []byte, after *[]string) error {
+		if jsontext.Value(raw).Kind() == 'n' {
+			return invalid("after must be an array")
+		}
+		return json.Unmarshal(raw, after)
+	})))
+	return workflow, err
 }
