@@ -286,6 +286,8 @@ func TestCronEditLookupCannotBypassEnabledPending(t *testing.T) {
 
 // Refreshing data invalidates a count, but must tell the operator to retry.
 func TestCronResumeRefreshRequiresRecount(t *testing.T) {
+	applyColorMode(colorDark, true)
+	t.Cleanup(applyDefaultColorMode)
 	for _, stage := range []string{"lookup", "confirmation"} {
 		t.Run(stage, func(t *testing.T) {
 			m, api := enabledFixture(t, pausedNative())
@@ -305,6 +307,7 @@ func TestCronResumeRefreshRequiresRecount(t *testing.T) {
 			require.Empty(t, api.enabledCalls)
 			require.NotNil(t, m.toast)
 			require.Equal(t, toastError, m.toast.level)
+			require.Equal(t, errorStyle.Render(m.toast.text), renderToast(m.toast))
 			require.Equal(t, "Job data changed; press p after refresh", m.toast.text)
 		})
 	}

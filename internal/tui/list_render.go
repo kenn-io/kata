@@ -698,6 +698,9 @@ func renderToast(t *toast) string {
 	if t == nil {
 		return ""
 	}
+	if t.level == toastError {
+		return errorStyle.Render(t.text)
+	}
 	return toastStyle.Render(t.text)
 }
 
