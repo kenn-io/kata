@@ -5,8 +5,10 @@
 export interface CronValidationBody {
   /** Accepted for create/update file compatibility; ignored. */
   actor?: string
-  definition: unknown
+  /** Missing or invalid definitions produce document-stage errors. */
+  definition?: unknown
   expected_event_uid?: string
-  name: string
+  /** Missing or empty names produce request-stage errors. */
+  name?: string
   uid?: string
 }

@@ -1598,22 +1598,25 @@ func (c CronRunsResponseBody) Validate() error {
 
 type CronValidationBody struct {
 	// Actor Accepted for create/update file compatibility; ignored.
-	Actor            *string         `json:"actor,omitempty"`
-	Definition       json.RawMessage `json:"definition"`
+	Actor *string `json:"actor,omitempty"`
+
+	// Definition Missing or invalid definitions produce document-stage errors.
+	Definition       json.RawMessage `json:"definition,omitempty"`
 	ExpectedEventUID *string         `json:"expected_event_uid,omitempty"`
-	Name             string          `json:"name" validate:"required"`
-	UID              *string         `json:"uid,omitempty"`
+
+	// Name Missing or empty names produce request-stage errors.
+	Name *string `json:"name,omitempty"`
+	UID  *string `json:"uid,omitempty"`
 }
 
 func (c CronValidationBody) Validate() error {
 	var errors runtime.ValidationErrors
-	if v, ok := any(c.Definition).(runtime.Validator); ok {
-		if err := v.Validate(); err != nil {
-			errors = errors.Append("Definition", err)
+	if c.Definition != nil {
+		if v, ok := any(c.Definition).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Definition", err)
+			}
 		}
-	}
-	if err := typesValidator.Var(c.Name, "required"); err != nil {
-		errors = errors.Append("Name", err)
 	}
 	if len(errors) == 0 {
 		return nil
@@ -1635,42 +1638,59 @@ func (c CronValidationError) Validate() error {
 type CronValidationResult struct {
 	Definition json.RawMessage         `json:"definition"`
 	Errors     []CronValidationError   `json:"errors" validate:"required"`
-	Name       string                  `json:"name" validate:"required"`
+	Name       *string                 `json:"name" validate:"required"`
 	Schedule   *SchedulePreview        `json:"schedule,omitempty"`
 	Valid      bool                    `json:"valid"`
 	Warnings   []CronValidationWarning `json:"warnings" validate:"required"`
 }
 
 func (c CronValidationResult) Validate() error {
-
-	// Request-stage errors allow an empty name; nested values still validate.
+	// The generator's complex validators skip nil pointers; enforce presence first.
+	if err := typesValidator.Struct(c); err != nil {
+		return runtime.ConvertValidatorError(err)
+	}
 	var errors runtime.ValidationErrors
+	if v, ok := any(c.Definition).(runtime.Validator); ok && v != nil {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Definition", err)
+		}
+	}
 	if err := typesValidator.Var(c.Errors, "required"); err != nil {
 		errors = errors.Append("Errors", err)
 	}
 	for i, item := range c.Errors {
-		if err := item.Validate(); err != nil {
-			errors = errors.Append(fmt.Sprintf("Errors[%d]", i), err)
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Errors[%d]", i), err)
+			}
+		}
+	}
+	if c.Name != nil {
+		if err := typesValidator.Var(c.Name, "required"); err != nil {
+			errors = errors.Append("Name", err)
 		}
 	}
 	if c.Schedule != nil {
-		if err := c.Schedule.Validate(); err != nil {
-			errors = errors.Append("Schedule", err)
+		if v, ok := any(c.Schedule).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Schedule", err)
+			}
 		}
 	}
 	if err := typesValidator.Var(c.Warnings, "required"); err != nil {
 		errors = errors.Append("Warnings", err)
 	}
 	for i, item := range c.Warnings {
-		if err := item.Validate(); err != nil {
-			errors = errors.Append(fmt.Sprintf("Warnings[%d]", i), err)
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Warnings[%d]", i), err)
+			}
 		}
 	}
 	if len(errors) == 0 {
 		return nil
 	}
 	return errors
-
 }
 
 type CronValidationWarning struct {
@@ -6459,8 +6479,8 @@ func (r RunIssueSyncOnceResponseBody) Validate() error {
 }
 
 type ScheduleFire struct {
-	At    time.Time `json:"at" validate:"required"`
-	Local string    `json:"local" validate:"required"`
+	At    *time.Time `json:"at" validate:"required"`
+	Local string     `json:"local" validate:"required"`
 }
 
 func (s ScheduleFire) Validate() error {
@@ -6470,12 +6490,16 @@ func (s ScheduleFire) Validate() error {
 type SchedulePreview struct {
 	Basis    string         `json:"basis" validate:"required"`
 	Delivery string         `json:"delivery" validate:"required"`
-	From     time.Time      `json:"from" validate:"required"`
+	From     *time.Time     `json:"from" validate:"required"`
 	Next     []ScheduleFire `json:"next" validate:"required"`
 	Zone     string         `json:"zone" validate:"required"`
 }
 
 func (s SchedulePreview) Validate() error {
+	// The generator's complex validators skip nil pointers; enforce presence first.
+	if err := typesValidator.Struct(s); err != nil {
+		return runtime.ConvertValidatorError(err)
+	}
 	var errors runtime.ValidationErrors
 	if err := typesValidator.Var(s.Basis, "required"); err != nil {
 		errors = errors.Append("Basis", err)
@@ -6483,8 +6507,10 @@ func (s SchedulePreview) Validate() error {
 	if err := typesValidator.Var(s.Delivery, "required"); err != nil {
 		errors = errors.Append("Delivery", err)
 	}
-	if err := typesValidator.Var(s.From, "required"); err != nil {
-		errors = errors.Append("From", err)
+	if s.From != nil {
+		if err := typesValidator.Var(s.From, "required"); err != nil {
+			errors = errors.Append("From", err)
+		}
 	}
 	if err := typesValidator.Var(s.Next, "required"); err != nil {
 		errors = errors.Append("Next", err)

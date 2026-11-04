@@ -1321,16 +1321,15 @@ components:
         actor:
           description: Accepted for create/update file compatibility; ignored.
           type: string
-        definition: {}
+        definition:
+          description: Missing or invalid definitions produce document-stage errors.
         expected_event_uid:
           type: string
         name:
+          description: Missing or empty names produce request-stage errors.
           type: string
         uid:
           type: string
-      required:
-        - name
-        - definition
       type: object
     CronValidationError:
       additionalProperties: true
