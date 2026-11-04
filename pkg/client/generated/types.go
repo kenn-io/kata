@@ -5630,6 +5630,45 @@ func (r ReadyResponseBody) Validate() error {
 	return errors
 }
 
+type ReapCronRunBody struct {
+	Actor            *string `json:"actor,omitempty"`
+	ExpectedRevision int64   `json:"expected_revision" validate:"gte=1"`
+	Force            *bool   `json:"force,omitempty"`
+	Message          *string `json:"message,omitempty" validate:"omitempty,max=1024"`
+}
+
+func (r ReapCronRunBody) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
+type ReapCronRunResponseBody struct {
+	Events []Event `json:"events" validate:"required"`
+	Run    CronRun `json:"run"`
+}
+
+func (r ReapCronRunResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(r.Events, "required"); err != nil {
+		errors = errors.Append("Events", err)
+	}
+	for i, item := range r.Events {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Events[%d]", i), err)
+			}
+		}
+	}
+	if v, ok := any(r.Run).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Run", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type RebindFederationReplicaRequestBody struct {
 	HubCatalog string `json:"hub_catalog" validate:"required"`
 }
