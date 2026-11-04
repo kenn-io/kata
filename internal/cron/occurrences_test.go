@@ -131,7 +131,7 @@ func TestRecurringOccurrencesSkipsAlreadyDelivered(t *testing.T) {
 	require.Equal(t, times(t, "2026-06-01T08:00:00Z"), got)
 }
 
-func adapterJob(t *testing.T, trigger Trigger) JobDefinition {
+func adapterJob(t testing.TB, trigger Trigger) JobDefinition {
 	t.Helper()
 	j, err := ParseJob([]byte(executeJSON))
 	require.NoError(t, err)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -118,4 +119,24 @@ func TestCronValidateReadCapability(t *testing.T) {
 	require.Len(t, host.calls, 2)
 	require.Equal(t, "read", string(host.calls[0].Policy.Capability))
 	require.False(t, host.calls[0].Policy.Mutation)
+}
+
+func TestCronValidateInvalidFromPrecedesDocument(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	project := seedProject(t, env, "example-project")
+	for _, resource := range []string{"jobs", "workflows"} {
+		for _, from := range []string{"0000-01-01T00:00:00+14:00", "9999-12-31T23:59:59-12:00"} {
+			t.Run(resource+"/"+from, func(t *testing.T) {
+				path := fmt.Sprintf("/api/v1/projects/%d/cron/%s/validate?from=%s", project.ID, resource, url.QueryEscape(from))
+				definition := any(cronHTTPDefinition(t))
+				if resource == "workflows" {
+					definition = map[string]any{"version": 1, "steps": []any{map[string]any{"key": "review", "kind": "prompt", "prompt": "Review"}}}
+				}
+				for _, doc := range []any{definition, jsontext.Value(`[]`)} {
+					status, raw := cronHTTP(t, env, http.MethodPost, path, map[string]any{"name": "Inspect", "definition": doc})
+					require.Equal(t, http.StatusBadRequest, status, "%s", raw)
+				}
+			})
+		}
+	}
 }

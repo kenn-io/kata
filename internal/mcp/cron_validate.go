@@ -66,7 +66,7 @@ func cronValidationBody(in CronValidationInput) (*generated.CronValidationBody, 
 	if err != nil {
 		return nil, err
 	}
-	body := &generated.CronValidationBody{Name: in.Name, Definition: raw}
+	body := &generated.CronValidationBody{Name: &in.Name, Definition: raw}
 	if in.UID != "" {
 		body.UID = &in.UID
 	}
@@ -80,11 +80,17 @@ func cronValidationResult(value *generated.CronValidationResult, err error) (*sd
 	if err != nil {
 		return nil, nil, err
 	}
+	if value == nil {
+		return nil, nil, errors.New("missing cron validation response")
+	}
+	if err := value.Validate(); err != nil {
+		return nil, nil, err
+	}
 	var definition any
 	if err := json.Unmarshal(value.Definition, &definition, jsonutil.PreserveNumberLiterals()); err != nil {
 		return nil, nil, err
 	}
-	return successResult(), &CronValidationOutput{Valid: value.Valid, Name: value.Name, Definition: definition, Errors: value.Errors, Warnings: value.Warnings, Schedule: value.Schedule}, nil
+	return successResult(), &CronValidationOutput{Valid: value.Valid, Name: *value.Name, Definition: definition, Errors: value.Errors, Warnings: value.Warnings, Schedule: value.Schedule}, nil
 }
 
 func (h toolHandlers) cronJobValidate(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronJobValidationInput) (*sdkmcp.CallToolResult, *CronValidationOutput, error) {

@@ -73,6 +73,17 @@ func TestCronCLIValidateOldDaemonAndMalformedResponse(t *testing.T) {
 		{"invalid-json", "0.41.0", `{`, ""},
 		{"null-definition", "0.41.0", `{"valid":true,"name":"Inspect","definition":null,"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
 		{"scalar-definition", "0.41.0", `{"valid":true,"name":"Inspect","definition":42,"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
+		{"missing-name", "0.41.0", `{"valid":true,"definition":{},"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
+		{"null-name", "0.41.0", `{"valid":true,"name":null,"definition":{},"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
+		{"missing-errors", "0.41.0", `{"valid":true,"name":"Inspect","definition":{},"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
+		{"null-errors", "0.41.0", `{"valid":true,"name":"Inspect","definition":{},"errors":null,"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
+		{"missing-warnings", "0.41.0", `{"valid":true,"name":"Inspect","definition":{},"errors":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
+		{"null-warnings", "0.41.0", `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":null,"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
+		{"missing-delivery", "0.41.0", `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
+		{"missing-basis", "0.41.0", `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"delivery":"adapter","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
+		{"missing-zone", "0.41.0", `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
+		{"missing-from", "0.41.0", `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","next":[]}}`, "validation response"},
+		{"missing-next", "0.41.0", `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z"}}`, "validation response"},
 		{"missing-schedule", "0.41.0", `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[]}`, "validation response"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -150,4 +161,24 @@ func TestCronCLIValidateOutputFailure(t *testing.T) {
 	cmd.SetOut(extraFailWriter{})
 	err := emitCronValidation(cmd, []byte(`{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[]}`), false)
 	require.ErrorIs(t, err, io.ErrClosedPipe)
+}
+
+func TestCronCLIValidateRejectsNullEnvelopeFields(t *testing.T) {
+	env := testenv.New(t)
+	_, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	for _, resource := range []string{"job", "workflow"} {
+		for _, field := range []string{"name", "uid", "expected_event_uid", "actor"} {
+			t.Run(resource+"/"+field, func(t *testing.T) {
+				definition := any(cronCLIJob(t).Definition)
+				if resource == "workflow" {
+					definition = api.CronWorkflowDefinition{Version: 1, Steps: []api.CronWorkflowStep{{Key: "review", Kind: "prompt", Prompt: "Review"}}}
+				}
+				body := map[string]any{"name": "Review", "definition": definition, field: nil}
+				out, _, err := executeCronCLI(t, env.URL, nil, resource, "validate", "--file", cronCLIFile(t, body))
+				require.ErrorContains(t, err, field+" must be a string")
+				require.Empty(t, out)
+			})
+		}
+	}
 }

@@ -21,10 +21,10 @@ func (s *Store) readCronTransaction(ctx context.Context, run func(*sql.Tx) error
 
 // ValidateCronJob checks a definition in a read-only snapshot without saving.
 func (s *Store) ValidateCronJob(ctx context.Context, in db.CronValidationInput) (db.CronValidation, error) {
-	return s.cronSQL().ValidateJob(ctx, in)
+	return s.cronSQL().Validate(ctx, in, true)
 }
 
 // ValidateCronWorkflow checks a definition in a read-only snapshot without saving.
 func (s *Store) ValidateCronWorkflow(ctx context.Context, in db.CronValidationInput) (db.CronValidation, error) {
-	return s.cronSQL().ValidateWorkflow(ctx, in)
+	return s.cronSQL().Validate(ctx, in, false)
 }

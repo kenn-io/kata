@@ -40,30 +40,14 @@ func registerCronValidationHandlers(h huma.API, cfg ServerConfig) {
 
 func validateCronDefinition(ctx context.Context, cfg ServerConfig, projectID int64, raw []byte, fromText, countText string, job bool) (*api.CronValidationResponse, error) {
 	invalid := func(message string) error { return api.NewError(400, "validation", message, "", nil) }
-	var fields map[string]jsontext.Value
-	if jsontext.Value(raw).Kind() != '{' {
-		return nil, invalid("request body must be a JSON object")
-	}
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return nil, invalid("invalid request body: " + err.Error())
+	if _, err := api.DecodeCronValidationEnvelope(raw); err != nil {
+		return nil, invalid(err.Error())
 	}
 	var body struct {
 		Name             string         `json:"name"`
 		Definition       jsontext.Value `json:"definition"`
 		UID              string         `json:"uid,omitempty"`
 		ExpectedEventUID string         `json:"expected_event_uid,omitempty"`
-	}
-	// JSON null is not a string, even though Go's decoder accepts it as zero.
-	for key, value := range fields {
-		switch key {
-		case "definition":
-		case "name", "uid", "expected_event_uid", "actor":
-			if value.Kind() != '"' {
-				return nil, invalid(key + " must be a string")
-			}
-		default:
-			return nil, invalid("unknown request member: " + key)
-		}
 	}
 	if err := json.Unmarshal(raw, &body); err != nil {
 		return nil, invalid(err.Error())
@@ -74,12 +58,15 @@ func validateCronDefinition(ctx context.Context, cfg ServerConfig, projectID int
 		if err != nil {
 			return nil, invalid("from must be RFC3339")
 		}
+		if _, err := parsed.UTC().MarshalText(); err != nil {
+			return nil, invalid("from must represent an RFC3339 UTC instant")
+		}
 		from = parsed
 	}
 	count := 5
 	if countText != "" {
 		parsed, err := strconv.Atoi(countText)
-		if err != nil {
+		if err != nil || parsed < 1 || parsed > 100 {
 			return nil, invalid("count must be between 1 and 100")
 		}
 		count = parsed
@@ -95,5 +82,5 @@ func validateCronDefinition(ctx context.Context, cfg ServerConfig, projectID int
 	if err != nil {
 		return nil, cronAPIError(ctx, cfg, err, projectID, body.UID, job)
 	}
-	return &api.CronValidationResponse{Body: api.CronValidationFrom(result)}, nil
+	return &api.CronValidationResponse{Body: api.CronValidationResult{Valid: result.Valid, Name: result.Name, Definition: api.JSONNullableRawObject(result.Definition), Errors: result.Errors, Warnings: result.Warnings, Schedule: result.Schedule}}, nil
 }

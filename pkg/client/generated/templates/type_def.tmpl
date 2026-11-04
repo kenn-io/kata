@@ -124,35 +124,11 @@
     {{ if $shouldValidate }}
     {{ if and (not $td.IsAlias) (not $td.Schema.UnionElements) (not $td.Schema.IsAnyType) $td.Schema.NeedsValidation }}
     func ({{$alias}} {{$td.Name}}) Validate() error {
-        {{ if eq $td.Name "CronValidationResult" }}
-        // Request-stage errors allow an empty name; nested values still validate.
-        var errors runtime.ValidationErrors
-        if err := typesValidator.Var({{$alias}}.Errors, "required"); err != nil {
-            errors = errors.Append("Errors", err)
+        {{ if or (eq $td.Name "CronValidationResult") (eq $td.Name "SchedulePreview") }}// The generator's complex validators skip nil pointers; enforce presence first.
+        if err := typesValidator.Struct({{$alias}}); err != nil {
+            return runtime.ConvertValidatorError(err)
         }
-        for i, item := range {{$alias}}.Errors {
-            if err := item.Validate(); err != nil {
-                errors = errors.Append(fmt.Sprintf("Errors[%d]", i), err)
-            }
-        }
-        if {{$alias}}.Schedule != nil {
-            if err := {{$alias}}.Schedule.Validate(); err != nil {
-                errors = errors.Append("Schedule", err)
-            }
-        }
-        if err := typesValidator.Var({{$alias}}.Warnings, "required"); err != nil {
-            errors = errors.Append("Warnings", err)
-        }
-        for i, item := range {{$alias}}.Warnings {
-            if err := item.Validate(); err != nil {
-                errors = errors.Append(fmt.Sprintf("Warnings[%d]", i), err)
-            }
-        }
-        if len(errors) == 0 {
-            return nil
-        }
-        return errors
-        {{ else }}{{ $td.Schema.ValidateDeclWithOptions $alias $validatorVar $forceSimple }}{{ end }}
+        {{ end }}{{ $td.Schema.ValidateDeclWithOptions $alias $validatorVar $forceSimple }}
     }
     {{ end }}
     {{ end -}}

@@ -1,6 +1,9 @@
 package api
 
 import (
+	"encoding/json/jsontext"
+	"encoding/json/v2"
+	"fmt"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 )
@@ -8,11 +11,35 @@ import (
 // CronValidationBody documents the raw preflight envelope. Definition remains
 // unrestricted so malformed documents can be reported as validation results.
 type CronValidationBody struct {
-	Name             string `json:"name"`
-	Definition       any    `json:"definition"`
+	Name             string `json:"name,omitempty" doc:"Missing or empty names produce request-stage errors."`
+	Definition       any    `json:"definition,omitempty" doc:"Missing or invalid definitions produce document-stage errors."`
 	UID              string `json:"uid,omitempty"`
 	ExpectedEventUID string `json:"expected_event_uid,omitempty"`
 	Actor            string `json:"actor,omitempty" doc:"Accepted for create/update file compatibility; ignored."`
+}
+
+// DecodeCronValidationEnvelope validates envelope types before any typed coercion.
+// The definition remains raw, including malformed documents and exact numbers.
+func DecodeCronValidationEnvelope(raw []byte) (map[string]jsontext.Value, error) {
+	var fields map[string]jsontext.Value
+	if jsontext.Value(raw).Kind() != '{' {
+		return nil, fmt.Errorf("request body must be a JSON object")
+	}
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, fmt.Errorf("invalid request body: %w", err)
+	}
+	for key, value := range fields {
+		switch key {
+		case "definition":
+		case "name", "uid", "expected_event_uid", "actor":
+			if value.Kind() != '"' {
+				return nil, fmt.Errorf("%s must be a string", key)
+			}
+		default:
+			return nil, fmt.Errorf("unknown request member: %s", key)
+		}
+	}
+	return fields, nil
 }
 
 // ValidateCronWorkflowRequest keeps envelope and document decoding in the handler.
@@ -40,8 +67,3 @@ type CronValidationResult struct {
 
 // CronValidationResponse returns the result without creating any cron state.
 type CronValidationResponse struct{ Body CronValidationResult }
-
-// CronValidationFrom keeps opaque document numbers intact on the API wire.
-func CronValidationFrom(value db.CronValidation) CronValidationResult {
-	return CronValidationResult{Valid: value.Valid, Name: value.Name, Definition: JSONNullableRawObject(value.Definition), Errors: value.Errors, Warnings: value.Warnings, Schedule: value.Schedule}
-}

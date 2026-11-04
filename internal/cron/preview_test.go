@@ -10,24 +10,23 @@ import (
 	"hegel.dev/go/hegel"
 )
 
-func previewJob() JobDefinition {
-	return JobDefinition{Version: 1, Kind: "job", Enabled: true,
-		Trigger: Trigger{Kind: "cron", Cron: "0 9 * * *", Timezone: "America/New_York"},
-		Action:  Action{Kind: "execute", Prompt: "Review"}, Issue: &IssuePolicy{Kind: "per-run", Title: "Review"},
-		Overlap: "forbid", Catchup: "latest"}
+func previewJob(t testing.TB) JobDefinition {
+	j := adapterJob(t, Trigger{Kind: "cron", Cron: "0 9 * * *", Timezone: "America/New_York"})
+	j.Catchup = "latest"
+	return j
 }
 
 // A document that fails strict decoding has no normalized document.
 func TestCronValidationDecodeShapes(t *testing.T) {
 	for _, raw := range []string{`null`, `[]`, `1`, `{"unknown":1}`, `{`} {
-		_, normalized, err := NormalizeJob([]byte(raw))
+		_, normalized, err := Normalize([]byte(raw), DecodeJob)
 		require.Error(t, err)
 		require.Empty(t, normalized)
 	}
 }
 
 func TestCronValidationWorkflowNumberPrecision(t *testing.T) {
-	_, normalized, err := NormalizeWorkflow([]byte(`{"version":1,"steps":[{"key":"review","kind":"prompt","prompt":"Review","options":{"n":12345678901234567890123}}]}`))
+	_, normalized, err := Normalize([]byte(`{"version":1,"steps":[{"key":"review","kind":"prompt","prompt":"Review","options":{"n":12345678901234567890123}}]}`), DecodeWorkflow)
 	require.NoError(t, err)
 	require.Contains(t, string(normalized), "12345678901234567890123")
 }
@@ -37,7 +36,7 @@ func TestCronPreviewNativeIntervals(t *testing.T) {
 		seconds := int64(hegel.Draw(ht, hegel.Integers(60, 1000000)))
 		count := hegel.Draw(ht, hegel.Integers(1, 100))
 		from := time.Unix(int64(hegel.Draw(ht, hegel.Integers(0, 2000000000))), 0).UTC()
-		job := previewJob()
+		job := previewJob(ht)
 		job.Action = Action{Kind: "notify", Recipient: "current-owner-or-author"}
 		job.Issue.ParentUID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 		job.Overlap = "allow"
@@ -57,7 +56,7 @@ func TestCronPreviewNativeIntervals(t *testing.T) {
 
 func TestCronPreviewBasesAndZones(t *testing.T) {
 	from := time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC)
-	job := previewJob()
+	job := previewJob(t)
 	out, err := PreviewSchedule(job, nil, from, 3)
 	require.NoError(t, err)
 	require.Equal(t, "adapter_trigger", out.Basis)
@@ -87,7 +86,7 @@ func TestCronPreviewBasesAndZones(t *testing.T) {
 // RFC3339 permits the Go zero instant; a hypothetical anchor is not persisted
 // progress and must not inherit the stored-progress sentinel restriction.
 func TestCronPreviewFreshAnchorAtZero(t *testing.T) {
-	job := previewJob()
+	job := previewJob(t)
 	job.Action = Action{Kind: "notify", Recipient: "current-owner-or-author"}
 	job.Issue.ParentUID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 	job.Overlap = "allow"
@@ -98,7 +97,7 @@ func TestCronPreviewFreshAnchorAtZero(t *testing.T) {
 }
 
 func TestCronPreviewFromOutsideRFC3339UTC(t *testing.T) {
-	job := previewJob()
+	job := previewJob(t)
 	for _, from := range []time.Time{
 		time.Date(0, 1, 1, 0, 0, 0, 0, time.FixedZone("ahead", 14*60*60)),
 		time.Date(9999, 12, 31, 23, 59, 59, 0, time.FixedZone("behind", -12*60*60)),
@@ -109,7 +108,7 @@ func TestCronPreviewFromOutsideRFC3339UTC(t *testing.T) {
 }
 
 func TestCronPreviewOnceOutsideRFC3339UTC(t *testing.T) {
-	job := previewJob()
+	job := previewJob(t)
 	job.Trigger = Trigger{Kind: "once", At: "9999-12-31T23:30:00-01:00", Timezone: "Etc/GMT+1"}
 	from := time.Date(9999, 12, 31, 22, 0, 0, 0, time.UTC)
 	out, err := PreviewSchedule(job, nil, from, 1)

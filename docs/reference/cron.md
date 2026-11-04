@@ -84,8 +84,10 @@ saves a definition, initializes progress, advances a clock, or emits an event.
 The result always prints as JSON, including under `--quiet`. Exit status is
 0 for `valid:true` and 3 for `valid:false`, including revision conflicts.
 The daemon must support API 0.41.0 or later; older daemons produce an upgrade
-message. A successful preflight checks current state. A later save can still
-fail if state or authorization changes.
+message. Validation checks definitions and referenced state, not permission to
+save. Read-only and spoke-authority restrictions can refuse a save after
+`valid:true`, even with unchanged state. Later state or authorization changes
+can also invalidate a save.
 
 The result includes the trimmed `name`, normalized `definition`, `errors`,
 and `warnings`. The definition is null when decoding fails. Errors stop at

@@ -42,7 +42,7 @@ func CheckCronValidateSnapshot(t *testing.T, reader db.CronSQL, writer db.Storag
 			return run(tx)
 		})
 	}
-	out, err := reader.ValidateJob(ctx, in)
+	out, err := reader.Validate(ctx, in, true)
 	require.NoError(t, err)
 	require.True(t, out.Valid, "%+v", out.Errors)
 	out, err = writer.ValidateCronJob(ctx, in)

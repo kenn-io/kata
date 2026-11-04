@@ -6,6 +6,8 @@ actions:
   - target: '$.components.schemas.CronValidationBody.properties.definition'
     update:
       x-go-type: json.RawMessage
+      x-go-type-skip-optional-pointer: true
+      x-omitempty: true
       x-go-type-import:
         path: encoding/json
   - target: '$.components.schemas.CronValidationResult.properties.definition'

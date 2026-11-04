@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/cron"
-	"go.kenn.io/kata/internal/uid"
 )
 
 // CronValidationInput describes an unsaved create or replacement candidate.
@@ -46,21 +45,12 @@ type CronValidation struct {
 	Schedule   *cron.SchedulePreview   `json:"schedule,omitempty"`
 }
 
-// ValidateJob checks a job using the same document and state rules as PutJob.
-func (a CronSQL) ValidateJob(ctx context.Context, in CronValidationInput) (CronValidation, error) {
-	return a.validateDefinition(ctx, in, true)
-}
-
-// ValidateWorkflow checks a workflow using the same rules as PutWorkflow.
-func (a CronSQL) ValidateWorkflow(ctx context.Context, in CronValidationInput) (CronValidation, error) {
-	return a.validateDefinition(ctx, in, false)
-}
-
-func (a CronSQL) validateDefinition(ctx context.Context, in CronValidationInput, job bool) (CronValidation, error) {
+// Validate reads shared document/state preconditions for a job or workflow.
+func (a CronSQL) Validate(ctx context.Context, in CronValidationInput, job bool) (CronValidation, error) {
 	out := CronValidation{Name: strings.TrimSpace(in.Name), Errors: []CronValidationError{}, Warnings: []CronValidationWarning{}}
 	in.UID = strings.ToUpper(in.UID)
-	if in.UID != "" && !uid.Valid(in.UID) {
-		return out, fmt.Errorf("%w: invalid UID", cron.ErrInvalid)
+	if err := checkCronUID(in.UID); err != nil {
+		return out, err
 	}
 	if job && (in.Count < 1 || in.Count > 100) {
 		return out, fmt.Errorf("%w: count must be between 1 and 100", cron.ErrInvalid)
@@ -77,25 +67,21 @@ func (a CronSQL) validateDefinition(ctx context.Context, in CronValidationInput,
 		return nil
 	}
 	err := a.ReadTransact(ctx, func(tx *sql.Tx) error {
-		var projectID int64
-		err := tx.QueryRowContext(ctx, `SELECT id FROM projects WHERE id=$1 AND deleted_at IS NULL AND name<>$2`, in.ProjectID, SystemProjectName).Scan(&projectID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		}
-		if err != nil {
+		if _, err := readCronProject(ctx, tx, in.ProjectID); err != nil {
 			return err
 		}
-		if out.Name == "" || len(out.Name) > 256 {
+		if !validCronName(out.Name) {
 			return fail("request", fmt.Errorf("%w: name required (maximum 256 bytes)", cron.ErrInvalid))
 		}
 		req := cronPutRequest{job: job, id: in.UID, projectID: in.ProjectID, expected: in.ExpectedEventUID}
+		var err error
 		var definition cron.JobDefinition
 		if job {
-			definition, out.Definition, err = cron.NormalizeJob(in.Raw)
+			definition, out.Definition, err = cron.Normalize(in.Raw, cron.DecodeJob)
 			req.definition = definition
 		} else {
 			var workflow cron.WorkflowDefinition
-			workflow, out.Definition, err = cron.NormalizeWorkflow(in.Raw)
+			workflow, out.Definition, err = cron.Normalize(in.Raw, cron.DecodeWorkflow)
 			req.definition = workflow
 		}
 		if err != nil {

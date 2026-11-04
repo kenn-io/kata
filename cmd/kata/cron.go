@@ -485,8 +485,6 @@ func (o *cronCLIOptions) decodeRequest(raw []byte) (map[string]jsontext.Value, e
 func (o *cronCLIOptions) requestShape() (any, error) {
 	replace := o.action == "create" || o.action == "update"
 	switch {
-	case o.action == "validate":
-		return &generated.CronValidationBody{}, nil
 	case o.resource == "job" && replace:
 		return &api.PutCronJobBody{}, nil
 	case o.resource == "workflow" && replace:
@@ -575,39 +573,45 @@ func applyCronTeammate(cmd *cobra.Command, fields map[string]jsontext.Value) err
 // applyExpectedEventUID reconciles the body precondition with
 // --expected-event-uid and writes the normalized value back to the body.
 func (o *cronCLIOptions) applyExpectedEventUID(fields map[string]jsontext.Value) error {
-	const key = "expected_event_uid"
+	if err := mergeCronUID(fields, "expected_event_uid", &o.expectedEventUID); err != nil {
+		return err
+	}
+	return o.checkExpectedEventUID()
+}
+
+// mergeCronUID reconciles a body identity with its flag without allocating one.
+func mergeCronUID(fields map[string]jsontext.Value, key string, flagValue *string) error {
 	bodyUID, err := cronStringField(fields, key)
 	if err != nil {
 		return err
 	}
 	if bodyUID != "" {
-		if bodyUID, err = normalizedCronCLIUID(bodyUID); err != nil {
+		bodyUID, err = normalizedCronCLIUID(bodyUID)
+		if err != nil {
 			return err
 		}
 	}
-	if o.expectedEventUID == "" {
-		o.expectedEventUID = bodyUID
+	if *flagValue == "" {
+		*flagValue = bodyUID
 	} else {
-		if o.expectedEventUID, err = normalizedCronCLIUID(o.expectedEventUID); err != nil {
+		*flagValue, err = normalizedCronCLIUID(*flagValue)
+		if err != nil {
 			return err
 		}
-		if bodyUID != "" && bodyUID != o.expectedEventUID {
+		if bodyUID != "" && bodyUID != *flagValue {
 			return cronCLIValidation(key + " in body and flag must match")
 		}
 	}
-	if err := o.checkExpectedEventUID(); err != nil {
-		return err
-	}
-	if o.expectedEventUID == "" {
+	if *flagValue == "" {
 		return nil
 	}
-	return setCronStringField(fields, key, o.expectedEventUID)
+	return setCronStringField(fields, key, *flagValue)
 }
 
 // checkExpectedEventUID requires a definition create to be unconditional and
 // every other definition mutation to name the event it replaces.
 func (o *cronCLIOptions) checkExpectedEventUID() error {
-	if !o.definition() || o.action == "validate" {
+	if !o.definition() {
 		return nil
 	}
 	if o.action == "create" && o.expectedEventUID != "" {

@@ -13,7 +13,7 @@ import (
 )
 
 func drawPreviewJob(ht *hegel.T) JobDefinition {
-	job := previewJob()
+	job := previewJob(ht)
 	job.Enabled = hegel.Draw(ht, hegel.Booleans())
 	zone := hegel.Draw(ht, hegel.SampledFrom([]string{"UTC", "America/New_York", "Australia/Lord_Howe", "Pacific/Kiritimati"}))
 	native := hegel.Draw(ht, hegel.Booleans())
@@ -63,7 +63,7 @@ func TestCronValidationJobParserAgreement(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
 		raw := normalizationCandidate(ht, false)
 		_, want := ParseJob(raw)
-		_, _, got := NormalizeJob(raw)
+		_, _, got := Normalize(raw, DecodeJob)
 		require.Equal(ht, want == nil, got == nil)
 	}, hegel.WithTestCases(100), hegel.WithDatabase(t.TempDir()))
 }
@@ -72,7 +72,7 @@ func TestCronValidationWorkflowParserAgreement(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
 		raw := normalizationCandidate(ht, true)
 		_, want := ParseWorkflow(raw)
-		_, _, got := NormalizeWorkflow(raw)
+		_, _, got := Normalize(raw, DecodeWorkflow)
 		require.Equal(ht, want == nil, got == nil)
 	}, hegel.WithTestCases(100), hegel.WithDatabase(t.TempDir()))
 }
@@ -82,7 +82,7 @@ func TestCronValidationPreservesInput(t *testing.T) {
 		job := drawPreviewJob(ht)
 		raw, err := json.Marshal(job)
 		require.NoError(ht, err)
-		_, normalized, err := NormalizeJob(raw)
+		_, normalized, err := Normalize(raw, DecodeJob)
 		require.NoError(ht, err)
 		parsed, err := ParseJob(normalized)
 		require.NoError(ht, err)
@@ -102,7 +102,7 @@ func TestCronValidationOpaqueNumberSpelling(t *testing.T) {
 		require.NoError(ht, err)
 		// Decoded documents retain normalized fields even if a value fails
 		// validation (native options or an overflowing option number).
-		_, normalized, _ := NormalizeJob(raw)
+		_, normalized, _ := Normalize(raw, DecodeJob)
 		require.NotEmpty(ht, normalized)
 		var fields map[string]jsontext.Value
 		require.NoError(ht, json.Unmarshal(normalized, &fields))

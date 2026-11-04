@@ -5,10 +5,9 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"strconv"
-	"time"
 
 	"github.com/spf13/cobra"
-	"go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/internal/api"
 	kataclient "go.kenn.io/kata/pkg/client"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -18,32 +17,14 @@ func (o *cronCLIOptions) validationRequestBody(cmd *cobra.Command) ([]byte, erro
 	if err != nil {
 		return nil, err
 	}
-	fields, err := o.decodeRequest(raw)
+	fields, err := api.DecodeCronValidationEnvelope(raw)
 	if err != nil {
+		return nil, cronCLIValidation(err.Error())
+	}
+	if err := mergeCronUID(fields, "uid", &o.identity); err != nil {
 		return nil, err
 	}
-	bodyUID, err := cronStringField(fields, "uid")
-	if err != nil {
-		return nil, err
-	}
-	if bodyUID != "" {
-		bodyUID, err = normalizedCronCLIUID(bodyUID)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if o.identity != "" && bodyUID != "" && bodyUID != o.identity {
-		return nil, cronCLIValidation("uid in body and flag must match")
-	}
-	if o.identity == "" {
-		o.identity = bodyUID
-	}
-	if o.identity != "" {
-		if err := setCronStringField(fields, "uid", o.identity); err != nil {
-			return nil, err
-		}
-	}
-	if err := o.applyExpectedEventUID(fields); err != nil {
+	if err := mergeCronUID(fields, "expected_event_uid", &o.expectedEventUID); err != nil {
 		return nil, err
 	}
 	return json.Marshal(fields)
@@ -74,33 +55,27 @@ func (o cronCLIOptions) callValidate(a daemonAPI, c *kataclient.Client, projectI
 
 func emitCronValidation(cmd *cobra.Command, raw []byte, job bool) error {
 	var out struct {
-		Valid      *bool                              `json:"valid"`
-		Name       *string                            `json:"name"`
-		Definition jsontext.Value                     `json:"definition"`
-		Errors     *[]generated.CronValidationError   `json:"errors"`
-		Warnings   *[]generated.CronValidationWarning `json:"warnings"`
-		Schedule   *struct {
-			Delivery *string              `json:"delivery"`
-			Basis    *string              `json:"basis"`
-			Zone     *string              `json:"zone"`
-			From     *time.Time           `json:"from"`
-			Next     *[]cron.ScheduleFire `json:"next"`
-		} `json:"schedule"`
+		Valid      *bool          `json:"valid"`
+		Definition jsontext.Value `json:"definition"`
 	}
+	var result generated.CronValidationResult
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return fmt.Errorf("decode cron validation response: %w", err)
 	}
-	if out.Valid == nil || out.Name == nil || len(out.Definition) == 0 || out.Errors == nil || out.Warnings == nil || (*out.Valid && len(*out.Errors) > 0) || (!*out.Valid && len(*out.Errors) == 0) {
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return fmt.Errorf("decode cron validation response: %w", err)
+	}
+	if out.Valid == nil || len(out.Definition) == 0 || (*out.Valid && len(result.Errors) > 0) || (!*out.Valid && len(result.Errors) == 0) {
 		return fmt.Errorf("incomplete cron validation response")
+	}
+	if err := result.Validate(); err != nil {
+		return fmt.Errorf("invalid cron validation response: %w", err)
 	}
 	if *out.Valid && out.Definition.Kind() != '{' {
 		return fmt.Errorf("invalid definition in cron validation response")
 	}
-	if *out.Valid && job {
-		schedule := out.Schedule
-		if schedule == nil || schedule.Delivery == nil || schedule.Basis == nil || schedule.Zone == nil || schedule.From == nil || schedule.Next == nil {
-			return fmt.Errorf("incomplete schedule in cron validation response")
-		}
+	if *out.Valid && job && result.Schedule == nil {
+		return fmt.Errorf("incomplete schedule in cron validation response")
 	}
 	if err := emitJSON(cmd.OutOrStdout(), jsontext.Value(raw)); err != nil {
 		return err
