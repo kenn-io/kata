@@ -158,9 +158,8 @@ func (s *Store) patchProjectMetadata(ctx context.Context, input db.PatchProjectM
 		}
 		if reassertTallies {
 			for key, value := range input.Patch {
-				if _, changed := diff[key]; !changed {
-					diff[key] = metadataKeyDiffPayload{From: value, To: value}
-				}
+				// From null reasserts every field under the pre-tally recursive fold.
+				diff[key] = metadataKeyDiffPayload{From: jsontext.Value(`null`), To: value}
 			}
 		}
 		if len(diff) == 0 {
