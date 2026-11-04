@@ -15,39 +15,41 @@ func CronTallyEventMetadata(event RemoteEvent) (JSONBlob, bool, error) {
 	}
 	fields := map[string]jsontext.Value{}
 	touched := false
-	if event.Type == "project.metadata_updated" {
-		for key, raw := range PayloadMap(PayloadMap(event.Payload)["diff"]) {
-			if !strings.HasPrefix(key, CronTallyPrefix) {
-				continue
-			}
-			touched = true
-			to := PayloadMap(raw)["to"]
-			if string(to) != "null" {
-				fields[key] = to
-			}
+	for key, raw := range cronTallyEventFields(event) {
+		if !strings.HasPrefix(key, CronTallyPrefix) {
+			continue
 		}
-	} else if event.Type == "project.federation_enabled" {
-		for key, raw := range PayloadMap(PayloadMap(event.Payload)["metadata"]) {
-			if strings.HasPrefix(key, CronTallyPrefix) {
-				fields[key] = raw
-				touched = true
-			}
+		touched = true
+		if event.Type == "project.metadata_updated" {
+			raw = PayloadMap(raw)["to"]
+		}
+		if string(raw) != "null" {
+			fields[key] = raw
 		}
 	}
 	raw, err := json.Marshal(fields, json.Deterministic(true))
 	return JSONBlob(raw), touched, err
 }
 
-// ValidateCronTallyDownstreamEvent checks fresh authenticated downstream
-// ingress. Source-origin assertions never create authority; direct adoption
-// is the bounded exception already verified by its enrollment continuation.
-func ValidateCronTallyDownstreamEvent(event RemoteEvent, allowAdoption bool) error {
-	_, touched, err := CronTallyEventMetadata(event)
-	if err != nil {
-		return err
+// cronTallyEventFields selects the carrier already validated at ingress.
+func cronTallyEventFields(event RemoteEvent) map[string]jsontext.Value {
+	field := "diff"
+	if event.Type == "project.federation_enabled" {
+		field = "metadata"
+	} else if event.Type != "project.metadata_updated" {
+		return nil
 	}
-	if touched && !allowAdoption {
-		return fmt.Errorf("%w: pruning tallies require root authority or a bounded adoption grant", ErrFederationIngestValidation)
+	return PayloadMap(PayloadMap(event.Payload)[field])
+}
+
+// ValidateCronTallyDownstreamEvent checks authority after value validation and
+// accepted duplicate detection. Every ingress validates values before checking
+// retries; this check only needs the reserved keys, not another decoded tally.
+func ValidateCronTallyDownstreamEvent(event RemoteEvent, allowAdoption bool) error {
+	for key := range cronTallyEventFields(event) {
+		if strings.HasPrefix(key, CronTallyPrefix) && !allowAdoption {
+			return fmt.Errorf("%w: pruning tallies require root authority or a bounded adoption grant", ErrFederationIngestValidation)
+		}
 	}
 	return nil
 }
