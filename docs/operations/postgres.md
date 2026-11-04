@@ -1,7 +1,7 @@
 ---
 title: PostgreSQL operations
 description: Operate Kata on PostgreSQL with split migration and runtime roles, backups, upgrades, and health checks.
-last_edited: 2026-11-02
+last_edited: 2026-11-03
 ---
 
 # PostgreSQL operations
@@ -120,6 +120,12 @@ Schema 39 adds an index for comment handle collisions when showing one issue.
 Stop daemons and imports while the migration scans the comment table and builds
 the index. See the [schema 39 migration requirements](../development/postgres-migrations.md#schema-39-comment-handle-lookup-index)
 for the offline window, grants, and rollback.
+
+Schema 41 indexes each comment separately so comment writes and issue edits
+avoid rebuilding every comment on the issue. Stop daemons and imports for the
+backfill and refresh runtime grants for `comment_search`. See the
+[schema 41 migration requirements](../development/postgres-migrations.md#schema-41-separate-comment-search-documents)
+for downtime, search ranking changes, and rollback.
 
 After preparation, grant the runtime role DML access and set default privileges
 for objects created by future migrations:

@@ -6,8 +6,6 @@ import (
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kit/search/postgres"
-	"go.kenn.io/kit/search/sqlquery"
 )
 
 // SearchFTS returns issues that contain all normalized query terms.
@@ -38,20 +36,14 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
 	}
 	anyQuery := `(SELECT CASE WHEN count(*) = 0 THEN NULL
 		ELSE to_tsquery('kata_simple_unaccent', string_agg(quote_literal(term), ' | ')) END
-		FROM unnest(tsvector_to_array(to_tsvector('kata_simple_unaccent', ?))) AS term)`
-	matchQuery := "plainto_tsquery('kata_simple_unaccent', ?)"
-	if request.any {
-		matchQuery = anyQuery
-	}
-	// The kit builder binds the source predicate's anonymous ? placeholders in
-	// textual order, so every fragment appends its value as it is rendered.
-	var predicateArgs []any
+		FROM unnest(tsvector_to_array(to_tsvector('kata_simple_unaccent', $1))) AS term)`
+	predicateArgs := []any{queryText}
 	bind := func(value any) string {
 		predicateArgs = append(predicateArgs, value)
-		return "?"
+		return fmt.Sprintf("$%d", len(predicateArgs))
 	}
 	var rowFilter strings.Builder
-	rowFilter.WriteString("EXISTS (SELECT 1 FROM issues i WHERE i.id = d.issue_id AND i.project_id = " + bind(request.params.ProjectID))
+	rowFilter.WriteString("i.project_id = " + bind(request.params.ProjectID))
 	if !request.params.IncludeDeleted {
 		rowFilter.WriteString("\n   AND i.deleted_at IS NULL")
 	}
@@ -72,49 +64,56 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
 	}
 	rowFilter.WriteString("\n   AND " + authorizedIssuePredicateWith(ctx, "i.project_id", bind))
 	if scope := request.params.IssueScope; scope != nil {
-		// The members CTE binds the root once and the project twice, in that
-		// textual order.
-		rowFilter.WriteString("\n   AND i.id IN (" + strings.NewReplacer("$1", bind(scope.RootIssueUID), "$2", "?").Replace(issueScopeMembersCTE) + " SELECT id FROM scope_members)")
-		predicateArgs = append(predicateArgs, scope.ProjectUID, scope.ProjectUID)
+		// Reuse the project parameter wherever the members CTE needs it.
+		rowFilter.WriteString("\n   AND i.id IN (" + strings.NewReplacer("$1", bind(scope.RootIssueUID), "$2", bind(scope.ProjectUID)).Replace(issueScopeMembersCTE) + " SELECT id FROM scope_members)")
 	}
 	if after := request.params.After; after != nil {
 		rowFilter.WriteString("\n   AND (i.created_at,i.id) > (" + bind(formatStoredTime(after.CreatedAt)) + "," + bind(after.ID) + ")")
 	}
-	rowFilter.WriteString(")")
-	predicate := rowFilter.String()
-	relation, err := postgres.BuildLexical(postgres.LexicalRequest{
-		Mapping: postgres.LexicalMapping{SourceTable: "issues_search", SourceKey: "issue_id", Vector: "d.tsv"},
-		Config:  "kata_simple_unaccent", TSQuery: matchQuery, TSQueryArgs: []any{queryText},
-		Rank: postgres.RankCover, CandidateLimit: limit,
-		SourcePredicate: sqlquery.Predicate{SQL: predicate, Args: predicateArgs},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("search fts: %w", err)
+	if !request.any {
+		rowFilter.WriteString(` AND NOT EXISTS (
+		 SELECT 1 FROM terms WHERE NOT (
+		  EXISTS (SELECT 1 FROM issues_search h WHERE h.issue_id = i.id AND h.tsv @@ to_tsquery('kata_simple_unaccent', quote_literal(terms.term)))
+		  OR EXISTS (SELECT 1 FROM comment_search h JOIN comments c ON c.id = h.comment_id
+		   WHERE c.issue_id = i.id AND h.tsv @@ to_tsquery('kata_simple_unaccent', quote_literal(terms.term)))
+		 ))`)
 	}
 	order := "candidates.score DESC, i.id DESC"
 	if request.params.StableOrder {
-		relation.SQL = strings.Replace(relation.SQL, "ORDER BY score DESC, doc_key ASC", "ORDER BY (SELECT created_at FROM issues WHERE id = d.issue_id) ASC, doc_key ASC", 1)
 		order = "i.created_at ASC, i.id ASC"
-	} else {
-		relation.SQL = strings.Replace(relation.SQL, "ORDER BY score DESC, doc_key ASC", "ORDER BY score DESC, doc_key DESC", 1)
 	}
-	query := fmt.Sprintf(`WITH candidates AS (%s), queries AS (
-  SELECT %s AS any_query
+	query := fmt.Sprintf(`WITH terms AS (
+ SELECT unnest(tsvector_to_array(to_tsvector('kata_simple_unaccent', $1))) AS term
+), queries AS (
+ SELECT %s AS any_query
+), issue_hits AS (
+ SELECT issue_id, ts_rank_cd(tsv, queries.any_query) AS score
+ FROM issues_search CROSS JOIN queries WHERE tsv @@ queries.any_query
+), comment_hits AS (
+ SELECT c.issue_id, max(ts_rank_cd(h.tsv, queries.any_query)) AS score
+ FROM comment_search h JOIN comments c ON c.id = h.comment_id CROSS JOIN queries
+ WHERE h.tsv @@ queries.any_query GROUP BY c.issue_id
+), hit_ids AS (
+ SELECT issue_id FROM issue_hits UNION SELECT issue_id FROM comment_hits
+), candidates AS (
+ SELECT i.id AS doc_key, coalesce(h.score, 0) + coalesce(c.score, 0) AS score
+ FROM hit_ids JOIN issues i ON i.id = hit_ids.issue_id
+ LEFT JOIN issue_hits h ON h.issue_id = i.id LEFT JOIN comment_hits c ON c.issue_id = i.id
+ WHERE %s
 )
 SELECT `+issueColumns+`,
        candidates.score,
        to_tsvector('kata_simple_unaccent', i.title) @@ queries.any_query AS in_title,
        to_tsvector('kata_simple_unaccent', i.body) @@ queries.any_query AS in_body,
-       to_tsvector('kata_simple_unaccent', COALESCE((
-         SELECT string_agg(c.body, ' ' ORDER BY c.id) FROM comments c WHERE c.issue_id = i.id
-       ), '')) @@ queries.any_query AS in_comments
-  FROM candidates
-  JOIN issues i ON i.id = candidates.doc_key
-  JOIN projects p ON p.id = i.project_id
+       EXISTS (SELECT 1 FROM comment_hits h WHERE h.issue_id = i.id) AS in_comments
+ FROM candidates
+ JOIN issues i ON i.id = candidates.doc_key
+ JOIN projects p ON p.id = i.project_id
  CROSS JOIN queries
- ORDER BY %s`, relation.SQL, strings.Replace(anyQuery, "?", "$1", 1), order)
+ ORDER BY %s LIMIT %s`, anyQuery, rowFilter.String(), order, bind(limit))
+	args := predicateArgs
 
-	rows, err := s.QueryContext(ctx, query, relation.Args...)
+	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search fts: %w", mapSQLError(err, nil))
 	}

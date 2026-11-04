@@ -1161,6 +1161,21 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	}
 	require.Len(t, commentMatches, 1)
 	assert.Equal(t, []string{"comments"}, commentMatches[0].MatchedIn)
+	_, _, err = store.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: primary.Issue.ID, Author: "discovery-author", Body: "safari timeout",
+	})
+	if err != nil {
+		return fmt.Errorf("create second searchable comment: %w", err)
+	}
+	splitMatches, err := store.SearchFTS(ctx, db.SearchFTSParams{
+		ProjectID: primary.Project.ID, Query: "login watermelon safari", Limit: 20,
+	})
+	if err != nil {
+		return fmt.Errorf("search across comment documents: %w", err)
+	}
+	require.Len(t, splitMatches, 1)
+	assert.Equal(t, primary.Issue.ID, splitMatches[0].Issue.ID)
+	assert.Equal(t, []string{"title", "comments"}, splitMatches[0].MatchedIn)
 	anyMatches, err := store.SearchFTSAny(ctx, db.SearchFTSParams{
 		ProjectID: primary.Project.ID, Query: "login absenttoken", Limit: 20,
 	})

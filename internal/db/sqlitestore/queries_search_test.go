@@ -13,10 +13,12 @@ func TestFTS_IssueInsertIsIndexed(t *testing.T) {
 	d, ctx, p := setupTestProject(t)
 	createTesterIssueWithBody(ctx, t, d, p.ID, "fix login crash", "stack trace here")
 
-	assertRowCount(ctx, t, d, 1, "FTS should index issue.title on insert",
-		`SELECT count(*) FROM issues_fts WHERE issues_fts MATCH 'login'`)
-	assertRowCount(ctx, t, d, 1, "FTS should index issue.body on insert",
-		`SELECT count(*) FROM issues_fts WHERE issues_fts MATCH 'trace'`)
+	hits, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login"})
+	require.NoError(t, err)
+	require.Len(t, hits, 1)
+	hits, err = d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "trace"})
+	require.NoError(t, err)
+	require.Len(t, hits, 1)
 }
 
 func TestFTS_IssueUpdateReindexes(t *testing.T) {
@@ -30,10 +32,12 @@ func TestFTS_IssueUpdateReindexes(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assertRowCount(ctx, t, d, 0, "old title tokens must be gone after edit",
-		`SELECT count(*) FROM issues_fts WHERE issues_fts MATCH 'old'`)
-	assertRowCount(ctx, t, d, 1, "new title tokens must be searchable after edit",
-		`SELECT count(*) FROM issues_fts WHERE issues_fts MATCH 'fresh'`)
+	hits, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "old"})
+	require.NoError(t, err)
+	require.Empty(t, hits)
+	hits, err = d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "fresh"})
+	require.NoError(t, err)
+	require.Len(t, hits, 1)
 }
 
 func TestFTS_CommentInsertReindexes(t *testing.T) {
@@ -42,8 +46,9 @@ func TestFTS_CommentInsertReindexes(t *testing.T) {
 	issue := createTesterIssueWithBody(ctx, t, d, p.ID, "boring", "body")
 	addTesterComment(ctx, t, d, issue.ID, "watermelon")
 
-	assertRowCount(ctx, t, d, 1, "comment body must be searchable after insert",
-		`SELECT count(*) FROM issues_fts WHERE issues_fts MATCH 'watermelon'`)
+	hits, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "watermelon"})
+	require.NoError(t, err)
+	require.Len(t, hits, 1)
 }
 
 func TestFTS_CommentUpdateReindexes(t *testing.T) {
@@ -60,10 +65,12 @@ func TestFTS_CommentUpdateReindexes(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assertRowCount(ctx, t, d, 0, "old comment tokens must be gone after edit",
-		`SELECT count(*) FROM issues_fts WHERE issues_fts MATCH 'leakedtoken'`)
-	assertRowCount(ctx, t, d, 1, "new comment tokens must be searchable after edit",
-		`SELECT count(*) FROM issues_fts WHERE issues_fts MATCH 'redactedtoken'`)
+	hits, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "leakedtoken"})
+	require.NoError(t, err)
+	require.Empty(t, hits)
+	hits, err = d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "redactedtoken"})
+	require.NoError(t, err)
+	require.Len(t, hits, 1)
 }
 
 func TestSearchFTS_RanksByBM25(t *testing.T) {
@@ -309,4 +316,31 @@ func TestSearchFTSAny_FindsNearDuplicates(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, gotOr, 1, "OR form must retrieve near-duplicates")
 	assert.Equal(t, "login crash on Safari", gotOr[0].Issue.Title)
+}
+
+func TestSearchFTS_SeparateCommentDocuments(t *testing.T) {
+	t.Parallel()
+	d, ctx, p := setupTestProject(t)
+	issue := createTesterIssueWithBody(ctx, t, d, p.ID, "login", "browser")
+	addTesterComment(ctx, t, d, issue.ID, "safari pull")
+	addTesterComment(ctx, t, d, issue.ID, "request timeout")
+	for _, query := range []string{"login safari", "safari timeout", "login browser safari timeout"} {
+		got, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: query})
+		require.NoError(t, err)
+		require.Len(t, got, 1, query)
+		require.Equal(t, issue.ID, got[0].Issue.ID)
+	}
+	got, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "pull-request"})
+	require.NoError(t, err)
+	require.Empty(t, got, "phrases cannot span comments")
+	addTesterComment(ctx, t, d, issue.ID, "pull request")
+	got, err = d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "pull-request"})
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, []string{"comments"}, got[0].MatchedIn)
+	_, err = d.ExecContext(ctx, `DELETE FROM comments WHERE issue_id=?`, issue.ID)
+	require.NoError(t, err)
+	got, err = d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "safari"})
+	require.NoError(t, err)
+	require.Empty(t, got)
 }

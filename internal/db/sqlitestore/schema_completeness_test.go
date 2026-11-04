@@ -29,7 +29,7 @@ func TestAllSchemaTablesExist(t *testing.T) {
 		"federation_quarantine", "federation_enrollments",
 		"issue_sync_bindings", "issue_sync_status",
 		"issue_claims", "pending_claim_requests",
-		"meta", "issues_fts", "import_mappings", "recurrences",
+		"meta", "issues_fts", "comments_fts", "import_mappings", "recurrences",
 		"external_root_bindings", "external_field_mappings", "external_field_states",
 	}
 	for _, name := range wanted {
@@ -42,6 +42,7 @@ func TestAllSchemaTablesExist(t *testing.T) {
 		 WHERE type = 'table'
 		   AND name NOT LIKE 'sqlite_%'
 		   AND name NOT GLOB 'issues_fts_*'
+		   AND name NOT GLOB 'comments_fts_*'
 		 ORDER BY name`)
 	require.NoError(t, err)
 	defer func() { _ = rows.Close() }()

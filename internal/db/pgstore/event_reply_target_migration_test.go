@@ -47,6 +47,7 @@ func TestEventReplyTargetIndexMigrationUpgradesVersion35(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
 	dropEventReplyTargetIndex(ctx, t, admin, schema)
+	restoreCommentSearch39(ctx, t, admin, schema)
 	dropCommentUIDHandleIndex(ctx, t, admin, schema)
 	_, err = admin.ExecContext(ctx, `UPDATE reply_target_upgrade.meta SET value='35' WHERE key='schema_version'`)
 	require.NoError(t, err)

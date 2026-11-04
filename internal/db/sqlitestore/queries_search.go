@@ -7,16 +7,13 @@ import (
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kit/search/lexical"
-	"go.kenn.io/kit/search/sqlitefts"
-	"go.kenn.io/kit/search/sqlquery"
 )
 
-// SearchFTS runs an FTS5 BM25-ranked query against issues_fts, joins back to
-// issues, and returns the top `p.Limit` rows scoped to the given project. When
-// p.IncludeDeleted is false, soft-deleted issues are filtered. The returned
-// Score is the negated raw BM25 (so higher = better match); MatchedIn is
-// derived from per-column MATCH subqueries since FTS5 highlight() returns
-// NULL on contentless tables.
+// SearchFTS finds terms across issues and their comments and returns the top
+// p.Limit issues scoped to the project. Score sums the issue's negated BM25
+// and its best matching comment's negated BM25 (higher is better). Soft-deleted
+// issues are filtered unless p.IncludeDeleted is set. MatchedIn uses MATCH
+// subqueries since FTS5 highlight() returns NULL on contentless tables.
 func (d *Store) SearchFTS(ctx context.Context, p db.SearchFTSParams) ([]db.SearchCandidate, error) {
 	return d.searchFTS(ctx, searchFTSReq{params: p, mode: searchAll})
 }
@@ -60,10 +57,6 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 	}
 
 	analyzer := lexical.Literal()
-	prepared, err := analyzer.PrepareLiteral(q)
-	if err != nil {
-		return nil, fmt.Errorf("search fts: %w", err)
-	}
 	phrases := make([]string, 0)
 	for word := range strings.FieldsSeq(q) {
 		term, err := analyzer.PrepareLiteral(word)
@@ -73,10 +66,6 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		phrases = append(phrases, term.Match)
 	}
 	colPhrase := strings.Join(phrases, " OR ")
-	topPhrase := prepared.Match
-	if r.mode == searchAny {
-		topPhrase = colPhrase
-	}
 
 	rowFilter := "AND i.deleted_at IS NULL"
 	if r.params.IncludeDeleted {
@@ -113,41 +102,47 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		filterArgs = append(filterArgs, stamp, stamp, r.params.After.ID)
 	}
 
-	helper, err := sqlitefts.New(
-		sqlitefts.WithIndexTable("issues_fts"), sqlitefts.WithIndexKey("rowid"),
-		sqlitefts.WithSourceTable("issues"), sqlitefts.WithSourceKey("id"),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("search fts: %w", err)
-	}
-	candidates, err := helper.Build(sqlitefts.Request{
-		Match: topPhrase, CandidateLimit: limit,
-		SourcePredicate: sqlquery.Predicate{
-			SQL:  "d.project_id = ? " + strings.ReplaceAll(rowFilter, "i.", "d."),
-			Args: append([]any{r.params.ProjectID}, filterArgs...),
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("search fts: %w", err)
-	}
-	if r.params.StableOrder {
-		candidates.SQL = strings.Replace(candidates.SQL, "ORDER BY score DESC, doc_key ASC", "ORDER BY "+creationKeySQL("d")+" ASC, doc_key ASC", 1)
+	// Each term can occur in the issue or any one of its comments.
+	if r.mode == searchAll {
+		for _, phrase := range phrases {
+			rowFilter += ` AND (i.id IN (SELECT rowid FROM issues_fts WHERE issues_fts MATCH ?)
+			 OR i.id IN (SELECT c.issue_id FROM comments_fts JOIN comments c ON c.id = comments_fts.rowid WHERE comments_fts MATCH ?))`
+			filterArgs = append(filterArgs, phrase, phrase)
+		}
 	}
 	order := "candidates.score DESC, i.id ASC"
 	if r.params.StableOrder {
 		order = creationKeySQL("i") + " ASC, i.id ASC"
 	}
-	query := fmt.Sprintf(`WITH candidates AS (%s)
+	// Materialize document scores before grouping: FTS5's bm25 must run in
+	// the MATCH scan, outside aggregate evaluation.
+	query := fmt.Sprintf(`WITH issue_hits AS MATERIALIZED (
+		SELECT rowid AS issue_id, -bm25(issues_fts) AS score FROM issues_fts WHERE issues_fts MATCH ?
+	), comment_scores AS MATERIALIZED (
+		SELECT c.issue_id, -bm25(comments_fts) AS score
+		FROM comments_fts JOIN comments c ON c.id = comments_fts.rowid WHERE comments_fts MATCH ?
+	), comment_hits AS (
+		SELECT issue_id, max(score) AS score FROM comment_scores GROUP BY issue_id
+	), hit_ids AS (
+		SELECT issue_id FROM issue_hits UNION SELECT issue_id FROM comment_hits
+	), candidates AS (
+		SELECT i.id AS doc_key, coalesce(h.score, 0) + coalesce(c.score, 0) AS score
+		FROM hit_ids JOIN issues i ON i.id = hit_ids.issue_id
+		LEFT JOIN issue_hits h ON h.issue_id = i.id LEFT JOIN comment_hits c ON c.issue_id = i.id
+		WHERE i.project_id = ? %s
+	)
 		SELECT `+issueColumns+`,
 		       candidates.score,
 		       (i.id IN (SELECT rowid FROM issues_fts WHERE title MATCH ?)) AS in_title,
 		       (i.id IN (SELECT rowid FROM issues_fts WHERE body MATCH ?)) AS in_body,
-		       (i.id IN (SELECT rowid FROM issues_fts WHERE comments MATCH ?)) AS in_comments
+		       (i.id IN (SELECT issue_id FROM comment_hits)) AS in_comments
 		FROM candidates
 		JOIN issues i ON i.id = candidates.doc_key
 		JOIN projects p ON p.id = i.project_id
-		ORDER BY %s`, candidates.SQL, order)
-	args := append(candidates.Args, colPhrase, colPhrase, colPhrase)
+		ORDER BY %s LIMIT ?`, rowFilter, order)
+	args := []any{colPhrase, colPhrase, r.params.ProjectID}
+	args = append(args, filterArgs...)
+	args = append(args, colPhrase, colPhrase, limit)
 
 	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {
