@@ -2449,6 +2449,7 @@ On main after 0.20.0, attach files to an issue with Docbank, then list, download
 
 ```sh
 kata docbank attachments add <issue> <file>...
+kata docbank attachments link <issue> <node-id|/path> [--version UUID]
 kata docbank attachments ls <issue>
 kata docbank attachments get <issue> <attachment> [-o PATH] [--force]
 kata docbank attachments rm <issue> <attachment>

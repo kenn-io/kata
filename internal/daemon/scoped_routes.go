@@ -35,6 +35,7 @@ var issueScopedRoutes = []scopedRouteRule{
 	scopedRoute(http.MethodPatch, `/api/v1/projects/[^/]+/issues/[^/]+`),
 	scopedRoute(http.MethodPost, `/api/v1/projects/[^/]+/issues/[^/]+/actions/(?:assign|claim|close|priority|reopen|unassign)`),
 	scopedRoute(http.MethodPost, `/api/v1/projects/[^/]+/issues/[^/]+/(?:comments|labels|links|metadata|notifications|attachments)`),
+	scopedRoute(http.MethodPost, `/api/v1/projects/[^/]+/issues/[^/]+/attachments/links`),
 	scopedRoute(http.MethodPatch, `/api/v1/projects/[^/]+/issues/[^/]+/comments/[^/]+`),
 	scopedRoute(http.MethodDelete, `/api/v1/projects/[^/]+/issues/[^/]+/(?:labels|links)/[^/]+`),
 	scopedRoute(http.MethodGet, `/api/v1/projects/[^/]+/issues/[^/]+/(?:graph|lease)`),
