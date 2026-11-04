@@ -144,21 +144,25 @@ func (m Model) finishDelete(target formTarget) (Model, tea.Cmd) {
 
 // forgetDeletedIssue invalidates the snapshots that navigation can restore.
 func (m Model) forgetDeletedIssue(uid string) (Model, tea.Cmd) {
+	deleted := func(dm detailModel) bool { return dm.issue != nil && dm.issue.UID == uid }
+	forgetBack := func(dm detailModel) detailModel {
+		dm.navStack = slices.DeleteFunc(slices.Clone(dm.navStack), deleted)
+		for i := range dm.navStack {
+			dm.navStack[i] = dm.navStack[i].invalidated()
+		}
+		return dm
+	}
 	forget := func(dm detailModel, focus *focusPane, views ...*viewID) detailModel {
-		dm.navStack = slices.DeleteFunc(slices.Clone(dm.navStack), func(prev detailModel) bool {
-			return prev.issue != nil && prev.issue.UID == uid
-		})
-		if dm.issue != nil && dm.issue.UID == uid {
-			if len(dm.navStack) > 0 {
-				dm, _ = dm.handleBack()
-			} else {
-				dm.cancelReads()
-				dm = newDetailModel()
-				*focus = focusList
-				for _, view := range views {
-					if *view == viewDetail {
-						*view = viewList
-					}
+		dm = forgetBack(dm)
+		if deleted(dm) && len(dm.navStack) > 0 {
+			dm, _ = dm.handleBack()
+		} else if deleted(dm) {
+			dm.cancelReads()
+			dm = newDetailModel()
+			*focus = focusList
+			for _, view := range views {
+				if *view == viewDetail {
+					*view = viewList
 				}
 			}
 		}
@@ -176,11 +180,8 @@ func (m Model) forgetDeletedIssue(uid string) (Model, tea.Cmd) {
 		m.attention.returnContext = &previous
 	}
 	m.attention.setRows(slices.DeleteFunc(slices.Clone(m.attention.rows), func(row attentionRequest) bool { return row.issue.UID == uid }))
-	m.detail.navStack = slices.DeleteFunc(slices.Clone(m.detail.navStack), func(prev detailModel) bool { return prev.issue != nil && prev.issue.UID == uid })
-	for i := range m.detail.navStack {
-		m.detail.navStack[i] = m.detail.navStack[i].invalidated()
-	}
-	if m.detail.issue != nil && m.detail.issue.UID == uid {
+	m.detail = forgetBack(m.detail)
+	if deleted(m.detail) {
 		if len(m.detail.navStack) > 0 {
 			var cmd tea.Cmd
 			m.detail, cmd, _ = m.detail.handleNavKey(tea.KeyPressMsg{Code: tea.KeyEscape}, m.keymap, m.api)

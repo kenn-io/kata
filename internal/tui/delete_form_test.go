@@ -185,7 +185,7 @@ func TestAttentionUndoIgnoresOtherEdits(t *testing.T) {
 
 // A delete must clear every place Back or a view switch can reveal.
 func TestDeleteReachesEverySavedView(t *testing.T) {
-	for _, context := range []string{"detail history", "Inbox", "Attention detail", "Attention Back", "split detail"} {
+	for _, context := range []string{"Inbox", "Attention detail", "Attention Back", "split detail"} {
 		t.Run(context, func(t *testing.T) {
 			t.Setenv("KATA_INBOX_USER", "alice")
 			h := newDeleteHarness(t, viewDetail)
@@ -195,9 +195,6 @@ func TestDeleteReachesEverySavedView(t *testing.T) {
 			require.Empty(t, h.m.detail.issue.QualifiedID, "confirmation must work with a fetched detail")
 			h.m.focus = focusDetail
 			switch context {
-			case "detail history":
-				h.focusChild(parent, target)
-				h.m = h.drain(h.enter())
 			case "Inbox":
 				h.openInbox()
 				require.True(t, h.m.scope.inbox)
@@ -231,9 +228,6 @@ func TestDeleteReachesEverySavedView(t *testing.T) {
 			require.True(t, h.isDeleted(target.UID))
 			assertNoDeletedView(t, h.m, target.UID)
 			switch context {
-			case "detail history":
-				require.NotNil(t, h.m.detail.issue)
-				assert.Equal(t, parent.UID, h.m.detail.issue.UID, "Back returns to the parent")
 			case "Inbox":
 				h.m = h.drain(h.key(runeKey('I')))
 				assert.Equal(t, viewList, h.m.view)
@@ -249,11 +243,7 @@ func TestDeleteReachesEverySavedView(t *testing.T) {
 			}
 			h.m = h.drain(h.key(runeKey('u')))
 			assert.False(t, h.isDeleted(target.UID))
-			switch context {
-			case "detail history":
-				require.Len(t, h.m.detail.children, 1, "undo puts the child back in the open parent")
-				assert.Equal(t, target.UID, h.m.detail.children[0].UID)
-			case "Attention detail", "Attention Back":
+			if context == "Attention detail" || context == "Attention Back" {
 				assert.True(t, slices.ContainsFunc(h.m.attention.rows, func(row attentionRequest) bool { return row.issue.UID == target.UID }), "undo reloads Attention")
 			}
 			if context == "Attention Back" {
@@ -278,10 +268,9 @@ func TestDeleteInvalidatesSavedRelations(t *testing.T) {
 			t.Setenv("KATA_INBOX_USER", "alice")
 			h := newDeleteHarness(t, viewDetail)
 			parent, child := h.issues[0], h.issues[1]
-			h.focusChild(parent, child)
 			_, err := h.client.KataAPI.AddLink(t.Context(), h.project.ID, parent.UID, LinkBody{Type: "related", ToRef: child.UID}, "alice")
 			require.NoError(t, err)
-			h.m = h.drain(h.m.detail.refetch(h.m.api))
+			h.focusChild(parent, child)
 			require.NotEmpty(t, h.m.detail.links)
 			late := runCmdTree(h.m.detail.refetch(h.m.api))
 			switch route {
@@ -320,6 +309,8 @@ func TestDeleteInvalidatesSavedRelations(t *testing.T) {
 				require.NotNil(t, h.m.detail.issue)
 				assert.Equal(t, parent.UID, h.m.detail.issue.UID)
 				assert.Empty(t, h.m.detail.children)
+				h.m = h.drain(h.key(runeKey('u')))
+				require.Len(t, h.m.detail.children, 1, "undo puts the child back in the open parent")
 			}
 		})
 	}
@@ -327,7 +318,8 @@ func TestDeleteInvalidatesSavedRelations(t *testing.T) {
 
 func assertNoDeletedView(t *testing.T, m Model, uid string) {
 	t.Helper()
-	checkIssue := func(dm detailModel) {
+	var checkDetail func(dm detailModel)
+	checkDetail = func(dm detailModel) {
 		if dm.issue != nil {
 			assert.NotEqual(t, uid, dm.issue.UID)
 		}
@@ -338,11 +330,8 @@ func assertNoDeletedView(t *testing.T, m Model, uid string) {
 		for _, child := range dm.children {
 			assert.NotEqual(t, uid, child.UID)
 		}
-	}
-	checkDetail := func(dm detailModel) {
-		checkIssue(dm)
 		for _, prev := range dm.navStack {
-			checkIssue(prev)
+			checkDetail(prev)
 		}
 	}
 	checkDetail(m.detail)
@@ -599,10 +588,7 @@ func TestDeleteFromSplitListReplacesRetainedDetail(t *testing.T) {
 	t.Run("delete result replaces retained detail", func(t *testing.T) {
 		h := newDeleteHarness(t, viewDetail)
 		parent, child := h.issues[0], h.issues[1]
-		_, err := NewClient(h.env.URL, h.env.HTTP).AddLink(t.Context(), h.project.ID, child.UID, LinkBody{Type: "parent", ToRef: parent.UID}, "alice")
-		require.NoError(t, err)
-		h.selectIssue(parent.UID)
-		h.m = h.drain(h.m.detail.refetch(h.m.api))
+		h.focusChild(parent, child)
 		require.Len(t, h.m.detail.children, 1)
 		h.m.view = viewList
 		h.m, _ = updateModel(h.m, tea.WindowSizeMsg{Width: 180, Height: 40})

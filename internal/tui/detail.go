@@ -198,11 +198,6 @@ func (dm detailModel) invalidated() detailModel {
 	dm.cancelReads()
 	dm.parent, dm.children, dm.comments, dm.events, dm.links = nil, nil, nil, nil, nil
 	dm.loading, dm.commentsLoading, dm.eventsLoading, dm.linksLoading = true, true, true, true
-	dm.err, dm.commentsErr, dm.eventsErr, dm.linksErr = nil, nil, nil, nil
-	dm.navStack = slices.Clone(dm.navStack)
-	for i := range dm.navStack {
-		dm.navStack[i] = dm.navStack[i].invalidated()
-	}
 	return dm
 }
 
