@@ -149,11 +149,16 @@ import type {
   ListAllIssuesParams,
   ListAllIssuesResponseBody,
   ListConnectorFieldsPathParameters,
+  ListCronJobVersionsParams,
+  ListCronJobVersionsPathParameters,
   ListCronJobsParams,
   ListCronJobsPathParameters,
   ListCronJobsResponseBody,
   ListCronRunsParams,
   ListCronRunsPathParameters,
+  ListCronVersionsResponseBody,
+  ListCronWorkflowVersionsParams,
+  ListCronWorkflowVersionsPathParameters,
   ListCronWorkflowsParams,
   ListCronWorkflowsPathParameters,
   ListCronWorkflowsResponseBody,
@@ -2445,6 +2450,60 @@ export const restoreCronJob = async (
   })
 }
 
+export type listCronJobVersionsResponse200 = {
+  data: ListCronVersionsResponseBody
+  status: 200
+}
+
+export type listCronJobVersionsResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type listCronJobVersionsResponseSuccess = listCronJobVersionsResponse200 & {
+  headers: Headers
+}
+export type listCronJobVersionsResponseError = listCronJobVersionsResponseDefault & {
+  headers: Headers
+}
+
+export type listCronJobVersionsResponse =
+  | listCronJobVersionsResponseSuccess
+  | listCronJobVersionsResponseError
+
+export const getListCronJobVersionsUrl = (
+  { projectId, cronUid }: ListCronJobVersionsPathParameters,
+  params?: ListCronJobVersionsParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/jobs/${encodeURIComponent(String(cronUid))}/versions?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/jobs/${encodeURIComponent(String(cronUid))}/versions`
+}
+
+export const listCronJobVersions = async (
+  { projectId, cronUid }: ListCronJobVersionsPathParameters,
+  params?: ListCronJobVersionsParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<listCronJobVersionsResponse> => {
+  return orvalFetch<listCronJobVersionsResponse>(
+    getListCronJobVersionsUrl({ projectId, cronUid }, params),
+    {
+      ...options,
+      method: 'GET',
+    },
+  )
+}
+
 export type listCronRunsResponse200 = {
   data: CronRunsResponseBody
   status: 200
@@ -2855,6 +2914,60 @@ export const restoreCronWorkflow = async (
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
       body: JSON.stringify(cronDefinitionActionBody),
+    },
+  )
+}
+
+export type listCronWorkflowVersionsResponse200 = {
+  data: ListCronVersionsResponseBody
+  status: 200
+}
+
+export type listCronWorkflowVersionsResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type listCronWorkflowVersionsResponseSuccess = listCronWorkflowVersionsResponse200 & {
+  headers: Headers
+}
+export type listCronWorkflowVersionsResponseError = listCronWorkflowVersionsResponseDefault & {
+  headers: Headers
+}
+
+export type listCronWorkflowVersionsResponse =
+  | listCronWorkflowVersionsResponseSuccess
+  | listCronWorkflowVersionsResponseError
+
+export const getListCronWorkflowVersionsUrl = (
+  { projectId, cronUid }: ListCronWorkflowVersionsPathParameters,
+  params?: ListCronWorkflowVersionsParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/workflows/${encodeURIComponent(String(cronUid))}/versions?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/workflows/${encodeURIComponent(String(cronUid))}/versions`
+}
+
+export const listCronWorkflowVersions = async (
+  { projectId, cronUid }: ListCronWorkflowVersionsPathParameters,
+  params?: ListCronWorkflowVersionsParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<listCronWorkflowVersionsResponse> => {
+  return orvalFetch<listCronWorkflowVersionsResponse>(
+    getListCronWorkflowVersionsUrl({ projectId, cronUid }, params),
+    {
+      ...options,
+      method: 'GET',
     },
   )
 }

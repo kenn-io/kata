@@ -1316,6 +1316,55 @@ func (c CronDefinitionActionBody) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(c))
 }
 
+type CronDefinitionVersion struct {
+	Actor         *string        `json:"actor" validate:"required"`
+	Current       bool           `json:"current"`
+	Definition    map[string]any `json:"definition"`
+	DefinitionHlc HLC            `json:"definition_hlc"`
+	DeletedAt     *time.Time     `json:"deleted_at,omitempty"`
+	EventUID      string         `json:"event_uid" validate:"required"`
+	Name          string         `json:"name" validate:"required"`
+	Operation     string         `json:"operation" validate:"required"`
+	UpdatedAt     time.Time      `json:"updated_at" validate:"required"`
+}
+
+func (value *CronDefinitionVersion) UnmarshalJSON(data []byte) error {
+	type plain CronDefinitionVersion
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	return decoder.Decode((*plain)(value))
+}
+
+func (c CronDefinitionVersion) Validate() error {
+	var errors runtime.ValidationErrors
+	if c.Actor != nil {
+		if err := typesValidator.Var(c.Actor, "required"); err != nil {
+			errors = errors.Append("Actor", err)
+		}
+	}
+	if v, ok := any(c.DefinitionHlc).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("DefinitionHlc", err)
+		}
+	}
+	if err := typesValidator.Var(c.EventUID, "required"); err != nil {
+		errors = errors.Append("EventUID", err)
+	}
+	if err := typesValidator.Var(c.Name, "required"); err != nil {
+		errors = errors.Append("Name", err)
+	}
+	if err := typesValidator.Var(c.Operation, "required"); err != nil {
+		errors = errors.Append("Operation", err)
+	}
+	if err := typesValidator.Var(c.UpdatedAt, "required"); err != nil {
+		errors = errors.Append("UpdatedAt", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type CronJob struct {
 	Author             string                    `json:"author" validate:"required"`
 	CreatedAt          time.Time                 `json:"created_at" validate:"required"`
@@ -4157,6 +4206,30 @@ func (l ListCronJobsResponseBody) Validate() error {
 		if v, ok := any(item).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append(fmt.Sprintf("Jobs[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type ListCronVersionsResponseBody struct {
+	NextBeforeEventUID *string                 `json:"next_before_event_uid,omitempty"`
+	SkippedEventUids   []string                `json:"skipped_event_uids,omitempty"`
+	Versions           []CronDefinitionVersion `json:"versions" validate:"required"`
+}
+
+func (l ListCronVersionsResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(l.Versions, "required"); err != nil {
+		errors = errors.Append("Versions", err)
+	}
+	for i, item := range l.Versions {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Versions[%d]", i), err)
 			}
 		}
 	}

@@ -199,6 +199,10 @@ type RestoreCronJobResponse = CronJobResponseBody
 
 type RestoreCronJobErrorResponse = ErrorEnvelope
 
+type ListCronJobVersionsResponse = ListCronVersionsResponseBody
+
+type ListCronJobVersionsErrorResponse = ErrorEnvelope
+
 type ListCronRunsResponse = CronRunsResponseBody
 
 type ListCronRunsErrorResponse = ErrorEnvelope
@@ -234,6 +238,10 @@ type ReplaceCronWorkflowErrorResponse = ErrorEnvelope
 type RestoreCronWorkflowResponse = CronWorkflowResponseBody
 
 type RestoreCronWorkflowErrorResponse = ErrorEnvelope
+
+type ListCronWorkflowVersionsResponse = ListCronVersionsResponseBody
+
+type ListCronWorkflowVersionsErrorResponse = ErrorEnvelope
 
 type DigestProjectResponse = DigestResponseBody
 
@@ -993,6 +1001,14 @@ type RestoreCronJobResp struct {
 	JSONDefault  *RestoreCronJobErrorResponse
 }
 
+type ListCronJobVersionsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ListCronJobVersionsResponse
+	JSONDefault  *ListCronJobVersionsErrorResponse
+}
+
 type ListCronRunsResp struct {
 	HTTPResponse *http.Response
 	Body         []byte
@@ -1063,6 +1079,14 @@ type RestoreCronWorkflowResp struct {
 	StatusCode   int
 	JSON200      *RestoreCronWorkflowResponse
 	JSONDefault  *RestoreCronWorkflowErrorResponse
+}
+
+type ListCronWorkflowVersionsResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ListCronWorkflowVersionsResponse
+	JSONDefault  *ListCronWorkflowVersionsErrorResponse
 }
 
 type DigestProjectResp struct {
