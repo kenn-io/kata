@@ -108,8 +108,10 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		return nil, fmt.Errorf("search fts: %w", err)
 	}
 	order := "candidates.score DESC, i.id ASC"
+	pageOrder := "score DESC, doc_key ASC"
 	if r.params.StableOrder {
 		order = creationKeySQL("i") + " ASC, i.id ASC"
+		pageOrder = "(SELECT " + creationKeySQL("i") + " FROM issues i WHERE i.id = candidates.doc_key) ASC, doc_key ASC"
 	}
 	minimum := 1
 	if r.mode == searchAll {
@@ -145,17 +147,19 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
  ), candidates AS (
   SELECT issue_id AS doc_key, count(*) AS matched_words, sum(score) AS score, max(in_comments) AS in_comments
   FROM word_hits GROUP BY issue_id HAVING count(*) >= ?
+ ), page AS MATERIALIZED (
+  SELECT * FROM candidates ORDER BY %s LIMIT ?
  )
  SELECT `+issueColumns+`,
         candidates.score,
         (i.id IN (SELECT rowid FROM issues_fts WHERE title MATCH ?)) AS in_title,
         (i.id IN (SELECT rowid FROM issues_fts WHERE body MATCH ?)) AS in_body,
         candidates.in_comments
- FROM candidates
+ FROM page AS candidates
  JOIN issues i ON i.id = candidates.doc_key
  JOIN projects p ON p.id = i.project_id
- ORDER BY %s LIMIT ?`, rowFilter, commentHits, order)
-	args = append(args, minimum, colPhrase, colPhrase, limit)
+ ORDER BY %s`, rowFilter, commentHits, pageOrder, order)
+	args = append(args, minimum, limit, colPhrase, colPhrase)
 
 	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {

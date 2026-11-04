@@ -84,8 +84,10 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
 	}
 
 	order := "candidates.score DESC, i.id DESC"
+	pageOrder := "score DESC, doc_key DESC"
 	if request.params.StableOrder {
 		order = "i.created_at ASC, i.id ASC"
+		pageOrder = "(SELECT i.created_at FROM issues i WHERE i.id = candidates.doc_key) ASC, doc_key ASC"
 	}
 	// Quote normalized lexemes directly so punctuation and URLs survive without
 	// a second parse through the text-search dictionary.
@@ -104,16 +106,18 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
 ), candidates AS (
  SELECT issue_id AS doc_key, count(*) AS matched_words, sum(score) AS score, bool_or(in_comments) AS in_comments
  FROM word_hits GROUP BY issue_id HAVING count(*) >= %s
+), page AS MATERIALIZED (
+ SELECT * FROM candidates ORDER BY %s LIMIT %s
 )
 SELECT `+issueColumns+`,
        candidates.score,
        EXISTS (SELECT 1 FROM terms WHERE to_tsvector('kata_simple_unaccent', i.title) @@ terms.q) AS in_title,
        EXISTS (SELECT 1 FROM terms WHERE to_tsvector('kata_simple_unaccent', i.body) @@ terms.q) AS in_body,
        candidates.in_comments
- FROM candidates
+ FROM page AS candidates
  JOIN issues i ON i.id = candidates.doc_key
  JOIN projects p ON p.id = i.project_id
- ORDER BY %s LIMIT %s`, rowFilter.String(), commentHits, minimum, order, bind(limit))
+ ORDER BY %s`, rowFilter.String(), commentHits, minimum, pageOrder, bind(limit), order)
 	args := predicateArgs
 
 	rows, err := s.QueryContext(ctx, query, args...)

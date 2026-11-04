@@ -14,6 +14,49 @@ import (
 	"modernc.org/sqlite"
 )
 
+func TestSearchFTS_CommonWordPageBudget(t *testing.T) {
+	d, path := openTestDBWithPath(t)
+	ctx := t.Context()
+	p, err := d.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	raw, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, raw.Close()) })
+	raw.SetMaxOpenConns(1)
+	_, err = raw.ExecContext(ctx, `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<20000)
+ INSERT INTO issues(uid,project_id,short_id,title,author)
+ SELECT printf('%026d',x),?,printf('%08d',x),'common','tester' FROM n`, p.ID)
+	require.NoError(t, err)
+	store := &sqlitestore.Store{DB: raw}
+	for name, search := range map[string]func(context.Context, db.SearchFTSParams) ([]db.SearchCandidate, error){
+		"all": store.SearchFTS, "any": store.SearchFTSAny,
+	} {
+		t.Run(name, func(t *testing.T) {
+			conn, err := raw.Conn(ctx)
+			require.NoError(t, err)
+			sqlitePageFetches(t, conn, true)
+			require.NoError(t, conn.Close())
+			start := time.Now()
+			hits, err := search(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "common", Limit: 20})
+			elapsed := time.Since(start)
+			require.NoError(t, err)
+			require.Len(t, hits, 20)
+			for n, hit := range hits {
+				require.Equal(t, int64(n+1), hit.Issue.ID)
+				require.Equal(t, []string{"title"}, hit.MatchedIn)
+			}
+			conn, err = raw.Conn(ctx)
+			require.NoError(t, err)
+			count := sqlitePageFetches(t, conn, false)
+			require.NoError(t, conn.Close())
+			t.Logf("20k issues / common / limit 20: %d page fetches, %.3f ms", count, float64(elapsed)/float64(time.Millisecond))
+			// Eligibility reads each matching issue. Leave 1k fetches beyond
+			// those 40k reads for the indexes and the 20 result projections.
+			require.LessOrEqual(t, count, 41_000, "only the requested page needs issue and project projections")
+		})
+	}
+}
+
 func TestSearchFTS_PageBudget(t *testing.T) {
 	for _, tc := range []struct {
 		name                      string
