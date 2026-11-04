@@ -722,6 +722,52 @@ func (c CloseActionRequestBody) Validate() error {
 	return errors
 }
 
+type CollisionItem struct {
+	At          *time.Time      `json:"at" validate:"required"`
+	Local       string          `json:"local" validate:"required"`
+	Occurrences int64           `json:"occurrences"`
+	PeerCount   int64           `json:"peer_count"`
+	Peers       []CollisionPeer `json:"peers" validate:"required"`
+}
+
+func (c CollisionItem) Validate() error {
+	if c.At == nil {
+		return runtime.NewValidationErrorsFromString("At", "is required")
+	}
+	var errors runtime.ValidationErrors
+	if c.At != nil {
+		if err := typesValidator.Var(c.At, "required"); err != nil {
+			errors = errors.Append("At", err)
+		}
+	}
+	if err := typesValidator.Var(c.Local, "required"); err != nil {
+		errors = errors.Append("Local", err)
+	}
+	if err := typesValidator.Var(c.Peers, "required"); err != nil {
+		errors = errors.Append("Peers", err)
+	}
+	for i, item := range c.Peers {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Peers[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type CollisionPeer struct {
+	Name string `json:"name" validate:"required"`
+	UID  string `json:"uid" validate:"required"`
+}
+
+func (c CollisionPeer) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+}
+
 type Comment struct {
 	AccountableActor *string              `json:"accountable_actor,omitempty"`
 	Author           string               `json:"author" validate:"required"`
@@ -6487,11 +6533,12 @@ func (s ScheduleFire) Validate() error {
 }
 
 type SchedulePreview struct {
-	Basis    string         `json:"basis" validate:"required"`
-	Delivery string         `json:"delivery" validate:"required"`
-	From     *time.Time     `json:"from" validate:"required"`
-	Next     []ScheduleFire `json:"next" validate:"required"`
-	Zone     string         `json:"zone" validate:"required"`
+	Basis      string                `json:"basis" validate:"required"`
+	Collisions *ValidationCollisions `json:"collisions,omitempty"`
+	Delivery   string                `json:"delivery" validate:"required"`
+	From       *time.Time            `json:"from" validate:"required"`
+	Next       []ScheduleFire        `json:"next" validate:"required"`
+	Zone       string                `json:"zone" validate:"required"`
 }
 
 func (s SchedulePreview) Validate() error {
@@ -6501,6 +6548,13 @@ func (s SchedulePreview) Validate() error {
 	var errors runtime.ValidationErrors
 	if err := typesValidator.Var(s.Basis, "required"); err != nil {
 		errors = errors.Append("Basis", err)
+	}
+	if s.Collisions != nil {
+		if v, ok := any(s.Collisions).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Collisions", err)
+			}
+		}
 	}
 	if err := typesValidator.Var(s.Delivery, "required"); err != nil {
 		errors = errors.Append("Delivery", err)
@@ -7624,4 +7678,37 @@ func (u UISnapshotResponseBody) Validate() error {
 type UnassignRequestBody struct {
 	Actor         *string `json:"actor,omitempty"`
 	ExpectedOwner *string `json:"expected_owner,omitempty"`
+}
+
+type ValidationCollisions struct {
+	Items     []CollisionItem `json:"items" validate:"required"`
+	Skipped   int64           `json:"skipped"`
+	Truncated bool            `json:"truncated"`
+	Until     *time.Time      `json:"until" validate:"required"`
+}
+
+func (v ValidationCollisions) Validate() error {
+	if v.Until == nil {
+		return runtime.NewValidationErrorsFromString("Until", "is required")
+	}
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(v.Items, "required"); err != nil {
+		errors = errors.Append("Items", err)
+	}
+	for i, item := range v.Items {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Items[%d]", i), err)
+			}
+		}
+	}
+	if v.Until != nil {
+		if err := typesValidator.Var(v.Until, "required"); err != nil {
+			errors = errors.Append("Until", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }
