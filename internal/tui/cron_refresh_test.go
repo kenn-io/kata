@@ -358,6 +358,12 @@ func TestCronNamedRunDuringFetch(t *testing.T) {
 	m = cronLoadTest(t, m)
 	require.Contains(t, a.reads, "o-102", "event received during first fetch must survive it")
 	require.False(t, m.cron.out)
+
+	t.Run("unloaded event", func(t *testing.T) {
+		m, _ := cronRefreshFixture(t, 1)
+		m = cronNameTest(m, "unloaded-x", 9)
+		require.Empty(t, m.cron.changed)
+	})
 }
 
 func TestCronLosingHigherSourceRevision(t *testing.T) {
@@ -431,11 +437,6 @@ func TestCronRefreshSubjects(t *testing.T) {
 	}
 	_, deferred = cronRefreshSubjects(&p, head, true)
 	require.True(t, deferred)
-	t.Run("unloaded event", func(t *testing.T) {
-		m, _ := cronRefreshFixture(t, 1)
-		m = cronNameTest(m, "unloaded-x", 9)
-		require.Empty(t, m.cron.changed)
-	})
 }
 
 func TestCronRefreshQueueAttentionBound(t *testing.T) {

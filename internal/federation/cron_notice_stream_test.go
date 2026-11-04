@@ -16,9 +16,10 @@ import (
 	"go.kenn.io/kata/internal/uid"
 )
 
-// Contract: federation's pulled-event callback can publish the observation
-// payload once through the daemon event publisher; repeating the pull publishes nothing.
-func TestCronPullCallbackPublishesObservation(t *testing.T) {
+// Contract: a pulled observation retains its payload through the daemon event
+// publisher, and repeating the pull publishes nothing. This supplies a callback;
+// it does not exercise the daemon runner's callback wiring or fork admission.
+func TestCronPulledObservationPayloadAndOnceOnlyPublishing(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	hub := nativeStore(t, "sqlite")

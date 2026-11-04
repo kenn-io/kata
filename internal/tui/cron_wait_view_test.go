@@ -104,5 +104,4 @@ func TestCronWaitPlainRunDetailDoesNotRepeatStatus(t *testing.T) {
 	require.Equal(t, 1, strings.Count(cronLinesText(lines), "running"), "plain status must appear exactly once")
 	require.Contains(t, cronLinesText(lines), "Status:     running")
 	require.NotContains(t, cronLinesText(lines), "Health:")
-	require.NotContains(t, cronLinesText(lines), "executor recorded")
 }

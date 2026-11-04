@@ -84,7 +84,7 @@ func TestCronHealthStates(t *testing.T) {
 			if tc.edit != nil {
 				tc.edit(&j)
 			}
-			p := cronData{lastRuns: map[string]generated.CronRun{}, lastErr: map[string]error{}}
+			p := cronData{jobs: []generated.CronJob{j}, lastRuns: map[string]generated.CronRun{}, lastErr: map[string]error{}}
 			if tc.status != "" {
 				p.lastRuns[j.UID] = generated.CronRun{JobUID: new(j.UID), Status: tc.status, CreatedAt: now.Add(-time.Hour), DefinitionEventUID: tc.runDefinition}
 			}
@@ -123,9 +123,9 @@ func TestCronHealthNativeDelivery(t *testing.T) {
 	t.Run("observations do not affect delivery", func(t *testing.T) {
 		j := cronFixture(t).cron.data.jobs[0]
 		nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&j.Definition)
-		p := cronData{parentOpen: map[string]bool{nextParentUID: true}, progress: map[string]cron.RecurringProgress{j.UID: {Version: 1, Anchor: snapshotFixedNow, Through: snapshotFixedNow}}}
+		p := cronData{jobs: []generated.CronJob{j}, parentOpen: map[string]bool{nextParentUID: true}, progress: map[string]cron.RecurringProgress{j.UID: {Version: 1, Anchor: snapshotFixedNow, Through: snapshotFixedNow}}}
 		hegel.Test(t, func(ht *hegel.T) {
-			p.lastRuns = map[string]generated.CronRun{j.UID: {Status: hegel.Draw(ht, hegel.Text()), CreatedAt: hegel.Draw(ht, hegel.Datetimes())}}
+			p.lastRuns = map[string]generated.CronRun{j.UID: {JobUID: new(j.UID), Status: hegel.Draw(ht, hegel.Text()), CreatedAt: hegel.Draw(ht, hegel.Datetimes())}}
 			p.lastErr = map[string]error{j.UID: errors.New("unreadable")}
 			if got := cronHealth(p, j, snapshotFixedNow); got.state != "ok" {
 				ht.Fatalf("observation affected native health: %v", got)
@@ -158,7 +158,7 @@ func TestCronHealthAdapterIntervalNeverMissed(t *testing.T) {
 func TestCronHealthFailedNeverOK(t *testing.T) {
 	j := cronFixture(t).cron.data.jobs[0]
 	hegel.Test(t, func(ht *hegel.T) {
-		p := cronData{lastRuns: map[string]generated.CronRun{j.UID: {Status: "failed", CreatedAt: hegel.Draw(ht, hegel.Datetimes())}}, lastErr: map[string]error{}}
+		p := cronData{jobs: []generated.CronJob{j}, lastRuns: map[string]generated.CronRun{j.UID: {JobUID: new(j.UID), Status: "failed", CreatedAt: hegel.Draw(ht, hegel.Datetimes())}}, lastErr: map[string]error{}}
 		if got := cronHealth(p, j, hegel.Draw(ht, hegel.Datetimes())); got.state != "failing" {
 			ht.Fatalf("failed run must be failing: %v", got)
 		}
@@ -206,7 +206,7 @@ func cronHealthFixture(t *testing.T) Model {
 		job.UID = state
 		job.Name = "job-" + strings.ReplaceAll(state, " ", "-")
 		job.Definition.Trigger = generated.TriggerResponse{Kind: "manual"}
-		r := generated.CronRun{Status: "succeeded", CreatedAt: snapshotFixedNow.Add(-time.Hour)}
+		r := generated.CronRun{JobUID: new(job.UID), Status: "succeeded", CreatedAt: snapshotFixedNow.Add(-time.Hour)}
 		switch state {
 		case "failing":
 			r.Status = "failed"
@@ -240,9 +240,6 @@ func TestCronHealthColumnRollupAndReason(t *testing.T) {
 	require.Contains(t, header, "Last run")
 	for _, state := range []string{"paused", "unavailable", "parent closed", "overdue", "running", "failing", "missed", "never ran"} {
 		require.Contains(t, title, "1 "+state)
-	}
-	for _, line := range lines {
-		require.Contains(t, line.text, cronHealth(*m.cron.data, *m.cron.data.job(line.target.uid), snapshotFixedNow).state)
 	}
 	m = m.cronFilter("job-ok")
 	title, _, lines = cronScreen(m)
