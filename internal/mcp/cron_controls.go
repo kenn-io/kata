@@ -57,7 +57,7 @@ func (h toolHandlers) cronDiscardCapabilities(ctx context.Context, pid int64, pr
 		return 0, err
 	}
 	if caps == nil || !slices.Contains(caps.Controls, "resume_discard_missed") || (project && caps.ProjectRevision <= 0) {
-		return 0, errors.New("daemon does not advertise discard resume support and its required revision")
+		return 0, errors.New("daemon cannot safely discard missed runs")
 	}
 	return caps.ProjectRevision, nil
 }

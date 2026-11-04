@@ -4,18 +4,18 @@ kata カタ [jobs] runs workflows
 
   Job            State   Trigger           Action             Last loaded run
 ▶ Weekly report  paused  every 1m0s        notify             succeeded 1h ago
-
-         ╭────────────────────────────────────────────────────────────╮
-         │                                                            │
-         │  Resume Weekly report?                                     │
-         │                                                            │
-         │  Backlog preview: 5 recurring children.                    │
-         │  y resumes with the existing catch-up policy.              │
-         │  d resumes and discards all missed occurrences             │
-         │  through the commit-time cutoff, including older backlog.  │
-         │                                                            │
-         ╰────────────────────────────────────────────────────────────╯
-
+               ╭────────────────────────────────────────────────╮
+               │                                                │
+               │  Resume Weekly report?                         │
+               │                                                │
+               │  Backlog at last check: 5 recurring child      │
+               │  issues that came due while it was paused.     │
+               │                                                │
+               │  y resumes with the existing catch-up policy.  │
+               │  d resumes and discards all missed runs up to  │
+               │  when it is saved, including older backlog.    │
+               │                                                │
+               ╰────────────────────────────────────────────────╯
 
 
 

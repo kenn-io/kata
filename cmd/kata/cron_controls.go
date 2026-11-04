@@ -90,7 +90,7 @@ func cronDiscardCapabilities(ctx context.Context, c *kataclient.Client, pid int6
 		return 0, err
 	}
 	if caps == nil || !slices.Contains(caps.Controls, "resume_discard_missed") || (project && caps.ProjectRevision <= 0) {
-		return 0, cronCLIValidation("daemon does not advertise discard resume support and its required revision")
+		return 0, cronCLIValidation("daemon cannot safely discard missed runs")
 	}
 	return caps.ProjectRevision, nil
 }

@@ -528,6 +528,9 @@ func cronStringField(fields map[string]jsontext.Value, key string) (string, erro
 }
 
 func setCronStringField(fields map[string]jsontext.Value, key, value string) error {
+	if fields == nil {
+		return cronCLIValidation("cron request body must be an object")
+	}
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return fmt.Errorf("encode cron request %s: %w", key, err)

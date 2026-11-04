@@ -18,7 +18,7 @@ type cronEnabledRequest struct {
 	uid, expected, name, parent string
 	enabled, invalidated        bool
 	count                       int
-	allowDiscard, discard bool
+	allowDiscard, discard       bool
 }
 type cronEnabledReadyMsg struct {
 	request cronEnabledRequest
@@ -56,7 +56,7 @@ func (m Model) routeCronEnabledKey(lines []cronLine, cursor int) (Model, tea.Cmd
 		read, err := api.readCronJob(ctx, pid, request.uid)
 		current := read.Job
 		if err == nil && request.enabled && read.Passover != nil && read.Passover.Invalid {
-			err = errors.New("passover state is invalid; repair it with an explicit discard resume")
+			err = errors.New("Invalid cutoff; repair with --discard-missed.")
 		}
 		if err == nil && (current.DeletedAt != nil || current.DefinitionEventUID != request.expected) {
 			err = &APIError{Status: http.StatusConflict, Code: "cron_conflict", Message: "The job changed; refresh before retrying"}
@@ -193,8 +193,8 @@ func renderCronResumeModal(request *cronEnabledRequest) string {
 			fmt.Sprintf("Backlog at last check: %d recurring child", request.count),
 			issues + " that came due while it was paused.", "",
 			"y resumes with the existing catch-up policy.",
-			"d resumes and discards all missed occurrences",
-			"through the commit-time cutoff, including older backlog.",
+			"d resumes and discards all missed runs up to",
+			"when it is saved, including older backlog.",
 		}, "\n"))
 	}
 	return modalBoxStyle.Render(strings.Join([]string{

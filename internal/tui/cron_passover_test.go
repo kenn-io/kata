@@ -44,7 +44,7 @@ func TestCronResumePassoverCount(t *testing.T) {
 			if invalid {
 				require.Nil(t, m.cron.enabled)
 				require.NotNil(t, m.toast)
-				require.Contains(t, m.toast.text, "invalid")
+				require.Equal(t, "Could not change the job: Invalid cutoff; repair with --discard-missed.", m.toast.text)
 				require.Empty(t, api.enabledCalls)
 			} else {
 				require.NotNil(t, write)
@@ -70,7 +70,8 @@ func TestCronDiscardResumeChoice(t *testing.T) {
 				require.Equal(t, modalCronResume, m.modal)
 				view := stripANSI(m.overlayInputAndModal(m.viewBody()))
 				if supported {
-					require.Contains(t, view, "discard")
+					require.Contains(t, view, "d resumes and discards all missed runs up to")
+					require.Contains(t, view, "when it is saved, including older backlog.")
 					require.Contains(t, view, "d discard missed")
 				} else {
 					require.NotContains(t, view, "discard")
