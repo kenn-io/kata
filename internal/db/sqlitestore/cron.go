@@ -8,7 +8,7 @@ import (
 )
 
 func (d *Store) cronSQL() db.CronSQL {
-	return db.CronSQL{CreateIssueTx: func(ctx context.Context, tx *sql.Tx, p db.CreateIssueParams) (db.Issue, db.Event, error) {
+	return db.CronSQL{LockAccess: lockProjectAccess, CreateIssueTx: func(ctx context.Context, tx *sql.Tx, p db.CreateIssueParams) (db.Issue, db.Event, error) {
 		id, event, err := d.createIssueTx(ctx, tx, p)
 		if err != nil {
 			return db.Issue{}, db.Event{}, err

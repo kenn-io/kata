@@ -59,6 +59,7 @@ import type {
   CreateTeamRequestBody,
   CreateTokenRequestBody,
   CreateTokenResponseBody,
+  CronAccessResponseBody,
   CronCapabilitiesResponseBody,
   CronDefinitionActionBody,
   CronJobResponseBody,
@@ -113,6 +114,7 @@ import type {
   FederationStatusBody,
   ForceReleaseIssueLeasePathParameters,
   GetConnectorStatusPathParameters,
+  GetCronAccessPathParameters,
   GetCronCapabilitiesPathParameters,
   GetExternalRootBridgeParams,
   GetExternalRootBridgePathParameters,
@@ -281,6 +283,8 @@ import type {
   SearchIssuesParams,
   SearchIssuesPathParameters,
   SearchResponseBody,
+  SetCronAccessPathParameters,
+  SetCronAccessRequestBody,
   SetFederationSpokeNamePathParameters,
   SetFederationSpokeNameRequestBody,
   SetIssuePriorityPathParameters,
@@ -2150,6 +2154,83 @@ export const detachProjectAlias = async (
       method: 'DELETE',
     },
   )
+}
+
+export type getCronAccessResponse200 = {
+  data: CronAccessResponseBody
+  status: 200
+}
+
+export type getCronAccessResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type getCronAccessResponseSuccess = getCronAccessResponse200 & {
+  headers: Headers
+}
+export type getCronAccessResponseError = getCronAccessResponseDefault & {
+  headers: Headers
+}
+
+export type getCronAccessResponse = getCronAccessResponseSuccess | getCronAccessResponseError
+
+export const getGetCronAccessUrl = ({ projectId }: GetCronAccessPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/access`
+}
+
+export const getCronAccess = async (
+  { projectId }: GetCronAccessPathParameters,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<getCronAccessResponse> => {
+  return orvalFetch<getCronAccessResponse>(getGetCronAccessUrl({ projectId }), {
+    ...options,
+    method: 'GET',
+  })
+}
+
+export type setCronAccessResponse200 = {
+  data: CronAccessResponseBody
+  status: 200
+}
+
+export type setCronAccessResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type setCronAccessResponseSuccess = setCronAccessResponse200 & {
+  headers: Headers
+}
+export type setCronAccessResponseError = setCronAccessResponseDefault & {
+  headers: Headers
+}
+
+export type setCronAccessResponse = setCronAccessResponseSuccess | setCronAccessResponseError
+
+export const getSetCronAccessUrl = ({ projectId }: SetCronAccessPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/access`
+}
+
+export const setCronAccess = async (
+  { projectId }: SetCronAccessPathParameters,
+  setCronAccessRequestBody: SetCronAccessRequestBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<setCronAccessResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<setCronAccessResponse>(getSetCronAccessUrl({ projectId }), {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(setCronAccessRequestBody),
+  })
 }
 
 export type getCronCapabilitiesResponse200 = {

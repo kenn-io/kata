@@ -13,6 +13,7 @@ import (
 )
 
 func registerCronDefinitionHandlers(h huma.API, cfg ServerConfig) {
+	registerCronAccessHandlers(h, cfg)
 	registerCronJobHandlers(h, cfg)
 	registerCronWorkflowHandlers(h, cfg)
 }
@@ -22,6 +23,8 @@ func cronAPIError(ctx context.Context, cfg ServerConfig, err error, projectID in
 		return apiErr
 	}
 	switch {
+	case errors.Is(err, db.ErrCronPermissionDenied):
+		return cronPermissionAPIError(err, http.StatusForbidden)
 	case errors.Is(err, db.ErrNotFound):
 		return api.NewError(404, "not_found", "cron not found", "", nil)
 	case errors.Is(err, cron.ErrInvalid):
@@ -75,6 +78,11 @@ func cronJobWriteContext(ctx context.Context, cfg ServerConfig, projectID int64,
 			return ctx, "", true, federationCredentialDenied()
 		}
 		actor = fed.Actor
+	}
+	if principal.Enrollment {
+		ctx = context.WithValue(ctx, cronAccessContextKey{}, db.CronAccessCheck{Actor: fed.Actor, Enforce: true})
+	} else if principal.OwnerAuthority {
+		ctx = context.WithValue(ctx, cronAccessContextKey{}, db.CronAccessCheck{})
 	}
 	ctx = attachCronRootAttribution(ctx, cfg, principal)
 	ctx, actor, err = cronWriteContext(ctx, actor)
@@ -146,7 +154,7 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 		if _, err := activeProjectByID(ctx, cfg.DB, projectID); err != nil {
 			return nil, err
 		}
-		value, events, err := cfg.DB.PutCronJob(ctx, db.PutCronJob{ProjectID: projectID, UID: id, ExpectedEventUID: body.ExpectedEventUID, Name: body.Name, Definition: body.Definition.Native(), Actor: body.Actor, Deleted: deleted})
+		value, events, err := cfg.DB.PutCronJob(ctx, db.PutCronJob{Access: cronRequestAccess(ctx), ProjectID: projectID, UID: id, ExpectedEventUID: body.ExpectedEventUID, Name: body.Name, Definition: body.Definition.Native(), Actor: body.Actor, Deleted: deleted})
 		if err != nil {
 			return nil, cronAPIError(ctx, cfg, err, projectID, id, true)
 		}
@@ -246,7 +254,7 @@ func registerCronWorkflowHandlers(h huma.API, cfg ServerConfig) {
 		if _, err := activeProjectByID(ctx, cfg.DB, projectID); err != nil {
 			return nil, err
 		}
-		value, event, err := cfg.DB.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: projectID, UID: id, ExpectedEventUID: body.ExpectedEventUID, Name: body.Name, Definition: body.Definition.Native(), Actor: actor, Deleted: deleted})
+		value, event, err := cfg.DB.PutCronWorkflow(ctx, db.PutCronWorkflow{Access: cronRequestAccess(ctx), ProjectID: projectID, UID: id, ExpectedEventUID: body.ExpectedEventUID, Name: body.Name, Definition: body.Definition.Native(), Actor: actor, Deleted: deleted})
 		if err != nil {
 			return nil, cronAPIError(ctx, cfg, err, projectID, id, false)
 		}

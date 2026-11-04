@@ -17,6 +17,7 @@ import (
 // Each backend supplies its own retry/isolation, authorization fence, and event
 // writer. SQL uses numbered placeholders supported by SQLite and PostgreSQL.
 type CronSQL struct {
+	LockAccess           func(context.Context, Transaction) error
 	CreateIssueTx        func(context.Context, *sql.Tx, CreateIssueParams) (Issue, Event, error)
 	PatchIssueMetadataTx func(context.Context, *sql.Tx, PatchIssueMetadataIn) (PatchIssueMetadataOut, error)
 	InstanceUID          string
@@ -62,11 +63,25 @@ type cronRow struct {
 }
 
 func scanCron(row interface{ Scan(...any) error }) (cronRow, error) {
+	return scanCronFields(row)
+}
+
+// scanCronRead adds derived attribution without changing persisted row scans.
+func scanCronRead(row interface{ Scan(...any) error }) (cronRow, error) {
+	var actor sql.NullString
+	result, err := scanCronFields(row, &actor)
+	if actor.Valid {
+		result.UpdatedBy = &actor.String
+	}
+	return result, err
+}
+
+func scanCronFields(row interface{ Scan(...any) error }, extra ...any) (cronRow, error) {
 	var result cronRow
 	var definition, clock, created, updated string
 	var deleted sql.NullString
 	fields := []any{&result.ID, &result.UID, &result.ProjectID, &result.Name, &definition, &result.DefinitionEventUID, &clock, &result.Author, &result.Revision, &created, &updated, &deleted}
-	if err := row.Scan(fields...); err != nil {
+	if err := row.Scan(append(fields, extra...)...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return result, ErrNotFound
 		}
@@ -95,6 +110,13 @@ func scanCron(row interface{ Scan(...any) error }) (cronRow, error) {
 	return result, nil
 }
 
+// cronDefinitionRead selects the winning event's actor in the same read.
+// Missing history stays NULL, including after federation baseline adoption.
+func cronDefinitionRead(job bool) string {
+	return "SELECT d." + strings.ReplaceAll(cronDefinitionColumns, ",", ",d.") +
+		",e.actor FROM " + cronTable(job) + " d LEFT JOIN events e ON e.uid=d.definition_event_uid AND e.project_id=d.project_id"
+}
+
 func cronTable(job bool) string {
 	if job {
 		return "cron_jobs"
@@ -117,7 +139,7 @@ func workflowFromRow(row cronRow) (CronWorkflow, error) {
 
 // Job reads one project-scoped definition, including a retained tombstone.
 func (a CronSQL) Job(ctx context.Context, project int64, id string) (CronJob, error) {
-	row, err := scanCron(a.Query.QueryRowContext(ctx, "SELECT "+cronDefinitionColumns+" FROM cron_jobs WHERE project_id=$1 AND uid=$2", project, strings.ToUpper(id)))
+	row, err := scanCronRead(a.Query.QueryRowContext(ctx, cronDefinitionRead(true)+" WHERE d.project_id=$1 AND d.uid=$2", project, strings.ToUpper(id)))
 	if err != nil {
 		return CronJob{}, err
 	}
@@ -126,7 +148,7 @@ func (a CronSQL) Job(ctx context.Context, project int64, id string) (CronJob, er
 
 // Workflow reads one project-scoped definition, including a retained tombstone.
 func (a CronSQL) Workflow(ctx context.Context, project int64, id string) (CronWorkflow, error) {
-	row, err := scanCron(a.Query.QueryRowContext(ctx, "SELECT "+cronDefinitionColumns+" FROM cron_workflows WHERE project_id=$1 AND uid=$2", project, strings.ToUpper(id)))
+	row, err := scanCronRead(a.Query.QueryRowContext(ctx, cronDefinitionRead(false)+" WHERE d.project_id=$1 AND d.uid=$2", project, strings.ToUpper(id)))
 	if err != nil {
 		return CronWorkflow{}, err
 	}
@@ -134,11 +156,11 @@ func (a CronSQL) Workflow(ctx context.Context, project int64, id string) (CronWo
 }
 
 func (a CronSQL) list(ctx context.Context, in CronList, job bool) ([]cronRow, error) {
-	query := "SELECT " + cronDefinitionColumns + " FROM " + cronTable(job) + " WHERE project_id=$1"
+	query := cronDefinitionRead(job) + " WHERE d.project_id=$1"
 	if !in.IncludeDeleted {
-		query += " AND deleted_at IS NULL"
+		query += " AND d.deleted_at IS NULL"
 	}
-	query += " ORDER BY name,uid"
+	query += " ORDER BY d.name,d.uid"
 	rows, err := a.Query.QueryContext(ctx, query, in.ProjectID)
 	if err != nil {
 		return nil, err
@@ -146,7 +168,7 @@ func (a CronSQL) list(ctx context.Context, in CronList, job bool) ([]cronRow, er
 	defer func() { _ = rows.Close() }()
 	result := []cronRow{}
 	for rows.Next() {
-		row, err := scanCron(rows)
+		row, err := scanCronRead(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -204,7 +226,7 @@ func (a CronSQL) PutJob(ctx context.Context, in PutCronJob) (CronJob, []Event, e
 	if err := validateLiveDefinition(in.Deleted, in.Definition.Validate); err != nil {
 		return CronJob{}, nil, err
 	}
-	row, event, err := a.put(ctx, cronPutRequest{job: true, id: in.UID, projectID: in.ProjectID, name: in.Name, expected: in.ExpectedEventUID, actor: in.Actor, deleted: in.Deleted, definition: in.Definition})
+	row, event, err := a.put(ctx, cronPutRequest{access: in.Access, job: true, id: in.UID, projectID: in.ProjectID, name: in.Name, expected: in.ExpectedEventUID, actor: in.Actor, deleted: in.Deleted, definition: in.Definition})
 	if err != nil {
 		return CronJob{}, nil, err
 	}
@@ -217,7 +239,7 @@ func (a CronSQL) PutWorkflow(ctx context.Context, in PutCronWorkflow) (CronWorkf
 	if err := validateLiveDefinition(in.Deleted, in.Definition.Validate); err != nil {
 		return CronWorkflow{}, Event{}, err
 	}
-	row, events, err := a.put(ctx, cronPutRequest{id: in.UID, projectID: in.ProjectID, name: in.Name, expected: in.ExpectedEventUID, actor: in.Actor, deleted: in.Deleted, definition: in.Definition})
+	row, events, err := a.put(ctx, cronPutRequest{access: in.Access, id: in.UID, projectID: in.ProjectID, name: in.Name, expected: in.ExpectedEventUID, actor: in.Actor, deleted: in.Deleted, definition: in.Definition})
 	if err != nil {
 		return CronWorkflow{}, Event{}, err
 	}
@@ -233,6 +255,7 @@ func (a CronSQL) PutWorkflow(ctx context.Context, in PutCronWorkflow) (CronWorkf
 
 // cronPutRequest is one whole-document definition write.
 type cronPutRequest struct {
+	access     CronAccessCheck
 	job        bool
 	id         string
 	projectID  int64
@@ -295,6 +318,9 @@ func (a CronSQL) putTx(ctx context.Context, tx *sql.Tx, req cronPutRequest, extr
 	if err := checkCronPutState(req, current, fresh); err != nil {
 		return cronRow{}, Event{}, err
 	}
+	if err := a.checkDefinitionGrant(ctx, tx, project.UID, req, current, fresh); err != nil {
+		return cronRow{}, Event{}, err
+	}
 	if err := a.checkCronPutDependencies(ctx, tx, req, current); err != nil {
 		return cronRow{}, Event{}, err
 	}
@@ -320,6 +346,7 @@ func (a CronSQL) putTx(ctx context.Context, tx *sql.Tx, req cronPutRequest, extr
 		}
 	}
 	row, err := scanCron(tx.QueryRowContext(ctx, "SELECT "+cronDefinitionColumns+" FROM "+cronTable(req.job)+" WHERE uid=$1", req.id))
+	row.UpdatedBy = &event.Actor
 	return row, event, err
 }
 

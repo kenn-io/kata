@@ -50,6 +50,21 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "cron access team union property", run: checkCronAccessTeamUnionProperty},
+	{name: "cron access backup", runWithBackend: checkCronAccessBackup},
+	{name: "cron access team deletion", run: checkCronAccessTeamDeletion},
+	{name: "cron access project lifecycle", run: checkCronAccessProjectLifecycle},
+	{name: "cron access adoption local", run: checkCronAccessAdoptionLocal},
+	{name: "cron access legacy ingest", run: checkCronAccessLegacyIngest},
+	{name: "cron access relay ingest", run: checkCronAccessRelayIngest},
+	{name: "cron access policy", methods: []string{"CronAccessPolicy", "SetCronAccessPolicy", "CronActorAccess"}, run: checkCronAccessPolicy},
+	{name: "cron access concurrent CAS", run: checkCronAccessConcurrentCAS},
+	{name: "cron access corruption", run: checkCronAccessCorruption},
+	{name: "cron access mutations", run: checkCronAccessMutations},
+	{name: "cron definition editors", methods: []string{"PutCronJob", "PutCronWorkflow", "CronJob", "CronWorkflow", "ListCronJobs", "ListCronWorkflows"}, run: checkCronDefinitionEditors},
+	{name: "cron definition editor property", methods: []string{"PutCronJob", "PutCronWorkflow", "CronJob", "CronWorkflow"}, run: checkCronDefinitionEditorProperty},
+	{name: "cron definition editor baseline", methods: []string{"AdoptProjectIntoFederation", "PutCronJob", "PutCronWorkflow", "CronJob", "CronWorkflow", "ListCronJobs", "ListCronWorkflows"}, run: checkCronDefinitionEditorBaseline},
+	{name: "cron definition editor retained history", methods: []string{"InsertRemoteEvent", "MaterializeFederatedProject", "CronJob", "CronWorkflow"}, runWithBackend: checkCronDefinitionEditorHistory},
 	{name: "setup finished delivery", methods: []string{"PrepareSetupFinished", "CompleteSetupFinished", "SystemProject", "CloseIssue", "SoftDeleteIssue", "RemoveProject"}, runWithBackend: checkSetupFinishedDelivery},
 	{name: "comment graph project access", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "MoveIssueProject", "ReadCommentGraph"}, run: checkCommentGraphProjectAccess},
 	{name: "recurring adoption snapshots", run: checkRecurringAdoptionSnapshots},

@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 # Federation
@@ -2150,6 +2150,13 @@ legacy schema-skew quarantine and re-sends the same events without advancing
 the push cursor.
 
 ## Quarantine
+
+A receiving daemon can reject fresh cron definitions or run observations with
+`400 cron_permission_denied` when the pushing enrollment's actor lacks its
+local `define` or `observe` grant. Have that daemon's owner grant the intended
+team access, then retry the quarantined batch. The policy applies to direct
+spokes and negotiated relay hops. See [cron permissions](../reference/cron.md#permissions)
+for setup and the preserved upstream/baseline exceptions.
 
 A spoke records active quarantine when it sees a permanently poisoned push
 batch. Quarantine blocks further push and can block reset.

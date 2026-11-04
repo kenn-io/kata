@@ -33,6 +33,7 @@ type CronRun struct {
 // ObserveCronRun replaces the mutable evidence of one immutable identity.
 // ExpectedRevision is zero for creation; exact retries return the current row.
 type ObserveCronRun struct {
+	Access                     CronAccessCheck
 	ProjectID                  int64
 	UID                        string
 	JobUID                     *string

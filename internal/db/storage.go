@@ -16,6 +16,7 @@ import (
 // Production entry points hold a db.Storage; backend selection happens
 // through the storeopen DSN dispatcher.
 type Storage interface {
+	CronAccessStorage
 	// Shared definitions, native recurring delivery and independently attributed execution evidence.
 	ObserveCronRun(context.Context, ObserveCronRun) (CronRunObservationResult, error)
 	CronRun(context.Context, int64, string) (CronRun, error)

@@ -1072,6 +1072,9 @@ func federationIngestEventsToDB(events []api.FederationIngestEventEnvelope) []db
 }
 
 func federationIngestError(err error) error {
+	if errors.Is(err, db.ErrCronPermissionDenied) {
+		return cronPermissionAPIError(err, http.StatusBadRequest)
+	}
 	if errors.Is(err, db.ErrUnsupportedEventFeatures) {
 		return federationFeatureError(err)
 	}

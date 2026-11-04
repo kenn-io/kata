@@ -174,6 +174,9 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 			return db.ProjectMergeResult{}, fmt.Errorf("update target project: %w", err)
 		}
 	}
+	if err := db.DeleteCronAccessPolicyTx(ctx, tx, source.UID); err != nil {
+		return db.ProjectMergeResult{}, err
+	}
 	if err := deleteProjectRelayMetadata(ctx, tx, source.UID); err != nil {
 		return db.ProjectMergeResult{}, fmt.Errorf("delete source project relay metadata: %w", err)
 	}

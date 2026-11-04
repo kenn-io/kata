@@ -1752,6 +1752,103 @@ func (o *DetachProjectAliasRequestOptions) GetHeader() (map[string]string, error
 	return nil, nil
 }
 
+// GetCronAccessRequestOptions is the options needed to make a request to GetCronAccess.
+type GetCronAccessRequestOptions struct {
+	PathParams *GetCronAccessPath
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *GetCronAccessRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *GetCronAccessRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *GetCronAccessRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *GetCronAccessRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *GetCronAccessRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
+// SetCronAccessRequestOptions is the options needed to make a request to SetCronAccess.
+type SetCronAccessRequestOptions struct {
+	PathParams *SetCronAccessPath
+	Body       *SetCronAccessBody
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *SetCronAccessRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *SetCronAccessRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *SetCronAccessRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *SetCronAccessRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *SetCronAccessRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
 // GetCronCapabilitiesRequestOptions is the options needed to make a request to GetCronCapabilities.
 type GetCronCapabilitiesRequestOptions struct {
 	PathParams *GetCronCapabilitiesPath

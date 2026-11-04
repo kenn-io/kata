@@ -9,7 +9,7 @@ import (
 )
 
 // cronWriteContext applies ordinary actor attribution and credential
-// revalidation. It adds no executor authority or scheduling permission.
+// revalidation. Independent cron grants use the authenticated principal.
 func cronWriteContext(ctx context.Context, requested string) (context.Context, string, error) {
 	actor, err := attributedActor(ctx, requested)
 	if err != nil {

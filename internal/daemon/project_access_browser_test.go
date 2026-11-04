@@ -73,6 +73,16 @@ func TestIdentityBrowserAccessAdministration(t *testing.T) {
 		members, err = store.TeamMembers(t.Context(), created.Team.UID)
 		require.NoError(t, err)
 		require.Equal(t, []string{"member"}, members)
+		cronPath := fmt.Sprintf("/api/v1/projects/%d/cron/access", f.public.ID)
+		response = request(http.MethodPut, cronPath, `{"define":{"mode":"teams","team_uids":[]},"observe":{"mode":"any","team_uids":[]},"revision":0}`, issued.CSRF, origin)
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		response = request(http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/capabilities", f.public.ID), "", "", origin)
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		var cronCapabilities struct {
+			Access db.CronAccess `json:"access"`
+		}
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &cronCapabilities))
+		require.Equal(t, db.CronAccess{}, cronCapabilities.Access)
 		path := fmt.Sprintf("/api/v1/projects/%d/access", f.public.ID)
 		response = request(http.MethodPut, path, fmt.Sprintf(`{"visibility":"teams","team_uids":[%q]}`, created.Team.UID), issued.CSRF, origin)
 		require.Equal(t, http.StatusOK, response.Code, response.Body.String())

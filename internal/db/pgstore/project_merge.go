@@ -146,6 +146,9 @@ func (s *Store) MergeProjects(ctx context.Context, params db.MergeProjectsParams
 				return mapSQLError(err, nil)
 			}
 		}
+		if err := db.DeleteCronAccessPolicyTx(ctx, tx, source.UID); err != nil {
+			return err
+		}
 		if err := deleteProjectRelayMetadataTx(ctx, tx, source.UID); err != nil {
 			return err
 		}

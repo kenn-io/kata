@@ -134,6 +134,9 @@ func authorizeRelayRequest(ctx context.Context, cfg ServerConfig, auth string, p
 }
 
 func relayTransportError(err error) error {
+	if errors.Is(err, db.ErrCronPermissionDenied) {
+		return cronPermissionAPIError(err, http.StatusBadRequest)
+	}
 	if apiErr := relayCrossProjectLinksAPIError(err); apiErr != nil {
 		return apiErr
 	}

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
@@ -29,6 +30,9 @@ func TestCronCapabilitiesEmptyProjectReadOnly(t *testing.T) {
 	require.NoError(t, json.Unmarshal(raw, &body))
 	require.Equal(t, []string{"cron_v1"}, body.EventFeatures)
 	require.Contains(t, string(raw), project.UID)
+	var capabilities api.CronCapabilitiesResponse
+	require.NoError(t, json.Unmarshal(raw, &capabilities.Body))
+	require.Equal(t, db.CronAccess{}, capabilities.Body.Access)
 	after, err := env.DB.UIEventCursor(t.Context())
 	require.NoError(t, err)
 	require.Equal(t, before, after)
@@ -64,8 +68,31 @@ func TestCronCapabilitiesProjectScopedHostRead(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		server.Handler().ServeHTTP(recorder, request)
 		require.Equalf(t, tc.want, recorder.Code, "%s", recorder.Body.String())
+		if tc.want == 200 {
+			var capabilities api.CronCapabilitiesResponse
+			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &capabilities.Body))
+			require.Equal(t, db.CronAccess{}, capabilities.Body.Access)
+		}
 	}
 	require.Len(t, host.calls, 2)
 	require.Equal(t, "getCronCapabilities", host.calls[0].ID)
 	require.False(t, host.calls[0].Policy.Mutation)
+}
+
+// Effective grants intersect the existing pull-only spoke write gate.
+func TestCronCapabilitiesPullOnlySpoke(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	project := seedProject(t, env, "spoke-project")
+	binding, err := env.DB.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: db.FederationRoleSpoke, HubURL: "https://daemon.example", HubProjectID: 42, HubProjectUID: project.UID, Enabled: true, Actor: "operator"})
+	require.NoError(t, err)
+	for _, push := range []bool{false, true} {
+		binding.PushEnabled = push
+		_, err = env.DB.UpsertFederationBinding(t.Context(), binding)
+		require.NoError(t, err)
+		code, raw := cronHTTP(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/capabilities", project.ID), nil)
+		require.Equal(t, 200, code, string(raw))
+		var capabilities api.CronCapabilitiesResponse
+		require.NoError(t, json.Unmarshal(raw, &capabilities.Body))
+		require.Equal(t, db.CronAccess{Define: push, Observe: push}, capabilities.Body.Access)
+	}
 }

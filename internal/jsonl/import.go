@@ -270,6 +270,12 @@ func toImportRecord(env Envelope, exportVersion int, localInstanceUID string, pr
 			return nil, err
 		}
 		return &record, nil
+	case KindProjectCronAccessPolicy:
+		var record db.ProjectCronAccessPolicy
+		if err := decodeData(env, &record); err != nil {
+			return nil, err
+		}
+		return &record, nil
 	case KindProjectAccessPolicy:
 		var record db.ProjectAccessPolicy
 		if err := decodeData(env, &record); err != nil {

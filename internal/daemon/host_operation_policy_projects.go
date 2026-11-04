@@ -14,11 +14,11 @@ func registerProjectOperationPolicies(policies map[string]HostOperationPolicy) {
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationTokenAdministration, Capability: hostCapabilityManage,
 		restricted: true,
-	}, "listTokens", "listTeams", "showTeam", "getProjectAccess")
+	}, "listTokens", "listTeams", "showTeam", "getProjectAccess", "getCronAccess")
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationTokenAdministration, Capability: hostCapabilityManage,
 		Mutation: true, restricted: true,
-	}, "createToken", "revokeToken", "createTeam", "deleteTeam", "addTeamMember", "removeTeamMember", "setProjectAccess")
+	}, "createToken", "revokeToken", "createTeam", "deleteTeam", "addTeamMember", "removeTeamMember", "setProjectAccess", "setCronAccess")
 
 	registerHostOperations(policies, HostOperationPolicy{
 		Kind: hostOperationIntegrationAdministration, Capability: hostCapabilityManage,

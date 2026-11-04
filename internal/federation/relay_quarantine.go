@@ -22,7 +22,7 @@ func recordRelayEventQuarantine(ctx context.Context, store db.Storage, binding d
 	poisoned := errors.Is(syncErr, db.ErrFederationIngestValidation) || errors.Is(syncErr, db.ErrRemoteEventConflict) || errors.Is(syncErr, db.ErrRemoteEventHashMismatch)
 	if status, ok := errors.AsType[*HubStatusError](syncErr); ok {
 		body, parsed := federationQuarantineHubError(status.Body)
-		poisoned = parsed && ((status.StatusCode == http.StatusBadRequest && body.Code == "relay_invalid") || (status.StatusCode == http.StatusConflict && body.Code == "relay_conflict"))
+		poisoned = parsed && ((status.StatusCode == http.StatusBadRequest && (body.Code == "relay_invalid" || body.Code == "cron_permission_denied")) || (status.StatusCode == http.StatusConflict && body.Code == "relay_conflict"))
 	}
 	if !poisoned {
 		return syncErr

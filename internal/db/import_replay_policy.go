@@ -288,7 +288,19 @@ func validateImportRecord(record ImportRecord) error {
 		}
 		return embedding.ValidateArtifact(rec.EmbeddingArtifact, "", "")
 	case *MetaKV:
-		return requireImportPayload(rec, ImportKindMeta)
+		if err := requireImportPayload(rec, ImportKindMeta); err != nil {
+			return err
+		}
+		if strings.HasPrefix(rec.Key, CronAccessPolicyPrefix) {
+			return errors.New("reserved cron policy metadata; use typed owner backup record")
+		}
+		return nil
+	case *ProjectCronAccessPolicy:
+		if rec == nil || rec.Revision < 1 {
+			return errors.New("invalid cron policy record")
+		}
+		_, err := NormalizeCronAccessPolicy(*rec)
+		return err
 	case *ProjectExport:
 		return requireImportPayload(rec, ImportKindProject)
 	case *RelayOutboxExport, *RelayInboxExport, *RelayCursorExport:
@@ -449,7 +461,7 @@ func importReplayRank(kind string) int {
 		return 2
 	case "team_membership", ImportKindIssueSyncStatus, ImportKindIssue:
 		return 3
-	case "project_access_policy", ImportKindComment, ImportKindIssueLabel, ImportKindLink,
+	case "project_cron_access_policy", "project_access_policy", ImportKindComment, ImportKindIssueLabel, ImportKindLink,
 		ImportKindFederationBinding, ImportKindFederationEnrollment,
 		ImportKindIssueClaim, ImportKindPendingClaimRequest:
 		return 4

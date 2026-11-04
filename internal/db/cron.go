@@ -28,6 +28,9 @@ type CronDefinition struct {
 	CreatedAt          time.Time         `json:"created_at"`
 	UpdatedAt          time.Time         `json:"updated_at"`
 	DeletedAt          *time.Time        `json:"deleted_at,omitempty"`
+
+	// UpdatedBy is derived from the winning event and is not a portable record field.
+	UpdatedBy *string `json:"-"`
 }
 
 // CronJob combines durable document provenance with a portable job.
@@ -45,6 +48,7 @@ type CronWorkflow struct {
 // PutCronJob replaces a complete definition. Empty UID allocates an
 // identity; every edit, tombstone, or restore requires the winning event UID.
 type PutCronJob struct {
+	Access           CronAccessCheck
 	UID              string
 	ProjectID        int64
 	Name             string
@@ -56,6 +60,7 @@ type PutCronJob struct {
 
 // PutCronWorkflow replaces a complete workflow using its expected winning event.
 type PutCronWorkflow struct {
+	Access           CronAccessCheck
 	UID              string
 	ProjectID        int64
 	Name             string

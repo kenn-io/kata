@@ -54,6 +54,10 @@ func buildNativeCronJSONLFixture(t *testing.T) nativeJSONLFixture {
 	require.NoError(t, jsonl.Export(ctx, source, &exported, jsonl.ExportOptions{IncludeDeleted: true}))
 	jobRecord := db.CronJobExport(job)
 	workflowRecord := db.CronWorkflowExport(workflow)
+	// The read-only editor is excluded from portable records and recomputed
+	// from retained events after restore.
+	jobRecord.UpdatedBy, workflowRecord.UpdatedBy = nil, nil
+	require.NotContains(t, exported.String(), `"updated_by"`)
 	return nativeJSONLFixture{data: exported.Bytes(), beforeCron: prior.Bytes(), records: append([]db.ImportRecord{&jobRecord, &workflowRecord}, runRecords...), projectID: project.ID}
 }
 

@@ -17,5 +17,10 @@ export interface CronWorkflow {
   revision: number
   uid: string
   updated_at: string
+  /**
+   * Actor of the winning definition event, or null when that event is not held locally.
+   * @nullable
+   */
+  updated_by: string | null
   [key: string]: unknown
 }

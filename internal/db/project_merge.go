@@ -69,7 +69,7 @@ func PrepareProjectMergeRecords(
 			return nil, fmt.Errorf("project merge does not accept hub-local relay delivery records")
 		case *RootKeyPin, *AttributionReceipt, *EntityProvenance:
 			return nil, fmt.Errorf("project merge does not accept trusted provenance; use enrolled federation reset")
-		case *Team, *TeamMembership, *ProjectAccessPolicy:
+		case *Team, *TeamMembership, *ProjectAccessPolicy, *ProjectCronAccessPolicy:
 			return nil, fmt.Errorf("project merge does not accept hub-local access policy records")
 		case *ProjectExport:
 			if rec.UID == SystemProjectUID || rec.Name == SystemProjectName {
