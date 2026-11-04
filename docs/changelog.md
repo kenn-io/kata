@@ -9,6 +9,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Operate cron across a company hub, personal hubs and multiple adapter
+  runtimes with the [team operations guide](operations/cron-teams.md).
+
 - Find every cron HTTP operation, its CLI command and MCP tool in the
   [cron route table](reference/cron.md#routes-events-and-records), with run-list
   page defaults for each surface.

@@ -60,6 +60,7 @@ nav = [
     {"Todoist sync" = "operations/todoist-sync.md"},
     {"TickTick sync" = "operations/ticktick-sync.md"},
     {"Federation" = "operations/federation.md"},
+    {"Cron for teams" = "operations/cron-teams.md"},
     {"Federation request signing" = "operations/federation-signing.md"},
     {"Agent orchestration" = "operations/agent-orchestration.md"},
     {"Hosted mode" = "operations/hosted-mode.md"},
