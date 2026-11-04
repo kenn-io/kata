@@ -18,7 +18,7 @@ import (
 func registerCronRuntimeHandlers(h huma.API, cfg ServerConfig) {
 	base := "/api/v1/projects/{project_id}/cron/runtimes"
 	huma.Register(h, huma.Operation{OperationID: "beatCronRuntime", Method: http.MethodPut, Path: base + "/{runtime_uid}", MaxBodyBytes: cron.RuntimeBeatLimit}, func(ctx context.Context, in *api.BeatCronRuntimeRequest) (*api.BeatCronRuntimeResponse, error) {
-		ctx, actor, err := cronWriteContext(ctx, in.Body.Actor)
+		ctx, actor, enrollment, err := cronJobWriteContext(ctx, cfg, in.ProjectID, in.Authorization, in.Body.Actor, "beatCronRuntime")
 		if err != nil {
 			return nil, err
 		}
@@ -33,7 +33,7 @@ func registerCronRuntimeHandlers(h huma.API, cfg ServerConfig) {
 		if err := json.Unmarshal(in.RawBody, &fields); err != nil {
 			return nil, api.NewError(400, "validation", "invalid runtime JSON", "", nil)
 		}
-		for _, key := range []string{"state", "interval_seconds"} {
+		for _, key := range []string{"state", "interval_seconds", "choices"} {
 			if strings.TrimSpace(string(fields[key])) == "null" {
 				return nil, api.NewError(400, "validation", "runtime "+key+" cannot be null", "", nil)
 			}
@@ -47,13 +47,17 @@ func registerCronRuntimeHandlers(h huma.API, cfg ServerConfig) {
 		if err := cronForwardAdmission(ctx, cfg.DB, project.ID, project.UID); err != nil {
 			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, "", true)
 		}
-		runtime, err := cfg.CronRuntimes.beatNormalized(in.ProjectID, in.RuntimeUID, actor, beat)
+		forwarder := ""
+		if enrollment {
+			forwarder = actor
+		}
+		runtime, err := cfg.CronRuntimes.beatNormalized(in.ProjectID, in.RuntimeUID, actor, beat, forwarder)
 		if err != nil {
 			return nil, api.NewError(429, "cron_runtime_limit", err.Error(), "retry after retained runtime evidence expires", nil)
 		}
 		out := &api.BeatCronRuntimeResponse{}
 		out.Body.Runtime = runtime
-		out.Body.Forwarded = "not_applicable"
+		out.Body.Forwarded = forwardCronRuntime(ctx, cfg, in.ProjectID, in.RuntimeUID, fields, enrollment)
 		return out, nil
 	})
 	huma.Register(h, huma.Operation{OperationID: "listCronRuntimes", Method: http.MethodGet, Path: base}, func(ctx context.Context, in *api.CronProjectRequest) (*api.CronRuntimesResponse, error) {

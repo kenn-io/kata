@@ -438,6 +438,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cronCmd tea.Cmd
 	m, cronCmd = m.cronSync()
 	cmd = combineCmds(cmd, cronCmd)
+	if _, tick := msg.(dayTickMsg); tick {
+		m, cronCmd = m.cronRuntimeSync(true)
+		cmd = combineCmds(cmd, cronCmd)
+	}
 	screenCmd := m.screenViewCommand(visit)
 	return m, tea.Batch(cmd, screenCmd)
 }
@@ -848,6 +852,8 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case cronLoadedMsg:
 		return m.cronLoaded(msg), nil, true
+	case cronRuntimeLoadedMsg:
+		return m.cronRuntimeLoaded(msg), nil, true
 	case cronEditOpenedMsg:
 		next, cmd := m.cronEditOpened(msg)
 		return next, cmd, true

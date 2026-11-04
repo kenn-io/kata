@@ -112,3 +112,5 @@ expires immediately. Advertisements do not activate or reserve work.`, `  kata c
   {"label":"example-worker","adapter":"example","features":["cron_v1"],"interval_seconds":60,"state":"active"}
 JSON`
 }
+
+const cronRuntimeWarningHelp = "Ready runtime-inventory warnings print to stderr; --quiet skips this optional lookup. Advertisements never prove execution eligibility."

@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -162,12 +163,11 @@ func TestCronFreshness(t *testing.T) {
 				require.Contains(t, stripANSI(m.viewBody()), "Newest title")
 				return
 			}
-			// Update appends the cron read after the existing issue/SSE commands.
-			msg := cmd()
-			if batch, ok := msg.(tea.BatchMsg); ok {
-				msg = batch[len(batch)-1]()
+			// Execute independent ordinary and runtime commands without relying
+			// on the shape or ordering of Bubble Tea's command batches.
+			for _, loaded := range runCmdTree(cmd) {
+				m, _ = updateModel(m, loaded)
 			}
-			m, _ = updateModel(m, msg)
 			require.Equal(t, 1, a.calls)
 			if tc.name == "disappearing record" {
 				require.Contains(t, stripANSI(m.viewBody()), "this job is no longer in the loaded data")
@@ -672,4 +672,8 @@ func TestCronSearchClickGuards(t *testing.T) {
 		m, _ = updateModel(m, mouseLeftClick(4, 2))
 		require.False(t, m.cron.filtering, state)
 	}
+}
+
+func (*cronReadTestAPI) ListCronRuntimes(context.Context, int64) (*cron.RuntimeInventory, error) {
+	return nil, nil
 }

@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kit/tui/helplayout"
 	"go.kenn.io/kit/tui/splitlayout"
 )
@@ -982,4 +983,8 @@ func TestInboxDesignationChangesApplyOnNextVisit(t *testing.T) {
 			require.Equal(t, "New Inbox capture", m.list.issues[0].Title)
 		})
 	}
+}
+
+func (*inboxTestAPI) ListCronRuntimes(context.Context, int64) (*cron.RuntimeInventory, error) {
+	return nil, nil
 }

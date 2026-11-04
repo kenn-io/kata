@@ -39,16 +39,20 @@ func cronCLIFile(t *testing.T, value any) string {
 }
 func executeCronCLI(t *testing.T, base string, stdin io.Reader, args ...string) (string, string, error) {
 	t.Helper()
+	var out, diagnostic bytes.Buffer
+	err := executeCronCLIWithWriters(t, base, stdin, &out, &diagnostic, args...)
+	return out.String(), diagnostic.String(), err
+}
+func executeCronCLIWithWriters(t *testing.T, base string, stdin io.Reader, out, diagnostic io.Writer, args ...string) error {
+	t.Helper()
 	resetFlags(t)
 	command := newRootCmd()
-	var out, diagnostic bytes.Buffer
-	command.SetOut(&out)
-	command.SetErr(&diagnostic)
+	command.SetOut(out)
+	command.SetErr(diagnostic)
 	command.SetIn(stdin)
 	command.SetContext(contextWithBaseURL(t.Context(), base))
 	command.SetArgs(append([]string{"--project", "spoke-project", "--json", "cron"}, args...))
-	err := command.Execute()
-	return out.String(), diagnostic.String(), err
+	return command.Execute()
 }
 
 func TestCronCLIWorkflowMutationHelpOmitsHubFallback(t *testing.T) {
@@ -147,6 +151,7 @@ func TestCronCLIRejectsInvalidInputBeforeNetwork(t *testing.T) {
 		{[]string{"run", "list", "--before-uid", "bad"}, ``, "ULID"},
 		{[]string{"job", "create", "--uid", "bad", "--file", "-"}, `{}`, "ULID"},
 		{[]string{"runtime", "beat", cronCLIUID(t), "--json-input", "-"}, `{"label":"worker","adapter":"example","features":null}`, "features"},
+		{[]string{"runtime", "beat", cronCLIUID(t), "--json-input", "-"}, `{"label":"worker","adapter":"example","choices":null}`, "choices"},
 		{[]string{"runtime", "beat", cronCLIUID(t), "--json-input", "-"}, `{"actor":"operator","label":" ","adapter":"example"}`, "label"},
 		{[]string{"runtime", "beat", cronCLIUID(t), "--json-input", "-"}, `{"actor":"operator","label":"worker","adapter":"example","interval_seconds":9}`, "interval_seconds"},
 		{[]string{"runtime", "beat", cronCLIUID(t), "--json-input", "-"}, `{"actor":"operator","label":"worker","adapter":"example","interval_seconds":3601}`, "interval_seconds"},
@@ -254,6 +259,10 @@ func TestCronCLIJobMutationWaitsForForwardingBudget(t *testing.T) {
 		}
 		if r.URL.Path == "/api/v1/projects/7" {
 			_, _ = io.WriteString(w, `{"project":{"id":7,"name":"spoke-project"}}`)
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/7/cron/runtimes" {
+			http.NotFound(w, r)
 			return
 		}
 		if r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/cron/jobs/") {

@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 # Federation
@@ -394,6 +394,22 @@ onward. Hubs advertise this transport support as `native_cron_writes` in
 project federation metadata. When federation request signing is required,
 enrollment job writes must be signed on either listener; ordinary daemon
 credentials still work on the normal listener.
+
+A direct project-scoped `push` enrollment also admits
+[runtime heartbeats](../reference/cron.md#runtime-heartbeats). Enabled direct
+spokes record locally and best-effort forward beats to their root. The root
+advertises this support as `cron_runtime_beats` in project federation metadata;
+beats require the same live enrollment, account access and signing policy as
+other push transport. The root derives forwarded attribution from the enrollment,
+never from a body flag. This does not grant general cron definition authority.
+
+Forwarding has one three-second budget and does not take the sync lock or flush
+pending events. A credential or binding change before dispatch prevents that
+attempt. Credentials stay pinned to their captured origin. A beat already sent
+to the old root may arrive after rebind and expire there. An unavailable or older
+root never fails the locally accepted beat; subsequent adapter beats retry.
+Relays do not forward advertisements in this version. Inventories stay in memory,
+do not replicate as events, and never activate or select an executor.
 
 Enrollment tokens are not general daemon API tokens.
 

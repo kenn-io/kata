@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"errors"
-	"slices"
 	"sync"
 	"time"
 
@@ -49,11 +48,11 @@ func (r *CronRuntimeRegistry) Beat(projectID int64, id, actor string, b cron.Run
 	if err != nil {
 		return cron.Runtime{}, err
 	}
-	return r.beatNormalized(projectID, id, actor, b)
+	return r.beatNormalized(projectID, id, actor, b, "")
 }
 
 // beatNormalized takes ownership of a beat validated by NormalizeRuntimeBeat.
-func (r *CronRuntimeRegistry) beatNormalized(projectID int64, id, actor string, b cron.RuntimeBeat) (cron.Runtime, error) {
+func (r *CronRuntimeRegistry) beatNormalized(projectID int64, id, actor string, b cron.RuntimeBeat, forwarder string) (cron.Runtime, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.clock().UTC()
@@ -76,12 +75,16 @@ func (r *CronRuntimeRegistry) beatNormalized(projectID int64, id, actor string, 
 		first = now
 	}
 	v := cron.Runtime{RuntimeBeat: b, UID: id, Actor: actor, FirstSeenAt: first, LastSeenAt: now, ExpiresAt: now.Add(time.Duration(b.IntervalSeconds) * 3 * time.Second), ReportedVia: "direct"}
+	if forwarder != "" {
+		v.ReportedVia = "forwarded"
+		v.ForwarderActor = forwarder
+	}
 	if b.State == "stopping" {
 		v.ExpiresAt = now
 	}
 	v.Status = cron.RuntimeStatus(v, now)
 	r.entries[key] = v
-	v.Features = slices.Clone(v.Features)
+	v.RuntimeBeat = cron.CloneRuntimeBeat(v.RuntimeBeat)
 	return v, nil
 }
 

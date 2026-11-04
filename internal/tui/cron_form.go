@@ -51,6 +51,8 @@ const (
 	cfGrace
 	cfTimeout
 	cfCheckout
+	cfAgent
+	cfModel
 	cfSecrets
 	cfOptions
 	cfCount
@@ -63,7 +65,7 @@ var cronFieldLabels = [cfCount]string{
 	cfPolicy: "Issue policy", cfScheduled: "Scheduled offset", cfDeadline: "Deadline offset",
 	cfRecipient: "Recipient", cfMessage: "Message", cfReport: "Issue",
 	cfOverlap: "Overlap", cfCatchup: "Catch up", cfGrace: "Grace", cfTimeout: "Timeout",
-	cfCheckout: "Checkout key", cfSecrets: "Secrets", cfOptions: "Options",
+	cfCheckout: "Checkout key", cfAgent: "Agent", cfModel: "Model", cfSecrets: "Secrets", cfOptions: "Options",
 }
 
 type cronChoice struct{ value, label string }
@@ -155,6 +157,8 @@ func executeKind(id, label string, workflow bool) cronJobKind {
 		},
 		shown: func(f *cronForm, field cronField) bool {
 			switch field {
+			case cfAgent, cfModel:
+				return f.runtimeFieldShown(field)
 			case cfPrompt:
 				return !workflow
 			case cfWorkflow:
@@ -358,28 +362,31 @@ func cronFormatSecrets(refs map[string]string) string {
 // cronForm is the create and edit draft. Text fields hold what was typed; the
 // definition is built from them only when validating or saving.
 type cronForm struct {
-	uid            string // minted when the form opens, so every send of a create is one job
-	create         bool
-	expected       string // definition_event_uid the edit replaces
-	opened         cron.JobDefinition
-	openedName     string
-	openedKind     string
-	kind           string
-	trigger        string
-	val            [cfCount]string
-	focus          cronField
-	ed             inputState
-	edInit         string
-	snapshot       [cfCount]string
-	snapKind       string
-	snapTrig       string
-	err            *cronFieldError
-	general        string
-	saving         bool
-	conflictCursor int
-	conflict       *db.CronJob
-	formGen        int64
-	workflows      []cronChoice
+	uid              string // minted when the form opens, so every send of a create is one job
+	create           bool
+	expected         string // definition_event_uid the edit replaces
+	opened           cron.JobDefinition
+	openedName       string
+	openedKind       string
+	kind             string
+	trigger          string
+	val              [cfCount]string
+	focus            cronField
+	ed               inputState
+	edInit           string
+	snapshot         [cfCount]string
+	snapKind         string
+	snapTrig         string
+	err              *cronFieldError
+	general          string
+	saving           bool
+	conflictCursor   int
+	conflict         *db.CronJob
+	formGen          int64
+	workflows        []cronChoice
+	runtimeInventory *cron.RuntimeInventory
+	runtimeChoices   map[string][]string
+	runtimeFree      [cfCount]bool
 }
 
 func (f *cronForm) kindDef() cronJobKind {
@@ -593,6 +600,10 @@ func (f *cronForm) locked(field cronField) bool {
 }
 
 func (f *cronForm) isChoice(field cronField) bool {
+	if key := cronRuntimeFieldKey(field); key != "" {
+		_, known := f.runtimeChoices[key]
+		return known && !f.runtimeFree[field] && f.runtimeFieldUsable(field)
+	}
 	switch field {
 	case cfKind, cfTrigger, cfEnabled, cfPolicy, cfWorkflow, cfOverlap, cfCatchup:
 		return true
@@ -609,6 +620,7 @@ func (f *cronForm) kinds() []cronJobKind {
 }
 
 func (f *cronForm) choices(field cronField) []cronChoice {
+
 	var out []cronChoice
 	switch field {
 	case cfKind:
@@ -641,6 +653,9 @@ func (f *cronForm) choices(field cronField) []cronChoice {
 }
 
 func (f *cronForm) current(field cronField) string {
+	if cronRuntimeFieldKey(field) != "" {
+		return f.runtimeCurrent(field)
+	}
 	switch field {
 	case cfKind:
 		return f.kind
@@ -651,6 +666,9 @@ func (f *cronForm) current(field cronField) string {
 }
 
 func (f *cronForm) display(field cronField) string {
+	if cronRuntimeFieldKey(field) != "" {
+		return f.runtimeDisplay(field)
+	}
 	for _, c := range f.choices(field) {
 		if c.value == f.current(field) {
 			return c.label
@@ -661,6 +679,10 @@ func (f *cronForm) display(field cronField) string {
 
 // step moves the focused choice field by one choice, wrapping.
 func (f *cronForm) step(field cronField, delta int) {
+	if cronRuntimeFieldKey(field) != "" {
+		f.stepRuntime(field, delta)
+		return
+	}
 	options := f.choices(field)
 	if len(options) == 0 {
 		return
@@ -738,7 +760,15 @@ func (f *cronForm) syncEditor() {
 		return
 	}
 	if v := f.ed.activeField().value(); v != f.edInit {
-		f.val[f.focus], f.edInit = v, v
+		if f.focus == cfAgent || f.focus == cfModel {
+			key := strings.TrimPrefix(cronRuntimeFieldKey(f.focus), "options.")
+			if raw, err := cronSetRuntimeOption(f.val[cfOptions], key, v); err == nil {
+				f.val[cfOptions] = raw
+			}
+		} else {
+			f.val[f.focus] = v
+		}
+		f.edInit = v
 	}
 }
 
@@ -749,7 +779,7 @@ func (f *cronForm) focusField(field cronField) {
 	if !f.externalText(field) {
 		editor = inputField{kind: fieldSingleLine, input: textinput.New()}
 		editor.input.Prompt = ""
-		editor.setValue(f.val[field])
+		editor.setValue(f.current(field))
 		editor.input.CursorEnd()
 		_ = editor.focus()
 	}
@@ -764,6 +794,7 @@ func (f *cronForm) externalText(field cronField) bool {
 // validate builds the definition with stand-in issue UIDs.
 func (f *cronForm) validate() {
 	f.syncEditor()
+	f.refreshRuntimeChoices()
 	_, _, err := f.build(func(ref string) string {
 		if strings.TrimSpace(ref) == "" {
 			return ""

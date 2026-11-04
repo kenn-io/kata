@@ -141,35 +141,47 @@ func TestCronRecurringChildrenContract(t *testing.T) {
 // A compact, attributed beat admitted by HTTP must also work through the CLI.
 func TestCronRuntimeCLIAdmittedBodyLimit(t *testing.T) {
 	for _, char := range []string{"a", "&", "<", ">"} {
-		t.Run(fmt.Sprintf("actor_%x", char), func(t *testing.T) {
-			env := testenv.New(t)
-			project, err := env.DB.CreateProject(t.Context(), "spoke-project")
-			require.NoError(t, err)
-			actor := strings.Repeat(char, 8143)
-			body, err := json.Marshal(map[string]string{"actor": actor, "label": "worker", "adapter": "example"})
-			require.NoError(t, err)
-			require.Len(t, body, cron.RuntimeBeatLimit)
-			id := "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-			request, err := http.NewRequestWithContext(t.Context(), http.MethodPut, fmt.Sprintf("%s/api/v1/projects/%d/cron/runtimes/%s", env.URL, project.ID, id), bytes.NewReader(body))
-			require.NoError(t, err)
-			request.Header.Set("Content-Type", "application/json")
-			response, err := env.HTTP.Do(request)
-			require.NoError(t, err)
-			raw, err := io.ReadAll(response.Body)
-			require.NoError(t, response.Body.Close())
-			require.NoError(t, err)
-			require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
-			out, diagnostics, err := executeCronCLI(t, env.URL, bytes.NewReader(body), "runtime", "beat", id, "--json-input", "-")
-			require.NoError(t, err, diagnostics)
-			var beat struct {
-				Runtime cron.Runtime `json:"runtime"`
-			}
-			require.NoError(t, json.Unmarshal([]byte(out), &beat))
-			require.Equal(t, actor, beat.Runtime.Actor)
-			require.Equal(t, "live", beat.Runtime.Status)
-			require.Equal(t, "active", beat.Runtime.State)
-			require.Equal(t, 60, beat.Runtime.IntervalSeconds)
-		})
+		for _, choices := range []bool{false, true} {
+			t.Run(fmt.Sprintf("actor_%x/choices_%t", char, choices), func(t *testing.T) {
+				env := testenv.New(t)
+				project, err := env.DB.CreateProject(t.Context(), "spoke-project")
+				require.NoError(t, err)
+				fields := map[string]any{"actor": "", "label": "worker", "adapter": "example"}
+				if choices {
+					fields["choices"] = map[string][]string{"options.agent": {"review"}}
+				}
+				empty, err := json.Marshal(fields)
+				require.NoError(t, err)
+				actor := strings.Repeat(char, cron.RuntimeBeatLimit-len(empty))
+				fields["actor"] = actor
+				body, err := json.Marshal(fields)
+				require.NoError(t, err)
+				require.Len(t, body, cron.RuntimeBeatLimit)
+				id := "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+				request, err := http.NewRequestWithContext(t.Context(), http.MethodPut, fmt.Sprintf("%s/api/v1/projects/%d/cron/runtimes/%s", env.URL, project.ID, id), bytes.NewReader(body))
+				require.NoError(t, err)
+				request.Header.Set("Content-Type", "application/json")
+				response, err := env.HTTP.Do(request)
+				require.NoError(t, err)
+				raw, err := io.ReadAll(response.Body)
+				require.NoError(t, response.Body.Close())
+				require.NoError(t, err)
+				require.Equal(t, http.StatusOK, response.StatusCode, string(raw))
+				out, diagnostics, err := executeCronCLI(t, env.URL, bytes.NewReader(body), "runtime", "beat", id, "--json-input", "-")
+				require.NoError(t, err, diagnostics)
+				var beat struct {
+					Runtime cron.Runtime `json:"runtime"`
+				}
+				require.NoError(t, json.Unmarshal([]byte(out), &beat))
+				require.Equal(t, actor, beat.Runtime.Actor)
+				require.Equal(t, "live", beat.Runtime.Status)
+				require.Equal(t, "active", beat.Runtime.State)
+				require.Equal(t, 60, beat.Runtime.IntervalSeconds)
+				if choices {
+					require.Equal(t, []string{"review"}, beat.Runtime.Choices["options.agent"])
+				}
+			})
+		}
 	}
 }
 

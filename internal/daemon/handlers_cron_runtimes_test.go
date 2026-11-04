@@ -32,21 +32,21 @@ func TestCronRuntimeHTTP(t *testing.T) {
 	other := seedProject(t, env, "other-project")
 	path := fmt.Sprintf("/api/v1/projects/%d/cron/runtimes", p.ID)
 	id := cronHTTPUID(t)
-	status, raw := cronHTTP(t, env, http.MethodGet, path, nil)
+	status, raw := runtimeHTTPRequest(t, env, http.MethodGet, path, nil)
 	require.Equalf(t, 200, status, "%s", raw)
 	require.Contains(t, string(raw), `"state":"unknown"`)
 	before, err := env.DB.MaxEventID(t.Context())
 	require.NoError(t, err)
-	status, raw = cronHTTP(t, env, http.MethodPut, path+"/"+id, runtimeHTTPBody())
+	status, raw = runtimeHTTPRequest(t, env, http.MethodPut, path+"/"+id, runtimeHTTPBody())
 	require.Equalf(t, 200, status, "%s", raw)
 	var response api.BeatCronRuntimeResponse
 	require.NoError(t, json.Unmarshal(raw, &response.Body))
 	require.Equal(t, "live", response.Body.Runtime.Status)
 	require.Equal(t, "not_applicable", response.Body.Forwarded)
-	status, raw = cronHTTP(t, env, http.MethodGet, path, nil)
+	status, raw = runtimeHTTPRequest(t, env, http.MethodGet, path, nil)
 	require.Equal(t, 200, status)
 	require.Contains(t, string(raw), id)
-	status, raw = cronHTTP(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/runtimes", other.ID), nil)
+	status, raw = runtimeHTTPRequest(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/runtimes", other.ID), nil)
 	require.Equal(t, 200, status)
 	require.NotContains(t, string(raw), id)
 	after, err := env.DB.MaxEventID(t.Context())
@@ -75,7 +75,7 @@ func TestCronRuntimeHTTPValidationAndCapacity(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			body := runtimeHTTPBody()
 			maps.Copy(body, tc.patch)
-			status, raw := cronHTTP(t, env, http.MethodPut, path+cronHTTPUID(t), body)
+			status, raw := runtimeHTTPRequest(t, env, http.MethodPut, path+cronHTTPUID(t), body)
 			require.Equal(t, http.StatusBadRequest, status, string(raw))
 			var response api.ErrorEnvelope
 			require.NoError(t, json.Unmarshal(raw, &response))
@@ -87,7 +87,7 @@ func TestCronRuntimeHTTPValidationAndCapacity(t *testing.T) {
 	canonicalBody["interval_seconds"] = 60
 	canonicalBody["state"] = "active"
 	for _, id := range []string{strings.ToLower(cronHTTPUID(t)), "invalid"} {
-		status, raw := cronHTTP(t, env, http.MethodPut, path+id, canonicalBody)
+		status, raw := runtimeHTTPRequest(t, env, http.MethodPut, path+id, canonicalBody)
 		require.Equal(t, http.StatusBadRequest, status, string(raw))
 		var response api.ErrorEnvelope
 		require.NoError(t, json.Unmarshal(raw, &response))
@@ -98,7 +98,7 @@ func TestCronRuntimeHTTPValidationAndCapacity(t *testing.T) {
 		_, err := registry.Beat(p.ID, cronHTTPUID(t), "operator", cron.RuntimeBeat{Label: "worker", Adapter: "example"})
 		require.NoError(t, err)
 	}
-	status, raw := cronHTTP(t, env, http.MethodPut, path+cronHTTPUID(t), runtimeHTTPBody())
+	status, raw := runtimeHTTPRequest(t, env, http.MethodPut, path+cronHTTPUID(t), runtimeHTTPBody())
 	require.Equal(t, http.StatusTooManyRequests, status, string(raw))
 	var response api.ErrorEnvelope
 	require.NoError(t, json.Unmarshal(raw, &response))
@@ -216,4 +216,57 @@ func TestCronRuntimeLateRevocation(t *testing.T) {
 	srv.Handler().ServeHTTP(recorder, req)
 	require.Equal(t, 401, recorder.Code, recorder.Body.String())
 	require.Empty(t, registry.List(p.ID, nil, "dev").Runtimes)
+}
+
+// Contract: optional choices replace the old advertisement and reject ambiguous nulls.
+func TestCronRuntimeChoicesHTTP(t *testing.T) {
+	env := testenv.New(t)
+	p := seedProject(t, env, "example-project")
+	path := fmt.Sprintf("/api/v1/projects/%d/cron/runtimes/%s", p.ID, cronHTTPUID(t))
+	body := runtimeHTTPBody()
+	body["choices"] = map[string][]string{"options.agent": {"review", "default"}, "checkout_key": {}}
+	status, raw := runtimeHTTPRequest(t, env, http.MethodPut, path, body)
+	require.Equalf(t, 200, status, "%s", raw)
+	require.Contains(t, string(raw), `"options.agent":["default","review"]`)
+	for _, bad := range []any{nil, map[string]any{"options.agent": nil}, map[string][]string{"unknown": {}}, map[string][]string{"options.agent": {"a", "a"}}, map[string][]string{"options.agent": make([]string, 33)}} {
+		body["choices"] = bad
+		status, raw = runtimeHTTPRequest(t, env, http.MethodPut, path, body)
+		require.Equalf(t, 400, status, "%s", raw)
+	}
+	delete(body, "choices")
+	status, raw = runtimeHTTPRequest(t, env, http.MethodPut, path, body)
+	require.Equalf(t, 200, status, "%s", raw)
+	require.NotContains(t, string(raw), "options.agent")
+	status, raw = runtimeHTTPRequest(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/capabilities", p.ID), nil)
+	require.Equal(t, 200, status)
+	require.Contains(t, string(raw), "cron_runtime_choices_v1")
+}
+func TestCronRuntimeChoicesRegistryOwnership(t *testing.T) {
+	now := time.Now()
+	registry := daemon.NewCronRuntimeRegistry(now, func() time.Time { return now })
+	b := api.BeatCronRuntimeBody{}.RuntimeBeat
+	b.Label = "worker"
+	b.Adapter = "example"
+	b.Choices = map[string][]string{"options.agent": {"a", "z"}, "checkout_key": {}}
+	out, err := registry.Beat(1, "id", "operator", b)
+	require.NoError(t, err)
+	b.Choices["options.agent"][0] = "input"
+	out.Choices["options.agent"][0] = "output"
+	delete(out.Choices, "checkout_key")
+	list := registry.List(1, nil, "dev")
+	require.Equal(t, []string{"a", "z"}, list.Runtimes[0].Choices["options.agent"])
+	require.Contains(t, list.Runtimes[0].Choices, "checkout_key")
+	list.Runtimes[0].Choices["options.agent"][0] = "list"
+	require.Equal(t, []string{"a", "z"}, registry.List(1, nil, "dev").Runtimes[0].Choices["options.agent"])
+	b.Choices = nil
+	_, err = registry.Beat(1, "id", "operator", b)
+	require.NoError(t, err)
+	require.Empty(t, registry.List(1, nil, "dev").Runtimes[0].Choices)
+}
+
+// Runtime fixtures use owner-local authority without inventing a bearer token.
+func runtimeHTTPRequest(t *testing.T, env *testenv.Env, method, path string, body any) (int, []byte) {
+	t.Helper()
+	response, raw := envDoRaw(t, env, method, path, body, nil)
+	return response.StatusCode, raw
 }
