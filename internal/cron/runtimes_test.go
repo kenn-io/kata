@@ -112,7 +112,7 @@ func TestRuntimeValidationDomains(t *testing.T) {
 	for i := range tooMany {
 		tooMany[i] = fmt.Sprintf("feature%d", i)
 	}
-	for _, bad := range []RuntimeBeat{{Label: "worker", Adapter: "example", Features: tooMany}, {Label: "worker", Adapter: "example", Features: []string{"same", "same"}}, {Label: string([]byte{255}), Adapter: "example"}, {Label: "worker", Adapter: "example", State: "idle"}} {
+	for _, bad := range []RuntimeBeat{{Label: "worker", Adapter: "example", Features: tooMany}, {Label: "worker", Adapter: "example", Features: []string{"same", "same"}}, {Label: "worker", Adapter: "example", Features: []string{"alpha", "beta", "alpha"}}, {Label: string([]byte{255}), Adapter: "example"}, {Label: "worker", Adapter: "example", State: "idle"}} {
 		_, err := NormalizeRuntimeBeat(bad)
 		require.Error(t, err)
 	}

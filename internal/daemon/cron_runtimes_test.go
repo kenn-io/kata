@@ -61,11 +61,13 @@ func TestCronRuntimeRegistryCapacity(t *testing.T) {
 	require.NoError(t, err, "reclaim across untouched projects")
 }
 func TestCronRuntimeRegistrySequences(t *testing.T) {
-	hegel.Test(t, func(h *hegel.T) {
+	check := func(h interface {
+		Fatal(...any)
+		Fatalf(string, ...any)
+	}, steps []int) {
 		now := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
 		reg := NewCronRuntimeRegistry(now, func() time.Time { return now })
 		model := map[string]time.Time{}
-		steps := hegel.Draw(h, hegel.Lists(hegel.Integers(0, 10000)))
 		if len(steps) > 100 {
 			steps = steps[:100]
 		}
@@ -103,7 +105,13 @@ func TestCronRuntimeRegistrySequences(t *testing.T) {
 				h.Fatalf("retained UID/expiry inventory %v want %v", observed, model)
 			}
 		}
-	}, hegel.WithTestCases(1000), hegel.WithDatabase(t.TempDir()))
+	}
+	t.Run("two_runtime_inventory", func(t *testing.T) { check(t, []int{20, 21}) })
+	t.Run("model", func(t *testing.T) {
+		hegel.Test(t, func(h *hegel.T) {
+			check(h, hegel.Draw(h, hegel.Lists(hegel.Integers(0, 10000))))
+		}, hegel.WithTestCases(1000), hegel.WithDatabase(t.TempDir()))
+	})
 }
 
 func TestCronRuntimeRegistryRefresh(t *testing.T) {

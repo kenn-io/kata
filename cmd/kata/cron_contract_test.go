@@ -205,7 +205,7 @@ func TestCronRuntimeHelpExampleExecutes(t *testing.T) {
 	require.NoError(t, err)
 	target, err := url.Parse(env.URL)
 	require.NoError(t, err)
-	// Observe the wire body without asserting a forwarded client identity.
+	// Verify every displayed field survives the complete CLI request path.
 	proxy := &httputil.ReverseProxy{Rewrite: func(request *httputil.ProxyRequest) {
 		request.SetURL(target)
 	}}

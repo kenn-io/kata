@@ -18,7 +18,7 @@ import (
 // An attributed beat keeps its bytes and replay reader through SDK transport.
 func TestCronRuntimeCLIWireBody(t *testing.T) {
 	check := func(h require.TestingT, actor string) {
-		// Materialize within the request budget even when every byte needs escaping.
+		// Keep materialized JSON within the 8 KiB request budget.
 		if len(actor) > 1000 {
 			actor = actor[:1000]
 			for !utf8.ValidString(actor) {

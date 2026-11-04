@@ -156,6 +156,35 @@ func TestCronRuntimeHTTPAuthority(t *testing.T) {
 			}
 		})
 	}
+	t.Run("host_policy", func(t *testing.T) {
+		env := testenv.New(t)
+		project := seedProject(t, env, "example-project")
+		host := &capabilitiesReadHost{projectID: project.ID}
+		server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, HostAccess: host})
+		t.Cleanup(func() { require.NoError(t, server.Close()) })
+		path := fmt.Sprintf("/api/v1/projects/%d/cron/runtimes", project.ID)
+		for _, tc := range []struct {
+			method, suffix string
+			status         int
+		}{
+			{http.MethodGet, "", http.StatusOK},
+			{http.MethodPut, "/" + cronHTTPUID(t), http.StatusNotFound},
+		} {
+			body, err := json.Marshal(runtimeHTTPBody())
+			require.NoError(t, err)
+			request := httptest.NewRequestWithContext(t.Context(), tc.method, path+tc.suffix, strings.NewReader(string(body)))
+			request.Header.Set("Content-Type", "application/json")
+			request = request.WithContext(daemon.WithPrincipal(request.Context(), daemon.Principal{Kind: daemon.PrincipalHost, Subject: "reader", Actor: "reader"}))
+			recorder := httptest.NewRecorder()
+			server.Handler().ServeHTTP(recorder, request)
+			require.Equal(t, tc.status, recorder.Code, recorder.Body.String())
+		}
+		require.Len(t, host.calls, 2)
+		require.Equal(t, "listCronRuntimes", host.calls[0].ID)
+		require.False(t, host.calls[0].Policy.Mutation)
+		require.Equal(t, "beatCronRuntime", host.calls[1].ID)
+		require.True(t, host.calls[1].Policy.Mutation)
+	})
 }
 
 type revokingRuntimeStore struct {
