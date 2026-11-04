@@ -216,7 +216,7 @@ func (m Model) refreshAfterUndo(entry undoEntry, resp *MutationResp) (Model, tea
 		m.cache.markStale()
 	}
 	cmds := []tea.Cmd{m.fetchInitial()}
-	if m.detail.issue != nil && (entry.kind == "delete" || m.detail.issue.UID == entry.uid ||
+	if m.detail.issue != nil && (m.detail.issue.UID == entry.uid ||
 		(entry.link != nil && (m.detail.issue.UID == entry.link.From.UID || m.detail.issue.UID == entry.link.To.UID))) {
 		if m.detail.issue.UID == entry.uid && resp != nil && resp.Issue != nil {
 			m.detail.issue = mergeUndoIssue(m.detail.issue, resp.Issue, entry)
@@ -228,7 +228,7 @@ func (m Model) refreshAfterUndo(entry undoEntry, resp *MutationResp) (Model, tea
 		m.detail.fetchSeq.links = max(m.detail.fetchSeq.links, floor)
 		cmds = append(cmds, m.detail.refetch(m.api))
 	}
-	if (entry.kind == "delete" || entry.kind == "label.add" || entry.kind == "label.remove") && entry.projectID != 0 && m.projectLabels != nil {
+	if (entry.kind == "delete" && entry.projectID != 0 || entry.kind == "label.add" || entry.kind == "label.remove") && m.projectLabels != nil {
 		if _, exists := m.projectLabels.byProject[entry.projectID]; exists {
 			var refresh tea.Cmd
 			m, refresh = m.dispatchLabelFetch(entry.projectID)

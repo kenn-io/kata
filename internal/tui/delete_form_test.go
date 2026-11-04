@@ -227,6 +227,9 @@ func TestDeleteSelectsTheNeighbouringRowAndNamesUndo(t *testing.T) {
 			h.finish(h.enter())
 
 			assert.True(t, h.isDeleted(target.UID))
+			for _, row := range h.m.list.visibleRows() {
+				assert.NotEqual(t, target.UID, row.issue.UID, "the confirmed issue leaves the list")
+			}
 			selected, ok := h.m.list.targetRow()
 			require.True(t, ok)
 			assert.Equal(t, neighbour.UID, selected.UID, "selection moves to the neighbouring row")
@@ -270,6 +273,9 @@ func TestUndoOfADelete(t *testing.T) {
 
 			h.m.projectLabels = newLabelCache()
 			h.m.projectLabels.byProject[h.project.ID] = labelCacheEntry{pid: h.project.ID}
+			neighbour, err := h.client.GetIssueDetail(t.Context(), h.project.ID, h.issues[1].UID)
+			require.NoError(t, err)
+			h.m.detail = detailModel{scopePID: h.project.ID, issue: neighbour.Issue}
 			refresh := h.finish(h.key(runeKey('u')))
 
 			assert.False(t, h.isDeleted(target.UID))
@@ -282,6 +288,9 @@ func TestUndoOfADelete(t *testing.T) {
 				assert.Equal(t, "undid delete on "+h.qualified(target), h.m.toast.text)
 			}
 			h.m = h.drain(refresh)
+			require.NotNil(t, h.m.detail.issue)
+			assert.Equal(t, h.issues[1].UID, h.m.detail.issue.UID)
+			assert.Equal(t, "Second", h.m.detail.issue.Title, "undo keeps the neighbouring detail visible")
 			assert.Equal(t, []LabelCount{{Label: "urgent", Count: 1}}, h.m.projectLabels.byProject[h.project.ID].labels, "undo refreshes the restored issue's project labels")
 		})
 	}
@@ -372,4 +381,56 @@ func TestDeleteFromSplitListReplacesRetainedDetail(t *testing.T) {
 	require.NotNil(t, h.m.detail.issue)
 	assert.Equal(t, selected.UID, h.m.detail.issue.UID)
 	assert.NotEqual(t, child.UID, h.m.detail.issue.UID)
+}
+
+func TestDeleteInInboxDoesNotRestoreDeletedDetail(t *testing.T) {
+	h := newDeleteHarness(t, viewDetail)
+	_, err := h.env.DB.DesignateInboxProject(t.Context(), db.DesignateInboxProjectIn{ProjectID: h.project.ID, Actor: "alice"})
+	require.NoError(t, err)
+	target := h.issues[0]
+	h.selectIssue(target.UID)
+	h.m = h.drain(h.finish(h.key(runeKey('I'))))
+	require.True(t, h.m.scope.inbox)
+	h.selectIssue(target.UID)
+	h.key(runeKey('X'))
+	h.m = typeString(h.m, "DELETE "+h.qualified(target))
+	h.m = h.drain(h.enter())
+	require.True(t, h.isDeleted(target.UID))
+	h.m = h.drain(h.key(runeKey('I')))
+	require.False(t, h.m.scope.inbox)
+	assert.NotContains(t, stripANSI(h.m.View().Content), "issue_not_found")
+	if h.m.detail.issue != nil {
+		assert.NotEqual(t, target.UID, h.m.detail.issue.UID, "returning from Inbox must leave the deleted detail")
+	}
+}
+
+func TestDeleteConfirmationFieldVisibleAt80x12(t *testing.T) {
+	defer snapshotInit(t)()
+	qualified := strings.Repeat("example-project-", 15) + "#abc4"
+	form := newDeleteForm(formTarget{}, Issue{Title: "Duplicate issue"}, qualified)
+	rendered := renderCenteredForm(form, 80, 12, snapshotFixedNow)
+	assert.LessOrEqual(t, strings.Count(rendered, "\n")+1, 12, "the whole modal fits:\n%s", stripANSI(rendered))
+	m := initialModel(Options{})
+	m.width, m.height, m.input = 80, 12, form
+	visible := stripANSI(m.overlayInputAndModal(strings.Repeat(strings.Repeat(" ", 80)+"\n", 11)))
+	assert.Contains(t, visible, "Confirm")
+	assert.Contains(t, visible, "enter delete · esc cancel")
+}
+
+func TestUndoLabelRefreshPreservesZeroProjectScope(t *testing.T) {
+	for _, kind := range []string{"label.add", "label.remove"} {
+		t.Run(kind, func(t *testing.T) {
+			h := newDeleteHarness(t, viewList)
+			h.m.projectLabels = newLabelCache()
+			h.m.projectLabels.byProject[0] = labelCacheEntry{}
+			_, cmd := h.m.refreshAfterUndo(undoEntry{kind: kind}, nil)
+			var refreshed []int64
+			for _, msg := range runCmdTree(cmd) {
+				if labels, ok := msg.(labelsFetchedMsg); ok {
+					refreshed = append(refreshed, labels.pid)
+				}
+			}
+			require.Equal(t, []int64{0}, refreshed, "label undo retains main's label-fetch scope")
+		})
+	}
 }

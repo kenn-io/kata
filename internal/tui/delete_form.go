@@ -107,9 +107,6 @@ func (m Model) finishDelete(target formTarget, mut mutationDoneMsg) (Model, tea.
 	qualified := m.input.del.expected
 	m.input = inputState{}
 	uid := target.issueUID
-	if mut.resp != nil && mut.resp.Issue != nil && mut.resp.Issue.UID != "" {
-		uid = mut.resp.Issue.UID
-	}
 	m.detail.cancelReads()
 	m.detail = newDetailModel()
 	m, follow := m.refreshListDay(func(lm listModel) listModel { return lm.withoutIssue(uid) })
@@ -148,8 +145,8 @@ func (lm listModel) withoutIssue(uid string) listModel {
 // renderDeleteForm shows the issue to be deleted and what to type.
 func renderDeleteForm(s inputState, innerW int) string {
 	parts := []string{
-		titleStyle.Render(strings.Join(termtext.Wrap(sanitizeForLine(s.title), innerW), "\n")),
-		subtleStyle.Render(truncate(sanitizeForLine(s.del.issueTitle), innerW)),
+		titleStyle.Render(strings.Join(termtext.Wrap(sanitizeForLine(s.title), innerW-2), "\n")),
+		subtleStyle.Render(truncate(sanitizeForLine(s.del.issueTitle), innerW-2)),
 		renderNewIssueField(s, 0, innerW),
 	}
 	if status := renderFormStatus(s); status != "" {
