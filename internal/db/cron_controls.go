@@ -122,7 +122,7 @@ func validateCronControlEvent(event RemoteEvent, authorityUID string, validatePa
 	}
 	for key, change := range payload.Diff {
 		request := strings.HasPrefix(key, CronRequestMetadataPrefix)
-		if !(request || (validatePause && key == CronProjectPauseMetadataKey)) {
+		if !request && (!validatePause || key != CronProjectPauseMetadataKey) {
 			continue
 		}
 		if authorityUID == "" || event.OriginInstanceUID != authorityUID {

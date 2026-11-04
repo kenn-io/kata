@@ -234,7 +234,7 @@ func TestCronRuntimeRequestEligibility(t *testing.T) {
 	require.Nil(t, m.cron.request)
 }
 func TestCronRuntimeRequestStaleCompletionAndDefinitiveError(t *testing.T) {
-	m, api := runtimeFixture(t, false)
+	m, _ := runtimeFixture(t, false)
 	m = runtimeDialog(t, m, 'R')
 	m, cmd := m.routeModalKey(keyRune('y'))
 	msg := cmd()
@@ -243,7 +243,7 @@ func TestCronRuntimeRequestStaleCompletionAndDefinitiveError(t *testing.T) {
 	require.Nil(t, m.cron.request)
 	next, _, _ := m.routeTopLevel(msg)
 	require.Nil(t, next.(Model).cron.request)
-	m, api = runtimeFixture(t, false)
+	m, api := runtimeFixture(t, false)
 	api.errs = []error{&APIError{Status: http.StatusGone, Code: "request_expired", Message: "Use a fresh UID"}}
 	m = runtimeDialog(t, m, 'R')
 	m, cmd = m.routeModalKey(keyRune('y'))

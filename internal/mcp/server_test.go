@@ -454,6 +454,7 @@ func TestServerToolAnnotationsMatchMutationRisk(t *testing.T) {
 	readOnly := map[string]bool{
 		"kata.cron_workflows": true, "kata.cron_workflow": true, "kata.cron_runs": true, "kata.cron_run": true,
 		"kata.cron_capabilities": true, "kata.cron_jobs": true, "kata.cron_job": true, "kata.cron_new_uid": true,
+		"kata.cron_request_list":        true,
 		"kata.skills":                   true,
 		"kata.federation_bridge_status": true,
 		"kata.teams":                    true, "kata.team_show": true, "kata.project_access_show": true,
