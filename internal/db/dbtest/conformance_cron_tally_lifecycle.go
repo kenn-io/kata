@@ -142,7 +142,7 @@ func checkCronTallyImportAndEnable(t *testing.T, store db.Storage, backend Backe
 // potentially overlapping pruning histories or loses source evidence.
 func checkCronTallyLiveMerge(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
-	for _, mode := range []string{"disjoint", "equal", "conflict", "kind collision", "pull-only target"} {
+	for _, mode := range []string{"disjoint", "equal", "conflict", "issue-sync conflict", "kind collision", "pull-only target"} {
 		source, target := newCronTallyFixture(ctx, t, store), newCronTallyFixture(ctx, t, store)
 		if mode == "pull-only target" {
 			_, err := store.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: target.project.ID, Role: db.FederationRoleSpoke, HubURL: "https://daemon.example", HubProjectID: 42, HubProjectUID: target.project.UID, Enabled: true, Actor: "operator"})
@@ -153,9 +153,9 @@ func checkCronTallyLiveMerge(t *testing.T, store db.Storage) error {
 		}
 		a, b := tallyLifecycleEntry(source, 9007199254740993), tallyLifecycleEntry(target, 17)
 		switch mode {
-		case "equal", "conflict":
+		case "equal", "conflict", "issue-sync conflict":
 			b = a
-			if mode == "conflict" {
+			if mode != "equal" {
 				b.Counts.Succeeded++
 			}
 		case "kind collision":
@@ -164,13 +164,18 @@ func checkCronTallyLiveMerge(t *testing.T, store db.Storage) error {
 		}
 		source.seed(ctx, t, a)
 		target.seed(ctx, t, b)
+		if mode == "issue-sync conflict" {
+			// Both backends name the binding before reading tally evidence.
+			_, err := store.UpsertIssueSyncBinding(ctx, db.UpsertIssueSyncBindingParams{ProjectID: target.project.ID, Provider: "github", SourceKey: "github:merge/target", RemoteID: "merge/target", DisplayName: "merge/target", Config: jsontext.Value(`{}`), IntervalSeconds: 60})
+			require.NoError(t, err)
+		}
 		beforeSource, err := store.ProjectByID(ctx, source.project.ID)
 		require.NoError(t, err)
 		beforeTarget, err := store.ProjectByID(ctx, target.project.ID)
 		require.NoError(t, err)
 		result, err := store.MergeProjects(ctx, db.MergeProjectsParams{SourceProjectID: source.project.ID, TargetProjectID: target.project.ID, Actor: "operator"})
-		if mode == "conflict" {
-			require.ErrorIs(t, err, db.ErrCronTallyConflict)
+		if mode == "conflict" || mode == "issue-sync conflict" {
+			require.ErrorIs(t, err, map[string]error{"conflict": db.ErrCronTallyConflict, "issue-sync conflict": db.ErrProjectMergeIssueSyncBinding}[mode])
 			got, e := store.ProjectByID(ctx, source.project.ID)
 			require.NoError(t, e)
 			require.Equal(t, beforeSource, got)
