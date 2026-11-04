@@ -112,13 +112,6 @@ func (h toolHandlers) cronRunObserve(ctx context.Context, _ *sdkmcp.CallToolRequ
 	if err != nil {
 		return nil, nil, err
 	}
-	raw, err := json.Marshal(in.Summary)
-	if err != nil {
-		return nil, nil, err
-	}
-	if _, err = cron.ParseSummary(raw); err != nil {
-		return nil, nil, err
-	}
 	p, err := h.createTarget(ctx, in.Project)
 	if err != nil {
 		return nil, nil, err
