@@ -3,6 +3,7 @@ package dbtest
 import (
 	"context"
 	"encoding/json/jsontext"
+	"fmt"
 	"testing"
 	"time"
 
@@ -73,14 +74,28 @@ func RunRelayCheckpointHistoryValidationCache(t *testing.T, store db.Storage, ba
 
 	unrelated, err := store.CreateProject(ctx, "snapshot-project")
 	require.NoError(t, err)
-	snapshotOther := newRemoteEvent(t, unrelated, &issue.UID, "issue.snapshot", "member", grants[0].SpokeInstanceUID, 650, jsontext.Value(`{}`))
+	unrelatedIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: unrelated.ID, Title: "Unrelated snapshot issue", Author: "member",
+	})
+	require.NoError(t, err)
+	check()
+	require.Equal(t, 4, fullScans, "unrelated snapshot issue creation preserves checkpoint validations")
+	snapshotOther := newRemoteEvent(t, unrelated, &unrelatedIssue.UID, "issue.snapshot", "member", grants[0].SpokeInstanceUID, 650,
+		jsontext.Value(fmt.Sprintf(`{"uid":%q,"title":"Unrelated snapshot issue","author":"member","status":"open","metadata":{},"comments":[],"labels":[],"links":[]}`, unrelatedIssue.UID)))
 	_, err = store.InsertRemoteEvents(ctx, unrelated.ID, []db.RemoteEvent{snapshotOther})
 	require.NoError(t, err)
 	check()
 	require.Equal(t, 4, fullScans, "unrelated snapshots preserve both checkpoint validations")
 
 	// A snapshot in the checkpoints' own project requires fresh validation.
-	snapshot := newRemoteEvent(t, fixture.project, &issue.UID, "issue.snapshot", "member", grants[0].SpokeInstanceUID, 700, jsontext.Value(`{}`))
+	snapshotIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: fixture.project.ID, Title: "Checkpoint snapshot issue", Author: "member",
+	})
+	require.NoError(t, err)
+	check()
+	require.Equal(t, 4, fullScans, "same-project snapshot issue creation preserves checkpoint validations")
+	snapshot := newRemoteEvent(t, fixture.project, &snapshotIssue.UID, "issue.snapshot", "member", grants[0].SpokeInstanceUID, 700,
+		jsontext.Value(fmt.Sprintf(`{"uid":%q,"title":"Checkpoint snapshot issue","author":"member","status":"open","metadata":{},"comments":[],"labels":[],"links":[]}`, snapshotIssue.UID)))
 	_, err = store.InsertRemoteEvents(ctx, fixture.project.ID, []db.RemoteEvent{snapshot})
 	require.NoError(t, err)
 	bootstrap := store.(db.RelayResetBootstrapStore)

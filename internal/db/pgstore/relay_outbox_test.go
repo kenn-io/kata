@@ -87,9 +87,7 @@ func TestRelayResetRepeatedBeforeDownstreamActivation(t *testing.T) {
 	store, err := pgstore.Open(t.Context(), dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
-	dbtest.RunRelayResetRepeatedBeforeDownstreamActivation(t, store, func(store db.Storage, observe func()) func() {
-		return pgstore.InstallRelayHistoryFullScanObserverForTest(store.(*pgstore.Store), observe)
-	})
+	dbtest.RunRelayResetRepeatedBeforeDownstreamActivation(t, store)
 }
 
 func TestRelayResetSupersedesArtifactOffers(t *testing.T) {

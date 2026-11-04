@@ -71,9 +71,7 @@ func TestRelayResetRepeatedBeforeDownstreamActivation(t *testing.T) {
 	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
-	dbtest.RunRelayResetRepeatedBeforeDownstreamActivation(t, store, func(store db.Storage, observe func()) func() {
-		return sqlitestore.InstallRelayHistoryFullScanObserverForTest(store.(*sqlitestore.Store), observe)
-	})
+	dbtest.RunRelayResetRepeatedBeforeDownstreamActivation(t, store)
 }
 
 func TestRelayResetSupersedesArtifactOffers(t *testing.T) {

@@ -117,7 +117,13 @@ func RunRelayEnrollmentHistoryValidationCache(t *testing.T, store db.Storage, ba
 	collision, err := store.CreateProject(ctx, "collision-project")
 	require.NoError(t, err)
 	for i, snapshotProject := range []db.Project{collision, project} {
-		snapshot := newRemoteEvent(t, snapshotProject, &issue.UID, "issue.snapshot", "member", peerUID, 550, jsontext.Value(`{}`))
+		snapshotIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: snapshotProject.ID, Title: "Snapshot issue", Author: "member",
+		})
+		require.NoError(t, err)
+		requireReset(false, 2, "snapshot issue creation preserves validated history")
+		snapshot := newRemoteEvent(t, snapshotProject, &snapshotIssue.UID, "issue.snapshot", "member", peerUID, 550,
+			jsontext.Value(fmt.Sprintf(`{"uid":%q,"title":"Snapshot issue","author":"member","status":"open","metadata":{},"comments":[],"labels":[],"links":[]}`, snapshotIssue.UID)))
 		_, err = store.InsertRemoteEvents(ctx, snapshotProject.ID, []db.RemoteEvent{snapshot})
 		require.NoError(t, err)
 		requireReset(false, 2+i, "only snapshots in the relayed project revalidate its history")
