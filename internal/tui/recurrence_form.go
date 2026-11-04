@@ -79,7 +79,7 @@ func (m Model) routeRecurrenceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if !m.keymap.SetRecurrence.matches(msg) {
 		return m, nil, false
 	}
-	if !m.detailIsActive() || m.detail.issue == nil {
+	if !m.detailPaneVisible() || m.detail.issue == nil {
 		return m, nil, false
 	}
 	if m.detail.issue.RecurrenceID != nil && m.detail.recurrence == nil {
