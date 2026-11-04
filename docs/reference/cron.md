@@ -111,6 +111,24 @@ The `basis` explains how those instants were calculated:
 | `adapter_defined` | Adapter interval or `@every`; Kata defines no instant, so `next` is empty. |
 | `none` | Manual or issue-date trigger; `next` is empty. |
 
+With API 0.40.0, `stored_progress`, `fresh_anchor` and `adapter_trigger`
+schedules also include `collisions`: shared UTC instants with enabled jobs in
+the same project and delivery kind, within `[from, from + 7 days)` and after
+retained native `through`. Groups contain their first `at`/trigger-zone
+`local`, `occurrences`, `peer_count` and up to ten named `peers`. Different
+nonempty string `options.adapter` or `options.executor` pins exclude a pair;
+missing/non-string pins match anything. This assumes adapters honor those
+conventions. `items: []` means no match was found; an absent field means it
+was not computed. `skipped` counts inspected jobs without usable instants,
+including native peers without live open parents or valid progress. Bounds
+are 20 groups, 10,080 instants per walk, 200,000 stepping calls, 1,024 live
+peer rows and 8 MiB of peer documents and parent metadata. `truncated` marks
+any omitted work or peer names; those groups contain known peers, and their
+counts need not equal the complete groups. An overflowing horizon clips to
+RFC3339's final representable instant; unrepresentable UTC/local instants
+are omitted, also marking truncation. The field is informational and changes
+no validation verdict, warning or exit status. Older daemons omit it.
+
 These are hypothetical trigger instants. A paused job shows what enabling it
 would produce (`paused` warning). A closed native parent shows what reopening
 it would produce (`parent_closed`). The preview does not promise dispatch or
@@ -637,7 +655,9 @@ arbitrates nothing. The value names an adapter, not an installation; each
 adapter decides which of its installations runs the job. `herdr-kata` and
 `tern-kata` are examples, and each adapter documents its own value. Adapters
 that do not read the key ignore it: Herdr Kata v0.1.0, for example, logs
-`ignored options key: adapter` and still runs the job.
+`ignored options key: adapter` and still runs the job. Validation reads
+`options.executor` only to exclude pin-disjoint pairs from the collision
+preview; the value stays adapter-defined and unenforced.
 
 Local transcripts, process IDs, session handles, credentials, and delivery
 buffers are not shared run evidence. An adapter may buffer a failed observation

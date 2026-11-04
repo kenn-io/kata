@@ -71,19 +71,36 @@ func recurringAuthority(ctx context.Context, tx *sql.Tx, projectID int64) (bool,
 
 // recurringParent reads the bound parent and whether it is soft-deleted.
 func (a CronSQL) recurringParent(ctx context.Context, tx *sql.Tx, projectID int64, parentUID string, lock bool) (Issue, bool, error) {
-	// Parent lock precedes reading owner/status/progress, sharing normal mutation serialization.
-	query := `SELECT id,uid,status,owner,author,metadata,revision,deleted_at IS NOT NULL FROM issues WHERE uid=$1 AND project_id=$2`
+	return a.recurringParentRead(ctx, tx, projectID, parentUID, lock, 0)
+}
+
+// A finite metadata limit is used only by informational fleet previews. Its
+// byte prefix can end inside a UTF-8 rune; callers reject the oversized
+// lookahead before decoding it as JSON.
+func (a CronSQL) recurringParentRead(ctx context.Context, tx *sql.Tx, projectID int64, parentUID string, lock bool, metadataLimit int) (Issue, bool, error) {
+	metadata := "metadata"
+	args := []any{parentUID, projectID}
+	if metadataLimit > 0 {
+		metadata = "SUBSTR(CAST(metadata AS BLOB),1,$3)"
+		if a.Postgres {
+			metadata = "SUBSTRING(CONVERT_TO(metadata,'UTF8'),1,$3)"
+		}
+		args = append(args, metadataLimit)
+	}
+	// Parent lock precedes reading owner/status/progress for normal mutations.
+	query := `SELECT id,uid,status,owner,author,` + metadata + `,revision,deleted_at IS NOT NULL FROM issues WHERE uid=$1 AND project_id=$2`
 	if a.Postgres && lock {
 		query += " FOR UPDATE"
 	}
 	var p Issue
 	var deleted bool
-	err := tx.QueryRowContext(ctx, query, parentUID, projectID).Scan(&p.ID, &p.UID, &p.Status, &p.Owner, &p.Author, &p.Metadata, &p.Revision, &deleted)
+	err := tx.QueryRowContext(ctx, query, args...).Scan(&p.ID, &p.UID, &p.Status, &p.Owner, &p.Author, &p.Metadata, &p.Revision, &deleted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, false, ErrNotFound
 	}
 	return p, deleted, err
 }
+
 func readRecurringProgress(parent Issue, jobUID string) (cron.RecurringProgress, error) {
 	var values map[string]jsontext.Value
 	var p cron.RecurringProgress

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -118,4 +119,49 @@ func TestCronValidateReadCapability(t *testing.T) {
 	require.Len(t, host.calls, 2)
 	require.Equal(t, "read", string(host.calls[0].Policy.Capability))
 	require.False(t, host.calls[0].Policy.Mutation)
+}
+
+// Adapter pin conventions only filter this informational field. A paused
+// candidate still shows its enabled-copy coincidences without extra warnings.
+func TestCronValidateCollisionHTTP(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	project := seedProject(t, env, "example-project")
+	definition := cronHTTPDefinition(t)
+	definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 9 * * *", Timezone: "America/New_York"}
+	definition.Options = []byte(`{"adapter":"runner-a","executor":"group-a"}`)
+	for _, name := range []string{"Morning review", "Daily review", "Other runner"} {
+		peer := definition
+		if name == "Other runner" {
+			peer.Options = []byte(`{"adapter":"runner-b"}`)
+		}
+		_, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: name, Definition: peer, Actor: "operator"})
+		require.NoError(t, err)
+	}
+	before, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	definition.Enabled = false
+	path := fmt.Sprintf("/api/v1/projects/%d/cron/jobs/validate?from=2026-11-03T00:00:00Z", project.ID)
+	status, raw := cronHTTP(t, env, http.MethodPost, path, map[string]any{"name": "Candidate", "definition": definition})
+	require.Equalf(t, 200, status, "%s", raw)
+	var out db.CronValidation
+	require.NoError(t, json.Unmarshal(raw, &out))
+	require.True(t, out.Valid)
+	require.Empty(t, out.Errors)
+	require.Len(t, out.Warnings, 1)
+	require.Equal(t, "paused", out.Warnings[0].Code)
+	require.NotNil(t, out.Schedule.Collisions)
+	require.Len(t, out.Schedule.Collisions.Items, 1)
+	item := out.Schedule.Collisions.Items[0]
+	require.Equal(t, 2, item.PeerCount)
+	require.Equal(t, 7, item.Occurrences)
+	require.Equal(t, "2026-11-03T09:00:00-05:00", item.Local)
+	after, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+	definition.Trigger = cron.Trigger{Kind: "once", At: "2026-12-01T00:00:00Z"}
+	status, raw = cronHTTP(t, env, http.MethodPost, path, map[string]any{"name": "Candidate", "definition": definition})
+	require.Equalf(t, 200, status, "%s", raw)
+	var fields map[string]any
+	require.NoError(t, json.Unmarshal(raw, &fields))
+	require.Equal(t, []any{}, fields["schedule"].(map[string]any)["collisions"].(map[string]any)["items"])
 }

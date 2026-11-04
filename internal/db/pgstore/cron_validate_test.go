@@ -23,6 +23,9 @@ func TestCronValidateDoesNotLockParent(t *testing.T) {
 	definition := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 60}, Action: cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}, Issue: &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Review"}, Overlap: "allow", Catchup: "latest"}
 	job, _, err := store.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Review", Actor: "operator", Definition: definition})
 	require.NoError(t, err)
+	_, _, err = store.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Peer review", Actor: "operator", Definition: definition})
+	require.NoError(t, err)
+
 	holder, err := store.BeginTx(t.Context(), nil)
 	require.NoError(t, err)
 	defer func() { _ = holder.Rollback() }()
