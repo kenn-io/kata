@@ -80,12 +80,7 @@ func (r *CronDispatchRecorder) Record(ctx context.Context, c db.RecurringCronCan
 	}
 	key := cronDispatchKey{c.ProjectID, c.JobUID}
 	prev, exists := r.last[key]
-	// A first idle observation seeds diagnostics without manufacturing a
-	// transition on every restart. First non-idle decisions still log.
-	changed := d.Reason != cron.DispatchIdle
-	if exists {
-		changed = prev.decision.Reason != d.Reason || prev.decision.DefinitionEventUID != d.DefinitionEventUID || prev.decision.Detail != d.Detail
-	}
+	changed := cronDispatchChanged(prev.decision, exists, d)
 	nonIdle := prev.nonIdle
 	if d.Reason != cron.DispatchIdle {
 		nonIdle = &d
@@ -112,6 +107,26 @@ func (r *CronDispatchRecorder) Record(ctx context.Context, c db.RecurringCronCan
 		r.health.LogErrorsSinceStart++
 	}
 	return changed, err
+}
+
+// cronDispatchChanged reports whether d is a transition worth history. A first
+// idle observation seeds diagnostics without a transition on every restart.
+// Delivered, skipped and scanning batches return to idle silently; failures
+// and other pauses keep a recovery record.
+func cronDispatchChanged(prev api.CronDispatchDecision, exists bool, d api.CronDispatchDecision) bool {
+	if !exists {
+		return d.Reason != cron.DispatchIdle
+	}
+	if prev.DefinitionEventUID != d.DefinitionEventUID || prev.Detail != d.Detail {
+		return true
+	}
+	switch prev.Reason {
+	case cron.DispatchDelivered, cron.DispatchSkipped, cron.DispatchScanning:
+		if d.Reason == cron.DispatchIdle {
+			return false
+		}
+	}
+	return prev.Reason != d.Reason
 }
 
 // appendLocked opens the log on demand; callers hold logMu.

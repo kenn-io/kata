@@ -217,7 +217,7 @@ func TestCronRecorderInitialIdleDoesNotLog(t *testing.T) {
 	require.NoError(t, err)
 	raw, err := os.ReadFile(path) //nolint:gosec // G304: TempDir fixture
 	require.NoError(t, err)
-	require.Equal(t, 2, strings.Count(string(raw), "\n"), "delivery and return to idle still log")
+	require.Equal(t, 1, strings.Count(string(raw), "\n"), "delivery logs; its return to idle does not")
 }
 
 // Healthy and neutral batches return to idle silently; failures retain a

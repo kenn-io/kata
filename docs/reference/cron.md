@@ -353,9 +353,10 @@ records; the reader does not validate it against this CLI's known codes.
 | `error` | Another failure occurred; the local log contains its detail. |
 
 The daemon retains each candidate's last decision in memory and logs changes,
-deliveries and finalized skips. A first idle observation stays in memory without
-writing a log entry. Repeated idle decisions and identical errors do not flood
-the log.
+deliveries and finalized skips. A first idle observation, or a return to idle
+after a delivery, skip or scan, stays in memory without writing a log entry; a
+return to idle after a failure or pause still logs. Repeated idle decisions and
+identical errors do not flood the log.
 The recorder resets on restart. The first non-idle decision after a restart logs
 an observation, even if it matches the previous process's last decision; a
 record does not by itself prove a state transition. Its JSONL history survives at
