@@ -16,8 +16,8 @@ import (
 // deleteFormState is what a Delete form needs beyond its field: the
 // "<project>#<id>" the user must type, and the title of the issue it is for.
 type deleteFormState struct {
-	expected string
-	title    string
+	expected   string
+	issueTitle string
 }
 
 func newDeleteForm(target formTarget, issue Issue, expected string) inputState {
@@ -30,7 +30,7 @@ func newDeleteForm(target formTarget, issue Issue, expected string) inputState {
 		title:  "DELETE " + expected,
 		target: target,
 		fields: []inputField{{id: fieldConfirm, kind: fieldSingleLine, input: input, label: "Confirm"}},
-		del:    deleteFormState{expected: expected, title: issue.Title},
+		del:    deleteFormState{expected: expected, issueTitle: issue.Title},
 	}
 	_ = s.fields[0].focus()
 	return s
@@ -179,7 +179,7 @@ func (lm listModel) withoutIssue(uid string) listModel {
 func renderDeleteForm(s inputState, innerW int) string {
 	parts := []string{
 		titleStyle.Render(truncate(sanitizeForLine(s.title), innerW)),
-		subtleStyle.Render(truncate(sanitizeForLine(s.del.title), innerW)),
+		subtleStyle.Render(truncate(sanitizeForLine(s.del.issueTitle), innerW)),
 		subtleStyle.Render(truncate(fmt.Sprintf("Type %s to confirm.", s.del.expected), innerW)),
 		renderNewIssueField(s, 0, innerW),
 	}

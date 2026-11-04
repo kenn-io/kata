@@ -84,21 +84,6 @@ func detailHelpRows(dm detailModel, chrome viewChrome) [][]helplayout.HelpItem {
 	return appendUndoHint(dm.detailHelpRows(chrome.deleteHidden), chrome.undoAvailable)
 }
 
-// deleteHintItem is the footer hint for the delete key; hidden leaves its key
-// empty so withoutUnboundKeys drops it.
-func deleteHintItem(hidden bool) helplayout.HelpItem {
-	item := helplayout.HelpItem{Description: "delete"}
-	if !hidden {
-		item.Key = keyDisplay(newKeymap().Delete)
-	}
-	return item
-}
-
-// withoutUnboundKeys drops hints whose key is empty (a cleared binding).
-func withoutUnboundKeys(items []helplayout.HelpItem) []helplayout.HelpItem {
-	return slices.DeleteFunc(items, func(item helplayout.HelpItem) bool { return item.Key == "" })
-}
-
 func appendUndoHint(rows [][]helplayout.HelpItem, available bool) [][]helplayout.HelpItem {
 	if !available || len(rows) == 0 {
 		return rows
@@ -206,7 +191,11 @@ func (lm listModel) queueHelpRows(hideDelete bool) [][]helplayout.HelpItem {
 		helplayout.HelpItem{Key: "c", Description: "clear"},
 		helplayout.HelpItem{Key: "x", Description: "close"},
 		helplayout.HelpItem{Key: "d", Description: "dates"},
-		deleteHintItem(hideDelete),
+	)
+	if !hideDelete {
+		items = append(items, helplayout.HelpItem{Key: "X", Description: "delete"})
+	}
+	items = append(items,
 		helplayout.HelpItem{Key: "!", Description: "priority"},
 		helplayout.HelpItem{Key: "D", Description: "daemons"},
 		helplayout.HelpItem{Key: "F", Description: "federation"},
@@ -215,7 +204,7 @@ func (lm listModel) queueHelpRows(hideDelete bool) [][]helplayout.HelpItem {
 		helplayout.HelpItem{Key: "?", Description: "help"},
 		helplayout.HelpItem{Key: "q", Description: "quit"},
 	)
-	return [][]helplayout.HelpItem{withoutUnboundKeys(items)}
+	return [][]helplayout.HelpItem{items}
 }
 
 // detailHelpRows is the persistent footer for the detail view. The
@@ -242,21 +231,24 @@ func (dm detailModel) detailHelpRows(hideDelete bool) [][]helplayout.HelpItem {
 		{Key: "x", Description: "close"},
 		{Key: "r", Description: "reopen"},
 		{Key: "d", Description: "dates"},
-		deleteHintItem(hideDelete),
-		{Key: "p", Description: "parent"},
-		{Key: "b", Description: "block"},
-		{Key: "l", Description: "related"},
-		{Key: "!", Description: "priority"},
-		{Key: "D", Description: "daemons"},
-		{Key: "F", Description: "federation"},
-		{Key: "C", Description: "credentials"},
-		{Key: "N", Description: "child"},
-		{Key: "L", Description: "layout"},
-		{Key: "esc", Description: "back"},
-		{Key: "?", Description: "help"},
-		{Key: "q", Description: "quit"},
 	}
-	actions = withoutUnboundKeys(actions)
+	if !hideDelete {
+		actions = append(actions, helplayout.HelpItem{Key: "X", Description: "delete"})
+	}
+	actions = append(actions,
+		helplayout.HelpItem{Key: "p", Description: "parent"},
+		helplayout.HelpItem{Key: "b", Description: "block"},
+		helplayout.HelpItem{Key: "l", Description: "related"},
+		helplayout.HelpItem{Key: "!", Description: "priority"},
+		helplayout.HelpItem{Key: "D", Description: "daemons"},
+		helplayout.HelpItem{Key: "F", Description: "federation"},
+		helplayout.HelpItem{Key: "C", Description: "credentials"},
+		helplayout.HelpItem{Key: "N", Description: "child"},
+		helplayout.HelpItem{Key: "L", Description: "layout"},
+		helplayout.HelpItem{Key: "esc", Description: "back"},
+		helplayout.HelpItem{Key: "?", Description: "help"},
+		helplayout.HelpItem{Key: "q", Description: "quit"},
+	)
 	if dm.detailFocus == focusChildren && len(dm.children) > 0 {
 		nav := []helplayout.HelpItem{
 			{Key: "↑↓", Description: "scroll"},
