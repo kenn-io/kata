@@ -14,53 +14,82 @@ import (
 	"modernc.org/sqlite"
 )
 
-func TestSearchFTS_ScopedPageBudget(t *testing.T) {
-	d, path := openTestDBWithPath(t)
-	ctx := t.Context()
-	p, err := d.CreateProject(ctx, "example-project")
-	require.NoError(t, err)
-	issue := createTesterIssueWithBody(ctx, t, d, p.ID, "login browser", "safari timeout")
-	other, err := d.CreateProject(ctx, "other-project")
-	require.NoError(t, err)
-	thread := createTesterIssueWithBody(ctx, t, d, other.ID, "ordinary task", "details")
-	raw, err := sql.Open("sqlite", path)
-	require.NoError(t, err)
-	defer func() { _ = raw.Close() }()
-	raw.SetMaxOpenConns(1)
-	// Search uses the real store query on an unwrapped driver connection so
-	// DBStatus includes every page read, including filtered-out documents.
-	searchStore := &sqlitestore.Store{DB: raw}
-	pages := func(reset bool) int {
-		conn, err := raw.Conn(ctx)
-		require.NoError(t, err)
-		defer func() { _ = conn.Close() }()
-		return sqlitePageFetches(t, conn, reset)
-	}
-	baseline := 0
-	for _, size := range []int{0, 30_000} {
-		if size > 0 {
+func TestSearchFTS_PageBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name                      string
+		comments                  int
+		otherProject, interleaved bool
+		query                     string
+		want, budget              int
+	}{
+		{"sparse same-project", 100_000, false, false, "needle", 1, 512},
+		{"dense other-project", 30_000, true, false, "login", 1, 4096},
+		{"interleaved", 30_000, true, true, "login browser safari timeout", 1, 16_384},
+		{"absent word", 0, false, false, "absentword", 0, 512},
+		{"busy four-term", 30_000, false, false, "login browser safari timeout", 20, 400_000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, path := openTestDBWithPath(t)
+			ctx := t.Context()
+			p, err := d.CreateProject(ctx, "example-project")
+			require.NoError(t, err)
+			issue := createTesterIssueWithBody(ctx, t, d, p.ID, "login browser", "safari timeout")
+			commentProject := p.ID
+			if tc.otherProject {
+				other, err := d.CreateProject(ctx, "other-project")
+				require.NoError(t, err)
+				commentProject = other.ID
+			}
+			raw, err := sql.Open("sqlite", path)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = raw.Close() })
+			raw.SetMaxOpenConns(1)
 			tx, err := raw.BeginTx(ctx, nil)
 			require.NoError(t, err)
-			for n := range size {
-				_, err = tx.ExecContext(ctx, `INSERT INTO comments(uid,issue_id,author,body) VALUES(?,?,?,?)`, fmt.Sprintf("%026d", n+1), thread.ID, "tester", "login browser safari timeout")
+			// Many issues also catch queries that probe every issue for absent words.
+			_, err = tx.ExecContext(ctx, `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
+ INSERT INTO issues(uid,project_id,short_id,title,author) SELECT printf('%026d',x),?,printf('%08d',x),'ordinary task','tester' FROM n`, commentProject)
+			require.NoError(t, err)
+			for n := range tc.comments {
+				body := "login browser safari timeout"
+				id := issue.ID + 1 + int64(n%300)
+				if tc.name == "sparse same-project" {
+					body = "ordinary text"
+					if n == 0 {
+						body = "needle"
+					}
+				}
+				if tc.interleaved && (n == 0 || n == tc.comments-1) {
+					id = issue.ID
+				}
+				_, err = tx.ExecContext(ctx, `INSERT INTO comments(uid,issue_id,author,body) VALUES(?,?,'tester',?)`, fmt.Sprintf("%026d", n+1), id, body)
 				require.NoError(t, err)
 			}
 			require.NoError(t, tx.Commit())
-		}
-		pages(true)
-		start := time.Now()
-		hits, err := searchStore.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login browser safari timeout"})
-		elapsed := time.Since(start)
-		require.NoError(t, err)
-		require.Len(t, hits, 1)
-		require.Equal(t, issue.ID, hits[0].Issue.ID)
-		count := pages(false)
-		t.Logf("%d other-project comments: %d page fetches, four-term search %s", size, count, elapsed)
-		if size == 0 {
-			baseline = count
-		} else {
-			require.LessOrEqual(t, count, baseline+512, "scoped search must avoid ranking another project's comments")
-		}
+			store := &sqlitestore.Store{DB: raw}
+			for name, search := range map[string]func(context.Context, db.SearchFTSParams) ([]db.SearchCandidate, error){"all": store.SearchFTS, "any": store.SearchFTSAny} {
+				t.Run(name, func(t *testing.T) {
+					conn, err := raw.Conn(ctx)
+					require.NoError(t, err)
+					sqlitePageFetches(t, conn, true)
+					require.NoError(t, conn.Close())
+					start := time.Now()
+					hits, err := search(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: tc.query})
+					elapsed := time.Since(start)
+					require.NoError(t, err)
+					require.Len(t, hits, tc.want)
+					for _, hit := range hits {
+						require.Equal(t, p.ID, hit.Issue.ProjectID)
+					}
+					conn, err = raw.Conn(ctx)
+					require.NoError(t, err)
+					count := sqlitePageFetches(t, conn, false)
+					require.NoError(t, conn.Close())
+					t.Logf("%d comments: %d page fetches, %.3f ms", tc.comments, count, float64(elapsed)/float64(time.Millisecond))
+					require.LessOrEqual(t, count, tc.budget, "search must follow matching postings")
+				})
+			}
+		})
 	}
 }
 
@@ -124,127 +153,4 @@ func sqlitePageFetches(t *testing.T, conn *sql.Conn, reset bool) int {
 		return nil
 	}))
 	return total
-}
-
-func TestSearchFTS_AbsentPageBudget(t *testing.T) {
-	d, path := openTestDBWithPath(t)
-	ctx := t.Context()
-	p, err := d.CreateProject(ctx, "example-project")
-	require.NoError(t, err)
-	raw, err := sql.Open("sqlite", path)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = raw.Close() })
-	raw.SetMaxOpenConns(1)
-	_, err = raw.ExecContext(ctx, `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
- INSERT INTO issues(uid,project_id,short_id,title,author) SELECT printf('%026d',x),?,printf('%08d',x),'ordinary task','tester' FROM n`, p.ID)
-	require.NoError(t, err)
-	store := &sqlitestore.Store{DB: raw}
-	for name, search := range map[string]func(context.Context, db.SearchFTSParams) ([]db.SearchCandidate, error){"all": store.SearchFTS, "any": store.SearchFTSAny} {
-		t.Run(name, func(t *testing.T) {
-			conn, err := raw.Conn(ctx)
-			require.NoError(t, err)
-			sqlitePageFetches(t, conn, true)
-			require.NoError(t, conn.Close())
-			start := time.Now()
-			hits, err := search(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "absentword"})
-			elapsed := time.Since(start)
-			require.NoError(t, err)
-			require.Empty(t, hits)
-			conn, err = raw.Conn(ctx)
-			require.NoError(t, err)
-			count := sqlitePageFetches(t, conn, false)
-			require.NoError(t, conn.Close())
-			t.Logf("10k issues absent word: %d page fetches, %s", count, elapsed)
-			require.LessOrEqual(t, count, 512, "an absent word must not probe every issue")
-		})
-	}
-}
-
-func TestSearchFTS_InterleavedPageBudget(t *testing.T) {
-	d, path := openTestDBWithPath(t)
-	ctx := t.Context()
-	p, err := d.CreateProject(ctx, "example-project")
-	require.NoError(t, err)
-	issue := createTesterIssueWithBody(ctx, t, d, p.ID, "login browser", "safari timeout")
-	other, err := d.CreateProject(ctx, "other-project")
-	require.NoError(t, err)
-	thread := createTesterIssueWithBody(ctx, t, d, other.ID, "ordinary task", "details")
-	raw, err := sql.Open("sqlite", path)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = raw.Close() })
-	raw.SetMaxOpenConns(1)
-	store := &sqlitestore.Store{DB: raw}
-	baseline := 0
-	for _, size := range []int{0, 30000} {
-		if size > 0 {
-			tx, err := raw.BeginTx(ctx, nil)
-			require.NoError(t, err)
-			for n := range size {
-				id := thread.ID
-				if n == 0 || n == size-1 {
-					id = issue.ID
-				}
-				_, err = tx.ExecContext(ctx, `INSERT INTO comments(uid,issue_id,author,body) VALUES(?,?,?,?)`, fmt.Sprintf("%026d", n+1), id, "tester", "login browser safari timeout")
-				require.NoError(t, err)
-			}
-			require.NoError(t, tx.Commit())
-		}
-		conn, err := raw.Conn(ctx)
-		require.NoError(t, err)
-		sqlitePageFetches(t, conn, true)
-		require.NoError(t, conn.Close())
-		start := time.Now()
-		hits, err := store.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login browser safari timeout"})
-		elapsed := time.Since(start)
-		require.NoError(t, err)
-		require.Len(t, hits, 1)
-		require.Equal(t, issue.ID, hits[0].Issue.ID)
-		conn, err = raw.Conn(ctx)
-		require.NoError(t, err)
-		count := sqlitePageFetches(t, conn, false)
-		require.NoError(t, conn.Close())
-		t.Logf("%d interleaved comments: %d page fetches, %s", size, count, elapsed)
-		if size == 0 {
-			baseline = count
-		} else {
-			require.LessOrEqual(t, count, baseline+512)
-		}
-	}
-}
-
-func TestSearchFTS_BusyProjectCost(t *testing.T) {
-	d, path := openTestDBWithPath(t)
-	ctx := t.Context()
-	p, err := d.CreateProject(ctx, "example-project")
-	require.NoError(t, err)
-	raw, err := sql.Open("sqlite", path)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = raw.Close() })
-	raw.SetMaxOpenConns(1)
-	tx, err := raw.BeginTx(ctx, nil)
-	require.NoError(t, err)
-	for n := range 300 {
-		_, err = tx.ExecContext(ctx, `INSERT INTO issues(uid,project_id,short_id,title,author) VALUES(?,?,?,'ordinary task','tester')`, fmt.Sprintf("%026d", n+1), p.ID, fmt.Sprintf("%08d", n+1))
-		require.NoError(t, err)
-	}
-	for n := range 30_000 {
-		_, err = tx.ExecContext(ctx, `INSERT INTO comments(uid,issue_id,author,body) VALUES(?,(SELECT id FROM issues WHERE project_id=? AND short_id=?),'tester',?)`, fmt.Sprintf("%026d", n+1), p.ID, fmt.Sprintf("%08d", n%300+1), "login browser safari timeout")
-		require.NoError(t, err)
-	}
-	require.NoError(t, tx.Commit())
-	conn, err := raw.Conn(ctx)
-	require.NoError(t, err)
-	sqlitePageFetches(t, conn, true)
-	require.NoError(t, conn.Close())
-	start := time.Now()
-	hits, err := (&sqlitestore.Store{DB: raw}).SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login browser safari timeout"})
-	elapsed := time.Since(start)
-	require.NoError(t, err)
-	require.Len(t, hits, 20)
-	conn, err = raw.Conn(ctx)
-	require.NoError(t, err)
-	count := sqlitePageFetches(t, conn, false)
-	require.NoError(t, conn.Close())
-	t.Logf("30k comments across 300 issues, four terms: %d page fetches, %s", count, elapsed)
-	require.LessOrEqual(t, count, 400_000, "each term must scan matching comments once across the project")
 }

@@ -116,30 +116,28 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 	if r.mode == searchAll {
 		minimum = len(phrases)
 	}
-	// Drive each term from its posting list. Membership filters discard other
-	// projects' hits before document lookups and bm25 scoring. Unary plus keeps
-	// SQLite from turning rowid membership into a MATCH lookup per document.
+	// Start from matching postings, then check issue eligibility before scoring.
 	query := fmt.Sprintf(`WITH terms AS (
   SELECT value AS word FROM json_each(?)
- ), scoped AS MATERIALIZED (
-  SELECT i.id FROM issues i WHERE i.project_id = ? %s
  ), hits AS MATERIALIZED (
   SELECT issues_fts.rowid AS issue_id, terms.word, -bm25(issues_fts) AS score, 0 AS in_comments
   FROM terms CROSS JOIN issues_fts
-  WHERE issues_fts MATCH terms.word AND +issues_fts.rowid IN (SELECT id FROM scoped)
+  WHERE issues_fts MATCH terms.word AND EXISTS (
+   SELECT 1 FROM issues i WHERE i.id = issues_fts.rowid AND i.project_id = ? %s
+  )
   UNION ALL
   SELECT c.issue_id, terms.word, -bm25(comments_fts), 1
   FROM terms CROSS JOIN comments_fts
   CROSS JOIN comments c ON c.id = comments_fts.rowid
-  WHERE comments_fts MATCH terms.word AND +comments_fts.rowid IN (
-   SELECT c.id FROM scoped i JOIN comments c ON c.issue_id = i.id
+  WHERE comments_fts MATCH terms.word AND EXISTS (
+   SELECT 1 FROM issues i WHERE i.id = c.issue_id AND i.project_id = ? %s
   )
  ), word_hits AS (
   SELECT issue_id, word, max(score) AS score, max(in_comments) AS in_comments
   FROM hits GROUP BY issue_id, word
  ), candidates AS (
   SELECT issue_id AS doc_key, sum(score) AS score, max(in_comments) AS in_comments
-  FROM word_hits GROUP BY issue_id HAVING count(DISTINCT word) >= ?
+  FROM word_hits GROUP BY issue_id HAVING count(*) >= ?
  )
  SELECT `+issueColumns+`,
         candidates.score,
@@ -149,8 +147,10 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
  FROM candidates
  JOIN issues i ON i.id = candidates.doc_key
  JOIN projects p ON p.id = i.project_id
- ORDER BY %s LIMIT ?`, rowFilter, order)
+ ORDER BY %s LIMIT ?`, rowFilter, rowFilter, order)
 	args := []any{string(words), r.params.ProjectID}
+	args = append(args, filterArgs...)
+	args = append(args, r.params.ProjectID)
 	args = append(args, filterArgs...)
 	args = append(args, minimum, colPhrase, colPhrase, limit)
 

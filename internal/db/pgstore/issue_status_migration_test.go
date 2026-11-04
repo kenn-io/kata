@@ -82,7 +82,6 @@ func TestIssueStatusMigrationUpgradesVersion29(t *testing.T) {
 func dropProjectAccessSchema(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
 	dropEventMoveHistoryIndex(ctx, t, admin, schema)
-	restoreCommentSearch39(ctx, t, admin, schema)
 	dropCommentUIDHandleIndex(ctx, t, admin, schema)
 	dropRelaySchema(ctx, t, admin, schema)
 	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP TABLE %s.federation_entity_provenance,%s.federation_event_provenance,%s.federation_root_keys`, schema, schema, schema)) // #nosec G201 -- fixed test schema identifiers.

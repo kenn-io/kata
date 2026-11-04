@@ -96,7 +96,6 @@ func TestCommentReplyIndexMigrationUpgradesVersion33(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
 	dropEventMoveHistoryIndex(ctx, t, admin, schema)
-	restoreCommentSearch39(ctx, t, admin, schema)
 	dropCommentUIDHandleIndex(ctx, t, admin, schema)
 	_, err = admin.ExecContext(ctx, `DROP INDEX reply_index_upgrade.idx_comments_reply_to;
 		UPDATE reply_index_upgrade.meta SET value='33' WHERE key='schema_version'`)

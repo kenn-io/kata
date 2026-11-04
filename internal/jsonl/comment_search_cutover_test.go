@@ -2,7 +2,6 @@ package jsonl_test
 
 import (
 	"database/sql"
-	_ "embed"
 	"path/filepath"
 	"testing"
 
@@ -12,17 +11,14 @@ import (
 	"go.kenn.io/kata/internal/jsonl"
 )
 
-//go:embed testdata/schema_v39.sql
-var commentSearchSQLiteSchema39 string
-
-func TestCommentSearchCutoverUpgradesVersion39(t *testing.T) {
+func TestCommentSearchCutoverUpgradesVersion32(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "old.db")
 	raw, err := sql.Open("sqlite", path)
 	require.NoError(t, err)
-	_, err = raw.ExecContext(ctx, commentSearchSQLiteSchema39+`
- INSERT INTO meta(key,value) VALUES('schema_version','39'),('instance_uid','00000000000000000000000009');
+	_, err = raw.ExecContext(ctx, projectHubRelaySQLiteSchema32+`
+ INSERT INTO meta(key,value) VALUES('schema_version','32'),('instance_uid','00000000000000000000000009');
  INSERT INTO projects(uid,name) VALUES('00000000000000000000000001','example-project');
  INSERT INTO issues(uid,project_id,short_id,title,author) SELECT '00000000000000000000000002',id,'0002','login','tester' FROM projects WHERE name='example-project';
  INSERT INTO comments(uid,issue_id,author,body) SELECT '00000000000000000000000003',id,'tester','safari' FROM issues;`)

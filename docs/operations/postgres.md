@@ -1,7 +1,7 @@
 ---
 title: PostgreSQL operations
 description: Operate Kata on PostgreSQL with split migration and runtime roles, backups, upgrades, and health checks.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 # PostgreSQL operations
@@ -125,7 +125,9 @@ Schema 41 indexes each comment separately so comment writes and issue edits
 avoid rebuilding every comment on the issue. Stop daemons and imports for the
 index build. Existing runtime table grants remain sufficient. See the
 [schema 41 migration requirements](../development/postgres-migrations.md#schema-41-separate-comment-search-documents)
-for downtime, search ranking changes, and rollback.
+for downtime and rollback. Scores combine each word's best document rank, so
+result order can change. SQLite phrases must fit within one document. Comment
+search cost follows the number of matching comments.
 
 After preparation, grant the runtime role DML access and set default privileges
 for objects created by future migrations:

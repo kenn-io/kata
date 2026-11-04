@@ -85,22 +85,20 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
  FROM jsonb_array_elements_text($1::jsonb)
 ), terms AS (
  SELECT word, quote_literal(word)::tsquery AS q FROM words
-), scoped AS MATERIALIZED (
- SELECT i.id FROM issues i WHERE %s
 ), hits AS (
  SELECT i.id AS issue_id, terms.word, ts_rank_cd(h.tsv, terms.q) AS score, false AS in_comments
- FROM terms CROSS JOIN scoped i JOIN issues_search h ON h.issue_id = i.id
- WHERE h.tsv @@ terms.q
+ FROM terms CROSS JOIN issues_search h JOIN issues i ON i.id = h.issue_id
+ WHERE h.tsv @@ terms.q AND %s
  UNION ALL
  SELECT i.id, terms.word, ts_rank_cd(to_tsvector('kata_simple_unaccent', c.body), terms.q), true
- FROM terms CROSS JOIN scoped i JOIN comments c ON c.issue_id = i.id
- WHERE to_tsvector('kata_simple_unaccent', c.body) @@ terms.q
+ FROM terms CROSS JOIN comments c JOIN issues i ON i.id = c.issue_id
+ WHERE to_tsvector('kata_simple_unaccent', c.body) @@ terms.q AND %s
 ), word_hits AS (
  SELECT issue_id, word, max(score) AS score, bool_or(in_comments) AS in_comments
  FROM hits GROUP BY issue_id, word
 ), candidates AS (
  SELECT issue_id AS doc_key, sum(score) AS score, bool_or(in_comments) AS in_comments
- FROM word_hits GROUP BY issue_id HAVING count(DISTINCT word) >= %s
+ FROM word_hits GROUP BY issue_id HAVING count(*) >= %s
 )
 SELECT `+issueColumns+`,
        candidates.score,
@@ -110,7 +108,7 @@ SELECT `+issueColumns+`,
  FROM candidates
  JOIN issues i ON i.id = candidates.doc_key
  JOIN projects p ON p.id = i.project_id
- ORDER BY %s LIMIT %s`, rowFilter.String(), minimum, order, bind(limit))
+ ORDER BY %s LIMIT %s`, rowFilter.String(), rowFilter.String(), minimum, order, bind(limit))
 	args := predicateArgs
 
 	rows, err := s.QueryContext(ctx, query, args...)

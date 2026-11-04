@@ -1,12 +1,12 @@
 -- Replace aggregate comment indexing while serving daemons and imports are stopped.
-DROP TRIGGER issues_search_after_comment_insert ON comments;
-DROP TRIGGER issues_search_after_comment_update ON comments;
-DROP TRIGGER issues_search_after_comment_delete ON comments;
-DROP FUNCTION issues_search_trigger_on_comment_insert();
-DROP FUNCTION issues_search_trigger_on_comment_update();
-DROP FUNCTION issues_search_trigger_on_comment_delete();
-DROP TRIGGER issues_search_after_issue_insert ON issues;
-DROP TRIGGER issues_search_after_issue_update ON issues;
+DROP TRIGGER IF EXISTS issues_search_after_comment_insert ON comments;
+DROP TRIGGER IF EXISTS issues_search_after_comment_update ON comments;
+DROP TRIGGER IF EXISTS issues_search_after_comment_delete ON comments;
+DROP FUNCTION IF EXISTS issues_search_trigger_on_comment_insert();
+DROP FUNCTION IF EXISTS issues_search_trigger_on_comment_update();
+DROP FUNCTION IF EXISTS issues_search_trigger_on_comment_delete();
+DROP TRIGGER IF EXISTS issues_search_after_issue_insert ON issues;
+DROP TRIGGER IF EXISTS issues_search_after_issue_update ON issues;
 
 CREATE OR REPLACE FUNCTION rebuild_issue_search(p_issue_id BIGINT) RETURNS void LANGUAGE plpgsql AS $$
 BEGIN
@@ -29,7 +29,7 @@ CREATE TRIGGER issues_search_after_issue_update
   AFTER UPDATE OF title, body ON issues
   FOR EACH ROW EXECUTE FUNCTION issues_search_trigger_on_issue();
 
-CREATE INDEX idx_comments_search ON comments USING GIN (to_tsvector('kata_simple_unaccent', body));
+CREATE INDEX IF NOT EXISTS idx_comments_search ON comments USING GIN (to_tsvector('kata_simple_unaccent', body));
 
 UPDATE issues_search s SET tsv = to_tsvector('kata_simple_unaccent', i.title || ' ' || coalesce(i.body, ''))
   FROM issues i WHERE i.id = s.issue_id;

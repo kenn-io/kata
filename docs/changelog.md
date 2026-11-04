@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -12,7 +12,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Add, edit, and delete comments, or edit issue titles and bodies, without
   reindexing every comment on the issue. Search still finds words spread across
   an issue and its comments; scores now sum each word's best document score,
-  so ranking can shift. SQLite phrases must fit within one document.
+  so ranking can shift. SQLite phrases must fit within one document. Comment
+  search cost follows the number of matching comments.
   Existing stores upgrade to schema 41 through SQLite's JSONL cutover or the
   [offline PostgreSQL migration](development/postgres-migrations.md#schema-41-separate-comment-search-documents).
 

@@ -118,7 +118,6 @@ func TestNativeCronMigrationRollback(t *testing.T) {
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
-	restoreCommentSearch39(ctx, t, admin, schema)
 	dropNativeCronSchema(ctx, t, admin, schema)
 	_, err = admin.ExecContext(ctx, `UPDATE cron_rollback.meta SET value='30' WHERE key='schema_version'; CREATE TABLE cron_rollback.cron_runs(blocker INTEGER)`)
 	require.NoError(t, err)

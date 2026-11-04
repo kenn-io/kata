@@ -33,7 +33,6 @@ func TestCommentUIDHandleIndexMigrationUpgradesVersion38(t *testing.T) {
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
-	restoreCommentSearch39(ctx, t, admin, schema)
 	dropCommentUIDHandleIndex(ctx, t, admin, schema)
 	_, err = admin.ExecContext(ctx, `UPDATE comment_handle_upgrade.meta SET value='38' WHERE key='schema_version'`)
 	require.NoError(t, err)

@@ -1,10 +1,7 @@
 package pgstore_test
 
 import (
-	"context"
 	"database/sql"
-	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -13,50 +10,36 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-// Prior-version migration fixtures restore the aggregate search triggers.
-func restoreCommentSearch39(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
-	t.Helper()
-	start := strings.Index(projectHubRelaySchema32, "CREATE OR REPLACE FUNCTION rebuild_issue_search")
-	require.NotEqual(t, -1, start)
-	searchSQL, _, found := strings.Cut(projectHubRelaySchema32[start:], "\n-- ---")
-	require.True(t, found)
-	tx, err := admin.BeginTx(ctx, nil)
-	require.NoError(t, err)
-	defer func() { _ = tx.Rollback() }()
-	_, err = tx.ExecContext(ctx, fmt.Sprintf(`SET LOCAL search_path TO %s, public;
- DROP INDEX IF EXISTS idx_comments_search;
- DROP TRIGGER issues_search_after_issue_insert ON issues;
- DROP TRIGGER issues_search_after_issue_update ON issues;
- DROP TRIGGER IF EXISTS issues_search_after_comment_insert ON comments;
- DROP TRIGGER IF EXISTS issues_search_after_comment_update ON comments;
- DROP TRIGGER IF EXISTS issues_search_after_comment_delete ON comments;
- `, schema)+searchSQL+`SELECT rebuild_issue_search(id) FROM issues;`) // #nosec G201 -- Fixed test schema.
-	require.NoError(t, err)
-	require.NoError(t, tx.Commit())
-}
-
 func TestCommentSearchMigrationUpgradesVersion39(t *testing.T) {
 	ctx := t.Context()
 	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
 	t.Cleanup(cleanup)
-	store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: "comment_search_upgrade", SchemaMode: pgstore.SchemaModeBootstrap})
-	require.NoError(t, err)
-	p, err := store.CreateProject(ctx, "example-project")
-	require.NoError(t, err)
-	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "login", Author: "tester"})
-	require.NoError(t, err)
-	_, _, err = store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "tester", Body: "safari"})
-	require.NoError(t, err)
-	require.NoError(t, store.Close())
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
-	defer func() { _ = admin.Close() }()
-	restoreCommentSearch39(ctx, t, admin, "comment_search_upgrade")
-	_, err = admin.ExecContext(ctx, `UPDATE comment_search_upgrade.meta SET value='39' WHERE key='schema_version'`)
+	t.Cleanup(func() { _ = admin.Close() })
+	tx, err := admin.BeginTx(ctx, nil)
 	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+	_, err = tx.ExecContext(ctx, `CREATE SCHEMA comment_search_upgrade; SET LOCAL search_path TO comment_search_upgrade, pg_catalog, pg_temp;`+projectHubRelaySchema32)
+	require.NoError(t, err)
+	for _, migration := range pgstore.Migrations() {
+		if migration.FromVersion >= 32 && migration.ToVersion <= 39 {
+			_, err = tx.ExecContext(ctx, migration.SQL)
+			require.NoError(t, err)
+		}
+	}
+	_, err = tx.ExecContext(ctx, `
+ INSERT INTO meta(key,value) VALUES('schema_version','39'),('instance_uid','00000000000000000000000009');
+ INSERT INTO projects(uid,name) VALUES('00000000000000000000000001','example-project');
+ INSERT INTO issues(uid,project_id,short_id,title,author) SELECT '00000000000000000000000002',id,'0002','login','tester' FROM projects;
+ INSERT INTO comments(uid,issue_id,author,body) SELECT '00000000000000000000000003',id,'tester','safari' FROM issues;`)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
 	upgraded, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: "comment_search_upgrade", SchemaMode: pgstore.SchemaModeBootstrap})
 	require.NoError(t, err)
 	defer func() { _ = upgraded.Close() }()
+	p, err := upgraded.ProjectByName(ctx, "example-project")
+	require.NoError(t, err)
 	hits, err := upgraded.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login safari"})
 	require.NoError(t, err)
 	require.Len(t, hits, 1)

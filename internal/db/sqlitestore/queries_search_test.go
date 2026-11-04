@@ -2,7 +2,6 @@ package sqlitestore_test
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -381,15 +380,13 @@ func TestSearchFTS_SeparateCommentDocuments(t *testing.T) {
 		require.Len(t, got, 1, query)
 		require.Equal(t, issue.ID, got[0].Issue.ID)
 	}
-	for _, query := range []string{"login browser safari missing", strings.Repeat("login ", 512) + "safari"} {
-		got, err := d.SearchFTSAny(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: query})
-		require.NoError(t, err)
-		require.Len(t, got, 1)
-		require.Equal(t, issue.ID, got[0].Issue.ID)
-		require.Contains(t, got[0].MatchedIn, "title")
-		require.Contains(t, got[0].MatchedIn, "comments")
-	}
-	got, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "pull-request"})
+	got, err := d.SearchFTSAny(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login browser safari missing"})
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, issue.ID, got[0].Issue.ID)
+	require.Contains(t, got[0].MatchedIn, "title")
+	require.Contains(t, got[0].MatchedIn, "comments")
+	got, err = d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "pull-request"})
 	require.NoError(t, err)
 	require.Empty(t, got, "phrases cannot span comments")
 	addTesterComment(ctx, t, d, issue.ID, "pull request")

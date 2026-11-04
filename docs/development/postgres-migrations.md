@@ -277,6 +277,7 @@ existing JSONL cutover, which rebuilds both search indexes.
 
 Search terms can match across the issue and separate comments. Scores combine
 each word's best document rank, so result order can change.
+Comment search cost follows the number of matching comments.
 On SQLite, a phrase must fit within one document; words split between two
 comments no longer form a phrase. Older binaries cannot open schema 41.
 Rollback requires the pre-upgrade backup and its matching binary.
