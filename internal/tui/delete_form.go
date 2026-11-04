@@ -111,8 +111,7 @@ func (m Model) finishDelete(target formTarget) (Model, tea.Cmd) {
 	qualified := m.input.del.expected
 	m.input = inputState{}
 	uid := target.issueUID
-	m.detail.cancelReads()
-	m.detail = newDetailModel()
+	m.detail = m.detail.withoutIssue(uid)
 	m, follow := m.refreshListDay(func(lm listModel) listModel { return lm.withoutIssue(uid) })
 	m, detailCmd := m.maybeBootstrapSplitDetail()
 	if m.cache != nil {
@@ -124,6 +123,20 @@ func (m Model) finishDelete(target formTarget) (Model, tea.Cmd) {
 	}
 	m, notice := m.undoNotice(message, toastInfo)
 	return m, combineCmds(follow, combineCmds(detailCmd, combineCmds(notice, withConnGen(m.list.refetchCmd(m.api, m.scope), m.connGen))))
+}
+
+// withoutIssue resets a detail pane that shows the deleted issue, as itself,
+// a child, or a Back entry, or that shows no issue yet. A pane inspecting an
+// unrelated issue keeps it and its Back history.
+func (dm detailModel) withoutIssue(uid string) detailModel {
+	shows := func(issue *Issue) bool { return issue != nil && issue.UID == uid }
+	if dm.issue != nil && !shows(dm.issue) &&
+		!slices.ContainsFunc(dm.children, func(child Issue) bool { return shows(&child) }) &&
+		!slices.ContainsFunc(dm.navStack, func(prev detailModel) bool { return shows(prev.issue) }) {
+		return dm
+	}
+	dm.cancelReads()
+	return newDetailModel()
 }
 
 // withoutIssue drops a deleted issue from the list and selects the row after
