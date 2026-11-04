@@ -335,6 +335,10 @@ CREATE INDEX idx_events_project ON events(project_id, id);
 CREATE INDEX idx_events_issue   ON events(issue_id, id) WHERE issue_id IS NOT NULL;
 CREATE INDEX idx_events_related ON events(related_issue_id, id) WHERE related_issue_id IS NOT NULL;
 CREATE INDEX idx_events_issue_uid ON events(issue_uid) WHERE issue_uid IS NOT NULL;
+CREATE INDEX idx_events_resolved_issue_uid ON events (
+    (CASE WHEN type LIKE 'issue.%' THEN COALESCE(NULLIF(issue_uid,''),payload::jsonb->>'issue_uid',payload::jsonb->>'uid') ELSE NULLIF(issue_uid,'') END),
+    id
+);
 CREATE INDEX idx_events_moved_from ON events((payload::jsonb->>'from_project_uid'), (payload::jsonb->>'from_short_id')) WHERE type = 'issue.moved';
 CREATE INDEX idx_events_reply_to ON events((payload::jsonb->>'reply_to_uid')) WHERE type = 'issue.commented' AND (payload::jsonb->>'reply_to_uid') IS NOT NULL;
 CREATE INDEX idx_events_related_issue_uid ON events(related_issue_uid) WHERE related_issue_uid IS NOT NULL;
