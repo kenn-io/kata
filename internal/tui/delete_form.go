@@ -107,8 +107,7 @@ func (m Model) finishDelete(target formTarget, mut mutationDoneMsg) (Model, tea.
 	qualified := m.input.del.expected
 	m.input = inputState{}
 	uid := target.issueUID
-	m.detail.cancelReads()
-	m.detail = newDetailModel()
+	m = m.withoutDeletedDetail(uid)
 	m, follow := m.refreshListDay(func(lm listModel) listModel { return lm.withoutIssue(uid) })
 	m, detailCmd := m.maybeBootstrapSplitDetail()
 	if m.cache != nil {
@@ -120,6 +119,19 @@ func (m Model) finishDelete(target formTarget, mut mutationDoneMsg) (Model, tea.
 	}
 	m, notice := m.undoNotice(message, toastInfo)
 	return m, combineCmds(follow, combineCmds(detailCmd, combineCmds(notice, withConnGen(m.list.refetchCmd(m.api, m.scope), m.connGen))))
+}
+
+// withoutDeletedDetail clears the detail pane after a delete, and the detail
+// saved on entering the Inbox when it shows the deleted issue, so leaving the
+// Inbox cannot bring the deleted issue back.
+func (m Model) withoutDeletedDetail(uid string) Model {
+	m.detail.cancelReads()
+	m.detail = newDetailModel()
+	if m.inboxReturn != nil {
+		saved := m.inboxReturn.withoutIssue(uid)
+		m.inboxReturn = &saved
+	}
+	return m
 }
 
 // withoutIssue drops a deleted issue from the list and selects the row after

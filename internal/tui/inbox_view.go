@@ -18,6 +18,23 @@ type inboxReturnState struct {
 	focus    focusPane
 }
 
+// withoutIssue forgets a saved detail that shows the deleted issue: the
+// return lands on the list, which the leave-time fetch brings up to date.
+func (r inboxReturnState) withoutIssue(uid string) inboxReturnState {
+	if r.detail.issue == nil || r.detail.issue.UID != uid {
+		return r
+	}
+	r.detail.cancelReads()
+	r.detail, r.focus = newDetailModel(), focusList
+	if r.view == viewDetail {
+		r.view = viewList
+	}
+	if r.prevView == viewDetail {
+		r.prevView = viewList
+	}
+	return r
+}
+
 type inboxProjectLoadedMsg struct {
 	connGen uint64
 	attempt uint64
