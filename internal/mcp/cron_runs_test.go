@@ -2,7 +2,13 @@ package mcpserver
 
 import (
 	"encoding/json"
+	"github.com/stretchr/testify/assert"
+	kataclient "go.kenn.io/kata/pkg/client"
 	"maps"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -197,4 +203,55 @@ func TestCronRunReasonFilter(t *testing.T) {
 	require.Len(t, runs, 1)
 	require.Equal(t, wanted, runs[0].(map[string]any)["uid"])
 	require.True(t, cronCall(t, f.session, "cron_runs", map[string]any{"reason": "INVALID"}).IsError)
+}
+
+func TestMCPCronRunsReasonRefusesOldDaemon(t *testing.T) {
+	var version atomic.Value
+	version.Store(`{"ok":true,"api_schema_version":"0.42.0"}`)
+	var reads, probes atomic.Int32
+	var wantReason atomic.Value
+	wantReason.Store("failed")
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/health" {
+			probes.Add(1)
+			_, _ = w.Write([]byte(version.Load().(string)))
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/cron/runs") {
+			reads.Add(1)
+			assert.Equal(t, wantReason.Load().(string), r.URL.Query().Get("reason"))
+			_, _ = w.Write([]byte(`{"runs":[]}`))
+			return
+		}
+		_, _ = w.Write(daemonResponse(r))
+	}))
+	defer daemon.Close()
+	client, err := kataclient.NewWithHTTPClient(daemon.URL, daemon.Client())
+	require.NoError(t, err)
+	session := connectTestServerWithClient(t, client)
+	// Reuse the session across upgrades and downgrades: no cached permission.
+	for _, health := range []string{`{"ok":true,"api_schema_version":"0.42.0"}`, `{"ok":true,"api_schema_version":"0.40.0"}`, `{"ok":true,"api_schema_version":""}`, `{"ok":true}`, `{"ok":true,"api_schema_version":"0.42.0"}`} {
+		version.Store(health)
+		before := reads.Load()
+		result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.cron_runs", Arguments: map[string]any{"reason": "failed"}})
+		require.NoError(t, err)
+		if strings.Contains(health, "0.42.0") {
+			require.False(t, result.IsError, "%s", mustJSON(t, result))
+			require.Equal(t, before+1, reads.Load())
+		} else {
+			require.True(t, result.IsError)
+			require.Contains(t, string(mustJSON(t, result)), "requires daemon API 0.42.0 or newer")
+			require.Equal(t, before, reads.Load())
+		}
+	}
+	require.EqualValues(t, 5, probes.Load())
+	// An unfiltered read remains usable without a version handshake.
+	version.Store(`{"ok":true,"api_schema_version":"0.40.0"}`)
+	wantReason.Store("")
+	result, err := session.CallTool(t.Context(), &sdkmcp.CallToolParams{Name: "kata.cron_runs", Arguments: map[string]any{}})
+	require.NoError(t, err)
+	require.False(t, result.IsError, "%s", mustJSON(t, result))
+	require.EqualValues(t, 5, probes.Load())
+	require.EqualValues(t, 3, reads.Load())
 }

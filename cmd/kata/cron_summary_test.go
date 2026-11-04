@@ -2,11 +2,13 @@ package main
 
 import (
 	"encoding/json/v2"
+	"github.com/stretchr/testify/assert"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -81,7 +83,11 @@ func TestCronCLIReasonOmittedWhenUnset(t *testing.T) {
 	require.NoError(t, err)
 	proxy := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) { r.SetURL(target) }}
 	queries := make(chan bool, 2)
+	var probes atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/health" {
+			probes.Add(1)
+		}
 		if strings.HasSuffix(r.URL.Path, "/cron/runs") {
 			queries <- r.URL.Query().Has("reason")
 		}
@@ -95,5 +101,47 @@ func TestCronCLIReasonOmittedWhenUnset(t *testing.T) {
 		require.False(t, present)
 	default:
 		t.Fatal("run list was not requested")
+	}
+	require.Zero(t, probes.Load())
+}
+
+// A selector must never silently become an unfiltered read on an older daemon.
+func TestCronRunListReasonRefusesOldDaemon(t *testing.T) {
+	for _, health := range []string{`{"api_schema_version":"0.40.0"}`, `{"api_schema_version":""}`, `{}`, `{"api_schema_version":"0.42.0"}`} {
+		t.Run(health, func(t *testing.T) {
+			env := testenv.New(t)
+			_, err := env.DB.CreateProject(t.Context(), "spoke-project")
+			require.NoError(t, err)
+			target, err := url.Parse(env.URL)
+			require.NoError(t, err)
+			proxy := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) { r.SetURL(target) }}
+			var reads, probes atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/health" {
+					probes.Add(1)
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(health))
+					return
+				}
+				if strings.HasSuffix(r.URL.Path, "/cron/runs") {
+					reads.Add(1)
+					assert.Equal(t, "failed", r.URL.Query().Get("reason"))
+				}
+				proxy.ServeHTTP(w, r)
+			}))
+			defer server.Close()
+			_, _, err = executeCronCLI(t, server.URL, strings.NewReader(""), "run", "list", "--reason", "failed")
+			if strings.Contains(health, "0.42.0") {
+				require.NoError(t, err)
+				require.EqualValues(t, 1, reads.Load())
+			} else {
+				require.Error(t, err)
+				var cliErr *cliError
+				require.ErrorAs(t, err, &cliErr)
+				require.Equal(t, "daemon_api_too_old", cliErr.Code)
+				require.Zero(t, reads.Load())
+			}
+			require.EqualValues(t, 1, probes.Load())
+		})
 	}
 }

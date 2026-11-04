@@ -70,8 +70,13 @@ func (h toolHandlers) cronRuns(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 	if limit < 1 || limit > maximumResultLimit {
 		return nil, nil, errors.New("limit must be from 1 through 100")
 	}
-	if in.Reason != "" && !cron.ValidReason(in.Reason) {
-		return nil, nil, errors.New("invalid reason code")
+	if in.Reason != "" {
+		if !cron.ValidReason(in.Reason) {
+			return nil, nil, errors.New("invalid reason code")
+		}
+		if err := h.requireDaemonAPI(ctx, "0.42.0", "cron run reason filtering"); err != nil {
+			return nil, nil, err
+		}
 	}
 	var err error
 	if in.BeforeUID != "" {

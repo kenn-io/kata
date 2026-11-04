@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 # HTTP API schema
@@ -151,7 +151,9 @@ Generated clients should still use the schema from their target release.
 The first-party CLI uses this check before requests where an older daemon
 could ignore a filter and return unfiltered rows. Status-filtered `search`
 requires API `0.20.0`; label-filtered `search` and filtered `ready --all`
-require API `0.8.0`; filtered `list --all` requires API `0.9.0`. The CLI stops before the filtered query and tells the operator to
+require API `0.8.0`; filtered `list --all` requires API `0.9.0`. Reason-filtered
+`cron run list` and MCP `kata.cron_runs` require API `0.42.0`. The CLI stops
+before the filtered query and tells the operator to
 upgrade when the daemon is too old. `kata mcp serve` performs the same check
 once at startup and requires API `0.11.0`, because its relationship tools
 always send the pinned-target fields and its close-audit paging relies on
@@ -251,6 +253,7 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 | Version | Change |
 | --- | --- |
+| `0.42.0` | Cron run summaries accept `reason`, `trigger`, `usage`, `steps` and `log_ref`. `GET /projects/{project_id}/cron/runs` accepts `reason`; older daemons ignore this query. |
 | `0.40.0` | Issue history accepts `include_effective_close_event_uid=true` and returns the visible native close event that currently supplies the issue's closed status. |
 | `0.39.0` | `POST /projects/{project_id}/issues/{ref}/attachments/links` accepts `reuse_existing=true` to reuse the smallest existing attachment reference for the resolved Docbank version, creating one if none exists. Omission keeps creating a new reference. |
 | `0.38.0` | Publishes `POST /projects/{project_id}/issues/{ref}/attachments/links`, which saves a reference to an existing Docbank file version without uploading its bytes. `kata docbank attachments link` refuses older daemons. |
