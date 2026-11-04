@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -283,6 +283,61 @@ binding time, without historical backfill.
 The existing daemon sweep runs at startup and every 30 seconds by default. Keep the authoritative hub running
 for unattended delivery. Local projects deliver locally; federated projects
 deliver only on their enabled owning hub. Spokes never deliver.
+
+### Dispatch decisions and skipped occurrences
+
+Read the current daemon's native recurring decisions with:
+
+```sh
+kata daemon logs --cron
+kata daemon logs --cron --tail --job-uid <job-uid>
+kata daemon logs --cron --reason parent_closed --limit 20
+```
+
+Each JSONL record identifies the project, job, definition revision and evaluation
+time. It reports committed child deliveries, whether another batch remains, and
+discarded occurrences. `kind: "skipped"` includes a count and the exclusive
+`after`/`before` window. Calendar counting stops at 1000; `capped: true` means the
+count is a lower bound. Interval counts are exact. Pending `latest` scans report
+no discarded work until their frozen window is finalized.
+
+| Reason | What the daemon observed |
+| --- | --- |
+| `delivered` | This batch committed child issues. |
+| `idle` | The gate was open and no occurrence was due. |
+| `skipped` | Only discarded occurrences advanced progress. |
+| `scanning` | A bounded `latest` calendar scan is unfinished. |
+| `external_adapter` | An external adapter owns scheduling. |
+| `disabled`, `deleted`, `job_missing` | The definition was disabled, deleted or absent. |
+| `replica`, `binding_disabled` | Delivery belongs to the hub, or its binding was disabled. |
+| `project_unavailable` | The project was unavailable or its write gate refused dispatch. |
+| `definition_changed` | The definition changed after enumeration; the next sweep retries. |
+| `parent_missing`, `parent_deleted`, `parent_closed` | The bound parent could not accept delivery. |
+| `progress_invalid`, `schedule_invalid`, `recipient_invalid` | Delivery failed closed on invalid stored state or recipient. |
+| `error` | Another failure occurred; the local log contains its detail. |
+
+The daemon retains each candidate's last decision in memory and logs changes,
+deliveries and finalized skips. Repeated idle decisions and identical errors do
+not flood the log. The recorder resets on restart. Its JSONL history survives at
+`<KATA_HOME>/cron/<storage-hash>/dispatch.jsonl`, with five rotated files and a
+50 MiB active-file rotation threshold. Logging is best effort, separate from
+the dispatch transaction; a process failure or filesystem error can lose a
+record. No diagnostic event replicates to peers.
+
+`GET /api/v1/health` includes a diagnostics-only `cron` block after the first
+sweep. It reports `last_sweep_at`, `last_sweep_ms`, `last_enumeration_at`, retained
+`jobs` and `by_reason`, and lifetime delivery, skip and error counters. These
+counts cover observed candidates, rather than all configured jobs: enumeration
+filters disabled/deleted definitions and non-authoritative bindings. Successful
+complete enumerations prune missing candidates; failed or partial enumerations
+retain previous observations. `skipped_count_is_lower_bound` marks capped totals.
+`enumeration_errors_since_start`, `log_error_present` and
+`log_errors_since_start` expose listing and log failures. Health contains no job
+identities or raw error detail.
+
+`daemon logs` reads the selected local Kata home, including when the CLI has
+remote daemons configured. Select exactly one of `--cron` and `--hooks`; their
+filters cannot be mixed. Run the command on the owning hub for its history.
 
 Direct spokes with push enabled can create, update, delete, and restore native
 recurring jobs through their existing enrollment. Each request checks hub

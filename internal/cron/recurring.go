@@ -113,6 +113,7 @@ type RecurringBatch struct {
 	Due      []time.Time
 	Progress RecurringProgress
 	More     bool
+	Skipped  RecurringSkip
 }
 
 // Validate rejects unusable checkpoints instead of silently starting over.
@@ -128,6 +129,33 @@ func (p RecurringProgress) Validate() error {
 
 // PlanRecurring evaluates one bounded step against an explicit clock and revision.
 func PlanRecurring(j JobDefinition, definitionEventUID string, p RecurringProgress, now time.Time) (RecurringBatch, error) {
+	out, err := planRecurring(j, definitionEventUID, p, now)
+	if err != nil {
+		return out, err
+	}
+	var before time.Time
+	switch j.Catchup {
+	case "skip":
+		if out.Progress.Through.After(p.Through) {
+			before = now.UTC().Add(-time.Duration(j.GraceSeconds) * time.Second)
+		}
+	case "latest":
+		if len(out.Due) > 0 {
+			before = out.Due[0]
+		}
+	}
+	if !before.IsZero() {
+		next, nextErr := recurringNext(j.Trigger, p.Anchor)
+		if nextErr == nil {
+			out.Skipped = countRecurringSkips(j.Trigger, next, p.Through, before)
+		}
+	}
+	return out, nil
+}
+
+// planRecurring owns delivery decisions; diagnostic counting never changes its
+// checkpoints, frozen scan horizons, batch limits, or error behavior.
+func planRecurring(j JobDefinition, definitionEventUID string, p RecurringProgress, now time.Time) (RecurringBatch, error) {
 	out := RecurringBatch{Progress: p}
 	if !IsRecurringIssueJob(j) || !validUID(definitionEventUID) {
 		return out, invalid("native job and definition revision required")

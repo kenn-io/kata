@@ -26,6 +26,7 @@ type DueNotificationSweeper struct {
 	Interval          time.Duration
 	OnError           func(error)
 	IdleAdmission     activity.WaitableAdmission
+	CronRecorder      *CronDispatchRecorder
 	recurringAfterUID string
 	// reachedFloor caches the database's stored reached-schedule floor.
 	reachedFloor *time.Time
@@ -59,6 +60,7 @@ func (s *DueNotificationSweeper) runOnce(ctx context.Context, now time.Time) (<-
 		fork = idleLease.Fork
 	}
 	var errs []error
+	started := time.Now()
 	if s.reachedFloor == nil {
 		// Without a floor the sweep still delivers inbox requests but records
 		// no reached schedule, so a failed read cannot replay overdue dates.
@@ -92,6 +94,8 @@ func (s *DueNotificationSweeper) runOnce(ctx context.Context, now time.Time) (<-
 	candidates, err := s.DB.ListRecurringCronJobs(ctx, s.recurringAfterUID, 100)
 	if err != nil {
 		errs = append(errs, err)
+		// A failed page cannot establish a complete observation cycle.
+		s.recurringAfterUID = ""
 	} else {
 		for _, candidate := range candidates {
 			s.recurringAfterUID = candidate.JobUID
@@ -103,6 +107,9 @@ func (s *DueNotificationSweeper) runOnce(ctx context.Context, now time.Time) (<-
 			s.recurringAfterUID = ""
 		}
 	}
+	if s.CronRecorder != nil {
+		s.CronRecorder.FinishSweep(now, time.Since(started), err == nil && len(candidates) < 100, err != nil)
+	}
 	return nil, false, errors.Join(errs...)
 }
 
@@ -113,16 +120,54 @@ func (s *DueNotificationSweeper) dispatchRecurring(ctx context.Context, candidat
 	for range maxRecurringBatchesPerSweep {
 		out, err := s.DB.DispatchRecurringCron(ctx, in)
 		if err != nil {
-			return fmt.Errorf("dispatch recurring job %s in project %d: %w", candidate.JobUID, candidate.ProjectID, err)
+			report := true
+			if s.CronRecorder != nil {
+				var logErr error
+				report, logErr = s.CronRecorder.Record(ctx, candidate, out, err, now)
+				err = errors.Join(err, logErr)
+			}
+			return recurringSweepError{err: fmt.Errorf("dispatch recurring job %s in project %d: %w", candidate.JobUID, candidate.ProjectID, err), report: report}
 		}
 		for _, event := range out.Events {
 			s.Publish.EventFrom(event.ProjectID, event, fork)
+		}
+		if s.CronRecorder != nil {
+			if changed, logErr := s.CronRecorder.Record(ctx, candidate, out, nil, now); logErr != nil && changed && s.OnError != nil {
+				s.OnError(fmt.Errorf("cron dispatch log: %w", logErr))
+			}
 		}
 		if !out.More {
 			return nil
 		}
 	}
 	return nil
+}
+
+type recurringSweepError struct {
+	err    error
+	report bool
+}
+
+func (e recurringSweepError) Error() string { return e.err.Error() }
+func (e recurringSweepError) Unwrap() error { return e.err }
+
+// recurringAlerts keeps RunOnce's full error evidence while suppressing only
+// unchanged recurring-job alerts. Other notification and listing errors repeat.
+func recurringAlerts(err error) error {
+	if e, ok := err.(recurringSweepError); ok {
+		if !e.report {
+			return nil
+		}
+		return e.err
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		var alerts []error
+		for _, child := range joined.Unwrap() {
+			alerts = append(alerts, recurringAlerts(child))
+		}
+		return errors.Join(alerts...)
+	}
+	return err
 }
 
 // Run performs one startup pass, then reconciles every interval until the
@@ -140,8 +185,8 @@ func (s *DueNotificationSweeper) Run(ctx context.Context) error {
 			if errors.Is(err, context.Canceled) {
 				return err
 			}
-			if s.OnError != nil {
-				s.OnError(err)
+			if alert := recurringAlerts(err); alert != nil && s.OnError != nil {
+				s.OnError(alert)
 			}
 		}
 		if denied && retry != nil {

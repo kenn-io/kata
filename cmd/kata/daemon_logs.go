@@ -21,12 +21,13 @@ import (
 	"go.kenn.io/kata/internal/config"
 )
 
-// daemonLogsCmd registers `kata daemon logs --hooks ...`. The --hooks
-// flag is required in v1; future log streams (broadcaster, audit) can
-// be selected by additional flags without breaking the command shape.
+// daemonLogsCmd selects one local diagnostic stream and its matching filters.
 func daemonLogsCmd() *cobra.Command {
 	var (
 		hooks      bool
+		cronLogs   bool
+		jobUID     string
+		reason     string
 		tail       bool
 		limit      int
 		failedOnly bool
@@ -35,13 +36,17 @@ func daemonLogsCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "logs",
-		Short: "read daemon logs (hook runs)",
+		Short: "read local daemon logs (hook runs or recurring dispatch)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := requireCurrentHomeDaemonCommand(); err != nil {
 				return err
 			}
-			if !hooks {
-				return &cliError{Kind: kindUsage, ExitCode: ExitUsage, Message: "currently only --hooks is supported"}
+			if hooks == cronLogs {
+				return &cliError{Kind: kindUsage, ExitCode: ExitUsage, Message: "select exactly one of --hooks or --cron"}
+			}
+			if (cronLogs && (cmd.Flags().Changed("failed-only") || cmd.Flags().Changed("event-type") || cmd.Flags().Changed("hook-index"))) ||
+				(hooks && (cmd.Flags().Changed("job-uid") || cmd.Flags().Changed("reason"))) {
+				return &cliError{Kind: kindUsage, ExitCode: ExitUsage, Message: "filters must match the selected log stream"}
 			}
 			// hammer-test finding #7: --limit was silently treated as
 			// "no limit" for 0 / -1, contradicting the help text. Reject
@@ -54,21 +59,51 @@ func daemonLogsCmd() *cobra.Command {
 			if hookIndex < -1 {
 				return &cliError{Message: "--hook-index must be -1 (all) or a non-negative integer", Kind: kindValidation, ExitCode: ExitValidation}
 			}
-			f := &hookLogFilter{failedOnly: failedOnly, eventType: eventType, hookIndex: hookIndex}
-			if tail {
-				return runHookLogTail(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), limit, f)
+			var f daemonLogFilter = &hookLogFilter{failedOnly: failedOnly, eventType: eventType, hookIndex: hookIndex}
+			if cronLogs {
+				f = &cronLogFilter{jobUID: strings.ToUpper(jobUID), reason: reason}
 			}
-			_, err := runHookLogOnce(cmd.OutOrStdout(), cmd.ErrOrStderr(), limit, f)
+			active, err := daemonLogPath(cmd.Context(), cronLogs)
+			if err != nil {
+				return err
+			}
+			if tail {
+				return runDaemonLogTail(cmd.Context(), active, cmd.OutOrStdout(), cmd.ErrOrStderr(), limit, f)
+			}
+			_, err = runDaemonLogOnce(cmd.Context(), active, cmd.OutOrStdout(), cmd.ErrOrStderr(), limit, f)
 			return err
 		},
 	}
 	cmd.Flags().BoolVar(&hooks, "hooks", false, "show hook run logs")
-	cmd.Flags().BoolVar(&tail, "tail", false, "follow the active runs.jsonl")
+	cmd.Flags().BoolVar(&cronLogs, "cron", false, "show native recurring dispatch decisions and skipped occurrences")
+	cmd.Flags().StringVar(&jobUID, "job-uid", "", "filter cron dispatch by job UID")
+	cmd.Flags().StringVar(&reason, "reason", "", "filter cron dispatch by reason code")
+	cmd.Flags().BoolVar(&tail, "tail", false, "follow the selected active JSONL log")
 	cmd.Flags().IntVar(&limit, "limit", 100, "maximum matching records (default 100)")
 	cmd.Flags().BoolVar(&failedOnly, "failed-only", false, "show only failed runs (result != ok || exit_code != 0)")
 	cmd.Flags().StringVar(&eventType, "event-type", "", "filter by event type")
 	cmd.Flags().IntVar(&hookIndex, "hook-index", -1, "filter by hook index (-1 = all)")
 	return cmd
+}
+
+type daemonLogFilter interface {
+	accept([]byte) (jsontext.Value, bool)
+}
+
+type cronLogFilter struct{ jobUID, reason string }
+
+func (f *cronLogFilter) accept(line []byte) (jsontext.Value, bool) {
+	var rec map[string]jsontext.Value
+	if err := json.Unmarshal(line, &rec); err != nil || rec == nil {
+		return nil, false
+	}
+	if f.jobUID != "" && strings.ToUpper(jsonString(rec, "job_uid")) != f.jobUID {
+		return nil, false
+	}
+	if f.reason != "" && jsonString(rec, "reason") != f.reason {
+		return nil, false
+	}
+	return jsontext.Value(line), true
 }
 
 type hookLogFilter struct {
@@ -112,7 +147,7 @@ func jsonInt(rec map[string]jsontext.Value, key string) int {
 }
 
 // activeMark records the identity and size of runs.jsonl at the
-// moment runHookLogOnce finished consuming it. Tail uses the mark to
+// moment runDaemonLogOnce finished consuming it. Tail uses the mark to
 // resume follow exactly where the one-shot pass stopped, so records
 // appended *between* one-shot and follow aren't dropped on the floor
 // even when awaitActiveFile's first stat happens after the new write.
@@ -122,14 +157,14 @@ type activeMark struct {
 	size int64
 }
 
-// runHookLogOnce reads runs.jsonl.K → runs.jsonl in chronological order
+// runDaemonLogOnce reads runs.jsonl.K → runs.jsonl in chronological order
 // and prints up to limit matching records (the *last* limit, not the
 // first — most recent failures are usually what the operator wants).
 // The returned mark is set when runs.jsonl was part of the snapshot
-// and carries its post-read identity/size; followActive uses it to
+// and carries its identity and complete-record byte boundary; followActive uses it to
 // pick the correct starting offset.
-func runHookLogOnce(stdout, stderr io.Writer, limit int, f *hookLogFilter) (activeMark, error) {
-	files, err := orderedRunsFiles()
+func runDaemonLogOnce(ctx context.Context, active string, stdout, stderr io.Writer, limit int, f daemonLogFilter) (activeMark, error) {
+	files, err := orderedLogFiles(ctx, active)
 	if err != nil {
 		return activeMark{}, err
 	}
@@ -138,19 +173,15 @@ func runHookLogOnce(stdout, stderr io.Writer, limit int, f *hookLogFilter) (acti
 		mark    activeMark
 	)
 	for _, p := range files {
-		m, info, err := readMatchesFromFile(p, stderr, f)
+		m, info, consumed, err := readMatchesFromFile(ctx, p, stderr, f)
 		if err != nil {
 			return mark, err
 		}
 		matches = append(matches, m...)
-		if filepath.Base(p) == "runs.jsonl" && info != nil {
-			// info comes from fh.Stat() on the same open handle the
-			// scan consumed, and the scan was capped at info.Size()
-			// via io.LimitReader. So mark.size IS the byte boundary
-			// the read stopped at — no race window with concurrent
-			// appends or rotation between read and mark, since both
-			// the size and the consumed bytes derive from one stat.
-			mark = activeMark{set: true, info: info, size: info.Size()}
+		if p == active && info != nil {
+			// The stat and scan share a handle. Advance only through complete
+			// records, leaving an unfinished suffix for the following poll.
+			mark = activeMark{set: true, info: info, size: consumed}
 		}
 	}
 	if matches == nil {
@@ -223,55 +254,56 @@ func agentLogValue(raw jsontext.Value) string {
 // io.LimitReader so the caller's "we consumed up to here" boundary
 // is atomic with the stat — a concurrent append after fh.Stat() is
 // invisible to this snapshot and belongs to follow's window instead.
-func readMatchesFromFile(path string, stderr io.Writer, f *hookLogFilter) ([]string, os.FileInfo, error) {
-	fh, err := os.Open(path) //nolint:gosec // G304: path is daemon-controlled state-dir filename
+func readMatchesFromFile(ctx context.Context, path string, stderr io.Writer, f daemonLogFilter) ([]string, os.FileInfo, int64, error) {
+	fh, err := os.Open(path) //nolint:gosec // daemon-controlled log path
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil, nil
+		return nil, nil, 0, nil
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	defer func() { _ = fh.Close() }()
 	info, err := fh.Stat()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	var matches []string
-	scanner := bufio.NewScanner(io.LimitReader(fh, info.Size()))
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	lineNo := 0
-	for scanner.Scan() {
-		lineNo++
-		line := scanner.Bytes()
-		if len(bytes.TrimSpace(line)) == 0 {
-			continue
+	var consumed int64
+	reader := bufio.NewReader(io.LimitReader(fh, info.Size()))
+	for lineNo := 1; ; lineNo++ {
+		if err := ctx.Err(); err != nil {
+			return matches, info, consumed, err
 		}
-		rec, ok := f.accept(append([]byte(nil), line...))
-		if !ok {
-			if !jsontext.Value(line).IsValid() {
+		line, readErr := reader.ReadBytes('\n')
+		if len(line) > 0 && line[len(line)-1] == '\n' {
+			consumed += int64(len(line))
+			line = line[:len(line)-1]
+			if rec, ok := f.accept(line); ok {
+				matches = append(matches, string(rec))
+			} else if len(bytes.TrimSpace(line)) > 0 && !jsontext.Value(line).IsValid() {
 				_, _ = fmt.Fprintf(stderr, "kata: skipping malformed line %d in %s\n", lineNo, path)
 			}
-			continue
 		}
-		matches = append(matches, string(rec))
+		if errors.Is(readErr, io.EOF) {
+			return matches, info, consumed, nil
+		}
+		if readErr != nil {
+			return matches, info, consumed, readErr
+		}
 	}
-	if err := scanner.Err(); err != nil {
-		return matches, info, fmt.Errorf("scanning %s: %w", path, err)
-	}
-	return matches, info, nil
 }
 
-// runHookLogTail prints the last `limit` matches from existing files,
-// then follows the active runs.jsonl. The mark from runHookLogOnce is
+// runDaemonLogTail prints the last `limit` matches from existing files,
+// then follows the active runs.jsonl. The mark from runDaemonLogOnce is
 // passed through so followActive resumes at the exact offset the
 // one-shot pass stopped consuming — rather than the file's current
 // size, which can have grown between one-shot and follow.
-func runHookLogTail(ctx context.Context, stdout, stderr io.Writer, limit int, f *hookLogFilter) error {
-	mark, err := runHookLogOnce(stdout, stderr, limit, f)
+func runDaemonLogTail(ctx context.Context, active string, stdout, stderr io.Writer, limit int, f daemonLogFilter) error {
+	mark, err := runDaemonLogOnce(ctx, active, stdout, stderr, limit, f)
 	if err != nil {
 		return err
 	}
-	active, err := awaitActiveFile(ctx)
+	active, err = awaitActiveFile(ctx, active)
 	if err != nil || active == "" {
 		return err
 	}
@@ -283,12 +315,7 @@ func runHookLogTail(ctx context.Context, stdout, stderr io.Writer, limit int, f 
 // directory" — a rotated-only directory (runs.jsonl.N present, active
 // missing) must NOT short-circuit, otherwise --tail would follow a
 // rotated file that never gets new content.
-func awaitActiveFile(ctx context.Context) (string, error) {
-	root, err := hookRunsRoot()
-	if err != nil {
-		return "", err
-	}
-	active := filepath.Join(root, "runs.jsonl")
+func awaitActiveFile(ctx context.Context, active string) (string, error) {
 	for {
 		switch _, statErr := os.Stat(active); {
 		case statErr == nil:
@@ -312,19 +339,16 @@ type followState struct {
 
 // followActive polls the active runs.jsonl, emitting newly appended
 // matching records. Detects rotation via os.SameFile identity change
-// or size shrink. The mark from runHookLogOnce decides the starting
+// or size shrink. The mark from runDaemonLogOnce decides the starting
 // offset: when mark.set is true AND the active file is the same
 // inode/identity, follow resumes at mark.size (where the one-shot
 // pass stopped consuming); otherwise follow starts at 0, which covers
 // (a) the active file appeared after the one-shot, (b) rotation
 // happened between one-shot and follow, or (c) size shrank.
-func followActive(ctx context.Context, stdout, stderr io.Writer, active string, mark activeMark, f *hookLogFilter) error {
+func followActive(ctx context.Context, stdout, stderr io.Writer, active string, mark activeMark, f daemonLogFilter) error {
 	st := &followState{}
-	if info, err := os.Stat(active); err == nil {
-		st.prevInfo = info
-		if mark.set && os.SameFile(mark.info, info) && info.Size() >= mark.size {
-			st.prevSize = mark.size
-		}
+	if mark.set {
+		st.prevInfo, st.prevSize = mark.info, mark.size
 	}
 	for {
 		select {
@@ -332,7 +356,7 @@ func followActive(ctx context.Context, stdout, stderr io.Writer, active string, 
 			return nil
 		case <-time.After(200 * time.Millisecond):
 		}
-		if err := tailTick(active, stdout, stderr, st, f); err != nil {
+		if err := tailTick(ctx, active, stdout, stderr, st, f); err != nil {
 			return err
 		}
 	}
@@ -341,27 +365,120 @@ func followActive(ctx context.Context, stdout, stderr io.Writer, active string, 
 // tailTick performs one poll cycle: stats the active file, detects
 // rotation via SameFile change or size shrink, and emits any newly
 // appended lines.
-func tailTick(active string, stdout, stderr io.Writer, st *followState, f *hookLogFilter) error {
-	info, err := os.Stat(active)
+func tailTick(ctx context.Context, active string, stdout, stderr io.Writer, st *followState, f daemonLogFilter) error {
+	fh, err := os.Open(active) //nolint:gosec // daemon-controlled log path
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil
-		}
+		return err
+	}
+	defer func() { _ = fh.Close() }()
+	info, err := fh.Stat()
+	if err != nil {
 		return err
 	}
 	if rotationDetected(st.prevInfo, info, st.prevSize) {
+		if st.prevInfo != nil && !os.SameFile(st.prevInfo, info) {
+			if err := drainRotatedLog(ctx, active, stdout, stderr, st, info, f); err != nil {
+				if errors.Is(err, fs.ErrNotExist) || errors.Is(err, errLogRotation) {
+					return nil
+				}
+				return err
+			}
+		}
 		st.prevSize = 0
 	}
 	st.prevInfo = info
 	if info.Size() == st.prevSize {
 		return nil
 	}
-	n, err := emitNewLines(active, st.prevSize, stdout, stderr, f)
+	n, err := emitLogLines(ctx, fh, active, st.prevSize, stdout, stderr, f)
+	st.prevSize += n
+	return err
+}
+
+// Drain the previous active file and any newer retained rotations before
+// following its replacement. Retention bounds how far a paused reader can catch up.
+func drainRotatedLog(ctx context.Context, active string, stdout, stderr io.Writer, st *followState, stop os.FileInfo, f daemonLogFilter) error {
+	files, err := pinRotatedLogs(ctx, active)
 	if err != nil {
 		return err
 	}
-	st.prevSize += n
+	defer closePinnedLogs(files)
+	found := false
+	for _, file := range files {
+		info, err := file.Stat()
+		if err != nil {
+			return err
+		}
+		if os.SameFile(info, stop) {
+			break
+		}
+		from := int64(0)
+		if !found {
+			if !os.SameFile(st.prevInfo, info) {
+				continue
+			}
+			found, from = true, st.prevSize
+		}
+		if _, err := emitLogLines(ctx, file, file.Name(), from, stdout, stderr, f); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// Pin generations before emitting. A stable active identity across collection
+// proves rotation did not shift generation names while handles were acquired.
+// A changed or missing active file yields to the next tail poll.
+var errLogRotation = errors.New("log rotated during collection")
+
+func pinRotatedLogs(ctx context.Context, active string) ([]*os.File, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	before, err := os.Stat(active)
+	if err != nil {
+		return nil, err
+	}
+	paths, err := orderedLogFiles(ctx, active)
+	if err != nil {
+		return nil, err
+	}
+	var files []*os.File
+	changed := false
+	for _, path := range paths {
+		if path == active {
+			break
+		}
+		file, err := os.Open(path) //nolint:gosec // daemon-controlled rotation paths
+		if errors.Is(err, fs.ErrNotExist) {
+			changed = true
+			break
+		}
+		if err != nil {
+			closePinnedLogs(files)
+			return nil, err
+		}
+		files = append(files, file)
+	}
+	after, err := os.Stat(active)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		closePinnedLogs(files)
+		return nil, err
+	}
+	if !changed && err == nil && os.SameFile(before, after) {
+		return files, nil
+	}
+	closePinnedLogs(files)
+	return nil, errLogRotation
+}
+
+func closePinnedLogs(files []*os.File) {
+	for _, file := range files {
+		_ = file.Close()
+	}
 }
 
 // rotationDetected returns true when the active file changed identity
@@ -376,12 +493,16 @@ func rotationDetected(prev, current os.FileInfo, prevSize int64) bool {
 // final write hasn't landed yet — is intentionally NOT counted, so the
 // caller's offset stays at the start of the mid-line and a later tick
 // can pick the record up once the writer flushes.
-func emitNewLines(path string, from int64, stdout, stderr io.Writer, f *hookLogFilter) (int64, error) {
+func emitNewLines(ctx context.Context, path string, from int64, stdout, stderr io.Writer, f daemonLogFilter) (int64, error) {
 	fh, err := os.Open(path) //nolint:gosec // G304: path is daemon-controlled state-dir filename
 	if err != nil {
 		return 0, err
 	}
 	defer func() { _ = fh.Close() }()
+	return emitLogLines(ctx, fh, path, from, stdout, stderr, f)
+}
+
+func emitLogLines(ctx context.Context, fh *os.File, path string, from int64, stdout, stderr io.Writer, f daemonLogFilter) (int64, error) {
 	if _, err := fh.Seek(from, io.SeekStart); err != nil {
 		return 0, err
 	}
@@ -389,6 +510,9 @@ func emitNewLines(path string, from int64, stdout, stderr io.Writer, f *hookLogF
 	var read int64
 	lineNo := 0
 	for {
+		if err := ctx.Err(); err != nil {
+			return read, err
+		}
 		line, rerr := reader.ReadBytes('\n')
 		if len(line) > 0 && line[len(line)-1] == '\n' {
 			read += int64(len(line))
@@ -406,7 +530,7 @@ func emitNewLines(path string, from int64, stdout, stderr io.Writer, f *hookLogF
 
 // emitOne is the per-record body shared by tail emission paths: skip
 // blank lines, warn-and-skip malformed JSON, otherwise print matches.
-func emitOne(content []byte, lineNo int, path string, stdout, stderr io.Writer, f *hookLogFilter) {
+func emitOne(content []byte, lineNo int, path string, stdout, stderr io.Writer, f daemonLogFilter) {
 	if len(bytes.TrimSpace(content)) == 0 {
 		return
 	}
@@ -420,27 +544,26 @@ func emitOne(content []byte, lineNo int, path string, stdout, stderr io.Writer, 
 	writeHookLogRecord(stdout, rec)
 }
 
-// hookRunsRoot returns $KATA_HOME/hooks/<dbhash> for the active DSN.
-func hookRunsRoot() (string, error) {
-	dbPath, err := config.KataDSN(context.Background())
+// daemonLogPath resolves the selected local log using the invocation context.
+func daemonLogPath(ctx context.Context, cronLogs bool) (string, error) {
+	dsn, err := config.KataDSN(ctx)
 	if err != nil {
 		return "", err
 	}
-	pgConfig, err := config.KataPostgresStorageConfig(context.Background())
+	pg, err := config.KataPostgresStorageConfig(ctx)
 	if err != nil {
 		return "", err
 	}
-	return config.HookRootDir(config.StorageHash(dbPath, pgConfig.Schema))
+	hash := config.StorageHash(dsn, pg.Schema)
+	if cronLogs {
+		return config.CronDispatchLogPath(hash)
+	}
+	return config.HookRunsPath(hash)
 }
 
-// orderedRunsFiles returns the rotated runs files plus the active file
-// in chronological order: runs.jsonl.K (oldest) → runs.jsonl (newest).
-func orderedRunsFiles() ([]string, error) {
-	root, err := hookRunsRoot()
-	if err != nil {
-		return nil, err
-	}
-	return scanRunsFiles(root)
+func hookRunsRoot(ctx context.Context) (string, error) {
+	path, err := daemonLogPath(ctx, false)
+	return filepath.Dir(path), err
 }
 
 // rotatedRun is a parsed runs.jsonl.N entry: idx is N, path is the
@@ -450,7 +573,11 @@ type rotatedRun struct {
 	idx  int
 }
 
-func scanRunsFiles(root string) ([]string, error) {
+func orderedLogFiles(ctx context.Context, active string) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	root, base := filepath.Dir(active), filepath.Base(active)
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -458,14 +585,14 @@ func scanRunsFiles(root string) ([]string, error) {
 		}
 		return nil, err
 	}
-	rotateds, hasActive := classifyRunsEntries(root, entries)
+	rotateds, hasActive := classifyRunsEntries(root, base, entries)
 	sort.Slice(rotateds, func(i, j int) bool { return rotateds[i].idx > rotateds[j].idx })
 	out := make([]string, 0, len(rotateds)+1)
 	for _, r := range rotateds {
 		out = append(out, r.path)
 	}
 	if hasActive {
-		out = append(out, filepath.Join(root, "runs.jsonl"))
+		out = append(out, active)
 	}
 	return out, nil
 }
@@ -473,16 +600,16 @@ func scanRunsFiles(root string) ([]string, error) {
 // classifyRunsEntries splits a directory listing into rotated entries
 // (runs.jsonl.N) and a hasActive flag for runs.jsonl. Anything else is
 // ignored.
-func classifyRunsEntries(root string, entries []os.DirEntry) ([]rotatedRun, bool) {
+func classifyRunsEntries(root, base string, entries []os.DirEntry) ([]rotatedRun, bool) {
 	var rotateds []rotatedRun
 	var hasActive bool
 	for _, e := range entries {
 		name := e.Name()
-		if name == "runs.jsonl" {
+		if name == base {
 			hasActive = true
 			continue
 		}
-		idx, ok := parseRotatedIndex(name)
+		idx, ok := parseRotatedIndex(base, name)
 		if !ok {
 			continue
 		}
@@ -493,11 +620,11 @@ func classifyRunsEntries(root string, entries []os.DirEntry) ([]rotatedRun, bool
 
 // parseRotatedIndex returns the numeric suffix of "runs.jsonl.N",
 // or false if the name doesn't match.
-func parseRotatedIndex(name string) (int, bool) {
-	if !strings.HasPrefix(name, "runs.jsonl.") {
+func parseRotatedIndex(base, name string) (int, bool) {
+	if !strings.HasPrefix(name, base+".") {
 		return 0, false
 	}
-	idx, err := strconv.Atoi(strings.TrimPrefix(name, "runs.jsonl."))
+	idx, err := strconv.Atoi(strings.TrimPrefix(name, base+"."))
 	if err != nil {
 		return 0, false
 	}

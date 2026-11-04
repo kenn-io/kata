@@ -1742,6 +1742,7 @@ kata daemon stop
 kata daemon restart [--listen <host:port>] [--insecure-readonly]
 kata daemon reload
 kata daemon logs --hooks [--tail]
+kata daemon logs --cron [--tail] [--limit N] [--job-uid <job-uid>] [--reason <code>]
 kata health
 kata doctor [--json | --agent] [--workspace <path>] [--project <name>] [--daemon <name>]
 kata whoami

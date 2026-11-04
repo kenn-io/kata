@@ -208,3 +208,16 @@ func HookRunsPath(dbhash string) (string, error) {
 	}
 	return filepath.Join(root, "runs.jsonl"), nil
 }
+
+// CronDispatchLogPath returns <KataHome>/cron/<dbhash>/dispatch.jsonl.
+// Like hook logs, local cron diagnostics are isolated per storage target.
+func CronDispatchLogPath(dbhash string) (string, error) {
+	if err := validateDBHash(dbhash); err != nil {
+		return "", err
+	}
+	home, err := KataHome()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, "cron", dbhash, "dispatch.jsonl"), nil
+}

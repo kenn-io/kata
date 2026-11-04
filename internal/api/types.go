@@ -48,7 +48,26 @@ type HealthResponse struct {
 		FederationConfig *FederationConfigHealth `json:"federation_config,omitempty"`
 		IdleShutdown     *IdleShutdownHealth     `json:"idle_shutdown,omitempty"`
 		RootSigning      *RootSigningHealth      `json:"root_signing,omitempty"`
+		Cron             *CronHealth             `json:"cron,omitempty"`
 	}
+}
+
+// CronHealth counts native jobs observed by this daemon's sweeper, not every
+// configured job. LastEnumerationAt advances only after a complete enumeration.
+type CronHealth struct {
+	LastSweepAt                 time.Time      `json:"last_sweep_at"`
+	LastSweepMS                 int64          `json:"last_sweep_ms"`
+	LastEnumerationAt           *time.Time     `json:"last_enumeration_at,omitempty"`
+	Jobs                        int            `json:"jobs"`
+	ByReason                    map[string]int `json:"by_reason"`
+	DeliveredSinceStart         int64          `json:"delivered_since_start"`
+	SkippedSinceStart           int64          `json:"skipped_since_start"`
+	SkippedCountIsLowerBound    bool           `json:"skipped_count_is_lower_bound"`
+	ErrorsSinceStart            int64          `json:"errors_since_start"`
+	EnumerationErrorsSinceStart int64          `json:"enumeration_errors_since_start"`
+	LogPath                     string         `json:"log_path"`
+	LogErrorPresent             bool           `json:"log_error_present"`
+	LogErrorsSinceStart         int64          `json:"log_errors_since_start"`
 }
 
 // RootSigningHealth reports root projects whose signed writes this daemon

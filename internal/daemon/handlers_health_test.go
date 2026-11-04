@@ -5,6 +5,7 @@ import (
 	"encoding/json/jsontext"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -13,10 +14,34 @@ import (
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/embedding"
 )
+
+func TestHealthCronDiagnosticsOnly(t *testing.T) {
+	d := openTestDB(t)
+	r := daemon.NewCronDispatchRecorder(filepath.Join(t.TempDir(), "dispatch.jsonl"))
+	t.Cleanup(func() { require.NoError(t, r.Close()) })
+	_, err := r.Record(t.Context(), db.RecurringCronCandidate{JobUID: "private-job"}, db.DispatchRecurringCronOut{Reason: cron.DispatchIdle}, nil, d.now)
+	require.NoError(t, err)
+	r.FinishSweep(d.now, 3*time.Millisecond, true, false)
+	ts := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, Auth: config.AuthConfig{Token: "operator-token"}, InsecureReadonly: true, CronRecorder: r})
+	resp, raw := doReq(t, ts, http.MethodGet, "/api/v1/health", nil, map[string]string{"Forwarded": "for=198.51.100.1"})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.NotContains(t, string(raw), `"cron"`)
+	resp, raw = doReq(t, ts, http.MethodGet, "/api/v1/health", nil, map[string]string{"Authorization": "Bearer operator-token"})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var body struct {
+		Cron *api.CronHealth `json:"cron"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &body))
+	require.NotNil(t, body.Cron)
+	require.Equal(t, 1, body.Cron.Jobs)
+	require.Equal(t, 1, body.Cron.ByReason["idle"])
+	require.NotContains(t, string(raw), "private-job")
+}
 
 func TestHealth_ReportsSchemaAndUptime(t *testing.T) {
 	ts, _ := startDefaultTestServer(t)
