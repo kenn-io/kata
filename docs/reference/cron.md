@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -65,6 +65,35 @@ process inside Kata.
 Secret references are names, and checkout keys are portable names. Credentials,
 host paths, and runtime handles are not part of this shared contract. Opaque
 option objects retain exact JSON numbers.
+
+### Pause and resume a job
+
+Use `kata cron job pause <job-uid>` to stop future work or
+`kata cron job resume <job-uid>` to re-enable it. Both preserve every other
+field. Add `--expected-event-uid <event-uid>` to guard a known revision; a
+stale revision returns 409 with the current job. Without the flag, Kata reads
+the current revision and guards the write with it. An already matching state
+at the root returns the job without emitting an event. Archived jobs must be
+restored before either action.
+
+The REST actions are POST `/api/v1/projects/{project_id}/cron/jobs/{cron_uid}/pause`
+and `/resume`, with `{actor?, expected_event_uid?}`. MCP exposes
+`kata.cron_job_pause` and `kata.cron_job_resume` with the same optional revision.
+In the TUI Jobs list or job detail, press `p`. Resuming a native job asks for
+confirmation when its catch-up policy would deliver any missed children.
+The confirmation uses the counted revision; a concurrent change requires a
+refresh and another attempt. Failed backlog reads leave the job paused.
+
+Direct spokes forward native job actions as conditional full-definition PUTs.
+This works with older hubs that support native writes but lack these action
+routes. The spoke needs a current local revision: stale state conflicts, and
+an older hub may emit an update for an already matching enabled flag. Pull
+before retrying a stale revision or use the owning hub directly. Adapter jobs
+remain local, and an adapter must honor the enabled flag itself.
+
+Resuming a native job follows its [catch-up policy](#recurring-child-issues).
+With `catchup: "all"`, it backfills missed children when its parent and project
+are active. Pause and resume never launch processes inside Kata.
 
 ### Request files
 

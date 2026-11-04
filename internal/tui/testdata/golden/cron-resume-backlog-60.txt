@@ -1,0 +1,24 @@
+
+
+
+
+
+
+      ╭─────────────────────────────────────────────╮
+      │                                             │
+      │  Resume Weekly report?                      │
+      │                                             │
+      │  Resuming delivers 5 recurring child        │
+      │  issues that came due while it was paused.  │
+      │                                             │
+      │  To change how missed runs are handled,     │
+      │  use `kata cron job update`.                │
+      │                                             │
+      ╰─────────────────────────────────────────────╯
+
+
+
+
+
+
+ y resume▕ n/esc cancel

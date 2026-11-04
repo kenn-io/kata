@@ -1,0 +1,24 @@
+ Project: example-project                                       kata カタ · dev
+kata カタ [jobs] runs workflows
+ / search                                                                 1 job
+
+  Job            State   Trigger           Action             Last loaded run
+▶ Weekly report  paused  every 1m0s        notify             succeeded 1h ago
+                ╭─────────────────────────────────────────────╮
+                │                                             │
+                │  Resume Weekly report?                      │
+                │                                             │
+                │  Resuming delivers 5 recurring child        │
+                │  issues that came due while it was paused.  │
+                │                                             │
+                │  To change how missed runs are handled,     │
+                │  use `kata cron job update`.                │
+                │                                             │
+                ╰─────────────────────────────────────────────╯
+
+
+
+
+
+
+ y resume▕ n/esc cancel

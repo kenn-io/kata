@@ -347,3 +347,19 @@ func TestCronReadonlyAndIssueScopedCredentials(t *testing.T) {
 	}
 	require.Empty(t, cronOK(t, f.session, "cron_jobs", map[string]any{})["jobs"])
 }
+
+func TestCronJobEnabledTools(t *testing.T) {
+	f := newCronFixture(t)
+	id := cronNewUID(t, f.session)
+	job := cronRecord(t, f.session, "cron_job_create", map[string]any{"uid": id, "name": "Inspect", "definition": cronDefinition()}, "job")
+	resumed := cronRecord(t, f.session, "cron_job_resume", map[string]any{"uid": id}, "job")
+	require.Equal(t, true, resumed["definition"].(map[string]any)["enabled"])
+	require.Equal(t, job["name"], resumed["name"])
+	require.True(t, cronCall(t, f.session, "cron_job_pause", map[string]any{"uid": id, "expected_event_uid": job["definition_event_uid"]}).IsError)
+	paused := cronRecord(t, f.session, "cron_job_pause", map[string]any{"uid": id, "expected_event_uid": resumed["definition_event_uid"]}, "job")
+	require.Equal(t, false, paused["definition"].(map[string]any)["enabled"])
+	retry := cronOK(t, f.session, "cron_job_pause", map[string]any{"uid": id})
+	require.NotContains(t, retry, "events")
+	require.Equal(t, paused, retry["job"])
+	require.True(t, cronCall(t, f.session, "cron_job_delete", map[string]any{"uid": id}).IsError, "archive still requires revision")
+}

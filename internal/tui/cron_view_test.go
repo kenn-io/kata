@@ -530,10 +530,12 @@ func TestCronFilterAndTabState(t *testing.T) {
 
 func TestSnapshot_Cron(t *testing.T) {
 	defer snapshotInit(t)()
-	for _, name := range []string{"jobs", "jobs-filter", "jobs-unavailable", "runs", "job-detail", "run-detail", "workflow-detail", "help", "all-projects"} {
+	for _, name := range []string{"jobs", "jobs-paused", "jobs-filter", "jobs-unavailable", "runs", "job-detail", "run-detail", "workflow-detail", "help", "all-projects"} {
 		t.Run(name, func(t *testing.T) {
 			m := cronFixture(t)
 			switch name {
+			case "jobs-paused":
+				m.cron.data.jobs[0].Definition.Enabled = false
 			case "jobs-filter":
 				m = sendRune(m, '/')
 				m, _ = updateModel(m, tea.PasteMsg{Content: "daily"})

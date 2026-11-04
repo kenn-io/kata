@@ -67,12 +67,14 @@ type cronState struct {
 	conn, scope     uint64
 	form            *cronForm
 	editSeq         uint64
+	enabledSeq      uint64
+	enabled         *cronEnabledRequest
 }
 
 // Synchronize after every update and retain visible records during refresh.
 func (m Model) cronSync() (Model, tea.Cmd) {
 	if m.cron.conn != m.connGen || m.cron.scope != m.scopeGen {
-		if m.modal == modalDiscardCronJob {
+		if m.modal == modalDiscardCronJob || m.modal == modalCronResume {
 			m.modal = modalNone
 		}
 		m.cron = cronState{tab: m.cron.tab, conn: m.connGen, scope: m.scopeGen}
@@ -254,6 +256,8 @@ func (m Model) routeCronKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		*cursor -= max(m.height-8, 1)
 	case m.keymap.PageDown.matches(msg):
 		*cursor += max(m.height-8, 1)
+	case key == "p":
+		return m.routeCronEnabledKey(lines, *cursor)
 	case key == "n", key == "e":
 		next, cmd, handled := m.routeCronJobKey(key, lines, *cursor)
 		if handled {

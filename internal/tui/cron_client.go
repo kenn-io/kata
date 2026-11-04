@@ -14,6 +14,7 @@ import (
 )
 
 type cronAPI interface {
+	CronJobEnabled(ctx context.Context, projectID int64, uid, expected, actor string, enabled bool) (db.CronJob, error)
 	ListCronJobs(context.Context, int64) ([]generated.CronJob, error)
 	ShowCronJob(ctx context.Context, projectID int64, uid string) (db.CronJob, error)
 	PutCronJob(ctx context.Context, projectID int64, uid string, write kataapi.PutCronJobBody) error
@@ -187,4 +188,31 @@ func (c *Client) PutCronJob(ctx context.Context, projectID int64, uid string, wr
 		return callErr
 	}
 	return decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil)
+}
+
+// CronJobEnabled changes enabled under the revision counted or selected by the UI.
+func (c *Client) CronJobEnabled(ctx context.Context, projectID int64, uid, expected, actor string, enabled bool) (db.CronJob, error) {
+	client, err := c.generatedClient()
+	if err != nil {
+		return db.CronJob{}, err
+	}
+	body := generated.CronJobEnabledActionBody{Actor: &actor, ExpectedEventUID: &expected}
+	if enabled {
+		wire, callErr := client.ResumeCronJobWithResponse(ctx, &generated.ResumeCronJobRequestOptions{PathParams: &generated.ResumeCronJobPath{ProjectID: projectID, CronUID: uid}, Body: &body})
+		if wire == nil {
+			return db.CronJob{}, callErr
+		}
+		if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil); err != nil {
+			return db.CronJob{}, err
+		}
+		return decodeCronJobRecord(wire.Body)
+	}
+	wire, callErr := client.PauseCronJobWithResponse(ctx, &generated.PauseCronJobRequestOptions{PathParams: &generated.PauseCronJobPath{ProjectID: projectID, CronUID: uid}, Body: &body})
+	if wire == nil {
+		return db.CronJob{}, callErr
+	}
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil); err != nil {
+		return db.CronJob{}, err
+	}
+	return decodeCronJobRecord(wire.Body)
 }
