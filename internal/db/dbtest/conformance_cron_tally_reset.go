@@ -48,6 +48,16 @@ func oldPeerMetadata(t *testing.T, events []db.RemoteEvent) map[string]jsontext.
 		return raw
 	}
 	for _, event := range events {
+		if event.Type == "project.federation_enabled" {
+			var baseline struct {
+				Metadata map[string]jsontext.Value `json:"metadata"`
+			}
+			require.NoError(t, json.Unmarshal(event.Payload, &baseline))
+			if baseline.Metadata != nil {
+				current = baseline.Metadata
+			}
+			continue
+		}
 		if event.Type != "project.metadata_updated" {
 			continue
 		}
