@@ -330,25 +330,34 @@ func TestSearchFTS_SeparateCommentDocuments(t *testing.T) {
 	issue := createTesterIssueWithBody(ctx, t, d, p.ID, "login", "browser")
 	addTesterComment(ctx, t, d, issue.ID, "safari pull")
 	addTesterComment(ctx, t, d, issue.ID, "request timeout")
-	var wordScores float64
+	var wordScores, titleBodyScores float64
 	for _, word := range []string{"login", "browser", "safari", "timeout"} {
 		got, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: word})
 		require.NoError(t, err)
 		require.Len(t, got, 1)
 		wordScores += got[0].Score
+		if word == "login" || word == "browser" {
+			titleBodyScores += got[0].Score
+		}
 	}
-	for _, search := range []func(context.Context, db.SearchFTSParams) ([]db.SearchCandidate, error){d.SearchFTS, d.SearchFTSAny} {
+	for name, search := range map[string]func(context.Context, db.SearchFTSParams) ([]db.SearchCandidate, error){"all": d.SearchFTS, "any": d.SearchFTSAny} {
 		got, err := search(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login browser safari timeout"})
 		require.NoError(t, err)
 		require.Len(t, got, 1)
-		require.InDelta(t, wordScores, got[0].Score, 1e-12, "each word contributes its best document score")
+		want := wordScores
+		if name == "any" {
+			want = titleBodyScores
+		}
+		require.InDelta(t, want, got[0].Score, 1e-12, "each word contributes its best eligible document score")
 	}
 	got, err := d.SearchFTSAny(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login browser safari missing"})
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	require.Equal(t, issue.ID, got[0].Issue.ID)
-	require.Contains(t, got[0].MatchedIn, "title")
-	require.Contains(t, got[0].MatchedIn, "comments")
+	require.Equal(t, []string{"title", "body"}, got[0].MatchedIn)
+	got, err = d.SearchFTSAny(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "safari timeout"})
+	require.NoError(t, err)
+	require.Empty(t, got, "comment-only matches don't enter look-alike candidates")
 	got, err = d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "pull-request"})
 	require.NoError(t, err)
 	require.Empty(t, got, "phrases cannot span comments")

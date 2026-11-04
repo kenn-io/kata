@@ -76,7 +76,11 @@ func TestSearchFTS_PageBudget(t *testing.T) {
 					hits, err := search(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: tc.query})
 					elapsed := time.Since(start)
 					require.NoError(t, err)
-					require.Len(t, hits, tc.want)
+					want := tc.want
+					if tc.name == "sparse same-project" && name == "any" {
+						want = 0 // The needle appears only in a comment.
+					}
+					require.Len(t, hits, want)
 					for _, hit := range hits {
 						require.Equal(t, p.ID, hit.Issue.ProjectID)
 					}

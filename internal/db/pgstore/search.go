@@ -14,7 +14,8 @@ func (s *Store) SearchFTS(ctx context.Context, p db.SearchFTSParams) ([]db.Searc
 	return s.searchFTS(ctx, searchFTSRequest{params: p})
 }
 
-// SearchFTSAny returns issues that contain at least one normalized query term.
+// SearchFTSAny finds at least one normalized query term in title and body
+// documents only. Comments don't contribute candidates, scores, or MatchedIn flags.
 func (s *Store) SearchFTSAny(ctx context.Context, p db.SearchFTSParams) ([]db.SearchCandidate, error) {
 	return s.searchFTS(ctx, searchFTSRequest{params: p, any: true})
 }
@@ -73,6 +74,14 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
 	if request.any {
 		minimum = "1"
 	}
+	commentHits := ""
+	if !request.any {
+		commentHits = fmt.Sprintf(`
+ UNION ALL
+ SELECT i.id, terms.word, ts_rank_cd(to_tsvector('kata_simple_unaccent', c.body), terms.q), true
+ FROM terms CROSS JOIN comments c JOIN issues i ON i.id = c.issue_id
+ WHERE to_tsvector('kata_simple_unaccent', c.body) @@ terms.q AND %s`, rowFilter.String())
+	}
 
 	order := "candidates.matched_words DESC, candidates.score DESC, i.id DESC"
 	if request.params.StableOrder {
@@ -88,11 +97,7 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
 ), hits AS (
  SELECT i.id AS issue_id, terms.word, ts_rank_cd(h.tsv, terms.q) AS score, false AS in_comments
  FROM terms CROSS JOIN issues_search h JOIN issues i ON i.id = h.issue_id
- WHERE h.tsv @@ terms.q AND %s
- UNION ALL
- SELECT i.id, terms.word, ts_rank_cd(to_tsvector('kata_simple_unaccent', c.body), terms.q), true
- FROM terms CROSS JOIN comments c JOIN issues i ON i.id = c.issue_id
- WHERE to_tsvector('kata_simple_unaccent', c.body) @@ terms.q AND %s
+ WHERE h.tsv @@ terms.q AND %s%s
 ), word_hits AS (
  SELECT issue_id, word, max(score) AS score, bool_or(in_comments) AS in_comments
  FROM hits GROUP BY issue_id, word
@@ -108,7 +113,7 @@ SELECT `+issueColumns+`,
  FROM candidates
  JOIN issues i ON i.id = candidates.doc_key
  JOIN projects p ON p.id = i.project_id
- ORDER BY %s LIMIT %s`, rowFilter.String(), rowFilter.String(), minimum, order, bind(limit))
+ ORDER BY %s LIMIT %s`, rowFilter.String(), commentHits, minimum, order, bind(limit))
 	args := predicateArgs
 
 	rows, err := s.QueryContext(ctx, query, args...)

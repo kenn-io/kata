@@ -46,11 +46,22 @@ func TestSearchFTSScopeFiltersAndTieBreak(t *testing.T) {
 				"cafe": {"title"}, "session": {"body"}, "browser": {"comments"},
 				"login session browser": {"title", "body", "comments"},
 			} {
+				if name == "any" {
+					if query == "browser" {
+						fields = nil
+					} else if query == "login session browser" {
+						fields = []string{"title", "body"}
+					}
+				}
 				hits, err := search(ctx, db.SearchFTSParams{
 					ProjectID: project.ID, Query: query, Limit: 1, Status: "open", Labels: []string{"BUG"},
 					IssueScope: &db.APITokenScope{Kind: db.APITokenScopeIssueSubtree, ProjectUID: project.UID, RootIssueUID: root.UID},
 				})
 				require.NoError(t, err)
+				if fields == nil {
+					require.Empty(t, hits, "comment-only matches don't enter look-alike candidates")
+					continue
+				}
 				require.Len(t, hits, 1, "query %q must match the scoped child", query)
 				require.Equal(t, child.UID, hits[0].Issue.UID)
 				require.Equal(t, fields, hits[0].MatchedIn)

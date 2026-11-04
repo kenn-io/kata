@@ -1242,7 +1242,7 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return fmt.Errorf("search amid comment noise: %w", err)
 	}
-	require.Len(t, noiseMatches, 20)
+	require.Len(t, noiseMatches, 1)
 	assert.Contains(t, searchCandidateIDs(noiseMatches), original.ID)
 
 	sparse, err := createFixtureIssue(ctx, store, primary.Project.ID, "ranktoken once", "discovery-author", nil)

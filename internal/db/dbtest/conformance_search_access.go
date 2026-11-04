@@ -32,28 +32,32 @@ func checkRestrictedSearchReads(t *testing.T, store db.Storage) error {
 	visibleIssue := create(visible.ID, "visible task", "bug", "urgent")
 	hiddenIssue := create(hidden.ID, "hidden task", "bug", "urgent")
 	create(hidden.ID, "hidden excluded task", "bug", "urgent", "blocked")
-	params := func(projectID int64) db.SearchFTSParams {
-		return db.SearchFTSParams{ProjectID: projectID, Query: "runnerrefused", Status: "open", Limit: 20, Labels: []string{"bug", "urgent"}, ExcludeLabels: []string{"blocked"}}
+	params := func(projectID int64, query string) db.SearchFTSParams {
+		return db.SearchFTSParams{ProjectID: projectID, Query: query, Status: "open", Limit: 20, Labels: []string{"bug", "urgent"}, ExcludeLabels: []string{"blocked"}}
 	}
 	onlyVisible := db.WithAuthorizedProjects(ctx, []string{visible.UID})
 	onlyHidden := db.WithAuthorizedProjects(ctx, []string{hidden.UID})
 	for name, search := range map[string]func(context.Context, db.SearchFTSParams) ([]db.SearchCandidate, error){"all": store.SearchFTS, "any": store.SearchFTSAny} {
 		t.Run(name, func(t *testing.T) {
-			hits, err := search(ctx, params(hidden.ID))
+			query := "runnerrefused"
+			if name == "any" {
+				query = "task"
+			}
+			hits, err := search(ctx, params(hidden.ID, query))
 			require.NoError(t, err)
 			assert.Equal(t, []int64{hiddenIssue.ID}, searchCandidateIDs(hits), "unrestricted control")
 
-			hits, err = search(onlyVisible, params(hidden.ID))
+			hits, err = search(onlyVisible, params(hidden.ID, query))
 			require.NoError(t, err)
 			assert.Empty(t, searchCandidateIDs(hits), "a hidden project's issue never surfaces")
-			hits, err = search(onlyHidden, params(visible.ID))
+			hits, err = search(onlyHidden, params(visible.ID, query))
 			require.NoError(t, err)
 			assert.Empty(t, searchCandidateIDs(hits))
-			hits, err = search(onlyVisible, params(visible.ID))
+			hits, err = search(onlyVisible, params(visible.ID, query))
 			require.NoError(t, err)
 			assert.Equal(t, []int64{visibleIssue.ID}, searchCandidateIDs(hits), "the admitted project still matches")
 
-			scoped := params(visible.ID)
+			scoped := params(visible.ID, query)
 			scoped.AllowedIssueIDs = []int64{visibleIssue.ID}
 			scoped.IssueScope = &db.APITokenScope{RootIssueUID: visibleIssue.UID, ProjectUID: visible.UID}
 			hits, err = search(onlyVisible, scoped)
