@@ -129,6 +129,11 @@ for downtime and rollback. Scores combine each word's best document rank, so
 result order can change. SQLite phrases must fit within one document. Comment
 search cost follows the number of matching comments.
 
+Schema 42 indexes creation-order issue pages within one project and across all
+projects. Stop daemons and imports while the migration reads `issues` and builds
+the indexes. See the [schema 42 migration requirements](../development/postgres-migrations.md#schema-42-issue-creation-order-indexes)
+for the offline window, grants, and rollback.
+
 After preparation, grant the runtime role DML access and set default privileges
 for objects created by future migrations:
 
