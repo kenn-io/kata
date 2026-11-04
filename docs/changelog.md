@@ -25,9 +25,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
   duplicate retries, missing peers, and cleanup keep their existing behavior.
   See [quarantine recovery](operations/federation.md#quarantine) before skipping
   a refused batch.
-- Delete an issue from `kata tui` with `X` from the list. Type
-  `DELETE <project>#<id>` to confirm; the selection moves to the
-  neighbouring row and `u` restores the issue, the way `kata restore` does.
+- Delete an issue from `kata tui` with `X` from the list or detail, including
+  Inbox and a detail opened from Attention. Saved views drop the deleted
+  issue. Type `DELETE <project>#<id>` to confirm; the selection moves to the
+  neighbouring row and `u` restores the issue, including from Attention, the
+  way `kata restore` does.
   Issue-scoped credentials cannot delete, so they are not offered the key. See
   the [CLI reference](reference/cli.md#daemon-and-diagnostics).
 

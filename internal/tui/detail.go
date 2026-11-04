@@ -171,7 +171,7 @@ func newDetailModel() detailModel { return detailModel{reads: &detailReadBatch{}
 // detail errors are immutable once installed.
 func cloneDetailModel(dm detailModel) detailModel {
 	cloned := dm
-	cloned.reads = &detailReadBatch{}
+	cloned.reads = &detailReadBatch{canceled: dm.reads != nil && dm.reads.canceled}
 	cloned.issue = cloneIssue(dm.issue)
 	if dm.parent != nil {
 		parent := *dm.parent
@@ -188,6 +188,22 @@ func cloneDetailModel(dm detailModel) detailModel {
 		}
 	}
 	return cloned
+}
+
+// invalidated retains navigation state while fetched relations wait for a refetch.
+func (dm detailModel) invalidated() detailModel {
+	if dm.issue == nil {
+		return dm
+	}
+	dm.cancelReads()
+	dm.parent, dm.children, dm.comments, dm.events, dm.links = nil, nil, nil, nil, nil
+	dm.loading, dm.commentsLoading, dm.eventsLoading, dm.linksLoading = true, true, true, true
+	dm.err, dm.commentsErr, dm.eventsErr, dm.linksErr = nil, nil, nil, nil
+	dm.navStack = slices.Clone(dm.navStack)
+	for i := range dm.navStack {
+		dm.navStack[i] = dm.navStack[i].invalidated()
+	}
+	return dm
 }
 
 func cloneIssue(issue *Issue) *Issue {

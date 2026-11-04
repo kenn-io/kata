@@ -202,10 +202,10 @@ func (m Model) undoTarget(entry undoEntry, out undoOutcome) string {
 	if entry.before.QualifiedID != "" && out.ref == "" {
 		return entry.before.QualifiedID
 	}
-	if project := m.projectsByID[entry.projectID]; project != "" && ref != entry.uid && !strings.Contains(ref, "#") {
-		return project + "#" + ref
-	}
 	if ref != entry.uid && !strings.Contains(ref, "#") {
+		if qualified, ok := m.qualifiedIssueRef(entry.projectID, ref); ok {
+			return qualified
+		}
 		return "#" + ref
 	}
 	return ref
@@ -216,7 +216,12 @@ func (m Model) refreshAfterUndo(entry undoEntry, resp *MutationResp) (Model, tea
 		m.cache.markStale()
 	}
 	cmds := []tea.Cmd{m.fetchInitial()}
-	if m.detail.issue != nil && (m.detail.issue.UID == entry.uid ||
+	if m.attentionVisible() {
+		var refresh tea.Cmd
+		m, refresh = m.reloadAttention()
+		cmds = append(cmds, refresh)
+	}
+	if m.detail.issue != nil && (entry.kind == "delete" || m.detail.issue.UID == entry.uid ||
 		(entry.link != nil && (m.detail.issue.UID == entry.link.From.UID || m.detail.issue.UID == entry.link.To.UID))) {
 		if m.detail.issue.UID == entry.uid && resp != nil && resp.Issue != nil {
 			m.detail.issue = mergeUndoIssue(m.detail.issue, resp.Issue, entry)

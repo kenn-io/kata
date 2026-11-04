@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"encoding/json/jsontext"
+	"slices"
 	"strings"
 	"testing"
 
@@ -9,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/notification"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kit/tui/helplayout"
 	"go.kenn.io/kit/tui/splitlayout"
@@ -35,6 +38,7 @@ func newDeleteHarness(t *testing.T, view viewID) *deleteHarness {
 	for _, title := range []string{"First", "Second", "Third"} {
 		issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
 			ProjectID: project.ID, Title: title, Author: "alice",
+			Metadata: map[string]jsontext.Value{notification.MetadataKey("alice"): jsontext.Value(`{"from":"bob","message":"Review"}`)},
 		})
 		require.NoError(t, err)
 		h.issues = append(h.issues, issue)
@@ -86,7 +90,7 @@ func (h *deleteHarness) drain(cmd tea.Cmd) Model {
 		next, follow := updateModel(h.m, msg)
 		h.m = next
 		switch msg.(type) {
-		case detailFollowTickMsg, detailFetchedMsg, commentsFetchedMsg, eventsFetchedMsg, linksFetchedMsg, openDetailMsg, jumpDetailMsg, popDetailMsg, mutationDoneMsg, undoDoneMsg:
+		case attentionLoadedMsg, detailFollowTickMsg, detailFetchedMsg, commentsFetchedMsg, eventsFetchedMsg, linksFetchedMsg, openDetailMsg, jumpDetailMsg, popDetailMsg, mutationDoneMsg, undoDoneMsg:
 			h.m = h.drain(follow)
 		}
 	}
@@ -105,6 +109,255 @@ func (h *deleteHarness) isDeleted(uid string) bool {
 
 func (h *deleteHarness) qualified(issue db.Issue) string {
 	return h.project.Name + "#" + issue.ShortID
+}
+
+// openInbox designates the project as the Inbox and switches to it.
+func (h *deleteHarness) openInbox() {
+	h.t.Helper()
+	_, err := h.env.DB.DesignateInboxProject(h.t.Context(), db.DesignateInboxProjectIn{ProjectID: h.project.ID, Actor: "alice"})
+	require.NoError(h.t, err)
+	h.m = h.drain(h.finish(h.key(runeKey('I'))))
+}
+
+// openAttentionDetail opens the issue's detail from Attention.
+func (h *deleteHarness) openAttentionDetail(uid string) {
+	h.t.Helper()
+	h.m = h.drain(h.key(runeKey('T')))
+	h.m.attention.cursor = slices.IndexFunc(h.m.attention.rows, func(row attentionRequest) bool { return row.issue.UID == uid })
+	require.NotEqual(h.t, -1, h.m.attention.cursor)
+	h.m = h.drain(h.enter())
+}
+
+// focusChild opens parent with child linked under it and focuses the children.
+func (h *deleteHarness) focusChild(parent, child db.Issue) {
+	h.t.Helper()
+	_, err := h.client.KataAPI.AddLink(h.t.Context(), h.project.ID, child.UID, LinkBody{Type: "parent", ToRef: parent.UID}, "alice")
+	require.NoError(h.t, err)
+	h.selectIssue(parent.UID)
+	h.m = h.drain(h.m.detail.refetch(h.m.api))
+	h.m.detail.detailFocus = focusChildren
+}
+
+func TestDeletePreservesPendingReturn(t *testing.T) {
+	for _, destination := range []string{"Inbox", "Attention"} {
+		t.Run(destination, func(t *testing.T) {
+			t.Setenv("KATA_INBOX_USER", "alice")
+			h := newDeleteHarness(t, viewDetail)
+			parent, child, target := h.issues[0], h.issues[1], h.issues[2]
+			h.focusChild(parent, child)
+			pending := h.finish(h.enter())
+			defer h.m.detail.cancelReads()
+			require.Nil(t, h.m.detail.issue)
+
+			if destination == "Inbox" {
+				h.openInbox()
+				h.selectIssue(target.UID)
+			} else {
+				h.openAttentionDetail(target.UID)
+			}
+			h.key(runeKey('X'))
+			h.m = typeString(h.m, "DELETE "+h.qualified(target))
+			h.m = h.drain(h.enter())
+			require.True(t, h.isDeleted(target.UID))
+			if destination == "Inbox" {
+				h.m = h.drain(h.key(runeKey('I')))
+			} else {
+				h.m = h.drain(h.key(tea.KeyPressMsg{Code: tea.KeyEscape}))
+			}
+			require.Equal(t, viewDetail, h.m.view, "return resumes the pending navigation")
+			h.m = h.drain(pending)
+			require.NotNil(t, h.m.detail.issue)
+			require.Equal(t, child.UID, h.m.detail.issue.UID)
+			h.m = h.drain(h.key(tea.KeyPressMsg{Code: tea.KeyEscape}))
+			require.NotNil(t, h.m.detail.issue)
+			assert.Equal(t, parent.UID, h.m.detail.issue.UID, "Back still reaches the parent")
+		})
+	}
+}
+
+func TestAttentionUndoIgnoresOtherEdits(t *testing.T) {
+	h := newDeleteHarness(t, viewAttention)
+	h.m.undoHistory.push(undoEntry{kind: "close", uid: h.issues[0].UID, projectID: h.project.ID})
+	assertHelpItemAbsent(t, flattenHelpRows(attentionHelpRows(h.m)), helplayout.HelpItem{Key: "u", Description: "undo"})
+	assert.Nil(t, h.key(runeKey('u')))
+	assert.Len(t, h.m.undoHistory.entries, 1)
+}
+
+// A delete must clear every place Back or a view switch can reveal.
+func TestDeleteReachesEverySavedView(t *testing.T) {
+	for _, context := range []string{"detail history", "Inbox", "Attention detail", "Attention Back", "split detail"} {
+		t.Run(context, func(t *testing.T) {
+			t.Setenv("KATA_INBOX_USER", "alice")
+			h := newDeleteHarness(t, viewDetail)
+			parent, target := h.issues[0], h.issues[1]
+			h.selectIssue(target.UID)
+			h.m = h.drain(h.m.detail.refetch(h.m.api))
+			require.Empty(t, h.m.detail.issue.QualifiedID, "confirmation must work with a fetched detail")
+			h.m.focus = focusDetail
+			switch context {
+			case "detail history":
+				h.focusChild(parent, target)
+				h.m = h.drain(h.enter())
+			case "Inbox":
+				h.openInbox()
+				require.True(t, h.m.scope.inbox)
+				h.selectIssue(target.UID)
+			case "Attention detail", "Attention Back":
+				if context == "Attention Back" {
+					h.focusChild(parent, target)
+					h.m = h.drain(h.enter())
+				}
+				h.openAttentionDetail(target.UID)
+			case "split detail":
+				h.m, _ = updateModel(h.m, tea.WindowSizeMsg{Width: 180, Height: 40})
+				require.Equal(t, splitlayout.Split, h.m.layout)
+				h.m.focus = focusDetail
+			}
+
+			h.key(runeKey('X'))
+			require.Equal(t, inputDeleteForm, h.m.input.kind, "X opens delete in this view")
+			h.m = typeString(h.m, "DELETE "+h.qualified(target))
+			refresh := h.finish(h.enter())
+			assertNoDeletedView(t, h.m, target.UID)
+			if context == "Attention detail" {
+				require.Len(t, h.m.attention.rows, 2)
+				h.m = h.drain(h.enter())
+				require.NotNil(t, h.m.detail.issue)
+				assert.NotEqual(t, target.UID, h.m.detail.issue.UID, "Enter cannot reopen the removed row before refresh")
+				h.m = h.drain(h.key(tea.KeyPressMsg{Code: tea.KeyEscape}))
+			} else {
+				h.m = h.drain(refresh)
+			}
+			require.True(t, h.isDeleted(target.UID))
+			assertNoDeletedView(t, h.m, target.UID)
+			switch context {
+			case "detail history":
+				require.NotNil(t, h.m.detail.issue)
+				assert.Equal(t, parent.UID, h.m.detail.issue.UID, "Back returns to the parent")
+			case "Inbox":
+				h.m = h.drain(h.key(runeKey('I')))
+				assert.Equal(t, viewList, h.m.view)
+			case "Attention detail", "Attention Back":
+				assert.Equal(t, viewAttention, h.m.view)
+				assertHelpItemPresent(t, flattenHelpRows(attentionHelpRows(h.m)), helplayout.HelpItem{Key: "u", Description: "undo"})
+			case "split detail":
+				assert.Equal(t, focusList, h.m.focus)
+				selected, ok := h.m.list.targetRow()
+				require.True(t, ok)
+				require.NotNil(t, h.m.detail.issue)
+				assert.Equal(t, selected.UID, h.m.detail.issue.UID)
+			}
+			h.m = h.drain(h.key(runeKey('u')))
+			assert.False(t, h.isDeleted(target.UID))
+			switch context {
+			case "detail history":
+				require.Len(t, h.m.detail.children, 1, "undo puts the child back in the open parent")
+				assert.Equal(t, target.UID, h.m.detail.children[0].UID)
+			case "Attention detail", "Attention Back":
+				assert.True(t, slices.ContainsFunc(h.m.attention.rows, func(row attentionRequest) bool { return row.issue.UID == target.UID }), "undo reloads Attention")
+			}
+			if context == "Attention Back" {
+				h.m = h.drain(h.key(tea.KeyPressMsg{Code: tea.KeyEscape}))
+				require.NotNil(t, h.m.detail.issue)
+				assert.Equal(t, parent.UID, h.m.detail.issue.UID, "the saved deleted detail pops Back to its parent")
+			}
+		})
+	}
+}
+
+func TestDeleteHintWaitsForLoadedDetail(t *testing.T) {
+	m := initialModel(Options{})
+	m.view = viewDetail
+	assertHelpItemAbsent(t, flattenHelpRows(m.helpRows()), helplayout.HelpItem{Key: "X", Description: "delete"})
+}
+
+// Returning after a delete must refetch the saved parent and reject older reads.
+func TestDeleteInvalidatesSavedRelations(t *testing.T) {
+	for _, route := range []string{"Back", "Inbox list", "Inbox detail", "Attention list", "Attention detail"} {
+		t.Run(route, func(t *testing.T) {
+			t.Setenv("KATA_INBOX_USER", "alice")
+			h := newDeleteHarness(t, viewDetail)
+			parent, child := h.issues[0], h.issues[1]
+			h.focusChild(parent, child)
+			_, err := h.client.KataAPI.AddLink(t.Context(), h.project.ID, parent.UID, LinkBody{Type: "related", ToRef: child.UID}, "alice")
+			require.NoError(t, err)
+			h.m = h.drain(h.m.detail.refetch(h.m.api))
+			require.NotEmpty(t, h.m.detail.links)
+			late := runCmdTree(h.m.detail.refetch(h.m.api))
+			switch route {
+			case "Back":
+				h.m = h.drain(h.enter())
+			case "Inbox list", "Inbox detail":
+				if route == "Inbox list" {
+					h.m.view = viewList
+				}
+				h.openInbox()
+				h.selectIssue(child.UID)
+			case "Attention list", "Attention detail":
+				if route == "Attention list" {
+					h.m.view = viewList
+				}
+				h.openAttentionDetail(child.UID)
+			}
+			h.key(runeKey('X'))
+			require.Equal(t, inputDeleteForm, h.m.input.kind)
+			h.m = typeString(h.m, "DELETE "+h.qualified(child))
+			refresh := h.finish(h.enter())
+			assertNoDeletedView(t, h.m, child.UID)
+			switch route {
+			case "Inbox list", "Inbox detail":
+				refresh = h.key(runeKey('I'))
+			case "Attention list", "Attention detail":
+				refresh = h.key(tea.KeyPressMsg{Code: tea.KeyEscape})
+			}
+			for _, msg := range late {
+				h.m, _ = updateModel(h.m, msg)
+			}
+			assertNoDeletedView(t, h.m, child.UID)
+			assert.NotContains(t, stripANSI(h.m.detail.View(120, 40, h.m.chrome())), "Second")
+			h.m = h.drain(refresh)
+			if h.m.view == viewDetail {
+				require.NotNil(t, h.m.detail.issue)
+				assert.Equal(t, parent.UID, h.m.detail.issue.UID)
+				assert.Empty(t, h.m.detail.children)
+			}
+		})
+	}
+}
+
+func assertNoDeletedView(t *testing.T, m Model, uid string) {
+	t.Helper()
+	checkIssue := func(dm detailModel) {
+		if dm.issue != nil {
+			assert.NotEqual(t, uid, dm.issue.UID)
+		}
+		if dm.loading {
+			assert.Empty(t, dm.links, "saved links wait for a fresh read")
+			assert.Nil(t, dm.parent)
+		}
+		for _, child := range dm.children {
+			assert.NotEqual(t, uid, child.UID)
+		}
+	}
+	checkDetail := func(dm detailModel) {
+		checkIssue(dm)
+		for _, prev := range dm.navStack {
+			checkIssue(prev)
+		}
+	}
+	checkDetail(m.detail)
+	for _, row := range m.attention.rows {
+		assert.NotEqual(t, uid, row.issue.UID)
+	}
+	if m.inboxReturn != nil {
+		checkDetail(m.inboxReturn.detail)
+		for _, row := range m.inboxReturn.list.visibleRows() {
+			assert.NotEqual(t, uid, row.issue.UID)
+		}
+	}
+	if m.attention.returnContext != nil {
+		checkDetail(m.attention.returnContext.detail)
+	}
 }
 
 func TestDeleteFormShowsConfirmationOnceAtEveryHeight(t *testing.T) {
@@ -291,9 +544,9 @@ func TestDeleteKeyIsOfferedOnlyToCredentialsThatCanDelete(t *testing.T) {
 			h.m.authCapabilitiesRequired, h.m.authCapabilitiesReady = true, true
 			h.m.issueScoped, h.m.scopedWritable = tc.scoped, tc.scoped
 
-			hidden := tc.scoped || tc.context != ""
+			hidden := tc.scoped
 			hint := helplayout.HelpItem{Key: "X", Description: "delete"}
-			if hidden || tc.view == viewDetail {
+			if hidden {
 				assertHelpItemAbsent(t, flattenHelpRows(h.m.helpRows()), hint)
 			}
 			if hidden {
@@ -315,9 +568,9 @@ func TestDeleteKeyIsOfferedOnlyToCredentialsThatCanDelete(t *testing.T) {
 			}
 
 			cmd := h.key(runeKey('X'))
-			if hidden || tc.view == viewDetail {
+			if hidden {
 				assert.Nil(t, cmd)
-				assert.Equal(t, inputNone, h.m.input.kind, "X requires list focus and credentials that can delete")
+				assert.Equal(t, inputNone, h.m.input.kind, "X requires credentials that can delete")
 				assert.Equal(t, tc.view, h.m.view)
 				assert.Equal(t, target.UID, h.m.list.selectedUID)
 				assert.False(t, h.isDeleted(target.UID))
@@ -343,35 +596,6 @@ func TestDeleteSavingEscKeepsResult(t *testing.T) {
 }
 
 func TestDeleteFromSplitListReplacesRetainedDetail(t *testing.T) {
-	t.Run("detail references", func(t *testing.T) {
-		deleted := Issue{UID: "deleted-issue"}
-		independent := Issue{UID: "independent-issue"}
-		prior := detailModel{issue: &Issue{UID: "prior-issue"}}
-		for _, tc := range []struct {
-			name     string
-			detail   detailModel
-			preserve bool
-		}{
-			{name: "deleted issue", detail: detailModel{issue: &deleted, navStack: []detailModel{prior}}},
-			{name: "deleted child", detail: detailModel{issue: &independent, children: []Issue{deleted}}},
-			{name: "deleted Back entry", detail: detailModel{issue: &independent, navStack: []detailModel{{issue: &deleted}}}},
-			{name: "no issue", detail: detailModel{navStack: []detailModel{prior}}},
-			{name: "independent issue keeps Back history", detail: detailModel{issue: &independent, navStack: []detailModel{prior}}, preserve: true},
-		} {
-			t.Run(tc.name, func(t *testing.T) {
-				got := tc.detail.withoutIssue(deleted.UID)
-				if tc.preserve {
-					assert.Equal(t, tc.detail, got)
-					assert.Len(t, got.navStack, 1)
-				} else {
-					assert.Nil(t, got.issue)
-					assert.Empty(t, got.children)
-					assert.Empty(t, got.navStack)
-				}
-			})
-		}
-	})
-
 	t.Run("delete result replaces retained detail", func(t *testing.T) {
 		h := newDeleteHarness(t, viewDetail)
 		parent, child := h.issues[0], h.issues[1]
