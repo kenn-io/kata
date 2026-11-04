@@ -414,6 +414,16 @@ func (s *Store) ProjectAccessRevision(ctx context.Context) (int64, error) {
 
 // ProjectAccessTransactionFence rechecks actor access while holding the policy lock through commit.
 func (s *Store) ProjectAccessTransactionFence(actor string, projectUIDs []string) db.TransactionFence {
+	return s.projectAccessCheck(actor, projectUIDs, true)
+}
+
+// ProjectAccessSnapshotCheck rechecks actor access using only reads in the
+// caller's pinned snapshot. Read-only transactions cannot take policy locks.
+func (s *Store) ProjectAccessSnapshotCheck(actor string, projectUIDs []string) db.TransactionFence {
+	return s.projectAccessCheck(actor, projectUIDs, false)
+}
+
+func (s *Store) projectAccessCheck(actor string, projectUIDs []string, lockPolicy bool) db.TransactionFence {
 	projectUIDs = slices.Clone(projectUIDs)
 	return func(ctx context.Context, tx db.Transaction) error {
 		if actor == "" && !db.UnrestrictedProjectWrites(ctx) {
@@ -422,17 +432,26 @@ func (s *Store) ProjectAccessTransactionFence(actor string, projectUIDs []string
 		if actor != "" && db.ValidateTokenActor(actor) != nil {
 			return db.ErrNotFound
 		}
-		if err := lockProjectAccess(ctx, tx); err != nil {
-			return err
+		if lockPolicy {
+			if err := lockProjectAccess(ctx, tx); err != nil {
+				return err
+			}
 		}
 		for _, projectUID := range projectUIDs {
 			var allowed int
-			err := tx.QueryRowContext(ctx, `SELECT 1 FROM projects p LEFT JOIN project_access_policies a ON a.project_uid=p.uid WHERE p.uid=$1 AND p.uid<>$2 AND (COALESCE(a.visibility,'all')='all' OR EXISTS(SELECT 1 FROM project_access_teams pat JOIN team_memberships tm ON tm.team_uid=pat.team_uid WHERE pat.project_uid=p.uid AND tm.actor=$3 AND tm.actor<>'')) FOR SHARE OF p`, projectUID, db.SystemProjectUID, strings.TrimSpace(actor)).Scan(&allowed)
+			query := `SELECT 1 FROM projects p LEFT JOIN project_access_policies a ON a.project_uid=p.uid WHERE p.uid=$1 AND p.uid<>$2 AND (COALESCE(a.visibility,'all')='all' OR EXISTS(SELECT 1 FROM project_access_teams pat JOIN team_memberships tm ON tm.team_uid=pat.team_uid WHERE pat.project_uid=p.uid AND tm.actor=$3 AND tm.actor<>''))`
+			if lockPolicy {
+				query += ` FOR SHARE OF p`
+			}
+			err := tx.QueryRowContext(ctx, query, projectUID, db.SystemProjectUID, strings.TrimSpace(actor)).Scan(&allowed)
 			if errors.Is(err, sql.ErrNoRows) {
 				return db.ErrNotFound
 			}
 			if err != nil {
-				return fmt.Errorf("project access fence: %w", err)
+				if lockPolicy {
+					return fmt.Errorf("project access fence: %w", err)
+				}
+				return fmt.Errorf("project access snapshot: %w", err)
 			}
 		}
 		return nil

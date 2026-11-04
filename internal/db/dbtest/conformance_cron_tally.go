@@ -259,8 +259,9 @@ func checkCronRunCounts(t *testing.T, store db.Storage) error {
 	_, err = store.CronRunCounts(db.WithAuthorizedProjects(ctx, []string{}), db.CronRunCountsQuery{ProjectID: f.project.ID})
 	require.ErrorIs(t, err, db.ErrNotFound)
 	denied := errors.New("project access denied")
-	_, err = store.CronRunCounts(db.WithProjectAccessTransactionCheck(ctx, func(context.Context, db.Transaction, string) error { return denied }), db.CronRunCountsQuery{ProjectID: f.project.ID})
+	_, err = store.CronRunCounts(db.WithProjectAccessSnapshotCheck(ctx, func(context.Context, db.Transaction, string) error { return denied }), db.CronRunCountsQuery{ProjectID: f.project.ID})
 	require.ErrorIs(t, err, denied)
+	checkCronRunCountsSnapshotAuthorization(t, store, f.project)
 	_, err = store.CronRunCounts(ctx, db.CronRunCountsQuery{ProjectID: f.project.ID, JobUID: f.job.UID, WorkflowUID: f.workflow.UID})
 	require.Error(t, err)
 	_, err = store.CronRunCounts(ctx, db.CronRunCountsQuery{ProjectID: f.project.ID, JobUID: "invalid"})
@@ -304,6 +305,54 @@ func checkCronRunCounts(t *testing.T, store db.Storage) error {
 	return nil
 }
 
+func checkCronRunCountsSnapshotAuthorization(t *testing.T, store db.Storage, project db.Project) {
+	t.Helper()
+	ctx := t.Context()
+	const actor = "cron-counts-reader"
+	_, _, err := store.CreateAPIToken(ctx, db.CreateAPITokenParams{PlaintextToken: "cron-counts-reader-token", Actor: actor, AdminActor: db.BootstrapActor})
+	require.NoError(t, err)
+	team, _, err := store.CreateTeam(ctx, "cron-counts-readers", db.BootstrapActor)
+	require.NoError(t, err)
+	hegel.Test(t, func(ht *hegel.T) {
+		scope := hegel.Draw(ht, hegel.Integers(0, 2)) // owner, empty, or one admitted project
+		public := hegel.Draw(ht, hegel.Booleans())
+		member := hegel.Draw(ht, hegel.Booleans())
+		validActor := hegel.Draw(ht, hegel.Booleans())
+		visibility, teamUIDs := "teams", []string{team.UID}
+		if public {
+			visibility, teamUIDs = "all", nil
+		}
+		_, _, err := store.SetProjectAccessPolicy(ctx, db.ProjectAccessPolicy{ProjectUID: project.UID, Visibility: visibility, TeamUIDs: teamUIDs}, db.BootstrapActor)
+		require.NoError(ht, err)
+		_, err = store.SetTeamMembership(ctx, team.UID, actor, member, db.BootstrapActor)
+		require.NoError(ht, err)
+
+		readCtx := ctx
+		switch scope {
+		case 0:
+			readCtx = db.WithAuthorizedProjects(readCtx, nil)
+		case 1:
+			readCtx = db.WithAuthorizedProjects(readCtx, []string{})
+		case 2:
+			readCtx = db.WithAuthorizedProjects(readCtx, []string{project.UID})
+			checkActor := actor
+			if !validActor {
+				checkActor = db.BootstrapActor
+			}
+			readCtx = db.WithProjectAccessSnapshotCheck(readCtx, func(checkCtx context.Context, tx db.Transaction, projectUID string) error {
+				return store.ProjectAccessSnapshotCheck(checkActor, []string{projectUID})(checkCtx, tx)
+			})
+		}
+		_, err = store.CronRunCounts(readCtx, db.CronRunCountsQuery{ProjectID: project.ID})
+		allowed := scope == 0 || (scope == 2 && validActor && (public || member))
+		if allowed {
+			require.NoError(ht, err)
+		} else {
+			require.ErrorIs(ht, err, db.ErrNotFound)
+		}
+	}, hegel.WithTestCases(64))
+}
+
 func checkCronRunCountsSnapshot(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	f := newCronTallyFixture(ctx, t, store)
@@ -313,7 +362,7 @@ func checkCronRunCountsSnapshot(t *testing.T, store db.Storage) error {
 	// metadata document and its retained aggregates. Commit a real writer there
 	// to distinguish a stable snapshot from independently consistent queries.
 	staged := false
-	readCtx := db.WithProjectAccessTransactionCheck(ctx, func(_ context.Context, _ db.Transaction, projectUID string) error {
+	readCtx := db.WithProjectAccessSnapshotCheck(ctx, func(_ context.Context, _ db.Transaction, projectUID string) error {
 		require.Equal(t, f.project.UID, projectUID)
 		result, err := store.PruneCronRuns(ctx, db.PruneCronRuns{ProjectID: f.project.ID, Actor: "operator", Before: f.before, Keep: 1})
 		require.NoError(t, err)

@@ -98,6 +98,7 @@ var alreadyImplemented = map[string]bool{
 	"AnonymousAccessibleProjectUIDs":       true, // project_access.go
 	"ProjectAccessRevision":                true, // project_access.go
 	"ProjectAccessTransactionFence":        true, // project_access.go
+	"ProjectAccessSnapshotCheck":           true, // project_access.go
 	"ExportProjectAccess":                  true, // project_access.go
 	"ApplyExternalFieldProjection":         true, // external_roots.go
 	"ActiveFederationQuarantine":           true, // federation_quarantine.go

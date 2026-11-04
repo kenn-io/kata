@@ -67,7 +67,7 @@ pruned again contributes again. Filters select a job or workflow's own group;
 		return renderCronRunCounts(cmd.OutOrStdout(), result)
 	}}
 	command.Flags().StringVar(&job, "job", "", "select one job UID")
-	command.Flags().StringVar(&workflow, "workflow", "", "select one workflow group UID (excludes job groups)")
+	command.Flags().StringVar(&workflow, "workflow", "", "select one workflow UID")
 	command.MarkFlagsMutuallyExclusive("job", "workflow")
 	return command
 }

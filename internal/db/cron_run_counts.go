@@ -71,7 +71,7 @@ func ReadCronRunCounts(ctx context.Context, tx CronCountsTransaction, in CronRun
 	if allowed, restricted := AuthorizedProjects(ctx); restricted && !slices.Contains(allowed, projectUID) {
 		return CronRunCountsResult{}, ErrNotFound
 	}
-	if err := CheckProjectAccessTransaction(ctx, tx, projectUID); err != nil {
+	if err := CheckProjectAccessSnapshot(ctx, tx, projectUID); err != nil {
 		return CronRunCountsResult{}, err
 	}
 	tallies, err := DecodeCronTallies(metadata)

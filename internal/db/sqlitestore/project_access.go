@@ -413,6 +413,16 @@ func (d *Store) ProjectAccessRevision(ctx context.Context) (int64, error) {
 
 // ProjectAccessTransactionFence rechecks actor access while holding the policy lock through commit.
 func (d *Store) ProjectAccessTransactionFence(actor string, projectUIDs []string) db.TransactionFence {
+	return d.projectAccessCheck(actor, projectUIDs, true)
+}
+
+// ProjectAccessSnapshotCheck rechecks actor access using only reads in the
+// caller's pinned snapshot. Read-only transactions cannot take policy locks.
+func (d *Store) ProjectAccessSnapshotCheck(actor string, projectUIDs []string) db.TransactionFence {
+	return d.projectAccessCheck(actor, projectUIDs, false)
+}
+
+func (d *Store) projectAccessCheck(actor string, projectUIDs []string, lockPolicy bool) db.TransactionFence {
 	projectUIDs = slices.Clone(projectUIDs)
 	return func(ctx context.Context, tx db.Transaction) error {
 		if actor == "" && !db.UnrestrictedProjectWrites(ctx) {
@@ -421,8 +431,10 @@ func (d *Store) ProjectAccessTransactionFence(actor string, projectUIDs []string
 		if actor != "" && db.ValidateTokenActor(actor) != nil {
 			return db.ErrNotFound
 		}
-		if err := lockProjectAccess(ctx, tx); err != nil {
-			return err
+		if lockPolicy {
+			if err := lockProjectAccess(ctx, tx); err != nil {
+				return err
+			}
 		}
 		for _, projectUID := range projectUIDs {
 			var allowed int
@@ -431,7 +443,10 @@ func (d *Store) ProjectAccessTransactionFence(actor string, projectUIDs []string
 				return db.ErrNotFound
 			}
 			if err != nil {
-				return fmt.Errorf("project access fence: %w", err)
+				if lockPolicy {
+					return fmt.Errorf("project access fence: %w", err)
+				}
+				return fmt.Errorf("project access snapshot: %w", err)
 			}
 		}
 		return nil

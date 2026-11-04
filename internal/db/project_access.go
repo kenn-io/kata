@@ -48,6 +48,7 @@ type ProjectAccessStorage interface {
 	AnonymousAccessibleProjectUIDs(ctx context.Context) ([]string, error)
 	ProjectAccessRevision(ctx context.Context) (int64, error)
 	ProjectAccessTransactionFence(actor string, projectUIDs []string) TransactionFence
+	ProjectAccessSnapshotCheck(actor string, projectUIDs []string) TransactionFence
 	ExportProjectAccess(ctx context.Context) iter.Seq2[ImportRecord, error]
 }
 

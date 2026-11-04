@@ -102,3 +102,15 @@ func TestCronRunCountsReadAuthority(t *testing.T) {
 		})
 	}
 }
+
+func TestCronRunCountsUsesDatabaseIdentityToken(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		fixture := newProjectAccessFixture(t, store, "cron-counts")
+		path := fmt.Sprintf("/api/v1/projects/%d/cron/runs/counts", fixture.private.ID)
+		status, _, body := fixture.request(t, http.MethodGet, path, "member", nil, nil)
+		require.Equal(t, http.StatusOK, status, string(body))
+
+		status, _, body = fixture.request(t, http.MethodGet, path, "nonmember", nil, nil)
+		require.Equal(t, http.StatusNotFound, status, string(body))
+	})
+}

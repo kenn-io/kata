@@ -59,3 +59,13 @@ func TestCronRunCountsHuman(t *testing.T) {
 	require.NotContains(t, text, "Review\nspoof")
 	require.NotContains(t, text, "0001-")
 }
+
+func TestCronRunCountsWorkflowHelpDescribesWorkflowUID(t *testing.T) {
+	command := newCronRunCountsCmd()
+	var help bytes.Buffer
+	command.SetOut(&help)
+	command.SetArgs([]string{"--help"})
+	require.NoError(t, command.Execute())
+	require.Contains(t, help.String(), "select one workflow UID")
+	require.NotContains(t, help.String(), "workflow group UID")
+}
