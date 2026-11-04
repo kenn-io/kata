@@ -25,7 +25,7 @@ func newDeleteForm(target formTarget, issue Issue, expected string) inputState {
 	input.Blur()
 	s := inputState{
 		kind:   inputDeleteForm,
-		title:  "Delete issue",
+		title:  fmt.Sprintf("Type DELETE %s to confirm", expected),
 		target: target,
 		fields: []inputField{{id: fieldConfirm, kind: fieldSingleLine, input: input, label: "Confirm"}},
 		del:    deleteFormState{expected: expected, issueTitle: issue.Title},
@@ -185,7 +185,6 @@ func renderDeleteForm(s inputState, innerW int) string {
 	parts := []string{
 		titleStyle.Render(truncate(sanitizeForLine(s.title), innerW)),
 		subtleStyle.Render(truncate(sanitizeForLine(s.del.issueTitle), innerW)),
-		subtleStyle.Render(truncate(fmt.Sprintf("Type DELETE %s to confirm.", s.del.expected), innerW)),
 		renderNewIssueField(s, 0, innerW),
 	}
 	if status := renderFormStatus(s); status != "" {

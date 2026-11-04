@@ -117,6 +117,14 @@ func (h *deleteHarness) qualified(issue db.Issue) string {
 	return h.project.Name + "#" + issue.ShortID
 }
 
+func TestDeleteFormShowsConfirmationOnceAtEveryHeight(t *testing.T) {
+	for _, height := range []int{10, 11, 30} {
+		form := newDeleteForm(formTarget{}, Issue{Title: "Duplicate issue"}, "example-project#abc4")
+		rendered := stripANSI(renderCenteredForm(form, 100, height, snapshotFixedNow))
+		assert.Equal(t, 1, strings.Count(rendered, "Type DELETE example-project#abc4 to confirm"), "height %d", height)
+	}
+}
+
 func TestDeleteFormRequiresFullConfirmation(t *testing.T) {
 	h := newDeleteHarness(t, viewList)
 	target := h.issues[1]
@@ -124,10 +132,8 @@ func TestDeleteFormRequiresFullConfirmation(t *testing.T) {
 
 	h.key(runeKey('X'))
 	require.Equal(t, inputDeleteForm, h.m.input.kind, "X opens the Delete form")
-	assert.Equal(t, "Delete issue", h.m.input.title)
 	rendered := stripANSI(renderCenteredForm(h.m.input, 100, 30, h.m.toastNow()))
-	assert.Contains(t, rendered, "Delete issue")
-	assert.Contains(t, rendered, "Type DELETE "+h.qualified(target)+" to confirm.")
+	assert.Contains(t, rendered, "Type DELETE "+h.qualified(target)+" to confirm")
 	assert.Empty(t, h.m.input.field(fieldConfirm).input.Placeholder)
 	assert.Contains(t, rendered, "Second", "the form shows the issue title")
 
