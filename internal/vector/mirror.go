@@ -22,40 +22,45 @@ func (ix *Index) RefreshMirror(ctx context.Context, store db.Storage) (int, erro
 	if ix.pg != nil {
 		return ix.pg.refreshMirror(ctx, store)
 	}
-	changed := 0
-	seen := make(map[string]struct{})
-	afterID := int64(0)
-	for {
-		page, err := store.ListIssueContent(ctx, afterID, mirrorPageSize)
-		if err != nil {
-			return changed, fmt.Errorf("vector: list issue content: %w", err)
-		}
-		if len(page) == 0 {
-			break
-		}
-		for _, ic := range page {
-			seen[ic.UID] = struct{}{}
-			afterID = ic.ID
-			res, err := ix.db.ExecContext(ctx, `
-				INSERT INTO issue_mirror (issue_uid, project_uid, content, content_revision)
-				VALUES (?, ?, ?, ?)
-				ON CONFLICT(issue_uid) DO UPDATE SET
-				  project_uid = excluded.project_uid,
-				  content = excluded.content,
-				  content_revision = excluded.content_revision
-				WHERE issue_mirror.content_revision != excluded.content_revision
-				   OR issue_mirror.project_uid != excluded.project_uid`,
-				ic.UID, ic.ProjectUID, embedding.EmbedText(ic.Title, ic.Body), ic.ContentRevision)
-			if err != nil {
-				return changed, fmt.Errorf("vector: upsert mirror row %s: %w", ic.UID, err)
-			}
-			if n, err := res.RowsAffected(); err == nil {
-				changed += int(n)
-			}
-		}
+	rows, err := ix.db.QueryContext(ctx, `SELECT issue_uid, content_revision, project_uid FROM issue_mirror`)
+	if err != nil {
+		return 0, fmt.Errorf("vector: scan mirror keys: %w", err)
 	}
-
-	stale, err := ix.mirrorUIDsNotIn(ctx, seen)
+	known := make(map[string]mirrorKey)
+	for rows.Next() {
+		var uid string
+		var key mirrorKey
+		if err := rows.Scan(&uid, &key.revision, &key.projectUID); err != nil {
+			_ = rows.Close()
+			return 0, fmt.Errorf("vector: scan mirror key: %w", err)
+		}
+		known[uid] = key
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	changed, stale, err := syncMirror(ctx, store, known, func(ic db.IssueContent) (int, error) {
+		res, err := ix.db.ExecContext(ctx, `
+			INSERT INTO issue_mirror (issue_uid, project_uid, content, content_revision)
+			VALUES (?, ?, ?, ?)
+			ON CONFLICT(issue_uid) DO UPDATE SET
+			  project_uid = excluded.project_uid,
+			  content = excluded.content,
+			  content_revision = excluded.content_revision
+			WHERE issue_mirror.content_revision != excluded.content_revision
+			   OR issue_mirror.project_uid != excluded.project_uid`,
+			ic.UID, ic.ProjectUID, embedding.EmbedText(ic.Title, ic.Body), ic.ContentRevision)
+		if err != nil {
+			return 0, fmt.Errorf("vector: upsert mirror row %s: %w", ic.UID, err)
+		}
+		if n, err := res.RowsAffected(); err == nil {
+			return int(n), nil
+		}
+		return 0, nil
+	})
 	if err != nil {
 		return changed, err
 	}
@@ -72,21 +77,39 @@ func (ix *Index) RefreshMirror(ctx context.Context, store db.Storage) (int, erro
 	return changed, nil
 }
 
-func (ix *Index) mirrorUIDsNotIn(ctx context.Context, seen map[string]struct{}) ([]string, error) {
-	rows, err := ix.db.QueryContext(ctx, `SELECT issue_uid FROM issue_mirror`)
-	if err != nil {
-		return nil, fmt.Errorf("vector: scan mirror uids: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	var out []string
-	for rows.Next() {
-		var uid string
-		if err := rows.Scan(&uid); err != nil {
-			return nil, fmt.Errorf("vector: scan mirror uid: %w", err)
+type mirrorKey struct {
+	revision   int64
+	projectUID string
+}
+
+// syncMirror consumes known as it pages the live feed. Leftovers are safe to
+// remove only after every page has been read successfully.
+func syncMirror(ctx context.Context, store db.Storage, known map[string]mirrorKey, upsert func(db.IssueContent) (int, error)) (changed int, leftovers []string, err error) {
+	var afterID int64
+	for {
+		page, err := store.ListIssueContent(ctx, afterID, mirrorPageSize)
+		if err != nil {
+			return changed, nil, fmt.Errorf("vector: list issue content: %w", err)
 		}
-		if _, ok := seen[uid]; !ok {
-			out = append(out, uid)
+		if len(page) == 0 {
+			break
+		}
+		for _, issue := range page {
+			afterID = issue.ID
+			key, exists := known[issue.UID]
+			delete(known, issue.UID)
+			if exists && key.revision == issue.ContentRevision && key.projectUID == issue.ProjectUID {
+				continue
+			}
+			n, err := upsert(issue)
+			if err != nil {
+				return changed, nil, err
+			}
+			changed += n
 		}
 	}
-	return out, rows.Err()
+	for uid := range known {
+		leftovers = append(leftovers, uid)
+	}
+	return changed, leftovers, nil
 }
