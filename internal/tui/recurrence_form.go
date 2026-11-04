@@ -274,7 +274,9 @@ func (m Model) reloadRecurrenceForm(current recurrenceSnapshot) Model {
 	m.input = m.input.loadRecurrence(current.issue, current.rec)
 	m.input.recurrence.currentAfterRefusal = describeRecurrence(current.rec)
 	for i, id := range []fieldID{fieldRule, fieldStart, fieldZone} {
-		m.input.field(id).setValue(typed[i])
+		if f := m.input.field(id); f != nil {
+			f.setValue(typed[i])
+		}
 	}
 	m.input.saving = false
 	m.input.err = recurrenceChangedMessage
