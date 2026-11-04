@@ -57,7 +57,7 @@ func (m Model) routeCronEnabledKey(lines []cronLine, cursor int) (Model, tea.Cmd
 			if err == nil && parent.open {
 				progress, ok := parent.progress[current.UID]
 				if !ok {
-					err = errors.New("Cannot count missed runs; refresh the job before resuming")
+					err = errors.New("cannot count missed runs; refresh the job before resuming")
 				} else {
 					definition := current.Definition
 					definition.Enabled = true

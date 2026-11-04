@@ -66,3 +66,53 @@ func checkCronEnabledDeletedParent(t *testing.T, s db.Storage) error {
 	})
 	return nil
 }
+
+func checkCronEnabledMovedAdapterTarget(t *testing.T, s db.Storage) error {
+	ctx := t.Context()
+	project, err := s.CreateProject(ctx, "adapter-project")
+	require.NoError(t, err)
+	targetProject, err := s.CreateProject(ctx, "dependency-project")
+	require.NoError(t, err)
+	target, _, err := s.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Adapter dependency", Author: "operator"})
+	require.NoError(t, err)
+	definition := cron.JobDefinition{
+		Version: 1, Kind: "job", Enabled: true,
+		Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 7200},
+		Action:  cron.Action{Kind: "notify", Recipient: "operator", Message: "Review service"},
+		Issue:   &cron.IssuePolicy{Kind: "existing", UID: target.UID},
+		Overlap: "allow", Catchup: "latest",
+	}
+	job, _, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "Adapter job", Actor: "operator", Definition: definition})
+	require.NoError(t, err)
+
+	definition.Enabled = false
+	paused, events, err := s.PutCronJob(ctx, db.PutCronJob{
+		ProjectID: project.ID, UID: job.UID, Name: job.Name, Definition: definition,
+		Actor: "operator", ExpectedEventUID: job.DefinitionEventUID,
+	})
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+
+	_, err = s.MoveIssueProject(ctx, db.MoveIssueProjectIn{
+		IssueID: target.ID, FromProjectID: project.ID, ToProjectID: targetProject.ID,
+		IfMatchRev: target.Revision, Actor: "operator",
+	})
+	require.NoError(t, err)
+	movedTarget, err := s.IssueByUID(ctx, target.UID, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Equal(t, targetProject.ID, movedTarget.ProjectID)
+
+	definition = paused.Definition
+	definition.Enabled = true
+	_, events, err = s.PutCronJob(ctx, db.PutCronJob{
+		ProjectID: project.ID, UID: job.UID, Name: job.Name, Definition: definition,
+		Actor: "operator", ExpectedEventUID: paused.DefinitionEventUID,
+	})
+	require.ErrorIs(t, err, cron.ErrInvalid)
+	require.ErrorContains(t, err, "dependency belongs to another project")
+	require.Empty(t, events)
+	current, err := s.CronJob(ctx, project.ID, job.UID)
+	require.NoError(t, err)
+	require.False(t, current.Definition.Enabled, "a rejected resume must leave the job paused")
+	return nil
+}

@@ -16,6 +16,21 @@ import (
 func CheckCronDependencies(ctx context.Context, q interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, projectID int64, definition cron.JobDefinition) error {
+	return checkCronDependencies(ctx, q, projectID, definition, false)
+}
+
+// checkCronDependenciesForEnabledChange permits tombstoned dependencies for a
+// caller that already proved the definition is otherwise unchanged, while still
+// requiring each dependency to exist in this project.
+func checkCronDependenciesForEnabledChange(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, projectID int64, definition cron.JobDefinition) error {
+	return checkCronDependencies(ctx, q, projectID, definition, true)
+}
+
+func checkCronDependencies(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, projectID int64, definition cron.JobDefinition, allowDeleted bool) error {
 	check := func(table, kind, id string) error {
 		if id == "" {
 			return nil
@@ -32,7 +47,7 @@ func CheckCronDependencies(ctx context.Context, q interface {
 		if owner != projectID {
 			return fmt.Errorf("%w: %s dependency belongs to another project", cron.ErrInvalid, kind)
 		}
-		if deleted.Valid {
+		if deleted.Valid && !allowDeleted {
 			return fmt.Errorf("%w: tombstoned %s dependency %s", cron.ErrInvalid, kind, id)
 		}
 		return nil
