@@ -3,7 +3,6 @@ package daemon_test
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -79,7 +78,7 @@ func TestCronRuntimeForwardingOutcomes(t *testing.T) {
 				case "push-disabled":
 					b.PushEnabled = false
 				case "relay":
-					runtimeConfigureRelay(t, f.hub, f.spoke, f.sp)
+					configureClaimRelayBinding(t, f.hub, f.spoke, f.sp)
 				case "no-credentials":
 					require.NoError(t, config.DefaultFederationCredentialStore().DeleteFederationCredential(t.Context(), f.sp.UID))
 				case "credential-target":
@@ -218,15 +217,6 @@ func runtimeHubHTTPRequest(t *testing.T, env *testenv.Env, method, path string, 
 	t.Helper()
 	response, raw := envDoRaw(t, env, method, path, body, map[string]string{"Authorization": "Bearer tok"})
 	return response.StatusCode, raw
-}
-func runtimeConfigureRelay(t *testing.T, hub, spoke *testenv.Env, sp db.Project) {
-	t.Helper()
-	rootUID := hub.DB.InstanceUID()
-	public, _, err := ed25519.GenerateKey(nil)
-	require.NoError(t, err)
-	require.NoError(t, spoke.DB.PinRootAuthority(t.Context(), db.RootKeyPin{ProjectUID: sp.UID, AuthorityUID: rootUID, KeyID: db.RootPublicKeyID(public), PublicKey: public}))
-	_, err = spoke.DB.SetRelayBindingConfig(t.Context(), sp.ID, db.RelayBindingConfig{ProtocolVersion: db.RelayProtocolVersion, BindingUID: cronHTTPUID(t), UpstreamInstanceUID: rootUID, AuthorityUID: rootUID, HubPath: []string{rootUID, spoke.DB.InstanceUID()}, LocalActor: "tester", ServeDownstream: true, ResetEpoch: 1})
-	require.NoError(t, err)
 }
 
 func TestCronRuntimeForwardingCredentialChanged(t *testing.T) {

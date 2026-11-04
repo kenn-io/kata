@@ -62,7 +62,7 @@ func cronSetRuntimeOption(raw, key, value string) (string, error) {
 		}
 		fields[key] = encoded
 	}
-	encoded, err := json.Marshal(fields)
+	encoded, err := json.Marshal(fields, json.Deterministic(true))
 	if err != nil {
 		return raw, err
 	}

@@ -251,3 +251,57 @@ func TestCronRuntimeHelpExampleExecutes(t *testing.T) {
 	require.Contains(t, out, `"actor":"operator"`)
 	require.Contains(t, out, "example-worker")
 }
+
+// The limit covers the attributed wire body. Attribution must neither be
+// dropped to fit nor cause an oversized request to reach the network.
+func TestCronRuntimeCLIAutoActorBodyLimit(t *testing.T) {
+	t.Setenv("KATA_AUTHOR", "operator")
+	for _, size := range []int{cron.RuntimeBeatLimit, cron.RuntimeBeatLimit + 1} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			choices := map[string][]string{"options.agent": {}, "options.model": {}}
+			for _, key := range []string{"options.agent", "options.model"} {
+				for i := range 32 {
+					choices[key] = append(choices[key], fmt.Sprintf("%02d-", i))
+				}
+			}
+			fields := map[string]any{"actor": "operator", "label": "worker", "adapter": "example", "choices": choices}
+			base, err := json.Marshal(fields)
+			require.NoError(t, err)
+			remaining := size - len(base)
+			for _, key := range []string{"options.agent", "options.model"} {
+				for i := range choices[key] {
+					n := min(remaining, 125)
+					choices[key][i] += strings.Repeat("x", n)
+					remaining -= n
+				}
+			}
+			require.Zero(t, remaining)
+			wire, err := json.Marshal(fields)
+			require.NoError(t, err)
+			require.Len(t, wire, size)
+			delete(fields, "actor")
+			input, err := json.Marshal(fields)
+			require.NoError(t, err)
+			if size > cron.RuntimeBeatLimit {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					t.Error("oversized attributed body reached network")
+					w.WriteHeader(500)
+				}))
+				defer server.Close()
+				_, _, err := executeCronCLI(t, server.URL, bytes.NewReader(input), "runtime", "beat", "01ARZ3NDEKTSV4RRFFQ69G5FAV", "--json-input", "-")
+				require.ErrorContains(t, err, "byte limit")
+				return
+			}
+			env := testenv.New(t)
+			_, err = env.DB.CreateProject(t.Context(), "spoke-project")
+			require.NoError(t, err)
+			out, diagnostics, err := executeCronCLI(t, env.URL, bytes.NewReader(input), "runtime", "beat", "01ARZ3NDEKTSV4RRFFQ69G5FAV", "--json-input", "-")
+			require.NoError(t, err, diagnostics)
+			var beat struct {
+				Runtime cron.Runtime `json:"runtime"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(out), &beat))
+			require.Equal(t, "operator", beat.Runtime.Actor)
+		})
+	}
+}

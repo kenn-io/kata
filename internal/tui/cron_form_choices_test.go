@@ -275,3 +275,19 @@ func TestCronRuntimeChoicePresenceProperty(t *testing.T) {
 		})
 	}
 }
+
+// Editing the same member produces stable visible and persisted Options text.
+func TestCronRuntimeOptionsDeterministic(t *testing.T) {
+	for _, value := range []string{"review", ""} {
+		raw := `{"z":1.10,"agent":"old","big":12345678901234567890123,"nested":{"keep":[1,2]}}`
+		want := `{"agent":"review","big":12345678901234567890123,"nested":{"keep":[1,2]},"z":1.10}`
+		if value == "" {
+			want = `{"big":12345678901234567890123,"nested":{"keep":[1,2]},"z":1.10}`
+		}
+		for range 20 {
+			got, err := cronSetRuntimeOption(raw, "agent", value)
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+		}
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json/v2"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -112,10 +113,21 @@ func TestCronRuntimeBannerCounts(t *testing.T) {
 	jobs := []generated.CronJob{{Definition: generated.CronJobDefinitionResponse{Enabled: true, Action: generated.ActionResponse{Kind: "execute"}}}, {Definition: generated.CronJobDefinitionResponse{Enabled: false, Action: generated.ActionResponse{Kind: "execute"}}}, {Definition: generated.CronJobDefinitionResponse{Enabled: true, Action: generated.ActionResponse{Kind: "notify"}}}}
 	text, show := cronRuntimeBanner(inventory, jobs, true)
 	require.True(t, show)
-	require.Contains(t, text, "1 enabled execute jobs")
+	require.Contains(t, text, "1 enabled execute job.")
 	require.NotContains(t, text, "will not run")
+	for _, n := range []int{0, 2} {
+		counted := append([]generated.CronJob{}, jobs[1:]...)
+		for range n {
+			counted = append(counted, jobs[0])
+		}
+		text, _ := cronRuntimeBanner(inventory, counted, true)
+		require.Contains(t, text, fmt.Sprintf("%d enabled execute jobs.", n))
+	}
 	text, _ = cronRuntimeBanner(inventory, jobs, false)
 	require.NotContains(t, text, "1 enabled")
+	inventory.Warnings = []cron.RuntimeWarning{{Code: "pin_unmatched", JobUID: "a"}, {Code: "adapter_unmatched", JobUID: "a"}}
+	text, _ = cronRuntimeBanner(inventory, jobs, true)
+	require.Contains(t, text, "1 enabled execute job has no matching")
 	inventory.Warnings = []cron.RuntimeWarning{{Code: "pin_unmatched", JobUID: "a"}, {Code: "adapter_unmatched", JobUID: "a"}, {Code: "pin_unmatched", JobUID: "b"}}
 	text, _ = cronRuntimeBanner(inventory, jobs, true)
 	require.Contains(t, text, "2 enabled execute jobs")
@@ -235,10 +247,14 @@ func TestCronRuntimePollAfterMinute(t *testing.T) {
 		require.Equal(t, seq, m.cron.runtimePoll.seq, "ticks coalesce while a read is in flight")
 		for _, result := range runCmdTree(cmd) {
 			if _, ok := result.(cronRuntimeLoadedMsg); ok {
-				m, _ = updateModel(m, result)
+				var replacement tea.Cmd
+				m, replacement = updateModel(m, result)
+				for _, fresh := range runCmdTree(replacement) {
+					m, _ = updateModel(m, fresh)
+				}
 			}
 		}
-		require.Equal(t, 1, a.calls)
+		require.Equal(t, 2, a.calls)
 		require.False(t, m.cron.runtimePoll.out)
 		require.Same(t, a.inventory, m.cron.runtimes)
 	})
@@ -289,5 +305,35 @@ func TestCronRuntimeNarrowRender(t *testing.T) {
 		lines := strings.Split(rendered, "\n")
 		require.Len(t, lines, m.height)
 		require.Contains(t, stripANSI(lines[3]), "No live runtime advertised")
+	}
+}
+
+// A manual refresh during an in-flight read queues one replacement, even if
+// several refreshes arrive. Old evidence cannot satisfy the newer intent.
+func TestCronRuntimeRefreshDuringRead(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		m, a := runtimePollFixture(t)
+		old := cronRuntimeLoadedMsg{conn: m.connGen, scope: m.scopeGen, epoch: 7, seq: 3,
+			inventory: &cron.RuntimeInventory{Inventory: cron.RuntimeInventoryState{State: "ready"}, Warnings: []cron.RuntimeWarning{{Code: "no_live_runtime"}}}}
+		if failed {
+			old.err = errors.New("offline")
+		}
+		for range 2 {
+			var cmd tea.Cmd
+			m, cmd = updateModel(m, keyRune('r'))
+			for _, msg := range runCmdTree(cmd) {
+				m, _ = updateModel(m, msg)
+			}
+		}
+		require.Zero(t, a.calls)
+		m, cmd := updateModel(m, old)
+		for _, msg := range runCmdTree(cmd) {
+			m, _ = updateModel(m, msg)
+		}
+		require.Equal(t, 1, a.calls)
+		require.Same(t, a.inventory, m.cron.runtimes)
+		require.False(t, m.cron.runtimePoll.out)
+		_, cmd = updateModel(m, old)
+		require.Nil(t, cmd, "a duplicate stale response cannot restart the read")
 	}
 }

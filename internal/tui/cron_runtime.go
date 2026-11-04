@@ -12,8 +12,8 @@ import (
 )
 
 type cronRuntimePoll struct {
-	active, out bool
-	epoch, seq  uint64
+	active, out, pending bool
+	epoch, seq           uint64
 }
 type cronRuntimeLoadedMsg struct {
 	conn, scope, epoch, seq uint64
@@ -31,6 +31,7 @@ func (m Model) cronRuntimeSync(refresh bool) (Model, tea.Cmd) {
 			p.epoch++
 			p.active = false
 			p.out = false
+			p.pending = false
 			m.cron.runtimes = nil
 		}
 		return m, nil
@@ -42,9 +43,11 @@ func (m Model) cronRuntimeSync(refresh bool) (Model, tea.Cmd) {
 		m.cron.runtimes = nil
 		refresh = true
 	}
-	if !refresh || p.out {
+	p.pending = p.pending || refresh
+	if !p.pending || p.out {
 		return m, nil
 	}
+	p.pending = false
 	p.out = true
 	p.seq++
 	return m, m.fetchCronRuntimes()
@@ -63,9 +66,9 @@ func (m Model) fetchCronRuntimes() tea.Cmd {
 func (m Model) cronRuntimeCurrent(conn, scope, epoch uint64) bool {
 	return m.view == viewCron && m.cron.runtimePoll.active && conn == m.connGen && scope == m.scopeGen && epoch == m.cron.runtimePoll.epoch
 }
-func (m Model) cronRuntimeLoaded(msg cronRuntimeLoadedMsg) Model {
+func (m Model) cronRuntimeLoaded(msg cronRuntimeLoadedMsg) (Model, tea.Cmd) {
 	if !m.cronRuntimeCurrent(msg.conn, msg.scope, msg.epoch) || msg.seq != m.cron.runtimePoll.seq {
-		return m
+		return m, nil
 	}
 	m.cron.runtimePoll.out = false
 	m.cron.runtimes = msg.inventory
@@ -75,7 +78,7 @@ func (m Model) cronRuntimeLoaded(msg cronRuntimeLoadedMsg) Model {
 	if m.cron.form != nil {
 		m.cron.form.setRuntimeInventory(m.cron.runtimes)
 	}
-	return m
+	return m.cronRuntimeSync(false)
 }
 
 // cronRuntimeBanner describes this daemon's evidence, never execution eligibility.
@@ -102,7 +105,11 @@ func cronRuntimeBanner(inventory *cron.RuntimeInventory, jobs []generated.CronJo
 					n++
 				}
 			}
-			text += fmt.Sprintf("; %d enabled execute jobs", n)
+			noun := "jobs"
+			if n == 1 {
+				noun = "job"
+			}
+			text += fmt.Sprintf("; %d enabled execute %s", n, noun)
 		}
 		return text + ".", true
 	}
@@ -110,7 +117,11 @@ func cronRuntimeBanner(inventory *cron.RuntimeInventory, jobs []generated.CronJo
 		if !jobsAvailable {
 			return "Enabled execute jobs have no matching live advertisement here. See kata cron runtime list.", true
 		}
-		return fmt.Sprintf("%d enabled execute jobs have no matching live advertisement here. See kata cron runtime list.", len(unmatched)), true
+		noun, verb := "jobs", "have"
+		if len(unmatched) == 1 {
+			noun, verb = "job", "has"
+		}
+		return fmt.Sprintf("%d enabled execute %s %s no matching live advertisement here. See kata cron runtime list.", len(unmatched), noun, verb), true
 	}
 	return "", false
 }

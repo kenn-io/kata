@@ -397,7 +397,14 @@ func (o *cronCLIOptions) requestBody(cmd *cobra.Command) ([]byte, error) {
 	if err := o.applyExpectedEventUID(fields); err != nil {
 		return nil, err
 	}
-	return json.Marshal(fields)
+	body, err := json.Marshal(fields)
+	if err != nil {
+		return nil, err
+	}
+	if o.resource == "runtime" && len(body) > cron.RuntimeBeatLimit {
+		return nil, cronCLIValidation("cron request exceeds its byte limit")
+	}
+	return body, nil
 }
 
 // readRequest returns the bounded request file. Definition delete and restore
