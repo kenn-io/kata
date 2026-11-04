@@ -122,21 +122,37 @@ func TestRecurrenceFormConflictAtMinimumHeight(t *testing.T) {
 	})
 	s.err = recurrenceChangedMessage
 	s.recurrence.currentAfterRefusal = "now: FREQ=DAILY from 2026-11-09 in Europe/Paris"
+	h := newRecurrenceHarness(t, viewDetail)
+	h.open()
+	h.fill("FREQ=WEEKLY;INTERVAL=2;BYDAY=MON,TUE,WED,THU,FRI", "2026-11-09", "Europe/Paris")
+	h.save()
+	require.Contains(t, h.m.input.err, "undefined weekday: MON")
 
-	for _, width := range []int{40, 60, 80} {
-		t.Run(strconv.Itoa(width)+"x12", func(t *testing.T) {
-			modal := renderCenteredForm(s, width, 12, snapshotFixedNow)
-			assert.LessOrEqual(t, lipgloss.Height(modal), 12, "conflict recovery must fit the supported terminal height")
-			assert.LessOrEqual(t, lipgloss.Width(modal), width)
-			got := stripANSI(overlayModal(strings.Repeat(blankLine(width)+"\n", 11)+blankLine(width), modal, width, 12))
-			assertLineCount(t, got, 12)
-			assertLinesFitWidth(t, got, width)
-			for _, want := range []string{"Rule", "Start", "Zone", "now: FREQ=DAILY", "ctrl+o save", "esc cancel"} {
-				assert.Contains(t, got, want)
-			}
-			text := strings.ReplaceAll(got, "│", " ")
-			assert.Contains(t, strings.Join(strings.Fields(text), " "), "Save again to overwrite.")
-		})
+	for _, tc := range []struct {
+		name  string
+		state inputState
+		want  []string
+	}{
+		{"conflict", s, []string{"now: FREQ=DAILY", "Save again to overwrite.", "ctrl+x stop"}},
+		{"daemon refusal", h.m.input, []string{"Could not start repeat"}},
+	} {
+		for _, width := range []int{40, 60, 80} {
+			t.Run(tc.name+"/"+strconv.Itoa(width)+"x12", func(t *testing.T) {
+				modal := renderCenteredForm(tc.state, width, 12, snapshotFixedNow)
+				assert.LessOrEqual(t, lipgloss.Height(modal), 12, "conflict recovery must fit the supported terminal height")
+				assert.LessOrEqual(t, lipgloss.Width(modal), width)
+				got := stripANSI(overlayModal(strings.Repeat(blankLine(width)+"\n", 11)+blankLine(width), modal, width, 12))
+				assertLineCount(t, got, 12)
+				assertLinesFitWidth(t, got, width)
+				for _, want := range []string{"Rule", "Start", "Zone", "ctrl+o save", "esc"} {
+					assert.Contains(t, got, want)
+				}
+				text := strings.ReplaceAll(got, "│", " ")
+				for _, want := range tc.want {
+					assert.Contains(t, strings.Join(strings.Fields(text), " "), want)
+				}
+			})
+		}
 	}
 }
 
@@ -361,7 +377,7 @@ func TestRecurrenceFormConflictKeepsInputAndShowsTheCurrentRecurrence(t *testing
 		require.Equal(t, inputRecurrenceForm, h.m.input.kind)
 		rule, _, _ := h.values()
 		assert.Equal(t, "FREQ=DAILY", rule, "the typed rule stays")
-		assert.Contains(t, h.m.input.err, "changed since the form opened")
+		assert.Equal(t, recurrenceChangedMessage, h.m.input.err)
 		assert.Contains(t, h.page(), "FREQ=MONTHLY", "the current recurrence is shown")
 		assert.Equal(t, "FREQ=MONTHLY", h.rows()[0].RRule, "nothing was written")
 
@@ -398,7 +414,7 @@ func TestRecurrenceFormConflictKeepsInputAndShowsTheCurrentRecurrence(t *testing
 		require.Equal(t, inputRecurrenceForm, h.m.input.kind)
 		rule, _, _ := h.values()
 		assert.Equal(t, "FREQ=DAILY", rule)
-		assert.Contains(t, h.m.input.err, "changed since the form opened")
+		assert.Equal(t, recurrenceChangedMessage, h.m.input.err)
 		assert.Empty(t, h.rows(), "nothing was written")
 
 		h.save()
