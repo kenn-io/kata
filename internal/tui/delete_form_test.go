@@ -114,6 +114,7 @@ func (h *deleteHarness) qualified(issue db.Issue) string {
 }
 
 func TestDeleteFormShowsConfirmationOnceAtEveryHeight(t *testing.T) {
+	defer snapshotInit(t)()
 	for _, tc := range []struct {
 		name      string
 		qualified string
@@ -121,6 +122,7 @@ func TestDeleteFormShowsConfirmationOnceAtEveryHeight(t *testing.T) {
 		height    int
 	}{
 		{"short terminal", "example-project#abc4", 100, 11},
+		{"long project in short terminal", "example-repository-project-with-a-very-long-task-tracker-name-that-exceeds-eighty-columns#abc4", 80, 11},
 		{"regular terminal", "example-project#abc4", 100, 30},
 		{"80 columns", "example-repository-project-task-tracker#abc4", 80, 24},
 		{"long project at 80 columns", "example-repository-project-with-a-long-task-tracker-name#abc4", 80, 24},
@@ -128,7 +130,12 @@ func TestDeleteFormShowsConfirmationOnceAtEveryHeight(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			form := newDeleteForm(formTarget{}, Issue{Title: "Duplicate issue"}, tc.qualified)
 			rendered := stripANSI(renderCenteredForm(form, tc.width, tc.height, snapshotFixedNow))
-			confirmation := strings.Join(strings.Fields(rendered), "")
+			var content strings.Builder
+			for line := range strings.SplitSeq(rendered, "\n") {
+				assert.LessOrEqual(t, len([]rune(line)), tc.width, "each line fits the terminal")
+				content.WriteString(strings.Trim(line, " │╭╮╰╯─"))
+			}
+			confirmation := strings.Join(strings.Fields(content.String()), "")
 			assert.Equal(t, 1, strings.Count(confirmation, "DELETE"+tc.qualified), "the full confirmation remains visible across wrapped lines:\n%s", rendered)
 			assert.Empty(t, form.field(fieldConfirm).input.Placeholder)
 			if tc.height >= formMinHeight {
@@ -136,6 +143,26 @@ func TestDeleteFormShowsConfirmationOnceAtEveryHeight(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDeleteKeyRefusesHiddenSplitListInHelp(t *testing.T) {
+	h := newDeleteHarness(t, viewList)
+	h.selectIssue(h.issues[0].UID)
+	h.m, _ = updateModel(h.m, tea.WindowSizeMsg{Width: 180, Height: 40})
+	require.Equal(t, splitlayout.Split, h.m.layout)
+	require.Equal(t, focusList, h.m.focus)
+	h.key(runeKey('?'))
+	require.Equal(t, viewHelp, h.m.view)
+
+	cmd := h.key(runeKey('X'))
+	assert.Nil(t, cmd)
+	assert.Equal(t, inputNone, h.m.input.kind, "Help keeps the hidden list from opening a delete form")
+	assert.Equal(t, viewHelp, h.m.view)
+
+	h.key(runeKey('?'))
+	require.Equal(t, viewList, h.m.view)
+	h.key(runeKey('X'))
+	assert.Equal(t, inputDeleteForm, h.m.input.kind, "the visible list can still delete")
 }
 
 func TestDeleteFormRequiresFullConfirmation(t *testing.T) {
@@ -207,6 +234,9 @@ func TestUndoOfADelete(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newDeleteHarness(t, viewList)
 			target := h.issues[0]
+			detail, err := h.client.GetIssueDetail(t.Context(), h.project.ID, target.UID)
+			require.NoError(t, err)
+			require.Empty(t, detail.Issue.QualifiedID, "the undo preflight needs the list's qualified reference")
 			h.selectIssue(target.UID)
 			h.key(runeKey('X'))
 			h.m = typeString(h.m, "DELETE "+h.qualified(target))

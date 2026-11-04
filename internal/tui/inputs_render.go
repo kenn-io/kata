@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+	"go.kenn.io/kit/tui/termtext"
 )
 
 // renderInputBar formats the inline command bar as a bordered box.
@@ -80,7 +81,7 @@ func renderPanelPrompt(s inputState, width int) string {
 // radio for the Status axis instead of a textinput.
 func renderCenteredForm(s inputState, width, height int, now time.Time) string {
 	if width < formMinWidth || height < formMinHeight {
-		return renderTinyFormFallback(s)
+		return renderTinyFormFallback(s, width)
 	}
 	innerW := formInnerWidth(width)
 	innerH := formInnerHeight(height)
@@ -332,12 +333,12 @@ func renderFormStatus(s inputState) string {
 // than the form's minimum size. Just dumps the textarea so the user
 // can still type; no border / no centering. Useful in narrow CI
 // terminals or test fixtures.
-func renderTinyFormFallback(s inputState) string {
+func renderTinyFormFallback(s inputState, width int) string {
 	f := s.activeField()
 	if f == nil {
 		return ""
 	}
-	return s.title + "\n" + f.value()
+	return strings.Join(termtext.Wrap(sanitizeForLine(s.title), max(width, 1)), "\n") + "\n" + f.value()
 }
 
 // formInnerWidth picks the centered form's interior width. ~70% of

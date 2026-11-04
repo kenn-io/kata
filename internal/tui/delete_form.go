@@ -55,7 +55,7 @@ func (m Model) routeDeleteKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if !m.keymap.Delete.matches(msg) {
 		return m, nil, false
 	}
-	if m.detailIsActive() {
+	if (m.view != viewList && m.view != viewDetail) || !m.listIsActive() {
 		return m, nil, true
 	}
 	target, issue, ok := m.activeIssueTarget()
