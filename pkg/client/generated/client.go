@@ -269,6 +269,9 @@ type ClientInterface interface {
 	CreateCronJob(ctx context.Context, options *CreateCronJobRequestOptions, reqEditors ...runtime.RequestEditorFn) (*CreateCronJobResponse, error)
 	CreateCronJobWithResponse(ctx context.Context, options *CreateCronJobRequestOptions, reqEditors ...runtime.RequestEditorFn) (*CreateCronJobResp, error)
 
+	ValidateCronJob(ctx context.Context, options *ValidateCronJobRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ValidateCronJobResponse, error)
+	ValidateCronJobWithResponse(ctx context.Context, options *ValidateCronJobRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ValidateCronJobResp, error)
+
 	ArchiveCronJob(ctx context.Context, options *ArchiveCronJobRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ArchiveCronJobResponse, error)
 	ArchiveCronJobWithResponse(ctx context.Context, options *ArchiveCronJobRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ArchiveCronJobResp, error)
 
@@ -295,6 +298,9 @@ type ClientInterface interface {
 
 	CreateCronWorkflow(ctx context.Context, options *CreateCronWorkflowRequestOptions, reqEditors ...runtime.RequestEditorFn) (*CreateCronWorkflowResponse, error)
 	CreateCronWorkflowWithResponse(ctx context.Context, options *CreateCronWorkflowRequestOptions, reqEditors ...runtime.RequestEditorFn) (*CreateCronWorkflowResp, error)
+
+	ValidateCronWorkflow(ctx context.Context, options *ValidateCronWorkflowRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ValidateCronWorkflowResponse, error)
+	ValidateCronWorkflowWithResponse(ctx context.Context, options *ValidateCronWorkflowRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ValidateCronWorkflowResp, error)
 
 	ArchiveCronWorkflow(ctx context.Context, options *ArchiveCronWorkflowRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ArchiveCronWorkflowResponse, error)
 	ArchiveCronWorkflowWithResponse(ctx context.Context, options *ArchiveCronWorkflowRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ArchiveCronWorkflowResp, error)
@@ -3432,6 +3438,75 @@ func (c *Client) CreateCronJob(ctx context.Context, options *CreateCronJobReques
 	return responseParser(ctx, resp)
 }
 
+func (c *Client) ValidateCronJob(ctx context.Context, options *ValidateCronJobRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ValidateCronJobResponse, error) {
+	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"count": {Style: "form", Explode: &[]bool{false}[0]},
+		"from":  {Style: "form", Explode: &[]bool{false}[0]},
+	}
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/jobs/validate",
+		Method:        "POST",
+		Options:       options,
+		ContentType:   "application/json",
+		QueryEncoding: queryEncoding,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*ValidateCronJobResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(ValidateCronJobErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "ValidateCronJobErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(ValidateCronJobResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "ValidateCronJobResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/jobs/validate")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
 func (c *Client) ArchiveCronJob(ctx context.Context, options *ArchiveCronJobRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ArchiveCronJobResponse, error) {
 	var err error
 	reqParams := runtime.RequestOptionsParameters{
@@ -4001,6 +4076,74 @@ func (c *Client) CreateCronWorkflow(ctx context.Context, options *CreateCronWork
 	}
 
 	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/workflows")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+	return responseParser(ctx, resp)
+}
+
+func (c *Client) ValidateCronWorkflow(ctx context.Context, options *ValidateCronWorkflowRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ValidateCronWorkflowResponse, error) {
+	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"from": {Style: "form", Explode: &[]bool{false}[0]},
+	}
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/workflows/validate",
+		Method:        "POST",
+		Options:       options,
+		ContentType:   "application/json",
+		QueryEncoding: queryEncoding,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	responseParser := func(ctx context.Context, resp *runtime.Response) (*ValidateCronWorkflowResponse, error) {
+		bodyBytes := resp.Content
+		if resp.StatusCode != 200 {
+			target := new(ValidateCronWorkflowErrorResponse)
+			// Handle empty error response body gracefully - skip unmarshal if no content
+			if len(bodyBytes) > 0 {
+				if err = json.Unmarshal(bodyBytes, target); err != nil {
+					return nil, &runtime.ResponseDecodeError{
+						StatusCode:    resp.StatusCode,
+						ContentType:   resp.Headers.Get("Content-Type"),
+						ContentLength: len(bodyBytes),
+						TargetType:    "ValidateCronWorkflowErrorResponse",
+						Body:          bodyBytes,
+						Err:           err,
+					}
+				}
+			}
+			// Return error with (possibly empty) target
+			if errTarget, ok := any(*target).(error); ok {
+				return nil, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+			}
+			return nil, runtime.NewClientAPIError(fmt.Errorf("API error (status %d): %v", resp.StatusCode, *target),
+				runtime.WithStatusCode(resp.StatusCode))
+		}
+		target := new(ValidateCronWorkflowResponse)
+		// Handle empty response body gracefully
+		if len(bodyBytes) == 0 {
+			return target, nil
+		}
+		if err = json.Unmarshal(bodyBytes, target); err != nil {
+			return nil, &runtime.ResponseDecodeError{
+				StatusCode:    resp.StatusCode,
+				ContentType:   resp.Headers.Get("Content-Type"),
+				ContentLength: len(bodyBytes),
+				TargetType:    "ValidateCronWorkflowResponse",
+				Body:          bodyBytes,
+				Err:           err,
+			}
+		}
+		return target, nil
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/workflows/validate")
 	if err != nil {
 		return nil, fmt.Errorf("error executing request: %w", err)
 	}

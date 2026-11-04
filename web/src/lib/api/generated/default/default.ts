@@ -64,6 +64,8 @@ import type {
   CronJobResponseBody,
   CronRunResponseBody,
   CronRunsResponseBody,
+  CronValidationBody,
+  CronValidationResult,
   CronWorkflowResponseBody,
   DeleteIssuePathParameters,
   DeleteLinkParams,
@@ -312,6 +314,10 @@ import type {
   UnbindExternalRootParams,
   UnbindExternalRootPathParameters,
   UnmapConnectorFieldPathParameters,
+  ValidateCronJobParams,
+  ValidateCronJobPathParameters,
+  ValidateCronWorkflowParams,
+  ValidateCronWorkflowPathParameters,
 } from '../models'
 
 import { orvalFetch } from '../../client.ts'
@@ -2280,6 +2286,92 @@ export const createCronJob = async (
   })
 }
 
+export type validateCronJobResponse200 = {
+  data: CronValidationResult
+  status: 200
+}
+
+export type validateCronJobResponse400 = {
+  data: ErrorEnvelope
+  status: 400
+}
+
+export type validateCronJobResponse404 = {
+  data: ErrorEnvelope
+  status: 404
+}
+
+export type validateCronJobResponse413 = {
+  data: ErrorEnvelope
+  status: 413
+}
+
+export type validateCronJobResponse422 = {
+  data: ErrorEnvelope
+  status: 422
+}
+
+export type validateCronJobResponse500 = {
+  data: ErrorEnvelope
+  status: 500
+}
+
+export type validateCronJobResponseSuccess = validateCronJobResponse200 & {
+  headers: Headers
+}
+export type validateCronJobResponseError = (
+  | validateCronJobResponse400
+  | validateCronJobResponse404
+  | validateCronJobResponse413
+  | validateCronJobResponse422
+  | validateCronJobResponse500
+) & {
+  headers: Headers
+}
+
+export type validateCronJobResponse = validateCronJobResponseSuccess | validateCronJobResponseError
+
+export const getValidateCronJobUrl = (
+  { projectId }: ValidateCronJobPathParameters,
+  params?: ValidateCronJobParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/jobs/validate?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/jobs/validate`
+}
+
+export const validateCronJob = async (
+  { projectId }: ValidateCronJobPathParameters,
+  cronValidationBody: CronValidationBody,
+  params?: ValidateCronJobParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<validateCronJobResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<validateCronJobResponse>(getValidateCronJobUrl({ projectId }, params), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(cronValidationBody),
+  })
+}
+
 export type archiveCronJobResponse200 = {
   data: CronJobResponseBody
   status: 200
@@ -2666,6 +2758,97 @@ export const createCronWorkflow = async (
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(putCronWorkflowBody),
   })
+}
+
+export type validateCronWorkflowResponse200 = {
+  data: CronValidationResult
+  status: 200
+}
+
+export type validateCronWorkflowResponse400 = {
+  data: ErrorEnvelope
+  status: 400
+}
+
+export type validateCronWorkflowResponse404 = {
+  data: ErrorEnvelope
+  status: 404
+}
+
+export type validateCronWorkflowResponse413 = {
+  data: ErrorEnvelope
+  status: 413
+}
+
+export type validateCronWorkflowResponse422 = {
+  data: ErrorEnvelope
+  status: 422
+}
+
+export type validateCronWorkflowResponse500 = {
+  data: ErrorEnvelope
+  status: 500
+}
+
+export type validateCronWorkflowResponseSuccess = validateCronWorkflowResponse200 & {
+  headers: Headers
+}
+export type validateCronWorkflowResponseError = (
+  | validateCronWorkflowResponse400
+  | validateCronWorkflowResponse404
+  | validateCronWorkflowResponse413
+  | validateCronWorkflowResponse422
+  | validateCronWorkflowResponse500
+) & {
+  headers: Headers
+}
+
+export type validateCronWorkflowResponse =
+  | validateCronWorkflowResponseSuccess
+  | validateCronWorkflowResponseError
+
+export const getValidateCronWorkflowUrl = (
+  { projectId }: ValidateCronWorkflowPathParameters,
+  params?: ValidateCronWorkflowParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/workflows/validate?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/workflows/validate`
+}
+
+export const validateCronWorkflow = async (
+  { projectId }: ValidateCronWorkflowPathParameters,
+  cronValidationBody: CronValidationBody,
+  params?: ValidateCronWorkflowParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<validateCronWorkflowResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<validateCronWorkflowResponse>(
+    getValidateCronWorkflowUrl({ projectId }, params),
+    {
+      ...options,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+      body: JSON.stringify(cronValidationBody),
+    },
+  )
 }
 
 export type archiveCronWorkflowResponse200 = {
