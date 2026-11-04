@@ -151,6 +151,8 @@ type ListCronJobsQuery struct {
 }
 
 type ListCronRunsQuery struct {
+	// Reason Structured reason code, or an exact legacy reason first line
+	Reason    *string `json:"reason,omitempty"`
 	JobUID    *string `json:"job_uid,omitempty"`
 	Limit     *int64  `json:"limit,omitempty" validate:"omitempty,gte=0,lte=100"`
 	BeforeUID *string `json:"before_uid,omitempty"`

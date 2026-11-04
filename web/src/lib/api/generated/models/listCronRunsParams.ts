@@ -3,6 +3,10 @@
  */
 
 export type ListCronRunsParams = {
+  /**
+   * Structured reason code, or an exact legacy reason first line
+   */
+  reason?: string
   job_uid?: string
   /**
    * @minimum 0
