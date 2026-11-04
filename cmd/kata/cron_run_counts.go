@@ -46,7 +46,7 @@ pruned again contributes again. Filters select a job or workflow's own group;
 		if err != nil {
 			return err
 		}
-		response, err := client.GetCronRunCountsWithResponse(cmd.Context(), &generated.GetCronRunCountsRequestOptions{PathParams: &generated.GetCronRunCountsPath{ProjectID: project.ID}, Query: &generated.GetCronRunCountsQuery{JobUID: &job, WorkflowUID: &workflow}})
+		response, err := client.GetCronRunCountsWithResponse(cmd.Context(), &generated.GetCronRunCountsRequestOptions{PathParams: &generated.GetCronRunCountsPath{ProjectID: project.ID}, Query: &generated.GetCronRunCountsQuery{JobUID: optionalString(job), WorkflowUID: optionalString(workflow)}})
 		if response == nil {
 			return externalCLITransportError(response, err)
 		}
