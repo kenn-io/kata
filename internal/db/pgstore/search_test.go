@@ -11,26 +11,7 @@ import (
 	"go.kenn.io/kata/internal/db/pgstore"
 )
 
-func TestSearchFTS_LiteralURL(t *testing.T) {
-	ctx := t.Context()
-	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
-	t.Cleanup(cleanup)
-	store, err := pgstore.Open(ctx, dsn)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
-	p, err := store.CreateProject(ctx, "example-project")
-	require.NoError(t, err)
-	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "http://a.example/x'y", Author: "tester"})
-	require.NoError(t, err)
-	for _, search := range []func(context.Context, db.SearchFTSParams) ([]db.SearchCandidate, error){store.SearchFTS, store.SearchFTSAny} {
-		hits, err := search(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "http://a.example/x'y"})
-		require.NoError(t, err)
-		require.Len(t, hits, 1)
-		require.Equal(t, issue.ID, hits[0].Issue.ID)
-	}
-}
-
-func TestSearchKitBuildersPreserveFieldsScopeAndOrdering(t *testing.T) {
+func TestSearchFTSScopeFiltersAndTieBreak(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires isolated PostgreSQL")
 	}
@@ -99,7 +80,7 @@ func TestSearchFTS_PunctuationLexemes(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, store.Close()) })
 	project, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
-	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "login", Body: "browser", Author: "tester"})
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "login http://a.example/x'y", Body: "browser", Author: "tester"})
 	require.NoError(t, err)
 	_, _, err = store.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Author: "tester", Body: "timeout"})
 	require.NoError(t, err)
@@ -112,6 +93,8 @@ func TestSearchFTS_PunctuationLexemes(t *testing.T) {
 		{"any_lexeme", "login,absent", true, []string{"title"}},
 		{"field_flags", "login,browser", false, []string{"title", "body"}},
 		{"distinct_lexemes", "login,login timeout", false, []string{"title", "comments"}},
+		{"literal_url_all", "http://a.example/x'y", false, []string{"title"}},
+		{"literal_url_any", "http://a.example/x'y", true, []string{"title"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			search := store.SearchFTS

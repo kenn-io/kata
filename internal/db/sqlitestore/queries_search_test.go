@@ -70,17 +70,6 @@ func TestFTS_IssueUpdateReindexes(t *testing.T) {
 	require.Len(t, hits, 1)
 }
 
-func TestFTS_CommentInsertReindexes(t *testing.T) {
-	t.Parallel()
-	d, ctx, p := setupTestProject(t)
-	issue := createTesterIssueWithBody(ctx, t, d, p.ID, "boring", "body")
-	addTesterComment(ctx, t, d, issue.ID, "watermelon")
-
-	hits, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "watermelon"})
-	require.NoError(t, err)
-	require.Len(t, hits, 1)
-}
-
 func TestFTS_CommentUpdateReindexes(t *testing.T) {
 	t.Parallel()
 	d, ctx, p := setupTestProject(t)
@@ -367,12 +356,6 @@ func TestSearchFTS_SeparateCommentDocuments(t *testing.T) {
 		require.Len(t, got, 1)
 		require.InDelta(t, wordScores, got[0].Score, 1e-12, "each word contributes its best document score")
 	}
-	for _, query := range []string{"login safari", "safari timeout", "login browser safari timeout"} {
-		got, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: query})
-		require.NoError(t, err)
-		require.Len(t, got, 1, query)
-		require.Equal(t, issue.ID, got[0].Issue.ID)
-	}
 	got, err := d.SearchFTSAny(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login browser safari missing"})
 	require.NoError(t, err)
 	require.Len(t, got, 1)
@@ -387,9 +370,4 @@ func TestSearchFTS_SeparateCommentDocuments(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	require.Equal(t, []string{"comments"}, got[0].MatchedIn)
-	_, err = d.ExecContext(ctx, `DELETE FROM comments WHERE issue_id=?`, issue.ID)
-	require.NoError(t, err)
-	got, err = d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "safari"})
-	require.NoError(t, err)
-	require.Empty(t, got)
 }

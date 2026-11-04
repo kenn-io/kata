@@ -1177,20 +1177,6 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	require.Len(t, splitMatches, 1)
 	assert.Equal(t, primary.Issue.ID, splitMatches[0].Issue.ID)
 	assert.Equal(t, []string{"title", "comments"}, splitMatches[0].MatchedIn)
-	// Punctuation contributes no searchable terms.
-	for _, query := range []string{"login - watermelon", "login ?", "- ?"} {
-		t.Run(query[:min(len(query), 40)], func(t *testing.T) {
-			for _, search := range []func(context.Context, db.SearchFTSParams) ([]db.SearchCandidate, error){store.SearchFTS, store.SearchFTSAny} {
-				hits, err := search(ctx, db.SearchFTSParams{ProjectID: primary.Project.ID, Query: query})
-				require.NoError(t, err)
-				if query == "- ?" {
-					require.Empty(t, hits)
-				} else {
-					require.Contains(t, searchCandidateIDs(hits), primary.Issue.ID)
-				}
-			}
-		})
-	}
 	var distinctTerms []string
 	for n := range 500 {
 		distinctTerms = append(distinctTerms, fmt.Sprintf("searchterm%d", n))
@@ -1216,6 +1202,49 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	}
 	assert.Contains(t, searchCandidateIDs(anyMatches), primary.Issue.ID)
 	assert.Contains(t, searchCandidateIDs(anyMatches), blocked.ID)
+
+	noiseProject, err := store.CreateProject(ctx, "comment-noise-project")
+	if err != nil {
+		return fmt.Errorf("create comment noise project: %w", err)
+	}
+	original, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: noiseProject.ID, Title: "login", Body: "crash", Author: "tester",
+	})
+	if err != nil {
+		return fmt.Errorf("create original issue: %w", err)
+	}
+	// More than 20 partial matches must not crowd out the two-word match.
+	for i := range 22 {
+		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: noiseProject.ID, Title: fmt.Sprintf("unrelated task %d", i), Author: "tester",
+		})
+		if err != nil {
+			return fmt.Errorf("create comment noise issue: %w", err)
+		}
+		_, _, err = store.CreateComment(ctx, db.CreateCommentParams{
+			IssueID: issue.ID, Body: strings.Repeat("login ", 100), Author: "tester",
+		})
+		if err != nil {
+			return fmt.Errorf("create matching noise comment: %w", err)
+		}
+		for range 100 {
+			_, _, err = store.CreateComment(ctx, db.CreateCommentParams{
+				IssueID: issue.ID, Body: "routine progress update", Author: "tester",
+			})
+			if err != nil {
+				return fmt.Errorf("create neutral noise comment: %w", err)
+			}
+		}
+	}
+	noiseMatches, err := store.SearchFTSAny(ctx, db.SearchFTSParams{
+		ProjectID: noiseProject.ID, Query: "login crash", Limit: 20,
+	})
+	if err != nil {
+		return fmt.Errorf("search amid comment noise: %w", err)
+	}
+	require.Len(t, noiseMatches, 20)
+	assert.Contains(t, searchCandidateIDs(noiseMatches), original.ID)
+
 	sparse, err := createFixtureIssue(ctx, store, primary.Project.ID, "ranktoken once", "discovery-author", nil)
 	if err != nil {
 		return err

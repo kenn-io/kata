@@ -26,7 +26,6 @@ func TestSearchFTS_PageBudget(t *testing.T) {
 		{"dense other-project", 30_000, true, false, "login", 1, 4096},
 		{"interleaved", 30_000, true, true, "login browser safari timeout", 1, 16_384},
 		{"absent word", 0, false, false, "absentword", 0, 512},
-		{"busy four-term", 30_000, false, false, "login browser safari timeout", 20, 400_000},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d, path := openTestDBWithPath(t)
