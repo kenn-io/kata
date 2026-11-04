@@ -1044,6 +1044,8 @@ components:
           items:
             type: string
           type: array
+        execution:
+          $ref: "#/components/schemas/CronExecutionPolicy"
         project_uid:
           type: string
       required:
@@ -1059,6 +1061,29 @@ components:
           type: string
       required:
         - expected_event_uid
+      type: object
+    CronExecutionPolicy:
+      properties:
+        member_actor:
+          type: string
+        mode:
+          enum:
+            - none
+            - owned
+            - all
+          type: string
+        replica:
+          type: boolean
+        source:
+          enum:
+            - local
+            - replica_default
+            - project
+          type: string
+      required:
+        - replica
+        - mode
+        - source
       type: object
     CronJob:
       properties:
