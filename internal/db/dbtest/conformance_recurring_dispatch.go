@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -19,6 +20,17 @@ func checkRecurringDispatchDecisions(t *testing.T, s db.Storage) error {
 	in := db.DispatchRecurringCronIn{ProjectID: p.ID, JobUID: job.UID, ExpectedEventUID: job.DefinitionEventUID, Now: progress.Anchor}
 	check := func(want string, delivered int) db.DispatchRecurringCronOut {
 		t.Helper()
+		// Revision races have no explain equivalent. Every live gate is read
+		// immediately before dispatch on the identical project, job and clock.
+		if want != "definition_changed" {
+			explanation, err := s.ExplainRecurringCron(ctx, in.ProjectID, in.JobUID, in.Now)
+			require.NoError(t, err)
+			expected := cron.DispatchReason(want)
+			if want == "delivered" {
+				expected = cron.DispatchDue
+			}
+			require.Equal(t, expected, explanation.Reason)
+		}
 		out, e := s.DispatchRecurringCron(ctx, in)
 		require.NoError(t, e)
 		require.Equal(t, want, string(out.Reason))
@@ -66,6 +78,10 @@ func checkRecurringDispatchDecisions(t *testing.T, s db.Storage) error {
 		t.Helper()
 		before, err := s.MaxEventID(ctx)
 		require.NoError(t, err)
+		explanation, err := s.ExplainRecurringCron(ctx, in.ProjectID, in.JobUID, in.Now)
+		require.Error(t, err)
+		require.Equal(t, cron.DispatchReason(reason), explanation.Reason)
+		require.Equal(t, explanation.Reason.PublicDetail(), explanation.Detail)
 		out, err := s.DispatchRecurringCron(ctx, in)
 		require.Error(t, err)
 		require.Equal(t, reason, string(out.Reason))

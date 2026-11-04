@@ -40,6 +40,26 @@ func TestHealthCronDiagnosticsOnly(t *testing.T) {
 	require.Equal(t, 1, body.Cron.Jobs)
 	require.Equal(t, 1, body.Cron.ByReason["idle"])
 	require.NotContains(t, string(raw), "private-job")
+	t.Run("failed first enumeration", func(t *testing.T) {
+		d := openTestDB(t)
+		r := daemon.NewCronDispatchRecorder(filepath.Join(t.TempDir(), "dispatch.jsonl"))
+		t.Cleanup(func() { require.NoError(t, r.Close()) })
+		r.FinishCycle(d.now, time.Millisecond, false, true)
+		ts := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, CronRecorder: r})
+		resp, raw := doReq(t, ts, http.MethodGet, "/api/v1/health", nil, nil)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		var body struct {
+			Cron map[string]any `json:"cron"`
+		}
+		require.NoError(t, json.Unmarshal(raw, &body))
+		require.NotNil(t, body.Cron)
+		require.NotContains(t, body.Cron, "last_enumeration_at")
+		require.EqualValues(t, 1, body.Cron["enumeration_errors_since_start"])
+		r.FinishCycle(d.now.Add(time.Minute), time.Millisecond, true, false)
+		_, raw = doReq(t, ts, http.MethodGet, "/api/v1/health", nil, nil)
+		require.NoError(t, json.Unmarshal(raw, &body))
+		require.Equal(t, d.now.Add(time.Minute).Format(time.RFC3339Nano), body.Cron["last_enumeration_at"])
+	})
 }
 
 func TestHealth_ReportsSchemaAndUptime(t *testing.T) {
@@ -353,25 +373,4 @@ func TestHealthSerializesSanitizedEmbeddingRejection(t *testing.T) {
 	assert.Equal(t, "rejected", body.Embeddings.Credential)
 	require.NotNil(t, body.Embeddings.LastErrorAt)
 	assert.Equal(t, http.StatusUnauthorized, body.Embeddings.LastErrorStatus)
-}
-
-func TestHealthCronFailedFirstEnumerationOmitsTimestamp(t *testing.T) {
-	d := openTestDB(t)
-	r := daemon.NewCronDispatchRecorder(filepath.Join(t.TempDir(), "dispatch.jsonl"))
-	t.Cleanup(func() { require.NoError(t, r.Close()) })
-	r.FinishCycle(d.now, time.Millisecond, false, true)
-	ts := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, CronRecorder: r})
-	resp, raw := doReq(t, ts, http.MethodGet, "/api/v1/health", nil, nil)
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-	var body struct {
-		Cron map[string]any `json:"cron"`
-	}
-	require.NoError(t, json.Unmarshal(raw, &body))
-	require.NotNil(t, body.Cron)
-	require.NotContains(t, body.Cron, "last_enumeration_at")
-	require.EqualValues(t, 1, body.Cron["enumeration_errors_since_start"])
-	r.FinishCycle(d.now.Add(time.Minute), time.Millisecond, true, false)
-	_, raw = doReq(t, ts, http.MethodGet, "/api/v1/health", nil, nil)
-	require.NoError(t, json.Unmarshal(raw, &body))
-	require.Equal(t, d.now.Add(time.Minute).Format(time.RFC3339Nano), body.Cron["last_enumeration_at"])
 }

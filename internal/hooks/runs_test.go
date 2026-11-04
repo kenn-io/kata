@@ -127,8 +127,8 @@ func TestRunsAppender_ConcurrentAppends_NoInterleave(t *testing.T) {
 	}
 }
 
-// Cron diagnostics must not change the hook writer's version default or
-// closed-writer behavior, even when the rotation mechanism is extracted.
+// Hook records default to version 1; writes after Close are discarded.
+// The explicit-version rotation tests do not exercise either contract.
 func TestRunsAppenderPreservesHookContract(t *testing.T) {
 	app, path := newTestRunsAppender(t, 1<<20, 5)
 	app.Append(runRecord{EventID: 1, Result: "ok"})
@@ -139,11 +139,15 @@ func TestRunsAppenderPreservesHookContract(t *testing.T) {
 	if count := countValidRunRecords(t, path); count != 1 {
 		t.Errorf("closed hook appender wrote %d records; want one", count)
 	}
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: test-controlled log under t.TempDir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), `"kata_hook_runs_version":1`) {
-		t.Errorf("hook records must default to version 1: %s", raw)
+	var record runRecord
+	if err := json.Unmarshal(raw, &record); err != nil {
+		t.Fatal(err)
+	}
+	if record.Version != 1 || record.EventID != 1 {
+		t.Errorf("got version %d event %d; want default version 1 and the pre-Close event", record.Version, record.EventID)
 	}
 }

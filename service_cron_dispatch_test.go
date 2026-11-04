@@ -21,6 +21,8 @@ import (
 
 // The embedded worker must retain the same committed observations served by
 // its HTTP handler, including skip-only progress that creates no child event.
+// Counts and the configured log path also detect a worker or health handler
+// wired to a different recorder; isolated recorder tests cannot detect that.
 func TestServiceCronDispatchHistory(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	s, err := New(t.Context(), Config{DSN: filepath.Join(t.TempDir(), "service.db"), Auth: AuthConfig{TrustCallerAuthentication: true}})

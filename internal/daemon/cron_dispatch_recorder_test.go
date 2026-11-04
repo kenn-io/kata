@@ -2,6 +2,7 @@ package daemon_test
 
 import (
 	"context"
+	"encoding/json/v2"
 	"errors"
 	"os"
 	"path/filepath"
@@ -57,7 +58,9 @@ func TestCronRecorderCommittedCountsDedupeAndPruning(t *testing.T) {
 	require.Equal(t, 1, r.Health().Jobs)
 	r.FinishCycle(now.Add(3*time.Minute), 0, true, false)
 	require.Zero(t, r.Health().Jobs)
-	require.Nil(t, recorderLast(r, c.ProjectID, c.JobUID))
+	last, nonIdle := r.Last(c.ProjectID, c.JobUID)
+	require.Nil(t, last)
+	require.Nil(t, nonIdle)
 }
 
 type failingRecurringStore struct {
@@ -94,40 +97,6 @@ func TestCronSweeperRetainsCommittedBatchBeforeLaterError(t *testing.T) {
 	require.Equal(t, cron.DispatchError, recorderLast(r, p.ID, job.UID).Reason)
 }
 
-func TestCronRecorderProjectKeysAndLogFailure(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "cron", "dispatch.jsonl")
-	r := daemon.NewCronDispatchRecorder(path)
-	t.Cleanup(func() { require.NoError(t, r.Close()) })
-	c := db.RecurringCronCandidate{ProjectID: 1, JobUID: "job"}
-	_, err := r.Record(t.Context(), c, db.DispatchRecurringCronOut{Reason: cron.DispatchError}, errors.New("private failure"), time.Now())
-	require.NoError(t, err)
-	require.Nil(t, recorderLast(r, 2, "job"))
-	require.NotContains(t, recorderLast(r, 1, "job").Detail, "private failure")
-	// Each response is a copy; callers cannot alter a retained observation.
-	recorderLast(r, 1, "job").Reason = cron.DispatchIdle
-	require.Equal(t, cron.DispatchError, recorderLast(r, 1, "job").Reason)
-}
-
-// Filesystem failures are local diagnostics. A later changed decision retries
-// opening; steady states still obey the documented deduplication contract.
-func TestCronRecorderLogFailureHealthAndRecovery(t *testing.T) {
-	blocked := filepath.Join(t.TempDir(), "blocked")
-	require.NoError(t, os.WriteFile(blocked, []byte("file"), 0o600))
-	r := daemon.NewCronDispatchRecorder(filepath.Join(blocked, "dispatch.jsonl"))
-	t.Cleanup(func() { require.NoError(t, r.Close()) })
-	c := db.RecurringCronCandidate{ProjectID: 1, JobUID: "job"}
-	_, err := r.Record(t.Context(), c, db.DispatchRecurringCronOut{Reason: cron.DispatchIdle}, nil, time.Now())
-	require.Error(t, err)
-	r.FinishCycle(time.Now(), 0, true, false)
-	require.True(t, r.Health().LogErrorPresent)
-	require.EqualValues(t, 1, r.Health().LogErrorsSinceStart)
-	require.NoError(t, os.Remove(blocked))
-	_, err = r.Record(t.Context(), c, db.DispatchRecurringCronOut{Reason: cron.DispatchDelivered, Delivered: 1}, nil, time.Now())
-	require.NoError(t, err)
-	require.False(t, r.Health().LogErrorPresent)
-	require.EqualValues(t, 1, r.Health().LogErrorsSinceStart)
-}
-
 // Cancellation after commit cannot erase a batch's delivered counts. A failed
 // attempt caused by shutdown should not create a diagnostic error instead.
 func TestCronRecorderKeepsCommitAfterCallerCancellation(t *testing.T) {
@@ -149,4 +118,97 @@ func TestCronRecorderKeepsCommitAfterCallerCancellation(t *testing.T) {
 func recorderLast(r *daemon.CronDispatchRecorder, projectID int64, jobUID string) *api.CronDispatchDecision {
 	last, _ := r.Last(projectID, jobUID)
 	return last
+}
+
+func TestCronRecorderLastNonIdleSurvivesIdle(t *testing.T) {
+	r := daemon.NewCronDispatchRecorder(filepath.Join(t.TempDir(), "cron", "dispatch.jsonl"))
+	t.Cleanup(func() { require.NoError(t, r.Close()) })
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	c := db.RecurringCronCandidate{ProjectID: 1, JobUID: "job"}
+	_, err := r.Record(t.Context(), c, db.DispatchRecurringCronOut{Reason: cron.DispatchError}, errors.New("local-private-detail"), now)
+	require.NoError(t, err)
+	errorLast, _ := r.Last(1, "job")
+	require.NotContains(t, errorLast.Detail, "local-private-detail")
+	errorLast.Reason = cron.DispatchIdle
+	errorLast, _ = r.Last(1, "job")
+	require.Equal(t, cron.DispatchError, errorLast.Reason, "error lookups return copies")
+	_, err = r.Record(t.Context(), c, db.DispatchRecurringCronOut{Reason: cron.DispatchIdle}, nil, now.Add(time.Minute))
+	require.NoError(t, err)
+	last, nonIdle := r.Last(1, "job")
+	require.Equal(t, cron.DispatchIdle, last.Reason)
+	last.Reason = cron.DispatchError
+	last, _ = r.Last(1, "job")
+	require.Equal(t, cron.DispatchIdle, last.Reason, "latest lookups also return copies")
+	require.Equal(t, cron.DispatchError, nonIdle.Reason)
+	require.NotContains(t, nonIdle.Detail, "local-private-detail")
+	nonIdle.Reason = cron.DispatchIdle
+	_, nonIdle = r.Last(1, "job")
+	require.Equal(t, cron.DispatchError, nonIdle.Reason, "lookups return copies")
+	last, nonIdle = r.Last(2, "job")
+	require.Nil(t, last)
+	require.Nil(t, nonIdle)
+}
+
+func TestCronRecorderLogFailureRecovery(t *testing.T) {
+	t.Run("unchanged decision", func(t *testing.T) {
+		blocked := filepath.Join(t.TempDir(), "blocked")
+		require.NoError(t, os.WriteFile(blocked, []byte("file"), 0o600))
+		r := daemon.NewCronDispatchRecorder(filepath.Join(blocked, "dispatch.jsonl"))
+		t.Cleanup(func() { require.NoError(t, r.Close()) })
+		now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+		candidate := db.RecurringCronCandidate{ProjectID: 1, JobUID: "job"}
+		out := db.DispatchRecurringCronOut{Reason: cron.DispatchIdle}
+		_, err := r.Record(t.Context(), candidate, out, nil, now)
+		require.Error(t, err)
+		r.FinishCycle(now, 0, true, false)
+		require.True(t, r.Health().LogErrorPresent)
+		require.NoError(t, os.Remove(blocked))
+		changed, err := r.Record(t.Context(), candidate, out, nil, now.Add(time.Minute))
+		require.NoError(t, err)
+		require.False(t, changed, "retrying the log must not repeat decision alerts")
+		require.False(t, r.Health().LogErrorPresent)
+		require.EqualValues(t, 1, r.Health().LogErrorsSinceStart)
+		raw, err := os.ReadFile(r.Health().LogPath)
+		require.NoError(t, err)
+		require.Contains(t, string(raw), `"reason":"idle"`)
+	})
+	t.Run("changed decision", func(t *testing.T) {
+		blocked := filepath.Join(t.TempDir(), "blocked")
+		require.NoError(t, os.WriteFile(blocked, []byte("file"), 0o600))
+		r := daemon.NewCronDispatchRecorder(filepath.Join(blocked, "dispatch.jsonl"))
+		t.Cleanup(func() { require.NoError(t, r.Close()) })
+		c := db.RecurringCronCandidate{ProjectID: 1, JobUID: "job"}
+		_, err := r.Record(t.Context(), c, db.DispatchRecurringCronOut{Reason: cron.DispatchIdle}, nil, time.Now())
+		require.Error(t, err)
+		r.FinishCycle(time.Now(), 0, true, false)
+		require.True(t, r.Health().LogErrorPresent)
+		require.EqualValues(t, 1, r.Health().LogErrorsSinceStart)
+		require.NoError(t, os.Remove(blocked))
+		_, err = r.Record(t.Context(), c, db.DispatchRecurringCronOut{Reason: cron.DispatchDelivered, Delivered: 1}, nil, time.Now())
+		require.NoError(t, err)
+		require.False(t, r.Health().LogErrorPresent)
+		require.EqualValues(t, 1, r.Health().LogErrorsSinceStart)
+	})
+}
+
+func TestCronRecorderEnumerationFreshnessAndLowerBound(t *testing.T) {
+	r := daemon.NewCronDispatchRecorder(filepath.Join(t.TempDir(), "dispatch.jsonl"))
+	t.Cleanup(func() { require.NoError(t, r.Close()) })
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	_, err := r.Record(t.Context(), db.RecurringCronCandidate{ProjectID: 1, JobUID: "job"}, db.DispatchRecurringCronOut{Reason: cron.DispatchSkipped, Skipped: cron.RecurringSkip{Count: 1000, Capped: true}}, nil, now)
+	require.NoError(t, err)
+	r.FinishCycle(now, 0, false, false) // one successfully listed page
+	r.FinishCycle(now.Add(time.Minute), 0, false, true)
+	raw, err := json.Marshal(r.Health())
+	require.NoError(t, err)
+	var health map[string]any
+	require.NoError(t, json.Unmarshal(raw, &health))
+	require.Equal(t, now.Format(time.RFC3339), health["last_enumeration_at"])
+	require.EqualValues(t, 1, health["enumeration_errors_since_start"])
+	require.Equal(t, true, health["skipped_count_is_lower_bound"])
+	r.FinishCycle(now.Add(2*time.Minute), 0, true, false)
+	raw, err = json.Marshal(r.Health())
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(raw, &health))
+	require.Equal(t, true, health["skipped_count_is_lower_bound"], "lifetime count remains approximate after pruning")
 }

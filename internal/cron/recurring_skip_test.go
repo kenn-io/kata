@@ -118,6 +118,8 @@ func TestRecurringLatestSkipFinalization(t *testing.T) {
 	require.Zero(t, revision.Skipped.Count)
 }
 
+// This deterministic 4,320-occurrence window exceeds the property's 2,500
+// maximum and catches accidental caps on longer interval backlogs.
 func TestRecurringSkipIntervalCountIsExact(t *testing.T) {
 	j := nativeJob(t)
 	j.Trigger = Trigger{Kind: "interval", IntervalSeconds: 60}

@@ -42,7 +42,9 @@ func TestDaemonCronLogsRejectsIncompatibleSelectors(t *testing.T) {
 	} {
 		resetFlags(t)
 		_, _, err := executeRootCapture(t, t.Context(), append([]string{"daemon", "logs"}, flags...)...)
-		require.Error(t, err, flags)
+		var usage *cliError
+		require.ErrorAs(t, err, &usage, flags)
+		require.Equal(t, ExitUsage, usage.ExitCode, flags)
 	}
 }
 

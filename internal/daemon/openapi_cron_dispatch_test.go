@@ -19,5 +19,4 @@ func TestOpenAPICronDispatchRequiredNullableLast(t *testing.T) {
 	result := &huma.ValidateResult{}
 	huma.Validate(doc.Components.Schemas, schema, huma.NewPathBuffer(nil, 0), huma.ModeReadFromServer, value, result)
 	require.Empty(t, result.Errors, "fresh-daemon null observation must validate")
-	require.True(t, schema.Properties["last"].Nullable)
 }

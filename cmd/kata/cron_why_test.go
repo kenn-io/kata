@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
-	kataclient "go.kenn.io/kata/pkg/client"
 )
 
 func TestCronJobShowWhyAddsOnlyDispatch(t *testing.T) {
@@ -71,14 +70,27 @@ func TestCronJobShowWhyRequiresCurrentDaemon(t *testing.T) {
 	require.Zero(t, calls)
 }
 
+// A malformed peer response must fail through the public CLI without a panic.
+// A valid-object show response cannot exercise this parser contract.
 func TestCronJobShowWhyRejectsNullShowResponse(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"gate":{"reason":"idle"},"last":null}`))
+	env := testenv.New(t)
+	p, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	body := cronCLIJob(t)
+	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Name: body.Name, Actor: "operator", Definition: body.Definition.Native()})
+	require.NoError(t, err)
+	target, err := url.Parse(env.URL)
+	require.NoError(t, err)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/cron/jobs/"+job.UID) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte("null"))
+			return
+		}
+		proxy.ServeHTTP(w, r)
 	}))
 	t.Cleanup(server.Close)
-	client, err := kataclient.New(server.URL)
-	require.NoError(t, err)
-	_, err = (cronCLIOptions{identity: "01K5ZN7SP700000000000000001"}).withDispatch(t.Context(), client, 1, []byte("null"))
-	require.Error(t, err)
+	_, _, err = executeCronCLI(t, server.URL, nil, "job", "show", job.UID, "--why")
+	require.ErrorContains(t, err, "cron job show response must be a JSON object")
 }

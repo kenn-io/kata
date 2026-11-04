@@ -15,6 +15,8 @@ import (
 
 // Live explanations share gate precedence, but only report eligibility. Every
 // read leaves parent progress/revision and the event cursor untouched.
+// Keep these read-only states separate from agreement dispatches: dispatch
+// advances progress, so it would change the later idle-recipient and scan cases.
 func checkRecurringExplain(t *testing.T, s db.Storage) error {
 	ctx := t.Context()
 	p, parent, job, progress := recurringFixture(t, s, "all")
