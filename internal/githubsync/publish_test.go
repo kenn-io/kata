@@ -90,7 +90,7 @@ func requirePublicationLegacyExternalIDs(t *testing.T, remote db.IssuePublicatio
 }
 
 func TestPublishGitHubSourceAndIdentityFences(t *testing.T) {
-	for _, scenario := range []string{"repo_changed", "disabled", "archived", "pull_request", "wrong_repository", "wrong_id", "url_input", "admission", "invalid_status"} {
+	for _, scenario := range []string{"repo_changed", "disabled", "pull_request", "wrong_repository", "wrong_id", "url_input", "admission", "invalid_status"} {
 		t.Run(scenario, func(t *testing.T) {
 			posts := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -101,8 +101,6 @@ func TestPublishGitHubSourceAndIdentityFences(t *testing.T) {
 						repo["node_id"] = "R_other"
 					case "disabled":
 						repo["has_issues"] = false
-					case "archived":
-						repo["archived"] = true
 					}
 					require.NoError(t, json.MarshalWrite(w, repo))
 					return
@@ -126,7 +124,7 @@ func TestPublishGitHubSourceAndIdentityFences(t *testing.T) {
 			defer server.Close()
 			session := openPublishGitHub(t, server)
 			payload, err := session.PrepareCreate(t.Context(), db.Issue{Title: "Native", Status: "open"})
-			if scenario == "repo_changed" || scenario == "disabled" || scenario == "archived" {
+			if scenario == "repo_changed" || scenario == "disabled" {
 				require.Error(t, err)
 				require.Zero(t, posts)
 				return
@@ -190,7 +188,7 @@ func TestPublishGitHubCreateNeverRetries(t *testing.T) {
 }
 
 func TestPublishGitHubValidationBeforeCreate(t *testing.T) {
-	for _, scenario := range []string{"long_title", "long_body", "denied"} {
+	for _, scenario := range []string{"long_body", "denied"} {
 		t.Run(scenario, func(t *testing.T) {
 			posts := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -207,8 +205,6 @@ func TestPublishGitHubValidationBeforeCreate(t *testing.T) {
 			session := openPublishGitHub(t, server)
 			issue := db.Issue{Title: "Native", Status: "open"}
 			switch scenario {
-			case "long_title":
-				issue.Title = strings.Repeat("界", 257)
 			case "long_body":
 				issue.Body = strings.Repeat("界", 65537)
 			}

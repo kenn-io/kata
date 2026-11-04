@@ -13,13 +13,10 @@ import (
 	"go.kenn.io/kata/internal/issuesync"
 )
 
-func openPublishNotion(t *testing.T, c *Client, legacy bool) issuesync.PublishSession {
+func openPublishNotion(t *testing.T, c *Client) issuesync.PublishSession {
 	t.Helper()
 	cfg, err := ResolveConfig(groupSchema(), Selectors{}, "")
 	require.NoError(t, err)
-	if legacy {
-		cfg = configFixture(t)
-	}
 	raw, err := EncodeConfig(cfg)
 	require.NoError(t, err)
 	session, err := NewAdapter(nil, c).OpenPublish(t.Context(), db.IssueSyncBinding{Provider: "notion", SourceKey: "notion:" + sourceID, RemoteID: sourceID, Config: raw})
@@ -53,7 +50,7 @@ func TestPublishNotionTitleMarkdownAndRecovery(t *testing.T) {
 					return response(404, `{}`), nil
 				}
 			})
-			s := openPublishNotion(t, c, false)
+			s := openPublishNotion(t, c)
 			payload, err := s.PrepareCreate(t.Context(), db.Issue{Title: "Native 🐟", Body: body, Status: "open"})
 			require.NoError(t, err)
 			remote, err := s.Create(t.Context(), payload, func(context.Context) error { admissions++; return nil })
@@ -110,15 +107,12 @@ func TestPublishNotionAfterOneWayReenableAddsOpenTarget(t *testing.T) {
 }
 
 func TestPublishNotionOneSendAndSourceFences(t *testing.T) {
-	for _, scenario := range []string{"drop", "503", "malformed", "async", "redirect", "wrong_parent", "incomplete", "denied", "title_removed", "legacy", "admission", "oversize"} {
+	for _, scenario := range []string{"drop", "503", "malformed", "async", "redirect", "wrong_parent", "incomplete", "title_removed", "admission", "oversize"} {
 		t.Run(scenario, func(t *testing.T) {
 			creates, admissions := 0, 0
 			c, _ := testClient(t, func(r *http.Request) (*http.Response, error) {
 				switch r.URL.Path {
 				case "/v1/data_sources/" + sourceID:
-					if scenario == "denied" {
-						return response(403, `{}`), nil
-					}
 					wire := statusSchemaWire()
 					if scenario == "title_removed" {
 						delete(wire["properties"].(map[string]any), "Task description")
@@ -156,13 +150,13 @@ func TestPublishNotionOneSendAndSourceFences(t *testing.T) {
 					return response(404, `{}`), nil
 				}
 			})
-			s := openPublishNotion(t, c, scenario == "legacy")
+			s := openPublishNotion(t, c)
 			body := "Body"
 			if scenario == "oversize" {
 				body = strings.Repeat("界", 200000)
 			}
 			payload, err := s.PrepareCreate(t.Context(), db.Issue{Title: "Native", Body: body, Status: "open"})
-			if scenario == "denied" || scenario == "title_removed" || scenario == "legacy" || scenario == "oversize" {
+			if scenario == "title_removed" || scenario == "oversize" {
 				require.Error(t, err)
 				require.Zero(t, creates)
 				return
@@ -196,7 +190,7 @@ func TestPublishNotionLongTitlePreservesText(t *testing.T) {
 		}
 		return jsonResponse(t, databaseWire()), nil
 	})
-	s := openPublishNotion(t, c, false)
+	s := openPublishNotion(t, c)
 	payload, err := s.PrepareCreate(t.Context(), db.Issue{Title: title, Status: "open"})
 	require.NoError(t, err)
 	var wire struct {

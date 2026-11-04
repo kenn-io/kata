@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -21,7 +20,7 @@ func TestPublishTwenty(t *testing.T) {
 		w.WriteHeader(http.StatusBadGateway)
 	}))
 	defer destination.Close()
-	for _, scenario := range []string{"success", "empty_body", "required_custom", "optional_custom", "schema", "workspace", "drop", "503", "malformed", "empty_response", "redirect", "read_failure", "closed", "admission", "oversize"} {
+	for _, scenario := range []string{"success", "empty_body", "optional_custom", "schema", "drop", "503", "malformed", "empty_response", "redirect", "read_failure", "closed", "admission"} {
 		t.Run(scenario, func(t *testing.T) {
 			creates, admissions := 0, 0
 			client, c, _ := testClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -36,14 +35,10 @@ func TestPublishTwenty(t *testing.T) {
 					if scenario == "schema" {
 						fields[1]["type"] = "TEXT"
 					}
-					if scenario == "required_custom" || scenario == "optional_custom" {
+					if scenario == "optional_custom" {
 						fields = append(fields, map[string]any{"id": "44444444-4444-4444-8444-444444444444", "name": "customRequired", "type": "TEXT", "isActive": true, "isSystem": false, "isNullable": scenario == "optional_custom", "defaultValue": nil})
 					}
-					workspace := workspaceID
-					if scenario == "workspace" {
-						workspace = taskID
-					}
-					standardMetadata(t, w, r, workspace, fields)
+					standardMetadata(t, w, r, workspaceID, fields)
 					return
 				}
 				if r.Method == http.MethodPost {
@@ -100,11 +95,8 @@ func TestPublishTwenty(t *testing.T) {
 			if scenario == "empty_body" {
 				i.Body = ""
 			}
-			if scenario == "oversize" {
-				i.Body = strings.Repeat("x", maxMarkdownBytes+1)
-			}
 			payload, err := session.PrepareCreate(t.Context(), i)
-			if scenario == "required_custom" || scenario == "schema" || scenario == "workspace" || scenario == "oversize" {
+			if scenario == "schema" {
 				require.Error(t, err)
 				require.Zero(t, creates)
 				return

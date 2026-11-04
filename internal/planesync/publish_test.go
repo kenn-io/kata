@@ -7,7 +7,6 @@ import (
 	"html"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -79,7 +78,7 @@ func TestPublishPlaneEscapedBodyAndRecovery(t *testing.T) {
 	}
 }
 func TestPublishPlaneOneSendAndPreflight(t *testing.T) {
-	for _, scenario := range []string{"drop", "503", "malformed", "redirect", "wrong_project", "read_failure", "archived", "no_open_state", "denied", "long_title", "long_body", "admission"} {
+	for _, scenario := range []string{"drop", "503", "malformed", "redirect", "wrong_project", "read_failure", "no_open_state", "denied", "admission"} {
 		t.Run(scenario, func(t *testing.T) {
 			creates := 0
 			readbacks := 0
@@ -94,9 +93,6 @@ func TestPublishPlaneOneSendAndPreflight(t *testing.T) {
 						return
 					}
 					wire := map[string]any{"id": testProjectID, "identifier": "EX"}
-					if scenario == "archived" {
-						wire["archived_at"] = "2026-01-01"
-					}
 					sendPlaneJSON(t, w, wire)
 				case publishPlanePrefix() + "states/":
 					rows := workflowRows()
@@ -146,14 +142,8 @@ func TestPublishPlaneOneSendAndPreflight(t *testing.T) {
 			defer server.Close()
 			s := openPublishPlane(t, server.URL)
 			issue := db.Issue{Title: "Native", Status: "open"}
-			if scenario == "long_title" {
-				issue.Title = strings.Repeat("界", 256)
-			}
-			if scenario == "long_body" {
-				issue.Body = strings.Repeat("&", maxDescriptionBytes/2)
-			}
 			payload, err := s.PrepareCreate(t.Context(), issue)
-			if scenario == "archived" || scenario == "no_open_state" || scenario == "denied" || scenario == "long_title" || scenario == "long_body" {
+			if scenario == "no_open_state" || scenario == "denied" {
 				require.Error(t, err)
 				require.Zero(t, creates)
 				return

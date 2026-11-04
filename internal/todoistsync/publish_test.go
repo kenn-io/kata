@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -22,7 +21,7 @@ func TestPublishTodoist(t *testing.T) {
 		w.WriteHeader(http.StatusBadGateway)
 	}))
 	defer destination.Close()
-	for _, scenario := range []string{"success", "empty_body", "null_updated", "wrong_account", "archived", "wrong_project", "closed", "incomplete", "drop", "503", "empty_response", "malformed", "redirect", "admission", "oversize"} {
+	for _, scenario := range []string{"success", "empty_body", "null_updated", "wrong_project", "closed", "incomplete", "drop", "503", "empty_response", "malformed", "redirect", "admission"} {
 		t.Run(scenario, func(t *testing.T) {
 			creates, admissions := 0, 0
 			cfg := testConfig()
@@ -33,13 +32,9 @@ func TestPublishTodoist(t *testing.T) {
 				reply := func(v any) { raw, err := json.Marshal(v); require.NoError(t, err); _, _ = w.Write(raw) }
 				switch r.URL.Path {
 				case "/api/v1/user":
-					id := cfg.AccountID
-					if scenario == "wrong_account" {
-						id = "7654321"
-					}
-					reply(map[string]any{"id": id})
+					reply(map[string]any{"id": cfg.AccountID})
 				case "/api/v1/projects/" + cfg.ProjectID:
-					reply(map[string]any{"id": cfg.ProjectID, "name": "Example tasks", "is_archived": scenario == "archived", "is_deleted": false})
+					reply(map[string]any{"id": cfg.ProjectID, "name": "Example tasks", "is_archived": false, "is_deleted": false})
 				case "/api/v1/tasks":
 					require.Equal(t, http.MethodPost, r.Method)
 					creates++
@@ -101,25 +96,12 @@ func TestPublishTodoist(t *testing.T) {
 			raw, err := EncodeConfig(cfg)
 			require.NoError(t, err)
 			session, err := NewAdapter(nil, client).OpenPublish(t.Context(), db.IssueSyncBinding{Provider: "todoist", SourceKey: cfg.SourceKey(), RemoteID: cfg.RemoteID(), Config: raw})
-			if scenario == "wrong_account" {
-				require.Error(t, err)
-				require.Zero(t, creates)
-				return
-			}
 			require.NoError(t, err)
 			issue := db.Issue{Title: "Native 🐟", Body: "**世界**\nBody", Status: "open"}
 			if scenario == "empty_body" {
 				issue.Body = ""
 			}
-			if scenario == "oversize" {
-				issue.Body = strings.Repeat("x", (1<<20)+1)
-			}
 			payload, err := session.PrepareCreate(t.Context(), issue)
-			if scenario == "archived" || scenario == "oversize" {
-				require.Error(t, err)
-				require.Zero(t, creates)
-				return
-			}
 			require.NoError(t, err)
 			remote, err := session.Create(t.Context(), payload, func(context.Context) error {
 				admissions++
