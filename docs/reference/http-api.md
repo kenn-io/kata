@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 # HTTP API schema
@@ -13,7 +13,9 @@ generate typed clients instead of hand-copying wire structs.
 Use [`kata daemon locate`](daemon-discovery.md) to discover the endpoint and
 transport for those requests with the same selection rules as the CLI. Go
 programs can use the generated [Go client](go-client.md), which includes
-discovery. [Cron](cron.md) documents job and workflow resources.
+discovery. [Cron](cron.md) documents job and workflow resources,
+[run pruning](cron.md#run-retention), and the
+[retained and pruned counts](cron.md#retained-and-pruned-counts) read.
 
 ## Getting the schema
 
@@ -398,9 +400,10 @@ validators include the principal and policy revision.
 Project administration follows project access. A credential that can access a
 project can rename it, archive it (`DELETE /api/v1/projects/{project_id}`),
 restore it, purge it, detach its aliases, purge its issues, rewrite its author
-identities, and enable, disable, inspect or run its issue sync. Merge requires
-access to both the source and the target project. Each operation rechecks
-access to every project it names inside its transaction.
+identities, prune its old cron runs, and enable, disable, inspect or run its
+issue sync. Merge requires access to both the source and the target project.
+Each operation rechecks access to every project it names inside its
+transaction.
 
 Daemon-owner credentials keep the administration that reaches beyond one
 project: token list, create and revoke; team and project-visibility
