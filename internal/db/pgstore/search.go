@@ -83,7 +83,7 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
  WHERE to_tsvector('kata_simple_unaccent', c.body) @@ terms.q AND %s`, rowFilter.String())
 	}
 
-	order := "candidates.matched_words DESC, candidates.score DESC, i.id DESC"
+	order := "candidates.score DESC, i.id DESC"
 	if request.params.StableOrder {
 		order = "i.created_at ASC, i.id ASC"
 	}

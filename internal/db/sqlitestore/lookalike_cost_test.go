@@ -3,7 +3,6 @@ package sqlitestore_test
 import (
 	"database/sql"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,10 +15,7 @@ import (
 // Look-alike retrieval runs on issue creation and must stay cheap as comments grow.
 func TestSearchFTSAny_LookalikePageBudget(t *testing.T) {
 	ctx := t.Context()
-	path := filepath.Join(t.TempDir(), "kata.db")
-	store, err := sqlitestore.Open(ctx, path)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	store, path := openTestDBWithPath(t)
 	project, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
 	words := strings.Fields("login browser safari timeout session request response server client token account password reset user profile settings page button form submit redirect callback cookie header connection network retry error failure crash reload refresh expired invalid missing duplicate create update delete search issue title body comment project workspace author owner label status priority open closed task progress report review change fix support handle return result message details context window screen")

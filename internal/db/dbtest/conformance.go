@@ -296,6 +296,7 @@ var storageScenarios = []scenario{
 		run:     checkIssueRevisionAuthorRewrite,
 	},
 	{name: "search status", methods: []string{"SearchFTS", "SearchFTSAny"}, run: checkSearchStatus},
+	{name: "duplicate survives higher word count distractors", methods: []string{"CreateProject", "CreateIssue", "SearchFTSAny"}, run: checkDuplicateSurvivesHigherWordCountDistractors},
 	{name: "restricted search reads", methods: []string{"AddLabel", "CreateComment", "CreateIssue", "CreateProject", "SearchFTS", "SearchFTSAny"}, run: checkRestrictedSearchReads},
 	{
 		name:    "search assignment expiry",

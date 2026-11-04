@@ -107,7 +107,7 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 	if err != nil {
 		return nil, fmt.Errorf("search fts: %w", err)
 	}
-	order := "candidates.matched_words DESC, candidates.score DESC, i.id ASC"
+	order := "candidates.score DESC, i.id ASC"
 	if r.params.StableOrder {
 		order = creationKeySQL("i") + " ASC, i.id ASC"
 	}
