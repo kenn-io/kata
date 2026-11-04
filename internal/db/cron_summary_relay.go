@@ -23,21 +23,23 @@ func RelayEnvelopeRequiredFeatures(envelope RelayEnvelope) (string, error) {
 
 // RequireRelayEnvelopeFeatures checks retained delivery bytes before emission.
 func RequireRelayEnvelopeFeatures(ctx context.Context, envelope RelayEnvelope) error {
-	supported, peer := ctx.Value(federationEventFeaturesKey{}).(string)
-	if !peer || RequireEventFeatures(supported, SupportedEventFeatures) == nil {
+	if !relayNeedsSummaryGate(ctx) {
 		return nil
 	}
 	required, err := RelayEnvelopeRequiredFeatures(envelope)
 	if err != nil {
 		return err
 	}
-	return RequireEventFeatures(supported, required)
+	if RequireEventFeatures(required, CronRunSummaryV2Feature) == nil {
+		return RequireEventFeatures("", CronRunSummaryV2Feature)
+	}
+	return nil
 }
 
 // RequireRelayCheckpointFeatures checks the exact snapshot being disclosed,
 // including an older retained checkpoint after current state was replaced.
 func RequireRelayCheckpointFeatures(ctx context.Context, snapshot RootResetSnapshot) error {
-	if supported, peer := ctx.Value(federationEventFeaturesKey{}).(string); !peer || RequireEventFeatures(supported, SupportedEventFeatures) == nil {
+	if !relayNeedsSummaryGate(ctx) {
 		return nil
 	}
 	for _, section := range [][]byte{snapshot.Events, snapshot.Entities} {

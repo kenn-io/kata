@@ -17,22 +17,32 @@ func WithFederationEventFeatures(ctx context.Context, supported string) context.
 
 // RequireProjectEventFeatures fences peer reads before any relay progress write.
 func RequireProjectEventFeatures(ctx context.Context, q interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }, projectUID string) error {
-	supported, peer := ctx.Value(federationEventFeaturesKey{}).(string)
-	if !peer || RequireEventFeatures(supported, SupportedEventFeatures) == nil {
+	if !relayNeedsSummaryGate(ctx) {
 		return nil
 	}
-	required, err := ProjectRequiredEventFeatures(ctx, q, projectUID)
+	required, err := projectSummaryRequired(ctx, q, projectUID)
 	if err != nil {
 		return err
 	}
-	return RequireEventFeatures(supported, required)
+	if required {
+		return RequireEventFeatures("", CronRunSummaryV2Feature)
+	}
+	return nil
+}
+
+// Existing relay clients predate feature negotiation for v1 cron and issue moves.
+// These new gates protect only structured run evidence.
+func relayNeedsSummaryGate(ctx context.Context) bool {
+	supported, peer := ctx.Value(federationEventFeaturesKey{}).(string)
+	return peer && RequireEventFeatures(supported, CronRunSummaryV2Feature) != nil
 }
 
 // Current projections cover imports without events; retained payloads cover v2
-// observations later replaced by v1. No process cache survives replacement state.
+// observations later replaced by v1. Projections marshal typed summaries with
+// literal member names; retained event bytes may contain escaped member names.
+// No process cache survives replacement state.
 func projectSummaryRequired(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }, projectUID string) (bool, error) {
@@ -42,7 +52,7 @@ WHERE p.uid=$1 AND e.type IN ('cron.run.observed','cron.run.snapshot') AND (
  e.payload LIKE '%"steps"%' OR e.payload LIKE '%"log_ref"%' OR e.payload LIKE '%\u%' ESCAPE '!')
 UNION ALL SELECT 'summary',r.summary_json FROM cron_runs r JOIN projects p ON p.id=r.project_id WHERE p.uid=$1 AND (
  r.summary_json LIKE '%"reason"%' OR r.summary_json LIKE '%"trigger"%' OR r.summary_json LIKE '%"usage"%' OR
- r.summary_json LIKE '%"steps"%' OR r.summary_json LIKE '%"log_ref"%' OR r.summary_json LIKE '%\u%' ESCAPE '!')`
+ r.summary_json LIKE '%"steps"%' OR r.summary_json LIKE '%"log_ref"%')`
 	rows, err := q.QueryContext(ctx, query, projectUID)
 	if err != nil {
 		return false, err

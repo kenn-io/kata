@@ -658,11 +658,11 @@ func checkRecurringFeatureProbeCandidates(t *testing.T, s db.Storage) error {
 	definition := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 7200}, Action: cron.Action{Kind: "notify", Recipient: "operator", Message: "Review service"}, Issue: &cron.IssuePolicy{Kind: "existing", UID: parent.UID}, Overlap: "allow", Catchup: "latest"}
 	_, _, err = s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "Adapter review", Actor: "operator", Definition: definition})
 	require.NoError(t, err)
-	probe := &recurringCountingProbe{recurringProbeQuerier: s.(recurringProbeQuerier)}
+	probe := &recurringCountingProbe{recurringProbeQuerier: s.(recurringProbeQuerier), nativeOnly: true}
 	features, err := db.ProjectRequiredEventFeatures(ctx, probe, p.UID)
 	require.NoError(t, err)
 	require.Equal(t, db.CronEventFeature, features)
-	require.Equal(t, []int{0, 0}, probe.candidates, "ordinary jobs must not reach JSON decoding")
+	require.Equal(t, []int{0}, probe.candidates, "ordinary jobs must not reach JSON decoding")
 	definition.Issue = &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Review service"}
 	job, _, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, Name: "Native review", Actor: "operator", Definition: definition})
 	require.NoError(t, err)
@@ -678,7 +678,7 @@ func checkRecurringFeatureProbeCandidates(t *testing.T, s db.Storage) error {
 	features, err = db.ProjectRequiredEventFeatures(ctx, probe, p.UID)
 	require.NoError(t, err)
 	require.Equal(t, db.CronEventFeature, features)
-	require.Equal(t, []int{0, 1}, probe.candidates, "escaped native definition remains the only candidate")
+	require.Equal(t, []int{1}, probe.candidates, "escaped native definition remains the only candidate")
 	return nil
 }
 
@@ -690,6 +690,7 @@ type recurringProbeQuerier interface {
 type recurringCountingProbe struct {
 	recurringProbeQuerier
 	candidates []int
+	nativeOnly bool
 }
 
 func (p *recurringCountingProbe) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
@@ -709,7 +710,9 @@ func (p *recurringCountingProbe) QueryContext(ctx context.Context, query string,
 	if closeErr != nil {
 		return nil, closeErr
 	}
-	p.candidates = append(p.candidates, count)
+	if !p.nativeOnly || strings.Contains(query, "'projection.job'") {
+		p.candidates = append(p.candidates, count)
+	}
 	return p.recurringProbeQuerier.QueryContext(ctx, query, args...)
 }
 

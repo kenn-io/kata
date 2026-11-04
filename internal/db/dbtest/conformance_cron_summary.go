@@ -101,16 +101,39 @@ func checkCronSummaryFeatures(t *testing.T, store db.Storage, backend Backend) e
 func checkCronSummaryRelaySkew(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	fixture := newRelayLinkBoundaryFixture(t, store, "summary-project")
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.sibling.ID, Title: "Moved work", Author: "relay-member"})
+	require.NoError(t, err)
+	_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: fixture.sibling.ID, ToProjectID: fixture.project.ID, IfMatchRev: issue.Revision, Actor: "relay-member"})
+	require.NoError(t, err)
 	peer, err := uid.New()
 	require.NoError(t, err)
 	grant, err := store.CreateRelayEnrollment(ctx, db.CreateRelayEnrollmentParams{ProjectID: fixture.project.ID, ParentTokenID: fixture.parentTokenID, SpokeInstanceUID: peer, ProtocolVersion: db.RelayProtocolVersion, Token: "summary-relay-fixture-token"})
 	require.NoError(t, err)
 	job, _ := nativeFederationDefinitions(t, store, fixture.project)
+
+	// Legacy relay clients have always accepted v1 cron evidence without a feature header.
+	v1UID, err := uid.New()
+	require.NoError(t, err)
+	_, err = store.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: fixture.project.ID, UID: v1UID, Actor: "relay-member", JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Status: "failed", Summary: cron.Summary{Version: 1}})
+	require.NoError(t, err)
+	features, err := db.ProjectRequiredEventFeatures(ctx, store.(recurringProbeQuerier), fixture.project.UID)
+	require.NoError(t, err)
+	require.Equal(t, db.MergeEventFeatures(db.CronEventFeature, db.IssueMoveEventFeature), features)
+	for _, support := range []string{"", "cron_v1", "cron_v1,issue_move_v1"} {
+		oldCtx := db.WithFederationEventFeatures(ctx, support)
+		_, err = store.PendingRelayDeliveries(oldCtx, grant.Enrollment.RelayBindingUID, db.RelayStreamEvent, 100)
+		require.NoError(t, err, "v1 offer to %q", support)
+		checkpoint, err := store.(db.RelayResetStore).CreateRelayReset(oldCtx, grant.Enrollment.RelayBindingUID, fixture.signer)
+		require.NoError(t, err, "v1 reset to %q", support)
+		require.NoError(t, db.RequireRelayCheckpointFeatures(oldCtx, checkpoint.Snapshot))
+	}
 	runUID, err := uid.New()
 	require.NoError(t, err)
 	_, err = store.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: fixture.project.ID, UID: runUID, Actor: "relay-member", JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Status: "failed", Summary: cron.Summary{Version: 1, Reason: "failed"}})
 	require.NoError(t, err)
 	binding := grant.Enrollment.RelayBindingUID
+	var emittedBefore int
+	require.NoError(t, store.(recurringProbeQuerier).QueryRowContext(ctx, `SELECT COUNT(*) FROM federation_relay_outbox WHERE binding_uid=$1 AND emitted=1`, binding).Scan(&emittedBefore))
 	before, err := store.MaxEventID(ctx)
 	require.NoError(t, err)
 	resetter := store.(db.RelayResetStore)
@@ -126,12 +149,15 @@ func checkCronSummaryRelaySkew(t *testing.T, store db.Storage) error {
 		QueryRowContext(context.Context, string, ...any) *sql.Row
 	})
 	require.NoError(t, q.QueryRowContext(ctx, `SELECT COUNT(*) FROM federation_relay_outbox WHERE binding_uid=$1 AND emitted=1`, binding).Scan(&emitted))
-	require.Zero(t, emitted)
+	require.Equal(t, emittedBefore, emitted)
 	after, err := store.MaxEventID(ctx)
 	require.NoError(t, err)
 	require.Equal(t, before, after)
 	checkpoint, err := resetter.CreateRelayReset(db.WithFederationEventFeatures(ctx, "cron_run_summary_v2,cron_v1"), binding, fixture.signer)
 	require.NoError(t, err)
+	features, err = db.ProjectRequiredEventFeatures(ctx, store.(recurringProbeQuerier), fixture.project.UID)
+	require.NoError(t, err)
+	require.Equal(t, db.SupportedEventFeatures, features, "exact cron, v2 and issue-move union")
 	pin, err := store.RootAuthority(ctx, fixture.project.UID)
 	require.NoError(t, err)
 	events, _, err := db.DecodeRootResetPayload(pin, checkpoint.Snapshot)
@@ -216,9 +242,6 @@ func checkCronSummaryProbeCandidates(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	_, err = store.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: id, Actor: "operator", JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Status: "failed", Summary: cron.Summary{Version: 1, Message: "reason: timeout"}})
 	require.NoError(t, err)
-	// Probe both summary and native-definition candidates.
-	_, err = db.ProjectRequiredEventFeatures(ctx, store.(recurringProbeQuerier), project.UID)
-	require.NoError(t, err)
 	probe := &recurringCountingProbe{recurringProbeQuerier: store.(recurringProbeQuerier)}
 	features, err := db.ProjectRequiredEventFeatures(ctx, probe, project.UID)
 	require.NoError(t, err)
@@ -227,15 +250,13 @@ func checkCronSummaryProbeCandidates(t *testing.T, store db.Storage) error {
 	exec := store.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	})
-	for _, raw := range []string{`{"version":1,"steps":[]}`, `{"version":1,"\u0073teps":[]}`} {
-		_, err = exec.ExecContext(ctx, `UPDATE cron_runs SET summary_json=$1 WHERE uid=$2`, raw, id)
-		require.NoError(t, err)
-		probe.candidates = nil
-		features, err = db.ProjectRequiredEventFeatures(ctx, probe, project.UID)
-		require.NoError(t, err)
-		require.Equal(t, db.MergeEventFeatures(db.CronRunSummaryV2Feature, db.CronEventFeature), features)
-		require.Equal(t, []int{1, 0}, probe.candidates, "projection-only structured evidence remains a candidate")
-	}
+	_, err = exec.ExecContext(ctx, `UPDATE cron_runs SET summary_json=$1 WHERE uid=$2`, `{"version":1,"steps":[]}`, id)
+	require.NoError(t, err)
+	probe.candidates = nil
+	features, err = db.ProjectRequiredEventFeatures(ctx, probe, project.UID)
+	require.NoError(t, err)
+	require.Equal(t, db.MergeEventFeatures(db.CronRunSummaryV2Feature, db.CronEventFeature), features)
+	require.Equal(t, []int{1, 0}, probe.candidates, "projection-only structured evidence remains a candidate")
 	// Retained escaped event evidence must survive a v1 projection rewrite too.
 	_, err = exec.ExecContext(ctx, `UPDATE cron_runs SET summary_json=$1 WHERE uid=$2`, `{"version":1}`, id)
 	require.NoError(t, err)
@@ -247,13 +268,8 @@ func checkCronSummaryProbeCandidates(t *testing.T, store db.Storage) error {
 	require.Equal(t, db.MergeEventFeatures(db.CronRunSummaryV2Feature, db.CronEventFeature), features)
 	require.Equal(t, []int{1, 0}, probe.candidates)
 	probe.candidates = nil
-	require.NoError(t, db.RequireProjectEventFeatures(db.WithFederationEventFeatures(ctx, db.SupportedEventFeatures), probe, project.UID))
+	require.NoError(t, db.RequireProjectEventFeatures(db.WithFederationEventFeatures(ctx, db.CronRunSummaryV2Feature), probe, project.UID))
 	require.Empty(t, probe.candidates, "a fully capable relay gate must not read candidates")
-	_, err = exec.ExecContext(ctx, `UPDATE events SET type='issue.moved' WHERE project_id=$1 AND type='cron.workflow.created'`, project.ID)
-	require.NoError(t, err)
-	features, err = db.ProjectRequiredEventFeatures(ctx, store.(recurringProbeQuerier), project.UID)
-	require.NoError(t, err)
-	require.Equal(t, db.SupportedEventFeatures, features, "main's issue-move requirement unions with v2 and cron")
 	return nil
 }
 
