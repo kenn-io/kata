@@ -16,10 +16,18 @@ func TestCronRunCountsCLI(t *testing.T) {
 	env := testenv.New(t)
 	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
 	require.NoError(t, err)
-	id := cronCLIUID(t)
+	id, otherID := cronCLIUID(t), cronCLIUID(t)
+	if id > otherID {
+		id, otherID = otherID, id
+	}
 	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	entry := db.CronTallyEntry{Kind: "job", UID: id, CoverageStartedAt: at, LastPrunedAt: at, OldestCreatedAt: at, NewestCreatedAt: at, Counts: db.CronTallyCounts{Succeeded: 9007199254740993}}
-	raw, err := json.Marshal(map[string]any{db.CronTallyPrefix + id: db.CronTallyValue{Version: 1, Groups: map[string]db.CronTallyEntry{"job": entry}}})
+	other := entry
+	other.UID, other.Counts = otherID, db.CronTallyCounts{Failed: 1}
+	raw, err := json.Marshal(map[string]any{
+		db.CronTallyPrefix + id:      db.CronTallyValue{Version: 1, Groups: map[string]db.CronTallyEntry{"job": entry}},
+		db.CronTallyPrefix + otherID: db.CronTallyValue{Version: 1, Groups: map[string]db.CronTallyEntry{"job": other}},
+	})
 	require.NoError(t, err)
 	_, err = env.DB.ExecContext(t.Context(), `UPDATE projects SET metadata=$1 WHERE id=$2`, string(raw), project.ID)
 	require.NoError(t, err)
@@ -29,7 +37,11 @@ func TestCronRunCountsCLI(t *testing.T) {
 		require.Contains(t, out, "9007199254740993")
 		var result db.CronRunCountsResult
 		require.NoError(t, json.Unmarshal([]byte(out), &result))
-		require.Len(t, result.Groups, 1)
+		wantGroups := 2
+		if len(args) > 2 && args[2] == "--job" {
+			wantGroups = 1
+		}
+		require.Len(t, result.Groups, wantGroups)
 		require.Equal(t, id, result.Groups[0].UID)
 		require.Equal(t, entry.Counts, result.Groups[0].PrunedSinceTracking)
 	}

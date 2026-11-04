@@ -154,10 +154,14 @@ func TestCronRunPruneWriteAuthority(t *testing.T) {
 	for _, kind := range []string{"bootstrap", "identity", "enrollment", "project-denied", "revoked"} {
 		t.Run(kind, func(t *testing.T) {
 			var tokenID int64
-			opts := []testenv.Option{testenv.WithAuthToken("tok"), testenv.WithRequireTokenIdentity()}
-			if kind == "revoked" {
-				opts = append(opts, func(cfg *daemon.ServerConfig) { cfg.DB = revokingPruneStore{cfg.DB, &tokenID} })
-			}
+			var pruneActor string
+			opts := []testenv.Option{testenv.WithAuthToken("tok"), testenv.WithRequireTokenIdentity(), func(cfg *daemon.ServerConfig) {
+				var revoke *int64
+				if kind == "revoked" {
+					revoke = &tokenID
+				}
+				cfg.DB = pruneAuthorityStore{Storage: cfg.DB, tokenID: revoke, actor: &pruneActor}
+			}}
 			env, project, path := cronPruneHTTPFixture(t, opts...)
 			token, want := "tok", 403
 			if kind != "bootstrap" && kind != "enrollment" {
@@ -184,6 +188,9 @@ func TestCronRunPruneWriteAuthority(t *testing.T) {
 			}
 			response, raw := envDoRaw(t, env, http.MethodPost, path, map[string]any{"actor": "supplied-worker", "before": time.Now().Add(-48 * time.Hour), "keep": 1, "dry_run": true}, bearer(token))
 			require.Equal(t, want, response.StatusCode, string(raw))
+			if kind == "identity" {
+				require.Equal(t, "credential-worker", pruneActor, "token identity overrides the supplied actor")
+			}
 			runs, err := env.DB.ListCronRuns(t.Context(), db.CronRunList{ProjectID: project.ID})
 			require.NoError(t, err)
 			require.Len(t, runs, 2)
@@ -191,14 +198,18 @@ func TestCronRunPruneWriteAuthority(t *testing.T) {
 	}
 }
 
-type revokingPruneStore struct {
+type pruneAuthorityStore struct {
 	db.Storage
 	tokenID *int64
+	actor   *string
 }
 
-func (s revokingPruneStore) PruneCronRuns(ctx context.Context, in db.PruneCronRuns) (db.CronRunPruneResult, error) {
-	if _, _, err := s.RevokeAPIToken(ctx, *s.tokenID, db.BootstrapActor); err != nil {
-		return db.CronRunPruneResult{}, err
+func (s pruneAuthorityStore) PruneCronRuns(ctx context.Context, in db.PruneCronRuns) (db.CronRunPruneResult, error) {
+	*s.actor = in.Actor
+	if s.tokenID != nil {
+		if _, _, err := s.RevokeAPIToken(ctx, *s.tokenID, db.BootstrapActor); err != nil {
+			return db.CronRunPruneResult{}, err
+		}
 	}
 	return s.Storage.PruneCronRuns(ctx, in)
 }

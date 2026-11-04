@@ -141,6 +141,17 @@ func checkCronRunPruneModel(t *testing.T, store db.Storage) error {
 	q := store.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	})
+	definition, err := cron.ParseJob([]byte(`{"version":1,"kind":"job","trigger":{"kind":"manual"},"action":{"kind":"execute","prompt":"Review"},"issue":{"kind":"per-run","title":"Review"},"overlap":"forbid","catchup":"skip"}`))
+	require.NoError(t, err)
+	jobs, workflows := map[string]db.CronJob{}, map[string]db.CronWorkflow{}
+	for i := 1; i <= 2; i++ {
+		id := fmt.Sprintf("%026d", i)
+		job, _, err := store.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, UID: id, Actor: "operator", Name: "Review", Definition: definition})
+		require.NoError(t, err)
+		workflow, _, err := store.PutCronWorkflow(ctx, db.PutCronWorkflow{ProjectID: project.ID, UID: id, Actor: "operator", Name: "Workflow", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "review", Kind: "command", Command: "true"}}}})
+		require.NoError(t, err)
+		jobs[id], workflows[id] = job, workflow
+	}
 	cutoff := time.Date(2026, 8, 1, 0, 0, 0, 123000000, time.UTC)
 	type run struct {
 		id, group, status string
@@ -148,7 +159,9 @@ func checkCronRunPruneModel(t *testing.T, store db.Storage) error {
 		created, updated  time.Time
 		job, workflow     *string
 	}
+	iteration := 0
 	hegel.Test(t, func(ht *hegel.T) {
+		iteration++
 		cutoff := cutoff.In(time.FixedZone("cutoff", hegel.Draw(ht, hegel.Integers(-12, 14))*3600))
 		raw := hegel.Draw(ht, hegel.Lists(hegel.Integers(0, 10000)))
 		if len(raw) > 24 {
@@ -165,10 +178,12 @@ func checkCronRunPruneModel(t *testing.T, store db.Storage) error {
 		narrow := hegel.Draw(ht, hegel.Integers(0, 4))
 		_, err := q.ExecContext(ctx, `DELETE FROM cron_runs WHERE project_id=$1`, project.ID)
 		require.NoError(ht, err)
+		_, err = q.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1 AND type='cron.run.observed'`, project.ID)
+		require.NoError(ht, err)
 		runs := []run{}
 		for i, v := range raw {
 			group := fmt.Sprintf("%026d", v%2+1)
-			id := fmt.Sprintf("%026d", i+100)
+			id := fmt.Sprintf("%026d", iteration*100+i)
 			r := run{id: id, group: group, kind: (v / 2) % 2, status: []string{"running", "succeeded", "failed", "cancelled", "unknown"}[(v/4)%5], created: cutoff.Add(time.Duration((v/20)%7-4) * time.Second), updated: cutoff.Add(time.Duration((v/140)%7-4) * time.Nanosecond)}
 			if hegel.Draw(ht, hegel.Booleans()) {
 				r.created = cutoff.Add(time.Duration(hegel.Draw(ht, hegel.Integers(-1, 1))))
@@ -184,17 +199,20 @@ func checkCronRunPruneModel(t *testing.T, store db.Storage) error {
 			if r.kind == 0 && v%3 == 0 {
 				r.workflow = &group
 			}
-			// Observation, federation materialization and import all persist UTC.
-			updated := r.updated.UTC()
-			var jobEvent, workflowEvent *string
-			event := fmt.Sprintf("%026d", 50)
+			in := db.ObserveCronRun{ProjectID: project.ID, UID: r.id, Actor: "operator", Status: r.status, Summary: cron.Summary{Version: 1}, JobUID: r.job, WorkflowUID: r.workflow}
 			if r.job != nil {
-				jobEvent = &event
+				job := jobs[*r.job]
+				in.DefinitionEventUID = &job.DefinitionEventUID
 			}
 			if r.workflow != nil {
-				workflowEvent = &event
+				workflow := workflows[*r.workflow]
+				in.WorkflowDefinitionEventUID = &workflow.DefinitionEventUID
 			}
-			_, err = q.ExecContext(ctx, `INSERT INTO cron_runs(uid,project_id,job_uid,definition_event_uid,workflow_uid,workflow_definition_event_uid,actor,status,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,'operator',$7,$8,$9)`, r.id, project.ID, r.job, jobEvent, r.workflow, workflowEvent, r.status, r.created.Format(db.CronRunCreatedAtFormat), updated.Format(time.RFC3339Nano))
+			_, err = store.ObserveCronRun(ctx, in)
+			require.NoError(ht, err)
+			// Age real observations for selection, as in checkCronRunPrune.
+			// The fixed-width creation format preserves all nanosecond draws.
+			_, err = q.ExecContext(ctx, `UPDATE cron_runs SET created_at=$1,updated_at=$2 WHERE uid=$3`, r.created.Format(db.CronRunCreatedAtFormat), r.updated.UTC().Format(time.RFC3339Nano), r.id)
 			require.NoError(ht, err)
 			runs = append(runs, r)
 		}
@@ -249,8 +267,10 @@ func checkCronRunPruneModel(t *testing.T, store db.Storage) error {
 				id := r.group
 				if r.kind == 0 {
 					group.JobUID = &id
+					group.Name = jobs[id].Name
 				} else {
 					group.WorkflowUID = &id
+					group.Name = workflows[id].Name
 				}
 				index = len(wantGroups)
 				wantGroups = append(wantGroups, group)

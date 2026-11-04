@@ -203,6 +203,9 @@ func checkCronPruneAcceptedReplay(t *testing.T, s db.Storage) error {
 	require.NoError(t, err)
 	_, err = s.ObserveCronRun(t.Context(), db.ObserveCronRun{ProjectID: p.ID, UID: newestUID, Actor: "operator", JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Status: "succeeded", Summary: cron.Summary{Version: 1}})
 	require.NoError(t, err)
+	// Distinct source events advance the spoke cursor; retries retain their ID.
+	sourceIDs := map[string]int64{}
+	var nextSourceID int64
 	hegel.Test(t, func(ht *hegel.T) {
 		status := []string{"running", "succeeded", "failed", "cancelled", "unknown"}[hegel.Draw(ht, hegel.Integers(0, 4))]
 		id, err := uid.New()
@@ -213,7 +216,13 @@ func checkCronPruneAcceptedReplay(t *testing.T, s db.Storage) error {
 		require.NoError(ht, err)
 		original := newRemoteEvent(t, p, nil, "cron.run.observed", "operator", spoke, at.UnixMilli(), jsontext.Value(body))
 		ingest := func(event db.RemoteEvent) (db.FederationIngestResult, error) {
-			return s.IngestFederationEvents(t.Context(), db.FederationIngestParams{ProjectID: p.ID, SpokeInstanceUID: spoke, BoundActor: "operator", EventFeatures: db.SupportedEventFeatures, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: event}}})
+			sourceID, ok := sourceIDs[event.EventUID]
+			if !ok {
+				nextSourceID++
+				sourceID = nextSourceID
+				sourceIDs[event.EventUID] = sourceID
+			}
+			return s.IngestFederationEvents(t.Context(), db.FederationIngestParams{ProjectID: p.ID, SpokeInstanceUID: spoke, BoundActor: "operator", EventFeatures: db.SupportedEventFeatures, Events: []db.FederationIngestEvent{{SourceEventID: sourceID, Event: event}}})
 		}
 		_, err = ingest(original)
 		require.NoError(ht, err)

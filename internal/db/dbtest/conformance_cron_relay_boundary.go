@@ -11,7 +11,7 @@ import (
 
 // Adoption invalidates local readers without discarding upstream history.
 // A relay's new downstream can still drain that history without a checkpoint.
-func checkCronRelayAdoptionBoundary(t *testing.T, store db.Storage) error {
+func checkRelayAdoptionResetBoundary(t *testing.T, store db.Storage) error {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "adopted-project")
 	require.NoError(t, err)

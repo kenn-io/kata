@@ -72,7 +72,8 @@ func TestCronRunCountsAPI(t *testing.T) {
 	require.Equal(t, 404, status, string(body))
 }
 
-// Counts use ordinary read authority and preserve the project visibility fence.
+// Counts enforce route authentication and the middleware project scope.
+// Snapshot-time visibility revalidation is covered by store conformance.
 func TestCronRunCountsReadAuthority(t *testing.T) {
 	for _, kind := range []string{"unauthenticated", "identity", "project-denied", "enrollment"} {
 		t.Run(kind, func(t *testing.T) {

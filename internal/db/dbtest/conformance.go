@@ -53,7 +53,7 @@ type scenario struct {
 
 var storageScenarios = []scenario{
 	{name: "attachment close evidence", methods: []string{"CloseIssueGuarded", "PatchIssueMetadata", "EventsByUIDs"}, run: checkAttachmentCloseEvidence},
-	{name: "cron relay adoption boundary", run: checkCronRelayAdoptionBoundary},
+	{name: "relay adoption reset boundary", run: checkRelayAdoptionResetBoundary},
 	{name: "search tokenizer words", methods: []string{"CreateProject", "CreateIssue", "SearchFTS", "SearchFTSAny"}, runWithBackend: checkSearchTokenizerWords},
 	{name: "cron prune event model", run: checkCronPruneEventModel},
 	{name: "cron prune rollback", runWithBackend: checkCronPruneRollback},
