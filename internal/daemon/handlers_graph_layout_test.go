@@ -2,13 +2,10 @@ package daemon
 
 import (
 	"fmt"
-	"math"
 	"math/rand/v2"
-	"runtime"
 	"slices"
 	"strconv"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
@@ -16,55 +13,50 @@ import (
 	"go.kenn.io/kata/internal/api"
 )
 
-func TestMarkTransitiveBlockLayoutScaling(t *testing.T) {
-	if testing.Short() {
-		t.Skip("scaling test")
-	}
-	for _, tc := range []struct {
-		shape        string
-		small, large int
-	}{
-		{"blocks hub", 500, 4000},
-		{"hub with back-link", 1000, 8000},
-		{"hub fan-in/out", 1000, 8000},
-		{"layered10", 250, 2000},
-		{"skip4", 1000, 8000},
-	} {
+var layoutScalingCases = []struct {
+	shape        string
+	small, large int
+}{
+	{"blocks hub", 500, 4000},
+	{"hub with back-link", 1000, 8000},
+	{"hub fan-in/out", 1000, 8000},
+	{"layered10", 250, 2000},
+	{"skip4", 1000, 8000},
+}
+
+func TestMarkTransitiveBlockLayoutAllocationScaling(t *testing.T) {
+	for _, tc := range layoutScalingCases {
 		t.Run(tc.shape, func(t *testing.T) {
-			var timings []time.Duration
+			var allocations []float64
 			for _, size := range []int{tc.small, tc.large} {
 				edges := layoutShape(tc.shape, size)
-				var samples []time.Duration
-				calls := 2
-				for len(samples) < 3 {
-					copies := make([][]api.ReachableGraphEdge, calls)
-					for i := range copies {
-						copies[i] = slices.Clone(edges)
-					}
-					// Discard garbage from the preceding graph before timing.
-					runtime.GC()
-					start := time.Now()
-					for _, copy := range copies {
-						markTransitiveBlockLayout(copy)
-					}
-					elapsed := time.Since(start)
-					if elapsed < 100*time.Millisecond {
-						calls *= 2
-						continue
-					}
-					samples = append(samples, elapsed/time.Duration(calls))
-				}
-				slices.Sort(samples)
-				timings = append(timings, samples[1])
+				actual := slices.Clone(edges)
+				allocations = append(allocations, testing.AllocsPerRun(5, func() {
+					copy(actual, edges)
+					markTransitiveBlockLayout(actual)
+				}))
 			}
-			t.Logf("%d=%v, %d=%v", tc.small, timings[0], tc.large, timings[1])
-			exponent := 1.5
-			if tc.shape == "layered10" || tc.shape == "skip4" {
-				// Reachability rows grow with both tasks and bitset words.
-				exponent = 2
-			}
-			require.Less(t, float64(timings[1]), float64(timings[0])*math.Pow(float64(tc.large)/float64(tc.small), exponent))
+			t.Logf("%d=%v allocs, %d=%v allocs", tc.small, allocations[0], tc.large, allocations[1])
+			// Per-edge graph searches allocate quadratically. Allocation counts
+			// catch that regression without depending on CI runner scheduling.
+			require.Less(t, allocations[1], allocations[0]*2*float64(tc.large)/float64(tc.small))
 		})
+	}
+}
+
+func BenchmarkMarkTransitiveBlockLayout(b *testing.B) {
+	for _, tc := range layoutScalingCases {
+		for _, size := range []int{tc.small, tc.large} {
+			b.Run(fmt.Sprintf("%s/%d", tc.shape, size), func(b *testing.B) {
+				edges := layoutShape(tc.shape, size)
+				actual := slices.Clone(edges)
+				b.ReportAllocs()
+				for b.Loop() {
+					copy(actual, edges)
+					markTransitiveBlockLayout(actual)
+				}
+			})
+		}
 	}
 }
 
