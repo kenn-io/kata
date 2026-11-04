@@ -2291,6 +2291,103 @@ func (o *ObserveCronRunRequestOptions) GetHeader() (map[string]string, error) {
 	return nil, nil
 }
 
+// ListCronRuntimesRequestOptions is the options needed to make a request to ListCronRuntimes.
+type ListCronRuntimesRequestOptions struct {
+	PathParams *ListCronRuntimesPath
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *ListCronRuntimesRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *ListCronRuntimesRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *ListCronRuntimesRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *ListCronRuntimesRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *ListCronRuntimesRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
+// BeatCronRuntimeRequestOptions is the options needed to make a request to BeatCronRuntime.
+type BeatCronRuntimeRequestOptions struct {
+	PathParams *BeatCronRuntimePath
+	Body       *BeatCronRuntimeBody
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *BeatCronRuntimeRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *BeatCronRuntimeRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *BeatCronRuntimeRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *BeatCronRuntimeRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *BeatCronRuntimeRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
 // ListCronWorkflowsRequestOptions is the options needed to make a request to ListCronWorkflows.
 type ListCronWorkflowsRequestOptions struct {
 	PathParams *ListCronWorkflowsPath

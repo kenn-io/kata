@@ -21,6 +21,9 @@ import type {
   AttachmentContentPathParameters,
   AuditClosesParams,
   AuditClosesResponseBody,
+  BeatCronRuntimeBody,
+  BeatCronRuntimePathParameters,
+  BeatCronRuntimeResponseBody,
   BindExternalRootPathParameters,
   BindExternalRootRequestBody,
   CaptureTelemetryEventRequestBody,
@@ -154,6 +157,7 @@ import type {
   ListCronJobsResponseBody,
   ListCronRunsParams,
   ListCronRunsPathParameters,
+  ListCronRuntimesPathParameters,
   ListCronWorkflowsParams,
   ListCronWorkflowsPathParameters,
   ListCronWorkflowsResponseBody,
@@ -278,6 +282,7 @@ import type {
   RunIssueSyncOncePathParameters,
   RunIssueSyncOnceRequestBody,
   RunIssueSyncOnceResponseBody,
+  RuntimeInventory,
   SearchIssuesParams,
   SearchIssuesPathParameters,
   SearchResponseBody,
@@ -2568,6 +2573,85 @@ export const observeCronRun = async (
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(observeCronRunBody),
+  })
+}
+
+export type listCronRuntimesResponse200 = {
+  data: RuntimeInventory
+  status: 200
+}
+
+export type listCronRuntimesResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type listCronRuntimesResponseSuccess = listCronRuntimesResponse200 & {
+  headers: Headers
+}
+export type listCronRuntimesResponseError = listCronRuntimesResponseDefault & {
+  headers: Headers
+}
+
+export type listCronRuntimesResponse =
+  | listCronRuntimesResponseSuccess
+  | listCronRuntimesResponseError
+
+export const getListCronRuntimesUrl = ({ projectId }: ListCronRuntimesPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/runtimes`
+}
+
+export const listCronRuntimes = async (
+  { projectId }: ListCronRuntimesPathParameters,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<listCronRuntimesResponse> => {
+  return orvalFetch<listCronRuntimesResponse>(getListCronRuntimesUrl({ projectId }), {
+    ...options,
+    method: 'GET',
+  })
+}
+
+export type beatCronRuntimeResponse200 = {
+  data: BeatCronRuntimeResponseBody
+  status: 200
+}
+
+export type beatCronRuntimeResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type beatCronRuntimeResponseSuccess = beatCronRuntimeResponse200 & {
+  headers: Headers
+}
+export type beatCronRuntimeResponseError = beatCronRuntimeResponseDefault & {
+  headers: Headers
+}
+
+export type beatCronRuntimeResponse = beatCronRuntimeResponseSuccess | beatCronRuntimeResponseError
+
+export const getBeatCronRuntimeUrl = ({ projectId, runtimeUid }: BeatCronRuntimePathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/runtimes/${encodeURIComponent(String(runtimeUid))}`
+}
+
+export const beatCronRuntime = async (
+  { projectId, runtimeUid }: BeatCronRuntimePathParameters,
+  beatCronRuntimeBody: BeatCronRuntimeBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<beatCronRuntimeResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<beatCronRuntimeResponse>(getBeatCronRuntimeUrl({ projectId, runtimeUid }), {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(beatCronRuntimeBody),
   })
 }
 
