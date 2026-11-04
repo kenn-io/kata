@@ -66,6 +66,9 @@ func (s *Store) MergeProjects(ctx context.Context, params db.MergeProjectsParams
 				return mapSQLError(err, nil)
 			}
 		}
+		if err := rejectProjectMergeBindingsTx(ctx, tx, source.ID, target.ID); err != nil {
+			return err
+		}
 		tallyPatch, err := db.MergeCronTallyMetadata(target.Metadata, source.Metadata)
 		if err != nil {
 			return err
@@ -75,9 +78,6 @@ func (s *Store) MergeProjects(ctx context.Context, params db.MergeProjectsParams
 			return err
 		}
 		if err := db.MergeCronProjects(ctx, tx, source, target); err != nil {
-			return err
-		}
-		if err := rejectProjectMergeBindingsTx(ctx, tx, source.ID, target.ID); err != nil {
 			return err
 		}
 		if err := db.CheckFederationProjectIdentityRetirement(ctx, tx, source); err != nil {
