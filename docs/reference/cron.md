@@ -578,8 +578,9 @@ it does not launch adapter work or enforce this execution contract.
 A conforming scheduler MUST exclude deleted and disabled jobs and jobs naming
 another adapter in `options.adapter`. It MUST follow the existing
 [native-job exclusion](#adapter-responsibilities). A `manual` trigger runs only
-on an adapter-local request, never as scheduled work. Other adapter
-notifications retain their delivery rules. Local activation is still required.
+on an adapter-local request, never as scheduled work. Non-native adapter
+notifications retain the existing [delivery rules](#adapter-responsibilities).
+Local activation is still required.
 
 `issue-scheduled` and `issue-deadline` retain the existing
 [issue-date readiness and delivery rules](#adapter-responsibilities). This
@@ -605,8 +606,9 @@ recurring issues use their first-binding anchor; this profile does not change it
 A checkpoint contains an inclusive enumeration horizon `through`, opaque
 `definition_event_uid`, and pending instants. On every decision, combine retained
 pending UNION new instants in `(through, now]`, sort and deduplicate them.
-`through` says what was enumerated, not what ran. It MUST NOT regress when the
-clock does. Retained pending can be later than `now` after a clock adjustment;
+`through` says what was enumerated, not what ran. After each eligible decision,
+set it to `max(through, now)`; ineligible calls freeze it as described below.
+Retained pending can be later than `now` after a clock adjustment;
 selected future instants remain pending until due.
 
 Apply catchup to the combined set on every call, even when a gate opens at the
@@ -644,7 +646,8 @@ RFC3339Nano instants are recommended.
 
 Before launching scheduled work, refresh the definition. Any different
 `definition_event_uid` replaces it; do not infer ordering from opaque UIDs.
-Discard old pending, preserve `through`, and store the new identity. Already
+Discard old pending even for metadata-only edits, preserve `through`, and store
+the new identity. Already
 launched runs retain frozen definition references and local holds.
 
 Disabled, other-adapter, native and manual calls freeze the horizon and retain
@@ -696,10 +699,11 @@ schedulers; those jobs belong to the native hub. Existing strict decoders reject
 the new `parent_uid` shape instead of scheduling it.
 
 Shared `enabled` configuration does not activate an adapter installation. Each
-adapter owns its local activation, checkout and secret mappings, process
-lifecycle, and conversation recovery. Adapters claiming the
-[conformance profile](#adapter-conformance) follow its scheduling, overlap,
-catchup and outcome rules.
+adapter owns its local activation, scheduler, overlap and catchup handling,
+checkout and secret mappings, process lifecycle, and conversation recovery.
+Adapters claiming the [conformance profile](#adapter-conformance) follow its
+scheduling, overlap, catchup and outcome rules; other adapters retain their own
+rules.
 A second adapter may independently execute the same occurrence. Each execution
 keeps a separate run UID; no shared observation reserves the issue or occurrence.
 
@@ -717,9 +721,11 @@ buffers are not shared run evidence. An adapter may buffer a failed observation
 write and retry it later without blocking its own work.
 
 The adapter must refresh current definitions before starting new scheduled work;
-offline cached data is for labeled reads. Portable `cron` triggers follow the
-[profile timezone precedence](#eligibility-and-schedule-instants). Issue-date
-triggers use the planning-date instant above: issue timezone, recurrence fallback, daemon default and UTC remain
+offline cached data is for labeled reads. Portable `cron` triggers use the
+configured trigger timezone. Adapters claiming the profile follow its
+[embedded timezone precedence](#eligibility-and-schedule-instants). Issue-date
+triggers use the planning-date instant above: issue timezone, recurrence
+fallback, daemon default and UTC remain
 authoritative. Future `scheduled_on` and `someday` defer ordinary execute
 readiness; `deadline_on` never does. Deadline actions are notification-only.
 
