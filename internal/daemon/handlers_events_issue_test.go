@@ -2,15 +2,18 @@ package daemon_test
 
 import (
 	"encoding/json"
+	"encoding/json/jsontext"
 	"fmt"
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
+	"hegel.dev/go/hegel"
 )
 
 // The issue history contract filters before limit and acknowledges the resolved
@@ -127,6 +130,318 @@ func TestPollProjectEventsIssueScopedHistory(t *testing.T) {
 	require.NotContains(t, string(body), hidden.UID)
 }
 
+func TestPollProjectEventsIssuePayloadOnlyClose(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		for index, identityField := range []string{"issue_uid", "uid"} {
+			t.Run(identityField, func(t *testing.T) {
+				f := newProjectAccessFixture(t, store, identityField)
+				issue := f.visible
+				expiresAt := time.Now().UTC().Add(time.Hour)
+				_, _, err := store.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+					PlaintextToken: "history-token-" + identityField, Actor: "member", AdminActor: db.BootstrapActor,
+					Scope: &db.APITokenScope{
+						Kind: db.APITokenScopeIssueSubtree, ProjectUID: f.public.UID, RootIssueUID: issue.UID,
+					}, ExpiresAt: &expiresAt,
+				})
+				require.NoError(t, err)
+				_, closed, changed, err := store.CloseIssueWithEvents(t.Context(), issue.ID, "done", "member", "Closed before newer federated evidence.", nil)
+				require.NoError(t, err)
+				require.True(t, changed)
+				require.Len(t, closed, 1)
+				remote := db.RemoteEvent{
+					EventUID: fmt.Sprintf("%026d", index+1), OriginInstanceUID: "7ZZZZZZZZZZZZZZZZZZZZZZZZZ",
+					ProjectUID: f.public.UID, ProjectName: f.public.Name,
+					Type: "issue.closed", Actor: "member", HLCPhysicalMS: closed[0].HLCPhysicalMS + 1,
+					Payload:   jsontext.Value(fmt.Sprintf(`{"%s":%q,"reason":"done","evidence":[{"type":"commit","sha":"0123456789abcdef0123456789abcdef01234567"}]}`, identityField, issue.UID)),
+					CreatedAt: closed[0].CreatedAt,
+				}
+				remote.ContentHash, err = db.RemoteEventContentHash(remote)
+				require.NoError(t, err)
+				inserted, err := store.InsertRemoteEvent(t.Context(), f.public.ID, remote)
+				require.NoError(t, err)
+				require.True(t, inserted)
+
+				path := fmt.Sprintf("%s?issue=%s&include_effective_close_event_uid=true", scopedProjectPath(f.public.ID, "events"), issue.UID)
+				for _, token := range []string{"member-" + identityField + "-test-token", "history-token-" + identityField} {
+					status, _, body := f.request(t, http.MethodGet, path, "", nil, map[string]string{"Authorization": "Bearer " + token})
+					require.Equal(t, http.StatusOK, status, string(body))
+					var page api.PollEventsBody
+					require.NoError(t, json.Unmarshal(body, &page))
+					require.Equal(t, remote.EventUID, page.EffectiveCloseEventUID, string(body))
+					var selected *api.EventEnvelope
+					for i := range page.Events {
+						if page.Events[i].EventUID == remote.EventUID {
+							selected = &page.Events[i]
+						}
+					}
+					require.NotNil(t, selected, "the selected close must be returned in issue history")
+					require.NotNil(t, selected.IssueUID)
+					require.Equal(t, issue.UID, *selected.IssueUID)
+					require.Contains(t, string(selected.Payload), "0123456789abcdef0123456789abcdef01234567")
+				}
+			})
+		}
+	})
+}
+
+func TestPollProjectEventsIssueReturnsEffectiveCloseEvent(t *testing.T) {
+	t.Run("federated tie keeps origin identity private", func(t *testing.T) {
+		env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+		project, err := env.DB.CreateProject(t.Context(), "example-project")
+		require.NoError(t, err)
+		issue := createScopedHTTPTestIssue(t, env, project.ID, "Close evidence", nil)
+		newScopedTokens(t, env, project, issue)
+		_, closedEvents, changed, err := env.DB.CloseIssueWithEvents(t.Context(), issue.ID, "done", "tester", "Completed with a source close event.", nil)
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Len(t, closedEvents, 1)
+
+		remoteUID := "00000000000000000000000001"
+		remoteOrigin := "7ZZZZZZZZZZZZZZZZZZZZZZZZZ"
+		insertRemoteIssueHistoryEvent(t, env, project, issue, remoteUID, remoteOrigin, "issue.closed",
+			closedEvents[0].HLCPhysicalMS, closedEvents[0].HLCCounter,
+			`{"reason":"done","evidence":[{"type":"commit","sha":"0123456789abcdef0123456789abcdef01234567"}]}`,
+			closedEvents[0].CreatedAt)
+
+		path := fmt.Sprintf("%s?issue=%s&include_effective_close_event_uid=true", scopedProjectPath(project.ID, "events"), url.QueryEscape(issue.UID))
+		resp, body := envDoRaw(t, env, http.MethodGet, path, nil, map[string]string{"Authorization": "Bearer worker-token"})
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+		require.Equal(t, issue.UID, resp.Header.Get("X-Kata-Events-Issue-UID"))
+		var raw map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(body, &raw))
+		var effectiveUID string
+		require.NoError(t, json.Unmarshal(raw["effective_close_event_uid"], &effectiveUID), string(body))
+		require.Equal(t, remoteUID, effectiveUID, string(body))
+		var page api.PollEventsBody
+		require.NoError(t, json.Unmarshal(body, &page))
+		require.NotEmpty(t, page.Events)
+		foundEffectiveClose := false
+		for _, event := range page.Events {
+			require.Empty(t, event.OriginInstanceUID, "scoped history keeps origin identity redacted")
+			foundEffectiveClose = foundEffectiveClose || event.EventUID == remoteUID
+		}
+		require.True(t, foundEffectiveClose, "the selected close must remain available in scoped history")
+		require.NotContains(t, string(body), remoteOrigin)
+	})
+
+	t.Run("provider transitions clear prior evidence", func(t *testing.T) {
+		env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+		project, err := env.DB.CreateProject(t.Context(), "example-project")
+		require.NoError(t, err)
+		issue := createScopedHTTPTestIssue(t, env, project.ID, "Provider status", nil)
+		newScopedTokens(t, env, project, issue)
+		_, closedEvents, changed, err := env.DB.CloseIssueWithEvents(t.Context(), issue.ID, "done", "tester", "Completed with evidence.", nil)
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Len(t, closedEvents, 1)
+		baseHLC := closedEvents[0].HLCPhysicalMS
+		origin := "7ZZZZZZZZZZZZZZZZZZZZZZZZZ"
+		createdAt := closedEvents[0].CreatedAt
+		insertRemoteIssueHistoryEvent(t, env, project, issue, "00000000000000000000000002", origin, "issue.updated",
+			baseHLC+1, 0, `{"status":"open"}`, createdAt)
+		insertRemoteIssueHistoryEvent(t, env, project, issue, "00000000000000000000000003", origin, "issue.snapshot",
+			baseHLC+2, 0, `{"uid":"`+issue.UID+`","short_id":"`+issue.ShortID+`","title":"Provider status","status":"closed"}`, createdAt)
+
+		path := fmt.Sprintf("%s?issue=%s&include_effective_close_event_uid=true", scopedProjectPath(project.ID, "events"), url.QueryEscape(issue.UID))
+		resp, body := envDoRaw(t, env, http.MethodGet, path, nil, map[string]string{"Authorization": "Bearer worker-token"})
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+		var raw map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(body, &raw))
+		_, hasEffectiveClose := raw["effective_close_event_uid"]
+		require.False(t, hasEffectiveClose, string(body))
+		require.NotContains(t, string(body), `"status":"open"`)
+	})
+
+	t.Run("hidden project transitions cannot leave an older visible close selected", func(t *testing.T) {
+		env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+		visible, err := env.DB.CreateProject(t.Context(), "example-project")
+		require.NoError(t, err)
+		hidden, err := env.DB.CreateProject(t.Context(), "restricted-project")
+		require.NoError(t, err)
+		hiddenTeam, _, err := env.DB.CreateTeam(t.Context(), "history-restricted-team", db.BootstrapActor)
+		require.NoError(t, err)
+		_, _, err = env.DB.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{
+			ProjectUID: hidden.UID, Visibility: "teams", TeamUIDs: []string{hiddenTeam.UID},
+		}, db.BootstrapActor)
+		require.NoError(t, err)
+		issue := createScopedHTTPTestIssue(t, env, visible.ID, "Moved close evidence", nil)
+		newScopedTokens(t, env, visible, issue)
+		_, closedEvents, changed, err := env.DB.CloseIssueWithEvents(t.Context(), issue.ID, "done", "tester", "Closed before moving.", nil)
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Len(t, closedEvents, 1)
+
+		current, err := env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		_, err = env.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+			IssueID: current.ID, FromProjectID: visible.ID, ToProjectID: hidden.ID,
+			IfMatchRev: current.Revision, Actor: "tester", Single: true,
+		})
+		require.NoError(t, err)
+
+		origin := "7ZZZZZZZZZZZZZZZZZZZZZZZZZ"
+		createdAt := closedEvents[0].CreatedAt
+		insertRemoteIssueHistoryEvent(t, env, hidden, issue, "00000000000000000000000004", origin, "issue.updated",
+			closedEvents[0].HLCPhysicalMS+100, 0, `{"status":"open"}`, createdAt)
+		const hiddenCloseUID = "00000000000000000000000005"
+		insertRemoteIssueHistoryEvent(t, env, hidden, issue, hiddenCloseUID, origin, "issue.closed",
+			closedEvents[0].HLCPhysicalMS+200, 0,
+			`{"reason":"done","evidence":[{"type":"commit","sha":"0123456789abcdef0123456789abcdef01234567"}]}`,
+			createdAt)
+
+		current, err = env.DB.IssueByUID(t.Context(), issue.UID, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		_, err = env.DB.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+			IssueID: current.ID, FromProjectID: hidden.ID, ToProjectID: visible.ID,
+			IfMatchRev: current.Revision, Actor: "tester", Single: true,
+		})
+		require.NoError(t, err)
+
+		path := fmt.Sprintf("%s?issue=%s&include_effective_close_event_uid=true", scopedProjectPath(visible.ID, "events"), url.QueryEscape(issue.UID))
+		resp, body := envDoRaw(t, env, http.MethodGet, path, nil, map[string]string{"Authorization": "Bearer worker-token"})
+		require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
+		var raw map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(body, &raw))
+		_, hasEffectiveClose := raw["effective_close_event_uid"]
+		require.False(t, hasEffectiveClose, string(body))
+		require.NotContains(t, string(body), hiddenCloseUID)
+	})
+}
+
+func TestPollProjectEventsIssueHidesEffectiveCloseWithPrivateReference(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		hegel.Test(t, func(ht *hegel.T) {
+			referenceForm := hegel.Draw(ht, hegel.Integers(0, 1))
+			evidenceForm := hegel.Draw(ht, hegel.Integers(0, 1))
+			visible, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+				ProjectID: f.public.ID, Title: "Visible close evidence source", Author: "member",
+			})
+			require.NoError(ht, err)
+
+			evidenceType, reason := "duplicate-of", "duplicate"
+			if evidenceForm == 1 {
+				evidenceType, reason = "superseded-by", "superseded"
+			}
+			issueRef := f.issue.UID
+			if referenceForm == 1 {
+				issueRef = f.private.Name + "#" + f.issue.ShortID
+			}
+			_, closeEvents, changed, err := store.CloseIssueWithEvents(t.Context(), visible.ID, reason, "member",
+				"Closed with a reference to a restricted issue.", []db.Evidence{{
+					Type: evidenceType, IssueRef: issueRef,
+				}})
+			require.NoError(ht, err)
+			require.True(ht, changed)
+			require.Len(ht, closeEvents, 1)
+
+			path := fmt.Sprintf("%s?issue=%s&include_effective_close_event_uid=true", scopedProjectPath(f.public.ID, "events"), url.QueryEscape(visible.UID))
+			status, _, body := f.request(t, http.MethodGet, path, "nonmember", nil, nil)
+			require.Equal(ht, http.StatusOK, status, string(body))
+			var page api.PollEventsBody
+			require.NoError(ht, json.Unmarshal(body, &page))
+			require.Empty(ht, page.EffectiveCloseEventUID, string(body))
+			for _, event := range page.Events {
+				require.NotEqual(ht, "issue.closed", event.Type, "a close with a hidden evidence target must remain omitted")
+			}
+		}, hegel.WithTestCases(8))
+	})
+}
+
+func TestPollProjectEventsIssueOmitsCloseWhenEvidenceReferenceMovesBetweenAuthorizedProjects(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		target, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+			ProjectID: f.public.ID, Title: "Evidence target", Author: "member",
+		})
+		require.NoError(t, err)
+		_, closeEvents, changed, err := store.CloseIssueWithEvents(t.Context(), f.visible.ID, "duplicate", "member",
+			"Closed with a historical short reference to its duplicate.", []db.Evidence{{
+				Type: "duplicate-of", IssueRef: target.ShortID,
+			}})
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Len(t, closeEvents, 1)
+
+		_, err = store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{
+			IssueID: target.ID, FromProjectID: f.public.ID, ToProjectID: f.private.ID,
+			IfMatchRev: target.Revision, Actor: "member", Single: true,
+		})
+		require.NoError(t, err)
+
+		path := fmt.Sprintf("%s?issue=%s&include_effective_close_event_uid=true",
+			scopedProjectPath(f.public.ID, "events"), url.QueryEscape(f.visible.UID))
+		status, _, body := f.request(t, http.MethodGet, path, "member", nil, nil)
+		require.Equal(t, http.StatusOK, status, string(body))
+		var page api.PollEventsBody
+		require.NoError(t, json.Unmarshal(body, &page))
+		require.Empty(t, page.EffectiveCloseEventUID, string(body))
+		for _, event := range page.Events {
+			require.NotEqual(t, "issue.closed", event.Type,
+				"a close replaced by a reference reset must not be advertised as the effective close")
+		}
+	})
+}
+
+func TestPollProjectEventsIssueSurvivesUnrelatedPolicyChangeWithHiddenEndpoint(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		_, _, err := store.CreateLinkAndEvent(t.Context(), db.CreateLinkParams{
+			FromIssueID: f.visible.ID, ToIssueID: f.issue.ID, Type: "blocks", Author: "member",
+		}, db.LinkEventParams{
+			EventType: "issue.linked", EventIssueID: f.visible.ID,
+			FromShortID: f.visible.ShortID, FromUID: f.visible.UID,
+			ToShortID: f.issue.ShortID, ToUID: f.issue.UID, Actor: "member",
+		})
+		require.NoError(t, err)
+		_, closed, _, err := store.CloseIssueWithEvents(t.Context(), f.visible.ID, "done", "member",
+			"Completed the visible task.", []db.Evidence{{Type: "commit", SHA: "0123456789abcdef0123456789abcdef01234567"}})
+		require.NoError(t, err)
+		require.Len(t, closed, 1)
+
+		f = projectAccessFixtureWithStorage(t, f, projectAccessReleaseStore{
+			Storage: store,
+			afterEventsAfter: func([]db.Event) {
+				_, err := store.SetTeamMembership(t.Context(), f.team.UID, "unrelated-actor", true, "admin")
+				require.NoError(t, err)
+			},
+		})
+		path := fmt.Sprintf("%s?issue=%s&include_effective_close_event_uid=true",
+			scopedProjectPath(f.public.ID, "events"), url.QueryEscape(f.visible.UID))
+		status, _, body := f.request(t, http.MethodGet, path, "nonmember", nil, nil)
+		require.Equal(t, http.StatusOK, status, string(body))
+		var page api.PollEventsBody
+		require.NoError(t, json.Unmarshal(body, &page))
+		require.Equal(t, closed[0].UID, page.EffectiveCloseEventUID)
+	})
+}
+
+func insertRemoteIssueHistoryEvent(
+	t *testing.T,
+	env *testenv.Env,
+	project db.Project,
+	issue db.Issue,
+	eventUID, originUID, eventType string,
+	hlcPhysicalMS, hlcCounter int64,
+	payload string,
+	createdAt time.Time,
+) {
+	t.Helper()
+	issueUID := issue.UID
+	event := db.RemoteEvent{
+		EventUID: eventUID, OriginInstanceUID: originUID,
+		ProjectUID: project.UID, ProjectName: project.Name, IssueUID: &issueUID,
+		Type: eventType, Actor: "tester", HLCPhysicalMS: hlcPhysicalMS, HLCCounter: hlcCounter,
+		Payload: jsontext.Value(payload), CreatedAt: createdAt,
+	}
+	hash, err := db.RemoteEventContentHash(event)
+	require.NoError(t, err)
+	event.ContentHash = hash
+	inserted, err := env.DB.InsertRemoteEvent(t.Context(), project.ID, event)
+	require.NoError(t, err)
+	require.True(t, inserted)
+}
+
 func TestPollProjectEventsIssueOmitsPrivatePeerEvents(t *testing.T) {
 	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
 		f := newProjectAccessFixture(t, store)
@@ -153,5 +468,30 @@ func TestPollProjectEventsIssueOmitsPrivatePeerEvents(t *testing.T) {
 		require.Equal(t, comment.ID, page.Events[0].EventID)
 		require.Equal(t, comment.ID, page.NextAfterID)
 		require.NotContains(t, string(body), f.issue.UID)
+	})
+}
+
+func TestPollProjectEventsMovedIssueRespectsHistoricalProjectAccess(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		_, err := store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: f.issue.ID, FromProjectID: f.private.ID, ToProjectID: f.public.ID, IfMatchRev: f.issue.Revision, Actor: "member"})
+		require.NoError(t, err)
+		path := fmt.Sprintf("%s?issue=%s", scopedProjectPath(f.public.ID, "events"), f.issue.UID)
+		for _, tc := range []struct {
+			actor       string
+			wantCreated bool
+		}{{"member", true}, {"nonmember", false}} {
+			status, _, body := f.request(t, http.MethodGet, path, tc.actor, nil, nil)
+			require.Equal(t, http.StatusOK, status, string(body))
+			var page api.PollEventsBody
+			require.NoError(t, json.Unmarshal(body, &page))
+			found := false
+			for _, event := range page.Events {
+				if event.Type == "issue.created" {
+					found = true
+				}
+			}
+			require.Equal(t, tc.wantCreated, found, string(body))
+		}
 	})
 }

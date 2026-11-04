@@ -24,14 +24,16 @@ type Fake struct {
 	Server       *httptest.Server
 	Fault        string
 	UploadStatus int
-	mu           sync.Mutex
-	requests     []string
-	nodes        map[int64]docbank.Node
-	paths        map[string]int64
-	metadata     map[string]docbank.Version
-	dirs         map[string]int64
-	versions     map[string]string
-	content      map[string][]byte
+	// BeforeResponse runs after request recording and before the fake handles it.
+	BeforeResponse func(method, path string)
+	mu             sync.Mutex
+	requests       []string
+	nodes          map[int64]docbank.Node
+	paths          map[string]int64
+	metadata       map[string]docbank.Version
+	dirs           map[string]int64
+	versions       map[string]string
+	content        map[string][]byte
 }
 
 // New starts an isolated Docbank fake and registers its cleanup.
@@ -63,8 +65,14 @@ func (f *Fake) Requests() []string {
 }
 func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.requests = append(f.requests, r.Method+" "+r.URL.Path)
+	before := f.BeforeResponse
+	f.mu.Unlock()
+	if before != nil {
+		before(r.Method, r.URL.Path)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if r.Header.Get("X-Api-Key") != "test-key" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return

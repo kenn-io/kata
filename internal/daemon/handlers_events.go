@@ -61,7 +61,7 @@ func registerEventsHandlers(humaAPI huma.API, mux *http.ServeMux, cfg ServerConf
 			if err != nil {
 				return nil, err
 			}
-			return pollIssueHistory(ctx, cfg.DB, in.AfterID, in.Limit, issue)
+			return pollIssueHistory(ctx, cfg.DB, in.AfterID, in.Limit, issue, in.IncludeEffectiveCloseEventUID)
 		}
 		return doPollEvents(ctx, cfg, in.AfterID, in.Limit, in.ProjectID)
 	})

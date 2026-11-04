@@ -2309,14 +2309,15 @@ func (e EventEnvelope) Validate() error {
 }
 
 type Evidence struct {
-	Account   *string  `json:"account,omitempty"`
-	Command   *string  `json:"command,omitempty"`
-	IssueRef  *string  `json:"issue_ref,omitempty"`
-	Paths     []string `json:"paths,omitempty"`
-	Rationale *string  `json:"rationale,omitempty"`
-	Sha       *string  `json:"sha,omitempty"`
-	Type      string   `json:"type" validate:"required"`
-	URL       *string  `json:"url,omitempty"`
+	Account      *string  `json:"account,omitempty"`
+	AttachmentID *string  `json:"attachment_id,omitempty"`
+	Command      *string  `json:"command,omitempty"`
+	IssueRef     *string  `json:"issue_ref,omitempty"`
+	Paths        []string `json:"paths,omitempty"`
+	Rationale    *string  `json:"rationale,omitempty"`
+	Sha          *string  `json:"sha,omitempty"`
+	Type         string   `json:"type" validate:"required"`
+	URL          *string  `json:"url,omitempty"`
 }
 
 func (e Evidence) Validate() error {
@@ -3965,10 +3966,13 @@ func (l LeaveFederationReplicaResultBody) Validate() error {
 }
 
 type LinkAttachmentInput struct {
-	Actor     *string    `json:"actor,omitempty"`
-	NodeID    *int64     `json:"node_id,omitempty"`
-	Path      *string    `json:"path,omitempty"`
-	VersionID *uuid.UUID `json:"version_id,omitempty"`
+	Actor  *string `json:"actor,omitempty"`
+	NodeID *int64  `json:"node_id,omitempty"`
+	Path   *string `json:"path,omitempty"`
+
+	// ReuseExisting When true, return the smallest existing attachment ID for this resolved Docbank version, or create a reference if none exists.
+	ReuseExisting *bool      `json:"reuse_existing,omitempty"`
+	VersionID     *uuid.UUID `json:"version_id,omitempty"`
 }
 
 func (l LinkAttachmentInput) Validate() error {
@@ -4900,10 +4904,11 @@ func (p PingResponseBody) Validate() error {
 }
 
 type PollEventsBody struct {
-	Events        []EventEnvelope `json:"events" validate:"required"`
-	NextAfterID   int64           `json:"next_after_id"`
-	ResetAfterID  *int64          `json:"reset_after_id,omitempty"`
-	ResetRequired bool            `json:"reset_required"`
+	EffectiveCloseEventUID *string         `json:"effective_close_event_uid,omitempty"`
+	Events                 []EventEnvelope `json:"events" validate:"required"`
+	NextAfterID            int64           `json:"next_after_id"`
+	ResetAfterID           *int64          `json:"reset_after_id,omitempty"`
+	ResetRequired          bool            `json:"reset_required"`
 }
 
 func (p PollEventsBody) Validate() error {
