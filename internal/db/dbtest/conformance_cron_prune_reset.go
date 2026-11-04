@@ -22,14 +22,8 @@ func checkCronPruneRelayReset(t *testing.T, store db.Storage, backend Backend) e
 	require.NoError(t, err)
 	job, _, err := store.PutCronJob(ctx, db.PutCronJob{ProjectID: fixture.project.ID, Name: "Review", Actor: "operator", Definition: def})
 	require.NoError(t, err)
-	q := store.(interface {
-		ExecContext(context.Context, string, ...any) (sql.Result, error)
-	})
 	for i := range 2 {
-		id, err := uid.New()
-		require.NoError(t, err)
-		_, err = q.ExecContext(ctx, `INSERT INTO cron_runs(uid,project_id,job_uid,definition_event_uid,actor,status,created_at,updated_at) VALUES($1,$2,$3,$4,'operator','succeeded',$5,$5)`, id, fixture.project.ID, job.UID, job.DefinitionEventUID, time.Date(2026, 1, i+1, 0, 0, 0, 0, time.UTC).Format(db.CronRunCreatedAtFormat))
-		require.NoError(t, err)
+		ObserveAgedCronRun(t, store, fixture.project, job, "operator", time.Date(2026, 1, i+1, 0, 0, 0, 0, time.UTC))
 	}
 	var grants [2]db.FederationEnrollment
 	var initial db.RelayResetCheckpoint
@@ -105,15 +99,18 @@ func checkCronPruneRelayReset(t *testing.T, store db.Storage, backend Backend) e
 	require.Equal(t, fresh, retry, "captured boundary does not endlessly refresh")
 	events, _, err := db.DecodeRootResetPayload(mustRootPin(t, store, fixture.project.UID), fresh.Snapshot)
 	require.NoError(t, err)
-	distinct := map[string]bool{}
+	distinct := map[string]int{}
 	for _, e := range events {
 		if e.Type == "cron.run.snapshot" {
 			var observation db.CronRunObservation
 			require.NoError(t, json.Unmarshal([]byte(e.Payload), &observation))
-			distinct[observation.UID] = true
+			distinct[observation.UID]++
 		}
 	}
-	require.Len(t, distinct, 1, "superseded snapshots of the kept UID remain valid history")
+	require.Len(t, distinct, 1)
+	for _, count := range distinct {
+		require.GreaterOrEqual(t, count, 2, "superseded snapshots of the kept UID remain valid history")
+	}
 	require.NoError(t, replica.(db.RelayResetStore).InstallRelayReset(ctx, grants[0].RelayBindingUID, fresh.Manifest, fresh.Snapshot, fresh.Translation))
 	forwarded, err = replica.(db.RelayResetStore).CreateRelayReset(ctx, child.Enrollment.RelayBindingUID, db.RootAttributionSigner{})
 	require.NoError(t, err)
@@ -125,7 +122,7 @@ func checkCronPruneRelayReset(t *testing.T, store db.Storage, backend Backend) e
 		retained, err := target.store.ListCronRuns(ctx, db.CronRunList{ProjectID: target.project.ID})
 		require.NoError(t, err)
 		require.Len(t, retained, 1)
-		require.True(t, distinct[retained[0].UID])
+		require.Positive(t, distinct[retained[0].UID])
 	}
 
 	return nil
@@ -162,4 +159,33 @@ func installPruneReplica(t *testing.T, target, upstream db.Storage, source db.Pr
 	require.NoError(t, err)
 	require.Len(t, runs, 2)
 	return project
+}
+
+// ObserveAgedCronRun creates real observation evidence, then moves its run time
+// into the past in both projection and source payload before any peer reads it.
+func ObserveAgedCronRun(t *testing.T, store db.Storage, project db.Project, job db.CronJob, actor string, at time.Time) db.CronRun {
+	t.Helper()
+	id, err := uid.New()
+	require.NoError(t, err)
+	observed, err := store.ObserveCronRun(t.Context(), db.ObserveCronRun{ProjectID: project.ID, UID: id, Actor: actor, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Status: "succeeded", Summary: cron.Summary{Version: 1}})
+	require.NoError(t, err)
+	run := observed.Run
+	run.CreatedAt, run.UpdatedAt = at, at
+	payload, err := json.Marshal(db.NewCronRunObservation(run, project.UID))
+	require.NoError(t, err)
+	q := store.(interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	})
+	_, err = q.ExecContext(t.Context(), `UPDATE cron_runs SET created_at=$1,updated_at=$1 WHERE uid=$2`, at.UTC().Format(db.CronRunCreatedAtFormat), id)
+	require.NoError(t, err)
+	for _, event := range observed.Events {
+		if event.Type != "cron.run.observed" {
+			continue
+		}
+		hash, err := db.EventContentHash(db.EventHashInput{UID: event.UID, OriginInstanceUID: event.OriginInstanceUID, ProjectUID: project.UID, Type: event.Type, Actor: event.Actor, HLCPhysicalMS: event.HLCPhysicalMS, HLCCounter: event.HLCCounter, CreatedAt: event.CreatedAt.UTC().Format(db.EventTimestampFormat), Payload: payload})
+		require.NoError(t, err)
+		_, err = q.ExecContext(t.Context(), `UPDATE events SET payload=$1,content_hash=$2 WHERE id=$3`, string(payload), hash, event.ID)
+		require.NoError(t, err)
+	}
+	return run
 }

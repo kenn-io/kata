@@ -19,6 +19,7 @@ import (
 // scenario must fail with the configured error, and unexpectedly passing it
 // fails the suite until the stale entry is removed.
 type Backend struct {
+	CronSQLForTest                      func(db.Storage) db.CronSQL
 	Name                                string
 	SearchIndexesEmoji                  bool
 	Open                                func(t *testing.T) db.Storage
@@ -54,7 +55,7 @@ var storageScenarios = []scenario{
 	{name: "cron relay adoption boundary", run: checkCronRelayAdoptionBoundary},
 	{name: "search tokenizer words", methods: []string{"CreateProject", "CreateIssue", "SearchFTS", "SearchFTSAny"}, runWithBackend: checkSearchTokenizerWords},
 	{name: "cron prune event model", run: checkCronPruneEventModel},
-	{name: "cron prune rollback", run: checkCronPruneRollback},
+	{name: "cron prune rollback", runWithBackend: checkCronPruneRollback},
 	{name: "cron prune accepted replay", run: checkCronPruneAcceptedReplay},
 	{name: "cron prune relay reset", runWithBackend: checkCronPruneRelayReset},
 	{name: "cron run prune model", run: checkCronRunPruneModel},

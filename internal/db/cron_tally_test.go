@@ -27,13 +27,8 @@ func tallyTestMetadata(value string) JSONBlob {
 func TestCronTallyCodec(t *testing.T) {
 	entry := tallyTestEntry("job", "9007199254740993")
 	value := `{"version":1,"groups":{"job":` + entry + `}}`
-	tallies, err := DecodeCronTallies(tallyTestMetadata(value))
-	require.NoError(t, err)
-	require.Equal(t, int64(9007199254740993), tallies[tallyTestUID].Groups["job"].Counts.Succeeded)
-	_, err = DecodeCronTallies(tallyTestMetadata(strings.Replace(value, "9007199254740993", "9223372036854775807", 1)))
-	require.NoError(t, err)
 	// All four MaxInt64 statuses are valid: positivity cannot sum into int64.
-	_, err = DecodeCronTallies(tallyTestMetadata(strings.ReplaceAll(strings.ReplaceAll(value, "9007199254740993", "9223372036854775807"), `":0`, `":9223372036854775807`)))
+	_, err := DecodeCronTallies(tallyTestMetadata(strings.ReplaceAll(strings.ReplaceAll(value, "9007199254740993", "9223372036854775807"), `":0`, `":9223372036854775807`)))
 	require.NoError(t, err)
 	_, err = DecodeCronTallies(tallyTestMetadata(strings.ReplaceAll(strings.ReplaceAll(value, "2026-08-01", "0001-01-01"), "2025-01-01", "0001-01-01")))
 	require.NoError(t, err, "year one is within the supported date domain")
@@ -78,8 +73,7 @@ func TestCronTallyCodec(t *testing.T) {
 }
 
 func TestCronTallyExactIntegers(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		count := hegel.Draw(ht, hegel.Integers[int64](1, math.MaxInt64))
+	check := func(ht require.TestingT, count int64) {
 		literal := fmt.Sprint(count)
 		value := `{"version":1,"groups":{"job":` + tallyTestEntry("job", literal) + `}}`
 		decoded, err := DecodeCronTallies(tallyTestMetadata(value))
@@ -88,6 +82,11 @@ func TestCronTallyExactIntegers(t *testing.T) {
 		encoded, err := json.Marshal(decoded[tallyTestUID])
 		require.NoError(ht, err)
 		require.Contains(ht, string(encoded), `"succeeded":`+literal)
+	}
+	check(t, 9007199254740993)
+	check(t, math.MaxInt64)
+	hegel.Test(t, func(ht *hegel.T) {
+		check(ht, hegel.Draw(ht, hegel.Integers[int64](1, math.MaxInt64)))
 	}, hegel.WithTestCases(1000))
 }
 

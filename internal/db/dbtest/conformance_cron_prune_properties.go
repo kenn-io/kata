@@ -29,16 +29,26 @@ func pruneEventFixture(t *testing.T, s db.Storage) (db.Project, pruneFixtureSQL)
 	t.Helper()
 	p, err := s.CreateProject(t.Context(), "event-model-project")
 	require.NoError(t, err)
+	definition, err := cron.ParseJob([]byte(`{"version":1,"kind":"job","trigger":{"kind":"manual"},"action":{"kind":"execute","prompt":"Review"},"issue":{"kind":"per-run","title":"Review"},"overlap":"forbid","catchup":"skip"}`))
+	require.NoError(t, err)
+	_, _, err = s.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, UID: fmt.Sprintf("%026d", 100), Name: "Review", Actor: "operator", Definition: definition})
+	require.NoError(t, err)
 	return p, s.(pruneFixtureSQL)
 }
 
 func seedPruneEventRows(ctx context.Context, t require.TestingT, q pruneFixtureSQL, p db.Project, count int) {
-	_, err := q.ExecContext(ctx, `DELETE FROM cron_runs WHERE project_id=$1`, p.ID)
+	job, err := q.(db.Storage).CronJob(ctx, p.ID, fmt.Sprintf("%026d", 100))
+	require.NoError(t, err)
+	definition, err := json.Marshal(job.Definition)
+	require.NoError(t, err)
+	jobSnapshot, err := json.Marshal(db.CronDefinitionEvent{UID: job.UID, ProjectUID: p.UID, Name: job.Name, Definition: definition, Author: job.Author, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt, DefinitionEventUID: job.DefinitionEventUID, DefinitionHLC: &job.DefinitionHLC})
+	require.NoError(t, err)
+	_, err = q.ExecContext(ctx, `DELETE FROM cron_runs WHERE project_id=$1`, p.ID)
 	require.NoError(t, err)
 	_, err = q.ExecContext(ctx, `DELETE FROM events WHERE project_id=$1 AND type LIKE 'cron.%'`, p.ID)
 	require.NoError(t, err)
 	for i := range 2 {
-		_, err = q.ExecContext(ctx, `INSERT INTO cron_runs(uid,project_id,job_uid,definition_event_uid,actor,status,created_at,updated_at) VALUES($1,$2,$3,$4,'operator','succeeded',$5,$5)`, fmt.Sprintf("%026d", i+100), p.ID, fmt.Sprintf("%026d", 1), fmt.Sprintf("%026d", 2), time.Date(2026, 1, i+1, 0, 0, 0, 0, time.UTC).Format(db.CronRunCreatedAtFormat))
+		_, err = q.ExecContext(ctx, `INSERT INTO cron_runs(uid,project_id,job_uid,definition_event_uid,actor,status,created_at,updated_at) VALUES($1,$2,$3,$4,'operator','succeeded',$5,$5)`, fmt.Sprintf("%026d", i+100), p.ID, job.UID, job.DefinitionEventUID, time.Date(2026, 1, i+1, 0, 0, 0, 0, time.UTC).Format(db.CronRunCreatedAtFormat))
 		require.NoError(t, err)
 	}
 	tx, err := q.BeginTx(ctx, nil)
@@ -50,7 +60,12 @@ func seedPruneEventRows(ctx context.Context, t require.TestingT, q pruneFixtureS
 		if i%4 == 3 {
 			id = 101
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash,created_at) VALUES($1,$2,$3,$4,$5,'operator',$6,1,0,$7,$8)`, fmt.Sprintf("%026d", i+1000), fmt.Sprintf("%026d", 3), p.ID, p.Name, kind, fmt.Sprintf(`{"uid":"%026d","other":"%026d"}`, id, 100), strings.Repeat("0", 64), "2026-01-01T00:00:00.000Z")
+		payload := fmt.Sprintf(`{"uid":"%026d","other":"%026d"}`, id, 100)
+		if kind == "cron.job.snapshot" {
+			// Job and run UIDs occupy separate tables and may coincide.
+			payload = string(jobSnapshot)
+		}
+		_, err := tx.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash,created_at) VALUES($1,$2,$3,$4,$5,'operator',$6,1,0,$7,$8)`, fmt.Sprintf("%026d", i+1000), fmt.Sprintf("%026d", 3), p.ID, p.Name, kind, payload, strings.Repeat("0", 64), "2026-01-01T00:00:00.000Z")
 		require.NoError(t, err)
 	}
 	require.NoError(t, tx.Commit())
@@ -116,7 +131,7 @@ func checkCronPruneEventModel(t *testing.T, s db.Storage) error {
 
 // Contract A9/A10: a failure after event and run deletion rolls back the entire
 // batch. The reset hook injects cancellation or a failure at the last stage.
-func checkCronPruneRollback(t *testing.T, s db.Storage) error {
+func checkCronPruneRollback(t *testing.T, s db.Storage, backend Backend) error {
 	p, q := pruneEventFixture(t, s)
 	seedPruneEventRows(t.Context(), t, q, p, 1001)
 	wantEvents := pruneEvents(t.Context(), t, s, p)
@@ -130,47 +145,18 @@ func checkCronPruneRollback(t *testing.T, s db.Storage) error {
 		t.Run(fmt.Sprintf("cancel=%t", cancelAtReset), func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
-			adapter := db.CronSQL{
-				PruneGate: func(context.Context, *sql.Tx, db.Project) error { return nil },
-				WriteGate: func(context.Context, *sql.Tx, int64) error { return nil },
-				ReserveResetCursor: func(context.Context, *sql.Tx) (int64, error) {
-					if cancelAtReset {
-						cancel()
-						return 0, context.Canceled
-					}
-					return 0, injectedResetFailure
-				},
-				PatchProjectMetadataTx: func(ctx context.Context, tx *sql.Tx, in db.PatchProjectMetadataIn) (db.PatchProjectMetadataOut, error) {
-					metadata, err := json.Marshal(in.Patch)
-					if err != nil {
-						return db.PatchProjectMetadataOut{}, err
-					}
-					if _, err := tx.ExecContext(ctx, `UPDATE projects SET metadata=$1,revision=revision+1 WHERE id=$2`, string(metadata), in.ProjectID); err != nil {
-						return db.PatchProjectMetadataOut{}, err
-					}
-					eventUID, err := uid.New()
-					if err != nil {
-						return db.PatchProjectMetadataOut{}, err
-					}
-					_, err = tx.ExecContext(ctx, `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash,created_at) VALUES($1,$2,$3,$4,'project.metadata_updated',$5,'{"diff":{}}',1,0,$6,$7)`, eventUID, s.InstanceUID(), p.ID, p.Name, in.Actor, strings.Repeat("0", 64), time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC).Format(db.CronRunCreatedAtFormat))
-					if err != nil {
-						return db.PatchProjectMetadataOut{}, err
-					}
-					return db.PatchProjectMetadataOut{}, nil
-				},
-				Transact: func(ctx context.Context, run func(*sql.Tx) error) error {
-					tx, err := q.BeginTx(ctx, nil)
-					if err != nil {
-						return err
-					}
-					defer func() { _ = tx.Rollback() }()
-					if err := run(tx); err != nil {
-						return err
-					}
-					return tx.Commit()
-				},
+			adapter := backend.CronSQLForTest(s)
+			reachedReset := false
+			adapter.ReserveResetCursor = func(context.Context, *sql.Tx) (int64, error) {
+				reachedReset = true
+				if cancelAtReset {
+					cancel()
+					return 0, ctx.Err()
+				}
+				return 0, injectedResetFailure
 			}
 			_, err := adapter.PruneRuns(ctx, db.PruneCronRuns{ProjectID: p.ID, Actor: "operator", Before: time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC), Keep: 1})
+			require.True(t, reachedReset, "failure occurs after real metadata and deletion writes")
 			if cancelAtReset {
 				require.ErrorIs(t, err, context.Canceled)
 			} else {
