@@ -80,20 +80,22 @@ func TestRuntimePermutationInvariant(t *testing.T) {
 	}, hegel.WithTestCases(2000), hegel.WithDatabase(t.TempDir()))
 }
 func TestRuntimeValidationDomains(t *testing.T) {
-	hegel.Test(t, func(h *hegel.T) {
-		b := runtimeFixture().RuntimeBeat
-		b.Label = hegel.Draw(h, hegel.Text())
-		n := hegel.Draw(h, hegel.Integers(math.MinInt, math.MaxInt))
-		if hegel.Draw(h, hegel.Booleans()) {
-			n = hegel.Draw(h, hegel.Integers(0, 3601))
-		}
-		b.IntervalSeconds = n
-		_, err := NormalizeRuntimeBeat(b)
-		want := len(b.Label) > 0 && len(b.Label) <= 256 && strings.TrimSpace(b.Label) != "" && (n == 0 || n >= 10 && n <= 3600)
-		if (err == nil) != want {
-			h.Fatalf("validation %v want valid=%v label=%q interval=%d", err, want, b.Label, n)
-		}
-	}, hegel.WithTestCases(2000), hegel.WithDatabase(t.TempDir()))
+	t.Run("label_interval", func(t *testing.T) {
+		hegel.Test(t, func(h *hegel.T) {
+			b := runtimeFixture().RuntimeBeat
+			b.Label = hegel.Draw(h, hegel.Text())
+			n := hegel.Draw(h, hegel.Integers(math.MinInt, math.MaxInt))
+			if hegel.Draw(h, hegel.Booleans()) {
+				n = hegel.Draw(h, hegel.Integers(0, 3601))
+			}
+			b.IntervalSeconds = n
+			_, err := NormalizeRuntimeBeat(b)
+			want := len(b.Label) > 0 && len(b.Label) <= 256 && strings.TrimSpace(b.Label) != "" && (n == 0 || n >= 10 && n <= 3600)
+			if (err == nil) != want {
+				h.Fatalf("validation %v want valid=%v label=%q interval=%d", err, want, b.Label, n)
+			}
+		}, hegel.WithTestCases(2000), hegel.WithDatabase(t.TempDir()))
+	})
 	tooMany := make([]string, 33)
 	for i := range tooMany {
 		tooMany[i] = fmt.Sprintf("feature%d", i)
@@ -107,6 +109,72 @@ func TestRuntimeValidationDomains(t *testing.T) {
 	require.Equal(t, 60, b.IntervalSeconds)
 	require.Equal(t, "active", b.State)
 	require.NotNil(t, b.Features)
+
+	t.Run("adapter", func(t *testing.T) {
+		for _, n := range []int{0, 1, 64, 65} {
+			b := runtimeFixture().RuntimeBeat
+			b.Adapter = strings.Repeat("a", n)
+			_, err := NormalizeRuntimeBeat(b)
+			require.Equal(t, n >= 1 && n <= 64, err == nil, "adapter bytes=%d", n)
+		}
+		hegel.Test(t, func(h *hegel.T) {
+			b := runtimeFixture().RuntimeBeat
+			token := hegel.Draw(h, hegel.Text())
+			if hegel.Draw(h, hegel.Booleans()) {
+				token = hegel.Draw(h, hegel.Text().Alphabet("abcdefghijklmnopqrstuvwxyz0123456789_.-").MaxSize(70))
+			}
+			b.Adapter = token
+			valid := len(token) >= 1 && len(token) <= 64
+			for _, c := range []byte(token) {
+				if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '_' && c != '.' && c != '-' {
+					valid = false
+				}
+			}
+			_, err := NormalizeRuntimeBeat(b)
+			if (err == nil) != valid {
+				h.Fatal("adapter token domain mismatch")
+			}
+		}, hegel.WithTestCases(2000), hegel.WithDatabase(t.TempDir()))
+	})
+	printable := make([]rune, 95)
+	for i := range printable {
+		printable[i] = rune(i + 32)
+	}
+	for _, field := range []string{"adapter_version", "kata_version"} {
+		t.Run(field, func(t *testing.T) {
+			set := func(b *RuntimeBeat, value string) {
+				if field == "adapter_version" {
+					b.AdapterVersion = value
+				} else {
+					b.KataVersion = value
+				}
+			}
+			for _, n := range []int{0, 1, 64, 65} {
+				b := runtimeFixture().RuntimeBeat
+				set(&b, strings.Repeat("a", n))
+				_, err := NormalizeRuntimeBeat(b)
+				require.Equal(t, n <= 64, err == nil, "version bytes=%d", n)
+			}
+			hegel.Test(t, func(h *hegel.T) {
+				b := runtimeFixture().RuntimeBeat
+				version := hegel.Draw(h, hegel.Text())
+				if hegel.Draw(h, hegel.Booleans()) {
+					version = hegel.Draw(h, hegel.Text().Alphabet(string(printable)).MaxSize(70))
+				}
+				set(&b, version)
+				valid := len(version) <= 64
+				for _, c := range []byte(version) {
+					if c < 32 || c > 126 {
+						valid = false
+					}
+				}
+				_, err := NormalizeRuntimeBeat(b)
+				if (err == nil) != valid {
+					h.Fatal("version domain mismatch")
+				}
+			}, hegel.WithTestCases(2000), hegel.WithDatabase(t.TempDir()))
+		})
+	}
 }
 
 // Contract: all selector components match conjunctively and labels stay exact.
@@ -159,6 +227,14 @@ func TestRuntimeSelectorsConjunctive(t *testing.T) {
 			}
 		}
 	}, hegel.WithTestCases(2000), hegel.WithDatabase(t.TempDir()))
+	t.Run("non_string_and_blank", func(t *testing.T) {
+		r := runtimeFixture()
+		now := r.LastSeenAt
+		for _, raw := range []string{`{"executor":42,"adapter":true}`, `{"executor":" ","adapter":null}`} {
+			job := runtimeJobFixture(t, []byte(raw))
+			require.Empty(t, EvaluateRuntimes([]Runtime{r}, []RuntimeJob{job}, now, "dev", now.Add(-4*time.Hour)).Warnings)
+		}
+	})
 }
 func TestRuntimeVersionSkewReportedLiveOnly(t *testing.T) {
 	hegel.Test(t, func(h *hegel.T) {
@@ -192,17 +268,9 @@ func TestRuntimeVersionSkewReportedLiveOnly(t *testing.T) {
 		}
 	}, hegel.WithTestCases(2000), hegel.WithDatabase(t.TempDir()))
 }
-func TestRuntimeNonStringAndBlankSelectorsIgnored(t *testing.T) {
-	r := runtimeFixture()
-	now := r.LastSeenAt
-	for _, raw := range []string{`{"executor":42,"adapter":true}`, `{"executor":" ","adapter":null}`} {
-		job := runtimeJobFixture(t, []byte(raw))
-		require.Empty(t, EvaluateRuntimes([]Runtime{r}, []RuntimeJob{job}, now, "dev", now.Add(-4*time.Hour)).Warnings)
-	}
-}
 
 func TestRuntimeNormalizationOwnsSlices(t *testing.T) {
-	for _, law := range []string{"input_unchanged", "idempotent", "result_owned"} {
+	for _, law := range []string{"idempotent", "result_owned"} {
 		t.Run(law, func(t *testing.T) {
 			hegel.Test(t, func(h *hegel.T) {
 				b := runtimeFixture().RuntimeBeat
@@ -213,10 +281,6 @@ func TestRuntimeNormalizationOwnsSlices(t *testing.T) {
 					h.Fatal(err)
 				}
 				switch law {
-				case "input_unchanged":
-					if !slices.Equal(b.Features, before) {
-						h.Fatal("normalization mutated caller")
-					}
 				case "idempotent":
 					twice, err := NormalizeRuntimeBeat(normalized)
 					if err != nil {
@@ -228,6 +292,9 @@ func TestRuntimeNormalizationOwnsSlices(t *testing.T) {
 						h.Fatal("normalization is not idempotent")
 					}
 				case "result_owned":
+					if !slices.Equal(b.Features, before) {
+						h.Fatal("normalization mutated caller")
+					}
 					if len(normalized.Features) > 0 {
 						normalized.Features[0] = "changed"
 						if !slices.Equal(b.Features, before) {
@@ -238,42 +305,6 @@ func TestRuntimeNormalizationOwnsSlices(t *testing.T) {
 			}, hegel.WithTestCases(2000), hegel.WithDatabase(t.TempDir()))
 		})
 	}
-}
-func TestRuntimeValidationTokenAndVersionDomains(t *testing.T) {
-	t.Run("adapter", func(t *testing.T) {
-		hegel.Test(t, func(h *hegel.T) {
-			b := runtimeFixture().RuntimeBeat
-			token := hegel.Draw(h, hegel.Text())
-			b.Adapter = token
-			valid := len(token) >= 1 && len(token) <= 64
-			for _, c := range []byte(token) {
-				if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '_' && c != '.' && c != '-' {
-					valid = false
-				}
-			}
-			_, err := NormalizeRuntimeBeat(b)
-			if (err == nil) != valid {
-				h.Fatal("adapter token domain mismatch")
-			}
-		}, hegel.WithTestCases(2000), hegel.WithDatabase(t.TempDir()))
-	})
-	t.Run("version", func(t *testing.T) {
-		hegel.Test(t, func(h *hegel.T) {
-			b := runtimeFixture().RuntimeBeat
-			version := hegel.Draw(h, hegel.Text())
-			b.AdapterVersion = version
-			valid := len(version) <= 64
-			for _, c := range []byte(version) {
-				if c < 32 || c > 126 {
-					valid = false
-				}
-			}
-			_, err := NormalizeRuntimeBeat(b)
-			if (err == nil) != valid {
-				h.Fatal("version domain mismatch")
-			}
-		}, hegel.WithTestCases(2000), hegel.WithDatabase(t.TempDir()))
-	})
 }
 func TestRuntimeKataVersionComparison(t *testing.T) {
 	now := runtimeFixture().LastSeenAt

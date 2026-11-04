@@ -198,6 +198,11 @@ func TestCronRuntimeHelpExampleExecutes(t *testing.T) {
 	}
 	require.Less(t, end, len(lines), "unterminated heredoc in runtime help")
 	body := strings.Join(lines[1:end], "\n")
+	var expected map[string]jsontext.Value
+	require.NoError(t, json.Unmarshal([]byte(body), &expected))
+	expected["actor"] = jsontext.Value(`"operator"`)
+	expectedRaw, err := json.Marshal(expected)
+	require.NoError(t, err)
 	target, err := url.Parse(env.URL)
 	require.NoError(t, err)
 	// Observe the wire body without asserting a forwarded client identity.
@@ -225,11 +230,12 @@ func TestCronRuntimeHelpExampleExecutes(t *testing.T) {
 	require.Contains(t, out, `"status":"live"`)
 	select {
 	case raw := <-wire:
-		require.JSONEq(t, `{"actor":"operator","label":"example-worker","adapter":"example","features":["cron_v1"],"interval_seconds":60,"state":"active"}`, string(raw))
+		require.JSONEq(t, string(expectedRaw), string(raw))
 	default:
 		t.Fatal("help example did not send a runtime beat")
 	}
 	out, _, err = executeCronCLI(t, env.URL, nil, "runtime", "list")
 	require.NoError(t, err)
-	require.Contains(t, string(out), "example-worker")
+	require.Contains(t, out, `"actor":"operator"`)
+	require.Contains(t, out, "example-worker")
 }

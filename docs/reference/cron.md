@@ -370,9 +370,9 @@ options). Each step has these fields:
 }
 ```
 
-### Runtime heartbeats
+## Runtime heartbeats
 
-On main after the latest release, adapters can advertise their liveness with
+Adapters can advertise their liveness with
 `kata cron runtime beat`. Generate one runtime ULID per installation, persist
 it, and reuse it for every beat. Report at the advertised interval, including
 while no jobs run. Send a final `stopping` beat on clean shutdown when possible.

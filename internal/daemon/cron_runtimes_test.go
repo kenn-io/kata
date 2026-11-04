@@ -124,7 +124,13 @@ func TestCronRuntimeRegistryRefresh(t *testing.T) {
 		if stopped.Status != "expired" || !stopped.ExpiresAt.Equal(now) {
 			h.Fatal("stopping not immediate")
 		}
-		now = now.Add(time.Second)
+		// UTC wall-clock readings can move backwards; stopping stays expired.
+		now = now.Add(-time.Second)
+		observed := reg.List(1, nil, "dev").Runtimes[0]
+		if observed.Status != "expired" || !observed.ExpiresAt.Equal(first) {
+			h.Fatal("clock rollback revived a stopping runtime")
+		}
+		now = first.Add(time.Second)
 		b.State = "active"
 		active, err := reg.Beat(1, runtimeRegistryUID(1), "second-actor", b)
 		if err != nil {

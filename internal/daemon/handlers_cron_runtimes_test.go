@@ -1,12 +1,10 @@
 package daemon_test
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json/v2"
 	"fmt"
-	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -34,21 +32,21 @@ func TestCronRuntimeHTTP(t *testing.T) {
 	other := seedProject(t, env, "other-project")
 	path := fmt.Sprintf("/api/v1/projects/%d/cron/runtimes", p.ID)
 	id := cronHTTPUID(t)
-	status, raw := runtimeHTTPRequest(t, env, http.MethodGet, path, nil)
+	status, raw := cronHTTP(t, env, http.MethodGet, path, nil)
 	require.Equalf(t, 200, status, "%s", raw)
 	require.Contains(t, string(raw), `"state":"unknown"`)
 	before, err := env.DB.MaxEventID(t.Context())
 	require.NoError(t, err)
-	status, raw = runtimeHTTPRequest(t, env, http.MethodPut, path+"/"+id, runtimeHTTPBody())
+	status, raw = cronHTTP(t, env, http.MethodPut, path+"/"+id, runtimeHTTPBody())
 	require.Equalf(t, 200, status, "%s", raw)
 	var response api.BeatCronRuntimeResponse
 	require.NoError(t, json.Unmarshal(raw, &response.Body))
 	require.Equal(t, "live", response.Body.Runtime.Status)
 	require.Equal(t, "not_applicable", response.Body.Forwarded)
-	status, raw = runtimeHTTPRequest(t, env, http.MethodGet, path, nil)
+	status, raw = cronHTTP(t, env, http.MethodGet, path, nil)
 	require.Equal(t, 200, status)
 	require.Contains(t, string(raw), id)
-	status, raw = runtimeHTTPRequest(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/runtimes", other.ID), nil)
+	status, raw = cronHTTP(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/runtimes", other.ID), nil)
 	require.Equal(t, 200, status)
 	require.NotContains(t, string(raw), id)
 	after, err := env.DB.MaxEventID(t.Context())
@@ -77,7 +75,7 @@ func TestCronRuntimeHTTPValidationAndCapacity(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			body := runtimeHTTPBody()
 			maps.Copy(body, tc.patch)
-			status, raw := runtimeHTTPRequest(t, env, http.MethodPut, path+cronHTTPUID(t), body)
+			status, raw := cronHTTP(t, env, http.MethodPut, path+cronHTTPUID(t), body)
 			require.Equal(t, http.StatusBadRequest, status, string(raw))
 			var response api.ErrorEnvelope
 			require.NoError(t, json.Unmarshal(raw, &response))
@@ -89,7 +87,7 @@ func TestCronRuntimeHTTPValidationAndCapacity(t *testing.T) {
 	canonicalBody["interval_seconds"] = 60
 	canonicalBody["state"] = "active"
 	for _, id := range []string{strings.ToLower(cronHTTPUID(t)), "invalid"} {
-		status, raw := runtimeHTTPRequest(t, env, http.MethodPut, path+id, canonicalBody)
+		status, raw := cronHTTP(t, env, http.MethodPut, path+id, canonicalBody)
 		require.Equal(t, http.StatusBadRequest, status, string(raw))
 		var response api.ErrorEnvelope
 		require.NoError(t, json.Unmarshal(raw, &response))
@@ -100,7 +98,7 @@ func TestCronRuntimeHTTPValidationAndCapacity(t *testing.T) {
 		_, err := registry.Beat(p.ID, cronHTTPUID(t), "operator", cron.RuntimeBeat{Label: "worker", Adapter: "example"})
 		require.NoError(t, err)
 	}
-	status, raw := runtimeHTTPRequest(t, env, http.MethodPut, path+cronHTTPUID(t), runtimeHTTPBody())
+	status, raw := cronHTTP(t, env, http.MethodPut, path+cronHTTPUID(t), runtimeHTTPBody())
 	require.Equal(t, http.StatusTooManyRequests, status, string(raw))
 	var response api.ErrorEnvelope
 	require.NoError(t, json.Unmarshal(raw, &response))
@@ -148,10 +146,10 @@ func TestCronRuntimeHTTPAuthority(t *testing.T) {
 				headers["Authorization"] = "Bearer " + token
 			}
 			if kind == "readonly" {
-				resp, raw := runtimeHTTPRaw(t, env, http.MethodGet, path, nil, headers)
+				resp, raw := envDoRaw(t, env, http.MethodGet, path, nil, headers)
 				require.Equalf(t, 200, resp.StatusCode, "%s", raw)
 			}
-			resp, raw := runtimeHTTPRaw(t, env, http.MethodPut, path+"/"+cronHTTPUID(t), runtimeHTTPBody(), headers)
+			resp, raw := envDoRaw(t, env, http.MethodPut, path+"/"+cronHTTPUID(t), runtimeHTTPBody(), headers)
 			require.Equalf(t, want, resp.StatusCode, "%s", raw)
 			if kind == "identity" {
 				require.Contains(t, string(raw), `"actor":"bound-actor"`)
@@ -189,31 +187,4 @@ func TestCronRuntimeLateRevocation(t *testing.T) {
 	srv.Handler().ServeHTTP(recorder, req)
 	require.Equal(t, 401, recorder.Code, recorder.Body.String())
 	require.Empty(t, registry.List(p.ID, nil, "dev").Runtimes)
-}
-
-func runtimeHTTPRequest(t *testing.T, env *testenv.Env, method, path string, body any) (int, []byte) {
-	t.Helper()
-	response, raw := runtimeHTTPRaw(t, env, method, path, body, nil)
-	return response.StatusCode, raw
-}
-func runtimeHTTPRaw(t *testing.T, env *testenv.Env, method, path string, body any, headers map[string]string) (*http.Response, []byte) {
-	t.Helper()
-	var raw []byte
-	var err error
-	if body != nil {
-		raw, err = json.Marshal(body)
-		require.NoError(t, err)
-	}
-	request, err := http.NewRequestWithContext(t.Context(), method, env.URL+path, bytes.NewReader(raw))
-	require.NoError(t, err)
-	request.Header.Set("Content-Type", "application/json")
-	for key, value := range headers {
-		request.Header.Set(key, value)
-	}
-	response, err := env.HTTP.Do(request)
-	require.NoError(t, err)
-	defer func() { require.NoError(t, response.Body.Close()) }()
-	data, err := io.ReadAll(response.Body)
-	require.NoError(t, err)
-	return response, data
 }
