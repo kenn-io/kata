@@ -44,7 +44,7 @@ func TestCronResumePassoverCount(t *testing.T) {
 			if invalid {
 				require.Nil(t, m.cron.enabled)
 				require.NotNil(t, m.toast)
-				require.Equal(t, "Could not change the job: Invalid cutoff; repair with --discard-missed.", m.toast.text)
+				require.Equal(t, "Could not change the job: invalid cutoff; repair with --discard-missed", m.toast.text)
 				require.Empty(t, api.enabledCalls)
 			} else {
 				require.NotNil(t, write)

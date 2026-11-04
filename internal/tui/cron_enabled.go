@@ -56,7 +56,7 @@ func (m Model) routeCronEnabledKey(lines []cronLine, cursor int) (Model, tea.Cmd
 		read, err := api.readCronJob(ctx, pid, request.uid)
 		current := read.Job
 		if err == nil && request.enabled && read.Passover != nil && read.Passover.Invalid {
-			err = errors.New("Invalid cutoff; repair with --discard-missed.")
+			err = errors.New("invalid cutoff; repair with --discard-missed")
 		}
 		if err == nil && (current.DeletedAt != nil || current.DefinitionEventUID != request.expected) {
 			err = &APIError{Status: http.StatusConflict, Code: "cron_conflict", Message: "The job changed; refresh before retrying"}
