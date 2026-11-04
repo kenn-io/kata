@@ -165,7 +165,9 @@
           ? byHierarchyKey.get(`${issue.project_uid}:${issue.parent_short_id}`)?.uid
           : undefined)
       if (!parentUID) continue
-      children.set(parentUID, [...(children.get(parentUID) ?? []), issue])
+      const siblings = children.get(parentUID)
+      if (siblings) siblings.push(issue)
+      else children.set(parentUID, [issue])
     }
     return children
   })
@@ -202,9 +204,9 @@
         }
       }
     }
-    const allIssues = groups.flatMap((group) => group.issues)
+    const visibleKeys = new Set(groups.flatMap((group) => group.issues.map(issueHierarchyKey)))
     return groups
-      .map((group) => ({ ...group, issues: topLevelIssues(group.issues, allIssues) }))
+      .map((group) => ({ ...group, issues: topLevelIssues(group.issues, visibleKeys) }))
       .filter((group) => group.issues.length > 0)
   })
 
@@ -401,13 +403,12 @@
 
   function topLevelIssues(
     issues: readonly KataTaskSummary[],
-    allIssues: readonly KataTaskSummary[] = issues,
+    visibleKeys: ReadonlySet<string> = new Set(issues.map(issueHierarchyKey)),
   ): KataTaskSummary[] {
     // A child collapses into its parent only when that parent is actually
     // present in the visible set. Search and filter results often surface a
     // matching child without its parent; those rows must still render as
     // their own top-level row instead of vanishing into a missing ancestor.
-    const visibleKeys = new Set(allIssues.map(issueHierarchyKey))
     return issues.filter((issue) => {
       const parentKey = parentHierarchyKey(issue)
       return parentKey === null || !visibleKeys.has(parentKey)

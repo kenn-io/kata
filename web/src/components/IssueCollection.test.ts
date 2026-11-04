@@ -647,7 +647,7 @@ describe('IssueCollection', () => {
     expect(screen.queryByRole('button', { name: /Child task/ })).toBeNull()
   })
 
-  it('does not show an expanded child again as a flat row', async () => {
+  it('nests a child under its parent across date groups', async () => {
     const parent = task({
       uid: 'issue-parent',
       short_id: 'parent',
@@ -664,7 +664,14 @@ describe('IssueCollection', () => {
     })
     render(IssueCollection, {
       props: {
-        currentView: viewWithIssues([parent, child]),
+        currentView: {
+          name: 'logbook',
+          fetched_at: currentView.fetched_at,
+          groups: [
+            { id: '2026-05-16', title: 'May 16', issues: [parent] },
+            { id: '2026-05-15', title: 'May 15', issues: [child] },
+          ],
+        },
         issueCatalog: [parent, child],
         selectedIssueUID: null,
         loading: false,
