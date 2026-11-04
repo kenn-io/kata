@@ -95,7 +95,7 @@ func TestMovedIssueLookupUsesIssueHistoryIndexes(t *testing.T) {
 				}
 				if strings.Contains(captured.query, "sync.reset_required") {
 					resetPlans++
-					require.Contains(t, joined, "idx_events_issue_uid on events reset",
+					require.Contains(t, joined, "idx_events_reset_from on events reset",
 						"reset references must use an event index: %s", joined)
 				}
 			}
@@ -112,20 +112,20 @@ func TestMovedIssueLookupUsesIssueHistoryIndexes(t *testing.T) {
 func seedIndexedMoveHistoryPlan(t *testing.T, store *pgstore.Store, project db.Project) {
 	t.Helper()
 	const eventCount = 2000
-	args := make([]any, 0, eventCount*10)
+	args := make([]any, 0, eventCount*11)
 	values := make([]string, 0, eventCount)
 	contentHash := strings.Repeat("a", 64)
 	for i := range eventCount {
 		eventUID, err := uid.New()
 		require.NoError(t, err)
 		args = append(args, eventUID, store.InstanceUID(), project.ID, project.Name,
-			"project.metadata_updated", "agent", `{}`, int64(i+1), int64(0), contentHash)
-		first := len(args) - 9
-		values = append(values, fmt.Sprintf("($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
-			first, first+1, first+2, first+3, first+4, first+5, first+6, first+7, first+8, first+9))
+			eventUID, "issue.updated", "agent", `{}`, int64(i+1), int64(0), contentHash)
+		first := len(args) - 10
+		values = append(values, fmt.Sprintf("($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
+			first, first+1, first+2, first+3, first+4, first+5, first+6, first+7, first+8, first+9, first+10))
 	}
 	_, err := store.ExecContext(t.Context(), `INSERT INTO events(
-uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash
+uid,origin_instance_uid,project_id,project_name,issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash
 ) VALUES `+strings.Join(values, ","), args...)
 	require.NoError(t, err)
 	_, err = store.ExecContext(t.Context(), "ANALYZE events")

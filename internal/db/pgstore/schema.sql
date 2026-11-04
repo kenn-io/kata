@@ -340,6 +340,7 @@ CREATE INDEX idx_events_resolved_issue_uid ON events (
     id
 );
 CREATE INDEX idx_events_moved_from ON events((payload::jsonb->>'from_project_uid'), (payload::jsonb->>'from_short_id')) WHERE type = 'issue.moved';
+CREATE INDEX idx_events_reset_from ON events((payload::jsonb->>'from_project_uid'), (payload::jsonb->>'from_short_id')) WHERE type = 'sync.reset_required';
 CREATE INDEX idx_events_reply_to ON events((payload::jsonb->>'reply_to_uid')) WHERE type = 'issue.commented' AND (payload::jsonb->>'reply_to_uid') IS NOT NULL;
 CREATE INDEX idx_events_related_issue_uid ON events(related_issue_uid) WHERE related_issue_uid IS NOT NULL;
 CREATE INDEX idx_events_origin_instance ON events(origin_instance_uid);

@@ -80,7 +80,7 @@ func TestMovedIssueLookupUsesIssueHistoryIndex(t *testing.T) {
 				}
 				if strings.Contains(captured.query, "sync.reset_required") {
 					resetPlans++
-					resetIndex := "idx_events_project"
+					resetIndex := "idx_events_reset_from"
 					if ref == issue.UID {
 						resetIndex = "idx_events_issue_uid"
 					}

@@ -321,3 +321,19 @@ migration chain first. SQLite uses its normal JSONL cutover.
 Start the matching schema 43 binary after migration. Older binaries cannot open
 schema 43. Rollback requires the pre-upgrade backup and matching older binary;
 there is no down migration.
+## Schema 44: reset reference lookup index
+
+The 43→44 migration adds the partial `idx_events_reset_from` index on `events`
+for `sync.reset_required` rows, keyed by the payload's `from_project_uid` and
+`from_short_id`. It speeds up lookups of receiver-local former issue references.
+Fresh PostgreSQL and SQLite databases include the index.
+
+Stop serving daemons and imports, back up the database, and run
+`kata storage postgres migrate` with schema-owner credentials. Building the
+index reads `events` and blocks event writes; allow an offline window that fits
+the table's size. Existing table grants remain sufficient. Validation-only
+runtime credentials cannot migrate. SQLite uses its normal JSONL cutover.
+
+Start the matching schema 44 binary after migration. Older binaries cannot open
+schema 44. Rollback requires the pre-upgrade backup and matching older binary;
+there is no down migration.
