@@ -17,6 +17,7 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationcoord"
+	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/testenv"
 )
 
@@ -64,7 +65,7 @@ func TestCronSummaryCapabilitiesAndAPI(t *testing.T) {
 }
 
 func TestCronSummarySpokeAdmission(t *testing.T) {
-	for _, mode := range []string{"supports", "old", "trigger-old", "offline", "redirect", "credential-mismatch", "rejoin", "v1"} {
+	for _, mode := range []string{"supports", "old", "trigger-old", "offline", "redirect", "credential-mismatch", "rejoin", "oversized", "v1"} {
 		t.Run(mode, func(t *testing.T) {
 			calls := 0
 			f := newCronForwardFixture(t, func(f *cronForwardFixture, cfg *daemon.ServerConfig) {
@@ -97,7 +98,11 @@ func TestCronSummarySpokeAdmission(t *testing.T) {
 							_, err = f.spoke.DB.UpsertFederationBinding(t.Context(), binding)
 							require.NoError(t, err)
 						}
-						return &http.Response{StatusCode: status, Header: h, Body: io.NopCloser(strings.NewReader(`{}`)), Request: r}, nil
+						body := `{}`
+						if mode == "oversized" {
+							body = strings.Repeat(" ", federationsigning.MaxBodyBytes+1)
+						}
+						return &http.Response{StatusCode: status, Header: h, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 					})}, nil
 				}
 			})

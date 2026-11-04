@@ -2,17 +2,15 @@ package daemon
 
 import (
 	"context"
+	"encoding/json/jsontext"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
-
-	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
-	"go.kenn.io/kata/pkg/client/generated"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationcoord"
-	"go.kenn.io/kata/internal/federationsigning"
 )
 
 func cronSummaryUnsupported() error {
@@ -58,20 +56,9 @@ func admitCronSummary(ctx context.Context, cfg ServerConfig, projectID int64) (c
 	if err != nil {
 		return fail(cronSummaryUnsupported())
 	}
-	apiClient, err := generated.NewDefaultClient(origin, runtime.WithHTTPClient(boundedProbeDoer{
-		client: client,
-		limit:  federationsigning.MaxBodyBytes + 1,
-	}))
-	if err != nil {
-		return fail(cronSummaryUnsupported())
-	}
-	features := db.SupportedEventFeatures
-	response, err := apiClient.GetFederationProjectMetadataWithResponse(ctx, &generated.GetFederationProjectMetadataRequestOptions{
-		PathParams: &generated.GetFederationProjectMetadataPath{ProjectID: binding.HubProjectID},
-		Header:     &generated.GetFederationProjectMetadataHeaders{XKataEventFeatures: &features},
-	})
-	if err != nil || response == nil || response.HTTPResponse == nil || response.StatusCode != http.StatusOK || len(response.Body) == 0 || len(response.Body) > federationsigning.MaxBodyBytes ||
-		db.RequireEventFeatures(response.HTTPResponse.Header.Get(db.EventFeaturesHeader), db.CronRunSummaryV2Feature) != nil {
+	var metadata jsontext.Value
+	headers, err := cronHubRequest(ctx, client, http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d/federation/metadata", origin, binding.HubProjectID), nil, &metadata, projectID)
+	if err != nil || db.RequireEventFeatures(headers.Get(db.EventFeaturesHeader), db.CronRunSummaryV2Feature) != nil {
 		return fail(cronSummaryUnsupported())
 	}
 	return db.WithCronSummaryBinding(ctx, &binding), cleanup, nil

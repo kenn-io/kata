@@ -81,7 +81,7 @@ func forwardCronJob(ctx context.Context, cfg ServerConfig, projectID int64, uid,
 	}
 	path := fmt.Sprintf("%s/api/v1/projects/%d", bindingOrigin, binding.HubProjectID)
 	var meta api.ProjectFederationBody
-	if err := cronHubRequest(ctx, client, http.MethodGet, path+"/federation/metadata", nil, &meta, projectID); err != nil {
+	if _, err := cronHubRequest(ctx, client, http.MethodGet, path+"/federation/metadata", nil, &meta, projectID); err != nil {
 		return nil, true, err
 	}
 	if !meta.NativeCronWrites {
@@ -115,7 +115,7 @@ func forwardCronJob(ctx context.Context, cfg ServerConfig, projectID int64, uid,
 	}
 	path += suffix
 	out := &api.CronJobResponse{}
-	if err := cronHubRequest(ctx, client, method, path, body, &out.Body, projectID); err != nil {
+	if _, err := cronHubRequest(ctx, client, method, path, body, &out.Body, projectID); err != nil {
 		return nil, true, err
 	}
 	if out.Body.Job.UID == "" || out.Body.Job.DefinitionEventUID == "" {
@@ -190,32 +190,32 @@ func localCronIdentity(job *api.CronJob, projectID int64) {
 
 // A full accepted job may appear in cron_conflict.data.current. Use the same
 // bulk bound as signed requests, rather than truncating structured errors.
-func cronHubRequest(ctx context.Context, client *http.Client, method, path string, body, out any, projectID int64) error {
+func cronHubRequest(ctx context.Context, client *http.Client, method, path string, body, out any, projectID int64) (http.Header, error) {
 	var payload []byte
 	var err error
 	if body != nil {
 		payload, err = json.Marshal(body)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 	req, err := http.NewRequestWithContext(ctx, method, path, bytes.NewReader(payload))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(db.EventFeaturesHeader, db.SupportedEventFeatures)
 	response, err := client.Do(req)
 	if err != nil {
 		if method == http.MethodGet {
-			return cronForwardUnavailable("hub metadata is unavailable")
+			return nil, cronForwardUnavailable("hub metadata is unavailable")
 		}
-		return cronForwardUnavailable("hub write response was lost; outcome may be unknown; re-read the hub or retry with the same job UID")
+		return nil, cronForwardUnavailable("hub write response was lost; outcome may be unknown; re-read the hub or retry with the same job UID")
 	}
 	defer func() { _ = response.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(response.Body, federationsigning.MaxBodyBytes+1))
 	if err != nil || len(raw) > federationsigning.MaxBodyBytes {
-		return cronForwardUnavailable("hub response is incomplete; outcome may be unknown; re-read the hub or retry with the same job UID")
+		return nil, cronForwardUnavailable("hub response is incomplete; outcome may be unknown; re-read the hub or retry with the same job UID")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		var envelope struct {
@@ -238,13 +238,13 @@ func cronHubRequest(ctx context.Context, client *http.Client, method, path strin
 					data["current"] = current
 				}
 			}
-			return api.NewError(response.StatusCode, envelope.Error.Code, envelope.Error.Message, envelope.Error.Hint, data)
+			return nil, api.NewError(response.StatusCode, envelope.Error.Code, envelope.Error.Message, envelope.Error.Hint, data)
 		}
 
-		return cronForwardUnavailable(fmt.Sprintf("hub returned status %d; outcome may be unknown", response.StatusCode))
+		return nil, cronForwardUnavailable(fmt.Sprintf("hub returned status %d; outcome may be unknown", response.StatusCode))
 	}
 	if err := json.Unmarshal(raw, out); err != nil {
-		return cronForwardUnavailable("hub response is invalid; outcome may be unknown; re-read the hub or retry with the same job UID")
+		return nil, cronForwardUnavailable("hub response is invalid; outcome may be unknown; re-read the hub or retry with the same job UID")
 	}
-	return nil
+	return response.Header, nil
 }
