@@ -275,6 +275,9 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 			TargetName:      namePtr,
 			Actor:           actor,
 		})
+		if errors.Is(err, db.ErrCronTallyConflict) {
+			return nil, api.NewError(http.StatusConflict, "cron_tally_conflict", err.Error(), "", nil)
+		}
 		if errors.Is(err, db.ErrProjectMergeSameProject) {
 			return nil, api.NewError(400, "validation", "cannot merge a project into itself", "", nil)
 		}

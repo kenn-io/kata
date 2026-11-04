@@ -109,7 +109,7 @@ func TestCronTallyUnionAndRootPreservation(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, patch)
 	_, err = MergeCronTallyMetadata(tallyTestMetadata(job), tallyTestMetadata(strings.Replace(job, `"succeeded":3`, `"succeeded":4`, 1)))
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrCronTallyConflict)
 	for _, current := range []JSONBlob{tallyTestMetadata(job), `{}`} {
 		preserved, err := PreserveCronTallies(current, tallyTestMetadata(workflow))
 		require.NoError(t, err)
