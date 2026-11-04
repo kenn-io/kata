@@ -37,7 +37,7 @@ type harnessFailureAdapter struct {
 }
 
 func (a *harnessFailureAdapter) Plan(ctx context.Context, in PlanInput) (PlanOutput, error) {
-	raw, err := json.Marshal(in)
+	raw, err := json.Marshal(in, json.Deterministic(true))
 	if err != nil {
 		return PlanOutput{}, err
 	}
@@ -61,7 +61,7 @@ func TestHarnessReportsFailuresOnScenarioSubtests(t *testing.T) {
 			if step.Plan == nil {
 				continue
 			}
-			raw, err := json.Marshal(step.Plan)
+			raw, err := json.Marshal(step.Plan, json.Deterministic(true))
 			require.NoError(t, err)
 			planCounts[string(raw)]++
 		}
@@ -72,7 +72,7 @@ func TestHarnessReportsFailuresOnScenarioSubtests(t *testing.T) {
 			if step.Plan == nil {
 				continue
 			}
-			raw, err := json.Marshal(step.Plan)
+			raw, err := json.Marshal(step.Plan, json.Deterministic(true))
 			require.NoError(t, err)
 			if planCounts[string(raw)] == 1 {
 				targetScenario, targetPlan = scenario.Name, string(raw)

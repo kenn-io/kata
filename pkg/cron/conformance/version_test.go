@@ -139,11 +139,11 @@ func TestV2PreservesV1Decisions(t *testing.T) {
 			t.Fatal("v2 must add only workflow vectors")
 		}
 		for i, s := range v1.Scenarios {
-			a, err := json.Marshal(s)
+			a, err := json.Marshal(s, json.Deterministic(true))
 			if err != nil {
 				t.Fatal(err)
 			}
-			b, err := json.Marshal(v2.Scenarios[i])
+			b, err := json.Marshal(v2.Scenarios[i], json.Deterministic(true))
 			if err != nil {
 				t.Fatal(err)
 			}

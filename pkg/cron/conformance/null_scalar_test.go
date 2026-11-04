@@ -42,7 +42,7 @@ func TestOutputNullScalarsAreMalformed(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			report, err := checkSuite(t.Context(), FixtureSuite{Schema: Schema, Declaration: Reference{}.Declare(), Scenarios: []Scenario{scenario}}, []Answer{{Name: scenario.Name, Outputs: []jsontext.Value{raw}}})
+			report, err := (FixtureSuite{Schema: Schema, Declaration: Reference{}.Declare(), Scenarios: []Scenario{scenario}}).Check(t.Context(), []Answer{{Name: scenario.Name, Outputs: []jsontext.Value{raw}}})
 			if err == nil {
 				t.Fatalf("null scalar treated as answer data: %+v", report)
 			}

@@ -2267,12 +2267,8 @@ current expected event UID, from `--expected-event-uid` or the request body. Ind
 same-write retry idempotency, and ordinary revision CAS for changed evidence.
 The planning-date read returns native resolved dates without changing readiness.
 
-Conformance export/check work offline without a project or daemon. Export
-refuses existing files and defaults to frozen fixture v1. Select v2 with
-`--schema kata.cron.adapter-conformance/v2` for successful dependency coverage.
-Check selects the exact schema from its answer header and reports JSON, with
-exit 1 for mismatches or 3 for invalid input. See [adapter conformance](cron.md#adapter-conformance)
-for declarations, sequential decisions and the Go harness.
+For offline adapter checks and declarations, see
+[adapter conformance](cron.md#adapter-conformance).
 
 ## Federation
 

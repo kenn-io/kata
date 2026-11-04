@@ -153,11 +153,7 @@ func NewSuite(ctx context.Context, schema string, d Declaration) (FixtureSuite, 
 		suite.Scenarios = append(suite.Scenarios, boundaries...)
 	}
 	if schema == SchemaV2 {
-		path := "testdata/adapter-v2/workflow.json"
-		if d.FailurePolicy == "stop" {
-			path = "testdata/adapter-v2/workflow-stop.json"
-		}
-		raw, err := fixtures.ReadFile(path)
+		raw, err := fixtures.ReadFile("testdata/adapter-v2/workflow.json")
 		if err != nil {
 			return suite, err
 		}
@@ -243,13 +239,6 @@ func Check(ctx context.Context, d Declaration, answers []Answer) (Report, error)
 
 // Check compares answers against this explicitly selected fixture suite.
 func (suite FixtureSuite) Check(ctx context.Context, answers []Answer) (Report, error) {
-	if suite.Schema != Schema && suite.Schema != SchemaV2 {
-		return Report{}, fmt.Errorf("unsupported conformance schema %q", suite.Schema)
-	}
-	return checkSuite(ctx, suite, answers)
-}
-
-func checkSuite(ctx context.Context, suite FixtureSuite, answers []Answer) (Report, error) {
 	report := Report{Schema: suite.Schema, Failed: []Failure{}}
 	expected := map[string]Scenario{}
 	seen := map[string]bool{}
@@ -271,7 +260,9 @@ func checkSuite(ctx context.Context, suite FixtureSuite, answers []Answer) (Repo
 			if len(a.Outputs) != len(scenario.Steps) {
 				diff = fmt.Sprintf("got %d decision outputs, want %d", len(a.Outputs), len(scenario.Steps))
 			}
-			// Validate every known decision, even after a value/count mismatch.
+		}
+		if exists {
+			// Validate known decisions independently of comparison failures.
 			for i := range min(len(a.Outputs), len(scenario.Steps)) {
 				raw := a.Outputs[i]
 				got, err := decodeOutput(raw, scenario.Steps[i], suite.Declaration)
@@ -304,7 +295,7 @@ func checkSuite(ctx context.Context, suite FixtureSuite, answers []Answer) (Repo
 
 func abbreviate(raw []byte) string {
 	if len(raw) > 300 {
-		return string(raw[:300]) + "..."
+		return strings.ToValidUTF8(string(raw[:300]), "") + "..."
 	}
 	return string(raw)
 }
@@ -384,9 +375,6 @@ func ExportFiles(ctx context.Context, d Declaration) (map[string][]byte, error) 
 func (suite FixtureSuite) ExportFiles(ctx context.Context) (map[string][]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
-	}
-	if suite.Schema != Schema && suite.Schema != SchemaV2 {
-		return nil, fmt.Errorf("unsupported conformance schema %q", suite.Schema)
 	}
 	d := suite.Declaration
 	groups := map[string][]Scenario{}
