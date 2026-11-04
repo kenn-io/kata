@@ -1266,6 +1266,8 @@ components:
         revision:
           format: int64
           type: integer
+        staleness:
+          $ref: "#/components/schemas/RunStaleness"
         started_at:
           format: date-time
           type: string
@@ -6320,6 +6322,24 @@ components:
         - binding
         - status
         - import
+      type: object
+    RunStaleness:
+      additionalProperties: true
+      properties:
+        basis:
+          enum:
+            - timeout_seconds
+            - default
+          type: string
+        stale:
+          type: boolean
+        stale_at:
+          format: date-time
+          type: string
+      required:
+        - stale
+        - stale_at
+        - basis
       type: object
     SearchHit:
       additionalProperties: true

@@ -1518,6 +1518,7 @@ type CronRun struct {
 	OccurrenceKey              *string         `json:"occurrence_key,omitempty"`
 	ProjectID                  int64           `json:"project_id"`
 	Revision                   int64           `json:"revision"`
+	Staleness                  *RunStaleness   `json:"staleness,omitempty"`
 	StartedAt                  *time.Time      `json:"started_at,omitempty"`
 	Status                     string          `json:"status" validate:"required"`
 	Summary                    SummaryResponse `json:"summary"`
@@ -1535,6 +1536,13 @@ func (c CronRun) Validate() error {
 	}
 	if err := typesValidator.Var(c.CreatedAt, "required"); err != nil {
 		errors = errors.Append("CreatedAt", err)
+	}
+	if c.Staleness != nil {
+		if v, ok := any(c.Staleness).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Staleness", err)
+			}
+		}
 	}
 	if err := typesValidator.Var(c.Status, "required"); err != nil {
 		errors = errors.Append("Status", err)
@@ -6357,6 +6365,28 @@ func (r RunIssueSyncOnceResponseBody) Validate() error {
 		if err := v.Validate(); err != nil {
 			errors = errors.Append("Status", err)
 		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type RunStaleness struct {
+	Basis   RunStalenessBasis `json:"basis" validate:"required"`
+	Stale   bool              `json:"stale"`
+	StaleAt time.Time         `json:"stale_at" validate:"required"`
+}
+
+func (r RunStaleness) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(r.Basis).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Basis", err)
+		}
+	}
+	if err := typesValidator.Var(r.StaleAt, "required"); err != nil {
+		errors = errors.Append("StaleAt", err)
 	}
 	if len(errors) == 0 {
 		return nil
