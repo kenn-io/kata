@@ -22,7 +22,7 @@ func RunRelayRejectsIssueMoves(t *testing.T, store db.Storage) {
 	require.NoError(t, err)
 	issue, created, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Relayed issue", Author: "personal-member"})
 	require.NoError(t, err)
-	var snapshot map[string]any
+	snapshot := map[string]any{}
 	require.NoError(t, json.Unmarshal([]byte(created.Payload), &snapshot))
 	snapshot["uid"], snapshot["short_id"] = issue.UID, issue.ShortID
 	var movePayload struct {

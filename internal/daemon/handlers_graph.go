@@ -350,6 +350,9 @@ func appendUnresolvedRef(
 // as edgesAndUnresolved provides. Keep in sync with markTransitiveBlockLayout
 // in web/src/lib/kata/projection.ts.
 func markTransitiveBlockLayout(edges []api.ReachableGraphEdge) {
+	if len(edges) == 0 {
+		return
+	}
 	ids := map[string]int{}
 	idOf := func(uid string) int {
 		if id, ok := ids[uid]; ok {
