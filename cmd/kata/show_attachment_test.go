@@ -40,23 +40,26 @@ func TestShowAttachmentHistoryRequiresSubjectAcknowledgement(t *testing.T) {
 			}))
 			defer server.Close()
 			_, err := closeEvidenceForShow(t.Context(), server.Client(), server.URL, 1, subject)
-			require.ErrorContains(t, err, "issue history")
+			require.EqualError(t, err, "history does not match issue "+subject)
 		})
 	}
 }
 
 func TestShowAttachmentHistoryRejectsResetAndForeignClose(t *testing.T) {
 	const subject = "01K7E222222222222222222222"
-	for _, body := range []string{`{"events":[],"next_after_id":0,"reset_required":true}`, `{"events":[{"event_id":1,"event_uid":"foreign-close","type":"issue.closed","issue_uid":"01K7E333333333333333333333","payload":{"evidence":[]}}],"next_after_id":1,"reset_required":false,"effective_close_event_uid":"foreign-close"}`} {
-		t.Run(body, func(t *testing.T) {
+	for _, tc := range []struct{ body, message string }{
+		{`{"events":[],"next_after_id":0,"reset_required":true}`, "issue history requires a reset"},
+		{`{"events":[{"event_id":1,"event_uid":"foreign-close","type":"issue.closed","issue_uid":"01K7E333333333333333333333","payload":{"evidence":[]}}],"next_after_id":1,"reset_required":false,"effective_close_event_uid":"foreign-close"}`, "history includes another issue's events"},
+	} {
+		t.Run(tc.message, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("X-Kata-Events-Issue-UID", subject)
-				_, _ = fmt.Fprint(w, body)
+				_, _ = fmt.Fprint(w, tc.body)
 			}))
 			defer server.Close()
 			_, err := closeEvidenceForShow(t.Context(), server.Client(), server.URL, 1, subject)
-			require.ErrorContains(t, err, "issue history")
+			require.EqualError(t, err, tc.message)
 		})
 	}
 }
@@ -88,7 +91,7 @@ func TestShowAttachmentHistoryRequiresAcknowledgementOnEveryPage(t *testing.T) {
 			evidence, err := closeEvidenceForShow(t.Context(), server.Client(), server.URL, 1, subject)
 			require.Equal(t, 2, pages)
 			if ack != subject {
-				require.ErrorContains(t, err, "issue history")
+				require.EqualError(t, err, "history does not match issue "+subject)
 				return
 			}
 			require.NoError(t, err)

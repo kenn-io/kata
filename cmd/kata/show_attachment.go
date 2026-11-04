@@ -54,7 +54,7 @@ func closeEvidenceForShow(ctx context.Context, hc *http.Client, base string, pid
 		}
 
 		if response.Headers200 == nil || response.Headers200.XKataEventsIssueUID != ref {
-			return nil, fmt.Errorf("issue history subject acknowledgement does not match %s", ref)
+			return nil, fmt.Errorf("history does not match issue %s", ref)
 		}
 		var page generated.PollEventsBody
 		if err := json.Unmarshal(response.Body, &page); err != nil {
@@ -75,7 +75,7 @@ func closeEvidenceForShow(ctx context.Context, hc *http.Client, base string, pid
 			switch event.Type {
 			case "issue.closed", "issue.reopened", "issue.updated", "issue.created", "issue.snapshot":
 				if event.IssueUID == nil || *event.IssueUID != ref {
-					return nil, fmt.Errorf("issue history event subject does not match %s", ref)
+					return nil, errors.New("history includes another issue's events")
 				}
 				events = append(events, event)
 			}
@@ -84,7 +84,7 @@ func closeEvidenceForShow(ctx context.Context, hc *http.Client, base string, pid
 			return effectiveCloseEvidence(events, effectiveCloseEventUID)
 		}
 		if page.NextAfterID <= after {
-			return nil, fmt.Errorf("issue history cursor did not advance")
+			return nil, errors.New("could not load more issue history")
 		}
 		after = page.NextAfterID
 	}
@@ -96,7 +96,7 @@ func effectiveCloseEvidence(events []generated.EventEnvelope, effectiveCloseEven
 			continue
 		}
 		if event.Type != "issue.closed" {
-			return nil, fmt.Errorf("effective close history event %s is not an issue close", effectiveCloseEventUID)
+			return nil, errors.New("invalid close history")
 		}
 		var payload struct {
 			Evidence []db.Evidence `json:"evidence"`
@@ -106,7 +106,7 @@ func effectiveCloseEvidence(events []generated.EventEnvelope, effectiveCloseEven
 		}
 		return payload.Evidence, nil
 	}
-	return nil, fmt.Errorf("effective close history event %s is missing", effectiveCloseEventUID)
+	return nil, errors.New("close history is incomplete")
 }
 
 func printShowAttachmentEvidence(out io.Writer, b showResponseForCLI) error {

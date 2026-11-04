@@ -329,6 +329,39 @@ func TestPollProjectEventsIssueOmitsCloseWhenEvidenceReferenceMovesBetweenAuthor
 	})
 }
 
+func TestPollProjectEventsIssueSurvivesUnrelatedPolicyChangeWithHiddenEndpoint(t *testing.T) {
+	projectAccessBackends(t, func(t *testing.T, store db.Storage) {
+		f := newProjectAccessFixture(t, store)
+		_, _, err := store.CreateLinkAndEvent(t.Context(), db.CreateLinkParams{
+			FromIssueID: f.visible.ID, ToIssueID: f.issue.ID, Type: "blocks", Author: "member",
+		}, db.LinkEventParams{
+			EventType: "issue.linked", EventIssueID: f.visible.ID,
+			FromShortID: f.visible.ShortID, FromUID: f.visible.UID,
+			ToShortID: f.issue.ShortID, ToUID: f.issue.UID, Actor: "member",
+		})
+		require.NoError(t, err)
+		_, closed, _, err := store.CloseIssueWithEvents(t.Context(), f.visible.ID, "done", "member",
+			"Completed the visible task.", []db.Evidence{{Type: "commit", SHA: "0123456789abcdef0123456789abcdef01234567"}})
+		require.NoError(t, err)
+		require.Len(t, closed, 1)
+
+		f = projectAccessFixtureWithStorage(t, f, projectAccessReleaseStore{
+			Storage: store,
+			afterEventsAfter: func([]db.Event) {
+				_, err := store.SetTeamMembership(t.Context(), f.team.UID, "unrelated-actor", true, "admin")
+				require.NoError(t, err)
+			},
+		})
+		path := fmt.Sprintf("%s?issue=%s&include_effective_close_event_uid=true",
+			scopedProjectPath(f.public.ID, "events"), url.QueryEscape(f.visible.UID))
+		status, _, body := f.request(t, http.MethodGet, path, "nonmember", nil, nil)
+		require.Equal(t, http.StatusOK, status, string(body))
+		var page api.PollEventsBody
+		require.NoError(t, json.Unmarshal(body, &page))
+		require.Equal(t, closed[0].UID, page.EffectiveCloseEventUID)
+	})
+}
+
 func insertRemoteIssueHistoryEvent(
 	t *testing.T,
 	env *testenv.Env,

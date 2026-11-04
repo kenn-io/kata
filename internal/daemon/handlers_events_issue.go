@@ -127,7 +127,8 @@ func effectiveIssueCloseEventUID(ctx context.Context, store db.Storage, issue db
 	// Status provenance must include transitions in projects the caller cannot
 	// inspect. Only a selected close event whose project, issue scope, and
 	// structured references are visible may be returned to the caller.
-	historyCtx := db.WithAuthorizedProjects(ctx, nil)
+	// Hidden scan endpoints must not become response release dependencies.
+	historyCtx := db.WithExposedIssues(db.WithAuthorizedProjects(ctx, nil))
 	for {
 		rows, err := store.EventsAfter(historyCtx, db.EventsAfterParams{
 			AfterID: afterID, IssueUID: issue.UID, Limit: batchLimit,
