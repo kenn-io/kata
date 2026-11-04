@@ -63,9 +63,11 @@ func TestCronControlMixedHistory(t *testing.T) {
 	good := jsontext.Value(`{"version":1,"through":"2026-01-02T03:04:05Z","by":"operator"}`)
 	for _, key := range []string{"cron.pause", "cron.request." + passoverJobUID} {
 		changes := map[string]cronResetChange{
-			"cron.passover": {From: jsontext.Value("null"), To: jsontext.Value("false")},
-			key:             {From: jsontext.Value("null"), To: jsontext.Value("false")},
+			"cron.passover":                  {From: jsontext.Value("null"), To: jsontext.Value("false")},
+			"cron.pause":                     {From: jsontext.Value("null"), To: jsontext.Value(`{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":"maintenance"}`)},
+			"cron.request." + passoverJobUID: {From: jsontext.Value("null"), To: jsontext.Value("null")},
 		}
+		changes[key] = cronResetChange{From: jsontext.Value("null"), To: jsontext.Value("false")}
 		payload, err := json.Marshal(map[string]any{"diff": changes})
 		require.NoError(t, err)
 		history := []RemoteEvent{{Type: "project.metadata_updated", OriginInstanceUID: "root", Payload: payload, HLCPhysicalMS: 1}}
