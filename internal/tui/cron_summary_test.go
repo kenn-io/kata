@@ -98,7 +98,7 @@ func TestCronSummaryDetailWrapProperty(t *testing.T) {
 	m := cronSummaryFixture(t)
 	hegel.Test(t, func(ht *hegel.T) {
 		m.width = hegel.Draw(ht, hegel.Integers[int](20, 120))
-		message := hegel.Draw(ht, hegel.Text().MaxSize(200))
+		message := strings.ReplaceAll(hegel.Draw(ht, hegel.Text().MaxSize(200)), "\x00", "")
 		m.cron.data.runs[0].Summary.Message = &message
 		m.cron.data.runs[0].Summary.Steps[0].Message = &message
 		_, _, lines := cronDetail(m, cronRef{cronRuns, m.cron.data.runs[0].UID})

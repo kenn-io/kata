@@ -302,6 +302,7 @@ func TestSummaryStepMessageControlsProperty(t *testing.T) {
 		} else {
 			require.NoError(ht, err)
 		}
+		// The same controls retain the independent v1 top-level message contract.
 		raw, err = json.Marshal(Summary{Version: 1, Message: message})
 		require.NoError(ht, err)
 		_, err = ParseSummary(raw)
