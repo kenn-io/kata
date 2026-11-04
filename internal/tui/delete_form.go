@@ -128,7 +128,7 @@ func (m Model) finishDelete(target formTarget) (Model, tea.Cmd) {
 	qualified := m.input.del.expected
 	m.input = inputState{}
 	uid := target.issueUID
-	m, forgotten := m.forgetDeletedIssue(uid)
+	m, forgotten := m.forgetDeletedIssue(target)
 	prevPID, prevUID, prevHas := highlightedIdentity(m.list)
 	m.list = m.list.syncSelection(m.list.visibleRows()).withoutIssue(uid).refreshDay()
 	var follow tea.Cmd
@@ -150,8 +150,13 @@ func (m Model) finishDelete(target formTarget) (Model, tea.Cmd) {
 }
 
 // forgetDeletedIssue invalidates the snapshots that navigation can restore.
-func (m Model) forgetDeletedIssue(uid string) (Model, tea.Cmd) {
-	deleted := func(dm detailModel) bool { return dm.issue != nil && dm.issue.UID == uid }
+func (m Model) forgetDeletedIssue(target formTarget) (Model, tea.Cmd) {
+	uid := target.issueUID
+	deleted := func(dm detailModel) bool {
+		return (dm.issue != nil && dm.issue.UID == uid) ||
+			dm.readRef == uid ||
+			(dm.scopePID == target.projectID && dm.readRef == target.issueShortID)
+	}
 	forgetDetail := func(dm detailModel) (detailModel, bool) {
 		dm.navStack = slices.DeleteFunc(slices.Clone(dm.navStack), deleted)
 		for i := range dm.navStack {

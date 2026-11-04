@@ -140,38 +140,51 @@ func (h *deleteHarness) focusChild(parent, child db.Issue) {
 
 func TestDeletePreservesPendingReturn(t *testing.T) {
 	for _, destination := range []string{"Inbox", "Attention"} {
-		t.Run(destination, func(t *testing.T) {
-			t.Setenv("KATA_INBOX_USER", "alice")
-			h := newDeleteHarness(t, viewDetail)
-			parent, child, target := h.issues[0], h.issues[1], h.issues[2]
-			h.focusChild(parent, child)
-			pending := h.finish(h.enter())
-			defer h.m.detail.cancelReads()
-			require.Nil(t, h.m.detail.issue)
+		for _, deletedTarget := range []string{"unrelated target", "pending child"} {
+			t.Run(destination+"/"+deletedTarget, func(t *testing.T) {
+				t.Setenv("KATA_INBOX_USER", "alice")
+				h := newDeleteHarness(t, viewDetail)
+				parent, child, target := h.issues[0], h.issues[1], h.issues[2]
+				if deletedTarget == "pending child" {
+					target = child
+				}
+				h.focusChild(parent, child)
+				pending := h.finish(h.enter())
+				defer h.m.detail.cancelReads()
+				require.Nil(t, h.m.detail.issue)
 
-			if destination == "Inbox" {
-				h.openInbox()
-				h.selectIssue(target.UID)
-			} else {
-				h.openAttentionDetail(target.UID)
-			}
-			h.key(runeKey('X'))
-			h.m = typeString(h.m, "DELETE "+h.qualified(target))
-			h.m = h.drain(h.enter())
-			require.True(t, h.isDeleted(target.UID))
-			if destination == "Inbox" {
-				h.m = h.drain(h.key(runeKey('I')))
-			} else {
+				if destination == "Inbox" {
+					h.openInbox()
+					h.selectIssue(target.UID)
+				} else {
+					h.openAttentionDetail(target.UID)
+				}
+				h.key(runeKey('X'))
+				h.m = typeString(h.m, "DELETE "+h.qualified(target))
+				h.m = h.drain(h.enter())
+				require.True(t, h.isDeleted(target.UID))
+				if destination == "Inbox" {
+					h.m = h.drain(h.key(runeKey('I')))
+				} else {
+					h.m = h.drain(h.key(tea.KeyPressMsg{Code: tea.KeyEscape}))
+				}
+				require.Equal(t, viewDetail, h.m.view, "return keeps the detail open")
+				if deletedTarget == "pending child" {
+					require.NotNil(t, h.m.detail.issue)
+					require.Equal(t, parent.UID, h.m.detail.issue.UID, "return reaches the surviving parent")
+					h.m = h.drain(pending)
+					require.NotNil(t, h.m.detail.issue)
+					assert.Equal(t, parent.UID, h.m.detail.issue.UID, "late child results keep the parent open")
+					return
+				}
+				h.m = h.drain(pending)
+				require.NotNil(t, h.m.detail.issue)
+				require.Equal(t, child.UID, h.m.detail.issue.UID)
 				h.m = h.drain(h.key(tea.KeyPressMsg{Code: tea.KeyEscape}))
-			}
-			require.Equal(t, viewDetail, h.m.view, "return resumes the pending navigation")
-			h.m = h.drain(pending)
-			require.NotNil(t, h.m.detail.issue)
-			require.Equal(t, child.UID, h.m.detail.issue.UID)
-			h.m = h.drain(h.key(tea.KeyPressMsg{Code: tea.KeyEscape}))
-			require.NotNil(t, h.m.detail.issue)
-			assert.Equal(t, parent.UID, h.m.detail.issue.UID, "Back still reaches the parent")
-		})
+				require.NotNil(t, h.m.detail.issue)
+				assert.Equal(t, parent.UID, h.m.detail.issue.UID, "Back still reaches the parent")
+			})
+		}
 	}
 }
 
