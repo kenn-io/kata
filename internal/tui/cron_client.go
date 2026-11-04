@@ -19,6 +19,7 @@ type cronAPI interface {
 	PutCronJob(ctx context.Context, projectID int64, uid string, write kataapi.PutCronJobBody) error
 	ListCronWorkflows(context.Context, int64) ([]generated.CronWorkflow, error)
 	ListCronRuns(context.Context, int64) ([]generated.CronRun, error)
+	ListCronJobRuns(ctx context.Context, projectID int64, jobUID, beforeUID string, limit int64) ([]generated.CronRun, string, error)
 	readCronParent(ctx context.Context, projectID int64, parentUID string) (cronParent, error)
 }
 
@@ -60,22 +61,33 @@ func (c *Client) ListCronWorkflows(ctx context.Context, projectID int64) ([]gene
 
 // ListCronRuns reads the newest 100 observations.
 func (c *Client) ListCronRuns(ctx context.Context, projectID int64) ([]generated.CronRun, error) {
+	runs, _, err := c.ListCronJobRuns(ctx, projectID, "", "", 100)
+	return runs, err
+}
+
+// ListCronJobRuns reads one page. Empty jobUID selects project-wide history.
+func (c *Client) ListCronJobRuns(ctx context.Context, projectID int64, jobUID, beforeUID string, limit int64) ([]generated.CronRun, string, error) {
 	client, err := c.generatedClient()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	query := &generated.ListCronRunsQuery{Limit: new(int64(100))}
+	query := &generated.ListCronRunsQuery{Limit: new(limit)}
+	if jobUID != "" {
+		query.JobUID = new(jobUID)
+	}
+	if beforeUID != "" {
+		query.BeforeUID = new(beforeUID)
+	}
 	wire, callErr := client.ListCronRunsWithResponse(ctx, &generated.ListCronRunsRequestOptions{
-		PathParams: &generated.ListCronRunsPath{ProjectID: projectID},
-		Query:      query,
+		PathParams: &generated.ListCronRunsPath{ProjectID: projectID}, Query: query,
 	})
 	if wire == nil {
-		return nil, callErr
+		return nil, "", callErr
 	}
 	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return wire.JSON200.Runs, nil
+	return wire.JSON200.Runs, deref(wire.JSON200.NextBeforeUID), nil
 }
 
 // cronParent is what a native job's parent issue tells the Jobs tab: whether

@@ -59,6 +59,8 @@ func cronFixture(t *testing.T) Model {
 		CreatedAt: snapshotFixedNow.Add(-time.Hour), StartedAt: new(snapshotFixedNow.Add(-2 * time.Hour)), EndedAt: new(snapshotFixedNow.Add(-time.Hour)),
 		Summary: generated.SummaryResponse{Version: 1, Message: new("Report ready"), InputTokens: new(int64(30)), OutputTokens: new(int64(10))},
 	}}
+	p.lastRuns = map[string]generated.CronRun{p.jobs[0].UID: p.runs[0]}
+	p.lastErr = map[string]error{}
 	m = sendRune(m, '2')
 	p.conn, p.scope = m.connGen, m.scopeGen
 	m, _ = updateModel(m, cronLoadedMsg(p))
@@ -156,6 +158,8 @@ func TestCronFreshness(t *testing.T) {
 				require.Contains(t, stripANSI(m.viewBody()), "New title")
 				require.NotContains(t, stripANSI(m.viewBody()), "Newest title")
 				require.NotNil(t, cmd, "events during the read request one replacement read")
+				m, cmd = updateModel(m, cmd())
+				require.NotNil(t, cmd, "open job history refreshes after the project head")
 				m, cmd = updateModel(m, cmd())
 				require.Nil(t, cmd)
 				require.Equal(t, 2, a.calls)
@@ -285,7 +289,7 @@ func TestCronDocumentContentAndCursor(t *testing.T) {
 	}
 	require.Contains(t, document, `"recipient": "reader"`)
 	require.Contains(t, document, "Weekly digest\nSecond line")
-	require.Contains(t, document, "Loaded runs (1) · newest 100")
+	require.Contains(t, document, "Runs (1)")
 	p.jobs[0].Definition.Action = generated.ActionResponse{
 		Kind: "execute", Prompt: new("Summarize all changes\nInclude follow-up tasks."),
 	}
@@ -352,6 +356,21 @@ func (a *cronReadTestAPI) ListCronRuns(_ context.Context, id int64) ([]generated
 		return nil, fmt.Errorf("unexpected project %d", id)
 	}
 	return slices.Clone(a.data.runs), a.data.runsErr
+}
+
+// The fake honors the same filtering and paging contract as the existing route.
+func (a *cronReadTestAPI) ListCronJobRuns(ctx context.Context, id int64, job, before string, limit int64) ([]generated.CronRun, string, error) {
+	runs, err := a.ListCronRuns(ctx, id)
+	filtered := []generated.CronRun{}
+	for _, r := range runs {
+		if (job == "" || deref(r.JobUID) == job) && (before == "" || r.UID < before) {
+			filtered = append(filtered, r)
+		}
+	}
+	if int64(len(filtered)) > limit {
+		filtered = filtered[:limit]
+	}
+	return filtered, "", err
 }
 
 func TestCronReturnToKata(t *testing.T) {
@@ -434,7 +453,12 @@ func TestCronIndependentFailuresAndRetainedRows(t *testing.T) {
 				require.Contains(t, stripANSI(m.viewBody()), "unknown")
 				require.NotContains(t, stripANSI(m.viewBody()), "0 jobs")
 			}
-			m = sendKey(m, tea.KeyEnter)
+			m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+			if tc.tab == '2' {
+				for _, result := range runCmdTree(cmd) {
+					m, _ = updateModel(m, result)
+				}
+			}
 			_, _, lines := cronScreen(m)
 			var document string
 			for _, line := range lines {
@@ -443,6 +467,9 @@ func TestCronIndependentFailuresAndRetainedRows(t *testing.T) {
 			if tc.jobsFail {
 				require.Contains(t, document, "Used by · unavailable")
 				require.NotContains(t, document, "Used by (0)")
+			} else if tc.tab == '2' {
+				require.Contains(t, document, "unavailable: runs read failed")
+				require.NotContains(t, document, "no runs")
 			} else {
 				require.Contains(t, document, "Loaded runs · unavailable")
 				require.NotContains(t, document, "no loaded runs")
