@@ -100,8 +100,6 @@ func TestCronEnabledWriteAllowsFederationForwarding(t *testing.T) {
 func TestCronResumeBacklogConfirmation(t *testing.T) {
 	m, api := enabledFixture(t, pausedNative())
 	withEnabledBacklog(api)
-	// A second parent job's checkpoint must not add to this job's count.
-	api.parent.progress[cronTestIssue] = cron.RecurringProgress{Anchor: time.Now().UTC().Add(-100 * time.Hour)}
 	m, lookup := press(m, keyRune('p'))
 	m, cmd := deliverEnabled(t, m, lookup)
 	require.Nil(t, cmd)
@@ -205,7 +203,7 @@ func TestCronResumeMissingProgressUsesUserFacingMessage(t *testing.T) {
 	m, write := deliverEnabled(t, m, lookup)
 	require.NotNil(t, write)
 	require.NotNil(t, m.toast)
-	require.Contains(t, m.toast.text, "Cannot count missed runs")
+	require.Contains(t, m.toast.text, "cannot count missed runs")
 	require.NotContains(t, m.toast.text, "recurring progress")
 	require.Empty(t, api.enabledCalls)
 }

@@ -375,7 +375,7 @@ func (a CronSQL) checkCronPutDependencies(ctx context.Context, tx *sql.Tx, req c
 			enabledChanged := old.Enabled != definition.Enabled
 			old.Enabled = definition.Enabled
 			if enabledChanged && reflect.DeepEqual(old, definition) {
-				return nil
+				return checkCronDependenciesForEnabledChange(ctx, tx, req.projectID, definition)
 			}
 		}
 		return CheckCronDependencies(ctx, tx, req.projectID, req.definition.(cron.JobDefinition))
