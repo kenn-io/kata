@@ -292,6 +292,66 @@ func (a AuthInfoOut) Validate() error {
 	return errors
 }
 
+type BeatCronRuntimeBody struct {
+	Actor           *string                   `json:"actor,omitempty"`
+	Adapter         string                    `json:"adapter" validate:"required"`
+	AdapterVersion  *string                   `json:"adapter_version,omitempty"`
+	Features        []string                  `json:"features,omitempty"`
+	IntervalSeconds *int64                    `json:"interval_seconds,omitempty" validate:"omitempty,gte=10,lte=3600"`
+	KataVersion     *string                   `json:"kata_version,omitempty"`
+	Label           string                    `json:"label" validate:"required"`
+	State           *BeatCronRuntimeBodyState `json:"state,omitempty"`
+}
+
+func (b BeatCronRuntimeBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(b.Adapter, "required"); err != nil {
+		errors = errors.Append("Adapter", err)
+	}
+	if b.IntervalSeconds != nil {
+		if err := typesValidator.Var(b.IntervalSeconds, "omitempty,gte=10,lte=3600"); err != nil {
+			errors = errors.Append("IntervalSeconds", err)
+		}
+	}
+	if err := typesValidator.Var(b.Label, "required"); err != nil {
+		errors = errors.Append("Label", err)
+	}
+	if b.State != nil {
+		if v, ok := any(b.State).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("State", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type BeatCronRuntimeResponseBody struct {
+	Forwarded BeatCronRuntimeResponseBodyForwarded `json:"forwarded" validate:"required"`
+	Runtime   Runtime                              `json:"runtime"`
+}
+
+func (b BeatCronRuntimeResponseBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(b.Forwarded).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Forwarded", err)
+		}
+	}
+	if v, ok := any(b.Runtime).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Runtime", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type BindExternalRootRequestBody struct {
 	Actor           *string `json:"actor,omitempty"`
 	Connector       string  `json:"connector" validate:"required"`
@@ -1300,6 +1360,7 @@ func (c CreateTokenResponseBody) Validate() error {
 
 type CronCapabilitiesResponseBody struct {
 	EventFeatures []string `json:"event_features" validate:"required"`
+	Features      []string `json:"features" validate:"required"`
 	ProjectUID    string   `json:"project_uid" validate:"required"`
 }
 
@@ -6362,6 +6423,152 @@ func (r RunIssueSyncOnceResponseBody) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type Runtime struct {
+	Actor           string             `json:"actor" validate:"required"`
+	Adapter         string             `json:"adapter" validate:"required"`
+	AdapterVersion  *string            `json:"adapter_version,omitempty"`
+	ExpiresAt       time.Time          `json:"expires_at" validate:"required"`
+	Features        []string           `json:"features,omitempty"`
+	FirstSeenAt     time.Time          `json:"first_seen_at" validate:"required"`
+	ForwarderActor  *string            `json:"forwarder_actor,omitempty"`
+	IntervalSeconds *int64             `json:"interval_seconds,omitempty" validate:"omitempty,gte=10,lte=3600"`
+	KataVersion     *string            `json:"kata_version,omitempty"`
+	Label           string             `json:"label" validate:"required"`
+	LastSeenAt      time.Time          `json:"last_seen_at" validate:"required"`
+	ReportedVia     RuntimeReportedVia `json:"reported_via" validate:"required"`
+	RuntimeUID      string             `json:"runtime_uid" validate:"required"`
+	State           *RuntimeState      `json:"state,omitempty"`
+	Status          RuntimeStatus      `json:"status" validate:"required"`
+}
+
+func (r Runtime) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(r.Actor, "required"); err != nil {
+		errors = errors.Append("Actor", err)
+	}
+	if err := typesValidator.Var(r.Adapter, "required"); err != nil {
+		errors = errors.Append("Adapter", err)
+	}
+	if err := typesValidator.Var(r.ExpiresAt, "required"); err != nil {
+		errors = errors.Append("ExpiresAt", err)
+	}
+	if err := typesValidator.Var(r.FirstSeenAt, "required"); err != nil {
+		errors = errors.Append("FirstSeenAt", err)
+	}
+	if r.IntervalSeconds != nil {
+		if err := typesValidator.Var(r.IntervalSeconds, "omitempty,gte=10,lte=3600"); err != nil {
+			errors = errors.Append("IntervalSeconds", err)
+		}
+	}
+	if err := typesValidator.Var(r.Label, "required"); err != nil {
+		errors = errors.Append("Label", err)
+	}
+	if err := typesValidator.Var(r.LastSeenAt, "required"); err != nil {
+		errors = errors.Append("LastSeenAt", err)
+	}
+	if v, ok := any(r.ReportedVia).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("ReportedVia", err)
+		}
+	}
+	if err := typesValidator.Var(r.RuntimeUID, "required"); err != nil {
+		errors = errors.Append("RuntimeUID", err)
+	}
+	if r.State != nil {
+		if v, ok := any(r.State).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("State", err)
+			}
+		}
+	}
+	if v, ok := any(r.Status).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Status", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type RuntimeInventory struct {
+	Inventory RuntimeInventoryState `json:"inventory"`
+	Runtimes  []Runtime             `json:"runtimes" validate:"required"`
+	Warnings  []RuntimeWarning      `json:"warnings" validate:"required"`
+}
+
+func (r RuntimeInventory) Validate() error {
+	var errors runtime.ValidationErrors
+	if v, ok := any(r.Inventory).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Inventory", err)
+		}
+	}
+	if err := typesValidator.Var(r.Runtimes, "required"); err != nil {
+		errors = errors.Append("Runtimes", err)
+	}
+	for i, item := range r.Runtimes {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Runtimes[%d]", i), err)
+			}
+		}
+	}
+	if err := typesValidator.Var(r.Warnings, "required"); err != nil {
+		errors = errors.Append("Warnings", err)
+	}
+	for i, item := range r.Warnings {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Warnings[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type RuntimeInventoryState struct {
+	DaemonStartedAt time.Time                  `json:"daemon_started_at" validate:"required"`
+	State           RuntimeInventoryStateState `json:"state" validate:"required"`
+	WarmingUntil    time.Time                  `json:"warming_until" validate:"required"`
+}
+
+func (r RuntimeInventoryState) Validate() error {
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(r.DaemonStartedAt, "required"); err != nil {
+		errors = errors.Append("DaemonStartedAt", err)
+	}
+	if v, ok := any(r.State).(runtime.Validator); ok {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("State", err)
+		}
+	}
+	if err := typesValidator.Var(r.WarmingUntil, "required"); err != nil {
+		errors = errors.Append("WarmingUntil", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type RuntimeWarning struct {
+	Adapter    *string  `json:"adapter,omitempty"`
+	Code       string   `json:"code" validate:"required"`
+	JobUID     *string  `json:"job_uid,omitempty"`
+	Message    string   `json:"message" validate:"required"`
+	RuntimeUID *string  `json:"runtime_uid,omitempty"`
+	Versions   []string `json:"versions,omitempty"`
+}
+
+func (r RuntimeWarning) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
 }
 
 type SearchHit struct {

@@ -2877,6 +2877,117 @@ func (c *Client) ObserveCronRunWithResponse(ctx context.Context, options *Observ
 	}
 }
 
+func (c *Client) ListCronRuntimesWithResponse(ctx context.Context, options *ListCronRuntimesRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListCronRuntimesResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL: c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/runtimes",
+		Method:     "GET",
+		Options:    options,
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/runtimes")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &ListCronRuntimesResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(ListCronRuntimesResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "ListCronRuntimesResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		return out, nil
+	default:
+		if len(resp.Content) > 0 {
+			body := new(ListCronRuntimesErrorResponse)
+			if json.Unmarshal(resp.Content, body) == nil {
+				out.JSONDefault = body
+				if errTarget, ok := any(*body).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
+func (c *Client) BeatCronRuntimeWithResponse(ctx context.Context, options *BeatCronRuntimeRequestOptions, reqEditors ...runtime.RequestEditorFn) (*BeatCronRuntimeResp, error) {
+	var err error
+	reqParams := runtime.RequestOptionsParameters{
+		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/runtimes/{runtime_uid}",
+		Method:      "PUT",
+		Options:     options,
+		ContentType: "application/json",
+	}
+
+	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	resp, err := c.apiClient.ExecuteRequest(ctx, req, "/api/v1/projects/{project_id}/cron/runtimes/{runtime_uid}")
+	if err != nil {
+		return nil, fmt.Errorf("error executing request: %w", err)
+	}
+
+	out := &BeatCronRuntimeResp{
+		HTTPResponse: resp.Raw,
+		Body:         resp.Content,
+		StatusCode:   resp.StatusCode,
+	}
+
+	switch resp.StatusCode {
+	case 200:
+		out.JSON200 = new(BeatCronRuntimeResponse)
+		bodyBytes := resp.Content
+		if len(bodyBytes) > 0 {
+			if err := json.Unmarshal(bodyBytes, out.JSON200); err != nil {
+				return out, &runtime.ResponseDecodeError{
+					StatusCode:    resp.StatusCode,
+					ContentType:   resp.Headers.Get("Content-Type"),
+					ContentLength: len(bodyBytes),
+					TargetType:    "BeatCronRuntimeResponse",
+					Body:          bodyBytes,
+					Err:           err,
+				}
+			}
+		}
+		return out, nil
+	default:
+		if len(resp.Content) > 0 {
+			body := new(BeatCronRuntimeErrorResponse)
+			if json.Unmarshal(resp.Content, body) == nil {
+				out.JSONDefault = body
+				if errTarget, ok := any(*body).(error); ok {
+					return out, runtime.NewClientAPIError(errTarget, runtime.WithStatusCode(resp.StatusCode))
+				}
+			}
+		}
+		return out, runtime.NewClientAPIError(fmt.Errorf("unexpected status code: %d", resp.StatusCode), runtime.WithStatusCode(resp.StatusCode))
+	}
+}
+
 func (c *Client) ListCronWorkflowsWithResponse(ctx context.Context, options *ListCronWorkflowsRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ListCronWorkflowsResp, error) {
 	var err error
 	reqParams := runtime.RequestOptionsParameters{

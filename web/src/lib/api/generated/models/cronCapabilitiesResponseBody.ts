@@ -4,6 +4,7 @@
 
 export interface CronCapabilitiesResponseBody {
   event_features: string[]
+  features: string[]
   project_uid: string
   [key: string]: unknown
 }

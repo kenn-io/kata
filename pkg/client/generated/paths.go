@@ -219,6 +219,19 @@ func (o ObserveCronRunPath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(o))
 }
 
+type ListCronRuntimesPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
+type BeatCronRuntimePath struct {
+	ProjectID  int64  `json:"project_id"`
+	RuntimeUID string `json:"runtime_uid" validate:"required"`
+}
+
+func (b BeatCronRuntimePath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(b))
+}
+
 type ListCronWorkflowsPath struct {
 	ProjectID int64 `json:"project_id"`
 }

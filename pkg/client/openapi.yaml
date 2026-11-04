@@ -261,6 +261,54 @@ components:
       required:
         - kind
       type: object
+    BeatCronRuntimeBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        adapter:
+          type: string
+        adapter_version:
+          type: string
+        features:
+          items:
+            type: string
+          type: array
+        interval_seconds:
+          default: 60
+          format: int64
+          maximum: 3600
+          minimum: 10
+          type: integer
+        kata_version:
+          type: string
+        label:
+          type: string
+        state:
+          default: active
+          enum:
+            - active
+            - stopping
+          type: string
+      required:
+        - label
+        - adapter
+      type: object
+    BeatCronRuntimeResponseBody:
+      properties:
+        forwarded:
+          enum:
+            - recorded
+            - unavailable
+            - unsupported
+            - not_applicable
+          type: string
+        runtime:
+          $ref: "#/components/schemas/Runtime"
+      required:
+        - runtime
+        - forwarded
+      type: object
     BindExternalRootRequestBody:
       additionalProperties: false
       properties:
@@ -1044,11 +1092,16 @@ components:
           items:
             type: string
           type: array
+        features:
+          items:
+            type: string
+          type: array
         project_uid:
           type: string
       required:
         - project_uid
         - event_features
+        - features
       type: object
     CronDefinitionActionBody:
       additionalProperties: false
@@ -6143,6 +6196,124 @@ components:
         - status
         - import
       type: object
+    Runtime:
+      properties:
+        actor:
+          type: string
+        adapter:
+          type: string
+        adapter_version:
+          type: string
+        expires_at:
+          format: date-time
+          type: string
+        features:
+          items:
+            type: string
+          type: array
+        first_seen_at:
+          format: date-time
+          type: string
+        forwarder_actor:
+          type: string
+        interval_seconds:
+          default: 60
+          format: int64
+          maximum: 3600
+          minimum: 10
+          type: integer
+        kata_version:
+          type: string
+        label:
+          type: string
+        last_seen_at:
+          format: date-time
+          type: string
+        reported_via:
+          enum:
+            - direct
+            - forwarded
+          type: string
+        runtime_uid:
+          type: string
+        state:
+          default: active
+          enum:
+            - active
+            - stopping
+          type: string
+        status:
+          enum:
+            - live
+            - expired
+          type: string
+      required:
+        - runtime_uid
+        - actor
+        - first_seen_at
+        - last_seen_at
+        - expires_at
+        - status
+        - reported_via
+        - label
+        - adapter
+      type: object
+    RuntimeInventory:
+      properties:
+        inventory:
+          $ref: "#/components/schemas/RuntimeInventoryState"
+        runtimes:
+          items:
+            $ref: "#/components/schemas/Runtime"
+          type: array
+        warnings:
+          items:
+            $ref: "#/components/schemas/RuntimeWarning"
+          type: array
+      required:
+        - inventory
+        - runtimes
+        - warnings
+      type: object
+    RuntimeInventoryState:
+      properties:
+        daemon_started_at:
+          format: date-time
+          type: string
+        state:
+          enum:
+            - unknown
+            - warming
+            - ready
+          type: string
+        warming_until:
+          format: date-time
+          type: string
+      required:
+        - state
+        - daemon_started_at
+        - warming_until
+      type: object
+    RuntimeWarning:
+      properties:
+        adapter:
+          type: string
+        code:
+          type: string
+        job_uid:
+          type: string
+        message:
+          type: string
+        runtime_uid:
+          type: string
+        versions:
+          items:
+            type: string
+          type: array
+      required:
+        - code
+        - message
+      type: object
     SearchHit:
       properties:
         issue:
@@ -8580,6 +8751,63 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ObserveCronRunResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/cron/runtimes:
+    get:
+      operationId: listCronRuntimes
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeInventory"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/cron/runtimes/{runtime_uid}:
+    put:
+      operationId: beatCronRuntime
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: runtime_uid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BeatCronRuntimeBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BeatCronRuntimeResponseBody"
           description: OK
         default:
           content:
