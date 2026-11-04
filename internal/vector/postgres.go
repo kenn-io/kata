@@ -109,18 +109,23 @@ func (p *postgresIndex) validate(ctx context.Context) error {
 	return nil
 }
 
-func (p *postgresIndex) PendingForGeneration(ctx context.Context, gen string, limit int) ([]kitvec.Pending[string], error) {
+func (p *postgresIndex) PendingForGeneration(ctx context.Context, gen string, after *string, limit int) ([]kitvec.Pending[string], error) {
 	if limit <= 0 {
 		limit = 1
 	}
-	rows, err := p.db.QueryContext(ctx, `
+	query := `
 		SELECT m.issue_uid, m.content, m.content_revision
 		FROM issue_vector_mirror m
 		LEFT JOIN issue_vector_stamps s
 		  ON s.gen_key = $1 AND s.issue_uid = m.issue_uid AND s.revision = m.content_revision
-		WHERE s.issue_uid IS NULL
-		ORDER BY m.issue_uid
-		LIMIT $2`, gen, limit)
+		WHERE s.issue_uid IS NULL`
+	args := []any{gen, limit}
+	if after != nil {
+		query += ` AND m.issue_uid > $3`
+		args = append(args, *after)
+	}
+	query += ` ORDER BY m.issue_uid LIMIT $2`
+	rows, err := p.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("vector: postgres pending documents: %w", err)
 	}
