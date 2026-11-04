@@ -1996,9 +1996,9 @@ choose a policy for you. Undoing a close asks the same way. If the TUI cannot
 read the jobs, it reopens without a prompt.
 
 Press `u` in the issue list or detail view to undo the latest eligible issue
-edit from this TUI session. Repeated presses walk back through up to 20 recent edits and all deletions,
-including close, reopen, owner, priority, label, body, dates, delete, and newly
-added parent, blocker, or related links. Undo follows the recorded issue across
+edit from this TUI session. Repeated presses walk back through up to 20 recent
+actions, including close, reopen, owner, priority, label, body, dates, delete,
+and newly added parent, blocker, or related links. Undo follows the issue across
 navigation and projects; it does not target whichever row is currently
 selected. It makes a new attributed change, so the original audit event
 remains. Undoing a reopen may open the normal completion form when the daemon
@@ -2009,14 +2009,16 @@ run one at a time; quick successive edits wait for the current edit to finish.
 Creating an issue or comment, making a timed assignment or owner edit involving
 an expiry, changing the status of a recurring issue, closing an issue with a
 live federation lease, or reopening an issue closed for a reason other than
-`done` clears the undo history except deletions. Switching daemons clears all history.
+`done` clears the undo history except deletions. Switching daemons clears all
+history.
 Except when restoring a deletion, undo reads the affected issue or exact link
 and refuses an observed conflicting change. It skips that history entry without
 changing the issue, so pressing `u` again reaches earlier edits. The revision
 check also rejects intervening status or owner changes, including changes away
 and back to the same value. These checks are not atomic: another client can
 edit the same field between the read and the undo write. A failed write with
-an uncertain outcome clears history except deletions rather than risking a second change.
+an uncertain outcome clears history except deletions to avoid repeating a
+change.
 
 Press `C` to open the read-only credential ledger when the selected daemon
 advertises `token_audit_read`. It lists live, expired, and revoked credentials

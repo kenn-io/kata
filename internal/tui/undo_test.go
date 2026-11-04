@@ -651,12 +651,16 @@ func TestUndoClientNoopInverseReadbackConsumesRestoredEntry(t *testing.T) {
 }
 
 func TestModelChangedPrincipalClearsUndoHistory(t *testing.T) {
-	m := initialModel(Options{})
-	m.undoHistory.push(undoEntry{kind: "close"})
-	entryID := m.undoHistory.entries[0].id
-	out := undoOutcome{conflict: "daemon principal changed"}
-	updated, _ := m.Update(undoDoneMsg{entryID: entryID, outcome: out})
-	require.Empty(t, updated.(Model).undoHistory.entries)
+	for _, conflict := range []string{"daemon principal changed", "daemon instance changed"} {
+		t.Run(conflict, func(t *testing.T) {
+			m := initialModel(Options{})
+			m.undoHistory.push(undoEntry{kind: "close"})
+			m.undoHistory.push(undoEntry{kind: "delete"})
+			entryID := m.undoHistory.entries[1].id
+			updated, _ := m.Update(undoDoneMsg{entryID: entryID, outcome: undoOutcome{conflict: conflict}})
+			require.Empty(t, updated.(Model).undoHistory.entries)
+		})
+	}
 }
 
 func TestModelChangedPrincipalClosesUndoEvidenceForm(t *testing.T) {
@@ -689,6 +693,7 @@ func TestModelDaemonSwitchClearsHistoryAndLateCompletion(t *testing.T) {
 	m.api = oldClient
 	m.connGen = 1
 	m.undoHistory.push(undoEntry{kind: "owner.assign"})
+	m.undoHistory.push(undoEntry{kind: "delete"})
 	m.undoInFlight = true
 	resp, err := oldClient.Close(t.Context(), 7, "abc4", "bob")
 	require.NoError(t, err)
@@ -895,4 +900,18 @@ func TestUndoClientPreservesWaitingWriteOrder(t *testing.T) {
 		require.NoError(t, <-results)
 		require.Equal(t, []*int64{new(int64(1)), new(int64(2)), new(int64(3))}, f.priorities)
 	})
+}
+
+func TestUndoHistoryCapsDeleteEntries(t *testing.T) {
+	for _, kind := range []string{"delete", "body.edit"} {
+		t.Run(kind, func(t *testing.T) {
+			var history undoHistory
+			history.push(undoEntry{kind: "delete", uid: "oldest"})
+			for range undoLimit {
+				history.push(undoEntry{kind: kind, uid: "recent"})
+			}
+			require.Len(t, history.entries, 20)
+			require.Equal(t, "recent", history.entries[0].uid)
+		})
+	}
 }

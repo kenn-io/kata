@@ -71,12 +71,6 @@ func (h *deleteHarness) selectIssue(uid string) {
 	h.t.Fatalf("issue %s is not listed", uid)
 }
 
-func (h *deleteHarness) typeText(text string) {
-	for _, r := range text {
-		h.key(runeKey(r))
-	}
-}
-
 func (h *deleteHarness) enter() tea.Cmd { return h.key(tea.KeyPressMsg{Code: tea.KeyEnter}) }
 
 // finish feeds the daemon's answer to a command back into the model.
@@ -146,7 +140,7 @@ func TestDeleteFormRequiresFullConfirmation(t *testing.T) {
 	}
 
 	h.m.input.field(fieldConfirm).setValue("")
-	h.typeText("DELETE " + h.qualified(target))
+	h.m = typeString(h.m, "DELETE "+h.qualified(target))
 	h.finish(h.enter())
 	assert.Equal(t, inputNone, h.m.input.kind, "a delete closes the form: "+h.m.input.err)
 	assert.True(t, h.isDeleted(target.UID))
@@ -171,7 +165,7 @@ func TestDeleteSelectsTheNeighbouringRowAndNamesUndo(t *testing.T) {
 			h.selectIssue(target.UID)
 
 			h.key(runeKey('X'))
-			h.typeText("DELETE " + h.project.Name + "#" + target.ShortID)
+			h.m = typeString(h.m, "DELETE "+h.project.Name+"#"+target.ShortID)
 			h.finish(h.enter())
 
 			assert.True(t, h.isDeleted(target.UID))
@@ -201,7 +195,7 @@ func TestUndoOfADelete(t *testing.T) {
 			target := h.issues[0]
 			h.selectIssue(target.UID)
 			h.key(runeKey('X'))
-			h.typeText("DELETE " + h.qualified(target))
+			h.m = typeString(h.m, "DELETE "+h.qualified(target))
 			h.finish(h.enter())
 			require.True(t, h.isDeleted(target.UID))
 			require.Len(t, h.m.undoHistory.entries, 1)
@@ -240,7 +234,7 @@ func TestUndoDeleteAfterComment(t *testing.T) {
 			target, survivor := h.issues[0], h.issues[1]
 			h.selectIssue(target.UID)
 			h.key(runeKey('X'))
-			h.typeText("DELETE " + h.qualified(target))
+			h.m = typeString(h.m, "DELETE "+h.qualified(target))
 			h.finish(h.enter())
 			require.True(t, h.isDeleted(target.UID))
 			for i := range tc.edits {
@@ -254,10 +248,15 @@ func TestUndoDeleteAfterComment(t *testing.T) {
 			next, _ := h.m.Update(mutationDoneMsg{resp: resp})
 			h.m = next.(Model)
 
-			h.finish(h.key(runeKey('u')))
-
-			require.False(t, h.isDeleted(target.UID))
-			assert.Contains(t, h.m.toast.text, "undid delete")
+			cmd := h.key(runeKey('u'))
+			if tc.edits > undoLimit {
+				require.True(t, h.isDeleted(target.UID))
+				assert.Contains(t, h.m.toast.text, "nothing to undo")
+			} else {
+				h.finish(cmd)
+				require.False(t, h.isDeleted(target.UID))
+				assert.Contains(t, h.m.toast.text, "undid delete")
+			}
 		})
 	}
 }
@@ -346,7 +345,7 @@ func TestDeleteLeavesTheDetailTheWayBackDoes(t *testing.T) {
 			tc.setup(h)
 
 			h.key(runeKey('X'))
-			h.typeText("DELETE " + h.project.Name + "#" + target.ShortID)
+			h.m = typeString(h.m, "DELETE "+h.project.Name+"#"+target.ShortID)
 			h.m = h.drain(h.enter())
 			require.True(t, h.isDeleted(target.UID))
 
@@ -365,7 +364,7 @@ func TestDeleteSavingEscKeepsResult(t *testing.T) {
 	target := h.issues[1]
 	h.selectIssue(target.UID)
 	h.key(runeKey('X'))
-	h.typeText("DELETE " + h.qualified(target))
+	h.m = typeString(h.m, "DELETE "+h.qualified(target))
 	cmd := h.enter()
 	require.NotNil(t, cmd)
 	h.key(tea.KeyPressMsg{Code: tea.KeyEscape})
@@ -381,7 +380,7 @@ func TestDeleteDetailStaysGoneAfterWidening(t *testing.T) {
 	target := h.issues[0]
 	h.selectIssue(target.UID)
 	h.key(runeKey('X'))
-	h.typeText("DELETE " + h.qualified(target))
+	h.m = typeString(h.m, "DELETE "+h.qualified(target))
 	h.finish(h.enter())
 	require.True(t, h.isDeleted(target.UID))
 	require.Equal(t, viewList, h.m.view)
@@ -428,7 +427,7 @@ func TestDeleteSkipsRepeatedIssueInDetailHistory(t *testing.T) {
 				h.m = h.drain(cmd)
 			}
 			h.key(runeKey('X'))
-			h.typeText("DELETE " + h.qualified(target))
+			h.m = typeString(h.m, "DELETE "+h.qualified(target))
 			next, cmd := h.m.Update(h.enter()())
 			h.m = next.(Model)
 			h.m = h.drain(cmd)
@@ -471,7 +470,7 @@ func TestDeleteChildRefetchesParent(t *testing.T) {
 	h.m = h.drain(h.enter())
 	require.Equal(t, child.UID, h.m.detail.issue.UID)
 	h.key(runeKey('X'))
-	h.typeText("DELETE " + h.qualified(child))
+	h.m = typeString(h.m, "DELETE "+h.qualified(child))
 	h.m = h.drain(h.enter())
 	require.Equal(t, parent.UID, h.m.detail.issue.UID)
 	assert.Empty(t, h.m.detail.children, "the restored parent drops its deleted child")
@@ -541,7 +540,7 @@ func TestDeleteReturnsToAttentionWithoutUndoHint(t *testing.T) {
 	h.m = h.drain(cmd)
 	h.m = h.drain(h.enter())
 	h.key(runeKey('X'))
-	h.typeText("DELETE " + h.qualified(target))
+	h.m = typeString(h.m, "DELETE "+h.qualified(target))
 	h.finish(h.enter())
 	require.Equal(t, viewAttention, h.m.view)
 	require.NotNil(t, h.m.toast)
@@ -620,9 +619,59 @@ func TestDeleteConfirmationResolvesDetailProject(t *testing.T) {
 			}
 			require.Equal(t, inputDeleteForm, h.m.input.kind)
 			assert.Equal(t, h.qualified(target), h.m.input.del.expected)
-			h.typeText("DELETE " + h.qualified(target))
+			h.m = typeString(h.m, "DELETE "+h.qualified(target))
 			h.finish(h.enter())
 			assert.True(t, h.isDeleted(target.UID))
 		})
 	}
+}
+
+func TestMissingBackgroundDetailKeepsForeground(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		view   viewID
+		layout splitlayout.Mode
+	}{
+		{"Attention", viewAttention, splitlayout.Stacked},
+		{"split Attention", viewAttention, splitlayout.Split},
+		{"credentials", viewCredentials, splitlayout.Split},
+		{"stacked list", viewList, splitlayout.Stacked},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newDeleteHarness(t, viewDetail)
+			h.m.layout = tc.layout
+			target := h.issues[0]
+			h.selectIssue(target.UID)
+			h.m.view = tc.view
+			_, err := h.client.DeleteIssue(t.Context(), h.project.ID, target.UID, h.qualified(target), "alice")
+			require.NoError(t, err)
+
+			h.m = h.drain(h.m.detail.refetch(h.m.api))
+
+			assert.Equal(t, tc.view, h.m.view, "a background refresh keeps the foreground view")
+		})
+	}
+}
+
+func TestDeleteFromSplitListRefetchesOpenParent(t *testing.T) {
+	h := newDeleteHarness(t, viewDetail)
+	parent, child := h.issues[0], h.issues[1]
+	_, err := NewClient(h.env.URL, h.env.HTTP).AddLink(t.Context(), h.project.ID, child.UID, LinkBody{Type: "parent", ToRef: parent.UID}, "alice")
+	require.NoError(t, err)
+	h.selectIssue(parent.UID)
+	h.m = h.drain(h.m.detail.refetch(h.m.api))
+	require.Len(t, h.m.detail.children, 1)
+	h.m.view = viewList
+	h.m.layout, h.m.focus = splitlayout.Split, focusList
+	h.m.detail.navStack = []detailModel{{scopePID: h.project.ID, issue: &Issue{UID: child.UID}}}
+	h.selectIssue(child.UID)
+
+	h.key(runeKey('X'))
+	h.m = typeString(h.m, "DELETE "+h.qualified(child))
+	h.m = h.drain(h.enter())
+
+	require.True(t, h.isDeleted(child.UID))
+	require.NotNil(t, h.m.detail.issue)
+	assert.Equal(t, parent.UID, h.m.detail.issue.UID)
+	assert.Empty(t, h.m.detail.children, "the open parent drops the child deleted from the list")
 }

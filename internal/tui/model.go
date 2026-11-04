@@ -3421,7 +3421,7 @@ func (m Model) dispatchToView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var applied bool
 		m.detail, applied = m.detail.applyFetchedIfFresh(msg)
 		m = m.syncAttentionReturnDetail(msg)
-		if fetched, ok := msg.(detailFetchedMsg); ok && applied {
+		if fetched, ok := msg.(detailFetchedMsg); ok && applied && (m.view == viewDetail || (m.view == viewList && m.layout == splitlayout.Split)) {
 			if apiErr, ok := errors.AsType[*APIError](fetched.err); ok && apiErr.Code == "issue_not_found" {
 				if len(m.detail.navStack) == 0 {
 					m.detail.cancelReads()

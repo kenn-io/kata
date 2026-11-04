@@ -24,12 +24,16 @@ func (h *undoHistory) push(entry undoEntry) {
 	entry.id = h.nextID
 	h.entries = append(h.entries, entry)
 	if len(h.entries) > undoLimit {
-		cutoff := len(h.entries) - undoLimit
-		h.entries = append(slices.DeleteFunc(h.entries[:cutoff], func(e undoEntry) bool { return e.kind != "delete" }), h.entries[cutoff:]...)
+		h.entries = h.entries[len(h.entries)-undoLimit:]
 	}
 }
 
 func (h *undoHistory) clear(reason string) {
+	h.entries = nil
+	h.boundary = reason
+}
+
+func (h *undoHistory) clearAfterWrite(reason string) {
 	h.entries = slices.DeleteFunc(h.entries, func(e undoEntry) bool { return e.kind != "delete" })
 	h.boundary = reason
 }
@@ -46,10 +50,10 @@ func (m Model) recordUndoAttempt(mut mutationDoneMsg) Model {
 	switch {
 	case attempt.unknown:
 		m.advanceMutationEpoch()
-		m.undoHistory.clear("previous action's outcome is unknown")
+		m.undoHistory.clearAfterWrite("previous action's outcome is unknown")
 	case attempt.boundary != "":
 		m.advanceMutationEpoch()
-		m.undoHistory.clear(attempt.boundary)
+		m.undoHistory.clearAfterWrite(attempt.boundary)
 	case mut.err == nil && attempt.entry != nil:
 		m.advanceMutationEpoch()
 		m.undoHistory.push(*attempt.entry)
@@ -168,7 +172,7 @@ func (m Model) handleUndoDone(msg undoDoneMsg) (Model, tea.Cmd) {
 		return m.undoNotice("skipped undo for "+target+": "+out.conflict, toastError)
 	case out.attempt != nil && out.attempt.unknown:
 		m.advanceMutationEpoch()
-		m.undoHistory.clear("undo outcome is unknown")
+		m.undoHistory.clearAfterWrite("undo outcome is unknown")
 		m, refresh := m.refreshAfterUndo(entry, nil)
 		m, notice := m.undoNotice("undo outcome unknown; refreshed issue state", toastError)
 		return m, combineCmds(notice, refresh)

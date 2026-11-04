@@ -126,7 +126,12 @@ func (m Model) finishDelete(target formTarget, mut mutationDoneMsg) (Model, tea.
 	if mut.resp != nil && mut.resp.Issue != nil && mut.resp.Issue.UID != "" {
 		uid = mut.resp.Issue.UID
 	}
-	m, leave := m.leaveDeletedDetail(uid)
+	var leave tea.Cmd
+	if m.detail.issue != nil && m.detail.issue.UID != uid {
+		leave = m.refetchOpenDetail()
+	} else {
+		m, leave = m.leaveDeletedDetail(uid)
+	}
 	m, follow := m.refreshListDay(func(lm listModel) listModel { return lm.withoutIssue(uid) })
 	if m.cache != nil {
 		m.cache.markStale()
