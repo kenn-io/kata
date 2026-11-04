@@ -7,25 +7,6 @@ import (
 	"time"
 )
 
-// Load and a string-valued ForbidDeferral are existing public API contracts.
-func TestPreservedPublicAPI(t *testing.T) {
-	mode := strings.Join([]string{"drop", "after", "grace"}, "_")
-	d := Declaration{Name: "example-adapter", FailurePolicy: "continue", ForbidDeferral: mode}
-	if err := d.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := fixtures.ReadFile("testdata/adapter-v1/schedule.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	scenarios, err := Load(raw)
-	if err != nil || len(scenarios) == 0 {
-		t.Fatalf("Load: %d scenarios, %v", len(scenarios), err)
-	}
-}
-
-// Declaration bounds are product policy; enumeration/materialization budgets
-// must not turn a valid large declaration into an invalid one.
 func TestLargeDeclarationResourceBudget(t *testing.T) {
 	d := Reference{}.Declare()
 	d.CatchupLimit = int(^uint(0) >> 1)

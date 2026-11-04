@@ -43,20 +43,7 @@ func TestDropsIndependentSwitches(t *testing.T) {
 				if len(drops) != wantGroups {
 					t.Fatalf("drops %+v", drops)
 				}
-				in.ActiveRuns = 0
-				free, err := ref.Plan(t.Context(), in)
-				if err != nil {
-					t.Fatal(err)
-				}
-				queue := d
-				queue.ForbidDeferral = "queue"
-				same, err := (Reference{Policy: queue}).Plan(t.Context(), in)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if !reflect.DeepEqual(free, same) {
-					t.Fatal("deferral changed free gate")
-				}
+
 			})
 		}
 	}

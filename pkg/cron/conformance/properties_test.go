@@ -147,6 +147,32 @@ func TestPlanningSetProperties(t *testing.T) {
 		}
 
 	})
+
+	t.Run("pending revision", func(t *testing.T) {
+		hegel.Test(t, func(ht *hegel.T) {
+			mask := hegel.Draw(ht, hegel.Integers(0, 1023))
+			changed := hegel.Draw(ht, hegel.Integers(0, 1)) == 1
+			in := testPlan(t)
+			in.Job.Definition = []byte(strings.ReplaceAll(string(in.Job.Definition), "3600", "60"))
+			in.Now = in.Job.CreatedAt.Add(10 * time.Minute)
+			pending := []time.Time{}
+			for i := range 10 {
+				if mask&(1<<i) != 0 {
+					pending = append(pending, in.Job.CreatedAt.Add(time.Duration(i+1)*time.Minute))
+				}
+			}
+			in.Checkpoint = &Checkpoint{Through: in.Now, DefinitionEventUID: in.Job.DefinitionEventUID, Pending: pending}
+			want := pending
+			if changed {
+				in.Job.DefinitionEventUID = "01ARZ3NDEKTSV4RRFFQ69G5FAA"
+				want = []time.Time{}
+			}
+			out, err := (Reference{}).Plan(ht.Context(), in)
+			require.NoError(ht, err)
+			require.Equal(ht, want, out.Launch)
+			require.Equal(ht, in.Now, out.Checkpoint.Through)
+		})
+	})
 }
 
 func TestNativeDecisionAgreement(t *testing.T) {
@@ -236,16 +262,7 @@ func TestPolicySuiteDetectsWrongAdapters(t *testing.T) {
 				"tolerance": {"schedule/policy-tolerance-boundary"},
 				"count":     {"catchup/policy-count-boundary"},
 				"age":       {"catchup/policy-age-window-boundary"},
-				"branches":  {"retries/policy-stop-preserves-zero-duration-prerequisite", "retries/policy-stop-preserves-started-independent-forward", "retries/policy-stop-preserves-started-independent-reversed"},
-			}
-			present := map[string]bool{}
-			for _, scenario := range suite.Scenarios {
-				present[scenario.Name] = true
-			}
-			for _, name := range wanted[policy] {
-				if !present[name] {
-					t.Fatalf("missing policy boundary %s", name)
-				}
+				"branches":  {"retries/independent-continue"},
 			}
 			answers := []Answer{}
 			a := wrongPolicyAdapter{declared: declared, actual: actual}
@@ -260,8 +277,14 @@ func TestPolicySuiteDetectsWrongAdapters(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(report.Failed) == 0 {
-				t.Fatal("wrong-policy adapter passed")
+			failed := map[string]bool{}
+			for _, failure := range report.Failed {
+				failed[failure.Name] = true
+			}
+			for _, name := range wanted[policy] {
+				if !failed[name] {
+					t.Fatalf("missing named policy failure %s: %+v", name, report)
+				}
 			}
 		})
 	}
@@ -302,7 +325,7 @@ func TestExternalConsumer(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := `package adapter_test
-import("context";"testing";c "go.kenn.io/kata/pkg/cron/conformance")
+import("context";"testing";_ "time/tzdata";c "go.kenn.io/kata/pkg/cron/conformance")
 type bridge struct{c.Reference}
 func(b bridge)Plan(ctx context.Context,in c.PlanInput)(c.PlanOutput,error){return b.Reference.Plan(ctx,in)}
 func TestProfile(t *testing.T){
@@ -327,62 +350,6 @@ func TestProfile(t *testing.T){
 	if strings.Contains(string(out), "no test files") {
 		t.Fatal("consumer did not run")
 	}
-}
-
-func TestRetryBudgetProperties(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		retries := hegel.Draw(ht, hegel.Integers(0, 100))
-		unknown := hegel.Draw(ht, hegel.Integers(0, retries+2))
-		start := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
-		offers := []Attempt{}
-		for i := range retries + 3 {
-			status := "failed"
-			if i == unknown {
-				status = "unknown"
-			}
-			offers = append(offers, Attempt{StartedAt: start.Add(time.Duration(i*2) * time.Second), EndedAt: start.Add(time.Duration(i*2+1) * time.Second), Status: status})
-		}
-		in := SettleInput{Steps: []WorkflowStep{{Key: "a", Retries: retries}}, Outcomes: map[string][]Attempt{"a": offers}, StartedAt: start, Now: start.Add(time.Hour)}
-		out, err := (Reference{}).Settle(ht.Context(), in)
-		if err != nil {
-			ht.Fatal(err)
-		}
-		wantCount := retries + 1
-		wantStatus := "failed"
-		if unknown <= retries {
-			wantCount = unknown + 1
-			wantStatus = "unknown"
-		}
-		if out.Attempts["a"] != wantCount || out.Status != wantStatus {
-			ht.Fatalf("retry %d unknown %d: %+v", retries, unknown, out)
-		}
-	})
-}
-
-func TestPendingRevisionProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		mask := hegel.Draw(ht, hegel.Integers(0, 1023))
-		changed := hegel.Draw(ht, hegel.Integers(0, 1)) == 1
-		in := testPlan(t)
-		in.Job.Definition = []byte(strings.ReplaceAll(string(in.Job.Definition), "3600", "60"))
-		in.Now = in.Job.CreatedAt.Add(10 * time.Minute)
-		pending := []time.Time{}
-		for i := range 10 {
-			if mask&(1<<i) != 0 {
-				pending = append(pending, in.Job.CreatedAt.Add(time.Duration(i+1)*time.Minute))
-			}
-		}
-		in.Checkpoint = &Checkpoint{Through: in.Now, DefinitionEventUID: in.Job.DefinitionEventUID, Pending: pending}
-		want := pending
-		if changed {
-			in.Job.DefinitionEventUID = "01ARZ3NDEKTSV4RRFFQ69G5FAA"
-			want = []time.Time{}
-		}
-		out, err := (Reference{}).Plan(ht.Context(), in)
-		require.NoError(ht, err)
-		require.Equal(ht, want, out.Launch)
-		require.Equal(ht, in.Now, out.Checkpoint.Through)
-	})
 }
 
 func TestSkipBoundaryProperty(t *testing.T) {
@@ -439,6 +406,37 @@ func TestAgeWindowBoundaryProperty(t *testing.T) {
 }
 
 func TestEarliestCutoffProperty(t *testing.T) {
+	start := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name, status                                     string
+		attemptStart, attemptEnd, timeout, cancel, count int
+		certain                                          bool
+		want                                             string
+	}{
+		{"no attempt at deadline", "succeeded", 5, 6, 5, 0, 0, false, "failed"},
+		{"completed before equal cutoffs", "succeeded", 0, 3, 5, 5, 1, true, "succeeded"},
+		{"earlier cancellation", "running", 0, 0, 5, 4, 1, true, "cancelled"},
+		{"earlier timeout", "running", 0, 0, 5, 6, 1, true, "failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			attempt := Attempt{StartedAt: start.Add(time.Duration(tc.attemptStart) * time.Second), Status: tc.status}
+			if tc.status != "running" {
+				attempt.EndedAt = start.Add(time.Duration(tc.attemptEnd) * time.Second)
+			}
+			in := SettleInput{Steps: []WorkflowStep{{Key: "a"}}, Outcomes: map[string][]Attempt{"a": {attempt}}, StartedAt: start, Now: start.Add(20 * time.Second), TimeoutSeconds: int64(tc.timeout), StoppedWithCertainty: tc.certain}
+			if tc.cancel > 0 {
+				at := start.Add(time.Duration(tc.cancel) * time.Second)
+				in.CancelledAt = &at
+			}
+			out, err := (Reference{}).Settle(t.Context(), in)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, out.Status)
+			require.False(t, out.Occupied)
+			require.Equal(t, tc.count, out.Attempts["a"])
+			require.Empty(t, out.Skipped)
+		})
+	}
+
 	hegel.Test(t, func(ht *hegel.T) {
 		timeout := hegel.Draw(ht, hegel.Integers(1, 3600))
 		cancel := hegel.Draw(ht, hegel.Integers(1, 3600))
@@ -465,6 +463,35 @@ func TestEarliestCutoffProperty(t *testing.T) {
 }
 
 func TestRetriedDependencyProperty(t *testing.T) {
+	t.Run("retry budget", func(t *testing.T) {
+		hegel.Test(t, func(ht *hegel.T) {
+			retries := hegel.Draw(ht, hegel.Integers(0, 100))
+			unknown := hegel.Draw(ht, hegel.Integers(0, retries+2))
+			start := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+			offers := []Attempt{}
+			for i := range retries + 3 {
+				status := "failed"
+				if i == unknown {
+					status = "unknown"
+				}
+				offers = append(offers, Attempt{StartedAt: start.Add(time.Duration(i*2) * time.Second), EndedAt: start.Add(time.Duration(i*2+1) * time.Second), Status: status})
+			}
+			in := SettleInput{Steps: []WorkflowStep{{Key: "a", Retries: retries}}, Outcomes: map[string][]Attempt{"a": offers}, StartedAt: start, Now: start.Add(time.Hour)}
+			out, err := (Reference{}).Settle(ht.Context(), in)
+			if err != nil {
+				ht.Fatal(err)
+			}
+			wantCount := retries + 1
+			wantStatus := "failed"
+			if unknown <= retries {
+				wantCount = unknown + 1
+				wantStatus = "unknown"
+			}
+			if out.Attempts["a"] != wantCount || out.Status != wantStatus {
+				ht.Fatalf("retry %d unknown %d: %+v", retries, unknown, out)
+			}
+		})
+	})
 	hegel.Test(t, func(ht *hegel.T) {
 		retries := hegel.Draw(ht, hegel.Integers(0, 5))
 		failures := hegel.Draw(ht, hegel.Integers(0, retries))

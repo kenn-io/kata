@@ -103,12 +103,33 @@ func TestCronConformanceOffline(t *testing.T) {
 }
 
 func TestCronConformanceInputAndExitCodes(t *testing.T) {
+	lines := bytes.Split(bytes.TrimSpace(conformanceAnswers(t, conformance.Reference{}.Declare())), []byte{'\n'})
+	var answer conformance.Answer
+	if err := json.Unmarshal(lines[1], &answer); err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]jsontext.Value
+	if err := json.Unmarshal(answer.Outputs[0], &fields); err != nil {
+		t.Fatal(err)
+	}
+	fields["typo"] = jsontext.Value(`true`)
+	var err error
+	answer.Outputs[0], err = json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines[1], err = json.Marshal(answer)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	for _, tc := range []struct {
 		name  string
 		input []byte
 		args  []string
 	}{
 		{"missing answers", nil, []string{"check"}},
+		{"malformed output", bytes.Join(lines, []byte{'\n'}), []string{"check", "--answers", "-"}},
 		{"missing dir", nil, []string{"export"}},
 		{"bad header", []byte(`{}`), []string{"check", "--answers", "-"}},
 		{"incomplete declaration", []byte(`{"name":"example"}`), []string{"export", "--dir", t.TempDir(), "--declaration", "-"}},
@@ -129,49 +150,41 @@ func TestCronConformanceNamedDropMismatch(t *testing.T) {
 	d.DropRecords = true
 	d.ForbidDeferral = "drop_after_grace"
 	original := conformanceAnswers(t, d)
-	for _, mutation := range []string{"reason"} {
-		t.Run(mutation, func(t *testing.T) {
-			lines := bytes.Split(bytes.TrimSpace(original), []byte{'\n'})
-			var answers []conformance.Answer
-			for i := 1; i < len(lines); i++ {
-				var answer conformance.Answer
-				if err := json.Unmarshal(lines[i], &answer); err != nil {
-					t.Fatal(err)
-				}
-				if answer.Name == "drops/latest" {
-					var output map[string]jsontext.Value
-					if err := json.Unmarshal(answer.Outputs[0], &output); err != nil {
-						t.Fatal(err)
-					}
-					switch mutation {
-					case "reason":
-						output["drops"] = jsontext.Value(`[{"reason":"overlap_skipped","instants":["2030-01-01T01:00:00Z","2030-01-01T02:00:00Z"]}]`)
-
-					}
-					answer.Outputs[0], _ = json.Marshal(output)
-				}
-				answers = append(answers, answer)
-				lines[i], _ = json.Marshal(answer)
-			}
-			want, err := conformance.Check(t.Context(), d, answers)
-			if err != nil {
+	lines := bytes.Split(bytes.TrimSpace(original), []byte{'\n'})
+	var answers []conformance.Answer
+	for i := 1; i < len(lines); i++ {
+		var answer conformance.Answer
+		if err := json.Unmarshal(lines[i], &answer); err != nil {
+			t.Fatal(err)
+		}
+		if answer.Name == "drops/latest" {
+			var output map[string]jsontext.Value
+			if err := json.Unmarshal(answer.Outputs[0], &output); err != nil {
 				t.Fatal(err)
 			}
-			raw, err := runConformance(t, t.Context(), bytes.Join(lines, []byte{'\n'}), "check", "--answers", "-")
-			var cli *cliError
-			if !errors.As(err, &cli) || cli.ExitCode != 1 {
-				t.Fatalf("want exit 1, got %v", err)
-			}
-			var got conformance.Report
-			if err := json.Unmarshal(raw, &got); err != nil {
-				t.Fatal(err)
-			}
-			a, _ := json.Marshal(got, json.Deterministic(true))
-			b, _ := json.Marshal(want, json.Deterministic(true))
-			if !bytes.Equal(a, b) || len(got.Failed) != 1 || got.Failed[0].Name != "drops/latest" {
-				t.Fatalf("Go/CLI mismatch %s / %s", a, b)
-			}
-		})
+			output["drops"] = jsontext.Value(`[{"reason":"overlap_skipped","instants":["2030-01-01T01:00:00Z","2030-01-01T02:00:00Z"]}]`)
+			answer.Outputs[0], _ = json.Marshal(output)
+		}
+		answers = append(answers, answer)
+		lines[i], _ = json.Marshal(answer)
+	}
+	want, err := conformance.Check(t.Context(), d, answers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := runConformance(t, t.Context(), bytes.Join(lines, []byte{'\n'}), "check", "--answers", "-")
+	var cli *cliError
+	if !errors.As(err, &cli) || cli.ExitCode != 1 {
+		t.Fatalf("want exit 1, got %v", err)
+	}
+	var got conformance.Report
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := json.Marshal(got, json.Deterministic(true))
+	b, _ := json.Marshal(want, json.Deterministic(true))
+	if !bytes.Equal(a, b) || len(got.Failed) != 1 || got.Failed[0].Name != "drops/latest" {
+		t.Fatalf("Go/CLI mismatch %s / %s", a, b)
 	}
 }
 
@@ -189,36 +202,52 @@ func (r *readNotification) Read(buffer []byte) (int, error) {
 }
 
 func TestConformanceInputCancellationAndLimit(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	pipe, writer := io.Pipe()
-	defer pipe.Close()
-	reader := &readNotification{ReadCloser: pipe, started: make(chan struct{})}
-	defer writer.Close()
-	done := make(chan error, 1)
-	go func() { _, err := readConformanceFile(ctx, reader, "-"); done <- err }()
-	select {
-	case <-reader.started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("stdin read never started")
-	}
-	cancel()
-	select {
-	case err := <-done:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatal(err)
-		}
-	case <-time.After(2 * time.Second):
-		_ = reader.Close()
-		t.Fatal("cancelled stdin blocked")
+	for _, tc := range []struct {
+		name string
+		read func(context.Context, io.Reader) ([]byte, error)
+	}{
+		{"conformance", func(ctx context.Context, reader io.Reader) ([]byte, error) {
+			return readConformanceFile(ctx, reader, "-")
+		}},
+		{"request", func(ctx context.Context, reader io.Reader) ([]byte, error) {
+			cmd := newCronCmd()
+			cmd.SetContext(ctx)
+			cmd.SetIn(reader)
+			return (&cronCLIOptions{file: "-", resource: "job", action: "create"}).readRequest(cmd)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			pipe, writer := io.Pipe()
+			defer pipe.Close()
+			defer writer.Close()
+			reader := &readNotification{ReadCloser: pipe, started: make(chan struct{})}
+			done := make(chan error, 1)
+			go func() { _, err := tc.read(ctx, reader); done <- err }()
+			select {
+			case <-reader.started:
+			case <-time.After(2 * time.Second):
+				t.Fatal("stdin read never started")
+			}
+			cancel()
+			select {
+			case err := <-done:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatal(err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("cancelled stdin blocked")
+			}
+		})
 	}
 	_, err := readConformanceFile(t.Context(), strings.NewReader(strings.Repeat("x", conformanceInputLimit+1)), "-")
-	if err == nil {
-		t.Fatal("accepted overlong input")
+	if err == nil || err.Error() != "conformance input exceeds 16 MiB" {
+		t.Fatalf("limit mapping: %v", err)
 	}
 }
 
-func TestConformanceExportPreflight(t *testing.T) {
+func TestConformanceExportRollback(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "b.json")
 	if err := os.WriteFile(path, []byte("existing"), 0600); err != nil {
@@ -229,7 +258,7 @@ func TestConformanceExportPreflight(t *testing.T) {
 		t.Fatal("replaced existing")
 	}
 	if _, err := os.Stat(filepath.Join(dir, "a.json")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("preflight created file: %v", err)
+		t.Fatalf("rollback left created file: %v", err)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil || string(raw) != "existing" {
@@ -243,36 +272,5 @@ func TestConformanceExportPreflight(t *testing.T) {
 	}
 	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("cancelled export created directory: %v", err)
-	}
-}
-
-func TestCronRequestReadCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	pipe, writer := io.Pipe()
-	defer pipe.Close()
-	defer writer.Close()
-	reader := &readNotification{ReadCloser: pipe, started: make(chan struct{})}
-	cmd := newCronCmd()
-	cmd.SetContext(ctx)
-	cmd.SetIn(reader)
-	done := make(chan error, 1)
-	go func() {
-		_, err := (&cronCLIOptions{file: "-", resource: "job", action: "create"}).readRequest(cmd)
-		done <- err
-	}()
-	select {
-	case <-reader.started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("request read never started")
-	}
-	cancel()
-	select {
-	case err := <-done:
-		if !errors.Is(err, context.Canceled) {
-			t.Fatal(err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("request read did not cancel")
 	}
 }

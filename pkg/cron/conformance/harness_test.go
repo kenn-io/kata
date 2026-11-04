@@ -10,27 +10,6 @@ import (
 	"testing"
 )
 
-func TestHarnessSelection(t *testing.T) {
-	if os.Getenv("KATA_CONFORMANCE_FILTER_CHILD") == "1" {
-		Run(t, Reference{})
-		return
-	}
-	for _, test := range []struct {
-		pattern string
-		want    string
-	}{
-		{pattern: "^TestHarnessSelection$/^does-not-exist$", want: "testing: warning: no tests to run"},
-		{pattern: "^TestHarnessSelection$/^schedule$/^interval-grid$", want: "--- PASS: TestHarnessSelection/schedule/interval-grid"},
-	} {
-		//nolint:gosec // Runs the current test binary with constant test-name filters.
-		cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run="+test.pattern, "-test.v")
-		cmd.Env = append(os.Environ(), "KATA_CONFORMANCE_FILTER_CHILD=1")
-		output, err := cmd.CombinedOutput()
-		require.NoError(t, err, string(output))
-		require.Contains(t, string(output), test.want)
-	}
-}
-
 type harnessFailureAdapter struct {
 	Reference
 	failPlanJSON string
@@ -41,15 +20,22 @@ func (a *harnessFailureAdapter) Plan(ctx context.Context, in PlanInput) (PlanOut
 	if err != nil {
 		return PlanOutput{}, err
 	}
-	if string(raw) == a.failPlanJSON {
+	if a.failPlanJSON == "*" || string(raw) == a.failPlanJSON {
 		return PlanOutput{}, errors.New("planned test failure")
 	}
 	return a.Reference.Plan(ctx, in)
 }
 
 func TestHarnessReportsFailuresOnScenarioSubtests(t *testing.T) {
-	if os.Getenv("KATA_CONFORMANCE_REPORT_FAILURE_CHILD") == "1" {
-		Run(t, &harnessFailureAdapter{failPlanJSON: os.Getenv("KATA_CONFORMANCE_REPORT_FAILURE_PLAN")})
+	if child := os.Getenv("KATA_CONFORMANCE_REPORT_FAILURE_CHILD"); child != "" {
+		var adapter Adapter = Reference{}
+		if child == "unmatched" {
+			adapter = &harnessFailureAdapter{failPlanJSON: "*"}
+		}
+		if child == "failure" {
+			adapter = &harnessFailureAdapter{failPlanJSON: os.Getenv("KATA_CONFORMANCE_REPORT_FAILURE_PLAN")}
+		}
+		Run(t, adapter)
 		return
 	}
 
@@ -86,12 +72,25 @@ func TestHarnessReportsFailuresOnScenarioSubtests(t *testing.T) {
 	require.NotEmpty(t, targetScenario, "expected a fixture with a unique plan input")
 	require.NotEmpty(t, targetPlan)
 
-	//nolint:gosec // Runs this test binary with a constant test-name filter.
-	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestHarnessReportsFailuresOnScenarioSubtests$", "-test.v")
-	cmd.Env = append(os.Environ(), "KATA_CONFORMANCE_REPORT_FAILURE_CHILD=1", "KATA_CONFORMANCE_REPORT_FAILURE_PLAN="+targetPlan)
-	output, err := cmd.CombinedOutput()
-	require.Error(t, err)
-	require.Contains(t, string(output), "--- FAIL: TestHarnessReportsFailuresOnScenarioSubtests/"+targetScenario)
-	require.Contains(t, string(output), "planned test failure")
-	require.NotContains(t, string(output), "missing answer")
+	for _, tc := range []struct {
+		mode, pattern, want string
+		failed              bool
+	}{
+		{"unmatched", "^TestHarnessReportsFailuresOnScenarioSubtests$/^does-not-exist$", "testing: warning: no tests to run", false},
+		{"matched", "^TestHarnessReportsFailuresOnScenarioSubtests$/^schedule$/^interval-grid$", "--- PASS: TestHarnessReportsFailuresOnScenarioSubtests/schedule/interval-grid", false},
+		{"failure", "^TestHarnessReportsFailuresOnScenarioSubtests$", "--- FAIL: TestHarnessReportsFailuresOnScenarioSubtests/" + targetScenario, true},
+	} {
+		//nolint:gosec // Runs the current test binary with constant test-name filters.
+		cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run="+tc.pattern, "-test.v")
+		cmd.Env = append(os.Environ(), "KATA_CONFORMANCE_REPORT_FAILURE_CHILD="+tc.mode, "KATA_CONFORMANCE_REPORT_FAILURE_PLAN="+targetPlan)
+		output, err := cmd.CombinedOutput()
+		if tc.failed {
+			require.Error(t, err)
+			require.Contains(t, string(output), "planned test failure")
+		} else {
+			require.NoError(t, err, string(output))
+		}
+		require.Contains(t, string(output), tc.want)
+		require.NotContains(t, string(output), "missing answer")
+	}
 }

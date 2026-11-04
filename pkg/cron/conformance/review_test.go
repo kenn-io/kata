@@ -7,27 +7,55 @@ import (
 	"testing"
 )
 
-// Every known answer's outputs require typed validation, even when duplicate
-// classification already establishes a comparison failure.
+// Validation must be independent of either an earlier mismatch or duplicate classification.
 func TestKnownDuplicateOutputValidation(t *testing.T) {
-	suite, err := Suite(t.Context(), Reference{}.Declare())
-	if err != nil {
-		t.Fatal(err)
-	}
-	scenario := suite.Scenarios[0]
-	good, err := Execute(t.Context(), Reference{}, scenario)
-	if err != nil {
-		t.Fatal(err)
-	}
-	suite.Scenarios = []Scenario{scenario}
-	report, err := suite.Check(t.Context(), []Answer{good, good})
-	if err != nil || len(report.Failed) != 1 || report.Failed[0].Diff != "duplicate answer" {
-		t.Fatalf("well-formed duplicate: %+v %v", report, err)
-	}
-	bad := Answer{Name: scenario.Name, Outputs: []jsontext.Value{jsontext.Value(`{"typo":true}`)}}
-	report, err = suite.Check(t.Context(), []Answer{good, bad})
-	if err == nil {
-		t.Fatalf("malformed duplicate became comparison result: %+v", report)
+	for _, kind := range []string{"earlier mismatch", "duplicate"} {
+		t.Run(kind, func(t *testing.T) {
+			suite, err := Suite(t.Context(), Reference{}.Declare())
+			if err != nil {
+				t.Fatal(err)
+			}
+			scenario := suite.Scenarios[0]
+			if kind == "earlier mismatch" {
+				for _, s := range suite.Scenarios {
+					if s.Name == "overlap/same-clock-release" {
+						scenario = s
+						break
+					}
+				}
+				if len(scenario.Steps) != 2 {
+					t.Fatal("missing two-decision fixture")
+				}
+			}
+			good, err := Execute(t.Context(), Reference{}, scenario)
+			if err != nil {
+				t.Fatal(err)
+			}
+			suite.Scenarios = []Scenario{scenario}
+			answers := []Answer{good}
+			if kind == "duplicate" {
+				answers = append(answers, Answer{Name: scenario.Name, Outputs: []jsontext.Value{jsontext.Value(`{"typo":true}`)}})
+			} else {
+				for i, raw := range good.Outputs {
+					var fields map[string]jsontext.Value
+					if err := json.Unmarshal(raw, &fields); err != nil {
+						t.Fatal(err)
+					}
+					if i == 0 {
+						fields["excluded"] = jsontext.Value(`"disabled"`)
+					} else {
+						delete(fields, "excluded")
+					}
+					answers[0].Outputs[i], err = json.Marshal(fields)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if report, err := suite.Check(t.Context(), answers); err == nil {
+				t.Fatalf("malformed output became comparison result: %+v", report)
+			}
+		})
 	}
 }
 
