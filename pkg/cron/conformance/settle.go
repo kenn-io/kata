@@ -81,11 +81,10 @@ func (r Reference) Settle(ctx context.Context, in SettleInput) (SettleOutput, er
 	if err != nil || !discoverStop {
 		return out, err
 	}
-	// A terminal dependent proves its prerequisites already succeeded, even if
-	// zero-duration attempts share its failure timestamp. Keep that chain.
-	stop.prerequisites = map[string]bool{}
+	// Tied terminals prove their prerequisites already succeeded, even if
+	// zero-duration attempts share the terminal timestamp. Keep those chains.
 	for _, step := range slices.Backward(in.Steps) {
-		if step.Key == stop.key || stop.prerequisites[step.Key] {
+		if stop.prerequisites[step.Key] {
 			for _, parent := range step.After {
 				stop.prerequisites[parent] = true
 			}
@@ -97,7 +96,6 @@ func (r Reference) Settle(ctx context.Context, in SettleInput) (SettleOutput, er
 
 type terminalPoint struct {
 	at            time.Time
-	key           string
 	prerequisites map[string]bool
 }
 
@@ -125,7 +123,7 @@ func settlePass(ctx context.Context, in SettleInput, cutoff time.Time, cause str
 		}
 		offers := in.Outcomes[step.Key]
 		started := len(offers) > 0 && offers[0].StartedAt.Before(stop.at) && !offers[0].StartedAt.After(in.Now)
-		if blocked || !stop.at.IsZero() && !started && step.Key != stop.key && !stop.prerequisites[step.Key] {
+		if blocked || !stop.at.IsZero() && !started && !stop.prerequisites[step.Key] {
 			states[step.Key] = "skipped"
 			out.Skipped = append(out.Skipped, step.Key)
 			continue
@@ -144,8 +142,11 @@ func settlePass(ctx context.Context, in SettleInput, cutoff time.Time, cause str
 				interrupted = !in.Now.Before(cutoff)
 				break
 			}
-			// Discover stop eligibility before validating timing of consumed offers.
-			if !discoverStop && attempt.StartedAt.Before(earliest) {
+			// Premature offers cannot supply success or terminal evidence in discovery.
+			if attempt.StartedAt.Before(earliest) {
+				if discoverStop {
+					break
+				}
 				return out, first, fmt.Errorf("step %s starts before dependencies succeeded", step.Key)
 			}
 			out.Attempts[step.Key]++
@@ -181,7 +182,9 @@ func settlePass(ctx context.Context, in SettleInput, cutoff time.Time, cause str
 		if state == "failed" || state == "cancelled" || state == "unknown" {
 			at := finished[step.Key]
 			if first.at.IsZero() || at.Before(first.at) {
-				first = terminalPoint{at: at, key: step.Key}
+				first = terminalPoint{at: at, prerequisites: map[string]bool{step.Key: true}}
+			} else if at.Equal(first.at) {
+				first.prerequisites[step.Key] = true
 			}
 		}
 	}

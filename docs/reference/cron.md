@@ -668,7 +668,7 @@ Dependencies MUST succeed before a dependent starts. The declared
 `failure_policy` selects the branch behavior:
 `continue` permits independent branches after terminal failure; `stop` skips
 not-yet-started independent work, including starts exactly at the terminal failure
-instant. Already-started independent branches, the triggering failure and
+instant. Already-started independent branches, simultaneous failures and
 completed prerequisites retain their results, including equal-time successful
 prerequisites. A failure still eligible for retry is not terminal.
 
@@ -753,8 +753,9 @@ run recording. Log-and-drop does not guarantee receipt.
 
 Implement `go.kenn.io/kata/pkg/cron/conformance.Adapter` around the runtime's
 pure `Plan` and `Settle` decisions. Public DTOs carry job definition JSON,
-clock, checkpoint, local occupancy and timestamped offered attempts. They do
-not expose internal Kata types or launch an executor.
+clock, checkpoint, local occupancy and timestamped offered attempts. Skipped
+offers omit dependency-timing checks; structural validation still applies.
+These DTOs do not expose internal Kata types or launch an executor.
 
 ```go
 func TestAdapterProfile(t *testing.T) {
