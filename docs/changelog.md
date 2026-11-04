@@ -32,8 +32,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   the detail view do not offer the key. Pick a project (same-named ones show
   their area), read the daemon's preview of the subtree that would move, or its
   refusal, then press `Enter` again to move it. The move is guarded on the
-  previewed revision, previews again if the issue changed, clears the undo
-  history, and shows the new `project#id`. Issue-scoped credentials cannot move.
+  previewed revision, which the daemon advances only for metadata, date and
+  claim changes, so the form previews again after one of those but not after a
+  title, body, label, priority or comment edit. It clears the undo history and
+  shows the new `project#id`. Issue-scoped credentials cannot move.
   Daemon API `0.35.0` or newer is required. See the
   [CLI reference](reference/cli.md#daemon-and-diagnostics).
 

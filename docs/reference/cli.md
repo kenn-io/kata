@@ -2078,9 +2078,11 @@ issue:
    project, the form shows its refusal in its own words. `Esc` returns to the
    picker.
 3. A second `Enter` moves, guarded by `If-Match` on the revision the preview
-   read, like `kata move`. If the preview carries no revision, nothing is sent.
-   If the issue changed since the preview, nothing is moved and the form
-   previews again at the current revision.
+   read. If the preview carries no revision, nothing is sent. The daemon
+   advances that revision only for metadata, date and claim changes, so if one
+   of those happened since the preview, nothing is moved and the form previews
+   again at the current revision. A title, body, label, priority or comment
+   edit does not advance it and does not stop the move.
 4. After a move the moved issue and its descendants leave the list (the next
    refresh lists them again where the scope shows their new project), the
    selection goes to the next row (the previous one after the last), and a

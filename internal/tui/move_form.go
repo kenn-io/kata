@@ -377,7 +377,7 @@ func (m Model) handleMoveDone(mut mutationDoneMsg) (Model, tea.Cmd) {
 	switch {
 	case isRevisionConflict(mut.err):
 		s.preview = nil
-		s.note = "The issue changed since the preview; nothing was moved. Showing the current preview."
+		s.note = "The issue's metadata, dates or claims changed since the preview; nothing was moved. Showing the current preview."
 		m.move = s
 		return m.dispatchMovePreview()
 	case mut.err != nil:
