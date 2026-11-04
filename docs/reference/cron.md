@@ -681,7 +681,47 @@ accepted that event earlier but its response was lost. Such a retry can
 restore running or terminal evidence because its deduplication event was
 removed. A later prune selects it only if the current rules allow it.
 Pruning therefore reduces retained evidence without promising bounded total
-database growth or lifetime counts.
+database growth or distinct lifetime counts.
+
+
+### Retained and pruned counts
+
+On newer main builds, read current run counts and recorded pruning separately:
+
+```sh
+kata cron run counts
+kata cron run counts --job <job-uid> --json
+kata cron run counts --workflow <workflow-uid> --agent
+```
+
+Each group reports `retained` counts for all five statuses and
+`pruned_since_tracking` counts for the four terminal statuses. Groups come
+from retained runs or pruning records, including groups whose definition was
+deleted or whose last run is gone. Definitions with neither are omitted.
+Names appear when available. Results are ordered by kind, then UID.
+
+The first contributing prune starts `coverage_started_at` for that group;
+previous deletions are unknown. `last_pruned_at`, `oldest_created_at`, and
+`newest_created_at` describe the recorded pruning window. A group with no
+recorded prune has zero pruning counts and no coverage timestamps. A restored
+or replayed run that is pruned again contributes again. These are pruning
+actions, not distinct lifetime runs.
+
+`--job` and `--workflow` select one aggregate identity and are mutually
+exclusive. Counts `--workflow` selects only runs without a job. Prune
+`--workflow` also selects job runs belonging to that workflow. An unmatched
+counts filter returns an empty `groups` list.
+
+Each response reads project access, metadata, retained rows and names from
+one consistent database snapshot. JSON and agent output preserve exact int64
+integers, including values above 2^53. Consumers must use an integer-capable
+JSON decoder.
+
+The owning hub stores absolute tallies in reserved `cron.tally.<group_uid>`
+project metadata. Generic metadata PATCH requests cannot change or delete
+that prefix. Backup, project export/import, and federation preserve validated
+tallies. Live project merge combines disjoint groups and identical histories;
+conflicting histories for the same kind and UID reject the whole merge.
 
 ## Routes, events, and records
 

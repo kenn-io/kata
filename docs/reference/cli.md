@@ -2227,6 +2227,7 @@ kata cron capabilities --json
 kata cron run observe <run-uid> --json-input observation.json --json
 kata cron run list [--limit 100] [--before-uid <uid>] [--job-uid <job-uid>] --json
 kata cron run show <run-uid> --json
+kata cron run counts [--job <uid> | --workflow <uid>] [--json | --agent]
 kata cron run prune --older-than 90d [--keep 10] [--limit 5000] [--job <uid> | --workflow <uid>]
 kata cron run prune --older-than 90d --force --confirm "PRUNE example-project cron runs" --json
 kata show <issue-ref> --planning-dates --json
@@ -2247,6 +2248,13 @@ omitted. `--older-than` accepts a Go duration or whole days (`90d`), with a
 24-hour minimum. Pruning keeps each job or workflow's newest evidence and
 resets replicas after a nonempty deletion. See [Run retention](cron.md#run-retention)
 for selection rules, ranges, export guidance, and replay limits.
+
+
+`cron run counts` reads retained evidence and recorded pruning from one
+snapshot. Its workflow filter selects only the workflow's own group, while
+prune's workflow filter also includes member job runs. See
+[Retained and pruned counts](cron.md#retained-and-pruned-counts) for coverage,
+replay semantics, and exact integer output.
 
 ## Federation
 

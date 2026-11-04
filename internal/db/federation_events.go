@@ -15,6 +15,9 @@ const EventTimestampFormat = "2006-01-02T15:04:05.000Z"
 // ProjectMetadataAdoptionPayload encodes existing project metadata as a
 // synthetic from-empty diff for a federation adoption baseline.
 func ProjectMetadataAdoptionPayload(metadata JSONBlob) (string, error) {
+	if _, err := DecodeCronTallies(metadata); err != nil {
+		return "", err
+	}
 	current := map[string]jsontext.Value{}
 	if len(metadata) > 0 {
 		if err := json.Unmarshal([]byte(metadata), &current); err != nil {
@@ -82,6 +85,9 @@ func remoteEventCreatedAt(event RemoteEvent) string {
 // embedded comments and links to be JSON objects on created and snapshot events.
 // Ingest and pull paths must call it before persisting the event.
 func ValidateFederationEntries(eventType, eventUID string, payloadJSON jsontext.Value) error {
+	if err := ValidateCronTallyEvent(RemoteEvent{Type: eventType, Payload: payloadJSON}); err != nil {
+		return fmt.Errorf("%w: event %s %s: %v", ErrFederationIngestValidation, eventUID, eventType, err)
+	}
 	if eventType == "issue.commented" || eventType == "issue.comment_edited" {
 		var payload map[string]jsontext.Value
 		if err := json.Unmarshal(payloadJSON, &payload); err != nil {

@@ -34,6 +34,7 @@ type CronRunPruneGroup struct {
 
 // CronRunPruneResult is identical for preview and deletion except the cursor.
 type CronRunPruneResult struct {
+	MetadataEvent     Event               `json:"-"`
 	DryRun            bool                `json:"dry_run"`
 	Before            time.Time           `json:"before"`
 	Keep              int                 `json:"keep"`
@@ -75,7 +76,7 @@ func (a CronSQL) PruneRuns(ctx context.Context, in PruneCronRuns) (CronRunPruneR
 			return err
 		}
 		project := Project{ID: in.ProjectID}
-		if err := tx.QueryRowContext(ctx, `SELECT uid,name FROM projects WHERE id=$1 AND deleted_at IS NULL AND name<>$2`, in.ProjectID, SystemProjectName).Scan(&project.UID, &project.Name); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT uid,name,metadata FROM projects WHERE id=$1 AND deleted_at IS NULL AND name<>$2`, in.ProjectID, SystemProjectName).Scan(&project.UID, &project.Name, &project.Metadata); err != nil {
 			if err == sql.ErrNoRows {
 				return ErrNotFound
 			}
@@ -84,13 +85,18 @@ func (a CronSQL) PruneRuns(ctx context.Context, in PruneCronRuns) (CronRunPruneR
 		if err := CheckProjectAccessTransaction(ctx, tx, project.UID); err != nil {
 			return err
 		}
+		tallies, err := DecodeCronTallies(project.Metadata)
+		if err != nil {
+			return err
+		}
 		if err := a.PruneGate(ctx, tx, project); err != nil {
 			return err
 		}
 		if err := a.WriteGate(ctx, tx, in.ProjectID); err != nil {
 			return err
 		}
-		if _, err := a.effectiveMutationActor(ctx, tx, in.ProjectID, in.Actor); err != nil {
+		actor, err := a.effectiveMutationActor(ctx, tx, in.ProjectID, in.Actor)
+		if err != nil {
 			return err
 		}
 		selected, more, err := selectPruneRuns(ctx, tx, in)
@@ -158,6 +164,18 @@ func (a CronSQL) PruneRuns(ctx context.Context, in PruneCronRuns) (CronRunPruneR
 				return err
 			}
 		}
+		patch, err := accumulateCronTallies(tallies, selected, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		// This event is below the mandatory reset boundary. Keep its event and
+		// provenance for audit/hooks, while downstream delivery uses the new
+		// checkpoint instead of an outbox body that precedes that reset.
+		metadata, err := a.PatchProjectMetadataTx(WithRelayStateCapture(ctx), tx, PatchProjectMetadataIn{ProjectID: in.ProjectID, Actor: actor, Patch: patch})
+		if err != nil {
+			return err
+		}
+		result.MetadataEvent = metadata.Event
 		result.ResetAfterEventID, err = a.ReserveResetCursor(ctx, tx)
 		if err != nil {
 			return err

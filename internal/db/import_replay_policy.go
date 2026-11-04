@@ -290,7 +290,11 @@ func validateImportRecord(record ImportRecord) error {
 	case *MetaKV:
 		return requireImportPayload(rec, ImportKindMeta)
 	case *ProjectExport:
-		return requireImportPayload(rec, ImportKindProject)
+		if err := requireImportPayload(rec, ImportKindProject); err != nil {
+			return err
+		}
+		_, err := DecodeCronTallies(JSONBlob(rec.Metadata))
+		return err
 	case *RelayOutboxExport, *RelayInboxExport, *RelayCursorExport:
 		return ValidateRelayDeliveryRecord(record)
 	case *RootKeyPin:

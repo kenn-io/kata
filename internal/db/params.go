@@ -530,6 +530,7 @@ type ShortIDExtension struct {
 
 // ProjectMergeResult summarizes the rows moved by MergeProjects.
 type ProjectMergeResult struct {
+	MetadataEvent     Event              `json:"-"`
 	Source            Project            `json:"source"`
 	Target            Project            `json:"target"`
 	IssuesMoved       int64              `json:"issues_moved"`

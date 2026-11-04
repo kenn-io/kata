@@ -312,6 +312,9 @@ func registerProjectsHandlers(humaAPI huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, internalAPIError(err)
 		}
+		if merged.MetadataEvent.ID > 0 {
+			deliverProjectMutation(cfg, &merged.MetadataEvent)
+		}
 		deliverProjectMutation(cfg, &merged.Event)
 		cfg.Publish().Reset(in.Body.SourceProjectID, merged.Event.ID)
 		extensions := make([]api.MergeShortIDExtension, 0, len(merged.ShortIDExtensions))

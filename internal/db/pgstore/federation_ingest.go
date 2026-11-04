@@ -91,6 +91,9 @@ func (s *Store) IngestFederationEvents(
 			); err != nil {
 				return err
 			}
+			if err := db.ValidateCronTallyEvent(event); err != nil {
+				return fmt.Errorf("%w: %v", db.ErrFederationIngestValidation, err)
+			}
 			if err := db.ValidateEmbeddingProducerEvent(event, ""); err != nil {
 				return err
 			}
@@ -138,6 +141,9 @@ func (s *Store) IngestFederationEvents(
 			if !errors.Is(err, db.ErrNotFound) {
 				return err
 			}
+			if err := db.ValidateCronTallyDownstreamEvent(event, adoptionState.allowTallyTransfer); err != nil {
+				return err
+			}
 			if adoptionState.duplicateOnly {
 				return fmt.Errorf("%w: adoption baseline retry contains fresh event %s",
 					db.ErrFederationIngestValidation, event.EventUID)
@@ -183,6 +189,7 @@ func (s *Store) IngestFederationEvents(
 			return err
 		}
 
+		tallyEvents := []db.RemoteEvent{}
 		linksAffected := false
 		for _, input := range prepared {
 			if input.duplicate {
@@ -199,6 +206,7 @@ func (s *Store) IngestFederationEvents(
 				continue
 			}
 			result.Accepted++
+			tallyEvents = append(tallyEvents, input.event)
 			if db.FederationEventAffectsLinks(input.event.Type) {
 				linksAffected = true
 			}
@@ -225,6 +233,24 @@ func (s *Store) IngestFederationEvents(
 				return err
 			}
 
+			if adoptionState.allowTallyTransfer {
+				var current db.JSONBlob
+				if err := tx.QueryRowContext(ctx, `SELECT metadata FROM projects WHERE id=$1`, params.ProjectID).Scan(&current); err != nil {
+					return err
+				}
+				tallyPatch, err := db.CronTallyAdoptionPatch(current, tallyEvents)
+				if err != nil {
+					return err
+				}
+				changed, err := s.patchProjectMetadataReassert(ctx, db.PatchProjectMetadataIn{ProjectID: params.ProjectID, Actor: params.BoundActor, Patch: tallyPatch}, func(_ context.Context, run transactionFunc) error { return run(tx) }, true)
+				if err != nil {
+					return err
+				}
+				if changed.Changed {
+					result.Events = append(result.Events, changed.Event)
+					result.InsertedEventUIDs = append(result.InsertedEventUIDs, changed.Event.UID)
+				}
+			}
 			if !adoptionState.shouldDeferMarker {
 				err = consumeFederationAdoptionSnapshotAuthorMarker(ctx, tx, params.ProjectID, params.FederationEnrollmentID, params.SpokeInstanceUID)
 			} else {

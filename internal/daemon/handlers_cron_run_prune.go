@@ -40,6 +40,9 @@ func registerCronRunPruneHandler(h huma.API, cfg ServerConfig) {
 		if err != nil {
 			return nil, cronAPIError(ctx, cfg, err, project.ID, "", true)
 		}
+		if result.MetadataEvent.ID > 0 {
+			cfg.Publish().Event(project.ID, result.MetadataEvent)
+		}
 		if result.ResetAfterEventID > 0 {
 			cfg.Publish().Reset(project.ID, result.ResetAfterEventID)
 			if err := refreshFederationBaselineAfterReset(ctx, cfg, project.ID, actor); err != nil {

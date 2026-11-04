@@ -938,7 +938,11 @@ stops after pruning and before refreshing its baseline. Pending deliveries
 and prepared resets awaiting activation block pruning; sync them or
 explicitly revoke the affected enrollment first. Relays bound upstream cannot
 prune their local replica. Delayed direct-spoke retries may restore a removed
-run because pruning keeps no run tombstone.
+run because pruning keeps no run tombstone. Validated recorded-prune tallies
+travel with project metadata in baselines, resets, backups and adoption.
+Replicas take the root's absolute tally state. See
+[Retained and pruned counts](../reference/cron.md#retained-and-pruned-counts)
+for coverage and replay limits.
 
 The signed snapshot includes complete ordered manifests for retained artifacts that
 match each issue's current content, without vector bytes. Reset installation preserves validated

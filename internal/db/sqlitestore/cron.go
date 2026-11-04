@@ -8,7 +8,7 @@ import (
 )
 
 func (d *Store) cronSQL() db.CronSQL {
-	return db.CronSQL{PruneGate: func(ctx context.Context, tx *sql.Tx, project db.Project) error {
+	return db.CronSQL{PatchProjectMetadataTx: d.patchProjectMetadataTx, PruneGate: func(ctx context.Context, tx *sql.Tx, project db.Project) error {
 		if err := ensureFederatedSpokeUnsupportedTx(ctx, tx, project.ID); err != nil {
 			return err
 		}

@@ -59,6 +59,15 @@ func TestCronRunPruneAPI(t *testing.T) {
 	require.Positive(t, result.ResetAfterEventID)
 	select {
 	case message := <-sub.Ch:
+		require.Equal(t, daemon.StreamKindEvent, message.Kind)
+		require.NotNil(t, message.Event)
+		require.Equal(t, "project.metadata_updated", message.Event.Type)
+		require.Less(t, message.Event.ID, result.ResetAfterEventID)
+	case <-time.After(time.Second):
+		t.Fatal("committed prune did not publish exact tally event")
+	}
+	select {
+	case message := <-sub.Ch:
 		require.Equal(t, daemon.StreamKindReset, message.Kind)
 		require.Equal(t, result.ResetAfterEventID, message.ResetID)
 	case <-time.After(time.Second):
@@ -96,6 +105,15 @@ func TestCronRunPruneAgeAndRefreshFailure(t *testing.T) {
 	reset, err := env.DB.PurgeResetCheck(t.Context(), before, project.ID)
 	require.NoError(t, err)
 	require.Greater(t, reset, before)
+	select {
+	case message := <-sub.Ch:
+		require.Equal(t, daemon.StreamKindEvent, message.Kind)
+		require.NotNil(t, message.Event)
+		require.Equal(t, "project.metadata_updated", message.Event.Type)
+		require.Less(t, message.Event.ID, reset)
+	case <-time.After(time.Second):
+		t.Fatal("refresh failure suppressed committed tally event")
+	}
 	select {
 	case message := <-sub.Ch:
 		require.Equal(t, reset, message.ResetID)

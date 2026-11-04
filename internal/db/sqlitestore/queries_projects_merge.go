@@ -64,6 +64,14 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 			return db.ProjectMergeResult{}, err
 		}
 	}
+	tallyPatch, err := db.MergeCronTallyMetadata(target.Metadata, source.Metadata)
+	if err != nil {
+		return db.ProjectMergeResult{}, err
+	}
+	tallyResult, err := d.patchProjectMetadataTx(ctx, tx, db.PatchProjectMetadataIn{ProjectID: target.ID, Actor: p.Actor, Patch: tallyPatch})
+	if err != nil {
+		return db.ProjectMergeResult{}, err
+	}
 	if err := db.MergeCronProjects(ctx, tx, source, target); err != nil {
 		return db.ProjectMergeResult{}, err
 	}
@@ -213,6 +221,7 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 		EventsMoved:       eventsMoved,
 		PurgeLogsMoved:    purgeLogsMoved,
 		ShortIDExtensions: extensions,
+		MetadataEvent:     tallyResult.Event,
 		Event:             event,
 	}, nil
 }
