@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"maps"
 	"sort"
@@ -43,6 +44,9 @@ type CronTallyValue struct {
 	Version int                       `json:"version"`
 	Groups  map[string]CronTallyEntry `json:"groups"`
 }
+
+// ErrCronTallyConflict rejects unions of different valid histories for one group.
+var ErrCronTallyConflict = errors.New("cron tally conflict")
 
 func cronTallyError(format string, args ...any) error {
 	return fmt.Errorf("%w: cron tally: %s", metadata.ErrInvalidValue, fmt.Sprintf(format, args...))
@@ -261,7 +265,7 @@ func MergeCronTallyMetadata(target, source JSONBlob) (map[string]jsontext.Value,
 		for kind, next := range value.Groups {
 			previous, found := current.Groups[kind]
 			if found && !sameCronTallyEntry(previous, next) {
-				return nil, cronTallyError("conflicting %s history for %s", kind, groupUID)
+				return nil, fmt.Errorf("%w: conflicting %s history for %s", ErrCronTallyConflict, kind, groupUID)
 			}
 			if !found {
 				current.Groups[kind] = next

@@ -163,7 +163,7 @@ func checkCronTallyLiveMerge(t *testing.T, store db.Storage) error {
 		require.NoError(t, err)
 		result, err := store.MergeProjects(ctx, db.MergeProjectsParams{SourceProjectID: source.project.ID, TargetProjectID: target.project.ID, Actor: "operator"})
 		if mode == "conflict" {
-			require.Error(t, err)
+			require.ErrorIs(t, err, db.ErrCronTallyConflict)
 			got, e := store.ProjectByID(ctx, source.project.ID)
 			require.NoError(t, e)
 			require.Equal(t, beforeSource, got)
