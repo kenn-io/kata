@@ -97,11 +97,12 @@ func (m Model) routeRecurrenceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if !m.keymap.SetRecurrence.matches(msg) {
 		return m, nil, false
 	}
-	target, _, ok := m.activeIssueTarget()
+	target, issue, ok := m.activeIssueTarget()
 	if !ok {
 		return m, nil, true
 	}
 	m.nextFormGen++
+	target.issueUID = issue.UID
 	return m, readRecurrenceForm(m.api, target, m.nextFormGen, m.connGen), true
 }
 
@@ -116,7 +117,7 @@ func readRecurrenceForm(api detailAPI, target formTarget, formGen int64, connGen
 		if reader, ok := api.(issueReadAPI); ok {
 			read = reader.ReadIssue
 		}
-		detail, err := read(ctx, target.projectID, target.issueShortID)
+		detail, err := read(ctx, target.projectID, target.issueUID)
 		if err != nil || detail == nil || detail.Issue == nil {
 			msg.err = cmp.Or(err, errors.New("the daemon returned no issue"))
 			return msg
@@ -139,7 +140,7 @@ func (m Model) openRecurrenceForm(msg recurrenceFormLoadedMsg) Model {
 	if m.staleConnMsg(msg.connGen) || msg.formGen != m.nextFormGen || m.input.kind != inputNone || m.modal != modalNone {
 		return m
 	}
-	if target, _, ok := m.activeIssueTarget(); !ok || target.issueShortID != msg.target.issueShortID {
+	if target, issue, ok := m.activeIssueTarget(); !ok || target.projectID != msg.target.projectID || issue.UID != msg.target.issueUID || target.origin != msg.target.origin || target.detailGen != msg.target.detailGen {
 		return m
 	}
 	if msg.refused != nil {
@@ -225,8 +226,8 @@ func dispatchFormSaveRecurrence(apiClient any, target formTarget, in RecurrenceI
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		resp, err := writer.SaveRecurrence(ctx, target.projectID, target.issueShortID, in)
-		if isRevisionConflict(err) {
+		resp, err := writer.SaveRecurrence(ctx, target.projectID, target.issueUID, in)
+		if recurrenceNeedsReload(kind, err) {
 			resp = withCurrentRecurrence(ctx, apiClient, target, resp)
 		}
 		return mutationDoneMsg{
@@ -234,6 +235,14 @@ func dispatchFormSaveRecurrence(apiClient any, target formTarget, in RecurrenceI
 			resp: resp, err: err,
 		}
 	}
+}
+
+func recurrenceNeedsReload(kind string, err error) bool {
+	if isRevisionConflict(err) {
+		return true
+	}
+	apiErr, ok := errors.AsType[*APIError](err)
+	return (kind == "recurrence.change" || kind == "recurrence.stop") && ok && apiErr.Status == 404
 }
 
 // withCurrentRecurrence attaches the issue and recurrence as the daemon holds
@@ -249,7 +258,7 @@ func withCurrentRecurrence(ctx context.Context, apiClient any, target formTarget
 	if strict, ok := apiClient.(issueReadAPI); ok {
 		read = strict.ReadIssue
 	}
-	detail, err := read(ctx, target.projectID, target.issueShortID)
+	detail, err := read(ctx, target.projectID, target.issueUID)
 	if err != nil || detail == nil || detail.Issue == nil {
 		return resp
 	}

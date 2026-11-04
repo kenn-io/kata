@@ -1857,12 +1857,16 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 	if m.input.kind == inputDatesForm && isRevisionConflict(mut.err) && mut.resp != nil && mut.resp.Issue != nil {
 		return m.reloadDatesForm(*mut.resp.Issue), nil
 	}
-	if m.input.kind == inputRecurrenceForm && isRevisionConflict(mut.err) && mut.resp != nil && mut.resp.current != nil {
+	if m.input.kind == inputRecurrenceForm && recurrenceNeedsReload(mut.kind, mut.err) && mut.resp != nil && mut.resp.current != nil {
 		return m.reloadRecurrenceForm(*mut.resp.current), nil
 	}
 	if mut.err != nil {
 		m.input.saving = false
 		m.input.err = mut.kind + " failed: " + mut.err.Error()
+		if m.input.kind == inputRecurrenceForm {
+			action := map[string]string{"recurrence.start": "start", "recurrence.change": "change", "recurrence.stop": "stop"}[mut.kind]
+			m.input.err = "Could not " + action + " repeat: " + mut.err.Error()
+		}
 		return m, m.reportShownError(mut.kind)
 	}
 	if m.input.kind == inputNewIssueForm {
@@ -1898,6 +1902,10 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 		return next, cmd
 	}
 	m.input = inputState{}
+	var recurrenceRefresh tea.Cmd
+	if formKind == inputRecurrenceForm && target.origin == "list" && m.detail.issue != nil && m.detail.scopePID == target.projectID && m.detail.issue.UID == target.issueUID {
+		recurrenceRefresh = m.scheduleDetailRefresh()
+	}
 	// Hand off to the existing per-view mutation routing so the
 	// detail's body / comments list updates. Re-classify as if it
 	// came from detail (gen=current detail gen) so existing
@@ -1910,6 +1918,10 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 		if !formKind.isPanelPrompt() {
 			mut.gen = m.detail.gen
 		}
+	}
+	if recurrenceRefresh != nil {
+		next, cmd := m.routeMutation(mut)
+		return next, tea.Batch(cmd, recurrenceRefresh)
 	}
 	return m.routeMutation(mut)
 }
@@ -2893,9 +2905,12 @@ func (m *Model) maybeRefetchOpenDetail(msg eventReceivedMsg) tea.Cmd {
 		return nil
 	}
 	projectCommentArrival := msg.eventType == "issue.snapshot" || (m.issueScoped && msg.eventType == "issue.commented")
+	// Recurrences apply to multiple occurrences. Their events name the
+	// recurrence rather than an issue, so refresh the project's open detail.
+	recurrenceChange := msg.projectID == m.detail.scopePID && strings.HasPrefix(msg.eventType, "recurrence.")
 	ref := m.detail.issue.ShortID
 	uid := m.detail.issue.UID
-	if !msg.matchesIssue(ref, uid) && !commentMatch && !relationLifecycleMatch && !projectCommentArrival {
+	if !msg.matchesIssue(ref, uid) && !commentMatch && !relationLifecycleMatch && !projectCommentArrival && !recurrenceChange {
 		return nil
 	}
 	return m.scheduleDetailRefresh()

@@ -233,9 +233,6 @@ func recurrenceCLIError(err error) error {
 	if status, ok := errors.AsType[*recurrenceclient.StatusError](err); ok {
 		return externalCLIResponseError(status.Status, status.Body, nil)
 	}
-	if errors.Is(err, recurrenceclient.ErrNoResponse) {
-		return externalCLITransportError[struct{}](nil, nil)
-	}
 	return err
 }
 

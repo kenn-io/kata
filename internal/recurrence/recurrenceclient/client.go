@@ -185,18 +185,6 @@ func (e *StatusError) Error() string {
 	return fmt.Sprintf("%s %s: HTTP %d", e.Method, e.URI, e.Status)
 }
 
-// ErrNoResponse is returned when a request produced neither a response nor an
-// error.
-var ErrNoResponse = errors.New("recurrence request returned no response")
-
-// noResponse is the error for a call that returned no response.
-func noResponse(callErr error) error {
-	if callErr != nil {
-		return callErr
-	}
-	return ErrNoResponse
-}
-
 // statusErr turns a response into an error: a *StatusError for a refusal, the
 // call's own error (a decode failure) otherwise, nil for a success.
 func statusErr(status int, body []byte, httpResp *http.Response, callErr error) error {
@@ -216,18 +204,19 @@ func List(ctx context.Context, api *generated.Client, projectID int64) ([]View, 
 		PathParams: &generated.ListRecurrencesPath{ProjectID: projectID},
 	})
 	if response == nil {
-		return nil, noResponse(callErr)
+		return nil, callErr
 	}
 	if err := statusErr(response.StatusCode, response.Body, response.HTTPResponse, callErr); err != nil {
 		return nil, err
 	}
-	var body struct {
-		Recurrences []View `json:"recurrences"`
+	rows := make([]View, 0, len(response.JSON200.Recurrences))
+	for _, rec := range response.JSON200.Recurrences {
+		rows = append(rows, View{
+			ID: rec.ID, UID: rec.UID, RRule: rec.Rrule, DTStart: rec.Dtstart,
+			Timezone: rec.Timezone, NextOccurrenceKey: rec.NextOccurrenceKey, Revision: rec.Revision,
+		})
 	}
-	if err := json.Unmarshal(response.Body, &body); err != nil {
-		return nil, err
-	}
-	return body.Recurrences, nil
+	return rows, nil
 }
 
 // Active finds the live recurrence the issue is an occurrence of. The show
@@ -265,7 +254,7 @@ func Start(ctx context.Context, api *generated.Client, projectID int64, ref stri
 		},
 	})
 	if response == nil {
-		return noResponse(callErr)
+		return callErr
 	}
 	return statusErr(response.StatusCode, response.Body, response.HTTPResponse, callErr)
 }
@@ -280,7 +269,7 @@ func Change(ctx context.Context, api *generated.Client, projectID int64, current
 		Body:       &generated.PatchRecurrenceBody{Actor: &terms.Actor, Rrule: &terms.Rule, Dtstart: &terms.Start, Timezone: &terms.Zone},
 	})
 	if response == nil {
-		return noResponse(callErr)
+		return callErr
 	}
 	return statusErr(response.StatusCode, response.Body, response.HTTPResponse, callErr)
 }
@@ -294,7 +283,7 @@ func Stop(ctx context.Context, api *generated.Client, projectID int64, current V
 		Header:     &generated.DeleteRecurrenceHeaders{IfMatch: ETag(current.Revision)},
 	})
 	if response == nil {
-		return noResponse(callErr)
+		return callErr
 	}
 	return statusErr(response.StatusCode, response.Body, response.HTTPResponse, callErr)
 }
