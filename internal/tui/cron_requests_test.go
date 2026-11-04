@@ -129,7 +129,7 @@ func TestCronRuntimeRequestConfirmAndRetry(t *testing.T) {
 }
 func TestCronRuntimeRequestFirstSubmitFences(t *testing.T) {
 	for _, cancel := range []bool{false, true} {
-		for _, change := range []string{"connection", "scope", "selection", "revision", "stale snapshot", "read only", "pending mutation", "capability"} {
+		for _, change := range []string{"connection", "scope", "selection", "revision", "read only", "capability"} {
 			t.Run(change+map[bool]string{false: " run", true: " cancel"}[cancel], func(t *testing.T) {
 				m, api := runtimeFixture(t, cancel)
 				key := 'R'
@@ -150,13 +150,9 @@ func TestCronRuntimeRequestFirstSubmitFences(t *testing.T) {
 					} else {
 						m.cron.data.jobs[0].DefinitionEventUID = "changed"
 					}
-				case "stale snapshot":
-					m.cron.events++
 				case "read only":
 					m.issueScoped = true
 					m.scopedWritable = false
-				case "pending mutation":
-					m.cron.enabled = &cronEnabledRequest{}
 				case "capability":
 					m.cron.data.project.controls = nil
 				}
@@ -187,7 +183,7 @@ func TestCronRuntimeRequestLiveRevisionFence(t *testing.T) {
 	}
 }
 func TestCronRuntimeRequestEligibility(t *testing.T) {
-	for _, reason := range []string{"native", "notify", "disabled", "deleted", "paused", "project error", "unsupported", "jobs error", "stale", "pending", "read only"} {
+	for _, reason := range []string{"native", "notify", "disabled", "deleted", "paused", "project error", "unsupported", "jobs error", "pending", "read only"} {
 		t.Run(reason, func(t *testing.T) {
 			m, api := runtimeFixture(t, false)
 			switch reason {
@@ -208,8 +204,6 @@ func TestCronRuntimeRequestEligibility(t *testing.T) {
 				m.cron.data.project.controls = nil
 			case "jobs error":
 				m.cron.data.jobsErr = errors.New("unavailable")
-			case "stale":
-				m.cron.events++
 			case "pending":
 				m.cron.enabled = &cronEnabledRequest{}
 			case "read only":

@@ -58,7 +58,7 @@ func (m Model) cronRuntimeTarget(kind string, lines []cronLine, cursor int) (cro
 }
 func (m Model) cronRuntimeEligible(request cronRuntimeRequest) bool {
 	data := m.cron.data
-	if data == nil || data.events != m.cron.events || data.projectErr != nil {
+	if data == nil || data.projectErr != nil {
 		return false
 	}
 	if request.kind == db.CronRequestKindRun {
@@ -105,13 +105,15 @@ func (m Model) confirmCronRuntimeRequest() (Model, tea.Cmd) {
 		m.modal, m.cron.request = modalNone, nil
 		return m, nil
 	}
-	_, _, lines := cronScreen(m)
-	selected, ok := m.cronRuntimeTarget(pending.kind, lines, *m.cronCursor())
-	// Once a request may have reached the root, retry its immutable identity even
-	// if eligibility changed. Root replay checks precede those eligibility checks.
-	if !ok || selected.target != pending.target || (pending.requestUID == "" && !m.cronRuntimeEligible(*pending)) {
-		m.modal, m.cron.request = modalNone, nil
-		return m, nil
+	// A possibly delivered request retries its immutable identity even after the
+	// selected row leaves the list; root replay precedes eligibility checks.
+	if pending.requestUID == "" {
+		_, _, lines := cronScreen(m)
+		selected, ok := m.cronRuntimeTarget(pending.kind, lines, *m.cronCursor())
+		if !ok || selected.target != pending.target || !m.cronRuntimeEligible(*pending) {
+			m.modal, m.cron.request = modalNone, nil
+			return m, nil
+		}
 	}
 	if next, cmd, blocked := m.blockMutation(false); blocked {
 		next.modal, next.cron.request = modalNone, nil

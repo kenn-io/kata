@@ -135,6 +135,9 @@ func TestCronRequestsRootAndScope(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, server.Close()) })
 	for _, pid := range []int64{p.ID, other.ID} {
 		for _, method := range []string{http.MethodPost, http.MethodGet} {
+			if pid == other.ID && method == http.MethodPost {
+				continue // A cross-project job does not exercise project authorization.
+			}
 			path := fmt.Sprintf("/api/v1/projects/%d/cron/requests", pid)
 			if method == http.MethodPost {
 				path = fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s/requests", pid, job.UID)

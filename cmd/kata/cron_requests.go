@@ -36,7 +36,7 @@ func newCronRequestWriteCmd(cancel bool) *cobra.Command {
 	var requestUID string
 	var ttl int64
 	cmd := &cobra.Command{Use: action + " <uid>", Short: "ask an optional runtime to " + map[bool]string{false: "run an execute job now", true: "cancel a running run"}[cancel], Args: cobra.ExactArgs(1), Long: "Submit an advisory request at the project's owning hub. Supply a fresh ULID, retain it with the TTL, and reuse both after a lost response. Request admission launches or cancels nothing itself."}
-	cmd.Flags().StringVar(&requestUID, "request-uid", "", "fresh request ULID; retain for retry")
+	cmd.Flags().StringVar(&requestUID, "request-uid", "", "request ULID; retain for retry")
 	cmd.Flags().Int64Var(&ttl, "ttl", 600, "request lifetime in seconds (60..86400)")
 	_ = cmd.MarkFlagRequired("request-uid")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
