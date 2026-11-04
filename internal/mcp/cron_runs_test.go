@@ -202,7 +202,9 @@ func TestCronRunReasonFilter(t *testing.T) {
 	runs := cronOK(t, f.session, "cron_runs", map[string]any{"reason": "failed", "limit": 1})["runs"].([]any)
 	require.Len(t, runs, 1)
 	require.Equal(t, wanted, runs[0].(map[string]any)["uid"])
-	require.True(t, cronCall(t, f.session, "cron_runs", map[string]any{"reason": "INVALID"}).IsError)
+	result := cronCall(t, f.session, "cron_runs", map[string]any{"reason": "INVALID"})
+	require.True(t, result.IsError)
+	require.Contains(t, string(mustJSON(t, result)), "invalid reason code")
 }
 
 func TestMCPCronRunsReasonRefusesOldDaemon(t *testing.T) {

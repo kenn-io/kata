@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -104,7 +105,7 @@ func TestSummaryRelayValidatesWholeBatch(t *testing.T) {
 		envelopes = append(envelopes, db.RelayEnvelope{Stream: db.RelayStreamEvent, Body: body})
 	}
 	_, err = client.AcceptRelayDeliveries(t.Context(), 1, db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: envelopes})
-	require.Error(t, err)
+	require.ErrorIs(t, err, cron.ErrInvalid)
 	require.Zero(t, posts)
 }
 

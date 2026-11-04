@@ -71,8 +71,19 @@ func TestCronCLIReasonFilter(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(raw), &result))
 	require.Len(t, result.Runs, 1)
 	require.Equal(t, wanted, result.Runs[0].UID)
-	_, _, err = executeCronCLI(t, env.URL, strings.NewReader(""), "run", "list", "--reason", "INVALID")
-	require.Error(t, err)
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+	_, _, err = executeCronCLI(t, server.URL, strings.NewReader(""), "run", "list", "--reason", "INVALID")
+	var cliErr *cliError
+	require.ErrorAs(t, err, &cliErr)
+	require.Equal(t, kindValidation, cliErr.Kind)
+	require.Equal(t, ExitValidation, cliErr.ExitCode)
+	require.Contains(t, cliErr.Message, "invalid reason code")
+	require.Zero(t, requests.Load(), "invalid reasons must fail before dialing the daemon")
 }
 
 func TestCronCLIReasonOmittedWhenUnset(t *testing.T) {

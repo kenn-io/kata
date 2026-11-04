@@ -34,28 +34,26 @@ func TestCronSummaryDetail(t *testing.T) {
 	for _, width := range []int{20, 40, 80} {
 		m.width = width
 		_, _, lines := cronDetail(m, cronRef{cronRuns, m.cron.data.runs[0].UID})
-		var text strings.Builder
 		for _, line := range lines {
 			require.LessOrEqual(t, ansi.StringWidth(line.text), width-2)
 			require.NotContains(t, line.text, "\x1b")
 			if strings.Contains(line.text, "urn:") {
 				require.Empty(t, line.target.uid)
 			}
-			text.WriteString(line.text)
-			text.WriteByte('\n')
 		}
-		compact := strings.Join(strings.Fields(text.String()), " ")
-		for _, want := range []string{"Reason:", "agent_quota", "Usage", "Model:", "model-large", "Cost:", "0.00 USD", "Steps (2)", "review", "Attempts:", "Exit:", "Duration:", "2s", "publish", "skipped", "Log ref:"} {
-			// Wrapping may split a long value at narrow widths; assert full values
-			// at the ordinary detail width; all widths must fit and strip escapes.
-			if width == 80 {
-				require.Contains(t, compact, want)
-			}
-		}
+	}
+	_, _, lines := cronDetail(m, cronRef{cronRuns, m.cron.data.runs[0].UID})
+	var text strings.Builder
+	for _, line := range lines {
+		text.WriteString(line.text + "\n")
+	}
+	compact := strings.Join(strings.Fields(text.String()), " ")
+	for _, want := range []string{"Reason:", "agent_quota", "Usage", "Model:", "model-large", "Cost:", "0.00 USD", "Steps (2)", "review", "Attempts:", "Exit:", "Duration:", "2s", "publish", "skipped", "Log ref:"} {
+		require.Contains(t, compact, want)
 	}
 	m.cron.data.runs[0].Summary.Usage.CostMicros = nil
 	m.cron.data.runs[0].Summary.Steps[0].ExitCode = nil
-	_, _, lines := cronDetail(m, cronRef{cronRuns, m.cron.data.runs[0].UID})
+	_, _, lines = cronDetail(m, cronRef{cronRuns, m.cron.data.runs[0].UID})
 	for _, line := range lines {
 		require.NotContains(t, line.text, "Cost:")
 		require.NotContains(t, line.text, "Exit:")
@@ -144,7 +142,7 @@ func TestCronSummaryReasonCarriers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := cronSummaryFixture(t)
 			m.width = 100
-			s := generated.SummaryResponse{Version: 1, Message: &tc.message}
+			s := generated.SummaryResponse{Version: 1, Message: optionalSummaryTime(tc.message)}
 			if tc.reason != "" {
 				s.Reason = &tc.reason
 			}

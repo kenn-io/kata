@@ -25,9 +25,9 @@ func TestCronSummaryTriggerDetail(t *testing.T) {
 			m.width = 100
 			run := &m.cron.data.runs[0]
 			run.OccurrenceKey = &tc.key
-			run.Summary.Trigger = &tc.explicit
-			run.Summary.Reason = &tc.reason
-			run.Summary.Message = &tc.message
+			run.Summary.Trigger = optionalSummaryTime(tc.explicit)
+			run.Summary.Reason = optionalSummaryTime(tc.reason)
+			run.Summary.Message = optionalSummaryTime(tc.message)
 			_, _, lines := cronDetail(m, cronRef{cronRuns, run.UID})
 			var b strings.Builder
 			for _, line := range lines {
@@ -70,7 +70,7 @@ func TestCronSummaryTriggerDetailProperty(t *testing.T) {
 		tc := cases[hegel.Draw(ht, hegel.Integers[int](0, len(cases)-1))]
 		m.width = hegel.Draw(ht, hegel.Integers[int](20, 120))
 		run := &m.cron.data.runs[0]
-		run.OccurrenceKey, run.Summary.Trigger, run.Summary.Reason = &tc.key, &tc.explicit, &tc.reason
+		run.OccurrenceKey, run.Summary.Trigger, run.Summary.Reason = &tc.key, optionalSummaryTime(tc.explicit), optionalSummaryTime(tc.reason)
 		_, _, lines := cronDetail(m, cronRef{cronRuns, run.UID})
 		var b strings.Builder
 		for _, line := range lines {

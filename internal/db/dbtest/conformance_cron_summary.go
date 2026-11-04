@@ -213,7 +213,7 @@ func checkCronSummaryRelayAcceptance(t *testing.T, store db.Storage) error {
 	require.NoError(t, err)
 	writeCtx := db.WithRootAttribution(ctx, fixture.signer, "relay-member")
 	_, err = store.AcceptRelayDeliveries(writeCtx, grant.Enrollment.RelayBindingUID, db.RelayBatch{Stream: db.RelayStreamEvent, Envelopes: envelopes[:]})
-	require.Error(t, err)
+	require.ErrorIs(t, err, db.ErrFederationIngestValidation)
 	for _, id := range ids {
 		_, err := store.CronRun(ctx, fixture.project.ID, id)
 		require.ErrorIs(t, err, db.ErrNotFound)
