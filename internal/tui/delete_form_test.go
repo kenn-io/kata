@@ -353,6 +353,46 @@ func TestDeleteFromSplitListReplacesRetainedDetail(t *testing.T) {
 	assert.Empty(t, h.m.detail.navStack, "the replacement detail starts fresh")
 }
 
+func TestDeleteFromSplitListPreservesIndependentDetailAndBack(t *testing.T) {
+	h := newDeleteHarness(t, viewDetail)
+	h.m.projectsByID = map[int64]string{h.project.ID: h.project.Name}
+	target, prior, related := h.issues[0], h.issues[1], h.issues[2]
+	_, err := NewClient(h.env.URL, h.env.HTTP).AddLink(t.Context(), h.project.ID, prior.UID, LinkBody{Type: "related", ToRef: related.UID}, "alice")
+	require.NoError(t, err)
+	h.selectIssue(prior.UID)
+	h.m = h.drain(h.m.detail.refetch(h.m.api))
+	h.m.view = viewList
+	h.selectIssue(target.UID)
+	h.m, _ = updateModel(h.m, tea.WindowSizeMsg{Width: 180, Height: 40})
+	require.Equal(t, splitlayout.Split, h.m.layout)
+	h.m.opts.Mouse = true
+	h.m.focus = focusDetail
+	h.m.detail.activeTab = tabLinks
+	h.m.detail.detailFocus = focusActivity
+	h.m.detail.tabCursor = 0
+	h.m = h.drain(h.enter())
+	require.NotNil(t, h.m.detail.issue)
+	require.Equal(t, related.UID, h.m.detail.issue.UID)
+
+	h.m, _ = updateModel(h.m, mouseLeftClick(4, 3))
+	require.Equal(t, focusList, h.m.focus)
+	require.Equal(t, target.UID, h.m.list.selectedUID)
+	h.key(runeKey('X'))
+	require.Equal(t, inputDeleteForm, h.m.input.kind)
+	h.m = typeString(h.m, "DELETE "+h.qualified(target))
+	h.m = h.drain(h.enter())
+
+	require.True(t, h.isDeleted(target.UID))
+	require.NotNil(t, h.m.detail.issue)
+	assert.Equal(t, related.UID, h.m.detail.issue.UID, "deleting a list row preserves the independently opened detail")
+	assert.Len(t, h.m.detail.navStack, 1, "the inspected detail keeps its Back history")
+	h.m, _ = updateModel(h.m, mouseLeftClick(h.m.width-4, 3))
+	require.Equal(t, focusDetail, h.m.focus)
+	h.m = h.drain(h.key(tea.KeyPressMsg{Code: tea.KeyEscape}))
+	require.NotNil(t, h.m.detail.issue)
+	assert.Equal(t, prior.UID, h.m.detail.issue.UID, "Back returns to the issue that linked to the inspected detail")
+}
+
 func TestDeleteKeyDoesNothingWithSavedReturnContext(t *testing.T) {
 	for _, context := range []string{"Inbox", "Attention"} {
 		t.Run(context, func(t *testing.T) {
