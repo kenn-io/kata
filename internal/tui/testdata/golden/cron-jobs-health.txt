@@ -23,4 +23,4 @@ kata カタ [jobs] runs workflows
 
 
 
- j/k move▕ ↵/l open▕ / filter▕ n/e new/edit▕ h/esc kata▕ r refresh▕ 1-4 tabs▕ ? help▕ q quit
+ j/k move▕ ↵/l open▕ / filter▕ n/e new/edit▕ h/esc kata▕ r refresh▕ u/U unseen/clear▕ 1-4 tabs▕ ? help▕ q quit

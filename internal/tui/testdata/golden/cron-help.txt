@@ -21,6 +21,7 @@ j/k    move
 n/e    new/edit
 h/esc  kata
 r      refresh
+u/U    unseen/clear
 1-4    tabs
 ?      help
 q      quit
