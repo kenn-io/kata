@@ -2,12 +2,11 @@ package pgstore
 
 import (
 	"context"
+	"encoding/json/v2"
 	"fmt"
 	"strings"
 
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kit/search/postgres"
-	"go.kenn.io/kit/search/sqlquery"
 )
 
 // SearchFTS returns issues that contain all normalized query terms.
@@ -15,7 +14,8 @@ func (s *Store) SearchFTS(ctx context.Context, p db.SearchFTSParams) ([]db.Searc
 	return s.searchFTS(ctx, searchFTSRequest{params: p})
 }
 
-// SearchFTSAny returns issues that contain at least one normalized query term.
+// SearchFTSAny finds at least one normalized query term in title and body
+// documents only. Comments don't contribute candidates, scores, or MatchedIn flags.
 func (s *Store) SearchFTSAny(ctx context.Context, p db.SearchFTSParams) ([]db.SearchCandidate, error) {
 	return s.searchFTS(ctx, searchFTSRequest{params: p, any: true})
 }
@@ -36,22 +36,14 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
 	} else if limit > 200 && !request.params.StableOrder {
 		limit = 200
 	}
-	anyQuery := `(SELECT CASE WHEN count(*) = 0 THEN NULL
-		ELSE to_tsquery('kata_simple_unaccent', string_agg(quote_literal(term), ' | ')) END
-		FROM unnest(tsvector_to_array(to_tsvector('kata_simple_unaccent', ?))) AS term)`
-	matchQuery := "plainto_tsquery('kata_simple_unaccent', ?)"
-	if request.any {
-		matchQuery = anyQuery
+	words, err := json.Marshal(strings.Fields(queryText))
+	if err != nil {
+		return nil, fmt.Errorf("search fts: %w", err)
 	}
-	// The kit builder binds the source predicate's anonymous ? placeholders in
-	// textual order, so every fragment appends its value as it is rendered.
-	var predicateArgs []any
-	bind := func(value any) string {
-		predicateArgs = append(predicateArgs, value)
-		return "?"
-	}
+	predicateArgs := []any{string(words)}
+	bind := numberedArg(&predicateArgs)
 	var rowFilter strings.Builder
-	rowFilter.WriteString("EXISTS (SELECT 1 FROM issues i WHERE i.id = d.issue_id AND i.project_id = " + bind(request.params.ProjectID))
+	rowFilter.WriteString("i.project_id = " + bind(request.params.ProjectID))
 	if !request.params.IncludeDeleted {
 		rowFilter.WriteString("\n   AND i.deleted_at IS NULL")
 	}
@@ -72,49 +64,63 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
 	}
 	rowFilter.WriteString("\n   AND " + authorizedIssuePredicateWith(ctx, "i.project_id", bind))
 	if scope := request.params.IssueScope; scope != nil {
-		// The members CTE binds the root once and the project twice, in that
-		// textual order.
-		rowFilter.WriteString("\n   AND i.id IN (" + strings.NewReplacer("$1", bind(scope.RootIssueUID), "$2", "?").Replace(issueScopeMembersCTE) + " SELECT id FROM scope_members)")
-		predicateArgs = append(predicateArgs, scope.ProjectUID, scope.ProjectUID)
+		// Reuse the project parameter wherever the members CTE needs it.
+		rowFilter.WriteString("\n   AND i.id IN (" + strings.NewReplacer("$1", bind(scope.RootIssueUID), "$2", bind(scope.ProjectUID)).Replace(issueScopeMembersCTE) + " SELECT id FROM scope_members)")
 	}
 	if after := request.params.After; after != nil {
 		rowFilter.WriteString("\n   AND (i.created_at,i.id) > (" + bind(formatStoredTime(after.CreatedAt)) + "," + bind(after.ID) + ")")
 	}
-	rowFilter.WriteString(")")
-	predicate := rowFilter.String()
-	relation, err := postgres.BuildLexical(postgres.LexicalRequest{
-		Mapping: postgres.LexicalMapping{SourceTable: "issues_search", SourceKey: "issue_id", Vector: "d.tsv"},
-		Config:  "kata_simple_unaccent", TSQuery: matchQuery, TSQueryArgs: []any{queryText},
-		Rank: postgres.RankCover, CandidateLimit: limit,
-		SourcePredicate: sqlquery.Predicate{SQL: predicate, Args: predicateArgs},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("search fts: %w", err)
+	minimum := "(SELECT count(*) FROM terms)"
+	if request.any {
+		minimum = "1"
 	}
+	commentHits := ""
+	if !request.any {
+		commentHits = fmt.Sprintf(`
+ UNION ALL
+ SELECT i.id, terms.word, ts_rank_cd(to_tsvector('kata_simple_unaccent', c.body), terms.q), true
+ FROM terms CROSS JOIN comments c JOIN issues i ON i.id = c.issue_id
+ WHERE to_tsvector('kata_simple_unaccent', c.body) @@ terms.q AND %s`, rowFilter.String())
+	}
+
 	order := "candidates.score DESC, i.id DESC"
+	pageOrder := "score DESC, doc_key DESC"
 	if request.params.StableOrder {
-		relation.SQL = strings.Replace(relation.SQL, "ORDER BY score DESC, doc_key ASC", "ORDER BY (SELECT created_at FROM issues WHERE id = d.issue_id) ASC, doc_key ASC", 1)
 		order = "i.created_at ASC, i.id ASC"
-	} else {
-		relation.SQL = strings.Replace(relation.SQL, "ORDER BY score DESC, doc_key ASC", "ORDER BY score DESC, doc_key DESC", 1)
+		pageOrder = "(SELECT i.created_at FROM issues i WHERE i.id = candidates.doc_key) ASC, doc_key ASC"
 	}
-	query := fmt.Sprintf(`WITH candidates AS (%s), queries AS (
-  SELECT %s AS any_query
+	// Quote normalized lexemes directly so punctuation and URLs survive without
+	// a second parse through the text-search dictionary.
+	query := fmt.Sprintf(`WITH words AS (
+ SELECT DISTINCT unnest(tsvector_to_array(to_tsvector('kata_simple_unaccent', value))) AS word
+ FROM jsonb_array_elements_text($1::jsonb)
+), terms AS (
+ SELECT word, quote_literal(word)::tsquery AS q FROM words
+), hits AS (
+ SELECT i.id AS issue_id, terms.word, ts_rank_cd(h.tsv, terms.q) AS score, false AS in_comments
+ FROM terms CROSS JOIN issues_search h JOIN issues i ON i.id = h.issue_id
+ WHERE h.tsv @@ terms.q AND %s%s
+), word_hits AS (
+ SELECT issue_id, word, max(score) AS score, bool_or(in_comments) AS in_comments
+ FROM hits GROUP BY issue_id, word
+), candidates AS (
+ SELECT issue_id AS doc_key, count(*) AS matched_words, sum(score) AS score, bool_or(in_comments) AS in_comments
+ FROM word_hits GROUP BY issue_id HAVING count(*) >= %s
+), page AS MATERIALIZED (
+ SELECT * FROM candidates ORDER BY %s LIMIT %s
 )
 SELECT `+issueColumns+`,
        candidates.score,
-       to_tsvector('kata_simple_unaccent', i.title) @@ queries.any_query AS in_title,
-       to_tsvector('kata_simple_unaccent', i.body) @@ queries.any_query AS in_body,
-       to_tsvector('kata_simple_unaccent', COALESCE((
-         SELECT string_agg(c.body, ' ' ORDER BY c.id) FROM comments c WHERE c.issue_id = i.id
-       ), '')) @@ queries.any_query AS in_comments
-  FROM candidates
-  JOIN issues i ON i.id = candidates.doc_key
-  JOIN projects p ON p.id = i.project_id
- CROSS JOIN queries
- ORDER BY %s`, relation.SQL, strings.Replace(anyQuery, "?", "$1", 1), order)
+       EXISTS (SELECT 1 FROM terms WHERE to_tsvector('kata_simple_unaccent', i.title) @@ terms.q) AS in_title,
+       EXISTS (SELECT 1 FROM terms WHERE to_tsvector('kata_simple_unaccent', i.body) @@ terms.q) AS in_body,
+       candidates.in_comments
+ FROM page AS candidates
+ JOIN issues i ON i.id = candidates.doc_key
+ JOIN projects p ON p.id = i.project_id
+ ORDER BY %s`, rowFilter.String(), commentHits, minimum, pageOrder, bind(limit), order)
+	args := predicateArgs
 
-	rows, err := s.QueryContext(ctx, query, relation.Args...)
+	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search fts: %w", mapSQLError(err, nil))
 	}

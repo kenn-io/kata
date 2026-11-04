@@ -20,6 +20,7 @@ import (
 // fails the suite until the stale entry is removed.
 type Backend struct {
 	Name                                string
+	SearchIndexesEmoji                  bool
 	Open                                func(t *testing.T) db.Storage
 	OpenSame                            func(t *testing.T, store db.Storage) db.Storage
 	InstallExternalRootClock            func(db.Storage, func() time.Time) func()
@@ -50,6 +51,7 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "search tokenizer words", methods: []string{"CreateProject", "CreateIssue", "SearchFTS", "SearchFTSAny"}, runWithBackend: checkSearchTokenizerWords},
 	{name: "setup finished delivery", methods: []string{"PrepareSetupFinished", "CompleteSetupFinished", "SystemProject", "CloseIssue", "SoftDeleteIssue", "RemoveProject"}, runWithBackend: checkSetupFinishedDelivery},
 	{name: "comment graph project access", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "MoveIssueProject", "ReadCommentGraph"}, run: checkCommentGraphProjectAccess},
 	{name: "recurring adoption snapshots", run: checkRecurringAdoptionSnapshots},
@@ -294,6 +296,7 @@ var storageScenarios = []scenario{
 		run:     checkIssueRevisionAuthorRewrite,
 	},
 	{name: "search status", methods: []string{"SearchFTS", "SearchFTSAny"}, run: checkSearchStatus},
+	{name: "duplicate survives higher word count distractors", methods: []string{"CreateProject", "CreateIssue", "SearchFTSAny"}, run: checkDuplicateSurvivesHigherWordCountDistractors},
 	{name: "restricted search reads", methods: []string{"AddLabel", "CreateComment", "CreateIssue", "CreateProject", "SearchFTS", "SearchFTSAny"}, run: checkRestrictedSearchReads},
 	{
 		name:    "search assignment expiry",

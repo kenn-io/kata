@@ -348,7 +348,7 @@ of unrelated event history and untouched projection rows. Batches with cron
 events also materialize cron definitions and run observations in the write
 phase. Total preparation still reads and folds project history, plus
 link-bearing group history when links can change. Existing full-text search
-triggers can aggregate comments on a changed issue, and claim auditing can
+triggers index each issue and comment separately, and claim auditing can
 expire claims. Custom transaction fences that write may acquire the lock before
 preparation; native enrollment fences only read. Explicit full materialization
 remains available for recovery.

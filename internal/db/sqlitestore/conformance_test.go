@@ -19,7 +19,8 @@ import (
 func TestStorageConformance(t *testing.T) {
 	t.Parallel()
 	dbtest.RunStorageConformance(t, dbtest.Backend{
-		Name: "sqlite",
+		Name:               "sqlite",
+		SearchIndexesEmoji: true,
 		Open: func(t *testing.T) db.Storage {
 			t.Helper()
 			store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))

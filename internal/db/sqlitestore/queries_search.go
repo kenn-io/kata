@@ -2,29 +2,28 @@ package sqlitestore
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json/v2"
 	"fmt"
 	"strings"
+	"sync"
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kit/search/lexical"
-	"go.kenn.io/kit/search/sqlitefts"
-	"go.kenn.io/kit/search/sqlquery"
 )
 
-// SearchFTS runs an FTS5 BM25-ranked query against issues_fts, joins back to
-// issues, and returns the top `p.Limit` rows scoped to the given project. When
-// p.IncludeDeleted is false, soft-deleted issues are filtered. The returned
-// Score is the negated raw BM25 (so higher = better match); MatchedIn is
-// derived from per-column MATCH subqueries since FTS5 highlight() returns
-// NULL on contentless tables.
+// SearchFTS finds terms across issues and their comments and returns the top
+// p.Limit issues scoped to the project. Score sums each word's best negated
+// document BM25 (higher is better). Soft-deleted
+// issues are filtered unless p.IncludeDeleted is set. MatchedIn uses MATCH
+// subqueries since FTS5 highlight() returns NULL on contentless tables.
 func (d *Store) SearchFTS(ctx context.Context, p db.SearchFTSParams) ([]db.SearchCandidate, error) {
 	return d.searchFTS(ctx, searchFTSReq{params: p, mode: searchAll})
 }
 
-// SearchFTSAny is like SearchFTS but joins query tokens with FTS5 OR rather
-// than implicit AND. The look-alike soft-block uses this so candidate
-// retrieval has high recall — similarity.Score is the actual gate, and the
-// AND form prematurely filters near-duplicates that differ by one token.
+// SearchFTSAny finds at least one query term in title and body documents only.
+// Look-alike checks score title and body overlap, so comments don't contribute
+// candidates, scores, or MatchedIn flags.
 func (d *Store) SearchFTSAny(ctx context.Context, p db.SearchFTSParams) ([]db.SearchCandidate, error) {
 	return d.searchFTS(ctx, searchFTSReq{params: p, mode: searchAny})
 }
@@ -59,24 +58,14 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		limit = 200
 	}
 
-	analyzer := lexical.Literal()
-	prepared, err := analyzer.PrepareLiteral(q)
+	phrases, err := searchablePhrases(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("search fts: %w", err)
 	}
-	phrases := make([]string, 0)
-	for word := range strings.FieldsSeq(q) {
-		term, err := analyzer.PrepareLiteral(word)
-		if err != nil {
-			return nil, fmt.Errorf("search fts: %w", err)
-		}
-		phrases = append(phrases, term.Match)
+	if len(phrases) == 0 {
+		return nil, nil
 	}
 	colPhrase := strings.Join(phrases, " OR ")
-	topPhrase := prepared.Match
-	if r.mode == searchAny {
-		topPhrase = colPhrase
-	}
 
 	rowFilter := "AND i.deleted_at IS NULL"
 	if r.params.IncludeDeleted {
@@ -113,41 +102,64 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		filterArgs = append(filterArgs, stamp, stamp, r.params.After.ID)
 	}
 
-	helper, err := sqlitefts.New(
-		sqlitefts.WithIndexTable("issues_fts"), sqlitefts.WithIndexKey("rowid"),
-		sqlitefts.WithSourceTable("issues"), sqlitefts.WithSourceKey("id"),
-	)
+	// Match words as rows with a fixed statement shape and one JSON parameter.
+	words, err := json.Marshal(phrases)
 	if err != nil {
 		return nil, fmt.Errorf("search fts: %w", err)
-	}
-	candidates, err := helper.Build(sqlitefts.Request{
-		Match: topPhrase, CandidateLimit: limit,
-		SourcePredicate: sqlquery.Predicate{
-			SQL:  "d.project_id = ? " + strings.ReplaceAll(rowFilter, "i.", "d."),
-			Args: append([]any{r.params.ProjectID}, filterArgs...),
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("search fts: %w", err)
-	}
-	if r.params.StableOrder {
-		candidates.SQL = strings.Replace(candidates.SQL, "ORDER BY score DESC, doc_key ASC", "ORDER BY "+creationKeySQL("d")+" ASC, doc_key ASC", 1)
 	}
 	order := "candidates.score DESC, i.id ASC"
+	pageOrder := "score DESC, doc_key ASC"
 	if r.params.StableOrder {
 		order = creationKeySQL("i") + " ASC, i.id ASC"
+		pageOrder = "(SELECT " + creationKeySQL("i") + " FROM issues i WHERE i.id = candidates.doc_key) ASC, doc_key ASC"
 	}
-	query := fmt.Sprintf(`WITH candidates AS (%s)
-		SELECT `+issueColumns+`,
-		       candidates.score,
-		       (i.id IN (SELECT rowid FROM issues_fts WHERE title MATCH ?)) AS in_title,
-		       (i.id IN (SELECT rowid FROM issues_fts WHERE body MATCH ?)) AS in_body,
-		       (i.id IN (SELECT rowid FROM issues_fts WHERE comments MATCH ?)) AS in_comments
-		FROM candidates
-		JOIN issues i ON i.id = candidates.doc_key
-		JOIN projects p ON p.id = i.project_id
-		ORDER BY %s`, candidates.SQL, order)
-	args := append(candidates.Args, colPhrase, colPhrase, colPhrase)
+	minimum := 1
+	if r.mode == searchAll {
+		minimum = len(phrases)
+	}
+	args := []any{string(words), r.params.ProjectID}
+	args = append(args, filterArgs...)
+	commentHits := ""
+	if r.mode == searchAll {
+		commentHits = fmt.Sprintf(`
+  UNION ALL
+  SELECT c.issue_id, terms.word, -bm25(comments_fts), 1
+  FROM terms CROSS JOIN comments_fts
+  CROSS JOIN comments c ON c.id = comments_fts.rowid
+  WHERE comments_fts MATCH terms.word AND EXISTS (
+   SELECT 1 FROM issues i WHERE i.id = c.issue_id AND i.project_id = ? %s
+  )`, rowFilter)
+		args = append(args, r.params.ProjectID)
+		args = append(args, filterArgs...)
+	}
+	// Start from matching postings, then check issue eligibility before scoring.
+	query := fmt.Sprintf(`WITH terms AS (
+  SELECT value AS word FROM json_each(?)
+ ), hits AS MATERIALIZED (
+  SELECT issues_fts.rowid AS issue_id, terms.word, -bm25(issues_fts) AS score, 0 AS in_comments
+  FROM terms CROSS JOIN issues_fts
+  WHERE issues_fts MATCH terms.word AND EXISTS (
+   SELECT 1 FROM issues i WHERE i.id = issues_fts.rowid AND i.project_id = ? %s
+  )%s
+ ), word_hits AS (
+  SELECT issue_id, word, max(score) AS score, max(in_comments) AS in_comments
+  FROM hits GROUP BY issue_id, word
+ ), candidates AS (
+  SELECT issue_id AS doc_key, count(*) AS matched_words, sum(score) AS score, max(in_comments) AS in_comments
+  FROM word_hits GROUP BY issue_id HAVING count(*) >= ?
+ ), page AS MATERIALIZED (
+  SELECT * FROM candidates ORDER BY %s LIMIT ?
+ )
+ SELECT `+issueColumns+`,
+        candidates.score,
+        (i.id IN (SELECT rowid FROM issues_fts WHERE title MATCH ?)) AS in_title,
+        (i.id IN (SELECT rowid FROM issues_fts WHERE body MATCH ?)) AS in_body,
+        candidates.in_comments
+ FROM page AS candidates
+ JOIN issues i ON i.id = candidates.doc_key
+ JOIN projects p ON p.id = i.project_id
+ ORDER BY %s`, rowFilter, commentHits, pageOrder, order)
+	args = append(args, minimum, limit, colPhrase, colPhrase)
 
 	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -192,4 +204,78 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		return nil, err
 	}
 	return out, nil
+}
+
+// The probe shares the index tokenizer without writing to the store, including
+// read-only stores. Each transaction owns the single connection until rollback.
+var searchProbe = sync.OnceValues(func() (*sql.DB, error) {
+	probe, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		return nil, err
+	}
+	probe.SetMaxOpenConns(1)
+	return probe, nil
+})
+
+// searchablePhrases deduplicates words and drops those unicode61 leaves empty.
+// Its Unicode 6.1 categories differ from Go's Unicode tables.
+func searchablePhrases(ctx context.Context, query string) ([]string, error) {
+	var words []string
+	phrases := make([]string, 0)
+	seen := make(map[string]bool)
+	analyzer := lexical.Literal()
+	for word := range strings.FieldsSeq(query) {
+		if seen[word] {
+			continue
+		}
+		seen[word] = true
+		term, err := analyzer.PrepareLiteral(word)
+		if err != nil {
+			return nil, err
+		}
+		words = append(words, word)
+		phrases = append(phrases, term.Match)
+	}
+	input, err := json.Marshal(words)
+	if err != nil {
+		return nil, err
+	}
+	probe, err := searchProbe()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := probe.ExecContext(ctx, `CREATE VIRTUAL TABLE IF NOT EXISTS query_fts USING fts5(text, tokenize='unicode61 remove_diacritics 2');
+ CREATE VIRTUAL TABLE IF NOT EXISTS query_vocab USING fts5vocab(query_fts, instance)`); err != nil {
+		return nil, err
+	}
+	tx, err := probe.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO query_fts(rowid,text) SELECT CAST(key AS INTEGER)+1,value FROM json_each(?)`, string(input)); err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT doc, group_concat(term, ' ')
+ FROM (SELECT doc, term FROM query_vocab ORDER BY doc, offset)
+ GROUP BY doc ORDER BY doc`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var searchable []string
+	clear(seen)
+	for rows.Next() {
+		var doc int
+		var normalized string
+		if err := rows.Scan(&doc, &normalized); err != nil {
+			return nil, err
+		}
+		if seen[normalized] {
+			continue
+		}
+		seen[normalized] = true
+		searchable = append(searchable, phrases[doc-1])
+	}
+	return searchable, rows.Err()
 }
