@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -440,80 +441,67 @@ func TestCronRefreshSubjects(t *testing.T) {
 func TestCronRefreshQueueAttentionBound(t *testing.T) {
 	for _, mode := range []string{"fill", "exact", "exact only"} {
 		t.Run(mode, func(t *testing.T) {
-			m, a := cronRefreshFixture(t, 16)
-			p := cronData{inspectedRuns: m.cron.runPage.runs}
-			entered := make(chan struct{}, 16)
-			release := make(chan struct{}, 16)
-			parentCalled := make(chan struct{})
-			a.waiter.wait = func(context.Context, string) (cronParent, error) {
-				close(parentCalled)
-				return cronParent{open: true}, nil
-			}
-			a.exact = func(ctx context.Context, uid string) (generated.CronRun, error) {
-				if mode == "exact" && uid == "o-000" {
-					return generated.CronRun{UID: uid, Status: "running", IssueUID: new("late")}, nil
+			synctest.Test(t, func(t *testing.T) {
+				m, a := cronRefreshFixture(t, 16)
+				p := cronData{inspectedRuns: m.cron.runPage.runs}
+				entered := make(chan struct{}, 16)
+				release := make(chan struct{}, 16)
+				parentCalled := make(chan int, 1)
+				a.waiter.wait = func(context.Context, string) (cronParent, error) {
+					a.mu.Lock()
+					defer a.mu.Unlock()
+					parentCalled <- len(a.reads) // exact reads started before attention
+					return cronParent{open: true}, nil
 				}
-				entered <- struct{}{}
-				select {
-				case <-release:
-				case <-ctx.Done():
-					return generated.CronRun{}, ctx.Err()
-				}
-				return generated.CronRun{UID: uid, Status: "succeeded"}, nil
-			}
-			if mode == "fill" {
-				j := cronFixture(t).cron.data.jobs[0]
-				p.jobs = []generated.CronJob{j}
-				// Override the list read only for this job fill, while retaining the head API.
-				a.cronWaitFetchAPI = &cronWaitFetchAPI{cronReadTestAPI: &cronReadTestAPI{data: cronData{runs: []generated.CronRun{{UID: "fill", JobUID: new(j.UID), Status: "running", IssueUID: new("late")}}}}, waiter: a.waiter}
-			}
-			done := make(chan struct{})
-			go func() { cronEnrich(t.Context(), a, 7, &p); close(done) }()
-			// Release up to eight exact reads. A dynamically admitted attention read
-			// must run before a ninth can overtake it (four queued plus four in flight).
-			if mode != "exact only" {
-				ahead := 0
-			admission:
-				for {
+				a.exact = func(ctx context.Context, uid string) (generated.CronRun, error) {
+					if mode == "exact" && uid == "o-000" {
+						return generated.CronRun{UID: uid, Status: "running", IssueUID: new("late")}, nil
+					}
+					entered <- struct{}{}
 					select {
-					case <-parentCalled:
-						break admission
-					case <-entered:
-						ahead++
-						if ahead > 8 {
-							select {
-							case <-parentCalled:
-								break admission
-							default:
-							}
-							for range 16 {
-								release <- struct{}{}
-							}
-							select {
-							case <-done:
-							case <-time.After(time.Second):
-								t.Fatal("refresh did not finish")
-							}
-							t.Fatal("more than eight exact reads overtook attention")
+					case <-release:
+					case <-ctx.Done():
+						return generated.CronRun{}, ctx.Err()
+					}
+					return generated.CronRun{UID: uid, Status: "succeeded"}, nil
+				}
+				if mode == "fill" {
+					j := cronFixture(t).cron.data.jobs[0]
+					p.jobs = []generated.CronJob{j}
+					// Override the list read only for this job fill, while retaining the head API.
+					a.cronWaitFetchAPI = &cronWaitFetchAPI{cronReadTestAPI: &cronReadTestAPI{data: cronData{runs: []generated.CronRun{{UID: "fill", JobUID: new(j.UID), Status: "running", IssueUID: new("late")}}}}, waiter: a.waiter}
+				}
+				done := make(chan struct{})
+				go func() { cronEnrich(t.Context(), a, 7, &p); close(done) }()
+				// A dynamically admitted attention read must run before a ninth exact
+				// read can overtake it (four queued plus four in flight). Releasing one
+				// read only once every worker blocks makes reads start in queue order,
+				// not goroutine wake-up order.
+				for mode != "exact only" {
+					synctest.Wait()
+					select {
+					case ahead := <-parentCalled:
+						if mode == "exact" {
+							ahead-- // o-000 itself revealed the attention
 						}
+						require.LessOrEqual(t, ahead, 8, "more than eight exact reads overtook attention")
+					case <-entered:
 						release <- struct{}{}
+						continue
 					case <-done:
 						t.Fatal("refresh ended without attention")
-					case <-time.After(time.Second):
+					default:
 						t.Fatal("attention read did not start")
 					}
+					break
 				}
-			}
-			for range 16 {
-				release <- struct{}{}
-			}
-			select {
-			case <-done:
-			case <-time.After(time.Second):
-				t.Fatal("refresh did not finish")
-			}
-			require.Len(t, a.reads, 16)
-			require.Len(t, p.lookup, 16)
+				for range 16 {
+					release <- struct{}{}
+				}
+				<-done
+				require.Len(t, a.reads, 16)
+				require.Len(t, p.lookup, 16)
+			})
 		})
 	}
 }
