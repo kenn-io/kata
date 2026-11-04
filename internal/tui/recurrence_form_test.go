@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
@@ -113,6 +114,39 @@ func (h *recurrenceHarness) save() {
 }
 
 func (h *recurrenceHarness) page() string { return stripANSI(h.m.viewContent()) }
+
+func TestRecurrenceFormConflictAtMinimumHeight(t *testing.T) {
+	defer snapshotInit(t)()
+	s := newRecurrenceForm(formTarget{issueShortID: "42aa"}, Issue{}, &recurrenceclient.View{
+		RRule: "FREQ=WEEKLY", DTStart: "2026-11-09", Timezone: "Europe/Paris",
+	})
+	s.err = recurrenceChangedMessage
+	s.recurrence.currentAfterRefusal = "now: FREQ=DAILY from 2026-11-09 in Europe/Paris"
+
+	modal := renderCenteredForm(s, 80, 12, snapshotFixedNow)
+	assert.LessOrEqual(t, lipgloss.Height(modal), 12, "conflict recovery must fit the supported terminal height")
+	got := stripANSI(overlayModal(strings.Repeat(blankLine(80)+"\n", 11)+blankLine(80), modal, 80, 12))
+	assertLineCount(t, got, 12)
+	assertLinesFitWidth(t, got, 80)
+	for _, want := range []string{"Rule", "Start", "Zone", "now: FREQ=DAILY", "again to write your input over it.", "ctrl+o save", "esc cancel"} {
+		assert.Contains(t, got, want)
+	}
+}
+
+func TestRecurrenceDetailScheduleFieldsAt80Columns(t *testing.T) {
+	defer snapshotInit(t)()
+	dm := snapDetailFixture()
+	dm.recurrence = &recurrenceclient.View{
+		RRule: "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,TU,WE,TH,FR", Timezone: "Europe/Paris",
+		NextOccurrenceKey: new("2026-11-09"),
+	}
+
+	got := stripANSI(dm.View(80, 40, viewChrome{}))
+	assertLinesFitWidth(t, got, 80)
+	for _, want := range []string{"repeats:", "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,TU,WE,TH,FR", "next 2026-11-09", "Europe/Paris"} {
+		assert.Contains(t, got, want)
+	}
+}
 
 // failingRecurrenceList fails the recurrence list and passes everything else
 // to the daemon.
