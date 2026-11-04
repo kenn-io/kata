@@ -15,9 +15,10 @@ import (
 	"hegel.dev/go/hegel"
 )
 
-func collisionJob(id, expression string) CollisionJob {
-	job := JobDefinition{Version: 1, Kind: "job", Enabled: true, Action: Action{Kind: "execute", Prompt: "Review"}, Issue: &IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "latest"}
-	job.Trigger = Trigger{Kind: "cron", Cron: expression}
+func collisionJob(t testing.TB, id, expression string) CollisionJob {
+	t.Helper()
+	job := adapterJob(t, Trigger{Kind: "cron", Cron: expression})
+	job.Catchup = "latest"
 	return CollisionJob{UID: id, Name: id, Def: job}
 }
 
@@ -25,8 +26,8 @@ func collisionJob(id, expression string) CollisionJob {
 // delivered watermark exclusive. Core next-fire previews remain strictly after.
 func TestCronCollisionsWindow(t *testing.T) {
 	from := time.Date(2026, 11, 3, 9, 0, 0, 0, time.UTC)
-	candidate := collisionJob("candidate", "0 9 * * *")
-	peer := collisionJob("peer", "0 9 * * *")
+	candidate := collisionJob(t, "candidate", "0 9 * * *")
+	peer := collisionJob(t, "peer", "0 9 * * *")
 	got := collisionReport(t, candidate, []CollisionJob{peer}, from, CollisionStepBudget)
 	require.False(t, got.Truncated)
 	require.Equal(t, from.Add(7*24*time.Hour), got.Until)
@@ -63,17 +64,17 @@ func nativeCollisionDefinition(job JobDefinition) JobDefinition {
 
 func TestCronCollisionsEligibilityAndPins(t *testing.T) {
 	from := time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)
-	candidate := collisionJob("candidate", "0 9 * * *")
+	candidate := collisionJob(t, "candidate", "0 9 * * *")
 	candidate.Def.Options = jsontext.Value(`{"adapter":"runner-a","executor":"group-a"}`)
 	peers := []CollisionJob{candidate}
 	for i, options := range []string{`{}`, `{"adapter":"runner-a"}`, `{"adapter":42,"executor":null}`, `{"executor":"group-b"}`, `{"adapter":"runner-b"}`} {
-		peer := collisionJob(fmt.Sprint(i), "0 9 * * *")
+		peer := collisionJob(t, fmt.Sprint(i), "0 9 * * *")
 		peer.Def.Options = jsontext.Value(options)
 		peers = append(peers, peer)
 	}
-	disabled := collisionJob("disabled", "0 9 * * *")
+	disabled := collisionJob(t, "disabled", "0 9 * * *")
 	disabled.Def.Enabled = false
-	native := collisionJob("native", "0 9 * * *")
+	native := collisionJob(t, "native", "0 9 * * *")
 	native.Def = nativeCollisionDefinition(native.Def)
 	peers = append(peers, disabled, native)
 	got := collisionReport(t, candidate, peers, from, CollisionStepBudget)
@@ -82,8 +83,8 @@ func TestCronCollisionsEligibilityAndPins(t *testing.T) {
 	require.Equal(t, []CollisionPeer{{UID: "0", Name: "0"}, {UID: "1", Name: "1"}, {UID: "2", Name: "2"}}, got.Items[0].Peers)
 	require.Zero(t, got.Skipped)
 	candidate.Def.Options = nil
-	peer := collisionJob("unpreviewable", "@every 1h")
-	missingProgress := collisionJob("missing-progress", "0 9 * * *")
+	peer := collisionJob(t, "unpreviewable", "@every 1h")
+	missingProgress := collisionJob(t, "missing-progress", "0 9 * * *")
 	missingProgress.Def = nativeCollisionDefinition(missingProgress.Def)
 	candidate.Def = nativeCollisionDefinition(candidate.Def)
 	got = collisionReport(t, candidate, []CollisionJob{missingProgress}, from, CollisionStepBudget)
@@ -95,8 +96,8 @@ func TestCronCollisionsEligibilityAndPins(t *testing.T) {
 
 func TestCronCollisionsBoundsAndPartialPeers(t *testing.T) {
 	from := time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)
-	candidate := collisionJob("candidate", "0 * * * *")
-	b, c := collisionJob("b", "0 * * * *"), collisionJob("c", "0 * * * *")
+	candidate := collisionJob(t, "candidate", "0 * * * *")
+	b, c := collisionJob(t, "b", "0 * * * *"), collisionJob(t, "c", "0 * * * *")
 	// Candidate and b each take 169 calls including their terminal probe;
 	// c then contributes two known occurrences before its walk is cut short.
 	partial := collisionReport(t, candidate, []CollisionJob{b, c}, from, 340)
@@ -108,7 +109,7 @@ func TestCronCollisionsBoundsAndPartialPeers(t *testing.T) {
 	require.Equal(t, 166, partial.Items[1].Occurrences)
 	peers := []CollisionJob{}
 	for i := range 25 {
-		peer := collisionJob(fmt.Sprintf("peer-%02d", i), "0 * * * *")
+		peer := collisionJob(t, fmt.Sprintf("peer-%02d", i), "0 * * * *")
 		peer.Def.Trigger = Trigger{Kind: "once", At: from.Add(time.Duration(i) * time.Hour).Format(time.RFC3339)}
 		peers = append(peers, peer)
 	}
@@ -133,7 +134,7 @@ func TestCronCollisionsBoundsAndPartialPeers(t *testing.T) {
 
 func TestCronCollisionsWireBoundaries(t *testing.T) {
 	for _, from := range []time.Time{{}, time.Date(9999, 12, 30, 0, 0, 0, 0, time.UTC)} {
-		candidate := collisionJob("candidate", "0 * * * *")
+		candidate := collisionJob(t, "candidate", "0 * * * *")
 		candidate.Def = nativeCollisionDefinition(candidate.Def)
 		peer := candidate
 		peer.UID = "peer"
@@ -143,7 +144,7 @@ func TestCronCollisionsWireBoundaries(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, from.Year() == 9999, got.Truncated)
 	}
-	candidate := collisionJob("candidate", "0 * * * *")
+	candidate := collisionJob(t, "candidate", "0 * * * *")
 	candidate.Def.Trigger = Trigger{Kind: "once", At: "9999-12-31T23:30:00Z", Timezone: "Pacific/Kiritimati"}
 	peer := candidate
 	peer.UID = "peer"
@@ -252,7 +253,7 @@ func drawCollisionFleet(ht *hegel.T) (CollisionJob, []CollisionJob, time.Time) {
 	}
 	native := hegel.Draw(ht, hegel.Booleans())
 	makeJob := func(i int) CollisionJob {
-		job := collisionJob(fmt.Sprint(i), hegel.Draw(ht, hegel.SampledFrom([]string{"0 * * * *", "0 9 * * *", "30 1 * * *", "30 2 * * *", "0 0 * * 1"})))
+		job := collisionJob(ht, fmt.Sprint(i), hegel.Draw(ht, hegel.SampledFrom([]string{"0 * * * *", "0 9 * * *", "30 1 * * *", "30 2 * * *", "0 0 * * 1"})))
 		job.Name = hegel.Draw(ht, hegel.Text())
 		job.Def.Trigger.Timezone = hegel.Draw(ht, hegel.SampledFrom([]string{"UTC", "America/New_York", "Australia/Lord_Howe", "Pacific/Kiritimati"}))
 		if native {
@@ -363,7 +364,7 @@ func TestCronCollisionsPausedProperty(t *testing.T) {
 func TestCronCollisionsZeroInstant(t *testing.T) {
 	from := time.Time{}
 	for _, trigger := range []Trigger{{Kind: "cron", Cron: "0 * * * *"}, {Kind: "once", At: "0001-01-01T00:00:00Z"}} {
-		candidate := collisionJob("candidate", "0 * * * *")
+		candidate := collisionJob(t, "candidate", "0 * * * *")
 		candidate.Def.Trigger = trigger
 		peer := candidate
 		peer.UID = "peer"
@@ -371,14 +372,14 @@ func TestCronCollisionsZeroInstant(t *testing.T) {
 		require.NotEmpty(t, got.Items)
 		require.Equal(t, from, got.Items[0].At)
 	}
-	impossible := collisionJob("candidate", "0 0 31 2 *")
+	impossible := collisionJob(t, "candidate", "0 0 31 2 *")
 	peer := impossible
 	peer.UID = "peer"
 	got := collisionReport(t, impossible, []CollisionJob{peer}, from, CollisionStepBudget)
 	require.Empty(t, got.Items, "a scheduler zero sentinel is not a real occurrence")
 
 	t.Run("expired once before zero", func(t *testing.T) {
-		candidate := collisionJob("candidate", "0 * * * *")
+		candidate := collisionJob(t, "candidate", "0 * * * *")
 		candidate.Def.Trigger = Trigger{Kind: "once", At: "0000-12-29T00:00:00Z"}
 		peer := candidate
 		peer.UID = "peer"
@@ -386,7 +387,7 @@ func TestCronCollisionsZeroInstant(t *testing.T) {
 		require.Empty(t, got.Items)
 	})
 	t.Run("zero horizon is finite", func(t *testing.T) {
-		candidate := collisionJob("candidate", "0 * * * *")
+		candidate := collisionJob(t, "candidate", "0 * * * *")
 		peer := candidate
 		peer.UID = "peer"
 		got := collisionReport(t, candidate, []CollisionJob{peer}, time.Time{}.Add(-7*24*time.Hour), CollisionStepBudget)
@@ -439,7 +440,7 @@ func TestCronCollisionsSoundnessProperty(t *testing.T) {
 
 func TestCronCollisionsLocalPrecision(t *testing.T) {
 	from := time.Date(2026, 11, 3, 0, 0, 0, 123456789, time.UTC)
-	candidate := collisionJob("candidate", "0 * * * *")
+	candidate := collisionJob(t, "candidate", "0 * * * *")
 	candidate.Def = nativeCollisionDefinition(candidate.Def)
 	candidate.Def.Trigger = Trigger{Kind: "interval", IntervalSeconds: 60}
 	candidate.Progress = &RecurringProgress{Version: 1, Anchor: from.Add(-time.Hour), Through: from.Add(-time.Minute)}
@@ -453,7 +454,7 @@ func TestCronCollisionsLocalPrecision(t *testing.T) {
 func TestCronCollisionsCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, err := PreviewCollisions(ctx, collisionJob("candidate", "0 * * * *"), nil, time.Now().UTC(), CollisionStepBudget)
+	_, err := PreviewCollisions(ctx, collisionJob(t, "candidate", "0 * * * *"), nil, time.Now().UTC(), CollisionStepBudget)
 	require.ErrorIs(t, err, context.Canceled)
 }
 
@@ -462,8 +463,8 @@ func TestCronCollisionsDormantDescriptors(t *testing.T) {
 	for _, native := range []bool{false, true} {
 		for _, expression := range []string{"@none", "@manual", "@triggered", "CRON_TZ=UTC @none", "TZ=UTC @manual"} {
 			t.Run(fmt.Sprintf("native=%t/%s", native, expression), func(t *testing.T) {
-				candidate := collisionJob("candidate", "0 9 * * *")
-				peer := collisionJob("peer", expression)
+				candidate := collisionJob(t, "candidate", "0 9 * * *")
+				peer := collisionJob(t, "peer", expression)
 				if native {
 					candidate.Def = nativeCollisionDefinition(candidate.Def)
 					peer.Def = nativeCollisionDefinition(peer.Def)
@@ -483,13 +484,13 @@ func TestCronCollisionsDormantDescriptors(t *testing.T) {
 
 func TestCronCollisionsFullSetsSurviveDisplayClipping(t *testing.T) {
 	from := time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)
-	candidate := collisionJob("candidate", "0 * * * *")
+	candidate := collisionJob(t, "candidate", "0 * * * *")
 	peers := make([]CollisionJob, 0, 12)
 	for i := range 10 {
-		peers = append(peers, collisionJob(fmt.Sprintf("common-%02d", i), "0 * * * *"))
+		peers = append(peers, collisionJob(t, fmt.Sprintf("common-%02d", i), "0 * * * *"))
 	}
 	for i := range 2 {
-		peer := collisionJob(fmt.Sprintf("zz-extra-%d", i), "0 * * * *")
+		peer := collisionJob(t, fmt.Sprintf("zz-extra-%d", i), "0 * * * *")
 		peer.Def.Trigger = Trigger{Kind: "once", At: from.Add(time.Duration(i) * time.Hour).Format(time.RFC3339)}
 		peers = append(peers, peer)
 	}
@@ -507,7 +508,7 @@ func TestCronCollisionsFullSetsSurviveDisplayClipping(t *testing.T) {
 
 func TestCronCollisionsOnceTerminalBudget(t *testing.T) {
 	from := time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)
-	job := collisionJob("candidate", "0 * * * *").Def
+	job := collisionJob(t, "candidate", "0 * * * *").Def
 	job.Trigger = Trigger{Kind: "once", At: from.Format(time.RFC3339)}
 	for initial := range 3 {
 		budget := initial
