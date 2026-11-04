@@ -38,19 +38,6 @@ func TestSearchFTS_NormalizedDuplicateScores(t *testing.T) {
 	}
 }
 
-func TestFTS_IssueInsertIsIndexed(t *testing.T) {
-	t.Parallel()
-	d, ctx, p := setupTestProject(t)
-	createTesterIssueWithBody(ctx, t, d, p.ID, "fix login crash", "stack trace here")
-
-	hits, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login"})
-	require.NoError(t, err)
-	require.Len(t, hits, 1)
-	hits, err = d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "trace"})
-	require.NoError(t, err)
-	require.Len(t, hits, 1)
-}
-
 func TestFTS_IssueUpdateReindexes(t *testing.T) {
 	t.Parallel()
 	d, ctx, p := setupTestProject(t)

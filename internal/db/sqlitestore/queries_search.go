@@ -213,7 +213,8 @@ var searchProbe = sync.OnceValues(func() (*sql.DB, error) {
 // searchablePhrases deduplicates words and drops those unicode61 leaves empty.
 // Its Unicode 6.1 categories differ from Go's Unicode tables.
 func searchablePhrases(ctx context.Context, query string) ([]string, error) {
-	var words, phrases []string
+	var words []string
+	phrases := make([]string, 0)
 	seen := make(map[string]bool)
 	analyzer := lexical.Literal()
 	for word := range strings.FieldsSeq(query) {
