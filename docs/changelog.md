@@ -9,6 +9,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Check adapter scheduling and workflow decisions with the opt-in
+  [adapter conformance profile](reference/cron.md#adapter-conformance), public
+  Go harness and offline `kata cron conformance export|check`. Frozen v1 stays
+  the default; explicit v2 adds successful dependency and multi-parent coverage.
+  Adapters can also declare drop records and occupied-gate expiry.
+
 - Keep local writes responsive on relay hubs. Creating an issue or receiving an
   unrelated snapshot leaves downstream sync incremental unless it can change the
   reset decision. Handshakes and reset downloads check history without holding
