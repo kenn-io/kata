@@ -84,10 +84,13 @@ func (c *featureProbeConn) QueryContext(_ context.Context, query string, _ []dri
 		c.state.probeQueries++
 		return &featureProbeRows{}, nil
 	}
+	if strings.Contains(query, "cron.run.observed") {
+		return &featureProbeRows{empty: true}, nil
+	}
 	return nil, errors.New("unexpected feature probe query")
 }
 
-type featureProbeRows struct{ presence, seen bool }
+type featureProbeRows struct{ presence, seen, empty bool }
 
 func (r *featureProbeRows) Columns() []string {
 	if r.presence {
@@ -97,6 +100,9 @@ func (r *featureProbeRows) Columns() []string {
 }
 func (*featureProbeRows) Close() error { return nil }
 func (r *featureProbeRows) Next(values []driver.Value) error {
+	if r.empty {
+		return io.EOF
+	}
 	if r.seen {
 		if r.presence {
 			return io.EOF

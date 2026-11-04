@@ -245,6 +245,7 @@ type RelayHandshake struct {
 
 // RelayOfferRequest selects an authenticated stream prefix or exact offered artifact misses.
 type RelayOfferRequest struct {
+	EventFeatures   string   `header:"X-Kata-Event-Features"`
 	ProjectID       int64    `path:"project_id"`
 	Authorization   string   `header:"Authorization"`
 	Stream          string   `query:"stream" enum:"events,receipts,artifacts"`
@@ -255,6 +256,7 @@ type RelayOfferRequest struct {
 
 // RelayResetRequest requests a checkpoint for the presented project transport grant.
 type RelayResetRequest struct {
+	EventFeatures string `header:"X-Kata-Event-Features"`
 	ProjectID     int64  `path:"project_id"`
 	Authorization string `header:"Authorization"`
 }

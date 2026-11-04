@@ -24,6 +24,10 @@ func (d *Store) CreateRelayReset(ctx context.Context, bindingUID string, signer 
 	return result, nil
 }
 
+func (b relayResetBackend) RequireProjectEventFeatures(ctx context.Context, projectUID string) error {
+	return db.RequireProjectEventFeatures(ctx, b.tx, projectUID)
+}
+
 func (b relayResetBackend) Project(ctx context.Context, projectID int64) (db.Project, error) {
 	return scanProject(b.tx.QueryRowContext(ctx, projectSelect+` WHERE id=?`, projectID))
 }

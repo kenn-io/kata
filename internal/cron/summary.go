@@ -202,7 +202,7 @@ func validLogRef(value string) bool {
 const (
 	ReasonOverlapSkipped   = "overlap_skipped"
 	ReasonCatchupMissed    = "catchup_missed"
-	ReasonPausedPassedOver = "paused_passed_over"
+	ReasonPausedPassedOver = "paused_passed_over" //nolint:gosec // G101: portable outcome code, not credentials.
 )
 
 // DropReason reports exact membership in the shared drop reason registry.
