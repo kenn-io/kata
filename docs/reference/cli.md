@@ -2157,7 +2157,7 @@ credentials cannot delete or restore, so `X` is not offered to them and does
 nothing.
 
 With the issue detail focused, press `O` to start, change, or stop the issue's recurrence, the same one `kata schedule <ref> <date> --repeat` manages. `O` is available only in the detail.
-The form has three fields. **Rule** is the RRULE text, sent as written: the
+The form has three fields. **Rule** is the RRULE text, sent with outer spaces trimmed: the
 daemon is the only validator, and its error appears in the form with your input
 kept. Clear **Rule** and save to stop an existing recurrence, keeping its occurrences. A blank rule cannot start a recurrence. **Start** requires a date when starting or changing: `YYYY-MM-DD`, `today`, `tomorrow`, `+Nd`, or
 `+Nw`. **Zone** starts as the recurrence's zone, else the issue's
