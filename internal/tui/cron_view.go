@@ -355,7 +355,7 @@ func (m Model) routeCronKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		if key == "esc" || key == "h" {
 			m.cron.help = false
 		}
-		return m, nil
+		return m.cronMarkOpenSeen(), nil
 	}
 	if m.cron.filtering {
 		query := m.cron.lists[m.cron.tab].query

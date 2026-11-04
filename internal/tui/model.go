@@ -2600,7 +2600,7 @@ func (m Model) routeLayoutFocusKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 func (m Model) toggleHelp() (Model, tea.Cmd) {
 	if m.view == viewCron {
 		m.cron.help = !m.cron.help
-		return m, nil
+		return m.cronMarkOpenSeen(), nil
 	}
 	if m.view == viewHelp {
 		m.view = m.prevView

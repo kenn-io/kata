@@ -562,3 +562,32 @@ func TestCronOpeningRetainedRunRefreshesByUID(t *testing.T) {
 		})
 	}
 }
+
+// Help covers the open run. A failure refreshed behind it is not shown, so it
+// stays unseen until Help closes and the run detail shows it again.
+func TestCronRefreshedFailureBehindHelpStaysUnseen(t *testing.T) {
+	for _, closeKey := range []tea.KeyPressMsg{keyRune('?'), {Code: tea.KeyEscape}, keyRune('h')} {
+		t.Run(closeKey.String(), func(t *testing.T) {
+			m, _ := cronRefreshFixture(t, 1)
+			r := m.cron.runPage.runs[0]
+			r.Status = "running"
+			m.cron.runPage.runs[0] = r
+			m = m.cronRemember([]generated.CronRun{r})
+			m.cron.tab = cronRuns
+			_, _, lines := cronScreen(m)
+			m.cron.lists[cronRuns].cursor = slices.IndexFunc(lines, func(l cronLine) bool { return l.target == cronRef{cronRuns, r.UID} })
+			m = sendKey(m, tea.KeyEnter)
+			m = sendRune(m, '?')
+			require.True(t, m.cron.help)
+			m = cronLoadTest(t, m)
+			got, _ := m.cron.data.run(r.UID)
+			require.Equal(t, "failed", got.Status)
+			require.Equal(t, 1, m.cronUnseenCount(), "a failure refreshed behind Help is not yet shown")
+			require.False(t, m.cronSeen.session[m.cronProjectUID()][r.UID])
+			m = cronUpdateTest(m, closeKey)
+			require.False(t, m.cron.help)
+			require.Equal(t, cronRef{cronRuns, r.UID}, m.cron.stack[len(m.cron.stack)-1].ref)
+			require.Zero(t, m.cronUnseenCount(), "closing Help shows the failed run")
+		})
+	}
+}

@@ -188,10 +188,11 @@ func (m Model) cronOpenRun(uid string) Model {
 	return m.cronMarkSeen(uid)
 }
 
-// A refreshed failure in the open run is seen once shown; a closed one is not.
+// A refreshed failure in the open run is seen once shown; a closed one, or one
+// behind Help, is not. Closing Help shows it.
 func (m Model) cronMarkOpenSeen() Model {
 	n := len(m.cron.stack)
-	if n == 0 || m.cron.stack[n-1].ref.kind != cronRuns || m.cronSeen.session[m.cronProjectUID()][m.cron.stack[n-1].ref.uid] {
+	if n == 0 || m.cron.help || m.cron.stack[n-1].ref.kind != cronRuns || m.cronSeen.session[m.cronProjectUID()][m.cron.stack[n-1].ref.uid] {
 		return m
 	}
 	return m.cronMarkSeen(m.cron.stack[n-1].ref.uid)
