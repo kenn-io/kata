@@ -425,6 +425,16 @@ func (s *Store) AttachIssuePublication(ctx context.Context, params db.IssuePubli
 		if _, err = tx.ExecContext(ctx, `UPDATE import_mappings SET observed_status=$1,observed_status_at=$2,remote_locator=NULLIF($3,''),pending_event_uid=$4 WHERE id=$5`, rawStatus, observedAt, remote.Locator, pendingEvent, mapping.ID); err != nil {
 			return err
 		}
+		if remote.ContentBaseline != nil {
+			config, err := db.WithIssueSyncPublicationContentBaseline(b.Config, remote.ExternalID, *remote.ContentBaseline)
+			if err != nil {
+				return err
+			}
+			updatedAt := storedTime(db.NextIssueSyncBindingUpdatedAt(b.UpdatedAt, time.Now()))
+			if _, err := tx.ExecContext(ctx, `UPDATE issue_sync_bindings SET config_json=$1, updated_at=$2 WHERE id=$3`, string(config), updatedAt, b.ID); err != nil {
+				return err
+			}
+		}
 		if p != nil {
 			_, err = tx.ExecContext(ctx, `DELETE FROM meta WHERE key=$1`, db.IssuePublicationMetaPrefix+g.ProjectUID)
 		}

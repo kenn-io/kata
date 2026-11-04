@@ -86,6 +86,7 @@ type TaskVersion struct {
 
 // Checkpoint survives partial import/restart and bounds absent-task recovery laps.
 type Checkpoint struct {
-	Versions     map[string]TaskVersion `json:"versions"`
-	MissingAfter string                 `json:"missing_after,omitempty"`
+	Versions                    map[string]TaskVersion                        `json:"versions"`
+	PublicationContentBaselines map[string]db.IssuePublicationContentBaseline `json:"publication_content_baselines,omitempty"`
+	MissingAfter                string                                        `json:"missing_after,omitempty"`
 }

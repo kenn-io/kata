@@ -34,15 +34,24 @@ type IssuePublication struct {
 // IssuePublicationRemote is a validated provider observation. SourceUpdatedAt
 // is absent when that provider has no genuine content modification clock.
 type IssuePublicationRemote struct {
-	ExternalID        string     `json:"external_id"`
-	LegacyExternalIDs []string   `json:"legacy_external_ids,omitempty"`
-	URL               string     `json:"url,omitempty"`
-	Locator           string     `json:"locator,omitempty"`
-	Status            string     `json:"status"`
-	RawStatus         *string    `json:"raw_status,omitempty"`
-	ClosedReason      string     `json:"closed_reason,omitempty"`
-	Version           time.Time  `json:"version"`
-	SourceUpdatedAt   *time.Time `json:"source_updated_at,omitempty"`
+	ExternalID        string                           `json:"external_id"`
+	LegacyExternalIDs []string                         `json:"legacy_external_ids,omitempty"`
+	URL               string                           `json:"url,omitempty"`
+	Locator           string                           `json:"locator,omitempty"`
+	Status            string                           `json:"status"`
+	RawStatus         *string                          `json:"raw_status,omitempty"`
+	ClosedReason      string                           `json:"closed_reason,omitempty"`
+	Version           time.Time                        `json:"version"`
+	SourceUpdatedAt   *time.Time                       `json:"source_updated_at,omitempty"`
+	ContentBaseline   *IssuePublicationContentBaseline `json:"content_baseline,omitempty"`
+}
+
+// IssuePublicationContentBaseline preserves the content snapshot used to
+// create a remote object. At is the native issue snapshot time, not a provider
+// modification clock.
+type IssuePublicationContentBaseline struct {
+	Hash string    `json:"hash"`
+	At   time.Time `json:"at"`
 }
 
 // IssuePublicationResolve records an attributed attestation that an attempt created no remote object.

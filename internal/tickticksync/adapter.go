@@ -205,7 +205,11 @@ func recoverMissingTasks(ctx context.Context, session Session, now func() time.T
 // marked pending until Finalize saves next after the import commits, so a
 // failed import reads them again.
 func stagedCheckpoint(cp, next Checkpoint, recovered map[string]bool) Checkpoint {
-	staged := Checkpoint{Versions: maps.Clone(next.Versions), MissingAfter: next.MissingAfter}
+	staged := Checkpoint{
+		Versions:                    maps.Clone(next.Versions),
+		PublicationContentBaselines: maps.Clone(next.PublicationContentBaselines),
+		MissingAfter:                next.MissingAfter,
+	}
 	for id := range recovered {
 		observed, ok := staged.Versions[id]
 		if !ok {
@@ -220,18 +224,17 @@ func stagedCheckpoint(cp, next Checkpoint, recovered map[string]bool) Checkpoint
 	return staged
 }
 
-// seedReturningTasks gives a mapped task with no checkpoint entry, such as one
-// that sync stopped tracking, its saved source version as a baseline. Unchanged
-// content then cannot replace newer local edits.
+// seedReturningTasks restores saved source versions and converts a publication
+// content baseline into the first checkpoint without inventing a source clock.
 func (a *Adapter) seedReturningTasks(ctx context.Context, b db.IssueSyncBinding, data ProjectData, cp *Checkpoint) error {
-	returning := map[string]Task{}
+	visible := map[string]Task{}
 	for _, t := range data.Tasks {
-		if _, tracked := cp.Versions[t.ID]; tracked || t.Status == nil || *t.Status == -1 || t.Kind == "NOTE" {
+		if t.Status == nil || *t.Status == -1 || t.Kind == "NOTE" {
 			continue
 		}
-		returning[t.ID] = t
+		visible[t.ID] = t
 	}
-	if len(returning) == 0 {
+	if len(visible) == 0 {
 		return nil
 	}
 	mappings, err := a.store.ImportMappingsByProjectSource(ctx, b.ProjectID, b.SourceKey)
@@ -239,14 +242,18 @@ func (a *Adapter) seedReturningTasks(ctx context.Context, b db.IssueSyncBinding,
 		return err
 	}
 	for _, m := range mappings {
-		if m.ObjectType != "issue" || m.SourceUpdatedAt == nil {
+		if m.ObjectType != "issue" {
 			continue
 		}
 		id, err := mappingTaskID(m.ExternalID)
 		if err != nil {
 			return err
 		}
-		task, ok := returning[id]
+		if _, tracked := cp.Versions[id]; tracked {
+			delete(cp.PublicationContentBaselines, m.ExternalID)
+			continue
+		}
+		task, ok := visible[id]
 		if !ok {
 			continue
 		}
@@ -254,8 +261,27 @@ func (a *Adapter) seedReturningTasks(ctx context.Context, b db.IssueSyncBinding,
 		if err != nil {
 			return err
 		}
+		if baseline, hasBaseline := cp.PublicationContentBaselines[m.ExternalID]; hasBaseline {
+			if m.SourceUpdatedAt == nil && hash == baseline.Hash {
+				at := baseline.At.UTC().Truncate(time.Millisecond)
+				cp.Versions[id] = TaskVersion{
+					Hash: hash, Status: *task.Status, CompletedTime: task.CompletedTime,
+					FirstSeen: at, Version: at,
+				}
+			}
+			delete(cp.PublicationContentBaselines, m.ExternalID)
+			if m.SourceUpdatedAt == nil {
+				continue
+			}
+		}
+		if m.SourceUpdatedAt == nil {
+			continue
+		}
 		saved := m.SourceUpdatedAt.UTC().Truncate(time.Millisecond)
 		cp.Versions[id] = TaskVersion{Hash: hash, FirstSeen: saved, Version: saved}
+	}
+	if len(cp.PublicationContentBaselines) == 0 {
+		cp.PublicationContentBaselines = nil
 	}
 	return nil
 }

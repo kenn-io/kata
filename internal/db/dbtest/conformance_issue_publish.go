@@ -99,6 +99,9 @@ func checkIssuePublishAttach(t *testing.T, store db.Storage, _ Backend) error {
 	ctx := t.Context()
 	require.NoError(t, p.DispatchIssuePublication(ctx, claim.Guard, pending.AttemptUID))
 	remote := publicationRemote()
+	remote.ContentBaseline = &db.IssuePublicationContentBaseline{
+		Hash: strings.Repeat("a", 64), At: claim.Issue.UpdatedAt.UTC().Truncate(time.Millisecond),
+	}
 	require.NoError(t, p.RecordIssuePublicationCreated(ctx, claim.Guard, pending.AttemptUID, remote))
 	saved, err := p.PendingIssuePublication(ctx, claim.Guard.ProjectID)
 	require.NoError(t, err)
@@ -113,6 +116,18 @@ func checkIssuePublishAttach(t *testing.T, store db.Storage, _ Backend) error {
 	require.Equal(t, claim.Issue.ID, *mapping.IssueID)
 	require.Equal(t, claim.Binding.SourceKey, mapping.Source)
 	require.Equal(t, remote.ExternalID, mapping.ExternalID)
+	updatedBinding, err := store.IssueSyncBindingByProject(ctx, claim.Issue.ProjectID)
+	require.NoError(t, err)
+	publicConfig, err := db.PublicIssueSyncConfig(updatedBinding.Config)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"status_sync":"two-way"}`, string(publicConfig))
+	var privateConfig struct {
+		ProviderCheckpoint struct {
+			PublicationContentBaselines map[string]db.IssuePublicationContentBaseline `json:"publication_content_baselines"`
+		} `json:"_provider_checkpoint"`
+	}
+	require.NoError(t, json.Unmarshal(updatedBinding.Config, &privateConfig))
+	require.Equal(t, *remote.ContentBaseline, privateConfig.ProviderCheckpoint.PublicationContentBaselines[remote.ExternalID])
 	saved, err = p.PendingIssuePublication(ctx, claim.Guard.ProjectID)
 	require.NoError(t, err)
 	require.Nil(t, saved)
@@ -120,7 +135,7 @@ func checkIssuePublishAttach(t *testing.T, store db.Storage, _ Backend) error {
 	require.NoError(t, err)
 	require.Equal(t, "Native title", current.Title)
 	require.Equal(t, "native-author", current.Author)
-	state, err := store.(db.IssueStatusReader).IssueStatusMappingByID(ctx, db.IssueSyncImportGuard{BindingID: claim.Binding.ID, Provider: "notion", StartedAt: claim.Guard.StartedAt, BindingUpdatedAt: &claim.Binding.UpdatedAt}, mapping.ID)
+	state, err := store.(db.IssueStatusReader).IssueStatusMappingByID(ctx, db.IssueSyncImportGuard{BindingID: claim.Binding.ID, Provider: "notion", StartedAt: claim.Guard.StartedAt, BindingUpdatedAt: &updatedBinding.UpdatedAt}, mapping.ID)
 	require.NoError(t, err)
 	require.Equal(t, latest.UID, state.State.PendingEventUID)
 	require.Equal(t, "todo", *state.State.Observed.Raw)

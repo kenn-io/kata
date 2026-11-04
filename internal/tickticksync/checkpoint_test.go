@@ -2,10 +2,12 @@ package tickticksync
 
 import (
 	"encoding/json/jsontext"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 )
 
 // Contract: a private durable checkpoint and its binding container must be
@@ -55,4 +57,18 @@ func TestCheckpointRecordsReadableStatus(t *testing.T) {
 	require.NoError(t, err)
 	_, err = DecodeCheckpoint(raw)
 	require.Error(t, err)
+}
+
+// A failed import retries recovered tasks from the staged checkpoint. Any
+// publication baselines not observed in that bounded recovery window must stay
+// available for the retry that eventually imports them.
+func TestStagedCheckpointRetainsUnobservedPublicationBaselines(t *testing.T) {
+	at := time.Date(2026, 11, 4, 8, 0, 0, 0, time.UTC)
+	baseline := db.IssuePublicationContentBaseline{Hash: strings.Repeat("a", 64), At: at}
+	next := Checkpoint{
+		Versions:                    map[string]TaskVersion{"task-1": {Hash: "content", FirstSeen: at, Version: at}},
+		PublicationContentBaselines: map[string]db.IssuePublicationContentBaseline{"task:task-2": baseline},
+	}
+	staged := stagedCheckpoint(Checkpoint{}, next, map[string]bool{"task-1": true})
+	require.Equal(t, next.PublicationContentBaselines, staged.PublicationContentBaselines)
 }

@@ -9,13 +9,17 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/issuesync"
 )
 
-type ticktickPublishSession struct{ session *clientSession }
+type ticktickPublishSession struct {
+	session           *clientSession
+	contentBaselineAt time.Time
+}
 type ticktickCreatePayload struct {
 	Title     string `json:"title"`
 	ProjectID string `json:"projectId"`
@@ -83,6 +87,10 @@ func (s *ticktickPublishSession) PrepareCreate(ctx context.Context, issue db.Iss
 	if err := s.writableProject(ctx); err != nil {
 		return nil, err
 	}
+	s.contentBaselineAt = issue.UpdatedAt.UTC().Truncate(time.Millisecond)
+	if !validTime(s.contentBaselineAt) {
+		s.contentBaselineAt = s.session.client.cfg.Now().UTC().Truncate(time.Millisecond)
+	}
 	return json.Marshal(p)
 }
 func (s *ticktickPublishSession) Create(ctx context.Context, raw jsontext.Value, admit func(context.Context) error) (db.IssuePublicationRemote, error) {
@@ -141,6 +149,17 @@ func (s *ticktickPublishSession) Create(ctx context.Context, raw jsontext.Value,
 	if err != nil {
 		return remote, err
 	}
+	if task.Title == "" {
+		task.Title = p.Title
+	}
+	if task.Content == "" {
+		task.Content = p.Content
+	}
+	hash, err := taskContentHash(task)
+	if err != nil {
+		return remote, err
+	}
+	observed.ContentBaseline = &db.IssuePublicationContentBaseline{Hash: hash, At: s.contentBaselineAt}
 	if observed.Status != "open" {
 		return remote, fmt.Errorf("TickTick created task is not open")
 	}
@@ -172,7 +191,23 @@ func (s *ticktickPublishSession) ReadCreated(ctx context.Context, identity db.Is
 	if err != nil {
 		return zero, err
 	}
-	return s.observation(task)
+	observed, err := s.observation(task)
+	if err != nil {
+		return zero, err
+	}
+	baseline := identity.ContentBaseline
+	if baseline == nil {
+		hash, err := taskContentHash(task)
+		if err != nil {
+			return zero, err
+		}
+		baseline = &db.IssuePublicationContentBaseline{Hash: hash, At: observed.Version}
+	} else {
+		copied := *identity.ContentBaseline
+		baseline = &copied
+	}
+	observed.ContentBaseline = baseline
+	return observed, nil
 }
 
 var _ issuesync.PublishAdapter = (*Adapter)(nil)

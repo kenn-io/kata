@@ -59,7 +59,9 @@ func TestPublishRoundTrip(t *testing.T) {
 			require.Equal(t, 1, creates)
 			saved, err := store.IssueSyncBindingByProject(t.Context(), b.ProjectID)
 			require.NoError(t, err)
-			require.JSONEq(t, string(b.Config), string(saved.Config))
+			publicConfig, err := db.PublicIssueSyncConfig(saved.Config)
+			require.NoError(t, err)
+			require.JSONEq(t, string(b.Config), string(publicConfig))
 
 			source := sourceData()
 			task.Title = "Upstream edit"

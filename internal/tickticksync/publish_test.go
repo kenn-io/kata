@@ -148,7 +148,7 @@ func TestPublishTickTickPreservesCheckpointAndImportsSameIssue(t *testing.T) {
 	store, b := adapterDB(t)
 	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: b.ProjectID, Title: "Native", Body: "Body", Author: "worker"})
 	require.NoError(t, err)
-	task := Task{ID: "task-1", ProjectID: "project-1", Title: "Native", Content: "Body", Status: new(0), Kind: "TEXT"}
+	task := Task{ID: "task-1", ProjectID: "project-1", Title: "Native", Content: "Body", Status: new(0), Kind: "TEXT", Items: []ChecklistItem{}}
 	client, _ := testClient(t, func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path == "/open/v1/project/project-1" {
 			return reply(200, `{"id":"project-1","kind":"TASK","permission":"write"}`), nil
@@ -162,10 +162,31 @@ func TestPublishTickTickPreservesCheckpointAndImportsSameIssue(t *testing.T) {
 	require.NoError(t, err)
 	saved, err := store.IssueSyncBindingByProject(t.Context(), b.ProjectID)
 	require.NoError(t, err)
-	require.JSONEq(t, string(b.Config), string(saved.Config))
+	publicConfig, err := db.PublicIssueSyncConfig(saved.Config)
+	require.NoError(t, err)
+	require.JSONEq(t, string(b.Config), string(publicConfig))
+	var persisted struct {
+		ProviderCheckpoint struct {
+			PublicationContentBaselines map[string]struct {
+				Hash string    `json:"hash"`
+				At   time.Time `json:"at"`
+			} `json:"publication_content_baselines"`
+		} `json:"_provider_checkpoint"`
+	}
+	require.NoError(t, json.Unmarshal(saved.Config, &persisted))
+	publishedHash, err := taskContentHash(task)
+	require.NoError(t, err)
+	baseline := persisted.ProviderCheckpoint.PublicationContentBaselines["task:task-1"]
+	require.Equal(t, publishedHash, baseline.Hash)
+	require.True(t, baseline.At.Equal(issue.UpdatedAt.UTC().Truncate(time.Millisecond)))
 	mapping, err := store.ImportMappingBySource(t.Context(), b.ProjectID, b.SourceKey, "issue", "task:task-1")
 	require.NoError(t, err)
 	require.Nil(t, mapping.SourceUpdatedAt)
+	localTitle, localBody := "Local title after publication", "Local body after publication"
+	local, _, _, err := store.EditIssue(t.Context(), db.EditIssueParams{
+		IssueID: issue.ID, Title: &localTitle, Body: &localBody, Actor: "worker",
+	})
+	require.NoError(t, err)
 	source := sourceData()
 	source.data.Tasks = []Task{task}
 	now := time.Now().UTC().Add(time.Minute)
@@ -173,10 +194,20 @@ func TestPublishTickTickPreservesCheckpointAndImportsSameIssue(t *testing.T) {
 	result, err := runner.RunOnce(t.Context(), b.ID)
 	require.NoError(t, err)
 	require.Zero(t, result.Import.Created)
-	require.Equal(t, issue.UID, mappedIssue(t, store, b, "task-1").UID)
+	afterFirstPoll := mappedIssue(t, store, b, "task-1")
+	require.Equal(t, issue.UID, afterFirstPoll.UID)
+	require.Equal(t, local.Title, afterFirstPoll.Title, "an unchanged first poll must preserve local title edits")
+	require.Equal(t, local.Body, afterFirstPoll.Body, "an unchanged first poll must preserve local body edits")
 	checkpoint, err := DecodeCheckpoint(result.Binding.Config)
 	require.NoError(t, err)
 	require.NotEmpty(t, checkpoint.Versions["task-1"].Hash)
+	var consumed struct {
+		ProviderCheckpoint struct {
+			PublicationContentBaselines map[string]any `json:"publication_content_baselines"`
+		} `json:"_provider_checkpoint"`
+	}
+	require.NoError(t, json.Unmarshal(result.Binding.Config, &consumed))
+	require.Empty(t, consumed.ProviderCheckpoint.PublicationContentBaselines)
 	version := checkpoint.Versions["task-1"].Version
 	now = now.Add(time.Minute)
 	result, err = runner.RunOnce(t.Context(), b.ID)
