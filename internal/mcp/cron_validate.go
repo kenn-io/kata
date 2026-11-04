@@ -104,13 +104,12 @@ func (h toolHandlers) cronJobValidate(ctx context.Context, _ *sdkmcp.CallToolReq
 		}
 		definition, _ := in.Definition.(map[string]any)
 		issue, ok := definition["issue"].(map[string]any)
-		if !ok {
-			return nil, nil, errors.New("parent_ref requires definition.issue")
+		if ok {
+			if existing, ok := issue["parent_uid"]; ok && existing != parent {
+				return nil, nil, errors.New("parent_ref disagrees with definition.issue.parent_uid")
+			}
+			issue["parent_uid"] = parent
 		}
-		if existing, ok := issue["parent_uid"]; ok && existing != parent {
-			return nil, nil, errors.New("parent_ref disagrees with definition.issue.parent_uid")
-		}
-		issue["parent_uid"] = parent
 	}
 	body, err := cronValidationBody(in.CronValidationInput)
 	if err != nil {

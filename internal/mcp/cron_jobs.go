@@ -82,7 +82,7 @@ func (h toolHandlers) cronPutJob(ctx context.Context, in CronJobCreateInput, exp
 	if err != nil {
 		return nil, nil, err
 	}
-	if _, _, err = cron.Normalize(raw, cron.DecodeJobForWrite); err != nil {
+	if _, err = cron.ParseJob(raw); err != nil {
 		return nil, nil, err
 	}
 	return cronResult(h.options.Client.ReplaceCronJob(ctx, &generated.ReplaceCronJobRequestOptions{PathParams: &generated.ReplaceCronJobPath{ProjectID: p.ID, CronUID: id}, Body: &generated.ReplaceCronJobBody{Actor: &h.options.Actor, Name: in.Name, Definition: in.Definition, ExpectedEventUID: expected}}))

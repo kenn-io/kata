@@ -40,12 +40,9 @@ type SchedulePreview struct {
 }
 
 // PreviewSchedule uses native progress when supplied, otherwise models creation
-// at from. Callers validate the job and retained progress before previewing.
+// at from. Callers bound count and validate the job and retained progress before previewing.
 // Paused jobs show the same hypothetical instants as enabled jobs.
 func PreviewSchedule(job JobDefinition, stored *RecurringProgress, from time.Time, count int) (SchedulePreview, error) {
-	if count < 1 || count > 100 {
-		return SchedulePreview{}, invalid("count must be between 1 and 100")
-	}
 	if _, err := from.UTC().MarshalText(); err != nil {
 		return SchedulePreview{}, invalid("from must represent an RFC3339 UTC instant")
 	}
