@@ -485,7 +485,7 @@ func projectScopedMutationEvent(
 	ctx context.Context, store db.Storage, event *db.Event,
 ) (*db.Event, error) {
 	lookup := newProjectScopeEventIssueLookup(ctx, store)
-	reset, err := db.EventRequiresProjectScopeReset(ctx, *event, lookup.IssueByUID, lookup.IssueByRef)
+	reset, err := db.EventRequiresProjectScopeReset(ctx, *event, lookup.IssueByUID, lookup.IssueByRef, lookup.CommentIssueByUID)
 	if err != nil {
 		return nil, err
 	}
@@ -529,6 +529,17 @@ func newProjectScopeEventIssueLookup(ctx context.Context, store db.Storage) *db.
 				return db.Issue{}, db.ErrNotFound
 			}
 			return issue, nil
+		},
+		func(uid string) (db.Issue, error) {
+			owners, err := store.CommentIssueIDsByUIDs(ctx, []string{uid})
+			if err != nil {
+				return db.Issue{}, err
+			}
+			id, found := owners[uid]
+			if !found {
+				return db.Issue{}, db.ErrNotFound
+			}
+			return store.IssueByID(ctx, id)
 		},
 	)
 }

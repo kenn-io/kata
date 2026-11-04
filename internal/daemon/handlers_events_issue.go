@@ -149,6 +149,7 @@ func effectiveIssueCloseEventUID(ctx context.Context, store db.Storage, issue db
 			if visible && event.Type == "issue.closed" {
 				requiresReset, err := db.EventRequiresProjectScopeReset(
 					ctx, event, eventIssueLookup.IssueByUID, eventIssueLookup.IssueByRef,
+					eventIssueLookup.CommentIssueByUID,
 				)
 				if err != nil {
 					return "", err

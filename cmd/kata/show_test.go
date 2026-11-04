@@ -394,7 +394,7 @@ func TestShow_TimedClaimUsesClaimHubNowForTimeLeft(t *testing.T) {
 	hub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "Bearer claim-token", r.Header.Get("Authorization"))
-		assert.Equal(t, "/api/v1/projects/42/issues/"+created.ShortID+"/lease", r.URL.Path)
+		assert.Equal(t, "/api/v1/projects/42/issues/"+created.UID+"/lease", r.URL.Path)
 		require.NoError(t, json.NewEncoder(w).Encode(api.ClaimStatusBody{
 			Held: true,
 			Holder: api.ClaimPrincipalOut{

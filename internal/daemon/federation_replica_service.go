@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
@@ -270,6 +272,15 @@ func PrepareFederationReplicaLeave(
 }
 
 func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, managed config.FederationManagedCredentialStore, project db.Project, preparationID string) (PrepareFederationReplicaLeaveResult, error) {
+	// Refuse known source credential dependencies before marking leave pending
+	// or allowing the caller to revoke that credential at the hub.
+	if project.ID > 0 {
+		if lifecycle, ok := store.(db.RelayLifecycleStore); ok {
+			if err := lifecycle.ValidateRelayLifecycle(ctx, project.ID); err != nil {
+				return PrepareFederationReplicaLeaveResult{}, err
+			}
+		}
+	}
 	key := federationReplicaTransitionKey(store, project.Name)
 	preparation := newFederationReplicaPreparation(store, project.ID, preparationID)
 
@@ -287,18 +298,83 @@ func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, manage
 	if found && match.Credential.Provider != nil {
 		key = federationReplicaOperationKey(store, project.Name, match.Credential)
 	}
+	// Native moves need the source credential at their destination. Fence both
+	// move endpoints in the DB before the durable credential marker can permit
+	// hub revocation; the earlier read-only preflight cannot close this race.
+	// Providers and relay hops retain their existing drain/teardown protocol.
+	nativeFenced := false
+	nativeLeaveRecorded := false
+	nativeLeaveAddedPreparation := false
+	var nativeFence *federationReplicaNativeFence
+	if project.ID > 0 && (!found || match.Credential.Provider == nil) {
+		binding, bindingErr := store.FederationBindingByProject(ctx, project.ID)
+		if bindingErr != nil && !errors.Is(bindingErr, db.ErrNotFound) {
+			ensureFederationReplicaMu.Unlock()
+			return PrepareFederationReplicaLeaveResult{}, bindingErr
+		}
+		if bindingErr == nil && binding.Role == db.FederationRoleSpoke && binding.RelayConfig == nil {
+			fencer, ok := store.(db.RelayDisconnectFenceStore)
+			if !ok {
+				ensureFederationReplicaMu.Unlock()
+				return PrepareFederationReplicaLeaveResult{}, fmt.Errorf("native federation leave fence is unavailable")
+			}
+			nativeFence = &federationReplicaNativeFence{
+				instanceUID: store.InstanceUID(), projectID: project.ID,
+				enabled: binding.Enabled, pushEnabled: binding.PushEnabled,
+			}
+			if !found {
+				nativeCredential, credentialFound, credentialErr := managed.FederationCredential(ctx, project.UID)
+				if credentialErr != nil {
+					ensureFederationReplicaMu.Unlock()
+					return PrepareFederationReplicaLeaveResult{}, credentialIOError("read native leave credential")
+				}
+				if nativeCredential.NativeLeave != nil {
+					nativeFence.enabled = nativeCredential.NativeLeave.Enabled
+					nativeFence.pushEnabled = nativeCredential.NativeLeave.PushEnabled
+				} else if previousFence := federationReplicaTransitions.nativeFenceForProject(store.InstanceUID(), project.ID); previousFence != nil {
+					nativeFence.enabled = previousFence.enabled
+					nativeFence.pushEnabled = previousFence.pushEnabled
+				}
+				nativeLeaveAddedPreparation = !federationNativeLeaveHasPreparation(nativeCredential.NativeLeave, preparation.id)
+				replacement := addFederationNativeLeavePreparation(
+					nativeCredential, credentialFound, binding, preparation.id, key,
+					nativeFence.enabled, nativeFence.pushEnabled,
+				)
+				if err := replaceFederationCredential(ctx, managed, project.UID, nativeCredential, credentialFound, replacement); err != nil {
+					ensureFederationReplicaMu.Unlock()
+					return PrepareFederationReplicaLeaveResult{}, credentialIOError("persist native leave preparation")
+				}
+				nativeLeaveRecorded = true
+			}
+			if err := fencer.FenceRelayDisconnect(ctx, project.ID); err != nil {
+				ensureFederationReplicaMu.Unlock()
+				if nativeLeaveRecorded && nativeLeaveAddedPreparation {
+					if restoreErr := rollbackFailedNativeLeavePreparation(
+						ctx, store, managed, project, preparation,
+					); restoreErr != nil {
+						err = errors.Join(err, fmt.Errorf("restore native federation binding after failed fence: %w", restoreErr))
+					}
+				}
+				return PrepareFederationReplicaLeaveResult{}, err
+			}
+			nativeFenced = true
+		}
+	}
 	if found && !match.Credential.LeavePending {
 		replacement := match
 		replacement.Credential.LeavePending = true
 		replacement.Credential.PendingEnrollmentID = 0
 		if err := managed.ReplaceManagedFederationCredential(ctx, match, replacement); err != nil {
 			ensureFederationReplicaMu.Unlock()
-			if errors.Is(err, config.ErrFederationCredentialConflict) {
-				return PrepareFederationReplicaLeaveResult{}, err
+			if !errors.Is(err, config.ErrFederationCredentialConflict) {
+				err = credentialIOError("mark managed reservation for leave")
 			}
-			return PrepareFederationReplicaLeaveResult{}, credentialIOError(
-				"mark managed reservation for leave",
-			)
+			if nativeFenced {
+				// Keep the committed safe fence, including across restarts. A
+				// retry can finish preparation without restoring stale cursors.
+				err = fmt.Errorf("%w; native federation writes remain paused; retry leave preparation", err)
+			}
+			return PrepareFederationReplicaLeaveResult{}, err
 		}
 		match = replacement
 	}
@@ -307,7 +383,7 @@ func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, manage
 	// concurrent reconciler record success for a leave that then fails to
 	// prepare, and rolling the publish back would erase a completed leave's
 	// suppression when a retried prepare fails.
-	federationReplicaTransitions.markLeavePending(key, preparation)
+	federationReplicaTransitions.markLeavePending(key, preparation, nativeFence)
 	ensureFederationReplicaMu.Unlock()
 
 	// A prepare call that fails from here on never answers its client. Drop
@@ -316,9 +392,12 @@ func prepareFederationReplicaLeave(ctx context.Context, store db.Storage, manage
 	durablyMarked := found
 	fail := func(err error) (PrepareFederationReplicaLeaveResult, error) {
 		if !durablyMarked {
-			ensureFederationReplicaMu.Lock()
-			federationReplicaTransitions.releaseFailedPrepare(key, preparation)
-			ensureFederationReplicaMu.Unlock()
+			if cleanupErr := releaseFailedFederationReplicaPrepare(
+				ctx, store, managed, project, key, preparation,
+				nativeLeaveRecorded, nativeLeaveAddedPreparation,
+			); cleanupErr != nil {
+				return PrepareFederationReplicaLeaveResult{}, errors.Join(err, cleanupErr)
+			}
 		}
 		return PrepareFederationReplicaLeaveResult{}, err
 	}
@@ -382,12 +461,26 @@ func AbortFederationReplicaLeave(
 	if err != nil {
 		return err
 	}
-	ensureFederationReplicaMu.Lock()
-	defer ensureFederationReplicaMu.Unlock()
-
 	project, err := store.ProjectByID(ctx, projectID)
 	if err != nil {
 		return fmt.Errorf("read federation replica project before releasing leave: %w", err)
+	}
+	finish, err := federationcoord.BeginRebind(
+		ctx,
+		federationcoord.Key(store.InstanceUID(), projectID),
+		store,
+		projectID,
+	)
+	if err != nil {
+		return fmt.Errorf("coordinate federation replica leave abort: %w", err)
+	}
+	defer finish()
+
+	ensureFederationReplicaMu.Lock()
+	defer ensureFederationReplicaMu.Unlock()
+	project, err = store.ProjectByID(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("recheck federation replica project before releasing leave: %w", err)
 	}
 	match, found, err := config.FindProjectManagedCredential(ctx, managed, project.UID, project.Name)
 	if err != nil {
@@ -409,6 +502,68 @@ func AbortFederationReplicaLeave(
 	// Find the preparation's own keys: the project may have been renamed since
 	// it prepared, and a provider-backed key names the provider request.
 	preparation := newFederationReplicaPreparation(store, project.ID, preparationID)
+	if credentialFound && federationNativeLeaveHasPreparation(credential.NativeLeave, preparationID) {
+		state := cloneFederationNativeLeaveState(credential.NativeLeave)
+		index := 0
+		for state.Preparations[index].ID != preparationID {
+			index++
+		}
+		prepared := state.Preparations[index]
+		if project.DeletedAt != nil {
+			return fmt.Errorf("%w: the project is archived", ErrFederationReplicaLeaveStarted)
+		}
+		binding, err := store.FederationBindingByProject(ctx, project.ID)
+		if errors.Is(err, db.ErrNotFound) {
+			return fmt.Errorf("%w: the binding is detached", ErrFederationReplicaLeaveStarted)
+		}
+		if err != nil {
+			return fmt.Errorf("read federation replica binding before releasing leave: %w", err)
+		}
+		if binding.Role != db.FederationRoleSpoke {
+			return db.ErrFederationNotSpoke
+		}
+		final := len(state.Preparations) == 1
+		fence := &federationReplicaNativeFence{
+			instanceUID: store.InstanceUID(), projectID: project.ID,
+			enabled: state.Enabled, pushEnabled: state.PushEnabled,
+		}
+		if final {
+			if err := restoreNativeFederationBindingUnderGate(ctx, store, project.ID, fence); err != nil {
+				return fmt.Errorf("restore native federation binding after leave abort: %w", err)
+			}
+		}
+		replacement, _, removed, _, err := removeFederationNativeLeavePreparation(
+			ctx, credentials, project.UID, credential, preparationID,
+		)
+		if err != nil {
+			return fmt.Errorf("clear native leave preparation after abort: %w", err)
+		}
+		if !removed {
+			return nil
+		}
+		inMemoryKeys := federationReplicaTransitions.preparationKeys(preparation)
+		keys := slices.Clone(inMemoryKeys)
+		for _, key := range prepared.Keys {
+			if !slices.Contains(keys, key) {
+				keys = append(keys, key)
+			}
+		}
+		for _, key := range keys {
+			federationReplicaTransitions.releasePreparedLeave(key, preparation)
+		}
+		if !final && len(inMemoryKeys) == 0 && replacement.NativeLeave != nil {
+			for _, remaining := range replacement.NativeLeave.Preparations {
+				remainingPreparation := newFederationReplicaPreparation(store, project.ID, remaining.ID)
+				for _, key := range remaining.Keys {
+					federationReplicaTransitions.markLeavePending(key, remainingPreparation, fence)
+				}
+			}
+		}
+		if final {
+			federationReplicaTransitions.clearNativeFenceForProject(store.InstanceUID(), project.ID)
+		}
+		return nil
+	}
 	keys := federationReplicaTransitions.preparationKeys(preparation)
 	if len(keys) == 0 {
 		return nil
@@ -426,10 +581,179 @@ func AbortFederationReplicaLeave(
 	if binding.Role != db.FederationRoleSpoke {
 		return db.ErrFederationNotSpoke
 	}
+	fence, final := federationReplicaTransitions.nativeFenceForFinalRelease(preparation, "", false)
+	if final && fence != nil {
+		if err := restoreNativeFederationBindingUnderGate(ctx, store, project.ID, fence); err != nil {
+			return fmt.Errorf("restore native federation binding after leave abort: %w", err)
+		}
+	}
 	for _, key := range keys {
 		federationReplicaTransitions.releasePreparedLeave(key, preparation)
 	}
+	if final && fence != nil {
+		federationReplicaTransitions.clearNativeFenceForProject(store.InstanceUID(), project.ID)
+	}
 	return nil
+}
+
+// restoreNativeFederationBindingUnderGate releases only the enabled/push
+// fence. The caller acquires the project gate before ensureFederationReplicaMu
+// so rollback never waits for project work while holding the replica mutex.
+func restoreNativeFederationBindingUnderGate(
+	ctx context.Context,
+	store db.Storage,
+	projectID int64,
+	fence *federationReplicaNativeFence,
+) error {
+	binding, err := store.FederationBindingByProject(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	if binding.Role != db.FederationRoleSpoke || binding.RelayConfig != nil {
+		return db.ErrFederationRebindConflict
+	}
+	binding.Enabled = fence.enabled
+	binding.PushEnabled = fence.pushEnabled
+	_, err = store.UpsertFederationBinding(ctx, binding)
+	return err
+}
+
+// federationReplicaCleanupContext keeps leave rollback bounded but allows it
+// to restore the pre-leave write state after the caller has cancelled.
+func federationReplicaCleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx.Err() == nil {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+}
+
+func rollbackFailedNativeLeavePreparation(
+	ctx context.Context,
+	store db.Storage,
+	managed config.FederationManagedCredentialStore,
+	project db.Project,
+	preparation federationReplicaPreparation,
+) error {
+	cleanupCtx, cancel := federationReplicaCleanupContext(ctx)
+	defer cancel()
+	finish, err := federationcoord.BeginRebind(
+		cleanupCtx,
+		federationcoord.Key(store.InstanceUID(), project.ID),
+		store,
+		project.ID,
+	)
+	if err != nil {
+		return err
+	}
+	defer finish()
+
+	ensureFederationReplicaMu.Lock()
+	defer ensureFederationReplicaMu.Unlock()
+	credential, found, err := managed.FederationCredential(cleanupCtx, project.UID)
+	if err != nil {
+		return err
+	}
+	if !found || !federationNativeLeaveHasPreparation(credential.NativeLeave, preparation.id) {
+		return nil
+	}
+	if federationReplicaTransitions.preparationHoldCount(preparation) > 0 {
+		// A concurrent retry already published this durable preparation.
+		return nil
+	}
+	if len(credential.NativeLeave.Preparations) == 1 {
+		fence := &federationReplicaNativeFence{
+			instanceUID: store.InstanceUID(), projectID: project.ID,
+			enabled: credential.NativeLeave.Enabled, pushEnabled: credential.NativeLeave.PushEnabled,
+		}
+		if err := restoreNativeFederationBindingUnderGate(cleanupCtx, store, project.ID, fence); err != nil {
+			return err
+		}
+	}
+	_, _, _, _, err = removeFederationNativeLeavePreparation(
+		cleanupCtx, managed, project.UID, credential, preparation.id,
+	)
+	return err
+}
+
+func releaseFailedFederationReplicaPrepare(
+	ctx context.Context,
+	store db.Storage,
+	managed config.FederationManagedCredentialStore,
+	project db.Project,
+	key string,
+	preparation federationReplicaPreparation,
+	nativeLeaveRecorded bool,
+	nativeLeaveAddedPreparation bool,
+) error {
+	cleanupCtx, cancel := federationReplicaCleanupContext(ctx)
+	defer cancel()
+
+	for {
+		ensureFederationReplicaMu.Lock()
+		fence, _ := federationReplicaTransitions.nativeFenceForFinalRelease(preparation, key, true)
+		ensureFederationReplicaMu.Unlock()
+
+		var finish func()
+		if fence != nil {
+			var err error
+			finish, err = federationcoord.BeginRebind(
+				cleanupCtx,
+				federationcoord.Key(store.InstanceUID(), project.ID),
+				store,
+				project.ID,
+			)
+			if err != nil {
+				return fmt.Errorf("coordinate native federation leave rollback: %w", err)
+			}
+		}
+
+		ensureFederationReplicaMu.Lock()
+		currentFence, final := federationReplicaTransitions.nativeFenceForFinalRelease(
+			preparation, key, true,
+		)
+		if currentFence != nil && finish == nil {
+			ensureFederationReplicaMu.Unlock()
+			continue
+		}
+		if final && currentFence != nil {
+			if err := restoreNativeFederationBindingUnderGate(
+				cleanupCtx, store, project.ID, currentFence,
+			); err != nil {
+				ensureFederationReplicaMu.Unlock()
+				if finish != nil {
+					finish()
+				}
+				return fmt.Errorf("restore native federation binding after failed leave preparation: %w", err)
+			}
+		}
+		if nativeLeaveRecorded && nativeLeaveAddedPreparation &&
+			federationReplicaTransitions.preparationHoldCount(preparation) == 1 {
+			credential, found, readErr := managed.FederationCredential(cleanupCtx, project.UID)
+			if readErr == nil && found {
+				_, _, _, _, readErr = removeFederationNativeLeavePreparation(
+					cleanupCtx, managed, project.UID, credential, preparation.id,
+				)
+			} else if readErr == nil {
+				readErr = config.ErrFederationCredentialConflict
+			}
+			if readErr != nil {
+				ensureFederationReplicaMu.Unlock()
+				if finish != nil {
+					finish()
+				}
+				return fmt.Errorf("clear failed native leave preparation: %w", readErr)
+			}
+		}
+		if final && currentFence != nil {
+			federationReplicaTransitions.clearNativeFenceForProject(store.InstanceUID(), project.ID)
+		}
+		federationReplicaTransitions.releaseFailedPrepare(key, preparation)
+		ensureFederationReplicaMu.Unlock()
+		if finish != nil {
+			finish()
+		}
+		return nil
+	}
 }
 
 // LeavePending blocks attachment first. Drain the existing project transport
@@ -1254,6 +1578,13 @@ func ensureFederationReplicaCredentialTarget(
 	}
 	if !ok {
 		return nil
+	}
+	if existing.NativeLeave != nil {
+		return federationReplicaError(
+			ErrFederationReplicaLeavePending,
+			"explicit federation leave is pending",
+			"abort or finish the leave before reconnecting",
+		)
 	}
 	if existing.Provider != nil && !existing.Equal(p.Credential) {
 		return federationReplicaCredentialTargetConflict(
