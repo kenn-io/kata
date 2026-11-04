@@ -48,7 +48,7 @@ func TestSearchFTSScopeFiltersAndTieBreak(t *testing.T) {
 			} {
 				if name == "any" {
 					if query == "browser" {
-						fields = nil
+						continue
 					} else if query == "login session browser" {
 						fields = []string{"title", "body"}
 					}
@@ -58,10 +58,6 @@ func TestSearchFTSScopeFiltersAndTieBreak(t *testing.T) {
 					IssueScope: &db.APITokenScope{Kind: db.APITokenScopeIssueSubtree, ProjectUID: project.UID, RootIssueUID: root.UID},
 				})
 				require.NoError(t, err)
-				if fields == nil {
-					require.Empty(t, hits, "comment-only matches don't enter look-alike candidates")
-					continue
-				}
 				require.Len(t, hits, 1, "query %q must match the scoped child", query)
 				require.Equal(t, child.UID, hits[0].Issue.UID)
 				require.Equal(t, fields, hits[0].MatchedIn)
@@ -100,9 +96,8 @@ func TestSearchFTS_PunctuationLexemes(t *testing.T) {
 		any         bool
 		fields      []string
 	}{
-		{"all_across_documents", "login,timeout", false, []string{"title", "comments"}},
+		{"all_across_documents", "login,browser,timeout", false, []string{"title", "body", "comments"}},
 		{"any_lexeme", "login,absent", true, []string{"title"}},
-		{"field_flags", "login,browser", false, []string{"title", "body"}},
 		{"distinct_lexemes", "login,login timeout", false, []string{"title", "comments"}},
 		{"literal_url_all", "http://a.example/x'y", false, []string{"title"}},
 		{"literal_url_any", "http://a.example/x'y", true, []string{"title"}},

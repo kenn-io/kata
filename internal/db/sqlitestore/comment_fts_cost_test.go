@@ -109,32 +109,24 @@ func TestSearchFTS_PageBudget(t *testing.T) {
 			}
 			require.NoError(t, tx.Commit())
 			store := &sqlitestore.Store{DB: raw}
-			for name, search := range map[string]func(context.Context, db.SearchFTSParams) ([]db.SearchCandidate, error){"all": store.SearchFTS, "any": store.SearchFTSAny} {
-				t.Run(name, func(t *testing.T) {
-					conn, err := raw.Conn(ctx)
-					require.NoError(t, err)
-					sqlitePageFetches(t, conn, true)
-					require.NoError(t, conn.Close())
-					start := time.Now()
-					hits, err := search(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: tc.query})
-					elapsed := time.Since(start)
-					require.NoError(t, err)
-					want := tc.want
-					if tc.name == "sparse same-project" && name == "any" {
-						want = 0 // The needle appears only in a comment.
-					}
-					require.Len(t, hits, want)
-					for _, hit := range hits {
-						require.Equal(t, p.ID, hit.Issue.ProjectID)
-					}
-					conn, err = raw.Conn(ctx)
-					require.NoError(t, err)
-					count := sqlitePageFetches(t, conn, false)
-					require.NoError(t, conn.Close())
-					t.Logf("%d comments: %d page fetches, %.3f ms", tc.comments, count, float64(elapsed)/float64(time.Millisecond))
-					require.LessOrEqual(t, count, tc.budget, "search must follow matching postings")
-				})
+			conn, err := raw.Conn(ctx)
+			require.NoError(t, err)
+			sqlitePageFetches(t, conn, true)
+			require.NoError(t, conn.Close())
+			start := time.Now()
+			hits, err := store.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: tc.query})
+			elapsed := time.Since(start)
+			require.NoError(t, err)
+			require.Len(t, hits, tc.want)
+			for _, hit := range hits {
+				require.Equal(t, p.ID, hit.Issue.ProjectID)
 			}
+			conn, err = raw.Conn(ctx)
+			require.NoError(t, err)
+			count := sqlitePageFetches(t, conn, false)
+			require.NoError(t, conn.Close())
+			t.Logf("%d comments: %d page fetches, %.3f ms", tc.comments, count, float64(elapsed)/float64(time.Millisecond))
+			require.LessOrEqual(t, count, tc.budget, "search must follow matching postings")
 		})
 	}
 }

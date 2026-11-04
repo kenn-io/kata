@@ -40,10 +40,9 @@ func TestCommentSearchMigrationUpgradesVersion39(t *testing.T) {
 	defer func() { _ = upgraded.Close() }()
 	p, err := upgraded.ProjectByName(ctx, "example-project")
 	require.NoError(t, err)
-	hits, err := upgraded.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login safari"})
+	hits, err := upgraded.SearchFTSAny(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "safari"})
 	require.NoError(t, err)
-	require.Len(t, hits, 1)
-	require.Equal(t, []string{"title", "comments"}, hits[0].MatchedIn)
+	require.Empty(t, hits, "the migration must remove comment text from the issue search document")
 	var indexDefinition string
 	require.NoError(t, admin.QueryRowContext(ctx, `SELECT indexdef FROM pg_indexes WHERE schemaname='comment_search_upgrade' AND indexname='idx_comments_search'`).Scan(&indexDefinition))
 	require.Contains(t, indexDefinition, "USING gin (to_tsvector(")

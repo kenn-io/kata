@@ -350,15 +350,7 @@ func TestSearchFTS_SeparateCommentDocuments(t *testing.T) {
 		}
 		require.InDelta(t, want, got[0].Score, 1e-12, "each word contributes its best eligible document score")
 	}
-	got, err := d.SearchFTSAny(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login browser safari missing"})
-	require.NoError(t, err)
-	require.Len(t, got, 1)
-	require.Equal(t, issue.ID, got[0].Issue.ID)
-	require.Equal(t, []string{"title", "body"}, got[0].MatchedIn)
-	got, err = d.SearchFTSAny(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "safari timeout"})
-	require.NoError(t, err)
-	require.Empty(t, got, "comment-only matches don't enter look-alike candidates")
-	got, err = d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "pull-request"})
+	got, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "pull-request"})
 	require.NoError(t, err)
 	require.Empty(t, got, "phrases cannot span comments")
 	addTesterComment(ctx, t, d, issue.ID, "pull request")

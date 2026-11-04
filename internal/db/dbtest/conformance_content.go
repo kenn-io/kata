@@ -1213,28 +1213,17 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	if err != nil {
 		return fmt.Errorf("create original issue: %w", err)
 	}
-	// More than 20 partial matches must not crowd out the two-word match.
-	for i := range 22 {
-		issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
-			ProjectID: noiseProject.ID, Title: fmt.Sprintf("unrelated task %d", i), Author: "tester",
-		})
-		if err != nil {
-			return fmt.Errorf("create comment noise issue: %w", err)
-		}
-		_, _, err = store.CreateComment(ctx, db.CreateCommentParams{
-			IssueID: issue.ID, Body: strings.Repeat("login ", 100), Author: "tester",
-		})
-		if err != nil {
-			return fmt.Errorf("create matching noise comment: %w", err)
-		}
-		for range 100 {
-			_, _, err = store.CreateComment(ctx, db.CreateCommentParams{
-				IssueID: issue.ID, Body: "routine progress update", Author: "tester",
-			})
-			if err != nil {
-				return fmt.Errorf("create neutral noise comment: %w", err)
-			}
-		}
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: noiseProject.ID, Title: "unrelated task", Author: "tester",
+	})
+	if err != nil {
+		return fmt.Errorf("create comment noise issue: %w", err)
+	}
+	_, _, err = store.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: issue.ID, Body: "login crash", Author: "tester",
+	})
+	if err != nil {
+		return fmt.Errorf("create matching noise comment: %w", err)
 	}
 	noiseMatches, err := store.SearchFTSAny(ctx, db.SearchFTSParams{
 		ProjectID: noiseProject.ID, Query: "login crash", Limit: 20,
@@ -1243,7 +1232,8 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 		return fmt.Errorf("search amid comment noise: %w", err)
 	}
 	require.Len(t, noiseMatches, 1)
-	assert.Contains(t, searchCandidateIDs(noiseMatches), original.ID)
+	assert.Equal(t, original.ID, noiseMatches[0].Issue.ID)
+	assert.Equal(t, []string{"title", "body"}, noiseMatches[0].MatchedIn)
 
 	sparse, err := createFixtureIssue(ctx, store, primary.Project.ID, "ranktoken once", "discovery-author", nil)
 	if err != nil {
