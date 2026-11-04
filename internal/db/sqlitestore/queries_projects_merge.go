@@ -67,6 +67,9 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 	if err := rejectFederatedProjectMerge(ctx, tx, source.ID, target.ID); err != nil {
 		return db.ProjectMergeResult{}, err
 	}
+	if err := rejectIssueSyncProjectMerge(ctx, tx, source.ID, target.ID); err != nil {
+		return db.ProjectMergeResult{}, err
+	}
 	tallyPatch, err := db.MergeCronTallyMetadata(target.Metadata, source.Metadata)
 	if err != nil {
 		return db.ProjectMergeResult{}, err
@@ -82,9 +85,6 @@ func (d *Store) mergeProjects(ctx context.Context, p db.MergeProjectsParams) (db
 		return db.ProjectMergeResult{}, err
 	}
 	if err := rejectProjectMergeAccessWideningTx(ctx, tx, source.UID, target.UID); err != nil {
-		return db.ProjectMergeResult{}, err
-	}
-	if err := rejectIssueSyncProjectMerge(ctx, tx, source.ID, target.ID); err != nil {
 		return db.ProjectMergeResult{}, err
 	}
 	if err := lockAndRejectFreshExternalRootClaimsForProjectTx(
