@@ -16,7 +16,7 @@ import (
 // (info.version). It tracks the HTTP API contract, not the build version, so
 // the committed schema artifact stays stable across builds and is bumped
 // deliberately when the wire contract changes.
-const APISchemaVersion = "0.41.0"
+const APISchemaVersion = "0.42.0"
 
 // OpenAPIDocument builds the daemon's complete OpenAPI model by wiring every
 // route through NewServer with a zero ServerConfig. It binds no listener and
@@ -41,39 +41,31 @@ func OpenAPIDocument() *huma.OpenAPI {
 func openAPIClientDocument() *huma.OpenAPI {
 	doc := baseOpenAPIDocument()
 	clearResponseAdditionalProperties(doc)
-	configureClientPresence(doc)
+	allowEmptyFederationJoinClientStrings(doc)
 	return doc
 }
 
-// Required names and times use client-only nullable fields to distinguish
-// presence from empty strings and zero instants. Join strings remain optional values.
-func configureClientPresence(doc *huma.OpenAPI) {
+// Required JSON properties specify presence, not a nonempty string. These
+// fields are intentionally empty when no origin is configured or a grant
+// cannot support a runnable join. Override the Go generator's inferred
+// nonzero-value validation without making the wire properties optional.
+func allowEmptyFederationJoinClientStrings(doc *huma.OpenAPI) {
 	if doc == nil || doc.Components == nil || doc.Components.Schemas == nil {
 		return
 	}
-	for schemaName, names := range map[string][]string{
-		"FederationJoinInstructions": {"hub_url", "join_command"},
-		"CronValidationResult":       {"name"}, "SchedulePreview": {"from"}, "ScheduleFire": {"at"},
-		"CollisionItem": {"at"}, "ValidationCollisions": {"until"},
-	} {
-		schema := doc.Components.Schemas.Map()[schemaName]
-		if schema == nil {
+	join := doc.Components.Schemas.Map()["FederationJoinInstructions"]
+	if join == nil {
+		return
+	}
+	for _, name := range []string{"hub_url", "join_command"} {
+		property := join.Properties[name]
+		if property == nil {
 			continue
 		}
-		for _, name := range names {
-			property := schema.Properties[name]
-			if property == nil {
-				continue
-			}
-			if schemaName != "FederationJoinInstructions" {
-				property.Nullable = true
-				continue
-			}
-			if property.Extensions == nil {
-				property.Extensions = map[string]any{}
-			}
-			property.Extensions["x-oapi-codegen-extra-tags"] = map[string]any{"validate": "omitempty"}
+		if property.Extensions == nil {
+			property.Extensions = map[string]any{}
 		}
+		property.Extensions["x-oapi-codegen-extra-tags"] = map[string]any{"validate": "omitempty"}
 	}
 }
 

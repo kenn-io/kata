@@ -2241,7 +2241,7 @@ to inject its value into the consuming process. Revoke the token during teardown
 `kata cron` stores shared jobs, workflows and independent attributed run evidence.
 Commands return JSON; external adapters schedule and launch their own work.
 See [Cron](cron.md) for bounded documents and retry semantics, and
-[Validate before saving](cron.md#validate-before-saving) for validation.
+[Validate before saving](cron.md#validate-before-saving) for validation. Anonymous `--insecure-readonly` clients cannot validate.
 
 ```sh
 kata cron job create --uid <job-uid> --file job.json --json

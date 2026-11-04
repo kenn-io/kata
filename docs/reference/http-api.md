@@ -251,7 +251,7 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 | Version | Change |
 | --- | --- |
-| `0.41.0` | Adds read-only `POST /projects/{project_id}/cron/jobs/validate` and `/projects/{project_id}/cron/workflows/validate` for unsaved definitions and hypothetical next fires. CLI job/workflow validation requires this version; older daemons produce an upgrade message. See [Validate before saving](cron.md#validate-before-saving) for stages and write-authority limits. |
+| `0.42.0` | Adds read-only `POST /projects/{project_id}/cron/jobs/validate` and `/projects/{project_id}/cron/workflows/validate` for unsaved definitions and hypothetical next fires. CLI job/workflow validation requires this version; older daemons produce an upgrade message. See [Validate before saving](cron.md#validate-before-saving) for stages and write-authority limits. |
 | `0.40.0` | Issue history accepts `include_effective_close_event_uid=true` and returns the visible native close event that currently supplies the issue's closed status. |
 | `0.39.0` | `POST /projects/{project_id}/issues/{ref}/attachments/links` accepts `reuse_existing=true` to reuse the smallest existing attachment reference for the resolved Docbank version, creating one if none exists. Omission keeps creating a new reference. |
 | `0.38.0` | Publishes `POST /projects/{project_id}/issues/{ref}/attachments/links`, which saves a reference to an existing Docbank file version without uploading its bytes. `kata docbank attachments link` refuses older daemons. |

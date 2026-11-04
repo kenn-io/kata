@@ -84,14 +84,14 @@ func TestCronCLIValidate(t *testing.T) {
 
 func TestCronCLIValidateOldDaemonAndMalformedResponse(t *testing.T) {
 	for _, tc := range []struct{ name, version, response, want string }{
-		{"old", "0.38.0", `{}`, "upgrade the daemon"},
-		{"missing-valid", "0.41.0", `{"name":"Inspect","definition":{},"errors":[],"warnings":[]}`, "validation response"},
-		{"wrong-valid", "0.41.0", `{"valid":"true"}`, "CronValidationResult.valid"},
-		{"invalid-json", "0.41.0", `{`, "unexpected end of JSON input"},
-		{"null-definition", "0.41.0", `{"valid":true,"name":"Inspect","definition":null,"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
-		{"scalar-definition", "0.41.0", `{"valid":true,"name":"Inspect","definition":42,"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
-		{"missing-name", "0.41.0", `{"valid":true,"definition":{},"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
-		{"missing-schedule", "0.41.0", `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[]}`, "validation response"},
+		{"old", "0.41.0", `{}`, "upgrade the daemon"},
+		{"missing-valid", "0.42.0", `{"name":"Inspect","definition":{},"errors":[],"warnings":[]}`, "validation response"},
+		{"wrong-valid", "0.42.0", `{"valid":"true"}`, "CronValidationResult.valid"},
+		{"invalid-json", "0.42.0", `{`, "unexpected end of JSON input"},
+		{"null-definition", "0.42.0", `{"valid":true,"name":"Inspect","definition":null,"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
+		{"scalar-definition", "0.42.0", `{"valid":true,"name":"Inspect","definition":42,"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
+		{"missing-name", "0.42.0", `{"valid":true,"definition":{},"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
+		{"missing-schedule", "0.42.0", `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[]}`, "validation response"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0
@@ -152,7 +152,7 @@ func TestCronCLIValidateConflictAndIdentity(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, conn.Close())
 		case r.URL.Path == "/api/v1/health":
-			_, _ = fmt.Fprint(w, `{"api_schema_version":"0.41.0"}`)
+			_, _ = fmt.Fprint(w, `{"api_schema_version":"0.42.0"}`)
 		default:
 			_, _ = fmt.Fprint(w, `{"project":{"id":1,"name":"spoke-project"},"projects":[{"id":1,"name":"spoke-project"}]}`)
 		}
