@@ -50,7 +50,8 @@ func newDeleteHarness(t *testing.T, view viewID) *deleteHarness {
 	return h
 }
 
-// target is the issue under the cursor, selected through the list.
+// selectIssue puts the cursor on the issue with the given uid, and in the
+// detail view opens that issue there.
 func (h *deleteHarness) selectIssue(uid string) {
 	h.t.Helper()
 	rows := h.m.list.visibleRows()
@@ -158,7 +159,7 @@ func TestDeleteSelectsTheNeighbouringRowAndNamesUndo(t *testing.T) {
 			assert.Equal(t, neighbour.UID, selected.UID, "selection moves to the neighbouring row")
 			assert.Equal(t, viewList, h.m.view, "a deleted issue's detail is left")
 			require.NotNil(t, h.m.toast)
-			assert.Contains(t, h.m.toast.text, "u", "the notice names the undo key")
+			assert.Contains(t, h.m.toast.text, "press u to undo", "the notice names the undo key")
 			assert.Contains(t, h.m.toast.text, h.project.Name+"#"+target.ShortID)
 		})
 	}

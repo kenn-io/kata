@@ -52,11 +52,17 @@ func (m Model) deleteConfirmation(issue Issue) string {
 	return project + "#" + issue.ShortID
 }
 
+// deleteHidden reports whether the delete key is not on offer: the connected
+// credentials cannot delete. Footer, help overlay and chrome all read it.
+func (m Model) deleteHidden() bool {
+	return !m.mutationAllowed(false)
+}
+
 // helpKeymap is the keymap the help overlay lists: without the delete key
-// when the connected credentials cannot delete.
+// when it is not on offer.
 func (m Model) helpKeymap() keymap {
 	km := m.keymap
-	if !m.mutationAllowed(false) {
+	if m.deleteHidden() {
 		km.Delete = key{}
 	}
 	return km

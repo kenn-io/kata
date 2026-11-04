@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -58,7 +57,7 @@ func helpSections(km keymap) []helpSection {
 	// An unbound key (Model.helpKeymap clears Delete when it is not on offer)
 	// is not listed.
 	for i := range sections {
-		sections[i].rows = slices.DeleteFunc(sections[i].rows, func(item helplayout.HelpItem) bool { return item.Key == "" })
+		sections[i].rows = withoutUnboundKeys(sections[i].rows)
 	}
 	return sections
 }
