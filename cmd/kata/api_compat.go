@@ -20,6 +20,7 @@ const (
 	apiVersionCloseTranscript           = "0.26.0"
 	apiVersionOtherAgentCloseTranscript = "0.34.0"
 	apiVersionDocbankAttachmentLink     = "0.38.0"
+	apiVersionCronDispatchWhy           = "0.40.0"
 	apiVersionCommentLinks              = "0.28.0"
 	apiVersionRecurrenceIfMatch         = "0.37.0"
 	apiVersionReadyAndSearchFilters     = "0.8.0"

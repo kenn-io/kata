@@ -3,7 +3,9 @@ package pgstore
 import (
 	"context"
 	"database/sql"
+	"time"
 
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -55,4 +57,22 @@ func (s *Store) ListRecurringCronJobs(ctx context.Context, after string, limit i
 // DispatchRecurringCron commits a bounded set of children and its progress together.
 func (s *Store) DispatchRecurringCron(ctx context.Context, in db.DispatchRecurringCronIn) (db.DispatchRecurringCronOut, error) {
 	return s.cronSQL().DispatchRecurring(ctx, in)
+}
+
+// ExplainRecurringCron evaluates one consistent read without mutation fences,
+// row locks, actor resolution, or the project's write gate.
+func (s *Store) ExplainRecurringCron(ctx context.Context, projectID int64, jobUID string, now time.Time) (db.RecurringExplanation, error) {
+	tx, err := s.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		return db.RecurringExplanation{Reason: cron.DispatchError, Detail: cron.DispatchError.PublicDetail()}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	out, err := s.cronSQL().ExplainRecurring(ctx, tx, db.DispatchRecurringCronIn{ProjectID: projectID, JobUID: jobUID, Now: now})
+	if err != nil {
+		return out, err
+	}
+	if err := tx.Commit(); err != nil {
+		return db.RecurringExplanation{Reason: cron.DispatchError, Detail: cron.DispatchError.PublicDetail()}, err
+	}
+	return out, nil
 }

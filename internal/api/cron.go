@@ -2,6 +2,10 @@ package api
 
 import (
 	"encoding/json/jsontext"
+	"reflect"
+
+	"github.com/danielgtaylor/huma/v2"
+	"time"
 
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
@@ -195,3 +199,35 @@ type ListCronWorkflowsResponse struct {
 		Workflows []CronWorkflow `json:"workflows"`
 	}
 }
+
+// CronDispatchDecision is a sanitized observation of a dispatch attempt.
+type CronDispatchDecision struct {
+	At                 time.Time           `json:"at"`
+	DefinitionEventUID string              `json:"definition_event_uid"`
+	Reason             cron.DispatchReason `json:"reason"`
+	Delivered          int                 `json:"delivered"`
+	More               bool                `json:"more"`
+	Skipped            cron.RecurringSkip  `json:"skipped"`
+	Detail             string              `json:"detail,omitempty"`
+}
+
+// CronDispatchExplanation combines read-only eligibility with this daemon's
+// retained observation. Neither field predicts a successful future write.
+type CronDispatchExplanation struct {
+	JobUID      string                  `json:"job_uid"`
+	EvaluatedAt time.Time               `json:"evaluated_at"`
+	Gate        db.RecurringExplanation `json:"gate"`
+	Last        *CronDispatchDecision   `json:"last"`
+}
+
+// TransformSchema preserves the required null state for an absent observation.
+func (CronDispatchExplanation) TransformSchema(registry huma.Registry, schema *huma.Schema) *huma.Schema {
+	last := huma.SchemaFromType(registry, reflect.TypeFor[CronDispatchDecision]())
+	last.Nullable = true
+	last.Extensions = map[string]any{"x-omitempty": false}
+	schema.Properties["last"] = last
+	return schema
+}
+
+// CronDispatchResponse contains a live explanation and optional local evidence.
+type CronDispatchResponse struct{ Body CronDispatchExplanation }

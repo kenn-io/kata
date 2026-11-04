@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"go.kenn.io/kata/internal/api"
@@ -189,6 +190,29 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 		}
 		out := &api.CronJobResponse{}
 		out.Body.Job = api.CronJobFrom(value)
+		return out, nil
+	})
+	huma.Register(h, huma.Operation{OperationID: "explainCronJobDispatch", Method: http.MethodGet, Path: path + "/{cron_uid}/dispatch"}, func(ctx context.Context, in *api.CronDefinitionRequest) (*api.CronDispatchResponse, error) {
+		project, err := activeProjectByID(ctx, cfg.DB, in.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		in.UID = strings.ToUpper(strings.TrimSpace(in.UID))
+		now := time.Now().UTC()
+		gate, err := cfg.DB.ExplainRecurringCron(ctx, in.ProjectID, in.UID, now)
+		if gate.Reason == cron.DispatchJobMissing {
+			return nil, cronAPIError(ctx, cfg, db.ErrNotFound, in.ProjectID, in.UID, true)
+		}
+		if err != nil && gate.Reason == "" {
+			gate.Reason = cron.DispatchError
+		}
+		// This is an explanation of failure as well as success. Raw errors and
+		// stored detail never enter the API, including for invalid progress.
+		gate.Detail = gate.Reason.PublicDetail()
+		out := &api.CronDispatchResponse{Body: api.CronDispatchExplanation{JobUID: in.UID, EvaluatedAt: now, Gate: gate}}
+		if cfg.CronRecorder != nil && gate.Reason != cron.DispatchExternalAdapter {
+			out.Body.Last = cfg.CronRecorder.Last(project.UID, in.UID)
+		}
 		return out, nil
 	})
 	huma.Register(h, huma.Operation{OperationID: "listCronJobs", Method: http.MethodGet, Path: path}, func(ctx context.Context, in *api.ListCronDefinitionsRequest) (*api.ListCronJobsResponse, error) {

@@ -41,7 +41,7 @@ func TestCronRecorderCommittedCountsDedupeAndPruning(t *testing.T) {
 	require.EqualValues(t, 2, h.ErrorsSinceStart)
 	require.True(t, h.SkippedCountIsLowerBound)
 	require.Equal(t, 1, h.ByReason["error"])
-	last := r.Last(c.JobUID)
+	last := r.Last(c.ProjectUID, c.JobUID)
 	require.NotNil(t, last)
 	require.NotContains(t, last.Detail, "local-sensitive-detail")
 	raw, err := os.ReadFile(h.LogPath)
@@ -58,7 +58,7 @@ func TestCronRecorderCommittedCountsDedupeAndPruning(t *testing.T) {
 	require.Equal(t, 1, r.Health().Jobs)
 	r.FinishSweep(now.Add(3*time.Minute), 0, true, false)
 	require.Zero(t, r.Health().Jobs)
-	require.Nil(t, r.Last(c.JobUID))
+	require.Nil(t, r.Last(c.ProjectUID, c.JobUID))
 }
 
 type failingRecurringStore struct {
@@ -92,7 +92,7 @@ func TestCronSweeperRetainsCommittedBatchBeforeLaterError(t *testing.T) {
 	require.EqualValues(t, 50, r.Health().DeliveredSinceStart)
 	require.EqualValues(t, 1, r.Health().ErrorsSinceStart)
 	require.Len(t, sink.events, 51)
-	require.Equal(t, cron.DispatchError, r.Last(job.UID).Reason)
+	require.Equal(t, cron.DispatchError, r.Last(p.UID, job.UID).Reason)
 }
 
 func TestCronRecorderRetriesLogFailure(t *testing.T) {

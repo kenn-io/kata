@@ -242,6 +242,7 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 | Version | Change |
 | --- | --- |
+| `0.40.0` | Publishes `GET /projects/{project_id}/cron/jobs/{cron_uid}/dispatch` for read-only recurring eligibility and sanitized local observations. `kata cron job show --why` requires this version. |
 | `0.39.0` | Health diagnostics include native recurring decision counts and local log status in `cron`. This block is available only to diagnostic-owner authority. |
 | `0.38.0` | Publishes `POST /projects/{project_id}/issues/{ref}/attachments/links`, which saves a reference to an existing Docbank file version without uploading its bytes. `kata docbank attachments link` refuses older daemons. |
 | `0.37.0` | `POST /projects/{project_id}/recurrences` accepts `If-Match: "rev-N"` with `initial_issue_ref`; a different issue revision returns 412 `revision_conflict` and writes nothing. An empty `If-Match` returns 400. Older daemons ignore the header. |

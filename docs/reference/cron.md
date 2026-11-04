@@ -286,6 +286,32 @@ deliver only on their enabled owning hub. Spokes never deliver.
 
 ### Dispatch decisions and skipped occurrences
 
+Explain one job's current eligibility and this daemon's retained observation:
+
+```sh
+kata cron job show <job-uid> --why
+```
+
+`--why` requires daemon API 0.40.0 and adds a top-level `dispatch` object to the
+normal show response. Without it, show output is unchanged. `gate` checks the
+current binding, definition, parent, progress, schedule and recipient in one
+read-only snapshot. `due` means the plan is eligible to create a child; it does
+not promise that a later write gate or transaction will succeed. The live check
+omits mutation authority and row locks. `skipped` means the current plan would
+only discard old occurrences, without committing that progress.
+
+`next_due_at`, when present, is the first scheduled instant after stored
+progress. It can be in the past and does not predict which occurrence `latest`
+will deliver. `last` is this daemon's last retained dispatch attempt, or `null`
+when none remains. Observations are local and reset on restart. Adapter jobs
+answer `external_adapter`; spokes and relays answer `replica`. To inspect the
+hub's observation, select it with `--daemon <hub-name>`. The query is not
+forwarded. Public details use fixed messages; raw errors stay in the local log.
+
+The same explanation is available at
+`GET /api/v1/projects/{project_id}/cron/jobs/{cron_uid}/dispatch`, with the same
+project read authorization as job show.
+
 Read the current daemon's native recurring decisions with:
 
 ```sh
@@ -303,7 +329,8 @@ no discarded work until their frozen window is finalized.
 
 | Reason | What the daemon observed |
 | --- | --- |
-| `delivered` | This batch committed child issues. |
+| `due` | Live explanation only: the read-only plan has a due child. |
+| `delivered` | This recorded batch committed child issues. |
 | `idle` | The gate was open and no occurrence was due. |
 | `skipped` | Only discarded occurrences advanced progress. |
 | `scanning` | A bounded `latest` calendar scan is unfinished. |

@@ -70,6 +70,7 @@ var storageScenarios = []scenario{
 	{name: "recurring project metadata keys", run: checkRecurringProjectMetadataKeys},
 	{name: "recurring backlog matches delivery", methods: []string{"CloseIssue", "ReopenIssue", "DispatchRecurringCron"}, run: checkRecurringBacklogMatchesDelivery},
 	{name: "recurring dispatch decisions", methods: []string{"DispatchRecurringCron"}, run: checkRecurringDispatchDecisions},
+	{name: "recurring explain", methods: []string{"ExplainRecurringCron"}, run: checkRecurringExplain},
 	{name: "recurring cron", methods: []string{"ListRecurringCronJobs", "DispatchRecurringCron"}, runWithBackend: checkRecurringCron},
 	{name: "close transcript", run: checkCloseTranscript},
 	{name: "comment notifications", methods: []string{"CreateComment", "PatchIssueMetadata"}, run: checkCommentNotifications},

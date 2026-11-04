@@ -6,6 +6,7 @@ type DispatchReason string
 
 // Native recurring dispatch reasons describe eligibility and committed outcomes.
 const (
+	DispatchDue                DispatchReason = "due"
 	DispatchDelivered          DispatchReason = "delivered"
 	DispatchIdle               DispatchReason = "idle"
 	DispatchSkipped            DispatchReason = "skipped"

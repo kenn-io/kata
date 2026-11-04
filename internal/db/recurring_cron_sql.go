@@ -75,9 +75,13 @@ func recurringAuthority(ctx context.Context, tx *sql.Tx, projectID int64) (bool,
 
 // recurringParent reads the bound parent and whether it is soft-deleted.
 func (a CronSQL) recurringParent(ctx context.Context, tx *sql.Tx, projectID int64, parentUID string) (Issue, bool, error) {
-	// Parent lock precedes reading owner/status/progress, sharing normal mutation serialization.
+	return a.recurringParentTx(ctx, tx, projectID, parentUID, true)
+}
+
+func (a CronSQL) recurringParentTx(ctx context.Context, tx *sql.Tx, projectID int64, parentUID string, lock bool) (Issue, bool, error) {
+	// Parent lock precedes reading owner/status/progress for dispatch.
 	query := `SELECT id,uid,status,owner,author,metadata,revision,deleted_at IS NOT NULL FROM issues WHERE uid=$1 AND project_id=$2`
-	if a.Postgres {
+	if a.Postgres && lock {
 		query += " FOR UPDATE"
 	}
 	var p Issue
@@ -221,7 +225,7 @@ func (a CronSQL) DispatchRecurring(ctx context.Context, in DispatchRecurringCron
 				failureReason = out.Reason
 			}
 		}()
-		g, err := a.recurringGateTx(ctx, tx, in)
+		g, err := a.recurringGateTx(ctx, tx, in, gateDispatch)
 		out.Reason = g.reason
 		if err != nil || g.reason != "" {
 			return err
@@ -241,14 +245,7 @@ func (a CronSQL) DispatchRecurring(ctx context.Context, in DispatchRecurringCron
 		if err != nil {
 			return err
 		}
-		recipient := job.Definition.Action.Recipient
-		if recipient == "current-owner-or-author" {
-			recipient = parent.Author
-			if parent.Owner != nil && *parent.Owner != "" {
-				recipient = *parent.Owner
-			}
-		}
-		recipient, err = notification.NormalizeRecipient(recipient)
+		recipient, err := recurringRecipient(job, parent)
 		if err != nil {
 			out.Reason = cron.DispatchRecipientInvalid
 			return err
@@ -383,4 +380,16 @@ func CheckNativeRecurringParentMove(ctx context.Context, tx *sql.Tx, postgres bo
 		return &NativeRecurringParentPinnedError{}
 	}
 	return nil
+}
+
+// recurringRecipient validates routing even when a plan is idle or skips only.
+func recurringRecipient(job CronJob, parent Issue) (string, error) {
+	recipient := job.Definition.Action.Recipient
+	if recipient == "current-owner-or-author" {
+		recipient = parent.Author
+		if parent.Owner != nil && *parent.Owner != "" {
+			recipient = *parent.Owner
+		}
+	}
+	return notification.NormalizeRecipient(recipient)
 }

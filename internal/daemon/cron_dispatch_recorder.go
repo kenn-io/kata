@@ -13,15 +13,7 @@ import (
 
 // CronDispatchDecision is an observation of a committed batch or failed attempt.
 // Detail is sanitized by Last; the local JSONL record retains raw diagnostics.
-type CronDispatchDecision struct {
-	At                 time.Time           `json:"at"`
-	DefinitionEventUID string              `json:"definition_event_uid"`
-	Reason             cron.DispatchReason `json:"reason"`
-	Delivered          int                 `json:"delivered"`
-	More               bool                `json:"more"`
-	Skipped            cron.RecurringSkip  `json:"skipped"`
-	Detail             string              `json:"detail,omitempty"`
-}
+type CronDispatchDecision = api.CronDispatchDecision
 
 type cronDispatchLog struct {
 	Version    int    `json:"version"`
@@ -36,6 +28,7 @@ type cronDispatchLog struct {
 type CronDispatchRecorder struct {
 	mu       sync.Mutex
 	last     map[string]CronDispatchDecision
+	projects map[string]string
 	seen     map[string]bool
 	pending  map[string]bool
 	appender *jsonlog.Appender
@@ -44,7 +37,7 @@ type CronDispatchRecorder struct {
 
 // NewCronDispatchRecorder creates a recorder with a lazily opened local log.
 func NewCronDispatchRecorder(path string) *CronDispatchRecorder {
-	return &CronDispatchRecorder{last: make(map[string]CronDispatchDecision), seen: make(map[string]bool), pending: make(map[string]bool), appender: jsonlog.New(path, 0, 0), health: api.CronHealth{LogPath: path}}
+	return &CronDispatchRecorder{last: make(map[string]CronDispatchDecision), projects: make(map[string]string), seen: make(map[string]bool), pending: make(map[string]bool), appender: jsonlog.New(path, 0, 0), health: api.CronHealth{LogPath: path}}
 }
 
 // Record must be called only after dispatch returns, never with tentative
@@ -64,7 +57,7 @@ func (r *CronDispatchRecorder) Record(ctx context.Context, c db.RecurringCronCan
 	}
 	previous, exists := r.last[c.JobUID]
 	changed := !exists || previous.Reason != d.Reason || previous.DefinitionEventUID != d.DefinitionEventUID || previous.Detail != d.Detail
-	r.last[c.JobUID], r.seen[c.JobUID] = d, true
+	r.last[c.JobUID], r.seen[c.JobUID], r.projects[c.JobUID] = d, true, c.ProjectUID
 	r.health.DeliveredSinceStart += int64(d.Delivered)
 	r.health.SkippedSinceStart += int64(d.Skipped.Count)
 	r.health.SkippedCountIsLowerBound = r.health.SkippedCountIsLowerBound || d.Skipped.Capped
@@ -103,6 +96,7 @@ func (r *CronDispatchRecorder) FinishSweep(now time.Time, elapsed time.Duration,
 	for uid := range r.last {
 		if !r.seen[uid] {
 			delete(r.last, uid)
+			delete(r.projects, uid)
 			delete(r.pending, uid)
 		}
 	}
@@ -133,12 +127,12 @@ func (r *CronDispatchRecorder) Health() *api.CronHealth {
 	return &h
 }
 
-// Last returns a copy with allowlisted detail. It never exposes log contents.
-func (r *CronDispatchRecorder) Last(jobUID string) *CronDispatchDecision {
+// Last returns a project-scoped copy with allowlisted detail, never log contents.
+func (r *CronDispatchRecorder) Last(projectUID, jobUID string) *CronDispatchDecision {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	d, ok := r.last[jobUID]
-	if !ok {
+	if !ok || r.projects[jobUID] != projectUID {
 		return nil
 	}
 	d.Detail = d.Reason.PublicDetail()

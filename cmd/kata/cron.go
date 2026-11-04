@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -67,6 +68,7 @@ type cronCLIOptions struct {
 	resource, action                 string
 	file, identity, expectedEventUID string
 	parent                           string
+	why                              bool
 	includeDeleted                   bool
 	limit                            int64
 	beforeUID, jobUID                string
@@ -84,6 +86,11 @@ func newCronOperationCmd(resource, action string) *cobra.Command {
 		if options.mutation() {
 			command.Long += "\nDirect spokes forward native recurring job writes synchronously when push is enabled. Otherwise, run the same command against the project's owning hub with --daemon <hub-name>."
 		}
+	}
+	if resource == "job" && action == "show" {
+		command.Flags().BoolVar(&options.why, "why", false, "explain live eligibility and the daemon's last dispatch decision")
+		command.Long += "\n--why adds live gate and local observation details (daemon API 0.40.0). Codes include due, idle, disabled, parent_closed, replica and external_adapter. Spokes answer replica; select --daemon <hub-name> for the hub's observation."
+		command.Example += "\n  kata cron job show <uid> --why --json"
 	}
 	if takesUID {
 		command.Use += " <uid>"
@@ -263,9 +270,20 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
+	if o.why {
+		if err := requireDaemonAPIVersion(daemon.ctx, daemon.client, daemon.baseURL, apiVersionCronDispatchWhy, "cron job show --why"); err != nil {
+			return err
+		}
+	}
 	raw, err := o.call(daemon, client, project.ID, body)
 	if err != nil {
 		return err
+	}
+	if o.why {
+		raw, err = o.withDispatch(daemon.ctx, client, project.ID, raw)
+		if err != nil {
+			return err
+		}
 	}
 	if flags.Quiet && currentOutputMode() != outputJSON {
 		return nil
@@ -753,4 +771,24 @@ func cronCapabilitiesCLIResponse(raw []byte, header string) ([]byte, error) {
 	}
 	body["event_features"] = encoded
 	return json.Marshal(body)
+}
+
+// withDispatch preserves the show response's opaque fields and JSON numbers.
+func (o cronCLIOptions) withDispatch(ctx context.Context, c *kataclient.Client, projectID int64, raw []byte) ([]byte, error) {
+	response, err := c.ExplainCronJobDispatchWithResponse(ctx, &generated.ExplainCronJobDispatchRequestOptions{PathParams: &generated.ExplainCronJobDispatchPath{ProjectID: projectID, CronUID: o.identity}})
+	if response == nil {
+		return nil, externalCLITransportError(response, err)
+	}
+	if err := externalCLIResponseError(response.StatusCode, response.Body, err); err != nil {
+		return nil, err
+	}
+	var fields map[string]jsontext.Value
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, err
+	}
+	if fields == nil {
+		return nil, fmt.Errorf("cron job show response must be a JSON object")
+	}
+	fields["dispatch"] = jsontext.Value(response.Body)
+	return json.Marshal(fields)
 }
