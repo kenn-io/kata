@@ -13,7 +13,7 @@ import (
 const (
 	canonicalColumnFingerprint     = "149178f2d94c65c520b50417c1e2859fdb52021e202f901364f7cf7ba3ab97e6"
 	canonicalConstraintFingerprint = "ed8007c6681e2530ded20619bfe30b94374a102718e8937e5835035603594522"
-	canonicalIndexFingerprint      = "21933347e0dd9fa729915654811dbdea9b7e759efdac655477ab651cb0ff56e8"
+	canonicalIndexFingerprint      = "858731fd9c5c0541b98b27d1a401d5ed20616c634c6bcb34ac4df615496824fd"
 	vectorColumnFingerprint        = "b8c7cb5e43f3c17502fc3e1deba77a772c3e9a486be623a96729de8866381c31"
 	vectorConstraintFingerprint    = "3a39a82331175295586fb3399dff2221fe511171f21e31a88410dd091c3a3cf4"
 	vectorIndexFingerprint         = "7868c4a815ebee6451cef203509dcedcd21401c76f49fb666e9facaad2f7aef3"

@@ -1,7 +1,7 @@
 ---
 title: Backup and restore
 description: Back up, restore, and move Kata data safely with JSONL export and import workflows.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 # Backup and restore
@@ -149,7 +149,7 @@ Project exports omit those local cursors. Receiving a new creation receipt
 invalidates the browser snapshot; an idle event stream requests a refresh on
 its next heartbeat.
 
-On main (schema 36), full owner backups also retain cron occurrence
+On main (schema 40), full owner backups also retain cron occurrence
 reservations. Restoring the same owner identity preserves reservations present
 in that snapshot. A snapshot cannot recover grants committed after it was
 taken. After rolling back to an older backup, reconcile ambiguous executions

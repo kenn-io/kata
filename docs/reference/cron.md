@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -420,7 +420,7 @@ unknown, or failed advertisements remain distinct outcomes. This is an ordinary 
 read and creates no permissions. Ordinary authentication, project isolation,
 and issue-scoped route restrictions apply.
 
-On main (schema 36), the response also contains `capabilities` and, when
+On main (schema 40), the response also contains `capabilities` and, when
 available, `claim_authority_instance_uid`. `cron_occurrence_claims_v1` means
 the project's root currently supports occurrence reservations. A spoke or
 relay asks the root synchronously; an offline, disabled, or older authority
@@ -455,7 +455,7 @@ See [Cron triggers](#triggers) for the expression rules.
 
 ## Reserve an execution occurrence
 
-On main (schema 36), adapters can reserve an occurrence before creating a
+On main (schema 40), adapters can reserve an occurrence before creating a
 per-run issue or launching work. Every participating runtime must claim for
 this to prevent competing launches. Observations and executor labels alone
 do not reserve anything.

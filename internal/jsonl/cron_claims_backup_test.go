@@ -113,7 +113,7 @@ func TestCronClaimsProjectMergeDerivesCopyAuthority(t *testing.T) {
 					continue
 				}
 				if mode == "legacy" {
-					line = bytes.ReplaceAll(line, []byte(`"value":"36"`), []byte(`"value":"35"`))
+					line = bytes.ReplaceAll(line, fmt.Appendf(nil, `"value":"%d"`, db.CurrentSchemaVersion()), []byte(`"value":"35"`))
 				}
 				data.Write(line)
 				data.WriteByte('\n')
@@ -139,7 +139,7 @@ func TestCronClaimsProjectMergeDerivesCopyAuthority(t *testing.T) {
 }
 
 func TestCronClaimsLegacyMarkerFreeImport(t *testing.T) {
-	for _, version := range []int{31, 32, 35} {
+	for _, version := range []int{31, 32, 35, 38, 39} {
 		for _, scoped := range []bool{false, true} {
 			t.Run(fmt.Sprintf("version_%d_scoped_%t", version, scoped), func(t *testing.T) {
 				source, in := claimBackupFixture(t)
@@ -154,7 +154,7 @@ func TestCronClaimsLegacyMarkerFreeImport(t *testing.T) {
 					if bytes.Contains(line, []byte(db.CronClaimAuthorityPrefix)) {
 						continue
 					}
-					line = bytes.ReplaceAll(line, []byte(`"value":"36"`), fmt.Appendf(nil, `"value":"%d"`, version))
+					line = bytes.ReplaceAll(line, fmt.Appendf(nil, `"value":"%d"`, db.CurrentSchemaVersion()), fmt.Appendf(nil, `"value":"%d"`, version))
 					legacy.Write(line)
 					legacy.WriteByte('\n')
 				}

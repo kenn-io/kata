@@ -12,10 +12,12 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-// Older-version fixtures start from the current schema and remove later indexes.
+// Older-version fixtures start from the current schema and remove later objects.
 func dropCommentUIDHandleIndex(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
-	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %s.idx_comments_uid_handle`, schema)) // #nosec G201 -- Fixed test schema.
+	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP TABLE IF EXISTS %s.cron_occurrence_claims`, schema)) // #nosec G201 -- Fixed test schema.
+	require.NoError(t, err)
+	_, err = admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %s.idx_comments_uid_handle`, schema)) // #nosec G201 -- Fixed test schema.
 	require.NoError(t, err)
 }
 
