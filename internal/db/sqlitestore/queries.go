@@ -1741,7 +1741,17 @@ func (d *Store) CommentIssueIDsByUIDs(ctx context.Context, uids []string) (map[s
 	if err := lookup("uid", exactUIDs); err != nil {
 		return nil, err
 	}
-	if err := lookup("UPPER(uid)", canonicalUIDs); err != nil {
+	handles := make([]string, 0, len(canonicalUIDs))
+	seenHandles := make(map[string]struct{}, len(canonicalUIDs))
+	for _, identity := range canonicalUIDs {
+		handle := strings.ToLower(identity[len(identity)-6:])
+		if _, seen := seenHandles[handle]; seen {
+			continue
+		}
+		seenHandles[handle] = struct{}{}
+		handles = append(handles, handle)
+	}
+	if err := lookup("lower(substr(uid,21))", handles); err != nil {
 		return nil, err
 	}
 	return out, nil

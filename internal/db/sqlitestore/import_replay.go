@@ -15,6 +15,7 @@ import (
 
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	katauid "go.kenn.io/kata/internal/uid"
 )
 
 // ImportReplay performs the entire JSONL import as one atomic transaction.
@@ -321,6 +322,42 @@ func refuseProjectMergeUIDCollisions(ctx context.Context, tx *sql.Tx, recs []db.
 	for _, check := range checks {
 		if check.uid == "" {
 			continue
+		}
+		if check.kind == "comment" {
+			identity := db.CanonicalCommentUID(check.uid)
+			if katauid.Valid(identity) {
+				handle := strings.ToLower(identity[len(identity)-6:])
+				rows, err := tx.QueryContext(ctx,
+					`SELECT uid FROM comments WHERE lower(substr(uid,21)) = ?`, handle)
+				if err != nil {
+					return fmt.Errorf("check project merge comment UID: %w", err)
+				}
+				var collision string
+				for rows.Next() {
+					var existing string
+					if err := rows.Scan(&existing); err != nil {
+						_ = rows.Close()
+						return fmt.Errorf("check project merge comment UID: %w", err)
+					}
+					existingIdentity := db.CanonicalCommentUID(existing)
+					if katauid.Valid(existingIdentity) && existingIdentity == identity {
+						collision = existing
+						break
+					}
+				}
+				rowsErr := rows.Err()
+				closeErr := rows.Close()
+				if rowsErr != nil {
+					return fmt.Errorf("check project merge comment UID: %w", rowsErr)
+				}
+				if closeErr != nil {
+					return fmt.Errorf("check project merge comment UID: %w", closeErr)
+				}
+				if collision != "" {
+					return fmt.Errorf("project merge refused: %s UID %q already exists", check.kind, check.uid)
+				}
+				continue
+			}
 		}
 		var exists bool
 		query := `SELECT EXISTS (SELECT 1 FROM ` + check.table + ` WHERE ` + check.column + ` = ?)`

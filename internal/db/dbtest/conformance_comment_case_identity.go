@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/json/v2"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/teammate"
+	"go.kenn.io/kata/internal/uid"
 	"hegel.dev/go/hegel"
 )
 
@@ -34,6 +36,133 @@ func updateCommentIdentityForTest(ctx context.Context, t *testing.T, store db.St
 	affected, err := result.RowsAffected()
 	require.NoError(t, err)
 	require.Equal(t, int64(1), affected)
+}
+
+func drawCommentIdentityULID(ht *hegel.T) string {
+	first := hegel.Draw(ht, hegel.SampledFrom([]string{"0", "1", "2", "3", "4", "5", "6", "7"}))
+	tail := []byte(hegel.Draw(ht, hegel.Text().Alphabet("0123456789ABCDEFGHJKMNPQRSTVWXYZ").MinSize(24).MaxSize(24)))
+	last := hegel.Draw(ht, hegel.SampledFrom([]string{"A", "B", "C", "D", "E", "F", "G", "H", "J", "K", "M", "N", "P", "Q", "R", "S", "T", "V", "W", "X", "Y", "Z"}))
+	return first + string(tail) + last
+}
+
+func drawCommentIdentityCaseVariant(ht *hegel.T, identity string) string {
+	variant := []byte(identity)
+	for index := 1; index < len(variant)-1; index++ {
+		if variant[index] >= 'A' && variant[index] <= 'Z' && hegel.Draw(ht, hegel.Booleans()) {
+			variant[index] += 'a' - 'A'
+		}
+	}
+	variant[len(variant)-1] += 'a' - 'A'
+	return string(variant)
+}
+
+func checkProjectMergeRejectsCanonicalCommentUIDCollision(t *testing.T, store db.Storage, backend Backend) error {
+	ctx := t.Context()
+	targetProject, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	targetIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: targetProject.ID, Title: "Existing issue", Author: "worker",
+	})
+	require.NoError(t, err)
+	existingComment, _, err := store.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: targetIssue.ID, Author: "worker", Body: "Existing comment",
+	})
+	require.NoError(t, err)
+
+	const importedAt = "2026-11-04T00:00:00.000Z"
+	stableTime := time.Date(2026, time.November, 4, 0, 0, 0, 0, time.UTC)
+	var trial uint64
+
+	hegel.Test(t, func(ht *hegel.T) {
+		trial++
+		trialSeed := strconv.FormatUint(trial, 10)
+		commentUID, err := uid.FromStableSeed([]byte("comment:"+trialSeed), stableTime)
+		require.NoError(ht, err)
+		last := hegel.Draw(ht, hegel.SampledFrom([]string{
+			"A", "B", "C", "D", "E", "F", "G", "H", "J", "K", "M", "N", "P", "Q", "R", "S", "T", "V", "W", "X", "Y", "Z",
+		}))
+		commentUID = commentUID[:len(commentUID)-1] + last
+		storedVariant := commentUID[:len(commentUID)-1] + strings.ToLower(last)
+		updateCommentIdentityForTest(ctx, t, store, backend, "uid", storedVariant, existingComment.ID)
+		importedProjectUID, err := uid.FromStableSeed([]byte("project:"+trialSeed), stableTime)
+		require.NoError(ht, err)
+		importedIssueUID, err := uid.FromStableSeed([]byte("issue:"+trialSeed), stableTime)
+		require.NoError(ht, err)
+
+		records := []db.ImportRecord{
+			&db.ProjectExport{
+				ID: 1, UID: importedProjectUID, Name: "spoke-project-" + trialSeed, CreatedAt: importedAt,
+				Metadata: []byte(`{}`), Revision: 1,
+			},
+			&db.IssueExport{
+				ID: 1, UID: importedIssueUID, ProjectID: 1,
+				ShortID: strings.ToLower(importedIssueUID[len(importedIssueUID)-4:]), Title: "Imported issue",
+				Status: "open", Author: "worker", CreatedAt: importedAt, UpdatedAt: importedAt,
+				Metadata: []byte(`{}`), Revision: 1, ContentRevision: 1,
+			},
+			&db.CommentExport{
+				ID: 1, UID: commentUID, IssueID: 1, Author: "worker", Body: "Imported comment",
+				CreatedAt: importedAt,
+			},
+		}
+		err = store.ImportReplay(ctx, records, db.ImportOptions{MergeProject: true})
+		require.ErrorContains(ht, err, "comment UID")
+		_, err = store.ProjectByUID(ctx, importedProjectUID)
+		require.ErrorIs(ht, err, db.ErrNotFound, "a UID collision must roll back the whole merge")
+	}, hegel.WithTestCases(1), hegel.WithDatabase(t.TempDir()))
+	return nil
+}
+
+func checkCommentIssueIDsByCanonicalUID(t *testing.T, store db.Storage, backend Backend) error {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	firstIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "First issue", Author: "worker",
+	})
+	require.NoError(t, err)
+	secondIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Second issue", Author: "worker",
+	})
+	require.NoError(t, err)
+	firstComment, _, err := store.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: firstIssue.ID, Author: "worker", Body: "First comment",
+	})
+	require.NoError(t, err)
+	secondComment, _, err := store.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: secondIssue.ID, Author: "worker", Body: "Second comment",
+	})
+	require.NoError(t, err)
+
+	hegel.Test(t, func(ht *hegel.T) {
+		canonical := drawCommentIdentityULID(ht)
+		storedVariant := drawCommentIdentityCaseVariant(ht, canonical)
+		firstAlternate := byte('0')
+		if canonical[0] == firstAlternate {
+			firstAlternate = '1'
+		}
+		secondAlternate := byte('2')
+		if canonical[0] == secondAlternate || firstAlternate == secondAlternate {
+			secondAlternate = '3'
+		}
+		collisionUID := string(firstAlternate) + canonical[1:]
+		missingUID := string(secondAlternate) + canonical[1:]
+		updateCommentIdentityForTest(ctx, t, store, backend, "uid", storedVariant, firstComment.ID)
+		updateCommentIdentityForTest(ctx, t, store, backend, "uid", collisionUID, secondComment.ID)
+
+		requestedVariant := drawCommentIdentityCaseVariant(ht, canonical)
+		requestedCollision := drawCommentIdentityCaseVariant(ht, collisionUID)
+		requestedMissing := drawCommentIdentityCaseVariant(ht, missingUID)
+		issueIDs, err := store.CommentIssueIDsByUIDs(ctx, []string{
+			requestedVariant, requestedCollision, requestedMissing,
+		})
+		require.NoError(ht, err)
+		require.Equal(ht, firstIssue.ID, issueIDs[requestedVariant])
+		require.Equal(ht, secondIssue.ID, issueIDs[requestedCollision])
+		require.NotContains(ht, issueIDs, requestedMissing,
+			"a same-handle candidate must still match the complete canonical UID")
+	}, hegel.WithTestCases(64), hegel.WithDatabase(t.TempDir()))
+	return nil
 }
 
 func checkSelectedCommentGraphCanonicalIdentity(t *testing.T, store db.Storage, backend Backend) error {

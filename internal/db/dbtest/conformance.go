@@ -109,6 +109,8 @@ var storageScenarios = []scenario{
 	{name: "comment reply envelope", methods: []string{"CreateComment"}, run: checkCommentReplyEnvelope},
 	{name: "case-normalized reply envelope", methods: []string{"CreateComment", "CreateIssue", "CreateProject"}, runWithBackend: checkCaseNormalizedReplyEnvelope},
 	{name: "comment issue ids by uids", methods: []string{"CommentIssueIDsByUIDs"}, run: checkCommentIssueIDsByUIDs},
+	{name: "comment issue ids by canonical uids", methods: []string{"CommentIssueIDsByUIDs", "CreateComment", "CreateIssue", "CreateProject"}, runWithBackend: checkCommentIssueIDsByCanonicalUID},
+	{name: "project merge rejects canonical comment uid collisions", methods: []string{"CreateComment", "CreateIssue", "CreateProject", "ImportReplay", "ProjectByUID"}, runWithBackend: checkProjectMergeRejectsCanonicalCommentUIDCollision},
 	{name: "issues by uids", methods: []string{"CreateProject", "CreateIssue", "SoftDeleteIssue", "IssueByUID", "IssuesByUIDs"}, run: checkIssuesByUIDs},
 	{name: "comment replies", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "EditComment", "CommentsByIssue"}, run: checkCommentReplies},
 	{name: "creation pagination precision", methods: []string{"ListIssues", "ListAllIssues", "SearchFTS"}, run: checkCreationPaginationPrecision},

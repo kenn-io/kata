@@ -164,6 +164,24 @@ func TestSelectedCommentGraphUsesLookupIndexes(t *testing.T) {
 		_, err := pool.ExecContext(ctx, statement)
 		require.NoError(t, err)
 	}
+	t.Run("canonical comment UID batch lookup uses handle index", func(t *testing.T) {
+		rows, err := pool.QueryContext(ctx,
+			`EXPLAIN QUERY PLAN SELECT uid,issue_id FROM comments WHERE lower(substr(uid,21)) IN (?)`,
+			strings.ToLower(targetUID[len(targetUID)-6:]),
+		)
+		require.NoError(t, err)
+		defer func() { _ = rows.Close() }()
+		var plan []string
+		for rows.Next() {
+			var id, parent, unused int
+			var detail string
+			require.NoError(t, rows.Scan(&id, &parent, &unused, &detail))
+			plan = append(plan, detail)
+		}
+		require.NoError(t, rows.Err())
+		require.Contains(t, strings.Join(plan, "\n"), "idx_comments_uid_handle",
+			"canonical comment UID candidates must use the existing suffix index before full identity comparison")
+	})
 	for _, tc := range []struct {
 		name    string
 		query   CommentGraphQuery
@@ -224,9 +242,10 @@ func TestSelectedCommentGraphUsesLookupIndexes(t *testing.T) {
 				}
 				require.NoError(t, rows.Err())
 				require.NoError(t, rows.Close())
-				require.Contains(t, strings.Join(plan, "\n"), "INDEX "+tc.indexes[index])
+				planText := strings.Join(plan, "\n")
+				require.Contains(t, planText, "INDEX "+tc.indexes[index])
 				if tc.query.Reference != nil {
-					require.NotContains(t, strings.Join(plan, "\n"), "idx_comments_issue")
+					require.NotContains(t, planText, "idx_comments_issue")
 				}
 			}
 		})
