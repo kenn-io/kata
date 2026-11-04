@@ -100,7 +100,8 @@ func TestCronSummarySpokeAdmission(t *testing.T) {
 						}
 						body := `{}`
 						if mode == "oversized" {
-							body = strings.Repeat(" ", federationsigning.MaxBodyBytes+1)
+							// Valid JSON isolates the size gate from JSON validation.
+							body = `{}` + strings.Repeat(" ", federationsigning.MaxBodyBytes-1)
 						}
 						return &http.Response{StatusCode: status, Header: h, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 					})}, nil

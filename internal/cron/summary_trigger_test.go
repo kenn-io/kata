@@ -125,6 +125,16 @@ func TestRunTriggerReferenceProperty(t *testing.T) {
 }
 
 func TestDropReasonProperty(t *testing.T) {
+	for _, tc := range []struct {
+		code string
+		want bool
+	}{
+		{"overlap_skipped", true}, {"catchup_missed", true}, {"paused_passed_over", true},
+		{"failed", false}, {"", false}, {"overlap_skipped ", false},
+		{" overlap_skipped", false}, {"catchup_missed\n", false}, {"PAUSED_PASSED_OVER", false},
+	} {
+		require.Equal(t, tc.want, DropReason(tc.code), "%q", tc.code)
+	}
 	codes := []string{ReasonOverlapSkipped, ReasonCatchupMissed, ReasonPausedPassedOver}
 	for _, code := range codes {
 		require.True(t, DropReason(code))

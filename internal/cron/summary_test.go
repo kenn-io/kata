@@ -47,7 +47,8 @@ func TestSummaryInvalidFields(t *testing.T) {
 		`"log_ref":null`, `"log_ref":""`, `"log_ref":"/logs/run"`, `"log_ref":"file:///logs/run"`, `"log_ref":"FILE:///logs/run"`,
 		`"log_ref":"C:/logs/run"`, `"log_ref":"C:relative"`, `"log_ref":"C:\\logs\\run"`, `"log_ref":"\\\\host\\run"`,
 		`"log_ref":"https:relative"`, `"log_ref":"https:///logs/run"`, `"log_ref":"https://user:pass@daemon.example/run"`,
-		`"log_ref":"https://daemon.example/a b"`, `"log_ref":"` + strings.Repeat("x", 513) + `"`, `"other":1`,
+		`"log_ref":"https://daemon.example/a b"`, `"log_ref":"` + strings.Repeat("x", 513) + `"`,
+		`"log_ref":"urn:example:` + strings.Repeat("x", 513-len("urn:example:")) + `"`, `"other":1`,
 	} {
 		t.Run(fields[:min(len(fields), 90)], func(t *testing.T) {
 			_, err := ParseSummary([]byte(`{"version":1,` + fields + `}`))

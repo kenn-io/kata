@@ -34,13 +34,16 @@ func TestCronSummaryDetail(t *testing.T) {
 	for _, width := range []int{20, 40, 80} {
 		m.width = width
 		_, _, lines := cronDetail(m, cronRef{cronRuns, m.cron.data.runs[0].UID})
+		logRefFound := false
 		for _, line := range lines {
 			require.LessOrEqual(t, ansi.StringWidth(line.text), width-2)
 			require.NotContains(t, line.text, "\x1b")
 			if strings.Contains(line.text, "urn:") {
+				logRefFound = true
 				require.Empty(t, line.target.uid)
 			}
 		}
+		require.True(t, logRefFound, "log reference must be rendered at width %d", width)
 	}
 	_, _, lines := cronDetail(m, cronRef{cronRuns, m.cron.data.runs[0].UID})
 	var text strings.Builder
