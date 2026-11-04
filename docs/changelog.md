@@ -1,13 +1,19 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Pause or resume a cron job with one CLI command, MCP call, or the TUI Jobs
+  tab's `p` key. Each action preserves the rest of the definition and guards
+  concurrent edits. The TUI confirms missed native children before resuming.
+  Direct spokes forward native actions to hubs that support native writes.
+  See [Pause and resume a job](reference/cron.md#pause-and-resume-a-job).
 
 - Load the web UI's issue list and graph on SQLite and PostgreSQL stores with
   tens of thousands of issues without exceeding SQL parameter limits.

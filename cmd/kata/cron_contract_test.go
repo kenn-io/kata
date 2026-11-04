@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
@@ -130,4 +131,45 @@ func TestCronRecurringChildrenContract(t *testing.T) {
 	parent, e = env.DB.IssueByID(t.Context(), parent.ID)
 	require.NoError(t, e)
 	require.Equal(t, "open", parent.Status)
+}
+
+// Contract: pause/resume work without a request file and optional CAS applies
+// to the selected revision. The response remains the ordinary job JSON.
+func TestCronJobEnabledCommands(t *testing.T) {
+	t.Setenv("KATA_AUTHOR", "operator")
+	env := testenv.New(t)
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	definition := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "manual"}, Action: cron.Action{Kind: "execute", Prompt: "Inspect"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Result"}, Overlap: "forbid", Catchup: "skip"}
+	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Inspect", Actor: "operator", Definition: definition})
+	require.NoError(t, err)
+	execute := func(action string, extra ...string) (api.CronJobResponse, error) {
+		t.Helper()
+		resetFlags(t)
+		root := newRootCmd()
+		var out bytes.Buffer
+		root.SetOut(&out)
+		root.SetErr(&out)
+		root.SetContext(contextWithBaseURL(t.Context(), env.URL))
+		root.SetArgs(append([]string{"--project", "example-project", "--json", "cron", "job", action, job.UID}, extra...))
+		err := root.Execute()
+		var result api.CronJobResponse
+		if err == nil {
+			require.NoError(t, json.Unmarshal(out.Bytes(), &result.Body))
+		}
+		return result, err
+	}
+	paused, err := execute("pause")
+	require.NoError(t, err)
+	require.False(t, paused.Body.Job.Definition.Enabled)
+	require.Equal(t, "operator", paused.Body.Events[0].Actor)
+	_, err = execute("resume", "--expected-event-uid", job.DefinitionEventUID)
+	require.Error(t, err)
+	resumed, err := execute("resume", "--expected-event-uid", paused.Body.Job.DefinitionEventUID)
+	require.NoError(t, err)
+	require.True(t, resumed.Body.Job.Definition.Enabled)
+	require.Equal(t, definition, resumed.Body.Job.Definition.Native())
+	repeated, err := execute("resume")
+	require.NoError(t, err)
+	require.Empty(t, repeated.Body.Events)
 }

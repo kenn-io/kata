@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/pkg/client/generated"
 )
@@ -112,4 +113,23 @@ func TestCronJobRecordRefusesDefinitionsItWouldDrop(t *testing.T) {
 	_, err := decodeCronJobRecord([]byte(body))
 	require.ErrorContains(t, err, "newer_member")
 	require.ErrorContains(t, err, "newer kata")
+}
+
+func TestCronClientEnabledActionsKeepRevisionAndOptions(t *testing.T) {
+	env := testenv.New(t)
+	c := NewClient(env.URL, env.HTTP)
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	definition := executeRecord(`{"large":9007199254740993}`).Definition
+	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Inspect", Actor: "operator", Definition: definition})
+	require.NoError(t, err)
+	paused, err := c.CronJobEnabled(t.Context(), project.ID, job.UID, job.DefinitionEventUID, "operator", false)
+	require.NoError(t, err)
+	require.False(t, paused.Definition.Enabled)
+	require.Equal(t, job.Definition.Options, paused.Definition.Options)
+	_, err = c.CronJobEnabled(t.Context(), project.ID, job.UID, job.DefinitionEventUID, "operator", true)
+	require.Error(t, err)
+	resumed, err := c.CronJobEnabled(t.Context(), project.ID, job.UID, paused.DefinitionEventUID, "operator", true)
+	require.NoError(t, err)
+	require.Equal(t, definition, resumed.Definition)
 }

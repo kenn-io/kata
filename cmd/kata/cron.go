@@ -50,6 +50,9 @@ The full contract is in the Cron reference (docs/reference/cron.md).`,
 		for _, action := range []string{"list", "show", "create", "update", "delete", "restore"} {
 			group.AddCommand(newCronOperationCmd(resource, action))
 		}
+		if resource == "job" {
+			group.AddCommand(newCronOperationCmd(resource, "pause"), newCronOperationCmd(resource, "resume"))
+		}
 		command.AddCommand(group)
 	}
 	runs := &cobra.Command{Use: "run", Short: "list, show and record independent run observations"}
@@ -175,6 +178,8 @@ the flag, so their JSON bodies also work for create.`
 			long += "\nUse --parent <ref> to set definition.issue.parent_uid; an existing native parent binding cannot change."
 		}
 		return long + "\n\n" + cronRequestHelp(resource), cronRequestExamples(resource, action)
+	case "pause", "resume":
+		return "Change only the job's enabled flag. --expected-event-uid is optional; a stale revision conflicts. Resuming a native job with catchup all backfills missed children.", "  " + cmd + " <job-uid> --json"
 	case "delete":
 		long := "Delete a " + resource + ` definition. Requires the current --expected-event-uid.
 The definition stays readable and kata cron ` + resource + ` restore brings it back.`
@@ -448,6 +453,8 @@ func (o *cronCLIOptions) requestShape() (any, error) {
 		return &api.PutCronWorkflowBody{}, nil
 	case o.resource == "run" && o.action == "observe":
 		return &api.ObserveCronRunBody{}, nil
+	case o.resource == "job" && (o.action == "pause" || o.action == "resume"):
+		return &api.CronJobEnabledActionBody{}, nil
 	case o.definition():
 		return &api.CronDefinitionActionBody{}, nil
 	default:
@@ -562,7 +569,7 @@ func (o *cronCLIOptions) applyExpectedEventUID(fields map[string]jsontext.Value)
 // checkExpectedEventUID requires a definition create to be unconditional and
 // every other definition mutation to name the event it replaces.
 func (o *cronCLIOptions) checkExpectedEventUID() error {
-	if !o.definition() {
+	if !o.definition() || o.action == "pause" || o.action == "resume" {
 		return nil
 	}
 	if o.action == "create" && o.expectedEventUID != "" {
@@ -592,7 +599,7 @@ func (o cronCLIOptions) call(a daemonAPI, c *kataclient.Client, projectID int64,
 		return o.callCapabilities(a, c, projectID)
 	case o.action == "list" || o.action == "show":
 		return o.callRead(a, c, projectID)
-	case o.action == "delete" || o.action == "restore":
+	case o.action == "delete" || o.action == "restore" || o.action == "pause" || o.action == "resume":
 		return o.callLifecycle(a, c, projectID, raw)
 	default:
 		return o.callWrite(a, c, projectID, raw)
@@ -695,6 +702,24 @@ func (o cronCLIOptions) callWrite(a daemonAPI, c *kataclient.Client, projectID i
 }
 
 func (o cronCLIOptions) callLifecycle(a daemonAPI, c *kataclient.Client, projectID int64, raw []byte) ([]byte, error) {
+	if o.resource == "job" && (o.action == "pause" || o.action == "resume") {
+		var body generated.CronJobEnabledActionBody
+		if err := decodeCronCLIRequest(raw, &body); err != nil {
+			return nil, err
+		}
+		if o.action == "pause" {
+			response, err := c.PauseCronJobWithResponse(a.ctx, &generated.PauseCronJobRequestOptions{PathParams: &generated.PauseCronJobPath{ProjectID: projectID, CronUID: o.identity}, Body: &body})
+			if response == nil {
+				return nil, externalCLITransportError(response, err)
+			}
+			return cronCLIResponse(response.StatusCode, response.Body, err)
+		}
+		response, err := c.ResumeCronJobWithResponse(a.ctx, &generated.ResumeCronJobRequestOptions{PathParams: &generated.ResumeCronJobPath{ProjectID: projectID, CronUID: o.identity}, Body: &body})
+		if response == nil {
+			return nil, externalCLITransportError(response, err)
+		}
+		return cronCLIResponse(response.StatusCode, response.Body, err)
+	}
 	if o.definition() {
 		var body generated.CronDefinitionActionBody
 		if err := decodeCronCLIRequest(raw, &body); err != nil {

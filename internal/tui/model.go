@@ -846,6 +846,12 @@ func projectIDFromMutation(m Model, mut mutationDoneMsg) int64 {
 // open/key. ok=true means the message was handled here.
 func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
+	case cronEnabledReadyMsg:
+		next, cmd := m.cronEnabledReady(msg)
+		return next, cmd, true
+	case cronEnabledDoneMsg:
+		next, cmd := m.cronEnabledDone(msg)
+		return next, cmd, true
 	case cronLoadedMsg:
 		return m.cronLoaded(msg), nil, true
 	case cronEditOpenedMsg:
@@ -3195,6 +3201,14 @@ func (m Model) routeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			m.modal = modalNone
 			return m, nil
 		}
+	case modalCronResume:
+		switch msg.String() {
+		case "y", "Y":
+			return m.confirmCronResume()
+		case "n", "N", "esc":
+			m.modal, m.cron.enabled = modalNone, nil
+			return m, nil
+		}
 	case modalReopenBacklog:
 		switch msg.String() {
 		case "y", "Y":
@@ -3651,12 +3665,12 @@ func (m Model) viewContent() string {
 		case viewCredentials:
 			body = renderCredentials(m)
 		default:
-			if m.modal == modalReopenBacklog {
+			if m.modal == modalReopenBacklog || m.modal == modalCronResume {
 				footer := renderFooterHelpTable(modalHelpRows(m.modal), m.width)
 				bodyHeight := max(0, m.height-lipgloss.Height(footer))
 				body = renderTooNarrow(m.width, bodyHeight)
 				body = m.withActiveConnectionHeader(m.appendNonListDetailExtras(body))
-				body = overlayModal(body, renderConfirmModal(m.modal, m.reopenPrompt), m.width, bodyHeight)
+				body = overlayModal(body, m.renderActiveConfirmModal(), m.width, bodyHeight)
 				lines := strings.Split(body, "\n")
 				return joinNonEmpty([]string{strings.Join(lines[:min(bodyHeight, len(lines))], "\n"), footer})
 			}
@@ -3692,7 +3706,7 @@ func (m Model) overlayInputAndModal(body string) string {
 		body = overlayModal(body, form, m.width, m.height)
 	}
 	if m.modal != modalNone {
-		body = overlayModal(body, renderConfirmModal(m.modal, m.reopenPrompt), m.width, m.height)
+		body = overlayModal(body, m.renderActiveConfirmModal(), m.width, m.height)
 	}
 	return body
 }

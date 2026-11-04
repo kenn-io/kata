@@ -125,6 +125,19 @@ type CronJobActionRequest struct {
 	CronDefinitionActionRequest
 }
 
+// CronJobEnabledActionBody changes enabled without requiring a full definition.
+type CronJobEnabledActionBody struct {
+	Actor            string `json:"actor,omitempty"`
+	ExpectedEventUID string `json:"expected_event_uid,omitempty"`
+}
+
+// CronJobEnabledActionRequest addresses an attributed pause or resume.
+type CronJobEnabledActionRequest struct {
+	Authorization string `header:"Authorization"`
+	CronDefinitionRequest
+	Body *CronJobEnabledActionBody
+}
+
 // PutCronJobBody carries a job definition and optional replacement precondition.
 type PutCronJobBody struct {
 	Actor            string            `json:"actor,omitempty"`

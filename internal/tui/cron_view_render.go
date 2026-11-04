@@ -390,7 +390,7 @@ func cronKeyRows(m Model) []helplayout.HelpItem {
 		rows = slices.Insert(rows, 2, helplayout.HelpItem{Key: "/", Description: "filter"})
 	}
 	if m.cronJobsScope() {
-		rows = slices.Insert(rows, 3, helplayout.HelpItem{Key: "n/e", Description: "new/edit"})
+		rows = slices.Insert(rows, 3, helplayout.HelpItem{Key: "n/e", Description: "new/edit"}, helplayout.HelpItem{Key: "p", Description: "pause/resume"})
 	}
 	return rows
 }
