@@ -2078,18 +2078,15 @@ issue:
    project, the form shows its refusal in its own words. `Esc` returns to the
    picker.
 3. A second `Enter` moves, guarded by `If-Match` on the revision the preview
-   read. If the preview carries no revision, nothing is sent. The daemon
-   advances that revision only for metadata, date and claim changes, so if one
-   of those happened since the preview, nothing is moved and the form previews
-   again at the current revision. A title, body, label, priority or comment
-   edit does not advance it and does not stop the move.
+   read; [Issue lifecycle](#issue-lifecycle) says what advances it. If the
+   revision changed since the preview, nothing is moved and the form previews
+   again at the current one.
 4. After a move the moved issue and its descendants leave the list (the next
    refresh lists them again where the scope shows their new project), the
    selection goes to the next row (the previous one after the last), and a
    notice names the issue's new `project#id`. A split detail pane resets only
    when it shows a moved issue, a child of one, or has one in its Back history;
-   a pane on another issue keeps it and its Back history. Label counts of both
-   projects refresh.
+   a pane on another issue keeps it and its Back history.
 
 A preview needs daemon API 0.35.0 or newer, because older daemons move only the
 selected issue; the form says so instead of previewing. A move changes the short
