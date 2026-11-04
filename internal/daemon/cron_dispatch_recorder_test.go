@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
@@ -217,4 +218,79 @@ func TestCronRecorderInitialIdleDoesNotLog(t *testing.T) {
 	raw, err := os.ReadFile(path) //nolint:gosec // G304: TempDir fixture
 	require.NoError(t, err)
 	require.Equal(t, 2, strings.Count(string(raw), "\n"), "delivery and return to idle still log")
+}
+
+// Healthy and neutral batches return to idle silently; failures retain a
+// recovery record. Definition and error identity changes still carry history.
+func TestCronRecorderIdleTransitionHistory(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		out             db.DispatchRecurringCronOut
+		err             error
+		newRevision     bool
+		wantIdleRecords int
+	}{
+		{name: "delivered", out: db.DispatchRecurringCronOut{Reason: cron.DispatchDelivered, Delivered: 1}},
+		{name: "skipped", out: db.DispatchRecurringCronOut{Reason: cron.DispatchSkipped, Skipped: cron.RecurringSkip{Count: 3, Capped: true}}},
+		{name: "scanning", out: db.DispatchRecurringCronOut{Reason: cron.DispatchScanning}},
+		{name: "failure recovery", out: db.DispatchRecurringCronOut{Reason: cron.DispatchError}, err: errors.New("dispatch failed"), wantIdleRecords: 1},
+		{name: "definition change", out: db.DispatchRecurringCronOut{Reason: cron.DispatchDelivered, Delivered: 1}, newRevision: true, wantIdleRecords: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "dispatch.jsonl")
+			r := daemon.NewCronDispatchRecorder(path)
+			t.Cleanup(func() { require.NoError(t, r.Close()) })
+			c := db.RecurringCronCandidate{ProjectID: 1, JobUID: "job", ExpectedEventUID: "revision"}
+			now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			_, err := r.Record(t.Context(), c, tc.out, tc.err, now)
+			require.NoError(t, err)
+			if tc.newRevision {
+				c.ExpectedEventUID = "new-revision"
+			}
+			for i := 1; i <= 2; i++ {
+				_, err = r.Record(t.Context(), c, db.DispatchRecurringCronOut{Reason: cron.DispatchIdle}, nil, now.Add(time.Duration(i)*time.Minute))
+				require.NoError(t, err)
+			}
+			last, nonIdle := r.Last(1, "job")
+			require.Equal(t, cron.DispatchIdle, last.Reason)
+			require.Equal(t, now.Add(2*time.Minute), last.At)
+			require.Equal(t, c.ExpectedEventUID, last.DefinitionEventUID)
+			require.Equal(t, tc.out.Reason, nonIdle.Reason)
+			r.FinishCycle(now.Add(2*time.Minute), 0, true, false)
+			h := r.Health()
+			require.Equal(t, 1, h.Jobs)
+			require.Equal(t, 1, h.ByReason["idle"])
+			require.EqualValues(t, tc.out.Delivered, h.DeliveredSinceStart)
+			require.EqualValues(t, tc.out.Skipped.Count, h.SkippedSinceStart)
+			require.Equal(t, tc.out.Skipped.Capped, h.SkippedCountIsLowerBound)
+			if tc.err != nil {
+				require.EqualValues(t, 1, h.ErrorsSinceStart)
+			} else {
+				require.Zero(t, h.ErrorsSinceStart)
+			}
+			raw, err := os.ReadFile(path) //nolint:gosec // G304: TempDir fixture
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantIdleRecords, strings.Count(string(raw), `"reason":"idle"`), "idle history records")
+			require.Equal(t, 1+tc.wantIdleRecords, strings.Count(string(raw), "\n"), "total history records")
+		})
+	}
+}
+
+func TestCronRecorderErrorIdentityHistory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dispatch.jsonl")
+	r := daemon.NewCronDispatchRecorder(path)
+	t.Cleanup(func() { require.NoError(t, r.Close()) })
+	c := db.RecurringCronCandidate{ProjectID: 1, JobUID: "job", ExpectedEventUID: "revision"}
+	for i, detail := range []string{"first failure", "first failure", "different failure"} {
+		changed, err := r.Record(t.Context(), c, db.DispatchRecurringCronOut{Reason: cron.DispatchError}, errors.New(detail), time.Date(2026, 1, 1, 0, i, 0, 0, time.UTC))
+		require.NoError(t, err)
+		require.Equal(t, i != 1, changed)
+	}
+	r.FinishCycle(time.Date(2026, 1, 1, 0, 3, 0, 0, time.UTC), 0, true, false)
+	require.EqualValues(t, 3, r.Health().ErrorsSinceStart)
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: TempDir fixture
+	require.NoError(t, err)
+	require.Equal(t, 2, strings.Count(string(raw), "\n"))
+	require.Contains(t, string(raw), "first failure")
+	require.Contains(t, string(raw), "different failure")
 }
