@@ -46,6 +46,12 @@ func checkCronRunPrune(t *testing.T, store db.Storage) error {
 	running := add("running", old.Add(3*time.Second), old, false)
 	workflowKept := add("failed", old, old, true)
 	in := db.PruneCronRuns{ProjectID: project.ID, Actor: "operator", Before: cutoff, Keep: 1, Limit: 1, DryRun: true}
+	for _, outsideUTC := range []time.Time{time.Date(1, 1, 1, 0, 0, 0, 0, time.FixedZone("offset", 3600)), time.Date(9999, 12, 31, 23, 59, 59, 0, time.FixedZone("offset", -3600))} {
+		invalid := in
+		invalid.Before = outsideUTC
+		_, err := store.PruneCronRuns(ctx, invalid)
+		require.ErrorIs(t, err, cron.ErrInvalid, "UTC-normalized cutoff must stay in years 1..9999")
+	}
 	maxBefore, err := store.MaxEventID(ctx)
 	require.NoError(t, err)
 	canceled, cancel := context.WithCancel(ctx)

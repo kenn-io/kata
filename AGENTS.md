@@ -160,6 +160,7 @@ start of each session for the agent contract; the short version:
   `--wontfix` when those reasons fit. The daemon refuses parent-close while
   children are open.
 - Never `kata delete` or `kata purge` without explicit user authorization.
+- Never run `kata cron run prune --force` without explicit user authorization.
 
 For long-running work, `kata events --tail` streams NDJSON.
 

@@ -60,12 +60,12 @@ func (a CronSQL) PruneRuns(ctx context.Context, in PruneCronRuns) (CronRunPruneR
 	if in.Limit == 0 {
 		in.Limit = 5000
 	}
+	in.Before = in.Before.UTC()
 	in.JobUID = strings.ToUpper(in.JobUID)
 	in.WorkflowUID = strings.ToUpper(in.WorkflowUID)
 	if in.Before.IsZero() || in.Before.Year() < 1 || in.Before.Year() > 9999 || in.Keep < 1 || in.Keep > 1000 || in.Limit < 1 || in.Limit > 20000 || (in.JobUID != "" && !cronUID(in.JobUID)) || (in.WorkflowUID != "" && !cronUID(in.WorkflowUID)) || (in.JobUID != "" && in.WorkflowUID != "") || strings.TrimSpace(in.Actor) == "" {
 		return CronRunPruneResult{}, fmt.Errorf("%w: invalid prune window, keep, limit, group or actor", cron.ErrInvalid)
 	}
-	in.Before = in.Before.UTC()
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	var result CronRunPruneResult
