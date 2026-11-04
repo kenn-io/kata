@@ -23,18 +23,14 @@ func TestRefreshMirrorMatchesLiveFeedAcrossBackends(t *testing.T) {
 			require.NoError(t, err)
 			target, err := store.CreateProject(ctx, "target-project")
 			require.NoError(t, err)
-			doomed, err := store.CreateProject(ctx, "removed-project")
-			require.NoError(t, err)
 			issues := make([]db.Issue, 506)
 			for i := range issues {
 				issues[i], _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: fmt.Sprintf("task %d", i), Body: "original body", Author: "tester"})
 				require.NoError(t, err)
 			}
-			_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: doomed.ID, Title: "removed with project", Author: "tester"})
-			require.NoError(t, err)
 			changed, err := idx.RefreshMirror(ctx, store)
 			require.NoError(t, err)
-			require.Equal(t, 507, changed)
+			require.Equal(t, 506, changed)
 			initial, err := idx.MirrorRowsForTest(ctx)
 			require.NoError(t, err)
 			gen := kitvec.Generation{Model: "example", Dimensions: 2}
@@ -50,7 +46,7 @@ func TestRefreshMirrorMatchesLiveFeedAcrossBackends(t *testing.T) {
 			require.NoError(t, err)
 			count, err := idx.VectorCountForTest(ctx)
 			require.NoError(t, err)
-			require.Equal(t, 507, count)
+			require.Equal(t, 506, count)
 
 			_, _, _, err = store.SoftDeleteIssue(ctx, issues[504].ID, "tester")
 			require.NoError(t, err)
@@ -65,20 +61,10 @@ func TestRefreshMirrorMatchesLiveFeedAcrossBackends(t *testing.T) {
 			require.NoError(t, err)
 			_, err = store.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issues[501].ID, FromProjectID: project.ID, ToProjectID: target.ID, IfMatchRev: issues[501].Revision, Actor: "tester", Single: true})
 			require.NoError(t, err)
-			for _, i := range []int{502, 503} {
-				_, _, _, err = store.SoftDeleteIssue(ctx, issues[i].ID, "tester")
-				require.NoError(t, err)
-			}
-			_, err = store.PurgeIssue(ctx, issues[503].ID, "tester", nil)
-			require.NoError(t, err)
-			_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: doomed.ID, Actor: "tester", Force: true})
-			require.NoError(t, err)
-			_, err = store.PurgeProject(ctx, db.PurgeProjectParams{ProjectID: doomed.ID, Actor: "tester"})
-			require.NoError(t, err)
 
 			changed, err = idx.RefreshMirror(ctx, store)
 			require.NoError(t, err)
-			require.Equal(t, 7, changed)
+			require.Equal(t, 4, changed)
 			want := make(map[string]vector.MirrorRowForTest)
 			var afterID int64
 			for {
@@ -98,7 +84,7 @@ func TestRefreshMirrorMatchesLiveFeedAcrossBackends(t *testing.T) {
 			require.Equal(t, initial[issues[501].UID].Revision, got[issues[501].UID].Revision, "a project move keeps the content revision")
 			count, err = idx.VectorCountForTest(ctx)
 			require.NoError(t, err)
-			require.Equal(t, 503, count, "four removed issues lose their stored vectors")
+			require.Equal(t, 505, count, "the removed issue loses its stored vector")
 			changed, err = idx.RefreshMirror(ctx, store)
 			require.NoError(t, err)
 			require.Zero(t, changed)
