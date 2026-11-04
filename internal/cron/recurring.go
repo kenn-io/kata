@@ -143,15 +143,15 @@ func PlanRecurring(j JobDefinition, definitionEventUID string, p RecurringProgre
 	if now.IsZero() || now.Year() > 9999 {
 		return out, invalid("invalid recurring clock")
 	}
+	if !j.Enabled || !now.After(p.Through) {
+		return out, nil
+	}
 	next, err := recurringNext(j.Trigger, p.Anchor)
 	if err != nil {
 		return out, err
 	}
 	previousThrough := p.Through
 	defer func() {
-		if err != nil || !j.Enabled {
-			return
-		}
 		var before time.Time
 		switch j.Catchup {
 		case "skip":
@@ -167,9 +167,6 @@ func PlanRecurring(j JobDefinition, definitionEventUID string, p RecurringProgre
 			out.Skipped = countRecurringSkips(j.Trigger, next, previousThrough, before)
 		}
 	}()
-	if !j.Enabled || !now.After(p.Through) {
-		return out, nil
-	}
 	if p.Scan != nil && (p.Scan.DefinitionEventUID != definitionEventUID || j.Catchup != "latest") {
 		p.Scan = nil
 		out.Progress = p

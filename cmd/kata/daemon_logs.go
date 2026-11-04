@@ -495,15 +495,6 @@ func closePinnedLogs(files []*os.File) {
 	}
 }
 
-func emitNewLines(ctx context.Context, path string, from int64, stdout, stderr io.Writer, f daemonLogFilter) (int64, error) {
-	file, err := openLog(ctx, path)
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = file.Close() }()
-	return emitLogLines(ctx, file, path, from, stdout, stderr, f)
-}
-
 func emitLogLines(ctx context.Context, file *os.File, path string, from int64, stdout, stderr io.Writer, f daemonLogFilter) (int64, error) {
 	if _, err := file.Seek(from, io.SeekStart); err != nil {
 		return 0, err

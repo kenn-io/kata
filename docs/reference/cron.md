@@ -353,7 +353,9 @@ The daemon retains each candidate's last decision in memory and logs changes,
 deliveries and finalized skips. A first idle observation stays in memory without
 writing a log entry. Repeated idle decisions and identical errors do not flood
 the log.
-The recorder resets on restart. Its JSONL history survives at
+The recorder resets on restart. The first non-idle decision after a restart logs
+an observation, even if it matches the previous process's last decision; a
+record does not by itself prove a state transition. Its JSONL history survives at
 `<KATA_HOME>/cron/<storage-hash>/dispatch.jsonl`, with five rotated files and a
 50 MiB active-file rotation threshold. Logging is best effort, separate from
 the dispatch transaction; a process failure or filesystem error can lose a

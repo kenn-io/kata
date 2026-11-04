@@ -201,7 +201,7 @@ func registerCronJobHandlers(h huma.API, cfg ServerConfig) {
 		in.UID = strings.ToUpper(strings.TrimSpace(in.UID))
 		now := time.Now().UTC()
 		gate, err := cfg.DB.ExplainRecurringCron(ctx, in.ProjectID, in.UID, now)
-		if err != nil {
+		if err != nil && !errors.Is(err, cron.ErrInvalid) {
 			logger := cfg.Logger
 			if logger == nil {
 				logger = slog.Default()

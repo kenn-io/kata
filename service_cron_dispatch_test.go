@@ -97,7 +97,12 @@ func TestServiceCronDispatchStartsWithoutHome(t *testing.T) {
 	s, err := New(t.Context(), Config{DSN: filepath.Join(t.TempDir(), "service.db"), Auth: AuthConfig{TrustCallerAuthentication: true}})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, s.Close()) })
-	_, err = s.cronRecorder.Record(t.Context(), db.RecurringCronCandidate{ProjectID: 1, JobUID: "job"}, db.DispatchRecurringCronOut{Reason: cron.DispatchIdle}, nil, time.Now())
+	candidate := db.RecurringCronCandidate{ProjectID: 1, JobUID: "job"}
+	_, err = s.cronRecorder.Record(t.Context(), candidate, db.DispatchRecurringCronOut{Reason: cron.DispatchIdle}, nil, time.Now())
+	require.NoError(t, err, "initial idle does not attempt logging")
+	s.cronRecorder.FinishCycle(time.Now(), 0, true, false)
+	require.False(t, s.cronRecorder.Health().LogErrorPresent)
+	_, err = s.cronRecorder.Record(t.Context(), candidate, db.DispatchRecurringCronOut{Reason: cron.DispatchDelivered, Delivered: 1}, nil, time.Now())
 	require.Error(t, err, "unavailable diagnostic home is an observable log failure")
 	s.cronRecorder.FinishCycle(time.Now(), 0, true, false)
 	require.True(t, s.cronRecorder.Health().LogErrorPresent)

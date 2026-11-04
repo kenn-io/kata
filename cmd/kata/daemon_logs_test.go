@@ -244,12 +244,8 @@ func TestDaemonLogs_Hooks_Tail_RotatedOnlyWaitsForActive(t *testing.T) {
 	})
 }
 
-// TestEmitNewLines_PartialTrailingLine_NotConsumed pins the contract
-// that emitNewLines does NOT advance the caller's offset across a
-// partial trailing line. Before the fix, every scanned record advanced
-// `read` by len(line)+1, which over-counted the unflushed mid-line by
-// 1 byte and caused later ticks to miss content.
-func TestEmitNewLines_PartialTrailingLine_NotConsumed(t *testing.T) {
+// Complete-record reads retain a partial trailing line for the next tick.
+func TestEmitLogLines_PartialTrailingLine_NotConsumed(t *testing.T) {
 	resetFlags(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "runs.jsonl")
@@ -260,7 +256,12 @@ func TestEmitNewLines_PartialTrailingLine_NotConsumed(t *testing.T) {
 	}
 	f := &hookLogFilter{hookIndex: -1}
 	var stdout, stderr bytes.Buffer
-	n, err := emitNewLines(t.Context(), path, 0, &stdout, &stderr, f)
+	file, err := openLog(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = file.Close() })
+	n, err := emitLogLines(t.Context(), file, path, 0, &stdout, &stderr, f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +286,7 @@ func TestEmitNewLines_PartialTrailingLine_NotConsumed(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	n2, err := emitNewLines(t.Context(), path, n, &stdout, &stderr, f)
+	n2, err := emitLogLines(t.Context(), file, path, n, &stdout, &stderr, f)
 	if err != nil {
 		t.Fatal(err)
 	}

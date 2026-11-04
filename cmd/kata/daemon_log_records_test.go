@@ -109,7 +109,10 @@ func TestLogRecordsVersionAndMixedSkip(t *testing.T) {
 			for _, tail := range []bool{false, true} {
 				var out, warnings bytes.Buffer
 				if tail {
-					_, err := emitNewLines(t.Context(), path, 0, &out, &warnings, tc.filter)
+					file, err := openLog(t.Context(), path)
+					require.NoError(t, err)
+					_, err = emitLogLines(t.Context(), file, path, 0, &out, &warnings, tc.filter)
+					require.NoError(t, file.Close())
 					require.NoError(t, err)
 				} else {
 					_, err := runDaemonLogOnce(t.Context(), logSource{dir, tc.base}, &out, &warnings, tc.limit, tc.filter)

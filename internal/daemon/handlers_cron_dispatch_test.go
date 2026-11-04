@@ -59,6 +59,31 @@ func (s failingExplanationStore) ExplainRecurringCron(context.Context, int64, st
 	return db.RecurringExplanation{Reason: cron.DispatchError, Detail: cron.DispatchError.PublicDetail()}, errors.New("local-sensitive-detail")
 }
 
+// Invalid persisted progress is an explanation result; polling it must not
+// emit the same error-level diagnostic on every read.
+type invalidProgressExplanationStore struct{ db.Storage }
+
+func (s invalidProgressExplanationStore) ExplainRecurringCron(context.Context, int64, string, time.Time) (db.RecurringExplanation, error) {
+	return db.RecurringExplanation{Reason: cron.DispatchProgressInvalid, Detail: cron.DispatchProgressInvalid.PublicDetail()}, fmt.Errorf("%w: corrupt recurring progress", cron.ErrInvalid)
+}
+
+func TestCronDispatchExplanationInvalidProgressPollStaysSilent(t *testing.T) {
+	env := testenv.New(t)
+	p, err := env.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	var logs bytes.Buffer
+	server := daemon.NewServer(daemon.ServerConfig{DB: invalidProgressExplanationStore{env.DB}, Logger: slog.New(slog.NewTextHandler(&logs, nil))})
+	t.Cleanup(func() { require.NoError(t, server.Close()) })
+	for range 2 {
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/jobs/01K5ZN7SP700000000000000001/dispatch", p.ID), nil)
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		require.Equal(t, http.StatusOK, response.Code)
+		require.Contains(t, response.Body.String(), `"reason":"progress_invalid"`)
+	}
+	require.Empty(t, logs.String(), "expected invalid-state explanations must not flood daemon logs")
+}
+
 type archiveBeforeExplanationStore struct {
 	db.Storage
 	archive func() error
