@@ -7,6 +7,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -136,9 +137,7 @@ func TestStrictFixtureLoader(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := map[string]jsontext.Value{}
-			for k, v := range original {
-				m[k] = v
-			}
+			maps.Copy(m, original)
 			tc.mutate(m)
 			b, err := json.Marshal(m)
 			if err != nil {

@@ -305,6 +305,7 @@ func TestExternalConsumer(t *testing.T) {
 	if err := os.Symlink(root, link); err != nil {
 		t.Skipf("directory symlink unavailable: %v", err)
 	}
+	// #nosec G304 -- Repository-owned module file resolved relative to this package.
 	rawModule, err := os.ReadFile(filepath.Join(root, "go.mod"))
 	if err != nil {
 		t.Fatal(err)
@@ -314,13 +315,16 @@ func TestExternalConsumer(t *testing.T) {
 		t.Fatal(err)
 	}
 	module := fmt.Sprintf("module example.com/adapter\n\ngo %s\n\nrequire go.kenn.io/kata v0.0.0\nreplace go.kenn.io/kata => %s\n", parsedModule.Go.Version, strconv.Quote(filepath.ToSlash(link)))
+	// #nosec G304 -- Repository-owned checksum file resolved relative to this package.
 	sums, err := os.ReadFile(filepath.Join(root, "go.sum"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G703 -- The destination is inside this test's own temporary external module.
 	if err := os.WriteFile(filepath.Join(dir, "go.sum"), sums, 0600); err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G703 -- The destination is inside this test's own temporary external module.
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(module), 0600); err != nil {
 		t.Fatal(err)
 	}

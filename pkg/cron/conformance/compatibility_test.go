@@ -2,7 +2,6 @@ package conformance
 
 import (
 	"encoding/json/v2"
-	"strings"
 	"testing"
 	"time"
 )
@@ -13,8 +12,8 @@ func TestLargeDeclarationResourceBudget(t *testing.T) {
 	if err := d.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Suite(t.Context(), d); err == nil || !strings.Contains(err.Error(), "resource") {
-		t.Fatalf("expected bounded materialization resource error, got %v", err)
+	if _, err := Suite(t.Context(), d); err == nil || err.Error() != "suite cannot check catchup_limit >100000" {
+		t.Fatalf("expected built-in suite limit diagnostic, got %v", err)
 	}
 }
 

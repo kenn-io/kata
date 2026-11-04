@@ -78,6 +78,7 @@ func TestFixtureArtifacts(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			// #nosec G304 -- Repository-owned fixture path assembled from the independent literal table.
 			got, err := os.ReadFile(path)
 			if err != nil {
 				t.Fatal(err)

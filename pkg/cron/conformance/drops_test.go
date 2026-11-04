@@ -71,7 +71,8 @@ func TestExecuteRecordingInterface(t *testing.T) {
 	for _, record := range []bool{false, true} {
 		d := Reference{}.Declare()
 		d.DropRecords = record
-		p := &recordingProbe{Reference: Reference{Policy: d}}
+		p := &recordingProbe{}
+		p.Policy = d
 		if _, err := Execute(t.Context(), p, s); err != nil {
 			t.Fatal(err)
 		}

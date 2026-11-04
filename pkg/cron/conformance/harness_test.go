@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json/v2"
 	"errors"
-	"github.com/stretchr/testify/require"
 	"os"
 	"os/exec"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 type harnessFailureAdapter struct {

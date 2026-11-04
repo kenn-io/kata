@@ -2,15 +2,16 @@ package main
 
 import (
 	"encoding/json/v2"
-	"go.kenn.io/kata/pkg/cron/conformance"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"go.kenn.io/kata/pkg/cron/conformance"
 )
 
 func TestCronConformanceV2(t *testing.T) {
 	dir := t.TempDir()
-	if _, err := runConformance(t, t.Context(), nil, "export", "--schema", conformance.SchemaV2, "--dir", dir); err != nil {
+	if _, err := runConformance(t.Context(), t, nil, "export", "--schema", conformance.SchemaV2, "--dir", dir); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
@@ -44,7 +45,7 @@ func TestCronConformanceV2(t *testing.T) {
 		}
 		lines = append(append(lines, encoded...), '\n')
 	}
-	output, err := runConformance(t, t.Context(), lines, "check", "--answers", "-")
+	output, err := runConformance(t.Context(), t, lines, "check", "--answers", "-")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,6 +1,9 @@
 package conformance
 
 import (
+	"fmt"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -65,5 +68,48 @@ func TestSettlementTimeline(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Offered outcomes are consumed only after the branch policy permits a start.
+// Stop must skip c after a's failure even though its offered start precedes b's
+// success; the same offer is a real dependency error when it can be consumed.
+func TestStopPolicyValidatesOnlyConsumedOffers(t *testing.T) {
+	start := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, order := range []string{"failure-first", "failure-last"} {
+		for _, policy := range []string{"stop", "continue"} {
+			for _, failed := range []bool{true, false} {
+				t.Run(fmt.Sprintf("%s/%s/failure=%v", order, policy, failed), func(t *testing.T) {
+					steps := []WorkflowStep{{Key: "a"}, {Key: "b"}, {Key: "c", After: []string{"b"}}}
+					if order == "failure-last" {
+						steps = []WorkflowStep{steps[1], steps[2], steps[0]}
+					}
+					aStatus := "succeeded"
+					if failed {
+						aStatus = "failed"
+					}
+					in := SettleInput{Steps: steps, StartedAt: start, Now: start.Add(5 * time.Second), StoppedWithCertainty: true, Outcomes: map[string][]Attempt{
+						"a": {{StartedAt: start, EndedAt: start.Add(time.Second), Status: aStatus}},
+						"b": {{StartedAt: start, EndedAt: start.Add(3 * time.Second), Status: "succeeded"}},
+						"c": {{StartedAt: start.Add(2 * time.Second), EndedAt: start.Add(4 * time.Second), Status: "succeeded"}},
+					}}
+					d := Reference{}.Declare()
+					d.FailurePolicy = policy
+					out, err := (Reference{Policy: d}).Settle(t.Context(), in)
+					if policy != "stop" || !failed {
+						if err == nil || !strings.Contains(err.Error(), "starts before dependencies succeeded") {
+							t.Fatalf("consumed premature offer must fail: %+v %v", out, err)
+						}
+						return
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					if out.Status != "failed" || out.Occupied || !reflect.DeepEqual(out.Attempts, map[string]int{"a": 1, "b": 1, "c": 0}) || !reflect.DeepEqual(out.Skipped, []string{"c"}) {
+						t.Fatalf("stop consumed an excluded offer: %+v", out)
+					}
+				})
+			}
+		}
 	}
 }

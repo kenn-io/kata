@@ -44,7 +44,7 @@ func conformanceAnswers(t *testing.T, d conformance.Declaration) []byte {
 	return raw
 }
 
-func runConformance(t *testing.T, ctx context.Context, in []byte, args ...string) ([]byte, error) {
+func runConformance(ctx context.Context, t *testing.T, in []byte, args ...string) ([]byte, error) {
 	t.Helper()
 	cmd := newRootCmd()
 	cmd.SilenceUsage = true
@@ -60,7 +60,7 @@ func runConformance(t *testing.T, ctx context.Context, in []byte, args ...string
 
 func TestCronConformanceOffline(t *testing.T) {
 	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls++
 		t.Error("offline command contacted server")
 		w.WriteHeader(500)
@@ -69,7 +69,7 @@ func TestCronConformanceOffline(t *testing.T) {
 	t.Setenv("KATA_SERVER", server.URL)
 	t.Setenv("KATA_HOME", t.TempDir())
 	dir := filepath.Join(t.TempDir(), "vectors")
-	raw, err := runConformance(t, t.Context(), nil, "export", "--dir", dir)
+	raw, err := runConformance(t.Context(), t, nil, "export", "--dir", dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestCronConformanceOffline(t *testing.T) {
 		}
 	}
 	answers := conformanceAnswers(t, conformance.Reference{}.Declare())
-	report, err := runConformance(t, t.Context(), answers, "check", "--answers", "-")
+	report, err := runConformance(t.Context(), t, answers, "check", "--answers", "-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestCronConformanceInputAndExitCodes(t *testing.T) {
 		{"unknown declaration field", []byte(`{"name":"example","failure_policy":"continue","typo":1}`), []string{"export", "--dir", t.TempDir(), "--declaration", "-"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := runConformance(t, t.Context(), tc.input, tc.args...)
+			_, err := runConformance(t.Context(), t, tc.input, tc.args...)
 			var cli *cliError
 			if !errors.As(err, &cli) || cli.ExitCode != 3 {
 				t.Fatalf("want exit 3, got %v", err)
@@ -172,7 +172,7 @@ func TestCronConformanceNamedDropMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := runConformance(t, t.Context(), bytes.Join(lines, []byte{'\n'}), "check", "--answers", "-")
+	raw, err := runConformance(t.Context(), t, bytes.Join(lines, []byte{'\n'}), "check", "--answers", "-")
 	var cli *cliError
 	if !errors.As(err, &cli) || cli.ExitCode != 1 {
 		t.Fatalf("want exit 1, got %v", err)
@@ -220,8 +220,8 @@ func TestConformanceInputCancellationAndLimit(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			pipe, writer := io.Pipe()
-			defer pipe.Close()
-			defer writer.Close()
+			defer func() { _ = pipe.Close() }()
+			defer func() { _ = writer.Close() }()
 			reader := &readNotification{ReadCloser: pipe, started: make(chan struct{})}
 			done := make(chan error, 1)
 			go func() { _, err := tc.read(ctx, reader); done <- err }()

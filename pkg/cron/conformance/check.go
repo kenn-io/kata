@@ -144,7 +144,7 @@ func NewSuite(ctx context.Context, schema string, d Declaration) (FixtureSuite, 
 		// Policy limits are valid independently of the kit's bounded test traces.
 		// Check before CatchupLimit+1 so even the maximum int cannot overflow.
 		if d.CatchupLimit > maxScan {
-			return suite, fmt.Errorf("policy boundary resource limit exceeds %d candidates", maxScan+1)
+			return suite, fmt.Errorf("suite cannot check catchup_limit >%d", maxScan)
 		}
 		boundaries := policyBoundaryScenarios(d)
 		if err := materialize(ctx, d, boundaries); err != nil {

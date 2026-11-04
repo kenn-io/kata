@@ -3,6 +3,7 @@ package conformance
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"go.kenn.io/kata/internal/cron"
@@ -75,22 +76,22 @@ func (r Reference) Settle(ctx context.Context, in SettleInput) (SettleOutput, er
 		cutoff = *in.CancelledAt
 		cause = "cancelled"
 	}
-	out, stop, err := settlePass(ctx, in, cutoff, cause, terminalPoint{})
-	if err != nil || d.FailurePolicy != "stop" || stop.at.IsZero() {
+	discoverStop := d.FailurePolicy == "stop"
+	out, stop, err := settlePass(ctx, in, cutoff, cause, terminalPoint{}, discoverStop)
+	if err != nil || !discoverStop {
 		return out, err
 	}
 	// A terminal dependent proves its prerequisites already succeeded, even if
 	// zero-duration attempts share its failure timestamp. Keep that chain.
 	stop.prerequisites = map[string]bool{}
-	for i := len(in.Steps) - 1; i >= 0; i-- {
-		step := in.Steps[i]
+	for _, step := range slices.Backward(in.Steps) {
 		if step.Key == stop.key || stop.prerequisites[step.Key] {
 			for _, parent := range step.After {
 				stop.prerequisites[parent] = true
 			}
 		}
 	}
-	out, _, err = settlePass(ctx, in, cutoff, cause, stop)
+	out, _, err = settlePass(ctx, in, cutoff, cause, stop, false)
 	return out, err
 }
 
@@ -100,7 +101,7 @@ type terminalPoint struct {
 	prerequisites map[string]bool
 }
 
-func settlePass(ctx context.Context, in SettleInput, cutoff time.Time, cause string, stop terminalPoint) (SettleOutput, terminalPoint, error) {
+func settlePass(ctx context.Context, in SettleInput, cutoff time.Time, cause string, stop terminalPoint, discoverStop bool) (SettleOutput, terminalPoint, error) {
 	out := SettleOutput{Attempts: map[string]int{}, Skipped: []string{}}
 	states := map[string]string{}
 	finished := map[string]time.Time{}
@@ -143,7 +144,8 @@ func settlePass(ctx context.Context, in SettleInput, cutoff time.Time, cause str
 				interrupted = !in.Now.Before(cutoff)
 				break
 			}
-			if attempt.StartedAt.Before(earliest) {
+			// Discover stop eligibility before validating timing of consumed offers.
+			if !discoverStop && attempt.StartedAt.Before(earliest) {
 				return out, first, fmt.Errorf("step %s starts before dependencies succeeded", step.Key)
 			}
 			out.Attempts[step.Key]++

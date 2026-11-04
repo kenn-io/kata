@@ -2,10 +2,11 @@ package conformance
 
 import (
 	"encoding/json/v2"
-	"github.com/stretchr/testify/require"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestSkipCatchupAppliesDeclaredCapsAfterGrace(t *testing.T) {
