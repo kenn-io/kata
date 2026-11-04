@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"encoding/json/v2"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -40,13 +39,12 @@ type movePreview struct {
 // daemon's preview of moving there. It is a value on Model, replaced whole on
 // every change, so a render never sees a half-updated form.
 type moveState struct {
-	target   formTarget
-	formGen  int64
-	issueUID string
-	shortID  string
-	// ownProjectID and ownProjectUID name the issue's project, which is never
-	// a destination.
-	ownProjectID  int64
+	target  formTarget
+	formGen int64
+	// mover is the connection's move client, checked once when the form opens.
+	mover moveAPI
+	// ownProjectUID names the issue's project (target.projectID is its id),
+	// which is never a destination.
 	ownProjectUID string
 
 	// seq numbers the request whose answer the form waits for; an answer to
@@ -57,9 +55,13 @@ type moveState struct {
 
 	filter   textinput.Model
 	projects []ProjectSummary
-	contexts map[string]string
-	names    map[int64]string
 	cursor   int
+	// disambiguators maps a project UID to the area or UID shown beside a
+	// name another project shares.
+	disambiguators map[string]string
+	// projectNames maps every project id to its name, for naming where a
+	// previewed descendant lives.
+	projectNames map[int64]string
 
 	chosen  ProjectSummary
 	preview *movePreview
@@ -105,7 +107,8 @@ func (m Model) routeMoveKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if !ok {
 		return m, nil, true
 	}
-	if _, ok := m.api.(moveAPI); !ok {
+	mover, ok := m.api.(moveAPI)
+	if !ok {
 		next, cmd := m.undoNotice("this connection cannot move issues", toastError)
 		return next, cmd, true
 	}
@@ -116,8 +119,7 @@ func (m Model) routeMoveKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	_ = filter.Focus()
 	m.move = moveState{
 		target: target, formGen: m.nextFormGen, loading: true, filter: filter,
-		issueUID: issue.UID, shortID: issue.ShortID,
-		ownProjectID: target.projectID, ownProjectUID: issue.ProjectUID,
+		mover: mover, ownProjectUID: issue.ProjectUID,
 	}
 	m.modal = modalMoveIssue
 	return m, m.fetchMoveProjects(), true
@@ -144,12 +146,12 @@ func (m Model) handleMoveProjects(msg moveProjectsMsg) Model {
 		m.move = s
 		return m
 	}
-	s.names = map[int64]string{}
+	s.projectNames = map[int64]string{}
 	s.projects = nil
 	for _, p := range msg.projects {
-		s.names[p.ID] = p.Name
-		own := p.ID == s.ownProjectID || (s.ownProjectUID != "" && p.UID == s.ownProjectUID)
-		if own || p.UID == "" || jsonString(p.Metadata.Role) == "inbox" {
+		s.projectNames[p.ID] = p.Name
+		own := p.ID == s.target.projectID || (s.ownProjectUID != "" && p.UID == s.ownProjectUID)
+		if own || p.UID == "" || isInboxProject(p) {
 			continue
 		}
 		s.projects = append(s.projects, p)
@@ -160,7 +162,7 @@ func (m Model) handleMoveProjects(msg moveProjectsMsg) Model {
 		}
 		return strings.Compare(a.UID, b.UID)
 	})
-	s.contexts = moveDestinationContexts(s.projects)
+	s.disambiguators = moveDestinationContexts(s.projects)
 	m.move = s
 	return m
 }
@@ -211,7 +213,7 @@ func (s moveState) choices() []moveChoice {
 	query := strings.ToLower(strings.TrimSpace(s.filter.Value()))
 	var out []moveChoice
 	for _, p := range s.projects {
-		extra := s.contexts[p.UID]
+		extra := s.disambiguators[p.UID]
 		if query != "" && !strings.Contains(strings.ToLower(p.Name), query) &&
 			!strings.Contains(strings.ToLower(extra), query) {
 			continue
@@ -296,17 +298,12 @@ func (m Model) dispatchMovePreview() (Model, tea.Cmd) {
 	s.seq++
 	s.sending, s.err = true, ""
 	m.move = s
-	apiClient, connGen, target := m.api, m.connGen, s.target
+	mover, target := s.mover, s.target
 	in := MoveInput{Actor: m.moveActor(), ToProjectUID: s.chosen.UID, DryRun: true}
-	formGen, seq := s.formGen, s.seq
+	connGen, formGen, seq := m.connGen, s.formGen, s.seq
 	return m, func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		mover, ok := apiClient.(moveAPI)
-		if !ok {
-			return movePreviewMsg{connGen: connGen, formGen: formGen, seq: seq,
-				err: errors.New("this connection cannot move issues")}
-		}
 		resp, err := mover.MoveIssue(ctx, target.projectID, target.issueShortID, in)
 		return movePreviewMsg{connGen: connGen, formGen: formGen, seq: seq, resp: resp, err: err}
 	}
@@ -340,11 +337,11 @@ func (m Model) handleMovePreview(msg movePreviewMsg) Model {
 	preview := &movePreview{revision: msg.resp.Revision}
 	for _, issue := range msg.resp.Issues {
 		preview.uids = append(preview.uids, issue.UID)
-		if issue.UID == s.issueUID {
+		if issue.UID == s.target.issueUID {
 			continue
 		}
 		ref := "#" + issue.ShortID
-		if name := s.names[issue.ProjectID]; name != "" {
+		if name := s.projectNames[issue.ProjectID]; name != "" {
 			ref = name + ref
 		}
 		preview.descendants = append(preview.descendants, sanitizeForLine(ref+" "+issue.Title))
@@ -358,19 +355,19 @@ func (m Model) handleMovePreview(msg movePreviewMsg) Model {
 // the preview read.
 func (m Model) dispatchMove() (Model, tea.Cmd) {
 	s := m.move
+	if s.preview.revision <= 0 {
+		s.err = "the daemon's preview did not report the issue's revision, so the move was not sent; press esc and choose the project again"
+		m.move = s
+		return m, nil
+	}
 	s.sending, s.err, s.note = true, "", ""
 	m.move = s
-	apiClient, target := m.api, s.target
+	mover, target := s.mover, s.target
 	in := MoveInput{Actor: m.moveActor(), ToProjectUID: s.chosen.UID, IfMatchRevision: s.preview.revision}
 	formGen := s.formGen
 	return m, withConnGen(func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		mover, ok := apiClient.(moveAPI)
-		if !ok {
-			return mutationDoneMsg{origin: "move", kind: "move", formGen: formGen,
-				err: errors.New("this connection cannot move issues")}
-		}
 		resp, err := mover.MoveIssue(ctx, target.projectID, target.issueShortID, in)
 		return mutationDoneMsg{origin: "move", kind: "move", formGen: formGen, resp: resp, err: err}
 	}, m.connGen)
@@ -403,7 +400,7 @@ func (m Model) handleMoveDone(mut mutationDoneMsg) (Model, tea.Cmd) {
 // issue into its new project), and the notice names the new project#id.
 func (m Model) finishMove(mut mutationDoneMsg) (Model, tea.Cmd) {
 	s := m.move
-	moved := map[string]bool{s.issueUID: true}
+	moved := map[string]bool{s.target.issueUID: true}
 	for _, uid := range s.preview.uids {
 		moved[uid] = true
 	}
@@ -412,9 +409,9 @@ func (m Model) finishMove(mut mutationDoneMsg) (Model, tea.Cmd) {
 		newRef += "#" + mut.resp.NewShortID
 	}
 	m.move, m.modal = moveState{}, modalNone
-	m.list = m.list.selectBeside(s.issueUID, moved)
+	m.list = m.list.selectBeside(s.target.issueUID, moved)
 	m.toast = &toast{
-		text:  sanitizeForLine(fmt.Sprintf("moved #%s to %s", s.shortID, newRef)),
+		text:  sanitizeForLine(fmt.Sprintf("moved #%s to %s", s.target.issueShortID, newRef)),
 		level: toastSuccess, expiresAt: m.toastNow().Add(toastNoBindingTTL),
 	}
 	cmds := []tea.Cmd{toastExpireCmd(toastNoBindingTTL), withConnGen(m.list.refetchCmd(m.api, m.scope), m.connGen)}
@@ -470,17 +467,17 @@ func renderMoveModal(s moveState, width, height int) string {
 	wrap := func(text string) string { return lipgloss.NewStyle().Width(innerW).Render(text) }
 	var parts []string
 	if s.preview != nil || (s.sending && s.chosen.UID != "") {
-		parts = append(parts, titleStyle.Render(sanitizeForLine(fmt.Sprintf("Move #%s to %s", s.shortID, s.chosen.Name))), "")
+		parts = append(parts, titleStyle.Render(sanitizeForLine(fmt.Sprintf("Move #%s to %s", s.target.issueShortID, s.chosen.Name))), "")
 		if preview := s.preview; preview != nil {
 			if len(preview.descendants) == 0 {
-				parts = append(parts, wrap(fmt.Sprintf("Single move: #%s has no descendants, so it moves alone.", sanitizeForLine(s.shortID))))
+				parts = append(parts, wrap(fmt.Sprintf("#%s has no descendants, so it moves alone.", sanitizeForLine(s.target.issueShortID))))
 			} else {
 				noun := "descendants"
 				if len(preview.descendants) == 1 {
 					noun = "descendant"
 				}
 				parts = append(parts, wrap(fmt.Sprintf("Subtree move: #%s and its %d %s move together.",
-					sanitizeForLine(s.shortID), len(preview.descendants), noun)))
+					sanitizeForLine(s.target.issueShortID), len(preview.descendants), noun)))
 				shown := min(len(preview.descendants), max(height-16, 3))
 				for _, line := range preview.descendants[:shown] {
 					parts = append(parts, "  "+truncate(line, innerW-2))
@@ -492,7 +489,7 @@ func renderMoveModal(s moveState, width, height int) string {
 			parts = append(parts, "", wrap("Nothing has moved yet. Each issue gets a new id in "+sanitizeForLine(s.chosen.Name)+"."))
 		}
 	} else {
-		parts = append(parts, titleStyle.Render(sanitizeForLine(fmt.Sprintf("Move #%s to another project", s.shortID))))
+		parts = append(parts, titleStyle.Render(sanitizeForLine(fmt.Sprintf("Move #%s to another project", s.target.issueShortID))))
 		parts = append(parts, "Project: "+s.filter.View(), "")
 		parts = append(parts, renderMoveChoices(s, innerW, max(min(height-12, 10), 3))...)
 	}

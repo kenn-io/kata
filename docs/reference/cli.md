@@ -2049,22 +2049,29 @@ dates once either is set, and `u` writes the previous dates back under the
 same revision check.
 
 In the issue list or detail, press `M` to move the selected issue to another
-project. A picker lists the daemon's projects except the issue's own, the Inbox
-project, and archived ones; typing filters by name or by the text beside it.
-Projects that share a name are told apart by their area, or by their UID when
-another of them has the same area. `Enter` on a project sends a dry run, so
-nothing is written, and shows what kata would do: whether it is a subtree move
-(the issue and its active descendants, listed one per line) or a single issue,
-or the daemon's refusal in its own words, such as a recurrence-pinned issue or
-an archived or federated project. `Esc` returns to the picker. A second `Enter`
-moves, guarded by `If-Match` on the revision the preview read, like
-`kata move`. If the issue changed since the preview, nothing is moved and the
-form previews again at the current revision. A preview needs daemon API 0.35.0
-or newer, because older daemons move only the selected issue; the form says so
-instead of previewing. After a move the selection goes to the neighboring row,
-an open detail closes, and a notice names the issue's new `project#id`. A move
-changes the short id, so it clears the undo history. The key follows the same
-permission check as the other edits.
+project:
+
+1. A picker lists the daemon's projects except the issue's own, the Inbox
+   project, and archived ones. Typing filters by name or by the text beside it.
+   Projects that share a name are told apart by their area, or by their UID when
+   another of them has the same area.
+2. `Enter` on a project sends a dry run, so nothing is written, and shows what
+   kata would do: the issue and its active descendants, listed one per line, or
+   a note that the issue has no descendants and moves alone. If the daemon
+   refuses, such as for a recurrence-pinned issue or an archived or federated
+   project, the form shows its refusal in its own words. `Esc` returns to the
+   picker.
+3. A second `Enter` moves, guarded by `If-Match` on the revision the preview
+   read, like `kata move`. If the preview carries no revision, nothing is sent.
+   If the issue changed since the preview, nothing is moved and the form
+   previews again at the current revision.
+4. After a move the selection goes to the neighboring row, an open detail
+   closes, and a notice names the issue's new `project#id`.
+
+A preview needs daemon API 0.35.0 or newer, because older daemons move only the
+selected issue; the form says so instead of previewing. A move changes the short
+id, so it clears the undo history. The key follows the same permission check as
+the other edits.
 
 In the issue list, `v` toggles between nested and flat views: nested groups
 children under parents, while flat shows matching issues as peers in list

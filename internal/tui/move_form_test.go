@@ -191,13 +191,13 @@ func TestMovePreviewNamesTheMoveAndListsDescendants(t *testing.T) {
 		want    []string
 		notWant string
 	}{
-		{"lone issue", nil, []string{"Single move"}, "Subtree move"},
+		{"lone issue", nil, []string{"has no descendants, so it moves alone"}, "Single move"},
 		{"one descendant", family(Issue{UID: "kid-1", ShortID: "k001", Title: "Child one", ProjectID: 7}),
 			[]string{"Subtree move", "its 1 descendant move", "#k001 Child one"}, "1 descendants"},
 		{"several descendants", family(
 			Issue{UID: "kid-1", ShortID: "k001", Title: "Child one", ProjectID: 7},
 			Issue{UID: "kid-2", ShortID: "k002", Title: "Child two", ProjectID: 9}),
-			[]string{"Subtree move", "its 2 descendants move", "#k001 Child one", "#k002 Child two"}, "Single move"},
+			[]string{"Subtree move", "its 2 descendants move", "#k001 Child one", "#k002 Child two"}, "moves alone"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			api := &moveTestAPI{projects: []ProjectSummary{moveProject(2, "hub-project", "", "")}, preview: tc.preview}
@@ -281,6 +281,25 @@ func TestMoveConflictPreviewsAgainAtCurrentRevision(t *testing.T) {
 	require.True(t, api.calls[2].DryRun)
 	require.Zero(t, api.calls[2].IfMatchRevision, "the re-preview reads the current revision")
 	require.Equal(t, int64(9), api.calls[3].IfMatchRevision)
+}
+
+func TestMoveWithoutPreviewRevisionIsNeverSentUnguarded(t *testing.T) {
+	api := &moveTestAPI{
+		projects: []ProjectSummary{moveProject(2, "hub-project", "", "")},
+		preview: func(int, MoveInput) (*MutationResp, error) {
+			return &MutationResp{Issue: &Issue{UID: "issue-b", ShortID: "bbbb"}}, nil
+		},
+	}
+	m := openMove(t, moveModel(t, api))
+	m, cmd := enter(m)
+	m, _ = deliver(t, m, cmd)
+
+	m, cmd = enter(m)
+	require.Nil(t, cmd, "a preview without a revision sends nothing")
+	require.Equal(t, modalMoveIssue, m.modal)
+	require.Contains(t, flattenModal(stripANSI(renderMoveModal(m.move, 100, 40))), "revision")
+	require.Len(t, api.calls, 1)
+	require.True(t, api.calls[0].DryRun)
 }
 
 func TestMoveSelectsNeighbourRowAndNamesNewRef(t *testing.T) {
@@ -459,4 +478,34 @@ func TestMoveIssueAgainstDaemonKeepsCommentsAndLinks(t *testing.T) {
 	require.Contains(t, m.toast.text, "spoke-project#"+moved.ShortID, "the notice names the new short id")
 	require.Empty(t, m.undoHistory.entries)
 	require.Equal(t, modalNone, m.modal)
+}
+
+func TestMovePickerNeverOffersArchivedProjectAgainstDaemon(t *testing.T) {
+	ctx := t.Context()
+	env := testenv.New(t)
+	base := NewClient(env.URL, env.HTTP)
+	source, err := env.DB.CreateProject(ctx, "example-workspace")
+	require.NoError(t, err)
+	_, err = env.DB.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	gone, err := env.DB.CreateProject(ctx, "archived-project")
+	require.NoError(t, err)
+	_, _, err = env.DB.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: gone.ID, Actor: "alice", Force: true})
+	require.NoError(t, err)
+	issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "To move", Author: "alice"})
+	require.NoError(t, err)
+
+	client := newConnectedUndoClient(t, base)
+	m := initialModel(Options{})
+	m.api = client
+	m.view = viewList
+	m.list.actor = "alice"
+	m.scope = scope{projectID: source.ID}
+	detail, err := client.GetIssueDetail(ctx, source.ID, issue.UID)
+	require.NoError(t, err)
+	m.list.issues = []Issue{*detail.Issue}
+	m = selectListUID(t, m, issue.UID)
+
+	m = openMove(t, m)
+	require.Equal(t, []string{"spoke-project"}, moveLabels(m))
 }

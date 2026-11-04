@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"encoding/json/v2"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -51,10 +50,15 @@ func (m Model) lookupInboxProject() (Model, tea.Cmd) {
 	}
 }
 
+// isInboxProject reports whether the project's role metadata designates it as
+// the Inbox.
+func isInboxProject(p ProjectSummary) bool {
+	return jsonString(p.Metadata.Role) == "inbox"
+}
+
 func designatedInboxProject(projects []ProjectSummary) (ProjectSummary, bool) {
 	for _, project := range projects {
-		var role string
-		if project.ID > 0 && json.Unmarshal(project.Metadata.Role, &role) == nil && role == "inbox" {
+		if project.ID > 0 && isInboxProject(project) {
 			return project, true
 		}
 	}
