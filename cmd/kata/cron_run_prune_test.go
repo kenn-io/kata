@@ -57,3 +57,21 @@ func TestCronRunPruneCLIPreviewAndConfirmation(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(out), &confirmed))
 	require.False(t, confirmed.DryRun)
 }
+
+func TestCronRunExplicitEmptyFilters(t *testing.T) {
+	env := testenv.New(t)
+	_, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	for _, command := range []string{"prune", "counts"} {
+		for _, flag := range []string{"--job", "--workflow"} {
+			t.Run(command+flag, func(t *testing.T) {
+				args := []string{"run", command, flag, ""}
+				if command == "prune" {
+					args = append(args, "--older-than", "90d", "--force", "--confirm", "PRUNE spoke-project cron runs")
+				}
+				_, _, err := executeCronCLI(t, env.URL, nil, args...)
+				require.ErrorContains(t, err, "cron identity must be a 26-character ULID")
+			})
+		}
+	}
+}

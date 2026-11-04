@@ -20,8 +20,8 @@ func newCronRunCountsCmd() *cobra.Command {
 Pruned counts start with the first contributing prune. Replayed evidence that is
 pruned again contributes again. Filters select a job or workflow's own group;
 --workflow does not include job runs belonging to that workflow.`, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		for _, value := range []*string{&job, &workflow} {
-			if *value != "" {
+		for name, value := range map[string]*string{"job": &job, "workflow": &workflow} {
+			if cmd.Flags().Changed(name) || *value != "" {
 				normalized, err := normalizedCronCLIUID(*value)
 				if err != nil {
 					return err
