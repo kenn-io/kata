@@ -1,0 +1,77 @@
+package federation_test
+
+import (
+	"context"
+	"encoding/json/v2"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+	clientpkg "go.kenn.io/kata/internal/client"
+	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/internal/daemon"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/federation"
+	"go.kenn.io/kata/internal/uid"
+)
+
+// Contract: the daemon's real pull callback publishes the observation payload to
+// its SSE broadcaster. Baseline snapshots and repeat pulls are not new failures.
+func TestCronPulledObservationReachesStream(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	hub := nativeStore(t, "sqlite")
+	spoke := nativeStore(t, "sqlite")
+	server := nativeHTTP(t, hub)
+	project, err := hub.CreateProject(ctx, "hub-project")
+	require.NoError(t, err)
+	job, _ := nativeJob(t, hub, project)
+	root, err := hub.EnableProjectFederation(ctx, project.ID, "operator")
+	require.NoError(t, err)
+	grant, err := hub.CreateFederationEnrollment(ctx, db.CreateFederationEnrollmentParams{SpokeInstanceUID: spoke.InstanceUID(), ProjectID: &project.ID, Capabilities: "pull", Actor: "operator"})
+	require.NoError(t, err)
+	local, err := spoke.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
+	adopted, err := spoke.AdoptProjectIntoFederation(ctx, db.AdoptProjectIntoFederationParams{ProjectID: local.ID, HubURL: server.URL, HubProjectID: project.ID, HubProjectUID: project.UID, ReplayHorizonEventID: root.ReplayHorizonEventID, Actor: "operator", EmptyOnly: true})
+	require.NoError(t, err)
+	credential := config.FederationCredential{HubURL: server.URL, HubProjectID: project.ID, Token: grant.Token}
+	require.NoError(t, federation.SyncFederationOnce(ctx, spoke, adopted.Binding, credential))
+	runUID, err := uid.New()
+	require.NoError(t, err)
+	ended := time.Now().UTC()
+	_, err = hub.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: runUID, JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Actor: "operator", Status: "failed", EndedAt: &ended, Summary: cron.Summary{Version: 1}})
+	require.NoError(t, err)
+	broadcaster := daemon.NewEventBroadcaster()
+	publisher := daemon.NewEventPublisher(broadcaster, nil)
+	stream := broadcaster.Subscribe(daemon.SubFilter{ProjectID: local.ID})
+	defer stream.Unsub()
+	pull := func() {
+		binding, err := spoke.FederationBindingByProject(ctx, local.ID)
+		require.NoError(t, err)
+		require.NoError(t, federation.SyncFederationOnceWithPulledEvents(ctx, spoke, binding, credential, clientpkg.Opts{}, func(projectID int64, events []db.Event) { publisher.EventsFrom(projectID, events, nil) }))
+	}
+	pull()
+	select {
+	case msg := <-stream.Ch:
+		require.NotNil(t, msg.Event)
+		require.Equal(t, "cron.run.observed", msg.Event.Type)
+		var payload struct {
+			UID        string `json:"uid"`
+			Status     string `json:"status"`
+			ProjectUID string `json:"project_uid"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(msg.Event.Payload), &payload))
+		require.Equal(t, runUID, payload.UID)
+		require.Equal(t, "failed", payload.Status)
+		require.Equal(t, project.UID, payload.ProjectUID)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	pull()
+	select {
+	case msg := <-stream.Ch:
+		t.Fatalf("duplicate pull unexpectedly published %v", msg.Event)
+	default:
+	}
+}

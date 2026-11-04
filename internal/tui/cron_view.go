@@ -68,6 +68,7 @@ type cronState struct {
 	filtering, help     bool
 	returnToCron        bool
 	issueReturn         *cronIssueReturn
+	unseenOnly          bool
 	stack               []cronFrame
 	data                *cronData
 	events              uint64
@@ -341,6 +342,9 @@ func (m Model) routeCronKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			}
 			if target.uid != "" {
 				m.cron.stack = append(m.cron.stack, cronFrame{ref: target})
+				if target.kind == cronRuns {
+					m = m.cronMarkSeen(target.uid)
+				}
 				if target.kind == cronJobs {
 					return m.cronRequestPage(target.uid, true)
 				}
@@ -356,6 +360,13 @@ func (m Model) routeCronKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		}
 	case key == "/" && len(m.cron.stack) == 0:
 		m.cron.filtering = true
+	case key == "u":
+		m.cron.tab = cronRuns
+		m.cron.stack = nil
+		m.cron.unseenOnly = !m.cron.unseenOnly
+		m.cron.lists[cronRuns].cursor = 0
+	case key == "U":
+		m = m.cronClearSeen()
 	case key == "r":
 		m.cron.events++
 	}

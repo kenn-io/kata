@@ -1957,6 +1957,12 @@ Runs starts with the newest 100 observations. Select **load 100 older runs** wit
 
 Replica projects show a chip with the last successful pull age, **never pulled**, or the age of a general sync error newer than the last pull. Pushes do not freshen this chip. It describes the local copy; it does not establish end-to-end relay freshness or identify the error's direction. Non-replicas and unavailable status reads show no chip.
 
+Cron shows **N unseen failed** for loaded failed or unknown observations, deduplicated across the project head, job fill-ins and loaded history. In Runs, `•` marks them. Opening a run marks it seen. `u` switches to Runs and toggles unseen-only, combined with its search query; `U` clears all loaded failures using their newest `ended_at` (or `updated_at` when absent), including unknown runs. The count can shrink when history unloads.
+
+Seen state belongs to the local Kata home, shared by TUIs using that home, at `<KATA_HOME>/tui/cron-seen.json`. It is keyed by project UID, so the same run stays seen when switching between that project's hub and replicas. Concurrent writers merge under a file lock. The file retains the newest 1000 individually seen UIDs by UID order; an evicted old UID can become unseen again after restart. Opening it keeps it seen for the current session. Clear-all keeps a timestamp watermark, which also clears later-loaded failures at or before that time. Late reports and skewed reporter timestamps can therefore affect what it covers. A corrupt or unreadable file disables writes for the session and shows **seen state unavailable**; in-memory marks still work.
+
+In any foreground view with a single project selected, new published failed or unknown observations produce one grouped notice after a two-second window. A job with an unseen announced failure stays quiet until all its announced failures are seen. The toast lasts ten seconds; loaded unseen counts remain available in Cron. The start-minus-two-minutes timestamp cutoff filters older reconnect traffic, with clock-skew and late-replay limits. Federation-pulled observed events can produce notices; baseline snapshots do not. All-project scope suppresses these notices. The shortcut hint adapts to the current view; `u` retains Undo outside Cron.
+
 In the detail Comments tab, press `R` to reply to the selected comment.
 `Ctrl+r` changes the reply kind and `Ctrl+o` submits. After a duplicate-reply
 refusal, `Ctrl+f` enables a forced retry. Use `[` and `]` to select a reply
