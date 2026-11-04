@@ -538,6 +538,42 @@ components:
         transcript:
           $ref: "#/components/schemas/Transcript"
       type: object
+    CollisionItem:
+      additionalProperties: true
+      properties:
+        at:
+          format: date-time
+          type: string
+        local:
+          type: string
+        occurrences:
+          format: int64
+          type: integer
+        peer_count:
+          format: int64
+          type: integer
+        peers:
+          items:
+            $ref: "#/components/schemas/CollisionPeer"
+          type: array
+      required:
+        - at
+        - local
+        - occurrences
+        - peer_count
+        - peers
+      type: object
+    CollisionPeer:
+      additionalProperties: true
+      properties:
+        name:
+          type: string
+        uid:
+          type: string
+      required:
+        - uid
+        - name
+      type: object
     Comment:
       additionalProperties: true
       properties:
@@ -1331,6 +1367,27 @@ components:
       required:
         - name
         - definition
+      type: object
+    CronValidationCollisions:
+      additionalProperties: true
+      properties:
+        items:
+          items:
+            $ref: "#/components/schemas/CollisionItem"
+          type: array
+        skipped:
+          format: int64
+          type: integer
+        truncated:
+          type: boolean
+        until:
+          format: date-time
+          type: string
+      required:
+        - until
+        - items
+        - skipped
+        - truncated
       type: object
     CronValidationError:
       additionalProperties: true
@@ -6411,6 +6468,8 @@ components:
       properties:
         basis:
           type: string
+        collisions:
+          $ref: "#/components/schemas/CronValidationCollisions"
         delivery:
           type: string
         from:
@@ -7343,7 +7402,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.39.0
+  version: 0.40.0
 openapi: 3.1.0
 paths:
   /api/v1/audit/closes:
