@@ -95,6 +95,19 @@ Other clients use the same actions:
   optional revision.
 - TUI: press `p` in the Jobs list or a job's detail.
 
+#### TUI controls
+
+| Key | Where | Action |
+| --- | --- | --- |
+| `p` | Jobs list or job detail | Pause, or resume with a backlog confirmation when needed. |
+| `R` | Eligible adapter execution job | Ask a runtime to run it now. |
+| `X` | Running run | Ask a runtime to cancel it. |
+| `d` | Supported positive-backlog resume dialog | Resume and discard missed runs through the saved cutoff. |
+
+A pending cron action blocks other cron mutations. Read-only connections and
+stale authority keep mutation controls disabled. Project pause stays a CLI,
+MCP, or REST action.
+
 #### Resume confirmation in the TUI
 
 When resuming a native job would deliver missed children, the TUI shows how
@@ -171,6 +184,12 @@ and the reserved `cron.request.` and `cron.passover.` prefixes, plus the exact
 `cron.passover` key; use typed cron routes for control
 state. These controls replicate through existing project metadata events,
 without a new federation feature requirement.
+
+A null control value reads as absent. Other malformed present values remain
+blocked. Before adopting a project into another hub, resume its project pause
+and wait until retained requests expire and the root collects them. Any retained
+non-null cutoff prevents adoption. Refusal preserves project identity, history,
+and binding; null controls are omitted from the adoption baseline.
 
 ### Ask a runtime to run or cancel
 

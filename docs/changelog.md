@@ -27,29 +27,18 @@ All notable changes to kata, grouped by release. Versioned releases start with
   search cost follows the number of matching comments.
   Existing stores upgrade to schema 41 through SQLite's JSONL cutover or the
   [offline PostgreSQL migration](development/postgres-migrations.md#schema-41-separate-comment-search-documents).
-- Pause or resume a cron job without resending its definition: run
-  `kata cron job pause` or `kata cron job resume`, call the matching MCP tool,
-  or press `p` on the TUI Jobs tab. The TUI asks before a resume that would
-  deliver missed native children. Direct spokes can pause native jobs on hubs
-  that predate these actions. Pausing no longer fails on soft-deleted
-  dependencies in the same project, and a native job with a deleted parent can
-  be resumed. See [Pause and resume a job](reference/cron.md#pause-and-resume-a-job).
-- Ask optional runtimes to run an execution job now or cancel a running run
-  through CLI, MCP, or the TUI's `R`/`X` keys. Retained request UIDs make retries
-  safe while the request remains; requests expire and show their current run
-  evidence. Submit at the owning hub with a fresh UID. Runtimes choose whether
-  to act. See [Runtime requests](reference/cron.md#ask-a-runtime-to-run-or-cancel).
-- Resume cron while discarding all undelivered scheduled occurrences through a
-  retained cutoff with `--discard-missed`, MCP, or the TUI's supported backlog
-  dialog. Counts and previews respect the cutoff. Upgrade every scheduling
-  replica and adapter before relying on it; source cutoffs not yet saved into
-  native progress can be lost on project merge. See
-  [Resume and discard scheduled backlog](reference/cron.md#resume-and-discard-scheduled-backlog).
-
-- Stop native cron delivery for a whole project with `kata cron pause` and
-  resume with each job's flags and catch-up policy preserved. Adapters can read
-  the shared pause, and all TUI cron tabs show it. Upgrade the owning hub first;
-  external adapters must honor the policy. See [Project cron pause](reference/cron.md#pause-cron-for-a-whole-project).
+- Control cron from CLI, MCP, REST, or the terminal UI: pause and resume a job
+  without resending its definition, pause a whole project, ask an optional
+  runtime to run or cancel work, and resume while discarding scheduled backlog.
+  The TUI uses `p` for pause/resume, `R`/`X` for runtime requests, and `d` in a
+  supported resume dialog to discard missed runs. Retained request UIDs make
+  retries safe while the request remains. Adapters choose whether to act.
+  Upgrade the owning hub first, and upgrade scheduling replicas and adapters
+  before relying on discard. Cutoffs apply lazily; source cutoffs not yet saved
+  into native progress can be lost on project merge. Direct spokes can pause
+  native jobs on older hubs. Same-project deleted dependencies may be paused,
+  and native jobs with deleted parents may be resumed. See
+  [Cron controls](reference/cron.md#pause-and-resume-a-job).
 
 - Load the web UI's issue list and graph on SQLite and PostgreSQL stores with
   tens of thousands of issues without exceeding SQL parameter limits.

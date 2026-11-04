@@ -59,7 +59,8 @@ func (a CronSQL) SetProjectPause(ctx context.Context, in SetCronProjectPauseIn) 
 				}
 			}
 			_, validErr := decodeCronPassover(values[CronPassoverMetadataKey])
-			_, present := values[CronPassoverMetadataKey]
+			raw, present := values[CronPassoverMetadataKey]
+			present = present && raw.Kind() != jsontext.KindNull
 			if pause == nil && (!present || validErr == nil) {
 				out.Project = project
 				out.NewRevision = project.Revision

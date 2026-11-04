@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/uid"
 )
 
 // Contract: answers use all retained evidence with exact project/job/revision
@@ -101,6 +102,23 @@ func checkCronRequestReads(t *testing.T, s db.Storage) error {
 }
 
 func checkCronRequestSweep(t *testing.T, s db.Storage) error {
+	t.Run("adopt after root collection", func(t *testing.T) {
+		p, job, _ := requestJobFixture(t, s, "request-collected-project")
+		now := time.Now().UTC()
+		id := requestUIDAt(t, now)
+		out, e := s.RequestCron(t.Context(), db.RequestCronIn{ProjectID: p.ID, UID: id, Kind: "run", TargetUID: job.UID, Actor: "operator", TTLSeconds: 60, Now: now})
+		require.NoError(t, e)
+		hub, e := uid.New()
+		require.NoError(t, e)
+		in := db.AdoptProjectIntoFederationParams{ProjectID: p.ID, HubURL: "https://daemon.example", HubProjectID: 42, HubProjectUID: hub, ReplayHorizonEventID: 1, Actor: "operator"}
+		_, e = s.AdoptProjectIntoFederation(t.Context(), in)
+		require.ErrorIs(t, e, db.ErrFederatedSpokeUnsupported)
+		event, e := s.SweepCronRequests(t.Context(), p.ID, out.Request.ExpiresAt)
+		require.NoError(t, e)
+		require.NotNil(t, event)
+		_, e = s.AdoptProjectIntoFederation(t.Context(), in)
+		require.NoError(t, e)
+	})
 	ctx := t.Context()
 	now := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	p, job, _ := requestJobFixture(t, s, "request-sweep-project")

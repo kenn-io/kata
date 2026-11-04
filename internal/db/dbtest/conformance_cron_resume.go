@@ -2,6 +2,7 @@ package dbtest
 
 import (
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"testing"
 	"time"
 
@@ -13,6 +14,23 @@ import (
 // Contract: discard requires a retained precondition and writes policy before
 // enable, atomically. An old retry may never resume a subsequent pause.
 func checkCronDiscardResume(t *testing.T, _ db.Storage, b Backend) error {
+	t.Run("null cutoff no-op", func(t *testing.T) {
+		s := b.Open(t)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+		p, _, job, _ := recurringFixture(t, s, "all")
+		seedPassover(t, s, p.ID, map[string]jsontext.Value{"cron.pause": jsontext.Value("null"), "cron.passover": jsontext.Value("null"), "cron.passover." + job.UID: jsontext.Value("null")})
+		before, e := s.MaxEventID(t.Context())
+		require.NoError(t, e)
+		out, e := s.SetCronProjectPause(t.Context(), db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", DiscardMissed: true, ExpectedRevision: &p.Revision})
+		require.NoError(t, e)
+		require.False(t, out.Changed, "null cutoff is absent, not a repair target")
+		resumed, e := s.ResumeCronJob(t.Context(), db.ResumeCronJobIn{ProjectID: p.ID, UID: job.UID, ExpectedEventUID: job.DefinitionEventUID, Actor: "operator", DiscardMissed: true})
+		require.NoError(t, e)
+		require.Empty(t, resumed.Events)
+		after, e := s.MaxEventID(t.Context())
+		require.NoError(t, e)
+		require.Equal(t, before, after)
+	})
 	t.Run("job", func(t *testing.T) {
 		s := b.Open(t)
 		t.Cleanup(func() { require.NoError(t, s.Close()) })
@@ -97,6 +115,25 @@ func checkCronDiscardResume(t *testing.T, _ db.Storage, b Backend) error {
 		_, err = s.ResumeCronJob(t.Context(), in)
 		require.ErrorIs(t, err, db.ErrCronConflict)
 
+	})
+	t.Run("project discard retains requests", func(t *testing.T) {
+		s := b.Open(t)
+		t.Cleanup(func() { require.NoError(t, s.Close()) })
+		p, job, _ := requestJobFixture(t, s, "discard-request-project")
+		now := time.Now().UTC()
+		id := requestUIDAt(t, now)
+		_, e := s.RequestCron(t.Context(), db.RequestCronIn{ProjectID: p.ID, UID: id, Kind: "run", TargetUID: job.UID, Actor: "operator", Now: now})
+		require.NoError(t, e)
+		paused, e := s.SetCronProjectPause(t.Context(), db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", Paused: true})
+		require.NoError(t, e)
+		var before map[string]jsontext.Value
+		require.NoError(t, json.Unmarshal([]byte(paused.Project.Metadata), &before))
+		resumed, e := s.SetCronProjectPause(t.Context(), db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", DiscardMissed: true, ExpectedRevision: &paused.NewRevision})
+		require.NoError(t, e)
+		var after map[string]jsontext.Value
+		require.NoError(t, json.Unmarshal([]byte(resumed.Project.Metadata), &after))
+		require.Equal(t, before[db.CronRequestMetadataPrefix+id], after[db.CronRequestMetadataPrefix+id])
+		require.NotEmpty(t, after[db.CronRequestMetadataPrefix+id])
 	})
 	t.Run("project", func(t *testing.T) {
 		s := b.Open(t)

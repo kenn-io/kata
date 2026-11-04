@@ -95,7 +95,8 @@ func (a CronSQL) ResumeJob(ctx context.Context, in ResumeCronJobIn) (ResumeCronJ
 				}
 			}
 			_, validErr := decodeCronPassover(values[CronPassoverMetadataPrefix+current.UID])
-			_, present := values[CronPassoverMetadataPrefix+current.UID]
+			raw, present := values[CronPassoverMetadataPrefix+current.UID]
+			present = present && raw.Kind() != jsontext.KindNull
 			if !current.Definition.Enabled || (present && validErr != nil) {
 				patch, err := cronPassoverPatch(project, CronPassoverMetadataPrefix+current.UID, actor, time.Now().UTC(), nil)
 				if err != nil {
