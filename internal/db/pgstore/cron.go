@@ -3,12 +3,15 @@ package pgstore
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"go.kenn.io/kata/internal/db"
 )
 
 func (s *Store) cronSQL() db.CronSQL {
-	return db.CronSQL{CreateIssueTx: s.createIssueTx, PatchIssueMetadataTx: func(ctx context.Context, tx *sql.Tx, in db.PatchIssueMetadataIn) (db.PatchIssueMetadataOut, error) {
+	return db.CronSQL{BeginRead: func(ctx context.Context) (*sql.Tx, error) {
+		return s.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+	}, CreateIssueTx: s.createIssueTx, PatchIssueMetadataTx: func(ctx context.Context, tx *sql.Tx, in db.PatchIssueMetadataIn) (db.PatchIssueMetadataOut, error) {
 		return s.patchIssueMetadata(ctx, in, func(_ context.Context, run transactionFunc) error { return run(tx) })
 	}, Postgres: true, InstanceUID: s.InstanceUID(), Query: s, Transact: func(ctx context.Context, run func(*sql.Tx) error) error { return s.withSerializableTx(ctx, run) }, WriteGate: func(ctx context.Context, tx *sql.Tx, id int64) error { return ensureProjectWritableTx(ctx, tx, id) }, EffectiveActor: func(ctx context.Context, tx *sql.Tx, projectID int64, actor string) (string, error) {
 		return effectiveLocalMutationActorTx(ctx, tx, projectID, actor)
@@ -55,4 +58,9 @@ func (s *Store) ListRecurringCronJobs(ctx context.Context, after string, limit i
 // DispatchRecurringCron commits a bounded set of children and its progress together.
 func (s *Store) DispatchRecurringCron(ctx context.Context, in db.DispatchRecurringCronIn) (db.DispatchRecurringCronOut, error) {
 	return s.cronSQL().DispatchRecurring(ctx, in)
+}
+
+// ExplainRecurringCron evaluates one consistent read without mutation fences.
+func (s *Store) ExplainRecurringCron(ctx context.Context, projectID int64, jobUID string, now time.Time) (db.RecurringExplanation, error) {
+	return s.cronSQL().ExplainRecurring(ctx, projectID, jobUID, now)
 }

@@ -97,15 +97,15 @@ func TestHookRunsRootSeparatesPostgresSchemas(t *testing.T) {
 	home := setupKataEnv(t)
 	t.Setenv("KATA_DSN", "postgres://user@db.example/kata?sslmode=verify-full")
 	t.Setenv("KATA_POSTGRES_SCHEMA", "alpha")
-	alpha, err := hookRunsRoot()
+	alpha, err := daemonLogSource(t.Context(), false)
 	require.NoError(t, err)
 	t.Setenv("KATA_POSTGRES_SCHEMA", "beta")
-	beta, err := hookRunsRoot()
+	beta, err := daemonLogSource(t.Context(), false)
 	require.NoError(t, err)
 
 	assert.NotEqual(t, alpha, beta)
-	assert.True(t, strings.HasPrefix(alpha, filepath.Join(home, "hooks")))
-	assert.True(t, strings.HasPrefix(beta, filepath.Join(home, "hooks")))
+	assert.True(t, strings.HasPrefix(alpha.root, filepath.Join(home, "hooks")))
+	assert.True(t, strings.HasPrefix(beta.root, filepath.Join(home, "hooks")))
 }
 
 func TestDaemonLogs_Hooks_PrintsChronological(t *testing.T) {
@@ -260,7 +260,7 @@ func TestEmitNewLines_PartialTrailingLine_NotConsumed(t *testing.T) {
 	}
 	f := &hookLogFilter{hookIndex: -1}
 	var stdout, stderr bytes.Buffer
-	n, err := emitNewLines(path, 0, &stdout, &stderr, f)
+	n, err := emitNewLines(t.Context(), path, 0, &stdout, &stderr, f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +285,7 @@ func TestEmitNewLines_PartialTrailingLine_NotConsumed(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	n2, err := emitNewLines(path, n, &stdout, &stderr, f)
+	n2, err := emitNewLines(t.Context(), path, n, &stdout, &stderr, f)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +361,7 @@ func TestRunHookLogOnce_Mark_ReportsActiveFileSize(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	mark, err := runHookLogOnce(&stdout, &stderr, 100, &hookLogFilter{hookIndex: -1})
+	mark, err := runDaemonLogOnce(t.Context(), testHookLogSource(t), &stdout, &stderr, 100, &hookLogFilter{hookIndex: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,7 +381,7 @@ func TestRunHookLogOnce_Mark_UnsetWhenActiveAbsent(t *testing.T) {
 	// Only a rotated file exists.
 	writeHookLog(t, dir, "runs.jsonl.1", map[string]any{"event_id": 99, "result": "ok"})
 	var stdout, stderr bytes.Buffer
-	mark, err := runHookLogOnce(&stdout, &stderr, 100, &hookLogFilter{hookIndex: -1})
+	mark, err := runDaemonLogOnce(t.Context(), testHookLogSource(t), &stdout, &stderr, 100, &hookLogFilter{hookIndex: -1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,4 +437,13 @@ func TestDaemonLogs_RejectsHookIndexBelowMinusOne(t *testing.T) {
 	var ce *cliError
 	require.True(t, errors.As(err, &ce))
 	assert.Equal(t, ExitValidation, ce.ExitCode)
+}
+
+func testHookLogSource(t *testing.T) logSource {
+	t.Helper()
+	source, err := daemonLogSource(t.Context(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return source
 }

@@ -5,18 +5,42 @@ import (
 	"encoding/json/jsontext"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/config"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/embedding"
 )
+
+func TestHealthCronDiagnosticsOnly(t *testing.T) {
+	d := openTestDB(t)
+	r := daemon.NewCronDispatchRecorder(filepath.Join(t.TempDir(), "dispatch.jsonl"))
+	t.Cleanup(func() { require.NoError(t, r.Close()) })
+	_, err := r.Record(t.Context(), db.RecurringCronCandidate{JobUID: "private-job"}, db.DispatchRecurringCronOut{Reason: cron.DispatchIdle}, nil, d.now)
+	require.NoError(t, err)
+	r.FinishCycle(d.now, 3*time.Millisecond, true, false)
+	ts := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, Auth: config.AuthConfig{Token: "operator-token"}, InsecureReadonly: true, CronRecorder: r})
+	resp, raw := doReq(t, ts, http.MethodGet, "/api/v1/health", nil, map[string]string{"Forwarded": "for=198.51.100.1"})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.NotContains(t, string(raw), `"cron"`)
+	resp, raw = doReq(t, ts, http.MethodGet, "/api/v1/health", nil, map[string]string{"Authorization": "Bearer operator-token"})
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var body struct {
+		Cron *api.CronHealth `json:"cron"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &body))
+	require.NotNil(t, body.Cron)
+	require.Equal(t, 1, body.Cron.Jobs)
+	require.Equal(t, 1, body.Cron.ByReason["idle"])
+	require.NotContains(t, string(raw), "private-job")
+}
 
 func TestHealth_ReportsSchemaAndUptime(t *testing.T) {
 	ts, _ := startDefaultTestServer(t)
@@ -329,4 +353,25 @@ func TestHealthSerializesSanitizedEmbeddingRejection(t *testing.T) {
 	assert.Equal(t, "rejected", body.Embeddings.Credential)
 	require.NotNil(t, body.Embeddings.LastErrorAt)
 	assert.Equal(t, http.StatusUnauthorized, body.Embeddings.LastErrorStatus)
+}
+
+func TestHealthCronFailedFirstEnumerationOmitsTimestamp(t *testing.T) {
+	d := openTestDB(t)
+	r := daemon.NewCronDispatchRecorder(filepath.Join(t.TempDir(), "dispatch.jsonl"))
+	t.Cleanup(func() { require.NoError(t, r.Close()) })
+	r.FinishCycle(d.now, time.Millisecond, false, true)
+	ts := startTestServer(t, daemon.ServerConfig{DB: d.db, StartedAt: d.now, CronRecorder: r})
+	resp, raw := doReq(t, ts, http.MethodGet, "/api/v1/health", nil, nil)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var body struct {
+		Cron map[string]any `json:"cron"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &body))
+	require.NotNil(t, body.Cron)
+	require.NotContains(t, body.Cron, "last_enumeration_at")
+	require.EqualValues(t, 1, body.Cron["enumeration_errors_since_start"])
+	r.FinishCycle(d.now.Add(time.Minute), time.Millisecond, true, false)
+	_, raw = doReq(t, ts, http.MethodGet, "/api/v1/health", nil, nil)
+	require.NoError(t, json.Unmarshal(raw, &body))
+	require.Equal(t, d.now.Add(time.Minute).Format(time.RFC3339Nano), body.Cron["last_enumeration_at"])
 }

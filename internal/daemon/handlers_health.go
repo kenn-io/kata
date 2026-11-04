@@ -48,6 +48,9 @@ func registerHealthHandlers(humaAPI huma.API, cfg ServerConfig) {
 		diagnostics := projectDiagnosticOwnerAuthority(ctx)
 		if diagnostics {
 			out.Body.DBPath = cfg.DB.Path()
+			if cfg.CronRecorder != nil {
+				out.Body.Cron = cfg.CronRecorder.Health()
+			}
 		}
 		if diagnostics && cfg.ReconcilerHealth != nil {
 			h := cfg.ReconcilerHealth()

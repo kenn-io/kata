@@ -3,12 +3,13 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"go.kenn.io/kata/internal/db"
 )
 
 func (d *Store) cronSQL() db.CronSQL {
-	return db.CronSQL{CreateIssueTx: func(ctx context.Context, tx *sql.Tx, p db.CreateIssueParams) (db.Issue, db.Event, error) {
+	return db.CronSQL{BeginRead: func(ctx context.Context) (*sql.Tx, error) { return d.BeginTx(ctx, &sql.TxOptions{ReadOnly: true}) }, CreateIssueTx: func(ctx context.Context, tx *sql.Tx, p db.CreateIssueParams) (db.Issue, db.Event, error) {
 		id, event, err := d.createIssueTx(ctx, tx, p)
 		if err != nil {
 			return db.Issue{}, db.Event{}, err
@@ -72,4 +73,9 @@ func (d *Store) ListRecurringCronJobs(ctx context.Context, after string, limit i
 // DispatchRecurringCron commits a bounded set of children and its progress together.
 func (d *Store) DispatchRecurringCron(ctx context.Context, in db.DispatchRecurringCronIn) (db.DispatchRecurringCronOut, error) {
 	return d.cronSQL().DispatchRecurring(ctx, in)
+}
+
+// ExplainRecurringCron evaluates one consistent read without mutation fences.
+func (d *Store) ExplainRecurringCron(ctx context.Context, projectID int64, jobUID string, now time.Time) (db.RecurringExplanation, error) {
+	return d.cronSQL().ExplainRecurring(ctx, projectID, jobUID, now)
 }

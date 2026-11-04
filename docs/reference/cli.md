@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-02
+last_edited: 2026-11-04
 ---
 
 # CLI reference
@@ -1754,6 +1754,7 @@ kata daemon stop
 kata daemon restart [--listen <host:port>] [--insecure-readonly]
 kata daemon reload
 kata daemon logs --hooks [--tail]
+kata daemon logs --cron [--tail] [--limit N] [--job-uid <job-uid>] [--reason <code>]
 kata health
 kata doctor [--json | --agent] [--workspace <path>] [--project <name>] [--daemon <name>]
 kata whoami
@@ -1763,6 +1764,12 @@ kata --version
 kata update [--check] [--force] [--yes]
 kata tui [issue-ref]
 ```
+
+`kata daemon logs --tail` follows complete records across retained rotations. If
+the previous file has been evicted, it resumes from the oldest retained file.
+History already evicted by retention cannot be recovered; run without `--tail`
+to read all retained history. See [Cron diagnostics](cron.md)
+for decision filters, local history limits and `job show --why`.
 
 Search stays visible above the issue list and the Jobs, Runs, and Workflows
 lists. Press `/` or, with `--mouse`, click the search line to edit the current query.
@@ -2231,7 +2238,7 @@ See [Cron](cron.md) for bounded documents and retry semantics.
 ```sh
 kata cron job create --uid <job-uid> --file job.json --json
 kata cron job list [--include-deleted] --json
-kata cron job show <job-uid> --json
+kata cron job show <job-uid> [--why] --json
 kata cron job update <job-uid> --expected-event-uid <event-uid> --file replacement.json --json
 kata cron job delete <job-uid> --expected-event-uid <event-uid> --json
 kata cron job restore <job-uid> --expected-event-uid <event-uid> --json

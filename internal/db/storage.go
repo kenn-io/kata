@@ -27,6 +27,7 @@ type Storage interface {
 	ListCronJobs(context.Context, CronList) ([]CronJob, error)
 	ListRecurringCronJobs(context.Context, string, int) ([]RecurringCronCandidate, error)
 	DispatchRecurringCron(context.Context, DispatchRecurringCronIn) (DispatchRecurringCronOut, error)
+	ExplainRecurringCron(context.Context, int64, string, time.Time) (RecurringExplanation, error)
 	ListCronWorkflows(context.Context, CronList) ([]CronWorkflow, error)
 	ExportCronJobs(context.Context, ExportFilter) iter.Seq2[CronJobExport, error]
 	ExportCronWorkflows(context.Context, ExportFilter) iter.Seq2[CronWorkflowExport, error]

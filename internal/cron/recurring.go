@@ -113,6 +113,7 @@ type RecurringBatch struct {
 	Due      []time.Time
 	Progress RecurringProgress
 	More     bool
+	Skipped  RecurringSkip
 }
 
 // Validate rejects unusable checkpoints instead of silently starting over.
@@ -127,8 +128,8 @@ func (p RecurringProgress) Validate() error {
 }
 
 // PlanRecurring evaluates one bounded step against an explicit clock and revision.
-func PlanRecurring(j JobDefinition, definitionEventUID string, p RecurringProgress, now time.Time) (RecurringBatch, error) {
-	out := RecurringBatch{Progress: p}
+func PlanRecurring(j JobDefinition, definitionEventUID string, p RecurringProgress, now time.Time) (out RecurringBatch, err error) {
+	out = RecurringBatch{Progress: p}
 	if !IsRecurringIssueJob(j) || !validUID(definitionEventUID) {
 		return out, invalid("native job and definition revision required")
 	}
@@ -142,16 +143,36 @@ func PlanRecurring(j JobDefinition, definitionEventUID string, p RecurringProgre
 	if now.IsZero() || now.Year() > 9999 {
 		return out, invalid("invalid recurring clock")
 	}
+	next, err := recurringNext(j.Trigger, p.Anchor)
+	if err != nil {
+		return out, err
+	}
+	previousThrough := p.Through
+	defer func() {
+		if err != nil || !j.Enabled {
+			return
+		}
+		var before time.Time
+		switch j.Catchup {
+		case "skip":
+			if out.Progress.Through.After(previousThrough) {
+				before = now.Add(-time.Duration(j.GraceSeconds) * time.Second)
+			}
+		case "latest":
+			if len(out.Due) > 0 {
+				before = out.Due[0]
+			}
+		}
+		if !before.IsZero() {
+			out.Skipped = countRecurringSkips(j.Trigger, next, previousThrough, before)
+		}
+	}()
 	if !j.Enabled || !now.After(p.Through) {
 		return out, nil
 	}
 	if p.Scan != nil && (p.Scan.DefinitionEventUID != definitionEventUID || j.Catchup != "latest") {
 		p.Scan = nil
 		out.Progress = p
-	}
-	next, err := recurringNext(j.Trigger, p.Anchor)
-	if err != nil {
-		return out, err
 	}
 	if j.Trigger.Kind == "interval" {
 		step := time.Duration(j.Trigger.IntervalSeconds) * time.Second

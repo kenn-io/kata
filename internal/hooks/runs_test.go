@@ -126,3 +126,24 @@ func TestRunsAppender_ConcurrentAppends_NoInterleave(t *testing.T) {
 			totalLines, len(files), want)
 	}
 }
+
+// Cron diagnostics must not change the hook writer's version default or
+// closed-writer behavior, even when the rotation mechanism is extracted.
+func TestRunsAppenderPreservesHookContract(t *testing.T) {
+	app, path := newTestRunsAppender(t, 1<<20, 5)
+	app.Append(runRecord{EventID: 1, Result: "ok"})
+	if err := app.Close(); err != nil {
+		t.Fatal(err)
+	}
+	app.Append(runRecord{EventID: 2, Result: "ok"})
+	if count := countValidRunRecords(t, path); count != 1 {
+		t.Errorf("closed hook appender wrote %d records; want one", count)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"kata_hook_runs_version":1`) {
+		t.Errorf("hook records must default to version 1: %s", raw)
+	}
+}

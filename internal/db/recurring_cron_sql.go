@@ -17,6 +17,7 @@ import (
 // RecurringCronCandidate avoids decoding a page's documents before individual dispatch.
 type RecurringCronCandidate struct {
 	ProjectID        int64
+	ProjectUID       string
 	JobUID           string
 	ExpectedEventUID string
 }
@@ -31,8 +32,11 @@ type DispatchRecurringCronIn struct {
 
 // DispatchRecurringCronOut contains only events from the committed transaction.
 type DispatchRecurringCronOut struct {
-	Events []Event
-	More   bool
+	Events    []Event
+	More      bool
+	Reason    cron.DispatchReason
+	Delivered int
+	Skipped   cron.RecurringSkip
 }
 
 type recurringWriteKey struct{}
@@ -71,9 +75,13 @@ func recurringAuthority(ctx context.Context, tx *sql.Tx, projectID int64) (bool,
 
 // recurringParent reads the bound parent and whether it is soft-deleted.
 func (a CronSQL) recurringParent(ctx context.Context, tx *sql.Tx, projectID int64, parentUID string) (Issue, bool, error) {
-	// Parent lock precedes reading owner/status/progress, sharing normal mutation serialization.
+	return a.recurringParentTx(ctx, tx, projectID, parentUID, true)
+}
+
+func (a CronSQL) recurringParentTx(ctx context.Context, tx *sql.Tx, projectID int64, parentUID string, lock bool) (Issue, bool, error) {
+	// Parent lock precedes reading owner/status/progress for dispatch.
 	query := `SELECT id,uid,status,owner,author,metadata,revision,deleted_at IS NOT NULL FROM issues WHERE uid=$1 AND project_id=$2`
-	if a.Postgres {
+	if a.Postgres && lock {
 		query += " FOR UPDATE"
 	}
 	var p Issue
@@ -188,7 +196,7 @@ func (a CronSQL) RecurringJobs(ctx context.Context, after string, limit int) ([]
 		issue = `j.definition_json::jsonb #>> '{issue,kind}'`
 		enabled = `j.definition_json::jsonb ->> 'enabled'='true'`
 	}
-	query := `SELECT j.project_id,j.uid,j.definition_event_uid FROM cron_jobs j JOIN projects p ON p.id=j.project_id WHERE j.uid>$1 AND j.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name<>$2 AND NOT EXISTS(SELECT 1 FROM federation_bindings fb WHERE fb.project_id=p.id AND (fb.role<>'hub' OR fb.enabled<>1)) AND ` + action + `='notify' AND ` + issue + `='per-run' AND ` + enabled + ` ORDER BY j.uid LIMIT $3`
+	query := `SELECT j.project_id,p.uid,j.uid,j.definition_event_uid FROM cron_jobs j JOIN projects p ON p.id=j.project_id WHERE j.uid>$1 AND j.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name<>$2 AND NOT EXISTS(SELECT 1 FROM federation_bindings fb WHERE fb.project_id=p.id AND (fb.role<>'hub' OR fb.enabled<>1)) AND ` + action + `='notify' AND ` + issue + `='per-run' AND ` + enabled + ` ORDER BY j.uid LIMIT $3`
 	rows, err := a.Query.QueryContext(ctx, query, after, SystemProjectName, limit)
 	if err != nil {
 		return nil, err
@@ -197,7 +205,7 @@ func (a CronSQL) RecurringJobs(ctx context.Context, after string, limit int) ([]
 	result := []RecurringCronCandidate{}
 	for rows.Next() {
 		var c RecurringCronCandidate
-		if err := rows.Scan(&c.ProjectID, &c.JobUID, &c.ExpectedEventUID); err != nil {
+		if err := rows.Scan(&c.ProjectID, &c.ProjectUID, &c.JobUID, &c.ExpectedEventUID); err != nil {
 			return nil, err
 		}
 		result = append(result, c)
@@ -208,72 +216,38 @@ func (a CronSQL) RecurringJobs(ctx context.Context, after string, limit int) ([]
 // DispatchRecurring composes ordinary issue writes and progress in one fenced transaction.
 func (a CronSQL) DispatchRecurring(ctx context.Context, in DispatchRecurringCronIn) (DispatchRecurringCronOut, error) {
 	var out DispatchRecurringCronOut
-	err := a.transactProject(ctx, in.ProjectID, func(tx *sql.Tx) error {
+	var failureReason cron.DispatchReason
+	err := a.transactProject(ctx, in.ProjectID, func(tx *sql.Tx) (txErr error) {
 		out = DispatchRecurringCronOut{}
-		if err := LockCronProject(ctx, tx, in.ProjectID); errors.Is(err, ErrNotFound) {
-			return nil
-		} else if err != nil {
+		failureReason = ""
+		defer func() {
+			if txErr != nil {
+				failureReason = out.Reason
+			}
+		}()
+		g, err := a.recurringGateTx(ctx, tx, in, true)
+		out.Reason = g.reason
+		if err != nil || g.reason != "" {
 			return err
 		}
-		authority, _, err := recurringAuthority(ctx, tx, in.ProjectID)
-		if err != nil || !authority {
-			return err
-		}
-		project, err := a.openCronProject(ctx, tx, in.ProjectID)
-		if errors.Is(err, ErrNotFound) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		row, err := scanCron(tx.QueryRowContext(ctx, `SELECT `+cronDefinitionColumns+` FROM cron_jobs WHERE project_id=$1 AND uid=$2`, in.ProjectID, in.JobUID))
-		if errors.Is(err, ErrNotFound) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if row.DeletedAt != nil || row.DefinitionEventUID != in.ExpectedEventUID {
-			return nil
-		}
-		job, err := jobFromRow(row)
-		if err != nil {
-			return err
-		}
-		if !cron.IsRecurringIssueJob(job.Definition) || !job.Definition.Enabled {
-			return nil
-		}
-		parent, deleted, err := a.recurringParent(ctx, tx, project.ID, job.Definition.Issue.ParentUID)
-		if errors.Is(err, ErrNotFound) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if deleted || parent.Status != "open" {
-			return nil
-		}
+		project, job, parent := g.project, g.job, g.parent
 		progress, err := readRecurringProgress(parent, job.UID)
 		if err != nil {
+			out.Reason = cron.DispatchProgressInvalid
 			return err
 		}
 		batch, err := cron.PlanRecurring(job.Definition, job.DefinitionEventUID, progress, in.Now)
 		if err != nil {
+			out.Reason = cron.DispatchScheduleInvalid
 			return err
 		}
 		actor, err := a.effectiveMutationActor(ctx, tx, project.ID, "system")
 		if err != nil {
 			return err
 		}
-		recipient := job.Definition.Action.Recipient
-		if recipient == "current-owner-or-author" {
-			recipient = parent.Author
-			if parent.Owner != nil && *parent.Owner != "" {
-				recipient = *parent.Owner
-			}
-		}
-		recipient, err = notification.NormalizeRecipient(recipient)
+		recipient, err := recurringRecipient(job, parent)
 		if err != nil {
+			out.Reason = cron.DispatchRecipientInvalid
 			return err
 		}
 		for _, due := range batch.Due {
@@ -318,11 +292,15 @@ func (a CronSQL) DispatchRecurring(ctx context.Context, in DispatchRecurringCron
 				out.Events = append(out.Events, changed.Event)
 			}
 		}
-		out.More = batch.More
+		out.More, out.Delivered, out.Skipped = batch.More, len(batch.Due), batch.Skipped
+		out.Reason = recurringBatchReason(batch, cron.DispatchDelivered)
 		return nil
 	})
 	if err != nil {
-		return DispatchRecurringCronOut{}, err
+		if failureReason == "" {
+			failureReason = cron.DispatchError
+		}
+		return DispatchRecurringCronOut{Reason: failureReason}, err
 	}
 	return out, nil
 }
@@ -436,4 +414,16 @@ func CheckNativeRecurringParentMove(ctx context.Context, tx *sql.Tx, postgres bo
 		return &NativeRecurringParentPinnedError{}
 	}
 	return nil
+}
+
+// recurringRecipient validates routing even when a plan is idle or skips only.
+func recurringRecipient(job CronJob, parent Issue) (string, error) {
+	recipient := job.Definition.Action.Recipient
+	if recipient == "current-owner-or-author" {
+		recipient = parent.Author
+		if parent.Owner != nil && *parent.Owner != "" {
+			recipient = *parent.Owner
+		}
+	}
+	return notification.NormalizeRecipient(recipient)
 }
