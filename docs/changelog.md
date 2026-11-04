@@ -13,6 +13,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   unrelated snapshot leaves downstream sync incremental unless it can change the
   reset decision. Handshakes and reset downloads check history without holding
   the writer, except when a second invalidation lands during the check.
+- Fill semantic search vectors faster on large stores by resuming each page after the previous page's last key instead of rescanning from the start.
 - Make semantic search pick up new issues sooner in large stores by skipping unchanged issue text during mirror refreshes.
 - Keep issue writes responsive during due-date sweeps. Sweeps skip date values
   more than 24h past UTC now, including every issue 36h or more out in any zone.

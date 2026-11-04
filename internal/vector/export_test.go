@@ -15,6 +15,10 @@ import (
 // mutator returns when this index holds no reconciler lease.
 var ErrReconcilerLeaseNotHeldForTest = errReconcilerLeaseNotHeld
 
+func (ix *Index) PendingForGenerationForTest(ctx context.Context, gen string, after *string, limit int) ([]kitvec.Pending[string], error) {
+	return ix.flowStore.PendingForGeneration(ctx, gen, after, limit)
+}
+
 // SaveVectorsForTest reaches the one derived-state mutator that has no
 // exported Index method: kit's fill drives it through the flow store.
 func (ix *Index) SaveVectorsForTest(
