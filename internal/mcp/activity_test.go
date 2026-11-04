@@ -78,6 +78,37 @@ func TestNextPriorityAgainstDaemon(t *testing.T) {
 	}
 }
 
+func TestNextAllIncludesProjectCreatedAfterCatalogRead(t *testing.T) {
+	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	_, err = store.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	server := daemon.NewServer(daemon.ServerConfig{DB: store, StartedAt: time.Now().UTC()})
+	t.Cleanup(func() { require.NoError(t, server.Close()) })
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server.Handler().ServeHTTP(w, r)
+		if r.URL.Path == "/api/v1/projects" {
+			project, createErr := store.CreateProject(r.Context(), "hub-project")
+			require.NoError(t, createErr)
+			_, _, createErr = store.CreateIssue(r.Context(), db.CreateIssueParams{
+				ProjectID: project.ID, Title: "priority pick", Author: "author", Priority: new(int64(1)),
+			})
+			require.NoError(t, createErr)
+		}
+	}))
+	t.Cleanup(httpServer.Close)
+	client, err := kataclient.NewWithHTTPClient(httpServer.URL, httpServer.Client())
+	require.NoError(t, err)
+	handlers := toolHandlers{options: Options{Client: client, Scope: NewAllScope()}}
+
+	_, output, err := handlers.next(t.Context(), nil, NextInput{})
+	require.NoError(t, err)
+	require.NotNil(t, output.Issue)
+	require.True(t, strings.HasPrefix(output.Issue.QualifiedRef, "hub-project#"))
+	require.Equal(t, "priority pick", output.Issue.Title)
+}
+
 func TestWorkflowToolsArePublished(t *testing.T) {
 	session := connectTestServer(t)
 	result, err := session.ListTools(t.Context(), nil)

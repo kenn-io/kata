@@ -79,7 +79,7 @@ func (o readyOptions) fetch(cmd *cobra.Command) (readyResultForCLI, error) {
 			o.Limit = 0
 		}
 	}
-	if o.All && (o.Unowned || o.Owner != "" || len(o.Labels) > 0 || len(o.NoLabels) > 0) {
+	if !o.PriorityFirst && o.All && (o.Unowned || o.Owner != "" || len(o.Labels) > 0 || len(o.NoLabels) > 0) {
 		if err := requireDaemonAPIVersion(ctx, client, baseURL,
 			apiVersionReadyAndSearchFilters, "filtered ready --all"); err != nil {
 			return readyResultForCLI{}, err
