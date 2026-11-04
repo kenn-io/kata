@@ -1,8 +1,9 @@
 package tui
 
 import (
-	"github.com/stretchr/testify/require"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestRenderToastUsesErrorStyle(t *testing.T) {
