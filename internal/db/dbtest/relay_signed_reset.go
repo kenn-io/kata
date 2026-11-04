@@ -24,6 +24,8 @@ func RunSignedRelayResetCommitments(t *testing.T, store db.Storage) {
 	ctx := t.Context()
 	project, err := store.CreateProject(ctx, "reset-replica")
 	require.NoError(t, err)
+	target, err := store.CreateProject(ctx, "spoke-project")
+	require.NoError(t, err)
 	rootUID := "00000000000000000000000002"
 	public, private, err := ed25519.GenerateKey(nil)
 	require.NoError(t, err)
@@ -63,6 +65,41 @@ func RunSignedRelayResetCommitments(t *testing.T, store db.Storage) {
 	}{[]db.RootKeyPin{pin}, []db.AttributionReceipt{proof}, []db.EntityProvenance{{ProjectUID: project.UID, Kind: "issue", EntityUID: issueUID, EventUID: source.EventUID}}})
 	require.NoError(t, err)
 	snapshot := db.RootResetSnapshot{Events: events, Entities: entities, Provenance: provenance, Artifacts: []byte(`[]`)}
+	movePayload, err := json.Marshal(map[string]any{
+		"issue_uid": issueUID, "from_project_uid": project.UID, "from_short_id": "0001",
+		"to_project_uid": target.UID, "to_short_id": "0001",
+		"snapshot": map[string]any{
+			"uid": issueUID, "short_id": "0001", "title": "Moved issue",
+			"author": "source-assistant", "status": "open", "metadata": map[string]any{},
+			"comments": []any{}, "labels": []any{}, "links": []any{},
+		},
+	})
+	require.NoError(t, err)
+	move := newRemoteEvent(t, project, &issueUID, "issue.moved", "source-assistant", rootUID, 500, jsontext.Value(movePayload))
+	moveBytes, err := db.EncodeRelaySourceEvent(move)
+	require.NoError(t, err)
+	moveEvents, err := json.Marshal([][]byte{sourceBytes, moveBytes})
+	require.NoError(t, err)
+	moveSnapshot := snapshot
+	moveSnapshot.Events = moveEvents
+	moveSnapshotUID, err := uid.New()
+	require.NoError(t, err)
+	moveManifest, err := db.SignRootResetManifest(db.RootResetManifest{
+		Version: 1, ProjectUID: project.UID, AuthorityUID: rootUID,
+		KeyID: pin.KeyID, ResetEpoch: 3, SnapshotUID: moveSnapshotUID,
+		RootBaselines: db.RelayStreamCursors{Events: 11, Receipts: 13, Artifacts: 17},
+	}, moveSnapshot, private)
+	require.NoError(t, err)
+	moveTranslation := db.RelayResetTranslation{
+		Authority: db.RelayHopAuthority{
+			BindingUID: bindingUID, ProjectUID: project.UID, AuthorityUID: rootUID,
+			SenderInstanceUID: rootUID, ReceiverInstanceUID: store.InstanceUID(), Epoch: 19,
+		},
+		SnapshotUID: moveManifest.SnapshotUID, SnapshotDigest: moveManifest.SnapshotDigest,
+		HopBaselines: db.RelayStreamCursors{Events: 101, Receipts: 113, Artifacts: 117},
+	}
+	require.ErrorIs(t, installer.InstallRelayReset(ctx, bindingUID, moveManifest, moveSnapshot, moveTranslation), db.ErrFederationIngestValidation,
+		"relay reset must reject cross-project issue moves")
 	snapshotUID, err := uid.New()
 	require.NoError(t, err)
 	manifest, err := db.SignRootResetManifest(db.RootResetManifest{Version: 1, ProjectUID: project.UID, AuthorityUID: rootUID, KeyID: pin.KeyID, ResetEpoch: 3, SnapshotUID: snapshotUID, RootBaselines: db.RelayStreamCursors{Events: 11, Receipts: 13, Artifacts: 17}}, snapshot, private)

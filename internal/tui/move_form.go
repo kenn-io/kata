@@ -10,7 +10,6 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"go.kenn.io/kit/tui/splitlayout"
 )
 
 // moveAPI moves an issue and its descendants to another project, or previews
@@ -102,7 +101,7 @@ func (m Model) routeMoveKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if m.undoInFlight || m.reopenLookupPending {
 		return m, nil, true
 	}
-	target, issue, ok := m.activeIssueTarget()
+	target, issue, ok := m.listIssueTarget()
 	if !ok {
 		return m, nil, true
 	}
@@ -309,9 +308,6 @@ func (m Model) moveRequest(in MoveInput) func() (*MutationResp, error) {
 }
 
 func (m Model) moveActor() string {
-	if m.move.target.origin == "detail" {
-		return m.detail.actor
-	}
 	return m.list.actor
 }
 
@@ -392,69 +388,40 @@ func (m Model) handleMoveDone(mut mutationDoneMsg) (Model, tea.Cmd) {
 	return m.finishMove(mut)
 }
 
-// finishMove closes the form after a move. The selection goes to the row beside
-// the moved issue, the detail of a moved issue closes (it does not follow the
-// issue into its new project), and the notice names the new project#id.
+// finishMove closes the form after a move. The moved issue and its subtree
+// leave the list the way a deleted one does (a move into another project is
+// listed again by the refetch when the scope shows it), the detail pane resets
+// only when it shows one of them, and the notice names the new project#id.
+// The daemon moved labels with the issues, so both projects' label counts are
+// refreshed.
 func (m Model) finishMove(mut mutationDoneMsg) (Model, tea.Cmd) {
 	s := m.move
-	moved := map[string]bool{s.target.issueUID: true}
-	for _, uid := range s.preview.uids {
-		moved[uid] = true
-	}
+	uid := s.target.issueUID
+	moved := append([]string{}, s.preview.uids...)
 	newRef := s.chosen.Name
 	if mut.resp != nil && mut.resp.NewShortID != "" {
 		newRef += "#" + mut.resp.NewShortID
 	}
 	m = m.closeMoveForm()
-	m.list = m.list.selectBeside(s.target.issueUID, moved)
-	m.toast = &toast{
-		text:  sanitizeForLine(fmt.Sprintf("moved #%s to %s", s.target.issueShortID, newRef)),
-		level: toastSuccess, expiresAt: m.toastNow().Add(toastNoBindingTTL),
+	m.detail = m.detail.withoutIssues(append(moved, uid)...)
+	m, follow := m.refreshListDay(func(lm listModel) listModel { return lm.withoutIssues(uid, moved...) })
+	m, detailCmd := m.maybeBootstrapSplitDetail()
+	if m.cache != nil {
+		m.cache.markStale()
 	}
-	cmds := []tea.Cmd{toastExpireCmd(toastNoBindingTTL), withConnGen(m.list.refetchCmd(m.api, m.scope), m.connGen)}
-	if m.detail.issue != nil && moved[m.detail.issue.UID] {
-		m.detail.cancelReads()
-		switch {
-		case m.layout == splitlayout.Split:
-			m.focus = focusList
-			var cmd tea.Cmd
-			m, cmd = m.scheduleDetailFollow()
-			cmds = append(cmds, cmd)
-		case m.view == viewDetail && m.attention.returnToAttention:
-			var cmd tea.Cmd
-			m, cmd = m.returnFromAttentionDetail()
-			cmds = append(cmds, cmd)
-		case m.view == viewDetail:
-			m.view, m.focus = viewList, focusList
+	m, notice := m.undoNotice(sanitizeForLine(fmt.Sprintf("moved #%s to %s", s.target.issueShortID, newRef)), toastSuccess)
+	cmds := []tea.Cmd{follow, detailCmd, notice, withConnGen(m.list.refetchCmd(m.api, m.scope), m.connGen)}
+	for _, pid := range []int64{s.target.projectID, s.chosen.ID} {
+		if m.projectLabels == nil {
+			break
+		}
+		if _, cached := m.projectLabels.byProject[pid]; cached {
+			var refresh tea.Cmd
+			m, refresh = m.dispatchLabelFetch(pid)
+			cmds = append(cmds, refresh)
 		}
 	}
 	return m, tea.Batch(cmds...)
-}
-
-// selectBeside puts the selection on the row after the issue that is not
-// moving along with it, else on the nearest such row before it.
-func (lm listModel) selectBeside(uid string, moving map[string]bool) listModel {
-	rows := lm.visibleRows()
-	at := slices.IndexFunc(rows, func(r queueRow) bool { return r.issue.UID == uid })
-	if at < 0 {
-		return lm
-	}
-	next := -1
-	for i := at + 1; i < len(rows) && next < 0; i++ {
-		if !moving[rows[i].issue.UID] {
-			next = i
-		}
-	}
-	for i := at - 1; i >= 0 && next < 0; i-- {
-		if !moving[rows[i].issue.UID] {
-			next = i
-		}
-	}
-	if next < 0 {
-		return lm
-	}
-	lm.cursor, lm.selectedUID, lm.selectedProjectID = next, rows[next].issue.UID, rows[next].issue.ProjectID
-	return lm.ensureCursorVisible(len(rows))
 }
 
 // renderMoveModal draws the project picker, or the daemon's preview once a

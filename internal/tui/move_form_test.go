@@ -14,6 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
+	"go.kenn.io/kit/tui/helplayout"
+	"go.kenn.io/kit/tui/splitlayout"
 )
 
 // moveTestAPI answers the project list and move requests of the Move form
@@ -74,9 +76,9 @@ func moveModel(t *testing.T, api *moveTestAPI) Model {
 	m.view = viewList
 	m.list.actor = "alice"
 	m.list.issues = []Issue{
-		{UID: "issue-a", ProjectID: 7, ProjectUID: "uid-7", ShortID: "aaaa", Title: "First", Revision: 3},
-		{UID: "issue-b", ProjectID: 7, ProjectUID: "uid-7", ShortID: "bbbb", Title: "Second", Revision: 4},
-		{UID: "issue-c", ProjectID: 7, ProjectUID: "uid-7", ShortID: "cccc", Title: "Third", Revision: 5},
+		{UID: "issue-a", ProjectID: 7, ProjectUID: "uid-7", ShortID: "aaaa", QualifiedID: "source#aaaa", Title: "First", Revision: 3},
+		{UID: "issue-b", ProjectID: 7, ProjectUID: "uid-7", ShortID: "bbbb", QualifiedID: "source#bbbb", Title: "Second", Revision: 4},
+		{UID: "issue-c", ProjectID: 7, ProjectUID: "uid-7", ShortID: "cccc", QualifiedID: "source#cccc", Title: "Third", Revision: 5},
 	}
 	m.list = m.list.syncSelection(m.list.visibleRows())
 	m = selectListUID(t, m, "issue-b")
@@ -341,6 +343,9 @@ func TestMoveSelectsNeighbourRowAndNamesNewRef(t *testing.T) {
 
 			require.Equal(t, modalNone, m.modal)
 			require.Equal(t, tc.wantNext, m.list.selectedUID)
+			for _, row := range m.list.visibleRows() {
+				require.NotContains(t, tc.moved, row.issue.UID, "a moved issue leaves the list until the refetch lists it again")
+			}
 			require.NotNil(t, follow, "the list is fetched again")
 			require.NotNil(t, m.toast)
 			require.Contains(t, m.toast.text, "hub-project#new1")
@@ -348,21 +353,138 @@ func TestMoveSelectsNeighbourRowAndNamesNewRef(t *testing.T) {
 	}
 }
 
-func TestMoveFromDetailLeavesTheMovedIssue(t *testing.T) {
-	api := &moveTestAPI{projects: []ProjectSummary{moveProject(2, "hub-project", "", "")}}
-	m := moveModel(t, api)
-	m.view = viewDetail
-	m.detail.scopePID = 7
-	m.detail.gen = 3
-	issue := m.list.issues[1]
-	m.detail.issue = &issue
+// moveThrough previews and performs a move of the selected issue to
+// hub-project, answering with a preview that lists the given uids.
+func moveThrough(t *testing.T, m Model, previewed ...string) (Model, tea.Cmd) {
+	t.Helper()
+	api := &moveTestAPI{
+		projects: []ProjectSummary{moveProject(2, "hub-project", "", "")},
+		preview: func(int, MoveInput) (*MutationResp, error) {
+			resp := &MutationResp{Issue: &Issue{UID: "issue-b"}, Revision: 5}
+			for _, uid := range previewed {
+				resp.Issues = append(resp.Issues, Issue{UID: uid, ShortID: "x"})
+			}
+			return resp, nil
+		},
+	}
+	m.api = newUndoClient(api)
 	m = openMove(t, m)
 	m, cmd := enter(m)
 	m, _ = deliver(t, m, cmd)
 	m, cmd = enter(m)
-	m, _ = deliver(t, m, cmd)
-	require.Equal(t, viewList, m.view, "the detail of a moved issue closes")
-	require.Equal(t, "issue-c", m.list.selectedUID)
+	return deliver(t, m, cmd)
+}
+
+func TestMoveIsOfferedOnlyOnTheSelectedRowOfThePlainList(t *testing.T) {
+	hint := helplayout.HelpItem{Key: "M", Description: "move"}
+	type tableCase struct {
+		name    string
+		prepare func(Model) Model
+		offered bool
+		// helpHidden: the help overlay lists M for every view; only credentials
+		// and saved browsing contexts take it away.
+		helpHidden bool
+	}
+	for _, tc := range []tableCase{
+		{name: "list row", offered: true, prepare: func(m Model) Model { return m }},
+		{name: "detail view", prepare: func(m Model) Model {
+			issue := m.list.issues[1]
+			m.view, m.detail.issue = viewDetail, &issue
+			return m
+		}},
+		{name: "split with the list focused", offered: true, prepare: func(m Model) Model {
+			m.layout, m.focus = splitlayout.Split, focusList
+			return m
+		}},
+		{name: "split with the detail focused", prepare: func(m Model) Model {
+			m.layout = splitlayout.Split
+			issue := m.list.issues[1]
+			m.detail.issue, m.focus = &issue, focusDetail
+			return m
+		}},
+		{name: "Inbox", helpHidden: true, prepare: func(m Model) Model { m.inboxReturn = &inboxReturnState{}; return m }},
+		{name: "detail opened from Attention", helpHidden: true, prepare: func(m Model) Model {
+			m.attention.returnContext = &attentionReturnContext{}
+			return m
+		}},
+		{name: "Help", prepare: func(m Model) Model { m.view = viewHelp; return m }},
+		{name: "empty list", prepare: func(m Model) Model {
+			m.list.issues, m.list.selectedUID, m.list.selectedProjectID = nil, "", 0
+			return m
+		}},
+		{name: "credentials that cannot move", helpHidden: true, prepare: func(m Model) Model {
+			m.authCapabilitiesRequired, m.authCapabilitiesReady = true, true
+			m.issueScoped, m.scopedWritable = true, false
+			return m
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := tc.prepare(moveModel(t, &moveTestAPI{projects: []ProjectSummary{moveProject(2, "hub-project", "", "")}}))
+			if m.view != viewHelp {
+				footer := flattenHelpRows(m.helpRows())
+				if tc.offered {
+					require.Contains(t, footer, hint)
+				} else {
+					assertHelpItemAbsent(t, footer, hint)
+				}
+			}
+			help := m
+			help.view, help.width = viewHelp, 120
+			require.Equal(t, !tc.helpHidden, strings.Contains(stripANSI(help.viewBody()), "move to another project"))
+
+			m, _ = updateModel(m, runeKey('M'))
+			require.Equal(t, tc.offered, m.modal == modalMoveIssue, "dispatch follows the footer")
+		})
+	}
+}
+
+func TestMoveLeavesASplitDetailOnTheSameTerms(t *testing.T) {
+	splitModel := func(t *testing.T, shown string, back ...string) Model {
+		t.Helper()
+		m := moveModel(t, &moveTestAPI{})
+		m.layout, m.focus = splitlayout.Split, focusList
+		m = selectListUID(t, m, "issue-b")
+		for _, row := range m.list.visibleRows() {
+			if row.issue.UID == shown {
+				issue := row.issue
+				m.detail = detailModel{scopePID: 7, issue: &issue}
+			}
+		}
+		for _, uid := range back {
+			m.detail.navStack = append(m.detail.navStack, detailModel{issue: &Issue{UID: uid}})
+		}
+		return m
+	}
+	// A reset pane follows the neighbour the selection moved to, without Back
+	// history. (The moved issue's own pane is covered by the selection test.)
+	t.Run("a pane showing a descendant that moved with it resets", func(t *testing.T) {
+		m, _ := moveThrough(t, splitModel(t, "issue-c", "issue-a"), "issue-b", "issue-c")
+		require.NotNil(t, m.detail.issue)
+		require.Equal(t, "issue-a", m.detail.issue.UID)
+		require.Empty(t, m.detail.navStack)
+	})
+	t.Run("a pane with the moved issue in its Back history resets", func(t *testing.T) {
+		m, _ := moveThrough(t, splitModel(t, "issue-a", "issue-b"))
+		require.NotNil(t, m.detail.issue)
+		require.Equal(t, "issue-c", m.detail.issue.UID)
+		require.Empty(t, m.detail.navStack)
+	})
+	t.Run("a pane on an unrelated issue keeps it and its Back history", func(t *testing.T) {
+		m, _ := moveThrough(t, splitModel(t, "issue-a", "issue-x"))
+		require.NotNil(t, m.detail.issue)
+		require.Equal(t, "issue-a", m.detail.issue.UID)
+		require.Len(t, m.detail.navStack, 1)
+	})
+}
+
+func TestMoveRefreshesTheLabelCountsOfBothProjects(t *testing.T) {
+	m := moveModel(t, &moveTestAPI{})
+	m.projectLabels = newLabelCache()
+	m.projectLabels.byProject[7] = labelCacheEntry{pid: 7}
+	m.projectLabels.byProject[2] = labelCacheEntry{pid: 2}
+	m, _ = moveThrough(t, m)
+	require.True(t, m.projectLabels.byProject[7].fetching, "the source project lost the issue's labels")
+	require.True(t, m.projectLabels.byProject[2].fetching, "the destination project gained them")
 }
 
 func TestMoveClearsUndoHistory(t *testing.T) {
@@ -377,15 +499,6 @@ func TestMoveClearsUndoHistory(t *testing.T) {
 	m, _ = deliver(t, m, cmd)
 	require.Empty(t, m.undoHistory.entries, "a move changes the short id, so earlier edits can no longer be undone")
 	require.Equal(t, "moving an issue cannot be undone", m.undoHistory.boundary)
-}
-
-func TestMoveFollowsTheSamePermissionGateAsOtherEdits(t *testing.T) {
-	api := &moveTestAPI{projects: []ProjectSummary{moveProject(2, "hub-project", "", "")}}
-	m := moveModel(t, api)
-	m.authCapabilitiesRequired, m.authCapabilitiesReady = true, true
-	m.issueScoped, m.scopedWritable = true, false
-	m, _ = updateModel(m, runeKey('M'))
-	require.Equal(t, modalNone, m.modal, "a read-only token cannot open the move form")
 }
 
 func TestMoveIssueNeedsDaemonWithSubtreeMoves(t *testing.T) {

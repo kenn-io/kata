@@ -643,6 +643,9 @@ func (d *Store) leaveFederationReplica(ctx context.Context, projectID int64, dis
 	if err != nil {
 		return db.LeaveFederationResult{}, err
 	}
+	if err := db.ClearFederationProjectIdentityDependencies(ctx, tx, uid); err != nil {
+		return db.LeaveFederationResult{}, fmt.Errorf("clear former project identity dependencies: %w", err)
+	}
 	for _, stmt := range []string{
 		`DELETE FROM federation_quarantine WHERE project_id = ?`,
 		`DELETE FROM federation_sync_status WHERE project_id = ?`,
@@ -818,12 +821,18 @@ func (d *Store) insertRemoteEventTx(
 	createdAt string,
 	validator *db.CronReplayValidator,
 ) (bool, error) {
-	if db.EventRequiredFeatures(ev.Type) != "" {
+	var err error
+	projectID, err = db.RemoteIssueEventProject(ctx, tx, projectID, ev)
+	if err != nil {
+		return false, err
+	}
+
+	if strings.HasPrefix(ev.Type, "cron.") {
 		if err := db.ValidateAcceptedCronEvent(ev); err != nil {
 			return false, err
 		}
 		var targetUID string
-		if err := tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1`, projectID).Scan(&targetUID); err != nil {
+		if err = tx.QueryRowContext(ctx, `SELECT uid FROM projects WHERE id=$1`, projectID).Scan(&targetUID); err != nil {
 			return false, err
 		}
 		if targetUID != ev.ProjectUID {
@@ -834,7 +843,7 @@ func (d *Store) insertRemoteEventTx(
 		}
 	}
 	var existingHash string
-	err := tx.QueryRowContext(ctx,
+	err = tx.QueryRowContext(ctx,
 		`SELECT content_hash FROM events WHERE uid = ?`, ev.EventUID).Scan(&existingHash)
 	if err == nil {
 		if existingHash == ev.ContentHash {
@@ -1161,12 +1170,23 @@ func (d *Store) insertFederationBaselineEventsTx(
 // MaterializeFederatedProject rebuilds the local read model for a spoke project
 // from its stored remote events. Event rows are retained.
 func (d *Store) MaterializeFederatedProject(ctx context.Context, projectID int64) error {
+	// Ownership can change while retained history is folded. Take the policy
+	// writer lock before request fences or project rows to avoid lock upgrades.
+	original := ctx
+	ctx = db.WithTransactionFence(ctx, func(fenceCtx context.Context, tx db.Transaction) error {
+		if err := lockProjectAccess(fenceCtx, tx); err != nil {
+			return err
+		}
+		return db.ApplyTransactionFence(original, tx)
+	})
 	return d.RetryTransient(ctx, func() error {
 		return d.materializeFederatedProject(ctx, projectID)
 	})
 }
 
 func (d *Store) materializeFederatedProject(ctx context.Context, projectID int64) error {
+	parent := ctx
+	ctx, resets := db.WithFederationMoveResetCapture(ctx)
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin federated materialization: %w", err)
@@ -1175,9 +1195,16 @@ func (d *Store) materializeFederatedProject(ctx context.Context, projectID int64
 	if err := d.materializeFederatedProjectTx(ctx, tx, projectID, true, nil, nil); err != nil {
 		return err
 	}
+	if err := db.RecordFederationCurrentProjectResets(ctx, tx, db.FederationPulledEventUIDs(ctx), func(project db.Project) (int64, error) {
+		event, err := d.insertEventTx(ctx, tx, eventInsert{ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, Type: db.ProjectScopeResetEventType, Actor: "system", Payload: "{}", SkipRelay: true})
+		return event.ID, err
+	}); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit federated materialization: %w", err)
 	}
+	db.CommitFederationMoveResets(parent, resets.Resets)
 	return nil
 }
 
@@ -1243,6 +1270,64 @@ func (d *Store) materializeFederatedProjectTxScoped(
 		}
 	}
 	projection := db.FoldEvents(events)
+	destinations, err := db.RehomeFederatedMovedIssues(ctx, tx, events, projection, func(pid int64, issue db.FoldIssue) (string, error) {
+		return resolveFederatedIssueShortID(ctx, tx, pid, issue.UID, issue.ShortID, nil)
+	}, func(id, source, target int64) error {
+		if err := lockAndRejectFreshExternalRootClaimsForIssueTx(ctx, tx, id, time.Now().UTC().Add(-db.ExternalRootClaimStaleAfter)); err != nil {
+			return err
+		}
+		if err := rejectIssueMoveExternalRootIssueSyncTx(ctx, tx, id, source, target); err != nil {
+			return err
+		}
+		collisions, err := issueMoveImportMappingCollisions(ctx, tx, id, source, target)
+		if err != nil {
+			return err
+		}
+		if len(collisions) > 0 {
+			return &db.ProjectMergeImportMappingCollisionError{Mappings: collisions}
+		}
+		var issueUID string
+		if err := tx.QueryRowContext(ctx, `SELECT uid FROM issues WHERE id=$1`, id).Scan(&issueUID); err != nil {
+			return err
+		}
+		return db.CheckNativeRecurringParentMove(ctx, tx, false, source, issueUID)
+	}, func(issueUID, targetProjectUID string) error {
+		if err := bumpProjectAccess(ctx, tx); err != nil {
+			return err
+		}
+		return rebindIssueEmbeddingArtifactsTx(ctx, tx, issueUID, targetProjectUID)
+	}, acceptedEventUIDs, func(project db.Project, reference *db.FederationMovedReference) (int64, error) {
+		payload := "{}"
+		var issueUID *string
+		if reference != nil {
+			encoded, err := json.Marshal(reference)
+			if err != nil {
+				return 0, err
+			}
+			payload = string(encoded)
+			issueUID = &reference.IssueUID
+		}
+		event, err := d.insertEventTx(ctx, tx, eventInsert{ProjectID: project.ID, ProjectUID: project.UID, ProjectName: project.Name, IssueUID: issueUID, Type: db.ProjectScopeResetEventType, Actor: "system", Payload: payload, SkipRelay: true})
+		return event.ID, err
+	})
+	if err != nil {
+		return err
+	}
+	if !db.FollowingMovedProjects(ctx) {
+		for _, pid := range destinations {
+			if pid != projectID {
+				if err := d.materializeFederatedProjectTx(db.WithMovedProjectPass(ctx), tx, pid, true, acceptedEventUIDs, validator); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	projectUID, err := projectUIDTx(ctx, tx, projectID)
+	if err != nil {
+		return err
+	}
+	db.RestrictFoldProject(&projection, projectUID)
+
 	if db.CronMaterializationNeeded(events, acceptedEventUIDs) {
 		if validator == nil {
 			validator = db.NewCronReplayValidator(tx, false)
@@ -1311,7 +1396,10 @@ func (d *Store) resetFederatedProject(ctx context.Context, projectID, replayHori
 	if err := rejectLegacyFederationResetTx(ctx, tx, projectID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE project_id = ?`, projectID); err != nil {
+	if err := db.ClearFederatedMovedIssueHistory(ctx, tx, projectID, d.instanceUID, false); err != nil {
+		return err
+	}
+	if err := db.ClearFederatedProjectEvents(ctx, tx, projectID, false); err != nil {
 		return fmt.Errorf("clear federated events: %w", err)
 	}
 	if err := clearFederatedProjection(ctx, tx, projectID); err != nil {
@@ -1403,19 +1491,10 @@ func ensureFederatedSpokeUnsupportedTx(ctx context.Context, q sqlReader, project
 }
 
 func ensureFederatedMoveAllowedTx(ctx context.Context, q sqlReader, projectIDs ...int64) error {
-	for _, projectID := range projectIDs {
-		var exists int
-		err := q.QueryRowContext(ctx,
-			`SELECT 1 FROM federation_bindings WHERE project_id = ?`, projectID).Scan(&exists)
-		if errors.Is(err, sql.ErrNoRows) {
-			continue
-		}
-		if err != nil {
-			return fmt.Errorf("check federated move gate: %w", err)
-		}
-		return errors.Join(db.ErrFederatedReadOnly, db.ErrFederatedMoveUnsupported)
+	if projectIDs == nil || len(projectIDs) != 2 {
+		return fmt.Errorf("issue move requires source and target projects, got %d", len(projectIDs))
 	}
-	return nil
+	return db.CheckFederatedIssueMove(ctx, q, projectIDs[0], projectIDs[1])
 }
 
 const federationBindingSelect = `SELECT project_id, role, hub_url, hub_project_id, hub_project_uid,
@@ -1749,51 +1828,56 @@ func federationFoldEventsForIssues(ctx context.Context, tx *sql.Tx, projectID in
 }
 
 func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64, eventTypes, issueScope []string) ([]db.FoldEvent, error) {
+	// Only issue events use payload fields as issue identity. Other event
+	// payloads can reference an issue without becoming part of its history.
+	eventIssueUID := `CASE WHEN e.type LIKE 'issue.%' THEN COALESCE(NULLIF(e.issue_uid,''),json_extract(e.payload,'$.issue_uid'),json_extract(e.payload,'$.uid')) ELSE NULLIF(e.issue_uid,'') END`
+	historyIssueUID := `CASE WHEN h.type LIKE 'issue.%' THEN COALESCE(NULLIF(h.issue_uid,''),json_extract(h.payload,'$.issue_uid'),json_extract(h.payload,'$.uid')) ELSE NULLIF(h.issue_uid,'') END`
+	moveIssueUID := `COALESCE(NULLIF(m.issue_uid,''),json_extract(m.payload,'$.issue_uid'),json_extract(m.payload,'$.uid'))`
 	query := `
-		SELECT uid, origin_instance_uid, project_name, issue_uid, related_issue_uid,
-		       type, actor, payload, hlc_physical_ms, hlc_counter, created_at
-		  FROM events
-		 WHERE project_id = ?`
+		SELECT e.uid, e.origin_instance_uid, p.uid, e.issue_uid, e.related_issue_uid,
+		       e.type, e.actor, e.payload, e.hlc_physical_ms, e.hlc_counter, e.created_at
+		  FROM events e JOIN projects p ON p.id=e.project_id
+ WHERE (e.project_id=$1 OR (` + eventIssueUID + ` IN (
+   SELECT ` + historyIssueUID + ` FROM events h WHERE h.project_id=$1
+   UNION SELECT uid FROM issues WHERE project_id=$1)
+ AND EXISTS(SELECT 1 FROM events m WHERE m.type='issue.moved' AND
+   ` + moveIssueUID + ` = ` + eventIssueUID + `)))`
 	args := []any{projectID}
 	if len(eventTypes) > 0 {
 		placeholders := make([]string, 0, len(eventTypes))
 		for _, eventType := range eventTypes {
-			placeholders = append(placeholders, "?")
+			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)+1))
 			args = append(args, eventType)
 		}
 		//nolint:gosec // G202: generated ? placeholders only; values are bound separately.
-		query += " AND type IN (" + strings.Join(placeholders, ",") + ")"
+		query += " AND e.type IN (" + strings.Join(placeholders, ",") + ")"
 	}
 	if len(issueScope) > 0 {
 		// NULL envelopes may carry issue identity in payloads. Historical project
 		// events (notably author rewrites) also participate in each issue's fold.
 		//nolint:gosec // G202: generated ? placeholders only; issue UIDs are bound separately.
-		query += " AND (issue_uid IN (?" + strings.Repeat(",?", len(issueScope)-1) + ") OR issue_uid IS NULL OR issue_uid = '' OR type LIKE 'project.%')"
+		query += " AND (e.issue_uid IN (?" + strings.Repeat(",?", len(issueScope)-1) + ") OR e.issue_uid IS NULL OR e.issue_uid = '' OR e.type LIKE 'project.%')"
 		for _, uid := range issueScope {
 			args = append(args, uid)
 		}
 	}
-	query += " ORDER BY id ASC"
+	query += " ORDER BY e.id ASC"
 	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list federated events: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	projectUID, err := projectUIDTx(ctx, tx, projectID)
-	if err != nil {
-		return nil, err
-	}
 	var out []db.FoldEvent
 	for rows.Next() {
 		var (
 			e               db.FoldEvent
-			projectName     string
+			projectUID      string
 			payload         string
 			issueUID        sql.NullString
 			relatedIssueUID sql.NullString
 			createdAt       time.Time
 		)
-		if err := rows.Scan(&e.UID, &e.OriginInstanceUID, &projectName, &issueUID,
+		if err := rows.Scan(&e.UID, &e.OriginInstanceUID, &projectUID, &issueUID,
 			&relatedIssueUID, &e.Type, &e.Actor, &payload, &e.HLCPhysicalMS,
 			&e.HLCCounter, &createdAt); err != nil {
 			return nil, fmt.Errorf("scan federated event: %w", err)
@@ -1812,7 +1896,7 @@ func federationFoldEventsScoped(ctx context.Context, tx *sql.Tx, projectID int64
 		}
 		out = append(out, e)
 	}
-	return out, rows.Err()
+	return db.FederationMoveBaselineEvents(out), rows.Err()
 }
 
 func projectUIDTx(ctx context.Context, tx *sql.Tx, projectID int64) (string, error) {
@@ -2900,6 +2984,11 @@ func (d *Store) adoptProjectIntoFederation(
 		}
 	}
 
+	if project.UID != p.HubProjectUID {
+		if err := db.CheckFederationProjectIdentityRetirement(ctx, tx, project); err != nil {
+			return db.AdoptProjectIntoFederationResult{}, err
+		}
+	}
 	cron, err := db.PrepareCronAdoption(ctx, tx, project, p.HubProjectUID, p.EmptyOnly)
 	if err != nil {
 		return db.AdoptProjectIntoFederationResult{}, err

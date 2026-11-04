@@ -24,7 +24,7 @@ func (m Model) helpRows() [][]helplayout.HelpItem {
 	case viewDetail:
 		return m.detail.detailHelpRows()
 	case viewList:
-		return m.list.queueHelpRows()
+		return m.list.queueHelpRows(m.listIssueOpsHidden())
 	case viewCredentials:
 		return credentialsHelpRows()
 	}
@@ -38,7 +38,7 @@ func (m Model) queueHelpRows() [][]helplayout.HelpItem {
 	if m.input.kind != inputNone {
 		return inputHelpRows(m.input)
 	}
-	return m.list.queueHelpRows()
+	return m.list.queueHelpRows(m.listIssueOpsHidden())
 }
 
 func (m Model) detailHelpRows() [][]helplayout.HelpItem {
@@ -61,7 +61,7 @@ func (m Model) splitHelpRows() [][]helplayout.HelpItem {
 	if m.focus == focusDetail {
 		return m.detail.detailHelpRows()
 	}
-	return m.list.queueHelpRows()
+	return m.list.queueHelpRows(m.listIssueOpsHidden())
 }
 
 func listHelpRows(lm listModel, chrome viewChrome) [][]helplayout.HelpItem {
@@ -71,7 +71,7 @@ func listHelpRows(lm listModel, chrome viewChrome) [][]helplayout.HelpItem {
 	if chrome.input.kind != inputNone {
 		return inputHelpRows(chrome.input)
 	}
-	return appendUndoHint(lm.queueHelpRows(), chrome.undoAvailable)
+	return appendUndoHint(lm.queueHelpRows(chrome.listOpsHidden), chrome.undoAvailable)
 }
 
 func detailHelpRows(dm detailModel, chrome viewChrome) [][]helplayout.HelpItem {
@@ -126,6 +126,14 @@ func inputHelpRows(input inputState) [][]helplayout.HelpItem {
 			{Key: "esc", Description: "cancel"},
 			{Key: "ctrl+r", Description: "reset"},
 		}}
+	case kind == inputDeleteForm:
+		if input.saving {
+			return nil
+		}
+		return [][]helplayout.HelpItem{{
+			{Key: "enter", Description: "delete"},
+			{Key: "esc", Description: "cancel"},
+		}}
 	case kind == inputDatesForm:
 		return [][]helplayout.HelpItem{{
 			{Key: "ctrl+o", Description: "save"},
@@ -149,7 +157,7 @@ func inputHelpRows(input inputState) [][]helplayout.HelpItem {
 	return nil
 }
 
-func (lm listModel) queueHelpRows() [][]helplayout.HelpItem {
+func (lm listModel) queueHelpRows(hideListOps bool) [][]helplayout.HelpItem {
 	row, ok := lm.targetQueueRow()
 	items := []helplayout.HelpItem{
 		{Key: "↑↓", Description: "move"},
@@ -183,7 +191,14 @@ func (lm listModel) queueHelpRows() [][]helplayout.HelpItem {
 		helplayout.HelpItem{Key: "c", Description: "clear"},
 		helplayout.HelpItem{Key: "x", Description: "close"},
 		helplayout.HelpItem{Key: "d", Description: "dates"},
-		helplayout.HelpItem{Key: "M", Description: "move"},
+	)
+	if ok && !hideListOps {
+		items = append(items,
+			helplayout.HelpItem{Key: "X", Description: "delete"},
+			helplayout.HelpItem{Key: "M", Description: "move"},
+		)
+	}
+	items = append(items,
 		helplayout.HelpItem{Key: "!", Description: "priority"},
 		helplayout.HelpItem{Key: "D", Description: "daemons"},
 		helplayout.HelpItem{Key: "F", Description: "federation"},
@@ -219,7 +234,6 @@ func (dm detailModel) detailHelpRows() [][]helplayout.HelpItem {
 		{Key: "x", Description: "close"},
 		{Key: "r", Description: "reopen"},
 		{Key: "d", Description: "dates"},
-		{Key: "M", Description: "move"},
 		{Key: "p", Description: "parent"},
 		{Key: "b", Description: "block"},
 		{Key: "l", Description: "related"},

@@ -14,6 +14,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"uuid"
+
+	"go.kenn.io/kata/internal/docbank"
 )
 
 // Fake keeps uploaded bytes in memory and records API requests.
@@ -21,19 +24,37 @@ type Fake struct {
 	Server       *httptest.Server
 	Fault        string
 	UploadStatus int
-	mu           sync.Mutex
-	requests     []string
-	dirs         map[string]int64
-	versions     map[string]string
-	content      map[string][]byte
+	// BeforeResponse runs after request recording and before the fake handles it.
+	BeforeResponse func(method, path string)
+	mu             sync.Mutex
+	requests       []string
+	nodes          map[int64]docbank.Node
+	paths          map[string]int64
+	metadata       map[string]docbank.Version
+	dirs           map[string]int64
+	versions       map[string]string
+	content        map[string][]byte
 }
 
 // New starts an isolated Docbank fake and registers its cleanup.
 func New(t testing.TB) *Fake {
-	f := &Fake{dirs: map[string]int64{"/": 1}, versions: map[string]string{}, content: map[string][]byte{}}
+	f := &Fake{nodes: map[int64]docbank.Node{}, paths: map[string]int64{}, metadata: map[string]docbank.Version{}, dirs: map[string]int64{"/": 1}, versions: map[string]string{}, content: map[string][]byte{}}
 	f.Server = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.Server.Close)
 	return f
+}
+
+// Seed stores a node and its immutable content versions.
+func (f *Fake) Seed(path string, node docbank.Node, versions map[uuid.UUID][]byte) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	node.Size = int64(len(versions[node.CurrentVersionID]))
+	f.nodes[node.ID] = node
+	f.paths[path] = node.ID
+	for id, content := range versions {
+		f.content[id.String()] = content
+		f.metadata[id.String()] = docbank.Version{ID: id, NodeID: node.ID, Size: int64(len(content))}
+	}
 }
 
 // Requests returns the method and path of each observed request.
@@ -44,8 +65,14 @@ func (f *Fake) Requests() []string {
 }
 func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.requests = append(f.requests, r.Method+" "+r.URL.Path)
+	before := f.BeforeResponse
+	f.mu.Unlock()
+	if before != nil {
+		before(r.Method, r.URL.Path)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if r.Header.Get("X-Api-Key") != "test-key" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -58,12 +85,36 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	send := func(v any) { w.Header().Set("Content-Type", "application/json"); _ = json.MarshalWrite(w, v) }
 	switch {
 	case r.URL.Path == "/api/v1/path" && r.Method == "GET":
+		if id, ok := f.paths[r.URL.Query().Get("path")]; ok {
+			node := f.nodes[id]
+			if node.TrashedAt != "" {
+				http.NotFound(w, r)
+				return
+			}
+			send(node)
+			return
+		}
 		id, ok := f.dirs[r.URL.Query().Get("path")]
 		if !ok {
 			http.NotFound(w, r)
 			return
 		}
 		send(map[string]any{"id": id, "kind": "dir"})
+	case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/v1/nodes/"):
+		id, _ := strconv.ParseInt(strings.TrimPrefix(r.URL.Path, "/api/v1/nodes/"), 10, 64)
+		node, ok := f.nodes[id]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		send(node)
+	case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/v1/versions/") && !strings.HasSuffix(r.URL.Path, "/content"):
+		version, ok := f.metadata[strings.TrimPrefix(r.URL.Path, "/api/v1/versions/")]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		send(version)
 	case r.URL.Path == "/api/v1/path/mkdir" && r.Method == "POST":
 		var in struct {
 			Path string `json:"path"`

@@ -286,6 +286,30 @@ describe('AppShell', () => {
     expect(summary.textContent).toContain(`Account: ${label}`)
   })
 
+  test('says a hub that predates account reporting did not report one', () => {
+    const current = snapshot()
+    current.capabilities.writable = false
+    delete current.capabilities.auth_kind
+    render(AppShell, {
+      props: {
+        route: {
+          kind: 'kata',
+          view: 'all-open',
+          graph: false,
+          filters: { status: [], owner: [], label: [], relationship: [] },
+        },
+        snapshot: current,
+        loading: false,
+        ...mutationProps({ canMutate: false }),
+        onNavigate: vi.fn(),
+        onCreateProject: vi.fn(async () => ({ changed: true })),
+      },
+    })
+    const summary = screen.getByRole('status', { name: 'Active connection' })
+    expect(summary.textContent).toContain('Account: Not reported by hub')
+    expect(summary.textContent).not.toContain('No account')
+  })
+
   test('shows only the active hub account and clears identity while switching', async () => {
     const current = snapshot()
     Object.assign(current.capabilities, { account: 'member-one', token_audit_read: false })

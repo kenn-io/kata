@@ -242,3 +242,19 @@ func TestValidateCloseInput_SupersededByWithEmptyRefRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "superseded-by")
 	assert.Contains(t, err.Error(), "issue_ref")
 }
+
+func TestValidateCloseAttachmentEvidence(t *testing.T) {
+	const message = "Delivered the requested report and checked its final contents carefully."
+	evidence := api.Evidence{Type: api.EvidenceAttachment, AttachmentID: "01K7E222222222222222222222"}
+	assert.NoError(t, ValidateCloseInput("done", message, []api.Evidence{evidence}))
+	for _, reason := range []string{"wontfix", "duplicate", "superseded", "audit-no-change"} {
+		assert.Error(t, ValidateCloseInput(reason, message, []api.Evidence{evidence}), reason)
+	}
+	for _, id := range []string{"", "  "} {
+		evidence.AttachmentID = id
+		assert.Error(t, ValidateCloseInput("done", message, []api.Evidence{evidence}))
+	}
+	evidence.AttachmentID = "01K7E222222222222222222222"
+	evidence.SHA = "abc1234"
+	assert.Error(t, ValidateCloseInput("done", message, []api.Evidence{evidence}), "attachment evidence carries only attachment_id")
+}

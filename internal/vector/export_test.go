@@ -37,3 +37,42 @@ func (ix *Index) ClearReconcilerLeaseForTest() {
 	}
 	ix.pg.releaseLease(conn)
 }
+
+// MirrorRowForTest contains the persisted embedding input and its change key.
+type MirrorRowForTest struct {
+	ProjectUID string
+	Content    string
+	Revision   int64
+}
+
+func (ix *Index) MirrorRowsForTest(ctx context.Context) (map[string]MirrorRowForTest, error) {
+	table := "issue_mirror"
+	if ix.pg != nil {
+		table = "issue_vector_mirror"
+	}
+	rows, err := ix.db.QueryContext(ctx, `SELECT issue_uid, project_uid, content, content_revision FROM `+table)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := make(map[string]MirrorRowForTest)
+	for rows.Next() {
+		var uid string
+		var row MirrorRowForTest
+		if err := rows.Scan(&uid, &row.ProjectUID, &row.Content, &row.Revision); err != nil {
+			return nil, err
+		}
+		out[uid] = row
+	}
+	return out, rows.Err()
+}
+
+func (ix *Index) VectorCountForTest(ctx context.Context) (int, error) {
+	table := "issue_vectors_chunks"
+	if ix.pg != nil {
+		table = "issue_vector_chunks"
+	}
+	var count int
+	err := ix.db.QueryRowContext(ctx, `SELECT count(*) FROM `+table).Scan(&count)
+	return count, err
+}

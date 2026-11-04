@@ -404,57 +404,28 @@ func (p *postgresIndex) refreshMirror(ctx context.Context, store db.Storage) (in
 	if err != nil {
 		return 0, fmt.Errorf("vector: refresh postgres mirror: %w", err)
 	}
-	changed := 0
-	seen := make(map[string]struct{})
-	var afterID int64
-	for {
-		page, err := store.ListIssueContent(ctx, afterID, mirrorPageSize)
-		if err != nil {
-			return changed, fmt.Errorf("vector: list issue content: %w", err)
-		}
-		if len(page) == 0 {
-			break
-		}
-		for _, issue := range page {
-			seen[issue.UID] = struct{}{}
-			afterID = issue.ID
-			result, err := executor.ExecContext(ctx, `
-				INSERT INTO issue_vector_mirror(issue_uid, project_uid, content, content_revision)
-				VALUES($1, $2, $3, $4)
-				ON CONFLICT(issue_uid) DO UPDATE SET
-				  project_uid = EXCLUDED.project_uid,
-				  content = EXCLUDED.content,
-				  content_revision = EXCLUDED.content_revision
-				WHERE issue_vector_mirror.content_revision <> EXCLUDED.content_revision
-				   OR issue_vector_mirror.project_uid <> EXCLUDED.project_uid`,
-				issue.UID, issue.ProjectUID, embedding.EmbedText(issue.Title, issue.Body), issue.ContentRevision)
-			if err != nil {
-				return changed, fmt.Errorf("vector: upsert postgres mirror row %s: %w", issue.UID, err)
-			}
-			if affected, err := result.RowsAffected(); err == nil {
-				changed += int(affected)
-			}
-		}
-	}
-	rows, err := executor.QueryContext(ctx, `SELECT issue_uid FROM issue_vector_mirror`)
+	known, err := loadMirrorKeys(ctx, executor, `SELECT issue_uid, content_revision, project_uid FROM issue_vector_mirror`)
 	if err != nil {
-		return changed, fmt.Errorf("vector: scan postgres mirror uids: %w", err)
+		return 0, fmt.Errorf("vector: scan postgres mirror keys: %w", err)
 	}
-	var stale []string
-	for rows.Next() {
-		var uid string
-		if err := rows.Scan(&uid); err != nil {
-			_ = rows.Close()
-			return changed, fmt.Errorf("vector: scan postgres mirror uid: %w", err)
+	changed, stale, err := syncMirror(ctx, store, known, func(issue db.IssueContent) (int, error) {
+		result, err := executor.ExecContext(ctx, `
+			INSERT INTO issue_vector_mirror(issue_uid, project_uid, content, content_revision)
+			VALUES($1, $2, $3, $4)
+			ON CONFLICT(issue_uid) DO UPDATE SET
+			  project_uid = EXCLUDED.project_uid,
+			  content = EXCLUDED.content,
+			  content_revision = EXCLUDED.content_revision`,
+			issue.UID, issue.ProjectUID, embedding.EmbedText(issue.Title, issue.Body), issue.ContentRevision)
+		if err != nil {
+			return 0, fmt.Errorf("vector: upsert postgres mirror row %s: %w", issue.UID, err)
 		}
-		if _, ok := seen[uid]; !ok {
-			stale = append(stale, uid)
+		if affected, err := result.RowsAffected(); err == nil {
+			return int(affected), nil
 		}
-	}
-	if err := rows.Close(); err != nil {
-		return changed, err
-	}
-	if err := rows.Err(); err != nil {
+		return 0, nil
+	})
+	if err != nil {
 		return changed, err
 	}
 	for _, uid := range stale {

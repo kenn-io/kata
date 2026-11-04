@@ -68,7 +68,7 @@ func (s *DueNotificationSweeper) runOnce(ctx context.Context, now time.Time) (<-
 			s.reachedFloor = &floor
 		}
 	}
-	ids, err := s.DB.ListDueNotificationIssueIDs(ctx)
+	ids, err := s.DB.ListDueNotificationIssueIDs(ctx, now)
 	if err != nil {
 		errs = append(errs, err)
 	}

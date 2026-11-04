@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-02
+last_edited: 2026-11-03
 ---
 
 # HTTP API schema
@@ -229,8 +229,17 @@ reference or full UID within the URL project. `after_id` and `limit` page
 through that history; omitting `issue` polls the project feed. Filtered history
 never returns `reset_required`: purging another issue removes only events that
 name it, and events that name an issue the caller cannot see are omitted.
-Scoped credentials receive the same authorized history projection as issue
-detail.
+History includes events from earlier projects after a move only when the caller
+can access those projects. Scoped credentials receive the same authorized
+history projection as issue detail.
+
+Clients that need close evidence can set
+`include_effective_close_event_uid=true`. The response includes
+`effective_close_event_uid` when a visible native close currently supplies the
+issue's closed status. The daemon selects the event using the same federation
+clock order as issue projection, so scoped clients do not need the redacted
+origin identity or status transitions to choose evidence. If no visible
+effective close exists, the field is omitted.
 
 Every successful filtered response includes `X-Kata-Events-Issue-UID` with the
 resolved issue UID, including empty pages. Clients should require
@@ -242,6 +251,9 @@ daemon message when the acknowledgement is missing or changes between pages.
 
 | Version | Change |
 | --- | --- |
+| `0.40.0` | Issue history accepts `include_effective_close_event_uid=true` and returns the visible native close event that currently supplies the issue's closed status. |
+| `0.39.0` | `POST /projects/{project_id}/issues/{ref}/attachments/links` accepts `reuse_existing=true` to reuse the smallest existing attachment reference for the resolved Docbank version, creating one if none exists. Omission keeps creating a new reference. |
+| `0.38.0` | Publishes `POST /projects/{project_id}/issues/{ref}/attachments/links`, which saves a reference to an existing Docbank file version without uploading its bytes. `kata docbank attachments link` refuses older daemons. |
 | `0.37.0` | `POST /projects/{project_id}/recurrences` accepts `If-Match: "rev-N"` with `initial_issue_ref`; a different issue revision returns 412 `revision_conflict` and writes nothing. An empty `If-Match` returns 400. Older daemons ignore the header. |
 | `0.36.0` | Issue list rows, show output and ready rows carry `scheduled_on_date` and `deadline_on_date`, the `scheduled_on` and `deadline_on` metadata as `YYYY-MM-DD` calendar dates, each omitted when its key is absent or its value cannot be read. Older daemons omit both fields. |
 | `0.35.0` | Moves include the issue subtree by default; `single` keeps the move to one issue. `X-Kata-Project-Scope` narrows requests to fixed projects and is enforced in the transaction, including historical issue references. Older daemons do not enforce this header. |
@@ -905,8 +917,7 @@ federated event log.
 uploads the raw request body as `application/octet-stream` to Docbank and
 returns the new `attachment_id` with its stored reference. `GET
 /api/v1/projects/{project_id}/issues/{ref}/attachments/{attachment_id}/content`
-streams the file back. Both return `docbank_not_configured` when the daemon has
-no Docbank. See [Issue attachments](../guide/attachments.md).
+streams the file back. `POST /api/v1/projects/{project_id}/issues/{ref}/attachments/links` saves a reference to an existing Docbank file version. Its JSON body takes exactly one of `node_id` or `path`, an optional `version_id`, and `actor`. Set `reuse_existing` to `true` to return the smallest existing attachment ID for that version without adding another reference; if no reference exists, the route creates one. Omitting this field creates a new reference. All three routes return `docbank_not_configured` when the daemon has no Docbank. See [Issue attachments](../guide/attachments.md).
 
 ## Project Hygiene Endpoints
 

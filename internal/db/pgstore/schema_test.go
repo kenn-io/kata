@@ -111,9 +111,6 @@ var expectedTriggers = []string{
 	// FTS sync.
 	"issues_search_after_issue_insert",
 	"issues_search_after_issue_update",
-	"issues_search_after_comment_insert",
-	"issues_search_after_comment_update",
-	"issues_search_after_comment_delete",
 }
 
 // expectedFKCounts pins the per-table foreign-key counts. The conformance
@@ -229,6 +226,14 @@ func TestSchema_BaselineMatchesExpectedSurface(t *testing.T) {
 		   AND indexname = 'idx_issues_search_tsv'`).Scan(&ftsGinIndex)
 	require.NoError(t, err)
 	assert.Equal(t, "idx_issues_search_tsv", ftsGinIndex)
+	var commentGinIndex string
+	err = s.QueryRowContext(ctx, `
+		SELECT indexdef FROM pg_indexes
+		 WHERE schemaname = current_schema()
+		   AND tablename = 'comments'
+		   AND indexname = 'idx_comments_search'`).Scan(&commentGinIndex)
+	require.NoError(t, err)
+	assert.Contains(t, commentGinIndex, "USING gin (to_tsvector('kata_simple_unaccent'::regconfig, body))")
 
 	// --- text search config ---
 	var textSearchConfig string
@@ -257,9 +262,6 @@ func TestSchema_BaselineMatchesExpectedSurface(t *testing.T) {
 		"enforce_uid_immutable",
 		"rebuild_issue_search",
 		"issues_search_trigger_on_issue",
-		"issues_search_trigger_on_comment_insert",
-		"issues_search_trigger_on_comment_update",
-		"issues_search_trigger_on_comment_delete",
 	} {
 		var name string
 		err := s.QueryRowContext(ctx, `

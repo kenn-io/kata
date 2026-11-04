@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
@@ -449,15 +450,20 @@ func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, er
 		}
 	}
 	server := daemon.NewServer(daemon.ServerConfig{
-		DB:                        store,
-		Docbank:                   docbankClient,
-		DocbankFolder:             docbankConfig.Folder,
-		WebHandler:                cfg.WebHandler,
-		DefaultTimezone:           cfg.DefaultTimezone,
-		StartedAt:                 startedAt,
-		Broadcaster:               broadcaster,
-		FederationWake:            wakeFederation,
+		DB:              store,
+		Docbank:         docbankClient,
+		DocbankFolder:   docbankConfig.Folder,
+		WebHandler:      cfg.WebHandler,
+		DefaultTimezone: cfg.DefaultTimezone,
+		StartedAt:       startedAt,
+		Broadcaster:     broadcaster,
+		FederationWake:  wakeFederation,
+		FederationPullOnce: func(ctx context.Context, binding db.FederationBinding, credential config.FederationCredential) error {
+			return federation.SyncFederationPullOnlyOnceWithPulledEvents(ctx, store, binding, credential, clientpkg.Opts{}, publisher.Events, federationCredentials)
+		},
 		FederationCredentials:     federationCredentials,
+		FederationPushPending:     federation.DirectSpokePushPending(store),
+		FederationHubClient:       federation.CredentialHTTPClient,
 		DisableFederationRebind:   true,
 		GitHubSyncFetcher:         gitHubSyncFetcher,
 		GitHubSyncProgress:        gitHubSyncProgress,

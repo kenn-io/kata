@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"encoding/json/jsontext"
 	"time"
 
@@ -544,6 +545,8 @@ type ProjectMergeResult struct {
 type MoveIssueProjectIn struct {
 	// AuthorizeProjects checks source project UIDs resolved inside the transaction.
 	AuthorizeProjects func([]string) error
+	// ExpectedIssueIDs fences externally validated subtree membership.
+	ExpectedIssueIDs []int64
 	// DryRun validates inside the move transaction, then rolls back without moving.
 	DryRun bool
 	// Single moves only the selected issue; the default includes descendants.
@@ -844,6 +847,12 @@ type FederationIngestEvent struct {
 // FederationIngestParams is the all-or-nothing DB ingest boundary used by the
 // hub transport handler.
 type FederationIngestParams struct {
+	// MoveSourceEnrollmentIDs contains supplemental grants authenticated by transport.
+	// A matching spoke/actor enrollment alone does not prove token possession.
+	MoveSourceEnrollmentIDs map[string]int64
+	// AuthorizeMove checks supplemental host authority for move sources and the
+	// current owners of fresh events, using a transactionally fenced native grant.
+	AuthorizeMove                    func(context.Context, Transaction, FederationEnrollment, Project) error
 	EventFeatures                    string
 	ProjectID                        int64
 	FederationEnrollmentID           int64
@@ -868,6 +877,7 @@ const (
 // only fresh events, including generated claim audit events in insertion order,
 // so callers can avoid rebroadcasting response-lost retries.
 type FederationIngestResult struct {
+	Resets []FederationProjectReset `json:"-"`
 	// Events retains every committed event in transaction insertion order.
 	Events                []Event
 	RequiredEventFeatures string

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -307,16 +308,13 @@ func federationProjectionRows(t testing.TB, d *Store, projectID int64) [][][]any
 		out = append(out, table)
 	}
 	for _, term := range []string{"work", "snapshot", "baseline", "comment", "edited"} {
-		rows, err := d.QueryContext(t.Context(), `SELECT i.uid FROM issues_fts f JOIN issues i ON i.id=f.rowid WHERE issues_fts MATCH ? AND i.project_id=? ORDER BY i.uid`, term, projectID)
+		hits, err := d.SearchFTS(t.Context(), db.SearchFTSParams{ProjectID: projectID, Query: term, StableOrder: true, Limit: 1000})
 		require.NoError(t, err)
 		var matches [][]any
-		for rows.Next() {
-			var uid string
-			require.NoError(t, rows.Scan(&uid))
-			matches = append(matches, []any{uid})
+		for _, hit := range hits {
+			matches = append(matches, []any{hit.Issue.UID})
 		}
-		require.NoError(t, rows.Err())
-		require.NoError(t, rows.Close())
+		sort.Slice(matches, func(i, j int) bool { return matches[i][0].(string) < matches[j][0].(string) })
 		out = append(out, matches)
 	}
 	return out

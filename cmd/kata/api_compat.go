@@ -19,6 +19,8 @@ const (
 	apiVersionMoveSubtree               = "0.35.0"
 	apiVersionCloseTranscript           = "0.26.0"
 	apiVersionOtherAgentCloseTranscript = "0.34.0"
+	apiVersionDocbankAttachmentLink     = "0.38.0"
+	apiVersionEffectiveCloseEventUID    = "0.40.0"
 	apiVersionCommentLinks              = "0.28.0"
 	apiVersionRecurrenceIfMatch         = "0.37.0"
 	apiVersionReadyAndSearchFilters     = "0.8.0"

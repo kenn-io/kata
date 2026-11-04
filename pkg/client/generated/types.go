@@ -2309,14 +2309,15 @@ func (e EventEnvelope) Validate() error {
 }
 
 type Evidence struct {
-	Account   *string  `json:"account,omitempty"`
-	Command   *string  `json:"command,omitempty"`
-	IssueRef  *string  `json:"issue_ref,omitempty"`
-	Paths     []string `json:"paths,omitempty"`
-	Rationale *string  `json:"rationale,omitempty"`
-	Sha       *string  `json:"sha,omitempty"`
-	Type      string   `json:"type" validate:"required"`
-	URL       *string  `json:"url,omitempty"`
+	Account      *string  `json:"account,omitempty"`
+	AttachmentID *string  `json:"attachment_id,omitempty"`
+	Command      *string  `json:"command,omitempty"`
+	IssueRef     *string  `json:"issue_ref,omitempty"`
+	Paths        []string `json:"paths,omitempty"`
+	Rationale    *string  `json:"rationale,omitempty"`
+	Sha          *string  `json:"sha,omitempty"`
+	Type         string   `json:"type" validate:"required"`
+	URL          *string  `json:"url,omitempty"`
 }
 
 func (e Evidence) Validate() error {
@@ -2766,7 +2767,10 @@ type FederationIngestEventsRequestBody struct {
 	AdoptionBaseline           *string                         `json:"adoption_baseline,omitempty"`
 	AdoptionBaselineEndEventID *int64                          `json:"adoption_baseline_end_event_id,omitempty"`
 	Events                     []FederationIngestEventEnvelope `json:"events,omitempty"`
-	SchemaVersion              int64                           `json:"schema_version"`
+
+	// MoveSourceTokens Supplemental project credentials proving move-source or current-project authority for fresh delayed events; transport-only, never persisted in event history.
+	MoveSourceTokens map[string]string `json:"move_source_tokens,omitempty"`
+	SchemaVersion    int64             `json:"schema_version"`
 }
 
 func (f FederationIngestEventsRequestBody) Validate() error {
@@ -3961,6 +3965,31 @@ func (l LeaveFederationReplicaResultBody) Validate() error {
 	return errors
 }
 
+type LinkAttachmentInput struct {
+	Actor  *string `json:"actor,omitempty"`
+	NodeID *int64  `json:"node_id,omitempty"`
+	Path   *string `json:"path,omitempty"`
+
+	// ReuseExisting When true, return the smallest existing attachment ID for this resolved Docbank version, or create a reference if none exists.
+	ReuseExisting *bool      `json:"reuse_existing,omitempty"`
+	VersionID     *uuid.UUID `json:"version_id,omitempty"`
+}
+
+func (l LinkAttachmentInput) Validate() error {
+	var errors runtime.ValidationErrors
+	if l.VersionID != nil {
+		if v, ok := any(l.VersionID).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("VersionID", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type LinkChanges struct {
 	BlockedByAdded   []LinkPeer `json:"blocked_by_added,omitempty"`
 	BlockedByRemoved []LinkPeer `json:"blocked_by_removed,omitempty"`
@@ -4875,10 +4904,11 @@ func (p PingResponseBody) Validate() error {
 }
 
 type PollEventsBody struct {
-	Events        []EventEnvelope `json:"events" validate:"required"`
-	NextAfterID   int64           `json:"next_after_id"`
-	ResetAfterID  *int64          `json:"reset_after_id,omitempty"`
-	ResetRequired bool            `json:"reset_required"`
+	EffectiveCloseEventUID *string         `json:"effective_close_event_uid,omitempty"`
+	Events                 []EventEnvelope `json:"events" validate:"required"`
+	NextAfterID            int64           `json:"next_after_id"`
+	ResetAfterID           *int64          `json:"reset_after_id,omitempty"`
+	ResetRequired          bool            `json:"reset_required"`
 }
 
 func (p PollEventsBody) Validate() error {
