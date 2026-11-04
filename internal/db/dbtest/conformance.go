@@ -50,6 +50,10 @@ type scenario struct {
 }
 
 var storageScenarios = []scenario{
+	{name: "cron definition editors", methods: []string{"PutCronJob", "PutCronWorkflow", "CronJob", "CronWorkflow", "ListCronJobs", "ListCronWorkflows"}, run: checkCronDefinitionEditors},
+	{name: "cron definition editor property", methods: []string{"PutCronJob", "PutCronWorkflow", "CronJob", "CronWorkflow"}, run: checkCronDefinitionEditorProperty},
+	{name: "cron definition editor baseline", methods: []string{"AdoptProjectIntoFederation", "PutCronJob", "PutCronWorkflow", "CronJob", "CronWorkflow", "ListCronJobs", "ListCronWorkflows"}, run: checkCronDefinitionEditorBaseline},
+	{name: "cron definition editor retained history", methods: []string{"InsertRemoteEvent", "MaterializeFederatedProject", "CronJob", "CronWorkflow"}, runWithBackend: checkCronDefinitionEditorHistory},
 	{name: "setup finished delivery", methods: []string{"PrepareSetupFinished", "CompleteSetupFinished", "SystemProject", "CloseIssue", "SoftDeleteIssue", "RemoveProject"}, runWithBackend: checkSetupFinishedDelivery},
 	{name: "comment graph project access", methods: []string{"CreateProject", "CreateIssue", "CreateComment", "MoveIssueProject", "ReadCommentGraph"}, run: checkCommentGraphProjectAccess},
 	{name: "recurring adoption snapshots", run: checkRecurringAdoptionSnapshots},

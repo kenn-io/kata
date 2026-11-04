@@ -1092,8 +1092,13 @@ components:
         updated_at:
           format: date-time
           type: string
+        updated_by:
+          description: Actor of the winning definition event, or null when that event is not held locally.
+          nullable: true
+          type: string
       required:
         - definition
+        - updated_by
         - id
         - uid
         - project_id
@@ -1311,8 +1316,13 @@ components:
         updated_at:
           format: date-time
           type: string
+        updated_by:
+          description: Actor of the winning definition event, or null when that event is not held locally.
+          nullable: true
+          type: string
       required:
         - definition
+        - updated_by
         - id
         - uid
         - project_id

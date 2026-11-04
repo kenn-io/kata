@@ -76,22 +76,28 @@ func CronWorkflowDefinitionFrom(value cron.WorkflowDefinition) CronWorkflowDefin
 type CronJob struct {
 	db.CronDefinition
 	Definition CronJobDefinition `json:"definition"`
+	UpdatedBy  *string           `json:"updated_by" doc:"Actor of the winning definition event, or null when that event is not held locally."`
 }
 
 // CronWorkflow combines workflow identity and revision with its portable definition.
 type CronWorkflow struct {
 	db.CronDefinition
 	Definition CronWorkflowDefinition `json:"definition"`
+	UpdatedBy  *string                `json:"updated_by" doc:"Actor of the winning definition event, or null when that event is not held locally."`
 }
 
 // CronJobFrom converts a storage value to its API representation.
 func CronJobFrom(value db.CronJob) CronJob {
-	return CronJob{value.CronDefinition, CronJobDefinitionFrom(value.Definition)}
+	identity := value.CronDefinition
+	identity.UpdatedBy = nil // The API owns the single serializable editor field.
+	return CronJob{identity, CronJobDefinitionFrom(value.Definition), value.UpdatedBy}
 }
 
 // CronWorkflowFrom converts a storage value to its API representation.
 func CronWorkflowFrom(value db.CronWorkflow) CronWorkflow {
-	return CronWorkflow{value.CronDefinition, CronWorkflowDefinitionFrom(value.Definition)}
+	identity := value.CronDefinition
+	identity.UpdatedBy = nil
+	return CronWorkflow{identity, CronWorkflowDefinitionFrom(value.Definition), value.UpdatedBy}
 }
 
 // CronDefinitionRequest addresses one project-scoped definition.
