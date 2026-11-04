@@ -85,15 +85,25 @@ func (a *Appender) Append(ctx context.Context, value any) error {
 			return err
 		}
 	}
-	n, err := a.file.Write(line)
-	a.size += int64(n)
-	if err != nil {
+	if err := a.writeLocked(line); err != nil {
 		return err
 	}
 	if a.size >= a.maxSize {
 		return a.rotateLocked(ctx)
 	}
 	return nil
+}
+
+// writeLocked drops the handle after a failed write so the next append
+// reopens it and terminates any partial record before writing.
+func (a *Appender) writeLocked(line []byte) error {
+	n, err := a.file.Write(line)
+	a.size += int64(n)
+	if err != nil {
+		_ = a.file.Close()
+		a.file = nil
+	}
+	return err
 }
 
 // rotateLocked leaves a nil handle on failure so the next append reopens it.
