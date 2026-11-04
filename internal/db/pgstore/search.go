@@ -2,6 +2,7 @@ package pgstore
 
 import (
 	"context"
+	"encoding/json/v2"
 	"fmt"
 	"strings"
 
@@ -34,10 +35,11 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
 	} else if limit > 200 && !request.params.StableOrder {
 		limit = 200
 	}
-	anyQuery := `(SELECT CASE WHEN count(*) = 0 THEN NULL
-		ELSE to_tsquery('kata_simple_unaccent', string_agg(quote_literal(term), ' | ')) END
-		FROM terms)`
-	predicateArgs := []any{queryText}
+	words, err := json.Marshal(strings.Fields(queryText))
+	if err != nil {
+		return nil, fmt.Errorf("search fts: %w", err)
+	}
+	predicateArgs := []any{string(words)}
 	bind := numberedArg(&predicateArgs)
 	var rowFilter strings.Builder
 	rowFilter.WriteString("i.project_id = " + bind(request.params.ProjectID))
@@ -67,47 +69,46 @@ func (s *Store) searchFTS(ctx context.Context, request searchFTSRequest) ([]db.S
 	if after := request.params.After; after != nil {
 		rowFilter.WriteString("\n   AND (i.created_at,i.id) > (" + bind(formatStoredTime(after.CreatedAt)) + "," + bind(after.ID) + ")")
 	}
-	if !request.any {
-		rowFilter.WriteString(` AND NOT EXISTS (
-		 SELECT 1 FROM terms WHERE NOT (
-		  EXISTS (SELECT 1 FROM issues_search h WHERE h.issue_id = i.id AND h.tsv @@ to_tsquery('kata_simple_unaccent', quote_literal(terms.term)))
-		  OR EXISTS (SELECT 1 FROM comment_search h JOIN comments c ON c.id = h.comment_id
-		   WHERE c.issue_id = i.id AND h.tsv @@ to_tsquery('kata_simple_unaccent', quote_literal(terms.term)))
-		 ))`)
+	minimum := "(SELECT count(*) FROM terms)"
+	if request.any {
+		minimum = "1"
 	}
+
 	order := "candidates.score DESC, i.id DESC"
 	if request.params.StableOrder {
 		order = "i.created_at ASC, i.id ASC"
 	}
-	query := fmt.Sprintf(`WITH terms AS (
- SELECT unnest(tsvector_to_array(to_tsvector('kata_simple_unaccent', $1))) AS term
-), queries AS (
- SELECT %s AS any_query
-), issue_hits AS (
- SELECT issue_id, ts_rank_cd(tsv, queries.any_query) AS score
- FROM issues_search CROSS JOIN queries WHERE tsv @@ queries.any_query
-), comment_hits AS (
- SELECT c.issue_id, max(ts_rank_cd(h.tsv, queries.any_query)) AS score
- FROM comment_search h JOIN comments c ON c.id = h.comment_id CROSS JOIN queries
- WHERE h.tsv @@ queries.any_query GROUP BY c.issue_id
-), hit_ids AS (
- SELECT issue_id FROM issue_hits UNION SELECT issue_id FROM comment_hits
+	query := fmt.Sprintf(`WITH words AS (
+ SELECT DISTINCT value AS word, plainto_tsquery('kata_simple_unaccent', value) AS q
+ FROM jsonb_array_elements_text($1::jsonb)
+), terms AS (
+ SELECT word, q FROM words WHERE numnode(q) > 0
+), scoped AS MATERIALIZED (
+ SELECT i.id FROM issues i WHERE %s
+), hits AS (
+ SELECT i.id AS issue_id, terms.word, ts_rank_cd(h.tsv, terms.q) AS score, false AS in_comments
+ FROM terms CROSS JOIN scoped i JOIN issues_search h ON h.issue_id = i.id
+ WHERE h.tsv @@ terms.q
+ UNION ALL
+ SELECT i.id, terms.word, ts_rank_cd(to_tsvector('kata_simple_unaccent', c.body), terms.q), true
+ FROM terms CROSS JOIN scoped i JOIN comments c ON c.issue_id = i.id
+ WHERE to_tsvector('kata_simple_unaccent', c.body) @@ terms.q
+), word_hits AS (
+ SELECT issue_id, word, max(score) AS score, bool_or(in_comments) AS in_comments
+ FROM hits GROUP BY issue_id, word
 ), candidates AS (
- SELECT i.id AS doc_key, coalesce(h.score, 0) + coalesce(c.score, 0) AS score
- FROM hit_ids JOIN issues i ON i.id = hit_ids.issue_id
- LEFT JOIN issue_hits h ON h.issue_id = i.id LEFT JOIN comment_hits c ON c.issue_id = i.id
- WHERE %s
+ SELECT issue_id AS doc_key, sum(score) AS score, bool_or(in_comments) AS in_comments
+ FROM word_hits GROUP BY issue_id HAVING count(DISTINCT word) >= %s
 )
 SELECT `+issueColumns+`,
        candidates.score,
-       to_tsvector('kata_simple_unaccent', i.title) @@ queries.any_query AS in_title,
-       to_tsvector('kata_simple_unaccent', i.body) @@ queries.any_query AS in_body,
-       EXISTS (SELECT 1 FROM comment_hits h WHERE h.issue_id = i.id) AS in_comments
+       EXISTS (SELECT 1 FROM terms WHERE to_tsvector('kata_simple_unaccent', i.title) @@ terms.q) AS in_title,
+       EXISTS (SELECT 1 FROM terms WHERE to_tsvector('kata_simple_unaccent', i.body) @@ terms.q) AS in_body,
+       candidates.in_comments
  FROM candidates
  JOIN issues i ON i.id = candidates.doc_key
  JOIN projects p ON p.id = i.project_id
- CROSS JOIN queries
- ORDER BY %s LIMIT %s`, anyQuery, rowFilter.String(), order, bind(limit))
+ ORDER BY %s LIMIT %s`, rowFilter.String(), minimum, order, bind(limit))
 	args := predicateArgs
 
 	rows, err := s.QueryContext(ctx, query, args...)

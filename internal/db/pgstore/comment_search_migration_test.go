@@ -24,10 +24,7 @@ func restoreCommentSearch39(ctx context.Context, t *testing.T, admin *sql.DB, sc
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
 	_, err = tx.ExecContext(ctx, fmt.Sprintf(`SET LOCAL search_path TO %s, public;
- DROP TABLE IF EXISTS comment_search CASCADE;
- DROP TRIGGER IF EXISTS comment_search_after_insert ON comments;
- DROP TRIGGER IF EXISTS comment_search_after_update ON comments;
- DROP FUNCTION IF EXISTS comment_search_trigger();
+ DROP INDEX IF EXISTS idx_comments_search;
  DROP TRIGGER issues_search_after_issue_insert ON issues;
  DROP TRIGGER issues_search_after_issue_update ON issues;
  DROP TRIGGER IF EXISTS issues_search_after_comment_insert ON comments;
@@ -64,7 +61,7 @@ func TestCommentSearchMigrationUpgradesVersion39(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, hits, 1)
 	require.Equal(t, []string{"title", "comments"}, hits[0].MatchedIn)
-	var count int
-	require.NoError(t, admin.QueryRowContext(ctx, `SELECT count(*) FROM comment_search_upgrade.comment_search`).Scan(&count))
-	require.Equal(t, 1, count)
+	var indexDefinition string
+	require.NoError(t, admin.QueryRowContext(ctx, `SELECT indexdef FROM pg_indexes WHERE schemaname='comment_search_upgrade' AND indexname='idx_comments_search'`).Scan(&indexDefinition))
+	require.Contains(t, indexDefinition, "USING gin (to_tsvector(")
 }

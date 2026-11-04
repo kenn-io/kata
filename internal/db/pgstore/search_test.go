@@ -54,6 +54,25 @@ func TestSearchFTS_TokenizerWords(t *testing.T) {
 	}
 }
 
+func TestSearchFTS_LiteralURL(t *testing.T) {
+	ctx := t.Context()
+	dsn, cleanup := pgstoretest.NewDatabase(t, ctx)
+	t.Cleanup(cleanup)
+	store, err := pgstore.Open(ctx, dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	p, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "http://a.example/x'y", Author: "tester"})
+	require.NoError(t, err)
+	for _, search := range []func(context.Context, db.SearchFTSParams) ([]db.SearchCandidate, error){store.SearchFTS, store.SearchFTSAny} {
+		hits, err := search(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "http://a.example/x'y"})
+		require.NoError(t, err)
+		require.Len(t, hits, 1)
+		require.Equal(t, issue.ID, hits[0].Issue.ID)
+	}
+}
+
 func TestSearchKitBuildersPreserveFieldsScopeAndOrdering(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires isolated PostgreSQL")

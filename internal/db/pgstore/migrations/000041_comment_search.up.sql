@@ -29,29 +29,9 @@ CREATE TRIGGER issues_search_after_issue_update
   AFTER UPDATE OF title, body ON issues
   FOR EACH ROW EXECUTE FUNCTION issues_search_trigger_on_issue();
 
-CREATE TABLE comment_search (
-  comment_id BIGINT PRIMARY KEY REFERENCES comments(id) ON DELETE CASCADE,
-  tsv        tsvector NOT NULL
-);
-CREATE INDEX idx_comment_search_tsv ON comment_search USING GIN(tsv);
+CREATE INDEX idx_comments_search ON comments USING GIN (to_tsvector('kata_simple_unaccent', body));
 
-CREATE OR REPLACE FUNCTION comment_search_trigger() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN
-  INSERT INTO comment_search (comment_id, tsv)
-    VALUES (NEW.id, to_tsvector('kata_simple_unaccent', NEW.body))
-    ON CONFLICT (comment_id) DO UPDATE SET tsv = EXCLUDED.tsv;
-  RETURN NULL;
-END $$;
-CREATE TRIGGER comment_search_after_insert
-  AFTER INSERT ON comments
-  FOR EACH ROW EXECUTE FUNCTION comment_search_trigger();
-CREATE TRIGGER comment_search_after_update
-  AFTER UPDATE OF body ON comments
-  FOR EACH ROW EXECUTE FUNCTION comment_search_trigger();
-
-INSERT INTO comment_search (comment_id, tsv)
-  SELECT id, to_tsvector('kata_simple_unaccent', body) FROM comments;
 UPDATE issues_search s SET tsv = to_tsvector('kata_simple_unaccent', i.title || ' ' || coalesce(i.body, ''))
   FROM issues i WHERE i.id = s.issue_id;
-ANALYZE comment_search;
+ANALYZE comments;
 ANALYZE issues_search;

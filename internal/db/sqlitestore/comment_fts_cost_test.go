@@ -5,10 +5,74 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 	"modernc.org/sqlite"
 )
+
+func TestSearchFTS_ScopedPageBudget(t *testing.T) {
+	d, path := openTestDBWithPath(t)
+	ctx := t.Context()
+	p, err := d.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	issue := createTesterIssueWithBody(ctx, t, d, p.ID, "login browser", "safari timeout")
+	other, err := d.CreateProject(ctx, "other-project")
+	require.NoError(t, err)
+	thread := createTesterIssueWithBody(ctx, t, d, other.ID, "ordinary task", "details")
+	raw, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	defer func() { _ = raw.Close() }()
+	raw.SetMaxOpenConns(1)
+	// Search uses the real store query on an unwrapped driver connection so
+	// DBStatus includes every page read, including filtered-out documents.
+	searchStore := &sqlitestore.Store{DB: raw}
+	pages := func(reset bool) int {
+		conn, err := raw.Conn(ctx)
+		require.NoError(t, err)
+		defer func() { _ = conn.Close() }()
+		total := 0
+		require.NoError(t, conn.Raw(func(raw any) error {
+			for _, op := range []sqlite.DBStatusOp{sqlite.DBStatusCacheHit, sqlite.DBStatusCacheMiss} {
+				n, _, err := raw.(sqlite.DBStatus).Status(op, reset)
+				if err != nil {
+					return err
+				}
+				total += n
+			}
+			return nil
+		}))
+		return total
+	}
+	baseline := 0
+	for _, size := range []int{0, 30_000} {
+		if size > 0 {
+			tx, err := raw.BeginTx(ctx, nil)
+			require.NoError(t, err)
+			for n := range size {
+				_, err = tx.ExecContext(ctx, `INSERT INTO comments(uid,issue_id,author,body) VALUES(?,?,?,?)`, fmt.Sprintf("%026d", n+1), thread.ID, "tester", "login browser safari timeout")
+				require.NoError(t, err)
+			}
+			require.NoError(t, tx.Commit())
+		}
+		pages(true)
+		start := time.Now()
+		hits, err := searchStore.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login browser safari timeout"})
+		elapsed := time.Since(start)
+		require.NoError(t, err)
+		require.Len(t, hits, 1)
+		require.Equal(t, issue.ID, hits[0].Issue.ID)
+		count := pages(false)
+		t.Logf("%d other-project comments: %d page fetches, four-term search %s", size, count, elapsed)
+		if size == 0 {
+			baseline = count
+		} else {
+			require.LessOrEqual(t, count, baseline+512, "scoped search must avoid ranking another project's comments")
+		}
+	}
+}
 
 // Page fetches include reads performed inside triggers, unlike returned-row counts.
 func TestCommentWritesReadFixedPagesAsIssueGrows(t *testing.T) {

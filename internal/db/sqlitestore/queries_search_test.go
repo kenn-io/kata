@@ -2,6 +2,7 @@ package sqlitestore_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -361,11 +362,32 @@ func TestSearchFTS_SeparateCommentDocuments(t *testing.T) {
 	issue := createTesterIssueWithBody(ctx, t, d, p.ID, "login", "browser")
 	addTesterComment(ctx, t, d, issue.ID, "safari pull")
 	addTesterComment(ctx, t, d, issue.ID, "request timeout")
+	var wordScores float64
+	for _, word := range []string{"login", "browser", "safari", "timeout"} {
+		got, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: word})
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		wordScores += got[0].Score
+	}
+	for _, search := range []func(context.Context, db.SearchFTSParams) ([]db.SearchCandidate, error){d.SearchFTS, d.SearchFTSAny} {
+		got, err := search(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login browser safari timeout"})
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		require.InDelta(t, wordScores, got[0].Score, 1e-12, "each word contributes its best document score")
+	}
 	for _, query := range []string{"login safari", "safari timeout", "login browser safari timeout"} {
 		got, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: query})
 		require.NoError(t, err)
 		require.Len(t, got, 1, query)
 		require.Equal(t, issue.ID, got[0].Issue.ID)
+	}
+	for _, query := range []string{"login browser safari missing", strings.Repeat("login ", 512) + "safari"} {
+		got, err := d.SearchFTSAny(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: query})
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		require.Equal(t, issue.ID, got[0].Issue.ID)
+		require.Contains(t, got[0].MatchedIn, "title")
+		require.Contains(t, got[0].MatchedIn, "comments")
 	}
 	got, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "pull-request"})
 	require.NoError(t, err)

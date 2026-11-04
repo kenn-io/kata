@@ -263,21 +263,20 @@ there is no down migration.
 ## Schema 41: separate comment search documents
 
 Comment writes and issue title or body edits now index only the changed
-document. The 39→41 migration creates `comment_search` with a cascading comment
-foreign key and a GIN index, backfills each comment, replaces the comment
-triggers, and rebuilds `issues_search` from titles and bodies alone. It then
-analyzes both search tables. Fresh installs use the same schema.
+document. The 39→41 migration builds a GIN expression index on comment bodies,
+removes the aggregate comment triggers, and rebuilds `issues_search` from titles
+and bodies alone. It then analyzes comments and issue search rows. Fresh installs
+use the same schema.
 
 Stop serving daemons and imports, back up the database, and run
 `kata storage postgres migrate` with schema-owner credentials. Allow an offline
 window for reading and indexing all comment bodies and rebuilding the issue
-vectors. Refresh runtime table grants for `comment_search` using the procedure
-in [PostgreSQL operations](../operations/postgres.md#prepare-the-schema).
+vectors. Existing runtime table grants remain sufficient.
 Validation-only runtime credentials cannot migrate. SQLite upgrades through its
 existing JSONL cutover, which rebuilds both search indexes.
 
 Search terms can match across the issue and separate comments. Scores combine
-the issue's rank with its best matching comment, so result order can change.
+each word's best document rank, so result order can change.
 On SQLite, a phrase must fit within one document; words split between two
 comments no longer form a phrase. Older binaries cannot open schema 41.
 Rollback requires the pre-upgrade backup and its matching binary.

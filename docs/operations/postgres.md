@@ -123,7 +123,7 @@ for the offline window, grants, and rollback.
 
 Schema 41 indexes each comment separately so comment writes and issue edits
 avoid rebuilding every comment on the issue. Stop daemons and imports for the
-backfill and refresh runtime grants for `comment_search`. See the
+index build. Existing runtime table grants remain sufficient. See the
 [schema 41 migration requirements](../development/postgres-migrations.md#schema-41-separate-comment-search-documents)
 for downtime, search ranking changes, and rollback.
 

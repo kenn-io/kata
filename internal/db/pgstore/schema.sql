@@ -12,7 +12,7 @@
 --   x NOT GLOB '*pat*'                 -> x NOT LIKE '%pat%'
 --   x NOT GLOB '*[^...]*'              -> x !~ '[^...]'                     (POSIX regex)
 --   json_extract(p, '$.k')             -> (p::jsonb ->> 'k')
---   FTS5 tables + 6 triggers          -> search tables + 4 triggers + FK CASCADE
+--   FTS5 tables + triggers            -> issue search table + 2 triggers, comment expression index
 --   SQLite RAISE(ABORT, msg) trigger   -> PL/pgSQL function + trigger
 --
 -- Table order is FK-dependency: parents before children. recurrences appears
@@ -681,25 +681,7 @@ CREATE TRIGGER issues_search_after_issue_update
   AFTER UPDATE OF title, body ON issues
   FOR EACH ROW EXECUTE FUNCTION issues_search_trigger_on_issue();
 
-CREATE TABLE comment_search (
-  comment_id BIGINT PRIMARY KEY REFERENCES comments(id) ON DELETE CASCADE,
-  tsv        tsvector NOT NULL
-);
-CREATE INDEX idx_comment_search_tsv ON comment_search USING GIN(tsv);
-
-CREATE OR REPLACE FUNCTION comment_search_trigger() RETURNS trigger LANGUAGE plpgsql AS $$
-BEGIN
-  INSERT INTO comment_search (comment_id, tsv)
-    VALUES (NEW.id, to_tsvector('kata_simple_unaccent', NEW.body))
-    ON CONFLICT (comment_id) DO UPDATE SET tsv = EXCLUDED.tsv;
-  RETURN NULL;
-END $$;
-CREATE TRIGGER comment_search_after_insert
-  AFTER INSERT ON comments
-  FOR EACH ROW EXECUTE FUNCTION comment_search_trigger();
-CREATE TRIGGER comment_search_after_update
-  AFTER UPDATE OF body ON comments
-  FOR EACH ROW EXECUTE FUNCTION comment_search_trigger();
+CREATE INDEX idx_comments_search ON comments USING GIN (to_tsvector('kata_simple_unaccent', body));
 
 -- ----------------------------------------------------------------------
 -- import_mappings: cross-source ID map, last (no FK targets above it).

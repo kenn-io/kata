@@ -11,8 +11,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Add, edit, and delete comments, or edit issue titles and bodies, without
   reindexing every comment on the issue. Search still finds words spread across
-  an issue and its comments; scores now combine the issue and its best matching
-  comment, so ranking can shift. SQLite phrases must fit within one document.
+  an issue and its comments; scores now sum each word's best document score,
+  so ranking can shift. SQLite phrases must fit within one document.
   Existing stores upgrade to schema 41 through SQLite's JSONL cutover or the
   [offline PostgreSQL migration](development/postgres-migrations.md#schema-41-separate-comment-search-documents).
 

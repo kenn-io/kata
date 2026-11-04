@@ -11,20 +11,19 @@ import (
 )
 
 const (
-	canonicalColumnFingerprint     = "4a42716ce75d6949aecf06ed58ddfb150ae6126fcc4fea82bd0699954ade8681"
-	canonicalConstraintFingerprint = "f47804b712b6f0c4818c4280c8be92d355809dcac49c41689ec3327381599d9f"
-	canonicalIndexFingerprint      = "43316f2211ac479a255413d9dbe11f3abe831ffdca81d1043b73a1cdd69c5f11"
+	canonicalColumnFingerprint     = "e39313e493aca5629098c150076ee7e1aa04a8d747d8704001e741401fe3df50"
+	canonicalConstraintFingerprint = "ec4c05a641252558d8b52b92ed9ff97c9310064e5f8ad2ab8c636fba65344a17"
+	canonicalIndexFingerprint      = "099ac5908dbed83e6f86b0e5c200d08d8325971398f39316099b66dc19bcce70"
 	vectorColumnFingerprint        = "b8c7cb5e43f3c17502fc3e1deba77a772c3e9a486be623a96729de8866381c31"
 	vectorConstraintFingerprint    = "3a39a82331175295586fb3399dff2221fe511171f21e31a88410dd091c3a3cf4"
 	vectorIndexFingerprint         = "7868c4a815ebee6451cef203509dcedcd21401c76f49fb666e9facaad2f7aef3"
-	canonicalTriggerFingerprint    = "71a6133e1c0ca21329a9eef6b7d4c150e6362fddf37d10291c1193144b50a93a"
-	canonicalFunctionFingerprint   = "2a05d5a988d5d2d594f7416268c4b393fd6900ab3785818d317f2dd8416d8007"
+	canonicalTriggerFingerprint    = "d027a602b31936d09dee01e5182c092c9245faf34edb2c0445ac36795a4a3b46"
+	canonicalFunctionFingerprint   = "be74ea17e4c0192144ab7f75740b168dc1eb7cc45de15a34aaf3a69c1ffdb7f8"
 	canonicalTextSearchFingerprint = "1206eb613d5e4cf9c00c447998c337ece326819f8b3261668f7a8c685571db06"
 )
 
 //nolint:gosec // This manifest lists canonical schema columns, including credential column names, not secret values.
 var canonicalTableColumns = map[string]string{
-	"comment_search":                 "comment_id,tsv",
 	"cron_runs":                      "id,uid,project_id,job_uid,definition_event_uid,workflow_uid,workflow_definition_event_uid,occurrence_key,issue_uid,actor,teammate,executor_label,status,summary_json,revision,created_at,started_at,ended_at,updated_at",
 	"cron_workflows":                 "id,uid,project_id,name,definition_json,definition_event_uid,definition_hlc_json,author,revision,created_at,updated_at,deleted_at",
 	"cron_jobs":                      "id,uid,project_id,name,definition_json,definition_event_uid,definition_hlc_json,author,revision,created_at,updated_at,deleted_at",
@@ -94,7 +93,7 @@ idx_external_field_mappings_active
 idx_issue_sync_bindings_due idx_issue_sync_status_project idx_issue_sync_status_due
 uniq_federation_quarantine_active idx_federation_enrollments_scope idx_federation_enrollments_spoke
 uniq_issue_claims_live_issue idx_issue_claims_project_issue idx_issue_claims_timed_expiry
-uniq_pending_claim_active idx_issues_search_tsv idx_comment_search_tsv idx_import_mappings_issue
+uniq_pending_claim_active idx_issues_search_tsv idx_comments_search idx_import_mappings_issue
 idx_import_mappings_comment idx_import_mappings_link`)
 
 var optionalVectorIndexes = []string{"idx_issue_vector_chunks_generation"}
@@ -102,8 +101,7 @@ var optionalVectorIndexes = []string{"idx_issue_vector_chunks_generation"}
 var canonicalTriggers = strings.Fields(`
 trg_links_uid_consistency_insert trg_links_uid_consistency_update
 trg_projects_uid_immutable trg_issues_uid_immutable trg_issue_sync_binding_immutable
-issues_search_after_issue_insert issues_search_after_issue_update
-comment_search_after_insert comment_search_after_update`)
+issues_search_after_issue_insert issues_search_after_issue_update`)
 
 var canonicalFunctions = strings.Fields(`
 enforce_links_uid_consistency()
@@ -111,8 +109,7 @@ enforce_uid_immutable()
 rewrite_project_uid_for_adoption(bigint,text)
 enforce_issue_sync_binding_immutable()
 rebuild_issue_search(bigint)
-issues_search_trigger_on_issue()
-comment_search_trigger()`)
+issues_search_trigger_on_issue()`)
 
 func (s *Store) validateSchemaManifest(ctx context.Context) error {
 	vectorsInstalled, err := s.vectorRelationsInstalled(ctx)
