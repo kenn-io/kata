@@ -150,6 +150,14 @@ type ListCronJobsQuery struct {
 	IncludeDeleted *bool `json:"include_deleted,omitempty"`
 }
 
+type ResumeCronProjectQuery struct {
+	DiscardMissed *bool `json:"discard_missed,omitempty"`
+}
+
+type PauseCronProjectQuery struct {
+	DiscardMissed *bool `json:"discard_missed,omitempty"`
+}
+
 type ListCronRequestsQuery struct {
 	State *ListCronRequestsQueryState `json:"state,omitempty"`
 }

@@ -2321,7 +2321,9 @@ func (o *ResumeCronJobRequestOptions) GetHeader() (map[string]string, error) {
 // ResumeCronProjectRequestOptions is the options needed to make a request to ResumeCronProject.
 type ResumeCronProjectRequestOptions struct {
 	PathParams *ResumeCronProjectPath
+	Query      *ResumeCronProjectQuery
 	Body       *ResumeCronProjectBody
+	Header     *ResumeCronProjectHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -2337,10 +2339,26 @@ func (o *ResumeCronProjectRequestOptions) Validate() error {
 		}
 	}
 
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
+			}
+		}
+	}
+
 	if o.Body != nil {
 		if v, ok := any(o.Body).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -2358,7 +2376,7 @@ func (o *ResumeCronProjectRequestOptions) GetPathParams() (map[string]any, error
 
 // GetQuery returns the query params as a map.
 func (o *ResumeCronProjectRequestOptions) GetQuery() (map[string]any, error) {
-	return nil, nil
+	return runtime.AsMap[any](o.Query)
 }
 
 // GetBody returns the payload in any type that can be marshalled to JSON by the client.
@@ -2368,13 +2386,15 @@ func (o *ResumeCronProjectRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *ResumeCronProjectRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // PauseCronProjectRequestOptions is the options needed to make a request to PauseCronProject.
 type PauseCronProjectRequestOptions struct {
 	PathParams *PauseCronProjectPath
+	Query      *PauseCronProjectQuery
 	Body       *PauseCronProjectBody
+	Header     *PauseCronProjectHeaders
 }
 
 // Validate validates all the fields in the options.
@@ -2390,10 +2410,26 @@ func (o *PauseCronProjectRequestOptions) Validate() error {
 		}
 	}
 
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
+			}
+		}
+	}
+
 	if o.Body != nil {
 		if v, ok := any(o.Body).(runtime.Validator); ok {
 			if err := v.Validate(); err != nil {
 				errors = errors.Append("Body", err)
+			}
+		}
+	}
+
+	if o.Header != nil {
+		if v, ok := any(o.Header).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Header", err)
 			}
 		}
 	}
@@ -2411,7 +2447,7 @@ func (o *PauseCronProjectRequestOptions) GetPathParams() (map[string]any, error)
 
 // GetQuery returns the query params as a map.
 func (o *PauseCronProjectRequestOptions) GetQuery() (map[string]any, error) {
-	return nil, nil
+	return runtime.AsMap[any](o.Query)
 }
 
 // GetBody returns the payload in any type that can be marshalled to JSON by the client.
@@ -2421,7 +2457,7 @@ func (o *PauseCronProjectRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *PauseCronProjectRequestOptions) GetHeader() (map[string]string, error) {
-	return nil, nil
+	return runtime.AsMap[string](o.Header)
 }
 
 // ListCronRequestsRequestOptions is the options needed to make a request to ListCronRequests.

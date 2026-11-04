@@ -54,7 +54,7 @@ type RequestCronJobRunBody = CronRequestBody
 
 type RestoreCronJobBody = CronDefinitionActionBody
 
-type ResumeCronJobBody = CronJobEnabledActionBody
+type ResumeCronJobBody = CronJobResumeBody
 
 type ResumeCronProjectBody = CronProjectPauseBody
 

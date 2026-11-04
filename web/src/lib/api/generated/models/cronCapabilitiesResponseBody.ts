@@ -8,6 +8,7 @@ export interface CronCapabilitiesResponseBody {
   event_features: string[]
   /** @nullable */
   project_pause: CronCapabilitiesResponseBodyProjectPause
+  project_revision: number
   project_uid: string
   [key: string]: unknown
 }

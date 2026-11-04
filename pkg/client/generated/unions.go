@@ -3,8 +3,16 @@
 package generated
 
 import (
+	"time"
+
 	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 )
+
+type ListCronJobsResponseBody_Passovers_AdditionalProperties struct {
+	Invalid *bool      `json:"invalid,omitempty"`
+	Scope   *string    `json:"scope,omitempty"`
+	Through *time.Time `json:"through,omitempty"`
+}
 
 type MetadataPatchGuard_OneOf_0 struct {
 	// IfValue Expected metadata value encoded as JSON text
