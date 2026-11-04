@@ -2057,8 +2057,8 @@ starts. The selection then moves to the next row (the previous one after the
 last). A detail showing the issue returns as it does on `Esc`, and a notice
 names `u`. `u` restores the issue the way `kata restore` does; if the issue was
 restored elsewhere in the meantime, the TUI says so and
-changes nothing. Older deletions remain available through `u` for the connected
-TUI session, including after comments and the 20-edit history limit. Use
+changes nothing. Deletions survive writes that can't be undone and share the
+20-entry undo limit. Use
 `kata restore` after leaving the session. Issue-scoped credentials cannot delete or restore, so `X` is
 not offered to them and does nothing.
 

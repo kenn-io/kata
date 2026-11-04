@@ -121,8 +121,14 @@ func TestDeleteFormShowsConfirmationOnceAtEveryHeight(t *testing.T) {
 	for _, height := range []int{10, 11, 30} {
 		form := newDeleteForm(formTarget{}, Issue{Title: "Duplicate issue"}, "example-project#abc4")
 		rendered := stripANSI(renderCenteredForm(form, 100, height, snapshotFixedNow))
-		assert.Equal(t, 1, strings.Count(rendered, "Type DELETE example-project#abc4 to confirm"), "height %d", height)
+		assert.Equal(t, 1, strings.Count(rendered, "DELETE example-project#abc4"), "height %d", height)
 	}
+}
+
+func TestDeleteFormShowsFullConfirmationAt80Columns(t *testing.T) {
+	form := newDeleteForm(formTarget{}, Issue{Title: "Duplicate issue"}, "example-repository-project-task-tracker#abc4")
+	rendered := stripANSI(renderCenteredForm(form, 80, 24, snapshotFixedNow))
+	assert.Contains(t, rendered, "DELETE example-repository-project-task-tracker#abc4")
 }
 
 func TestDeleteFormRequiresFullConfirmation(t *testing.T) {
@@ -133,7 +139,7 @@ func TestDeleteFormRequiresFullConfirmation(t *testing.T) {
 	h.key(runeKey('X'))
 	require.Equal(t, inputDeleteForm, h.m.input.kind, "X opens the Delete form")
 	rendered := stripANSI(renderCenteredForm(h.m.input, 100, 30, h.m.toastNow()))
-	assert.Contains(t, rendered, "Type DELETE "+h.qualified(target)+" to confirm")
+	assert.Contains(t, rendered, "DELETE "+h.qualified(target))
 	assert.Empty(t, h.m.input.field(fieldConfirm).input.Placeholder)
 	assert.Contains(t, rendered, "Second", "the form shows the issue title")
 

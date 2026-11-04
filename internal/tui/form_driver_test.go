@@ -8,7 +8,7 @@ type formDriver struct {
 }
 
 func (h *formDriver) key(msg tea.KeyPressMsg) tea.Cmd {
-	out, cmd := h.m.Update(msg)
-	h.m = out.(Model)
+	var cmd tea.Cmd
+	h.m, cmd = stepModel(h.m, msg)
 	return cmd
 }
