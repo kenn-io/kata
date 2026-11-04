@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
-	"go.kenn.io/kata/internal/jsonutil"
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
@@ -27,17 +26,6 @@ type CronJobValidationInput struct {
 	ParentRef string `json:"parent_ref,omitempty"`
 	Count     *int   `json:"count,omitempty" jsonschema:"Number of next fires, 1 through 100; defaults to 5"`
 	From      string `json:"from,omitempty" jsonschema:"RFC3339 preview start; defaults to daemon now"`
-}
-
-// CronValidationOutput mirrors the generated response with an unrestricted JSON
-// definition schema. RawMessage otherwise infers a byte-array MCP schema.
-type CronValidationOutput struct {
-	Valid      bool                              `json:"valid"`
-	Name       string                            `json:"name"`
-	Definition any                               `json:"definition"`
-	Errors     []generated.CronValidationError   `json:"errors"`
-	Warnings   []generated.CronValidationWarning `json:"warnings"`
-	Schedule   *generated.SchedulePreview        `json:"schedule,omitempty"`
 }
 
 func registerCronValidationTools(server *sdkmcp.Server, h toolHandlers) {
@@ -75,7 +63,7 @@ func cronValidationBody(in CronValidationInput) (*generated.CronValidationBody, 
 	return body, nil
 }
 
-func cronValidationResult(value *generated.CronValidationResult, err error) (*sdkmcp.CallToolResult, *CronValidationOutput, error) {
+func cronValidationResult(value *generated.CronValidationResult, err error) (*sdkmcp.CallToolResult, *generated.CronValidationResult, error) {
 	if err != nil {
 		return nil, nil, err
 	}
@@ -85,14 +73,10 @@ func cronValidationResult(value *generated.CronValidationResult, err error) (*sd
 	if err := value.Validate(); err != nil {
 		return nil, nil, err
 	}
-	var definition any
-	if err := json.Unmarshal(value.Definition, &definition, jsonutil.PreserveNumberLiterals()); err != nil {
-		return nil, nil, err
-	}
-	return successResult(), &CronValidationOutput{Valid: value.Valid, Name: *value.Name, Definition: definition, Errors: value.Errors, Warnings: value.Warnings, Schedule: value.Schedule}, nil
+	return successResult(), value, nil
 }
 
-func (h toolHandlers) cronJobValidate(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronJobValidationInput) (*sdkmcp.CallToolResult, *CronValidationOutput, error) {
+func (h toolHandlers) cronJobValidate(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronJobValidationInput) (*sdkmcp.CallToolResult, *generated.CronValidationResult, error) {
 	project, err := h.createTarget(ctx, in.Project)
 	if err != nil {
 		return nil, nil, err
@@ -129,7 +113,7 @@ func (h toolHandlers) cronJobValidate(ctx context.Context, _ *sdkmcp.CallToolReq
 	return result, value, err
 }
 
-func (h toolHandlers) cronWorkflowValidate(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronValidationInput) (*sdkmcp.CallToolResult, *CronValidationOutput, error) {
+func (h toolHandlers) cronWorkflowValidate(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronValidationInput) (*sdkmcp.CallToolResult, *generated.CronValidationResult, error) {
 	project, err := h.createTarget(ctx, in.Project)
 	if err != nil {
 		return nil, nil, err

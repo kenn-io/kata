@@ -2,12 +2,15 @@ package mcpserver
 
 import (
 	"context"
+	stdjson "encoding/json"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"go.kenn.io/kata/internal/jsonutil"
 	"go.kenn.io/kata/internal/uid"
@@ -90,7 +93,14 @@ func cronExpected(value string) (string, error) {
 // typed adapter re-marshals a float64 validation copy and rounds opaque options
 // and exact int64 evidence. Validate separately, then decode the original.
 func addCronTool[In, Out any](server *sdkmcp.Server, name, title, description string, hints *sdkmcp.ToolAnnotations, handler sdkmcp.ToolHandlerFor[In, Out], rawProperties ...string) {
-	inputSchema, outputSchema := inputSchemaFor[In](name), schemaFor[Out]()
+	inputSchema := inputSchemaFor[In](name)
+	outputSchema, err := jsonschema.ForType(reflect.TypeFor[Out](), &jsonschema.ForOptions{
+		TypeSchemas: map[reflect.Type]*jsonschema.Schema{reflect.TypeFor[stdjson.RawMessage](): {}},
+	})
+	if err != nil {
+		panic(err)
+	}
+	outputSchema.Schema = "https://json-schema.org/draft/2020-12/schema"
 	resolved, err := inputSchema.Resolve(nil)
 	if err != nil {
 		panic(err)
