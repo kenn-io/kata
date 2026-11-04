@@ -31,6 +31,9 @@ func cronSchedule(t generated.TriggerResponse) string {
 	switch t.Kind {
 	case "cron":
 		value = deref(t.Cron)
+		if label, ok := cronScheduleLabel(value); ok {
+			value = label
+		}
 	case "interval":
 		value = "every " + (time.Duration(deref(t.IntervalSeconds)) * time.Second).String()
 	case "once":
@@ -224,7 +227,7 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 		if j := p.job(ref.uid); j != nil {
 			name = j.Name
 			d.field("State", cronJobState(*j))
-			d.field("Schedule", cronSchedule(j.Definition.Trigger))
+			d.field("Schedule", cronScheduleDetail(j.Definition.Trigger))
 			if label, times := cronNextRuns(p, *j, renderNow()); len(times) > 0 {
 				d.field(label, times[0])
 				for _, t := range times[1:] {
