@@ -674,7 +674,7 @@ terminal run evidence. Retention is manual; Kata does not prune automatically.
 Export history first if you need an archive:
 
 ```sh
-kata export --project example-project --output history.jsonl
+kata export --project example-project --output history.jsonl --allow-running-daemon
 kata cron run prune --older-than 90d --keep 10 --limit 5000
 kata cron run prune --older-than 90d --keep 10 --limit 5000 \
   --force --confirm "PRUNE example-project cron runs" --json
@@ -697,8 +697,8 @@ again. A preview can change before the real call if another writer updates
 history.
 
 Deletion removes selected run rows and their `cron.run.observed` and
-`cron.run.snapshot` event bodies. Definitions, issues, occurrence claims,
-receipts, provenance, delivery bodies, and snapshots for kept runs remain.
+`cron.run.snapshot` event bodies. Definitions, issues, receipts, provenance,
+delivery bodies, and snapshots for kept runs remain.
 Each nonempty batch resets event streams and makes direct spokes and relay
 descendants rebuild their project state. Prefer infrequent, larger batches
 within the command limit to reduce repeated rebuilds. Pending relay deliveries or a

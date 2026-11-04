@@ -153,9 +153,9 @@ func checkCronRunTally(t *testing.T, store db.Storage) error {
 	overflowPreview := in
 	overflowPreview.DryRun = true
 	_, err = store.PruneCronRuns(ctx, overflowPreview)
-	require.Error(t, err, "preview must reject tally overflow just like execution")
+	require.ErrorContains(t, err, "cron tally: failed count overflow for job "+f.job.UID, "preview must reject tally overflow just like execution")
 	_, err = store.PruneCronRuns(ctx, in)
-	require.Error(t, err)
+	require.ErrorContains(t, err, "cron tally: failed count overflow for job "+f.job.UID)
 	project, err = store.ProjectByID(ctx, f.project.ID)
 	require.NoError(t, err)
 	require.Equal(t, before, project)

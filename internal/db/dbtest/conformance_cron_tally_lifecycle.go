@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/uid"
 	"hegel.dev/go/hegel"
 )
@@ -443,7 +444,7 @@ func checkCronTallyEqualSubsetReplay(t *testing.T, store db.Storage) error {
 			}
 			legacy, err := json.Marshal(oldPeerMetadata(t, legacyEvents))
 			require.NoError(t, err)
-			require.Equal(t, losslessMetadataJSON(t, []byte(project.Metadata)), losslessMetadataJSON(t, legacy), "pre-tally peers must recover the complete root tally")
+			require.Equal(t, metadata.NormalizeJSON([]byte(project.Metadata)), metadata.NormalizeJSON(legacy), "pre-tally peers must recover the complete root tally")
 			correctionCount := 0
 			for _, emitted := range result.Events {
 				if emitted.OriginInstanceUID == store.InstanceUID() && emitted.Type == "project.metadata_updated" {

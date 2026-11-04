@@ -14,6 +14,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/uid"
 )
 
@@ -92,7 +93,7 @@ func oldPeerValue(t *testing.T, current, from, to jsontext.Value) jsontext.Value
 		_, nextObject := object(next)
 		if priorObject && nextObject {
 			cur[key] = oldPeerValue(t, cur[key], prior, next)
-		} else if !bytes.Equal(losslessMetadataJSON(t, prior), losslessMetadataJSON(t, next)) {
+		} else if !bytes.Equal(oldPeerJSON(t, prior), oldPeerJSON(t, next)) {
 			cur[key] = next
 		}
 	}
@@ -111,8 +112,9 @@ func oldPeerValue(t *testing.T, current, from, to jsontext.Value) jsontext.Value
 	return out
 }
 
-// UseNumber keeps comparisons sensitive to a one-count change above 2^53.
-func losslessMetadataJSON(t *testing.T, raw []byte) []byte {
+// Keep the legacy merge oracle independent of production metadata comparison.
+// UseNumber preserves one-count differences above 2^53.
+func oldPeerJSON(t *testing.T, raw []byte) []byte {
 	t.Helper()
 	decoder := jsonv1.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
@@ -139,7 +141,7 @@ func checkCronTallyResetInventory(t *testing.T, store db.Storage) error {
 	legacy, err := json.Marshal(oldPeerMetadata(t, ordinary))
 	require.NoError(t, err)
 	require.JSONEq(t, `{"profile":{"label":"root","count":2}}`, string(folded.ProjectMetadata["example-project"]))
-	require.Equal(t, losslessMetadataJSON(t, folded.ProjectMetadata["example-project"]), losslessMetadataJSON(t, legacy))
+	require.Equal(t, metadata.NormalizeJSON(folded.ProjectMetadata["example-project"]), metadata.NormalizeJSON(legacy))
 	ctx := t.Context()
 	for i, mode := range []string{"removed kind", "removed key", "empty inventory"} {
 		fixture := newRelayLinkBoundaryFixture(t, store, fmt.Sprintf("tally-reset-%d", i))
@@ -199,10 +201,10 @@ func checkCronTallyResetInventory(t *testing.T, store db.Storage) error {
 		}
 		require.True(t, found, "source history remains byte-identical")
 		upgraded := db.FoldEvents(remoteEventsToFold(events))
-		require.Equal(t, losslessMetadataJSON(t, current), losslessMetadataJSON(t, upgraded.ProjectMetadata[fixture.project.UID]))
+		require.Equal(t, metadata.NormalizeJSON(current), metadata.NormalizeJSON(upgraded.ProjectMetadata[fixture.project.UID]))
 		old, err := json.Marshal(oldPeerMetadata(t, events))
 		require.NoError(t, err)
-		require.Equal(t, losslessMetadataJSON(t, current), losslessMetadataJSON(t, old), mode)
+		require.Equal(t, metadata.NormalizeJSON(current), metadata.NormalizeJSON(old), mode)
 	}
 	return nil
 }

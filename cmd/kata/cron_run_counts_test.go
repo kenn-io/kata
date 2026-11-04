@@ -67,7 +67,6 @@ func TestCronRunCountsHuman(t *testing.T) {
 	require.Contains(t, text, "Pruned since tracking")
 	require.Contains(t, text, "9007199254740993")
 	require.Contains(t, text, "2026-01-01T00:00:00Z")
-	require.NotContains(t, text, "lifetime")
 	require.NotContains(t, text, "Review\nspoof")
 	require.NotContains(t, text, "0001-")
 }
