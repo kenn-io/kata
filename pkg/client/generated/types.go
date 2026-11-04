@@ -6746,6 +6746,7 @@ type Summary struct {
 	OutputTokens *int64        `json:"output_tokens,omitempty"`
 	Reason       *string       `json:"reason,omitempty"`
 	Steps        []SummaryStep `json:"steps,omitzero"`
+	Trigger      *string       `json:"trigger,omitempty"`
 	Usage        *SummaryUsage `json:"usage,omitempty"`
 	Version      int64         `json:"version"`
 }
@@ -6779,6 +6780,7 @@ type SummaryResponse struct {
 	OutputTokens *int64                `json:"output_tokens,omitempty"`
 	Reason       *string               `json:"reason,omitempty"`
 	Steps        []SummaryStepResponse `json:"steps,omitzero"`
+	Trigger      *string               `json:"trigger,omitempty"`
 	Usage        *SummaryUsageResponse `json:"usage,omitempty"`
 	Version      int64                 `json:"version"`
 }

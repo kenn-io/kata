@@ -6627,6 +6627,8 @@ components:
           items:
             $ref: "#/components/schemas/SummaryStep"
           type: array
+        trigger:
+          type: string
         usage:
           $ref: "#/components/schemas/SummaryUsage"
         version:
@@ -6654,6 +6656,8 @@ components:
           items:
             $ref: "#/components/schemas/SummaryStepResponse"
           type: array
+        trigger:
+          type: string
         usage:
           $ref: "#/components/schemas/SummaryUsageResponse"
         version:

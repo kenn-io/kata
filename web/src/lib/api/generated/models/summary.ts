@@ -11,6 +11,7 @@ export interface Summary {
   output_tokens?: number
   reason?: string
   steps?: SummaryStep[]
+  trigger?: string
   usage?: SummaryUsage
   version: number
 }

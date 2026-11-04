@@ -11,6 +11,7 @@ export interface SummaryResponse {
   output_tokens?: number
   reason?: string
   steps?: SummaryStepResponse[]
+  trigger?: string
   usage?: SummaryUsageResponse
   version: number
   [key: string]: unknown
