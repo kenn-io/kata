@@ -261,9 +261,18 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			name = r.UID
 			d.field("Status", r.Status)
 			if reason, ok := cronSummaryReason(r.Summary); ok {
+				if cron.DropReason(reason) {
+					reason += " (not launched)"
+				}
 				d.field("Reason", reason)
 			}
 			d.field("Occurrence", deref(r.OccurrenceKey))
+			if trigger, derived := cron.RunTrigger(cron.Summary{Trigger: deref(r.Summary.Trigger)}, r.OccurrenceKey, r.StartedAt); trigger != "" {
+				if derived {
+					trigger += " (derived)"
+				}
+				d.field("Trigger", trigger)
+			}
 			d.field("Started", cronTime(r.StartedAt))
 			d.field("Ended", cronTime(r.EndedAt))
 			d.field("Recorded", r.CreatedAt.Format(time.RFC3339))

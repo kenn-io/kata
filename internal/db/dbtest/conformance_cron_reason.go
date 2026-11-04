@@ -31,6 +31,12 @@ func checkCronRunReasons(t *testing.T, store db.Storage) error {
 		{Version: 1, Message: "reason: " + long + "\nDetails"},
 		{Version: 1, Reason: long},
 		{Version: 1, Message: "reason: failed\n"},
+		{Version: 1, Reason: cron.ReasonOverlapSkipped, Message: "reason: failed"},
+		{Version: 1, Message: "reason: " + cron.ReasonOverlapSkipped},
+		{Version: 1, Reason: cron.ReasonCatchupMissed},
+		{Version: 1, Message: "reason: " + cron.ReasonCatchupMissed},
+		{Version: 1, Reason: cron.ReasonPausedPassedOver},
+		{Version: 1, Message: "reason: " + cron.ReasonPausedPassedOver},
 		{Version: 1, Message: "unrelated newest run"},
 	} {
 		id, err := uid.New()
@@ -40,7 +46,7 @@ func checkCronRunReasons(t *testing.T, store db.Storage) error {
 	}
 	all, err := store.ListCronRuns(ctx, db.CronRunList{ProjectID: project.ID})
 	require.NoError(t, err)
-	for _, reason := range []string{"failed", "timeout", long, "absent"} {
+	for _, reason := range []string{"failed", "timeout", long, "absent", cron.ReasonOverlapSkipped, cron.ReasonCatchupMissed, cron.ReasonPausedPassedOver} {
 		want := []string{}
 		for _, run := range all {
 			if value, ok := cron.RunReason(run.Summary); ok && value == reason {

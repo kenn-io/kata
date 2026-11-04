@@ -599,7 +599,10 @@ downgrading a hub or rebinding a project that already contains v2 evidence.
 The TUI Runs list prefixes messages with the selected reason code. Run details
 show usage, ordered steps, known-zero cost and exit values, and the log
 reference as plain text. A missing step timestamp leaves duration blank. Log
-references are never opened or fetched.
+references are never opened or fetched. Run details show Trigger after the
+occurrence key, with `(derived)` on values inferred from older run evidence.
+Unknown triggers stay hidden. The three shared drop reasons show
+`(not launched)` after the selected reason code.
 
 ### Reason codes
 
