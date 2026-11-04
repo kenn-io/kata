@@ -1855,8 +1855,7 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 		m.input.saving = false
 		m.input.err = mut.kind + " failed: " + mut.err.Error()
 		if m.input.kind == inputRecurrenceForm {
-			action := map[string]string{"recurrence.start": "start", "recurrence.change": "change", "recurrence.stop": "stop"}[mut.kind]
-			m.input.err = "Could not " + action + " repeat: " + mut.err.Error()
+			m.input.err = fmt.Sprintf(successTemplates[mut.kind].failure, mut.err.Error())
 		}
 		return m, m.reportShownError(mut.kind)
 	}

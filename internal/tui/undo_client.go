@@ -130,7 +130,7 @@ func (c *undoClient) edit(ctx context.Context, projectID int64, ref, actor, kind
 	if instance.InstanceUID == "" {
 		return &MutationResp{undo: attempt}, errors.New("daemon instance identity is unavailable")
 	}
-	before, err := c.GetIssueDetail(ctx, projectID, ref)
+	before, err := c.readIssue(ctx, projectID, ref)
 	if err != nil || before == nil || before.Issue == nil {
 		if err == nil {
 			err = errors.New("issue preflight returned no issue")

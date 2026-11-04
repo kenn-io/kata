@@ -288,9 +288,6 @@ func (c *Client) readIssue(ctx context.Context, projectID int64, ref string) (*I
 
 // readRecurrence reads the live recurrence while preserving a daemon refusal.
 func (c *Client) readRecurrence(ctx context.Context, projectID int64, id *int64) (*recurrenceclient.View, error) {
-	if id == nil {
-		return nil, nil
-	}
 	apiClient, err := c.generatedClient()
 	if err != nil {
 		return nil, err

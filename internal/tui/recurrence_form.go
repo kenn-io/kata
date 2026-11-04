@@ -82,6 +82,9 @@ func (m Model) routeRecurrenceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if !m.detailPaneVisible() || m.detail.issue == nil {
 		return m, nil, false
 	}
+	if m.detail.loading || (m.detail.reads != nil && m.detail.reads.remaining&1 != 0) {
+		return m, nil, true
+	}
 	if m.detail.recurrenceErr != nil {
 		m.toast = &toast{
 			text:  "Could not read the repeat: " + m.detail.recurrenceErr.Error(),
