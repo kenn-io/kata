@@ -299,7 +299,7 @@ func (s *httpFetcherBindingSession) ReadStatuses(ctx context.Context, cfg Config
 		s.fetcher.deferStatusRequests(s.binding, retryWait(headers, s.fetcher.now()))
 		return nil
 	}
-	remaining, missing := parentErrorsWithoutMissingChildren(response.Errors, response.Data, len(valid))
+	remaining, _ := parentErrorsWithoutMissingChildren(response.Errors, response.Data, len(valid))
 	if len(remaining) > 0 {
 		return nil
 	}
@@ -322,7 +322,7 @@ func (s *httpFetcherBindingSession) ReadStatuses(ctx context.Context, cfg Config
 		raw, present := response.Data.Repository[fmt.Sprintf("i%d", i)]
 		result := StatusResult{}
 		switch {
-		case missing[i] || !present || bytes.Equal(bytes.TrimSpace(raw), []byte("null")):
+		case !present || bytes.Equal(bytes.TrimSpace(raw), []byte("null")):
 			result.Err = &issuesync.StatusError{Message: "GitHub status issue not found", Blocked: true}
 		case json.Unmarshal(raw, &node) != nil:
 			result.Err = fmt.Errorf("GitHub status observation has invalid state or version")
