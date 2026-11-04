@@ -288,8 +288,8 @@ func TestFooterHelpTableParity(t *testing.T) {
 	oldMode, oldDark := activeColorMode, activeHasDarkBackground
 	defer func() { applyColorMode(oldMode, oldDark) }()
 
-	listRows := (Model{list: listModel{issues: hierarchyIssues()}}).queueHelpRows()
-	detailRows := hierarchyDetailModel(focusChildren).detailHelpRows()
+	listRows := (listModel{issues: hierarchyIssues()}).queueHelpRows("X")
+	detailRows := hierarchyDetailModel(focusChildren).detailHelpRows("X")
 	cases := []struct {
 		name       string
 		mode       colorMode

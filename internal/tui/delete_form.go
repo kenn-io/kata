@@ -72,18 +72,14 @@ func (m Model) routeDeleteKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	}
 	expected := m.deleteConfirmation(issue)
 	if expected == "" {
-		return m.deleteNotice("cannot delete: the issue's project is unknown", toastError)
+		next, cmd := m.undoNotice("cannot delete: the issue's project is unknown", toastError)
+		return next, cmd, true
 	}
 	target.issueUID = issue.UID
 	m.nextFormGen++
 	m.input = newDeleteForm(target, issue, expected)
 	m.input.formGen = m.nextFormGen
 	return m, nil, true
-}
-
-func (m Model) deleteNotice(message string, level toastLevel) (Model, tea.Cmd, bool) {
-	next, cmd := m.undoNotice(message, level)
-	return next, cmd, true
 }
 
 // commitDeleteForm sends the delete once the typed text is the issue's
@@ -130,17 +126,27 @@ func (m Model) finishDelete(target formTarget, mut mutationDoneMsg) (Model, tea.
 	if m.cache != nil {
 		m.cache.markStale()
 	}
-	if m.detail.issue != nil && m.detail.issue.UID == uid && m.layout != splitlayout.Split {
+	var leave tea.Cmd
+	if m.detail.issue != nil && m.detail.issue.UID == uid {
 		m.detail.cancelReads()
-		m.detail = m.applyDetailViewportCache(newDetailModel())
-		m.view, m.focus = viewList, focusList
+		switch {
+		case m.attention.returnToAttention:
+			m, leave = m.returnFromAttentionDetail()
+		case m.layout == splitlayout.Split:
+			m.detail = newDetailModel()
+			m.view, m.focus = viewList, focusList
+			m, leave = m.scheduleDetailFollow()
+		default:
+			m.detail = m.applyDetailViewportCache(newDetailModel())
+			m.view, m.focus = viewList, focusList
+		}
 	}
 	message := "deleted " + qualified
 	if last := len(m.undoHistory.entries) - 1; last >= 0 && m.undoHistory.entries[last].kind == "delete" && m.undoHistory.entries[last].uid == uid {
 		message += "; press u to undo"
 	}
 	m, notice := m.undoNotice(message, toastInfo)
-	return m, combineCmds(follow, combineCmds(notice, withConnGen(m.list.refetchCmd(m.api, m.scope), m.connGen)))
+	return m, combineCmds(follow, combineCmds(leave, combineCmds(notice, withConnGen(m.list.refetchCmd(m.api, m.scope), m.connGen))))
 }
 
 // withoutIssue drops a deleted issue from the list and selects the row after
@@ -149,7 +155,7 @@ func (lm listModel) withoutIssue(uid string) listModel {
 	rows := lm.visibleRows()
 	at := slices.IndexFunc(rows, func(row queueRow) bool { return row.issue.UID == uid })
 	lm.issues = slices.DeleteFunc(slices.Clone(lm.issues), func(issue Issue) bool { return issue.UID == uid })
-	if at < 0 {
+	if at < 0 || lm.selectedUID != uid {
 		return lm.restoreCursorToSelection()
 	}
 	next := at + 1

@@ -3849,7 +3849,7 @@ func (m Model) chrome() viewChrome {
 		daemon:        activeDaemonDisplay(m.activeDaemon),
 		modal:         m.modal,
 		undoAvailable: len(m.undoHistory.entries) > 0,
-		deleteHidden:  !m.mutationAllowed(false),
+		deleteHidden:  m.deleteHintKey() == "",
 	}
 }
 

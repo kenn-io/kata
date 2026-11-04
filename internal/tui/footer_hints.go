@@ -22,9 +22,9 @@ func (m Model) helpRows() [][]helplayout.HelpItem {
 	}
 	switch m.view {
 	case viewDetail:
-		return m.detail.detailHelpRows()
+		return m.detail.detailHelpRows(m.deleteHintKey())
 	case viewList:
-		return m.list.queueHelpRows()
+		return m.list.queueHelpRows(m.deleteHintKey())
 	case viewCredentials:
 		return credentialsHelpRows()
 	}
@@ -38,7 +38,7 @@ func (m Model) queueHelpRows() [][]helplayout.HelpItem {
 	if m.input.kind != inputNone {
 		return inputHelpRows(m.input)
 	}
-	return m.list.queueHelpRows()
+	return m.list.queueHelpRows(m.deleteHintKey())
 }
 
 func (m Model) detailHelpRows() [][]helplayout.HelpItem {
@@ -48,7 +48,7 @@ func (m Model) detailHelpRows() [][]helplayout.HelpItem {
 	if m.input.kind != inputNone {
 		return inputHelpRows(m.input)
 	}
-	return m.detail.detailHelpRows()
+	return m.detail.detailHelpRows(m.deleteHintKey())
 }
 
 func (m Model) splitHelpRows() [][]helplayout.HelpItem {
@@ -59,9 +59,9 @@ func (m Model) splitHelpRows() [][]helplayout.HelpItem {
 		return inputHelpRows(m.input)
 	}
 	if m.focus == focusDetail {
-		return m.detail.detailHelpRows()
+		return m.detail.detailHelpRows(m.deleteHintKey())
 	}
-	return m.list.queueHelpRows()
+	return m.list.queueHelpRows(m.deleteHintKey())
 }
 
 func listHelpRows(lm listModel, chrome viewChrome) [][]helplayout.HelpItem {
@@ -71,7 +71,7 @@ func listHelpRows(lm listModel, chrome viewChrome) [][]helplayout.HelpItem {
 	if chrome.input.kind != inputNone {
 		return inputHelpRows(chrome.input)
 	}
-	return appendUndoHint(withoutDeleteHint(lm.queueHelpRows(), chrome.deleteHidden), chrome.undoAvailable)
+	return appendUndoHint(lm.queueHelpRows(chrome.deleteHintKey()), chrome.undoAvailable)
 }
 
 func detailHelpRows(dm detailModel, chrome viewChrome) [][]helplayout.HelpItem {
@@ -81,22 +81,27 @@ func detailHelpRows(dm detailModel, chrome viewChrome) [][]helplayout.HelpItem {
 	if chrome.input.kind != inputNone {
 		return inputHelpRows(chrome.input)
 	}
-	return appendUndoHint(withoutDeleteHint(dm.detailHelpRows(), chrome.deleteHidden), chrome.undoAvailable)
+	return appendUndoHint(dm.detailHelpRows(chrome.deleteHintKey()), chrome.undoAvailable)
 }
 
-// withoutDeleteHint drops the delete key from the footer when the connected
-// credentials cannot delete.
-func withoutDeleteHint(rows [][]helplayout.HelpItem, hidden bool) [][]helplayout.HelpItem {
-	if !hidden {
-		return rows
+// deleteHintKey is the footer label of the delete key: empty, which drops the
+// hint, when the connected credentials cannot delete.
+func (m Model) deleteHintKey() string {
+	return keyDisplay(m.helpKeymap().Delete)
+}
+
+// deleteHintKey is the footer label of the delete key; chrome carries only
+// whether it is hidden so a zero viewChrome offers it.
+func (c viewChrome) deleteHintKey() string {
+	if c.deleteHidden {
+		return ""
 	}
-	out := make([][]helplayout.HelpItem, len(rows))
-	for i, row := range rows {
-		out[i] = slices.DeleteFunc(slices.Clone(row), func(item helplayout.HelpItem) bool {
-			return item.Key == "X" && item.Description == "delete"
-		})
-	}
-	return out
+	return keyDisplay(newKeymap().Delete)
+}
+
+// withoutUnboundKeys drops hints whose key is empty (a cleared binding).
+func withoutUnboundKeys(items []helplayout.HelpItem) []helplayout.HelpItem {
+	return slices.DeleteFunc(items, func(item helplayout.HelpItem) bool { return item.Key == "" })
 }
 
 func appendUndoHint(rows [][]helplayout.HelpItem, available bool) [][]helplayout.HelpItem {
@@ -172,7 +177,7 @@ func inputHelpRows(input inputState) [][]helplayout.HelpItem {
 	return nil
 }
 
-func (lm listModel) queueHelpRows() [][]helplayout.HelpItem {
+func (lm listModel) queueHelpRows(deleteKey string) [][]helplayout.HelpItem {
 	row, ok := lm.targetQueueRow()
 	items := []helplayout.HelpItem{
 		{Key: "↑↓", Description: "move"},
@@ -206,7 +211,7 @@ func (lm listModel) queueHelpRows() [][]helplayout.HelpItem {
 		helplayout.HelpItem{Key: "c", Description: "clear"},
 		helplayout.HelpItem{Key: "x", Description: "close"},
 		helplayout.HelpItem{Key: "d", Description: "dates"},
-		helplayout.HelpItem{Key: "X", Description: "delete"},
+		helplayout.HelpItem{Key: deleteKey, Description: "delete"},
 		helplayout.HelpItem{Key: "!", Description: "priority"},
 		helplayout.HelpItem{Key: "D", Description: "daemons"},
 		helplayout.HelpItem{Key: "F", Description: "federation"},
@@ -215,7 +220,7 @@ func (lm listModel) queueHelpRows() [][]helplayout.HelpItem {
 		helplayout.HelpItem{Key: "?", Description: "help"},
 		helplayout.HelpItem{Key: "q", Description: "quit"},
 	)
-	return [][]helplayout.HelpItem{items}
+	return [][]helplayout.HelpItem{withoutUnboundKeys(items)}
 }
 
 // detailHelpRows is the persistent footer for the detail view. The
@@ -230,7 +235,7 @@ func (lm listModel) queueHelpRows() [][]helplayout.HelpItem {
 // child / N new child / p parent) but keeps the same action surface
 // because the same mutations apply to the parent issue regardless
 // of which section the cursor is on.
-func (dm detailModel) detailHelpRows() [][]helplayout.HelpItem {
+func (dm detailModel) detailHelpRows(deleteKey string) [][]helplayout.HelpItem {
 	actions := []helplayout.HelpItem{
 		{Key: "e", Description: "edit"},
 		{Key: "c", Description: "comment"},
@@ -242,7 +247,7 @@ func (dm detailModel) detailHelpRows() [][]helplayout.HelpItem {
 		{Key: "x", Description: "close"},
 		{Key: "r", Description: "reopen"},
 		{Key: "d", Description: "dates"},
-		{Key: "X", Description: "delete"},
+		{Key: deleteKey, Description: "delete"},
 		{Key: "p", Description: "parent"},
 		{Key: "b", Description: "block"},
 		{Key: "l", Description: "related"},
@@ -256,6 +261,7 @@ func (dm detailModel) detailHelpRows() [][]helplayout.HelpItem {
 		{Key: "?", Description: "help"},
 		{Key: "q", Description: "quit"},
 	}
+	actions = withoutUnboundKeys(actions)
 	if dm.detailFocus == focusChildren && len(dm.children) > 0 {
 		nav := []helplayout.HelpItem{
 			{Key: "↑↓", Description: "scroll"},

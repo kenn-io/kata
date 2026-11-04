@@ -9,6 +9,7 @@ import (
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kit/tui/helplayout"
+	"go.kenn.io/kit/tui/splitlayout"
 )
 
 // deleteHarness drives the Delete form over three issues held by a real daemon.
@@ -130,12 +131,21 @@ func TestDeleteFormAsksForTheQualifiedIDAndOnlyEnterOnAnExactMatchDeletes(t *tes
 }
 
 func TestDeleteSelectsTheNeighbouringRowAndNamesUndo(t *testing.T) {
-	for _, view := range []viewID{viewList, viewDetail} {
-		t.Run(map[viewID]string{viewList: "list", viewDetail: "detail"}[view], func(t *testing.T) {
-			h := newDeleteHarness(t, view)
+	cases := []struct {
+		name              string
+		view              viewID
+		target, neighbour int
+	}{
+		{"list", viewList, 1, 2},
+		{"detail", viewDetail, 1, 2},
+		{"last row selects the previous row", viewList, 2, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newDeleteHarness(t, tc.view)
 			rows := h.m.list.visibleRows()
 			require.Len(t, rows, 3)
-			target, neighbour := rows[1].issue, rows[2].issue
+			target, neighbour := rows[tc.target].issue, rows[tc.neighbour].issue
 			h.selectIssue(target.UID)
 
 			h.key(runeKey('X'))
@@ -145,7 +155,7 @@ func TestDeleteSelectsTheNeighbouringRowAndNamesUndo(t *testing.T) {
 			assert.True(t, h.isDeleted(target.UID))
 			selected, ok := h.m.list.targetRow()
 			require.True(t, ok)
-			assert.Equal(t, neighbour.UID, selected.UID, "selection moves to the next row")
+			assert.Equal(t, neighbour.UID, selected.UID, "selection moves to the neighbouring row")
 			assert.Equal(t, viewList, h.m.view, "a deleted issue's detail is left")
 			require.NotNil(t, h.m.toast)
 			assert.Contains(t, h.m.toast.text, "u", "the notice names the undo key")
@@ -154,86 +164,126 @@ func TestDeleteSelectsTheNeighbouringRowAndNamesUndo(t *testing.T) {
 	}
 }
 
-func TestDeleteOfTheLastRowSelectsThePreviousRow(t *testing.T) {
-	h := newDeleteHarness(t, viewList)
-	rows := h.m.list.visibleRows()
-	last, previous := rows[2].issue, rows[1].issue
-	h.selectIssue(last.UID)
-	h.key(runeKey('X'))
-	h.typeText(h.project.Name + "#" + last.ShortID)
-	h.finish(h.enter())
+func TestUndoOfADelete(t *testing.T) {
+	cases := []struct {
+		name              string
+		restoredElsewhere bool
+		wantToast         string
+	}{
+		{"restores the issue", false, "undid delete"},
+		{"reports an issue that is no longer deleted", true, "already restored"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newDeleteHarness(t, viewList)
+			target := h.issues[0]
+			h.selectIssue(target.UID)
+			h.key(runeKey('X'))
+			h.typeText(h.qualified(target))
+			h.finish(h.enter())
+			require.True(t, h.isDeleted(target.UID))
+			require.Len(t, h.m.undoHistory.entries, 1)
+			if tc.restoredElsewhere {
+				_, _, changed, err := h.env.DB.RestoreIssue(t.Context(), target.ID, "bob")
+				require.NoError(t, err)
+				require.True(t, changed)
+			}
 
-	selected, ok := h.m.list.targetRow()
-	require.True(t, ok)
-	assert.Equal(t, previous.UID, selected.UID)
+			h.finish(h.key(runeKey('u')))
+
+			assert.False(t, h.isDeleted(target.UID))
+			assert.Empty(t, h.m.undoHistory.entries, "the spent entry is dropped")
+			require.NotNil(t, h.m.toast)
+			assert.Equal(t, toastInfo, h.m.toast.level, "an already restored issue is not an error")
+			assert.Contains(t, h.m.toast.text, tc.wantToast)
+		})
+	}
 }
 
-func TestUndoRestoresADeletedIssue(t *testing.T) {
-	h := newDeleteHarness(t, viewList)
-	target := h.issues[0]
-	h.selectIssue(target.UID)
-	h.key(runeKey('X'))
-	h.typeText(h.qualified(target))
-	h.finish(h.enter())
-	require.True(t, h.isDeleted(target.UID))
-	require.Len(t, h.m.undoHistory.entries, 1)
+func TestDeleteKeyIsOfferedOnlyToCredentialsThatCanDelete(t *testing.T) {
+	hint := helplayout.HelpItem{Key: "X", Description: "delete"}
+	for _, scoped := range []bool{false, true} {
+		for _, view := range []viewID{viewList, viewDetail} {
+			h := newDeleteHarness(t, view)
+			h.selectIssue(h.issues[0].UID)
+			h.m.authCapabilitiesRequired, h.m.authCapabilitiesReady = true, true
+			h.m.issueScoped, h.m.scopedWritable = scoped, scoped
 
-	cmd := h.key(runeKey('u'))
-	h.finish(cmd)
-
-	assert.False(t, h.isDeleted(target.UID), "undo restores the issue")
-	assert.Empty(t, h.m.undoHistory.entries)
-	require.NotNil(t, h.m.toast)
-	assert.Contains(t, h.m.toast.text, "undid delete")
-}
-
-func TestUndoReportsAnIssueThatIsNoLongerDeleted(t *testing.T) {
-	h := newDeleteHarness(t, viewList)
-	target := h.issues[0]
-	h.selectIssue(target.UID)
-	h.key(runeKey('X'))
-	h.typeText(h.qualified(target))
-	h.finish(h.enter())
-	require.True(t, h.isDeleted(target.UID))
-
-	_, _, changed, err := h.env.DB.RestoreIssue(t.Context(), target.ID, "bob")
-	require.NoError(t, err)
-	require.True(t, changed)
-
-	cmd := h.key(runeKey('u'))
-	h.finish(cmd)
-
-	assert.False(t, h.isDeleted(target.UID))
-	assert.Empty(t, h.m.undoHistory.entries, "the spent entry is dropped")
-	require.NotNil(t, h.m.toast)
-	assert.Equal(t, toastInfo, h.m.toast.level, "an already restored issue is not an error")
-	assert.Contains(t, h.m.toast.text, "already restored")
-}
-
-func TestDeleteKeyIsHiddenUnderIssueScopedCredentials(t *testing.T) {
-	for _, view := range []viewID{viewList, viewDetail} {
-		h := newDeleteHarness(t, view)
-		h.selectIssue(h.issues[0].UID)
-		h.m.authCapabilitiesRequired, h.m.authCapabilitiesReady = true, true
-		h.m.issueScoped, h.m.scopedWritable = true, true
-
-		cmd := h.key(runeKey('X'))
-		assert.Nil(t, cmd)
-		assert.Equal(t, inputNone, h.m.input.kind, "X does nothing under scoped credentials")
-		assert.False(t, h.isDeleted(h.issues[0].UID))
-
-		assert.NotContains(t, stripANSI(renderHelp(h.m.helpKeymap(), 120, ListFilter{})), "delete issue")
-		for _, rows := range [][][]helplayout.HelpItem{listHelpRows(h.m.list, h.m.chrome()), detailHelpRows(h.m.detail, h.m.chrome())} {
-			assertHelpItemAbsent(t, flattenHelpRows(rows), helplayout.HelpItem{Key: "X", Description: "delete"})
+			cmd := h.key(runeKey('X'))
+			helpText := stripANSI(renderHelp(h.m.helpKeymap(), 120, ListFilter{}))
+			if scoped {
+				assert.Nil(t, cmd)
+				assert.Equal(t, inputNone, h.m.input.kind, "X does nothing under scoped credentials")
+				assert.False(t, h.isDeleted(h.issues[0].UID))
+				assert.NotContains(t, helpText, "delete issue")
+			} else {
+				assert.Equal(t, inputDeleteForm, h.m.input.kind)
+				assert.Contains(t, helpText, "delete issue")
+			}
+			h.m.input = inputState{}
+			for _, rows := range [][][]helplayout.HelpItem{listHelpRows(h.m.list, h.m.chrome()), detailHelpRows(h.m.detail, h.m.chrome())} {
+				if scoped {
+					assertHelpItemAbsent(t, flattenHelpRows(rows), hint)
+				} else {
+					assertHelpItemPresent(t, flattenHelpRows(rows), hint)
+				}
+			}
 		}
 	}
 }
 
-func TestDeleteKeyIsOfferedToOrdinaryCredentials(t *testing.T) {
-	h := newDeleteHarness(t, viewList)
-	h.m.authCapabilitiesRequired, h.m.authCapabilitiesReady = true, true
+// A deleted issue's detail is left the way back leaves it, and the list
+// selection only moves when the deleted issue was the selected row.
+func TestDeleteLeavesTheDetailTheWayBackDoes(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(h *deleteHarness)
+		check func(t *testing.T, h *deleteHarness)
+	}{
+		{
+			name: "split detail reached by a jump",
+			setup: func(h *deleteHarness) {
+				h.m.layout = splitlayout.Split
+				h.m.focus = focusDetail
+			},
+			check: func(t *testing.T, h *deleteHarness) {
+				assert.Equal(t, focusList, h.m.focus)
+				require.NotNil(t, h.m.detail.issue, "the pane follows the selected row")
+				assert.Equal(t, h.issues[0].UID, h.m.detail.issue.UID)
+				assert.Empty(t, h.m.detail.navStack)
+			},
+		},
+		{
+			name: "opened from attention",
+			setup: func(h *deleteHarness) {
+				h.m.attention.returnToAttention = true
+			},
+			check: func(t *testing.T, h *deleteHarness) {
+				assert.Equal(t, viewAttention, h.m.view)
+				assert.False(t, h.m.attention.returnToAttention)
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newDeleteHarness(t, viewDetail)
+			rows := h.m.list.visibleRows()
+			selected, target := rows[0].issue, rows[2].issue
+			h.selectIssue(selected.UID)
+			parent := selected
+			h.m.detail = detailModel{scopePID: h.project.ID, issue: &target,
+				navStack: []detailModel{{issue: &parent}}}
+			tc.setup(h)
 
-	assert.Contains(t, stripANSI(renderHelp(h.m.helpKeymap(), 120, ListFilter{})), "delete issue")
-	assertHelpItemPresent(t, flattenHelpRows(listHelpRows(h.m.list, h.m.chrome())), helplayout.HelpItem{Key: "X", Description: "delete"})
-	assertHelpItemPresent(t, flattenHelpRows(detailHelpRows(h.m.detail, h.m.chrome())), helplayout.HelpItem{Key: "X", Description: "delete"})
+			h.key(runeKey('X'))
+			h.typeText(h.project.Name + "#" + target.ShortID)
+			h.finish(h.enter())
+			require.True(t, h.isDeleted(target.UID))
+
+			current, ok := h.m.list.targetRow()
+			require.True(t, ok)
+			assert.Equal(t, selected.UID, current.UID, "the selection stays on the row that was selected")
+			tc.check(t, h)
+		})
+	}
 }
