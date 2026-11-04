@@ -67,7 +67,7 @@ func TestCronProjectPauseHTTP(t *testing.T) {
 			require.Equal(t, "operator", events[0].Actor)
 		} else {
 			require.Equal(t, before, after)
-			assertNoReceive(t, sub.Ch, 20*time.Millisecond, "no-op pause")
+			assertNoReceive(t, sub.Ch, 20*time.Millisecond, "no-op pause") //nolint:kennlint // deadlinetest: bounded absence check for the no-op pause broadcast contract
 		}
 		for _, route := range []string{"/capabilities", "/jobs"} {
 			status, raw = cronHTTP(t, env, http.MethodGet, path+route, nil)
