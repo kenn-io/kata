@@ -235,7 +235,7 @@ func TestCheckerRejectsAnswerSets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	report, err := checkSuite(t.Context(), FixtureSuite{Declaration: d, Scenarios: []Scenario{settled}}, []Answer{{Name: settled.Name, Outputs: []jsontext.Value{raw}}})
+	report, err := (FixtureSuite{Declaration: d, Scenarios: []Scenario{settled}}).Check(t.Context(), []Answer{{Name: settled.Name, Outputs: []jsontext.Value{raw}}})
 	if err != nil || len(report.Failed) != 1 {
 		t.Fatalf("integer comparison: %+v %v", report, err)
 	}
@@ -305,7 +305,7 @@ func TestMalformedLaterDecisionIsNotHiddenByMismatch(t *testing.T) {
 		}
 		outputs = append(outputs, raw)
 	}
-	if report, err := checkSuite(t.Context(), FixtureSuite{Schema: Schema, Declaration: Reference{}.Declare(), Scenarios: []Scenario{sequence}}, []Answer{{Name: sequence.Name, Outputs: outputs}}); err == nil {
+	if report, err := (FixtureSuite{Schema: Schema, Declaration: Reference{}.Declare(), Scenarios: []Scenario{sequence}}).Check(t.Context(), []Answer{{Name: sequence.Name, Outputs: outputs}}); err == nil {
 		t.Fatalf("malformed later output hidden: %+v", report)
 	}
 }

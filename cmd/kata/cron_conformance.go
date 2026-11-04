@@ -45,9 +45,6 @@ func newCronConformanceCmd() *cobra.Command {
 				return cronCLIValidation(err.Error())
 			}
 		}
-		if err := d.Validate(); err != nil {
-			return cronCLIValidation(err.Error())
-		}
 		suite, err := conformance.NewSuite(cmd.Context(), schema, d)
 		if err != nil {
 			return cronCLIValidation(err.Error())
@@ -129,9 +126,6 @@ func readConformanceAnswers(ctx context.Context, raw []byte) (conformanceHeader,
 			if err := json.Unmarshal(scanner.Bytes(), &header, json.RejectUnknownMembers(true)); err != nil {
 				return header, nil, fmt.Errorf("header: %w", err)
 			}
-			if err := header.Declaration.Validate(); err != nil {
-				return header, nil, err
-			}
 		} else {
 			var answer conformance.Answer
 			if err := json.Unmarshal(scanner.Bytes(), &answer, json.RejectUnknownMembers(true)); err != nil {
@@ -161,14 +155,6 @@ func exportConformanceFiles(ctx context.Context, dir string, files map[string][]
 		names = append(names, name)
 	}
 	slices.Sort(names)
-	for _, name := range names {
-		path := filepath.Join(dir, name)
-		if _, err := os.Lstat(path); err == nil {
-			return fmt.Errorf("destination exists: %s", path)
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-	}
 	if err := os.MkdirAll(dir, 0750); err != nil {
 		return err
 	}

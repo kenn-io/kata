@@ -166,8 +166,8 @@ func TestCronConformanceNamedDropMismatch(t *testing.T) {
 			if err := json.Unmarshal(raw, &got); err != nil {
 				t.Fatal(err)
 			}
-			a, _ := json.Marshal(got)
-			b, _ := json.Marshal(want)
+			a, _ := json.Marshal(got, json.Deterministic(true))
+			b, _ := json.Marshal(want, json.Deterministic(true))
 			if !bytes.Equal(a, b) || len(got.Failed) != 1 || got.Failed[0].Name != "drops/latest" {
 				t.Fatalf("Go/CLI mismatch %s / %s", a, b)
 			}

@@ -826,8 +826,6 @@ ascending nonempty unique instants. Settle outputs never carry drops.
 
 Default export bytes and output shapes remain frozen. A conformance claim
 names the fixture schema version; changing frozen outputs requires a new one.
-Regenerate artifacts from independent literals with
-`go test ./pkg/cron/conformance -run TestFixtureArtifacts -update-golden`.
 
 ### Check another runtime offline
 
