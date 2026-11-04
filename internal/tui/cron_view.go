@@ -193,25 +193,8 @@ func (m Model) cronLoaded(msg cronLoadedMsg) Model {
 			data.runs = previous.runs
 		}
 	}
-	// Keep records that the navigation stack still references; paged records are
-	// lookup evidence only and never establish fresh last-run health.
-	data.lookup = maps.Clone(data.lookup)
-	if data.lookup == nil {
-		data.lookup = map[string]generated.CronRun{}
-	}
-	if previous := m.cron.data; previous != nil {
-		for _, frame := range m.cron.stack {
-			if frame.ref.kind == cronRuns {
-				if r, ok := previous.run(frame.ref.uid); ok {
-					if fresh, ok := data.lookup[r.UID]; !ok || r.Revision > fresh.Revision {
-						data.lookup[r.UID] = r
-					}
-				}
-			}
-		}
-	}
 	old := m
-	m = m.cronRememberData(&data)
+	m.cron.out, m.cron.data = false, &data
 	if data.runsErr == nil {
 		if data.resetPages || !m.cron.runPage.ready {
 			m.cron.runPage = cronHistoryPage{runs: data.runs, next: data.nextBefore, ready: true, gen: m.cronGeneration()}
@@ -229,28 +212,27 @@ func (m Model) cronLoaded(msg cronLoadedMsg) Model {
 		m.cron.jobPage.reload = true
 		m.cron.jobPage.merge = !data.resetPages
 	}
-	// Retained pages keep the highest observation already known for each UID,
-	// even after its detail frame has been closed.
+	// Retained pages and open run frames keep the highest known observation.
 	retained := cronMergeRuns(m.cron.runPage.runs, m.cron.jobPage.runs)
-	for i, r := range retained {
-		if old.cron.data != nil {
-			if known, ok := old.cron.data.run(r.UID); ok && known.Revision > r.Revision {
+	remembered := slices.Collect(maps.Values(data.lastRuns))
+	if previous := old.cron.data; previous != nil {
+		for _, frame := range m.cron.stack {
+			if r, ok := previous.run(frame.ref.uid); ok && frame.ref.kind == cronRuns {
+				if fresh, ok := data.lookup[r.UID]; !ok || r.Revision > fresh.Revision {
+					remembered = append([]generated.CronRun{r}, remembered...)
+				}
+			}
+		}
+		for i, r := range retained {
+			if known, ok := previous.run(r.UID); ok && known.Revision > r.Revision {
 				retained[i] = known
 			}
 		}
 	}
-	m = m.cronRemember(retained)
+	m = m.cronRemember(append(remembered, retained...))
 	return m.cronKeepSelection(old)
 }
 
-func (m Model) cronRememberData(data *cronData) Model {
-	m.cron.out, m.cron.data = false, data
-	runs := slices.Clone(data.runs)
-	for _, r := range data.lastRuns {
-		runs = append(runs, r)
-	}
-	return m.cronRemember(runs)
-}
 func cronListLines(m Model, tab int) []cronLine {
 	m.cron.tab, m.cron.stack = tab, nil
 	_, _, lines := cronScreen(m)

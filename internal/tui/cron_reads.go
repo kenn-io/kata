@@ -90,7 +90,6 @@ func cronEnrich(ctx context.Context, reader cronAPI, id int64, p *cronData) {
 		}
 	}
 	tasks := []cronEnrichment{}
-	parents := map[string]bool{}
 	fills := 0
 	issueReads := map[string]bool{}
 	// Enabled health reads take priority over paused display reads. Within each
@@ -102,14 +101,9 @@ func cronEnrich(ctx context.Context, reader cronAPI, id int64, p *cronData) {
 				if (parent != "") != native || j.Definition.Enabled != enabled {
 					continue
 				}
-				if parent != "" {
-					if j.Definition.Enabled && !parents[parent] {
-						parents[parent] = true
-						if len(parents) <= 200 {
-							tasks = append(tasks, cronEnrichment{uid: parent, parent: true})
-							issueReads[parent] = true
-						}
-					}
+				if parent != "" && enabled && !issueReads[parent] && len(issueReads) < 200 {
+					issueReads[parent] = true
+					tasks = append(tasks, cronEnrichment{uid: parent, parent: true})
 				}
 				if _, known := p.lastRuns[j.UID]; known {
 					continue

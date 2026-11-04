@@ -54,24 +54,18 @@ func (m Model) cronRequestPage(job string, reset bool) (Model, tea.Cmd) {
 		return m, nil
 	}
 	merge := reset && page.merge && page.ready && page.job == job
-	if reset {
-		previous := *page
-		runs := page.runs
-		if page.job != job {
-			runs = nil
-			if m.cron.data != nil {
-				for _, r := range m.cron.data.runs {
-					if job == "" || deref(r.JobUID) == job {
-						runs = append(runs, r)
-					}
+	if reset && page.job != job {
+		var runs []generated.CronRun
+		if m.cron.data != nil {
+			for _, r := range m.cron.data.runs {
+				if job == "" || deref(r.JobUID) == job {
+					runs = append(runs, r)
 				}
 			}
 		}
-		*page = cronHistoryPage{job: job, runs: runs, ready: previous.ready && previous.job == job}
-		if previous.job == job {
-			page.next = previous.next
-			page.older = previous.older
-		}
+		*page = cronHistoryPage{job: job, runs: runs}
+	} else if reset {
+		page.err, page.merge = nil, false
 	}
 	page.gen = m.cronGeneration()
 	page.cursor = page.next
@@ -114,15 +108,12 @@ func (m Model) cronPageLoaded(msg cronPageMsg) Model {
 	if msg.err != nil {
 		return m.cronKeepSelection(previous)
 	}
-	if msg.cursor == "" && msg.merge {
-		page.runs = cronMergeRuns(page.runs, msg.runs)
-	} else if msg.cursor == "" {
-		page.runs = cronMergeRuns(nil, msg.runs)
-		page.older = false
-	} else {
-		page.runs = cronMergeRuns(page.runs, msg.runs)
+	if msg.cursor == "" && !msg.merge {
+		page.runs, page.older = nil, false
+	} else if msg.cursor != "" {
 		page.older = true
 	}
+	page.runs = cronMergeRuns(page.runs, msg.runs)
 	if !msg.merge {
 		page.next = msg.next
 		if len(msg.runs) == 0 || msg.next == msg.cursor {
