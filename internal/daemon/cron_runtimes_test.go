@@ -162,3 +162,26 @@ func TestCronRuntimeRegistryRefresh(t *testing.T) {
 		}
 	}, hegel.WithTestCases(1000), hegel.WithDatabase(t.TempDir()))
 }
+
+func TestCronRuntimeChoicesRegistryOwnership(t *testing.T) {
+	now := time.Now()
+	registry := NewCronRuntimeRegistry(now, func() time.Time { return now })
+	b := cron.RuntimeBeat{}
+	b.Label = "worker"
+	b.Adapter = "example"
+	b.Choices = map[string][]string{"options.agent": {"a", "z"}, "checkout_key": {}}
+	out, err := registry.Beat(1, "id", "operator", b)
+	require.NoError(t, err)
+	b.Choices["options.agent"][0] = "input"
+	out.Choices["options.agent"][0] = "output"
+	delete(out.Choices, "checkout_key")
+	list := registry.List(1, nil, "dev")
+	require.Equal(t, []string{"a", "z"}, list.Runtimes[0].Choices["options.agent"])
+	require.Contains(t, list.Runtimes[0].Choices, "checkout_key")
+	list.Runtimes[0].Choices["options.agent"][0] = "list"
+	require.Equal(t, []string{"a", "z"}, registry.List(1, nil, "dev").Runtimes[0].Choices["options.agent"])
+	b.Choices = nil
+	_, err = registry.Beat(1, "id", "operator", b)
+	require.NoError(t, err)
+	require.Empty(t, registry.List(1, nil, "dev").Runtimes[0].Choices)
+}

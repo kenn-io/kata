@@ -40,41 +40,43 @@ func drawCronRuntimeInventory(h *hegel.T) *cron.RuntimeInventory {
 	return inventory
 }
 func TestCronRuntimeBannerProperties(t *testing.T) {
-	hegel.Test(t, func(h *hegel.T) {
-		inventory := drawCronRuntimeInventory(h)
-		want := false
-		for _, w := range inventory.Warnings {
-			if w.Code == "no_live_runtime" || w.Code == "pin_unmatched" || w.Code == "adapter_unmatched" {
-				want = true
+	t.Run("visibility", func(t *testing.T) {
+		hegel.Test(t, func(h *hegel.T) {
+			inventory := drawCronRuntimeInventory(h)
+			want := false
+			for _, w := range inventory.Warnings {
+				if w.Code == "no_live_runtime" || w.Code == "pin_unmatched" || w.Code == "adapter_unmatched" {
+					want = true
+				}
 			}
-		}
-		_, show := cronRuntimeBanner(inventory, nil, false)
-		if show != (inventory.Inventory.State == "ready" && want) {
-			h.Fatal("banner violated readiness/code contract")
-		}
-	}, hegel.WithTestCases(2000), hegel.WithDatabase(t.TempDir()))
-}
-func TestCronRuntimeBannerPriority(t *testing.T) {
-	hegel.Test(t, func(h *hegel.T) {
-		inventory := drawCronRuntimeInventory(h)
-		inventory.Inventory.State = "ready"
-		inventory.Warnings = append(inventory.Warnings, cron.RuntimeWarning{Code: "no_live_runtime"})
-		text, show := cronRuntimeBanner(inventory, nil, false)
-		if !show || !strings.HasPrefix(text, "No live runtime advertised") {
-			h.Fatal("no-live warning lost priority")
-		}
-	}, hegel.WithTestCases(2000), hegel.WithDatabase(t.TempDir()))
-}
-func TestCronRuntimeBannerPermutation(t *testing.T) {
-	hegel.Test(t, func(h *hegel.T) {
-		inventory := drawCronRuntimeInventory(h)
-		one, show := cronRuntimeBanner(inventory, nil, false)
-		slices.Reverse(inventory.Warnings)
-		two, showTwo := cronRuntimeBanner(inventory, nil, false)
-		if one != two || show != showTwo {
-			h.Fatal("warning order changed banner")
-		}
-	}, hegel.WithTestCases(2000), hegel.WithDatabase(t.TempDir()))
+			_, show := cronRuntimeBanner(inventory, nil, false)
+			if show != (inventory.Inventory.State == "ready" && want) {
+				h.Fatal("banner violated readiness/code contract")
+			}
+		}, hegel.WithTestCases(2000), hegel.WithDatabase(t.TempDir()))
+	})
+	t.Run("priority", func(t *testing.T) {
+		hegel.Test(t, func(h *hegel.T) {
+			inventory := drawCronRuntimeInventory(h)
+			inventory.Inventory.State = "ready"
+			inventory.Warnings = append(inventory.Warnings, cron.RuntimeWarning{Code: "no_live_runtime"})
+			text, show := cronRuntimeBanner(inventory, nil, false)
+			if !show || !strings.HasPrefix(text, "No live runtime advertised") {
+				h.Fatal("no-live warning lost priority")
+			}
+		}, hegel.WithTestCases(2000), hegel.WithDatabase(t.TempDir()))
+	})
+	t.Run("permutation", func(t *testing.T) {
+		hegel.Test(t, func(h *hegel.T) {
+			inventory := drawCronRuntimeInventory(h)
+			one, show := cronRuntimeBanner(inventory, nil, false)
+			slices.Reverse(inventory.Warnings)
+			two, showTwo := cronRuntimeBanner(inventory, nil, false)
+			if one != two || show != showTwo {
+				h.Fatal("warning order changed banner")
+			}
+		}, hegel.WithTestCases(2000), hegel.WithDatabase(t.TempDir()))
+	})
 }
 func TestCronRuntimeMessagesProperty(t *testing.T) {
 	hegel.Test(t, func(h *hegel.T) {

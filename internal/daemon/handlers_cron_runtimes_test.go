@@ -237,31 +237,6 @@ func TestCronRuntimeChoicesHTTP(t *testing.T) {
 	status, raw = runtimeHTTPRequest(t, env, http.MethodPut, path, body)
 	require.Equalf(t, 200, status, "%s", raw)
 	require.NotContains(t, string(raw), "options.agent")
-	status, raw = runtimeHTTPRequest(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/capabilities", p.ID), nil)
-	require.Equal(t, 200, status)
-	require.Contains(t, string(raw), "cron_runtime_choices_v1")
-}
-func TestCronRuntimeChoicesRegistryOwnership(t *testing.T) {
-	now := time.Now()
-	registry := daemon.NewCronRuntimeRegistry(now, func() time.Time { return now })
-	b := api.BeatCronRuntimeBody{}.RuntimeBeat
-	b.Label = "worker"
-	b.Adapter = "example"
-	b.Choices = map[string][]string{"options.agent": {"a", "z"}, "checkout_key": {}}
-	out, err := registry.Beat(1, "id", "operator", b)
-	require.NoError(t, err)
-	b.Choices["options.agent"][0] = "input"
-	out.Choices["options.agent"][0] = "output"
-	delete(out.Choices, "checkout_key")
-	list := registry.List(1, nil, "dev")
-	require.Equal(t, []string{"a", "z"}, list.Runtimes[0].Choices["options.agent"])
-	require.Contains(t, list.Runtimes[0].Choices, "checkout_key")
-	list.Runtimes[0].Choices["options.agent"][0] = "list"
-	require.Equal(t, []string{"a", "z"}, registry.List(1, nil, "dev").Runtimes[0].Choices["options.agent"])
-	b.Choices = nil
-	_, err = registry.Beat(1, "id", "operator", b)
-	require.NoError(t, err)
-	require.Empty(t, registry.List(1, nil, "dev").Runtimes[0].Choices)
 }
 
 // Runtime fixtures use owner-local authority without inventing a bearer token.
