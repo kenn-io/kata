@@ -90,7 +90,7 @@ func (m Model) handleAuthCapabilities(msg authCapabilitiesMsg) (Model, tea.Cmd) 
 	if !m.inputMutationAllowed() {
 		m.input = inputState{}
 	}
-	if !m.mutationAllowed(true) {
+	if !m.mutationAllowed(false) {
 		m = m.closeMoveForm()
 	}
 	var viewCmd tea.Cmd

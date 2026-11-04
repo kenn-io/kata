@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json/v2"
 	"fmt"
 	"slices"
 	"strings"
@@ -68,6 +69,25 @@ type moveState struct {
 	note    string
 }
 
+// moveStep is what the Move form is doing, which decides what enter does.
+type moveStep int
+
+const (
+	movePicking moveStep = iota
+	movePreviewing
+	moveSending
+)
+
+func (s moveState) step() moveStep {
+	switch {
+	case s.sending:
+		return moveSending
+	case s.preview != nil:
+		return movePreviewing
+	}
+	return movePicking
+}
+
 // closeMoveForm drops an open Move form, as when the daemon's answer about
 // what this principal may write takes the permission away.
 func (m Model) closeMoveForm() Model {
@@ -94,15 +114,26 @@ type movePreviewMsg struct {
 	err     error
 }
 
+// jsonString reads a metadata value that holds a string; anything else is "".
+func jsonString(raw []byte) string {
+	var s string
+	if len(raw) == 0 || json.Unmarshal(raw, &s) != nil {
+		return ""
+	}
+	return s
+}
+
+// isInboxProject reports whether the project's role metadata designates it as
+// the Inbox, the way the Inbox lookup reads it.
+func isInboxProject(p ProjectSummary) bool {
+	return jsonString(p.Metadata.Role) == "inbox"
+}
+
 func (m Model) routeMoveKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if !m.keymap.MoveIssue.matches(msg) {
 		return m, nil, false
 	}
-	// A pending undo or reopen owns the issue until it answers.
-	if m.undoInFlight || m.reopenLookupPending {
-		return m, nil, true
-	}
-	target, issue, ok := m.listIssueTarget()
+	target, issue, ok := m.moveTarget()
 	if !ok {
 		return m, nil, true
 	}
@@ -182,12 +213,12 @@ func moveDestinationContexts(projects []ProjectSummary) map[string]string {
 		}
 		areaCount := map[string]int{}
 		for _, p := range group {
-			if area := jsonString(p.Metadata.Area); area != "" {
+			if area := strings.TrimSpace(jsonString(p.Metadata.Area)); area != "" {
 				areaCount[area]++
 			}
 		}
 		for _, p := range group {
-			if area := jsonString(p.Metadata.Area); area != "" && areaCount[area] == 1 {
+			if area := strings.TrimSpace(jsonString(p.Metadata.Area)); area != "" && areaCount[area] == 1 {
 				nameContext[p.UID] = area
 			} else {
 				nameContext[p.UID] = p.UID
@@ -237,10 +268,10 @@ func (m Model) routeMoveModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	switch key {
 	case "esc":
 		return m.closeMoveForm(), nil
-	case "up", "ctrl+p":
+	case "up":
 		s.cursor = max(s.cursor-1, 0)
 		m.move = s
-	case "down", "ctrl+n":
+	case "down":
 		s.cursor = min(s.cursor+1, max(len(s.choices())-1, 0))
 		m.move = s
 	case "ctrl+u":
@@ -256,14 +287,15 @@ func (m Model) routeMoveModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		m.move = s
 		return m.dispatchMovePreview()
 	default:
-		m.move = s.filterUpdated(msg)
+		m.move = s.filterUpdated(msg, m.width, m.height)
 	}
 	return m, nil
 }
 
 // filterUpdated feeds a key or paste to the filter and returns to the first
 // match when the text changed.
-func (s moveState) filterUpdated(msg tea.Msg) moveState {
+func (s moveState) filterUpdated(msg tea.Msg, width, height int) moveState {
+	s.filter.SetWidth(moveFilterWidth(width, height))
 	before := s.filter.Value()
 	s.filter, _ = s.filter.Update(msg)
 	if s.filter.Value() != before {
@@ -277,7 +309,7 @@ func (m Model) pasteIntoMoveFilter(msg tea.PasteMsg) Model {
 	if m.move.sending || m.move.preview != nil {
 		return m
 	}
-	m.move = m.move.filterUpdated(msg)
+	m.move = m.move.filterUpdated(msg, m.width, m.height)
 	return m
 }
 
@@ -288,7 +320,7 @@ func (m Model) dispatchMovePreview() (Model, tea.Cmd) {
 	s.seq++
 	s.sending, s.err = true, ""
 	m.move = s
-	in := MoveInput{Actor: m.moveActor(), ToProjectUID: s.chosen.UID, DryRun: true}
+	in := MoveInput{Actor: m.list.actor, ToProjectUID: s.chosen.UID, DryRun: true}
 	connGen, formGen, seq := m.connGen, s.formGen, s.seq
 	request := m.moveRequest(in)
 	return m, func() tea.Msg {
@@ -306,10 +338,6 @@ func (m Model) moveRequest(in MoveInput) func() (*MutationResp, error) {
 		defer cancel()
 		return mover.MoveIssue(ctx, target.projectID, target.issueShortID, in)
 	}
-}
-
-func (m Model) moveActor() string {
-	return m.list.actor
 }
 
 func (m Model) handleMovePreview(msg movePreviewMsg) Model {
@@ -358,7 +386,7 @@ func (m Model) dispatchMove() (Model, tea.Cmd) {
 	}
 	s.sending, s.err, s.note = true, "", ""
 	m.move = s
-	in := MoveInput{Actor: m.moveActor(), ToProjectUID: s.chosen.UID, IfMatchRevision: s.preview.revision}
+	in := MoveInput{Actor: m.list.actor, ToProjectUID: s.chosen.UID, IfMatchRevision: s.preview.revision}
 	formGen := s.formGen
 	request := m.moveRequest(in)
 	return m, withConnGen(func() tea.Msg {
@@ -377,7 +405,7 @@ func (m Model) handleMoveDone(mut mutationDoneMsg) (Model, tea.Cmd) {
 	switch {
 	case isRevisionConflict(mut.err):
 		s.preview = nil
-		s.note = "The issue's metadata, dates or claims changed since the preview; nothing was moved. Showing the current preview."
+		s.note = "The issue's revision changed since the preview; nothing was moved. Showing the current preview."
 		m.move = s
 		return m.dispatchMovePreview()
 	case mut.err != nil:
@@ -389,40 +417,50 @@ func (m Model) handleMoveDone(mut mutationDoneMsg) (Model, tea.Cmd) {
 	return m.finishMove(mut)
 }
 
-// finishMove closes the form after a move. The moved issue and its subtree
-// leave the list the way a deleted one does (a move into another project is
-// listed again by the refetch when the scope shows it), the detail pane resets
-// only when it shows one of them, and the notice names the new project#id.
-// The daemon moved labels with the issues, so both projects' label counts are
-// refreshed.
+// finishMove closes the form after a move. The issues the daemon reports moved
+// (the preview's list when the reply carries none) leave the list as deleted
+// ones do, and the notice names the new project#id. A child added after the
+// preview is in the reply, so it goes too.
 func (m Model) finishMove(mut mutationDoneMsg) (Model, tea.Cmd) {
 	s := m.move
 	uid := s.target.issueUID
-	moved := append([]string{}, s.preview.uids...)
+	gone := []string{uid}
+	reported := s.preview.uids
+	if mut.resp != nil && len(mut.resp.Issues) > 0 {
+		reported = reported[:0:0]
+		for _, issue := range mut.resp.Issues {
+			reported = append(reported, issue.UID)
+		}
+	}
+	for _, moved := range reported {
+		if !slices.Contains(gone, moved) {
+			gone = append(gone, moved)
+		}
+	}
 	newRef := s.chosen.Name
 	if mut.resp != nil && mut.resp.NewShortID != "" {
 		newRef += "#" + mut.resp.NewShortID
 	}
 	m = m.closeMoveForm()
-	m.detail = m.detail.withoutIssues(append(moved, uid)...)
-	m, follow := m.refreshListDay(func(lm listModel) listModel { return lm.withoutIssues(uid, moved...) })
-	m, detailCmd := m.maybeBootstrapSplitDetail()
-	if m.cache != nil {
-		m.cache.markStale()
-	}
+	m, cmd := m.dropIssues(uid, gone)
 	m, notice := m.undoNotice(sanitizeForLine(fmt.Sprintf("moved #%s to %s", s.target.issueShortID, newRef)), toastSuccess)
-	cmds := []tea.Cmd{follow, detailCmd, notice, withConnGen(m.list.refetchCmd(m.api, m.scope), m.connGen)}
-	for _, pid := range []int64{s.target.projectID, s.chosen.ID} {
-		if m.projectLabels == nil {
-			break
-		}
-		if _, cached := m.projectLabels.byProject[pid]; cached {
-			var refresh tea.Cmd
-			m, refresh = m.dispatchLabelFetch(pid)
-			cmds = append(cmds, refresh)
-		}
+	return m, combineCmds(cmd, notice)
+}
+
+// moveInnerWidth is the text width of the Move form: the box's interior, or the
+// whole row when the terminal is too short for a border.
+func moveInnerWidth(width, height int) int {
+	if height < formMinHeight {
+		return max(width, 1)
 	}
-	return m, tea.Batch(cmds...)
+	return max(min(width*7/10, 80), min(width-8, 30))
+}
+
+// moveFilterWidth bounds the picker's filter to its line, which also holds the
+// "Project: " label and the cursor. It is set before each key as well as on
+// render, because the input scrolls its text when it is typed into.
+func moveFilterWidth(width, height int) int {
+	return max(moveInnerWidth(width, height)-len("Project: ")-1, 1)
 }
 
 // renderMoveModal draws the project picker, or the daemon's preview once a
@@ -432,12 +470,10 @@ func (m Model) finishMove(mut mutationDoneMsg) (Model, tea.Cmd) {
 // the title, the outcome, a refusal and the enter/esc prompt do.
 func renderMoveModal(s moveState, width, height int) string {
 	boxed := height >= formMinHeight
-	innerW := max(min(width*7/10, 80), min(width-8, 30))
+	innerW := moveInnerWidth(width, height)
 	budget := height - 1 // the footer keeps its row
 	if boxed {
 		budget -= 4 // border and padding
-	} else {
-		innerW = max(width, 1)
 	}
 	wrap := func(text string) []string { return termtext.Wrap(text, max(innerW, 1)) }
 	title := func(text string) []string {
@@ -480,6 +516,7 @@ func renderMoveModal(s moveState, width, height int) string {
 			optional = wrap("Nothing has moved yet. Each issue gets a new id in " + sanitizeForLine(s.chosen.Name) + ".")
 		}
 	} else {
+		s.filter.SetWidth(moveFilterWidth(width, height))
 		head = append(title(fmt.Sprintf("Move #%s to another project", s.target.issueShortID)), "Project: "+s.filter.View())
 		list = func(room int) []string { return renderMoveChoices(s, innerW, min(max(room, 1), 10)) }
 	}

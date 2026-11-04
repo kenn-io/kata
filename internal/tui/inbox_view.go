@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"encoding/json/v2"
-	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -52,24 +51,10 @@ func (m Model) lookupInboxProject() (Model, tea.Cmd) {
 	}
 }
 
-// jsonString reads a metadata value that holds a string; anything else is "".
-func jsonString(raw []byte) string {
-	var s string
-	if len(raw) == 0 || json.Unmarshal(raw, &s) != nil {
-		return ""
-	}
-	return strings.TrimSpace(s)
-}
-
-// isInboxProject reports whether the project's role metadata designates it as
-// the Inbox.
-func isInboxProject(p ProjectSummary) bool {
-	return jsonString(p.Metadata.Role) == "inbox"
-}
-
 func designatedInboxProject(projects []ProjectSummary) (ProjectSummary, bool) {
 	for _, project := range projects {
-		if project.ID > 0 && isInboxProject(project) {
+		var role string
+		if project.ID > 0 && json.Unmarshal(project.Metadata.Role, &role) == nil && role == "inbox" {
 			return project, true
 		}
 	}

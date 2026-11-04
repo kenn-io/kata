@@ -25,12 +25,30 @@ func (m Model) listIssueTarget() (formTarget, Issue, bool) {
 	return m.activeIssueTarget()
 }
 
+// moveHidden adds to the shared rule what only M waits for: a pending undo or
+// reopen lookup owns the issue until it answers, and a reopen lookup that
+// answers opens its own confirmation over an open Move form.
+func (m Model) moveHidden() bool {
+	return m.listIssueOpsHidden() || m.undoInFlight || m.reopenLookupPending
+}
+
+// moveTarget is listIssueTarget for M, held back by the same wait.
+func (m Model) moveTarget() (formTarget, Issue, bool) {
+	if m.undoInFlight || m.reopenLookupPending {
+		return formTarget{}, Issue{}, false
+	}
+	return m.listIssueTarget()
+}
+
 // helpKeymap is the keymap the help overlay lists: without the delete and move
 // keys when they are not on offer.
 func (m Model) helpKeymap() keymap {
 	km := m.keymap
 	if m.listIssueOpsHidden() {
-		km.Delete, km.MoveIssue = key{}, key{}
+		km.Delete = key{}
+	}
+	if m.moveHidden() {
+		km.MoveIssue = key{}
 	}
 	return km
 }

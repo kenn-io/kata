@@ -291,7 +291,7 @@ func TestFooterHelpTableParity(t *testing.T) {
 	oldMode, oldDark := activeColorMode, activeHasDarkBackground
 	defer func() { applyColorMode(oldMode, oldDark) }()
 
-	listRows := (listModel{issues: hierarchyIssues()}).queueHelpRows(false)
+	listRows := (listModel{issues: hierarchyIssues()}).queueHelpRows(false, false)
 	detailRows := hierarchyDetailModel(focusChildren).detailHelpRows()
 	cases := []struct {
 		name       string
@@ -308,7 +308,7 @@ func TestFooterHelpTableParity(t *testing.T) {
 			mode:       colorLight,
 			width:      80,
 			innerWidth: 78,
-			rows:       modalHelpRows(modalQuitConfirm, false),
+			rows:       modalHelpRows(modalQuitConfirm, movePicking),
 			want:       "\x1b[48;5;253m \x1b[m\x1b[38;5;242;48;5;253m\x1b[38;5;242my\x1b[m \x1b[38;5;248mconfirm\x1b[m\x1b[38;5;248m▕\x1b[m \x1b[38;5;242mn/esc\x1b[m \x1b[38;5;248mcancel\x1b[m                                                       \x1b[m\x1b[48;5;253m \x1b[m",
 			wantLines:  1,
 		},

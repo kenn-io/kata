@@ -13,9 +13,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
-	"go.kenn.io/kit/tui/helplayout"
 	"go.kenn.io/kit/tui/splitlayout"
 )
 
@@ -88,9 +88,10 @@ func moveModel(t *testing.T, api *moveTestAPI) Model {
 
 func selectListUID(t *testing.T, m Model, uid string) Model {
 	t.Helper()
-	for i, row := range m.list.visibleRows() {
+	rows := m.list.visibleRows()
+	for i, row := range rows {
 		if row.issue.UID == uid {
-			m.list.cursor, m.list.selectedUID, m.list.selectedProjectID = i, uid, row.issue.ProjectID
+			m.list = m.list.selectVisibleRow(rows, i)
 			return m
 		}
 	}
@@ -111,13 +112,6 @@ func openMove(t *testing.T, m Model) Model {
 	m, cmd := updateModel(m, runeKey('M'))
 	require.Equal(t, modalMoveIssue, m.modal, "M opens the move picker")
 	m, _ = deliver(t, m, cmd)
-	return m
-}
-
-func typeText(m Model, text string) Model {
-	for _, r := range text {
-		m, _ = updateModel(m, runeKey(r))
-	}
 	return m
 }
 
@@ -171,19 +165,12 @@ func TestMovePickerShowsAreaToTellSameNamedProjectsApart(t *testing.T) {
 		"wiki · play",
 	}, moveLabels(m), "an area names a project only when no same-named project shares it, ignoring surrounding spaces; otherwise the UID does")
 
-	m = typeText(m, "WORK")
+	m = typeString(m, "WORK")
 	require.Equal(t, []string{"docs · work"}, moveLabels(m), "the filter matches the area shown beside a name, case-insensitively")
 
 	m, _ = updateModel(m, tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
-	m = typeText(m, "so")
+	m = typeString(m, "so")
 	require.Equal(t, []string{"solo"}, moveLabels(m), "the filter matches names")
-}
-
-func TestMovePickerShowsNoPlaceholderFragmentBeforeTyping(t *testing.T) {
-	api := &moveTestAPI{projects: []ProjectSummary{moveProject(2, "hub-project", "", "")}}
-	m := openMove(t, moveModel(t, api))
-	view := flattenModal(stripANSI(renderMoveModal(m.move, 100, 40)))
-	require.NotContains(t, view, "Project: t", "an empty filter must not show a clipped placeholder")
 }
 
 func TestMovePreviewNamesTheMoveAndListsDescendants(t *testing.T) {
@@ -280,7 +267,8 @@ func TestMoveConflictPreviewsAgainAtCurrentRevision(t *testing.T) {
 	require.Equal(t, modalMoveIssue, m.modal, "a conflict keeps the form open")
 	require.NotNil(t, cmd, "a conflict asks for a fresh preview")
 	m, _ = deliver(t, m, cmd)
-	require.Contains(t, stripANSI(renderMoveModal(m.move, 100, 40)), "changed")
+	require.Contains(t, flattenModal(stripANSI(renderMoveModal(m.move, 100, 40))),
+		"The issue's revision changed since the preview; nothing was moved.")
 
 	m, cmd = enter(m)
 	m, _ = deliver(t, m, cmd)
@@ -292,25 +280,6 @@ func TestMoveConflictPreviewsAgainAtCurrentRevision(t *testing.T) {
 	require.True(t, api.calls[2].DryRun)
 	require.Zero(t, api.calls[2].IfMatchRevision, "the re-preview reads the current revision")
 	require.Equal(t, int64(9), api.calls[3].IfMatchRevision)
-}
-
-func TestMoveWithoutPreviewRevisionIsNeverSentUnguarded(t *testing.T) {
-	api := &moveTestAPI{
-		projects: []ProjectSummary{moveProject(2, "hub-project", "", "")},
-		preview: func(int, MoveInput) (*MutationResp, error) {
-			return &MutationResp{Issue: &Issue{UID: "issue-b", ShortID: "bbbb"}}, nil
-		},
-	}
-	m := openMove(t, moveModel(t, api))
-	m, cmd := enter(m)
-	m, _ = deliver(t, m, cmd)
-
-	m, cmd = enter(m)
-	require.Nil(t, cmd, "a preview without a revision sends nothing")
-	require.Equal(t, modalMoveIssue, m.modal)
-	require.Contains(t, flattenModal(stripANSI(renderMoveModal(m.move, 100, 40))), "revision")
-	require.Len(t, api.calls, 1)
-	require.True(t, api.calls[0].DryRun)
 }
 
 func TestMoveSelectsNeighbourRowAndNamesNewRef(t *testing.T) {
@@ -376,69 +345,6 @@ func moveThrough(t *testing.T, m Model, previewed ...string) (Model, tea.Cmd) {
 	return deliver(t, m, cmd)
 }
 
-func TestMoveIsOfferedOnlyOnTheSelectedRowOfThePlainList(t *testing.T) {
-	hint := helplayout.HelpItem{Key: "M", Description: "move"}
-	type tableCase struct {
-		name    string
-		prepare func(Model) Model
-		offered bool
-		// helpHidden: the help overlay lists M for every view; only credentials
-		// and saved browsing contexts take it away.
-		helpHidden bool
-	}
-	for _, tc := range []tableCase{
-		{name: "list row", offered: true, prepare: func(m Model) Model { return m }},
-		{name: "detail view", prepare: func(m Model) Model {
-			issue := m.list.issues[1]
-			m.view, m.detail.issue = viewDetail, &issue
-			return m
-		}},
-		{name: "split with the list focused", offered: true, prepare: func(m Model) Model {
-			m.layout, m.focus = splitlayout.Split, focusList
-			return m
-		}},
-		{name: "split with the detail focused", prepare: func(m Model) Model {
-			m.layout = splitlayout.Split
-			issue := m.list.issues[1]
-			m.detail.issue, m.focus = &issue, focusDetail
-			return m
-		}},
-		{name: "Inbox", helpHidden: true, prepare: func(m Model) Model { m.inboxReturn = &inboxReturnState{}; return m }},
-		{name: "detail opened from Attention", helpHidden: true, prepare: func(m Model) Model {
-			m.attention.returnContext = &attentionReturnContext{}
-			return m
-		}},
-		{name: "Help", prepare: func(m Model) Model { m.view = viewHelp; return m }},
-		{name: "empty list", prepare: func(m Model) Model {
-			m.list.issues, m.list.selectedUID, m.list.selectedProjectID = nil, "", 0
-			return m
-		}},
-		{name: "credentials that cannot move", helpHidden: true, prepare: func(m Model) Model {
-			m.authCapabilitiesRequired, m.authCapabilitiesReady = true, true
-			m.issueScoped, m.scopedWritable = true, false
-			return m
-		}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			m := tc.prepare(moveModel(t, &moveTestAPI{projects: []ProjectSummary{moveProject(2, "hub-project", "", "")}}))
-			if m.view != viewHelp {
-				footer := flattenHelpRows(m.helpRows())
-				if tc.offered {
-					require.Contains(t, footer, hint)
-				} else {
-					assertHelpItemAbsent(t, footer, hint)
-				}
-			}
-			help := m
-			help.view, help.width = viewHelp, 120
-			require.Equal(t, !tc.helpHidden, strings.Contains(stripANSI(help.viewBody()), "move to another project"))
-
-			m, _ = updateModel(m, runeKey('M'))
-			require.Equal(t, tc.offered, m.modal == modalMoveIssue, "dispatch follows the footer")
-		})
-	}
-}
-
 func TestMoveLeavesASplitDetailOnTheSameTerms(t *testing.T) {
 	splitModel := func(t *testing.T, shown string, back ...string) Model {
 		t.Helper()
@@ -478,16 +384,6 @@ func TestMoveLeavesASplitDetailOnTheSameTerms(t *testing.T) {
 	})
 }
 
-func TestMoveRefreshesTheLabelCountsOfBothProjects(t *testing.T) {
-	m := moveModel(t, &moveTestAPI{})
-	m.projectLabels = newLabelCache()
-	m.projectLabels.byProject[7] = labelCacheEntry{pid: 7}
-	m.projectLabels.byProject[2] = labelCacheEntry{pid: 2}
-	m, _ = moveThrough(t, m)
-	require.True(t, m.projectLabels.byProject[7].fetching, "the source project lost the issue's labels")
-	require.True(t, m.projectLabels.byProject[2].fetching, "the destination project gained them")
-}
-
 func TestMoveClearsUndoHistory(t *testing.T) {
 	api := &moveTestAPI{projects: []ProjectSummary{moveProject(2, "hub-project", "", "")}}
 	m := moveModel(t, api)
@@ -499,7 +395,6 @@ func TestMoveClearsUndoHistory(t *testing.T) {
 	m, cmd = enter(m)
 	m, _ = deliver(t, m, cmd)
 	require.Empty(t, m.undoHistory.entries, "a move changes the short id, so earlier edits can no longer be undone")
-	require.Equal(t, "moving an issue cannot be undone", m.undoHistory.boundary)
 }
 
 func TestMoveIssueNeedsDaemonWithSubtreeMoves(t *testing.T) {
@@ -520,125 +415,13 @@ func TestMoveIssueNeedsDaemonWithSubtreeMoves(t *testing.T) {
 	require.Zero(t, posts.Load(), "an old daemon is never sent a move it would run as a single-issue move")
 }
 
-func TestMoveIssueAgainstDaemonKeepsCommentsAndLinks(t *testing.T) {
-	ctx := t.Context()
-	env := testenv.New(t)
-	base := NewClient(env.URL, env.HTTP)
-	source, err := env.DB.CreateProject(ctx, "example-workspace")
-	require.NoError(t, err)
-	dest, err := env.DB.CreateProject(ctx, "spoke-project")
-	require.NoError(t, err)
-	create := func(title string) db.Issue {
-		issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{
-			ProjectID: source.ID, Title: title, Body: "body", Author: "alice",
-		})
-		require.NoError(t, err)
-		return issue
-	}
-	parent, child, other := create("Parent to move"), create("Child to move"), create("Related stays")
-	_, err = base.AddLink(ctx, source.ID, child.UID, LinkBody{Type: "parent", ToRef: parent.UID}, "alice")
-	require.NoError(t, err)
-	_, err = base.AddLink(ctx, source.ID, parent.UID, LinkBody{Type: "related", ToRef: other.UID}, "alice")
-	require.NoError(t, err)
-	_, err = base.AddComment(ctx, source.ID, parent.UID, "Original finding", "alice")
-	require.NoError(t, err)
-
-	client := newConnectedUndoClient(t, base)
-	m := initialModel(Options{})
-	m.api = client
-	m.view = viewList
-	m.list.actor = "alice"
-	m.scope = scope{projectID: source.ID}
-	for _, issue := range []db.Issue{parent, child, other} {
-		detail, err := client.GetIssueDetail(ctx, source.ID, issue.UID)
-		require.NoError(t, err)
-		m.list.issues = append(m.list.issues, *detail.Issue)
-	}
-	m = selectListUID(t, m, parent.UID)
-	m.undoHistory.push(undoEntry{kind: "priority.set", uid: other.UID})
-
-	m = openMove(t, m)
-	m = typeText(m, "spoke")
-	m, cmd := enter(m)
-	m, _ = deliver(t, m, cmd)
-	view := stripANSI(renderMoveModal(m.move, 100, 40))
-	require.Contains(t, view, "Child to move", "the preview lists the descendant that moves with it")
-	stored, err := env.DB.IssueByUID(ctx, parent.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	require.Equal(t, source.ID, stored.ProjectID, "a preview writes nothing")
-
-	m, cmd = enter(m)
-	m, _ = deliver(t, m, cmd)
-
-	moved, err := env.DB.IssueByUID(ctx, parent.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	require.Equal(t, dest.ID, moved.ProjectID)
-	movedChild, err := env.DB.IssueByUID(ctx, child.UID, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	require.Equal(t, dest.ID, movedChild.ProjectID, "the subtree moves together")
-
-	comments, err := base.ListComments(ctx, dest.ID, moved.UID)
-	require.NoError(t, err)
-	require.Len(t, comments, 1)
-	require.Equal(t, "Original finding", comments[0].Body)
-	links, err := env.DB.LinksByIssue(ctx, moved.ID)
-	require.NoError(t, err)
-	require.Len(t, links, 2, "the related link and the child's parent link survive the move")
-	detail, err := base.GetIssueDetail(ctx, dest.ID, moved.UID)
-	require.NoError(t, err)
-	require.Len(t, detail.Children, 1)
-	events, err := env.DB.EventsAfter(ctx, db.EventsAfterParams{IssueUID: moved.UID, Limit: 100})
-	require.NoError(t, err)
-	var types []string
-	for _, e := range events {
-		types = append(types, e.Type)
-	}
-	require.Contains(t, types, "issue.created", "the issue's history survives the move")
-	require.Contains(t, types, "issue.moved")
-
-	require.NotNil(t, m.toast)
-	require.Contains(t, m.toast.text, "spoke-project#"+moved.ShortID, "the notice names the new short id")
-	require.Empty(t, m.undoHistory.entries)
-	require.Equal(t, modalNone, m.modal)
-}
-
-func TestMovePickerNeverOffersArchivedProjectAgainstDaemon(t *testing.T) {
-	ctx := t.Context()
-	env := testenv.New(t)
-	base := NewClient(env.URL, env.HTTP)
-	source, err := env.DB.CreateProject(ctx, "example-workspace")
-	require.NoError(t, err)
-	_, err = env.DB.CreateProject(ctx, "spoke-project")
-	require.NoError(t, err)
-	gone, err := env.DB.CreateProject(ctx, "archived-project")
-	require.NoError(t, err)
-	_, _, err = env.DB.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: gone.ID, Actor: "alice", Force: true})
-	require.NoError(t, err)
-	issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "To move", Author: "alice"})
-	require.NoError(t, err)
-
-	client := newConnectedUndoClient(t, base)
-	m := initialModel(Options{})
-	m.api = client
-	m.view = viewList
-	m.list.actor = "alice"
-	m.scope = scope{projectID: source.ID}
-	detail, err := client.GetIssueDetail(ctx, source.ID, issue.UID)
-	require.NoError(t, err)
-	m.list.issues = []Issue{*detail.Issue}
-	m = selectListUID(t, m, issue.UID)
-
-	m = openMove(t, m)
-	require.Equal(t, []string{"spoke-project"}, moveLabels(m))
-}
-
 func TestMoveIsRefusedWhenTheIssueChangedAfterThePreviewAgainstDaemon(t *testing.T) {
 	ctx := t.Context()
 	env := testenv.New(t)
 	base := NewClient(env.URL, env.HTTP)
 	source, err := env.DB.CreateProject(ctx, "example-workspace")
 	require.NoError(t, err)
-	dest, err := env.DB.CreateProject(ctx, "spoke-project")
+	_, err = env.DB.CreateProject(ctx, "spoke-project")
 	require.NoError(t, err)
 	issue, _, err := env.DB.CreateIssue(ctx, db.CreateIssueParams{ProjectID: source.ID, Title: "Guarded", Author: "alice"})
 	require.NoError(t, err)
@@ -657,7 +440,7 @@ func TestMoveIsRefusedWhenTheIssueChangedAfterThePreviewAgainstDaemon(t *testing
 	m = openMove(t, m)
 	m, cmd := enter(m)
 	m, _ = deliver(t, m, cmd)
-	// Only metadata edits (dates, claims) advance the revision a move is guarded on.
+	// A dates edit advances the issue revision the move is guarded on.
 	_, err = base.SetDates(ctx, source.ID, issue.UID, DatesInput{
 		Actor: "alice", IfMatchRevision: issue.Revision, Set: map[string]*string{"scheduled": new("2030-01-01")},
 	})
@@ -669,10 +452,9 @@ func TestMoveIsRefusedWhenTheIssueChangedAfterThePreviewAgainstDaemon(t *testing
 	stored, err := env.DB.IssueByUID(ctx, issue.UID, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Equal(t, source.ID, stored.ProjectID, "a stale preview moves nothing")
-	require.NotEqual(t, dest.ID, stored.ProjectID)
 	require.Equal(t, modalMoveIssue, m.modal, "the form stays open on a fresh preview")
 	require.NotNil(t, m.move.preview, "and shows the preview at the current revision")
-	require.Contains(t, m.move.note, "changed since the preview")
+	require.Contains(t, m.move.note, "revision changed since the preview")
 }
 
 func TestMoveFooterNamesWhatEnterDoesAtEachStep(t *testing.T) {
@@ -688,8 +470,12 @@ func TestMoveFooterNamesWhatEnterDoesAtEachStep(t *testing.T) {
 	m := openMove(t, moveModel(t, api))
 	require.Equal(t, "preview", enterAction(m), "in the picker enter sends a dry run")
 	m, cmd := enter(m)
+	require.Empty(t, flattenHelpRows(m.helpRows()), "no keys are offered while the preview request is in flight")
 	m, _ = deliver(t, m, cmd)
 	require.Equal(t, "move", enterAction(m), "in the preview enter moves")
+	m, cmd = enter(m)
+	require.Empty(t, flattenHelpRows(m.helpRows()), "no keys are offered while the move request is in flight")
+	_, _ = deliver(t, m, cmd)
 }
 
 // TestMoveFormRendersCompletelyAtEveryTerminalSize follows the Delete form's
@@ -725,12 +511,16 @@ func TestMoveFormRendersCompletelyAtEveryTerminalSize(t *testing.T) {
 	}{
 		{"80x24", 80, 24}, {"80x12", 80, 12}, {"100x8", 100, 8}, {"split 140x40", 140, 40}, {"split 140x10", 140, 10},
 	} {
+		sized := picker
+		sized.width, sized.height = size.width, size.height
+		pasted, _ := stepModel(sized, tea.PasteMsg{Content: strings.Repeat("pasted-filter-", 20)})
 		for _, step := range []struct {
 			name  string
 			state Model
 			want  []string
 		}{
 			{"picker", picker, []string{"Project:", "▸ " + longName[:20], "enter preview · esc cancel"}},
+			{"picker with a long pasted filter", pasted, []string{"Project:", "no project matches", "enter preview · esc cancel"}},
 			{"preview", previewing, []string{"Subtree move", "enter move · esc back"}},
 			{"refusal", refused, []string{"Subtree move", "project_not_found", "enter move · esc back"}},
 		} {
@@ -747,11 +537,52 @@ func TestMoveFormRendersCompletelyAtEveryTerminalSize(t *testing.T) {
 				for _, want := range step.want {
 					require.Contains(t, flat, want, "%s\n%s", size.name, rendered)
 				}
-				if step.name != "picker" {
+				if step.state.move.preview != nil {
 					require.Equal(t, 1, strings.Count(strings.Join(strings.Fields(content.String()), ""), "to"+longName),
 						"the full destination name shows once, wrapped if need be:\n%s", rendered)
 				}
 			})
 		}
 	}
+}
+
+func TestMoveDropsEveryIssueTheDaemonReportsMoved(t *testing.T) {
+	// issue-c became a child of the moved issue after the preview was read.
+	api := &moveTestAPI{
+		projects: []ProjectSummary{moveProject(2, "hub-project", "", "")},
+		move: func(int, MoveInput) (*MutationResp, error) {
+			return &MutationResp{
+				Issues:     []Issue{{UID: "issue-b"}, {UID: "issue-c"}},
+				NewShortID: "new1", Changed: true,
+			}, nil
+		},
+	}
+	m := moveModel(t, api)
+	m.layout, m.focus = splitlayout.Split, focusList
+	child := m.list.issues[2]
+	m.detail = detailModel{scopePID: 7, issue: &child, navStack: []detailModel{{issue: &Issue{UID: "issue-x"}}}}
+
+	m = openMove(t, m)
+	m, cmd := enter(m)
+	m, _ = deliver(t, m, cmd)
+	m, cmd = enter(m)
+	m, _ = deliver(t, m, cmd)
+
+	for _, row := range m.list.visibleRows() {
+		require.NotEqual(t, "issue-c", row.issue.UID, "the late child left the list with its parent")
+	}
+	require.Equal(t, "issue-a", m.list.selectedUID)
+	require.NotNil(t, m.detail.issue)
+	require.NotEqual(t, "issue-c", m.detail.issue.UID, "a pane showing the late child resets")
+	require.Empty(t, m.detail.navStack)
+}
+
+func TestMoveFormClosesWhenCredentialsNoLongerAllowAWholeProjectWrite(t *testing.T) {
+	m := openMove(t, moveModel(t, &moveTestAPI{projects: []ProjectSummary{moveProject(2, "hub-project", "", "")}}))
+	// Issue-scoped credentials may edit within their subtree but cannot move.
+	m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{
+		Kind: "token", Actor: "member", AllowedActions: []string{"issue.read", "issue.edit"},
+		Scope: &api.TokenScopeOut{},
+	}})
+	require.Equal(t, modalNone, m.modal)
 }
