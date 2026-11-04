@@ -216,6 +216,7 @@ var storageScenarios = []scenario{
 	{name: "cron run revision after remote winner", methods: []string{"CreateProject", "PutCronJob", "ObserveCronRun", "EnableProjectFederation", "InsertRemoteEvent", "MaterializeFederatedProject", "CronRun"}, run: checkCronRunRevisionAfterRemoteWinner},
 	{name: "run history instants", methods: []string{"ObserveCronRun", "ListCronRuns"}, run: checkRunHistoryInstants},
 	{name: "cron backup tombstone round trip", methods: []string{"CreateProject", "PutCronJob", "PutCronWorkflow", "ObserveCronRun", "ImportReplay", "CronJob", "CronWorkflow", "CronRun", "ListCronJobs", "ListCronWorkflows"}, runWithBackend: checkCronBackupTombstoneRoundTrip},
+	{name: "cron run reasons", methods: []string{"ObserveCronRun", "ListCronRuns"}, run: checkCronRunReasons},
 	{name: "cron summary admission", methods: []string{"ObserveCronRun"}, run: checkCronSummaryAdmission},
 	{name: "cron summary probe candidates", methods: []string{"ObserveCronRun"}, run: checkCronSummaryProbeCandidates},
 	{name: "cron summary features", methods: []string{"ObserveCronRun", "ReadFederation", "ImportReplay"}, runWithBackend: checkCronSummaryFeatures},

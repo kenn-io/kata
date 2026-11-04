@@ -113,6 +113,26 @@ func (a CronSQL) Runs(ctx context.Context, in CronRunList) ([]CronRun, error) {
 		query += fmt.Sprintf(" AND job_uid=$%d", len(args))
 	}
 
+	if in.Reason != "" {
+		if !cron.ValidReason(in.Reason) {
+			return nil, fmt.Errorf("%w: invalid reason", cron.ErrInvalid)
+		}
+		args = append(args, in.Reason)
+		parameter := fmt.Sprintf("$%d", len(args))
+		reason := "json_extract(summary_json,'$.reason')"
+		message := "json_extract(summary_json,'$.message')"
+		firstLine := "substr(" + message + ",1,length(" + parameter + ")+9)"
+		newline := "char(10)"
+		if a.Postgres {
+			reason = "summary_json::jsonb->>'reason'"
+			message = "summary_json::jsonb->>'message'"
+			firstLine = "left(" + message + ",length(" + parameter + ")+9)"
+			newline = "chr(10)"
+		}
+		// The newline participates in the match, so CRLF, trailing spaces and
+		// later message lines cannot become legacy reason evidence.
+		query += " AND (" + reason + "=" + parameter + " OR (" + reason + " IS NULL AND (" + message + "='reason: '||" + parameter + " OR " + firstLine + "='reason: '||" + parameter + "||" + newline + ")))"
+	}
 	if in.BeforeUID != "" {
 		if !cronUID(in.BeforeUID) {
 			return nil, fmt.Errorf("%w: invalid cursor", cron.ErrInvalid)
