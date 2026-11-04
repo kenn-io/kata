@@ -10,6 +10,7 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"go.kenn.io/kit/tui/termtext"
 )
 
 // deleteFormState is what a Delete form needs beyond its field: the
@@ -183,7 +184,7 @@ func (lm listModel) withoutIssue(uid string) listModel {
 // renderDeleteForm shows the issue to be deleted and what to type.
 func renderDeleteForm(s inputState, innerW int) string {
 	parts := []string{
-		titleStyle.Render(truncate(sanitizeForLine(s.title), innerW)),
+		titleStyle.Render(strings.Join(termtext.Wrap(sanitizeForLine(s.title), innerW), "\n")),
 		subtleStyle.Render(truncate(sanitizeForLine(s.del.issueTitle), innerW)),
 		renderNewIssueField(s, 0, innerW),
 	}

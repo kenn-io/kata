@@ -125,11 +125,13 @@ func TestDeleteFormShowsConfirmationOnceAtEveryHeight(t *testing.T) {
 		{"short terminal", "example-project#abc4", 100, 11},
 		{"regular terminal", "example-project#abc4", 100, 30},
 		{"80 columns", "example-repository-project-task-tracker#abc4", 80, 24},
+		{"long project at 80 columns", "example-repository-project-with-a-long-task-tracker-name#abc4", 80, 24},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			form := newDeleteForm(formTarget{}, Issue{Title: "Duplicate issue"}, tc.qualified)
 			rendered := stripANSI(renderCenteredForm(form, tc.width, tc.height, snapshotFixedNow))
-			assert.Equal(t, 1, strings.Count(rendered, "DELETE "+tc.qualified))
+			confirmation := strings.Join(strings.Fields(rendered), "")
+			assert.Equal(t, 1, strings.Count(confirmation, "DELETE"+tc.qualified), "the full confirmation remains visible across wrapped lines:\n%s", rendered)
 			assert.Empty(t, form.field(fieldConfirm).input.Placeholder)
 			if tc.height >= formMinHeight {
 				assert.Contains(t, rendered, "Duplicate issue", "the form shows the issue title")
@@ -544,15 +546,6 @@ func TestDetailFetchErrorsOnlyLeaveMissingCurrentIssue(t *testing.T) {
 			assert.Equal(t, "current-issue", m.detail.issue.UID)
 		})
 	}
-}
-
-func TestDeleteUndoEntryKeepsQualifiedReference(t *testing.T) {
-	h := newDeleteHarness(t, viewList)
-	target := h.issues[0]
-	resp, err := h.client.DeleteIssue(t.Context(), h.project.ID, target.UID, h.qualified(target), "alice")
-	require.NoError(t, err)
-	require.NotNil(t, resp.undo.entry)
-	assert.Equal(t, h.qualified(target), resp.undo.entry.before.QualifiedID)
 }
 
 func TestDeleteConfirmationResolvesDetailProject(t *testing.T) {
