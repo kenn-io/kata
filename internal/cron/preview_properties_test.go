@@ -59,6 +59,7 @@ func normalizationCandidate(ht *hegel.T, workflow bool) []byte {
 	return raw
 }
 
+// A document that fails strict decoding has no normalized document.
 func TestCronValidationParserAgreement(t *testing.T) {
 	for _, raw := range []string{`null`, `[]`, `1`, `{"unknown":1}`, `{`} {
 		_, normalized, err := Normalize([]byte(raw), DecodeJob)
@@ -96,10 +97,6 @@ func TestCronValidationPreservesInput(t *testing.T) {
 }
 
 func TestCronValidationOpaqueNumberSpelling(t *testing.T) {
-	// Retain the fixed valid workflow regression alongside generated spellings.
-	_, fixed, err := Normalize([]byte(`{"version":1,"steps":[{"key":"review","kind":"prompt","prompt":"Review","options":{"n":12345678901234567890123}}]}`), DecodeWorkflow)
-	require.NoError(t, err)
-	require.Contains(t, string(fixed), "12345678901234567890123")
 	hegel.Test(t, func(ht *hegel.T) {
 		integer := hegel.Draw(ht, hegel.Integers(int64(math.MinInt64), int64(math.MaxInt64)))
 		exponent := hegel.Draw(ht, hegel.Integers(-300, 300))

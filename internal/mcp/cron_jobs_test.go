@@ -329,24 +329,6 @@ func TestCronInvalidDefinitionsAndUIDs(t *testing.T) {
 		require.Contains(t, failure.Content[0].(*sdkmcp.TextContent).Text, tc.message)
 	}
 
-	for _, enabled := range []string{"missing", "null", "false", "true"} {
-		definition := cronDefinition()
-		delete(definition, "enabled")
-		switch enabled {
-		case "null":
-			definition["enabled"] = nil
-		case "false":
-			definition["enabled"] = false
-		case "true":
-			definition["enabled"] = true
-		}
-		created := cronCall(t, f.session, "cron_job_create", map[string]any{"uid": cronNewUID(t, f.session), "name": "Inspect", "definition": definition})
-		savable := enabled == "false" || enabled == "true"
-		require.Equal(t, !savable, created.IsError)
-		if !savable {
-			require.Contains(t, created.Content[0].(*sdkmcp.TextContent).Text, "enabled")
-		}
-	}
 }
 func TestCronReadonlyAndIssueScopedCredentials(t *testing.T) {
 	f := newCronFixture(t)

@@ -26,6 +26,14 @@ func TestCronValidateDecodedInputParity(t *testing.T) {
 				resource, definition, decoded = "workflow", cronWorkflowDefinition(), &generated.CronWorkflowDefinition{}
 				definition["steps"].([]any)[0].(map[string]any)["after"] = nil
 			}
+			if resource == "job" {
+				created := cronCall(t, f.session, "cron_job_create", map[string]any{"uid": cronNewUID(t, f.session), "name": name, "definition": definition})
+				savable := name == "false-enabled" || name == "true-enabled"
+				require.Equal(t, !savable, created.IsError)
+				if !savable {
+					require.Contains(t, string(mustJSON(t, created.Content)), "enabled")
+				}
+			}
 			require.NoError(t, json.Unmarshal(mustJSON(t, definition), decoded))
 			// Mutation schemas remain strict. Compare the typed save input, as
 			// SDK clients send it, with validation of the original definition.

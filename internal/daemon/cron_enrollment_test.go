@@ -99,7 +99,7 @@ func TestCronPushEnrollmentLifecycle(t *testing.T) {
 // Cron accepts direct scoped push authority only. Every rejection must leave
 // the project history untouched, including on an otherwise keyless hub.
 func TestCronEnrollmentWriteBoundaries(t *testing.T) {
-	for _, kind := range []string{"missing-push", "revoked", "membership", "wrong-project", "global", "actor-mismatch", "relay", "adapter", "workflow", "disabled-hub", "spoke", "invalid-keyless"} {
+	for _, kind := range []string{"missing-push", "revoked", "membership", "wrong-project", "global", "actor-mismatch", "relay", "adapter", "workflow", "disabled-hub", "spoke", "invalid-keyless", "validate"} {
 		t.Run(kind, func(t *testing.T) {
 			options := []testenv.Option{testenv.WithAuthToken("owner-token")}
 			if kind == "invalid-keyless" {
@@ -116,6 +116,8 @@ func TestCronEnrollmentWriteBoundaries(t *testing.T) {
 			path := fmt.Sprintf("/api/v1/projects/%d/cron/jobs", project.ID)
 			var document any = definition
 			switch kind {
+			case "validate":
+				path += "/validate"
 			case "membership":
 				_, _, err := env.DB.SetProjectAccessPolicy(t.Context(), db.ProjectAccessPolicy{ProjectUID: project.UID, Visibility: "teams"}, "admin")
 				require.NoError(t, err)

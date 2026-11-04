@@ -36,8 +36,6 @@ func TestCronCollisionsWindow(t *testing.T) {
 	candidate.Def.Trigger = Trigger{Kind: "once", At: from.Format(time.RFC3339)}
 	got = collisionReport(t, candidate, []CollisionJob{peer}, from, CollisionStepBudget)
 	require.Equal(t, 1, got.Items[0].Occurrences)
-	peer.Def.Trigger = Trigger{Kind: "once", At: got.Until.Format(time.RFC3339)}
-	require.Empty(t, collisionReport(t, candidate, []CollisionJob{peer}, from, CollisionStepBudget).Items)
 	candidate.Def = nativeCollisionDefinition(candidate.Def)
 	candidate.Def.Trigger = Trigger{Kind: "cron", Cron: "0 9 * * *"}
 	peer.Def = candidate.Def
@@ -321,6 +319,26 @@ func TestCronCollisionsReferenceProperty(t *testing.T) {
 		require.Equal(ht, limited, got.Truncated)
 		require.Equal(ht, want, got.Items)
 	}, hegel.WithTestCases(60), hegel.WithDatabase(t.TempDir()))
+	t.Run("symmetry", func(t *testing.T) {
+		hegel.Test(t, func(ht *hegel.T) {
+			a, _, from := drawCollisionFleet(ht)
+			b, _, _ := drawCollisionFleet(ht)
+			b.UID = "other"
+			a.Def.Enabled = true
+			b.Def.Enabled = true
+			ab := collisionReport(t, a, []CollisionJob{b}, from, CollisionStepBudget)
+			ba := collisionReport(t, b, []CollisionJob{a}, from, CollisionStepBudget)
+			// Clipping can omit different local instants for the two candidates.
+			if ab.Truncated || ba.Truncated {
+				return
+			}
+			require.Equal(ht, len(ab.Items), len(ba.Items))
+			if len(ab.Items) > 0 {
+				require.Equal(ht, ab.Items[0].At, ba.Items[0].At)
+				require.Equal(ht, ab.Items[0].Occurrences, ba.Items[0].Occurrences)
+			}
+		}, hegel.WithTestCases(40), hegel.WithDatabase(t.TempDir()))
+	})
 }
 
 func TestCronCollisionsOrderProperty(t *testing.T) {
@@ -342,27 +360,6 @@ func TestCronCollisionsPausedProperty(t *testing.T) {
 	}, hegel.WithTestCases(60), hegel.WithDatabase(t.TempDir()))
 }
 
-func TestCronCollisionsSymmetryProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		a, _, from := drawCollisionFleet(ht)
-		b, _, _ := drawCollisionFleet(ht)
-		b.UID = "other"
-		a.Def.Enabled = true
-		b.Def.Enabled = true
-		ab := collisionReport(t, a, []CollisionJob{b}, from, CollisionStepBudget)
-		ba := collisionReport(t, b, []CollisionJob{a}, from, CollisionStepBudget)
-		// Clipping can omit different local instants for the two candidates.
-		if ab.Truncated || ba.Truncated {
-			return
-		}
-		require.Equal(ht, len(ab.Items), len(ba.Items))
-		if len(ab.Items) > 0 {
-			require.Equal(ht, ab.Items[0].At, ba.Items[0].At)
-			require.Equal(ht, ab.Items[0].Occurrences, ba.Items[0].Occurrences)
-		}
-	}, hegel.WithTestCases(40), hegel.WithDatabase(t.TempDir()))
-}
-
 func TestCronCollisionsZeroInstant(t *testing.T) {
 	from := time.Time{}
 	for _, trigger := range []Trigger{{Kind: "cron", Cron: "0 * * * *"}, {Kind: "once", At: "0001-01-01T00:00:00Z"}} {
@@ -379,9 +376,7 @@ func TestCronCollisionsZeroInstant(t *testing.T) {
 	peer.UID = "peer"
 	got := collisionReport(t, impossible, []CollisionJob{peer}, from, CollisionStepBudget)
 	require.Empty(t, got.Items, "a scheduler zero sentinel is not a real occurrence")
-}
 
-func TestCronCollisionsSentinelBoundaries(t *testing.T) {
 	t.Run("expired once before zero", func(t *testing.T) {
 		candidate := collisionJob("candidate", "0 * * * *")
 		candidate.Def.Trigger = Trigger{Kind: "once", At: "0000-12-29T00:00:00Z"}

@@ -44,7 +44,7 @@ func TestCronCLIValidateParentOptionParity(t *testing.T) {
 			after, err := env.DB.MaxEventID(t.Context())
 			require.NoError(t, err)
 			require.Equal(t, before, after)
-			t.Logf("create: exit=%d error=%v; validate: error=%v output=%s", createErr.ExitCode, createErr, validateErr, out)
+
 			var cliErr *cliError
 			require.ErrorAs(t, validateErr, &cliErr, "validate must reject an option that create rejects: %s", out)
 			require.Equal(t, ExitValidation, cliErr.ExitCode)

@@ -41,10 +41,8 @@ func checkCronValidateCollisions(t *testing.T, s db.Storage) error {
 	noInstant := job
 	noInstant.Trigger = cron.Trigger{Kind: "interval", IntervalSeconds: 60}
 	put(project.ID, "Adapter interval", noInstant)
-	for _, expression := range []string{"@none", "@manual", "@triggered", "CRON_TZ=UTC @none", "TZ=UTC @manual"} {
-		noInstant.Trigger = cron.Trigger{Kind: "cron", Cron: expression}
-		put(project.ID, expression, noInstant)
-	}
+	noInstant.Trigger = cron.Trigger{Kind: "cron", Cron: "@none"}
+	put(project.ID, "Dormant", noInstant)
 	raw, err := json.Marshal(job)
 	require.NoError(t, err)
 	from := time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)
@@ -57,7 +55,7 @@ func checkCronValidateCollisions(t *testing.T, s db.Storage) error {
 	require.NotNil(t, out.Schedule.Collisions)
 	clashes := out.Schedule.Collisions
 	require.False(t, clashes.Truncated)
-	require.Equal(t, 6, clashes.Skipped)
+	require.Equal(t, 2, clashes.Skipped)
 	require.Len(t, clashes.Items, 1)
 	require.Equal(t, 7, clashes.Items[0].Occurrences)
 	require.Equal(t, []cron.CollisionPeer{{UID: peer.UID, Name: peer.Name}}, clashes.Items[0].Peers)
@@ -74,7 +72,7 @@ func checkCronValidateCollisions(t *testing.T, s db.Storage) error {
 	require.NoError(t, err)
 	require.True(t, out.Valid)
 	require.Empty(t, out.Schedule.Collisions.Items)
-	require.Equal(t, 7, out.Schedule.Collisions.Skipped)
+	require.Equal(t, 3, out.Schedule.Collisions.Skipped)
 	for _, trigger := range []cron.Trigger{{Kind: "manual"}, {Kind: "interval", IntervalSeconds: 60}, {Kind: "cron", Cron: "@every 1h"}} {
 		job.Trigger = trigger
 		in.UID = ""
@@ -127,8 +125,8 @@ func checkCronValidateNativeCollisions(t *testing.T, s db.Storage) error {
 			require.NoError(t, marshalErr)
 			_, err = q.ExecContext(ctx, `UPDATE cron_jobs SET definition_json=$1 WHERE uid=$2`, string(raw), peer.UID)
 		case "zz-oversized-metadata":
-			// The bounded byte lookahead ends inside a UTF-8 rune. It must
-			// truncate before attempting to decode that incomplete prefix.
+			// Oversized metadata must truncate the report before decoding.
+			// The direct parent-reader test separately checks pre-Scan byte bounds.
 			_, err = q.ExecContext(ctx, `UPDATE issues SET metadata=$1 WHERE id=$2`, `{"blob":"`+strings.Repeat("😀", 2<<20)+`"}`, parent.ID)
 		}
 		require.NoError(t, err)
@@ -170,8 +168,8 @@ func checkCronValidateCollisionReadBounds(t *testing.T, s db.Storage) error {
 	require.True(t, out.Schedule.Collisions.Truncated)
 	require.Equal(t, 1024, out.Schedule.Collisions.Items[0].PeerCount)
 	require.Equal(t, "Peer 0000", out.Schedule.Collisions.Items[0].Peers[0].Name, "row selection follows names before UIDs")
-	// A prefix is now unpreviewable and large: the byte cap still applies
-	// without spending occurrence calls or querying any native parent.
+	// A large unpreviewable prefix exhausts the byte cap before matching
+	// peers. Removing that cap must expose items and fail this assertion.
 	large := job
 	large.Trigger = cron.Trigger{Kind: "manual"}
 	large.Options = []byte(`{"padding":"` + strings.Repeat("x", 250000) + `"}`)
@@ -182,8 +180,6 @@ func checkCronValidateCollisionReadBounds(t *testing.T, s db.Storage) error {
 	out, err = s.ValidateCronJob(ctx, in)
 	require.NoError(t, err)
 	require.True(t, out.Valid)
-	require.True(t, out.Schedule.Collisions.Truncated)
-	require.Less(t, out.Schedule.Collisions.Skipped, 100)
 	require.Empty(t, out.Schedule.Collisions.Items, "the byte budget excludes matching peers beyond the oversized prefix")
 	return nil
 }

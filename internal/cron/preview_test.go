@@ -15,8 +15,6 @@ func previewJob(t testing.TB) JobDefinition {
 	return j
 }
 
-// A document that fails strict decoding has no normalized document.
-
 func TestCronPreviewNativeIntervals(t *testing.T) {
 	// A fresh hypothetical anchor may be the Go zero instant.
 	job := previewJob(t)

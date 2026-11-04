@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
 )
@@ -25,20 +26,38 @@ func TestCronCLIValidate(t *testing.T) {
 	require.NoError(t, err)
 	parent, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Periodic review", Author: "operator"})
 	require.NoError(t, err)
+	peerDefinition := cronCLIJob(t).Definition.Native()
+	peerDefinition.Enabled = true
+	peerDefinition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 9 * * *"}
+	peer, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Daily peer", Definition: peerDefinition, Actor: "operator"})
+	require.NoError(t, err)
 	before, err := env.DB.MaxEventID(t.Context())
 	require.NoError(t, err)
 	for _, resource := range []string{"job", "workflow"} {
-		var body any = cronCLIJob(t)
+		jobBody := cronCLIJob(t)
+		jobBody.Definition.Trigger = cron.Trigger{Kind: "cron", Cron: "0 9 * * *"}
+		var body any = jobBody
 		if resource == "workflow" {
 			body = api.PutCronWorkflowBody{Name: "Review", Definition: api.CronWorkflowDefinition{Version: 1, Steps: []api.CronWorkflowStep{{Key: "inspect", Kind: "prompt", Prompt: "Inspect"}}}}
 		}
 		file := cronCLIFile(t, body)
-		out, diagnostic, err := executeCronCLI(t, env.URL, nil, resource, "validate", "--file", file)
+		args := []string{resource, "validate", "--file", file, "--quiet"}
+		if resource == "job" {
+			args = append(args, "--count", "1", "--from", "2026-11-03T00:00:00Z")
+		}
+		out, diagnostic, err := executeCronCLIWithoutJSON(t, env.URL, nil, args...)
 		require.NoError(t, err)
 		require.NotContains(t, diagnostic, "Definition UID")
 		var result db.CronValidation
 		require.NoError(t, json.Unmarshal([]byte(out), &result))
 		require.True(t, result.Valid)
+		if resource == "job" {
+			require.Len(t, result.Schedule.Next, 1)
+			require.Len(t, result.Schedule.Collisions.Items, 1)
+			require.Equal(t, 7, result.Schedule.Collisions.Items[0].Occurrences)
+			require.Equal(t, []cron.CollisionPeer{{UID: peer.UID, Name: peer.Name}}, result.Schedule.Collisions.Items[0].Peers)
+			require.Equal(t, "paused", result.Warnings[0].Code)
+		}
 		for _, withParent := range []bool{false, true} {
 			if withParent && resource != "job" {
 				continue
