@@ -111,6 +111,73 @@ API representation; original stored JSON member presence is not preserved.
 The daemon's current serialization rules and the bundle limits apply. Export performs
 ordinary reads; concurrent edits can change which versions are collected.
 
+### Copy jobs and workflows
+
+Import a bundle into a selected project, or copy definitions to another project
+on the same daemon:
+
+```sh
+kata cron import --file cron-bundle.json --project target-project --dry-run
+kata cron import --file cron-bundle.json --project target-project
+kata cron copy --job <job-uid> --to-project target-project
+```
+
+For another hub, select each daemon independently:
+
+```sh
+kata --daemon source-hub --project source-project cron export --all |
+  kata --daemon target-hub --project target-project cron import --file -
+```
+
+Each source definition gets one deterministic new UID per target project.
+Rerunning the same command resumes the copy; it does not create another copy.
+Workflow references are remapped automatically. Runs and source delivery
+checkpoints are excluded. Import validates every planned definition against
+current write rules before the first write. Optional empty fields and explicit
+defaults follow current API serialization; opaque numeric tokens retain their
+exact values and spellings.
+
+Issue references stay unchanged within the source project. Across projects,
+map every referenced issue to an existing issue in the destination. Explicit
+mappings also override references within the same project:
+
+```sh
+kata cron import --file cron-bundle.json --project target-project \
+  --map-issue <source-issue-uid>=abc4
+```
+
+Mappings apply only to `trigger.issue_uid`, `issue.uid`, and
+`issue.parent_uid`. Qualified refs must resolve in the selected target project.
+Conflicting mappings for the same source UID are rejected. Missing mappings
+are listed before any write for otherwise-valid definitions. Prompts, messages
+and opaque options are never searched for UID text or rewritten.
+
+Jobs arrive disabled unless `--keep-enabled` preserves their source state.
+Review the reported runtime-local recipients, checkout keys, secret-reference
+names and options for the destination installation. Disabled native recurring
+jobs still initialize fresh progress on their mapped parent. Enabling later
+with `catchup: all` can deliver occurrences since copy creation.
+
+Import writes workflows before jobs and reports `created`, `unchanged`,
+`replaced`, `conflict`, or `tombstoned` for each attempted item. It stops with a
+nonzero exit on the first unresolved conflict, tombstone or other error; earlier
+writes remain committed. No dependent job is written after its workflow fails.
+An uncertain transport/server outcome is reported as `uncertain`; reuse the
+same bundle and flags to recover. Recovery uses the authoritative current
+definition returned by a conflict, including forwarded writes through spokes.
+It never accepts a stale local projection as proof of an unchanged copy.
+
+Use `--replace` to update a different live copy with its current revision. A
+second concurrent change fails instead of repeatedly overwriting it. Import
+never restores deleted definitions. Native parent bindings remain immutable.
+Replacing a shared workflow may immediately affect existing enabled jobs, even
+when the newly copied jobs are disabled.
+
+`--dry-run` uses the same mappings, enabled policy and comparison rules but
+writes nothing. Its outcomes are predictions from current reads; a spoke's
+projection may lag its hub. A later write still checks permissions, live
+dependencies, native lifecycle restrictions and the current revision.
+
 ### Request files
 
 The `--file` body for `create` and `update` requires both `name` and
