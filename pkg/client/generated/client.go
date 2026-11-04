@@ -3823,11 +3823,16 @@ func (c *Client) ResumeCronJob(ctx context.Context, options *ResumeCronJobReques
 
 func (c *Client) ResumeCronProject(ctx context.Context, options *ResumeCronProjectRequestOptions, reqEditors ...runtime.RequestEditorFn) (*ResumeCronProjectResponse, error) {
 	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"discard_missed": {Style: "form", Explode: &[]bool{false}[0]},
+	}
 	reqParams := runtime.RequestOptionsParameters{
-		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/pause",
-		Method:      "DELETE",
-		Options:     options,
-		ContentType: "application/json",
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/pause",
+		Method:        "DELETE",
+		Options:       options,
+		ContentType:   "application/json",
+		QueryEncoding: queryEncoding,
 	}
 
 	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)
@@ -3886,11 +3891,16 @@ func (c *Client) ResumeCronProject(ctx context.Context, options *ResumeCronProje
 
 func (c *Client) PauseCronProject(ctx context.Context, options *PauseCronProjectRequestOptions, reqEditors ...runtime.RequestEditorFn) (*PauseCronProjectResponse, error) {
 	var err error
+
+	queryEncoding := map[string]runtime.QueryEncoding{
+		"discard_missed": {Style: "form", Explode: &[]bool{false}[0]},
+	}
 	reqParams := runtime.RequestOptionsParameters{
-		RequestURL:  c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/pause",
-		Method:      "PUT",
-		Options:     options,
-		ContentType: "application/json",
+		RequestURL:    c.apiClient.GetBaseURL() + "/api/v1/projects/{project_id}/cron/pause",
+		Method:        "PUT",
+		Options:       options,
+		ContentType:   "application/json",
+		QueryEncoding: queryEncoding,
 	}
 
 	req, err := c.apiClient.CreateRequest(ctx, reqParams, reqEditors...)

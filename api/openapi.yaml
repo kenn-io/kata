@@ -1095,9 +1095,13 @@ components:
           type:
             - object
             - "null"
+        project_revision:
+          format: int64
+          type: integer
         project_uid:
           type: string
       required:
+        - project_revision
         - project_uid
         - event_features
         - project_pause
@@ -1264,8 +1268,32 @@ components:
           type: array
         job:
           $ref: "#/components/schemas/CronJob"
+        passover:
+          additionalProperties: true
+          properties:
+            invalid:
+              type: boolean
+            scope:
+              type: string
+            through:
+              format: date-time
+              type: string
+          type:
+            - object
+            - "null"
       required:
         - job
+        - passover
+      type: object
+    CronJobResumeBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        discard_missed:
+          type: boolean
+        expected_event_uid:
+          type: string
       type: object
     CronProjectPauseBody:
       additionalProperties: false
@@ -4210,6 +4238,21 @@ components:
           items:
             $ref: "#/components/schemas/CronJob"
           type: array
+        passovers:
+          additionalProperties:
+            additionalProperties: true
+            properties:
+              invalid:
+                type: boolean
+              scope:
+                type: string
+              through:
+                format: date-time
+                type: string
+            type:
+              - object
+              - "null"
+          type: object
         project_pause:
           additionalProperties: true
           properties:
@@ -4229,6 +4272,7 @@ components:
             - "null"
       required:
         - jobs
+        - passovers
         - project_pause
         - controls
       type: object
@@ -8840,7 +8884,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CronJobEnabledActionBody"
+              $ref: "#/components/schemas/CronJobResumeBody"
       responses:
         "200":
           content:
@@ -8864,6 +8908,15 @@ paths:
           schema:
             format: int64
             type: integer
+        - explode: false
+          in: query
+          name: discard_missed
+          schema:
+            type: boolean
+        - in: header
+          name: If-Match
+          schema:
+            type: string
       requestBody:
         content:
           application/json:
@@ -8891,6 +8944,15 @@ paths:
           schema:
             format: int64
             type: integer
+        - explode: false
+          in: query
+          name: discard_missed
+          schema:
+            type: boolean
+        - in: header
+          name: If-Match
+          schema:
+            type: string
       requestBody:
         content:
           application/json:

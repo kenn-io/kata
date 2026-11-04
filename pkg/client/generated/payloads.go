@@ -52,7 +52,7 @@ type PauseCronJobBody = CronJobEnabledActionBody
 
 type RestoreCronJobBody = CronDefinitionActionBody
 
-type ResumeCronJobBody = CronJobEnabledActionBody
+type ResumeCronJobBody = CronJobResumeBody
 
 type ResumeCronProjectBody = CronProjectPauseBody
 
