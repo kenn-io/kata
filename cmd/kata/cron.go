@@ -696,13 +696,9 @@ func (o cronCLIOptions) callCapabilities(a daemonAPI, c *kataclient.Client, proj
 
 func (o cronCLIOptions) callWrite(a daemonAPI, c *kataclient.Client, projectID int64, raw []byte) ([]byte, error) {
 	if o.resource == "runtime" {
-		var body generated.BeatCronRuntimeBody
-		if err := decodeCronCLIRequest(raw, &body); err != nil {
-			return nil, err
-		}
 		// The attributed JSONv2 body already passed validation. Keep its bytes:
 		// the SDK's HTML escaping can expand an admitted beat beyond 8 KiB.
-		response, err := c.BeatCronRuntimeWithResponse(a.ctx, &generated.BeatCronRuntimeRequestOptions{PathParams: &generated.BeatCronRuntimePath{ProjectID: projectID, RuntimeUID: o.identity}, Body: &body}, func(_ context.Context, request *http.Request) error {
+		response, err := c.BeatCronRuntimeWithResponse(a.ctx, &generated.BeatCronRuntimeRequestOptions{PathParams: &generated.BeatCronRuntimePath{ProjectID: projectID, RuntimeUID: o.identity}}, func(_ context.Context, request *http.Request) error {
 			if request.Body != nil {
 				_ = request.Body.Close()
 			}

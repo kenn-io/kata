@@ -370,6 +370,45 @@ options). Each step has these fields:
 }
 ```
 
+### Adapter command jobs
+
+A job runs commands by referencing a workflow. `action.kind` remains
+`execute`; use `workflow_uid` instead of `prompt`, and put each command in a
+workflow step. The referenced workflow must already exist in the same project.
+
+Save the workflow above as `workflow.json` and create it with a retained UID:
+
+```sh
+kata cron workflow create --uid 01J00000000000000000000010 --file workflow.json --json
+```
+
+The UID here is an example. Choose your own ULID and use it in both the create
+command and the following job body. Save this request as `command.json`:
+
+```json
+{
+  "name": "nightly-tests",
+  "definition": {
+    "version": 1,
+    "kind": "job",
+    "enabled": true,
+    "trigger": {"kind": "cron", "cron": "0 2 * * *", "timezone": "UTC"},
+    "action": {"kind": "execute", "workflow_uid": "01J00000000000000000000010"},
+    "issue": {"kind": "per-run", "title": "Nightly tests"},
+    "overlap": "forbid",
+    "catchup": "latest",
+    "checkout_key": "example-project"
+  }
+}
+```
+
+```sh
+kata cron job create --uid <job-uid> --file command.json --json
+```
+
+The external adapter schedules the job and runs its workflow in the configured
+checkout. Kata stores the definitions and run evidence.
+
 ## Runtime heartbeats
 
 Adapters can advertise their liveness with
@@ -449,45 +488,6 @@ the forwarding slice lands.
 Advertisements are self-reported evidence. They do not activate an installation,
 select jobs, authorize execution, reserve an occurrence, or change run status.
 Adapters remain responsible for scheduling and execution policy.
-
-## Adapter command jobs
-
-A job runs commands by referencing a workflow. `action.kind` remains
-`execute`; use `workflow_uid` instead of `prompt`, and put each command in a
-workflow step. The referenced workflow must already exist in the same project.
-
-Save the workflow above as `workflow.json` and create it with a retained UID:
-
-```sh
-kata cron workflow create --uid 01J00000000000000000000010 --file workflow.json --json
-```
-
-The UID here is an example. Choose your own ULID and use it in both the create
-command and the following job body. Save this request as `command.json`:
-
-```json
-{
-  "name": "nightly-tests",
-  "definition": {
-    "version": 1,
-    "kind": "job",
-    "enabled": true,
-    "trigger": {"kind": "cron", "cron": "0 2 * * *", "timezone": "UTC"},
-    "action": {"kind": "execute", "workflow_uid": "01J00000000000000000000010"},
-    "issue": {"kind": "per-run", "title": "Nightly tests"},
-    "overlap": "forbid",
-    "catchup": "latest",
-    "checkout_key": "example-project"
-  }
-}
-```
-
-```sh
-kata cron job create --uid <job-uid> --file command.json --json
-```
-
-The external adapter schedules the job and runs its workflow in the configured
-checkout. Kata stores the definitions and run evidence.
 
 ## Capabilities
 

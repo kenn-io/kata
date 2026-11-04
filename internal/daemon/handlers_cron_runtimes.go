@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
-	"errors"
 	"net/http"
 	"strings"
 
@@ -49,11 +48,8 @@ func registerCronRuntimeHandlers(h huma.API, cfg ServerConfig) {
 			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, "", true)
 		}
 		runtime, err := cfg.CronRuntimes.beatNormalized(in.ProjectID, in.RuntimeUID, actor, beat)
-		if errors.Is(err, errCronRuntimeLimit) {
-			return nil, api.NewError(429, "cron_runtime_limit", err.Error(), "retry after retained runtime evidence expires", nil)
-		}
 		if err != nil {
-			return nil, cronAPIError(ctx, cfg, err, in.ProjectID, "", true)
+			return nil, api.NewError(429, "cron_runtime_limit", err.Error(), "retry after retained runtime evidence expires", nil)
 		}
 		out := &api.BeatCronRuntimeResponse{}
 		out.Body.Runtime = runtime
