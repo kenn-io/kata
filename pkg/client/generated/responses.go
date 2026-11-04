@@ -207,6 +207,14 @@ type ResumeCronJobResponse = CronJobResponseBody
 
 type ResumeCronJobErrorResponse = ErrorEnvelope
 
+type ResumeCronProjectResponse = CronProjectPauseResponseBody
+
+type ResumeCronProjectErrorResponse = ErrorEnvelope
+
+type PauseCronProjectResponse = CronProjectPauseResponseBody
+
+type PauseCronProjectErrorResponse = ErrorEnvelope
+
 type ListCronRunsResponse = CronRunsResponseBody
 
 type ListCronRunsErrorResponse = ErrorEnvelope
@@ -1015,6 +1023,22 @@ type ResumeCronJobResp struct {
 	StatusCode   int
 	JSON200      *ResumeCronJobResponse
 	JSONDefault  *ResumeCronJobErrorResponse
+}
+
+type ResumeCronProjectResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *ResumeCronProjectResponse
+	JSONDefault  *ResumeCronProjectErrorResponse
+}
+
+type PauseCronProjectResp struct {
+	HTTPResponse *http.Response
+	Body         []byte
+	StatusCode   int
+	JSON200      *PauseCronProjectResponse
+	JSONDefault  *PauseCronProjectErrorResponse
 }
 
 type ListCronRunsResp struct {

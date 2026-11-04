@@ -63,6 +63,8 @@ import type {
   CronDefinitionActionBody,
   CronJobEnabledActionBody,
   CronJobResponseBody,
+  CronProjectPauseBody,
+  CronProjectPauseResponseBody,
   CronRunResponseBody,
   CronRunsResponseBody,
   CronWorkflowResponseBody,
@@ -196,6 +198,7 @@ import type {
   PatchRecurrenceRequestBody,
   PatchRecurrenceResponseBody,
   PauseCronJobPathParameters,
+  PauseCronProjectPathParameters,
   PauseExternalRootBridgePathParameters,
   PingResponseBody,
   PollEventsBody,
@@ -267,6 +270,7 @@ import type {
   RestoreProjectResponseBody,
   RestoreRequestBody,
   ResumeCronJobPathParameters,
+  ResumeCronProjectPathParameters,
   ResumeExternalRootBridgePathParameters,
   RetryFederationQuarantinePathParameters,
   RetryFederationQuarantineRequestBody,
@@ -2533,6 +2537,98 @@ export const resumeCronJob = async (
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(cronJobEnabledActionBody),
+  })
+}
+
+export type resumeCronProjectResponse200 = {
+  data: CronProjectPauseResponseBody
+  status: 200
+}
+
+export type resumeCronProjectResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type resumeCronProjectResponseSuccess = resumeCronProjectResponse200 & {
+  headers: Headers
+}
+export type resumeCronProjectResponseError = resumeCronProjectResponseDefault & {
+  headers: Headers
+}
+
+export type resumeCronProjectResponse =
+  | resumeCronProjectResponseSuccess
+  | resumeCronProjectResponseError
+
+export const getResumeCronProjectUrl = ({ projectId }: ResumeCronProjectPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/pause`
+}
+
+export const resumeCronProject = async (
+  { projectId }: ResumeCronProjectPathParameters,
+  cronProjectPauseBody?: CronProjectPauseBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<resumeCronProjectResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<resumeCronProjectResponse>(getResumeCronProjectUrl({ projectId }), {
+    ...options,
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(cronProjectPauseBody),
+  })
+}
+
+export type pauseCronProjectResponse200 = {
+  data: CronProjectPauseResponseBody
+  status: 200
+}
+
+export type pauseCronProjectResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type pauseCronProjectResponseSuccess = pauseCronProjectResponse200 & {
+  headers: Headers
+}
+export type pauseCronProjectResponseError = pauseCronProjectResponseDefault & {
+  headers: Headers
+}
+
+export type pauseCronProjectResponse =
+  | pauseCronProjectResponseSuccess
+  | pauseCronProjectResponseError
+
+export const getPauseCronProjectUrl = ({ projectId }: PauseCronProjectPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/pause`
+}
+
+export const pauseCronProject = async (
+  { projectId }: PauseCronProjectPathParameters,
+  cronProjectPauseBody?: CronProjectPauseBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<pauseCronProjectResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<pauseCronProjectResponse>(getPauseCronProjectUrl({ projectId }), {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(cronProjectPauseBody),
   })
 }
 
