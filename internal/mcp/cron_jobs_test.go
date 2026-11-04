@@ -74,6 +74,8 @@ func TestCronProgressiveDiscovery(t *testing.T) {
 	s := connectRawTestServerWithOptions(t, Options{Client: inertTestClient(t), ProjectID: 42, ProjectName: "spoke-project", Actor: "example-agent", Version: "test"})
 	loaded := cronOK(t, s, "load_cron", map[string]any{})
 	require.Equal(t, true, loaded["loaded"])
+	require.Contains(t, loaded["tools"], "kata.cron_job_pause")
+	require.Contains(t, loaded["tools"], "kata.cron_job_resume")
 	after, err := s.ListTools(t.Context(), nil)
 	require.NoError(t, err)
 	require.Contains(t, toolNames(after.Tools), "kata.cron_job_create")
