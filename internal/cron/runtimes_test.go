@@ -15,7 +15,23 @@ import (
 
 func runtimeFixture() Runtime {
 	at := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
-	return Runtime{Label: "worker", Adapter: "example", AdapterVersion: "1.0.0", KataVersion: "0.31.0", IntervalSeconds: 60, State: "active", Features: []string{}, UID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Actor: "operator", FirstSeenAt: at, LastSeenAt: at, ExpiresAt: at.Add(180 * time.Second), ReportedVia: "direct"}
+	return Runtime{
+		RuntimeBeat: RuntimeBeat{
+			Label:           "worker",
+			Adapter:         "example",
+			AdapterVersion:  "1.0.0",
+			KataVersion:     "0.31.0",
+			IntervalSeconds: 60,
+			State:           "active",
+			Features:        []string{},
+		},
+		UID:         "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+		Actor:       "operator",
+		FirstSeenAt: at,
+		LastSeenAt:  at,
+		ExpiresAt:   at.Add(180 * time.Second),
+		ReportedVia: "direct",
+	}
 }
 
 func runtimeJobFixture(t *testing.T, options []byte) RuntimeJob {
@@ -24,10 +40,6 @@ func runtimeJobFixture(t *testing.T, options []byte) RuntimeJob {
 	definition.Options = options
 	require.NoError(t, definition.Validate())
 	return RuntimeJob{UID: "01ARZ3NDEKTSV4RRFFQ69G5FAY", Definition: definition}
-}
-
-func runtimeTestUID(index int) string {
-	return fmt.Sprintf("%026d", index)
 }
 
 // Contract: liveness is a half-open interval.
@@ -61,7 +73,7 @@ func TestRuntimePermutationInvariant(t *testing.T) {
 		n := hegel.Draw(h, hegel.Integers(0, 30))
 		for i := range n {
 			r := runtimeFixture()
-			r.UID = runtimeTestUID(i)
+			r.UID = fmt.Sprintf("%026d", i)
 			r.Label = hegel.Draw(h, hegel.SampledFrom([]string{"worker", "another"}))
 			r.Adapter = hegel.Draw(h, hegel.SampledFrom([]string{"alpha", "beta"}))
 			r.AdapterVersion = hegel.Draw(h, hegel.SampledFrom([]string{"", "1.0.0", "2.0.0"}))
@@ -239,7 +251,7 @@ func TestRuntimeSelectorsConjunctive(t *testing.T) {
 func TestRuntimeVersionSkewReportedLiveOnly(t *testing.T) {
 	hegel.Test(t, func(h *hegel.T) {
 		a, b := runtimeFixture(), runtimeFixture()
-		a.UID, b.UID = runtimeTestUID(1), runtimeTestUID(2)
+		a.UID, b.UID = fmt.Sprintf("%026d", 1), fmt.Sprintf("%026d", 2)
 		version := fmt.Sprintf("%d.%d.%d", hegel.Draw(h, hegel.Integers(0, 1000)), hegel.Draw(h, hegel.Integers(0, 1000)), hegel.Draw(h, hegel.Integers(0, 1000)))
 		a.AdapterVersion = version
 		mode := hegel.Draw(h, hegel.Integers(0, 2))

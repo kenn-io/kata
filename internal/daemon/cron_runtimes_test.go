@@ -12,16 +12,12 @@ import (
 	"hegel.dev/go/hegel"
 )
 
-func runtimeRegistryUID(index int) string {
-	return fmt.Sprintf("%026d", index)
-}
-
 func TestCronRuntimeRegistryRetentionAndIsolation(t *testing.T) {
 	now := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
 	start := now
 	reg := NewCronRuntimeRegistry(start, func() time.Time { return now })
 	beat := cron.RuntimeBeat{Label: "worker", Adapter: "example", IntervalSeconds: 10, Features: []string{"cron_v1"}}
-	r, err := reg.Beat(1, runtimeRegistryUID(1), "operator", beat)
+	r, err := reg.Beat(1, fmt.Sprintf("%026d", 1), "operator", beat)
 	require.NoError(t, err)
 	r.Features[0] = "returned-mutation"
 	list := reg.List(1, nil, "dev")
@@ -42,26 +38,26 @@ func TestCronRuntimeRegistryCapacity(t *testing.T) {
 	reg := NewCronRuntimeRegistry(now, func() time.Time { return now })
 	beat := cron.RuntimeBeat{Label: "worker", Adapter: "example", IntervalSeconds: 10}
 	for i := range 256 {
-		_, err := reg.Beat(1, runtimeRegistryUID(i), "operator", beat)
+		_, err := reg.Beat(1, fmt.Sprintf("%026d", i), "operator", beat)
 		require.NoError(t, err)
 	}
-	_, err := reg.Beat(1, runtimeRegistryUID(256), "operator", beat)
+	_, err := reg.Beat(1, fmt.Sprintf("%026d", 256), "operator", beat)
 	require.ErrorIs(t, err, errCronRuntimeLimit, "project limit applies below daemon capacity")
 	for p := int64(2); p <= 16; p++ {
 		for i := range 256 {
-			_, err := reg.Beat(p, runtimeRegistryUID(i), "operator", beat)
+			_, err := reg.Beat(p, fmt.Sprintf("%026d", i), "operator", beat)
 			require.NoError(t, err)
 		}
 	}
-	_, err = reg.Beat(17, runtimeRegistryUID(256), "operator", beat)
+	_, err = reg.Beat(17, fmt.Sprintf("%026d", 256), "operator", beat)
 	require.ErrorIs(t, err, errCronRuntimeLimit)
 	now = now.Add(30 * time.Second)
-	_, err = reg.Beat(1, runtimeRegistryUID(0), "operator", beat)
+	_, err = reg.Beat(1, fmt.Sprintf("%026d", 0), "operator", beat)
 	require.NoError(t, err, "retained identities may refresh at capacity")
-	_, err = reg.Beat(17, runtimeRegistryUID(256), "operator", beat)
+	_, err = reg.Beat(17, fmt.Sprintf("%026d", 256), "operator", beat)
 	require.ErrorIs(t, err, errCronRuntimeLimit, "expiry alone does not release retention")
 	now = now.Add(24 * time.Hour)
-	_, err = reg.Beat(17, runtimeRegistryUID(256), "operator", beat)
+	_, err = reg.Beat(17, fmt.Sprintf("%026d", 256), "operator", beat)
 	require.NoError(t, err, "reclaim across untouched projects")
 }
 func TestCronRuntimeRegistrySequences(t *testing.T) {
@@ -74,7 +70,7 @@ func TestCronRuntimeRegistrySequences(t *testing.T) {
 			steps = steps[:100]
 		}
 		for _, step := range steps {
-			key := runtimeRegistryUID(step % 10)
+			key := fmt.Sprintf("%026d", step%10)
 			operation := step / 10 % 3
 			switch operation {
 			case 0:
@@ -117,7 +113,7 @@ func TestCronRuntimeRegistryRefresh(t *testing.T) {
 		first := now
 		interval := hegel.Draw(h, hegel.Integers(10, 3600))
 		b := cron.RuntimeBeat{Label: "worker", Adapter: "example", IntervalSeconds: interval, State: "stopping"}
-		stopped, err := reg.Beat(1, runtimeRegistryUID(1), "first-actor", b)
+		stopped, err := reg.Beat(1, fmt.Sprintf("%026d", 1), "first-actor", b)
 		if err != nil {
 			h.Fatal(err)
 		}
@@ -132,14 +128,14 @@ func TestCronRuntimeRegistryRefresh(t *testing.T) {
 		}
 		now = first.Add(time.Second)
 		b.State = "active"
-		active, err := reg.Beat(1, runtimeRegistryUID(1), "second-actor", b)
+		active, err := reg.Beat(1, fmt.Sprintf("%026d", 1), "second-actor", b)
 		if err != nil {
 			h.Fatal(err)
 		}
 		if !active.FirstSeenAt.Equal(first) || !active.LastSeenAt.Equal(now) || !active.ExpiresAt.Equal(now.Add(time.Duration(interval)*3*time.Second)) || active.Actor != "second-actor" || active.Status != "live" {
 			h.Fatal("refresh did not replace current evidence and preserve retained history")
 		}
-		_, err = reg.Beat(2, runtimeRegistryUID(1), "other-project", b)
+		_, err = reg.Beat(2, fmt.Sprintf("%026d", 1), "other-project", b)
 		if err != nil {
 			h.Fatal(err)
 		}
