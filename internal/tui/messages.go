@@ -47,8 +47,9 @@ type detailFetchedMsg struct {
 	children   []Issue
 	// recurrence is the live recurrence of the issue; nil when it has none or
 	// the read failed, so a stale one never outlives its read.
-	recurrence *recurrenceclient.View
-	err        error
+	recurrence    *recurrenceclient.View
+	recurrenceErr error
+	err           error
 }
 
 // commentsFetchedMsg, eventsFetchedMsg, and linksFetchedMsg carry the

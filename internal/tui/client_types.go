@@ -403,9 +403,9 @@ type IssueDetail struct {
 	Parent   *IssueRef
 	Children []Issue
 	Lease    *api.IssueClaimOut
-	// Recurrence is the live recurrence the issue belongs to; nil when it
-	// has none or the daemon would not list it.
-	Recurrence *recurrenceclient.View
+	// Recurrence is nil when absent or unreadable; RecurrenceErr distinguishes them.
+	Recurrence    *recurrenceclient.View
+	RecurrenceErr error
 }
 
 // showIssueLabel is the per-label projection from showIssue's labels

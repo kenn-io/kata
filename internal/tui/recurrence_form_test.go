@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -14,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
+	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/pkg/client/generated"
 	"go.kenn.io/kit/tui/splitlayout"
 )
@@ -186,16 +188,21 @@ func TestRecurrenceFormStartsAndChangesARecurrence(t *testing.T) {
 	assert.Equal(t, "FREQ=DAILY", changed[0].RRule)
 }
 
-func TestRecurrenceFormPaddedUnchangedRuleSkipsSave(t *testing.T) {
+func TestRecurrenceFormPaddedUnchangedRuleClosesQuietly(t *testing.T) {
 	h := newRecurrenceHarness(t, viewDetail)
+	h.openForm()
+	h.datesHarness.fill("2026-11-09", "")
+	h.datesHarness.save()
+	require.Len(t, h.m.undoHistory.entries, 1)
 	h.startBehindTheTUI("FREQ=WEEKLY;BYDAY=MO", "2026-11-09", "Europe/Paris")
 	h.open()
 	h.fill(" FREQ=WEEKLY;BYDAY=MO ", "2026-11-09", "Europe/Paris")
 
-	cmd := h.key(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
-
-	assert.Empty(t, msgsOfType[mutationDoneMsg](cmd), "an equivalent rule closes without sending a save")
+	h.save()
 	assert.Equal(t, inputNone, h.m.input.kind)
+	assert.Empty(t, h.m.detail.status)
+	assert.Nil(t, h.m.toast)
+	assert.Len(t, h.m.undoHistory.entries, 1)
 	assert.Equal(t, "FREQ=WEEKLY;BYDAY=MO", h.rows()[0].RRule)
 }
 
@@ -269,6 +276,52 @@ func TestRecurrenceKeyRefusesMissingRecurrence(t *testing.T) {
 	assert.Equal(t, inputNone, h.m.input.kind)
 	require.NotNil(t, h.m.toast)
 	assert.Equal(t, "Can't read this issue's repeat; it may have been stopped", h.m.toast.text)
+}
+
+func TestRecurrenceKeyShowsScopedReadRefusal(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("bootstrap-token"), testenv.WithRequireTokenIdentity())
+	project, err := env.DB.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Example", Author: "alice",
+	})
+	require.NoError(t, err)
+	authedClient := func(token string) *Client {
+		return NewClient(env.URL, &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			r = r.Clone(r.Context())
+			r.Header.Set("Authorization", "Bearer "+token)
+			return env.HTTP.Do(r)
+		})})
+	}
+	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+		PlaintextToken: "owner-token", Actor: "alice", AdminActor: db.BootstrapActor,
+	})
+	require.NoError(t, err)
+	api, err := authedClient("owner-token").generatedClient()
+	require.NoError(t, err)
+	require.NoError(t, recurrenceclient.Start(t.Context(), api, project.ID, issue.UID,
+		recurrenceclient.Template{Title: "Example"},
+		recurrenceclient.Terms{Rule: "FREQ=WEEKLY", Start: "2026-11-09", Zone: "Europe/Paris", Actor: "alice"}, nil))
+	expires := time.Now().Add(time.Hour)
+	_, _, err = env.DB.CreateAPIToken(t.Context(), db.CreateAPITokenParams{
+		PlaintextToken: "worker-token", Actor: "alice", AdminActor: db.BootstrapActor,
+		Scope:     &db.APITokenScope{Kind: db.APITokenScopeIssueSubtree, ProjectUID: project.UID, RootIssueUID: issue.UID},
+		ExpiresAt: &expires,
+	})
+	require.NoError(t, err)
+	m := initialModel(Options{})
+	m.view = viewDetail
+	out, _ := m.Update(fetchIssue(authedClient("worker-token"), project.ID, issue.UID, m.detail.gen)())
+	m = out.(Model)
+	require.NotNil(t, m.detail.issue, "the scoped token can still read the issue")
+	require.NotNil(t, m.detail.issue.RecurrenceID)
+	m, _, handled := m.routeRecurrenceKey(runeKey('O'))
+	require.True(t, handled)
+	assert.Equal(t, inputNone, m.input.kind)
+	require.NotNil(t, m.toast)
+	assert.Contains(t, m.toast.text, "Could not read the repeat:")
+	assert.Contains(t, m.toast.text, "operation is not available to an issue-scoped credential")
+	assert.NotContains(t, m.toast.text, "may have been stopped")
 }
 
 func TestRecurrenceFormRefusesAndKeepsTheInput(t *testing.T) {
