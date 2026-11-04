@@ -211,6 +211,25 @@ func checkCronProjectPause(t *testing.T, s db.Storage, b Backend) error {
 			}
 		}
 	})
+	t.Run("adoption accepts null controls", func(t *testing.T) {
+		for _, key := range []string{"cron.pause", "cron.request.01ARZ3NDEKTSV4RRFFQ69G5FAV", "cron.passover", "cron.passover.01ARZ3NDEKTSV4RRFFQ69G5FAV"} {
+			p, e := s.CreateProject(ctx, "null-adoption-"+strings.ReplaceAll(key, ".", "-"))
+			require.NoError(t, e)
+			seedPassover(t, s, p.ID, map[string]jsontext.Value{key: jsontext.Value("null"), "ordinary": jsontext.Value("null")})
+			hub, e := uid.New()
+			require.NoError(t, e)
+			in := db.AdoptProjectIntoFederationParams{ProjectID: p.ID, HubURL: "https://daemon.example", HubProjectID: 42, HubProjectUID: hub, ReplayHorizonEventID: 1, Actor: "operator"}
+			adopted, e := s.AdoptProjectIntoFederation(ctx, in)
+			require.NoError(t, e)
+			require.Equal(t, hub, adopted.Project.UID)
+			baseline, e := db.ProjectMetadataAdoptionPayload(adopted.Project.Metadata)
+			require.NoError(t, e)
+			require.NoError(t, db.ValidateCronControlEvent(db.RemoteEvent{Type: "project.metadata_updated", OriginInstanceUID: s.InstanceUID(), Payload: jsontext.Value(baseline)}, "root"))
+			retry, e := s.AdoptProjectIntoFederation(ctx, in)
+			require.NoError(t, e, "already-adopted retry bypasses the guard")
+			require.Equal(t, adopted.Project.UID, retry.Project.UID)
+		}
+	})
 	t.Run("root disabled binding", func(t *testing.T) {
 		p, e := s.CreateProject(ctx, "disabled-root-project")
 		require.NoError(t, e)

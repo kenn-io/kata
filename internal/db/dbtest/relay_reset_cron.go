@@ -71,6 +71,11 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	require.NoError(t, err)
 	var rootMetadata map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(rootProject.Metadata), &rootMetadata))
+	rootMetadata["cron.pause"] = jsontext.Value("null")
+	seedPassover(t, root, project.ID, rootMetadata)
+	rootProject, err = root.ProjectByID(ctx, project.ID)
+	require.NoError(t, err)
+	require.Nil(t, db.CronProjectPauseFromMetadata(rootProject.Metadata))
 	//nolint:gosec // This is a deterministic fixture credential, never an operational secret.
 	parent, _, err := root.CreateAPIToken(ctx, db.CreateAPITokenParams{PlaintextToken: "cron-reset-parent-test-token", Actor: "company-member", AdminActor: "admin"})
 	require.NoError(t, err)
@@ -115,25 +120,40 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	// contract before any project state is replaced.
 	beforeInvalid, err := downstream.ProjectByID(ctx, replica.ID)
 	require.NoError(t, err)
-	badSnapshot := checkpoint.Snapshot
-	var entityBodies [][]byte
-	require.NoError(t, json.Unmarshal(badSnapshot.Entities, &entityBodies))
-	badEvent := newRemoteEvent(t, project, nil, "project.metadata_updated", "operator", root.InstanceUID(), time.Now().UnixMilli(), jsontext.Value(`{"project_uid":"`+project.UID+`","diff":{"cron.request.`+requestID+`":{"from":null,"to":{"kind":"run"}}}}`))
-	badBody, err := db.EncodeRelaySourceEvent(badEvent)
-	require.NoError(t, err)
-	badSnapshot.Entities, err = json.Marshal(append(entityBodies, badBody))
-	require.NoError(t, err)
-	badManifest, err := db.SignRootResetManifest(checkpoint.Manifest, badSnapshot, private)
-	require.NoError(t, err)
-	badTranslation := checkpoint.Translation
-	badTranslation.SnapshotDigest = badManifest.SnapshotDigest
-	require.NoError(t, db.VerifyRootResetManifest(pin, badManifest, badSnapshot))
-	require.ErrorIs(t, installer.InstallRelayReset(ctx, bindingUID, badManifest, badSnapshot, badTranslation), db.ErrFederationIngestValidation)
-	afterInvalid, err := downstream.ProjectByID(ctx, replica.ID)
-	require.NoError(t, err)
-	require.Equal(t, beforeInvalid, afterInvalid, "invalid request checkpoint cannot partially replace the replica")
-	_, err = downstream.CronJob(ctx, replica.ID, job.UID)
-	require.ErrorIs(t, err, db.ErrNotFound)
+	for _, key := range []string{"cron.pause", "cron.request." + requestID} {
+		for _, entitySection := range []bool{false, true} {
+			badSnapshot := checkpoint.Snapshot
+			bodies := badSnapshot.Events
+			if entitySection {
+				bodies = badSnapshot.Entities
+			}
+			var sources [][]byte
+			require.NoError(t, json.Unmarshal(bodies, &sources))
+			raw, e := json.Marshal(map[string]any{"project_uid": project.UID, "diff": map[string]any{key: map[string]any{"from": nil, "to": false}}})
+			require.NoError(t, e)
+			event := newRemoteEvent(t, project, nil, "project.metadata_updated", "operator", root.InstanceUID(), time.Now().UnixMilli(), raw)
+			body, e := db.EncodeRelaySourceEvent(event)
+			require.NoError(t, e)
+			bodies, e = json.Marshal(append(sources, body))
+			require.NoError(t, e)
+			if entitySection {
+				badSnapshot.Entities = bodies
+			} else {
+				badSnapshot.Events = bodies
+			}
+			manifest, e := db.SignRootResetManifest(checkpoint.Manifest, badSnapshot, private)
+			require.NoError(t, e)
+			translation := checkpoint.Translation
+			translation.SnapshotDigest = manifest.SnapshotDigest
+			require.NoError(t, db.VerifyRootResetManifest(pin, manifest, badSnapshot))
+			require.ErrorIs(t, installer.InstallRelayReset(ctx, bindingUID, manifest, badSnapshot, translation), db.ErrFederationIngestValidation, key)
+			after, e := downstream.ProjectByID(ctx, replica.ID)
+			require.NoError(t, e)
+			require.Equal(t, beforeInvalid, after, "invalid controls cannot partially replace replica")
+			_, e = downstream.CronJob(ctx, replica.ID, job.UID)
+			require.ErrorIs(t, e, db.ErrNotFound)
+		}
+	}
 	// A correctly signed malformed cutoff must fail atomically in either
 	// retained source history or synthesized entity state.
 	for _, entitySection := range []bool{false, true} {
@@ -190,6 +210,7 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 
 	installedProject, err := downstream.ProjectByID(ctx, replica.ID)
 	require.NoError(t, err)
+	require.Nil(t, db.CronProjectPauseFromMetadata(installedProject.Metadata))
 	require.Equal(t, retainedPassover, db.CronPassoverFromMetadata(installedProject.Metadata, job.UID))
 	installedJob, err := downstream.CronJob(ctx, replica.ID, job.UID)
 	require.NoError(t, err)

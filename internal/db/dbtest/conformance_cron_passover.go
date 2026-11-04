@@ -120,7 +120,7 @@ func checkCronPassover(t *testing.T, _ db.Storage, b Backend) error {
 		p, parent, job, progress := recurringFixture(t, s, "all")
 		in := db.DispatchRecurringCronIn{ProjectID: p.ID, JobUID: job.UID, ExpectedEventUID: job.DefinitionEventUID, Now: progress.Anchor.Add(2 * time.Hour)}
 		valid := passoverFixtureValue(t, progress.Anchor)
-		for _, values := range []map[string]jsontext.Value{{"cron.passover": jsontext.Value(`null`), "cron.passover." + job.UID: valid}, {"cron.passover": valid, "cron.passover." + job.UID: jsontext.Value(`null`)}} {
+		for _, values := range []map[string]jsontext.Value{{"cron.passover": jsontext.Value(`false`), "cron.passover." + job.UID: valid}, {"cron.passover": valid, "cron.passover." + job.UID: jsontext.Value(`false`)}} {
 			seedPassover(t, s, p.ID, values)
 			out, e := s.DispatchRecurringCron(t.Context(), in)
 			require.ErrorIs(t, e, cron.ErrInvalid)

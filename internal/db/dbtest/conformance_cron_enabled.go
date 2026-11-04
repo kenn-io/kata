@@ -1,6 +1,9 @@
 package dbtest
 
 import (
+	"context"
+	"database/sql"
+	"encoding/json/v2"
 	"testing"
 	"time"
 
@@ -43,7 +46,7 @@ func checkCronEnabledDeletedParent(t *testing.T, s db.Storage) error {
 
 // Adapter dependency failures are tested separately from native parent gating.
 func checkCronEnabledAdapterTarget(t *testing.T, s db.Storage) error {
-	for _, kind := range []string{"deleted", "moved-resume", "moved-pause"} {
+	for _, kind := range []string{"deleted", "moved-resume", "moved-pause", "missing-pause"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := t.Context()
 			project, err := s.CreateProject(ctx, "adapter-"+kind)
@@ -65,15 +68,30 @@ func checkCronEnabledAdapterTarget(t *testing.T, s db.Storage) error {
 			if kind == "moved-pause" {
 				moveTarget()
 			}
+			if kind == "missing-pause" {
+				// A restored definition may reference a missing issue. The
+				// enabled-only exception must still check existence.
+				q := s.(interface {
+					ExecContext(context.Context, string, ...any) (sql.Result, error)
+				})
+				definition.Issue.UID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+				raw, e := json.Marshal(definition)
+				require.NoError(t, e)
+				_, err = q.ExecContext(ctx, "UPDATE cron_jobs SET definition_json=$1 WHERE uid=$2", string(raw), job.UID)
+				require.NoError(t, err)
+				job.Definition = definition
+			}
 			if kind == "deleted" {
 				_, _, _, err = s.SoftDeleteIssue(ctx, target.ID, "operator")
 				require.NoError(t, err)
 			}
 			definition.Enabled = false
 			paused, events, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, UID: job.UID, Name: job.Name, Definition: definition, Actor: "operator", ExpectedEventUID: job.DefinitionEventUID})
-			if kind == "moved-pause" {
+			if kind == "moved-pause" || kind == "missing-pause" {
 				require.ErrorIs(t, err, cron.ErrInvalid)
-				require.ErrorContains(t, err, "dependency belongs to another project")
+				if kind == "moved-pause" {
+					require.ErrorContains(t, err, "dependency belongs to another project")
+				}
 				require.Empty(t, events)
 				current, readErr := s.CronJob(ctx, project.ID, job.UID)
 				require.NoError(t, readErr)
@@ -85,6 +103,18 @@ func checkCronEnabledAdapterTarget(t *testing.T, s db.Storage) error {
 			require.Equal(t, definition, paused.Definition)
 			if kind == "moved-resume" {
 				moveTarget()
+				beforeProject, e := s.ProjectByID(ctx, project.ID)
+				require.NoError(t, e)
+				beforeEvent, e := s.MaxEventID(ctx)
+				require.NoError(t, e)
+				_, e = s.ResumeCronJob(ctx, db.ResumeCronJobIn{ProjectID: project.ID, UID: job.UID, ExpectedEventUID: paused.DefinitionEventUID, Actor: "operator", DiscardMissed: true})
+				require.ErrorIs(t, e, cron.ErrInvalid)
+				afterProject, e := s.ProjectByID(ctx, project.ID)
+				require.NoError(t, e)
+				require.Equal(t, beforeProject, afterProject, "refused discard cannot retain a cutoff")
+				afterEvent, e := s.MaxEventID(ctx)
+				require.NoError(t, e)
+				require.Equal(t, beforeEvent, afterEvent)
 			}
 			definition.Enabled = true
 			_, events, err = s.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, UID: job.UID, Name: job.Name, Definition: definition, Actor: "operator", ExpectedEventUID: paused.DefinitionEventUID})

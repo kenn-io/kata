@@ -92,7 +92,7 @@ func checkCronControlIngressValue(t *testing.T, store db.Storage, key, pause str
 			current, err := store.ProjectByID(ctx, p.ID)
 			require.NoError(t, err)
 			require.JSONEq(t, pause, string(readValue(t, current)))
-			if key != "cron.pause" {
+			if key == "cron.passover" {
 				require.ErrorIs(t, deliver(2, `null`), db.ErrFederationIngestValidation)
 				return
 			}
