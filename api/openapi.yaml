@@ -1301,6 +1301,76 @@ components:
         - project_pause
         - changed
       type: object
+    CronRequest:
+      additionalProperties: true
+      properties:
+        definition_event_uid:
+          type: string
+        expires_at:
+          format: date-time
+          type: string
+        job_uid:
+          type: string
+        kind:
+          type: string
+        requested_at:
+          format: date-time
+          type: string
+        requested_by:
+          type: string
+        run_uid:
+          type: string
+        state:
+          type: string
+        uid:
+          type: string
+      required:
+        - uid
+        - kind
+        - requested_by
+        - requested_at
+        - expires_at
+      type: object
+    CronRequestBody:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+        ttl_seconds:
+          format: int64
+          maximum: 86400
+          minimum: 60
+          type: integer
+        uid:
+          maxLength: 26
+          minLength: 26
+          type: string
+      required:
+        - uid
+      type: object
+    CronRequestListResponseBody:
+      additionalProperties: true
+      properties:
+        requests:
+          items:
+            $ref: "#/components/schemas/CronRequest"
+          type: array
+      required:
+        - requests
+      type: object
+    CronRequestResponseBody:
+      additionalProperties: true
+      properties:
+        event:
+          $ref: "#/components/schemas/Event"
+        replayed:
+          type: boolean
+        request:
+          $ref: "#/components/schemas/CronRequest"
+      required:
+        - request
+        - replayed
+      type: object
     CronRun:
       additionalProperties: true
       properties:
@@ -8791,6 +8861,40 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
+  /api/v1/projects/{project_id}/cron/jobs/{cron_uid}/requests:
+    post:
+      operationId: requestCronJobRun
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: cron_uid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CronRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CronRequestResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
   /api/v1/projects/{project_id}/cron/jobs/{cron_uid}/restore:
     post:
       operationId: restoreCronJob
@@ -8921,6 +9025,38 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
           description: Error
+  /api/v1/projects/{project_id}/cron/requests:
+    get:
+      operationId: listCronRequests
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - explode: false
+          in: query
+          name: state
+          schema:
+            enum:
+              - pending
+              - answered
+              - expired
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CronRequestListResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
   /api/v1/projects/{project_id}/cron/runs:
     get:
       operationId: listCronRuns
@@ -9016,6 +9152,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ObserveCronRunResponseBody"
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+          description: Error
+  /api/v1/projects/{project_id}/cron/runs/{run_uid}/cancel-request:
+    post:
+      operationId: requestCronRunCancel
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            format: int64
+            type: integer
+        - in: path
+          name: run_uid
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CronRequestBody"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CronRequestResponseBody"
           description: OK
         default:
           content:

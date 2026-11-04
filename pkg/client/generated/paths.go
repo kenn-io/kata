@@ -197,6 +197,15 @@ func (p PauseCronJobPath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(p))
 }
 
+type RequestCronJobRunPath struct {
+	ProjectID int64  `json:"project_id"`
+	CronUID   string `json:"cron_uid" validate:"required"`
+}
+
+func (r RequestCronJobRunPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
+}
+
 type RestoreCronJobPath struct {
 	ProjectID int64  `json:"project_id"`
 	CronUID   string `json:"cron_uid" validate:"required"`
@@ -223,6 +232,10 @@ type PauseCronProjectPath struct {
 	ProjectID int64 `json:"project_id"`
 }
 
+type ListCronRequestsPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
 type ListCronRunsPath struct {
 	ProjectID int64 `json:"project_id"`
 }
@@ -243,6 +256,15 @@ type ObserveCronRunPath struct {
 
 func (o ObserveCronRunPath) Validate() error {
 	return runtime.ConvertValidatorError(typesValidator.Struct(o))
+}
+
+type RequestCronRunCancelPath struct {
+	ProjectID int64  `json:"project_id"`
+	RunUID    string `json:"run_uid" validate:"required"`
+}
+
+func (r RequestCronRunCancelPath) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(r))
 }
 
 type ListCronWorkflowsPath struct {

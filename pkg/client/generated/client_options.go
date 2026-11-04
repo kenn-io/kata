@@ -2141,6 +2141,59 @@ func (o *PauseCronJobRequestOptions) GetHeader() (map[string]string, error) {
 	return runtime.AsMap[string](o.Header)
 }
 
+// RequestCronJobRunRequestOptions is the options needed to make a request to RequestCronJobRun.
+type RequestCronJobRunRequestOptions struct {
+	PathParams *RequestCronJobRunPath
+	Body       *RequestCronJobRunBody
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *RequestCronJobRunRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *RequestCronJobRunRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *RequestCronJobRunRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *RequestCronJobRunRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *RequestCronJobRunRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
 // RestoreCronJobRequestOptions is the options needed to make a request to RestoreCronJob.
 type RestoreCronJobRequestOptions struct {
 	PathParams *RestoreCronJobPath
@@ -2371,6 +2424,59 @@ func (o *PauseCronProjectRequestOptions) GetHeader() (map[string]string, error) 
 	return nil, nil
 }
 
+// ListCronRequestsRequestOptions is the options needed to make a request to ListCronRequests.
+type ListCronRequestsRequestOptions struct {
+	PathParams *ListCronRequestsPath
+	Query      *ListCronRequestsQuery
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *ListCronRequestsRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Query != nil {
+		if v, ok := any(o.Query).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Query", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *ListCronRequestsRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *ListCronRequestsRequestOptions) GetQuery() (map[string]any, error) {
+	return runtime.AsMap[any](o.Query)
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *ListCronRequestsRequestOptions) GetBody() any {
+	return nil
+}
+
+// GetHeader returns the headers as a map.
+func (o *ListCronRequestsRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
 // ListCronRunsRequestOptions is the options needed to make a request to ListCronRuns.
 type ListCronRunsRequestOptions struct {
 	PathParams *ListCronRunsPath
@@ -2518,6 +2624,59 @@ func (o *ObserveCronRunRequestOptions) GetBody() any {
 
 // GetHeader returns the headers as a map.
 func (o *ObserveCronRunRequestOptions) GetHeader() (map[string]string, error) {
+	return nil, nil
+}
+
+// RequestCronRunCancelRequestOptions is the options needed to make a request to RequestCronRunCancel.
+type RequestCronRunCancelRequestOptions struct {
+	PathParams *RequestCronRunCancelPath
+	Body       *RequestCronRunCancelBody
+}
+
+// Validate validates all the fields in the options.
+// Use it if fields validation was not run.
+func (o *RequestCronRunCancelRequestOptions) Validate() error {
+	var errors runtime.ValidationErrors
+
+	if o.PathParams != nil {
+		if v, ok := any(o.PathParams).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("PathParams", err)
+			}
+		}
+	}
+
+	if o.Body != nil {
+		if v, ok := any(o.Body).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Body", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+
+	return errors
+}
+
+// GetPathParams returns the path params as a map.
+func (o *RequestCronRunCancelRequestOptions) GetPathParams() (map[string]any, error) {
+	return runtime.AsMap[any](o.PathParams)
+}
+
+// GetQuery returns the query params as a map.
+func (o *RequestCronRunCancelRequestOptions) GetQuery() (map[string]any, error) {
+	return nil, nil
+}
+
+// GetBody returns the payload in any type that can be marshalled to JSON by the client.
+func (o *RequestCronRunCancelRequestOptions) GetBody() any {
+	return o.Body
+}
+
+// GetHeader returns the headers as a map.
+func (o *RequestCronRunCancelRequestOptions) GetHeader() (map[string]string, error) {
 	return nil, nil
 }
 

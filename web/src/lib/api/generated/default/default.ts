@@ -65,6 +65,9 @@ import type {
   CronJobResponseBody,
   CronProjectPauseBody,
   CronProjectPauseResponseBody,
+  CronRequestBody,
+  CronRequestListResponseBody,
+  CronRequestResponseBody,
   CronRunResponseBody,
   CronRunsResponseBody,
   CronWorkflowResponseBody,
@@ -155,6 +158,8 @@ import type {
   ListCronJobsParams,
   ListCronJobsPathParameters,
   ListCronJobsResponseBody,
+  ListCronRequestsParams,
+  ListCronRequestsPathParameters,
   ListCronRunsParams,
   ListCronRunsPathParameters,
   ListCronWorkflowsParams,
@@ -256,6 +261,8 @@ import type {
   RepinFederationRootKeyRequestBody,
   ReplaceCronJobPathParameters,
   ReplaceCronWorkflowPathParameters,
+  RequestCronJobRunPathParameters,
+  RequestCronRunCancelPathParameters,
   ResolveExternalCommentPathParameters,
   ResolveExternalCommentRequestBody,
   ResolveExternalFieldPathParameters,
@@ -2452,6 +2459,55 @@ export const pauseCronJob = async (
   })
 }
 
+export type requestCronJobRunResponse200 = {
+  data: CronRequestResponseBody
+  status: 200
+}
+
+export type requestCronJobRunResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type requestCronJobRunResponseSuccess = requestCronJobRunResponse200 & {
+  headers: Headers
+}
+export type requestCronJobRunResponseError = requestCronJobRunResponseDefault & {
+  headers: Headers
+}
+
+export type requestCronJobRunResponse =
+  | requestCronJobRunResponseSuccess
+  | requestCronJobRunResponseError
+
+export const getRequestCronJobRunUrl = ({
+  projectId,
+  cronUid,
+}: RequestCronJobRunPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/jobs/${encodeURIComponent(String(cronUid))}/requests`
+}
+
+export const requestCronJobRun = async (
+  { projectId, cronUid }: RequestCronJobRunPathParameters,
+  cronRequestBody: CronRequestBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<requestCronJobRunResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<requestCronJobRunResponse>(getRequestCronJobRunUrl({ projectId, cronUid }), {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(cronRequestBody),
+  })
+}
+
 export type restoreCronJobResponse200 = {
   data: CronJobResponseBody
   status: 200
@@ -2632,6 +2688,57 @@ export const pauseCronProject = async (
   })
 }
 
+export type listCronRequestsResponse200 = {
+  data: CronRequestListResponseBody
+  status: 200
+}
+
+export type listCronRequestsResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type listCronRequestsResponseSuccess = listCronRequestsResponse200 & {
+  headers: Headers
+}
+export type listCronRequestsResponseError = listCronRequestsResponseDefault & {
+  headers: Headers
+}
+
+export type listCronRequestsResponse =
+  | listCronRequestsResponseSuccess
+  | listCronRequestsResponseError
+
+export const getListCronRequestsUrl = (
+  { projectId }: ListCronRequestsPathParameters,
+  params?: ListCronRequestsParams,
+) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/requests?${stringifiedParams}`
+    : `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/requests`
+}
+
+export const listCronRequests = async (
+  { projectId }: ListCronRequestsPathParameters,
+  params?: ListCronRequestsParams,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<listCronRequestsResponse> => {
+  return orvalFetch<listCronRequestsResponse>(getListCronRequestsUrl({ projectId }, params), {
+    ...options,
+    method: 'GET',
+  })
+}
+
 export type listCronRunsResponse200 = {
   data: CronRunsResponseBody
   status: 200
@@ -2756,6 +2863,58 @@ export const observeCronRun = async (
     headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(observeCronRunBody),
   })
+}
+
+export type requestCronRunCancelResponse200 = {
+  data: CronRequestResponseBody
+  status: 200
+}
+
+export type requestCronRunCancelResponseDefault = {
+  data: ErrorEnvelope
+  status: Exclude<HTTPStatusCodes, 200>
+}
+
+export type requestCronRunCancelResponseSuccess = requestCronRunCancelResponse200 & {
+  headers: Headers
+}
+export type requestCronRunCancelResponseError = requestCronRunCancelResponseDefault & {
+  headers: Headers
+}
+
+export type requestCronRunCancelResponse =
+  | requestCronRunCancelResponseSuccess
+  | requestCronRunCancelResponseError
+
+export const getRequestCronRunCancelUrl = ({
+  projectId,
+  runUid,
+}: RequestCronRunCancelPathParameters) => {
+  return `/api/v1/projects/${encodeURIComponent(String(projectId))}/cron/runs/${encodeURIComponent(String(runUid))}/cancel-request`
+}
+
+export const requestCronRunCancel = async (
+  { projectId, runUid }: RequestCronRunCancelPathParameters,
+  cronRequestBody: CronRequestBody,
+  options?: Parameters<typeof orvalFetch>[1],
+): Promise<requestCronRunCancelResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit['headers']>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {}
+    if (h instanceof Headers) return Object.fromEntries(h.entries())
+    if (Array.isArray(h)) return Object.fromEntries(h)
+    return h
+  }
+  return orvalFetch<requestCronRunCancelResponse>(
+    getRequestCronRunCancelUrl({ projectId, runUid }),
+    {
+      ...options,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+      body: JSON.stringify(cronRequestBody),
+    },
+  )
 }
 
 export type listCronWorkflowsResponse200 = {
