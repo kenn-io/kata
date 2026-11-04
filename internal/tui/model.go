@@ -644,6 +644,9 @@ func (m Model) reconcileSplitDetailAfterRefetch(
 		(m.input.kind == inputSearchBar && m.input.searchFocus != searchFocusResults) {
 		return m, nil
 	}
+	if m.detail.issue != nil && (m.detail.issue.UID != prevUID || detailProjectID(*m.detail.issue, m.scope) != prevPID) {
+		return m, nil
+	}
 	newPID, newUID, newHas := highlightedIdentity(m.list)
 	if prevHas == newHas && prevPID == newPID && prevUID == newUID {
 		return m, nil

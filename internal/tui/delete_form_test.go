@@ -175,6 +175,41 @@ func TestDeletePreservesPendingReturn(t *testing.T) {
 	}
 }
 
+func TestDeletePreservesIndependentSplitDetail(t *testing.T) {
+	h := newDeleteHarness(t, viewList)
+	rows := h.m.list.visibleRows()
+	parent, child := rows[0].issue, rows[2].issue
+	_, err := h.client.KataAPI.AddLink(t.Context(), h.project.ID, child.UID, LinkBody{Type: "parent", ToRef: parent.UID}, "alice")
+	require.NoError(t, err)
+
+	h.selectIssue(parent.UID)
+	m, cmd := updateModel(h.m, tea.WindowSizeMsg{Width: 180, Height: 40})
+	h.m = m
+	h.m = h.drain(cmd)
+	require.Equal(t, splitlayout.Split, h.m.layout)
+	h.m = h.drain(h.enter())
+	h.m.detail.detailFocus = focusChildren
+	h.m = h.drain(h.enter())
+	require.NotNil(t, h.m.detail.issue)
+	require.Equal(t, child.UID, h.m.detail.issue.UID)
+	require.Len(t, h.m.detail.navStack, 1)
+
+	h.m.focus = focusList
+	h.key(runeKey('X'))
+	require.Equal(t, inputDeleteForm, h.m.input.kind)
+	h.m = typeString(h.m, "DELETE "+h.project.Name+"#"+parent.ShortID)
+	refresh := h.finish(h.enter())
+	require.True(t, h.isDeleted(parent.UID))
+	require.NotNil(t, h.m.detail.issue)
+	assert.Equal(t, child.UID, h.m.detail.issue.UID, "deletion keeps the independently opened detail")
+	h.m = h.drain(refresh)
+	require.NotNil(t, h.m.detail.issue)
+	assert.Equal(t, child.UID, h.m.detail.issue.UID, "list refresh keeps the independently opened detail")
+	selected, ok := h.m.list.targetRow()
+	require.True(t, ok)
+	assert.Equal(t, rows[1].issue.UID, selected.UID, "the list selects the neighbouring row")
+}
+
 func TestAttentionUndoIgnoresOtherEdits(t *testing.T) {
 	h := newDeleteHarness(t, viewAttention)
 	h.m.undoHistory.push(undoEntry{kind: "close", uid: h.issues[0].UID, projectID: h.project.ID})
