@@ -1635,7 +1635,7 @@ func (c CronValidationError) Validate() error {
 type CronValidationResult struct {
 	Definition json.RawMessage         `json:"definition"`
 	Errors     []CronValidationError   `json:"errors" validate:"required"`
-	Name       string                  `json:"name" validate:"omitempty"`
+	Name       string                  `json:"name" validate:"required"`
 	Schedule   *SchedulePreview        `json:"schedule,omitempty"`
 	Valid      bool                    `json:"valid"`
 	Warnings   []CronValidationWarning `json:"warnings" validate:"required"`
@@ -1643,40 +1643,27 @@ type CronValidationResult struct {
 
 func (c CronValidationResult) Validate() error {
 
-	// Required name may be empty in request-stage errors. The generator's
-	// complex validator ignores the field's extra-tags override.
-
+	// Request-stage errors allow an empty name; nested values still validate.
 	var errors runtime.ValidationErrors
-	if v, ok := any(c.Definition).(runtime.Validator); ok && v != nil {
-		if err := v.Validate(); err != nil {
-			errors = errors.Append("Definition", err)
-		}
-	}
 	if err := typesValidator.Var(c.Errors, "required"); err != nil {
 		errors = errors.Append("Errors", err)
 	}
 	for i, item := range c.Errors {
-		if v, ok := any(item).(runtime.Validator); ok {
-			if err := v.Validate(); err != nil {
-				errors = errors.Append(fmt.Sprintf("Errors[%d]", i), err)
-			}
+		if err := item.Validate(); err != nil {
+			errors = errors.Append(fmt.Sprintf("Errors[%d]", i), err)
 		}
 	}
 	if c.Schedule != nil {
-		if v, ok := any(c.Schedule).(runtime.Validator); ok {
-			if err := v.Validate(); err != nil {
-				errors = errors.Append("Schedule", err)
-			}
+		if err := c.Schedule.Validate(); err != nil {
+			errors = errors.Append("Schedule", err)
 		}
 	}
 	if err := typesValidator.Var(c.Warnings, "required"); err != nil {
 		errors = errors.Append("Warnings", err)
 	}
 	for i, item := range c.Warnings {
-		if v, ok := any(item).(runtime.Validator); ok {
-			if err := v.Validate(); err != nil {
-				errors = errors.Append(fmt.Sprintf("Warnings[%d]", i), err)
-			}
+		if err := item.Validate(); err != nil {
+			errors = errors.Append(fmt.Sprintf("Warnings[%d]", i), err)
 		}
 	}
 	if len(errors) == 0 {

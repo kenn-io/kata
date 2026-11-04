@@ -1323,8 +1323,6 @@ components:
           type: array
         name:
           type: string
-          x-oapi-codegen-extra-tags:
-            validate: omitempty
         schedule:
           $ref: "#/components/schemas/SchedulePreview"
         valid:
