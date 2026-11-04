@@ -13,10 +13,10 @@ import (
 )
 
 type cronEnabledRequest struct {
-	conn, scope, seq    uint64
-	uid, expected, name string
-	enabled             bool
-	count               int
+	conn, scope, seq, events uint64
+	uid, expected, name      string
+	enabled                  bool
+	count                    int
 }
 type cronEnabledReadyMsg struct {
 	request cronEnabledRequest
@@ -41,7 +41,7 @@ func (m Model) routeCronEnabledKey(lines []cronLine, cursor int) (Model, tea.Cmd
 	}
 	m.cron.enabledSeq++
 	m.cron.editSeq++
-	request := cronEnabledRequest{conn: m.connGen, scope: m.scopeGen, seq: m.cron.enabledSeq, uid: id, expected: job.DefinitionEventUID, name: job.Name, enabled: !job.Definition.Enabled}
+	request := cronEnabledRequest{conn: m.connGen, scope: m.scopeGen, seq: m.cron.enabledSeq, events: m.cron.events, uid: id, expected: job.DefinitionEventUID, name: job.Name, enabled: !job.Definition.Enabled}
 	m.cron.enabled = &request
 	api, pid := m.api, m.scope.projectID
 	return m, func() tea.Msg {
@@ -90,7 +90,7 @@ func (m Model) cronEnabledReady(msg cronEnabledReadyMsg) (Model, tea.Cmd) {
 	if !m.sameCronEnabledRequest(msg.request) {
 		return m, nil
 	}
-	if m.modal == modalNone && m.cron.data != nil && m.cron.data.events != m.cron.events {
+	if m.modal == modalNone && msg.request.events != m.cron.events {
 		m.cron.enabled = nil
 		return m.undoNotice("Job data changed; press p after refresh", toastError)
 	}
@@ -131,7 +131,7 @@ func (m Model) confirmCronResume() (Model, tea.Cmd) {
 	if pending == nil {
 		return m, nil
 	}
-	if m.sameCronEnabledRequest(*pending) && m.cron.data != nil && m.cron.data.events != m.cron.events {
+	if m.sameCronEnabledRequest(*pending) && pending.events != m.cron.events {
 		m.cron.enabled = nil
 		return m.undoNotice("Job data changed; press p after refresh", toastError)
 	}
