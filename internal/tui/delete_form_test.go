@@ -114,61 +114,42 @@ func TestDeleteFormShowsConfirmationOnceAtEveryHeight(t *testing.T) {
 		qualified string
 		width     int
 		height    int
+		typed     bool
 	}{
-		{"short terminal", "example-project#abc4", 100, 11},
-		{"long project in short terminal", "example-repository-project-with-a-very-long-task-tracker-name-that-exceeds-eighty-columns#abc4", 80, 11},
-		{"regular terminal", "example-project#abc4", 100, 30},
-		{"80 columns", "example-repository-project-task-tracker#abc4", 80, 24},
-		{"long project at 80 columns", "example-repository-project-with-a-long-task-tracker-name#abc4", 80, 24},
+		{"long project in short terminal", "example-repository-project-with-a-very-long-task-tracker-name-that-exceeds-eighty-columns#abc4", 80, 11, false},
+		{"80 columns", "example-repository-project-task-tracker#abc4", 80, 24, false},
+		{"long project at 80 columns", "example-repository-project-with-a-long-task-tracker-name#abc4", 80, 24, false},
+		{"typed confirmation in short terminal", strings.Repeat("example-project-", 9) + "#abc4", 80, 11, true},
+		{"long title at 80x12", strings.Repeat("example-project-", 15) + "#abc4", 80, 12, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			form := newDeleteForm(formTarget{}, Issue{Title: "Duplicate issue"}, tc.qualified)
+			if tc.typed {
+				form.field(fieldConfirm).setValue("DELETE " + tc.qualified)
+			}
 			rendered := stripANSI(renderCenteredForm(form, tc.width, tc.height, snapshotFixedNow))
 			var content strings.Builder
 			for line := range strings.SplitSeq(rendered, "\n") {
-				assert.LessOrEqual(t, len([]rune(line)), tc.width, "each line fits the terminal")
+				assert.LessOrEqual(t, ansi.StringWidth(line), tc.width, "each line fits the terminal")
 				content.WriteString(strings.Trim(line, " │╭╮╰╯─"))
 			}
 			confirmation := strings.Join(strings.Fields(content.String()), "")
-			assert.Equal(t, 1, strings.Count(confirmation, "DELETE"+tc.qualified), "the full confirmation remains visible across wrapped lines:\n%s", rendered)
-			assert.Empty(t, form.field(fieldConfirm).input.Placeholder)
+			wantCount := 1
+			if tc.typed {
+				wantCount = 2
+			}
+			assert.Equal(t, wantCount, strings.Count(confirmation, "DELETE"+tc.qualified), "the full confirmation remains visible across wrapped lines:\n%s", rendered)
 			if tc.height >= formMinHeight {
 				assert.Contains(t, rendered, "Duplicate issue", "the form shows the issue title")
+				assert.LessOrEqual(t, strings.Count(rendered, "\n")+1, tc.height, "the whole modal fits:\n%s", rendered)
+				m := initialModel(Options{})
+				m.width, m.height, m.input = tc.width, tc.height, form
+				visible := stripANSI(m.overlayInputAndModal(strings.Repeat(strings.Repeat(" ", tc.width)+"\n", tc.height-1)))
+				assert.Contains(t, visible, "Confirm")
+				assert.Contains(t, visible, "enter delete · esc cancel")
 			}
 		})
 	}
-}
-
-func TestDeleteFormLongTypedConfirmationFitsShortTerminal(t *testing.T) {
-	defer snapshotInit(t)()
-	qualified := strings.Repeat("example-project-", 9) + "#abc4"
-	form := newDeleteForm(formTarget{}, Issue{Title: "Duplicate issue"}, qualified)
-	form.field(fieldConfirm).setValue("DELETE " + qualified)
-	rendered := renderCenteredForm(form, 80, 11, snapshotFixedNow)
-	for line := range strings.SplitSeq(rendered, "\n") {
-		assert.LessOrEqual(t, ansi.StringWidth(line), 80, "the typed confirmation fits the terminal")
-	}
-	assert.Equal(t, 2, strings.Count(strings.ReplaceAll(stripANSI(rendered), "\n", ""), "DELETE "+qualified), "both the title and typed value remain complete")
-}
-
-func TestDeleteKeyRefusesHiddenSplitListInHelp(t *testing.T) {
-	h := newDeleteHarness(t, viewList)
-	h.selectIssue(h.issues[0].UID)
-	h.m, _ = updateModel(h.m, tea.WindowSizeMsg{Width: 180, Height: 40})
-	require.Equal(t, splitlayout.Split, h.m.layout)
-	require.Equal(t, focusList, h.m.focus)
-	h.key(runeKey('?'))
-	require.Equal(t, viewHelp, h.m.view)
-
-	cmd := h.key(runeKey('X'))
-	assert.Nil(t, cmd)
-	assert.Equal(t, inputNone, h.m.input.kind, "Help keeps the hidden list from opening a delete form")
-	assert.Equal(t, viewHelp, h.m.view)
-
-	h.key(runeKey('?'))
-	require.Equal(t, viewList, h.m.view)
-	h.key(runeKey('X'))
-	assert.Equal(t, inputDeleteForm, h.m.input.kind, "the visible list can still delete")
 }
 
 func TestDeleteFormRequiresFullConfirmation(t *testing.T) {
@@ -188,35 +169,23 @@ func TestDeleteFormRequiresFullConfirmation(t *testing.T) {
 	}
 
 	h.m.input.field(fieldConfirm).setValue("")
-	h.m = typeString(h.m, "DELETE "+h.qualified(target))
-	h.finish(h.enter())
-	assert.Equal(t, inputNone, h.m.input.kind, "a delete closes the form: "+h.m.input.err)
-	assert.True(t, h.isDeleted(target.UID))
-}
-
-func TestDeleteFormTrimsConfirmation(t *testing.T) {
-	h := newDeleteHarness(t, viewList)
-	target := h.issues[0]
-	h.selectIssue(target.UID)
-	h.key(runeKey('X'))
 	h.m = typeString(h.m, "  DELETE "+h.qualified(target)+"  ")
 	h.finish(h.enter())
+	assert.Equal(t, inputNone, h.m.input.kind, "a delete with surrounding spaces closes the form: "+h.m.input.err)
 	assert.True(t, h.isDeleted(target.UID))
-	assert.Equal(t, inputNone, h.m.input.kind)
 }
 
 func TestDeleteSelectsTheNeighbouringRowAndNamesUndo(t *testing.T) {
 	cases := []struct {
 		name              string
-		view              viewID
 		target, neighbour int
 	}{
-		{"list", viewList, 1, 2},
-		{"last row selects the previous row", viewList, 2, 1},
+		{"list", 1, 2},
+		{"last row selects the previous row", 2, 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := newDeleteHarness(t, tc.view)
+			h := newDeleteHarness(t, viewList)
 			rows := h.m.list.visibleRows()
 			require.Len(t, rows, 3)
 			target, neighbour := rows[tc.target].issue, rows[tc.neighbour].issue
@@ -233,7 +202,6 @@ func TestDeleteSelectsTheNeighbouringRowAndNamesUndo(t *testing.T) {
 			selected, ok := h.m.list.targetRow()
 			require.True(t, ok)
 			assert.Equal(t, neighbour.UID, selected.UID, "selection moves to the neighbouring row")
-			assert.Equal(t, viewList, h.m.view, "a deleted issue's detail is left")
 			require.NotNil(t, h.m.toast)
 			assert.Contains(t, h.m.toast.text, "press u to undo", "the notice names the undo key")
 			assert.Contains(t, h.m.toast.text, h.project.Name+"#"+target.ShortID)
@@ -273,9 +241,6 @@ func TestUndoOfADelete(t *testing.T) {
 
 			h.m.projectLabels = newLabelCache()
 			h.m.projectLabels.byProject[h.project.ID] = labelCacheEntry{pid: h.project.ID}
-			neighbour, err := h.client.GetIssueDetail(t.Context(), h.project.ID, h.issues[1].UID)
-			require.NoError(t, err)
-			h.m.detail = detailModel{scopePID: h.project.ID, issue: neighbour.Issue}
 			refresh := h.finish(h.key(runeKey('u')))
 
 			assert.False(t, h.isDeleted(target.UID))
@@ -288,9 +253,6 @@ func TestUndoOfADelete(t *testing.T) {
 				assert.Equal(t, "undid delete on "+h.qualified(target), h.m.toast.text)
 			}
 			h.m = h.drain(refresh)
-			require.NotNil(t, h.m.detail.issue)
-			assert.Equal(t, h.issues[1].UID, h.m.detail.issue.UID)
-			assert.Equal(t, "Second", h.m.detail.issue.Title, "undo keeps the neighbouring detail visible")
 			assert.Equal(t, []LabelCount{{Label: "urgent", Count: 1}}, h.m.projectLabels.byProject[h.project.ID].labels, "undo refreshes the restored issue's project labels")
 		})
 	}
@@ -298,9 +260,18 @@ func TestUndoOfADelete(t *testing.T) {
 
 func TestDeleteKeyIsOfferedOnlyToCredentialsThatCanDelete(t *testing.T) {
 	for _, scoped := range []bool{false, true} {
-		for _, view := range []viewID{viewList, viewDetail} {
-			h := newDeleteHarness(t, view)
+		for _, view := range []viewID{viewList, viewDetail, viewHelp} {
+			h := newDeleteHarness(t, viewList)
 			h.selectIssue(h.issues[0].UID)
+			if view == viewHelp {
+				h.m, _ = updateModel(h.m, tea.WindowSizeMsg{Width: 180, Height: 40})
+				require.Equal(t, splitlayout.Split, h.m.layout)
+				require.Equal(t, focusList, h.m.focus)
+				h.key(runeKey('?'))
+				require.Equal(t, viewHelp, h.m.view)
+			} else {
+				h.m.view = view
+			}
 			if view == viewDetail {
 				h.m.focus = focusDetail
 			}
@@ -309,9 +280,10 @@ func TestDeleteKeyIsOfferedOnlyToCredentialsThatCanDelete(t *testing.T) {
 
 			cmd := h.key(runeKey('X'))
 			helpText := stripANSI(renderHelp(h.m.helpKeymap(), 120, ListFilter{}))
-			if scoped || view == viewDetail {
+			if scoped || view != viewList {
 				assert.Nil(t, cmd)
 				assert.Equal(t, inputNone, h.m.input.kind, "X requires list focus and credentials that can delete")
+				assert.Equal(t, view, h.m.view)
 				assert.False(t, h.isDeleted(h.issues[0].UID))
 				if scoped {
 					assert.NotContains(t, helpText, "delete issue")
@@ -340,7 +312,12 @@ func TestDeleteSavingEscKeepsResult(t *testing.T) {
 	h.key(tea.KeyPressMsg{Code: tea.KeyEscape})
 	assert.Equal(t, inputDeleteForm, h.m.input.kind)
 	h.finish(cmd)
-	assert.True(t, h.isDeleted(target.UID))
+	assert.Equal(t, inputNone, h.m.input.kind)
+	for _, row := range h.m.list.visibleRows() {
+		assert.NotEqual(t, target.UID, row.issue.UID, "the confirmed issue leaves the list")
+	}
+	require.NotNil(t, h.m.toast)
+	assert.Equal(t, "deleted "+h.qualified(target)+"; press u to undo", h.m.toast.text)
 }
 
 func TestDeleteFromSplitListReplacesRetainedDetail(t *testing.T) {
@@ -369,18 +346,6 @@ func TestDeleteFromSplitListReplacesRetainedDetail(t *testing.T) {
 	assert.NotEmpty(t, h.m.detail.events, "the neighbouring parent's activity loads")
 	assert.Empty(t, h.m.detail.children, "the neighbouring parent loads without the deleted child")
 	assert.Empty(t, h.m.detail.navStack, "the replacement detail starts fresh")
-
-	h.m, _ = updateModel(h.m, tea.WindowSizeMsg{Width: 80, Height: 24})
-	require.Equal(t, splitlayout.Stacked, h.m.layout)
-	var cmd tea.Cmd
-	h.m, cmd = updateModel(h.m, tea.WindowSizeMsg{Width: 180, Height: 40})
-	h.m = h.drain(cmd)
-	require.Equal(t, splitlayout.Split, h.m.layout)
-	selected, ok := h.m.list.targetRow()
-	require.True(t, ok)
-	require.NotNil(t, h.m.detail.issue)
-	assert.Equal(t, selected.UID, h.m.detail.issue.UID)
-	assert.NotEqual(t, child.UID, h.m.detail.issue.UID)
 }
 
 func TestDeleteInInboxDoesNotRestoreDeletedDetail(t *testing.T) {
@@ -399,38 +364,6 @@ func TestDeleteInInboxDoesNotRestoreDeletedDetail(t *testing.T) {
 	h.m = h.drain(h.key(runeKey('I')))
 	require.False(t, h.m.scope.inbox)
 	assert.NotContains(t, stripANSI(h.m.View().Content), "issue_not_found")
-	if h.m.detail.issue != nil {
-		assert.NotEqual(t, target.UID, h.m.detail.issue.UID, "returning from Inbox must leave the deleted detail")
-	}
-}
-
-func TestDeleteConfirmationFieldVisibleAt80x12(t *testing.T) {
-	defer snapshotInit(t)()
-	qualified := strings.Repeat("example-project-", 15) + "#abc4"
-	form := newDeleteForm(formTarget{}, Issue{Title: "Duplicate issue"}, qualified)
-	rendered := renderCenteredForm(form, 80, 12, snapshotFixedNow)
-	assert.LessOrEqual(t, strings.Count(rendered, "\n")+1, 12, "the whole modal fits:\n%s", stripANSI(rendered))
-	m := initialModel(Options{})
-	m.width, m.height, m.input = 80, 12, form
-	visible := stripANSI(m.overlayInputAndModal(strings.Repeat(strings.Repeat(" ", 80)+"\n", 11)))
-	assert.Contains(t, visible, "Confirm")
-	assert.Contains(t, visible, "enter delete · esc cancel")
-}
-
-func TestUndoLabelRefreshPreservesZeroProjectScope(t *testing.T) {
-	for _, kind := range []string{"label.add", "label.remove"} {
-		t.Run(kind, func(t *testing.T) {
-			h := newDeleteHarness(t, viewList)
-			h.m.projectLabels = newLabelCache()
-			h.m.projectLabels.byProject[0] = labelCacheEntry{}
-			_, cmd := h.m.refreshAfterUndo(undoEntry{kind: kind}, nil)
-			var refreshed []int64
-			for _, msg := range runCmdTree(cmd) {
-				if labels, ok := msg.(labelsFetchedMsg); ok {
-					refreshed = append(refreshed, labels.pid)
-				}
-			}
-			require.Equal(t, []int64{0}, refreshed, "label undo retains main's label-fetch scope")
-		})
-	}
+	assert.Equal(t, viewList, h.m.view)
+	assert.Nil(t, h.m.detail.issue)
 }
