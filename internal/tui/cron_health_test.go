@@ -1,9 +1,9 @@
 package tui
 
 import (
-	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -93,6 +93,9 @@ func TestCronHealthStates(t *testing.T) {
 			if got.state != "paused" && got.state != "running" {
 				require.NotEmpty(t, got.reason)
 			}
+			if tc.name == "overdue" {
+				require.Equal(t, "running past timeout_seconds 60 (started 2026-05-01T11:00:00Z)", got.reason)
+			}
 		})
 	}
 }
@@ -160,31 +163,27 @@ func TestCronHealthNativeIgnoresObservations(t *testing.T) {
 	}, hegel.WithTestCases(2000))
 }
 
-func TestCronHealthMissedAgreesWithSchedule(t *testing.T) {
+// Daily UTC schedules admit an independent calendar oracle, including the
+// supported year boundary. Datetimes spans years 1..9999; no DST is involved.
+func TestCronHealthDailyScheduleAndGrace(t *testing.T) {
 	j := cronFixture(t).cron.data.jobs[0]
 	hegel.Test(t, func(ht *hegel.T) {
-		j.Definition.Trigger = generated.TriggerResponse{Kind: "cron", Cron: new(fmt.Sprintf("%d %d * * *", hegel.Draw(ht, hegel.Integers(0, 59)), hegel.Draw(ht, hegel.Integers(0, 23))))}
+		minute := hegel.Draw(ht, hegel.Integers(0, 59))
+		hour := hegel.Draw(ht, hegel.Integers(0, 23))
+		j.Definition.Trigger = generated.TriggerResponse{Kind: "cron", Cron: new(fmt.Sprintf("%d %d * * *", minute, hour))}
 		base := hegel.Draw(ht, hegel.Datetimes())
 		j.CreatedAt = base
 		j.Definition.GraceSeconds = new(hegel.Draw(ht, hegel.Integers[int64](0, 86400)))
 		now := base.Add(time.Duration(hegel.Draw(ht, hegel.Integers[int64](0, 7*86400))) * time.Second)
-		var def cron.JobDefinition
-		raw, err := json.Marshal(j.Definition)
-		if err != nil {
-			ht.Fatal(err)
-		}
-		if err := json.Unmarshal(raw, &def); err != nil {
-			ht.Fatal(err)
-		}
-		due, err := cron.RecurringOccurrences(def, cron.RecurringProgress{}, base, 1)
-		if err != nil {
-			ht.Fatal(err)
+		due := time.Date(base.Year(), base.Month(), base.Day(), hour, minute, 0, 0, time.UTC)
+		if !due.After(base) {
+			due = due.AddDate(0, 0, 1)
 		}
 		grace := 15 * time.Minute
-		if def.GraceSeconds > 0 {
-			grace = time.Duration(def.GraceSeconds) * time.Second
+		if *j.Definition.GraceSeconds > 0 {
+			grace = time.Duration(*j.Definition.GraceSeconds) * time.Second
 		}
-		want := len(due) > 0 && due[0].Before(now.Add(-grace))
+		want := due.Year() <= 9999 && due.Add(grace).Before(now)
 		got := cronHealth(cronData{lastErr: map[string]error{}}, j, now)
 		if (got.state == "missed") != want {
 			ht.Fatalf("missed=%v want=%v base=%s due=%v now=%s", got, want, base, due, now)
@@ -263,10 +262,7 @@ func TestCronHealthColumnRollupAndReason(t *testing.T) {
 		require.Contains(t, cronLinesText(lines), "Health:")
 	}
 
-	{
-		defer snapshotInit(t)()
-		assertGolden(t, "cron-jobs-health", cronHealthFixture(t).viewBody())
-	}
+	assertGolden(t, "cron-jobs-health", cronHealthFixture(t).viewBody())
 }
 
 func cronLinesText(lines []cronLine) string {
@@ -275,4 +271,48 @@ func cronLinesText(lines []cronLine) string {
 		text += line.text + "\n"
 	}
 	return text
+}
+
+func TestCronHealthCellsKeepRowBand(t *testing.T) {
+	defer snapshotInit(t)()
+	for _, mode := range []colorMode{colorDark, colorLight} {
+		for _, cursor := range []int{0, 1} {
+			m := cronHealthFixture(t)
+			m.width = 120
+			m.cron.lists[cronJobs].cursor = cursor
+			applyColorMode(mode, mode == colorDark)
+			lines := strings.Split(renderCron(m), "\n")
+			row := slices.IndexFunc(lines, func(line string) bool { return strings.Contains(stripANSI(line), "job-failing") })
+			require.NotEqual(t, -1, row)
+			style := altRowStyle
+			if cursor == 1 {
+				style = cursorRowStyle
+			}
+			expected := attentionTerminalCells(style.Render("x"))[0]
+			cells := attentionTerminalCells(lines[row])
+			require.Len(t, cells, m.width)
+			for x, cell := range cells {
+				require.Equal(t, expected.background, cell.background, "mode %v cursor %d column %d", mode, cursor, x)
+			}
+		}
+	}
+}
+
+func TestCronHealthOverdueWinsAndNativeIgnoresWait(t *testing.T) {
+	j := cronFixture(t).cron.data.jobs[0]
+	j.Definition.Trigger = generated.TriggerResponse{Kind: "manual"}
+	j.Definition.TimeoutSeconds = new(int64(60))
+	r := generated.CronRun{Status: "running", Actor: "operator", IssueUID: new("issue-example"), JobUID: new(j.UID), CreatedAt: snapshotFixedNow.Add(-time.Hour)}
+	p := cronData{jobs: []generated.CronJob{j}, lastRuns: map[string]generated.CronRun{j.UID: r}, lastErr: map[string]error{}, waits: map[string]cronParent{"issue-example": {open: true, metadata: map[string]any{"work.attention": "stuck"}}}}
+	got := cronHealth(p, j, snapshotFixedNow)
+	require.Equal(t, "overdue", got.state)
+	require.Contains(t, got.reason, "Stuck")
+	j.Definition.TimeoutSeconds = nil
+	require.Equal(t, "blocked", cronHealth(p, j, snapshotFixedNow).state)
+	nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&j.Definition)
+	p.jobs = []generated.CronJob{j}
+	p.parentOpen = map[string]bool{nextParentUID: true}
+	p.progress = map[string]cron.RecurringProgress{j.UID: {Version: 1, Anchor: snapshotFixedNow, Through: snapshotFixedNow}}
+	require.Equal(t, "ok", cronHealth(p, j, snapshotFixedNow).state)
+	require.NotEqual(t, "blocked", cronRunHealth(p, r).state)
 }

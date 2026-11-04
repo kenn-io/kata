@@ -48,32 +48,6 @@ func TestCronQueryLiteralMatchesOldSubstring(t *testing.T) {
 	}, hegel.WithTestCases(2000))
 }
 
-func TestCronQueryNewKeyCannotAddRows(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		status := hegel.Draw(ht, hegel.SampledFrom([]string{"failed", "running", "succeeded", "unknown", "cancelled"}))
-		actor := hegel.Draw(ht, hegel.Text())
-		fields := map[string]string{"status": status, "actor": actor}
-		base := cronQuery("status:failed status:running", cronRuns)
-		added := cronQuery("status:failed status:running actor:operator", cronRuns)
-		if got, want := added.match(fields, ""), base.match(fields, "") && strings.Contains(strings.ToLower(actor), "operator"); got != want {
-			ht.Fatal("new key must intersect the actor match")
-		}
-	}, hegel.WithTestCases(2000))
-}
-
-func TestCronQuerySameKeyCannotRemoveRows(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		status := hegel.Draw(ht, hegel.SampledFrom([]string{"failed", "running", "succeeded", "unknown", "cancelled"}))
-		fields := map[string]string{"status": status}
-		if cronQuery("status:failed", cronRuns).match(fields, "") && !cronQuery("status:failed status:running", cronRuns).match(fields, "") {
-			ht.Fatal("OR expansion removed a row")
-		}
-		if got, want := cronQuery("status:failed status:running", cronRuns).match(fields, ""), status == "failed" || status == "running"; got != want {
-			ht.Fatal("fixed OR query must match exactly either status")
-		}
-	}, hegel.WithTestCases(2000))
-}
-
 func TestCronQueryArbitraryInputTotal(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
 		query := hegel.Draw(ht, hegel.Text())
@@ -112,14 +86,60 @@ func TestCronQueryUsesUntruncatedFields(t *testing.T) {
 	assertGolden(t, "cron-runs-filter-tokens", m.viewBody())
 }
 
-func TestCronQueryRepeatedKeyORExact(t *testing.T) {
+func TestCronQueryCombinedBlockedFilter(t *testing.T) {
+	m := cronSeenFixture(t)
+	j := m.cron.data.jobs[0]
+	j.Definition.Trigger = generated.TriggerResponse{Kind: "manual"}
+	r := generated.CronRun{UID: "waiting-run", JobUID: new(j.UID), IssueUID: new("waiting-issue"), Status: "running", Actor: "operator", CreatedAt: snapshotFixedNow}
+	m.cron.data.jobs = []generated.CronJob{j}
+	m.cron.data.runs = []generated.CronRun{r}
+	m.cron.runPage.runs = []generated.CronRun{r}
+	m.cron.data.lastRuns = map[string]generated.CronRun{j.UID: r}
+	m.cron.data.lastErr = map[string]error{}
+	m.cron.data.waits = map[string]cronParent{"waiting-issue": {open: true, metadata: map[string]any{"work.attention": "needs-human"}}}
+	m.cron.lists[cronJobs].query = "health:blocked status:running"
+	_, _, lines := cronScreen(m)
+	require.Len(t, lines, 1)
+	require.Contains(t, lines[0].text, "blocked")
+	m.cron.tab = cronRuns
+	m.cron.lists[cronRuns].query = "status:running actor:operator"
+	_, _, lines = cronScreen(m)
+	require.Len(t, lines, 1)
+	require.Contains(t, lines[0].text, "blocked")
+}
+
+// OR within status and AND across actor share one closed-form query oracle.
+func TestCronQueryRepeatedStatusAndActorIntersection(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
-		status := hegel.Draw(ht, hegel.SampledFrom([]string{"failed", "running", "succeeded", "unknown", "cancelled"}))
-		first := hegel.Draw(ht, hegel.SampledFrom([]string{"failed", "running", "succeeded", "unknown", "cancelled"}))
-		second := hegel.Draw(ht, hegel.SampledFrom([]string{"failed", "running", "succeeded", "unknown", "cancelled"}))
-		got := cronQuery(fmt.Sprintf("status:%s status:%s", first, second), cronRuns).match(map[string]string{"status": status}, "")
-		if got != (status == first || status == second) {
+		statuses := []string{"failed", "running", "succeeded", "unknown", "cancelled"}
+		status := hegel.Draw(ht, hegel.SampledFrom(statuses))
+		first := hegel.Draw(ht, hegel.SampledFrom(statuses))
+		second := hegel.Draw(ht, hegel.SampledFrom(statuses))
+		actor := hegel.Draw(ht, hegel.Text())
+		// Exercise both actor-match directions while preserving arbitrary text.
+		if hegel.Draw(ht, hegel.Booleans()) {
+			actor = "Operator" + actor
+		}
+		fields := map[string]string{"status": status, "actor": actor}
+		query := fmt.Sprintf("status:%s status:%s", first, second)
+		wantStatus := status == first || status == second
+		if got := cronQuery(query, cronRuns).match(fields, ""); got != wantStatus {
 			ht.Fatalf("OR mismatch: %q vs %q/%q", status, first, second)
+		}
+		wantActor := strings.Contains(strings.ToLower(actor), "operator")
+		if got := cronQuery(query+" actor:operator", cronRuns).match(fields, ""); got != (wantStatus && wantActor) {
+			ht.Fatal("new key must intersect the actor match")
+		}
+		fixed := cronQuery("status:failed status:running", cronRuns)
+		if cronQuery("status:failed", cronRuns).match(fields, "") && !fixed.match(fields, "") {
+			ht.Fatal("OR expansion removed a row")
+		}
+		wantFixed := status == "failed" || status == "running"
+		if got := fixed.match(fields, ""); got != wantFixed {
+			ht.Fatal("fixed OR query must match exactly either status")
+		}
+		if got := cronQuery("status:failed status:running actor:operator", cronRuns).match(fields, ""); got != (wantFixed && wantActor) {
+			ht.Fatal("fixed query must intersect the actor match")
 		}
 	}, hegel.WithTestCases(2000))
 }

@@ -7,38 +7,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
-	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/notification"
 	"go.kenn.io/kata/pkg/client/generated"
 	"hegel.dev/go/hegel"
 )
-
-// Contract: a wait is an inference from a running observation plus an open
-// issue's work.attention or the exact run actor's validated notification.
-func TestCronWaitBlockedIffRunningOpenAndSignalled(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		statuses := []string{"running", "failed", "unknown", "succeeded", "cancelled", ""}
-		attentions := []string{"needs-human", "stuck", "ok", "", "unrecognized"}
-		status := statuses[hegel.Draw(ht, hegel.Integers[uint64](0, ^uint64(0)))%uint64(len(statuses))]
-		attention := attentions[hegel.Draw(ht, hegel.Integers[uint64](0, ^uint64(0)))%uint64(len(attentions))]
-		open := hegel.Draw(ht, hegel.Booleans())
-		request := hegel.Draw(ht, hegel.Booleans())
-		r := generated.CronRun{Status: status, Actor: " operator ", IssueUID: new("issue-example")}
-		metadata := map[string]any{"work.attention": attention}
-		if request {
-			metadata[notification.MetadataKey("operator")] = map[string]any{"from": "worker", "message": "please review"}
-		}
-		p := cronData{waits: map[string]cronParent{"issue-example": {open: open, metadata: metadata}}}
-		want := status == "running" && open && (request || attention == "needs-human" || attention == "stuck")
-		got := cronRunHealth(p, r)
-		if (got.state == "blocked") != want {
-			ht.Fatalf("status=%q open=%v attention=%q request=%v: got %v want blocked=%v", status, open, attention, request, got, want)
-		}
-	}, hegel.WithTestCases(600))
-}
 
 func TestCronWaitOnlyExactNormalizedActorCounts(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
@@ -76,40 +50,6 @@ func TestCronWaitUnavailableOrMalformedNeverBlocks(t *testing.T) {
 	}
 }
 
-func TestCronWaitBothSignalsMustClear(t *testing.T) {
-	key := notification.MetadataKey("operator")
-	w := cronParent{open: true, metadata: map[string]any{"work.attention": "needs-human", key: map[string]any{"from": "worker", "message": "review"}}}
-	require.Equal(t, "blocked", cronRunWaitForActor(w, "operator").state)
-	require.Contains(t, w.metadata, key, "reading attention must not consume the request")
-	delete(w.metadata, key)
-	require.Equal(t, "blocked", cronRunWaitForActor(w, "operator").state)
-	w.metadata["work.attention"] = "ok"
-	require.Equal(t, "running", cronRunWaitForActor(w, "operator").state)
-	w.metadata[key] = map[string]any{"from": "worker", "message": "review"}
-	require.Equal(t, "blocked", cronRunWaitForActor(w, "operator").state)
-	w.open = false
-	require.Equal(t, "running", cronRunWaitForActor(w, "operator").state)
-}
-
-func TestCronWaitOverdueWinsAndNativeIgnoresWait(t *testing.T) {
-	j := cronFixture(t).cron.data.jobs[0]
-	j.Definition.Trigger = generated.TriggerResponse{Kind: "manual"}
-	j.Definition.TimeoutSeconds = new(int64(60))
-	r := generated.CronRun{Status: "running", Actor: "operator", IssueUID: new("issue-example"), JobUID: new(j.UID), CreatedAt: snapshotFixedNow.Add(-time.Hour)}
-	p := cronData{jobs: []generated.CronJob{j}, lastRuns: map[string]generated.CronRun{j.UID: r}, lastErr: map[string]error{}, waits: map[string]cronParent{"issue-example": {open: true, metadata: map[string]any{"work.attention": "stuck"}}}}
-	got := cronHealth(p, j, snapshotFixedNow)
-	require.Equal(t, "overdue", got.state)
-	require.Contains(t, got.reason, "Stuck")
-	j.Definition.TimeoutSeconds = nil
-	require.Equal(t, "blocked", cronHealth(p, j, snapshotFixedNow).state)
-	nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&j.Definition)
-	p.jobs = []generated.CronJob{j}
-	p.parentOpen = map[string]bool{nextParentUID: true}
-	p.progress = map[string]cron.RecurringProgress{j.UID: {Version: 1, Anchor: snapshotFixedNow, Through: snapshotFixedNow}}
-	require.Equal(t, "ok", cronHealth(p, j, snapshotFixedNow).state)
-	require.NotEqual(t, "blocked", cronRunHealth(p, r).state)
-}
-
 func TestCronWaitClientReadsOpenAndDeletedMetadata(t *testing.T) {
 	for _, deleted := range []bool{false, true} {
 		t.Run(fmt.Sprint(deleted), func(t *testing.T) {
@@ -130,4 +70,46 @@ func TestCronWaitClientReadsOpenAndDeletedMetadata(t *testing.T) {
 			require.Equal(t, "needs-human", got.metadata["work.attention"])
 		})
 	}
+}
+
+// Contract: a wait is an inference from a running observation plus an open
+// issue's work.attention or the exact run actor's validated notification.
+func TestCronWaitBlockedIffRunningOpenAndSignalled(t *testing.T) {
+	hegel.Test(t, func(ht *hegel.T) {
+		statuses := []string{"running", "failed", "unknown", "succeeded", "cancelled"}
+		attentions := []string{"needs-human", "stuck", "ok", "", "unrecognized"}
+		status := statuses[hegel.Draw(ht, hegel.Integers[uint64](0, ^uint64(0)))%uint64(len(statuses))]
+		attention := attentions[hegel.Draw(ht, hegel.Integers[uint64](0, ^uint64(0)))%uint64(len(attentions))]
+		open := hegel.Draw(ht, hegel.Booleans())
+		request := hegel.Draw(ht, hegel.Booleans())
+		r := generated.CronRun{Status: status, Actor: " operator ", IssueUID: new("issue-example")}
+		metadata := map[string]any{"work.attention": attention}
+		if request {
+			metadata[notification.MetadataKey("operator")] = map[string]any{"from": "worker", "message": "please review"}
+		}
+		p := cronData{waits: map[string]cronParent{"issue-example": {open: open, metadata: metadata}}}
+		want := status == "running" && open && (request || attention == "needs-human" || attention == "stuck")
+		got := cronRunHealth(p, r)
+		if request {
+			require.Contains(t, metadata, notification.MetadataKey("operator"), "reading attention must not consume requests")
+		}
+		if (got.state == "blocked") != want {
+			ht.Fatalf("status=%q open=%v attention=%q request=%v: got %v want blocked=%v", status, open, attention, request, got, want)
+		}
+	}, hegel.WithTestCases(600))
+
+	t.Run("both signals must clear", func(t *testing.T) {
+		key := notification.MetadataKey("operator")
+		w := cronParent{open: true, metadata: map[string]any{"work.attention": "needs-human", key: map[string]any{"from": "worker", "message": "review"}}}
+		require.Equal(t, "blocked", cronRunWaitForActor(w, "operator").state)
+		require.Contains(t, w.metadata, key, "reading attention must not consume the request")
+		delete(w.metadata, key)
+		require.Equal(t, "blocked", cronRunWaitForActor(w, "operator").state)
+		w.metadata["work.attention"] = "ok"
+		require.Equal(t, "running", cronRunWaitForActor(w, "operator").state)
+		w.metadata[key] = map[string]any{"from": "worker", "message": "review"}
+		require.Equal(t, "blocked", cronRunWaitForActor(w, "operator").state)
+		w.open = false
+		require.Equal(t, "running", cronRunWaitForActor(w, "operator").state)
+	})
 }

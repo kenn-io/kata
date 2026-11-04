@@ -733,3 +733,27 @@ func TestCronSearchClickGuards(t *testing.T) {
 		require.False(t, m.cron.filtering, state)
 	}
 }
+
+func TestCronPagingFixtureUsesCreationCursor(t *testing.T) {
+	now := snapshotFixedNow
+	a := &cronReadTestAPI{data: cronData{runs: []generated.CronRun{
+		{UID: "01ARZ3NDEKTSV4RRFFQ69G5FAZ", CreatedAt: now.Add(-time.Hour), JobUID: new("job")},
+		{UID: "01ARZ3NDEKTSV4RRFFQ69G5FAA", CreatedAt: now, JobUID: new("job")},
+		{UID: "01ARZ3NDEKTSV4RRFFQ69G5FAB", CreatedAt: now, JobUID: new("job")},
+		{UID: "01ARZ3NDEKTSV4RRFFQ69G5FB0", CreatedAt: now.Add(time.Hour), JobUID: new("01ARZ3NDEKTSV4RRFFQ69G5FB0")},
+	}}}
+	page, next, err := a.ListCronJobRuns(t.Context(), 7, "job", "", 1)
+	require.NoError(t, err)
+	require.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FAB", page[0].UID)
+	require.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FAB", next)
+	page, next, err = a.ListCronJobRuns(t.Context(), 7, "job", next, 1)
+	require.NoError(t, err)
+	require.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FAA", page[0].UID)
+	require.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FAA", next)
+	page, _, err = a.ListCronJobRuns(t.Context(), 7, "job", next, 1)
+	require.NoError(t, err)
+	require.Len(t, page, 1)
+	require.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FAZ", page[0].UID)
+	_, _, err = a.ListCronJobRuns(t.Context(), 7, "job", "01ARZ3NDEKTSV4RRFFQ69G5FB1", 1)
+	require.Error(t, err)
+}

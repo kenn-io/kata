@@ -1,7 +1,6 @@
 package tui
 
 import (
-	tea "charm.land/bubbletea/v2"
 	"context"
 	"encoding/json/v2"
 	"fmt"
@@ -15,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/pkg/client/generated"
 	"hegel.dev/go/hegel"
@@ -166,7 +166,7 @@ func TestCronSeenLoadedCountAndKeys(t *testing.T) {
 	success.UID = "success"
 	success.Status = "succeeded"
 	m.cron.data.runs = []generated.CronRun{r, success}
-	m.cron.data.lastRuns = map[string]generated.CronRun{"job": r}
+	m.cron.data.lastRuns = map[string]generated.CronRun{*r.JobUID: r}
 	m.cron.jobPage.runs = []generated.CronRun{unknown, r}
 	m.cron.runPage.runs = []generated.CronRun{r, unknown}
 	m.cron.runPage.ready = true
@@ -217,28 +217,7 @@ func TestCronSeenLoadedCountAndKeys(t *testing.T) {
 		assertGolden(t, "cron-runs-unseen", m.viewBody())
 	}
 }
-func TestCronSeenAsyncMergesAndDisablesWrites(t *testing.T) {
-	m := cronSeenFixture(t)
-	r := m.cron.data.runs[0]
-	r.Status = "failed"
-	m.cron.data.runs = []generated.CronRun{r}
-	m = m.cronMarkSeen(r.UID)
-	m, _ = m.cronSeenResult(cronSeenResultMsg{data: cronSeenStore{Version: 1, Projects: map[string]cronSeenProject{"other": {Runs: []string{"elsewhere"}}}}, write: true})
-	require.Zero(t, m.cronUnseenCount())
-	require.Contains(t, m.cronSeen.data.Projects, "other")
-	m, _ = m.cronSeenResult(cronSeenResultMsg{err: fmt.Errorf("corrupt\nstate")})
-	require.Error(t, m.cronSeen.err)
-	require.Contains(t, stripANSI(renderCron(m)), "seen state unavailable: corrupt\\nstate")
-	_, cmd := m.cronSeenSync()
-	require.Nil(t, cmd, "failed load/write disables writes for the session")
-	// Loading the file after an early in-memory mark never discards that mark.
-	m = cronSeenFixture(t)
-	m.cronSeen.ready = false
-	m.cron.data.runs = []generated.CronRun{r}
-	m = m.cronMarkSeen(r.UID)
-	m, _ = m.cronSeenResult(cronSeenResultMsg{data: cronSeenStore{Version: 1, Projects: map[string]cronSeenProject{}}})
-	require.Zero(t, m.cronUnseenCount())
-}
+
 func TestCronSeenOpeningOldRunAtCapacityIsSeenForSession(t *testing.T) {
 	m := cronSeenFixture(t)
 	r := m.cron.data.runs[0]
@@ -335,4 +314,103 @@ func TestCronSeenLoadsOnlyAtInitialization(t *testing.T) {
 	require.NoError(t, msg.err)
 	m, _ = m.cronSeenResult(msg)
 	require.True(t, m.cronSeen.ready)
+}
+
+func TestCronSeenFillReachableWithTokens(t *testing.T) {
+	m := cronSeenFixture(t)
+	r := generated.CronRun{UID: "quiet-failure", JobUID: new(m.cron.data.jobs[0].UID), Status: "failed", Actor: "operator", UpdatedAt: snapshotFixedNow}
+	m.cron.data.lastRuns = map[string]generated.CronRun{*r.JobUID: r}
+	m = m.cronRemember([]generated.CronRun{r})
+	m.cron.lists[cronRuns].query = "status:failed actor:operator"
+	m = sendRune(m, 'u')
+	require.Positive(t, m.cronUnseenCount())
+	_, _, lines := cronScreen(m)
+	found := false
+	for _, line := range lines {
+		if line.target.uid == r.UID {
+			found = true
+		}
+	}
+	require.True(t, found, "the unseen review must include failures counted from quiet job fills")
+	m = sendKey(m, tea.KeyEnter)
+	require.Equal(t, r.UID, m.cron.stack[len(m.cron.stack)-1].ref.uid)
+}
+
+func TestCronSeenRetainedFailureMarker(t *testing.T) {
+	m := cronSeenFixture(t)
+	old := m.cron.data.runs[0]
+	old.UID, old.Status, old.Revision = "corrected-failure", "failed", 1
+	old.EndedAt = new(snapshotFixedNow)
+	fresh := old
+	fresh.Status, fresh.Revision = "succeeded", 2
+	m.cron.data.runs = nil
+	m.cron.data.lastRuns = nil
+	m.cron.data.lookup = map[string]generated.CronRun{old.UID: fresh}
+	m.cron.runPage = cronHistoryPage{runs: []generated.CronRun{old}, ready: true, older: true}
+	m.cron.tab = cronRuns
+	require.Zero(t, m.cronUnseenCount(), "newest loaded revision is successful")
+	_, _, lines := cronScreen(m)
+	require.Len(t, lines, 1)
+	require.NotContains(t, lines[0].text, "•", "zero unseen count must not show an unseen failure marker")
+}
+
+func TestCronSeenFilterPreservesRunOrder(t *testing.T) {
+	m := cronSeenFixture(t)
+	old := m.cron.data.runs[0]
+	old.UID, old.Status = "01ARZ3NDEKTSV4RRFFQ69G5FAA", "failed"
+	old.CreatedAt = snapshotFixedNow.Add(-time.Hour)
+	old.EndedAt = new(old.CreatedAt)
+	newest := old
+	newest.UID = "01ARZ3NDEKTSV4RRFFQ69G5FAB"
+	newest.CreatedAt = snapshotFixedNow
+	newest.EndedAt = new(newest.CreatedAt)
+	rows := []generated.CronRun{newest, old}
+	m.cron.tab = cronRuns
+	m.cron.data.runs = rows
+	m.cron.data.lastRuns = nil
+	m.cron.data.lookup = nil
+	m.cron.runPage = cronHistoryPage{runs: rows, ready: true}
+	_, _, before := cronScreen(m)
+	m.cron.unseenOnly = true
+	_, _, after := cronScreen(m)
+	require.Equal(t, before[0].target, after[0].target, "enabling a filter must retain the newest-first run order")
+}
+
+func TestCronSeenAsyncMergesAndDisablesWrites(t *testing.T) {
+	m := cronSeenFixture(t)
+	r := m.cron.data.runs[0]
+	r.Status = "failed"
+	m.cron.data.runs = []generated.CronRun{r}
+	m = m.cronMarkSeen(r.UID)
+	m, _ = m.cronSeenResult(cronSeenResultMsg{data: cronSeenStore{Version: 1, Projects: map[string]cronSeenProject{"other": {Runs: []string{"elsewhere"}}}}, write: true})
+	require.Zero(t, m.cronUnseenCount())
+	require.Contains(t, m.cronSeen.data.Projects, "other")
+	m, _ = m.cronSeenResult(cronSeenResultMsg{err: fmt.Errorf("corrupt\nstate")})
+	require.Error(t, m.cronSeen.err)
+	require.Contains(t, stripANSI(renderCron(m)), "seen state unavailable: corrupt\\nstate")
+	_, cmd := m.cronSeenSync()
+	require.Nil(t, cmd, "failed load/write disables writes for the session")
+	// Loading the file after an early in-memory mark never discards that mark.
+	m = cronSeenFixture(t)
+	m.cronSeen.ready = false
+	m.cron.data.runs = []generated.CronRun{r}
+	m = m.cronMarkSeen(r.UID)
+	m, _ = m.cronSeenResult(cronSeenResultMsg{data: cronSeenStore{Version: 1, Projects: map[string]cronSeenProject{}}})
+	require.Zero(t, m.cronUnseenCount())
+
+	t.Run("corrupt persisted state leaves count unknown", func(t *testing.T) {
+		m := cronSeenFixture(t)
+		r := m.cron.data.runs[0]
+		r.Status = "failed"
+		m.cron.data.runs = []generated.CronRun{r}
+		path := filepath.Join(t.TempDir(), "cron-seen.json")
+		require.NoError(t, os.WriteFile(path, []byte("corrupt"), 0600))
+		m.cronSeen = cronSeenState{path: path}
+		msg := m.cronSeenCommand(false)().(cronSeenResultMsg)
+		require.Error(t, msg.err)
+		m, _ = m.cronSeenResult(msg)
+		screen := stripANSI(renderCron(m))
+		require.Contains(t, screen, "seen state unavailable")
+		require.NotContains(t, screen, "1 unseen failed", "unreadable persisted acknowledgements leave the count unknown")
+	})
 }

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -164,20 +165,6 @@ func TestCronEnrichmentCancellation(t *testing.T) {
 	require.ErrorIs(t, p.lastErr[j.UID], context.Canceled)
 }
 
-func TestCronRefreshLastEvidence(t *testing.T) {
-	m := cronFixture(t)
-	j := m.cron.data.jobs[0]
-	old := m.cron.data.runs[0]
-	m.cron.data.lastRuns = map[string]generated.CronRun{j.UID: old}
-	msg := cronLoadedMsg{conn: m.connGen, scope: m.scopeGen, jobs: []generated.CronJob{j}, lastRuns: map[string]generated.CronRun{}, lastErr: map[string]error{j.UID: errors.New("offline")}}
-	m = m.cronLoaded(msg)
-	require.Equal(t, old.UID, m.cron.data.lastRuns[j.UID].UID)
-	require.Equal(t, "unavailable", cronHealth(*m.cron.data, j, snapshotFixedNow).state)
-	msg.lastErr = map[string]error{}
-	m = m.cronLoaded(msg)
-	require.NotContains(t, m.cron.data.lastRuns, j.UID, "fresh empty must clear display-only evidence")
-}
-
 func TestCronVisitCancelsAndFencesRefresh(t *testing.T) {
 	m := cronFixture(t)
 	ctx, cancel := context.WithCancel(t.Context())
@@ -201,4 +188,132 @@ func TestCronVisitCancelsAndFencesRefresh(t *testing.T) {
 	currentCtx := m.cron.reads.ctx
 	cancel()
 	require.ErrorIs(t, currentCtx.Err(), context.Canceled, "TUI shutdown cancels every Cron child")
+}
+
+func TestCronEnrichmentPrioritizesAdaptersAndEnabledJobs(t *testing.T) {
+	j := cronFixture(t).cron.data.jobs[0]
+	adapter := j
+	adapter.UID = "quiet-adapter"
+	p := cronData{}
+	for i := range 201 {
+		native := j
+		native.UID = fmt.Sprintf("native-%03d", i)
+		nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&native.Definition)
+		p.jobs = append(p.jobs, native)
+	}
+	p.jobs = append(p.jobs, adapter)
+	a := &cronEnrichAPI{read: func(_ context.Context, job string) ([]generated.CronRun, error) {
+		return []generated.CronRun{{UID: job + "-run", JobUID: new(job), Status: "succeeded"}}, nil
+	}}
+	cronEnrich(t.Context(), a, 7, &p)
+	require.NoError(t, p.lastErr[adapter.UID])
+	require.Equal(t, adapter.UID+"-run", p.lastRuns[adapter.UID].UID)
+	require.Equal(t, "native-000-run", p.lastRuns["native-000"].UID, "native observations still feed exact display and status filters")
+	require.Error(t, p.lastErr["native-200"], "native display lookups remain bounded")
+	p = cronData{}
+	for i := range 210 {
+		job := j
+		job.UID = fmt.Sprintf("ordered-%03d", i)
+		job.Definition.Enabled = i >= 150
+		p.jobs = append(p.jobs, job)
+	}
+	cronEnrich(t.Context(), a, 7, &p)
+	for _, job := range p.jobs[150:] {
+		require.NoError(t, p.lastErr[job.UID], "enabled jobs must be admitted before paused display reads")
+		require.Equal(t, job.UID+"-run", p.lastRuns[job.UID].UID)
+	}
+
+	{
+		j := cronFixture(t).cron.data.jobs[0]
+		nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&j.Definition)
+		a := &cronEnrichAPI{read: func(_ context.Context, job string) ([]generated.CronRun, error) {
+			return []generated.CronRun{{UID: "native-run", JobUID: new(job)}}, nil
+		}}
+		p := cronData{jobs: []generated.CronJob{j}}
+		cronEnrich(t.Context(), a, 7, &p)
+		require.Equal(t, "native-run", p.lastRuns[j.UID].UID)
+		require.Equal(t, 1, a.parents)
+	}
+}
+
+func TestCronRunClientByUID(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/v1/projects/7/cron/runs/run-example", r.URL.Path)
+		respondJSON(t, w, map[string]any{"run": map[string]any{"uid": "run-example", "status": "failed", "revision": 2}})
+	})
+	reader, ok := any(newUndoClient(c)).(cronRunAPI)
+	require.True(t, ok)
+	r, err := reader.readCronRun(t.Context(), 7, "run-example")
+	require.NoError(t, err)
+	require.Equal(t, "run-example", r.UID)
+	require.Equal(t, "failed", r.Status)
+}
+
+func TestCronRefreshLastEvidence(t *testing.T) {
+	m := cronFixture(t)
+	j := m.cron.data.jobs[0]
+	old := m.cron.data.runs[0]
+	m.cron.data.lastRuns = map[string]generated.CronRun{j.UID: old}
+	msg := cronLoadedMsg{conn: m.connGen, scope: m.scopeGen, jobs: []generated.CronJob{j}, lastRuns: map[string]generated.CronRun{}, lastErr: map[string]error{j.UID: errors.New("offline")}}
+	m = m.cronLoaded(msg)
+	require.Equal(t, old.UID, m.cron.data.lastRuns[j.UID].UID)
+	require.Equal(t, "unavailable", cronHealth(*m.cron.data, j, snapshotFixedNow).state)
+	msg.lastErr = map[string]error{}
+	m = m.cronLoaded(msg)
+	require.NotContains(t, m.cron.data.lastRuns, j.UID, "fresh empty must clear display-only evidence")
+
+	t.Run("jobs error keeps fresh head evidence", func(t *testing.T) {
+		m := cronSeenFixture(t)
+		job := m.cron.data.jobs[0]
+		fresh := m.cron.data.runs[0]
+		fresh.UID, fresh.Status = "new-head-run", "failed"
+		fresh.CreatedAt = fresh.CreatedAt.Add(time.Hour)
+		data := *m.cron.data
+		data.jobsErr = errors.New("jobs unavailable")
+		data.runs = []generated.CronRun{fresh}
+		m.api = &cronReadTestAPI{data: data}
+		msg := m.fetchCron()().(cronLoadedMsg)
+		require.Equal(t, fresh.UID, msg.lastRuns[job.UID].UID, "the successful head read supplies fresh last-run evidence")
+		m = m.cronLoaded(msg)
+		require.Equal(t, "unavailable", cronHealth(*m.cron.data, job, snapshotFixedNow).state)
+		require.Contains(t, cronJobLast(*m.cron.data, job.UID), "failed", "Last run must retain the successful head read despite the unrelated jobs failure")
+	})
+}
+
+func TestCronEventRefreshCoalescesQuietJobFills(t *testing.T) {
+	m := cronSeenFixture(t)
+	data := *m.cron.data
+	for i := range 2 {
+		j := data.jobs[0]
+		j.UID = fmt.Sprintf("quiet-job-%d", i)
+		data.jobs = append(data.jobs, j)
+	}
+	a := &cronFanoutAPI{cronReadTestAPI: &cronReadTestAPI{data: data}}
+	m.api = a
+	defer func() { m.cron.reads.stop() }()
+	for range 3 {
+		// This is Update's event handler followed by its Cron scheduling hook.
+		// Leave the debounce command pending while completing any immediate fetch.
+		next, _ := m.handleEventReceived(eventReceivedMsg{eventType: "cron.run.observed", projectID: 7})
+		m = next.(Model)
+		nextModel, cmd := m.cronSync()
+		m = nextModel
+		if cmd != nil {
+			m = m.cronLoaded(cmd().(cronLoadedMsg))
+		}
+	}
+	require.Equal(t, int64(2), a.fills.Load(), "one pending event debounce must issue exactly one quiet-job sweep")
+}
+
+type cronFanoutAPI struct {
+	*cronReadTestAPI
+	fills atomic.Int64
+}
+
+func (a *cronFanoutAPI) ListCronJobRuns(ctx context.Context, id int64, job, before string, limit int64) ([]generated.CronRun, string, error) {
+	if job == "" {
+		return a.cronReadTestAPI.ListCronJobRuns(ctx, id, job, before, limit)
+	}
+	a.fills.Add(1)
+	return nil, "", nil // These enabled jobs have never run.
 }

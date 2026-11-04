@@ -17,7 +17,7 @@ import (
 )
 
 // Contract: federation's pulled-event callback can publish the observation
-// payload through the daemon event publisher. Baseline snapshots and repeat pulls are not new failures.
+// payload once through the daemon event publisher; repeating the pull publishes nothing.
 func TestCronPullCallbackPublishesObservation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
@@ -72,6 +72,8 @@ func TestCronPullCallbackPublishesObservation(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
+	// The sync invokes its callback inline after commit, and EventsFrom sends
+	// to the subscriber synchronously, so an empty channel is conclusive here.
 	pull()
 	select {
 	case msg := <-stream.Ch:

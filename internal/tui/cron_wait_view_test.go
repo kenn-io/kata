@@ -91,3 +91,18 @@ func TestCronWaitNativeRunDoesNotAddAttentionRead(t *testing.T) {
 	cronEnrich(t.Context(), a, 7, m.cron.data)
 	require.Equal(t, map[string]int{nextParentUID: 1}, a.waitCalls, "only the shared native parent read is needed")
 }
+
+func TestCronWaitPlainRunDetailDoesNotRepeatStatus(t *testing.T) {
+	m := cronFixture(t)
+	r := m.cron.data.runs[0]
+	r.Status = "running"
+	r.IssueUID = new("issue")
+	m.cron.data.runs = []generated.CronRun{r}
+	m.cron.data.waits = map[string]cronParent{"issue": {open: true}}
+	m.cron.stack = []cronFrame{{ref: cronRef{cronRuns, r.UID}}}
+	_, _, lines := cronScreen(m)
+	require.Equal(t, 1, strings.Count(cronLinesText(lines), "running"), "plain status must appear exactly once")
+	require.Contains(t, cronLinesText(lines), "Status:     running")
+	require.NotContains(t, cronLinesText(lines), "Health:")
+	require.NotContains(t, cronLinesText(lines), "executor recorded")
+}

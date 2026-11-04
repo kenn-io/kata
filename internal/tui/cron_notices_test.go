@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/pkg/client/generated"
 	"hegel.dev/go/hegel"
 )
 
@@ -186,4 +187,60 @@ func TestCronNoticeStaleWindowAndHints(t *testing.T) {
 		m.view = viewList
 		assertGolden(t, "cron-notice-list", m.viewContent())
 	}
+}
+
+func TestCronNoticeShortcutEnablesUnseen(t *testing.T) {
+	m := cronNoticeFixture(t)
+	m.cron.unseenOnly = true
+	m.toast = &toast{cronFailure: true, expiresAt: snapshotFixedNow.Add(time.Minute)}
+	m, _ = m.routeCronKey(keyRune('u'))
+	require.True(t, m.cron.unseenOnly)
+	m.toast = nil
+	m, _ = m.routeCronKey(keyRune('u'))
+	require.False(t, m.cron.unseenOnly, "ordinary u keeps its toggle behavior")
+}
+
+func TestCronNoticeCorrectionReleasesSuppression(t *testing.T) {
+	for _, announced := range []bool{false, true} {
+		m := cronNoticeFixture(t)
+		m, _ = m.cronNoticeEvent(cronNoticeEvent("corrected", "job", snapshotFixedNow))
+		if announced {
+			m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+			m.toast = nil
+		}
+		corrected := cronNoticeEvent("corrected", "job", snapshotFixedNow)
+		corrected.cronRun.Status = "succeeded"
+		m, _ = m.cronNoticeEvent(corrected)
+		require.NotContains(t, m.cronNotices.pending, "corrected")
+		require.NotContains(t, m.cronNotices.announced, "corrected")
+		if !announced {
+			m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+			require.Nil(t, m.toast)
+		}
+		m, cmd := m.cronNoticeEvent(cronNoticeEvent("next", "job", snapshotFixedNow))
+		require.NotNil(t, cmd, "corrected failure must release job suppression")
+	}
+
+	t.Run("loaded correction after reset", func(t *testing.T) {
+		m := cronNoticeFixture(t)
+		job := m.cron.data.jobs[0].UID
+		event := cronNoticeEvent("corrected-run", job, snapshotFixedNow)
+		m, _ = m.cronNoticeEvent(event)
+		m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+		require.NotNil(t, m.toast)
+		m.toast = nil
+		current := m.cron.data.runs[0]
+		current.UID, current.Status, current.Revision = "corrected-run", "succeeded", 2
+		data := *m.cron.data
+		data.runs = []generated.CronRun{current}
+		data.lastRuns = map[string]generated.CronRun{job: current}
+		data.lookup = map[string]generated.CronRun{current.UID: current}
+		data.resetPages = true
+		m = m.cronLoaded(cronLoadedMsg(data))
+		require.Zero(t, m.cronUnseenCount())
+		m, cmd := m.cronNoticeEvent(cronNoticeEvent("new-failure", job, snapshotFixedNow))
+		require.NotNil(t, cmd, "a corrected failure is no longer an unseen failure of this job")
+		m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+		require.NotNil(t, m.toast)
+	})
 }

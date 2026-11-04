@@ -3,7 +3,9 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
+	"sync/atomic"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -125,4 +127,26 @@ func TestSnapshot_CronIssue(t *testing.T) {
 	defer snapshotInit(t)()
 	m := cronIssueFixture(t, 100)
 	assertGolden(t, "cron-run-detail-issue", m.viewBody())
+}
+
+func TestCronIssueFetchByUID(t *testing.T) {
+	m := cronIssueFixture(t, 80)
+	var fetched atomic.Bool
+	m.api = newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/projects/7/issues/issue-example" {
+			fetched.Store(true)
+			respondJSON(t, w, map[string]any{"issue": map[string]any{"uid": "issue-example", "project_id": 7, "short_id": "abcd", "title": "Linked issue", "status": "open"}})
+			return
+		}
+		http.Error(w, "fixture not found", http.StatusNotFound)
+	})
+	m, cmd := m.cronOpenIssue("issue-example")
+	require.NotNil(t, cmd)
+	for _, msg := range runCmdTree(cmd) {
+		if _, ok := msg.(detailFetchedMsg); ok {
+			m, _ = updateModel(m, msg)
+		}
+	}
+	require.True(t, fetched.Load(), "opening a UID link must fetch the issue, even before its short ID is known")
+	require.Equal(t, "Linked issue", m.detail.issue.Title)
 }

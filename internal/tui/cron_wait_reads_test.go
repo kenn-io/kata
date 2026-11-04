@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -36,23 +38,6 @@ func waitReadAPI(read func(context.Context, string) ([]generated.CronRun, error)
 	return &cronWaitReadAPI{cronEnrichAPI: &cronEnrichAPI{read: read}, waitCalls: map[string]int{}, wait: func(context.Context, string) (cronParent, error) {
 		return cronParent{open: true, metadata: map[string]any{notification.MetadataKey("operator"): map[string]any{"from": "worker", "message": "review"}}}, nil
 	}}
-}
-
-// Contract: at most 20 distinct issues, one fetch per shared issue, with each
-// actor evaluated independently and excess/missing evidence explicitly unknown.
-func TestCronWaitReadCapAndSharedIssue(t *testing.T) {
-	p := cronData{}
-	for i := range 26 {
-		p.runs = append(p.runs, generated.CronRun{UID: fmt.Sprint(i), Status: "running", Actor: "operator", IssueUID: new(fmt.Sprint(i)), CreatedAt: snapshotFixedNow.Add(-time.Duration(i) * time.Minute)})
-	}
-	p.runs = append(p.runs, generated.CronRun{UID: "other-actor", Status: "running", Actor: "other", IssueUID: new("0")})
-	a := waitReadAPI(nil)
-	cronEnrich(t.Context(), a, 7, &p)
-	require.Len(t, a.waitCalls, 20)
-	require.Equal(t, 1, a.waitCalls["0"], "two actors sharing an issue must not issue a second read")
-	require.Equal(t, "blocked", cronRunHealth(p, p.runs[0]).state)
-	require.Equal(t, "running", cronRunHealth(p, p.runs[26]).state)
-	require.Contains(t, cronRunHealth(p, p.runs[25]).reason, "attention unavailable")
 }
 
 func TestCronWaitReadFillAndHistoryRevisions(t *testing.T) {
@@ -156,8 +141,60 @@ func (a *cronWaitFetchAPI) readCronParent(ctx context.Context, id int64, uid str
 	return a.waiter.readCronParent(ctx, id, uid)
 }
 
-// Contract: head and retained rows share a unique-issue admission cap, and a
-// fresh unavailable read cannot reuse a preceding successful wait snapshot.
+// A fresh unavailable read cannot reuse a preceding successful wait snapshot.
+
+func TestCronWaitRefreshUnavailableProperty(t *testing.T) {
+	uid := "issue-example"
+	r := generated.CronRun{UID: "run-example", Status: "running", Actor: "operator", IssueUID: new(uid)}
+	metadata := map[string]any{"work.attention": "stuck", notification.MetadataKey("operator"): map[string]any{"from": "worker", "message": "review"}}
+	p := cronData{runs: []generated.CronRun{r}, waits: map[string]cronParent{uid: {open: true, metadata: metadata}}}
+	require.Equal(t, "blocked", cronRunHealth(p, r).state)
+	a := waitReadAPI(nil)
+	a.wait = func(context.Context, string) (cronParent, error) { return cronParent{}, errors.New("offline") }
+	cronEnrich(t.Context(), a, 7, &p)
+	got := cronRunHealth(p, r)
+	require.Equal(t, "running", got.state)
+	require.Equal(t, "attention unavailable", got.reason)
+}
+
+// Production installs undoClient around the daemon API; shared issue reads
+// must preserve attention evidence through that wrapper.
+func TestCronWaitSharedIssueThroughUndoClient(t *testing.T) {
+	j := cronFixture(t).cron.data.jobs[0]
+	nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&j.Definition)
+	p := cronData{jobs: []generated.CronJob{j}, runs: []generated.CronRun{{UID: "adapter-run", Status: "running", Actor: "operator", IssueUID: new(nextParentUID)}}}
+	var reads atomic.Int32
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/projects/7/issues/"+nextParentUID {
+			reads.Add(1)
+			respondJSON(t, w, map[string]any{"issue": map[string]any{"status": "open", "metadata": map[string]any{"work.attention": "needs-human"}}})
+		} else {
+			require.Equal(t, "/api/v1/projects/7/cron/runs", r.URL.Path)
+			respondJSON(t, w, map[string]any{"runs": []any{}})
+		}
+	})
+	cronEnrich(t.Context(), newUndoClient(c), 7, &p)
+	require.Equal(t, int32(1), reads.Load())
+	require.True(t, p.parentOpen[nextParentUID])
+	require.Equal(t, "blocked", cronRunHealth(p, p.runs[0]).state)
+
+	{
+		m := cronFixture(t)
+		a := waitReadAPI(nil)
+		base := &cronWaitFetchAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, waiter: a}
+		r := generated.CronRun{UID: "run-example", Status: "running", Actor: "operator", IssueUID: new("issue-example"), JobUID: new(m.cron.data.jobs[0].UID)}
+		p := cronData{jobs: m.cron.data.jobs, runs: []generated.CronRun{r}}
+		cronEnrich(t.Context(), newUndoClient(base), 7, &p)
+		require.Equal(t, "blocked", cronRunHealth(p, r).state)
+		require.Equal(t, 1, a.waitCalls["issue-example"])
+		cronEnrich(t.Context(), newUndoClient(&cronReadTestAPI{data: *m.cron.data}), 7, &p)
+		require.Equal(t, "running", cronRunHealth(p, r).state)
+		require.Equal(t, "attention unavailable", cronRunHealth(p, r).reason)
+	}
+}
+
+// Contract: at most 20 distinct issues, one fetch per shared issue, with each
+// actor evaluated independently and excess/missing evidence explicitly unknown.
 func TestCronWaitUniqueAdmissionProperty(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
 		count := int(hegel.Draw(ht, hegel.Integers[uint64](0, ^uint64(0))) % 61)
@@ -185,21 +222,19 @@ func TestCronWaitUniqueAdmissionProperty(t *testing.T) {
 			}
 		}
 	}, hegel.WithTestCases(150))
-}
 
-func TestCronWaitRefreshUnavailableProperty(t *testing.T) {
-	uid := "issue-example"
-	r := generated.CronRun{UID: "run-example", Status: "running", Actor: "operator", IssueUID: new(uid)}
-	metadata := map[string]any{"work.attention": "stuck", notification.MetadataKey("operator"): map[string]any{"from": "worker", "message": "review"}}
-	p := cronData{runs: []generated.CronRun{r}, waits: map[string]cronParent{uid: {open: true, metadata: metadata}}}
-	require.Equal(t, "blocked", cronRunHealth(p, r).state)
-	a := waitReadAPI(nil)
-	a.wait = func(context.Context, string) (cronParent, error) { return cronParent{}, errors.New("offline") }
-	cronEnrich(t.Context(), a, 7, &p)
-	got := cronRunHealth(p, r)
-	require.Equal(t, "running", got.state)
-	require.Equal(t, "attention unavailable", got.reason)
+	t.Run("shared actor and overflow outcomes", func(t *testing.T) {
+		p := cronData{}
+		for i := range 26 {
+			p.runs = append(p.runs, generated.CronRun{UID: fmt.Sprint(i), Status: "running", Actor: "operator", IssueUID: new(fmt.Sprint(i)), CreatedAt: snapshotFixedNow.Add(-time.Duration(i) * time.Minute)})
+		}
+		p.runs = append(p.runs, generated.CronRun{UID: "other-actor", Status: "running", Actor: "other", IssueUID: new("0")})
+		a := waitReadAPI(nil)
+		cronEnrich(t.Context(), a, 7, &p)
+		require.Len(t, a.waitCalls, 20)
+		require.Equal(t, 1, a.waitCalls["0"], "two actors sharing an issue must not issue a second read")
+		require.Equal(t, "blocked", cronRunHealth(p, p.runs[0]).state)
+		require.Equal(t, "running", cronRunHealth(p, p.runs[26]).state)
+		require.Contains(t, cronRunHealth(p, p.runs[25]).reason, "attention unavailable")
+	})
 }
-
-// Production installs undoClient around the daemon API; shared issue reads
-// must preserve attention evidence through that wrapper.
