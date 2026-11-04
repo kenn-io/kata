@@ -107,9 +107,9 @@ func TestDeleteFormRequiresFullConfirmation(t *testing.T) {
 
 	h.key(runeKey('X'))
 	require.Equal(t, inputDeleteForm, h.m.input.kind, "X opens the Delete form")
-	assert.Equal(t, "DELETE "+h.qualified(target), h.m.input.title)
+	assert.Equal(t, "Delete issue", h.m.input.title)
 	rendered := stripANSI(renderCenteredForm(h.m.input, 100, 30, h.m.toastNow()))
-	assert.Contains(t, rendered, "DELETE "+h.qualified(target))
+	assert.Contains(t, rendered, "Delete issue")
 	assert.Contains(t, rendered, "Type DELETE "+h.qualified(target)+" to confirm.")
 	assert.Empty(t, h.m.input.field(fieldConfirm).input.Placeholder)
 	assert.Contains(t, rendered, "Second", "the form shows the issue title")
@@ -315,6 +315,79 @@ func TestDeleteSavingEscKeepsResult(t *testing.T) {
 	assert.True(t, h.isDeleted(target.UID))
 }
 
+func TestDeleteDetailStaysGoneAfterWidening(t *testing.T) {
+	h := newDeleteHarness(t, viewDetail)
+	h.m, _ = updateModel(h.m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	require.Equal(t, splitlayout.Stacked, h.m.layout)
+	target := h.issues[0]
+	h.selectIssue(target.UID)
+	h.key(runeKey('X'))
+	h.typeText("DELETE " + h.qualified(target))
+	h.finish(h.enter())
+	require.True(t, h.isDeleted(target.UID))
+	require.Equal(t, viewList, h.m.view)
+	assert.Nil(t, h.m.detail.issue, "returning to the stacked list clears the deleted detail")
+
+	var cmd tea.Cmd
+	h.m, cmd = updateModel(h.m, tea.WindowSizeMsg{Width: 180, Height: 40})
+	h.m = drainInboxCmds(h.m, cmd)
+	require.Equal(t, splitlayout.Split, h.m.layout)
+	require.NotNil(t, h.m.detail.issue)
+	selected, ok := h.m.list.targetRow()
+	require.True(t, ok)
+	assert.Equal(t, selected.UID, h.m.detail.issue.UID)
+	assert.NotEqual(t, target.UID, h.m.detail.issue.UID)
+}
+
+func TestDeleteSkipsRepeatedIssueInDetailHistory(t *testing.T) {
+	for _, source := range []string{"detail", "Attention"} {
+		t.Run(source, func(t *testing.T) {
+			h := newDeleteHarness(t, viewDetail)
+			h.m.layout = splitlayout.Stacked
+			target, other := h.issues[0], h.issues[1]
+			h.selectIssue(target.UID)
+			var history []detailModel
+			for i, issue := range []db.Issue{target, other, target} {
+				h.selectIssue(issue.UID)
+				h.m.detail.gen = int64(i + 1)
+				history = append(history, cloneDetailModel(h.m.detail))
+			}
+			h.m.detail.navStack = history
+			h.m.detail.gen, h.m.nextGen = 4, 4
+			if source == "Attention" {
+				t.Setenv("KATA_INBOX_USER", "alice")
+				_, err := h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+					IssueID: target.ID, Actor: "alice", IfMatchRev: new(target.Revision),
+					Patch: map[string]jsontext.Value{notification.MetadataKey("alice"): jsontext.Value(`{"from":"bob","message":"Review this"}`)},
+				})
+				require.NoError(t, err)
+				var cmd tea.Cmd
+				h.m, cmd = h.m.transitionToAttention()
+				h.m = drainInboxCmds(h.m, cmd)
+				next, cmd := h.m.Update(h.enter()())
+				h.m = drainInboxCmds(next.(Model), cmd)
+			}
+			h.key(runeKey('X'))
+			h.typeText("DELETE " + h.qualified(target))
+			next, cmd := h.m.Update(h.enter()())
+			h.m = drainInboxCmds(next.(Model), cmd)
+			require.True(t, h.isDeleted(target.UID))
+			if source == "Attention" {
+				require.Equal(t, viewAttention, h.m.view)
+				cmd = h.key(tea.KeyPressMsg{Code: tea.KeyEscape})
+				h.m = drainInboxCmds(h.m, cmd)
+			}
+			require.Equal(t, viewDetail, h.m.view)
+			require.NotNil(t, h.m.detail.issue)
+			assert.Equal(t, other.UID, h.m.detail.issue.UID, "delete skips consecutive visits to the deleted issue")
+			cmd = h.key(tea.KeyPressMsg{Code: tea.KeyEscape})
+			h.m = drainInboxCmds(h.m, cmd)
+			assert.Equal(t, viewList, h.m.view, "Back skips the earlier visit to the deleted issue")
+			assert.True(t, h.m.detail.issue == nil || h.m.detail.issue.UID != target.UID)
+		})
+	}
+}
+
 func TestDeleteChildRefetchesParent(t *testing.T) {
 	h := newDeleteHarness(t, viewDetail)
 	parent, child := h.issues[0], h.issues[1]
@@ -452,7 +525,7 @@ func TestDeleteConfirmationResolvesDetailProject(t *testing.T) {
 				return
 			}
 			require.Equal(t, inputDeleteForm, h.m.input.kind)
-			assert.Equal(t, "DELETE "+h.qualified(target), h.m.input.title)
+			assert.Equal(t, h.qualified(target), h.m.input.del.expected)
 			h.typeText("DELETE " + h.qualified(target))
 			h.finish(h.enter())
 			assert.True(t, h.isDeleted(target.UID))

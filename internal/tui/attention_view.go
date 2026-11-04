@@ -138,10 +138,8 @@ func (m Model) leaveDeletedAttentionReturn(uid string) Model {
 		return m
 	}
 	restored := *saved
-	if len(restored.detail.navStack) > 0 {
-		restored.detail, _ = restored.detail.handleBack(nil)
-	} else {
-		restored.detail = newDetailModel()
+	restored.detail = restored.detail.backPastDeleted(uid)
+	if restored.detail.issue == nil {
 		restored.view, restored.prevView = listInsteadOfDetail(restored.view), listInsteadOfDetail(restored.prevView)
 		restored.foreground, restored.focus = listInsteadOfDetail(restored.foreground), focusList
 	}

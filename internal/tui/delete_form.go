@@ -25,7 +25,7 @@ func newDeleteForm(target formTarget, issue Issue, expected string) inputState {
 	input.Blur()
 	s := inputState{
 		kind:   inputDeleteForm,
-		title:  "DELETE " + expected,
+		title:  "Delete issue",
 		target: target,
 		fields: []inputField{{id: fieldConfirm, kind: fieldSingleLine, input: input, label: "Confirm"}},
 		del:    deleteFormState{expected: expected, issueTitle: issue.Title},
@@ -149,13 +149,30 @@ func (m Model) leaveDeletedDetail(prior detailModel, uid string) (Model, tea.Cmd
 	if prior.issue == nil || prior.issue.UID != uid {
 		return m, nil
 	}
-	restored, leave := prior.handleBack(m.api)
-	if len(prior.navStack) > 0 {
+	restored := prior.backPastDeleted(uid)
+	if restored.issue != nil {
 		m.detail = restored
-		return m, leave
+		cmd := m.detail.refetch(m.api)
+		return m, cmd
 	}
-	next, cmd, _ := m.routeTopLevel(leave())
+	if m.detail.issue != nil && m.detail.issue.UID == uid {
+		m.detail = restored
+	}
+	next, cmd, _ := m.routeTopLevel(popDetailMsg{})
 	return next.(Model), cmd
+}
+
+// backPastDeleted removes every visit to the deleted issue before going back.
+func (dm detailModel) backPastDeleted(uid string) detailModel {
+	dm.cancelReads()
+	dm.navStack = slices.DeleteFunc(slices.Clone(dm.navStack), func(prior detailModel) bool {
+		return prior.issue != nil && prior.issue.UID == uid
+	})
+	if len(dm.navStack) == 0 {
+		return newDetailModel()
+	}
+	restored, _ := dm.handleBack(nil)
+	return restored
 }
 
 // withoutIssue drops a deleted issue from the list and selects the row after
