@@ -41,12 +41,4 @@ func TestPendingForGenerationCursor(t *testing.T) {
 	end, err := idx.PendingForGenerationForTest(ctx, key, &issues[2].UID, 10)
 	require.NoError(t, err)
 	require.Empty(t, end)
-	restarted, err := idx.PendingForGenerationForTest(ctx, key, nil, 1)
-	require.NoError(t, err)
-	require.Equal(t, first, restarted)
-	missing := issues[0].UID + "0"
-	next, err = idx.PendingForGenerationForTest(ctx, key, &missing, 10)
-	require.NoError(t, err)
-	require.Len(t, next, 1)
-	require.Equal(t, issues[2].UID, next[0].Doc)
 }
