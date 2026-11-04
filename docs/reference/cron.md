@@ -717,7 +717,6 @@ removed. A later prune selects it only if the current rules allow it.
 Pruning therefore reduces retained evidence without promising bounded total
 database growth or distinct lifetime counts.
 
-
 ### Retained and pruned counts
 
 Read current run counts and recorded pruning separately:
@@ -752,10 +751,11 @@ integers, including values above 2^53. Consumers must use an integer-capable
 JSON decoder.
 
 The owning hub stores absolute tallies in reserved `cron.tally.<group_uid>`
-project metadata. Generic metadata PATCH requests cannot change or delete
-that prefix. Backup, project export/import, and federation preserve validated
-tallies. Live project merge combines disjoint groups and identical histories;
-conflicting histories for the same kind and UID reject the whole merge.
+project metadata. Generic metadata PATCH requests reject changes, deletions,
+and no-ops for that prefix. Backup, project export/import, and federation
+preserve validated tallies. Live project merge combines disjoint groups and
+identical histories; conflicting histories for the same kind and UID reject
+the whole merge.
 
 ## Routes, events, and records
 
@@ -773,10 +773,6 @@ relay delivery returns `409 federation_pending_delivery`. Responses contain
 Counts use `GET /api/v1/projects/{project_id}/cron/runs/counts` with ordinary
 project read authority and optional `job_uid` or `workflow_uid`. Invalid or
 combined filters return 400; unauthorized project access returns 404.
-Tracked groups include `coverage_started_at`, `last_pruned_at`,
-`oldest_created_at`, and `newest_created_at`, alongside the counts described
-above. Generic metadata PATCH writes to `cron.tally.` reject changes,
-deletions, and no-ops.
 
 Workflow routes are `/api/v1/projects/{project_id}/cron/workflows` and
 `/api/v1/projects/{project_id}/cron/workflows/{cron_uid}`. Responses use
