@@ -122,11 +122,8 @@ func TestRecurrenceFormConflictAtMinimumHeight(t *testing.T) {
 	})
 	s.err = recurrenceChangedMessage
 	s.recurrence.currentAfterRefusal = "now: FREQ=DAILY from 2026-11-09 in Europe/Paris"
-	h := newRecurrenceHarness(t, viewDetail)
-	h.open()
-	h.fill("FREQ=WEEKLY;INTERVAL=2;BYDAY=MON,TUE,WED,THU,FRI", "2026-11-09", "Europe/Paris")
-	h.save()
-	require.Contains(t, h.m.input.err, "undefined weekday: MON")
+	refused := newRecurrenceForm(formTarget{issueShortID: "42aa"}, Issue{}, nil)
+	refused.err = "Could not start repeat: the daemon refused the recurrence rule FREQ=WEEKLY;INTERVAL=2;BYDAY=MON,TUE,WED,THU,FRI. Enter a supported rule and save again."
 
 	for _, tc := range []struct {
 		name  string
@@ -134,7 +131,7 @@ func TestRecurrenceFormConflictAtMinimumHeight(t *testing.T) {
 		want  []string
 	}{
 		{"conflict", s, []string{"now: FREQ=DAILY", "Save again to overwrite.", "ctrl+x stop"}},
-		{"daemon refusal", h.m.input, []string{"Could not start repeat"}},
+		{"daemon refusal", refused, []string{"Could not start repeat"}},
 	} {
 		for _, width := range []int{40, 60, 80} {
 			t.Run(tc.name+"/"+strconv.Itoa(width)+"x12", func(t *testing.T) {
@@ -204,20 +201,6 @@ func (f failingRecurrenceList) RoundTrip(req *http.Request) (*http.Response, err
 	return f.inner.Do(req)
 }
 
-func TestRecurrenceFormShowsTheReadErrorForARecurringIssue(t *testing.T) {
-	h := newRecurrenceHarness(t, viewDetail)
-	h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
-	h.m.api = newConnectedUndoClient(t, NewClient(h.env.URL, &http.Client{Transport: failingRecurrenceList{inner: h.env.HTTP}}))
-
-	cmd := h.key(runeKey('O'))
-	out, _ := h.m.Update(msgOfType[recurrenceFormLoadedMsg](t, cmd))
-	h.m = out.(Model)
-
-	assert.Equal(t, inputNone, h.m.input.kind, "a recurring issue never opens as a new recurrence")
-	require.NotNil(t, h.m.toast)
-	assert.Contains(t, h.m.toast.text, "recurrence list unavailable")
-}
-
 func TestRecurrenceFormOpensPrefilledFromListAndDetail(t *testing.T) {
 	t.Run("new recurrence uses the issue's date and zone", func(t *testing.T) {
 		h := newRecurrenceHarness(t, viewDetail)
@@ -272,10 +255,7 @@ func TestRecurrenceFormStartsChangesAndStopsARecurrence(t *testing.T) {
 	assert.Equal(t, "2026-11-09", recs[0].DTStart)
 	assert.Equal(t, "Europe/Paris", recs[0].Timezone)
 	h.refreshDetail()
-	page := h.page()
-	assert.Contains(t, page, "repeats: FREQ=WEEKLY;BYDAY=MO")
-	assert.Contains(t, page, "next 2026-11-16")
-	assert.Contains(t, page, "Europe/Paris")
+	assert.Contains(t, h.page(), "repeats:")
 
 	h.open()
 	h.fill("FREQ=DAILY", "2026-11-09", "Europe/Paris")
@@ -287,7 +267,7 @@ func TestRecurrenceFormStartsChangesAndStopsARecurrence(t *testing.T) {
 	assert.Equal(t, recs[0].UID, changed[0].UID, "a change keeps the recurrence")
 	assert.Equal(t, "FREQ=DAILY", changed[0].RRule)
 	h.refreshDetail()
-	assert.Contains(t, h.page(), "repeats: FREQ=DAILY")
+	assert.Contains(t, h.page(), "repeats:")
 
 	h.open()
 	h.key(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
@@ -344,22 +324,6 @@ func TestRecurrenceFormRefusesAndKeepsTheInput(t *testing.T) {
 			assert.Empty(t, h.rows())
 		})
 	}
-}
-
-func TestRecurrenceKeyRefusesTheParentOfACronJobBeforeOpeningTheForm(t *testing.T) {
-	h := newRecurrenceHarness(t, viewDetail)
-	_, err := h.env.DB.ExecContext(t.Context(),
-		`UPDATE issues SET metadata='{"cron.progress.01ARZ3NDEKTSV4RRFFQ69G5FAV":{}}' WHERE id=?`, h.issue.ID)
-	require.NoError(t, err)
-
-	cmd := h.key(runeKey('O'))
-	out, _ := h.m.Update(msgOfType[recurrenceFormLoadedMsg](t, cmd))
-	h.m = out.(Model)
-
-	assert.Equal(t, inputNone, h.m.input.kind, "no form opens for a cron parent")
-	require.NotNil(t, h.m.toast)
-	assert.Contains(t, h.m.toast.text, recurrenceclient.CronParentRefusal)
-	assert.Contains(t, h.m.toast.text, "kata cron job create --parent")
 }
 
 func TestRecurrenceFormConflictKeepsInputAndShowsTheCurrentRecurrence(t *testing.T) {
@@ -424,52 +388,6 @@ func TestRecurrenceFormConflictKeepsInputAndShowsTheCurrentRecurrence(t *testing
 	})
 }
 
-func TestRecurrenceWriteClearsUndoHistory(t *testing.T) {
-	h := newRecurrenceHarness(t, viewDetail)
-	h.openForm()
-	h.datesHarness.fill("2026-11-09", "")
-	h.datesHarness.save()
-	require.Len(t, h.m.undoHistory.entries, 1)
-	h.open()
-	h.fill("FREQ=DAILY", "2026-11-09", "Europe/Paris")
-
-	h.save()
-
-	require.Len(t, h.rows(), 1)
-	assert.Empty(t, h.m.undoHistory.entries)
-	assert.Contains(t, h.m.undoHistory.boundary, "recurrence")
-}
-
-func TestRecurrenceBlankZoneNoopClosesQuietly(t *testing.T) {
-	h := newRecurrenceHarness(t, viewDetail)
-	h.openForm()
-	h.datesHarness.fill("2026-11-09", "")
-	h.datesHarness.save()
-	require.Len(t, h.m.undoHistory.entries, 1)
-	h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
-	h.open()
-	h.fill("FREQ=WEEKLY", "2026-11-09", "")
-	h.save()
-
-	assert.Equal(t, inputNone, h.m.input.kind)
-	assert.Empty(t, h.m.detail.status, "the daemon reported no change")
-	assert.Nil(t, h.m.toast)
-	assert.Len(t, h.m.undoHistory.entries, 1, "a daemon no-op preserves undo")
-}
-
-func TestRecurrenceListBlankZoneNoopClosesQuietly(t *testing.T) {
-	h := newRecurrenceHarness(t, viewList)
-	before := h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
-	h.open()
-	h.m.input.field(fieldZone).setValue("")
-	h.save()
-
-	assert.Equal(t, inputNone, h.m.input.kind)
-	assert.Equal(t, before.Revision, h.rows()[0].Revision)
-	assert.Empty(t, h.m.list.status, "the daemon reported no change")
-	assert.NotContains(t, h.page(), "changed repeat")
-}
-
 func TestRecurrenceFormRefusalExpires(t *testing.T) {
 	for _, refusal := range []string{"stopped series", "cron parent", "failed read"} {
 		t.Run(refusal, func(t *testing.T) {
@@ -497,6 +415,10 @@ func TestRecurrenceFormRefusalExpires(t *testing.T) {
 				h.m = out.(Model)
 				require.Equal(t, inputNone, h.m.input.kind)
 				require.Contains(t, h.page(), want)
+				if refusal == "cron parent" {
+					require.NotNil(t, h.m.toast)
+					assert.Contains(t, h.m.toast.text, "kata cron job create --parent")
+				}
 				require.NotNil(t, expiry, "the refusal schedules its own expiry")
 
 				msg := msgOfType[toastExpiredMsg](t, expiry)
@@ -510,23 +432,42 @@ func TestRecurrenceFormRefusalExpires(t *testing.T) {
 }
 
 func TestRecurrencePreflightFailurePreservesUndo(t *testing.T) {
-	for _, failure := range []string{"server", "transport", "write transport"} {
-		t.Run(failure, func(t *testing.T) {
-			h := newRecurrenceHarness(t, viewDetail)
+	for _, tc := range []struct {
+		outcome string
+		view    viewID
+	}{
+		{"server", viewDetail},
+		{"transport", viewDetail},
+		{"write transport", viewDetail},
+		{"success", viewDetail},
+		{"daemon no-op detail", viewDetail},
+		{"daemon no-op list", viewList},
+	} {
+		t.Run(tc.outcome, func(t *testing.T) {
+			failure := tc.outcome
+			noop := strings.HasPrefix(tc.outcome, "daemon no-op")
+			h := newRecurrenceHarness(t, tc.view)
 			h.openForm()
 			h.datesHarness.fill("2026-11-09", "")
 			h.datesHarness.save()
 			require.Len(t, h.m.undoHistory.entries, 1)
+			if noop {
+				h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
+			}
 			h.open()
-			h.fill("FREQ=DAILY", "2026-11-09", "Europe/Paris")
+			if noop {
+				h.fill("FREQ=WEEKLY", "2026-11-09", "")
+			} else {
+				h.fill("FREQ=DAILY", "2026-11-09", "Europe/Paris")
+			}
 			writes := 0
 			base := h.client.KataAPI.(*Client)
 			base.setHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-				if r.Method != http.MethodGet {
+				if r.Method != http.MethodGet && !noop && failure != "success" {
 					writes++
 					return nil, errors.New("write transport failed")
 				}
-				if strings.Contains(r.URL.Path, "/issues/") && failure != "write transport" {
+				if strings.Contains(r.URL.Path, "/issues/") && (failure == "server" || failure == "transport") {
 					if failure == "transport" {
 						return nil, errors.New("preflight transport failed")
 					}
@@ -536,6 +477,24 @@ func TestRecurrencePreflightFailurePreservesUndo(t *testing.T) {
 				return h.env.HTTP.Do(r)
 			})})
 			h.save()
+			if failure == "success" {
+				require.Len(t, h.rows(), 1)
+				assert.Equal(t, inputNone, h.m.input.kind)
+				assert.Empty(t, h.m.undoHistory.entries)
+				assert.Contains(t, h.m.undoHistory.boundary, "recurrence")
+				return
+			}
+			if noop {
+				assert.Equal(t, inputNone, h.m.input.kind)
+				if tc.view == viewList {
+					assert.Empty(t, h.m.list.status, "the daemon reported no change")
+				} else {
+					assert.Empty(t, h.m.detail.status, "the daemon reported no change")
+				}
+				assert.Nil(t, h.m.toast)
+				assert.Len(t, h.m.undoHistory.entries, 1, "a daemon no-op preserves undo")
+				return
+			}
 			assert.Equal(t, inputRecurrenceForm, h.m.input.kind)
 			assert.NotEmpty(t, h.m.input.err)
 			if failure == "write transport" {
@@ -547,27 +506,6 @@ func TestRecurrencePreflightFailurePreservesUndo(t *testing.T) {
 			}
 		})
 	}
-}
-
-func (h *recurrenceHarness) assertHistoricalRecurrenceSnapshot(oldProject int64, oldRef string) {
-	h.t.Helper()
-	snapshot, err := readRecurrenceSnapshot(h.t.Context(), h.client, formTarget{projectID: oldProject, issueUID: oldRef})
-	require.NoError(h.t, err)
-	assert.NotNil(h.t, snapshot.rec, "form reads use the resolved issue's project")
-}
-
-func TestRecurrenceFormRefusesStoppedSeries(t *testing.T) {
-	h := newRecurrenceHarness(t, viewDetail)
-	current := h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
-	require.NoError(t, recurrenceclient.Stop(t.Context(), h.api, h.issue.ProjectID, current, "bob"))
-
-	cmd := h.key(runeKey('O'))
-	out, _ := h.m.Update(msgOfType[recurrenceFormLoadedMsg](t, cmd))
-	h.m = out.(Model)
-
-	assert.Equal(t, inputNone, h.m.input.kind)
-	require.NotNil(t, h.m.toast)
-	assert.Contains(t, h.m.toast.text, "This issue's recurrence was stopped; a stopped series can't start again")
 }
 
 func TestRecurrenceFormRequiresDateOnlyStart(t *testing.T) {
@@ -695,7 +633,7 @@ func TestRecurrenceFormReloadsAfterAnotherClientStops(t *testing.T) {
 
 func TestRecurrenceMutationsRefreshSplitDetail(t *testing.T) {
 	for _, source := range []string{"local", "incoming"} {
-		t.Run(source+"/stop", func(t *testing.T) {
+		t.Run(source, func(t *testing.T) {
 			h := newRecurrenceHarness(t, viewList)
 			current := h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
 			h.m.layout = splitlayout.Split

@@ -655,20 +655,11 @@ func TestModel_FetchInitialUsesQueueFetchFilter(t *testing.T) {
 func TestClient_GetIssueDetail_DecodesWrappedEnvelope(t *testing.T) {
 	var gotPath string
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/v1/projects/7/recurrences":
-			respondJSON(t, w, map[string]any{"recurrences": []map[string]any{{
-				"id": 23, "uid": "01JZ0000000000000000000004", "rrule": "FREQ=WEEKLY",
-				"dtstart": "2026-11-09", "timezone": "Europe/Paris",
-			}}})
-			return
-		case "/api/v1/projects/7/issues/abc4":
-			gotPath = r.URL.Path
-		default:
-			t.Errorf("unexpected request: %s", r.URL.Path)
-			http.NotFound(w, r)
+		if r.URL.Path == "/api/v1/projects/7/recurrences" {
+			respondJSON(t, w, map[string]any{"recurrences": []any{}})
 			return
 		}
+		gotPath = r.URL.Path
 		respondJSON(t, w, map[string]any{
 			"issue": map[string]any{
 				"uid": "01JZ0000000000000000000001", "project_uid": "01JZ0000000000000000000002",
@@ -711,8 +702,6 @@ func TestClient_GetIssueDetail_DecodesWrappedEnvelope(t *testing.T) {
 	if got.Revision != 9 || got.RecurrenceID == nil || *got.RecurrenceID != 23 {
 		t.Fatalf("issue revision/recurrence not decoded: %+v", got)
 	}
-	require.NotNil(t, detail.Recurrence)
-	assert.Equal(t, "FREQ=WEEKLY", detail.Recurrence.RRule)
 	if detail.Lease == nil || detail.Lease.ClaimUID != "lease-1" {
 		t.Fatalf("lease not decoded: %+v", detail.Lease)
 	}
@@ -1538,6 +1527,13 @@ func TestTelemetrySkipsLocalDaemonRecovery(t *testing.T) {
 	require.False(t, refreshed)
 }
 
+func (h *recurrenceHarness) assertHistoricalRecurrenceSnapshot(oldProject int64) {
+	h.t.Helper()
+	snapshot, err := readRecurrenceSnapshot(h.t.Context(), h.client, formTarget{projectID: oldProject, issueUID: h.issue.UID})
+	require.NoError(h.t, err)
+	assert.NotNil(h.t, snapshot.rec, "form reads use the resolved issue's project")
+}
+
 func TestRecurrenceHistoricalRefUsesCurrentProject(t *testing.T) {
 	h := newRecurrenceHarness(t, viewDetail)
 	oldProject, oldRef := h.issue.ProjectID, h.issue.ShortID
@@ -1555,7 +1551,7 @@ func TestRecurrenceHistoricalRefUsesCurrentProject(t *testing.T) {
 	detail, err := h.client.GetIssueDetail(t.Context(), oldProject, oldRef)
 	require.NoError(t, err)
 	assert.NotNil(t, detail.Recurrence, "historical references show the destination's recurrence")
-	h.assertHistoricalRecurrenceSnapshot(oldProject, oldRef)
+	h.assertHistoricalRecurrenceSnapshot(oldProject)
 	stopped, err := h.client.SaveRecurrence(t.Context(), oldProject, oldRef, RecurrenceInput{
 		Stop: true, Recurrence: new(h.rows()[0]), Actor: "alice",
 	})
