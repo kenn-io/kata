@@ -73,3 +73,35 @@ func checkCronRunReasons(t *testing.T, store db.Storage) error {
 	}
 	return nil
 }
+
+// Step messages must behave identically across stores: reject NUL before SQL,
+// while retaining other free-text controls and reason-filtered readback.
+func checkCronSummaryStepControls(t *testing.T, store db.Storage) error {
+	for _, message := range []string{"before\x00after", "line\nnext\tcolumn\rreturn\x01control"} {
+		t.Run(message, func(t *testing.T) {
+			ctx := t.Context()
+			id, err := uid.New()
+			require.NoError(t, err)
+			project, err := store.CreateProject(ctx, "step-controls-"+strings.ToLower(id))
+			require.NoError(t, err)
+			job, _ := nativeFederationDefinitions(t, store, project)
+			summary := cron.Summary{Version: 1, Reason: "failed", Steps: []cron.SummaryStep{{Key: "review", Status: "failed", Message: message}}}
+			_, err = store.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: project.ID, UID: id, Actor: "operator", JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Status: "failed", Summary: summary})
+			if strings.ContainsRune(message, 0) {
+				require.ErrorIs(t, err, cron.ErrInvalid)
+				_, err = store.CronRun(ctx, project.ID, id)
+				require.ErrorIs(t, err, db.ErrNotFound)
+				return
+			}
+			require.NoError(t, err)
+			run, err := store.CronRun(ctx, project.ID, id)
+			require.NoError(t, err)
+			require.Equal(t, summary, run.Summary)
+			runs, err := store.ListCronRuns(ctx, db.CronRunList{ProjectID: project.ID, Reason: "failed"})
+			require.NoError(t, err)
+			require.Len(t, runs, 1)
+			require.Equal(t, id, runs[0].UID)
+		})
+	}
+	return nil
+}

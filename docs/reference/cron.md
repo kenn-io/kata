@@ -571,7 +571,7 @@ Each step requires a unique workflow-style `key` and a `status` of `running`,
 `succeeded`, `failed`, `cancelled`, `unknown`, or `skipped`. `attempts` defaults
 to zero and is at most 1000. An optional `exit_code` is a signed 32-bit integer;
 zero is distinct from an omitted code. A step may also carry a `reason` under
-the same grammar, a UTF-8 `message` of at most 4096 bytes, and RFC3339
+the same grammar, a UTF-8 `message` of at most 4096 bytes without NUL, and RFC3339
 `started_at`/`ended_at` instants. An end cannot precede a start. Steps need not
 match the current workflow definition: evidence may describe an older or ad-hoc
 workflow.

@@ -135,6 +135,7 @@ func TestCronRunProjectSelectionAndInvalidEvidence(t *testing.T) {
 		{"status": "completed"},
 		{"summary": map[string]any{"version": 2}},
 		{"summary": map[string]any{"version": 1, "input_tokens": -1}},
+		{"summary": map[string]any{"version": 1, "steps": []any{map[string]any{"key": "review", "status": "failed", "message": "before\x00after"}}}},
 		{"job_uid": "invalid"},
 		{"definition_event_uid": "01ARZ3NDEKTSV4RRFFQ69G5FAV"},
 	} {

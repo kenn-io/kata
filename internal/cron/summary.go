@@ -149,7 +149,7 @@ func (s Summary) validate() error {
 	}
 	seen := map[string]bool{}
 	for _, step := range s.Steps {
-		if !portableKey(step.Key) || seen[step.Key] || step.Attempts < 0 || step.Attempts > 1000 || len(step.Message) > 4096 || !utf8.ValidString(step.Message) || step.Reason != "" && !ValidReason(step.Reason) {
+		if !portableKey(step.Key) || seen[step.Key] || step.Attempts < 0 || step.Attempts > 1000 || len(step.Message) > 4096 || !utf8.ValidString(step.Message) || strings.ContainsRune(step.Message, 0) || step.Reason != "" && !ValidReason(step.Reason) {
 			return invalid("invalid summary step")
 		}
 		seen[step.Key] = true

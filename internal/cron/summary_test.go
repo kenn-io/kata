@@ -143,7 +143,7 @@ func TestSummaryRoundTripProperty(t *testing.T) {
 			count := min(hegel.Draw(ht, hegel.Integers[uint64](0, math.MaxUint64)), 64)
 			s.Steps = make([]SummaryStep, int(count))
 			for i := range s.Steps {
-				step := SummaryStep{Key: fmt.Sprintf("step-%d", i), Status: hegel.Draw(ht, hegel.SampledFrom([]string{"running", "succeeded", "failed", "cancelled", "unknown", "skipped"})), Attempts: hegel.Draw(ht, hegel.Integers[int](0, 1000)), Message: summaryPropertyText(ht, 256)}
+				step := SummaryStep{Key: fmt.Sprintf("step-%d", i), Status: hegel.Draw(ht, hegel.SampledFrom([]string{"running", "succeeded", "failed", "cancelled", "unknown", "skipped"})), Attempts: hegel.Draw(ht, hegel.Integers[int](0, 1000)), Message: strings.ReplaceAll(summaryPropertyText(ht, 256), "\x00", "")}
 				if hegel.Draw(ht, hegel.Booleans()) {
 					code := hegel.Draw(ht, hegel.Integers[int32](math.MinInt32, math.MaxInt32))
 					step.ExitCode = &code
@@ -286,4 +286,25 @@ func TestSummaryNestedOptionalCanonicalization(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, `{"version":1,"steps":[{"key":"review","status":"running"}]}`, string(encoded))
 	}
+}
+
+// New step text rejects the reproduced PostgreSQL NUL failure; legacy message
+// decoding keeps its existing acceptance, including NUL.
+func TestSummaryStepMessageControlsProperty(t *testing.T) {
+	hegel.Test(t, func(ht *hegel.T) {
+		control := hegel.Draw(ht, hegel.OneOf(hegel.Integers[rune](0, 31), hegel.SampledFrom([]rune{127})))
+		message := "before" + string(control) + "after"
+		raw, err := json.Marshal(Summary{Version: 1, Steps: []SummaryStep{{Key: "review", Status: "failed", Message: message}}})
+		require.NoError(ht, err)
+		_, err = ParseSummary(raw)
+		if control == 0 {
+			require.ErrorIs(ht, err, ErrInvalid)
+		} else {
+			require.NoError(ht, err)
+		}
+		raw, err = json.Marshal(Summary{Version: 1, Message: message})
+		require.NoError(ht, err)
+		_, err = ParseSummary(raw)
+		require.NoError(ht, err)
+	}, hegel.WithTestCases(200), hegel.WithDatabase(t.TempDir()))
 }
