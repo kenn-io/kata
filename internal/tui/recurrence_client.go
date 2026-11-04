@@ -60,6 +60,7 @@ func (c *Client) SaveRecurrence(ctx context.Context, projectID int64, ref string
 	if recurrenceclient.ParentsCronJob(issue.Metadata) {
 		return nil, &mutationPreflightError{errCronParent()}
 	}
+	changed := true
 	if in.Stop {
 		if in.Recurrence == nil {
 			return nil, &mutationPreflightError{errors.New("issue has no active recurrence; nothing was written")}
@@ -77,7 +78,7 @@ func (c *Client) SaveRecurrence(ctx context.Context, projectID int64, ref string
 		terms := in.Terms
 		terms.Zone = zone
 		if in.Recurrence != nil {
-			err = recurrenceclient.Change(ctx, apiClient, projectID, *in.Recurrence, terms)
+			changed, err = recurrenceclient.Change(ctx, apiClient, projectID, *in.Recurrence, terms)
 		} else {
 			err = startRecurrence(ctx, apiClient, projectID, ref, wire, in, terms)
 		}
@@ -88,7 +89,7 @@ func (c *Client) SaveRecurrence(ctx context.Context, projectID int64, ref string
 		}
 		return nil, err
 	}
-	resp := &MutationResp{Changed: true}
+	resp := &MutationResp{Changed: changed}
 	if after, err := c.ReadIssue(ctx, projectID, ref); err == nil {
 		resp.Issue = after.Issue
 	}
@@ -103,7 +104,7 @@ func errCronParent() error {
 // startRecurrence builds the template from the issue as read, minus owner and
 // metadata, and creates the recurrence guarded on the revision the form read.
 func startRecurrence(ctx context.Context, apiClient *generated.Client, projectID int64, ref string, shown *generated.ShowIssueResp, in RecurrenceInput, terms recurrenceclient.Terms) error {
-	if err := requireAPIVersion(ctx, apiClient, "0.37.0", "starting a recurrence requires daemon API 0.37.0 or newer"); err != nil {
+	if err := requireAPIVersion(ctx, apiClient, recurrenceclient.APIVersionIfMatch, "starting a recurrence requires daemon API "+recurrenceclient.APIVersionIfMatch+" or newer"); err != nil {
 		return &mutationPreflightError{err}
 	}
 	tpl, err := recurrenceclient.TemplateFromShow(shown.Body)

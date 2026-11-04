@@ -308,7 +308,11 @@ func (c *Client) ReadRecurrence(ctx context.Context, projectID int64, id *int64)
 	if err != nil {
 		return nil, err
 	}
-	return recurrenceclient.Active(ctx, apiClient, projectID, id)
+	rec, err := recurrenceclient.Active(ctx, apiClient, projectID, id)
+	if status, ok := errors.AsType[*recurrenceclient.StatusError](err); ok {
+		return nil, decodeError(status.Body, status.Status, status.Method, status.URI)
+	}
+	return rec, err
 }
 
 // CreateIssue posts a new issue. body.IdempotencyKey rides the

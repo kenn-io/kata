@@ -23,6 +23,9 @@ import (
 // issue it parents.
 const CronProgressPrefix = "cron.progress."
 
+// APIVersionIfMatch is the oldest daemon that guards recurrence creation.
+const APIVersionIfMatch = "0.37.0"
+
 // CronParentRefusal and CronParentHint are the refusal for an issue that
 // parents a native recurring job: closing it as done would pause the job.
 const (
@@ -261,7 +264,7 @@ func Start(ctx context.Context, api *generated.Client, projectID int64, ref stri
 
 // Change rewrites the rule, start and zone of current, guarded on the
 // revision current carries.
-func Change(ctx context.Context, api *generated.Client, projectID int64, current View, terms Terms) error {
+func Change(ctx context.Context, api *generated.Client, projectID int64, current View, terms Terms) (bool, error) {
 	tag := ETag(current.Revision)
 	response, callErr := api.PatchRecurrenceWithResponse(ctx, &generated.PatchRecurrenceRequestOptions{
 		PathParams: &generated.PatchRecurrencePath{ProjectID: projectID, RecurrenceUID: current.UID},
@@ -269,9 +272,12 @@ func Change(ctx context.Context, api *generated.Client, projectID int64, current
 		Body:       &generated.PatchRecurrenceBody{Actor: &terms.Actor, Rrule: &terms.Rule, Dtstart: &terms.Start, Timezone: &terms.Zone},
 	})
 	if response == nil {
-		return callErr
+		return false, callErr
 	}
-	return statusErr(response.StatusCode, response.Body, response.HTTPResponse, callErr)
+	if err := statusErr(response.StatusCode, response.Body, response.HTTPResponse, callErr); err != nil {
+		return false, err
+	}
+	return response.JSON200.Changed, nil
 }
 
 // Stop ends current, guarded on the revision current carries. Occurrences
