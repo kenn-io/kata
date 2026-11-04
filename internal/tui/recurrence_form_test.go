@@ -4,7 +4,9 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
+	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/pkg/client/generated"
+	"go.kenn.io/kit/tui/splitlayout"
 )
 
 // recurrenceHarness drives the Repeat form of one issue held by a real daemon.
@@ -113,21 +116,11 @@ func (h *recurrenceHarness) key(msg tea.KeyPressMsg) tea.Cmd {
 // housekeeping.
 func msgsOfType[T tea.Msg](cmd tea.Cmd) []T {
 	var found []T
-	var visit func(tea.Cmd)
-	visit = func(c tea.Cmd) {
-		if c == nil {
-			return
-		}
-		switch msg := c().(type) {
-		case T:
-			found = append(found, msg)
-		case tea.BatchMsg:
-			for _, sub := range msg {
-				visit(sub)
-			}
+	for _, msg := range runCmdTree(cmd) {
+		if typed, ok := msg.(T); ok {
+			found = append(found, typed)
 		}
 	}
-	visit(cmd)
 	return found
 }
 
@@ -424,4 +417,131 @@ func TestRecurrenceKeyUsesTheSamePermissionGateAsOtherEdits(t *testing.T) {
 
 	assert.Empty(t, msgsOfType[recurrenceFormLoadedMsg](cmd), "nothing is read for a key that may not edit")
 	assert.Equal(t, inputNone, h.m.input.kind)
+}
+
+func TestRecurrenceFormDropsLoadAfterNavigation(t *testing.T) {
+	for _, moved := range []string{"project", "UID", "view", "detail generation"} {
+		t.Run(moved, func(t *testing.T) {
+			h := newRecurrenceHarness(t, viewList)
+			h.m.scope.allProjects = true
+			if moved == "detail generation" {
+				h.m.view = viewDetail
+			}
+			loaded := msgOfType[recurrenceFormLoadedMsg](t, h.key(runeKey('O')))
+			switch moved {
+			case "project":
+				h.m.list.issues[0].ProjectID++
+			case "UID":
+				h.m.list.issues[0].UID = "another-issue"
+			case "view":
+				h.m.view = viewDetail
+			case "detail generation":
+				h.m.detail.gen++
+			}
+			out, _ := h.m.Update(loaded)
+			assert.Equal(t, inputNone, out.(Model).input.kind)
+		})
+	}
+}
+
+func TestRecurrenceFormRequiresGuardedStartAPI(t *testing.T) {
+	h := newRecurrenceHarness(t, viewDetail)
+	posts := 0
+	hc := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/api/v1/health" {
+			return &http.Response{StatusCode: http.StatusOK, Request: r,
+				Header: http.Header{"Content-Type": {"application/json"}},
+				Body:   io.NopCloser(strings.NewReader(`{"ok":true,"api_schema_version":"0.36.0"}`))}, nil
+		}
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/recurrences") {
+			posts++
+		}
+		return h.env.HTTP.Do(r)
+	})}
+	h.m.api = newConnectedUndoClient(t, NewClient(h.env.URL, hc))
+	h.open()
+	h.fill("FREQ=DAILY", "2026-11-09", "Europe/Paris")
+	h.save()
+	assert.Zero(t, posts, "an older daemon cannot enforce a guarded start")
+	assert.Equal(t, inputRecurrenceForm, h.m.input.kind)
+	assert.Contains(t, h.m.input.err, "upgrade the daemon")
+	assert.Empty(t, h.rows())
+}
+
+func TestRecurrenceFormReloadsAfterAnotherClientStops(t *testing.T) {
+	for _, action := range []string{"change", "stop"} {
+		t.Run(action, func(t *testing.T) {
+			h := newRecurrenceHarness(t, viewDetail)
+			current := h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
+			h.open()
+			h.fill("FREQ=DAILY", "2026-11-10", "Asia/Tokyo")
+			require.NoError(t, recurrenceclient.Stop(t.Context(), h.api, h.issue.ProjectID, current, "bob"))
+			if action == "stop" {
+				h.key(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
+				h.send(h.key(runeKey('y')))
+			} else {
+				h.save()
+			}
+			require.Equal(t, inputRecurrenceForm, h.m.input.kind)
+			assert.Nil(t, h.m.input.recurrence.rec)
+			assert.Contains(t, h.page(), "now: no recurrence")
+			rule, start, zone := h.values()
+			assert.Equal(t, []string{"FREQ=DAILY", "2026-11-10", "Asia/Tokyo"}, []string{rule, start, zone})
+			assert.Empty(t, h.rows(), "the refused write leaves the recurrence stopped")
+		})
+	}
+}
+
+func TestRecurrenceMutationsRefreshSplitDetail(t *testing.T) {
+	for _, source := range []string{"local", "incoming"} {
+		for _, action := range []string{"change", "stop"} {
+			t.Run(source+"/"+action, func(t *testing.T) {
+				h := newRecurrenceHarness(t, viewList)
+				current := h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
+				h.m.layout = splitlayout.Split
+				h.m.focus = focusList
+				h.refreshDetail()
+				require.Contains(t, h.page(), "repeats: FREQ=WEEKLY")
+				var cmd tea.Cmd
+				if source == "local" {
+					h.open()
+					if action == "change" {
+						h.fill("FREQ=DAILY", "2026-11-09", "Europe/Paris")
+						cmd = h.key(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+					} else {
+						h.key(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
+						cmd = h.key(runeKey('y'))
+					}
+					out, refresh := h.m.Update(msgOfType[mutationDoneMsg](t, cmd))
+					h.m, cmd = out.(Model), refresh
+				} else {
+					if action == "change" {
+						require.NoError(t, recurrenceclient.Change(t.Context(), h.api, h.issue.ProjectID, current,
+							recurrenceclient.Terms{Rule: "FREQ=DAILY", Start: "2026-11-09", Zone: "Europe/Paris", Actor: "bob"}))
+					} else {
+						require.NoError(t, recurrenceclient.Stop(t.Context(), h.api, h.issue.ProjectID, current, "bob"))
+					}
+					eventType := "recurrence.updated"
+					if action == "stop" {
+						eventType = "recurrence.deleted"
+					}
+					event := decodeEventReceived(frame{data: []byte(`{"type":"` + eventType + `","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"payload":{"recurrence_uid":"` + current.UID + `"}}`)})
+					cmd = h.m.maybeRefetchOpenDetail(event)
+				}
+				for _, msg := range runCmdTree(cmd) {
+					out, next := h.m.Update(msg)
+					h.m = out.(Model)
+					for _, fetched := range runCmdTree(next) {
+						out, _ = h.m.Update(fetched)
+						h.m = out.(Model)
+					}
+				}
+				if action == "change" {
+					assert.Contains(t, h.page(), "repeats: FREQ=DAILY")
+				} else {
+					assert.NotContains(t, h.page(), "repeats:")
+				}
+			})
+		}
+	}
 }

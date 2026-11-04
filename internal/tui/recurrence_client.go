@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 
 	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -104,13 +103,8 @@ func errCronParent() error {
 // startRecurrence builds the template from the issue as read, minus owner and
 // metadata, and creates the recurrence guarded on the revision the form read.
 func startRecurrence(ctx context.Context, apiClient *generated.Client, projectID int64, ref string, shown *generated.ShowIssueResp, in RecurrenceInput, terms recurrenceclient.Terms) error {
-	issue := shown.JSON200.Issue
-	if issue.Revision != in.IssueRevision {
-		return &APIError{
-			Method: http.MethodPost, Path: fmt.Sprintf("/api/v1/projects/%d/recurrences", projectID),
-			Status: http.StatusPreconditionFailed, Code: "revision_conflict",
-			Message: "the issue changed since the form read it",
-		}
+	if err := requireAPIVersion(ctx, apiClient, "0.37.0", "starting a recurrence requires daemon API 0.37.0 or newer"); err != nil {
+		return &mutationPreflightError{err}
 	}
 	tpl, err := recurrenceclient.TemplateFromShow(shown.Body)
 	if err != nil {
