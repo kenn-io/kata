@@ -129,6 +129,33 @@ func (m Model) syncAttentionReturnMutation(mut mutationDoneMsg) Model {
 	return m
 }
 
+// leaveDeletedAttentionReturn steps Attention's saved return detail back
+// through its history when it shows the deleted issue, or returns to the
+// list instead when it has none.
+func (m Model) leaveDeletedAttentionReturn(uid string) Model {
+	saved := m.attention.returnContext
+	if saved == nil || saved.detail.issue == nil || saved.detail.issue.UID != uid {
+		return m
+	}
+	restored := *saved
+	if len(restored.detail.navStack) > 0 {
+		restored.detail, _ = restored.detail.handleBack(nil)
+	} else {
+		restored.detail = newDetailModel()
+		restored.view, restored.prevView = listInsteadOfDetail(restored.view), listInsteadOfDetail(restored.prevView)
+		restored.foreground, restored.focus = listInsteadOfDetail(restored.foreground), focusList
+	}
+	m.attention.returnContext = &restored
+	return m
+}
+
+func listInsteadOfDetail(view viewID) viewID {
+	if view == viewDetail {
+		return viewList
+	}
+	return view
+}
+
 func attentionUsesSavedPreviousView(view viewID) bool {
 	switch view {
 	case viewDaemons, viewFederation, viewCredentials:

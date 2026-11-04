@@ -126,23 +126,12 @@ func (m Model) finishDelete(target formTarget, mut mutationDoneMsg) (Model, tea.
 	if mut.resp != nil && mut.resp.Issue != nil && mut.resp.Issue.UID != "" {
 		uid = mut.resp.Issue.UID
 	}
-	deletedDetail := m.detail.issue != nil && m.detail.issue.UID == uid
 	priorDetail := m.detail
 	m, follow := m.refreshListDay(func(lm listModel) listModel { return lm.withoutIssue(uid) })
 	if m.cache != nil {
 		m.cache.markStale()
 	}
-	var leave tea.Cmd
-	if deletedDetail {
-		var restored detailModel
-		restored, leave = priorDetail.handleBack(m.api)
-		if len(priorDetail.navStack) > 0 {
-			m.detail = restored
-		} else {
-			next, cmd, _ := m.routeTopLevel(leave())
-			m, leave = next.(Model), cmd
-		}
-	}
+	m, leave := m.leaveDeletedDetail(priorDetail, uid)
 	message := "deleted " + qualified
 	if last := len(m.undoHistory.entries) - 1; last >= 0 && m.undoHistory.entries[last].kind == "delete" && m.undoHistory.entries[last].uid == uid {
 		m.undoHistory.entries[last].before.QualifiedID = qualified
@@ -150,6 +139,23 @@ func (m Model) finishDelete(target formTarget, mut mutationDoneMsg) (Model, tea.
 	}
 	m, notice := m.undoNotice(message, toastInfo)
 	return m, combineCmds(follow, combineCmds(leave, combineCmds(notice, withConnGen(m.list.refetchCmd(m.api, m.scope), m.connGen))))
+}
+
+// leaveDeletedDetail steps a detail showing the deleted issue back through
+// its history, or pops it when it has none, and keeps Attention's saved
+// return detail from reopening the issue.
+func (m Model) leaveDeletedDetail(prior detailModel, uid string) (Model, tea.Cmd) {
+	m = m.leaveDeletedAttentionReturn(uid)
+	if prior.issue == nil || prior.issue.UID != uid {
+		return m, nil
+	}
+	restored, leave := prior.handleBack(m.api)
+	if len(prior.navStack) > 0 {
+		m.detail = restored
+		return m, leave
+	}
+	next, cmd, _ := m.routeTopLevel(leave())
+	return next.(Model), cmd
 }
 
 // withoutIssue drops a deleted issue from the list and selects the row after
