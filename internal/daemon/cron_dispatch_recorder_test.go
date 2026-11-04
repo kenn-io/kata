@@ -30,7 +30,7 @@ func TestCronRecorderCommittedCountsDedupeAndPruning(t *testing.T) {
 		require.NoError(t, logErr)
 		return changed
 	}
-	require.True(t, record(db.DispatchRecurringCronOut{Reason: cron.DispatchIdle}, nil))
+	require.False(t, record(db.DispatchRecurringCronOut{Reason: cron.DispatchIdle}, nil))
 	require.False(t, record(db.DispatchRecurringCronOut{Reason: cron.DispatchIdle}, nil))
 	record(db.DispatchRecurringCronOut{Reason: cron.DispatchDelivered, Delivered: 2, Skipped: cron.RecurringSkip{Count: 1000, Capped: true}}, nil)
 	require.True(t, record(db.DispatchRecurringCronOut{Reason: cron.DispatchError}, errors.New("local-sensitive-detail")))
@@ -48,7 +48,7 @@ func TestCronRecorderCommittedCountsDedupeAndPruning(t *testing.T) {
 	raw, err := os.ReadFile(h.LogPath) //nolint:gosec // G304: test-controlled path under t.TempDir()
 	require.NoError(t, err)
 	require.Contains(t, string(raw), "local-sensitive-detail")
-	require.Equal(t, 3, strings.Count(string(raw), "\n"), "steady states must not flood log")
+	require.Equal(t, 2, strings.Count(string(raw), "\n"), "steady states must not flood log")
 	require.Contains(t, string(raw), `"kind":"skipped"`)
 
 	// Failed or paginated enumeration cannot prune previous observations.
@@ -156,7 +156,7 @@ func TestCronRecorderLogFailureRecovery(t *testing.T) {
 		r := daemon.NewCronDispatchRecorder(filepath.Join(blocked, "dispatch.jsonl"))
 		t.Cleanup(func() { require.NoError(t, r.Close()) })
 		c := db.RecurringCronCandidate{ProjectID: 1, JobUID: "job"}
-		_, err := r.Record(t.Context(), c, db.DispatchRecurringCronOut{Reason: cron.DispatchIdle}, nil, time.Now())
+		_, err := r.Record(t.Context(), c, db.DispatchRecurringCronOut{Reason: cron.DispatchDisabled}, nil, time.Now())
 		require.Error(t, err)
 		r.FinishCycle(time.Now(), 0, true, false)
 		require.True(t, r.Health().LogErrorPresent)
@@ -189,4 +189,34 @@ func TestCronRecorderEnumerationFreshnessAndLowerBound(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(raw, &health))
 	require.Equal(t, true, health["skipped_count_is_lower_bound"], "lifetime count remains approximate after pruning")
+}
+
+// A recorder restart has no previous decision to transition from. Idle jobs
+// remain observable in memory without growing durable history each restart.
+func TestCronRecorderInitialIdleDoesNotLog(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dispatch.jsonl")
+	c := db.RecurringCronCandidate{ProjectID: 1, JobUID: "job", ExpectedEventUID: "revision"}
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for range 2 {
+		r := daemon.NewCronDispatchRecorder(path)
+		_, err := r.Record(t.Context(), c, db.DispatchRecurringCronOut{Reason: cron.DispatchIdle}, nil, now)
+		require.NoError(t, err)
+		last, nonIdle := r.Last(1, "job")
+		require.Equal(t, cron.DispatchIdle, last.Reason)
+		require.Nil(t, nonIdle)
+		r.FinishCycle(now, 0, true, false)
+		require.Equal(t, 1, r.Health().ByReason["idle"])
+		require.NoError(t, r.Close())
+	}
+	_, err := os.Stat(path)
+	require.ErrorIs(t, err, os.ErrNotExist)
+	r := daemon.NewCronDispatchRecorder(path)
+	t.Cleanup(func() { require.NoError(t, r.Close()) })
+	_, err = r.Record(t.Context(), c, db.DispatchRecurringCronOut{Reason: cron.DispatchDelivered, Delivered: 1}, nil, now)
+	require.NoError(t, err)
+	_, err = r.Record(t.Context(), c, db.DispatchRecurringCronOut{Reason: cron.DispatchIdle}, nil, now)
+	require.NoError(t, err)
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: TempDir fixture
+	require.NoError(t, err)
+	require.Equal(t, 2, strings.Count(string(raw), "\n"), "delivery and return to idle still log")
 }

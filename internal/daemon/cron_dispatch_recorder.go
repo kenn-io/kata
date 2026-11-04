@@ -80,7 +80,12 @@ func (r *CronDispatchRecorder) Record(ctx context.Context, c db.RecurringCronCan
 	}
 	key := cronDispatchKey{c.ProjectID, c.JobUID}
 	prev, exists := r.last[key]
-	changed := !exists || prev.decision.Reason != d.Reason || prev.decision.DefinitionEventUID != d.DefinitionEventUID || prev.decision.Detail != d.Detail
+	// A first idle observation seeds diagnostics without manufacturing a
+	// transition on every restart. First non-idle decisions still log.
+	changed := d.Reason != cron.DispatchIdle
+	if exists {
+		changed = prev.decision.Reason != d.Reason || prev.decision.DefinitionEventUID != d.DefinitionEventUID || prev.decision.Detail != d.Detail
+	}
 	nonIdle := prev.nonIdle
 	if d.Reason != cron.DispatchIdle {
 		nonIdle = &d

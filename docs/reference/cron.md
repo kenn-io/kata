@@ -350,8 +350,9 @@ kind is `skipped`, and `--reason skipped` includes it.
 | `error` | Another failure occurred; the local log contains its detail. |
 
 The daemon retains each candidate's last decision in memory and logs changes,
-deliveries and finalized skips. Repeated idle decisions and identical errors do
-not flood the log.
+deliveries and finalized skips. A first idle observation stays in memory without
+writing a log entry. Repeated idle decisions and identical errors do not flood
+the log.
 The recorder resets on restart. Its JSONL history survives at
 `<KATA_HOME>/cron/<storage-hash>/dispatch.jsonl`, with five rotated files and a
 50 MiB active-file rotation threshold. Logging is best effort, separate from
