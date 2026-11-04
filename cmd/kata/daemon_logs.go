@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -149,12 +150,31 @@ func runDaemonLogOnce(ctx context.Context, source logSource, stdout, stderr io.W
 }
 
 func readDaemonLogSnapshot(ctx context.Context, source logSource, stdout, stderr io.Writer, limit int, f daemonLogFilter, pin bool) (activeMark, error) {
-	files, err := scanRunsFiles(source)
-	if err != nil {
-		return activeMark{}, err
+	var files []*os.File
+	for {
+		var err error
+		files, err = pinLogFiles(ctx, source)
+		if !errors.Is(err, errLogRotation) {
+			if err != nil {
+				return activeMark{}, err
+			}
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return activeMark{}, ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
 	}
 	var matches []string
 	var mark activeMark
+	defer func() {
+		for _, file := range files {
+			if file != mark.file {
+				_ = file.Close()
+			}
+		}
+	}()
 	head := 0
 	accept := func(line []byte) {
 		if len(matches) < limit {
@@ -164,14 +184,15 @@ func readDaemonLogSnapshot(ctx context.Context, source logSource, stdout, stderr
 			head = (head + 1) % limit
 		}
 	}
-	for _, path := range files {
-		current, err := readMatchesFromFile(ctx, path, stderr, f, accept, pin && filepath.Base(path) == source.base)
+	for _, file := range files {
+		current, err := readMatchesFromLog(ctx, file, stderr, f, accept)
 		if err != nil {
-			return mark, err
+			return activeMark{}, err
 		}
-		if filepath.Base(path) == source.base && current.set {
-			mark = current
-		}
+		mark = current
+	}
+	if pin && len(files) > 0 {
+		mark.file = files[len(files)-1]
 	}
 	for i := range matches {
 		writeHookLogRecord(stdout, []byte(matches[(head+i)%len(matches)]))
@@ -229,29 +250,13 @@ func agentLogValue(raw jsontext.Value) string {
 	return agentValue(buf.String())
 }
 
-func readMatchesFromFile(ctx context.Context, path string, stderr io.Writer, f daemonLogFilter, accept func([]byte), pin bool) (mark activeMark, err error) {
-	file, err := openLog(ctx, path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return mark, nil
-	}
-	if err != nil {
-		return mark, err
-	}
-	defer func() {
-		if err != nil || !pin {
-			_ = file.Close()
-		}
-	}()
+func readMatchesFromLog(ctx context.Context, file *os.File, stderr io.Writer, f daemonLogFilter, accept func([]byte)) (activeMark, error) {
 	info, err := file.Stat()
 	if err != nil {
-		return mark, err
+		return activeMark{}, err
 	}
-	n, err := readLogRecords(ctx, io.LimitReader(file, info.Size()), path, stderr, f, accept)
-	mark = activeMark{set: true, info: info, size: n}
-	if pin && err == nil {
-		mark.file = file
-	}
-	return mark, err
+	n, err := readLogRecords(ctx, io.LimitReader(file, info.Size()), file.Name(), stderr, f, accept)
+	return activeMark{set: true, info: info, size: n}, err
 }
 
 // runDaemonLogTail prints the last `limit` matches from existing files,
@@ -356,7 +361,7 @@ func tailTick(ctx context.Context, active string, stdout, stderr io.Writer, st *
 	if err != nil {
 		return err
 	}
-	if st.prevInfo != nil && !os.SameFile(st.prevInfo, info) {
+	if st.prevInfo == nil || !os.SameFile(st.prevInfo, info) {
 		if err := drainRotatedLog(ctx, active, stdout, stderr, st, info, f); err != nil {
 			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, errLogRotation) {
 				return nil
@@ -390,7 +395,7 @@ func drainRotatedLog(ctx context.Context, active string, stdout, stderr io.Write
 		if err != nil {
 			return err
 		}
-		if os.SameFile(st.prevInfo, info) {
+		if st.prevInfo != nil && os.SameFile(st.prevInfo, info) {
 			start, from = i, st.prevSize
 			break
 		}
@@ -408,50 +413,80 @@ func drainRotatedLog(ctx context.Context, active string, stdout, stderr io.Write
 
 var errLogRotation = errors.New("log rotated during collection")
 
-// Stable active identity across collection proves generation names did not
-// shift while handles were acquired. Otherwise leave the cursor for next poll.
-func pinRotatedLogs(ctx context.Context, active string, stop os.FileInfo) ([]*os.File, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	before, err := os.Stat(active)
+// Both snapshot and tail acquire a complete generation set before reading.
+// Validation in generation order detects renames during collection; pinned
+// handles remain readable even when the writer subsequently rotates them.
+func pinLogFiles(ctx context.Context, source logSource) (files []*os.File, err error) {
+	defer func() {
+		if err != nil {
+			closePinnedLogs(files)
+			files = nil
+		}
+	}()
+	paths, err := scanRunsFiles(source)
 	if err != nil {
 		return nil, err
 	}
-	if !os.SameFile(before, stop) {
-		return nil, errLogRotation
-	}
-	paths, err := scanRunsFiles(logSource{filepath.Dir(active), filepath.Base(active)})
-	if err != nil {
-		return nil, err
-	}
-	var files []*os.File
-	changed := false
 	for _, path := range paths {
-		if path == active {
-			break
+		if err := ctx.Err(); err != nil {
+			return files, err
 		}
 		file, err := openLog(ctx, path)
 		if errors.Is(err, fs.ErrNotExist) {
-			changed = true
-			break
+			return files, errLogRotation
 		}
 		if err != nil {
-			closePinnedLogs(files)
-			return nil, err
+			return files, err
 		}
 		files = append(files, file)
 	}
-	after, err := os.Stat(active)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		closePinnedLogs(files)
+	after, err := scanRunsFiles(source)
+	if err != nil {
+		return files, err
+	}
+	if !slices.Equal(paths, after) {
+		return files, errLogRotation
+	}
+	for _, file := range files {
+		pinned, err := file.Stat()
+		if err != nil {
+			return files, err
+		}
+		current, err := os.Stat(file.Name())
+		if errors.Is(err, fs.ErrNotExist) {
+			return files, errLogRotation
+		}
+		if err != nil {
+			return files, err
+		}
+		if !os.SameFile(pinned, current) {
+			return files, errLogRotation
+		}
+	}
+	return files, nil
+}
+
+// A tail tick must drain only generations preceding its pinned active handle.
+// If that handle rotated during collection, leave the cursor for the next poll.
+func pinRotatedLogs(ctx context.Context, active string, stop os.FileInfo) ([]*os.File, error) {
+	files, err := pinLogFiles(ctx, logSource{filepath.Dir(active), filepath.Base(active)})
+	if err != nil {
 		return nil, err
 	}
-	if !changed && err == nil && os.SameFile(before, after) {
-		return files, nil
+	if len(files) == 0 {
+		return nil, errLogRotation
 	}
-	closePinnedLogs(files)
-	return nil, errLogRotation
+	newest := files[len(files)-1]
+	info, err := newest.Stat()
+	if err != nil || !os.SameFile(info, stop) {
+		closePinnedLogs(files)
+		if err != nil {
+			return nil, err
+		}
+		return nil, errLogRotation
+	}
+	_ = newest.Close()
+	return files[:len(files)-1], nil
 }
 
 func closePinnedLogs(files []*os.File) {

@@ -373,10 +373,9 @@ func TestRunHookLogOnce_Mark_ReportsActiveFileSize(t *testing.T) {
 	}
 }
 
-// TestRunHookLogOnce_Mark_UnsetWhenActiveAbsent verifies that the
-// one-shot mark stays unset when runs.jsonl is absent — so follow
-// later starts at offset 0 once the file appears.
-func TestRunHookLogOnce_Mark_UnsetWhenActiveAbsent(t *testing.T) {
+// A rotated-only snapshot retains its newest cursor so tail does not replay
+// history when an active file appears and rotates before the first poll.
+func TestRunHookLogOnce_Mark_RetainsNewestWhenActiveAbsent(t *testing.T) {
 	_, dir, _ := setupHooksDir(t)
 	// Only a rotated file exists.
 	writeHookLog(t, dir, "runs.jsonl.1", map[string]any{"event_id": 99, "result": "ok"})
@@ -385,8 +384,8 @@ func TestRunHookLogOnce_Mark_UnsetWhenActiveAbsent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mark.set {
-		t.Fatal("mark must stay unset when runs.jsonl wasn't in snapshot")
+	if !mark.set {
+		t.Fatal("mark must retain the newest rotated file")
 	}
 }
 
