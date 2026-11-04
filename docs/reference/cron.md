@@ -722,6 +722,25 @@ policy expectations use the reference model. The model bounds enumeration at
 100,000 instants and returns an error when a horizon exceeds that reference
 budget; it never silently discards an unexamined backlog.
 
+To check optional drop recording, declare `drop_records: true` and implement
+`conformance.DropRecorder.PlanWithDrops(ctx, input)`. It returns the ordinary
+`PlanOutput` and ordered `Drop` groups together in one call. The harness uses
+that method instead of `Plan` when recording is declared; an undeclared
+implementation is ignored, and declaring recording without the interface fails.
+The kit checks dispositions, not observation persistence or alert delivery.
+
+`forbid_deferral` may be omitted (meaning `queue`), `queue`, or
+`drop_after_grace`. Recording and deferral are independent switches. With
+recording enabled, `Suite` adds `drops.json` and each serialized plan output
+contains a required `drops` array, including `[]` for none. Settle outputs never
+carry it. Missing/null, extra, duplicate or unordered groups fail checking.
+Each group has `reason` and ascending unique nonempty `instants`. Current
+produced reasons are `catchup_missed` and `overlap_skipped`.
+
+Default declarations keep the original seven bundles, manifest and output
+shape byte-for-byte. Opt-in bundles carry declaration metadata for strict
+loading; an older checker rejects the new declaration members explicitly.
+
 A conformance claim names the fixture schema version. Changing frozen expected
 outputs requires a new version. Keep job/installation identity, run UIDs,
 occurrence keys and process reconciliation stable in the production adapter;
@@ -737,7 +756,8 @@ kata cron conformance check --answers ./answers.jsonl
 ```
 
 Both commands work without a project or daemon and perform no network requests.
-Export creates seven scenario bundles and `manifest.json`; it refuses to replace
+Export creates seven scenario bundles and `manifest.json` by default, adding
+`drops.json` when recording is declared; it refuses to replace
 existing files. The manifest declares the schema, policy and bundle filenames.
 For a different policy, provide a complete declaration JSON file with
 `export --dir ./adapter-vectors --declaration ./declaration.json`.

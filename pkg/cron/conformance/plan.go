@@ -46,17 +46,28 @@ func validatePlan(in PlanInput) (cron.JobDefinition, error) {
 }
 
 func (r Reference) Plan(ctx context.Context, in PlanInput) (PlanOutput, error) {
+	out, _, err := r.planDecision(ctx, in)
+	return out, err
+}
+
+// PlanWithDrops returns the plan and drop groups from one evaluation.
+func (r Reference) PlanWithDrops(ctx context.Context, in PlanInput) (PlanOutput, []Drop, error) {
+	return r.planDecision(ctx, in)
+}
+
+func (r Reference) planDecision(ctx context.Context, in PlanInput) (PlanOutput, []Drop, error) {
+	drops := []Drop{}
 	out := PlanOutput{Launch: []time.Time{}, Checkpoint: Checkpoint{Through: in.Job.CreatedAt.UTC(), DefinitionEventUID: in.Job.DefinitionEventUID, Pending: []time.Time{}}}
 	if err := ctx.Err(); err != nil {
-		return out, err
+		return out, drops, err
 	}
 	d := r.Declare()
 	if err := d.Validate(); err != nil {
-		return out, err
+		return out, drops, err
 	}
 	job, err := validatePlan(in)
 	if err != nil {
-		return out, err
+		return out, drops, err
 	}
 	if in.InstalledAt.After(out.Checkpoint.Through) {
 		out.Checkpoint.Through = in.InstalledAt.UTC()
@@ -83,7 +94,7 @@ func (r Reference) Plan(ctx context.Context, in PlanInput) (PlanOutput, error) {
 		var options map[string]any
 		if len(job.Options) > 0 {
 			if err := json.Unmarshal(job.Options, &options); err != nil {
-				return out, err
+				return out, drops, err
 			}
 		}
 		if target, ok := options["adapter"]; ok && target != in.Adapter {
@@ -91,38 +102,38 @@ func (r Reference) Plan(ctx context.Context, in PlanInput) (PlanOutput, error) {
 		}
 	}
 	if out.Excluded != "" {
-		return out, nil
+		return out, drops, nil
 	}
 	if job.Trigger.Kind == "issue-scheduled" || job.Trigger.Kind == "issue-deadline" {
-		return out, fmt.Errorf("issue-date decisions require readiness reads outside this kit")
+		return out, drops, fmt.Errorf("issue-date decisions require readiness reads outside this kit")
 	}
 	if job.Trigger.Kind == "once" {
 		at, _ := time.Parse(time.RFC3339, job.Trigger.At)
 		if !at.After(in.Job.CreatedAt) {
 			out.Excluded = "once_past"
-			return out, nil
+			return out, drops, nil
 		}
 	}
 	next, err := cron.AdapterSchedule(job.Trigger, in.Job.CreatedAt)
 	if err != nil {
-		return out, err
+		return out, drops, err
 	}
 	for _, at := range out.Checkpoint.Pending {
 		if !next(at.Add(-time.Nanosecond)).Equal(at) {
-			return out, fmt.Errorf("pending value is not a schedule instant")
+			return out, drops, fmt.Errorf("pending value is not a schedule instant")
 		}
 	}
 	candidates := slices.Clone(out.Checkpoint.Pending)
 	for cursor, scanned := out.Checkpoint.Through, 0; ; scanned++ {
 		if err := ctx.Err(); err != nil {
-			return out, err
+			return out, drops, err
 		}
 		due := next(cursor)
 		if due.IsZero() || due.After(in.Now) {
 			break
 		}
 		if scanned >= 100000 {
-			return out, fmt.Errorf("reference schedule scan exceeds 100000 instants")
+			return out, drops, fmt.Errorf("reference schedule scan exceeds 100000 instants")
 		}
 		candidates = append(candidates, due.UTC())
 		cursor = due
@@ -132,6 +143,7 @@ func (r Reference) Plan(ctx context.Context, in PlanInput) (PlanOutput, error) {
 	}
 	slices.SortFunc(candidates, func(a, b time.Time) int { return a.Compare(b) })
 	candidates = slices.CompactFunc(candidates, func(a, b time.Time) bool { return a.Equal(b) })
+	original := slices.Clone(candidates)
 	switch job.Catchup {
 	case "latest":
 		if len(candidates) > 1 {
@@ -148,6 +160,25 @@ func (r Reference) Plan(ctx context.Context, in PlanInput) (PlanOutput, error) {
 		}
 		if d.CatchupLimit > 0 && len(candidates) > d.CatchupLimit {
 			candidates = candidates[len(candidates)-d.CatchupLimit:]
+		}
+	}
+	if d.DropRecords {
+		drops = appendDrop(drops, "catchup_missed", removedInstants(original, candidates))
+	}
+	if job.Overlap == "forbid" && in.ActiveRuns > 0 && d.ForbidDeferral == "drop_after_grace" {
+		cutoff := in.Now.Add(-time.Duration(job.GraceSeconds) * time.Second).Add(-time.Duration(d.ToleranceSeconds) * time.Second)
+		kept := []time.Time{}
+		removed := []time.Time{}
+		for _, at := range candidates {
+			if at.Before(cutoff) {
+				removed = append(removed, at)
+			} else {
+				kept = append(kept, at)
+			}
+		}
+		candidates = kept
+		if d.DropRecords {
+			drops = appendDrop(drops, "overlap_skipped", removed)
 		}
 	}
 	future := []time.Time{}
@@ -170,5 +201,5 @@ func (r Reference) Plan(ctx context.Context, in PlanInput) (PlanOutput, error) {
 		out.Launch = append(out.Launch, due...)
 	}
 	out.Checkpoint.Pending = append(out.Checkpoint.Pending, future...)
-	return out, nil
+	return out, drops, nil
 }

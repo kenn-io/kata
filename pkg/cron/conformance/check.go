@@ -14,6 +14,18 @@ import (
 // configure the adapter to the declaration used to materialize that scenario.
 func Execute(ctx context.Context, a Adapter, s Scenario) (Answer, error) {
 	answer := Answer{Name: s.Name, Outputs: []jsontext.Value{}}
+	declaration := a.Declare()
+	if err := declaration.Validate(); err != nil {
+		return answer, err
+	}
+	var recorder DropRecorder
+	if declaration.DropRecords {
+		var ok bool
+		recorder, ok = a.(DropRecorder)
+		if !ok {
+			return answer, fmt.Errorf("drop_records requires DropRecorder")
+		}
+	}
 	var previousPlan *PlanOutput
 	var previousSettle *SettleOutput
 	for _, step := range s.Steps {
@@ -41,12 +53,25 @@ func Execute(ctx context.Context, a Adapter, s Scenario) (Answer, error) {
 					in.ActiveRuns = 1
 				}
 			}
-			out, err := a.Plan(ctx, in)
+			var out PlanOutput
+			var drops []Drop
+			var err error
+			if declaration.DropRecords {
+				out, drops, err = recorder.PlanWithDrops(ctx, in)
+			} else {
+				out, err = a.Plan(ctx, in)
+			}
 			if err != nil {
 				return answer, err
 			}
 			previousPlan = &out
 			output = out
+			if declaration.DropRecords {
+				if err := validateDrops(drops); err != nil {
+					return answer, err
+				}
+				output = recordedPlanOutput{PlanOutput: out, Drops: append([]Drop{}, drops...)}
+			}
 		} else if step.Settle != nil {
 			out, err := a.Settle(ctx, *step.Settle)
 			if err != nil {
@@ -57,7 +82,7 @@ func Execute(ctx context.Context, a Adapter, s Scenario) (Answer, error) {
 		} else {
 			return answer, fmt.Errorf("decision requires an input")
 		}
-		raw, err := json.Marshal(output)
+		raw, err := json.Marshal(output, json.Deterministic(true))
 		if err != nil {
 			return answer, err
 		}
@@ -77,6 +102,17 @@ func Suite(ctx context.Context, d Declaration) (FixtureSuite, error) {
 	scenarios, err := Scenarios()
 	if err != nil {
 		return suite, err
+	}
+	if d.DropRecords {
+		raw, err := fixtures.ReadFile("testdata/adapter-v1/drops.json")
+		if err != nil {
+			return suite, err
+		}
+		extra, err := Load(raw)
+		if err != nil {
+			return suite, err
+		}
+		scenarios = append(scenarios, extra...)
 	}
 	baseline := Reference{}.Declare()
 	baseline.Name = d.Name
@@ -134,11 +170,11 @@ func checkSuite(ctx context.Context, suite FixtureSuite, answers []Answer) (Repo
 		} else {
 			for i, raw := range answer.Outputs {
 				var got, want any
-				if err := decodeOutput(raw, scenario.Steps[i], &got); err != nil {
+				if err := decodeOutput(raw, scenario.Steps[i], suite.Declaration, &got); err != nil {
 					diff = fmt.Sprintf("decision %d: invalid JSON: %v", i+1, err)
 					break
 				}
-				if err := decodeOutput(scenario.Steps[i].Expect, scenario.Steps[i], &want); err != nil {
+				if err := decodeOutput(scenario.Steps[i].Expect, scenario.Steps[i], suite.Declaration, &want); err != nil {
 					return report, err
 				}
 				if !reflect.DeepEqual(got, want) {
@@ -183,7 +219,11 @@ func ExportFiles(ctx context.Context, d Declaration) (map[string][]byte, error) 
 	names := []string{}
 	for area, scenarios := range groups {
 		name := area + ".json"
-		raw, err := json.Marshal(bundle{Schema: Schema, Scenarios: scenarios}, jsontext.WithIndent("  "), json.Deterministic(true))
+		b := bundle{Schema: Schema, Scenarios: scenarios}
+		if d.DropRecords {
+			b.Declaration = &d
+		}
+		raw, err := json.Marshal(b, jsontext.WithIndent("  "), json.Deterministic(true))
 		if err != nil {
 			return nil, err
 		}
@@ -206,11 +246,11 @@ func ExportFiles(ctx context.Context, d Declaration) (map[string][]byte, error) 
 
 // Decode output DTOs before comparison so integer counts cannot round through
 // float64 and equivalent RFC3339 offsets compare as the same instant.
-func decodeOutput(raw []byte, decision Decision, value *any) error {
+func decodeOutput(raw []byte, decision Decision, declaration Declaration, value *any) error {
 	var normalized any
 	if decision.Plan != nil {
-		var out PlanOutput
-		if err := json.Unmarshal(raw, &out, json.RejectUnknownMembers(true)); err != nil {
+		out, drops, err := decodePlanOutput(raw, declaration)
+		if err != nil {
 			return err
 		}
 		out.Checkpoint.Through = out.Checkpoint.Through.UTC()
@@ -221,6 +261,9 @@ func decodeOutput(raw []byte, decision Decision, value *any) error {
 			out.Checkpoint.Pending[i] = out.Checkpoint.Pending[i].UTC()
 		}
 		normalized = out
+		if declaration.DropRecords {
+			normalized = recordedPlanOutput{PlanOutput: out, Drops: drops}
+		}
 	} else {
 		var out SettleOutput
 		if err := json.Unmarshal(raw, &out, json.RejectUnknownMembers(true)); err != nil {

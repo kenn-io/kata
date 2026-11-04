@@ -13,8 +13,9 @@ import (
 var fixtures embed.FS
 
 type bundle struct {
-	Schema    string     `json:"schema"`
-	Scenarios []Scenario `json:"scenarios"`
+	Schema      string       `json:"schema"`
+	Declaration *Declaration `json:"declaration,omitempty"`
+	Scenarios   []Scenario   `json:"scenarios"`
 }
 
 // Load strictly decodes a versioned bundle. Every public input and expected
@@ -26,6 +27,13 @@ func Load(raw []byte) ([]Scenario, error) {
 	}
 	if b.Schema != Schema || len(b.Scenarios) == 0 {
 		return nil, fmt.Errorf("unsupported schema or empty scenarios")
+	}
+	declaration := Reference{}.Declare()
+	if b.Declaration != nil {
+		declaration = *b.Declaration
+		if err := declaration.Validate(); err != nil {
+			return nil, err
+		}
 	}
 	seen := map[string]bool{}
 	for _, s := range b.Scenarios {
@@ -46,8 +54,8 @@ func Load(raw []byte) ([]Scenario, error) {
 				if _, err := validatePlan(*step.Plan); err != nil {
 					return nil, fmt.Errorf("%s: %w", s.Name, err)
 				}
-				var out PlanOutput
-				if err := json.Unmarshal(step.Expect, &out, json.RejectUnknownMembers(true)); err != nil {
+				out, _, err := decodePlanOutput(step.Expect, declaration)
+				if err != nil {
 					return nil, err
 				}
 				if out.Checkpoint.Through.IsZero() || out.Checkpoint.DefinitionEventUID == "" || !ordered(out.Launch) || !ordered(out.Checkpoint.Pending) {
@@ -89,6 +97,9 @@ func Scenarios() ([]Scenario, error) {
 	var all []Scenario
 	seen := map[string]bool{}
 	for _, path := range paths {
+		if strings.HasSuffix(path, "/drops.json") {
+			continue
+		}
 		raw, err := fixtures.ReadFile(path)
 		if err != nil {
 			return nil, err

@@ -204,3 +204,101 @@ func (r *conformanceSignalledReader) Read(p []byte) (int, error) {
 	r.once.Do(func() { close(r.entered) })
 	return r.ReadCloser.Read(p)
 }
+
+func TestCronConformanceDropAnswersUseSharedChecker(t *testing.T) {
+	d := conformance.Reference{}.Declare()
+	d.DropRecords = true
+	d.ForbidDeferral = "drop_after_grace"
+	d.CatchupWindowSeconds = 86400
+	suite, err := conformance.Suite(t.Context(), d)
+	require.NoError(t, err)
+	for _, mutation := range []string{"correct", "wrong-reason", "missing-instant", "extra-group"} {
+		t.Run(mutation, func(t *testing.T) {
+			answers := []conformance.Answer{}
+			for _, s := range suite.Scenarios {
+				a, err := conformance.Execute(t.Context(), conformance.Reference{Policy: d}, s)
+				require.NoError(t, err)
+				if s.Name == "drops/latest" && mutation != "correct" {
+					var fields map[string]jsontext.Value
+					require.NoError(t, json.Unmarshal(a.Outputs[0], &fields))
+					var drops []conformance.Drop
+					require.NoError(t, json.Unmarshal(fields["drops"], &drops))
+					switch mutation {
+					case "wrong-reason":
+						drops[0].Reason = "wrong"
+					case "missing-instant":
+						drops[0].Instants = drops[0].Instants[1:]
+					case "extra-group":
+						drops = append(drops, drops[0])
+					}
+					fields["drops"], err = json.Marshal(drops)
+					require.NoError(t, err)
+					a.Outputs[0], err = json.Marshal(fields, json.Deterministic(true))
+					require.NoError(t, err)
+				}
+				answers = append(answers, a)
+			}
+			want, err := conformance.Check(t.Context(), d, answers)
+			require.NoError(t, err)
+			header, err := json.Marshal(conformanceHeader{Schema: conformance.Schema, Declaration: d})
+			require.NoError(t, err)
+			var data bytes.Buffer
+			data.Write(header)
+			data.WriteByte('\n')
+			for _, answer := range answers {
+				raw, err := json.Marshal(answer)
+				require.NoError(t, err)
+				data.Write(raw)
+				data.WriteByte('\n')
+			}
+			file := filepath.Join(t.TempDir(), "answers.jsonl")
+			require.NoError(t, os.WriteFile(file, data.Bytes(), 0600))
+			out, err := executeConformanceCLI(t, "check", "--answers", file)
+			if mutation == "correct" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				var ce *cliError
+				require.ErrorAs(t, err, &ce)
+				require.Equal(t, 1, ce.ExitCode)
+			}
+			var got conformance.Report
+			require.NoError(t, json.Unmarshal([]byte(out), &got))
+			require.Equal(t, want, got)
+		})
+	}
+	raw, err := json.Marshal(d)
+	require.NoError(t, err)
+	policy := filepath.Join(t.TempDir(), "policy.json")
+	require.NoError(t, os.WriteFile(policy, raw, 0600))
+	dir := filepath.Join(t.TempDir(), "vectors")
+	_, err = executeConformanceCLI(t, "export", "--dir", dir, "--declaration", policy)
+	require.NoError(t, err)
+	_, err = os.Stat(filepath.Join(dir, "drops.json"))
+	require.NoError(t, err)
+}
+
+func TestCronConformanceSuppliedDeferralValidation(t *testing.T) {
+	raw, err := json.Marshal(conformance.Reference{}.Declare())
+	require.NoError(t, err)
+	for _, supplied := range []string{`""`, `null`} {
+		var fields map[string]jsontext.Value
+		require.NoError(t, json.Unmarshal(raw, &fields))
+		fields["forbid_deferral"] = []byte(supplied)
+		declaration, err := json.Marshal(fields)
+		require.NoError(t, err)
+		file := filepath.Join(t.TempDir(), "declaration.json")
+		require.NoError(t, os.WriteFile(file, declaration, 0600))
+		_, err = executeConformanceCLI(t, "export", "--dir", filepath.Join(t.TempDir(), "vectors"), "--declaration", file)
+		var ce *cliError
+		require.ErrorAs(t, err, &ce)
+		require.Equal(t, ExitValidation, ce.ExitCode)
+		header, err := json.Marshal(map[string]any{"schema": conformance.Schema, "declaration": fields})
+		require.NoError(t, err)
+		answers := filepath.Join(t.TempDir(), "answers.jsonl")
+		require.NoError(t, os.WriteFile(answers, append(header, '\n'), 0600))
+		_, err = executeConformanceCLI(t, "check", "--answers", answers)
+		require.ErrorAs(t, err, &ce)
+		require.Equal(t, ExitValidation, ce.ExitCode)
+	}
+}
