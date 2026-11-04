@@ -38,7 +38,7 @@ func TestCronCLIValidate(t *testing.T) {
 		require.NoError(t, json.Unmarshal([]byte(out), &result))
 		require.True(t, result.Valid)
 		for _, raw := range []string{`{"name":"Inspect","definition":[]}`, `{"name":"Inspect","definition":{"unknown":true}}`, `{"name":"Inspect","definition":{"version":1e1000}}`, `{"name":"Inspect"}`} {
-			out, _, err = executeCronCLI(t, env.URL, strings.NewReader(raw), resource, "validate", "--file", "-", "--quiet")
+			out, _, err = executeCronCLIWithoutJSON(t, env.URL, strings.NewReader(raw), resource, "validate", "--file", "-", "--quiet")
 			var cliErr *cliError
 			require.ErrorAs(t, err, &cliErr)
 			require.Equal(t, ExitValidation, cliErr.ExitCode)
@@ -81,12 +81,12 @@ func TestCronCLIValidateOldDaemonAndMalformedResponse(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				switch {
 				case r.URL.Path == "/api/v1/health":
-					fmt.Fprintf(w, `{"api_schema_version":%q}`, tc.version)
+					_, _ = fmt.Fprintf(w, `{"api_schema_version":%q}`, tc.version)
 				case strings.HasSuffix(r.URL.Path, "/validate"):
 					calls++
-					fmt.Fprint(w, tc.response)
+					_, _ = fmt.Fprint(w, tc.response)
 				default:
-					fmt.Fprint(w, `{"project":{"id":1,"name":"spoke-project"},"projects":[{"id":1,"name":"spoke-project"}]}`)
+					_, _ = fmt.Fprint(w, `{"project":{"id":1,"name":"spoke-project"},"projects":[{"id":1,"name":"spoke-project"}]}`)
 				}
 			}))
 			defer server.Close()
@@ -123,7 +123,7 @@ func TestCronCLIValidateConflictAndIdentity(t *testing.T) {
 	stored, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: input.Name, Definition: input.Definition.Native(), Actor: "operator"})
 	require.NoError(t, err)
 	file := cronCLIFile(t, input)
-	out, _, err := executeCronCLI(t, env.URL, nil, "job", "validate", "--file", file, "--uid", stored.UID, "--quiet")
+	out, _, err := executeCronCLIWithoutJSON(t, env.URL, nil, "job", "validate", "--file", file, "--uid", stored.UID, "--quiet")
 	var cliErr *cliError
 	require.ErrorAs(t, err, &cliErr)
 	require.Equal(t, ExitValidation, cliErr.ExitCode)

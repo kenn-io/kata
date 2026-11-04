@@ -49,22 +49,24 @@ var alreadyImplemented = map[string]bool{
 	"PrepareSetupFinished":  true, // setup_finished.go
 	"CompleteSetupFinished": true, // setup_finished.go
 
-	"ClaimScreenView":     true, // store.go
-	"ReleaseScreenView":   true, // store.go
-	"ObserveCronRun":      true,
-	"IssuePlanningDates":  true,
-	"CronRun":             true,
-	"ListCronRuns":        true,
-	"ReadFederation":      true, // federation_read.go
-	"PutCronJob":          true,
-	"PutCronWorkflow":     true,
-	"CronJob":             true,
-	"CronWorkflow":        true,
-	"ListCronJobs":        true,
-	"ListCronWorkflows":   true,
-	"ExportCronJobs":      true,
-	"ExportCronWorkflows": true,
-	"ExportCronRuns":      true,
+	"ClaimScreenView":      true, // store.go
+	"ReleaseScreenView":    true, // store.go
+	"ObserveCronRun":       true,
+	"IssuePlanningDates":   true,
+	"CronRun":              true,
+	"ListCronRuns":         true,
+	"ReadFederation":       true, // federation_read.go
+	"PutCronJob":           true,
+	"PutCronWorkflow":      true,
+	"CronJob":              true,
+	"CronWorkflow":         true,
+	"ListCronJobs":         true,
+	"ListCronWorkflows":    true,
+	"ExportCronJobs":       true,
+	"ExportCronWorkflows":  true,
+	"ExportCronRuns":       true,
+	"ValidateCronJob":      true, // cron_validate.go
+	"ValidateCronWorkflow": true, // cron_validate.go
 
 	"AcceptRelayDeliveries":    true, // native relay storage
 	"AckRelayDeliveries":       true, // native relay storage
