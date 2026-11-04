@@ -16,21 +16,19 @@ import (
 func runtimeFixture() Runtime {
 	at := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
 	return Runtime{
-		RuntimeBeat: RuntimeBeat{
-			Label:           "worker",
-			Adapter:         "example",
-			AdapterVersion:  "1.0.0",
-			KataVersion:     "0.31.0",
-			IntervalSeconds: 60,
-			State:           "active",
-			Features:        []string{},
-		},
-		UID:         "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-		Actor:       "operator",
-		FirstSeenAt: at,
-		LastSeenAt:  at,
-		ExpiresAt:   at.Add(180 * time.Second),
-		ReportedVia: "direct",
+		Label:           "worker",
+		Adapter:         "example",
+		AdapterVersion:  "1.0.0",
+		KataVersion:     "0.31.0",
+		IntervalSeconds: 60,
+		State:           "active",
+		Features:        []string{},
+		UID:             "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+		Actor:           "operator",
+		FirstSeenAt:     at,
+		LastSeenAt:      at,
+		ExpiresAt:       at.Add(180 * time.Second),
+		ReportedVia:     "direct",
 	}
 }
 

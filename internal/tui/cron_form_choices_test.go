@@ -17,7 +17,7 @@ func choiceForm(t *testing.T, raw string) *cronForm {
 	t.Helper()
 	f, err := cronFormFor(executeRecord(raw), nil)
 	require.NoError(t, err)
-	f.setRuntimeInventory(&cron.RuntimeInventory{Runtimes: []cron.Runtime{{RuntimeBeat: cron.RuntimeBeat{Label: "worker", Adapter: "example", Choices: map[string][]string{"options.agent": {"default", "review", "(unset)", "other…"}, "options.model": {"model-a"}, "checkout_key": {"example-project"}}}, Status: "live"}}})
+	f.setRuntimeInventory(&cron.RuntimeInventory{Runtimes: []cron.Runtime{{Label: "worker", Adapter: "example", Choices: map[string][]string{"options.agent": {"default", "review", "(unset)", "other…"}, "options.model": {"model-a"}, "checkout_key": {"example-project"}}, Status: "live"}}})
 	return f
 }
 func TestCronChoiceRawOptionsProperty(t *testing.T) {
@@ -142,7 +142,7 @@ func TestCronRuntimeFormUntouchedProperty(t *testing.T) {
 		advertised := hegel.Draw(h, hegel.Booleans())
 		inv := (*cron.RuntimeInventory)(nil)
 		if advertised {
-			inv = &cron.RuntimeInventory{Runtimes: []cron.Runtime{{RuntimeBeat: cron.RuntimeBeat{Choices: map[string][]string{"options.agent": {"default"}}}, Status: "live"}}}
+			inv = &cron.RuntimeInventory{Runtimes: []cron.Runtime{{Choices: map[string][]string{"options.agent": {"default"}}, Status: "live"}}}
 		}
 		f.setRuntimeInventory(inv)
 		for range hegel.Draw(h, hegel.Integers(0, 80)) {

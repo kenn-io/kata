@@ -39,7 +39,15 @@ func TestRuntimeChoiceDomain(t *testing.T) {
 			h.Fatalf("%q %q valid=%v err=%v", key, value, want, err)
 		}
 	}, hegel.WithTestCases(2000), hegel.WithDatabase(t.TempDir()))
-	for _, choices := range []map[string][]string{{"options.agent": nil}, {"options.agent": {"a", "a"}}, {"options.agent": make([]string, 33)}, {"checkout_key": {"/bad"}}} {
+	distinct := make([]string, 33)
+	for i := range distinct {
+		distinct[i] = fmt.Sprintf("agent-%02d", i)
+	}
+	b := runtimeFixture().RuntimeBeat
+	b.Choices = map[string][]string{"options.agent": distinct[:32]}
+	_, err := NormalizeRuntimeBeat(b)
+	require.NoError(t, err, "32 distinct valid choices are admitted")
+	for _, choices := range []map[string][]string{{"options.agent": nil}, {"options.agent": {"a", "a"}}, {"options.agent": make([]string, 33)}, {"options.agent": distinct}, {"checkout_key": {"/bad"}}} {
 		b := runtimeFixture().RuntimeBeat
 		b.Choices = choices
 		_, err := NormalizeRuntimeBeat(b)

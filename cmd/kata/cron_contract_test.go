@@ -283,7 +283,7 @@ func TestCronRuntimeCLIAutoActorBodyLimit(t *testing.T) {
 			input, err := json.Marshal(fields)
 			require.NoError(t, err)
 			if size > cron.RuntimeBeatLimit {
-				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 					t.Error("oversized attributed body reached network")
 					w.WriteHeader(500)
 				}))

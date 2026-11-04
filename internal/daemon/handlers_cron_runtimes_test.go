@@ -228,7 +228,14 @@ func TestCronRuntimeChoicesHTTP(t *testing.T) {
 	status, raw := runtimeHTTPRequest(t, env, http.MethodPut, path, body)
 	require.Equalf(t, 200, status, "%s", raw)
 	require.Contains(t, string(raw), `"options.agent":["default","review"]`)
-	for _, bad := range []any{nil, map[string]any{"options.agent": nil}, map[string][]string{"unknown": {}}, map[string][]string{"options.agent": {"a", "a"}}, map[string][]string{"options.agent": make([]string, 33)}} {
+	distinct := make([]string, 33)
+	for i := range distinct {
+		distinct[i] = fmt.Sprintf("agent-%02d", i)
+	}
+	body["choices"] = map[string][]string{"options.agent": distinct[:32]}
+	status, raw = runtimeHTTPRequest(t, env, http.MethodPut, path, body)
+	require.Equalf(t, 200, status, "%s", raw)
+	for _, bad := range []any{nil, map[string]any{"options.agent": nil}, map[string][]string{"unknown": {}}, map[string][]string{"options.agent": {"a", "a"}}, map[string][]string{"options.agent": make([]string, 33)}, map[string][]string{"options.agent": distinct}} {
 		body["choices"] = bad
 		status, raw = runtimeHTTPRequest(t, env, http.MethodPut, path, body)
 		require.Equalf(t, 400, status, "%s", raw)
