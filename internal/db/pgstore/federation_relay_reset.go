@@ -21,8 +21,9 @@ func (d *Store) InstallRelayReset(ctx context.Context, bindingUID string, manife
 // relayResetBackend gives the shared relay reset protocol this store's SQL
 // inside one transaction.
 type relayResetBackend struct {
-	d  *Store
-	tx *sql.Tx
+	scanRelayHistory bool
+	d                *Store
+	tx               *sql.Tx
 }
 
 func (d *Store) relayReset(tx *sql.Tx) db.RelayResetProtocol {
