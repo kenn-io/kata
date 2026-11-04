@@ -101,13 +101,14 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Fetch the highest-priority ready issue with flat lookup cost as ready queues grow using `kata next` and MCP `kata.next`. SQLite and PostgreSQL walk priority indexes instead of sorting every ready row; PostgreSQL bounds each request and expands it when scheduled issues fill the batch. Daemons with API `0.41.0` or newer return one priority-ordered row per request; older daemons keep the existing selection behavior. Existing stores upgrade to schema 46 through SQLite's JSONL cutover or the [offline PostgreSQL migration](development/postgres-migrations.md#schema-46-ready-priority-indexes).
 - CLI crashes now exit 1 with an internal error and bug-report hint in the selected human, JSON, or agent format, instead of exit 2 with a raw panic trace. Foreground daemon crashes keep their trace. See [CLI reference](reference/cli.md). Thanks to [Rusty Shackleford](https://github.com/salmonumbrella).
 - Create and edit workflows in the `kata tui` Workflows tab with `n` and `e`. Edit the JSON definition with `Ctrl+e` and save with `Ctrl+o`. The form keeps your draft after errors and shows the current definition after concurrent changes. See [CLI reference](reference/cli.md#daemon-and-diagnostics).
-- Start, change or stop an issue's recurrence in `kata tui` with `O`, from the
-  list or the detail. The form takes the RRULE as written, a start date and an
-  IANA zone, and shows the daemon's error with your input kept. A change is
-  revision-guarded, and a conflict shows the current recurrence. Stopping asks
-  first, and an issue that parents a recurring cron job is refused, as in
-  `kata schedule --repeat`. The detail now shows the rule, the next occurrence
-  and the zone. See the [CLI reference](reference/cli.md#daemon-and-diagnostics).
+- Start or change an issue's recurrence in `kata tui` with `O` from the detail.
+  The form takes the RRULE as written, a start date, and an IANA zone, and
+  shows the daemon's error with your input kept. Saves are revision-guarded;
+  after a conflict, press `Esc`, then `O` once the detail refreshes.
+  An issue that parents a recurring cron job is refused on save, as in
+  `kata schedule --repeat`. Stop a recurrence with `kata schedule <ref> --repeat -`.
+  The detail shows the rule, the next occurrence, and the zone.
+  See the [CLI reference](reference/cli.md#daemon-and-diagnostics).
 - Search references faster in the web UI on large stores; a `q` search now returns only issue references.
 - Spend 2 REST requests and 1 GraphQL request per 100-issue GitHub status sweep, down from 102 REST requests, while continuing to import upstream closes and reopens. Hosts without the required GraphQL fields keep using REST status reads.
 - Sync GitHub comment history with fewer requests by reading repository-wide comment pages and fetching only recent comments on later polls.

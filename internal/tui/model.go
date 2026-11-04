@@ -857,9 +857,6 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	case cronSavedMsg:
 		next, cmd := m.cronSaved(msg)
 		return next, cmd, true
-	case recurrenceFormLoadedMsg:
-		next, cmd := m.openRecurrenceForm(msg)
-		return next, cmd, true
 	case tea.BackgroundColorMsg:
 		// The terminal answered Init's in-loop background query. Only
 		// colorAuto consults the answer — explicit KATA_COLOR_MODE
@@ -1347,9 +1344,6 @@ func (m Model) routeInputKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		}
 	}
 
-	if next, handled := m.routeRecurrenceFormKey(msg); handled {
-		return next, nil
-	}
 	if m.input.kind.isPanelPrompt() {
 		if m.input.saving {
 			return m, nil
@@ -1858,14 +1852,11 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 	if m.input.kind == inputDatesForm && isRevisionConflict(mut.err) && mut.resp != nil && mut.resp.Issue != nil {
 		return m.reloadDatesForm(*mut.resp.Issue), nil
 	}
-	if m.input.kind == inputRecurrenceForm && recurrenceNeedsReload(mut.kind, mut.err) && mut.resp != nil && mut.resp.current != nil {
-		return m.reloadRecurrenceForm(*mut.resp.current), nil
-	}
 	if mut.err != nil {
 		m.input.saving = false
 		m.input.err = mut.kind + " failed: " + mut.err.Error()
 		if m.input.kind == inputRecurrenceForm {
-			action := map[string]string{"recurrence.start": "start", "recurrence.change": "change", "recurrence.stop": "stop"}[mut.kind]
+			action := map[string]string{"recurrence.start": "start", "recurrence.change": "change"}[mut.kind]
 			m.input.err = "Could not " + action + " repeat: " + mut.err.Error()
 		}
 		return m, m.reportShownError(mut.kind)
@@ -1903,10 +1894,6 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 		return next, cmd
 	}
 	m.input = inputState{}
-	var recurrenceRefresh tea.Cmd
-	if formKind == inputRecurrenceForm && target.origin == "list" && m.detail.issue != nil && m.detail.scopePID == target.projectID && m.detail.issue.UID == target.issueUID {
-		recurrenceRefresh = m.scheduleDetailRefresh()
-	}
 	// Hand off to the existing per-view mutation routing so the
 	// detail's body / comments list updates. Re-classify as if it
 	// came from detail (gen=current detail gen) so existing
@@ -1919,10 +1906,6 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 		if !formKind.isPanelPrompt() {
 			mut.gen = m.detail.gen
 		}
-	}
-	if recurrenceRefresh != nil {
-		next, cmd := m.routeMutation(mut)
-		return next, tea.Batch(cmd, recurrenceRefresh)
 	}
 	return m.routeMutation(mut)
 }
@@ -3253,14 +3236,6 @@ func (m Model) routeModalKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		case "y", "Y":
 			m.modal, m.cron.form = modalNone, nil
 			return m, nil
-		case "n", "N", "esc":
-			m.modal = modalNone
-			return m, nil
-		}
-	case modalStopRecurrence:
-		switch msg.String() {
-		case "y", "Y":
-			return m.confirmStopRecurrence()
 		case "n", "N", "esc":
 			m.modal = modalNone
 			return m, nil

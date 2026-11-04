@@ -259,7 +259,7 @@ func (c *Client) listIssuesAt(ctx context.Context, projectID *int64, f ListFilte
 // ref is a short_id, qualified short_id, or UID — the daemon's path
 // resolver picks the matching column.
 func (c *Client) GetIssueDetail(ctx context.Context, projectID int64, ref string) (*IssueDetail, error) {
-	detail, err := c.ReadIssue(ctx, projectID, ref)
+	detail, err := c.readIssue(ctx, projectID, ref)
 	if err != nil {
 		return nil, err
 	}
@@ -267,9 +267,9 @@ func (c *Client) GetIssueDetail(ctx context.Context, projectID int64, ref string
 	return detail, nil
 }
 
-// ReadIssue is GetIssueDetail without the recurrence read, for callers that
+// readIssue is GetIssueDetail without the recurrence read, for callers that
 // read the recurrence themselves or do not need it.
-func (c *Client) ReadIssue(ctx context.Context, projectID int64, ref string) (*IssueDetail, error) {
+func (c *Client) readIssue(ctx context.Context, projectID int64, ref string) (*IssueDetail, error) {
 	body, err := c.showIssue(ctx, projectID, ref)
 	if err != nil {
 		return nil, err
@@ -290,29 +290,18 @@ func (c *Client) ReadIssue(ctx context.Context, projectID int64, ref string) (*I
 // effort, as it is in kata show: a token that may not list recurrences still
 // reads the issue, which then shows no recurrence.
 func (c *Client) recurrenceOrNil(ctx context.Context, projectID int64, id *int64) *recurrenceclient.View {
-	rec, err := c.ReadRecurrence(ctx, projectID, id)
+	if id == nil {
+		return nil
+	}
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil
+	}
+	rec, err := recurrenceclient.Active(ctx, apiClient, projectID, id)
 	if err != nil {
 		return nil
 	}
 	return rec
-}
-
-// ReadRecurrence reads the live recurrence an issue belongs to and reports
-// why it could not, for callers that must not mistake a failed read for an
-// issue that does not repeat.
-func (c *Client) ReadRecurrence(ctx context.Context, projectID int64, id *int64) (*recurrenceclient.View, error) {
-	if id == nil {
-		return nil, nil
-	}
-	apiClient, err := c.generatedClient()
-	if err != nil {
-		return nil, err
-	}
-	rec, err := recurrenceclient.Active(ctx, apiClient, projectID, id)
-	if status, ok := errors.AsType[*recurrenceclient.StatusError](err); ok {
-		return nil, decodeError(status.Body, status.Status, status.Method, status.URI)
-	}
-	return rec, err
 }
 
 // CreateIssue posts a new issue. body.IdempotencyKey rides the

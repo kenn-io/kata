@@ -2170,8 +2170,7 @@ the 20-entry undo limit and the history-clearing boundaries above. Use
 credentials cannot delete or restore, so `X` is not offered to them and does
 nothing.
 
-In the issue list or detail, press `O` to start, change or stop the selected
-issue's recurrence, the same one `kata schedule <ref> <date> --repeat` manages.
+In the issue detail, press `O` to start or change the issue's recurrence, the same one `kata schedule <ref> <date> --repeat` manages.
 The form has three fields. **Rule** is the RRULE text, sent as written: the
 daemon is the only validator, and its error appears in the form with your input
 kept. **Start** requires a date: `YYYY-MM-DD`, `today`, `tomorrow`, `+Nd`, or
@@ -2181,9 +2180,9 @@ link); it is never `Local`. Starting a recurrence rewrites the issue's
 `scheduled_on` to the first occurrence. `Ctrl+o` saves and `Esc` cancels. A
 change is guarded by `If-Match` on the revision the form read, and a start on
 the issue's; if another client got there first, nothing is written, the form
-keeps what you typed and shows the current recurrence. `Ctrl+x` asks for
-confirmation and then stops the recurrence; occurrences already created stay,
-as with `--repeat -`. An issue that parents a recurring cron job is refused,
+keeps what you typed and shows the daemon's error. Press `Esc`, then `O` to
+reopen the form after the detail refreshes. Stop a recurrence with
+`kata schedule <ref> --repeat -`. An issue that parents a recurring cron job is refused on save,
 exactly as the CLI refuses it. The issue detail shows a `repeats:` line with
 the rule, the next occurrence and the zone. A recurrence change clears the undo
 history, since `u` cannot reverse it.

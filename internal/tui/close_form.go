@@ -147,9 +147,6 @@ func (m Model) routeCloseKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 // activeIssueTarget is the issue a list or detail action key acts on: the open
 // detail's issue, else the list row under the cursor.
 func (m Model) activeIssueTarget() (formTarget, Issue, bool) {
-	if m.view != viewList && m.view != viewDetail {
-		return formTarget{}, Issue{}, false
-	}
 	if m.detailIsActive() {
 		if m.detail.issue == nil {
 			return formTarget{}, Issue{}, false

@@ -11,12 +11,11 @@ import (
 
 // RecurrenceInput is one Repeat form save. Recurrence is the recurrence the
 // form read (nil when the issue had none) and IssueRevision the issue revision
-// it read: a start is guarded on the issue's revision, a change or a stop on
+// it read: a start is guarded on the issue's revision, a change on
 // the recurrence's. Zone is the zone as typed; blank takes the recurrence's
 // zone, then the issue's, then the caller's own, as kata schedule does.
 type RecurrenceInput struct {
 	recurrenceclient.Terms
-	Stop          bool
 	IssueRevision int64
 	Recurrence    *recurrenceclient.View
 }
@@ -25,21 +24,7 @@ type recurrenceAPI interface {
 	SaveRecurrence(ctx context.Context, projectID int64, ref string, in RecurrenceInput) (*MutationResp, error)
 }
 
-type issueReadAPI interface {
-	ReadIssue(ctx context.Context, projectID int64, ref string) (*IssueDetail, error)
-}
-
-type recurrenceReadAPI interface {
-	ReadRecurrence(ctx context.Context, projectID int64, id *int64) (*recurrenceclient.View, error)
-}
-
-// recurrenceSnapshot is an issue and its recurrence as the daemon holds them.
-type recurrenceSnapshot struct {
-	issue Issue
-	rec   *recurrenceclient.View
-}
-
-// SaveRecurrence starts, changes or stops the recurrence of an issue through
+// SaveRecurrence starts or changes the recurrence of an issue through
 // the same shared logic as kata schedule --repeat. The daemon validates the
 // rule; its refusal comes back as the error.
 func (c *Client) SaveRecurrence(ctx context.Context, projectID int64, ref string, in RecurrenceInput) (*MutationResp, error) {
@@ -61,28 +46,22 @@ func (c *Client) SaveRecurrence(ctx context.Context, projectID int64, ref string
 		return nil, &mutationPreflightError{errCronParent()}
 	}
 	changed := true
-	if in.Stop {
-		if in.Recurrence == nil {
-			return nil, &mutationPreflightError{errors.New("issue has no active recurrence; nothing was written")}
-		}
-		err = recurrenceclient.Stop(ctx, apiClient, issue.ProjectID, *in.Recurrence, in.Actor)
-	} else {
-		issueZone, _ := issue.Metadata["timezone"].(string)
-		zone, zoneErr := recurrenceclient.ResolveZone(in.Zone, in.Recurrence.Zone(), issueZone, localZone)
-		switch {
-		case errors.Is(zoneErr, recurrenceclient.ErrLocalZone):
-			return nil, &mutationPreflightError{errors.New(`"Local" is not an IANA zone; enter a name like Europe/Paris`)}
-		case zoneErr != nil:
-			return nil, &mutationPreflightError{errors.New("no timezone known for this recurrence; enter an IANA zone like Europe/Paris")}
-		}
-		terms := in.Terms
-		terms.Zone = zone
-		if in.Recurrence != nil {
-			changed, err = recurrenceclient.Change(ctx, apiClient, issue.ProjectID, *in.Recurrence, terms)
-		} else {
-			err = startRecurrence(ctx, apiClient, issue.ProjectID, issue.UID, wire, in, terms)
-		}
+	issueZone, _ := issue.Metadata["timezone"].(string)
+	zone, zoneErr := recurrenceclient.ResolveZone(in.Zone, in.Recurrence.Zone(), issueZone, localZone)
+	switch {
+	case errors.Is(zoneErr, recurrenceclient.ErrLocalZone):
+		return nil, &mutationPreflightError{errors.New(`"Local" is not an IANA zone; enter a name like Europe/Paris`)}
+	case zoneErr != nil:
+		return nil, &mutationPreflightError{errors.New("no timezone known for this recurrence; enter an IANA zone like Europe/Paris")}
 	}
+	terms := in.Terms
+	terms.Zone = zone
+	if in.Recurrence != nil {
+		changed, err = recurrenceclient.Change(ctx, apiClient, issue.ProjectID, *in.Recurrence, terms)
+	} else {
+		err = startRecurrence(ctx, apiClient, issue.ProjectID, issue.UID, wire, in, terms)
+	}
+
 	if err != nil {
 		if status, ok := errors.AsType[*recurrenceclient.StatusError](err); ok {
 			return nil, decodeError(status.Body, status.Status, status.Method, status.URI)
@@ -90,7 +69,7 @@ func (c *Client) SaveRecurrence(ctx context.Context, projectID int64, ref string
 		return nil, err
 	}
 	resp := &MutationResp{Changed: changed, Issue: &Issue{UID: issue.UID, ShortID: issue.ShortID, ProjectID: issue.ProjectID}}
-	if after, err := c.ReadIssue(ctx, issue.ProjectID, issue.UID); err == nil {
+	if after, err := c.readIssue(ctx, issue.ProjectID, issue.UID); err == nil {
 		resp.Issue = after.Issue
 	}
 	return resp, nil

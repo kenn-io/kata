@@ -141,7 +141,7 @@ func inputHelpRows(input inputState) [][]helplayout.HelpItem {
 			{Key: "tab", Description: "field"},
 		}}
 	case kind == inputRecurrenceForm:
-		return [][]helplayout.HelpItem{recurrenceFormControls(input)}
+		return [][]helplayout.HelpItem{recurrenceFormControls()}
 	case kind == inputNewIssueForm:
 		return [][]helplayout.HelpItem{{
 			{Key: "ctrl+o", Description: "create"},
@@ -198,7 +198,6 @@ func (lm listModel) queueHelpRows(hideDelete bool) [][]helplayout.HelpItem {
 		items = append(items, helplayout.HelpItem{Key: "X", Description: "delete"})
 	}
 	items = append(items,
-		helplayout.HelpItem{Key: "O", Description: "repeat"},
 		helplayout.HelpItem{Key: "!", Description: "priority"},
 		helplayout.HelpItem{Key: "D", Description: "daemons"},
 		helplayout.HelpItem{Key: "F", Description: "federation"},
@@ -283,11 +282,6 @@ func modalHelpRows(kind modalKind) [][]helplayout.HelpItem {
 		return [][]helplayout.HelpItem{{
 			{Key: "y", Description: "reopen"},
 			{Key: "n/esc", Description: "cancel"},
-		}}
-	case modalStopRecurrence:
-		return [][]helplayout.HelpItem{{
-			{Key: "y", Description: "stop repeating"},
-			{Key: "n/esc", Description: "keep"},
 		}}
 	case modalDiscardComment, modalDiscardNewIssue, modalDiscardCronJob:
 		return [][]helplayout.HelpItem{{
