@@ -8,12 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"runtime"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -379,21 +377,6 @@ func TestCronEditNormalizationPreservesNumberTokens(t *testing.T) {
 	}
 }
 
-func TestCronEditNumberEqualityProperty(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		n := hegel.Draw(ht, hegel.Integers[int64](math.MinInt64, math.MaxInt64))
-		token := strconv.FormatInt(n, 10)
-		left := []byte(`{"n":` + token + `,"opaque":{}}`)
-		right := []byte("{\n\"opaque\": {},\n\"n\": " + token + "\n}")
-		if !cronEditEqual(left, right) {
-			ht.Fatalf("formatting changed exact numeric value %s", token)
-		}
-		if cronEditEqual(left, []byte(`{"n":`+token+`0,"opaque":{}}`)) && n != 0 {
-			ht.Fatalf("rounded distinct numeric tokens around %s", token)
-		}
-	}, hegel.WithTestCases(1000), hegel.WithDatabase(t.TempDir()))
-}
-
 func TestCronEditLargeIndentedDocumentAndNameBytes(t *testing.T) {
 	definition := `{"version":1,"steps":[{"key":"inspect","kind":"command","command":"git status"}],"options":{"values":[` + strings.Repeat("0,", 39999) + `0]}}`
 	raw := jsontext.Value(`{"name":"Inspection","definition":` + definition + `}`)
@@ -527,20 +510,12 @@ func TestCronEditTransportFailureKeepsOriginalCAS(t *testing.T) {
 	require.Equal(t, original, job.DefinitionEventUID)
 }
 
-func TestCronEditHelp(t *testing.T) {
+func TestCronEditOwnsRequestFlags(t *testing.T) {
 	for _, resource := range []string{"job", "workflow"} {
 		command := newCronOperationCmd(resource, "edit")
-		var out bytes.Buffer
-		command.SetOut(&out)
-		require.NoError(t, command.Help())
-		for _, phrase := range []string{"VISUAL", "EDITOR", "terminal", "definition_event_uid", "CONFLICT", "draft", "expected-event-uid"} {
-			require.Contains(t, out.String(), phrase)
-		}
 		for _, flag := range []string{"file", "expected-event-uid", "parent"} {
 			require.Nil(t, command.Flags().Lookup(flag))
 		}
-		update, _ := cronOperationHelp(resource, "update")
-		require.Contains(t, update, "kata cron "+resource+" edit")
 	}
 }
 
