@@ -779,16 +779,22 @@ bundle supplied by the caller. V1 does not
 exercise successful dependent-step execution: an adapter that always skips
 dependents can pass v1. Passing v1 therefore does not establish that workflow
 progression works. Choose explicit fixture v2 for that coverage.
-`Suite(ctx, declaration)` uses a bundle's frozen expectations when its policy
-matches, otherwise materializes them with `Reference` and adds policy boundaries.
-The default reference declares zero tolerance, count 1000, unlimited age and
-continue. An implementation name does not affect the scenarios; omitted deferral
-and explicit `queue` select the same policy. `Reference` is deterministic and offline; running it alone does not
+`Suite(ctx, declaration)` keeps a bundle's literal expectations only when its
+policy matches. The seven default bundles use zero tolerance, count 1000,
+unlimited age, `continue`, recording off and `queue`. The optional drop bundle
+uses those defaults except window 86,400, `drop_records: true` and
+`forbid_deferral: "drop_after_grace"`. Other bundle-policy combinations use
+`Reference`-generated expectations and policy boundaries. Implementation names
+do not affect matching; omitted deferral and explicit `queue` are equivalent.
+
+`Reference` is deterministic and offline; running it alone does not
 test an adapter. Enumeration stops with an error beyond 100,000 new instants,
 never silently discarding unexamined work. After acknowledging that gap,
 rebuild the checkpoint at now with current revision and no pending to resume.
-Policy boundary materialization also has a 100,000-instant resource budget;
-larger declarations remain valid but require a smaller custom test trace.
+Built-in suites and CLI export/check cannot materialize `catchup_limit` above
+100,000. Such declarations remain valid. To check them from Go, call `RunSuite`
+with a hand-built `FixtureSuite` carrying the adapter's declaration and a
+smaller candidate trace.
 
 Fixture version `kata.cron.adapter-conformance/v2` retains those v1 decisions
 and adds five workflow cases: successful and waiting dependencies, multiple
