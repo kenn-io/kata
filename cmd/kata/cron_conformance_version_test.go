@@ -14,6 +14,7 @@ func TestCronConformanceV2(t *testing.T) {
 	if _, err := runConformance(t.Context(), t, nil, "export", "--schema", conformance.SchemaV2, "--dir", dir); err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G304 -- This test reads the manifest it just exported into t.TempDir.
 	raw, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
 	if err != nil {
 		t.Fatal(err)

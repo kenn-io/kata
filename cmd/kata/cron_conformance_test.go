@@ -81,6 +81,7 @@ func TestCronConformanceOffline(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, want := range files {
+		// #nosec G304 -- This test reads files it just exported inside its own t.TempDir.
 		got, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			t.Fatal(err)
@@ -260,6 +261,7 @@ func TestConformanceExportRollback(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "a.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("rollback left created file: %v", err)
 	}
+	// #nosec G304 -- This test-owned rollback sentinel is inside t.TempDir.
 	raw, err := os.ReadFile(path)
 	if err != nil || string(raw) != "existing" {
 		t.Fatalf("existing file changed: %s %v", raw, err)
