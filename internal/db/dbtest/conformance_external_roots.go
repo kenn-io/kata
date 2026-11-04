@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"hegel.dev/go/hegel"
 )
 
 func checkExternalRootBindings(t *testing.T, store db.Storage, backend Backend) error {
@@ -575,5 +576,77 @@ func checkExternalRootBindings(t *testing.T, store db.Storage, backend Backend) 
 	assert.Equal(t, issue.Status, hubIssue.Status)
 	_, err = hubStore.ExternalRootBindingByIssue(ctx, hubIssue.ID)
 	assert.ErrorIs(t, err, db.ErrNotFound)
+	if err := checkPendingExternalCommentCaseVariant(t, store, backend); err != nil {
+		return err
+	}
 	return nil
+}
+
+func checkPendingExternalCommentCaseVariant(t *testing.T, store db.Storage, backend Backend) error {
+	t.Helper()
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "pending-comment-project")
+	require.NoError(t, err)
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: project.ID, Title: "Pending publication", Author: "tester",
+	})
+	require.NoError(t, err)
+	comment, _, err := store.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: issue.ID, Author: "tester", Body: "Comment identity case check",
+	})
+	require.NoError(t, err)
+	const canonicalUID = "01AAAAAAAAAAAAAAAAAAAAAAAA"
+	updateCommentIdentityForTest(ctx, t, store, backend, "uid", canonicalUID, comment.ID)
+	comment.UID = canonicalUID
+
+	startedAt := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	binding, _, err := store.CreateExternalRootBinding(ctx, db.CreateExternalRootBindingParams{
+		ProjectID: project.ID, IssueID: issue.ID,
+		ConnectorInstance: "notes", ExternalRootKey: "root-case-variant",
+		ExternalAccountKey: "opaque-account-key", Actor: "tester",
+		ReceiveCommentsAfter: startedAt,
+	})
+	require.NoError(t, err)
+	claimed, acquired, err := store.ClaimExternalRootBinding(
+		ctx, binding.ID, "case-variant-claim", startedAt, startedAt.Add(-time.Minute),
+	)
+	require.NoError(t, err)
+	require.True(t, acquired)
+
+	hegel.Test(t, func(ht *hegel.T) {
+		staleUID := drawExternalCommentUIDCaseVariant(ht, comment.UID)
+		if staleUID == comment.UID {
+			ht.Fatalf("generated UID spelling is not a case variant: %q", staleUID)
+		}
+		_, err := store.SetPendingExternalComment(ctx, db.SetPendingExternalCommentParams{
+			BindingID: binding.ID, ClaimToken: claimed.ClaimToken,
+			CommentUID: staleUID, At: startedAt.Add(time.Minute),
+		})
+		require.ErrorIs(ht, err, db.ErrNotFound)
+		current, err := store.ExternalRootBindingByID(ctx, binding.ID)
+		require.NoError(ht, err)
+		require.Empty(ht, current.PendingCommentUID)
+	}, hegel.WithTestCases(50), hegel.WithDatabase(t.TempDir()))
+	return nil
+}
+
+func drawExternalCommentUIDCaseVariant(ht *hegel.T, uid string) string {
+	variant := []byte(uid)
+	lowered := false
+	for index := range variant {
+		if variant[index] < 'A' || variant[index] > 'Z' || !hegel.Draw(ht, hegel.Booleans()) {
+			continue
+		}
+		variant[index] += 'a' - 'A'
+		lowered = true
+	}
+	if !lowered {
+		for index := range variant {
+			if variant[index] >= 'A' && variant[index] <= 'Z' {
+				variant[index] += 'a' - 'A'
+				break
+			}
+		}
+	}
+	return string(variant)
 }

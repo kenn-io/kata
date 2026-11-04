@@ -1493,8 +1493,14 @@ func (d *Store) SetPendingExternalComment(
 		if current.ClaimToken != params.ClaimToken || !current.Active || !current.Enabled {
 			return db.ExternalRootBinding{}, db.ErrExternalRootClaimLost
 		}
-		if _, err := commentByUIDForIssueTx(ctx, tx, current.IssueID, params.CommentUID); err != nil {
-			return db.ExternalRootBinding{}, err
+		var commentID int64
+		err = tx.QueryRowContext(ctx, `SELECT id FROM comments WHERE issue_id = ? AND uid = ?`,
+			current.IssueID, params.CommentUID).Scan(&commentID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return db.ExternalRootBinding{}, db.ErrNotFound
+		}
+		if err != nil {
+			return db.ExternalRootBinding{}, fmt.Errorf("lookup pending external comment: %w", err)
 		}
 		if current.PendingCommentUID != "" {
 			if current.PendingCommentUID == params.CommentUID {
