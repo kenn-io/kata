@@ -174,7 +174,7 @@ func (h toolHandlers) cronJobResume(ctx context.Context, _ *sdkmcp.CallToolReque
 	return cronResult(h.options.Client.ResumeCronJob(ctx, &generated.ResumeCronJobRequestOptions{PathParams: &generated.ResumeCronJobPath{ProjectID: p.ID, CronUID: id}, Body: &generated.ResumeCronJobBody{Actor: &h.options.Actor, ExpectedEventUID: expected}}))
 }
 func cronOptionalExpected(value string) (*string, error) {
-	if strings.TrimSpace(value) == "" {
+	if value == "" {
 		return nil, nil
 	}
 	expected, err := cronExpected(value)
