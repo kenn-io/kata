@@ -99,6 +99,12 @@ func cronLast(runs []generated.CronRun, uid string, workflow bool) string {
 	}
 	return "—"
 }
+func cronJobLast(p cronData, uid string) string {
+	if r, ok := p.lastRuns[uid]; ok {
+		return r.Status + " " + humanizeRelative(r.CreatedAt)
+	}
+	return "—"
+}
 func cronCount(n int, noun string) string {
 	if n != 1 {
 		noun += "s"
@@ -119,17 +125,20 @@ func cronScreen(m Model) (string, string, []cronLine) {
 	}
 	headers := [][]string{
 		nil,
-		{"Job", "State", "Trigger", "Action", "Last loaded run"},
+		{"Job", "Health", "Trigger", "Action", "Last run"},
 		{"Status", "Job", "Occurrence", "Started", "Ended", "Summary"},
 		{"Workflow", "Steps", "Used by", "Last loaded run", "Updated"},
 	}[m.cron.tab]
 	// Fixed columns leave the name and summary the remaining cells.
 	widths := [][]int{
 		nil,
-		{0, 7, 17, 18, 18},
+		{0, 13, 17, 18, 18},
 		{10, 0, 12, 11, 11, 0},
 		{0, 5, 7, 18, 11},
 	}[m.cron.tab]
+	if m.cron.tab == cronJobs && m.width < 100 {
+		widths = []int{0, 13, 14, 12, 16}
+	}
 	fixed := 2 + len(widths) - 1
 	flex := 0
 	for _, w := range widths {
@@ -148,6 +157,9 @@ func cronScreen(m Model) (string, string, []cronLine) {
 		out := make([]string, len(cells))
 		for i, c := range cells {
 			out[i] = padToWidth(truncate(sanitizeForLine(c), widths[i]), widths[i])
+			if m.cron.tab == cronJobs && i == 1 && (c == "failing" || c == "overdue" || c == "missed") {
+				out[i] = errorStyle.Render(out[i])
+			}
 		}
 		return strings.Join(out, " ")
 	}
@@ -159,10 +171,13 @@ func cronScreen(m Model) (string, string, []cronLine) {
 	}
 	if p := m.cron.data; p != nil {
 		runs := p.runs
+		if m.cron.tab == cronRuns && m.cron.runPage.ready {
+			runs = m.cron.runPage.runs
+		}
 		switch m.cron.tab {
 		case cronJobs:
 			for _, j := range p.jobs {
-				add(j.UID, []string{j.Name, cronJobState(j), cronSchedule(j.Definition.Trigger), cronAction(*p, j), cronLast(runs, j.UID, false)})
+				add(j.UID, []string{j.Name, cronHealth(*p, j, renderNow()).state, cronSchedule(j.Definition.Trigger), cronAction(*p, j), cronJobLast(*p, j.UID)})
 			}
 		case cronRuns:
 			for _, r := range runs {
@@ -176,8 +191,31 @@ func cronScreen(m Model) (string, string, []cronLine) {
 	}
 	noun := []string{"", "job", "run", "workflow"}[m.cron.tab]
 	title := cronCount(len(lines), noun)
+	if m.cron.tab == cronJobs && m.cron.data != nil {
+		counts := map[string]int{}
+		for _, j := range m.cron.data.jobs {
+			counts[cronHealth(*m.cron.data, j, renderNow()).state]++
+		}
+		for _, state := range []string{"paused", "unavailable", "parent closed", "overdue", "running", "failing", "missed", "never ran"} {
+			if count := counts[state]; count > 0 {
+				title += fmt.Sprintf(" · %d %s", count, state)
+			}
+		}
+	}
 	if m.cron.tab == cronRuns {
-		title = cronCount(len(lines), "loaded run") + " · newest 100"
+		title = cronCount(len(lines), "loaded run")
+		if !m.cron.runPage.older {
+			title += " · newest 100"
+		}
+		if m.cron.runPage.next != "" {
+			lines = append(lines, cronLine{text: "load 100 older runs", target: cronRef{cronOlder, "project"}})
+		}
+		if m.cron.runPage.err != nil {
+			lines = append(lines, cronLine{text: "unavailable: " + sanitizeForLine(m.cron.runPage.err.Error())})
+		}
+		if m.cron.runPage.out {
+			lines = append(lines, cronLine{text: "loading…"})
+		}
 	}
 	return title, format(headers), lines
 }
@@ -224,6 +262,9 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 		if j := p.job(ref.uid); j != nil {
 			name = j.Name
 			d.field("State", cronJobState(*j))
+			health := cronHealth(p, *j, renderNow())
+			d.field("Health", health.state)
+			d.field("Reason", health.reason)
 			d.field("Schedule", cronSchedule(j.Definition.Trigger))
 			if label, times := cronNextRuns(p, *j, renderNow()); len(times) > 0 {
 				d.field(label, times[0])
@@ -248,13 +289,10 @@ func cronDetail(m Model, ref cronRef) (string, string, []cronLine) {
 			}
 			d.section("Definition")
 			d.json(def)
-			cronHistory(&d, p, ref)
+			cronJobHistory(&d, m, ref.uid)
 		}
 	case cronRuns:
-		for _, r := range p.runs {
-			if r.UID != ref.uid {
-				continue
-			}
+		if r, ok := p.run(ref.uid); ok {
 			name = r.UID
 			d.field("Status", r.Status)
 			d.field("Occurrence", deref(r.OccurrenceKey))

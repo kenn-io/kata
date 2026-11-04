@@ -108,6 +108,9 @@ func Run(ctx context.Context, opts Options) error {
 		return err
 	}
 	m := buildRunModel(opts, c, bi, conn)
+	lifetimeCtx, cancelLifetime := context.WithCancel(ctx)
+	defer cancelLifetime()
+	m.lifetime = &cronReadScope{ctx: lifetimeCtx, cancel: cancelLifetime}
 	sseCtx, cancelSSE := context.WithCancel(ctx)
 	startSSE := func(ctx context.Context, hc *http.Client, endpoint string, projectID *int64, ch chan tea.Msg, gen uint64) {
 		go startSSEForConnection(ctx, hc, endpoint, projectID, ch, gen)

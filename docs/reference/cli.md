@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-02
+last_edited: 2026-11-04
 ---
 
 # CLI reference
@@ -1935,7 +1935,11 @@ The job form offers four kinds: a recurring child issue (a native job with a par
 
 The form mints the job UID when it opens, so retrying a failed create never makes a second job. An edit is guarded on the job's `definition_event_uid`. If the revision changed while you edited, the form keeps your draft. If the current definition supports editing, it shows the current name, revision, and complete definition; otherwise it shows an error. Use the arrow keys to scroll, or press `Ctrl+o` to save your whole draft against the current revision. Saving the draft replaces the current definition, including settings changed by another writer. `Esc` returns to the draft. Other save errors keep the form open with the error. A recurring child issue's parent cannot change after creation, and native jobs must be written on the project's owning hub.
 
-Runs loads the newest 100 observations for the current project. Job and workflow details show matching runs from that loaded project history. Run details distinguish the recorded definition revision from the current job or workflow, including definitions that have changed or disappeared.
+Jobs shows each job's **Health** and exact **Last run**, even when that run is outside the project's newest 100. The title counts non-ok states across all loaded jobs, including filtered-out jobs. Open a job for the reason. Disabled jobs are **paused**. Adapter observations show **running**, **failing** (failed or unknown), **overdue** (running beyond a positive `timeout_seconds`), or **never ran**. A successful or cancelled observation is healthy unless a later expected instant is missed. Native recurring jobs use their parent issue's delivery progress, independently of executor observations; a closed or deleted parent shows **parent closed**.
+
+**Missed** is a local display heuristic: the next expected cron or once instant, or native recurring delivery, is older than `grace_seconds` when positive, otherwise 15 minutes. It does not assert that an executor skipped a run. Adapter intervals and `@every` expressions have no anchored instant and cannot show missed. Health ages on the minute tick without polling each job again. Unreadable definitions, progress or last observations show **unavailable**. Refresh fills missing adapter observations and native parent progress with four shared workers, at most 200 reads of each kind and one five-second enrichment budget. Capped or failed reads are unavailable; retained last-run text is display-only evidence.
+
+Runs starts with the newest 100 observations. Select **load 100 older runs** with Enter or `l` to append a page. A job's detail reads its own history in pages of 20; select **load 20 older runs** to continue. Refresh resets paging; a failed read retains visible rows and can be retried. Workflow details still show matching runs from the newest 100 project observations. Older daemons that do not return a cursor show no load-older link. Run details distinguish the recorded definition revision from the current job or workflow, including definitions that have changed or disappeared.
 
 In the detail Comments tab, press `R` to reply to the selected comment.
 `Ctrl+r` changes the reply kind and `Ctrl+o` submits. After a duplicate-reply

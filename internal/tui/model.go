@@ -48,6 +48,8 @@ const (
 // toastNow is a clock injection point: production uses time.Now, tests
 // replace it to drive deterministic toast expiry.
 type Model struct {
+	nextCronRequest     uint64
+	lifetime            *cronReadScope
 	telemetry           *telemetryGate
 	searchQuery         string
 	searchCounted       string
@@ -846,6 +848,8 @@ func projectIDFromMutation(m Model, mut mutationDoneMsg) int64 {
 // open/key. ok=true means the message was handled here.
 func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
+	case cronPageMsg:
+		return m.cronPageLoaded(msg), nil, true
 	case cronLoadedMsg:
 		return m.cronLoaded(msg), nil, true
 	case cronEditOpenedMsg:

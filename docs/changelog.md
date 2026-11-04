@@ -1,13 +1,19 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Spot failing, overdue and missed cron jobs in `kata tui`, with exact last-run
+  evidence, a project health roll-up, and a reason in each job's detail.
+  Page through each job's run history or load older project observations.
+  Native delivery health comes from parent progress; missed is a local display
+  heuristic. See [CLI reference](reference/cli.md#daemon-and-diagnostics).
 
 - Load the web UI's issue list and graph on SQLite and PostgreSQL stores with
   tens of thousands of issues without exceeding SQL parameter limits.

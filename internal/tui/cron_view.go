@@ -33,9 +33,14 @@ type cronList struct {
 }
 type cronData struct {
 	conn, scope, events uint64
+	generation          uint64
 	jobs                []generated.CronJob
 	workflows           []generated.CronWorkflow
 	runs                []generated.CronRun
+	nextBefore          string
+	lastRuns            map[string]generated.CronRun
+	lastErr             map[string]error
+	lookup              map[string]generated.CronRun
 	progress            map[string]cron.RecurringProgress
 	parentOpen          map[string]bool
 	jobsErr             error
@@ -57,85 +62,115 @@ func (p cronData) readError(kind int) error {
 }
 
 type cronState struct {
-	tab             int
-	lists           [4]cronList
-	filtering, help bool
-	stack           []cronFrame
-	data            *cronData
-	events          uint64
-	out             bool
-	conn, scope     uint64
-	form            *cronForm
-	editSeq         uint64
+	tab                 int
+	lists               [4]cronList
+	filtering, help     bool
+	stack               []cronFrame
+	data                *cronData
+	events              uint64
+	out                 bool
+	conn, scope         uint64
+	form                *cronForm
+	editSeq             uint64
+	reads               *cronReadScope
+	readGen, pageEvents uint64
+	jobPage, runPage    cronHistoryPage
 }
 
 // Synchronize after every update and retain visible records during refresh.
 func (m Model) cronSync() (Model, tea.Cmd) {
 	if m.cron.conn != m.connGen || m.cron.scope != m.scopeGen {
+		m.cron.reads.stop()
 		if m.modal == modalDiscardCronJob {
 			m.modal = modalNone
 		}
 		m.cron = cronState{tab: m.cron.tab, conn: m.connGen, scope: m.scopeGen}
 	}
-	if m.view != viewCron || m.scope.allProjects || m.scope.projectID == 0 || m.cron.out {
+	if m.cron.pageEvents != m.cron.events {
+		m.cronInvalidatePages()
+		m.cron.pageEvents = m.cron.events
+	}
+	if m.view != viewCron || m.scope.allProjects || m.scope.projectID == 0 {
+		m.cron.reads.stop()
+		m.cron.reads = nil
+		if m.cron.out || m.cron.jobPage.out || m.cron.runPage.out {
+			m.cronInvalidatePages()
+		}
+		m.cron.readGen = 0
+		m.cron.out = false
 		return m, nil
 	}
+	if m.cron.out {
+		return m, nil
+	}
+	if m.cron.reads == nil {
+		// Update is a Bubble Tea framework callback with no supplied context.
+		root := context.Background()
+		if m.lifetime != nil {
+			root = m.lifetime.ctx
+		}
+		ctx, cancel := context.WithCancel(root)
+		m.cron.reads = &cronReadScope{ctx: ctx, cancel: cancel}
+	}
 	if m.cron.data != nil && m.cron.data.events == m.cron.events {
+		// Returning through another job can leave the sole page cache on that
+		// job. Start a matching request as soon as this job becomes visible.
+		if n := len(m.cron.stack); n > 0 {
+			frame := m.cron.stack[n-1]
+			if frame.ref.kind == cronJobs && m.cron.jobPage.job != frame.ref.uid {
+				return m.cronRequestPage(frame.ref.uid, true)
+			}
+		}
+
+		if m.cron.jobPage.reload {
+			for _, frame := range m.cron.stack {
+				if frame.ref.kind == cronJobs && frame.ref.uid == m.cron.jobPage.job {
+					return m.cronRequestPage(frame.ref.uid, true)
+				}
+			}
+			m.cron.jobPage.reload = false
+		}
 		return m, nil
 	}
 	m.cron.out = true
+	m.cron.readGen = m.cronGeneration()
 	return m, m.fetchCron()
 }
 func (m Model) fetchCron() tea.Cmd {
 	reader, id := m.api, m.scope.projectID
-	data := cronData{conn: m.connGen, scope: m.scopeGen, events: m.cron.events}
+	data := cronData{conn: m.connGen, scope: m.scopeGen, events: m.cron.events, generation: m.cron.readGen}
 	return func() tea.Msg {
-		data.jobs, data.jobsErr = cronRead(reader.ListCronJobs, id)
-		data.workflows, data.workflowsErr = cronRead(reader.ListCronWorkflows, id)
-		data.runs, data.runsErr = cronRead(reader.ListCronRuns, id)
-		data.progress, data.parentOpen = cronReadParents(reader, id, data.jobs)
+		// Bubble Tea command callbacks supply no context in isolated model tests.
+		root := context.Background()
+		if m.lifetime != nil {
+			root = m.lifetime.ctx
+		}
+		if m.cron.reads != nil {
+			root = m.cron.reads.ctx
+		}
+		ctx, cancel := context.WithTimeout(root, 3*defaultHTTPTimeout)
+		defer cancel()
+		cronFetch(ctx, reader, id, &data)
 		return cronLoadedMsg(data)
 	}
 }
-func cronRead[T any](read func(context.Context, int64) (T, error), id int64) (T, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
-	defer cancel()
-	return read(ctx, id)
-}
-
-// cronReadParents reads each enabled native job's parent issue once: its delivery
-// checkpoints and whether it is open. Failed reads leave the parent unavailable.
-func cronReadParents(reader cronAPI, id int64, jobs []generated.CronJob) (map[string]cron.RecurringProgress, map[string]bool) {
-	progress := map[string]cron.RecurringProgress{}
-	open := map[string]bool{}
-	seen := map[string]bool{}
-	for _, j := range jobs {
-		if !j.Definition.Enabled {
-			continue
-		}
-		parent := cronNativeParent(j)
-		if parent == "" || seen[parent] {
-			continue
-		}
-		seen[parent] = true
-		ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
-		read, err := reader.readCronParent(ctx, id, parent)
-		cancel()
-		if err == nil {
-			maps.Copy(progress, read.progress)
-			open[parent] = read.open
-		}
-	}
-	return progress, open
-}
 func (m Model) cronLoaded(msg cronLoadedMsg) Model {
-	if msg.conn != m.connGen || msg.scope != m.scopeGen {
+	if msg.conn != m.connGen || msg.scope != m.scopeGen || (msg.generation != 0 && msg.generation != m.cron.readGen) {
 		return m
 	}
 	data := cronData(msg)
+	data.lastRuns = maps.Clone(data.lastRuns)
 	if previous := m.cron.data; previous != nil {
 		if data.jobsErr != nil {
 			data.jobs = previous.jobs
+		}
+		for uid, run := range previous.lastRuns {
+			if data.jobsErr != nil || data.lastErr[uid] != nil {
+				if data.lastRuns == nil {
+					data.lastRuns = map[string]generated.CronRun{}
+				}
+				data.lastRuns[uid] = run
+			}
 		}
 		if data.workflowsErr != nil {
 			data.workflows = previous.workflows
@@ -144,13 +179,32 @@ func (m Model) cronLoaded(msg cronLoadedMsg) Model {
 			data.runs = previous.runs
 		}
 	}
-	return m.cronReplaceData(&data)
-}
-
-// cronReplaceData keeps each list's cursor on the record it selected before.
-func (m Model) cronReplaceData(data *cronData) Model {
+	// Keep records that the navigation stack still references; paged records are
+	// lookup evidence only and never establish fresh last-run health.
+	data.lookup = map[string]generated.CronRun{}
+	if previous := m.cron.data; previous != nil {
+		for _, frame := range m.cron.stack {
+			if frame.ref.kind == cronRuns {
+				if r, ok := previous.run(frame.ref.uid); ok {
+					data.lookup[r.UID] = r
+				}
+			}
+		}
+	}
 	old := m
-	m.cron.out, m.cron.data = false, data
+	m = m.cronRememberData(&data)
+	if data.runsErr == nil {
+		m.cron.runPage = cronHistoryPage{runs: data.runs, next: data.nextBefore, ready: true, gen: m.cronGeneration()}
+	} else {
+		m.cron.runPage.err = data.runsErr
+		m.cron.runPage.out = false
+		m = m.cronRemember(m.cron.runPage.runs)
+	}
+	if m.cron.jobPage.job != "" {
+		m.cron.jobPage.reload = true
+		m = m.cronRemember(m.cron.jobPage.runs)
+	}
+	// Preserve cursor selection against the pre-refresh list, including older pages.
 	for tab := cronJobs; tab <= cronWorkflows; tab++ {
 		before, after := cronListLines(old, tab), cronListLines(m, tab)
 		cursor := &m.cron.lists[tab].cursor
@@ -163,6 +217,15 @@ func (m Model) cronReplaceData(data *cronData) Model {
 		}
 	}
 	return m
+}
+
+func (m Model) cronRememberData(data *cronData) Model {
+	m.cron.out, m.cron.data = false, data
+	runs := slices.Clone(data.runs)
+	for _, r := range data.lastRuns {
+		runs = append(runs, r)
+	}
+	return m.cronRemember(runs)
 }
 func cronListLines(m Model, tab int) []cronLine {
 	m.cron.tab, m.cron.stack = tab, nil
@@ -260,8 +323,22 @@ func (m Model) routeCronKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			return next, cmd
 		}
 	case key == "enter" || key == "l":
-		if len(lines) > 0 && lines[*cursor].target.uid != "" {
-			m.cron.stack = append(m.cron.stack, cronFrame{ref: lines[*cursor].target})
+		if len(lines) > 0 {
+			target := lines[*cursor].target
+			if target.kind == cronOlder {
+				job := target.uid
+				if job == "project" {
+					job = ""
+				}
+				reset := job != "" && !m.cron.jobPage.ready && m.cron.jobPage.next == ""
+				return m.cronRequestPage(job, reset)
+			}
+			if target.uid != "" {
+				m.cron.stack = append(m.cron.stack, cronFrame{ref: target})
+				if target.kind == cronJobs {
+					return m.cronRequestPage(target.uid, true)
+				}
+			}
 		}
 	case key == "h" || key == "esc":
 		if len(m.cron.stack) > 0 {

@@ -1,0 +1,100 @@
+package tui
+
+import (
+	"encoding/json/v2"
+	"fmt"
+	"time"
+
+	"go.kenn.io/kata/internal/cron"
+	"go.kenn.io/kata/pkg/client/generated"
+)
+
+type cronHealthState struct{ state, reason string }
+
+// cronHealth describes the local evidence, not a daemon skip decision. Native
+// jobs deliver issues: executor observations cannot describe their health.
+func cronHealth(p cronData, j generated.CronJob, now time.Time) cronHealthState {
+	state := func(label, reason string) cronHealthState { return cronHealthState{label, reason} }
+	if !j.Definition.Enabled {
+		return state("paused", "job is disabled")
+	}
+	if p.jobsErr != nil {
+		return state("unavailable", "job definitions could not be refreshed")
+	}
+	var def cron.JobDefinition
+	raw, err := json.Marshal(j.Definition)
+	if err != nil {
+		return state("unavailable", "job definition could not be read")
+	}
+	if err = json.Unmarshal(raw, &def); err == nil {
+		err = def.Validate()
+	}
+	if err != nil {
+		return state("unavailable", "invalid definition: "+err.Error())
+	}
+
+	progress, base := cron.RecurringProgress{}, j.CreatedAt
+	last, hasRun := p.lastRuns[j.UID]
+	native := cron.IsRecurringIssueJob(def)
+	if native {
+		open, known := p.parentOpen[def.Issue.ParentUID]
+		if !known {
+			return state("unavailable", "parent issue could not be read")
+		}
+		if !open {
+			return state("parent closed", "delivery stops while the parent is closed or deleted")
+		}
+		var knownProgress bool
+		progress, knownProgress = p.progress[j.UID]
+		if !knownProgress {
+			return state("unavailable", "delivery progress is missing or unreadable")
+		}
+		base = time.Time{}
+	} else {
+		if p.lastErr == nil {
+			return state("unavailable", "last run has not been read")
+		}
+		if err := p.lastErr[j.UID]; err != nil {
+			return state("unavailable", "last run: "+err.Error())
+		}
+		if hasRun {
+			base = last.CreatedAt
+			switch last.Status {
+			case "running":
+				started := last.CreatedAt
+				if last.StartedAt != nil {
+					started = *last.StartedAt
+				}
+				if def.TimeoutSeconds > 0 && started.Add(time.Duration(def.TimeoutSeconds)*time.Second).Before(now) {
+					return state("overdue", fmt.Sprintf("running past timeout_seconds %d (started %s)", def.TimeoutSeconds, started.Format(time.RFC3339)))
+				}
+				return state("running", "executor recorded a running observation")
+			case "failed", "unknown":
+				return state("failing", "last run status is "+last.Status)
+			}
+			if def.Trigger.Kind == "once" {
+				return state("ok", "one-time trigger has an observation")
+			}
+		} else if def.Trigger.Kind == "once" {
+			base = time.Time{}
+		}
+	}
+	instants, err := cron.RecurringOccurrences(def, progress, base, 1)
+	if err != nil {
+		return state("unavailable", "schedule or progress: "+err.Error())
+	}
+	grace := 15 * time.Minute
+	if def.GraceSeconds > 0 {
+		grace = time.Duration(def.GraceSeconds) * time.Second
+	}
+	if len(instants) > 0 && instants[0].Add(grace).Before(now) {
+		return state("missed", "expected "+instants[0].Format(time.RFC3339)+" beyond display tolerance "+grace.String())
+	}
+	if !native && !hasRun {
+		return state("never ran", "no recorded run; no expected instant beyond display tolerance")
+	}
+	if native {
+		return state("ok", "delivery progress has no expected instant beyond display tolerance")
+	}
+	return state("ok", "last run status is "+last.Status)
+}
