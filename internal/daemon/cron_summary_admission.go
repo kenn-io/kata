@@ -3,14 +3,18 @@ package daemon
 import (
 	"context"
 	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
-	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
+	"go.kenn.io/kata/pkg/client/generated"
 
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/federationcoord"
+	"go.kenn.io/kata/internal/federationsigning"
 )
 
 func cronSummaryUnsupported() error {
@@ -56,10 +60,24 @@ func admitCronSummary(ctx context.Context, cfg ServerConfig, projectID int64) (c
 	if err != nil {
 		return fail(cronSummaryUnsupported())
 	}
-	var metadata jsontext.Value
-	headers, err := cronHubRequest(ctx, client, http.MethodGet, fmt.Sprintf("%s/api/v1/projects/%d/federation/metadata", origin, binding.HubProjectID), nil, &metadata, projectID)
-	if err != nil || db.RequireEventFeatures(headers.Get(db.EventFeaturesHeader), db.CronRunSummaryV2Feature) != nil {
+	if !cronHubAdvertisesSummary(ctx, client, origin, binding.HubProjectID) {
 		return fail(cronSummaryUnsupported())
 	}
 	return db.WithCronSummaryBinding(ctx, &binding), cleanup, nil
+}
+
+// cronHubAdvertisesSummary probes hub metadata over the pinned, redirect-refusing
+// client with the gate the hand-rolled request used: any 2xx whose body is valid
+// JSON within the signed-body bound and advertises cron_run_summary_v2. Typed
+// decoding is ignored, and truncation alone could accept padded JSON.
+func cronHubAdvertisesSummary(ctx context.Context, client *http.Client, origin string, hubProjectID int64) bool {
+	apiClient, err := generated.NewDefaultClient(origin, runtime.WithHTTPClient(boundedProbeDoer{client: client, limit: federationsigning.MaxBodyBytes + 1}))
+	if err != nil {
+		return false
+	}
+	features := db.SupportedEventFeatures
+	result, _ := apiClient.GetFederationProjectMetadataWithResponse(ctx, &generated.GetFederationProjectMetadataRequestOptions{PathParams: &generated.GetFederationProjectMetadataPath{ProjectID: hubProjectID}, Header: &generated.GetFederationProjectMetadataHeaders{XKataEventFeatures: &features}})
+	return result != nil && result.StatusCode >= 200 && result.StatusCode < 300 && len(result.Body) <= federationsigning.MaxBodyBytes &&
+		json.Unmarshal(result.Body, new(jsontext.Value)) == nil &&
+		db.RequireEventFeatures(result.HTTPResponse.Header.Get(db.EventFeaturesHeader), db.CronRunSummaryV2Feature) == nil
 }
