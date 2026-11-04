@@ -84,9 +84,9 @@ func (r Reference) Settle(ctx context.Context, in SettleInput) (SettleOutput, er
 	// Tied terminals prove their prerequisites already succeeded, even if
 	// zero-duration attempts share the terminal timestamp. Keep those chains.
 	for _, step := range slices.Backward(in.Steps) {
-		if stop.prerequisites[step.Key] {
+		if stop.retained[step.Key] {
 			for _, parent := range step.After {
-				stop.prerequisites[parent] = true
+				stop.retained[parent] = true
 			}
 		}
 	}
@@ -95,8 +95,8 @@ func (r Reference) Settle(ctx context.Context, in SettleInput) (SettleOutput, er
 }
 
 type terminalPoint struct {
-	at            time.Time
-	prerequisites map[string]bool
+	at       time.Time
+	retained map[string]bool
 }
 
 func settlePass(ctx context.Context, in SettleInput, cutoff time.Time, cause string, stop terminalPoint, discoverStop bool) (SettleOutput, terminalPoint, error) {
@@ -123,7 +123,7 @@ func settlePass(ctx context.Context, in SettleInput, cutoff time.Time, cause str
 		}
 		offers := in.Outcomes[step.Key]
 		started := len(offers) > 0 && offers[0].StartedAt.Before(stop.at) && !offers[0].StartedAt.After(in.Now)
-		if blocked || !stop.at.IsZero() && !started && !stop.prerequisites[step.Key] {
+		if blocked || !stop.at.IsZero() && !started && !stop.retained[step.Key] {
 			states[step.Key] = "skipped"
 			out.Skipped = append(out.Skipped, step.Key)
 			continue
@@ -182,9 +182,9 @@ func settlePass(ctx context.Context, in SettleInput, cutoff time.Time, cause str
 		if state == "failed" || state == "cancelled" || state == "unknown" {
 			at := finished[step.Key]
 			if first.at.IsZero() || at.Before(first.at) {
-				first = terminalPoint{at: at, prerequisites: map[string]bool{step.Key: true}}
+				first = terminalPoint{at: at, retained: map[string]bool{step.Key: true}}
 			} else if at.Equal(first.at) {
-				first.prerequisites[step.Key] = true
+				first.retained[step.Key] = true
 			}
 		}
 	}

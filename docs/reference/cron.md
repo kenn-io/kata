@@ -667,9 +667,9 @@ attempts, never unknown or successful ones. All attempts share one run UID.
 Dependencies MUST succeed before a dependent starts. The declared
 `failure_policy` selects the branch behavior:
 `continue` permits independent branches after terminal failure; `stop` skips
-not-yet-started independent work, including starts at the terminal failure instant,
-except simultaneous failures and completed prerequisites (including equal-time
-successes). Already-started independent branches retain their results. A failure still eligible for retry is not terminal.
+unstarted steps, including dependents in independent branches, at or after that
+instant, except tied failed/cancelled/unknown terminals and successful prerequisites
+(including equality). Started steps retain results. Retriable failures are not terminal.
 
 A positive `timeout_seconds` sets one deadline from run start for every attempt.
 Zero means no Kata deadline; document adapter defaults separately. Cancellation

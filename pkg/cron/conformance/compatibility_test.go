@@ -2,18 +2,18 @@ package conformance
 
 import (
 	"encoding/json/v2"
-	"strings"
+	"fmt"
 	"testing"
 	"time"
 )
 
-func TestLargeDeclarationResourceBudget(t *testing.T) {
+func TestSuiteRejectsLargeCatchupLimit(t *testing.T) {
 	d := Reference{}.Declare()
 	d.CatchupLimit = int(^uint(0) >> 1)
 	if err := d.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Suite(t.Context(), d); err == nil || !strings.Contains(err.Error(), "catchup_limit") {
+	if _, err := Suite(t.Context(), d); err == nil || err.Error() != fmt.Sprintf("suite cannot check catchup_limit >%d", maxScan) {
 		t.Fatalf("expected built-in suite limit diagnostic, got %v", err)
 	}
 }
