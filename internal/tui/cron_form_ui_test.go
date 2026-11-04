@@ -26,11 +26,13 @@ type cronPut struct {
 // cronWriteTestAPI doubles the cron write boundary; reads come from the fixture.
 type cronWriteTestAPI struct {
 	*cronReadTestAPI
-	puts      []cronPut
-	putErrs   []error // consumed one per put
-	shown     db.CronJob
-	showErr   error
-	issueUIDs map[string]string
+	workflowPuts  []workflowPut
+	workflowShown db.CronWorkflow
+	puts          []cronPut
+	putErrs       []error // consumed one per put
+	shown         db.CronJob
+	showErr       error
+	issueUIDs     map[string]string
 }
 
 func (a *cronWriteTestAPI) ShowCronJob(context.Context, int64, string) (db.CronJob, error) {
@@ -39,22 +41,40 @@ func (a *cronWriteTestAPI) ShowCronJob(context.Context, int64, string) (db.CronJ
 
 func (a *cronWriteTestAPI) PutCronJob(_ context.Context, _ int64, uid string, w kataapi.PutCronJobBody) error {
 	a.puts = append(a.puts, cronPut{uid, w})
-	if len(a.putErrs) > 0 {
-		err := a.putErrs[0]
-		a.putErrs = a.putErrs[1:]
-		var apiErr *APIError
-		if errors.As(err, &apiErr) && apiErr.Code == "cron_conflict" {
-			raw, marshalErr := json.Marshal(struct {
-				Current kataapi.CronJob `json:"current"`
-			}{kataapi.CronJobFrom(a.shown)})
-			if marshalErr != nil {
-				return marshalErr
-			}
-			apiErr.Data = raw
-		}
-		return err
+	return a.nextPutError(kataapi.CronJobFrom(a.shown))
+}
+
+type workflowPut struct {
+	uid   string
+	write kataapi.PutCronWorkflowBody
+}
+
+func (a *cronWriteTestAPI) ShowCronWorkflow(context.Context, int64, string) (db.CronWorkflow, error) {
+	return a.workflowShown, a.showErr
+}
+
+func (a *cronWriteTestAPI) PutCronWorkflow(_ context.Context, _ int64, uid string, w kataapi.PutCronWorkflowBody) error {
+	a.workflowPuts = append(a.workflowPuts, workflowPut{uid, w})
+	return a.nextPutError(kataapi.CronWorkflowFrom(a.workflowShown))
+}
+
+func (a *cronWriteTestAPI) nextPutError(current any) error {
+	if len(a.putErrs) == 0 {
+		return nil
 	}
-	return nil
+	err := a.putErrs[0]
+	a.putErrs = a.putErrs[1:]
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && apiErr.Code == "cron_conflict" {
+		raw, marshalErr := json.Marshal(struct {
+			Current any `json:"current"`
+		}{current})
+		if marshalErr != nil {
+			return marshalErr
+		}
+		apiErr.Data = raw
+	}
+	return err
 }
 
 func (a *cronWriteTestAPI) GetIssueDetail(_ context.Context, _ int64, ref string) (*IssueDetail, error) {
@@ -86,6 +106,8 @@ func settle(t *testing.T, m Model, cmd tea.Cmd) Model {
 	switch msg := cmd().(type) {
 	case cronSavedMsg:
 		m, _ = m.cronSaved(msg)
+	case workflowOpenedMsg:
+		m, _ = m.workflowOpened(msg)
 	case cronEditOpenedMsg:
 		m, _ = m.cronEditOpened(msg)
 	default:
@@ -270,7 +292,7 @@ func TestCronEscAsksBeforeDiscardingADirtyDraft(t *testing.T) {
 	m, _ = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEsc})
 	require.NotNil(t, m.cron.form)
 	require.Equal(t, modalDiscardCronJob, m.modal)
-	require.Contains(t, stripANSI(m.View().Content), "Discard job draft?")
+	require.Contains(t, stripANSI(m.View().Content), "Discard draft?")
 	m, _ = updateModel(m, keyRune('n'))
 	require.NotNil(t, m.cron.form, "n keeps editing")
 	require.Equal(t, modalNone, m.modal)
