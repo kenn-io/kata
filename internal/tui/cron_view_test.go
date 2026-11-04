@@ -67,6 +67,14 @@ func cronFixture(t *testing.T) Model {
 	return m
 }
 
+// cronSettleTest answers the refresh an open requests with the loaded snapshot.
+func cronSettleTest(m Model) Model {
+	p := *m.cron.data
+	p.events, p.generation = m.cron.events, m.cron.readGen
+	m, _ = updateModel(m, cronLoadedMsg(p))
+	return m
+}
+
 func TestCronLinkFollows(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -606,7 +614,7 @@ func TestSnapshot_Cron(t *testing.T) {
 				m = sendKey(m, tea.KeyEnter)
 			case "run-detail":
 				m = sendRune(m, '3')
-				m = sendKey(m, tea.KeyEnter)
+				m = cronSettleTest(sendKey(m, tea.KeyEnter))
 			case "workflow-detail":
 				m = sendRune(m, '4')
 				m = sendKey(m, tea.KeyEnter)

@@ -24,7 +24,7 @@ func cronIssueFixture(t *testing.T, width int) Model {
 	m.list.loading = false
 	original := testIssue("origin-example")
 	m.detail.issue = &original
-	m = sendKey(m, tea.KeyEnter)
+	m = cronSettleTest(sendKey(m, tea.KeyEnter))
 	_, _, lines := cronScreen(m)
 	for i, line := range lines {
 		if line.target.kind == cronIssue {

@@ -248,7 +248,7 @@ func (m Model) cronLoaded(msg cronLoadedMsg) Model {
 		}
 	}
 	m = m.cronRemember(append(remembered, retained...))
-	m = m.cronSettleChanged(data)
+	m = m.cronSettleChanged(data).cronMarkOpenSeen()
 	return m.cronKeepSelection(old)
 }
 
@@ -414,7 +414,7 @@ func (m Model) routeCronKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			if target.uid != "" {
 				m.cron.stack = append(m.cron.stack, cronFrame{ref: target})
 				if target.kind == cronRuns {
-					m = m.cronMarkSeen(target.uid)
+					m = m.cronOpenRun(target.uid)
 				}
 				if target.kind == cronJobs {
 					return m.cronRequestPage(target.uid, true)

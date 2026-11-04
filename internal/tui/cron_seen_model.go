@@ -179,3 +179,20 @@ func (m Model) cronClearSeen() Model {
 	// Retain marks for runs outside the loaded window, whose time is unknown.
 	return m.cronApplySeen(project, nil, newest)
 }
+
+// Matching counters name no run, so an open requests the fenced refresh that
+// reads open runs by UID, as an explicit refresh does, before marking it seen.
+func (m Model) cronOpenRun(uid string) Model {
+	m.cron.events++
+	m.cron.fence = m.cron.events
+	return m.cronMarkSeen(uid)
+}
+
+// A refreshed failure in the open run is seen once shown; a closed one is not.
+func (m Model) cronMarkOpenSeen() Model {
+	n := len(m.cron.stack)
+	if n == 0 || m.cron.stack[n-1].ref.kind != cronRuns || m.cronSeen.session[m.cronProjectUID()][m.cron.stack[n-1].ref.uid] {
+		return m
+	}
+	return m.cronMarkSeen(m.cron.stack[n-1].ref.uid)
+}

@@ -530,3 +530,46 @@ func TestCronSuccessfulHeadClearsMarkWithoutExactRead(t *testing.T) {
 	require.Empty(t, m.cron.changed)
 	require.Equal(t, 1, m.cronUnseenCount())
 }
+
+// Matching counters name no run, so opening a retained row after missed events
+// or skipped or failed reads must itself read the run by UID.
+func TestCronOpeningRetainedRunRefreshesByUID(t *testing.T) {
+	for _, mode := range []string{"failed", "running", "old client", "closed before load"} {
+		t.Run(mode, func(t *testing.T) {
+			m, a := cronRefreshFixture(t, 1)
+			r := m.cron.runPage.runs[0]
+			r.Status, r.Actor, r.IssueUID = "running", "operator", new("wait-issue")
+			m.cron.runPage.runs[0] = r
+			m = m.cronRemember([]generated.CronRun{r})
+			if mode == "running" {
+				a.exact = func(context.Context, string) (generated.CronRun, error) { r.Revision = 3; return r, nil }
+			}
+			if mode == "old client" {
+				m.api = newUndoClient(a.cronWaitFetchAPI)
+			}
+			m.cron.tab = cronRuns
+			_, _, lines := cronScreen(m)
+			m.cron.lists[cronRuns].cursor = slices.IndexFunc(lines, func(l cronLine) bool { return l.target == cronRef{cronRuns, r.UID} })
+			m = sendKey(m, tea.KeyEnter)
+			if mode == "closed before load" {
+				m = sendKey(m, tea.KeyEscape)
+			}
+			m = cronLoadTest(t, m)
+			got, _ := m.cron.data.run(r.UID)
+			switch mode {
+			case "failed":
+				require.Equal(t, []string{r.UID}, a.reads)
+				require.Equal(t, "failed", got.Status)
+				require.Zero(t, m.cronUnseenCount(), "a failure shown in the open run is seen")
+			case "running":
+				require.Equal(t, map[string]int{"wait-issue": 1}, a.waiter.waitCalls)
+				require.Contains(t, cronScreenText(m), "blocked")
+			case "old client":
+				require.Contains(t, cronScreenText(m), "unavailable: run refresh unavailable")
+			case "closed before load":
+				require.Equal(t, "failed", got.Status)
+				require.Equal(t, 1, m.cronUnseenCount(), "a failure never shown stays unseen")
+			}
+		})
+	}
+}
