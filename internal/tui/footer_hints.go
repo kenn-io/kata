@@ -192,7 +192,7 @@ func (lm listModel) queueHelpRows(hideDelete bool) [][]helplayout.HelpItem {
 		helplayout.HelpItem{Key: "x", Description: "close"},
 		helplayout.HelpItem{Key: "d", Description: "dates"},
 	)
-	if !hideDelete {
+	if ok && !hideDelete {
 		items = append(items, helplayout.HelpItem{Key: "X", Description: "delete"})
 	}
 	items = append(items,

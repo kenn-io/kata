@@ -17,6 +17,7 @@ func TestQueueHelpRows_ConditionalItems(t *testing.T) {
 		helplayout.HelpItem{Key: "space", Description: "expand"},
 		helplayout.HelpItem{Key: "E", Description: "all"},
 		helplayout.HelpItem{Key: "N", Description: "child"},
+		helplayout.HelpItem{Key: "X", Description: "delete"},
 		helplayout.HelpItem{Key: "o", Description: "order"})
 
 	leaf := Model{list: listModel{issues: []Issue{
@@ -37,6 +38,8 @@ func TestQueueHelpRows_ConditionalItems(t *testing.T) {
 	empty := Model{}
 	assertHelpItemAbsent(t, flattenHelpRows(empty.queueHelpRows()),
 		helplayout.HelpItem{Key: "N", Description: "child"})
+	assertHelpItemAbsent(t, flattenHelpRows(empty.queueHelpRows()),
+		helplayout.HelpItem{Key: "X", Description: "delete"})
 }
 
 // TestDetailHelpRows_Contexts: the persistent detail footer is

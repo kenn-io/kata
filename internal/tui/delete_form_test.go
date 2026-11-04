@@ -74,8 +74,8 @@ func (h *deleteHarness) enter() tea.Cmd { return h.key(tea.KeyPressMsg{Code: tea
 func (h *deleteHarness) finish(cmd tea.Cmd) tea.Cmd {
 	h.t.Helper()
 	require.NotNil(h.t, cmd)
-	out, follow := h.m.Update(cmd())
-	h.m = out.(Model)
+	var follow tea.Cmd
+	h.m, follow = stepModel(h.m, cmd())
 	return follow
 }
 
