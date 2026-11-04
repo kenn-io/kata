@@ -116,7 +116,7 @@ func rewritePayload(event FoldEvent, payload map[string]jsontext.Value, key stri
 
 // ValidateLegacyRelayAdmission rejects fresh crossing additions while preserving
 // missing peers and cleanup. Callers resolve membership within the ingest transaction.
-func ValidateLegacyRelayAdmission(ctx context.Context, event RemoteEvent, uidCrosses, refCrosses func(context.Context, string) (bool, error)) error {
+func ValidateLegacyRelayAdmission(ctx context.Context, event RemoteEvent, uidCrosses, shortIDCrosses, refCrosses func(context.Context, string) (bool, error)) error {
 	var lookupErr error
 	crossing := false
 	checkUID := func(peer string) bool {
@@ -137,6 +137,12 @@ func ValidateLegacyRelayAdmission(ctx context.Context, event RemoteEvent, uidCro
 		payload := PayloadMap(event.Payload)
 		if parent, _ := StringValue(payload["parent_uid"]); parent != "" {
 			checkUID(parent) // The UID takes precedence over historical short IDs.
+		} else if parent, _ := StringValue(payload["parent_short_id"]); parent != "" {
+			restricted, err := shortIDCrosses(ctx, parent)
+			if err != nil {
+				return err
+			}
+			crossing = crossing || restricted
 		}
 		var evidence []Evidence
 		if raw, ok := payload["evidence"]; ok {
@@ -159,7 +165,7 @@ func ValidateLegacyRelayAdmission(ctx context.Context, event RemoteEvent, uidCro
 		return lookupErr
 	}
 	if crossing {
-		return fmt.Errorf("%w: event %s crosses a relay project boundary: %w", ErrFederationIngestValidation, event.EventUID, ErrFederationCrossProjectBoundary)
+		return fmt.Errorf("%w: event %s: %w", ErrFederationIngestValidation, event.EventUID, ErrFederationCrossProjectBoundary)
 	}
 	return nil
 }

@@ -79,6 +79,8 @@ func RunLegacyRelayAdmission(t *testing.T, store db.Storage) {
 		"single link":        {"sibling"},
 		"composite":          {"sibling"},
 		"parent":             {"sibling"},
+		"parent short ID":    {"sibling", "same project", "relayed peer", "missing"},
+		"parent empty UID":   {"sibling"},
 		"duplicate-of":       {"sibling", "same project", "missing"},
 		"superseded-by":      {"sibling", "same project", "missing"},
 		"malformed evidence": {"sibling"},
@@ -144,6 +146,12 @@ func RunLegacyRelayAdmission(t *testing.T, store db.Storage) {
 				case "parent":
 					eventType = "issue.closed"
 					payload = `{"reason":"done","parent_uid":"` + peer.UID + `","parent_short_id":"` + peer.ShortID + `"}`
+				case "parent short ID", "parent empty UID":
+					eventType = "issue.closed"
+					payload = `{"reason":"done","parent_short_id":"` + peer.ShortID + `"}`
+					if kind == "parent empty UID" {
+						payload = `{"reason":"done","parent_uid":"","parent_short_id":"` + peer.ShortID + `"}`
+					}
 				case "duplicate-of", "superseded-by":
 					eventType = "issue.closed"
 					ref := peer.UID
@@ -237,4 +245,9 @@ func RunLegacyRelayParentUIDCollision(t *testing.T, store db.Storage) {
 	closed := newRemoteEvent(t, fixture.project, &child.UID, "issue.closed", "member", spoke, 702, jsontext.Value(`{"reason":"done","parent_uid":"`+parent.UID+`","parent_short_id":"d4ex"}`))
 	_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: fixture.project.ID, SpokeInstanceUID: spoke, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: closed}}})
 	require.ErrorIs(t, err, db.ErrFederationCrossProjectBoundary)
+
+	closed = newRemoteEvent(t, fixture.project, &child.UID, "issue.closed", "member", spoke, 703, jsontext.Value(`{"reason":"done","parent_short_id":"d4ex"}`))
+	result, err := store.IngestFederationEvents(ctx, db.FederationIngestParams{ProjectID: fixture.project.ID, SpokeInstanceUID: spoke, Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: closed}}})
+	require.NoError(t, err, "an ambiguous short ID does not establish a crossing")
+	require.Equal(t, 1, result.Accepted)
 }

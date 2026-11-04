@@ -51,6 +51,17 @@ func validateLegacyRelayAdmissionTx(ctx context.Context, tx *sql.Tx, projectID i
 			return false, err
 		}
 		return crossesProject(ctx, peerProject)
+	}, func(ctx context.Context, shortID string) (bool, error) {
+		// Legacy parents resolve only when the short ID is unique across projects.
+		var matches int
+		var peerProject int64
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(MIN(project_id),0) FROM issues WHERE short_id=?`, shortID).Scan(&matches, &peerProject); err != nil {
+			return false, err
+		}
+		if matches != 1 {
+			return false, nil
+		}
+		return crossesProject(ctx, peerProject)
 	}, func(ctx context.Context, ref string) (bool, error) {
 		// Membership, rather than caller visibility, decides admission.
 		target, err := eventIssueByRef(db.WithAuthorizedProjects(ctx, nil), tx, event.ProjectUID, ref)
