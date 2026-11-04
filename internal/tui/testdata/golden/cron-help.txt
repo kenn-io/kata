@@ -6,6 +6,8 @@ A workflow is a named list of steps jobs can run.
 A run is what an executor recorded; runs remember the definition revision they
 used.
 kata cron --help shows creation examples.
+Follow a run’s Issue line to open it; back returns here.
+Replica age is the last successful pull; pushes do not freshen it.
 
 Cron keys
 j/k    move

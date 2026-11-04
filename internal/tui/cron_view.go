@@ -38,6 +38,7 @@ type cronData struct {
 	workflows           []generated.CronWorkflow
 	runs                []generated.CronRun
 	nextBefore          string
+	replica             cronReplica
 	lastRuns            map[string]generated.CronRun
 	lastErr             map[string]error
 	lookup              map[string]generated.CronRun
@@ -65,6 +66,8 @@ type cronState struct {
 	tab                 int
 	lists               [4]cronList
 	filtering, help     bool
+	returnToCron        bool
+	issueReturn         *cronIssueReturn
 	stack               []cronFrame
 	data                *cronData
 	events              uint64
@@ -325,6 +328,9 @@ func (m Model) routeCronKey(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	case key == "enter" || key == "l":
 		if len(lines) > 0 {
 			target := lines[*cursor].target
+			if target.kind == cronIssue {
+				return m.cronOpenIssue(target.uid)
+			}
 			if target.kind == cronOlder {
 				job := target.uid
 				if job == "project" {

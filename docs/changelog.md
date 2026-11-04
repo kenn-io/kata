@@ -9,6 +9,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Open a cron run's linked issue from `kata tui` and return to the same Cron
+  detail. Replica projects show their last successful pull age or a newer sync
+  error, so recent push activity cannot hide an old local copy. See
+  [CLI reference](reference/cli.md#daemon-and-diagnostics).
+
 - Spot failing, overdue and missed cron jobs in `kata tui`, with exact last-run
   evidence, a project health roll-up, and a reason in each job's detail.
   Page through each job's run history or load older project observations.
