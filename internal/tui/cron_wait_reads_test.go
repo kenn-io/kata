@@ -194,13 +194,22 @@ func TestCronWaitSharedIssueThroughUndoClient(t *testing.T) {
 	}
 }
 
-// Contract: at most 20 distinct issues, one fetch per shared issue, with each
+// Contract: at most 20 attention reads, one fetch per shared issue, with each
 // actor evaluated independently and excess/missing evidence explicitly unknown.
 func TestCronWaitUniqueAdmissionProperty(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
 		count := int(hegel.Draw(ht, hegel.Integers[uint64](0, ^uint64(0))) % 61)
 		pool := 1 + int(hegel.Draw(ht, hegel.Integers[uint64](0, ^uint64(0)))%31)
 		p := cronData{}
+		nativeCount := hegel.Draw(ht, hegel.Integers[int](0, pool))
+		for i := range nativeCount {
+			j := cronFixture(t).cron.data.jobs[0]
+			j.UID = fmt.Sprintf("native-%d", i)
+			nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&j.Definition)
+			j.Definition.Issue.ParentUID = new(fmt.Sprint(i))
+			p.runs = append(p.runs, generated.CronRun{UID: "last-" + j.UID, JobUID: new(j.UID), Status: "succeeded"})
+			p.jobs = append(p.jobs, j)
+		}
 		unique := map[string]bool{}
 		for i := range count {
 			issue := fmt.Sprint(i % pool)
@@ -214,10 +223,19 @@ func TestCronWaitUniqueAdmissionProperty(t *testing.T) {
 		}
 		a := waitReadAPI(nil)
 		cronEnrich(t.Context(), a, 7, &p)
-		if len(a.waitCalls) != min(20, len(unique)) {
+		shared := 0
+		for i := range nativeCount {
+			if unique[fmt.Sprint(i)] {
+				shared++
+			}
+		}
+		if len(a.waitCalls) != nativeCount+min(20, len(unique)-shared) {
 			ht.Fatalf("count %d pool %d: fetched %v", count, pool, a.waitCalls)
 		}
 		for uid, n := range a.waitCalls {
+			if p.waitErr[uid] != nil {
+				ht.Fatalf("fetched issue %q has cap error: %v", uid, p.waitErr[uid])
+			}
 			if n != 1 {
 				ht.Fatalf("issue %q fetched %d times", uid, n)
 			}

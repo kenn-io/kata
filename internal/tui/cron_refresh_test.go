@@ -1,0 +1,544 @@
+package tui
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"slices"
+	"sync"
+	"testing"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/pkg/client/generated"
+)
+
+type cronRefreshTestAPI struct {
+	*cronWaitFetchAPI
+	mu    sync.Mutex
+	reads []string
+	exact func(context.Context, string) (generated.CronRun, error)
+}
+
+func (a *cronRefreshTestAPI) readCronRun(ctx context.Context, _ int64, uid string) (generated.CronRun, error) {
+	a.mu.Lock()
+	a.reads = append(a.reads, uid)
+	a.mu.Unlock()
+	return a.exact(ctx, uid)
+}
+func cronRefreshFixture(t *testing.T, n int) (Model, *cronRefreshTestAPI) {
+	t.Helper()
+	m := cronSeenFixture(t)
+	m.cron.stack = nil
+	m.cron.data = &cronData{}
+	m.cron.runPage, m.cron.jobPage = cronHistoryPage{}, cronHistoryPage{}
+	for i := range n {
+		m.cron.runPage.runs = append(m.cron.runPage.runs, generated.CronRun{UID: fmt.Sprintf("o-%03d", i), Status: "succeeded", Revision: 2, CreatedAt: snapshotFixedNow.Add(-time.Duration(i) * time.Minute), UpdatedAt: snapshotFixedNow})
+	}
+	m = m.cronRemember(m.cron.runPage.runs)
+	m.cron.runPage.ready = true
+	a := &cronRefreshTestAPI{cronWaitFetchAPI: &cronWaitFetchAPI{cronReadTestAPI: &cronReadTestAPI{}, waiter: waitReadAPI(nil)}}
+	a.exact = func(_ context.Context, uid string) (generated.CronRun, error) {
+		i := slices.IndexFunc(m.cron.runPage.runs, func(r generated.CronRun) bool { return r.UID == uid })
+		r := m.cron.runPage.runs[i]
+		r.Status = "failed"
+		r.Revision = 3
+		return r, nil
+	}
+	m.api = a
+	return m, a
+}
+func cronUpdateTest(m Model, msg tea.Msg) Model { next, _ := m.Update(msg); return next.(Model) }
+func cronNameTest(m Model, uid string, revision int64) Model {
+	msg := cronNoticeEvent(uid, "", snapshotFixedNow)
+	msg.cronRun.Revision = revision
+	return cronUpdateTest(m, msg)
+}
+func cronLoadTest(t *testing.T, m Model) Model {
+	t.Helper()
+	require.True(t, m.cron.out)
+	return cronUpdateTest(m, m.fetchCron()())
+}
+
+// The supported federation contract permits winning source revisions equal to
+// or below this store's CAS revision; the oldest row must escape the fallback cap.
+func TestCronEventRefreshReadsLoadedRuns(t *testing.T) {
+	for _, rev := range []int64{1, 2, 9} {
+		t.Run(fmt.Sprint(rev), func(t *testing.T) {
+			m, a := cronRefreshFixture(t, 103)
+			m = cronNameTest(m, "o-102", rev)
+			m = cronLoadTest(t, m)
+			require.Contains(t, a.reads, "o-102")
+			r, ok := m.cron.data.run("o-102")
+			require.True(t, ok)
+			require.Equal(t, "failed", r.Status)
+			require.True(t, m.cronRunUnseen(m.cronProjectUID(), r))
+			require.Empty(t, m.cron.changed)
+		})
+	}
+	for _, status := range []string{"unknown", "running"} {
+		t.Run(status, func(t *testing.T) {
+			m, a := cronRefreshFixture(t, 1)
+			r := m.cron.runPage.runs[0]
+			r.Status = status
+			r.IssueUID = new("wait-issue")
+			m.cron.runPage.runs[0] = r
+			m = m.cronRemember([]generated.CronRun{r})
+			a.exact = func(context.Context, string) (generated.CronRun, error) {
+				r.Status = "succeeded"
+				r.Revision++
+				return r, nil
+			}
+			m = cronNameTest(m, r.UID, 1)
+			m = cronLoadTest(t, m)
+			got, _ := m.cron.data.run(r.UID)
+			require.Equal(t, "succeeded", got.Status)
+			require.Zero(t, m.cronUnseenCount())
+			require.Empty(t, m.cron.data.waits)
+		})
+	}
+	t.Run("evicted previous head and failed current head", func(t *testing.T) {
+		for _, failed := range []bool{false, true} {
+			m, a := cronRefreshFixture(t, 1)
+			m.cron.data.runs = slices.Clone(m.cron.runPage.runs)
+			if failed {
+				a.data.runsErr = errors.New("offline")
+			}
+			m = cronNameTest(m, "o-000", 1)
+			m = cronLoadTest(t, m)
+			require.Contains(t, a.reads, "o-000")
+			r, _ := m.cron.data.run("o-000")
+			require.Equal(t, "failed", r.Status)
+		}
+	})
+}
+
+func TestCronNamedBurstDrains(t *testing.T) {
+	for _, failures := range []int{0, 10, 100} {
+		t.Run(fmt.Sprint(failures), func(t *testing.T) {
+			m, a := cronRefreshFixture(t, 130)
+			original := a.exact
+			a.exact = func(ctx context.Context, uid string) (generated.CronRun, error) {
+				var i int
+				_, err := fmt.Sscanf(uid, "o-%03d", &i)
+				if err != nil {
+					return generated.CronRun{}, err
+				}
+				if i >= 130-failures {
+					return generated.CronRun{}, errors.New("offline")
+				}
+				return original(ctx, uid)
+			}
+			m.view = viewList
+			for i := 129; i >= 0; i-- {
+				m = cronNameTest(m, fmt.Sprintf("o-%03d", i), 1)
+			}
+			m = cronUpdateTest(m, refetchTickMsg{})
+			m.view = viewCron
+			m = cronUpdateTest(m, nil)
+			m = cronLoadTest(t, m)
+			require.Len(t, a.reads, 100)
+			for i := 30; i < 130; i++ {
+				require.Contains(t, a.reads, fmt.Sprintf("o-%03d", i))
+			}
+			if failures == 100 {
+				require.Len(t, m.cron.changed, 130)
+				require.False(t, m.cron.out)
+				for range 3 {
+					m = cronUpdateTest(m, nil)
+					require.False(t, m.cron.out)
+				}
+				m = cronUpdateTest(m, eventReceivedMsg{eventType: "cron.job.updated", projectID: 7})
+				data := cronData(m.fetchCron()().(cronLoadedMsg))
+				subjects, _ := cronRefreshSubjects(&data, nil, true)
+				for i := range 30 {
+					require.Equal(t, fmt.Sprintf("o-%03d", 29-i), subjects[i].UID)
+				}
+				return
+			}
+			require.True(t, m.cron.out, "deferred events must drain without another event")
+			a.exact = original
+			a.reads = nil
+			data := cronData(m.fetchCron()().(cronLoadedMsg))
+			subjects, _ := cronRefreshSubjects(&data, nil, true)
+			for i := range 30 {
+				require.Equal(t, fmt.Sprintf("o-%03d", 29-i), subjects[i].UID)
+			}
+			if failures > 0 {
+				require.Len(t, data.changed, 40)
+			}
+			m = cronUpdateTest(m, cronLoadedMsg(data))
+			require.Len(t, a.reads, 100)
+			require.Empty(t, m.cron.changed)
+			require.False(t, m.cron.out)
+			require.Equal(t, 130, m.cronUnseenCount())
+		})
+	}
+}
+
+func TestCronExactResultAdmitsAttention(t *testing.T) {
+	for _, mode := range []string{"becomes running", "stale running", "offline", "wrong UID"} {
+		t.Run(mode, func(t *testing.T) {
+			m, a := cronRefreshFixture(t, 1)
+			r := m.cron.runPage.runs[0]
+			r.Status = "running"
+			r.Actor = "operator"
+			r.IssueUID = new("wait-issue")
+			if mode == "becomes running" {
+				r.Status = "failed"
+			}
+			p := cronData{inspectedRuns: []generated.CronRun{r}, historyRuns: []generated.CronRun{r}}
+			if mode == "stale running" {
+				for i := range 20 {
+					old := r
+					old.UID = fmt.Sprint(i)
+					old.IssueUID = new(old.UID)
+					p.inspectedRuns = append(p.inspectedRuns, old)
+					p.historyRuns = append(p.historyRuns, old)
+				}
+			}
+			a.exact = func(_ context.Context, uid string) (generated.CronRun, error) {
+				fresh := r
+				fresh.Status = "running"
+				switch mode {
+				case "offline":
+					return generated.CronRun{}, errors.New("offline")
+				case "wrong UID":
+					fresh.UID = "foreign"
+				}
+				if uid != r.UID {
+					fresh.UID = uid
+					fresh.Status = "succeeded"
+				}
+				return fresh, nil
+			}
+			cronEnrich(t.Context(), a, 7, &p)
+			require.Equal(t, map[string]int{"wait-issue": 1}, a.waiter.waitCalls)
+			require.Equal(t, "blocked", cronRunHealth(p, p.lookup[r.UID]).state)
+			require.NotContains(t, p.lookup, "foreign")
+			if mode == "offline" || mode == "wrong UID" {
+				require.Error(t, p.runErr[r.UID])
+				require.Equal(t, r, p.lookup[r.UID])
+			}
+		})
+	}
+}
+
+func TestCronResetDropsUnreadHistory(t *testing.T) {
+	for _, mode := range []string{"inactive", "open", "failed head"} {
+		t.Run(mode, func(t *testing.T) {
+			m, a := cronRefreshFixture(t, 1)
+			r := m.cron.runPage.runs[0]
+			r.Status = "running"
+			r.IssueUID = new("old-issue")
+			m.cron.runPage.runs = nil
+			m.cron.jobPage = cronHistoryPage{job: "job", runs: []generated.CronRun{r}, ready: true}
+			m.cron.data.lookup = map[string]generated.CronRun{r.UID: r}
+			m.view = viewList
+			m = cronNameTest(m, r.UID, 1)
+			if mode == "open" {
+				m.cron.stack = []cronFrame{{ref: cronRef{cronRuns, r.UID}}}
+			}
+			if mode == "failed head" {
+				a.data.runsErr = errors.New("offline")
+			}
+			m.view = viewCron
+			m = cronUpdateTest(m, tea.KeyPressMsg{Code: 'r', Text: "r"})
+			m = cronLoadTest(t, m)
+			if mode == "failed head" {
+				require.NotEmpty(t, m.cron.jobPage.runs)
+				require.True(t, m.cron.resetPages)
+				return
+			}
+			require.Empty(t, m.cron.jobPage.runs)
+			require.Empty(t, m.cron.data.waits)
+			if mode == "open" {
+				require.Contains(t, a.reads, r.UID)
+				got, _ := m.cron.data.run(r.UID)
+				require.Equal(t, "failed", got.Status)
+			} else {
+				require.Empty(t, a.reads)
+				require.Empty(t, m.cronLoadedRuns())
+			}
+		})
+	}
+}
+
+func TestCronNoticeCrossPeerCorrection(t *testing.T) {
+	// A high source revision was announced. A later winning peer correction has
+	// become local revision 3. A new failure for the job must be announced.
+	m := cronNoticeFixture(t)
+	m.cron.data.lookup = map[string]generated.CronRun{"old": {UID: "old", Status: "failed", Revision: 2, UpdatedAt: snapshotFixedNow}}
+	first := cronNoticeEvent("old", "job", snapshotFixedNow)
+	first.cronRun.Revision = 9
+	m, _ = m.cronNoticeEvent(first)
+	m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+	require.NotNil(t, m.toast)
+	m.cron.data.lookup = map[string]generated.CronRun{"old": {UID: "old", Status: "succeeded", Revision: 3, UpdatedAt: snapshotFixedNow}}
+	m, cmd := m.cronNoticeEvent(cronNoticeEvent("next", "job", snapshotFixedNow))
+	require.NotNil(t, cmd, "a corrected announcement must stop suppressing this job")
+	m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+	require.Contains(t, m.toast.text, "1 run")
+	require.Contains(t, m.cronNotices.announced, "next")
+}
+
+func TestCronSharedParentEvidence(t *testing.T) {
+	for _, parentFirst := range []bool{false, true} {
+		t.Run(fmt.Sprint(parentFirst), func(t *testing.T) {
+			native := cronFixture(t).cron.data.jobs[0]
+			nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&native.Definition)
+			adapter := native
+			adapter.UID = "adapter"
+			adapter.Definition.Action = generated.ActionResponse{Kind: "shell"}
+			p := cronData{jobs: []generated.CronJob{native, adapter}, runs: []generated.CronRun{{UID: "native-run", JobUID: new(native.UID), Status: "succeeded"}}}
+			for i := range 20 {
+				p.runs = append(p.runs, generated.CronRun{UID: fmt.Sprint(i), Status: "running", IssueUID: new(fmt.Sprint(i)), Actor: "operator"})
+			}
+			parentDone, fillDone := make(chan struct{}), make(chan struct{})
+			a := waitReadAPI(func(context.Context, string) ([]generated.CronRun, error) {
+				if parentFirst {
+					<-parentDone
+				}
+				close(fillDone)
+				return []generated.CronRun{{UID: "fill", JobUID: new(adapter.UID), Status: "running", Actor: "operator", IssueUID: new(nextParentUID)}}, nil
+			})
+			a.wait = func(_ context.Context, uid string) (cronParent, error) {
+				if uid == nextParentUID {
+					if !parentFirst {
+						<-fillDone
+					}
+					close(parentDone)
+				}
+				return cronParent{open: true, metadata: map[string]any{"work.attention": "needs-human"}}, nil
+			}
+			cronEnrich(t.Context(), a, 7, &p)
+			require.Len(t, a.waitCalls, 21)
+			require.Equal(t, 1, a.waitCalls[nextParentUID])
+			require.NoError(t, p.waitErr[nextParentUID])
+			require.Equal(t, "blocked", cronRunHealth(p, p.lastRuns[adapter.UID]).state)
+		})
+	}
+}
+
+func TestCronRefreshCancellationAndOldClient(t *testing.T) {
+	t.Run("exact cancellation", func(t *testing.T) {
+		m, a := cronRefreshFixture(t, 12)
+		r := m.cron.runPage.runs[0]
+		p := cronData{inspectedRuns: []generated.CronRun{r}, historyRuns: m.cron.runPage.runs}
+		a.exact = func(context.Context, string) (generated.CronRun, error) {
+			t.Error("cancelled read performed I/O")
+			return r, nil
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		cronEnrich(ctx, a, 7, &p)
+		require.Empty(t, a.reads)
+		require.ErrorIs(t, p.runErr[r.UID], context.Canceled)
+		require.Equal(t, r, p.lookup[r.UID])
+	})
+	t.Run("wrapped old client", func(t *testing.T) {
+		m, a := cronRefreshFixture(t, 4)
+		rows := slices.Clone(m.cron.runPage.runs)
+		for i := range rows {
+			rows[i].Status = "running"
+			rows[i].IssueUID = new(rows[i].UID)
+		}
+		p := cronData{inspectedRuns: rows[:1], historyRuns: rows}
+		cronEnrich(t.Context(), newUndoClient(a.cronWaitFetchAPI), 7, &p)
+		require.EqualError(t, p.runErr[rows[0].UID], "run refresh unavailable")
+		require.Len(t, p.runErr, 1)
+		require.Len(t, a.waiter.waitCalls, 4)
+	})
+}
+
+func TestCronNamedRunDuringFetch(t *testing.T) {
+	m, a := cronRefreshFixture(t, 103)
+	m = cronNameTest(m, "o-102", 1)
+	first := m.fetchCron()
+	seq := m.cron.changed["o-102"].seq
+	m = cronNameTest(m, "o-102", 2)
+	m = cronUpdateTest(m, first())
+	require.Equal(t, seq, m.cron.changed["o-102"].seq)
+	require.Greater(t, m.cron.changed["o-102"].at, m.cron.data.events)
+	m = cronUpdateTest(m, refetchTickMsg{})
+	require.True(t, m.cron.out)
+	a.reads = nil
+	m = cronLoadTest(t, m)
+	require.Contains(t, a.reads, "o-102", "event received during first fetch must survive it")
+	require.False(t, m.cron.out)
+}
+
+func TestCronLosingHigherSourceRevision(t *testing.T) {
+	m, a := cronRefreshFixture(t, 202)
+	original := a.exact
+	a.exact = func(_ context.Context, uid string) (generated.CronRun, error) {
+		for _, r := range m.cron.runPage.runs {
+			if r.UID == uid {
+				return r, nil
+			}
+		}
+		return generated.CronRun{}, errors.New("missing")
+	}
+	m.view = viewList
+	for i := range 100 {
+		m = cronNameTest(m, fmt.Sprintf("o-%03d", i), 9)
+	}
+	m = cronUpdateTest(m, refetchTickMsg{})
+	m.view = viewCron
+	m = cronUpdateTest(m, nil)
+	m = cronLoadTest(t, m)
+	require.Empty(t, m.cron.changed)
+	require.False(t, m.cron.out)
+	a.exact = original
+	a.reads = nil
+	m = cronNameTest(m, "o-201", 1)
+	m = cronLoadTest(t, m)
+	require.Contains(t, a.reads, "o-201")
+	r, _ := m.cron.data.run("o-201")
+	require.Equal(t, "failed", r.Status)
+}
+
+func TestCronRefreshSubjects(t *testing.T) {
+	p := cronData{}
+	head := map[string]generated.CronRun{}
+	for i := range 100 {
+		r := generated.CronRun{UID: fmt.Sprintf("h-%03d", i), Status: "succeeded"}
+		p.historyRuns = append(p.historyRuns, r)
+		if i != 99 {
+			head[r.UID] = r
+		}
+	}
+	for i := range 150 {
+		p.historyRuns = append(p.historyRuns, generated.CronRun{UID: fmt.Sprintf("o-%03d", i), Status: "succeeded"})
+	}
+	p.inspectedRuns = []generated.CronRun{p.historyRuns[240]}
+	for i := 245; i <= 247; i++ {
+		p.historyRuns[i].Status = "running"
+	}
+	p.changed = []string{"o-149", "o-120", "h-050", "unloaded-x"}
+	got, deferred := cronRefreshSubjects(&p, head, true)
+	ids := func(rows []generated.CronRun) []string {
+		var out []string
+		for _, r := range rows {
+			out = append(out, r.UID)
+		}
+		return out
+	}
+	want := []string{"o-140", "o-149", "o-120", "o-145", "o-146", "o-147", "h-099"}
+	for i := range 94 {
+		want = append(want, fmt.Sprintf("o-%03d", i))
+	}
+	require.Equal(t, want, ids(got))
+	require.False(t, deferred)
+	got, deferred = cronRefreshSubjects(&p, head, false)
+	require.Equal(t, []string{"o-140"}, ids(got))
+	require.False(t, deferred)
+	p.changed = nil
+	for i := range 101 {
+		p.changed = append(p.changed, fmt.Sprintf("o-%03d", i))
+	}
+	_, deferred = cronRefreshSubjects(&p, head, true)
+	require.True(t, deferred)
+	t.Run("unloaded event", func(t *testing.T) {
+		m, _ := cronRefreshFixture(t, 1)
+		m = cronNameTest(m, "unloaded-x", 9)
+		require.Empty(t, m.cron.changed)
+	})
+}
+
+func TestCronRefreshQueueAttentionBound(t *testing.T) {
+	for _, mode := range []string{"fill", "exact", "exact only"} {
+		t.Run(mode, func(t *testing.T) {
+			m, a := cronRefreshFixture(t, 16)
+			p := cronData{inspectedRuns: m.cron.runPage.runs}
+			entered := make(chan struct{}, 16)
+			release := make(chan struct{}, 16)
+			parentCalled := make(chan struct{})
+			a.waiter.wait = func(context.Context, string) (cronParent, error) {
+				close(parentCalled)
+				return cronParent{open: true}, nil
+			}
+			a.exact = func(ctx context.Context, uid string) (generated.CronRun, error) {
+				if mode == "exact" && uid == "o-000" {
+					return generated.CronRun{UID: uid, Status: "running", IssueUID: new("late")}, nil
+				}
+				entered <- struct{}{}
+				select {
+				case <-release:
+				case <-ctx.Done():
+					return generated.CronRun{}, ctx.Err()
+				}
+				return generated.CronRun{UID: uid, Status: "succeeded"}, nil
+			}
+			if mode == "fill" {
+				j := cronFixture(t).cron.data.jobs[0]
+				p.jobs = []generated.CronJob{j}
+				// Override the list read only for this job fill, while retaining the head API.
+				a.cronWaitFetchAPI = &cronWaitFetchAPI{cronReadTestAPI: &cronReadTestAPI{data: cronData{runs: []generated.CronRun{{UID: "fill", JobUID: new(j.UID), Status: "running", IssueUID: new("late")}}}}, waiter: a.waiter}
+			}
+			done := make(chan struct{})
+			go func() { cronEnrich(t.Context(), a, 7, &p); close(done) }()
+			// Release up to eight exact reads. A dynamically admitted attention read
+			// must run before a ninth can overtake it (four queued plus four in flight).
+			if mode != "exact only" {
+				ahead := 0
+			admission:
+				for {
+					select {
+					case <-parentCalled:
+						break admission
+					case <-entered:
+						ahead++
+						if ahead > 8 {
+							select {
+							case <-parentCalled:
+								break admission
+							default:
+							}
+							for range 16 {
+								release <- struct{}{}
+							}
+							<-done
+							t.Fatal("more than eight exact reads overtook attention")
+						}
+						release <- struct{}{}
+					case <-done:
+						t.Fatal("refresh ended without attention")
+					}
+				}
+			}
+			for range 16 {
+				release <- struct{}{}
+			}
+			<-done
+			require.Len(t, a.reads, 16)
+			require.Len(t, p.lookup, 16)
+		})
+	}
+}
+
+func TestCronNoticeKeepsNewerEventOverLoadedSnapshot(t *testing.T) {
+	m := cronNoticeFixture(t)
+	m.cron.data.lookup = map[string]generated.CronRun{"old": {UID: "old", Status: "succeeded", Revision: 50, UpdatedAt: snapshotFixedNow}}
+	first := cronNoticeEvent("old", "job", snapshotFixedNow)
+	first.cronRun.Revision = 1
+	m, _ = m.cronNoticeEvent(first)
+	m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+	m, cmd := m.cronNoticeEvent(cronNoticeEvent("next", "job", snapshotFixedNow))
+	require.Nil(t, cmd, "the pre-event local snapshot cannot supersede the announcement")
+	require.NotContains(t, m.cronNotices.pending, "next")
+}
+
+func TestCronSuccessfulHeadClearsMarkWithoutExactRead(t *testing.T) {
+	m, a := cronRefreshFixture(t, 1)
+	r := m.cron.runPage.runs[0]
+	r.Status = "failed"
+	r.Revision++
+	a.data.runs = []generated.CronRun{r}
+	m = cronNameTest(m, r.UID, 9)
+	m = cronLoadTest(t, m)
+	require.Empty(t, a.reads)
+	require.Empty(t, m.cron.changed)
+	require.Equal(t, 1, m.cronUnseenCount())
+}

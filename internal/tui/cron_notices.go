@@ -14,13 +14,14 @@ import (
 const cronNoticeWindow = 2 * time.Second
 
 type cronRunEvent struct {
-	UID        string     `json:"uid"`
-	JobUID     string     `json:"job_uid"`
-	ProjectUID string     `json:"project_uid"`
-	Status     string     `json:"status"`
-	Revision   int64      `json:"revision"`
-	EndedAt    *time.Time `json:"ended_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	localRevision int64      // loaded store revision when this event arrived; never a peer revision
+	UID           string     `json:"uid"`
+	JobUID        string     `json:"job_uid"`
+	ProjectUID    string     `json:"project_uid"`
+	Status        string     `json:"status"`
+	Revision      int64      `json:"revision"`
+	EndedAt       *time.Time `json:"ended_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 func (r cronRunEvent) run() generated.CronRun {
@@ -64,11 +65,11 @@ func (m Model) cronNoticeSuppressed(r cronRunEvent) bool {
 	return false
 }
 
-// A higher loaded revision, such as a correction missed across an SSE reset,
-// supersedes the announced payload.
+// A local revision newer than the snapshot at announcement supersedes it.
+// Source peer revisions are incomparable with these store-local CAS tokens.
 func (m Model) cronNoticeNewest(r cronRunEvent) generated.CronRun {
 	if m.cron.data != nil {
-		if known, ok := m.cron.data.run(r.UID); ok && known.Revision > r.Revision {
+		if known, ok := m.cron.data.run(r.UID); ok && known.Revision > r.localRevision {
 			return known
 		}
 	}
@@ -80,6 +81,11 @@ func (m Model) cronNoticeEvent(msg eventReceivedMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 	r := *msg.cronRun
+	if m.cron.data != nil {
+		if known, ok := m.cron.data.run(r.UID); ok {
+			r.localRevision = known.Revision
+		}
+	}
 	if r.UID == "" || r.ProjectUID == "" || r.ProjectUID != msg.projectUID {
 		return m, nil
 	}

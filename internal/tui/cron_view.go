@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"context"
 	"maps"
 	"slices"
@@ -49,6 +50,8 @@ type cronData struct {
 	waitErr             map[string]error
 	historyRuns         []generated.CronRun
 	inspectedRuns       []generated.CronRun
+	changed             []string
+	deferred            bool
 	runErr              map[string]error
 	jobsErr             error
 	workflowsErr        error
@@ -68,7 +71,13 @@ func (p cronData) readError(kind int) error {
 	return nil
 }
 
+type cronChange struct {
+	at  uint64 // latest naming event covered by a fetch
+	seq uint64 // first naming, or the back of the queue after a failed read
+}
+
 type cronState struct {
+	changed          map[string]cronChange
 	tab              int
 	lists            [4]cronList
 	filtering, help  bool
@@ -143,6 +152,9 @@ func (m Model) fetchCron() tea.Cmd {
 	reader, id := m.api, m.scope.projectID
 	data := cronData{conn: m.connGen, scope: m.scopeGen, events: m.cron.events, generation: m.cron.readGen}
 	data.historyRuns = m.cronLoadedRuns()
+	data.changed = slices.SortedFunc(maps.Keys(m.cron.changed), func(a, b string) int {
+		return cmp.Or(cmp.Compare(m.cron.changed[a].seq, m.cron.changed[b].seq), strings.Compare(a, b))
+	})
 	data.resetPages = m.cron.resetPages
 	if m.cron.data != nil {
 		for _, frame := range m.cron.stack {
@@ -208,6 +220,12 @@ func (m Model) cronLoaded(msg cronLoadedMsg) Model {
 	} else {
 		m.cron.runPage.err = data.runsErr
 	}
+	// Reset drops unread history, including an inactive job's cache.
+	if data.resetPages && data.runsErr == nil && !slices.ContainsFunc(m.cron.stack, func(f cronFrame) bool {
+		return f.ref.kind == cronJobs && f.ref.uid == m.cron.jobPage.job
+	}) {
+		m.cron.jobPage = cronHistoryPage{}
+	}
 	if m.cron.jobPage.job != "" {
 		m.cron.jobPage.reload = true
 		m.cron.jobPage.merge = !data.resetPages
@@ -230,7 +248,58 @@ func (m Model) cronLoaded(msg cronLoadedMsg) Model {
 		}
 	}
 	m = m.cronRemember(append(remembered, retained...))
+	m = m.cronSettleChanged(data)
 	return m.cronKeepSelection(old)
+}
+
+// Event payload revisions belong to source peers, not this store's CAS sequence.
+func (m Model) cronMarkChanged(msg eventReceivedMsg) Model {
+	if msg.eventType != "cron.run.observed" || msg.cronRun == nil || m.cron.data == nil {
+		return m
+	}
+	uid := msg.cronRun.UID
+	if _, loaded := m.cron.data.run(uid); !loaded {
+		return m
+	}
+	m.cron.changed = maps.Clone(m.cron.changed)
+	if m.cron.changed == nil {
+		m.cron.changed = map[string]cronChange{}
+	}
+	c, seen := m.cron.changed[uid]
+	if !seen {
+		c.seq = m.cron.events
+	}
+	c.at = m.cron.events
+	m.cron.changed[uid] = c
+	return m
+}
+
+// Successful reads clear only events captured by this fetch. Failures move to
+// the back. Progress with deferred marks schedules one bounded follow-up;
+// a refresh that clears nothing never schedules itself again.
+func (m Model) cronSettleChanged(data cronData) Model {
+	m.cron.changed = maps.Clone(m.cron.changed)
+	cleared := false
+	for uid, c := range m.cron.changed {
+		err, read := data.runErr[uid]
+		fresh := data.runsErr == nil && slices.ContainsFunc(data.runs, func(r generated.CronRun) bool { return r.UID == uid })
+		_, loaded := m.cron.data.run(uid)
+		switch {
+		case !loaded:
+			delete(m.cron.changed, uid)
+		case c.at > data.events: // named after this fetch captured its inputs
+		case fresh || read && err == nil:
+			delete(m.cron.changed, uid)
+			cleared = true
+		case read:
+			c.seq = m.cron.events + 1
+			m.cron.changed[uid] = c
+		}
+	}
+	if cleared && data.deferred {
+		m.cron.events++
+	}
+	return m
 }
 
 func cronListLines(m Model, tab int) []cronLine {

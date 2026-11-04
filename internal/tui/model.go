@@ -2809,6 +2809,7 @@ func (m Model) handleEventReceived(msg eventReceivedMsg) (tea.Model, tea.Cmd) {
 	if m.eventAffectsView(msg) {
 		if strings.HasPrefix(msg.eventType, "cron.") || msg.eventType == "project.merged" || msg.eventType == "project.removed" || msg.eventType == "project.restored" || m.cronParentEvent(msg) {
 			m.cron.events++
+			m = m.cronMarkChanged(msg)
 		}
 		m.cache.markStale()
 		if !m.pendingRefetch {

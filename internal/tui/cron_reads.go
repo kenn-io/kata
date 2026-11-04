@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"maps"
+	"slices"
 	"sync"
 
 	"go.kenn.io/kata/internal/cron"
@@ -67,11 +69,38 @@ type cronEnrichment struct {
 	err         error
 }
 
+// Open runs are uncapped. Other loaded runs missing from the successful head
+// use at most 100 slots: named runs in queue order, then running, then newest.
+func cronRefreshSubjects(p *cronData, head map[string]generated.CronRun, more bool) ([]generated.CronRun, bool) {
+	subjects := slices.Clone(p.inspectedRuns)
+	if !more {
+		return subjects, false
+	}
+	rank := map[string]int{}
+	for i, uid := range p.changed {
+		rank[uid] = i - len(p.changed)
+	}
+	var older []generated.CronRun
+	for _, r := range p.historyRuns {
+		if _, fresh := head[r.UID]; fresh || slices.ContainsFunc(p.inspectedRuns, func(s generated.CronRun) bool { return s.UID == r.UID }) {
+			continue
+		}
+		if _, named := rank[r.UID]; !named && r.Status != "running" {
+			rank[r.UID] = 1
+		}
+		older = append(older, r)
+	}
+	slices.SortStableFunc(older, func(a, b generated.CronRun) int { return cmp.Compare(rank[a.UID], rank[b.UID]) })
+	n := min(len(older), 100)
+	return append(subjects, older[:n]...), n < len(older) && rank[older[n].UID] < 0
+}
+
 // cronEnrich establishes fresh last-run provenance independently of the display
 // cache. All extra reads share four workers and one deadline, including parents.
 func cronEnrich(ctx context.Context, reader cronAPI, id int64, p *cronData) {
 	ctx, cancel := context.WithTimeout(ctx, defaultHTTPTimeout)
 	defer cancel()
+	p.deferred = false
 	p.lastRuns = map[string]generated.CronRun{}
 	p.lastErr = map[string]error{}
 	p.progress = map[string]cron.RecurringProgress{}
@@ -117,11 +146,20 @@ func cronEnrich(ctx context.Context, reader cronAPI, id int64, p *cronData) {
 			}
 		}
 	}
-	runReader, supportsRun := reader.(cronRunAPI)
-	for _, r := range p.inspectedRuns {
+	runReader, supportsRun := cronRunReader(reader)
+	head := map[string]generated.CronRun{}
+	if p.runsErr == nil {
+		for _, r := range p.runs {
+			head[r.UID] = r
+		}
+	}
+	subjects, deferred := cronRefreshSubjects(p, head, supportsRun && !p.resetPages)
+	p.deferred = deferred
+	var held []cronEnrichment
+	reading := map[string]bool{}
+	for _, r := range subjects {
 		p.lookup[r.UID] = r
-		fresh, known := p.lastRuns[deref(r.JobUID)]
-		if known && fresh.UID == r.UID {
+		if fresh, ok := head[r.UID]; ok {
 			p.lookup[r.UID] = fresh
 			continue
 		}
@@ -129,9 +167,11 @@ func cronEnrich(ctx context.Context, reader cronAPI, id int64, p *cronData) {
 			p.runErr[r.UID] = errors.New("run refresh unavailable")
 			continue
 		}
-		tasks = append(tasks, cronEnrichment{uid: r.UID, run: true})
+		reading[r.UID] = true
+		held = append(held, cronEnrichment{uid: r.UID, run: true})
 	}
 	issues := map[string]bool{}
+	attention := 0
 	waitTasks := func(runs []generated.CronRun) []cronEnrichment {
 		var added []cronEnrichment
 		for _, r := range runs {
@@ -143,27 +183,44 @@ func cronEnrich(ctx context.Context, reader cronAPI, id int64, p *cronData) {
 				continue
 			}
 			issues[uid] = true
-			if len(issues) > 20 {
+			if issueReads[uid] {
+				continue
+			} // share native parent evidence without another read
+			if attention == 20 {
 				p.waitErr[uid] = errors.New("too many running issues (20 attention reads per refresh)")
 				continue
 			}
-			if !issueReads[uid] {
-				issueReads[uid] = true
-				added = append(added, cronEnrichment{uid: uid, parent: true})
-			}
+			attention++
+			issueReads[uid] = true
+			added = append(added, cronEnrichment{uid: uid, parent: true})
 		}
 		return added
 	}
-	tasks = append(tasks, waitTasks(cronMergeRuns(p.historyRuns, p.runs))...)
+	history := p.historyRuns
+	if p.resetPages {
+		history = p.inspectedRuns
+	}
+	current := slices.DeleteFunc(cronMergeRuns(history, p.runs), func(r generated.CronRun) bool { return reading[r.UID] })
+	tasks = append(tasks, waitTasks(current)...)
 	// Fill reads may discover running observations. The coordinator admits those
 	// reads into this same pool before closing it; no new deadline is created.
-	queue := make(chan cronEnrichment, len(tasks)+20)
-	results := make(chan cronEnrichment, len(tasks)+20)
+	pending := len(tasks) + len(held)
+	queue := make(chan cronEnrichment, pending+20)
+	results := make(chan cronEnrichment, pending+20)
 	for _, task := range tasks {
 		queue <- task
 	}
+	// Exact work enters only a nearly empty queue. Late attention reads have
+	// at most four queued and four in-flight exact reads ahead of them.
+	feed := func() {
+		for len(held) > 0 && len(queue) < 4 {
+			queue <- held[0]
+			held = held[1:]
+		}
+	}
+	feed()
 	var wg sync.WaitGroup
-	for range min(4, len(tasks)) {
+	for range min(4, pending) {
 		wg.Go(func() {
 			for task := range queue {
 				if task.err = ctx.Err(); task.err == nil {
@@ -188,14 +245,20 @@ func cronEnrich(ctx context.Context, reader cronAPI, id int64, p *cronData) {
 			}
 		})
 	}
-	for pending := len(tasks); pending > 0; {
+	for pending > 0 {
 		result := <-results
 		pending--
 		switch {
 		case result.run:
 			p.runErr[result.uid] = result.err
+			admit := p.lookup[result.uid] // a failed read keeps independent snapshot attention
 			if result.err == nil {
-				p.lookup[result.uid] = result.runs[0]
+				admit = result.runs[0]
+				p.lookup[result.uid] = admit
+			}
+			for _, task := range waitTasks([]generated.CronRun{admit}) {
+				queue <- task
+				pending++
 			}
 		case result.parent:
 			if p.waitErr[result.uid] == nil {
@@ -218,6 +281,7 @@ func cronEnrich(ctx context.Context, reader cronAPI, id int64, p *cronData) {
 				}
 			}
 		}
+		feed()
 	}
 	close(queue)
 	wg.Wait()

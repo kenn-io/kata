@@ -200,6 +200,17 @@ type cronRunAPI interface {
 	readCronRun(context.Context, int64, string) (generated.CronRun, error)
 }
 
+// undoClient forwards the optional method even when its underlying API lacks it.
+func cronRunReader(reader cronAPI) (cronRunAPI, bool) {
+	if u, ok := reader.(*undoClient); ok {
+		if _, ok := u.KataAPI.(cronRunAPI); !ok {
+			return nil, false
+		}
+	}
+	r, ok := reader.(cronRunAPI)
+	return r, ok
+}
+
 func (c *undoClient) readCronRun(ctx context.Context, projectID int64, uid string) (generated.CronRun, error) {
 	reader, ok := c.KataAPI.(cronRunAPI)
 	if !ok {
