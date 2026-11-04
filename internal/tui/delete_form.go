@@ -192,17 +192,13 @@ func (m Model) forgetDeletedIssue(uid string) (Model, tea.Cmd) {
 	}
 	m.attention.setRows(slices.DeleteFunc(slices.Clone(m.attention.rows), func(row attentionRequest) bool { return row.issue.UID == uid }))
 	wasDeleted := deleted(m.detail)
-	previousGen := m.detail.gen
 	detail, reset := forgetDetail(m.detail)
 	m.detail = detail
 	if reset {
 		return m.leaveDetail()
 	}
 	if wasDeleted {
-		if m.detail.gen != previousGen {
-			return m, withConnGen(m.detail.refetch(m.api), m.connGen)
-		}
-		return m, nil
+		return m, withConnGen(m.detail.refetch(m.api), m.connGen)
 	}
 	if slices.ContainsFunc(m.detail.children, func(child Issue) bool { return child.UID == uid }) {
 		m.detail.children = slices.DeleteFunc(slices.Clone(m.detail.children), func(child Issue) bool { return child.UID == uid })
