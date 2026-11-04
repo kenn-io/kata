@@ -332,6 +332,9 @@ count is a lower bound. Interval counts are exact. Pending `latest` scans report
 no discarded work until their frozen window is finalized. A batch can both
 deliver children and discard older occurrences: its reason is `delivered`, its
 kind is `skipped`, and `--reason skipped` includes it.
+Other `--reason` values match the recorded reason exactly, including codes added
+by newer daemons using the same record version. An unmatched value prints no
+records; the reader does not validate it against this CLI's known codes.
 
 | Reason | What the daemon observed |
 | --- | --- |
@@ -376,9 +379,13 @@ counts are capped; `skipped_count_is_lower_bound` stays true once any capped
 count contributes to the lifetime total. A failed enumeration updates the sweep
 time and error counter but preserves the last successful enumeration time.
 `last_enumeration_at` is absent until the first successful enumeration page.
-`log_error_present` and `log_errors_since_start` expose
-log failures. Health contains no job
-identities or raw error detail.
+`log_error_present` reports whether the latest attempted log operation failed;
+`log_errors_since_start` counts failed operations. A rotation error can follow a
+complete record write, so these fields do not count lost records. The next
+qualifying write retries opening the log and updates the flag. An unchanged
+decision without deliveries or skips does not retry a failed log operation,
+even after the filesystem is repaired. Health contains no job identities or
+raw error detail.
 
 `daemon logs --tail` advances only over complete newline-terminated records and
 drains unread data across retained rotations between polls. If the previous

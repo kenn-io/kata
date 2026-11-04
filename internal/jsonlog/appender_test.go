@@ -10,6 +10,29 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Append reports I/O failures, including retention failures after a complete
+// write. A later append must reopen and recover without losing that record.
+func TestAppenderRotationFailurePreservesRecordAndRecovers(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dispatch.jsonl")
+	a, err := Open(t.Context(), path, 1, 1)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, a.Close()) })
+	// A nonempty directory cannot be removed as the oldest retained file.
+	require.NoError(t, os.Mkdir(path+".1", 0o700))
+	blocker := filepath.Join(path+".1", "blocker")
+	require.NoError(t, os.WriteFile(blocker, []byte("fixture"), 0o600))
+	require.Error(t, a.Append(t.Context(), map[string]int{"n": 1}))
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: TempDir fixture
+	require.NoError(t, err)
+	require.Equal(t, "{\"n\":1}\n", string(raw))
+	require.NoError(t, os.Remove(blocker))
+	require.NoError(t, os.Remove(path+".1"))
+	require.NoError(t, a.Append(t.Context(), map[string]int{"n": 2}))
+	raw, err = os.ReadFile(path + ".1") //nolint:gosec // G304: TempDir fixture
+	require.NoError(t, err)
+	require.Equal(t, "{\"n\":1}\n{\"n\":2}\n", string(raw))
+}
+
 // A fresh daemon home must accept records, rotate them, and recover after a
 // rotation leaves no active handle. Hook logging retains its separate existing contract.
 func TestAppenderCreatesRotatesAndReopens(t *testing.T) {

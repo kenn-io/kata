@@ -15,6 +15,9 @@ import (
 )
 
 // Appender writes complete JSONL records and retries failed opens on append.
+// Unlike hooks.runsAppender, it reports append/rotation errors to health and
+// repairs interrupted tails. Hooks retain their silent best-effort writes and
+// private diagnostic locking; sharing a core must first reconcile those contracts.
 type Appender struct {
 	mu      sync.Mutex
 	path    string
@@ -72,6 +75,7 @@ func terminateTail(file *os.File) (int64, error) {
 }
 
 // Append reports I/O failures without changing committed dispatch accounting.
+// A rotation error can follow a complete write; an error does not imply loss.
 func (a *Appender) Append(ctx context.Context, value any) error {
 	line, err := json.Marshal(value)
 	if err != nil {

@@ -11,6 +11,26 @@ import (
 	"go.kenn.io/kata/internal/config"
 )
 
+// Version-1 log records remain readable when a newer daemon adds a reason.
+// Filtering local history must not require that daemon's reason enum.
+func TestDaemonCronLogsFiltersFutureReason(t *testing.T) {
+	_, _, hash := setupHooksDir(t)
+	path, err := config.CronDispatchLogPath(hash)
+	require.NoError(t, err)
+	writeRuns(t, filepath.Dir(path), map[string][]map[string]any{
+		"dispatch.jsonl": {
+			{"version": 1, "job_uid": "JOB-A", "reason": "future_reason"},
+			{"version": 1, "job_uid": "JOB-B", "reason": "idle"},
+		},
+	})
+	resetFlags(t)
+	out, warnings, err := executeRootCapture(t, t.Context(), "daemon", "logs", "--cron", "--reason", "future_reason")
+	require.NoError(t, err)
+	require.Contains(t, out, `"reason":"future_reason"`)
+	require.NotContains(t, out, `"reason":"idle"`)
+	require.Empty(t, warnings)
+}
+
 func TestDaemonCronLogsChronologyAndFilters(t *testing.T) {
 	_, _, hash := setupHooksDir(t)
 	path, err := config.CronDispatchLogPath(hash)
