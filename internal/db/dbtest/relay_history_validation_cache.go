@@ -2,7 +2,12 @@ package dbtest
 
 import (
 	"crypto/ed25519"
+	"encoding/json/jsontext"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -49,11 +54,20 @@ func RunRelayEnrollmentHistoryValidationCache(t *testing.T, store db.Storage, ba
 	})
 	require.NoError(t, err)
 
+	// A cold handshake must release the writer before scanning history.
+	cold := backend.OpenSame(t, store)
+	bootstrap := cold.(db.RelayResetBootstrapStore)
+	_, required, err := requireWriteDuringRelayScan(t, cold, backend, project.ID, func() (bool, error) {
+		return bootstrap.RelayEnrollmentNeedsReset(ctx, grant.Enrollment.RelayBindingUID)
+	}, nil)
+	require.NoError(t, err)
+	require.False(t, required)
+	// Measure the original handle independently of the cold scan.
 	fullScans := 0
 	require.NotNil(t, backend.InstallRelayHistoryFullScanObserver)
 	resetObserver := backend.InstallRelayHistoryFullScanObserver(store, func() { fullScans++ })
 	t.Cleanup(resetObserver)
-	bootstrap := store.(db.RelayResetBootstrapStore)
+	bootstrap = store.(db.RelayResetBootstrapStore)
 	for range 2 {
 		required, err := bootstrap.RelayEnrollmentNeedsReset(ctx, grant.Enrollment.RelayBindingUID)
 		require.NoError(t, err)
@@ -65,7 +79,7 @@ func RunRelayEnrollmentHistoryValidationCache(t *testing.T, store db.Storage, ba
 		IssueID: issue.ID, Author: "example-assistant", Body: "New relay event",
 	})
 	require.NoError(t, err)
-	required, err := bootstrap.RelayEnrollmentNeedsReset(ctx, grant.Enrollment.RelayBindingUID)
+	required, err = bootstrap.RelayEnrollmentNeedsReset(ctx, grant.Enrollment.RelayBindingUID)
 	require.NoError(t, err)
 	require.False(t, required)
 	require.Equal(t, 1, fullScans, "new events should be inspected after the cached history cursor")
@@ -79,7 +93,14 @@ func RunRelayEnrollmentHistoryValidationCache(t *testing.T, store db.Storage, ba
 	required, err = bootstrap.RelayEnrollmentNeedsReset(ctx, grant.Enrollment.RelayBindingUID)
 	require.NoError(t, err)
 	require.False(t, required)
-	require.Equal(t, 2, fullScans, "new issue endpoints invalidate history whose references may resolve differently")
+	require.Equal(t, 1, fullScans, "unrelated creations preserve validated history")
+	requireReset := func(want bool, scans int, msg string) {
+		t.Helper()
+		required, err := bootstrap.RelayEnrollmentNeedsReset(ctx, grant.Enrollment.RelayBindingUID)
+		require.NoError(t, err)
+		require.Equal(t, want, required, msg)
+		require.Equal(t, scans, fullScans, msg)
+	}
 
 	_, _, err = store.RemoveProject(ctx, db.RemoveProjectParams{
 		ProjectID: other.ID, Actor: "example-operator", Force: true,
@@ -92,9 +113,115 @@ func RunRelayEnrollmentHistoryValidationCache(t *testing.T, store db.Storage, ba
 	required, err = bootstrap.RelayEnrollmentNeedsReset(ctx, grant.Enrollment.RelayBindingUID)
 	require.NoError(t, err)
 	require.False(t, required)
-	require.Equal(t, 3, fullScans, "purge markers invalidate previously validated history")
+	require.Equal(t, 2, fullScans, "purge markers invalidate previously validated history")
+	collision, err := store.CreateProject(ctx, "collision-project")
+	require.NoError(t, err)
+	for i, snapshotProject := range []db.Project{collision, project} {
+		snapshotIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+			ProjectID: snapshotProject.ID, Title: "Snapshot issue", Author: "member",
+		})
+		require.NoError(t, err)
+		requireReset(false, 2, "snapshot issue creation preserves validated history")
+		snapshot := newRemoteEvent(t, snapshotProject, &snapshotIssue.UID, "issue.snapshot", "member", peerUID, 550,
+			jsontext.Value(fmt.Sprintf(`{"uid":%q,"title":"Snapshot issue","author":"member","status":"open","metadata":{},"comments":[],"labels":[],"links":[]}`, snapshotIssue.UID)))
+		_, err = store.InsertRemoteEvents(ctx, snapshotProject.ID, []db.RemoteEvent{snapshot})
+		require.NoError(t, err)
+		requireReset(false, 2+i, "only snapshots in the relayed project revalidate its history")
+	}
 
-	require.NoError(t, store.RevokeFederationEnrollment(ctx, grant.Enrollment.ID))
+	missingUID, err := uid.New()
+	require.NoError(t, err)
+	missingClose := newRemoteEvent(t, project, &issue.UID, "issue.closed", "member", peerUID, 575,
+		jsontext.Value(fmt.Sprintf(`{"reason":"done","parent_uid":%q}`, missingUID)))
+	_, err = store.InsertRemoteEvents(ctx, project.ID, []db.RemoteEvent{missingClose})
+	require.NoError(t, err)
+	requireReset(true, 3, "a missing parent requires reset")
+	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, UID: missingUID, Title: "Resolved parent", Author: "member"})
+	require.NoError(t, err)
+	requireReset(false, 4, "a new parent can resolve a cached reset result")
+
+	parentIssue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Parent", Author: "member"})
+	require.NoError(t, err)
+	child, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Child", Author: "member"})
+	require.NoError(t, err)
+	legacyClose := newRemoteEvent(t, project, &child.UID, "issue.closed", "member", peerUID, 600,
+		jsontext.Value(fmt.Sprintf(`{"reason":"done","closed_at":"2026-01-01T00:00:00Z","parent_short_id":%q}`, parentIssue.ShortID)))
+	_, err = store.InsertRemoteEvents(ctx, project.ID, []db.RemoteEvent{legacyClose})
+	require.NoError(t, err)
+	requireReset(false, 4, "incremental validation tracks legacy short parents")
+	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: collision.ID, Title: "Different short reference", Author: "member"})
+	require.NoError(t, err)
+	requireReset(false, 5, "any creation revalidates a short-only parent")
+	freshUID, err := uid.New()
+	require.NoError(t, err)
+	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: collision.ID, Title: "Ambiguous parent", Author: "member", UID: freshUID[:10] + parentIssue.UID[10:], ShortIDOverride: parentIssue.ShortID})
+	require.NoError(t, err)
+	requireReset(true, 6, "a new short-id collision forces one full scan")
+
+	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: collision.ID, Title: "Another endpoint", Author: "member"})
+	require.NoError(t, err)
+	scans, required, err := requireWriteDuringRelayScan(t, store, backend, collision.ID, func() (bool, error) {
+		return bootstrap.RelayEnrollmentNeedsReset(ctx, grant.Enrollment.RelayBindingUID)
+	}, nil)
+	require.NoError(t, err)
+	require.True(t, required)
+	require.Equal(t, int64(2), scans, "a creation during the fill causes one final fenced scan")
+
+	// The cold handle's entry predates the purge, so its next check fills.
+	_, _, err = requireWriteDuringRelayScan(t, cold, backend, collision.ID, func() (bool, error) {
+		return cold.(db.RelayResetBootstrapStore).RelayEnrollmentNeedsReset(ctx, grant.Enrollment.RelayBindingUID)
+	}, func() {
+		require.NoError(t, store.RevokeFederationEnrollment(ctx, grant.Enrollment.ID))
+	})
+	require.ErrorIs(t, err, db.ErrNotFound, "revocation during fill is checked by the second fenced attempt")
 	_, err = bootstrap.RelayEnrollmentNeedsReset(ctx, grant.Enrollment.RelayBindingUID)
 	require.ErrorIs(t, err, db.ErrNotFound, "live enrollment authority is checked even when history is cached")
+}
+
+// requireWriteDuringRelayScan blocks the first full history scan started by
+// scan, runs during, and requires a local issue write to commit meanwhile.
+func requireWriteDuringRelayScan(t *testing.T, store db.Storage, backend Backend, projectID int64, scan func() (bool, error), during func()) (int64, bool, error) {
+	t.Helper()
+	entered, release := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
+	var scans atomic.Int64
+	defer backend.InstallRelayHistoryFullScanObserver(store, func() {
+		if scans.Add(1) == 1 {
+			close(entered)
+			<-release
+		}
+	})()
+	type result struct {
+		required bool
+		err      error
+	}
+	scanDone, writeDone := make(chan result, 1), make(chan error, 1)
+	go func() {
+		required, err := scan()
+		scanDone <- result{required, err}
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("full scan did not start")
+	}
+	if during != nil {
+		during()
+	}
+	go func() {
+		_, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: projectID, Title: "Concurrent local issue", Author: "member"})
+		writeDone <- err
+	}()
+	select {
+	case err := <-writeDone:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Error("local write waited for the relay history scan")
+		unblock()
+		require.NoError(t, <-writeDone)
+	}
+	unblock()
+	scanned := <-scanDone
+	return scans.Load(), scanned.required, scanned.err
 }

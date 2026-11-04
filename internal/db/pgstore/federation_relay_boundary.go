@@ -208,39 +208,19 @@ func relayHistoryHasBoundaryAfterTx(ctx context.Context, tx *sql.Tx, projectID, 
 
 func relayHistoryCrossesProjectAfterTx(ctx context.Context, tx *sql.Tx, projectID, after int64) (bool, error) {
 	for {
-		// #nosec G202 -- The event-type predicate is fixed native SQL; all project and cursor values remain bound.
-		rows, err := tx.QueryContext(ctx, `SELECT e.id FROM events e WHERE e.project_id=$1 AND e.id>$2 AND `+pgFederationPushEventTypeCondition("e.type")+` ORDER BY e.id LIMIT 100`, projectID, after)
+		events, err := relayCheckpointEventPageTx(ctx, tx, projectID, after)
 		if err != nil {
 			return false, err
 		}
-		var ids []int64
-		for rows.Next() {
-			var id int64
-			if err = rows.Scan(&id); err != nil {
-				break
-			}
-			ids = append(ids, id)
-		}
-		if err == nil {
-			err = rows.Err()
-		}
-		_ = rows.Close()
-		if err != nil {
-			return false, err
-		}
-		if len(ids) == 0 {
+		if len(events) == 0 {
 			return false, nil
 		}
-		for _, id := range ids {
-			event, err := scanEvent(tx.QueryRowContext(ctx, eventSelect+` WHERE e.id=$1`, id))
-			if err != nil {
-				return false, err
-			}
+		for _, event := range events {
 			crossing, err := relayEventCrossesProjectTx(ctx, tx, projectID, db.RemoteEventFromStored(event))
 			if err != nil || crossing {
 				return crossing, err
 			}
 		}
-		after = ids[len(ids)-1]
+		after = events[len(events)-1].ID
 	}
 }

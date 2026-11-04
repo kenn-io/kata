@@ -43,6 +43,7 @@ type viewChrome struct {
 	daemon        string           // active daemon display label
 	modal         modalKind        // active confirmation; takes footer precedence
 	undoAvailable bool             // session history has an eligible action
+	deleteHidden  bool             // the connected credentials cannot delete
 }
 
 // View renders the list under the M3.5 chrome layer:

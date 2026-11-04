@@ -228,11 +228,11 @@ func (m Model) refreshAfterUndo(entry undoEntry, resp *MutationResp) (Model, tea
 		m.detail.fetchSeq.links = max(m.detail.fetchSeq.links, floor)
 		cmds = append(cmds, m.detail.refetch(m.api))
 	}
-	if (entry.kind == "label.add" || entry.kind == "label.remove") && m.projectLabels != nil {
+	if ((entry.kind == "delete" && entry.projectID != 0) || entry.kind == "label.add" || entry.kind == "label.remove") && m.projectLabels != nil {
 		if _, exists := m.projectLabels.byProject[entry.projectID]; exists {
-			var labelCmd tea.Cmd
-			m, labelCmd = m.dispatchLabelFetch(entry.projectID)
-			cmds = append(cmds, labelCmd)
+			var refresh tea.Cmd
+			m, refresh = m.dispatchLabelFetch(entry.projectID)
+			cmds = append(cmds, refresh)
 		}
 	}
 	return m, tea.Batch(cmds...)

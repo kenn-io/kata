@@ -14,17 +14,20 @@ type relayHistoryValidationKey struct {
 }
 
 type relayHistoryValidationEntry struct {
-	projectUID string
-	generation uint64
-	after      int64
-	cursor     int64
-	reset      bool
+	projectUID   string
+	generation   uint64
+	creations    uint64
+	shortParents bool
+	after        int64
+	cursor       int64
+	reset        bool
 }
 
 type relayHistoryValidationCache struct {
 	mu                 sync.Mutex
 	initialized        bool
 	generation         uint64
+	creations          uint64
 	eventCursor        int64
 	purgeCursor        int64
 	projectPurgeCursor int64
@@ -49,14 +52,16 @@ func (d *Store) invalidateRelayHistoryValidationCache() {
 
 // relayHistoryNeedsResetCachedTx validates unchanged history once, then checks
 // only new source events. Retained checkpoints have independent grant/boundary
-// entries. Issue identity changes and purges invalidate cached
-// results because they can change how retained event references resolve.
+// entries. Moves, merges, renames, and purges invalidate results when retained
+// references can resolve differently. Creations, baselines, and unrelated snapshots
+// revalidate only short-parent references or reset results.
 func (d *Store) relayHistoryNeedsResetCachedTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	projectID int64,
 	projectUID string,
 	checkpoint *db.RelayResetCheckpoint,
+	scan bool,
 ) (bool, error) {
 	key := relayHistoryValidationKey{projectID: projectID}
 	var after int64
@@ -69,9 +74,11 @@ func (d *Store) relayHistoryNeedsResetCachedTx(
 		key.bindingUID = checkpoint.Translation.Authority.BindingUID
 		after = checkpoint.Manifest.HistoryEventID
 	}
+	// mu covers only bookkeeping, taken before the fill's first read so
+	// lock order equals snapshot order. Scans run unlocked; entries carry the
+	// stamps this snapshot observed, so a late publication fails reuse.
 	cache := d.relayHistoryCache
 	cache.mu.Lock()
-	defer cache.mu.Unlock()
 
 	var eventCursor, purgeCursor, projectPurgeCursor int64
 	if err := tx.QueryRowContext(ctx, `SELECT
@@ -80,6 +87,7 @@ func (d *Store) relayHistoryNeedsResetCachedTx(
 		COALESCE((SELECT MAX(id) FROM project_purge_log),0)`).Scan(
 		&eventCursor, &purgeCursor, &projectPurgeCursor,
 	); err != nil {
+		cache.mu.Unlock()
 		return false, err
 	}
 	if !cache.initialized {
@@ -87,16 +95,21 @@ func (d *Store) relayHistoryNeedsResetCachedTx(
 		cache.generation = 1
 	} else {
 		invalidated := purgeCursor != cache.purgeCursor || projectPurgeCursor != cache.projectPurgeCursor || eventCursor < cache.eventCursor
+		var created bool
 		if !invalidated && eventCursor > cache.eventCursor {
 			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events
-				WHERE id>? AND type IN ('issue.created','issue.snapshot','issue.moved','project.merged','project.federation_enabled'))`,
-				cache.eventCursor,
-			).Scan(&invalidated); err != nil {
+				WHERE id>? AND type IN ('issue.moved','project.merged','project.renamed')),
+				EXISTS(SELECT 1 FROM events WHERE id>? AND type IN ('issue.created','issue.snapshot','project.federation_enabled'))`,
+				cache.eventCursor, cache.eventCursor,
+			).Scan(&invalidated, &created); err != nil {
+				cache.mu.Unlock()
 				return false, err
 			}
 		}
 		if invalidated {
 			cache.generation++
+		} else if created {
+			cache.creations++
 		}
 	}
 	cache.eventCursor = eventCursor
@@ -105,41 +118,74 @@ func (d *Store) relayHistoryNeedsResetCachedTx(
 
 	var projectCursor int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(id),0) FROM events WHERE project_id=?`, projectID).Scan(&projectCursor); err != nil {
+		cache.mu.Unlock()
 		return false, err
 	}
 	entry, cached := cache.entries[key]
-	if !cached || entry.projectUID != projectUID || entry.after != after || entry.generation != cache.generation || projectCursor < entry.cursor {
+	generation, creations := cache.generation, cache.creations
+	cache.mu.Unlock()
+
+	// Adoption and relay-reset install write snapshot-only history into the
+	// project they replace.
+	var snapshot bool
+	if cached && projectCursor > entry.cursor {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE project_id=? AND id>? AND type='issue.snapshot')`, projectID, entry.cursor).Scan(&snapshot); err != nil {
+			return false, err
+		}
+	}
+	full := snapshot || !cached || entry.projectUID != projectUID || entry.after != after || entry.generation != generation || projectCursor < entry.cursor || entry.creations != creations && (entry.reset || entry.shortParents)
+	if !full && projectCursor == entry.cursor {
+		return entry.reset, nil
+	}
+	if !scan {
+		return false, &relayHistoryCacheMiss{projectID: projectID, projectUID: projectUID, checkpoint: checkpoint}
+	}
+	from := entry.cursor
+	if full {
 		if d.relayHistoryFullScanObserver != nil {
 			d.relayHistoryFullScanObserver()
 		}
-		var reset bool
-		var err error
-		if checkpoint == nil {
-			reset, err = relayHistoryNeedsResetTx(ctx, tx, projectID, projectUID)
-		} else {
-			reset, err = validateAfter(ctx, tx, projectID, after)
-		}
-		if err != nil {
-			return false, err
-		}
-		cache.entries[key] = relayHistoryValidationEntry{
-			projectUID: projectUID,
-			generation: cache.generation,
-			after:      after,
-			cursor:     projectCursor,
-			reset:      reset,
-		}
-		return reset, nil
+		entry, from = relayHistoryValidationEntry{projectUID: projectUID, after: after}, after
 	}
-	if projectCursor == entry.cursor {
-		return entry.reset, nil
+	var reset bool
+	var err error
+	if full && checkpoint == nil {
+		reset, err = relayHistoryNeedsResetTx(ctx, tx, projectID, projectUID)
+	} else {
+		reset, err = validateAfter(ctx, tx, projectID, from)
 	}
-	reset, err := validateAfter(ctx, tx, projectID, entry.cursor)
 	if err != nil {
 		return false, err
 	}
-	entry.cursor = projectCursor
+	shortParents, err := relayHistoryResolvesShortParentAfterTx(ctx, tx, projectID, from)
+	if err != nil {
+		return false, err
+	}
+	entry.generation, entry.creations, entry.cursor = generation, creations, projectCursor
+	entry.shortParents = entry.shortParents || shortParents
 	entry.reset = entry.reset || reset
+	cache.mu.Lock()
 	cache.entries[key] = entry
+	cache.mu.Unlock()
 	return entry.reset, nil
 }
+
+// relayHistoryResolvesShortParentAfterTx detects the only references whose
+// project scope can become ambiguous after an issue is created elsewhere.
+// Bare evidence references use the event's project; qualified names can change
+// on rename, which invalidates all entries above. UID references match exactly.
+func relayHistoryResolvesShortParentAfterTx(ctx context.Context, tx *sql.Tx, projectID, after int64) (bool, error) {
+	var found bool
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE project_id=? AND id>? AND type='issue.closed' AND COALESCE(json_extract(payload,'$.parent_uid'),'')='' AND COALESCE(json_extract(payload,'$.parent_short_id'),'')<>'')`, projectID, after).Scan(&found)
+	return found, err
+}
+
+// relayHistoryCacheMiss asks the caller to fill this exact key outside the
+// fenced transaction, after its authority checks have succeeded.
+type relayHistoryCacheMiss struct {
+	projectID  int64
+	projectUID string
+	checkpoint *db.RelayResetCheckpoint
+}
+
+func (*relayHistoryCacheMiss) Error() string { return "relay history validation needs a fill" }
