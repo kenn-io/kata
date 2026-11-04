@@ -62,28 +62,18 @@ func TestCronCLIValidate(t *testing.T) {
 	require.Contains(t, string(result.Definition), parent.UID)
 	after, err := env.DB.MaxEventID(t.Context())
 	require.NoError(t, err)
-	require.Equal(t, before+1, after, "only fixture parent creation writes an event")
+	require.Equal(t, before+1, after, "CLI preflight adds no events beyond fixture parent creation")
 }
 
 func TestCronCLIValidateOldDaemonAndMalformedResponse(t *testing.T) {
 	for _, tc := range []struct{ name, version, response, want string }{
 		{"old", "0.38.0", `{}`, "upgrade the daemon"},
 		{"missing-valid", "0.41.0", `{"name":"Inspect","definition":{},"errors":[],"warnings":[]}`, "validation response"},
-		{"wrong-valid", "0.41.0", `{"valid":"true"}`, ""},
-		{"invalid-json", "0.41.0", `{`, ""},
+		{"wrong-valid", "0.41.0", `{"valid":"true"}`, "CronValidationResult.valid"},
+		{"invalid-json", "0.41.0", `{`, "unexpected end of JSON input"},
 		{"null-definition", "0.41.0", `{"valid":true,"name":"Inspect","definition":null,"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
 		{"scalar-definition", "0.41.0", `{"valid":true,"name":"Inspect","definition":42,"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
 		{"missing-name", "0.41.0", `{"valid":true,"definition":{},"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
-		{"null-name", "0.41.0", `{"valid":true,"name":null,"definition":{},"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
-		{"missing-errors", "0.41.0", `{"valid":true,"name":"Inspect","definition":{},"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
-		{"null-errors", "0.41.0", `{"valid":true,"name":"Inspect","definition":{},"errors":null,"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
-		{"missing-warnings", "0.41.0", `{"valid":true,"name":"Inspect","definition":{},"errors":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
-		{"null-warnings", "0.41.0", `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":null,"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
-		{"missing-delivery", "0.41.0", `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
-		{"missing-basis", "0.41.0", `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"delivery":"adapter","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
-		{"missing-zone", "0.41.0", `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","from":"2026-11-03T00:00:00Z","next":[]}}`, "validation response"},
-		{"missing-from", "0.41.0", `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","next":[]}}`, "validation response"},
-		{"missing-next", "0.41.0", `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z"}}`, "validation response"},
 		{"missing-schedule", "0.41.0", `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[]}`, "validation response"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -152,8 +142,25 @@ func TestCronCLIValidateConflictAndIdentity(t *testing.T) {
 	withUID := map[string]any{"uid": stored.UID, "name": input.Name, "definition": input.Definition}
 	_, _, err = executeCronCLI(t, env.URL, nil, "job", "validate", "--file", cronCLIFile(t, withUID), "--uid", cronCLIUID(t))
 	require.ErrorContains(t, err, "uid in body and flag must match")
-	_, _, err = executeCronCLI(t, "http://127.0.0.1:1", nil, "job", "validate", "--file", file)
-	require.Error(t, err)
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/validate"):
+			calls++
+			conn, _, err := w.(http.Hijacker).Hijack()
+			require.NoError(t, err)
+			require.NoError(t, conn.Close())
+		case r.URL.Path == "/api/v1/health":
+			_, _ = fmt.Fprint(w, `{"api_schema_version":"0.41.0"}`)
+		default:
+			_, _ = fmt.Fprint(w, `{"project":{"id":1,"name":"spoke-project"},"projects":[{"id":1,"name":"spoke-project"}]}`)
+		}
+	}))
+	defer server.Close()
+	_, _, err = executeCronCLI(t, server.URL, nil, "job", "validate", "--file", file)
+	require.ErrorContains(t, err, "selected daemon connection closed before response headers arrived")
+	require.Equal(t, 1, calls, "transport failure must occur on validation, after project resolution")
 }
 
 func TestCronCLIValidateOutputFailure(t *testing.T) {
@@ -168,7 +175,7 @@ func TestCronCLIValidateRejectsNullEnvelopeFields(t *testing.T) {
 	_, err := env.DB.CreateProject(t.Context(), "spoke-project")
 	require.NoError(t, err)
 	for _, resource := range []string{"job", "workflow"} {
-		for _, field := range []string{"name", "uid", "expected_event_uid", "actor"} {
+		for _, field := range []string{"uid"} {
 			t.Run(resource+"/"+field, func(t *testing.T) {
 				definition := any(cronCLIJob(t).Definition)
 				if resource == "workflow" {

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
-	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -77,7 +76,7 @@ func checkCronValidate(t *testing.T, s db.Storage) error {
 		}
 	}
 	for _, tc := range []struct{ name, raw, stage string }{
-		{"", `{}`, "request"}, {strings.Repeat("x", 257), `{}`, "request"}, {"Review", `[]`, "document"}, {"Review", `{"unknown":true}`, "document"},
+		{"", `{}`, "request"}, {strings.Repeat("x", 257), `{}`, "request"}, {"Review", `null`, "document"}, {"Review", `[]`, "document"}, {"Review", `1`, "document"}, {"Review", `"text"`, "document"}, {"Review", `{}`, "document"}, {"Review", `{"unknown":true}`, "document"},
 	} {
 		candidate := in
 		candidate.Name, candidate.Raw = tc.name, []byte(tc.raw)
@@ -85,6 +84,7 @@ func checkCronValidate(t *testing.T, s db.Storage) error {
 		require.False(t, out.Valid)
 		require.Equal(t, tc.stage, out.Errors[0].Stage)
 	}
+	// A job UID must not resolve as a workflow dependency.
 	job.Action = cron.Action{Kind: "execute", WorkflowUID: stored.UID}
 	in.Raw, err = json.Marshal(job)
 	require.NoError(t, err)
@@ -116,10 +116,6 @@ func checkCronValidate(t *testing.T, s db.Storage) error {
 	require.Equal(t, deleted.DefinitionEventUID, out.Errors[0].DefinitionEventUID)
 	in.UID, in.ExpectedEventUID = strings.ToLower(w.UID), deleted.DefinitionEventUID
 	require.True(t, validate(in, true).Valid, "matching tombstone revision can be restored")
-	canceled, cancel := context.WithCancel(ctx)
-	cancel()
-	_, err = s.ValidateCronWorkflow(canceled, in)
-	require.True(t, errors.Is(err, context.Canceled), "context errors are not result errors")
 	in.ProjectID = 999999
 	_, err = s.ValidateCronWorkflow(ctx, in)
 	require.ErrorIs(t, err, db.ErrNotFound)
@@ -207,13 +203,21 @@ func checkCronValidateNative(t *testing.T, s db.Storage) error {
 	in.ExpectedEventUID = converted.DefinitionEventUID
 	out, err = s.ValidateCronJob(ctx, in)
 	require.NoError(t, err)
-	require.Equal(t, "ownership", out.Errors[0].Stage, "adapter conversion shares the initialization guard")
+	require.Equal(t, "ownership", out.Errors[0].Stage, "adapter-to-native conversion shares the initialization guard")
+	_, _, err = s.PutCronJob(ctx, db.PutCronJob{ProjectID: p.ID, UID: newUID, ExpectedEventUID: converted.DefinitionEventUID, Name: stored.Name, Definition: stored.Definition, Actor: "operator"})
+	require.EqualError(t, err, out.Errors[0].Message)
 	in.UID = ""
 	in.ExpectedEventUID = ""
 	out, err = s.ValidateCronJob(ctx, in)
 	require.NoError(t, err)
 	require.True(t, out.Valid)
 	require.Equal(t, "fresh_anchor", out.Schedule.Basis)
+	_, err = s.UpsertFederationBinding(ctx, db.FederationBinding{ProjectID: p.ID, Role: db.FederationRoleSpoke, HubURL: "https://daemon.example", HubProjectID: 42, HubProjectUID: p.UID, Enabled: true, Actor: "operator"})
+	require.NoError(t, err)
+	out, err = s.ValidateCronJob(ctx, in)
+	require.NoError(t, err)
+	require.True(t, out.Valid)
+	require.Contains(t, out.Warnings, db.CronValidationWarning{Code: "hub_owned", Message: "native recurring writes are committed by the owning hub"})
 	return nil
 }
 

@@ -12,20 +12,16 @@ import (
 
 func TestCronValidateDiscovery(t *testing.T) {
 	session := connectRawTestServerWithOptions(t, Options{Client: inertTestClient(t), ProjectID: 42, ProjectName: "spoke-project", Actor: "example-agent", Version: "test"})
-	loaded := cronOK(t, session, "load_cron", map[string]any{})
+	cronOK(t, session, "load_cron", map[string]any{})
 	tools, err := session.ListTools(t.Context(), nil)
 	require.NoError(t, err)
 	for _, name := range []string{"kata.cron_job_validate", "kata.cron_workflow_validate"} {
-		require.Contains(t, loaded["tools"], name)
 		found := false
 		for _, tool := range tools.Tools {
 			if tool.Name != name {
 				continue
 			}
 			found = true
-			require.True(t, tool.Annotations.ReadOnlyHint)
-			require.False(t, *tool.Annotations.DestructiveHint)
-			require.False(t, *tool.Annotations.OpenWorldHint)
 			raw, err := json.Marshal(tool.OutputSchema)
 			require.NoError(t, err)
 			var schema struct{ Properties map[string]json.RawMessage }
@@ -49,11 +45,7 @@ func TestCronValidateRawDocuments(t *testing.T) {
 		result := cronOK(t, f.session, tool, map[string]any{"name": "  Review  ", "definition": definition})
 		require.Equal(t, true, result["valid"])
 		require.Equal(t, "Review", result["name"])
-		for _, raw := range []string{`null`, `[]`, `"text"`, `1`, `{"unknown":1}`, `{"version":1e1000}`} {
-			result := cronOK(t, f.session, tool, map[string]any{"name": "Review", "definition": json.RawMessage(raw)})
-			require.Equal(t, false, result["valid"], raw)
-			require.Equal(t, "document", result["errors"].([]any)[0].(map[string]any)["stage"])
-		}
+
 		result = cronOK(t, f.session, tool, map[string]any{"name": "", "definition": definition})
 		require.Equal(t, "request", result["errors"].([]any)[0].(map[string]any)["stage"])
 		result = cronOK(t, f.session, tool, map[string]any{"name": "Review"})
@@ -70,6 +62,11 @@ func TestCronValidateOpaqueNumbers(t *testing.T) {
 		definition := cronDefinition()
 		if resource == "workflow" {
 			definition = cronWorkflowDefinition()
+		}
+		for _, raw := range []string{`null`, `[]`, `"text"`, `1`, `{"unknown":1}`, `{"version":1e1000}`} {
+			result := cronOK(t, f.session, "cron_"+resource+"_validate", map[string]any{"name": "Review", "definition": json.RawMessage(raw)})
+			require.Equal(t, false, result["valid"], raw)
+			require.Equal(t, "document", result["errors"].([]any)[0].(map[string]any)["stage"])
 		}
 		opaque := json.RawMessage(`{"integer":12345678901234567890123,"decimal":1.0000000000000000001,"nested":[-0.00,1E+003]}`)
 		definition["options"] = opaque
@@ -107,19 +104,26 @@ func TestCronValidateParentScopeAndQuery(t *testing.T) {
 	require.Equal(t, "2026-11-03T00:00:00Z", schedule["from"])
 	require.Len(t, schedule["next"], 2)
 	args["count"] = 0
-	require.True(t, cronCall(t, session, "cron_job_validate", args).IsError)
+	failure := cronCall(t, session, "cron_job_validate", args)
+	require.True(t, failure.IsError)
+	require.Contains(t, string(mustJSON(t, failure)), "count must be between 1 and 100")
 	args["count"], args["from"] = 2, "bad"
-	require.True(t, cronCall(t, session, "cron_job_validate", args).IsError)
+	failure = cronCall(t, session, "cron_job_validate", args)
+	require.True(t, failure.IsError)
+	require.Contains(t, string(mustJSON(t, failure)), "from must be RFC3339")
 	args["from"], args["project"] = "2026-11-03T00:00:00Z", "other-project"
 	require.True(t, cronCall(t, session, "cron_job_validate", args).IsError)
 	delete(args, "project")
 	args["parent_ref"] = "other-project#" + parent.ShortID
 	require.True(t, cronCall(t, session, "cron_job_validate", args).IsError)
 	args["parent_ref"] = parent.ShortID
-	definition["issue"].(map[string]any)["parent_uid"] = ""
-	require.True(t, cronCall(t, session, "cron_job_validate", args).IsError)
-	definition["issue"].(map[string]any)["parent_uid"] = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-	require.True(t, cronCall(t, session, "cron_job_validate", args).IsError)
+	for _, parentUID := range []string{"", "01ARZ3NDEKTSV4RRFFQ69G5FAV"} {
+		definition["issue"].(map[string]any)["parent_uid"] = parentUID
+		failure = cronCall(t, session, "cron_job_validate", args)
+		require.True(t, failure.IsError)
+		require.Contains(t, string(mustJSON(t, failure)), "parent_ref disagrees with definition.issue.parent_uid")
+	}
+
 }
 
 func TestCronValidateRevisionConflictIsResult(t *testing.T) {

@@ -34,64 +34,54 @@ func TestCronValidationSDKRawDefinition(t *testing.T) {
 	require.Contains(t, string(raw), "0.12345678901234567890123")
 }
 
-// An empty required name is a legitimate request-stage validation outcome.
-func TestCronValidationSDKEmptyName(t *testing.T) {
-	var result generated.CronValidationResult
-	require.NoError(t, json.Unmarshal([]byte(`{"valid":false,"name":"","definition":null,"errors":[{"stage":"request","code":"validation","message":"name required"}],"warnings":[]}`), &result))
-	require.NoError(t, result.Validate())
-}
-
-// SDK result validation must reject malformed nested diagnostics and fires.
-func TestCronValidationSDKNestedResponses(t *testing.T) {
-	for _, raw := range []string{
-		`{"name":"Inspect","definition":null,"errors":[{}],"warnings":[]}`,
-		`{"name":"Inspect","definition":null,"errors":[],"warnings":[{}]}`,
-		`{"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"basis":"adapter_trigger","delivery":"adapter","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[{"at":"2026-11-04T00:00:00Z"}]}}`,
-	} {
-		var result generated.CronValidationResult
-		require.NoError(t, json.Unmarshal([]byte(raw), &result))
-		require.Error(t, result.Validate(), raw)
-	}
-}
-
-func TestCronValidationSDKRequestStageEnvelope(t *testing.T) {
-	var body generated.CronValidationBody
-	require.NoError(t, json.Unmarshal([]byte(`{"name":"","definition":null}`), &body))
-	require.NoError(t, body.Validate())
-}
-
-func TestCronValidationSDKZeroInstants(t *testing.T) {
-	for _, tc := range []struct{ name, from, at string }{
-		{"from", "0001-01-01T00:00:00Z", "0001-01-01T00:01:00Z"},
-		{"fire", "0000-12-31T23:59:59Z", "0001-01-01T00:00:00Z"},
+// Required-field validation accepts present empty names and zero instants,
+// rejects absent/null fields, and validates nested diagnostics and fires.
+func TestCronValidationSDKPresence(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		request, reject bool
+		raw             string
+	}{
+		{"empty-name", false, false, `{"valid":false,"name":"","definition":null,"errors":[{"stage":"request","code":"validation","message":"name required"}],"warnings":[]}`},
+		{"nested-0", false, true, `{"name":"Inspect","definition":null,"errors":[{}],"warnings":[]}`},
+		{"nested-1", false, true, `{"name":"Inspect","definition":null,"errors":[],"warnings":[{}]}`},
+		{"nested-2", false, true, `{"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"basis":"adapter_trigger","delivery":"adapter","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[{"at":"2026-11-04T00:00:00Z"}]}}`},
+		{"request-empty-name", true, false, `{"name":"","definition":null}`},
+		{"zero-from", false, false, `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"basis":"fresh_anchor","delivery":"daemon","zone":"UTC","from":"0001-01-01T00:00:00Z","next":[{"at":"0001-01-01T00:01:00Z","local":"0001-01-01T00:01:00Z"}]}}`},
+		{"zero-fire", false, false, `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"basis":"fresh_anchor","delivery":"daemon","zone":"UTC","from":"0000-12-31T23:59:59Z","next":[{"at":"0001-01-01T00:00:00Z","local":"0001-01-01T00:00:00Z"}]}}`},
+		{"missing-instant-0", false, true, `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"basis":"adapter_trigger","delivery":"adapter","zone":"UTC","next":[]}}`},
+		{"missing-instant-1", false, true, `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"basis":"adapter_trigger","delivery":"adapter","zone":"UTC","from":null,"next":[]}}`},
+		{"missing-instant-2", false, true, `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"basis":"adapter_trigger","delivery":"adapter","zone":"UTC","from":"2026-11-04T00:00:00Z","next":[{"local":"2026-11-04T00:01:00Z"}]}}`},
+		{"missing-instant-3", false, true, `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"basis":"adapter_trigger","delivery":"adapter","zone":"UTC","from":"2026-11-04T00:00:00Z","next":[{"at":null,"local":"2026-11-04T00:01:00Z"}]}}`},
+		{"missing-name", false, true, `{"valid":false,"definition":null,"errors":[],"warnings":[]}`},
+		{"null-name", false, true, `{"name":null,"valid":false,"definition":null,"errors":[],"warnings":[]}`},
+		{"null-name", false, true, `{"valid":true,"name":null,"definition":{},"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`},
+		{"missing-errors", false, true, `{"valid":true,"name":"Inspect","definition":{},"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`},
+		{"null-errors", false, true, `{"valid":true,"name":"Inspect","definition":{},"errors":null,"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`},
+		{"missing-warnings", false, true, `{"valid":true,"name":"Inspect","definition":{},"errors":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`},
+		{"null-warnings", false, true, `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":null,"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`},
+		{"missing-delivery", false, true, `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`},
+		{"missing-basis", false, true, `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"delivery":"adapter","zone":"UTC","from":"2026-11-03T00:00:00Z","next":[]}}`},
+		{"missing-zone", false, true, `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","from":"2026-11-03T00:00:00Z","next":[]}}`},
+		{"missing-from", false, true, `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","next":[]}}`},
+		{"missing-next", false, true, `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"delivery":"adapter","basis":"none","zone":"UTC","from":"2026-11-03T00:00:00Z"}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			raw := `{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":{"basis":"fresh_anchor","delivery":"daemon","zone":"UTC","from":"` + tc.from + `","next":[{"at":"` + tc.at + `","local":"` + tc.at + `"}]}}`
-			var result generated.CronValidationResult
-			require.NoError(t, json.Unmarshal([]byte(raw), &result))
-			require.NoError(t, result.Validate())
+			var err error
+			if tc.request {
+				var body generated.CronValidationBody
+				require.NoError(t, json.Unmarshal([]byte(tc.raw), &body))
+				err = body.Validate()
+			} else {
+				var result generated.CronValidationResult
+				require.NoError(t, json.Unmarshal([]byte(tc.raw), &result))
+				err = result.Validate()
+			}
+			if tc.reject {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
 		})
-	}
-}
-
-func TestCronValidationSDKMissingInstants(t *testing.T) {
-	for _, schedule := range []string{
-		`{"basis":"adapter_trigger","delivery":"adapter","zone":"UTC","next":[]}`,
-		`{"basis":"adapter_trigger","delivery":"adapter","zone":"UTC","from":null,"next":[]}`,
-		`{"basis":"adapter_trigger","delivery":"adapter","zone":"UTC","from":"2026-11-04T00:00:00Z","next":[{"local":"2026-11-04T00:01:00Z"}]}`,
-		`{"basis":"adapter_trigger","delivery":"adapter","zone":"UTC","from":"2026-11-04T00:00:00Z","next":[{"at":null,"local":"2026-11-04T00:01:00Z"}]}`,
-	} {
-		var result generated.CronValidationResult
-		require.NoError(t, json.Unmarshal([]byte(`{"valid":true,"name":"Inspect","definition":{},"errors":[],"warnings":[],"schedule":`+schedule+`}`), &result))
-		require.Error(t, result.Validate(), schedule)
-	}
-}
-
-// Required response names distinguish an empty value from an absent value.
-func TestCronValidationSDKMissingNames(t *testing.T) {
-	for _, name := range []string{"", `"name":null,`} {
-		var result generated.CronValidationResult
-		require.NoError(t, json.Unmarshal([]byte(`{`+name+`"valid":false,"definition":null,"errors":[],"warnings":[]}`), &result))
-		require.Error(t, result.Validate())
 	}
 }

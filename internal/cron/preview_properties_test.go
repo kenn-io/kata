@@ -59,21 +59,20 @@ func normalizationCandidate(ht *hegel.T, workflow bool) []byte {
 	return raw
 }
 
-func TestCronValidationJobParserAgreement(t *testing.T) {
+func TestCronValidationParserAgreement(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
-		raw := normalizationCandidate(ht, false)
-		_, want := ParseJob(raw)
-		_, _, got := Normalize(raw, DecodeJob)
-		require.Equal(ht, want == nil, got == nil)
-	}, hegel.WithTestCases(100), hegel.WithDatabase(t.TempDir()))
-}
-
-func TestCronValidationWorkflowParserAgreement(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		raw := normalizationCandidate(ht, true)
-		_, want := ParseWorkflow(raw)
-		_, _, got := Normalize(raw, DecodeWorkflow)
-		require.Equal(ht, want == nil, got == nil)
+		for _, workflow := range []bool{false, true} {
+			raw := normalizationCandidate(ht, workflow)
+			var want, got error
+			if workflow {
+				_, want = ParseWorkflow(raw)
+				_, _, got = Normalize(raw, DecodeWorkflow)
+			} else {
+				_, want = ParseJob(raw)
+				_, _, got = Normalize(raw, DecodeJob)
+			}
+			require.Equal(ht, want == nil, got == nil, "workflow=%t raw=%s", workflow, raw)
+		}
 	}, hegel.WithTestCases(100), hegel.WithDatabase(t.TempDir()))
 }
 
@@ -91,11 +90,28 @@ func TestCronValidationPreservesInput(t *testing.T) {
 }
 
 func TestCronValidationOpaqueNumberSpelling(t *testing.T) {
+	// Retain the fixed valid workflow regression alongside generated spellings.
+	_, fixed, err := Normalize([]byte(`{"version":1,"steps":[{"key":"review","kind":"prompt","prompt":"Review","options":{"n":12345678901234567890123}}]}`), DecodeWorkflow)
+	require.NoError(t, err)
+	require.Contains(t, string(fixed), "12345678901234567890123")
 	hegel.Test(t, func(ht *hegel.T) {
 		integer := hegel.Draw(ht, hegel.Integers(int64(math.MinInt64), int64(math.MaxInt64)))
 		exponent := hegel.Draw(ht, hegel.Integers(-300, 300))
 		literal := fmt.Sprintf(`%dE%+d`, integer, exponent)
-		nested := []byte(fmt.Sprintf(`{"nested":[{"value":%s}],"decimal":0.12345678901234567890123}`, literal))
+		nested := []byte(fmt.Sprintf(`{"nested":[{"value":%s}],"decimal":0.12345678901234567890123,"n":12345678901234567890123}`, literal))
+		workflow := WorkflowDefinition{Version: 1, Steps: []WorkflowStep{{Key: "review", Kind: "prompt", Prompt: "Review", Options: nested}}}
+		workflowRaw, err := json.Marshal(workflow)
+		require.NoError(ht, err)
+		_, normalizedWorkflow, _ := Normalize(workflowRaw, DecodeWorkflow)
+		require.NotEmpty(ht, normalizedWorkflow)
+		var workflowFields struct {
+			Steps []struct {
+				Options jsontext.Value `json:"options"`
+			} `json:"steps"`
+		}
+		require.NoError(ht, json.Unmarshal(normalizedWorkflow, &workflowFields))
+		require.Len(ht, workflowFields.Steps, 1)
+		require.Equal(ht, jsontext.Value(nested), workflowFields.Steps[0].Options)
 		job := drawPreviewJob(ht)
 		job.Options = nested
 		raw, err := json.Marshal(job)
@@ -123,11 +139,16 @@ func drawPreviewState(ht *hegel.T) (JobDefinition, *RecurringProgress, time.Time
 	return job, stored, from, count
 }
 
-func TestCronPreviewOrderedFutureInstants(t *testing.T) {
+func TestCronPreviewOccurrenceAgreement(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
 		job, stored, from, count := drawPreviewState(ht)
+		job.Enabled = false
+		paused, err := PreviewSchedule(job, stored, from, count)
+		require.NoError(ht, err)
+		job.Enabled = true
 		out, err := PreviewSchedule(job, stored, from, count)
 		require.NoError(ht, err)
+		require.Equal(ht, out, paused)
 		require.LessOrEqual(ht, len(out.Next), count)
 		previous := from
 		if stored != nil && stored.Through.After(previous) {
@@ -137,14 +158,6 @@ func TestCronPreviewOrderedFutureInstants(t *testing.T) {
 			require.True(ht, fire.At.After(previous))
 			previous = fire.At
 		}
-	}, hegel.WithTestCases(100), hegel.WithDatabase(t.TempDir()))
-}
-
-func TestCronPreviewOccurrenceAgreement(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		job, stored, from, count := drawPreviewState(ht)
-		out, err := PreviewSchedule(job, stored, from, count)
-		require.NoError(ht, err)
 		progress := RecurringProgress{Version: 1, Anchor: from, Through: from}
 		if stored != nil {
 			progress = *stored
@@ -160,20 +173,29 @@ func TestCronPreviewOccurrenceAgreement(t *testing.T) {
 	}, hegel.WithTestCases(100), hegel.WithDatabase(t.TempDir()))
 }
 
-func TestCronPreviewPausedInvariant(t *testing.T) {
-	hegel.Test(t, func(ht *hegel.T) {
-		job, stored, from, count := drawPreviewState(ht)
-		job.Enabled = false
-		paused, err := PreviewSchedule(job, stored, from, count)
-		require.NoError(ht, err)
-		job.Enabled = true
-		enabled, err := PreviewSchedule(job, stored, from, count)
-		require.NoError(ht, err)
-		require.Equal(ht, enabled, paused)
-	}, hegel.WithTestCases(100), hegel.WithDatabase(t.TempDir()))
-}
-
 func TestCronPreviewTimestampDomain(t *testing.T) {
+	{
+		job := previewJob(t)
+		for _, from := range []time.Time{
+			time.Date(0, 1, 1, 0, 0, 0, 0, time.FixedZone("ahead", 14*60*60)),
+			time.Date(9999, 12, 31, 23, 59, 59, 0, time.FixedZone("behind", -12*60*60)),
+		} {
+			_, err := PreviewSchedule(job, nil, from, 1)
+			require.ErrorContains(t, err, "from must represent an RFC3339 UTC instant")
+		}
+
+	}
+	{
+		job := previewJob(t)
+		job.Trigger = Trigger{Kind: "once", At: "9999-12-31T23:30:00-01:00", Timezone: "Etc/GMT+1"}
+		from := time.Date(9999, 12, 31, 22, 0, 0, 0, time.UTC)
+		out, err := PreviewSchedule(job, nil, from, 1)
+		require.NoError(t, err)
+		require.Empty(t, out.Next)
+		_, err = json.Marshal(out)
+		require.NoError(t, err)
+
+	}
 	hegel.Test(t, func(ht *hegel.T) {
 		job := drawPreviewJob(ht)
 		year := hegel.Draw(ht, hegel.OneOf(hegel.Integers(0, 9999), hegel.SampledFrom([]int{0, 1, 9999})))

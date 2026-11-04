@@ -49,4 +49,25 @@ func CheckCronValidateSnapshot(t *testing.T, reader db.CronSQL, writer db.Storag
 	require.NoError(t, err)
 	require.False(t, out.Valid)
 	require.Equal(t, "dependencies", out.Errors[0].Stage)
+	// Enter a real transaction before cancelling. This exercises an operational
+	// read error inside the callback, rather than BeginTx rejecting the context.
+	cancelled, cancelRead := context.WithCancel(ctx)
+	defer cancelRead()
+	entered := false
+	reader.ReadTransact = func(ctx context.Context, run func(*sql.Tx) error) error {
+		return readTransaction(ctx, func(tx *sql.Tx) error {
+			var one int
+			if err := tx.QueryRowContext(ctx, `SELECT 1`).Scan(&one); err != nil {
+				return err
+			}
+			entered = true
+			cancelRead()
+			return run(tx)
+		})
+	}
+	out, err = reader.Validate(cancelled, in, true)
+	require.True(t, entered)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Empty(t, out.Errors, "operational errors must escape rather than become staged errors")
+
 }
