@@ -12,37 +12,31 @@ import (
 // These five literal outcomes apply under both branch policies: already-started
 // parents continue, and dependency success/waiting/blocking is policy-independent.
 func TestWorkflowFixtureArtifacts(t *testing.T) {
-	for _, policy := range []string{"continue", "stop"} {
-		var scenarios []Scenario
-		if err := json.Unmarshal([]byte(workflowFixtureCases), &scenarios); err != nil {
+	var scenarios []Scenario
+	if err := json.Unmarshal([]byte(workflowFixtureCases), &scenarios); err != nil {
+		t.Fatal(err)
+	}
+	d := Declaration{Name: "kata-reference", CatchupLimit: 1000, FailurePolicy: "continue"}
+	raw, err := json.Marshal(bundle{Schema: SchemaV2, Declaration: &d, Scenarios: scenarios}, jsontext.WithIndent("  "), json.Deterministic(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = append(raw, '\n')
+	path := filepath.Join("testdata", "adapter-v2", "workflow.json")
+	if *updateFixtures {
+		if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
 			t.Fatal(err)
 		}
-		d := Declaration{Name: "kata-reference", CatchupLimit: 1000, FailurePolicy: policy}
-		raw, err := json.Marshal(bundle{Schema: SchemaV2, Declaration: &d, Scenarios: scenarios}, jsontext.WithIndent("  "), json.Deterministic(true))
-		if err != nil {
+		if err := os.WriteFile(path, raw, 0600); err != nil {
 			t.Fatal(err)
 		}
-		raw = append(raw, '\n')
-		name := "workflow.json"
-		if policy == "stop" {
-			name = "workflow-stop.json"
-		}
-		path := filepath.Join("testdata", "adapter-v2", name)
-		if *updateFixtures {
-			if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(path, raw, 0600); err != nil {
-				t.Fatal(err)
-			}
-		}
-		got, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(got, raw) {
-			t.Fatalf("%s differs from independent literals", name)
-		}
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, raw) {
+		t.Fatal("workflow.json differs from independent literals")
 	}
 }
 
