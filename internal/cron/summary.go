@@ -4,6 +4,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -114,13 +115,13 @@ func (s *Summary) UnmarshalJSON(input []byte) error {
 	return nil
 }
 
+var stepTimestamp = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.([0-9]+))?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$`)
+
 // ParseSummary decodes and validates one bounded observation summary.
 func ParseSummary(input []byte) (Summary, error) {
 	var value Summary
-	if err := decode(input, &value, SummaryLimit); err != nil {
-		return value, err
-	}
-	return value, nil
+	err := value.UnmarshalJSON(input)
+	return value, err
 }
 
 func (s Summary) validate() error {
@@ -157,22 +158,20 @@ func (s Summary) validate() error {
 		default:
 			return invalid("invalid step status")
 		}
-		var start, end time.Time
+		// time.Parse truncates fractions past nanoseconds; compare the full evidence.
+		times, fractions := [2]time.Time{}, [2]string{}
 		for i, raw := range []string{step.StartedAt, step.EndedAt} {
 			if raw == "" {
 				continue
 			}
 			at, err := time.Parse(time.RFC3339Nano, raw)
-			if err != nil {
+			parts := stepTimestamp.FindStringSubmatch(raw)
+			if err != nil || parts == nil {
 				return invalid("invalid step timestamp")
 			}
-			if i == 0 {
-				start = at
-			} else {
-				end = at
-			}
+			times[i], fractions[i] = at, strings.TrimRight(parts[1], "0")
 		}
-		if step.StartedAt != "" && step.EndedAt != "" && end.Before(start) {
+		if step.StartedAt != "" && step.EndedAt != "" && (times[1].Before(times[0]) || times[1].Equal(times[0]) && fractions[1] < fractions[0]) {
 			return invalid("step end precedes start")
 		}
 	}
