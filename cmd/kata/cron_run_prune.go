@@ -97,7 +97,7 @@ Counts describe this batch. If more is true, run another preview before deleting
 			response, err := client.PruneCronRunsWithResponse(cmd.Context(), &generated.PruneCronRunsRequestOptions{
 				PathParams: &generated.PruneCronRunsPath{ProjectID: project.ID},
 				Header:     &generated.PruneCronRunsHeaders{XKataConfirm: &confirm},
-				Body:       &generated.PruneCronRunsBody{Actor: &actor, Before: time.Now().Add(-age).UTC(), Keep: &keep, Limit: &limit, JobUID: &job, WorkflowUID: &workflow, DryRun: !force},
+				Body:       &generated.PruneCronRunsBody{Actor: &actor, Before: time.Now().Add(-age).UTC(), Keep: &keep, Limit: &limit, JobUID: optionalString(job), WorkflowUID: optionalString(workflow), DryRun: !force},
 			})
 			if response == nil {
 				return externalCLITransportError(response, err)
