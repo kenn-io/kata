@@ -45,17 +45,17 @@ func TestRecurringAlertsPreserveErrorsAndSuppressOnlyRepeats(t *testing.T) {
 	s.CronRecorder = r
 	// Ordinary callers still receive identical recurring failures every time.
 	require.ErrorContains(t, s.RunOnce(t.Context(), time.Now()), "first failure")
-	_, _, err, alert := s.runOnce(t.Context(), time.Now())
-	require.ErrorContains(t, err, "first failure")
-	require.NoError(t, alert)
-	_, _, err, alert = s.runOnce(t.Context(), time.Now())
-	require.ErrorContains(t, err, "changed failure")
-	require.ErrorContains(t, alert, "changed failure")
+	result := s.runOnce(t.Context(), time.Now())
+	require.ErrorContains(t, result.err, "first failure")
+	require.NoError(t, result.alert)
+	result = s.runOnce(t.Context(), time.Now())
+	require.ErrorContains(t, result.err, "changed failure")
+	require.ErrorContains(t, result.alert, "changed failure")
 	store.listingError = errors.New("ordinary listing failure")
-	_, _, err, alert = s.runOnce(t.Context(), time.Now())
-	require.ErrorContains(t, err, "ordinary listing failure")
-	require.ErrorContains(t, alert, "ordinary listing failure")
-	require.NotContains(t, alert.Error(), "changed failure")
+	result = s.runOnce(t.Context(), time.Now())
+	require.ErrorContains(t, result.err, "ordinary listing failure")
+	require.ErrorContains(t, result.alert, "ordinary listing failure")
+	require.NotContains(t, result.alert.Error(), "changed failure")
 }
 
 func TestRecurringOnErrorOncePerChange(t *testing.T) {
