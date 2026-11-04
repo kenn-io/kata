@@ -647,6 +647,93 @@ describe('IssueCollection', () => {
     expect(screen.queryByRole('button', { name: /Child task/ })).toBeNull()
   })
 
+  it('does not show an expanded child again as a flat row', async () => {
+    const parent = task({
+      uid: 'issue-parent',
+      short_id: 'parent',
+      qualified_id: 'example-project#parent',
+      title: 'Parent task',
+      child_counts: { open: 1, total: 1 },
+    })
+    const child = task({
+      uid: 'issue-child',
+      short_id: 'child',
+      qualified_id: 'example-project#child',
+      title: 'Child task',
+      parent_short_id: parent.short_id,
+    })
+    render(IssueCollection, {
+      props: {
+        currentView: viewWithIssues([parent, child]),
+        issueCatalog: [parent, child],
+        selectedIssueUID: null,
+        loading: false,
+        onSelect: () => {},
+      },
+    })
+
+    expect(screen.queryByRole('button', { name: /Child task/ })).toBeNull()
+
+    const parentRow = screen.getByRole('button', { name: /Parent task/ })
+    await fireEvent.keyDown(parentRow, { key: 'ArrowRight' })
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: /Child task/ })).toHaveLength(1)
+    })
+    expect(
+      screen.getByRole('button', { name: /Child task/ }).classList.contains('row--child'),
+    ).toBe(true)
+  })
+
+  it('bounds identity reads as Logbook date groups increase', () => {
+    const issueCount = 128
+    const readsByGroupCount: number[] = []
+
+    // Keep the issue count fixed so extra groups cannot justify rescanning every issue.
+    for (const groupCount of [4, 64]) {
+      let identityReads = 0
+      const groups = Array.from({ length: groupCount }, (_, groupIndex) => {
+        const date = new Date(Date.UTC(2026, 0, groupIndex + 1)).toISOString().slice(0, 10)
+        const issues = Array.from({ length: issueCount / groupCount }, (_, issueIndex) => {
+          const shortID = `task-${groupIndex}-${issueIndex}`
+          const issue = task({
+            uid: `issue-${shortID}`,
+            short_id: shortID,
+            qualified_id: `example-project#${shortID}`,
+            title: shortID,
+            status: 'closed',
+            closed_at: `${date}T08:00:00Z`,
+          })
+          Object.defineProperty(issue, 'short_id', {
+            enumerable: true,
+            get() {
+              identityReads += 1
+              return shortID
+            },
+          })
+          return issue
+        })
+        return { id: date, title: date, issues }
+      })
+      const { unmount } = render(IssueCollection, {
+        props: {
+          currentView: { name: 'logbook', fetched_at: currentView.fetched_at, groups },
+          selectedIssueUID: null,
+          loading: false,
+          onSelect: () => {},
+        },
+      })
+
+      expect(visibleRows()).toHaveLength(issueCount)
+      readsByGroupCount.push(identityReads)
+      unmount()
+    }
+
+    expect(readsByGroupCount[0]).toBeGreaterThan(0)
+    // Sixteen times as many groups should stay within a generous constant factor.
+    expect(readsByGroupCount[1]).toBeLessThan(readsByGroupCount[0]! * 3)
+  })
+
   it('nests a child under its parent across date groups', async () => {
     const parent = task({
       uid: 'issue-parent',
