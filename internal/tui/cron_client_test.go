@@ -2,7 +2,10 @@ package tui
 
 import (
 	"encoding/json/v2"
+	"errors"
+	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
@@ -10,6 +13,27 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kata/pkg/client/generated"
 )
+
+func TestCronClientEnabledTimeoutDoesNotChangeReadTimeout(t *testing.T) {
+	var remaining []time.Duration
+	hc := &http.Client{Timeout: defaultHTTPTimeout, Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		deadline, ok := req.Context().Deadline()
+		require.True(t, ok)
+		remaining = append(remaining, time.Until(deadline))
+		return nil, errors.New("request stopped after capturing its deadline")
+	})}
+	c := NewClient("https://daemon.example", hc)
+	_, err := c.CronJobEnabled(t.Context(), 42, "example-job", "example-event", "operator", false)
+	require.Error(t, err)
+	_, err = c.ListCronJobs(t.Context(), 42)
+	require.Error(t, err)
+
+	require.Len(t, remaining, 2)
+	require.Greater(t, remaining[0], 15*time.Second, "enabled actions must outlive the daemon's 15-second federation forward")
+	require.Greater(t, remaining[1], 4*time.Second)
+	require.LessOrEqual(t, remaining[1], defaultHTTPTimeout, "ordinary reads keep the default timeout")
+	require.Equal(t, defaultHTTPTimeout, hc.Timeout, "the shared client keeps its default timeout")
+}
 
 func TestCronClientReadsStoredRecords(t *testing.T) {
 	env := testenv.New(t)

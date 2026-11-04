@@ -364,15 +364,17 @@ func (a CronSQL) checkCronPutDependencies(ctx context.Context, tx *sql.Tx, req c
 	}
 	if req.job && !req.deleted {
 		// Existing native progress and ownership were checked above. An
-		// enabled-only edit retains its parent even while that parent is
-		// soft-deleted, so operators can pause before restoring it.
-		if current.DeletedAt == nil && cron.IsRecurringIssueJob(req.definition.(cron.JobDefinition)) && len(current.document) > 0 {
+		// enabled-only edit retains dependencies even while they are
+		// soft-deleted, so operators can pause before restoring them.
+		if current.DeletedAt == nil && len(current.document) > 0 {
 			old, err := cron.DecodeJob(current.document)
 			if err != nil {
 				return err
 			}
-			old.Enabled = req.definition.(cron.JobDefinition).Enabled
-			if reflect.DeepEqual(old, req.definition) {
+			definition := req.definition.(cron.JobDefinition)
+			enabledChanged := old.Enabled != definition.Enabled
+			old.Enabled = definition.Enabled
+			if enabledChanged && reflect.DeepEqual(old, definition) {
 				return nil
 			}
 		}

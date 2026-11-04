@@ -57,7 +57,7 @@ func (m Model) routeCronEnabledKey(lines []cronLine, cursor int) (Model, tea.Cmd
 			if err == nil && parent.open {
 				progress, ok := parent.progress[current.UID]
 				if !ok {
-					err = errors.New("recurring progress is unavailable")
+					err = errors.New("Cannot count missed runs; refresh the job before resuming")
 				} else {
 					definition := current.Definition
 					definition.Enabled = true
@@ -111,7 +111,7 @@ func (m Model) cronEnabledWrite(request cronEnabledRequest) tea.Cmd {
 	api, pid, actor := m.api, m.scope.projectID, m.list.actor
 	return func() tea.Msg {
 		// Bubble Tea supplies no context; bound the independent command lifetime.
-		ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), cronEnabledTimeout)
 		defer cancel()
 		_, err := api.CronJobEnabled(ctx, pid, request.uid, request.expected, actor, request.enabled)
 		return cronEnabledDoneMsg{request, err}

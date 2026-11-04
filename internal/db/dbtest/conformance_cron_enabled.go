@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/db"
 )
 
@@ -38,5 +39,30 @@ func checkCronEnabledDeletedParent(t *testing.T, s db.Storage) error {
 	out, err := s.DispatchRecurringCron(t.Context(), db.DispatchRecurringCronIn{ProjectID: p.ID, JobUID: job.UID, ExpectedEventUID: job.DefinitionEventUID, Now: progress.Anchor.Add(4 * time.Hour)})
 	require.NoError(t, err)
 	require.NotEmpty(t, out.Events)
+	t.Run("adapter", func(t *testing.T) {
+		project, err := s.CreateProject(t.Context(), "adapter-project")
+		require.NoError(t, err)
+		parent, _, err := s.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Adapter dependency", Author: "operator"})
+		require.NoError(t, err)
+		definition := cron.JobDefinition{
+			Version: 1, Kind: "job", Enabled: true,
+			Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: 7200},
+			Action:  cron.Action{Kind: "notify", Recipient: "operator", Message: "Review service"},
+			Issue:   &cron.IssuePolicy{Kind: "existing", UID: parent.UID},
+			Overlap: "allow", Catchup: "latest",
+		}
+		job, _, err := s.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Adapter job", Actor: "operator", Definition: definition})
+		require.NoError(t, err)
+		_, _, _, err = s.SoftDeleteIssue(t.Context(), parent.ID, "operator")
+		require.NoError(t, err)
+		definition.Enabled = false
+		paused, events, err := s.PutCronJob(t.Context(), db.PutCronJob{
+			ProjectID: project.ID, UID: job.UID, Name: job.Name, Definition: definition,
+			Actor: "operator", ExpectedEventUID: job.DefinitionEventUID,
+		})
+		require.NoError(t, err)
+		require.Len(t, events, 1)
+		require.Equal(t, definition, paused.Definition)
+	})
 	return nil
 }

@@ -26,12 +26,15 @@ type cronEnabledTestAPI struct {
 	parent                cronParent
 	parentErr, errorWrite error
 	enabledCalls          []enabledCall
+	mutationDeadline      time.Time
+	mutationHasDeadline   bool
 }
 
 func (a *cronEnabledTestAPI) readCronParent(context.Context, int64, string) (cronParent, error) {
 	return a.parent, a.parentErr
 }
-func (a *cronEnabledTestAPI) CronJobEnabled(_ context.Context, _ int64, id, expected, actor string, enabled bool) (db.CronJob, error) {
+func (a *cronEnabledTestAPI) CronJobEnabled(ctx context.Context, _ int64, id, expected, actor string, enabled bool) (db.CronJob, error) {
+	a.mutationDeadline, a.mutationHasDeadline = ctx.Deadline()
 	a.enabledCalls = append(a.enabledCalls, enabledCall{id, expected, actor, enabled})
 	return a.shown, a.errorWrite
 }
@@ -82,6 +85,16 @@ func TestCronEnabledKeyListAndDetail(t *testing.T) {
 			require.Equal(t, []enabledCall{{uid: api.shown.UID, expected: api.shown.DefinitionEventUID, actor: "operator", enabled: false}}, api.enabledCalls)
 		})
 	}
+}
+
+func TestCronEnabledWriteAllowsFederationForwarding(t *testing.T) {
+	m, api := enabledFixture(t, executeRecord(`{}`))
+	m, lookup := press(m, keyRune('p'))
+	m, write := deliverEnabled(t, m, lookup)
+	_, _ = deliverEnabled(t, m, write)
+
+	require.True(t, api.mutationHasDeadline)
+	require.Greater(t, time.Until(api.mutationDeadline), 15*time.Second)
 }
 
 func TestCronResumeBacklogConfirmation(t *testing.T) {
@@ -170,13 +183,31 @@ func TestCronEnabledAdmissionAndPending(t *testing.T) {
 			case "other-tab":
 				m = sendRune(m, '3')
 			}
-			_, cmd := press(m, keyRune('p'))
-			if kind != "stale-permissions" {
-				require.Nil(t, cmd)
+			m, cmd := press(m, keyRune('p'))
+			if kind == "stale-permissions" {
+				require.NotNil(t, cmd, "stale permissions must schedule capability discovery")
+				require.Nil(t, m.cron.enabled, "permission discovery must not admit a pending enabled action")
+				require.NotNil(t, m.toast)
+				require.Contains(t, m.toast.text, "Checking daemon permissions")
+				require.Empty(t, api.enabledCalls)
+				return
 			}
+			require.Nil(t, cmd)
 			require.Empty(t, api.enabledCalls)
 		})
 	}
+}
+
+func TestCronResumeMissingProgressUsesUserFacingMessage(t *testing.T) {
+	m, api := enabledFixture(t, pausedNative())
+	api.parent = cronParent{open: true, progress: map[string]cron.RecurringProgress{}}
+	m, lookup := press(m, keyRune('p'))
+	m, write := deliverEnabled(t, m, lookup)
+	require.NotNil(t, write)
+	require.NotNil(t, m.toast)
+	require.Contains(t, m.toast.text, "Cannot count missed runs")
+	require.NotContains(t, m.toast.text, "recurring progress")
+	require.Empty(t, api.enabledCalls)
 }
 
 func TestCronResumeConflictRefreshes(t *testing.T) {

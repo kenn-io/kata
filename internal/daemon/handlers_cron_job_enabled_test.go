@@ -110,6 +110,51 @@ func TestCronJobEnabledPreservationProperty(t *testing.T) {
 	})
 }
 
+// Contract: an enabled-only pause or resume preserves an adapter definition
+// after its referenced issue is deleted. The existing issue can be restored
+// later without rewriting the job document.
+func TestCronJobEnabledDeletedAdapterParentProperty(t *testing.T) {
+	env := testenv.New(t, testenv.WithAuthToken("tok"))
+	project := seedProject(t, env, "example-project")
+	hegel.Test(t, func(ht *hegel.T) {
+		parent, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Adapter dependency", Author: "operator"})
+		require.NoError(ht, err)
+		drawText := func() string {
+			text := []rune(hegel.Draw(ht, hegel.Text()))
+			return string(text[:min(len(text), 40)])
+		}
+		definition := cron.JobDefinition{
+			Version: 1, Kind: "job", Enabled: true,
+			Trigger: cron.Trigger{Kind: "interval", IntervalSeconds: int64(hegel.Draw(ht, hegel.Integers(60, 86400)))},
+			Action:  cron.Action{Kind: "notify", Recipient: "operator", Message: "Review " + drawText()},
+			Issue:   &cron.IssuePolicy{Kind: "existing", UID: parent.UID},
+			Overlap: "allow", Catchup: "latest",
+			Options: jsontext.Value(fmt.Appendf(nil, `{"opaque":%d}`, hegel.Draw(ht, hegel.Integers(0, 999999)))),
+		}
+		job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Adapter job", Actor: "operator", Definition: definition})
+		require.NoError(ht, err)
+		_, _, _, err = env.DB.SoftDeleteIssue(t.Context(), parent.ID, "operator")
+		require.NoError(ht, err)
+		path := fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s", project.ID, job.UID)
+		for _, action := range []struct {
+			name    string
+			enabled bool
+		}{{"pause", false}, {"resume", true}} {
+			status, raw := cronHTTP(t, env, http.MethodPost, path+"/"+action.name, map[string]any{
+				"actor": "operator", "expected_event_uid": job.DefinitionEventUID,
+			})
+			require.Equalf(ht, http.StatusOK, status, "%s", raw)
+			var out api.CronJobResponse
+			require.NoError(ht, json.Unmarshal(raw, &out.Body))
+			want := job.Definition
+			want.Enabled = action.enabled
+			require.Equal(ht, want, out.Body.Job.Definition.Native())
+			require.Len(ht, out.Body.Events, 1)
+			job = db.CronJob{CronDefinition: out.Body.Job.CronDefinition, Definition: out.Body.Job.Definition.Native()}
+		}
+	})
+}
+
 func TestCronJobPauseLosesConcurrentEdit(t *testing.T) {
 	env := testenv.New(t)
 	project := seedProject(t, env, "example-project")

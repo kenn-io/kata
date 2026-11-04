@@ -6,6 +6,9 @@ import (
 	"encoding/json/v2"
 	"fmt"
 	"strings"
+	"time"
+
+	"github.com/doordash-oss/oapi-codegen-dd/v3/pkg/runtime"
 
 	kataapi "go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
@@ -190,9 +193,12 @@ func (c *Client) PutCronJob(ctx context.Context, projectID int64, uid string, wr
 	return decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, nil)
 }
 
+// Allow the daemon's 15-second federation forward plus response overhead.
+const cronEnabledTimeout = 20 * time.Second
+
 // CronJobEnabled changes enabled under the revision counted or selected by the UI.
 func (c *Client) CronJobEnabled(ctx context.Context, projectID int64, uid, expected, actor string, enabled bool) (db.CronJob, error) {
-	client, err := c.generatedClient()
+	client, err := generated.NewDefaultClient(c.base, runtime.WithHTTPClient(tuiRequestDoer{client: c, timeout: cronEnabledTimeout}))
 	if err != nil {
 		return db.CronJob{}, err
 	}
