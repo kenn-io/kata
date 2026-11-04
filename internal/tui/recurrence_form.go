@@ -10,7 +10,7 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"go.kenn.io/kata/internal/recurrence"
+	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 )
 
 // recurrenceFormState is what a Repeat form needs beyond its fields: the
@@ -20,7 +20,7 @@ type recurrenceFormState struct {
 	issueRevision int64
 	// rec is the recurrence the form read; nil when the issue has none, which
 	// makes a save start one.
-	rec *recurrence.View
+	rec *recurrenceclient.View
 	// rule, start and zone are the values the form was opened with.
 	rule, start, zone string
 	// currentAfterRefusal describes the recurrence that beat a refused save.
@@ -36,13 +36,13 @@ type recurrenceFormLoadedMsg struct {
 	formGen    int64
 	target     formTarget
 	issue      Issue
-	recurrence *recurrence.View
+	recurrence *recurrenceclient.View
 	err        error
 	// refused is why the issue cannot repeat at all; no form opens for it.
 	refused error
 }
 
-func newRecurrenceForm(target formTarget, issue Issue, rec *recurrence.View) inputState {
+func newRecurrenceForm(target formTarget, issue Issue, rec *recurrenceclient.View) inputState {
 	s := inputState{
 		kind:   inputRecurrenceForm,
 		title:  fmt.Sprintf("repeat #%s", target.issueShortID),
@@ -71,13 +71,13 @@ func newRecurrenceForm(target formTarget, issue Issue, rec *recurrence.View) inp
 // loadRecurrence fills the form from the recurrence, or from the issue when it
 // has none: the issue's date and the zone kata schedule would pick. The
 // revisions a save is guarded on are the ones just read.
-func (s inputState) loadRecurrence(issue Issue, rec *recurrence.View) inputState {
+func (s inputState) loadRecurrence(issue Issue, rec *recurrenceclient.View) inputState {
 	state := recurrenceFormState{issueRevision: issue.Revision, rec: rec}
 	if rec != nil {
 		state.rule, state.start, state.zone = rec.RRule, rec.DTStart, rec.Timezone
 	} else {
 		state.start = cmp.Or(issue.ScheduledOnDate, issue.scheduledOn())
-		state.zone, _ = recurrence.ResolveZone("", "", issue.timezone(), recurrence.LocalZone)
+		state.zone, _ = recurrenceclient.ResolveZone("", "", issue.timezone(), localZone)
 	}
 	s.recurrence = state
 	for i := range s.fields {
@@ -106,13 +106,17 @@ func (m Model) routeRecurrenceKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 }
 
 // readRecurrenceForm reads the issue as the daemon holds it now with its
-// recurrence, so the form opens on current values and revisions.
+// recurrence (one list call), so the form opens on current values and revisions.
 func readRecurrenceForm(api detailAPI, target formTarget, formGen int64, connGen uint64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		msg := recurrenceFormLoadedMsg{connGen: connGen, formGen: formGen, target: target}
-		detail, err := api.GetIssueDetail(ctx, target.projectID, target.issueShortID)
+		read := api.GetIssueDetail
+		if reader, ok := api.(issueReadAPI); ok {
+			read = reader.ReadIssue
+		}
+		detail, err := read(ctx, target.projectID, target.issueShortID)
 		if err != nil || detail == nil || detail.Issue == nil {
 			msg.err = cmp.Or(err, errors.New("the daemon returned no issue"))
 			return msg
@@ -272,7 +276,7 @@ func (m Model) reloadRecurrenceForm(current recurrenceSnapshot) Model {
 	return m
 }
 
-func describeRecurrence(rec *recurrence.View) string {
+func describeRecurrence(rec *recurrenceclient.View) string {
 	if rec == nil {
 		return "now: no recurrence"
 	}
@@ -281,7 +285,7 @@ func describeRecurrence(rec *recurrence.View) string {
 
 // renderRecurrenceRow is the detail line for a recurring issue: its rule, the
 // next occurrence after the issue's own, and the zone.
-func renderRecurrenceRow(rec *recurrence.View, width int) string {
+func renderRecurrenceRow(rec *recurrenceclient.View, width int) string {
 	next := "none"
 	if rec.NextOccurrenceKey != nil {
 		next = *rec.NextOccurrenceKey

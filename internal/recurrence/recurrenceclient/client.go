@@ -1,4 +1,9 @@
-package recurrence
+// Package recurrenceclient is what every client of the daemon's recurrence routes
+// shares: the calls (List, Active, Start, Change, Stop), the template built
+// from a shown issue, the zone rules and the refusal for the parent of a cron
+// job, so `kata schedule --repeat` and the TUI behave alike. The store layer
+// uses internal/recurrence instead and does not import this package.
+package recurrenceclient
 
 import (
 	"context"
@@ -13,11 +18,6 @@ import (
 
 	"go.kenn.io/kata/pkg/client/generated"
 )
-
-// This file is what every client of the daemon's recurrence routes shares:
-// `kata schedule --repeat` and the TUI's recurrence form build the template
-// from the issue (TemplateFromShow), pick the zone, refuse a cron parent and
-// guard writes the same way. The daemon is the only validator of a rule.
 
 // CronProgressPrefix starts the metadata keys a native cron job writes on the
 // issue it parents.
@@ -136,11 +136,11 @@ func ResolveZone(explicit, recurrenceZone, issueZone string, localZone func() st
 const DefaultLocaltimePath = "/etc/localtime"
 
 // LocalZone names the caller's local IANA zone: TZ first, then the
-// /etc/localtime link. It returns "" when nothing names a zone, so the
+// link at localtimePath. It returns "" when nothing names a zone, so the
 // daemon falls back to its own timezone.
-func LocalZone() string {
+func LocalZone(localtimePath string) string {
 	tz, set := os.LookupEnv("TZ")
-	return ResolveLocalZone(tz, set, DefaultLocaltimePath)
+	return ResolveLocalZone(tz, set, localtimePath)
 }
 
 // ResolveLocalZone is LocalZone with its inputs given. A TZ that is set but

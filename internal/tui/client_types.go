@@ -10,7 +10,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/commentref"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kata/internal/recurrence"
+	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 )
 
 // Issue is a strict subset of the daemon's wire shape. Labels rides on
@@ -75,7 +75,7 @@ func (m *issueMetadata) UnmarshalJSON(data []byte) error {
 	}
 	*m = issueMetadata{
 		ScheduledOn: keys["scheduled_on"], DeadlineOn: keys["deadline_on"], Timezone: keys["timezone"],
-		cronParent: recurrence.ParentsCronJob(keys),
+		cronParent: recurrenceclient.ParentsCronJob(keys),
 	}
 	return nil
 }
@@ -423,7 +423,7 @@ type IssueDetail struct {
 	Lease    *api.IssueClaimOut
 	// Recurrence is the live recurrence the issue belongs to; nil when it
 	// has none or the daemon would not list it.
-	Recurrence *recurrence.View
+	Recurrence *recurrenceclient.View
 }
 
 // showIssueLabel is the per-label projection from showIssue's labels

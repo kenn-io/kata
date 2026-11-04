@@ -20,7 +20,7 @@ import (
 	"go.kenn.io/kata/internal/api"
 	clientpkg "go.kenn.io/kata/internal/client"
 	"go.kenn.io/kata/internal/config"
-	"go.kenn.io/kata/internal/recurrence"
+	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 	"go.kenn.io/kata/internal/shortid"
 	"go.kenn.io/kata/internal/telemetry"
 	katauid "go.kenn.io/kata/internal/uid"
@@ -259,6 +259,17 @@ func (c *Client) listIssuesAt(ctx context.Context, projectID *int64, f ListFilte
 // ref is a short_id, qualified short_id, or UID — the daemon's path
 // resolver picks the matching column.
 func (c *Client) GetIssueDetail(ctx context.Context, projectID int64, ref string) (*IssueDetail, error) {
+	detail, err := c.ReadIssue(ctx, projectID, ref)
+	if err != nil {
+		return nil, err
+	}
+	detail.Recurrence = c.recurrenceOrNil(ctx, projectID, detail.Issue.RecurrenceID)
+	return detail, nil
+}
+
+// ReadIssue is GetIssueDetail without the recurrence read, for callers that
+// read the recurrence themselves or do not need it.
+func (c *Client) ReadIssue(ctx context.Context, projectID int64, ref string) (*IssueDetail, error) {
 	body, err := c.showIssue(ctx, projectID, ref)
 	if err != nil {
 		return nil, err
@@ -268,18 +279,17 @@ func (c *Client) GetIssueDetail(ctx context.Context, projectID int64, ref string
 		lease = body.Claim
 	}
 	return &IssueDetail{
-		Issue:      &body.Issue,
-		Parent:     body.Parent,
-		Children:   body.Children,
-		Lease:      lease,
-		Recurrence: c.recurrenceOrNil(ctx, projectID, body.Issue.RecurrenceID),
+		Issue:    &body.Issue,
+		Parent:   body.Parent,
+		Children: body.Children,
+		Lease:    lease,
 	}, nil
 }
 
 // recurrenceOrNil reads the live recurrence an issue belongs to. It is best
 // effort, as it is in kata show: a token that may not list recurrences still
 // reads the issue, which then shows no recurrence.
-func (c *Client) recurrenceOrNil(ctx context.Context, projectID int64, id *int64) *recurrence.View {
+func (c *Client) recurrenceOrNil(ctx context.Context, projectID int64, id *int64) *recurrenceclient.View {
 	rec, err := c.ReadRecurrence(ctx, projectID, id)
 	if err != nil {
 		return nil
@@ -290,7 +300,7 @@ func (c *Client) recurrenceOrNil(ctx context.Context, projectID int64, id *int64
 // ReadRecurrence reads the live recurrence an issue belongs to and reports
 // why it could not, for callers that must not mistake a failed read for an
 // issue that does not repeat.
-func (c *Client) ReadRecurrence(ctx context.Context, projectID int64, id *int64) (*recurrence.View, error) {
+func (c *Client) ReadRecurrence(ctx context.Context, projectID int64, id *int64) (*recurrenceclient.View, error) {
 	if id == nil {
 		return nil, nil
 	}
@@ -298,7 +308,7 @@ func (c *Client) ReadRecurrence(ctx context.Context, projectID int64, id *int64)
 	if err != nil {
 		return nil, err
 	}
-	return recurrence.Active(ctx, apiClient, projectID, id)
+	return recurrenceclient.Active(ctx, apiClient, projectID, id)
 }
 
 // CreateIssue posts a new issue. body.IdempotencyKey rides the
