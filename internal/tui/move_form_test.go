@@ -145,25 +145,25 @@ func TestMovePickerOffersOnlyProjectsAnIssueCanMoveTo(t *testing.T) {
 func TestMovePickerShowsAreaToTellSameNamedProjectsApart(t *testing.T) {
 	api := &moveTestAPI{projects: []ProjectSummary{
 		moveProject(2, "docs", "", "work"),
-		moveProject(3, "docs", "", "home"),
-		moveProject(4, "docs", "", "home"),
+		moveProject(3, "Docs", "", "home"),
+		moveProject(4, "DOCS", "", "home"),
 		moveProject(6, "solo", "", "work"),
 		moveProject(11, "notes", "", "work "),
-		moveProject(12, "notes", "", "work"),
+		moveProject(12, "Notes", "", "work"),
 		moveProject(13, "wiki", "", " home "),
-		moveProject(14, "wiki", "", "play"),
+		moveProject(14, "WIKI", "", "play"),
 	}}
 	m := openMove(t, moveModel(t, api))
 	require.Equal(t, []string{
 		"docs · work",
-		"docs · uid-3",
-		"docs · uid-4",
+		"Docs · uid-3",
+		"DOCS · uid-4",
 		"notes · uid-11",
-		"notes · uid-12",
+		"Notes · uid-12",
 		"solo",
 		"wiki · home",
-		"wiki · play",
-	}, moveLabels(m), "an area names a project only when no same-named project shares it, ignoring surrounding spaces; otherwise the UID does")
+		"WIKI · play",
+	}, moveLabels(m), "same-named projects (any case) get an area only when it is theirs alone, ignoring surrounding spaces; otherwise the UID")
 
 	m = typeString(m, "WORK")
 	require.Equal(t, []string{"docs · work"}, moveLabels(m), "the filter matches the area shown beside a name, case-insensitively")
@@ -189,13 +189,13 @@ func TestMovePreviewNamesTheMoveAndListsDescendants(t *testing.T) {
 		want    []string
 		notWant string
 	}{
-		{"lone issue", nil, []string{"has no descendants, so it moves alone"}, "Subtree move"},
+		{"lone issue", nil, []string{"has no descendants, so it moves alone"}, "This issue and its"},
 		{"one descendant", family(Issue{UID: "kid-1", ShortID: "k001", Title: "Child one", ProjectID: 7}),
-			[]string{"Subtree move", "its 1 descendant move", "#k001 Child one"}, "1 descendants"},
+			[]string{"This issue and its 1 descendant move", "#k001 Child one"}, "1 descendants"},
 		{"several descendants", family(
 			Issue{UID: "kid-1", ShortID: "k001", Title: "Child one", ProjectID: 7},
 			Issue{UID: "kid-2", ShortID: "k002", Title: "Child two", ProjectID: 9}),
-			[]string{"Subtree move", "its 2 descendants move", "#k001 Child one", "#k002 Child two"}, "moves alone"},
+			[]string{"This issue and its 2 descendants move", "#k001 Child one", "#k002 Child two"}, "moves alone"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			api := &moveTestAPI{projects: []ProjectSummary{moveProject(2, "hub-project", "", "")}, preview: tc.preview}
@@ -321,6 +321,27 @@ func TestMoveSelectsNeighbourRowAndNamesNewRef(t *testing.T) {
 			require.Contains(t, m.toast.text, "hub-project#new1")
 		})
 	}
+}
+
+// moveThroughFamily is moveThrough with a descendant of the moved issue in the
+// preview.
+func moveThroughFamily(t *testing.T, m Model, kids ...Issue) (Model, tea.Cmd) {
+	t.Helper()
+	api := &moveTestAPI{
+		projects: []ProjectSummary{moveProject(2, "hub-project", "", "")},
+		preview: func(int, MoveInput) (*MutationResp, error) {
+			return &MutationResp{
+				Issues:   append([]Issue{{UID: "issue-b", ProjectID: 7}}, kids...),
+				Revision: 5,
+			}, nil
+		},
+	}
+	m.api = newUndoClient(api)
+	m = openMove(t, m)
+	m, cmd := enter(m)
+	m, _ = deliver(t, m, cmd)
+	m, cmd = enter(m)
+	return deliver(t, m, cmd)
 }
 
 // moveThrough previews and performs a move of the selected issue to
@@ -504,6 +525,11 @@ func TestMoveFormRendersCompletelyAtEveryTerminalSize(t *testing.T) {
 	previewing, _ = deliver(t, previewing, cmd)
 	refused := previewing
 	refused.move.err = "move failed: project_not_found: project not found"
+	// The mandatory text of a refused, re-previewed move: a conflict note and a
+	// daemon error of several lines, under a long name.
+	crowded := previewing
+	crowded.move.note = "The issue's revision changed since the preview; nothing was moved. Showing the current preview."
+	crowded.move.err = "move failed: descendant example-destination#abcd: issue_move_descendant_archived\nrestore its project or remove its parent link\nbefore moving the subtree"
 
 	for _, size := range []struct {
 		name          string
@@ -518,11 +544,14 @@ func TestMoveFormRendersCompletelyAtEveryTerminalSize(t *testing.T) {
 			name  string
 			state Model
 			want  []string
+			// prompt is the in-modal hint, shown only where the footer is not.
+			prompt string
 		}{
-			{"picker", picker, []string{"Project:", "▸ " + longName[:20], "enter preview · esc cancel"}},
-			{"picker with a long pasted filter", pasted, []string{"Project:", "no project matches", "enter preview · esc cancel"}},
-			{"preview", previewing, []string{"Subtree move", "enter move · esc back"}},
-			{"refusal", refused, []string{"Subtree move", "project_not_found", "enter move · esc back"}},
+			{"picker", picker, []string{"Project:", "▸ " + longName[:20]}, "enter preview · esc cancel"},
+			{"picker with a long pasted filter", pasted, []string{"Project:", "no project matches"}, "enter preview · esc cancel"},
+			{"preview", previewing, []string{"This issue and its 4 descendants move together."}, "enter move · esc back"},
+			{"refusal", refused, []string{"project_not_found"}, "enter move · esc back"},
+			{"conflict note and a multiline error", crowded, []string{"revision changed since the preview", "issue_move_descendant_archived", "remove its parent link", "before moving the subtree"}, "enter move · esc back"},
 		} {
 			t.Run(size.name+" "+step.name, func(t *testing.T) {
 				rendered := stripANSI(renderMoveModal(step.state.move, size.width, size.height))
@@ -532,12 +561,22 @@ func TestMoveFormRendersCompletelyAtEveryTerminalSize(t *testing.T) {
 					content.WriteString(strings.Trim(line, " │╭╮╰╯─"))
 					content.WriteString(" ")
 				}
-				require.LessOrEqual(t, strings.Count(rendered, "\n")+1, size.height-1, "the whole modal fits above the footer row:\n%s", rendered)
+				footerShown := size.height >= listMinHeight
+				limit := size.height
+				if footerShown {
+					limit-- // the footer keeps its row
+				}
+				require.LessOrEqual(t, strings.Count(rendered, "\n")+1, limit, "the whole modal fits:\n%s", rendered)
 				flat := strings.Join(strings.Fields(content.String()), " ")
 				for _, want := range step.want {
 					require.Contains(t, flat, want, "%s\n%s", size.name, rendered)
 				}
-				if step.state.move.preview != nil {
+				if footerShown {
+					require.NotContains(t, flat, step.prompt, "the footer already says it:\n%s", rendered)
+				} else {
+					require.Contains(t, flat, step.prompt, "no footer, so the modal says it:\n%s", rendered)
+				}
+				if step.state.move.preview != nil && step.name != "conflict note and a multiline error" {
 					require.Equal(t, 1, strings.Count(strings.Join(strings.Fields(content.String()), ""), "to"+longName),
 						"the full destination name shows once, wrapped if need be:\n%s", rendered)
 				}
@@ -585,4 +624,27 @@ func TestMoveFormClosesWhenCredentialsNoLongerAllowAWholeProjectWrite(t *testing
 		Scope: &api.TokenScopeOut{},
 	}})
 	require.Equal(t, modalNone, m.modal)
+}
+
+func TestMoveRefreshesTheLabelCountsOfEveryAffectedProject(t *testing.T) {
+	api := &moveTestAPI{projects: []ProjectSummary{moveProject(2, "hub-project", "", "")}}
+	m := moveModel(t, api)
+	m.projectLabels = newLabelCache()
+	for _, pid := range []int64{7, 9, 2} {
+		m.projectLabels.byProject[pid] = labelCacheEntry{pid: pid}
+	}
+	// issue-b has a descendant that lives in project 9.
+	m, _ = moveThroughFamily(t, m, Issue{UID: "kid-9", ShortID: "k009", Title: "Kid", ProjectID: 9})
+	for _, pid := range []int64{7, 9, 2} {
+		require.True(t, m.projectLabels.byProject[pid].fetching, "project %d's label counts are fetched again", pid)
+	}
+}
+
+func TestMoveCancelsAnArmedPriorityPrompt(t *testing.T) {
+	m := moveModel(t, &moveTestAPI{projects: []ProjectSummary{moveProject(2, "hub-project", "", "")}})
+	m, _ = updateModel(m, runeKey('!'))
+	require.True(t, m.list.pendingPriority)
+	m = openMove(t, m)
+	require.False(t, m.list.pendingPriority, "a digit after the move must not set a priority on the neighbour")
+	require.Empty(t, m.list.status, "the hint naming the issue is gone")
 }

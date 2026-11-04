@@ -29,8 +29,11 @@ type moveChoice struct {
 // movePreview is what the daemon said a move would do. revision is the one
 // the daemon read, which the move is guarded on.
 type movePreview struct {
-	revision    int64
-	uids        []string
+	revision int64
+	uids     []string
+	// projects are the ones the previewed issues leave, whose label counts
+	// change when they go.
+	projects    []int64
 	descendants []string
 }
 
@@ -126,6 +129,10 @@ func (m Model) routeMoveKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		next, cmd := m.undoNotice("this connection cannot move issues", toastError)
 		return next, cmd, true
 	}
+	// Like any key after `!`, this one cancels the priority prompt, which
+	// names the issue the selection is about to leave.
+	m.list.pendingPriority = false
+	m.list.status = ""
 	target.issueUID = issue.UID
 	m.nextFormGen++
 	filter := textinput.New()
@@ -342,9 +349,12 @@ func (m Model) handleMovePreview(msg movePreviewMsg) Model {
 		m.move = s
 		return m
 	}
-	preview := &movePreview{revision: msg.resp.Revision}
+	preview := &movePreview{revision: msg.resp.Revision, projects: []int64{s.target.projectID}}
 	for _, issue := range msg.resp.Issues {
 		preview.uids = append(preview.uids, issue.UID)
+		if issue.ProjectID != 0 && !slices.Contains(preview.projects, issue.ProjectID) {
+			preview.projects = append(preview.projects, issue.ProjectID)
+		}
 		if issue.UID == s.target.issueUID {
 			continue
 		}
@@ -427,8 +437,10 @@ func (m Model) finishMove(mut mutationDoneMsg) (Model, tea.Cmd) {
 	}
 	m = m.closeMoveForm()
 	m, cmd := m.dropIssues(uid, gone)
+	// Labels travel with the issues, so the cached counts of both ends are stale.
+	m, labels := m.refreshCachedLabels(append(slices.Clone(s.preview.projects), s.chosen.ID)...)
 	m, notice := m.undoNotice(sanitizeForLine(fmt.Sprintf("moved #%s to %s", s.target.issueShortID, newRef)), toastSuccess)
-	return m, combineCmds(cmd, notice)
+	return m, combineCmds(cmd, combineCmds(labels, notice))
 }
 
 // moveInnerWidth is the text width of the Move form: the box's interior, or the
@@ -454,34 +466,62 @@ func moveFilterWidth(width, height int) int {
 // the title, the outcome, a refusal and the enter/esc prompt do.
 func renderMoveModal(s moveState, width, height int) string {
 	boxed := height >= formMinHeight
+	// The footer states what the keys do wherever it is drawn; without one the
+	// modal says it itself.
+	footerShown := height >= listMinHeight
 	innerW := moveInnerWidth(width, height)
-	budget := height - 1 // the footer keeps its row
+	budget := height
+	if footerShown {
+		budget-- // the footer keeps its row
+	}
 	if boxed {
 		budget -= 4 // border and padding
 	}
 	wrap := func(text string) []string { return termtext.Wrap(text, max(innerW, 1)) }
-	title := func(text string) []string {
-		lines := wrap(sanitizeForLine(text))
-		for i := range lines {
-			lines[i] = titleStyle.Render(lines[i])
+	styled := func(lines []string) []string {
+		out := make([]string, len(lines))
+		for i, line := range lines {
+			out[i] = titleStyle.Render(line)
 		}
-		return lines
+		return out
 	}
-	var head, tail, optional []string
-	var list func(room int) []string
+	oneLine := func(text string) []string { return []string{truncate(text, max(innerW, 1))} }
+
+	// What must stay: the refusal, the conflict note and the action prompt.
+	// The title and the outcome shrink first, then the optional sentence and
+	// the list.
+	var tail []string
+	if s.note != "" {
+		tail = append(tail, wrap(s.note)...)
+	}
+	if s.err != "" {
+		tail = append(tail, strings.Split(errorStyle.Width(max(innerW, 1)).Render(s.err), "\n")...)
+	}
 	previewing := s.preview != nil || (s.sending && s.chosen.UID != "")
+	switch {
+	case s.sending:
+		tail = append(tail, statusStyle.Render("working…"))
+	case !footerShown && previewing:
+		tail = append(tail, subtleStyle.Render("enter move · esc back"))
+	case !footerShown:
+		tail = append(tail, subtleStyle.Render("enter preview · esc cancel"))
+	}
+
+	var titleText string
+	var outcome, optional []string
+	var extra []string // lines that belong to the step itself (the picker's filter)
+	var list func(room int) []string
 	if previewing {
-		head = title(fmt.Sprintf("Move #%s to %s", s.target.issueShortID, s.chosen.Name))
+		titleText = sanitizeForLine(fmt.Sprintf("Move #%s to %s", s.target.issueShortID, s.chosen.Name))
 		if preview := s.preview; preview != nil {
 			if len(preview.descendants) == 0 {
-				head = append(head, wrap(fmt.Sprintf("#%s has no descendants, so it moves alone.", sanitizeForLine(s.target.issueShortID)))...)
+				outcome = []string{fmt.Sprintf("#%s has no descendants, so it moves alone.", sanitizeForLine(s.target.issueShortID))}
 			} else {
 				noun := "descendants"
 				if len(preview.descendants) == 1 {
 					noun = "descendant"
 				}
-				head = append(head, wrap(fmt.Sprintf("Subtree move: #%s and its %d %s move together.",
-					sanitizeForLine(s.target.issueShortID), len(preview.descendants), noun))...)
+				outcome = []string{fmt.Sprintf("This issue and its %d %s move together.", len(preview.descendants), noun)}
 				list = func(room int) []string {
 					shown := len(preview.descendants)
 					if shown > room {
@@ -501,28 +541,41 @@ func renderMoveModal(s moveState, width, height int) string {
 		}
 	} else {
 		s.filter.SetWidth(moveFilterWidth(width, height))
-		head = append(title(fmt.Sprintf("Move #%s to another project", s.target.issueShortID)), "Project: "+s.filter.View())
+		titleText = fmt.Sprintf("Move #%s to another project", s.target.issueShortID)
+		extra = []string{"Project: " + s.filter.View()}
 		list = func(room int) []string { return renderMoveChoices(s, innerW, min(max(room, 1), 10)) }
 	}
-	if s.note != "" {
-		tail = append(tail, wrap(s.note)...)
+	var outcomeLines []string
+	for _, line := range outcome {
+		outcomeLines = append(outcomeLines, wrap(line)...)
 	}
-	if s.err != "" {
-		tail = append(tail, strings.Split(errorStyle.Width(max(innerW, 1)).Render(s.err), "\n")...)
+
+	// The richest title and outcome that leave room for what must stay.
+	titleLines, outLines := styled(wrap(titleText)), outcomeLines
+	for _, try := range []struct{ title, outcome []string }{
+		{titleLines, outcomeLines},
+		{titleLines, firstOrNil(outcome, oneLine)},
+		{styled(oneLine(titleText)), firstOrNil(outcome, oneLine)},
+		{styled(oneLine(titleText)), nil},
+	} {
+		titleLines, outLines = try.title, try.outcome
+		if len(titleLines)+len(outLines)+len(extra)+len(tail) <= budget {
+			break
+		}
 	}
-	switch {
-	case s.sending:
-		tail = append(tail, statusStyle.Render("working…"))
-	case previewing:
-		tail = append(tail, subtleStyle.Render("enter move · esc back"))
-	default:
-		tail = append(tail, subtleStyle.Render("enter preview · esc cancel"))
+	// Still too much: the error text gives up its last lines, never the prompt.
+	if over := len(titleLines) + len(outLines) + len(extra) + len(tail) - budget; over > 0 && s.err != "" {
+		prompt := 0
+		if !footerShown || s.sending {
+			prompt = 1
+		}
+		errEnd := len(tail) - prompt
+		cut := min(over, max(len(strings.Split(errorStyle.Width(max(innerW, 1)).Render(s.err), "\n"))-1, 0))
+		tail = append(tail[:errEnd-cut], tail[errEnd:]...)
 	}
-	// Spend what is left on the optional sentence first (it is one block), then
-	// the list. Blank separators are dropped when they do not fit.
-	room := budget - len(head) - len(tail)
-	var parts []string
-	parts = append(parts, head...)
+
+	parts := append(append(append([]string{}, titleLines...), outLines...), extra...)
+	room := budget - len(parts) - len(tail)
 	if len(optional) > 0 && room >= len(optional)+2 {
 		parts = append(parts, "")
 		parts = append(parts, optional...)
@@ -539,6 +592,14 @@ func renderMoveModal(s moveState, width, height int) string {
 		return lipgloss.NewStyle().Width(max(width, 1)).Render(body)
 	}
 	return modalBoxStyle.Render(body)
+}
+
+// firstOrNil is the first of lines, cut to one row, or nothing.
+func firstOrNil(lines []string, oneLine func(string) []string) []string {
+	if len(lines) == 0 {
+		return nil
+	}
+	return oneLine(lines[0])
 }
 
 func renderMoveChoices(s moveState, innerW, visible int) []string {

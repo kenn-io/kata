@@ -813,23 +813,27 @@ func batchLabelRefresh(
 		return next, prior
 	}
 	pid := projectIDFromMutation(nm, mut)
-	if pid == 0 {
-		return next, prior
+	nm, refresh := nm.refreshCachedLabels(pid)
+	return nm, combineCmds(prior, refresh)
+}
+
+// refreshCachedLabels fetches the label aggregate of each project that already
+// has a cache entry. A project the user never opened the suggestion menu for
+// has none, and a fetch for it would be a wasted roundtrip.
+func (m Model) refreshCachedLabels(pids ...int64) (Model, tea.Cmd) {
+	var cmd tea.Cmd
+	if m.projectLabels == nil {
+		return m, nil
 	}
-	if nm.projectLabels == nil {
-		return next, prior
+	for _, pid := range pids {
+		if _, exists := m.projectLabels.byProject[pid]; pid == 0 || !exists {
+			continue
+		}
+		var refresh tea.Cmd
+		m, refresh = m.dispatchLabelFetch(pid)
+		cmd = combineCmds(cmd, refresh)
 	}
-	if _, exists := nm.projectLabels.byProject[pid]; !exists {
-		return next, prior
-	}
-	nm, refresh := nm.dispatchLabelFetch(pid)
-	if refresh == nil {
-		return nm, prior
-	}
-	if prior == nil {
-		return nm, refresh
-	}
-	return nm, tea.Batch(prior, refresh)
+	return m, cmd
 }
 
 // projectIDFromMutation picks the project id the mutation acted on.
