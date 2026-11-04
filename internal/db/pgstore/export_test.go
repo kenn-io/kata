@@ -3,6 +3,8 @@ package pgstore
 import (
 	"context"
 	"time"
+
+	"go.kenn.io/kata/internal/db"
 )
 
 // NewStoreForTesting builds a Store with the given dsn but no live *sql.DB.
@@ -38,3 +40,6 @@ func InstallRelayHistoryFullScanObserverForTest(store *Store, observe func()) fu
 	store.relayHistoryFullScanObserver = observe
 	return func() { store.relayHistoryFullScanObserver = previous }
 }
+
+// CronSQLForTest exposes the production transaction adapter for fault injection.
+func CronSQLForTest(store *Store) db.CronSQL { return store.cronSQL() }

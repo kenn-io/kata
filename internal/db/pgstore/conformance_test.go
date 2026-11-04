@@ -22,7 +22,8 @@ func TestStorageConformance(t *testing.T) {
 	}
 	dsns := map[db.Storage]string{}
 	dbtest.RunStorageConformance(t, dbtest.Backend{
-		Name: "postgres",
+		Name:           "postgres",
+		CronSQLForTest: func(store db.Storage) db.CronSQL { return pgstore.CronSQLForTest(store.(*pgstore.Store)) },
 		Open: func(t *testing.T) db.Storage {
 			t.Helper()
 			store, dsn := openConformanceStore(t)

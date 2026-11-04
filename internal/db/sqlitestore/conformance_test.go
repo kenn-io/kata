@@ -19,6 +19,7 @@ import (
 func TestStorageConformance(t *testing.T) {
 	t.Parallel()
 	dbtest.RunStorageConformance(t, dbtest.Backend{
+		CronSQLForTest:     func(store db.Storage) db.CronSQL { return sqlitestore.CronSQLForTest(store.(*sqlitestore.Store)) },
 		Name:               "sqlite",
 		SearchIndexesEmoji: true,
 		Open: func(t *testing.T) db.Storage {

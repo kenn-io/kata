@@ -1,8 +1,6 @@
 package federation_test
 
 import (
-	"context"
-	"database/sql"
 	"fmt"
 	"testing"
 	"time"
@@ -10,8 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/dbtest"
 	"go.kenn.io/kata/internal/federation"
-	"go.kenn.io/kata/internal/uid"
 )
 
 // Contract: a direct spoke rebuilds from the retained run set even when the
@@ -26,17 +24,8 @@ func TestCronPruneDirectSpokeReset(t *testing.T) {
 				project, err := hub.CreateProject(ctx, "hub-project")
 				require.NoError(t, err)
 				job, _ := nativeJob(t, hub, project)
-				q := hub.(interface {
-					ExecContext(context.Context, string, ...any) (sql.Result, error)
-				})
 				for i := range 3 {
-					id, err := uid.New()
-					require.NoError(t, err)
-
-					require.NoError(t, err)
-					at := time.Now().Add(-72*time.Hour + time.Duration(i)*time.Second).UTC().Format(db.CronRunCreatedAtFormat)
-					_, err = q.ExecContext(ctx, `INSERT INTO cron_runs(uid,project_id,job_uid,definition_event_uid,actor,status,created_at,updated_at) VALUES($1,$2,$3,$4,'worker','succeeded',$5,$5)`, id, project.ID, job.UID, job.DefinitionEventUID, at)
-					require.NoError(t, err)
+					dbtest.ObserveAgedCronRun(t, hub, project, job, "worker", time.Now().Add(-72*time.Hour+time.Duration(i)*time.Second).UTC())
 				}
 				rootBinding, err := hub.EnableProjectFederation(ctx, project.ID, "worker")
 				require.NoError(t, err)

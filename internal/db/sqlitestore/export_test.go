@@ -3,6 +3,8 @@ package sqlitestore
 import (
 	"context"
 	"time"
+
+	"go.kenn.io/kata/internal/db"
 )
 
 // LinksChangedPayloadForTest exposes linksChangedPayload to external tests so
@@ -41,3 +43,6 @@ func InstallRelayHistoryFullScanObserverForTest(store *Store, observe func()) fu
 func MaterializeFederatedProjectOnceForTest(ctx context.Context, store *Store, projectID int64) error {
 	return store.materializeFederatedProject(ctx, projectID)
 }
+
+// CronSQLForTest exposes the production transaction adapter for fault injection.
+func CronSQLForTest(store *Store) db.CronSQL { return store.cronSQL() }

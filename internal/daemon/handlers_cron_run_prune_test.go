@@ -86,18 +86,14 @@ func TestCronRunPruneAPI(t *testing.T) {
 	}
 }
 
-func TestCronRunPruneAgeAndRefreshFailure(t *testing.T) {
+func TestCronRunPruneRefreshFailure(t *testing.T) {
 	env, project, path := cronPruneHTTPFixture(t, func(cfg *daemon.ServerConfig) { cfg.DB = purgeBaselineFailureStore{cfg.DB} })
-	body := map[string]any{"actor": "operator", "before": time.Now().Add(-23 * time.Hour), "keep": 1, "dry_run": true}
-	response, raw := envDoRaw(t, env, http.MethodPost, path, body, nil)
-	require.Equal(t, 400, response.StatusCode, string(raw))
-	body["before"] = time.Now().Add(-48 * time.Hour)
-	body["dry_run"] = false
+	body := map[string]any{"actor": "operator", "before": time.Now().Add(-48 * time.Hour), "keep": 1, "dry_run": false}
 	sub := env.Broadcaster.Subscribe(daemon.SubFilter{ProjectID: project.ID})
 	defer sub.Unsub()
 	before, err := env.DB.MaxEventID(t.Context())
 	require.NoError(t, err)
-	response, raw = envDoRaw(t, env, http.MethodPost, path, body, map[string]string{"X-Kata-Confirm": "PRUNE example-project cron runs"})
+	response, raw := envDoRaw(t, env, http.MethodPost, path, body, map[string]string{"X-Kata-Confirm": "PRUNE example-project cron runs"})
 	require.Equal(t, 500, response.StatusCode, string(raw))
 	runs, err := env.DB.ListCronRuns(t.Context(), db.CronRunList{ProjectID: project.ID})
 	require.NoError(t, err)
@@ -137,6 +133,8 @@ func TestCronRunPruneSpokeRefusal(t *testing.T) {
 
 func TestCronRunPruneInvalidBounds(t *testing.T) {
 	env, _, path := cronPruneHTTPFixture(t)
+	response, raw := envDoRaw(t, env, http.MethodPost, path, map[string]any{"actor": "operator", "before": time.Now().Add(-23 * time.Hour), "keep": 1, "dry_run": true}, nil)
+	require.Equal(t, 400, response.StatusCode, string(raw))
 	for _, field := range []string{"keep", "limit"} {
 		for _, value := range []int{-1, 0, 20001} {
 			body := map[string]any{"actor": "operator", "before": time.Now().Add(-48 * time.Hour), "dry_run": true, field: value}
