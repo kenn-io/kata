@@ -11,6 +11,8 @@ import (
 	"go.kenn.io/kata/internal/metadata"
 )
 
+const readyPriorityOrderBy = ` ORDER BY i.priority ASC NULLS LAST, i.updated_at DESC, i.id DESC`
+
 // ReadyIssues returns actionable open issues that have no active blocker.
 // Issues marked someday=true or scheduled after their effective local date or
 // instant are parked and excluded. Optional owner and label filters are
@@ -68,7 +70,7 @@ func (s *Store) ReadyIssues(
            WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`)
 	}
 	if filter.PriorityFirst {
-		query.WriteString(` ORDER BY i.priority ASC NULLS LAST, i.updated_at DESC, i.id DESC`)
+		query.WriteString(readyPriorityOrderBy)
 	} else {
 		query.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
 	}
@@ -160,7 +162,7 @@ func (s *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
            WHERE il.issue_id = i.id AND il.label = ` + addArg(strings.ToLower(label)) + `)`)
 	}
 	if filter.PriorityFirst {
-		query.WriteString(` ORDER BY i.priority ASC NULLS LAST, i.updated_at DESC, i.id DESC`)
+		query.WriteString(readyPriorityOrderBy)
 	} else {
 		query.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
 	}

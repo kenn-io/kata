@@ -37,8 +37,11 @@ func TestNextPriorityAgainstDaemon(t *testing.T) {
 	}
 	server := daemon.NewServer(daemon.ServerConfig{DB: store, StartedAt: time.Now().UTC()})
 	t.Cleanup(func() { require.NoError(t, server.Close()) })
-	var healthCalls, readyCalls atomic.Int32
+	var healthCalls, readyCalls, catalogCalls atomic.Int32
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/projects" {
+			catalogCalls.Add(1)
+		}
 		if r.URL.Path == "/api/v1/health" {
 			healthCalls.Add(1)
 		}
@@ -63,6 +66,7 @@ func TestNextPriorityAgainstDaemon(t *testing.T) {
 		t.Run(string(scope.Mode()), func(t *testing.T) {
 			healthCalls.Store(0)
 			readyCalls.Store(0)
+			catalogCalls.Store(0)
 			handlers := toolHandlers{options: Options{Client: client, Scope: scope}}
 			_, output, err := handlers.next(t.Context(), nil, NextInput{})
 			require.NoError(t, err)
@@ -74,11 +78,16 @@ func TestNextPriorityAgainstDaemon(t *testing.T) {
 				wantReady = 2
 			}
 			require.Equal(t, wantReady, readyCalls.Load())
+			wantCatalog := int32(1)
+			if scope.Mode() == ScopeAll {
+				wantCatalog = 0
+			}
+			require.Equal(t, wantCatalog, catalogCalls.Load())
 		})
 	}
 }
 
-func TestNextAllIncludesProjectCreatedAfterCatalogRead(t *testing.T) {
+func TestNextAllSkipsProjectCatalog(t *testing.T) {
 	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, store.Close()) })
@@ -87,8 +96,12 @@ func TestNextAllIncludesProjectCreatedAfterCatalogRead(t *testing.T) {
 	server := daemon.NewServer(daemon.ServerConfig{DB: store, StartedAt: time.Now().UTC()})
 	t.Cleanup(func() { require.NoError(t, server.Close()) })
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		server.Handler().ServeHTTP(w, r)
 		if r.URL.Path == "/api/v1/projects" {
+			t.Error("all-project next fetched the project catalog")
+			http.Error(w, "unexpected project catalog request", http.StatusInternalServerError)
+			return
+		}
+		if r.URL.Path == "/api/v1/ready" {
 			project, createErr := store.CreateProject(r.Context(), "hub-project")
 			require.NoError(t, createErr)
 			_, _, createErr = store.CreateIssue(r.Context(), db.CreateIssueParams{
@@ -96,6 +109,7 @@ func TestNextAllIncludesProjectCreatedAfterCatalogRead(t *testing.T) {
 			})
 			require.NoError(t, createErr)
 		}
+		server.Handler().ServeHTTP(w, r)
 	}))
 	t.Cleanup(httpServer.Close)
 	client, err := kataclient.NewWithHTTPClient(httpServer.URL, httpServer.Client())

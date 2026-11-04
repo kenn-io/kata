@@ -2462,6 +2462,8 @@ func (d *Store) claimOwner(ctx context.Context, p db.ClaimOwnerParams) (db.Claim
 	return result, nil
 }
 
+const readyPriorityOrderBy = ` ORDER BY i.priority IS NULL, i.priority, i.updated_at DESC, i.id DESC`
+
 // ReadyIssues returns actionable open issues with no open `blocks` predecessor,
 // ordered by updated_at DESC. Issues marked someday=true or scheduled after
 // their effective local date or instant are parked and excluded. limit==0 means
@@ -2515,7 +2517,7 @@ func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, fil
 	}
 
 	if filter.PriorityFirst {
-		q.WriteString(` ORDER BY i.priority IS NULL, i.priority, i.updated_at DESC, i.id DESC`)
+		q.WriteString(readyPriorityOrderBy)
 	} else {
 		q.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
 	}
@@ -2609,7 +2611,7 @@ func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 	}
 
 	if filter.PriorityFirst {
-		q.WriteString(` ORDER BY i.priority IS NULL, i.priority, i.updated_at DESC, i.id DESC`)
+		q.WriteString(readyPriorityOrderBy)
 	} else {
 		q.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
 	}
