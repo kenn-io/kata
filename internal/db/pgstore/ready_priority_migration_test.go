@@ -1,0 +1,58 @@
+package pgstore_test
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/db/pgstore"
+	"go.kenn.io/kata/internal/testenv"
+)
+
+func TestReadyPriorityIndexMigrationUpgradesVersion45(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires PostgreSQL")
+	}
+	ctx := t.Context()
+	dsn, cleanup := testenv.NewPostgresContainer(t, ctx)
+	t.Cleanup(cleanup)
+	const schema = "ready_priority_upgrade"
+	store, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
+	require.NoError(t, err)
+	require.NoError(t, store.Close())
+	admin, err := sql.Open("pgx", dsn)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = admin.Close() })
+	_, err = admin.ExecContext(ctx, `DROP INDEX ready_priority_upgrade.idx_issues_project_ready_priority; DROP INDEX ready_priority_upgrade.idx_issues_ready_priority`)
+	require.NoError(t, err)
+	_, err = admin.ExecContext(ctx, `UPDATE ready_priority_upgrade.meta SET value='45' WHERE key='schema_version'`)
+	require.NoError(t, err)
+	upgraded, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = upgraded.Close() })
+	version, err := upgraded.SchemaVersion(ctx)
+	require.NoError(t, err)
+	require.Equal(t, db.CurrentSchemaVersion(), version)
+	fresh, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: "ready_priority_fresh", SchemaMode: pgstore.SchemaModeBootstrap})
+	require.NoError(t, err)
+	require.NoError(t, fresh.Close())
+	for _, targetSchema := range []string{schema, "ready_priority_fresh"} {
+		for name, columns := range map[string]string{
+			"idx_issues_project_ready_priority": "project_id, COALESCE(priority, 5), updated_at DESC, id DESC",
+			"idx_issues_ready_priority":         "COALESCE(priority, 5), updated_at DESC, id DESC",
+		} {
+			var definition string
+			require.NoError(t, admin.QueryRowContext(ctx, `SELECT replace(indexdef, schemaname || '.', '') FROM pg_indexes WHERE schemaname=$1 AND indexname=$2`, targetSchema, name).Scan(&definition))
+			require.Equal(t, "CREATE INDEX "+name+" ON issues USING btree ("+columns+") WHERE ((status = 'open'::text) AND (deleted_at IS NULL))", definition)
+		}
+	}
+}
+
+func dropReadyPriorityIndexes(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
+	t.Helper()
+	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX %s.idx_issues_project_ready_priority; DROP INDEX %s.idx_issues_ready_priority`, schema, schema)) // #nosec G201 -- Fixed test schema.
+	require.NoError(t, err)
+}

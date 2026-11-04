@@ -3,6 +3,7 @@ package dbtest
 import (
 	"encoding/json/jsontext"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
@@ -31,6 +32,10 @@ func checkReadyPriorityOrder(t *testing.T, store db.Storage) error {
 				return issue
 			}
 			create(primary.ID, "parked P0", new(int64(0)), map[string]jsontext.Value{"someday": jsontext.Value(`true`)})
+			for range 9 {
+				create(primary.ID, "scheduled P0", new(int64(0)), map[string]jsontext.Value{"scheduled_on": jsontext.Value(`"2099-01-01"`)})
+			}
+			filter.At = time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
 			best := create(primary.ID, "due P1", new(int64(1)), nil)
 			newer := create(primary.ID, "P2 before edit", new(int64(2)), nil)
 			secondProject := primary.ID
