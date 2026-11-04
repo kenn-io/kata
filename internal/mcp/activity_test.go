@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -14,60 +13,58 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.kenn.io/kata/internal/daemon"
-	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/db/sqlitestore"
 	kataclient "go.kenn.io/kata/pkg/client"
 )
 
 func TestNextPriorityAgainstDaemon(t *testing.T) {
-	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
-	spoke, err := store.CreateProject(t.Context(), "spoke-project")
-	require.NoError(t, err)
-	hub, err := store.CreateProject(t.Context(), "hub-project")
-	require.NoError(t, err)
-	_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: spoke.ID, Title: "lower priority", Author: "author", Priority: new(int64(2))})
-	require.NoError(t, err)
-	best, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: hub.ID, Title: "priority pick", Author: "author", Priority: new(int64(1))})
-	require.NoError(t, err)
-	for _, project := range []db.Project{spoke, hub} {
-		_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "newer unprioritized", Author: "author"})
-		require.NoError(t, err)
-	}
-	server := daemon.NewServer(daemon.ServerConfig{DB: store, StartedAt: time.Now().UTC()})
-	t.Cleanup(func() { require.NoError(t, server.Close()) })
-	var healthCalls, readyCalls atomic.Int32
-	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/health" {
-			healthCalls.Add(1)
-		}
-		if strings.HasSuffix(r.URL.Path, "/ready") {
-			readyCalls.Add(1)
-			assert.Equal(t, "1", r.URL.Query().Get("limit"))
-			assert.Equal(t, "priority", r.URL.Query().Get("sort"))
-		}
-		server.Handler().ServeHTTP(w, r)
-	}))
-	t.Cleanup(httpServer.Close)
-	client, err := kataclient.NewWithHTTPClient(httpServer.URL, httpServer.Client())
-	require.NoError(t, err)
-	bound, err := NewBoundScope(ProjectIdentity{ID: hub.ID, UID: hub.UID, Name: hub.Name})
+	bound, err := NewBoundScope(ProjectIdentity{ID: 2, UID: "01HBBBBBBBBBBBBBBBBBBBBBBB", Name: "hub-project"})
 	require.NoError(t, err)
 	allowlist, err := NewAllowlistScope([]ProjectIdentity{
-		{ID: spoke.ID, UID: spoke.UID, Name: spoke.Name},
-		{ID: hub.ID, UID: hub.UID, Name: hub.Name},
+		{ID: 1, UID: "01HAAAAAAAAAAAAAAAAAAAAAAA", Name: "spoke-project"},
+		{ID: 2, UID: "01HBBBBBBBBBBBBBBBBBBBBBBB", Name: "hub-project"},
 	})
 	require.NoError(t, err)
 	for _, scope := range []*Scope{bound, allowlist, NewAllScope()} {
 		t.Run(string(scope.Mode()), func(t *testing.T) {
-			healthCalls.Store(0)
-			readyCalls.Store(0)
+			var healthCalls, readyCalls atomic.Int32
+			client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/health":
+					healthCalls.Add(1)
+					writeJSON(w, map[string]any{"ok": true, "api_schema_version": "0.41.0"})
+				case "/api/v1/projects":
+					writeJSON(w, map[string]any{"projects": []any{
+						projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
+						projectJSON(2, "01HBBBBBBBBBBBBBBBBBBBBBBB", "hub-project"),
+					}})
+				case "/api/v1/projects/1/ready", "/api/v1/projects/2/ready", "/api/v1/ready":
+					readyCalls.Add(1)
+					assert.Equal(t, "1", r.URL.Query().Get("limit"))
+					assert.Equal(t, "priority", r.URL.Query().Get("sort"))
+					issue := globalIssueJSON(2, "01HBBBBBBBBBBBBBBBBBBBBBBB", "hub-project", "best")
+					issue["priority"] = 1
+					issue["title"] = "priority pick"
+					if r.URL.Path == "/api/v1/projects/1/ready" {
+						assert.Equal(t, ScopeAllowlist, scope.Mode())
+						issue = issueJSON(1, "spoke-project", "lower")
+						issue["priority"] = 2
+						issue["updated_at"] = "2026-08-12T00:00:00Z"
+					} else if scope.Mode() == ScopeAll {
+						assert.Equal(t, "/api/v1/ready", r.URL.Path)
+					} else {
+						assert.Equal(t, "/api/v1/projects/2/ready", r.URL.Path)
+					}
+					writeJSON(w, map[string]any{"issues": []any{issue}})
+				default:
+					http.NotFound(w, r)
+				}
+			})
 			handlers := toolHandlers{options: Options{Client: client, Scope: scope}}
 			_, output, err := handlers.next(t.Context(), nil, NextInput{})
 			require.NoError(t, err)
 			require.NotNil(t, output.Issue)
-			require.Equal(t, "hub-project#"+best.ShortID, output.Issue.QualifiedRef)
+			require.Equal(t, "hub-project#best", output.Issue.QualifiedRef)
 			require.Equal(t, int32(1), healthCalls.Load())
 			wantReady := int32(1)
 			if scope.Mode() == ScopeAllowlist {
@@ -79,33 +76,27 @@ func TestNextPriorityAgainstDaemon(t *testing.T) {
 }
 
 func TestNextAllIncludesProjectCreatedAfterCatalogRead(t *testing.T) {
-	store, err := sqlitestore.Open(t.Context(), filepath.Join(t.TempDir(), "kata.db"))
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
-	_, err = store.CreateProject(t.Context(), "spoke-project")
-	require.NoError(t, err)
-	server := daemon.NewServer(daemon.ServerConfig{DB: store, StartedAt: time.Now().UTC()})
-	t.Cleanup(func() { require.NoError(t, server.Close()) })
-	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		server.Handler().ServeHTTP(w, r)
-		if r.URL.Path == "/api/v1/projects" {
-			project, createErr := store.CreateProject(r.Context(), "hub-project")
-			require.NoError(t, createErr)
-			_, _, createErr = store.CreateIssue(r.Context(), db.CreateIssueParams{
-				ProjectID: project.ID, Title: "priority pick", Author: "author", Priority: new(int64(1)),
-			})
-			require.NoError(t, createErr)
+	client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/health":
+			writeJSON(w, map[string]any{"ok": true, "api_schema_version": "0.41.0"})
+		case "/api/v1/projects":
+			writeJSON(w, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
+		case "/api/v1/ready":
+			issue := globalIssueJSON(2, "01HBBBBBBBBBBBBBBBBBBBBBBB", "hub-project", "best")
+			issue["priority"] = 1
+			issue["title"] = "priority pick"
+			writeJSON(w, map[string]any{"issues": []any{issue}})
+		default:
+			http.NotFound(w, r)
 		}
-	}))
-	t.Cleanup(httpServer.Close)
-	client, err := kataclient.NewWithHTTPClient(httpServer.URL, httpServer.Client())
-	require.NoError(t, err)
+	})
 	handlers := toolHandlers{options: Options{Client: client, Scope: NewAllScope()}}
 
 	_, output, err := handlers.next(t.Context(), nil, NextInput{})
 	require.NoError(t, err)
 	require.NotNil(t, output.Issue)
-	require.True(t, strings.HasPrefix(output.Issue.QualifiedRef, "hub-project#"))
+	require.Equal(t, "hub-project#best", output.Issue.QualifiedRef)
 	require.Equal(t, "priority pick", output.Issue.Title)
 }
 

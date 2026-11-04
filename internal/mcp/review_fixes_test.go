@@ -1697,11 +1697,8 @@ func TestNextExaminesAllReadyIssuesOnOlderDaemon(t *testing.T) {
 			writeJSON(writer, map[string]any{"projects": []any{projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project")}})
 		case "/api/v1/ready":
 			require.Empty(t, request.URL.Query().Get("sort"))
-			require.Empty(t, request.URL.Query().Get("limit"))
-			count := 101
-			if request.URL.Query().Has("limit") {
-				count = 100
-			}
+			require.False(t, request.URL.Query().Has("limit"))
+			const count = 101
 			issues := make([]any, 0, count)
 			for index := 0; index < count; index++ {
 				issue := globalIssueJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project", fmt.Sprintf("i%03d", index))

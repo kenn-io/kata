@@ -68,19 +68,11 @@ SELECT printf('%026d', n), ?, printf('%06d', n), 'Ready issue', 'author', n % 5,
 					if scope == "global" {
 						issues, err := store.ReadyIssuesGlobal(ctx, 1, tc.filter)
 						require.NoError(t, err)
-						if tc.wantID == 0 {
-							require.Empty(t, issues)
-							return
-						}
 						require.Len(t, issues, 1)
 						issue = issues[0].Issue
 					} else {
 						issues, err := store.ReadyIssues(ctx, project.ID, 1, tc.filter)
 						require.NoError(t, err)
-						if tc.wantID == 0 {
-							require.Empty(t, issues)
-							return
-						}
 						require.Len(t, issues, 1)
 						issue = issues[0]
 					}

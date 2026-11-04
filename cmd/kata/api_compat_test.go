@@ -231,8 +231,19 @@ func TestListSortDaemonCompatibility(t *testing.T) {
 
 func TestNextPriorityDaemonCompatibility(t *testing.T) {
 	for _, version := range []string{"0.41.0", "0.40.0", "", "development"} {
-		for _, all := range []bool{false, true} {
-			t.Run(version+map[bool]string{false: "/project", true: "/all"}[all], func(t *testing.T) {
+		for _, scope := range []struct {
+			name    string
+			all     bool
+			unowned bool
+		}{
+			{name: "project"},
+			{name: "all", all: true},
+			{name: "all-unowned", all: true, unowned: true},
+		} {
+			if scope.unowned && version != "0.41.0" {
+				continue
+			}
+			t.Run(version+"/"+scope.name, func(t *testing.T) {
 				var readyCalls, healthCalls atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					switch r.URL.Path {
@@ -243,7 +254,10 @@ func TestNextPriorityDaemonCompatibility(t *testing.T) {
 						_, _ = w.Write([]byte(`{"project":{"id":1,"name":"example-project","uid":"01TESTPROJECTAAAAAAAAAAAAAA"}}`))
 					case "/api/v1/projects/1/ready", "/api/v1/ready":
 						readyCalls.Add(1)
-						if all {
+						if scope.unowned {
+							assert.Equal(t, "true", r.URL.Query().Get("unowned"))
+						}
+						if scope.all {
 							assert.Equal(t, "/api/v1/ready", r.URL.Path)
 						} else {
 							assert.Equal(t, "/api/v1/projects/1/ready", r.URL.Path)
@@ -263,10 +277,13 @@ func TestNextPriorityDaemonCompatibility(t *testing.T) {
 				}))
 				t.Cleanup(server.Close)
 				args := []string{"--agent", "next"}
-				if all {
+				if scope.all {
 					args = append(args, "--all")
 				} else {
 					args = append(args, "--project", "example-project")
+				}
+				if scope.unowned {
+					args = append(args, "--unowned")
 				}
 				out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), args...)
 				require.NoError(t, err)
@@ -276,29 +293,6 @@ func TestNextPriorityDaemonCompatibility(t *testing.T) {
 			})
 		}
 	}
-}
-
-func TestNextFilteredAllChecksHealthOnce(t *testing.T) {
-	var healthCalls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/v1/health":
-			healthCalls.Add(1)
-			_, _ = w.Write([]byte(`{"ok":true,"api_schema_version":"0.41.0"}`))
-		case "/api/v1/ready":
-			assert.Equal(t, "1", r.URL.Query().Get("limit"))
-			assert.Equal(t, "priority", r.URL.Query().Get("sort"))
-			assert.Equal(t, "true", r.URL.Query().Get("unowned"))
-			_, _ = w.Write([]byte(`{"issues":[{"short_id":"best","title":"priority pick","priority":1,"project_name":"example-project"}]}`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	t.Cleanup(server.Close)
-	out, _, err := executeRootCapture(t, contextWithBaseURL(t.Context(), server.URL), "--agent", "next", "--all", "--unowned")
-	require.NoError(t, err)
-	assert.Contains(t, out, `best priority=1 title="priority pick"`)
-	assert.Equal(t, int32(1), healthCalls.Load())
 }
 
 func TestAPIVersionAtLeast(t *testing.T) {
