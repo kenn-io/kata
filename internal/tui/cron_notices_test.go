@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/pkg/client/generated"
 	"hegel.dev/go/hegel"
@@ -294,4 +295,53 @@ func TestCronNoticeRenderedFailure(t *testing.T) {
 	require.Contains(t, out, "1 unseen failed")
 	require.Contains(t, out, "failing")
 	require.Contains(t, out, "failed 0s ago")
+}
+
+// Failure severity applies to the shared notice row outside the Cron list.
+func TestCronNoticeProjectsFailureSeverity(t *testing.T) {
+	defer snapshotInit(t)()
+	m := cronNoticeFixture(t)
+	applyColorMode(colorDark, true)
+	m.width, m.height = 120, 26
+	m.view = viewProjects
+	m, _ = updateModel(m, cronNoticeEvent("failure", "job", snapshotFixedNow))
+	m, _ = updateModel(m, cronNoticeTickFor(m))
+	for _, line := range strings.Split(m.viewContent(), "\n") {
+		plain := stripANSI(line)
+		if x := strings.Index(plain, "cron: 1 run failed:"); x >= 0 {
+			cell := attentionTerminalCells(line)[ansi.StringWidth(plain[:x])]
+			want := attentionTerminalCells(errorStyle.Render("x"))[0].foreground
+			require.Equal(t, want, cell.foreground, "Projects failure notice must use the error foreground")
+			return
+		}
+	}
+	t.Fatal("failure notice missing from Projects")
+}
+
+// An emitted failure belongs to the scope and connection that observed it.
+func TestCronNoticeClearsOnSwitch(t *testing.T) {
+	for _, target := range []string{"project", "all projects", "daemon"} {
+		t.Run(target, func(t *testing.T) {
+			m := cronNoticeFixture(t)
+			m, _ = updateModel(m, cronNoticeEvent("failure", "job", snapshotFixedNow))
+			m, _ = updateModel(m, cronNoticeTickFor(m))
+			require.NotNil(t, m.toast)
+			switch target {
+			case "project", "all projects":
+				m.projectsCursor = 0
+				m, _ = m.applyProjectsViewSelection([]projectsRow{{projectID: 8, name: "other-project", sentinel: target == "all projects"}})
+				m, _ = updateModel(m, cronNoticeTickFor(m))
+			case "daemon":
+				m, _ = updateModel(m, daemonSwitchResultMsg{conn: daemonConnection{
+					api: NewClient("http://daemon.example", nil),
+					init: bootInit{view: viewList, scope: homedScope(8, "other-project")},
+				}})
+			}
+			require.Nil(t, m.toast, "departed scope's failure must not survive a switch")
+			m.view = viewCron
+			m.cron.unseenOnly = true
+			m, _ = m.routeCronKey(keyRune('u'))
+			require.False(t, m.cron.unseenOnly, "u must toggle normally after switching")
+		})
+	}
 }
