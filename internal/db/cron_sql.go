@@ -25,6 +25,7 @@ type CronSQL struct {
 		QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 		QueryRowContext(context.Context, string, ...any) *sql.Row
 	}
+	ReadTransact   func(context.Context, func(*sql.Tx) error) error
 	Transact       func(context.Context, func(*sql.Tx) error) error
 	WriteGate      func(context.Context, *sql.Tx, int64) error
 	EffectiveActor func(context.Context, *sql.Tx, int64, string) (string, error)

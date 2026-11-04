@@ -12,6 +12,7 @@ import (
 )
 
 const (
+	apiVersionCronValidate              = "0.39.0"
 	apiVersionSearchStatus              = "0.20.0"
 	apiVersionListSort                  = "0.21.0"
 	apiVersionDiscoveryPagination       = "0.27.0"

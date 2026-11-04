@@ -13,6 +13,7 @@ import (
 )
 
 func registerCronDefinitionHandlers(h huma.API, cfg ServerConfig) {
+	registerCronValidationHandlers(h, cfg)
 	registerCronJobHandlers(h, cfg)
 	registerCronWorkflowHandlers(h, cfg)
 }

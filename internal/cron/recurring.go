@@ -290,6 +290,12 @@ func sameRecurringPosition(a, b RecurringProgress) bool {
 // once triggers have instants (the adapter's own trigger times); progress is
 // read for native jobs only.
 func RecurringOccurrences(j JobDefinition, progress RecurringProgress, after time.Time, n int) ([]time.Time, error) {
+	return recurringOccurrences(j, progress, after, n, false)
+}
+
+// A hypothetical fresh anchor can be the zero instant, which persisted
+// progress reserves as a missing-value sentinel. Its stepping is identical.
+func recurringOccurrences(j JobDefinition, progress RecurringProgress, after time.Time, n int, freshAnchor bool) ([]time.Time, error) {
 	if err := j.Validate(); err != nil {
 		return nil, err
 	}
@@ -300,8 +306,10 @@ func RecurringOccurrences(j JobDefinition, progress RecurringProgress, after tim
 	var next func(time.Time) time.Time
 	switch {
 	case IsRecurringIssueJob(j):
-		if err := progress.Validate(); err != nil {
-			return nil, err
+		if !freshAnchor {
+			if err := progress.Validate(); err != nil {
+				return nil, err
+			}
 		}
 		after = laterOf(after, progress.Through)
 		step, err := recurringNext(j.Trigger, progress.Anchor)
