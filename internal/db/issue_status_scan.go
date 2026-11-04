@@ -251,6 +251,44 @@ const IssueSyncProviderCheckpointKey = "_provider_checkpoint"
 // snapshots inside the private provider checkpoint.
 const IssueSyncPublicationContentBaselinesKey = "publication_content_baselines"
 
+// HasIssueSyncPublicationContentBaseline reports whether the private provider
+// checkpoint holds a publication baseline for externalID. Moves use this to
+// keep a baseline with the project binding that can consume it.
+func HasIssueSyncPublicationContentBaseline(config jsontext.Value, externalID string) (bool, error) {
+	invalid := fmt.Errorf("%w: invalid issue sync publication checkpoint", ErrImportValidation)
+	if externalID == "" {
+		return false, invalid
+	}
+	var fields map[string]jsontext.Value
+	if err := json.Unmarshal(config, &fields); err != nil || fields == nil {
+		return false, invalid
+	}
+	rawCheckpoint, ok := fields[IssueSyncProviderCheckpointKey]
+	if !ok {
+		return false, nil
+	}
+	if len(rawCheckpoint) > 2<<20 {
+		return false, invalid
+	}
+	var checkpoint map[string]jsontext.Value
+	if err := json.Unmarshal(rawCheckpoint, &checkpoint); err != nil || checkpoint == nil {
+		return false, invalid
+	}
+	rawBaselines, ok := checkpoint[IssueSyncPublicationContentBaselinesKey]
+	if !ok {
+		return false, nil
+	}
+	if len(rawBaselines) > 2<<20 {
+		return false, invalid
+	}
+	var baselines map[string]jsontext.Value
+	if err := json.Unmarshal(rawBaselines, &baselines); err != nil || baselines == nil {
+		return false, invalid
+	}
+	_, ok = baselines[externalID]
+	return ok, nil
+}
+
 // WithIssueSyncPublicationContentBaseline records the exact published content
 // snapshot without treating it as a provider modification timestamp.
 func WithIssueSyncPublicationContentBaseline(

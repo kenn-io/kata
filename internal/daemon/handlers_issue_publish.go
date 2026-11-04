@@ -84,7 +84,7 @@ func issuePublishError(err error, provider string) error {
 	}
 	if publication, ok := errors.AsType[*issuesync.PublishError](err); ok {
 		if publication.Code == "restore_adoption_requires_disabled_binding" {
-			return api.NewError(http.StatusConflict, publication.Code, "Disable sync before using --adopt.", "Disable the binding before adopting a restored issue.", nil)
+			return api.NewError(http.StatusConflict, publication.Code, "Disable sync before adopting a restored issue with --adopt.", "", nil)
 		}
 		if message, hint, known := publication.ValidationDetails(); known {
 			return api.NewError(http.StatusBadRequest, publication.Code, message, hint, nil)

@@ -73,6 +73,7 @@ var storageScenarios = []scenario{
 	{name: "IssuePublishModeChangeDiscardsIntent", runWithBackend: checkIssuePublishModeChangeDiscardsIntent},
 	{name: "IssuePublishFederationAdoption", runWithBackend: checkIssuePublishFederationAdoption},
 	{name: "IssuePublishMoveDestination", runWithBackend: checkIssuePublishMoveDestination},
+	{name: "IssuePublishMovePendingBaseline", runWithBackend: checkIssuePublishMovePendingBaseline},
 	{name: "IssuePublishPreflightContent", runWithBackend: checkIssuePublishPreflightContent},
 	{name: "IssuePublishTickTickRecoveryStatus", runWithBackend: checkIssuePublishTickTickRecoveryStatus},
 	{name: "IssuePublishInputFences", runWithBackend: checkIssuePublishInputFences},

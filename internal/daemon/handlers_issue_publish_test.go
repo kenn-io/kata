@@ -71,7 +71,8 @@ func TestIssuePublishRestoreAdoptionExplainsDisabledSync(t *testing.T) {
 	})
 	require.Equal(t, http.StatusConflict, resp.StatusCode, string(body))
 	require.Contains(t, string(body), "restore_adoption_requires_disabled_binding")
-	require.Contains(t, string(body), "Disable sync before using --adopt.")
+	require.Contains(t, string(body), "Disable sync before adopting a restored issue with --adopt.")
+	require.NotContains(t, string(body), "Disable the binding before adopting a restored issue.")
 }
 
 func TestIssuePublishStatusAndLifecycleExposeOnlyRecoveryIdentity(t *testing.T) {

@@ -242,6 +242,11 @@ func taskContentHash(task Task) (string, error) {
 // its remote task ID. Empty checklists use one stable representation.
 func publicationContentHash(task Task) (string, error) {
 	task.ID = ""
+	// TickTick may omit kind when it reads back a text task. Treat that default
+	// the same as the explicit kind used to prepare the publication baseline.
+	if task.Kind == "" && len(task.Items) == 0 {
+		task.Kind = "TEXT"
+	}
 	if task.Items == nil {
 		task.Items = []ChecklistItem{}
 	}

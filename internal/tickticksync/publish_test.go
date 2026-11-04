@@ -146,15 +146,28 @@ func TestPublishTickTickPreservesCheckpointAndImportsSameIssue(t *testing.T) {
 	store, b := adapterDB(t)
 	issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: b.ProjectID, Title: "Native", Body: "Body", Author: "worker"})
 	require.NoError(t, err)
-	task := Task{ID: "task-1", ProjectID: "project-1", Title: "Native", Content: "Body", Status: new(0), Kind: "TEXT", Items: []ChecklistItem{}}
-	client, _ := testClient(t, func(r *http.Request) (*http.Response, error) {
-		if r.URL.Path == "/open/v1/project/project-1" {
-			return reply(200, `{"id":"project-1","kind":"TASK","permission":"write"}`), nil
-		}
-		require.Equal(t, "/open/v1/task", r.URL.Path)
-		raw, err := json.Marshal(task)
+	// TickTick may omit kind on a text-task response. The publication baseline
+	// uses the prepared TEXT task, so this unchanged first import must compare
+	// equal and preserve local edits made after publication.
+	task := Task{ID: "task-1", ProjectID: "project-1", Title: "Native", Content: "Body", Status: new(0), Items: []ChecklistItem{}}
+	taskResponseWithoutKind := func() string {
+		raw, err := json.Marshal(map[string]any{
+			"id": task.ID, "projectId": task.ProjectID, "title": task.Title, "content": task.Content,
+			"status": *task.Status, "items": task.Items,
+		})
 		require.NoError(t, err)
-		return reply(200, string(raw)), nil
+		return string(raw)
+	}
+	client, _ := testClient(t, func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/open/v1/project/project-1":
+			return reply(200, `{"id":"project-1","kind":"TASK","permission":"write"}`), nil
+		case "/open/v1/task", "/open/v1/project/project-1/task/task-1":
+			return reply(200, taskResponseWithoutKind()), nil
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			return reply(404, `{}`), nil
+		}
 	})
 	_, err = issuesync.NewPublisher(issuesync.PublisherConfig{Store: store, Adapter: NewAdapter(store, client)}).Publish(t.Context(), issuesync.PublishRequest{ProjectID: b.ProjectID, IssueID: issue.ID, Provider: "ticktick", Actor: "worker"})
 	require.NoError(t, err)
@@ -172,7 +185,9 @@ func TestPublishTickTickPreservesCheckpointAndImportsSameIssue(t *testing.T) {
 		} `json:"_provider_checkpoint"`
 	}
 	require.NoError(t, json.Unmarshal(saved.Config, &persisted))
-	publishedHash, err := publicationContentHash(task)
+	preparedTask := task
+	preparedTask.Kind = "TEXT"
+	publishedHash, err := publicationContentHash(preparedTask)
 	require.NoError(t, err)
 	baseline := persisted.ProviderCheckpoint.PublicationContentBaselines["task:task-1"]
 	require.Equal(t, publishedHash, baseline.Hash)
@@ -368,7 +383,7 @@ func TestPublishTickTickIncompleteCreateObservationPreservesLocalEdits(t *testin
 	})
 	require.NoError(t, err)
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	created := Task{ID: "task-1", ProjectID: "project-1", Title: issue.Title, Content: issue.Body, Status: new(0), Kind: "TEXT", Items: []ChecklistItem{}}
+	created := Task{ID: "task-1", ProjectID: "project-1", Title: issue.Title, Content: issue.Body, Status: new(0), Items: []ChecklistItem{}}
 	partial := Task{ID: "task-1", ProjectID: "project-1", Kind: "TEXT"}
 	createRequests := 0
 	client, _ := testClient(t, func(r *http.Request) (*http.Response, error) {

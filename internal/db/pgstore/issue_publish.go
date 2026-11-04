@@ -680,6 +680,17 @@ func projectPublicationTx(ctx context.Context, tx *sql.Tx, projectID int64) (*db
 
 // A move must preserve any destination identity reserved for recovery.
 func ensurePublicationMoveAllowedTx(ctx context.Context, tx *sql.Tx, issueID, sourceProjectID, targetProjectID int64) error {
+	sourceBinding, sourceErr := scanIssueSyncBinding(tx.QueryRowContext(ctx, issueSyncBindingSelect+` WHERE b.project_id=$1`, sourceProjectID))
+	if sourceErr != nil && !errors.Is(sourceErr, db.ErrNotFound) {
+		return sourceErr
+	}
+	targetBinding, targetErr := scanIssueSyncBinding(tx.QueryRowContext(ctx, issueSyncBindingSelect+` WHERE b.project_id=$1`, targetProjectID))
+	if targetErr != nil && !errors.Is(targetErr, db.ErrNotFound) {
+		return targetErr
+	}
+	matchingTickTickBinding := sourceErr == nil && targetErr == nil &&
+		sourceBinding.Provider == "ticktick" && targetBinding.Provider == "ticktick"
+
 	rows, err := tx.QueryContext(ctx, `SELECT source, external_id FROM import_mappings WHERE issue_id=$1 AND project_id=$2 AND object_type='issue'`, issueID, sourceProjectID)
 	if err != nil {
 		return err
@@ -700,6 +711,15 @@ func ensurePublicationMoveAllowedTx(ctx context.Context, tx *sql.Tx, issueID, so
 		return err
 	}
 	for _, m := range mappings {
+		if matchingTickTickBinding && targetBinding.SourceKey == m.Source {
+			hasBaseline, err := db.HasIssueSyncPublicationContentBaseline(sourceBinding.Config, m.ExternalID)
+			if err != nil {
+				return err
+			}
+			if hasBaseline {
+				return fmt.Errorf("%w: a published TickTick issue must complete its first import before it can move", db.ErrImportValidation)
+			}
+		}
 		if err := ensurePublicationMappingAllowedTx(ctx, tx, m); err != nil {
 			return err
 		}

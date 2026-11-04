@@ -99,6 +99,9 @@ func TestPublicationContentHashMatchesPreparedSnapshotProperty(t *testing.T) {
 		}
 		remote := prepared
 		remote.ID = hegel.Draw(ht, hegel.Text().MaxSize(32))
+		if hegel.Draw(ht, hegel.Booleans()) {
+			remote.Kind = ""
+		}
 		status := hegel.Draw(ht, hegel.Integers(0, 2))
 		remote.Status = &status
 		remote.CompletedTime = hegel.Draw(ht, hegel.Text().MaxSize(64))
