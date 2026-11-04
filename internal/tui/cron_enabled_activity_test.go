@@ -16,7 +16,7 @@ func cronEnabledEvent(t *testing.T, m Model, kind, issue string, payload any) Mo
 }
 
 func TestCronResumeSurvivesUnrelatedActivity(t *testing.T) {
-	for _, stage := range []string{"admission", "lookup", "confirmation"} {
+	for _, stage := range []string{"lookup", "confirmation"} {
 		for _, completed := range []bool{false, true} {
 			phase := "loading"
 			if completed {
@@ -26,15 +26,11 @@ func TestCronResumeSurvivesUnrelatedActivity(t *testing.T) {
 				t.Run(stage+"/"+phase+"/"+kind, func(t *testing.T) {
 					m, api := enabledFixture(t, pausedNative())
 					withEnabledBacklog(api)
-					var reply cronEnabledReadyMsg
-					if stage != "admission" {
-						next, cmd := press(m, keyRune('p'))
-						m = next
-						require.NotNil(t, cmd)
-						reply = cmd().(cronEnabledReadyMsg)
-						if stage == "confirmation" {
-							m, _ = m.cronEnabledReady(reply)
-						}
+					m, cmd := press(m, keyRune('p'))
+					require.NotNil(t, cmd)
+					reply := cmd().(cronEnabledReadyMsg)
+					if stage == "confirmation" {
+						m, _ = m.cronEnabledReady(reply)
 					}
 					before := m.cron.events
 					for range 3 {
@@ -64,12 +60,6 @@ func TestCronResumeSurvivesUnrelatedActivity(t *testing.T) {
 						fresh.events = m.cron.events
 						m = m.cronLoaded(cronLoadedMsg(fresh))
 					}
-					if stage == "admission" {
-						next, cmd := press(m, keyRune('p'))
-						m = next
-						require.NotNil(t, cmd, "background activity must not starve a selected job action")
-						reply = cmd().(cronEnabledReadyMsg)
-					}
 					if stage != "confirmation" {
 						m, _ = m.cronEnabledReady(reply)
 					}
@@ -87,60 +77,103 @@ func TestCronResumeSurvivesUnrelatedActivity(t *testing.T) {
 	}
 }
 
-func TestCronResumeRelevantChangesRemainFenced(t *testing.T) {
-	for _, stage := range []string{"lookup", "confirmation"} {
-		for _, kind := range []string{"checkpoint", "status", "deleted", "selected-job", "reset", "malformed-metadata", "unknown-job"} {
-			t.Run(stage+"/"+kind, func(t *testing.T) {
-				m, api := enabledFixture(t, pausedNative())
-				withEnabledBacklog(api)
-				m, lookup := press(m, keyRune('p'))
-				reply := lookup().(cronEnabledReadyMsg)
-				if stage == "confirmation" {
-					m, _ = m.cronEnabledReady(reply)
-				}
-				event, issue, payload := "issue.metadata_updated", api.shown.Definition.Issue.ParentUID, map[string]any{"diff": map[string]any{"cron.progress." + api.shown.UID: map[string]any{"to": nil}}}
-				switch kind {
-				case "status":
-					event = "issue.updated"
-					payload = map[string]any{"status": "closed"}
-				case "deleted":
-					event = "issue.soft_deleted"
-				case "selected-job":
-					event = "cron.job.updated"
-					issue = ""
-					payload = map[string]any{"uid": api.shown.UID}
-				case "malformed-metadata":
-					payload = map[string]any{"diff": nil}
-				case "unknown-job":
-					event = "cron.job.updated"
-					issue = ""
-					payload = nil
-				}
-				if kind == "reset" {
-					next, _ := m.handleResetRequired(resetRequiredMsg{})
-					m = next.(Model)
-				} else {
-					m = cronEnabledEvent(t, m, event, issue, payload)
-				}
-				fresh := *m.cron.data
-				fresh.events = m.cron.events
-				m = m.cronLoaded(cronLoadedMsg(fresh))
-				if stage == "lookup" {
-					m, _ = m.cronEnabledReady(reply)
-				} else {
-					m, _ = m.routeModalKey(keyRune('y'))
-				}
-				require.Nil(t, m.cron.enabled)
-				require.Equal(t, modalNone, m.modal)
-				require.Empty(t, api.enabledCalls)
-				require.NotNil(t, m.toast)
-				require.Equal(t, toastError, m.toast.level)
-				require.Contains(t, m.toast.text, "after refresh")
-			})
-		}
+// Admission is a separate gate: restoring the old project-wide freshness
+// check here starves actions even though their own lookup and CAS are guarded.
+func TestCronEnabledAdmissionDuringBackgroundRefresh(t *testing.T) {
+	m, api := enabledFixture(t, pausedNative())
+	withEnabledBacklog(api)
+	for range 3 {
+		m = cronEnabledEvent(t, m, "cron.run.observed", "", map[string]any{"uid": cronTestIssue})
 	}
+	require.NotEqual(t, m.cron.data.events, m.cron.events, "the background refresh has not completed")
+	m, cmd := press(m, keyRune('p'))
+	require.NotNil(t, cmd, "unrelated background refresh must not prevent admission")
+	require.NotNil(t, m.cron.enabled)
+	reply, ok := cmd().(cronEnabledReadyMsg)
+	require.True(t, ok)
+	require.NoError(t, reply.err)
 }
 
-func TestCronResumeModalLabelsCountAtLookup(t *testing.T) {
-	require.Contains(t, stripANSI(renderCronResumeModal(&cronEnabledRequest{name: "Weekly report", count: 5})), "Backlog at last check: 5 recurring child")
+func TestCronResumeRelevantChangesRemainFenced(t *testing.T) {
+	for _, stage := range []string{"lookup", "confirmation"} {
+		for _, completed := range []bool{false, true} {
+			phase := "loading"
+			if completed {
+				phase = "loaded"
+			}
+			for _, kind := range []string{"checkpoint", "status", "deleted", "selected-job", "reset", "reopened", "malformed-metadata", "unknown-job"} {
+				t.Run(stage+"/"+phase+"/"+kind, func(t *testing.T) {
+					m, api := enabledFixture(t, pausedNative())
+					withEnabledBacklog(api)
+					if kind == "reopened" && stage == "lookup" {
+						api.parent.open = false
+					}
+					m, lookup := press(m, keyRune('p'))
+					reply := lookup().(cronEnabledReadyMsg)
+					if kind == "reopened" && stage == "lookup" {
+						require.Zero(t, reply.request.count, "a closed parent suppressed the old count")
+					}
+					if stage == "confirmation" {
+						m, _ = m.cronEnabledReady(reply)
+						require.Equal(t, modalCronResume, m.modal)
+						require.Equal(t, 5, m.cron.enabled.count)
+					}
+					before := m.cron.events
+					event, issue, payload := "issue.metadata_updated", api.shown.Definition.Issue.ParentUID, map[string]any{"diff": map[string]any{"cron.progress." + api.shown.UID: map[string]any{"to": nil}}}
+					switch kind {
+					case "status":
+						event = "issue.updated"
+						payload = map[string]any{"status": "closed"}
+					case "deleted":
+						event = "issue.soft_deleted"
+					case "selected-job":
+						event = "cron.job.updated"
+						issue = ""
+						payload = map[string]any{"uid": api.shown.UID}
+					case "reopened":
+						event = "issue.reopened"
+					// These deliberately exercise the input guards: dropping either nil-diff
+					// or absent-UID refusal would otherwise accept an unclassifiable change.
+					case "malformed-metadata":
+						payload = map[string]any{"diff": nil}
+					case "unknown-job":
+						event = "cron.job.updated"
+						issue = ""
+						payload = nil
+					}
+					if kind == "reset" {
+						next, _ := m.handleResetRequired(resetRequiredMsg{})
+						m = next.(Model)
+					} else {
+						m = cronEnabledEvent(t, m, event, issue, payload)
+					}
+					require.Greater(t, m.cron.events, before)
+					if completed {
+						fresh := *m.cron.data
+						fresh.events = m.cron.events
+						if kind == "reopened" {
+							fresh.parentOpen = map[string]bool{api.shown.Definition.Issue.ParentUID: true}
+							fresh.progress = api.parent.progress
+						}
+						m = m.cronLoaded(cronLoadedMsg(fresh))
+						require.Equal(t, m.cron.events, m.cron.data.events, "refresh completed")
+					} else {
+						require.NotEqual(t, m.cron.events, m.cron.data.events, "refresh is pending")
+					}
+					require.Equal(t, api.shown.DefinitionEventUID, m.cron.data.jobs[0].DefinitionEventUID)
+					if stage == "lookup" {
+						m, _ = m.cronEnabledReady(reply)
+					} else {
+						m, _ = m.routeModalKey(keyRune('y'))
+					}
+					require.Nil(t, m.cron.enabled, "a relevant change must discard the old calculation before a write")
+					require.Equal(t, modalNone, m.modal)
+					require.Empty(t, api.enabledCalls)
+					require.NotNil(t, m.toast)
+					require.Equal(t, toastError, m.toast.level)
+					require.Equal(t, "Job data changed; press p after refresh", m.toast.text)
+				})
+			}
+		}
+	}
 }

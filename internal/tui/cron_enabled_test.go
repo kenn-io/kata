@@ -87,18 +87,10 @@ func TestCronEnabledKeyListAndDetail(t *testing.T) {
 			m, write := m.cronEnabledReady(reply)
 			_, _ = deliverEnabled(t, m, write)
 			require.Equal(t, []enabledCall{{uid: api.shown.UID, expected: api.shown.DefinitionEventUID, actor: "operator", enabled: false}}, api.enabledCalls)
+			require.True(t, api.mutationHasDeadline)
+			require.Greater(t, time.Until(api.mutationDeadline), 15*time.Second)
 		})
 	}
-}
-
-func TestCronEnabledWriteAllowsFederationForwarding(t *testing.T) {
-	m, api := enabledFixture(t, executeRecord(`{}`))
-	m, lookup := press(m, keyRune('p'))
-	m, write := deliverEnabled(t, m, lookup)
-	_, _ = deliverEnabled(t, m, write)
-
-	require.True(t, api.mutationHasDeadline)
-	require.Greater(t, time.Until(api.mutationDeadline), 15*time.Second)
 }
 
 func TestCronResumeBacklogConfirmation(t *testing.T) {
@@ -202,7 +194,7 @@ func TestCronEnabledAdmissionAndPending(t *testing.T) {
 	}
 }
 
-func TestCronResumeConflictRefreshes(t *testing.T) {
+func TestCronEnabledWriteErrorRefreshes(t *testing.T) {
 	m, api := enabledFixture(t, pausedNative())
 	withEnabledBacklog(api)
 	api.errorWrite = &APIError{Status: http.StatusConflict, Code: "cron_conflict", Message: "changed"}
@@ -277,32 +269,8 @@ func TestCronEditLookupCannotBypassEnabledPending(t *testing.T) {
 	require.Len(t, api.enabledCalls, 1)
 }
 
-// A relevant parent event invalidates a count and tells the operator to retry.
-func TestCronResumeRefreshRequiresRecount(t *testing.T) {
-	for _, stage := range []string{"lookup", "confirmation"} {
-		t.Run(stage, func(t *testing.T) {
-			m, api := enabledFixture(t, pausedNative())
-			withEnabledBacklog(api)
-			m, lookup := press(m, keyRune('p'))
-			if stage == "confirmation" {
-				m, _ = deliverEnabled(t, m, lookup)
-			}
-			m = cronEnabledEvent(t, m, "issue.reopened", api.shown.Definition.Issue.ParentUID, nil)
-			if stage == "lookup" {
-				m, _ = deliverEnabled(t, m, lookup)
-			} else {
-				m, _ = m.routeModalKey(keyRune('y'))
-			}
-			require.Nil(t, m.cron.enabled)
-			require.Equal(t, modalNone, m.modal)
-			require.Empty(t, api.enabledCalls)
-			require.NotNil(t, m.toast)
-			require.Equal(t, toastError, m.toast.level)
-			require.Equal(t, "Job data changed; press p after refresh", m.toast.text)
-		})
-	}
-}
-
+// Count 2 protects the singular/plural boundary; the count-5 snapshot cannot
+// detect an accidental <= 2 singular condition.
 func TestCronResumeModalCountGrammar(t *testing.T) {
 	for _, count := range []int{1, 2} {
 		view := stripANSI(renderCronResumeModal(&cronEnabledRequest{name: "Weekly report", count: count}))

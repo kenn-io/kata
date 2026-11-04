@@ -43,7 +43,7 @@ func checkCronEnabledDeletedParent(t *testing.T, s db.Storage) error {
 
 // Adapter dependency failures are tested separately from native parent gating.
 func checkCronEnabledAdapterTarget(t *testing.T, s db.Storage) error {
-	for _, kind := range []string{"deleted", "moved"} {
+	for _, kind := range []string{"deleted", "moved-resume", "moved-pause"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := t.Context()
 			project, err := s.CreateProject(ctx, "adapter-"+kind)
@@ -53,17 +53,8 @@ func checkCronEnabledAdapterTarget(t *testing.T, s db.Storage) error {
 			definition := adapterNotifyDefinition(target.UID)
 			job, _, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "Adapter job", Actor: "operator", Definition: definition})
 			require.NoError(t, err)
-			if kind == "deleted" {
-				_, _, _, err = s.SoftDeleteIssue(ctx, target.ID, "operator")
-				require.NoError(t, err)
-			}
-			definition.Enabled = false
-			paused, events, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, UID: job.UID, Name: job.Name, Definition: definition, Actor: "operator", ExpectedEventUID: job.DefinitionEventUID})
-			require.NoError(t, err)
-			require.Len(t, events, 1)
-			require.Equal(t, definition, paused.Definition)
-			if kind == "moved" {
-				other, err := s.CreateProject(ctx, "dependency-project")
+			moveTarget := func() {
+				other, err := s.CreateProject(ctx, "dependency-"+kind)
 				require.NoError(t, err)
 				_, err = s.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: target.ID, FromProjectID: project.ID, ToProjectID: other.ID, IfMatchRev: target.Revision, Actor: "operator"})
 				require.NoError(t, err)
@@ -71,10 +62,34 @@ func checkCronEnabledAdapterTarget(t *testing.T, s db.Storage) error {
 				require.NoError(t, err)
 				require.Equal(t, other.ID, moved.ProjectID)
 			}
+			if kind == "moved-pause" {
+				moveTarget()
+			}
+			if kind == "deleted" {
+				_, _, _, err = s.SoftDeleteIssue(ctx, target.ID, "operator")
+				require.NoError(t, err)
+			}
+			definition.Enabled = false
+			paused, events, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, UID: job.UID, Name: job.Name, Definition: definition, Actor: "operator", ExpectedEventUID: job.DefinitionEventUID})
+			if kind == "moved-pause" {
+				require.ErrorIs(t, err, cron.ErrInvalid)
+				require.ErrorContains(t, err, "dependency belongs to another project")
+				require.Empty(t, events)
+				current, readErr := s.CronJob(ctx, project.ID, job.UID)
+				require.NoError(t, readErr)
+				require.Equal(t, job, current, "a refused pause must leave the definition and revision unchanged")
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, events, 1)
+			require.Equal(t, definition, paused.Definition)
+			if kind == "moved-resume" {
+				moveTarget()
+			}
 			definition.Enabled = true
 			_, events, err = s.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, UID: job.UID, Name: job.Name, Definition: definition, Actor: "operator", ExpectedEventUID: paused.DefinitionEventUID})
 			require.ErrorIs(t, err, cron.ErrInvalid)
-			if kind == "moved" {
+			if kind == "moved-resume" {
 				require.ErrorContains(t, err, "dependency belongs to another project")
 			}
 			require.Empty(t, events)

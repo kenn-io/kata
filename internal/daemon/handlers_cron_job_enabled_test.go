@@ -32,8 +32,6 @@ func TestCronJobPauseResume(t *testing.T) {
 		require.Equalf(t, 200, status, "%s", raw)
 		var out api.CronJobResponse
 		require.NoError(t, json.Unmarshal(raw, &out.Body))
-		require.Equal(t, original.Name, out.Body.Job.Name)
-		require.Equal(t, original.UID, out.Body.Job.UID)
 		require.Len(t, out.Body.Events, 1)
 		require.Equal(t, "cron.job.updated", out.Body.Events[0].Type)
 		require.Equal(t, "operator", out.Body.Events[0].Actor)
@@ -85,6 +83,8 @@ func TestCronJobEnabledPreservationProperty(t *testing.T) {
 			require.Equal(ht, 200, status, string(raw))
 			var out api.CronJobResponse
 			require.NoError(ht, json.Unmarshal(raw, &out.Body))
+			require.Equal(ht, job.Name, out.Body.Job.Name)
+			require.Equal(ht, job.UID, out.Body.Job.UID)
 			want := definition
 			want.Enabled = action == "resume"
 			stored, err := env.DB.CronJob(t.Context(), project.ID, job.UID)
@@ -95,6 +95,7 @@ func TestCronJobEnabledPreservationProperty(t *testing.T) {
 				want.Options = nil
 			}
 			require.Equal(ht, want, out.Body.Job.Definition.Native())
+			// These retries omit expected_event_uid; the CAS test owns guarded no-ops.
 			if job.Definition.Enabled == want.Enabled {
 				require.Empty(ht, out.Body.Events)
 			} else {

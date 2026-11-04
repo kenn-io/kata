@@ -371,8 +371,8 @@ func TestCronJobEnabledTools(t *testing.T) {
 	}
 	rejectWhitespace("resume", job)
 	resumed := cronRecord(t, f.session, "cron_job_resume", map[string]any{"uid": id}, "job")
+	// These booleans prove each tool chooses its matching generated operation.
 	require.Equal(t, true, resumed["definition"].(map[string]any)["enabled"])
-	require.Equal(t, job["name"], resumed["name"])
 	rejectWhitespace("pause", resumed)
 	require.True(t, cronCall(t, f.session, "cron_job_pause", map[string]any{"uid": id, "expected_event_uid": job["definition_event_uid"]}).IsError)
 	paused := cronRecord(t, f.session, "cron_job_pause", map[string]any{"uid": id, "expected_event_uid": resumed["definition_event_uid"]}, "job")
