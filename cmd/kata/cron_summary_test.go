@@ -40,3 +40,31 @@ func TestCronCLISummaryRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestCronCLIReasonFilter(t *testing.T) {
+	t.Setenv("KATA_AUTHOR", "worker")
+	env := testenv.New(t)
+	project, err := env.DB.CreateProject(t.Context(), "spoke-project")
+	require.NoError(t, err)
+	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Actor: "worker", Name: "Review", Definition: cronCLIJob(t).Definition.Native()})
+	require.NoError(t, err)
+	wanted := cronCLIUID(t)
+	for _, id := range []string{wanted, cronCLIUID(t)} {
+		reason := "timeout"
+		if id == wanted {
+			reason = "failed"
+		}
+		_, err := env.DB.ObserveCronRun(t.Context(), db.ObserveCronRun{ProjectID: project.ID, UID: id, Actor: "worker", JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Status: "failed", Summary: cron.Summary{Version: 1, Reason: reason}})
+		require.NoError(t, err)
+	}
+	raw, _, err := executeCronCLI(t, env.URL, strings.NewReader(""), "run", "list", "--reason", "failed", "--limit", "1")
+	require.NoError(t, err)
+	var result struct {
+		Runs []api.CronRun `json:"runs"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(raw), &result))
+	require.Len(t, result.Runs, 1)
+	require.Equal(t, wanted, result.Runs[0].UID)
+	_, _, err = executeCronCLI(t, env.URL, strings.NewReader(""), "run", "list", "--reason", "INVALID")
+	require.Error(t, err)
+}

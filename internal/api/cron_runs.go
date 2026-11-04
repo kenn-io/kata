@@ -80,6 +80,7 @@ type ObserveCronRunResponse struct {
 
 // CronRunsRequest selects a bounded project-scoped history page.
 type CronRunsRequest struct {
+	Reason string `query:"reason" doc:"Structured reason code, or an exact legacy reason first line"`
 	CronProjectRequest
 	JobUID    string `query:"job_uid"`
 	Limit     int    `query:"limit" minimum:"0" maximum:"100"`

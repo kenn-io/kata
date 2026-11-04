@@ -178,3 +178,22 @@ func TestCronRunSummaryRejectsNullMembers(t *testing.T) {
 		})
 	}
 }
+
+func TestCronRunReasonFilter(t *testing.T) {
+	f := newCronFixture(t)
+	job := cronTestJob(t, f)
+	wanted := cronNewUID(t, f.session)
+	for _, id := range []string{wanted, cronNewUID(t, f.session)} {
+		args := cronObservation(id, job)
+		reason := "timeout"
+		if id == wanted {
+			reason = "failed"
+		}
+		args["summary"] = map[string]any{"version": 1, "reason": reason}
+		cronOK(t, f.session, "cron_run_observe", args)
+	}
+	runs := cronOK(t, f.session, "cron_runs", map[string]any{"reason": "failed", "limit": 1})["runs"].([]any)
+	require.Len(t, runs, 1)
+	require.Equal(t, wanted, runs[0].(map[string]any)["uid"])
+	require.True(t, cronCall(t, f.session, "cron_runs", map[string]any{"reason": "INVALID"}).IsError)
+}

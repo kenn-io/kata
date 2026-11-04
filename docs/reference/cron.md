@@ -512,6 +512,21 @@ page. Ordinary federation publishes observations from spokes, folds evidence
 by original event provenance per run UID, and preserves independent runs in
 baselines and backup. Run identity conflicts fail rather than replacing a run.
 
+### Filter runs by reason
+
+`kata cron run list --reason agent_quota --limit 20 --json` selects one reason
+code. The REST query is `reason=agent_quota`; MCP `kata.cron_runs` accepts the
+same `reason` input. Codes must match `[a-z0-9_.-]{1,64}`. Invalid codes return
+400 `validation` from the daemon.
+
+The structured `summary.reason` takes precedence. When it is absent, a run
+matches only if the first message line is exactly `reason: <code>`, terminated
+by LF or the end of the message. CRLF, trailing spaces and later lines do not
+match. Filtering happens before the page limit and composes with `job_uid`
+and `before_uid`; keep the same filters when following `next_before_uid`.
+The database scans summary JSON within the selected project; there is no new
+reason index.
+
 ### Structured run summaries
 
 Adapters can report a reason, model usage, ordered step results, and an opaque

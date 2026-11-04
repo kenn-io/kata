@@ -78,7 +78,7 @@ func registerCronRunHandlers(h huma.API, cfg ServerConfig) {
 		if _, err := activeProjectByID(ctx, cfg.DB, in.ProjectID); err != nil {
 			return nil, err
 		}
-		runs, err := cfg.DB.ListCronRuns(ctx, db.CronRunList{ProjectID: in.ProjectID, JobUID: in.JobUID, Limit: in.Limit, BeforeUID: in.BeforeUID})
+		runs, err := cfg.DB.ListCronRuns(ctx, db.CronRunList{ProjectID: in.ProjectID, JobUID: in.JobUID, Reason: in.Reason, Limit: in.Limit, BeforeUID: in.BeforeUID})
 		if err != nil {
 			return nil, cronRunAPIError(ctx, cfg, err, in.ProjectID, "")
 		}

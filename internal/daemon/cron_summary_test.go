@@ -189,3 +189,11 @@ func TestCronSummaryRelayMetadataCapabilities(t *testing.T) {
 		require.Equal(t, db.SupportedEventFeatures, headers.Get(db.EventFeaturesHeader))
 	})
 }
+
+func TestCronRunReasonValidation(t *testing.T) {
+	env := testenv.New(t)
+	project := seedProject(t, env, "reason-project")
+	status, raw := cronHTTP(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/runs?reason=INVALID", project.ID), nil)
+	require.Equal(t, 400, status, string(raw))
+	require.Contains(t, string(raw), "validation")
+}
