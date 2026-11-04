@@ -50,3 +50,46 @@ func checkSnapshotReplayRejectsMalformedRetainedStatusScan(t *testing.T, store d
 	require.JSONEq(t, string(valid), string(binding.Config))
 	return nil
 }
+
+func checkSnapshotReplayPreservesPublicationBaseline(t *testing.T, store db.Storage) error {
+	ctx := t.Context()
+	const projectID, bindingID, mappingID = int64(5), int64(7), int64(8)
+	issueID := int64(6)
+	const importedAt = "2026-09-29T00:00:00.000Z"
+	const baselineHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	config := jsontext.Value(`{"project_id":"project-1","status_sync":"one-way","_status_sync":{"pending":{"after":0,"through":0},"sweep":{"after":0,"through":0}},"_provider_checkpoint":{"versions":{"task-1":{"hash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","first_seen":"2026-09-29T00:00:00Z","version":"2026-09-29T00:00:00Z"}},"missing_after":"task-1","publication_content_baselines":{"task:task-1":{"hash":"` + baselineHash + `","at":"2026-09-29T00:00:00Z"}}}}`)
+	issue := &db.IssueExport{
+		ID: issueID, UID: replayIssueUID, ProjectID: projectID, ShortID: "zz12",
+		Title: "Locally edited title", Body: "Locally edited body", Status: "open",
+		Author: "fixture-author", CreatedAt: importedAt, UpdatedAt: importedAt,
+		Metadata: jsontext.Value(`{}`), Revision: 2, ContentRevision: 2,
+	}
+	records := []db.ImportRecord{
+		&db.ProjectExport{ID: projectID, UID: replayProjectUID, Name: "replay-project", CreatedAt: importedAt, Metadata: jsontext.Value(`{}`), Revision: 1},
+		issue,
+		&db.IssueSyncBindingExport{
+			ID: bindingID, ProjectID: projectID, Provider: "ticktick", SourceKey: "ticktick:project-1", RemoteID: "project-1",
+			DisplayName: "Example tasks", Config: config, Enabled: true, IntervalSeconds: 300, CreatedAt: importedAt, UpdatedAt: importedAt,
+		},
+		&db.ImportMappingExport{ID: mappingID, Source: "ticktick:project-1", ExternalID: "task:task-1", ObjectType: "issue", ProjectID: projectID, IssueID: &issueID, ImportedAt: importedAt},
+	}
+	if err := store.ImportReplay(ctx, records, db.ImportOptions{}); err != nil {
+		return err
+	}
+	binding, err := store.IssueSyncBindingByProject(ctx, projectID)
+	require.NoError(t, err)
+	require.False(t, binding.Enabled, "ordinary restores must disable external sync")
+	require.JSONEq(t, `{"project_id":"project-1","status_sync":"one-way","_provider_checkpoint":{"publication_content_baselines":{"task:task-1":{"hash":"`+baselineHash+`","at":"2026-09-29T00:00:00Z"}}}}`, string(binding.Config),
+		"restore may retain the inert publication baseline, not scan progress or task checkpoints")
+	mapping, err := store.ImportMappingBySource(ctx, projectID, "ticktick:project-1", "issue", "task:task-1")
+	require.NoError(t, err)
+	require.Nil(t, mapping.SourceUpdatedAt, "the first content import must remain pending after restore")
+	gotIssue, err := store.IssueByID(ctx, issueID)
+	require.NoError(t, err)
+	require.Equal(t, issue.Title, gotIssue.Title)
+	require.Equal(t, issue.Body, gotIssue.Body)
+	pending, err := store.(db.IssuePublicationStore).PendingIssuePublication(ctx, projectID)
+	require.NoError(t, err)
+	require.Nil(t, pending, "ordinary restore must not resume an executable publication attempt")
+	return nil
+}

@@ -249,10 +249,6 @@ func (a *Adapter) seedReturningTasks(ctx context.Context, b db.IssueSyncBinding,
 		if err != nil {
 			return err
 		}
-		if _, tracked := cp.Versions[id]; tracked {
-			delete(cp.PublicationContentBaselines, m.ExternalID)
-			continue
-		}
 		task, ok := visible[id]
 		if !ok {
 			continue
@@ -261,20 +257,29 @@ func (a *Adapter) seedReturningTasks(ctx context.Context, b db.IssueSyncBinding,
 		if err != nil {
 			return err
 		}
-		if baseline, hasBaseline := cp.PublicationContentBaselines[m.ExternalID]; hasBaseline {
-			if m.SourceUpdatedAt == nil && hash == baseline.Hash {
-				at := baseline.At.UTC().Truncate(time.Millisecond)
-				cp.Versions[id] = TaskVersion{
-					Hash: hash, Status: *task.Status, CompletedTime: task.CompletedTime,
-					FirstSeen: at, Version: at,
-				}
-			}
-			delete(cp.PublicationContentBaselines, m.ExternalID)
-			if m.SourceUpdatedAt == nil {
-				continue
-			}
-		}
 		if m.SourceUpdatedAt == nil {
+			if baseline, hasBaseline := cp.PublicationContentBaselines[m.ExternalID]; hasBaseline {
+				baselineHash, err := publicationContentHash(task)
+				if err != nil {
+					return err
+				}
+				if baselineHash == baseline.Hash {
+					at := baseline.At.UTC().Truncate(time.Millisecond)
+					cp.Versions[id] = TaskVersion{
+						Hash: hash, Status: *task.Status, CompletedTime: task.CompletedTime,
+						FirstSeen: at, Version: at,
+					}
+				} else {
+					// A checkpoint staged by a failed pre-attachment sync is not an
+					// imported source version. Re-read changed content as the first import.
+					delete(cp.Versions, id)
+				}
+				delete(cp.PublicationContentBaselines, m.ExternalID)
+			}
+			continue
+		}
+		if _, tracked := cp.Versions[id]; tracked {
+			delete(cp.PublicationContentBaselines, m.ExternalID)
 			continue
 		}
 		saved := m.SourceUpdatedAt.UTC().Truncate(time.Millisecond)

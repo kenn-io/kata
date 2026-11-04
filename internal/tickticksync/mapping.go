@@ -237,3 +237,13 @@ func taskContentHash(task Task) (string, error) {
 	hash := sha256.Sum256(encoded)
 	return hex.EncodeToString(hash[:]), nil
 }
+
+// publicationContentHash uses the prepared task content before TickTick assigns
+// its remote task ID. Empty checklists use one stable representation.
+func publicationContentHash(task Task) (string, error) {
+	task.ID = ""
+	if task.Items == nil {
+		task.Items = []ChecklistItem{}
+	}
+	return taskContentHash(task)
+}

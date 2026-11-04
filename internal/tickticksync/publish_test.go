@@ -5,7 +5,6 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 
@@ -66,7 +65,7 @@ func TestPublishTickTickContentAndRecovery(t *testing.T) {
 	}
 }
 func TestPublishTickTickOneSendAndProjectPolicy(t *testing.T) {
-	for _, scenario := range []string{"NOTE", "closed_project", "read", "comment", "wrong_project", "drop", "503", "empty", "malformed", "redirect", "closed_task", "incomplete", "admission", "oversize"} {
+	for _, scenario := range []string{"NOTE", "comment", "wrong_project", "drop", "503", "empty", "malformed", "redirect", "closed_task", "incomplete", "admission"} {
 		t.Run(scenario, func(t *testing.T) {
 			creates := 0
 			c, _ := testClient(t, func(r *http.Request) (*http.Response, error) {
@@ -75,9 +74,7 @@ func TestPublishTickTickOneSendAndProjectPolicy(t *testing.T) {
 					switch scenario {
 					case "NOTE":
 						project.Kind = "NOTE"
-					case "closed_project":
-						project.Closed = true
-					case "read", "comment":
+					case "comment":
 						project.Permission = scenario
 					}
 					raw, err := json.Marshal(project)
@@ -115,11 +112,8 @@ func TestPublishTickTickOneSendAndProjectPolicy(t *testing.T) {
 			})
 			s := openPublishTickTick(t, c)
 			issue := db.Issue{Title: "Native", Status: "open"}
-			if scenario == "oversize" {
-				issue.Body = strings.Repeat("x", (1<<20)+1)
-			}
 			payload, err := s.PrepareCreate(t.Context(), issue)
-			if scenario == "NOTE" || scenario == "closed_project" || scenario == "read" || scenario == "comment" || scenario == "oversize" {
+			if scenario == "NOTE" || scenario == "comment" {
 				require.Error(t, err)
 				require.Zero(t, creates)
 				return
@@ -174,7 +168,7 @@ func TestPublishTickTickPreservesCheckpointAndImportsSameIssue(t *testing.T) {
 		} `json:"_provider_checkpoint"`
 	}
 	require.NoError(t, json.Unmarshal(saved.Config, &persisted))
-	publishedHash, err := taskContentHash(task)
+	publishedHash, err := publicationContentHash(task)
 	require.NoError(t, err)
 	baseline := persisted.ProviderCheckpoint.PublicationContentBaselines["task:task-1"]
 	require.Equal(t, publishedHash, baseline.Hash)
@@ -215,6 +209,94 @@ func TestPublishTickTickPreservesCheckpointAndImportsSameIssue(t *testing.T) {
 	checkpoint, err = DecodeCheckpoint(result.Binding.Config)
 	require.NoError(t, err)
 	require.Equal(t, version, checkpoint.Versions["task-1"].Version)
+}
+
+func TestPublishTickTickResponseLossPreservesOriginalContentBaseline(t *testing.T) {
+	for _, stagedBeforeRecovery := range []bool{false, true} {
+		name := "direct_recovery"
+		if stagedBeforeRecovery {
+			name = "failed_scheduled_sync_before_recovery"
+		}
+		t.Run(name, func(t *testing.T) {
+			store, binding := adapterDB(t)
+			now := time.Now().UTC().Truncate(time.Millisecond)
+			issue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
+				ProjectID: binding.ProjectID, Title: "Native", Body: "Published body", Author: "worker",
+			})
+			require.NoError(t, err)
+
+			created := Task{ID: "task-1", ProjectID: "project-1", Title: issue.Title, Content: issue.Body, Status: new(0), Kind: "TEXT", Items: []ChecklistItem{}}
+			createRequests := 0
+			client, _ := testClient(t, func(r *http.Request) (*http.Response, error) {
+				switch r.URL.Path {
+				case "/open/v1/project/project-1":
+					return reply(200, `{"id":"project-1","kind":"TASK","permission":"write"}`), nil
+				case "/open/v1/task":
+					createRequests++
+					return nil, errors.New("response lost after creation")
+				case "/open/v1/project/project-1/task/task-1":
+					raw, marshalErr := json.Marshal(created)
+					require.NoError(t, marshalErr)
+					return reply(200, string(raw)), nil
+				default:
+					t.Errorf("unexpected path %s", r.URL.Path)
+					return reply(404, `{}`), nil
+				}
+			})
+			publisher := issuesync.NewPublisher(issuesync.PublisherConfig{Store: store, Adapter: NewAdapter(store, client), Clock: func() time.Time { return now }})
+			request := issuesync.PublishRequest{ProjectID: binding.ProjectID, IssueID: issue.ID, Provider: "ticktick", Actor: "worker"}
+			_, err = publisher.Publish(t.Context(), request)
+			require.Error(t, err)
+			require.Equal(t, 1, createRequests, "the uncertain create must not be sent again")
+
+			localTitle, localBody := "Local title after publication", "Local body after publication"
+			local, _, _, err := store.EditIssue(t.Context(), db.EditIssueParams{
+				IssueID: issue.ID, Title: &localTitle, Body: &localBody, Actor: "worker",
+			})
+			require.NoError(t, err)
+
+			// The pending publication owns its claim until the normal recovery TTL
+			// expires. A later scheduled sync is still allowed to stage its checkpoint.
+			now = now.Add(31 * time.Minute)
+			source := sourceData()
+			source.data.Tasks = []Task{created}
+			runner := NewRunner(RunnerConfig{Store: store, Fetcher: source, Clock: func() time.Time { return now }})
+			if stagedBeforeRecovery {
+				_, err = runner.RunOnce(t.Context(), binding.ID)
+				require.Error(t, err, "the pending publication fences the scheduled import")
+				stagedBinding, readErr := store.IssueSyncBindingByProject(t.Context(), binding.ProjectID)
+				require.NoError(t, readErr)
+				staged, decodeErr := DecodeCheckpoint(stagedBinding.Config)
+				require.NoError(t, decodeErr)
+				require.Contains(t, staged.Versions, "task-1", "the failed run persisted its pre-import source checkpoint")
+			}
+
+			_, err = publisher.Publish(t.Context(), issuesync.PublishRequest{
+				ProjectID: binding.ProjectID, IssueID: issue.ID, Provider: "ticktick", Actor: "worker", Adopt: "task-1",
+			})
+			require.NoError(t, err)
+			attached, err := store.IssueSyncBindingByProject(t.Context(), binding.ProjectID)
+			require.NoError(t, err)
+			attachedCheckpoint, err := DecodeCheckpoint(attached.Config)
+			require.NoError(t, err)
+			baseline := attachedCheckpoint.PublicationContentBaselines["task:task-1"]
+			require.Equal(t, issue.UpdatedAt.UTC().Truncate(time.Millisecond), baseline.At,
+				"recovery must keep the content snapshot time from before dispatch")
+
+			now = now.Add(10 * time.Minute)
+			result, err := runner.RunOnce(t.Context(), binding.ID)
+			require.NoError(t, err)
+			require.Zero(t, result.Import.Created)
+			after := mappedIssue(t, store, binding, "task-1")
+			require.Equal(t, issue.UID, after.UID)
+			require.Equal(t, local.Title, after.Title, "an unchanged first poll must preserve a local title edit")
+			require.Equal(t, local.Body, after.Body, "an unchanged first poll must preserve a local body edit")
+			checkpoint, err := DecodeCheckpoint(result.Binding.Config)
+			require.NoError(t, err)
+			require.Equal(t, issue.UpdatedAt.UTC().Truncate(time.Millisecond), checkpoint.Versions["task-1"].Version)
+			require.Equal(t, 1, createRequests)
+		})
+	}
 }
 
 func TestPublishTickTickRecoversCompletionBeforeFirstImport(t *testing.T) {

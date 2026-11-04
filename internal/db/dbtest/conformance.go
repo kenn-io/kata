@@ -1105,6 +1105,11 @@ var storageScenarios = []scenario{
 		run:     checkSnapshotReplayRejectsMalformedRetainedStatusScan,
 	},
 	{
+		name:    "snapshot replay preserves inert issue publication baselines",
+		methods: []string{"ImportReplay", "IssueByID", "IssueSyncBindingByProject", "ImportMappingBySource"},
+		run:     checkSnapshotReplayPreservesPublicationBaseline,
+	},
+	{
 		name:    "snapshot replay rejects invalid external root frontiers",
 		methods: []string{"ImportReplay", "ProjectByUID"},
 		run:     checkSnapshotReplayRejectsInvalidExternalRootFrontiers,

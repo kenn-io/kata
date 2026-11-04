@@ -109,7 +109,7 @@ func pgReplayIssueSyncBinding(
 	}
 	if !preserveEnabled {
 		var err error
-		configJSON, err = db.PublicIssueSyncConfig(configJSON)
+		configJSON, err = db.IssueSyncConfigForRestore(configJSON)
 		if err != nil {
 			return err
 		}

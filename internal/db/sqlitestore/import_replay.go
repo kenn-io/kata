@@ -630,7 +630,7 @@ func importIssueSyncBinding(ctx context.Context, tx *sql.Tx, b *db.IssueSyncBind
 	config := b.Config
 	if !preserveEnabled {
 		var err error
-		config, err = db.PublicIssueSyncConfig(config)
+		config, err = db.IssueSyncConfigForRestore(config)
 		if err != nil {
 			return err
 		}

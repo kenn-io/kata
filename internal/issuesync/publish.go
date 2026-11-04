@@ -27,6 +27,12 @@ type PublishSession interface {
 	ReadCreated(context.Context, db.IssuePublicationRemote) (db.IssuePublicationRemote, error)
 }
 
+// PreparedPublishRecoverySession can use the saved create request to restore
+// provider metadata that must survive an uncertain create response.
+type PreparedPublishRecoverySession interface {
+	ReadCreatedWithPrepared(context.Context, db.IssuePublicationRemote, jsontext.Value) (db.IssuePublicationRemote, error)
+}
+
 // PublisherConfig supplies storage, provider access, admission, and event delivery.
 type PublisherConfig struct {
 	Store          db.Storage
@@ -190,7 +196,15 @@ func (p *Publisher) Publish(ctx context.Context, r PublishRequest) (PublishResul
 		if r.Adopt == "" {
 			identity = *pending.Remote
 		}
-		remote, err = session.ReadCreated(ctx, identity)
+		if pending != nil {
+			if recovery, ok := session.(PreparedPublishRecoverySession); ok {
+				remote, err = recovery.ReadCreatedWithPrepared(ctx, identity, pending.Payload)
+			} else {
+				remote, err = session.ReadCreated(ctx, identity)
+			}
+		} else {
+			remote, err = session.ReadCreated(ctx, identity)
+		}
 		if err != nil {
 			return zero, failure("publication_recovery_read_failed", pending)
 		}

@@ -2,11 +2,14 @@ package db_test
 
 import (
 	"encoding/json/jsontext"
+	"encoding/json/v2"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"hegel.dev/go/hegel"
 )
 
 func TestIssueSyncBindingTimestampAlwaysAdvances(t *testing.T) {
@@ -36,6 +39,37 @@ func TestIssueStatusScanRejectsInvalidProgressAndConfigInjection(t *testing.T) {
 	public, err := db.PublicIssueSyncConfig(merged)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"status_sync":"one-way"}`, string(public))
+}
+
+func TestIssueSyncConfigRestorePreservesOnlyPublicationBaselinesProperty(t *testing.T) {
+	hegel.Test(t, func(ht *hegel.T) {
+		count := hegel.Draw(ht, hegel.Integers(1, 8))
+		baselines := make(map[string]db.IssuePublicationContentBaseline, count)
+		for i := range count {
+			hash := fmt.Sprintf("%064x", hegel.Draw(ht, hegel.Integers(0, 1<<20)))
+			at := time.Unix(int64(hegel.Draw(ht, hegel.Integers(1, 2_000_000_000))), 0).UTC()
+			baselines[fmt.Sprintf("task:%d", i)] = db.IssuePublicationContentBaseline{Hash: hash, At: at}
+		}
+		baselineJSON, err := json.Marshal(baselines, json.Deterministic(true))
+		require.NoError(ht, err)
+		config := jsontext.Value(`{"project_id":"project-1","status_sync":"one-way","_status_sync":{"pending":{"after":0,"through":0},"sweep":{"after":0,"through":0}},"_provider_checkpoint":{"versions":{"task:stale":{"hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","first_seen":"2026-09-29T00:00:00Z","version":"2026-09-29T00:00:00Z"}},"missing_after":"task:stale","publication_content_baselines":` + string(baselineJSON) + `}}`)
+
+		restored, err := db.IssueSyncConfigForRestore(config)
+		require.NoError(ht, err)
+		var got struct {
+			StatusScan         map[string]jsontext.Value `json:"_status_sync"`
+			ProviderCheckpoint struct {
+				Versions                    map[string]jsontext.Value                     `json:"versions"`
+				MissingAfter                string                                        `json:"missing_after"`
+				PublicationContentBaselines map[string]db.IssuePublicationContentBaseline `json:"publication_content_baselines"`
+			} `json:"_provider_checkpoint"`
+		}
+		require.NoError(ht, json.Unmarshal(restored, &got))
+		require.Nil(ht, got.StatusScan)
+		require.Nil(ht, got.ProviderCheckpoint.Versions)
+		require.Empty(ht, got.ProviderCheckpoint.MissingAfter)
+		require.Equal(ht, baselines, got.ProviderCheckpoint.PublicationContentBaselines)
+	}, hegel.WithTestCases(32))
 }
 
 func TestIssueSyncConfigComparisonIgnoresPrivateProgress(t *testing.T) {

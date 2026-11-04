@@ -3,6 +3,7 @@ package tickticksync
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
@@ -24,6 +25,13 @@ type ticktickCreatePayload struct {
 	Title     string `json:"title"`
 	ProjectID string `json:"projectId"`
 	Content   string `json:"content"`
+}
+
+type ticktickPreparedCreate struct {
+	Title           string                              `json:"title"`
+	ProjectID       string                              `json:"projectId"`
+	Content         string                              `json:"content"`
+	ContentBaseline *db.IssuePublicationContentBaseline `json:"content_baseline,omitempty"`
 }
 
 // OpenPublish captures a provider session for the configured source.
@@ -91,14 +99,21 @@ func (s *ticktickPublishSession) PrepareCreate(ctx context.Context, issue db.Iss
 	if !validTime(s.contentBaselineAt) {
 		s.contentBaselineAt = s.session.client.cfg.Now().UTC().Truncate(time.Millisecond)
 	}
-	return json.Marshal(p)
+	baselineTask := Task{ProjectID: p.ProjectID, Title: p.Title, Content: p.Content, Kind: "TEXT", Items: []ChecklistItem{}}
+	baselineHash, err := publicationContentHash(baselineTask)
+	if err != nil {
+		return nil, err
+	}
+	baseline := &db.IssuePublicationContentBaseline{Hash: baselineHash, At: s.contentBaselineAt}
+	return json.Marshal(ticktickPreparedCreate{Title: p.Title, ProjectID: p.ProjectID, Content: p.Content, ContentBaseline: baseline})
 }
 func (s *ticktickPublishSession) Create(ctx context.Context, raw jsontext.Value, admit func(context.Context) error) (db.IssuePublicationRemote, error) {
 	var zero db.IssuePublicationRemote
-	var p ticktickCreatePayload
-	if json.Unmarshal(raw, &p, json.RejectUnknownMembers(true)) != nil || admit == nil || p.ProjectID != s.session.config.ProjectID {
+	var prepared ticktickPreparedCreate
+	if json.Unmarshal(raw, &prepared, json.RejectUnknownMembers(true)) != nil || admit == nil || prepared.ProjectID != s.session.config.ProjectID {
 		return zero, fmt.Errorf("invalid TickTick creation request")
 	}
+	p := ticktickCreatePayload{Title: prepared.Title, ProjectID: prepared.ProjectID, Content: prepared.Content}
 	if err := validateTickTickCreate(p); err != nil {
 		return zero, err
 	}
@@ -155,11 +170,19 @@ func (s *ticktickPublishSession) Create(ctx context.Context, raw jsontext.Value,
 	if task.Content == "" {
 		task.Content = p.Content
 	}
-	hash, err := taskContentHash(task)
-	if err != nil {
-		return remote, err
+	baseline := prepared.ContentBaseline
+	if baseline == nil {
+		hash, hashErr := publicationContentHash(task)
+		if hashErr != nil {
+			return remote, hashErr
+		}
+		baseline = &db.IssuePublicationContentBaseline{Hash: hash, At: s.contentBaselineAt}
 	}
-	observed.ContentBaseline = &db.IssuePublicationContentBaseline{Hash: hash, At: s.contentBaselineAt}
+	if !validPublicationContentBaseline(*baseline) {
+		return remote, fmt.Errorf("invalid TickTick publication content baseline")
+	}
+	baselineCopy := *baseline
+	observed.ContentBaseline = &baselineCopy
 	if observed.Status != "open" {
 		return remote, fmt.Errorf("TickTick created task is not open")
 	}
@@ -197,12 +220,15 @@ func (s *ticktickPublishSession) ReadCreated(ctx context.Context, identity db.Is
 	}
 	baseline := identity.ContentBaseline
 	if baseline == nil {
-		hash, err := taskContentHash(task)
+		hash, err := publicationContentHash(task)
 		if err != nil {
 			return zero, err
 		}
 		baseline = &db.IssuePublicationContentBaseline{Hash: hash, At: observed.Version}
 	} else {
+		if !validPublicationContentBaseline(*baseline) {
+			return zero, fmt.Errorf("invalid TickTick publication content baseline")
+		}
 		copied := *identity.ContentBaseline
 		baseline = &copied
 	}
@@ -210,5 +236,30 @@ func (s *ticktickPublishSession) ReadCreated(ctx context.Context, identity db.Is
 	return observed, nil
 }
 
+func (s *ticktickPublishSession) ReadCreatedWithPrepared(
+	ctx context.Context,
+	identity db.IssuePublicationRemote,
+	raw jsontext.Value,
+) (db.IssuePublicationRemote, error) {
+	var prepared ticktickPreparedCreate
+	if json.Unmarshal(raw, &prepared, json.RejectUnknownMembers(true)) != nil {
+		return db.IssuePublicationRemote{}, fmt.Errorf("invalid TickTick recovery request")
+	}
+	if prepared.ContentBaseline == nil {
+		return s.ReadCreated(ctx, identity)
+	}
+	if !validPublicationContentBaseline(*prepared.ContentBaseline) {
+		return db.IssuePublicationRemote{}, fmt.Errorf("invalid TickTick recovery baseline")
+	}
+	identity.ContentBaseline = prepared.ContentBaseline
+	return s.ReadCreated(ctx, identity)
+}
+
+func validPublicationContentBaseline(baseline db.IssuePublicationContentBaseline) bool {
+	hash, err := hex.DecodeString(baseline.Hash)
+	return err == nil && len(hash) == 32 && validTime(baseline.At)
+}
+
 var _ issuesync.PublishAdapter = (*Adapter)(nil)
 var _ issuesync.PublishSession = (*ticktickPublishSession)(nil)
+var _ issuesync.PreparedPublishRecoverySession = (*ticktickPublishSession)(nil)
