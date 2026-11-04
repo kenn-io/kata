@@ -89,7 +89,7 @@ func (r *CronDispatchRecorder) Record(ctx context.Context, c db.RecurringCronCan
 	r.health.DeliveredSinceStart += int64(d.Delivered)
 	r.health.SkippedSinceStart += int64(d.Skipped.Count)
 	r.health.SkippedCountIsLowerBound = r.health.SkippedCountIsLowerBound || d.Skipped.Capped
-	if !changed && d.Delivered == 0 && d.Skipped.Count == 0 && !r.health.LogErrorPresent {
+	if !changed && d.Delivered == 0 && d.Skipped.Count == 0 {
 		r.mu.Unlock()
 		return false, nil
 	}

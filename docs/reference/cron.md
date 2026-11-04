@@ -351,7 +351,7 @@ kind is `skipped`, and `--reason skipped` includes it.
 
 The daemon retains each candidate's last decision in memory and logs changes,
 deliveries and finalized skips. Repeated idle decisions and identical errors do
-not flood the log. Failed logging is retried even when the decision is unchanged.
+not flood the log.
 The recorder resets on restart. Its JSONL history survives at
 `<KATA_HOME>/cron/<storage-hash>/dispatch.jsonl`, with five rotated files and a
 50 MiB active-file rotation threshold. Logging is best effort, separate from

@@ -150,28 +150,6 @@ func TestCronRecorderLastNonIdleSurvivesIdle(t *testing.T) {
 }
 
 func TestCronRecorderLogFailureRecovery(t *testing.T) {
-	t.Run("unchanged decision", func(t *testing.T) {
-		blocked := filepath.Join(t.TempDir(), "blocked")
-		require.NoError(t, os.WriteFile(blocked, []byte("file"), 0o600))
-		r := daemon.NewCronDispatchRecorder(filepath.Join(blocked, "dispatch.jsonl"))
-		t.Cleanup(func() { require.NoError(t, r.Close()) })
-		now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-		candidate := db.RecurringCronCandidate{ProjectID: 1, JobUID: "job"}
-		out := db.DispatchRecurringCronOut{Reason: cron.DispatchIdle}
-		_, err := r.Record(t.Context(), candidate, out, nil, now)
-		require.Error(t, err)
-		r.FinishCycle(now, 0, true, false)
-		require.True(t, r.Health().LogErrorPresent)
-		require.NoError(t, os.Remove(blocked))
-		changed, err := r.Record(t.Context(), candidate, out, nil, now.Add(time.Minute))
-		require.NoError(t, err)
-		require.False(t, changed, "retrying the log must not repeat decision alerts")
-		require.False(t, r.Health().LogErrorPresent)
-		require.EqualValues(t, 1, r.Health().LogErrorsSinceStart)
-		raw, err := os.ReadFile(r.Health().LogPath)
-		require.NoError(t, err)
-		require.Contains(t, string(raw), `"reason":"idle"`)
-	})
 	t.Run("changed decision", func(t *testing.T) {
 		blocked := filepath.Join(t.TempDir(), "blocked")
 		require.NoError(t, os.WriteFile(blocked, []byte("file"), 0o600))

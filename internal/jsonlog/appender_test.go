@@ -1,10 +1,10 @@
 package jsonlog
 
 import (
-	"bufio"
 	"encoding/json/v2"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -43,18 +43,15 @@ func TestAppenderRestartPreservesRecordBoundary(t *testing.T) {
 			require.NoError(t, err)
 			require.NoError(t, a.Append(t.Context(), map[string]int{"n": 2}))
 			require.NoError(t, a.Close())
-			file, err := os.Open(path)
+			raw, err := os.ReadFile(path) //nolint:gosec // G304: TempDir fixture
 			require.NoError(t, err)
-			defer file.Close()
-			scan := bufio.NewScanner(file)
 			var values []int
-			for scan.Scan() {
+			for line := range strings.SplitSeq(string(raw), "\n") {
 				var value map[string]int
-				if json.Unmarshal(scan.Bytes(), &value) == nil {
+				if json.Unmarshal([]byte(line), &value) == nil {
 					values = append(values, value["n"])
 				}
 			}
-			require.NoError(t, scan.Err())
 			require.Contains(t, values, 0, "complete pre-crash records survive")
 			require.Contains(t, values, 2, "successful post-crash append is independently readable")
 		})
