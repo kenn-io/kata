@@ -245,14 +245,24 @@ func withCurrentRecurrence(ctx context.Context, apiClient any, target formTarget
 	if !ok {
 		return resp
 	}
-	detail, err := reader.GetIssueDetail(ctx, target.projectID, target.issueShortID)
+	read := reader.GetIssueDetail
+	if strict, ok := apiClient.(issueReadAPI); ok {
+		read = strict.ReadIssue
+	}
+	detail, err := read(ctx, target.projectID, target.issueShortID)
 	if err != nil || detail == nil || detail.Issue == nil {
 		return resp
+	}
+	rec := detail.Recurrence
+	if recReader, ok := apiClient.(recurrenceReadAPI); ok && detail.Issue.RecurrenceID != nil {
+		if rec, err = recReader.ReadRecurrence(ctx, target.projectID, detail.Issue.RecurrenceID); err != nil {
+			return resp
+		}
 	}
 	if resp == nil {
 		resp = &MutationResp{}
 	}
-	resp.current = &recurrenceSnapshot{issue: *detail.Issue, rec: detail.Recurrence}
+	resp.current = &recurrenceSnapshot{issue: *detail.Issue, rec: rec}
 	return resp
 }
 

@@ -366,6 +366,22 @@ func TestRecurrenceFormConflictKeepsInputAndShowsTheCurrentRecurrence(t *testing
 		assert.Equal(t, inputNone, h.m.input.kind, "saving again is guarded on the revision just shown")
 		assert.Equal(t, "FREQ=DAILY", h.rows()[0].RRule)
 	})
+	t.Run("a failed read of the current recurrence keeps the form as it was", func(t *testing.T) {
+		h := newRecurrenceHarness(t, viewDetail)
+		current := h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
+		h.open()
+		require.NoError(t, recurrenceclient.Change(t.Context(), h.api, h.issue.ProjectID, current,
+			recurrenceclient.Terms{Rule: "FREQ=MONTHLY", Start: "2026-11-09", Zone: "Europe/Paris", Actor: "bob"}))
+		h.m.api = newConnectedUndoClient(t, NewClient(h.env.URL, &http.Client{Transport: failingRecurrenceList{inner: h.env.HTTP}}))
+		h.fill("FREQ=DAILY", "2026-11-09", "Europe/Paris")
+
+		h.save()
+
+		require.Equal(t, inputRecurrenceForm, h.m.input.kind)
+		assert.NotNil(t, h.m.input.recurrence.rec, "the form keeps the recurrence it opened on")
+		assert.NotContains(t, h.page(), "no recurrence")
+		assert.Equal(t, "FREQ=MONTHLY", h.rows()[0].RRule, "nothing was written")
+	})
 	t.Run("starting on an issue another client changed", func(t *testing.T) {
 		h := newRecurrenceHarness(t, viewDetail)
 		h.open()
