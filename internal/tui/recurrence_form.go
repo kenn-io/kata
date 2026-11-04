@@ -10,6 +10,7 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"go.kenn.io/kata/internal/recurrence/recurrenceclient"
 	"go.kenn.io/kit/tui/helplayout"
 )
@@ -320,21 +321,21 @@ func describeRecurrence(rec *recurrenceclient.View) string {
 	return fmt.Sprintf("now: %s from %s in %s", rec.RRule, rec.DTStart, rec.Timezone)
 }
 
-// renderRecurrenceRow is the detail line for a recurring issue: its rule, the
+// renderRecurrenceRows shows the schedule for a recurring issue: its rule, the
 // next occurrence after the issue's own, and the zone.
-func renderRecurrenceRow(rec *recurrenceclient.View, width int) string {
+func renderRecurrenceRows(rec *recurrenceclient.View, width int) []string {
 	next := "none"
 	if rec.NextOccurrenceKey != nil {
 		next = *rec.NextOccurrenceKey
 	}
-	text := fmt.Sprintf("%s %s · next %s · %s",
-		metadataLabel("repeats:"), sanitizeForDisplay(rec.RRule), sanitizeForDisplay(next), sanitizeForDisplay(rec.Timezone))
-	return truncate(text, width)
+	return joinMetadataRow(
+		metadataLabel("repeats:")+" "+sanitizeForDisplay(rec.RRule),
+		fmt.Sprintf("next %s · %s", sanitizeForDisplay(next), sanitizeForDisplay(rec.Timezone)), width)
 }
 
 // renderRecurrenceForm lays out the three fields, the day the start resolves
 // to, and after a refused save the recurrence that beat it.
-func renderRecurrenceForm(s inputState, innerW int, now time.Time) string {
+func renderRecurrenceForm(s inputState, innerW, height int, now time.Time) string {
 	parts := []string{titleStyle.Render(s.title)}
 	for idx := range s.fields {
 		parts = append(parts, renderNewIssueField(s, idx, innerW))
@@ -349,7 +350,23 @@ func renderRecurrenceForm(s inputState, innerW int, now time.Time) string {
 		parts = append(parts, status)
 	}
 	parts = append(parts, renderRecurrenceFooter(s, innerW))
-	return modalBoxStyle.Width(innerW+2).Padding(0, 1).Render(strings.Join(parts, "\n"))
+	box := modalBoxStyle.Width(innerW+2).Padding(0, 1)
+	rendered := box.Render(strings.Join(parts, "\n"))
+	if lipgloss.Height(rendered) <= height {
+		return rendered
+	}
+	// Put each label beside its input to leave room for recovery and controls.
+	part := 1
+	for idx := range s.fields {
+		label, _, _ := strings.Cut(parts[part], "\n")
+		field := renderNewIssueField(s, idx, innerW-lipgloss.Width(label)-1)
+		parts[part] = strings.Replace(field, "\n", " ", 1)
+		part++
+		if s.fields[idx].id == fieldStart {
+			part++ // date preview
+		}
+	}
+	return box.Render(strings.Join(parts, "\n"))
 }
 
 func renderRecurrenceFooter(s inputState, innerW int) string {
