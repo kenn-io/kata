@@ -767,19 +767,14 @@ func (m Model) routeMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 	return next, withConnGen(cmd, m.connGen)
 }
 
-// mutAffectsLabelCounts reports whether a successful mutation could
-// have changed the project's label aggregate. Label add/remove and
-// create (which since Plan 8 commit 4 may carry labels via the
-// multi-field new-issue form) all qualify; the cache refresh is gated
-// against the per-project entry's existence so a plain-title create
-// against a project that never had a label menu opened remains a
-// zero-cost no-op.
+// mutAffectsLabelCounts reports whether a successful mutation could change
+// label counts. batchLabelRefresh refreshes only projects with a cached entry.
 func mutAffectsLabelCounts(mut mutationDoneMsg) bool {
 	if mut.err != nil {
 		return false
 	}
 	switch mut.kind {
-	case "label.add", "label.remove", "create":
+	case "label.add", "label.remove", "create", "delete":
 		return true
 	}
 	return false
@@ -1864,7 +1859,12 @@ func (m Model) routeFormMutation(mut mutationDoneMsg) (tea.Model, tea.Cmd) {
 	target := m.input.target
 	formKind := m.input.kind
 	if formKind == inputDeleteForm {
-		return m.finishDelete(target, mut)
+		next, cmd := m.finishDelete(target, mut)
+		if mutAffectsLabelCounts(mut) {
+			refreshed, cmd := batchLabelRefresh(next, cmd, mut)
+			return refreshed, withConnGen(cmd, m.connGen)
+		}
+		return next, cmd
 	}
 	m.input = inputState{}
 	// Hand off to the existing per-view mutation routing so the
@@ -2788,15 +2788,14 @@ func (m Model) handleEventReceived(msg eventReceivedMsg) (tea.Model, tea.Cmd) {
 }
 
 // maybeRefetchLabels invalidates the project-label cache when an SSE
-// label or delete/restore event names a project we have a cached entry for. The
+// label event names a project we have a cached entry for. The
 // suggestion menu reads the cache on render, so a fresh dispatch
 // keeps the `+` autocomplete in sync with the daemon's authoritative
 // counts. No-op for other events, when the cache has no
 // entry for the project, or projectLabels was never initialized
 // (defensive — the field is set by initialModel).
 func (m Model) maybeRefetchLabels(msg eventReceivedMsg) (Model, tea.Cmd) {
-	if msg.eventType != "issue.labeled" && msg.eventType != "issue.unlabeled" &&
-		msg.eventType != "issue.soft_deleted" && msg.eventType != "issue.restored" {
+	if msg.eventType != "issue.labeled" && msg.eventType != "issue.unlabeled" {
 		return m, nil
 	}
 	if m.projectLabels == nil {

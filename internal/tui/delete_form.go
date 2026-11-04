@@ -134,9 +134,10 @@ func (m Model) finishDelete(target formTarget, mut mutationDoneMsg) (Model, tea.
 	}
 	var leave tea.Cmd
 	if deletedDetail {
-		priorDetail, leave = priorDetail.handleBack()
-		if leave == nil {
-			m.detail = priorDetail
+		var restored detailModel
+		restored, leave = priorDetail.handleBack(m.api)
+		if len(priorDetail.navStack) > 0 {
+			m.detail = restored
 		} else {
 			next, cmd, _ := m.routeTopLevel(leave())
 			m, leave = next.(Model), cmd
@@ -144,6 +145,7 @@ func (m Model) finishDelete(target formTarget, mut mutationDoneMsg) (Model, tea.
 	}
 	message := "deleted " + qualified
 	if last := len(m.undoHistory.entries) - 1; last >= 0 && m.undoHistory.entries[last].kind == "delete" && m.undoHistory.entries[last].uid == uid {
+		m.undoHistory.entries[last].before.QualifiedID = qualified
 		message += "; press u to undo"
 	}
 	m, notice := m.undoNotice(message, toastInfo)

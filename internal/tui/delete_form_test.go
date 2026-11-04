@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"encoding/json/jsontext"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/notification"
 	"go.kenn.io/kata/internal/testenv"
 	"go.kenn.io/kit/tui/helplayout"
 	"go.kenn.io/kit/tui/splitlayout"
@@ -339,39 +341,80 @@ func TestDeleteSavingEscKeepsResult(t *testing.T) {
 	assert.Contains(t, h.m.toast.text, "deleted "+h.qualified(target)+"; press u to undo")
 }
 
-func TestDeleteRestoreEventsRefreshLabelCounts(t *testing.T) {
-	for _, eventType := range []string{"issue.soft_deleted", "issue.restored"} {
-		t.Run(eventType, func(t *testing.T) {
-			h := newDeleteHarness(t, viewList)
-			target := h.issues[0]
-			base := NewClient(h.env.URL, h.env.HTTP)
-			_, err := base.AddLabel(t.Context(), h.project.ID, target.UID, "bug", "alice")
-			require.NoError(t, err)
-			if eventType == "issue.restored" {
-				_, err = base.DeleteIssue(t.Context(), h.project.ID, target.UID, h.qualified(target), "alice")
-				require.NoError(t, err)
-			}
-			var cmd tea.Cmd
-			h.m, cmd = h.m.dispatchLabelFetch(h.project.ID)
-			h.finish(cmd)
-			if eventType == "issue.soft_deleted" {
-				require.Equal(t, []LabelCount{{Label: "bug", Count: 1}}, h.m.projectLabels.byProject[h.project.ID].labels)
-				_, err = base.DeleteIssue(t.Context(), h.project.ID, target.UID, h.qualified(target), "alice")
-			} else {
-				require.Empty(t, h.m.projectLabels.byProject[h.project.ID].labels)
-				_, err = base.RestoreIssue(t.Context(), h.project.ID, target.UID, "alice")
-			}
-			require.NoError(t, err)
-			h.m, cmd = h.m.maybeRefetchLabels(eventReceivedMsg{eventType: eventType, projectID: h.project.ID})
-			require.NotNil(t, cmd, "the lifecycle event refetches cached label counts")
-			h.finish(cmd)
-			if eventType == "issue.soft_deleted" {
-				assert.Empty(t, h.m.projectLabels.byProject[h.project.ID].labels)
-			} else {
-				assert.Equal(t, []LabelCount{{Label: "bug", Count: 1}}, h.m.projectLabels.byProject[h.project.ID].labels)
-			}
-		})
-	}
+func TestDeleteAndUndoRefreshLabelCounts(t *testing.T) {
+	h := newDeleteHarness(t, viewList)
+	target := h.issues[0]
+	base := NewClient(h.env.URL, h.env.HTTP)
+	_, err := base.AddLabel(t.Context(), h.project.ID, target.UID, "bug", "alice")
+	require.NoError(t, err)
+	var cmd tea.Cmd
+	h.m, cmd = h.m.dispatchLabelFetch(h.project.ID)
+	h.m = drainInboxCmds(h.m, cmd)
+	require.Equal(t, []LabelCount{{Label: "bug", Count: 1}}, h.m.projectLabels.byProject[h.project.ID].labels)
+	h.selectIssue(target.UID)
+	h.key(runeKey('X'))
+	h.typeText("DELETE " + h.qualified(target))
+	next, cmd := h.m.Update(h.enter()())
+	h.m = drainInboxCmds(next.(Model), cmd)
+	assert.Empty(t, h.m.projectLabels.byProject[h.project.ID].labels, "delete completion refreshes counts without an event")
+	h.m, cmd = h.m.dispatchLabelFetch(h.project.ID)
+	h.m = drainInboxCmds(h.m, cmd)
+	require.Empty(t, h.m.projectLabels.byProject[h.project.ID].labels)
+	next, cmd = h.m.Update(h.key(runeKey('u'))())
+	h.m = drainInboxCmds(next.(Model), cmd)
+	assert.Equal(t, []LabelCount{{Label: "bug", Count: 1}}, h.m.projectLabels.byProject[h.project.ID].labels, "undo completion refreshes counts without an event")
+}
+
+func TestDeleteChildRefetchesParent(t *testing.T) {
+	h := newDeleteHarness(t, viewDetail)
+	parent, child := h.issues[0], h.issues[1]
+	base := NewClient(h.env.URL, h.env.HTTP)
+	_, err := base.AddLink(t.Context(), h.project.ID, child.UID, LinkBody{Type: "parent", ToRef: parent.UID}, "alice")
+	require.NoError(t, err)
+	h.selectIssue(parent.UID)
+	h.m.detail.gen = 1
+	h.m.nextGen = 1
+	cmd := h.m.detail.refetch(h.m.api)
+	h.m = drainInboxCmds(h.m, cmd)
+	require.Len(t, h.m.detail.children, 1)
+	h.m.detail.detailFocus = focusChildren
+	next, cmd := h.m.Update(h.enter()())
+	h.m = drainInboxCmds(next.(Model), cmd)
+	require.Equal(t, child.UID, h.m.detail.issue.UID)
+	h.key(runeKey('X'))
+	h.typeText("DELETE " + h.qualified(child))
+	next, cmd = h.m.Update(h.enter()())
+	h.m = drainInboxCmds(next.(Model), cmd)
+	require.Equal(t, parent.UID, h.m.detail.issue.UID)
+	assert.Empty(t, h.m.detail.children, "the restored parent drops its deleted child")
+}
+
+func TestUndoDeleteReloadsAttention(t *testing.T) {
+	t.Setenv("KATA_INBOX_USER", "alice")
+	h := newDeleteHarness(t, viewList)
+	target := h.issues[0]
+	_, err := h.env.DB.PatchIssueMetadata(t.Context(), db.PatchIssueMetadataIn{
+		IssueID: target.ID, Actor: "alice", IfMatchRev: new(target.Revision),
+		Patch: map[string]jsontext.Value{notification.MetadataKey("alice"): jsontext.Value(`{"from":"bob","message":"Review this"}`)},
+	})
+	require.NoError(t, err)
+	var cmd tea.Cmd
+	h.m, cmd = h.m.transitionToAttention()
+	h.m = drainInboxCmds(h.m, cmd)
+	require.Len(t, h.m.attention.rows, 1)
+	next, cmd := h.m.Update(h.enter()())
+	h.m = drainInboxCmds(next.(Model), cmd)
+	require.Equal(t, target.UID, h.m.detail.issue.UID)
+	h.key(runeKey('X'))
+	h.typeText("DELETE " + h.qualified(target))
+	next, cmd = h.m.Update(h.enter()())
+	h.m = drainInboxCmds(next.(Model), cmd)
+	require.Equal(t, viewAttention, h.m.view)
+	require.Empty(t, h.m.attention.rows)
+	next, cmd = h.m.Update(h.key(runeKey('u'))())
+	h.m = drainInboxCmds(next.(Model), cmd)
+	require.Len(t, h.m.attention.rows, 1, "undo reloads Attention without waiting for an event")
+	assert.Equal(t, target.UID, h.m.attention.rows[0].issue.UID)
 }
 
 func TestDeleteConfirmationResolvesDetailProject(t *testing.T) {
@@ -412,6 +455,8 @@ func TestDeleteConfirmationResolvesDetailProject(t *testing.T) {
 			h.typeText("DELETE " + h.qualified(target))
 			h.finish(h.enter())
 			assert.True(t, h.isDeleted(target.UID))
+			h.finish(h.key(runeKey('u')))
+			assert.Equal(t, "undid delete on "+h.qualified(target), h.m.toast.text)
 		})
 	}
 }

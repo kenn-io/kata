@@ -536,10 +536,7 @@ func (dm detailModel) handleNavKey(
 		next, cmd := dm.handleEnter(api)
 		return next, cmd, true
 	case km.Back.matches(msg):
-		next, cmd := dm.handleBack()
-		if next.gen != dm.gen && api != nil {
-			cmd = next.refetch(api)
-		}
+		next, cmd := dm.handleBack(api)
 		return next, cmd, true
 	default:
 		return dm, nil, false
@@ -709,15 +706,19 @@ func (dm detailModel) handleDown() (detailModel, bool) {
 	return dm.scrollViewportBy(1), false
 }
 
-// handleBack pops one level off the nav stack if non-empty, otherwise
-// returns popDetailCmd so the top-level Model reverts to viewList.
-func (dm detailModel) handleBack() (detailModel, tea.Cmd) {
+// handleBack restores and refetches the prior detail, or returns
+// popDetailCmd so the top-level Model leaves detail.
+func (dm detailModel) handleBack(api detailAPI) (detailModel, tea.Cmd) {
 	if len(dm.navStack) == 0 {
 		return dm, popDetailCmd()
 	}
 	dm.cancelReads()
 	prev := cloneDetailModel(dm.navStack[len(dm.navStack)-1])
 	prev.navStack = dm.navStack[:len(dm.navStack)-1]
+	if prev.gen != dm.gen && api != nil {
+		cmd := prev.refetch(api)
+		return prev, cmd
+	}
 	return prev, nil
 }
 

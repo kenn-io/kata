@@ -76,22 +76,3 @@ func (c *undoClient) RestoreIssue(ctx context.Context, projectID int64, ref, act
 	}
 	return restorer.RestoreIssue(ctx, projectID, ref, actor)
 }
-
-// undoDelete restores a deleted issue by UID. A deleted issue cannot be read
-// back, so the restore is the check: the daemon answers changed=false when the
-// issue is no longer deleted, which undo reports as already restored.
-func (c *undoClient) undoDelete(ctx context.Context, entry undoEntry, out undoOutcome) undoOutcome {
-	out.resp, out.err = c.RestoreIssue(ctx, entry.projectID, entry.uid, entry.actor)
-	if out.err != nil {
-		out.attempt.unknown = ambiguousWriteError(out.err)
-		return out
-	}
-	if out.resp == nil {
-		out.err = errors.New("undo returned no response")
-		out.attempt.unknown = true
-		return out
-	}
-	out.changed = out.resp.Changed
-	out.already = !out.changed
-	return out
-}

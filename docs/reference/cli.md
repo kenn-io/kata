@@ -2010,7 +2010,7 @@ Creating an issue or comment, making a timed assignment or owner edit involving
 an expiry, changing the status of a recurring issue, closing an issue with a
 live federation lease, or reopening an issue closed for a reason other than
 `done` clears the undo history. Switching daemons also clears it.
-Before undo writes, the TUI reads the affected issue or exact link and refuses
+Except when restoring a deletion, undo reads the affected issue or exact link and refuses
 an observed conflicting change. It skips that history entry without changing
 the issue, so pressing `u` again reaches earlier edits. The revision check also
 rejects intervening status or owner changes, including changes away and back
