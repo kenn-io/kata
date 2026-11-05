@@ -83,7 +83,7 @@ saves a definition, initializes progress, advances a clock, or emits an event.
 
 The result always prints as JSON, including under `--quiet`. Exit status is
 0 for `valid:true` and 3 for `valid:false`, including revision conflicts.
-The daemon must support API 0.42.0 or later; older daemons produce an upgrade
+The daemon must support API 0.43.0 or later; older daemons produce an upgrade
 message. Validation checks definitions and referenced state, not permission to
 save. Read-only and spoke-authority restrictions can refuse a save after
 `valid:true`, even with unchanged state. Later state or authorization changes

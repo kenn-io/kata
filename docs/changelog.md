@@ -11,7 +11,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 - Validate unsaved cron jobs and workflows through the CLI, HTTP API, or MCP
   before saving. See normalized definitions, staged errors, hypothetical next
-  fires, and bounded job collision previews. Requires daemon API 0.42.0 or later.
+  fires, and bounded job collision previews. Requires daemon API 0.43.0 or later.
   See [Validate before saving](reference/cron.md#validate-before-saving).
 
 - Keep local writes responsive on relay hubs. Creating an issue or receiving an
