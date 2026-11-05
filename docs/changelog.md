@@ -9,7 +9,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
-- Create issues faster on large SQLite stores by scoring look-alike candidates once per issue and dropping stop words from the query.
+- Create issues faster on large SQLite stores by scoring look-alike candidates once per issue.
 - Speed up label loading for list and ready responses and label filters in semantic or hybrid search on large SQLite stores.
 - Resume local writes sooner after spoke rebuilds of large projects by skipping
   issues and comments whose stored values already match the event log.

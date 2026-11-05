@@ -163,15 +163,6 @@ func TitlePrefix(title string) string {
 
 // LookalikeQuery returns the issue text used to retrieve look-alike
 // candidates. Its title and body portions match the prefixes used by Score.
-// It drops stop words while preserving other whitespace-delimited words exactly
-// as indexed, including compound words and Unicode normalization.
 func LookalikeQuery(title, body string) string {
-	var words []string
-	for word := range strings.FieldsSeq(TitlePrefix(title) + " " + BodyPrefix(body)) {
-		comparison := strings.ToLower(strings.TrimFunc(word, unicode.IsPunct))
-		if _, isStop := stopWords[comparison]; !isStop {
-			words = append(words, word)
-		}
-	}
-	return strings.Join(words, " ")
+	return strings.TrimSpace(TitlePrefix(title) + " " + BodyPrefix(body))
 }

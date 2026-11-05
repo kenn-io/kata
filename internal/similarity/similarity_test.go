@@ -38,21 +38,7 @@ func TestLookalikeQuery(t *testing.T) {
 	assert.Contains(t, got, "留")
 	assert.NotContains(t, got, "discard-this-suffix")
 	assert.True(t, utf8.ValidString(got))
-	assert.Equal(t, "full issue title "+prefix, got)
-}
-
-func TestLookalikeQuery_FiltersStopWords(t *testing.T) {
-	assert.Equal(t, "Fix flaky login tests, running cookies x é 界 cafe\u0301", similarity.LookalikeQuery("THE Fix a flaky login", "tests, running cookies with x é 界 cafe\u0301"))
-	assert.Empty(t, similarity.LookalikeQuery("(THE) and, a", "\"With\" [or]"))
-}
-
-func TestLookalikeQuery_PreservesCompoundWords(t *testing.T) {
-	assert.Equal(t, "login-callback session-timeout", similarity.LookalikeQuery("login-callback", "session-timeout"))
-	assert.Equal(t, "the-callback callback/the", similarity.LookalikeQuery("the-callback", "callback/the"))
-}
-
-func TestLookalikeQuery_PreservesDecomposedHangul(t *testing.T) {
-	assert.Equal(t, "\u1100\u1161 \u1102\u1161", similarity.LookalikeQuery("\u1100\u1161", "\u1102\u1161"))
+	assert.Equal(t, "full issue title   "+prefix, got)
 }
 
 func TestLookalikeQuery_TitleIsBounded(t *testing.T) {
