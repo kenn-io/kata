@@ -7040,7 +7040,7 @@ components:
       type: object
 info:
   title: kata
-  version: 0.40.0
+  version: 0.41.0
 openapi: 3.0.3
 paths:
   /api/v1/audit/closes:
@@ -11392,6 +11392,16 @@ paths:
           schema:
             format: int64
             type: integer
+        - description: priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order
+          explode: false
+          in: query
+          name: sort
+          schema:
+            description: priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order
+            enum:
+              - priority
+              - ""
+            type: string
         - explode: false
           in: query
           name: limit
@@ -11759,6 +11769,16 @@ paths:
     get:
       operationId: readyIssuesGlobal
       parameters:
+        - description: priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order
+          explode: false
+          in: query
+          name: sort
+          schema:
+            description: priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order
+            enum:
+              - priority
+              - ""
+            type: string
         - explode: false
           in: query
           name: limit

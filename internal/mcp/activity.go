@@ -243,14 +243,25 @@ func (h toolHandlers) allReadyIssues(ctx context.Context, input NextInput) ([]Is
 	if input.Unowned && strings.TrimSpace(input.Owner) != "" {
 		return nil, errors.New("owner and unowned are mutually exclusive")
 	}
-	projects, err := h.readProjects(ctx, input.Project)
+	priorityFirst, err := h.daemonSupportsAPIVersion(ctx, "0.41.0")
 	if err != nil {
 		return nil, err
+	}
+	var projects []ProjectIdentity
+	if h.options.Scope.Mode() != ScopeAll || strings.TrimSpace(input.Project) != "" {
+		projects, err = h.readProjects(ctx, input.Project)
+		if err != nil {
+			return nil, err
+		}
 	}
 	issues := make([]IssueSummary, 0)
 	query := generated.ReadyIssuesQuery{
 		Unowned: optionalTrue(input.Unowned), Owner: optionalString(input.Owner),
 		Label: compactStrings(input.Labels), ExcludeLabel: compactStrings(input.ExcludeLabels),
+	}
+	if priorityFirst {
+		query.Sort = new(generated.Priority)
+		query.Limit = new(int64(1))
 	}
 	if h.options.Scope.Mode() == ScopeAllowlist && strings.TrimSpace(input.Project) == "" {
 		for _, project := range projects {
@@ -281,17 +292,15 @@ func (h toolHandlers) allReadyIssues(ctx context.Context, input NextInput) ([]Is
 	}
 	response, err := h.options.Client.ReadyIssuesGlobal(ctx, &generated.ReadyIssuesGlobalRequestOptions{
 		Query: &generated.ReadyIssuesGlobalQuery{
+			Sort: (*generated.ReadyIssuesGlobalQuerySort)(query.Sort), Limit: query.Limit,
 			Unowned: query.Unowned, Owner: query.Owner, Label: query.Label, ExcludeLabel: query.ExcludeLabel,
 		},
 	})
 	if err != nil {
 		return nil, err
 	}
-	allowed := projectIDSet(projects)
 	for _, issue := range response.Issues {
-		if _, ok := allowed[issue.ProjectID]; ok {
-			issues = append(issues, summaryFromReadyGlobalIssue(issue))
-		}
+		issues = append(issues, summaryFromReadyGlobalIssue(issue))
 	}
 	return issues, nil
 }
@@ -1235,6 +1244,11 @@ func (h toolHandlers) redactEventsOutsideScope(ctx context.Context, output *Even
 // daemonSupportsSubtreeMoves reports whether the daemon has API 0.35.0, which
 // moves subtrees by default and accepts the single field.
 func (h toolHandlers) daemonSupportsSubtreeMoves(ctx context.Context) (bool, error) {
+	return h.daemonSupportsAPIVersion(ctx, "0.35.0")
+}
+
+// Recheck each call: a long-lived MCP client can outlive a daemon replacement.
+func (h toolHandlers) daemonSupportsAPIVersion(ctx context.Context, required string) (bool, error) {
 	health, err := h.options.Client.Health(ctx)
 	if err != nil {
 		return false, err
@@ -1243,7 +1257,7 @@ func (h toolHandlers) daemonSupportsSubtreeMoves(ctx context.Context) (bool, err
 	if health.APISchemaVersion != nil {
 		version = strings.TrimSpace(*health.APISchemaVersion)
 	}
-	return semver.IsValid("v"+version) && semver.Compare("v"+version, "v0.35.0") >= 0, nil
+	return semver.IsValid("v"+version) && semver.Compare("v"+version, "v"+required) >= 0, nil
 }
 
 // closeEvidenceUIDRefs returns duplicate and superseding targets stored as

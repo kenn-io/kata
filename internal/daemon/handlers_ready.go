@@ -24,6 +24,7 @@ func registerReadyHandlers(humaAPI huma.API, cfg ServerConfig) {
 			return nil, err
 		}
 		filter := db.ReadyIssuesFilter{
+			PriorityFirst:   in.Sort == "priority",
 			Unowned:         in.Unowned,
 			Owner:           in.Owner,
 			Labels:          in.Labels,
@@ -56,6 +57,7 @@ func registerReadyHandlers(humaAPI huma.API, cfg ServerConfig) {
 				"--unowned and --owner are mutually exclusive", "", nil)
 		}
 		filter := db.ReadyIssuesFilter{
+			PriorityFirst:   in.Sort == "priority",
 			Unowned:         in.Unowned,
 			Owner:           in.Owner,
 			Labels:          in.Labels,

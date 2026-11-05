@@ -19,7 +19,6 @@ import (
 func dropNativeCronSchema(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
 	dropEventMoveHistoryIndex(ctx, t, admin, schema)
-	dropLaterMigrationIndexes(ctx, t, admin, schema)
 	for _, table := range []string{"cron_runs", "cron_jobs", "cron_workflows"} {
 		_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP TABLE IF EXISTS %s.%s`, schema, table))
 		require.NoError(t, err)
@@ -50,6 +49,7 @@ func TestNativeCronMigrationPreservesVersion30(t *testing.T) {
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
+	dropLaterMigrationIndexes(ctx, t, admin, schema)
 	dropCommentReplySchema(ctx, t, admin, schema)
 	dropProjectAccessSchema(ctx, t, admin, schema)
 	dropNativeCronSchema(ctx, t, admin, schema)
@@ -118,6 +118,7 @@ func TestNativeCronMigrationRollback(t *testing.T) {
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
+	dropLaterMigrationIndexes(ctx, t, admin, schema)
 	dropNativeCronSchema(ctx, t, admin, schema)
 	_, err = admin.ExecContext(ctx, `UPDATE cron_rollback.meta SET value='30' WHERE key='schema_version'; CREATE TABLE cron_rollback.cron_runs(blocker INTEGER)`)
 	require.NoError(t, err)

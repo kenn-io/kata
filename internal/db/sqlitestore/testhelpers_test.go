@@ -2,6 +2,7 @@ package sqlitestore_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"path/filepath"
 	"strconv"
@@ -31,6 +32,24 @@ func openTestDBWithPath(t *testing.T) (*sqlitestore.Store, string) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
 	return d, path
+}
+
+// openPageBudgetDB seeds 50k issues without planner statistics on one connection.
+func openPageBudgetDB(t *testing.T) (*sql.DB, int64) {
+	t.Helper()
+	d, path := openTestDBWithPath(t)
+	ctx := t.Context()
+	p, err := d.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	raw, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, raw.Close()) })
+	raw.SetMaxOpenConns(1)
+	_, err = raw.ExecContext(ctx, `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<50000)
+ INSERT INTO issues(uid,project_id,short_id,title,author)
+ SELECT printf('%026d',x),?,printf('%08d',x),'ordinary task','tester' FROM n`, p.ID)
+	require.NoError(t, err)
+	return raw, p.ID
 }
 
 // assertSchemaVersion checks that the schema_version row in meta matches the

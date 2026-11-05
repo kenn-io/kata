@@ -361,3 +361,25 @@ runtime credentials cannot migrate. SQLite uses its normal JSONL cutover.
 Start the matching schema 45 binary after migration. Older binaries cannot open
 schema 45. Rollback requires the pre-upgrade backup and matching older binary;
 there is no down migration.
+
+## Schema 46: ready priority indexes
+
+`kata next` and MCP `kata.next` can walk ready issues in priority order within
+one project or across all projects. The 45→46 migration adds
+`idx_issues_project_ready_priority` on
+`issues(project_id, COALESCE(priority, 5), updated_at DESC, id DESC)` and
+`idx_issues_ready_priority` without `project_id`. Both indexes contain only
+open issues where `deleted_at IS NULL`. It then runs `ANALYZE issues`.
+Unset priorities sort after P4. Fresh PostgreSQL and SQLite databases include
+these indexes; SQLite upgrades through its normal JSONL cutover.
+
+Stop serving daemons and imports, back up the database, and run
+`kata storage postgres migrate` with schema-owner credentials. Building the
+indexes reads `issues` and blocks issue writes; allow an offline window that
+fits the table's size. Existing table grants remain sufficient. Validation-only
+runtime credentials cannot migrate. Versions 25–44 follow the existing
+immutable migration chain first.
+
+Start the matching schema 46 binary after migration. Older binaries cannot open
+schema 46. Rollback requires the pre-upgrade backup and matching older binary;
+there is no down migration.
