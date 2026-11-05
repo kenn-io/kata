@@ -591,7 +591,10 @@ Upgrade the hub first, then every spoke and relay that must synchronize this
 project. Enable structured output in adapters only after all participating
 peers support v2. Send these fields only when `kata cron capabilities --json`
 lists `cron_run_summary_v2`; this advertisement confirms the target daemon
-supports it, not that the project's other peers are ready. Projects containing current or retained v2 run
+supports it. Admission still depends on the project's binding and upstream:
+an enabled spoke requires push to be enabled and a reachable hub advertising
+v2. Each new or changed v2 write checks the hub without caching, with a
+15-second admission timeout. Projects containing current or retained v2 run
 evidence require both `cron_v1` and `cron_run_summary_v2`; older peers receive
 409 `unsupported_event_features` before receiving incompatible history or
 advancing relay progress. Backups containing v2 summaries require a Kata

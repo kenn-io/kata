@@ -21,10 +21,6 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-type summaryRoundTripper func(*http.Request) (*http.Response, error)
-
-func (f summaryRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-
 func TestCronSummaryCapabilitiesAndAPI(t *testing.T) {
 	env := testenv.New(t)
 	project := seedProject(t, env, "example-project")
@@ -76,7 +72,7 @@ func TestCronSummarySpokeAdmission(t *testing.T) {
 				}
 				cfg.FederationHubClient = func(_ context.Context, cred config.FederationCredential) (*http.Client, error) {
 					require.Equal(t, f.credential.HubURL, cred.HubURL)
-					return &http.Client{Transport: summaryRoundTripper(func(r *http.Request) (*http.Response, error) {
+					return &http.Client{Transport: daemon.OutcomeTransport(func(r *http.Request) (*http.Response, error) {
 						calls++
 						if mode == "offline" {
 							return nil, errors.New("fixture offline")
@@ -144,7 +140,7 @@ func TestCronSummaryAdmissionRechecksSupportAndReleasesCoordination(t *testing.T
 	support, calls := true, 0
 	f := newCronForwardFixture(t, func(_ *cronForwardFixture, cfg *daemon.ServerConfig) {
 		cfg.FederationHubClient = func(context.Context, config.FederationCredential) (*http.Client, error) {
-			return &http.Client{Transport: summaryRoundTripper(func(r *http.Request) (*http.Response, error) {
+			return &http.Client{Transport: daemon.OutcomeTransport(func(r *http.Request) (*http.Response, error) {
 				calls++
 				headers := http.Header{}
 				if support {
@@ -183,7 +179,7 @@ func TestCronSummaryAdmissionBusyRequestsRetry(t *testing.T) {
 	calls := 0
 	f := newCronForwardFixture(t, func(_ *cronForwardFixture, cfg *daemon.ServerConfig) {
 		cfg.FederationHubClient = func(context.Context, config.FederationCredential) (*http.Client, error) {
-			return &http.Client{Transport: summaryRoundTripper(func(r *http.Request) (*http.Response, error) {
+			return &http.Client{Transport: daemon.OutcomeTransport(func(r *http.Request) (*http.Response, error) {
 				calls++
 				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{db.EventFeaturesHeader: []string{db.SupportedEventFeatures}}, Body: io.NopCloser(strings.NewReader(`{}`)), Request: r}, nil
 			})}, nil

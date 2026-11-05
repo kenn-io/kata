@@ -7,6 +7,9 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
+// CronRunReasonAPIVersion is the first daemon API that applies run reason filters.
+const CronRunReasonAPIVersion = "0.42.0"
+
 // CronRun is flat, bounded, independently attributed public evidence.
 type CronRun db.CronRun
 

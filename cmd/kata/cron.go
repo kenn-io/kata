@@ -632,7 +632,7 @@ func (o cronCLIOptions) callRead(a daemonAPI, c *kataclient.Client, projectID in
 		return cronCLIResponse(response.StatusCode, response.Body, err)
 	case o.resource == "run" && o.action == "list":
 		if o.reason != "" {
-			if err := requireDaemonAPIVersion(a.ctx, a.client, a.baseURL, apiVersionCronRunReason, "cron run list --reason"); err != nil {
+			if err := requireDaemonAPIVersion(a.ctx, a.client, a.baseURL, api.CronRunReasonAPIVersion, "cron run list --reason"); err != nil {
 				return nil, err
 			}
 		}

@@ -25,7 +25,7 @@ func TestCronSummaryReplaySurvivesUnavailableUpstream(t *testing.T) {
 			available, calls := true, 0
 			f := newCronForwardFixture(t, func(_ *cronForwardFixture, cfg *daemon.ServerConfig) {
 				cfg.FederationHubClient = func(context.Context, config.FederationCredential) (*http.Client, error) {
-					return &http.Client{Transport: summaryRoundTripper(func(r *http.Request) (*http.Response, error) {
+					return &http.Client{Transport: daemon.OutcomeTransport(func(r *http.Request) (*http.Response, error) {
 						calls++
 						if !available && mode == "offline" {
 							return nil, errors.New("fixture offline")
@@ -121,7 +121,7 @@ func TestCronSummaryConcurrentEvidenceBetweenAdmissionPasses(t *testing.T) {
 	var inject func()
 	f := newCronForwardFixture(t, func(_ *cronForwardFixture, cfg *daemon.ServerConfig) {
 		cfg.FederationHubClient = func(context.Context, config.FederationCredential) (*http.Client, error) {
-			return &http.Client{Transport: summaryRoundTripper(func(r *http.Request) (*http.Response, error) {
+			return &http.Client{Transport: daemon.OutcomeTransport(func(r *http.Request) (*http.Response, error) {
 				if inject != nil {
 					inject()
 				}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/teammate"
 	"go.kenn.io/kata/pkg/client/generated"
@@ -74,7 +75,7 @@ func (h toolHandlers) cronRuns(ctx context.Context, _ *sdkmcp.CallToolRequest, i
 		if !cron.ValidReason(in.Reason) {
 			return nil, nil, errors.New("invalid reason code")
 		}
-		if err := h.requireDaemonAPI(ctx, "0.42.0", "cron run reason filtering"); err != nil {
+		if err := h.requireDaemonAPI(ctx, api.CronRunReasonAPIVersion, "cron run reason filtering"); err != nil {
 			return nil, nil, err
 		}
 	}
