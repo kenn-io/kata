@@ -57,9 +57,8 @@ func daemonLocalEmbeddingsCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		original, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME or a test fixture
-		originalExists := err == nil
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
+		original, originalExists, err := readLocalEmbeddingsConfig(path)
+		if err != nil {
 			return err
 		}
 		current, err := config.ReadSearchConfig()
@@ -217,6 +216,18 @@ func daemonLocalEmbeddingsCmd() *cobra.Command {
 	}}
 	cmd.Flags().BoolVar(&yes, "yes", false, "approve the download and configuration change")
 	return cmd
+}
+
+// A dangling symlink reads as absent, but writing through it would create its target.
+func readLocalEmbeddingsConfig(path string) ([]byte, bool, error) {
+	data, err := os.ReadFile(path) // #nosec G304 G703 -- read the operator-selected KATA_HOME configuration
+	if !errors.Is(err, os.ErrNotExist) {
+		return data, err == nil, err
+	}
+	if _, err := os.Lstat(path); err == nil { // #nosec G703 -- inspect the same operator-selected configuration path
+		return nil, false, fmt.Errorf("configuration %q is a symlink to a missing file; create its target or remove the link, then rerun", path)
+	}
+	return nil, false, nil
 }
 
 // Rewrite only the embeddings table, preserving surrounding bytes and its full-line comments.

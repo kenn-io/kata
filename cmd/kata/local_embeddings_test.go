@@ -294,7 +294,7 @@ func TestLocalEmbeddingsRebuildRefusal(t *testing.T) {
 }
 
 func TestLocalEmbeddingsRestartRollback(t *testing.T) {
-	for _, scenario := range []string{"existing symlink", "new", "concurrent edit"} {
+	for _, scenario := range []string{"existing symlink", "dangling symlink", "new", "concurrent edit"} {
 		t.Run(scenario, func(t *testing.T) {
 			home := setupKataEnv(t)
 			stubLocalEmbeddingsInstall(t)
@@ -303,13 +303,15 @@ func TestLocalEmbeddingsRestartRollback(t *testing.T) {
 			original := []byte("# original\n[search.embeddings]\nbase_url = 'http://127.0.0.1:11434/v1'\nmodel = 'nomic-embed-text'\n")
 			if scenario != "new" {
 				target := path
-				if scenario == "existing symlink" {
+				if scenario == "existing symlink" || scenario == "dangling symlink" {
 					target = filepath.Join(home, "provider.toml")
 					if err := os.Symlink("provider.toml", path); err != nil {
 						t.Skipf("symlink unavailable: %v", err)
 					}
 				}
-				require.NoError(t, os.WriteFile(target, original, 0600))
+				if scenario != "dangling symlink" {
+					require.NoError(t, os.WriteFile(target, original, 0600))
+				}
 			}
 			ns, err := daemonruntime.NewNamespace()
 			require.NoError(t, err)
@@ -328,7 +330,24 @@ func TestLocalEmbeddingsRestartRollback(t *testing.T) {
 				}
 				return "", errors.New("replacement unavailable")
 			}
+			installed := false
+			if scenario == "dangling symlink" {
+				localEmbeddingsInstall = func(context.Context, embedlocal.InstallOptions) (embedlocal.Installation, error) {
+					installed = true
+					return embedlocal.Installation{Executable: "/example/kennembed"}, nil
+				}
+			}
 			out, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
+			if scenario == "dangling symlink" {
+				link, linkErr := os.Readlink(path)
+				require.NoError(t, linkErr)
+				require.Equal(t, "provider.toml", link)
+				require.ErrorContains(t, err, "symlink")
+				require.False(t, installed, "refuse before installing the shared server")
+				_, err = os.Stat(filepath.Join(home, "provider.toml"))
+				require.ErrorIs(t, err, os.ErrNotExist)
+				return
+			}
 			require.ErrorContains(t, err, "cannot resolve the installed restart executable")
 			require.Empty(t, out)
 			got, readErr := os.ReadFile(path) // #nosec G304 -- test-owned configuration snapshot
