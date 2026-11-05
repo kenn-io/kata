@@ -451,3 +451,104 @@ func TestGitHubStatusSessionVerifiesRepositoryOnce(t *testing.T) {
 	}
 	require.Equal(t, 1, repoReads)
 }
+
+func TestGitHubStatusBatchReadUsesOneGraphQLRequest(t *testing.T) {
+	for _, invalid := range []string{"identity", "repository", "number", "state", "version"} {
+		t.Run(invalid, func(t *testing.T) {
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				if r.Method == http.MethodGet {
+					require.Equal(t, "/repos/example-owner/example-repo", r.URL.Path)
+					require.NoError(t, json.MarshalWrite(w, map[string]any{"id": 123, "full_name": "example-owner/example-repo"}))
+					return
+				}
+				allowed, err := scopedGraphQLRequest(r, statusConfig().Binding())
+				require.NoError(t, err)
+				require.True(t, allowed)
+				node := map[string]any{"fullDatabaseId": "458", "number": 9, "state": "OPEN", "updatedAt": "2026-09-02T00:00:00Z", "repository": map[string]any{"databaseId": 123}}
+				switch invalid {
+				case "identity":
+					node["fullDatabaseId"] = "999"
+				case "repository":
+					node["repository"] = map[string]any{"databaseId": 999}
+				case "number":
+					node["number"] = 99
+				case "state":
+					node["state"] = "UNKNOWN"
+				case "version":
+					node["updatedAt"] = nil
+				}
+				require.NoError(t, json.MarshalWrite(w, map[string]any{
+					"data": map[string]any{"repository": map[string]any{
+						"i0": map[string]any{"fullDatabaseId": "456", "number": 7, "state": "OPEN", "updatedAt": "2026-09-02T00:00:00Z", "repository": map[string]any{"databaseId": 123}},
+						"i1": map[string]any{"fullDatabaseId": 457, "number": 8, "state": "CLOSED", "stateReason": "NOT_PLANNED", "closedAt": "2026-09-01T00:00:00Z", "updatedAt": "2026-09-02T00:00:00Z", "repository": map[string]any{"databaseId": 123}},
+						"i2": node, "i3": nil,
+					}},
+					"errors": []any{map[string]any{"type": "NOT_FOUND", "path": []any{"repository", "i3"}}},
+				}))
+			}))
+			defer server.Close()
+			f := NewHTTPFetcher(HTTPFetcherConfig{Client: server.Client(), CredentialResolver: newStaticHTTPFetcherTestResolver("test-token"), RESTBaseURLOverride: server.URL, GraphQLURLOverride: server.URL + "/graphql"})
+			session, err := f.ForBinding(t.Context(), statusConfig().Binding())
+			require.NoError(t, err)
+			results := session.(StatusBatchSession).ReadStatuses(t.Context(), statusConfig(), []StatusLocator{{ExternalID: "issue-id:456", Number: 7}, {ExternalID: "issue-id:457", Number: 8}, {ExternalID: "issue-id:458", Number: 9}, {ExternalID: "issue-id:459", Number: 10}, {ExternalID: "bad-id", Number: 11}})
+			require.Error(t, results["issue-id:458"].Err)
+			if invalid == "identity" {
+				require.Len(t, results, 4)
+				require.NoError(t, results["issue-id:456"].Err)
+				require.Equal(t, "open", results["issue-id:456"].Observation.Status)
+				require.Equal(t, "7", results["issue-id:456"].Observation.Locator)
+				closed := results["issue-id:457"]
+				require.NoError(t, closed.Err)
+				require.Equal(t, "closed", *closed.Observation.RawStatus)
+				require.Equal(t, "wontfix", closed.Observation.ClosedReason)
+				require.Equal(t, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), *closed.Observation.ClosedAt)
+				var blocked *issuesync.StatusError
+				require.ErrorAs(t, results["issue-id:459"].Err, &blocked)
+				require.True(t, blocked.Blocked)
+				require.Equal(t, 2, requests)
+			}
+		})
+	}
+}
+
+func TestGitHubStatusBatchRateLimitAndUnsupportedFallback(t *testing.T) {
+	for _, limited := range []bool{true, false} {
+		t.Run(fmt.Sprint(limited), func(t *testing.T) {
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				if r.Method == http.MethodPost {
+					if limited {
+						w.Header().Set("Retry-After", "7")
+						_, err := io.WriteString(w, `{"errors":[{"type":"RATE_LIMITED"}]}`)
+						require.NoError(t, err)
+					} else {
+						_, err := io.WriteString(w, `{"errors":[{"type":"undefinedField","message":"Field 'stateReason' doesn't exist"}]}`)
+						require.NoError(t, err)
+					}
+					return
+				}
+				if r.URL.Path == "/repos/example-owner/example-repo" {
+					require.NoError(t, json.MarshalWrite(w, map[string]any{"id": 123, "full_name": "example-owner/example-repo"}))
+					return
+				}
+				require.NoError(t, json.MarshalWrite(w, statusIssueWire("open")))
+			}))
+			defer server.Close()
+			f := NewHTTPFetcher(HTTPFetcherConfig{Client: server.Client(), CredentialResolver: newStaticHTTPFetcherTestResolver("test-token"), RESTBaseURLOverride: server.URL, GraphQLURLOverride: server.URL + "/graphql"})
+			session, err := f.ForBinding(t.Context(), statusConfig().Binding())
+			require.NoError(t, err)
+			results := session.(StatusBatchSession).ReadStatuses(t.Context(), statusConfig(), []StatusLocator{{ExternalID: "issue-id:456", Number: 7}})
+			require.Nil(t, results)
+			if limited {
+				_, err = session.(StatusSession).ReadStatus(t.Context(), statusConfig(), "issue-id:456", 7)
+				var rate *issuesync.StatusError
+				require.ErrorAs(t, err, &rate)
+				require.Positive(t, rate.RetryAfter)
+				require.Equal(t, 2, requests)
+			}
+		})
+	}
+}

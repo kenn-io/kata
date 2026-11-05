@@ -319,14 +319,14 @@ func TestNotionCursorAndFailure(t *testing.T) {
 			}
 			switch mode {
 			case "second chunk":
-				f = newAdapterSession(manyPages(5001, "")...)
+				f = newAdapterSession(manyPages(issuesync.DefaultInitialBatchSize+1, "")...)
 				f.onContent = func(context.Context, Page) error { require.Zero(t, wrapped.calls); completed++; return nil }
 				wrapped.beforeImport = func(p db.ImportBatchParams) error {
-					require.Equal(t, 5001, completed)
+					require.Equal(t, issuesync.DefaultInitialBatchSize+1, completed)
 					if wrapped.calls == 2 {
 						return errors.New("second chunk unavailable")
 					}
-					require.Len(t, p.Items, 5000)
+					require.Len(t, p.Items, issuesync.DefaultInitialBatchSize)
 					return nil
 				}
 			}
@@ -346,7 +346,7 @@ func TestNotionCursorAndFailure(t *testing.T) {
 			require.Equal(t, previous, *after.LastCursorAt)
 			switch mode {
 			case "second chunk":
-				require.Equal(t, 5000, res.Import.Created)
+				require.Equal(t, issuesync.DefaultInitialBatchSize, res.Import.Created)
 			case "success record":
 				require.Equal(t, 1, res.Import.Created)
 			case "claim theft":
@@ -465,7 +465,7 @@ func TestNotionProgressPhases(t *testing.T) {
 func TestNotionEventsAfterCommit(t *testing.T) {
 	s := adapterStore(t)
 	b := adapterBinding(t, s, configFixture(t))
-	f := newAdapterSession(manyPages(5001, "")...)
+	f := newAdapterSession(manyPages(issuesync.DefaultInitialBatchSize+1, "")...)
 	wrapped := &adapterFaultStore{Storage: s}
 	at := pageFixture().Page.UpdatedAt.Add(time.Hour)
 	deliveries := 0
@@ -490,7 +490,7 @@ func TestNotionEventsAfterCommit(t *testing.T) {
 	}})
 	res, err := r.RunOnce(t.Context(), b.ID)
 	require.NoError(t, err)
-	require.Equal(t, 5001, res.Import.Created)
+	require.Equal(t, issuesync.DefaultInitialBatchSize+1, res.Import.Created)
 	require.Equal(t, 2, deliveries)
 	require.Equal(t, at, *res.Binding.LastCursorAt)
 }
