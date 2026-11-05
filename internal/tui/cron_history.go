@@ -126,7 +126,7 @@ func (m Model) cronPageLoaded(msg cronPageMsg) Model {
 		}
 	}
 	page.ready = true
-	m = m.cronRemember(page.runs).cronMarkOpenSeen().cronNoticePage(msg)
+	m = m.cronRememberPage(msg, page.runs).cronMarkOpenSeen().cronNoticePage(msg)
 	return m.cronKeepSelection(previous)
 }
 
@@ -193,6 +193,33 @@ func (m Model) cronKeepSelection(before Model) Model {
 		m.cron.stack[i].cursor = keep(old, fresh, before.cron.stack[i].cursor)
 	}
 	return m
+}
+
+// A successful replacement ends the discarded page's lookup coverage. Reuse
+// the loaded-source union without lookup, keeping exact reads and open frames.
+func (m Model) cronRememberPage(msg cronPageMsg, runs []generated.CronRun) Model {
+	if m.cron.data == nil || msg.cursor != "" || msg.merge {
+		return m.cronRemember(runs)
+	}
+	data := *m.cron.data
+	lookup := data.lookup
+	data.lookup = nil
+	m.cron.data = &data
+	keep := map[string]bool{}
+	for _, r := range m.cronLoadedRuns() {
+		keep[r.UID] = true
+	}
+	for _, frame := range m.cron.stack {
+		if frame.ref.kind == cronRuns {
+			keep[frame.ref.uid] = true
+		}
+	}
+	data.lookup = maps.Clone(lookup)
+	maps.DeleteFunc(data.lookup, func(uid string, _ generated.CronRun) bool {
+		err, read := data.runErr[uid]
+		return !keep[uid] && !(read && err == nil)
+	})
+	return m.cronRemember(runs)
 }
 
 func (m Model) cronRemember(runs []generated.CronRun) Model {

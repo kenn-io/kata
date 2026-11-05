@@ -149,6 +149,107 @@ func TestCronHistoryFailureRetryAndForeignJob(t *testing.T) {
 	require.True(t, m.cron.jobPage.ready)
 }
 
+// Resetting history discards its old coverage only after a successful read.
+// Independent page, read, last-run and open-detail evidence remains loaded.
+func TestCronHistoryReplacementPrunesLookup(t *testing.T) {
+	for _, source := range []string{"discarded", "project page", "job page", "fresh read", "last run", "open run", "failed replacement"} {
+		t.Run(source, func(t *testing.T) {
+			m := cronSeenFixture(t)
+			base := m.cron.data.runs[0]
+			base.Status = "succeeded"
+			rows := cronHistoryRows(base, 121)
+			old := rows[120]
+			old.Status, old.Revision = "failed", 2
+			rows[120] = old
+			m.cron.data.runs = slices.Clone(rows[:100])
+			m.cron.data.lookup, m.cron.data.lastRuns = nil, nil
+			m.cron.runPage = cronHistoryPage{runs: slices.Clone(rows[:100]), ready: true}
+			job := *base.JobUID
+			m.cron.stack = []cronFrame{{ref: cronRef{cronJobs, job}}}
+			a := &cronReadTestAPI{data: *m.cron.data}
+			a.data.runs = rows
+			m.api = a
+			m, cmd := m.cronRequestPage(job, true)
+			m = m.cronPageLoaded(cmd().(cronPageMsg))
+			for range 6 {
+				m, cmd = m.cronRequestPage(job, false)
+				require.NotNil(t, cmd)
+				m = m.cronPageLoaded(cmd().(cronPageMsg))
+			}
+			require.Contains(t, m.cron.jobPage.runs, old)
+			require.Equal(t, old, m.cron.data.lookup[old.UID])
+			require.Equal(t, 1, m.cronUnseenCount())
+			// The server corrects an older failure, outside both replacement heads.
+			a.data.runs = slices.Clone(rows)
+			a.data.runs[120].Status, a.data.runs[120].Revision = "succeeded", 3
+			requestJob := job
+			switch source {
+			case "project page":
+				m.cron.runPage.runs = append(slices.Clone(m.cron.runPage.runs), old)
+			case "job page":
+				m.cron.runPage = cronHistoryPage{runs: slices.Clone(m.cron.jobPage.runs), ready: true}
+				m.cron.jobPage.runs = []generated.CronRun{old}
+				requestJob = "" // Replace project history while job history survives.
+			case "fresh read":
+				m.cron.data.runErr = map[string]error{old.UID: nil}
+				m = m.cronRemember([]generated.CronRun{a.data.runs[120]})
+			case "last run":
+				m.cron.data.lastRuns = map[string]generated.CronRun{job: old}
+			case "open run":
+				m.cron.stack = append(m.cron.stack, cronFrame{ref: cronRef{cronRuns, old.UID}})
+				m.cron.help = true // Retain the frame without showing/acknowledging it.
+			case "failed replacement":
+				a.data.runsErr = errors.New("offline")
+			}
+			m, cmd = m.cronRequestPage(requestJob, true)
+			m = m.cronPageLoaded(cmd().(cronPageMsg))
+			page := cronGapPage(&m, requestJob)
+			if source == "failed replacement" {
+				require.ErrorContains(t, page.err, "offline")
+				require.Equal(t, rows, page.runs)
+			} else {
+				require.NoError(t, page.err)
+				limit := 20
+				if requestJob == "" {
+					limit = 100
+				}
+				require.Equal(t, rows[:limit], page.runs)
+			}
+			loaded := m.cronLoadedRuns()
+			ids := make([]string, len(loaded))
+			for i, r := range loaded {
+				ids[i] = r.UID
+			}
+			want := make([]string, 100)
+			for i, r := range rows[:100] {
+				want[i] = r.UID
+			}
+			switch source {
+			case "discarded":
+				require.NotContains(t, m.cron.data.lookup, old.UID)
+				require.Zero(t, m.cronUnseenCount())
+			case "failed replacement":
+				want = nil
+				for _, r := range rows {
+					want = append(want, r.UID)
+				}
+				require.Equal(t, old, m.cron.data.lookup[old.UID])
+				require.Equal(t, 1, m.cronUnseenCount())
+			default:
+				want = append(want, old.UID)
+				if source == "fresh read" {
+					require.Equal(t, a.data.runs[120], m.cron.data.lookup[old.UID])
+					require.Zero(t, m.cronUnseenCount())
+				} else {
+					require.Equal(t, old, m.cron.data.lookup[old.UID])
+					require.Equal(t, 1, m.cronUnseenCount())
+				}
+			}
+			require.ElementsMatch(t, want, ids)
+		})
+	}
+}
+
 func TestCronRunsLoadOlderByKey(t *testing.T) {
 	m := sendRune(cronFixture(t), '3')
 	m.cron.data.runs = cronHistoryRows(m.cron.data.runs[0], 100)
