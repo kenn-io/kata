@@ -46,14 +46,14 @@ func TestCronValidateHTTP(t *testing.T) {
 		require.Equal(t, float64(7), item["occurrences"], "count does not shorten the collision horizon")
 		require.Equal(t, "paused", out["warnings"].([]any)[0].(map[string]any)["code"])
 	})
+	before, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
 	for _, resource := range []string{"jobs", "workflows"} {
 		path := fmt.Sprintf("/api/v1/projects/%d/cron/%s/validate", project.ID, resource)
 		definition := any(native)
 		if resource == "workflows" {
 			definition = map[string]any{"version": 1, "steps": []any{map[string]any{"key": "inspect", "kind": "prompt", "prompt": "Inspect"}}}
 		}
-		before, err := env.DB.MaxEventID(t.Context())
-		require.NoError(t, err)
 		status, raw := cronHTTP(t, env, http.MethodPost, path+"?count=2&from=2026-11-03T00:00:00Z", map[string]any{"name": "Inspect", "definition": definition})
 		require.Equalf(t, 200, status, "%s", raw)
 		var result db.CronValidation
@@ -85,11 +85,10 @@ func TestCronValidateHTTP(t *testing.T) {
 			raw := readClose(t, response)
 			require.Equalf(t, 400, response.StatusCode, "body %s: %s", body, raw)
 		}
-
-		after, err := env.DB.MaxEventID(t.Context())
-		require.NoError(t, err)
-		require.Equal(t, before, after)
 	}
+	after, err := env.DB.MaxEventID(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, before, after)
 	path := fmt.Sprintf("/api/v1/projects/%d/cron/jobs/validate", project.ID)
 	for _, query := range []string{"?count=bad", "?count=0", "?count=101"} {
 		status, raw := cronHTTP(t, env, http.MethodPost, path+query, map[string]any{"name": "Inspect", "definition": cronHTTPDefinition(t)})

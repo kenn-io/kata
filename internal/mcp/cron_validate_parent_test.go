@@ -34,7 +34,7 @@ func TestCronValidateParentOptionParity(t *testing.T) {
 				require.Equal(t, "document", failures[0].(map[string]any)["stage"])
 			})
 		}
-		// Preserve the reviewer's exact empty-definition reproduction too.
+		// Parent patching must preserve the document stage for an empty definition.
 		result := cronOK(t, f.session, "cron_job_validate", map[string]any{"name": "Inspect", "definition": map[string]any{}, "parent_ref": parent.ShortID})
 		require.Equal(t, false, result["valid"])
 		require.Equal(t, "document", result["errors"].([]any)[0].(map[string]any)["stage"])

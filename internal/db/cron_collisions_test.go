@@ -25,12 +25,13 @@ func TestCronCollisionParentMetadataByteReadBound(t *testing.T) {
 	_, err = pool.ExecContext(t.Context(), `CREATE TABLE issues(id INTEGER, uid TEXT, project_id INTEGER, status TEXT, owner TEXT, author TEXT, metadata TEXT, revision INTEGER, deleted_at TEXT)`)
 	require.NoError(t, err)
 	metadata := `{"blob":"` + strings.Repeat("😀", 128) + `"}`
-	_, err = pool.ExecContext(t.Context(), `INSERT INTO issues VALUES(1,'parent',1,'open','','operator',$1,1,NULL)`, metadata)
+	parentUID := "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+	_, err = pool.ExecContext(t.Context(), `INSERT INTO issues VALUES(1,$1,1,'open','','operator',$2,1,NULL)`, parentUID, metadata)
 	require.NoError(t, err)
 	tx, err := pool.BeginTx(t.Context(), &sql.TxOptions{ReadOnly: true})
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
-	parent, _, err := (CronSQL{}).recurringParentRead(t.Context(), tx, 1, "parent", false, 128)
+	parent, _, err := (CronSQL{}).recurringParentRead(t.Context(), tx, 1, parentUID, false, 128)
 	require.NoError(t, err)
 	require.LessOrEqual(t, len(parent.Metadata), 128)
 }

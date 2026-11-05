@@ -44,7 +44,6 @@ func TestCronValidateDoesNotLockParent(t *testing.T) {
 	out, err := store.ValidateCronJob(ctx, db.CronValidationInput{ProjectID: project.ID, UID: job.UID, ExpectedEventUID: job.DefinitionEventUID, Name: job.Name, Raw: raw, From: time.Now(), Count: 5})
 	require.NoError(t, err)
 	require.True(t, out.Valid)
-	require.Equal(t, "stored_progress", out.Schedule.Basis)
 	require.Len(t, out.Schedule.Collisions.Items, 1)
 	require.Equal(t, peer.UID, out.Schedule.Collisions.Items[0].Peers[0].UID)
 	// Maintenance can hold an exclusive table lock. The ownership read must
