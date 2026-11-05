@@ -328,6 +328,7 @@ func TestDeleteReachesEverySavedView(t *testing.T) {
 				assert.Equal(t, selected.UID, h.m.detail.issue.UID)
 			case "Attention detail", "Attention Back":
 				assert.Equal(t, viewAttention, h.m.view)
+				assertHelpItemPresent(t, flattenHelpRows(attentionHelpRows(h.m)), helplayout.HelpItem{Key: "u", Description: "undo"})
 			case "split detail":
 				selected, ok := h.m.list.targetRow()
 				require.True(t, ok)
@@ -623,6 +624,9 @@ func TestDeleteKeyIsOfferedOnlyToCredentialsThatCanDelete(t *testing.T) {
 			if tc.scoped || tc.unloaded {
 				assertHelpItemAbsent(t, flattenHelpRows(h.m.helpRows()), hint)
 				assertHelpItemAbsent(t, flattenHelpRows(h.m.splitHelpRows()), hint)
+			} else {
+				assertHelpItemPresent(t, flattenHelpRows(h.m.helpRows()), hint)
+				assertHelpItemPresent(t, flattenHelpRows(h.m.splitHelpRows()), hint)
 			}
 			for _, section := range helpSections(h.m.helpKeymap()) {
 				for _, item := range section.rows {
