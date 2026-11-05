@@ -10,6 +10,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 ## Unreleased
 
 - Enable search by meaning with `kata daemon local-embeddings`. A fresh home uses a running Ollama; otherwise, it asks before downloading the shared built-in server. Switching keeps compatible Nomic indexes and warns before changing a federation recipe.
+- Load web UI suggestions faster on large SQLite stores with unrestricted local owner access; scoped and account-bound access keep today's speed.
 - Create issues faster on large SQLite stores by scoring look-alike candidates once per issue.
 - Load project stats in milliseconds on large stores in the TUI Projects screen, `kata --agent projects list`, and `?include=stats`. "Updated" follows the newest recorded event, as the web UI does; a reconnecting spoke's older relayed events can show an older time until the next local event.
 - Speed up label loading for list and ready responses and label filters in semantic or hybrid search on large SQLite stores.
@@ -22,6 +23,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   in every database locale while keeping case-sensitive matching. Existing
   stores upgrade to schema 45 through SQLite's JSONL cutover or the
   [offline PostgreSQL index build](development/postgres-migrations.md#schema-45-issue-uid-prefix-index).
+- Fetch the highest-priority ready issue with flat lookup cost as ready queues grow using `kata next` and MCP `kata.next`. SQLite and PostgreSQL walk priority indexes instead of sorting every ready row; PostgreSQL bounds each request and expands it when scheduled issues fill the batch. Daemons with API `0.41.0` or newer return one priority-ordered row per request; older daemons keep the existing selection behavior. Existing stores upgrade to schema 46 through SQLite's JSONL cutover or the [offline PostgreSQL migration](development/postgres-migrations.md#schema-46-ready-priority-indexes).
 - Search references faster in the web UI on large stores; a `q` search now returns only issue references.
 - Spend 2 REST requests and 1 GraphQL request per 100-issue GitHub status sweep, down from 102 REST requests, while continuing to import upstream closes and reopens. Hosts without the required GraphQL fields keep using REST status reads.
 - Sync GitHub comment history with fewer requests by reading repository-wide comment pages and fetching only recent comments on later polls.

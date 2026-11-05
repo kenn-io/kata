@@ -285,6 +285,7 @@ type ExpireAssignmentsParams struct {
 
 // ReadyIssuesFilter holds optional filters for the ready query.
 type ReadyIssuesFilter struct {
+	PriorityFirst bool     // priority ascending, unprioritized last, then ready order
 	Unowned       bool     // only issues effectively unassigned at At
 	Owner         string   // only active assignments to this owner (empty = no filter)
 	Labels        []string // issues must have ALL these labels (AND logic)
