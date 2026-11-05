@@ -134,6 +134,11 @@ projects. Stop daemons and imports while the migration reads `issues` and builds
 the indexes. See the [schema 42 migration requirements](../development/postgres-migrations.md#schema-42-issue-creation-order-indexes)
 for the offline window, grants, and rollback.
 
+Schema 43 indexes federated issue history by resolved issue UID. Stop daemons
+and imports while the migration reads `events` and builds the index. See the
+[schema 43 migration requirements](../development/postgres-migrations.md#schema-43-resolved-issue-history-index)
+for the offline window, grants, and rollback.
+
 After preparation, grant the runtime role DML access and set default privileges
 for objects created by future migrations:
 

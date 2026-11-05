@@ -220,6 +220,7 @@ The [docs site](docs/) is the definitive reference:
   [Changelog](docs/changelog.md)
 - Guide: [Concepts](docs/guide/concepts.md) ·
   [Workspaces and projects](docs/guide/workspaces-projects.md) ·
+  [Issue attachments](docs/guide/attachments.md) ·
   [Semantic search](docs/guide/semantic-search.md) ·
   [Migrating from Beads](docs/guide/migrating-from-beads.md)
 - Reference: [CLI](docs/reference/cli.md) ·
