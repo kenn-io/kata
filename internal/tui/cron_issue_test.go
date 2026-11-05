@@ -254,57 +254,55 @@ func TestCronIssueActionsWaitForIssue(t *testing.T) {
 	}
 }
 
-// Stacked detail has no pane frame around it, so a linked issue that failed to
-// load must itself show why and how to return, while its actions stay inert.
-func TestCronIssueUnreadableStackedView(t *testing.T) {
-	m := cronIssueFixture(t, 80)
-	m = sendKey(m, tea.KeyEnter)
-	require.Equal(t, splitlayout.Stacked, m.layout)
-	m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, err: errors.New("issue not found")})
-	require.Nil(t, m.detail.issue)
-	require.ErrorContains(t, m.detail.err, "issue not found")
-	require.True(t, m.cron.returnToCron)
-	require.Nil(t, m.toast, "the visible empty state already explains; a notice would repeat it")
-	view := ansi.Strip(m.viewBody())
-	require.Contains(t, view, "issue not found")
-	require.Contains(t, view, "esc")
-	require.Contains(t, view, "back")
-	require.NotContains(t, view, "no issue selected")
-	stacked := m
-	m, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
-	m = drainInboxCmds(m, cmd)
-	require.Equal(t, viewCron, m.view)
-	stacked, cmd = updateModel(stacked, popDetailMsg{})
-	stacked = drainInboxCmds(stacked, cmd)
-	require.Equal(t, viewCron, stacked.view)
-}
-
-// The split pane shows a linked issue's pending read and then why it failed,
-// while Esc still returns and identity actions wait.
+// Linked-issue reads show their pending/error state in both layouts. Esc
+// returns to Cron, and failed reads cannot launch identity-dependent actions.
 func TestCronIssueSplitPaneShowsReadState(t *testing.T) {
-	m := cronIssueFixture(t, 160)
-	m = sendKey(m, tea.KeyEnter)
-	require.True(t, m.cron.returnToCron)
-	require.Equal(t, splitlayout.Split, m.layout)
-	require.True(t, m.detail.loading)
-	require.Equal(t, "issue-example", m.detail.readRef)
-	require.Nil(t, m.detail.issue)
-	view := ansi.Strip(m.viewBody())
-	require.Contains(t, view, "loading…")
-	require.NotContains(t, view, "select an issue from the list pane")
-	m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, err: errors.New("issue not found")})
-	require.Nil(t, m.toast, "the visible pane already explains; a notice would repeat it")
-	view = ansi.Strip(m.viewBody())
-	require.Contains(t, view, "unavailable: issue not found")
-	require.Contains(t, view, "esc")
-	require.Contains(t, view, "back")
-	require.NotContains(t, view, "select an issue from the list pane")
-	m, cmd := updateModel(m, keyRune('N'))
-	require.False(t, slices.ContainsFunc(runCmdTree(cmd), func(msg tea.Msg) bool { _, ok := msg.(openInputMsg); return ok }))
-	require.Equal(t, inputNone, m.input.kind)
-	m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
-	m = drainInboxCmds(m, cmd)
-	require.Equal(t, viewCron, m.view)
+	for _, width := range []int{80, 160} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			m := cronIssueFixture(t, width)
+			m = sendKey(m, tea.KeyEnter)
+			require.True(t, m.cron.returnToCron)
+			if width == 80 {
+				require.Equal(t, splitlayout.Stacked, m.layout)
+			} else {
+				require.Equal(t, splitlayout.Split, m.layout)
+				require.True(t, m.detail.loading)
+				require.Equal(t, "issue-example", m.detail.readRef)
+				require.Nil(t, m.detail.issue)
+				view := ansi.Strip(m.viewBody())
+				require.Contains(t, view, "loading…")
+				require.NotContains(t, view, "select an issue from the list pane")
+			}
+			m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, err: errors.New("issue not found")})
+			require.Nil(t, m.detail.issue)
+			require.ErrorContains(t, m.detail.err, "issue not found")
+			require.True(t, m.cron.returnToCron)
+			require.Nil(t, m.toast, "the visible error already explains; a notice would repeat it")
+			view := ansi.Strip(m.viewBody())
+			require.Contains(t, view, "issue not found")
+			require.Contains(t, view, "esc")
+			require.Contains(t, view, "back")
+			if width == 80 {
+				require.NotContains(t, view, "no issue selected")
+			} else {
+				require.Contains(t, view, "unavailable: issue not found")
+				require.NotContains(t, view, "select an issue from the list pane")
+				var cmd tea.Cmd
+				m, cmd = updateModel(m, keyRune('N'))
+				require.False(t, slices.ContainsFunc(runCmdTree(cmd), func(msg tea.Msg) bool { _, ok := msg.(openInputMsg); return ok }))
+				require.Equal(t, inputNone, m.input.kind)
+			}
+			stacked := m
+			m, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+			m = drainInboxCmds(m, cmd)
+			require.Equal(t, viewCron, m.view)
+			if width == 80 {
+				stacked, cmd = updateModel(stacked, popDetailMsg{})
+				stacked = drainInboxCmds(stacked, cmd)
+				require.Equal(t, viewCron, stacked.view)
+			}
+		})
+	}
 }
 
 // A failed linked-issue read gets a notice only where no persistent error is
@@ -326,7 +324,24 @@ func TestCronIssueReadFailureNoticeWhenHidden(t *testing.T) {
 				m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, issue: &Issue{UID: "issue-example", ShortID: "abcd", Title: "Linked result", ProjectID: 7}})
 				require.Nil(t, m.toast)
 			}
-			m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, err: errors.New("server unavailable")})
+			if mode == "refresh" {
+				api := &fakeDetailAPI{getIssueErr: errors.New("server unavailable")}
+				cmd := m.detail.refetch(api)
+				require.NotNil(t, cmd)
+				defer func() { m.detail.cancelReads() }()
+				fetched := 0
+				for _, msg := range runCmdTree(cmd) {
+					if result, ok := msg.(detailFetchedMsg); ok {
+						fetched++
+						require.EqualError(t, result.err, "server unavailable")
+					}
+					m, _ = updateModel(m, msg)
+				}
+				require.Equal(t, 1, fetched)
+				require.Equal(t, "abcd", api.lastGetIssue)
+			} else {
+				m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, err: errors.New("server unavailable")})
+			}
 			require.True(t, m.cron.returnToCron)
 			require.NotNil(t, m.toast, "no persistent error is visible, so a notice explains the failure")
 			require.Contains(t, m.toast.text, "server unavailable")

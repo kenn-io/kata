@@ -59,6 +59,15 @@ func TestCronWaitReadFillAndHistoryRevisions(t *testing.T) {
 	p.jobs = nil
 	cronEnrich(t.Context(), a, 7, &p)
 	require.Empty(t, p.waits)
+	t.Run("native job only reads its shared parent", func(t *testing.T) {
+		m := cronBlockedFixture(t)
+		j := m.cron.data.jobs[0]
+		nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(time.Hour / time.Second))})(&j.Definition)
+		m.cron.data.jobs = []generated.CronJob{j}
+		a := waitReadAPI(nil)
+		cronEnrich(t.Context(), a, 7, m.cron.data)
+		require.Equal(t, map[string]int{nextParentUID: 1}, a.waitCalls, "only the shared native parent read is needed")
+	})
 }
 
 func TestCronWaitReadsBoundedWithDeadlineAndCancellation(t *testing.T) {
@@ -109,6 +118,11 @@ func TestCronWaitReadsBoundedWithDeadlineAndCancellation(t *testing.T) {
 			t.Fatal("attention read did not start")
 		}
 		synctest.Wait() // admit all reads before testing cancellation of the pool
+		a.mu.Lock()
+		active, peak := a.active, a.peak
+		a.mu.Unlock()
+		require.Equal(t, 4, active, "the shared pool admits four blocked attention reads")
+		require.Equal(t, 4, peak, "fill and attention reads share the same four-worker cap")
 		cancel()
 		select {
 		case <-done:

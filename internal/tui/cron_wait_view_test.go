@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/stretchr/testify/require"
@@ -83,16 +82,6 @@ func TestCronWaitRendering(t *testing.T) {
 		m.cron.stack = []cronFrame{{ref: cronRef{cronRuns, m.cron.data.runs[0].UID}}}
 		assertGolden(t, "cron-run-detail-blocked", m.viewBody())
 	}
-}
-
-func TestCronWaitNativeRunDoesNotAddAttentionRead(t *testing.T) {
-	m := cronBlockedFixture(t)
-	j := m.cron.data.jobs[0]
-	nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(time.Hour / time.Second))})(&j.Definition)
-	m.cron.data.jobs = []generated.CronJob{j}
-	a := waitReadAPI(nil)
-	cronEnrich(t.Context(), a, 7, m.cron.data)
-	require.Equal(t, map[string]int{nextParentUID: 1}, a.waitCalls, "only the shared native parent read is needed")
 }
 
 // A running run's issue that moved to another project still decides Cron

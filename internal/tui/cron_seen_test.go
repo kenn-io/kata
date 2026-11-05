@@ -27,13 +27,18 @@ import (
 func TestCronSeenMergeAlgebra(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
 		draw := func() cronSeenStore {
-			ids := hegel.Draw(ht, hegel.Lists(hegel.Integers[uint64](0, ^uint64(0))).MaxSize(40))
-			runs := make([]string, len(ids))
-			for i, id := range ids {
-				runs[i] = fmt.Sprintf("%016x", id)
+			store := cronSeenStore{Version: 1, Projects: map[string]cronSeenProject{}}
+			// Each sample has an overlapping key and a possibly distinct key.
+			for _, key := range []string{"project-shared", fmt.Sprintf("project-%d", hegel.Draw(ht, hegel.Integers[int](0, 2)))} {
+				ids := hegel.Draw(ht, hegel.Lists(hegel.Integers[uint64](0, ^uint64(0))).MaxSize(40))
+				runs := make([]string, len(ids))
+				for i, id := range ids {
+					runs[i] = fmt.Sprintf("%016x", id)
+				}
+				stamp := snapshotFixedNow.Add(time.Duration(hegel.Draw(ht, hegel.Integers[uint32](0, ^uint32(0)))))
+				store.Projects[key] = cronSeenProject{ClearedThrough: stamp, Runs: runs}
 			}
-			stamp := snapshotFixedNow.Add(time.Duration(hegel.Draw(ht, hegel.Integers[uint32](0, ^uint32(0)))))
-			return cronSeenStore{Version: 1, Projects: map[string]cronSeenProject{"project": {ClearedThrough: stamp, Runs: runs}}}
+			return store
 		}
 		a, b, c := draw(), draw(), draw()
 		ab := cronSeenMerge(a, b)
@@ -47,16 +52,29 @@ func TestCronSeenMergeAlgebra(t *testing.T) {
 		if !reflect.DeepEqual(canonical, cronSeenMerge(canonical, canonical)) {
 			ht.Fatal("merge is not idempotent")
 		}
-		latest := a.Projects["project"].ClearedThrough
-		if other := b.Projects["project"].ClearedThrough; other.After(latest) {
-			latest = other
+		expected := map[string]cronSeenProject{}
+		for _, input := range []cronSeenStore{a, b} {
+			for key, project := range input.Projects {
+				want := expected[key]
+				want.Runs = append(want.Runs, project.Runs...)
+				if project.ClearedThrough.After(want.ClearedThrough) {
+					want.ClearedThrough = project.ClearedThrough
+				}
+				expected[key] = want
+			}
 		}
-		if !ab.Projects["project"].ClearedThrough.Equal(latest) {
-			ht.Fatal("merge must retain the maximum clear watermark")
+		if len(ab.Projects) != len(expected) {
+			ht.Fatal("merge must preserve every input project")
 		}
-		for _, id := range canonical.Projects["project"].Runs {
-			if !slices.Contains(ab.Projects["project"].Runs, id) {
-				ht.Fatalf("merge lost %q", id)
+		for key, want := range expected {
+			slices.Sort(want.Runs)
+			want.Runs = slices.Compact(want.Runs)
+			got := ab.Projects[key]
+			if !slices.Equal(want.Runs, got.Runs) {
+				ht.Fatalf("project %q membership = %v, want input union %v", key, got.Runs, want.Runs)
+			}
+			if !got.ClearedThrough.Equal(want.ClearedThrough) {
+				ht.Fatalf("project %q lost the maximum clear watermark", key)
 			}
 		}
 	}, hegel.WithTestCases(300))

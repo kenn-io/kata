@@ -46,7 +46,7 @@ func TestCronHistoryFencesAndSingleFlight(t *testing.T) {
 	a := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: cronHistoryRows(m.cron.data.runs[0], 20)}
 	a.next = a.page[len(a.page)-1].UID
 	m.api = a
-	m.cron.jobPage = cronHistoryPage{job: j, next: a.next, ready: true}
+	m.cron.jobPage = cronHistoryPage{job: j, runs: slices.Clone(a.page), next: a.next, ready: true}
 	m, cmd := m.cronRequestPage(j, false)
 	require.NotNil(t, cmd)
 	_, second := m.cronRequestPage(j, false)
@@ -314,6 +314,8 @@ func TestCronHistoryRetainedRuns(t *testing.T) {
 		m.cron.jobPage = cronHistoryPage{job: j.UID, runs: a.page, ready: true}
 		m = m.cronRemember(a.page)
 		m.cron.stack = []cronFrame{{ref: cronRef{cronJobs, j.UID}}, {ref: cronRef{cronRuns, old.UID}}}
+		require.Contains(t, stripANSI(m.viewBody()), old.Status)
+		require.Contains(t, stripANSI(m.viewBody()), "runs / "+old.UID)
 		// A head refresh must retain the run currently being inspected, including
 		// when the project-head read fails.
 		for _, failed := range []bool{false, true} {
@@ -337,6 +339,11 @@ func TestCronHistoryRetainedRuns(t *testing.T) {
 				require.Contains(t, stripANSI(next.viewBody()), "runs / "+old.UID)
 			})
 		}
+		// Job pages and lookup never enlarge the workflow's newest-100 history.
+		m.cron.stack = []cronFrame{{ref: cronRef{cronWorkflows, m.cron.data.workflows[0].UID}}}
+		_, _, lines := cronScreen(m)
+		require.False(t, slices.ContainsFunc(lines, func(l cronLine) bool { return l.target.uid == old.UID }))
+		require.Contains(t, cronLinesText(lines), fmt.Sprintf("Loaded runs (%d) · newest 100", len(m.cron.data.runs)))
 	})
 	t.Run("project lookup survives failed refresh", func(t *testing.T) {
 		m := cronFixture(t)
@@ -501,29 +508,6 @@ func cronGapOlder(t *testing.T, m Model, job string) Model {
 	msg := request().(cronPageMsg)
 	require.NoError(t, msg.err)
 	return m.cronPageLoaded(msg)
-}
-
-// Job details have independent server-filtered history; job pages and lookup
-// never enlarge the workflow's documented newest-100 history.
-func TestCronHistoryJobPagesAndLookup(t *testing.T) {
-	m := cronFixture(t)
-	j := m.cron.data.jobs[0]
-	old := m.cron.data.runs[0]
-	old.UID = "old-run"
-	old.Revision = 1
-	a := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: cronHistoryRows(old, 20)}
-	m.api = a
-	m.cron.jobPage = cronHistoryPage{job: j.UID, runs: a.page, ready: true}
-	m = m.cronRemember(a.page)
-	m.cron.stack = []cronFrame{{ref: cronRef{cronJobs, j.UID}}}
-	m.cron.stack = append(m.cron.stack, cronFrame{ref: cronRef{cronRuns, old.UID}})
-	require.Contains(t, stripANSI(m.viewBody()), old.Status)
-	require.Contains(t, stripANSI(m.viewBody()), "runs / "+old.UID)
-
-	m.cron.stack = []cronFrame{{ref: cronRef{cronWorkflows, m.cron.data.workflows[0].UID}}}
-	_, _, lines := cronScreen(m)
-	require.False(t, slices.ContainsFunc(lines, func(l cronLine) bool { return l.target.uid == old.UID }))
-	require.Contains(t, cronLinesText(lines), fmt.Sprintf("Loaded runs (%d) · newest 100", len(m.cron.data.runs)))
 }
 
 // Events retain pages, cursors, selection and in-flight reads; manual refresh

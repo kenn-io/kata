@@ -36,11 +36,10 @@ func TestCronNoticeDecodeObservedOnly(t *testing.T) {
 		require.NoError(t, err)
 		msg := decodeEventReceived(frame{data: raw})
 		if kind == "cron.run.observed" {
-			require.NotNil(t, msg.cronRun)
-			require.Equal(t, "run", msg.cronRun.UID)
-			require.Equal(t, int64(7), msg.cronRun.Revision)
-			require.NotNil(t, msg.cronRun.EndedAt)
-			require.Equal(t, snapshotFixedNow.Add(-time.Minute), *msg.cronRun.EndedAt)
+			require.Equal(t, &cronRunEvent{
+				UID: "run", JobUID: "job", ProjectUID: "project-example", Status: "unknown",
+				Revision: 7, UpdatedAt: snapshotFixedNow, EndedAt: new(snapshotFixedNow.Add(-time.Minute)),
+			}, msg.cronRun)
 		} else {
 			require.Nil(t, msg.cronRun)
 		}
@@ -70,9 +69,16 @@ func TestCronNoticeWindowPermutation(t *testing.T) {
 			}
 		}
 		slices.Sort(wantLabels)
-		offset := hegel.Draw(ht, hegel.Integers[int](0, n-1))
-		for i := range n * 2 {
-			next, cmd := m.cronNoticeEvent(cronNoticeEvent(fmt.Sprint((i+offset)%n), chosen[(i+offset)%n], snapshotFixedNow))
+		order := make([]int, n*2)
+		for i := range order {
+			order[i] = i % n
+		}
+		for i := len(order) - 1; i > 0; i-- {
+			j := hegel.Draw(ht, hegel.Integers[int](0, i))
+			order[i], order[j] = order[j], order[i]
+		}
+		for i, id := range order {
+			next, cmd := m.cronNoticeEvent(cronNoticeEvent(fmt.Sprint(id), chosen[id], snapshotFixedNow))
 			m = next
 			if (cmd != nil) != (i == 0) {
 				ht.Fatalf("event %d armed an unexpected window", i)
@@ -568,8 +574,16 @@ func TestCronNoticeOlderPageSettlement(t *testing.T) {
 					if requested == "before event" {
 						kept.Status, kept.UpdatedAt, kept.EndedAt = "running", T.Add(-time.Hour), nil
 					}
-					m.api = &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: []generated.CronRun{kept}}
-					m.cron.runPage = cronHistoryPage{runs: m.cron.data.runs, next: "older-cursor", ready: true}
+					head := cronHistoryRows(m.cron.data.runs[0], 100)
+					kept.CreatedAt = head[len(head)-1].CreatedAt.Add(-time.Minute)
+					if requested == "before event" {
+						kept.UpdatedAt = kept.CreatedAt
+					}
+					data := *m.cron.data
+					data.runs = append(slices.Clone(head), kept)
+					m.api = &cronReadTestAPI{data: data}
+					m.cron.data.runs = head
+					m.cron.runPage = cronHistoryPage{runs: head, next: head[len(head)-1].UID, ready: true}
 					event := cronNoticeEvent("r", job, T.Add(time.Minute))
 					if requested != "before event" {
 						m, _ = updateModel(m, event)
