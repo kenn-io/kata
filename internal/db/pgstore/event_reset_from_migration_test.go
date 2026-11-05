@@ -24,6 +24,7 @@ func TestEventResetFromIndexMigrationUpgradesVersion43(t *testing.T) {
 	admin, err := sql.Open("pgx", dsn)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
+	dropReadyPriorityIndexes(ctx, t, admin, schema)
 	_, err = admin.ExecContext(ctx, `DROP INDEX IF EXISTS event_reset_upgrade.idx_events_reset_from;
 DROP INDEX IF EXISTS event_reset_upgrade.idx_issues_uid_prefix;
 DROP INDEX IF EXISTS event_reset_upgrade.idx_issues_project_uid_prefix;

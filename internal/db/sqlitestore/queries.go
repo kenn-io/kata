@@ -2462,19 +2462,9 @@ func (d *Store) claimOwner(ctx context.Context, p db.ClaimOwnerParams) (db.Claim
 	return result, nil
 }
 
-// ReadyIssues returns actionable open issues with no open `blocks` predecessor,
-// ordered by updated_at DESC. Issues marked someday=true or scheduled after
-// their effective local date or instant are parked and excluded. limit==0 means
-// no limit. Blockers may live in another project (links span projects, storage
-// v16), but a blocker whose project is archived (projects.deleted_at IS NOT
-// NULL) does not gate readiness — mirroring the child/close queries'
-// archived-project exclusion, so an active issue is not stranded behind hidden
-// archived work.
-func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, filter db.ReadyIssuesFilter) ([]db.Issue, error) {
-	at := filter.At
-	if at.IsZero() {
-		at = time.Now()
-	}
+const readyPriorityOrderBy = ` ORDER BY COALESCE(i.priority, 5), i.updated_at DESC, i.id DESC`
+
+func buildReadyIssuesQuery(ctx context.Context, projectID int64, filter db.ReadyIssuesFilter, at time.Time) (string, []any) {
 	args := []any{projectID}
 	var q strings.Builder
 	q.WriteString(scheduledIssueSelect + `
@@ -2514,8 +2504,29 @@ func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, fil
 		args = append(args, strings.ToLower(label))
 	}
 
-	q.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
-	rows, err := d.QueryContext(ctx, q.String(), args...)
+	if filter.PriorityFirst {
+		q.WriteString(readyPriorityOrderBy)
+	} else {
+		q.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
+	}
+	return q.String(), args
+}
+
+// ReadyIssues returns actionable open issues with no open `blocks` predecessor,
+// ordered by updated_at DESC. Issues marked someday=true or scheduled after
+// their effective local date or instant are parked and excluded. limit==0 means
+// no limit. Blockers may live in another project (links span projects, storage
+// v16), but a blocker whose project is archived (projects.deleted_at IS NOT
+// NULL) does not gate readiness — mirroring the child/close queries'
+// archived-project exclusion, so an active issue is not stranded behind hidden
+// archived work.
+func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, filter db.ReadyIssuesFilter) ([]db.Issue, error) {
+	at := filter.At
+	if at.IsZero() {
+		at = time.Now()
+	}
+	query, args := buildReadyIssuesQuery(ctx, projectID, filter, at)
+	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ready issues: %w", err)
 	}
@@ -2547,20 +2558,7 @@ func (d *Store) ReadyIssues(ctx context.Context, projectID int64, limit int, fil
 	return out, rows.Err()
 }
 
-// ReadyIssuesGlobal returns ready issues across every non-archived project,
-// each paired with its project name. "Ready" matches ReadyIssues: actionable,
-// open, not soft-deleted, and not blocked by an open `blocks` predecessor in
-// an active project. Issues from archived projects (projects.deleted_at IS NOT
-// NULL) are excluded, and an open blocker in an archived project does not gate
-// readiness. Ordering and filter semantics match ReadyIssues so behavior is
-// consistent.
-func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.ReadyIssuesFilter) ([]db.ReadyGlobalIssue, error) {
-	// The global row also carries the project name and linked recurrence
-	// timezone, so build this projection from the shared issue columns.
-	at := filter.At
-	if at.IsZero() {
-		at = time.Now()
-	}
+func buildReadyIssuesGlobalQuery(ctx context.Context, filter db.ReadyIssuesFilter, at time.Time) (string, []any) {
 	args := []any{}
 	var q strings.Builder
 	q.WriteString(`SELECT ` + issueColumns + `, p.name AS project_name, schedule_recurrence.timezone
@@ -2604,8 +2602,30 @@ func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.Read
 		args = append(args, strings.ToLower(label))
 	}
 
-	q.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
-	rows, err := d.QueryContext(ctx, q.String(), args...)
+	if filter.PriorityFirst {
+		q.WriteString(readyPriorityOrderBy)
+	} else {
+		q.WriteString(` ORDER BY i.updated_at DESC, i.id DESC`)
+	}
+	return q.String(), args
+}
+
+// ReadyIssuesGlobal returns ready issues across every non-archived project,
+// each paired with its project name. "Ready" matches ReadyIssues: actionable,
+// open, not soft-deleted, and not blocked by an open `blocks` predecessor in
+// an active project. Issues from archived projects (projects.deleted_at IS NOT
+// NULL) are excluded, and an open blocker in an archived project does not gate
+// readiness. Ordering and filter semantics match ReadyIssues so behavior is
+// consistent.
+func (d *Store) ReadyIssuesGlobal(ctx context.Context, limit int, filter db.ReadyIssuesFilter) ([]db.ReadyGlobalIssue, error) {
+	// The global row also carries the project name and linked recurrence
+	// timezone, so build this projection from the shared issue columns.
+	at := filter.At
+	if at.IsZero() {
+		at = time.Now()
+	}
+	query, args := buildReadyIssuesGlobalQuery(ctx, filter, at)
+	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("ready issues global: %w", err)
 	}
