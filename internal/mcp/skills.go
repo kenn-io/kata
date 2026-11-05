@@ -18,11 +18,11 @@ type skillGuide struct {
 }
 
 var skillGuides = []skillGuide{
-	{name: "workflow", title: "Kata agent workflow", summary: "Search first, claim work, track attention and close with evidence."},
+	{name: "workflow", title: "Kata agent workflow", summary: "Search first, reuse or create one issue, claim it and close with evidence."},
 	{name: "issues", title: "Find, create and update issues", summary: "Reuse existing work, create with idempotency and connect related issues.", fragments: []string{"intro", "real-work", "search-create-update", "relationships"}, commands: []string{"kata search", "kata create", "kata show", "kata comment", "kata label add", "kata edit"}},
 	{name: "claiming", title: "Pick up and own work", summary: "Find available work, claim it and release ownership safely.", fragments: []string{"claiming"}, commands: []string{"kata next", "kata ready", "kata claim", "kata unassign", "kata status", "kata show"}},
 	{name: "closing", title: "Close with evidence", summary: "Complete work with typed evidence or hand back unfinished work.", fragments: []string{"closing", "destructive"}, commands: []string{"kata label add", "kata close", "kata audit closes", "kata reopen"}},
-	{name: "teammates", title: "Teammates, inbox and attention", summary: "Attribute contributions and coordinate requests with teammates.", fragments: []string{"teammates"}, commands: []string{"kata comment", "kata create", "kata claim", "kata notify", "kata inbox"}},
+	{name: "teammates", title: "Teammates, inbox and attention", summary: "Attribute contributions, coordinate requests and signal attention with work.* metadata.", fragments: []string{"teammates", "coordination"}, commands: []string{"kata comment", "kata create", "kata claim", "kata notify", "kata inbox", "kata meta set", "kata wait"}},
 	{name: "scheduling", title: "Park, schedule and set deadlines", summary: "Defer work, set deadlines and return deferred issues to the queue.", fragments: []string{"scheduling"}, commands: []string{"kata schedule", "kata deadline", "kata meta set", "kata meta unset"}},
 	{name: "events", title: "Follow activity with events", summary: "Resume activity from a cursor and recover from resets.", fragments: []string{"events"}, commands: []string{"kata events"}},
 }

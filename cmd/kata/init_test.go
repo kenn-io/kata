@@ -474,7 +474,7 @@ func TestInit_WithAgents_WritesAgentsFileWhenAbsent(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(content), agentsBlockBegin)
 	assert.Contains(t, string(content), agentsBlockEnd)
-	assert.Contains(t, string(content), "Kata is the system of record for intent.")
+	assert.Contains(t, string(content), agentContractText)
 }
 
 func TestInit_WithoutFlag_DoesNotWriteAgents(t *testing.T) {
@@ -599,15 +599,14 @@ func TestInit_WithAgents_RefreshesStaleBlock(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
 	assert.NotContains(t, string(content), "old kata guidance that should be replaced")
-	assert.Contains(t, string(content), "Kata is the system of record for intent.")
+	assert.Contains(t, string(content), agentContractText)
 	assert.Contains(t, string(content), "# House rules", "content outside the markers must survive")
 	assert.Equal(t, 1, strings.Count(string(content), agentsBlockBegin))
 }
 
-// TestInit_WithAgents_BlockIncludesWorkflowConventions pins the distinction
-// between incomplete work, attention state, and delegation in the managed
-// briefing installed for agents.
-func TestInit_WithAgents_BlockIncludesWorkflowConventions(t *testing.T) {
+// TestInit_WithAgents_BlockEmbedsContract checks that the managed briefing
+// installed for agents is the canonical contract the hooks inject.
+func TestInit_WithAgents_BlockEmbedsContract(t *testing.T) {
 	env := testenv.New(t)
 	dir := t.TempDir()
 	runGit(t, dir, "init", "--quiet")
@@ -623,34 +622,6 @@ func TestInit_WithAgents_BlockIncludesWorkflowConventions(t *testing.T) {
 	require.NoError(t, err)
 	got := string(content)
 	require.Contains(t, got, agentsManagedBlock(), "managed guidance must embed the canonical contract verbatim")
-	assert.Contains(t, got, "Never `kata delete` or `kata purge` without explicit user authorization.")
-	assert.Contains(t, got, "kata meta set <ref> work.attention stuck|needs-human|ok")
-	assert.Contains(t, got, "kata close <ref> --done")
-	assert.Contains(t, got, "kata label add <ref> needs-review")
-	assert.Contains(t, got, "kata notify <ref> --to <actor>[/<teammate>] --message <reason>")
-	assert.Contains(t, got, "KATA_INBOX_USER=<actor>/<teammate>")
-}
-
-func TestInit_WithAgents_BlockIncludesScheduleDueAndSomedayConventions(t *testing.T) {
-	env := testenv.New(t)
-	dir := t.TempDir()
-	runGit(t, dir, "init", "--quiet")
-	runGit(t, dir, "remote", "add", "origin", "https://github.com/example/example-project.git")
-
-	flags.Mode = outputJSON
-	t.Cleanup(func() { flags.Mode = "" })
-
-	_, err := callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
-	require.NoError(t, err)
-
-	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
-	require.NoError(t, err)
-	got := string(content)
-	assert.Contains(t, got, "kata schedule <ref> <date-or-time>")
-	assert.Contains(t, got, "kata deadline <ref> <date-or-time>")
-	assert.Contains(t, got, "kata meta set <ref> someday true --json-value")
-	assert.Contains(t, got, "kata meta unset <ref> someday")
-	assert.Contains(t, got, "Reached schedules and deadlines use notify.*")
 }
 
 // oldAgentsBlockBody is the managed-block body kata shipped before the work.*
@@ -693,9 +664,8 @@ func TestInit_WithAgents_RefreshesPreWorkConventionsBlock(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
 	got := string(content)
-	assert.Contains(t, got, "Kata is the system of record for intent.",
+	assert.Contains(t, got, agentContractText,
 		"refresh must install the current intent workflow over an older block")
-	assert.Contains(t, got, "digraph kata {")
 	assert.Contains(t, got, "# House rules", "content before the markers must survive")
 	assert.Contains(t, got, "Keep this line.")
 	assert.Contains(t, got, "## Trailing section", "content after the markers must survive")
@@ -740,7 +710,7 @@ func TestInit_WithAgents_BeadsBlockInAgents_WritesSidecar(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(proposed), "Legacy notes.")
 	assert.Contains(t, string(proposed), agentsBlockBegin)
-	assert.Contains(t, string(proposed), "Kata is the system of record for intent.")
+	assert.Contains(t, string(proposed), agentContractText)
 	assert.NotContains(t, string(proposed), beadsBlockBeginPrefix)
 	assert.NotContains(t, string(proposed), beadsBlockEnd)
 

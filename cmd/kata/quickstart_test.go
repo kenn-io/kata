@@ -195,37 +195,10 @@ func TestQuickstart_ContractPrintsManagedWorkflowWithoutMarkers(t *testing.T) {
 	resetFlags(t)
 	out := string(executeRoot(t, newRootCmd(), "quickstart", "--format", "contract"))
 
-	assert.True(t, strings.HasPrefix(out, "Kata is the system of record for intent."))
-	assert.Contains(t, out, "Never `kata delete` or `kata purge` without explicit user authorization.")
-	assert.Contains(t, out, "~~~dot\ndigraph kata {")
-	assert.Contains(t, out, "}\n~~~\n")
-	assert.Contains(t, out, "kata meta set <ref> work.attention ok")
-	assert.Contains(t, out, "kata meta set <ref> work.branch <branch>")
-	assert.Contains(t, out, "kata create ... --meta work.branch=<branch> --idempotency-key <key>")
-	assert.Contains(t, out, "kata meta set <ref> work.attention stuck|needs-human|ok")
-	assert.Contains(t, out, `kata meta set <ref> work.attention_msg \"<why>\"`)
-	assert.Contains(t, out, "kata wait <refs> --until attention --any")
-	assert.Contains(t, out, ".issue.short_id")
-	assert.Contains(t, out, "kata close <ref> --done")
-	assert.Contains(t, out, "kata label add <ref> needs-review")
-	assert.Contains(t, out, "kata schedule <ref> <date-or-time>")
-	assert.Contains(t, out, "kata meta set <ref> someday true --json-value")
-	assert.Contains(t, out, "kata meta unset <ref> someday")
-	assert.Contains(t, out, "Schedule/someday defer work; deadlines don’t.")
-	assert.Contains(t, out, "Reached schedules and deadlines use notify.*")
-	assert.Contains(t, out, "KATA_TEAMMATE")
-	assert.Contains(t, out, "KATA_INBOX_USER=<actor>/<teammate>")
-	assert.Contains(t, out, "--parent <ref>")
-	assert.Equal(t, 1, strings.Count(out, "kata notify <ref> --to <actor>[/<teammate>] --message <reason>"),
-		"session injection should teach attention requests once")
-	assert.LessOrEqual(t, len(out), 4500, "keep the per-session briefing compact with actionable close and routing guidance")
-	assert.Contains(t, out, "Read requests: kata inbox --for <actor>[/<teammate>].")
-	assert.Contains(t, out, "kata inbox --for <actor>[/<teammate>] --all")
-	assert.Contains(t, out, "kata notify <ref> --to <actor>[/<teammate>] --clear")
-	assert.NotContains(t, out, "20z0", "a universal contract cannot use a project-scoped issue ref")
-	assert.NotContains(t, out, agentsBlockBegin)
-	assert.NotContains(t, out, agentsBlockEnd)
-	assert.NotContains(t, out, "# kata agent quickstart")
+	assert.Equal(t, agentContractText, out, "contract format prints the injected contract without markers or framing")
+	// Hooks inject this text into every session in a kata workspace. Keep it
+	// to the single-agent core; coordination detail belongs in kata quickstart.
+	assert.LessOrEqual(t, len(out), 2000, "keep the per-session contract compact")
 }
 
 // The contract is rendered into other projects' AGENTS.md files, so it must

@@ -34,7 +34,7 @@ func TestE2E_InitWithAgents_NewEmptyRepo(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(content), agentsBlockBegin)
 	assert.Contains(t, string(content), agentsBlockEnd)
-	assert.Contains(t, string(content), "Kata is the system of record for intent.")
+	assert.Contains(t, string(content), agentContractText)
 
 	// kata writes AGENTS.md only; it does not invent a CLAUDE.md.
 	assert.NoFileExists(t, filepath.Join(dir, "CLAUDE.md"))
@@ -48,7 +48,7 @@ func TestE2E_QuickstartContractDoesNotInitializeWorkspace(t *testing.T) {
 	out, err := runCLICapture(t, env, dir,
 		"quickstart", "--format", "contract", "--workspace", dir)
 	require.NoError(t, err)
-	assert.Contains(t, out, "Kata is the system of record for intent.")
+	assert.Contains(t, out, agentContractText)
 	assert.NoFileExists(t, filepath.Join(dir, ".kata.toml"))
 	assert.NoFileExists(t, filepath.Join(dir, "AGENTS.md"))
 	assert.NoDirExists(t, filepath.Join(dir, ".codex"))
@@ -85,7 +85,7 @@ func TestE2E_InitWithAgents_PreservesExistingAgentDocs(t *testing.T) {
 	assert.Contains(t, got, "Run `make build` before pushing.")
 	assert.Contains(t, got, "Tabs, not spaces.")
 	assert.Contains(t, got, agentsBlockBegin)
-	assert.Contains(t, got, "Kata is the system of record for intent.")
+	assert.Contains(t, got, agentContractText)
 }
 
 // TestE2E_InitWithAgents_ThenBeadsImport walks the realistic migration: a repo
@@ -121,5 +121,5 @@ func TestE2E_InitWithAgents_ThenBeadsImport(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "Legacy notes from the Beads era.")
 	assert.Contains(t, string(content), agentsBlockBegin)
-	assert.Contains(t, string(content), "Kata is the system of record for intent.")
+	assert.Contains(t, string(content), agentContractText)
 }
