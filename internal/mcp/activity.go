@@ -247,9 +247,12 @@ func (h toolHandlers) allReadyIssues(ctx context.Context, input NextInput) ([]Is
 	if err != nil {
 		return nil, err
 	}
-	projects, err := h.readProjects(ctx, input.Project)
-	if err != nil {
-		return nil, err
+	var projects []ProjectIdentity
+	if h.options.Scope.Mode() != ScopeAll || strings.TrimSpace(input.Project) != "" {
+		projects, err = h.readProjects(ctx, input.Project)
+		if err != nil {
+			return nil, err
+		}
 	}
 	issues := make([]IssueSummary, 0)
 	query := generated.ReadyIssuesQuery{

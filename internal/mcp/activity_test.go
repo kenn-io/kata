@@ -27,13 +27,14 @@ func TestNextPriorityAgainstDaemon(t *testing.T) {
 	require.NoError(t, err)
 	for _, scope := range []*Scope{bound, allowlist, NewAllScope()} {
 		t.Run(string(scope.Mode()), func(t *testing.T) {
-			var healthCalls, readyCalls atomic.Int32
+			var healthCalls, readyCalls, catalogCalls atomic.Int32
 			client := reviewClient(t, func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
 				case "/api/v1/health":
 					healthCalls.Add(1)
 					writeJSON(w, map[string]any{"ok": true, "api_schema_version": "0.41.0"})
 				case "/api/v1/projects":
+					catalogCalls.Add(1)
 					writeJSON(w, map[string]any{"projects": []any{
 						projectJSON(1, "01HAAAAAAAAAAAAAAAAAAAAAAA", "spoke-project"),
 						projectJSON(2, "01HBBBBBBBBBBBBBBBBBBBBBBB", "hub-project"),
@@ -71,6 +72,9 @@ func TestNextPriorityAgainstDaemon(t *testing.T) {
 				wantReady = 2
 			}
 			require.Equal(t, wantReady, readyCalls.Load())
+			if scope.Mode() == ScopeAll {
+				require.Zero(t, catalogCalls.Load())
+			}
 		})
 	}
 }
