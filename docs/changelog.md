@@ -106,6 +106,9 @@ All notable changes to kata, grouped by release. Versioned releases start with
   changes and move history retain complete replay, and link reconciliation
   keeps its existing scope.
 
+- Sync shared cron changes alongside issue updates without preparing unrelated
+  issue rows on SQLite hubs and spokes. Cron-only pushes also skip issue replay.
+
 - Pull shared cron updates faster on large SQLite spokes by replaying cron
   history without reconciling unrelated issues and their short IDs.
 
