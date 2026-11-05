@@ -72,8 +72,11 @@ func (a CronSQL) PruneRuns(ctx context.Context, in PruneCronRuns) (CronRunPruneR
 	err := a.transactProject(ctx, in.ProjectID, func(tx *sql.Tx) error {
 		// Reset retry-local results: serializable transactions can run again.
 		result = CronRunPruneResult{DryRun: in.DryRun, Before: in.Before, Keep: in.Keep, Groups: []CronRunPruneGroup{}}
-		if err := LockCronProject(ctx, tx, in.ProjectID); err != nil {
-			return err
+		// Fenced transactions already lock before checking their authority.
+		if !HasTransactionFence(ctx) {
+			if err := LockCronProject(ctx, tx, in.ProjectID); err != nil {
+				return err
+			}
 		}
 		project := Project{ID: in.ProjectID}
 		if err := tx.QueryRowContext(ctx, `SELECT uid,name,metadata FROM projects WHERE id=$1 AND deleted_at IS NULL AND name<>$2`, in.ProjectID, SystemProjectName).Scan(&project.UID, &project.Name, &project.Metadata); err != nil {

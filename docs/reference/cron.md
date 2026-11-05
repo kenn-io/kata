@@ -707,6 +707,11 @@ project or its authoritative hub; spokes and upstream-bound relays refuse
 both preview and deletion. JSON and agent modes return the same batch
 response. Human output shows one row per job or workflow.
 
+If stored pruning records are malformed or use an unsupported version, preview,
+deletion, and counts return HTTP 409 `cron_tally_invalid` without changing
+history. Upgrade Kata for newer records, or restore valid project metadata
+from backup before retrying.
+
 If the daemon returns HTTP 500 while refreshing the federation baseline,
 run deletion, tally accumulation, and the stream reset have already committed.
 Check `kata cron run counts` and preview the same prune window before retrying;

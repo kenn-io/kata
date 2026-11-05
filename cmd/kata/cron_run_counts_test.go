@@ -51,6 +51,9 @@ func TestCronRunCountsCLI(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(out), &empty))
 	require.NotNil(t, empty.Groups)
 	require.Empty(t, empty.Groups)
+	out, _, err = executeCronCLI(t, env.URL, nil, "run", "counts", "--workflow", id, "--json=false")
+	require.NoError(t, err)
+	require.Contains(t, out, "Workflow counts exclude job runs; use counts --job <uid> for job groups.")
 	for _, args := range [][]string{{"run", "counts", "--job", "bad"}, {"run", "counts", "--job", id, "--workflow", id}} {
 		_, _, err = executeCronCLI(t, env.URL, nil, args...)
 		require.Error(t, err)

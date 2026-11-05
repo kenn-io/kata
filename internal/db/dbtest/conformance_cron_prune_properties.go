@@ -133,19 +133,10 @@ func checkCronPruneEventModel(t *testing.T, s db.Storage) error {
 		original := pruneEvents(t.Context(), ht, s, p)
 		want := maps.Clone(original)
 		eventCount := len(want)
-		for id, e := range want {
-			var body struct {
-				UID string `json:"uid"`
-			}
-			require.NoError(ht, json.Unmarshal(e.Payload, &body))
-			if (e.Type == "cron.run.observed" || e.Type == "cron.run.snapshot") && body.UID == fmt.Sprintf("%026d", 100) {
-				delete(want, id)
-			}
-		}
-		if escaped {
-			// Keep the deterministic identity oracle independent of JSON decoding.
-			want = maps.Clone(original)
-			for _, i := range []int{0, 1, 4} {
+		// The fixture's four-row cycle identifies matches independently of the
+		// production JSON decoder, including the escaped fifth event.
+		for i := range count {
+			if i%4 == 0 || i%4 == 1 {
 				delete(want, fmt.Sprintf("%026d", 1000+i))
 			}
 		}

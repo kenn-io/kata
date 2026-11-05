@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"go.kenn.io/kata/internal/metadata"
-	"go.kenn.io/kata/internal/uid"
 )
 
 // CronTallyPrefix reserves project metadata for root-owned pruning evidence.
@@ -105,7 +104,7 @@ func cronTallyObject(raw jsontext.Value, required ...string) (map[string]jsontex
 
 func decodeCronTallyValue(key string, raw jsontext.Value) (CronTallyValue, error) {
 	groupUID := strings.TrimPrefix(key, CronTallyPrefix)
-	if !strings.HasPrefix(key, CronTallyPrefix) || !uid.Valid(groupUID) || groupUID != strings.ToUpper(groupUID) {
+	if !strings.HasPrefix(key, CronTallyPrefix) || !cronUID(groupUID) {
 		return CronTallyValue{}, cronTallyError("invalid reserved key %q", key)
 	}
 	fields, err := cronTallyObject(raw, "version", "groups")
@@ -240,7 +239,7 @@ func ValidateCronTallyEvent(event RemoteEvent) error {
 				// From null means prior absence; to null means whole-key deletion.
 				// Still validate the key when neither side supplies a value.
 				groupUID := strings.TrimPrefix(key, CronTallyPrefix)
-				if !uid.Valid(groupUID) || groupUID != strings.ToUpper(groupUID) {
+				if !cronUID(groupUID) {
 					return cronTallyError("invalid reserved key %q", key)
 				}
 				continue

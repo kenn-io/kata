@@ -63,7 +63,13 @@ Pruned counts start with the first contributing prune. Runs pruned again count a
 		if flags.Quiet {
 			return nil
 		}
-		return renderCronRunCounts(cmd.OutOrStdout(), result)
+		if err := renderCronRunCounts(cmd.OutOrStdout(), result); err != nil {
+			return err
+		}
+		if workflow != "" {
+			_, err = fmt.Fprintln(cmd.OutOrStdout(), "Workflow counts exclude job runs; use counts --job <uid> for job groups.")
+		}
+		return err
 	}}
 	command.Flags().StringVar(&job, "job", "", "select one job UID")
 	command.Flags().StringVar(&workflow, "workflow", "", "select one workflow UID")

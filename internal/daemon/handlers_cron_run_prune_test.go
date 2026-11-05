@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/cron"
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
@@ -212,4 +213,52 @@ func (s pruneAuthorityStore) PruneCronRuns(ctx context.Context, in db.PruneCronR
 		}
 	}
 	return s.Storage.PruneCronRuns(ctx, in)
+}
+
+// Contract: unreadable stored pruning evidence blocks both reads and writes
+// with an actionable conflict, preserving the stored evidence for recovery.
+func TestCronRunPruneUnreadableTallies(t *testing.T) {
+	for name, document := range map[string]string{
+		"newer-version": `{"cron.tally.01K00000000000000000000001":{"version":2,"groups":{}}}`,
+		"null":          `{"cron.tally.01K00000000000000000000001":null}`,
+		"lowercase-key": `{"cron.tally.01k00000000000000000000001":null}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			env, project, path := cronPruneHTTPFixture(t)
+			_, err := env.DB.ExecContext(t.Context(), `UPDATE projects SET metadata=$1 WHERE id=$2`, document, project.ID)
+			require.NoError(t, err)
+			before, err := env.DB.ProjectByID(t.Context(), project.ID)
+			require.NoError(t, err)
+			runs, err := env.DB.ListCronRuns(t.Context(), db.CronRunList{ProjectID: project.ID})
+			require.NoError(t, err)
+			cursor, err := env.DB.MaxEventID(t.Context())
+			require.NoError(t, err)
+			for _, operation := range []string{"preview", "prune", "counts"} {
+				t.Run(operation, func(t *testing.T) {
+					method, target := http.MethodPost, path
+					var body any = map[string]any{"actor": "operator", "before": time.Now().Add(-48 * time.Hour), "keep": 1, "dry_run": operation == "preview"}
+					if operation == "counts" {
+						method, target, body = http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/runs/counts", project.ID), nil
+					}
+					response, raw := envDoRaw(t, env, method, target, body, map[string]string{"X-Kata-Confirm": "PRUNE example-project cron runs"})
+					require.Equal(t, http.StatusConflict, response.StatusCode, string(raw))
+					var result api.ErrorEnvelope
+					require.NoError(t, json.Unmarshal(raw, &result))
+					require.Equal(t, "cron_tally_invalid", result.Error.Code)
+					require.Contains(t, result.Error.Message, "cron tally")
+					require.Contains(t, result.Error.Hint, "upgrade")
+					require.Contains(t, result.Error.Hint, "restore")
+					after, err := env.DB.ProjectByID(t.Context(), project.ID)
+					require.NoError(t, err)
+					require.Equal(t, before, after)
+					gotRuns, err := env.DB.ListCronRuns(t.Context(), db.CronRunList{ProjectID: project.ID})
+					require.NoError(t, err)
+					require.Equal(t, runs, gotRuns)
+					gotCursor, err := env.DB.MaxEventID(t.Context())
+					require.NoError(t, err)
+					require.Equal(t, cursor, gotCursor)
+				})
+			}
+		})
+	}
 }

@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-04
+last_edited: 2026-11-05
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -10,6 +10,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
 ## Unreleased
 
 - Search references faster in the web UI on large stores; a `q` search now returns only issue references.
+- Preview and remove old terminal cron run evidence with `kata cron run prune`,
+  and read retained and recorded pruning counts with `kata cron run counts`.
+  Export history first. Deletion requires `--force` and the exact confirmation,
+  runs on the owning hub, and makes replicas rebuild. Pruning records survive
+  backup and federation; they count deletion actions, including repeated pruning
+  of a restored run. See [run retention](reference/cron.md#run-retention).
 - Keep local writes responsive on relay hubs. Creating an issue or receiving an
   unrelated snapshot leaves downstream sync incremental unless it can change the
   reset decision. Handshakes and reset downloads check history without holding

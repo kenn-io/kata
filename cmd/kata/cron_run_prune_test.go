@@ -26,6 +26,8 @@ func TestCronRunPruneHumanReportsBatchWindowAndReplicaReset(t *testing.T) {
 }
 
 func TestCronPruneOlderThan(t *testing.T) {
+	// Keep the prune boundary cases even though digest shares conversion:
+	// prune must neither impose a tighter limit nor accept digest timestamps.
 	for value, expected := range map[string]time.Duration{"30d": 720 * time.Hour, "24h": 24 * time.Hour, "25h30m": 25*time.Hour + 30*time.Minute, "1d": 24 * time.Hour, "106751d": 106751 * 24 * time.Hour} {
 		d, err := parseCronPruneAge(value)
 		require.NoError(t, err)

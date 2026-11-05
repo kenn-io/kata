@@ -133,6 +133,8 @@ func TestDigest_ParseSinceUntil(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, now.Add(-36*time.Hour), got)
 
+	// Both bounds reach the day guard; the huge input instead overflows the
+	// duration parser. Keep that distinct parser failure alongside the bounds.
 	// Day conversion must reject overflow instead of wrapping the window.
 	for _, value := range []string{"106752d", "-106752d", "9223372036854775807d"} {
 		_, err := parseSinceUntil(value, now)

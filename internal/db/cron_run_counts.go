@@ -45,16 +45,9 @@ type CronRunCountsResult struct {
 	Groups []CronRunCountGroup `json:"groups"`
 }
 
-// CronCountsTransaction adds streaming queries to the authorization transaction.
-// Backends supply a pinned read snapshot.
-type CronCountsTransaction interface {
-	Transaction
-	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-}
-
 // ReadCronRunCounts reads metadata, projections and names through one pinned
 // backend snapshot. The caller owns transaction commit/isolation.
-func ReadCronRunCounts(ctx context.Context, tx CronCountsTransaction, in CronRunCountsQuery) (CronRunCountsResult, error) {
+func ReadCronRunCounts(ctx context.Context, tx cronEventQuery, in CronRunCountsQuery) (CronRunCountsResult, error) {
 	in.JobUID, in.WorkflowUID = strings.ToUpper(in.JobUID), strings.ToUpper(in.WorkflowUID)
 	if (in.JobUID != "" && !cronUID(in.JobUID)) || (in.WorkflowUID != "" && !cronUID(in.WorkflowUID)) || (in.JobUID != "" && in.WorkflowUID != "") {
 		return CronRunCountsResult{}, fmt.Errorf("%w: choose one valid job or workflow UID", cron.ErrInvalid)
