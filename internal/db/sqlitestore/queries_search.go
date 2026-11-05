@@ -23,7 +23,8 @@ func (d *Store) SearchFTS(ctx context.Context, p db.SearchFTSParams) ([]db.Searc
 
 // SearchFTSAny finds at least one query term in title and body documents only.
 // Look-alike checks score title and body overlap, so comments don't contribute
-// candidates, scores, or MatchedIn flags.
+// candidates, scores, or MatchedIn flags. A single OR match sums BM25 relevance
+// across query words for each issue.
 func (d *Store) SearchFTSAny(ctx context.Context, p db.SearchFTSParams) ([]db.SearchCandidate, error) {
 	return d.searchFTS(ctx, searchFTSReq{params: p, mode: searchAny})
 }
@@ -102,51 +103,57 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
 		filterArgs = append(filterArgs, stamp, stamp, r.params.After.ID)
 	}
 
-	// Match words as rows with a fixed statement shape and one JSON parameter.
-	words, err := json.Marshal(phrases)
-	if err != nil {
-		return nil, fmt.Errorf("search fts: %w", err)
-	}
 	order := "candidates.score DESC, i.id ASC"
 	pageOrder := "score DESC, doc_key ASC"
 	if r.params.StableOrder {
 		order = creationKeySQL("i") + " ASC, i.id ASC"
 		pageOrder = "(SELECT " + creationKeySQL("i") + " FROM issues i WHERE i.id = candidates.doc_key) ASC, doc_key ASC"
 	}
-	minimum := 1
-	if r.mode == searchAll {
-		minimum = len(phrases)
-	}
-	args := []any{string(words), r.params.ProjectID}
-	args = append(args, filterArgs...)
-	commentHits := ""
-	if r.mode == searchAll {
-		commentHits = fmt.Sprintf(`
-  UNION ALL
-  SELECT c.issue_id, terms.word, -bm25(comments_fts), 1
-  FROM terms CROSS JOIN comments_fts
-  CROSS JOIN comments c ON c.id = comments_fts.rowid
-  WHERE comments_fts MATCH terms.word AND EXISTS (
-   SELECT 1 FROM issues i WHERE i.id = c.issue_id AND i.project_id = ? %s
-  )`, rowFilter)
+	var candidates string
+	var args []any
+	if r.mode == searchAny {
+		candidates = fmt.Sprintf(`WITH candidates AS (
+  SELECT i.id AS doc_key, -bm25(issues_fts) AS score, 0 AS in_comments
+  FROM issues_fts
+  CROSS JOIN issues i ON i.id = issues_fts.rowid
+  WHERE issues_fts MATCH ? AND i.project_id = ? %s`, rowFilter)
+		args = append(args, colPhrase, r.params.ProjectID)
+		args = append(args, filterArgs...)
+	} else {
+		// Match words as rows with a fixed statement shape and one JSON parameter.
+		words, err := json.Marshal(phrases)
+		if err != nil {
+			return nil, fmt.Errorf("search fts: %w", err)
+		}
+		args = append(args, string(words), r.params.ProjectID)
+		args = append(args, filterArgs...)
 		args = append(args, r.params.ProjectID)
 		args = append(args, filterArgs...)
-	}
-	// Start from matching postings, then check issue eligibility before scoring.
-	query := fmt.Sprintf(`WITH terms AS (
+		args = append(args, len(phrases))
+		// Keep per-word aggregation across issue and comment documents for AND search.
+		candidates = fmt.Sprintf(`WITH terms AS (
   SELECT value AS word FROM json_each(?)
  ), hits AS MATERIALIZED (
   SELECT issues_fts.rowid AS issue_id, terms.word, -bm25(issues_fts) AS score, 0 AS in_comments
   FROM terms CROSS JOIN issues_fts
   WHERE issues_fts MATCH terms.word AND EXISTS (
    SELECT 1 FROM issues i WHERE i.id = issues_fts.rowid AND i.project_id = ? %s
-  )%s
+  )
+  UNION ALL
+  SELECT c.issue_id, terms.word, -bm25(comments_fts), 1
+  FROM terms CROSS JOIN comments_fts
+  CROSS JOIN comments c ON c.id = comments_fts.rowid
+  WHERE comments_fts MATCH terms.word AND EXISTS (
+   SELECT 1 FROM issues i WHERE i.id = c.issue_id AND i.project_id = ? %s
+  )
  ), word_hits AS (
   SELECT issue_id, word, max(score) AS score, max(in_comments) AS in_comments
   FROM hits GROUP BY issue_id, word
  ), candidates AS (
   SELECT issue_id AS doc_key, count(*) AS matched_words, sum(score) AS score, max(in_comments) AS in_comments
-  FROM word_hits GROUP BY issue_id HAVING count(*) >= ?
+  FROM word_hits GROUP BY issue_id HAVING count(*) >= ?`, rowFilter, rowFilter)
+	}
+	query := candidates + fmt.Sprintf(`
  ), page AS MATERIALIZED (
   SELECT * FROM candidates ORDER BY %s LIMIT ?
  )
@@ -158,8 +165,8 @@ func (d *Store) searchFTS(ctx context.Context, r searchFTSReq) ([]db.SearchCandi
  FROM page AS candidates
  JOIN issues i ON i.id = candidates.doc_key
  JOIN projects p ON p.id = i.project_id
- ORDER BY %s`, rowFilter, commentHits, pageOrder, order)
-	args = append(args, minimum, limit, colPhrase, colPhrase)
+ ORDER BY %s`, pageOrder, order)
+	args = append(args, limit, colPhrase, colPhrase)
 
 	rows, err := d.QueryContext(ctx, query, args...)
 	if err != nil {
