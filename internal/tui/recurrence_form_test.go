@@ -502,7 +502,10 @@ func TestSaveRecurrenceRequiresGuardedStartAPI(t *testing.T) {
 	})}
 	h.client = newConnectedUndoClient(t, NewClient(h.env.URL, hc))
 	_, err := h.client.SaveRecurrence(t.Context(), h.issue.ProjectID, h.issue.UID, RecurrenceInput{
-		Terms:         recurrenceclient.Terms{Rule: "FREQ=DAILY", Start: "2026-11-09", Zone: "Europe/Paris", Actor: "alice"},
+		Rule:          "FREQ=DAILY",
+		Start:         "2026-11-09",
+		Zone:          "Europe/Paris",
+		Actor:         "alice",
 		IssueRevision: h.issue.Revision,
 	})
 	require.Error(t, err)
