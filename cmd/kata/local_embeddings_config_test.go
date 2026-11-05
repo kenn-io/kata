@@ -69,7 +69,7 @@ func TestLocalEmbeddingsTOMLLayouts(t *testing.T) {
 	for _, body := range []string{
 		"[search.embeddings]\nlocal=true\nfingerprint_salt='manual-reindex'\n",
 		"\ufeff[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='nomic-embed-text'\n",
-		"[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1' # endpoint comment\nmodel='nomic-embed-text'\n",
+		"[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1' # endpoint comment\nmodel='nomic-embed-text'\napi_key='example-key'\napi_key_file='/example/embedding.key'\napi_key_env='EXAMPLE_EMBEDDING_KEY'\n",
 		"[search . embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='nomic-embed-text'\n",
 		"[search.\"embeddings\"]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='nomic-embed-text'\n",
 		"[search]\nembeddings={base_url='http://127.0.0.1:11434/v1',model='nomic-embed-text'}\n",
@@ -92,6 +92,9 @@ func TestLocalEmbeddingsTOMLLayouts(t *testing.T) {
 			require.True(t, next.Embeddings.Local)
 			require.Empty(t, next.Embeddings.BaseURL)
 			require.Equal(t, current.Embeddings.FingerprintSalt, next.Embeddings.FingerprintSalt)
+			require.Equal(t, current.Embeddings.APIKey, next.Embeddings.APIKey)
+			require.Equal(t, current.Embeddings.APIKeyFile, next.Embeddings.APIKeyFile)
+			require.Equal(t, current.Embeddings.APIKeyEnv, next.Embeddings.APIKeyEnv)
 			require.Equal(t, strings.HasPrefix(text, "\ufeff"), strings.HasPrefix(string(result), "\ufeff"))
 			again, err := localEmbeddingsConfig(result, next.Embeddings, "")
 			require.NoError(t, err)
