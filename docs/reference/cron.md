@@ -712,11 +712,13 @@ deletion, and counts return HTTP 409 `cron_tally_invalid` without changing
 history. Upgrade Kata for newer records, or restore valid project metadata
 from backup before retrying.
 
-If the daemon returns HTTP 500 while refreshing the federation baseline,
-run deletion, tally accumulation, and the stream reset have already committed.
-Check `kata cron run counts` and preview the same prune window before retrying;
-a retry can delete another eligible batch. An empty retry does not refresh
-the baseline. Subsequent federation metadata reads refresh it lazily.
+If the daemon returns HTTP 500 `cron_prune_refresh_failed`, run deletion,
+tally accumulation, and the stream reset have already committed; the error
+data carries that batch's `pruned`, `events_deleted`, and
+`reset_after_event_id`. Check `kata cron run counts` and preview the same prune
+window before retrying; a retry can delete another eligible batch. An empty
+retry does not refresh the baseline. Subsequent federation metadata reads
+refresh it lazily.
 
 The batch limit bounds deleted runs, not query work. Preview and deletion may
 scan all project runs and run events within a 30-second transaction deadline.

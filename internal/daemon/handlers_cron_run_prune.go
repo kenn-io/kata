@@ -46,7 +46,7 @@ func registerCronRunPruneHandler(h huma.API, cfg ServerConfig) {
 		if result.ResetAfterEventID > 0 {
 			cfg.Publish().Reset(project.ID, result.ResetAfterEventID)
 			if err := refreshFederationBaselineAfterReset(ctx, cfg, project.ID, actor); err != nil {
-				return nil, internalAPIError(err)
+				return nil, api.NewError(500, "cron_prune_refresh_failed", "cron run prune committed; federation baseline refresh failed: "+err.Error(), "check kata cron run counts and preview the same window before retrying; a retry can delete another batch", map[string]any{"pruned": result.Pruned, "events_deleted": result.EventsDeleted, "reset_after_event_id": result.ResetAfterEventID})
 			}
 		}
 		return &api.PruneCronRunsResponse{Body: result}, nil

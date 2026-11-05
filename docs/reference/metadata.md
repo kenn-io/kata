@@ -54,7 +54,6 @@ rejected. Everything else is stored verbatim.
 | `checklist` | Issue | Checklist structure |
 | `timezone` | Issue | IANA timezone name |
 | `area` | Project | String |
-| `cron.tally.<group_uid>` | Project | Version-1 absolute run-pruning tally |
 
 `cron.tally.` is reserved for daemon-managed pruning totals. Generic project
 metadata PATCH requests cannot set or remove these keys. Read recorded totals

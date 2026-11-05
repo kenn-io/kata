@@ -102,6 +102,16 @@ func TestCronRunPruneRefreshFailure(t *testing.T) {
 	reset, err := env.DB.PurgeResetCheck(t.Context(), before, project.ID)
 	require.NoError(t, err)
 	require.Greater(t, reset, before)
+	// The caller must learn the batch committed, so a retry is not blind.
+	var failure api.ErrorEnvelope
+	require.NoError(t, json.Unmarshal(raw, &failure))
+	require.Equal(t, "cron_prune_refresh_failed", failure.Error.Code)
+	require.Contains(t, failure.Error.Message, "committed")
+	require.Contains(t, failure.Error.Message, "baseline unavailable")
+	require.Contains(t, failure.Error.Hint, "kata cron run counts")
+	require.EqualValues(t, 1, failure.Error.Data["pruned"])
+	require.Positive(t, failure.Error.Data["events_deleted"])
+	require.EqualValues(t, reset, failure.Error.Data["reset_after_event_id"])
 	select {
 	case message := <-sub.Ch:
 		require.Equal(t, daemon.StreamKindEvent, message.Kind)
