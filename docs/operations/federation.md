@@ -2411,12 +2411,7 @@ On unreleased main, spokes and relays default local adapter execution to
 `none`, including disabled bindings. Reading company definitions does not opt
 this daemon into running them. After upgrading the daemon, choose `owned` or
 `all` in its local `[cron]` configuration and restart it before resuming local
-adapter execution. Under `owned`, the upstream member must have created each
-executed job and workflow and, when its current definition event is present,
-written its current version. A definition received in a federation baseline
-snapshot is judged by its creator alone because the snapshot omits its last
-editor. A member re-saves a definition a colleague edited to regain eligibility
-under `owned`.
+adapter execution. `owned` runs only jobs and workflows whose stored creator is this replica's member actor; the creator is preserved across edits, so a colleague's edit on the hub does not change eligibility.
 See the [replica execution contract](../reference/cron.md#adapter-responsibilities)
 for ownership, admission, and project-name matching. Native notify delivery
 remains on the owning hub.

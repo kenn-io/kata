@@ -70,11 +70,7 @@ func checkCronExecution(ctx context.Context, cfg ServerConfig, project db.Projec
 			strings.EqualFold(*in.Body.DefinitionEventUID, job.DefinitionEventUID) &&
 			job.Definition.Version == 1 && job.Definition.Action.Kind == "notify"
 		if !notify {
-			eligible, err := cronDefinitionEligible(ctx, cfg.DB, project.ID, policy, job.CronDefinition)
-			if err != nil {
-				return err
-			}
-			if !eligible {
+			if !executionEligible(config.CronExecuteMode(policy.Mode), policy.MemberActor, job.Author) {
 				return cronExecutionRefusal(policy, "job", id)
 			}
 			if job.Definition.Action.WorkflowUID != "" {
@@ -93,32 +89,13 @@ func checkCronExecution(ctx context.Context, cfg ServerConfig, project db.Projec
 		if readErr != nil {
 			return readErr
 		}
-		eligible, err := cronDefinitionEligible(ctx, cfg.DB, project.ID, policy, workflow.CronDefinition)
-		if err != nil {
-			return err
-		}
-		if !eligible {
+		if !executionEligible(config.CronExecuteMode(policy.Mode), policy.MemberActor, workflow.Author) {
 			return cronExecutionRefusal(policy, "workflow", id)
 		}
 	}
-	// Policy uses check-time binding, authorship, and definition events.
+	// Policy uses check-time binding and authorship.
 	// This cooperative admission check is not a transaction authorization fence.
 	return nil
-}
-
-func cronDefinitionEligible(ctx context.Context, store db.Storage, projectID int64, policy api.CronExecutionPolicy, definition db.CronDefinition) (bool, error) {
-	if !executionEligible(config.CronExecuteMode(policy.Mode), policy.MemberActor, definition.Author) {
-		return false, nil
-	}
-	events, err := store.EventsByUIDs(ctx, projectID, []string{definition.DefinitionEventUID})
-	if errors.Is(err, db.ErrNotFound) {
-		// Federation baselines retain the creator but omit the current editor.
-		return true, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return events[0].Actor == policy.MemberActor, nil
 }
 
 // executionEligible compares exact upstream member identities.

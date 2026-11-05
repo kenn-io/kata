@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-04
+last_edited: 2026-11-05
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -16,6 +16,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
   the local policy, and new excluded run observations return
   `403 cron_execution_not_enabled`. Adapters must admit a
   fresh run before launch; existing-run updates and replicated ingest continue.
+  `owned` runs only jobs and workflows whose stored creator is this replica's member actor; the creator is preserved across edits, so a colleague's edit on the hub does not change eligibility.
   See the [adapter contract](reference/cron.md#adapter-responsibilities).
 - Search references faster in the web UI on large stores; a `q` search now returns only issue references.
 - Keep local writes responsive on relay hubs. Creating an issue or receiving an

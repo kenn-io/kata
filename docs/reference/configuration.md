@@ -1488,7 +1488,7 @@ execute = "owned"
 ```
 
 `replica_execute` defaults to `none`; both mode fields accept `none`, `owned`
-or `all`. `owned` runs only jobs and workflows created by this replica's member actor whose current definition that actor also wrote; a definition received in a federation baseline snapshot, which does not record its last editor, is judged by its creator alone.
+or `all`. `owned` runs only jobs and workflows whose stored creator is this replica's member actor; the creator is preserved across edits, so a colleague's edit on the hub does not change eligibility.
 Each override needs a unique, valid local project name and an explicit
 `execute` mode. Names match exactly as stored, including leading or trailing
 spaces. Unknown names warn at startup and may match a later join. Overrides

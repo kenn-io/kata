@@ -648,7 +648,7 @@ execute = "owned"
 | Mode | Eligible execution on this replica |
 | --- | --- |
 | `none` | No execute jobs or workflows. |
-| `owned` | Jobs and workflows created by the nonblank member actor, with current definitions that actor wrote. Baseline snapshots use creator alone. |
+| `owned` | Jobs and workflows created by the nonblank member actor. |
 | `all` | Every execute job and workflow, subject to the adapter's own activation. |
 
 Local and hub-role projects always use `all`. Overrides match the exact current
@@ -667,8 +667,7 @@ is exempt from the job execution rule; a notify job with a workflow reference
 must still satisfy the workflow rule. A non-current job definition reference
 counts as execution.
 
-`owned` runs only jobs and workflows created by this replica's member actor whose current definition that actor also wrote; a definition received in a federation baseline snapshot, which does not record its last editor, is judged by its creator alone.
-A member re-saves a definition a colleague edited to regain eligibility under `owned`.
+`owned` runs only jobs and workflows whose stored creator is this replica's member actor; the creator is preserved across edits, so a colleague's edit on the hub does not change eligibility.
 A missing job or workflow passes through to the store's reference validation.
 
 Before launch, submit a `running` observation with a fresh run UID and require
@@ -676,8 +675,8 @@ success. The local observe route rejects new excluded runs with
 `403 cron_execution_not_enabled`; its error includes `mode`, `member_actor`
 and an opt-in hint. A failed admission must prevent launch. Existing or
 replicated run UIDs may still accept evidence updates; success on such an
-update never authorizes another execution. Policy uses the current binding,
-author, and definition event at check time; federation adoption can change author between checks.
+update never authorizes another execution. Policy uses the current binding
+and stored creator at check time; federation adoption can change the stored creator between checks.
 This cooperative adapter contract does not control an external process or a
 writer sending observations directly to the owning hub. Older adapters that
 launch before reporting must be updated to honor it.
