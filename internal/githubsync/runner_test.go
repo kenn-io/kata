@@ -2103,11 +2103,13 @@ func TestRunnerUnsupportedPendingParentBackfillKeepsIncrementalREST(t *testing.T
 
 func TestRunnerCommentWindowsAndFallbacks(t *testing.T) {
 	for _, tc := range []struct {
-		name                                             string
-		cursor, cutoff, mapped, incomplete, large, fresh bool
-		wantRepository, wantIssue, prComments            int
+		name                                                             string
+		cursor, cutoff, mapped, incomplete, large, fresh, missingCreated bool
+		wantRepository, wantIssue, prComments                            int
 	}{
 		{name: "small first sync", wantRepository: 1},
+		{name: "unknown creation filtered first sync", cutoff: true, missingCreated: true, wantIssue: 1},
+		{name: "unknown creation incremental", cursor: true, missingCreated: true, wantRepository: 1},
 		{name: "PR-heavy first sync", prComments: 1001, wantIssue: 1},
 		{name: "PR-heavy filtered first sync", cutoff: true, fresh: true, prComments: 1001, wantIssue: 1},
 		{name: "PR-heavy incremental", cursor: true, mapped: true, prComments: 1001, wantRepository: 1},
@@ -2151,6 +2153,9 @@ func TestRunnerCommentWindowsAndFallbacks(t *testing.T) {
 			}
 			issue.UpdatedAt = new(h.now)
 			issue.Comments = 1
+			if tc.missingCreated {
+				issue.CreatedAt = nil
+			}
 			h.fetcher.issues = []Issue{issue}
 			if tc.large || tc.prComments > 0 {
 				h.fetcher.parentMap = map[int]int64{}

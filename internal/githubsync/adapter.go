@@ -266,7 +266,7 @@ func (r *adapter) fetchComments(ctx context.Context, fetcher Fetcher, binding db
 			continue
 		}
 		commented = append(commented, issue)
-		if window != nil && issue.CreatedAt.Before(*window) {
+		if window != nil && (issue.CreatedAt == nil || issue.CreatedAt.Before(*window)) {
 			older = append(older, issue)
 		}
 	}
@@ -300,7 +300,7 @@ func (r *adapter) fetchComments(ctx context.Context, fetcher Fetcher, binding db
 	// Without a cursor, PR comments can make the repository feed more
 	// expensive than individual reads, or push it to the truncation limit.
 	repositoryPages := (totalComments + 99) / 100
-	if binding.LastCursorAt == nil && (repositoryPages >= 300 || repositoryPages > individualPages) {
+	if binding.LastCursorAt == nil && (repositoryPages >= repositoryCommentsPageLimit || repositoryPages > individualPages) {
 		individual = append(individual, windowed...)
 		windowed = nil
 	}
