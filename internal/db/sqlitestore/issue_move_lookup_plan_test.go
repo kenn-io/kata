@@ -80,11 +80,7 @@ func TestMovedIssueLookupUsesIssueHistoryIndex(t *testing.T) {
 				}
 				if strings.Contains(captured.query, "sync.reset_required") {
 					resetPlans++
-					resetIndex := "idx_events_project"
-					if ref == issue.UID {
-						resetIndex = "idx_events_issue_uid"
-					}
-					require.Contains(t, joined, "INDEX "+resetIndex, "reset references must use an event index: %s", joined)
+					require.Contains(t, joined, "INDEX idx_events_reset_from", "reset references must use an event index: %s", joined)
 				}
 			}
 			require.Positive(t, movePlans, "expected to inspect the move-history lookup plan")

@@ -95,7 +95,7 @@ func TestMovedIssueLookupUsesIssueHistoryIndexes(t *testing.T) {
 				}
 				if strings.Contains(captured.query, "sync.reset_required") {
 					resetPlans++
-					require.Contains(t, joined, "idx_events_issue_uid on events reset",
+					require.Contains(t, joined, "idx_events_reset_from on events reset",
 						"reset references must use an event index: %s", joined)
 				}
 			}

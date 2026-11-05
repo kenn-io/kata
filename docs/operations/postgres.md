@@ -139,6 +139,11 @@ and imports while the migration reads `events` and builds the index. See the
 [schema 43 migration requirements](../development/postgres-migrations.md#schema-43-resolved-issue-history-index)
 for the offline window, grants, and rollback.
 
+Schema 44 indexes receiver-local reset references for former issue IDs. Stop
+daemons and imports while the migration scans the event table and builds the
+index. See the [schema 44 migration requirements](../development/postgres-migrations.md#schema-44-reset-reference-lookup-index)
+for the offline window, grants, and rollback.
+
 After preparation, grant the runtime role DML access and set default privileges
 for objects created by future migrations:
 

@@ -17,12 +17,12 @@ func dropLaterMigrationIndexes(ctx context.Context, t *testing.T, admin *sql.DB,
 	t.Helper()
 	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %s.idx_comments_uid_handle`, schema)) // #nosec G201 -- Fixed test schema.
 	require.NoError(t, err)
-	dropIssueCreatedOrderIndexes(ctx, t, admin, schema)
+	dropIssueCreatedAndEventIndexes(ctx, t, admin, schema)
 }
 
-func dropIssueCreatedOrderIndexes(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
+func dropIssueCreatedAndEventIndexes(ctx context.Context, t *testing.T, admin *sql.DB, schema string) {
 	t.Helper()
-	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %s.idx_issues_project_created; DROP INDEX IF EXISTS %s.idx_issues_created; DROP INDEX IF EXISTS %s.idx_events_resolved_issue_uid`, schema, schema, schema)) // #nosec G201 -- Fixed test schema.
+	_, err := admin.ExecContext(ctx, fmt.Sprintf(`DROP INDEX IF EXISTS %s.idx_issues_project_created; DROP INDEX IF EXISTS %s.idx_issues_created; DROP INDEX IF EXISTS %s.idx_events_resolved_issue_uid; DROP INDEX IF EXISTS %s.idx_events_reset_from`, schema, schema, schema, schema)) // #nosec G201 -- Fixed test schema.
 	require.NoError(t, err)
 }
 
