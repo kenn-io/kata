@@ -681,8 +681,8 @@ endpoints published in OpenAPI:
 - `GET /api/v1/ui/references` returns bounded projects, owners, labels, and
   qualified issue references for pickers and typeahead. A `q` search returns
   only issue references, with empty projects, owners, and labels. Repeating
-  `issue_uid` hydrates summaries for up to 200 stable issue UIDs and composes with the
-  existing project and text filters.
+  `issue_uid` hydrates summaries for up to 200 stable issue UIDs and composes
+  with the existing project and text filters.
 - `GET /api/v1/ui/launch-target?issue_uid=<uid>` validates one active issue and
   returns a safe absolute route into the standalone browser application:
 
