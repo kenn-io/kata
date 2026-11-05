@@ -48,13 +48,17 @@ for unattended setup. It restarts a running daemon, which embeds existing
 issues in the background. A stopped daemon picks up the setting on its next
 start. Watch progress with `kata health --json`.
 
+If the shared files are already installed, a fresh home enables them without
+a prompt. Switching an existing provider still asks before starting the server.
+
 Switching from Ollama's 768-dimensional `nomic-embed-text` keeps your index and
 federation recipe. Smaller widths are kept only with `request_dimensions = true`.
 Other recipes rebuild the index after a warning. If this daemon shares
 embeddings, replicas need the same recipe before they can reuse its vectors.
 
-The command preserves config comments and unrelated formatting. It checks that
-running daemons support restart before writing, then waits for them to restart.
+The command keeps comments and preserves formatting outside the rewritten
+settings. It checks that running daemons support restart before writing, then
+waits for them to restart.
 Run it again to retry a failed restart. Older Kata releases reject the `local`
 config key; use the updated binary after enabling it.
 
@@ -67,7 +71,8 @@ config key; use the updated binary after enabling it.
    ollama pull nomic-embed-text
    ```
 
-2. Add a `[search.embeddings]` block to `<KATA_HOME>/config.toml`:
+2. Add a `[search.embeddings]` block to `<KATA_HOME>/config.toml`, or replace
+   the existing block, removing `local = true`:
 
    ```toml
    [search.embeddings]

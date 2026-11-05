@@ -135,21 +135,6 @@ func TestLocalEmbeddingsSetupRefusesChangedConfig(t *testing.T) {
 	}
 }
 
-func TestLocalEmbeddingsDaemonRefusesDownload(t *testing.T) {
-	oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
-	t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
-	localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) { return "", embedlocal.ErrNotFound }
-	localEmbeddingsInstall = func(ctx context.Context, opts embedlocal.InstallOptions) (embedlocal.Installation, error) {
-		yes, err := opts.Confirm(ctx, 290_000_000)
-		require.False(t, yes)
-		return embedlocal.Installation{}, err
-	}
-	client, _, err := preflightEmbeddingStartup(config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text"}, filepath.Join(t.TempDir(), "kata.db"))
-	require.NoError(t, err)
-	_, err = client.Embed(t.Context(), []string{"hello"})
-	require.ErrorContains(t, err, "kata daemon local-embeddings")
-}
-
 func TestLocalEmbeddingsRecipeOffline(t *testing.T) {
 	home := setupKataEnv(t)
 	require.NoError(t, os.WriteFile(filepath.Join(home, "config.toml"), []byte("[search.embeddings]\nlocal = true\n"), 0600))
@@ -166,6 +151,47 @@ func TestLocalEmbeddingsRecipeOffline(t *testing.T) {
 	out, stderr, err := executeRootCapture(t, t.Context(), "federation", "embedding-recipe")
 	require.NoError(t, err, stderr)
 	require.Contains(t, out, `"model":"nomic-embed-text"`)
+}
+
+func TestLocalEmbeddingsDaemonRefusesDownload(t *testing.T) {
+	home := setupKataEnv(t)
+	store := openKataTestDB(t, filepath.Join(home, "kata.db"))
+	t.Cleanup(func() { require.NoError(t, store.Close()) })
+	project, err := store.CreateProject(t.Context(), "example-project")
+	require.NoError(t, err)
+	_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "login crash", Author: "agent"})
+	require.NoError(t, err)
+	oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
+	t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
+	localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) { return "", embedlocal.ErrNotFound }
+	localEmbeddingsInstall = func(ctx context.Context, opts embedlocal.InstallOptions) (embedlocal.Installation, error) {
+		approved, err := opts.Confirm(ctx, 290_000_000)
+		require.False(t, approved)
+		return embedlocal.Installation{}, err
+	}
+	ec := config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text"}
+	client, _, err := preflightEmbeddingStartup(ec, filepath.Join(home, "kata.db"))
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	workers := newDaemonWorkerGroup()
+	_, idx, health, _, err := startEmbeddingReconciler(ctx, workers, nil, ec, client, filepath.Join(home, "vectors.db"), store, daemon.NewEventBroadcaster(), log.New(io.Discard, "", 0))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		cancel()
+		require.True(t, workers.Wait(context.WithoutCancel(t.Context())))
+		require.NoError(t, idx.Close())
+	})
+	//nolint:kennlint // sleeptest: observe the asynchronous backfill failure.
+	require.Eventually(t, func() bool { return health().LastError != "" }, 10*time.Second, 10*time.Millisecond)
+	require.Contains(t, health().LastError, "kata daemon local-embeddings")
+	server := daemon.NewServer(daemon.ServerConfig{DB: store, Embedder: client, ReconcilerHealth: health})
+	t.Cleanup(func() { require.NoError(t, server.Close()) })
+	httpServer := httptest.NewServer(server.Handler())
+	t.Cleanup(httpServer.Close)
+	out, stderr, err := executeRootCapture(t, contextWithBaseURL(t.Context(), httpServer.URL), "health", "--json")
+	require.NoError(t, err, stderr)
+	require.Contains(t, out, `"error_present":true`)
+	require.Contains(t, out, `"backlog":1`)
 }
 
 func TestLocalEmbeddingsSwitchKeepsIndex(t *testing.T) {
@@ -289,24 +315,39 @@ func TestLocalEmbeddingsSwitchKeepsIndex(t *testing.T) {
 }
 
 func TestLocalEmbeddingsRebuildRefusal(t *testing.T) {
-	home := setupKataEnv(t)
-	t.Setenv("KATA_SERVER", "")
-	path := filepath.Join(home, "config.toml")
-	original := []byte("[search.embeddings]\nbase_url = 'http://127.0.0.1:11434/v1'\nmodel = 'mxbai-embed-large'\n")
-	require.NoError(t, os.WriteFile(path, original, 0600))
-	oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
-	t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
-	localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) { return "", embedlocal.ErrNotFound }
-	localEmbeddingsInstall = func(ctx context.Context, opts embedlocal.InstallOptions) (embedlocal.Installation, error) {
-		approved, err := opts.Confirm(ctx, 290_000_000)
-		require.False(t, approved)
-		return embedlocal.Installation{}, err
+	for _, installed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("installed=%t", installed), func(t *testing.T) {
+			home := setupKataEnv(t)
+			t.Setenv("KATA_SERVER", "")
+			path := filepath.Join(home, "config.toml")
+			original := []byte("[search.embeddings]\nbase_url = 'http://127.0.0.1:11434/v1'\nmodel = 'mxbai-embed-large'\n")
+			require.NoError(t, os.WriteFile(path, original, 0600))
+			oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
+			t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
+			starts := 0
+			localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
+				if opts.Executable == "" {
+					return "", embedlocal.ErrNotFound
+				}
+				starts++
+				return "http://127.0.0.1:12345/v1", nil
+			}
+			localEmbeddingsInstall = func(ctx context.Context, opts embedlocal.InstallOptions) (embedlocal.Installation, error) {
+				if !installed {
+					approved, err := opts.Confirm(ctx, 290_000_000)
+					require.False(t, approved)
+					return embedlocal.Installation{}, err
+				}
+				return embedlocal.Installation{Executable: "/example/kennembed"}, nil
+			}
+			_, stderr, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings")
+			require.ErrorContains(t, err, "no TTY")
+			require.Zero(t, starts, "server must not start before the switch is approved")
+			require.Contains(t, stderr, "index will be rebuilt")
+			require.Contains(t, stderr, "replicas need the same recipe")
+			got, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME or a test fixture
+			require.NoError(t, err)
+			require.Equal(t, original, got)
+		})
 	}
-	_, stderr, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings")
-	require.ErrorContains(t, err, "no TTY")
-	require.Contains(t, stderr, "index will be rebuilt")
-	require.Contains(t, stderr, "replicas need the same recipe")
-	got, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME or a test fixture
-	require.NoError(t, err)
-	require.Equal(t, original, got)
 }

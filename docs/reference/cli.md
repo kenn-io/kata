@@ -1886,12 +1886,17 @@ options and persist through later restarts. `kata daemon stop` followed by
 `KATA_HOME` and rejects `--daemon`. It shows the missing download size, about
 290 MB on a fresh install, and asks before downloading files shared by all
 Kenn apps. Use `--yes` without a terminal. It keeps compatible Nomic vectors,
-config comments, and unrelated formatting. Widths below 768 are
-kept only with `request_dimensions = true`. Other recipes get a rebuild warning.
+config comments, and formatting outside the rewritten settings. Widths below
+768 are kept only with `request_dimensions = true`. Other recipes get a rebuild warning.
 If this daemon shares embeddings, replicas need the same recipe before they
 can reuse its vectors. Running daemons must support restart before the command
 writes the config. It waits for every restart; rerun the command to retry a
 failed restart. Older Kata releases reject the `local` config key.
+
+When the shared files are already installed, a fresh home needs no prompt;
+switching an existing provider still asks before starting the server. To return
+to Ollama, remove `local = true`, set `base_url` and `model` in
+`[search.embeddings]`, and run `kata daemon restart`.
 
 The result includes `index`, one of `new`, `kept`, or `rebuilt`, and `progress`,
 the command `kata health --json` for watching indexing progress. JSON and agent

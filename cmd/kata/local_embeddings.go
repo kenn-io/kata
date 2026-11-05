@@ -27,15 +27,19 @@ func resolveLocalEmbeddings(ctx context.Context, confirm func(context.Context, i
 	if !errors.Is(err, embedlocal.ErrNotFound) {
 		return endpoint, err
 	}
-	dir, err := embedlocal.DefaultDir()
-	if err != nil {
-		return "", err
-	}
-	installed, err := localEmbeddingsInstall(ctx, embedlocal.InstallOptions{DataDir: dir, Confirm: confirm})
+	installed, err := installLocalEmbeddings(ctx, confirm)
 	if err != nil {
 		return "", err
 	}
 	return localEmbeddingsEndpoint(ctx, embedlocal.Options{SkipOllama: true, Executable: installed.Executable})
+}
+
+func installLocalEmbeddings(ctx context.Context, confirm func(context.Context, int64) (bool, error)) (embedlocal.Installation, error) {
+	dir, err := embedlocal.DefaultDir()
+	if err != nil {
+		return embedlocal.Installation{}, err
+	}
+	return localEmbeddingsInstall(ctx, embedlocal.InstallOptions{DataDir: dir, Confirm: confirm})
 }
 
 func daemonLocalEmbeddingsCmd() *cobra.Command {
@@ -114,11 +118,21 @@ func daemonLocalEmbeddingsCmd() *cobra.Command {
 			confirmed = true
 			return true, nil
 		}
-		if _, err := resolveLocalEmbeddings(cmd.Context(), confirm); err != nil {
+		_, err = localEmbeddingsEndpoint(cmd.Context(), embedlocal.Options{SkipOllama: true})
+		var installed embedlocal.Installation
+		if errors.Is(err, embedlocal.ErrNotFound) {
+			installed, err = installLocalEmbeddings(cmd.Context(), confirm)
+		}
+		if err != nil {
 			return err
 		}
 		if !confirmed && before != nil && !current.Embeddings.Local {
 			if _, err := confirm(cmd.Context(), 0); err != nil {
+				return err
+			}
+		}
+		if installed.Executable != "" {
+			if _, err := localEmbeddingsEndpoint(cmd.Context(), embedlocal.Options{SkipOllama: true, Executable: installed.Executable}); err != nil {
 				return err
 			}
 		}
