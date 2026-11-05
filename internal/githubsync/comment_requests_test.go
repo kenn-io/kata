@@ -42,8 +42,8 @@ func TestRunnerCommentRequestCounts(t *testing.T) {
 				for range issue.Comments {
 					id := int64(len(comments) + 1)
 					comments = append(comments, commentRow{
-						Comment:   Comment{ID: id, NodeID: fmt.Sprintf("C_%d", id), Body: fmt.Sprintf("comment %d", id), User: &User{Login: "commenter"}, CreatedAt: new(old), IssueURL: fmt.Sprintf("https://api.github.com/repos/example-owner/example-repo/issues/%d", number)},
-						UpdatedAt: old,
+						ID: id, NodeID: fmt.Sprintf("C_%d", id), Body: fmt.Sprintf("comment %d", id), User: &User{Login: "commenter"}, CreatedAt: new(old),
+						IssueURL: fmt.Sprintf("https://api.github.com/repos/example-owner/example-repo/issues/%d", number), UpdatedAt: old,
 					})
 				}
 			}
@@ -114,7 +114,7 @@ func TestRunnerCommentRequestCounts(t *testing.T) {
 				if stage == "new comment" {
 					issues[0].UpdatedAt = new(h.now)
 					issues[0].Comments++
-					comments = append(comments, commentRow{Comment: Comment{ID: 99999, NodeID: "C_new", Body: "new comment", User: &User{Login: "commenter"}, CreatedAt: new(h.now), IssueURL: comments[0].IssueURL}, UpdatedAt: h.now})
+					comments = append(comments, commentRow{ID: 99999, NodeID: "C_new", Body: "new comment", User: &User{Login: "commenter"}, CreatedAt: new(h.now), IssueURL: comments[0].IssueURL, UpdatedAt: h.now})
 				}
 				result, err := h.runner.RunOnce(h.ctx, h.binding.ID)
 				require.NoError(t, err)
