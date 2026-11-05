@@ -248,7 +248,7 @@ func (m Model) cronLoaded(msg cronLoadedMsg) Model {
 		}
 	}
 	m = m.cronRemember(append(remembered, retained...))
-	m = m.cronSettleChanged(data).cronMarkOpenSeen()
+	m = m.cronSettleChanged(data).cronMarkOpenSeen().cronNoticeResolve()
 	return m.cronKeepSelection(old)
 }
 
@@ -281,14 +281,14 @@ func (m Model) cronSettleChanged(data cronData) Model {
 	m.cron.changed = maps.Clone(m.cron.changed)
 	cleared := false
 	for uid, c := range m.cron.changed {
-		err, read := data.runErr[uid]
-		fresh := data.runsErr == nil && slices.ContainsFunc(data.runs, func(r generated.CronRun) bool { return r.UID == uid })
+		_, read := data.runErr[uid]
+		_, fresh := data.fetched(uid)
 		_, loaded := m.cron.data.run(uid)
 		switch {
 		case !loaded:
 			delete(m.cron.changed, uid)
 		case c.at > data.events: // named after this fetch captured its inputs
-		case fresh || read && err == nil:
+		case fresh:
 			delete(m.cron.changed, uid)
 			cleared = true
 		case read:

@@ -112,7 +112,7 @@ func (m Model) handleLayoutFlip(prev splitlayout.Mode) (Model, tea.Cmd) {
 			(m.prevView == viewList || m.prevView == viewDetail) {
 			// Keep the overlay visible, but make its return target match
 			// the pane that was focused before the layout narrowed.
-			if m.focus == focusDetail && m.detail.issue != nil {
+			if m.focus == focusDetail && m.detailHeld() {
 				m.prevView = viewDetail
 			} else {
 				m.prevView = viewList
@@ -126,7 +126,7 @@ func (m Model) handleLayoutFlip(prev splitlayout.Mode) (Model, tea.Cmd) {
 		// Coming back to the stacked layout: pick the view that
 		// matches the focused pane so the user keeps seeing the
 		// pane they last interacted with.
-		if m.focus == focusDetail && m.detail.issue != nil {
+		if m.focus == focusDetail && m.detailHeld() {
 			m.view = viewDetail
 		} else {
 			m.view = viewList
@@ -141,7 +141,7 @@ func (m Model) handleLayoutFlip(prev splitlayout.Mode) (Model, tea.Cmd) {
 		if coveredView {
 			foreground = m.prevView
 		}
-		if foreground == viewDetail && m.detail.issue != nil {
+		if foreground == viewDetail && m.detailHeld() {
 			m.focus = focusDetail
 		} else {
 			m.focus = focusList

@@ -26,6 +26,9 @@ func (m Model) cronOpenIssue(uid string) (Model, tea.Cmd) {
 	return m, m.detail.fetchDetail(m.api, uid)
 }
 
+// A Cron-opened issue holds the detail while its read is pending or failed.
+func (m Model) detailHeld() bool { return m.detail.issue != nil || m.cron.returnToCron }
+
 func (m Model) returnFromCronDetail() (Model, tea.Cmd) {
 	m.detail.cancelReads()
 	m.cron.returnToCron = false

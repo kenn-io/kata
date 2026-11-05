@@ -34,10 +34,10 @@ func TestCronHealthStates(t *testing.T) {
 		{name: "failed", reason: "last run status is failed", status: "failed", want: "failing"},
 		{name: "unknown", reason: "last run status is unknown", status: "unknown", want: "failing"},
 		{name: "running", reason: "", status: "running", want: "running"},
-		{name: "overdue", reason: "running past timeout_seconds 60 (started 2026-05-01T11:00:00Z)", status: "running", want: "overdue", edit: func(j *generated.CronJob) { j.Definition.TimeoutSeconds = new(int64(60)) }},
+		{name: "overdue", reason: "Timeout exceeded: 60s; started 2026-05-01T11:00:00Z", status: "running", want: "overdue", edit: func(j *generated.CronJob) { j.Definition.TimeoutSeconds = new(int64(60)) }},
 		{name: "timeout equality", reason: "", status: "running", want: "running", edit: func(j *generated.CronJob) { j.Definition.TimeoutSeconds = new(int64(3600)) }},
 		{name: "blocked", reason: "Stuck", status: "running", want: "blocked", blocked: true},
-		{name: "overdue blocked", reason: "running past timeout_seconds 60 (started 2026-05-01T11:00:00Z); Stuck", status: "running", want: "overdue", blocked: true, edit: func(j *generated.CronJob) { j.Definition.TimeoutSeconds = new(int64(60)) }},
+		{name: "overdue blocked", reason: "Timeout exceeded: 60s; started 2026-05-01T11:00:00Z; Stuck", status: "running", want: "overdue", blocked: true, edit: func(j *generated.CronJob) { j.Definition.TimeoutSeconds = new(int64(60)) }},
 		{name: "never", reason: "No scheduled run is past its grace period", want: "never ran"},
 		{name: "unavailable", reason: "last run: read failed", want: "unavailable", unreadable: true},
 		{name: "paused", reason: "", status: "failed", want: "paused", unreadable: true, edit: func(j *generated.CronJob) { j.Definition.Enabled = false }},
@@ -260,7 +260,7 @@ func TestCronHealthColumnRollupAndReason(t *testing.T) {
 	_, _, lines = cronScreen(m)
 	document := cronLinesText(lines)
 	require.Contains(t, document, "Health:")
-	require.Contains(t, document, "running past timeout_seconds 60")
+	require.Contains(t, document, "Timeout exceeded: 60s; started 2026-05-01T11:00:00Z")
 
 	{
 		m := cronFixture(t)

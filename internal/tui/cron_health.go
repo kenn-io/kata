@@ -58,7 +58,7 @@ func cronHealth(p cronData, j generated.CronJob, now time.Time) cronHealthState 
 					started = *last.StartedAt
 				}
 				if def.TimeoutSeconds > 0 && started.Add(time.Duration(def.TimeoutSeconds)*time.Second).Before(now) {
-					reason := fmt.Sprintf("running past timeout_seconds %d (started %s)", def.TimeoutSeconds, started.Format(time.RFC3339))
+					reason := fmt.Sprintf("Timeout exceeded: %ds; started %s", def.TimeoutSeconds, started.Format(time.RFC3339))
 					if wait.state == "blocked" {
 						reason += "; " + wait.reason
 					}

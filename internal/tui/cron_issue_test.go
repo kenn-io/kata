@@ -208,3 +208,34 @@ func TestCronIssueUnreadableStackedView(t *testing.T) {
 	stacked = drainInboxCmds(stacked, cmd)
 	require.Equal(t, viewCron, stacked.view)
 }
+
+// A layout change while a linked issue loads, or after its read failed, keeps
+// that issue in front, also behind Help, and its return to the Cron frame.
+func TestCronIssueLayoutChangeKeepsReturn(t *testing.T) {
+	for _, from := range []int{80, 160} {
+		for _, mode := range []string{"loading", "failed", "help"} {
+			t.Run(fmt.Sprintf("%d/%s", from, mode), func(t *testing.T) {
+				m := cronIssueFixture(t, from)
+				stack := slices.Clone(m.cron.stack)
+				m = sendKey(m, tea.KeyEnter)
+				if mode == "failed" {
+					m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, err: errors.New("issue not found")})
+				}
+				if mode == "help" {
+					m = sendRune(m, '?')
+				}
+				m = resizeModel(m, 240-from, 40)
+				if mode == "help" {
+					m = sendRune(m, '?')
+				}
+				require.Equal(t, viewDetail, m.view)
+				require.Equal(t, focusDetail, m.focus)
+				require.True(t, m.cron.returnToCron)
+				m, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+				m = drainInboxCmds(m, cmd)
+				require.Equal(t, viewCron, m.view)
+				require.Equal(t, stack, m.cron.stack)
+			})
+		}
+	}
+}

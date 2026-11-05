@@ -100,6 +100,19 @@ func (p cronData) fetched(uid string) (generated.CronRun, bool) {
 	}
 	return rows[i], true
 }
+
+// A read that settled an announced run outlives the history that carried it,
+// so job suppression keeps that read once the run leaves the loaded rows.
+func (m Model) cronNoticeResolve() Model {
+	announced := maps.Clone(m.cronNotices.announced)
+	for uid, r := range announced {
+		row := m.cronNoticeNewest(r)
+		r.Status, r.Revision, r.EndedAt, r.UpdatedAt = row.Status, row.Revision, row.EndedAt, row.UpdatedAt
+		announced[uid] = r
+	}
+	m.cronNotices.announced = announced
+	return m
+}
 func (m Model) cronNoticeEvent(msg eventReceivedMsg) (Model, tea.Cmd) {
 	m = m.cronNoticeSync()
 	if msg.eventType != "cron.run.observed" || msg.cronRun == nil || m.scope.allProjects || m.scope.projectID == 0 || msg.projectID != m.scope.projectID {

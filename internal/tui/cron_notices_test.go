@@ -595,3 +595,66 @@ func TestCronNoticeIgnoresStaleOlderPage(t *testing.T) {
 		})
 	}
 }
+
+// A read that settled an announced failure outlives the history that showed
+// it: once a later head no longer carries the run, a corrected failure still
+// releases its job and an uncorrected one still suppresses it.
+func TestCronNoticeResolutionOutlivesHistory(t *testing.T) {
+	for _, corrected := range []bool{true, false} {
+		t.Run(fmt.Sprintf("corrected=%v", corrected), func(t *testing.T) {
+			m := cronNoticeFixture(t)
+			job := m.cron.data.jobs[0].UID
+			m, _ = m.cronNoticeEvent(cronNoticeEvent("announced", job, snapshotFixedNow))
+			m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+			require.NotNil(t, m.toast)
+			m.toast = nil
+			newer := m.cron.data.runs[0]
+			read := newer
+			read.UID, read.Status, read.Revision, read.EndedAt = "announced", "failed", 2, new(snapshotFixedNow)
+			if corrected {
+				read.Status = "succeeded"
+			}
+			for _, head := range [][]generated.CronRun{{newer, read}, {newer}} {
+				data := *m.cron.data
+				data.runs, data.lookup, data.resetPages = head, nil, true
+				data.lastRuns = map[string]generated.CronRun{job: newer}
+				m = m.cronLoaded(cronLoadedMsg(data))
+			}
+			_, loaded := m.cron.data.run("announced")
+			require.False(t, loaded, "the later head dropped the run from loaded history")
+			m, cmd := m.cronNoticeEvent(cronNoticeEvent("next", job, snapshotFixedNow))
+			require.Equal(t, corrected, cmd != nil, "the settled read, not the original event, decides the job")
+		})
+	}
+}
+
+// A last-run fill read after a correction settles that run, even when its
+// exact UID read failed, so the corrected failure releases its job.
+func TestCronNoticeLastRunFillSettlesCorrection(t *testing.T) {
+	m := cronNoticeFixture(t)
+	job := m.cron.data.jobs[0].UID
+	old := m.cron.data.runs[0]
+	old.UID, old.Status, old.Revision, old.EndedAt = "outside-head", "failed", 2, new(snapshotFixedNow)
+	m.cron.data.runs = nil
+	m.cron.data.lastRuns = map[string]generated.CronRun{job: old}
+	m.cron.data.lookup = map[string]generated.CronRun{old.UID: old}
+	m, _ = m.cronNoticeEvent(cronNoticeEvent(old.UID, job, snapshotFixedNow))
+	m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+	require.NotNil(t, m.toast)
+	m.toast = nil
+	correction := cronNoticeEvent(old.UID, job, snapshotFixedNow)
+	correction.cronRun.Status = "succeeded"
+	m = cronUpdateTest(m, correction)
+	require.NotZero(t, m.cron.changed[old.UID].at)
+	fixed := old
+	fixed.Status, fixed.Revision = "succeeded", 3
+	data := *m.cron.data
+	data.events, data.generation = m.cron.events, m.cron.readGen
+	data.runs = nil
+	data.lastRuns, data.lastErr = map[string]generated.CronRun{job: fixed}, map[string]error{job: nil}
+	data.runErr = map[string]error{old.UID: errors.New("context deadline exceeded")}
+	m, _ = updateModel(m, cronLoadedMsg(data))
+	require.NotContains(t, m.cron.changed, old.UID, "the fill read the run after its correction")
+	m, cmd := m.cronNoticeEvent(cronNoticeEvent("next", job, snapshotFixedNow))
+	require.NotNil(t, cmd, "the corrected failure releases its job")
+}
