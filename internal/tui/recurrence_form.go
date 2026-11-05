@@ -201,18 +201,11 @@ func renderRecurrenceForm(s inputState, innerW, height int, now time.Time) strin
 }
 
 func renderRecurrenceFooter(s inputState, innerW int) string {
-	if s.saving {
-		return statusStyle.Render("saving…")
-	}
 	var controls []string
 	for _, item := range recurrenceFormControls() {
 		controls = append(controls, item.Key+" "+item.Description)
 	}
-	keys := strings.Join(controls, " · ")
-	if len(keys) > innerW {
-		return subtleStyle.Render("ctrl+o save · esc cancel")
-	}
-	return subtleStyle.Render(keys)
+	return renderFormFooterHint(s, innerW, strings.Join(controls, " · "))
 }
 
 func recurrenceFormControls() []helplayout.HelpItem {

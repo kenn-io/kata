@@ -515,20 +515,33 @@ func TestSaveRecurrenceRequiresGuardedStartAPI(t *testing.T) {
 
 func TestRecurrenceIncomingMutationRefreshesDetail(t *testing.T) {
 	h := newRecurrenceHarness(t, viewDetail)
-	current := h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
-	h.refreshDetail()
-	require.Contains(t, h.page(), "repeats: FREQ=WEEKLY")
-	require.NoError(t, recurrenceclient.Stop(t.Context(), h.api, h.issue.ProjectID, current, "bob"))
-	event := decodeEventReceived(frame{data: []byte(`{"type":"recurrence.deleted","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"payload":{"recurrence_uid":"` + current.UID + `"}}`)})
-	cmd := h.m.maybeRefetchOpenDetail(event)
-	for _, msg := range runCmdTree(cmd) {
-		out, next := h.m.Update(msg)
-		h.m = out.(Model)
-		for _, fetched := range runCmdTree(next) {
-			out, _ = h.m.Update(fetched)
+	for _, eventType := range []string{"recurrence.materialized", "recurrence.deleted"} {
+		event := eventReceivedMsg{eventType: eventType, projectID: h.issue.ProjectID, issueUID: "another-issue"}
+		assert.Nil(t, h.m.maybeRefetchOpenDetail(event), "unrelated recurrence events leave a nonrecurring detail alone")
+	}
+	refresh := func(event eventReceivedMsg) {
+		cmd := h.m.maybeRefetchOpenDetail(event)
+		require.NotNil(t, cmd)
+		for _, msg := range runCmdTree(cmd) {
+			out, next := h.m.Update(msg)
 			h.m = out.(Model)
+			for _, fetched := range runCmdTree(next) {
+				out, _ = h.m.Update(fetched)
+				h.m = out.(Model)
+			}
 		}
 	}
+	// Another client starts repeating while the displayed issue is still stale.
+	require.NoError(t, recurrenceclient.Start(t.Context(), h.api, h.issue.ProjectID, h.issue.UID,
+		recurrenceclient.Template{Title: "Example", Body: "body"},
+		recurrenceclient.Terms{Rule: "FREQ=WEEKLY", Start: "2026-11-09", Zone: "Europe/Paris", Actor: "bob"}, nil))
+	current := h.rows()[0]
+	require.Nil(t, h.m.detail.issue.RecurrenceID)
+	require.NotContains(t, h.page(), "repeats:")
+	refresh(decodeEventReceived(frame{data: []byte(`{"type":"recurrence.materialized","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"issue_uid":"` + h.issue.UID + `","payload":{"recurrence_uid":"` + current.UID + `","issue_uid":"` + h.issue.UID + `"}}`)}))
+	require.Contains(t, h.page(), "repeats: FREQ=WEEKLY")
+	require.NoError(t, recurrenceclient.Stop(t.Context(), h.api, h.issue.ProjectID, current, "bob"))
+	refresh(decodeEventReceived(frame{data: []byte(`{"type":"recurrence.deleted","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"payload":{"recurrence_uid":"` + current.UID + `"}}`)}))
 	assert.NotContains(t, h.page(), "repeats:")
 }
 
@@ -585,6 +598,12 @@ func TestRecurrenceFormDaemonErrorFitsMinimumHeight(t *testing.T) {
 			for _, want := range []string{"Rule", "Start", "Zone", "Could not start repeat", "ctrl+o save", "esc"} {
 				assert.Contains(t, got, want)
 			}
+			s.saving = true
+			modal = renderCenteredForm(s, width, 12, snapshotFixedNow)
+			assert.LessOrEqual(t, lipgloss.Height(modal), 12)
+			assert.LessOrEqual(t, lipgloss.Width(modal), width)
+			assert.Contains(t, stripANSI(modal), "saving…")
+			assert.NotContains(t, stripANSI(modal), "ctrl+o save")
 		}
 	}
 }

@@ -308,12 +308,16 @@ func renderNewIssueField(s inputState, idx, innerW int) string {
 // hint with a "(body only)" parenthetical, used by the new-issue
 // form when a single-line field has focus.
 func renderFormFooter(s inputState, innerW int, allowEditor bool) string {
-	if s.saving {
-		return statusStyle.Render("saving…")
-	}
 	hint := "ctrl+o save · esc cancel · ctrl+e $EDITOR"
 	if !allowEditor {
 		hint = "ctrl+o save · esc cancel · tab next · ctrl+e (body only)"
+	}
+	return renderFormFooterHint(s, innerW, hint)
+}
+
+func renderFormFooterHint(s inputState, innerW int, hint string) string {
+	if s.saving {
+		return statusStyle.Render("saving…")
 	}
 	if len(hint) > innerW {
 		hint = "ctrl+o save · esc cancel"
