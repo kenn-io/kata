@@ -70,9 +70,9 @@ WHERE statement LIKE '%i.uid LIKE %' AND statement NOT LIKE '%pg_prepared_statem
 			}
 			require.NoError(t, rows.Err())
 			require.NoError(t, rows.Close())
-			require.Contains(t, plan.String(), "idx_issues_uid_prefix")
-			require.Contains(t, plan.String(), "uid ~>=~")
-			require.Contains(t, plan.String(), "uid ~<~")
+			// C collation can seek the ordinary unique index with the same bounds.
+			require.Regexp(t, `Index Cond: .*uid (?:~>=~|>=) `, plan.String())
+			require.Regexp(t, `Index Cond: .*uid (?:~<~|<) `, plan.String())
 		}
 	}
 }
