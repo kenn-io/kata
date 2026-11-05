@@ -337,8 +337,10 @@ func TestCronSeenQuitPersistsFinalAcknowledgements(t *testing.T) {
 		m, path := fixture(t, true)
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
-		cronSeenAfterQuit(ctx, m, io.Discard)
+		var stderr strings.Builder
+		cronSeenAfterQuit(ctx, m, &stderr)
 		require.Equal(t, []string{"first-failure", "second-failure"}, saved(t, path))
+		require.Empty(t, stderr.String())
 	})
 	t.Run("held lock bounds quit and reports", func(t *testing.T) {
 		m, path := fixture(t, true)
@@ -348,7 +350,9 @@ func TestCronSeenQuitPersistsFinalAcknowledgements(t *testing.T) {
 		var stderr strings.Builder
 		started := time.Now()
 		cronSeenAfterQuit(t.Context(), m, &stderr)
-		require.Less(t, time.Since(started), defaultHTTPTimeout, "quit waits less than an ordinary write")
+		// Keep the ceiling independent of the production timeout so increasing
+		// that timeout cannot silently weaken the shutdown responsiveness contract.
+		require.Less(t, time.Since(started), 2*time.Second, "quit bounds its one-second lock wait")
 		require.Contains(t, stderr.String(), "cron seen state not saved")
 		require.NoFileExists(t, path)
 	})
