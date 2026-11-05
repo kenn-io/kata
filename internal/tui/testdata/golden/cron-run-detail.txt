@@ -1,5 +1,4 @@
- Project: example-project                                       kata カタ · dev
-kata カタ jobs [runs] workflows
+ kata カタ jobs [runs] workflows                 Project: example-project · dev
  runs / 01ARZ3NDEKTSV4RRFFQ69G5FAY
 
 ▶ Status:     succeeded
@@ -16,6 +15,7 @@ kata カタ jobs [runs] workflows
   Recorded with
   Job: Daily summary · current definition changed since this run
   Workflow: Summary flow
+
 
 
 

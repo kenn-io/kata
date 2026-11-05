@@ -1,5 +1,4 @@
- Project: example-project                                       kata カタ · dev
-kata カタ jobs runs [workflows]
+ kata カタ jobs runs [workflows]                 Project: example-project · dev
  workflows / Summary flow
 
 ▶
@@ -20,5 +19,6 @@ kata カタ jobs runs [workflows]
     "shell": "sh"
   }
 
+  Used by (1)
 
  j/k move▕ ↵/l follow▕ h/esc back▕ r refresh▕ 1-4 tabs▕ ? help▕ q quit

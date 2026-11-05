@@ -1,4 +1,4 @@
- Project: kata                                                                                                                                  kata カタ · dev
+ [kata] カタ jobs runs workflows                                                                                                            Project: kata · dev
 ┌──────────────────────────────────────────────────────────────────┐┌──────────────────────────────────────────────────────────────────────────────────────────┐
 │ / search                            open: 1 · closed: 1 · all: 3 ││  #42aa  fix login bug on Safari                                                    [open]│
 │    #     prio status    title                   kids    updated  ││  authored by wesm                                                                        │

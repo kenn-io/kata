@@ -3,7 +3,7 @@ kata — keybindings
 Global
 ?         help
 q/ctrl+c  quit
-1-4       switch tab
+1-4       switch tab (Tab/Shift+Tab in lists)
 P         projects
 I         inbox
 D         daemons

@@ -1646,7 +1646,7 @@ func (m Model) mouseFederationClick(y int) (Model, tea.Cmd) {
 	}
 	budget := len(rows)
 	if m.height > 0 {
-		budget = max(m.height-federationViewChromeRows, 1)
+		budget = max(m.contentHeight()-federationViewChromeRows, 1)
 	}
 	start, end := windowBounds(len(rows), m.federation.cursor, budget)
 	idx := start + row

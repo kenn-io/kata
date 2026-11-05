@@ -179,10 +179,11 @@ network, authentication, and proxy setup.
 
 The yellow summary at the top shows the active hub, account, and credential
 status. It stays visible while you navigate and wraps on narrow screens.
-A healthy TUI connection keeps its normal title bar. The TUI shows the summary
+A healthy TUI connection shows only its tab header, with project and daemon names
+on the right. The TUI shows a separate summary below that header
 only when credentials expire, authentication is required, or the connection is
 read-only, unavailable, connecting, reconnecting, or disconnected. The summary
-keeps the header row's existing label and adds the status and hub. The account
+keeps project context and adds the status and hub. The account
 appears only for read-only connections; every other attention state shows a dash,
 including Reconnecting and Disconnected.
 

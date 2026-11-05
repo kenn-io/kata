@@ -1,4 +1,4 @@
- Project: kata                                                                                                                                  kata カタ · dev
+ [kata] カタ jobs runs workflows                                                                                                            Project: kata · dev
 
   #aaa1  fix the tui to be less shitty                                                      [open]
   authored by anonymous · created May 2 19:15 · updated 21h ago

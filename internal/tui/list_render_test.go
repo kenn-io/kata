@@ -170,7 +170,7 @@ func TestTitleBarShowsTaggedVersion(t *testing.T) {
 	useNoColor(t)
 	got := stripANSI(renderTitleBar(100, scope{projectName: "kata"}, "v0.5.0"))
 
-	assertContains(t, got, "kata カタ · v0.5.0", "title bar missing tagged version")
+	assertContains(t, got, "Project: kata · v0.5.0", "title bar missing tagged version")
 }
 
 func TestTitleBarShowsDaemonHostFallback(t *testing.T) {
@@ -212,7 +212,7 @@ func TestDetailTitleBarShowsDaemon(t *testing.T) {
 
 	clean := stripANSI(got)
 	assertContains(t, clean, "Daemon: shared", "detail title bar missing daemon label")
-	assertContains(t, clean, "kata カタ · v0.5.0", "detail title bar missing tagged version")
+	assertContains(t, clean, "Daemon: shared · v0.5.0", "detail title bar missing tagged version")
 }
 
 func TestSplitTitleBarShowsDaemon(t *testing.T) {
@@ -231,7 +231,7 @@ func TestSplitTitleBarShowsDaemon(t *testing.T) {
 
 	clean := stripANSI(got)
 	assertContains(t, clean, "Daemon: shared", "split title bar missing daemon label")
-	assertContains(t, clean, "kata カタ · v0.5.0", "split title bar missing tagged version")
+	assertContains(t, clean, "Daemon: shared · v0.5.0", "split title bar missing tagged version")
 }
 
 // TestRenderLabelChips_LargeOverflowReservesActualWidth pins the

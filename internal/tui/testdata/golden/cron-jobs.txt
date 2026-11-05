@@ -1,5 +1,4 @@
- Project: example-project                                       kata カタ · dev
-kata カタ [jobs] runs workflows
+ kata カタ [jobs] runs workflows                 Project: example-project · dev
  / search                                                                 1 job
 
   Job            State   Trigger           Action             Last loaded run
@@ -20,5 +19,6 @@ kata カタ [jobs] runs workflows
 
 
 
- j/k move▕ ↵/l open▕ / filter▕ n/e new/edit▕ h/esc kata▕ r refresh▕ 1-4 tabs
- ? help  ▕ q quit
+
+ j/k move▕ ↵/l open▕ / filter▕ n/e new/edit        ▕ h/esc kata▕ r refresh
+ 1-4 tabs▕ ? help  ▕ q quit  ▕ Tab/S-Tab cycle tabs

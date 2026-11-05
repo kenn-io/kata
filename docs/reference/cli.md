@@ -1921,7 +1921,9 @@ such as `kata tui abc4`, to open that issue's detail view directly. The ref
 accepts the same bare short ID, qualified short ID, and full UID forms as
 `kata show`.
 
-**Cron tabs.** Press `1` for Kata, `2` for Jobs, `3` for Runs, or `4` for Workflows. Runs and Workflows are read-only; Jobs can create and change jobs (below). Cron tabs show the current project. In All projects, press `P` to pick one. Each tab keeps its filter and position when you switch tabs. Returning to Kata preserves the issue you were browsing.
+**Tabs.** The header stays visible on every screen, with Kata selected at startup. Press `1` for Kata, `2` for Jobs, `3` for Runs, or `4` for Workflows. In the full-width issue list and the cron lists, `Tab` cycles forward and `Shift+Tab` cycles backward, wrapping at either end. In split panes, issue details, filters, and forms, these keys keep their existing focus and field bindings. Runs and Workflows are read-only; Jobs can create and change jobs (below). Cron tabs show the current project. In All projects, press `P` to pick one. Each tab keeps its filter and position when you switch tabs. Returning to Kata preserves the issue you were browsing.
+
+Project and daemon names appear on the right of the tab row. A separate connection summary appears below it only when the connection needs attention; a healthy connection uses just the tab row.
 
 A job's detail lists its next three run times in the trigger's timezone, with the zone abbreviation so daylight-saving changes read clearly. A native recurring job shows them as **Next**, stepping from the progress the daemon saved on its parent issue. An adapter job shows its cron and `once` trigger times as **Triggers**; they are when the adapter's trigger fires, because Kata holds no anchor or catch-up for an adapter, and an adapter interval shows no time. A paused job shows none, as does a native job whose parent issue is closed or deleted, because the daemon delivers only while the parent is open. A native job whose parent or progress cannot be read shows **unavailable**. An adapter cron expression is read in its own `TZ=` or `CRON_TZ=` zone when it has one, and an `@every` expression shows no time.
 
@@ -1933,6 +1935,7 @@ A job's detail lists its next three run times in the trigger's timezone, with th
 | `/` | Filter a list; Enter applies the filter and Esc clears it. |
 | `r` | Refresh the loaded data. |
 | `1`–`4` | Switch tabs. |
+| `Tab` / `Shift+Tab` | Cycle tabs forward / backward from a list. |
 | `?` | Explain jobs, workflows, and runs, and show keybindings. |
 | `q` | Quit. |
 

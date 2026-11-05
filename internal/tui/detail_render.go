@@ -30,19 +30,26 @@ import (
 // bands across wide terminals so the page reads as a focused document,
 // not a half-empty workspace.
 func (dm detailModel) View(width, height int, chrome viewChrome) string {
+	titleBar := renderTitleBar(width, chrome.scope, chrome.version, chrome.daemon)
+	if height == 1 {
+		return titleBar
+	}
 	if dm.loading {
-		return statusStyle.Render("loading…")
+		return titleBar + "\n" + statusStyle.Render("loading…")
 	}
 	if dm.issue == nil {
-		return statusStyle.Render("no issue selected")
+		return titleBar + "\n" + statusStyle.Render("no issue selected")
 	}
 	if width <= 0 || height < listMinHeight {
-		return dm.renderTinyFallback(width)
+		body := strings.Split(dm.renderTinyFallback(width), "\n")
+		if height > 0 {
+			body = body[:min(len(body), height-1)]
+		}
+		return strings.Join(append([]string{titleBar}, body...), "\n")
 	}
 	helpRows := detailHelpRows(dm, chrome)
 	footerLines := helpLines(helpRows, width)
 	footer := renderFooterHelpTable(helpRows, width)
-	titleBar := renderTitleBar(width, chrome.scope, chrome.version, chrome.daemon)
 	// Top chrome (title + blank) + bottom chrome (info + footer) frame
 	// the viewport. Whatever rows are left belong to the document.
 	visible := max(height-2-1-footerLines, 1)

@@ -14,7 +14,7 @@ import (
 	"go.kenn.io/kit/tui/termtext"
 )
 
-var cronTabNames = [...]string{"kata カタ", "jobs", "runs", "workflows"}
+var cronTabNames = [...]string{"kata", "jobs", "runs", "workflows"}
 
 type cronLine struct {
 	text   string
@@ -24,6 +24,7 @@ type cronLine struct {
 func cronTabs(tab int) string {
 	names := slices.Clone(cronTabNames[:])
 	names[tab] = tabActive.Render("[" + names[tab] + "]")
+	names[cronKata] += " カタ"
 	return strings.Join(names, " ")
 }
 func cronSchedule(t generated.TriggerResponse) string {
@@ -388,6 +389,7 @@ func cronKeyRows(m Model) []helplayout.HelpItem {
 	}
 	if len(m.cron.stack) == 0 {
 		rows = slices.Insert(rows, 2, helplayout.HelpItem{Key: "/", Description: "filter"})
+		rows = append(rows, helplayout.HelpItem{Key: "Tab/S-Tab", Description: "cycle tabs"})
 	}
 	if m.cronJobsScope() {
 		rows = slices.Insert(rows, 3, helplayout.HelpItem{Key: "n/e", Description: "new/edit"})
@@ -404,7 +406,7 @@ func cronNoticeRows(m Model) int {
 }
 func renderCron(m Model) string {
 	if m.scope.allProjects || m.scope.projectID == 0 {
-		body := []string{renderTitleBar(m.width, m.scope, kataVersion, m.chrome().daemon), cronTabs(m.cron.tab), "", "Press P to pick a project, then 2 for Jobs, 3 for Runs, or 4 for Workflows."}
+		body := []string{renderTabHeader(m.width, m.cron.tab, m.scope, kataVersion, m.chrome().daemon), "", "Press P to pick a project, then 2 for Jobs, 3 for Runs, or 4 for Workflows."}
 		help := cronHelpRows(m)
 		for range max(m.height-len(body)-helpLines(help, m.width)-cronNoticeRows(m), 1) {
 			body = append(body, "")
@@ -450,8 +452,7 @@ func renderCron(m Model) string {
 		right = "loading…"
 	}
 	body := []string{
-		renderTitleBar(m.width, m.scope, kataVersion, m.chrome().daemon),
-		cronTabs(m.cron.tab),
+		renderTabHeader(m.width, m.cron.tab, m.scope, kataVersion, m.chrome().daemon),
 		statsLineStyle.Render(padLeftRightInside(left, right, titleBarInnerWidth(m.width))),
 		"",
 	}
@@ -512,8 +513,7 @@ func cronHelp(m Model) string {
 		intro[i] = strings.Join(termtext.Wrap(s, max(m.width, 1)), "\n")
 	}
 	body := []string{
-		renderTitleBar(m.width, m.scope, kataVersion, m.chrome().daemon),
-		cronTabs(m.cron.tab),
+		renderTabHeader(m.width, m.cron.tab, m.scope, kataVersion, m.chrome().daemon),
 		"",
 		strings.Join(intro, "\n"),
 		"",
