@@ -1,6 +1,8 @@
 package dbtest
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json/jsontext"
 	"testing"
 	"time"
@@ -45,8 +47,16 @@ func checkReadyPriorityOrder(t *testing.T, store db.Storage) error {
 			older := create(secondProject, "older P2", new(int64(2)), nil)
 			newer, _, _, err = store.EditIssue(ctx, db.EditIssueParams{IssueID: newer.ID, Title: new("newer P2"), Actor: "author"})
 			require.NoError(t, err)
-			require.True(t, newer.UpdatedAt.After(older.UpdatedAt))
 			unprioritized := create(secondProject, "newest unprioritized", nil, nil)
+			sqlStore := store.(interface {
+				ExecContext(context.Context, string, ...any) (sql.Result, error)
+			})
+			// Seed distinct times so ordering never depends on clock precision.
+			for i, issue := range []db.Issue{older, newer, unprioritized} {
+				updatedAt := filter.At.Add(time.Duration(i) * time.Minute)
+				_, err := sqlStore.ExecContext(ctx, `UPDATE issues SET updated_at=$1 WHERE id=$2`, updatedAt.Format(time.RFC3339Nano), issue.ID)
+				require.NoError(t, err)
+			}
 			for _, limit := range []int{1, 0} {
 				var issues []db.Issue
 				if global {
