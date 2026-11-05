@@ -14,6 +14,12 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
+func TestUISnapshotGraphReachContract(t *testing.T) {
+	dbtest.RunUISnapshotGraphReachContract(t, func(t *testing.T) db.Storage {
+		return openUIStore(t)
+	})
+}
+
 func TestUISnapshotMutationCursorContract(t *testing.T) {
 	dbtest.RunUISnapshotMutationCursorContract(t, func(t *testing.T) db.Storage {
 		return openUIStore(t)
@@ -47,7 +53,7 @@ func TestReadUISnapshotPastPostgresParameterLimit(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Len(t, snapshot.Issues, 32770)
-	require.Len(t, snapshot.GraphIssues, 32770)
+	require.Len(t, snapshot.GraphIssues, 2)
 	for _, links := range [][]db.UILink{snapshot.CollectionLinks, snapshot.GraphLinks} {
 		require.Len(t, links, 1)
 		require.Equal(t, source.UID, links[0].FromIssueUID)

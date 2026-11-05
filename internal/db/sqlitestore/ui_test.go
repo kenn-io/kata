@@ -15,6 +15,13 @@ import (
 	"go.kenn.io/kata/internal/db/dbtest"
 )
 
+func TestUISnapshotGraphReachContract(t *testing.T) {
+	t.Parallel()
+	dbtest.RunUISnapshotGraphReachContract(t, func(t *testing.T) db.Storage {
+		return openUIStore(t)
+	})
+}
+
 func TestUISnapshotMutationCursorContract(t *testing.T) {
 	t.Parallel()
 	dbtest.RunUISnapshotMutationCursorContract(t, func(t *testing.T) db.Storage {
@@ -162,11 +169,11 @@ func TestReadUIGraphLinksLargeIssueSet(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	snapshot, err := store.ReadUISnapshot(ctx, db.UISnapshotQuery{
-		View: "all-open", IncludeGraph: true,
+		View: "all-open", IncludeGraph: true, SelectedIssueUID: fmt.Sprintf("%026d", 1),
 	})
 	require.NoError(t, err)
 	require.Len(t, snapshot.Issues, 16384)
-	require.Len(t, snapshot.GraphIssues, 16384)
+	require.Len(t, snapshot.GraphIssues, 3)
 	for _, links := range [][]db.UILink{snapshot.CollectionLinks, snapshot.GraphLinks} {
 		gotIDs := make([]int64, 0, len(links))
 		for _, link := range links {
