@@ -15,6 +15,13 @@ import (
 	"go.kenn.io/kata/internal/db/dbtest"
 )
 
+func TestUISnapshotGraphReachContract(t *testing.T) {
+	t.Parallel()
+	dbtest.RunUISnapshotGraphReachContract(t, func(t *testing.T) db.Storage {
+		return openUIStore(t)
+	})
+}
+
 func TestUISnapshotMutationCursorContract(t *testing.T) {
 	t.Parallel()
 	dbtest.RunUISnapshotMutationCursorContract(t, func(t *testing.T) db.Storage {
@@ -153,6 +160,20 @@ func TestReadUIGraphLinksLargeIssueSet(t *testing.T) {
 			wantIDs = append(wantIDs, link.ID)
 		}
 	}
+	rows, err := store.QueryContext(t.Context(), `
+		INSERT INTO links (from_issue_id, to_issue_id, from_issue_uid, to_issue_uid, type, author)
+		SELECT 1, id, printf('%026d', 1), uid, 'blocks', 'user-a'
+		FROM issues WHERE id BETWEEN 4 AND 16384
+		RETURNING id`)
+	require.NoError(t, err)
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var id int64
+		require.NoError(t, rows.Scan(&id))
+		wantIDs = append(wantIDs, id)
+	}
+	require.NoError(t, rows.Err())
+	require.NoError(t, rows.Close())
 	// Keep links with one or both endpoints outside the visible snapshot.
 	for _, id := range []int64{16385, 16386} {
 		_, _, _, err := store.SoftDeleteIssue(t.Context(), id, "user-a")
@@ -162,7 +183,7 @@ func TestReadUIGraphLinksLargeIssueSet(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	snapshot, err := store.ReadUISnapshot(ctx, db.UISnapshotQuery{
-		View: "all-open", IncludeGraph: true,
+		View: "all-open", IncludeGraph: true, SelectedIssueUID: fmt.Sprintf("%026d", 1),
 	})
 	require.NoError(t, err)
 	require.Len(t, snapshot.Issues, 16384)

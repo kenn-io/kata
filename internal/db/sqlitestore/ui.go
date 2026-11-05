@@ -149,8 +149,8 @@ func (d *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 			return db.UISnapshotData{}, err
 		}
 	}
-	if query.IncludeGraph {
-		data.GraphIssues, err = readUIGraphIssues(ctx, tx, query, projectNames)
+	if query.IncludeGraph && data.SelectedIssue != nil {
+		data.GraphIssues, err = readUIGraphIssues(ctx, tx, query, projectNames, data.SelectedIssue.ID)
 		if err != nil {
 			return db.UISnapshotData{}, err
 		}
@@ -177,18 +177,36 @@ func (d *Store) ReadUISnapshot(ctx context.Context, query db.UISnapshotQuery) (d
 
 func readUIGraphIssues(
 	ctx context.Context, tx *sql.Tx, query db.UISnapshotQuery,
-	projectNames map[int64]string,
+	projectNames map[int64]string, sourceID int64,
 ) ([]db.UIIssue, error) {
-	statement := issueSelect + `
-		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?`
-	args := []any{db.SystemProjectName}
-	statement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &args)
-	allowPredicate, allowArgs := uiSQLiteIssueAllowlist(`i.id`, query.AllowedIssueIDs)
-	if allowPredicate != "" {
-		statement += ` AND ` + allowPredicate // #nosec G202 -- the predicate contains only a fixed column name and count-derived ? placeholders; values stay bound.
-		args = append(args, allowArgs...)
+	args := []any{sourceID}
+	eligible := func() string {
+		args = append(args, db.SystemProjectName)
+		predicate := `i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?`
+		predicate += " AND " + authorizedProjectPredicate(ctx, "p.uid", &args)
+		allowPredicate, allowArgs := uiSQLiteIssueAllowlist(`i.id`, query.AllowedIssueIDs)
+		if allowPredicate != "" {
+			predicate += " AND " + allowPredicate
+			args = append(args, allowArgs...)
+		}
+		return predicate
 	}
-	statement += ` ORDER BY i.uid`
+	// #nosec G202 -- eligible builds fixed predicates and placeholders; all values stay bound.
+	statement := `WITH RECURSIVE graph_reach(id) AS (
+		SELECT ?
+		UNION
+		SELECT i.id FROM graph_reach r
+		JOIN links l ON l.from_issue_id = r.id
+		JOIN issues i ON i.id = l.to_issue_id
+		JOIN projects p ON p.id = i.project_id
+		WHERE ` + eligible() + `
+		UNION
+		SELECT i.id FROM graph_reach r
+		JOIN links l ON l.to_issue_id = r.id
+		JOIN issues i ON i.id = l.from_issue_id
+		JOIN projects p ON p.id = i.project_id
+		WHERE ` + eligible() + `
+	) ` + issueSelect + ` WHERE i.id IN (SELECT id FROM graph_reach) ORDER BY i.uid`
 	rows, err := tx.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read UI graph issues: %w", err)

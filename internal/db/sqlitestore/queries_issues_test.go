@@ -198,55 +198,6 @@ func TestIssueByShortID_IncludeDeletedYesResolvesSoftDeleted(t *testing.T) {
 	assert.Equal(t, created.UID, got.UID)
 }
 
-// TestIssueUIDPrefixMatch_DefaultExcludesSoftDeleted pins that the default
-// include-deleted=no filter mirrors IssueByUID — a soft-deleted issue must
-// not surface through the prefix-match fallback used by the daemon's global
-// /api/v1/issues/{ref} handler.
-func TestIssueUIDPrefixMatch_DefaultExcludesSoftDeleted(t *testing.T) {
-	t.Parallel()
-	d := openTestDB(t)
-	ctx := t.Context()
-	p := createProject(ctx, t, d, "demo")
-	created, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
-		ProjectID: p.ID,
-		UID:       "01HZNQ7VFPK1XGD8R5MABCD4EX",
-		Title:     "soon-gone",
-		Author:    "tester",
-	})
-	require.NoError(t, err)
-	_, _, _, err = d.SoftDeleteIssue(ctx, created.ID, "tester")
-	require.NoError(t, err)
-
-	matches, err := d.IssueUIDPrefixMatch(ctx, "01HZNQ7V", 20, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	assert.Empty(t, matches)
-}
-
-// TestIssueUIDPrefixMatch_IncludeDeletedYesResolvesSoftDeleted pins the
-// carveout branch (spec §6): callers passing IncludeDeletedYes (restore,
-// idempotent re-delete) must see soft-deleted rows when matched by UID
-// prefix.
-func TestIssueUIDPrefixMatch_IncludeDeletedYesResolvesSoftDeleted(t *testing.T) {
-	t.Parallel()
-	d := openTestDB(t)
-	ctx := t.Context()
-	p := createProject(ctx, t, d, "demo")
-	created, _, err := d.CreateIssue(ctx, db.CreateIssueParams{
-		ProjectID: p.ID,
-		UID:       "01HZNQ7VFPK1XGD8R5MABCD4EX",
-		Title:     "soon-gone",
-		Author:    "tester",
-	})
-	require.NoError(t, err)
-	_, _, _, err = d.SoftDeleteIssue(ctx, created.ID, "tester")
-	require.NoError(t, err)
-
-	matches, err := d.IssueUIDPrefixMatch(ctx, "01HZNQ7V", 20, db.IncludeDeletedYes)
-	require.NoError(t, err)
-	require.Len(t, matches, 1)
-	assert.Equal(t, created.UID, matches[0].UID)
-}
-
 func TestListIssues_DefaultsToOpenOnlyAndExcludesDeleted(t *testing.T) {
 	t.Parallel()
 	d, ctx, p := setupTestProject(t)

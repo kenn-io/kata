@@ -231,6 +231,10 @@ func (*serviceGitHubFetcher) Comments(context.Context, githubsync.Binding, int) 
 	return nil, nil
 }
 
+func (*serviceGitHubFetcher) RepositoryComments(context.Context, githubsync.Binding, *time.Time) (map[int][]githubsync.Comment, bool, error) {
+	return nil, true, nil
+}
+
 func (*serviceGitHubFetcher) ParentData(context.Context, githubsync.Binding, githubsync.ParentRequest) (githubsync.ParentData, error) {
 	return githubsync.ParentData{Scan: githubsync.ParentScanUnsupported}, nil
 }
@@ -258,6 +262,10 @@ func (f *serviceGitHubProgressFetcher) Issues(ctx context.Context, _ githubsync.
 
 func (*serviceGitHubProgressFetcher) Comments(context.Context, githubsync.Binding, int) ([]githubsync.Comment, error) {
 	return nil, nil
+}
+
+func (*serviceGitHubProgressFetcher) RepositoryComments(context.Context, githubsync.Binding, *time.Time) (map[int][]githubsync.Comment, bool, error) {
+	return nil, true, nil
 }
 
 func (*serviceGitHubProgressFetcher) ParentData(context.Context, githubsync.Binding, githubsync.ParentRequest) (githubsync.ParentData, error) {
