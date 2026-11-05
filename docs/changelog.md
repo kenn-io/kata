@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -13,8 +13,34 @@ All notable changes to kata, grouped by release. Versioned releases start with
   The Jobs list shows readable schedule labels, and the detail keeps the raw
   expression. Custom drafts survive cycling through presets; the time zone
   stays unchanged. See the [CLI reference](reference/cli.md#daemon-and-diagnostics).
+- Keep local writes responsive on relay hubs. Creating an issue or receiving an
+  unrelated snapshot leaves downstream sync incremental unless it can change the
+  reset decision. Handshakes and reset downloads check history without holding
+  the writer, except when a second invalidation lands during the check.
+- Fill semantic search vectors faster on large stores by resuming each page after the previous page's last key instead of rescanning from the start.
+- Make semantic search pick up new issues sooner in large stores by skipping unchanged issue text during mirror refreshes.
+- Keep issue writes responsive during due-date sweeps. Sweeps skip date values
+  more than 24h past UTC now, including every issue 36h or more out in any zone.
+  Other checks take SQLite's writer only for due notifications or cleanup.
+- Page through issues by creation time faster with MCP `list` and the project
+  and global issue routes. SQLite and PostgreSQL use indexes instead of sorting
+  every issue for each page.
+- Add, edit, and delete comments, or edit issue titles and bodies, without
+  reindexing every comment on the issue. Search still finds words spread across
+  an issue and its comments; scores now sum each word's best document score,
+  so ranking can shift. SQLite phrases must fit within one document. Comment
+  search cost follows the number of matching comments.
+  Existing stores upgrade to schema 41 through SQLite's JSONL cutover or the
+  [offline PostgreSQL migration](development/postgres-migrations.md#schema-41-separate-comment-search-documents).
+
 - Load the web UI's issue list and graph on SQLite and PostgreSQL stores with
   tens of thousands of issues without exceeding SQL parameter limits.
+- Keep legacy spokes from adding stored sibling-project references after either
+  project enrolls for relay. The hub rejects the whole fresh push batch with
+  `400 validation` and identifies the offending event; accepted history,
+  duplicate retries, missing peers, and cleanup keep their existing behavior.
+  See [quarantine recovery](operations/federation.md#quarantine) before skipping
+  a refused batch.
 - See when a cron job runs next: the `kata tui` Jobs tab detail lists the next
   three times in the trigger's timezone, computed with the same schedule code
   the daemon delivers with, including daylight-saving changes. A native
@@ -24,6 +50,11 @@ All notable changes to kata, grouped by release. Versioned releases start with
   parent is closed, shows none. An issue-deadline trigger now says how long
   before the deadline it fires. See
   [CLI reference](reference/cli.md#daemon-and-diagnostics).
+- Delete an issue from `kata tui` with `X` from the list. Type
+  `DELETE <project>#<id>` to confirm; the selection moves to the
+  neighbouring row and `u` restores the issue, the way `kata restore` does.
+  Issue-scoped credentials cannot delete, so they are not offered the key. See
+  the [CLI reference](reference/cli.md#daemon-and-diagnostics).
 - Receive direct legacy spoke creations through relays on SQLite roots before later root updates, preventing "references unknown issue" errors on relays while preserving the original event identity and hash. Thanks to [Rusty Shackleford](https://github.com/salmonumbrella).
 
 - Keep the browser reachable when `kata daemon restart` runs from a sandbox or

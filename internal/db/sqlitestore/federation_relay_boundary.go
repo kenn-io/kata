@@ -22,8 +22,7 @@ func ensureRelayLinkBoundaryTx(ctx context.Context, tx *sql.Tx, fromID, toID int
 	if fromProject == toProject {
 		return nil
 	}
-	var relayed bool
-	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id IN(?,?) AND (b.relay_config IS NOT NULL OR EXISTS(SELECT 1 FROM federation_enrollments e WHERE e.project_id=b.project_id AND e.relay_protocol_version=1 AND e.revoked_at IS NULL)))`, fromProject, toProject).Scan(&relayed)
+	relayed, err := relayProjectsActiveTx(ctx, tx, fromProject, toProject)
 	if err != nil {
 		return err
 	}
@@ -31,6 +30,49 @@ func ensureRelayLinkBoundaryTx(ctx context.Context, tx *sql.Tx, fromID, toID int
 		return errors.Join(db.ErrFederatedReadOnly, db.ErrFederationCrossProjectBoundary)
 	}
 	return nil
+}
+
+func relayProjectsActiveTx(ctx context.Context, tx *sql.Tx, fromProject, toProject int64) (bool, error) {
+	var relayed bool
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM federation_bindings b WHERE b.project_id IN(?,?) AND (b.relay_config IS NOT NULL OR EXISTS(SELECT 1 FROM federation_enrollments e WHERE e.project_id=b.project_id AND e.relay_protocol_version=1 AND e.revoked_at IS NULL)))`, fromProject, toProject).Scan(&relayed)
+	return relayed, err
+}
+
+func validateLegacyRelayAdmissionTx(ctx context.Context, tx *sql.Tx, projectID int64, event db.RemoteEvent) error {
+	crossesProject := func(ctx context.Context, peerProject int64) (bool, error) {
+		if peerProject == projectID {
+			return false, nil
+		}
+		return relayProjectsActiveTx(ctx, tx, projectID, peerProject)
+	}
+	return db.ValidateLegacyRelayAdmission(ctx, event, func(ctx context.Context, peer string) (bool, error) {
+		var peerProject int64
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT project_id FROM issues WHERE uid=?),?)`, peer, projectID).Scan(&peerProject); err != nil {
+			return false, err
+		}
+		return crossesProject(ctx, peerProject)
+	}, func(ctx context.Context, shortID string) (bool, error) {
+		// Legacy parents resolve only when the short ID is unique across projects.
+		var matches int
+		var peerProject int64
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(MIN(project_id),0) FROM issues WHERE short_id=?`, shortID).Scan(&matches, &peerProject); err != nil {
+			return false, err
+		}
+		if matches != 1 {
+			return false, nil
+		}
+		return crossesProject(ctx, peerProject)
+	}, func(ctx context.Context, ref string) (bool, error) {
+		// Membership, rather than caller visibility, decides admission.
+		target, err := eventIssueByRef(db.WithAuthorizedProjects(ctx, nil), tx, event.ProjectUID, ref)
+		if errors.Is(err, db.ErrNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return crossesProject(ctx, target.ProjectID)
+	})
 }
 
 // CheckRelayProjectLinks uses the same native boundary check as enrollment.
@@ -208,39 +250,19 @@ func relayHistoryHasBoundaryAfterTx(ctx context.Context, tx *sql.Tx, projectID, 
 
 func relayHistoryCrossesProjectAfterTx(ctx context.Context, tx *sql.Tx, projectID, after int64) (bool, error) {
 	for {
-		//nolint:gosec // Only fixed event-type SQL is concatenated; values use placeholders.
-		rows, err := tx.QueryContext(ctx, `SELECT e.id FROM events e WHERE e.project_id=? AND e.id>? AND `+federationPushEventTypeCondition("e.type")+` ORDER BY e.id LIMIT 100`, projectID, after)
+		events, err := relayCheckpointEventPageTx(ctx, tx, projectID, after)
 		if err != nil {
 			return false, err
 		}
-		var ids []int64
-		for rows.Next() {
-			var id int64
-			if err = rows.Scan(&id); err != nil {
-				break
-			}
-			ids = append(ids, id)
-		}
-		if err == nil {
-			err = rows.Err()
-		}
-		_ = rows.Close()
-		if err != nil {
-			return false, err
-		}
-		if len(ids) == 0 {
+		if len(events) == 0 {
 			return false, nil
 		}
-		for _, id := range ids {
-			event, err := scanEvent(tx.QueryRowContext(ctx, eventSelectByID, id))
-			if err != nil {
-				return false, err
-			}
+		for _, event := range events {
 			crossing, err := relayEventCrossesProjectTx(ctx, tx, projectID, db.RemoteEventFromStored(event))
 			if err != nil || crossing {
 				return crossing, err
 			}
 		}
-		after = ids[len(ids)-1]
+		after = events[len(events)-1].ID
 	}
 }

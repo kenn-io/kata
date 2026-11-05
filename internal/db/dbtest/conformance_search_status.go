@@ -78,6 +78,10 @@ func checkSearchStatus(t *testing.T, store db.Storage) error {
 	create(sibling.ID, "sibling task", "open", false, "bug", "urgent")
 	for name, search := range map[string]func(context.Context, db.SearchFTSParams) ([]db.SearchCandidate, error){"all": store.SearchFTS, "any": store.SearchFTSAny} {
 		t.Run(name, func(t *testing.T) {
+			query, fields := "runnerrefused", []string{"comments"}
+			if name == "any" {
+				query, fields = "task", []string{"title"}
+			}
 			for _, tc := range []struct {
 				status  string
 				deleted bool
@@ -88,16 +92,16 @@ func checkSearchStatus(t *testing.T, store db.Storage) error {
 				{"open", true, []int64{open.ID, deletedOpen.ID}}, {"closed", true, []int64{closed.ID, deletedClosed.ID}},
 				{"", true, []int64{open.ID, closed.ID, deletedOpen.ID, deletedClosed.ID}},
 			} {
-				hits, err := search(ctx, db.SearchFTSParams{ProjectID: project.ID, Query: "runnerrefused", Status: tc.status, IncludeDeleted: tc.deleted, Limit: 20, Labels: []string{"BUG", "urgent"}, ExcludeLabels: []string{"BLOCKED"}})
+				hits, err := search(ctx, db.SearchFTSParams{ProjectID: project.ID, Query: query, Status: tc.status, IncludeDeleted: tc.deleted, Limit: 20, Labels: []string{"BUG", "urgent"}, ExcludeLabels: []string{"BLOCKED"}})
 				require.NoError(t, err)
 				assert.ElementsMatch(t, tc.want, searchCandidateIDs(hits), "status=%q deleted=%v", tc.status, tc.deleted)
 				for _, hit := range hits {
-					assert.Equal(t, []string{"comments"}, hit.MatchedIn)
+					assert.Equal(t, fields, hit.MatchedIn)
 				}
 			}
 			// Choose the opposite status from the unfiltered first hit, so either
 			// backend's ranking exposes filtering that happens after LIMIT.
-			params := db.SearchFTSParams{ProjectID: project.ID, Query: "runnerrefused", Limit: 1, Labels: []string{"urgent"}, ExcludeLabels: []string{"blocked"}}
+			params := db.SearchFTSParams{ProjectID: project.ID, Query: query, Limit: 1, Labels: []string{"urgent"}, ExcludeLabels: []string{"blocked"}}
 			first, err := search(ctx, params)
 			require.NoError(t, err)
 			require.Len(t, first, 1)

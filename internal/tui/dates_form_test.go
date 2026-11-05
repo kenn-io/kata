@@ -19,11 +19,11 @@ var datesNow = time.Date(2026, time.November, 2, 9, 30, 0, 0, time.UTC)
 
 // datesHarness drives the Dates form of one issue held by a real daemon.
 type datesHarness struct {
+	formDriver
 	t      *testing.T
 	env    *testenv.Env
 	client *undoClient
 	issue  db.Issue
-	m      Model
 }
 
 func newDatesHarness(t *testing.T, stored map[string]string, view viewID) *datesHarness {
@@ -88,12 +88,6 @@ func (h *datesHarness) revision() int64 {
 	current, err := h.env.DB.IssueByUID(h.t.Context(), h.issue.UID, db.IncludeDeletedNo)
 	require.NoError(h.t, err)
 	return current.Revision
-}
-
-func (h *datesHarness) key(msg tea.KeyPressMsg) tea.Cmd {
-	out, cmd := h.m.Update(msg)
-	h.m = out.(Model)
-	return cmd
 }
 
 func (h *datesHarness) openForm() {

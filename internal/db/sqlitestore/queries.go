@@ -1155,9 +1155,10 @@ func buildListIssuesQuery(ctx context.Context, p db.ListIssuesParams, count bool
 			op = ">"
 		}
 		key := creationKeySQL("i")
-		fmt.Fprintf(&q, " AND (%s %s ? OR (%s = ? AND i.id %s ?))", key, op, key, op)
+		// The inclusive bound lets SQLite seek while the OR preserves ties.
+		fmt.Fprintf(&q, " AND %s %s= ? AND (%s %s ? OR (%s = ? AND i.id %s ?))", key, op, key, op, key, op)
 		stamp := p.After.CreatedAt.UTC().Format(creationCursorTimeFormat)
-		args = append(args, stamp, stamp, p.After.ID)
+		args = append(args, stamp, stamp, stamp, p.After.ID)
 	}
 
 	if p.OldestFirst {
@@ -1278,9 +1279,10 @@ func buildListAllIssuesQuery(ctx context.Context, p db.ListAllIssuesParams, coun
 			op = ">"
 		}
 		key := creationKeySQL("i")
-		fmt.Fprintf(&q, " AND (%s %s ? OR (%s = ? AND i.id %s ?))", key, op, key, op)
+		// The inclusive bound lets SQLite seek while the OR preserves ties.
+		fmt.Fprintf(&q, " AND %s %s= ? AND (%s %s ? OR (%s = ? AND i.id %s ?))", key, op, key, op, key, op)
 		stamp := p.After.CreatedAt.UTC().Format(creationCursorTimeFormat)
-		args = append(args, stamp, stamp, p.After.ID)
+		args = append(args, stamp, stamp, stamp, p.After.ID)
 	}
 
 	if p.OldestFirst {
@@ -1770,6 +1772,10 @@ func (d *Store) closeIssueGuarded(
 	if err := db.CheckEvidenceTargetsTx(ctx, tx, p.Evidence); err != nil {
 		return db.Issue{}, nil, false, err
 	}
+	evidence, err := db.ResolveAttachmentEvidence(issue, p.Evidence)
+	if err != nil {
+		return db.Issue{}, nil, false, err
+	}
 	closedAt := time.Now().UTC().Format(sqliteTimeFormat)
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE issues
@@ -1815,7 +1821,7 @@ func (d *Store) closeIssueGuarded(
 		Reason:                 p.Reason,
 		ClosedAt:               closedAt,
 		Message:                p.Message,
-		Evidence:               p.Evidence,
+		Evidence:               evidence,
 		Transcript:             p.Transcript,
 		ParentUID:              parentUIDForPayload,
 		ParentShortID:          parentSIDForPayload,
@@ -2705,9 +2711,11 @@ func (d *Store) insertEventTx(ctx context.Context, tx *sql.Tx, in eventInsert) (
 	contentHash := in.ContentHash
 	eventActor := in.Actor
 	if contentHash == "" {
-		eventActor, err = d.effectiveLocalEventActorTx(ctx, tx, in.ProjectID, originInstanceUID, eventActor)
-		if err != nil {
-			return db.Event{}, err
+		if in.Type != db.ProjectScopeResetEventType {
+			eventActor, err = d.effectiveLocalEventActorTx(ctx, tx, in.ProjectID, originInstanceUID, eventActor)
+			if err != nil {
+				return db.Event{}, err
+			}
 		}
 		contentHash, err = db.EventContentHash(db.EventHashInput{
 			UID:               eventUID,
@@ -2751,14 +2759,16 @@ func (d *Store) insertEventTx(ctx context.Context, tx *sql.Tx, in eventInsert) (
 	if err != nil {
 		return db.Event{}, fmt.Errorf("read event: %w", err)
 	}
-	if in.ContentHash == "" {
-		if err := d.recordNativeRootAttributionTx(ctx, tx, e); err != nil {
+	if in.Type != db.ProjectScopeResetEventType {
+		if in.ContentHash == "" {
+			if err := d.recordNativeRootAttributionTx(ctx, tx, e); err != nil {
+				return db.Event{}, err
+			}
+		} else if err := d.attachStoredRootReceiptTx(ctx, tx, e); err != nil {
 			return db.Event{}, err
 		}
-	} else if err := d.attachStoredRootReceiptTx(ctx, tx, e); err != nil {
-		return db.Event{}, err
 	}
-	if !in.SkipRelay {
+	if !in.SkipRelay && in.Type != db.ProjectScopeResetEventType {
 		if err := d.queueRelaySourceTx(ctx, tx, e); err != nil {
 			return db.Event{}, err
 		}

@@ -21,6 +21,7 @@ type federationEventType struct {
 var federationEventTypes = []federationEventType{
 	{name: "project.metadata_updated", version: 30},
 	{name: "issue.created", version: 30},
+	{name: "issue.moved", version: 30, feature: IssueMoveEventFeature},
 	{name: "issue.snapshot", version: 30, snapshot: true},
 	{name: "issue.updated", version: 30},
 	{name: "issue.closed", version: 30},

@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-02
+last_edited: 2026-11-03
 ---
 
 # CLI reference
@@ -876,14 +876,13 @@ The issue's target `short_id` is assigned by the daemon during the move, so it
 may differ from the source `short_id` if the target project already has a
 collision. `--dry` asks the daemon to validate the same move restrictions
 without changing issues, claims, comments, or the event cursor. The preview lists
-every issue that would move. It rejects
-recurrence-pinned issues, archived projects, federation bindings, active external
-root claims, and import mapping or issue-sync ownership conflicts just as a real
-move does. Any descendant that fails a rule rejects the whole move, and the
-error names that descendant. A descendant in an archived project also rejects
-the move with `issue_move_descendant_archived`; restore its project or remove
-its parent link first. A preview validates the current state; a later move
-checks it again.
+every issue that would move. It rejects recurrence-pinned issues, archived projects,
+incompatible federation bindings, active external root claims, and import mapping
+or issue-sync ownership conflicts just as a real move does. Any descendant that
+fails a rule rejects the whole move, and the error names that descendant. A
+descendant in an archived project also rejects the move with
+`issue_move_descendant_archived`; restore its project or remove its parent link
+first. A preview validates the current state; a later move checks it again.
 The target short ID is assigned only during the real move. `--comment` is ignored
 by a preview. Subtree moves require daemon API 0.35.0 or newer. With older
 daemons, `--single` preserves the legacy move request; `--single --dry` requires
@@ -892,10 +891,13 @@ request fields.
 A preview is a move request, so it needs the same write authority as a real
 move. Read-only tokens and `--insecure-readonly` clients cannot preview.
 
-Moves involving any federated project are unsupported on both hubs and spokes,
-including projects whose sync is disabled. The daemon returns
-`federated_move_unsupported` rather than treating a hub as a read-only spoke.
-See [Federation](../operations/federation.md#moving-issues-between-projects).
+Federated moves require both projects to use the same active hub. Spokes require
+both projects to be joined, use the same federation actor, and have push enabled
+for a local move. Relay-connected projects are unsupported. Different hubs,
+paused bindings, and mixed local/federated projects return
+`federated_move_unsupported`; create an issue in the target project and link it to
+the original. See [Federation](../operations/federation.md#moving-issues-between-projects)
+for peer requirements.
 
 Links survive a move: `parent`, `blocks`/`blocked-by`, and `related` edges
 are never removed or rewritten. See the link-flag reference above for
@@ -969,6 +971,7 @@ kata close <ref> --done --message <text> \
   [--pr <url>] \
   [--test <command>] \
   [--reviewed <path>] \
+  [--docbank <node-id|/path>] \
   [--evidence <type:value>] \
   [--idempotency-key <key>] \
   [--if-match <revision>] \
@@ -977,6 +980,15 @@ kata close <ref> --done --message <text> \
 
 Repeat `--commit`, `--pr`, `--test`, `--reviewed`, or `--evidence` to record
 more than one item, for example a fix that landed in two pull requests.
+
+`--evidence attachment:<id-or-unique-suffix>` cites a live issue attachment
+as done evidence and freezes its descriptor in history. Repeat `--docbank`
+with a Docbank node ID or absolute path to link current file versions and cite
+them in one close. Both forms require daemon API 0.39.0. `--docbank` is
+done-only and rejects `--dry`, `--if-match` and `--idempotency-key`; link first
+for those workflows. Partial link failures leave the issue open and list the
+IDs already linked. See [document close evidence](../guide/attachments.md#cite-a-document-when-closing-work)
+for historical versions, offline closes and stable retries.
 
 `--dry` validates the close without changing the issue and reports the close
 event it would record. Releases before 0.19.0 spelled this flag `--dry-run`.
@@ -1007,7 +1019,7 @@ Evidence is validated against the close reason:
 
 | Reason | Evidence rule |
 | --- | --- |
-| `done` | One or more of `commit`, `pr`, `test`, `reviewed-paths`, or `external` |
+| `done` | One or more of `commit`, `pr`, `test`, `reviewed-paths`, `external`, or `attachment` |
 | `wontfix` | No evidence; any evidence item is rejected |
 | `duplicate` | Exactly one `duplicate-of` item |
 | `superseded` | Exactly one `superseded-by` item |
@@ -1999,7 +2011,7 @@ read the jobs, it reopens without a prompt.
 
 Press `u` in the issue list or detail view to undo the latest eligible issue
 edit from this TUI session. Repeated presses walk back through up to 20 edits,
-including close, reopen, owner, priority, label, body, dates, and newly added
+including close, reopen, owner, priority, label, body, dates, delete, and newly added
 parent, blocker, or related links. Undo follows the recorded issue across
 navigation and projects; it does not target whichever row is currently
 selected. It makes a new attributed change, so the original audit event
@@ -2012,8 +2024,8 @@ Creating an issue or comment, making a timed assignment or owner edit involving
 an expiry, changing the status of a recurring issue, closing an issue with a
 live federation lease, or reopening an issue closed for a reason other than
 `done` clears the undo history. Switching daemons also clears it.
-Before undo writes, the TUI reads the affected issue or exact link and refuses
-an observed conflicting change. It skips that history entry without changing
+Except when restoring a deletion, undo reads the affected issue or exact link
+and refuses an observed conflicting change. It skips that history entry without changing
 the issue, so pressing `u` again reaches earlier edits. The revision check also
 rejects intervening status or owner changes, including changes away and back
 to the same value. These checks are not atomic: another client can edit the
@@ -2048,6 +2060,20 @@ since the form opened, nothing is written; the form stays open and shows the
 current dates so you can edit them again. The detail properties show both
 dates once either is set, and `u` writes the previous dates back under the
 same revision check.
+
+In the issue list, press `X` to soft-delete the selected issue. In split
+layout, focus the list first. In Inbox and while browsing from Attention, use
+`kata delete` instead. The form shows the issue's title and the header
+`DELETE <project>#<id>`, the string `kata delete --confirm` takes. Type
+`DELETE <project>#<id>` and press `Enter`. `Enter` does nothing until the text
+matches. `Esc` cancels before the request starts. The selection then moves to
+the next row (the previous one after the last), and a notice names `u`.
+`u` restores the issue the way `kata restore` does; if the issue was restored
+elsewhere in the meantime, the TUI says so and changes nothing. Deletions share
+the 20-entry undo limit and the history-clearing boundaries above. Use
+`kata restore` after the undo history clears or the session ends. Issue-scoped
+credentials cannot delete or restore, so `X` is not offered to them and does
+nothing.
 
 In the issue list, `v` toggles between nested and flat views: nested groups
 children under parents, while flat shows matching issues as peers in list

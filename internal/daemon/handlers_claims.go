@@ -26,6 +26,7 @@ import (
 	"go.kenn.io/kata/internal/federationcoord"
 	"go.kenn.io/kata/internal/federationsigning"
 	"go.kenn.io/kata/internal/federationsigning/signingpolicy"
+	"go.kenn.io/kata/internal/projectscope"
 )
 
 // projectScopedClaimActionEvent rewrites the lease action response's event
@@ -957,6 +958,9 @@ func (c *claimHubClient) ClaimIssue(
 		return api.ClaimResponseBody{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if err := addClaimForwardProjectScope(ctx, req); err != nil {
+		return api.ClaimResponseBody{}, err
+	}
 	resp, err := c.client.Do(req) //nolint:gosec // the binding's canonical hub origin configures this client and pins its bearer token.
 	if err != nil {
 		return api.ClaimResponseBody{}, err
@@ -1004,34 +1008,82 @@ func applyForwardedAssignmentClaim(
 	for _, event := range forwarded.Events {
 		allUIDs = append(allUIDs, event.UID)
 	}
-	insertedUIDs := make([]string, 0, len(receivedEvents))
+	type eventGroup struct {
+		projectID    int64
+		eventUIDs    []string
+		insertedUIDs map[string]struct{}
+		seenUIDs     map[string]struct{}
+	}
+	groupsByProject := make(map[int64]*eventGroup)
+	groups := make([]*eventGroup, 0, len(receivedEvents))
+	projectIDsByUID := make(map[string]int64)
 	for _, event := range receivedEvents {
-		inserted, err := cfg.DB.InsertRemoteEvent(ctx, projectID, remoteEventFromStoredEvent(event))
+		eventProjectID := projectID
+		if event.ProjectUID != "" {
+			var known bool
+			eventProjectID, known = projectIDsByUID[event.ProjectUID]
+			if !known {
+				project, err := cfg.DB.ProjectByUID(ctx, event.ProjectUID)
+				if err != nil {
+					return nil, err
+				}
+				eventProjectID = project.ID
+				projectIDsByUID[event.ProjectUID] = eventProjectID
+			}
+		}
+		group := groupsByProject[eventProjectID]
+		if group == nil {
+			group = &eventGroup{
+				projectID: eventProjectID, insertedUIDs: make(map[string]struct{}),
+				seenUIDs: make(map[string]struct{}),
+			}
+			groupsByProject[eventProjectID] = group
+			groups = append(groups, group)
+		}
+		if _, seen := group.seenUIDs[event.UID]; !seen {
+			group.eventUIDs = append(group.eventUIDs, event.UID)
+			group.seenUIDs[event.UID] = struct{}{}
+		}
+		inserted, err := cfg.DB.InsertRemoteEvent(ctx, eventProjectID, remoteEventFromStoredEvent(event))
 		if err != nil {
 			return nil, err
 		}
 		if inserted {
-			insertedUIDs = append(insertedUIDs, event.UID)
+			group.insertedUIDs[event.UID] = struct{}{}
 		}
 	}
-	if len(receivedEvents) > 0 {
-		if err := cfg.DB.MaterializeFederatedProject(ctx, projectID); err != nil {
+	for _, group := range groups {
+		if err := cfg.DB.MaterializeFederatedProject(ctx, group.projectID); err != nil {
 			return nil, err
+		}
+	}
+	storedByUID := make(map[string]db.Event, len(receivedEvents))
+	for _, group := range groups {
+		stored, err := cfg.DB.EventsByUIDs(ctx, group.projectID, group.eventUIDs)
+		if err != nil {
+			return nil, err
+		}
+		insertedEvents := make([]db.Event, 0, len(group.insertedUIDs))
+		for _, event := range stored {
+			storedByUID[event.UID] = event
+			if _, inserted := group.insertedUIDs[event.UID]; inserted {
+				insertedEvents = append(insertedEvents, event)
+			}
+		}
+		// Publish each committed event under its envelope project before any
+		// response-only issue or projection read can fail.
+		cfg.Publish().Events(group.projectID, insertedEvents)
+	}
+	events := make([]db.Event, 0, len(allUIDs))
+	for _, uid := range allUIDs {
+		if event, ok := storedByUID[uid]; ok {
+			events = append(events, event)
 		}
 	}
 	issue, err := cfg.DB.IssueByUID(ctx, issueUID, db.IncludeDeletedNo)
 	if err != nil {
 		return nil, err
 	}
-	events, err := cfg.DB.EventsByUIDs(ctx, projectID, allUIDs)
-	if err != nil {
-		return nil, err
-	}
-	insertedEvents, err := cfg.DB.EventsByUIDs(ctx, projectID, insertedUIDs)
-	if err != nil {
-		return nil, err
-	}
-	cfg.Publish().Events(projectID, insertedEvents)
 	// Response events follow the scoped projection contract shared by every
 	// mutation response; publishing above stays raw so mirror subscribers and
 	// hooks keep the durable form. Remote event rows carry no local issue_id
@@ -1175,7 +1227,11 @@ func normalizeForwardedClaimStatus(body *api.ClaimStatusBody) {
 type claimHubDoer struct{ client *http.Client }
 
 func (d claimHubDoer) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
-	resp, err := d.client.Do(req.WithContext(ctx)) //nolint:gosec // G704: generated lease routes use the operator-configured federation hub and its origin-pinned transport.
+	req = req.Clone(ctx)
+	if err := addClaimForwardProjectScope(ctx, req); err != nil {
+		return nil, err
+	}
+	resp, err := d.client.Do(req) //nolint:gosec // G704: generated lease routes use the operator-configured federation hub and its origin-pinned transport.
 	if err != nil {
 		return nil, err
 	}
@@ -1185,6 +1241,29 @@ func (d claimHubDoer) Do(ctx context.Context, req *http.Request) (*http.Response
 		return nil, &claimHubStatusError{Path: req.URL.Path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(body))}
 	}
 	return resp, nil
+}
+
+// Native hub and spoke project UIDs identify the same projects. Carry the
+// caller's effective project authority, including fixed request limits, so a
+// broader transport credential cannot escape it when the spoke is stale.
+func addClaimForwardProjectScope(ctx context.Context, req *http.Request) error {
+	decision, _ := ctx.Value(projectAccessContextKey{}).(*ProjectAccessDecision)
+	if decision == nil {
+		return nil
+	}
+	projects := narrowProjectUIDs(decision.ProjectUIDs, decision.fixedUIDs)
+	if projects == nil {
+		return nil
+	}
+	if len(projects) == 0 {
+		return projectAccessDenied()
+	}
+	limit, err := json.Marshal(projects)
+	if err != nil {
+		return err
+	}
+	req.Header.Add(projectscope.Header, string(limit))
+	return nil
 }
 
 func requireHubClaimBinding(ctx context.Context, store db.Storage, projectID int64) error {
@@ -1330,7 +1409,7 @@ func refreshShowClaimStatus(ctx context.Context, cfg ServerConfig, issue db.Issu
 		}
 		return nil, err
 	}
-	resp, err := remote.ClaimStatus(remoteCtx, cred.HubProjectID, issue.ShortID)
+	resp, err := remote.ClaimStatus(remoteCtx, cred.HubProjectID, issue.UID)
 	cancelRemote()
 	if err != nil {
 		if statusErr, ok := errors.AsType[*claimHubStatusError](err); ok {

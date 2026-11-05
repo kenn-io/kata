@@ -71,6 +71,12 @@ func (c *undoClient) undo(ctx context.Context, entry undoEntry, opts undoOptions
 		out.conflict = "daemon principal changed"
 		return out
 	}
+	// A deleted issue cannot be read. Restore by UID and let changed=false
+	// report that another client already restored it.
+	if entry.kind == "delete" {
+		out.resp, out.err = c.RestoreIssue(ctx, entry.projectID, entry.uid, entry.actor)
+		return c.finishUndo(ctx, entry, out)
+	}
 	detail, err := c.GetIssueDetail(ctx, entry.projectID, entry.uid)
 	if err != nil {
 		out.err = err
@@ -255,17 +261,25 @@ func (c *undoClient) undo(ctx context.Context, entry undoEntry, opts undoOptions
 		out.err = fmt.Errorf("unsupported undo action %q", entry.kind)
 		return out
 	}
+	return c.finishUndo(ctx, entry, out)
+}
+
+func (c *undoClient) finishUndo(ctx context.Context, entry undoEntry, out undoOutcome) undoOutcome {
 	if out.err != nil {
-		attempt.unknown = ambiguousWriteError(out.err)
+		out.attempt.unknown = ambiguousWriteError(out.err)
 		return out
 	}
 	if out.resp == nil {
 		out.err = errors.New("undo returned no response")
-		attempt.unknown = true
+		out.attempt.unknown = true
 		return out
 	}
 	out.changed = out.resp.Changed
 	if !out.changed {
+		if entry.kind == "delete" {
+			out.already = true
+			return out
+		}
 		out.already, out.err = c.restoredAfterNoop(ctx, entry)
 		if out.err == nil && !out.already {
 			out.err = errors.New("undo returned no change; issue still needs correction")
