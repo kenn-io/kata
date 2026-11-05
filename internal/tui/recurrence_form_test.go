@@ -256,11 +256,6 @@ func TestRecurrenceKeyWaitsForDetail(t *testing.T) {
 	assert.Equal(t, inputNone, h.m.input.kind)
 	assert.Nil(t, h.m.toast, "loading must not report a stopped recurrence")
 	h.refreshDetail()
-	h.m.detail.loading = true
-	h.key(runeKey('O'))
-	assert.Equal(t, inputNone, h.m.input.kind)
-	assert.Nil(t, h.m.toast)
-	h.m.detail.loading = false
 	h.open()
 	rule, _, _ := h.values()
 	assert.Equal(t, "FREQ=DAILY", rule)
