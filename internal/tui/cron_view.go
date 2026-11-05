@@ -177,6 +177,13 @@ func (m Model) leaveCron() Model {
 	}
 	return m
 }
+
+// Tab keeps its existing meaning in split panes, detail, filters and editors.
+func (m Model) canCycleTopLevelTabs() bool {
+	return m.view == viewList && m.layout != splitlayout.Split ||
+		m.view == viewCron && !m.cron.help && len(m.cron.stack) == 0
+}
+
 func (m Model) switchCronTab(key string) Model {
 	tab := int(key[0] - '1')
 	if m.view != viewCron {

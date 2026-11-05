@@ -43,7 +43,7 @@ type key struct {
 // newKeymap returns the spec §7.3 bindings.
 func newKeymap() keymap {
 	return keymap{
-		Tabs:         key{Keys: []string{"1", "2", "3", "4"}, Help: "switch tab", Display: "1-4"},
+		Tabs:         key{Keys: []string{"1", "2", "3", "4"}, Help: "switch tab (Tab/Shift+Tab in lists)", Display: "1-4"},
 		Help:         key{Keys: []string{"?"}, Help: "help"},
 		Quit:         key{Keys: []string{"q", "ctrl+c"}, Help: "quit"},
 		Projects:     key{Keys: []string{"P"}, Help: "projects"},

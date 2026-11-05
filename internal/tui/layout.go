@@ -25,7 +25,7 @@ var splitConfig = splitlayout.Config{
 }
 
 func (m Model) splitGeometry() splitlayout.Geom {
-	return splitConfig.Geometry(m.width, m.height, helpLines(m.splitHelpRows(), m.width))
+	return splitConfig.Geometry(m.width, m.contentHeight(), helpLines(m.splitHelpRows(), m.width))
 }
 
 // resolveLayout returns the splitlayout.Mode the model should render for

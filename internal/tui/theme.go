@@ -135,7 +135,7 @@ func applyColorMode(m colorMode, isDark bool) {
 		toastStyle = base.Bold(true)
 		chipStyle = base
 		chipActive = base.Bold(true)
-		tabActive = base.Bold(true).Underline(true)
+		tabActive = base.Bold(true)
 		tabInactive = base.Faint(true)
 		detailMetaStyle = base
 		detailSectionHeaderStyle = base.Bold(true)
@@ -195,7 +195,7 @@ func applyColorMode(m colorMode, isDark bool) {
 	toastStyle = lipgloss.NewStyle().Bold(true).Foreground(pick("28", "46"))
 	chipStyle = lipgloss.NewStyle().Foreground(pick("242", "246"))
 	chipActive = lipgloss.NewStyle().Bold(true).Foreground(pick("125", "205"))
-	tabActive = lipgloss.NewStyle().Bold(true).Underline(true).Foreground(pick("125", "205"))
+	tabActive = lipgloss.NewStyle().Bold(true).Foreground(pick("125", "205"))
 	tabInactive = lipgloss.NewStyle().Foreground(pick("242", "246"))
 	// detailMetaStyle and detailSectionHeaderStyle no longer paint a
 	// background band. The earlier full-width slabs read as heavy

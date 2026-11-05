@@ -149,19 +149,22 @@ func (lm listModel) renderBodyArea(width, bodyRows int, chrome viewChrome) strin
 	return strings.Join(rendered, "\n")
 }
 
-// renderTitleBar formats the top brand strip:
-//
-//	Project: {name}                         kata カタ · vX.Y.Z
-//
-// Project context lives on the left because it's what the user is
-// actually working in; brand + version are window-chrome and pin to
-// the right. `カタ` is katakana for "form/pattern" — the romaji
-// disambiguator for the brand vs. a project that happens to also be
-// named "kata". All-projects scope and the empty-scope hint render
-// in the project slot so the left side is never blank.
+// renderTitleBar is the shared navigation header for issue browsing.
 func renderTitleBar(width int, sc scope, version string, daemon ...string) string {
-	left := titleBarLeft(sc)
-	right := titleBarRight(version, firstDaemonLabel(daemon))
+	return renderTabHeader(width, cronKata, sc, version, firstDaemonLabel(daemon))
+}
+
+// Navigation has priority on small terminals; project and daemon context use
+// the remaining right-hand space instead of occupying a permanent status row.
+func renderTabHeader(width, tab int, sc scope, version, daemon string) string {
+	left := cronTabs(tab)
+	right := titleBarLeft(sc)
+	if clean := sanitizeForLine(daemon); clean != "" {
+		right += " · Daemon: " + clean
+	}
+	if version != "" {
+		right += " · " + sanitizeForLine(version)
+	}
 	body := padLeftRightInside(left, right, titleBarInnerWidth(width))
 	return titleBarStyle.Render(body)
 }
@@ -263,7 +266,7 @@ func statsCountsText(c issueCounts) string {
 //  2. SSE-degraded indicator when sseStatus != connected.
 //  3. A toast (e.g. "resynced").
 //  4. A truncation notice when the loaded issue set hit its limit.
-//  5. Tabs on the left, with the scroll or cursor indicator on the right.
+//  5. The scroll or cursor indicator on the right.
 //
 // dataBudget is the actual data-row budget the table renders into;
 // the scroll indicator only fires when the visible list exceeds it.
@@ -293,7 +296,7 @@ func renderListInfoLine(width int, chrome viewChrome, lm listModel, dataBudget i
 		} else if n > 0 {
 			position = footerPositionIndicator(lm.cursor, n)
 		}
-		body = padLeftRightInside(cronTabs(cronKata), position, titleBarInnerWidth(width))
+		body = rightAlignInside(position, titleBarInnerWidth(width))
 	}
 	return statsLineStyle.Render(padToWidth(body, titleBarInnerWidth(width)))
 }

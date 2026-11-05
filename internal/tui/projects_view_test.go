@@ -108,7 +108,7 @@ func TestProjectsView_RendersTable(t *testing.T) {
 
 	out := m.viewContent()
 	for _, want := range []string{
-		"kata / projects", "Project", "Open", "Closed", "Total", "Updated",
+		"[kata]", "Project", "Open", "Closed", "Total", "Updated",
 		"All projects", "kata", "roborev",
 	} {
 		assert.Contains(t, out, want, "missing %q in viewProjects output", want)

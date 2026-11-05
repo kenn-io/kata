@@ -2,7 +2,6 @@ package tui
 
 import (
 	"net/http"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -18,7 +17,7 @@ func TestActiveConnectionDirectRemoteAndRevoked(t *testing.T) {
 		m.activeDaemon = daemonTarget{URL: "https://daemon.example"}
 		m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{Actor: "member"}})
 		m.sseStatus = sseReconnecting
-		header, _, _ := strings.Cut(stripANSI(m.viewContent()), "\n")
+		header := connectionAttentionRow(t, m)
 		require.Contains(t, header, "Hub: daemon.example")
 		require.NotContains(t, header, "Local daemon")
 	})
@@ -28,7 +27,7 @@ func TestActiveConnectionDirectRemoteAndRevoked(t *testing.T) {
 		m.height = 24
 		m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{Actor: "member"}})
 		m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{err: &APIError{Status: http.StatusUnauthorized, Code: "unauthorized", Message: "credential revoked"}})
-		header, _, _ := strings.Cut(stripANSI(m.viewContent()), "\n")
+		header := connectionAttentionRow(t, m)
 		require.Contains(t, header, "Authentication required")
 		require.NotContains(t, header, "member")
 	})

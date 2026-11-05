@@ -23,11 +23,11 @@ func TestActiveConnectionHeaderEveryView(t *testing.T) {
 			m.activeDaemon = daemonTarget{Name: "shared-hub"}
 			m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{Kind: "token", Actor: "member", TokenAuditRead: false}})
 			m.sseStatus = sseReconnecting
-			header, _, _ := strings.Cut(stripANSI(m.viewContent()), "\n")
+			header := connectionAttentionRow(t, m)
 			require.Contains(t, header, "Hub: shared-hub")
 			require.Contains(t, header, "Reconnecting")
 			m.width = 60
-			narrow, _, _ := strings.Cut(m.viewContent(), "\n")
+			narrow := connectionAttentionRow(t, m)
 			require.LessOrEqual(t, ansi.StringWidth(narrow), 60)
 			require.Contains(t, stripANSI(narrow), "Reconnecting")
 		})
@@ -55,9 +55,8 @@ func TestActiveConnectionHeaderFencesStaleReplies(t *testing.T) {
 	require.NotContains(t, stripANSI(m.viewContent()), "Hub:")
 }
 
-// The connection summary shares the title-bar row, so it must yield to the
-// project scope label at narrow widths and leave the title bar's right
-// cluster visible when the row has room.
+// The attention row preserves project context at narrow widths and keeps
+// daemon/version context when room remains. Navigation has its own row.
 func TestActiveConnectionHeaderKeepsTitleBarContent(t *testing.T) {
 	defer snapshotInit(t)()
 	priorVersion := kataVersion
@@ -91,7 +90,7 @@ func TestActiveConnectionHeaderKeepsTitleBarContent(t *testing.T) {
 		{240, "shared-hub"},
 	} {
 		m := model(tc.width, tc.hub)
-		header, _, _ := strings.Cut(stripANSI(m.viewContent()), "\n")
+		header := connectionAttentionRow(t, m)
 		if tc.width < 240 {
 			require.NotContains(t, header, m.activeDaemon.Name)
 			require.NotContains(t, header, m.activeAuth.Actor)
@@ -147,7 +146,7 @@ func TestActiveConnectionHeaderAttentionStates(t *testing.T) {
 			m.activeAuth = tc.auth
 			m.activeAuthError = tc.err
 			m.sseStatus = tc.sse
-			header, _, _ := strings.Cut(stripANSI(m.viewContent()), "\n")
+			header := connectionAttentionRow(t, m)
 			require.True(t, strings.HasPrefix(header, tc.status+" · Hub: shared-hub · Account: — · Project: example-project"), "header: %s", header)
 			if tc.absent != "" {
 				require.NotContains(t, header, tc.absent)
@@ -170,8 +169,16 @@ func TestActiveConnectionHeaderReadOnlyAccount(t *testing.T) {
 			m.width = 160
 			m.height = 24
 			m, _ = m.handleAuthCapabilities(authCapabilitiesMsg{auth: AuthInfo{Kind: tc.kind}})
-			header, _, _ := strings.Cut(stripANSI(m.viewContent()), "\n")
+			header := connectionAttentionRow(t, m)
 			require.True(t, strings.HasPrefix(header, "Read-only · Hub: Local daemon · Account: "+tc.account+" · "), "header: %s", header)
 		})
 	}
+}
+
+func connectionAttentionRow(t *testing.T, m Model) string {
+	t.Helper()
+	rows := strings.Split(stripANSI(m.viewContent()), "\n")
+	require.GreaterOrEqual(t, len(rows), 2)
+	require.Contains(t, rows[0], "jobs runs workflows")
+	return rows[1]
 }

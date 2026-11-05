@@ -42,33 +42,47 @@ func actorlessConnectionLabel(kind string) string {
 	}
 }
 
-// Reuse the existing header row. No body, mouse, or modal coordinates move.
-func (m Model) withActiveConnectionHeader(body string) string {
-	if !m.authCapabilitiesRequired || m.width <= 0 {
-		return body
-	}
-	status := "Connected"
+// activeConnectionStatus is empty when no connection state needs attention.
+// Authentication checks apply only after capability discovery is required;
+// transport failures also matter on older daemons without that discovery.
+func (m Model) activeConnectionStatus() string {
 	switch {
-	case m.activeAuth.ExpiresAt != nil && !m.toastNow().Before(*m.activeAuth.ExpiresAt):
-		status = "Credential expired"
-	case m.activeAuthRejected || strings.Contains(strings.ToLower(m.activeAuthError), "authentication required"):
-		status = "Authentication required"
-	case m.activeAuthError != "":
-		status = "Connection unavailable"
-	case !m.authCapabilitiesReady:
-		status = "Connecting"
+	case m.authCapabilitiesRequired && m.activeAuth.ExpiresAt != nil && !m.toastNow().Before(*m.activeAuth.ExpiresAt):
+		return "Credential expired"
+	case m.authCapabilitiesRequired && (m.activeAuthRejected || strings.Contains(strings.ToLower(m.activeAuthError), "authentication required")):
+		return "Authentication required"
+	case m.authCapabilitiesRequired && m.activeAuthError != "":
+		return "Connection unavailable"
+	case m.authCapabilitiesRequired && !m.authCapabilitiesReady:
+		return "Connecting"
 	case m.sseStatus == sseReconnecting:
-		status = "Reconnecting"
+		return "Reconnecting"
 	case m.sseStatus == sseDisconnected:
-		status = "Disconnected"
-	case m.activeAuth.Kind == "insecure_readonly" || m.activeAuth.Kind == "bootstrap" || m.activeAuth.Kind == "trusted_proxy_absent" || !m.mutationAllowed(true):
-		status = "Read-only"
+		return "Disconnected"
+	case m.authCapabilitiesRequired && (m.activeAuth.Kind == "insecure_readonly" || m.activeAuth.Kind == "bootstrap" || m.activeAuth.Kind == "trusted_proxy_absent" || !m.mutationAllowed(true)):
+		return "Read-only"
 	}
-	// A healthy connection keeps the normal header row; the summary is
-	// only for states that need attention.
-	if status == "Connected" {
+	return ""
+}
+
+func (m Model) connectionHeaderRows() int {
+	if m.width > 0 && m.height > 1 && m.activeConnectionStatus() != "" {
+		return 1
+	}
+	return 0
+}
+
+func (m Model) contentHeight() int {
+	return max(m.height-m.connectionHeaderRows(), 0)
+}
+
+// Keep navigation pinned above the attention row. Renderers reserve its height
+// before drawing their bodies, so footers and viewport geometry stay aligned.
+func (m Model) withActiveConnectionHeader(body string) string {
+	if m.connectionHeaderRows() == 0 {
 		return body
 	}
+	status := m.activeConnectionStatus()
 	account := "—"
 	if status == "Read-only" {
 		account = sanitizeForLine(m.activeAuth.Actor)
@@ -81,28 +95,18 @@ func (m Model) withActiveConnectionHeader(body string) string {
 		hub = "Local daemon"
 	}
 	first, rest, more := strings.Cut(body, "\n")
-	left, right := m.headerRowContent(first)
+	chrome := m.chrome()
+	left, right := titleBarLeft(chrome.scope), titleBarRight(chrome.version, chrome.daemon)
 	summary := m.connectionSummaryRow(status, hub, account, left, right)
 	summary = lipgloss.NewStyle().Background(lipgloss.Color("#fff3bb")).Foreground(lipgloss.Color("#493800")).Render(summary)
 	if more {
-		return summary + "\n" + rest
+		return first + "\n" + summary + "\n" + rest
 	}
-	return summary
+	return first + "\n" + summary
 }
 
-// headerRowContent splits the row the summary replaces into the label that
-// must survive (the title bar's project scope, or another view's heading)
-// and the title bar's right cluster, which is shown only when room remains.
-func (m Model) headerRowContent(first string) (string, string) {
-	chrome := m.chrome()
-	if first == renderTitleBar(m.width, chrome.scope, chrome.version, chrome.daemon) {
-		return titleBarLeft(chrome.scope), titleBarRight(chrome.version, chrome.daemon)
-	}
-	return strings.TrimSpace(ansi.Strip(first)), ""
-}
-
-// connectionSummaryRow fits one row in priority order: status, the replaced
-// row's label, hub and account, then the right cluster.
+// connectionSummaryRow fits one row in priority order: status, project,
+// hub and account, then the version cluster.
 func (m Model) connectionSummaryRow(status, hub, account, left, right string) string {
 	width := m.width
 	tail := ""

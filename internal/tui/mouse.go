@@ -136,6 +136,10 @@ func (m Model) mouseListWheel(delta int) (Model, tea.Cmd) {
 }
 
 func (m Model) mouseLeftClick(x, y int) (Model, tea.Cmd) {
+	y -= m.connectionHeaderRows()
+	if y < 0 {
+		return m, nil
+	}
 	if m.view == viewProjects {
 		return m.mouseProjectsClick(y)
 	}
@@ -153,7 +157,7 @@ func (m Model) mouseLeftClick(x, y int) (Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.view == viewList {
-		if m.height < listMinHeight {
+		if m.contentHeight() < listMinHeight {
 			return m.mouseListClick(y - 3) // Title, search and table header precede compact rows.
 		}
 		return m.mouseListClick(y - stackedListDataRowY)
@@ -193,11 +197,11 @@ func (m Model) listDataBudget() int {
 		innerH := max(m.splitGeometry().ListInnerH, 2)
 		return innerH - 2
 	}
-	if m.height < listMinHeight {
+	if m.contentHeight() < listMinHeight {
 		return m.listRenderedDataRows()
 	}
 	footerLines := helpLines(listHelpRows(m.list, m.chrome()), m.width)
-	bodyRows := max(m.height-2-1-footerLines, listBodyFloor)
+	bodyRows := max(m.contentHeight()-2-1-footerLines, listBodyFloor)
 	return bodyRows - 2
 }
 
@@ -210,7 +214,7 @@ func (m Model) mouseProjectsClick(y int) (Model, tea.Cmd) {
 	budget := len(rows)
 	if m.height > 0 {
 		footerLines := helpLines(projectsHelpRows(), m.width)
-		budget = max(m.height-projectsViewChromeRows(footerLines), 1)
+		budget = max(m.contentHeight()-projectsViewChromeRows(footerLines), 1)
 	}
 	visible := clipProjectsRows(rows, m.projectsCursor, budget)
 	if row >= len(visible) {

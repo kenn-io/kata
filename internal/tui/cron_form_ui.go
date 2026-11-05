@@ -430,8 +430,7 @@ func renderCronForm(m Model) string {
 		title = "Edit job · " + sanitizeForLine(f.openedName)
 	}
 	body := []string{
-		renderTitleBar(m.width, m.scope, kataVersion, m.chrome().daemon),
-		cronTabs(m.cron.tab),
+		renderTabHeader(m.width, m.cron.tab, m.scope, kataVersion, m.chrome().daemon),
 		statsLineStyle.Render(padLeftRightInside(title, f.uid, titleBarInnerWidth(m.width))),
 		"",
 	}

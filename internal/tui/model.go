@@ -48,19 +48,21 @@ const (
 // toastNow is a clock injection point: production uses time.Now, tests
 // replace it to drive deterministic toast expiry.
 type Model struct {
-	telemetry           *telemetryGate
-	searchQuery         string
-	searchCounted       string
-	telemetryScreen     string
-	telemetryConnGen    uint64
-	telemetryDay        string
-	opts                Options
-	api                 KataAPI
-	scope               scope
-	view                viewID
-	prevView            viewID
-	width               int
-	height              int
+	telemetry        *telemetryGate
+	searchQuery      string
+	searchCounted    string
+	telemetryScreen  string
+	telemetryConnGen uint64
+	telemetryDay     string
+	opts             Options
+	api              KataAPI
+	scope            scope
+	view             viewID
+	prevView         viewID
+	width            int
+	height           int
+	// Track the rendered alert height across time-driven credential expiry.
+	connectionRows      int
 	keymap              keymap
 	cron                cronState
 	list                listModel
@@ -413,6 +415,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	previousConn, previousScope := m.connGen, m.scopeGen
 	next, cmd := m.update(msg)
 	m = next.(Model)
+	if rows := m.connectionHeaderRows(); rows != m.connectionRows {
+		m.connectionRows = rows
+		m.detail = m.applyDetailViewportCache(m.detail)
+		m = m.applyListViewportCache()
+	}
 	query := strings.TrimSpace(m.list.filter.Search)
 	if query != m.searchQuery {
 		m.searchQuery = ""
@@ -1086,7 +1093,7 @@ func (m Model) mutationForKey(msg tea.KeyPressMsg) (withinSubtree, mutation bool
 // returns ok=false and pageStep degrades to detailFallbackPageStep.
 func (m Model) applyDetailViewportCache(dm detailModel) detailModel {
 	dm.lastTermWidth = m.width
-	dm.lastTermHeight = m.height
+	dm.lastTermHeight = m.contentHeight()
 	return m.cacheDetailViewport(dm)
 }
 
@@ -1108,18 +1115,19 @@ func (m Model) applyListViewportCache() Model {
 }
 
 func (m Model) listRenderedDataRows() int {
-	if m.width <= 0 || m.height <= 0 {
+	height := m.contentHeight()
+	if m.width <= 0 || height <= 0 {
 		return 0
 	}
 	if m.layout == splitlayout.Split {
 		innerH := max(m.splitGeometry().ListInnerH, 2)
 		return max(1, innerH-2)
 	}
-	if m.height < listMinHeight {
-		return max(0, m.height-3)
+	if height < listMinHeight {
+		return max(0, height-3)
 	}
 	footerLines := helpLines(listHelpRows(m.list, m.chrome()), m.width)
-	bodyRows := max(m.height-2-1-footerLines, listBodyFloor)
+	bodyRows := max(height-2-1-footerLines, listBodyFloor)
 	return max(1, bodyRows-1)
 }
 
@@ -2415,6 +2423,20 @@ func (m Model) routeGlobalKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if !m.canQuit() {
 		return m, nil, false
 	}
+	if !m.list.pendingPriority && m.canCycleTopLevelTabs() {
+		if key := msg.String(); key == "tab" || key == "shift+tab" {
+			tab := cronKata
+			if m.view == viewCron {
+				tab = m.cron.tab
+			}
+			delta := 1
+			if key == "shift+tab" {
+				delta = -1
+			}
+			tab = (tab + delta + len(cronTabNames)) % len(cronTabNames)
+			return m.switchCronTab(fmt.Sprint(tab + 1)), nil, true
+		}
+	}
 	if m.keymap.Tabs.matches(msg) && !m.list.pendingPriority && (m.view == viewList || m.view == viewDetail || m.view == viewCron && !m.cron.help) {
 		return m.switchCronTab(msg.String()), nil, true
 	}
@@ -3662,24 +3684,24 @@ func (m Model) viewContent() string {
 		var body string
 		switch m.view {
 		case viewProjects:
-			body = renderProjects(m)
+			body = renderProjects(m.withContentHeight())
 		case viewFederation:
-			body = renderFederation(m)
+			body = renderFederation(m.withContentHeight())
 		case viewCredentials:
-			body = renderCredentials(m)
+			body = renderCredentials(m.withContentHeight())
 		default:
 			if m.modal == modalReopenBacklog {
 				footer := renderFooterHelpTable(modalHelpRows(m.modal), m.width)
-				bodyHeight := max(0, m.height-lipgloss.Height(footer))
+				bodyHeight := max(0, m.contentHeight()-lipgloss.Height(footer))
 				body = renderTooNarrow(m.width, bodyHeight)
-				body = m.withActiveConnectionHeader(m.appendNonListDetailExtras(body))
+				body = m.withActiveConnectionHeader(m.withTabHeader(m.appendNonListDetailExtras(body)))
 				body = overlayModal(body, renderConfirmModal(m.modal, m.reopenPrompt), m.width, bodyHeight)
 				lines := strings.Split(body, "\n")
 				return joinNonEmpty([]string{strings.Join(lines[:min(bodyHeight, len(lines))], "\n"), footer})
 			}
-			body = renderTooNarrow(m.width, m.height)
+			body = renderTooNarrow(m.width, m.contentHeight())
 		}
-		body = m.withActiveConnectionHeader(m.appendNonListDetailExtras(body))
+		body = m.withActiveConnectionHeader(m.withTabHeader(m.appendNonListDetailExtras(body)))
 		return m.overlayInputAndModal(body)
 	}
 	body := m.viewBody()
@@ -3801,38 +3823,63 @@ func (m Model) cacheEntryForPrompt(s inputState) labelCacheEntry {
 // of the split path so the help overlay / onboarding hint always
 // take the full screen regardless of layout.
 func (m Model) viewBody() string {
+	return m.withTabHeader(m.renderViewBody())
+}
+
+// withTabHeader reuses auxiliary screens' heading row as well as the normal
+// issue title row. Navigation remains visible even in the narrow fallback.
+func (m Model) withTabHeader(body string) string {
+	tab := cronKata
+	if m.view == viewCron {
+		tab = m.cron.tab
+	}
+	header := renderTabHeader(m.width, tab, m.scope, kataVersion, m.chrome().daemon)
+	_, rest, more := strings.Cut(body, "\n")
+	if more {
+		return header + "\n" + rest
+	}
+	return header
+}
+
+func (m Model) withContentHeight() Model {
+	m.height = m.contentHeight()
+	return m
+}
+
+func (m Model) renderViewBody() string {
+	content := m.withContentHeight()
 	switch m.view {
 	case viewCron:
 		if m.cron.help {
-			return cronHelp(m)
+			return cronHelp(content)
 		}
 		if m.cron.form != nil {
-			return renderCronForm(m)
+			return renderCronForm(content)
 		}
-		return renderCron(m)
+		return renderCron(content)
 	case viewHelp:
 		return renderHelp(m.helpKeymap(), m.width, m.list.filter)
 	case viewEmpty:
-		return renderEmpty(m.width, m.height)
+		return renderEmpty(m.width, content.height)
 	case viewProjects:
-		return renderProjects(m)
+		return renderProjects(content)
 	case viewDaemons:
-		return renderDaemons(m)
+		return renderDaemons(content)
 	case viewFederation:
-		return renderFederation(m)
+		return renderFederation(content)
 	case viewAttention:
-		return renderAttention(m)
+		return renderAttention(content)
 	case viewCredentials:
-		return renderCredentials(m)
+		return renderCredentials(content)
 	}
 	if m.layout == splitlayout.Split {
 		return renderSplit(m)
 	}
 	switch m.view {
 	case viewList:
-		return m.list.View(m.width, m.height, m.chrome())
+		return m.list.View(m.width, content.height, m.chrome())
 	case viewDetail:
-		return m.detail.View(m.width, m.height, m.chrome())
+		return m.detail.View(m.width, content.height, m.chrome())
 	}
 	return ""
 }

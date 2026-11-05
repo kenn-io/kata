@@ -630,7 +630,7 @@ func TestCronPersistentSearch(t *testing.T) {
 			case "unavailable":
 				m.cron.data = &cronData{jobsErr: errors.New("offline"), runsErr: errors.New("offline"), workflowsErr: errors.New("offline")}
 			}
-			line := strings.Split(ansi.Strip(renderCron(m)), "\n")[2]
+			line := strings.Split(ansi.Strip(renderCron(m)), "\n")[1]
 			want := "/ search"
 			if state == "empty" {
 				want = "/absent-query"
@@ -643,7 +643,7 @@ func TestCronPersistentSearch(t *testing.T) {
 			m = sendRune(m, '/')
 			m, _ = updateModel(m, tea.PasteMsg{Content: prefix + "TAIL"})
 			m = sendRune(m, 'Z')
-			line := strings.Split(ansi.Strip(renderCron(m)), "\n")[2]
+			line := strings.Split(ansi.Strip(renderCron(m)), "\n")[1]
 			require.Contains(t, line, "TAILZ▏", "tab %c must show the edited tail and caret", tab)
 			require.LessOrEqual(t, ansi.StringWidth(line), 80)
 		}

@@ -1,4 +1,4 @@
- Project: —                                                   kata カタ
+ [kata] カタ jobs runs workflows                             Project: —
 
   #42aa  fix login bug on Safari                                  [open]
   authored by wesm
