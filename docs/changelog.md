@@ -12,13 +12,21 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Pull shared cron updates faster on large SQLite spokes by replaying cron
   history without reconciling unrelated issues and their short IDs.
 
+- Create issues faster on large SQLite stores by scoring look-alike candidates once per issue.
 - Load project stats in milliseconds on large stores in the TUI Projects screen, `kata --agent projects list`, and `?include=stats`. "Updated" follows the newest recorded event, as the web UI does; a reconnecting spoke's older relayed events can show an older time until the next local event.
 - Speed up label loading for list and ready responses and label filters in semantic or hybrid search on large SQLite stores.
 - Resume local writes sooner after spoke rebuilds of large projects by skipping
   issues and comments whose stored values already match the event log.
 - Open issues in graph mode on large stores with only the selected issue's reachable graph in the response. Previously, a 100,000-issue fixture sent 119 MB in graph mode versus 34 MB for a plain issue open.
+- Resolve issue UID prefixes without scanning unrelated issues, including with
+  project-restricted credentials. SQLite orders mixed-case candidates by their
+  case-insensitive UID value, then original bytes; PostgreSQL uses byte order
+  in every database locale while keeping case-sensitive matching. Existing
+  stores upgrade to schema 45 through SQLite's JSONL cutover or the
+  [offline PostgreSQL index build](development/postgres-migrations.md#schema-45-issue-uid-prefix-index).
 - Search references faster in the web UI on large stores; a `q` search now returns only issue references.
 - Spend 2 REST requests and 1 GraphQL request per 100-issue GitHub status sweep, down from 102 REST requests, while continuing to import upstream closes and reopens. Hosts without the required GraphQL fields keep using REST status reads.
+- Sync GitHub comment history with fewer requests by reading repository-wide comment pages and fetching only recent comments on later polls.
 
 - Keep local writes responsive on relay hubs. Creating an issue or receiving an
   unrelated snapshot leaves downstream sync incremental unless it can change the

@@ -127,6 +127,15 @@ func (f *HTTPFetcher) Comments(ctx context.Context, binding Binding, issueNumber
 	return session.Comments(ctx, binding, issueNumber)
 }
 
+// RepositoryComments reads repository-wide comment pages through one binding session.
+func (f *HTTPFetcher) RepositoryComments(ctx context.Context, binding Binding, since *time.Time) (map[int][]Comment, bool, error) {
+	session, err := f.ForBinding(ctx, binding)
+	if err != nil {
+		return nil, false, err
+	}
+	return session.RepositoryComments(ctx, binding, since)
+}
+
 func fetchRESTPagesWithClient[T any](ctx context.Context, f *HTTPFetcher, client *http.Client, binding Binding, firstURL, resource, phase string) ([]T, error) {
 	var out []T
 	retryBudget := &gitHubRetryBudget{}
@@ -226,6 +235,54 @@ func (s *httpFetcherBindingSession) Comments(ctx context.Context, binding Bindin
 		return nil, err
 	}
 	return fetchRESTPagesWithClient[Comment](ctx, s.fetcher, s.client, binding, requestURL, "GitHub comments for issue "+strconv.Itoa(issueNumber), "")
+}
+
+func (s *httpFetcherBindingSession) RepositoryComments(ctx context.Context, binding Binding, since *time.Time) (map[int][]Comment, bool, error) {
+	binding, err := normalizeBinding(binding)
+	if err != nil {
+		return nil, false, err
+	}
+	if binding != s.binding {
+		return nil, false, fmt.Errorf("GitHub fetcher session for %s/%s/%s cannot read %s/%s/%s",
+			s.binding.Host, s.binding.Owner, s.binding.Repo, binding.Host, binding.Owner, binding.Repo)
+	}
+	requestURL, err := s.fetcher.restEndpointURL(binding, repositoryCommentsEndpoint(binding, since))
+	if err != nil {
+		return nil, false, err
+	}
+	rows, err := fetchRESTPagesWithClient[Comment](ctx, s.fetcher, s.client, binding, requestURL, "GitHub repository comments", "comments")
+	if err != nil {
+		return nil, false, err
+	}
+	out := make(map[int][]Comment)
+	for _, comment := range rows {
+		number, err := commentIssueNumber(comment.IssueURL)
+		if err != nil {
+			return nil, false, err
+		}
+		out[number] = append(out[number], comment)
+	}
+	return out, len(rows) < repositoryCommentsPageLimit*100, nil
+}
+
+func commentIssueNumber(raw string) (int, error) {
+	u, err := url.Parse(raw)
+	if err == nil && u.Scheme == "https" && u.Host != "" && u.RawQuery == "" && u.Fragment == "" {
+		path := u.Path
+		if u.Host == "api.github.com" {
+			path = strings.TrimPrefix(path, "/")
+		} else {
+			path = strings.TrimPrefix(path, "/api/v3/")
+		}
+		parts := strings.Split(path, "/")
+		if len(parts) == 5 && parts[0] == "repos" && parts[1] != "" && parts[2] != "" && parts[3] == "issues" {
+			number, err := strconv.Atoi(parts[4])
+			if err == nil && number > 0 {
+				return number, nil
+			}
+		}
+	}
+	return 0, fmt.Errorf("invalid GitHub comment issue_url %q", raw)
 }
 
 func (s *httpFetcherBindingSession) ParentData(ctx context.Context, binding Binding, request ParentRequest) (ParentData, error) {
