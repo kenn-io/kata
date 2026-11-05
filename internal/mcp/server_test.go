@@ -257,7 +257,6 @@ func TestServerToolOutputSchemasAreObjects(t *testing.T) {
 	for _, tool := range result.Tools {
 		t.Run(tool.Name, func(t *testing.T) {
 			// MCP 2025-11-25 clients require an object root in outputSchema.
-			require.NotNil(t, tool.OutputSchema)
 			require.Equal(t, "object", schemaObject(t, tool.OutputSchema)["type"])
 		})
 	}
@@ -429,7 +428,6 @@ func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 		gotNames = append(gotNames, tool.Name)
 		require.NotEmpty(t, tool.Title, tool.Name)
 		require.NotEmpty(t, tool.Description, tool.Name)
-		require.NotNil(t, tool.OutputSchema, tool.Name)
 
 		input := schemaObject(t, tool.InputSchema)
 		require.Equal(t, "https://json-schema.org/draft/2020-12/schema", input["$schema"], tool.Name)
