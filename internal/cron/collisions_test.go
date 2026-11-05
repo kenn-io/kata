@@ -52,6 +52,18 @@ func TestCronCollisionsWindow(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, truncated)
 	require.Equal(t, []time.Time{from.Add(time.Minute)}, fires)
+	t.Run("native interval local precision", func(t *testing.T) {
+		from := time.Date(2026, 11, 3, 0, 0, 0, 123456789, time.UTC)
+		candidate := collisionJob(t, "candidate", "0 * * * *")
+		candidate.Def = nativeCollisionDefinition(candidate.Def)
+		candidate.Def.Trigger = Trigger{Kind: "interval", IntervalSeconds: 60}
+		candidate.Progress = &RecurringProgress{Version: 1, Anchor: from.Add(-time.Hour), Through: from.Add(-time.Minute)}
+		peer := candidate
+		peer.UID = "peer"
+		got := collisionReport(t, candidate, []CollisionJob{peer}, from, CollisionStepBudget)
+		require.Equal(t, from, got.Items[0].At)
+		require.Equal(t, from.Format(time.RFC3339Nano), got.Items[0].Local)
+	})
 }
 
 func nativeCollisionDefinition(job JobDefinition) JobDefinition {
@@ -74,9 +86,7 @@ func TestCronCollisionsEligibilityAndPins(t *testing.T) {
 	}
 	disabled := collisionJob(t, "disabled", "0 9 * * *")
 	disabled.Def.Enabled = false
-	native := collisionJob(t, "native", "0 9 * * *")
-	native.Def = nativeCollisionDefinition(native.Def)
-	peers = append(peers, disabled, native)
+	peers = append(peers, disabled)
 	got := collisionReport(t, candidate, peers, from, CollisionStepBudget)
 	require.Len(t, got.Items, 1)
 	require.Equal(t, 3, got.Items[0].PeerCount)
@@ -115,14 +125,6 @@ func TestCronCollisionsBoundsAndPartialPeers(t *testing.T) {
 	}
 	got := collisionReport(t, candidate, peers, from, CollisionStepBudget)
 	require.Len(t, got.Items, 20)
-	require.True(t, got.Truncated)
-	for i := range peers {
-		peers[i].Def = b.Def
-	}
-	got = collisionReport(t, candidate, peers, from, CollisionStepBudget)
-	require.Len(t, got.Items, 1)
-	require.Equal(t, 25, got.Items[0].PeerCount)
-	require.Len(t, got.Items[0].Peers, 10)
 	require.True(t, got.Truncated)
 	_, truncated, err := occurrencesWithin(b.Def, nil, from, from.Add(time.Hour), 1, nil)
 	require.NoError(t, err)
@@ -438,19 +440,6 @@ func TestCronCollisionsSoundnessProperty(t *testing.T) {
 	}, hegel.WithTestCases(60), hegel.WithDatabase(t.TempDir()))
 }
 
-func TestCronCollisionsLocalPrecision(t *testing.T) {
-	from := time.Date(2026, 11, 3, 0, 0, 0, 123456789, time.UTC)
-	candidate := collisionJob(t, "candidate", "0 * * * *")
-	candidate.Def = nativeCollisionDefinition(candidate.Def)
-	candidate.Def.Trigger = Trigger{Kind: "interval", IntervalSeconds: 60}
-	candidate.Progress = &RecurringProgress{Version: 1, Anchor: from.Add(-time.Hour), Through: from.Add(-time.Minute)}
-	peer := candidate
-	peer.UID = "peer"
-	got := collisionReport(t, candidate, []CollisionJob{peer}, from, CollisionStepBudget)
-	require.Equal(t, from, got.Items[0].At)
-	require.Equal(t, from.Format(time.RFC3339Nano), got.Items[0].Local)
-}
-
 func TestCronCollisionsCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -504,6 +493,20 @@ func TestCronCollisionsFullSetsSurviveDisplayClipping(t *testing.T) {
 	require.Equal(t, 1, got.Items[1].Occurrences)
 	require.Equal(t, from, got.Items[0].At)
 	require.Equal(t, from.Add(time.Hour), got.Items[1].At)
+	t.Run("25 peers share one set", func(t *testing.T) {
+		peers := make([]CollisionJob, 25)
+		for i := range peers {
+			peers[i] = collisionJob(t, fmt.Sprintf("peer-%02d", i), "0 * * * *")
+		}
+		for i := range peers {
+			peers[i].Def = candidate.Def
+		}
+		got := collisionReport(t, candidate, peers, from, CollisionStepBudget)
+		require.Len(t, got.Items, 1)
+		require.Equal(t, 25, got.Items[0].PeerCount)
+		require.Len(t, got.Items[0].Peers, 10)
+		require.True(t, got.Truncated)
+	})
 }
 
 func TestCronCollisionsOnceTerminalBudget(t *testing.T) {

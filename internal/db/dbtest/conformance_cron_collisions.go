@@ -35,6 +35,14 @@ func checkCronValidateCollisions(t *testing.T, s db.Storage) error {
 	disabled := job
 	disabled.Enabled = false
 	put(project.ID, "Disabled", disabled)
+	// Delivery admission belongs to the storage read, before parent lookups.
+	parent, _, err := s.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Native peer parent", Author: "operator"})
+	require.NoError(t, err)
+	native := job
+	native.Action = cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}
+	native.Issue = &cron.IssuePolicy{Kind: "per-run", ParentUID: parent.UID, Title: "Review"}
+	native.Overlap = "allow"
+	put(project.ID, "Native peer", native)
 	deleted := put(project.ID, "Deleted", job)
 	_, _, err = s.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, UID: deleted.UID, ExpectedEventUID: deleted.DefinitionEventUID, Name: deleted.Name, Definition: job, Actor: "operator", Deleted: true})
 	require.NoError(t, err)
@@ -92,6 +100,12 @@ func checkCronValidateCollisions(t *testing.T, s db.Storage) error {
 func checkCronValidateNativeCollisions(t *testing.T, s db.Storage) error {
 	ctx := t.Context()
 	project, _, candidate, progress := recurringFixture(t, s, "latest")
+	// An adapter fire coincides with native progress, but must be excluded
+	// by delivery admission rather than merged into the native peer set.
+	adapter := cronValidationJob()
+	adapter.Trigger = cron.Trigger{Kind: "once", At: progress.Anchor.Add(2 * time.Hour).Format(time.RFC3339Nano)}
+	_, _, err := s.PutCronJob(ctx, db.PutCronJob{ProjectID: project.ID, Name: "Adapter peer", Definition: adapter, Actor: "operator"})
+	require.NoError(t, err)
 	q := s.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	})

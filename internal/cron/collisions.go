@@ -47,11 +47,9 @@ type ValidationCollisions struct {
 	Truncated bool            `json:"truncated"`
 }
 
-// Retained progress has already been validated by the storage decoder.
+// The candidate and retained progress are validated by callers; peers are
+// validated during admission below.
 func occurrencesWithin(j JobDefinition, p *RecurringProgress, from, until time.Time, limit int, budget *int) ([]time.Time, bool, error) {
-	if err := j.Validate(); err != nil {
-		return nil, false, err
-	}
 	after := from.UTC().Add(-time.Nanosecond)
 	progress := RecurringProgress{Version: 1, Anchor: from.UTC(), Through: after}
 	if p != nil {
@@ -61,7 +59,8 @@ func occurrencesWithin(j JobDefinition, p *RecurringProgress, from, until time.T
 }
 
 // PreviewCollisions is deterministic, observes cancellation between peer walks,
-// and leaves both the fleet and candidate intact.
+// and leaves both the fleet and candidate intact. Callers admit only enabled
+// peers of the candidate's delivery kind before reading their retained progress.
 func PreviewCollisions(ctx context.Context, candidate CollisionJob, peers []CollisionJob, from time.Time, budget int) (ValidationCollisions, error) {
 	out := ValidationCollisions{Until: from.UTC().Add(7 * 24 * time.Hour), Items: []CollisionItem{}}
 	if out.Until.Year() > 9999 {
@@ -103,7 +102,7 @@ func PreviewCollisions(ctx context.Context, candidate CollisionJob, peers []Coll
 		if err := ctx.Err(); err != nil {
 			return out, err
 		}
-		if peer.UID == candidate.UID || !peer.Def.Enabled || IsRecurringIssueJob(peer.Def) != IsRecurringIssueJob(candidate.Def) {
+		if peer.UID == candidate.UID {
 			continue
 		}
 		if !IsRecurringIssueJob(candidate.Def) && pinsDisjoint(candidate.Def.Options, peer.Def.Options) {
@@ -113,7 +112,7 @@ func PreviewCollisions(ctx context.Context, candidate CollisionJob, peers []Coll
 			out.Skipped++
 			continue
 		}
-		if !collisionInstants(peer.Def) {
+		if !collisionInstants(peer.Def) || peer.Def.Validate() != nil {
 			out.Skipped++
 			continue
 		}
