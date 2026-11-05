@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-04
+last_edited: 2026-11-05
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -9,6 +9,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Speed up label loading for list and ready responses and label filters in semantic or hybrid search on large SQLite stores.
 - Resume local writes sooner after spoke rebuilds of large projects by skipping
   issues and comments whose stored values already match the event log.
 - Search references faster in the web UI on large stores; a `q` search now returns only issue references.
