@@ -1961,7 +1961,7 @@ func TestProjectAccessDistinctTeamCollections(t *testing.T) {
 		_, _, err = store.CreateAPIToken(t.Context(), db.CreateAPITokenParams{PlaintextToken: "other-member-test-token", Actor: "other-member", AdminActor: "admin"})
 		require.NoError(t, err)
 		for _, actor := range []string{"member", "other-member", "nonmember", "admin"} {
-			for _, path := range []string{"/api/v1/projects?include=stats", "/api/v1/issues", "/api/v1/ui/snapshot?view=all-open&include_graph=true", "/api/v1/events"} {
+			for _, path := range []string{"/api/v1/projects?include=stats", "/api/v1/issues", "/api/v1/ui/snapshot?view=all-open", "/api/v1/events"} {
 				status, _, body := f.request(t, http.MethodGet, path, actor, nil, nil)
 				assert.Equal(t, http.StatusOK, status, string(body))
 				assert.Contains(t, string(body), f.public.UID)

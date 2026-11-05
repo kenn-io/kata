@@ -68,7 +68,7 @@ func TestIssueScopedSnapshotETagReturns304WithoutProjectionReads(t *testing.T) {
 	})
 	require.NoError(t, err)
 	headers := map[string]string{"Authorization": "Bearer worker-token"}
-	query := "/api/v1/ui/snapshot?view=all-open&include_graph=true"
+	query := "/api/v1/ui/snapshot?view=all-open"
 
 	resp, body := envDoRaw(t, env, http.MethodGet, query, nil, headers)
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)

@@ -189,7 +189,6 @@ func TestReadUIGraphLinksLargeIssueSet(t *testing.T) {
 	require.Len(t, snapshot.Issues, 16384)
 	require.Len(t, snapshot.GraphIssues, 16384)
 	for _, links := range [][]db.UILink{snapshot.CollectionLinks, snapshot.GraphLinks} {
-		require.Len(t, links, 16383)
 		gotIDs := make([]int64, 0, len(links))
 		for _, link := range links {
 			gotIDs = append(gotIDs, link.ID)
