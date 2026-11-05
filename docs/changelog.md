@@ -9,6 +9,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Load owner, label, and issue suggestions faster when opening or reconnecting the web UI on large SQLite stores.
 - Speed up label loading for list and ready responses and label filters in semantic or hybrid search on large SQLite stores.
 - Resume local writes sooner after spoke rebuilds of large projects by skipping
   issues and comments whose stored values already match the event log.

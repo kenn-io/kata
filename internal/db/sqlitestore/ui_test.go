@@ -415,6 +415,74 @@ func TestReadUIReferences(t *testing.T) {
 	assert.Greater(t, references.Cursor, int64(0))
 }
 
+func TestReadUIReferencesVisibleRepresentatives(t *testing.T) {
+	ctx := t.Context()
+	store := openUIStore(t)
+	visible := createUIProject(t, store, "example-project")
+	deleted := createUIProject(t, store, "deleted-project")
+	var system db.Project
+	require.NoError(t, store.QueryRowContext(ctx, `SELECT id,uid FROM projects WHERE name=?`, db.SystemProjectName).Scan(&system.ID, &system.UID))
+	// Insert contributors out of ID order. Hidden rows sort before visible choices.
+	for _, row := range []struct {
+		id, project  int64
+		owner, label string
+		deleted      bool
+	}{
+		{90, visible.ID, "beta", "beta", false},
+		{80, visible.ID, "alpha", "alpha", false},
+		{10, visible.ID, "alpha", "alpha", false},
+		{20, visible.ID, "beta", "beta", false},
+		{30, visible.ID, "gamma", "gamma", false},
+		{1, visible.ID, "a-deleted", "a-deleted", true},
+		{2, deleted.ID, "a-hidden", "a-hidden", false},
+		{3, system.ID, "a-system", "a-system", false},
+		{4, visible.ID, "", "gamma", false},
+	} {
+		_, err := store.ExecContext(ctx, `INSERT INTO issues(id,uid,project_id,short_id,title,author,owner,deleted_at)
+ VALUES(?,?,?,?, 'ordinary task','tester',?, CASE WHEN ? THEN CURRENT_TIMESTAMP END)`, row.id, fmt.Sprintf("%026d", row.id), row.project, fmt.Sprintf("%08d", row.id), row.owner, row.deleted)
+		require.NoError(t, err)
+		_, err = store.ExecContext(ctx, `INSERT INTO issue_labels(issue_id,label,author) VALUES(?,?,'tester')`, row.id, row.label)
+		require.NoError(t, err)
+	}
+	_, err := store.ExecContext(ctx, `UPDATE projects SET deleted_at=CURRENT_TIMESTAMP WHERE id=?`, deleted.ID)
+	require.NoError(t, err)
+	for _, limit := range []int{2, 20} {
+		query := db.UIReferencesQuery{Limit: limit}
+		unrestricted, err := store.ReadUIReferences(ctx, query)
+		require.NoError(t, err)
+		restricted, err := store.ReadUIReferences(db.WithAuthorizedProjects(ctx, []string{visible.UID, deleted.UID, system.UID}), query)
+		require.NoError(t, err)
+		require.Equal(t, restricted, unrestricted)
+		require.Equal(t, []string{"alpha", "beta", "gamma"}[:min(limit, 3)], unrestricted.Owners)
+		require.Equal(t, unrestricted.Owners, unrestricted.Labels)
+	}
+	// Exercise each facet alone so issue references cannot mask missing exposure.
+	tx, err := store.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+	for _, facet := range []string{"owner", "label"} {
+		statement := uiReferenceOwnersQuery
+		if facet == "label" {
+			statement = uiReferenceLabelsQuery
+		}
+		exposure := db.WithExposedIssues(ctx)
+		values, err := readUIReferenceSuggestions(exposure, tx, statement, db.SystemProjectName, 2)
+		require.NoError(t, err)
+		require.Equal(t, []string{"alpha", "beta"}, values)
+		if facet == "owner" {
+			require.ElementsMatch(t, []int64{10, 20}, db.ExposedIssues(exposure))
+		} else {
+			for _, id := range db.ExposedIssues(exposure) {
+				require.Contains(t, []int64{10, 20, 80, 90}, id)
+				var label string
+				require.NoError(t, tx.QueryRowContext(ctx, `SELECT label FROM issue_labels WHERE issue_id=?`, id).Scan(&label))
+				require.Contains(t, values, label)
+			}
+			require.Len(t, db.ExposedIssues(exposure), 2)
+		}
+	}
+}
+
 func TestReadUIReferencesFiltersIssueUIDs(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()

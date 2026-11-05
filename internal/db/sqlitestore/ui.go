@@ -330,6 +330,10 @@ func (d *Store) ReadUIReferences(ctx context.Context, query db.UIReferencesQuery
 		ownerStatement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &ownerArgs)
 		ownerStatement += ` GROUP BY i.owner ORDER BY i.owner LIMIT ?`
 		ownerArgs = append(ownerArgs, limit)
+		_, restricted := db.AuthorizedProjects(ctx)
+		if !restricted && query.AllowedIssueIDs == nil {
+			ownerStatement, ownerArgs = uiReferenceOwnersQuery, []any{db.SystemProjectName, limit}
+		}
 		data.Owners, err = readUIReferenceSuggestions(ctx, tx, ownerStatement, ownerArgs...)
 		if err != nil {
 			return db.UIReferencesData{}, err
@@ -346,6 +350,9 @@ func (d *Store) ReadUIReferences(ctx context.Context, query db.UIReferencesQuery
 		labelStatement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &labelArgs)
 		labelStatement += ` GROUP BY il.label ORDER BY il.label LIMIT ?`
 		labelArgs = append(labelArgs, limit)
+		if !restricted && query.AllowedIssueIDs == nil {
+			labelStatement, labelArgs = uiReferenceLabelsQuery, []any{db.SystemProjectName, limit}
+		}
 		data.Labels, err = readUIReferenceSuggestions(ctx, tx, labelStatement, labelArgs...)
 		if err != nil {
 			return db.UIReferencesData{}, err
@@ -360,6 +367,36 @@ func (d *Store) ReadUIReferences(ctx context.Context, query db.UIReferencesQuery
 	}
 	return data, nil
 }
+
+const uiReferenceOwnersQuery = `WITH RECURSIVE choices(value, issue_id) AS (
+	SELECT owner, id FROM (
+		SELECT i.owner, i.id FROM issues i JOIN projects p ON p.id = i.project_id
+		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?1 AND i.owner IS NOT NULL AND i.owner <> ''
+		ORDER BY i.owner, i.id LIMIT 1
+	)
+	UNION ALL
+	SELECT i.owner, i.id FROM choices prev JOIN issues i ON i.id = (
+		SELECT i.id FROM issues i JOIN projects p ON p.id = i.project_id
+		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?1 AND i.owner IS NOT NULL AND i.owner > prev.value
+		ORDER BY i.owner, i.id LIMIT 1
+	)
+	LIMIT ?2
+) SELECT value, issue_id FROM choices ORDER BY value`
+
+const uiReferenceLabelsQuery = `WITH RECURSIVE choices(value, issue_id) AS (
+	SELECT label, issue_id FROM (
+		SELECT il.label, il.issue_id FROM issue_labels il JOIN issues i ON i.id = il.issue_id JOIN projects p ON p.id = i.project_id
+		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?1
+		ORDER BY il.label LIMIT 1
+	)
+	UNION ALL
+	SELECT il.label, il.issue_id FROM choices prev JOIN issue_labels il ON il.rowid = (
+		SELECT il.rowid FROM issue_labels il JOIN issues i ON i.id = il.issue_id JOIN projects p ON p.id = i.project_id
+		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?1 AND il.label > prev.value
+		ORDER BY il.label LIMIT 1
+	)
+	LIMIT ?2
+) SELECT value, issue_id FROM choices ORDER BY value`
 
 func appendUIReferenceIssueScopeSQLite(statement string, args []any, issueIDs []int64) (string, []any) {
 	predicate, scopeArgs := uiSQLiteIssueAllowlist("i.id", issueIDs)
@@ -1219,8 +1256,13 @@ func readUIReferenceScope(
 func readUIReferenceIssues(
 	ctx context.Context, tx *sql.Tx, query db.UIReferencesQuery, limit int,
 ) ([]db.UIIssueReference, error) {
+	from := `issues i JOIN projects p ON p.id = i.project_id`
+	if query.Query == "" && query.AllowedIssueIDs == nil && len(query.IssueUIDs) == 0 {
+		// Keep project/short-ID index order when planner statistics are absent.
+		from = `projects p CROSS JOIN issues i ON i.project_id = p.id`
+	}
 	statement := `SELECT i.id, i.project_id, i.uid, p.uid, p.name, i.short_id, i.title, i.status
-		FROM issues i JOIN projects p ON p.id = i.project_id
+		FROM ` + from + `
 		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?`
 	args := []any{db.SystemProjectName}
 	statement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &args)
@@ -1264,8 +1306,9 @@ func readUIReferenceIssues(
 }
 
 // readUIReferenceSuggestions reads aggregate owner or label choices. Each row
-// carries one representative contributing issue, MIN(i.id), which is recorded
-// for the project access release. Recording every contributor would be
+// carries one representative contributing issue, MIN(i.id) for scoped callers.
+// Unrestricted label choices use any visible contributor; their release check
+// does not read the representative. Recording every contributor would be
 // unbounded; one per choice is bounded by the limit and fails closed: if the
 // representative moves out of the caller's projects mid-request the response
 // is withheld, even when another visible issue still contributes the choice.
