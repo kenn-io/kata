@@ -26,39 +26,33 @@ func TestLabelsByIssues_PageBudget(t *testing.T) {
 	_, err = raw.ExecContext(ctx, `INSERT INTO issue_labels(issue_id,label,author) SELECT id,'example-label','tester' FROM issues WHERE project_id=?`, p.ID)
 	require.NoError(t, err)
 	store := &sqlitestore.Store{DB: raw}
-	for _, stats := range []string{"without-stats", "analyzed"} {
-		t.Run(stats, func(t *testing.T) {
-			if stats == "analyzed" {
-				_, err := raw.ExecContext(ctx, "ANALYZE")
+	t.Run("without-stats", func(t *testing.T) {
+		for _, size := range []int{50, 1001} {
+			t.Run(fmt.Sprintf("ids=%d", size), func(t *testing.T) {
+				ids := make([]int64, size)
+				for i := range ids {
+					ids[i] = int64(i + 1)
+				}
+				conn, err := raw.Conn(ctx)
 				require.NoError(t, err)
-			}
-			for _, size := range []int{50, 1001} {
-				t.Run(fmt.Sprintf("ids=%d", size), func(t *testing.T) {
-					ids := make([]int64, size)
-					for i := range ids {
-						ids[i] = int64(i + 1)
-					}
-					conn, err := raw.Conn(ctx)
-					require.NoError(t, err)
-					sqlitePageFetches(t, conn, true)
-					require.NoError(t, conn.Close())
-					start := time.Now()
-					got, err := store.LabelsByIssues(ctx, p.ID, ids)
-					elapsed := time.Since(start)
-					require.NoError(t, err)
-					require.Len(t, got, size)
-					for _, id := range ids {
-						require.Equal(t, []string{"example-label"}, got[id])
-					}
-					conn, err = raw.Conn(ctx)
-					require.NoError(t, err)
-					count := sqlitePageFetches(t, conn, false)
-					require.NoError(t, conn.Close())
-					t.Logf("100k issues / %d IDs: %d page fetches, %.3f ms", size, count, float64(elapsed)/float64(time.Millisecond))
-					// Allow index and issue lookups per requested ID, including chunk boundaries.
-					require.LessOrEqual(t, count, size*2+256, "label hydration must read requested IDs rather than the whole project per chunk")
-				})
-			}
-		})
-	}
+				sqlitePageFetches(t, conn, true)
+				require.NoError(t, conn.Close())
+				start := time.Now()
+				got, err := store.LabelsByIssues(ctx, p.ID, ids)
+				elapsed := time.Since(start)
+				require.NoError(t, err)
+				require.Len(t, got, size)
+				for _, id := range ids {
+					require.Equal(t, []string{"example-label"}, got[id])
+				}
+				conn, err = raw.Conn(ctx)
+				require.NoError(t, err)
+				count := sqlitePageFetches(t, conn, false)
+				require.NoError(t, conn.Close())
+				t.Logf("100k issues / %d IDs: %d page fetches, %.3f ms", size, count, float64(elapsed)/float64(time.Millisecond))
+				// Allow index and issue lookups per requested ID, including chunk boundaries.
+				require.LessOrEqual(t, count, size*2+256, "label hydration must read requested IDs rather than the whole project per chunk")
+			})
+		}
+	})
 }

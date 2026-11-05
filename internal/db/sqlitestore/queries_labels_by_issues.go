@@ -27,8 +27,8 @@ const labelsByIssuesChunkSize = 500
 // column (see schema.sql) — projection has to go through
 // issues.project_id.
 //
-// CROSS JOIN keeps issue_labels first so each chunk starts from the requested
-// IDs rather than scanning every project issue when planner statistics are absent.
+// CROSS JOIN deliberately keeps issue_labels first. Replacing it with JOIN
+// brings back the whole-project scan when planner statistics are absent.
 //
 // Chunked into groups of labelsByIssuesChunkSize to stay under SQLite's
 // bound-parameter limit (roborev job 246). The list endpoint allows
