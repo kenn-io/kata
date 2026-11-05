@@ -25,6 +25,7 @@ type CronSQL struct {
 		QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 		QueryRowContext(context.Context, string, ...any) *sql.Row
 	}
+	ReadTransact   func(context.Context, func(*sql.Tx) error) error
 	Transact       func(context.Context, func(*sql.Tx) error) error
 	WriteGate      func(context.Context, *sql.Tx, int64) error
 	EffectiveActor func(context.Context, *sql.Tx, int64, string) (string, error)
@@ -244,15 +245,23 @@ type cronPutRequest struct {
 	document   []byte
 }
 
+func validCronName(name string) bool { return name != "" && len(name) <= 256 }
+func checkCronUID(id string) error {
+	if id != "" && !uid.Valid(id) {
+		return fmt.Errorf("%w: invalid UID", cron.ErrInvalid)
+	}
+	return nil
+}
+
 func (a CronSQL) put(ctx context.Context, req cronPutRequest) (cronRow, []Event, error) {
 	req.id = strings.ToUpper(req.id)
 	req.name = strings.TrimSpace(req.name)
 	req.actor = strings.TrimSpace(req.actor)
-	if req.name == "" || len(req.name) > 256 || req.actor == "" {
+	if !validCronName(req.name) || req.actor == "" {
 		return cronRow{}, nil, fmt.Errorf("%w: name and actor required", cron.ErrInvalid)
 	}
-	if req.id != "" && !uid.Valid(req.id) {
-		return cronRow{}, nil, fmt.Errorf("%w: invalid UID", cron.ErrInvalid)
+	if err := checkCronUID(req.id); err != nil {
+		return cronRow{}, nil, err
 	}
 	var err error
 	if req.document, err = json.Marshal(req.definition); err != nil {
@@ -329,11 +338,7 @@ func (a CronSQL) openCronProject(ctx context.Context, tx *sql.Tx, projectID int6
 	if err := LockCronProject(ctx, tx, projectID); err != nil {
 		return Project{}, err
 	}
-	project := Project{ID: projectID}
-	err := tx.QueryRowContext(ctx, `SELECT uid,name FROM projects WHERE id=$1 AND deleted_at IS NULL AND name<>$2`, projectID, SystemProjectName).Scan(&project.UID, &project.Name)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Project{}, ErrNotFound
-	}
+	project, err := readCronProject(ctx, tx, projectID)
 	if err != nil {
 		return Project{}, err
 	}
@@ -341,6 +346,15 @@ func (a CronSQL) openCronProject(ctx context.Context, tx *sql.Tx, projectID int6
 		return Project{}, err
 	}
 	return project, nil
+}
+
+func readCronProject(ctx context.Context, tx *sql.Tx, projectID int64) (Project, error) {
+	project := Project{ID: projectID}
+	err := tx.QueryRowContext(ctx, `SELECT uid,name FROM projects WHERE id=$1 AND deleted_at IS NULL AND name<>$2`, projectID, SystemProjectName).Scan(&project.UID, &project.Name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Project{}, ErrNotFound
+	}
+	return project, err
 }
 
 // checkCronPutState enforces whole-document compare-and-swap: a create names

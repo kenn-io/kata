@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-11-04
+last_edited: 2026-11-05
 ---
 
 # Model Context Protocol server
@@ -290,7 +290,7 @@ model context at startup.
 | `kata.load_issue_discovery` | `kata.search`, `kata.list`, `kata.show`, `kata.ready`, `kata.next`, `kata.labels`, `kata.graph` |
 | `kata.load_issue_mutation` | `kata.create`, `kata.edit`, `kata.comment`, `kata.edit_comment`, `kata.claim`, `kata.set_label`, `kata.set_metadata`, `kata.set_schedule`, `kata.set_deadline`, `kata.move` |
 | `kata.load_coordination` | `kata.assign`, `kata.unassign`, `kata.inbox`, `kata.status` |
-| `kata.load_cron` | `kata.cron_capabilities`, `kata.cron_new_uid`, `kata.cron_jobs`, `kata.cron_job`, `kata.cron_job_create`, `kata.cron_job_update`, `kata.cron_job_delete`, `kata.cron_job_restore`, `kata.cron_workflows`, `kata.cron_workflow`, `kata.cron_workflow_create`, `kata.cron_workflow_update`, `kata.cron_workflow_delete`, `kata.cron_workflow_restore`, `kata.cron_runs`, `kata.cron_run`, `kata.cron_run_observe` |
+| `kata.load_cron` | `kata.cron_capabilities`, `kata.cron_new_uid`, `kata.cron_jobs`, `kata.cron_job`, `kata.cron_job_create`, `kata.cron_job_update`, `kata.cron_job_delete`, `kata.cron_job_restore`, `kata.cron_job_validate`, `kata.cron_workflows`, `kata.cron_workflow`, `kata.cron_workflow_create`, `kata.cron_workflow_update`, `kata.cron_workflow_delete`, `kata.cron_workflow_restore`, `kata.cron_workflow_validate`, `kata.cron_runs`, `kata.cron_run`, `kata.cron_run_observe` |
 | `kata.load_issue_lifecycle` | `kata.close`, `kata.reopen`, `kata.delete`, `kata.restore`, `kata.purge`, `kata.wait`, `kata.audit_closes` |
 | `kata.load_leases` | `kata.lease_status`, `kata.lease`, `kata.lease_force_release`, `kata.lease_steal` |
 | `kata.load_projects` | `kata.projects`, `kata.project_show`, `kata.project_create`, `kata.project_update`, `kata.project_merge`, `kata.project_remove`, `kata.project_restore`, `kata.project_purge` |
@@ -408,8 +408,8 @@ the separate `kata.load_recurrence` tools manage RRULE issue templates.
 | Purpose | Tools |
 | --- | --- |
 | Discovery and identity | `kata.cron_capabilities`, `kata.cron_new_uid` |
-| Jobs | `kata.cron_jobs`, `kata.cron_job`, `kata.cron_job_create`, `kata.cron_job_update`, `kata.cron_job_delete`, `kata.cron_job_restore` |
-| Workflows | `kata.cron_workflows`, `kata.cron_workflow`, `kata.cron_workflow_create`, `kata.cron_workflow_update`, `kata.cron_workflow_delete`, `kata.cron_workflow_restore` |
+| Jobs | `kata.cron_jobs`, `kata.cron_job`, `kata.cron_job_create`, `kata.cron_job_update`, `kata.cron_job_delete`, `kata.cron_job_restore`, `kata.cron_job_validate` |
+| Workflows | `kata.cron_workflows`, `kata.cron_workflow`, `kata.cron_workflow_create`, `kata.cron_workflow_update`, `kata.cron_workflow_delete`, `kata.cron_workflow_restore`, `kata.cron_workflow_validate` |
 | Run evidence | `kata.cron_runs`, `kata.cron_run`, `kata.cron_run_observe` |
 
 Every operation uses the MCP server's configured daemon credentials, project
@@ -429,6 +429,21 @@ current definition after a conflict and decide whether to retry; MCP never fetch
 a new CAS value on the caller's behalf. Delete is the existing reversible cron
 tombstone operation. Workflow-in-use checks and native parent bindings are
 preserved. Typed definitions and opaque option objects retain exact JSON numbers.
+
+`kata.cron_job_validate` and `kata.cron_workflow_validate` accept an unsaved
+`name` and raw `definition`, plus optional `uid` and `expected_event_uid` for
+an edit. Invalid documents and revision conflicts return `valid:false` with
+staged errors. Both tools are read-only and save nothing. Job validation also
+accepts `parent_ref`, `count` (1–100, default 5), and RFC3339 `from`, and returns
+hypothetical next fires. See [Validate before saving](cron.md#validate-before-saving)
+for stages, warnings, preview bases, and limits. Some MCP clients decode
+structured numbers as `float64`. When that decoder rejects an overflowing number
+in options, MCP returns the same `valid:false` document error with
+`definition: null`; HTTP and CLI return the retained document. Previewable jobs also return
+`schedule.collisions`, the same seven-day peer-set report exposed by HTTP and
+CLI. An absent report means it was not computed; empty `items` means no
+coincidences were found. `skipped` and `truncated` describe incomplete work;
+collisions do not change validity or tool success.
 
 `kata.cron_runs` defaults to 20 records, accepts `limit` from 1 through 100,
 and returns `next_before_uid`; pass it as `before_uid` to continue. `job_uid`

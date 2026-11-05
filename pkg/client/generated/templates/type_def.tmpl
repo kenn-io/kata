@@ -124,7 +124,10 @@
     {{ if $shouldValidate }}
     {{ if and (not $td.IsAlias) (not $td.Schema.UnionElements) (not $td.Schema.IsAnyType) $td.Schema.NeedsValidation }}
     func ({{$alias}} {{$td.Name}}) Validate() error {
-        {{ $td.Schema.ValidateDeclWithOptions $alias $validatorVar $forceSimple }}
+        {{ range $td.Schema.Properties }}{{ if index .Extensions "x-kata-require-presence" }}if {{$alias}}.{{.GoName}} == nil {
+            return runtime.NewValidationErrorsFromString("{{.GoName}}", "is required")
+        }
+        {{ end }}{{ end }}{{ $td.Schema.ValidateDeclWithOptions $alias $validatorVar $forceSimple }}
     }
     {{ end }}
     {{ end -}}

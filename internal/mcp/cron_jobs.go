@@ -13,6 +13,8 @@ import (
 	"go.kenn.io/kata/pkg/client/generated"
 )
 
+const cronParentIssueRequired = "parent_ref requires definition.issue"
+
 // CronJobCreateInput creates one caller-identified definition.
 type CronJobCreateInput struct {
 	CronIdentityInput
@@ -71,10 +73,10 @@ func (h toolHandlers) cronPutJob(ctx context.Context, in CronJobCreateInput, exp
 			return nil, nil, err
 		}
 		if in.Definition.Issue == nil {
-			return nil, nil, errors.New("parent_ref requires definition.issue")
+			return nil, nil, errors.New(cronParentIssueRequired)
 		}
-		if in.Definition.Issue.ParentUID != nil && *in.Definition.Issue.ParentUID != parent {
-			return nil, nil, errors.New("parent_ref disagrees with definition.issue.parent_uid")
+		if err := checkCronParentUID(in.Definition.Issue.ParentUID, parent); err != nil {
+			return nil, nil, err
 		}
 		in.Definition.Issue.ParentUID = &parent
 	}
@@ -139,4 +141,19 @@ func (h toolHandlers) cronJobRestore(ctx context.Context, _ *sdkmcp.CallToolRequ
 		return nil, nil, err
 	}
 	return cronResult(h.options.Client.RestoreCronJob(ctx, &generated.RestoreCronJobRequestOptions{PathParams: &generated.RestoreCronJobPath{ProjectID: p.ID, CronUID: id}, Body: &generated.RestoreCronJobBody{Actor: &h.options.Actor, ExpectedEventUID: expected}}))
+}
+
+// checkCronParentUID treats JSON null and a nil optional pointer as absent.
+// Raw validation fields and typed mutation fields share the same comparison.
+func checkCronParentUID(existing any, parent string) error {
+	if pointer, ok := existing.(*string); ok {
+		if pointer == nil {
+			return nil
+		}
+		existing = *pointer
+	}
+	if existing != nil && existing != parent {
+		return errors.New("parent_ref disagrees with definition.issue.parent_uid")
+	}
+	return nil
 }

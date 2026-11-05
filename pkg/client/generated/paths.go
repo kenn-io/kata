@@ -161,6 +161,10 @@ type CreateCronJobPath struct {
 	ProjectID int64 `json:"project_id"`
 }
 
+type ValidateCronJobPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
 type ArchiveCronJobPath struct {
 	ProjectID int64  `json:"project_id"`
 	CronUID   string `json:"cron_uid" validate:"required"`
@@ -224,6 +228,10 @@ type ListCronWorkflowsPath struct {
 }
 
 type CreateCronWorkflowPath struct {
+	ProjectID int64 `json:"project_id"`
+}
+
+type ValidateCronWorkflowPath struct {
 	ProjectID int64 `json:"project_id"`
 }
 

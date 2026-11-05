@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -55,17 +56,24 @@ func TestCronCapabilitiesProjectScopedHostRead(t *testing.T) {
 	host := &capabilitiesReadHost{projectID: project.ID}
 	server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, HostAccess: host})
 	t.Cleanup(func() { require.NoError(t, server.Close()) })
-	for _, tc := range []struct {
-		id   int64
-		want int
-	}{{project.ID, 200}, {other.ID, 404}} {
-		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/capabilities", tc.id), nil)
-		request = request.WithContext(daemon.WithPrincipal(request.Context(), daemon.Principal{Kind: daemon.PrincipalHost, Subject: "reader", Actor: "reader"}))
-		recorder := httptest.NewRecorder()
-		server.Handler().ServeHTTP(recorder, request)
-		require.Equalf(t, tc.want, recorder.Code, "%s", recorder.Body.String())
+	for _, op := range []struct{ method, path, body, id string }{
+		{http.MethodGet, "/api/v1/projects/%d/cron/capabilities", "", "getCronCapabilities"},
+		{http.MethodPost, "/api/v1/projects/%d/cron/jobs/validate", `{"name":"Inspect","definition":{"version":1,"kind":"job","enabled":true,"trigger":{"kind":"manual"},"action":{"kind":"execute","prompt":"Review"},"issue":{"kind":"per-run","title":"Review"},"overlap":"forbid","catchup":"latest"}}`, "validateCronJob"},
+	} {
+		for _, tc := range []struct {
+			id   int64
+			want int
+		}{{project.ID, 200}, {other.ID, 404}} {
+			request := httptest.NewRequestWithContext(t.Context(), op.method, fmt.Sprintf(op.path, tc.id), strings.NewReader(op.body))
+			request.Header.Set("Content-Type", "application/json")
+			request = request.WithContext(daemon.WithPrincipal(request.Context(), daemon.Principal{Kind: daemon.PrincipalHost, Subject: "reader", Actor: "reader"}))
+			recorder := httptest.NewRecorder()
+			server.Handler().ServeHTTP(recorder, request)
+			require.Equalf(t, tc.want, recorder.Code, "%s", recorder.Body.String())
+		}
+		require.Equal(t, op.id, host.calls[len(host.calls)-2].ID)
+		require.Equal(t, "read", string(host.calls[len(host.calls)-2].Policy.Capability))
+		require.False(t, host.calls[len(host.calls)-2].Policy.Mutation)
 	}
-	require.Len(t, host.calls, 2)
-	require.Equal(t, "getCronCapabilities", host.calls[0].ID)
-	require.False(t, host.calls[0].Policy.Mutation)
+	require.Len(t, host.calls, 4)
 }

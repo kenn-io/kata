@@ -15,7 +15,7 @@ func (d *Store) cronSQL() db.CronSQL {
 		}
 		issue, err := issueByIDTx(ctx, tx, id)
 		return issue, event, err
-	}, PatchIssueMetadataTx: d.patchIssueMetadataTx, InstanceUID: d.InstanceUID(), Query: d, Transact: func(ctx context.Context, run func(*sql.Tx) error) error {
+	}, PatchIssueMetadataTx: d.patchIssueMetadataTx, InstanceUID: d.InstanceUID(), Query: d, ReadTransact: d.readCronTransaction, Transact: func(ctx context.Context, run func(*sql.Tx) error) error {
 		return d.RetryTransient(ctx, func() error {
 			tx, err := d.BeginTx(ctx, nil)
 			if err != nil {

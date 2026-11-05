@@ -15,6 +15,10 @@ const recurringJSON = `{"version":1,"kind":"job","enabled":true,"trigger":{"kind
 
 // The native shape must be accepted without accepting adapter/execution fields.
 func TestRecurringDefinition(t *testing.T) {
+	t.Run("null options", func(t *testing.T) {
+		_, err := ParseJob([]byte(strings.Replace(recurringJSON, `"version":1`, `"version":1,"options":null`, 1)))
+		require.NoError(t, err)
+	})
 	job, err := ParseJob([]byte(recurringJSON))
 	require.NoError(t, err)
 	require.Equal(t, "per-run", job.Issue.Kind)

@@ -150,6 +150,18 @@ type ListCronJobsQuery struct {
 	IncludeDeleted *bool `json:"include_deleted,omitempty"`
 }
 
+type ValidateCronJobQuery struct {
+	// From RFC3339 preview start; defaults to daemon now.
+	From *string `json:"from,omitempty"`
+
+	// Count Number of next fires, from 1 through 100; defaults to 5.
+	Count *int64 `json:"count,omitempty" validate:"omitempty,gte=1,lte=100"`
+}
+
+func (v ValidateCronJobQuery) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(v))
+}
+
 type ListCronRunsQuery struct {
 	JobUID    *string `json:"job_uid,omitempty"`
 	Limit     *int64  `json:"limit,omitempty" validate:"omitempty,gte=0,lte=100"`
@@ -162,6 +174,11 @@ func (l ListCronRunsQuery) Validate() error {
 
 type ListCronWorkflowsQuery struct {
 	IncludeDeleted *bool `json:"include_deleted,omitempty"`
+}
+
+type ValidateCronWorkflowQuery struct {
+	// From RFC3339 preview start; defaults to daemon now.
+	From *string `json:"from,omitempty"`
 }
 
 type DigestProjectQuery struct {

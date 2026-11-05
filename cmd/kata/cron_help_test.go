@@ -15,12 +15,12 @@ import (
 	"go.kenn.io/kata/internal/testenv"
 )
 
-// The product contract is copyable request bodies in create AND update help.
+// The product contract is copyable request bodies in create, update and validate help.
 // Extract the rendered bodies rather than duplicating fixtures: a missing
 // issue policy, invalid field, or broken workflow dependency must fail here.
 func TestCronHelpRequestExamples(t *testing.T) {
 	for _, resource := range []string{"job", "workflow"} {
-		for _, action := range []string{"create", "update"} {
+		for _, action := range []string{"create", "update", "validate"} {
 			t.Run(resource+"/"+action, func(t *testing.T) {
 				t.Setenv("KATA_AUTHOR", "worker")
 				env := testenv.New(t)
@@ -35,6 +35,9 @@ func TestCronHelpRequestExamples(t *testing.T) {
 				wantResources := []string{"workflow"}
 				if resource == "job" {
 					wantResources = []string{"job", "job", "workflow", "job"}
+				}
+				if action == "validate" {
+					wantResources = []string{resource}
 				}
 				require.Len(t, examples, len(wantResources), "help must show every common request kind")
 				for i, example := range examples {
@@ -84,6 +87,12 @@ func TestCronHelpRequestExamples(t *testing.T) {
 					}
 					out, _, err := executeCronCLI(t, env.URL, nil, args...)
 					require.NoError(t, err, "example %d: %s", i, example.body)
+					if action == "validate" {
+						var result db.CronValidation
+						require.NoError(t, json.Unmarshal([]byte(out), &result))
+						require.True(t, result.Valid)
+						continue
+					}
 					if args[0] == "workflow" {
 						var result struct {
 							Workflow api.CronWorkflow `json:"workflow"`

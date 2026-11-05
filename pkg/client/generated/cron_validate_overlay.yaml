@@ -1,0 +1,36 @@
+overlay: 1.0.0
+info:
+  title: Preserve unsaved cron documents without client coercion
+  version: 1.0.0
+actions:
+  - target: '$.components.schemas.CronValidationBody.properties.definition'
+    update:
+      x-go-type: json.RawMessage
+      x-go-type-skip-optional-pointer: true
+      x-omitempty: true
+      x-go-type-import:
+        path: encoding/json
+  - target: '$.components.schemas.CronValidationResult.properties.definition'
+    update:
+      x-go-type: json.RawMessage
+      x-go-type-import:
+        path: encoding/json
+  - target: '$.components.schemas.CronValidationResult.properties.name'
+    update:
+      nullable: true
+      x-kata-require-presence: true
+  - target: '$.components.schemas.SchedulePreview.properties.from'
+    update:
+      nullable: true
+      x-kata-require-presence: true
+  - target: '$.components.schemas.CollisionItem.properties.at'
+    update:
+      nullable: true
+      x-kata-require-presence: true
+  - target: '$.components.schemas.ValidationCollisions.properties.until'
+    update:
+      nullable: true
+      x-kata-require-presence: true
+  - target: '$.components.schemas.ScheduleFire.properties.at'
+    update:
+      nullable: true

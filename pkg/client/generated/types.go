@@ -722,6 +722,52 @@ func (c CloseActionRequestBody) Validate() error {
 	return errors
 }
 
+type CollisionItem struct {
+	At          *time.Time      `json:"at" validate:"required"`
+	Local       string          `json:"local" validate:"required"`
+	Occurrences int64           `json:"occurrences"`
+	PeerCount   int64           `json:"peer_count"`
+	Peers       []CollisionPeer `json:"peers" validate:"required"`
+}
+
+func (c CollisionItem) Validate() error {
+	if c.At == nil {
+		return runtime.NewValidationErrorsFromString("At", "is required")
+	}
+	var errors runtime.ValidationErrors
+	if c.At != nil {
+		if err := typesValidator.Var(c.At, "required"); err != nil {
+			errors = errors.Append("At", err)
+		}
+	}
+	if err := typesValidator.Var(c.Local, "required"); err != nil {
+		errors = errors.Append("Local", err)
+	}
+	if err := typesValidator.Var(c.Peers, "required"); err != nil {
+		errors = errors.Append("Peers", err)
+	}
+	for i, item := range c.Peers {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Peers[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type CollisionPeer struct {
+	Name string `json:"name" validate:"required"`
+	UID  string `json:"uid" validate:"required"`
+}
+
+func (c CollisionPeer) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+}
+
 type Comment struct {
 	AccountableActor *string              `json:"accountable_actor,omitempty"`
 	Author           string               `json:"author" validate:"required"`
@@ -1594,6 +1640,111 @@ func (c CronRunsResponseBody) Validate() error {
 		return nil
 	}
 	return errors
+}
+
+type CronValidationBody struct {
+	// Actor Accepted for create/update file compatibility; ignored.
+	Actor *string `json:"actor,omitempty"`
+
+	// Definition Missing or invalid definitions produce document-stage errors.
+	Definition       json.RawMessage `json:"definition,omitempty"`
+	ExpectedEventUID *string         `json:"expected_event_uid,omitempty"`
+
+	// Name Missing or empty names produce request-stage errors.
+	Name *string `json:"name,omitempty"`
+	UID  *string `json:"uid,omitempty"`
+}
+
+func (c CronValidationBody) Validate() error {
+	var errors runtime.ValidationErrors
+	if c.Definition != nil {
+		if v, ok := any(c.Definition).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Definition", err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type CronValidationError struct {
+	Code               string  `json:"code" validate:"required"`
+	DefinitionEventUID *string `json:"definition_event_uid,omitempty"`
+	Message            string  `json:"message" validate:"required"`
+	Stage              string  `json:"stage" validate:"required"`
+}
+
+func (c CronValidationError) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
+}
+
+type CronValidationResult struct {
+	Definition json.RawMessage         `json:"definition"`
+	Errors     []CronValidationError   `json:"errors" validate:"required"`
+	Name       *string                 `json:"name" validate:"required"`
+	Schedule   *SchedulePreview        `json:"schedule,omitempty"`
+	Valid      bool                    `json:"valid"`
+	Warnings   []CronValidationWarning `json:"warnings" validate:"required"`
+}
+
+func (c CronValidationResult) Validate() error {
+	if c.Name == nil {
+		return runtime.NewValidationErrorsFromString("Name", "is required")
+	}
+	var errors runtime.ValidationErrors
+	if v, ok := any(c.Definition).(runtime.Validator); ok && v != nil {
+		if err := v.Validate(); err != nil {
+			errors = errors.Append("Definition", err)
+		}
+	}
+	if err := typesValidator.Var(c.Errors, "required"); err != nil {
+		errors = errors.Append("Errors", err)
+	}
+	for i, item := range c.Errors {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Errors[%d]", i), err)
+			}
+		}
+	}
+	if c.Name != nil {
+		if err := typesValidator.Var(c.Name, "required"); err != nil {
+			errors = errors.Append("Name", err)
+		}
+	}
+	if c.Schedule != nil {
+		if v, ok := any(c.Schedule).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Schedule", err)
+			}
+		}
+	}
+	if err := typesValidator.Var(c.Warnings, "required"); err != nil {
+		errors = errors.Append("Warnings", err)
+	}
+	for i, item := range c.Warnings {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Warnings[%d]", i), err)
+			}
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
+type CronValidationWarning struct {
+	Code    string `json:"code" validate:"required"`
+	Message string `json:"message" validate:"required"`
+}
+
+func (c CronValidationWarning) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(c))
 }
 
 type CronWorkflow struct {
@@ -6372,6 +6523,66 @@ func (r RunIssueSyncOnceResponseBody) Validate() error {
 	return errors
 }
 
+type ScheduleFire struct {
+	At    *time.Time `json:"at" validate:"required"`
+	Local string     `json:"local" validate:"required"`
+}
+
+func (s ScheduleFire) Validate() error {
+	return runtime.ConvertValidatorError(typesValidator.Struct(s))
+}
+
+type SchedulePreview struct {
+	Basis      string                `json:"basis" validate:"required"`
+	Collisions *ValidationCollisions `json:"collisions,omitempty"`
+	Delivery   string                `json:"delivery" validate:"required"`
+	From       *time.Time            `json:"from" validate:"required"`
+	Next       []ScheduleFire        `json:"next" validate:"required"`
+	Zone       string                `json:"zone" validate:"required"`
+}
+
+func (s SchedulePreview) Validate() error {
+	if s.From == nil {
+		return runtime.NewValidationErrorsFromString("From", "is required")
+	}
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(s.Basis, "required"); err != nil {
+		errors = errors.Append("Basis", err)
+	}
+	if s.Collisions != nil {
+		if v, ok := any(s.Collisions).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append("Collisions", err)
+			}
+		}
+	}
+	if err := typesValidator.Var(s.Delivery, "required"); err != nil {
+		errors = errors.Append("Delivery", err)
+	}
+	if s.From != nil {
+		if err := typesValidator.Var(s.From, "required"); err != nil {
+			errors = errors.Append("From", err)
+		}
+	}
+	if err := typesValidator.Var(s.Next, "required"); err != nil {
+		errors = errors.Append("Next", err)
+	}
+	for i, item := range s.Next {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Next[%d]", i), err)
+			}
+		}
+	}
+	if err := typesValidator.Var(s.Zone, "required"); err != nil {
+		errors = errors.Append("Zone", err)
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
+}
+
 type SearchHit struct {
 	Issue     Issue    `json:"issue"`
 	MatchedIn []string `json:"matched_in" validate:"required"`
@@ -7467,4 +7678,37 @@ func (u UISnapshotResponseBody) Validate() error {
 type UnassignRequestBody struct {
 	Actor         *string `json:"actor,omitempty"`
 	ExpectedOwner *string `json:"expected_owner,omitempty"`
+}
+
+type ValidationCollisions struct {
+	Items     []CollisionItem `json:"items" validate:"required"`
+	Skipped   int64           `json:"skipped"`
+	Truncated bool            `json:"truncated"`
+	Until     *time.Time      `json:"until" validate:"required"`
+}
+
+func (v ValidationCollisions) Validate() error {
+	if v.Until == nil {
+		return runtime.NewValidationErrorsFromString("Until", "is required")
+	}
+	var errors runtime.ValidationErrors
+	if err := typesValidator.Var(v.Items, "required"); err != nil {
+		errors = errors.Append("Items", err)
+	}
+	for i, item := range v.Items {
+		if v, ok := any(item).(runtime.Validator); ok {
+			if err := v.Validate(); err != nil {
+				errors = errors.Append(fmt.Sprintf("Items[%d]", i), err)
+			}
+		}
+	}
+	if v.Until != nil {
+		if err := typesValidator.Var(v.Until, "required"); err != nil {
+			errors = errors.Append("Until", err)
+		}
+	}
+	if len(errors) == 0 {
+		return nil
+	}
+	return errors
 }

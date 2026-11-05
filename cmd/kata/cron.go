@@ -47,7 +47,7 @@ The full contract is in the Cron reference (docs/reference/cron.md).`,
 		case "workflow":
 			group.Long = "Manage reusable command or prompt steps. For issue stages with human approval, see docs/workflows/gated-workflows.md."
 		}
-		for _, action := range []string{"list", "show", "create", "update", "edit", "delete", "restore"} {
+		for _, action := range []string{"list", "show", "create", "update", "edit", "delete", "restore", "validate"} {
 			group.AddCommand(newCronOperationCmd(resource, action))
 		}
 		command.AddCommand(group)
@@ -63,22 +63,27 @@ The full contract is in the Cron reference (docs/reference/cron.md).`,
 	return command
 }
 
+const cronParentIssueRequired = "--parent requires definition.issue of kind per-run"
+
 type cronCLIOptions struct {
 	resource, action                 string
 	file, identity, expectedEventUID string
 	parent                           string
+	parentIncompatible               bool
+	count                            int
+	from                             string
 	includeDeleted                   bool
 	limit                            int64
 	beforeUID, jobUID                string
 }
 
 func (o cronCLIOptions) mutation() bool {
-	return o.action != "list" && o.action != "show" && o.action != "edit"
+	return o.action != "list" && o.action != "show" && o.action != "edit" && o.action != "validate"
 }
 func (o cronCLIOptions) definition() bool { return o.resource == "job" || o.resource == "workflow" }
 func newCronOperationCmd(resource, action string) *cobra.Command {
 	options := cronCLIOptions{resource: resource, action: action, limit: 100}
-	takesUID := (resource == "job" || resource == "workflow" || resource == "run") && action != "list" && action != "create"
+	takesUID := (resource == "job" || resource == "workflow" || resource == "run") && action != "list" && action != "create" && action != "validate"
 	command := &cobra.Command{Use: action, Short: action + " " + resource, Args: cobra.NoArgs}
 	command.Long, command.Example = cronOperationHelp(resource, action)
 	if resource == "job" {
@@ -112,6 +117,16 @@ func newCronOperationCmd(resource, action string) *cobra.Command {
 		}
 		if resource == "job" && (action == "create" || action == "update") {
 			command.Flags().StringVar(&options.parent, "parent", "", "parent issue ref for a per-run job (stores the full UID)")
+		}
+	}
+	if action == "validate" {
+		command.Flags().StringVar(&options.file, "file", "", "JSON request body file, or - for stdin")
+		command.Flags().StringVar(&options.identity, "uid", "", "existing definition ULID (optional)")
+		command.Flags().StringVar(&options.expectedEventUID, "expected-event-uid", "", "current definition event UID; must match the request body if present")
+		if resource == "job" {
+			command.Flags().StringVar(&options.parent, "parent", "", "parent issue ref for a per-run job (stores the full UID)")
+			command.Flags().IntVar(&options.count, "count", 5, "number of next fires (1-100)")
+			command.Flags().StringVar(&options.from, "from", "", "RFC3339 preview start (defaults to daemon now)")
 		}
 	}
 	if action == "list" && options.definition() {
@@ -148,6 +163,12 @@ never changes an issue's owner, dates, lease, or status.`,
 			"  " + cmd + " <run-uid> --json-input observation.json --json"
 	}
 	switch action {
+	case "validate":
+		example := cronPromptRequestExample + "  kata cron job validate --file prompt.json --count 5"
+		if resource == "workflow" {
+			example = cronWorkflowRequestExample + "  kata cron workflow validate --file workflow.json"
+		}
+		return "Validate an unsaved " + resource + " without saving. Prints normalized definition, errors and warnings as JSON; invalid definitions exit 3. Jobs include hypothetical next fires. Use --uid and --expected-event-uid to check an edit.\n\n" + cronRequestHelp(resource), example
 	case "list":
 		return "List the project's " + resource + ` definitions. --include-deleted also lists
 deleted (tombstoned) ones.`, "  " + cmd + " --json\n  " + cmd + " --include-deleted --json"
@@ -232,7 +253,7 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 		return cronCLIValidation("limit must be between 1 and 100")
 	}
 	var body []byte
-	if o.mutation() {
+	if o.mutation() || o.action == "validate" {
 		var err error
 		body, err = o.requestBody(cmd)
 		if err != nil {
@@ -286,6 +307,9 @@ func (o *cronCLIOptions) execute(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
+	if o.action == "validate" {
+		return emitCronValidation(cmd, raw, o.resource == "job", o.parentIncompatible)
+	}
 	if flags.Quiet && currentOutputMode() != outputJSON {
 		return nil
 	}
@@ -299,18 +323,11 @@ func (o *cronCLIOptions) applyParent(cmd *cobra.Command, daemon daemonAPI, raw [
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return projectRef{}, nil, err
 	}
-	if fields == nil {
-		return projectRef{}, nil, cronCLIValidation("--parent requires definition.issue of kind per-run")
-	}
-	if err := json.Unmarshal(fields["definition"], &definition); err != nil || definition == nil {
-		return projectRef{}, nil, cronCLIValidation("--parent requires definition.issue of kind per-run")
-	}
-	if err := json.Unmarshal(definition["issue"], &issue); err != nil || issue == nil {
-		return projectRef{}, nil, cronCLIValidation("--parent requires definition.issue of kind per-run")
-	}
-	kind, err := cronStringField(issue, "kind")
-	if err != nil || kind != "per-run" {
-		return projectRef{}, nil, cronCLIValidation("--parent requires definition.issue of kind per-run")
+	o.parentIncompatible = fields == nil || json.Unmarshal(fields["definition"], &definition) != nil || definition == nil || json.Unmarshal(definition["issue"], &issue) != nil || issue == nil
+	kind, kindErr := cronStringField(issue, "kind")
+	o.parentIncompatible = o.parentIncompatible || kindErr != nil || kind != "per-run"
+	if o.parentIncompatible && o.action != "validate" {
+		return projectRef{}, nil, cronCLIValidation(cronParentIssueRequired)
 	}
 	ctx, baseURL, pid, ref, err := resolveIssueRefForCommand(cmd, o.parent)
 	if err != nil {
@@ -334,6 +351,11 @@ func (o *cronCLIOptions) applyParent(cmd *cobra.Command, daemon daemonAPI, raw [
 		if selected.ID != project.ID {
 			return projectRef{}, nil, cronCLIValidation(fmt.Sprintf("job project %q and parent project %q must match", selected.Name, project.Name))
 		}
+	}
+	// Validation forwards incomplete or incompatible documents unchanged so
+	// their failures remain staged results. Parent patching applies to per-run jobs.
+	if o.parentIncompatible {
+		return project, raw, nil
 	}
 	client, err := kataclient.NewWithHTTPClient(baseURL, daemon.client)
 	if err != nil {
@@ -380,6 +402,9 @@ func (o *cronCLIOptions) applyParent(cmd *cobra.Command, daemon daemonAPI, raw [
 const cronDefinitionRequestLimit = 1 << 20
 
 func (o *cronCLIOptions) requestBody(cmd *cobra.Command) ([]byte, error) {
+	if o.action == "validate" {
+		return o.validationRequestBody(cmd)
+	}
 	raw, err := o.readRequest(cmd)
 	if err != nil {
 		return nil, err
@@ -406,7 +431,7 @@ func (o *cronCLIOptions) requestBody(cmd *cobra.Command) ([]byte, error) {
 // may omit it and send an empty object; every other mutation requires it.
 func (o *cronCLIOptions) readRequest(cmd *cobra.Command) ([]byte, error) {
 	if o.file == "" {
-		if o.definition() && o.action != "create" && o.action != "update" {
+		if o.definition() && o.action != "create" && o.action != "update" && o.action != "validate" {
 			return []byte(`{}`), nil
 		}
 		if o.resource == "run" {
@@ -549,33 +574,39 @@ func applyCronTeammate(cmd *cobra.Command, fields map[string]jsontext.Value) err
 // applyExpectedEventUID reconciles the body precondition with
 // --expected-event-uid and writes the normalized value back to the body.
 func (o *cronCLIOptions) applyExpectedEventUID(fields map[string]jsontext.Value) error {
-	const key = "expected_event_uid"
+	if err := mergeCronUID(fields, "expected_event_uid", &o.expectedEventUID); err != nil {
+		return err
+	}
+	return o.checkExpectedEventUID()
+}
+
+// mergeCronUID reconciles a body identity with its flag without allocating one.
+func mergeCronUID(fields map[string]jsontext.Value, key string, flagValue *string) error {
 	bodyUID, err := cronStringField(fields, key)
 	if err != nil {
 		return err
 	}
 	if bodyUID != "" {
-		if bodyUID, err = normalizedCronCLIUID(bodyUID); err != nil {
+		bodyUID, err = normalizedCronCLIUID(bodyUID)
+		if err != nil {
 			return err
 		}
 	}
-	if o.expectedEventUID == "" {
-		o.expectedEventUID = bodyUID
+	if *flagValue == "" {
+		*flagValue = bodyUID
 	} else {
-		if o.expectedEventUID, err = normalizedCronCLIUID(o.expectedEventUID); err != nil {
+		*flagValue, err = normalizedCronCLIUID(*flagValue)
+		if err != nil {
 			return err
 		}
-		if bodyUID != "" && bodyUID != o.expectedEventUID {
+		if bodyUID != "" && bodyUID != *flagValue {
 			return cronCLIValidation(key + " in body and flag must match")
 		}
 	}
-	if err := o.checkExpectedEventUID(); err != nil {
-		return err
-	}
-	if o.expectedEventUID == "" {
+	if *flagValue == "" {
 		return nil
 	}
-	return setCronStringField(fields, key, o.expectedEventUID)
+	return setCronStringField(fields, key, *flagValue)
 }
 
 // checkExpectedEventUID requires a definition create to be unconditional and
@@ -607,6 +638,8 @@ func cronCLIResponse(status int, raw []byte, err error) ([]byte, error) {
 
 func (o cronCLIOptions) call(a daemonAPI, c *kataclient.Client, projectID int64, raw []byte) ([]byte, error) {
 	switch {
+	case o.action == "validate":
+		return o.callValidate(a, c, projectID, raw)
 	case o.resource == "capabilities":
 		return o.callCapabilities(a, c, projectID)
 	case o.action == "list" || o.action == "show":

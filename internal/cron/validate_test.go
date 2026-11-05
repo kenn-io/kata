@@ -16,6 +16,21 @@ const executeJSON = `{"version":1,"kind":"job","trigger":{"kind":"manual"},"acti
 // Native definitions are versioned portable documents. Invalid envelopes cannot
 // become saved jobs, including notify actions accidentally carrying execution.
 func TestParseJob(t *testing.T) {
+	t.Run("null options normalize as absent", func(t *testing.T) {
+		job, err := ParseJob([]byte(strings.Replace(executeJSON, `"version":1`, `"version":1,"options":null`, 1)))
+		require.NoError(t, err)
+		raw, err := json.Marshal(job)
+		require.NoError(t, err)
+		var normalized map[string]any
+		require.NoError(t, json.Unmarshal(raw, &normalized))
+		require.NotContains(t, normalized, "options")
+	})
+	t.Run("non-object options", func(t *testing.T) {
+		for _, value := range []string{`[]`, `"text"`, `1`, `true`, `false`} {
+			_, err := ParseJob([]byte(strings.Replace(executeJSON, `"version":1`, `"version":1,"options":`+value, 1)))
+			require.ErrorContains(t, err, "options must be an object", value)
+		}
+	})
 	for _, input := range []string{executeJSON,
 		`{"version":1,"kind":"job","trigger":{"kind":"cron","cron":"0 9 * * 1-5"},"action":{"kind":"notify","recipient":"operator","message":"Review"},"issue":{"kind":"existing","uid":"01ARZ3NDEKTSV4RRFFQ69G5FAV"},"overlap":"forbid","catchup":"latest"}`,
 		`{"version":1,"kind":"job","trigger":{"kind":"issue-deadline","issue_uid":"01ARZ3NDEKTSV4RRFFQ69G5FAV","lead_seconds":1800},"action":{"kind":"notify","recipient":"operator/worker","message":"Due soon"},"overlap":"forbid","catchup":"latest"}`,

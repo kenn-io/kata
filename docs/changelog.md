@@ -1,13 +1,18 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-04
+last_edited: 2026-11-05
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Validate unsaved cron jobs and workflows through the CLI, HTTP API, or MCP
+  before saving. See normalized definitions, staged errors, hypothetical next
+  fires, and bounded job collision previews. Requires daemon API 0.43.0 or later.
+  See [Validate before saving](reference/cron.md#validate-before-saving).
 
 - Keep local writes responsive on relay hubs. Creating an issue or receiving an
   unrelated snapshot leaves downstream sync incremental unless it can change the
