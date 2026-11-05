@@ -22,7 +22,9 @@ func TestIssueUIDPrefixIndexMigrationUpgradesVersion44(t *testing.T) {
 	require.NoError(t, err)
 	project, err := store.CreateProject(ctx, "example-project")
 	require.NoError(t, err)
-	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, UID: "01hznq7v000000000000000003", Title: "Prefix match", Author: "agent"})
+	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, UID: "01hznq7v000000000000000001", Title: "Prefix match", Author: "agent"})
+	require.NoError(t, err)
+	_, _, err = store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, UID: "01HZNQ7V000000000000000003", Title: "Uppercase match", Author: "agent"})
 	require.NoError(t, err)
 	other, err := store.CreateProject(ctx, "other-project")
 	require.NoError(t, err)
@@ -33,6 +35,7 @@ func TestIssueUIDPrefixIndexMigrationUpgradesVersion44(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = admin.Close() })
 	_, err = admin.ExecContext(ctx, `DROP INDEX uid_prefix_upgrade.idx_issues_uid_prefix;
+DROP INDEX uid_prefix_upgrade.idx_issues_project_uid_prefix;
 UPDATE uid_prefix_upgrade.meta SET value='44' WHERE key='schema_version'`)
 	require.NoError(t, err)
 	upgraded, err := pgstore.OpenWithConfig(ctx, dsn, pgstore.Config{Schema: schema, SchemaMode: pgstore.SchemaModeBootstrap})
@@ -48,12 +51,26 @@ UPDATE uid_prefix_upgrade.meta SET value='44' WHERE key='schema_version'`)
 		var definition string
 		require.NoError(t, admin.QueryRowContext(ctx, `SELECT replace(indexdef, schemaname || '.', '') FROM pg_indexes WHERE schemaname=$1 AND indexname='idx_issues_uid_prefix'`, targetSchema).Scan(&definition))
 		require.Equal(t, `CREATE INDEX idx_issues_uid_prefix ON issues USING btree (uid text_pattern_ops)`, definition)
+		require.NoError(t, admin.QueryRowContext(ctx, `SELECT replace(indexdef, schemaname || '.', '') FROM pg_indexes WHERE schemaname=$1 AND indexname='idx_issues_project_uid_prefix'`, targetSchema).Scan(&definition))
+		require.Equal(t, `CREATE INDEX idx_issues_project_uid_prefix ON issues USING btree (project_id, uid text_pattern_ops)`, definition)
 	}
 	matches, err := upgraded.IssueUIDPrefixMatch(ctx, "01hznq7v", 20, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Len(t, matches, 1)
-	require.Equal(t, "01hznq7v000000000000000003", matches[0].UID)
+	require.Equal(t, "01hznq7v000000000000000001", matches[0].UID)
 	matches, err = upgraded.IssueUIDPrefixMatch(db.WithAuthorizedProjects(ctx, []string{other.UID}), "01hznq7v", 20, db.IncludeDeletedNo)
 	require.NoError(t, err)
 	require.Empty(t, matches)
+	for _, projects := range [][]string{nil, {project.UID}} {
+		matches, err = upgraded.IssueUIDPrefixMatch(db.WithAuthorizedProjects(ctx, projects), "01", 20, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		expected := []string{"01HZNQ7V000000000000000000", "01HZNQ7V000000000000000003", "01hznq7v000000000000000001"}
+		if projects != nil {
+			expected = expected[1:]
+		}
+		require.Len(t, matches, len(expected))
+		for i, uid := range expected {
+			require.Equal(t, uid, matches[i].UID)
+		}
+	}
 }

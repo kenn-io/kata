@@ -42,7 +42,7 @@ SELECT '01M4'||lpad(x::text,22,'0'),lpad(x::text,6,'0'),$1,'Unrelated issue','ag
 	}
 	// Inspect the real pgx-cached queries after PostgreSQL can choose generic plans.
 	rows, err := store.QueryContext(ctx, `SELECT name, cardinality(parameter_types) FROM pg_prepared_statements
-WHERE statement LIKE '%i.uid LIKE %' AND statement NOT LIKE '%pg_prepared_statements%'`)
+WHERE statement LIKE '%uid LIKE %' AND statement NOT LIKE '%pg_prepared_statements%'`)
 	require.NoError(t, err)
 	statements := make(map[string]int)
 	for rows.Next() {
@@ -57,8 +57,8 @@ WHERE statement LIKE '%i.uid LIKE %' AND statement NOT LIKE '%pg_prepared_statem
 	for name, parameters := range statements {
 		for _, prefix := range []string{"01ZZ%", "01ZY%"} {
 			arguments := fmt.Sprintf("'%s',1", prefix)
-			if parameters == 3 {
-				arguments = fmt.Sprintf("'%s','%s',1", prefix, project.UID)
+			if parameters == 4 {
+				arguments = fmt.Sprintf("'%s',1,'%s',1", prefix, project.UID)
 			}
 			rows, err := store.QueryContext(ctx, "EXPLAIN EXECUTE "+pgx.Identifier{name}.Sanitize()+"("+arguments+")")
 			require.NoError(t, err)

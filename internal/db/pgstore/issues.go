@@ -306,7 +306,7 @@ func (s *Store) IssuesByUIDs(ctx context.Context, uids []string, include db.Incl
 	return issues, mapSQLError(rows.Err(), nil)
 }
 
-// IssueUIDPrefixMatch returns deterministic UID-prefix matches.
+// IssueUIDPrefixMatch returns case-sensitive UID-prefix matches in byte order.
 func (s *Store) IssueUIDPrefixMatch(
 	ctx context.Context,
 	prefix string,
@@ -317,13 +317,23 @@ func (s *Store) IssueUIDPrefixMatch(
 		limit = 20
 	}
 	query := issueSelect + ` WHERE i.uid LIKE $1`
-	if include == db.IncludeDeletedNo {
+	args := []any{prefix + "%"}
+	if _, restricted := db.AuthorizedProjects(ctx); restricted {
+		// Bound each project's candidates before combining the authorized projects.
+		query = `SELECT ` + issueColumns + ` FROM projects p JOIN LATERAL (
+SELECT candidate.id FROM issues candidate WHERE candidate.project_id = p.id AND candidate.uid LIKE $1`
+		if include == db.IncludeDeletedNo {
+			query += ` AND candidate.deleted_at IS NULL`
+		}
+		query += ` ORDER BY candidate.uid USING ~<~ LIMIT $2) matches ON true
+JOIN issues i ON i.id = matches.id WHERE `
+		args = append(args, limit)
+		query += authorizedProjectPredicate(ctx, "p.uid", &args)
+	} else if include == db.IncludeDeletedNo {
 		query += ` AND i.deleted_at IS NULL`
 	}
-	args := []any{prefix + "%"}
-	query += " AND " + authorizedIssuePredicate(ctx, "i.project_id", &args)
 	args = append(args, limit)
-	query += fmt.Sprintf(` ORDER BY i.uid ASC LIMIT $%d`, len(args))
+	query += fmt.Sprintf(` ORDER BY i.uid USING ~<~ LIMIT $%d`, len(args))
 	rows, err := s.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, mapSQLError(err, nil)
