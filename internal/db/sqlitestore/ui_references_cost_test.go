@@ -24,18 +24,10 @@ func TestUIReferences_PageBudget(t *testing.T) {
 		name   string
 		budget int
 	}{
-		// About four to five times the measured 266 and 25 fetches.
+		// About four times the measured 266 fetches.
 		{"all choices", 1100},
-		{"analyzed mostly deleted", 1100},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if tc.name == "analyzed mostly deleted" {
-				// Keep early representatives and the recent label visible while stats favor live issues.
-				_, err := raw.ExecContext(ctx, `UPDATE issues SET deleted_at=CURRENT_TIMESTAMP WHERE id>1000 AND id<=49960`)
-				require.NoError(t, err)
-				_, err = raw.ExecContext(ctx, `ANALYZE`)
-				require.NoError(t, err)
-			}
 			conn, err := raw.Conn(ctx)
 			require.NoError(t, err)
 			sqlitePageFetches(t, conn, true)

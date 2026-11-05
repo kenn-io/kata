@@ -393,13 +393,13 @@ const uiReferenceOwnersQuery = `WITH RECURSIVE choices(value, issue_id) AS (
 
 const uiReferenceLabelsQuery = `WITH RECURSIVE choices(value, issue_id) AS (
 	SELECT label, issue_id FROM (
-		SELECT il.label, il.issue_id FROM issue_labels il CROSS JOIN issues i ON i.id = il.issue_id CROSS JOIN projects p ON p.id = i.project_id
+		SELECT il.label, il.issue_id FROM issue_labels il JOIN issues i ON i.id = il.issue_id JOIN projects p ON p.id = i.project_id
 		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?1
 		ORDER BY il.label LIMIT 1
 	)
 	UNION ALL
 	SELECT il.label, il.issue_id FROM choices prev JOIN issue_labels il ON il.rowid = (
-		SELECT il.rowid FROM issue_labels il CROSS JOIN issues i ON i.id = il.issue_id CROSS JOIN projects p ON p.id = i.project_id
+		SELECT il.rowid FROM issue_labels il JOIN issues i ON i.id = il.issue_id JOIN projects p ON p.id = i.project_id
 		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?1 AND il.label > prev.value
 		ORDER BY il.label LIMIT 1
 	)
