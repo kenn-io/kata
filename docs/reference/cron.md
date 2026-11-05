@@ -668,6 +668,7 @@ must still satisfy the workflow rule. A non-current job definition reference
 counts as execution.
 
 `owned` runs only jobs and workflows created by this replica's member actor whose current definition that actor also wrote; a definition received in a federation baseline snapshot, which does not record its last editor, is judged by its creator alone.
+A member re-saves a definition a colleague edited to regain eligibility under `owned`.
 A missing job or workflow passes through to the store's reference validation.
 
 Before launch, submit a `running` observation with a fresh run UID and require

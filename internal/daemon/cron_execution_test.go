@@ -81,6 +81,7 @@ func TestCronExecutionNewRunPolicy(t *testing.T) {
 		{name: "none", author: "company-member", want: 403},
 		{name: "owned author", mode: "owned", author: "company-member", want: 200},
 		{name: "owned other", mode: "owned", author: "other-member", want: 403},
+		{name: "owned case differs", mode: "owned", author: "Company-member", want: 403},
 		{name: "relay upstream", mode: "owned", author: "company-member", relay: true, want: 200},
 		{name: "relay local", mode: "owned", author: "local-member", relay: true, want: 403},
 		{name: "all", mode: "all", author: "other-member", want: 200},

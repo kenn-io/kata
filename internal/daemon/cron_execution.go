@@ -121,11 +121,11 @@ func cronDefinitionEligible(ctx context.Context, store db.Storage, projectID int
 	return events[0].Actor == policy.MemberActor, nil
 }
 
-// executionEligible compares exact, nonblank upstream member identities.
+// executionEligible compares exact upstream member identities.
 func executionEligible(mode config.CronExecuteMode, memberActor, author string) bool {
 	switch mode {
 	case config.ModeOwned:
-		return strings.TrimSpace(memberActor) != "" && memberActor == author
+		return memberActor == author
 	default:
 		return false
 	}
