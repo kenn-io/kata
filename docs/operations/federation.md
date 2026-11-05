@@ -1,7 +1,7 @@
 ---
 title: Federation
 description: Configure and operate trusted Kata hub-and-spoke federation across SQLite or PostgreSQL daemons.
-last_edited: 2026-11-04
+last_edited: 2026-11-05
 ---
 
 # Federation
@@ -2411,6 +2411,9 @@ On unreleased main, spokes and relays default local adapter execution to
 `none`, including disabled bindings. Reading company definitions does not opt
 this daemon into running them. After upgrading the daemon, choose `owned` or
 `all` in its local `[cron]` configuration and restart it before resuming local
-adapter execution. See the [replica execution contract](../reference/cron.md#adapter-responsibilities)
-for ownership, admission and project-name matching. Native notify delivery
+adapter execution. Under `owned`, the upstream member must have created each
+executed job and workflow and written its current version. A definition whose
+current event this daemon lacks is refused until the member saves it again.
+See the [replica execution contract](../reference/cron.md#adapter-responsibilities)
+for ownership, admission, and project-name matching. Native notify delivery
 remains on the owning hub.

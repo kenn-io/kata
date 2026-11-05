@@ -460,9 +460,15 @@ The response also includes daemon-local `execution` policy:
 {"replica": true, "mode": "owned", "member_actor": "company-member", "source": "project"}
 ```
 
-`source` is `project` for a matching local override, `replica_default` for a
-spoke or relay using the daemon default, and `local` otherwise. Local and
-hub-role projects return `{"replica":false,"mode":"all","source":"local"}`.
+`execution.source` identifies which local setting selected the mode:
+
+| Value | Meaning |
+| --- | --- |
+| `project` | A matching `[[cron.project]]` override. |
+| `replica_default` | A spoke or relay using `cron.replica_execute`, including an explicit `all`, or `none` when unset. |
+| `local` | A local or hub-role project, which always uses `all`. |
+
+Local and hub-role projects return `{"replica":false,"mode":"all","source":"local"}`.
 `member_actor` is the binding's upstream account, including on relays; the
 relay's local setup account can differ. Disabled spoke bindings remain replicas.
 This field is local policy, not a replicated event feature, and does not change
@@ -642,7 +648,7 @@ execute = "owned"
 | Mode | Eligible execution on this replica |
 | --- | --- |
 | `none` | No execute jobs or workflows. |
-| `owned` | Every executed definition's author exactly matches the nonblank upstream member actor from capabilities, including the job's workflow. |
+| `owned` | The nonblank upstream member actor from capabilities created every executed job and workflow and wrote each one's current version. |
 | `all` | Every execute job and workflow, subject to the adapter's own activation. |
 
 Local and hub-role projects always use `all`. Overrides match the exact current
@@ -654,13 +660,15 @@ when the daemon default is `all`. Config edits take effect after
 warn at startup; local/hub overrides warn and have no effect.
 
 Before scheduling or manually starting each new execution, adapters must read
-live capabilities and apply this rule. Under `owned`, check the job's author,
-the author of any workflow named by its `action.workflow_uid`, and the author
-of any `workflow_uid` in the observation. Workflow-only runs check the
-workflow's author. Only a reference to the current version 1 notify definition
+live capabilities and apply this rule. Under `owned`, the member must have
+created the job and written its current version. The same rule covers any
+workflow named by its `action.workflow_uid` or by `workflow_uid` in the
+observation, including workflow-only runs. Only a reference to the current version 1 notify definition
 is exempt from the job execution rule; a notify job with a workflow reference
 must still satisfy the workflow rule. A non-current job definition reference
-counts as execution. Ownership uses the current canonical author. A missing
+counts as execution. The daemon checks both the definition's author and the
+actor on its current definition event. Under `owned`, a definition whose current
+event this daemon lacks is refused until the member saves it again. A missing
 current definition cannot establish eligibility under `none` or `owned`.
 
 Before launch, submit a `running` observation with a fresh run UID and require
@@ -668,8 +676,8 @@ success. The local observe route rejects new excluded runs with
 `403 cron_execution_not_enabled`; its error includes `mode`, `member_actor`
 and an opt-in hint. A failed admission must prevent launch. Existing or
 replicated run UIDs may still accept evidence updates; success on such an
-update never authorizes another execution. Policy uses the current binding and
-author at check time; federation adoption can change author between checks.
+update never authorizes another execution. Policy uses the current binding,
+author, and definition event at check time; federation adoption can change author between checks.
 This cooperative adapter contract does not control an external process or a
 writer sending observations directly to the owning hub. Older adapters that
 launch before reporting must be updated to honor it.

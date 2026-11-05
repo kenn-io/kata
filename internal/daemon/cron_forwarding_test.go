@@ -165,7 +165,7 @@ func TestCronSpokeForwardRefusals(t *testing.T) {
 				case "push-disabled":
 					b.PushEnabled = false
 				case "relay":
-					configureClaimRelayBinding(t, f.hub, f.spoke, f.sp)
+					configureClaimRelayBinding(t, f.spoke.DB, f.sp, f.hub.DB.InstanceUID(), "tester", "tester")
 				case "no-credentials":
 					require.NoError(t, config.DefaultFederationCredentialStore().DeleteFederationCredential(t.Context(), f.sp.UID))
 				case "credential-target":

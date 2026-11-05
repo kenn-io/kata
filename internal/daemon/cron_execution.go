@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"go.kenn.io/kata/internal/api"
@@ -53,7 +54,6 @@ func checkCronExecution(ctx context.Context, cfg ServerConfig, project db.Projec
 	if !errors.Is(err, db.ErrNotFound) {
 		return err
 	}
-	mode := config.CronExecuteMode(policy.Mode)
 	var workflows []string
 	if in.Body.JobUID != nil {
 		id := *in.Body.JobUID
@@ -70,7 +70,11 @@ func checkCronExecution(ctx context.Context, cfg ServerConfig, project db.Projec
 			strings.EqualFold(*in.Body.DefinitionEventUID, job.DefinitionEventUID) &&
 			job.Definition.Version == 1 && job.Definition.Action.Kind == "notify"
 		if !notify {
-			if !executionEligible(mode, policy.MemberActor, job.Author) {
+			eligible, err := cronDefinitionEligible(ctx, cfg.DB, project.ID, policy, job.CronDefinition)
+			if err != nil {
+				return err
+			}
+			if !eligible {
 				return cronExecutionRefusal(policy, "job", id)
 			}
 			if job.Definition.Action.WorkflowUID != "" {
@@ -78,7 +82,7 @@ func checkCronExecution(ctx context.Context, cfg ServerConfig, project db.Projec
 			}
 		}
 	}
-	if in.Body.WorkflowUID != nil {
+	if in.Body.WorkflowUID != nil && !slices.Contains(workflows, *in.Body.WorkflowUID) {
 		workflows = append(workflows, *in.Body.WorkflowUID)
 	}
 	for _, id := range workflows {
@@ -89,20 +93,36 @@ func checkCronExecution(ctx context.Context, cfg ServerConfig, project db.Projec
 		if readErr != nil {
 			return readErr
 		}
-		if !executionEligible(mode, policy.MemberActor, workflow.Author) {
+		eligible, err := cronDefinitionEligible(ctx, cfg.DB, project.ID, policy, workflow.CronDefinition)
+		if err != nil {
+			return err
+		}
+		if !eligible {
 			return cronExecutionRefusal(policy, "workflow", id)
 		}
 	}
-	// Policy uses check-time binding and authorship. Adoption can change authors;
-	// this cooperative admission check is not a transaction authorization fence.
+	// Policy uses check-time binding, authorship, and definition events.
+	// This cooperative admission check is not a transaction authorization fence.
 	return nil
+}
+
+func cronDefinitionEligible(ctx context.Context, store db.Storage, projectID int64, policy api.CronExecutionPolicy, definition db.CronDefinition) (bool, error) {
+	if !executionEligible(config.CronExecuteMode(policy.Mode), policy.MemberActor, definition.Author) {
+		return false, nil
+	}
+	events, err := store.EventsByUIDs(ctx, projectID, []string{definition.DefinitionEventUID})
+	if errors.Is(err, db.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return len(events) == 1 && events[0].Actor == policy.MemberActor, nil
 }
 
 // executionEligible compares exact, nonblank upstream member identities.
 func executionEligible(mode config.CronExecuteMode, memberActor, author string) bool {
 	switch mode {
-	case config.ModeAll:
-		return true
 	case config.ModeOwned:
 		return strings.TrimSpace(memberActor) != "" && memberActor == author
 	default:

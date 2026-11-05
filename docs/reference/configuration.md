@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-04
+last_edited: 2026-11-05
 ---
 
 # Configuration
@@ -1488,7 +1488,10 @@ execute = "owned"
 ```
 
 `replica_execute` defaults to `none`; both mode fields accept `none`, `owned`
-or `all`. Each override needs a unique, valid local project name and an explicit
+or `all`. Under `owned`, the upstream member must have created each executed
+job and workflow and written its current version. A definition whose current
+event this daemon lacks is refused until the member saves it again.
+Each override needs a unique, valid local project name and an explicit
 `execute` mode. Names match exactly as stored, including leading or trailing
 spaces. Unknown names warn at startup and may match a later join. Overrides
 follow current names, including rename and name reuse. Local/hub projects

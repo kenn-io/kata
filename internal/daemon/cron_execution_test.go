@@ -2,7 +2,7 @@ package daemon_test
 
 import (
 	"context"
-	"crypto/ed25519"
+	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -27,12 +27,7 @@ func executionBinding(t *testing.T, store db.Storage, project db.Project, role d
 	_, err := store.UpsertFederationBinding(t.Context(), db.FederationBinding{ProjectID: project.ID, Role: role, HubURL: "https://daemon.example", HubProjectID: 42, HubProjectUID: project.UID, Actor: "company-member", Enabled: enabled, PushEnabled: true})
 	require.NoError(t, err)
 	if relay {
-		root := cronHTTPUID(t)
-		public, _, keyErr := ed25519.GenerateKey(nil)
-		require.NoError(t, keyErr)
-		require.NoError(t, store.PinRootAuthority(t.Context(), db.RootKeyPin{ProjectUID: project.UID, AuthorityUID: root, KeyID: db.RootPublicKeyID(public), PublicKey: public}))
-		_, err = store.SetRelayBindingConfig(t.Context(), project.ID, db.RelayBindingConfig{ProtocolVersion: db.RelayProtocolVersion, BindingUID: cronHTTPUID(t), UpstreamInstanceUID: root, AuthorityUID: root, HubPath: []string{root, store.InstanceUID()}, LocalActor: "local-member", ServeDownstream: true, ResetEpoch: 1})
-		require.NoError(t, err)
+		configureClaimRelayBinding(t, store, project, cronHTTPUID(t), "company-member", "local-member")
 	}
 }
 
@@ -81,6 +76,7 @@ func TestCronExecutionNewRunPolicy(t *testing.T) {
 		name, mode, author, kind string
 		workflowAuthor           string
 		actionWorkflow           bool
+		missingEvent             bool
 		workflow, deleted, relay bool
 		want                     int
 	}{
@@ -92,6 +88,8 @@ func TestCronExecutionNewRunPolicy(t *testing.T) {
 		{name: "all", mode: "all", author: "other-member", want: 200},
 		{name: "workflow owned", mode: "owned", author: "company-member", workflow: true, want: 200},
 		{name: "workflow other", mode: "owned", author: "other-member", workflow: true, want: 403},
+		{name: "workflow missing current event", mode: "owned", author: "company-member", workflow: true, missingEvent: true, want: 403},
+		{name: "job missing current event", mode: "owned", author: "company-member", missingEvent: true, want: 403},
 		{name: "workflow none", author: "company-member", workflow: true, want: 403},
 		{name: "notify", author: "other-member", kind: "notify", want: 200},
 		{name: "notify workflow", author: "other-member", kind: "notify", workflow: true, want: 403},
@@ -139,6 +137,15 @@ func TestCronExecutionNewRunPolicy(t *testing.T) {
 				body["job_uid"], body["definition_event_uid"] = job.UID, job.DefinitionEventUID
 			}
 			executionBinding(t, env.DB, project, db.FederationRoleSpoke, true, tc.relay)
+			if tc.missingEvent {
+				eventUID := body["definition_event_uid"]
+				if tc.workflow {
+					eventUID = body["workflow_definition_event_uid"]
+				}
+				// A materialized definition may arrive without its current event.
+				_, err := env.DB.ExecContext(t.Context(), "DELETE FROM events WHERE uid=?", eventUID)
+				require.NoError(t, err)
+			}
 			before, err := env.DB.MaxEventID(t.Context())
 			require.NoError(t, err)
 			status, raw := cronHTTP(t, env, http.MethodPut, fmt.Sprintf("/api/v1/projects/%d/cron/runs/%s", project.ID, cronHTTPUID(t)), body)
@@ -159,6 +166,132 @@ func TestCronExecutionNewRunPolicy(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, before, after)
 			}
+		})
+	}
+}
+
+func TestCronExecutionOwnedCurrentWriter(t *testing.T) {
+	for _, target := range []string{"job", "action workflow", "observed workflow", "both workflow references"} {
+		for _, tc := range []struct {
+			name, creator, editor string
+			want                  int
+		}{
+			{name: "unedited", creator: "company-member", want: 200},
+			{name: "member edit", creator: "company-member", editor: "company-member", want: 200},
+			{name: "other edit", creator: "company-member", editor: "other-member", want: 403},
+			{name: "other creator", creator: "other-member", editor: "company-member", want: 403},
+		} {
+			t.Run(target+"/"+tc.name, func(t *testing.T) {
+				hub := testenv.New(t)
+				project := createFederatedHubProject(t, hub, "hub-project")
+				var events []db.Event
+				body := map[string]any{"actor": "observer", "status": "running", "summary": map[string]any{"version": 1}, "expected_revision": 0}
+				def := cronHTTPDefinition(t)
+				if target != "job" {
+					wfDef := cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "inspect", Kind: "command", Command: "true"}}}
+					wf, event, err := hub.DB.PutCronWorkflow(t.Context(), db.PutCronWorkflow{ProjectID: project.ID, Name: "Inspect", Actor: tc.creator, Definition: wfDef})
+					require.NoError(t, err)
+					events = append(events, event)
+					if tc.editor != "" {
+						wfDef.Steps[0].Command = "echo changed"
+						wf, event, err = hub.DB.PutCronWorkflow(t.Context(), db.PutCronWorkflow{ProjectID: project.ID, UID: wf.UID, ExpectedEventUID: wf.DefinitionEventUID, Name: wf.Name, Actor: tc.editor, Definition: wfDef})
+						require.NoError(t, err)
+						events = append(events, event)
+					}
+					require.Equal(t, tc.creator, wf.Author)
+					if target != "action workflow" {
+						body["workflow_uid"], body["workflow_definition_event_uid"] = wf.UID, wf.DefinitionEventUID
+					}
+					if target != "observed workflow" {
+						def.Action = cron.Action{Kind: "execute", WorkflowUID: wf.UID}
+					}
+				}
+				if target != "observed workflow" {
+					author := "company-member"
+					if target == "job" {
+						author = tc.creator
+					}
+					job, created, err := hub.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Inspect", Actor: author, Definition: def})
+					require.NoError(t, err)
+					events = append(events, created...)
+					if target == "job" && tc.editor != "" {
+						def.Action.Prompt = "Inspect again"
+						job, created, err = hub.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, UID: job.UID, ExpectedEventUID: job.DefinitionEventUID, Name: job.Name, Actor: tc.editor, Definition: def})
+						require.NoError(t, err)
+						events = append(events, created...)
+					}
+					require.Equal(t, author, job.Author)
+					body["job_uid"], body["definition_event_uid"] = job.UID, job.DefinitionEventUID
+				}
+				spoke := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.CronExecution.ReplicaExecute = "owned" })
+				replica, err := spoke.DB.CreateProjectWithUID(t.Context(), "spoke-project", project.UID)
+				require.NoError(t, err)
+				executionBinding(t, spoke.DB, replica, db.FederationRoleSpoke, true, false)
+				for _, event := range events {
+					inserted, err := spoke.DB.InsertRemoteEvent(t.Context(), replica.ID, db.RemoteEvent{
+						EventUID: event.UID, OriginInstanceUID: event.OriginInstanceUID,
+						ProjectUID: event.ProjectUID, ProjectName: event.ProjectName,
+						Type: event.Type, Actor: event.Actor, HLCPhysicalMS: event.HLCPhysicalMS,
+						HLCCounter: event.HLCCounter, ContentHash: event.ContentHash,
+						Payload: jsontext.Value(event.Payload), CreatedAt: event.CreatedAt,
+					})
+					require.NoError(t, err)
+					require.True(t, inserted)
+				}
+				require.NoError(t, spoke.DB.MaterializeFederatedProject(t.Context(), replica.ID))
+				runUID := cronHTTPUID(t)
+				status, raw := cronHTTP(t, spoke, http.MethodPut, fmt.Sprintf("/api/v1/projects/%d/cron/runs/%s", replica.ID, runUID), body)
+				require.Equalf(t, tc.want, status, "%s", raw)
+				if tc.want == 403 {
+					var problem api.ErrorEnvelope
+					require.NoError(t, json.Unmarshal(raw, &problem))
+					require.Equal(t, "cron_execution_not_enabled", problem.Error.Code)
+					_, err = spoke.DB.CronRun(t.Context(), replica.ID, runUID)
+					require.ErrorIs(t, err, db.ErrNotFound)
+				}
+			})
+		}
+	}
+}
+
+type executionWorkflowReadStore struct {
+	db.Storage
+	reads map[string]int
+}
+
+func (s executionWorkflowReadStore) CronWorkflow(ctx context.Context, projectID int64, uid string) (db.CronWorkflow, error) {
+	s.reads[uid]++
+	return s.Storage.CronWorkflow(ctx, projectID, uid)
+}
+
+func TestCronExecutionDistinctWorkflows(t *testing.T) {
+	for _, same := range []bool{true, false} {
+		t.Run(fmt.Sprintf("same=%t", same), func(t *testing.T) {
+			reads := make(map[string]int)
+			env := testenv.New(t, func(cfg *daemon.ServerConfig) {
+				cfg.CronExecution.ReplicaExecute = "owned"
+				cfg.DB = executionWorkflowReadStore{Storage: cfg.DB, reads: reads}
+			})
+			project := seedProject(t, env, "spoke-project")
+			def := cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "inspect", Kind: "command", Command: "true"}}}
+			wf, _, err := env.DB.PutCronWorkflow(t.Context(), db.PutCronWorkflow{ProjectID: project.ID, Name: "Inspect", Actor: "company-member", Definition: def})
+			require.NoError(t, err)
+			observed := wf
+			want := map[string]int{wf.UID: 1}
+			if !same {
+				observed, _, err = env.DB.PutCronWorkflow(t.Context(), db.PutCronWorkflow{ProjectID: project.ID, Name: "Report", Actor: "company-member", Definition: def})
+				require.NoError(t, err)
+				want[observed.UID] = 1
+			}
+			jobDef := cronHTTPDefinition(t)
+			jobDef.Action = cron.Action{Kind: "execute", WorkflowUID: wf.UID}
+			job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Inspect", Actor: "company-member", Definition: jobDef})
+			require.NoError(t, err)
+			executionBinding(t, env.DB, project, db.FederationRoleSpoke, true, false)
+			body := map[string]any{"actor": "observer", "job_uid": job.UID, "definition_event_uid": job.DefinitionEventUID, "workflow_uid": observed.UID, "workflow_definition_event_uid": observed.DefinitionEventUID, "status": "running", "summary": map[string]any{"version": 1}, "expected_revision": 0}
+			status, raw := cronHTTP(t, env, http.MethodPut, fmt.Sprintf("/api/v1/projects/%d/cron/runs/%s", project.ID, cronHTTPUID(t)), body)
+			require.Equalf(t, 200, status, "%s", raw)
+			require.Equal(t, want, reads)
 		})
 	}
 }
@@ -256,16 +389,32 @@ func (s executionReadErrorStore) CronJob(ctx context.Context, id int64, job stri
 	}
 	return s.Storage.CronJob(ctx, id, job)
 }
+func (s executionReadErrorStore) CronWorkflow(ctx context.Context, id int64, workflow string) (db.CronWorkflow, error) {
+	if s.fail == "workflow" {
+		return db.CronWorkflow{}, errors.New("lookup unavailable")
+	}
+	return s.Storage.CronWorkflow(ctx, id, workflow)
+}
+func (s executionReadErrorStore) EventsByUIDs(ctx context.Context, id int64, uids []string) ([]db.Event, error) {
+	if s.fail == "event" {
+		return nil, errors.New("lookup unavailable")
+	}
+	return s.Storage.EventsByUIDs(ctx, id, uids)
+}
 func TestCronExecutionLookupErrors(t *testing.T) {
 	env := testenv.New(t)
 	project := seedProject(t, env, "company-project")
 	executionBinding(t, env.DB, project, db.FederationRoleSpoke, true, false)
-	for _, fail := range []string{"binding", "run", "job"} {
+	wf, _, err := env.DB.PutCronWorkflow(t.Context(), db.PutCronWorkflow{ProjectID: project.ID, Name: "Inspect", Actor: "company-member", Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "inspect", Kind: "command", Command: "true"}}}})
+	require.NoError(t, err)
+	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Inspect", Actor: "company-member", Definition: cronHTTPDefinition(t)})
+	require.NoError(t, err)
+	for _, fail := range []string{"binding", "run", "job", "workflow", "event"} {
 		t.Run(fail, func(t *testing.T) {
-			srv := daemon.NewServer(daemon.ServerConfig{DB: executionReadErrorStore{Storage: env.DB, fail: fail}})
+			srv := daemon.NewServer(daemon.ServerConfig{DB: executionReadErrorStore{Storage: env.DB, fail: fail}, CronExecution: config.CronConfig{ReplicaExecute: "owned"}})
 			t.Cleanup(func() { require.NoError(t, srv.Close()) })
 			recorder := httptest.NewRecorder()
-			request := httptest.NewRequestWithContext(t.Context(), http.MethodPut, fmt.Sprintf("/api/v1/projects/%d/cron/runs/%s", project.ID, cronHTTPUID(t)), strings.NewReader(fmt.Sprintf(`{"actor":"observer","job_uid":%q,"definition_event_uid":%q,"status":"running","summary":{"version":1},"expected_revision":0}`, cronHTTPUID(t), cronHTTPUID(t))))
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPut, fmt.Sprintf("/api/v1/projects/%d/cron/runs/%s", project.ID, cronHTTPUID(t)), strings.NewReader(fmt.Sprintf(`{"actor":"observer","job_uid":%q,"definition_event_uid":%q,"workflow_uid":%q,"workflow_definition_event_uid":%q,"status":"running","summary":{"version":1},"expected_revision":0}`, job.UID, job.DefinitionEventUID, wf.UID, wf.DefinitionEventUID)))
 			request.Header.Set("Content-Type", "application/json")
 			srv.Handler().ServeHTTP(recorder, request)
 			require.Equalf(t, 500, recorder.Code, "%s", recorder.Body.String())

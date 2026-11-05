@@ -11,20 +11,18 @@ type CronExecuteMode string
 const (
 	// ModeNone excludes all replica jobs and workflows.
 	ModeNone CronExecuteMode = "none"
-	// ModeOwned allows definitions authored by the upstream member actor.
+	// ModeOwned requires the upstream member actor to create and last edit definitions.
 	ModeOwned CronExecuteMode = "owned"
 	// ModeAll allows all replica jobs and workflows.
 	ModeAll CronExecuteMode = "all"
 )
 
-// ParseCronExecuteMode recognizes the supported local replica execution modes.
-func ParseCronExecuteMode(value string) (CronExecuteMode, bool) {
-	mode := CronExecuteMode(value)
-	switch mode {
+func validExecuteMode(value string) bool {
+	switch CronExecuteMode(value) {
 	case ModeNone, ModeOwned, ModeAll:
-		return mode, true
+		return true
 	default:
-		return "", false
+		return false
 	}
 }
 
@@ -45,11 +43,6 @@ func trimCronConfig(cfg *CronConfig) {
 	for i := range cfg.Projects {
 		cfg.Projects[i].Execute = strings.TrimSpace(cfg.Projects[i].Execute)
 	}
-}
-
-func validExecuteMode(mode string) bool {
-	_, ok := ParseCronExecuteMode(mode)
-	return ok
 }
 
 // Validate checks local policy without accessing storage. An absent global

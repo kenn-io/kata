@@ -13,7 +13,6 @@ func TestExecutionEligible(t *testing.T) {
 		want                       bool
 	}{
 		{name: "none", mode: "none", member: "member-a", author: "member-a"},
-		{name: "all", mode: "all", author: "member-b", want: true},
 		{name: "owned", mode: "owned", member: "member-a", author: "member-a", want: true},
 		{name: "other author", mode: "owned", member: "member-a", author: "member-b"},
 		{name: "case differs", mode: "owned", member: "member-a", author: "Member-A"},
