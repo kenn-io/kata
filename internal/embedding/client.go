@@ -64,20 +64,15 @@ func New(cfg Config) (*Client, error) {
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
-	parts := embedconfig.Parts{
-		Model:     embedconfig.Model{Name: cfg.Model, Revision: cfg.Salt, Dimensions: dims, Metric: embedconfig.MetricCosine, Normalization: embedconfig.NormalizationL2},
-		Roles:     embedconfig.Roles{InputType: embedconfig.InputTypeNone},
-		Batch:     embedconfig.Batch{Items: batch},
-		Transport: embedconfig.Transport{Timeout: timeout},
+	baseURL := cfg.BaseURL
+	if cfg.Endpoint != nil {
+		baseURL = "http://127.0.0.1"
 	}
-	if cfg.Endpoint == nil {
-		var err error
-		parts, err = (embedconfig.Embedder{
-			BaseURL: cfg.BaseURL, Model: cfg.Model, Dims: dims, FingerprintSalt: cfg.Salt, BatchSize: batch, TrustPrivateNetwork: cfg.TrustPrivateNetwork,
-		}).Parts()
-		if err != nil {
-			return nil, fmt.Errorf("embedding: configure client: %w", err)
-		}
+	parts, err := (embedconfig.Embedder{
+		BaseURL: baseURL, Model: cfg.Model, Dims: dims, FingerprintSalt: cfg.Salt, BatchSize: batch, TrustPrivateNetwork: cfg.TrustPrivateNetwork,
+	}).Parts()
+	if err != nil {
+		return nil, fmt.Errorf("embedding: configure client: %w", err)
 	}
 	parts.Model.RequestDimensions = cfg.RequestDimensions
 	parts.Roles.DocumentPrefix = cfg.DocumentPrefix
@@ -89,10 +84,8 @@ func New(cfg Config) (*Client, error) {
 		Model: parts.Model, Roles: parts.Roles, Deployment: parts.Deployment,
 		Batch: parts.Batch, Transport: parts.Transport,
 	}
-	if cfg.Endpoint == nil {
-		if _, err := embedclient.New(options); err != nil {
-			return nil, fmt.Errorf("embedding: configure client: %w", err)
-		}
+	if _, err := embedclient.New(options); err != nil {
+		return nil, fmt.Errorf("embedding: configure client: %w", err)
 	}
 	params := map[string]string{"recipe": strconv.Itoa(RecipeVersion)}
 	if cfg.Salt != "" {

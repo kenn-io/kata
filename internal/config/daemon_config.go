@@ -175,6 +175,11 @@ func (e EmbeddingsConfig) Enabled() bool {
 	return e.Local || strings.TrimSpace(e.BaseURL) != "" && strings.TrimSpace(e.Model) != ""
 }
 
+// UsesLocal reports whether the built-in server is selected without a configured endpoint.
+func (e EmbeddingsConfig) UsesLocal() bool {
+	return e.Local && strings.TrimSpace(e.BaseURL) == ""
+}
+
 // LocalRecipeCompatible reports whether the built-in server supports this model and width.
 func (e EmbeddingsConfig) LocalRecipeCompatible() bool {
 	return (e.Model == "nomic-embed-text" || e.Model == "nomic-embed-text:latest" || e.Model == "nomic-embed-text:v1.5") &&
@@ -812,7 +817,7 @@ func trimSearchEmbeddings(cfg *DaemonConfig) {
 	e := &cfg.Search.Embeddings
 	e.BaseURL = strings.TrimSpace(e.BaseURL)
 	e.Model = strings.TrimSpace(e.Model)
-	if e.Local && e.Model == "" {
+	if e.UsesLocal() && e.Model == "" {
 		e.Model = "nomic-embed-text"
 	}
 	e.APIKey = strings.TrimSpace(e.APIKey)
@@ -923,10 +928,8 @@ func validateAuthProxy(p ProxyConfig) error {
 func validateEmbeddings(e EmbeddingsConfig) error {
 	hasBase := strings.TrimSpace(e.BaseURL) != ""
 	hasModel := strings.TrimSpace(e.Model) != ""
-	if e.Local {
-		if hasBase {
-			return errors.New("search.embeddings: local conflicts with base_url")
-		}
+	if e.UsesLocal() {
+		// Kit embedserver/handler.go defines the built-in model aliases and widths.
 		if !e.LocalRecipeCompatible() {
 			return errors.New("search.embeddings: local requires a nomic-embed-text model and dims 768, or request_dimensions for a smaller width")
 		}

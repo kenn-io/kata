@@ -10,7 +10,7 @@ import (
 func TestLocalEmbeddingsConfig(t *testing.T) {
 	for _, tt := range []struct{ name, text, wantError string }{
 		{"enabled", "local = true", ""},
-		{"endpoint conflict", "local = true\nbase_url = 'http://127.0.0.1:11434/v1'", "base_url"},
+		{"configured server", "local = true\nbase_url = 'http://127.0.0.1:11434/v1'\nmodel = 'mxbai-embed-large'", ""},
 		{"wrong model", "local = true\nmodel = 'mxbai-embed-large'", "model"},
 		{"too wide", "local = true\ndims = 769", "dims"},
 	} {

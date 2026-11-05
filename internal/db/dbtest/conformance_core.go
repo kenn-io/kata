@@ -897,6 +897,15 @@ func checkIssueLifecycle(t *testing.T, store db.Storage) error {
 	require.NotNil(t, deleteEvent)
 	_, err = store.IssueByShortID(ctx, project.ID, issue.ShortID, db.IncludeDeletedNo)
 	assert.ErrorIs(t, err, db.ErrNotFound)
+	for _, lookupCtx := range []context.Context{ctx, db.WithAuthorizedProjects(ctx, []string{project.UID})} {
+		matches, err := store.IssueUIDPrefixMatch(lookupCtx, issue.UID[:8], 20, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		require.Empty(t, matches)
+		matches, err = store.IssueUIDPrefixMatch(lookupCtx, issue.UID[:8], 20, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		require.Len(t, matches, 1)
+		require.Equal(t, issue.UID, matches[0].UID)
+	}
 
 	restored, restoreEvent, changed, err := store.RestoreIssue(ctx, issue.ID, "conformance-agent")
 	if err != nil {
@@ -946,6 +955,32 @@ func checkIssueLifecycle(t *testing.T, store db.Storage) error {
 		}
 	}
 	assert.Equal(t, 1, changedCount)
+	other, err := store.CreateProject(ctx, "prefix-other-project")
+	require.NoError(t, err)
+	for _, row := range []struct {
+		uid       string
+		projectID int64
+	}{
+		{"01HZNQ7V000000000000000003", project.ID},
+		{"01HZNQ7V000000000000000002", project.ID},
+		{"01HZNQ7V000000000000000001", other.ID},
+	} {
+		_, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: row.projectID, UID: row.uid, Title: "Prefix match", Author: "conformance-agent"})
+		require.NoError(t, err)
+	}
+	prefixMatches, err = store.IssueUIDPrefixMatch(ctx, "01HZNQ7V", 2, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Len(t, prefixMatches, 2)
+	require.Equal(t, "01HZNQ7V000000000000000001", prefixMatches[0].UID)
+	require.Equal(t, "01HZNQ7V000000000000000002", prefixMatches[1].UID)
+	prefixMatches, err = store.IssueUIDPrefixMatch(db.WithAuthorizedProjects(ctx, []string{project.UID}), "01HZNQ7V", 20, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Len(t, prefixMatches, 2)
+	require.Equal(t, "01HZNQ7V000000000000000002", prefixMatches[0].UID)
+	require.Equal(t, "01HZNQ7V000000000000000003", prefixMatches[1].UID)
+	prefixMatches, err = store.IssueUIDPrefixMatch(db.WithAuthorizedProjects(ctx, []string{}), "01HZNQ7V", 20, db.IncludeDeletedNo)
+	require.NoError(t, err)
+	require.Empty(t, prefixMatches)
 	return nil
 }
 

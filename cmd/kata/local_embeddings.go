@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 	"github.com/pelletier/go-toml/v2/unstable"
@@ -47,6 +48,9 @@ func daemonLocalEmbeddingsCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "local-embeddings", Short: "enable search by meaning with the built-in server", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		if err := requireCurrentHomeDaemonCommand(); err != nil {
 			return err
+		}
+		if strings.TrimSpace(os.Getenv("KATA_SEARCH_EMBEDDINGS_BASE_URL")) != "" {
+			return errors.New("unset KATA_SEARCH_EMBEDDINGS_BASE_URL, then rerun to enable built-in embeddings")
 		}
 		path, err := config.DaemonConfigPath()
 		if err != nil {
@@ -118,23 +122,17 @@ func daemonLocalEmbeddingsCmd() *cobra.Command {
 			confirmed = true
 			return true, nil
 		}
-		_, err = localEmbeddingsEndpoint(cmd.Context(), embedlocal.Options{SkipOllama: true})
-		var installed embedlocal.Installation
-		if errors.Is(err, embedlocal.ErrNotFound) {
-			installed, err = installLocalEmbeddings(cmd.Context(), confirm)
-		}
+		installed, err := installLocalEmbeddings(cmd.Context(), confirm)
 		if err != nil {
 			return err
 		}
-		if !confirmed && before != nil && !current.Embeddings.Local {
+		if !confirmed && before != nil && !current.Embeddings.UsesLocal() {
 			if _, err := confirm(cmd.Context(), 0); err != nil {
 				return err
 			}
 		}
-		if installed.Executable != "" {
-			if _, err := localEmbeddingsEndpoint(cmd.Context(), embedlocal.Options{SkipOllama: true, Executable: installed.Executable}); err != nil {
-				return err
-			}
+		if _, err := localEmbeddingsEndpoint(cmd.Context(), embedlocal.Options{SkipOllama: true, Executable: installed.Executable}); err != nil {
+			return err
 		}
 		ns, err := daemonruntime.NewNamespace()
 		if err != nil {
@@ -164,6 +162,27 @@ func daemonLocalEmbeddingsCmd() *cobra.Command {
 			}
 		}
 		if _, _, err := restartRunningDaemons(cmd.Context(), ns, running, nil); err != nil {
+			if !bytes.Equal(original, proposed) {
+				latest, readErr := os.ReadFile(path) // #nosec G304 -- compare the snapshot before restoring it
+				if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+					return errors.Join(err, readErr)
+				}
+				if readErr == nil && bytes.Equal(latest, proposed) {
+					var restoreErr error
+					if originalExists {
+						restoreErr = atomicfile.WriteFile(path, original, atomicfile.WithPreserveMode())
+					} else {
+						restoreErr = os.Remove(path)
+					}
+					if restoreErr != nil {
+						return errors.Join(err, restoreErr)
+					}
+					return fmt.Errorf("%w; configuration restored", err)
+				}
+			}
+			return err
+		}
+		if _, err := fmt.Fprintln(cmd.ErrOrStderr(), "Service environment settings can override this configuration."); err != nil {
 			return err
 		}
 
@@ -176,7 +195,7 @@ func daemonLocalEmbeddingsCmd() *cobra.Command {
 		case outputAgent:
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "OK index=%s progress=%s\n", index, agentValue("kata health --json"))
 		case outputHuman:
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Built-in embeddings enabled, index %s. Check indexing progress with kata health --json.\n", index)
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "Built-in embeddings configured in config.toml, index %s. Check indexing progress with kata health --json.\n", index)
 		}
 		return err
 	}}
@@ -186,6 +205,11 @@ func daemonLocalEmbeddingsCmd() *cobra.Command {
 
 // Rewrite only the embeddings table, preserving surrounding bytes and its full-line comments.
 func localEmbeddingsConfig(data []byte, current config.EmbeddingsConfig) ([]byte, error) {
+	bom := []byte{0xef, 0xbb, 0xbf}
+	hasBOM := bytes.HasPrefix(data, bom)
+	if hasBOM {
+		data = data[len(bom):]
+	}
 	var document map[string]any
 	if _, err := toml.Decode(string(data), &document); err != nil {
 		return nil, err
@@ -312,6 +336,9 @@ func localEmbeddingsConfig(data []byte, current config.EmbeddingsConfig) ([]byte
 	}
 	if !reflect.DeepEqual(document, rewritten) {
 		return nil, errors.New("cannot rewrite config text without changing other settings")
+	}
+	if hasBOM {
+		return append(bom, result.Bytes()...), nil
 	}
 	return result.Bytes(), nil
 }

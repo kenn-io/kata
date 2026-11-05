@@ -43,6 +43,9 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 		expectedDir, err := embedlocal.DefaultDir()
 		require.NoError(t, err)
 		require.Equal(t, expectedDir, opts.DataDir)
+		if installed {
+			return embedlocal.Installation{Executable: "/example/kennembed"}, nil
+		}
 		yes, err := opts.Confirm(ctx, 290_000_000)
 		require.NoError(t, err)
 		require.True(t, yes)
@@ -69,12 +72,21 @@ func TestLocalEmbeddingsSetupRefusesEnvironmentOverride(t *testing.T) {
 	home := setupKataEnv(t)
 	t.Setenv("KATA_SERVER", "")
 	t.Setenv("KATA_SEARCH_EMBEDDINGS_BASE_URL", "http://127.0.0.1:11434/v1")
+	oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
+	t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
+	localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) {
+		t.Fatal("environment refusal must precede server discovery")
+		return "", nil
+	}
+	localEmbeddingsInstall = func(context.Context, embedlocal.InstallOptions) (embedlocal.Installation, error) {
+		t.Fatal("environment refusal must precede installation")
+		return embedlocal.Installation{}, nil
+	}
 	original := []byte("# untouched\n")
 	path := filepath.Join(home, "config.toml")
 	require.NoError(t, os.WriteFile(path, original, 0600))
 	_, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
-	require.ErrorContains(t, err, "environment overrides")
-	require.ErrorContains(t, err, "base_url")
+	require.ErrorContains(t, err, "KATA_SEARCH_EMBEDDINGS_BASE_URL")
 	got, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME or a test fixture
 	require.NoError(t, err)
 	require.Equal(t, original, got)
@@ -196,6 +208,7 @@ func TestLocalEmbeddingsDaemonRefusesDownload(t *testing.T) {
 
 func TestLocalEmbeddingsSwitchKeepsIndex(t *testing.T) {
 	home := setupKataEnv(t)
+	stubLocalEmbeddingsInstall(t)
 	t.Setenv("KATA_SERVER", "")
 	store := openKataTestDB(t, filepath.Join(home, "kata.db"))
 	t.Cleanup(func() { require.NoError(t, store.Close()) })

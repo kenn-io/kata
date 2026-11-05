@@ -1891,11 +1891,12 @@ config comments, and formatting outside the rewritten settings. Widths below
 If this daemon shares embeddings, replicas need the same recipe before they
 can reuse its vectors. Running daemons must support restart before the command
 writes the config. It waits for every restart; rerun the command to retry a
-failed restart. Older Kata releases reject the `local` config key.
+failed restart. A refused restart restores the configuration file. Older Kata
+releases reject the `local` config key.
 
 When the shared files are already installed, a fresh home needs no prompt;
 switching an existing provider still asks before starting the server. To return
-to Ollama, remove `local = true`, set `base_url` and `model` in
+to Ollama, set `local = false`, restore `base_url` and `model` in
 `[search.embeddings]`, and run `kata daemon restart`.
 
 The result includes `index`, one of `new`, `kept`, or `rebuilt`, and `progress`,

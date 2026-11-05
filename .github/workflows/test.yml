@@ -717,8 +717,10 @@ jobs:
           persist-credentials: false
 
       - name: Install mise tools
-        uses: jdx/mise-action@v5.2.2
+        uses: jdx/mise-action@v5.2.4
         with:
+          # Rebuild older caches so they include mise's signed checksums.
+          cache_key_prefix: mise-v2
           cache: true
           install: true
 
@@ -787,8 +789,9 @@ jobs:
           persist-credentials: false
 
       - name: Install mise tools
-        uses: jdx/mise-action@v5.2.2
+        uses: jdx/mise-action@v5.2.4
         with:
+          cache_key_prefix: mise-v2
           cache: true
           install: true
 

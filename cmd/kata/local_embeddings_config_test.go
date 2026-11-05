@@ -19,8 +19,18 @@ import (
 	"go.kenn.io/kit/embedlocal"
 )
 
+func stubLocalEmbeddingsInstall(t *testing.T) {
+	t.Helper()
+	original := localEmbeddingsInstall
+	t.Cleanup(func() { localEmbeddingsInstall = original })
+	localEmbeddingsInstall = func(context.Context, embedlocal.InstallOptions) (embedlocal.Installation, error) {
+		return embedlocal.Installation{Executable: "/example/kennembed"}, nil
+	}
+}
+
 func TestLocalEmbeddingsRestartRefusal(t *testing.T) {
 	home := setupKataEnv(t)
+	stubLocalEmbeddingsInstall(t)
 	t.Setenv("KATA_SERVER", "")
 	oldEndpoint := localEmbeddingsEndpoint
 	t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
@@ -38,7 +48,7 @@ func TestLocalEmbeddingsRestartRefusal(t *testing.T) {
 	require.Error(t, err, "retry must still report the old daemon's failed activation")
 	_, err = os.Stat(filepath.Join(home, "config.toml"))
 	require.ErrorIs(t, err, os.ErrNotExist)
-	// A later replacement failure leaves the setting persisted, but reruns must retry activation.
+	// A later replacement failure restores the file, and reruns must retry activation.
 	oldExecutable := resolveDaemonExecutable
 	t.Cleanup(func() { resolveDaemonExecutable = oldExecutable })
 	resolveDaemonExecutable = func() (string, error) { return "", errors.New("unavailable executable") }
@@ -47,17 +57,19 @@ func TestLocalEmbeddingsRestartRefusal(t *testing.T) {
 	for range 2 {
 		out, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
 		require.ErrorContains(t, err, "cannot resolve the installed restart executable")
+		require.ErrorContains(t, err, "configuration restored")
 		require.Empty(t, out)
 	}
 	cfg, err := config.ReadSearchConfig()
 	require.NoError(t, err)
-	require.True(t, cfg.Embeddings.Local)
+	require.False(t, cfg.Embeddings.Local)
 }
 
 func TestLocalEmbeddingsTOMLLayouts(t *testing.T) {
 	prefix := "title   = \"\"\"a fake header\n[search.embeddings]\n\"\"\"\nports = [\n  1,\n  2,\n]\n# before search\n"
 	suffix := "[display]\n# unrelated comment\n"
 	for _, body := range []string{
+		"\ufeff[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='nomic-embed-text'\n",
 		"[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1' # endpoint comment\nmodel='nomic-embed-text'\n",
 		"[search . embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='nomic-embed-text'\n",
 		"[search.\"embeddings\"]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='nomic-embed-text'\n",
@@ -68,7 +80,10 @@ func TestLocalEmbeddingsTOMLLayouts(t *testing.T) {
 		"search={embeddings={base_url='http://127.0.0.1:11434/v1',model='nomic-embed-text'}}\n",
 	} {
 		t.Run(body, func(t *testing.T) {
-			text := prefix + body + suffix
+			text := prefix + strings.TrimPrefix(body, "\ufeff") + suffix
+			if strings.HasPrefix(body, "\ufeff") {
+				text = "\ufeff" + text
+			}
 			current, err := config.ParseSearchConfig([]byte(text))
 			require.NoError(t, err)
 			result, err := localEmbeddingsConfig([]byte(text), current.Embeddings)
@@ -77,6 +92,7 @@ func TestLocalEmbeddingsTOMLLayouts(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, next.Embeddings.Local)
 			require.Empty(t, next.Embeddings.BaseURL)
+			require.Equal(t, strings.HasPrefix(text, "\ufeff"), strings.HasPrefix(string(result), "\ufeff"))
 			again, err := localEmbeddingsConfig(result, next.Embeddings)
 			require.NoError(t, err)
 			require.Equal(t, result, again, "retry must preserve the already-written configuration")
@@ -94,6 +110,7 @@ func TestLocalEmbeddingsTOMLLayouts(t *testing.T) {
 
 func TestLocalEmbeddingsReducedWidth(t *testing.T) {
 	home := setupKataEnv(t)
+	stubLocalEmbeddingsInstall(t)
 	t.Setenv("KATA_SERVER", "")
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {

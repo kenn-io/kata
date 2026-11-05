@@ -338,3 +338,26 @@ runtime credentials cannot migrate. SQLite uses its normal JSONL cutover.
 Start the matching schema 44 binary after migration. Older binaries cannot open
 schema 44. Rollback requires the pre-upgrade backup and matching older binary;
 there is no down migration.
+
+## Schema 45: issue UID prefix index
+
+UID prefix lookups can seek matching issues without scanning unrelated issues.
+The 44→45 migration adds `idx_issues_uid_prefix` on `issues(uid text_pattern_ops)`
+and `idx_issues_project_uid_prefix` on `(project_id, uid text_pattern_ops)`,
+then analyzes `issues`. Fresh PostgreSQL installs include the same indexes.
+SQLite uses indexes on `(uid COLLATE NOCASE, uid)` and
+`(project_id, uid COLLATE NOCASE, uid)` to seek global and project-scoped
+prefixes. Matching stays case-insensitive. SQLite orders candidates by their
+case-insensitive UID value, then original bytes. PostgreSQL matching stays
+case-sensitive and candidates use byte order in every database locale. This
+can change the order of mixed-case candidates on locale-based databases.
+
+Stop serving daemons and imports, back up the database, and run
+`kata storage postgres migrate` with schema-owner credentials. Building the
+index reads `issues` and blocks issue writes; allow an offline window that
+fits the table's size. Existing table grants remain sufficient. Validation-only
+runtime credentials cannot migrate. SQLite uses its normal JSONL cutover.
+
+Start the matching schema 45 binary after migration. Older binaries cannot open
+schema 45. Rollback requires the pre-upgrade backup and matching older binary;
+there is no down migration.

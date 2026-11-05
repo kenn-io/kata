@@ -2101,7 +2101,7 @@ func preflightEmbeddingStartup(
 		Timeout:             time.Duration(ec.TimeoutSeconds) * time.Second,
 		TrustPrivateNetwork: ec.TrustPrivateNetwork,
 	}
-	if ec.Local {
+	if ec.UsesLocal() {
 		cfg.Endpoint = func(ctx context.Context) (string, error) {
 			return resolveLocalEmbeddings(ctx, func(context.Context, int64) (bool, error) {
 				return false, errors.New("run kata daemon local-embeddings to approve the download")

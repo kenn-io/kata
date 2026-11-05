@@ -978,13 +978,17 @@ local = true
 
 `local` uses `nomic-embed-text` with 768 dimensions by default. It accepts
 `nomic-embed-text`, `nomic-embed-text:latest`, and `nomic-embed-text:v1.5`, and
-widths up to 768. Widths below 768 require `request_dimensions = true`. It
-cannot be combined with `base_url`. The daemon reuses
+widths up to 768. Widths below 768 require `request_dimensions = true`. A
+`base_url` from any source, including `KATA_SEARCH_EMBEDDINGS_BASE_URL`, takes
+precedence over `local = true`. API key settings are ignored only while the
+built-in server is selected. The setup command refuses while that environment
+variable is set and restores the config if a daemon refuses its restart.
+The daemon reuses
 installed files and asks you to run the setup command if a download is needed.
 Older Kata releases reject the `local` key.
 
 With embeddings disabled, search matches words only. To use an external
-OpenAI-compatible provider, configure its endpoint and model instead:
+OpenAI-compatible provider, set `local = false` and configure its endpoint and model:
 
 ```toml
 [search.embeddings]

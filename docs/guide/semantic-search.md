@@ -62,6 +62,12 @@ waits for them to restart.
 Run it again to retry a failed restart. Older Kata releases reject the `local`
 config key; use the updated binary after enabling it.
 
+A `base_url` from any source takes precedence over `local = true`. The setup
+command refuses while `KATA_SEARCH_EMBEDDINGS_BASE_URL` is set; unset it and
+rerun. A service with that variable still uses its configured server after
+restart. API key settings are ignored while the built-in server is selected.
+If a daemon refuses its restart, setup restores the configuration file.
+
 ### Using Ollama or another provider
 
 1. Run an embeddings endpoint. For a fully local setup, install
@@ -72,7 +78,7 @@ config key; use the updated binary after enabling it.
    ```
 
 2. Add a `[search.embeddings]` block to `<KATA_HOME>/config.toml`, or replace
-   the existing block, removing `local = true`:
+   the existing block, setting `local = false`:
 
    ```toml
    [search.embeddings]

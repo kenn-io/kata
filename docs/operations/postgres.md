@@ -1,7 +1,7 @@
 ---
 title: PostgreSQL operations
 description: Operate Kata on PostgreSQL with split migration and runtime roles, backups, upgrades, and health checks.
-last_edited: 2026-11-04
+last_edited: 2026-11-05
 ---
 
 # PostgreSQL operations
@@ -143,6 +143,15 @@ Schema 44 indexes receiver-local reset references for former issue IDs. Stop
 daemons and imports while the migration scans the event table and builds the
 index. See the [schema 44 migration requirements](../development/postgres-migrations.md#schema-44-reset-reference-lookup-index)
 for the offline window, grants, and rollback.
+
+Schema 45 indexes global and project-scoped issue UID prefixes. PostgreSQL
+keeps case-sensitive matching and switches candidate sorting from the
+database locale to UID byte order. This can change mixed-case suggestions.
+Stop daemons and imports while the migration scans `issues` and builds the indexes. Existing
+runtime grants remain sufficient. See the [schema 45 migration requirements](../development/postgres-migrations.md#schema-45-issue-uid-prefix-index)
+for downtime and rollback. SQLite's JSONL cutover installs global and
+project-scoped prefix indexes; candidates sort by case-insensitive UID value,
+then original bytes.
 
 After preparation, grant the runtime role DML access and set default privileges
 for objects created by future migrations:

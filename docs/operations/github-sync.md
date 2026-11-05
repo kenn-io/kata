@@ -160,7 +160,10 @@ seconds, such as `2026-01-01T12:00:00Z`. It includes issues whose GitHub
 recently updated. It is not a creation-date filter. Rows without `updated_at`
 are excluded when a cutoff is configured. The daemon applies the same cutoff
 on initial imports, incremental polls, and title or parent-link backfills.
-GitHub's REST `since` query limits issue fetching before comments are fetched.
+GitHub's REST `since` query limits issue and repository comment fetching. Comment
+polls use the last successful cursor with a two-minute overlap. Initial sync
+uses the cutoff when set. Older issues imported for the first time still fetch
+their full comment history.
 
 Re-enable with a different cutoff to change it, or pass `--since=""` to remove
 it. Omitting `--since` keeps the stored cutoff, including when changing
@@ -242,9 +245,10 @@ counts eligible children with a known total. Incremental parent progress counts
 selected children checked against GitHub, with the selected total known once
 recent events have been read. Full parent scans and
 issue fetches count rows as pages arrive; their total is unknown. The issue count
-includes pull-request rows and rows the cutoff may subsequently exclude. Comments count
-eligible issues checked, including issues with no comments, rather than comment
-rows. Importing counts committed batch items, including parent reconciliation
+includes pull-request rows and rows the cutoff may subsequently exclude.
+Repository comment fetches count rows as pages arrive, with an unknown total.
+Per-issue comment fetches count issues read out of those needing a read.
+Importing counts committed batch items, including parent reconciliation
 items. A zero total means unknown or an empty phase; no percentage is guessed.
 
 `once` waits for completion. Run `kata sync github status` in another terminal

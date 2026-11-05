@@ -13,7 +13,7 @@ func TestLocalEndpointPerBatch(t *testing.T) {
 	defer first.Close()
 	defer second.Close()
 	calls := 0
-	client, err := New(Config{Model: "nomic-embed-text", Dims: 2, Endpoint: func(context.Context) (string, error) {
+	client, err := New(Config{BaseURL: "://ignored", Model: "nomic-embed-text", Dims: 2, Endpoint: func(context.Context) (string, error) {
 		calls++
 		if calls <= 2 {
 			return first.URL, nil
