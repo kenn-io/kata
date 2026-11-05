@@ -1062,14 +1062,22 @@ func (d *Store) IssueUIDPrefixMatch(ctx context.Context, prefix string, limit in
 	if limit <= 0 {
 		limit = 20
 	}
-	// Project scope otherwise lets the planner scan every issue in an allowed project.
-	q := `SELECT ` + issueColumns + ` FROM issues i INDEXED BY idx_issues_uid_prefix JOIN projects p ON p.id = i.project_id WHERE i.uid LIKE ?`
-	if include == db.IncludeDeletedNo {
+	q := issueSelect + ` WHERE i.uid LIKE ?`
+	args := []any{prefix + "%"}
+	if _, restricted := db.AuthorizedProjects(ctx); restricted {
+		// Bound each project's candidates before combining the authorized projects.
+		q = `SELECT ` + issueColumns + ` FROM projects p JOIN issues i ON i.id IN (
+SELECT candidate.id FROM issues candidate WHERE candidate.project_id = p.id AND candidate.uid LIKE ?`
+		if include == db.IncludeDeletedNo {
+			q += ` AND candidate.deleted_at IS NULL`
+		}
+		q += ` ORDER BY candidate.uid COLLATE NOCASE, candidate.uid LIMIT ?) WHERE `
+		args = append(args, limit)
+		q += authorizedProjectPredicate(ctx, "p.uid", &args)
+	} else if include == db.IncludeDeletedNo {
 		q += ` AND i.deleted_at IS NULL`
 	}
-	args := []any{prefix + "%"}
-	q += " AND " + authorizedIssuePredicate(ctx, "i.project_id", &args)
-	q += ` ORDER BY i.uid ASC LIMIT ?`
+	q += ` ORDER BY i.uid COLLATE NOCASE, i.uid LIMIT ?`
 	args = append(args, limit)
 	rows, err := d.QueryContext(ctx, q, args...)
 	if err != nil {

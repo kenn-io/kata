@@ -344,8 +344,11 @@ there is no down migration.
 UID prefix lookups can seek matching issues without scanning unrelated issues.
 The 44→45 migration adds `idx_issues_uid_prefix` on `issues(uid text_pattern_ops)`
 and analyzes `issues`. Fresh PostgreSQL installs include the same index.
-SQLite uses `issues(uid COLLATE NOCASE)` to preserve case-insensitive prefix
-matching. PostgreSQL matching remains case-sensitive.
+SQLite uses indexes on `(uid COLLATE NOCASE, uid)` and
+`(project_id, uid COLLATE NOCASE, uid)` to seek global and project-scoped
+prefixes. Matching stays case-insensitive. SQLite orders candidates by their
+case-insensitive UID value, then original bytes; PostgreSQL matching stays
+case-sensitive with ordinary UID ordering.
 
 Stop serving daemons and imports, back up the database, and run
 `kata storage postgres migrate` with schema-owner credentials. Building the

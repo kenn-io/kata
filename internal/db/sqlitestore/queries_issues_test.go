@@ -1,6 +1,7 @@
 package sqlitestore_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -217,9 +218,11 @@ func TestIssueUIDPrefixMatch_DefaultExcludesSoftDeleted(t *testing.T) {
 	_, _, _, err = d.SoftDeleteIssue(ctx, created.ID, "tester")
 	require.NoError(t, err)
 
-	matches, err := d.IssueUIDPrefixMatch(ctx, "01HZNQ7V", 20, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	assert.Empty(t, matches)
+	for _, lookupCtx := range []context.Context{ctx, db.WithAuthorizedProjects(ctx, []string{p.UID})} {
+		matches, err := d.IssueUIDPrefixMatch(lookupCtx, "01HZNQ7V", 20, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		assert.Empty(t, matches)
+	}
 }
 
 // TestIssueUIDPrefixMatch_IncludeDeletedYesResolvesSoftDeleted pins the
@@ -241,10 +244,12 @@ func TestIssueUIDPrefixMatch_IncludeDeletedYesResolvesSoftDeleted(t *testing.T) 
 	_, _, _, err = d.SoftDeleteIssue(ctx, created.ID, "tester")
 	require.NoError(t, err)
 
-	matches, err := d.IssueUIDPrefixMatch(ctx, "01HZNQ7V", 20, db.IncludeDeletedYes)
-	require.NoError(t, err)
-	require.Len(t, matches, 1)
-	assert.Equal(t, created.UID, matches[0].UID)
+	for _, lookupCtx := range []context.Context{ctx, db.WithAuthorizedProjects(ctx, []string{p.UID})} {
+		matches, err := d.IssueUIDPrefixMatch(lookupCtx, "01HZNQ7V", 20, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		require.Len(t, matches, 1)
+		assert.Equal(t, created.UID, matches[0].UID)
+	}
 }
 
 func TestListIssues_DefaultsToOpenOnlyAndExcludesDeleted(t *testing.T) {
