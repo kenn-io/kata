@@ -12,6 +12,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Resume local writes sooner after spoke rebuilds of large projects by skipping
   issues and comments whose stored values already match the event log.
 - Search references faster in the web UI on large stores; a `q` search now returns only issue references.
+- Spend 2 REST requests and 1 GraphQL request per 100-issue GitHub status sweep, down from 102 REST requests, while continuing to import upstream closes and reopens. Hosts without the required GraphQL fields keep using REST status reads.
+
 - Keep local writes responsive on relay hubs. Creating an issue or receiving an
   unrelated snapshot leaves downstream sync incremental unless it can change the
   reset decision. Handshakes and reset downloads check history without holding
