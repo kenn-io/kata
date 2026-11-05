@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
-	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -59,8 +57,9 @@ func occurrencesWithin(j JobDefinition, p *RecurringProgress, from, until time.T
 }
 
 // PreviewCollisions is deterministic, observes cancellation between peer walks,
-// and leaves both the fleet and candidate intact. Callers admit only enabled
-// peers of the candidate's delivery kind before reading their retained progress.
+// and leaves both the fleet and candidate intact. Callers supply enabled peers
+// of the same delivery kind in binary name/UID order, excluding the candidate,
+// with validated retained progress for native peers.
 func PreviewCollisions(ctx context.Context, candidate CollisionJob, peers []CollisionJob, from time.Time, budget int) (ValidationCollisions, error) {
 	out := ValidationCollisions{Until: from.UTC().Add(7 * 24 * time.Hour), Items: []CollisionItem{}}
 	if out.Until.Year() > 9999 {
@@ -91,25 +90,11 @@ func PreviewCollisions(ctx context.Context, candidate CollisionJob, peers []Coll
 		matches[at] = nil
 		locals[at] = string(local)
 	}
-	peers = slices.Clone(peers)
-	sort.Slice(peers, func(i, j int) bool {
-		if peers[i].Name != peers[j].Name {
-			return peers[i].Name < peers[j].Name
-		}
-		return peers[i].UID < peers[j].UID
-	})
 	for _, peer := range peers {
 		if err := ctx.Err(); err != nil {
 			return out, err
 		}
-		if peer.UID == candidate.UID {
-			continue
-		}
 		if !IsRecurringIssueJob(candidate.Def) && pinsDisjoint(candidate.Def.Options, peer.Def.Options) {
-			continue
-		}
-		if IsRecurringIssueJob(peer.Def) && peer.Progress == nil {
-			out.Skipped++
 			continue
 		}
 		if !collisionInstants(peer.Def) || peer.Def.Validate() != nil {

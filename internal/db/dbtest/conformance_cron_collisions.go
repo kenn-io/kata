@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json/v2"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -195,5 +196,27 @@ func checkCronValidateCollisionReadBounds(t *testing.T, s db.Storage) error {
 	require.NoError(t, err)
 	require.True(t, out.Valid)
 	require.Empty(t, out.Schedule.Collisions.Items, "the byte budget excludes matching peers beyond the oversized prefix")
+	// Binary names and same-name UID ties must survive storage admission on
+	// both backends; the engine consumes this order without sorting again.
+	_, err = q.ExecContext(ctx, `UPDATE cron_jobs SET definition_json=$1 WHERE project_id=$2`, string(raw), project.ID)
+	require.NoError(t, err)
+	ordered := []cron.CollisionPeer{}
+	for i, name := range []string{"0A", "0a", "0é", "0é", "0Α", "0😀"} {
+		peer := cron.CollisionPeer{UID: fmt.Sprintf("%026d", 2025-i), Name: name}
+		_, err = q.ExecContext(ctx, `UPDATE cron_jobs SET name=$1 WHERE uid=$2`, name, peer.UID)
+		require.NoError(t, err)
+		ordered = append(ordered, peer)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].Name != ordered[j].Name {
+			return ordered[i].Name < ordered[j].Name
+		}
+		return ordered[i].UID < ordered[j].UID
+	})
+	out, err = s.ValidateCronJob(ctx, in)
+	require.NoError(t, err)
+	require.NotEmpty(t, out.Schedule.Collisions.Items)
+	require.GreaterOrEqual(t, len(out.Schedule.Collisions.Items[0].Peers), len(ordered))
+	require.Equal(t, ordered, out.Schedule.Collisions.Items[0].Peers[:len(ordered)])
 	return nil
 }

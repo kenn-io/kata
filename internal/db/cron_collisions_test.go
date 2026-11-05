@@ -2,10 +2,17 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json/v2"
+	"fmt"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/cron"
+	"hegel.dev/go/hegel"
 	_ "modernc.org/sqlite"
 )
 
@@ -27,4 +34,68 @@ func TestCronCollisionParentMetadataByteReadBound(t *testing.T) {
 	parent, _, err := (CronSQL{}).recurringParentRead(t.Context(), tx, 1, "parent", false, 128)
 	require.NoError(t, err)
 	require.LessOrEqual(t, len(parent.Metadata), 128)
+}
+
+// Admission owns binary name/UID order and self-exclusion before the engine
+// spends its stepping budget. Insertion order cannot change the report.
+func TestCronCollisionsOrderProperty(t *testing.T) {
+	pool, err := sql.Open("sqlite", ":memory:")
+	require.NoError(t, err)
+	pool.SetMaxOpenConns(1)
+	t.Cleanup(func() { require.NoError(t, pool.Close()) })
+	_, err = pool.ExecContext(t.Context(), `CREATE TABLE cron_jobs(uid TEXT, project_id INTEGER, name TEXT, definition_json TEXT, deleted_at TEXT)`)
+	require.NoError(t, err)
+	definition := cron.JobDefinition{Version: 1, Kind: "job", Enabled: true, Trigger: cron.Trigger{Kind: "cron", Cron: "0 * * * *"}, Action: cron.Action{Kind: "execute", Prompt: "Review"}, Issue: &cron.IssuePolicy{Kind: "per-run", Title: "Review"}, Overlap: "forbid", Catchup: "latest"}
+	require.NoError(t, definition.Validate())
+	raw, err := json.Marshal(definition)
+	require.NoError(t, err)
+	candidate := cron.CollisionJob{UID: "candidate", Name: "Candidate", Def: definition}
+	from := time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)
+	hegel.Test(t, func(ht *hegel.T) {
+		tx, err := pool.BeginTx(t.Context(), nil)
+		require.NoError(ht, err)
+		defer func() { require.NoError(ht, tx.Rollback()) }()
+		size := hegel.Draw(ht, hegel.Integers(0, int(^uint(0)>>1)))
+		peers := make([]cron.CollisionJob, min(size, 12))
+		for i := range peers {
+			var name string
+			if i%2 == 0 {
+				name = hegel.Draw(ht, hegel.Text())
+			} else {
+				name = peers[i-1].Name
+			}
+			peers[i] = cron.CollisionJob{UID: fmt.Sprintf("%026d", len(peers)-i), Name: name, Def: definition}
+		}
+		want := slices.Clone(peers)
+		sort.Slice(want, func(i, j int) bool {
+			if want[i].Name != want[j].Name {
+				return want[i].Name < want[j].Name
+			}
+			return want[i].UID < want[j].UID
+		})
+		budget := hegel.Draw(ht, hegel.Integers(0, cron.CollisionStepBudget))
+		var report cron.ValidationCollisions
+		for pass := range 2 {
+			_, err := tx.ExecContext(t.Context(), `DELETE FROM cron_jobs`)
+			require.NoError(ht, err)
+			for _, peer := range append(slices.Clone(peers), candidate) {
+				_, err = tx.ExecContext(t.Context(), `INSERT INTO cron_jobs VALUES($1,1,$2,$3,NULL)`, peer.UID, peer.Name, string(raw))
+				require.NoError(ht, err)
+			}
+			admitted, skipped, limited, err := (CronSQL{}).collisionPeers(t.Context(), tx, CronValidationInput{ProjectID: 1, UID: candidate.UID}, definition)
+			require.NoError(ht, err)
+			require.Zero(ht, skipped)
+			require.False(ht, limited)
+			require.Equal(ht, want, admitted)
+			got, err := cron.PreviewCollisions(t.Context(), candidate, admitted, from, budget)
+			require.NoError(ht, err)
+			require.Equal(ht, want, admitted, "preview must not mutate admitted order or definitions")
+			if pass == 0 {
+				report = got
+			} else {
+				require.Equal(ht, report, got)
+			}
+			slices.Reverse(peers)
+		}
+	}, hegel.WithTestCases(60), hegel.WithDatabase(t.TempDir()))
 }
