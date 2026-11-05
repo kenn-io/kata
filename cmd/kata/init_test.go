@@ -472,9 +472,8 @@ func TestInit_WithAgents_WritesAgentsFileWhenAbsent(t *testing.T) {
 
 	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
 	require.NoError(t, err)
-	assert.Contains(t, string(content), agentsBlockBegin)
-	assert.Contains(t, string(content), agentsBlockEnd)
-	assert.Contains(t, string(content), agentContractText)
+	assert.Contains(t, string(content), agentsBlockBegin+"\n"+agentContractText+agentsBlockEnd,
+		"the managed block must hold the contract the hooks inject, verbatim")
 }
 
 func TestInit_WithoutFlag_DoesNotWriteAgents(t *testing.T) {
@@ -602,26 +601,6 @@ func TestInit_WithAgents_RefreshesStaleBlock(t *testing.T) {
 	assert.Contains(t, string(content), agentContractText)
 	assert.Contains(t, string(content), "# House rules", "content outside the markers must survive")
 	assert.Equal(t, 1, strings.Count(string(content), agentsBlockBegin))
-}
-
-// TestInit_WithAgents_BlockEmbedsContract checks that the managed briefing
-// installed for agents is the canonical contract the hooks inject.
-func TestInit_WithAgents_BlockEmbedsContract(t *testing.T) {
-	env := testenv.New(t)
-	dir := t.TempDir()
-	runGit(t, dir, "init", "--quiet")
-	runGit(t, dir, "remote", "add", "origin", "https://github.com/wesm/kata.git")
-
-	flags.Mode = outputJSON
-	t.Cleanup(func() { flags.Mode = "" })
-
-	_, err := callInit(t.Context(), env.URL, dir, callInitOpts{WithAgents: true})
-	require.NoError(t, err)
-
-	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md")) //nolint:gosec // test fixture under TempDir
-	require.NoError(t, err)
-	got := string(content)
-	require.Contains(t, got, agentsManagedBlock(), "managed guidance must embed the canonical contract verbatim")
 }
 
 // oldAgentsBlockBody is the managed-block body kata shipped before the work.*
