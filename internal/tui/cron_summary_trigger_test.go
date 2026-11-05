@@ -25,7 +25,6 @@ func TestCronSummaryTriggerDetail(t *testing.T) {
 			m.width = 100
 			run := &m.cron.data.runs[0]
 			if strings.Contains(tc.wantReason, " (not launched)") {
-				run.Status = "skipped"
 				run.Summary.Usage, run.Summary.Steps, run.Summary.LogRef = nil, nil, nil
 			}
 			run.OccurrenceKey = &tc.key
@@ -75,7 +74,6 @@ func TestCronSummaryTriggerDetailProperty(t *testing.T) {
 		m.width = hegel.Draw(ht, hegel.Integers[int](20, 120))
 		run := &m.cron.data.runs[0]
 		if cron.DropReason(tc.reason) {
-			run.Status = "skipped"
 			run.Summary.Usage, run.Summary.Steps, run.Summary.LogRef = nil, nil, nil
 		}
 		run.OccurrenceKey, run.Summary.Trigger, run.Summary.Reason = &tc.key, optionalSummaryTime(tc.explicit), optionalSummaryTime(tc.reason)
