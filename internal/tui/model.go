@@ -447,9 +447,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if previousReads != nil && (previousReads != m.detail.reads || previousConn != m.connGen || previousScope != m.scopeGen) {
 		previousReads.stop()
 	}
-	cmd = combineCmds(cmd, m.finishDetailRefresh())
 	var issueCmd tea.Cmd
 	m, issueCmd = m.cronIssueAdopt(msg).cronIssueFeedback(msg)
+	cmd = combineCmds(cmd, m.finishDetailRefresh())
 	cmd = combineCmds(cmd, issueCmd)
 	var cronCmd tea.Cmd
 	m, cronCmd = m.cronSync()

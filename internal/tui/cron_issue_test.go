@@ -156,6 +156,74 @@ func TestCronIssueMovedIssueTargetsDestination(t *testing.T) {
 	require.Equal(t, []string{"/api/v1/projects/9/issues/wxyz/actions/close"}, closes, "the close must reach the moved issue, not the source project's colliding short ID")
 }
 
+// An invalidation during a moved issue's refresh must use its accepted project
+// and short ID together, even when the issue response finishes the batch.
+func TestCronIssueMovedIssueQueuedInvalidation(t *testing.T) {
+	m := cronIssueFixture(t, 80)
+	var mu sync.Mutex
+	var paths []string
+	m.api = newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+		uid, pid, ref := "issue-example", 7, "abcd"
+		switch r.URL.Path {
+		case "/api/v1/projects/7/issues/issue-example":
+		case "/api/v1/projects/7/issues/abcd", "/api/v1/projects/9/issues/wxyz":
+			pid, ref = 9, "wxyz"
+		case "/api/v1/projects/7/issues/wxyz":
+			uid, ref = "colliding-issue", "wxyz"
+		default:
+			http.Error(w, "fixture not found", http.StatusNotFound)
+			return
+		}
+		respondJSON(t, w, map[string]any{"issue": map[string]any{"uid": uid, "project_id": pid, "short_id": ref, "title": "Linked issue", "status": "open"}})
+	})
+	m, cmd := m.cronOpenIssue("issue-example")
+	defer func() { m.detail.cancelReads() }()
+	for _, msg := range runCmdTree(cmd) {
+		m, _ = updateModel(m, msg)
+	}
+	require.Equal(t, int64(7), m.detail.scopePID)
+	event := eventReceivedMsg{eventType: "issue.updated", projectID: 7, issueUID: "issue-example"}
+	tick := m.maybeRefetchOpenDetail(event)
+	require.NotNil(t, tick)
+	m, cmd = updateModel(m, tick())
+	results := runCmdTree(cmd)
+	m, _ = updateModel(m, event)
+	require.True(t, m.detail.reads.dirty, "the next invalidation waits for the active batch")
+	var issue detailFetchedMsg
+	for _, msg := range results {
+		if fetched, ok := msg.(detailFetchedMsg); ok {
+			issue = fetched
+		} else {
+			m, _ = updateModel(m, msg)
+		}
+	}
+	require.NotNil(t, issue.issue)
+	require.Equal(t, int64(9), issue.issue.ProjectID)
+	require.Equal(t, "wxyz", issue.issue.ShortID)
+	require.Equal(t, uint8(1), m.detail.reads.remaining, "only the moved issue response remains")
+	mu.Lock()
+	paths = nil
+	mu.Unlock()
+	m, cmd = updateModel(m, issue)
+	require.NotNil(t, cmd, "the queued invalidation starts a trailing refresh")
+	for _, msg := range runCmdTree(cmd) {
+		m, _ = updateModel(m, msg)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	require.ElementsMatch(t, []string{
+		"/api/v1/projects/9/issues/wxyz",
+		"/api/v1/projects/9/issues/wxyz",
+		"/api/v1/projects/9/events",
+		"/api/v1/projects/9/issues/wxyz",
+	}, paths, "all trailing reads must follow the moved issue to its destination")
+	require.NoError(t, m.detail.err)
+	require.Equal(t, "issue-example", m.detail.issue.UID, "a source-project short-ID collision must not replace the linked issue")
+}
+
 // Before the linked issue's read returns, the detail has no identity: actions
 // that need one, such as a new child, wait instead of using an empty parent.
 func TestCronIssueActionsWaitForIssue(t *testing.T) {

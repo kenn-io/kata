@@ -319,15 +319,20 @@ func TestCronHistoryRetainedRuns(t *testing.T) {
 		for _, failed := range []bool{false, true} {
 			t.Run(fmt.Sprintf("inspected job run/failed=%v", failed), func(t *testing.T) {
 				m := m
-				data := *m.cron.data
 				head := old
 				head.UID, head.CreatedAt = "current-head", old.CreatedAt.Add(24*time.Hour)
-				data.runs = cronHistoryRows(head, 100)
-				data.nextBefore = data.runs[len(data.runs)-1].UID
+				api := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: cronHistoryRows(head, 100)}
+				api.next = api.page[len(api.page)-1].UID
 				if failed {
-					data.runsErr = errors.New("offline")
+					api.err = errors.New("offline")
 				}
-				next := m.cronLoaded(cronLoadedMsg(data))
+				m.api = api
+				data := m.fetchCron()().(cronLoadedMsg)
+				require.NotContains(t, data.runs, old, "the head response excludes the inspected run")
+				require.Equal(t, api.err, data.runsErr)
+				require.EqualError(t, data.runErr[old.UID], "run refresh unavailable")
+				require.Equal(t, old, data.lookup[old.UID], "fetchCron retains the inspected run without an exact reader")
+				next := m.cronLoaded(data)
 				require.Contains(t, stripANSI(next.viewBody()), old.Status)
 				require.Contains(t, stripANSI(next.viewBody()), "runs / "+old.UID)
 			})
