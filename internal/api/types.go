@@ -1253,6 +1253,7 @@ type ClaimResponseBody struct {
 // ReadyRequest is GET /api/v1/projects/{id}/ready.
 type ReadyRequest struct {
 	ProjectID     int64    `path:"project_id" required:"true"`
+	Sort          string   `query:"sort,omitempty" enum:"priority," doc:"priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order"`
 	Limit         int      `query:"limit,omitempty"`
 	Unowned       bool     `query:"unowned,omitempty"`
 	Owner         string   `query:"owner,omitempty"`
@@ -1272,6 +1273,7 @@ type ReadyResponse struct {
 // ReadyGlobalRequest is GET /api/v1/ready (no project_id; spans every
 // non-archived project).
 type ReadyGlobalRequest struct {
+	Sort          string   `query:"sort,omitempty" enum:"priority," doc:"priority = priority ascending, unprioritized last, then updated_at descending and id descending; empty preserves ready order"`
 	Limit         int      `query:"limit,omitempty"`
 	Unowned       bool     `query:"unowned,omitempty"`
 	Owner         string   `query:"owner,omitempty"`

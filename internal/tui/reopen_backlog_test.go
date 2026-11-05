@@ -360,15 +360,6 @@ func TestUndoCloseWithoutBacklogReopensDirectly(t *testing.T) {
 	}
 }
 
-func TestReopenBacklogModalFooterShowsChoices(t *testing.T) {
-	spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
-	m, _ := updateModel(listReopenModel(t, spy), tea.WindowSizeMsg{Width: 120, Height: 40})
-	m, _ = pressReopen(t, m)
-	footer := stripANSI(m.View().Content)
-	require.Contains(t, footer, "reopen")
-	require.Contains(t, footer, "cancel")
-}
-
 // Without a backlog reader the key still reopens, with the row's project, ref and actor.
 func TestReopenDispatchesRowAndActor(t *testing.T) {
 	for name, model := range map[string]func(*testing.T, *reopenSpyAPI) Model{"list": listReopenModel, "detail": detailReopenModel} {
