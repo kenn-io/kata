@@ -25,6 +25,6 @@ await plugin.default.setup({
 const system = [];
 await handlers.get("context")({ sessionID: "nested-session", system });
 assert.equal(system.length, 1);
-assert.match(system[0].text, /<kata_contract>\nworkspace contract\n<\/kata_contract>/);
+assert.ok(system[0].text.includes("<kata_contract>\nworkspace contract\nsession: " + nested + "\n</kata_contract>"), system[0].text);
 assert.doesNotMatch(system[0].text, /nested decoy/);
 console.log("project workspace: " + workspace);

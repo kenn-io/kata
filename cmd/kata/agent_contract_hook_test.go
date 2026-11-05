@@ -64,17 +64,24 @@ func TestAgentContractHookBare(t *testing.T) {
 func TestAgentContractHookOnlyInKataWorkspaces(t *testing.T) {
 	workspace := writeKataWorkspace(t, t.TempDir())
 	outside := t.TempDir()
-	t.Chdir(outside)
+	// A Git checkout nested in a kata workspace is its own unbound repository.
+	nestedCheckout := filepath.Join(workspace, "vendor", "lib")
+	require.NoError(t, os.MkdirAll(filepath.Join(nestedCheckout, ".git"), 0o700))
 	for _, tc := range []struct {
 		name string
+		cwd  string
 		args []string
 		want string
 	}{
-		{"cwd outside", nil, ""},
-		{"workspace flag inside", []string{"--workspace", workspace}, agentContractText},
-		{"workspace flag outside", []string{"--workspace", t.TempDir()}, ""},
+		{"cwd outside", outside, nil, ""},
+		{"workspace flag inside", outside, []string{"--workspace", workspace}, agentContractText},
+		{"workspace flag outside", outside, []string{"--workspace", t.TempDir()}, ""},
+		// Project-scoped plugins run from the install workspace so a relative
+		// --source resolves there, and pass the session directory separately.
+		{"session in nested checkout", workspace, []string{"--workspace", nestedCheckout}, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Chdir(tc.cwd)
 			resetRunEEntered(t)
 			resetFlags(t)
 			stdout, stderr, err := executeRootCapture(t, t.Context(), append(tc.args, "agent-contract-hook")...)

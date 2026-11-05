@@ -40,7 +40,7 @@ for(const reason of ['new','resume','fork','reload']) {
  assert.equal(fresh.systemPromptOptions.sections.kata_contract,'fresh user contract',reason+' must retire stale project contract');
  assert.equal(fresh.systemPromptOptions.sections.kata_inbox,'fresh user request');
  assert.equal(fresh.systemPromptOptions.sections.other,'preserved');
- assert.deepEqual(calls().filter(c=>c.args[0]==='agent-contract-hook').at(-1).args,['agent-contract-hook','--source','user.txt']);
+ assert.deepEqual(calls().filter(c=>c.args[0]==='agent-contract-hook').at(-1).args,['agent-contract-hook','--source','user.txt','--workspace',cwd]);
  process.env.KATA_REF='later-unrelated-ref';
  await current.emit({type:'session_shutdown',reason:'quit'});
  const terminal=calls().filter(c=>c.args[0]==='agent-hook').at(-1);

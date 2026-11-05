@@ -293,8 +293,11 @@ export default function kataHooks(pi) {
         return "Kata " + kind + " context is unavailable for this prompt.";
       }
     }
+    // A relative source resolves against the install workspace, but the
+    // contract gate checks the session directory named by --workspace.
     const args = ["agent-contract-hook"];
     if (options.sourceSet) args.push("--source", options.source);
+    args.push("--workspace", path.resolve(ctx.cwd));
     const sourceCwd = options.scope === "project" && options.sourceSet && !path.isAbsolute(options.source)
       ? options.workspace : ctx.cwd;
     const contract = await read(args, "contract", stdout => {
