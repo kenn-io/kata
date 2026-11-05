@@ -1488,9 +1488,7 @@ execute = "owned"
 ```
 
 `replica_execute` defaults to `none`; both mode fields accept `none`, `owned`
-or `all`. Under `owned`, the upstream member must have created each executed
-job and workflow and written its current version. A definition whose current
-event this daemon lacks is refused until the member saves it again.
+or `all`. `owned` runs only jobs and workflows created by this replica's member actor whose current definition that actor also wrote; a definition received in a federation baseline snapshot, which does not record its last editor, is judged by its creator alone.
 Each override needs a unique, valid local project name and an explicit
 `execute` mode. Names match exactly as stored, including leading or trailing
 spaces. Unknown names warn at startup and may match a later join. Overrides

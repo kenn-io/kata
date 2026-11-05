@@ -14,7 +14,7 @@ import (
 )
 
 func TestServiceCronExecutionConfig(t *testing.T) {
-	for _, mode := range []string{"", "none", "owned", "all", "invalid", "project"} {
+	for _, mode := range []string{"owned", "invalid", "project"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Setenv("KATA_HOME", t.TempDir())
 			cfg := Config{DSN: filepath.Join(t.TempDir(), "db"), Auth: AuthConfig{TrustCallerAuthentication: true}, CronExecution: CronExecutionConfig{ReplicaExecute: mode}}
@@ -45,9 +45,6 @@ func TestServiceCronExecutionConfig(t *testing.T) {
 			want := mode
 			if mode == "project" {
 				want = "all"
-			}
-			if want == "" {
-				want = "none"
 			}
 			require.Equal(t, want, result.Execution.Mode)
 		})

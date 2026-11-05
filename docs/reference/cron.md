@@ -648,7 +648,7 @@ execute = "owned"
 | Mode | Eligible execution on this replica |
 | --- | --- |
 | `none` | No execute jobs or workflows. |
-| `owned` | The nonblank upstream member actor from capabilities created every executed job and workflow and wrote each one's current version. |
+| `owned` | Jobs and workflows created by the nonblank member actor, with current definitions that actor wrote. Baseline snapshots use creator alone. |
 | `all` | Every execute job and workflow, subject to the adapter's own activation. |
 
 Local and hub-role projects always use `all`. Overrides match the exact current
@@ -660,16 +660,15 @@ when the daemon default is `all`. Config edits take effect after
 warn at startup; local/hub overrides warn and have no effect.
 
 Before scheduling or manually starting each new execution, adapters must read
-live capabilities and apply this rule. Under `owned`, the member must have
-created the job and written its current version. The same rule covers any
-workflow named by its `action.workflow_uid` or by `workflow_uid` in the
-observation, including workflow-only runs. Only a reference to the current version 1 notify definition
+live capabilities and apply this rule to the job and any workflow named by
+its `action.workflow_uid` or by `workflow_uid` in the observation, including
+workflow-only runs. Only a reference to the current version 1 notify definition
 is exempt from the job execution rule; a notify job with a workflow reference
 must still satisfy the workflow rule. A non-current job definition reference
-counts as execution. The daemon checks both the definition's author and the
-actor on its current definition event. Under `owned`, a definition whose current
-event this daemon lacks is refused until the member saves it again. A missing
-current definition cannot establish eligibility under `none` or `owned`.
+counts as execution.
+
+`owned` runs only jobs and workflows created by this replica's member actor whose current definition that actor also wrote; a definition received in a federation baseline snapshot, which does not record its last editor, is judged by its creator alone.
+A missing job or workflow passes through to the store's reference validation.
 
 Before launch, submit a `running` observation with a fresh run UID and require
 success. The local observe route rejects new excluded runs with

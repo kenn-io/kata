@@ -1636,7 +1636,7 @@ func runDaemonProcess(
 	}
 	cronWarnings, err := daemon.CronExecutionWarnings(ctx, store, dcfg.Cron)
 	if err != nil {
-		return fmt.Errorf("check cron execution overrides: %w", err)
+		slog.Warn("check cron execution overrides", "error", err)
 	}
 	for _, warning := range cronWarnings {
 		slog.Warn(warning)

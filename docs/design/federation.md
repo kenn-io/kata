@@ -482,6 +482,8 @@ create, or a snapshot outside an approved adoption baseline, is refused for a
 definition the hub already holds. An edit that introduces a definition the hub
 has not seen must carry the bound actor.
 
+`owned` runs only jobs and workflows created by this replica's member actor whose current definition that actor also wrote; a definition received in a federation baseline snapshot, which does not record its last editor, is judged by its creator alone.
+
 A run's actor is its immutable identity: whoever first observed it. Each
 observation event is attributed to the writer's effective actor, which on a
 push spoke is the bound actor. A later observation continues the run when the
