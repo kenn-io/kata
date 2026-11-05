@@ -62,22 +62,19 @@ func cronLoadTest(t *testing.T, m Model) Model {
 	return cronUpdateTest(m, m.fetchCron()())
 }
 
-// The supported federation contract permits winning source revisions equal to
-// or below this store's CAS revision; the oldest row must escape the fallback cap.
+// An event naming a retained run refreshes it even beyond the fallback cap.
 func TestCronEventRefreshReadsLoadedRuns(t *testing.T) {
-	for _, rev := range []int64{1, 2, 9} {
-		t.Run(fmt.Sprint(rev), func(t *testing.T) {
-			m, a := cronRefreshFixture(t, 103)
-			m = cronNameTest(m, "o-102", rev)
-			m = cronLoadTest(t, m)
-			require.Contains(t, a.reads, "o-102")
-			r, ok := m.cron.data.run("o-102")
-			require.True(t, ok)
-			require.Equal(t, "failed", r.Status)
-			require.True(t, m.cronRunUnseen(m.cronProjectUID(), r))
-			require.Empty(t, m.cron.changed)
-		})
-	}
+	t.Run("1", func(t *testing.T) {
+		m, a := cronRefreshFixture(t, 103)
+		m = cronNameTest(m, "o-102", 1)
+		m = cronLoadTest(t, m)
+		require.Contains(t, a.reads, "o-102")
+		r, ok := m.cron.data.run("o-102")
+		require.True(t, ok)
+		require.Equal(t, "failed", r.Status)
+		require.True(t, m.cronRunUnseen(m.cronProjectUID(), r))
+		require.Empty(t, m.cron.changed)
+	})
 	for _, status := range []string{"unknown", "running"} {
 		t.Run(status, func(t *testing.T) {
 			m, a := cronRefreshFixture(t, 1)

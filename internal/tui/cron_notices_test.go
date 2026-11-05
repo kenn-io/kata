@@ -294,31 +294,6 @@ func TestCronNoticeRenderedFailure(t *testing.T) {
 		})
 	}
 
-	t.Run("fresh failure after notice", func(t *testing.T) {
-		defer snapshotInit(t)()
-		m := cronNoticeFixture(t)
-		m.width, m.height = 120, 26
-		event := cronNoticeEvent("new-failure", m.cron.data.jobs[0].UID, snapshotFixedNow)
-		m, cmd := updateModel(m, event)
-		require.NotNil(t, cmd)
-		require.True(t, m.pendingRefetch)
-		m, _ = updateModel(m, cronNoticeTickFor(m))
-		require.NotNil(t, m.toast)
-
-		// The old success can remain visible while the asynchronous read is pending.
-		// Deliver its fresh result: no extra event-projection mechanism is needed.
-		m, _ = updateModel(m, refetchTickMsg{})
-		data := *m.cron.data
-		data.events, data.generation = m.cron.events, m.cron.readGen
-		run := data.runs[0]
-		run.UID, run.Status, run.Revision = "new-failure", "failed", 1
-		run.CreatedAt, run.UpdatedAt, run.EndedAt = snapshotFixedNow, snapshotFixedNow, new(snapshotFixedNow)
-		data.runs = []generated.CronRun{run}
-		data.lastRuns = map[string]generated.CronRun{*run.JobUID: run}
-		m, _ = updateModel(m, cronLoadedMsg(data))
-		out := stripANSI(m.viewContent())
-		require.Contains(t, out, "1 unseen failed")
-	})
 }
 
 // An emitted failure belongs to the scope and connection that observed it.

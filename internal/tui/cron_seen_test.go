@@ -169,7 +169,7 @@ func TestCronSeenLoadedCountAndKeys(t *testing.T) {
 	success.Status = "succeeded"
 	m.cron.data.runs = []generated.CronRun{r, success}
 	m.cron.data.lastRuns = map[string]generated.CronRun{*r.JobUID: r}
-	m.cron.jobPage.runs = []generated.CronRun{unknown, r}
+	m.cron.jobPage = cronHistoryPage{job: *r.JobUID, runs: []generated.CronRun{unknown, r}, ready: true}
 	m.cron.runPage.runs = []generated.CronRun{r, unknown}
 	m.cron.runPage.ready = true
 	require.Equal(t, 2, m.cronUnseenCount())

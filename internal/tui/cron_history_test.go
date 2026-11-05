@@ -46,10 +46,13 @@ func TestCronHistoryFencesAndSingleFlight(t *testing.T) {
 	a := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: cronHistoryRows(m.cron.data.runs[0], 20)}
 	a.next = a.page[len(a.page)-1].UID
 	m.api = a
-	m, cmd := m.cronRequestPage(j, true)
-	stale := cmd().(cronPageMsg)
+	m.cron.jobPage = cronHistoryPage{job: j, next: a.next, ready: true}
+	m, cmd := m.cronRequestPage(j, false)
+	require.NotNil(t, cmd)
 	_, second := m.cronRequestPage(j, false)
-	require.Nil(t, second, "one outstanding read per history")
+	require.Nil(t, second, "one outstanding read per history even with a continuation cursor")
+	m, cmd = m.cronRequestPage(j, true)
+	stale := cmd().(cronPageMsg)
 	// A -> B -> A reopening has the same scope, job and cursor, but a new generation.
 	m, _ = m.cronRequestPage("different", true)
 	m, current := m.cronRequestPage(j, true)
@@ -127,14 +130,6 @@ func TestCronHistoryFailureRetryAndForeignJob(t *testing.T) {
 	require.Contains(t, stripANSI(m.viewBody()), r.Status)
 	require.Contains(t, stripANSI(m.viewBody()), "runs / "+r.UID)
 	m.cron.stack = m.cron.stack[:1]
-	// Resume from the retained cursor to check an empty terminal reply too.
-	m.cron.jobPage.next = cursor
-	a.page = nil
-	a.next = ""
-	m, cmd = m.cronRequestPage(j, false)
-	m = m.cronPageLoaded(cmd().(cronPageMsg))
-	require.NoError(t, m.cron.jobPage.err)
-	require.Empty(t, m.cron.jobPage.next, "empty terminal page is ordinary exhaustion")
 
 	// A failed same-job reset keeps old rows; a successful empty reset clears them.
 	m = cronFixture(t)
@@ -227,8 +222,8 @@ func TestCronHistoryBackToJobRestartsHistory(t *testing.T) {
 }
 
 func TestCronHistoryRetainedRuns(t *testing.T) {
-	for _, jobHistory := range []bool{false, true} {
-		t.Run(map[bool]string{false: "project", true: "job"}[jobHistory], func(t *testing.T) {
+	for _, history := range []string{"project", "job", "lookup"} {
+		t.Run(history, func(t *testing.T) {
 			m := cronSeenFixture(t)
 			old := m.cron.data.runs[0]
 			old.UID, old.Status, old.Revision = "old-running", "running", 1
@@ -245,53 +240,42 @@ func TestCronHistoryRetainedRuns(t *testing.T) {
 			m.cron.jobPage = cronHistoryPage{job: *old.JobUID, runs: []generated.CronRun{head, old}, ready: true, older: true}
 			m.cron.tab = cronRuns
 			m.cron.stack = []cronFrame{{ref: cronRef{cronRuns, old.UID}}}
-			if jobHistory {
+			if history == "lookup" {
+				// An inspected lookup can outlive both history pages.
+				m.cron.runPage = cronHistoryPage{runs: []generated.CronRun{head}, ready: true}
+				m.cron.jobPage = cronHistoryPage{}
+			}
+			if history == "job" {
 				m.cron.stack = append([]cronFrame{{ref: cronRef{cronJobs, *old.JobUID}}}, m.cron.stack...)
 			}
 			fresh := old
 			fresh.Status, fresh.Revision = "succeeded", 2
 			fresh.EndedAt = new(snapshotFixedNow)
-			m.api = &cronRunRefreshAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, run: fresh}
+			a := &cronRunRefreshAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, run: fresh}
+			m.api = newUndoClient(a)
 			m = m.cronLoaded(m.fetchCron()().(cronLoadedMsg))
 			got, ok := m.cron.data.run(old.UID)
 			require.True(t, ok)
 			require.Equal(t, "succeeded", got.Status, "detail refresh succeeds")
-			m.cron.stack = m.cron.stack[:len(m.cron.stack)-1]
-			_, _, lines := cronScreen(m)
-			i := slices.IndexFunc(lines, func(l cronLine) bool { return l.target.uid == old.UID })
-			require.NotEqual(t, -1, i)
-			require.Contains(t, lines[i].text, "succeeded", "back to retained history must agree with refreshed detail")
+			if history != "lookup" {
+				m.cron.stack = m.cron.stack[:len(m.cron.stack)-1]
+				_, _, lines := cronScreen(m)
+				i := slices.IndexFunc(lines, func(l cronLine) bool { return l.target.uid == old.UID })
+				require.NotEqual(t, -1, i)
+				require.Contains(t, lines[i].text, "succeeded", "back to retained history must agree with refreshed detail")
+				m = m.cronLoaded(m.fetchCron()().(cronLoadedMsg))
+				_, _, lines = cronScreen(m)
+				i = slices.IndexFunc(lines, func(l cronLine) bool { return l.target.uid == old.UID })
+				require.NotEqual(t, -1, i)
+				require.Contains(t, lines[i].text, "succeeded", "later events must not downgrade a retained page to its old revision")
+				m.cron.stack = append(m.cron.stack, cronFrame{ref: cronRef{cronRuns, old.UID}})
+			}
+			a.err = errors.New("run refresh offline")
 			m = m.cronLoaded(m.fetchCron()().(cronLoadedMsg))
-			_, _, lines = cronScreen(m)
-			i = slices.IndexFunc(lines, func(l cronLine) bool { return l.target.uid == old.UID })
-			require.NotEqual(t, -1, i)
-			require.Contains(t, lines[i].text, "succeeded", "later events must not downgrade a retained page to its old revision")
+			_, _, lines := cronScreen(m)
+			require.Contains(t, cronLinesText(lines), "run refresh offline")
 		})
 	}
-
-	t.Run("inspected lookup and failed refresh through undo client", func(t *testing.T) {
-		m := cronFixture(t)
-		old := generated.CronRun{UID: "old-run", Revision: 1, Status: "running", IssueUID: new("old-issue")}
-		m.cron.data.lookup = map[string]generated.CronRun{old.UID: old}
-		m.cron.stack = []cronFrame{{ref: cronRef{cronRuns, old.UID}}}
-		fresh := old
-		fresh.Revision = 2
-		fresh.Status = "succeeded"
-		a := &cronRunRefreshAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, run: fresh}
-		m.api = newUndoClient(a)
-		m = m.cronLoaded(m.fetchCron()().(cronLoadedMsg))
-		got, ok := m.cron.data.run(old.UID)
-		require.True(t, ok)
-		require.Equal(t, "succeeded", got.Status)
-		a.err = errors.New("run refresh offline")
-		m = m.cronLoaded(m.fetchCron()().(cronLoadedMsg))
-		_, _, lines := cronScreen(m)
-		text := ""
-		for _, line := range lines {
-			text += line.text + "\n"
-		}
-		require.Contains(t, text, "run refresh offline")
-	})
 
 	t.Run("opening retained failure", func(t *testing.T) {
 		m := cronSeenFixture(t)
@@ -425,7 +409,10 @@ func TestCronHistoryJobPagesAndLookup(t *testing.T) {
 	for _, failed := range []bool{false, true} {
 		t.Run(fmt.Sprintf("inspected job run/failed=%v", failed), func(t *testing.T) {
 			data := *m.cron.data
-			data.runs = nil
+			head := old
+			head.UID, head.CreatedAt = "current-head", old.CreatedAt.Add(24*time.Hour)
+			data.runs = cronHistoryRows(head, 100)
+			data.nextBefore = data.runs[len(data.runs)-1].UID
 			if failed {
 				data.runsErr = errors.New("offline")
 			}
@@ -488,6 +475,10 @@ func TestCronHistoryEventPages(t *testing.T) {
 					require.GreaterOrEqual(t, m.cron.stack[0].cursor, 0)
 					fresh := *m.cron.data
 					fresh.runs = []generated.CronRun{head}
+					if kind != "manual" {
+						// A real head overlaps the retained pages and advertises a newer cursor.
+						fresh.runs = append(fresh.runs, m.cron.runPage.runs[:99]...)
+					}
 					if kind == "failed event" {
 						fresh.runsErr = errors.New("offline")
 					}

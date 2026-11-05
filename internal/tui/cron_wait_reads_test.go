@@ -123,9 +123,9 @@ func TestCronWaitReadsBoundedWithDeadlineAndCancellation(t *testing.T) {
 
 func TestCronWaitRefreshCapturesLoadedHistory(t *testing.T) {
 	m := cronFixture(t)
-	r := generated.CronRun{UID: "old-running", Status: "running", IssueUID: new("history-issue")}
+	r := generated.CronRun{UID: "old-running", JobUID: new(m.cron.data.jobs[0].UID), Status: "running", IssueUID: new("history-issue")}
 	m.cron.data.lookup = map[string]generated.CronRun{r.UID: r}
-	m.cron.jobPage.runs = []generated.CronRun{r}
+	m.cron.jobPage = cronHistoryPage{job: *r.JobUID, runs: []generated.CronRun{r}, ready: true}
 	a := waitReadAPI(func(context.Context, string) ([]generated.CronRun, error) { return nil, nil })
 	// fetchCron also reads jobs/workflows/head, so delegate those to the fixture API.
 	m.api = &cronWaitFetchAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, waiter: a}
