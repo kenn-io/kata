@@ -354,6 +354,69 @@ func TestCronHistoryRetainedRuns(t *testing.T) {
 	})
 }
 
+// A run can finish between its exact read and its job's history read, both
+// successful. The page then shows the open run failed; once shown, it is seen.
+func TestCronJobPageShowsOpenRunFailureAsSeen(t *testing.T) {
+	for _, mode := range []string{"shown", "behind help", "behind narrow"} {
+		t.Run(mode, func(t *testing.T) {
+			m := cronSeenFixture(t)
+			head := m.cron.data.runs[0]
+			job := *head.JobUID
+			r := head
+			r.UID, r.Status, r.Revision = "old-running", "running", 1
+			r.CreatedAt = snapshotFixedNow.Add(-24 * time.Hour)
+			r.EndedAt = nil
+			m.cron.data.lookup = map[string]generated.CronRun{r.UID: r}
+			m.cron.jobPage = cronHistoryPage{job: job, runs: []generated.CronRun{head, r}, ready: true}
+			m.cron.tab = cronJobs
+			m.cron.stack = []cronFrame{{ref: cronRef{cronJobs, job}}}
+			a := &cronRunRefreshAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, run: r}
+			m.api = a
+			_, _, lines := cronScreen(m)
+			i := slices.IndexFunc(lines, func(l cronLine) bool { return l.target == cronRef{cronRuns, r.UID} })
+			require.NotEqual(t, -1, i)
+			m.cron.stack[0].cursor = i
+			m = sendKey(m, tea.KeyEnter)
+			require.Equal(t, cronRef{cronRuns, r.UID}, m.cron.stack[len(m.cron.stack)-1].ref)
+			m = m.cronLoaded(m.fetchCron()().(cronLoadedMsg))
+			got, _ := m.cron.data.run(r.UID)
+			require.Equal(t, "running", got.Status, "the exact read precedes completion")
+			m, cmd := m.cronSync()
+			require.NotNil(t, cmd, "the job under the open run reloads its history")
+			failed := r
+			failed.Status, failed.Revision = "failed", 2
+			failed.EndedAt = new(snapshotFixedNow)
+			a.data.runs = []generated.CronRun{head, failed}
+			page := cmd().(cronPageMsg)
+			require.NoError(t, page.err)
+			switch mode {
+			case "behind help":
+				m = sendRune(m, '?')
+				require.True(t, m.cron.help)
+			case "behind narrow":
+				m, _ = updateModel(m, tea.WindowSizeMsg{Width: 60, Height: 24})
+			}
+			m, _ = updateModel(m, page)
+			got, _ = m.cron.data.run(r.UID)
+			require.Equal(t, "failed", got.Status)
+			switch mode {
+			case "shown":
+				require.Contains(t, cronScreenText(m), "failed")
+				require.Zero(t, m.cronUnseenCount(), "a failure shown in the open run is seen")
+				require.True(t, m.cronSeen.session["project-example"][r.UID])
+			case "behind help":
+				require.Equal(t, 1, m.cronUnseenCount(), "a failure loaded behind Help is not yet shown")
+				m = sendRune(m, '?')
+				require.Zero(t, m.cronUnseenCount(), "closing Help shows the failed run")
+			case "behind narrow":
+				require.Equal(t, 1, m.cronUnseenCount(), "a failure loaded behind the narrow hint is not yet shown")
+				m, _ = updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 24})
+				require.Zero(t, m.cronUnseenCount(), "widening shows the failed run")
+			}
+		})
+	}
+}
+
 type cronRunRefreshAPI struct {
 	*cronReadTestAPI
 	run generated.CronRun

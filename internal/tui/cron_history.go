@@ -126,7 +126,7 @@ func (m Model) cronPageLoaded(msg cronPageMsg) Model {
 		}
 	}
 	page.ready = true
-	m = m.cronRemember(page.runs).cronNoticePage(msg)
+	m = m.cronRemember(page.runs).cronMarkOpenSeen().cronNoticePage(msg)
 	return m.cronKeepSelection(previous)
 }
 
