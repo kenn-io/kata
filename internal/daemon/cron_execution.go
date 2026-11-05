@@ -58,24 +58,23 @@ func checkCronExecution(ctx context.Context, cfg ServerConfig, project db.Projec
 	if in.Body.JobUID != nil {
 		id := *in.Body.JobUID
 		job, readErr := cfg.DB.CronJob(ctx, project.ID, id)
-		if readErr != nil && !errors.Is(readErr, db.ErrNotFound) {
+		if errors.Is(readErr, db.ErrNotFound) {
+			return cronExecutionMissingDefinition(policy, "job", id)
+		}
+		if readErr != nil {
 			return readErr
 		}
-		// A missing job leaves its reference validation to the store, but the
-		// observation's workflow still needs an eligibility check.
-		if readErr == nil {
-			// Only the current v1 notify action is exempt. Adapters refresh current
-			// definitions before launch; an older reference counts as execution.
-			notify := in.Body.DefinitionEventUID != nil &&
-				strings.EqualFold(*in.Body.DefinitionEventUID, job.DefinitionEventUID) &&
-				job.Definition.Version == 1 && job.Definition.Action.Kind == "notify"
-			if !notify {
-				if !executionEligible(config.CronExecuteMode(policy.Mode), policy.MemberActor, job.Author) {
-					return cronExecutionRefusal(policy, "job", id)
-				}
-				if job.Definition.Action.WorkflowUID != "" {
-					workflows = append(workflows, job.Definition.Action.WorkflowUID)
-				}
+		// Only the current v1 notify action is exempt. Adapters refresh current
+		// definitions before launch; an older reference counts as execution.
+		notify := in.Body.DefinitionEventUID != nil &&
+			strings.EqualFold(*in.Body.DefinitionEventUID, job.DefinitionEventUID) &&
+			job.Definition.Version == 1 && job.Definition.Action.Kind == "notify"
+		if !notify {
+			if !executionEligible(config.CronExecuteMode(policy.Mode), policy.MemberActor, job.Author) {
+				return cronExecutionRefusal(policy, "job", id)
+			}
+			if job.Definition.Action.WorkflowUID != "" {
+				workflows = append(workflows, job.Definition.Action.WorkflowUID)
 			}
 		}
 	}
@@ -85,7 +84,7 @@ func checkCronExecution(ctx context.Context, cfg ServerConfig, project db.Projec
 	for _, id := range workflows {
 		workflow, readErr := cfg.DB.CronWorkflow(ctx, project.ID, id)
 		if errors.Is(readErr, db.ErrNotFound) {
-			continue // Check remaining workflows; the store validates definition references.
+			return cronExecutionMissingDefinition(policy, "workflow", id)
 		}
 		if readErr != nil {
 			return readErr
@@ -111,6 +110,10 @@ func executionEligible(mode config.CronExecuteMode, memberActor, author string) 
 
 func cronExecutionRefusal(policy api.CronExecutionPolicy, kind, id string) error {
 	return api.NewError(403, "cron_execution_not_enabled", fmt.Sprintf("this daemon has not opted in to executing %s %s for this replicated project", kind, id), "Set [[cron.project]] execute in config.toml on this daemon, or run it on the owning hub.", map[string]any{"mode": policy.Mode, "member_actor": policy.MemberActor})
+}
+
+func cronExecutionMissingDefinition(policy api.CronExecutionPolicy, kind, id string) error {
+	return api.NewError(403, "cron_execution_not_enabled", fmt.Sprintf("%s %s definition was not found on this daemon for this replicated project", kind, id), "Check the definition UID and sync this replica before retrying.", map[string]any{"mode": policy.Mode, "member_actor": policy.MemberActor})
 }
 
 // CronExecutionWarnings describes unmatched or ineffective overrides once at

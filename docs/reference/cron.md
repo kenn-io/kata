@@ -668,12 +668,16 @@ must still satisfy the workflow rule. A non-current job definition reference
 counts as execution.
 
 `owned` runs only jobs and workflows whose stored creator is this replica's member actor; the creator is preserved across edits, so a colleague's edit on the hub does not change eligibility.
-A missing job or workflow passes through to the store's reference validation.
+Under `none` or `owned`, a fresh observation that references a job or workflow
+without a current row on this daemon receives `403 cron_execution_not_enabled`,
+even if its historical definition event exists. The message names the kind and
+UID and says the definition was not found on this daemon.
 
 Before launch, submit a `running` observation with a fresh run UID and require
 success. The local observe route rejects new excluded runs with
 `403 cron_execution_not_enabled`; its error includes `mode`, `member_actor`
-and an opt-in hint. A failed admission must prevent launch. Existing or
+and a hint to check the definition reference or opt in. A failed admission must
+prevent launch. Existing or
 replicated run UIDs may still accept evidence updates; success on such an
 update never authorizes another execution. Policy uses the current binding
 and stored creator at check time; federation adoption can change the stored creator between checks.

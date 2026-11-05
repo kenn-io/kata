@@ -70,13 +70,14 @@ func TestCronExecutionCapabilities(t *testing.T) {
 
 func TestCronExecutionNewRunPolicy(t *testing.T) {
 	for _, tc := range []struct {
-		name, mode, author, kind string
-		workflowAuthor, editor   string
-		stale, missingJob        bool
-		actionWorkflow           bool
-		missingActionWorkflow    bool
-		workflow, deleted, relay bool
-		want                     int
+		name, mode, author, kind    string
+		workflowAuthor, editor      string
+		stale, missingJob           bool
+		omittedJob, omittedWorkflow bool
+		actionWorkflow              bool
+		missingActionWorkflow       bool
+		workflow, deleted, relay    bool
+		want                        int
 	}{
 		{name: "none", author: "company-member", want: 403},
 		{name: "owned author", mode: "owned", author: "company-member", want: 200},
@@ -89,9 +90,13 @@ func TestCronExecutionNewRunPolicy(t *testing.T) {
 		{name: "workflow other", mode: "owned", author: "other-member", workflow: true, want: 403},
 		{name: "workflow none", author: "company-member", workflow: true, want: 403},
 		{name: "stale notify", author: "other-member", kind: "notify", stale: true, want: 403},
-		{name: "typo job", author: "company-member", missingJob: true, want: 400},
+		{name: "typo job", author: "company-member", missingJob: true, want: 403},
+		{name: "omitted job none", mode: "none", author: "company-member", omittedJob: true, want: 403},
+		{name: "omitted job owned", mode: "owned", author: "company-member", omittedJob: true, want: 403},
+		{name: "omitted workflow none", mode: "none", author: "other-member", workflow: true, omittedWorkflow: true, want: 403},
+		{name: "omitted workflow owned", mode: "owned", author: "other-member", workflow: true, omittedWorkflow: true, want: 403},
 		{name: "missing job with foreign body workflow", mode: "owned", missingJob: true, workflow: true, workflowAuthor: "other-member", want: 403},
-		{name: "missing job with owned body workflow", mode: "owned", missingJob: true, workflow: true, workflowAuthor: "company-member", want: 400},
+		{name: "missing job with owned body workflow", mode: "owned", missingJob: true, workflow: true, workflowAuthor: "company-member", want: 403},
 		{name: "owned job after colleague edit", mode: "owned", author: "company-member", editor: "other-member", want: 200},
 		{name: "owned workflow after colleague edit", mode: "owned", author: "company-member", workflow: true, editor: "other-member", want: 200},
 		{name: "notify", author: "other-member", kind: "notify", want: 200},
@@ -165,23 +170,39 @@ func TestCronExecutionNewRunPolicy(t *testing.T) {
 			if tc.missingJob {
 				body["job_uid"], body["definition_event_uid"] = cronHTTPUID(t), cronHTTPUID(t)
 			}
+			// An export can omit archived definitions while retaining their events.
+			if tc.omittedJob {
+				_, err := env.DB.ExecContext(t.Context(), `DELETE FROM cron_jobs WHERE uid = ?`, body["job_uid"])
+				require.NoError(t, err)
+			}
+			if tc.omittedWorkflow {
+				_, err := env.DB.ExecContext(t.Context(), `DELETE FROM cron_workflows WHERE uid = ?`, body["workflow_uid"])
+				require.NoError(t, err)
+			}
 			executionBinding(t, env.DB, project, db.FederationRoleSpoke, true, tc.relay)
 			before, err := env.DB.MaxEventID(t.Context())
 			require.NoError(t, err)
-			status, raw := cronHTTP(t, env, http.MethodPut, fmt.Sprintf("/api/v1/projects/%d/cron/runs/%s", project.ID, cronHTTPUID(t)), body)
+			runUID := cronHTTPUID(t)
+			status, raw := cronHTTP(t, env, http.MethodPut, fmt.Sprintf("/api/v1/projects/%d/cron/runs/%s", project.ID, runUID), body)
 			require.Equalf(t, tc.want, status, "%s", raw)
-			if tc.want == 400 {
-				var problem api.ErrorEnvelope
-				require.NoError(t, json.Unmarshal(raw, &problem))
-				require.Equal(t, "validation", problem.Error.Code)
-				require.Contains(t, problem.Error.Message, "definition event reference")
-			}
 			if tc.want == 403 {
 				var problem api.ErrorEnvelope
 				require.NoError(t, json.Unmarshal(raw, &problem))
 				require.Equal(t, "cron_execution_not_enabled", problem.Error.Code)
-				require.Contains(t, problem.Error.Hint, "[[cron.project]]")
+				if tc.missingJob || tc.omittedJob || tc.omittedWorkflow || tc.missingActionWorkflow {
+					require.Contains(t, problem.Error.Hint, "Check the definition UID")
+				} else {
+					require.Contains(t, problem.Error.Hint, "[[cron.project]]")
+				}
 				require.Contains(t, problem.Error.Message, "replicated project")
+				if tc.missingJob || tc.omittedJob || tc.omittedWorkflow {
+					kind, id := "job", body["job_uid"]
+					if tc.omittedWorkflow {
+						kind, id = "workflow", body["workflow_uid"]
+					}
+					require.Contains(t, problem.Error.Message, fmt.Sprintf("%s %s", kind, id))
+					require.Contains(t, problem.Error.Message, "definition was not found on this daemon")
+				}
 				mode := tc.mode
 				if mode == "" {
 					mode = "none"
@@ -191,6 +212,8 @@ func TestCronExecutionNewRunPolicy(t *testing.T) {
 				after, err := env.DB.MaxEventID(t.Context())
 				require.NoError(t, err)
 				require.Equal(t, before, after)
+				_, err = env.DB.CronRun(t.Context(), project.ID, runUID)
+				require.ErrorIs(t, err, db.ErrNotFound)
 			}
 		})
 	}
