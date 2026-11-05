@@ -540,7 +540,21 @@ func TestRecurrenceFormConflictKeepsInputUntilReopened(t *testing.T) {
 		recurrenceclient.Terms{Rule: "FREQ=MONTHLY", Start: "2026-11-09", Zone: "Europe/Paris", Actor: "bob"})
 	require.NoError(t, err)
 	h.fill("FREQ=DAILY", "2026-11-09", "Europe/Paris")
-	h.save()
+	cmd := h.key(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+	out, cmd := h.m.Update(msgOfType[mutationDoneMsg](t, cmd))
+	h.m = out.(Model)
+	// Run conflict recovery without delivering an SSE event.
+	pending := []tea.Cmd{cmd}
+	for len(pending) > 0 {
+		cmd, pending = pending[0], pending[1:]
+		for _, msg := range runCmdTree(cmd) {
+			out, next := h.m.Update(msg)
+			h.m = out.(Model)
+			if next != nil {
+				pending = append(pending, next)
+			}
+		}
+	}
 	require.Equal(t, inputRecurrenceForm, h.m.input.kind)
 	assert.Contains(t, h.m.input.err, "Could not change repeat:")
 	rule, _, _ := h.values()
@@ -548,10 +562,13 @@ func TestRecurrenceFormConflictKeepsInputUntilReopened(t *testing.T) {
 	assert.Equal(t, current.Revision, h.m.input.recurrence.rec.Revision)
 	assert.Equal(t, "FREQ=MONTHLY", h.rows()[0].RRule)
 	h.key(tea.KeyPressMsg{Code: tea.KeyEscape})
-	h.refreshDetail()
 	h.open()
 	rule, _, _ = h.values()
 	assert.Equal(t, "FREQ=MONTHLY", rule)
+	h.fill("FREQ=DAILY", "2026-11-09", "Europe/Paris")
+	h.save()
+	assert.Equal(t, inputNone, h.m.input.kind)
+	assert.Equal(t, "FREQ=DAILY", h.rows()[0].RRule)
 }
 
 func TestRecurrenceFormDaemonErrorFitsMinimumHeight(t *testing.T) {
