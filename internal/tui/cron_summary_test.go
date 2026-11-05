@@ -193,6 +193,9 @@ func TestCronSummaryGroupedEvidence(t *testing.T) {
 		b.WriteByte('\n')
 	}
 	text := b.String()
+	for _, heading := range []string{"Log ref:", "Usage", "Tokens:"} {
+		require.Contains(t, text, heading)
+	}
 	require.Less(t, strings.Index(text, "Log ref:"), strings.Index(text, "Usage"))
 	require.Less(t, strings.Index(text, "Usage"), strings.Index(text, "Tokens:"))
 	require.Contains(t, text, "  Reason:     agent_quota")
