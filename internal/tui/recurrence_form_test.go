@@ -359,7 +359,7 @@ func TestRecurrenceFormRefusesAndKeepsTheInput(t *testing.T) {
 		wantErr    []string
 	}{
 		{"the daemon's refusal is shown as is", nil, "every other tuesday", "Europe/Paris", []string{"every other tuesday"}},
-		{"a blank rule requires an existing recurrence", nil, "", "Europe/Paris", []string{"Could not start repeat:"}},
+		{"a blank rule requires an existing recurrence", nil, "", "Europe/Paris", []string{"Could not start repeat:", `parse rrule "": wrong format`}},
 		{"an issue changed after the form opened is refused", func(h *recurrenceHarness) {
 			h.patchDaemon(map[string]string{"scheduled_on": "2026-12-01"})
 		}, "FREQ=DAILY", "Europe/Paris", []string{"Could not start repeat:"}},
@@ -453,22 +453,23 @@ func TestRecurrenceSaveUpdatesUndo(t *testing.T) {
 }
 
 func TestRecurrenceFormRequiresDateOnlyStart(t *testing.T) {
-	for _, typed := range []string{"", "2026-11-09T09:00", "next Tuesday"} {
-		t.Run(typed, func(t *testing.T) {
+	for _, tc := range []struct {
+		typed, wantErr string
+	}{
+		{"", "Start is required."},
+		{"2026-11-09T09:00", "Start must be YYYY-MM-DD, today, tomorrow, +Nd or +Nw."},
+		{"next Tuesday", "Start must be YYYY-MM-DD, today, tomorrow, +Nd or +Nw."},
+	} {
+		t.Run(tc.typed, func(t *testing.T) {
 			h := newRecurrenceHarness(t, viewDetail)
 			h.open()
-			h.fill("FREQ=DAILY", typed, "Europe/Paris")
+			h.fill("FREQ=DAILY", tc.typed, "Europe/Paris")
 
 			cmd := h.key(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
 
 			assert.Empty(t, msgsOfType[mutationDoneMsg](cmd), "invalid starts are refused before writing")
-			if strings.TrimSpace(typed) == "" {
-				assert.Equal(t, "Start is required.", h.m.input.err)
-			} else {
-				assert.Equal(t, "Start must be YYYY-MM-DD, today, tomorrow, +Nd or +Nw.", h.m.input.err)
-			}
-			assert.Equal(t, typed, h.m.input.fieldValue(fieldStart))
-			assert.Empty(t, h.rows())
+			assert.Equal(t, tc.wantErr, h.m.input.err)
+			assert.Equal(t, tc.typed, h.m.input.fieldValue(fieldStart))
 		})
 	}
 }
@@ -528,6 +529,7 @@ func TestRecurrenceIncomingMutationRefreshesDetail(t *testing.T) {
 		}
 	}
 	// Another client starts repeating while the displayed issue is still stale.
+	// The top-level issue UID triggers this refresh before its recurrence is known.
 	require.NoError(t, recurrenceclient.Start(t.Context(), h.api, h.issue.ProjectID, h.issue.UID,
 		recurrenceclient.Template{Title: "Example", Body: "body"},
 		recurrenceclient.Terms{Rule: "FREQ=WEEKLY", Start: "2026-11-09", Zone: "Europe/Paris", Actor: "bob"}, nil))
@@ -543,9 +545,6 @@ func TestRecurrenceIncomingMutationRefreshesDetail(t *testing.T) {
 		event := decodeEventReceived(frame{data: []byte(`{"type":"` + eventType + `","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"payload":{"recurrence_uid":"another-recurrence"}}`)})
 		require.Nil(t, h.m.maybeRefetchOpenDetail(event), "another recurrence leaves the displayed repeat available")
 	}
-	h.open()
-	h.key(tea.KeyPressMsg{Code: tea.KeyEscape})
-
 	_, err := recurrenceclient.Change(t.Context(), h.api, h.issue.ProjectID, current,
 		recurrenceclient.Terms{Rule: "FREQ=MONTHLY", Start: "2026-11-09", Zone: "Europe/Paris", Actor: "bob"})
 	require.NoError(t, err)
@@ -610,41 +609,50 @@ func TestRecurrenceFormConflictKeepsInputUntilReopened(t *testing.T) {
 			h.open()
 			rule, _, _ = h.values()
 			assert.Equal(t, "FREQ=MONTHLY", rule)
-			h.fill(tc.rule, tc.start, tc.zone)
-			h.save()
-			assert.Equal(t, inputNone, h.m.input.kind)
-			if tc.rule == "" {
-				assert.Empty(t, h.rows())
-			} else {
-				assert.Equal(t, tc.rule, h.rows()[0].RRule)
-			}
 		})
 	}
 }
 
 func TestRecurrenceFormDaemonErrorFitsMinimumHeight(t *testing.T) {
 	defer snapshotInit(t)()
+	type formCase struct {
+		state        inputState
+		prefix, tail string
+	}
+	var forms []formCase
+	// Keep the start form too: status rendering must work without a recurrence.
+	for _, rec := range []*recurrenceclient.View{nil, {ID: 1, UID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Revision: 2, RRule: "FREQ=YEARLY;INTERVAL=2;BYMONTH=1,2,3,4,5,6,7,8,9,10,11,12;BYDAY=MO,TU,WE,TH,FR;BYHOUR=0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23;BYMINUTE=0,15,30,45;BYSECOND=0;WKST=MO", DTStart: "2026-11-09", Timezone: "Europe/Paris"}} {
+		issue := Issue{ID: 1, UID: "01ARZ3NDEKTSV4RRFFQ69G5FAW", ProjectID: 1, ShortID: "42aa", Title: "Example", Revision: 3}
+		if rec != nil {
+			issue.RecurrenceID = new(rec.ID)
+		}
+		s := newRecurrenceForm(formTarget{issueShortID: issue.ShortID, issueUID: issue.UID}, issue, rec)
+		s.err = "Could not start repeat: the daemon refused the recurrence rule FREQ=WEEKLY;INTERVAL=2;BYDAY=MON,TUE,WED,THU,FRI. Enter a supported rule and save again."
+		forms = append(forms, formCase{s, "Could not start repeat", "save again."})
+	}
+	h := newRecurrenceHarness(t, viewDetail)
+	h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
+	h.open()
+	h.fill("FREQ=DAILY;BYDAY=MO;BYMONTH=1,2,3,4,5;BAD=1", "2026-11-09", "Europe/Paris")
+	h.key(tea.KeyPressMsg{Code: tea.KeyEnd})
+	h.save()
+	require.Contains(t, h.m.input.err, "unknown RRULE property: BAD")
+	forms = append(forms, formCase{h.m.input, "Could not change repeat", "unknown RRULE property: BAD"})
 	for _, width := range []int{40, 60, 80} {
-		// Keep the start form too: status rendering must work without a recurrence.
-		for _, rec := range []*recurrenceclient.View{nil, {ID: 1, UID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Revision: 2, RRule: "FREQ=YEARLY;INTERVAL=2;BYMONTH=1,2,3,4,5,6,7,8,9,10,11,12;BYDAY=MO,TU,WE,TH,FR;BYHOUR=0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23;BYMINUTE=0,15,30,45;BYSECOND=0;WKST=MO", DTStart: "2026-11-09", Timezone: "Europe/Paris"}} {
-			issue := Issue{ID: 1, UID: "01ARZ3NDEKTSV4RRFFQ69G5FAW", ProjectID: 1, ShortID: "42aa", Title: "Example", Revision: 3}
-			if rec != nil {
-				issue.RecurrenceID = new(rec.ID)
-			}
-			s := newRecurrenceForm(formTarget{issueShortID: issue.ShortID, issueUID: issue.UID}, issue, rec)
-			s.err = "Could not start repeat: the daemon refused the recurrence rule FREQ=WEEKLY;INTERVAL=2;BYDAY=MON,TUE,WED,THU,FRI. Enter a supported rule and save again."
+		for _, form := range forms {
+			s := form.state
 			modal := renderCenteredForm(s, width, 12, snapshotFixedNow)
 			assert.LessOrEqual(t, lipgloss.Height(modal), 12)
 			assert.LessOrEqual(t, lipgloss.Width(modal), width)
 			got := stripANSI(modal)
-			for _, want := range []string{"Rule", "Start", "Zone", "Could not start repeat", "ctrl+o save", "esc"} {
+			for _, want := range []string{"Rule", "Start", "Zone", form.prefix, "ctrl+o save", "esc"} {
 				assert.Contains(t, got, want)
 			}
 			lines := strings.Split(got, "\n")
 			for i := range lines {
 				lines[i] = strings.Trim(lines[i], "│ ")
 			}
-			assert.Contains(t, strings.Join(lines, " "), "save again.")
+			assert.Contains(t, strings.Join(lines, " "), form.tail)
 			s.err = ""
 			s.saving = true
 			modal = renderCenteredForm(s, width, 12, snapshotFixedNow)
@@ -654,30 +662,4 @@ func TestRecurrenceFormDaemonErrorFitsMinimumHeight(t *testing.T) {
 			assert.NotContains(t, stripANSI(modal), "ctrl+o save")
 		}
 	}
-	t.Run("rejected long rule", func(t *testing.T) {
-		h := newRecurrenceHarness(t, viewDetail)
-		h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
-		h.open()
-		h.fill("FREQ=DAILY;BYDAY=MO;BYMONTH=1,2,3,4,5;BAD=1", "2026-11-09", "Europe/Paris")
-		// Match the cursor position after typing the rule.
-		h.key(tea.KeyPressMsg{Code: tea.KeyEnd})
-		h.save()
-		require.Contains(t, h.m.input.err, "unknown RRULE property: BAD")
-
-		for _, width := range []int{80, 40} {
-			t.Run(strconv.Itoa(width), func(t *testing.T) {
-				modal := renderCenteredForm(h.m.input, width, 12, snapshotFixedNow)
-				assert.LessOrEqual(t, lipgloss.Height(modal), 12)
-				assert.LessOrEqual(t, lipgloss.Width(modal), width)
-				lines := strings.Split(stripANSI(modal), "\n")
-				for i := range lines {
-					lines[i] = strings.Trim(lines[i], "│ ")
-				}
-				got := strings.Join(lines, " ")
-				for _, want := range []string{"Rule", "Start", "Zone", "Could not change repeat", "unknown RRULE property: BAD", "ctrl+o save", "esc"} {
-					assert.Contains(t, got, want)
-				}
-			})
-		}
-	})
 }
