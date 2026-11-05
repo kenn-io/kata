@@ -1,66 +1,27 @@
 package pgstore_test
 
 import (
-	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
-	"go.kenn.io/kit/growthtest"
+	"go.kenn.io/kata/internal/db/dbtest"
+	"go.kenn.io/kata/internal/db/pgstore"
 )
 
-// Ordinary project history must not make short-ID reservation checks more expensive.
 func TestCreateIssueHistoryGrowth(t *testing.T) {
-	growthtest.Run(t, growthtest.Check{
-		Small: 21_000, Large: 210_000,
-		MaxRatio: 2, Floor: float64(10 * time.Microsecond),
-		Measure: growthtest.Fastest(9),
-		Build: func(_ testing.TB, size int) (run, reset func()) {
-			store, _ := openConformanceStore(t)
-			t.Cleanup(func() { _ = store.Close() })
-			project, err := store.CreateProject(t.Context(), "example-project")
-			require.NoError(t, err)
-			historyIssue, _, err := store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, UID: "01M60000000000000000000000", Title: "History issue", Author: "agent"})
-			require.NoError(t, err)
-			// A real move keeps PostgreSQL's reset-history join from ending at an empty move index.
-			target, err := store.CreateProject(t.Context(), "target-project")
-			require.NoError(t, err)
-			_, err = store.MoveIssueProject(t.Context(), db.MoveIssueProjectIn{IssueID: historyIssue.ID, FromProjectID: project.ID, ToProjectID: target.ID, IfMatchRev: historyIssue.Revision, Actor: "agent"})
-			require.NoError(t, err)
-			_, err = store.ExecContext(t.Context(), `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,issue_id,issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
+	dbtest.RunCreateIssueHistoryGrowth(t, func(t *testing.T) db.Storage {
+		store, _ := openConformanceStore(t)
+		t.Cleanup(func() { _ = store.Close() })
+		return store
+	}, func(t *testing.T, storage db.Storage, project db.Project, historyIssue db.Issue, size int) {
+		store := storage.(*pgstore.Store)
+		_, err := store.ExecContext(t.Context(), `INSERT INTO events(uid,origin_instance_uid,project_id,project_name,issue_id,issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
 SELECT '01M4'||lpad(x::text,22,'0'),$1,$2,$3,$6,$7,'issue.updated','agent','{}',x,0,$4
 FROM generate_series(1,$5::int) AS n(x)`, store.InstanceUID(), project.ID, project.Name, strings.Repeat("a", 64), size, historyIssue.ID, historyIssue.UID)
-			require.NoError(t, err)
-			_, err = store.ExecContext(t.Context(), "ANALYZE events")
-			require.NoError(t, err)
-
-			// Choose a fresh UID outside each measurement, including the warm-up.
-			var issueUID string
-			sample := 0
-			return func() {
-					issue, event, err := store.CreateIssue(t.Context(), db.CreateIssueParams{
-						ProjectID: project.ID, UID: issueUID, Title: "New issue", Author: "agent",
-					})
-					require.NoError(t, err)
-					require.Equal(t, issueUID, issue.UID)
-					require.Equal(t, project.ID, issue.ProjectID)
-					require.Equal(t, "New issue", issue.Title)
-					require.NotEmpty(t, issue.ShortID)
-					persisted, err := store.IssueByID(t.Context(), issue.ID)
-					require.NoError(t, err)
-					require.Equal(t, issue, persisted)
-					var eventType, eventIssueUID string
-					require.NoError(t, store.QueryRowContext(t.Context(),
-						"SELECT type,issue_uid FROM events WHERE id=$1", event.ID,
-					).Scan(&eventType, &eventIssueUID))
-					require.Equal(t, "issue.created", eventType)
-					require.Equal(t, issueUID, eventIssueUID)
-				}, func() {
-					sample++
-					issueUID = fmt.Sprintf("01M5%022d", sample)
-				}
-		},
+		require.NoError(t, err)
+		_, err = store.ExecContext(t.Context(), "ANALYZE events")
+		require.NoError(t, err)
 	})
 }
