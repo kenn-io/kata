@@ -1,13 +1,15 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-04
+last_edited: 2026-11-05
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
 0.5.0; earlier entries are a retroactive project history grouped by ISO week.
 
 ## Unreleased
+
+- Load project stats in milliseconds on large stores in the TUI Projects screen, `kata projects list`, and `?include=stats`; "updated" now follows the newest recorded event, as the web UI does.
 
 - Resume local writes sooner after spoke rebuilds of large projects by skipping
   issues and comments whose stored values already match the event log.
