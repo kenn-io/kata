@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-04
+last_edited: 2026-11-05
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -103,6 +103,11 @@ time. It must normalize to a UTC year from 0000 through 9999. Each instant
 has UTC `at` and trigger-zone `local` representations. Only instants that
 fit RFC3339 in both zones appear. Use `at` for exact instants; `local` uses
 RFC3339's minute precision for UTC offsets, including historical zones.
+
+The HTTP workflow validation route also accepts and validates `from`,
+although workflows return no schedule. Its `count` query is ignored; `count`
+applies only to jobs. CLI workflows accept neither flag.
+
 The `basis` explains how those instants were calculated:
 
 | Basis | Meaning |
