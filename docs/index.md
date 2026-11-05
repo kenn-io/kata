@@ -33,12 +33,13 @@ powershell -ExecutionPolicy ByPass -c "irm https://katatracker.com/install.ps1 |
 ```
 </section>
 
-## New in 0.20.0
+## New in 0.21.0
 
-Handle notification requests in the terminal UI's Attention inbox, ask for
-replies to specific comments, broadcast to participants, and trigger work when
-scheduled dates arrive. The [0.20.0 release notes](changelog.md#0200) also cover
-SQLite upgrades, daemon restarts, cron scheduling, and contributor credits.
+Attach files to issues, move whole issue subtrees between projects, repeat
+issues from the CLI, and manage planning dates and cron jobs in the terminal UI.
+Remote MCP gateways can connect to the daemon directly, and large stores open,
+page, and search much faster. The [0.21.0 release notes](changelog.md#0210)
+cover the schema 43 upgrade, PostgreSQL migration, and contributor credits.
 See [Updating Kata](get-started/install.md#updating-kata) for installation
 and federation upgrade guidance.
 

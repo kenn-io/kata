@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: Reference Kata environment variables, workspace files, daemon settings, authentication, and integrations.
-last_edited: 2026-11-02
+last_edited: 2026-11-04
 ---
 
 # Configuration
@@ -1453,7 +1453,7 @@ for access tokens, field ownership, completion writeback, and recovery limits.
 
 ## Docbank attachments
 
-On main after 0.19.0, `[docbank]` enables issue file uploads and reads through a
+Kata 0.21.0 and later: `[docbank]` enables issue file uploads and reads through a
 separately hosted Docbank. See [Issue attachments](../guide/attachments.md) for
 setup and the shared-vault trust boundary.
 

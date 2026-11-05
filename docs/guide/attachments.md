@@ -1,13 +1,13 @@
 ---
 title: Issue attachments
 description: Attach files through Docbank and view images and videos in Kata.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 # Issue attachments
 
 Attach screenshots, recordings, and other files in the web UI or with `kata docbank attachments`.
-Kata stores one reference per file in issue metadata. [Docbank](https://github.com/kenn-io/docbank) stores the bytes. Only references federate. This feature is available on main after 0.20.0.
+Kata stores one reference per file in issue metadata. [Docbank](https://github.com/kenn-io/docbank) stores the bytes. Only references federate. Attachments require Kata 0.21.0 or later.
 
 ## Configure the daemon
 

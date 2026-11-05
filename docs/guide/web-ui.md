@@ -1,7 +1,7 @@
 ---
 title: Web UI
 description: Browse and manage Kata projects and issues in the daemon-served browser application.
-last_edited: 2026-10-30
+last_edited: 2026-11-04
 ---
 
 # Web UI
@@ -113,6 +113,11 @@ project, and **Done editing** returns to the read-only view. The editor also sup
 When a close saved a
 [closing-session reference](../reference/configuration.md#closing-session-transcripts),
 the issue's events show `Session: <agent> <id>`, linked when a URL was saved. See the configuration reference for API and AgentsView compatibility.
+
+When the daemon has [Docbank configured](attachments.md#configure-the-daemon),
+the read view also lists the issue's attachments. **Attach files** uploads one
+or more files, **Preview** shows images, and **Play** plays videos in place. See
+[Issue attachments](attachments.md) for size limits and supported types.
 
 With daemon API `0.28.0` or newer, comments show handles, reply targets,
 backlinks, and edit markers. Select a reply target or backlink to open its issue

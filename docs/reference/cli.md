@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 # CLI reference
@@ -1945,7 +1945,7 @@ On the Jobs tab, or on a job's detail, these keys change jobs. On the Kata tab, 
 
 The job form offers four kinds: a recurring child issue (a native job with a parent issue), an agent prompt, a workflow run, and a notification. Each kind offers the triggers that fit it: cron with its time zone, interval, once at an RFC 3339 instant, manual, an issue's scheduled date, and an issue's deadline with its lead. Issue fields take a short ID or a full UID. A prompt or workflow job on an issue-date trigger runs on the trigger's issue when its policy is the existing issue, so the form asks for it once. The form also edits `enabled`, `checkout_key`, `secret_refs`, and `options`; `options` is a raw JSON object, and unknown keys and exact numbers are kept across an edit. Job validation messages appear below the form. `Ctrl+o` or `Ctrl+s` saves. `Tab`, `Shift+Tab`, and `Enter` change fields. On an issue body, prompt, message, or options field, `Ctrl+e` opens `$VISUAL` or `$EDITOR`, with `vi` as the fallback. These fields keep their complete text, including tabs and line endings, until you edit them. `Esc` on a changed draft asks `y`/`n` before it discards the changes. Definitions with unsupported versions or unknown members require a newer kata for editing.
 
-The form mints the job UID when it opens, so retrying a failed create never makes a second job. An edit is guarded on the job's `definition_event_uid`. If the revision changed while you edited, the form keeps your draft. If the current definition supports editing, it shows the current name, revision, and complete definition; otherwise it shows an error. Use the arrow keys to scroll, or press `Ctrl+o` to save your whole draft against the current revision. Saving the draft replaces the current definition, including settings changed by another writer. `Esc` returns to the draft. Other save errors keep the form open with the error. A recurring child issue's parent cannot change after creation, and native jobs must be written on the project's owning hub.
+The form mints the job UID when it opens, so retrying a failed create never makes a second job. An edit is guarded on the job's `definition_event_uid`. If the revision changed while you edited, the form keeps your draft. If the current definition supports editing, it shows the current name, revision, and complete definition; otherwise it shows an error. Use the arrow keys to scroll, or press `Ctrl+o` to save your whole draft against the current revision. Saving the draft replaces the current definition, including settings changed by another writer. `Esc` returns to the draft. Other save errors keep the form open with the error. A recurring child issue's parent cannot change after creation. On a federated project, native jobs are written on the owning hub; a direct, push-enabled spoke forwards the save there (see [Cron](cron.md)).
 
 Runs loads the newest 100 observations for the current project. Job and workflow details show matching runs from that loaded project history. Run details distinguish the recorded definition revision from the current job or workflow, including definitions that have changed or disappeared.
 
@@ -2059,7 +2059,7 @@ current dates so you can edit them again. The detail properties show both
 dates once either is set, and `u` writes the previous dates back under the
 same revision check.
 
-In the issue list, press `X` to soft-delete the selected issue. In split
+On main after 0.21.0, press `X` in the issue list to soft-delete the selected issue. In split
 layout, focus the list first. In Inbox and while browsing from Attention, use
 `kata delete` instead. The form shows the issue's title and the header
 `DELETE <project>#<id>`, the string `kata delete --confirm` takes. Type
@@ -2471,7 +2471,7 @@ Legacy numeric refs no longer resolve.
 
 ## Issue attachments
 
-On main after 0.20.0, attach files to an issue with Docbank, then list, download, or remove their references. See [Issue attachments](../guide/attachments.md).
+Attach files to an issue with Docbank, then list, download, or remove their references. See [Issue attachments](../guide/attachments.md).
 
 ```sh
 kata docbank attachments add <issue> <file>...
