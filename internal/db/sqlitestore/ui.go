@@ -321,9 +321,10 @@ func (d *Store) ReadUIReferences(ctx context.Context, query db.UIReferencesQuery
 	}
 	if query.Query == "" {
 		_, restricted := db.AuthorizedProjects(ctx)
+		unrestricted := !restricted && query.AllowedIssueIDs == nil
 		var ownerStatement string
 		var ownerArgs []any
-		if !restricted && query.AllowedIssueIDs == nil {
+		if unrestricted {
 			ownerStatement, ownerArgs = uiReferenceOwnersQuery, []any{db.SystemProjectName, limit}
 		} else {
 			ownerStatement = `
@@ -343,7 +344,7 @@ func (d *Store) ReadUIReferences(ctx context.Context, query db.UIReferencesQuery
 		}
 		var labelStatement string
 		var labelArgs []any
-		if !restricted && query.AllowedIssueIDs == nil {
+		if unrestricted {
 			labelStatement, labelArgs = uiReferenceLabelsQuery, []any{db.SystemProjectName, limit}
 		} else {
 			labelStatement = `
