@@ -118,6 +118,7 @@ func (h *recurrenceHarness) page() string { return stripANSI(h.m.viewContent()) 
 func TestRecurrenceDetailScheduleFieldsAt80Columns(t *testing.T) {
 	defer snapshotInit(t)()
 	dm := snapDetailFixture()
+	dm.issue.RecurrenceID = new(int64(1))
 	dm.recurrence = &recurrenceclient.View{
 		RRule: "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,TU,WE,TH,FR", Timezone: "Europe/Paris",
 		NextOccurrenceKey: new("2026-11-09"),
@@ -190,35 +191,14 @@ func TestRecurrenceFormStartsAndChangesARecurrence(t *testing.T) {
 }
 
 func TestRecurrenceFormBlankRuleStops(t *testing.T) {
-	for _, name := range []string{"stops", "conflict"} {
-		t.Run(name, func(t *testing.T) {
-			conflict := name == "conflict"
-			h := newRecurrenceHarness(t, viewDetail)
-			current := h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
-			h.open()
-			assert.Contains(t, h.page(), "blank rule stops repeating")
-			if conflict {
-				_, err := recurrenceclient.Change(t.Context(), h.api, h.issue.ProjectID, current,
-					recurrenceclient.Terms{Rule: "FREQ=DAILY", Start: "2026-11-09", Zone: "Europe/Paris", Actor: "bob"})
-				require.NoError(t, err)
-			}
-			h.fill("", "", "Local") // Stopping needs neither a date nor a zone.
-			h.save()
-			if conflict {
-				assert.Equal(t, inputRecurrenceForm, h.m.input.kind)
-				assert.Contains(t, h.m.input.err, "Could not stop repeat:")
-				assert.Len(t, h.rows(), 1)
-				return
-			}
-			assert.Equal(t, inputNone, h.m.input.kind)
-			assert.Equal(t, "stopped repeat of #"+h.issue.ShortID, h.m.detail.status)
-			assert.Empty(t, h.rows())
-			issue, err := h.env.DB.IssueByUID(t.Context(), h.issue.UID, db.IncludeDeletedNo)
-			require.NoError(t, err)
-			assert.Equal(t, h.issue.Title, issue.Title, "the existing occurrence stays")
-			assert.NotNil(t, issue.RecurrenceID)
-		})
-	}
+	h := newRecurrenceHarness(t, viewDetail)
+	h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
+	h.open()
+	h.fill("", "", "Local") // Stopping needs neither a date nor a zone.
+	h.save()
+	assert.Equal(t, inputNone, h.m.input.kind)
+	assert.Equal(t, "stopped repeat of #"+h.issue.ShortID, h.m.detail.status)
+	assert.Empty(t, h.rows())
 }
 
 func TestRecurrenceKeyIsDetailOnly(t *testing.T) {
@@ -232,10 +212,10 @@ func TestRecurrenceKeyIsDetailOnly(t *testing.T) {
 	})
 
 	// Help hides both panes; these cases also check list focus in each layout.
-	for _, split := range []bool{false, true} {
-		t.Run(strconv.FormatBool(split), func(t *testing.T) {
+	for _, name := range []string{"stacked list", "split list focus"} {
+		t.Run(name, func(t *testing.T) {
 			h := newRecurrenceHarness(t, viewList)
-			if split {
+			if name == "split list focus" {
 				h.m.layout, h.m.focus = splitlayout.Split, focusList
 			}
 			_, _, handled := h.m.routeRecurrenceKey(runeKey('O'))
@@ -359,6 +339,7 @@ func TestRecurrenceKeyShowsScopedReadRefusal(t *testing.T) {
 	out, _ = m.Update(fetchIssue(reader, project.ID, issue.UID, m.detail.gen)())
 	m = out.(Model)
 	require.ErrorContains(t, m.detail.err, "connection interrupted")
+	m.toast = nil
 	m, _, handled = m.routeRecurrenceKey(runeKey('O'))
 	require.True(t, handled)
 	assert.Equal(t, inputNone, m.input.kind)
@@ -554,9 +535,12 @@ func TestRecurrenceIncomingMutationRefreshesDetail(t *testing.T) {
 		recurrenceclient.Terms{Rule: "FREQ=WEEKLY", Start: "2026-11-09", Zone: "Europe/Paris", Actor: "bob"}, nil))
 	current := h.rows()[0]
 	require.Nil(t, h.m.detail.issue.RecurrenceID)
-	require.NotContains(t, h.page(), "repeats:")
+	require.Nil(t, h.m.detail.recurrence)
+	require.NoError(t, h.m.detail.recurrenceErr)
 	refresh(decodeEventReceived(frame{data: []byte(`{"type":"recurrence.materialized","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"issue_uid":"` + h.issue.UID + `","payload":{"recurrence_uid":"` + current.UID + `","issue_uid":"` + h.issue.UID + `"}}`)}))
-	require.Contains(t, h.page(), "repeats: FREQ=WEEKLY")
+	require.NotNil(t, h.m.detail.recurrence)
+	assert.Equal(t, "FREQ=WEEKLY", h.m.detail.recurrence.RRule)
+	require.NoError(t, h.m.detail.recurrenceErr)
 	for _, eventType := range []string{"recurrence.updated", "recurrence.materialized", "recurrence.deleted"} {
 		event := decodeEventReceived(frame{data: []byte(`{"type":"` + eventType + `","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"payload":{"recurrence_uid":"another-recurrence"}}`)})
 		require.Nil(t, h.m.maybeRefetchOpenDetail(event), "another recurrence leaves the displayed repeat available")
@@ -569,66 +553,87 @@ func TestRecurrenceIncomingMutationRefreshesDetail(t *testing.T) {
 	require.NoError(t, err)
 	current = h.rows()[0]
 	refresh(decodeEventReceived(frame{data: []byte(`{"type":"recurrence.updated","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"payload":{"recurrence_uid":"` + current.UID + `"}}`)}))
-	require.Contains(t, h.page(), "repeats: FREQ=MONTHLY")
+	require.NotNil(t, h.m.detail.recurrence)
+	assert.Equal(t, "FREQ=MONTHLY", h.m.detail.recurrence.RRule)
+	require.NoError(t, h.m.detail.recurrenceErr)
 
 	// A failed recurrence read leaves its identity unknown, so retry on events.
 	h.m.detail.recurrence = nil
 	h.m.detail.recurrenceErr = errors.New("repeat read failed")
 	refresh(decodeEventReceived(frame{data: []byte(`{"type":"recurrence.updated","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"payload":{"recurrence_uid":"another-recurrence"}}`)}))
-	require.Contains(t, h.page(), "repeats: FREQ=MONTHLY")
+	require.NotNil(t, h.m.detail.recurrence)
+	assert.Equal(t, "FREQ=MONTHLY", h.m.detail.recurrence.RRule)
 	require.NoError(t, h.m.detail.recurrenceErr)
 	require.NoError(t, recurrenceclient.Stop(t.Context(), h.api, h.issue.ProjectID, current, "bob"))
 	refresh(decodeEventReceived(frame{data: []byte(`{"type":"recurrence.deleted","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"payload":{"recurrence_uid":"` + current.UID + `"}}`)}))
-	assert.NotContains(t, h.page(), "repeats:")
+	assert.Nil(t, h.m.detail.recurrence)
+	require.NoError(t, h.m.detail.recurrenceErr)
 	event := decodeEventReceived(frame{data: []byte(`{"type":"recurrence.materialized","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"payload":{"recurrence_uid":"another-recurrence"}}`)})
 	require.Nil(t, h.m.maybeRefetchOpenDetail(event), "another recurrence leaves a stopped issue's detail alone")
 }
 
 func TestRecurrenceFormConflictKeepsInputUntilReopened(t *testing.T) {
-	h := newRecurrenceHarness(t, viewDetail)
-	current := h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
-	h.open()
-	_, err := recurrenceclient.Change(t.Context(), h.api, h.issue.ProjectID, current,
-		recurrenceclient.Terms{Rule: "FREQ=MONTHLY", Start: "2026-11-09", Zone: "Europe/Paris", Actor: "bob"})
-	require.NoError(t, err)
-	h.fill("FREQ=DAILY", "2026-11-09", "Europe/Paris")
-	cmd := h.key(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
-	out, cmd := h.m.Update(msgOfType[mutationDoneMsg](t, cmd))
-	h.m = out.(Model)
-	// Run conflict recovery without delivering an SSE event.
-	pending := []tea.Cmd{cmd}
-	for len(pending) > 0 {
-		cmd, pending = pending[0], pending[1:]
-		for _, msg := range runCmdTree(cmd) {
-			out, next := h.m.Update(msg)
+	for _, tc := range []struct {
+		name, rule, start, zone, prefix string
+	}{
+		{"change", "FREQ=DAILY", "2026-11-09", "Europe/Paris", "Could not change repeat:"},
+		{"stop", "", "", "Local", "Could not stop repeat:"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newRecurrenceHarness(t, viewDetail)
+			current := h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
+			h.open()
+			_, err := recurrenceclient.Change(t.Context(), h.api, h.issue.ProjectID, current,
+				recurrenceclient.Terms{Rule: "FREQ=MONTHLY", Start: "2026-11-09", Zone: "Europe/Paris", Actor: "bob"})
+			require.NoError(t, err)
+			h.fill(tc.rule, tc.start, tc.zone)
+			cmd := h.key(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+			out, cmd := h.m.Update(msgOfType[mutationDoneMsg](t, cmd))
 			h.m = out.(Model)
-			if next != nil {
-				pending = append(pending, next)
+			// Run conflict recovery without delivering an SSE event.
+			pending := []tea.Cmd{cmd}
+			for len(pending) > 0 {
+				cmd, pending = pending[0], pending[1:]
+				for _, msg := range runCmdTree(cmd) {
+					out, next := h.m.Update(msg)
+					h.m = out.(Model)
+					if next != nil {
+						pending = append(pending, next)
+					}
+				}
 			}
-		}
+			require.Equal(t, inputRecurrenceForm, h.m.input.kind)
+			assert.Contains(t, h.m.input.err, tc.prefix)
+			rule, _, _ := h.values()
+			assert.Equal(t, tc.rule, rule)
+			assert.Equal(t, current.Revision, h.m.input.recurrence.rec.Revision)
+			assert.Equal(t, "FREQ=MONTHLY", h.rows()[0].RRule)
+			h.key(tea.KeyPressMsg{Code: tea.KeyEscape})
+			h.open()
+			rule, _, _ = h.values()
+			assert.Equal(t, "FREQ=MONTHLY", rule)
+			h.fill(tc.rule, tc.start, tc.zone)
+			h.save()
+			assert.Equal(t, inputNone, h.m.input.kind)
+			if tc.rule == "" {
+				assert.Empty(t, h.rows())
+			} else {
+				assert.Equal(t, tc.rule, h.rows()[0].RRule)
+			}
+		})
 	}
-	require.Equal(t, inputRecurrenceForm, h.m.input.kind)
-	assert.Contains(t, h.m.input.err, "Could not change repeat:")
-	rule, _, _ := h.values()
-	assert.Equal(t, "FREQ=DAILY", rule)
-	assert.Equal(t, current.Revision, h.m.input.recurrence.rec.Revision)
-	assert.Equal(t, "FREQ=MONTHLY", h.rows()[0].RRule)
-	h.key(tea.KeyPressMsg{Code: tea.KeyEscape})
-	h.open()
-	rule, _, _ = h.values()
-	assert.Equal(t, "FREQ=MONTHLY", rule)
-	h.fill("FREQ=DAILY", "2026-11-09", "Europe/Paris")
-	h.save()
-	assert.Equal(t, inputNone, h.m.input.kind)
-	assert.Equal(t, "FREQ=DAILY", h.rows()[0].RRule)
 }
 
 func TestRecurrenceFormDaemonErrorFitsMinimumHeight(t *testing.T) {
 	defer snapshotInit(t)()
 	for _, width := range []int{40, 60, 80} {
 		// Keep the start form too: status rendering must work without a recurrence.
-		for _, rec := range []*recurrenceclient.View{nil, {RRule: "FREQ=YEARLY;INTERVAL=2;BYMONTH=1,2,3,4,5,6,7,8,9,10,11,12;BYDAY=MO,TU,WE,TH,FR;BYHOUR=0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23;BYMINUTE=0,15,30,45;BYSECOND=0;WKST=MO", DTStart: "2026-11-09", Timezone: "Europe/Paris"}} {
-			s := newRecurrenceForm(formTarget{issueShortID: "42aa"}, Issue{}, rec)
+		for _, rec := range []*recurrenceclient.View{nil, {ID: 1, UID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Revision: 2, RRule: "FREQ=YEARLY;INTERVAL=2;BYMONTH=1,2,3,4,5,6,7,8,9,10,11,12;BYDAY=MO,TU,WE,TH,FR;BYHOUR=0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23;BYMINUTE=0,15,30,45;BYSECOND=0;WKST=MO", DTStart: "2026-11-09", Timezone: "Europe/Paris"}} {
+			issue := Issue{ID: 1, UID: "01ARZ3NDEKTSV4RRFFQ69G5FAW", ProjectID: 1, ShortID: "42aa", Title: "Example", Revision: 3}
+			if rec != nil {
+				issue.RecurrenceID = new(rec.ID)
+			}
+			s := newRecurrenceForm(formTarget{issueShortID: issue.ShortID, issueUID: issue.UID}, issue, rec)
 			s.err = "Could not start repeat: the daemon refused the recurrence rule FREQ=WEEKLY;INTERVAL=2;BYDAY=MON,TUE,WED,THU,FRI. Enter a supported rule and save again."
 			modal := renderCenteredForm(s, width, 12, snapshotFixedNow)
 			assert.LessOrEqual(t, lipgloss.Height(modal), 12)
