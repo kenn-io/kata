@@ -1,7 +1,7 @@
 ---
 title: HTTP API schema
 description: Generate clients and inspect Kata's versioned OpenAPI schema, compatibility rules, and authentication.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 # HTTP API schema
@@ -679,8 +679,9 @@ endpoints published in OpenAPI:
   selected detail/history/graph projection, capability envelope, durable event
   cursor, and strong ETag.
 - `GET /api/v1/ui/references` returns bounded projects, owners, labels, and
-  qualified issue references for pickers and typeahead. Repeating `issue_uid`
-  hydrates summaries for up to 200 stable issue UIDs and composes with the
+  qualified issue references for pickers and typeahead. A `q` search returns
+  only issue references, with empty projects, owners, and labels. Repeating
+  `issue_uid` hydrates summaries for up to 200 stable issue UIDs and composes with the
   existing project and text filters.
 - `GET /api/v1/ui/launch-target?issue_uid=<uid>` validates one active issue and
   returns a safe absolute route into the standalone browser application:

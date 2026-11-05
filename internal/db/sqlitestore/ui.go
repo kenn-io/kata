@@ -277,19 +277,20 @@ func (d *Store) ReadUIReferences(ctx context.Context, query db.UIReferencesQuery
 		limit = 500
 	}
 
-	projects, _, err := readUIProjects(ctx, tx, d.uiProjectStatsRead)
-	if err != nil {
-		return db.UIReferencesData{}, err
-	}
 	data := db.UIReferencesData{
-		Projects: make([]db.Project, 0, min(limit, len(projects))),
-		Issues:   []db.UIIssueReference{}, Owners: []string{}, Labels: []string{},
+		Projects: []db.Project{}, Issues: []db.UIIssueReference{}, Owners: []string{}, Labels: []string{},
 	}
-	for _, project := range projects {
-		if len(data.Projects) == limit {
-			break
+	if query.Query == "" {
+		projects, _, err := readUIProjectRows(ctx, tx)
+		if err != nil {
+			return db.UIReferencesData{}, err
 		}
-		data.Projects = append(data.Projects, project.Project)
+		for _, project := range projects {
+			if len(data.Projects) == limit {
+				break
+			}
+			data.Projects = append(data.Projects, project.Project)
+		}
 	}
 	if d.uiReadStage != nil {
 		if err := d.uiReadStage(ctx); err != nil {
@@ -300,35 +301,37 @@ func (d *Store) ReadUIReferences(ctx context.Context, query db.UIReferencesQuery
 	if err != nil {
 		return db.UIReferencesData{}, err
 	}
-	ownerStatement := `
-		SELECT i.owner, MIN(i.id)
-		FROM issues i JOIN projects p ON p.id = i.project_id
-		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ? AND i.owner IS NOT NULL AND i.owner <> ''
-	`
-	ownerArgs := []any{db.SystemProjectName}
-	ownerStatement, ownerArgs = appendUIReferenceIssueScopeSQLite(ownerStatement, ownerArgs, query.AllowedIssueIDs)
-	ownerStatement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &ownerArgs)
-	ownerStatement += ` GROUP BY i.owner ORDER BY i.owner LIMIT ?`
-	ownerArgs = append(ownerArgs, limit)
-	data.Owners, err = readUIReferenceSuggestions(ctx, tx, ownerStatement, ownerArgs...)
-	if err != nil {
-		return db.UIReferencesData{}, err
-	}
-	labelStatement := `
-		SELECT il.label, MIN(i.id)
-		FROM issue_labels il
-		JOIN issues i ON i.id = il.issue_id
-		JOIN projects p ON p.id = i.project_id
-		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?
-	`
-	labelArgs := []any{db.SystemProjectName}
-	labelStatement, labelArgs = appendUIReferenceIssueScopeSQLite(labelStatement, labelArgs, query.AllowedIssueIDs)
-	labelStatement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &labelArgs)
-	labelStatement += ` GROUP BY il.label ORDER BY il.label LIMIT ?`
-	labelArgs = append(labelArgs, limit)
-	data.Labels, err = readUIReferenceSuggestions(ctx, tx, labelStatement, labelArgs...)
-	if err != nil {
-		return db.UIReferencesData{}, err
+	if query.Query == "" {
+		ownerStatement := `
+			SELECT i.owner, MIN(i.id)
+			FROM issues i JOIN projects p ON p.id = i.project_id
+			WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ? AND i.owner IS NOT NULL AND i.owner <> ''
+		`
+		ownerArgs := []any{db.SystemProjectName}
+		ownerStatement, ownerArgs = appendUIReferenceIssueScopeSQLite(ownerStatement, ownerArgs, query.AllowedIssueIDs)
+		ownerStatement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &ownerArgs)
+		ownerStatement += ` GROUP BY i.owner ORDER BY i.owner LIMIT ?`
+		ownerArgs = append(ownerArgs, limit)
+		data.Owners, err = readUIReferenceSuggestions(ctx, tx, ownerStatement, ownerArgs...)
+		if err != nil {
+			return db.UIReferencesData{}, err
+		}
+		labelStatement := `
+			SELECT il.label, MIN(i.id)
+			FROM issue_labels il
+			JOIN issues i ON i.id = il.issue_id
+			JOIN projects p ON p.id = i.project_id
+			WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?
+		`
+		labelArgs := []any{db.SystemProjectName}
+		labelStatement, labelArgs = appendUIReferenceIssueScopeSQLite(labelStatement, labelArgs, query.AllowedIssueIDs)
+		labelStatement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &labelArgs)
+		labelStatement += ` GROUP BY il.label ORDER BY il.label LIMIT ?`
+		labelArgs = append(labelArgs, limit)
+		data.Labels, err = readUIReferenceSuggestions(ctx, tx, labelStatement, labelArgs...)
+		if err != nil {
+			return db.UIReferencesData{}, err
+		}
 	}
 	data.Cursor, err = maxUIEventID(ctx, tx)
 	if err != nil {
@@ -373,6 +376,24 @@ func maxUIEventID(ctx context.Context, queryer uiQueryer) (int64, error) {
 func readUIProjects(
 	ctx context.Context, tx *sql.Tx, onStatsRead func(),
 ) ([]db.UIProject, map[int64]string, error) {
+	projects, projectNames, err := readUIProjectRows(ctx, tx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if onStatsRead != nil {
+		onStatsRead()
+	}
+	stats, err := readUIProjectStats(ctx, tx)
+	if err != nil {
+		return nil, nil, err
+	}
+	for idx := range projects {
+		projects[idx].Stats = stats[projects[idx].Project.ID]
+	}
+	return projects, projectNames, nil
+}
+
+func readUIProjectRows(ctx context.Context, tx *sql.Tx) ([]db.UIProject, map[int64]string, error) {
 	args := []any{db.SystemProjectName}
 	statement := projectSelect + ` WHERE deleted_at IS NULL AND name <> ?`
 	// #nosec G202 -- Authorization predicates use fixed SQL identifiers and generated placeholders; all identities remain bound values.
@@ -397,16 +418,6 @@ func readUIProjects(
 	}
 	if err := rows.Close(); err != nil {
 		return nil, nil, fmt.Errorf("close UI projects: %w", err)
-	}
-	if onStatsRead != nil {
-		onStatsRead()
-	}
-	stats, err := readUIProjectStats(ctx, tx)
-	if err != nil {
-		return nil, nil, err
-	}
-	for idx := range projects {
-		projects[idx].Stats = stats[projects[idx].Project.ID]
 	}
 	return projects, projectNames, nil
 }
