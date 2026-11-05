@@ -23,7 +23,7 @@ func TestReadyPriorityUsesOrderedIndexes(t *testing.T) {
 	_, err = store.ExecContext(ctx, `WITH RECURSIVE numbers(n) AS (
 	 SELECT 1 UNION ALL SELECT n+1 FROM numbers WHERE n < 1002
 	) INSERT INTO issues(uid, project_id, short_id, title, author, priority, owner, updated_at)
-SELECT printf('%026d', n), CASE WHEN n <= 1000 THEN ? ELSE ? END, printf('%06d', n), 'Ready issue', 'author', n % 5, CASE WHEN n % 3 = 0 THEN NULL ELSE 'other' END, strftime('%Y-%m-%dT%H:%M:%fZ', '2026-01-01', printf('+%d seconds', n)) FROM numbers`, project.ID, other.ID)
+SELECT printf('%026d', n), CASE WHEN n <= 1000 THEN ? ELSE ? END, printf('%06d', n), 'Ready issue', 'author', n % 5, CASE WHEN n % 3 = 0 AND n < 1002 THEN NULL ELSE 'other' END, strftime('%Y-%m-%dT%H:%M:%fZ', '2026-01-01', printf('+%d seconds', n)) FROM numbers`, project.ID, other.ID)
 	require.NoError(t, err)
 	for _, scope := range []string{"project", "global"} {
 		t.Run(scope, func(t *testing.T) {
@@ -35,7 +35,7 @@ SELECT printf('%026d', n), CASE WHEN n <= 1000 THEN ? ELSE ? END, printf('%06d',
 				{name: "all", filter: db.ReadyIssuesFilter{PriorityFirst: true}, wantID: 1000},
 				{name: "unowned", filter: db.ReadyIssuesFilter{PriorityFirst: true, Unowned: true}, wantID: 990},
 				{name: "updated", wantID: 1002},
-				{name: "updated-unowned", filter: db.ReadyIssuesFilter{Unowned: true}, wantID: 1002},
+				{name: "updated-unowned", filter: db.ReadyIssuesFilter{Unowned: true}, wantID: 999},
 			} {
 				if scope == "project" && !tc.filter.PriorityFirst {
 					continue
