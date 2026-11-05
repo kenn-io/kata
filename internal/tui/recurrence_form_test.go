@@ -571,3 +571,31 @@ func TestRecurrenceFormDaemonErrorFitsMinimumHeight(t *testing.T) {
 		}
 	}
 }
+
+func TestRecurrenceFormRejectedLongRuleFitsMinimumHeight(t *testing.T) {
+	defer snapshotInit(t)()
+	h := newRecurrenceHarness(t, viewDetail)
+	h.startBehindTheTUI("FREQ=WEEKLY", "2026-11-09", "Europe/Paris")
+	h.open()
+	h.fill("FREQ=DAILY;BYDAY=MO;BYMONTH=1,2,3,4,5;BAD=1", "2026-11-09", "Europe/Paris")
+	// Match the cursor position after typing the rule.
+	h.key(tea.KeyPressMsg{Code: tea.KeyEnd})
+	h.save()
+	require.Contains(t, h.m.input.err, "unknown RRULE property: BAD")
+
+	for _, width := range []int{80, 40} {
+		t.Run(strconv.Itoa(width), func(t *testing.T) {
+			modal := renderCenteredForm(h.m.input, width, 12, snapshotFixedNow)
+			assert.LessOrEqual(t, lipgloss.Height(modal), 12)
+			assert.LessOrEqual(t, lipgloss.Width(modal), width)
+			lines := strings.Split(stripANSI(modal), "\n")
+			for i := range lines {
+				lines[i] = strings.Trim(lines[i], "│ ")
+			}
+			got := strings.Join(lines, " ")
+			for _, want := range []string{"Rule", "Start", "Zone", "Could not change repeat", "unknown RRULE property: BAD", "ctrl+o save", "esc"} {
+				assert.Contains(t, got, want)
+			}
+		})
+	}
+}

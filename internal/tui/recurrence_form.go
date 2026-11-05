@@ -191,6 +191,9 @@ func renderRecurrenceForm(s inputState, innerW, height int, now time.Time) strin
 	if status := renderFormStatus(s); status != "" {
 		rows := max(height-lipgloss.Height(box.Render(strings.Join(append(parts, footer), "\n"))), 0)
 		lines := termtext.Wrap(status, innerW)
+		if rows > 1 && len(lines) > rows {
+			lines = append(lines[:1], lines[len(lines)-rows+1:]...)
+		}
 		parts = append(parts, lines[:min(len(lines), rows)]...)
 	}
 	parts = append(parts, footer)
