@@ -278,8 +278,8 @@ type PendingClaimOut struct {
 }
 
 // ProjectStatsOut is the per-project aggregate returned by GET
-// /api/v1/projects?include=stats. LastEventAt is nil for a project with
-// zero events. Spec §7.2.
+// /api/v1/projects?include=stats. LastEventAt is the created_at of the project's
+// newest event by id, or nil for zero events. Spec §7.2.
 type ProjectStatsOut struct {
 	Open        int        `json:"open"`
 	Closed      int        `json:"closed"`

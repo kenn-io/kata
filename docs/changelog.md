@@ -9,6 +9,7 @@ All notable changes to kata, grouped by release. Versioned releases start with
 
 ## Unreleased
 
+- Load project stats in milliseconds on large stores in the TUI Projects screen, `kata --agent projects list`, and `?include=stats`. "Updated" follows the newest recorded event, as the web UI does; a reconnecting spoke's older relayed events can show an older time until the next local event.
 - Complete SQLite federation pushes and pulls after slow snapshot preparation
   instead of exhausting contention retries before the writer-held fallback.
 - Speed up label loading for list and ready responses and label filters in semantic or hybrid search on large SQLite stores.
