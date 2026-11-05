@@ -3,6 +3,7 @@ package issuesync
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -312,39 +313,64 @@ func (s *failureStore) ImportBatch(ctx context.Context, p db.ImportBatchParams) 
 }
 
 func TestRunnerDefaultChunksBoundWriterHold(t *testing.T) {
-	s := testStore(t)
-	b := testBinding(t, s, "example-project", "synthetic")
-	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	a := &testAdapter{prepare: func(_ context.Context, binding db.IssueSyncBinding, _ time.Time) (Prepared, error) {
-		p := testPrepared(binding, at)
-		p.Batch.Items = nil
-		for i := range 201 {
-			p.Batch.Items = append(p.Batch.Items, db.ImportItem{ExternalID: fmt.Sprintf("item-%d", i), Title: "task", Author: "author", Status: "open", CreatedAt: at, UpdatedAt: at})
-		}
-		return p, nil
-	}}
-	var sizes []int
-	var native db.Issue
-	store := &failureStore{Storage: s, afterImport: func(ctx context.Context, p db.ImportBatchParams) {
-		sizes = append(sizes, len(p.Items))
-		if len(sizes) == 1 {
+	synctest.Test(t, func(t *testing.T) {
+		s := testStore(t)
+		b := testBinding(t, s, "example-project", "synthetic")
+		at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+		blocked := make(chan *sql.Tx, 1)
+		a := &testAdapter{prepare: func(ctx context.Context, binding db.IssueSyncBinding, _ time.Time) (Prepared, error) {
+			p := testPrepared(binding, at)
+			p.Batch.Items = nil
+			for i := range 201 {
+				p.Batch.Items = append(p.Batch.Items, db.ImportItem{ExternalID: fmt.Sprintf("item-%d", i), Title: "task", Author: "author", Status: "open", CreatedAt: at, UpdatedAt: at})
+			}
+			tx, err := s.BeginTx(ctx, nil)
+			if err != nil {
+				return Prepared{}, err
+			}
+			blocked <- tx
+			return p, nil
+		}}
+		var sizes []int
+		store := &failureStore{Storage: s, afterImport: func(_ context.Context, p db.ImportBatchParams) {
+			sizes = append(sizes, len(p.Items))
+		}}
+		r := NewRunner(RunnerConfig{Store: store, Adapter: a, Clock: func() time.Time { return at }})
+		var result RunResult
+		synced := make(chan error, 1)
+		go func() {
 			var err error
-			native, _, err = s.CreateIssue(ctx, db.CreateIssueParams{ProjectID: b.ProjectID, Title: "native task", Author: "author"})
-			require.NoError(t, err)
-			issues, err := s.ListIssues(ctx, db.ListIssuesParams{ProjectID: b.ProjectID})
-			require.NoError(t, err)
-			require.Less(t, len(issues), 202, "native create must commit before the sync imports every issue")
-		}
-	}}
-	r := NewRunner(RunnerConfig{Store: store, Adapter: a, Clock: func() time.Time { return at }})
-	result, err := r.RunOnce(t.Context(), b.ID)
-	require.NoError(t, err)
-	require.Equal(t, []int{200, 1}, sizes)
-	require.Equal(t, 201, result.Import.Created)
-	issues, err := s.ListIssues(t.Context(), db.ListIssuesParams{ProjectID: b.ProjectID})
-	require.NoError(t, err)
-	require.Len(t, issues, 202)
-	require.Contains(t, issues, native)
+			result, err = r.RunOnce(t.Context(), b.ID)
+			synced <- err
+		}()
+		tx := receive(t, blocked)
+		defer func() { _ = tx.Rollback() }()
+		// Queue the first chunk, then the user write, behind the held writer.
+		synctest.Wait()
+		var native db.Issue
+		created := make(chan error, 1)
+		go func() {
+			var err error
+			native, _, err = s.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: b.ProjectID, Title: "native task", Author: "author"})
+			created <- err
+		}()
+		synctest.Wait()
+		require.NoError(t, tx.Rollback())
+		require.NoError(t, receive(t, created))
+		require.NoError(t, receive(t, synced))
+		require.Equal(t, []int{200, 1}, sizes)
+		require.Equal(t, 201, result.Import.Created)
+		first, err := s.ImportMappingBySource(t.Context(), b.ProjectID, b.SourceKey, "issue", "item-0")
+		require.NoError(t, err)
+		last, err := s.ImportMappingBySource(t.Context(), b.ProjectID, b.SourceKey, "issue", "item-200")
+		require.NoError(t, err)
+		require.Greater(t, native.ID, *first.IssueID)
+		require.Less(t, native.ID, *last.IssueID, "queued native create must commit before the last sync chunk")
+		issues, err := s.ListIssues(t.Context(), db.ListIssuesParams{ProjectID: b.ProjectID})
+		require.NoError(t, err)
+		require.Len(t, issues, 202)
+		require.Contains(t, issues, native)
+	})
 }
 
 // A bounded finalizer must observe both the binding deadline and parent cancellation.
