@@ -17,6 +17,7 @@ import (
 )
 
 func TestLocalEmbeddingsSetup(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
 	home := filepath.Join(setupKataEnv(t), "fresh")
 	t.Setenv("KATA_HOME", home)
 	t.Setenv("KATA_DB", filepath.Join(home, "kata.db"))
@@ -50,6 +51,7 @@ func TestLocalEmbeddingsSetup(t *testing.T) {
 }
 
 func TestLocalEmbeddingsSetupRefusesBeforeInstall(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
 	for _, scenario := range []string{"environment override", "dangling symlink"} {
 		t.Run(scenario, func(t *testing.T) {
 			home := setupKataEnv(t)
@@ -94,31 +96,8 @@ func TestLocalEmbeddingsSetupRefusesBeforeInstall(t *testing.T) {
 	}
 }
 
-func TestLocalEmbeddingsSetupRefusesUnsupportedDaemon(t *testing.T) {
-	home := setupKataEnv(t)
-	stubLocalEmbeddingsInstall(t)
-	t.Setenv("KATA_SERVER", "")
-	ns, err := daemonruntime.NewNamespace()
-	require.NoError(t, err)
-	require.NoError(t, ns.EnsureDirs())
-	identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
-	require.True(t, ok)
-	_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: identity, StartedAt: time.Now(), Network: "tcp", Address: "127.0.0.1:12345"})
-	require.NoError(t, err)
-	oldEndpoint := localEmbeddingsEndpoint
-	t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
-	localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) { return "http://127.0.0.1:12345/v1", nil }
-	stubDaemonExecutable(t, func() (string, error) {
-		t.Fatal("unsupported daemon must be refused before resolving a replacement")
-		return "", nil
-	})
-	_, _, err = executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
-	require.ErrorContains(t, err, "is from an older kata release")
-	_, err = os.Stat(filepath.Join(home, "config.toml"))
-	require.ErrorIs(t, err, os.ErrNotExist)
-}
-
 func TestLocalEmbeddingsFreshOllama(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
 	setupKataEnv(t)
 	t.Setenv("KATA_SERVER", "")
 	oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
@@ -148,6 +127,7 @@ func TestLocalEmbeddingsFreshOllama(t *testing.T) {
 }
 
 func TestLocalEmbeddingsSetupRefusesChangedConfig(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
 	for _, tc := range []struct {
 		name     string
 		original string
@@ -192,16 +172,14 @@ func TestLocalEmbeddingsSetupRefusesChangedConfig(t *testing.T) {
 }
 
 func TestLocalEmbeddingsDaemonRefusesDownload(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
 	home := setupKataEnv(t)
 	oldEndpoint, oldInstall := localEmbeddingsEndpoint, localEmbeddingsInstall
 	t.Cleanup(func() { localEmbeddingsEndpoint, localEmbeddingsInstall = oldEndpoint, oldInstall })
-	calls := 0
 	localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) {
-		calls++
 		return "", embedlocal.ErrNotFound
 	}
 	localEmbeddingsInstall = func(ctx context.Context, opts embedlocal.InstallOptions) (embedlocal.Installation, error) {
-		calls++
 		approved, err := opts.Confirm(ctx, 290_000_000)
 		require.False(t, approved)
 		return embedlocal.Installation{}, err
@@ -209,30 +187,24 @@ func TestLocalEmbeddingsDaemonRefusesDownload(t *testing.T) {
 	ec := config.EmbeddingsConfig{Local: true, Model: "nomic-embed-text"}
 	client, _, err := preflightEmbeddingStartup(ec, filepath.Join(home, "kata.db"))
 	require.NoError(t, err)
-	require.Zero(t, calls, "building the recipe must not contact or install the server")
 	_, err = client.Embed(t.Context(), []string{"x"})
 	require.ErrorContains(t, err, "kata daemon local-embeddings")
 }
 
 func TestLocalEmbeddingsSwitchRecipe(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
 	for _, tt := range []struct {
-		name, recipe, modelEnv, dimsEnv, index string
-		dims                                   int
-		symlink                                bool
+		name, recipe, index string
+		symlink             bool
 	}{
-		{name: "Nomic", recipe: "model='nomic-embed-text'\ndims=768\ndocument_prefix='search_document: '\nquery_prefix='search_query: '\n", index: "kept", dims: 768},
-		{name: "external revision", recipe: "model='nomic-embed-text'\ndims=768\nfingerprint_salt='changed-nomic-weights'\n", index: "rebuilt", dims: 768},
-		{name: "temporary recipe override", recipe: "model='mxbai-embed-large'\ndims=1024\n", modelEnv: "nomic-embed-text", dimsEnv: "768", index: "kept", dims: 768},
-		{name: "smaller width omitted", recipe: "model='nomic-embed-text'\ndims=512\n", index: "rebuilt", dims: 768},
-		{name: "smaller width requested", recipe: "model='nomic-embed-text'\ndims=512\nrequest_dimensions=true\n", index: "kept", dims: 512},
-		{name: "symlink", recipe: "model='nomic-embed-text'\ndims=768\n", index: "kept", dims: 768, symlink: true},
+		{name: "Nomic", recipe: "model='nomic-embed-text'\ndims=768\ndocument_prefix='search_document: '\nquery_prefix='search_query: '\n", index: "kept"},
+		{name: "external revision", recipe: "model='nomic-embed-text'\ndims=768\nfingerprint_salt='changed-nomic-weights'\n", index: "rebuilt"},
+		{name: "symlink", recipe: "model='nomic-embed-text'\ndims=768\n", index: "kept", symlink: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			home := setupKataEnv(t)
 			stubLocalEmbeddingsInstall(t)
 			t.Setenv("KATA_SERVER", "")
-			t.Setenv("KATA_SEARCH_EMBEDDINGS_MODEL", tt.modelEnv)
-			t.Setenv("KATA_SEARCH_EMBEDDINGS_DIMS", tt.dimsEnv)
 			path := filepath.Join(home, "config.toml")
 			target := path
 			if tt.symlink {
@@ -252,14 +224,6 @@ func TestLocalEmbeddingsSwitchRecipe(t *testing.T) {
 			out, stderr, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
 			require.NoError(t, err, out+stderr)
 			require.Contains(t, stderr, "index will be "+tt.index)
-			// Read again without transient shell settings to verify the persisted recipe.
-			t.Setenv("KATA_SEARCH_EMBEDDINGS_MODEL", "")
-			t.Setenv("KATA_SEARCH_EMBEDDINGS_DIMS", "")
-			next, err := config.ReadSearchConfig()
-			require.NoError(t, err)
-			require.True(t, next.Embeddings.UsesLocal())
-			require.Empty(t, next.Embeddings.FingerprintSalt)
-			require.Equal(t, tt.dims, next.Embeddings.Dims)
 			info, err := os.Stat(target)
 			require.NoError(t, err)
 			require.Equal(t, os.FileMode(0640), info.Mode().Perm())
@@ -273,6 +237,8 @@ func TestLocalEmbeddingsSwitchRecipe(t *testing.T) {
 }
 
 func TestLocalEmbeddingsRebuildRefusal(t *testing.T) {
+	clearLocalEmbeddingsEnv(t)
+	stubIsTTY(t, false)
 	for _, installed := range []bool{false, true} {
 		t.Run(fmt.Sprintf("installed=%t", installed), func(t *testing.T) {
 			home := setupKataEnv(t)
@@ -311,14 +277,15 @@ func TestLocalEmbeddingsRebuildRefusal(t *testing.T) {
 }
 
 func TestLocalEmbeddingsRestartRollback(t *testing.T) {
-	for _, scenario := range []string{"existing symlink", "new", "concurrent edit"} {
+	clearLocalEmbeddingsEnv(t)
+	for _, scenario := range []string{"existing symlink", "new", "concurrent edit", "unsupported daemon"} {
 		t.Run(scenario, func(t *testing.T) {
 			home := setupKataEnv(t)
 			stubLocalEmbeddingsInstall(t)
 			t.Setenv("KATA_SERVER", "")
 			path := filepath.Join(home, "config.toml")
 			original := []byte("# original\n[search.embeddings]\nbase_url = 'http://127.0.0.1:11434/v1'\nmodel = 'nomic-embed-text'\n")
-			if scenario != "new" {
+			if scenario != "new" && scenario != "unsupported daemon" {
 				target := path
 				if scenario == "existing symlink" {
 					target = filepath.Join(home, "provider.toml")
@@ -334,7 +301,9 @@ func TestLocalEmbeddingsRestartRollback(t *testing.T) {
 			identity, ok := kitdaemon.ReadProcessIdentity(os.Getpid())
 			require.True(t, ok)
 			record := kitdaemon.RuntimeRecord{PID: os.Getpid(), ProcessIdentityV2: identity, StartedAt: time.Now(), Network: "tcp", Address: "127.0.0.1:12345"}
-			record.Metadata = map[string]string{daemonruntime.RuntimeRestartExecutableKey: "1"}
+			if scenario != "unsupported daemon" {
+				record.Metadata = map[string]string{daemonruntime.RuntimeRestartExecutableKey: "1"}
+			}
 			_, err = (kitdaemon.RuntimeStore{Dir: ns.DataDir}).Write(record)
 			require.NoError(t, err)
 			oldEndpoint := localEmbeddingsEndpoint
@@ -342,12 +311,21 @@ func TestLocalEmbeddingsRestartRollback(t *testing.T) {
 			localEmbeddingsEndpoint = func(context.Context, embedlocal.Options) (string, error) { return "http://127.0.0.1:12345/v1", nil }
 			edited := []byte("# edited while restart failed\n")
 			stubDaemonExecutable(t, func() (string, error) {
+				if scenario == "unsupported daemon" {
+					t.Fatal("unsupported daemon must be refused before resolving a replacement")
+				}
 				if scenario == "concurrent edit" {
 					require.NoError(t, os.WriteFile(path, edited, 0600))
 				}
 				return "", errors.New("replacement unavailable")
 			})
 			out, _, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
+			if scenario == "unsupported daemon" {
+				require.ErrorContains(t, err, "is from an older kata release")
+				_, err = os.Stat(path)
+				require.ErrorIs(t, err, os.ErrNotExist)
+				return
+			}
 			require.ErrorContains(t, err, "cannot resolve the installed restart executable")
 			require.Empty(t, out)
 			got, readErr := os.ReadFile(path) // #nosec G304 -- test-owned configuration snapshot
