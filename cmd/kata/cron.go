@@ -121,7 +121,7 @@ func newCronOperationCmd(resource, action string) *cobra.Command {
 	}
 	if action == "validate" {
 		command.Flags().StringVar(&options.file, "file", "", "JSON request body file, or - for stdin")
-		command.Flags().StringVar(&options.identity, "uid", "", "optional retained definition ULID to preflight a replacement")
+		command.Flags().StringVar(&options.identity, "uid", "", "existing definition ULID (optional)")
 		command.Flags().StringVar(&options.expectedEventUID, "expected-event-uid", "", "current definition event UID; must match the request body if present")
 		if resource == "job" {
 			command.Flags().StringVar(&options.parent, "parent", "", "parent issue ref for a per-run job (stores the full UID)")
