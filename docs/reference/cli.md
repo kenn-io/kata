@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-03
+last_edited: 2026-11-04
 ---
 
 # CLI reference
@@ -2018,7 +2018,8 @@ requires evidence.
 There is no redo; repeat the action manually if you undo by mistake. Issue edits
 run one at a time; quick successive edits wait for the current edit to finish.
 
-Creating an issue or comment, making a timed assignment or owner edit involving
+Creating an issue or comment, moving an issue to another project, making a
+timed assignment or owner edit involving
 an expiry, changing the status of a recurring issue, closing an issue with a
 live federation lease, or reopening an issue closed for a reason other than
 `done` clears the undo history. Switching daemons also clears it.
@@ -2058,6 +2059,40 @@ since the form opened, nothing is written; the form stays open and shows the
 current dates so you can edit them again. The detail properties show both
 dates once either is set, and `u` writes the previous dates back under the
 same revision check.
+
+In the issue list, press `M` to move the selected issue to another project. In
+split layout, focus the list first. In Inbox and while browsing from Attention,
+use `kata move` instead; the detail view does not offer the key, because a
+detail, its Back history and those return contexts keep their own copies of the
+issue:
+
+1. A picker lists the daemon's projects except the issue's own, the Inbox
+   project, and archived ones. Typing filters by name or by the text beside it.
+   Projects that share a name are told apart by their area, or by their UID when
+   another of them has the same area or they have none.
+2. `Enter` on a project sends a dry run, so nothing is written, and shows what
+   kata would do: the issue's active descendants, listed one per line (a long
+   list is cut off with "… and N more"), or a note that the issue has no
+   descendants and moves alone. If the daemon
+   refuses, such as for a recurrence-pinned issue or an archived or federated
+   project, the form shows its refusal in its own words. `Esc` returns to the
+   picker.
+3. A second `Enter` moves, guarded by `If-Match` on the revision the preview
+   read; [Issue lifecycle](#issue-lifecycle) says what advances it. If the
+   revision changed since the preview, nothing is moved and the form previews
+   again at the current one.
+4. After a move the moved issue and its descendants leave the list (the next
+   refresh lists them again where the scope shows their new project), the
+   selection goes to the next row (the previous one after the last), and a
+   notice names the issue's new `project#id`. A split detail pane resets only
+   when it shows a moved issue, a child of one, or has one in its Back history;
+   a pane on another issue keeps it and its Back history.
+
+A preview needs daemon API 0.35.0 or newer, because older daemons move only the
+selected issue; the form says so instead of previewing. A move clears the undo
+history, because the issue's project-qualified reference changes and its short
+id can too. Issue-scoped credentials cannot move, so `M`
+is not offered to them and does nothing.
 
 In the issue list, press `X` to soft-delete the selected issue. In split
 layout, focus the list first. In Inbox and while browsing from Attention, use

@@ -43,7 +43,9 @@ type viewChrome struct {
 	daemon        string           // active daemon display label
 	modal         modalKind        // active confirmation; takes footer precedence
 	undoAvailable bool             // session history has an eligible action
-	deleteHidden  bool             // the connected credentials cannot delete
+	moveStep      moveStep         // the Move form step, for its footer
+	listOpsHidden bool             // delete and move are not on offer (credentials or saved context)
+	moveHidden    bool             // move is also waiting on an undo or reopen lookup
 }
 
 // View renders the list under the M3.5 chrome layer:
@@ -100,6 +102,17 @@ func (lm listModel) ViewBody(width, bodyRows int, chrome viewChrome) string {
 // listMinHeight is the smallest height for the full list chrome.
 // Below this we keep the title and search but omit the footer.
 const listMinHeight = 10
+
+// tooNarrowWidth is the width below which the TUI draws only its too-narrow
+// screen.
+const tooNarrowWidth = 80
+
+// footerDrawn reports whether the footer key table is on screen: the
+// too-narrow screen has none, and the list drops it in short terminals. Forms
+// that would otherwise rely on the footer to name their keys ask it.
+func footerDrawn(width, height int) bool {
+	return width >= tooNarrowWidth && height >= listMinHeight
+}
 
 // listBodyFloor is the smallest row count the table body will ever
 // render. Keeps a usable list visible even when the chrome math is

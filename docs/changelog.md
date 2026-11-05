@@ -28,6 +28,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
   search cost follows the number of matching comments.
   Existing stores upgrade to schema 41 through SQLite's JSONL cutover or the
   [offline PostgreSQL migration](development/postgres-migrations.md#schema-41-separate-comment-search-documents).
+- Move an issue to another project from `kata tui` with `M` on the selected row
+  of the issue list, after a dry-run preview of the subtree that would move.
+  Daemon API `0.35.0` or newer is required. See the
+  [CLI reference](reference/cli.md#daemon-and-diagnostics).
 
 - Load the web UI's issue list and graph on SQLite and PostgreSQL stores with
   tens of thousands of issues without exceeding SQL parameter limits.

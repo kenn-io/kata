@@ -291,7 +291,7 @@ func TestFooterHelpTableParity(t *testing.T) {
 	oldMode, oldDark := activeColorMode, activeHasDarkBackground
 	defer func() { applyColorMode(oldMode, oldDark) }()
 
-	listRows := (listModel{issues: hierarchyIssues()}).queueHelpRows(false)
+	listRows := (listModel{issues: hierarchyIssues()}).queueHelpRows(false, false)
 	detailRows := hierarchyDetailModel(focusChildren).detailHelpRows()
 	cases := []struct {
 		name       string
@@ -308,7 +308,7 @@ func TestFooterHelpTableParity(t *testing.T) {
 			mode:       colorLight,
 			width:      80,
 			innerWidth: 78,
-			rows:       modalHelpRows(modalQuitConfirm),
+			rows:       modalHelpRows(modalQuitConfirm, movePicking),
 			want:       "\x1b[48;5;253m \x1b[m\x1b[38;5;242;48;5;253m\x1b[38;5;242my\x1b[m \x1b[38;5;248mconfirm\x1b[m\x1b[38;5;248m▕\x1b[m \x1b[38;5;242mn/esc\x1b[m \x1b[38;5;248mcancel\x1b[m                                                       \x1b[m\x1b[48;5;253m \x1b[m",
 			wantLines:  1,
 		},
@@ -319,7 +319,7 @@ func TestFooterHelpTableParity(t *testing.T) {
 			width:      80,
 			innerWidth: 78,
 			rows:       listRows,
-			want:       "\x1b[48;5;234m \x1b[m\x1b[38;5;246;48;5;234m\x1b[38;5;246m↑↓\x1b[m \x1b[38;5;240mmove\x1b[m      \x1b[38;5;242m▕\x1b[m \x1b[38;5;246m↵\x1b[m \x1b[38;5;240mopen\x1b[m  \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mspace\x1b[m \x1b[38;5;240mexpand\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246mE\x1b[m \x1b[38;5;240mall\x1b[m     \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mn\x1b[m \x1b[38;5;240mnew\x1b[m    \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mN\x1b[m \x1b[38;5;240mchild\x1b[m         \x1b[m\x1b[48;5;234m \x1b[m\n\x1b[48;5;234m \x1b[m\x1b[38;5;246;48;5;234m\x1b[38;5;246m/\x1b[m \x1b[38;5;240msearch\x1b[m     \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mf\x1b[m \x1b[38;5;240mfilter\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246ms\x1b[m \x1b[38;5;240mstatus\x1b[m    \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mv\x1b[m \x1b[38;5;240mview\x1b[m    \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mo\x1b[m \x1b[38;5;240morder\x1b[m  \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mc\x1b[m \x1b[38;5;240mclear\x1b[m         \x1b[m\x1b[48;5;234m \x1b[m\n\x1b[48;5;234m \x1b[m\x1b[38;5;246;48;5;234m\x1b[38;5;246mx\x1b[m \x1b[38;5;240mclose\x1b[m      \x1b[38;5;242m▕\x1b[m \x1b[38;5;246md\x1b[m \x1b[38;5;240mdates\x1b[m \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mX\x1b[m \x1b[38;5;240mdelete\x1b[m    \x1b[38;5;242m▕\x1b[m \x1b[38;5;246m!\x1b[m \x1b[38;5;240mpriority\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246mD\x1b[m \x1b[38;5;240mdaemons\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246mF\x1b[m \x1b[38;5;240mfederation\x1b[m    \x1b[m\x1b[48;5;234m \x1b[m\n\x1b[48;5;234m \x1b[m\x1b[38;5;246;48;5;234m\x1b[38;5;246mC\x1b[m \x1b[38;5;240mcredentials\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246mL\x1b[m \x1b[38;5;240mlayout\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246m?\x1b[m \x1b[38;5;240mhelp\x1b[m      \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mq\x1b[m \x1b[38;5;240mquit\x1b[m                                 \x1b[m\x1b[48;5;234m \x1b[m",
+			want:       "\x1b[48;5;234m \x1b[m\x1b[38;5;246;48;5;234m\x1b[38;5;246m↑↓\x1b[m \x1b[38;5;240mmove\x1b[m     \x1b[38;5;242m▕\x1b[m \x1b[38;5;246m↵\x1b[m \x1b[38;5;240mopen\x1b[m       \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mspace\x1b[m \x1b[38;5;240mexpand\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246mE\x1b[m \x1b[38;5;240mall\x1b[m \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mn\x1b[m \x1b[38;5;240mnew\x1b[m     \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mN\x1b[m \x1b[38;5;240mchild\x1b[m        \x1b[m\x1b[48;5;234m \x1b[m\n\x1b[48;5;234m \x1b[m\x1b[38;5;246;48;5;234m\x1b[38;5;246m/\x1b[m \x1b[38;5;240msearch\x1b[m    \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mf\x1b[m \x1b[38;5;240mfilter\x1b[m     \x1b[38;5;242m▕\x1b[m \x1b[38;5;246ms\x1b[m \x1b[38;5;240mstatus\x1b[m    \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mv\x1b[m \x1b[38;5;240mview\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246mo\x1b[m \x1b[38;5;240morder\x1b[m   \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mc\x1b[m \x1b[38;5;240mclear\x1b[m        \x1b[m\x1b[48;5;234m \x1b[m\n\x1b[48;5;234m \x1b[m\x1b[38;5;246;48;5;234m\x1b[38;5;246mx\x1b[m \x1b[38;5;240mclose\x1b[m     \x1b[38;5;242m▕\x1b[m \x1b[38;5;246md\x1b[m \x1b[38;5;240mdates\x1b[m      \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mX\x1b[m \x1b[38;5;240mdelete\x1b[m    \x1b[38;5;242m▕\x1b[m \x1b[38;5;246mM\x1b[m \x1b[38;5;240mmove\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246m!\x1b[m \x1b[38;5;240mpriority\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246mD\x1b[m \x1b[38;5;240mdaemons\x1b[m      \x1b[m\x1b[48;5;234m \x1b[m\n\x1b[48;5;234m \x1b[m\x1b[38;5;246;48;5;234m\x1b[38;5;246mF\x1b[m \x1b[38;5;240mfederation\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246mC\x1b[m \x1b[38;5;240mcredentials\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246mL\x1b[m \x1b[38;5;240mlayout\x1b[m    \x1b[38;5;242m▕\x1b[m \x1b[38;5;246m?\x1b[m \x1b[38;5;240mhelp\x1b[m\x1b[38;5;242m▕\x1b[m \x1b[38;5;246mq\x1b[m \x1b[38;5;240mquit\x1b[m                     \x1b[m\x1b[48;5;234m \x1b[m",
 			wantLines:  4,
 		},
 		{

@@ -256,12 +256,29 @@ func TestUndoOfADelete(t *testing.T) {
 	}
 }
 
-func TestDeleteKeyIsOfferedOnlyToCredentialsThatCanDelete(t *testing.T) {
+// TestListRowKeysAreOfferedOnlyOnThePlainListRow holds X and M to one rule: the
+// footer, the help overlay and the dispatch all offer the key on the selected row
+// of the plain issue list, and nowhere else. An undo or reopen lookup in flight
+// also takes M away, because the Move form would be replaced when it answers.
+func TestListRowKeysAreOfferedOnlyOnThePlainListRow(t *testing.T) {
+	type rowKey struct {
+		name     string
+		key      rune
+		hint     helplayout.HelpItem
+		helpText string
+		opened   func(Model) bool
+		busy     bool // an undo in flight takes the key away
+	}
+	keys := []rowKey{
+		{"X", 'X', helplayout.HelpItem{Key: "X", Description: "delete"}, "delete issue", func(m Model) bool { return m.input.kind == inputDeleteForm }, false},
+		{"M", 'M', helplayout.HelpItem{Key: "M", Description: "move"}, "move to another project", func(m Model) bool { return m.modal == modalMoveIssue }, true},
+	}
 	for _, tc := range []struct {
 		name    string
 		view    viewID
 		scoped  bool
 		context string
+		extra   string
 	}{
 		{name: "unscoped list", view: viewList},
 		{name: "unscoped detail", view: viewDetail},
@@ -269,62 +286,76 @@ func TestDeleteKeyIsOfferedOnlyToCredentialsThatCanDelete(t *testing.T) {
 		{name: "scoped detail", view: viewDetail, scoped: true},
 		{name: "Inbox", view: viewList, context: "Inbox"},
 		{name: "Attention", view: viewList, context: "Attention"},
+		{name: "Help", view: viewList, extra: "help"},
+		{name: "empty list", view: viewList, extra: "empty"},
+		{name: "split with the detail focused", view: viewList, extra: "split detail"},
+		{name: "undo in flight", view: viewList, extra: "undo"},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h := newDeleteHarness(t, tc.view)
-			target := h.issues[0]
-			switch tc.context {
-			case "Inbox":
-				_, err := h.env.DB.DesignateInboxProject(t.Context(), db.DesignateInboxProjectIn{ProjectID: h.project.ID, Actor: "alice"})
-				require.NoError(t, err)
-				h.m = h.drain(h.finish(h.key(runeKey('I'))))
-				require.True(t, h.m.scope.inbox)
-				require.NotNil(t, h.m.inboxReturn)
-			case "Attention":
-				h.m.attention.returnContext = &attentionReturnContext{detail: h.m.detail}
-			}
-			h.selectIssue(target.UID)
-			if tc.view == viewDetail {
-				h.m.focus = focusDetail
-				require.NotNil(t, h.m.detail.issue)
-			}
-			h.m.authCapabilitiesRequired, h.m.authCapabilitiesReady = true, true
-			h.m.issueScoped, h.m.scopedWritable = tc.scoped, tc.scoped
-
-			hidden := tc.scoped || tc.context != ""
-			hint := helplayout.HelpItem{Key: "X", Description: "delete"}
-			if hidden || tc.view == viewDetail {
-				assertHelpItemAbsent(t, flattenHelpRows(h.m.helpRows()), hint)
-			}
-			if hidden {
-				assertHelpItemAbsent(t, flattenHelpRows(h.m.splitHelpRows()), hint)
-				assertHelpItemAbsent(t, flattenHelpRows(listHelpRows(h.m.list, h.m.chrome())), hint)
-			}
-			for _, section := range helpSections(h.m.helpKeymap()) {
-				for _, item := range section.rows {
-					assert.NotEmpty(t, item.Key, "help omits unbound rows")
+		for _, rk := range keys {
+			t.Run(tc.name+" "+rk.name, func(t *testing.T) {
+				h := newDeleteHarness(t, tc.view)
+				target := h.issues[0]
+				switch tc.context {
+				case "Inbox":
+					_, err := h.env.DB.DesignateInboxProject(t.Context(), db.DesignateInboxProjectIn{ProjectID: h.project.ID, Actor: "alice"})
+					require.NoError(t, err)
+					h.m = h.drain(h.finish(h.key(runeKey('I'))))
+					require.True(t, h.m.scope.inbox)
+					require.NotNil(t, h.m.inboxReturn)
+				case "Attention":
+					h.m.attention.returnContext = &attentionReturnContext{detail: h.m.detail}
 				}
-			}
-			helpModel := h.m
-			helpModel.view, helpModel.width = viewHelp, 120
-			helpText := stripANSI(helpModel.viewBody())
-			if hidden {
-				assert.NotContains(t, helpText, "delete issue")
-			} else {
-				assert.Contains(t, helpText, "delete issue")
-			}
+				h.selectIssue(target.UID)
+				if tc.view == viewDetail {
+					h.m.focus = focusDetail
+					require.NotNil(t, h.m.detail.issue)
+				}
+				h.m.authCapabilitiesRequired, h.m.authCapabilitiesReady = true, true
+				h.m.issueScoped, h.m.scopedWritable = tc.scoped, tc.scoped
+				switch tc.extra {
+				case "help":
+					h.m.view = viewHelp
+				case "empty":
+					h.m.list.issues, h.m.list.selectedUID, h.m.list.selectedProjectID = nil, "", 0
+				case "split detail":
+					issue := h.m.list.issues[0]
+					h.m.layout, h.m.focus, h.m.detail.issue = splitlayout.Split, focusDetail, &issue
+				case "undo":
+					h.m.undoInFlight = true
+				}
 
-			cmd := h.key(runeKey('X'))
-			if hidden || tc.view == viewDetail {
-				assert.Nil(t, cmd)
-				assert.Equal(t, inputNone, h.m.input.kind, "X requires list focus and credentials that can delete")
-				assert.Equal(t, tc.view, h.m.view)
-				assert.Equal(t, target.UID, h.m.list.selectedUID)
-				assert.False(t, h.isDeleted(target.UID))
-			} else {
-				assert.Equal(t, inputDeleteForm, h.m.input.kind)
-			}
-		})
+				busy := rk.busy && tc.extra == "undo"
+				offered := tc.view == viewList && !tc.scoped && tc.context == "" && tc.extra == "" || tc.extra == "undo" && !busy
+				helpListed := !tc.scoped && tc.context == "" && !busy
+				if tc.extra != "help" {
+					rows := flattenHelpRows(h.m.helpRows())
+					if offered {
+						assert.Contains(t, rows, rk.hint)
+					} else {
+						assertHelpItemAbsent(t, rows, rk.hint)
+					}
+				}
+				if !offered && (tc.scoped || tc.context != "") {
+					assertHelpItemAbsent(t, flattenHelpRows(h.m.splitHelpRows()), rk.hint)
+					assertHelpItemAbsent(t, flattenHelpRows(listHelpRows(h.m.list, h.m.chrome())), rk.hint)
+				}
+				for _, section := range helpSections(h.m.helpKeymap()) {
+					for _, item := range section.rows {
+						assert.NotEmpty(t, item.Key, "help omits unbound rows")
+					}
+				}
+				helpModel := h.m
+				helpModel.view, helpModel.width = viewHelp, 120
+				assert.Equal(t, helpListed, strings.Contains(stripANSI(helpModel.viewBody()), rk.helpText))
+
+				cmd := h.key(runeKey(rk.key))
+				assert.Equal(t, offered, rk.opened(h.m), "dispatch follows the footer")
+				if !offered {
+					assert.Nil(t, cmd)
+					assert.False(t, h.isDeleted(target.UID))
+				}
+			})
+		}
 	}
 }
 
@@ -359,7 +390,7 @@ func TestDeleteFromSplitListReplacesRetainedDetail(t *testing.T) {
 			{name: "independent issue keeps Back history", detail: detailModel{issue: &independent, navStack: []detailModel{prior}}, preserve: true},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
-				got := tc.detail.withoutIssue(deleted.UID)
+				got := tc.detail.withoutIssues(deleted.UID)
 				if tc.preserve {
 					assert.Equal(t, tc.detail, got)
 					assert.Len(t, got.navStack, 1)

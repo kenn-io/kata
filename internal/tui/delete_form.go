@@ -35,34 +35,11 @@ func newDeleteForm(target formTarget, issue Issue, expected string) inputState {
 	return s
 }
 
-// deleteHidden reports whether credentials or a saved browsing context prevent
-// deletion. Footer, help overlay, and chrome all read it.
-func (m Model) deleteHidden() bool {
-	return !m.mutationAllowed(false) || m.deleteBlockedByContext()
-}
-
-func (m Model) deleteBlockedByContext() bool {
-	return m.inboxReturn != nil || m.attention.returnContext != nil
-}
-
-// helpKeymap is the keymap the help overlay lists: without the delete key
-// when it is not on offer.
-func (m Model) helpKeymap() keymap {
-	km := m.keymap
-	if m.deleteHidden() {
-		km.Delete = key{}
-	}
-	return km
-}
-
 func (m Model) routeDeleteKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	if !m.keymap.Delete.matches(msg) {
 		return m, nil, false
 	}
-	if (m.view != viewList && m.view != viewDetail) || !m.listIsActive() || m.deleteBlockedByContext() {
-		return m, nil, true
-	}
-	target, issue, ok := m.activeIssueTarget()
+	target, issue, ok := m.listIssueTarget()
 	if !ok {
 		return m, nil, true
 	}
@@ -111,25 +88,44 @@ func (m Model) finishDelete(target formTarget) (Model, tea.Cmd) {
 	qualified := m.input.del.expected
 	m.input = inputState{}
 	uid := target.issueUID
-	m.detail = m.detail.withoutIssue(uid)
-	m, follow := m.refreshListDay(func(lm listModel) listModel { return lm.withoutIssue(uid) })
-	m, detailCmd := m.maybeBootstrapSplitDetail()
-	if m.cache != nil {
-		m.cache.markStale()
-	}
+	m, cmd := m.dropIssues(uid, []string{uid})
 	message := "deleted " + qualified
 	if last := len(m.undoHistory.entries) - 1; (m.view == viewList || m.view == viewDetail) && last >= 0 && m.undoHistory.entries[last].kind == "delete" && m.undoHistory.entries[last].uid == uid {
 		message += "; press u to undo"
 	}
 	m, notice := m.undoNotice(message, toastInfo)
-	return m, combineCmds(follow, combineCmds(detailCmd, combineCmds(notice, withConnGen(m.list.refetchCmd(m.api, m.scope), m.connGen))))
+	return m, combineCmds(cmd, notice)
 }
 
-// withoutIssue resets a detail pane that shows the deleted issue, as itself,
-// a child, or a Back entry, or that shows no issue yet. A pane inspecting an
-// unrelated issue keeps it and its Back history.
-func (dm detailModel) withoutIssue(uid string) detailModel {
-	shows := func(issue *Issue) bool { return issue != nil && issue.UID == uid }
+// dropIssues removes issues the daemon deleted or moved out of the list a
+// delete or move was started from: the rows leave the list and the selection
+// goes to the row after anchor (the one before it after the last), a detail
+// pane that shows one of them resets, the cached lists go stale, and the list
+// is fetched again. A pane on an unrelated issue stays as it is, even when it
+// no longer shows the highlighted row: the list edit does not make it follow
+// the new selection.
+func (m Model) dropIssues(anchor string, gone []string) (Model, tea.Cmd) {
+	hadIssue := m.detail.issue != nil
+	m.detail = m.detail.withoutIssues(gone...)
+	drop := func(lm listModel) listModel { return lm.droppingIssues(anchor, gone) }
+	var follow, detailCmd tea.Cmd
+	if hadIssue && m.detail.issue != nil {
+		m = m.editListDay(drop)
+	} else {
+		m, follow = m.refreshListDay(drop)
+		m, detailCmd = m.maybeBootstrapSplitDetail()
+	}
+	if m.cache != nil {
+		m.cache.markStale()
+	}
+	return m, combineCmds(follow, combineCmds(detailCmd, withConnGen(m.list.refetchCmd(m.api, m.scope), m.connGen)))
+}
+
+// withoutIssues resets a detail pane that shows a deleted or moved issue, as
+// itself, a child, or a Back entry, or that shows no issue yet. A pane
+// inspecting an unrelated issue keeps it and its Back history.
+func (dm detailModel) withoutIssues(gone ...string) detailModel {
+	shows := func(issue *Issue) bool { return issue != nil && slices.Contains(gone, issue.UID) }
 	if dm.issue != nil && !shows(dm.issue) &&
 		!slices.ContainsFunc(dm.children, func(child Issue) bool { return shows(&child) }) &&
 		!slices.ContainsFunc(dm.navStack, func(prev detailModel) bool { return shows(prev.issue) }) {
@@ -139,18 +135,27 @@ func (dm detailModel) withoutIssue(uid string) detailModel {
 	return newDetailModel()
 }
 
-// withoutIssue drops a deleted issue from the list and selects the row after
-// it, or the row before it when it was the last.
-func (lm listModel) withoutIssue(uid string) listModel {
+// droppingIssues drops the issues from the list. When anchor was the selection,
+// it selects the row after it, or the row before it when it was the last,
+// skipping any other dropped row, such as a moved subtree.
+func (lm listModel) droppingIssues(anchor string, gone []string) listModel {
+	isGone := func(uid string) bool { return slices.Contains(gone, uid) }
 	rows := lm.visibleRows()
-	at := slices.IndexFunc(rows, func(row queueRow) bool { return row.issue.UID == uid })
-	lm.issues = slices.DeleteFunc(slices.Clone(lm.issues), func(issue Issue) bool { return issue.UID == uid })
-	if at < 0 || lm.selectedUID != uid {
+	at := slices.IndexFunc(rows, func(row queueRow) bool { return row.issue.UID == anchor })
+	lm.issues = slices.DeleteFunc(slices.Clone(lm.issues), func(issue Issue) bool { return isGone(issue.UID) })
+	if at < 0 || lm.selectedUID != anchor {
 		return lm.restoreCursorToSelection()
 	}
-	next := at + 1
-	if next >= len(rows) {
-		next = at - 1
+	next := -1
+	for i := at + 1; i < len(rows) && next < 0; i++ {
+		if !isGone(rows[i].issue.UID) {
+			next = i
+		}
+	}
+	for i := at - 1; i >= 0 && next < 0; i-- {
+		if !isGone(rows[i].issue.UID) {
+			next = i
+		}
 	}
 	lm.selectedUID, lm.selectedProjectID = "", 0
 	if next >= 0 {

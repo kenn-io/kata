@@ -12,7 +12,7 @@ import (
 
 func (m Model) helpRows() [][]helplayout.HelpItem {
 	if m.modal != modalNone {
-		return modalHelpRows(m.modal)
+		return modalHelpRows(m.modal, m.move.step())
 	}
 	if m.input.kind != inputNone {
 		return inputHelpRows(m.input)
@@ -24,7 +24,7 @@ func (m Model) helpRows() [][]helplayout.HelpItem {
 	case viewDetail:
 		return m.detail.detailHelpRows()
 	case viewList:
-		return m.list.queueHelpRows(m.deleteHidden())
+		return m.list.queueHelpRows(m.listIssueOpsHidden(), m.moveHidden())
 	case viewCredentials:
 		return credentialsHelpRows()
 	}
@@ -33,17 +33,17 @@ func (m Model) helpRows() [][]helplayout.HelpItem {
 
 func (m Model) queueHelpRows() [][]helplayout.HelpItem {
 	if m.modal != modalNone {
-		return modalHelpRows(m.modal)
+		return modalHelpRows(m.modal, m.move.step())
 	}
 	if m.input.kind != inputNone {
 		return inputHelpRows(m.input)
 	}
-	return m.list.queueHelpRows(m.deleteHidden())
+	return m.list.queueHelpRows(m.listIssueOpsHidden(), m.moveHidden())
 }
 
 func (m Model) detailHelpRows() [][]helplayout.HelpItem {
 	if m.modal != modalNone {
-		return modalHelpRows(m.modal)
+		return modalHelpRows(m.modal, m.move.step())
 	}
 	if m.input.kind != inputNone {
 		return inputHelpRows(m.input)
@@ -53,7 +53,7 @@ func (m Model) detailHelpRows() [][]helplayout.HelpItem {
 
 func (m Model) splitHelpRows() [][]helplayout.HelpItem {
 	if m.modal != modalNone {
-		return modalHelpRows(m.modal)
+		return modalHelpRows(m.modal, m.move.step())
 	}
 	if m.input.kind != inputNone {
 		return inputHelpRows(m.input)
@@ -61,22 +61,22 @@ func (m Model) splitHelpRows() [][]helplayout.HelpItem {
 	if m.focus == focusDetail {
 		return m.detail.detailHelpRows()
 	}
-	return m.list.queueHelpRows(m.deleteHidden())
+	return m.list.queueHelpRows(m.listIssueOpsHidden(), m.moveHidden())
 }
 
 func listHelpRows(lm listModel, chrome viewChrome) [][]helplayout.HelpItem {
 	if chrome.modal != modalNone {
-		return modalHelpRows(chrome.modal)
+		return modalHelpRows(chrome.modal, chrome.moveStep)
 	}
 	if chrome.input.kind != inputNone {
 		return inputHelpRows(chrome.input)
 	}
-	return appendUndoHint(lm.queueHelpRows(chrome.deleteHidden), chrome.undoAvailable)
+	return appendUndoHint(lm.queueHelpRows(chrome.listOpsHidden, chrome.moveHidden), chrome.undoAvailable)
 }
 
 func detailHelpRows(dm detailModel, chrome viewChrome) [][]helplayout.HelpItem {
 	if chrome.modal != modalNone {
-		return modalHelpRows(chrome.modal)
+		return modalHelpRows(chrome.modal, chrome.moveStep)
 	}
 	if chrome.input.kind != inputNone {
 		return inputHelpRows(chrome.input)
@@ -157,7 +157,7 @@ func inputHelpRows(input inputState) [][]helplayout.HelpItem {
 	return nil
 }
 
-func (lm listModel) queueHelpRows(hideDelete bool) [][]helplayout.HelpItem {
+func (lm listModel) queueHelpRows(hideListOps, hideMove bool) [][]helplayout.HelpItem {
 	row, ok := lm.targetQueueRow()
 	items := []helplayout.HelpItem{
 		{Key: "↑↓", Description: "move"},
@@ -192,8 +192,11 @@ func (lm listModel) queueHelpRows(hideDelete bool) [][]helplayout.HelpItem {
 		helplayout.HelpItem{Key: "x", Description: "close"},
 		helplayout.HelpItem{Key: "d", Description: "dates"},
 	)
-	if ok && !hideDelete {
+	if ok && !hideListOps {
 		items = append(items, helplayout.HelpItem{Key: "X", Description: "delete"})
+	}
+	if ok && !hideMove {
+		items = append(items, helplayout.HelpItem{Key: "M", Description: "move"})
 	}
 	items = append(items,
 		helplayout.HelpItem{Key: "!", Description: "priority"},
@@ -264,7 +267,10 @@ func (dm detailModel) detailHelpRows() [][]helplayout.HelpItem {
 	return [][]helplayout.HelpItem{append(nav, actions...)}
 }
 
-func modalHelpRows(kind modalKind) [][]helplayout.HelpItem {
+// modalHelpRows is the footer of an open confirmation. step picks the Move
+// form's, because enter does something different in each, and nothing is
+// offered while its request is in flight.
+func modalHelpRows(kind modalKind, step moveStep) [][]helplayout.HelpItem {
 	switch kind {
 	case modalQuitConfirm:
 		return [][]helplayout.HelpItem{{
@@ -276,6 +282,21 @@ func modalHelpRows(kind modalKind) [][]helplayout.HelpItem {
 			{Key: "y", Description: "reopen"},
 			{Key: "n/esc", Description: "cancel"},
 		}}
+	case modalMoveIssue:
+		if step == moveSending {
+			return nil
+		}
+		if step == movePreviewing {
+			return [][]helplayout.HelpItem{{
+				{Key: "enter", Description: "move"},
+				{Key: "esc", Description: "back"},
+			}}
+		}
+		return [][]helplayout.HelpItem{{
+			{Key: "↑↓", Description: "choose"},
+			{Key: "enter", Description: "preview"},
+			{Key: "esc", Description: "cancel"},
+		}}
 	case modalDiscardComment, modalDiscardNewIssue, modalDiscardCronJob:
 		return [][]helplayout.HelpItem{{
 			{Key: "y", Description: "discard"},
@@ -285,9 +306,10 @@ func modalHelpRows(kind modalKind) [][]helplayout.HelpItem {
 	return nil
 }
 
+// modalFirstHelpRows is for views that cannot hold the Move form.
 func modalFirstHelpRows(kind modalKind, fallback [][]helplayout.HelpItem) [][]helplayout.HelpItem {
 	if kind != modalNone {
-		return modalHelpRows(kind)
+		return modalHelpRows(kind, movePicking)
 	}
 	return fallback
 }

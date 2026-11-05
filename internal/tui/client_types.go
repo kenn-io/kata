@@ -173,7 +173,23 @@ type MutationResp struct {
 	Event   *EventEnvelope `json:"event,omitempty"`
 	Changed bool           `json:"changed"`
 	Reused  bool           `json:"reused,omitempty"`
-	undo    *undoAttempt
+	// Issues lists every issue a move (or its dry run) covers, the moved
+	// issue first. NewShortID is the moved issue's id in its new project.
+	Issues     []Issue `json:"issues,omitempty"`
+	NewShortID string  `json:"new_short_id,omitempty"`
+	// Revision is the issue revision the daemon reported in its ETag.
+	Revision int64 `json:"-"`
+	undo     *undoAttempt
+}
+
+// MoveInput is one move request. A DryRun validates and previews without
+// writing. IfMatchRevision guards the move on the revision the preview read;
+// zero sends no If-Match header.
+type MoveInput struct {
+	Actor           string
+	ToProjectUID    string
+	DryRun          bool
+	IfMatchRevision int64
 }
 
 // EventEnvelope is the minimal event projection embedded in mutation
@@ -209,6 +225,7 @@ type ProjectSummary struct {
 	UID      string `json:"uid,omitempty"`
 	Metadata struct {
 		Role jsontext.Value `json:"role"`
+		Area jsontext.Value `json:"area"`
 	} `json:"metadata"`
 }
 

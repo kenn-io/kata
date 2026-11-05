@@ -197,6 +197,16 @@ func (lm listModel) armPendingPriority() listModel {
 	return lm
 }
 
+// cancelPriorityPrompt drops an armed `!` prompt and its hint, and leaves any
+// other status alone.
+func (lm listModel) cancelPriorityPrompt() listModel {
+	if lm.pendingPriority {
+		lm.pendingPriority = false
+		lm.status = ""
+	}
+	return lm
+}
+
 // applyPendingPriorityKey consumes the keystroke following `!`. Digits
 // 0..4 dispatch a set; `-` clears; esc / any other key cancels (the
 // pending mode flips off and the status hint clears). ok=true means the
