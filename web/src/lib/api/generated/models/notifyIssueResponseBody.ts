@@ -9,5 +9,6 @@ export interface NotifyIssueResponseBody {
   event?: Event
   issue: Issue
   recipients: string[]
+  scheduled_on?: string
   [key: string]: unknown
 }

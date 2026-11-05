@@ -19,7 +19,7 @@ const notificationMessageMaxBytes = notification.MessageMaxBytes
 type notificationValue = notification.Value
 
 func newNotifyCmd() *cobra.Command {
-	var recipient, message, re string
+	var recipient, message, re, followUp string
 	var broadcast, teammates bool
 	var clearRequest bool
 	cmd := &cobra.Command{
@@ -32,14 +32,33 @@ issue and recipient; a new one replaces the old. Clear it after handling.
 comment --reply, --confirm, --refute, or --supersede clears the request and
 tells you on this issue, so wait --until reply here wakes.
 --broadcast replaces --to: it asks this issue's participants and those of
-its open children (at most 50); --teammates adds their teammate inboxes.`,
+its open children (at most 50); --teammates adds their teammate inboxes.
+--follow-up sets this issue's shared scheduled_on atomically with the request.
+It accepts the same dates as kata schedule, including past dates: YYYY-MM-DD,
+local YYYY-MM-DDTHH:MM[:SS], or RFC 3339 UTC ending in Z. Relative words are
+rejected. A future date hides the issue from ready/next until its gate opens.
+The current owner (author if unowned) gets the due reminder. --clear removes
+only the request; clear the date separately with kata schedule <ref> -.
+Recipients may be outside handles; requests go to Kata inboxes, not email.`,
 		Example: `  kata notify abc4 --to coordinator --message "Need a decision on the schema" --agent
   kata notify abc4 --to coordinator/teammate-1 --message "Please re-run the tests" --agent
   kata notify abc4 --to reviewer/teammate-2 --re c:abc123 --message "Please confirm or refute this finding" --agent
   kata notify abc4 --broadcast --message "Schema changed; re-check your branches" --agent
-  kata notify abc4 --to coordinator/teammate-1 --clear --agent`,
+  kata notify abc4 --to coordinator/teammate-1 --clear --agent
+  kata notify abc4 --to alex --message "Please decide" --follow-up 2026-11-10 --agent`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			hasFollowUp := cmd.Flags().Changed("follow-up")
+			if hasFollowUp && clearRequest {
+				return notificationValidationError("--follow-up and --clear are mutually exclusive")
+			}
+			if hasFollowUp && (followUp == "" || followUp == "-") {
+				return notificationValidationError("--follow-up requires a date or time; use kata schedule <ref> - to clear the date")
+			}
+			var scheduledOn *string
+			if hasFollowUp {
+				scheduledOn = &followUp
+			}
 			to := ""
 			if broadcast {
 				if recipient != "" {
@@ -86,14 +105,14 @@ its open children (at most 50); --teammates adds their teammate inboxes.`,
 				return err
 			}
 			actor, _ := resolveActor(ctx, flags.As, nil)
-			if broadcast || re != "" {
+			if broadcast || re != "" || hasFollowUp {
 				apiClient, err := kataclient.NewWithHTTPClient(baseURL, client)
 				if err != nil {
 					return err
 				}
 				response, callErr := apiClient.NotifyIssueWithResponse(ctx, &generated.NotifyIssueRequestOptions{
 					PathParams: &generated.NotifyIssuePath{ProjectID: fmt.Sprint(pid), Ref: ref.RefForAPI},
-					Body:       &generated.NotifyIssueBody{Actor: &actor, Teammate: &senderTeammate, To: &to, Re: &re, Message: message, Broadcast: &broadcast, Teammates: &teammates},
+					Body:       &generated.NotifyIssueBody{Actor: &actor, Teammate: &senderTeammate, To: &to, Re: &re, Message: message, Broadcast: &broadcast, Teammates: &teammates, ScheduledOn: scheduledOn},
 				})
 				if response == nil {
 					return callErr
@@ -163,6 +182,7 @@ its open children (at most 50); --teammates adds their teammate inboxes.`,
 			return printNotificationMutation(cmd, response.Body, verb, to, ref.ProjectName)
 		},
 	}
+	cmd.Flags().StringVar(&followUp, "follow-up", "", "set the issue schedule with the request (same date formats as schedule; incompatible with --clear)")
 	cmd.Flags().StringVar(&re, "re", "", "comment reference to open and reply to")
 	cmd.Flags().BoolVar(&broadcast, "broadcast", false, "request attention from issue and open-child participants")
 	cmd.Flags().BoolVar(&teammates, "teammates", false, "include exact teammate inboxes in a broadcast")
@@ -200,7 +220,10 @@ func printNotificationMutation(cmd *cobra.Command, response []byte, verb, recipi
 		_, err := fmt.Fprint(cmd.OutOrStdout(), output.String())
 		return err
 	}
-	var decoded metaPatchResponse
+	var decoded struct {
+		metaPatchResponse
+		ScheduledOn *string `json:"scheduled_on"`
+	}
 	if err := json.Unmarshal(response, &decoded); err != nil {
 		return err
 	}
@@ -213,8 +236,12 @@ func printNotificationMutation(cmd *cobra.Command, response []byte, verb, recipi
 		if flags.Quiet {
 			return nil
 		}
-		_, err := fmt.Fprintf(cmd.OutOrStdout(), "OK notify %s to=%s changed=%t\n",
-			agentValue(decoded.Issue.ShortID), agentValue(recipient), decoded.Changed)
+		scheduled := ""
+		if decoded.ScheduledOn != nil {
+			scheduled = " scheduled_on=" + agentValue(*decoded.ScheduledOn)
+		}
+		_, err := fmt.Fprintf(cmd.OutOrStdout(), "OK notify %s to=%s changed=%t%s\n",
+			agentValue(decoded.Issue.ShortID), agentValue(recipient), decoded.Changed, scheduled)
 		return err
 	}
 	if flags.Quiet {

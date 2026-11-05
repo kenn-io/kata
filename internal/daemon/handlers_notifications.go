@@ -14,6 +14,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"go.kenn.io/kata/internal/api"
 	"go.kenn.io/kata/internal/db"
+	"go.kenn.io/kata/internal/metadata"
 	"go.kenn.io/kata/internal/notification"
 	"go.kenn.io/kata/internal/teammate"
 )
@@ -117,6 +118,13 @@ func registerNotificationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			for _, recipient := range recipients {
 				patch[notification.MetadataKey(recipient)] = value
 			}
+			if in.Body.ScheduledOn != nil {
+				encoded, err := json.Marshal(*in.Body.ScheduledOn)
+				if err != nil {
+					return nil, err
+				}
+				patch["scheduled_on"] = encoded
+			}
 			return patch, nil
 		})
 		result, err := cfg.DB.PatchIssueMetadata(ctx, db.PatchIssueMetadataIn{IssueID: issue.ID, Actor: actor})
@@ -125,6 +133,9 @@ func registerNotificationHandlers(humaAPI huma.API, cfg ServerConfig) {
 			// A failed rollback or host cleanup is retryable; it must not read
 			// as the denial or missing comment that it may also carry.
 			return nil, internalAPIError(err)
+		}
+		if errors.Is(err, metadata.ErrInvalidValue) {
+			return nil, api.NewError(400, "invalid_metadata_value", err.Error(), "", nil)
 		}
 		if errors.Is(err, db.ErrNotFound) {
 			return nil, api.NewError(404, "comment_not_found", "comment not found", "", nil)
@@ -144,6 +155,15 @@ func registerNotificationHandlers(humaAPI huma.API, cfg ServerConfig) {
 		out := &api.NotifyIssueResponse{}
 		out.Body.Issue = result.Issue
 		out.Body.Changed = result.Changed
+		if in.Body.ScheduledOn != nil {
+			var planning struct {
+				ScheduledOn *string `json:"scheduled_on"`
+			}
+			if err := json.Unmarshal([]byte(result.Issue.Metadata), &planning); err != nil {
+				return nil, internalAPIError(err)
+			}
+			out.Body.ScheduledOn = planning.ScheduledOn
+		}
 		out.Body.Recipients = recipients
 		if out.Body.Recipients == nil {
 			out.Body.Recipients = []string{}

@@ -4517,6 +4517,9 @@ components:
           type: string
         re:
           type: string
+        scheduled_on:
+          description: Set the issue schedule atomically with the request; accepts the same dates as kata schedule.
+          type: string
         teammate:
           type: string
         teammates:
@@ -4539,6 +4542,8 @@ components:
           items:
             type: string
           type: array
+        scheduled_on:
+          type: string
       required:
         - issue
         - changed

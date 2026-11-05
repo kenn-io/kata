@@ -7,13 +7,14 @@ type NotifyIssueRequest struct {
 	ProjectTarget
 	Ref  string `path:"ref" required:"true"`
 	Body struct {
-		Actor     string `json:"actor,omitempty"`
-		Teammate  string `json:"teammate,omitempty"`
-		To        string `json:"to,omitempty"`
-		Re        string `json:"re,omitempty"`
-		Message   string `json:"message" required:"true"`
-		Broadcast bool   `json:"broadcast,omitzero"`
-		Teammates bool   `json:"teammates,omitzero"`
+		Actor       string  `json:"actor,omitempty"`
+		Teammate    string  `json:"teammate,omitempty"`
+		ScheduledOn *string `json:"scheduled_on,omitempty" doc:"Set the issue schedule atomically with the request; accepts the same dates as kata schedule."`
+		To          string  `json:"to,omitempty"`
+		Re          string  `json:"re,omitempty"`
+		Message     string  `json:"message" required:"true"`
+		Broadcast   bool    `json:"broadcast,omitzero"`
+		Teammates   bool    `json:"teammates,omitzero"`
 	}
 }
 
@@ -21,9 +22,10 @@ type NotifyIssueRequest struct {
 type NotifyIssueResponse struct {
 	ProjectNameHeader
 	Body struct {
-		Issue      db.Issue  `json:"issue"`
-		Event      *db.Event `json:"event,omitempty"`
-		Changed    bool      `json:"changed"`
-		Recipients []string  `json:"recipients"`
+		Issue       db.Issue  `json:"issue"`
+		Event       *db.Event `json:"event,omitempty"`
+		Changed     bool      `json:"changed"`
+		ScheduledOn *string   `json:"scheduled_on,omitempty"`
+		Recipients  []string  `json:"recipients"`
 	}
 }

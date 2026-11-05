@@ -7,6 +7,8 @@ export interface NotifyIssueRequestBody {
   broadcast?: boolean
   message: string
   re?: string
+  /** Set the issue schedule atomically with the request; accepts the same dates as kata schedule. */
+  scheduled_on?: string
   teammate?: string
   teammates?: boolean
   to?: string

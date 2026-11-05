@@ -1204,7 +1204,7 @@ repeating work under the issue with `kata cron job create --parent` instead.
 
 ```sh
 kata notify <ref> [--to <recipient> | --broadcast] \
-  [--re <comment>] [--teammates] --message TEXT
+  [--re <comment>] [--teammates] --message TEXT [--follow-up <date-or-time>]
 kata notify <ref> --to <recipient> --clear
 kata notify abc4 --to coordinator --message "Please decide"
 kata notify abc4 --to coordinator/teammate-1 --message "Please check the reproduction"
@@ -1226,7 +1226,39 @@ The command rejects an issue it reads as closed. Concurrent writes preserve
 other recipients' requests; the last write to the same recipient wins.
 Closure can still race with the write; either way, the request is hidden while
 the issue is closed. Messages must be nonblank and at most 1024 bytes.
-Requests do not change ownership or readiness.
+Requests do not change ownership. Without `--follow-up`, they do not change readiness.
+
+Add `--follow-up <date-or-time>` to write the request and set the issue's
+`scheduled_on` in one daemon transaction. It uses the same validation and timezone
+rules as [`kata schedule`](#issue-metadata), including past dates. Relative words
+and numeric UTC offsets are rejected. `--follow-up` cannot be empty, `-`, or
+combined with `--clear`; these are usage errors (exit 2). Clear the date with
+`kata schedule <ref> -`.
+
+The date is shared by every request on the issue. Each follow-up replaces it;
+clearing or answering a request leaves it intact. Future dates hide the issue
+from `ready` and `next` until the gate opens. Due reminders go to the current
+owner, or author when unowned, using the existing occupied-slot and deduplication
+rules below. Changing a recurring occurrence's date leaves its recurrence rule
+and future occurrences unchanged.
+
+`--follow-up` also works with `--re` and `--broadcast`. A broadcast schedules
+only the addressed issue, not its children. With an empty audience it can still
+set the date and returns `recipients: []`. Broadcast rate limits still apply,
+including date-only changes. An identical targeted request and date returns
+`changed: false`. JSON adds top-level `scheduled_on`; agent output appends
+`scheduled_on=<value>`, including on no-op follow-ups. Calls without the flag
+retain their existing output.
+
+Validation or authorization rejection commits neither part. A lost response or
+a failure after commit can leave both changes saved; inspect the issue before
+retrying. An older daemon that rejects the new request field cannot perform this
+operation; there is no fallback to separate writes.
+
+Recipients may be outside handles with no Kata actor account. They identify
+exact Kata inboxes; `notify` does not send email or contact an external service.
+See [Waiting on a person](../workflows/agents.md#waiting-on-a-person) for parking,
+follow-up, and cleanup commands.
 
 Use `--re <comment>` to ask the recipient to answer one visible comment. A
 typed reply clears the matching request and notifies the original requester on
