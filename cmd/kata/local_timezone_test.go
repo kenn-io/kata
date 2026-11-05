@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestLocalTimeZoneNameReadsLocaltimeLink(t *testing.T) {
+func TestLocalTimeZoneNameUsesEnvironmentAndLocaltimeLink(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "localtime")
 	require.NoError(t, os.Symlink("/usr/share/zoneinfo/Asia/Tokyo", path))
 	old := localtimePath
@@ -19,7 +19,9 @@ func TestLocalTimeZoneNameReadsLocaltimeLink(t *testing.T) {
 	t.Setenv("TZ", "")
 	assert.Equal(t, "UTC", localTimeZoneName(), "TZ set but empty means UTC, not the localtime link")
 	require.NoError(t, os.Unsetenv("TZ"))
+	// Check the CLI wrapper's fallback after TZ changes from empty to unset.
 	assert.Equal(t, "Asia/Tokyo", localTimeZoneName())
+	// Schedule coverage uses a colon-prefixed TZ; keep the plain name here too.
 	t.Setenv("TZ", "Europe/Paris")
 	assert.Equal(t, "Europe/Paris", localTimeZoneName())
 }

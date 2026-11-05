@@ -231,6 +231,7 @@ func TestRecurrenceKeyIsDetailOnly(t *testing.T) {
 		assert.Nil(t, cmd)
 	})
 
+	// Help hides both panes; these cases also check list focus in each layout.
 	for _, split := range []bool{false, true} {
 		t.Run(strconv.FormatBool(split), func(t *testing.T) {
 			h := newRecurrenceHarness(t, viewList)
@@ -485,7 +486,7 @@ func TestRecurrenceKeyUsesTheSamePermissionGateAsOtherEdits(t *testing.T) {
 	assert.Equal(t, inputNone, h.m.input.kind)
 }
 
-func TestRecurrenceFormRequiresGuardedStartAPI(t *testing.T) {
+func TestSaveRecurrenceRequiresGuardedStartAPI(t *testing.T) {
 	h := newRecurrenceHarness(t, viewDetail)
 	posts := 0
 	hc := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
@@ -499,14 +500,14 @@ func TestRecurrenceFormRequiresGuardedStartAPI(t *testing.T) {
 		}
 		return h.env.HTTP.Do(r)
 	})}
-	h.m.api = newConnectedUndoClient(t, NewClient(h.env.URL, hc))
-	h.open()
-	h.fill("FREQ=DAILY", "2026-11-09", "Europe/Paris")
-	h.save()
+	h.client = newConnectedUndoClient(t, NewClient(h.env.URL, hc))
+	_, err := h.client.SaveRecurrence(t.Context(), h.issue.ProjectID, h.issue.UID, RecurrenceInput{
+		Terms:         recurrenceclient.Terms{Rule: "FREQ=DAILY", Start: "2026-11-09", Zone: "Europe/Paris", Actor: "alice"},
+		IssueRevision: h.issue.Revision,
+	})
+	require.Error(t, err)
 	assert.Zero(t, posts, "an older daemon cannot enforce a guarded start")
-	assert.Equal(t, inputRecurrenceForm, h.m.input.kind)
-	assert.Contains(t, h.m.input.err, "upgrade the daemon")
-	assert.Empty(t, h.rows())
+	assert.Contains(t, err.Error(), "upgrade the daemon")
 }
 
 func TestRecurrenceIncomingMutationRefreshesDetail(t *testing.T) {
@@ -553,6 +554,7 @@ func TestRecurrenceFormConflictKeepsInputUntilReopened(t *testing.T) {
 func TestRecurrenceFormDaemonErrorFitsMinimumHeight(t *testing.T) {
 	defer snapshotInit(t)()
 	for _, width := range []int{40, 60, 80} {
+		// Keep the start form too: status rendering must work without a recurrence.
 		for _, rec := range []*recurrenceclient.View{nil, {RRule: "FREQ=YEARLY;INTERVAL=2;BYMONTH=1,2,3,4,5,6,7,8,9,10,11,12;BYDAY=MO,TU,WE,TH,FR;BYHOUR=0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23;BYMINUTE=0,15,30,45;BYSECOND=0;WKST=MO", DTStart: "2026-11-09", Timezone: "Europe/Paris"}} {
 			s := newRecurrenceForm(formTarget{issueShortID: "42aa"}, Issue{}, rec)
 			s.err = "Could not start repeat: the daemon refused the recurrence rule FREQ=WEEKLY;INTERVAL=2;BYDAY=MON,TUE,WED,THU,FRI. Enter a supported rule and save again."
