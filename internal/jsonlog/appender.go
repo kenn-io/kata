@@ -134,7 +134,9 @@ func (a *Appender) rotateLocked(ctx context.Context) error {
 	return a.openActive(ctx)
 }
 
-// Close releases the stream after its sweeper has stopped.
+// Close releases the current handle after its sweeper has stopped.
+// It does not disable Append: a later append reopens the stream, just as it
+// does after an I/O failure. Callers own stopping writes before cleanup.
 func (a *Appender) Close() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()

@@ -80,3 +80,19 @@ func TestAppenderRestartPreservesRecordBoundary(t *testing.T) {
 		})
 	}
 }
+
+// Close releases a handle rather than disabling the retryable stream.
+func TestAppenderAppendAfterCloseReopens(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dispatch.jsonl")
+	a, err := Open(t.Context(), path, 1<<20, 2)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, a.Close()) })
+	require.NoError(t, a.Append(t.Context(), map[string]int{"n": 1}))
+	require.NoError(t, a.Close())
+	require.NoError(t, a.Close())
+	require.NoError(t, a.Append(t.Context(), map[string]int{"n": 2}))
+	require.NoError(t, a.Close())
+	raw, err := os.ReadFile(path) //nolint:gosec // TempDir fixture
+	require.NoError(t, err)
+	require.Equal(t, "{\"n\":1}\n{\"n\":2}\n", string(raw))
+}

@@ -210,8 +210,8 @@ func TestDaemonLogs_Hooks_AgentOutputOneLinePerRecord(t *testing.T) {
 	assert.NotContains(t, lines[0], "{")
 }
 
-func TestFormatAgentHookLogRecordFormatsDecodedRecord(t *testing.T) {
-	got := formatAgentHookLogRecord(map[string]jsontext.Value{
+func TestFormatAgentDaemonLogRecordFormatsDecodedRecord(t *testing.T) {
+	got := formatAgentDaemonLogRecord(map[string]jsontext.Value{
 		"event_id":   jsontext.Value(`1`),
 		"event_type": jsontext.Value(`"issue.created"`),
 		"stderr":     jsontext.Value(`"first line\nsecond line"`),

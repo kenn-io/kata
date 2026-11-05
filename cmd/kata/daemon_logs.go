@@ -195,7 +195,7 @@ func readDaemonLogSnapshot(ctx context.Context, source logSource, stdout, stderr
 		mark.file = files[len(files)-1]
 	}
 	for i := range matches {
-		writeHookLogRecord(stdout, []byte(matches[(head+i)%len(matches)]))
+		writeDaemonLogRecord(stdout, []byte(matches[(head+i)%len(matches)]))
 	}
 	return mark, nil
 }
@@ -209,7 +209,7 @@ func writeLine(w io.Writer, s string) {
 	_, _ = w.Write([]byte{'\n'})
 }
 
-func writeHookLogRecord(w io.Writer, raw []byte) {
+func writeDaemonLogRecord(w io.Writer, raw []byte) {
 	if currentOutputMode() != outputAgent {
 		writeLine(w, string(raw))
 		return
@@ -218,10 +218,10 @@ func writeHookLogRecord(w io.Writer, raw []byte) {
 	if err := json.Unmarshal(raw, &rec); err != nil {
 		return
 	}
-	writeLine(w, formatAgentHookLogRecord(rec))
+	writeLine(w, formatAgentDaemonLogRecord(rec))
 }
 
-func formatAgentHookLogRecord(rec map[string]jsontext.Value) string {
+func formatAgentDaemonLogRecord(rec map[string]jsontext.Value) string {
 	keys := make([]string, 0, len(rec))
 	for k := range rec {
 		keys = append(keys, k)
@@ -260,7 +260,7 @@ func readMatchesFromLog(ctx context.Context, file *os.File, stderr io.Writer, f 
 }
 
 // runDaemonLogTail prints the last `limit` matches from existing files,
-// then follows the active runs.jsonl. The snapshot mark is
+// then follows the selected active log. The snapshot mark is
 // passed through so followActive resumes at the exact offset the
 // one-shot pass stopped consuming — rather than the file's current
 // size, which can have grown between one-shot and follow.
@@ -284,11 +284,9 @@ func runDaemonLogTail(ctx context.Context, source logSource, stdout, stderr io.W
 	return followActive(ctx, stdout, stderr, active, cursor, f)
 }
 
-// awaitActiveFile blocks until runs.jsonl exists (or ctx is done).
-// Watches runs.jsonl specifically rather than "any file in the
-// directory" — a rotated-only directory (runs.jsonl.N present, active
-// missing) must NOT short-circuit, otherwise --tail would follow a
-// rotated file that never gets new content.
+// awaitActiveFile blocks until the selected active log exists (or ctx is done).
+// A directory containing only rotated logs must not short-circuit: --tail
+// must follow the active file that receives new records.
 func awaitActiveFile(ctx context.Context, source logSource) (string, error) {
 	active := filepath.Join(source.root, source.base)
 	for {
@@ -499,7 +497,7 @@ func emitLogLines(ctx context.Context, file *os.File, path string, from int64, s
 	if _, err := file.Seek(from, io.SeekStart); err != nil {
 		return 0, err
 	}
-	return readLogRecords(ctx, file, path, stderr, f, func(line []byte) { writeHookLogRecord(stdout, line) })
+	return readLogRecords(ctx, file, path, stderr, f, func(line []byte) { writeDaemonLogRecord(stdout, line) })
 }
 
 // readLogRecords is the complete-record and version boundary for both modes.
@@ -555,7 +553,7 @@ func daemonLogSource(ctx context.Context, cron bool) (logSource, error) {
 	return logSource{root, "runs.jsonl"}, err
 }
 
-// rotatedRun is a parsed runs.jsonl.N entry: idx is N, path is the
+// rotatedRun is a parsed base.N entry: idx is N, path is the
 // absolute filesystem path.
 type rotatedRun struct {
 	path string
@@ -583,7 +581,7 @@ func scanRunsFiles(source logSource) ([]string, error) {
 }
 
 // classifyRunsEntries splits a directory listing into rotated entries
-// (runs.jsonl.N) and a hasActive flag for runs.jsonl. Anything else is
+// (base.N) and a hasActive flag for the selected base. Anything else is
 // ignored.
 func classifyRunsEntries(source logSource, entries []os.DirEntry) ([]rotatedRun, bool) {
 	var rotateds []rotatedRun
@@ -603,7 +601,7 @@ func classifyRunsEntries(source logSource, entries []os.DirEntry) ([]rotatedRun,
 	return rotateds, hasActive
 }
 
-// parseRotatedIndex returns the numeric suffix of "runs.jsonl.N",
+// parseRotatedIndex returns the numeric suffix of "base.N",
 // or false if the name doesn't match.
 func parseRotatedIndex(name, base string) (int, bool) {
 	if !strings.HasPrefix(name, base+".") {

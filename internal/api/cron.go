@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json/jsontext"
-	"reflect"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -223,10 +222,7 @@ type CronDispatchExplanation struct {
 // TransformSchema preserves the required null state for an absent observation.
 func (CronDispatchExplanation) TransformSchema(registry huma.Registry, schema *huma.Schema) *huma.Schema {
 	for _, field := range []string{"last", "last_non_idle"} {
-		last := huma.SchemaFromType(registry, reflect.TypeFor[CronDispatchDecision]())
-		last.Nullable = true
-		last.Extensions = map[string]any{"x-omitempty": false}
-		schema.Properties[field] = last
+		schema.Properties[field] = requiredNullableObjectSchema[CronDispatchDecision](registry)
 	}
 	return schema
 }
