@@ -1,7 +1,6 @@
 package sqlitestore_test
 
 import (
-	"database/sql"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -10,24 +9,15 @@ import (
 )
 
 func TestUIReferences_PageBudget(t *testing.T) {
-	d, path := openTestDBWithPath(t)
+	raw, projectID := openPageBudgetDB(t)
 	ctx := t.Context()
-	p, err := d.CreateProject(ctx, "example-project")
-	require.NoError(t, err)
-	raw, err := sql.Open("sqlite", path)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, raw.Close()) })
-	raw.SetMaxOpenConns(1)
-	// Leave planner statistics absent, as on a newly populated store.
-	_, err = raw.ExecContext(ctx, `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<50000)
- INSERT INTO issues(uid,project_id,short_id,title,author,owner)
- SELECT printf('%026d',x),?,printf('%08d',x),'ordinary task','tester',printf('owner-%02d',x%10) FROM n`, p.ID)
+	_, err := raw.ExecContext(ctx, `UPDATE issues SET owner=printf('owner-%02d',id%10) WHERE project_id=?`, projectID)
 	require.NoError(t, err)
 	_, err = raw.ExecContext(ctx, `INSERT INTO issue_labels(issue_id,label,author)
- SELECT id,printf('label-%02d',id%10),'tester' FROM issues WHERE project_id=?`, p.ID)
+ SELECT id,printf('label-%02d',id%10),'tester' FROM issues WHERE project_id=?`, projectID)
 	require.NoError(t, err)
 	_, err = raw.ExecContext(ctx, `INSERT INTO issue_labels(issue_id,label,author)
- SELECT id,'recent-label','tester' FROM issues WHERE project_id=? ORDER BY id DESC LIMIT 40`, p.ID)
+ SELECT id,'recent-label','tester' FROM issues WHERE project_id=? ORDER BY id DESC LIMIT 40`, projectID)
 	require.NoError(t, err)
 	store := &sqlitestore.Store{DB: raw}
 	for _, tc := range []struct {
@@ -36,9 +26,17 @@ func TestUIReferences_PageBudget(t *testing.T) {
 	}{
 		// About four to five times the measured 266 and 25 fetches.
 		{"all choices", 1100},
+		{"analyzed mostly deleted", 1100},
 		{"issue ordering", 128},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.name == "analyzed mostly deleted" {
+				// Keep early representatives and the recent label visible while stats favor live issues.
+				_, err := raw.ExecContext(ctx, `UPDATE issues SET deleted_at=CURRENT_TIMESTAMP WHERE id>1000 AND id<=49960`)
+				require.NoError(t, err)
+				_, err = raw.ExecContext(ctx, `ANALYZE`)
+				require.NoError(t, err)
+			}
 			if tc.name == "issue ordering" {
 				_, err := raw.ExecContext(ctx, `UPDATE issues SET owner=NULL`)
 				require.NoError(t, err)
@@ -52,7 +50,7 @@ func TestUIReferences_PageBudget(t *testing.T) {
 			refs, err := store.ReadUIReferences(ctx, db.UIReferencesQuery{Limit: 200})
 			require.NoError(t, err)
 			require.Len(t, refs.Issues, 200)
-			if tc.name == "all choices" {
+			if tc.name != "issue ordering" {
 				require.Len(t, refs.Owners, 10)
 				require.Len(t, refs.Labels, 11)
 			}

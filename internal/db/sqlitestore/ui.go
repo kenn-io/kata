@@ -320,38 +320,44 @@ func (d *Store) ReadUIReferences(ctx context.Context, query db.UIReferencesQuery
 		return db.UIReferencesData{}, err
 	}
 	if query.Query == "" {
-		ownerStatement := `
-			SELECT i.owner, MIN(i.id)
-			FROM issues i JOIN projects p ON p.id = i.project_id
-			WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ? AND i.owner IS NOT NULL AND i.owner <> ''
-		`
-		ownerArgs := []any{db.SystemProjectName}
-		ownerStatement, ownerArgs = appendUIReferenceIssueScopeSQLite(ownerStatement, ownerArgs, query.AllowedIssueIDs)
-		ownerStatement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &ownerArgs)
-		ownerStatement += ` GROUP BY i.owner ORDER BY i.owner LIMIT ?`
-		ownerArgs = append(ownerArgs, limit)
 		_, restricted := db.AuthorizedProjects(ctx)
+		var ownerStatement string
+		var ownerArgs []any
 		if !restricted && query.AllowedIssueIDs == nil {
 			ownerStatement, ownerArgs = uiReferenceOwnersQuery, []any{db.SystemProjectName, limit}
+		} else {
+			ownerStatement = `
+				SELECT i.owner, MIN(i.id)
+				FROM issues i JOIN projects p ON p.id = i.project_id
+				WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ? AND i.owner IS NOT NULL AND i.owner <> ''
+			`
+			ownerArgs = []any{db.SystemProjectName}
+			ownerStatement, ownerArgs = appendUIReferenceIssueScopeSQLite(ownerStatement, ownerArgs, query.AllowedIssueIDs)
+			ownerStatement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &ownerArgs)
+			ownerStatement += ` GROUP BY i.owner ORDER BY i.owner LIMIT ?`
+			ownerArgs = append(ownerArgs, limit)
 		}
 		data.Owners, err = readUIReferenceSuggestions(ctx, tx, ownerStatement, ownerArgs...)
 		if err != nil {
 			return db.UIReferencesData{}, err
 		}
-		labelStatement := `
-			SELECT il.label, MIN(i.id)
-			FROM issue_labels il
-			JOIN issues i ON i.id = il.issue_id
-			JOIN projects p ON p.id = i.project_id
-			WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?
-		`
-		labelArgs := []any{db.SystemProjectName}
-		labelStatement, labelArgs = appendUIReferenceIssueScopeSQLite(labelStatement, labelArgs, query.AllowedIssueIDs)
-		labelStatement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &labelArgs)
-		labelStatement += ` GROUP BY il.label ORDER BY il.label LIMIT ?`
-		labelArgs = append(labelArgs, limit)
+		var labelStatement string
+		var labelArgs []any
 		if !restricted && query.AllowedIssueIDs == nil {
 			labelStatement, labelArgs = uiReferenceLabelsQuery, []any{db.SystemProjectName, limit}
+		} else {
+			labelStatement = `
+				SELECT il.label, MIN(i.id)
+				FROM issue_labels il
+				JOIN issues i ON i.id = il.issue_id
+				JOIN projects p ON p.id = i.project_id
+				WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?
+			`
+			labelArgs = []any{db.SystemProjectName}
+			labelStatement, labelArgs = appendUIReferenceIssueScopeSQLite(labelStatement, labelArgs, query.AllowedIssueIDs)
+			labelStatement += " AND " + authorizedProjectPredicate(ctx, "p.uid", &labelArgs)
+			labelStatement += ` GROUP BY il.label ORDER BY il.label LIMIT ?`
+			labelArgs = append(labelArgs, limit)
 		}
 		data.Labels, err = readUIReferenceSuggestions(ctx, tx, labelStatement, labelArgs...)
 		if err != nil {
@@ -368,15 +374,16 @@ func (d *Store) ReadUIReferences(ctx context.Context, query db.UIReferencesQuery
 	return data, nil
 }
 
+// CROSS JOIN keeps each seek in index order even after ANALYZE.
 const uiReferenceOwnersQuery = `WITH RECURSIVE choices(value, issue_id) AS (
 	SELECT owner, id FROM (
-		SELECT i.owner, i.id FROM issues i JOIN projects p ON p.id = i.project_id
+		SELECT i.owner, i.id FROM issues i CROSS JOIN projects p ON p.id = i.project_id
 		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?1 AND i.owner IS NOT NULL AND i.owner <> ''
 		ORDER BY i.owner, i.id LIMIT 1
 	)
 	UNION ALL
 	SELECT i.owner, i.id FROM choices prev JOIN issues i ON i.id = (
-		SELECT i.id FROM issues i JOIN projects p ON p.id = i.project_id
+		SELECT i.id FROM issues i CROSS JOIN projects p ON p.id = i.project_id
 		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?1 AND i.owner IS NOT NULL AND i.owner > prev.value
 		ORDER BY i.owner, i.id LIMIT 1
 	)
@@ -385,13 +392,13 @@ const uiReferenceOwnersQuery = `WITH RECURSIVE choices(value, issue_id) AS (
 
 const uiReferenceLabelsQuery = `WITH RECURSIVE choices(value, issue_id) AS (
 	SELECT label, issue_id FROM (
-		SELECT il.label, il.issue_id FROM issue_labels il JOIN issues i ON i.id = il.issue_id JOIN projects p ON p.id = i.project_id
+		SELECT il.label, il.issue_id FROM issue_labels il CROSS JOIN issues i ON i.id = il.issue_id CROSS JOIN projects p ON p.id = i.project_id
 		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?1
 		ORDER BY il.label LIMIT 1
 	)
 	UNION ALL
 	SELECT il.label, il.issue_id FROM choices prev JOIN issue_labels il ON il.rowid = (
-		SELECT il.rowid FROM issue_labels il JOIN issues i ON i.id = il.issue_id JOIN projects p ON p.id = i.project_id
+		SELECT il.rowid FROM issue_labels il CROSS JOIN issues i ON i.id = il.issue_id CROSS JOIN projects p ON p.id = i.project_id
 		WHERE i.deleted_at IS NULL AND p.deleted_at IS NULL AND p.name <> ?1 AND il.label > prev.value
 		ORDER BY il.label LIMIT 1
 	)
