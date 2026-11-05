@@ -752,7 +752,7 @@ func TestHTTPFetcherRepositoryComments(t *testing.T) {
 			assert.Equal(t, "asc", r.URL.Query().Get("direction"))
 			assert.Equal(t, since.Format(time.RFC3339), r.URL.Query().Get("since"))
 			w.Header().Set("Link", `<https://api.github.com/repositories/101/issues/comments?page=2>; rel="next"`)
-			writeHTTPFetcherTestResponse(t, w, `[{"id":1,"issue_url":"https://api.github.com/repos/example-owner/example-repo/issues/7"},{"id":2,"issue_url":"https://github.example.com/api/v3/repos/example-owner/example-repo/issues/8"}]`)
+			writeHTTPFetcherTestResponse(t, w, `[{"id":1,"issue_url":"https://api.github.com/repos/example-owner/example-repo/issues/7"},{"id":2,"issue_url":"https://api.github.com/repos/example-owner/example-repo/issues/8"}]`)
 		} else {
 			assert.Equal(t, []int{2}, counts)
 			writeHTTPFetcherTestResponse(t, w, `[{"id":3,"issue_url":"https://api.github.com/repos/example-owner/example-repo/issues/7"}]`)
@@ -782,49 +782,77 @@ func TestHTTPFetcherRepositoryComments(t *testing.T) {
 }
 
 func TestHTTPFetcherRepositoryCommentsCompletenessAndMalformedURL(t *testing.T) {
-	for _, tc := range []struct {
-		name, issueURL      string
-		rows                int
-		complete, wantError bool
-	}{
-		{"empty", "", 0, true, false},
-		{"full last page", "https://api.github.com/repos/example-owner/example-repo/issues/1", 100, true, false},
-		{"two full pages", "https://api.github.com/repos/example-owner/example-repo/issues/1", 200, true, false},
-		{"below feed limit", "https://api.github.com/repos/example-owner/example-repo/issues/1", 29999, true, false},
-		{"feed limit", "https://api.github.com/repos/example-owner/example-repo/issues/1", 30000, false, false},
-		{"above feed limit", "https://api.github.com/repos/example-owner/example-repo/issues/1", 30001, false, false},
-		{"malformed", "bogus", 1, false, true},
-		{"zero", "https://api.github.com/repos/example-owner/example-repo/issues/0", 1, false, true},
-		{"wrong resource", "https://api.github.com/repos/example-owner/example-repo/pulls/1", 1, false, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				assert.Empty(t, r.URL.Query().Get("since"))
-				page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-				if page == 0 {
-					page = 1
+	t.Run("completeness", func(t *testing.T) {
+		for _, tc := range []struct {
+			name     string
+			rows     int
+			complete bool
+		}{
+			{"empty", 0, true},
+			{"full last page", 100, true},
+			{"two full pages", 200, true},
+			{"below feed limit", 29999, true},
+			{"feed limit", 30000, false},
+			{"above feed limit", 30001, false},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					assert.Empty(t, r.URL.Query().Get("since"))
+					page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+					if page == 0 {
+						page = 1
+					}
+					start := (page - 1) * 100
+					end := min(start+100, tc.rows)
+					if end < tc.rows {
+						w.Header().Set("Link", fmt.Sprintf(`<http://%s%s?page=%d>; rel="next"`, r.Host, r.URL.Path, page+1))
+					}
+					rows := make([]map[string]any, end-start)
+					for i := range rows {
+						rows[i] = map[string]any{"id": start + i + 1, "issue_url": "https://api.github.com/repos/example-owner/example-repo/issues/1"}
+					}
+					require.NoError(t, json.MarshalWrite(w, rows))
+				}))
+				defer server.Close()
+				fetcher := NewHTTPFetcher(HTTPFetcherConfig{Client: server.Client(), CredentialResolver: newStaticHTTPFetcherTestResolver("test-token"), RESTBaseURLOverride: server.URL})
+				comments, complete, err := fetcher.RepositoryComments(t.Context(), Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}, nil)
+				require.NoError(t, err)
+				assert.Equal(t, tc.complete, complete)
+				assert.Len(t, comments[1], tc.rows)
+			})
+		}
+	})
+	t.Run("issue_url", func(t *testing.T) {
+		for _, tc := range []struct {
+			name, host, issueURL string
+			number               int
+		}{
+			{"github", "github.com", "https://api.github.com/repos/example-owner/example-repo/issues/7", 7},
+			{"GHES", "github.example.com", "https://github.example.com/api/v3/repos/example-owner/example-repo/issues/8", 8},
+			{"malformed", "github.com", "bogus", 0},
+			{"zero", "github.com", "https://api.github.com/repos/example-owner/example-repo/issues/0", 0},
+			{"wrong resource", "github.com", "https://api.github.com/repos/example-owner/example-repo/pulls/1", 0},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				if tc.host != "github.com" {
+					allowGitHubEnterpriseHost(t, tc.host)
 				}
-				start := (page - 1) * 100
-				end := min(start+100, tc.rows)
-				if end < tc.rows {
-					w.Header().Set("Link", fmt.Sprintf(`<http://%s%s?page=%d>; rel="next"`, r.Host, r.URL.Path, page+1))
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					assert.Empty(t, r.URL.Query().Get("since"))
+					require.NoError(t, json.MarshalWrite(w, []map[string]any{{"id": 17, "issue_url": tc.issueURL}}))
+				}))
+				defer server.Close()
+				fetcher := NewHTTPFetcher(HTTPFetcherConfig{Client: server.Client(), CredentialResolver: newStaticHTTPFetcherTestResolver("test-token"), RESTBaseURLOverride: server.URL})
+				comments, complete, err := fetcher.RepositoryComments(t.Context(), Binding{Host: tc.host, Owner: "example-owner", Repo: "example-repo"}, nil)
+				if tc.number == 0 {
+					require.ErrorContains(t, err, "issue_url")
+					return
 				}
-				rows := make([]map[string]any, end-start)
-				for i := range rows {
-					rows[i] = map[string]any{"id": start + i + 1, "issue_url": tc.issueURL}
-				}
-				require.NoError(t, json.MarshalWrite(w, rows))
-			}))
-			defer server.Close()
-			fetcher := NewHTTPFetcher(HTTPFetcherConfig{Client: server.Client(), CredentialResolver: newStaticHTTPFetcherTestResolver("test-token"), RESTBaseURLOverride: server.URL})
-			comments, complete, err := fetcher.RepositoryComments(t.Context(), Binding{Host: "github.com", Owner: "example-owner", Repo: "example-repo"}, nil)
-			if tc.wantError {
-				require.ErrorContains(t, err, "issue_url")
-				return
-			}
-			require.NoError(t, err)
-			assert.Equal(t, tc.complete, complete)
-			assert.Len(t, comments[1], tc.rows)
-		})
-	}
+				require.NoError(t, err)
+				assert.True(t, complete)
+				require.Len(t, comments[tc.number], 1)
+				assert.Equal(t, int64(17), comments[tc.number][0].ID)
+			})
+		}
+	})
 }

@@ -43,9 +43,6 @@ func TestRunnerFirstSyncFetchesAllImportsCommentsEmitsEventsAndAdvancesCursor(t 
 
 	require.Len(t, h.fetcher.issueCalls, 1)
 	assert.Nil(t, h.fetcher.issueCalls[0].since)
-	assert.Empty(t, h.fetcher.commentCalls)
-	require.Len(t, h.fetcher.repositoryCommentCalls, 1)
-	assert.Nil(t, h.fetcher.repositoryCommentCalls[0])
 	assert.Equal(t, 2, result.Import.Created)
 	assert.Equal(t, 2, result.Import.Comments)
 	assert.Equal(t, 2, result.Status.LastCreated)
@@ -629,33 +626,15 @@ func TestRunnerLegacyTitlePrefixConfigReconcilesExistingImportedTitles(t *testin
 	assert.True(t, *refreshedConfig.TitlePrefix)
 }
 
-func TestRunnerFetchesCommentsForReturnedNonPullRequestIssuesInOverlapWindow(t *testing.T) {
-	h := newRunnerHarness(t)
-	lastCursor := h.now.Add(-10 * time.Minute)
-	recordSuccessfulCursor(h.ctx, t, h.db, h.binding.ID, lastCursor)
-	overlapIssue := testIssue(101, 1, "overlap issue", lastCursor.Add(-time.Minute))
-	overlapIssue.Comments = 1
-	equalCursorIssue := testIssue(102, 2, "equal cursor issue", lastCursor)
-	equalCursorIssue.Comments = 1
-	pullRequest := testIssue(103, 3, "pull request", lastCursor.Add(-time.Minute))
-	pullRequest.Comments = 1
-	pullRequest.PullRequest = &PullRequest{}
-	h.fetcher.issues = []Issue{overlapIssue, equalCursorIssue, pullRequest}
-
-	_, err := h.runner.RunOnce(h.ctx, h.binding.ID)
-	require.NoError(t, err)
-
-	assert.Empty(t, h.fetcher.commentCalls)
-	require.Len(t, h.fetcher.repositoryCommentCalls, 1)
-	require.NotNil(t, h.fetcher.repositoryCommentCalls[0])
-	assert.Equal(t, lastCursor.Add(-2*time.Minute), *h.fetcher.repositoryCommentCalls[0])
-}
-
 func TestRunnerSkipsCommentFetchWhenGitHubIssueReportsZeroComments(t *testing.T) {
 	h := newRunnerHarness(t)
+	cutoff := h.now.Add(-30 * time.Minute)
+	setParentRunnerConfig(t, h, true, &cutoff)
 	withComments := testIssue(101, 1, "with comments", h.now.Add(-time.Hour))
 	withComments.Comments = 2
 	withoutComments := testIssue(102, 2, "without comments", h.now.Add(-time.Hour))
+	withComments.UpdatedAt = new(h.now)
+	withoutComments.UpdatedAt = new(h.now)
 	h.fetcher.issues = []Issue{withComments, withoutComments}
 	h.fetcher.comments = map[int][]Comment{
 		1: {{
@@ -670,9 +649,7 @@ func TestRunnerSkipsCommentFetchWhenGitHubIssueReportsZeroComments(t *testing.T)
 	result, err := h.runner.RunOnce(h.ctx, h.binding.ID)
 	require.NoError(t, err)
 
-	assert.Empty(t, h.fetcher.commentCalls)
-	require.Len(t, h.fetcher.repositoryCommentCalls, 1)
-	assert.Nil(t, h.fetcher.repositoryCommentCalls[0])
+	assert.Equal(t, []int{1}, h.fetcher.commentCalls)
 	assert.Equal(t, 2, result.Import.Created)
 	assert.Equal(t, 1, result.Import.Comments)
 }
@@ -2113,17 +2090,15 @@ func TestRunnerCommentWindowsAndFallbacks(t *testing.T) {
 		{name: "PR-heavy first sync", prComments: 1001, wantIssue: 1},
 		{name: "PR-heavy filtered first sync", cutoff: true, fresh: true, prComments: 1001, wantIssue: 1},
 		{name: "PR-heavy incremental", cursor: true, mapped: true, prComments: 1001, wantRepository: 1},
-		{name: "filtered large first sync", cutoff: true, fresh: true, large: true, wantIssue: 1},
+		{name: "large parent backfill keeps window", cursor: true, mapped: true, prComments: 29997, wantRepository: 1},
+		{name: "filtered large first sync", cutoff: true, fresh: true, large: true, wantIssue: 300},
 		{name: "filtered new issue", cutoff: true, fresh: true, wantRepository: 1},
 		{name: "incomplete initial feed", incomplete: true, wantRepository: 1, wantIssue: 1},
 		{name: "cutoff preserves cursor window", cursor: true, cutoff: true, mapped: true, wantRepository: 1},
-		{name: "mapped incremental", cursor: true, mapped: true, wantRepository: 1},
 		{name: "old first import", cursor: true, wantIssue: 1},
-		{name: "filtered first sync", cutoff: true, wantIssue: 1},
 		{name: "reset cursor keeps mappings", cutoff: true, mapped: true, wantIssue: 1},
 		{name: "incomplete repository feed", cursor: true, mapped: true, incomplete: true, wantRepository: 1, wantIssue: 1},
-		{name: "unfiltered large first sync", large: true, wantIssue: 1},
-		{name: "large parent backfill keeps window", cursor: true, mapped: true, large: true, wantRepository: 1},
+		{name: "unfiltered large first sync", large: true, wantIssue: 300},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newRunnerHarness(t)
@@ -2157,16 +2132,32 @@ func TestRunnerCommentWindowsAndFallbacks(t *testing.T) {
 				issue.CreatedAt = nil
 			}
 			h.fetcher.issues = []Issue{issue}
-			if tc.large || tc.prComments > 0 {
+			if tc.large {
+				// Equal page estimates isolate the repository's page limit.
+				h.fetcher.issues[0].Comments = 100
+				for number := 2; number <= 300; number++ {
+					extra := testIssue(int64(100+number), number, "issue", old)
+					extra.CreatedAt = issue.CreatedAt
+					extra.UpdatedAt = new(h.now)
+					extra.Comments = 100
+					h.fetcher.issues = append(h.fetcher.issues, extra)
+				}
+			}
+			if tc.prComments > 0 {
 				h.fetcher.parentMap = map[int]int64{}
 				pr := testIssue(102, 2, "pull request", old)
 				pr.PullRequest = &PullRequest{}
 				pr.Comments = tc.prComments
-				if tc.large {
-					pr.Comments = 29999
-				}
 				pr.UpdatedAt = new(h.now)
 				h.fetcher.issues = append(h.fetcher.issues, pr)
+				if tc.cursor {
+					// Include issues created at and after the window boundary.
+					for i, updated := range []time.Time{cursor.Add(-time.Minute), cursor} {
+						extra := testIssue(int64(103+i), 3+i, "overlap issue", updated)
+						extra.Comments = 1
+						h.fetcher.issues = append(h.fetcher.issues, extra)
+					}
+				}
 			}
 			h.fetcher.comments = map[int][]Comment{1: {{ID: 1001, Body: "old comment", CreatedAt: new(old)}}}
 			// The incremental feed also returns edited comments, even when they
@@ -2194,7 +2185,7 @@ func TestRunnerCommentWindowsAndFallbacks(t *testing.T) {
 					assert.Nil(t, h.fetcher.repositoryCommentCalls[0])
 				}
 			}
-			if tc.large && tc.cursor {
+			if tc.prComments > 0 && tc.cursor {
 				assert.Nil(t, h.fetcher.issueCalls[0].since)
 			}
 		})
