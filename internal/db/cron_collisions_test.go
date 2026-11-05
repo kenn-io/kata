@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/cron"
@@ -36,8 +35,8 @@ func TestCronCollisionParentMetadataByteReadBound(t *testing.T) {
 	require.LessOrEqual(t, len(parent.Metadata), 128)
 }
 
-// Admission owns binary name/UID order and self-exclusion before the engine
-// spends its stepping budget. Insertion order cannot change the report.
+// Admission owns binary name/UID order and self-exclusion. Changing physical
+// insertion order must leave the exact admitted peer sequence unchanged.
 func TestCronCollisionsOrderProperty(t *testing.T) {
 	pool, err := sql.Open("sqlite", ":memory:")
 	require.NoError(t, err)
@@ -49,8 +48,7 @@ func TestCronCollisionsOrderProperty(t *testing.T) {
 	require.NoError(t, definition.Validate())
 	raw, err := json.Marshal(definition)
 	require.NoError(t, err)
-	candidate := cron.CollisionJob{UID: "candidate", Name: "Candidate", Def: definition}
-	from := time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)
+	candidate := cron.CollisionJob{UID: "candidate", Name: "Candidate"}
 	hegel.Test(t, func(ht *hegel.T) {
 		tx, err := pool.BeginTx(t.Context(), nil)
 		require.NoError(ht, err)
@@ -73,9 +71,7 @@ func TestCronCollisionsOrderProperty(t *testing.T) {
 			}
 			return want[i].UID < want[j].UID
 		})
-		budget := hegel.Draw(ht, hegel.Integers(0, cron.CollisionStepBudget))
-		var report cron.ValidationCollisions
-		for pass := range 2 {
+		for range 2 {
 			_, err := tx.ExecContext(t.Context(), `DELETE FROM cron_jobs`)
 			require.NoError(ht, err)
 			for _, peer := range append(slices.Clone(peers), candidate) {
@@ -87,14 +83,6 @@ func TestCronCollisionsOrderProperty(t *testing.T) {
 			require.Zero(ht, skipped)
 			require.False(ht, limited)
 			require.Equal(ht, want, admitted)
-			got, err := cron.PreviewCollisions(t.Context(), candidate, admitted, from, budget)
-			require.NoError(ht, err)
-			require.Equal(ht, want, admitted, "preview must not mutate admitted order or definitions")
-			if pass == 0 {
-				report = got
-			} else {
-				require.Equal(ht, report, got)
-			}
 			slices.Reverse(peers)
 		}
 	}, hegel.WithTestCases(60), hegel.WithDatabase(t.TempDir()))

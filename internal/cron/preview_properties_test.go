@@ -93,6 +93,20 @@ func TestCronValidationPreservesInput(t *testing.T) {
 		parsed, err := ParseJob(normalized)
 		require.NoError(ht, err)
 		require.Equal(ht, job, parsed)
+		integer := hegel.Draw(ht, hegel.Integers(int64(math.MinInt64), int64(math.MaxInt64)))
+		exponent := hegel.Draw(ht, hegel.Integers(-300, 300))
+		literal := fmt.Sprintf(`%dE%+d`, integer, exponent)
+		nested := []byte(fmt.Sprintf(`{"nested":[{"value":%s}],"decimal":0.12345678901234567890123,"n":12345678901234567890123}`, literal))
+		job.Options = nested
+		raw, err = json.Marshal(job)
+		require.NoError(ht, err)
+		// Decoded documents retain normalized fields even if a value fails
+		// validation (native options or an overflowing option number).
+		_, normalized, _ = Normalize(raw, DecodeJob)
+		require.NotEmpty(ht, normalized)
+		var fields map[string]jsontext.Value
+		require.NoError(ht, json.Unmarshal(normalized, &fields))
+		require.Equal(ht, jsontext.Value(nested), fields["options"])
 	}, hegel.WithTestCases(100), hegel.WithDatabase(t.TempDir()))
 }
 
@@ -115,17 +129,6 @@ func TestCronValidationOpaqueNumberSpelling(t *testing.T) {
 		require.NoError(ht, json.Unmarshal(normalizedWorkflow, &workflowFields))
 		require.Len(ht, workflowFields.Steps, 1)
 		require.Equal(ht, jsontext.Value(nested), workflowFields.Steps[0].Options)
-		job := drawPreviewJob(ht)
-		job.Options = nested
-		raw, err := json.Marshal(job)
-		require.NoError(ht, err)
-		// Decoded documents retain normalized fields even if a value fails
-		// validation (native options or an overflowing option number).
-		_, normalized, _ := Normalize(raw, DecodeJob)
-		require.NotEmpty(ht, normalized)
-		var fields map[string]jsontext.Value
-		require.NoError(ht, json.Unmarshal(normalized, &fields))
-		require.Equal(ht, jsontext.Value(nested), fields["options"])
 	}, hegel.WithTestCases(100), hegel.WithDatabase(t.TempDir()))
 }
 

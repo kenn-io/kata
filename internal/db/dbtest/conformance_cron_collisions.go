@@ -110,10 +110,11 @@ func checkCronValidateNativeCollisions(t *testing.T, s db.Storage) error {
 	q := s.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	})
-	for _, state := range []string{"open", "closed", "deleted", "missing-progress", "corrupt-progress", "non-object-progress", "missing-parent", "zz-oversized-metadata"} {
+	for _, state := range []string{"open", "closed", "deleted", "disabled", "missing-progress", "corrupt-progress", "non-object-progress", "missing-parent", "zz-oversized-metadata"} {
 		parent, _, err := s.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "Peer parent", Author: "operator"})
 		require.NoError(t, err)
 		definition := candidate.Definition
+		definition.Enabled = state != "disabled"
 		copyIssue := *definition.Issue
 		definition.Issue = &copyIssue
 		definition.Issue.ParentUID = parent.UID
@@ -128,7 +129,7 @@ func checkCronValidateNativeCollisions(t *testing.T, s db.Storage) error {
 			_, _, _, err = s.CloseIssue(ctx, parent.ID, "done", "operator", "Close this recurring parent for the conformance fixture", nil)
 		case "deleted":
 			_, _, _, err = s.SoftDeleteIssue(ctx, parent.ID, "operator")
-		case "missing-progress":
+		case "disabled", "missing-progress":
 			_, err = q.ExecContext(ctx, `UPDATE issues SET metadata='{}' WHERE id=$1`, parent.ID)
 		case "corrupt-progress":
 			_, err = q.ExecContext(ctx, `UPDATE issues SET metadata=$1 WHERE id=$2`, fmt.Sprintf(`{"cron.progress.%s":{}}`, peer.UID), parent.ID)
