@@ -256,7 +256,7 @@ func TestServerToolOutputSchemasAreObjects(t *testing.T) {
 	require.NotEmpty(t, result.Tools)
 	for _, tool := range result.Tools {
 		t.Run(tool.Name, func(t *testing.T) {
-			// MCP requires an object root, even when nested fields are nullable.
+			// MCP 2025-11-25 clients require an object root in outputSchema.
 			require.NotNil(t, tool.OutputSchema)
 			require.Equal(t, "object", schemaObject(t, tool.OutputSchema)["type"])
 		})
