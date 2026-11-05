@@ -2069,11 +2069,6 @@ func resolveFederatedIssueShortID(
 	preferred string,
 	existing *federatedIssueRow,
 ) (string, error) {
-	// The stored ID is the UID's suffix and unique in its project,
-	// so the allocator would return it unchanged.
-	if existing != nil && (preferred == "" || preferred == existing.shortID) {
-		return existing.shortID, nil
-	}
 	minLength := shortid.MinLength
 	if preferred != "" {
 		if !shortid.Valid(preferred) {
@@ -2088,6 +2083,11 @@ func resolveFederatedIssueShortID(
 				preferred, issueUID, len(preferred), derived)
 		}
 		minLength = len(preferred)
+	}
+	// The stored ID is the UID's suffix and unique in its project,
+	// so the allocator would return it unchanged.
+	if existing != nil && (preferred == "" || preferred == existing.shortID) {
+		return existing.shortID, nil
 	}
 	if existing != nil && len(existing.shortID) > minLength {
 		minLength = len(existing.shortID)

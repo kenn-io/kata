@@ -1,4 +1,4 @@
-package sqlitestore
+package sqlitestore_test
 
 import (
 	"database/sql"
@@ -7,22 +7,25 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
-	"modernc.org/sqlite"
+	"go.kenn.io/kata/internal/db/sqlitestore"
 )
 
 func TestFederationReplayCostUnchangedIssues(t *testing.T) {
 	var small int
 	for _, count := range []int{8, 64} {
 		t.Run(fmt.Sprint(count), func(t *testing.T) {
-			d, p, _ := incrementalTestStore(t)
-			ctx := t.Context()
+			d, ctx, p := setupTestProject(t)
+			_, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "work", Author: "tester"})
+			require.NoError(t, err)
+			_, err = d.EnableProjectFederation(ctx, p.ID, "tester")
+			require.NoError(t, err)
 			for range count {
 				issue, _, err := d.CreateIssue(ctx, db.CreateIssueParams{ProjectID: p.ID, Title: "work", Author: "tester"})
 				require.NoError(t, err)
 				_, _, err = d.CreateComment(ctx, db.CreateCommentParams{IssueID: issue.ID, Body: "note", Author: "tester"})
 				require.NoError(t, err)
 			}
-			_, err := d.DB.ExecContext(ctx, `UPDATE federation_bindings SET role = 'spoke', hub_url = 'https://hub.example', hub_project_id = ?, hub_project_uid = ? WHERE project_id = ?`, p.ID, p.UID, p.ID)
+			_, err = d.DB.ExecContext(ctx, `UPDATE federation_bindings SET role = 'spoke', hub_url = 'https://hub.example', hub_project_id = ?, hub_project_uid = ? WHERE project_id = ?`, p.ID, p.UID, p.ID)
 			require.NoError(t, err)
 			var path string
 			var seq int
@@ -32,24 +35,13 @@ func TestFederationReplayCostUnchangedIssues(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, raw.Close()) })
 			raw.SetMaxOpenConns(1)
-			store := &Store{DB: raw}
+			store := &sqlitestore.Store{DB: raw}
 			require.NoError(t, store.MaterializeFederatedProject(ctx, p.ID))
 			pages := func(reset bool) int {
 				conn, err := raw.Conn(ctx)
 				require.NoError(t, err)
 				defer func() { require.NoError(t, conn.Close()) }()
-				total := 0
-				require.NoError(t, conn.Raw(func(raw any) error {
-					for _, op := range []sqlite.DBStatusOp{sqlite.DBStatusCacheHit, sqlite.DBStatusCacheMiss} {
-						n, _, err := raw.(sqlite.DBStatus).Status(op, reset)
-						if err != nil {
-							return err
-						}
-						total += n
-					}
-					return nil
-				}))
-				return total
+				return sqlitePageFetches(t, conn, reset)
 			}
 			pages(true)
 			require.NoError(t, store.MaterializeFederatedProject(ctx, p.ID))
