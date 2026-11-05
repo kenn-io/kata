@@ -641,7 +641,7 @@ kata create <title> \
   [--body TEXT | --body-file PATH | --body-stdin] \
   [--label LABEL] \
   [--owner NAME] \
-  [--priority 0..4] \
+  [--priority <0..4|none>] \
   [--parent <ref>] \
   [--blocks <ref>] \
   [--blocked-by <ref>] \
@@ -653,8 +653,9 @@ kata create <title> \
 
 When `--priority` is omitted, `kata create` uses the optional
 [`create.default_priority` client setting](configuration.md#default-priority-for-issue-creation).
-An explicit `--priority` wins. With neither a flag nor a configured default,
-priority stays unset.
+An explicit `--priority` wins. Use `--priority none` to leave priority unset
+without changing the configured default. With neither a flag nor a configured
+default, priority stays unset.
 
 `--meta` binds string-valued metadata at creation and is repeatable.
 
