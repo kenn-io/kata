@@ -47,10 +47,6 @@ var stopWords = map[string]struct{}{
 // stop-words and tokens shorter than 2 runes, and applies a simple
 // suffix-stripper (ing → "", ed → "", es → "", s → "").
 func Tokenize(s string) []string {
-	return tokenize(s, true)
-}
-
-func tokenize(s string, applyStem bool) []string {
 	s = norm.NFC.String(s)
 	s = strings.ToLower(s)
 
@@ -72,11 +68,9 @@ func tokenize(s string, applyStem bool) []string {
 		if _, isStop := stopWords[tok]; isStop {
 			return
 		}
-		if applyStem {
-			tok = stem(tok)
-			if utf8.RuneCountInString(tok) < 2 {
-				return
-			}
+		tok = stem(tok)
+		if utf8.RuneCountInString(tok) < 2 {
+			return
 		}
 		out = append(out, tok)
 	}
@@ -169,7 +163,15 @@ func TitlePrefix(title string) string {
 
 // LookalikeQuery returns the issue text used to retrieve look-alike
 // candidates. Its title and body portions match the prefixes used by Score.
-// It drops stop words and one-rune tokens, keeping literal words unstemmed.
+// It drops stop words while preserving other whitespace-delimited words exactly
+// as indexed, including compound words and Unicode normalization.
 func LookalikeQuery(title, body string) string {
-	return strings.Join(tokenize(TitlePrefix(title)+" "+BodyPrefix(body), false), " ")
+	var words []string
+	for word := range strings.FieldsSeq(TitlePrefix(title) + " " + BodyPrefix(body)) {
+		comparison := strings.ToLower(strings.TrimFunc(word, unicode.IsPunct))
+		if _, isStop := stopWords[comparison]; !isStop {
+			words = append(words, word)
+		}
+	}
+	return strings.Join(words, " ")
 }

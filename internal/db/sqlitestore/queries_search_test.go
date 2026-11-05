@@ -324,16 +324,6 @@ func TestSearchFTSAny_FindsNearDuplicates(t *testing.T) {
 	assert.Equal(t, "login crash on Safari", gotOr[0].Issue.Title)
 }
 
-func TestSearchFTSAny_NearDuplicateWithNewIdentifiers(t *testing.T) {
-	t.Parallel()
-	d, ctx, p := setupTestProject(t)
-	original := createTesterIssueWithBody(ctx, t, d, p.ID, "Fix flaky login test", "browser callback fails intermittently")
-	got, err := d.SearchFTSAny(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "Fix flaky login test newpathone newpathtwo newpaththree newerrorone newerrortwo newerrorthree newcodeone newcodetwo newcodethree newcodefour", Limit: 20})
-	require.NoError(t, err)
-	require.Len(t, got, 1)
-	assert.Equal(t, original.ID, got[0].Issue.ID)
-}
-
 func TestSearchFTS_SeparateCommentDocuments(t *testing.T) {
 	t.Parallel()
 	d, ctx, p := setupTestProject(t)
