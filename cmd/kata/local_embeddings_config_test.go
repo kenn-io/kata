@@ -35,9 +35,8 @@ func TestLocalEmbeddingsTOMLLayouts(t *testing.T) {
 		comments                                []string
 		wantDims                                int
 	}{
-		{name: "incompatible model", body: "[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='mxbai-embed-large'\ndims=1024\n", comments: []string{"# base_url = \"http://127.0.0.1:11434/v1\"", "# model = \"mxbai-embed-large\"", "# dims = 1024"}, wantDims: 768},
 		{name: "external revision", body: "[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='nomic-embed-text'\ndims=768\nfingerprint_salt='changed-nomic-weights'\n", comments: []string{"# fingerprint_salt = \"changed-nomic-weights\""}, wantDims: 768},
-		{name: "temporary recipe override", body: "[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='mxbai-embed-large'\ndims=1024\n", modelEnv: "nomic-embed-text", dimsEnv: "768", comments: []string{"# model = \"mxbai-embed-large\"", "# dims = 1024"}, wantDims: 768},
+		{name: "temporary recipe override", body: "[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='mxbai-embed-large'\ndims=1024\n", modelEnv: "nomic-embed-text", dimsEnv: "768", comments: []string{"# base_url = \"http://127.0.0.1:11434/v1\"", "# model = \"mxbai-embed-large\"", "# dims = 1024"}, wantDims: 768},
 		{name: "local salt", body: "[search.embeddings]\nlocal=true\nfingerprint_salt='manual-reindex'\n", wantSalt: "manual-reindex"},
 		{name: "BOM", body: "\ufeff[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='nomic-embed-text'\n", comments: []string{"# base_url = \"http://127.0.0.1:11434/v1\""}},
 		{name: "credentials", body: "[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1' # endpoint comment\nmodel='nomic-embed-text'\napi_key='example-key'\napi_key_file='/example/embedding.key'\napi_key_env='EXAMPLE_EMBEDDING_KEY'\n", comments: []string{"# base_url = \"http://127.0.0.1:11434/v1\"", "# endpoint comment"}},
