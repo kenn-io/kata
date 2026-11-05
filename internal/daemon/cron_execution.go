@@ -58,23 +58,24 @@ func checkCronExecution(ctx context.Context, cfg ServerConfig, project db.Projec
 	if in.Body.JobUID != nil {
 		id := *in.Body.JobUID
 		job, readErr := cfg.DB.CronJob(ctx, project.ID, id)
-		if errors.Is(readErr, db.ErrNotFound) {
-			return nil // The store validates definition references.
-		}
-		if readErr != nil {
+		if readErr != nil && !errors.Is(readErr, db.ErrNotFound) {
 			return readErr
 		}
-		// Only the current v1 notify action is exempt. Adapters refresh current
-		// definitions before launch; an older reference counts as execution.
-		notify := in.Body.DefinitionEventUID != nil &&
-			strings.EqualFold(*in.Body.DefinitionEventUID, job.DefinitionEventUID) &&
-			job.Definition.Version == 1 && job.Definition.Action.Kind == "notify"
-		if !notify {
-			if !executionEligible(config.CronExecuteMode(policy.Mode), policy.MemberActor, job.Author) {
-				return cronExecutionRefusal(policy, "job", id)
-			}
-			if job.Definition.Action.WorkflowUID != "" {
-				workflows = append(workflows, job.Definition.Action.WorkflowUID)
+		// A missing job leaves its reference validation to the store, but the
+		// observation's workflow still needs an eligibility check.
+		if readErr == nil {
+			// Only the current v1 notify action is exempt. Adapters refresh current
+			// definitions before launch; an older reference counts as execution.
+			notify := in.Body.DefinitionEventUID != nil &&
+				strings.EqualFold(*in.Body.DefinitionEventUID, job.DefinitionEventUID) &&
+				job.Definition.Version == 1 && job.Definition.Action.Kind == "notify"
+			if !notify {
+				if !executionEligible(config.CronExecuteMode(policy.Mode), policy.MemberActor, job.Author) {
+					return cronExecutionRefusal(policy, "job", id)
+				}
+				if job.Definition.Action.WorkflowUID != "" {
+					workflows = append(workflows, job.Definition.Action.WorkflowUID)
+				}
 			}
 		}
 	}

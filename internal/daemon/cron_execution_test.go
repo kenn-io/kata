@@ -90,6 +90,8 @@ func TestCronExecutionNewRunPolicy(t *testing.T) {
 		{name: "workflow none", author: "company-member", workflow: true, want: 403},
 		{name: "stale notify", author: "other-member", kind: "notify", stale: true, want: 403},
 		{name: "typo job", author: "company-member", missingJob: true, want: 400},
+		{name: "missing job with foreign body workflow", mode: "owned", missingJob: true, workflow: true, workflowAuthor: "other-member", want: 403},
+		{name: "missing job with owned body workflow", mode: "owned", missingJob: true, workflow: true, workflowAuthor: "company-member", want: 400},
 		{name: "owned job after colleague edit", mode: "owned", author: "company-member", editor: "other-member", want: 200},
 		{name: "owned workflow after colleague edit", mode: "owned", author: "company-member", workflow: true, editor: "other-member", want: 200},
 		{name: "notify", author: "other-member", kind: "notify", want: 200},
@@ -159,9 +161,9 @@ func TestCronExecutionNewRunPolicy(t *testing.T) {
 				if tc.stale {
 					body["definition_event_uid"] = oldEvent
 				}
-				if tc.missingJob {
-					body["job_uid"], body["definition_event_uid"] = cronHTTPUID(t), cronHTTPUID(t)
-				}
+			}
+			if tc.missingJob {
+				body["job_uid"], body["definition_event_uid"] = cronHTTPUID(t), cronHTTPUID(t)
 			}
 			executionBinding(t, env.DB, project, db.FederationRoleSpoke, true, tc.relay)
 			before, err := env.DB.MaxEventID(t.Context())
