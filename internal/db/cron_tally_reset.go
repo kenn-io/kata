@@ -11,18 +11,13 @@ import (
 // merge ordinary object values, so omission alone cannot remove a key or kind.
 // Source bytes remain untouched; this is an ordinary root metadata event.
 func CronTallyResetClearPayload(project Project, records RelayCheckpointRecords) (string, error) {
-	if _, err := DecodeCronTallies(project.Metadata); err != nil {
-		return "", err
-	}
-	current, err := cronTallyMetadataFields(project.Metadata)
+	current, err := DecodeCronTallies(project.Metadata)
 	if err != nil {
 		return "", err
 	}
 	keys := map[string]bool{}
-	for key := range current {
-		if strings.HasPrefix(key, CronTallyPrefix) {
-			keys[key] = true
-		}
+	for groupUID := range current {
+		keys[CronTallyPrefix+groupUID] = true
 	}
 	for _, section := range [][][]byte{records.Sources, records.Entities} {
 		for _, raw := range section {

@@ -52,7 +52,7 @@ type pruneRun struct {
 
 // PruneRuns atomically removes a bounded number of eligible runs and records
 // a reset. Ranking may inspect the entire project; the deadline bounds work,
-// while event pages bound memory and parameter counts. No tombstones are kept.
+// while run/event deletion chunks bound parameter counts. No tombstones are kept.
 func (a CronSQL) PruneRuns(ctx context.Context, in PruneCronRuns) (CronRunPruneResult, error) {
 	if in.Keep == 0 {
 		in.Keep = 10
@@ -96,7 +96,7 @@ func (a CronSQL) PruneRuns(ctx context.Context, in PruneCronRuns) (CronRunPruneR
 		if err != nil {
 			return err
 		}
-		selected, more, err := selectPruneRuns(ctx, tx, in)
+		selected, more, err := a.selectPruneRuns(ctx, tx, in)
 		if err != nil {
 			return err
 		}
@@ -179,17 +179,38 @@ func (a CronSQL) PruneRuns(ctx context.Context, in PruneCronRuns) (CronRunPruneR
 	return result, nil
 }
 
-func selectPruneRuns(ctx context.Context, tx *sql.Tx, in PruneCronRuns) ([]pruneRun, bool, error) {
+func (a CronSQL) selectPruneRuns(ctx context.Context, tx *sql.Tx, in PruneCronRuns) ([]pruneRun, bool, error) {
 	// Kind prevents a valid job/workflow UID collision. Rank before narrowing:
 	// workflow filtering must never redefine a job's newest retained evidence.
-	rows, err := tx.QueryContext(ctx, `SELECT uid,kind,group_uid,status,created_at,updated_at FROM (
- SELECT uid,job_uid,workflow_uid,CASE WHEN job_uid IS NOT NULL THEN 'job' ELSE 'workflow' END AS kind,
- COALESCE(job_uid,workflow_uid) AS group_uid,status,created_at,updated_at,
- ROW_NUMBER() OVER(PARTITION BY CASE WHEN job_uid IS NOT NULL THEN 'job' ELSE 'workflow' END,COALESCE(job_uid,workflow_uid) ORDER BY created_at DESC,uid DESC) AS rank
- FROM cron_runs WHERE project_id=$1) AS ranked
- WHERE rank>$2 AND status IN ('succeeded','failed','cancelled','unknown') AND created_at<$3
+	// The existing project/job/time index can read each job's newest keep rows
+	// directly. Derive groups from runs so deleted definitions stay protected.
+	// Workflow-only rows have no equivalent index and retain window ranking.
+	protectedJobs := `SELECT kept.value FROM (
+ SELECT DISTINCT job_uid FROM cron_runs WHERE project_id=$1 AND job_uid IS NOT NULL
+ ) AS jobs CROSS JOIN json_each((
+ SELECT json_group_array(uid) FROM (
+ SELECT uid FROM cron_runs WHERE project_id=$1 AND job_uid=jobs.job_uid
+ ORDER BY created_at DESC,uid DESC LIMIT $2) AS newest
+ )) AS kept`
+	if a.Postgres {
+		protectedJobs = `SELECT newest.uid FROM (
+ SELECT DISTINCT job_uid FROM cron_runs WHERE project_id=$1 AND job_uid IS NOT NULL
+ ) AS jobs CROSS JOIN LATERAL (
+ SELECT uid FROM cron_runs WHERE project_id=$1 AND job_uid=jobs.job_uid
+ ORDER BY created_at DESC,uid DESC LIMIT $2) AS newest`
+	}
+	// UIDs are unique and non-null. Excluding these protected rows preserves
+	// rank>keep without ranking and sorting every job-backed run.
+	query := `SELECT uid,CASE WHEN job_uid IS NOT NULL THEN 'job' ELSE 'workflow' END AS kind,
+ COALESCE(job_uid,workflow_uid) AS group_uid,status,created_at,updated_at
+ FROM cron_runs WHERE project_id=$1 AND uid NOT IN (` + protectedJobs + `
+ UNION ALL SELECT uid FROM (
+ SELECT uid,ROW_NUMBER() OVER(PARTITION BY workflow_uid ORDER BY created_at DESC,uid DESC) AS rank
+ FROM cron_runs WHERE project_id=$1 AND job_uid IS NULL) AS ranked WHERE rank<=$2)
+ AND status IN ('succeeded','failed','cancelled','unknown') AND created_at<$3
  AND ($4='' OR job_uid=$4) AND ($5='' OR workflow_uid=$5)
- ORDER BY created_at ASC,uid ASC`, in.ProjectID, in.Keep, in.Before.Format(CronRunCreatedAtFormat), in.JobUID, in.WorkflowUID)
+ ORDER BY created_at ASC,uid ASC`
+	rows, err := tx.QueryContext(ctx, query, in.ProjectID, in.Keep, in.Before.Format(CronRunCreatedAtFormat), in.JobUID, in.WorkflowUID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -221,51 +242,51 @@ func selectPruneRuns(ctx context.Context, tx *sql.Tx, in PruneCronRuns) ([]prune
 }
 
 func pruneRunEvents(ctx context.Context, tx *sql.Tx, projectID int64, ids map[string]bool, dry bool) (int, error) {
-	var after int64
+	// Stream once rather than planning and opening a query for every page.
+	// Keep strict Go decoding even for unselected runs: SQL JSON extraction
+	// would change rejection of duplicate members and incorrectly typed UIDs.
+	rows, err := tx.QueryContext(ctx, `SELECT id,payload FROM events WHERE project_id=$1 AND id>0 AND type LIKE 'cron.%' AND type IN ('cron.run.observed','cron.run.snapshot') ORDER BY id`, projectID)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = rows.Close() }()
 	count := 0
-	for {
-		rows, err := tx.QueryContext(ctx, `SELECT id,payload FROM events WHERE project_id=$1 AND id>$2 AND type LIKE 'cron.%' AND type IN ('cron.run.observed','cron.run.snapshot') ORDER BY id LIMIT 500`, projectID, after)
-		if err != nil {
+	var matches []any
+	var value struct {
+		UID string `json:"uid"`
+	}
+	for rows.Next() {
+		var id int64
+		var payload sql.RawBytes
+		if err := rows.Scan(&id, &payload); err != nil {
 			return 0, err
 		}
-		var matches []any
-		n := 0
-		for rows.Next() {
-			var id int64
-			var payload string
-			if err = rows.Scan(&id, &payload); err != nil {
-				break
-			}
-			after = id
-			n++
-			var value struct {
-				UID string `json:"uid"`
-			}
-			if err = json.Unmarshal([]byte(payload), &value); err != nil {
-				break
-			}
-			if ids[value.UID] {
+		// RawBytes is valid until Next; decoding here avoids a payload copy.
+		// Reset the reused target so a missing/null UID cannot inherit a match.
+		value.UID = ""
+		if err := json.Unmarshal(payload, &value); err != nil {
+			return 0, err
+		}
+		if ids[value.UID] {
+			count++
+			if !dry {
 				matches = append(matches, id)
 			}
 		}
-		readErr := rows.Err()
-		_ = rows.Close()
-		if err != nil {
+	}
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		return 0, err
+	}
+	// PostgreSQL needs the reader closed before writing on this transaction.
+	// Only matching IDs are retained; preview needs no per-event storage.
+	if !dry {
+		if err := deleteProjectRows(ctx, tx, "events", "id", projectID, matches); err != nil {
 			return 0, err
 		}
-		if readErr != nil {
-			return 0, readErr
-		}
-		count += len(matches)
-		if !dry {
-			if err := deleteProjectRows(ctx, tx, "events", "id", projectID, matches); err != nil {
-				return 0, err
-			}
-		}
-		if n < 500 {
-			return count, nil
-		}
 	}
+	return count, nil
 }
 
 func deleteProjectRows(ctx context.Context, tx *sql.Tx, table, column string, projectID int64, values []any) error {

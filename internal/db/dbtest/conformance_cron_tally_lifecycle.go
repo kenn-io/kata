@@ -465,8 +465,8 @@ func checkCronTallyEqualSubsetReplay(t *testing.T, store db.Storage) error {
 	return nil
 }
 
-// Old, valid backup dates remain prunable; already-stored out-of-domain dates
-// must fail both preview and execution without poisoning counts or backups.
+// Year-one and year-zero backup dates survive import, preview, pruning,
+// counts, and a second export/import without losing their exact instant.
 func checkCronTallyTimestampHistory(t *testing.T, store db.Storage, backend Backend) error {
 	ctx := t.Context()
 	for _, at := range []time.Time{

@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-04
+last_edited: 2026-11-05
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -716,6 +716,8 @@ the baseline. Subsequent federation metadata reads refresh it lazily.
 The batch limit bounds deleted runs, not query work. Preview and deletion may
 scan all project runs and run events within a 30-second transaction deadline.
 A timeout rolls back the batch; reducing `--limit` may not avoid that scan.
+Deletion retains matching event IDs until the scan finishes. Memory use grows
+with the selected runs' observation and snapshot history.
 
 A pruned run returns 404, and a pruned `--before-uid` pagination cursor also
 returns 404; restart pagination from the first page. Re-observing a pruned

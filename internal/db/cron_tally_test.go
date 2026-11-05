@@ -31,7 +31,7 @@ func TestCronTallyCodec(t *testing.T) {
 	_, err := DecodeCronTallies(tallyTestMetadata(strings.ReplaceAll(strings.ReplaceAll(value, "9007199254740993", "9223372036854775807"), `":0`, `":9223372036854775807`)))
 	require.NoError(t, err)
 	_, err = DecodeCronTallies(tallyTestMetadata(strings.ReplaceAll(strings.ReplaceAll(value, "2026-08-01", "0001-01-01"), "2025-01-01", "0001-01-01")))
-	require.NoError(t, err, "year one is within the supported date domain")
+	require.NoError(t, err, "year one remains supported alongside year zero")
 	invalid := map[string]string{
 		"missing status":    strings.Replace(value, `,"unknown":0`, "", 1),
 		"extra status":      strings.Replace(value, `"unknown":0`, `"unknown":0,"running":1`, 1),
