@@ -55,3 +55,38 @@ func TestSearchFTSAny_LookalikePageBudget(t *testing.T) {
 	t.Logf("2k issues / 30k comments / 68 words: %d page fetches, %.3f ms", count, float64(elapsed)/float64(time.Millisecond))
 	require.LessOrEqual(t, count, 100_000, "look-alike retrieval must rank title and body documents only")
 }
+
+func TestSearchFTSAny_DensePostingsPageBudget(t *testing.T) {
+	ctx := t.Context()
+	store, path := openTestDBWithPath(t)
+	project, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	common := "login browser timeout session request response server client token account password reset"
+	raw, err := sql.Open("sqlite", path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, raw.Close()) })
+	raw.SetMaxOpenConns(1)
+	tx, err := raw.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback() })
+	for n := range 2_000 {
+		_, err = tx.ExecContext(ctx, `INSERT INTO issues(uid,project_id,short_id,title,body,author) VALUES(?,?,?,?,?,'tester')`, fmt.Sprintf("%026d", n+1), project.ID, fmt.Sprintf("%08d", n+1), "shared issue", common)
+		require.NoError(t, err)
+	}
+	require.NoError(t, tx.Commit())
+	original := createTesterIssueWithBody(ctx, t, store, project.ID, "distinctive callback failure", common)
+	conn, err := raw.Conn(ctx)
+	require.NoError(t, err)
+	sqlitePageFetches(t, conn, true)
+	require.NoError(t, conn.Close())
+	hits, err := (&sqlitestore.Store{DB: raw}).SearchFTSAny(ctx, db.SearchFTSParams{ProjectID: project.ID, Query: common + " distinctive callback failure", Limit: 20})
+	require.NoError(t, err)
+	require.NotEmpty(t, hits)
+	require.Equal(t, original.ID, hits[0].Issue.ID)
+	conn, err = raw.Conn(ctx)
+	require.NoError(t, err)
+	count := sqlitePageFetches(t, conn, false)
+	require.NoError(t, conn.Close())
+	t.Logf("2k issues / 15 words with dense postings: %d page fetches", count)
+	require.LessOrEqual(t, count, 20_000, "look-alike retrieval must score each issue once")
+}

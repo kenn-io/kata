@@ -38,7 +38,12 @@ func TestLookalikeQuery(t *testing.T) {
 	assert.Contains(t, got, "留")
 	assert.NotContains(t, got, "discard-this-suffix")
 	assert.True(t, utf8.ValidString(got))
-	assert.Equal(t, "full issue title   "+prefix, got)
+	assert.Equal(t, "full issue title "+prefix, got)
+}
+
+func TestLookalikeQuery_FiltersUnscoredWords(t *testing.T) {
+	assert.Equal(t, "fix flaky login tests running cookies café", similarity.LookalikeQuery("THE Fix a flaky login", "tests, running cookies with x é 界 cafe\u0301"))
+	assert.Empty(t, similarity.LookalikeQuery("the and a", "x é"))
 }
 
 func TestLookalikeQuery_TitleIsBounded(t *testing.T) {
