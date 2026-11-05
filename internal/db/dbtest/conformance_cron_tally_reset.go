@@ -91,7 +91,7 @@ func oldPeerValue(t *testing.T, current, from, to jsontext.Value) jsontext.Value
 		}
 		_, priorObject := object(prior)
 		_, nextObject := object(next)
-		if priorObject && nextObject {
+		if _, curObject := object(cur[key]); priorObject && nextObject && (curObject || len(cur[key]) == 0 || string(cur[key]) == "null") {
 			cur[key] = oldPeerValue(t, cur[key], prior, next)
 		} else if !bytes.Equal(oldPeerJSON(t, prior), oldPeerJSON(t, next)) {
 			cur[key] = next
@@ -132,15 +132,21 @@ func checkCronTallyResetInventory(t *testing.T, store db.Storage) error {
 	// nested fields. Keep this independent oracle check: neither a project-path
 	// regression nor an oracle regression is subsumed by the issue fold test.
 	// The changed count must survive the scalar from/to comparison above 2^53.
-	ordinary := []db.RemoteEvent{
-		{ProjectUID: "example-project", Type: "project.federation_enabled", HLCPhysicalMS: 1, Payload: []byte(`{"metadata":{"profile":{"label":"root","count":9007199254740992,"removed":true}}}`)},
-		{ProjectUID: "example-project", Type: "project.metadata_updated", HLCPhysicalMS: 2, Payload: []byte(`{"diff":{"profile":{"from":{"label":"old","count":9007199254740992,"removed":true},"to":{"label":"old","count":9007199254740993}}}}`)},
+	// An unchanged nested object must not replace a concurrent scalar value.
+	for _, tc := range []struct{ initial, label, want string }{
+		{`"root"`, `"old"`, `{"profile":{"label":"root","count":9007199254740993}}`},
+		{`0`, `{"v":1}`, `{"profile":{"label":0,"count":9007199254740993}}`},
+	} {
+		ordinary := []db.RemoteEvent{
+			{ProjectUID: "example-project", Type: "project.federation_enabled", HLCPhysicalMS: 1, Payload: []byte(`{"metadata":{"profile":{"label":` + tc.initial + `,"count":9007199254740992,"removed":true}}}`)},
+			{ProjectUID: "example-project", Type: "project.metadata_updated", HLCPhysicalMS: 2, Payload: []byte(`{"diff":{"profile":{"from":{"label":` + tc.label + `,"count":9007199254740992,"removed":true},"to":{"label":` + tc.label + `,"count":9007199254740993}}}}`)},
+		}
+		folded := db.FoldEvents(remoteEventsToFold(ordinary))
+		legacy, err := json.Marshal(oldPeerMetadata(t, ordinary))
+		require.NoError(t, err)
+		require.Equal(t, metadata.NormalizeJSON([]byte(tc.want)), metadata.NormalizeJSON(folded.ProjectMetadata["example-project"]))
+		require.Equal(t, metadata.NormalizeJSON(folded.ProjectMetadata["example-project"]), metadata.NormalizeJSON(legacy), tc.initial)
 	}
-	folded := db.FoldEvents(remoteEventsToFold(ordinary))
-	legacy, err := json.Marshal(oldPeerMetadata(t, ordinary))
-	require.NoError(t, err)
-	require.Equal(t, metadata.NormalizeJSON([]byte(`{"profile":{"label":"root","count":9007199254740993}}`)), metadata.NormalizeJSON(folded.ProjectMetadata["example-project"]))
-	require.Equal(t, metadata.NormalizeJSON(folded.ProjectMetadata["example-project"]), metadata.NormalizeJSON(legacy))
 	ctx := t.Context()
 	for i, mode := range []string{"removed kind", "removed key", "empty inventory"} {
 		fixture := newRelayLinkBoundaryFixture(t, store, fmt.Sprintf("tally-reset-%d", i))
