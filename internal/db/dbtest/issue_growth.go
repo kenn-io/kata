@@ -10,7 +10,7 @@ import (
 	"go.kenn.io/kit/growthtest"
 )
 
-// RunCreateIssueHistoryGrowth checks that ordinary history keeps short-ID reservation costs flat.
+// RunCreateIssueHistoryGrowth measures issue creation and reads that verify the saved issue and event as ordinary history grows.
 func RunCreateIssueHistoryGrowth(t *testing.T, open func(*testing.T) db.Storage, seed func(*testing.T, db.Storage, db.Project, db.Issue, int)) {
 	t.Helper()
 	growthtest.Run(t, growthtest.Check{
