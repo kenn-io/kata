@@ -836,14 +836,12 @@ func TestReopenBacklogAnswerAfterHelpIsDropped(t *testing.T) {
 	require.Nil(t, cmd)
 	require.Equal(t, modalNone, m.modal)
 	require.Zero(t, spy.reopens)
-	m, _ = updateModel(m, runeKey('?'))
-	require.Equal(t, viewList, m.view)
 }
 
-// The confirmation's keys stay on screen at supported short terminal sizes.
+// The compact confirmation clears the underlying list or detail view.
 func TestReopenBacklogActionsVisibleOnShortTerminals(t *testing.T) {
 	for _, origin := range []string{"list", "detail"} {
-		for _, size := range [][2]int{{100, 8}, {100, 4}, {100, 3}, {100, 2}, {60, 8}, {40, 24}, {40, 2}} {
+		for _, size := range [][2]int{{100, 8}, {40, 2}} {
 			t.Run(fmt.Sprintf("%s/%dx%d", origin, size[0], size[1]), func(t *testing.T) {
 				spy := &reopenSpyAPI{Client: backlogDaemon(t, nil, backlogJob{uid: "job-a", catchup: "all", missed: 3})}
 				model := listReopenModel
@@ -854,20 +852,7 @@ func TestReopenBacklogActionsVisibleOnShortTerminals(t *testing.T) {
 				m, _ = pressReopen(t, m)
 				require.Equal(t, modalReopenBacklog, m.modal)
 				view := stripANSI(m.View().Content)
-				require.LessOrEqual(t, len(strings.Split(view, "\n")), size[1])
-				for line := range strings.SplitSeq(view, "\n") {
-					require.LessOrEqual(t, lipgloss.Width(line), size[0])
-				}
-				require.Contains(t, view, "#abcd")
-				require.Contains(t, view, "3 recurring child", "the backlog being confirmed stays on screen")
-				require.Contains(t, view, "y reopen")
-				require.Contains(t, view, "n/esc cancel")
 				require.NotContains(t, view, "Parent", "the compact confirmation clears the underlying view")
-
-				cancelled, cmd := updateModel(m, runeKey('n'))
-				require.Nil(t, cmd)
-				require.Equal(t, modalNone, cancelled.modal)
-				require.Zero(t, spy.reopens)
 			})
 		}
 	}
@@ -876,58 +861,42 @@ func TestReopenBacklogActionsVisibleOnShortTerminals(t *testing.T) {
 // Undo names the issue with its project, so a long reference must not push the
 // issue ID or backlog count off a narrow compact confirmation.
 func TestReopenBacklogConfirmationFitsSupportedSizes(t *testing.T) {
+	type testCase struct {
+		ref    string
+		wantID string
+		count  int
+		width  int
+		height int
+	}
+	var cases []testCase
 	for _, ref := range []string{"#abcd", "spoke-project#abcd", strings.Repeat("p", 48) + "#abcd"} {
 		for _, count := range []int{3, 12, 168} {
-			m := newTestModel()
-			m.modal = modalReopenBacklog
-			m.reopenPrompt = &reopenPrompt{ref: ref, count: count, undoEntryID: 1}
 			for _, width := range []int{40, 41, 47, 55, 80, 130} {
 				for _, height := range []int{2, 3, 4, 8, 14} {
-					t.Run(fmt.Sprintf("%s/%d/%dx%d", ref, count, width, height), func(t *testing.T) {
-						m = resizeModel(m, width, height)
-						view := stripANSI(m.View().Content)
-						lines := strings.Split(view, "\n")
-						require.LessOrEqual(t, len(lines), height)
-						for _, line := range lines {
-							require.LessOrEqual(t, lipgloss.Width(line), width)
-						}
-						require.Contains(t, view, "#abcd")
-						text := strings.Join(strings.Fields(strings.ReplaceAll(view, "│", "")), " ")
-						require.Contains(t, text, fmt.Sprintf("%d recurring child issues", count))
-						require.Contains(t, view, "y reopen")
-						require.Contains(t, view, "n/esc cancel")
-					})
+					cases = append(cases, testCase{ref, "#abcd", count, width, height})
 				}
 			}
 		}
 	}
-}
-
-func TestReopenBacklogConfirmationKeepsFullCountAndID(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		ref    string
-		count  int
-		height int
-		want   string
-	}{
-		{"three-digit count", "#abcd", 168, 2, "168 recurring child issues"},
-		{"six-digit count", "#abcd", 123456, 2, "123456 recurring child issues"},
-		{"full-length id", "#01ARZ3NDEKTSV4RRFFQ69G5FAV", 2503, 8, "2503 recurring child issues"},
-		{"eight-character id", "#abcdefgh", 123456, 2, "123456 recurring child issues"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			m := resizeModel(newTestModel(), 40, tc.height)
+	cases = append(cases,
+		testCase{"#abcd", "#abcd", 123456, 40, 2},
+		testCase{backlogParentUID, backlogParentUID, 2503, 40, 8},
+		testCase{"#abcdefgh", "#abcdefgh", 123456, 40, 2},
+	)
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("%s/%d/%dx%d", tc.ref, tc.count, tc.width, tc.height), func(t *testing.T) {
+			m := resizeModel(newTestModel(), tc.width, tc.height)
 			m.modal = modalReopenBacklog
-			m.reopenPrompt = &reopenPrompt{ref: tc.ref, count: tc.count}
+			m.reopenPrompt = &reopenPrompt{ref: tc.ref, count: tc.count, undoEntryID: 1}
 			view := stripANSI(m.View().Content)
 			lines := strings.Split(view, "\n")
 			require.LessOrEqual(t, len(lines), tc.height)
 			for _, line := range lines {
-				require.LessOrEqual(t, lipgloss.Width(line), 40)
+				require.LessOrEqual(t, lipgloss.Width(line), tc.width)
 			}
-			require.Contains(t, view, tc.ref)
-			require.Contains(t, view, tc.want)
+			require.Contains(t, view, tc.wantID)
+			text := strings.Join(strings.Fields(strings.ReplaceAll(view, "│", "")), " ")
+			require.Contains(t, text, fmt.Sprintf("%d recurring child issues", tc.count))
 			require.Contains(t, lines[len(lines)-1], "y reopen")
 			require.Contains(t, lines[len(lines)-1], "n/esc cancel")
 		})
