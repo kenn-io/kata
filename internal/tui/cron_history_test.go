@@ -87,12 +87,20 @@ func TestCronHistoryFailureRetryAndForeignJob(t *testing.T) {
 	m := cronFixture(t)
 	j := m.cron.data.jobs[0].UID
 	r := m.cron.data.runs[0]
+	r.UID, r.Revision = "old-run", 1
 	a := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: cronHistoryRows(r, 20)}
 	a.next = a.page[len(a.page)-1].UID
 	cursor := a.next
 	m.api = a
 	m, cmd := m.cronRequestPage(j, true)
 	m = m.cronPageLoaded(cmd().(cronPageMsg))
+	require.Equal(t, j, a.job)
+	require.Equal(t, int64(20), a.limit)
+	require.Empty(t, a.before)
+	m.cron.stack = []cronFrame{{ref: cronRef{cronJobs, j}}}
+	_, _, lines := cronScreen(m)
+	require.True(t, slices.ContainsFunc(lines, func(l cronLine) bool { return l.target == cronRef{cronRuns, r.UID} }))
+	require.True(t, slices.ContainsFunc(lines, func(l cronLine) bool { return l.target.kind == cronOlder }))
 	a.err = errors.New("offline")
 	m, cmd = m.cronRequestPage(j, false)
 	m = m.cronPageLoaded(cmd().(cronPageMsg))
@@ -107,6 +115,20 @@ func TestCronHistoryFailureRetryAndForeignJob(t *testing.T) {
 	require.Equal(t, r.UID, m.cron.jobPage.runs[0].UID, "foreign pages cannot replace retained evidence")
 	require.Equal(t, cursor, m.cron.jobPage.next)
 	require.Len(t, m.cron.jobPage.runs, 20)
+	older := r
+	older.UID, older.CreatedAt = "older-run", r.CreatedAt.Add(-time.Hour)
+	a.page = []generated.CronRun{older}
+	a.next = ""
+	m, cmd = m.cronRequestPage(j, false)
+	m = m.cronPageLoaded(cmd().(cronPageMsg))
+	require.Equal(t, cursor, a.before)
+	require.Len(t, m.cron.jobPage.runs, 21)
+	m.cron.stack = append(m.cron.stack, cronFrame{ref: cronRef{cronRuns, r.UID}})
+	require.Contains(t, stripANSI(m.viewBody()), r.Status)
+	require.Contains(t, stripANSI(m.viewBody()), "runs / "+r.UID)
+	m.cron.stack = m.cron.stack[:1]
+	// Resume from the retained cursor to check an empty terminal reply too.
+	m.cron.jobPage.next = cursor
 	a.page = nil
 	a.next = ""
 	m, cmd = m.cronRequestPage(j, false)
@@ -173,37 +195,35 @@ func TestSnapshot_CronHistory(t *testing.T) {
 // A -> workflow -> B -> back to A must start A's
 // history again; a single cached page cannot leave the visible job loading.
 func TestCronHistoryBackToJobRestartsHistory(t *testing.T) {
-	t.Run("round trip", func(t *testing.T) {
-		m := cronFixture(t)
-		job := m.cron.data.jobs[0].UID
-		other := "other-job"
+	m := cronFixture(t)
+	job := m.cron.data.jobs[0].UID
+	other := "other-job"
 
-		second := m.cron.data.jobs[0]
-		second.UID = other
-		m.cron.data.jobs = append(m.cron.data.jobs, second)
-		a := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}}
-		m.api = a
-		follow := func(target cronRef) {
-			_, _, lines := cronScreen(m)
-			i := slices.IndexFunc(lines, func(l cronLine) bool { return l.target == target })
-			if i < 0 {
-				t.Fatalf("missing reachable link %+v", target)
-			}
-			*m.cronCursor() = i
-			next, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
-			m = drainInboxCmds(next, cmd)
+	second := m.cron.data.jobs[0]
+	second.UID = other
+	m.cron.data.jobs = append(m.cron.data.jobs, second)
+	a := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}}
+	m.api = a
+	follow := func(target cronRef) {
+		_, _, lines := cronScreen(m)
+		i := slices.IndexFunc(lines, func(l cronLine) bool { return l.target == target })
+		if i < 0 {
+			t.Fatalf("missing reachable link %+v", target)
 		}
-		follow(cronRef{cronJobs, job})
-		follow(cronRef{cronWorkflows, m.cron.data.workflows[0].UID})
-		follow(cronRef{cronJobs, other})
-		for range 2 {
-			next, cmd := updateModel(m, keyRune('h'))
-			m = drainInboxCmds(next, cmd)
-		}
-		if m.cron.jobPage.job != job || !m.cron.jobPage.ready || a.job != job {
-			t.Fatalf("visible job %q left without its own history: page=%+v read=%q", job, m.cron.jobPage, a.job)
-		}
-	})
+		*m.cronCursor() = i
+		next, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+		m = drainInboxCmds(next, cmd)
+	}
+	follow(cronRef{cronJobs, job})
+	follow(cronRef{cronWorkflows, m.cron.data.workflows[0].UID})
+	follow(cronRef{cronJobs, other})
+	for range 2 {
+		next, cmd := updateModel(m, keyRune('h'))
+		m = drainInboxCmds(next, cmd)
+	}
+	if m.cron.jobPage.job != job || !m.cron.jobPage.ready || a.job != job {
+		t.Fatalf("visible job %q left without its own history: page=%+v read=%q", job, m.cron.jobPage, a.job)
+	}
 }
 
 func TestCronHistoryRetainedRuns(t *testing.T) {
@@ -271,6 +291,33 @@ func TestCronHistoryRetainedRuns(t *testing.T) {
 			text += line.text + "\n"
 		}
 		require.Contains(t, text, "run refresh offline")
+	})
+
+	t.Run("opening retained failure", func(t *testing.T) {
+		m := cronSeenFixture(t)
+		head := m.cron.data.runs[0]
+		r := head
+		r.UID, r.Status = "retained-failure", "failed"
+		r.CreatedAt = snapshotFixedNow.Add(-24 * time.Hour)
+		r.EndedAt = new(r.CreatedAt)
+		m.cron.data.runs = []generated.CronRun{head}
+		m.cron.data.lastRuns = map[string]generated.CronRun{*head.JobUID: head}
+		m.cron.runPage = cronHistoryPage{runs: []generated.CronRun{head, r}, ready: true, older: true}
+		m = m.cronRemember([]generated.CronRun{r})
+		// Refreshing the head must preserve this older failure in history.
+		m.cron.runPage.older = true
+		m.api = &cronReadTestAPI{data: *m.cron.data}
+		m.cron.events++
+		m = m.cronLoaded(m.fetchCron()().(cronLoadedMsg))
+		m.cron.tab = cronRuns
+		_, _, lines := cronScreen(m)
+		i := slices.IndexFunc(lines, func(l cronLine) bool { return l.target == cronRef{cronRuns, r.UID} })
+		require.NotEqual(t, -1, i)
+		m.cron.lists[cronRuns].cursor = i
+		m = sendKey(m, tea.KeyEnter)
+		require.Zero(t, m.cronUnseenCount(), "opening the retained row acknowledges it")
+		require.NotContains(t, cronScreenText(m), "no longer in the loaded data")
+		require.Contains(t, cronScreenText(m), "failed")
 	})
 
 }
@@ -366,27 +413,10 @@ func TestCronHistoryJobPagesAndLookup(t *testing.T) {
 	old.UID = "old-run"
 	old.Revision = 1
 	a := &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: cronHistoryRows(old, 20)}
-	a.next = a.page[len(a.page)-1].UID
-	cursor := a.next
 	m.api = a
-	m, cmd := m.cronRequestPage(j.UID, true)
-	m = m.cronPageLoaded(cmd().(cronPageMsg))
-	require.Equal(t, j.UID, a.job)
-	require.Equal(t, int64(20), a.limit)
-	require.Equal(t, "", a.before)
+	m.cron.jobPage = cronHistoryPage{job: j.UID, runs: a.page, ready: true}
+	m = m.cronRemember(a.page)
 	m.cron.stack = []cronFrame{{ref: cronRef{cronJobs, j.UID}}}
-	_, _, lines := cronScreen(m)
-	require.True(t, slices.ContainsFunc(lines, func(l cronLine) bool { return l.target == cronRef{cronRuns, old.UID} }))
-	require.True(t, slices.ContainsFunc(lines, func(l cronLine) bool { return l.target.kind == cronOlder }))
-	older := old
-	older.UID = "older-run"
-	older.CreatedAt = old.CreatedAt.Add(-time.Hour)
-	a.page = []generated.CronRun{older}
-	a.next = ""
-	m, cmd = m.cronRequestPage(j.UID, false)
-	m = m.cronPageLoaded(cmd().(cronPageMsg))
-	require.Equal(t, cursor, a.before)
-	require.Len(t, m.cron.jobPage.runs, 21)
 	m.cron.stack = append(m.cron.stack, cronFrame{ref: cronRef{cronRuns, old.UID}})
 	require.Contains(t, stripANSI(m.viewBody()), old.Status)
 	require.Contains(t, stripANSI(m.viewBody()), "runs / "+old.UID)
@@ -406,7 +436,7 @@ func TestCronHistoryJobPagesAndLookup(t *testing.T) {
 	}
 
 	m.cron.stack = []cronFrame{{ref: cronRef{cronWorkflows, m.cron.data.workflows[0].UID}}}
-	_, _, lines = cronScreen(m)
+	_, _, lines := cronScreen(m)
 	require.False(t, slices.ContainsFunc(lines, func(l cronLine) bool { return l.target.uid == old.UID }))
 	require.Contains(t, cronLinesText(lines), fmt.Sprintf("Loaded runs (%d) · newest 100", len(m.cron.data.runs)))
 

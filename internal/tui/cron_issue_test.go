@@ -7,7 +7,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -112,46 +111,10 @@ func TestCronIssueReturnAuthorityClears(t *testing.T) {
 	}
 }
 
-func TestCronIssueUnreadableStillReturns(t *testing.T) {
-	m := cronIssueFixture(t, 80)
-	m = sendKey(m, tea.KeyEnter)
-	// The ordinary show-error path leaves a readable error and the Cron return.
-	m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, err: errors.New("issue not found")})
-	require.ErrorContains(t, m.detail.err, "issue not found")
-	require.True(t, m.cron.returnToCron, "the unreadable link keeps the Cron return route")
-	require.NotNil(t, m.toast)
-	require.Contains(t, m.toast.text, "issue not found")
-	m, cmd := updateModel(m, popDetailMsg{})
-	m = drainInboxCmds(m, cmd)
-	require.Equal(t, viewCron, m.view)
-}
-
 func TestSnapshot_CronIssue(t *testing.T) {
 	defer snapshotInit(t)()
 	m := cronIssueFixture(t, 100)
 	assertGolden(t, "cron-run-detail-issue", m.viewBody())
-}
-
-func TestCronIssueFetchByUID(t *testing.T) {
-	m := cronIssueFixture(t, 80)
-	var fetched atomic.Bool
-	m.api = newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/v1/projects/7/issues/issue-example" {
-			fetched.Store(true)
-			respondJSON(t, w, map[string]any{"issue": map[string]any{"uid": "issue-example", "project_id": 7, "short_id": "abcd", "title": "Linked issue", "status": "open"}})
-			return
-		}
-		http.Error(w, "fixture not found", http.StatusNotFound)
-	})
-	m, cmd := m.cronOpenIssue("issue-example")
-	require.NotNil(t, cmd)
-	for _, msg := range runCmdTree(cmd) {
-		if _, ok := msg.(detailFetchedMsg); ok {
-			m, _ = updateModel(m, msg)
-		}
-	}
-	require.True(t, fetched.Load(), "opening a UID link must fetch the issue, even before its short ID is known")
-	require.Equal(t, "Linked issue", m.detail.issue.Title)
 }
 
 // A linked issue moved after the run named it. The UID read resolves through
@@ -182,6 +145,7 @@ func TestCronIssueMovedIssueTargetsDestination(t *testing.T) {
 	for _, msg := range runCmdTree(cmd) {
 		m, _ = updateModel(m, msg)
 	}
+	require.Equal(t, "Moved issue", m.detail.issue.Title)
 	require.Equal(t, "wxyz", m.detail.issue.ShortID)
 	require.False(t, m.closeRequiresEvidence)
 	m, cmd = updateModel(m, keyRune('x'))
@@ -223,6 +187,10 @@ func TestCronIssueUnreadableStackedView(t *testing.T) {
 	require.Equal(t, splitlayout.Stacked, m.layout)
 	m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, err: errors.New("issue not found")})
 	require.Nil(t, m.detail.issue)
+	require.ErrorContains(t, m.detail.err, "issue not found")
+	require.True(t, m.cron.returnToCron)
+	require.NotNil(t, m.toast)
+	require.Contains(t, m.toast.text, "issue not found")
 	m.toast = nil // the notice expires; the screen must still explain
 	view := ansi.Strip(m.viewBody())
 	require.Contains(t, view, "issue not found")
@@ -232,7 +200,11 @@ func TestCronIssueUnreadableStackedView(t *testing.T) {
 	m, cmd := updateModel(m, keyRune('N'))
 	require.False(t, slices.ContainsFunc(runCmdTree(cmd), func(msg tea.Msg) bool { _, ok := msg.(openInputMsg); return ok }), "N on an unreadable issue must not open a parentless form")
 	require.Equal(t, inputNone, m.input.kind)
+	stacked := m
 	m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = drainInboxCmds(m, cmd)
 	require.Equal(t, viewCron, m.view)
+	stacked, cmd = updateModel(stacked, popDetailMsg{})
+	stacked = drainInboxCmds(stacked, cmd)
+	require.Equal(t, viewCron, stacked.view)
 }

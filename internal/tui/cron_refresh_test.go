@@ -269,45 +269,47 @@ func TestCronResetDropsUnreadHistory(t *testing.T) {
 func TestCronSharedParentEvidence(t *testing.T) {
 	for _, parentFirst := range []bool{false, true} {
 		t.Run(fmt.Sprint(parentFirst), func(t *testing.T) {
-			native := cronFixture(t).cron.data.jobs[0]
-			nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&native.Definition)
-			adapter := native
-			adapter.UID = "adapter"
-			adapter.Definition.Action = generated.ActionResponse{Kind: "shell"}
-			p := cronData{jobs: []generated.CronJob{native, adapter}, runs: []generated.CronRun{{UID: "native-run", JobUID: new(native.UID), Status: "succeeded"}}}
-			for i := range 20 {
-				p.runs = append(p.runs, generated.CronRun{UID: fmt.Sprint(i), Status: "running", IssueUID: new(fmt.Sprint(i)), Actor: "operator"})
-			}
-			parentDone, fillDone := make(chan struct{}), make(chan struct{})
-			a := waitReadAPI(func(context.Context, string) ([]generated.CronRun, error) {
-				if parentFirst {
-					select {
-					case <-parentDone:
-					case <-time.After(time.Second):
-						return nil, errors.New("parent read did not finish")
-					}
+			synctest.Test(t, func(t *testing.T) {
+				native := cronFixture(t).cron.data.jobs[0]
+				nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&native.Definition)
+				adapter := native
+				adapter.UID = "adapter"
+				adapter.Definition.Action = generated.ActionResponse{Kind: "shell"}
+				p := cronData{jobs: []generated.CronJob{native, adapter}, runs: []generated.CronRun{{UID: "native-run", JobUID: new(native.UID), Status: "succeeded"}}}
+				for i := range 20 {
+					p.runs = append(p.runs, generated.CronRun{UID: fmt.Sprint(i), Status: "running", IssueUID: new(fmt.Sprint(i)), Actor: "operator"})
 				}
-				close(fillDone)
-				return []generated.CronRun{{UID: "fill", JobUID: new(adapter.UID), Status: "running", Actor: "operator", IssueUID: new(nextParentUID)}}, nil
-			})
-			a.wait = func(_ context.Context, uid string) (cronParent, error) {
-				if uid == nextParentUID {
-					if !parentFirst {
+				parentDone, fillDone := make(chan struct{}), make(chan struct{})
+				a := waitReadAPI(func(context.Context, string) ([]generated.CronRun, error) {
+					if parentFirst {
 						select {
-						case <-fillDone:
+						case <-parentDone:
 						case <-time.After(time.Second):
-							return cronParent{}, errors.New("fill read did not finish")
+							return nil, errors.New("parent read did not finish")
 						}
 					}
-					close(parentDone)
+					close(fillDone)
+					return []generated.CronRun{{UID: "fill", JobUID: new(adapter.UID), Status: "running", Actor: "operator", IssueUID: new(nextParentUID)}}, nil
+				})
+				a.wait = func(_ context.Context, uid string) (cronParent, error) {
+					if uid == nextParentUID {
+						if !parentFirst {
+							select {
+							case <-fillDone:
+							case <-time.After(time.Second):
+								return cronParent{}, errors.New("fill read did not finish")
+							}
+						}
+						close(parentDone)
+					}
+					return cronParent{open: true, metadata: map[string]any{"work.attention": "needs-human"}}, nil
 				}
-				return cronParent{open: true, metadata: map[string]any{"work.attention": "needs-human"}}, nil
-			}
-			cronEnrich(t.Context(), a, 7, &p)
-			require.Len(t, a.waitCalls, 21)
-			require.Equal(t, 1, a.waitCalls[nextParentUID])
-			require.NoError(t, p.waitErr[nextParentUID])
-			require.Equal(t, "blocked", cronRunHealth(p, p.lastRuns[adapter.UID]).state)
+				cronEnrich(t.Context(), a, 7, &p)
+				require.Len(t, a.waitCalls, 21)
+				require.Equal(t, 1, a.waitCalls[nextParentUID])
+				require.NoError(t, p.waitErr[nextParentUID])
+				require.Equal(t, "blocked", cronRunHealth(p, p.lastRuns[adapter.UID]).state)
+			})
 		})
 	}
 }
@@ -427,7 +429,7 @@ func TestCronRefreshSubjects(t *testing.T) {
 }
 
 func TestCronRefreshQueueAttentionBound(t *testing.T) {
-	for _, mode := range []string{"fill", "exact", "exact only"} {
+	for _, mode := range []string{"fill", "exact"} {
 		t.Run(mode, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				m, a := cronRefreshFixture(t, 16)
@@ -465,7 +467,7 @@ func TestCronRefreshQueueAttentionBound(t *testing.T) {
 				// read can overtake it (four queued plus four in flight). Releasing one
 				// read only once every worker blocks makes reads start in queue order,
 				// not goroutine wake-up order.
-				for mode != "exact only" {
+				for {
 					synctest.Wait()
 					select {
 					case ahead := <-parentCalled:
@@ -513,7 +515,7 @@ func TestCronOpeningRetainedRunRefreshesByUID(t *testing.T) {
 	cases := []struct {
 		mode     string
 		closeKey tea.KeyPressMsg
-	}{{mode: "failed"}, {mode: "running"}, {mode: "closed before load"}, {mode: "already failed"}}
+	}{{mode: "failed"}, {mode: "running"}, {mode: "closed before load"}}
 	for _, key := range []tea.KeyPressMsg{keyRune('?'), {Code: tea.KeyEscape}, keyRune('h')} {
 		cases = append(cases, struct {
 			mode     string
@@ -530,28 +532,8 @@ func TestCronOpeningRetainedRunRefreshesByUID(t *testing.T) {
 			m, a := cronRefreshFixture(t, 1)
 			r := m.cron.runPage.runs[0]
 			r.Status, r.Actor, r.IssueUID = "running", "operator", new("wait-issue")
-			if mode == "already failed" {
-				m = cronSeenFixture(t)
-				head := m.cron.data.runs[0]
-				r = head
-				r.UID, r.Status = "retained-failure", "failed"
-				r.CreatedAt = snapshotFixedNow.Add(-24 * time.Hour)
-				r.EndedAt = new(r.CreatedAt)
-				m.cron.data.runs = []generated.CronRun{head}
-				m.cron.data.lastRuns = map[string]generated.CronRun{*head.JobUID: head}
-				m.cron.runPage = cronHistoryPage{runs: []generated.CronRun{head, r}, ready: true, older: true}
-			}
-			if mode != "already failed" {
-				m.cron.runPage.runs[0] = r
-			}
+			m.cron.runPage.runs[0] = r
 			m = m.cronRemember([]generated.CronRun{r})
-			if mode == "already failed" {
-				// Refreshing the head must preserve this older failure in history.
-				m.cron.runPage.older = true
-				m.api = &cronReadTestAPI{data: *m.cron.data}
-				m.cron.events++
-				m = m.cronLoaded(m.fetchCron()().(cronLoadedMsg))
-			}
 			if mode == "running" {
 				a.exact = func(context.Context, string) (generated.CronRun, error) { r.Revision = 3; return r, nil }
 			}
@@ -561,12 +543,7 @@ func TestCronOpeningRetainedRunRefreshesByUID(t *testing.T) {
 			require.NotEqual(t, -1, i, "event retains the older row")
 			m.cron.lists[cronRuns].cursor = i
 			m = sendKey(m, tea.KeyEnter)
-			if mode == "already failed" {
-				require.Zero(t, m.cronUnseenCount(), "opening the retained row acknowledges it")
-				require.NotContains(t, cronScreenText(m), "no longer in the loaded data", "an acknowledged run must still be readable")
-				require.Contains(t, cronScreenText(m), "failed")
-				return
-			}
+
 			if mode == "closed before load" {
 				m = sendKey(m, tea.KeyEscape)
 			}

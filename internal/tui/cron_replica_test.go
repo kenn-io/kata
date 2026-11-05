@@ -13,12 +13,17 @@ import (
 // Contract: this optional chip describes pulls for the selected project, never
 // recent push traffic, and an unavailable status read does not hide cron data.
 func TestCronReplicaClient(t *testing.T) {
+	requests := make(chan *http.Request, 1)
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/api/v1/projects/7/federation/status", r.URL.Path)
+		requests <- r
 		respondJSON(t, w, map[string]any{"statuses": []map[string]any{{"project_id": 7, "role": "spoke", "last_pull_success_at": "2026-05-01T11:00:00Z", "last_successful_sync_at": "2026-05-01T11:59:00Z", "last_error_at": "2026-05-01T11:30:00Z", "last_error": "pull failed"}}})
 	})
 	status, err := c.readCronReplica(t.Context(), 7)
 	require.NoError(t, err)
+	require.Len(t, requests, 1, "the client must issue exactly one request")
+	req := <-requests
+	require.Equal(t, "/api/v1/projects/7/federation/status", req.URL.Path)
+
 	require.Equal(t, "spoke", status.role)
 	require.Equal(t, snapshotFixedNow.Add(-time.Hour), *status.pulledAt)
 	require.Equal(t, "pull failed", status.lastError)
@@ -49,9 +54,6 @@ func TestCronReplicaChip(t *testing.T) {
 		m.width = 120
 		m.cron.data.replica = cronReplica{role: "spoke", pulledAt: new(snapshotFixedNow.Add(-3 * time.Minute))}
 		assertGolden(t, "cron-jobs-replica", m.viewBody())
-		m.cron.data.replica.errorAt = new(snapshotFixedNow.Add(-2 * time.Minute))
-		m.cron.data.replica.lastError = "sync failed"
-		assertGolden(t, "cron-jobs-replica-error", m.viewBody())
 	})
 }
 

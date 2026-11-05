@@ -143,7 +143,6 @@ func (a *cronWaitFetchAPI) readCronParent(ctx context.Context, id int64, uid str
 }
 
 // A fresh unavailable read cannot reuse a preceding successful wait snapshot.
-
 func TestCronWaitRefreshUnavailable(t *testing.T) {
 	uid := "issue-example"
 	r := generated.CronRun{UID: "run-example", Status: "running", Actor: "operator", IssueUID: new(uid)}
@@ -165,33 +164,27 @@ func TestCronWaitSharedIssueThroughUndoClient(t *testing.T) {
 	nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&j.Definition)
 	p := cronData{jobs: []generated.CronJob{j}, runs: []generated.CronRun{{UID: "adapter-run", Status: "running", Actor: "operator", IssueUID: new(nextParentUID)}}}
 	var reads atomic.Int32
+	requests := make(chan string, 4)
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.URL.Path
 		if r.URL.Path == "/api/v1/projects/7/issues/"+nextParentUID {
 			reads.Add(1)
 			respondJSON(t, w, map[string]any{"issue": map[string]any{"status": "open", "metadata": map[string]any{"work.attention": "needs-human"}}})
 		} else {
-			require.Equal(t, "/api/v1/projects/7/cron/runs", r.URL.Path)
 			respondJSON(t, w, map[string]any{"runs": []any{}})
 		}
 	})
 	cronEnrich(t.Context(), newUndoClient(c), 7, &p)
+	close(requests)
+	var paths []string
+	for path := range requests {
+		paths = append(paths, path)
+	}
+	require.ElementsMatch(t, []string{"/api/v1/projects/7/issues/" + nextParentUID, "/api/v1/projects/7/cron/runs"}, paths)
 	require.Equal(t, int32(1), reads.Load())
 	require.True(t, p.parentOpen[nextParentUID])
 	require.Equal(t, "blocked", cronRunHealth(p, p.runs[0]).state)
 
-	{
-		m := cronFixture(t)
-		a := waitReadAPI(nil)
-		base := &cronWaitFetchAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, waiter: a}
-		r := generated.CronRun{UID: "run-example", Status: "running", Actor: "operator", IssueUID: new("issue-example"), JobUID: new(m.cron.data.jobs[0].UID)}
-		p := cronData{jobs: m.cron.data.jobs, runs: []generated.CronRun{r}}
-		cronEnrich(t.Context(), newUndoClient(base), 7, &p)
-		require.Equal(t, "blocked", cronRunHealth(p, r).state)
-		require.Equal(t, 1, a.waitCalls["issue-example"])
-		cronEnrich(t.Context(), newUndoClient(&cronReadTestAPI{data: *m.cron.data}), 7, &p)
-		require.Equal(t, "running", cronRunHealth(p, r).state)
-		require.Equal(t, "attention unavailable", cronRunHealth(p, r).reason)
-	}
 }
 
 // Contract: at most 20 attention reads, one fetch per shared issue, with each

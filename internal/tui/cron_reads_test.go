@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -19,11 +20,9 @@ import (
 // Contract: the existing run route must receive the exact job/page constraints,
 // and callers need the server cursor to discover runs outside the project head.
 func TestCronClientPages(t *testing.T) {
+	requests := make(chan *http.Request, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/api/v1/projects/7/cron/runs", r.URL.Path)
-		require.Equal(t, "job-example", r.URL.Query().Get("job_uid"))
-		require.Equal(t, "before-example", r.URL.Query().Get("before_uid"))
-		require.Equal(t, "20", r.URL.Query().Get("limit"))
+		requests <- r
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"runs":[],"next_before_uid":"next-example"}`))
 	}))
@@ -31,6 +30,13 @@ func TestCronClientPages(t *testing.T) {
 	c := NewClient(srv.URL, srv.Client())
 	runs, next, err := c.ListCronJobRuns(t.Context(), 7, "job-example", "before-example", 20)
 	require.NoError(t, err)
+	require.Len(t, requests, 1, "the client must issue exactly one request")
+	req := <-requests
+	require.Equal(t, "/api/v1/projects/7/cron/runs", req.URL.Path)
+	require.Equal(t, "job-example", req.URL.Query().Get("job_uid"))
+	require.Equal(t, "before-example", req.URL.Query().Get("before_uid"))
+	require.Equal(t, "20", req.URL.Query().Get("limit"))
+
 	require.Empty(t, runs)
 	require.Equal(t, "next-example", next)
 }
@@ -106,84 +112,88 @@ func TestCronEnrichmentExactAndIsolated(t *testing.T) {
 }
 
 func TestCronEnrichmentAdmissionAndWorkerCaps(t *testing.T) {
-	j := cronFixture(t).cron.data.jobs[0]
-	p := cronData{}
-	for i := range 205 {
-		j.UID = fmt.Sprint(i)
-		p.jobs = append(p.jobs, j)
-	}
-	for i := range 205 {
-		j.UID = "native-" + fmt.Sprint(i)
-		nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&j.Definition)
-		j.Definition.Issue.ParentUID = new("parent-" + fmt.Sprint(i))
-		p.jobs = append(p.jobs, j)
-	}
-	entered, release := make(chan struct{}, 200), make(chan struct{})
-	t.Cleanup(func() {
-		select {
-		case <-release:
-		default:
-			close(release)
+	synctest.Test(t, func(t *testing.T) {
+		j := cronFixture(t).cron.data.jobs[0]
+		p := cronData{}
+		for i := range 205 {
+			j.UID = fmt.Sprint(i)
+			p.jobs = append(p.jobs, j)
 		}
-	})
-	a := &cronEnrichAPI{read: func(ctx context.Context, _ string) ([]generated.CronRun, error) {
-		entered <- struct{}{}
-		select {
-		case <-release:
-			return nil, nil
-		case <-ctx.Done():
-			return nil, ctx.Err()
+		for i := range 205 {
+			j.UID = "native-" + fmt.Sprint(i)
+			nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&j.Definition)
+			j.Definition.Issue.ParentUID = new("parent-" + fmt.Sprint(i))
+			p.jobs = append(p.jobs, j)
 		}
-	}}
-	done := make(chan struct{})
-	go func() { cronEnrich(t.Context(), a, 7, &p); close(done) }()
-	for range 4 {
+		entered, release := make(chan struct{}, 200), make(chan struct{})
+		t.Cleanup(func() {
+			select {
+			case <-release:
+			default:
+				close(release)
+			}
+		})
+		a := &cronEnrichAPI{read: func(ctx context.Context, _ string) ([]generated.CronRun, error) {
+			entered <- struct{}{}
+			select {
+			case <-release:
+				return nil, nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}}
+		done := make(chan struct{})
+		go func() { cronEnrich(t.Context(), a, 7, &p); close(done) }()
+		for range 4 {
+			select {
+			case <-entered:
+			case <-time.After(time.Second):
+				t.Fatal("enrichment worker did not start")
+			}
+		}
+		close(release)
 		select {
-		case <-entered:
+		case <-done:
 		case <-time.After(time.Second):
-			t.Fatal("enrichment worker did not start")
+			t.Fatal("enrichment did not finish")
 		}
-	}
-	close(release)
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("enrichment did not finish")
-	}
-	require.Equal(t, 200, a.calls)
-	require.Equal(t, 200, a.parents)
-	// Fills block together; parent reads run later. This checks per-stage caps.
-	require.LessOrEqual(t, a.peak, 4)
-	require.Greater(t, a.peak, 1)
-	require.ErrorContains(t, p.lastErr["204"], "200 jobs per refresh")
-	require.NotContains(t, p.parentOpen, "parent-204")
+		require.Equal(t, 200, a.calls)
+		require.Equal(t, 200, a.parents)
+		// Fills block together; parent reads run later. This checks per-stage caps.
+		require.LessOrEqual(t, a.peak, 4)
+		require.Greater(t, a.peak, 1)
+		require.ErrorContains(t, p.lastErr["204"], "200 jobs per refresh")
+		require.NotContains(t, p.parentOpen, "parent-204")
+	})
 }
 
 func TestCronEnrichmentCancellation(t *testing.T) {
-	j := cronFixture(t).cron.data.jobs[0]
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	entered := make(chan struct{})
-	a := &cronEnrichAPI{read: func(ctx context.Context, _ string) ([]generated.CronRun, error) {
-		close(entered)
-		<-ctx.Done()
-		return nil, ctx.Err()
-	}}
-	p := cronData{jobs: []generated.CronJob{j}}
-	done := make(chan struct{})
-	go func() { cronEnrich(ctx, a, 7, &p); close(done) }()
-	select {
-	case <-entered:
-	case <-time.After(time.Second):
-		t.Fatal("enrichment read did not start")
-	}
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("enrichment did not cancel")
-	}
-	require.ErrorIs(t, p.lastErr[j.UID], context.Canceled)
+	synctest.Test(t, func(t *testing.T) {
+		j := cronFixture(t).cron.data.jobs[0]
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		entered := make(chan struct{})
+		a := &cronEnrichAPI{read: func(ctx context.Context, _ string) ([]generated.CronRun, error) {
+			close(entered)
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}}
+		p := cronData{jobs: []generated.CronJob{j}}
+		done := make(chan struct{})
+		go func() { cronEnrich(ctx, a, 7, &p); close(done) }()
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			t.Fatal("enrichment read did not start")
+		}
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("enrichment did not cancel")
+		}
+		require.ErrorIs(t, p.lastErr[j.UID], context.Canceled)
+	})
 }
 
 func TestCronVisitCancelsAndFencesRefresh(t *testing.T) {
@@ -244,28 +254,22 @@ func TestCronEnrichmentPrioritizesAdaptersAndEnabledJobs(t *testing.T) {
 		require.Equal(t, job.UID+"-run", p.lastRuns[job.UID].UID)
 	}
 
-	{
-		j := cronFixture(t).cron.data.jobs[0]
-		nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&j.Definition)
-		a := &cronEnrichAPI{read: func(_ context.Context, job string) ([]generated.CronRun, error) {
-			return []generated.CronRun{{UID: "native-run", JobUID: new(job)}}, nil
-		}}
-		p := cronData{jobs: []generated.CronJob{j}}
-		cronEnrich(t.Context(), a, 7, &p)
-		require.Equal(t, "native-run", p.lastRuns[j.UID].UID)
-		require.Equal(t, 1, a.parents)
-	}
 }
 
 func TestCronRunClientByUID(t *testing.T) {
+	requests := make(chan *http.Request, 1)
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/api/v1/projects/7/cron/runs/run-example", r.URL.Path)
+		requests <- r
 		respondJSON(t, w, map[string]any{"run": map[string]any{"uid": "run-example", "status": "failed", "revision": 2}})
 	})
 	reader, ok := any(newUndoClient(c)).(cronRunAPI)
 	require.True(t, ok)
 	r, err := reader.readCronRun(t.Context(), 7, "run-example")
 	require.NoError(t, err)
+	require.Len(t, requests, 1, "the client must issue exactly one request")
+	req := <-requests
+	require.Equal(t, "/api/v1/projects/7/cron/runs/run-example", req.URL.Path)
+
 	require.Equal(t, "run-example", r.UID)
 	require.Equal(t, "failed", r.Status)
 }

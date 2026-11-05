@@ -72,7 +72,6 @@ func TestCronSeenMergeAlgebra(t *testing.T) {
 }
 
 func TestCronSeenDecodeRejectsInvalid(t *testing.T) {
-
 	for _, raw := range []string{`null`, `{}`, `{"version":2}`, `{"version":1,"projects":{"p":{"cleared_through":"bad"}}}`} {
 		_, err := cronSeenDecode([]byte(raw))
 		require.Error(t, err)
@@ -111,9 +110,8 @@ func TestCronSeenFiles(t *testing.T) {
 	cancel()
 	_, err = cronSeenLoad(ctx, path)
 	require.ErrorIs(t, err, context.Canceled)
-	// Concurrent-save smoke test: stale snapshots must merge unrelated project
-	// entries. Scheduling is uncontrolled, so this does not deterministically
-	// prove that the file lock prevents lost updates.
+	// Concurrent stale saves must preserve unrelated project entries. This catches
+	// lost updates without the lock, though scheduling is uncontrolled.
 	var wg sync.WaitGroup
 	errs := make(chan error, 20)
 	for i := range 20 {

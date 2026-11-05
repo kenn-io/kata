@@ -20,8 +20,7 @@ func TestCronQueryExamples(t *testing.T) {
 		want  bool
 	}{
 		{"status:FAILED", cronRuns, true}, {"status:fail", cronRuns, false},
-		{"status:running status:failed actor:oper", cronRuns, true},
-		{"status:failed actor:other", cronRuns, false}, {"report status:failed", cronRuns, true},
+		{"report status:failed", cronRuns, true},
 		{"missing status:failed", cronRuns, false}, {"job:abc1", cronRuns, true},
 		{"executor:KER teammate:read", cronRuns, true}, {"issue:01x", cronRuns, true},
 		{"issue:xyz", cronRuns, false}, {"issue:none", cronRuns, false},
@@ -61,6 +60,10 @@ func TestCronQueryArbitraryInputTotal(t *testing.T) {
 
 // OR within status and AND across actor share one closed-form query oracle.
 func TestCronQueryRepeatedStatusAndActorIntersection(t *testing.T) {
+	// Preserve the shorter actor substring and explicit mismatch examples.
+	fields := map[string]string{"status": "failed", "actor": "Operator"}
+	require.True(t, cronQuery("status:running status:failed actor:oper", cronRuns).match(fields, ""))
+	require.False(t, cronQuery("status:failed actor:other", cronRuns).match(fields, ""))
 	hegel.Test(t, func(ht *hegel.T) {
 		statuses := []string{"failed", "running", "succeeded", "unknown", "cancelled"}
 		status := hegel.Draw(ht, hegel.SampledFrom(statuses))
@@ -82,9 +85,6 @@ func TestCronQueryRepeatedStatusAndActorIntersection(t *testing.T) {
 			ht.Fatal("new key must intersect the actor match")
 		}
 		fixed := cronQuery("status:failed status:running", cronRuns)
-		if cronQuery("status:failed", cronRuns).match(fields, "") && !fixed.match(fields, "") {
-			ht.Fatal("OR expansion removed a row")
-		}
 		wantFixed := status == "failed" || status == "running"
 		if got := fixed.match(fields, ""); got != wantFixed {
 			ht.Fatal("fixed OR query must match exactly either status")

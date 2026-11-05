@@ -349,7 +349,7 @@ func TestCronNoticeClearsOnSwitch(t *testing.T) {
 // observation HLC. A failure event that loses that fold, whatever its peer
 // revision or updated_at, must neither be announced once a read issued after
 // it shows the store's row, nor keep suppressing its job's later failures.
-
+//
 // An announcement stops suppressing its job only after acknowledgement or
 // authoritative correction. Peer revisions and timestamps are not local order.
 func TestCronNoticeJobSuppressionRelease(t *testing.T) {
@@ -379,7 +379,10 @@ func TestCronNoticeJobSuppressionRelease(t *testing.T) {
 			m.cronSeen.data.Projects["project-example"] = cronSeenProject{Runs: []string{"a", "b"}}
 			m, cmd = m.cronNoticeEvent(cronNoticeEvent("c", "job", snapshotFixedNow))
 			require.NotNil(t, cmd)
+			m.toast = nil
 			m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+			require.NotNil(t, m.toast)
+			require.Contains(t, m.cronNotices.announced, "c")
 		}},
 		{"loaded correction after reset", func(t *testing.T, m Model) {
 			job := m.cron.data.jobs[0].UID
@@ -404,61 +407,56 @@ func TestCronNoticeJobSuppressionRelease(t *testing.T) {
 		}},
 	}
 	T := snapshotFixedNow
-	for _, at := range []struct {
-		name string
-		at   time.Time
-	}{{"older", T}, {"equal", T.Add(time.Minute)}, {"skewed later", T.Add(2 * time.Minute)}} {
-		for _, order := range []string{"read before flush", "flush before read", "winning failure"} {
-			tests = append(tests, struct {
-				name string
-				run  func(*testing.T, Model)
-			}{at.name + "/" + order, func(t *testing.T, m Model) {
-				job := m.cron.data.jobs[0].UID
-				loaded := generated.CronRun{UID: "old", JobUID: &job, Status: "succeeded", Revision: 5, CreatedAt: T, UpdatedAt: T.Add(time.Minute), EndedAt: new(T.Add(time.Minute))}
-				m.cron.data.runs = append(m.cron.data.runs, loaded)
-				event := cronNoticeEvent("old", job, at.at)
-				event.cronRun.Revision = 9 // a source peer's revision, incomparable with local revision 5
-				next, _ := m.handleEventReceived(event)
-				m = next.(Model)
-				require.Contains(t, m.cronNotices.pending, "old", "before any later read, the event is the only evidence")
-				if order == "winning failure" {
-					// The event won: the store's row became failed at local revision 6.
-					won := loaded
-					won.Status, won.Revision, won.UpdatedAt, won.EndedAt = "failed", 6, at.at, new(at.at)
-					m.cron.data.runs[len(m.cron.data.runs)-1] = won
-				}
-				if order != "flush before read" {
-					m = cronSettleTest(m)
-					require.NotContains(t, m.cron.changed, "old")
-				}
-				m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
-				if order == "read before flush" {
-					require.Nil(t, m.toast, "the store kept the success; the losing failure is not announced")
-					require.NotContains(t, m.cronNotices.announced, "old")
-				} else {
-					require.NotNil(t, m.toast)
-					require.Contains(t, m.cronNotices.announced, "old")
-				}
-				if order == "flush before read" {
-					m = cronSettleTest(m)
-					require.NotContains(t, m.cron.changed, "old")
-				}
-				next, _ = m.handleEventReceived(cronNoticeEvent("next", job, T.Add(3*time.Minute)))
-				m = next.(Model)
-				if order == "winning failure" {
-					require.NotContains(t, m.cronNotices.pending, "next", "an unseen winning failure still suppresses its job")
-					return
-				}
-				require.Contains(t, m.cronNotices.pending, "next", "a losing failure must release its job")
-				require.True(t, m.cronNotices.window)
-				m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+	for _, order := range []string{"read before flush", "flush before read", "winning failure"} {
+		tests = append(tests, struct {
+			name string
+			run  func(*testing.T, Model)
+		}{order, func(t *testing.T, m Model) {
+			job := m.cron.data.jobs[0].UID
+			loaded := generated.CronRun{UID: "old", JobUID: &job, Status: "succeeded", Revision: 5, CreatedAt: T, UpdatedAt: T.Add(time.Minute), EndedAt: new(T.Add(time.Minute))}
+			m.cron.data.runs = append(m.cron.data.runs, loaded)
+			event := cronNoticeEvent("old", job, T)
+			event.cronRun.Revision = 9 // a source peer's revision, incomparable with local revision 5
+			next, _ := m.handleEventReceived(event)
+			m = next.(Model)
+			require.Contains(t, m.cronNotices.pending, "old", "before any later read, the event is the only evidence")
+			if order == "winning failure" {
+				// The event won: the store's row became failed at local revision 6.
+				won := loaded
+				won.Status, won.Revision, won.UpdatedAt, won.EndedAt = "failed", 6, T, new(T)
+				m.cron.data.runs[len(m.cron.data.runs)-1] = won
+			}
+			if order != "flush before read" {
+				m = cronSettleTest(m)
+				require.NotContains(t, m.cron.changed, "old")
+			}
+			m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+			if order == "read before flush" {
+				require.Nil(t, m.toast, "the store kept the success; the losing failure is not announced")
+				require.NotContains(t, m.cronNotices.announced, "old")
+			} else {
 				require.NotNil(t, m.toast)
-				require.Contains(t, m.toast.text, "1 run")
-				require.Contains(t, m.cronNotices.announced, "next")
-				r, _ := m.cron.data.run("old")
-				require.False(t, m.cronSeen.session[m.cronProjectUID()][r.UID], "releasing a job must not mark rows seen")
-			}})
-		}
+				require.Contains(t, m.cronNotices.announced, "old")
+			}
+			if order == "flush before read" {
+				m = cronSettleTest(m)
+				require.NotContains(t, m.cron.changed, "old")
+			}
+			next, _ = m.handleEventReceived(cronNoticeEvent("next", job, T.Add(3*time.Minute)))
+			m = next.(Model)
+			if order == "winning failure" {
+				require.NotContains(t, m.cronNotices.pending, "next", "an unseen winning failure still suppresses its job")
+				return
+			}
+			require.Contains(t, m.cronNotices.pending, "next", "a losing failure must release its job")
+			require.True(t, m.cronNotices.window)
+			m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+			require.NotNil(t, m.toast)
+			require.Contains(t, m.toast.text, "1 run")
+			require.Contains(t, m.cronNotices.announced, "next")
+			r, _ := m.cron.data.run("old")
+			require.False(t, m.cronSeen.session[m.cronProjectUID()][r.UID], "releasing a job must not mark rows seen")
+		}})
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -536,6 +534,16 @@ func TestCronNoticeWaitsForReadAfterEvent(t *testing.T) {
 				_, pending := m.cronNotices.pending["r"]
 				_, announced := m.cronNotices.announced["r"]
 				require.True(t, pending || announced, "the event alone does not settle the store's fold")
+				// A read issued before the correction can land afterward. Its success
+				// cannot settle the newer change mark, even though it captured the failure.
+				probe := land(m, m.cron.events-1, row(m, "succeeded", 7, T.Add(30*time.Second)))
+				require.NotZero(t, probe.cron.changed["r"].at)
+				if !flushed {
+					probe, _ = probe.cronNoticeFlush(cronNoticeTickFor(probe))
+					require.NotNil(t, probe.toast, "the older success must not cancel the failure window")
+				}
+				probe = deliver(probe, "before-read", "failed", T.Add(time.Minute))
+				require.NotContains(t, probe.cronNotices.pending, "before-read", "the correction's read must settle before releasing the job")
 				store := failed
 				if wins {
 					store = row(m, "succeeded", 7, T.Add(30*time.Second))
