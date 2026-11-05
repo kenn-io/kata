@@ -876,6 +876,15 @@ func checkIssueLifecycle(t *testing.T, store db.Storage) error {
 	require.NotNil(t, deleteEvent)
 	_, err = store.IssueByShortID(ctx, project.ID, issue.ShortID, db.IncludeDeletedNo)
 	assert.ErrorIs(t, err, db.ErrNotFound)
+	for _, lookupCtx := range []context.Context{ctx, db.WithAuthorizedProjects(ctx, []string{project.UID})} {
+		matches, err := store.IssueUIDPrefixMatch(lookupCtx, issue.UID[:8], 20, db.IncludeDeletedNo)
+		require.NoError(t, err)
+		require.Empty(t, matches)
+		matches, err = store.IssueUIDPrefixMatch(lookupCtx, issue.UID[:8], 20, db.IncludeDeletedYes)
+		require.NoError(t, err)
+		require.Len(t, matches, 1)
+		require.Equal(t, issue.UID, matches[0].UID)
+	}
 
 	restored, restoreEvent, changed, err := store.RestoreIssue(ctx, issue.ID, "conformance-agent")
 	if err != nil {

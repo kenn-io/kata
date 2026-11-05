@@ -30,13 +30,15 @@ func TestIssueUIDPrefixMatchCaseMatching(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, UID: "01HZNQ7V000000000000000001", Title: "Case tie", Author: "agent"})
 	require.NoError(t, err)
-	for _, prefix := range []string{"01HZNQ7V", "01hznq7v"} {
-		matches, err := store.IssueUIDPrefixMatch(t.Context(), prefix, 20, db.IncludeDeletedNo)
-		require.NoError(t, err)
-		require.Len(t, matches, 3)
-		// Candidate order follows case-insensitive UID values, then original bytes.
-		require.Equal(t, "01HZNQ7V000000000000000001", matches[0].UID)
-		require.Equal(t, "01hznq7v000000000000000001", matches[1].UID)
-		require.Equal(t, "01HZNQ7V000000000000000003", matches[2].UID)
+	for _, projects := range [][]string{nil, {project.UID}} {
+		for _, prefix := range []string{"01HZNQ7V", "01hznq7v"} {
+			matches, err := store.IssueUIDPrefixMatch(db.WithAuthorizedProjects(t.Context(), projects), prefix, 20, db.IncludeDeletedNo)
+			require.NoError(t, err)
+			require.Len(t, matches, 3)
+			// SQLite deliberately matches without case and orders ties by original bytes.
+			require.Equal(t, "01HZNQ7V000000000000000001", matches[0].UID)
+			require.Equal(t, "01hznq7v000000000000000001", matches[1].UID)
+			require.Equal(t, "01HZNQ7V000000000000000003", matches[2].UID)
+		}
 	}
 }

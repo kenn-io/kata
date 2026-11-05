@@ -145,9 +145,9 @@ index. See the [schema 44 migration requirements](../development/postgres-migrat
 for the offline window, grants, and rollback.
 
 Schema 45 indexes global and project-scoped issue UID prefixes. PostgreSQL
-keeps case-sensitive matching and orders candidates by UID bytes in every
-database locale, which can change mixed-case candidate order. Stop daemons
-and imports while the migration scans `issues` and builds the indexes. Existing
+keeps case-sensitive matching and switches candidate sorting from the
+database locale to UID byte order. This can change mixed-case suggestions.
+Stop daemons and imports while the migration scans `issues` and builds the indexes. Existing
 runtime grants remain sufficient. See the [schema 45 migration requirements](../development/postgres-migrations.md#schema-45-issue-uid-prefix-index)
 for downtime and rollback. SQLite's JSONL cutover installs global and
 project-scoped prefix indexes; candidates sort by case-insensitive UID value,

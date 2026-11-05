@@ -49,6 +49,9 @@ func RunCreateIssueHistoryGrowth(t *testing.T, open func(*testing.T) db.Storage,
 // RunIssueUIDPrefixGrowth checks bounded candidate lookup across project scopes.
 func RunIssueUIDPrefixGrowth(t *testing.T, open func(*testing.T) db.Storage, seed func(*testing.T, db.Storage, int, int, string, int64, int64)) {
 	t.Helper()
+	if testing.Short() {
+		t.Skip("growthtest: growth checks skip under -short")
+	}
 	type fixture struct {
 		store           db.Storage
 		project, second db.Project
