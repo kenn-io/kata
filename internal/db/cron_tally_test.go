@@ -194,7 +194,7 @@ func TestCronTallyTimestampDomainIsUTCClosed(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
 		offsetMinutes := hegel.Draw(ht, hegel.Integers(-1439, 1439))
 		upper := hegel.Draw(ht, hegel.Integers(0, 1)) == 1
-		at := time.Date(1, 1, 1, 0, 0, 0, 0, time.FixedZone("offset", offsetMinutes*60))
+		at := time.Date(0, 1, 1, 0, 0, 0, 0, time.FixedZone("offset", offsetMinutes*60))
 		if upper {
 			at = time.Date(9999, 12, 31, 23, 59, 59, 999999999, at.Location())
 		}
@@ -203,7 +203,7 @@ func TestCronTallyTimestampDomainIsUTCClosed(t *testing.T) {
 		raw, err := json.Marshal(map[string]CronTallyValue{tallyTestKey: {Version: 1, Groups: map[string]CronTallyEntry{"job": entry}}})
 		require.NoError(ht, err)
 		values, err := DecodeCronTallies(JSONBlob(raw))
-		if at.UTC().Year() < 1 || at.UTC().Year() > 9999 {
+		if at.UTC().Year() < 0 || at.UTC().Year() > 9999 {
 			require.Error(ht, err, "normalization must not create an out-of-domain instant")
 			return
 		}

@@ -3,16 +3,11 @@ package db
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"go.kenn.io/kata/internal/uid"
 )
 
 func cronUID(value string) bool { return uid.Valid(value) && value == strings.ToUpper(value) }
-
-func cronTimestampInRange(at time.Time) bool {
-	return at.Year() >= 1 && at.Year() <= 9999 && at.UTC().Year() >= 1 && at.UTC().Year() <= 9999
-}
 
 // ValidateCronRecord checks one backup row before either backend restores it.
 // Definition documents were decoded strictly with the record; today's rules are
@@ -33,7 +28,7 @@ func ValidateCronRecord(record ImportRecord) error {
 		if value == nil {
 			return fmt.Errorf("nil cron run")
 		}
-		if value.ID <= 0 || value.Revision < 1 || value.CreatedAt.IsZero() || value.UpdatedAt.IsZero() || !cronTimestampInRange(value.CreatedAt) {
+		if value.ID <= 0 || value.Revision < 1 || value.CreatedAt.IsZero() || value.UpdatedAt.IsZero() {
 			return fmt.Errorf("invalid cron observation history")
 		}
 		return validateCronRun(CronRun(*value))

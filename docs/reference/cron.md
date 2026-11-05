@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-05
+last_edited: 2026-11-04
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -528,9 +528,6 @@ its event are bounded to 96 KiB. Unknown fields are rejected. Times are RFC3339
 instants; an end cannot precede a start. An occurrence key is at most 1024
 characters; actor and optional executor label are at most 256 bytes. Teammates
 use Kata's existing 1–64 character ASCII names.
-
-Imported and federated run creation times must be nonzero and stay within
-years 1–9999 before and after conversion to UTC.
 
 A new observation uses expected revision 0. A changed observation requires its
 current revision. An identical retry of the same UID and canonical evidence

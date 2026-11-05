@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/metadata"
@@ -476,7 +475,7 @@ func checkCronTallyTimestampHistory(t *testing.T, store db.Storage, backend Back
 	} {
 		t.Run(at.Format(time.RFC3339), func(t *testing.T) {
 			f := newCronTallyFixture(ctx, t, store)
-			run := f.add(ctx, t, "job", "succeeded", at, "")
+			f.add(ctx, t, "job", "succeeded", at, "")
 			f.add(ctx, t, "job", "running", f.before.Add(-time.Minute), "")
 			records, err := CollectImportRecords(ctx, store, db.ExportFilter{ProjectID: &f.project.ID, IncludeDeleted: true})
 			require.NoError(t, err)
@@ -498,52 +497,20 @@ func checkCronTallyTimestampHistory(t *testing.T, store db.Storage, backend Back
 			replayed := backend.Open(t)
 			t.Cleanup(func() { require.NoError(t, replayed.Close()) })
 			err = replayed.ImportReplay(ctx, records, db.ImportOptions{NewInstance: true, RecomputeEventContentHash: true})
-			target := replayed
-			if at.Year() < 1 {
-				assert.Error(t, err, "new imports reject out-of-domain run history")
-				if err != nil {
-					// The existing store models rows accepted before validation.
-					target = store
-				}
-			} else {
-				require.NoError(t, err)
-			}
-			project, err := target.ProjectByUID(ctx, f.project.UID)
 			require.NoError(t, err)
-			events, err := target.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID})
-			require.NoError(t, err)
-			reset, err := target.PurgeResetCheck(ctx, 0, project.ID)
+			project, err := replayed.ProjectByUID(ctx, f.project.UID)
 			require.NoError(t, err)
 			for _, preview := range []bool{true, false} {
-				result, err := target.PruneCronRuns(ctx, db.PruneCronRuns{ProjectID: project.ID, Actor: "operator", Before: f.before, Keep: 1, DryRun: preview})
-				if at.Year() < 1 {
-					assert.ErrorContains(t, err, "cron tally:")
-				} else {
-					require.NoError(t, err)
-					require.Equal(t, 1, result.Pruned)
-				}
+				result, err := replayed.PruneCronRuns(ctx, db.PruneCronRuns{ProjectID: project.ID, Actor: "operator", Before: f.before, Keep: 1, DryRun: preview})
+				require.NoError(t, err)
+				require.Equal(t, 1, result.Pruned)
 			}
-			counts, err := target.CronRunCounts(ctx, db.CronRunCountsQuery{ProjectID: project.ID})
+			counts, err := replayed.CronRunCounts(ctx, db.CronRunCountsQuery{ProjectID: project.ID})
 			require.NoError(t, err)
 			require.Len(t, counts.Groups, 1)
-			if at.Year() < 1 {
-				after, err := target.ProjectByID(ctx, project.ID)
-				require.NoError(t, err)
-				require.Equal(t, project, after)
-				afterEvents, err := target.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID})
-				require.NoError(t, err)
-				require.Equal(t, events, afterEvents)
-				afterReset, err := target.PurgeResetCheck(ctx, 0, project.ID)
-				require.NoError(t, err)
-				require.Equal(t, reset, afterReset)
-				_, err = target.CronRun(ctx, project.ID, run.UID)
-				require.NoError(t, err)
-				require.Equal(t, int64(0), counts.Groups[0].PrunedSinceTracking.Succeeded)
-				return
-			}
 			require.Equal(t, int64(1), counts.Groups[0].PrunedSinceTracking.Succeeded)
 			require.True(t, counts.Groups[0].OldestCreatedAt.Equal(at))
-			records, err = CollectImportRecords(ctx, target, db.ExportFilter{ProjectID: &project.ID, IncludeDeleted: true})
+			records, err = CollectImportRecords(ctx, replayed, db.ExportFilter{ProjectID: &project.ID, IncludeDeleted: true})
 			require.NoError(t, err)
 			restored := backend.Open(t)
 			t.Cleanup(func() { require.NoError(t, restored.Close()) })
