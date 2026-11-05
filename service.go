@@ -249,7 +249,7 @@ func New(ctx context.Context, cfg Config) (*Service, error) {
 func newService(ctx context.Context, cfg Config, deps serviceDeps) (*Service, error) {
 	cronExecution := cfg.CronExecution.internal()
 	if err := cronExecution.Validate(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("kata: %w", err)
 	}
 	if strings.TrimSpace(cfg.DSN) == "" {
 		return nil, errors.New("kata: storage DSN is required")

@@ -49,11 +49,6 @@ func (d *Store) CronJob(ctx context.Context, project int64, id string) (db.CronJ
 	return d.cronSQL().Job(ctx, project, id)
 }
 
-// CronJobSnapshotPayload returns one retained snapshot matching a job definition version.
-func (d *Store) CronJobSnapshotPayload(ctx context.Context, project int64, jobUID, definitionEventUID string) (string, error) {
-	return d.cronSQL().JobSnapshotPayload(ctx, project, jobUID, definitionEventUID)
-}
-
 // CronWorkflow reads one project-scoped workflow definition.
 func (d *Store) CronWorkflow(ctx context.Context, project int64, id string) (db.CronWorkflow, error) {
 	return d.cronSQL().Workflow(ctx, project, id)

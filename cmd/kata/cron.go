@@ -24,9 +24,10 @@ func newCronCmd() *cobra.Command {
 		Short: "manage recurring issues, shared jobs, workflows and run evidence",
 		Long: `Store a project's shared job and workflow definitions and record run evidence.
 The daemon schedules recurring issue jobs to create child issues and inbox
-requests. External adapters schedule other jobs, launch processes, and report
-each run with kata cron run observe. A recorded run status never controls
-whether anything runs.
+requests. External adapters schedule other jobs. Before each execution, they
+read kata cron capabilities, record a fresh running observation with kata cron
+run observe, and wait for admission before launching processes. They report
+results on the same run.
 Results are JSON.
 A job is configured work: its trigger, action, and execution settings.
 A workflow is reusable command or prompt steps with dependencies.
@@ -58,7 +59,7 @@ The full contract is in the Cron reference (docs/reference/cron.md).`,
 	}
 	capabilities := newCronOperationCmd("capabilities", "show")
 	capabilities.Use = "capabilities"
-	capabilities.Short = "discover local protocol support without creating cron state"
+	capabilities.Short = "show local protocol support and execution policy"
 	command.AddCommand(runs, capabilities)
 	return command
 }
@@ -131,7 +132,9 @@ func cronOperationHelp(resource, action string) (string, string) {
 	switch resource + " " + action {
 	case "capabilities show":
 		return `Show whether the daemon supports shared cron and recurring child issues for
-this project (cron_v1 covers all cron features). Reads only; creates no cron state.`, "  kata cron capabilities --json"
+this project (cron_v1 covers all cron features), plus its local execution policy.
+Read before each execution, then record a fresh running observation and wait for
+admission before launching. Reads only; creates no cron state.`, "  kata cron capabilities --json"
 	case "run list":
 		return `List the project's recorded runs, newest first. --job-uid lists one job's runs.
 For the next page, pass the response's next_before_uid as --before-uid.`,

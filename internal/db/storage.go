@@ -23,9 +23,6 @@ type Storage interface {
 	PutCronJob(context.Context, PutCronJob) (CronJob, []Event, error)
 	PutCronWorkflow(context.Context, PutCronWorkflow) (CronWorkflow, Event, error)
 	CronJob(context.Context, int64, string) (CronJob, error)
-	// CronJobSnapshotPayload returns one retained job snapshot matching both
-	// definition identities without returning unrelated project history.
-	CronJobSnapshotPayload(context.Context, int64, string, string) (string, error)
 	CronWorkflow(context.Context, int64, string) (CronWorkflow, error)
 	ListCronJobs(context.Context, CronList) ([]CronJob, error)
 	ListRecurringCronJobs(context.Context, string, int) ([]RecurringCronCandidate, error)

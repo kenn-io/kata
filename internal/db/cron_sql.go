@@ -124,27 +124,6 @@ func (a CronSQL) Job(ctx context.Context, project int64, id string) (CronJob, er
 	return jobFromRow(row)
 }
 
-// JobSnapshotPayload returns only the retained snapshot for one job definition
-// version. The partial project/cron index bounds the search to cron events, but
-// JSON identities still need evaluation because adding a payload index is
-// outside this feature's schema scope.
-func (a CronSQL) JobSnapshotPayload(ctx context.Context, project int64, jobUID, definitionEventUID string) (string, error) {
-	query := `SELECT payload FROM events WHERE project_id=$1 AND type LIKE 'cron.%' AND type='cron.job.snapshot'
-AND UPPER(json_extract(payload,'$.uid'))=$2 AND UPPER(json_extract(payload,'$.definition_event_uid'))=$3
-ORDER BY id ASC LIMIT 1`
-	if a.Postgres {
-		query = `SELECT payload FROM events WHERE project_id=$1 AND type LIKE 'cron.%' AND type='cron.job.snapshot'
-AND UPPER(payload::jsonb->>'uid')=$2 AND UPPER(payload::jsonb->>'definition_event_uid')=$3
-ORDER BY id ASC LIMIT 1`
-	}
-	var payload string
-	err := a.Query.QueryRowContext(ctx, query, project, strings.ToUpper(jobUID), strings.ToUpper(definitionEventUID)).Scan(&payload)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", ErrNotFound
-	}
-	return payload, err
-}
-
 // Workflow reads one project-scoped definition, including a retained tombstone.
 func (a CronSQL) Workflow(ctx context.Context, project int64, id string) (CronWorkflow, error) {
 	row, err := scanCron(a.Query.QueryRowContext(ctx, "SELECT "+cronDefinitionColumns+" FROM cron_workflows WHERE project_id=$1 AND uid=$2", project, strings.ToUpper(id)))

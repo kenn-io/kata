@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -23,6 +24,7 @@ func TestServiceCronExecutionConfig(t *testing.T) {
 			service, err := New(t.Context(), cfg)
 			if mode == "invalid" {
 				require.ErrorContains(t, err, "cron.replica_execute")
+				require.True(t, strings.HasPrefix(err.Error(), "kata:"), "%s", err)
 				return
 			}
 			require.NoError(t, err)

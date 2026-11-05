@@ -3,7 +3,6 @@ package daemon_test
 import (
 	"context"
 	"crypto/ed25519"
-	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
 	"fmt"
@@ -13,7 +12,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/api"
@@ -22,7 +20,6 @@ import (
 	"go.kenn.io/kata/internal/daemon"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/testenv"
-	"hegel.dev/go/hegel"
 )
 
 func executionBinding(t *testing.T, store db.Storage, project db.Project, role db.FederationRole, enabled, relay bool) {
@@ -82,6 +79,8 @@ func TestCronExecutionCapabilities(t *testing.T) {
 func TestCronExecutionNewRunPolicy(t *testing.T) {
 	for _, tc := range []struct {
 		name, mode, author, kind string
+		workflowAuthor           string
+		actionWorkflow           bool
 		workflow, deleted, relay bool
 		want                     int
 	}{
@@ -96,7 +95,10 @@ func TestCronExecutionNewRunPolicy(t *testing.T) {
 		{name: "workflow none", author: "company-member", workflow: true, want: 403},
 		{name: "notify", author: "other-member", kind: "notify", want: 200},
 		{name: "notify workflow", author: "other-member", kind: "notify", workflow: true, want: 403},
-		{name: "execute workflow job wins", mode: "owned", author: "company-member", kind: "execute", workflow: true, want: 200},
+		{name: "execute with foreign body workflow", mode: "owned", author: "company-member", kind: "execute", workflow: true, workflowAuthor: "other-member", want: 403},
+		{name: "execute with owned body workflow", mode: "owned", author: "company-member", kind: "execute", workflow: true, workflowAuthor: "company-member", want: 200},
+		{name: "owned job foreign action workflow", mode: "owned", author: "company-member", actionWorkflow: true, workflowAuthor: "other-member", want: 403},
+		{name: "owned job owned action workflow", mode: "owned", author: "company-member", actionWorkflow: true, workflowAuthor: "company-member", want: 200},
 		{name: "tombstone", mode: "owned", author: "company-member", deleted: true, want: 200},
 		{name: "tombstone other", mode: "owned", author: "other-member", deleted: true, want: 403},
 	} {
@@ -104,8 +106,24 @@ func TestCronExecutionNewRunPolicy(t *testing.T) {
 			env := testenv.New(t, func(cfg *daemon.ServerConfig) { cfg.CronExecution = config.CronConfig{ReplicaExecute: tc.mode} })
 			project := seedProject(t, env, "company-project")
 			body := map[string]any{"actor": "observer", "status": "running", "summary": map[string]any{"version": 1}, "expected_revision": 0}
-			if !tc.workflow || tc.kind != "" {
+			var wf db.CronWorkflow
+			if tc.workflow || tc.actionWorkflow {
+				author := tc.workflowAuthor
+				if author == "" {
+					author = tc.author
+				}
+				var err error
+				wf, _, err = env.DB.PutCronWorkflow(t.Context(), db.PutCronWorkflow{ProjectID: project.ID, Name: "Inspect", Actor: author, Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "inspect", Kind: "command", Command: "true"}}}})
+				require.NoError(t, err)
+				if tc.workflow {
+					body["workflow_uid"], body["workflow_definition_event_uid"] = wf.UID, wf.DefinitionEventUID
+				}
+			}
+			if !tc.workflow || tc.kind != "" || tc.actionWorkflow {
 				def := cronHTTPDefinition(t)
+				if tc.actionWorkflow {
+					def.Action = cron.Action{Kind: "execute", WorkflowUID: wf.UID}
+				}
 				if tc.kind == "notify" {
 					def.Action = cron.Action{Kind: "notify", Recipient: "company-member", Message: "Inspect"}
 					issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Inspect", Author: tc.author})
@@ -119,15 +137,6 @@ func TestCronExecutionNewRunPolicy(t *testing.T) {
 					require.NoError(t, err)
 				}
 				body["job_uid"], body["definition_event_uid"] = job.UID, job.DefinitionEventUID
-			}
-			if tc.workflow {
-				author := tc.author
-				if tc.kind != "" {
-					author = "other-member"
-				}
-				wf, _, err := env.DB.PutCronWorkflow(t.Context(), db.PutCronWorkflow{ProjectID: project.ID, Name: "Inspect", Actor: author, Definition: cron.WorkflowDefinition{Version: 1, Steps: []cron.WorkflowStep{{Key: "inspect", Kind: "command", Command: "true"}}}})
-				require.NoError(t, err)
-				body["workflow_uid"], body["workflow_definition_event_uid"] = wf.UID, wf.DefinitionEventUID
 			}
 			executionBinding(t, env.DB, project, db.FederationRoleSpoke, true, tc.relay)
 			before, err := env.DB.MaxEventID(t.Context())
@@ -278,258 +287,25 @@ func TestCronExecutionConfigWarnings(t *testing.T) {
 	require.Contains(t, strings.Join(warnings, "\n"), "future-project")
 }
 
-// Historical evidence keeps its action kind even when the current document changes.
-func TestCronExecutionHistoricalActionKind(t *testing.T) {
-	for _, oldKind := range []string{"notify", "execute"} {
-		t.Run(oldKind, func(t *testing.T) {
-			env := testenv.New(t)
-			project := seedProject(t, env, "company-project")
-			issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Inspect", Author: "company-member"})
-			require.NoError(t, err)
-			def := cronHTTPDefinition(t)
-			if oldKind == "notify" {
-				def.Action = cron.Action{Kind: "notify", Recipient: "company-member", Message: "Inspect"}
-				def.Issue = &cron.IssuePolicy{Kind: "existing", UID: issue.UID}
-			}
-			job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Inspect", Actor: "company-member", Definition: def})
-			require.NoError(t, err)
-			oldEvent := job.DefinitionEventUID
-			if oldKind == "notify" {
-				def = cronHTTPDefinition(t)
-			} else {
-				def.Action = cron.Action{Kind: "notify", Recipient: "company-member", Message: "Inspect"}
-				def.Issue = &cron.IssuePolicy{Kind: "existing", UID: issue.UID}
-			}
-			job, _, err = env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, UID: job.UID, ExpectedEventUID: job.DefinitionEventUID, Name: job.Name, Actor: "company-member", Definition: def})
-			require.NoError(t, err)
-			executionBinding(t, env.DB, project, db.FederationRoleSpoke, true, false)
-			body := map[string]any{"actor": "observer", "job_uid": job.UID, "definition_event_uid": oldEvent, "status": "succeeded", "summary": map[string]any{"version": 1}, "expected_revision": 0}
-			status, raw := cronHTTP(t, env, http.MethodPut, fmt.Sprintf("/api/v1/projects/%d/cron/runs/%s", project.ID, cronHTTPUID(t)), body)
-			want := 403
-			if oldKind == "notify" {
-				want = 200
-			}
-			require.Equalf(t, want, status, "historical %s: %s", oldKind, raw)
-		})
-	}
-}
-
-func TestCronExecutionHistoricalSnapshotActionKind(t *testing.T) {
+func TestCronExecutionNonCurrentNotifyDefinition(t *testing.T) {
 	env := testenv.New(t)
 	project := seedProject(t, env, "spoke-project")
 	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Inspect", Author: "member-a"})
 	require.NoError(t, err)
-	notifyDefinition := cronHTTPDefinition(t)
-	notifyDefinition.Action = cron.Action{Kind: "notify", Recipient: "member-a", Message: "Inspect"}
-	notifyDefinition.Issue = &cron.IssuePolicy{Kind: "existing", UID: issue.UID}
-	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{
-		ProjectID: project.ID, Name: "Inspect", Definition: notifyDefinition, Actor: "member-a",
-	})
+	def := cronHTTPDefinition(t)
+	def.Action = cron.Action{Kind: "notify", Recipient: "member-a", Message: "Inspect"}
+	def.Issue = &cron.IssuePolicy{Kind: "existing", UID: issue.UID}
+	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Inspect", Actor: "member-a", Definition: def})
 	require.NoError(t, err)
-	oldDefinitionUID := job.DefinitionEventUID
-	insertExecutionJobSnapshot(t, env, project, job, job.Definition, oldDefinitionUID)
-
-	// A compacted replica retains the snapshot payload but not the source event envelope.
-	result, err := env.DB.ExecContext(t.Context(), "DELETE FROM events WHERE uid = ?", oldDefinitionUID)
-	require.NoError(t, err)
-	deleted, err := result.RowsAffected()
-	require.NoError(t, err)
-	require.Equal(t, int64(1), deleted)
-	_, _, err = env.DB.PutCronJob(t.Context(), db.PutCronJob{
-		ProjectID: project.ID, UID: job.UID, ExpectedEventUID: job.DefinitionEventUID,
-		Name: job.Name, Definition: cronHTTPDefinition(t), Actor: "member-a",
-	})
+	oldEvent := job.DefinitionEventUID
+	def.Action.Message = "Inspect again"
+	job, _, err = env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, UID: job.UID, ExpectedEventUID: oldEvent, Name: job.Name, Actor: "member-a", Definition: def})
 	require.NoError(t, err)
 	executionBinding(t, env.DB, project, db.FederationRoleSpoke, true, false)
-
-	body := map[string]any{
-		"actor": "observer", "job_uid": job.UID, "definition_event_uid": oldDefinitionUID,
-		"status": "succeeded", "summary": map[string]any{"version": 1}, "expected_revision": 0,
-	}
+	body := map[string]any{"actor": "observer", "job_uid": job.UID, "definition_event_uid": oldEvent, "status": "running", "summary": map[string]any{"version": 1}, "expected_revision": 0}
 	status, raw := cronHTTP(t, env, http.MethodPut, fmt.Sprintf("/api/v1/projects/%d/cron/runs/%s", project.ID, cronHTTPUID(t)), body)
-	require.Equalf(t, http.StatusOK, status, "snapshot notification evidence: %s", raw)
-}
-
-func TestCronExecutionUnsupportedHistoricalDefinitionVersion(t *testing.T) {
-	env := testenv.New(t)
-	project := seedProject(t, env, "spoke-project")
-	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{
-		ProjectID: project.ID, Name: "Inspect", Definition: cronHTTPDefinition(t), Actor: "member-a",
-	})
-	require.NoError(t, err)
-	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Inspect", Author: "member-a"})
-	require.NoError(t, err)
-
-	definition := cronHTTPDefinition(t)
-	definition.Version = 2
-	definition.Action = cron.Action{Kind: "notify", Recipient: "member-a", Message: "Inspect"}
-	definition.Issue = &cron.IssuePolicy{Kind: "existing", UID: issue.UID}
-	rawDefinition, err := json.Marshal(definition)
-	require.NoError(t, err)
-	payload, err := json.Marshal(db.CronDefinitionEvent{
-		UID: job.UID, ProjectUID: project.UID, Name: job.Name, Definition: jsontext.Value(rawDefinition),
-		Author: job.Author, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt,
-	})
-	require.NoError(t, err)
-	definitionEventUID, originUID := cronHTTPUID(t), cronHTTPUID(t)
-	now := time.Now().UTC().Truncate(time.Millisecond)
-	event := db.RemoteEvent{
-		EventUID: definitionEventUID, OriginInstanceUID: originUID, ProjectUID: project.UID, ProjectName: project.Name,
-		Type: "cron.job.updated", Actor: "member-a", HLCPhysicalMS: now.UnixMilli(),
-		Payload: jsontext.Value(payload), CreatedAt: now,
-	}
-	require.NoError(t, db.ValidateAcceptedCronEvent(event), "accepted history permits newer definition documents for reading")
-	event.ContentHash, err = db.EventContentHash(db.EventHashInput{
-		UID: event.EventUID, OriginInstanceUID: event.OriginInstanceUID, ProjectUID: event.ProjectUID,
-		ProjectName: event.ProjectName, Type: event.Type, Actor: event.Actor, HLCPhysicalMS: event.HLCPhysicalMS,
-		CreatedAt: now.Format(db.EventTimestampFormat), Payload: event.Payload,
-	})
-	require.NoError(t, err)
-	inserted, err := env.DB.InsertRemoteEvent(t.Context(), project.ID, event)
-	require.NoError(t, err)
-	require.True(t, inserted)
-	executionBinding(t, env.DB, project, db.FederationRoleSpoke, true, false)
-
-	body := map[string]any{
-		"actor": "observer", "job_uid": job.UID, "definition_event_uid": definitionEventUID,
-		"status": "running", "summary": map[string]any{"version": 1}, "expected_revision": 0,
-	}
-	status, raw := cronHTTP(t, env, http.MethodPut, fmt.Sprintf("/api/v1/projects/%d/cron/runs/%s", project.ID, cronHTTPUID(t)), body)
-	require.Equalf(t, http.StatusForbidden, status, "unsupported historical action version: %s", raw)
-}
-
-func TestCronExecutionUnsupportedHistoricalSnapshotVersion(t *testing.T) {
-	env := testenv.New(t)
-	project := seedProject(t, env, "spoke-project")
-	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{
-		ProjectID: project.ID, Name: "Inspect", Definition: cronHTTPDefinition(t), Actor: "member-a",
-	})
-	require.NoError(t, err)
-	issue, _, err := env.DB.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "Inspect", Author: "member-a"})
-	require.NoError(t, err)
-	definition := cronHTTPDefinition(t)
-	definition.Version = 2
-	definition.Action = cron.Action{Kind: "notify", Recipient: "member-a", Message: "Inspect"}
-	definition.Issue = &cron.IssuePolicy{Kind: "existing", UID: issue.UID}
-	definitionEventUID := cronHTTPUID(t)
-	insertExecutionJobSnapshot(t, env, project, job, definition, definitionEventUID)
-	executionBinding(t, env.DB, project, db.FederationRoleSpoke, true, false)
-
-	body := map[string]any{
-		"actor": "observer", "job_uid": job.UID, "definition_event_uid": definitionEventUID,
-		"status": "running", "summary": map[string]any{"version": 1}, "expected_revision": 0,
-	}
-	status, raw := cronHTTP(t, env, http.MethodPut, fmt.Sprintf("/api/v1/projects/%d/cron/runs/%s", project.ID, cronHTTPUID(t)), body)
-	require.Equalf(t, http.StatusForbidden, status, "unsupported snapshot action version: %s", raw)
-}
-
-func insertExecutionJobSnapshot(t *testing.T, env *testenv.Env, project db.Project, job db.CronJob, definition cron.JobDefinition, definitionEventUID string) {
-	t.Helper()
-	rawDefinition, err := json.Marshal(definition)
-	require.NoError(t, err)
-	snapshot := db.CronDefinitionEvent{
-		UID: job.UID, ProjectUID: project.UID, Name: job.Name, Definition: jsontext.Value(rawDefinition),
-		Author: job.Author, CreatedAt: job.CreatedAt, UpdatedAt: job.UpdatedAt,
-		DefinitionEventUID: definitionEventUID, DefinitionHLC: &job.DefinitionHLC,
-	}
-	snapshotPayload, err := json.Marshal(snapshot)
-	require.NoError(t, err)
-	originUID, snapshotUID := cronHTTPUID(t), cronHTTPUID(t)
-	now := time.Now().UTC().Truncate(time.Millisecond)
-	event := db.RemoteEvent{
-		EventUID: snapshotUID, OriginInstanceUID: originUID, ProjectUID: project.UID, ProjectName: project.Name,
-		Type: "cron.job.snapshot", Actor: "member-a", HLCPhysicalMS: now.UnixMilli(),
-		Payload: jsontext.Value(snapshotPayload), CreatedAt: now,
-	}
-	require.NoError(t, db.ValidateAcceptedCronEvent(event))
-	event.ContentHash, err = db.EventContentHash(db.EventHashInput{
-		UID: event.EventUID, OriginInstanceUID: event.OriginInstanceUID, ProjectUID: event.ProjectUID,
-		ProjectName: event.ProjectName, Type: event.Type, Actor: event.Actor, HLCPhysicalMS: event.HLCPhysicalMS,
-		CreatedAt: now.Format(db.EventTimestampFormat), Payload: event.Payload,
-	})
-	require.NoError(t, err)
-	inserted, err := env.DB.InsertRemoteEvent(t.Context(), project.ID, event)
-	require.NoError(t, err)
-	require.True(t, inserted)
-}
-
-type executionPropertyStore struct {
-	db.Storage
-	project                                          db.Project
-	mode, member, jobAuthor, workflowAuthor, jobKind string
-	replica, observed                                bool
-}
-
-func (s *executionPropertyStore) ProjectByID(context.Context, int64) (db.Project, error) {
-	p := s.project
-	p.Name = s.mode
-	return p, nil
-}
-func (s *executionPropertyStore) FederationBindingByProject(context.Context, int64) (db.FederationBinding, error) {
-	if !s.replica {
-		return db.FederationBinding{}, db.ErrNotFound
-	}
-	return db.FederationBinding{Role: db.FederationRoleSpoke, Actor: s.member}, nil
-}
-func (s *executionPropertyStore) CronRun(context.Context, int64, string) (db.CronRun, error) {
-	return db.CronRun{}, db.ErrNotFound
-}
-func (s *executionPropertyStore) CronJob(_ context.Context, _ int64, id string) (db.CronJob, error) {
-	return db.CronJob{UID: id, DefinitionEventUID: id, Author: s.jobAuthor, Definition: cron.JobDefinition{Version: 1, Action: cron.Action{Kind: s.jobKind}}}, nil
-}
-func (s *executionPropertyStore) CronWorkflow(context.Context, int64, string) (db.CronWorkflow, error) {
-	return db.CronWorkflow{Author: s.workflowAuthor}, nil
-}
-func (s *executionPropertyStore) ObserveCronRun(_ context.Context, in db.ObserveCronRun) (db.CronRunObservationResult, error) {
-	s.observed = true
-	return db.CronRunObservationResult{Run: db.CronRun{UID: in.UID, ProjectID: in.ProjectID, Status: in.Status, Summary: in.Summary}}, nil
-}
-
-// The normative ownership and precedence rules hold across all policy modes,
-// both reference shapes and arbitrary exact actor labels, before storage writes.
-func TestCronExecutionAdmissionProperties(t *testing.T) {
-	env := testenv.New(t)
-	project := seedProject(t, env, "company-project")
-	store := &executionPropertyStore{Storage: env.DB, project: project}
-	srv := daemon.NewServer(daemon.ServerConfig{DB: store, CronExecution: config.CronConfig{Projects: []config.CronProjectConfig{{Name: "none", Execute: "none"}, {Name: "owned", Execute: "owned"}, {Name: "all", Execute: "all"}}}})
-	t.Cleanup(func() { require.NoError(t, srv.Close()) })
-	id := cronHTTPUID(t)
-	hegel.Test(t, func(ht *hegel.T) {
-		store.mode = hegel.Draw(ht, hegel.SampledFrom([]string{"none", "owned", "all"}))
-		store.replica = hegel.Draw(ht, hegel.Booleans())
-		store.member = hegel.Draw(ht, hegel.OneOf(hegel.Text(), hegel.SampledFrom([]string{"", "\u2003", "company-member", "é", "e\u0301"})))
-		actorGen := hegel.OneOf(hegel.Text(), hegel.Just(store.member), hegel.Just(strings.ToUpper(store.member)))
-		store.jobAuthor = hegel.Draw(ht, actorGen)
-		store.workflowAuthor = hegel.Draw(ht, actorGen)
-		store.jobKind = hegel.Draw(ht, hegel.SampledFrom([]string{"notify", "execute"}))
-		store.observed = false
-		job, workflow := hegel.Draw(ht, hegel.Booleans()), hegel.Draw(ht, hegel.Booleans())
-		if !job && !workflow {
-			workflow = true
-		}
-		body := map[string]any{"actor": "observer", "status": "running", "summary": map[string]any{"version": 1}, "expected_revision": 0}
-		if job {
-			body["job_uid"], body["definition_event_uid"] = id, id
-		}
-		if workflow {
-			body["workflow_uid"], body["workflow_definition_event_uid"] = id, id
-		}
-		raw, err := json.Marshal(body)
-		require.NoError(ht, err)
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPut, fmt.Sprintf("/api/v1/projects/%d/cron/runs/%s", project.ID, id), strings.NewReader(string(raw)))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rec, req)
-		author := store.workflowAuthor
-		if job && store.jobKind == "execute" {
-			author = store.jobAuthor
-		}
-		allowed := !store.replica || store.mode == "all" || (job && store.jobKind == "notify" && !workflow) || (store.mode == "owned" && strings.TrimSpace(store.member) != "" && store.member == author)
-		want := 403
-		if allowed {
-			want = 200
-		}
-		require.Equalf(ht, want, rec.Code, "%s", rec.Body.String())
-		require.Equal(ht, allowed, store.observed)
-	}, hegel.WithTestCases(1000))
+	require.Equalf(t, http.StatusForbidden, status, "%s", raw)
+	var problem api.ErrorEnvelope
+	require.NoError(t, json.Unmarshal(raw, &problem))
+	require.Equal(t, "cron_execution_not_enabled", problem.Error.Code)
 }

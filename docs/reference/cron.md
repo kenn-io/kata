@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-04
+last_edited: 2026-11-05
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -642,7 +642,7 @@ execute = "owned"
 | Mode | Eligible execution on this replica |
 | --- | --- |
 | `none` | No execute jobs or workflows. |
-| `owned` | The definition's author exactly matches the nonblank upstream member actor from capabilities. |
+| `owned` | Every executed definition's author exactly matches the nonblank upstream member actor from capabilities, including the job's workflow. |
 | `all` | Every execute job and workflow, subject to the adapter's own activation. |
 
 Local and hub-role projects always use `all`. Overrides match the exact current
@@ -654,15 +654,14 @@ when the daemon default is `all`. Config edits take effect after
 warn at startup; local/hub overrides warn and have no effect.
 
 Before scheduling or manually starting each new execution, adapters must read
-live capabilities and apply this rule. For a run referencing an execute job,
-use the job's author even when it also references a workflow. Workflow-only
-runs use the workflow's author. Notify-only observations are unaffected; a
-notify job with a workflow reference must satisfy the workflow rule. The
-referenced historical action determines whether evidence is for execution or
-notification; ownership uses the current canonical author. A missing current
-definition cannot establish eligibility under `none` or `owned`. If compaction
-removed an older action body, its reference alone cannot establish a
-notification exemption, so the execution policy applies.
+live capabilities and apply this rule. Under `owned`, check the job's author,
+the author of any workflow named by its `action.workflow_uid`, and the author
+of any `workflow_uid` in the observation. Workflow-only runs check the
+workflow's author. Only a reference to the current version 1 notify definition
+is exempt from the job execution rule; a notify job with a workflow reference
+must still satisfy the workflow rule. A non-current job definition reference
+counts as execution. Ownership uses the current canonical author. A missing
+current definition cannot establish eligibility under `none` or `owned`.
 
 Before launch, submit a `running` observation with a fresh run UID and require
 success. The local observe route rejects new excluded runs with

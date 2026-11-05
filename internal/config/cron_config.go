@@ -3,9 +3,30 @@ package config
 import (
 	"fmt"
 	"strings"
-
-	"go.kenn.io/kata/internal/cronpolicy"
 )
+
+// CronExecuteMode controls which replica definitions a local adapter may execute.
+type CronExecuteMode string
+
+const (
+	// ModeNone excludes all replica jobs and workflows.
+	ModeNone CronExecuteMode = "none"
+	// ModeOwned allows definitions authored by the upstream member actor.
+	ModeOwned CronExecuteMode = "owned"
+	// ModeAll allows all replica jobs and workflows.
+	ModeAll CronExecuteMode = "all"
+)
+
+// ParseCronExecuteMode recognizes the supported local replica execution modes.
+func ParseCronExecuteMode(value string) (CronExecuteMode, bool) {
+	mode := CronExecuteMode(value)
+	switch mode {
+	case ModeNone, ModeOwned, ModeAll:
+		return mode, true
+	default:
+		return "", false
+	}
+}
 
 // CronConfig is local execution policy, never replicated with definitions.
 type CronConfig struct {
@@ -27,7 +48,7 @@ func trimCronConfig(cfg *CronConfig) {
 }
 
 func validExecuteMode(mode string) bool {
-	_, ok := cronpolicy.ParseExecuteMode(mode)
+	_, ok := ParseCronExecuteMode(mode)
 	return ok
 }
 
