@@ -10,7 +10,11 @@ import (
 )
 
 func TestProjectStatsPlanUsesProjectEventIndex(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires postgres testcontainer")
+	}
 	store, _ := openConformanceStore(t)
+	t.Cleanup(func() { _ = store.Close() })
 	tx, err := store.BeginTx(t.Context(), nil)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback() }()
