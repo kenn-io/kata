@@ -79,6 +79,9 @@ func TestCronRequestCommands(t *testing.T) {
 	_, err = execute("run", "request-cancel", runID)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "request-uid")
-	_, err = execute("job", "request-run", job.UID, "--request-uid", id, "--ttl", "59")
+	fresh, err := uid.New()
+	require.NoError(t, err)
+	_, err = execute("job", "request-run", job.UID, "--request-uid", fresh, "--ttl", "59")
 	require.Error(t, err)
+	require.Contains(t, err.Error(), "ttl_seconds: expected number >= 60")
 }

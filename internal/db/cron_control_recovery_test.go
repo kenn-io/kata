@@ -20,6 +20,15 @@ func controlRecoveryEvent(t *testing.T, key string, from, to jsontext.Value, ori
 // An exact later root deletion recovers legacy opaque values without accepting
 // unrepaired, forged, regressing or currently malformed signed-reset state.
 func TestCronResetDeletedLegacyControls(t *testing.T) {
+	for _, key := range []string{"cron.pause", "cron.request.01ARZ3NDEKTSV4RRFFQ69G5FAV"} {
+		t.Run(key, func(t *testing.T) {
+			payload, err := json.Marshal(map[string]any{"diff": map[string]any{key: map[string]any{"from": nil, "to": false}}})
+			require.NoError(t, err)
+			event := RemoteEvent{Type: "project.metadata_updated", OriginInstanceUID: "root", Payload: payload}
+			require.ErrorIs(t, validateCronResetHistory([]RemoteEvent{event}, nil, "root"), ErrFederationIngestValidation)
+		})
+	}
+
 	for _, key := range []string{"cron.pause", "cron.request." + passoverJobUID, "cron.request.legacy"} {
 		for _, mode := range []string{"repaired", "unrepaired", "wrong-origin", "wrong-repair-origin", "mismatched-old", "not-later", "current-malformed"} {
 			t.Run(key+"/"+mode, func(t *testing.T) {

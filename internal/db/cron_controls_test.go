@@ -48,28 +48,6 @@ func TestCronProjectPauseReasonProperty(t *testing.T) {
 	})
 }
 
-// Contract: only a pinned root may change the reserved key; malformed old state can be deleted.
-func TestCronProjectPauseIngestValidation(t *testing.T) {
-	valid := `{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":""}`
-	for _, tc := range []struct {
-		from, to, origin, authority string
-		ok                          bool
-	}{
-		{`null`, valid, "root", "root", true}, {valid, `null`, "root", "root", true}, {`{"legacy":true}`, `null`, "root", "root", true},
-		{`null`, valid, "spoke", "root", false}, {`null`, valid, "root", "", false}, {`null`, `true`, "root", "root", false},
-		{`null`, `{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":"","extra":1}`, "root", "root", false},
-	} {
-		ev := RemoteEvent{Type: "project.metadata_updated", OriginInstanceUID: tc.origin, Payload: jsontext.Value(`{"diff":{"cron.pause":{"from":` + tc.from + `,"to":` + tc.to + `}}}`)}
-		err := ValidateCronControlEvent(ev, tc.authority)
-		if tc.ok {
-			require.NoError(t, err)
-		} else {
-			require.ErrorIs(t, err, ErrFederationIngestValidation)
-		}
-	}
-	require.NoError(t, ValidateCronControlEvent(RemoteEvent{Type: "project.metadata_updated", Payload: jsontext.Value(`{"diff":{"ordinary":{"to":true}}}`)}, ""))
-}
-
 // Contract: valid actor/reason/timestamp values survive byte-for-byte strings and
 // the same timestamp instant; invalid actor/reason values fail closed.
 func TestCronProjectPauseValueProperty(t *testing.T) {
@@ -94,6 +72,25 @@ func TestCronProjectPauseValueProperty(t *testing.T) {
 // Contract: ingest depends on authenticated provenance and the replacement,
 // never the old value or the receiver clock. Only explicit null deletes.
 func TestCronProjectPauseReplacementProperty(t *testing.T) {
+	valid := `{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":""}`
+	for _, tc := range []struct {
+		from, to, origin, authority string
+		ok                          bool
+	}{
+		{`null`, valid, "root", "root", true}, {valid, `null`, "root", "root", true}, {`{"legacy":true}`, `null`, "root", "root", true},
+		{`null`, valid, "spoke", "root", false}, {`null`, valid, "root", "", false}, {`null`, `true`, "root", "root", false},
+		{`null`, `{"paused_by":"operator","paused_at":"2026-01-02T03:04:05Z","reason":"","extra":1}`, "root", "root", false},
+	} {
+		ev := RemoteEvent{Type: "project.metadata_updated", OriginInstanceUID: tc.origin, Payload: jsontext.Value(`{"diff":{"cron.pause":{"from":` + tc.from + `,"to":` + tc.to + `}}}`)}
+		err := ValidateCronControlEvent(ev, tc.authority)
+		if tc.ok {
+			require.NoError(t, err)
+		} else {
+			require.ErrorIs(t, err, ErrFederationIngestValidation)
+		}
+	}
+	require.NoError(t, ValidateCronControlEvent(RemoteEvent{Type: "project.metadata_updated", Payload: jsontext.Value(`{"diff":{"ordinary":{"to":true}}}`)}, ""))
+
 	hegel.Test(t, func(ht *hegel.T) {
 		actor := hegel.Draw(ht, hegel.Text())
 		reason := hegel.Draw(ht, hegel.Text())

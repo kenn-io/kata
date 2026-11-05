@@ -72,24 +72,34 @@ func withEnabledBacklog(api *cronEnabledTestAPI) {
 }
 
 func TestCronEnabledKeyListAndDetail(t *testing.T) {
-	for _, detail := range []bool{false, true} {
-		t.Run(map[bool]string{false: "list", true: "detail"}[detail], func(t *testing.T) {
-			m, api := enabledFixture(t, executeRecord(`{"large":9007199254740993}`))
-			if detail {
-				m = sendKey(m, tea.KeyEnter)
-			}
-			api.showErr = errors.New("unexpected job lookup")
-			m, cmd := press(m, keyRune('p'))
-			require.NotNil(t, cmd)
-			reply, ok := cmd().(cronEnabledReadyMsg)
-			require.True(t, ok)
-			require.NoError(t, reply.err, "pause uses the selected revision without a lookup")
-			m, write := m.cronEnabledReady(reply)
-			_, _ = deliverEnabled(t, m, write)
-			require.Equal(t, []enabledCall{{uid: api.shown.UID, expected: api.shown.DefinitionEventUID, actor: "operator", enabled: false}}, api.enabledCalls)
-			require.True(t, api.mutationHasDeadline)
-			require.Greater(t, time.Until(api.mutationDeadline), 15*time.Second)
-		})
+	for _, native := range []bool{false, true} {
+		for _, detail := range []bool{false, true} {
+			t.Run(map[bool]string{false: "list", true: "detail"}[detail], func(t *testing.T) {
+				record := executeRecord(`{"large":9007199254740993}`)
+				if native {
+					record = pausedNative()
+					record.Definition.Enabled = true
+				}
+				m, api := enabledFixture(t, record)
+				if native {
+					m.cron.data.passovers = map[string]*db.CronPassoverState{record.UID: {Invalid: true}}
+				}
+				if detail {
+					m = sendKey(m, tea.KeyEnter)
+				}
+				api.showErr = errors.New("unexpected job lookup")
+				m, cmd := press(m, keyRune('p'))
+				require.NotNil(t, cmd)
+				reply, ok := cmd().(cronEnabledReadyMsg)
+				require.True(t, ok)
+				require.NoError(t, reply.err, "pause uses the selected revision without a lookup")
+				m, write := m.cronEnabledReady(reply)
+				_, _ = deliverEnabled(t, m, write)
+				require.Equal(t, []enabledCall{{uid: api.shown.UID, expected: api.shown.DefinitionEventUID, actor: "operator", enabled: false}}, api.enabledCalls)
+				require.True(t, api.mutationHasDeadline)
+				require.Greater(t, time.Until(api.mutationDeadline), 15*time.Second)
+			})
+		}
 	}
 }
 

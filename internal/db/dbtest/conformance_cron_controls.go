@@ -63,24 +63,36 @@ func checkCronProjectPause(t *testing.T, s db.Storage, b Backend) error {
 		_, e = s.PatchProjectMetadata(ctx, db.PatchProjectMetadataIn{ProjectID: p.ID, Actor: "operator", Patch: map[string]jsontext.Value{"cron.pause.note": []byte(`"ordinary"`)}})
 		require.NoError(t, e)
 	})
-	t.Run("malformed recovery", func(t *testing.T) {
-		p, e := s.CreateProject(ctx, "legacy-project")
-		require.NoError(t, e)
-		q := s.(interface {
-			ExecContext(context.Context, string, ...any) (sql.Result, error)
+	for _, initial := range []string{`{"legacy":true}`, `null`} {
+		t.Run("policy recovery/"+initial, func(t *testing.T) {
+			p, e := s.CreateProject(ctx, "recovery-project-"+strings.ReplaceAll(initial, "\"", ""))
+			require.NoError(t, e)
+			q := s.(interface {
+				ExecContext(context.Context, string, ...any) (sql.Result, error)
+			})
+			_, e = q.ExecContext(ctx, `UPDATE projects SET metadata=$1 WHERE id=$2`, `{"cron.pause":`+initial+`,"keep":9007199254740993}`, p.ID)
+			require.NoError(t, e)
+			if initial == `null` {
+				unpaused, e := s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator"})
+				require.NoError(t, e)
+				require.False(t, unpaused.Changed, "null is already unpaused")
+				require.Nil(t, db.CronProjectPauseFromMetadata(unpaused.Project.Metadata))
+			}
+			paused, e := s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", Paused: true})
+			require.NoError(t, e)
+			require.Equal(t, initial == `null`, paused.Changed)
+			require.NotNil(t, db.CronProjectPauseFromMetadata(paused.Project.Metadata))
+			require.Equal(t, initial != `null`, db.CronProjectPauseFromMetadata(paused.Project.Metadata).Invalid)
+			out, e := s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator"})
+			require.NoError(t, e)
+			require.True(t, out.Changed)
+			require.Nil(t, db.CronProjectPauseFromMetadata(out.Project.Metadata))
+			if initial == `null` {
+				require.Equal(t, p.Revision+2, out.NewRevision)
+			}
+			require.Contains(t, string(out.Project.Metadata), "9007199254740993")
 		})
-		_, e = q.ExecContext(ctx, `UPDATE projects SET metadata=$1 WHERE id=$2`, `{"cron.pause":{"legacy":true},"keep":9007199254740993}`, p.ID)
-		require.NoError(t, e)
-		out, e := s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", Paused: true})
-		require.NoError(t, e)
-		require.False(t, out.Changed)
-		require.True(t, db.CronProjectPauseFromMetadata(out.Project.Metadata).Invalid)
-		out, e = s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator"})
-		require.NoError(t, e)
-		require.True(t, out.Changed)
-		require.Nil(t, db.CronProjectPauseFromMetadata(out.Project.Metadata))
-		require.Contains(t, string(out.Project.Metadata), "9007199254740993")
-	})
+	}
 	for _, policy := range []string{"all", "latest", "skip"} {
 		t.Run("dispatch "+policy, func(t *testing.T) {
 			// Separate backend because recurringFixture has a fixed project name.
@@ -143,29 +155,6 @@ func checkCronProjectPause(t *testing.T, s db.Storage, b Backend) error {
 			}
 		}
 	})
-	t.Run("null recovery", func(t *testing.T) {
-		p, err := s.CreateProject(ctx, "null-pause-project")
-		require.NoError(t, err)
-		q := s.(interface {
-			ExecContext(context.Context, string, ...any) (sql.Result, error)
-		})
-		_, err = q.ExecContext(ctx, `UPDATE projects SET metadata=$1 WHERE id=$2`, `{"cron.pause":null,"keep":9007199254740993}`, p.ID)
-		require.NoError(t, err)
-		unpaused, err := s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator"})
-		require.NoError(t, err)
-		require.False(t, unpaused.Changed, "null is already unpaused")
-		require.Nil(t, db.CronProjectPauseFromMetadata(unpaused.Project.Metadata))
-		paused, err := s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator", Paused: true})
-		require.NoError(t, err)
-		require.True(t, paused.Changed)
-		require.False(t, db.CronProjectPauseFromMetadata(paused.Project.Metadata).Invalid)
-		out, err := s.SetCronProjectPause(ctx, db.SetCronProjectPauseIn{ProjectID: p.ID, Actor: "operator"})
-		require.NoError(t, err)
-		require.True(t, out.Changed)
-		require.Nil(t, db.CronProjectPauseFromMetadata(out.Project.Metadata))
-		require.Equal(t, p.Revision+2, out.NewRevision)
-		require.Contains(t, string(out.Project.Metadata), "9007199254740993")
-	})
 	t.Run("spoke denied even disabled", func(t *testing.T) {
 		p, e := s.CreateProject(ctx, "spoke-project")
 		require.NoError(t, e)
@@ -224,6 +213,7 @@ func checkCronProjectPause(t *testing.T, s db.Storage, b Backend) error {
 			require.Equal(t, hub, adopted.Project.UID)
 			baseline, e := db.ProjectMetadataAdoptionPayload(adopted.Project.Metadata)
 			require.NoError(t, e)
+			require.JSONEq(t, `{"diff":{"ordinary":{"from":null,"to":null}}}`, baseline)
 			require.NoError(t, db.ValidateCronControlEvent(db.RemoteEvent{Type: "project.metadata_updated", OriginInstanceUID: s.InstanceUID(), Payload: jsontext.Value(baseline)}, "root"))
 			retry, e := s.AdoptProjectIntoFederation(ctx, in)
 			require.NoError(t, e, "already-adopted retry bypasses the guard")

@@ -190,22 +190,6 @@ func TestCronClientPassoverEnvelope(t *testing.T) {
 	require.Equal(t, one.Passover, list.Passovers[record.UID])
 }
 
-// Pausing remains available when scheduling is blocked by malformed cutoff
-// state; it does not plan, launch work, or repair the retained metadata.
-func TestCronPauseWithInvalidPassover(t *testing.T) {
-	record := pausedNative()
-	record.Definition.Enabled = true
-	m, base := enabledFixture(t, record)
-	api := &passoverTestAPI{cronEnabledTestAPI: base, passover: &db.CronPassoverState{Invalid: true}}
-	m.api = api
-	m, lookup := press(m, keyRune('p'))
-	m, write := deliverEnabled(t, m, lookup)
-	require.NotNil(t, write)
-	_, _ = deliverEnabled(t, m, write)
-	require.Equal(t, []enabledCall{{record.UID, record.DefinitionEventUID, "operator", false}}, api.enabledCalls)
-	require.Empty(t, api.discarded)
-}
-
 // Adapter once previews use a strict after boundary, including equality.
 func TestCronNextOncePassoverBoundary(t *testing.T) {
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)

@@ -3,8 +3,10 @@ package tui
 import (
 	"encoding/json/v2"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.kenn.io/kata/internal/db"
 )
 
 func cronEnabledEvent(t *testing.T, m Model, kind, issue string, payload any) Model {
@@ -22,7 +24,7 @@ func TestCronResumeSurvivesUnrelatedActivity(t *testing.T) {
 			if completed {
 				phase = "loaded"
 			}
-			for _, kind := range []string{"run", "other-job", "workflow", "parent-comment", "other-checkpoint", "parent-title"} {
+			for _, kind := range []string{"run", "other-job", "workflow", "parent-comment", "other-checkpoint", "parent-title", "other-cutoff", "ordinary", "request"} {
 				t.Run(stage+"/"+phase+"/"+kind, func(t *testing.T) {
 					m, api := enabledFixture(t, pausedNative())
 					withEnabledBacklog(api)
@@ -47,6 +49,17 @@ func TestCronResumeSurvivesUnrelatedActivity(t *testing.T) {
 							event = "issue.metadata_updated"
 							issue = api.shown.Definition.Issue.ParentUID
 							payload = map[string]any{"diff": map[string]any{"cron.progress." + cronTestIssue: map[string]any{"to": nil}}}
+						case "other-cutoff", "ordinary", "request":
+							event = "project.metadata_updated"
+							key := kind
+							var value any = db.CronPassover{Version: 1, Through: time.Now().UTC().Add(time.Hour), By: "another-operator"}
+							if kind == "other-cutoff" {
+								key = "cron.passover." + cronTestIssue
+							}
+							if kind == "request" {
+								key, value = "cron.request."+cronTestIssue, nil
+							}
+							payload = map[string]any{"diff": map[string]any{key: map[string]any{"to": value}}}
 						case "parent-title":
 							event = "issue.updated"
 							issue = api.shown.Definition.Issue.ParentUID
@@ -101,7 +114,7 @@ func TestCronResumeRelevantChangesRemainFenced(t *testing.T) {
 			if completed {
 				phase = "loaded"
 			}
-			for _, kind := range []string{"checkpoint", "status", "deleted", "selected-job", "reset", "reopened", "malformed-metadata", "unknown-job"} {
+			for _, kind := range []string{"checkpoint", "status", "deleted", "selected-job", "reset", "reopened", "malformed-metadata", "unknown-job", "project-cutoff", "selected-cutoff"} {
 				t.Run(stage+"/"+phase+"/"+kind, func(t *testing.T) {
 					m, api := enabledFixture(t, pausedNative())
 					withEnabledBacklog(api)
@@ -119,8 +132,16 @@ func TestCronResumeRelevantChangesRemainFenced(t *testing.T) {
 						require.Equal(t, 5, m.cron.enabled.count)
 					}
 					before := m.cron.events
+					cutoff := time.Now().UTC().Add(time.Hour)
 					event, issue, payload := "issue.metadata_updated", api.shown.Definition.Issue.ParentUID, map[string]any{"diff": map[string]any{"cron.progress." + api.shown.UID: map[string]any{"to": nil}}}
 					switch kind {
+					case "project-cutoff", "selected-cutoff":
+						event, issue = "project.metadata_updated", ""
+						key := "cron.passover"
+						if kind == "selected-cutoff" {
+							key += "." + api.shown.UID
+						}
+						payload = map[string]any{"diff": map[string]any{key: map[string]any{"to": db.CronPassover{Version: 1, Through: cutoff, By: "another-operator"}}}}
 					case "status":
 						event = "issue.updated"
 						payload = map[string]any{"status": "closed"}
@@ -151,6 +172,9 @@ func TestCronResumeRelevantChangesRemainFenced(t *testing.T) {
 					if completed {
 						fresh := *m.cron.data
 						fresh.events = m.cron.events
+						if kind == "project-cutoff" || kind == "selected-cutoff" {
+							fresh.passovers = map[string]*db.CronPassoverState{api.shown.UID: {Through: cutoff, Scope: "project"}}
+						}
 						if kind == "reopened" {
 							fresh.parentOpen = map[string]bool{api.shown.Definition.Issue.ParentUID: true}
 							fresh.progress = api.parent.progress

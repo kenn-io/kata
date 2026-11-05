@@ -145,6 +145,8 @@ func checkCronRequests(t *testing.T, s db.Storage, b Backend) error {
 		store := b.Open(t)
 		t.Cleanup(func() { require.NoError(t, store.Close()) })
 		p, job, _ := requestJobFixture(t, store, "capacity-project")
+		running, e := store.ObserveCronRun(ctx, db.ObserveCronRun{ProjectID: p.ID, UID: requestUIDAt(t, now), JobUID: &job.UID, DefinitionEventUID: &job.DefinitionEventUID, Actor: "operator", Status: "running", Summary: cron.Summary{Version: 1}})
+		require.NoError(t, e)
 		values := map[string]any{}
 		for i := range 99 {
 			id, e := uid.FromStableSeed([]byte(fmt.Sprint(i)), now)
@@ -152,7 +154,7 @@ func checkCronRequests(t *testing.T, s db.Storage, b Backend) error {
 			value := map[string]any{"kind": "run", "job_uid": job.UID, "definition_event_uid": job.DefinitionEventUID, "requested_by": "operator", "requested_at": now, "expires_at": now.Add(600 * time.Second)}
 			if i%2 == 1 {
 				value["kind"] = "cancel"
-				value["run_uid"] = job.UID
+				value["run_uid"] = running.Run.UID
 			}
 			values["cron.request."+id] = value
 		}

@@ -74,6 +74,9 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 	require.NoError(t, err)
 	var rootMetadata map[string]jsontext.Value
 	require.NoError(t, json.Unmarshal([]byte(rootProject.Metadata), &rootMetadata))
+	if rootMetadata == nil {
+		t.Fatal("expected retained root metadata object")
+	}
 	rootMetadata["cron.pause"] = jsontext.Value("null")
 	seedPassover(t, root, project.ID, rootMetadata)
 	rootProject, err = root.ProjectByID(ctx, project.ID)
@@ -176,6 +179,9 @@ func RunRelayResetCarriesCronDefinitions(t *testing.T, root db.Storage, openDown
 			}
 			var payload map[string]jsontext.Value
 			require.NoError(t, json.Unmarshal(event.Payload, &payload))
+			if payload == nil {
+				t.Fatal("expected project metadata event payload object")
+			}
 			diff := make(map[string]map[string]jsontext.Value)
 			require.NoError(t, json.Unmarshal(payload["diff"], &diff))
 			key := "cron.passover." + job.UID

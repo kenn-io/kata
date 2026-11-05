@@ -217,6 +217,9 @@ func checkCronRequestSweep(t *testing.T, s db.Storage) error {
 	event, e = s.SweepCronRequests(ctx, p.ID, first.Request.ExpiresAt)
 	require.NoError(t, e)
 	require.Nil(t, event)
+	if values == nil {
+		t.Fatal("expected project metadata object before seeding malformed spoke state")
+	}
 	// A spoke may not repair even malformed root-owned state.
 	values["cron.request.bad"] = jsontext.Value(`{"note":"legacy"}`)
 	raw, e = json.Marshal(values)

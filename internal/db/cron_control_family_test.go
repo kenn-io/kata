@@ -19,17 +19,6 @@ func TestCronControlNullReadsAsAbsent(t *testing.T) {
 }
 
 func TestCronControlAdoptionBaseline(t *testing.T) {
-	for _, key := range []string{"cron.pause", "cron.request.01ARZ3NDEKTSV4RRFFQ69G5FAV", "cron.passover", "cron.passover.01ARZ3NDEKTSV4RRFFQ69G5FAV"} {
-		t.Run(key, func(t *testing.T) {
-			raw, err := json.Marshal(map[string]any{key: nil, "ordinary": nil})
-			require.NoError(t, err)
-			require.NoError(t, CheckCronControlAdoption(Project{Metadata: JSONBlob(raw)}))
-			baseline, err := ProjectMetadataAdoptionPayload(JSONBlob(raw))
-			require.NoError(t, err)
-			require.JSONEq(t, `{"diff":{"ordinary":{"from":null,"to":null}}}`, baseline)
-			require.NoError(t, ValidateCronControlEvent(RemoteEvent{Type: "project.metadata_updated", OriginInstanceUID: "spoke", Payload: jsontext.Value(baseline)}, "root"))
-		})
-	}
 	for _, raw := range []JSONBlob{`{}`, `{"ordinary":null}`} {
 		payload, err := ProjectMetadataAdoptionPayload(raw)
 		require.NoError(t, err)
@@ -38,17 +27,6 @@ func TestCronControlAdoptionBaseline(t *testing.T) {
 			want = `{"diff":{"ordinary":{"from":null,"to":null}}}`
 		}
 		require.Equal(t, want, payload, "ordinary baseline bytes stay unchanged")
-	}
-}
-
-func TestCronControlResetHistoryRejectsMalformedNonPassover(t *testing.T) {
-	for _, key := range []string{"cron.pause", "cron.request.01ARZ3NDEKTSV4RRFFQ69G5FAV"} {
-		t.Run(key, func(t *testing.T) {
-			payload, err := json.Marshal(map[string]any{"diff": map[string]any{key: map[string]any{"from": nil, "to": false}}})
-			require.NoError(t, err)
-			event := RemoteEvent{Type: "project.metadata_updated", OriginInstanceUID: "root", Payload: payload}
-			require.ErrorIs(t, validateCronResetHistory([]RemoteEvent{event}, nil, "root"), ErrFederationIngestValidation)
-		})
 	}
 }
 
