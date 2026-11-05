@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -92,15 +92,17 @@ func pruneEvents(ctx context.Context, t require.TestingT, s db.Storage, p db.Pro
 }
 
 // Contract D6/D7: only selected runs' top-level observed/snapshot event bodies
-// disappear, including across event pages; every surviving row is identical.
+// disappear, including across 500-ID delete chunks; every survivor is identical.
 func checkCronPruneEventModel(t *testing.T, s db.Storage) error {
 	p, q := pruneEventFixture(t, s)
 	hegel.Test(t, func(ht *hegel.T) {
-		count := hegel.Draw(ht, hegel.Integers(0, math.MaxInt32))
-		count = min(count, 1100) // Bound fixture materialization, not the drawn domain.
+		matches := hegel.Draw(ht, hegel.Integers(0, 20))
 		if hegel.Draw(ht, hegel.Booleans()) {
-			count = []int{0, 1, 499, 500, 501, 999, 1000, 1001}[hegel.Draw(ht, hegel.Integers(0, 7))]
+			matches = []int{0, 1, 499, 500, 501, 999, 1000, 1001}[hegel.Draw(ht, hegel.Integers(0, 7))]
 		}
+		// Each four-row cycle has two matching run events, one job snapshot,
+		// and one retained run event. Target deletion counts, not scan pages.
+		count := 4*(matches/2) + matches%2
 		seedPruneEventRows(t.Context(), ht, q, p, count)
 		want := pruneEvents(t.Context(), ht, s, p)
 		eventCount := len(want)
@@ -114,13 +116,14 @@ func checkCronPruneEventModel(t *testing.T, s db.Storage) error {
 			}
 		}
 		in := db.PruneCronRuns{ProjectID: p.ID, Actor: "operator", Before: time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC), Keep: 1, DryRun: true}
+		require.Equal(ht, matches, eventCount-len(want))
 		preview, err := s.PruneCronRuns(t.Context(), in)
 		require.NoError(ht, err)
 		require.Equal(ht, eventCount-len(want), preview.EventsDeleted)
 		in.DryRun = false
 		result, err := s.PruneCronRuns(t.Context(), in)
-		require.Equal(ht, eventCount-len(want), result.EventsDeleted)
 		require.NoError(ht, err)
+		require.Equal(ht, eventCount-len(want), result.EventsDeleted)
 		got := pruneEvents(t.Context(), ht, s, p)
 		metadataEvent, ok := got[result.MetadataEvent.UID]
 		require.True(ht, ok, "prune metadata event is exported")
@@ -140,27 +143,61 @@ func checkCronPruneEventModel(t *testing.T, s db.Storage) error {
 	return nil
 }
 
-// Match only exact top-level run UIDs, independently of JSON spelling and
-// another project's matching event bodies.
+// Match only exact top-level run UIDs, independently of JSON spelling.
+// Null/missing/nested and prefix/suffix identities deliberately exercise the
+// deletion decoder, not current ingress validation. The foreign matching body
+// is a project-isolation probe, not a second materialized run with the same UID.
 func checkCronPruneEventIdentity(t *testing.T, s db.Storage) error {
 	p, q := pruneEventFixture(t, s)
 	seedPruneEventRows(t.Context(), t, q, p, 13)
 	selected := fmt.Sprintf("%026d", 100)
-	for i, payload := range map[int]string{
-		1:  `{"uid":null}`,
-		4:  ` { "uid" : "\u0030` + selected[1:] + `" } `,
-		5:  `{}`,
-		8:  `{"nested":{"uid":"` + selected + `"}}`,
-		12: `{"uid":"prefix-` + selected + `-suffix"}`,
+	for i, replacement := range map[int]string{
+		1:  `"uid":null`,
+		4:  `"uid" : "\u0030` + selected[1:] + `"`,
+		5:  `"unused_uid":"` + selected + `"`,
+		8:  `"nested":{"uid":"` + selected + `"}`,
+		12: `"uid":"prefix-` + selected + `-suffix"`,
 	} {
+		var payload string
+		require.NoError(t, q.QueryRowContext(t.Context(), `SELECT payload FROM events WHERE project_id=$1 AND uid=$2`, p.ID, fmt.Sprintf("%026d", 1000+i)).Scan(&payload))
+		identity := `"uid":"` + selected + `"`
+		require.Contains(t, payload, identity)
+		// Keep all other observation fields. In particular, the escaped UID
+		// case remains a complete observation a peer could send.
+		payload = " " + strings.Replace(payload, identity, replacement, 1) + " "
+		if i == 5 {
+			var fields map[string]jsontext.Value
+			require.NoError(t, json.Unmarshal([]byte(payload), &fields))
+			delete(fields, "unused_uid")
+			raw, err := json.Marshal(fields)
+			require.NoError(t, err)
+			payload = string(raw)
+		}
 		_, err := q.ExecContext(t.Context(), `UPDATE events SET payload=$1 WHERE project_id=$2 AND uid=$3`, payload, p.ID, fmt.Sprintf("%026d", 1000+i))
 		require.NoError(t, err)
 	}
 	other := newCronTallyFixture(t.Context(), t, s)
 	other.add(t.Context(), t, "job", "succeeded", time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC), "")
 	other.add(t.Context(), t, "job", "running", other.before, "")
-	_, err := q.ExecContext(t.Context(), `UPDATE events SET payload=$1 WHERE project_id=$2 AND type='cron.run.observed'`, `{"uid":"`+selected+`"}`, other.project.ID)
+	rows, err := q.QueryContext(t.Context(), `SELECT uid,payload FROM events WHERE project_id=$1 AND type='cron.run.observed'`, other.project.ID)
 	require.NoError(t, err)
+	foreignBodies := map[string]string{}
+	for rows.Next() {
+		var id, payload string
+		require.NoError(t, rows.Scan(&id, &payload))
+		var observation db.CronRunObservation
+		require.NoError(t, json.Unmarshal([]byte(payload), &observation))
+		observation.UID = selected
+		raw, err := json.Marshal(observation)
+		require.NoError(t, err)
+		foreignBodies[id] = string(raw)
+	}
+	require.NoError(t, rows.Err())
+	require.NoError(t, rows.Close())
+	for id, payload := range foreignBodies {
+		_, err := q.ExecContext(t.Context(), `UPDATE events SET payload=$1 WHERE project_id=$2 AND uid=$3`, payload, other.project.ID, id)
+		require.NoError(t, err)
+	}
 	otherEvents := pruneEvents(t.Context(), t, s, other.project)
 	otherRuns, err := s.ListCronRuns(t.Context(), db.CronRunList{ProjectID: other.project.ID})
 	require.NoError(t, err)
@@ -197,11 +234,16 @@ func checkCronPruneEventIdentity(t *testing.T, s db.Storage) error {
 	return nil
 }
 
-// The existing strict decoder rejects corruption even on an unselected run.
-// Preview and deletion must return that error and preserve the whole batch.
+// The deletion decoder must retain its strict errors even on an unselected
+// run. These deliberately corrupted persisted bodies do not model accepted
+// ingress. Preview and deletion must preserve the whole batch on decoder error.
 func checkCronPruneMalformedEvents(t *testing.T, s db.Storage) error {
 	p, q := pruneEventFixture(t, s)
-	seedPruneEventRows(t.Context(), t, q, p, 1001)
+	seedPruneEventRows(t.Context(), t, q, p, 4)
+	var original string
+	require.NoError(t, q.QueryRowContext(t.Context(), `SELECT payload FROM events WHERE project_id=$1 AND uid=$2`, p.ID, fmt.Sprintf("%026d", 1003)).Scan(&original))
+	identity := `"uid":"` + fmt.Sprintf("%026d", 101) + `"`
+	require.Contains(t, original, identity)
 	// ExportEvents intentionally refuses duplicate JSON members. Compare raw
 	// persisted bodies so that export validation cannot mask the prune result.
 	snapshot := func(t *testing.T) map[int64]string {
@@ -219,14 +261,15 @@ func checkCronPruneMalformedEvents(t *testing.T, s db.Storage) error {
 		require.NoError(t, rows.Err())
 		return out
 	}
-	for _, payload := range []string{
-		`{"uid":123}`,
-		`{"uid":"unselected","uid":"unselected"}`,
-		`{"uid":"unselected","extra":{"x":1,"x":2}}`,
-		`{"uid":"unselected","\u0075id":"unselected"}`,
+	for name, replacement := range map[string]string{
+		"numeric_uid":           `"uid":123`,
+		"duplicate_uid":         identity + `,` + identity,
+		"nested_duplicate":      identity + `,"extra":{"x":1,"x":2}`,
+		"escaped_duplicate_uid": identity + `,"\u0075id":"unselected"`,
 	} {
-		t.Run(payload, func(t *testing.T) {
-			_, err := q.ExecContext(t.Context(), `UPDATE events SET payload=$1 WHERE project_id=$2 AND uid=$3`, payload, p.ID, fmt.Sprintf("%026d", 1999))
+		t.Run(name, func(t *testing.T) {
+			payload := strings.Replace(original, identity, replacement, 1)
+			_, err := q.ExecContext(t.Context(), `UPDATE events SET payload=$1 WHERE project_id=$2 AND uid=$3`, payload, p.ID, fmt.Sprintf("%026d", 1003))
 			require.NoError(t, err)
 			wantEvents := snapshot(t)
 			wantRuns, err := s.ListCronRuns(t.Context(), db.CronRunList{ProjectID: p.ID})

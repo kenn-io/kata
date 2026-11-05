@@ -72,7 +72,8 @@ func checkCronPruneHistoryScale(t *testing.T, s db.Storage, backend Backend) err
 		t.Run(call.name, func(t *testing.T) {
 			started := time.Now()
 			result, err := s.PruneCronRuns(t.Context(), db.PruneCronRuns{ProjectID: p.ID, Actor: "operator", Before: time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC), Keep: 10, Limit: call.limit, DryRun: call.dry})
-			t.Logf("runs=%d events=%d elapsed=%s", runs, runs*2, time.Since(started))
+			elapsed := time.Since(started)
+			t.Logf("runs=%d events=%d elapsed=%s", runs, runs*2, elapsed)
 			if err != nil || call.dry {
 				require.Equal(t, runs, count(t, "cron_runs"))
 				require.Equal(t, wantEvents, count(t, "events"))
@@ -82,6 +83,7 @@ func checkCronPruneHistoryScale(t *testing.T, s db.Storage, backend Backend) err
 				require.Equal(t, project.Revision, current.Revision)
 			}
 			require.NoError(t, err)
+			require.Less(t, elapsed, 30*time.Second, "the measured fixture must fit the production transaction budget")
 			require.Equal(t, call.limit, result.Pruned)
 			require.Equal(t, call.limit*2, result.EventsDeleted)
 			require.True(t, result.More)
