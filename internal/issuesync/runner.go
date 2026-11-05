@@ -15,8 +15,9 @@ import (
 const (
 	// DefaultStaleLockTTL is the recovery horizon for an abandoned sync claim.
 	DefaultStaleLockTTL = 30 * time.Minute
-	// DefaultInitialBatchSize limits the number of imported issues per batch.
-	DefaultInitialBatchSize = 5000
+	// DefaultInitialBatchSize limits the number of issues per import chunk.
+	// Smaller chunks release SQLite's single writer more often.
+	DefaultInitialBatchSize = 200
 )
 
 const (

@@ -14,7 +14,7 @@ import (
 const (
 	// DefaultStaleLockTTL is the recovery horizon for an abandoned sync claim.
 	DefaultStaleLockTTL = issuesync.DefaultStaleLockTTL
-	// DefaultInitialBatchSize limits the number of imported issues per batch.
+	// DefaultInitialBatchSize limits the number of issues per import chunk.
 	DefaultInitialBatchSize = issuesync.DefaultInitialBatchSize
 )
 
