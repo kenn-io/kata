@@ -59,6 +59,8 @@ for machine readers.
   mirror one task data source with daemon polling and optional two-way status sync
 - [Configuration](https://katatracker.com/docs/reference/configuration.md):
   config.toml reference
+- [Cron for teams](https://katatracker.com/docs/operations/cron-teams.md):
+  operate shared cron across a company hub, personal hubs and adapter runtimes
 - [Cron](https://katatracker.com/docs/reference/cron.md):
   shared job definitions, run evidence, and recurring child issues
 - [Diagnosing setup](https://katatracker.com/docs/operations/doctor.md):

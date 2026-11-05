@@ -296,6 +296,16 @@
       "permanent": true
     },
     {
+      "source": "/operations/cron-teams/",
+      "destination": "/docs/operations/cron-teams/",
+      "permanent": true
+    },
+    {
+      "source": "/operations/cron-teams.md",
+      "destination": "/docs/operations/cron-teams.md",
+      "permanent": true
+    },
+    {
       "source": "/operations/federation/",
       "destination": "/docs/operations/federation/",
       "permanent": true

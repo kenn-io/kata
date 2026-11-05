@@ -1,7 +1,7 @@
 ---
 title: Changelog
 description: Release history for kata
-last_edited: 2026-11-04
+last_edited: 2026-11-05
 ---
 
 All notable changes to kata, grouped by release. Versioned releases start with
@@ -28,6 +28,12 @@ All notable changes to kata, grouped by release. Versioned releases start with
   search cost follows the number of matching comments.
   Existing stores upgrade to schema 41 through SQLite's JSONL cutover or the
   [offline PostgreSQL migration](development/postgres-migrations.md#schema-41-separate-comment-search-documents).
+- Operate cron across a company hub, personal hubs and multiple adapter
+  runtimes with the [team operations guide](operations/cron-teams.md).
+
+- Find every cron HTTP operation, its CLI command and MCP tool in the
+  [cron route table](reference/cron.md#routes-events-and-records), with run-list
+  page defaults for each surface.
 
 - Load the web UI's issue list and graph on SQLite and PostgreSQL stores with
   tens of thousands of issues without exceeding SQL parameter limits.
