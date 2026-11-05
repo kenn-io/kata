@@ -37,7 +37,7 @@ func TestCronDispatchExplanationProjectScopedRead(t *testing.T) {
 			if role != "local" {
 				_, err = env.DB.EnableProjectFederation(t.Context(), p.ID, "operator")
 				require.NoError(t, err)
-				_, err = env.DB.ExecContext(t.Context(), `UPDATE federation_bindings SET role=$1,enabled=0,hub_project_id=1,hub_url='https://daemon.example' WHERE project_id=$2`, role, p.ID)
+				_, err = env.DB.ExecContext(t.Context(), `UPDATE federation_bindings SET role=$1,enabled=0,hub_project_id=CASE WHEN $1='spoke' THEN 1 ELSE 0 END,hub_url=CASE WHEN $1='spoke' THEN 'https://daemon.example' ELSE '' END WHERE project_id=$2`, role, p.ID)
 				require.NoError(t, err)
 			}
 			host := &capabilitiesReadHost{projectID: p.ID}
@@ -104,7 +104,7 @@ func TestCronDispatchExplanationProjectArchivedAfterPreflight(t *testing.T) {
 			if role != "local" {
 				_, err = env.DB.EnableProjectFederation(t.Context(), p.ID, "operator")
 				require.NoError(t, err)
-				_, err = env.DB.ExecContext(t.Context(), `UPDATE federation_bindings SET role=$1,enabled=0,hub_project_id=1,hub_url='https://daemon.example' WHERE project_id=$2`, role, p.ID)
+				_, err = env.DB.ExecContext(t.Context(), `UPDATE federation_bindings SET role=$1,enabled=0,hub_project_id=CASE WHEN $1='spoke' THEN 1 ELSE 0 END,hub_url=CASE WHEN $1='spoke' THEN 'https://daemon.example' ELSE '' END WHERE project_id=$2`, role, p.ID)
 				require.NoError(t, err)
 			}
 			server := daemon.NewServer(daemon.ServerConfig{DB: archiveBeforeExplanationStore{Storage: env.DB, archive: func() error {

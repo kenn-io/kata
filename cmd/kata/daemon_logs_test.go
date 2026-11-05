@@ -351,42 +351,32 @@ func TestFollowActive_MarkAtSize_DoesNotReEmit(t *testing.T) {
 	}
 }
 
-// TestRunHookLogOnce_Mark_ReportsActiveFileSize verifies that the
-// one-shot pass reports a set mark with the size of runs.jsonl after
-// it was read, so tail can resume at the exact byte offset.
-func TestRunHookLogOnce_Mark_ReportsActiveFileSize(t *testing.T) {
-	_, dir, _ := setupHooksDir(t)
-	contents := `{"event_id":1,"result":"ok"}` + "\n"
-	path := filepath.Join(dir, "runs.jsonl")
-	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	var stdout, stderr bytes.Buffer
-	mark, err := runDaemonLogOnce(t.Context(), testHookLogSource(t), &stdout, &stderr, 100, &hookLogFilter{hookIndex: -1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !mark.set {
-		t.Fatal("mark should be set when runs.jsonl was in the snapshot")
-	}
-	if mark.size != int64(len(contents)) {
-		t.Fatalf("mark.size = %d, want %d", mark.size, len(contents))
-	}
-}
-
-// A rotated-only snapshot retains its newest cursor so tail does not replay
-// history when an active file appears and rotates before the first poll.
-func TestRunHookLogOnce_Mark_RetainsNewestWhenActiveAbsent(t *testing.T) {
-	_, dir, _ := setupHooksDir(t)
-	// Only a rotated file exists.
-	writeHookLog(t, dir, "runs.jsonl.1", map[string]any{"event_id": 99, "result": "ok"})
-	var stdout, stderr bytes.Buffer
-	mark, err := runDaemonLogOnce(t.Context(), testHookLogSource(t), &stdout, &stderr, 100, &hookLogFilter{hookIndex: -1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !mark.set {
-		t.Fatal("mark must retain the newest rotated file")
+// Snapshots retain the newest cursor, including when only a rotated file exists.
+func TestRunHookLogOnce_Mark_RetainsNewestFile(t *testing.T) {
+	for _, tc := range []struct {
+		file     string
+		contents string
+	}{
+		{file: "runs.jsonl", contents: `{"event_id":1,"result":"ok"}` + "\n"},
+		{file: "runs.jsonl.1", contents: `{"event_id":99,"result":"ok"}` + "\n"},
+	} {
+		t.Run(tc.file, func(t *testing.T) {
+			_, dir, _ := setupHooksDir(t)
+			if err := os.WriteFile(filepath.Join(dir, tc.file), []byte(tc.contents), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var stdout, stderr bytes.Buffer
+			mark, err := runDaemonLogOnce(t.Context(), testHookLogSource(t), &stdout, &stderr, 100, &hookLogFilter{hookIndex: -1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !mark.set {
+				t.Fatal("mark must retain the newest file")
+			}
+			if tc.file == "runs.jsonl" && mark.size != int64(len(tc.contents)) {
+				t.Fatalf("mark.size = %d, want %d", mark.size, len(tc.contents))
+			}
+		})
 	}
 }
 

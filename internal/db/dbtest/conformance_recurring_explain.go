@@ -124,7 +124,7 @@ func checkRecurringExplainArchivedBinding(t *testing.T, s db.Storage) error {
 	})
 	for _, role := range []string{"spoke", "hub"} {
 		t.Run(role, func(t *testing.T) {
-			_, err := q.ExecContext(t.Context(), `UPDATE federation_bindings SET role=$1,enabled=0,hub_project_id=1,hub_url='https://daemon.example' WHERE project_id=$2`, role, p.ID)
+			_, err := q.ExecContext(t.Context(), `UPDATE federation_bindings SET role=$1,enabled=0,hub_project_id=CASE WHEN $1='spoke' THEN 1 ELSE 0 END,hub_url=CASE WHEN $1='spoke' THEN 'https://daemon.example' ELSE '' END WHERE project_id=$2`, role, p.ID)
 			require.NoError(t, err)
 			out, err := s.ExplainRecurringCron(t.Context(), p.ID, job.UID, progress.Anchor)
 			require.NoError(t, err)
