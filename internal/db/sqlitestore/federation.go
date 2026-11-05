@@ -3,6 +3,7 @@ package sqlitestore
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -1973,15 +1974,15 @@ func reconcileFederatedIssuesFromRows(ctx context.Context, tx *sql.Tx, projectID
 		if err != nil {
 			return nil, fmt.Errorf("resolve federated issue short_id %s: %w", uid, err)
 		}
-		metadata := jsontext.Value(`{}`)
-		if raw := projection.IssueMetadata[uid]; len(raw) > 0 {
-			metadata = raw
-		}
-		updatedAt := issue.UpdatedAt
-		if updatedAt == "" {
-			updatedAt = issue.CreatedAt
+		issueValues, err := federatedIssueValues(issue, shortID, projection.IssueMetadata[uid])
+		if err != nil {
+			return nil, err
 		}
 		if row, ok := existing[uid]; ok {
+			if slices.Equal(issueValues, row.values) {
+				out[uid] = row.id
+				continue
+			}
 			if err := rejectExternalRootContentMutationTx(
 				ctx, tx, row.id,
 				issue.Title != row.title || issue.Body != row.body || (issue.DeletedAt != nil) != row.deleted,
@@ -1990,13 +1991,6 @@ func reconcileFederatedIssuesFromRows(ctx context.Context, tx *sql.Tx, projectID
 					return nil, fmt.Errorf("%w: %w", db.ErrFederationIngestValidation, err)
 				}
 				return nil, err
-			}
-			issueValues := []any{
-				shortID, issue.Title, issue.Body, nonEmptyStatus(issue.Status),
-				issue.ClosedReason, issue.Owner, issue.AssignmentExpiresOn, issue.Priority, nonEmptyAuthor(issue.Author),
-				nonEmptyTime(issue.CreatedAt), nonEmptyTime(updatedAt),
-				optionalStringValue(issue.ClosedAt), optionalStringValue(issue.DeletedAt),
-				string(metadata),
 			}
 			args := append([]any{}, issueValues...)
 			args = append(args, issue.Title, issue.Body)
@@ -2054,11 +2048,7 @@ func reconcileFederatedIssuesFromRows(ctx context.Context, tx *sql.Tx, projectID
 				deleted_at, metadata, revision
 			)
 			VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-			issue.UID, projectID, shortID, issue.Title, issue.Body, nonEmptyStatus(issue.Status),
-			issue.ClosedReason, issue.Owner, issue.AssignmentExpiresOn, issue.Priority, nonEmptyAuthor(issue.Author),
-			nonEmptyTime(issue.CreatedAt), nonEmptyTime(updatedAt),
-			optionalStringValue(issue.ClosedAt), optionalStringValue(issue.DeletedAt),
-			string(metadata))
+			append([]any{issue.UID, projectID}, issueValues...)...)
 		if err != nil {
 			return nil, fmt.Errorf("insert federated issue %s: %w", uid, err)
 		}
@@ -2079,7 +2069,9 @@ func resolveFederatedIssueShortID(
 	preferred string,
 	existing *federatedIssueRow,
 ) (string, error) {
-	if preferred == "" && existing != nil {
+	// The stored ID is the UID's suffix and unique in its project,
+	// so the allocator would return it unchanged.
+	if existing != nil && (preferred == "" || preferred == existing.shortID) {
 		return existing.shortID, nil
 	}
 	minLength := shortid.MinLength
@@ -2114,6 +2106,27 @@ type federatedIssueRow struct {
 	title   string
 	body    string
 	deleted bool
+}
+
+func federatedIssueValues(issue db.FoldIssue, shortID string, metadata jsontext.Value) ([]any, error) {
+	if len(metadata) == 0 {
+		metadata = jsontext.Value(`{}`)
+	}
+	updatedAt := issue.UpdatedAt
+	if updatedAt == "" {
+		updatedAt = issue.CreatedAt
+	}
+	values := []any{shortID, issue.Title, issue.Body, nonEmptyStatus(issue.Status), issue.ClosedReason, issue.Owner,
+		issue.AssignmentExpiresOn, issue.Priority, nonEmptyAuthor(issue.Author), nonEmptyTime(issue.CreatedAt),
+		nonEmptyTime(updatedAt), optionalStringValue(issue.ClosedAt), optionalStringValue(issue.DeletedAt), string(metadata)}
+	for i, value := range values {
+		var err error
+		values[i], err = driver.DefaultParameterConverter.ConvertValue(value)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return values, nil
 }
 
 func federatedIssueRowsByUID(ctx context.Context, tx *sql.Tx, projectID int64, issueScope ...string) (map[string]federatedIssueRow, error) {
@@ -2183,6 +2196,11 @@ func reconcileFederatedCommentsFromRows(ctx context.Context, tx *sql.Tx, issueID
 			return fmt.Errorf("federated comment %s references unknown issue %s", uid, comment.IssueUID)
 		}
 		if row, ok := existing[uid]; ok {
+			if row.issueID == issueID && row.author == nonEmptyAuthor(comment.Author) &&
+				row.body == comment.Body && row.teammate == comment.Teammate &&
+				row.createdAt == nonEmptyTime(comment.CreatedAt) {
+				continue
+			}
 			owned, err := federatedExternalCommentOwnedTx(ctx, tx, row.id)
 			if err != nil {
 				return err
@@ -2191,11 +2209,6 @@ func reconcileFederatedCommentsFromRows(ctx context.Context, tx *sql.Tx, issueID
 				if comment.Body != row.body || comment.Teammate != row.teammate {
 					return fmt.Errorf("%w: %w", db.ErrFederationIngestValidation, db.ErrExternalCommentContentOwned)
 				}
-				continue
-			}
-			if row.issueID == issueID && row.author == nonEmptyAuthor(comment.Author) &&
-				row.body == comment.Body && row.teammate == comment.Teammate &&
-				row.createdAt == nonEmptyTime(comment.CreatedAt) {
 				continue
 			}
 			if _, err := tx.ExecContext(ctx,
