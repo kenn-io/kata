@@ -59,8 +59,20 @@ func TestCronValidateDiscovery(t *testing.T) {
 	}
 }
 
-func TestCronValidateOpaqueNumbers(t *testing.T) {
+func TestCronValidateRawInputAndNoWrites(t *testing.T) {
 	f := newCronFixture(t)
+	for _, tc := range []struct {
+		field   string
+		value   any
+		message string
+	}{
+		{"count", 0, "count: expected number >= 1"}, {"from", "bad", "from must be RFC3339"},
+	} {
+		args := map[string]any{"name": "Inspect", "definition": cronDefinition(), tc.field: tc.value}
+		failure := cronCall(t, f.session, "cron_job_validate", args)
+		require.True(t, failure.IsError)
+		require.Contains(t, failure.Content[0].(*sdkmcp.TextContent).Text, tc.message)
+	}
 	before, err := f.store.MaxEventID(t.Context())
 	require.NoError(t, err)
 
@@ -119,8 +131,6 @@ func TestCronValidateParentScopeAndQuery(t *testing.T) {
 	definition["overlap"] = "allow"
 	definition["catchup"] = "latest"
 	args := map[string]any{"name": "Review", "definition": definition, "parent_ref": parent.ShortID, "count": 2, "from": "2026-11-03T00:00:00Z"}
-	// MCP startup retains its existing accountable actor; validation supplies
-	// no per-call actor and performs no mutation attribution.
 	session := connectTestServerWithOptions(t, Options{Client: f.client, ProjectID: f.project.ID, ProjectName: f.project.Name, Actor: "reader", Version: "test"})
 	result := cronOK(t, session, "cron_job_validate", args)
 	require.Equal(t, true, result["valid"])

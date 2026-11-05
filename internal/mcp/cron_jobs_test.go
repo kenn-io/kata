@@ -316,18 +316,6 @@ func TestCronInvalidDefinitionsAndUIDs(t *testing.T) {
 	definition["secret_refs"] = map[string]any{"TOKEN": "env:TOKEN"}
 	require.True(t, cronCall(t, f.session, "cron_job_create", map[string]any{"uid": cronNewUID(t, f.session), "name": "Invalid secret", "definition": definition}).IsError)
 	require.Empty(t, cronOK(t, f.session, "cron_jobs", map[string]any{})["jobs"])
-	for _, tc := range []struct {
-		field   string
-		value   any
-		message string
-	}{
-		{"count", 0, "count: expected number >= 1"}, {"from", "bad", "from must be RFC3339"},
-	} {
-		args := map[string]any{"name": "Inspect", "definition": cronDefinition(), tc.field: tc.value}
-		failure := cronCall(t, f.session, "cron_job_validate", args)
-		require.True(t, failure.IsError)
-		require.Contains(t, failure.Content[0].(*sdkmcp.TextContent).Text, tc.message)
-	}
 
 }
 func TestCronReadonlyAndIssueScopedCredentials(t *testing.T) {

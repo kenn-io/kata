@@ -142,6 +142,8 @@ func drawPreviewState(ht *hegel.T) (JobDefinition, *RecurringProgress, time.Time
 	return job, stored, from, count
 }
 
+// Preview output must retain the checked scheduler's instants, including count
+// and cursor forwarding; this is a wiring check, not an independent walk oracle.
 func TestCronPreviewOccurrenceAgreement(t *testing.T) {
 	hegel.Test(t, func(ht *hegel.T) {
 		job, stored, from, count := drawPreviewState(ht)
@@ -189,14 +191,19 @@ func TestCronPreviewTimestampDomain(t *testing.T) {
 
 	}
 	{
-		job := previewJob(t)
-		job.Trigger = Trigger{Kind: "once", At: "9999-12-31T23:30:00-01:00", Timezone: "Etc/GMT+1"}
-		from := time.Date(9999, 12, 31, 22, 0, 0, 0, time.UTC)
-		out, err := PreviewSchedule(job, nil, from, 1)
-		require.NoError(t, err)
-		require.Empty(t, out.Next)
-		_, err = json.Marshal(out)
-		require.NoError(t, err)
+		for _, trigger := range []Trigger{
+			{Kind: "once", At: "9999-12-31T23:30:00-01:00", Timezone: "Etc/GMT+1"},
+			{Kind: "once", At: "9999-12-31T23:30:00Z", Timezone: "Pacific/Kiritimati"},
+		} {
+			job := previewJob(t)
+			job.Trigger = trigger
+			from := time.Date(9999, 12, 31, 22, 0, 0, 0, time.UTC)
+			out, err := PreviewSchedule(job, nil, from, 1)
+			require.NoError(t, err)
+			require.Empty(t, out.Next, trigger.Timezone)
+			_, err = json.Marshal(out)
+			require.NoError(t, err)
+		}
 
 	}
 	hegel.Test(t, func(ht *hegel.T) {

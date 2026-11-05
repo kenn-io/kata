@@ -9,6 +9,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
@@ -53,6 +56,7 @@ func TestCronCLIValidate(t *testing.T) {
 		require.True(t, result.Valid)
 		if resource == "job" {
 			require.Len(t, result.Schedule.Next, 1)
+			require.Equal(t, "2026-11-03T00:00:00Z", result.Schedule.From.Format(time.RFC3339))
 			require.Len(t, result.Schedule.Collisions.Items, 1)
 			require.Equal(t, 7, result.Schedule.Collisions.Items[0].Occurrences)
 			require.Equal(t, []cron.CollisionPeer{{UID: peer.UID, Name: peer.Name}}, result.Schedule.Collisions.Items[0].Peers)
@@ -87,6 +91,49 @@ func TestCronCLIValidate(t *testing.T) {
 		_, _, err = executeCronCLI(t, env.URL, nil, resource, "validate")
 		require.ErrorContains(t, err, "--file is required")
 	}
+	t.Run("parent option parity", func(t *testing.T) {
+		t.Setenv("KATA_AUTHOR", "operator")
+		for _, name := range []string{"existing-issue-execute", "issue-scheduled-notify"} {
+			t.Run(name, func(t *testing.T) {
+				body := cronCLIJob(t)
+				body.Definition.Issue = &cron.IssuePolicy{Kind: "existing", UID: parent.UID}
+				if name == "issue-scheduled-notify" {
+					body.Definition.Trigger = cron.Trigger{Kind: "issue-scheduled", IssueUID: parent.UID}
+					body.Definition.Action = cron.Action{Kind: "notify", Recipient: "current-owner-or-author"}
+					body.Definition.Issue = nil
+				}
+				file := cronCLIFile(t, body)
+				out, _, err := executeCronCLI(t, env.URL, nil, "job", "validate", "--file", file)
+				require.NoError(t, err, out)
+				var result db.CronValidation
+				require.NoError(t, json.Unmarshal([]byte(out), &result))
+				require.True(t, result.Valid, "definition is valid without --parent")
+				validDefinition := result.Definition
+				before, err := env.DB.MaxEventID(t.Context())
+				require.NoError(t, err)
+				_, _, err = executeCronCLI(t, env.URL, nil, "job", "create", "--uid", cronCLIUID(t), "--file", file, "--parent", parent.ShortID)
+				require.ErrorContains(t, err, "--parent requires definition.issue of kind per-run")
+				var createErr *cliError
+				require.ErrorAs(t, err, &createErr)
+				require.Equal(t, ExitValidation, createErr.ExitCode)
+				out, _, validateErr := executeCronCLI(t, env.URL, nil, "job", "validate", "--file", file, "--parent", parent.ShortID)
+				after, err := env.DB.MaxEventID(t.Context())
+				require.NoError(t, err)
+				require.Equal(t, before, after)
+
+				var cliErr *cliError
+				require.ErrorAs(t, validateErr, &cliErr, "validate must reject an option that create rejects: %s", out)
+				require.Equal(t, ExitValidation, cliErr.ExitCode)
+				result = db.CronValidation{}
+				require.NoError(t, json.Unmarshal([]byte(out), &result))
+				require.False(t, result.Valid)
+				require.JSONEq(t, string(validDefinition), string(result.Definition))
+				require.Nil(t, result.Schedule)
+				require.Equal(t, "request", result.Errors[0].Stage)
+				require.Contains(t, out, "--parent requires definition.issue of kind per-run")
+			})
+		}
+	})
 	// Rendered recurring example is valid once its parent is resolved.
 	examples := cronHelpRequests(t, string(executeRoot(t, newRootCmd(), "cron", "job", "create", "--help")))
 	out, _, err := executeCronCLI(t, env.URL, bytes.NewReader(examples[0].body), "job", "validate", "--file", "-", "--parent", parent.ShortID, "--count", "2", "--from", "2026-11-03T00:00:00Z")
@@ -95,6 +142,7 @@ func TestCronCLIValidate(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(out), &result))
 	require.True(t, result.Valid)
 	require.Len(t, result.Schedule.Next, 2)
+	require.Equal(t, "2026-11-03T00:00:00Z", result.Schedule.From.Format(time.RFC3339))
 	require.Contains(t, string(result.Definition), parent.UID)
 	after, err := env.DB.MaxEventID(t.Context())
 	require.NoError(t, err)
@@ -168,8 +216,10 @@ func TestCronCLIValidateConflictAndIdentity(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/validate"):
 			calls++
 			conn, _, err := w.(http.Hijacker).Hijack()
-			require.NoError(t, err)
-			require.NoError(t, conn.Close())
+			if !assert.NoError(t, err) {
+				return
+			}
+			assert.NoError(t, conn.Close())
 		case r.URL.Path == "/api/v1/health":
 			_, _ = fmt.Fprint(w, `{"api_schema_version":"0.42.0"}`)
 		default:
