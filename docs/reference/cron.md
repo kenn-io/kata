@@ -1,7 +1,7 @@
 ---
 title: Cron
 description: Recurring child issues, shared job definitions, and attributed run evidence.
-last_edited: 2026-11-04
+last_edited: 2026-11-05
 ---
 
 Kata creates recurring child issues and inbox requests from enabled native
@@ -667,9 +667,9 @@ attempts, never unknown or successful ones. All attempts share one run UID.
 Dependencies MUST succeed before a dependent starts. The declared
 `failure_policy` selects the branch behavior:
 `continue` permits independent branches after terminal failure; `stop` skips
-unstarted steps, including dependents in independent branches, at or after that
-instant, except tied failed/cancelled/unknown terminals and successful prerequisites
-(including equality). Started steps retain results. Retriable failures are not terminal.
+unstarted steps and dependents from the earliest failed/cancelled/unknown terminal,
+except tied terminals and their successful prerequisites (including equality).
+Started steps retain results. Retry-eligible failures are nonterminal.
 
 A positive `timeout_seconds` sets one deadline from run start for every attempt.
 Zero means no Kata deadline; document adapter defaults separately. Cancellation
@@ -801,9 +801,12 @@ Fixture version `kata.cron.adapter-conformance/v2` retains those v1 decisions
 and adds five workflow cases: successful and waiting dependencies, multiple
 successful parents, and blocked or waiting multi-parent dependencies. Their
 expected decisions are independent literals under both `continue` and `stop`.
-They remain literal oracles when other declaration settings change; the older
-policy-sensitive vectors still use reference-materialized nondefault answers.
-Selecting v2 changes the fixture suite, not stored cron definitions.
+These finite fixed vectors remain literal oracles when declaration settings
+change; older policy-sensitive vectors use reference-materialized nondefault
+answers. Tied-terminal and stop-skipped offer timing requirements remain normative;
+`Reference` unit tests enforce them, but these exported literals do not pin them.
+Use Go `RunSuite` with a hand-built `FixtureSuite` to check additional boundary
+inputs. Selecting v2 changes the fixture suite, not stored cron definitions.
 
 To check v2 from Go, select the suite explicitly:
 
