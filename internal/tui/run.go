@@ -123,9 +123,9 @@ func Run(ctx context.Context, opts Options) error {
 		startSSE(sseCtx, sseHC, endpoint, sseProjectScope(bi.scope), m.sseCh, m.connGen)
 	}
 	started := time.Now()
-	_, err = tea.NewProgram(m, programOpts(ctx, opts)...).Run()
-	elapsed := time.Since(started)
-	c.ReportSessionEnded(elapsed)
+	final, err := tea.NewProgram(m, programOpts(ctx, opts)...).Run()
+	c.ReportSessionEnded(time.Since(started))
+	cronSeenAfterQuit(ctx, final, opts.Stderr)
 	return err
 }
 

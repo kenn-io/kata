@@ -2,7 +2,10 @@ package tui
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"maps"
+	"os"
 	"slices"
 	"time"
 
@@ -73,6 +76,31 @@ func (m Model) cronSeenSync() (Model, tea.Cmd) {
 	m.cronSeen.writing = true
 	return m, m.cronSeenCommand(true)
 }
+
+// Quit does not wait for commands. An acknowledgement made during the single
+// flight write is never dispatched, so the final model saves once more through
+// the same locked merge. The bound covers lock waits, not a stalled filesystem.
+const cronSeenQuitTimeout = time.Second
+
+func cronSeenAfterQuit(ctx context.Context, final tea.Model, stderr io.Writer) {
+	m, ok := final.(Model)
+	if !ok || m.cronSeen.err != nil || !m.cronSeen.ready || (!m.cronSeen.dirty && !m.cronSeen.writing) {
+		return
+	}
+	// The program cancels its lifetime, and a cancelled caller still saves.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cronSeenQuitTimeout)
+	defer cancel()
+	m.lifetime = &cronReadScope{ctx: ctx, cancel: cancel}
+	msg, _ := m.cronSeenCommand(true)().(cronSeenResultMsg)
+	if msg.err == nil {
+		return
+	}
+	if stderr == nil {
+		stderr = os.Stderr
+	}
+	_, _ = fmt.Fprintf(stderr, "kata tui: cron seen state not saved: %s\n", sanitizeForLine(msg.err.Error()))
+}
+
 func (m Model) cronSeenResult(msg cronSeenResultMsg) (Model, tea.Cmd) {
 	if msg.write {
 		m.cronSeen.writing = false

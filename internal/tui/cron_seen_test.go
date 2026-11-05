@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/json/v2"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,10 +11,12 @@ import (
 	"reflect"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/gofrs/flock"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/pkg/client/generated"
 	"hegel.dev/go/hegel"
@@ -285,6 +288,85 @@ func TestCronSeenUpdateSchedulesPersistence(t *testing.T) {
 	}
 	require.True(t, wrote, "Update must return the actual persistence command")
 	require.True(t, next.cronSeen.writing, "the Update loop must dispatch the durable write after the clear action")
+}
+
+// Quit does not wait for an outstanding seen write, and an acknowledgement
+// made during it is never dispatched. The final model persists once more,
+// through the same locked merge, within a short bound.
+func TestCronSeenQuitPersistsFinalAcknowledgements(t *testing.T) {
+	fixture := func(t *testing.T, second bool) (Model, string) {
+		t.Helper()
+		m := cronSeenFixture(t)
+		first := m.cron.data.runs[0]
+		first.UID, first.Status = "first-failure", "failed"
+		later := first
+		later.UID = "second-failure"
+		m.cron.data.runs = []generated.CronRun{first, later}
+		path := filepath.Join(t.TempDir(), "cron-seen.json")
+		m.cronSeen.path = path
+		m, cmd := m.cronMarkSeen(first.UID).cronSeenSync()
+		require.NotNil(t, cmd)
+		require.True(t, m.cronSeen.writing, "the first write is outstanding and never finishes")
+		if second {
+			m, cmd = m.cronMarkSeen(later.UID).cronSeenSync()
+			require.Nil(t, cmd, "single flight holds the newer acknowledgement")
+			require.True(t, m.cronSeen.dirty)
+		}
+		return m, path
+	}
+	saved := func(t *testing.T, path string) []string {
+		t.Helper()
+		data, err := cronSeenLoad(t.Context(), path)
+		require.NoError(t, err)
+		return data.Projects["project-example"].Runs
+	}
+	t.Run("newer acknowledgement behind an outstanding write", func(t *testing.T) {
+		m, path := fixture(t, true)
+		var stderr strings.Builder
+		cronSeenAfterQuit(t.Context(), m, &stderr)
+		require.Equal(t, []string{"first-failure", "second-failure"}, saved(t, path))
+		require.Empty(t, stderr.String())
+	})
+	t.Run("latest snapshot dispatched but unfinished", func(t *testing.T) {
+		m, path := fixture(t, false)
+		require.False(t, m.cronSeen.dirty)
+		cronSeenAfterQuit(t.Context(), m, io.Discard)
+		require.Equal(t, []string{"first-failure"}, saved(t, path))
+	})
+	t.Run("cancelled caller", func(t *testing.T) {
+		m, path := fixture(t, true)
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		cronSeenAfterQuit(ctx, m, io.Discard)
+		require.Equal(t, []string{"first-failure", "second-failure"}, saved(t, path))
+	})
+	t.Run("held lock bounds quit and reports", func(t *testing.T) {
+		m, path := fixture(t, true)
+		lock := flock.New(path + ".lock")
+		require.NoError(t, lock.Lock())
+		defer func() { _ = lock.Unlock() }()
+		var stderr strings.Builder
+		started := time.Now()
+		cronSeenAfterQuit(t.Context(), m, &stderr)
+		require.Less(t, time.Since(started), defaultHTTPTimeout, "quit waits less than an ordinary write")
+		require.Contains(t, stderr.String(), "cron seen state not saved")
+		require.NoFileExists(t, path)
+	})
+	t.Run("nothing to save", func(t *testing.T) {
+		clean := cronSeenFixture(t)
+		failed, _ := fixture(t, true)
+		failed.cronSeen.err = errors.New("unreadable")
+		loading, _ := fixture(t, true)
+		loading.cronSeen.ready = false
+		for _, m := range []Model{clean, failed, loading} {
+			path := filepath.Join(t.TempDir(), "cron-seen.json")
+			m.cronSeen.path = path
+			var stderr strings.Builder
+			cronSeenAfterQuit(t.Context(), m, &stderr)
+			require.NoFileExists(t, path)
+			require.Empty(t, stderr.String())
+		}
+	})
 }
 
 // The catalog can arrive after the run view; acknowledgement waits for its
