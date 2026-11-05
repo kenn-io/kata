@@ -51,7 +51,7 @@ func cronScheduleLabel(expr string) (string, bool) {
 	if len(fields) != 5 || fields[2] != "*" || fields[3] != "*" {
 		return "", false
 	}
-	minute, ok := cronDecimal(fields[0], 59)
+	minute, ok := cronDecimal(fields[0])
 	if !ok {
 		return "", false
 	}
@@ -61,7 +61,7 @@ func cronScheduleLabel(expr string) (string, bool) {
 		}
 		return fmt.Sprintf("Hourly at :%02d", minute), true
 	}
-	hour, ok := cronDecimal(fields[1], 23)
+	hour, ok := cronDecimal(fields[1])
 	if !ok {
 		return "", false
 	}
@@ -79,25 +79,17 @@ func cronScheduleLabel(expr string) (string, bool) {
 	return fmt.Sprintf("%s %02d:%02d", label, hour, minute), true
 }
 
-func cronDecimal(text string, maxValue int) (int, bool) {
+// cronDecimal recognizes decimal syntax after ParseCron has validated bounds.
+func cronDecimal(text string) (int, bool) {
 	for _, r := range text {
 		if r < '0' || r > '9' {
 			return 0, false
 		}
 	}
 	n, err := strconv.Atoi(text)
-	return n, err == nil && n <= maxValue
+	return n, err == nil
 }
 
 func cronScheduleDetail(t generated.TriggerResponse) string {
-	if t.Kind == "cron" {
-		if label, ok := cronScheduleLabel(deref(t.Cron)); ok {
-			raw := deref(t.Cron)
-			if zone := deref(t.Timezone); zone != "" && zone != "UTC" {
-				raw += " (" + zone + ")"
-			}
-			return label + " · " + raw
-		}
-	}
-	return cronSchedule(t)
+	return formatCronSchedule(t, true)
 }

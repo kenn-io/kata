@@ -27,12 +27,20 @@ func cronTabs(tab int) string {
 	return strings.Join(names, " ")
 }
 func cronSchedule(t generated.TriggerResponse) string {
+	return formatCronSchedule(t, false)
+}
+
+func formatCronSchedule(t generated.TriggerResponse, includeRaw bool) string {
 	value := t.Kind
 	switch t.Kind {
 	case "cron":
 		value = deref(t.Cron)
 		if label, ok := cronScheduleLabel(value); ok {
-			value = label
+			if includeRaw {
+				value = label + " · " + value
+			} else {
+				value = label
+			}
 		}
 	case "interval":
 		value = "every " + (time.Duration(deref(t.IntervalSeconds)) * time.Second).String()
@@ -52,8 +60,8 @@ func cronSchedule(t generated.TriggerResponse) string {
 			value += ", " + cronLead(lead) + " before"
 		}
 	}
-	if deref(t.Timezone) != "" && deref(t.Timezone) != "UTC" {
-		value += " (" + deref(t.Timezone) + ")"
+	if zone := deref(t.Timezone); zone != "" && zone != "UTC" {
+		value += " (" + zone + ")"
 	}
 	return value
 }

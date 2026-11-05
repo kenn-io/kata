@@ -220,10 +220,21 @@ func TestCronPresetFollowsTypedAndPastedCron(t *testing.T) {
 		f.focusField(cfCron)
 		m, _ = updateModel(m, tea.PasteMsg{Content: "30 8 * * 1-5"})
 		f.focusField(cfPreset)
-		for _, key := range []rune{tea.KeyRight, tea.KeyLeft, tea.KeySpace, tea.KeyLeft} {
-			m = sendKey(m, key)
+		for _, selection := range []struct {
+			key   rune
+			expr  string
+			label string
+		}{
+			{tea.KeyRight, "0 * * * *", "Hourly"},
+			{tea.KeyLeft, "30 8 * * 1-5", "Custom"},
+			{tea.KeySpace, "0 * * * *", "Hourly"},
+			{tea.KeyLeft, "30 8 * * 1-5", "Custom"},
+		} {
+			m = sendKey(m, selection.key)
+			require.Equal(t, selection.expr, f.val[cfCron], "paste=%t key=%d", paste, selection.key)
+			require.Contains(t, stripANSI(m.viewBody()), "‹ "+selection.label+" ›")
+			require.Equal(t, "UTC", f.val[cfZone])
 		}
-		require.Equal(t, "30 8 * * 1-5", f.val[cfCron])
 		f.step(cfTrigger, 1)
 		require.False(t, f.shown(cfPreset))
 		f.step(cfTrigger, -1)
