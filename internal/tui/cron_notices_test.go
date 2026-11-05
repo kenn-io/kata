@@ -518,6 +518,36 @@ func TestCronNoticeWaitsForReadAfterEvent(t *testing.T) {
 			})
 		}
 	}
+	// A correction read inside the window settles the pending notice, even when
+	// a later refresh in that window cannot read the run or sees a newer event.
+	for _, mode := range []string{"later read failed", "later event unsettled"} {
+		t.Run("settled correction survives the window/"+mode, func(t *testing.T) {
+			m := cronNoticeFixture(t)
+			m = land(m, m.cron.events, row(m, "running", 5, T))
+			m = deliver(m, "r", "failed", T.Add(time.Minute))
+			require.Contains(t, m.cronNotices.pending, "r")
+			m = deliver(m, "r", "succeeded", T.Add(30*time.Second))
+			m = land(m, m.cron.events, row(m, "succeeded", 7, T.Add(30*time.Second)))
+			require.NotContains(t, m.cron.changed, "r", "the correction's read settled the run")
+			switch mode {
+			case "later read failed":
+				m = deliver(m, "other", "running", T.Add(time.Minute))
+				p := *m.cron.data
+				p.events, p.generation = m.cron.events, m.cron.readGen
+				p.runsErr = errors.New("daemon offline")
+				p.runErr = map[string]error{"r": errors.New("daemon offline")}
+				p.lastErr = map[string]error{m.cron.data.jobs[0].UID: errors.New("daemon offline")}
+				m, _ = updateModel(m, cronLoadedMsg(p))
+			case "later event unsettled":
+				m = deliver(m, "r", "succeeded", T.Add(31*time.Second))
+				require.NotZero(t, m.cron.changed["r"].at)
+			}
+			m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+			require.Nil(t, m.toast, "the settled correction must cancel the pending notice")
+			m, cmd := m.cronNoticeEvent(cronNoticeEvent("next", m.cron.data.jobs[0].UID, T.Add(2*time.Minute)))
+			require.NotNil(t, cmd, "a later failure of the job must still be announced")
+		})
+	}
 }
 
 // Older-page evidence settles a notice only if its request follows the latest

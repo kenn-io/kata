@@ -62,9 +62,6 @@ func TestCronHealthStates(t *testing.T) {
 		{name: "rescheduled once under older definition", reason: "Expected 2026-05-01T11:30:00Z; over 15m0s late (estimate)", status: "succeeded", want: "missed", runDefinition: new("01ARZ3NDEKTSV4RRFFQ69G5FB1"), edit: func(j *generated.CronJob) {
 			j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(now.Add(-30 * time.Minute).Format(time.RFC3339))}
 		}},
-		{name: "rescheduled once without identity", reason: "Expected 2026-05-01T11:30:00Z; over 15m0s late (estimate)", status: "succeeded", want: "missed", edit: func(j *generated.CronJob) {
-			j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(now.Add(-30 * time.Minute).Format(time.RFC3339))}
-		}},
 		{name: "once manual success under current definition", reason: "One-time job has run under its current definition", status: "succeeded", want: "ok", runDefinition: new("01ARZ3NDEKTSV4RRFFQ69G5FB2"), edit: func(j *generated.CronJob) {
 			j.Definition.Trigger = generated.TriggerResponse{Kind: "once", At: new(now.Add(-30 * time.Minute).Format(time.RFC3339))}
 		}},

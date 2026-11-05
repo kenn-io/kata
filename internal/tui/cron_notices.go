@@ -101,16 +101,21 @@ func (p cronData) fetched(uid string) (generated.CronRun, bool) {
 	return rows[i], true
 }
 
-// A read that settled an announced run outlives the history that carried it,
-// so job suppression keeps that read once the run leaves the loaded rows.
+// settle takes a qualifying read's evidence; seq stays the event's.
+func (r cronRunEvent) settle(row generated.CronRun) cronRunEvent {
+	r.Status, r.Revision, r.EndedAt, r.UpdatedAt = row.Status, row.Revision, row.EndedAt, row.UpdatedAt
+	return r
+}
+
+// A read that settled a pending or announced run outlives the refresh that
+// carried it, so later refreshes that skip the run keep that read.
 func (m Model) cronNoticeResolve() Model {
-	announced := maps.Clone(m.cronNotices.announced)
-	for uid, r := range announced {
-		row := m.cronNoticeNewest(r)
-		r.Status, r.Revision, r.EndedAt, r.UpdatedAt = row.Status, row.Revision, row.EndedAt, row.UpdatedAt
-		announced[uid] = r
+	for _, notices := range []*map[string]cronRunEvent{&m.cronNotices.pending, &m.cronNotices.announced} {
+		*notices = maps.Clone(*notices)
+		for uid, r := range *notices {
+			(*notices)[uid] = r.settle(m.cronNoticeNewest(r))
+		}
 	}
-	m.cronNotices.announced = announced
 	return m
 }
 
@@ -124,8 +129,7 @@ func (m Model) cronNoticePage(msg cronPageMsg) Model {
 		*notices = maps.Clone(*notices)
 		for _, row := range msg.runs {
 			if r, ok := (*notices)[row.UID]; ok && r.seq <= msg.events {
-				r.Status, r.Revision, r.EndedAt, r.UpdatedAt = row.Status, row.Revision, row.EndedAt, row.UpdatedAt
-				(*notices)[row.UID] = r
+				(*notices)[row.UID] = r.settle(row)
 			}
 		}
 	}
