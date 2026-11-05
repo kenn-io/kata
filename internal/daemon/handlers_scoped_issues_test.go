@@ -581,12 +581,12 @@ func TestIssueScopedTokenNarrowsBrowserSnapshotAndReferences(t *testing.T) {
 	// Warm the shared snapshot caches under broad authority first. A scoped
 	// request on the same server must still execute against its own candidate set.
 	wideResp, wideBody := envDoRaw(t, env, http.MethodGet,
-		"/api/v1/ui/snapshot?view=all-open&limit=1&include_graph=true", nil,
+		"/api/v1/ui/snapshot?view=all-open&limit=1&include_graph=true&selected_issue_uid="+child.UID, nil,
 		map[string]string{"Authorization": "Bearer bootstrap-token"})
 	require.Equalf(t, http.StatusOK, wideResp.StatusCode, "body: %s", wideBody)
 
 	resp, body := envDoRaw(t, env, http.MethodGet,
-		"/api/v1/ui/snapshot?view=all-open&limit=1&include_graph=true", nil, headers)
+		"/api/v1/ui/snapshot?view=all-open&limit=1&include_graph=true&selected_issue_uid="+child.UID, nil, headers)
 	require.Equalf(t, http.StatusOK, resp.StatusCode, "body: %s", body)
 	var snapshot struct {
 		Catalog []struct {
