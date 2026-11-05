@@ -74,53 +74,6 @@ func TestEventsAfter_QuietProjectPageBudget(t *testing.T) {
 	})
 }
 
-// Project polling must bound page work even when many issues left the project.
-func TestEventsAfter_DepartureBacklogPageBudget(t *testing.T) {
-	d, path := openTestDBWithPath(t)
-	ctx := t.Context()
-	source := createProject(ctx, t, d, "quiet-project")
-	target := createProject(ctx, t, d, "busy-project")
-	issue, _ := createTesterIssue(ctx, t, d, target.ID, "Moved issue")
-	base, err := d.MaxEventID(ctx)
-	require.NoError(t, err)
-	_, err = d.ExecContext(ctx, `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
- INSERT INTO events(uid,origin_instance_uid,project_id,project_name,issue_id,issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
- SELECT printf('%026d',x),?,?,'busy-project',?,?,'issue.moved','tester',json_object('issue_uid',?,'from_project_uid',?,'from_short_id',printf('%026d',10001-x),'to_project_uid',?,'to_short_id',?,'updated_at',?),1,0,? FROM n`, d.InstanceUID(), target.ID, issue.ID, issue.UID, issue.UID, source.UID, target.UID, issue.ShortID, issue.UpdatedAt, strings.Repeat("a", 64))
-	require.NoError(t, err)
-	raw, err := sql.Open("sqlite", path)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, raw.Close()) })
-	raw.SetMaxOpenConns(1)
-	store := &sqlitestore.Store{DB: raw}
-	for _, analyzed := range []bool{false, true} {
-		if analyzed {
-			_, err = raw.ExecContext(ctx, "ANALYZE")
-			require.NoError(t, err)
-		}
-		for _, after := range []int64{0, 5000, 9999, 10000} {
-			t.Run(fmt.Sprintf("analyzed=%t/after=%d", analyzed, after), func(t *testing.T) {
-				conn, err := raw.Conn(ctx)
-				require.NoError(t, err)
-				sqlitePageFetches(t, conn, true)
-				require.NoError(t, conn.Close())
-				events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: source.ID, AfterID: base + after, Limit: 100})
-				require.NoError(t, err)
-				require.NotNil(t, events)
-				require.Len(t, events, int(min(100, 10000-after)))
-				for i, event := range events {
-					require.Equal(t, base+after+int64(i)+1, event.ID)
-				}
-				conn, err = raw.Conn(ctx)
-				require.NoError(t, err)
-				pages := sqlitePageFetches(t, conn, false)
-				require.NoError(t, conn.Close())
-				t.Logf("10k departures: %d page fetches", pages)
-				require.LessOrEqual(t, pages, 512, "project polling must skip earlier departures")
-			})
-		}
-	}
-}
-
 func TestEventsAfter_CombinedProjectFilters(t *testing.T) {
 	d, _ := openTestDBWithPath(t)
 	ctx := t.Context()

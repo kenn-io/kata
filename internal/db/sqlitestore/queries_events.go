@@ -63,7 +63,7 @@ func (d *Store) EventsAfter(ctx context.Context, p db.EventsAfterParams) ([]db.E
 		q = eventSelect + " WHERE " + where + " AND e.project_id = ?"
 		args = append(args, p.ProjectID)
 		movedWhere, movedArgs := sharedConditions()
-		// Keep the moved-from expression searchable through idx_events_moved_from_id.
+		// Keep the moved-from expression searchable through idx_events_moved_from.
 		// Read the UID in this snapshot; unary + removes its column affinity so
 		// SQLite can seek the expression index even before ANALYZE.
 		// An inner ORDER BY/LIMIT on this leg can select a rowid walk after ANALYZE.
