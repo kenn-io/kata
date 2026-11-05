@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -61,64 +62,66 @@ func TestCronWaitReadFillAndHistoryRevisions(t *testing.T) {
 }
 
 func TestCronWaitReadsBoundedWithDeadlineAndCancellation(t *testing.T) {
-	j := cronFixture(t).cron.data.jobs[0]
-	p := cronData{}
-	for i := range 8 {
-		j.UID = fmt.Sprint(i)
-		p.jobs = append(p.jobs, j)
-	}
-	var fillDeadline time.Time
-	var deadlineMu sync.Mutex
-	a := waitReadAPI(func(ctx context.Context, job string) ([]generated.CronRun, error) {
-		deadlineMu.Lock()
-		var ok bool
-		fillDeadline, ok = ctx.Deadline()
-		deadlineMu.Unlock()
-		if !ok {
-			return nil, errors.New("fill context has no deadline")
+	synctest.Test(t, func(t *testing.T) {
+		j := cronFixture(t).cron.data.jobs[0]
+		p := cronData{}
+		for i := range 8 {
+			j.UID = fmt.Sprint(i)
+			p.jobs = append(p.jobs, j)
 		}
-		return []generated.CronRun{{UID: job, JobUID: new(job), Status: "running", IssueUID: new(job)}}, nil
+		var fillDeadline time.Time
+		var deadlineMu sync.Mutex
+		a := waitReadAPI(func(ctx context.Context, job string) ([]generated.CronRun, error) {
+			deadlineMu.Lock()
+			var ok bool
+			fillDeadline, ok = ctx.Deadline()
+			deadlineMu.Unlock()
+			if !ok {
+				return nil, errors.New("fill context has no deadline")
+			}
+			return []generated.CronRun{{UID: job, JobUID: new(job), Status: "running", IssueUID: new(job)}}, nil
+		})
+		entered := make(chan struct{}, 20)
+		a.wait = func(ctx context.Context, _ string) (cronParent, error) {
+			entered <- struct{}{}
+			got, ok := ctx.Deadline()
+			if !ok {
+				return cronParent{}, errors.New("wait context has no deadline")
+			}
+			deadlineMu.Lock()
+			want := fillDeadline
+			deadlineMu.Unlock()
+			if !got.Equal(want) {
+				return cronParent{}, fmt.Errorf("wait received a different deadline")
+			}
+			<-ctx.Done()
+			return cronParent{}, ctx.Err()
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		done := make(chan struct{})
+		go func() { cronEnrich(ctx, a, 7, &p); close(done) }()
+		select {
+		case <-entered:
+		case <-done:
+			t.Fatal("no attention read was admitted")
+		case <-time.After(defaultHTTPTimeout):
+			t.Fatal("attention read did not start")
+		}
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("enrichment did not cancel")
+		}
+		// Fills precede waits; this bounds each stage, not overlapping pools.
+		require.LessOrEqual(t, a.peak, 4)
+		require.NotEmpty(t, a.waitCalls)
+		for uid := range a.waitCalls {
+			require.ErrorIs(t, p.waitErr[uid], context.Canceled)
+			require.NotContains(t, p.waits, uid)
+		}
 	})
-	entered := make(chan struct{}, 20)
-	a.wait = func(ctx context.Context, _ string) (cronParent, error) {
-		entered <- struct{}{}
-		got, ok := ctx.Deadline()
-		if !ok {
-			return cronParent{}, errors.New("wait context has no deadline")
-		}
-		deadlineMu.Lock()
-		want := fillDeadline
-		deadlineMu.Unlock()
-		if !got.Equal(want) {
-			return cronParent{}, fmt.Errorf("wait received a different deadline")
-		}
-		<-ctx.Done()
-		return cronParent{}, ctx.Err()
-	}
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	done := make(chan struct{})
-	go func() { cronEnrich(ctx, a, 7, &p); close(done) }()
-	select {
-	case <-entered:
-	case <-done:
-		t.Fatal("no attention read was admitted")
-	case <-time.After(defaultHTTPTimeout):
-		t.Fatal("attention read did not start")
-	}
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("enrichment did not cancel")
-	}
-	// Fills precede waits; this bounds each stage, not overlapping pools.
-	require.LessOrEqual(t, a.peak, 4)
-	require.NotEmpty(t, a.waitCalls)
-	for uid := range a.waitCalls {
-		require.ErrorIs(t, p.waitErr[uid], context.Canceled)
-		require.NotContains(t, p.waits, uid)
-	}
 }
 
 func TestCronWaitRefreshCapturesLoadedHistory(t *testing.T) {

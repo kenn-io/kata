@@ -126,6 +126,7 @@ func TestCronHealthNativeDelivery(t *testing.T) {
 	require.Equal(t, "unavailable", cronHealth(p, j, now).state)
 	p.parentOpen[nextParentUID] = false
 	require.Equal(t, "parent closed", cronHealth(p, j, now).state)
+	p.progress[j.UID] = cron.RecurringProgress{Version: 1, Anchor: now, Through: now}
 	delete(p.parentOpen, nextParentUID)
 	require.Equal(t, "unavailable", cronHealth(p, j, now).state)
 
@@ -134,7 +135,7 @@ func TestCronHealthNativeDelivery(t *testing.T) {
 		nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&j.Definition)
 		p := cronData{jobs: []generated.CronJob{j}, parentOpen: map[string]bool{nextParentUID: true}, progress: map[string]cron.RecurringProgress{j.UID: {Version: 1, Anchor: snapshotFixedNow, Through: snapshotFixedNow}}}
 		hegel.Test(t, func(ht *hegel.T) {
-			p.lastRuns = map[string]generated.CronRun{j.UID: {JobUID: new(j.UID), Status: hegel.Draw(ht, hegel.Text()), CreatedAt: hegel.Draw(ht, hegel.Datetimes())}}
+			p.lastRuns = map[string]generated.CronRun{j.UID: {JobUID: new(j.UID), Status: hegel.Draw(ht, hegel.SampledFrom([]string{"running", "succeeded", "cancelled", "failed", "unknown"})), CreatedAt: hegel.Draw(ht, hegel.Datetimes())}}
 			p.lastErr = map[string]error{j.UID: errors.New("unreadable")}
 			if got := cronHealth(p, j, snapshotFixedNow); got.state != "ok" {
 				ht.Fatalf("observation affected native health: %v", got)
@@ -267,17 +268,9 @@ func TestCronHealthColumnRollupAndReason(t *testing.T) {
 	assertGolden(t, "cron-jobs-health", cronHealthFixture(t).viewBody())
 }
 
-func cronLinesText(lines []cronLine) string {
-	text := ""
-	for _, line := range lines {
-		text += line.text + "\n"
-	}
-	return text
-}
-
-// Health text retains readable contrast (at least 4.5:1) against its
-// painted background in both themes, through both rendering entry points.
-func TestCronHealthCellsKeepRowBand(t *testing.T) {
+// Both rendering entry points preserve row backgrounds in both themes.
+// Selected health text additionally retains at least 4.5:1 contrast.
+func TestCronHealthRowBandsAndSelectedContrast(t *testing.T) {
 	defer snapshotInit(t)()
 	for _, mode := range []colorMode{colorDark, colorLight} {
 		for _, cursor := range []int{0, 1} {
@@ -319,7 +312,7 @@ func TestCronHealthCellsKeepRowBand(t *testing.T) {
 					}
 					a, b := luminance(cell.foreground), luminance(cell.background)
 					ratio := (max(a, b) + 0.05) / (min(a, b) + 0.05)
-					t.Logf("selected health foreground=%s background=%s contrast=%.2f:1", cell.foreground, cell.background, ratio)
+					t.Logf("health foreground=%s background=%s contrast=%.2f:1", cell.foreground, cell.background, ratio)
 					require.GreaterOrEqual(t, ratio, 4.5)
 				}
 			}

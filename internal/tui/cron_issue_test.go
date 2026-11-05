@@ -159,24 +159,31 @@ func TestCronIssueMovedIssueTargetsDestination(t *testing.T) {
 // Before the linked issue's read returns, the detail has no identity: actions
 // that need one, such as a new child, wait instead of using an empty parent.
 func TestCronIssueActionsWaitForIssue(t *testing.T) {
-	m := cronIssueFixture(t, 80)
-	m, _ = m.cronOpenIssue("issue-example")
-	require.True(t, m.detail.loading)
-	require.Equal(t, "issue-example", m.detail.readRef)
-	m, cmd := updateModel(m, keyRune('N'))
-	require.False(t, slices.ContainsFunc(runCmdTree(cmd), func(msg tea.Msg) bool { _, ok := msg.(openInputMsg); return ok }), "N before the issue loads must not open a parentless form")
-	require.Equal(t, inputNone, m.input.kind)
-	m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, issue: &Issue{UID: "issue-example", ShortID: "abcd", ProjectID: 7}})
-	m, cmd = updateModel(m, keyRune('N'))
-	var opened *openInputMsg
-	for _, msg := range runCmdTree(cmd) {
-		if o, ok := msg.(openInputMsg); ok {
-			opened = &o
-		}
+	for _, state := range []string{"loading", "unreadable"} {
+		t.Run(state, func(t *testing.T) {
+			m := cronIssueFixture(t, 80)
+			m, _ = m.cronOpenIssue("issue-example")
+			require.True(t, m.detail.loading)
+			require.Equal(t, "issue-example", m.detail.readRef)
+			if state == "unreadable" {
+				m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, err: errors.New("issue not found")})
+			}
+			m, cmd := updateModel(m, keyRune('N'))
+			require.False(t, slices.ContainsFunc(runCmdTree(cmd), func(msg tea.Msg) bool { _, ok := msg.(openInputMsg); return ok }), "N without issue identity must not open a parentless form")
+			require.Equal(t, inputNone, m.input.kind)
+			m, _ = updateModel(m, detailFetchedMsg{gen: m.detail.gen, issue: &Issue{UID: "issue-example", ShortID: "abcd", ProjectID: 7}})
+			m, cmd = updateModel(m, keyRune('N'))
+			var opened *openInputMsg
+			for _, msg := range runCmdTree(cmd) {
+				if o, ok := msg.(openInputMsg); ok {
+					opened = &o
+				}
+			}
+			require.NotNil(t, opened)
+			require.NotNil(t, opened.parentShortID)
+			require.Equal(t, "abcd", *opened.parentShortID)
+		})
 	}
-	require.NotNil(t, opened)
-	require.NotNil(t, opened.parentShortID)
-	require.Equal(t, "abcd", *opened.parentShortID)
 }
 
 // Stacked detail has no pane frame around it, so a linked issue that failed to
@@ -197,11 +204,8 @@ func TestCronIssueUnreadableStackedView(t *testing.T) {
 	require.Contains(t, view, "esc")
 	require.Contains(t, view, "back")
 	require.NotContains(t, view, "no issue selected")
-	m, cmd := updateModel(m, keyRune('N'))
-	require.False(t, slices.ContainsFunc(runCmdTree(cmd), func(msg tea.Msg) bool { _, ok := msg.(openInputMsg); return ok }), "N on an unreadable issue must not open a parentless form")
-	require.Equal(t, inputNone, m.input.kind)
 	stacked := m
-	m, cmd = updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	m, cmd := updateModel(m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = drainInboxCmds(m, cmd)
 	require.Equal(t, viewCron, m.view)
 	stacked, cmd = updateModel(stacked, popDetailMsg{})

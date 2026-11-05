@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -57,7 +56,7 @@ func TestCronWaitClientReadsOpenAndDeletedMetadata(t *testing.T) {
 	for _, deleted := range []bool{false, true} {
 		t.Run(fmt.Sprint(deleted), func(t *testing.T) {
 			requests := make(chan *http.Request, 1)
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 				requests <- r
 				w.Header().Set("Content-Type", "application/json")
 				deletedAt := "null"
@@ -65,9 +64,8 @@ func TestCronWaitClientReadsOpenAndDeletedMetadata(t *testing.T) {
 					deletedAt = `"2026-05-01T12:00:00Z"`
 				}
 				_, _ = w.Write([]byte(`{"issue":{"status":"open","deleted_at":` + deletedAt + `,"metadata":{"work.attention":"needs-human"}}}`))
-			}))
-			defer srv.Close()
-			got, err := NewClient(srv.URL, srv.Client()).readCronParent(t.Context(), 7, "issue-example")
+			})
+			got, err := c.readCronParent(t.Context(), 7, "issue-example")
 			require.NoError(t, err)
 			require.Len(t, requests, 1, "the client must issue exactly one request")
 			req := <-requests

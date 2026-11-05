@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -21,13 +20,11 @@ import (
 // and callers need the server cursor to discover runs outside the project head.
 func TestCronClientPages(t *testing.T) {
 	requests := make(chan *http.Request, 1)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		requests <- r
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"runs":[],"next_before_uid":"next-example"}`))
-	}))
-	defer srv.Close()
-	c := NewClient(srv.URL, srv.Client())
+	})
 	runs, next, err := c.ListCronJobRuns(t.Context(), 7, "job-example", "before-example", 20)
 	require.NoError(t, err)
 	require.Len(t, requests, 1, "the client must issue exactly one request")
@@ -102,7 +99,7 @@ func TestCronEnrichmentExactAndIsolated(t *testing.T) {
 	require.NotContains(t, p.lastRuns, "empty")
 	require.NoError(t, p.lastErr["empty"])
 	require.ErrorContains(t, p.lastErr["failed"], "offline")
-	require.ErrorContains(t, p.lastErr["foreign"], "job")
+	require.EqualError(t, p.lastErr["foreign"], "received runs for a different job")
 	require.NotContains(t, p.lastRuns, "foreign", "a mismatched reply cannot replace job evidence")
 	// A failed shared read cannot prevent a successful job-specific read.
 	p = cronData{jobs: jobs[:1], runsErr: errors.New("head unavailable")}
@@ -165,6 +162,39 @@ func TestCronEnrichmentAdmissionAndWorkerCaps(t *testing.T) {
 		require.ErrorContains(t, p.lastErr["204"], "200 jobs per refresh")
 		require.NotContains(t, p.parentOpen, "parent-204")
 	})
+	t.Run("adapter and enabled priority", func(t *testing.T) {
+		j := cronFixture(t).cron.data.jobs[0]
+		adapter := j
+		adapter.UID = "quiet-adapter"
+		p := cronData{}
+		for i := range 201 {
+			native := j
+			native.UID = fmt.Sprintf("native-%03d", i)
+			nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&native.Definition)
+			p.jobs = append(p.jobs, native)
+		}
+		p.jobs = append(p.jobs, adapter)
+		a := &cronEnrichAPI{read: func(_ context.Context, job string) ([]generated.CronRun, error) {
+			return []generated.CronRun{{UID: job + "-run", JobUID: new(job), Status: "succeeded"}}, nil
+		}}
+		cronEnrich(t.Context(), a, 7, &p)
+		require.NoError(t, p.lastErr[adapter.UID])
+		require.Equal(t, adapter.UID+"-run", p.lastRuns[adapter.UID].UID)
+		require.Equal(t, "native-000-run", p.lastRuns["native-000"].UID, "native observations still feed exact display and status filters")
+		require.Error(t, p.lastErr["native-200"], "native display lookups remain bounded")
+		p = cronData{}
+		for i := range 210 {
+			job := j
+			job.UID = fmt.Sprintf("ordered-%03d", i)
+			job.Definition.Enabled = i >= 150
+			p.jobs = append(p.jobs, job)
+		}
+		cronEnrich(t.Context(), a, 7, &p)
+		for _, job := range p.jobs[150:] {
+			require.NoError(t, p.lastErr[job.UID], "enabled jobs must be admitted before paused display reads")
+			require.Equal(t, job.UID+"-run", p.lastRuns[job.UID].UID)
+		}
+	})
 }
 
 func TestCronEnrichmentCancellation(t *testing.T) {
@@ -194,6 +224,21 @@ func TestCronEnrichmentCancellation(t *testing.T) {
 		}
 		require.ErrorIs(t, p.lastErr[j.UID], context.Canceled)
 	})
+	t.Run("pre-cancelled context performs no exact read", func(t *testing.T) {
+		m, a := cronRefreshFixture(t, 12)
+		r := m.cron.runPage.runs[0]
+		p := cronData{inspectedRuns: []generated.CronRun{r}, historyRuns: m.cron.runPage.runs}
+		a.exact = func(context.Context, string) (generated.CronRun, error) {
+			t.Error("cancelled read performed I/O")
+			return r, nil
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		cronEnrich(ctx, a, 7, &p)
+		require.Empty(t, a.reads)
+		require.ErrorIs(t, p.runErr[r.UID], context.Canceled)
+		require.Equal(t, r, p.lookup[r.UID])
+	})
 }
 
 func TestCronVisitCancelsAndFencesRefresh(t *testing.T) {
@@ -219,41 +264,6 @@ func TestCronVisitCancelsAndFencesRefresh(t *testing.T) {
 	currentCtx := m.cron.reads.ctx
 	cancel()
 	require.ErrorIs(t, currentCtx.Err(), context.Canceled, "TUI shutdown cancels every Cron child")
-}
-
-func TestCronEnrichmentPrioritizesAdaptersAndEnabledJobs(t *testing.T) {
-	j := cronFixture(t).cron.data.jobs[0]
-	adapter := j
-	adapter.UID = "quiet-adapter"
-	p := cronData{}
-	for i := range 201 {
-		native := j
-		native.UID = fmt.Sprintf("native-%03d", i)
-		nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&native.Definition)
-		p.jobs = append(p.jobs, native)
-	}
-	p.jobs = append(p.jobs, adapter)
-	a := &cronEnrichAPI{read: func(_ context.Context, job string) ([]generated.CronRun, error) {
-		return []generated.CronRun{{UID: job + "-run", JobUID: new(job), Status: "succeeded"}}, nil
-	}}
-	cronEnrich(t.Context(), a, 7, &p)
-	require.NoError(t, p.lastErr[adapter.UID])
-	require.Equal(t, adapter.UID+"-run", p.lastRuns[adapter.UID].UID)
-	require.Equal(t, "native-000-run", p.lastRuns["native-000"].UID, "native observations still feed exact display and status filters")
-	require.Error(t, p.lastErr["native-200"], "native display lookups remain bounded")
-	p = cronData{}
-	for i := range 210 {
-		job := j
-		job.UID = fmt.Sprintf("ordered-%03d", i)
-		job.Definition.Enabled = i >= 150
-		p.jobs = append(p.jobs, job)
-	}
-	cronEnrich(t.Context(), a, 7, &p)
-	for _, job := range p.jobs[150:] {
-		require.NoError(t, p.lastErr[job.UID], "enabled jobs must be admitted before paused display reads")
-		require.Equal(t, job.UID+"-run", p.lastRuns[job.UID].UID)
-	}
-
 }
 
 func TestCronRunClientByUID(t *testing.T) {

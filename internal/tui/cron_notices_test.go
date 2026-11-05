@@ -148,60 +148,56 @@ func TestCronNoticeStartupScopeAndCutoff(t *testing.T) {
 	m = cronNoticeFixture(t)
 	m, cmd = m.cronNoticeEvent(cronNoticeEvent("edge", "job", snapshotFixedNow.Add(-2*time.Minute)))
 	require.NotNil(t, cmd, "cutoff equality is eligible")
-	// Workflow-only observations do not share an empty-job suppression bucket.
-	m = cronNoticeFixture(t)
-	m, _ = m.cronNoticeEvent(cronNoticeEvent("first", "", snapshotFixedNow))
-	m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
-	m, cmd = m.cronNoticeEvent(cronNoticeEvent("first", "", snapshotFixedNow))
-	require.Nil(t, cmd, "same-UID workflow replay must stay suppressed without a job bucket")
-	require.Empty(t, m.cronNotices.pending)
-	m, cmd = m.cronNoticeEvent(cronNoticeEvent("second", "", snapshotFixedNow))
-	require.NotNil(t, cmd)
 }
 func TestCronNoticeStaleWindowAndHints(t *testing.T) {
-	for _, fence := range []string{"connection", "scope", "generation"} {
-		t.Run(fence, func(t *testing.T) {
-			m := cronNoticeFixture(t)
-			m.cronSeen.ready = false
-			m, _ = m.cronNoticeEvent(cronNoticeEvent("early", "job", snapshotFixedNow))
-			m, _ = m.cronSeenResult(cronSeenResultMsg{data: cronSeenStore{Version: 1}})
-			tick := cronNoticeTickFor(m)
-			switch fence {
-			case "connection":
-				m.connGen++
-			case "scope":
-				m.scopeGen++
-			case "generation":
-				m.cronNotices.gen++
-			}
-			m, _ = m.cronNoticeFlush(tick)
-			require.Nil(t, m.toast, "stale tick must not emit a notice")
-		})
-	}
+	t.Run("window fences", func(t *testing.T) {
+		for _, fence := range []string{"connection", "scope"} {
+			t.Run(fence, func(t *testing.T) {
+				m := cronNoticeFixture(t)
+				m.cronSeen.ready = false
+				m, _ = m.cronNoticeEvent(cronNoticeEvent("early", "job", snapshotFixedNow))
+				m, _ = m.cronSeenResult(cronSeenResultMsg{data: cronSeenStore{Version: 1}})
+				tick := cronNoticeTickFor(m)
+				switch fence {
+				case "connection":
+					m.connGen++
+				case "scope":
+					m.scopeGen++
+				}
+				m, _ = m.cronNoticeFlush(tick)
+				require.Nil(t, m.toast, "stale tick must not emit a notice")
+			})
+		}
 
-	m := cronNoticeFixture(t)
-	m, _ = m.cronNoticeEvent(cronNoticeEvent("a", "job", snapshotFixedNow))
-	old := cronNoticeTickFor(m)
-	m.cronSeen.data.Projects["project-example"] = cronSeenProject{Runs: []string{"a"}}
-	m, _ = m.cronNoticeFlush(old)
-	m, _ = m.cronNoticeEvent(cronNoticeEvent("b", "job", snapshotFixedNow))
-	m, _ = m.cronNoticeFlush(old)
-	require.Nil(t, m.toast, "old tick must not flush a newer window")
-	m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
-	require.NotNil(t, m.toast)
-	for _, tc := range []struct {
-		view viewID
-		help bool
-		want string
-	}{{viewCron, false, "u to review"}, {viewCron, true, "open Cron Runs"}, {viewList, false, "3 then u"}, {viewDetail, false, "3 then u"}, {viewProjects, false, "open Cron Runs"}} {
-		m.view, m.cron.help = tc.view, tc.help
-		require.Contains(t, m.cronToast().text, tc.want)
-	}
-	m.view = viewCron
-	m.cron.filtering = true
-	require.Contains(t, m.cronToast().text, "open Cron Runs")
+		m := cronNoticeFixture(t)
+		m, _ = m.cronNoticeEvent(cronNoticeEvent("a", "job", snapshotFixedNow))
+		old := cronNoticeTickFor(m)
+		m.cronSeen.data.Projects["project-example"] = cronSeenProject{Runs: []string{"a"}}
+		m, _ = m.cronNoticeFlush(old)
+		m, _ = m.cronNoticeEvent(cronNoticeEvent("b", "job", snapshotFixedNow))
+		m, _ = m.cronNoticeFlush(old)
+		require.Nil(t, m.toast, "old tick must not flush a newer window")
+		m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+		require.NotNil(t, m.toast)
+	})
+	t.Run("hints", func(t *testing.T) {
+		m := cronNoticeFixture(t)
+		m, _ = m.cronNoticeEvent(cronNoticeEvent("b", "job", snapshotFixedNow))
+		m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
 
-	{
+		for _, tc := range []struct {
+			view viewID
+			help bool
+			want string
+		}{{viewCron, false, "u to review"}, {viewCron, true, "open Cron Runs"}, {viewList, false, "3 then u"}, {viewDetail, false, "3 then u"}, {viewProjects, false, "open Cron Runs"}} {
+			m.view, m.cron.help = tc.view, tc.help
+			require.Contains(t, m.cronToast().text, tc.want)
+		}
+		m.view = viewCron
+		m.cron.filtering = true
+		require.Contains(t, m.cronToast().text, "open Cron Runs")
+	})
+	t.Run("goldens", func(t *testing.T) {
 		defer snapshotInit(t)()
 		m := cronNoticeFixture(t)
 		m.width = 120
@@ -210,7 +206,7 @@ func TestCronNoticeStaleWindowAndHints(t *testing.T) {
 		assertGolden(t, "cron-notice", m.viewContent())
 		m.view = viewList
 		assertGolden(t, "cron-notice-list", m.viewContent())
-	}
+	})
 }
 
 func TestCronNoticeShortcutEnablesUnseen(t *testing.T) {
@@ -293,7 +289,6 @@ func TestCronNoticeRenderedFailure(t *testing.T) {
 			require.Equal(t, 1, strings.Count(stripANSI(m.viewContent()), "cron: 1 run failed:"), "notice must appear exactly once")
 		})
 	}
-
 }
 
 // An emitted failure belongs to the scope and connection that observed it.
@@ -328,6 +323,17 @@ func TestCronNoticeClearsOnSwitch(t *testing.T) {
 // An announcement stops suppressing its job only after acknowledgement or
 // authoritative correction. Peer revisions and timestamps are not local order.
 func TestCronNoticeJobSuppressionRelease(t *testing.T) {
+	t.Run("workflow-only suppression", func(t *testing.T) {
+		// Workflow-only observations do not share an empty-job suppression bucket.
+		m := cronNoticeFixture(t)
+		m, _ = m.cronNoticeEvent(cronNoticeEvent("first", "", snapshotFixedNow))
+		m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+		m, cmd := m.cronNoticeEvent(cronNoticeEvent("first", "", snapshotFixedNow))
+		require.Nil(t, cmd, "same-UID workflow replay must stay suppressed without a job bucket")
+		require.Empty(t, m.cronNotices.pending)
+		m, cmd = m.cronNoticeEvent(cronNoticeEvent("second", "", snapshotFixedNow))
+		require.NotNil(t, cmd)
+	})
 	tests := []struct {
 		name string
 		run  func(*testing.T, Model)
@@ -336,7 +342,7 @@ func TestCronNoticeJobSuppressionRelease(t *testing.T) {
 			m.cron.data.lookup = map[string]generated.CronRun{"old": {UID: "old", Status: "succeeded", Revision: 50, UpdatedAt: snapshotFixedNow}}
 			first := cronNoticeEvent("old", "job", snapshotFixedNow)
 			first.cronRun.Revision = 1
-			m = cronUpdateTest(m, first) // the real handler marks the run changed until a later read
+			m, _ = updateModel(m, first) // the real handler marks the run changed until a later read
 			m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
 			m, cmd := m.cronNoticeEvent(cronNoticeEvent("next", "job", snapshotFixedNow))
 			require.Nil(t, cmd, "the pre-event local snapshot cannot supersede the announcement")
@@ -358,27 +364,6 @@ func TestCronNoticeJobSuppressionRelease(t *testing.T) {
 			m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
 			require.NotNil(t, m.toast)
 			require.Contains(t, m.cronNotices.announced, "c")
-		}},
-		{"loaded correction after reset", func(t *testing.T, m Model) {
-			job := m.cron.data.jobs[0].UID
-			event := cronNoticeEvent("corrected-run", job, snapshotFixedNow)
-			m, _ = m.cronNoticeEvent(event)
-			m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
-			require.NotNil(t, m.toast)
-			m.toast = nil
-			current := m.cron.data.runs[0]
-			current.UID, current.Status, current.Revision = "corrected-run", "succeeded", 2
-			data := *m.cron.data
-			data.runs = []generated.CronRun{current}
-			data.lastRuns = map[string]generated.CronRun{job: current}
-			data.lookup = map[string]generated.CronRun{current.UID: current}
-			data.resetPages = true
-			m = m.cronLoaded(cronLoadedMsg(data))
-			require.Zero(t, m.cronUnseenCount())
-			m, cmd := m.cronNoticeEvent(cronNoticeEvent("new-failure", job, snapshotFixedNow))
-			require.NotNil(t, cmd, "a corrected failure is no longer an unseen failure of this job")
-			m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
-			require.NotNil(t, m.toast)
 		}},
 	}
 	T := snapshotFixedNow
@@ -535,83 +520,64 @@ func TestCronNoticeWaitsForReadAfterEvent(t *testing.T) {
 	}
 }
 
-// A run outside the loaded head carries no change mark, so an older page read
-// before its failure event cannot settle the notice, whether that page lands
-// before or after the head refresh the event triggered. That refresh did not
-// read the run, so only the event describes it.
-func TestCronNoticeIgnoresStaleOlderPage(t *testing.T) {
+// Older-page evidence settles a notice only if its request follows the latest
+// event, regardless of whether the page or the project-head refresh lands first.
+func TestCronNoticeOlderPageSettlement(t *testing.T) {
 	T := snapshotFixedNow
-	for _, pageFirst := range []bool{true, false} {
-		t.Run(fmt.Sprintf("page before head=%v", pageFirst), func(t *testing.T) {
-			m := cronNoticeFixture(t)
-			job := m.cron.data.jobs[0].UID
-			m.cron.runPage = cronHistoryPage{runs: m.cron.data.runs, next: "older-cursor", ready: true}
-			m, _ = m.cronRequestPage("", false)
-			require.True(t, m.cron.runPage.out)
-			stale := generated.CronRun{UID: "r", JobUID: &job, Status: "running", Revision: 5, CreatedAt: T.Add(-time.Hour), UpdatedAt: T.Add(-time.Hour)}
-			page := cronPageMsg{conn: m.connGen, scope: m.scopeGen, gen: m.cron.runPage.gen, cursor: "older-cursor", runs: []generated.CronRun{stale}}
-			next, _ := m.handleEventReceived(cronNoticeEvent("r", job, T.Add(time.Minute)))
-			m = next.(Model)
-			require.NotContains(t, m.cron.changed, "r", "an unloaded run has no change mark")
-			require.Contains(t, m.cronNotices.pending, "r")
-			if pageFirst {
-				m, _ = updateModel(m, page)
+	for _, requested := range []string{"before event", "after event", "overtaken"} {
+		for _, pageFirst := range []bool{true, false} {
+			for _, announced := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/page before head=%v/announced=%v", requested, pageFirst, announced), func(t *testing.T) {
+					m := cronNoticeFixture(t)
+					job := m.cron.data.jobs[0].UID
+					kept := generated.CronRun{UID: "r", JobUID: &job, Status: "succeeded", Revision: 5, CreatedAt: T.Add(-time.Hour), UpdatedAt: T.Add(time.Minute), EndedAt: new(T.Add(time.Minute))}
+					if requested == "before event" {
+						kept.Status, kept.UpdatedAt, kept.EndedAt = "running", T.Add(-time.Hour), nil
+					}
+					m.api = &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: []generated.CronRun{kept}}
+					m.cron.runPage = cronHistoryPage{runs: m.cron.data.runs, next: "older-cursor", ready: true}
+					event := cronNoticeEvent("r", job, T.Add(time.Minute))
+					if requested != "before event" {
+						m, _ = updateModel(m, event)
+					}
+					m, cmd := m.cronRequestPage("", false)
+					require.NotNil(t, cmd)
+					page := cmd()
+					if requested == "before event" {
+						m, _ = updateModel(m, event)
+					}
+					require.NotContains(t, m.cron.changed, "r", "an unloaded run has no change mark")
+					require.Contains(t, m.cronNotices.pending, "r")
+					if announced {
+						m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+						require.Contains(t, m.cronNotices.announced, "r")
+						m.toast = nil
+					}
+					if requested == "overtaken" {
+						m, _ = updateModel(m, cronNoticeEvent("r", job, T.Add(2*time.Minute)))
+					}
+					if pageFirst {
+						m, _ = updateModel(m, page)
+					}
+					m = cronSettleTest(m)
+					if !pageFirst {
+						m, _ = updateModel(m, page)
+					}
+					got, loaded := m.cron.data.run("r")
+					require.True(t, loaded, "the page remains available for display")
+					require.Equal(t, kept.Status, got.Status)
+					fresh := requested == "after event"
+					if !announced {
+						m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+						require.Equal(t, !fresh, m.toast != nil, "only a page read after the latest event settles the notice")
+						require.Equal(t, !fresh, m.cronNotices.announced["r"].UID != "")
+					} else {
+						m = cronSettleTest(m)
+						m, cmd = m.cronNoticeEvent(cronNoticeEvent("next", job, T.Add(3*time.Minute)))
+						require.Equal(t, fresh, cmd != nil, "only settled success releases the job")
+					}
+				})
 			}
-			m = cronSettleTest(m) // the head refresh issued after the event; r is not in its head
-			if !pageFirst {
-				m, _ = updateModel(m, page)
-			}
-			got, loaded := m.cron.data.run("r")
-			require.True(t, loaded, "the older page's row is retained for display")
-			require.Equal(t, "running", got.Status)
-			m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
-			require.NotNil(t, m.toast, "a page read before the failure cannot supersede it")
-			require.Contains(t, m.cronNotices.announced, "r")
-		})
-	}
-}
-
-// A page requested after a run's failure event is as current as a refresh that
-// read the run: when the store kept a success, the failure is neither announced
-// nor left suppressing its job. A page overtaken by a later event settles nothing.
-func TestCronNoticeFreshPageSettlesFailure(t *testing.T) {
-	T := snapshotFixedNow
-	for _, announced := range []bool{false, true} {
-		for _, overtaken := range []bool{false, true} {
-			t.Run(fmt.Sprintf("announced=%v/overtaken=%v", announced, overtaken), func(t *testing.T) {
-				m := cronNoticeFixture(t)
-				job := m.cron.data.jobs[0].UID
-				kept := generated.CronRun{UID: "r", JobUID: &job, Status: "succeeded", Revision: 5, CreatedAt: T.Add(-time.Hour), UpdatedAt: T.Add(time.Minute), EndedAt: new(T.Add(time.Minute))}
-				m.api = &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: []generated.CronRun{kept}}
-				m.cron.runPage = cronHistoryPage{runs: m.cron.data.runs, next: "older-cursor", ready: true}
-				m = cronUpdateTest(m, cronNoticeEvent("r", job, T.Add(time.Minute)))
-				require.NotContains(t, m.cron.changed, "r", "an unloaded run has no change mark")
-				m = cronSettleTest(m) // the head refresh the event triggered does not carry r
-				if announced {
-					m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
-					require.Contains(t, m.cronNotices.announced, "r")
-					m.toast = nil
-				}
-				m, cmd := m.cronRequestPage("", false)
-				require.NotNil(t, cmd)
-				page := cmd()
-				if overtaken {
-					m = cronUpdateTest(m, cronNoticeEvent("r", job, T.Add(2*time.Minute)))
-				}
-				m = cronUpdateTest(m, page)
-				got, loaded := m.cron.data.run("r")
-				require.True(t, loaded)
-				require.Equal(t, "succeeded", got.Status)
-				if !announced {
-					m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
-					require.Equal(t, overtaken, m.toast != nil, "only a page read after the run's latest event settles it")
-					require.Equal(t, overtaken, m.cronNotices.announced["r"].UID != "")
-					return
-				}
-				m = cronSettleTest(m) // a later head without r keeps the page's settlement
-				m, cmd = m.cronNoticeEvent(cronNoticeEvent("next", job, T.Add(3*time.Minute)))
-				require.Equal(t, !overtaken, cmd != nil, "a fresh page's success releases the job")
-			})
 		}
 	}
 }
@@ -639,6 +605,14 @@ func TestCronNoticeResolutionOutlivesHistory(t *testing.T) {
 				data.runs, data.lookup, data.resetPages = head, nil, true
 				data.lastRuns = map[string]generated.CronRun{job: newer}
 				m = m.cronLoaded(cronLoadedMsg(data))
+				if corrected && len(head) == 2 {
+					require.Zero(t, m.cronUnseenCount())
+					probe, cmd := m.cronNoticeEvent(cronNoticeEvent("new-failure", job, snapshotFixedNow))
+					require.NotNil(t, cmd, "the loaded correction immediately releases its job")
+					probe, _ = probe.cronNoticeFlush(cronNoticeTickFor(probe))
+					require.NotNil(t, probe.toast)
+				}
+
 			}
 			_, loaded := m.cron.data.run("announced")
 			require.False(t, loaded, "the later head dropped the run from loaded history")
@@ -664,7 +638,7 @@ func TestCronNoticeLastRunFillSettlesCorrection(t *testing.T) {
 	m.toast = nil
 	correction := cronNoticeEvent(old.UID, job, snapshotFixedNow)
 	correction.cronRun.Status = "succeeded"
-	m = cronUpdateTest(m, correction)
+	m, _ = updateModel(m, correction)
 	require.NotZero(t, m.cron.changed[old.UID].at)
 	fixed := old
 	fixed.Status, fixed.Revision = "succeeded", 3

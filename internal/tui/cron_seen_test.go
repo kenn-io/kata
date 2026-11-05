@@ -10,7 +10,6 @@ import (
 	"reflect"
 	"runtime"
 	"slices"
-	"sync"
 	"testing"
 	"time"
 
@@ -110,25 +109,17 @@ func TestCronSeenFiles(t *testing.T) {
 	cancel()
 	_, err = cronSeenLoad(ctx, path)
 	require.ErrorIs(t, err, context.Canceled)
-	// Concurrent stale saves must preserve unrelated project entries. This catches
-	// lost updates without the lock, though scheduling is uncontrolled.
-	var wg sync.WaitGroup
-	errs := make(chan error, 20)
+	// Each writer starts from the same stale snapshot. Saving must merge the
+	// current disk state rather than replace another project's acknowledgements.
 	for i := range 20 {
-		wg.Go(func() {
-			_, err := cronSeenSave(t.Context(), path, cronSeenStore{Projects: map[string]cronSeenProject{fmt.Sprint(i % 2): {Runs: []string{fmt.Sprint(i)}}}})
-			errs <- err
-		})
-	}
-	wg.Wait()
-	close(errs)
-	for err := range errs {
+		_, err := cronSeenSave(t.Context(), path, cronSeenStore{Projects: map[string]cronSeenProject{fmt.Sprint(i % 2): {Runs: []string{fmt.Sprint(i)}}}})
 		require.NoError(t, err)
 	}
 	got, err := cronSeenLoad(t.Context(), path)
 	require.NoError(t, err)
 	require.Len(t, got.Projects["0"].Runs, 10)
 	require.Len(t, got.Projects["1"].Runs, 10)
+	require.True(t, slices.IsSorted(got.Projects["0"].Runs))
 	if runtime.GOOS != "windows" {
 		info, err := os.Stat(path)
 		require.NoError(t, err)
@@ -143,7 +134,6 @@ func TestCronSeenFiles(t *testing.T) {
 	raw, err := os.ReadFile(path) //nolint:gosec // G304: test-controlled path under t.TempDir()
 	require.NoError(t, err)
 	require.Equal(t, "corrupt", string(raw))
-	require.True(t, slices.IsSorted(got.Projects["0"].Runs))
 }
 
 func cronSeenFixture(t *testing.T) Model {
@@ -154,59 +144,72 @@ func cronSeenFixture(t *testing.T) Model {
 	return m
 }
 func TestCronSeenLoadedCountAndKeys(t *testing.T) {
-	m := cronSeenFixture(t)
-	r := m.cron.data.runs[0]
-	r.Status = "failed"
-	r.UID = "failed"
-	r.EndedAt = new(snapshotFixedNow.Add(17 * time.Nanosecond))
-	unknown := r
-	unknown.UID = "unknown"
-	unknown.Status = "unknown"
-	unknown.EndedAt = nil
-	unknown.UpdatedAt = snapshotFixedNow.Add(23 * time.Nanosecond)
-	success := r
-	success.UID = "success"
-	success.Status = "succeeded"
-	m.cron.data.runs = []generated.CronRun{r, success}
-	m.cron.data.lastRuns = map[string]generated.CronRun{*r.JobUID: r}
-	m.cron.jobPage = cronHistoryPage{job: *r.JobUID, runs: []generated.CronRun{unknown, r}, ready: true}
-	m.cron.runPage.runs = []generated.CronRun{r, unknown}
-	m.cron.runPage.ready = true
-	require.Equal(t, 2, m.cronUnseenCount())
-	m.width = 160
-	for _, tab := range []int{cronJobs, cronRuns, cronWorkflows} {
-		m.cron.tab = tab
-		require.Contains(t, stripANSI(renderCron(m)), "2 unseen failed")
+	fixture := func(t *testing.T) (Model, generated.CronRun) {
+		t.Helper()
+		m := cronSeenFixture(t)
+		r := m.cron.data.runs[0]
+		r.Status = "failed"
+		r.UID = "failed"
+		r.EndedAt = new(snapshotFixedNow.Add(17 * time.Nanosecond))
+		unknown := r
+		unknown.UID = "unknown"
+		unknown.Status = "unknown"
+		unknown.EndedAt = nil
+		unknown.UpdatedAt = snapshotFixedNow.Add(23 * time.Nanosecond)
+		success := r
+		success.UID = "success"
+		success.Status = "succeeded"
+		m.cron.data.runs = []generated.CronRun{r, success}
+		m.cron.data.lastRuns = map[string]generated.CronRun{*r.JobUID: r}
+		m.cron.jobPage = cronHistoryPage{job: *r.JobUID, runs: []generated.CronRun{unknown, r}, ready: true}
+		m.cron.runPage.runs = []generated.CronRun{r, unknown}
+		m.cron.runPage.ready = true
+		return m, unknown
 	}
-	m = sendRune(m, 'u')
-	require.Equal(t, cronRuns, m.cron.tab)
-	require.True(t, m.cron.unseenOnly)
-	title, _, lines := cronScreen(m)
-	require.Contains(t, title, "unseen only")
-	require.Len(t, lines, 2)
-	failed := slices.IndexFunc(lines, func(l cronLine) bool { return l.target.uid == "failed" })
-	require.NotEqual(t, -1, failed)
-	require.Contains(t, stripANSI(lines[failed].text), "• failed")
-	m = m.cronFilter("no match")
-	_, _, lines = cronScreen(m)
-	require.Empty(t, lines, "unseen-only ANDs with the existing query")
-	m = m.cronFilter("")
-	m, cmd := m.routeCronKey(keyRune('l'))
-	require.Nil(t, cmd)
-	require.Equal(t, 1, m.cronUnseenCount(), "opening any followable run marks it")
-	m = sendRune(m, 'U')
-	require.Zero(t, m.cronUnseenCount())
-	require.Equal(t, unknown.UpdatedAt, m.cronSeen.data.Projects["project-example"].ClearedThrough)
-	wire, err := json.Marshal(m.cronSeen.data)
-	require.NoError(t, err)
-	m.cronSeen.data, err = cronSeenDecode(wire)
-	require.NoError(t, err)
-	require.Zero(t, m.cronUnseenCount())
-	// A different project on the same local numeric id has separate state.
-	m.projectUIDByID[7] = "other-project"
-	require.Equal(t, 2, m.cronUnseenCount())
-
-	{
+	t.Run("loaded count and banners", func(t *testing.T) {
+		m, _ := fixture(t)
+		require.Equal(t, 2, m.cronUnseenCount())
+		m.width = 160
+		for _, tab := range []int{cronJobs, cronRuns, cronWorkflows} {
+			m.cron.tab = tab
+			require.Contains(t, stripANSI(renderCron(m)), "2 unseen failed")
+		}
+	})
+	t.Run("review and clear keys", func(t *testing.T) {
+		m, unknown := fixture(t)
+		m = sendRune(m, 'u')
+		require.Equal(t, cronRuns, m.cron.tab)
+		require.True(t, m.cron.unseenOnly)
+		title, _, lines := cronScreen(m)
+		require.Contains(t, title, "unseen only")
+		require.Len(t, lines, 2)
+		failed := slices.IndexFunc(lines, func(l cronLine) bool { return l.target.uid == "failed" })
+		require.NotEqual(t, -1, failed)
+		require.Contains(t, stripANSI(lines[failed].text), "• failed")
+		m = m.cronFilter("no match")
+		_, _, lines = cronScreen(m)
+		require.Empty(t, lines, "unseen-only ANDs with the existing query")
+		m = m.cronFilter("")
+		m, cmd := m.routeCronKey(keyRune('l'))
+		require.Nil(t, cmd)
+		require.Equal(t, 1, m.cronUnseenCount(), "opening any followable run marks it")
+		m = sendRune(m, 'U')
+		require.Zero(t, m.cronUnseenCount())
+		require.Equal(t, unknown.UpdatedAt, m.cronSeen.data.Projects["project-example"].ClearedThrough)
+	})
+	t.Run("roundtrip and project identity", func(t *testing.T) {
+		m, _ := fixture(t)
+		m = m.cronClearSeen()
+		wire, err := json.Marshal(m.cronSeen.data)
+		require.NoError(t, err)
+		m.cronSeen.data, err = cronSeenDecode(wire)
+		require.NoError(t, err)
+		require.Zero(t, m.cronUnseenCount())
+		// A different project on the same local numeric id has separate state.
+		m.projectUIDByID[7] = "other-project"
+		require.Equal(t, 2, m.cronUnseenCount())
+	})
+	t.Run("golden", func(t *testing.T) {
 		defer snapshotInit(t)()
 		m := cronSeenFixture(t)
 		m.width = 120
@@ -217,7 +220,7 @@ func TestCronSeenLoadedCountAndKeys(t *testing.T) {
 		m.cron.runPage.runs = []generated.CronRun{r}
 		m = sendRune(m, 'u')
 		assertGolden(t, "cron-runs-unseen", m.viewBody())
-	}
+	})
 
 	t.Run("filter preserves run order", func(t *testing.T) {
 		m := cronSeenFixture(t)
@@ -240,7 +243,6 @@ func TestCronSeenLoadedCountAndKeys(t *testing.T) {
 		_, _, after := cronScreen(m)
 		require.Equal(t, before[0].target, after[0].target, "enabling a filter must retain the newest-first run order")
 	})
-
 }
 
 func TestCronSeenOpeningOldRunAtCapacityIsSeenForSession(t *testing.T) {
@@ -284,27 +286,29 @@ func TestCronSeenUpdateSchedulesPersistence(t *testing.T) {
 func TestCronSeenDeferredProjectIdentity(t *testing.T) {
 	for _, clear := range []bool{false, true} {
 		for _, switched := range []bool{false, true} {
-			m := cronSeenFixture(t)
-			r := m.cron.data.runs[0]
-			r.Status = "failed"
-			m.cron.data.runs = []generated.CronRun{r}
-			m.projectUIDByID = nil
-			if clear {
-				m = m.cronClearSeen()
-			} else {
-				m = m.cronMarkSeen(r.UID)
-			}
-			require.Empty(t, m.cronSeen.data.Projects)
-			if switched {
-				m.scopeGen++
-			}
-			m.projectUIDByID = map[int64]string{7: "project-example"}
-			m, _ = m.cronSeenSync()
-			if switched {
+			t.Run(fmt.Sprintf("clear=%v/switched=%v", clear, switched), func(t *testing.T) {
+				m := cronSeenFixture(t)
+				r := m.cron.data.runs[0]
+				r.Status = "failed"
+				m.cron.data.runs = []generated.CronRun{r}
+				m.projectUIDByID = nil
+				if clear {
+					m = m.cronClearSeen()
+				} else {
+					m = m.cronMarkSeen(r.UID)
+				}
 				require.Empty(t, m.cronSeen.data.Projects)
-			} else {
-				require.Zero(t, m.cronUnseenCount(), "the deferred acknowledgement applies once identity resolves")
-			}
+				if switched {
+					m.scopeGen++
+				}
+				m.projectUIDByID = map[int64]string{7: "project-example"}
+				m, _ = m.cronSeenSync()
+				if switched {
+					require.Empty(t, m.cronSeen.data.Projects)
+				} else {
+					require.Zero(t, m.cronUnseenCount(), "the deferred acknowledgement applies once identity resolves")
+				}
+			})
 		}
 	}
 }

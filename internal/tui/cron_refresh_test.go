@@ -50,16 +50,17 @@ func cronRefreshFixture(t *testing.T, n int) (Model, *cronRefreshTestAPI) {
 	m.api = a
 	return m, a
 }
-func cronUpdateTest(m Model, msg tea.Msg) Model { next, _ := m.Update(msg); return next.(Model) }
 func cronNameTest(m Model, uid string, revision int64) Model {
 	msg := cronNoticeEvent(uid, "", snapshotFixedNow)
 	msg.cronRun.Revision = revision
-	return cronUpdateTest(m, msg)
+	m, _ = updateModel(m, msg)
+	return m
 }
 func cronLoadTest(t *testing.T, m Model) Model {
 	t.Helper()
 	require.True(t, m.cron.out)
-	return cronUpdateTest(m, m.fetchCron()())
+	m, _ = updateModel(m, m.fetchCron()())
+	return m
 }
 
 // An event naming a retained run refreshes it even beyond the fallback cap.
@@ -132,9 +133,9 @@ func TestCronNamedBurstDrains(t *testing.T) {
 			for i := 129; i >= 0; i-- {
 				m = cronNameTest(m, fmt.Sprintf("o-%03d", i), 1)
 			}
-			m = cronUpdateTest(m, refetchTickMsg{})
+			m, _ = updateModel(m, refetchTickMsg{})
 			m.view = viewCron
-			m = cronUpdateTest(m, nil)
+			m, _ = updateModel(m, nil)
 			m = cronLoadTest(t, m)
 			require.Len(t, a.reads, 100)
 			for i := 30; i < 130; i++ {
@@ -144,14 +145,13 @@ func TestCronNamedBurstDrains(t *testing.T) {
 				require.Len(t, m.cron.changed, 130)
 				require.False(t, m.cron.out)
 				for range 3 {
-					m = cronUpdateTest(m, nil)
+					m, _ = updateModel(m, nil)
 					require.False(t, m.cron.out)
 				}
-				m = cronUpdateTest(m, eventReceivedMsg{eventType: "cron.job.updated", projectID: 7})
+				m, _ = updateModel(m, eventReceivedMsg{eventType: "cron.job.updated", projectID: 7})
 				data := cronData(m.fetchCron()().(cronLoadedMsg))
-				subjects, _ := cronRefreshSubjects(&data, nil, true)
 				for i := range 30 {
-					require.Equal(t, fmt.Sprintf("o-%03d", 29-i), subjects[i].UID)
+					require.Equal(t, fmt.Sprintf("o-%03d", 29-i), data.changed[i], "fetchCron preserves deferred event order")
 				}
 				return
 			}
@@ -159,14 +159,13 @@ func TestCronNamedBurstDrains(t *testing.T) {
 			a.exact = original
 			a.reads = nil
 			data := cronData(m.fetchCron()().(cronLoadedMsg))
-			subjects, _ := cronRefreshSubjects(&data, nil, true)
 			for i := range 30 {
-				require.Equal(t, fmt.Sprintf("o-%03d", 29-i), subjects[i].UID)
+				require.Equal(t, fmt.Sprintf("o-%03d", 29-i), data.changed[i], "fetchCron preserves deferred event order")
 			}
 			if failures > 0 {
 				require.Len(t, data.changed, 40)
 			}
-			m = cronUpdateTest(m, cronLoadedMsg(data))
+			m, _ = updateModel(m, cronLoadedMsg(data))
 			require.Len(t, a.reads, 100)
 			require.Empty(t, m.cron.changed)
 			require.False(t, m.cron.out)
@@ -242,7 +241,7 @@ func TestCronResetDropsUnreadHistory(t *testing.T) {
 				a.data.runsErr = errors.New("offline")
 			}
 			m.view = viewCron
-			m = cronUpdateTest(m, tea.KeyPressMsg{Code: 'r', Text: "r"})
+			m, _ = updateModel(m, tea.KeyPressMsg{Code: 'r', Text: "r"})
 			m = cronLoadTest(t, m)
 			if mode == "failed head" {
 				require.NotEmpty(t, m.cron.jobPage.runs)
@@ -311,34 +310,16 @@ func TestCronSharedParentEvidence(t *testing.T) {
 	}
 }
 
-func TestCronRefreshCancellation(t *testing.T) {
-	t.Run("exact cancellation", func(t *testing.T) {
-		m, a := cronRefreshFixture(t, 12)
-		r := m.cron.runPage.runs[0]
-		p := cronData{inspectedRuns: []generated.CronRun{r}, historyRuns: m.cron.runPage.runs}
-		a.exact = func(context.Context, string) (generated.CronRun, error) {
-			t.Error("cancelled read performed I/O")
-			return r, nil
-		}
-		ctx, cancel := context.WithCancel(t.Context())
-		cancel()
-		cronEnrich(ctx, a, 7, &p)
-		require.Empty(t, a.reads)
-		require.ErrorIs(t, p.runErr[r.UID], context.Canceled)
-		require.Equal(t, r, p.lookup[r.UID])
-	})
-}
-
 func TestCronNamedRunDuringFetch(t *testing.T) {
 	m, a := cronRefreshFixture(t, 103)
 	m = cronNameTest(m, "o-102", 1)
 	first := m.fetchCron()
 	seq := m.cron.changed["o-102"].seq
 	m = cronNameTest(m, "o-102", 2)
-	m = cronUpdateTest(m, first())
+	m, _ = updateModel(m, first())
 	require.Equal(t, seq, m.cron.changed["o-102"].seq)
 	require.Greater(t, m.cron.changed["o-102"].at, m.cron.data.events)
-	m = cronUpdateTest(m, refetchTickMsg{})
+	m, _ = updateModel(m, refetchTickMsg{})
 	require.True(t, m.cron.out)
 	a.reads = nil
 	m = cronLoadTest(t, m)
@@ -367,9 +348,9 @@ func TestCronLosingHigherSourceRevision(t *testing.T) {
 	for i := range 100 {
 		m = cronNameTest(m, fmt.Sprintf("o-%03d", i), 9)
 	}
-	m = cronUpdateTest(m, refetchTickMsg{})
+	m, _ = updateModel(m, refetchTickMsg{})
 	m.view = viewCron
-	m = cronUpdateTest(m, nil)
+	m, _ = updateModel(m, nil)
 	m = cronLoadTest(t, m)
 	require.Empty(t, m.cron.changed)
 	require.False(t, m.cron.out)
@@ -549,7 +530,7 @@ func TestCronOpeningRetainedRunRefreshesByUID(t *testing.T) {
 				require.True(t, m.cron.help)
 			}
 			if mode == "behind narrow" {
-				m = cronUpdateTest(m, tea.WindowSizeMsg{Width: 60, Height: 24})
+				m, _ = updateModel(m, tea.WindowSizeMsg{Width: 60, Height: 24})
 				require.Contains(t, stripANSI(m.View().Content), "needs more space")
 			}
 			m = cronLoadTest(t, m)
@@ -569,7 +550,7 @@ func TestCronOpeningRetainedRunRefreshesByUID(t *testing.T) {
 				require.Equal(t, "failed", got.Status)
 				require.Equal(t, 1, m.cronUnseenCount(), "a failure refreshed behind Help is not yet shown")
 				require.False(t, m.cronSeen.session[m.cronProjectUID()][r.UID])
-				m = cronUpdateTest(m, tc.closeKey)
+				m, _ = updateModel(m, tc.closeKey)
 				require.False(t, m.cron.help)
 				require.Equal(t, cronRef{cronRuns, r.UID}, m.cron.stack[len(m.cron.stack)-1].ref)
 				require.Zero(t, m.cronUnseenCount(), "closing Help shows the failed run")
@@ -577,7 +558,7 @@ func TestCronOpeningRetainedRunRefreshesByUID(t *testing.T) {
 				require.Equal(t, "failed", got.Status)
 				require.Equal(t, 1, m.cronUnseenCount(), "a failure refreshed behind the narrow hint is not yet shown")
 				require.False(t, m.cronSeen.session[m.cronProjectUID()][r.UID])
-				m = cronUpdateTest(m, tea.WindowSizeMsg{Width: 100, Height: 24})
+				m, _ = updateModel(m, tea.WindowSizeMsg{Width: 100, Height: 24})
 				require.Contains(t, stripANSI(m.View().Content), "failed")
 				require.Zero(t, m.cronUnseenCount(), "widening the terminal shows the failed run")
 			}

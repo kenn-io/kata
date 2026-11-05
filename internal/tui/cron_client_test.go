@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json/v2"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -80,6 +81,53 @@ func TestCronClientReadsStoredRecords(t *testing.T) {
 	require.Len(t, runs, 1)
 	require.Equal(t, "Report ready", deref(runs[0].Summary.Message))
 	require.Equal(t, project.ID, runs[0].ProjectID)
+	// Compare the paging fake with the real route using stored records, including
+	// a workflow-only run that must be excluded from job-filtered pages.
+	for i, uid := range []string{"01ARZ3NDEKTSV4RRFFQ69G5FAX", "01ARZ3NDEKTSV4RRFFQ69G5FAW", "01ARZ3NDEKTSV4RRFFQ69G5FAY"} {
+		jobUID, definitionUID := &j.Job.UID, &j.Job.DefinitionEventUID
+		if i == 1 {
+			jobUID, definitionUID = nil, nil
+		}
+		observed, err := client.ObserveCronRunWithResponse(ctx, &generated.ObserveCronRunRequestOptions{
+			PathParams: &generated.ObserveCronRunPath{ProjectID: project.ID, RunUID: uid},
+			Body: &generated.ObserveCronRunBody{
+				Actor: new("worker"), Status: "succeeded",
+				JobUID: jobUID, DefinitionEventUID: definitionUID,
+				WorkflowUID: &w.Workflow.UID, WorkflowDefinitionEventUID: &w.Workflow.DefinitionEventUID,
+				Summary: generated.Summary{Version: 1, Message: new("Report ready")},
+			},
+		})
+		require.NoError(t, err)
+		require.Equal(t, 200, observed.HTTPResponse.StatusCode, string(observed.Body))
+	}
+	stored, _, err := c.ListCronJobRuns(ctx, project.ID, "", "", 100)
+	require.NoError(t, err)
+	require.Len(t, stored, 4)
+	fake := &cronReadTestAPI{data: cronData{runs: slices.Clone(stored)}}
+	slices.Reverse(fake.data.runs) // Exercise sorting rather than reusing the server order.
+	for _, jobUID := range []string{"", j.Job.UID} {
+		before, count := "", 0
+		for {
+			page, next, err := c.ListCronJobRuns(ctx, project.ID, jobUID, before, 2)
+			require.NoError(t, err)
+			want, wantNext, err := fake.ListCronJobRuns(ctx, 7, jobUID, before, 2)
+			require.NoError(t, err)
+			require.Equal(t, want, page, "job=%q before=%q", jobUID, before)
+			require.Equal(t, wantNext, next)
+			count += len(page)
+			if next == "" {
+				break
+			}
+			require.NotEqual(t, before, next, "paging must advance")
+			before = next
+			require.LessOrEqual(t, count, len(stored))
+		}
+		wantCount := 4
+		if jobUID != "" {
+			wantCount = 3
+		}
+		require.Equal(t, wantCount, count)
+	}
 }
 
 func TestCronClientWriteGuardsEdits(t *testing.T) {

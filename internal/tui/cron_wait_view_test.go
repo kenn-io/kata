@@ -27,6 +27,10 @@ func cronBlockedFixture(t *testing.T) Model {
 }
 func cronScreenText(m Model) string {
 	_, _, lines := cronScreen(m)
+	return cronLinesText(lines)
+}
+
+func cronLinesText(lines []cronLine) string {
 	var s strings.Builder
 	for _, l := range lines {
 		s.WriteString(ansi.Strip(l.text))
@@ -146,7 +150,7 @@ func TestCronMovedRunIssueEventRefreshesCron(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m, waiter := fixture(t, tc.wait)
-			m = cronUpdateTest(m, moved("issue-example"))
+			m, _ = updateModel(m, moved("issue-example"))
 			require.True(t, m.cron.out, "the moved issue's event refreshes Cron")
 			require.False(t, m.pendingRefetch, "the selected project's issue list is not invalidated")
 			m = cronLoadTest(t, m)
@@ -168,7 +172,7 @@ func TestCronMovedRunIssueEventRefreshesCron(t *testing.T) {
 		r.UID, r.IssueUID = "retained-run", new("retained-issue")
 		m.cron.runPage.runs = append(m.cron.runPage.runs, r)
 		m = m.cronRemember([]generated.CronRun{r})
-		m = cronUpdateTest(m, moved("retained-issue"))
+		m, _ = updateModel(m, moved("retained-issue"))
 		require.True(t, m.cron.out)
 	})
 	t.Run("unrelated or terminal issue", func(t *testing.T) {
@@ -177,18 +181,18 @@ func TestCronMovedRunIssueEventRefreshesCron(t *testing.T) {
 		r.UID, r.Status, r.IssueUID = "ended-run", "succeeded", new("ended-issue")
 		m = m.cronRemember([]generated.CronRun{r})
 		for _, uid := range []string{"other-issue", "ended-issue"} {
-			m = cronUpdateTest(m, moved(uid))
+			m, _ = updateModel(m, moved(uid))
 			require.False(t, m.cron.out, uid)
 			require.Equal(t, m.cron.data.events, m.cron.events, uid)
 		}
 	})
 	t.Run("during an outstanding fetch", func(t *testing.T) {
 		m, waiter := fixture(t, cleared)
-		m = cronUpdateTest(m, moved("issue-example"))
+		m, _ = updateModel(m, moved("issue-example"))
 		first := m.fetchCron()
-		m = cronUpdateTest(m, moved("issue-example"))
+		m, _ = updateModel(m, moved("issue-example"))
 		require.True(t, m.cron.out)
-		m = cronUpdateTest(m, first())
+		m, _ = updateModel(m, first())
 		require.True(t, m.cron.out, "the later event is read by a follow-up refresh")
 		m = cronLoadTest(t, m)
 		require.Equal(t, 2, waiter.waitCalls["issue-example"])
