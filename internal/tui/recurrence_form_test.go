@@ -113,8 +113,6 @@ func (h *recurrenceHarness) save() {
 	h.send(h.key(tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}))
 }
 
-func (h *recurrenceHarness) page() string { return stripANSI(h.m.viewContent()) }
-
 func TestRecurrenceDetailScheduleFieldsAt80Columns(t *testing.T) {
 	defer snapshotInit(t)()
 	dm := snapDetailFixture()
