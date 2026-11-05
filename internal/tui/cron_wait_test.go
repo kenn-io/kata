@@ -50,6 +50,12 @@ func TestCronWaitUnavailableOrMalformedNeverBlocks(t *testing.T) {
 		require.Equal(t, "running", got.state)
 		require.Empty(t, got.reason)
 	}
+	// Native delivery is not blocked by its run issue's attention metadata.
+	j := cronFixture(t).cron.data.jobs[0]
+	nativeNotify(generated.TriggerResponse{Kind: "interval", IntervalSeconds: new(int64(3600))})(&j.Definition)
+	r.JobUID = new(j.UID)
+	p = cronData{jobs: []generated.CronJob{j}, waits: map[string]cronParent{"issue-example": {open: true, metadata: map[string]any{"work.attention": "stuck"}}}}
+	require.Equal(t, cronHealthState{"running", ""}, cronRunHealth(p, r))
 }
 
 func TestCronWaitClientReadsOpenAndDeletedMetadata(t *testing.T) {

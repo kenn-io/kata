@@ -404,17 +404,16 @@ func cronGapPage(m *Model, job string) *cronHistoryPage {
 
 func cronGapEvent(t *testing.T, m Model) Model {
 	t.Helper()
-	model, _ := m.handleEventReceived(eventReceivedMsg{eventType: "cron.run.observed", projectID: 7})
-	m = model.(Model)
-	// Deliver the debounce tick directly; no wall-clock wait is needed.
-	model, _ = m.handleRefetchTick()
-	m = model.(Model)
-	m, fetch := m.cronSync()
-	require.NotNil(t, fetch)
-	m = m.cronLoaded(fetch().(cronLoadedMsg))
-	m, head := m.cronSync()
-	if head != nil {
-		m = m.cronPageLoaded(head().(cronPageMsg))
+	m, _ = updateModel(m, eventReceivedMsg{eventType: "cron.run.observed", projectID: 7})
+	// Deliver the debounce tick through Update, including notice/seen hooks.
+	m, _ = updateModel(m, refetchTickMsg{})
+	require.True(t, m.cron.out)
+	var followup tea.Cmd
+	m, followup = updateModel(m, m.fetchCron()())
+	for _, msg := range runCmdTree(followup) {
+		if page, ok := msg.(cronPageMsg); ok {
+			m, _ = updateModel(m, page)
+		}
 	}
 	return m
 }

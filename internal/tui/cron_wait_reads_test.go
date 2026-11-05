@@ -145,7 +145,7 @@ func (a *cronWaitFetchAPI) readCronParent(ctx context.Context, id int64, uid str
 }
 
 // A fresh unavailable read cannot reuse a preceding successful wait snapshot.
-func TestCronWaitRefreshUnavailable(t *testing.T) {
+func TestCronWaitFailedReadDiscardsAttentionEvidence(t *testing.T) {
 	uid := "issue-example"
 	r := generated.CronRun{UID: "run-example", Status: "running", Actor: "operator", IssueUID: new(uid)}
 	metadata := map[string]any{"work.attention": "stuck", notification.MetadataKey("operator"): map[string]any{"from": "worker", "message": "review"}}
@@ -154,6 +154,8 @@ func TestCronWaitRefreshUnavailable(t *testing.T) {
 	a := waitReadAPI(nil)
 	a.wait = func(context.Context, string) (cronParent, error) { return cronParent{}, errors.New("offline") }
 	cronEnrich(t.Context(), a, 7, &p)
+	require.NotContains(t, p.waits, uid, "failed refresh must discard prior attention evidence")
+	require.EqualError(t, p.waitErr[uid], "offline")
 	got := cronRunHealth(p, r)
 	require.Equal(t, "running", got.state)
 	require.Equal(t, "attention unavailable", got.reason)

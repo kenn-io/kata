@@ -218,6 +218,7 @@ func TestCronIssueUnreadableStackedView(t *testing.T) {
 func TestCronIssueSplitPaneShowsReadState(t *testing.T) {
 	m := cronIssueFixture(t, 160)
 	m = sendKey(m, tea.KeyEnter)
+	require.True(t, m.cron.returnToCron)
 	require.Equal(t, splitlayout.Split, m.layout)
 	require.True(t, m.detail.loading)
 	require.Equal(t, "issue-example", m.detail.readRef)

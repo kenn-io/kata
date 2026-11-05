@@ -332,17 +332,17 @@ func TestCronEventRefreshCoalescesQuietJobFills(t *testing.T) {
 	m.api = a
 	defer func() { m.cron.reads.stop() }()
 	for range 3 {
-		// This is Update's event handler followed by its Cron scheduling hook.
-		// Leave the debounce command pending while completing any immediate fetch.
-		next, _ := m.handleEventReceived(eventReceivedMsg{eventType: "cron.run.observed", projectID: 7})
-		m = next.(Model)
-		nextModel, cmd := m.cronSync()
-		m = nextModel
-		if cmd != nil {
-			m = m.cronLoaded(cmd().(cronLoadedMsg))
+		m, _ = updateModel(m, eventReceivedMsg{eventType: "cron.run.observed", projectID: 7})
+		if m.cron.out {
+			m = cronLoadTest(t, m)
 		}
 	}
-	require.Equal(t, int64(2), a.fills.Load(), "one pending event debounce must issue exactly one quiet-job sweep")
+	require.Equal(t, int64(2), a.fills.Load(), "events sharing a pending debounce issue only the initial quiet-job sweep")
+	m, _ = updateModel(m, refetchTickMsg{})
+	m = cronLoadTest(t, m)
+	require.Equal(t, int64(4), a.fills.Load(), "the debounce settles later events with one trailing sweep")
+	m, _ = updateModel(m, refetchTickMsg{})
+	require.False(t, m.cron.out, "a settled burst must not schedule another refresh")
 }
 
 type cronFanoutAPI struct {

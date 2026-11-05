@@ -146,7 +146,6 @@ func TestCronHealthNativeDelivery(t *testing.T) {
 	p.lastRuns = map[string]generated.CronRun{j.UID: r}
 	p.waits = map[string]cronParent{"issue-example": {open: true, metadata: map[string]any{"work.attention": "stuck"}}}
 	require.Equal(t, "ok", cronHealth(p, j, now).state)
-	require.NotEqual(t, "blocked", cronRunHealth(p, r).state)
 	p.progress[j.UID] = cron.RecurringProgress{Version: 1, Anchor: now.Add(-2 * time.Hour), Through: now.Add(-2 * time.Hour)}
 	require.Equal(t, "missed", cronHealth(p, j, now).state)
 	delete(p.progress, j.UID)

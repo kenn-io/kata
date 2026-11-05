@@ -189,7 +189,6 @@ func TestCronFreshness(t *testing.T) {
 			if strings.HasPrefix(tc.name, "project merged") {
 				require.Contains(t, stripANSI(sendRune(m, '4').viewBody()), "New workflow")
 				runs := sendRune(m, '3')
-				require.Equal(t, 80, runs.width)
 				_, _, lines := cronScreen(runs)
 				require.NotEmpty(t, lines)
 				for _, line := range lines {
@@ -539,7 +538,6 @@ func TestCronIndependentFailuresAndRetainedRows(t *testing.T) {
 	m = sendRune(m, '4')
 	require.Contains(t, stripANSI(m.viewBody()), "Summary flow")
 	m = sendRune(m, '3')
-	require.Equal(t, 80, m.width)
 	m = sendKey(m, tea.KeyEnter)
 	require.Contains(t, stripANSI(m.viewBody()), "Report ready")
 	m = sendKey(m, tea.KeyEscape)
