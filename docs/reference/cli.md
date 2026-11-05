@@ -1,7 +1,7 @@
 ---
 title: CLI reference
 description: Reference Kata's command-line flags, issue relationships, output modes, and administration workflows.
-last_edited: 2026-11-02
+last_edited: 2026-11-04
 ---
 
 # CLI reference
@@ -876,14 +876,13 @@ The issue's target `short_id` is assigned by the daemon during the move, so it
 may differ from the source `short_id` if the target project already has a
 collision. `--dry` asks the daemon to validate the same move restrictions
 without changing issues, claims, comments, or the event cursor. The preview lists
-every issue that would move. It rejects
-recurrence-pinned issues, archived projects, federation bindings, active external
-root claims, and import mapping or issue-sync ownership conflicts just as a real
-move does. Any descendant that fails a rule rejects the whole move, and the
-error names that descendant. A descendant in an archived project also rejects
-the move with `issue_move_descendant_archived`; restore its project or remove
-its parent link first. A preview validates the current state; a later move
-checks it again.
+every issue that would move. It rejects recurrence-pinned issues, archived projects,
+incompatible federation bindings, active external root claims, and import mapping
+or issue-sync ownership conflicts just as a real move does. Any descendant that
+fails a rule rejects the whole move, and the error names that descendant. A
+descendant in an archived project also rejects the move with
+`issue_move_descendant_archived`; restore its project or remove its parent link
+first. A preview validates the current state; a later move checks it again.
 The target short ID is assigned only during the real move. `--comment` is ignored
 by a preview. Subtree moves require daemon API 0.35.0 or newer. With older
 daemons, `--single` preserves the legacy move request; `--single --dry` requires
@@ -892,10 +891,13 @@ request fields.
 A preview is a move request, so it needs the same write authority as a real
 move. Read-only tokens and `--insecure-readonly` clients cannot preview.
 
-Moves involving any federated project are unsupported on both hubs and spokes,
-including projects whose sync is disabled. The daemon returns
-`federated_move_unsupported` rather than treating a hub as a read-only spoke.
-See [Federation](../operations/federation.md#moving-issues-between-projects).
+Federated moves require both projects to use the same active hub. Spokes require
+both projects to be joined, use the same federation actor, and have push enabled
+for a local move. Relay-connected projects are unsupported. Different hubs,
+paused bindings, and mixed local/federated projects return
+`federated_move_unsupported`; create an issue in the target project and link it to
+the original. See [Federation](../operations/federation.md#moving-issues-between-projects)
+for peer requirements.
 
 Links survive a move: `parent`, `blocks`/`blocked-by`, and `related` edges
 are never removed or rewritten. See the link-flag reference above for
@@ -969,6 +971,7 @@ kata close <ref> --done --message <text> \
   [--pr <url>] \
   [--test <command>] \
   [--reviewed <path>] \
+  [--docbank <node-id|/path>] \
   [--evidence <type:value>] \
   [--idempotency-key <key>] \
   [--if-match <revision>] \
@@ -977,6 +980,15 @@ kata close <ref> --done --message <text> \
 
 Repeat `--commit`, `--pr`, `--test`, `--reviewed`, or `--evidence` to record
 more than one item, for example a fix that landed in two pull requests.
+
+`--evidence attachment:<id-or-unique-suffix>` cites a live issue attachment
+as done evidence and freezes its descriptor in history. Repeat `--docbank`
+with a Docbank node ID or absolute path to link current file versions and cite
+them in one close. Both forms require daemon API 0.39.0. `--docbank` is
+done-only and rejects `--dry`, `--if-match` and `--idempotency-key`; link first
+for those workflows. Partial link failures leave the issue open and list the
+IDs already linked. See [document close evidence](../guide/attachments.md#cite-a-document-when-closing-work)
+for historical versions, offline closes and stable retries.
 
 `--dry` validates the close without changing the issue and reports the close
 event it would record. Releases before 0.19.0 spelled this flag `--dry-run`.
@@ -1007,7 +1019,7 @@ Evidence is validated against the close reason:
 
 | Reason | Evidence rule |
 | --- | --- |
-| `done` | One or more of `commit`, `pr`, `test`, `reviewed-paths`, or `external` |
+| `done` | One or more of `commit`, `pr`, `test`, `reviewed-paths`, `external`, or `attachment` |
 | `wontfix` | No evidence; any evidence item is rejected |
 | `duplicate` | Exactly one `duplicate-of` item |
 | `superseded` | Exactly one `superseded-by` item |
@@ -1933,7 +1945,7 @@ On the Jobs tab, or on a job's detail, these keys change jobs. On the Kata tab, 
 
 The job form offers four kinds: a recurring child issue (a native job with a parent issue), an agent prompt, a workflow run, and a notification. Each kind offers the triggers that fit it: cron with its time zone, interval, once at an RFC 3339 instant, manual, an issue's scheduled date, and an issue's deadline with its lead. Issue fields take a short ID or a full UID. A prompt or workflow job on an issue-date trigger runs on the trigger's issue when its policy is the existing issue, so the form asks for it once. The form also edits `enabled`, `checkout_key`, `secret_refs`, and `options`; `options` is a raw JSON object, and unknown keys and exact numbers are kept across an edit. Job validation messages appear below the form. `Ctrl+o` or `Ctrl+s` saves. `Tab`, `Shift+Tab`, and `Enter` change fields. On an issue body, prompt, message, or options field, `Ctrl+e` opens `$VISUAL` or `$EDITOR`, with `vi` as the fallback. These fields keep their complete text, including tabs and line endings, until you edit them. `Esc` on a changed draft asks `y`/`n` before it discards the changes. Definitions with unsupported versions or unknown members require a newer kata for editing.
 
-The form mints the job UID when it opens, so retrying a failed create never makes a second job. An edit is guarded on the job's `definition_event_uid`. If the revision changed while you edited, the form keeps your draft. If the current definition supports editing, it shows the current name, revision, and complete definition; otherwise it shows an error. Use the arrow keys to scroll, or press `Ctrl+o` to save your whole draft against the current revision. Saving the draft replaces the current definition, including settings changed by another writer. `Esc` returns to the draft. Other save errors keep the form open with the error. A recurring child issue's parent cannot change after creation, and native jobs must be written on the project's owning hub.
+The form mints the job UID when it opens, so retrying a failed create never makes a second job. An edit is guarded on the job's `definition_event_uid`. If the revision changed while you edited, the form keeps your draft. If the current definition supports editing, it shows the current name, revision, and complete definition; otherwise it shows an error. Use the arrow keys to scroll, or press `Ctrl+o` to save your whole draft against the current revision. Saving the draft replaces the current definition, including settings changed by another writer. `Esc` returns to the draft. Other save errors keep the form open with the error. A recurring child issue's parent cannot change after creation. On a federated project, native jobs are written on the owning hub; a direct, push-enabled spoke forwards the save there (see [Cron](cron.md)).
 
 Runs loads the newest 100 observations for the current project. Job and workflow details show matching runs from that loaded project history. Run details distinguish the recorded definition revision from the current job or workflow, including definitions that have changed or disappeared.
 
@@ -1997,7 +2009,7 @@ read the jobs, it reopens without a prompt.
 
 Press `u` in the issue list or detail view to undo the latest eligible issue
 edit from this TUI session. Repeated presses walk back through up to 20 edits,
-including close, reopen, owner, priority, label, body, dates, and newly added
+including close, reopen, owner, priority, label, body, dates, delete, and newly added
 parent, blocker, or related links. Undo follows the recorded issue across
 navigation and projects; it does not target whichever row is currently
 selected. It makes a new attributed change, so the original audit event
@@ -2010,8 +2022,8 @@ Creating an issue or comment, making a timed assignment or owner edit involving
 an expiry, changing the status of a recurring issue, closing an issue with a
 live federation lease, or reopening an issue closed for a reason other than
 `done` clears the undo history. Switching daemons also clears it.
-Before undo writes, the TUI reads the affected issue or exact link and refuses
-an observed conflicting change. It skips that history entry without changing
+Except when restoring a deletion, undo reads the affected issue or exact link
+and refuses an observed conflicting change. It skips that history entry without changing
 the issue, so pressing `u` again reaches earlier edits. The revision check also
 rejects intervening status or owner changes, including changes away and back
 to the same value. These checks are not atomic: another client can edit the
@@ -2046,6 +2058,20 @@ since the form opened, nothing is written; the form stays open and shows the
 current dates so you can edit them again. The detail properties show both
 dates once either is set, and `u` writes the previous dates back under the
 same revision check.
+
+On main after 0.21.0, press `X` in the issue list to soft-delete the selected issue. In split
+layout, focus the list first. In Inbox and while browsing from Attention, use
+`kata delete` instead. The form shows the issue's title and the header
+`DELETE <project>#<id>`, the string `kata delete --confirm` takes. Type
+`DELETE <project>#<id>` and press `Enter`. `Enter` does nothing until the text
+matches. `Esc` cancels before the request starts. The selection then moves to
+the next row (the previous one after the last), and a notice names `u`.
+`u` restores the issue the way `kata restore` does; if the issue was restored
+elsewhere in the meantime, the TUI says so and changes nothing. Deletions share
+the 20-entry undo limit and the history-clearing boundaries above. Use
+`kata restore` after the undo history clears or the session ends. Issue-scoped
+credentials cannot delete or restore, so `X` is not offered to them and does
+nothing.
 
 In the issue list, `v` toggles between nested and flat views: nested groups
 children under parents, while flat shows matching issues as peers in list
@@ -2220,6 +2246,8 @@ See [Cron](cron.md) for bounded documents and retry semantics.
 kata cron job create --uid <job-uid> --file job.json --json
 kata cron job list [--include-deleted] --json
 kata cron job show <job-uid> --json
+kata cron job edit <job-uid>
+kata cron workflow edit <workflow-uid>
 kata cron job update <job-uid> --expected-event-uid <event-uid> --file replacement.json --json
 kata cron job delete <job-uid> --expected-event-uid <event-uid> --json
 kata cron job restore <job-uid> --expected-event-uid <event-uid> --json
@@ -2445,7 +2473,7 @@ Legacy numeric refs no longer resolve.
 
 ## Issue attachments
 
-On main after 0.20.0, attach files to an issue with Docbank, then list, download, or remove their references. See [Issue attachments](../guide/attachments.md).
+Attach files to an issue with Docbank, then list, download, or remove their references. See [Issue attachments](../guide/attachments.md).
 
 ```sh
 kata docbank attachments add <issue> <file>...

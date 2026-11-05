@@ -259,3 +259,82 @@ uses its normal JSONL cutover with backup and swap protections.
 Start the matching schema 39 binary after migration. Older binaries cannot open
 schema 39. Rollback requires the pre-upgrade backup and matching older binary;
 there is no down migration.
+
+## Schema 41: separate comment search documents
+
+Comment writes and issue title or body edits now index only the changed
+document. The 39→41 migration builds a GIN expression index on comment bodies,
+removes the aggregate comment triggers, and rebuilds `issues_search` from titles
+and bodies alone. It then analyzes comments and issue search rows. Fresh installs
+use the same schema.
+
+Stop serving daemons and imports, back up the database, and run
+`kata storage postgres migrate` with schema-owner credentials. Allow an offline
+window for reading and indexing all comment bodies and rebuilding the issue
+vectors. Existing runtime table grants remain sufficient.
+Validation-only runtime credentials cannot migrate. SQLite upgrades through its
+existing JSONL cutover, which rebuilds both search indexes.
+
+Search terms can match across the issue and separate comments. Scores combine
+each word's best document rank, so result order can change.
+Comment search cost follows the number of matching comments.
+On SQLite, a phrase must fit within one document; words split between two
+comments no longer form a phrase. Older binaries cannot open schema 41.
+Rollback requires the pre-upgrade backup and its matching binary.
+
+## Schema 42: issue creation-order indexes
+
+Creation-order issue pages can read indexes within one project or across all
+projects. The 41→42 migration adds `idx_issues_project_created` on
+`issues(project_id, created_at, id)` and `idx_issues_created` on
+`issues(created_at, id)`, both restricted to rows where `deleted_at IS NULL`.
+It then runs `ANALYZE issues`. Fresh PostgreSQL and SQLite databases include
+these indexes; SQLite indexes normalized creation instants.
+
+Stop serving daemons and imports, back up the database, and run
+`kata storage postgres migrate` with schema-owner credentials. Building the
+indexes reads `issues` and blocks issue writes; allow an offline window that
+fits the table's size. Existing table grants remain sufficient. Validation-only
+runtime credentials cannot migrate. Versions 25–41 follow the existing
+immutable migration chain first. SQLite uses its normal JSONL cutover.
+
+Start the matching schema 42 binary after migration. Older binaries cannot open
+schema 42. Rollback requires the pre-upgrade backup and matching older binary;
+there is no down migration.
+
+## Schema 43: resolved issue history index
+
+Issue history can find federated events whose issue UID is stored only in the
+payload without scanning unrelated history. The 42→43 migration adds
+`idx_events_resolved_issue_uid` on the resolved issue UID and event ID, then runs
+`ANALYZE events`. The identity uses a nonempty envelope `issue_uid` first, then
+payload `issue_uid` or `uid` for `issue.*` events. Fresh PostgreSQL and SQLite
+databases include the same index. Event contents and table columns stay intact.
+
+Stop serving daemons and imports, back up the database, and run
+`kata storage postgres migrate` with schema-owner credentials. Building the
+index reads `events` and blocks event writes; allow an offline window that fits
+the event log's size. Existing table grants remain sufficient. Validation-only
+runtime credentials cannot migrate. Versions 25–42 follow the existing immutable
+migration chain first. SQLite uses its normal JSONL cutover.
+
+Start the matching schema 43 binary after migration. Older binaries cannot open
+schema 43. Rollback requires the pre-upgrade backup and matching older binary;
+there is no down migration.
+
+## Schema 44: reset reference lookup index
+
+The 43→44 migration adds the partial `idx_events_reset_from` index on `events`
+for `sync.reset_required` rows, keyed by the payload's `from_project_uid` and
+`from_short_id`. It speeds up lookups of receiver-local former issue references.
+Fresh PostgreSQL and SQLite databases include the index.
+
+Stop serving daemons and imports, back up the database, and run
+`kata storage postgres migrate` with schema-owner credentials. Building the
+index reads `events` and blocks event writes; allow an offline window that fits
+the table's size. Existing table grants remain sufficient. Validation-only
+runtime credentials cannot migrate. SQLite uses its normal JSONL cutover.
+
+Start the matching schema 44 binary after migration. Older binaries cannot open
+schema 44. Rollback requires the pre-upgrade backup and matching older binary;
+there is no down migration.

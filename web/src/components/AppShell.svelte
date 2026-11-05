@@ -219,8 +219,9 @@
     daemonSwitching || stale || reconnecting || loading || daemonError || credentialExpired
       ? '—'
       : snapshot.capabilities.account ||
-          actorlessConnectionLabels[snapshot.capabilities.auth_kind ?? ''] ||
-          'No account',
+          (snapshot.capabilities.auth_kind === undefined
+            ? 'Not reported by hub'
+            : actorlessConnectionLabels[snapshot.capabilities.auth_kind] || 'No account'),
   )
 
   let captureOpen = $state(false)

@@ -4,6 +4,7 @@
 import type { EventEnvelope } from './eventEnvelope.ts'
 
 export interface PollEventsBody {
+  effective_close_event_uid?: string
   events: EventEnvelope[]
   next_after_id: number
   reset_after_id?: number

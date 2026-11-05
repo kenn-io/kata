@@ -179,6 +179,9 @@ type PollProjectEventsQuery struct {
 	Issue   *string `json:"issue,omitempty"`
 	AfterID *int64  `json:"after_id,omitempty"`
 	Limit   *int64  `json:"limit,omitempty"`
+
+	// IncludeEffectiveCloseEventUID Include the effective native close event UID in issue history when available.
+	IncludeEffectiveCloseEventUID *bool `json:"include_effective_close_event_uid,omitempty"`
 }
 
 type GetProjectFederationQuery struct {
@@ -192,7 +195,10 @@ func (g GetProjectFederationQuery) Validate() error {
 
 type PollFederationProjectEventsQuery struct {
 	AfterID *int64 `json:"after_id,omitempty"`
-	Limit   *int64 `json:"limit,omitempty"`
+
+	// IssueUID Read retained history only for an issue currently owned by this project, independently of the project cursor.
+	IssueUID *string `json:"issue_uid,omitempty"`
+	Limit    *int64  `json:"limit,omitempty"`
 }
 
 type OfferRelayDeliveriesQuery struct {

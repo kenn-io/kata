@@ -5,6 +5,7 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -1161,6 +1162,38 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	}
 	require.Len(t, commentMatches, 1)
 	assert.Equal(t, []string{"comments"}, commentMatches[0].MatchedIn)
+	_, _, err = store.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: primary.Issue.ID, Author: "discovery-author", Body: "safari timeout",
+	})
+	if err != nil {
+		return fmt.Errorf("create second searchable comment: %w", err)
+	}
+	splitMatches, err := store.SearchFTS(ctx, db.SearchFTSParams{
+		ProjectID: primary.Project.ID, Query: "login watermelon safari", Limit: 20,
+	})
+	if err != nil {
+		return fmt.Errorf("search across comment documents: %w", err)
+	}
+	require.Len(t, splitMatches, 1)
+	assert.Equal(t, primary.Issue.ID, splitMatches[0].Issue.ID)
+	assert.Equal(t, []string{"title", "comments"}, splitMatches[0].MatchedIn)
+	var distinctTerms []string
+	for n := range 500 {
+		distinctTerms = append(distinctTerms, fmt.Sprintf("searchterm%d", n))
+	}
+	distinctQuery := strings.Join(distinctTerms, " ")
+	distinctIssue, err := createFixtureIssue(ctx, store, primary.Project.ID, distinctQuery, "discovery-author", nil)
+	if err != nil {
+		return err
+	}
+	t.Run("long distinct terms", func(t *testing.T) {
+		hits, err := store.SearchFTS(ctx, db.SearchFTSParams{ProjectID: primary.Project.ID, Query: distinctQuery})
+		require.NoError(t, err)
+		require.Equal(t, []int64{distinctIssue.ID}, searchCandidateIDs(hits))
+		hits, err = store.SearchFTS(ctx, db.SearchFTSParams{ProjectID: primary.Project.ID, Query: distinctQuery + " absenttoken"})
+		require.NoError(t, err)
+		require.Empty(t, hits)
+	})
 	anyMatches, err := store.SearchFTSAny(ctx, db.SearchFTSParams{
 		ProjectID: primary.Project.ID, Query: "login absenttoken", Limit: 20,
 	})
@@ -1169,6 +1202,39 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	}
 	assert.Contains(t, searchCandidateIDs(anyMatches), primary.Issue.ID)
 	assert.Contains(t, searchCandidateIDs(anyMatches), blocked.ID)
+
+	noiseProject, err := store.CreateProject(ctx, "comment-noise-project")
+	if err != nil {
+		return fmt.Errorf("create comment noise project: %w", err)
+	}
+	original, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: noiseProject.ID, Title: "login", Body: "crash", Author: "tester",
+	})
+	if err != nil {
+		return fmt.Errorf("create original issue: %w", err)
+	}
+	issue, _, err := store.CreateIssue(ctx, db.CreateIssueParams{
+		ProjectID: noiseProject.ID, Title: "unrelated task", Author: "tester",
+	})
+	if err != nil {
+		return fmt.Errorf("create comment noise issue: %w", err)
+	}
+	_, _, err = store.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: issue.ID, Body: "login crash", Author: "tester",
+	})
+	if err != nil {
+		return fmt.Errorf("create matching noise comment: %w", err)
+	}
+	noiseMatches, err := store.SearchFTSAny(ctx, db.SearchFTSParams{
+		ProjectID: noiseProject.ID, Query: "login crash", Limit: 20,
+	})
+	if err != nil {
+		return fmt.Errorf("search amid comment noise: %w", err)
+	}
+	require.Len(t, noiseMatches, 1)
+	assert.Equal(t, original.ID, noiseMatches[0].Issue.ID)
+	assert.Equal(t, []string{"title", "body"}, noiseMatches[0].MatchedIn)
+
 	sparse, err := createFixtureIssue(ctx, store, primary.Project.ID, "ranktoken once", "discovery-author", nil)
 	if err != nil {
 		return err
@@ -1350,6 +1416,48 @@ func checkReadyQueuesAndDiscovery(t *testing.T, store db.Storage) error {
 	for _, content := range append(firstPage, secondPage...) {
 		assert.NotEqual(t, deleted.ID, content.ID)
 		assert.NotEmpty(t, content.ProjectUID)
+	}
+	return nil
+}
+
+func checkSearchTokenizerWords(t *testing.T, store db.Storage, backend Backend) error {
+	ctx := t.Context()
+	project, err := store.CreateProject(ctx, "example-project")
+	require.NoError(t, err)
+	tagged, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "login 🧪", Author: "tester"})
+	require.NoError(t, err)
+	plain, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: project.ID, Title: "login", Author: "tester"})
+	require.NoError(t, err)
+	var emojiIDs []int64
+	mixedIDs := []int64{tagged.ID, plain.ID}
+	if backend.SearchIndexesEmoji {
+		emojiIDs = []int64{tagged.ID}
+		mixedIDs = emojiIDs
+	}
+	for name, search := range map[string]func(context.Context, db.SearchFTSParams) ([]db.SearchCandidate, error){
+		"all": store.SearchFTS, "any": store.SearchFTSAny,
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, tc := range []struct {
+				query    string
+				all, any []int64
+			}{
+				{"🧪", emojiIDs, emojiIDs},
+				{"!!!", nil, nil},
+				{"login !!!", []int64{tagged.ID, plain.ID}, []int64{tagged.ID, plain.ID}},
+				{"login 🧪 !!!", mixedIDs, []int64{tagged.ID, plain.ID}},
+			} {
+				t.Run(tc.query, func(t *testing.T) {
+					want := tc.all
+					if name == "any" {
+						want = tc.any
+					}
+					hits, err := search(ctx, db.SearchFTSParams{ProjectID: project.ID, Query: tc.query})
+					require.NoError(t, err)
+					assert.ElementsMatch(t, want, searchCandidateIDs(hits))
+				})
+			}
+		})
 	}
 	return nil
 }

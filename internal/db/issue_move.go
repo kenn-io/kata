@@ -49,18 +49,25 @@ func (item IssueMoveTreeItem) Refusal(err error) error {
 	return &IssueMoveDescendantError{Descendant: *item.Descendant, Err: err}
 }
 
+// ErrIssueMoveTreeChanged reports membership changes since external validation.
+var ErrIssueMoveTreeChanged = errors.New("issue move tree changed during validation")
+
 // IssueMoveTreeInputs captures descendant revisions inside the move transaction.
 // Both backends serialize the entire discovery/validation/write operation. Parent
 // links point from child to parent and may cross project boundaries. A deleted
 // descendant ends its branch, so its own subtree stays with it.
 func IssueMoveTreeInputs(ctx context.Context, tx *sql.Tx, in MoveIssueProjectIn) ([]IssueMoveTreeItem, error) {
 	if in.Single {
+		inputs := []IssueMoveTreeItem{{In: in}}
+		if err := validateIssueMoveMembership(in.ExpectedIssueIDs, inputs); err != nil {
+			return nil, err
+		}
 		if in.AuthorizeProjects != nil {
 			if err := authorizeIssueMoveProjects(ctx, tx, in, []int64{in.FromProjectID}); err != nil {
 				return nil, err
 			}
 		}
-		return []IssueMoveTreeItem{{In: in}}, nil
+		return inputs, nil
 	}
 	rows, err := tx.QueryContext(ctx, `WITH RECURSIVE tree(id) AS (
  SELECT id FROM issues WHERE id=$1
@@ -103,6 +110,9 @@ func IssueMoveTreeInputs(ctx context.Context, tx *sql.Tx, in MoveIssueProjectIn)
 	if len(items) == 0 || items[0].In.IssueID != in.IssueID {
 		return nil, fmt.Errorf("issue %d not in project %d: %w", in.IssueID, in.FromProjectID, ErrNotFound)
 	}
+	if err := validateIssueMoveMembership(in.ExpectedIssueIDs, items); err != nil {
+		return nil, err
+	}
 	if in.AuthorizeProjects != nil {
 		ids := make([]int64, 0, len(items))
 		for _, item := range items {
@@ -120,6 +130,25 @@ func IssueMoveTreeInputs(ctx context.Context, tx *sql.Tx, in MoveIssueProjectIn)
 		return nil, err
 	}
 	return items, nil
+}
+
+func validateIssueMoveMembership(expected []int64, inputs []IssueMoveTreeItem) error {
+	if expected == nil {
+		return nil
+	}
+	want := make(map[int64]struct{}, len(expected))
+	for _, id := range expected {
+		want[id] = struct{}{}
+	}
+	if len(want) != len(inputs) {
+		return ErrIssueMoveTreeChanged
+	}
+	for _, item := range inputs {
+		if _, ok := want[item.In.IssueID]; !ok {
+			return ErrIssueMoveTreeChanged
+		}
+	}
+	return nil
 }
 
 // Validate the complete proposed mapping set before previews or writes. Checking
@@ -197,16 +226,25 @@ func MovedIssueUID(ctx context.Context, q interface {
 }, projectID int64, shortID string, postgres bool) (string, error) {
 	fromProject := "json_extract(e.payload, '$.from_project_uid')"
 	fromShort := "json_extract(e.payload, '$.from_short_id')"
+	resetFromProject := "json_extract(reset.payload, '$.from_project_uid')"
+	resetFromShort := "json_extract(reset.payload, '$.from_short_id')"
+	resetMoveEvent := "json_extract(reset.payload, '$.move_event_uid')"
 	if postgres {
 		fromProject = "e.payload::jsonb->>'from_project_uid'"
 		fromShort = "e.payload::jsonb->>'from_short_id'"
+		resetFromProject = "reset.payload::jsonb->>'from_project_uid'"
+		resetFromShort = "reset.payload::jsonb->>'from_short_id'"
+		resetMoveEvent = "reset.payload::jsonb->>'move_event_uid'"
 	}
 	// idx_events_moved_from finds a former short ID directly; a full UID uses
-	// the issue history index. Issue creation runs this reservation check, so
-	// neither form may scan issues or events. Expressions must match the index.
-	match := fromShort + "=$2"
+	// the issue history index. idx_events_reset_from finds receiver-local reset
+	// references. Issue creation runs this check, so neither lookup may scan event
+	// history. Expressions must match their respective indexes.
+	moveMatch := fromShort + "=$2"
+	resetMatch := resetFromShort + "=$2"
 	if len(shortID) == shortid.MaxLength {
-		match = "e.issue_uid=upper($2)"
+		moveMatch = "e.issue_uid=upper($2)"
+		resetMatch = "reset.issue_uid=upper($2)"
 	}
 	// Bind the project UID: SQLite cannot search an expression index with a
 	// value produced by a subquery.
@@ -219,14 +257,35 @@ func MovedIssueUID(ctx context.Context, q interface {
 		return "", err
 	}
 	var uid string
+	// Move history uses the signed source and reference. A receiver-local reset
+	// uses its own source and reference, which may differ after a competing pull.
+	// Check indexed move history first so ordinary references do not scan resets.
 	err = q.QueryRowContext(ctx, `SELECT e.issue_uid FROM events e
- WHERE e.type='issue.moved' AND `+fromProject+`=$3 AND `+match+`
+ WHERE e.type='issue.moved' AND `+fromProject+`=$3 AND `+moveMatch+`
  AND EXISTS (SELECT 1 FROM issues WHERE uid=e.issue_uid)
  AND NOT EXISTS (SELECT 1 FROM issues WHERE project_id=$1 AND short_id=$2)
  AND NOT EXISTS (SELECT 1 FROM purge_log WHERE project_id=$1 AND short_id=$2)
  ORDER BY e.id DESC LIMIT 1`, projectID, shortID, projectUID).Scan(&uid)
+	if err == nil {
+		return uid, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	err = q.QueryRowContext(ctx, `SELECT reset.issue_uid FROM events reset
+ JOIN events e ON `+resetMoveEvent+`=e.uid
+            AND e.type='issue.moved' AND e.issue_uid=reset.issue_uid
+ WHERE reset.project_id=$1 AND reset.type='sync.reset_required'
+ AND reset.issue_uid IS NOT NULL AND `+resetFromProject+`=$3 AND `+resetMatch+`
+ AND EXISTS (SELECT 1 FROM issues WHERE uid=reset.issue_uid)
+ AND NOT EXISTS (SELECT 1 FROM issues WHERE project_id=$1 AND short_id=$2)
+ AND NOT EXISTS (SELECT 1 FROM purge_log WHERE project_id=$1 AND short_id=$2)
+ ORDER BY CASE WHEN reset.id > e.id THEN reset.id ELSE e.id END DESC LIMIT 1`, projectID, shortID, projectUID).Scan(&uid)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
 	}
-	return uid, err
+	if err != nil {
+		return "", err
+	}
+	return uid, nil
 }

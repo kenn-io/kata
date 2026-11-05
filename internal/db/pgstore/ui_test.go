@@ -317,13 +317,26 @@ func TestReadUIReferences(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	references, err := store.ReadUIReferences(ctx, db.UIReferencesQuery{Query: "example", Limit: 20})
+	statsReads := 0
+	store.uiProjectStatsRead = func() { statsReads++ }
+	references, err := store.ReadUIReferences(ctx, db.UIReferencesQuery{Limit: 20})
 	require.NoError(t, err)
+	assert.Zero(t, statsReads)
 	require.Len(t, references.Projects, 2)
 	require.Len(t, references.Issues, 1)
 	assert.Equal(t, "example-project#"+issue.ShortID, references.Issues[0].QualifiedID)
 	assert.Equal(t, []string{"user-a"}, references.Owners)
 	assert.Equal(t, []string{"ready"}, references.Labels)
+	assert.Greater(t, references.Cursor, int64(0))
+
+	references, err = store.ReadUIReferences(ctx, db.UIReferencesQuery{Query: "example", Limit: 20})
+	require.NoError(t, err)
+	assert.Zero(t, statsReads)
+	assert.Equal(t, []db.Project{}, references.Projects)
+	assert.Equal(t, []string{}, references.Owners)
+	assert.Equal(t, []string{}, references.Labels)
+	require.Len(t, references.Issues, 1)
+	assert.Equal(t, issue.UID, references.Issues[0].UID)
 	assert.Greater(t, references.Cursor, int64(0))
 }
 

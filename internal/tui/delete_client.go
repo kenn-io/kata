@@ -1,0 +1,82 @@
+package tui
+
+import (
+	"context"
+	"errors"
+
+	"go.kenn.io/kata/pkg/client/generated"
+)
+
+// deleteAPI soft-deletes and restores issues through the
+// same daemon calls as `kata delete` and `kata restore`.
+type deleteAPI interface {
+	DeleteIssue(ctx context.Context, projectID int64, ref, qualifiedID, actor string) (*MutationResp, error)
+	RestoreIssue(ctx context.Context, projectID int64, ref, actor string) (*MutationResp, error)
+}
+
+// DeleteIssue soft-deletes the issue. The daemon only accepts the delete when
+// X-Kata-Confirm reads "DELETE <project>#<short_id>"; qualifiedID is that
+// "<project>#<short_id>".
+func (c *Client) DeleteIssue(ctx context.Context, projectID int64, ref, qualifiedID, actor string) (*MutationResp, error) {
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	confirm := "DELETE " + qualifiedID
+	wire, callErr := apiClient.DeleteIssueWithResponse(ctx, &generated.DeleteIssueRequestOptions{
+		PathParams: &generated.DeleteIssuePath{ProjectID: projectID, Ref: ref},
+		Body:       &generated.DeleteIssueBody{Actor: actor},
+		Header:     &generated.DeleteIssueHeaders{XKataConfirm: &confirm},
+	})
+	if wire == nil {
+		return nil, callErr
+	}
+	var resp MutationResp
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// RestoreIssue clears a soft delete. The daemon answers changed=false when the
+// issue is not deleted.
+func (c *Client) RestoreIssue(ctx context.Context, projectID int64, ref, actor string) (*MutationResp, error) {
+	apiClient, err := c.generatedClient()
+	if err != nil {
+		return nil, err
+	}
+	wire, callErr := apiClient.RestoreIssueWithResponse(ctx, &generated.RestoreIssueRequestOptions{
+		PathParams: &generated.RestoreIssuePath{ProjectID: projectID, Ref: ref},
+		Body:       &generated.RestoreIssueBody{Actor: actor},
+	})
+	if wire == nil {
+		return nil, callErr
+	}
+	var resp MutationResp
+	if err := decodeGeneratedResponse(wire.HTTPResponse, wire.Body, callErr, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (c *undoClient) DeleteIssue(ctx context.Context, projectID int64, ref, qualifiedID, actor string) (*MutationResp, error) {
+	writer, ok := c.KataAPI.(deleteAPI)
+	if !ok {
+		return nil, errors.New("connected client cannot delete issues")
+	}
+	resp, err := c.edit(ctx, projectID, ref, actor, "delete", func(uid string) (*MutationResp, error) {
+		return writer.DeleteIssue(ctx, projectID, uid, qualifiedID, actor)
+	})
+	if resp != nil && resp.undo != nil && resp.undo.entry != nil {
+		resp.undo.entry.before.QualifiedID = qualifiedID
+	}
+	return resp, err
+}
+
+func (c *undoClient) RestoreIssue(ctx context.Context, projectID int64, ref, actor string) (*MutationResp, error) {
+	restorer, ok := c.KataAPI.(deleteAPI)
+	if !ok {
+		return nil, errors.New("connected client cannot restore issues")
+	}
+	return restorer.RestoreIssue(ctx, projectID, ref, actor)
+}

@@ -26,6 +26,7 @@ import (
 	"go.kenn.io/kata/internal/config"
 	"go.kenn.io/kata/internal/processtree"
 	protocol "go.kenn.io/kata/pkg/connector"
+	"go.kenn.io/kit/consolewindow"
 )
 
 const (
@@ -387,6 +388,7 @@ func (p *processClient) call(ctx context.Context, method string, params any, res
 	stdout := &cappedBuffer{limit: maxResponseBytes}
 	command.Stdout = stdout
 	command.WaitDelay = connectorProcessCleanupGrace
+	consolewindow.Hide(command)
 	if commandCtx.Err() != nil {
 		return connectorContextError(ctx, context.Cause(commandCtx))
 	}

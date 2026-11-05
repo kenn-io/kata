@@ -1,7 +1,7 @@
 ---
 title: PostgreSQL operations
 description: Operate Kata on PostgreSQL with split migration and runtime roles, backups, upgrades, and health checks.
-last_edited: 2026-11-02
+last_edited: 2026-11-04
 ---
 
 # PostgreSQL operations
@@ -119,6 +119,29 @@ imports while it builds. See the [schema 38 migration requirements](../developme
 Schema 39 adds an index for comment handle collisions when showing one issue.
 Stop daemons and imports while the migration scans the comment table and builds
 the index. See the [schema 39 migration requirements](../development/postgres-migrations.md#schema-39-comment-handle-lookup-index)
+for the offline window, grants, and rollback.
+
+Schema 41 indexes each comment separately so comment writes and issue edits
+avoid rebuilding every comment on the issue. Stop daemons and imports for the
+index build. Existing runtime table grants remain sufficient. See the
+[schema 41 migration requirements](../development/postgres-migrations.md#schema-41-separate-comment-search-documents)
+for downtime and rollback. Scores combine each word's best document rank, so
+result order can change. SQLite phrases must fit within one document. Comment
+search cost follows the number of matching comments.
+
+Schema 42 indexes creation-order issue pages within one project and across all
+projects. Stop daemons and imports while the migration reads `issues` and builds
+the indexes. See the [schema 42 migration requirements](../development/postgres-migrations.md#schema-42-issue-creation-order-indexes)
+for the offline window, grants, and rollback.
+
+Schema 43 indexes federated issue history by resolved issue UID. Stop daemons
+and imports while the migration reads `events` and builds the index. See the
+[schema 43 migration requirements](../development/postgres-migrations.md#schema-43-resolved-issue-history-index)
+for the offline window, grants, and rollback.
+
+Schema 44 indexes receiver-local reset references for former issue IDs. Stop
+daemons and imports while the migration scans the event table and builds the
+index. See the [schema 44 migration requirements](../development/postgres-migrations.md#schema-44-reset-reference-lookup-index)
 for the offline window, grants, and rollback.
 
 After preparation, grant the runtime role DML access and set default privileges

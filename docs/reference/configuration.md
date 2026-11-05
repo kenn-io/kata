@@ -578,9 +578,11 @@ discovers the local browser gateway and initially selects `active_daemon`; chang
 side. Use `kata ui --daemon <name>` only when opening one named target directly
 is preferred. Identity-authenticated tabs can read remote gateway targets, but
 must open the target directly for writes because the gateway does not delegate
-browser identities. Request-actor tabs remain writable only when the target
-advertises the same request-actor policy; the gateway rechecks that target's
-authenticated capabilities immediately before every mutation.
+browser identities. Request-actor tabs can write when the target advertises
+the same request-actor policy or its `[[daemon]]` token belongs to an account.
+An account-bound target records each write as the token's account, the same as
+`kata --daemon <name>`. The gateway rechecks that target's authenticated
+capabilities immediately before every mutation.
 
 `[web].listen` selects the browser listener when the normal daemon transport
 cannot also serve HTTP. If omitted, Kata binds `127.0.0.1:0`, lets the operating
@@ -1451,7 +1453,7 @@ for access tokens, field ownership, completion writeback, and recovery limits.
 
 ## Docbank attachments
 
-On main after 0.19.0, `[docbank]` enables issue file uploads and reads through a
+Kata 0.21.0 and later: `[docbank]` enables issue file uploads and reads through a
 separately hosted Docbank. See [Issue attachments](../guide/attachments.md) for
 setup and the shared-vault trust boundary.
 

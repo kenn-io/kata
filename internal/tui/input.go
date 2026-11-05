@@ -36,6 +36,7 @@ const (
 	inputFilterForm          // list `f` — multi-axis filter modal: Status/Owner/Search
 	inputCloseForm           // list/detail `x` — authenticated close message + evidence
 	inputDatesForm           // list/detail `d` — Scheduled and Deadline dates
+	inputDeleteForm          // list `X` — typed <project>#<id> confirmation
 )
 
 type searchFocus int
@@ -75,7 +76,7 @@ func (k inputKind) isCommandBar() bool {
 // branch that keeps it out of commitFormInput.
 func (k inputKind) isCenteredForm() bool {
 	switch k {
-	case inputBodyEditForm, inputCommentForm, inputNewIssueForm, inputFilterForm, inputCloseForm, inputDatesForm:
+	case inputBodyEditForm, inputCommentForm, inputNewIssueForm, inputFilterForm, inputCloseForm, inputDatesForm, inputDeleteForm:
 		return true
 	}
 	return false
@@ -118,6 +119,7 @@ const (
 	fieldEvidenceValue
 	fieldScheduled
 	fieldDeadline
+	fieldConfirm
 )
 
 // radioField backs a fieldRadio inputField: a finite set of choices
@@ -343,6 +345,7 @@ type inputState struct {
 	target                 formTarget
 	formGen                int64
 	dates                  datesFormState
+	del                    deleteFormState
 	suggestHighlight       int
 	suggestScroll          int
 }
@@ -558,6 +561,16 @@ func (s inputState) handleFormControlKey(
 	msg tea.KeyPressMsg,
 ) (inputState, inputAction, bool) {
 	switch msg.String() {
+	case "enter":
+		// The Delete form has one field, so enter has no next field to go to:
+		// it commits, and the commit does nothing until the text matches.
+		if s.kind != inputDeleteForm {
+			return s, actionNone, false
+		}
+		if s.saving {
+			return s, actionNone, true
+		}
+		return s, actionCommit, true
 	case "ctrl+o", "ctrl+s":
 		if s.saving {
 			return s, actionNone, true
@@ -667,7 +680,7 @@ func (s inputState) resetFilterFields() inputState {
 // field at all so $EDITOR is never offered.
 func (s inputState) ctrlEAllowed() bool {
 	switch s.kind {
-	case inputFilterForm, inputDatesForm:
+	case inputFilterForm, inputDatesForm, inputDeleteForm:
 		return false
 	case inputNewIssueForm:
 		return s.activeFieldIs(fieldBody)

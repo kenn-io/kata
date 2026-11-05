@@ -52,3 +52,15 @@ func TestEvidence_UnmarshalUnknownTypeIsError(t *testing.T) {
 	err := json.Unmarshal([]byte(in), &e)
 	require.Error(t, err)
 }
+
+func TestEvidenceAttachmentWire(t *testing.T) {
+	const input = `{"type":"attachment","attachment_id":"01K7E222222222222222222222"}`
+	var e Evidence
+	require.NoError(t, json.Unmarshal([]byte(input), &e))
+	assert.Equal(t, EvidenceAttachment, e.Type)
+	assert.Equal(t, "01K7E222222222222222222222", e.AttachmentID)
+	raw, err := json.Marshal(e)
+	require.NoError(t, err)
+	assert.JSONEq(t, input, string(raw))
+	require.Error(t, json.Unmarshal([]byte(`{"type":"attachment","attachment_id":"01K7E222222222222222222222","attachment":{"name":"forged.pdf"}}`), &e), "callers cannot supply a frozen server descriptor")
+}

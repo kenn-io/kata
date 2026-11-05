@@ -1,6 +1,7 @@
 package sqlitestore_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -8,15 +9,33 @@ import (
 	"go.kenn.io/kata/internal/db"
 )
 
-func TestFTS_IssueInsertIsIndexed(t *testing.T) {
+func TestSearchFTS_NormalizedDuplicateScores(t *testing.T) {
 	t.Parallel()
 	d, ctx, p := setupTestProject(t)
-	createTesterIssueWithBody(ctx, t, d, p.ID, "fix login crash", "stack trace here")
-
-	assertRowCount(ctx, t, d, 1, "FTS should index issue.title on insert",
-		`SELECT count(*) FROM issues_fts WHERE issues_fts MATCH 'login'`)
-	assertRowCount(ctx, t, d, 1, "FTS should index issue.body on insert",
-		`SELECT count(*) FROM issues_fts WHERE issues_fts MATCH 'trace'`)
+	issue := createTesterIssueWithBody(ctx, t, d, p.ID, "login cafe pull request", "")
+	for name, search := range map[string]func(context.Context, db.SearchFTSParams) ([]db.SearchCandidate, error){
+		"all": d.SearchFTS, "any": d.SearchFTSAny,
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, tc := range []struct{ query, repeated string }{
+				{"login", "Login login"},
+				{"cafe", "café cafe"},
+				{"login", "login, login"},
+				{"pull-request", "pull-request pull.request"},
+			} {
+				t.Run(tc.repeated, func(t *testing.T) {
+					base, err := search(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: tc.query})
+					require.NoError(t, err)
+					require.Len(t, base, 1)
+					hits, err := search(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: tc.repeated})
+					require.NoError(t, err)
+					require.Len(t, hits, 1)
+					assert.Equal(t, issue.ID, hits[0].Issue.ID)
+					assert.Equal(t, base[0].Score, hits[0].Score, "normalized duplicates must contribute one score")
+				})
+			}
+		})
+	}
 }
 
 func TestFTS_IssueUpdateReindexes(t *testing.T) {
@@ -30,20 +49,12 @@ func TestFTS_IssueUpdateReindexes(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assertRowCount(ctx, t, d, 0, "old title tokens must be gone after edit",
-		`SELECT count(*) FROM issues_fts WHERE issues_fts MATCH 'old'`)
-	assertRowCount(ctx, t, d, 1, "new title tokens must be searchable after edit",
-		`SELECT count(*) FROM issues_fts WHERE issues_fts MATCH 'fresh'`)
-}
-
-func TestFTS_CommentInsertReindexes(t *testing.T) {
-	t.Parallel()
-	d, ctx, p := setupTestProject(t)
-	issue := createTesterIssueWithBody(ctx, t, d, p.ID, "boring", "body")
-	addTesterComment(ctx, t, d, issue.ID, "watermelon")
-
-	assertRowCount(ctx, t, d, 1, "comment body must be searchable after insert",
-		`SELECT count(*) FROM issues_fts WHERE issues_fts MATCH 'watermelon'`)
+	hits, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "old"})
+	require.NoError(t, err)
+	require.Empty(t, hits)
+	hits, err = d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "fresh"})
+	require.NoError(t, err)
+	require.Len(t, hits, 1)
 }
 
 func TestFTS_CommentUpdateReindexes(t *testing.T) {
@@ -60,10 +71,12 @@ func TestFTS_CommentUpdateReindexes(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assertRowCount(ctx, t, d, 0, "old comment tokens must be gone after edit",
-		`SELECT count(*) FROM issues_fts WHERE issues_fts MATCH 'leakedtoken'`)
-	assertRowCount(ctx, t, d, 1, "new comment tokens must be searchable after edit",
-		`SELECT count(*) FROM issues_fts WHERE issues_fts MATCH 'redactedtoken'`)
+	hits, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "leakedtoken"})
+	require.NoError(t, err)
+	require.Empty(t, hits)
+	hits, err = d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "redactedtoken"})
+	require.NoError(t, err)
+	require.Len(t, hits, 1)
 }
 
 func TestSearchFTS_RanksByBM25(t *testing.T) {
@@ -309,4 +322,40 @@ func TestSearchFTSAny_FindsNearDuplicates(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, gotOr, 1, "OR form must retrieve near-duplicates")
 	assert.Equal(t, "login crash on Safari", gotOr[0].Issue.Title)
+}
+
+func TestSearchFTS_SeparateCommentDocuments(t *testing.T) {
+	t.Parallel()
+	d, ctx, p := setupTestProject(t)
+	issue := createTesterIssueWithBody(ctx, t, d, p.ID, "login", "browser")
+	addTesterComment(ctx, t, d, issue.ID, "safari pull")
+	addTesterComment(ctx, t, d, issue.ID, "request timeout")
+	var wordScores, titleBodyScores float64
+	for _, word := range []string{"login", "browser", "safari", "timeout"} {
+		got, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: word})
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		wordScores += got[0].Score
+		if word == "login" || word == "browser" {
+			titleBodyScores += got[0].Score
+		}
+	}
+	for name, search := range map[string]func(context.Context, db.SearchFTSParams) ([]db.SearchCandidate, error){"all": d.SearchFTS, "any": d.SearchFTSAny} {
+		got, err := search(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "login browser safari timeout"})
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		want := wordScores
+		if name == "any" {
+			want = titleBodyScores
+		}
+		require.InDelta(t, want, got[0].Score, 1e-12, "each word contributes its best eligible document score")
+	}
+	got, err := d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "pull-request"})
+	require.NoError(t, err)
+	require.Empty(t, got, "phrases cannot span comments")
+	addTesterComment(ctx, t, d, issue.ID, "pull request")
+	got, err = d.SearchFTS(ctx, db.SearchFTSParams{ProjectID: p.ID, Query: "pull-request"})
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, []string{"comments"}, got[0].MatchedIn)
 }

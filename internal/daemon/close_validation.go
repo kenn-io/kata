@@ -36,6 +36,13 @@ func isHexSHA(s string) bool {
 // {"type":"duplicate-of","issue":0} would slip through.
 func validateEvidenceShape(index int, e api.Evidence) error {
 	switch e.Type {
+	case api.EvidenceAttachment:
+		if strings.TrimSpace(e.AttachmentID) == "" {
+			return fmt.Errorf("evidence[%d] attachment requires non-empty attachment_id", index)
+		}
+		if e.SHA != "" || e.URL != "" || e.Command != "" || len(e.Paths) != 0 || e.Account != "" || e.Rationale != "" || e.IssueRef != "" {
+			return fmt.Errorf("evidence[%d] attachment accepts only attachment_id", index)
+		}
 	case api.EvidenceCommit:
 		sha := strings.TrimSpace(e.SHA)
 		if sha == "" {
@@ -168,15 +175,15 @@ func ValidateCloseInput(reason, message string, evidence []api.Evidence) error {
 	switch reason {
 	case "done":
 		if err := onlyAllow(api.EvidenceCommit, api.EvidencePR,
-			api.EvidenceTest, api.EvidenceReviewedPaths, api.EvidenceExternal); err != nil {
+			api.EvidenceTest, api.EvidenceReviewedPaths, api.EvidenceExternal, api.EvidenceAttachment); err != nil {
 			return err
 		}
 		if !has(api.EvidenceCommit) && !has(api.EvidencePR) &&
 			!has(api.EvidenceTest) && !has(api.EvidenceReviewedPaths) &&
-			!has(api.EvidenceExternal) {
+			!has(api.EvidenceExternal) && !has(api.EvidenceAttachment) {
 			return fmt.Errorf("evidence required for reason=done. " +
 				"Accepted: commit:<sha>, pr:<url>, test:<cmd>, reviewed-paths:<path>, " +
-				"external:<account>. " +
+				"external:<account>, attachment:<id>. " +
 				"If the work is not actually complete, do not close — use " +
 				"`kata label add <ref> needs-review --comment \"<what remains>\"`")
 		}
