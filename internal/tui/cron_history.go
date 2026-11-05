@@ -24,6 +24,7 @@ type cronHistoryPage struct {
 
 type cronPageMsg struct {
 	conn, scope, gen  uint64
+	events            uint64 // m.cron.events when requested
 	job, cursor, next string
 	merge             bool
 	runs              []generated.CronRun
@@ -73,7 +74,7 @@ func (m Model) cronRequestPage(job string, reset bool) (Model, tea.Cmd) {
 		page.cursor = ""
 	}
 	page.out, page.reload = true, false
-	msg := cronPageMsg{conn: m.connGen, scope: m.scopeGen, gen: page.gen, job: job, cursor: page.cursor, merge: merge}
+	msg := cronPageMsg{conn: m.connGen, scope: m.scopeGen, gen: page.gen, events: m.cron.events, job: job, cursor: page.cursor, merge: merge}
 	reader, id := m.api, m.scope.projectID
 	m = m.cronKeepSelection(before)
 	return m, func() tea.Msg {
@@ -125,7 +126,7 @@ func (m Model) cronPageLoaded(msg cronPageMsg) Model {
 		}
 	}
 	page.ready = true
-	m = m.cronRemember(page.runs)
+	m = m.cronRemember(page.runs).cronNoticePage(msg)
 	return m.cronKeepSelection(previous)
 }
 

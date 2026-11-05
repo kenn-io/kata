@@ -252,6 +252,17 @@ func (m Model) cronLoaded(msg cronLoadedMsg) Model {
 	return m.cronKeepSelection(old)
 }
 
+// Cron counts its project's cron, project and parent events. A loaded running
+// run's issue may have moved, so its events count whichever project they carry.
+func (m Model) cronEventDemand(msg eventReceivedMsg) Model {
+	cronEvent := strings.HasPrefix(msg.eventType, "cron.") || msg.eventType == "project.merged" || msg.eventType == "project.removed" || msg.eventType == "project.restored"
+	if cronEvent && m.eventAffectsView(msg) || msg.projectID != 0 && m.cronParentEvent(msg) {
+		m.cron.events++
+		m = m.cronMarkChanged(msg)
+	}
+	return m
+}
+
 // Event payload revisions belong to source peers, not this store's CAS sequence.
 func (m Model) cronMarkChanged(msg eventReceivedMsg) Model {
 	if msg.eventType != "cron.run.observed" || msg.cronRun == nil || m.cron.data == nil {

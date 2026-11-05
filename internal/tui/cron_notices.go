@@ -113,6 +113,24 @@ func (m Model) cronNoticeResolve() Model {
 	m.cronNotices.announced = announced
 	return m
 }
+
+// A page requested after a notice's event, and before any later event, read the
+// store's current row, so it settles that run as a fresh refresh read would.
+func (m Model) cronNoticePage(msg cronPageMsg) Model {
+	if msg.events != m.cron.events {
+		return m
+	}
+	for _, notices := range []*map[string]cronRunEvent{&m.cronNotices.pending, &m.cronNotices.announced} {
+		*notices = maps.Clone(*notices)
+		for _, row := range msg.runs {
+			if r, ok := (*notices)[row.UID]; ok && r.seq <= msg.events {
+				r.Status, r.Revision, r.EndedAt, r.UpdatedAt = row.Status, row.Revision, row.EndedAt, row.UpdatedAt
+				(*notices)[row.UID] = r
+			}
+		}
+	}
+	return m
+}
 func (m Model) cronNoticeEvent(msg eventReceivedMsg) (Model, tea.Cmd) {
 	m = m.cronNoticeSync()
 	if msg.eventType != "cron.run.observed" || msg.cronRun == nil || m.scope.allProjects || m.scope.projectID == 0 || msg.projectID != m.scope.projectID {

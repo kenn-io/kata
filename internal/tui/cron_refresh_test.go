@@ -512,7 +512,7 @@ func TestCronOpeningRetainedRunRefreshesByUID(t *testing.T) {
 	cases := []struct {
 		mode     string
 		closeKey tea.KeyPressMsg
-	}{{mode: "failed"}, {mode: "running"}, {mode: "closed before load"}}
+	}{{mode: "failed"}, {mode: "running"}, {mode: "closed before load"}, {mode: "behind narrow"}}
 	for _, key := range []tea.KeyPressMsg{keyRune('?'), {Code: tea.KeyEscape}, keyRune('h')} {
 		cases = append(cases, struct {
 			mode     string
@@ -548,6 +548,10 @@ func TestCronOpeningRetainedRunRefreshesByUID(t *testing.T) {
 				m = sendRune(m, '?')
 				require.True(t, m.cron.help)
 			}
+			if mode == "behind narrow" {
+				m = cronUpdateTest(m, tea.WindowSizeMsg{Width: 60, Height: 24})
+				require.Contains(t, stripANSI(m.View().Content), "needs more space")
+			}
 			m = cronLoadTest(t, m)
 			got, _ := m.cron.data.run(r.UID)
 			switch mode {
@@ -569,6 +573,13 @@ func TestCronOpeningRetainedRunRefreshesByUID(t *testing.T) {
 				require.False(t, m.cron.help)
 				require.Equal(t, cronRef{cronRuns, r.UID}, m.cron.stack[len(m.cron.stack)-1].ref)
 				require.Zero(t, m.cronUnseenCount(), "closing Help shows the failed run")
+			case "behind narrow":
+				require.Equal(t, "failed", got.Status)
+				require.Equal(t, 1, m.cronUnseenCount(), "a failure refreshed behind the narrow hint is not yet shown")
+				require.False(t, m.cronSeen.session[m.cronProjectUID()][r.UID])
+				m = cronUpdateTest(m, tea.WindowSizeMsg{Width: 100, Height: 24})
+				require.Contains(t, stripANSI(m.View().Content), "failed")
+				require.Zero(t, m.cronUnseenCount(), "widening the terminal shows the failed run")
 			}
 		})
 	}

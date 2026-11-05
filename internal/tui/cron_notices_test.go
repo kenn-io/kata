@@ -571,6 +571,51 @@ func TestCronNoticeIgnoresStaleOlderPage(t *testing.T) {
 	}
 }
 
+// A page requested after a run's failure event is as current as a refresh that
+// read the run: when the store kept a success, the failure is neither announced
+// nor left suppressing its job. A page overtaken by a later event settles nothing.
+func TestCronNoticeFreshPageSettlesFailure(t *testing.T) {
+	T := snapshotFixedNow
+	for _, announced := range []bool{false, true} {
+		for _, overtaken := range []bool{false, true} {
+			t.Run(fmt.Sprintf("announced=%v/overtaken=%v", announced, overtaken), func(t *testing.T) {
+				m := cronNoticeFixture(t)
+				job := m.cron.data.jobs[0].UID
+				kept := generated.CronRun{UID: "r", JobUID: &job, Status: "succeeded", Revision: 5, CreatedAt: T.Add(-time.Hour), UpdatedAt: T.Add(time.Minute), EndedAt: new(T.Add(time.Minute))}
+				m.api = &cronPagingAPI{cronReadTestAPI: &cronReadTestAPI{data: *m.cron.data}, page: []generated.CronRun{kept}}
+				m.cron.runPage = cronHistoryPage{runs: m.cron.data.runs, next: "older-cursor", ready: true}
+				m = cronUpdateTest(m, cronNoticeEvent("r", job, T.Add(time.Minute)))
+				require.NotContains(t, m.cron.changed, "r", "an unloaded run has no change mark")
+				m = cronSettleTest(m) // the head refresh the event triggered does not carry r
+				if announced {
+					m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+					require.Contains(t, m.cronNotices.announced, "r")
+					m.toast = nil
+				}
+				m, cmd := m.cronRequestPage("", false)
+				require.NotNil(t, cmd)
+				page := cmd()
+				if overtaken {
+					m = cronUpdateTest(m, cronNoticeEvent("r", job, T.Add(2*time.Minute)))
+				}
+				m = cronUpdateTest(m, page)
+				got, loaded := m.cron.data.run("r")
+				require.True(t, loaded)
+				require.Equal(t, "succeeded", got.Status)
+				if !announced {
+					m, _ = m.cronNoticeFlush(cronNoticeTickFor(m))
+					require.Equal(t, overtaken, m.toast != nil, "only a page read after the run's latest event settles it")
+					require.Equal(t, overtaken, m.cronNotices.announced["r"].UID != "")
+					return
+				}
+				m = cronSettleTest(m) // a later head without r keeps the page's settlement
+				m, cmd = m.cronNoticeEvent(cronNoticeEvent("next", job, T.Add(3*time.Minute)))
+				require.Equal(t, !overtaken, cmd != nil, "a fresh page's success releases the job")
+			})
+		}
+	}
+}
+
 // A read that settled an announced failure outlives the history that showed
 // it: once a later head no longer carries the run, a corrected failure still
 // releases its job and an uncorrected one still suppresses it.

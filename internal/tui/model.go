@@ -933,7 +933,7 @@ func (m Model) routeTopLevel(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		// Cache viewport dimensions so PgDn/PgUp use the same page
 		// sizes the renderer draws.
 		m.detail = m.applyDetailViewportCache(m.detail)
-		m = m.applyListViewportCache()
+		m = m.applyListViewportCache().cronMarkOpenSeen()
 		return m, flipCmd, true
 	case tea.KeyPressMsg:
 		if m.inboxPending && !m.inboxEntryKeptKey(msg) {
@@ -2804,11 +2804,8 @@ func cacheKeysEqual(a, b cacheKey) bool {
 // it doesn't replace or short-circuit the list/detail refetch above.
 func (m Model) handleEventReceived(msg eventReceivedMsg) (tea.Model, tea.Cmd) {
 	cmds := []tea.Cmd{m.waitForSSE()}
+	m = m.cronEventDemand(msg)
 	if m.eventAffectsView(msg) {
-		if strings.HasPrefix(msg.eventType, "cron.") || msg.eventType == "project.merged" || msg.eventType == "project.removed" || msg.eventType == "project.restored" || m.cronParentEvent(msg) {
-			m.cron.events++
-			m = m.cronMarkChanged(msg)
-		}
 		m.cache.markStale()
 		if !m.pendingRefetch {
 			m.pendingRefetch, m.cron.fence = true, m.cron.events

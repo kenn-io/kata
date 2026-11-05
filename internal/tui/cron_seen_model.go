@@ -189,11 +189,16 @@ func (m Model) cronOpenRun(uid string) Model {
 }
 
 // A refreshed failure in the open run is seen once shown; a closed one, or one
-// behind Help, is not. Closing Help shows it.
+// behind Help or the narrow hint, is not. Closing Help or widening shows it.
 func (m Model) cronMarkOpenSeen() Model {
 	n := len(m.cron.stack)
-	if n == 0 || m.cron.help || m.cron.stack[n-1].ref.kind != cronRuns || m.cronSeen.session[m.cronProjectUID()][m.cron.stack[n-1].ref.uid] {
+	if n == 0 || !m.cronScreenShown() || m.cron.stack[n-1].ref.kind != cronRuns || m.cronSeen.session[m.cronProjectUID()][m.cron.stack[n-1].ref.uid] {
 		return m
 	}
 	return m.cronMarkSeen(m.cron.stack[n-1].ref.uid)
+}
+
+// The Cron screen is visible in its view unless Help or the narrow hint covers it.
+func (m Model) cronScreenShown() bool {
+	return m.view == viewCron && !m.cron.help && (m.width == 0 || m.width >= 80)
 }
