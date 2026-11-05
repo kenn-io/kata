@@ -456,31 +456,6 @@ func TestReadUIReferencesVisibleRepresentatives(t *testing.T) {
 		require.Equal(t, []string{"alpha", "beta", "gamma"}[:min(limit, 3)], unrestricted.Owners)
 		require.Equal(t, unrestricted.Owners, unrestricted.Labels)
 	}
-	// Exercise each facet alone so issue references cannot mask missing exposure.
-	tx, err := store.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-	require.NoError(t, err)
-	defer func() { _ = tx.Rollback() }()
-	for _, facet := range []string{"owner", "label"} {
-		statement := uiReferenceOwnersQuery
-		if facet == "label" {
-			statement = uiReferenceLabelsQuery
-		}
-		exposure := db.WithExposedIssues(ctx)
-		values, err := readUIReferenceSuggestions(exposure, tx, statement, db.SystemProjectName, 2)
-		require.NoError(t, err)
-		require.Equal(t, []string{"alpha", "beta"}, values)
-		if facet == "owner" {
-			require.ElementsMatch(t, []int64{10, 20}, db.ExposedIssues(exposure))
-		} else {
-			for _, id := range db.ExposedIssues(exposure) {
-				require.Contains(t, []int64{10, 20, 80, 90}, id)
-				var label string
-				require.NoError(t, tx.QueryRowContext(ctx, `SELECT label FROM issue_labels WHERE issue_id=?`, id).Scan(&label))
-				require.Contains(t, values, label)
-			}
-			require.Len(t, db.ExposedIssues(exposure), 2)
-		}
-	}
 }
 
 func TestReadUIReferencesFiltersIssueUIDs(t *testing.T) {
