@@ -176,7 +176,7 @@ string; on a keyed retry use `original_event.payload`. Both contain the same
 | `TELEMETRY_ENABLED` | See [Telemetry reporting rules](#reporting-rules) for opt-out values and process preferences. |
 | `DO_NOT_TRACK` | See [Telemetry reporting rules](#reporting-rules) for opt-out values and process preferences. |
 | `CI` | See [Telemetry reporting rules](#reporting-rules) for opt-out values and process preferences. |
-| `KATA_HTTP_TIMEOUT` | Timeout for configured-remote connectivity probes and non-streaming CLI requests, such as `30s` or `2m`. Defaults to `5s`; raise it for bulk imports. It also overrides the federation sync client's separate 60-second request budget. Larger values increase how long an unreachable remote can delay a command or sync attempt. |
+| `KATA_HTTP_TIMEOUT` | Timeout for configured-remote connectivity probes and non-streaming CLI requests, such as `30s` or `2m`. Defaults to `5s`; raise it for bulk imports. It also overrides the federation sync client's separate 60-second request budget, including in autostarted local-profile daemons. Larger values increase how long an unreachable remote can delay a command or sync attempt. |
 | `KATA_AUTOSTART_IDLE_TIMEOUT` | Overrides `autostart_idle_timeout`. Empty or `0` disables idle shutdown; positive values must be at least `10s`. |
 | `KATA_LINEAR_TOKEN` | Default daemon-owned Linear credential; `[linear_sync].token_env` selects another variable. |
 | `KATA_TWENTY_TOKEN` | Default daemon-side Twenty API key; `[twenty_sync].token_env` can select another environment variable. |

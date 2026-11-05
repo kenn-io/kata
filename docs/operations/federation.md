@@ -1936,8 +1936,9 @@ events that can change endpoint resolution still run the full reconciliation.
 
 Federation push and poll requests have a 60-second default budget, separate
 from the shorter interactive CLI default. `KATA_HTTP_TIMEOUT` overrides that
-budget when a large, healthy hub needs more time. A timed-out request leaves
-the cursor unchanged and retries through the normal sync loop.
+budget when a large, healthy hub needs more time. Set it in the environment
+that starts the daemon; local-profile autostart preserves the value. A timed-out
+request leaves the cursor unchanged and retries through the normal sync loop.
 
 If a response is lost after the hub commits, retrying the same batch is safe.
 Permanent validation failures or hash conflicts record a quarantine on the
