@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/metadata"
@@ -460,6 +461,98 @@ func checkCronTallyEqualSubsetReplay(t *testing.T, store db.Storage) error {
 			require.NoError(t, err)
 			require.Equal(t, 1, retry.Duplicates)
 			require.Empty(t, retry.Events)
+		})
+	}
+	return nil
+}
+
+// Old, valid backup dates remain prunable; already-stored out-of-domain dates
+// must fail both preview and execution without poisoning counts or backups.
+func checkCronTallyTimestampHistory(t *testing.T, store db.Storage, backend Backend) error {
+	ctx := t.Context()
+	for _, at := range []time.Time{
+		time.Date(1, 1, 1, 0, 0, 1, 0, time.UTC),
+		time.Date(0, 12, 31, 23, 59, 59, 0, time.UTC),
+	} {
+		t.Run(at.Format(time.RFC3339), func(t *testing.T) {
+			f := newCronTallyFixture(ctx, t, store)
+			run := f.add(ctx, t, "job", "succeeded", at, "")
+			f.add(ctx, t, "job", "running", f.before.Add(-time.Minute), "")
+			records, err := CollectImportRecords(ctx, store, db.ExportFilter{ProjectID: &f.project.ID, IncludeDeleted: true})
+			require.NoError(t, err)
+			// Match the exported observations to the fixture's backdated rows.
+			runs := map[string]db.CronRun{}
+			for _, record := range records {
+				if row, ok := record.(*db.CronRunExport); ok {
+					runs[row.UID] = db.CronRun(*row)
+				}
+			}
+			for _, record := range records {
+				if event, ok := record.(*db.EventExport); ok && event.Type == "cron.run.observed" {
+					var observation db.CronRunObservation
+					require.NoError(t, json.Unmarshal(event.Payload, &observation))
+					event.Payload, err = json.Marshal(db.NewCronRunObservation(runs[observation.UID], f.project.UID))
+					require.NoError(t, err)
+				}
+			}
+			replayed := backend.Open(t)
+			t.Cleanup(func() { require.NoError(t, replayed.Close()) })
+			err = replayed.ImportReplay(ctx, records, db.ImportOptions{NewInstance: true, RecomputeEventContentHash: true})
+			target := replayed
+			if at.Year() < 1 {
+				assert.Error(t, err, "new imports reject out-of-domain run history")
+				if err != nil {
+					// The existing store models rows accepted before validation.
+					target = store
+				}
+			} else {
+				require.NoError(t, err)
+			}
+			project, err := target.ProjectByUID(ctx, f.project.UID)
+			require.NoError(t, err)
+			events, err := target.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID})
+			require.NoError(t, err)
+			reset, err := target.PurgeResetCheck(ctx, 0, project.ID)
+			require.NoError(t, err)
+			for _, preview := range []bool{true, false} {
+				result, err := target.PruneCronRuns(ctx, db.PruneCronRuns{ProjectID: project.ID, Actor: "operator", Before: f.before, Keep: 1, DryRun: preview})
+				if at.Year() < 1 {
+					assert.ErrorContains(t, err, "cron tally:")
+				} else {
+					require.NoError(t, err)
+					require.Equal(t, 1, result.Pruned)
+				}
+			}
+			counts, err := target.CronRunCounts(ctx, db.CronRunCountsQuery{ProjectID: project.ID})
+			require.NoError(t, err)
+			require.Len(t, counts.Groups, 1)
+			if at.Year() < 1 {
+				after, err := target.ProjectByID(ctx, project.ID)
+				require.NoError(t, err)
+				require.Equal(t, project, after)
+				afterEvents, err := target.EventsAfter(ctx, db.EventsAfterParams{ProjectID: project.ID})
+				require.NoError(t, err)
+				require.Equal(t, events, afterEvents)
+				afterReset, err := target.PurgeResetCheck(ctx, 0, project.ID)
+				require.NoError(t, err)
+				require.Equal(t, reset, afterReset)
+				_, err = target.CronRun(ctx, project.ID, run.UID)
+				require.NoError(t, err)
+				require.Equal(t, int64(0), counts.Groups[0].PrunedSinceTracking.Succeeded)
+				return
+			}
+			require.Equal(t, int64(1), counts.Groups[0].PrunedSinceTracking.Succeeded)
+			require.True(t, counts.Groups[0].OldestCreatedAt.Equal(at))
+			records, err = CollectImportRecords(ctx, target, db.ExportFilter{ProjectID: &project.ID, IncludeDeleted: true})
+			require.NoError(t, err)
+			restored := backend.Open(t)
+			t.Cleanup(func() { require.NoError(t, restored.Close()) })
+			require.NoError(t, restored.ImportReplay(ctx, records, db.ImportOptions{NewInstance: true}))
+			restoredProject, err := restored.ProjectByUID(ctx, project.UID)
+			require.NoError(t, err)
+			restoredCounts, err := restored.CronRunCounts(ctx, db.CronRunCountsQuery{ProjectID: restoredProject.ID})
+			require.NoError(t, err)
+			require.Equal(t, counts.Groups, restoredCounts.Groups)
 		})
 	}
 	return nil

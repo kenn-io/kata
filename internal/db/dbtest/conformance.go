@@ -62,6 +62,7 @@ var storageScenarios = []scenario{
 	{name: "cron run prune model", run: checkCronRunPruneModel},
 	{name: "cron run prune", methods: []string{"PruneCronRuns"}, run: checkCronRunPrune},
 	{name: "cron run tally", run: checkCronRunTally},
+	{name: "cron tally timestamp history", runWithBackend: checkCronTallyTimestampHistory},
 	{name: "cron run tally model", run: checkCronRunTallyModel},
 	{name: "cron run tally concurrent", run: checkCronRunTallyConcurrent},
 	{name: "cron run counts", methods: []string{"CronRunCounts", "ProjectAccessSnapshotCheck"}, run: checkCronRunCounts},

@@ -172,7 +172,7 @@ func decodeCronTallyEntry(kind, groupUID string, raw jsontext.Value) (CronTallyE
 		}
 	}
 	for _, at := range []time.Time{entry.CoverageStartedAt, entry.LastPrunedAt, entry.OldestCreatedAt, entry.NewestCreatedAt} {
-		if at.Year() < 1 || at.Year() > 9999 || at.UTC().Year() < 1 || at.UTC().Year() > 9999 {
+		if !cronTimestampInRange(at) {
 			return CronTallyEntry{}, cronTallyError("missing or invalid timestamp")
 		}
 	}

@@ -48,6 +48,9 @@ func accumulateCronTallies(values map[string]CronTallyValue, groups []CronRunPru
 		if err != nil {
 			return nil, err
 		}
+		if _, err := decodeCronTallyValue(CronTallyPrefix+groupUID, raw); err != nil {
+			return nil, err
+		}
 		patch[CronTallyPrefix+groupUID] = raw
 	}
 	return patch, nil
