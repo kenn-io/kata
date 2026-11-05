@@ -247,124 +247,140 @@ func TestLocalEmbeddingsDaemonRefusesDownload(t *testing.T) {
 	require.Contains(t, out, `"backlog":1`)
 }
 
-func TestLocalEmbeddingsSwitchKeepsIndex(t *testing.T) {
-	home := setupKataEnv(t)
-	stubLocalEmbeddingsInstall(t)
-	t.Setenv("KATA_SERVER", "")
-	store := openKataTestDB(t, filepath.Join(home, "kata.db"))
-	t.Cleanup(func() { require.NoError(t, store.Close()) })
-	project, err := store.CreateProject(t.Context(), "spoke-project")
-	require.NoError(t, err)
-	_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "login crash", Author: "agent"})
-	require.NoError(t, err)
-	var oldCalls, newCalls atomic.Int64
-	handler := func(counter *atomic.Int64) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			var request struct {
-				Input      []string `json:"input"`
-				Model      string   `json:"model"`
-				Dimensions int      `json:"dimensions"`
+func TestLocalEmbeddingsSwitchIndex(t *testing.T) {
+	for _, salt := range []string{"", "changed-nomic-weights"} {
+		t.Run("salt="+salt, func(t *testing.T) {
+			home := setupKataEnv(t)
+			stubLocalEmbeddingsInstall(t)
+			t.Setenv("KATA_SERVER", "")
+			store := openKataTestDB(t, filepath.Join(home, "kata.db"))
+			t.Cleanup(func() { require.NoError(t, store.Close()) })
+			project, err := store.CreateProject(t.Context(), "spoke-project")
+			require.NoError(t, err)
+			_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "login crash", Author: "agent"})
+			require.NoError(t, err)
+			var oldCalls, newCalls atomic.Int64
+			handler := func(counter *atomic.Int64) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					var request struct {
+						Input      []string `json:"input"`
+						Model      string   `json:"model"`
+						Dimensions int      `json:"dimensions"`
+					}
+					require.NoError(t, json.UnmarshalRead(r.Body, &request))
+					require.Equal(t, "nomic-embed-text", request.Model)
+					counter.Add(int64(len(request.Input)))
+					data := make([]map[string]any, len(request.Input))
+					width := request.Dimensions
+					if width == 0 {
+						width = 768
+					}
+					for i := range data {
+						vector := make([]float32, width)
+						vector[0] = 1
+						data[i] = map[string]any{"index": i, "embedding": vector}
+					}
+					require.NoError(t, json.MarshalWrite(w, map[string]any{"data": data}))
+				})
 			}
-			require.NoError(t, json.UnmarshalRead(r.Body, &request))
-			require.Equal(t, "nomic-embed-text", request.Model)
-			counter.Add(int64(len(request.Input)))
-			data := make([]map[string]any, len(request.Input))
-			width := request.Dimensions
-			if width == 0 {
-				width = 768
+			oldProvider := httptest.NewServer(handler(&oldCalls))
+			t.Cleanup(oldProvider.Close)
+			newProvider := httptest.NewServer(handler(&newCalls))
+			t.Cleanup(newProvider.Close)
+			original := fmt.Sprintf("# shared config\n[search.embeddings]\n# keep recipe\nbase_url = %q\nmodel = 'nomic-embed-text'\ndims = 768\ndocument_prefix = 'search_document: '\nquery_prefix = 'search_query: '\nfingerprint_salt = %q\n[display]\n# untouched\n", oldProvider.URL, salt)
+			path := filepath.Join(home, "config.toml")
+			require.NoError(t, os.WriteFile(path, []byte(original), 0640)) // #nosec G306 -- fixture exercises preservation of an existing mode
+			oldEndpoint := localEmbeddingsEndpoint
+			localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
+				require.True(t, opts.SkipOllama)
+				return newProvider.URL, nil
 			}
-			for i := range data {
-				vector := make([]float32, width)
-				vector[0] = 1
-				data[i] = map[string]any{"index": i, "embedding": vector}
+			t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
+			var firstFingerprint string
+			var firstRecipe embedding.ArtifactIdentity
+			for phase := range 2 {
+				ec, err := config.ReadSearchConfig()
+				require.NoError(t, err)
+				client, _, err := preflightEmbeddingStartup(ec.Embeddings, filepath.Join(home, "kata.db"))
+				require.NoError(t, err)
+				recipe, err := client.ArtifactIdentity("", "", "")
+				require.NoError(t, err)
+				if phase == 0 {
+					firstFingerprint = client.Generation().Fingerprint()
+					firstRecipe = recipe
+				} else if salt == "" {
+					require.Equal(t, firstFingerprint, client.Generation().Fingerprint())
+					require.Equal(t, firstRecipe, recipe)
+				} else {
+					require.Empty(t, ec.Embeddings.FingerprintSalt)
+					require.NotEqual(t, firstFingerprint, client.Generation().Fingerprint())
+					require.NotEqual(t, firstRecipe.RecipeFingerprint, recipe.RecipeFingerprint)
+				}
+				ctx, cancel := context.WithCancel(t.Context())
+				workers := newDaemonWorkerGroup()
+				cycles := make(chan struct{}, 8)
+				admission := func() (*activity.Lease, bool, <-chan struct{}) {
+					return activity.NewLease(func() { cycles <- struct{}{} }, nil), true, nil
+				}
+				_, idx, health, wake, err := startEmbeddingReconciler(ctx, workers, admission, ec.Embeddings, client, filepath.Join(home, "vectors.db"), store, daemon.NewEventBroadcaster(), log.New(io.Discard, "", 0))
+				require.NoError(t, err)
+				stop := func() {
+					cancel()
+					require.True(t, workers.Wait(context.WithoutCancel(t.Context())))
+					require.NoError(t, idx.Close())
+				}
+				t.Cleanup(func() { cancel(); workers.Wait(context.WithoutCancel(t.Context())) })
+				select {
+				case <-cycles:
+				case <-time.After(10 * time.Second):
+					t.Fatal("backfill did not finish")
+				}
+				require.Zero(t, health().Backlog)
+				if phase == 0 {
+					require.EqualValues(t, 1, oldCalls.Load())
+					stop()
+					oldProvider.Close()
+					out, stderr, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
+					require.NoError(t, err, out+stderr)
+					if salt == "" {
+						require.Contains(t, stderr, "index will be kept")
+					} else {
+						require.Contains(t, stderr, "index will be rebuilt")
+					}
+					rewritten, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME or a test fixture
+					require.NoError(t, err)
+					require.Contains(t, string(rewritten), "# keep recipe")
+					require.Contains(t, string(rewritten), "[display]\n# untouched\n")
+					require.NotContains(t, string(rewritten), "base_url")
+					info, err := os.Stat(path)
+					require.NoError(t, err)
+					require.Equal(t, os.FileMode(0640), info.Mode().Perm())
+				} else {
+					rebuilt := int64(0)
+					if salt != "" {
+						rebuilt = 1
+					}
+					require.Equal(t, rebuilt, newCalls.Load(), "changed model weights must re-embed old issues")
+					_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "login timeout", Author: "agent"})
+					require.NoError(t, err)
+					wake()
+					//nolint:kennlint // sleeptest: observe persisted indexing progress after the worker wake.
+					require.Eventually(t, func() bool { return health().Embedded == 2 && health().Backlog == 0 }, 10*time.Second, 10*time.Millisecond)
+					require.EqualValues(t, rebuilt+1, newCalls.Load())
+					server := daemon.NewServer(daemon.ServerConfig{DB: store, VectorIndex: idx, Embedder: client})
+					httpServer := httptest.NewServer(server.Handler())
+					t.Setenv("KATA_SERVER", httpServer.URL)
+					out, stderr, err := executeRootCapture(t, t.Context(), "search", "login", "--project", "spoke-project", "--json")
+					httpServer.Close()
+					require.NoError(t, server.Close())
+					require.NoError(t, err, stderr)
+					require.Contains(t, out, `"mode":"hybrid"`)
+					require.Contains(t, out, "login crash")
+					require.Contains(t, out, "login timeout")
+					stop()
+				}
 			}
-			require.NoError(t, json.MarshalWrite(w, map[string]any{"data": data}))
 		})
-	}
-	oldProvider := httptest.NewServer(handler(&oldCalls))
-	t.Cleanup(oldProvider.Close)
-	newProvider := httptest.NewServer(handler(&newCalls))
-	t.Cleanup(newProvider.Close)
-	original := fmt.Sprintf("# shared config\n[search.embeddings]\n# keep recipe\nbase_url = %q\nmodel = 'nomic-embed-text'\ndims = 768\ndocument_prefix = 'search_document: '\nquery_prefix = 'search_query: '\n[display]\n# untouched\n", oldProvider.URL)
-	path := filepath.Join(home, "config.toml")
-	require.NoError(t, os.WriteFile(path, []byte(original), 0640)) // #nosec G306 -- fixture exercises preservation of an existing mode
-	oldEndpoint := localEmbeddingsEndpoint
-	localEmbeddingsEndpoint = func(_ context.Context, opts embedlocal.Options) (string, error) {
-		require.True(t, opts.SkipOllama)
-		return newProvider.URL, nil
-	}
-	t.Cleanup(func() { localEmbeddingsEndpoint = oldEndpoint })
-	var firstFingerprint string
-	var firstRecipe embedding.ArtifactIdentity
-	for phase := range 2 {
-		ec, err := config.ReadSearchConfig()
-		require.NoError(t, err)
-		client, _, err := preflightEmbeddingStartup(ec.Embeddings, filepath.Join(home, "kata.db"))
-		require.NoError(t, err)
-		recipe, err := client.ArtifactIdentity("", "", "")
-		require.NoError(t, err)
-		if phase == 0 {
-			firstFingerprint = client.Generation().Fingerprint()
-			firstRecipe = recipe
-		} else {
-			require.Equal(t, firstFingerprint, client.Generation().Fingerprint())
-			require.Equal(t, firstRecipe, recipe)
-		}
-		ctx, cancel := context.WithCancel(t.Context())
-		workers := newDaemonWorkerGroup()
-		cycles := make(chan struct{}, 8)
-		admission := func() (*activity.Lease, bool, <-chan struct{}) {
-			return activity.NewLease(func() { cycles <- struct{}{} }, nil), true, nil
-		}
-		_, idx, health, wake, err := startEmbeddingReconciler(ctx, workers, admission, ec.Embeddings, client, filepath.Join(home, "vectors.db"), store, daemon.NewEventBroadcaster(), log.New(io.Discard, "", 0))
-		require.NoError(t, err)
-		stop := func() {
-			cancel()
-			require.True(t, workers.Wait(context.WithoutCancel(t.Context())))
-			require.NoError(t, idx.Close())
-		}
-		t.Cleanup(func() { cancel(); workers.Wait(context.WithoutCancel(t.Context())) })
-		select {
-		case <-cycles:
-		case <-time.After(10 * time.Second):
-			t.Fatal("backfill did not finish")
-		}
-		require.Zero(t, health().Backlog)
-		if phase == 0 {
-			require.EqualValues(t, 1, oldCalls.Load())
-			stop()
-			oldProvider.Close()
-			out, stderr, err := executeRootCapture(t, t.Context(), "daemon", "local-embeddings", "--yes")
-			require.NoError(t, err, out+stderr)
-			require.Contains(t, stderr, "index will be kept")
-			rewritten, err := os.ReadFile(path) // #nosec G304 -- path is derived from KATA_HOME or a test fixture
-			require.NoError(t, err)
-			require.Contains(t, string(rewritten), "# keep recipe")
-			require.Contains(t, string(rewritten), "[display]\n# untouched\n")
-			require.NotContains(t, string(rewritten), "base_url")
-			info, err := os.Stat(path)
-			require.NoError(t, err)
-			require.Equal(t, os.FileMode(0640), info.Mode().Perm())
-		} else {
-			require.Zero(t, newCalls.Load(), "old issues must reuse stored vectors")
-			_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, Title: "login timeout", Author: "agent"})
-			require.NoError(t, err)
-			wake()
-			//nolint:kennlint // sleeptest: observe persisted indexing progress after the worker wake.
-			require.Eventually(t, func() bool { return health().Embedded == 2 && health().Backlog == 0 }, 10*time.Second, 10*time.Millisecond)
-			require.EqualValues(t, 1, newCalls.Load())
-			server := daemon.NewServer(daemon.ServerConfig{DB: store, VectorIndex: idx, Embedder: client})
-			httpServer := httptest.NewServer(server.Handler())
-			t.Setenv("KATA_SERVER", httpServer.URL)
-			out, stderr, err := executeRootCapture(t, t.Context(), "search", "login", "--project", "spoke-project", "--json")
-			httpServer.Close()
-			require.NoError(t, server.Close())
-			require.NoError(t, err, stderr)
-			require.Contains(t, out, `"mode":"hybrid"`)
-			require.Contains(t, out, "login crash")
-			require.Contains(t, out, "login timeout")
-			stop()
-		}
 	}
 }
 

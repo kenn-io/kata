@@ -238,7 +238,7 @@ func localEmbeddingsConfig(data []byte, current config.EmbeddingsConfig, baseURL
 	for _, key := range []string{"base_url", "api_key", "api_key_file", "api_key_env"} {
 		delete(fields, key)
 	}
-	if !current.LocalRecipeCompatible() {
+	if !current.LocalRecipeCompatible() || current.FingerprintSalt != "" && !current.UsesLocal() {
 		for _, key := range []string{"model", "dims", "document_prefix", "document_suffix", "query_prefix", "query_suffix", "fingerprint_salt", "request_dimensions"} {
 			delete(fields, key)
 		}

@@ -69,6 +69,7 @@ func TestLocalEmbeddingsTOMLLayouts(t *testing.T) {
 	prefix := "title   = \"\"\"a fake header\n[search.embeddings]\n\"\"\"\nports = [\n  1,\n  2,\n]\n# before search\n"
 	suffix := "[display]\n# unrelated comment\n"
 	for _, body := range []string{
+		"[search.embeddings]\nlocal=true\nfingerprint_salt='manual-reindex'\n",
 		"\ufeff[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='nomic-embed-text'\n",
 		"[search.embeddings]\nbase_url='http://127.0.0.1:11434/v1' # endpoint comment\nmodel='nomic-embed-text'\n",
 		"[search . embeddings]\nbase_url='http://127.0.0.1:11434/v1'\nmodel='nomic-embed-text'\n",
@@ -92,6 +93,7 @@ func TestLocalEmbeddingsTOMLLayouts(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, next.Embeddings.Local)
 			require.Empty(t, next.Embeddings.BaseURL)
+			require.Equal(t, current.Embeddings.FingerprintSalt, next.Embeddings.FingerprintSalt)
 			require.Equal(t, strings.HasPrefix(text, "\ufeff"), strings.HasPrefix(string(result), "\ufeff"))
 			again, err := localEmbeddingsConfig(result, next.Embeddings, "")
 			require.NoError(t, err)

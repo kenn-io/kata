@@ -57,6 +57,8 @@ the built-in server without a prompt.
 
 Switching from Ollama's 768-dimensional `nomic-embed-text` keeps your index and
 federation recipe. Smaller widths are kept only with `request_dimensions = true`.
+An external provider's nonempty `fingerprint_salt` forces a rebuild with the
+built-in model's weights and is cleared during the switch.
 Other recipes rebuild the index after a warning. If this daemon shares
 embeddings, replicas need the same recipe before they can reuse its vectors.
 
