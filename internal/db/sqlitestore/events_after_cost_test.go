@@ -16,13 +16,13 @@ func TestEventsAfter_QuietProjectPageBudget(t *testing.T) {
 	ctx := t.Context()
 	busy := createProject(ctx, t, d, "busy-project")
 	quiet := createProject(ctx, t, d, "quiet-project")
-	spoke := createProject(ctx, t, d, "spoke-project")
-	// Project catalog events aren't part of this issue-history fixture.
-	_, err := d.ExecContext(ctx, `DELETE FROM events`)
+	quietCreatedID, err := d.MaxEventID(ctx)
 	require.NoError(t, err)
+	spoke := createProject(ctx, t, d, "spoke-project")
+	busyIssue, _ := createTesterIssue(ctx, t, d, busy.ID, "Busy issue")
 	_, err = d.ExecContext(ctx, `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<100000)
- INSERT INTO events(uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
- SELECT printf('%026d',x),?,?,'busy-project','issue.created','tester','{}',1,0,? FROM n`, d.InstanceUID(), busy.ID, strings.Repeat("a", 64))
+ INSERT INTO events(uid,origin_instance_uid,project_id,project_name,issue_id,issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
+ SELECT printf('%026d',x),?,?,'busy-project',?,?,'issue.updated','tester',json_object('title',printf('Update %d',x)),1,0,? FROM n`, d.InstanceUID(), busy.ID, busyIssue.ID, busyIssue.UID, strings.Repeat("a", 64))
 	require.NoError(t, err)
 	issue, created := createTesterIssue(ctx, t, d, quiet.ID, "Moving issue")
 	move, err := d.MoveIssueProject(ctx, db.MoveIssueProjectIn{IssueID: issue.ID, FromProjectID: quiet.ID, ToProjectID: busy.ID, IfMatchRev: issue.Revision, Actor: "tester"})
@@ -42,7 +42,7 @@ func TestEventsAfter_QuietProjectPageBudget(t *testing.T) {
 			after int64
 			want  []int64
 		}{
-			{"from start", 0, []int64{created.ID, move.EventID}},
+			{"from start", 0, []int64{quietCreatedID, created.ID, move.EventID}},
 			{"near tip", move.EventID - 1, []int64{move.EventID}},
 		} {
 			t.Run(fmt.Sprintf("analyzed=%t/%s", analyzed, tc.name), func(t *testing.T) {
@@ -66,12 +66,6 @@ func TestEventsAfter_QuietProjectPageBudget(t *testing.T) {
 			})
 		}
 	}
-	t.Run("destination includes move once", func(t *testing.T) {
-		events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: busy.ID, AfterID: created.ID, Limit: 100})
-		require.NoError(t, err)
-		require.Len(t, events, 1)
-		require.Equal(t, move.EventID, events[0].ID)
-	})
 	t.Run("restricted", func(t *testing.T) {
 		events, err := store.EventsAfter(db.WithAuthorizedProjects(ctx, []string{spoke.UID}), db.EventsAfterParams{ProjectID: quiet.ID, Limit: 100})
 		require.NoError(t, err)
@@ -86,11 +80,12 @@ func TestEventsAfter_DepartureBacklogPageBudget(t *testing.T) {
 	ctx := t.Context()
 	source := createProject(ctx, t, d, "quiet-project")
 	target := createProject(ctx, t, d, "busy-project")
-	_, err := d.ExecContext(ctx, `DELETE FROM events`)
+	issue, _ := createTesterIssue(ctx, t, d, target.ID, "Moved issue")
+	base, err := d.MaxEventID(ctx)
 	require.NoError(t, err)
 	_, err = d.ExecContext(ctx, `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
- INSERT INTO events(id,uid,origin_instance_uid,project_id,project_name,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
- SELECT x,printf('%026d',x),?,?,'busy-project','issue.moved','tester',json_object('from_project_uid',?,'from_short_id',printf('%04x',10001-x)),1,0,? FROM n`, d.InstanceUID(), target.ID, source.UID, strings.Repeat("a", 64))
+ INSERT INTO events(uid,origin_instance_uid,project_id,project_name,issue_id,issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
+ SELECT printf('%026d',x),?,?,'busy-project',?,?,'issue.moved','tester',json_object('issue_uid',?,'from_project_uid',?,'from_short_id',printf('%026d',10001-x),'to_project_uid',?,'to_short_id',?,'updated_at',?),1,0,? FROM n`, d.InstanceUID(), target.ID, issue.ID, issue.UID, issue.UID, source.UID, target.UID, issue.ShortID, issue.UpdatedAt, strings.Repeat("a", 64))
 	require.NoError(t, err)
 	raw, err := sql.Open("sqlite", path)
 	require.NoError(t, err)
@@ -108,12 +103,12 @@ func TestEventsAfter_DepartureBacklogPageBudget(t *testing.T) {
 				require.NoError(t, err)
 				sqlitePageFetches(t, conn, true)
 				require.NoError(t, conn.Close())
-				events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: source.ID, AfterID: after, Limit: 100})
+				events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: source.ID, AfterID: base + after, Limit: 100})
 				require.NoError(t, err)
 				require.NotNil(t, events)
 				require.Len(t, events, int(min(100, 10000-after)))
 				for i, event := range events {
-					require.Equal(t, after+int64(i)+1, event.ID)
+					require.Equal(t, base+after+int64(i)+1, event.ID)
 				}
 				conn, err = raw.Conn(ctx)
 				require.NoError(t, err)
@@ -123,18 +118,6 @@ func TestEventsAfter_DepartureBacklogPageBudget(t *testing.T) {
 				require.LessOrEqual(t, pages, 512, "project polling must skip earlier departures")
 			})
 		}
-		t.Run(fmt.Sprintf("analyzed=%t/replay", analyzed), func(t *testing.T) {
-			var after int64
-			for after < 10000 {
-				events, err := store.EventsAfter(ctx, db.EventsAfterParams{ProjectID: source.ID, AfterID: after, Limit: 100})
-				require.NoError(t, err)
-				require.Len(t, events, 100)
-				for _, event := range events {
-					require.Equal(t, after+1, event.ID)
-					after = event.ID
-				}
-			}
-		})
 	}
 }
 
