@@ -13,6 +13,10 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Resume local writes sooner after spoke rebuilds of large projects by skipping
   issues and comments whose stored values already match the event log.
 - Open issues in graph mode on large stores with only the selected issue's reachable graph in the response. Previously, a 100,000-issue fixture sent 119 MB in graph mode versus 34 MB for a plain issue open.
+- Resolve issue UID prefixes without scanning unrelated issues, including with
+  project-restricted credentials. Existing stores upgrade to schema 45 through
+  SQLite's JSONL cutover or the
+  [offline PostgreSQL index build](development/postgres-migrations.md#schema-45-issue-uid-prefix-index).
 - Search references faster in the web UI on large stores; a `q` search now returns only issue references.
 - Spend 2 REST requests and 1 GraphQL request per 100-issue GitHub status sweep, down from 102 REST requests, while continuing to import upstream closes and reopens. Hosts without the required GraphQL fields keep using REST status reads.
 

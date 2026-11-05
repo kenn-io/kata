@@ -1062,7 +1062,8 @@ func (d *Store) IssueUIDPrefixMatch(ctx context.Context, prefix string, limit in
 	if limit <= 0 {
 		limit = 20
 	}
-	q := issueSelect + ` WHERE i.uid LIKE ?`
+	// Project scope otherwise lets the planner scan every issue in an allowed project.
+	q := `SELECT ` + issueColumns + ` FROM issues i INDEXED BY idx_issues_uid_prefix JOIN projects p ON p.id = i.project_id WHERE i.uid LIKE ?`
 	if include == db.IncludeDeletedNo {
 		q += ` AND i.deleted_at IS NULL`
 	}
