@@ -348,6 +348,23 @@ func TestRecurrenceKeyShowsScopedReadRefusal(t *testing.T) {
 	assert.Contains(t, m.toast.text, "Could not read the repeat:")
 	assert.Contains(t, m.toast.text, "operation is not available to an issue-scoped credential")
 	assert.NotContains(t, m.toast.text, "may have been stopped")
+
+	reader := authedClient("worker-token")
+	reader.setHTTPClient(&http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/issues/"+issue.UID) {
+			return nil, errors.New("connection interrupted")
+		}
+		return env.HTTP.Do(r)
+	})})
+	out, _ = m.Update(fetchIssue(reader, project.ID, issue.UID, m.detail.gen)())
+	m = out.(Model)
+	require.ErrorContains(t, m.detail.err, "connection interrupted")
+	m, _, handled = m.routeRecurrenceKey(runeKey('O'))
+	require.True(t, handled)
+	assert.Equal(t, inputNone, m.input.kind)
+	require.NotNil(t, m.toast)
+	assert.Contains(t, m.toast.text, "operation is not available to an issue-scoped credential")
+	assert.NotContains(t, m.toast.text, "may have been stopped")
 }
 
 func TestRecurrenceFormRefusesAndKeepsTheInput(t *testing.T) {
