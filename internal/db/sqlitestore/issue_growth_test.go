@@ -1,7 +1,6 @@
 package sqlitestore_test
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -19,7 +18,9 @@ func TestCreateIssueHistoryGrowth(t *testing.T) {
     VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<?
 )
 INSERT INTO events(uid,origin_instance_uid,project_id,project_name,issue_id,issue_uid,type,actor,payload,hlc_physical_ms,hlc_counter,content_hash)
-SELECT printf('01M4%022d',x),?,?,?,?,?,'issue.updated','agent','{}',x,0,? FROM n`, size, store.InstanceUID(), project.ID, project.Name, historyIssue.ID, historyIssue.UID, strings.Repeat("a", 64))
+SELECT printf('01M4%022d',x),?,?,?,?,?,'issue.updated','agent',
+CASE x%2 WHEN 1 THEN '{"old_title":"History a","title":"History b"}' ELSE '{"old_title":"History b","title":"History a"}' END,
+x,0,printf('%064x',x) FROM n`, size, store.InstanceUID(), project.ID, project.Name, historyIssue.ID, historyIssue.UID)
 		require.NoError(t, err)
 	})
 }
