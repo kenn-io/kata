@@ -68,8 +68,9 @@ func preparePulledFederationMaterializationTx(ctx context.Context, tx *sql.Tx, p
 	full := false
 	for _, ev := range events {
 		uid := db.FederationEventIssueUID(ev.IssueUID, ev.Payload)
-		// Project/cron state, moves and unidentified events can affect more than
-		// one issue. Keep the complete fold for these and replay-horizon baselines.
+		// Project state, moves and unidentified events can affect more than one
+		// issue. Cron pages start unscoped here; common preparation separates
+		// their complete cron history from any eligible touched issue scope.
 		if uid == "" || strings.HasPrefix(ev.Type, "project.") || strings.HasPrefix(ev.Type, "cron.") || ev.Type == "issue.moved" {
 			full = true
 		} else if !slices.Contains(scope, uid) {

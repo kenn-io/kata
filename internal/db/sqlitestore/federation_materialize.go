@@ -35,13 +35,13 @@ func prepareFederationMaterializationTx(ctx context.Context, tx *sql.Tx, project
 }
 
 // alreadyStored selects pull preparation: the page is in the log already.
-// Cron-only pages fold cron history; other pages reconcile the supplied issue
-// histories and rows (nil is full).
+// Cron-only pages fold cron history. Eligible mixed pages combine that history
+// with touched issues; other pages reconcile the supplied issue scope (nil is full).
 func prepareFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID int64, prepared []preparedFederationIngestEvent, alreadyStored bool, issueScope []string) (federationMaterialization, error) {
 	var fresh []db.FoldEvent
 	var accepted []string
 	linksAffected := false
-	cronOnly := alreadyStored
+	cronOnly := true
 	for _, in := range prepared {
 		if in.Duplicate {
 			continue
@@ -69,11 +69,27 @@ func prepareFederationMaterialization(ctx context.Context, tx *sql.Tx, projectID
 		return federationMaterialization{}, err
 	}
 	if cronOnly {
-		return prepareCronPullMaterialization(ctx, tx, projectID, binding)
+		return prepareCronFederationMaterialization(ctx, tx, projectID, binding, fresh, alreadyStored)
+	}
+	cronScope, scopedCron := cronFederationIssueScope(fresh)
+	if scopedCron {
+		issueScope = cronScope
 	}
 	events, err := federationFoldEventsForIssues(ctx, tx, projectID, issueScope)
 	if err != nil {
 		return federationMaterialization{}, err
+	}
+	if scopedCron {
+		// Issue-scoped history can include observations referencing a touched
+		// issue. Replace those with the complete project cron history once.
+		events = slices.DeleteFunc(events, func(event db.FoldEvent) bool {
+			return db.EventRequiredFeatures(event.Type) == db.CronEventFeature
+		})
+		cronEvents, err := federationCronFoldEvents(ctx, tx, projectID)
+		if err != nil {
+			return federationMaterialization{}, err
+		}
+		events = append(events, cronEvents...)
 	}
 	if !alreadyStored {
 		events = append(events, fresh...)

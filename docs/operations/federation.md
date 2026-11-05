@@ -1918,9 +1918,13 @@ This section describes direct-spoke transport. Negotiated relays use
 A spoke polls the hub for events after its pull cursor. It applies hub events
 in order, deduplicates by event UID and content hash, folds portable payloads
 into the local projection, and advances its pull cursor only after successful
-application. SQLite cron-only pull pages replay the project's cron history
-without reconciling unrelated issues or their short IDs. Mixed pages and
-project or move baselines retain the ordinary issue reconciliation path.
+application. SQLite cron-only pages and pushes replay the project's cron history
+without reconciling unrelated issues or their short IDs. Mixed batches of cron
+and ordinary issue events combine complete cron history with the touched issue
+histories and rows. Project-wide events, moves and batches touching more than
+500 issues retain the ordinary preparation path; retained move history still
+requires a full rebuild. Other ingest validation and history scans can still
+grow with the project's history.
 
 A push-enabled spoke scans for local-origin events above its push cursor and
 sends them to the hub as an all-or-nothing batch. The hub authenticates the
