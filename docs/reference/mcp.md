@@ -1,7 +1,7 @@
 ---
 title: Model Context Protocol server
 description: Configure Kata's MCP server and use its typed issue, administration, and event tools.
-last_edited: 2026-11-04
+last_edited: 2026-11-05
 ---
 
 # Model Context Protocol server
@@ -436,7 +436,10 @@ an edit. Invalid documents and revision conflicts return `valid:false` with
 staged errors. Both tools are read-only and save nothing. Job validation also
 accepts `parent_ref`, `count` (1–100, default 5), and RFC3339 `from`, and returns
 hypothetical next fires. See [Validate before saving](cron.md#validate-before-saving)
-for stages, warnings, preview bases, and limits. Previewable jobs also return
+for stages, warnings, preview bases, and limits. Some MCP clients decode
+structured numbers as `float64`. When that decoder rejects an overflowing number
+in options, MCP returns the same `valid:false` document error with
+`definition: null`; HTTP and CLI return the retained document. Previewable jobs also return
 `schedule.collisions`, the same seven-day peer-set report exposed by HTTP and
 CLI. An absent report means it was not computed; empty `items` means no
 coincidences were found. `skipped` and `truncated` describe incomplete work;

@@ -70,10 +70,28 @@ func cronValidationResult(value *generated.CronValidationResult, err error) (*sd
 	if value == nil {
 		return nil, nil, errors.New("missing cron validation response")
 	}
-	if err := value.Validate(); err != nil {
+	if err := mcpCronValidation(value); err != nil {
 		return nil, nil, err
 	}
 	return successResult(), value, nil
+}
+
+// mcpCronValidation validates the daemon result for MCP. Some MCP clients decode
+// structured numbers as float64. validateOptions rejects those same
+// overflowing option values, so only a document-stage result can carry one;
+// MCP returns its documented null definition there.
+func mcpCronValidation(value *generated.CronValidationResult) error {
+	if err := value.Validate(); err != nil {
+		return err
+	}
+	if len(value.Definition) == 0 || json.Unmarshal(value.Definition, new(any)) == nil {
+		return nil
+	}
+	if value.Valid || len(value.Errors) == 0 || value.Errors[0].Stage != "document" {
+		return errors.New("cron validation definition is not representable in MCP")
+	}
+	value.Definition = nil
+	return nil
 }
 
 func (h toolHandlers) cronJobValidate(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronJobValidationInput) (*sdkmcp.CallToolResult, *generated.CronValidationResult, error) {

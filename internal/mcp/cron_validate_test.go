@@ -101,11 +101,36 @@ func TestCronValidateRawInputAndNoWrites(t *testing.T) {
 		if resource == "workflow" {
 			definition["steps"].([]any)[0].(map[string]any)["options"] = opaque
 		}
-		result := cronCall(t, f.session, "cron_"+resource+"_validate", map[string]any{"name": "Review", "definition": definition})
-		require.False(t, result.IsError, "%s", mustJSON(t, result))
-		raw := result.Content[0].(*sdkmcp.TextContent).Text
-		for _, literal := range []string{"12345678901234567890123", "1.0000000000000000001", "-0.00", "1E+003"} {
-			require.Contains(t, raw, literal)
+		t.Run(resource+"/finite options", func(t *testing.T) {
+			result := cronCall(t, f.session, "cron_"+resource+"_validate", map[string]any{"name": "Review", "definition": definition})
+			require.False(t, result.IsError, "%s", mustJSON(t, result))
+			require.Equal(t, true, result.StructuredContent.(map[string]any)["valid"])
+			raw := result.Content[0].(*sdkmcp.TextContent).Text
+			for _, literal := range []string{"12345678901234567890123", "1.0000000000000000001", "-0.00", "1E+003"} {
+				require.Contains(t, raw, literal)
+			}
+		})
+		sites := []map[string]any{definition}
+		if resource == "workflow" {
+			sites = append(sites, definition["steps"].([]any)[0].(map[string]any))
+		}
+		for i, site := range sites {
+			name := "options"
+			if i > 0 {
+				name = "step options"
+			}
+			t.Run(resource+"/"+name+"/overflow", func(t *testing.T) {
+				original := site["options"]
+				site["options"] = json.RawMessage(`{"value":1e1000}`)
+				defer func() { site["options"] = original }()
+				result := cronOK(t, f.session, "cron_"+resource+"_validate", map[string]any{"name": "Review", "definition": definition})
+				require.Equal(t, false, result["valid"])
+				failure := result["errors"].([]any)[0].(map[string]any)
+				require.Equal(t, "document", failure["stage"])
+				require.Equal(t, "validation", failure["code"])
+				require.Nil(t, result["definition"])
+				require.NotContains(t, result, "schedule")
+			})
 		}
 	}
 
