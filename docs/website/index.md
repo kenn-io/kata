@@ -78,11 +78,11 @@ calls per task. At 4ms each that costs half a second.
   hooks for Claude Code and Codex so the ledger knows which issues have an
   agent on them right now.
 
-In 0.20.0, handle notification requests in the terminal UI's Attention inbox,
-ask for replies to specific comments, broadcast to participants, and trigger
-work when scheduled dates arrive. See the
-[release notes](https://katatracker.com/docs/changelog/#0200) for setup links
-and SQLite and cron upgrade requirements.
+In 0.21.0, attach files to issues, move whole issue subtrees between projects,
+repeat issues from the CLI, and manage planning dates and cron jobs in the
+terminal UI. See the
+[release notes](https://katatracker.com/docs/changelog/#0210) for setup links
+and the schema 43 upgrade requirements.
 
 ## 04 / Discipline: a close is a completion claim
 

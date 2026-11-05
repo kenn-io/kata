@@ -765,6 +765,13 @@ snapshots because the event stream remains protected.
 
 ## Federation Enrollment and Health Endpoints
 
+`POST /api/v1/projects/{project_id}/federation/events:ingest` returns
+`400 validation` when a fresh event names a stored sibling-project issue through
+an added link, close parent, or duplicate/superseded evidence and either project
+uses a relay. The error identifies the event UID, and the whole batch rolls back.
+See [quarantine recovery](../operations/federation.md#quarantine) before retrying
+or skipping a refused batch.
+
 `POST /api/v1/federation/enrollments` accepts an optional `token`. Omitting it
 preserves create-once behavior and returns a newly generated plaintext
 enrollment token. When the caller supplies a token, an exact retry with the

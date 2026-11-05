@@ -15,6 +15,7 @@ import (
 
 	"go.kenn.io/kata/internal/db"
 	"go.kenn.io/kata/internal/processtree"
+	"go.kenn.io/kit/consolewindow"
 )
 
 // runRecord is the JSONL line shape for runs.jsonl. The dispatcher's
@@ -289,6 +290,7 @@ func runJob(ctx context.Context, shutdown <-chan struct{}, job HookJob, deps run
 	cmd.Stdin = bytes.NewReader(stdinPayload)
 	cmd.Stdout = rc.outFile
 	cmd.Stderr = rc.errFile
+	consolewindow.Hide(cmd)
 	tree, err := processtree.New(cmd)
 	if err != nil {
 		rc.finalize("spawn_failed", err.Error(), -1, payloadTruncated)

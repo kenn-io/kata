@@ -12,7 +12,7 @@ import (
 // RunRelayRootCheckpointLaterBoundary exercises legacy source history arriving
 // after a child has activated its first signed checkpoint. The original private
 // source bytes must stay at the root; the child needs a fresh current snapshot.
-func RunRelayRootCheckpointLaterBoundary(t *testing.T, store db.Storage, openReplica func(*testing.T) db.Storage) {
+func RunRelayRootCheckpointLaterBoundary(t *testing.T, store db.Storage, openReplica func(*testing.T) db.Storage, seedHistory func(*testing.T, db.Project, db.RemoteEvent)) {
 	ctx := t.Context()
 	fixture := newRelayLinkBoundaryFixture(t, store, "checkpoint-boundary")
 	private, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: fixture.sibling.ID, Title: "Private endpoint", Author: "member"})
@@ -63,11 +63,7 @@ func RunRelayRootCheckpointLaterBoundary(t *testing.T, store db.Storage, openRep
 	require.NoError(t, err)
 	payload := jsontext.Value(`{"uid":"` + issueUID + `","title":"Later legacy creation","body":"","author":"member","status":"open","metadata":{},"created_at":"2026-05-23T12:00:00.000Z","links":[{"type":"blocks","to_issue_uid":"` + private.UID + `","author":"member"}]}`)
 	event := newRemoteEvent(t, fixture.project, &issueUID, "issue.created", "member", legacyUID, 600, payload)
-	_, err = store.IngestFederationEvents(ctx, db.FederationIngestParams{
-		ProjectID: fixture.project.ID, SpokeInstanceUID: legacyUID,
-		Events: []db.FederationIngestEvent{{SourceEventID: 1, Event: event}},
-	})
-	require.NoError(t, err)
+	seedHistory(t, fixture.project, event)
 	issue, err := store.IssueByUID(ctx, issueUID, db.IncludeDeletedYes)
 	require.NoError(t, err)
 	metadata, err := store.PatchIssueMetadata(writeCtx, db.PatchIssueMetadataIn{
@@ -93,9 +89,8 @@ func RunRelayRootCheckpointLaterBoundary(t *testing.T, store db.Storage, openRep
 	later, _, err := store.CreateIssue(writeCtx, db.CreateIssueParams{ProjectID: fixture.project.ID, Title: "Later ordinary issue", Author: "member"})
 	require.NoError(t, err)
 	// Model an already-rejected pull using the authentic metadata envelope
-	// whose issue introduction the old feed withheld. Legacy ingress queues
-	// different prefixes on the native backends; retain the complete old
-	// offer as well to check that checkpoint recovery covers every row.
+	// whose issue introduction the old feed withheld. Retain the complete
+	// old offer to check that checkpoint recovery covers every row.
 	batch, err := store.PendingRelayDeliveries(ctx, bindingUID, db.RelayStreamEvent, 100)
 	require.NoError(t, err)
 	require.NotEmpty(t, batch)

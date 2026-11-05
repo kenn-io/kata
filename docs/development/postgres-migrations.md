@@ -315,7 +315,7 @@ Stop serving daemons and imports, back up the database, and run
 `kata storage postgres migrate` with schema-owner credentials. Building the
 index reads `events` and blocks event writes; allow an offline window that fits
 the event log's size. Existing table grants remain sufficient. Validation-only
-runtime credentials cannot migrate. Versions 25–41 follow the existing immutable
+runtime credentials cannot migrate. Versions 25–42 follow the existing immutable
 migration chain first. SQLite uses its normal JSONL cutover.
 
 Start the matching schema 43 binary after migration. Older binaries cannot open

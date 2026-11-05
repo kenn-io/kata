@@ -37,7 +37,7 @@ issue. Recording a run changes neither ownership nor leases. See
 ## Definitions
 
 `kata cron job` and `kata cron workflow` support `create`, `list`, `show`,
-`update`, `delete`, and `restore`. Commands return JSON. Creation retains a ULID:
+`update`, `edit`, `delete`, and `restore`. Commands return JSON. Creation retains a ULID:
 
 ```sh
 kata cron job create --uid <job-uid> --file job.json --json
@@ -65,6 +65,40 @@ process inside Kata.
 Secret references are names, and checkout keys are portable names. Credentials,
 host paths, and runtime handles are not part of this shared contract. Opaque
 option objects retain exact JSON numbers.
+
+### Edit in place
+
+Open an existing definition with `kata cron job edit <job-uid>` or
+`kata cron workflow edit <workflow-uid>`. Both stdin and stdout must be
+terminals. Kata chooses `$VISUAL`, then `$EDITOR`, then `vi`; editor arguments
+are split on whitespace, without shell expansion.
+
+The buffer contains `name` and `definition`. Kata owns the actor and revision;
+use `--as` for attribution. Only the consecutive leading `//` header is ignored.
+An empty body aborts, and an unchanged definition saves nothing. Local validation
+and daemon validation errors reopen the draft with the error; leaving an invalid
+body unchanged stops the command. Deleted definitions must be restored first.
+
+Kata saves with the `definition_event_uid` captured when the editor opened. If
+another writer changes the definition, the header shows their changes and a
+`CONFLICT` line. Review that diff and delete the conflict line to save your draft
+over the displayed revision. Each further conflict needs acknowledgment again.
+Kata does not merge the definitions automatically.
+
+Failures retain a private draft and print its path. The header records the exact
+expected event for manual recovery. Inspect `kata cron job show <job-uid>` before
+retrying. Strip only the leading header into a new file, then use the retained
+event, substituting `workflow` for a workflow draft:
+
+```sh
+awk 'BEGIN { header = 1 } header && /^\/\// { next } { header = 0; print }' "$draft" > replacement.json
+kata cron job update <job-uid> --file replacement.json --expected-event-uid <retained-event-uid> --json
+```
+
+If an intervening write occurred, that guarded retry conflicts. Review the current
+definition before choosing a newer expected event. A fresh `edit` reads a new base;
+it does not resume the retained draft. An output failure after an accepted save
+reports that the definition was saved and keeps the draft for inspection.
 
 ### Pause and resume a job
 

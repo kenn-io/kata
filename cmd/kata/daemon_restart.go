@@ -21,6 +21,7 @@ import (
 	"go.kenn.io/kata/internal/daemonruntime"
 
 	"go.kenn.io/kit/atomicfile"
+	"go.kenn.io/kit/consolewindow"
 	kitdaemon "go.kenn.io/kit/daemon"
 	"go.kenn.io/kit/safefileio"
 
@@ -204,6 +205,7 @@ func validateDaemonReplacement(ctx context.Context, executable string, flags []s
 	ctx, cancel := context.WithTimeout(ctx, daemonReplacementCheckTimeout)
 	defer cancel()
 	command := exec.CommandContext(ctx, executable, daemonArgs(append(flags, "--check-startup")...)...) //nolint:gosec // selected installed executable with daemon-owned arguments
+	consolewindow.Hide(command)
 	if output, err := command.CombinedOutput(); err != nil {
 		return fmt.Errorf("check replacement startup: %w: %s", err, output)
 	}

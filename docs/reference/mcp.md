@@ -39,9 +39,9 @@ no status text or logs to stdout. The actor is fixed when the process starts
 and uses the normal precedence: `--as`, `KATA_AUTHOR`, `USER`, Git `user.name`,
 then `anonymous`.
 
-### Server identity (unreleased)
+### Server identity
 
-On `main`, MCP clients receive Kata's website and icon in server metadata.
+MCP clients receive Kata's website and icon in server metadata.
 The icon is an embedded PNG data URI, so stdio and HTTP clients can load it
 without an external request. Whether it appears depends on the client.
 
