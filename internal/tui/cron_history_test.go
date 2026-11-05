@@ -437,9 +437,11 @@ func TestCronHistoryJobPagesAndLookup(t *testing.T) {
 		m.cron.runPage.next = m.cron.runPage.runs[len(m.cron.runPage.runs)-1].UID
 		m, cmd := m.cronRequestPage("", false)
 		m = m.cronPageLoaded(cmd().(cronPageMsg))
-		data := *m.cron.data
-		data.runsErr = errors.New("offline")
-		m = m.cronLoaded(cronLoadedMsg(data))
+		a.page, a.err = nil, errors.New("offline")
+		data := m.fetchCron()().(cronLoadedMsg)
+		require.Error(t, data.runsErr)
+		require.NotContains(t, data.lookup, r.UID, "the failed refresh itself carries no copy of the page row")
+		m = m.cronLoaded(data)
 		m.cron.stack = []cronFrame{{ref: cronRef{cronRuns, r.UID}}}
 		_, _, lines := cronScreen(m)
 		require.Contains(t, cronLinesText(lines), "Report ready")
