@@ -90,6 +90,85 @@ func TestLogRecordsRotation(t *testing.T) {
 			require.Equal(t, "{\"n\":1}\n{\"n\":2}\n{\"n\":3}\n", out.String())
 		})
 	})
+
+	// Retention can evict the cursor; newer retained generations must drain.
+	t.Run("cursor eviction", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "dispatch.jsonl")
+		writer, err := jsonlog.Open(t.Context(), path, 1, 2)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, writer.Close()) })
+		require.NoError(t, writer.Append(t.Context(), map[string]int{"n": 1}))
+		var out, warnings bytes.Buffer
+		mark, err := readDaemonLogSnapshot(t.Context(), logSource{dir, "dispatch.jsonl"}, &out, &warnings, 10, &cronLogFilter{}, true)
+		require.NoError(t, err)
+		state := &followState{prevInfo: mark.info, prevSize: mark.size, prevFile: mark.file}
+		t.Cleanup(state.close)
+		for n := 2; n <= 4; n++ {
+			require.NoError(t, writer.Append(t.Context(), map[string]int{"n": n}))
+		}
+		require.NoError(t, tailTick(t.Context(), path, &out, &warnings, state, &cronLogFilter{}))
+		require.Equal(t, "{\"n\":1}\n{\"n\":3}\n{\"n\":4}\n", out.String())
+	})
+
+	t.Run("rotation during snapshot", func(t *testing.T) {
+		for _, base := range []string{"dispatch.jsonl", "runs.jsonl"} {
+			for _, pin := range []bool{false, true} {
+				t.Run(base+"/pin="+strconv.FormatBool(pin), func(t *testing.T) {
+					dir := t.TempDir()
+					path := filepath.Join(dir, base)
+					require.NoError(t, os.WriteFile(path+".1", []byte("{\"n\":1}\n"), 0o600))
+					require.NoError(t, os.WriteFile(path, []byte("{\"n\":2}\n"), 0o600))
+					f := &rotatingSnapshotFilter{rotate: func() {
+						require.NoError(t, os.Rename(path+".1", path+".2"))
+						require.NoError(t, os.Rename(path, path+".1"))
+						require.NoError(t, os.WriteFile(path, []byte("{\"n\":3}\n"), 0o600))
+					}}
+					var out, warnings bytes.Buffer
+					mark, err := readDaemonLogSnapshot(t.Context(), logSource{dir, base}, &out, &warnings, 10, f, pin)
+					require.NoError(t, err)
+					require.Equal(t, "{\"n\":1}\n{\"n\":2}\n", out.String(), "snapshot must retain the pinned generations")
+					state := &followState{prevInfo: mark.info, prevSize: mark.size, prevFile: mark.file}
+					t.Cleanup(state.close)
+					require.NoError(t, tailTick(t.Context(), path, &out, &warnings, state, &cronLogFilter{}))
+					require.NoError(t, os.WriteFile(path, []byte("{\"n\":3}\n{\"n\":4}\n"), 0o600))
+					require.NoError(t, tailTick(t.Context(), path, &out, &warnings, state, &cronLogFilter{}))
+					require.Equal(t, "{\"n\":1}\n{\"n\":2}\n{\"n\":3}\n{\"n\":4}\n", out.String())
+					require.Empty(t, warnings.String())
+				})
+			}
+		}
+	})
+
+	t.Run("first tick", func(t *testing.T) {
+		for _, rotatedSnapshot := range []bool{false, true} {
+			t.Run("rotated snapshot="+strconv.FormatBool(rotatedSnapshot), func(t *testing.T) {
+				dir := t.TempDir()
+				path := filepath.Join(dir, "dispatch.jsonl")
+				if rotatedSnapshot {
+					require.NoError(t, os.WriteFile(path+".1", []byte("{\"n\":0}\n"), 0o600))
+				}
+				var out, warnings bytes.Buffer
+				mark, err := readDaemonLogSnapshot(t.Context(), logSource{dir, "dispatch.jsonl"}, &out, &warnings, 10, &cronLogFilter{}, true)
+				require.NoError(t, err)
+				state := &followState{prevInfo: mark.info, prevSize: mark.size, prevFile: mark.file}
+				t.Cleanup(state.close)
+				if rotatedSnapshot {
+					require.NoError(t, os.Rename(path+".1", path+".2"))
+				}
+				require.NoError(t, os.WriteFile(path+".1", []byte("{\"n\":1}\n"), 0o600))
+				require.NoError(t, os.WriteFile(path, nil, 0o600))
+				require.NoError(t, tailTick(t.Context(), path, &out, &warnings, state, &cronLogFilter{}))
+				want := "{\"n\":1}\n"
+				if rotatedSnapshot {
+					want = "{\"n\":0}\n" + want
+				}
+				require.Equal(t, want, out.String())
+				require.NoError(t, tailTick(t.Context(), path, &out, &warnings, state, &cronLogFilter{}))
+				require.Equal(t, want, out.String(), "next poll must not replay retained history")
+			})
+		}
+	})
 }
 
 func TestLogRecordsVersionAndMixedSkip(t *testing.T) {
@@ -153,26 +232,6 @@ func TestLogRecordsReaderAllowsWriterRotation(t *testing.T) {
 	require.True(t, os.SameFile(info, rotatedInfo))
 }
 
-// Retention can evict the cursor; all newer generations still retained must drain.
-func TestLogRecordsCursorEviction(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "dispatch.jsonl")
-	writer, err := jsonlog.Open(t.Context(), path, 1, 2)
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, writer.Close()) })
-	require.NoError(t, writer.Append(t.Context(), map[string]int{"n": 1}))
-	var out, warnings bytes.Buffer
-	mark, err := readDaemonLogSnapshot(t.Context(), logSource{dir, "dispatch.jsonl"}, &out, &warnings, 10, &cronLogFilter{}, true)
-	require.NoError(t, err)
-	state := &followState{prevInfo: mark.info, prevSize: mark.size, prevFile: mark.file}
-	t.Cleanup(state.close)
-	for n := 2; n <= 4; n++ {
-		require.NoError(t, writer.Append(t.Context(), map[string]int{"n": n}))
-	}
-	require.NoError(t, tailTick(t.Context(), path, &out, &warnings, state, &cronLogFilter{}))
-	require.Equal(t, "{\"n\":1}\n{\"n\":3}\n{\"n\":4}\n", out.String())
-}
-
 // Rotate after the oldest record is consumed, exactly between mutable names.
 // Both selectors must retain the snapshot and hand off each later record once.
 type rotatingSnapshotFilter struct{ rotate func() }
@@ -184,63 +243,4 @@ func (f *rotatingSnapshotFilter) accept(map[string]jsontext.Value) bool {
 		rotate()
 	}
 	return true
-}
-
-func TestLogSnapshotRotationRetainsHistory(t *testing.T) {
-	for _, base := range []string{"dispatch.jsonl", "runs.jsonl"} {
-		for _, pin := range []bool{false, true} {
-			t.Run(base+"/pin="+strconv.FormatBool(pin), func(t *testing.T) {
-				dir := t.TempDir()
-				path := filepath.Join(dir, base)
-				require.NoError(t, os.WriteFile(path+".1", []byte("{\"n\":1}\n"), 0o600))
-				require.NoError(t, os.WriteFile(path, []byte("{\"n\":2}\n"), 0o600))
-				f := &rotatingSnapshotFilter{rotate: func() {
-					require.NoError(t, os.Rename(path+".1", path+".2"))
-					require.NoError(t, os.Rename(path, path+".1"))
-					require.NoError(t, os.WriteFile(path, []byte("{\"n\":3}\n"), 0o600))
-				}}
-				var out, warnings bytes.Buffer
-				mark, err := readDaemonLogSnapshot(t.Context(), logSource{dir, base}, &out, &warnings, 10, f, pin)
-				require.NoError(t, err)
-				require.Equal(t, "{\"n\":1}\n{\"n\":2}\n", out.String(), "snapshot must retain the pinned generations")
-				state := &followState{prevInfo: mark.info, prevSize: mark.size, prevFile: mark.file}
-				t.Cleanup(state.close)
-				require.NoError(t, tailTick(t.Context(), path, &out, &warnings, state, &cronLogFilter{}))
-				require.NoError(t, os.WriteFile(path, []byte("{\"n\":3}\n{\"n\":4}\n"), 0o600))
-				require.NoError(t, tailTick(t.Context(), path, &out, &warnings, state, &cronLogFilter{}))
-				require.Equal(t, "{\"n\":1}\n{\"n\":2}\n{\"n\":3}\n{\"n\":4}\n", out.String())
-				require.Empty(t, warnings.String())
-			})
-		}
-	}
-}
-
-func TestLogTailFirstTickRetainsHistory(t *testing.T) {
-	for _, rotatedSnapshot := range []bool{false, true} {
-		t.Run("rotated snapshot="+strconv.FormatBool(rotatedSnapshot), func(t *testing.T) {
-			dir := t.TempDir()
-			path := filepath.Join(dir, "dispatch.jsonl")
-			if rotatedSnapshot {
-				require.NoError(t, os.WriteFile(path+".1", []byte("{\"n\":0}\n"), 0o600))
-			}
-			var out, warnings bytes.Buffer
-			mark, err := readDaemonLogSnapshot(t.Context(), logSource{dir, "dispatch.jsonl"}, &out, &warnings, 10, &cronLogFilter{}, true)
-			require.NoError(t, err)
-			state := &followState{prevInfo: mark.info, prevSize: mark.size, prevFile: mark.file}
-			t.Cleanup(state.close)
-			if rotatedSnapshot {
-				require.NoError(t, os.Rename(path+".1", path+".2"))
-			}
-			require.NoError(t, os.WriteFile(path+".1", []byte("{\"n\":1}\n"), 0o600))
-			require.NoError(t, os.WriteFile(path, nil, 0o600))
-			require.NoError(t, tailTick(t.Context(), path, &out, &warnings, state, &cronLogFilter{}))
-			want := "{\"n\":1}\n"
-			if rotatedSnapshot {
-				want = "{\"n\":0}\n" + want
-			}
-			require.Equal(t, want, out.String())
-			require.NoError(t, tailTick(t.Context(), path, &out, &warnings, state, &cronLogFilter{}))
-			require.Equal(t, want, out.String(), "next poll must not replay retained history")
-		})
-	}
 }

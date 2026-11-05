@@ -119,16 +119,16 @@ func checkRecurringDispatchDecisions(t *testing.T, s db.Storage) error {
 	check("parent_deleted", 0)
 	_, e = q.ExecContext(ctx, `UPDATE issues SET deleted_at=NULL WHERE id=$1`, parent.ID)
 	require.NoError(t, e)
+	_, _, e = s.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: p.ID, Actor: "operator", Force: true})
+	require.NoError(t, e)
+	check("project_unavailable", 0)
+	_, _, _, e = s.RestoreProject(ctx, p.ID, "operator")
+	require.NoError(t, e)
 	_, e = s.EnableProjectFederation(ctx, p.ID, "operator")
 	require.NoError(t, e)
 	_, e = q.ExecContext(ctx, `UPDATE federation_bindings SET enabled=0 WHERE project_id=$1`, p.ID)
 	require.NoError(t, e)
 	check("binding_disabled", 0)
-	_, e = q.ExecContext(ctx, `UPDATE federation_bindings SET role='spoke',hub_project_id=1,hub_url='https://daemon.example' WHERE project_id=$1`, p.ID)
-	require.NoError(t, e)
-	check("replica", 0)
-	in.ProjectID = -1
-	check("project_unavailable", 0)
 	return nil
 }
 

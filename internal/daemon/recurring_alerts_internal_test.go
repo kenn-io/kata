@@ -57,28 +57,27 @@ func TestRecurringAlertsPreserveErrorsAndSuppressOnlyRepeats(t *testing.T) {
 	require.ErrorContains(t, result.err, "ordinary listing failure")
 	require.ErrorContains(t, result.alert, "ordinary listing failure")
 	require.NotContains(t, result.alert.Error(), "changed failure")
-}
-
-func TestRecurringOnErrorOncePerChange(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		store := &recurringAlertStore{}
-		r := NewCronDispatchRecorder(filepath.Join(t.TempDir(), "dispatch.jsonl"))
-		t.Cleanup(func() { require.NoError(t, r.Close()) })
-		s := NewDueNotificationSweeper(store, EventPublisher{}, "UTC")
-		s.CronRecorder = r
-		s.Interval = time.Millisecond
-		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-		defer cancel()
-		alerts := 0
-		s.OnError = func(error) {
-			alerts++
-			if alerts == 2 {
-				cancel()
+	t.Run("OnError once per change", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			store := &recurringAlertStore{}
+			r := NewCronDispatchRecorder(filepath.Join(t.TempDir(), "dispatch.jsonl"))
+			t.Cleanup(func() { require.NoError(t, r.Close()) })
+			s := NewDueNotificationSweeper(store, EventPublisher{}, "UTC")
+			s.CronRecorder = r
+			s.Interval = time.Millisecond
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			alerts := 0
+			s.OnError = func(error) {
+				alerts++
+				if alerts == 2 {
+					cancel()
+				}
 			}
-		}
-		require.ErrorIs(t, s.Run(ctx), context.Canceled)
-		require.Equal(t, 2, alerts)
-		require.GreaterOrEqual(t, store.calls, 3)
+			require.ErrorIs(t, s.Run(ctx), context.Canceled)
+			require.Equal(t, 2, alerts)
+			require.GreaterOrEqual(t, store.calls, 3)
+		})
 	})
 }
 
@@ -106,7 +105,7 @@ func TestCanceledSweepRetainsEnumeratedObservation(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	candidate := db.RecurringCronCandidate{ProjectID: 1, JobUID: "retained", ExpectedEventUID: "revision"}
 	absent := db.RecurringCronCandidate{ProjectID: 1, JobUID: "absent"}
-	out := db.DispatchRecurringCronOut{Reason: cron.DispatchDelivered, Delivered: 2, Skipped: cron.RecurringSkip{Count: 3, Capped: true}}
+	out := db.DispatchRecurringCronOut{Reason: cron.DispatchDelivered, Delivered: 2, Skipped: cron.RecurringSkip{Count: 1000, Capped: true}}
 	for _, c := range []db.RecurringCronCandidate{candidate, absent} {
 		_, err := r.Record(t.Context(), c, out, nil, now)
 		require.NoError(t, err)

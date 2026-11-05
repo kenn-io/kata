@@ -35,9 +35,13 @@ func TestCronDispatchExplanationProjectScopedRead(t *testing.T) {
 			foreign, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: other.ID, Name: "Private", Actor: "operator", Definition: cronHTTPDefinition(t)})
 			require.NoError(t, err)
 			if role != "local" {
-				_, err = env.DB.EnableProjectFederation(t.Context(), p.ID, "operator")
+				if role == "spoke" {
+					_, err = env.DB.AdoptProjectIntoFederation(t.Context(), db.AdoptProjectIntoFederationParams{ProjectID: p.ID, HubURL: "https://daemon.example", HubProjectID: 1, HubProjectUID: "01ARZ3NDEKTSV4RRFFQ69G5FAB", Actor: "operator"})
+				} else {
+					_, err = env.DB.EnableProjectFederation(t.Context(), p.ID, "operator")
+				}
 				require.NoError(t, err)
-				_, err = env.DB.ExecContext(t.Context(), `UPDATE federation_bindings SET role=$1,enabled=0,hub_project_id=CASE WHEN $1='spoke' THEN 1 ELSE 0 END,hub_url=CASE WHEN $1='spoke' THEN 'https://daemon.example' ELSE '' END WHERE project_id=$2`, role, p.ID)
+				_, err = env.DB.ExecContext(t.Context(), `UPDATE federation_bindings SET enabled=0 WHERE project_id=$1`, p.ID)
 				require.NoError(t, err)
 			}
 			host := &capabilitiesReadHost{projectID: p.ID}
@@ -65,20 +69,22 @@ func TestCronDispatchExplanationProjectScopedRead(t *testing.T) {
 			require.False(t, host.calls[0].Policy.Mutation)
 		})
 	}
+	t.Run("lowercase job UID", func(t *testing.T) {
+		env := testenv.New(t)
+		p, err := env.DB.CreateProject(t.Context(), "spoke-project")
+		require.NoError(t, err)
+		job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Name: "Inspect", Actor: "operator", Definition: cronHTTPDefinition(t)})
+		require.NoError(t, err)
+		status, raw := cronHTTP(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s/dispatch", p.ID, strings.ToLower(job.UID)), nil)
+		require.Equalf(t, 200, status, "%s", raw)
+		require.Contains(t, string(raw), job.UID)
+	})
 }
 
 type failingExplanationStore struct{ db.Storage }
 
 func (s failingExplanationStore) ExplainRecurringCron(context.Context, int64, string, time.Time) (db.RecurringExplanation, error) {
 	return db.RecurringExplanation{Reason: cron.DispatchError, Detail: cron.DispatchError.PublicDetail()}, errors.New("local-sensitive-detail")
-}
-
-// Invalid persisted progress is an explanation result; polling it must not
-// emit the same error-level diagnostic on every read.
-type invalidProgressExplanationStore struct{ db.Storage }
-
-func (s invalidProgressExplanationStore) ExplainRecurringCron(context.Context, int64, string, time.Time) (db.RecurringExplanation, error) {
-	return db.RecurringExplanation{Reason: cron.DispatchProgressInvalid, Detail: cron.DispatchProgressInvalid.PublicDetail()}, fmt.Errorf("%w: corrupt recurring progress", cron.ErrInvalid)
 }
 
 type archiveBeforeExplanationStore struct {
@@ -102,9 +108,13 @@ func TestCronDispatchExplanationProjectArchivedAfterPreflight(t *testing.T) {
 			job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Name: "Inspect", Actor: "operator", Definition: cronHTTPDefinition(t)})
 			require.NoError(t, err)
 			if role != "local" {
-				_, err = env.DB.EnableProjectFederation(t.Context(), p.ID, "operator")
+				if role == "spoke" {
+					_, err = env.DB.AdoptProjectIntoFederation(t.Context(), db.AdoptProjectIntoFederationParams{ProjectID: p.ID, HubURL: "https://daemon.example", HubProjectID: 1, HubProjectUID: "01ARZ3NDEKTSV4RRFFQ69G5FAB", Actor: "operator"})
+				} else {
+					_, err = env.DB.EnableProjectFederation(t.Context(), p.ID, "operator")
+				}
 				require.NoError(t, err)
-				_, err = env.DB.ExecContext(t.Context(), `UPDATE federation_bindings SET role=$1,enabled=0,hub_project_id=CASE WHEN $1='spoke' THEN 1 ELSE 0 END,hub_url=CASE WHEN $1='spoke' THEN 'https://daemon.example' ELSE '' END WHERE project_id=$2`, role, p.ID)
+				_, err = env.DB.ExecContext(t.Context(), `UPDATE federation_bindings SET enabled=0 WHERE project_id=$1`, p.ID)
 				require.NoError(t, err)
 			}
 			server := daemon.NewServer(daemon.ServerConfig{DB: archiveBeforeExplanationStore{Storage: env.DB, archive: func() error {
@@ -157,11 +167,14 @@ func TestCronDispatchExplanationRedactsFailureAndObservation(t *testing.T) {
 		env := testenv.New(t)
 		p, err := env.DB.CreateProject(t.Context(), "example-project")
 		require.NoError(t, err)
+		job := nativeDispatchJob(t, env.DB, p.ID)
+		_, err = env.DB.ExecContext(t.Context(), `UPDATE issues SET metadata='{}' WHERE uid=$1`, job.Definition.Issue.ParentUID)
+		require.NoError(t, err)
 		var logs bytes.Buffer
-		server := daemon.NewServer(daemon.ServerConfig{DB: invalidProgressExplanationStore{env.DB}, Logger: slog.New(slog.NewTextHandler(&logs, nil))})
+		server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, Logger: slog.New(slog.NewTextHandler(&logs, nil))})
 		t.Cleanup(func() { require.NoError(t, server.Close()) })
 		for range 2 {
-			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/jobs/01K5ZN7SP700000000000000001/dispatch", p.ID), nil)
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s/dispatch", p.ID, job.UID), nil)
 			response := httptest.NewRecorder()
 			server.Handler().ServeHTTP(response, request)
 			require.Equal(t, http.StatusOK, response.Code)
@@ -177,23 +190,19 @@ func TestCronDispatchExplanationRedactsFailureAndObservation(t *testing.T) {
 		require.NoError(t, err)
 		_, err = env.DB.ExecContext(t.Context(), `UPDATE cron_jobs SET definition_json=$1 WHERE uid=$2`, `{"version":1,"local-sensitive-detail":true}`, job.UID)
 		require.NoError(t, err)
-		status, raw := cronHTTP(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s/dispatch", p.ID, job.UID), nil)
-		require.Equalf(t, http.StatusOK, status, "%s", raw)
+		var logs bytes.Buffer
+		server := daemon.NewServer(daemon.ServerConfig{DB: env.DB, Logger: slog.New(slog.NewTextHandler(&logs, nil))})
+		t.Cleanup(func() { require.NoError(t, server.Close()) })
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s/dispatch", p.ID, job.UID), nil)
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		require.Equalf(t, http.StatusOK, response.Code, "%s", response.Body.String())
+		raw := response.Body.Bytes()
+		require.Empty(t, logs.String(), "expected invalid-state explanations must not flood daemon logs")
 		var body api.CronDispatchExplanation
 		require.NoError(t, json.Unmarshal(raw, &body))
 		require.Equal(t, cron.DispatchScheduleInvalid, body.Gate.Reason)
 		require.Equal(t, cron.DispatchScheduleInvalid.PublicDetail(), body.Gate.Detail)
 		require.NotContains(t, string(raw), "local-sensitive-detail")
 	})
-}
-
-func TestCronDispatchExplanationNormalizesJobUID(t *testing.T) {
-	env := testenv.New(t)
-	p, err := env.DB.CreateProject(t.Context(), "spoke-project")
-	require.NoError(t, err)
-	job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: p.ID, Name: "Inspect", Actor: "operator", Definition: cronHTTPDefinition(t)})
-	require.NoError(t, err)
-	status, raw := cronHTTP(t, env, http.MethodGet, fmt.Sprintf("/api/v1/projects/%d/cron/jobs/%s/dispatch", p.ID, strings.ToLower(job.UID)), nil)
-	require.Equalf(t, 200, status, "%s", raw)
-	require.Contains(t, string(raw), job.UID)
 }

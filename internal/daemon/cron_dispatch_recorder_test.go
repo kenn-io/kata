@@ -183,18 +183,18 @@ func TestCronRecorderEnumerationFreshnessAndLowerBound(t *testing.T) {
 	require.NoError(t, err)
 	r.FinishCycle(now, 0, false, false) // one successfully listed page
 	r.FinishCycle(now.Add(time.Minute), 0, false, true)
-	raw, err := json.Marshal(r.Health())
+	health := r.Health()
+	require.Equal(t, now, health.LastEnumerationAt)
+	require.EqualValues(t, 1, health.EnumerationErrorsSinceStart)
+	// The HTTP health test covers enumeration JSON keys, but does not exercise
+	// a capped skip. Keep the wire assertion for that distinct field here.
+	raw, err := json.Marshal(health)
 	require.NoError(t, err)
-	var health map[string]any
-	require.NoError(t, json.Unmarshal(raw, &health))
-	require.Equal(t, now.Format(time.RFC3339), health["last_enumeration_at"])
-	require.EqualValues(t, 1, health["enumeration_errors_since_start"])
-	require.Equal(t, true, health["skipped_count_is_lower_bound"])
+	var serialized map[string]any
+	require.NoError(t, json.Unmarshal(raw, &serialized))
+	require.Equal(t, true, serialized["skipped_count_is_lower_bound"])
 	r.FinishCycle(now.Add(2*time.Minute), 0, true, false)
-	raw, err = json.Marshal(r.Health())
-	require.NoError(t, err)
-	require.NoError(t, json.Unmarshal(raw, &health))
-	require.Equal(t, true, health["skipped_count_is_lower_bound"], "lifetime count remains approximate after pruning")
+	require.True(t, r.Health().SkippedCountIsLowerBound, "lifetime count remains approximate after pruning")
 }
 
 // A recorder restart has no previous decision to transition from. Idle jobs
@@ -236,7 +236,7 @@ func TestCronRecorderIdleTransitionHistory(t *testing.T) {
 		wantIdleRecords int
 	}{
 		{name: "delivered", out: db.DispatchRecurringCronOut{Reason: cron.DispatchDelivered, Delivered: 1}},
-		{name: "skipped", out: db.DispatchRecurringCronOut{Reason: cron.DispatchSkipped, Skipped: cron.RecurringSkip{Count: 3, Capped: true}}},
+		{name: "skipped", out: db.DispatchRecurringCronOut{Reason: cron.DispatchSkipped, Skipped: cron.RecurringSkip{Count: 1000, Capped: true}}},
 		{name: "scanning", out: db.DispatchRecurringCronOut{Reason: cron.DispatchScanning}},
 		{name: "failure recovery", out: db.DispatchRecurringCronOut{Reason: cron.DispatchError}, err: errors.New("dispatch failed"), wantIdleRecords: 1},
 		{name: "definition change", out: db.DispatchRecurringCronOut{Reason: cron.DispatchDelivered, Delivered: 1}, newRevision: true, wantIdleRecords: 1},

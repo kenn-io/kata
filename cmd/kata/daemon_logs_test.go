@@ -373,7 +373,7 @@ func TestRunHookLogOnce_Mark_RetainsNewestFile(t *testing.T) {
 			if !mark.set {
 				t.Fatal("mark must retain the newest file")
 			}
-			if tc.file == "runs.jsonl" && mark.size != int64(len(tc.contents)) {
+			if mark.size != int64(len(tc.contents)) {
 				t.Fatalf("mark.size = %d, want %d", mark.size, len(tc.contents))
 			}
 		})

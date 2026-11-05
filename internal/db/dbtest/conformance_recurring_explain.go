@@ -101,15 +101,6 @@ func checkRecurringExplain(t *testing.T, s db.Storage) error {
 	_, e = q.ExecContext(ctx, `UPDATE federation_bindings SET enabled=0 WHERE project_id=$1`, p.ID)
 	require.NoError(t, e)
 	check("binding_disabled", false)
-	_, e = q.ExecContext(ctx, `UPDATE federation_bindings SET role='spoke',hub_project_id=1,hub_url='https://daemon.example' WHERE project_id=$1`, p.ID)
-	require.NoError(t, e)
-	check("replica", false)
-	missing, e := s.ExplainRecurringCron(ctx, p.ID, "01K5ZN7SP700000000000000001", now)
-	require.NoError(t, e)
-	require.Equal(t, cron.DispatchJobMissing, missing.Reason, "explanation checks membership inside its read snapshot before early authority gates")
-	out, e := s.ExplainRecurringCron(ctx, -1, job.UID, now)
-	require.NoError(t, e)
-	require.Equal(t, "project_unavailable", string(out.Reason))
 	return nil
 }
 
@@ -122,14 +113,10 @@ func checkRecurringExplainArchivedBinding(t *testing.T, s db.Storage) error {
 	q := s.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	})
-	for _, role := range []string{"spoke", "hub"} {
-		t.Run(role, func(t *testing.T) {
-			_, err := q.ExecContext(t.Context(), `UPDATE federation_bindings SET role=$1,enabled=0,hub_project_id=CASE WHEN $1='spoke' THEN 1 ELSE 0 END,hub_url=CASE WHEN $1='spoke' THEN 'https://daemon.example' ELSE '' END WHERE project_id=$2`, role, p.ID)
-			require.NoError(t, err)
-			out, err := s.ExplainRecurringCron(t.Context(), p.ID, job.UID, progress.Anchor)
-			require.NoError(t, err)
-			require.Equal(t, cron.DispatchProjectUnavailable, out.Reason)
-		})
-	}
+	_, err = q.ExecContext(t.Context(), `UPDATE federation_bindings SET enabled=0 WHERE project_id=$1`, p.ID)
+	require.NoError(t, err)
+	out, err := s.ExplainRecurringCron(t.Context(), p.ID, job.UID, progress.Anchor)
+	require.NoError(t, err)
+	require.Equal(t, cron.DispatchProjectUnavailable, out.Reason)
 	return nil
 }

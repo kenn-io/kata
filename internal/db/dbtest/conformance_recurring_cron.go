@@ -447,6 +447,8 @@ func checkRecurringFederation(t *testing.T, hub db.Storage, b Backend) error {
 	out, e := peer.DispatchRecurringCron(ctx, in)
 	require.NoError(t, e)
 	require.Empty(t, out.Events)
+	require.Equal(t, cron.DispatchReplica, out.Reason)
+	require.Zero(t, out.Delivered)
 	// A retained disabled binding is still a replica, even when generic writes pass.
 	q := peer.(interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
@@ -456,6 +458,52 @@ func checkRecurringFederation(t *testing.T, hub db.Storage, b Backend) error {
 	out, e = peer.DispatchRecurringCron(ctx, in)
 	require.NoError(t, e)
 	require.Empty(t, out.Events)
+	require.Equal(t, cron.DispatchReplica, out.Reason)
+	require.Zero(t, out.Delivered)
+	// Preserve the deleted-job replica input from the explain scenario as well
+	// as the live-job dispatch input. A job tombstone must not outrank authority.
+	replayDeletion := func(deleted bool) {
+		t.Helper()
+		var events []db.Event
+		job, events, e = hub.PutCronJob(ctx, db.PutCronJob{UID: job.UID, ProjectID: p.ID, Name: job.Name, Definition: job.Definition, ExpectedEventUID: job.DefinitionEventUID, Actor: "operator", Deleted: deleted})
+		require.NoError(t, e)
+		for _, event := range events {
+			_, err := peer.InsertRemoteEvent(ctx, adopted.Project.ID, portableNativeEvent(event))
+			require.NoError(t, err)
+		}
+		require.NoError(t, peer.MaterializeFederatedProject(ctx, adopted.Project.ID))
+	}
+	// The moved decision scenarios used a disabled binding without push. Keep
+	// that input too; the earlier disabled-binding check deliberately enables it.
+	_, e = q.ExecContext(ctx, `UPDATE federation_bindings SET push_enabled=0 WHERE project_id=$1`, adopted.Project.ID)
+	require.NoError(t, e)
+	out, e = peer.DispatchRecurringCron(ctx, in)
+	require.NoError(t, e)
+	require.Empty(t, out.Events)
+	require.Equal(t, cron.DispatchReplica, out.Reason)
+	require.Zero(t, out.Delivered)
+	replayDeletion(true)
+	beforeExplain, e := peer.MaxEventID(ctx)
+	require.NoError(t, e)
+	originalParent, e := peer.IssueByUID(ctx, job.Definition.Issue.ParentUID, db.IncludeDeletedNo)
+	require.NoError(t, e)
+	readCtx := db.WithTransactionFence(ctx, func(context.Context, db.Transaction) error { return errors.New("write fence must not run") })
+	explanation, e := peer.ExplainRecurringCron(readCtx, in.ProjectID, in.JobUID, in.Now)
+	require.NoError(t, e)
+	require.Equal(t, cron.DispatchReplica, explanation.Reason)
+	require.Equal(t, explanation.Reason.PublicDetail(), explanation.Detail)
+	afterExplain, e := peer.MaxEventID(ctx)
+	require.NoError(t, e)
+	require.Equal(t, beforeExplain, afterExplain)
+	currentParent, e := peer.IssueByID(ctx, originalParent.ID)
+	require.NoError(t, e)
+	require.Equal(t, originalParent.Revision, currentParent.Revision)
+	require.Equal(t, originalParent.Metadata, currentParent.Metadata)
+	missing, e := peer.ExplainRecurringCron(ctx, in.ProjectID, "01K5ZN7SP700000000000000001", in.Now)
+	require.NoError(t, e)
+	require.Equal(t, cron.DispatchJobMissing, missing.Reason, "membership precedes replica authority")
+	_, e = q.ExecContext(ctx, `UPDATE federation_bindings SET push_enabled=1 WHERE project_id=$1`, adopted.Project.ID)
+	require.NoError(t, e)
 	candidate, e = peer.ListRecurringCronJobs(ctx, "", 100)
 	require.NoError(t, e)
 	require.Empty(t, candidate)
@@ -471,6 +519,15 @@ func checkRecurringFederation(t *testing.T, hub db.Storage, b Backend) error {
 	after, e := hub.MaxEventID(ctx)
 	require.NoError(t, e)
 	require.Equal(t, before, after)
+	replayDeletion(false)
+	_, e = q.ExecContext(ctx, `UPDATE federation_bindings SET push_enabled=0 WHERE project_id=$1`, adopted.Project.ID)
+	require.NoError(t, e)
+	// A real archived spoke must report project availability before its binding.
+	_, _, e = peer.RemoveProject(ctx, db.RemoveProjectParams{ProjectID: in.ProjectID, Actor: "operator", Force: true})
+	require.NoError(t, e)
+	explanation, e = peer.ExplainRecurringCron(ctx, in.ProjectID, in.JobUID, in.Now)
+	require.NoError(t, e)
+	require.Equal(t, cron.DispatchProjectUnavailable, explanation.Reason)
 	return nil
 }
 
