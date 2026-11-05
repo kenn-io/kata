@@ -2003,6 +2003,13 @@ A complete issue read on a spoke, including `kata show`, makes an optional
 lease-status refresh from the hub. That refresh gets a 500 ms budget; if it
 times out or the hub is unavailable, the read still returns the locally cached
 lease state.
+On main, local cache updates share an outer 600 ms optional-work budget,
+including the 500 ms hub request. A busy local writer or a federation endpoint
+change therefore leaves the read using its committed local cache. Cache
+transactions already committed remain visible if a later update times out.
+When the cache is available, failed hub refreshes still record their retry
+suppression marker. Caller cancellation and local authorization or storage
+errors remain errors.
 This is a budget for the optional hub refresh, not a deadline for the complete
 issue read. Project-local projections such as `kata meta get` do not perform
 the refresh.
