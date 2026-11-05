@@ -84,7 +84,7 @@ func checkCronExecution(ctx context.Context, cfg ServerConfig, project db.Projec
 	for _, id := range workflows {
 		workflow, readErr := cfg.DB.CronWorkflow(ctx, project.ID, id)
 		if errors.Is(readErr, db.ErrNotFound) {
-			return nil // The store validates definition references.
+			continue // Check remaining workflows; the store validates definition references.
 		}
 		if readErr != nil {
 			return readErr

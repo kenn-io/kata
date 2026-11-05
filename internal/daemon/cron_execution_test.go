@@ -74,6 +74,7 @@ func TestCronExecutionNewRunPolicy(t *testing.T) {
 		workflowAuthor, editor   string
 		stale, missingJob        bool
 		actionWorkflow           bool
+		missingActionWorkflow    bool
 		workflow, deleted, relay bool
 		want                     int
 	}{
@@ -97,6 +98,7 @@ func TestCronExecutionNewRunPolicy(t *testing.T) {
 		{name: "execute with owned body workflow", mode: "owned", author: "company-member", kind: "execute", workflow: true, workflowAuthor: "company-member", want: 200},
 		{name: "owned job foreign action workflow", mode: "owned", author: "company-member", actionWorkflow: true, workflowAuthor: "other-member", want: 403},
 		{name: "owned job owned action workflow", mode: "owned", author: "company-member", actionWorkflow: true, workflowAuthor: "company-member", want: 200},
+		{name: "owned job missing action workflow with foreign body workflow", mode: "owned", author: "company-member", actionWorkflow: true, missingActionWorkflow: true, workflow: true, workflowAuthor: "other-member", want: 403},
 		{name: "tombstone", mode: "owned", author: "company-member", deleted: true, want: 200},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -135,6 +137,11 @@ func TestCronExecutionNewRunPolicy(t *testing.T) {
 				}
 				job, _, err := env.DB.PutCronJob(t.Context(), db.PutCronJob{ProjectID: project.ID, Name: "Review", Actor: tc.author, Definition: def})
 				require.NoError(t, err)
+				if tc.missingActionWorkflow {
+					// Restored definitions can reference workflows absent from this store.
+					_, err = env.DB.ExecContext(t.Context(), `UPDATE cron_jobs SET definition_json = json_set(definition_json, '$.action.workflow_uid', ?) WHERE uid = ?`, cronHTTPUID(t), job.UID)
+					require.NoError(t, err)
+				}
 				oldEvent := job.DefinitionEventUID
 				if tc.stale || tc.editor != "" && !tc.actionWorkflow {
 					actor := tc.editor
