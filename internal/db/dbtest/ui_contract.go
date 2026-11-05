@@ -77,6 +77,23 @@ func RunUISnapshotGraphReachContract(t *testing.T, open func(*testing.T) db.Stor
 			require.ElementsMatch(t, tc.links, links)
 		})
 	}
+	t.Run("cycle", func(t *testing.T) {
+		createCursorLink(ctx, t, store, source, b, "related")
+		snapshot, err := store.(db.UIStore).ReadUISnapshot(ctx, db.UISnapshotQuery{
+			View: "all-open", IncludeGraph: true, SelectedIssueUID: source.UID,
+		})
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{source.UID, a.UID, b.UID, p.UID, q.UID}, uiIssueUIDs(snapshot.GraphIssues))
+		links := make([][3]string, 0, len(snapshot.GraphLinks))
+		for _, link := range snapshot.GraphLinks {
+			links = append(links, [3]string{link.FromIssueUID, link.ToIssueUID, link.Type})
+		}
+		require.ElementsMatch(t, [][3]string{
+			{source.UID, a.UID, "blocks"}, {b.UID, a.UID, "parent"},
+			{source.UID, p.UID, "related"}, {p.UID, q.UID, "blocks"},
+			{source.UID, b.UID, "related"},
+		}, links)
+	})
 }
 
 // RunUISnapshotCompletenessContract verifies that an unbounded browser
