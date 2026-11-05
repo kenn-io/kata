@@ -65,7 +65,7 @@ func relayCheckpointActorBoundTx(ctx context.Context, tx *sql.Tx, projectID int6
 // relayCheckpointSizeTx serializes retained history plus the baseline a
 // capture would add and measures the result against the capacity.
 func (d *Store) relayCheckpointSizeTx(ctx context.Context, tx *sql.Tx, project db.Project, actor string) (db.RelayCheckpointSize, error) {
-	records, err := d.relayCheckpointRecordsTx(ctx, tx, project, math.MaxInt64)
+	records, err := d.relayCheckpointRecordsTx(ctx, tx, project, math.MaxInt64, false)
 	if err != nil {
 		return db.RelayCheckpointSize{}, err
 	}
@@ -109,13 +109,15 @@ func (d *Store) relayCheckpointIssuesTx(ctx context.Context, tx *sql.Tx, project
 // relayCheckpointRecordsTx loads every record a root checkpoint for project
 // serializes. Portable events below boundaryID are retained history; events at
 // or above it are the current-state records a checkpoint creation just wrote.
-func (d *Store) relayCheckpointRecordsTx(ctx context.Context, tx *sql.Tx, project db.Project, boundaryID int64) (db.RelayCheckpointRecords, error) {
+// metadataOnly loads just the metadata carriers needed for tally-key inventory,
+// without the provenance and artifacts that only the final snapshot needs.
+func (d *Store) relayCheckpointRecordsTx(ctx context.Context, tx *sql.Tx, project db.Project, boundaryID int64, metadataOnly bool) (db.RelayCheckpointRecords, error) {
 	var records db.RelayCheckpointRecords
 	crosses := func(event db.RemoteEvent) (bool, error) {
 		return relayEventCrossesProjectTx(ctx, tx, project.ID, event)
 	}
 	for after := int64(0); ; {
-		events, err := relayCheckpointEventPageTx(ctx, tx, project.ID, after)
+		events, err := relayCheckpointEventPageTx(ctx, tx, project.ID, after, metadataOnly)
 		if err != nil {
 			return records, err
 		}
@@ -127,6 +129,9 @@ func (d *Store) relayCheckpointRecordsTx(ctx context.Context, tx *sql.Tx, projec
 		}
 		after = events[len(events)-1].ID
 	}
+	if metadataOnly {
+		return records, nil
+	}
 	var err error
 	records.Provenance, err = relayCheckpointProvenanceTx(ctx, tx, project.UID)
 	if err != nil {
@@ -136,12 +141,17 @@ func (d *Store) relayCheckpointRecordsTx(ctx context.Context, tx *sql.Tx, projec
 	return records, err
 }
 
-// relayCheckpointEventPageTx reads one page of portable events after an id.
+// relayCheckpointEventPageTx reads one page of portable events after an id,
+// restricted to metadata carriers when metadataOnly is true.
 // Pages are closed before the records are encoded, so the per-event boundary
 // checks never run against an open cursor.
-func relayCheckpointEventPageTx(ctx context.Context, tx *sql.Tx, projectID, after int64) ([]db.Event, error) {
+func relayCheckpointEventPageTx(ctx context.Context, tx *sql.Tx, projectID, after int64, metadataOnly bool) ([]db.Event, error) {
+	types := pgFederationPushEventTypeCondition("e.type")
+	if metadataOnly {
+		types += " AND e.type IN ('project.metadata_updated','project.federation_enabled')"
+	}
 	// #nosec G202 -- The event-type predicate is fixed native SQL; all project and cursor values remain bound.
-	rows, err := tx.QueryContext(ctx, eventSelect+` WHERE e.project_id=$1 AND e.id>$2 AND `+pgFederationPushEventTypeCondition("e.type")+` ORDER BY e.id LIMIT $3`, projectID, after, relayCheckpointEventPage)
+	rows, err := tx.QueryContext(ctx, eventSelect+` WHERE e.project_id=$1 AND e.id>$2 AND `+types+` ORDER BY e.id LIMIT $3`, projectID, after, relayCheckpointEventPage)
 	if err != nil {
 		return nil, err
 	}

@@ -175,9 +175,9 @@ func (p RelayResetProtocol) captureRootCheckpoint(ctx context.Context, create re
 	if err != nil {
 		return RelayResetCheckpoint{}, err
 	}
-	// Inspect retained history before writing the replacement pair. A second
-	// read afterward includes the pair and its exact provenance receipts.
-	records, err := p.Backend.RelayCheckpointRecords(ctx, project, boundary.ID)
+	// Inventory metadata carriers before writing the replacement pair. Load
+	// complete history, provenance and artifacts only after the pair exists.
+	records, err := p.Backend.RelayCheckpointRecords(ctx, project, boundary.ID, true)
 	if err != nil {
 		return RelayResetCheckpoint{}, err
 	}
@@ -216,7 +216,7 @@ func (p RelayResetProtocol) captureRootCheckpoint(ctx context.Context, create re
 	if err := p.Backend.InsertRelayCheckpointStateEvent(capture, state); err != nil {
 		return RelayResetCheckpoint{}, err
 	}
-	records, err = p.Backend.RelayCheckpointRecords(ctx, project, boundary.ID)
+	records, err = p.Backend.RelayCheckpointRecords(ctx, project, boundary.ID, false)
 	if err != nil {
 		return RelayResetCheckpoint{}, err
 	}

@@ -214,8 +214,7 @@ func (d *Store) patchProjectMetadata(ctx context.Context, in db.PatchProjectMeta
 	if err := db.RejectCronTallyPatch(in.Patch); err != nil {
 		return db.PatchProjectMetadataOut{}, err
 	}
-	// Preserve public preflight validation before opening a transaction. The
-	// internal helper also validates patches supplied by lifecycle writers.
+	// Validate public patches before opening a transaction.
 	for key, raw := range in.Patch {
 		if err := metadata.Validate(metadata.ProjectRegistry, key, raw); err != nil {
 			return db.PatchProjectMetadataOut{}, fmt.Errorf("validate %q: %w", key, err)
@@ -245,11 +244,6 @@ func (d *Store) patchProjectMetadataTx(ctx context.Context, tx *sql.Tx, in db.Pa
 // Adoption may need a replay correction although the root row is unchanged.
 func (d *Store) patchProjectMetadataTxReassert(ctx context.Context, tx *sql.Tx, in db.PatchProjectMetadataIn, reassertTallies bool) (db.PatchProjectMetadataOut, error) {
 	var out db.PatchProjectMetadataOut
-	for key, raw := range in.Patch {
-		if err := metadata.Validate(metadata.ProjectRegistry, key, raw); err != nil {
-			return out, fmt.Errorf("validate %q: %w", key, err)
-		}
-	}
 	var (
 		curMetadata string
 		curRevision int64

@@ -1,8 +1,8 @@
 package db
 
 import (
-	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"fmt"
 	"strings"
 )
 
@@ -25,18 +25,10 @@ func CronTallyResetClearPayload(project Project, records RelayCheckpointRecords)
 			if err != nil {
 				return "", err
 			}
-			if _, _, err := CronTallyEventMetadata(event); err != nil {
-				return "", err
+			if err := ValidateCronTallyEvent(event); err != nil {
+				return "", fmt.Errorf("%w: %v", ErrFederationIngestValidation, err)
 			}
-			payload := PayloadMap(event.Payload)
-			var fields map[string]jsontext.Value
-			switch event.Type {
-			case "project.metadata_updated":
-				fields = PayloadMap(payload["diff"])
-			case "project.federation_enabled":
-				fields = PayloadMap(payload["metadata"])
-			}
-			for key := range fields {
+			for key := range cronTallyEventFields(event) {
 				if strings.HasPrefix(key, CronTallyPrefix) {
 					keys[key] = true
 				}

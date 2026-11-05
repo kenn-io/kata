@@ -47,8 +47,8 @@ func (b relayResetBackend) InsertRelayCheckpointStateEvent(ctx context.Context, 
 	return err
 }
 
-func (b relayResetBackend) RelayCheckpointRecords(ctx context.Context, project db.Project, boundaryID int64) (db.RelayCheckpointRecords, error) {
-	return b.d.relayCheckpointRecordsTx(ctx, b.tx, project, boundaryID)
+func (b relayResetBackend) RelayCheckpointRecords(ctx context.Context, project db.Project, boundaryID int64, metadataOnly bool) (db.RelayCheckpointRecords, error) {
+	return b.d.relayCheckpointRecordsTx(ctx, b.tx, project, boundaryID, metadataOnly)
 }
 
 func (b relayResetBackend) RelayCheckpointCapacity() int64 {

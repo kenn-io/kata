@@ -250,7 +250,7 @@ func relayHistoryHasBoundaryAfterTx(ctx context.Context, tx *sql.Tx, projectID, 
 
 func relayHistoryCrossesProjectAfterTx(ctx context.Context, tx *sql.Tx, projectID, after int64) (bool, error) {
 	for {
-		events, err := relayCheckpointEventPageTx(ctx, tx, projectID, after)
+		events, err := relayCheckpointEventPageTx(ctx, tx, projectID, after, false)
 		if err != nil {
 			return false, err
 		}
