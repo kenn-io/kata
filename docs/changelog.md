@@ -19,7 +19,8 @@ All notable changes to kata, grouped by release. Versioned releases start with
 - Keep issue creation and missing short ID lookups fast as event history grows.
   Existing stores upgrade to schema 44 through SQLite's JSONL cutover or the
   [offline PostgreSQL migration](development/postgres-migrations.md#schema-44-reset-reference-lookup-index).
-- Keep creates and comments responsive during issue syncs by committing imports in smaller chunks.
+- Keep creates and comments responsive during issue syncs by committing imports
+  in smaller chunks.
 - Keep legacy spokes from adding stored sibling-project references after either
   project enrolls for relay. The hub rejects the whole fresh push batch with
   `400 validation` and identifies the offending event; accepted history,
