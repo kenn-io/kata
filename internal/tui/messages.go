@@ -209,6 +209,7 @@ type eventReceivedMsg struct {
 	projectUID      string
 	issueShortID    string
 	issueUID        string
+	recurrenceUID   string
 	relatedIssueUID string
 	commentUID      string
 	commentUIDs     []string

@@ -2893,9 +2893,9 @@ func (m *Model) maybeRefetchOpenDetail(msg eventReceivedMsg) tea.Cmd {
 		return nil
 	}
 	projectCommentArrival := msg.eventType == "issue.snapshot" || (m.issueScoped && msg.eventType == "issue.commented")
-	// Recurrences apply to multiple occurrences. Events naming only the
-	// recurrence also refresh an open recurring issue in the project.
-	recurrenceChange := m.detail.issue.RecurrenceID != nil && strings.HasPrefix(msg.eventType, "recurrence.")
+	// Refresh events for this recurrence, retrying when its read failed.
+	recurrenceChange := m.detail.issue.RecurrenceID != nil && strings.HasPrefix(msg.eventType, "recurrence.") &&
+		(m.detail.recurrence == nil || msg.recurrenceUID == m.detail.recurrence.UID)
 	ref := m.detail.issue.ShortID
 	uid := m.detail.issue.UID
 	if !msg.matchesIssue(ref, uid) && !commentMatch && !relationLifecycleMatch && !projectCommentArrival && !recurrenceChange {

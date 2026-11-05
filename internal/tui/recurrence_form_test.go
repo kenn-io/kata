@@ -557,6 +557,26 @@ func TestRecurrenceIncomingMutationRefreshesDetail(t *testing.T) {
 	require.NotContains(t, h.page(), "repeats:")
 	refresh(decodeEventReceived(frame{data: []byte(`{"type":"recurrence.materialized","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"issue_uid":"` + h.issue.UID + `","payload":{"recurrence_uid":"` + current.UID + `","issue_uid":"` + h.issue.UID + `"}}`)}))
 	require.Contains(t, h.page(), "repeats: FREQ=WEEKLY")
+	for _, eventType := range []string{"recurrence.updated", "recurrence.materialized", "recurrence.deleted"} {
+		event := decodeEventReceived(frame{data: []byte(`{"type":"` + eventType + `","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"payload":{"recurrence_uid":"another-recurrence"}}`)})
+		require.Nil(t, h.m.maybeRefetchOpenDetail(event), "another recurrence leaves the displayed repeat available")
+	}
+	h.open()
+	h.key(tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	_, err := recurrenceclient.Change(t.Context(), h.api, h.issue.ProjectID, current,
+		recurrenceclient.Terms{Rule: "FREQ=MONTHLY", Start: "2026-11-09", Zone: "Europe/Paris", Actor: "bob"})
+	require.NoError(t, err)
+	current = h.rows()[0]
+	refresh(decodeEventReceived(frame{data: []byte(`{"type":"recurrence.updated","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"payload":{"recurrence_uid":"` + current.UID + `"}}`)}))
+	require.Contains(t, h.page(), "repeats: FREQ=MONTHLY")
+
+	// A failed recurrence read leaves its identity unknown, so retry on events.
+	h.m.detail.recurrence = nil
+	h.m.detail.recurrenceErr = errors.New("repeat read failed")
+	refresh(decodeEventReceived(frame{data: []byte(`{"type":"recurrence.updated","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"payload":{"recurrence_uid":"another-recurrence"}}`)}))
+	require.Contains(t, h.page(), "repeats: FREQ=MONTHLY")
+	require.NoError(t, h.m.detail.recurrenceErr)
 	require.NoError(t, recurrenceclient.Stop(t.Context(), h.api, h.issue.ProjectID, current, "bob"))
 	refresh(decodeEventReceived(frame{data: []byte(`{"type":"recurrence.deleted","project_id":` + strconv.FormatInt(h.issue.ProjectID, 10) + `,"payload":{"recurrence_uid":"` + current.UID + `"}}`)}))
 	assert.NotContains(t, h.page(), "repeats:")
