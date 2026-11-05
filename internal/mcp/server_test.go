@@ -243,6 +243,26 @@ func TestTokenSectionRequiresExplicitStartupCapability(t *testing.T) {
 	require.True(t, output.Loaded)
 }
 
+func TestServerToolOutputSchemasAreObjects(t *testing.T) {
+	admin, err := storageadmin.New(storageadmin.Config{Root: t.TempDir(), SourceDSN: "source.db"})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, admin.Close()) })
+	session := connectTestServerWithOptions(t, Options{
+		Client: inertTestClient(t), Scope: NewAllScope(), EnableTokenAdmin: true, StorageAdmin: admin,
+		Actor: "example-agent", Version: "test-version",
+	})
+	result, err := session.ListTools(t.Context(), nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, result.Tools)
+	for _, tool := range result.Tools {
+		t.Run(tool.Name, func(t *testing.T) {
+			// MCP requires an object root, even when nested fields are nullable.
+			require.NotNil(t, tool.OutputSchema)
+			require.Equal(t, "object", schemaObject(t, tool.OutputSchema)["type"])
+		})
+	}
+}
+
 func TestServerPublishesCurrentToolsOnly(t *testing.T) {
 	session := connectTestServerWithOptions(t, Options{
 		Client: inertTestClient(t), Scope: NewAllScope(), EnableTokenAdmin: true,

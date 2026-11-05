@@ -60,15 +60,19 @@ func (h toolHandlers) cronNewUID(context.Context, *sdkmcp.CallToolRequest, CronP
 	id, err := kataclient.NewCronUID()
 	return successResult(), CronUIDOutput{UID: id}, err
 }
-func (h toolHandlers) cronCapabilities(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronProjectInput) (*sdkmcp.CallToolResult, *generated.GetCronCapabilitiesResponse, error) {
+func (h toolHandlers) cronCapabilities(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronProjectInput) (*sdkmcp.CallToolResult, generated.GetCronCapabilitiesResponse, error) {
 	project, err := h.createTarget(ctx, in.Project)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.GetCronCapabilitiesResponse{}, err
 	}
 	return cronResult(h.options.Client.GetCronCapabilities(ctx, &generated.GetCronCapabilitiesRequestOptions{PathParams: &generated.GetCronCapabilitiesPath{ProjectID: project.ID}}))
 }
-func cronResult[T any](value *T, err error) (*sdkmcp.CallToolResult, *T, error) {
-	return successResult(), value, err
+func cronResult[T any](value *T, err error) (*sdkmcp.CallToolResult, T, error) {
+	if err != nil {
+		var zero T
+		return nil, zero, err
+	}
+	return successResult(), *value, nil
 }
 func cronUID(value string) (string, error) {
 	value = strings.ToUpper(strings.TrimSpace(value))

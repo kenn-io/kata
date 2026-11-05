@@ -31,79 +31,79 @@ func registerCronWorkflowTools(server *sdkmcp.Server, h toolHandlers) {
 	addCronTool(server, "kata.cron_workflow_delete", "Archive cron workflow", "Reversibly tombstone a workflow using its current expected_event_uid. In-use workflow conflicts are preserved.", toolHints(false, true, false), h.cronWorkflowDelete)
 	addCronTool(server, "kata.cron_workflow_restore", "Restore cron workflow", "Restore a workflow tombstone using its current expected_event_uid and the daemon's dependency checks.", toolHints(false, false, false), h.cronWorkflowRestore)
 }
-func (h toolHandlers) cronWorkflows(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronListInput) (*sdkmcp.CallToolResult, *generated.ListCronWorkflowsResponse, error) {
+func (h toolHandlers) cronWorkflows(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronListInput) (*sdkmcp.CallToolResult, generated.ListCronWorkflowsResponse, error) {
 	p, err := h.createTarget(ctx, in.Project)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ListCronWorkflowsResponse{}, err
 	}
 	return cronResult(h.options.Client.ListCronWorkflows(ctx, &generated.ListCronWorkflowsRequestOptions{PathParams: &generated.ListCronWorkflowsPath{ProjectID: p.ID}, Query: &generated.ListCronWorkflowsQuery{IncludeDeleted: &in.IncludeDeleted}}))
 }
-func (h toolHandlers) cronWorkflow(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronIdentityInput) (*sdkmcp.CallToolResult, *generated.ShowCronWorkflowResponse, error) {
+func (h toolHandlers) cronWorkflow(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronIdentityInput) (*sdkmcp.CallToolResult, generated.ShowCronWorkflowResponse, error) {
 	id, err := cronUID(in.UID)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ShowCronWorkflowResponse{}, err
 	}
 	p, err := h.createTarget(ctx, in.Project)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ShowCronWorkflowResponse{}, err
 	}
 	return cronResult(h.options.Client.ShowCronWorkflow(ctx, &generated.ShowCronWorkflowRequestOptions{PathParams: &generated.ShowCronWorkflowPath{ProjectID: p.ID, CronUID: id}}))
 }
-func (h toolHandlers) cronWorkflowCreate(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronWorkflowCreateInput) (*sdkmcp.CallToolResult, *generated.ReplaceCronWorkflowResponse, error) {
+func (h toolHandlers) cronWorkflowCreate(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronWorkflowCreateInput) (*sdkmcp.CallToolResult, generated.ReplaceCronWorkflowResponse, error) {
 	return h.cronPutWorkflow(ctx, in, nil)
 }
-func (h toolHandlers) cronWorkflowUpdate(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronWorkflowUpdateInput) (*sdkmcp.CallToolResult, *generated.ReplaceCronWorkflowResponse, error) {
+func (h toolHandlers) cronWorkflowUpdate(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronWorkflowUpdateInput) (*sdkmcp.CallToolResult, generated.ReplaceCronWorkflowResponse, error) {
 	expected, err := cronExpected(in.ExpectedEventUID)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ReplaceCronWorkflowResponse{}, err
 	}
 	return h.cronPutWorkflow(ctx, in.CronWorkflowCreateInput, &expected)
 }
-func (h toolHandlers) cronPutWorkflow(ctx context.Context, in CronWorkflowCreateInput, expected *string) (*sdkmcp.CallToolResult, *generated.ReplaceCronWorkflowResponse, error) {
+func (h toolHandlers) cronPutWorkflow(ctx context.Context, in CronWorkflowCreateInput, expected *string) (*sdkmcp.CallToolResult, generated.ReplaceCronWorkflowResponse, error) {
 	id, err := cronUID(in.UID)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ReplaceCronWorkflowResponse{}, err
 	}
 	raw, err := json.Marshal(in.Definition)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ReplaceCronWorkflowResponse{}, err
 	}
 	if _, err = cron.ParseWorkflow(raw); err != nil {
-		return nil, nil, err
+		return nil, generated.ReplaceCronWorkflowResponse{}, err
 	}
 	p, err := h.createTarget(ctx, in.Project)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ReplaceCronWorkflowResponse{}, err
 	}
 	return cronResult(h.options.Client.ReplaceCronWorkflow(ctx, &generated.ReplaceCronWorkflowRequestOptions{PathParams: &generated.ReplaceCronWorkflowPath{ProjectID: p.ID, CronUID: id}, Body: &generated.ReplaceCronWorkflowBody{Actor: &h.options.Actor, Name: in.Name, Definition: in.Definition, ExpectedEventUID: expected}}))
 }
-func (h toolHandlers) cronWorkflowDelete(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronActionInput) (*sdkmcp.CallToolResult, *generated.ArchiveCronWorkflowResponse, error) {
+func (h toolHandlers) cronWorkflowDelete(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronActionInput) (*sdkmcp.CallToolResult, generated.ArchiveCronWorkflowResponse, error) {
 	id, err := cronUID(in.UID)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ArchiveCronWorkflowResponse{}, err
 	}
 	expected, err := cronExpected(in.ExpectedEventUID)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ArchiveCronWorkflowResponse{}, err
 	}
 	p, err := h.createTarget(ctx, in.Project)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.ArchiveCronWorkflowResponse{}, err
 	}
 	return cronResult(h.options.Client.ArchiveCronWorkflow(ctx, &generated.ArchiveCronWorkflowRequestOptions{PathParams: &generated.ArchiveCronWorkflowPath{ProjectID: p.ID, CronUID: id}, Body: &generated.ArchiveCronWorkflowBody{Actor: &h.options.Actor, ExpectedEventUID: expected}}))
 }
-func (h toolHandlers) cronWorkflowRestore(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronActionInput) (*sdkmcp.CallToolResult, *generated.RestoreCronWorkflowResponse, error) {
+func (h toolHandlers) cronWorkflowRestore(ctx context.Context, _ *sdkmcp.CallToolRequest, in CronActionInput) (*sdkmcp.CallToolResult, generated.RestoreCronWorkflowResponse, error) {
 	id, err := cronUID(in.UID)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.RestoreCronWorkflowResponse{}, err
 	}
 	expected, err := cronExpected(in.ExpectedEventUID)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.RestoreCronWorkflowResponse{}, err
 	}
 	p, err := h.createTarget(ctx, in.Project)
 	if err != nil {
-		return nil, nil, err
+		return nil, generated.RestoreCronWorkflowResponse{}, err
 	}
 	return cronResult(h.options.Client.RestoreCronWorkflow(ctx, &generated.RestoreCronWorkflowRequestOptions{PathParams: &generated.RestoreCronWorkflowPath{ProjectID: p.ID, CronUID: id}, Body: &generated.RestoreCronWorkflowBody{Actor: &h.options.Actor, ExpectedEventUID: expected}}))
 }
