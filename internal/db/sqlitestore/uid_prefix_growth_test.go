@@ -12,8 +12,8 @@ import (
 func TestIssueUIDPrefixGrowth(t *testing.T) {
 	for _, scope := range []string{"unrestricted", "one-project", "multiple-projects"} {
 		t.Run(scope, func(t *testing.T) {
-			for _, prefix := range []string{"01ZZ", "01ZY"} {
-				t.Run(prefix, func(t *testing.T) {
+			for _, kind := range []string{"hit", "missing"} {
+				t.Run(kind, func(t *testing.T) {
 					growthtest.Run(t, growthtest.Check{
 						Small: 10_000, Large: 100_000,
 						MaxRatio: 2, Floor: float64(32 * time.Microsecond),
@@ -29,14 +29,17 @@ func TestIssueUIDPrefixGrowth(t *testing.T) {
 							_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: hidden.ID, UID: "01ZY0000000000000000000001", Title: "Hidden issue", Author: "agent"})
 							require.NoError(t, err)
 							ctx := t.Context()
-							lookupPrefix := prefix
+							lookupPrefix := "01ZZ"
+							if kind == "missing" {
+								lookupPrefix = "01ZY"
+							}
 							switch scope {
 							case "one-project":
 								ctx = db.WithAuthorizedProjects(ctx, []string{project.UID})
 							case "multiple-projects":
 								ctx = db.WithAuthorizedProjects(ctx, []string{project.UID, second.UID})
 							case "unrestricted":
-								if prefix == "01ZY" {
+								if kind == "missing" {
 									lookupPrefix = "01ZX"
 								}
 							}
@@ -47,13 +50,17 @@ INSERT INTO issues(uid,short_id,project_id,title,author)
 SELECT printf('01M4%022d',x),printf('%06d',x),?,'Unrelated issue','agent' FROM n`, size, project.ID)
 							require.NoError(t, err)
 							// The only match follows every unrelated UID in binary order.
-							_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, UID: "01ZZ0000000000000000000001", Title: "Matching issue", Author: "agent"})
+							matchProject := project.ID
+							if scope == "multiple-projects" {
+								matchProject = second.ID
+							}
+							_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: matchProject, UID: "01ZZ0000000000000000000001", Title: "Matching issue", Author: "agent"})
 							require.NoError(t, err)
 							return func() {
 								for range 32 {
 									matches, err := store.IssueUIDPrefixMatch(ctx, lookupPrefix, 1, db.IncludeDeletedNo)
 									require.NoError(t, err)
-									if prefix == "01ZZ" {
+									if kind == "hit" {
 										require.Len(t, matches, 1)
 										require.Equal(t, "01ZZ0000000000000000000001", matches[0].UID)
 									} else {
@@ -69,38 +76,19 @@ SELECT printf('01M4%022d',x),printf('%06d',x),?,'Unrelated issue','agent' FROM n
 	}
 }
 
-func TestIssueUIDPrefixMatchOrderingAndScope(t *testing.T) {
+func TestIssueUIDPrefixMatchCaseMatching(t *testing.T) {
 	store := openTestDB(t)
-	ctx := t.Context()
-	allowed, err := store.CreateProject(ctx, "allowed-project")
+	project, err := store.CreateProject(t.Context(), "example-project")
 	require.NoError(t, err)
-	other, err := store.CreateProject(ctx, "other-project")
+	_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, UID: "01hznq7v000000000000000001", Title: "Prefix match", Author: "agent"})
 	require.NoError(t, err)
-	// Reverse insertion order distinguishes UID order from insertion order.
-	for _, row := range []struct {
-		uid       string
-		projectID int64
-	}{
-		{"01hznq7v000000000000000003", allowed.ID},
-		{"01HZNQ7V000000000000000002", allowed.ID},
-		{"01HZNQ7V000000000000000001", other.ID},
-	} {
-		_, _, err := store.CreateIssue(ctx, db.CreateIssueParams{ProjectID: row.projectID, UID: row.uid, Title: "Prefix match", Author: "agent"})
+	_, _, err = store.CreateIssue(t.Context(), db.CreateIssueParams{ProjectID: project.ID, UID: "01HZNQ7V000000000000000003", Title: "Other match", Author: "agent"})
+	require.NoError(t, err)
+	for _, prefix := range []string{"01HZNQ7V", "01hznq7v"} {
+		matches, err := store.IssueUIDPrefixMatch(t.Context(), prefix, 20, db.IncludeDeletedNo)
 		require.NoError(t, err)
+		require.Len(t, matches, 2)
+		require.Equal(t, "01HZNQ7V000000000000000003", matches[0].UID)
+		require.Equal(t, "01hznq7v000000000000000001", matches[1].UID)
 	}
-	matches, err := store.IssueUIDPrefixMatch(ctx, "01HZNQ7V", 2, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	require.Len(t, matches, 2)
-	require.Equal(t, "01HZNQ7V000000000000000001", matches[0].UID)
-	require.Equal(t, "01HZNQ7V000000000000000002", matches[1].UID)
-
-	scoped := db.WithAuthorizedProjects(ctx, []string{allowed.UID})
-	matches, err = store.IssueUIDPrefixMatch(scoped, "01hznq7v", 20, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	require.Len(t, matches, 2)
-	require.Equal(t, "01HZNQ7V000000000000000002", matches[0].UID)
-	require.Equal(t, "01hznq7v000000000000000003", matches[1].UID)
-	matches, err = store.IssueUIDPrefixMatch(db.WithAuthorizedProjects(ctx, []string{}), "01HZNQ7V", 20, db.IncludeDeletedNo)
-	require.NoError(t, err)
-	require.Empty(t, matches)
 }

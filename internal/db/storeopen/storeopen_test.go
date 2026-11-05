@@ -180,28 +180,7 @@ func TestOpen_UnknownSchemeIsUnsupported(t *testing.T) {
 	assert.True(t, strings.Contains(msg, "unsupported"), "error must mark scheme as unsupported, got %q", msg)
 }
 
-// TestOpen_RunsCutoverOnPreCurrentSQLite stands up a DB whose
-// schema_version is below db.CurrentSchemaVersion() and confirms storeopen
-// runs jsonl.AutoCutover before opening.
 func TestOpen_RunsCutoverOnPreCurrentSQLite(t *testing.T) {
-	t.Setenv("KATA_HOME", t.TempDir())
-	ctx := t.Context()
-	path := filepath.Join(t.TempDir(), "kata.db")
-
-	// Stand up a fixture and rewrite meta.schema_version to a pre-current
-	// value so storeopen routes through cutover.
-	stageLegacyPreCutoverFixture(t, path, db.CurrentSchemaVersion()-1)
-
-	s, err := storeopen.Open(ctx, path)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = s.Close() })
-
-	v, err := s.SchemaVersion(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, db.CurrentSchemaVersion(), v)
-}
-
-func TestOpen_UIDPrefixIndexCutover(t *testing.T) {
 	t.Setenv("KATA_HOME", t.TempDir())
 	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "kata.db")
@@ -226,6 +205,9 @@ UPDATE meta SET value='44' WHERE key='schema_version'`)
 	var definition string
 	require.NoError(t, upgraded.(*sqlitestore.Store).QueryRowContext(ctx, `SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_issues_uid_prefix'`).Scan(&definition))
 	require.Equal(t, `CREATE INDEX idx_issues_uid_prefix ON issues(uid COLLATE NOCASE)`, definition)
+	version, err := upgraded.SchemaVersion(ctx)
+	require.NoError(t, err)
+	require.Equal(t, db.CurrentSchemaVersion(), version)
 }
 
 func TestOpen_RoutesVersionZeroExistingSQLiteThroughCutover(t *testing.T) {
